@@ -1,0 +1,1 @@
+ALTER TABLE `ContextSnapshot` ADD `runId` varchar(36);

@@ -1,0 +1,430 @@
+/**
+ * V11 Invocation 仓储（S05-C01）。
+ *
+ * 事实源：
+ * - ../v11-agentkit-platform/10-core-data-model.md §6.2（Invocation L366-387）、§9.1（事务边界）
+ * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）
+ * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C01
+ *
+ * 职责：
+ * - createInvocation：事务内分配 invocationSequence + INSERT Invocation + 写 invocation.queued Event。
+ * - getInvocationById / getInvocationsByTurn：查询（跨租户隔离）。
+ * - updateInvocationState：状态机转换（queued → running → completed/failed/cancelled/lost）。
+ * - recordInvocationHeartbeat：更新 lastHeartbeatAt。
+ *
+ * 关键约束：
+ * - turnId/jobId 恰有一个非空（应用层校验，DB 不加 CHECK）。
+ * - invocationSequence 在 Turn 或 Job 内单调递增（UNIQUE(threadId, invocationSequence) / UNIQUE(jobId, invocationSequence)）。
+ * - ThreadEvent sequence 通过锁定 Thread.last_event_sequence 原子递增（不用 max+1）。
+ * - 状态机非法转换 → InvocationStateConflictError。
+ */
+import { randomUUID } from "node:crypto";
+import { db } from "@/lib/db/client";
+import { allocateEventSequences, insertThreadEvent } from "@/lib/v11/conversation/thread-queries";
+import { InvocationNotFoundError, InvocationStateConflictError } from "@/lib/v11/runtime/errors";
+import {
+  type ThreadEventActorType,
+  type V11ThreadEvent,
+  v11Thread,
+  v11Turn,
+} from "@/lib/v11/schema/conversation";
+import {
+  type InvocationExecutionState,
+  type InvocationKind,
+  type V11Invocation,
+  v11Invocation,
+} from "@/lib/v11/schema/runtime";
+import { and, asc, eq, sql } from "drizzle-orm";
+
+/** 事务句柄类型。 */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Invocation 状态机允许的转换。 */
+const INVOCATION_ALLOWED_TRANSITIONS: Record<InvocationExecutionState, InvocationExecutionState[]> =
+  {
+    queued: ["running", "cancelled", "failed", "lost"],
+    running: ["waiting_user", "completed", "failed", "cancelled", "lost"],
+    waiting_user: ["running", "cancelled", "failed", "lost"],
+    completed: [],
+    failed: [],
+    cancelled: [],
+    lost: [],
+  };
+
+/** createInvocation 入参。 */
+export interface CreateInvocationParams {
+  tenantId: string;
+  /** 会话执行时存在；后台 Job 执行时为空。 */
+  threadId?: string | null;
+  /** 会话执行时存在；后台 Job 执行时为空。 */
+  turnId?: string | null;
+  /** 后台执行时存在；会话执行时为空。 */
+  jobId?: string | null;
+  invocationKind: InvocationKind;
+  /** 输入 Item（通常是 user_message）。 */
+  triggerItemId?: string | null;
+  /** Regenerate 替代的原 Invocation id。 */
+  replacesInvocationId?: string | null;
+  /** 关联标识（X-Request-Id / traceparent）。 */
+  correlationId?: string | null;
+  /** 触发事件的 actor 类型（默认 system）。 */
+  actorType?: ThreadEventActorType;
+  /** 触发事件的 actor id。 */
+  actorId?: string | null;
+}
+
+/** createInvocation 返回结果。 */
+export interface CreateInvocationResult {
+  invocation: V11Invocation;
+  event: V11ThreadEvent;
+}
+
+/**
+ * 创建 Invocation 并写 invocation.queued Event。
+ *
+ * 事务内（§9.1）：
+ * 1. 校验 turnId/jobId 恰有一个非空。
+ * 2. 如果 threadId 存在：SELECT FOR UPDATE Thread 行（防止并发分配 sequence 冲突）。
+ * 3. 分配 invocationSequence（COALESCE(MAX(invocationSequence), 0) + 1，按 threadId 或 jobId 维度）。
+ * 4. INSERT Invocation（executionState=queued）。
+ * 5. 如果 threadId 存在：分配 event sequence 并写 invocation.queued ThreadEvent。
+ * 6. 返回 Invocation + Event（job 模式无 ThreadEvent，Event 为 null 占位由调用方处理）。
+ *
+ * @throws InvocationStateConflictError turnId/jobId 都为空或都非空
+ */
+export async function createInvocation(
+  params: CreateInvocationParams,
+): Promise<CreateInvocationResult> {
+  // 1. 校验 turnId/jobId 恰有一个非空
+  const hasTurn = params.turnId !== null && params.turnId !== undefined;
+  const hasJob = params.jobId !== null && params.jobId !== undefined;
+  if (hasTurn === hasJob) {
+    throw new InvocationStateConflictError("<new>", "queued", "turnId/jobId 必须恰有一个非空");
+  }
+  if (hasTurn && !params.threadId) {
+    throw new InvocationStateConflictError("<new>", "queued", "会话执行必须提供 threadId");
+  }
+
+  const invocationId = randomUUID();
+  const now = new Date();
+  const actorType: ThreadEventActorType = params.actorType ?? "system";
+
+  const result = await db.transaction(async (tx) => {
+    // 2. SELECT FOR UPDATE Thread（如果 threadId 存在）
+    let threadRow: { id: string } | null = null;
+    if (params.threadId) {
+      const [thread] = await tx
+        .select({ id: v11Thread.id })
+        .from(v11Thread)
+        .where(and(eq(v11Thread.tenantId, params.tenantId), eq(v11Thread.id, params.threadId)))
+        .for("update")
+        .limit(1);
+      if (!thread) {
+        throw new InvocationStateConflictError(
+          invocationId,
+          "queued",
+          `Thread 不存在或跨租户不可见: ${params.threadId}`,
+        );
+      }
+      threadRow = thread;
+    }
+
+    // 3. 分配 invocationSequence（COALESCE(MAX(invocationSequence), 0) + 1）
+    const invocationSequence = await allocateInvocationSequence(
+      tx,
+      params.threadId ?? null,
+      params.jobId ?? null,
+    );
+
+    // 4. INSERT Invocation
+    await tx.insert(v11Invocation).values({
+      id: invocationId,
+      tenantId: params.tenantId,
+      threadId: params.threadId ?? null,
+      turnId: params.turnId ?? null,
+      jobId: params.jobId ?? null,
+      invocationSequence,
+      invocationKind: params.invocationKind,
+      executionState: "queued",
+      triggerItemId: params.triggerItemId ?? null,
+      replacesInvocationId: params.replacesInvocationId ?? null,
+      outputItemId: null,
+      resultRef: null,
+      runtimeSessionBindingId: null,
+      runtimeExecutionRef: null,
+      startedAt: null,
+      finishedAt: null,
+      lastHeartbeatAt: null,
+      errorCode: null,
+      errorSummary: null,
+      versionNo: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // 5. 写 invocation.queued Event（仅会话模式；job 模式无 ThreadEvent 流）
+    let eventRow: V11ThreadEvent | null = null;
+    if (threadRow) {
+      const eventSeq = await allocateEventSequences(tx, threadRow.id, 1);
+      eventRow = await insertThreadEvent(tx, threadRow.id, eventSeq, {
+        eventType: "invocation.queued",
+        turnId: params.turnId ?? undefined,
+        invocationId,
+        actorType,
+        actorId: params.actorId ?? undefined,
+        payload: {
+          invocation_kind: params.invocationKind,
+          trigger_item_id: params.triggerItemId ?? null,
+          replaces_invocation_id: params.replacesInvocationId ?? null,
+          thread_id: params.threadId ?? null,
+          turn_id: params.turnId ?? null,
+          job_id: params.jobId ?? null,
+        },
+        correlationId: params.correlationId ?? undefined,
+      });
+    }
+
+    return { invocationSequence, eventRow };
+  });
+
+  // 回读 Invocation
+  const [invocation] = await db
+    .select()
+    .from(v11Invocation)
+    .where(eq(v11Invocation.id, invocationId))
+    .limit(1);
+  if (!invocation) {
+    throw new Error(`createInvocation: Invocation 行未找到（id=${invocationId}）`);
+  }
+
+  return {
+    invocation,
+    event: result.eventRow as V11ThreadEvent,
+  };
+}
+
+/**
+ * 锁定 Thread 行后分配 invocationSequence（COALESCE(MAX(invocationSequence), 0) + 1）。
+ *
+ * 必须在 db.transaction 内调用。调用方应先 SELECT FOR UPDATE Thread 行（会话模式）。
+ * job 模式下 threadId 为空，按 jobId 维度分配（无 Thread 行需要锁定）。
+ */
+export async function allocateInvocationSequence(
+  tx: Tx,
+  threadId: string | null,
+  jobId: string | null,
+): Promise<number> {
+  if (threadId) {
+    const [row] = await tx
+      .select({ maxSeq: sql<number>`COALESCE(MAX(${v11Invocation.invocationSequence}), 0)` })
+      .from(v11Invocation)
+      .where(eq(v11Invocation.threadId, threadId));
+    return (row?.maxSeq ?? 0) + 1;
+  }
+  if (jobId) {
+    const [row] = await tx
+      .select({ maxSeq: sql<number>`COALESCE(MAX(${v11Invocation.invocationSequence}), 0)` })
+      .from(v11Invocation)
+      .where(eq(v11Invocation.jobId, jobId));
+    return (row?.maxSeq ?? 0) + 1;
+  }
+  throw new Error("allocateInvocationSequence: threadId 和 jobId 都为空");
+}
+
+/** 按 id 获取 Invocation（跨租户隔离）。不存在返回 null。 */
+export async function getInvocationById(
+  tenantId: string,
+  invocationId: string,
+): Promise<V11Invocation | null> {
+  const [row] = await db
+    .select()
+    .from(v11Invocation)
+    .where(and(eq(v11Invocation.tenantId, tenantId), eq(v11Invocation.id, invocationId)))
+    .limit(1);
+  return row ?? null;
+}
+
+/** 列出 Turn 的所有 Invocation（按 invocationSequence 升序，跨租户隔离）。 */
+export async function getInvocationsByTurn(
+  tenantId: string,
+  turnId: string,
+): Promise<V11Invocation[]> {
+  return db
+    .select()
+    .from(v11Invocation)
+    .where(and(eq(v11Invocation.tenantId, tenantId), eq(v11Invocation.turnId, turnId)))
+    .orderBy(asc(v11Invocation.invocationSequence));
+}
+
+/** updateInvocationState 附加字段。 */
+export interface UpdateInvocationStateOptions {
+  startedAt?: Date | null;
+  finishedAt?: Date | null;
+  errorCode?: string | null;
+  errorSummary?: string | null;
+  outputItemId?: string | null;
+  runtimeExecutionRef?: string | null;
+  resultRef?: string | null;
+}
+
+/**
+ * 更新 Invocation 状态（事务内 SELECT FOR UPDATE + 状态机校验 + 递增 versionNo）。
+ *
+ * 状态机（§6.2）：
+ * - queued → running / cancelled / failed / lost
+ * - running → waiting_user / completed / failed / cancelled / lost
+ * - waiting_user → running / cancelled / failed / lost
+ * - completed / failed / cancelled / lost：终态，不可恢复
+ *
+ * @throws InvocationNotFoundError Invocation 不存在或跨租户不可见
+ * @throws InvocationStateConflictError 状态机非法转换
+ */
+export async function updateInvocationState(
+  tx: Tx,
+  tenantId: string,
+  invocationId: string,
+  newState: InvocationExecutionState,
+  options?: UpdateInvocationStateOptions,
+): Promise<V11Invocation> {
+  // SELECT FOR UPDATE Invocation
+  const [current] = await tx
+    .select()
+    .from(v11Invocation)
+    .where(and(eq(v11Invocation.tenantId, tenantId), eq(v11Invocation.id, invocationId)))
+    .for("update")
+    .limit(1);
+
+  if (!current) {
+    throw new InvocationNotFoundError(invocationId);
+  }
+
+  // 状态机校验
+  const allowed = INVOCATION_ALLOWED_TRANSITIONS[current.executionState];
+  if (!allowed.includes(newState)) {
+    throw new InvocationStateConflictError(invocationId, current.executionState, `→ ${newState}`);
+  }
+
+  const now = new Date();
+  const updates: Partial<typeof v11Invocation.$inferInsert> = {
+    executionState: newState,
+    versionNo: current.versionNo + 1,
+    updatedAt: now,
+  };
+
+  // 状态相关的字段更新
+  if (newState === "running") {
+    updates.startedAt = options?.startedAt ?? current.startedAt ?? now;
+    updates.lastHeartbeatAt = now;
+    if (options?.runtimeExecutionRef !== undefined) {
+      updates.runtimeExecutionRef = options.runtimeExecutionRef;
+    }
+  }
+  if (newState === "waiting_user") {
+    updates.lastHeartbeatAt = now;
+  }
+  if (
+    newState === "completed" ||
+    newState === "failed" ||
+    newState === "cancelled" ||
+    newState === "lost"
+  ) {
+    updates.finishedAt = options?.finishedAt ?? now;
+    if (newState === "failed" || newState === "lost") {
+      if (options?.errorCode !== undefined) {
+        updates.errorCode = options.errorCode;
+      }
+      if (options?.errorSummary !== undefined) {
+        updates.errorSummary = options.errorSummary;
+      }
+    }
+  }
+  if (options?.outputItemId !== undefined) {
+    updates.outputItemId = options.outputItemId;
+  }
+  if (options?.runtimeExecutionRef !== undefined && newState !== "running") {
+    updates.runtimeExecutionRef = options.runtimeExecutionRef;
+  }
+  if (options?.resultRef !== undefined) {
+    updates.resultRef = options.resultRef;
+  }
+
+  await tx.update(v11Invocation).set(updates).where(eq(v11Invocation.id, invocationId));
+
+  const [updated] = await tx
+    .select()
+    .from(v11Invocation)
+    .where(eq(v11Invocation.id, invocationId))
+    .limit(1);
+  if (!updated) {
+    throw new Error(`updateInvocationState: Invocation 行未找到（id=${invocationId}）`);
+  }
+  return updated;
+}
+
+/**
+ * 记录 Invocation 心跳（更新 lastHeartbeatAt）。
+ *
+ * 不在事务内运行（轻量更新），用于 Runtime worker 心跳上报。
+ */
+export async function recordInvocationHeartbeat(
+  tenantId: string,
+  invocationId: string,
+  at: Date = new Date(),
+): Promise<V11Invocation | null> {
+  await db
+    .update(v11Invocation)
+    .set({ lastHeartbeatAt: at, updatedAt: at })
+    .where(and(eq(v11Invocation.tenantId, tenantId), eq(v11Invocation.id, invocationId)));
+
+  const [row] = await db
+    .select()
+    .from(v11Invocation)
+    .where(eq(v11Invocation.id, invocationId))
+    .limit(1);
+  return row ?? null;
+}
+
+/** 导出事务句柄类型与状态机常量供外部组合事务使用。 */
+export type { Tx };
+export { INVOCATION_ALLOWED_TRANSITIONS };
+
+/** 通过 turnId 查询所属 threadId（内部 helper，跨租户隔离）。 */
+export async function getThreadIdByTurn(tenantId: string, turnId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ threadId: v11Turn.threadId })
+    .from(v11Turn)
+    .innerJoin(v11Thread, eq(v11Turn.threadId, v11Thread.id))
+    .where(and(eq(v11Thread.tenantId, tenantId), eq(v11Turn.id, turnId)))
+    .limit(1);
+  return row?.threadId ?? null;
+}
+
+/**
+ * 列出 Thread 下所有 Invocation（按 invocationSequence 升序，跨租户隔离）。
+ *
+ * 事实源：S11-W04 管理面排障端点 /admin/api/v1/threads/[thread_id]/invocations 使用本函数。
+ *
+ * V11Invocation 表存在 threadId 直接字段（schema/runtime.ts L249），无需通过 turn 关联子查询。
+ *
+ * 选项：
+ * - limit：默认 100，最大 500。
+ * - afterSequence：游标分页（invocationSequence > afterSequence）。
+ */
+export async function listInvocationsByThread(
+  tenantId: string,
+  threadId: string,
+  options?: { limit?: number; afterSequence?: number },
+): Promise<V11Invocation[]> {
+  const limit = Math.min(options?.limit ?? 100, 500);
+  const conditions = [eq(v11Invocation.tenantId, tenantId), eq(v11Invocation.threadId, threadId)];
+  if (options?.afterSequence !== undefined) {
+    conditions.push(sql`${v11Invocation.invocationSequence} > ${options.afterSequence}`);
+  }
+
+  return db
+    .select()
+    .from(v11Invocation)
+    .where(and(...conditions))
+    .orderBy(asc(v11Invocation.invocationSequence))
+    .limit(limit);
+}

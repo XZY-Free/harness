@@ -1,0 +1,10 @@
+allowBuilds:
+  '@biomejs/biome': true
+  cpu-features: true
+  electron: true
+  esbuild: true
+  protobufjs: true
+  sharp: true
+  ssh2: true
+  tesseract.js: true
+storeDir: /Users/sunshine/Library/pnpm/store/v11

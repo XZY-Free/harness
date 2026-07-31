@@ -1,0 +1,41 @@
+-- V11 Stage 3: agent & agent_revision (S03-C01)
+CREATE TABLE `V11Agent` (
+  `id` varchar(36) NOT NULL,
+  `tenantId` varchar(36) NOT NULL,
+  `agentKey` varchar(128) NOT NULL,
+  `displayName` varchar(256) NOT NULL,
+  `description` text NULL,
+  `ownerUserId` varchar(36) NOT NULL,
+  `lifecycleState` enum('draft','enabled','disabled','retired') NOT NULL DEFAULT 'draft',
+  `currentRevisionId` varchar(36) NULL,
+  `visibilityPolicyId` varchar(36) NULL,
+  `versionNo` bigint NOT NULL DEFAULT 1,
+  `createdAt` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `deletedAt` datetime NULL,
+  PRIMARY KEY(`id`),
+  UNIQUE KEY `V11Agent_tenant_agentKey_uq`(`tenantId`,`agentKey`),
+  KEY `V11Agent_tenant_lifecycle_updated_idx`(`tenantId`,`lifecycleState`,`updatedAt`),
+  CONSTRAINT `V11Agent_tenantId_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB;--> statement-breakpoint
+CREATE TABLE `V11AgentRevision` (
+  `id` varchar(36) NOT NULL,
+  `agentId` varchar(36) NOT NULL,
+  `revisionNo` bigint NOT NULL,
+  `sourceType` varchar(32) NOT NULL,
+  `sourceRevision` varchar(128) NOT NULL,
+  `instructionHash` varchar(128) NOT NULL,
+  `agentArtifactRef` varchar(512) NOT NULL,
+  `modelPolicyJson` json NOT NULL,
+  `permissionRequirementsJson` json NOT NULL,
+  `delegationPolicyJson` json NOT NULL,
+  `agentInterfaceRequirementsJson` json NOT NULL,
+  `revisionState` enum('draft','published','withdrawn') NOT NULL DEFAULT 'draft',
+  `createdBy` varchar(128) NOT NULL,
+  `createdAt` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `publishedAt` datetime(3) NULL,
+  PRIMARY KEY(`id`),
+  UNIQUE KEY `V11AgentRevision_agent_revisionNo_uq`(`agentId`,`revisionNo`),
+  KEY `V11AgentRevision_agent_state_idx`(`agentId`,`revisionState`),
+  CONSTRAINT `V11AgentRevision_agentId_fk` FOREIGN KEY (`agentId`) REFERENCES `V11Agent`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB;

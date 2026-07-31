@@ -1,0 +1,68 @@
+# V10 Phase 8：electron-builder 打包配置（Apple Silicon）
+#
+# 签名策略：
+# - 未设置 CSC_LINK/CSC_KEY_PASSWORD 环境变量时 → identity 解析为 null，打未签名测试包
+# - 设置后 → electron-builder 自动签名 + Hardened Runtime + entitlements + notarize
+#
+# 使用方式：
+#   本地未签名测试包：pnpm package:desktop
+#   正式签名 + notarize：
+#     export CSC_LINK="Developer ID Application: xxx.p12"
+#     export CSC_KEY_PASSWORD="..."
+#     export APPLE_ID="your-apple-id@example.com"
+#     export APPLE_APP_SPECIFIC_PASSWORD="..."
+#     export APPLE_TEAM_ID="TEAMID"
+#     pnpm package:desktop
+appId: com.snowharness.desktop
+productName: SnowHarness
+directories:
+  app: desktop/package-app
+  buildResources: desktop
+  output: release
+asar: true
+npmRebuild: false
+asarUnpack:
+  - node_modules/better-sqlite3/build/Release/*.node
+# 复用 pnpm 已安装的 Electron runtime，离线/受限网络下不再访问 GitHub release。
+electronDist: node_modules/electron/dist
+# package-app 由 scripts/build-desktop.mjs 生成，只包含桌面运行时文件。
+files:
+  - bundle/**/*
+  - renderer/**/*
+  - package.json
+  - node_modules/better-sqlite3/**/*
+  - node_modules/bindings/**/*
+  - node_modules/file-uri-to-path/**/*
+mac:
+  # Apple Silicon（M1/M2）
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+  icon: app-icon.icns
+  # Hardened Runtime：签名时启用（未签名时 electron-builder 自动忽略）
+  hardenedRuntime: true
+  # entitlements：声明应用所需运行时权限（Keychain、网络、JIT、文件访问）
+  entitlements: desktop/entitlements.mac.plist
+  entitlementsInherit: desktop/entitlements.mac.plist
+  # gatekeeperAssess：false（notarize 后由 macOS 自动评估，无需手动 assess）
+  gatekeeperAssess: false
+  # identity：不指定时 electron-builder 自动从 keychain 查找 "Developer ID Application"
+  # 若未找到则打未签名包（开发/测试用）
+  # notarize：需要 APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID 环境变量
+  # 若未设置则跳过 notarize（开发/测试用）
+# 预留 SQLite migration 文件位置（Phase 4+ 启用本地 SQLite 时使用）
+extraResources:
+  - from: desktop/runtime-config.json
+    to: runtime-config.json
+  - from: desktop/storage/migrations
+    to: desktop-migrations
+    filter:
+      - "**/*.sql"
+# Phase 8：自动更新发布配置
+# electron-builder 打包时自动生成 latest-mac.yml 更新 manifest
+# electron-updater 运行时从该 URL 检查更新
+# 生产环境替换为真实更新服务器 URL
+publish:
+  provider: generic
+  url: https://updates.snowharness.com/mac

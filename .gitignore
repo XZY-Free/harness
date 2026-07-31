@@ -1,0 +1,79 @@
+node_modules
+.next/
+out/
+build
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# 环境变量文件（.env.{APP_ENV} 提交到 git，.env 和 .local 文件忽略）
+.env
+.env*.local
+
+coverage
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# 上游参考源（只读参考，不纳入本仓库；仓库地址见 docs/02-开发计划与源码清单.md）
+upstreams/
+# 预览运行时工作区（运行时生成的用户项目，仅根目录；勿匹配 app/studio/workspaces 路由目录）
+/workspaces/
+# 工具 / 编排状态
+.omc/
+.omx/
+# 本地数据库落盘（PGlite）
+.data/
+
+# V3.2 后台任务运行时日志（host 平台目录 / container workspace bind mount）
+.snow/
+
+# 用户上传文件（本地存储）
+public/uploads/
+
+# Electron 构建产物和打包输出
+desktop/bundle/
+desktop/package-app/
+desktop/renderer-dist/
+desktop/dist/
+desktop/release/
+/release/
+
+# 基准测试输出（临时产物，不提交）
+benchmark-reports/
+
+# Playwright 临时产物（trace / screenshot / video / 测试报告）
+test-results/
+.playwright-cli/
+playwright-report/
+
+# ─── 文档与方案文件（仅推送工程代码，不上传方案 / 审计 / 设计文档）───
+# docs/ 整个目录：架构、方案、审计报告、周报等
+docs/
+# 散落在其他目录的方案 / 调试 / 记忆文档
+.debug/
+.omc/
+.workbuddy/
+.codebuddy/
+# 根目录设计 QA 方案
+design-qa.md
+# 截图 / 临时产物 / 临时 SQL
+output/
+tmp/
+
+# 任何纯文本文档与 Office 文档（防止方案 / 笔记误传）
+*.txt
+*.doc
+*.docx
+*.pdf
+*.rtf
+*.pptx
+*.ppt
+
+# IDE 个人配置（不属于工程代码）
+.idea/
+.vscode/
+
+# macOS 系统文件
+.DS_Store

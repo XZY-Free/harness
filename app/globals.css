@@ -1,0 +1,869 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* 文档与根目录会话记录不是源码，不参与 Tailwind class 扫描。
+ * 否则其中的任意值示例会被误识别为类名，并生成无效 CSS。 */
+@source not "../docs/**";
+@source not "../*.txt";
+
+/* ════════════════════════════════════════════════════════════════════════
+ * W1-3 语义 token 体系（SnowHarness UI 重构第一步）
+ * 规格：docs/solutions/desktop-ui-redesign/01-foundation-and-shell.md §3
+ *
+ * 结构顺序（方案 §W1-3 执行要点，不得调整）：
+ *   1. 新语义 token（:root 浅色 + .dark 暗色类选择器）
+ *   2. @theme inline 映射
+ *   3. @deprecated 别名段（旧 token → 新 token，保证存量零回归）
+ *   4. .codex 块（原样冻结，第三步清退）
+ *   5. 其余既有全局样式
+ *
+ * 配色原则：色值沿用现有 SnowHarness v2，仅做命名收敛，不重新配色
+ * （方案 §3.1：浅色以现有 :root 值为基准，暗色以现有 :root.dark 值为基准换算）。
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/* ─── 1. 新语义 token · 浅色（:root）──────────────────────────────────
+ * W3-1 定调：单色派生（Codex 官方做法）——浅色全部从 --foreground 派生。
+ * 主按钮 = 中性黑底白字；品牌蓝只做链接、焦点环、运行态指示。
+ * --radius 收敛为 12px（shadcn 派生 sm=7.2 / md=9.6 / lg=12 / xl=16.8）。 */
+:root {
+  color-scheme: light;
+
+  /* 字体栈（沿用系统字体，不引入 web 字体——方案 §1 非目标） */
+  --font-hanken: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-jetbrains: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+
+  /* 前景基准：近黑微冷 */
+  --foreground: #1a1c1f;
+
+  /* 标准 shadcn token（单色派生） */
+  --background: #ffffff;
+  --card: #ffffff;
+  --card-foreground: var(--foreground);
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+  --primary: #1a1c1f; /* 主按钮 = 中性黑底白字 */
+  --primary-foreground: #ffffff;
+  --secondary: #f3f3f3; /* 次级弱底 */
+  --secondary-foreground: var(--foreground);
+  --muted: #f9f9f9; /* 侧栏底 / 弱背景 */
+  --muted-foreground: color-mix(in oklab, var(--foreground) 62%, transparent);
+  --accent: #f0f0ef; /* hover 弱强调底 */
+  --accent-foreground: var(--foreground);
+  --destructive: #e02e2a;
+  --destructive-foreground: #ffffff;
+  --border: color-mix(in oklab, var(--foreground) 8%, transparent);
+  --input: color-mix(in oklab, var(--foreground) 8%, transparent);
+  --ring: #0285ff; /* 品牌蓝只做链接、焦点环、运行态指示 */
+  --radius: 12px;
+
+  /* 项目扩展 token */
+  --foreground-subtle: color-mix(in oklab, var(--foreground) 40%, transparent);
+  --border-strong: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --success: #00a240;
+  --success-foreground: #ffffff;
+  --warning: #e25507;
+  --warning-foreground: #ffffff;
+
+  /* 阴影：极轻多层（≤12% 黑） */
+  --shadow-hairline: 0 0 0 0.5px rgba(0, 0, 0, 0.1);
+  --shadow-sm: 0 1px 2px -1px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 2px 4px -1px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 8px -2px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 8px 16px -4px rgba(0, 0, 0, 0.12);
+  --shadow-pop: 0 8px 32px -8px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-glow: 0 0 0 1px rgba(2, 133, 255, 0.12), 0 4px 16px -4px rgba(2, 133, 255, 0.1);
+  --shadow-accent: 0 6px 20px -4px rgba(2, 133, 255, 0.2);
+
+  /* 图表 token（shadcn 标准，保留 W1-2 init 值） */
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+
+  /* 侧边栏 token */
+  --sidebar: #f9f9f9;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--foreground);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f0f0ef;
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: color-mix(in oklab, var(--foreground) 8%, transparent);
+  --sidebar-ring: #0285ff;
+}
+
+/* ─── 1. 新语义 token · 暗色（.dark 类选择器）─────────────────────────
+ * 用 .dark 类选择器（非 :root.dark）以便挂在任意容器上
+ * （Desktop 布局容器将挂 dark——方案 §W1-3 执行要点）。
+ * 色值沿用现有 :root.dark，仅做命名收敛。 */
+.dark {
+  color-scheme: dark;
+
+  --background: oklch(0.16 0.015 260); /* ← 旧 --bg dark */
+  --foreground: oklch(0.94 0.008 260); /* ← 旧 --fg dark */
+  --card: oklch(0.2 0.018 260); /* ← 旧 --surface dark */
+  --card-foreground: oklch(0.94 0.008 260);
+  --popover: oklch(0.2 0.018 260);
+  --popover-foreground: oklch(0.94 0.008 260);
+  --primary: oklch(0.72 0.18 252); /* ← 旧 --accent dark（品牌蓝暗色提亮） */
+  --primary-foreground: oklch(0.14 0.015 260); /* ← 旧 --accent-fg dark */
+  --secondary: oklch(0.24 0.02 260); /* ← 旧 --surface-2 dark */
+  --secondary-foreground: oklch(0.94 0.008 260);
+  --muted: oklch(0.24 0.02 260); /* ← 旧 --surface-2 dark */
+  --muted-foreground: oklch(0.7 0.012 260); /* ← 旧 --fg-muted dark */
+  --accent: oklch(0.28 0.022 260); /* ← 旧 --surface-3 dark（同浅色，被别名覆盖） */
+  --accent-foreground: oklch(0.94 0.008 260);
+  --destructive: oklch(0.7 0.22 25); /* ← 旧 --danger dark */
+  --destructive-foreground: #ffffff;
+  --border: oklch(0.32 0.018 260); /* ← 旧 --border dark */
+  --input: oklch(0.32 0.018 260);
+  --ring: oklch(0.72 0.18 252 / 0.35); /* ← 旧 --accent-ring dark */
+  --radius: 14px;
+
+  --foreground-subtle: oklch(0.52 0.015 260); /* ← 旧 --fg-subtle dark */
+  --border-strong: oklch(0.4 0.022 260); /* ← 旧 --border-strong dark */
+  --success: oklch(0.72 0.16 162); /* ← 旧 --ok dark */
+  --success-foreground: #ffffff;
+  --warning: oklch(0.78 0.18 75); /* ← 旧 --warn dark */
+  --warning-foreground: oklch(0.14 0.015 260);
+
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.25), 0 2px 6px oklch(0 0 0 / 0.2);
+  --shadow-md: 0 4px 16px -4px oklch(0 0 0 / 0.4), 0 2px 8px oklch(0 0 0 / 0.25);
+  --shadow-pop: 0 8px 32px -8px oklch(0 0 0 / 0.55), 0 4px 12px oklch(0 0 0 / 0.35);
+  --shadow-lg: 0 16px 56px -16px oklch(0 0 0 / 0.65), 0 8px 24px oklch(0 0 0 / 0.45);
+  --shadow-glow: 0 0 0 1px oklch(0.72 0.18 252 / 0.15), 0 4px 16px -4px oklch(0.72 0.18 252 / 0.12);
+
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+
+  --sidebar: oklch(0.2 0.018 260);
+  --sidebar-foreground: oklch(0.94 0.008 260);
+  --sidebar-primary: oklch(0.72 0.18 252);
+  --sidebar-primary-foreground: oklch(0.14 0.015 260);
+  --sidebar-accent: oklch(0.24 0.02 260);
+  --sidebar-accent-foreground: oklch(0.94 0.008 260);
+  --sidebar-border: oklch(0.32 0.018 260);
+  --sidebar-ring: oklch(0.72 0.18 252 / 0.35);
+}
+
+/* ─── 2. @theme inline 映射（Tailwind v4 CSS-first）────────────────── */
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: var(--font-sans);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* 项目扩展 */
+  --color-foreground-subtle: var(--foreground-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+
+  /* 图表 */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* 侧边栏 */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* 圆角派生档位（基准 --radius = 12px） */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* 排版阶梯（方案 §3.4）—— text-3xs = 10px, text-2xs = 11px，其余沿用 Tailwind 默认档 */
+  --text-3xs: 10px;
+  --text-3xs--line-height: 1.4;
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.4;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* ─── 3. @deprecated 别名段（旧 token → 新 token）────────────────────
+ * 目的：保证存量组件与 .codex 覆盖块零改动继续工作（方案 §3.3）。
+ * 策略：旧 token 名全部保留为别名，值改为 var(--新token) 引用。
+ *      找不到一对一新 token 的旧名（soft 系列、success-bg 等）保留原字面值。
+ *      别名段只求存量视觉不变，不求优雅。
+ * 清退计划：第三步对话流重构时随 .codex 一并删除。
+ * ⚠️ 新代码禁止引用旧名。 */
+:root {
+  /* 表面 */
+  --bg: var(--background);
+  --surface: var(--card);
+  --surface-2: var(--muted);
+  --surface-3: oklch(0.94 0.01 260); /* 无新对应，保留字面值 */
+
+  /* 文字 */
+  --fg: var(--foreground);
+  --fg-muted: var(--muted-foreground);
+  --fg-subtle: var(--foreground-subtle);
+
+  /* 描边（--border / --border-strong 与新 token 同名，新 token 已定义，此处不重复） */
+
+  /* 品牌色（旧 --accent → 新 --primary，§3.2 最大陷阱）
+   * 2026-07-26 已清退：存量 var(--accent) 引用已全量改为 var(--primary)，
+   * 新 shadcn --accent（hover 弱强调底）自此生效，ui 组件 hover/高亮恢复正常。 */
+  --accent-hover: oklch(0.54 0.2 252); /* 无新对应，保留字面值 */
+  --accent-fg: var(--primary-foreground);
+  --accent-soft: oklch(0.96 0.025 252); /* 无新对应，保留字面值 */
+  --accent-ring: var(--ring);
+
+  /* 渐变（冻结，随 .codex 清退一并删除——方案 §3.2 末行） */
+  --accent-gradient: linear-gradient(135deg, oklch(0.6 0.18 252) 0%, oklch(0.56 0.22 280) 100%);
+  --accent-gradient-hover: linear-gradient(
+    135deg,
+    oklch(0.56 0.2 252) 0%,
+    oklch(0.52 0.24 280) 100%
+  );
+
+  /* 状态色 */
+  --ok: var(--success);
+  --ok-soft: oklch(0.95 0.04 162); /* 无新对应，保留字面值 */
+  --warn: var(--warning);
+  --warn-soft: oklch(0.96 0.06 80); /* 无新对应，保留字面值 */
+  --danger: var(--destructive);
+  --danger-soft: oklch(0.95 0.05 25); /* 无新对应，保留字面值 */
+
+  /* 状态徽章 bg/fg（方案 §3.2 标记"删除"，但别名段保留字面值以保证存量零回归） */
+  --success-bg: oklch(0.95 0.04 162);
+  --success-fg: oklch(0.42 0.14 162);
+  --info-bg: oklch(0.95 0.03 252);
+  --info-fg: oklch(0.45 0.14 252);
+  --warning-bg: oklch(0.96 0.06 80);
+  --warning-fg: oklch(0.48 0.16 75);
+  --danger-bg: oklch(0.95 0.05 25);
+  --danger-fg: oklch(0.42 0.2 25);
+
+  /* 圆角（旧字面值保留，不改写为派生值，保证存量零回归——方案 §3.2 注） */
+  --radius-sm: 10px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  /* --radius 本身与新 token 同名，已在上文定义为 14px */
+
+  /* 阴影（项目扩展，保留现值；--shadow-sm/md/pop/lg/glow 已在上文新 token 段定义） */
+  --shadow-accent: 0 8px 24px -6px oklch(0.6 0.18 252 / 0.3), 0 4px 12px oklch(0.6 0.18 252 / 0.18);
+
+  /* 侧边栏（冻结，随 .codex 清退一并删除——方案 §3.2 末行） */
+  --sidebar-gradient: linear-gradient(180deg, #ffffff 0%, oklch(0.985 0.003 260) 100%);
+  --sidebar-hover-glow: 0 0 0 1px oklch(0.6 0.18 252 / 0.08), 0 2px 8px oklch(0.2 0.01 260 / 0.06);
+}
+
+/* 旧暗色块保留原样（:root.dark 选择器，比 .dark 类选择器特异性高）
+ * 保证旧 token 在暗色下使用原字面值，与新 .dark 块共存零冲突。
+ * 不改 themeInitScript 与切换逻辑（方案 §W1-3 执行要点）。 */
+:root.dark {
+  color-scheme: dark;
+  --bg: oklch(0.16 0.015 260);
+  --surface: oklch(0.2 0.018 260);
+  --surface-2: oklch(0.24 0.02 260);
+  --surface-3: oklch(0.28 0.022 260);
+  --fg: oklch(0.94 0.008 260);
+  --fg-muted: oklch(0.7 0.012 260);
+  --fg-subtle: oklch(0.52 0.015 260);
+  --border: oklch(0.32 0.018 260);
+  --border-strong: oklch(0.4 0.022 260);
+  --accent: oklch(0.72 0.18 252);
+  --accent-hover: oklch(0.78 0.2 252);
+  --accent-fg: oklch(0.14 0.015 260);
+  --accent-soft: oklch(0.3 0.06 252);
+  --accent-ring: oklch(0.72 0.18 252 / 0.35);
+  --accent-gradient: linear-gradient(135deg, oklch(0.72 0.18 252) 0%, oklch(0.68 0.22 280) 100%);
+  --accent-gradient-hover: linear-gradient(
+    135deg,
+    oklch(0.76 0.2 252) 0%,
+    oklch(0.72 0.24 280) 100%
+  );
+  --ok: oklch(0.72 0.16 162);
+  --ok-soft: oklch(0.28 0.06 162);
+  --warn: oklch(0.78 0.18 75);
+  --warn-soft: oklch(0.3 0.08 80);
+  --danger: oklch(0.7 0.22 25);
+  --danger-soft: oklch(0.28 0.08 25);
+  --success-bg: oklch(0.28 0.06 162);
+  --success-fg: oklch(0.8 0.16 162);
+  --info-bg: oklch(0.28 0.06 252);
+  --info-fg: oklch(0.8 0.16 252);
+  --warning-bg: oklch(0.3 0.08 80);
+  --warning-fg: oklch(0.8 0.18 75);
+  --danger-bg: oklch(0.28 0.08 25);
+  --danger-fg: oklch(0.78 0.22 25);
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.25), 0 2px 6px oklch(0 0 0 / 0.2);
+  --shadow-md: 0 4px 16px -4px oklch(0 0 0 / 0.4), 0 2px 8px oklch(0 0 0 / 0.25);
+  --shadow-pop: 0 8px 32px -8px oklch(0 0 0 / 0.55), 0 4px 12px oklch(0 0 0 / 0.35);
+  --shadow-lg: 0 16px 56px -16px oklch(0 0 0 / 0.65), 0 8px 24px oklch(0 0 0 / 0.45);
+  --shadow-glow: 0 0 0 1px oklch(0.72 0.18 252 / 0.15), 0 4px 16px -4px oklch(0.72 0.18 252 / 0.12);
+  --shadow-accent: 0 8px 24px -6px oklch(0.72 0.18 252 / 0.35), 0 4px 12px
+    oklch(0.72 0.18 252 / 0.22);
+  --sidebar-gradient: linear-gradient(180deg, oklch(0.2 0.018 260) 0%, oklch(0.18 0.016 260) 100%);
+  --sidebar-hover-glow: 0 0 0 1px oklch(0.72 0.18 252 / 0.12), 0 2px 8px oklch(0 0 0 / 0.2);
+}
+/* ─── end @deprecated 别名段 ────────────────────────────────────────── */
+
+/* W3-6: .codex 块已清退 */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-hanken), "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-mono {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+/* 极简点阵纹理 —— 几乎不可见 */
+.workshop-grid {
+  background-image: radial-gradient(oklch(0.7 0.005 260 / 0.05) 1px, transparent 1.4px);
+  background-size: 24px 24px;
+}
+
+/* 动画 */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-rise {
+  animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.animate-fade {
+  animation: fade 0.3s ease both;
+}
+.animate-pop {
+  animation: pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* 增强动画 - 更生动的入场效果 */
+@keyframes rise-enhanced {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pop-enhanced {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-rise-enhanced {
+  animation: rise-enhanced 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.animate-pop-enhanced {
+  animation: pop-enhanced 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.animate-slide-up {
+  animation: slide-up 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.animate-scale-in {
+  animation: scale-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* 微妙的脉冲动画 */
+@keyframes subtle-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+.animate-subtle-pulse {
+  animation: subtle-pulse 2s ease-in-out infinite;
+}
+
+/* 渐变背景动画 */
+@keyframes gradient-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 3s ease infinite;
+}
+
+/* 侧边栏专用动画 */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    max-height: 2000px;
+    transform: none;
+  }
+}
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes gentlePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+.animate-slide-down {
+  animation: slideDown 0.25s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.animate-slide-in-left {
+  animation: slideInLeft 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.animate-gentle-pulse {
+  animation: gentlePulse 2s ease-in-out infinite;
+}
+
+/* 侧边栏线程项卡片样式 */
+.sidebar-thread-item {
+  transition: all 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.sidebar-thread-item:hover {
+  box-shadow: var(--sidebar-hover-glow);
+}
+
+/* 思考中省略号 */
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.dot {
+  animation: blink 1.4s infinite both;
+}
+.dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* ========== Markdown 渲染样式（消息气泡 + 思考卡片）========== */
+.prose-markdown {
+  line-height: 1.75;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.prose-markdown p {
+  margin: 0.35em 0;
+}
+.prose-markdown p:first-child {
+  margin-top: 0;
+}
+.prose-markdown p:last-child {
+  margin-bottom: 0;
+}
+.prose-markdown code {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.875em;
+  background: var(--muted);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  color: var(--foreground);
+}
+.prose-markdown ul,
+.prose-markdown ol {
+  padding-left: 1.4em;
+  margin: 0.4em 0;
+}
+.prose-markdown li {
+  margin: 0.15em 0;
+}
+.prose-markdown li > p {
+  margin: 0.25em 0;
+}
+.prose-markdown blockquote {
+  border-left: 3px solid var(--ring);
+  color: var(--muted-foreground);
+  margin: 0.5em 0;
+  padding: 0.4em 0.9em;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in oklab, var(--ring) 8%, transparent);
+}
+.prose-markdown blockquote p {
+  margin: 0.2em 0;
+}
+.prose-markdown h1,
+.prose-markdown h2,
+.prose-markdown h3,
+.prose-markdown h4 {
+  font-weight: 600;
+  margin: 0.7em 0 0.35em;
+  line-height: 1.35;
+  color: var(--foreground);
+}
+.prose-markdown h1 {
+  font-size: 1.25em;
+}
+.prose-markdown h2 {
+  font-size: 1.12em;
+}
+.prose-markdown h3 {
+  font-size: 1.04em;
+}
+.prose-markdown a {
+  color: var(--ring);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-markdown a:hover {
+  color: color-mix(in oklab, var(--ring) 82%, var(--foreground));
+}
+.prose-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+  font-size: 0.9em;
+}
+.prose-markdown th,
+.prose-markdown td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+}
+.prose-markdown th {
+  background: var(--muted);
+  font-weight: 600;
+}
+.prose-markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.7em 0;
+}
+.prose-markdown strong {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+/* Desktop 对话排版（W3 已落地的实际样式）。 */
+.conversation-column {
+  width: 100%;
+  max-width: 720px;
+  margin-inline: auto;
+  padding-inline: 32px;
+}
+
+.conversation-user-bubble {
+  border-radius: 15px;
+  padding: 11px 18px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.conversation-copy {
+  font-size: 14.5px;
+  line-height: 1.85;
+}
+
+/* E-4: 移动端响应式断点 —— Tailwind lg: class 覆盖大部分场景，
+   这里补少量 @media 处理特殊场景（小屏隐藏滚动条占位、触控目标、长内容截断）。 */
+@media (max-width: 1023px) {
+  /* 小屏下消息区横向 padding 已由 chat-panel 的 px-4 控制；
+     此处确保长链接/代码块不撑破视口 */
+  .prose-markdown table {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  /* 极小屏：放大触控目标，紧凑间距 */
+  .prose-markdown {
+    font-size: 14px;
+    line-height: 1.65;
+  }
+}
+
+/* ========== 工具类 - 现代UI增强 ========== */
+
+/* 渐变背景 */
+.bg-accent-gradient {
+  background: var(--accent-gradient);
+}
+.bg-accent-gradient-hover:hover {
+  background: var(--accent-gradient-hover);
+}
+
+/* 彩色阴影 */
+.shadow-accent {
+  box-shadow: var(--shadow-accent);
+}
+
+/* 增强的hover效果 */
+.hover-lift {
+  transition: all 0.25s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.hover-scale {
+  transition: all 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.hover-scale:hover {
+  transform: scale(1.02);
+}
+
+/* 玻璃态效果 */
+.glass {
+  background: oklch(1 0 0 / 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid oklch(1 0 0 / 0.2);
+}
+:root.dark .glass {
+  background: oklch(0.2 0.018 260 / 0.7);
+  border: 1px solid oklch(0.4 0.022 260 / 0.3);
+}
+
+/* 渐变文字 */
+.text-gradient {
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* 增强的焦点状态 */
+.focus-ring {
+  transition: all 0.2s ease;
+}
+.focus-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  border-color: var(--accent);
+}
+
+/* 卡片增强 */
+.card-enhanced {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition: all 0.25s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.card-enhanced:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* 按钮增强 */
+.btn-primary-enhanced {
+  background: var(--accent-gradient);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  padding: 10px 20px;
+  font-weight: 500;
+  transition: all 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+  box-shadow: var(--shadow-sm);
+}
+.btn-primary-enhanced:hover {
+  background: var(--accent-gradient-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-accent);
+}
+.btn-primary-enhanced:active {
+  transform: translateY(0);
+}
+
+/* 输入框增强 */
+.input-enhanced {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  transition: all 0.2s ease;
+}
+.input-enhanced:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  outline: none;
+}
+
+/* 消息气泡增强 */
+.message-user-enhanced {
+  background: var(--accent-gradient);
+  color: white;
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.message-assistant-enhanced {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  transition: all 0.2s ease;
+}
+.message-assistant-enhanced:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ========== 全局滚动条（W2-3 合并） ========== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* ========== 微细节：淡化分隔线 ========== */
+.hairline {
+  border-color: var(--border) !important;
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `Thread` ADD `pinnedAt` datetime;

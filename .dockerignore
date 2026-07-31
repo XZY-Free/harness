@@ -1,0 +1,27 @@
+# 构建镜像时排除的内容（context 内不进 builder 层）
+node_modules
+.next
+out
+
+# 运行时产物（不该进镜像）
+.data
+workspaces
+upstreams
+
+# 密钥与本地配置
+.env
+.env.*
+!.env.example
+
+# vcs / 日志 / 编辑器 / OMC
+.git
+.gitignore
+*.log
+.DS_Store
+.idea
+.omc
+.omx
+
+# 容器自身
+Dockerfile
+.dockerignore

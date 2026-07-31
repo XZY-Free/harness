@@ -1,0 +1,1 @@
+ALTER TABLE `ThreadEvent` ADD `runId` varchar(36);

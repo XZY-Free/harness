@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "lib": ["esnext"],
+    "outDir": "./dist",
+    "strict": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": ["node"]
+  },
+  "include": [
+    "main/**/*.ts",
+    "preload/**/*.ts",
+    "storage/**/*.ts",
+    "browser/**/*.ts",
+    "bridge/**/*.ts",
+    "../lib/desktop/capabilities.ts",
+    "../lib/desktop/errors.ts",
+    "../lib/desktop/signing.ts",
+    "../lib/desktop/protocol.ts",
+    "../lib/desktop/rpc-envelope.ts",
+    "../lib/desktop/rpc-security.ts",
+    "../lib/desktop/connection-state.ts",
+    "../lib/desktop/bridge-messages.ts",
+    "../lib/desktop/commands.ts",
+    "../lib/desktop/lease.ts",
+    "../lib/desktop/approval.ts"
+  ],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx"]
+}

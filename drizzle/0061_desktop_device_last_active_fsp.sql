@@ -1,0 +1,2 @@
+ALTER TABLE `DesktopDevice`
+  MODIFY COLUMN `lastActiveAt` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3);

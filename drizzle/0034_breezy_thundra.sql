@@ -1,0 +1,1 @@
+ALTER TABLE `Thread` ADD `cicdApiToken` varchar(256);

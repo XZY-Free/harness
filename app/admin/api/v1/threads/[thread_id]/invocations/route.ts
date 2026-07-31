@@ -1,0 +1,102 @@
+import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+  v11SchemaInvalid,
+} from "@/lib/v11/admin/route-helpers";
+import { getThreadById } from "@/lib/v11/conversation/thread-queries";
+import { listInvocationsByThread } from "@/lib/v11/runtime/invocation-queries";
+/**
+ * GET /admin/api/v1/threads/{thread_id}/invocations — 列出 Thread 下的 Invocation（S11-W04）。
+ *
+ * 行为：
+ * - 解析 admin 主体（读操作，无需专门 action scope）。
+ * - 校验 Thread 存在且属于当前租户（跨租户隐藏为 404）。
+ * - 支持查询参数 after_sequence、limit。
+ * - 调用 listInvocationsByThread 返回 V11Invocation 列表（按 invocation_sequence 升序）。
+ * - 投影为 snake_case。
+ *
+ * 错误映射：
+ * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
+ * - Thread 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
+ * - limit / after_sequence 非法 → 400 REQUEST_SCHEMA_INVALID
+ */
+
+export const dynamic = "force-dynamic";
+
+interface RouteContext {
+  params: Promise<{ thread_id: string }>;
+}
+
+export async function GET(request: Request, context: RouteContext): Promise<Response> {
+  const requestId = getRequestId(request);
+  const { thread_id: threadId } = await context.params;
+
+  let principal: AdminPrincipal;
+  try {
+    principal = await resolveAdminPrincipalAsync(request.headers);
+  } catch (err) {
+    const authResp = adminAuthErrorResponse(err, requestId);
+    if (authResp) return authResp;
+    throw err;
+  }
+
+  // 校验 Thread 存在且属于当前租户
+  const thread = await getThreadById(principal.tenantId, threadId);
+  if (!thread) {
+    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+  }
+
+  // 解析查询参数
+  const url = new URL(request.url);
+  const limitParam = url.searchParams.get("limit");
+  const afterSequenceParam = url.searchParams.get("after_sequence");
+
+  const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+  }
+  let afterSequence: number | undefined;
+  if (afterSequenceParam) {
+    afterSequence = Number.parseInt(afterSequenceParam, 10);
+    if (!Number.isFinite(afterSequence)) {
+      return v11SchemaInvalid(requestId, "after_sequence 必须是整数");
+    }
+  }
+
+  const invocations = await listInvocationsByThread(principal.tenantId, threadId, {
+    limit,
+    afterSequence,
+  });
+
+  const projected = invocations.map((i) => ({
+    id: i.id,
+    tenant_id: i.tenantId,
+    thread_id: i.threadId,
+    turn_id: i.turnId,
+    job_id: i.jobId,
+    invocation_sequence: i.invocationSequence,
+    invocation_kind: i.invocationKind,
+    execution_state: i.executionState,
+    trigger_item_id: i.triggerItemId,
+    replaces_invocation_id: i.replacesInvocationId,
+    output_item_id: i.outputItemId,
+    result_ref: i.resultRef,
+    runtime_session_binding_id: i.runtimeSessionBindingId,
+    runtime_execution_ref: i.runtimeExecutionRef,
+    started_at: i.startedAt?.toISOString() ?? null,
+    finished_at: i.finishedAt?.toISOString() ?? null,
+    last_heartbeat_at: i.lastHeartbeatAt?.toISOString() ?? null,
+    error_code: i.errorCode,
+    error_summary: i.errorSummary,
+    version_no: i.versionNo,
+    created_at: i.createdAt.toISOString(),
+    updated_at: i.updatedAt.toISOString(),
+  }));
+
+  return v11Ok(
+    { items: projected, total: projected.length },
+    { headers: { [REQUEST_ID_HEADER]: requestId } },
+  );
+}

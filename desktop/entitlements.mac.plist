@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Hardened Runtime 必需：允许加载未签名 JIT 代码（Electron V8 需要） -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<!-- Hardened Runtime 必需：允许加载未签名的第三方库（Electron 内部依赖） -->
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<!-- Hardened Runtime 必需：允许 dyld 环境变量（Electron 启动需要） -->
+	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+	<true/>
+	<!-- Hardened Runtime 必需：允许禁用库验证（加载未签名 FFmpeg 等） -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<!-- 网络出站连接（Agent Bridge WebSocket + Server HTTP） -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- 网络入站连接（本地 Bridge Server 开发模式） -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<!-- Keychain 访问（设备身份 ed25519 密钥存储） -->
+	<key>com.apple.security.keychain-access</key>
+	<true/>
+	<!-- 文件读取（用户选择的工作区文件上传） -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- 深链接 snowharness:// 协议注册 -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:snowharness</string>
+	</array>
+</dict>
+</plist>

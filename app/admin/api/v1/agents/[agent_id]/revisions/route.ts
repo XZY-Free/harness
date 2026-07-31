@@ -1,0 +1,322 @@
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  etagHeader,
+  getRequestId,
+  v11NotFound,
+  v11Ok,
+} from "@/lib/http";
+import {
+  AGENT_REVISION_ETAG_PREFIX,
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  v11SchemaInvalid,
+} from "@/lib/v11/admin/route-helpers";
+/**
+ * POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision（S03-C05）。
+ *
+ * 事实源：../v11-agentkit-platform/contracts/v11.openapi.json（post_admin_api_v1_agents_by_agent_id_revisions）、
+ *         ../v11-agentkit-platform/11-api-and-event-boundaries.md §6、
+ *         ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md S03-W05。
+ *
+ * 行为：
+ * - 解析 admin 主体（SSO 管理员或 CI/CD Service Identity）。
+ * - 校验 action scope: agent.revision.create + resource { type: "agent", id: agent_id }。
+ * - 校验 Idempotency-Key（必填）+ computeRequestHash → enforceIdempotency。
+ * - 校验 Agent 存在且属于当前租户（跨租户隐藏为 404）。
+ * - 校验请求体（source/artifact_digest/instruction_hash/model_policy/permission_requirements/delegation_policy/agent_interface_requirements）。
+ * - 调用 createDraftRevision 创建 draft Revision。
+ * - 写 AuditEvent（agent.revision.create）。
+ * - completeRecord + 返回 201 + revision 投影 + ETag。
+ *
+ * 错误映射：
+ * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
+ * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
+ * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
+ * - Agent 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
+ * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
+ */
+import { getAgentById } from "@/lib/v11/control-plane/agent-queries";
+import {
+  createDraftRevision,
+  getRevisionsByAgent,
+} from "@/lib/v11/control-plane/agent-revision-queries";
+import {
+  type AuditActor,
+  actorFromPrincipal,
+  actorFromWorkloadPrincipal,
+  recordAuditEvent,
+} from "@/lib/v11/identity/audit";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/v11/identity/idempotency";
+import type { V11AgentRevision } from "@/lib/v11/schema/agent";
+
+export const dynamic = "force-dynamic";
+
+/** 路径参数上下文（Next.js App Router 动态段）。 */
+interface RouteContext {
+  params: Promise<{ agent_id: string }>;
+}
+
+/** 请求体 schema（与 OpenAPI requestBody 对齐）。 */
+interface CreateRevisionBody {
+  source: Record<string, unknown>;
+  artifact_digest: string;
+  instruction_hash: string;
+  model_policy: Record<string, unknown>;
+  permission_requirements: Record<string, unknown>;
+  delegation_policy: Record<string, unknown>;
+  agent_interface_requirements: Record<string, unknown>;
+}
+
+/** 校验请求体。 */
+function validateBody(body: unknown): body is CreateRevisionBody {
+  if (!body || typeof body !== "object") return false;
+  const b = body as Record<string, unknown>;
+  if (!b.source || typeof b.source !== "object") return false;
+  if (typeof b.artifact_digest !== "string" || b.artifact_digest.length === 0) return false;
+  if (typeof b.instruction_hash !== "string" || b.instruction_hash.length === 0) return false;
+  if (!b.model_policy || typeof b.model_policy !== "object") return false;
+  if (!b.permission_requirements || typeof b.permission_requirements !== "object") return false;
+  if (!b.delegation_policy || typeof b.delegation_policy !== "object") return false;
+  if (!b.agent_interface_requirements || typeof b.agent_interface_requirements !== "object")
+    return false;
+  return true;
+}
+
+/** 从主体提取幂等 caller。 */
+function callerFromAdminPrincipal(principal: AdminPrincipal) {
+  if ("userIdentityId" in principal) {
+    return callerFromPrincipal(principal);
+  }
+  return callerFromWorkloadPrincipal(principal);
+}
+
+/** 从主体提取审计 actor。 */
+function actorFromAdminPrincipal(principal: AdminPrincipal): AuditActor {
+  if ("userIdentityId" in principal) {
+    return actorFromPrincipal(principal);
+  }
+  return actorFromWorkloadPrincipal(principal);
+}
+
+/** 从主体提取 createdBy（userIdentityId 或 serviceId）。 */
+function createdByFromAdminPrincipal(principal: AdminPrincipal): string {
+  if ("userIdentityId" in principal) {
+    return principal.userIdentityId;
+  }
+  return principal.serviceId ?? principal.claims.tenantId;
+}
+
+/** 投影 Revision 为响应体（snake_case + etag）。 */
+function projectRevision(revision: V11AgentRevision): Record<string, unknown> {
+  return {
+    id: revision.id,
+    agent_id: revision.agentId,
+    revision_no: revision.revisionNo,
+    revision_state: revision.revisionState,
+    source_revision: revision.sourceRevision,
+    etag: `${AGENT_REVISION_ETAG_PREFIX}${revision.revisionNo}`,
+  };
+}
+
+export async function POST(request: Request, context: RouteContext): Promise<Response> {
+  const requestId = getRequestId(request);
+  const { agent_id: agentId } = await context.params;
+
+  // 1. 解析身份
+  let principal: AdminPrincipal;
+  try {
+    principal = await resolveAdminPrincipalAsync(request.headers);
+  } catch (err) {
+    const authResp = adminAuthErrorResponse(err, requestId);
+    if (authResp) return authResp;
+    throw err;
+  }
+
+  // 2. 校验 action scope
+  const scopeResult = await requireAdminActionScope(
+    principal,
+    "agent.revision.create",
+    { type: "agent", id: agentId },
+    requestId,
+  );
+  if (!scopeResult.ok) return scopeResult.response;
+
+  // 3. 校验 Agent 存在且属于当前租户（跨租户隐藏为 404）
+  const agent = await getAgentById(principal.tenantId, agentId);
+  if (!agent) {
+    return v11NotFound(requestId, `Agent 不存在或无权访问: ${agentId}`);
+  }
+
+  // 4. 解析 Idempotency-Key（必填）
+  const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
+  if (!idempotencyKey) {
+    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+  }
+
+  // 5. 解析请求体
+  const body = await request.json().catch(() => null);
+  if (!validateBody(body)) {
+    return v11SchemaInvalid(requestId, "请求体非法：缺少必填字段或字段类型错误");
+  }
+
+  // 6. 计算请求 hash + 幂等守卫
+  const path = new URL(request.url).pathname;
+  const requestHash = computeRequestHash("POST", path, body);
+  const caller = callerFromAdminPrincipal(principal);
+  const commandScope = `agent.revision.create:${agentId}`;
+
+  const outcome = await enforceIdempotency({
+    caller,
+    commandScope,
+    idempotencyKey,
+    requestHash,
+  });
+
+  // 7. 处理幂等结果
+  if (outcome.kind === "replay") {
+    return buildReplayResponse(outcome.record, requestId);
+  }
+  if (outcome.kind === "in_flight" || outcome.kind === "conflict") {
+    return buildIdempotencyErrorResponse({
+      record: outcome.kind === "conflict" ? outcome.existingRecord : outcome.record,
+      reason: outcome.kind === "conflict" ? "conflict" : "in_flight",
+      requestId,
+    });
+  }
+
+  // retry_allowed：重置 failed 记录后重新执行
+  let recordId = outcome.record.id;
+  if (outcome.kind === "retry_allowed") {
+    const reset = await prepareRetryForFailedRecord({
+      record: outcome.record,
+      requestHash,
+    });
+    if (!reset) {
+      return buildIdempotencyErrorResponse({
+        record: outcome.record,
+        reason: "conflict",
+        requestId,
+      });
+    }
+    recordId = reset.id;
+  }
+
+  // 8. 执行业务：创建 draft Revision
+  try {
+    const sourceRevision = JSON.stringify(body.source);
+    const revision = await createDraftRevision({
+      tenantId: principal.tenantId,
+      agentId,
+      sourceType: "agent_yaml",
+      sourceRevision,
+      instructionHash: body.instruction_hash,
+      agentArtifactRef: body.artifact_digest,
+      modelPolicyJson: body.model_policy,
+      permissionRequirementsJson: body.permission_requirements,
+      delegationPolicyJson: body.delegation_policy,
+      agentInterfaceRequirementsJson: body.agent_interface_requirements,
+      createdBy: createdByFromAdminPrincipal(principal),
+    });
+
+    // 9. 写 AuditEvent（agent.revision.create）
+    await recordAuditEvent({
+      actor: actorFromAdminPrincipal(principal),
+      actionType: "agent.revision.create",
+      targetType: "agent_revision",
+      targetId: revision.id,
+      after: {
+        agent_id: agentId,
+        revision_no: revision.revisionNo,
+        revision_state: revision.revisionState,
+        instruction_hash: revision.instructionHash,
+        artifact_ref: revision.agentArtifactRef,
+      },
+      reason: `创建 AgentRevision (draft, revisionNo=${revision.revisionNo})`,
+      requestId,
+    });
+
+    // 10. completeRecord + 返回 201
+    const responseBody = projectRevision(revision);
+    await completeRecord({
+      recordId,
+      httpStatus: 201,
+      responseRedactedJson: JSON.stringify(responseBody),
+    });
+
+    return v11Ok(responseBody, {
+      status: 201,
+      headers: {
+        [REQUEST_ID_HEADER]: requestId,
+        ...etagHeader(`${AGENT_REVISION_ETAG_PREFIX}${revision.revisionNo}`),
+      },
+    });
+  } catch (err) {
+    await failRecord(recordId);
+    throw err;
+  }
+}
+
+/**
+ * GET /admin/api/v1/agents/{agent_id}/revisions — 列出 Agent 的所有 Revision（S11-W02）。
+ *
+ * 行为：
+ * - 解析 admin 主体（读操作，无需专门 action scope）。
+ * - 校验 Agent 存在且属于当前租户（跨租户 404）。
+ * - 调用 getRevisionsByAgent 返回 Revision 列表（按 revisionNo 降序）。
+ * - 支持查询参数 state 过滤（draft / published / withdrawn）。
+ *
+ * 错误映射：
+ * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
+ * - Agent 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
+ */
+export async function GET(request: Request, context: RouteContext): Promise<Response> {
+  const requestId = getRequestId(request);
+  const { agent_id: agentId } = await context.params;
+
+  let principal: AdminPrincipal;
+  try {
+    principal = await resolveAdminPrincipalAsync(request.headers);
+  } catch (err) {
+    const authResp = adminAuthErrorResponse(err, requestId);
+    return authResp ?? v11NotFound(requestId);
+  }
+
+  // 校验 Agent 存在且属于当前租户
+  const agent = await getAgentById(principal.tenantId, agentId);
+  if (!agent) {
+    return v11NotFound(requestId, `Agent 不存在或无权访问: ${agentId}`);
+  }
+
+  // 解析查询参数 state
+  const url = new URL(request.url);
+  const stateParam = url.searchParams.get("state");
+  const validStates = new Set(["draft", "published", "withdrawn"]);
+  const revisionState =
+    stateParam && validStates.has(stateParam)
+      ? (stateParam as "draft" | "published" | "withdrawn")
+      : undefined;
+
+  const revisions = await getRevisionsByAgent(
+    agentId,
+    revisionState ? { revisionState } : undefined,
+  );
+  const projected = revisions.map(projectRevision);
+
+  return v11Ok(
+    { items: projected, total: projected.length },
+    { headers: { [REQUEST_ID_HEADER]: requestId } },
+  );
+}
