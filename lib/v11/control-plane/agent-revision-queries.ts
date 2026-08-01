@@ -23,10 +23,10 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { setCurrentRevision } from "@/lib/v11/control-plane/agent-queries";
 import {
   type AgentRevisionState,
   type V11AgentRevision,
+  v11Agent,
   v11AgentRevision,
 } from "@/lib/v11/schema/agent";
 import { and, desc, eq, max } from "drizzle-orm";
@@ -131,7 +131,7 @@ export async function updateDraftContent(
  *
  * - publishedAt 写当前时间。
  * - 业务内容自此不可修改。
- * - 同步回填 Agent.currentRevisionId（乐观锁：失败回滚语义由调用方处理）。
+ * - 与 Agent.currentRevisionId 乐观锁更新在同一事务提交；任一步失败都回滚。
  *
  * @throws RevisionNotFoundError Revision 不存在
  * @throws RevisionStateError Revision 非 draft 状态
@@ -141,39 +141,66 @@ export async function publishRevision(
   revisionId: string,
   agentExpectedVersionNo: number,
 ): Promise<V11AgentRevision> {
-  const current = await getRevisionById(revisionId);
-  if (!current) {
-    throw new RevisionNotFoundError(revisionId);
-  }
-  if (current.revisionState !== "draft") {
-    throw new RevisionStateError(
-      revisionId,
-      current.revisionState,
-      "published",
-      "只有 draft 状态可发布",
-    );
-  }
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(v11AgentRevision)
+      .where(eq(v11AgentRevision.id, revisionId))
+      .limit(1);
+    if (!current) {
+      throw new RevisionNotFoundError(revisionId);
+    }
+    if (current.revisionState !== "draft") {
+      throw new RevisionStateError(
+        revisionId,
+        current.revisionState,
+        "published",
+        "只有 draft 状态可发布",
+      );
+    }
 
-  const now = new Date();
-  await db
-    .update(v11AgentRevision)
-    .set({ revisionState: "published", publishedAt: now })
-    .where(eq(v11AgentRevision.id, revisionId));
+    const now = new Date();
+    const revisionUpdate = await tx
+      .update(v11AgentRevision)
+      .set({ revisionState: "published", publishedAt: now })
+      .where(and(eq(v11AgentRevision.id, revisionId), eq(v11AgentRevision.revisionState, "draft")));
+    if (revisionUpdate[0].affectedRows === 0) {
+      throw new RevisionStateError(
+        revisionId,
+        "draft",
+        "published",
+        "Revision 已被并发发布或状态已变化",
+      );
+    }
 
-  // 回填 Agent.currentRevisionId（乐观锁）
-  const updated = await setCurrentRevision(
-    tenantId,
-    current.agentId,
-    revisionId,
-    agentExpectedVersionNo,
-  );
-  if (!updated) {
-    // 乐观锁冲突：Revision 已 published，但 Agent.currentRevisionId 未更新。
-    // 调用方应返回 412 ETAG_MISMATCH，调用方重新读 Agent.versionNo 后重试回填。
-    throw new AgentVersionConflictError(current.agentId, agentExpectedVersionNo);
-  }
+    const agentUpdate = await tx
+      .update(v11Agent)
+      .set({
+        currentRevisionId: revisionId,
+        versionNo: agentExpectedVersionNo + 1,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(v11Agent.tenantId, tenantId),
+          eq(v11Agent.id, current.agentId),
+          eq(v11Agent.versionNo, agentExpectedVersionNo),
+        ),
+      );
+    if (agentUpdate[0].affectedRows === 0) {
+      throw new AgentVersionConflictError(current.agentId, agentExpectedVersionNo);
+    }
 
-  return (await getRevisionById(revisionId)) as V11AgentRevision;
+    const [published] = await tx
+      .select()
+      .from(v11AgentRevision)
+      .where(eq(v11AgentRevision.id, revisionId))
+      .limit(1);
+    if (!published) {
+      throw new RevisionNotFoundError(revisionId);
+    }
+    return published;
+  });
 }
 
 /**
@@ -297,7 +324,7 @@ export class RevisionImmutableError extends Error {
   }
 }
 
-/** Agent 乐观锁冲突（publishRevision 回填 Agent.currentRevisionId 时）。 */
+/** Agent 乐观锁冲突（publishRevision 事务整体回滚）。 */
 export class AgentVersionConflictError extends Error {
   constructor(
     public readonly agentId: string,

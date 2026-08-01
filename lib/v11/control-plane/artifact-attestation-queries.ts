@@ -15,7 +15,8 @@
  *   - 无论成功失败都写 AuditEvent（action_type=artifact.attestation.verify）。
  *   - 失败抛 ArtifactAttestationFailedError（含 failureCode），RouteSet 不变化。
  * - assertAttestationGate：发布门禁，校验 attestation 已 verified 且引用正确 revision。
- * - publishAgentRevisionWithAttestation / publishRuntimeRevisionWithAttestation：发布门禁 + 原发布流程 wrapper。
+ * - publishAgentRevisionWithAttestation：正式 Application Service 的兼容 Facade。
+ * - publishRuntimeRevisionWithAttestation：Runtime 发布门禁 + 原发布流程 wrapper。
  *
  * 审计语义：
  * - 验证动作（无论成功失败）写 AuditEvent，action_type=artifact.attestation.verify。
@@ -23,8 +24,22 @@
  * - 失败原因摘要写入 audit.afterHash（不存原文），不泄露内部漏洞细节给无权调用者。
  */
 import { randomUUID } from "node:crypto";
+import {
+  type PublishAgentRevisionResult,
+  createPublishAgentRevision,
+} from "@/lib/agents/application/publish-agent-revision";
+import {
+  AgentPublicationPrerequisiteError,
+  AgentPublicationVersionConflictError,
+  AgentRevisionPublicationNotFoundError,
+  AgentRevisionPublicationStateError,
+} from "@/lib/agents/domain/agent-revision-publication-policy";
 import { db } from "@/lib/db/client";
-import { publishRevision as publishAgentRevision } from "@/lib/v11/control-plane/agent-revision-queries";
+import {
+  AgentVersionConflictError,
+  RevisionNotFoundError,
+  RevisionStateError,
+} from "@/lib/v11/control-plane/agent-revision-queries";
 import {
   ArtifactAttestationFailedError,
   ArtifactNotVerifiedError,
@@ -33,6 +48,7 @@ import {
   type VerifyAttestationInput,
   verifyArtifactAttestation,
 } from "@/lib/v11/control-plane/artifact-attestation";
+import { mysqlAgentPublicationStore } from "@/lib/v11/control-plane/mysql-agent-publication-store";
 import type { ConformanceCaseResult } from "@/lib/v11/control-plane/runtime-conformance";
 import { publishRuntimeRevision } from "@/lib/v11/control-plane/runtime-revision-queries";
 import { type AuditActor, recordAuditEvent } from "@/lib/v11/identity/audit";
@@ -487,15 +503,24 @@ export interface PublishAgentRevisionWithAttestationResult {
   auditEventId: string;
 }
 
+const publishAgentRevisionApplication = createPublishAgentRevision({
+  store: mysqlAgentPublicationStore,
+});
+
+export interface PublishAgentRevisionIdempotencyCompletion {
+  recordId: string;
+  httpStatus: number;
+  responseRef?: string | null;
+  serializeResponse: (result: PublishAgentRevisionResult) => string;
+}
+
 /**
  * AgentRevision 发布门禁 + 发布流程。
  *
- * 步骤：
- * 1. assertAttestationGate：校验 attestation 已 verified 且引用正确 revision。
- * 2. publishRevision：执行原发布流程（draft → published + 回填 Agent.currentRevisionId）。
- * 3. 写 AuditEvent（action_type=agent.publish，target=revision）。
+ * 正式实现位于 lib/agents/application/publish-agent-revision.ts。本 Facade 保留旧签名和错误类型，
+ * 由 Application Service 在单一事务内完成门禁、Revision、Agent 指针、Audit、Outbox 和 Idempotency。
  *
- * 失败时（门禁失败或发布失败）不写 agent.publish 审计；门禁失败抛 ArtifactNotVerifiedError。
+ * 失败时事务整体回滚；门禁失败继续抛 ArtifactNotVerifiedError 兼容旧调用方。
  *
  * @throws ArtifactNotVerifiedError attestation 不存在/未验证/引用不一致
  * @throws RevisionNotFoundError Revision 不存在（来自 publishRevision）
@@ -509,40 +534,38 @@ export async function publishAgentRevisionWithAttestation(
   attestationId: string,
   actor: AuditActor,
   requestId?: string,
+  idempotency?: PublishAgentRevisionIdempotencyCompletion,
 ): Promise<PublishAgentRevisionWithAttestationResult> {
-  // 1. 发布门禁
-  const attestation = await assertAttestationGate(
-    tenantId,
-    "agent_revision",
-    revisionId,
-    attestationId,
-  );
-
-  // 2. 执行原发布流程
-  const revision = await publishAgentRevision(tenantId, revisionId, agentExpectedVersionNo);
-
-  // 3. 写 AuditEvent（agent.publish）
-  const auditEvent = await recordAuditEvent({
-    actor,
-    actionType: "agent.publish",
-    targetType: "agent_revision",
-    targetId: revisionId,
-    after: {
-      agent_id: revision.agentId,
-      revision_no: revision.revisionNo,
-      revision_state: revision.revisionState,
-      attestation_id: attestationId,
-      artifact_digest: attestation.artifactDigest,
-    },
-    reason: "AgentRevision 发布（attestation 门禁通过）",
-    requestId,
-  });
-
-  return {
-    revision,
-    attestation,
-    auditEventId: auditEvent.id,
-  };
+  try {
+    const result = await publishAgentRevisionApplication({
+      tenantId,
+      revisionId,
+      agentExpectedVersionNo,
+      attestationId,
+      actor,
+      requestId: requestId ?? randomUUID(),
+      idempotency,
+    });
+    return {
+      revision: result.revision as V11AgentRevision,
+      attestation: result.attestation as V11ArtifactAttestation,
+      auditEventId: result.auditEventId,
+    };
+  } catch (error) {
+    if (error instanceof AgentPublicationPrerequisiteError) {
+      throw new ArtifactNotVerifiedError(error.attestationId, error.message);
+    }
+    if (error instanceof AgentPublicationVersionConflictError) {
+      throw new AgentVersionConflictError(error.agentId, error.expectedVersionNo);
+    }
+    if (error instanceof AgentRevisionPublicationNotFoundError) {
+      throw new RevisionNotFoundError(error.revisionId);
+    }
+    if (error instanceof AgentRevisionPublicationStateError) {
+      throw new RevisionStateError(error.revisionId, error.fromState, "published", error.message);
+    }
+    throw error;
+  }
 }
 
 // ─── 发布门禁 + Runtime 发布 wrapper ───────────────────────

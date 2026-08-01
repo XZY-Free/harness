@@ -31,8 +31,8 @@ import {
  * - 校验 Revision 存在且属于当前租户（跨租户隐藏为 404）。
  * - 校验 If-Match ETag 与 Revision 当前的 agent-revision-{revisionNo} 一致（412 ETAG_MISMATCH）。
  * - 读取 Agent 当前 versionNo（用于 publishAgentRevisionWithAttestation 乐观锁）。
- * - 调用 publishAgentRevisionWithAttestation：attestation 门禁 + publish + agent.publish 审计。
- * - completeRecord + 返回 200 + published 投影。
+ * - 调用 publishAgentRevisionWithAttestation Facade；正式 Application Service 负责发布事务。
+ * - Idempotency 完成与发布事实同事务提交，Route 只返回原有 200 投影。
  *
  * 错误映射：
  * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
@@ -48,6 +48,7 @@ import {
 import { getAgentById } from "@/lib/v11/control-plane/agent-queries";
 import {
   AgentVersionConflictError,
+  RevisionStateError,
   getRevisionById,
 } from "@/lib/v11/control-plane/agent-revision-queries";
 import {
@@ -64,7 +65,6 @@ import {
   buildReplayResponse,
   callerFromPrincipal,
   callerFromWorkloadPrincipal,
-  completeRecord,
   computeRequestHash,
   enforceIdempotency,
   failRecord,
@@ -241,6 +241,18 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       body.artifact_attestation_id,
       actorFromAdminPrincipal(principal),
       requestId,
+      {
+        recordId,
+        httpStatus: 200,
+        responseRef: revisionId,
+        serializeResponse: (published) =>
+          JSON.stringify({
+            id: published.revision.id,
+            revision_state: published.revision.revisionState,
+            published_at: published.revision.publishedAt?.toISOString() ?? null,
+            audit_event_id: published.auditEventId,
+          }),
+      },
     );
 
     const responseBody = {
@@ -249,12 +261,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       published_at: result.revision.publishedAt?.toISOString() ?? null,
       audit_event_id: result.auditEventId,
     };
-
-    await completeRecord({
-      recordId,
-      httpStatus: 200,
-      responseRedactedJson: JSON.stringify(responseBody),
-    });
 
     return v11Ok(responseBody, {
       status: 200,
@@ -271,6 +277,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         requestId,
         `Agent ${err.agentId} versionNo 不匹配（期望 ${err.expectedVersionNo}），并发冲突`,
       );
+    }
+    if (err instanceof RevisionStateError) {
+      return v11EtagMismatch(requestId, `AgentRevision ${err.revisionId} 状态已并发变化`);
     }
     throw err;
   }
