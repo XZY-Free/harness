@@ -1,3 +1,4 @@
+import * as controlPlaneOutboxSchema from "@/lib/agents/persistence/control-plane-outbox";
 import { dbConfig } from "@/lib/config";
 import * as v11AdminExportSchema from "@/lib/v11/schema/admin-export";
 import * as v11AgentSchema from "@/lib/v11/schema/agent";
@@ -15,9 +16,9 @@ import * as v11IdempotencySchema from "@/lib/v11/schema/idempotency";
 import * as v11IdentitySchema from "@/lib/v11/schema/identity";
 import * as v11PermissionSchema from "@/lib/v11/schema/permission";
 import * as v11RecoveryDrillSchema from "@/lib/v11/schema/recovery-drill";
-import * as v11SecurityIncidentSchema from "@/lib/v11/schema/security-incident";
 import * as v11RuntimeSchema from "@/lib/v11/schema/runtime";
 import * as v11RuntimeArtifactSchema from "@/lib/v11/schema/runtime-artifact";
+import * as v11SecurityIncidentSchema from "@/lib/v11/schema/security-incident";
 import * as v11TraceSchema from "@/lib/v11/schema/trace";
 import * as v11UsageSchema from "@/lib/v11/schema/usage";
 import * as v11UserActionRequestSchema from "@/lib/v11/schema/user-action-request";
@@ -29,6 +30,7 @@ import * as schema from "./schema";
 /** 合并旧 schema 与 V11 schema，使 db.query.* 关系查询覆盖 V11 表。 */
 const fullSchema = {
   ...schema,
+  ...controlPlaneOutboxSchema,
   ...v11IdentitySchema,
   ...v11DeviceSchema,
   ...v11AuthorizationSchema,

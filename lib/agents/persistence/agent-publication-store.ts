@@ -1,0 +1,73 @@
+import type { AgentRevisionPublicationState } from "@/lib/agents/domain/agent-revision-publication-policy";
+
+export interface AgentPublicationRevision {
+  id: string;
+  agentId: string;
+  revisionNo: number;
+  revisionState: AgentRevisionPublicationState;
+  instructionHash: string;
+  agentArtifactRef: string;
+  publishedAt: Date | null;
+}
+
+export interface AgentPublicationAgent {
+  id: string;
+  tenantId: string;
+  versionNo: number;
+}
+
+export interface AgentPublicationAttestation {
+  id: string;
+  artifactDigest: string;
+}
+
+export type AgentPublicationActorType = "user" | "service" | "workload" | "system";
+
+export interface AgentPublicationSession {
+  findRevision(tenantId: string, revisionId: string): Promise<AgentPublicationRevision | null>;
+  findAgent(tenantId: string, agentId: string): Promise<AgentPublicationAgent | null>;
+  findVerifiedAttestation(params: {
+    tenantId: string;
+    revisionId: string;
+    attestationId: string;
+  }): Promise<AgentPublicationAttestation | null>;
+  markRevisionPublished(revisionId: string, publishedAt: Date): Promise<boolean>;
+  setAgentCurrentRevision(params: {
+    tenantId: string;
+    agentId: string;
+    revisionId: string;
+    expectedVersionNo: number;
+    updatedAt: Date;
+  }): Promise<boolean>;
+  appendAudit(params: {
+    id: string;
+    tenantId: string;
+    actorType: AgentPublicationActorType;
+    actorId: string;
+    revisionId: string;
+    after: unknown;
+    requestId: string;
+    occurredAt: Date;
+  }): Promise<void>;
+  appendOutbox(params: {
+    id: string;
+    tenantId: string;
+    eventKey: string;
+    eventType: string;
+    aggregateType: string;
+    aggregateId: string;
+    payload: unknown;
+    occurredAt: Date;
+  }): Promise<void>;
+  completeIdempotency(params: {
+    recordId: string;
+    httpStatus: number;
+    responseRef: string | null;
+    responseRedactedJson: string;
+    completedAt: Date;
+  }): Promise<boolean>;
+}
+
+export interface AgentPublicationStore {
+  transaction<T>(operation: (session: AgentPublicationSession) => Promise<T>): Promise<T>;
+}
