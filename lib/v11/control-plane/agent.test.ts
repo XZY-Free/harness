@@ -517,9 +517,13 @@ describe("V11 agent-revision-queries", () => {
   it("publishRevision Agent 乐观锁冲突抛 AgentVersionConflictError", async () => {
     const rev = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
     await expect(publishRevision(tenantId, rev.id, 999)).rejects.toThrow(AgentVersionConflictError);
-    // 但 Revision 已 published（Agent.currentRevisionId 未回填，调用方需处理）
+    // Revision 与 Agent 当前指针必须处于同一事务；CAS 冲突不得留下部分发布。
     const after = await getRevisionById(rev.id);
-    expect(after?.revisionState).toBe("published");
+    expect(after?.revisionState).toBe("draft");
+    expect(after?.publishedAt).toBeNull();
+    const agentAfter = await getAgentById(tenantId, agentId);
+    expect(agentAfter?.currentRevisionId).toBeNull();
+    expect(agentAfter?.versionNo).toBe(1);
   });
 
   it("withdrawRevision published → withdrawn（业务内容不变，publishedAt 保留）", async () => {

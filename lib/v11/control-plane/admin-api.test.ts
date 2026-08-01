@@ -15,11 +15,12 @@ import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revisio
 import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations:verify/route";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { PUT as updateRoutePUT } from "@/app/admin/api/v1/deployment-routes/[route_id]/route";
+import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
+import { createAgent, getAgentById } from "@/lib/v11/control-plane/agent-queries";
 import {
   createDraftRevision,
   getRevisionById,
@@ -50,10 +51,12 @@ import {
   createDraftRuntimeRevision,
   publishRuntimeRevision,
 } from "@/lib/v11/control-plane/runtime-revision-queries";
+import { findIdempotencyRecord } from "@/lib/v11/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/v11/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 identity.test.ts 一致）。
@@ -674,6 +677,108 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.revision_state).toBe("published");
     expect(body.published_at).toBeTruthy();
+
+    const publishedAgent = await getAgentById(tenantId, agent.id);
+    expect(publishedAgent?.currentRevisionId).toBe(draftRevision.id);
+
+    const outbox = await db
+      .select()
+      .from(controlPlaneOutboxEvent)
+      .where(eq(controlPlaneOutboxEvent.aggregateId, draftRevision.id));
+    expect(outbox).toHaveLength(1);
+
+    const idempotency = await findIdempotencyRecord({
+      tenantId,
+      audience: "admin",
+      callerType: "user",
+      callerId: userIdentityId,
+      commandScope: `agent.publish:${draftRevision.id}`,
+      idempotencyKey: "idem-publish-001",
+    });
+    expect(idempotency?.processingState).toBe("completed");
+    expect(idempotency?.responseRedactedJson).toBe(JSON.stringify(body));
+
+    const replayRequest = buildV11Request({
+      audience: "admin",
+      method: "POST",
+      path: "/agent-revisions/rev:publish",
+      idempotencyKey: "idem-publish-001",
+      ifMatch: "agent-revision-1",
+      body: {
+        release_notes: "Initial release",
+        artifact_attestation_id: attestationId,
+      },
+    });
+    const replayResponse = await publishPOST(replayRequest, {
+      params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+    });
+    expect(replayResponse.status).toBe(200);
+    expect(await replayResponse.json()).toEqual(body);
+    expect(
+      await db
+        .select()
+        .from(controlPlaneOutboxEvent)
+        .where(eq(controlPlaneOutboxEvent.aggregateId, draftRevision.id)),
+    ).toHaveLength(1);
+  });
+
+  it("两个不同幂等键并发发布时只返回一个成功结果", async () => {
+    const agent = await createAgent({
+      tenantId,
+      agentKey: "concurrent-publish-agent",
+      displayName: "Concurrent Publish Agent",
+      ownerUserId: userIdentityId,
+    });
+    const draftRevision = await createDraftRevision({
+      tenantId,
+      agentId: agent.id,
+      sourceType: "agent_yaml",
+      sourceRevision: "git:concurrent-publish-v1",
+      instructionHash: "sha256:instr-concurrent-publish",
+      agentArtifactRef: "oci://registry/agent@sha256:concurrent-publish",
+      modelPolicyJson: {},
+      permissionRequirementsJson: {},
+      delegationPolicyJson: {},
+      agentInterfaceRequirementsJson: { required: [], optional: [] },
+      createdBy: userIdentityId,
+    });
+    const attestationId = await createVerifiedAttestationDirect(
+      tenantId,
+      "agent_revision",
+      draftRevision.id,
+      "concurrent-publish-content",
+    );
+    const buildRequest = (idempotencyKey: string) =>
+      buildV11Request({
+        audience: "admin",
+        method: "POST",
+        path: "/agent-revisions/rev:publish",
+        idempotencyKey,
+        ifMatch: "agent-revision-1",
+        body: {
+          release_notes: "Concurrent release",
+          artifact_attestation_id: attestationId,
+        },
+      });
+
+    const responses = await Promise.all([
+      publishPOST(buildRequest("idem-concurrent-publish-1"), {
+        params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+      }),
+      publishPOST(buildRequest("idem-concurrent-publish-2"), {
+        params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+      }),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 412]);
+    expect((await getRevisionById(draftRevision.id))?.revisionState).toBe("published");
+    expect((await getAgentById(tenantId, agent.id))?.currentRevisionId).toBe(draftRevision.id);
+    expect(
+      await db
+        .select()
+        .from(controlPlaneOutboxEvent)
+        .where(eq(controlPlaneOutboxEvent.aggregateId, draftRevision.id)),
+    ).toHaveLength(1);
   });
 
   it("缺少 If-Match → 400 REQUEST_SCHEMA_INVALID", async () => {
