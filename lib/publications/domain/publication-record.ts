@@ -22,11 +22,15 @@ export function computePublicationEvidenceSetDigest(params: {
   attestationIds: string[];
   conformanceRunId: string | null;
   approvals: unknown[];
+  additionalEvidence?: unknown;
 }): string {
   const evidence = canonicalize({
     approvals: params.approvals,
     attestation_ids: [...params.attestationIds].sort(),
     conformance_run_id: params.conformanceRunId,
+    ...(params.additionalEvidence === undefined
+      ? {}
+      : { additional_evidence: params.additionalEvidence }),
   });
   return `sha256:${createHash("sha256").update(JSON.stringify(evidence)).digest("hex")}`;
 }
