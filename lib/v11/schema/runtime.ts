@@ -153,6 +153,10 @@ export const v11RuntimeRevision = mysqlTable(
     endpointRef: varchar("endpointRef", { length: 512 }).notNull(),
     /** Runtime 主机/Adapter 制品引用。 */
     runtimeArtifactRef: varchar("runtimeArtifactRef", { length: 512 }).notNull(),
+    /** 权威控制面 Artifact；兼容期允许旧 Revision 为空。 */
+    artifactId: varchar("artifactId", { length: 36 }),
+    /** 与 artifactId 同时冻结的内容摘要。 */
+    artifactDigest: varchar("artifactDigest", { length: 71 }),
     /** 实际能力（来自探测和一致性测试，非手工勾选）。 */
     runtimeCapabilitiesJson: json("runtimeCapabilitiesJson").notNull(),
     /** 身份模式（workload_token/api_key/none/...）；varchar 以便扩展。 */
@@ -175,6 +179,7 @@ export const v11RuntimeRevision = mysqlTable(
       t.revisionNo,
     ),
     runtimeStateIdx: index("V11RuntimeRevision_runtime_state_idx").on(t.runtimeId, t.revisionState),
+    artifactIdx: index("V11RuntimeRevision_artifact_idx").on(t.artifactId),
   }),
 );
 

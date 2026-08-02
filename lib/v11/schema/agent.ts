@@ -135,6 +135,10 @@ export const v11AgentRevision = mysqlTable(
     instructionHash: varchar("instructionHash", { length: 128 }).notNull(),
     /** Agent 代码/agent.yaml 制品引用；由 Runtime 加载，不是 Runtime 主机镜像。 */
     agentArtifactRef: varchar("agentArtifactRef", { length: 512 }).notNull(),
+    /** 权威控制面 Artifact；兼容期允许旧 Revision 为空。 */
+    artifactId: varchar("artifactId", { length: 36 }),
+    /** 与 artifactId 同时冻结的内容摘要。 */
+    artifactDigest: varchar("artifactDigest", { length: 71 }),
     /** 默认模型策略。 */
     modelPolicyJson: json("modelPolicyJson").notNull(),
     /** 权限要求。 */
@@ -157,6 +161,7 @@ export const v11AgentRevision = mysqlTable(
       t.revisionNo,
     ),
     agentStateIdx: index("V11AgentRevision_agent_state_idx").on(t.agentId, t.revisionState),
+    artifactIdx: index("V11AgentRevision_artifact_idx").on(t.artifactId),
   }),
 );
 
