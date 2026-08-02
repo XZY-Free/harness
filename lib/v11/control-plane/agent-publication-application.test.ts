@@ -5,6 +5,7 @@ import type {
   AgentPublicationStore,
 } from "@/lib/agents/persistence/agent-publication-store";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { artifact } from "@/lib/artifacts/persistence/artifact-record";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
@@ -25,8 +26,9 @@ import {
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { v11AgentRevision } from "@/lib/v11/schema/agent";
 import { tenant } from "@/lib/v11/schema/identity";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -67,11 +69,12 @@ async function seedPublicationFixture() {
     agentInterfaceRequirementsJson: { required: [], optional: [] },
     createdBy: identity.id,
   });
+  const artifactDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const attestation = await insertAttestation({
     tenantId: tenant.id,
     artifactType: "agent_revision",
     artifactRevisionId: revision.id,
-    artifactDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    artifactDigest,
     signatureBundleRef: "attestation:signature:publication",
     sbomRef: "attestation:sbom:publication",
     provenanceRef: "attestation:provenance:publication",
@@ -79,6 +82,16 @@ async function seedPublicationFixture() {
     verificationState: "verified",
     verifiedAt: new Date(),
   });
+  const [authority] = await db
+    .select()
+    .from(artifact)
+    .where(and(eq(artifact.tenantId, tenant.id), eq(artifact.digest, artifactDigest)))
+    .limit(1);
+  if (!authority) throw new Error("Agent publication fixture Artifact 未创建");
+  await db
+    .update(v11AgentRevision)
+    .set({ artifactId: authority.id, artifactDigest: authority.digest })
+    .where(eq(v11AgentRevision.id, revision.id));
   const idempotency = await insertProcessingRecord({
     tenantId: tenant.id,
     audience: "admin",

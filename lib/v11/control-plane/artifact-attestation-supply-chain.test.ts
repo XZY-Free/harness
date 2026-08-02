@@ -12,7 +12,8 @@
  *
  * 真实签名（ed25519）+ InMemoryManagedArtifactStore，复用 artifact-attestation.test.ts 的辅助模式。
  */
-import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
+import { type KeyObject, generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -43,6 +44,7 @@ import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-que
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
 import { ATTESTATION_FAILURE_CODES, type V11ArtifactAttestation } from "@/lib/v11/schema/artifact";
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -168,6 +170,7 @@ async function createVerifiedAttestation(
   artifactRevisionId: string,
   artifactContent: string,
   builderIdentity = "builder:company-agent-runtime",
+  actor: AuditActor = buildActor(tenantId, "ci-service-001"),
 ): Promise<{ attestation: V11ArtifactAttestation; keyPair: BuilderKeyPair; digest: string }> {
   const keyPair = generateBuilderKeyPair(builderIdentity);
   const builderKeys: BuilderKeyRegistry = { [builderIdentity]: keyPair.publicKeyBase64 };
@@ -192,12 +195,7 @@ async function createVerifiedAttestation(
     builderIdentity,
   };
 
-  const attestation = await verifyAndPersistAttestation(
-    input,
-    store,
-    builderKeys,
-    buildActor(tenantId, "ci-service-001"),
-  );
+  const attestation = await verifyAndPersistAttestation(input, store, builderKeys, actor);
 
   return { attestation, keyPair, digest };
 }
@@ -343,6 +341,86 @@ describe("S12-W04 provenance 摘要持久化", () => {
     expect(result.scanSummary?.packagesScanned).toBe(2);
     expect(result.scanSummary?.vulnerabilityCount).toBe(0);
     expect(result.scanSummary?.blockedLicenseCount).toBe(0);
+  });
+
+  it("验证成功创建独立Artifact并让Attestation引用该权威对象", async () => {
+    const { attestation, digest } = await createVerifiedAttestation(
+      tenantId,
+      "agent_revision",
+      "rev-authoritative-artifact",
+      "authoritative artifact content",
+    );
+
+    const [tables] = (await db.execute("SHOW TABLES LIKE 'Artifact'")) as unknown as [unknown[]];
+    expect(tables).toHaveLength(1);
+
+    const [artifacts] = (await db.execute(sql`
+      SELECT \`id\`, \`tenantId\`, \`digest\`
+      FROM \`Artifact\`
+      WHERE \`tenantId\` = ${tenantId} AND \`digest\` = ${digest}
+    `)) as unknown as [Array<{ id: string; tenantId: string; digest: string }>];
+    expect(artifacts).toHaveLength(1);
+    expect((attestation as unknown as { artifactId: string | null }).artifactId).toBe(
+      artifacts[0]?.id,
+    );
+  });
+
+  it("并发验证同一Digest只创建一个权威Artifact", async () => {
+    const [left, right] = await Promise.all([
+      createVerifiedAttestation(
+        tenantId,
+        "agent_revision",
+        "rev-concurrent-artifact-left",
+        "shared concurrent artifact",
+      ),
+      createVerifiedAttestation(
+        tenantId,
+        "agent_revision",
+        "rev-concurrent-artifact-right",
+        "shared concurrent artifact",
+      ),
+    ]);
+
+    expect(left.attestation.artifactId).toBe(right.attestation.artifactId);
+    const [rows] = (await db.execute(sql`
+      SELECT \`id\` FROM \`Artifact\`
+      WHERE \`tenantId\` = ${tenantId} AND \`digest\` = ${left.digest}
+    `)) as unknown as [Array<{ id: string }>];
+    expect(rows).toHaveLength(1);
+  });
+
+  it("Audit写入失败会回滚Artifact、Attestation和Outbox", async () => {
+    const revisionId = "rev-verification-rollback";
+    const content = "verification rollback artifact";
+    const digest = computeArtifactDigest(content);
+    const invalidActor: AuditActor = {
+      tenantId,
+      actorType: "invalid" as AuditActor["actorType"],
+      actorId: "invalid-audit-actor",
+    };
+
+    await expect(
+      createVerifiedAttestation(
+        tenantId,
+        "agent_revision",
+        revisionId,
+        content,
+        "builder:company-agent-runtime",
+        invalidActor,
+      ),
+    ).rejects.toThrow();
+
+    const [artifacts] = (await db.execute(sql`
+      SELECT \`id\` FROM \`Artifact\`
+      WHERE \`tenantId\` = ${tenantId} AND \`digest\` = ${digest}
+    `)) as unknown as [unknown[]];
+    const [attestations] = (await db.execute(sql`
+      SELECT \`id\` FROM \`V11ArtifactAttestation\`
+      WHERE \`tenantId\` = ${tenantId} AND \`artifactRevisionId\` = ${revisionId}
+    `)) as unknown as [unknown[]];
+    expect(artifacts).toHaveLength(0);
+    expect(attestations).toHaveLength(0);
+    expect(await db.select().from(controlPlaneOutboxEvent)).toHaveLength(0);
   });
 });
 
@@ -599,6 +677,124 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
     // before/after 摘要存在
     expect(ev?.beforeHash).toBeTruthy();
     expect(ev?.afterHash).toBeTruthy();
+  });
+
+  it("撤销追加AttestationRevocationRecord且不改写原Attestation", async () => {
+    const { attestation } = await createVerifiedAttestation(
+      tenantId,
+      "agent_revision",
+      "rev-append-only-revocation",
+      "append-only revocation content",
+    );
+
+    await revokeAttestation(
+      tenantId,
+      attestation.id,
+      buildActor(tenantId, "admin-append-only"),
+      "供应链密钥泄露",
+    );
+
+    const [attestationRows] = (await db.execute(sql`
+      SELECT \`revokedAt\`, \`revokedBy\`, \`revocationReason\`
+      FROM \`V11ArtifactAttestation\`
+      WHERE \`id\` = ${attestation.id}
+    `)) as unknown as [
+      Array<{ revokedAt: Date | null; revokedBy: string | null; revocationReason: string | null }>,
+    ];
+    expect(attestationRows[0]).toEqual({
+      revokedAt: null,
+      revokedBy: null,
+      revocationReason: null,
+    });
+
+    const [revocations] = (await db.execute(sql`
+      SELECT \`attestationId\`, \`reason\`, \`revokedBy\`
+      FROM \`AttestationRevocationRecord\`
+      WHERE \`attestationId\` = ${attestation.id}
+    `)) as unknown as [Array<{ attestationId: string; reason: string; revokedBy: string }>];
+    expect(revocations).toEqual([
+      {
+        attestationId: attestation.id,
+        reason: "供应链密钥泄露",
+        revokedBy: "admin-append-only",
+      },
+    ]);
+  });
+
+  it("两个并发撤销只有一个权威撤销事实", async () => {
+    const { attestation } = await createVerifiedAttestation(
+      tenantId,
+      "agent_revision",
+      "rev-concurrent-revocation",
+      "concurrent revocation content",
+    );
+
+    const outcomes = await Promise.allSettled([
+      revokeAttestation(
+        tenantId,
+        attestation.id,
+        buildActor(tenantId, "security-admin-left"),
+        "密钥泄露",
+      ),
+      revokeAttestation(
+        tenantId,
+        attestation.id,
+        buildActor(tenantId, "security-admin-right"),
+        "密钥泄露",
+      ),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    const rejected = outcomes.find((outcome) => outcome.status === "rejected");
+    expect(rejected?.status === "rejected" ? rejected.reason : null).toBeInstanceOf(
+      AttestationAlreadyRevokedError,
+    );
+    const [rows] = (await db.execute(sql`
+      SELECT \`id\` FROM \`AttestationRevocationRecord\`
+      WHERE \`attestationId\` = ${attestation.id}
+    `)) as unknown as [unknown[]];
+    expect(rows).toHaveLength(1);
+  });
+
+  it("Outbox写入失败会回滚撤销记录和Audit", async () => {
+    const { attestation } = await createVerifiedAttestation(
+      tenantId,
+      "agent_revision",
+      "rev-revocation-rollback",
+      "revocation rollback content",
+    );
+    await db.insert(controlPlaneOutboxEvent).values({
+      id: randomUUID(),
+      tenantId,
+      eventKey: `artifact-attestation-revoked:${attestation.id}`,
+      eventType: "test.conflict",
+      aggregateType: "artifact_attestation",
+      aggregateId: attestation.id,
+      payloadJson: {},
+      occurredAt: new Date(),
+    });
+
+    await expect(
+      revokeAttestation(
+        tenantId,
+        attestation.id,
+        buildActor(tenantId, "security-admin-rollback"),
+        "故障注入",
+      ),
+    ).rejects.toThrow();
+
+    const [rows] = (await db.execute(sql`
+      SELECT \`id\` FROM \`AttestationRevocationRecord\`
+      WHERE \`attestationId\` = ${attestation.id}
+    `)) as unknown as [unknown[]];
+    expect(rows).toHaveLength(0);
+    expect(
+      await listAuditEvents({
+        tenantId,
+        actionType: "artifact.attestation.revoke",
+        targetId: attestation.id,
+      }),
+    ).toHaveLength(0);
   });
 
   it("撤销不存在 attestation → AttestationNotFoundError", async () => {

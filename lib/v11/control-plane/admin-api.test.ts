@@ -35,7 +35,10 @@ import {
   type SignatureBundle,
   computeArtifactDigest,
 } from "@/lib/v11/control-plane/artifact-attestation";
-import { verifyAndPersistAttestation } from "@/lib/v11/control-plane/artifact-attestation-queries";
+import {
+  listAttestationsByRevision,
+  verifyAndPersistAttestation,
+} from "@/lib/v11/control-plane/artifact-attestation-queries";
 import {
   resetArtifactStoreOverrides,
   setArtifactStoreOverride,
@@ -438,26 +441,45 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     setArtifactStoreOverride(store);
     setBuilderKeyRegistryOverride(builderKeys);
 
-    const request = buildV11Request({
-      audience: "admin",
-      method: "POST",
-      path: "/artifact-attestations:verify",
-      idempotencyKey: "idem-verify-fail",
-      body: {
-        artifact_type: "agent_revision",
-        artifact_revision_id: "rev-bad-sig",
-        artifact_digest: digest,
-        signature_bundle_ref: sigRef,
-        sbom_ref: sbomRef,
-        provenance_ref: provRef,
-        builder_identity: "builder:company-agent-runtime",
-      },
-    });
+    const requestBody = {
+      artifact_type: "agent_revision",
+      artifact_revision_id: "rev-bad-sig",
+      artifact_digest: digest,
+      signature_bundle_ref: sigRef,
+      sbom_ref: sbomRef,
+      provenance_ref: provRef,
+      builder_identity: "builder:company-agent-runtime",
+    };
+    const buildRequest = () =>
+      buildV11Request({
+        audience: "admin",
+        method: "POST",
+        path: "/artifact-attestations:verify",
+        idempotencyKey: "idem-verify-fail",
+        body: requestBody,
+      });
 
-    const response = await verifyPOST(request);
+    const response = await verifyPOST(buildRequest());
     expect(response.status).toBe(422);
     const body = (await response.json()) as { error: { code: string } };
     expect(body.error.code).toBe("ARTIFACT_ATTESTATION_FAILED");
+
+    const replay = await verifyPOST(buildRequest());
+    expect(replay.status).toBe(422);
+    expect(await replay.json()).toEqual(body);
+    expect(
+      await listAttestationsByRevision(tenantId, "agent_revision", "rev-bad-sig"),
+    ).toHaveLength(1);
+    const idempotency = await findIdempotencyRecord({
+      tenantId,
+      audience: "admin",
+      callerType: "user",
+      callerId: userIdentityId,
+      commandScope: "artifact.attestation.verify:rev-bad-sig",
+      idempotencyKey: "idem-verify-fail",
+    });
+    expect(idempotency?.processingState).toBe("completed");
+    expect(idempotency?.httpStatus).toBe(422);
   });
 
   it("幂等重放 → 200 (same response)", async () => {

@@ -1171,6 +1171,8 @@ describe("publishAgentRevisionWithAttestation", () => {
     expect(result.revision.revisionState).toBe("published");
     expect(result.revision.publishedAt).toBeTruthy();
     expect(result.attestation.id).toBe(fixture.attestation.id);
+    expect(result.revision.artifactId).toBe(fixture.attestation.artifactId);
+    expect(result.revision.artifactDigest).toBe(fixture.digest);
 
     // agent.publish 审计
     const auditEvents = await listAuditEvents({
@@ -1290,6 +1292,45 @@ describe("publishAgentRevisionWithAttestation", () => {
         buildActor(tenantId, "ci-001"),
       ),
     ).rejects.toThrow();
+  });
+
+  it("Revision绑定的Artifact Digest与Attestation不一致时拒绝发布", async () => {
+    const agent = await createAgent({
+      tenantId,
+      agentKey: "agent-digest-mismatch",
+      displayName: "Agent Digest Mismatch",
+      ownerUserId: ownerId,
+    });
+    const revision = await createDraftRevision({
+      tenantId,
+      agentId: agent.id,
+      sourceType: "code",
+      sourceRevision: "git:digest-mismatch",
+      instructionHash: "sha256:instruction-digest-mismatch",
+      agentArtifactRef: computeArtifactDigest("revision artifact"),
+      modelPolicyJson: {},
+      permissionRequirementsJson: {},
+      delegationPolicyJson: {},
+      agentInterfaceRequirementsJson: {},
+      createdBy: ownerId,
+    });
+    const fixture = await createVerifiedAttestationFixture(
+      tenantId,
+      "agent_revision",
+      revision.id,
+      "different attested artifact",
+    );
+
+    await expect(
+      publishAgentRevisionWithAttestation(
+        tenantId,
+        revision.id,
+        agent.versionNo,
+        fixture.attestation.id,
+        buildActor(tenantId, "ci-digest-mismatch"),
+      ),
+    ).rejects.toThrow(ArtifactNotVerifiedError);
+    expect((await getRevisionById(revision.id))?.revisionState).toBe("draft");
   });
 });
 
