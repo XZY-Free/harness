@@ -1,3 +1,4 @@
+import { publishRuntimeRevisionThroughControlPlane } from "@/lib/compatibility/runtimes/publish-runtime-revision";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -29,6 +30,7 @@ import {
  * 行为：
  * - GET：列出 Revision 的全部 conformance 结果（按 caseId 升序）。
  * - POST：提交 conformance 结果。可选 `publish=true` 同时发布 Revision（通过门禁后）。
+ * - publish=true时，发布事实、Runtime指针、Audit、Outbox和幂等完成同事务提交。
  *
  * 身份与授权：
  * - 解析 admin 主体（SSO 管理员；CI/CD Service Identity 不允许 runtime.publish）。
@@ -62,8 +64,12 @@ import {
   RuntimeRevisionNotFoundError,
   RuntimeVersionConflictError,
   getRuntimeRevisionById,
-  publishRuntimeRevision,
 } from "@/lib/v11/control-plane/runtime-revision-queries";
+import {
+  type AuditActor,
+  actorFromPrincipal,
+  actorFromWorkloadPrincipal,
+} from "@/lib/v11/identity/audit";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -139,6 +145,13 @@ function callerFromAdminPrincipal(principal: AdminPrincipal) {
     return callerFromPrincipal(principal);
   }
   return callerFromWorkloadPrincipal(principal);
+}
+
+function actorFromAdminPrincipal(principal: AdminPrincipal): AuditActor {
+  if ("userIdentityId" in principal) {
+    return actorFromPrincipal(principal);
+  }
+  return actorFromWorkloadPrincipal(principal);
 }
 
 /** 把 ConformanceCaseInput[] 转为 ConformanceCaseResult[]。 */
@@ -356,16 +369,32 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       evidenceRef: body.evidence_ref ?? null,
     };
 
-    let publishedRevision = null;
+    let publishedResult = null;
     if (shouldPublish && expectedVersionNo !== null) {
-      // publish=true：调用 publishRuntimeRevision（内含门禁校验 + 持久化 + 状态变更）
-      publishedRevision = await publishRuntimeRevision(
-        principal.tenantId,
+      publishedResult = await publishRuntimeRevisionThroughControlPlane({
+        tenantId: principal.tenantId,
         revisionId,
-        expectedVersionNo,
+        runtimeExpectedVersionNo: expectedVersionNo,
         conformanceResults,
-        options,
-      );
+        conformanceOptions: options,
+        actor: actorFromAdminPrincipal(principal),
+        requestId,
+        idempotencyKey,
+        idempotency: {
+          recordId,
+          httpStatus: 200,
+          responseRef: revisionId,
+          serializeResponse: (published) =>
+            JSON.stringify({
+              runtime_revision_id: revisionId,
+              revision_state: published.revision.revisionState,
+              published: true,
+              published_at: published.revision.publishedAt?.toISOString() ?? null,
+              etag: `${RUNTIME_REVISION_ETAG_PREFIX}${published.revision.revisionNo}`,
+              results: published.conformanceResults.map(formatConformanceResult),
+            }),
+        },
+      });
     } else {
       // publish=false：只持久化 conformance 结果（不发布）
       // 先校验门禁，失败则返回 422（不持久化失败结果）
@@ -389,7 +418,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     }
 
     // 11. 查询最新 conformance 结果
-    const results = await listConformanceResultsByRevision(revisionId);
+    const publishedRevision = publishedResult?.revision ?? null;
+    const results =
+      publishedResult?.conformanceResults ?? (await listConformanceResultsByRevision(revisionId));
 
     const responseBody = {
       runtime_revision_id: revisionId,
@@ -402,11 +433,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       results: results.map(formatConformanceResult),
     };
 
-    await completeRecord({
-      recordId,
-      httpStatus: 200,
-      responseRedactedJson: JSON.stringify(responseBody),
-    });
+    if (!publishedResult) {
+      await completeRecord({
+        recordId,
+        httpStatus: 200,
+        responseRedactedJson: JSON.stringify(responseBody),
+      });
+    }
 
     const headers: Record<string, string> = { [REQUEST_ID_HEADER]: requestId };
     if (publishedRevision) {

@@ -6,7 +6,7 @@
  *
  * 职责：
  * - createDraftRevision：创建 draft Revision（revisionNo 在 Runtime 内单调递增）。
- * - publishRevision：draft → published（conformance 门禁 + 业务内容固化 + 回填 Runtime.currentRevisionId）。
+ * - publishRevision：兼容入口，委托正式 Runtime 发布应用服务。
  * - withdrawRevision：published → withdrawn（只阻止新发布/路由，不删除历史引用）。
  * - updateDraftContent：仅 draft 状态可编辑业务内容（published/withdrawn 不可改）。
  * - getRevision/getRevisionsByRuntime/getLatestPublishedRevision：查询。
@@ -22,14 +22,13 @@
  * - capabilities 必须来自探测和一致性测试，管理员不能手工勾选未支持能力。
  */
 import { randomUUID } from "node:crypto";
+import { publishRuntimeRevisionThroughControlPlane } from "@/lib/compatibility/runtimes/publish-runtime-revision";
 import { db } from "@/lib/db/client";
 import {
   type ConformanceCaseResult,
-  ConformanceGateError,
-  validateConformanceGate,
-} from "@/lib/v11/control-plane/runtime-conformance";
-import { persistConformanceResults } from "@/lib/v11/control-plane/runtime-conformance-result-queries";
-import { setCurrentRuntimeRevision } from "@/lib/v11/control-plane/runtime-queries";
+  RuntimeRevisionNotFoundError,
+  RuntimeRevisionStateError,
+} from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 import {
   type RuntimeRevisionState,
   type V11RuntimeRevision,
@@ -124,22 +123,29 @@ export async function updateDraftRuntimeRevisionContent(
 
   if (Object.keys(updates).length === 0) return current;
 
-  await db.update(v11RuntimeRevision).set(updates).where(eq(v11RuntimeRevision.id, revisionId));
+  const result = await db
+    .update(v11RuntimeRevision)
+    .set(updates)
+    .where(
+      and(eq(v11RuntimeRevision.id, revisionId), eq(v11RuntimeRevision.revisionState, "draft")),
+    );
+  if (result[0].affectedRows !== 1) {
+    const latest = await getRuntimeRevisionById(revisionId);
+    if (!latest) throw new RuntimeRevisionNotFoundError(revisionId);
+    throw new RuntimeRevisionImmutableError(revisionId, latest.revisionState);
+  }
   return (await getRuntimeRevisionById(revisionId)) as V11RuntimeRevision;
 }
 
 /**
  * 发布 RuntimeRevision：draft → published。
  *
- * 步骤：
- * 1. 校验 conformance 门禁（4 个 mandatory case 必须通过）。
- * 2. 持久化 conformance 结果（UPSERT 到 v11RuntimeConformanceResult）。
- * 3. 写 publishedAt + revisionState=published。
- * 4. 回填 Runtime.currentRevisionId（乐观锁）。
+ * 正式应用事务同时写入 conformance 投影、PublicationRecord、Revision发布投影、
+ * Runtime.currentRevisionId、Audit、Outbox和可选幂等完成。本函数只保留旧签名兼容。
  *
  * @throws RuntimeRevisionNotFoundError Revision 不存在
  * @throws RuntimeRevisionStateError Revision 非 draft 状态
- * @throws ConformanceGateError conformance 门禁失败（Revision 保持 draft）
+ * @throws ConformanceGateError conformance 门禁失败（事务无写入）
  * @throws RuntimeVersionConflictError Runtime 乐观锁冲突
  */
 export async function publishRuntimeRevision(
@@ -156,54 +162,21 @@ export async function publishRuntimeRevision(
     evidenceRef?: string | null;
   },
 ): Promise<V11RuntimeRevision> {
-  const current = await getRuntimeRevisionById(revisionId);
-  if (!current) {
-    throw new RuntimeRevisionNotFoundError(revisionId);
-  }
-  if (current.revisionState !== "draft") {
-    throw new RuntimeRevisionStateError(
-      revisionId,
-      current.revisionState,
-      "published",
-      "只有 draft 状态可发布",
-    );
-  }
-
-  // Conformance 门禁：mandatory case 必须全部通过
-  const gateResult = validateConformanceGate(conformanceResults);
-  if (!gateResult.passed) {
-    throw new ConformanceGateError(gateResult.failedCases);
-  }
-
-  // 门禁通过后持久化 conformance 结果（UPSERT）。失败抛错，Revision 保持 draft。
-  await persistConformanceResults({
+  const result = await publishRuntimeRevisionThroughControlPlane({
     tenantId,
-    runtimeRevisionId: revisionId,
-    results: conformanceResults,
-    adapterDigest: options?.adapterDigest ?? null,
-    testEnvironment: options?.testEnvironment ?? null,
-    evidenceRef: options?.evidenceRef ?? null,
-  });
-
-  const now = new Date();
-  await db
-    .update(v11RuntimeRevision)
-    .set({ revisionState: "published", publishedAt: now })
-    .where(eq(v11RuntimeRevision.id, revisionId));
-
-  // 回填 Runtime.currentRevisionId（乐观锁）
-  const updated = await setCurrentRuntimeRevision(
-    tenantId,
-    current.runtimeId,
     revisionId,
     runtimeExpectedVersionNo,
-  );
-  if (!updated) {
-    // 乐观锁冲突：Revision 已 published，但 Runtime.currentRevisionId 未更新。
-    throw new RuntimeVersionConflictError(current.runtimeId, runtimeExpectedVersionNo);
-  }
-
-  return (await getRuntimeRevisionById(revisionId)) as V11RuntimeRevision;
+    conformanceResults,
+    conformanceOptions: options,
+    actor: {
+      tenantId,
+      actorType: "system",
+      actorId: "runtime-publication-compatibility",
+    },
+    requestId: `compat-runtime-publish:${randomUUID()}`,
+    idempotencyKey: `compat-runtime-publish:${revisionId}`,
+  });
+  return result.revision as V11RuntimeRevision;
 }
 
 /**
@@ -296,27 +269,6 @@ async function nextRevisionNo(runtimeId: string): Promise<number> {
   return currentMax + 1;
 }
 
-/** RuntimeRevision 不存在错误。 */
-export class RuntimeRevisionNotFoundError extends Error {
-  constructor(public readonly revisionId: string) {
-    super(`RuntimeRevision 不存在: ${revisionId}`);
-    this.name = "RuntimeRevisionNotFoundError";
-  }
-}
-
-/** RuntimeRevision 状态错误。 */
-export class RuntimeRevisionStateError extends Error {
-  constructor(
-    public readonly revisionId: string,
-    public readonly fromState: RuntimeRevisionState,
-    public readonly toState: RuntimeRevisionState,
-    message: string,
-  ) {
-    super(message);
-    this.name = "RuntimeRevisionStateError";
-  }
-}
-
 /** RuntimeRevision 不可变错误。 */
 export class RuntimeRevisionImmutableError extends Error {
   constructor(
@@ -328,17 +280,11 @@ export class RuntimeRevisionImmutableError extends Error {
   }
 }
 
-/** Runtime 乐观锁冲突。 */
-export class RuntimeVersionConflictError extends Error {
-  constructor(
-    public readonly runtimeId: string,
-    public readonly expectedVersionNo: number,
-  ) {
-    super(`Runtime ${runtimeId} versionNo 不匹配（期望 ${expectedVersionNo}），乐观锁冲突`);
-    this.name = "RuntimeVersionConflictError";
-  }
-}
-
 /** Re-export 供外部统一从本模块引入类型。 */
 export type { RuntimeRevisionState, V11RuntimeRevision } from "@/lib/v11/schema/runtime";
 export { RUNTIME_REVISION_STATES } from "@/lib/v11/schema/runtime";
+export {
+  RuntimeRevisionNotFoundError,
+  RuntimeRevisionStateError,
+  RuntimeVersionConflictError,
+} from "@/lib/runtimes/domain/runtime-revision-publication-policy";

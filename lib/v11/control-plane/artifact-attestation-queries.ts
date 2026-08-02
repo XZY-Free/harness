@@ -16,7 +16,7 @@
  *   - 失败抛 ArtifactAttestationFailedError（含 failureCode），RouteSet 不变化。
  * - assertAttestationGate：发布门禁，校验 attestation 已 verified 且引用正确 revision。
  * - publishAgentRevisionWithAttestation：正式 Application Service 的兼容 Facade。
- * - publishRuntimeRevisionWithAttestation：Runtime 发布门禁 + 原发布流程 wrapper。
+ * - publishRuntimeRevisionWithAttestation：正式 Runtime 发布应用服务的兼容 Facade。
  *
  * 审计语义：
  * - 验证动作（无论成功失败）写 AuditEvent，action_type=artifact.attestation.verify。
@@ -34,7 +34,9 @@ import {
   AgentRevisionPublicationNotFoundError,
   AgentRevisionPublicationStateError,
 } from "@/lib/agents/domain/agent-revision-publication-policy";
+import { publishRuntimeRevisionThroughControlPlane } from "@/lib/compatibility/runtimes/publish-runtime-revision";
 import { db } from "@/lib/db/client";
+import { RuntimePublicationPrerequisiteError } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 import {
   AgentVersionConflictError,
   RevisionNotFoundError,
@@ -50,7 +52,6 @@ import {
 } from "@/lib/v11/control-plane/artifact-attestation";
 import { mysqlAgentPublicationStore } from "@/lib/v11/control-plane/mysql-agent-publication-store";
 import type { ConformanceCaseResult } from "@/lib/v11/control-plane/runtime-conformance";
-import { publishRuntimeRevision } from "@/lib/v11/control-plane/runtime-revision-queries";
 import { type AuditActor, recordAuditEvent } from "@/lib/v11/identity/audit";
 import type { V11AgentRevision } from "@/lib/v11/schema/agent";
 import {
@@ -581,15 +582,12 @@ export interface PublishRuntimeRevisionWithAttestationResult {
 }
 
 /**
- * RuntimeRevision 发布门禁 + 发布流程（attestation + conformance 双门禁）。
+ * RuntimeRevision 发布门禁 + 原子发布流程（attestation + conformance 双门禁）。
  *
- * 步骤：
- * 1. assertAttestationGate：校验 attestation 已 verified 且引用正确 revision。
- * 2. publishRuntimeRevision：执行原发布流程（conformance 门禁 + draft → published + 回填 Runtime.currentRevisionId）。
- * 3. 写 AuditEvent（action_type=runtime.publish，targetType=runtime_revision）。
- *    S11-W02 已新增 runtime.publish actionType，原过渡方案写 route.update 已替换。
+ * Attestation校验、conformance持久化、PublicationRecord、发布投影、Runtime指针、
+ * Audit和Outbox由正式应用服务在一个事务内完成。
  *
- * 失败时（门禁失败或发布失败）不写发布审计；门禁失败抛 ArtifactNotVerifiedError。
+ * 失败时事务整体回滚；Attestation门禁失败保持旧错误类型ArtifactNotVerifiedError。
  *
  * @throws ArtifactNotVerifiedError attestation 不存在/未验证/引用不一致
  * @throws RuntimeRevisionNotFoundError Revision 不存在（来自 publishRuntimeRevision）
@@ -606,44 +604,29 @@ export async function publishRuntimeRevisionWithAttestation(
   actor: AuditActor,
   requestId?: string,
 ): Promise<PublishRuntimeRevisionWithAttestationResult> {
-  // 1. attestation 发布门禁
-  const attestation = await assertAttestationGate(
-    tenantId,
-    "runtime_revision",
-    revisionId,
-    attestationId,
-  );
+  try {
+    const result = await publishRuntimeRevisionThroughControlPlane({
+      tenantId,
+      revisionId,
+      runtimeExpectedVersionNo,
+      conformanceResults,
+      attestationId,
+      actor,
+      requestId: requestId ?? `runtime-publish:${randomUUID()}`,
+      idempotencyKey: `runtime-attested-publish:${revisionId}`,
+    });
 
-  // 2. 执行原发布流程（含 conformance 门禁）
-  const revision = await publishRuntimeRevision(
-    tenantId,
-    revisionId,
-    runtimeExpectedVersionNo,
-    conformanceResults,
-  );
-
-  // 3. 写 AuditEvent（runtime.publish：S11-W02 细化，原过渡方案写 route.update）
-  const auditEvent = await recordAuditEvent({
-    actor,
-    actionType: "runtime.publish",
-    targetType: "runtime_revision",
-    targetId: revisionId,
-    after: {
-      runtime_id: revision.runtimeId,
-      revision_no: revision.revisionNo,
-      revision_state: revision.revisionState,
-      attestation_id: attestationId,
-      artifact_digest: attestation.artifactDigest,
-    },
-    reason: "RuntimeRevision 发布（attestation + conformance 双门禁通过）",
-    requestId,
-  });
-
-  return {
-    revision,
-    attestation,
-    auditEventId: auditEvent.id,
-  };
+    return {
+      revision: result.revision as V11RuntimeRevision,
+      attestation: result.attestation as V11ArtifactAttestation,
+      auditEventId: result.auditEventId,
+    };
+  } catch (error) {
+    if (error instanceof RuntimePublicationPrerequisiteError) {
+      throw new ArtifactNotVerifiedError(error.attestationId, error.message);
+    }
+    throw error;
+  }
 }
 
 // ─── Re-exports ────────────────────────────────────────────
