@@ -31,6 +31,18 @@ export interface AgentPublicationSession {
     revisionId: string;
     attestationId: string;
   }): Promise<AgentPublicationAttestation | null>;
+  appendPublication(params: {
+    id: string;
+    tenantId: string;
+    revisionId: string;
+    evidenceSetDigest: string;
+    attestationIds: string[];
+    publishedByType: AgentPublicationActorType;
+    publishedBy: string;
+    publishedAt: Date;
+    idempotencyKey: string;
+    idempotencyRecordId: string | null;
+  }): Promise<void>;
   markRevisionPublished(revisionId: string, publishedAt: Date): Promise<boolean>;
   setAgentCurrentRevision(params: {
     tenantId: string;
@@ -46,6 +58,7 @@ export interface AgentPublicationSession {
     actorId: string;
     revisionId: string;
     after: unknown;
+    reason: string;
     requestId: string;
     occurredAt: Date;
   }): Promise<void>;

@@ -12,6 +12,7 @@
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { getWithdrawalRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import {
   AgentLifecycleError,
   createAgent,
@@ -533,6 +534,14 @@ describe("V11 agent-revision-queries", () => {
     expect(withdrawn.revisionState).toBe("withdrawn");
     expect(withdrawn.instructionHash).toBe(published.instructionHash);
     expect(withdrawn.publishedAt).toEqual(published.publishedAt);
+    expect((await getAgentById(tenantId, agentId))?.currentRevisionId).toBeNull();
+    expect(
+      await getWithdrawalRecordBySubject({
+        tenantId,
+        subjectType: "agent_revision",
+        subjectRevisionId: rev.id,
+      }),
+    ).not.toBeNull();
   });
 
   it("withdrawRevision draft 状态抛 RevisionStateError（必须先 publish）", async () => {

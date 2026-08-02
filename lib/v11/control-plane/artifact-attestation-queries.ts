@@ -509,6 +509,7 @@ const publishAgentRevisionApplication = createPublishAgentRevision({
 
 export interface PublishAgentRevisionIdempotencyCompletion {
   recordId: string;
+  idempotencyKey: string;
   httpStatus: number;
   responseRef?: string | null;
   serializeResponse: (result: PublishAgentRevisionResult) => string;
@@ -536,6 +537,7 @@ export async function publishAgentRevisionWithAttestation(
   requestId?: string,
   idempotency?: PublishAgentRevisionIdempotencyCompletion,
 ): Promise<PublishAgentRevisionWithAttestationResult> {
+  const effectiveRequestId = requestId ?? randomUUID();
   try {
     const result = await publishAgentRevisionApplication({
       tenantId,
@@ -543,7 +545,8 @@ export async function publishAgentRevisionWithAttestation(
       agentExpectedVersionNo,
       attestationId,
       actor,
-      requestId: requestId ?? randomUUID(),
+      requestId: effectiveRequestId,
+      idempotencyKey: idempotency?.idempotencyKey ?? `compat:${effectiveRequestId}`,
       idempotency,
     });
     return {

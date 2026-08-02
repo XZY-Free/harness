@@ -20,6 +20,7 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createAgent, getAgentById } from "@/lib/v11/control-plane/agent-queries";
 import {
   createDraftRevision,
@@ -697,6 +698,19 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     });
     expect(idempotency?.processingState).toBe("completed");
     expect(idempotency?.responseRedactedJson).toBe(JSON.stringify(body));
+    expect(
+      await getPublicationRecordBySubject({
+        tenantId,
+        subjectType: "agent_revision",
+        subjectRevisionId: draftRevision.id,
+      }),
+    ).toMatchObject({
+      attestationIds: [attestationId],
+      idempotencyKey: "idem-publish-001",
+      idempotencyRecordId: idempotency?.id,
+      publishedByType: "user",
+      publishedBy: userIdentityId,
+    });
 
     const replayRequest = buildV11Request({
       audience: "admin",

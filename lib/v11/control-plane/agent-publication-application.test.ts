@@ -7,6 +7,8 @@ import type {
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { publicationRecord } from "@/lib/publications/persistence/publication-record";
+import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createAgent, getAgentById } from "@/lib/v11/control-plane/agent-queries";
 import {
   createDraftRevision,
@@ -90,6 +92,7 @@ async function seedPublicationFixture() {
 }
 
 type PublicationStep =
+  | "appendPublication"
   | "markRevisionPublished"
   | "setAgentCurrentRevision"
   | "appendAudit"
@@ -107,6 +110,8 @@ function failAfterStep(store: AgentPublicationStore, failureStep: PublicationSte
         };
         return operation({
           ...session,
+          appendPublication: (params) =>
+            failAfter("appendPublication", session.appendPublication(params)),
           markRevisionPublished: (revisionId, publishedAt) =>
             failAfter(
               "markRevisionPublished",
@@ -135,6 +140,7 @@ function publicationCommand(fixture: Awaited<ReturnType<typeof seedPublicationFi
       actorId: fixture.ownerId,
     },
     requestId: "req-agent-publication",
+    idempotencyKey: fixture.idempotency.idempotencyKey,
     idempotency: {
       recordId: fixture.idempotency.id,
       httpStatus: 200,
@@ -167,6 +173,7 @@ describe("PublishAgentRevision Application Service", () => {
       attestationId: fixture.attestation.id,
       actor: { tenantId: fixture.tenantId, actorType: "user", actorId: fixture.ownerId },
       requestId: "req-agent-publication-success",
+      idempotencyKey: fixture.idempotency.idempotencyKey,
       idempotency: {
         recordId: fixture.idempotency.id,
         httpStatus: 200,
@@ -182,6 +189,25 @@ describe("PublishAgentRevision Application Service", () => {
     });
 
     expect(result.revision.revisionState).toBe("published");
+    const publication = await getPublicationRecordBySubject({
+      tenantId: fixture.tenantId,
+      subjectType: "agent_revision",
+      subjectRevisionId: fixture.revision.id,
+    });
+    expect(publication).toMatchObject({
+      id: result.publicationRecordId,
+      subjectType: "agent_revision",
+      subjectRevisionId: fixture.revision.id,
+      attestationIds: [fixture.attestation.id],
+      conformanceRunId: null,
+      approvals: [],
+      publishedByType: "user",
+      publishedBy: fixture.ownerId,
+      idempotencyKey: fixture.idempotency.idempotencyKey,
+      idempotencyRecordId: fixture.idempotency.id,
+    });
+    expect(publication?.publicationSequence).toBeGreaterThan(0);
+    expect(publication?.evidenceSetDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
     const agent = await getAgentById(fixture.tenantId, fixture.agent.id);
     expect(agent?.currentRevisionId).toBe(fixture.revision.id);
     expect(agent?.versionNo).toBe(fixture.agent.versionNo + 1);
@@ -243,6 +269,12 @@ describe("PublishAgentRevision Application Service", () => {
         .from(controlPlaneOutboxEvent)
         .where(eq(controlPlaneOutboxEvent.aggregateId, fixture.revision.id)),
     ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(publicationRecord)
+        .where(eq(publicationRecord.subjectRevisionId, fixture.revision.id)),
+    ).toHaveLength(1);
   });
 
   it("应用服务按租户锁定 Revision，跨租户调用不暴露或修改发布事实", async () => {
@@ -269,6 +301,7 @@ describe("PublishAgentRevision Application Service", () => {
   });
 
   it.each<PublicationStep>([
+    "appendPublication",
     "markRevisionPublished",
     "setAgentCurrentRevision",
     "appendAudit",
@@ -287,6 +320,13 @@ describe("PublishAgentRevision Application Service", () => {
     const revision = await getRevisionById(fixture.revision.id);
     expect(revision?.revisionState).toBe("draft");
     expect(revision?.publishedAt).toBeNull();
+    expect(
+      await getPublicationRecordBySubject({
+        tenantId: fixture.tenantId,
+        subjectType: "agent_revision",
+        subjectRevisionId: fixture.revision.id,
+      }),
+    ).toBeNull();
     const agent = await getAgentById(fixture.tenantId, fixture.agent.id);
     expect(agent?.currentRevisionId).toBeNull();
     expect(agent?.versionNo).toBe(fixture.agent.versionNo);

@@ -1,49 +1,24 @@
 import { randomUUID } from "node:crypto";
 import {
-  AgentPublicationIdempotencyCompletionError,
-  AgentPublicationPrerequisiteError,
   AgentPublicationVersionConflictError,
   AgentRevisionPublicationNotFoundError,
   AgentRevisionPublicationStateError,
   assertAgentRevisionPublishable,
 } from "@/lib/agents/domain/agent-revision-publication-policy";
 import type {
-  AgentPublicationActorType,
-  AgentPublicationAttestation,
   AgentPublicationRevision,
   AgentPublicationStore,
 } from "@/lib/agents/persistence/agent-publication-store";
 import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 
-export interface PublishAgentRevisionResult {
+export interface PublishLegacyAgentRevisionResult {
   revision: AgentPublicationRevision;
-  attestation: AgentPublicationAttestation;
+  publicationRecordId: string;
   auditEventId: string;
   outboxEventId: string;
-  publicationRecordId: string;
 }
 
-export interface PublishAgentRevisionCommand {
-  tenantId: string;
-  revisionId: string;
-  agentExpectedVersionNo: number;
-  attestationId: string;
-  actor: {
-    tenantId: string;
-    actorType: AgentPublicationActorType;
-    actorId: string;
-  };
-  requestId: string;
-  idempotencyKey: string;
-  idempotency?: {
-    recordId: string;
-    httpStatus: number;
-    responseRef?: string | null;
-    serializeResponse: (result: PublishAgentRevisionResult) => string;
-  };
-}
-
-export function createPublishAgentRevision(dependencies: {
+export function createPublishLegacyAgentRevision(dependencies: {
   store: AgentPublicationStore;
   now?: () => Date;
   newId?: () => string;
@@ -51,13 +26,12 @@ export function createPublishAgentRevision(dependencies: {
   const now = dependencies.now ?? (() => new Date());
   const newId = dependencies.newId ?? randomUUID;
 
-  return async function publishAgentRevision(
-    command: PublishAgentRevisionCommand,
-  ): Promise<PublishAgentRevisionResult> {
-    if (command.actor.tenantId !== command.tenantId) {
-      throw new Error("AgentRevision 发布 actor tenant 与命令 tenant 不一致");
-    }
-
+  return async function publishLegacyAgentRevision(command: {
+    tenantId: string;
+    revisionId: string;
+    agentExpectedVersionNo: number;
+    requestId: string;
+  }): Promise<PublishLegacyAgentRevisionResult> {
     return dependencies.store.transaction(async (session) => {
       const revision = await session.findRevision(command.tenantId, command.revisionId);
       if (!revision) {
@@ -76,33 +50,23 @@ export function createPublishAgentRevision(dependencies: {
         );
       }
 
-      const attestation = await session.findVerifiedAttestation({
-        tenantId: command.tenantId,
-        revisionId: revision.id,
-        attestationId: command.attestationId,
-      });
-      if (!attestation) {
-        throw new AgentPublicationPrerequisiteError(revision.id, command.attestationId);
-      }
-
       const publishedAt = now();
       const publicationRecordId = newId();
-      const attestationIds = [attestation.id];
       await session.appendPublication({
         id: publicationRecordId,
         tenantId: command.tenantId,
         revisionId: revision.id,
         evidenceSetDigest: computePublicationEvidenceSetDigest({
-          attestationIds,
+          attestationIds: [],
           conformanceRunId: null,
           approvals: [],
         }),
-        attestationIds,
-        publishedByType: command.actor.actorType,
-        publishedBy: command.actor.actorId,
+        attestationIds: [],
+        publishedByType: "system",
+        publishedBy: "legacy-agent-revision-queries",
         publishedAt,
-        idempotencyKey: command.idempotencyKey,
-        idempotencyRecordId: command.idempotency?.recordId ?? null,
+        idempotencyKey: `compat:publish:${revision.id}`,
+        idempotencyRecordId: null,
       });
       if (!(await session.markRevisionPublished(revision.id, publishedAt))) {
         throw new AgentRevisionPublicationStateError(
@@ -130,18 +94,16 @@ export function createPublishAgentRevision(dependencies: {
       await session.appendAudit({
         id: auditEventId,
         tenantId: command.tenantId,
-        actorType: command.actor.actorType,
-        actorId: command.actor.actorId,
+        actorType: "system",
+        actorId: "legacy-agent-revision-queries",
         revisionId: revision.id,
         after: {
           agent_id: revision.agentId,
           revision_no: revision.revisionNo,
           revision_state: "published",
-          attestation_id: attestation.id,
-          artifact_digest: attestation.artifactDigest,
           publication_record_id: publicationRecordId,
         },
-        reason: "AgentRevision 发布（attestation 门禁通过）",
+        reason: "AgentRevision 由兼容入口发布；未声明 Attestation",
         requestId: command.requestId,
         occurredAt: publishedAt,
       });
@@ -158,35 +120,19 @@ export function createPublishAgentRevision(dependencies: {
           agent_id: revision.agentId,
           revision_id: revision.id,
           revision_no: revision.revisionNo,
-          attestation_id: attestation.id,
-          audit_event_id: auditEventId,
           publication_record_id: publicationRecordId,
+          audit_event_id: auditEventId,
+          compatibility_source: "legacy-agent-revision-queries",
         },
         occurredAt: publishedAt,
       });
 
-      const result: PublishAgentRevisionResult = {
+      return {
         revision: { ...revision, revisionState: "published", publishedAt },
-        attestation,
+        publicationRecordId,
         auditEventId,
         outboxEventId,
-        publicationRecordId,
       };
-
-      if (command.idempotency) {
-        const completed = await session.completeIdempotency({
-          recordId: command.idempotency.recordId,
-          httpStatus: command.idempotency.httpStatus,
-          responseRef: command.idempotency.responseRef ?? null,
-          responseRedactedJson: command.idempotency.serializeResponse(result),
-          completedAt: publishedAt,
-        });
-        if (!completed) {
-          throw new AgentPublicationIdempotencyCompletionError(command.idempotency.recordId);
-        }
-      }
-
-      return result;
     });
   };
 }

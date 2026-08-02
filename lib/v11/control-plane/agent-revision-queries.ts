@@ -22,7 +22,22 @@
  * - RuntimeRevision 独立发布；由 DeploymentRoute 决定新 Invocation 使用哪个组合。
  */
 import { randomUUID } from "node:crypto";
+import { createWithdrawAgentRevision } from "@/lib/agents/application/withdraw-agent-revision";
+import {
+  AgentPublicationVersionConflictError,
+  AgentRevisionPublicationNotFoundError,
+  AgentRevisionPublicationStateError,
+} from "@/lib/agents/domain/agent-revision-publication-policy";
+import {
+  AgentRevisionWithdrawalNotFoundError,
+  AgentRevisionWithdrawalPublicationNotFoundError,
+  AgentRevisionWithdrawalStateError,
+  AgentWithdrawalVersionConflictError,
+} from "@/lib/agents/domain/agent-revision-withdrawal-policy";
+import { createPublishLegacyAgentRevision } from "@/lib/compatibility/agents/publish-agent-revision";
 import { db } from "@/lib/db/client";
+import { mysqlAgentPublicationStore } from "@/lib/v11/control-plane/mysql-agent-publication-store";
+import { mysqlAgentWithdrawalStore } from "@/lib/v11/control-plane/mysql-agent-withdrawal-store";
 import {
   type AgentRevisionState,
   type V11AgentRevision,
@@ -30,6 +45,13 @@ import {
   v11AgentRevision,
 } from "@/lib/v11/schema/agent";
 import { and, desc, eq, max } from "drizzle-orm";
+
+const publishLegacyAgentRevisionApplication = createPublishLegacyAgentRevision({
+  store: mysqlAgentPublicationStore,
+});
+const withdrawAgentRevisionApplication = createWithdrawAgentRevision({
+  store: mysqlAgentWithdrawalStore,
+});
 
 /** 创建 draft Revision 的入参。 */
 export interface CreateDraftRevisionParams {
@@ -141,66 +163,28 @@ export async function publishRevision(
   revisionId: string,
   agentExpectedVersionNo: number,
 ): Promise<V11AgentRevision> {
-  return db.transaction(async (tx) => {
-    const [current] = await tx
-      .select()
-      .from(v11AgentRevision)
-      .where(eq(v11AgentRevision.id, revisionId))
-      .limit(1);
-    if (!current) {
-      throw new RevisionNotFoundError(revisionId);
-    }
-    if (current.revisionState !== "draft") {
-      throw new RevisionStateError(
-        revisionId,
-        current.revisionState,
-        "published",
-        "只有 draft 状态可发布",
-      );
-    }
-
-    const now = new Date();
-    const revisionUpdate = await tx
-      .update(v11AgentRevision)
-      .set({ revisionState: "published", publishedAt: now })
-      .where(and(eq(v11AgentRevision.id, revisionId), eq(v11AgentRevision.revisionState, "draft")));
-    if (revisionUpdate[0].affectedRows === 0) {
-      throw new RevisionStateError(
-        revisionId,
-        "draft",
-        "published",
-        "Revision 已被并发发布或状态已变化",
-      );
-    }
-
-    const agentUpdate = await tx
-      .update(v11Agent)
-      .set({
-        currentRevisionId: revisionId,
-        versionNo: agentExpectedVersionNo + 1,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(v11Agent.tenantId, tenantId),
-          eq(v11Agent.id, current.agentId),
-          eq(v11Agent.versionNo, agentExpectedVersionNo),
-        ),
-      );
-    if (agentUpdate[0].affectedRows === 0) {
-      throw new AgentVersionConflictError(current.agentId, agentExpectedVersionNo);
-    }
-
-    const [published] = await tx
-      .select()
-      .from(v11AgentRevision)
-      .where(eq(v11AgentRevision.id, revisionId))
-      .limit(1);
-    if (!published) {
-      throw new RevisionNotFoundError(revisionId);
-    }
+  try {
+    await publishLegacyAgentRevisionApplication({
+      tenantId,
+      revisionId,
+      agentExpectedVersionNo,
+      requestId: randomUUID(),
+    });
+    const published = await getRevisionById(revisionId);
+    if (!published) throw new RevisionNotFoundError(revisionId);
     return published;
-  });
+  } catch (error) {
+    if (error instanceof AgentRevisionPublicationNotFoundError) {
+      throw new RevisionNotFoundError(error.revisionId);
+    }
+    if (error instanceof AgentRevisionPublicationStateError) {
+      throw new RevisionStateError(error.revisionId, error.fromState, "published", error.message);
+    }
+    if (error instanceof AgentPublicationVersionConflictError) {
+      throw new AgentVersionConflictError(error.agentId, error.expectedVersionNo);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -208,31 +192,51 @@ export async function publishRevision(
  *
  * - 不删除行，不修改业务内容。
  * - 只阻止新发布或路由引用；已开始的 ExecutionBinding 不受影响。
- * - 不自动变更 Agent.currentRevisionId（由调用方按业务规则处理）。
+ * - 兼容入口委托正式 Application Service，原子写 WithdrawalRecord、投影、当前指针、Audit 和 Outbox。
  *
  * @throws RevisionNotFoundError Revision 不存在
  * @throws RevisionStateError Revision 非 published 状态
  */
 export async function withdrawRevision(revisionId: string): Promise<V11AgentRevision> {
-  const current = await getRevisionById(revisionId);
-  if (!current) {
+  const [row] = await db
+    .select({ revision: v11AgentRevision, agent: v11Agent })
+    .from(v11AgentRevision)
+    .innerJoin(v11Agent, eq(v11Agent.id, v11AgentRevision.agentId))
+    .where(eq(v11AgentRevision.id, revisionId))
+    .limit(1);
+  if (!row) {
     throw new RevisionNotFoundError(revisionId);
   }
-  if (current.revisionState !== "published") {
-    throw new RevisionStateError(
+  try {
+    const result = await withdrawAgentRevisionApplication({
+      tenantId: row.agent.tenantId,
       revisionId,
-      current.revisionState,
-      "withdrawn",
-      "只有 published 状态可撤回",
-    );
+      agentExpectedVersionNo: row.agent.versionNo,
+      actor: {
+        tenantId: row.agent.tenantId,
+        actorType: "system",
+        actorId: "legacy-agent-revision-queries",
+      },
+      reasonCode: "legacy_compatibility",
+      reason: "由兼容入口撤回 AgentRevision",
+      requestId: randomUUID(),
+    });
+    return result.revision as V11AgentRevision;
+  } catch (error) {
+    if (error instanceof AgentRevisionWithdrawalNotFoundError) {
+      throw new RevisionNotFoundError(error.revisionId);
+    }
+    if (error instanceof AgentRevisionWithdrawalStateError) {
+      throw new RevisionStateError(error.revisionId, error.fromState, "withdrawn", error.message);
+    }
+    if (error instanceof AgentRevisionWithdrawalPublicationNotFoundError) {
+      throw new RevisionStateError(revisionId, "published", "withdrawn", error.message);
+    }
+    if (error instanceof AgentWithdrawalVersionConflictError) {
+      throw new AgentVersionConflictError(error.agentId, error.expectedVersionNo);
+    }
+    throw error;
   }
-
-  await db
-    .update(v11AgentRevision)
-    .set({ revisionState: "withdrawn" })
-    .where(eq(v11AgentRevision.id, revisionId));
-
-  return (await getRevisionById(revisionId)) as V11AgentRevision;
 }
 
 /** 按 id 获取 Revision。不存在返回 null。 */

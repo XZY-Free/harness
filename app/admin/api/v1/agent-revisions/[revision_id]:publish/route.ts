@@ -243,6 +243,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       requestId,
       {
         recordId,
+        idempotencyKey,
         httpStatus: 200,
         responseRef: revisionId,
         serializeResponse: (published) =>

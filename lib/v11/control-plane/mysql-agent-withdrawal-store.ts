@@ -1,15 +1,17 @@
-import type { AgentPublicationStore } from "@/lib/agents/persistence/agent-publication-store";
+import type { AgentWithdrawalStore } from "@/lib/agents/persistence/agent-withdrawal-store";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
 import { db } from "@/lib/db/client";
-import { publicationRecord } from "@/lib/publications/persistence/publication-record";
+import {
+  publicationRecord,
+  withdrawalRecord,
+} from "@/lib/publications/persistence/publication-record";
 import { computeContentHash } from "@/lib/v11/identity/audit";
 import { v11Agent, v11AgentRevision } from "@/lib/v11/schema/agent";
-import { v11ArtifactAttestation } from "@/lib/v11/schema/artifact";
 import { auditEvent } from "@/lib/v11/schema/audit";
 import { idempotencyRecord } from "@/lib/v11/schema/idempotency";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 
-export const mysqlAgentPublicationStore: AgentPublicationStore = {
+export const mysqlAgentWithdrawalStore: AgentWithdrawalStore = {
   transaction: (operation) =>
     db.transaction(async (tx) =>
       operation({
@@ -31,50 +33,79 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
             .select()
             .from(v11Agent)
             .where(and(eq(v11Agent.tenantId, tenantId), eq(v11Agent.id, agentId)))
-            .limit(1);
+            .limit(1)
+            .for("update");
           return agent ?? null;
         },
-        async findVerifiedAttestation(params) {
-          const [attestation] = await tx
-            .select()
-            .from(v11ArtifactAttestation)
+        async findPublication(tenantId, revisionId) {
+          const [record] = await tx
+            .select({ id: publicationRecord.id })
+            .from(publicationRecord)
+            .leftJoin(
+              withdrawalRecord,
+              eq(withdrawalRecord.publicationRecordId, publicationRecord.id),
+            )
             .where(
               and(
-                eq(v11ArtifactAttestation.id, params.attestationId),
-                eq(v11ArtifactAttestation.tenantId, params.tenantId),
-                eq(v11ArtifactAttestation.artifactType, "agent_revision"),
-                eq(v11ArtifactAttestation.artifactRevisionId, params.revisionId),
-                eq(v11ArtifactAttestation.verificationState, "verified"),
-                isNull(v11ArtifactAttestation.revokedAt),
+                eq(publicationRecord.tenantId, tenantId),
+                eq(publicationRecord.subjectType, "agent_revision"),
+                eq(publicationRecord.subjectRevisionId, revisionId),
+                isNull(withdrawalRecord.id),
               ),
             )
             .limit(1)
             .for("update");
-          return attestation ?? null;
+          return record ?? null;
         },
-        async appendPublication(params) {
-          await tx.insert(publicationRecord).values({
+        async findLatestPublishedRevisionId(params) {
+          const [record] = await tx
+            .select({ revisionId: v11AgentRevision.id })
+            .from(publicationRecord)
+            .innerJoin(
+              v11AgentRevision,
+              eq(v11AgentRevision.id, publicationRecord.subjectRevisionId),
+            )
+            .leftJoin(
+              withdrawalRecord,
+              eq(withdrawalRecord.publicationRecordId, publicationRecord.id),
+            )
+            .where(
+              and(
+                eq(publicationRecord.tenantId, params.tenantId),
+                eq(publicationRecord.subjectType, "agent_revision"),
+                eq(v11AgentRevision.agentId, params.agentId),
+                eq(v11AgentRevision.revisionState, "published"),
+                ne(v11AgentRevision.id, params.excludingRevisionId),
+                isNull(withdrawalRecord.id),
+              ),
+            )
+            .orderBy(desc(publicationRecord.publicationSequence))
+            .limit(1);
+          return record?.revisionId ?? null;
+        },
+        async appendWithdrawal(params) {
+          await tx.insert(withdrawalRecord).values({
             id: params.id,
             tenantId: params.tenantId,
+            publicationRecordId: params.publicationRecordId,
             subjectType: "agent_revision",
             subjectRevisionId: params.revisionId,
-            evidenceSetDigest: params.evidenceSetDigest,
-            attestationIds: params.attestationIds,
-            conformanceRunId: null,
-            approvals: [],
-            publishedByType: params.publishedByType,
-            publishedBy: params.publishedBy,
-            publishedAt: params.publishedAt,
-            idempotencyKey: params.idempotencyKey,
-            idempotencyRecordId: params.idempotencyRecordId,
+            reasonCode: params.reasonCode,
+            reason: params.reason,
+            withdrawnByType: params.withdrawnByType,
+            withdrawnBy: params.withdrawnBy,
+            withdrawnAt: params.withdrawnAt,
           });
         },
-        async markRevisionPublished(revisionId, publishedAt) {
+        async markRevisionWithdrawn(revisionId) {
           const result = await tx
             .update(v11AgentRevision)
-            .set({ revisionState: "published", publishedAt })
+            .set({ revisionState: "withdrawn" })
             .where(
-              and(eq(v11AgentRevision.id, revisionId), eq(v11AgentRevision.revisionState, "draft")),
+              and(
+                eq(v11AgentRevision.id, revisionId),
+                eq(v11AgentRevision.revisionState, "published"),
+              ),
             );
           return result[0].affectedRows === 1;
         },
@@ -82,7 +113,7 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
           const result = await tx
             .update(v11Agent)
             .set({
-              currentRevisionId: params.revisionId,
+              currentRevisionId: params.currentRevisionId,
               versionNo: params.expectedVersionNo + 1,
               updatedAt: params.updatedAt,
             })
@@ -101,12 +132,12 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
             tenantId: params.tenantId,
             actorType: params.actorType,
             actorId: params.actorId,
-            actionType: "agent.publish",
+            actionType: "agent.retract",
             targetType: "agent_revision",
             targetId: params.revisionId,
             beforeHash: null,
             afterHash: computeContentHash(params.after),
-            reason: params.reason,
+            reason: `${params.reasonCode}: ${params.reason}`,
             requestId: params.requestId,
             occurredAt: params.occurredAt,
           });
