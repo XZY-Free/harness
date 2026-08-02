@@ -1,10 +1,14 @@
 import type { AgentPublicationStore } from "@/lib/agents/persistence/agent-publication-store";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import {
+  artifact,
+  artifactAttestation,
+  attestationRevocationRecord,
+} from "@/lib/artifacts/persistence/artifact-record";
 import { db } from "@/lib/db/client";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import { computeContentHash } from "@/lib/v11/identity/audit";
 import { v11Agent, v11AgentRevision } from "@/lib/v11/schema/agent";
-import { v11ArtifactAttestation } from "@/lib/v11/schema/artifact";
 import { auditEvent } from "@/lib/v11/schema/audit";
 import { idempotencyRecord } from "@/lib/v11/schema/idempotency";
 import { and, eq, isNull } from "drizzle-orm";
@@ -36,21 +40,32 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
         },
         async findVerifiedAttestation(params) {
           const [attestation] = await tx
-            .select()
-            .from(v11ArtifactAttestation)
+            .select({ attestation: artifactAttestation })
+            .from(artifactAttestation)
+            .innerJoin(artifact, eq(artifact.id, artifactAttestation.artifactId))
+            .innerJoin(v11AgentRevision, eq(v11AgentRevision.id, params.revisionId))
+            .leftJoin(
+              attestationRevocationRecord,
+              eq(attestationRevocationRecord.attestationId, artifactAttestation.id),
+            )
             .where(
               and(
-                eq(v11ArtifactAttestation.id, params.attestationId),
-                eq(v11ArtifactAttestation.tenantId, params.tenantId),
-                eq(v11ArtifactAttestation.artifactType, "agent_revision"),
-                eq(v11ArtifactAttestation.artifactRevisionId, params.revisionId),
-                eq(v11ArtifactAttestation.verificationState, "verified"),
-                isNull(v11ArtifactAttestation.revokedAt),
+                eq(artifactAttestation.id, params.attestationId),
+                eq(artifactAttestation.tenantId, params.tenantId),
+                eq(artifactAttestation.artifactType, "agent_revision"),
+                eq(artifactAttestation.artifactRevisionId, params.revisionId),
+                eq(artifactAttestation.verificationState, "verified"),
+                eq(artifact.tenantId, params.tenantId),
+                eq(artifact.digest, artifactAttestation.artifactDigest),
+                eq(v11AgentRevision.artifactId, artifact.id),
+                eq(v11AgentRevision.artifactDigest, artifact.digest),
+                isNull(attestationRevocationRecord.id),
+                isNull(artifactAttestation.revokedAt),
               ),
             )
             .limit(1)
             .for("update");
-          return attestation ?? null;
+          return attestation?.attestation ?? null;
         },
         async appendPublication(params) {
           await tx.insert(publicationRecord).values({

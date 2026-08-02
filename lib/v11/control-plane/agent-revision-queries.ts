@@ -130,7 +130,11 @@ export async function updateDraftContent(
   const updates: Record<string, unknown> = {};
   if (patch.sourceRevision !== undefined) updates.sourceRevision = patch.sourceRevision;
   if (patch.instructionHash !== undefined) updates.instructionHash = patch.instructionHash;
-  if (patch.agentArtifactRef !== undefined) updates.agentArtifactRef = patch.agentArtifactRef;
+  if (patch.agentArtifactRef !== undefined) {
+    updates.agentArtifactRef = patch.agentArtifactRef;
+    updates.artifactId = null;
+    updates.artifactDigest = null;
+  }
   if (patch.modelPolicyJson !== undefined) updates.modelPolicyJson = patch.modelPolicyJson;
   if (patch.permissionRequirementsJson !== undefined) {
     updates.permissionRequirementsJson = patch.permissionRequirementsJson;

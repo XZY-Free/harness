@@ -113,6 +113,8 @@ export async function updateDraftRuntimeRevisionContent(
   if (patch.endpointRef !== undefined) updates.endpointRef = patch.endpointRef;
   if (patch.runtimeArtifactRef !== undefined) {
     updates.runtimeArtifactRef = patch.runtimeArtifactRef;
+    updates.artifactId = null;
+    updates.artifactDigest = null;
   }
   if (patch.runtimeCapabilitiesJson !== undefined) {
     updates.runtimeCapabilitiesJson = patch.runtimeCapabilitiesJson;

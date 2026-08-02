@@ -9,7 +9,7 @@
  * - 校验 action scope: artifact.attestation.revoke + resource { type: "artifact_type", id: artifact_type }。
  *   先查 attestation 获取 artifact_type，再校验 scope。
  * - 必填 reason（撤销原因）。
- * - 调用 revokeAttestation：设置 revokedAt/revokedBy/revocationReason + 写审计。
+ * - 调用 revokeAttestation：追加独立撤销事实，并写审计与 Outbox。
  * - 撤销后 getVerifiedAttestationForRevision 不再返回此 attestation；
  *   assertAttestationGate 拒绝已撤销 attestation；新 Invocation/发布/路由被阻止。
  *

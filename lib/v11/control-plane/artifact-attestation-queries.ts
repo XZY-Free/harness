@@ -9,7 +9,7 @@
  * 职责：
  * - insertAttestation / getAttestationById / listAttestationsByRevision / listAttestationsByDigest /
  *   getVerifiedAttestationForRevision：数据访问。
- * - verifyAndPersistAttestation：完整验证流程（独立校验 + 持久化 + 审计）。
+ * - verifyAndPersistAttestation：兼容入口，委托正式 Artifact 应用服务持久化。
  *   - 调用 verifyArtifactAttestation 独立校验（调用方不能自报 verified）。
  *   - 无论成功失败都持久化 attestation 记录（verified 写 verifiedAt，failed 写 failureCode）。
  *   - 无论成功失败都写 AuditEvent（action_type=artifact.attestation.verify）。
@@ -34,6 +34,18 @@ import {
   AgentRevisionPublicationNotFoundError,
   AgentRevisionPublicationStateError,
 } from "@/lib/agents/domain/agent-revision-publication-policy";
+import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
+import {
+  AttestationAlreadyRevokedError,
+  AttestationNotFoundError,
+  createRevokeArtifactAttestation,
+} from "@/lib/artifacts/application/revoke-artifact-attestation";
+import { isSha256Digest } from "@/lib/artifacts/domain/artifact";
+import { artifact, attestationRevocationRecord } from "@/lib/artifacts/persistence/artifact-record";
+import {
+  mysqlArtifactAttestationPersistenceStore,
+  mysqlAttestationRevocationStore,
+} from "@/lib/compatibility/artifacts/mysql-artifact-attestation-store";
 import { publishRuntimeRevisionThroughControlPlane } from "@/lib/compatibility/runtimes/publish-runtime-revision";
 import { db } from "@/lib/db/client";
 import { RuntimePublicationPrerequisiteError } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
@@ -52,7 +64,7 @@ import {
 } from "@/lib/v11/control-plane/artifact-attestation";
 import { mysqlAgentPublicationStore } from "@/lib/v11/control-plane/mysql-agent-publication-store";
 import type { ConformanceCaseResult } from "@/lib/v11/control-plane/runtime-conformance";
-import { type AuditActor, recordAuditEvent } from "@/lib/v11/identity/audit";
+import type { AuditActor } from "@/lib/v11/identity/audit";
 import type { V11AgentRevision } from "@/lib/v11/schema/agent";
 import {
   type AttestationFailureCode,
@@ -61,7 +73,14 @@ import {
   v11ArtifactAttestation,
 } from "@/lib/v11/schema/artifact";
 import type { V11RuntimeRevision } from "@/lib/v11/schema/runtime";
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, or } from "drizzle-orm";
+
+const recordArtifactAttestation = createRecordArtifactAttestation({
+  store: mysqlArtifactAttestationPersistenceStore,
+});
+const revokeArtifactAttestation = createRevokeArtifactAttestation({
+  store: mysqlAttestationRevocationStore,
+});
 
 // ─── 仓储：insertAttestation ───────────────────────────────
 
@@ -86,35 +105,60 @@ export async function insertAttestation(params: {
   scanSummaryJson?: Record<string, unknown> | null;
 }): Promise<V11ArtifactAttestation> {
   const id = randomUUID();
-  await db.insert(v11ArtifactAttestation).values({
-    id,
-    tenantId: params.tenantId,
-    artifactType: params.artifactType,
-    artifactRevisionId: params.artifactRevisionId,
-    artifactDigest: params.artifactDigest,
-    signatureBundleRef: params.signatureBundleRef,
-    sbomRef: params.sbomRef,
-    provenanceRef: params.provenanceRef,
-    builderIdentity: params.builderIdentity,
-    verificationState: params.verificationState,
-    policyRevisionId: params.policyRevisionId ?? null,
-    failureCode: params.failureCode ?? null,
-    verifiedAt: params.verifiedAt ?? null,
-    sourceRevision: params.sourceRevision ?? null,
-    buildPipeline: params.buildPipeline ?? null,
-    dependencyLockFileHash: params.dependencyLockFileHash ?? null,
-    buildTime: params.buildTime ?? null,
-    scanSummaryJson: params.scanSummaryJson ?? null,
+  return db.transaction(async (tx) => {
+    let authorityId: string | null = null;
+    if (isSha256Digest(params.artifactDigest)) {
+      const [existing] = await tx
+        .select()
+        .from(artifact)
+        .where(
+          and(eq(artifact.tenantId, params.tenantId), eq(artifact.digest, params.artifactDigest)),
+        )
+        .limit(1);
+      if (existing) {
+        authorityId = existing.id;
+      } else {
+        authorityId = randomUUID();
+        await tx.insert(artifact).values({
+          id: authorityId,
+          tenantId: params.tenantId,
+          kind: params.artifactType as typeof artifact.$inferInsert.kind,
+          digest: params.artifactDigest,
+          sourceRevision: params.sourceRevision ?? null,
+          buildMetadata: null,
+          createdAt: params.verifiedAt ?? new Date(),
+        });
+      }
+    }
+    await tx.insert(v11ArtifactAttestation).values({
+      id,
+      tenantId: params.tenantId,
+      artifactId: authorityId,
+      artifactType: params.artifactType,
+      artifactRevisionId: params.artifactRevisionId,
+      artifactDigest: params.artifactDigest,
+      signatureBundleRef: params.signatureBundleRef,
+      sbomRef: params.sbomRef,
+      provenanceRef: params.provenanceRef,
+      builderIdentity: params.builderIdentity,
+      verificationState: params.verificationState,
+      policyRevisionId: params.policyRevisionId ?? null,
+      failureCode: params.failureCode ?? null,
+      verifiedAt: params.verifiedAt ?? null,
+      sourceRevision: params.sourceRevision ?? null,
+      buildPipeline: params.buildPipeline ?? null,
+      dependencyLockFileHash: params.dependencyLockFileHash ?? null,
+      buildTime: params.buildTime ?? null,
+      scanSummaryJson: params.scanSummaryJson ?? null,
+    });
+    const [row] = await tx
+      .select()
+      .from(v11ArtifactAttestation)
+      .where(eq(v11ArtifactAttestation.id, id))
+      .limit(1);
+    if (!row) throw new Error(`insertAttestation: 行未找到（id=${id}）`);
+    return row;
   });
-  const [row] = await db
-    .select()
-    .from(v11ArtifactAttestation)
-    .where(eq(v11ArtifactAttestation.id, id))
-    .limit(1);
-  if (!row) {
-    throw new Error(`insertAttestation: 行未找到（id=${id}）`);
-  }
-  return row;
 }
 
 // ─── 仓储：查询 ────────────────────────────────────────────
@@ -125,8 +169,12 @@ export async function getAttestationById(
   attestationId: string,
 ): Promise<V11ArtifactAttestation | null> {
   const [row] = await db
-    .select()
+    .select({ attestation: v11ArtifactAttestation, revocation: attestationRevocationRecord })
     .from(v11ArtifactAttestation)
+    .leftJoin(
+      attestationRevocationRecord,
+      eq(attestationRevocationRecord.attestationId, v11ArtifactAttestation.id),
+    )
     .where(
       and(
         eq(v11ArtifactAttestation.id, attestationId),
@@ -134,7 +182,7 @@ export async function getAttestationById(
       ),
     )
     .limit(1);
-  return row ?? null;
+  return row ? withEffectiveRevocation(row.attestation, row.revocation) : null;
 }
 
 /** 按 revision 列出 attestation（按 createdAt 降序；跨租户隔离）。 */
@@ -152,11 +200,16 @@ export async function listAttestationsByRevision(
   if (options?.verificationState) {
     conditions.push(eq(v11ArtifactAttestation.verificationState, options.verificationState));
   }
-  return db
-    .select()
+  const rows = await db
+    .select({ attestation: v11ArtifactAttestation, revocation: attestationRevocationRecord })
     .from(v11ArtifactAttestation)
+    .leftJoin(
+      attestationRevocationRecord,
+      eq(attestationRevocationRecord.attestationId, v11ArtifactAttestation.id),
+    )
     .where(and(...conditions))
     .orderBy(desc(v11ArtifactAttestation.createdAt));
+  return rows.map((row) => withEffectiveRevocation(row.attestation, row.revocation));
 }
 
 /** 按 digest 列出 attestation（按 createdAt 降序；跨租户隔离）。 */
@@ -164,9 +217,13 @@ export async function listAttestationsByDigest(
   tenantId: string,
   artifactDigest: string,
 ): Promise<V11ArtifactAttestation[]> {
-  return db
-    .select()
+  const rows = await db
+    .select({ attestation: v11ArtifactAttestation, revocation: attestationRevocationRecord })
     .from(v11ArtifactAttestation)
+    .leftJoin(
+      attestationRevocationRecord,
+      eq(attestationRevocationRecord.attestationId, v11ArtifactAttestation.id),
+    )
     .where(
       and(
         eq(v11ArtifactAttestation.tenantId, tenantId),
@@ -174,6 +231,7 @@ export async function listAttestationsByDigest(
       ),
     )
     .orderBy(desc(v11ArtifactAttestation.createdAt));
+  return rows.map((row) => withEffectiveRevocation(row.attestation, row.revocation));
 }
 
 /** listAttestations 过滤选项。 */
@@ -206,22 +264,35 @@ export async function listAttestations(
     conditions.push(eq(v11ArtifactAttestation.verificationState, options.verificationState));
   }
   if (options?.revoked === true) {
-    conditions.push(isNotNull(v11ArtifactAttestation.revokedAt));
+    const revokedCondition = or(
+      isNotNull(attestationRevocationRecord.id),
+      isNotNull(v11ArtifactAttestation.revokedAt),
+    );
+    if (revokedCondition) conditions.push(revokedCondition);
   } else if (options?.revoked === false) {
-    conditions.push(isNull(v11ArtifactAttestation.revokedAt));
+    const activeCondition = and(
+      isNull(attestationRevocationRecord.id),
+      isNull(v11ArtifactAttestation.revokedAt),
+    );
+    if (activeCondition) conditions.push(activeCondition);
   }
 
   const limit = options?.limit ?? 50;
   const fetchLimit = limit + 1;
   const rows = await db
-    .select()
+    .select({ attestation: v11ArtifactAttestation, revocation: attestationRevocationRecord })
     .from(v11ArtifactAttestation)
+    .leftJoin(
+      attestationRevocationRecord,
+      eq(attestationRevocationRecord.attestationId, v11ArtifactAttestation.id),
+    )
     .where(and(...conditions))
     .orderBy(desc(v11ArtifactAttestation.createdAt))
     .limit(fetchLimit);
 
   const hasMore = rows.length > limit;
-  const items = hasMore ? rows.slice(0, limit) : rows;
+  const selected = hasMore ? rows.slice(0, limit) : rows;
+  const items = selected.map((row) => withEffectiveRevocation(row.attestation, row.revocation));
   const last = items[items.length - 1];
   const nextCursor =
     hasMore && last
@@ -240,20 +311,43 @@ export async function getVerifiedAttestationForRevision(
   artifactRevisionId: string,
 ): Promise<V11ArtifactAttestation | null> {
   const list = await db
-    .select()
+    .select({ attestation: v11ArtifactAttestation, revocation: attestationRevocationRecord })
     .from(v11ArtifactAttestation)
+    .innerJoin(artifact, eq(artifact.id, v11ArtifactAttestation.artifactId))
+    .leftJoin(
+      attestationRevocationRecord,
+      eq(attestationRevocationRecord.attestationId, v11ArtifactAttestation.id),
+    )
     .where(
       and(
         eq(v11ArtifactAttestation.tenantId, tenantId),
         eq(v11ArtifactAttestation.artifactType, artifactType),
         eq(v11ArtifactAttestation.artifactRevisionId, artifactRevisionId),
         eq(v11ArtifactAttestation.verificationState, "verified"),
+        isNotNull(v11ArtifactAttestation.artifactId),
+        eq(artifact.tenantId, tenantId),
+        eq(artifact.digest, v11ArtifactAttestation.artifactDigest),
+        isNull(attestationRevocationRecord.id),
         isNull(v11ArtifactAttestation.revokedAt),
       ),
     )
     .orderBy(desc(v11ArtifactAttestation.createdAt))
     .limit(1);
-  return list[0] ?? null;
+  const row = list[0];
+  return row ? withEffectiveRevocation(row.attestation, row.revocation) : null;
+}
+
+function withEffectiveRevocation(
+  attestation: V11ArtifactAttestation,
+  revocation: typeof attestationRevocationRecord.$inferSelect | null,
+): V11ArtifactAttestation {
+  if (!revocation) return attestation;
+  return {
+    ...attestation,
+    revokedAt: revocation.revokedAt,
+    revokedBy: revocation.revokedBy,
+    revocationReason: revocation.reason,
+  };
 }
 
 // ─── 完整验证流程：verifyAndPersistAttestation ─────────────
@@ -278,12 +372,17 @@ export async function verifyAndPersistAttestation(
   builderKeys: BuilderKeyRegistry,
   actor: AuditActor,
   requestId?: string,
+  idempotency?: {
+    recordId: string;
+    httpStatus: number | ((verificationState: VerificationState) => number);
+    responseRef?: string | null;
+    serializeResponse: (attestation: V11ArtifactAttestation) => string;
+  },
 ): Promise<V11ArtifactAttestation> {
   const result = await verifyArtifactAttestation(input, store, builderKeys);
   const now = new Date();
 
-  // 持久化 attestation 记录（无论成功失败；成功时附带 provenance/scan 摘要）
-  const attestation = await insertAttestation({
+  const attestation = await recordArtifactAttestation({
     tenantId: input.tenantId,
     artifactType: input.artifactType,
     artifactRevisionId: input.artifactRevisionId,
@@ -301,30 +400,17 @@ export async function verifyAndPersistAttestation(
     dependencyLockFileHash: result.provenanceSummary?.dependencyLockFile ?? null,
     buildTime: result.provenanceSummary ? new Date(result.provenanceSummary.buildTime) : null,
     scanSummaryJson: result.scanSummary ?? null,
-  });
-
-  // 写 AuditEvent（无论成功失败；afterHash 是结果摘要的 hash，不存原文）
-  const auditSummary = {
-    attestation_id: attestation.id,
-    artifact_type: input.artifactType,
-    artifact_revision_id: input.artifactRevisionId,
-    artifact_digest: input.artifactDigest,
-    builder_identity: input.builderIdentity,
-    verification_state: result.verificationState,
-    failure_code: result.failureCode ?? null,
-  };
-  await recordAuditEvent({
     actor,
-    actionType: "artifact.attestation.verify",
-    targetType: "artifact_attestation",
-    targetId: attestation.id,
-    after: auditSummary,
-    reason:
-      result.verificationState === "verified"
-        ? "制品证明验证通过"
-        : (result.failureReason ?? "制品证明验证失败"),
-    requestId,
-    occurredAt: now,
+    requestId: requestId ?? randomUUID(),
+    idempotency: idempotency
+      ? {
+          ...idempotency,
+          httpStatus:
+            typeof idempotency.httpStatus === "function"
+              ? idempotency.httpStatus(result.verificationState)
+              : idempotency.httpStatus,
+        }
+      : undefined,
   });
 
   // 失败时抛错（已持久化失败记录与审计）
@@ -388,32 +474,30 @@ export async function assertAttestationGate(
       `attestation artifactRevisionId 不匹配（期望 ${expectedRevisionId}, 实际 ${attestation.artifactRevisionId}）`,
     );
   }
+  if (!attestation.artifactId) {
+    throw new ArtifactNotVerifiedError(attestationId, "attestation 未引用权威 Artifact");
+  }
+  const [authority] = await db
+    .select({ id: artifact.id })
+    .from(artifact)
+    .where(
+      and(
+        eq(artifact.id, attestation.artifactId),
+        eq(artifact.tenantId, tenantId),
+        eq(artifact.digest, attestation.artifactDigest),
+      ),
+    )
+    .limit(1);
+  if (!authority) {
+    throw new ArtifactNotVerifiedError(
+      attestationId,
+      "attestation 的 Artifact ID 与 digest 不一致",
+    );
+  }
   return attestation;
 }
 
 // ─── 撤销：revokeAttestation ───────────────────────────────
-
-/** Attestation 不存在或已撤销错误。 */
-export class AttestationNotFoundError extends Error {
-  constructor(
-    public readonly attestationId: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "AttestationNotFoundError";
-  }
-}
-
-/** Attestation 已撤销错误。 */
-export class AttestationAlreadyRevokedError extends Error {
-  constructor(
-    public readonly attestationId: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "AttestationAlreadyRevokedError";
-  }
-}
 
 /**
  * 撤销 attestation（S12-W04）。
@@ -421,8 +505,8 @@ export class AttestationAlreadyRevokedError extends Error {
  * 行为：
  * 1. 校验 attestation 存在且属于当前租户。
  * 2. 校验未已撤销（幂等保护：已撤销抛错而非静默成功）。
- * 3. 设置 revokedAt / revokedBy / revocationReason。
- * 4. 写 AuditEvent（action_type=artifact.attestation.revoke）。
+ * 3. 追加 AttestationRevocationRecord，不改写原 Attestation。
+ * 4. 在同一事务写 AuditEvent 与 Outbox。
  *
  * 撤销后：
  * - getVerifiedAttestationForRevision 不再返回此 attestation。
@@ -439,60 +523,14 @@ export async function revokeAttestation(
   reason: string,
   requestId?: string,
 ): Promise<V11ArtifactAttestation> {
-  const attestation = await getAttestationById(tenantId, attestationId);
-  if (!attestation) {
-    throw new AttestationNotFoundError(
-      attestationId,
-      `attestation 不存在或跨租户: ${attestationId}`,
-    );
-  }
-  if (attestation.revokedAt !== null) {
-    throw new AttestationAlreadyRevokedError(
-      attestationId,
-      `attestation 已撤销（revokedAt=${attestation.revokedAt.toISOString()}）`,
-    );
-  }
-
-  const now = new Date();
-  await db
-    .update(v11ArtifactAttestation)
-    .set({
-      revokedAt: now,
-      revokedBy: actor.actorId,
-      revocationReason: reason,
-    })
-    .where(eq(v11ArtifactAttestation.id, attestationId));
-
-  const [updated] = await db
-    .select()
-    .from(v11ArtifactAttestation)
-    .where(eq(v11ArtifactAttestation.id, attestationId))
-    .limit(1);
-
-  // 写 AuditEvent
-  await recordAuditEvent({
+  const result = await revokeArtifactAttestation({
+    tenantId,
+    attestationId,
     actor,
-    actionType: "artifact.attestation.revoke",
-    targetType: "artifact_attestation",
-    targetId: attestationId,
-    before: {
-      artifact_type: attestation.artifactType,
-      artifact_revision_id: attestation.artifactRevisionId,
-      artifact_digest: attestation.artifactDigest,
-      builder_identity: attestation.builderIdentity,
-      verification_state: attestation.verificationState,
-    },
-    after: {
-      revoked_at: now.toISOString(),
-      revoked_by: actor.actorId,
-      revocation_reason: reason,
-    },
     reason,
-    requestId,
-    occurredAt: now,
+    requestId: requestId ?? randomUUID(),
   });
-
-  return updated ?? attestation;
+  return withEffectiveRevocation(result.attestation, result.revocation);
 }
 
 // ─── 发布门禁 + Agent 发布 wrapper ─────────────────────────
@@ -632,6 +670,7 @@ export async function publishRuntimeRevisionWithAttestation(
 // ─── Re-exports ────────────────────────────────────────────
 
 export type { V11ArtifactAttestation } from "@/lib/v11/schema/artifact";
+export { AttestationAlreadyRevokedError, AttestationNotFoundError };
 export type {
   AttestationFailureCode,
   VerificationState,

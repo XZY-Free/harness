@@ -57,13 +57,12 @@ import {
   buildReplayResponse,
   callerFromPrincipal,
   callerFromWorkloadPrincipal,
-  completeRecord,
   computeRequestHash,
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/v11/identity/idempotency";
-import { ARTIFACT_TYPES } from "@/lib/v11/schema/artifact";
+import { ARTIFACT_TYPES, type V11ArtifactAttestation } from "@/lib/v11/schema/artifact";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +82,18 @@ interface VerifyBody {
   provenance_ref: string;
   builder_identity: string;
   policy_revision_id?: string;
+}
+
+function projectResponse(attestation: V11ArtifactAttestation) {
+  return {
+    attestation_id: attestation.id,
+    artifact_revision_id: attestation.artifactRevisionId,
+    artifact_digest: attestation.artifactDigest,
+    verification_state: attestation.verificationState,
+    builder_identity: attestation.builderIdentity,
+    policy_revision_id: attestation.policyRevisionId,
+    verified_at: attestation.verifiedAt?.toISOString() ?? null,
+  };
 }
 
 /** 校验请求体。 */
@@ -224,23 +235,26 @@ export async function POST(request: Request): Promise<Response> {
       builderKeys,
       actorFromAdminPrincipal(principal),
       requestId,
+      {
+        recordId,
+        httpStatus: (state) => (state === "verified" ? 200 : 422),
+        serializeResponse: (attestation) =>
+          JSON.stringify(
+            attestation.verificationState === "verified"
+              ? projectResponse(attestation)
+              : {
+                  error: {
+                    code: "ARTIFACT_ATTESTATION_FAILED",
+                    message: `制品证明验证失败（failure_code=${attestation.failureCode}）`,
+                    request_id: requestId,
+                    retryable: false,
+                  },
+                },
+          ),
+      },
     );
 
-    const responseBody = {
-      attestation_id: attestation.id,
-      artifact_revision_id: attestation.artifactRevisionId,
-      artifact_digest: attestation.artifactDigest,
-      verification_state: attestation.verificationState,
-      builder_identity: attestation.builderIdentity,
-      policy_revision_id: attestation.policyRevisionId,
-      verified_at: attestation.verifiedAt?.toISOString() ?? null,
-    };
-
-    await completeRecord({
-      recordId,
-      httpStatus: 200,
-      responseRedactedJson: JSON.stringify(responseBody),
-    });
+    const responseBody = projectResponse(attestation);
 
     return v11Ok(responseBody, {
       status: 200,

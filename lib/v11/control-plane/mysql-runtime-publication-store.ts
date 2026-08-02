@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import {
+  artifact,
+  artifactAttestation,
+  attestationRevocationRecord,
+} from "@/lib/artifacts/persistence/artifact-record";
 import { db } from "@/lib/db/client";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import type { ConformanceCaseId } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 import type { RuntimePublicationStore } from "@/lib/runtimes/persistence/runtime-publication-store";
 import { computeContentHash } from "@/lib/v11/identity/audit";
-import { v11ArtifactAttestation } from "@/lib/v11/schema/artifact";
 import { auditEvent } from "@/lib/v11/schema/audit";
 import { idempotencyRecord } from "@/lib/v11/schema/idempotency";
 import {
@@ -46,21 +50,32 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
         },
         async findVerifiedAttestation(params) {
           const [attestation] = await tx
-            .select()
-            .from(v11ArtifactAttestation)
+            .select({ attestation: artifactAttestation })
+            .from(artifactAttestation)
+            .innerJoin(artifact, eq(artifact.id, artifactAttestation.artifactId))
+            .innerJoin(v11RuntimeRevision, eq(v11RuntimeRevision.id, params.revisionId))
+            .leftJoin(
+              attestationRevocationRecord,
+              eq(attestationRevocationRecord.attestationId, artifactAttestation.id),
+            )
             .where(
               and(
-                eq(v11ArtifactAttestation.id, params.attestationId),
-                eq(v11ArtifactAttestation.tenantId, params.tenantId),
-                eq(v11ArtifactAttestation.artifactType, "runtime_revision"),
-                eq(v11ArtifactAttestation.artifactRevisionId, params.revisionId),
-                eq(v11ArtifactAttestation.verificationState, "verified"),
-                isNull(v11ArtifactAttestation.revokedAt),
+                eq(artifactAttestation.id, params.attestationId),
+                eq(artifactAttestation.tenantId, params.tenantId),
+                eq(artifactAttestation.artifactType, "runtime_revision"),
+                eq(artifactAttestation.artifactRevisionId, params.revisionId),
+                eq(artifactAttestation.verificationState, "verified"),
+                eq(artifact.tenantId, params.tenantId),
+                eq(artifact.digest, artifactAttestation.artifactDigest),
+                eq(v11RuntimeRevision.artifactId, artifact.id),
+                eq(v11RuntimeRevision.artifactDigest, artifact.digest),
+                isNull(attestationRevocationRecord.id),
+                isNull(artifactAttestation.revokedAt),
               ),
             )
             .limit(1)
             .for("update");
-          return attestation ?? null;
+          return attestation?.attestation ?? null;
         },
         async persistConformanceResults(params) {
           for (const result of params.results) {
