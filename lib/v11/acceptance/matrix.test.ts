@@ -35,7 +35,7 @@ import { MANDATORY_GATE_CASES } from "@/lib/v11/control-plane/runtime-conformanc
  * - 矩阵生成器：从契约对象生成矩阵、HTTP 维度 required 判定、基线计数校验、文件加载
  * - 矩阵执行器：完整执行 + 跳过策略 + 异常捕获 + 超时 + 并行/顺序
  * - 报告生成：按类别/维度汇总、阻断项清单、格式化输出
- * - 门禁判定：mandatory 失败阻断、非 mandatory 失败不阻断、断言模式
+ * - 门禁判定：全部 required Runtime case 失败都会阻断、断言模式
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -156,8 +156,8 @@ describe("S13-W06 矩阵契约定义", () => {
     expect(RELEASE_BASELINE_COUNTS.runtimeConformanceCases).toBe(16);
   });
 
-  it("MANDATORY_GATE_CASES 含 4 个 mandatory case", () => {
-    expect(MANDATORY_GATE_CASES).toHaveLength(4);
+  it("MANDATORY_GATE_CASES 覆盖全部 16 个 required case", () => {
+    expect(MANDATORY_GATE_CASES).toHaveLength(16);
     expect(MANDATORY_GATE_CASES).toContain("dispatch-binds-immutable-config");
     expect(MANDATORY_GATE_CASES).toContain("event-batch-idempotent");
     expect(MANDATORY_GATE_CASES).toContain("cancel-request-not-terminal");
@@ -249,16 +249,16 @@ describe("S13-W06 矩阵生成器", () => {
     expect(runtimeItems).toHaveLength(4);
 
     const mandatory = runtimeItems.filter((i) => i.mandatory);
-    expect(mandatory).toHaveLength(3); // dispatch-binds + event-batch + credential
+    expect(mandatory).toHaveLength(4);
     expect(mandatory.map((i) => i.contractItemId)).toContain("dispatch-binds-immutable-config");
     expect(mandatory.map((i) => i.contractItemId)).toContain("event-batch-idempotent");
     expect(mandatory.map((i) => i.contractItemId)).toContain("credential-never-in-model-data");
   });
 
-  it("非 mandatory Runtime case 标记正确", () => {
+  it("steer-requires-ack 同样是发布门禁", () => {
     const matrix = generateAcceptanceMatrix(bundle);
     const steerItem = matrix.find((i) => i.contractItemId === "steer-requires-ack");
-    expect(steerItem?.mandatory).toBe(false);
+    expect(steerItem?.mandatory).toBe(true);
   });
 
   it("矩阵项 key 唯一", () => {
@@ -369,18 +369,18 @@ describe("S13-W06 矩阵执行器", () => {
     expect(report.blockingFailures).toContain(failedKey);
   });
 
-  it("非 mandatory 项失败时不阻断发布", async () => {
+  it("任一 required Runtime case 失败都会阻断发布", async () => {
     const failedKey = "steer-requires-ack:conformance";
     const runner = new AcceptanceMatrixRunner(
-      createProvidersWithFailures([failedKey], "非 mandatory 失败"),
+      createProvidersWithFailures([failedKey], "required case 失败"),
       { verifier: "test" },
     );
     const report = await runner.run(matrix);
 
-    expect(report.passed).toBe(true);
-    expect(report.mandatoryFailedCount).toBe(0);
+    expect(report.passed).toBe(false);
+    expect(report.mandatoryFailedCount).toBe(1);
     expect(report.failedCount).toBe(1);
-    expect(report.blockingFailures).toHaveLength(0);
+    expect(report.blockingFailures).toEqual([failedKey]);
   });
 
   it("Provider 异常被捕获为失败", async () => {
@@ -626,15 +626,15 @@ describe("S13-W06 验收门禁", () => {
     }
   });
 
-  it("仅非 mandatory 失败时门禁通过", async () => {
+  it("steer case 失败时门禁拒绝", async () => {
     const failedKey = "steer-requires-ack:conformance";
     const runner = new AcceptanceMatrixRunner(createProvidersWithFailures([failedKey]), {
       verifier: "ci",
     });
     const report = await runner.run(matrix);
 
-    expect(report.passed).toBe(true);
-    expect(() => assertAcceptanceGate(report)).not.toThrow();
+    expect(report.passed).toBe(false);
+    expect(() => assertAcceptanceGate(report)).toThrow(AcceptanceGateError);
   });
 });
 
@@ -664,7 +664,7 @@ describe("S13-W06 真实契约文件加载", () => {
     const runtimeItems = matrix.filter((i) => i.category === "runtime_conformance");
     expect(runtimeItems.length).toBe(16);
     const mandatory = runtimeItems.filter((i) => i.mandatory);
-    expect(mandatory.length).toBe(4);
+    expect(mandatory.length).toBe(16);
   });
 
   it("真实契约基线计数校验返回偏差报告", () => {
