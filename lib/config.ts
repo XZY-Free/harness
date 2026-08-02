@@ -103,6 +103,13 @@ export const dbConfig = {
   },
 } as const;
 
+/** 可信 Runtime Conformance Runner 回传报告的 HMAC 验签配置。缺失时 fail-closed。 */
+export const runtimeConformanceConfig = {
+  get signingSecret(): string {
+    return process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET ?? "";
+  },
+} as const;
+
 export const aiConfig = {
   /** OpenAI 兼容端点 API 密钥。缺失返回空串，运行时校验。 */
   get apiKey(): string {

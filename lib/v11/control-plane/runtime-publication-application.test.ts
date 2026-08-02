@@ -1,8 +1,15 @@
+import { createHmac, randomUUID } from "node:crypto";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { mysqlRuntimeConformanceRunStore } from "@/lib/compatibility/runtimes/mysql-runtime-conformance-run-store";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
+import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
+import {
+  ALL_CONFORMANCE_CASES,
+  canonicalizeRuntimeConformanceReport,
+} from "@/lib/runtimes/domain/runtime-conformance-run";
 import type {
   RuntimePublicationSession,
   RuntimePublicationStore,
@@ -14,7 +21,6 @@ import { createRuntime, getRuntimeById } from "@/lib/v11/control-plane/runtime-q
 import {
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
-  publishRuntimeRevision,
 } from "@/lib/v11/control-plane/runtime-revision-queries";
 import { listAuditEvents } from "@/lib/v11/identity/audit-queries";
 import {
@@ -50,11 +56,11 @@ async function seedRuntimePublicationFixture(suffix = "") {
     runtimeId: runtime.id,
     protocolType: "agent_runtime_protocol",
     endpointRef: "managed://runtime/publication",
-    runtimeArtifactRef: "oci://registry/runtime@sha256:publication",
+    runtimeArtifactRef: `oci://registry/runtime@sha256:${"a".repeat(64)}`,
     runtimeCapabilitiesJson: { capabilities: ["event_stream"] },
     identityMode: "workload_token",
     networkZone: "external",
-    configHash: "sha256:runtime-publication",
+    configHash: `sha256:${"b".repeat(64)}`,
     createdBy: owner.id,
   });
   const idempotency = await insertProcessingRecord({
@@ -66,14 +72,56 @@ async function seedRuntimePublicationFixture(suffix = "") {
     idempotencyKey: "publish-runtime-revision-success",
     requestHash: "b".repeat(64),
   });
-  return { tenantId: tenant.id, ownerId: owner.id, runtime, revision, idempotency };
+  const report = {
+    runId: randomUUID(),
+    runtimeRevisionId: revision.id,
+    runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
+    runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
+    protocolContractRevision: revision.protocolContractRevision,
+    suiteRevision: "runtime-conformance@1",
+    runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
+    runnerIdentity: "ci/runtime-conformance",
+    testEnvironmentRevision: "isolated-mysql8@1",
+    startedAt: "2026-08-02T01:00:00.000Z",
+    completedAt: "2026-08-02T01:00:01.000Z",
+    overallResult: "passed" as const,
+    evidenceManifestDigest: `sha256:${randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
+    caseResults: ALL_CONFORMANCE_CASES.map((caseId, index) => ({
+      caseId,
+      passed: true,
+      reason: null,
+      evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
+    })),
+  };
+  const secret = "publication-test-secret-at-least-32-bytes";
+  await createRecordRuntimeConformanceRun({
+    store: mysqlRuntimeConformanceRunStore,
+    signingSecret: () => secret,
+  })({
+    tenantId: tenant.id,
+    runtimeRevisionId: revision.id,
+    report,
+    signature: createHmac("sha256", secret)
+      .update(canonicalizeRuntimeConformanceReport(report))
+      .digest("hex"),
+    idempotencyKey: `run-${report.runId}`,
+    requestId: `request-${report.runId}`,
+    actor: { actorType: "system", actorId: "test-trusted-runner" },
+  });
+  return {
+    tenantId: tenant.id,
+    ownerId: owner.id,
+    runtime,
+    revision,
+    idempotency,
+    conformanceRunId: report.runId,
+  };
 }
 
 const passingConformanceResults = () =>
   MANDATORY_GATE_CASES.map((caseId) => ({ caseId, passed: true }));
 
 type PublicationStep =
-  | "persistConformanceResults"
   | "appendPublication"
   | "markRevisionPublished"
   | "setRuntimeCurrentRevision"
@@ -92,8 +140,6 @@ function failAfterStep(store: RuntimePublicationStore, failureStep: PublicationS
         };
         return operation({
           ...session,
-          persistConformanceResults: (params) =>
-            failAfter("persistConformanceResults", session.persistConformanceResults(params)),
           appendPublication: (params) =>
             failAfter("appendPublication", session.appendPublication(params)),
           markRevisionPublished: (revisionId, publishedAt) =>
@@ -117,6 +163,7 @@ function publicationCommand(fixture: Awaited<ReturnType<typeof seedRuntimePublic
     tenantId: fixture.tenantId,
     revisionId: fixture.revision.id,
     runtimeExpectedVersionNo: fixture.runtime.versionNo,
+    conformanceRunId: fixture.conformanceRunId,
     conformanceResults: passingConformanceResults(),
     actor: {
       tenantId: fixture.tenantId,
@@ -143,15 +190,14 @@ function publicationCommand(fixture: Awaited<ReturnType<typeof seedRuntimePublic
 }
 
 describe("RuntimeRevision publication application boundary", () => {
-  it("原发布入口在同一结果中写入PublicationRecord、Runtime指针、Audit与Outbox", async () => {
+  it("显式 Passed Run 发布在同一结果中写入PublicationRecord、Runtime指针、Audit与Outbox", async () => {
     const fixture = await seedRuntimePublicationFixture();
 
-    const revision = await publishRuntimeRevision(
-      fixture.tenantId,
-      fixture.revision.id,
-      fixture.runtime.versionNo,
-      passingConformanceResults(),
-    );
+    const publish = createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore });
+    const { revision } = await publish({
+      ...publicationCommand(fixture),
+      idempotency: undefined,
+    });
 
     expect(revision.revisionState).toBe("published");
     expect((await getRuntimeById(fixture.tenantId, fixture.runtime.id))?.currentRevisionId).toBe(
@@ -167,8 +213,8 @@ describe("RuntimeRevision publication application boundary", () => {
       subjectType: "runtime_revision",
       subjectRevisionId: revision.id,
       attestationIds: [],
-      conformanceRunId: null,
-      publishedByType: "system",
+      conformanceRunId: fixture.conformanceRunId,
+      publishedByType: "user",
     });
 
     const auditEvents = await listAuditEvents({
@@ -196,6 +242,7 @@ describe("RuntimeRevision publication application boundary", () => {
       tenantId: fixture.tenantId,
       revisionId: fixture.revision.id,
       runtimeExpectedVersionNo: fixture.runtime.versionNo,
+      conformanceRunId: fixture.conformanceRunId,
       conformanceResults: passingConformanceResults(),
       actor: {
         tenantId: fixture.tenantId,
@@ -304,7 +351,7 @@ describe("RuntimeRevision publication application boundary", () => {
     ).toBeNull();
   });
 
-  it("相同conformance证据顺序不同仍生成相同EvidenceSetDigest", async () => {
+  it("PublicationRecord 的 EvidenceSetDigest 冻结所选 Conformance Run", async () => {
     const first = await seedRuntimePublicationFixture("-digest-a");
     const second = await seedRuntimePublicationFixture("-digest-b");
     const publishRuntimeRevision = createPublishRuntimeRevision({
@@ -317,7 +364,6 @@ describe("RuntimeRevision publication application boundary", () => {
     });
     await publishRuntimeRevision({
       ...publicationCommand(second),
-      conformanceResults: [...passingConformanceResults()].reverse(),
       idempotency: undefined,
     });
 
@@ -331,11 +377,10 @@ describe("RuntimeRevision publication application boundary", () => {
       subjectType: "runtime_revision",
       subjectRevisionId: second.revision.id,
     });
-    expect(secondPublication?.evidenceSetDigest).toBe(firstPublication?.evidenceSetDigest);
+    expect(secondPublication?.evidenceSetDigest).not.toBe(firstPublication?.evidenceSetDigest);
   });
 
   it.each<PublicationStep>([
-    "persistConformanceResults",
     "appendPublication",
     "markRevisionPublished",
     "setRuntimeCurrentRevision",

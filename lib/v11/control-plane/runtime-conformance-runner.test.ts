@@ -19,6 +19,7 @@ import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
+import { canonicalizeRuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
 import {
   ALL_CONFORMANCE_CASES,
   type ConformanceCaseId,
@@ -79,14 +80,21 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-api.test.ts 一致）。
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+const ORIGINAL_CONFORMANCE_SECRET = process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET;
+const CONFORMANCE_SECRET = "test-runtime-conformance-secret-32-bytes";
+const RUNTIME_DIGEST = `sha256:${"a".repeat(64)}`;
+const CONFIG_DIGEST = `sha256:${"b".repeat(64)}`;
+const RUNNER_DIGEST = `sha256:${"c".repeat(64)}`;
 
 beforeEach(async () => {
   process.env.SNOW_AUTH_MODE = "dev";
+  process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET = CONFORMANCE_SECRET;
   await resetDatabase(db);
 });
 
 afterEach(() => {
   process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
+  process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET = ORIGINAL_CONFORMANCE_SECRET;
 });
 
 // ─── 辅助：seed 租户 + 用户 + Runtime + draft Revision ──
@@ -126,11 +134,11 @@ async function seedRuntimeAndRevision(
     runtimeId: runtime.id,
     protocolType: "agent_runtime_protocol",
     endpointRef: "connection://doubao-prod",
-    runtimeArtifactRef: "oci://registry/runtime@sha256:abc",
+    runtimeArtifactRef: `oci://registry/runtime@${RUNTIME_DIGEST}`,
     runtimeCapabilitiesJson: { steer: true, cancel: true, event_stream: true, tool_call: true },
     identityMode: "workload_token",
     networkZone: "internal",
-    configHash: "sha256:config_v1",
+    configHash: CONFIG_DIGEST,
     createdBy: ownerId,
   });
   return { runtime, revision };
@@ -144,6 +152,36 @@ function passingConformanceResults(): ConformanceCaseResult[] {
 /** 构造全部 16 case 通过的 conformance 结果。 */
 function passingAllConformanceResults(): ConformanceCaseResult[] {
   return ALL_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true }));
+}
+
+function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
+  const report = {
+    runId: randomUUID(),
+    runtimeRevisionId,
+    runtimeArtifactDigest: RUNTIME_DIGEST,
+    runtimeConfigDigest: CONFIG_DIGEST,
+    protocolContractRevision: "agent-runtime-protocol@1",
+    suiteRevision: "runtime-conformance@1",
+    runnerArtifactDigest: RUNNER_DIGEST,
+    runnerIdentity: "ci/runtime-conformance",
+    testEnvironmentRevision: "isolated-mysql8@1",
+    startedAt: "2026-08-02T01:00:00.000Z",
+    completedAt: "2026-08-02T01:00:01.000Z",
+    overallResult: passed ? ("passed" as const) : ("failed" as const),
+    evidenceManifestDigest: `sha256:${randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
+    caseResults: ALL_CONFORMANCE_CASES.map((caseId, index) => ({
+      caseId,
+      passed: passed || index !== 0,
+      reason: !passed && index === 0 ? "isolated test failure" : null,
+      evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
+    })),
+  };
+  return {
+    runner_report: report,
+    runner_signature: createHmac("sha256", CONFORMANCE_SECRET)
+      .update(canonicalizeRuntimeConformanceReport(report))
+      .digest("hex"),
+  };
 }
 
 /** 构造指定 mandatory case 失败的 conformance 结果。 */
@@ -295,7 +333,7 @@ describe("S05-C06 runtime-conformance-result-queries（持久化）", () => {
     revisionId = revision.id;
   });
 
-  it("persistConformanceResults 写入 4 个 mandatory case 结果", async () => {
+  it("旧结果投影仍可读取全部 required case（不再作为发布依据）", async () => {
     const results = await persistConformanceResults({
       tenantId,
       runtimeRevisionId: revisionId,
@@ -305,8 +343,8 @@ describe("S05-C06 runtime-conformance-result-queries（持久化）", () => {
       evidenceRef: "log://test/abc",
     });
 
-    expect(results).toHaveLength(4);
-    expect(results[0]?.caseId).toBe("cancel-request-not-terminal");
+    expect(results).toHaveLength(16);
+    expect(results[0]?.caseId).toBe("attempt-sequence-continuity");
     expect(results[0]?.passed).toBe(true);
     expect(results[0]?.adapterDigest).toBe("sha256:adapter-v1");
     expect(results[0]?.testEnvironment).toBe("testcontainers-mysql-8");
@@ -334,7 +372,7 @@ describe("S05-C06 runtime-conformance-result-queries（持久化）", () => {
     });
 
     const all = await listConformanceResultsByRevision(revisionId);
-    expect(all).toHaveLength(4);
+    expect(all).toHaveLength(16);
     // 全部应为 false（UPSERT 更新）
     expect(all.every((r) => r.passed === false)).toBe(true);
     expect(all[0]?.reason).toBe("重新测试失败");
@@ -376,7 +414,7 @@ describe("S05-C06 runtime-conformance-result-queries（持久化）", () => {
     });
 
     const deleted = await deleteConformanceResultsByRevision(revisionId);
-    expect(deleted).toBe(4);
+    expect(deleted).toBe(16);
     expect(await listConformanceResultsByRevision(revisionId)).toHaveLength(0);
   });
 
@@ -417,7 +455,7 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
     expect(results.map((r) => r.caseId)).toEqual([...ALL_CONFORMANCE_CASES]);
   });
 
-  it("runConformanceSuite HostedAdapter 全部 case passed=true", async () => {
+  it("runConformanceSuite 不会把未执行的 case 伪装为通过", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
 
@@ -427,11 +465,13 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
       runtimeAdapter: adapter,
     });
 
-    const failedCases = results.filter((r) => !r.passed);
-    expect(failedCases).toHaveLength(0);
+    expect(results.find((r) => r.caseId === "tool-schema-refresh")).toMatchObject({
+      passed: false,
+      reason: "case_requires_isolated_runner",
+    });
   });
 
-  it("runConformanceSuite 通过 validateConformanceGate 门禁", async () => {
+  it("仅 Adapter probe 的结果不能通过完整门禁", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
 
@@ -442,8 +482,8 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
     });
 
     const gateResult = validateConformanceGate(results);
-    expect(gateResult.passed).toBe(true);
-    expect(gateResult.failedCases).toHaveLength(0);
+    expect(gateResult.passed).toBe(false);
+    expect(gateResult.failedCases).toContain("tool-schema-refresh");
   });
 
   it("dispatch-binds-immutable-config: HostedAdapter 返回唯一 runtime_execution_ref", async () => {
@@ -502,7 +542,7 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
     expect(case7?.passed).toBe(true);
   });
 
-  it("credential-never-in-model-data: adapter_design_guarantee → passed=true", async () => {
+  it("credential-never-in-model-data: 设计声明不能冒充隔离实测", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
 
@@ -513,8 +553,25 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
     });
 
     const case14 = results.find((r) => r.caseId === "credential-never-in-model-data");
-    expect(case14?.passed).toBe(true);
-    expect(case14?.reason).toContain("adapter_design_guarantee");
+    expect(case14).toMatchObject({
+      passed: false,
+      reason: "case_requires_isolated_runner",
+    });
+  });
+
+  it("execution-ownership-epoch: Hosted 单节点假设不能冒充所有权切换实测", async () => {
+    const { sink } = createMockSink();
+    const adapter = createHostedAdapter(mockAdapterParams(sink));
+    const results = await runConformanceSuite({
+      tenantId,
+      runtimeRevisionId: revisionId,
+      runtimeAdapter: adapter,
+    });
+
+    expect(results.find((r) => r.caseId === "execution-ownership-epoch")).toMatchObject({
+      passed: false,
+      reason: "case_requires_isolated_runner",
+    });
   });
 
   it("session-does-not-claim-filesystem-recovery: filesystem_checkpoint=false → passed=true", async () => {
@@ -531,7 +588,7 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
     expect(case16?.passed).toBe(true);
   });
 
-  it("6 个 not_applicable_this_stage case 返回 passed=true + reason", async () => {
+  it("6 个未执行 case fail-closed", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
 
@@ -552,8 +609,8 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
 
     for (const caseId of notApplicableCases) {
       const result = results.find((r) => r.caseId === caseId);
-      expect(result?.passed).toBe(true);
-      expect(result?.reason).toBe("not_applicable_this_stage");
+      expect(result?.passed).toBe(false);
+      expect(result?.reason).toBe("case_requires_isolated_runner");
     }
   });
 
@@ -715,27 +772,11 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
     revisionId = revision.id;
   });
 
-  it("publishRuntimeRevision 成功后持久化 conformance 结果（含 options）", async () => {
-    const published = await publishRuntimeRevision(
-      tenantId,
-      revisionId,
-      1,
-      passingAllConformanceResults(),
-      {
-        adapterDigest: "sha256:adapter-v1",
-        testEnvironment: "testcontainers-mysql-8",
-        evidenceRef: "log://test/publish-001",
-      },
-    );
-
-    expect(published.revisionState).toBe("published");
-
-    // 验证 conformance 结果已持久化
-    const results = await listConformanceResultsByRevision(revisionId);
-    expect(results).toHaveLength(16);
-    expect(results[0]?.adapterDigest).toBe("sha256:adapter-v1");
-    expect(results[0]?.testEnvironment).toBe("testcontainers-mysql-8");
-    expect(results[0]?.evidenceRef).toBe("log://test/publish-001");
+  it("旧发布入口不能再用调用方自报结果发布", async () => {
+    await expect(
+      publishRuntimeRevision(tenantId, revisionId, 1, passingAllConformanceResults()),
+    ).rejects.toThrow(ConformanceGateError);
+    expect((await getRuntimeRevisionById(revisionId))?.revisionState).toBe("draft");
   });
 
   it("publishRuntimeRevision 门禁失败 → 抛 ConformanceGateError + 不持久化结果", async () => {
@@ -757,28 +798,19 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
     expect(results).toHaveLength(0);
   });
 
-  it("publishRuntimeRevision 仅 4 mandatory case 通过即可发布（非 mandatory case 可缺失）", async () => {
-    const published = await publishRuntimeRevision(
-      tenantId,
-      revisionId,
-      1,
-      passingConformanceResults(),
-    );
-
-    expect(published.revisionState).toBe("published");
-
-    // 只持久化 4 个 mandatory case
-    const results = await listConformanceResultsByRevision(revisionId);
-    expect(results).toHaveLength(4);
+  it("缺少显式 Passed Run 时全部 16 个 required case 均视为缺失", async () => {
+    await expect(
+      publishRuntimeRevision(tenantId, revisionId, 1, passingConformanceResults()),
+    ).rejects.toMatchObject({ failedCases: ALL_CONFORMANCE_CASES });
   });
 
-  it("publishRuntimeRevision 不传 options → conformance 结果 adapterDigest/testEnvironment/evidenceRef 为 null", async () => {
-    await publishRuntimeRevision(tenantId, revisionId, 1, passingConformanceResults());
-
-    const results = await listConformanceResultsByRevision(revisionId);
-    expect(results[0]?.adapterDigest).toBeNull();
-    expect(results[0]?.testEnvironment).toBeNull();
-    expect(results[0]?.evidenceRef).toBeNull();
+  it("旧式 options 不会创建或覆盖任何 conformance 事实", async () => {
+    await expect(
+      publishRuntimeRevision(tenantId, revisionId, 1, passingConformanceResults(), {
+        adapterDigest: "sha256:legacy",
+      }),
+    ).rejects.toThrow(ConformanceGateError);
+    expect(await listConformanceResultsByRevision(revisionId)).toHaveLength(0);
   });
 });
 
@@ -820,7 +852,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     expect(body.results).toHaveLength(0);
   });
 
-  it("GET /conformance 返回已持久化的 conformance 结果", async () => {
+  it("GET /conformance 不把旧可覆盖投影冒充权威 Run", async () => {
     // 先持久化一些结果
     await persistConformanceResults({
       tenantId,
@@ -839,22 +871,16 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { results: unknown[] };
-    expect(body.results).toHaveLength(4);
+    expect(body.results).toHaveLength(0);
   });
 
-  it("POST /conformance publish=false 持久化 conformance 结果（不发布）", async () => {
+  it("POST /conformance publish=false 验签并记录不可变 Run（不发布）", async () => {
     const request = buildV11Request({
       audience: "admin",
       method: "POST",
       path: `/runtime-revisions/${revisionId}/conformance`,
       idempotencyKey: "idem-conf-001",
-      body: {
-        conformance_results: passingConformanceResults().map((r) => ({
-          case_id: r.caseId,
-          passed: r.passed,
-        })),
-        publish: false,
-      },
+      body: { ...trustedRunnerBody(revisionId), publish: false },
     });
 
     const response = await conformancePOST(request, {
@@ -864,7 +890,8 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.published).toBe(false);
     expect(body.revision_state).toBe("draft");
-    expect(body.results).toHaveLength(4);
+    expect(body.results).toHaveLength(16);
+    expect(body.conformance_run_id).toBeTruthy();
 
     // Revision 仍为 draft
     const after = await getRuntimeRevisionById(revisionId);
@@ -872,20 +899,18 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
   });
 
   it("POST /conformance publish=true 通过门禁 → 发布 Revision", async () => {
+    const signedBody = {
+      ...trustedRunnerBody(revisionId),
+      publish: true,
+      expected_version_no: 1,
+    };
     const request = buildV11Request({
       audience: "admin",
       method: "POST",
       path: `/runtime-revisions/${revisionId}/conformance`,
       idempotencyKey: "idem-conf-publish-001",
       ifMatch: etag,
-      body: {
-        conformance_results: passingConformanceResults().map((r) => ({
-          case_id: r.caseId,
-          passed: r.passed,
-        })),
-        publish: true,
-        expected_version_no: 1,
-      },
+      body: signedBody,
     });
 
     const response = await conformancePOST(request, {
@@ -919,14 +944,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
         path: `/runtime-revisions/${revisionId}/conformance`,
         idempotencyKey: "idem-conf-publish-001",
         ifMatch: etag,
-        body: {
-          conformance_results: passingConformanceResults().map((result) => ({
-            case_id: result.caseId,
-            passed: result.passed,
-          })),
-          publish: true,
-          expected_version_no: 1,
-        },
+        body: signedBody,
       }),
       { params: Promise.resolve({ revision_id: revisionId }) },
     );
@@ -934,19 +952,17 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     expect(await replayResponse.json()).toEqual(body);
   });
 
-  it("POST /conformance 门禁失败 → 422 BUSINESS_CONSTRAINT_VIOLATION", async () => {
+  it("POST /conformance publish=true 的 Failed Run 被发布门禁阻断", async () => {
     const request = buildV11Request({
       audience: "admin",
       method: "POST",
       path: `/runtime-revisions/${revisionId}/conformance`,
       idempotencyKey: "idem-conf-fail-001",
+      ifMatch: etag,
       body: {
-        conformance_results: failingConformanceResults("event-batch-idempotent").map((r) => ({
-          case_id: r.caseId,
-          passed: r.passed,
-          reason: r.reason,
-        })),
-        publish: false,
+        ...trustedRunnerBody(revisionId, false),
+        publish: true,
+        expected_version_no: 1,
       },
     });
 
@@ -965,10 +981,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
       path: `/runtime-revisions/${revisionId}/conformance`,
       idempotencyKey: "idem-conf-no-ifmatch-001",
       body: {
-        conformance_results: passingConformanceResults().map((r) => ({
-          case_id: r.caseId,
-          passed: r.passed,
-        })),
+        ...trustedRunnerBody(revisionId),
         publish: true,
         expected_version_no: 1,
       },
@@ -1047,3 +1060,4 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     expect(body.error.code).toBe("RESOURCE_NOT_FOUND");
   });
 });
+import { createHmac, randomUUID } from "node:crypto";

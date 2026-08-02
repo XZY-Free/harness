@@ -149,6 +149,10 @@ export const v11RuntimeRevision = mysqlTable(
     revisionNo: bigint("revisionNo", { mode: "number" }).notNull(),
     /** 协议类型（agent_runtime_protocol/a2a/...）；varchar 以便扩展。 */
     protocolType: varchar("protocolType", { length: 32 }).notNull(),
+    /** Conformance 与发布共同冻结的协议契约版本。 */
+    protocolContractRevision: varchar("protocolContractRevision", { length: 128 })
+      .notNull()
+      .default("agent-runtime-protocol@1"),
     /** 受管连接引用，不保存带 Secret 的 URL。 */
     endpointRef: varchar("endpointRef", { length: 512 }).notNull(),
     /** Runtime 主机/Adapter 制品引用。 */

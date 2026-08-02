@@ -2041,6 +2041,7 @@ export type DesktopDevice = InferSelectModel<typeof desktopDevice>;
 
 // ─── V11 Schema（阶段 2 起拆入身份、授权、幂等、审计表组）─────────
 export * from "@/lib/v11/schema/identity";
+export * from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 export * from "@/lib/v11/schema/device";
 export * from "@/lib/v11/schema/authorization";
 export * from "@/lib/v11/schema/idempotency";

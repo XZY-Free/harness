@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
 import {
   artifact,
@@ -8,15 +7,15 @@ import {
 import { db } from "@/lib/db/client";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import type { ConformanceCaseId } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
+import {
+  runtimeConformanceCaseResult,
+  runtimeConformanceRun,
+} from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import type { RuntimePublicationStore } from "@/lib/runtimes/persistence/runtime-publication-store";
 import { computeContentHash } from "@/lib/v11/identity/audit";
 import { auditEvent } from "@/lib/v11/schema/audit";
 import { idempotencyRecord } from "@/lib/v11/schema/idempotency";
-import {
-  v11Runtime,
-  v11RuntimeConformanceResult,
-  v11RuntimeRevision,
-} from "@/lib/v11/schema/runtime";
+import { v11Runtime, v11RuntimeRevision } from "@/lib/v11/schema/runtime";
 import { and, asc, eq, isNull } from "drizzle-orm";
 
 export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
@@ -77,49 +76,58 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
             .for("update");
           return attestation?.attestation ?? null;
         },
-        async persistConformanceResults(params) {
-          for (const result of params.results) {
-            await tx
-              .insert(v11RuntimeConformanceResult)
-              .values({
-                id: randomUUID(),
-                runtimeRevisionId: params.revisionId,
-                tenantId: params.tenantId,
-                caseId: result.caseId,
-                passed: result.passed,
-                reason: result.reason ?? null,
-                adapterDigest: params.options.adapterDigest,
-                testEnvironment: params.options.testEnvironment,
-                evidenceRef: params.options.evidenceRef,
-                testedAt: params.testedAt,
-              })
-              .onDuplicateKeyUpdate({
-                set: {
-                  passed: result.passed,
-                  reason: result.reason ?? null,
-                  adapterDigest: params.options.adapterDigest,
-                  testEnvironment: params.options.testEnvironment,
-                  evidenceRef: params.options.evidenceRef,
-                  testedAt: params.testedAt,
-                  updatedAt: params.testedAt,
-                },
-              });
+        async findPassedConformanceRun(params) {
+          const [run] = await tx
+            .select()
+            .from(runtimeConformanceRun)
+            .where(
+              and(
+                eq(runtimeConformanceRun.id, params.conformanceRunId),
+                eq(runtimeConformanceRun.tenantId, params.tenantId),
+                eq(runtimeConformanceRun.runtimeRevisionId, params.revisionId),
+                eq(runtimeConformanceRun.overallResult, "passed"),
+              ),
+            )
+            .limit(1)
+            .for("update");
+          if (!run) return null;
+          const [revision] = await tx
+            .select()
+            .from(v11RuntimeRevision)
+            .where(eq(v11RuntimeRevision.id, params.revisionId))
+            .limit(1);
+          if (
+            !revision ||
+            revision.artifactDigest !== run.runtimeArtifactDigest ||
+            revision.configHash !== run.runtimeConfigDigest ||
+            revision.protocolContractRevision !== run.protocolContractRevision
+          ) {
+            return null;
           }
-
           const rows = await tx
             .select()
-            .from(v11RuntimeConformanceResult)
-            .where(eq(v11RuntimeConformanceResult.runtimeRevisionId, params.revisionId))
-            .orderBy(asc(v11RuntimeConformanceResult.caseId));
-          return rows.map((row) => ({
-            caseId: row.caseId as ConformanceCaseId,
-            passed: row.passed,
-            reason: row.reason,
-            adapterDigest: row.adapterDigest,
-            testEnvironment: row.testEnvironment,
-            evidenceRef: row.evidenceRef,
-            testedAt: row.testedAt,
-          }));
+            .from(runtimeConformanceCaseResult)
+            .where(eq(runtimeConformanceCaseResult.runId, run.id))
+            .orderBy(asc(runtimeConformanceCaseResult.caseId));
+          if (rows.length !== 16 || rows.some((row) => !row.passed)) return null;
+          return {
+            id: run.id,
+            evidenceManifestDigest: run.evidenceManifestDigest,
+            results: rows.map((row) => ({
+              caseId: row.caseId as ConformanceCaseId,
+              passed: row.passed,
+              reason: row.reason,
+              adapterDigest: run.runnerArtifactDigest,
+              testEnvironment: run.testEnvironmentRevision,
+              evidenceRef: row.evidenceDigest,
+              testedAt: run.completedAt,
+            })),
+          };
+        },
+        async persistConformanceResults() {
+          throw new Error(
+            "旧式可覆盖 ConformanceResult 写入已停用；必须记录不可变 Conformance Run",
+          );
         },
         async appendPublication(params) {
           await tx.insert(publicationRecord).values({
@@ -129,7 +137,7 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
             subjectRevisionId: params.revisionId,
             evidenceSetDigest: params.evidenceSetDigest,
             attestationIds: params.attestationIds,
-            conformanceRunId: null,
+            conformanceRunId: params.conformanceRunId,
             approvals: [],
             publishedByType: params.publishedByType,
             publishedBy: params.publishedBy,

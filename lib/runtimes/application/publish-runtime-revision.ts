@@ -3,12 +3,12 @@ import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/p
 import {
   type ConformanceCaseResult,
   ConformanceGateError,
+  MANDATORY_GATE_CASES,
   RuntimePublicationIdempotencyCompletionError,
   RuntimePublicationPrerequisiteError,
   RuntimeRevisionNotFoundError,
   RuntimeRevisionStateError,
   RuntimeVersionConflictError,
-  validateConformanceGate,
 } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 import type {
   RuntimePublicationActorType,
@@ -32,7 +32,11 @@ export interface PublishRuntimeRevisionCommand {
   tenantId: string;
   revisionId: string;
   runtimeExpectedVersionNo: number;
-  conformanceResults: ConformanceCaseResult[];
+  /** 必须显式选择已完成且与 Revision 绑定一致的 Passed Run。 */
+  conformanceRunId?: string;
+  /** @deprecated 调用方自报结果不再参与门禁，仅为旧调用方编译兼容保留。 */
+  conformanceResults?: ConformanceCaseResult[];
+  /** @deprecated 调用方自报元数据不再参与门禁。 */
   conformanceOptions?: Partial<RuntimePublicationConformanceOptions>;
   attestationId?: string;
   actor: {
@@ -65,11 +69,10 @@ export function createPublishRuntimeRevision(dependencies: {
       throw new Error("RuntimeRevision 发布 actor tenant 与命令 tenant 不一致");
     }
 
-    const gate = validateConformanceGate(command.conformanceResults);
-    if (!gate.passed) throw new ConformanceGateError(gate.failedCases);
-    const normalizedConformanceResults = [...command.conformanceResults].sort((left, right) =>
-      left.caseId.localeCompare(right.caseId),
-    );
+    const conformanceRunId = command.conformanceRunId;
+    if (!conformanceRunId) {
+      throw new ConformanceGateError([...MANDATORY_GATE_CASES]);
+    }
 
     return dependencies.store.transaction(async (session) => {
       const revision = await session.findRevision(command.tenantId, command.revisionId);
@@ -100,19 +103,14 @@ export function createPublishRuntimeRevision(dependencies: {
         }
       }
 
-      const publishedAt = now();
-      const conformanceOptions: RuntimePublicationConformanceOptions = {
-        adapterDigest: command.conformanceOptions?.adapterDigest ?? null,
-        testEnvironment: command.conformanceOptions?.testEnvironment ?? null,
-        evidenceRef: command.conformanceOptions?.evidenceRef ?? null,
-      };
-      const conformanceResults = await session.persistConformanceResults({
+      const conformanceRun = await session.findPassedConformanceRun({
         tenantId: command.tenantId,
         revisionId: revision.id,
-        results: normalizedConformanceResults,
-        options: conformanceOptions,
-        testedAt: publishedAt,
+        conformanceRunId,
       });
+      if (!conformanceRun) throw new ConformanceGateError([...MANDATORY_GATE_CASES]);
+      const publishedAt = now();
+      const conformanceResults = conformanceRun.results;
 
       const publicationRecordId = newId();
       const attestationIds = attestation ? [attestation.id] : [];
@@ -122,13 +120,9 @@ export function createPublishRuntimeRevision(dependencies: {
         revisionId: revision.id,
         evidenceSetDigest: computePublicationEvidenceSetDigest({
           attestationIds,
-          conformanceRunId: null,
+          conformanceRunId: conformanceRun.id,
           approvals: [],
-          additionalEvidence: {
-            kind: "inline_conformance_results",
-            results: normalizedConformanceResults,
-            ...conformanceOptions,
-          },
+          additionalEvidence: { evidenceManifestDigest: conformanceRun.evidenceManifestDigest },
         }),
         attestationIds,
         publishedByType: command.actor.actorType,
@@ -136,6 +130,7 @@ export function createPublishRuntimeRevision(dependencies: {
         publishedAt,
         idempotencyKey: command.idempotencyKey,
         idempotencyRecordId: command.idempotency?.recordId ?? null,
+        conformanceRunId: conformanceRun.id,
       });
 
       if (!(await session.markRevisionPublished(revision.id, publishedAt))) {
@@ -172,6 +167,7 @@ export function createPublishRuntimeRevision(dependencies: {
           attestation_id: attestation?.id ?? null,
           artifact_digest: attestation?.artifactDigest ?? null,
           publication_record_id: publicationRecordId,
+          conformance_run_id: conformanceRun.id,
         },
         reason: "RuntimeRevision 发布（conformance 门禁通过）",
         requestId: command.requestId,
@@ -193,6 +189,7 @@ export function createPublishRuntimeRevision(dependencies: {
           attestation_id: attestation?.id ?? null,
           audit_event_id: auditEventId,
           publication_record_id: publicationRecordId,
+          conformance_run_id: conformanceRun.id,
         },
         occurredAt: publishedAt,
       });

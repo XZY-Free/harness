@@ -10,7 +10,7 @@
  * - runConformanceSuite：对 RuntimeAdapter 运行 16 个 conformance case 的基础场景，
  *   返回 ConformanceCaseResult[]。
  * - 基础场景：仅通过 RuntimeAdapter 接口可验证的 case（不需要完整平台基础设施）。
- * - 高级场景：返回 passed=true + reason="not_applicable_this_stage"（后续阶段补完整）。
+ * - 无法在本地 Adapter probe 中实测的场景一律 fail-closed；本 runner 不产生权威 Passed Run。
  *
  * 16 个 case 分类：
  * - 9 个基础场景（adapter probe 可验证）：
@@ -154,11 +154,7 @@ async function runSingleCase(
       return testSessionDoesNotClaimFilesystemRecovery(params, capabilities);
     default:
       if (NOT_APPLICABLE_CASES.includes(caseId)) {
-        return {
-          caseId,
-          passed: true,
-          reason: "not_applicable_this_stage",
-        };
+        return { caseId, passed: false, reason: "case_requires_isolated_runner" };
       }
       // 未识别的 case：fail-closed
       return {
@@ -477,9 +473,8 @@ function testCredentialNeverInModelData(
   void capabilities; // capabilities schema 已由类型系统保证无 credential 字段
   return {
     caseId: "credential-never-in-model-data",
-    passed: true,
-    reason:
-      "adapter_design_guarantee：RuntimeAdapter 接口不暴露 credential 字段；完整 schema 校验后续阶段补",
+    passed: false,
+    reason: "case_requires_isolated_runner",
   };
 }
 
@@ -497,9 +492,8 @@ function testExecutionOwnershipEpoch(
   void capabilities;
   return {
     caseId: "execution-ownership-epoch",
-    passed: true,
-    reason:
-      "adapter_design_guarantee：Hosted Runtime 单 leaseEpoch；External Runtime 切换测试后续阶段补",
+    passed: false,
+    reason: "case_requires_isolated_runner",
   };
 }
 

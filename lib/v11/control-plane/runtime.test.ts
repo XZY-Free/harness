@@ -1,3 +1,5 @@
+import { mysqlRuntimeConformanceRunStore } from "@/lib/compatibility/runtimes/mysql-runtime-conformance-run-store";
+import { publishRuntimeRevisionThroughControlPlane } from "@/lib/compatibility/runtimes/publish-runtime-revision";
 /**
  * S03-C02：V11 Runtime 修订模型集成测试（真实 MySQL 8）。
  *
@@ -13,7 +15,10 @@
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
+import { canonicalizeRuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
 import {
+  ALL_CONFORMANCE_CASES,
   type ConformanceCaseResult,
   ConformanceGateError,
   MANDATORY_GATE_CASES,
@@ -94,13 +99,72 @@ function buildDraftParams(
     runtimeId,
     protocolType: overrides.protocolType ?? "agent_runtime_protocol",
     endpointRef: overrides.endpointRef ?? "connection://doubao-prod",
-    runtimeArtifactRef: overrides.runtimeArtifactRef ?? "oci://registry/runtime@sha256:abc",
+    runtimeArtifactRef:
+      overrides.runtimeArtifactRef ?? `oci://registry/runtime@sha256:${"a".repeat(64)}`,
     runtimeCapabilitiesJson: { steer: true, cancel: true, event_stream: true, tool_call: true },
     identityMode: overrides.identityMode ?? "workload_token",
     networkZone: overrides.networkZone ?? "internal",
-    configHash: overrides.configHash ?? "sha256:config_v1",
+    configHash: overrides.configHash ?? `sha256:${"b".repeat(64)}`,
     createdBy,
   };
+}
+
+const TRUSTED_SECRET = "runtime-test-trusted-secret-at-least-32-bytes";
+const RUNNER_DIGEST = `sha256:${"c".repeat(64)}`;
+
+async function publishTrustedRevision(
+  tenantId: string,
+  revisionId: string,
+  expectedVersionNo: number,
+) {
+  const revision = await getRuntimeRevisionById(revisionId);
+  if (!revision?.artifactDigest) throw new Error("测试 Revision 缺少不可变 artifactDigest");
+  const report = {
+    runId: randomUUID(),
+    runtimeRevisionId: revisionId,
+    runtimeArtifactDigest: revision.artifactDigest,
+    runtimeConfigDigest: revision.configHash,
+    protocolContractRevision: revision.protocolContractRevision,
+    suiteRevision: "runtime-conformance@1",
+    runnerArtifactDigest: RUNNER_DIGEST,
+    runnerIdentity: "ci/runtime-conformance",
+    testEnvironmentRevision: "isolated-mysql8@1",
+    startedAt: "2026-08-02T01:00:00.000Z",
+    completedAt: "2026-08-02T01:00:01.000Z",
+    overallResult: "passed" as const,
+    evidenceManifestDigest: `sha256:${randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
+    caseResults: ALL_CONFORMANCE_CASES.map((caseId, index) => ({
+      caseId,
+      passed: true,
+      reason: null,
+      evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
+    })),
+  };
+  const record = createRecordRuntimeConformanceRun({
+    store: mysqlRuntimeConformanceRunStore,
+    signingSecret: () => TRUSTED_SECRET,
+  });
+  await record({
+    tenantId,
+    runtimeRevisionId: revisionId,
+    report,
+    signature: createHmac("sha256", TRUSTED_SECRET)
+      .update(canonicalizeRuntimeConformanceReport(report))
+      .digest("hex"),
+    idempotencyKey: `test-run-${report.runId}`,
+    requestId: `request-${report.runId}`,
+    actor: { actorType: "system", actorId: "test-trusted-runner" },
+  });
+  const published = await publishRuntimeRevisionThroughControlPlane({
+    tenantId,
+    revisionId,
+    runtimeExpectedVersionNo: expectedVersionNo,
+    conformanceRunId: report.runId,
+    actor: { tenantId, actorType: "system", actorId: "test-trusted-runner" },
+    requestId: `publish-${report.runId}`,
+    idempotencyKey: `publish-${report.runId}`,
+  });
+  return { revision: published.revision, conformanceRunId: report.runId };
 }
 
 /** 构造全部 mandatory case 通过的 conformance 结果。 */
@@ -145,29 +209,24 @@ describe("V11 runtime-conformance（纯逻辑）", () => {
     expect(result.failedCases).toContain("credential-never-in-model-data");
   });
 
-  it("validateConformanceGate 空 results → passed=false（4 个全缺失）", () => {
+  it("validateConformanceGate 空 results → passed=false（16 个全缺失）", () => {
     const result = validateConformanceGate([]);
     expect(result.passed).toBe(false);
-    expect(result.failedCases).toHaveLength(4);
+    expect(result.failedCases).toHaveLength(16);
   });
 
-  it("validateConformanceGate 非 mandatory case 不影响门禁", () => {
+  it("validateConformanceGate 任一 required case 失败都会阻断门禁", () => {
     const results: ConformanceCaseResult[] = [
       ...passingConformanceResults(),
       { caseId: "steer-requires-ack", passed: false, reason: "optional case 失败" },
     ];
     const result = validateConformanceGate(results);
-    expect(result.passed).toBe(true);
+    expect(result.passed).toBe(false);
+    expect(result.failedCases).toContain("steer-requires-ack");
   });
 
-  it("MANDATORY_GATE_CASES 恰好 4 个基础用例", () => {
-    expect(MANDATORY_GATE_CASES).toHaveLength(4);
-    expect([...MANDATORY_GATE_CASES]).toEqual([
-      "dispatch-binds-immutable-config",
-      "event-batch-idempotent",
-      "cancel-request-not-terminal",
-      "credential-never-in-model-data",
-    ]);
+  it("MANDATORY_GATE_CASES 覆盖全部 16 个 required case", () => {
+    expect(MANDATORY_GATE_CASES).toEqual(ALL_CONFORMANCE_CASES);
   });
 
   it("isCapabilitySubset 子集满足 → satisfied=true", () => {
@@ -510,7 +569,7 @@ describe("V11 runtime-revision-queries", () => {
 
   it("updateDraftRuntimeRevisionContent published 状态抛 ImmutableError", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    await publishRuntimeRevision(tenantId, rev.id, 1, passingConformanceResults());
+    await publishTrustedRevision(tenantId, rev.id, 1);
     await expect(
       updateDraftRuntimeRevisionContent(rev.id, { configHash: "sha256:modified" }),
     ).rejects.toThrow(RuntimeRevisionImmutableError);
@@ -518,12 +577,7 @@ describe("V11 runtime-revision-queries", () => {
 
   it("publishRuntimeRevision conformance 门禁通过 → published + currentRevisionId 回填", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    const published = await publishRuntimeRevision(
-      tenantId,
-      rev.id,
-      1,
-      passingConformanceResults(),
-    );
+    const { revision: published } = await publishTrustedRevision(tenantId, rev.id, 1);
     expect(published.revisionState).toBe("published");
     expect(published.publishedAt).not.toBeNull();
 
@@ -568,22 +622,30 @@ describe("V11 runtime-revision-queries", () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     const error = await publishRuntimeRevision(tenantId, rev.id, 1, []).catch((e) => e);
     expect(error).toBeInstanceOf(ConformanceGateError);
-    expect(error.failedCases).toHaveLength(4);
+    expect(error.failedCases).toHaveLength(16);
   });
 
   it("publishRuntimeRevision published 状态再 publish 抛 StateError", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    await publishRuntimeRevision(tenantId, rev.id, 1, passingConformanceResults());
+    const firstPublication = await publishTrustedRevision(tenantId, rev.id, 1);
     await expect(
-      publishRuntimeRevision(tenantId, rev.id, 2, passingConformanceResults()),
+      publishRuntimeRevisionThroughControlPlane({
+        tenantId,
+        revisionId: rev.id,
+        runtimeExpectedVersionNo: 2,
+        conformanceRunId: firstPublication.conformanceRunId,
+        actor: { tenantId, actorType: "system", actorId: "test-trusted-runner" },
+        requestId: "repeat-publish",
+        idempotencyKey: "repeat-publish",
+      }),
     ).rejects.toThrow(RuntimeRevisionStateError);
   });
 
   it("publishRuntimeRevision Runtime 乐观锁冲突抛 VersionConflictError", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    await expect(
-      publishRuntimeRevision(tenantId, rev.id, 999, passingConformanceResults()),
-    ).rejects.toThrow(RuntimeVersionConflictError);
+    await expect(publishTrustedRevision(tenantId, rev.id, 999)).rejects.toThrow(
+      RuntimeVersionConflictError,
+    );
     // 发布事务整体回滚，不留下 Revision 已发布但 Runtime 指针未更新的部分状态。
     const after = await getRuntimeRevisionById(rev.id);
     expect(after?.revisionState).toBe("draft");
@@ -592,12 +654,7 @@ describe("V11 runtime-revision-queries", () => {
 
   it("withdrawRuntimeRevision published → withdrawn", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    const published = await publishRuntimeRevision(
-      tenantId,
-      rev.id,
-      1,
-      passingConformanceResults(),
-    );
+    const { revision: published } = await publishTrustedRevision(tenantId, rev.id, 1);
     const withdrawn = await withdrawRuntimeRevision(rev.id);
     expect(withdrawn.revisionState).toBe("withdrawn");
     expect(withdrawn.configHash).toBe(published.configHash);
@@ -622,9 +679,9 @@ describe("V11 runtime-revision-queries", () => {
   it("getLatestPublishedRuntimeRevision 返回最大 revisionNo 的 published", async () => {
     const r1 = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     const r2 = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    await publishRuntimeRevision(tenantId, r1.id, 1, passingConformanceResults());
+    await publishTrustedRevision(tenantId, r1.id, 1);
     // r1 publish 后 Runtime.versionNo=2，r2 publish 需用 versionNo=2
-    await publishRuntimeRevision(tenantId, r2.id, 2, passingConformanceResults());
+    await publishTrustedRevision(tenantId, r2.id, 2);
     const latest = await getLatestPublishedRuntimeRevision(runtimeId);
     expect(latest?.id).toBe(r2.id);
     expect(latest?.revisionNo).toBe(2);
@@ -633,8 +690,8 @@ describe("V11 runtime-revision-queries", () => {
   it("getLatestPublishedRuntimeRevision 排除 withdrawn", async () => {
     const r1 = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     const r2 = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    await publishRuntimeRevision(tenantId, r1.id, 1, passingConformanceResults());
-    await publishRuntimeRevision(tenantId, r2.id, 2, passingConformanceResults());
+    await publishTrustedRevision(tenantId, r1.id, 1);
+    await publishTrustedRevision(tenantId, r2.id, 2);
     await withdrawRuntimeRevision(r2.id);
     const latest = await getLatestPublishedRuntimeRevision(runtimeId);
     expect(latest?.id).toBe(r1.id);
@@ -664,15 +721,15 @@ describe("V11 S03-W02 阶段验收场景", () => {
 
   it("Runtime 制品/能力变化 → 生成新 Revision，旧 Revision 不可变", async () => {
     const r1 = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    await publishRuntimeRevision(tenantId, r1.id, 1, passingConformanceResults());
+    await publishTrustedRevision(tenantId, r1.id, 1);
     // 制品变化生成新 Revision
     const r2 = await createDraftRuntimeRevision(
       buildDraftParams(tenantId, runtimeId, ownerId, {
-        runtimeArtifactRef: "oci://registry/runtime@sha256:v2",
-        configHash: "sha256:config_v2",
+        runtimeArtifactRef: `oci://registry/runtime@sha256:${"d".repeat(64)}`,
+        configHash: `sha256:${"e".repeat(64)}`,
       }),
     );
-    await publishRuntimeRevision(tenantId, r2.id, 2, passingConformanceResults());
+    await publishTrustedRevision(tenantId, r2.id, 2);
     expect(r2.revisionNo).toBe(2);
     // 旧 Revision r1 业务内容不可变
     await expect(
@@ -682,7 +739,7 @@ describe("V11 S03-W02 阶段验收场景", () => {
 
   it("published Revision 业务内容不可修改（capabilities/protocolType/endpointRef 等）", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    await publishRuntimeRevision(tenantId, rev.id, 1, passingConformanceResults());
+    await publishTrustedRevision(tenantId, rev.id, 1);
     await expect(
       updateDraftRuntimeRevisionContent(rev.id, {
         runtimeCapabilitiesJson: { modified: true },
@@ -698,7 +755,7 @@ describe("V11 S03-W02 阶段验收场景", () => {
 
   it("withdrawn Revision 不删除历史引用（仍可查询）", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
-    await publishRuntimeRevision(tenantId, rev.id, 1, passingConformanceResults());
+    await publishTrustedRevision(tenantId, rev.id, 1);
     await withdrawRuntimeRevision(rev.id);
     const found = await getRuntimeRevisionById(rev.id);
     expect(found).not.toBeNull();
@@ -736,3 +793,4 @@ describe("V11 S03-W02 阶段验收场景", () => {
     expect(fail.missing).toEqual(["memory"]);
   });
 });
+import { createHmac, randomUUID } from "node:crypto";

@@ -22,8 +22,10 @@
  * - capabilities 必须来自探测和一致性测试，管理员不能手工勾选未支持能力。
  */
 import { randomUUID } from "node:crypto";
+import { extractArtifactDigest } from "@/lib/artifacts/domain/artifact";
 import { publishRuntimeRevisionThroughControlPlane } from "@/lib/compatibility/runtimes/publish-runtime-revision";
 import { db } from "@/lib/db/client";
+import { protocolContractRevision } from "@/lib/runtimes/domain/runtime-conformance-run";
 import {
   type ConformanceCaseResult,
   RuntimeRevisionNotFoundError,
@@ -66,8 +68,10 @@ export async function createDraftRuntimeRevision(
     runtimeId: params.runtimeId,
     revisionNo,
     protocolType: params.protocolType,
+    protocolContractRevision: protocolContractRevision(params.protocolType),
     endpointRef: params.endpointRef,
     runtimeArtifactRef: params.runtimeArtifactRef,
+    artifactDigest: extractArtifactDigest(params.runtimeArtifactRef),
     runtimeCapabilitiesJson: params.runtimeCapabilitiesJson,
     identityMode: params.identityMode,
     networkZone: params.networkZone,
@@ -109,7 +113,10 @@ export async function updateDraftRuntimeRevisionContent(
   }
 
   const updates: Record<string, unknown> = {};
-  if (patch.protocolType !== undefined) updates.protocolType = patch.protocolType;
+  if (patch.protocolType !== undefined) {
+    updates.protocolType = patch.protocolType;
+    updates.protocolContractRevision = protocolContractRevision(patch.protocolType);
+  }
   if (patch.endpointRef !== undefined) updates.endpointRef = patch.endpointRef;
   if (patch.runtimeArtifactRef !== undefined) {
     updates.runtimeArtifactRef = patch.runtimeArtifactRef;

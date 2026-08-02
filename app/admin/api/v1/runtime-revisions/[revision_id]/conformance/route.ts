@@ -1,5 +1,10 @@
 import { publishRuntimeRevisionThroughControlPlane } from "@/lib/compatibility/runtimes/publish-runtime-revision";
 import {
+  listRuntimeConformanceCaseResults,
+  listRuntimeConformanceRuns,
+  recordRuntimeConformanceRun,
+} from "@/lib/compatibility/runtimes/runtime-conformance-runs";
+import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   etagHeader,
@@ -9,16 +14,6 @@ import {
   v11NotFound,
   v11Ok,
 } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  RUNTIME_REVISION_ETAG_PREFIX,
-  adminAuthErrorResponse,
-  parseRuntimeRevisionEtag,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11EtagMismatch,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 /**
  * GET/POST /admin/api/v1/runtime-revisions/{revision_id}/conformance — RuntimeRevision conformance 结果（S05-C06）。
  *
@@ -47,18 +42,22 @@ import {
  * - Conformance 门禁失败 → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - Runtime 乐观锁冲突 → 412 ETAG_MISMATCH
  */
+import type { RuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
 import {
-  ALL_CONFORMANCE_CASES,
-  type ConformanceCaseId,
-  type ConformanceCaseResult,
-  ConformanceGateError,
-  validateConformanceGate,
-} from "@/lib/v11/control-plane/runtime-conformance";
+  RuntimeConformanceBindingError,
+  RuntimeConformanceTrustError,
+} from "@/lib/runtimes/domain/runtime-conformance-run";
 import {
-  deleteConformanceResultsByRevision,
-  listConformanceResultsByRevision,
-  persistConformanceResults,
-} from "@/lib/v11/control-plane/runtime-conformance-result-queries";
+  type AdminPrincipal,
+  RUNTIME_REVISION_ETAG_PREFIX,
+  adminAuthErrorResponse,
+  parseRuntimeRevisionEtag,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  v11EtagMismatch,
+  v11SchemaInvalid,
+} from "@/lib/v11/admin/route-helpers";
+import { ConformanceGateError } from "@/lib/v11/control-plane/runtime-conformance";
 import { getRuntimeById } from "@/lib/v11/control-plane/runtime-queries";
 import {
   RuntimeRevisionNotFoundError,
@@ -75,7 +74,6 @@ import {
   buildReplayResponse,
   callerFromPrincipal,
   callerFromWorkloadPrincipal,
-  completeRecord,
   computeRequestHash,
   enforceIdempotency,
   failRecord,
@@ -90,46 +88,23 @@ interface RouteContext {
 }
 
 /** 单个 conformance case 结果（请求体格式）。 */
-interface ConformanceCaseInput {
-  case_id: string;
-  passed: boolean;
-  reason?: string;
-}
-
 /** POST 请求体 schema。 */
 interface ConformanceBody {
-  /** conformance case 结果列表（至少包含 4 个 mandatory case）。 */
-  conformance_results: ConformanceCaseInput[];
-  /** Adapter 制品 digest（可选）。 */
-  adapter_digest?: string;
-  /** 测试环境标识（可选）。 */
-  test_environment?: string;
-  /** 证据引用（可选）。 */
-  evidence_ref?: string;
+  /** 隔离 Runner 生成并签名的完整报告；管理员不能自行提交 passed。 */
+  runner_report: RuntimeConformanceReport;
+  runner_signature: string;
   /** 是否同时发布 Revision（默认 false）。 */
   publish?: boolean;
   /** Runtime 乐观锁期望版本号（publish=true 时必填）。 */
   expected_version_no?: number;
 }
 
-/** 已知 conformance case id 集合（用于校验）。 */
-const KNOWN_CASE_IDS: ReadonlySet<string> = new Set(ALL_CONFORMANCE_CASES);
-
 /** 校验 POST 请求体。 */
 function validateBody(body: unknown): body is ConformanceBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
-  if (!Array.isArray(b.conformance_results) || b.conformance_results.length === 0) return false;
-  for (const item of b.conformance_results) {
-    if (!item || typeof item !== "object") return false;
-    const r = item as Record<string, unknown>;
-    if (typeof r.case_id !== "string" || !KNOWN_CASE_IDS.has(r.case_id)) return false;
-    if (typeof r.passed !== "boolean") return false;
-    if (r.reason !== undefined && typeof r.reason !== "string") return false;
-  }
-  if (b.adapter_digest !== undefined && typeof b.adapter_digest !== "string") return false;
-  if (b.test_environment !== undefined && typeof b.test_environment !== "string") return false;
-  if (b.evidence_ref !== undefined && typeof b.evidence_ref !== "string") return false;
+  if (!b.runner_report || typeof b.runner_report !== "object") return false;
+  if (typeof b.runner_signature !== "string") return false;
   if (b.publish !== undefined && typeof b.publish !== "boolean") return false;
   if (
     b.expected_version_no !== undefined &&
@@ -152,15 +127,6 @@ function actorFromAdminPrincipal(principal: AdminPrincipal): AuditActor {
     return actorFromPrincipal(principal);
   }
   return actorFromWorkloadPrincipal(principal);
-}
-
-/** 把 ConformanceCaseInput[] 转为 ConformanceCaseResult[]。 */
-function toConformanceCaseResults(inputs: ConformanceCaseInput[]): ConformanceCaseResult[] {
-  return inputs.map((input) => ({
-    caseId: input.case_id as ConformanceCaseId,
-    passed: input.passed,
-    reason: input.reason,
-  }));
 }
 
 /** 把持久化的 ConformanceResult 行转为响应体格式。 */
@@ -222,13 +188,22 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   if (!scopeResult.ok) return scopeResult.response;
 
   // 5. 列出 conformance 结果
-  const results = await listConformanceResultsByRevision(revisionId);
+  const runs = await listRuntimeConformanceRuns(principal.tenantId, revisionId);
+  const latestRun = runs[0] ?? null;
+  const results = latestRun ? await listRuntimeConformanceCaseResults(latestRun.id) : [];
 
   return v11Ok(
     {
       runtime_revision_id: revisionId,
       revision_state: revision.revisionState,
-      results: results.map(formatConformanceResult),
+      conformance_run_id: latestRun?.id ?? null,
+      overall_result: latestRun?.overallResult ?? null,
+      results: results.map((row) => ({
+        case_id: row.caseId,
+        passed: row.passed,
+        reason: row.reason,
+        evidence_digest: row.evidenceDigest,
+      })),
     },
     {
       status: 200,
@@ -362,12 +337,42 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   // 10. 执行业务
   try {
-    const conformanceResults = toConformanceCaseResults(body.conformance_results);
-    const options = {
-      adapterDigest: body.adapter_digest ?? null,
-      testEnvironment: body.test_environment ?? null,
-      evidenceRef: body.evidence_ref ?? null,
-    };
+    const recorded = await recordRuntimeConformanceRun({
+      tenantId: principal.tenantId,
+      runtimeRevisionId: revisionId,
+      report: body.runner_report,
+      signature: body.runner_signature,
+      idempotencyKey,
+      requestId,
+      actor: actorFromAdminPrincipal(principal),
+      idempotency: shouldPublish
+        ? undefined
+        : {
+            recordId,
+            httpStatus: 200,
+            responseRef: revisionId,
+            serializeResponse: (result) =>
+              JSON.stringify({
+                runtime_revision_id: revisionId,
+                revision_state: revision.revisionState,
+                published: false,
+                published_at: null,
+                etag: null,
+                conformance_run_id: result.run.id,
+                results: result.caseResults.map((row) =>
+                  formatConformanceResult({
+                    caseId: row.caseId,
+                    passed: row.passed,
+                    reason: row.reason,
+                    adapterDigest: result.run.runnerArtifactDigest,
+                    testEnvironment: result.run.testEnvironmentRevision,
+                    evidenceRef: row.evidenceDigest,
+                    testedAt: result.run.completedAt,
+                  }),
+                ),
+              }),
+          },
+    });
 
     let publishedResult = null;
     if (shouldPublish && expectedVersionNo !== null) {
@@ -375,8 +380,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         tenantId: principal.tenantId,
         revisionId,
         runtimeExpectedVersionNo: expectedVersionNo,
-        conformanceResults,
-        conformanceOptions: options,
+        conformanceRunId: recorded.run.id,
         actor: actorFromAdminPrincipal(principal),
         requestId,
         idempotencyKey,
@@ -391,36 +395,26 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
               published: true,
               published_at: published.revision.publishedAt?.toISOString() ?? null,
               etag: `${RUNTIME_REVISION_ETAG_PREFIX}${published.revision.revisionNo}`,
+              conformance_run_id: recorded.run.id,
               results: published.conformanceResults.map(formatConformanceResult),
             }),
         },
       });
     } else {
-      // publish=false：只持久化 conformance 结果（不发布）
-      // 先校验门禁，失败则返回 422（不持久化失败结果）
-      const gateResult = validateConformanceGate(conformanceResults);
-      if (!gateResult.passed) {
-        await failRecord(recordId);
-        return v11Error(
-          "BUSINESS_CONSTRAINT_VIOLATION",
-          `Conformance 门禁失败，缺失/失败的 mandatory case：${gateResult.failedCases.join(", ")}`,
-          { requestId },
-        );
-      }
-      // 先清空旧结果，再持久化新结果（重新测试场景）
-      await deleteConformanceResultsByRevision(revisionId);
-      await persistConformanceResults({
-        tenantId: principal.tenantId,
-        runtimeRevisionId: revisionId,
-        results: conformanceResults,
-        ...options,
-      });
+      // publish=false 仅记录不可变 Run；失败结果同样保留为测试事实。
     }
 
     // 11. 查询最新 conformance 结果
     const publishedRevision = publishedResult?.revision ?? null;
-    const results =
-      publishedResult?.conformanceResults ?? (await listConformanceResultsByRevision(revisionId));
+    const results = recorded.caseResults.map((row) => ({
+      caseId: row.caseId,
+      passed: row.passed,
+      reason: row.reason,
+      adapterDigest: recorded.run.runnerArtifactDigest,
+      testEnvironment: recorded.run.testEnvironmentRevision,
+      evidenceRef: row.evidenceDigest,
+      testedAt: recorded.run.completedAt,
+    }));
 
     const responseBody = {
       runtime_revision_id: revisionId,
@@ -430,16 +424,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       etag: publishedRevision
         ? `${RUNTIME_REVISION_ETAG_PREFIX}${publishedRevision.revisionNo}`
         : ifMatchEtag,
+      conformance_run_id: recorded.run.id,
       results: results.map(formatConformanceResult),
     };
-
-    if (!publishedResult) {
-      await completeRecord({
-        recordId,
-        httpStatus: 200,
-        responseRedactedJson: JSON.stringify(responseBody),
-      });
-    }
 
     const headers: Record<string, string> = { [REQUEST_ID_HEADER]: requestId };
     if (publishedRevision) {
@@ -450,6 +437,12 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   } catch (err) {
     await failRecord(recordId);
 
+    if (
+      err instanceof RuntimeConformanceTrustError ||
+      err instanceof RuntimeConformanceBindingError
+    ) {
+      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+    }
     if (err instanceof ConformanceGateError) {
       return v11Error(
         "BUSINESS_CONSTRAINT_VIOLATION",

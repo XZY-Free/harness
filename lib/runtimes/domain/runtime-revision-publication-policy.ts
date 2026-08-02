@@ -19,12 +19,7 @@ export const ALL_CONFORMANCE_CASES = [
 
 export type ConformanceCaseId = (typeof ALL_CONFORMANCE_CASES)[number];
 
-export const MANDATORY_GATE_CASES: readonly ConformanceCaseId[] = [
-  "dispatch-binds-immutable-config",
-  "event-batch-idempotent",
-  "cancel-request-not-terminal",
-  "credential-never-in-model-data",
-];
+export const MANDATORY_GATE_CASES: readonly ConformanceCaseId[] = ALL_CONFORMANCE_CASES;
 
 export interface ConformanceCaseResult {
   caseId: ConformanceCaseId;

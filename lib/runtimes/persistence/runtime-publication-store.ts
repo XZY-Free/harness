@@ -11,7 +11,9 @@ export interface RuntimePublicationRevision {
   revisionNo: number;
   revisionState: RuntimeRevisionPublicationState;
   runtimeArtifactRef: string;
+  artifactDigest: string | null;
   configHash: string;
+  protocolContractRevision: string;
   publishedAt: Date | null;
 }
 
@@ -50,6 +52,16 @@ export interface RuntimePublicationSession {
     revisionId: string;
     attestationId: string;
   }): Promise<RuntimePublicationAttestation | null>;
+  findPassedConformanceRun(params: {
+    tenantId: string;
+    revisionId: string;
+    conformanceRunId: string;
+  }): Promise<{
+    id: string;
+    evidenceManifestDigest: string;
+    results: StoredRuntimeConformanceResult[];
+  } | null>;
+  /** @deprecated 权威发布不再调用；只用于使旧 Store 装饰器显式失败而非静默 UPSERT。 */
   persistConformanceResults(params: {
     tenantId: string;
     revisionId: string;
@@ -68,6 +80,7 @@ export interface RuntimePublicationSession {
     publishedAt: Date;
     idempotencyKey: string;
     idempotencyRecordId: string | null;
+    conformanceRunId: string;
   }): Promise<void>;
   markRevisionPublished(revisionId: string, publishedAt: Date): Promise<boolean>;
   setRuntimeCurrentRevision(params: {
