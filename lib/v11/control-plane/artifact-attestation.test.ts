@@ -16,6 +16,7 @@
 import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { AgentLifecycleError, createAgent } from "@/lib/v11/control-plane/agent-queries";
 import {
   createDraftRevision,
@@ -1306,7 +1307,7 @@ describe("publishRuntimeRevisionWithAttestation 双门禁", () => {
     ownerId = seeded.ownerId;
   });
 
-  it("成功路径：attestation + conformance 双门禁通过 + 发布 + route.update 审计", async () => {
+  it("成功路径：attestation + conformance 双门禁通过 + 发布 + runtime.publish 审计", async () => {
     const runtime = await createRuntime({
       tenantId,
       runtimeKey: "doubao-hosted",
@@ -1344,6 +1345,15 @@ describe("publishRuntimeRevisionWithAttestation 双门禁", () => {
     );
 
     expect(result.revision.revisionState).toBe("published");
+
+    const publication = await getPublicationRecordBySubject({
+      tenantId,
+      subjectType: "runtime_revision",
+      subjectRevisionId: revision.id,
+    });
+    expect(publication?.attestationIds).toEqual([fixture.attestation.id]);
+    expect(publication?.publishedByType).toBe("service");
+    expect(publication?.publishedBy).toBe("ci-001");
 
     const auditEvents = await listAuditEvents({
       tenantId,

@@ -584,9 +584,10 @@ describe("V11 runtime-revision-queries", () => {
     await expect(
       publishRuntimeRevision(tenantId, rev.id, 999, passingConformanceResults()),
     ).rejects.toThrow(RuntimeVersionConflictError);
-    // 但 Revision 已 published（conformance 通过后写入了 published）
+    // 发布事务整体回滚，不留下 Revision 已发布但 Runtime 指针未更新的部分状态。
     const after = await getRuntimeRevisionById(rev.id);
-    expect(after?.revisionState).toBe("published");
+    expect(after?.revisionState).toBe("draft");
+    expect((await getRuntimeById(tenantId, runtimeId))?.currentRevisionId).toBeNull();
   });
 
   it("withdrawRuntimeRevision published → withdrawn", async () => {

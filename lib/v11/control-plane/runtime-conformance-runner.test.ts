@@ -18,6 +18,7 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import {
   ALL_CONFORMANCE_CASES,
   type ConformanceCaseId,
@@ -50,6 +51,7 @@ import {
   publishRuntimeRevision,
   withdrawRuntimeRevision,
 } from "@/lib/v11/control-plane/runtime-revision-queries";
+import { getIdempotencyRecordById } from "@/lib/v11/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/v11/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
@@ -899,6 +901,37 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     // Runtime.currentRevisionId 已回填
     const runtime = await getRuntimeById(tenantId, runtimeId);
     expect(runtime?.currentRevisionId).toBe(revisionId);
+
+    const publication = await getPublicationRecordBySubject({
+      tenantId,
+      subjectType: "runtime_revision",
+      subjectRevisionId: revisionId,
+    });
+    expect(publication?.idempotencyRecordId).not.toBeNull();
+    const idempotency = await getIdempotencyRecordById(publication?.idempotencyRecordId ?? "");
+    expect(idempotency?.processingState).toBe("completed");
+    expect(idempotency?.responseRedactedJson).toBe(JSON.stringify(body));
+
+    const replayResponse = await conformancePOST(
+      buildV11Request({
+        audience: "admin",
+        method: "POST",
+        path: `/runtime-revisions/${revisionId}/conformance`,
+        idempotencyKey: "idem-conf-publish-001",
+        ifMatch: etag,
+        body: {
+          conformance_results: passingConformanceResults().map((result) => ({
+            case_id: result.caseId,
+            passed: result.passed,
+          })),
+          publish: true,
+          expected_version_no: 1,
+        },
+      }),
+      { params: Promise.resolve({ revision_id: revisionId }) },
+    );
+    expect(replayResponse.status).toBe(200);
+    expect(await replayResponse.json()).toEqual(body);
   });
 
   it("POST /conformance 门禁失败 → 422 BUSINESS_CONSTRAINT_VIOLATION", async () => {
