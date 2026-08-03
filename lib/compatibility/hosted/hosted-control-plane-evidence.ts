@@ -4,6 +4,7 @@ import type {
   ManagedArtifactStore,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import type { RuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
+import { configuredHostedControlPlaneEvidenceProvider } from "./configured-hosted-control-plane-evidence";
 
 export interface HostedArtifactEvidence {
   artifactDigest: string;
@@ -39,31 +40,20 @@ export interface HostedControlPlaneEvidenceProvider {
   }>;
 }
 
-class MissingHostedControlPlaneEvidenceProvider implements HostedControlPlaneEvidenceProvider {
-  async loadArtifactEvidence(): Promise<never> {
-    throw new Error("Hosted 控制面证据源未配置");
-  }
-
-  async runRuntimeConformance(): Promise<never> {
-    throw new Error("Hosted 控制面证据源未配置");
-  }
-}
-
-const missingProvider = new MissingHostedControlPlaneEvidenceProvider();
 let provider: HostedControlPlaneEvidenceProvider | null = null;
 
 export function getHostedControlPlaneEvidenceProvider(): HostedControlPlaneEvidenceProvider {
-  return provider ?? missingProvider;
+  return provider ?? configuredHostedControlPlaneEvidenceProvider;
 }
 
-/** 应用启动装配可信制品存储和独立 Conformance Runner；未装配时保持 fail-closed。 */
+/** 覆盖默认配置驱动的证据服务；用于测试或宿主应用显式装配。 */
 export function setHostedControlPlaneEvidenceProvider(
   next: HostedControlPlaneEvidenceProvider,
 ): void {
   provider = next;
 }
 
-/** 仅用于测试隔离和进程关闭。 */
+/** 清除覆盖，恢复配置驱动的默认服务。 */
 export function resetHostedControlPlaneEvidenceProvider(): void {
   provider = null;
 }

@@ -110,6 +110,32 @@ export const runtimeConformanceConfig = {
   },
 } as const;
 
+/** Hosted 制品证明与独立 Conformance Runner 的受管服务配置。 */
+export const hostedControlPlaneConfig = {
+  get endpoint(): string {
+    return optionalEnv("SNOW_HOSTED_EVIDENCE_SERVICE_URL", "").replace(/\/$/, "");
+  },
+  get token(): string {
+    return process.env.SNOW_HOSTED_EVIDENCE_SERVICE_TOKEN ?? "";
+  },
+  get builderKeys(): Record<string, string> {
+    const raw = optionalEnv("SNOW_HOSTED_BUILDER_KEYS_JSON", "");
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, string>)
+        : {};
+    } catch {
+      return {};
+    }
+  },
+  get timeoutMs(): number {
+    const value = Number.parseInt(optionalEnv("SNOW_HOSTED_EVIDENCE_TIMEOUT_MS", "30000"), 10);
+    return Number.isFinite(value) && value > 0 ? value : 30_000;
+  },
+} as const;
+
 export const aiConfig = {
   /** OpenAI 兼容端点 API 密钥。缺失返回空串，运行时校验。 */
   get apiKey(): string {
