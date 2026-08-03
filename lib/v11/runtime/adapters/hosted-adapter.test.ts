@@ -35,15 +35,8 @@ import {
   createRouteSet,
   upsertDeploymentRoute,
 } from "@/lib/v11/control-plane/deployment-route-queries";
-import {
-  type ConformanceCaseResult,
-  MANDATORY_GATE_CASES,
-} from "@/lib/v11/control-plane/runtime-conformance";
 import { createRuntime } from "@/lib/v11/control-plane/runtime-queries";
-import {
-  createDraftRuntimeRevision,
-  publishRuntimeRevision,
-} from "@/lib/v11/control-plane/runtime-revision-queries";
+import { createDraftRuntimeRevision } from "@/lib/v11/control-plane/runtime-revision-queries";
 import { listItemsByThread } from "@/lib/v11/conversation/thread-item-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
@@ -67,6 +60,7 @@ import { ingressEventBatch } from "@/lib/v11/runtime/event-ingress-queries";
 import { getInvocationById, updateInvocationState } from "@/lib/v11/runtime/invocation-queries";
 import type { V11AgentRevision } from "@/lib/v11/schema/agent";
 import type { V11RuntimeRevision } from "@/lib/v11/schema/runtime";
+import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // ─── 全局 setup/teardown ──────────────────────────────────
@@ -675,10 +669,6 @@ function buildActor(tenantId: string, actorId: string): AuditActor {
   return { tenantId, actorType: "service", actorId };
 }
 
-function passingConformanceResults(): ConformanceCaseResult[] {
-  return MANDATORY_GATE_CASES.map((caseId) => ({ caseId, passed: true }));
-}
-
 // ─── 辅助：创建 verified attestation ───────────────────────
 
 async function createVerifiedAttestation(
@@ -798,7 +788,11 @@ async function seedPublishedRuntimeRevision(
     revision.id,
     `runtime-content-${contentSuffix}`,
   );
-  await publishRuntimeRevision(tenantId, revision.id, 1, passingConformanceResults());
+  await publishTrustedRuntimeRevisionForTest({
+    tenantId,
+    revisionId: revision.id,
+    runtimeExpectedVersionNo: 1,
+  });
 
   return { runtime, revision };
 }

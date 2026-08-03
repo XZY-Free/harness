@@ -11,9 +11,17 @@
  *
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
+import { type KeyObject, createHash, generateKeyPairSync, sign } from "node:crypto";
+import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { mysqlRouteControlStore } from "@/lib/compatibility/routes/mysql-route-control-store";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { createActivateRouteRevision } from "@/lib/routes/application/activate-route-revision";
+import type {
+  RouteControlSession,
+  RouteControlStore,
+} from "@/lib/routes/persistence/route-control-store";
+import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import {
   createDraftRevision,
@@ -47,20 +55,19 @@ import {
   listRoutesBySet,
   upsertDeploymentRoute,
 } from "@/lib/v11/control-plane/deployment-route-queries";
-import {
-  type ConformanceCaseResult,
-  MANDATORY_GATE_CASES,
-} from "@/lib/v11/control-plane/runtime-conformance";
 import { createRuntime } from "@/lib/v11/control-plane/runtime-queries";
-import {
-  createDraftRuntimeRevision,
-  publishRuntimeRevision,
-} from "@/lib/v11/control-plane/runtime-revision-queries";
+import { createDraftRuntimeRevision } from "@/lib/v11/control-plane/runtime-revision-queries";
 import type { AuditActor } from "@/lib/v11/identity/audit";
 import { listAuditEvents } from "@/lib/v11/identity/audit-queries";
+import {
+  getIdempotencyRecordById,
+  insertProcessingRecord,
+} from "@/lib/v11/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
+import { and, asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -176,8 +183,40 @@ function buildActor(tenantId: string, actorId: string): AuditActor {
   return { tenantId, actorType: "service", actorId };
 }
 
-function passingConformanceResults(): ConformanceCaseResult[] {
-  return MANDATORY_GATE_CASES.map((caseId) => ({ caseId, passed: true }));
+type RouteTransactionStep =
+  | "appendRevision"
+  | "appendActivation"
+  | "updateRouteProjection"
+  | "advanceRouteSetVersion"
+  | "appendAudit"
+  | "appendOutbox"
+  | "completeIdempotency";
+
+function failAfterRouteStep(store: RouteControlStore, failureStep: RouteTransactionStep) {
+  return {
+    transaction: <T>(operation: (session: RouteControlSession) => Promise<T>) =>
+      store.transaction((session) => {
+        const failAfter = async <TResult>(step: RouteTransactionStep, result: Promise<TResult>) => {
+          const value = await result;
+          if (step === failureStep) throw new Error(`injected failure after ${step}`);
+          return value;
+        };
+        return operation({
+          ...session,
+          appendRevision: (params) => failAfter("appendRevision", session.appendRevision(params)),
+          appendActivation: (params) =>
+            failAfter("appendActivation", session.appendActivation(params)),
+          updateRouteProjection: (params) =>
+            failAfter("updateRouteProjection", session.updateRouteProjection(params)),
+          advanceRouteSetVersion: (params) =>
+            failAfter("advanceRouteSetVersion", session.advanceRouteSetVersion(params)),
+          appendAudit: (params) => failAfter("appendAudit", session.appendAudit(params)),
+          appendOutbox: (params) => failAfter("appendOutbox", session.appendOutbox(params)),
+          completeIdempotency: (params) =>
+            failAfter("completeIdempotency", session.completeIdempotency(params)),
+        });
+      }),
+  } satisfies RouteControlStore;
 }
 
 // ─── 辅助：创建 verified attestation ───────────────────────
@@ -288,7 +327,7 @@ async function seedPublishedRuntimeRevision(
     runtimeCapabilitiesJson: capabilities,
     identityMode: "managed",
     networkZone: "internal",
-    configHash: `sha256:config_${contentSuffix}`,
+    configHash: `sha256:${createHash("sha256").update(`config_${contentSuffix}`).digest("hex")}`,
     createdBy: ownerId,
   });
 
@@ -298,7 +337,11 @@ async function seedPublishedRuntimeRevision(
     revision.id,
     `runtime-content-${contentSuffix}`,
   );
-  await publishRuntimeRevision(tenantId, revision.id, 1, passingConformanceResults());
+  await publishTrustedRuntimeRevisionForTest({
+    tenantId,
+    revisionId: revision.id,
+    runtimeExpectedVersionNo: 1,
+  });
 
   return { runtime, revision };
 }
@@ -610,14 +653,18 @@ describe("V11 upsertDeploymentRoute", () => {
       runtimeId,
       protocolType: "a2a",
       endpointRef: "https://no-attest.internal",
-      runtimeArtifactRef: "oci://registry/runtime@sha256:no-attest",
+      runtimeArtifactRef: `oci://registry/runtime@sha256:${"d".repeat(64)}`,
       runtimeCapabilitiesJson: ["event_stream", "steer"],
       identityMode: "managed",
       networkZone: "internal",
-      configHash: "sha256:no-attest",
+      configHash: `sha256:${createHash("sha256").update("no-attest").digest("hex")}`,
       createdBy: ownerId,
     });
-    await publishRuntimeRevision(tenantId, newRuntimeRevision.id, 2, passingConformanceResults());
+    await publishTrustedRuntimeRevisionForTest({
+      tenantId,
+      revisionId: newRuntimeRevision.id,
+      runtimeExpectedVersionNo: 2,
+    });
 
     await expect(
       upsertDeploymentRoute({
@@ -633,14 +680,27 @@ describe("V11 upsertDeploymentRoute", () => {
   });
 
   it("能力子集不满足 → AgentCapabilityUnsupportedError", async () => {
-    // 创建需要 memory 能力的 AgentRevision（Runtime 不提供 memory）
-    const { revision: memAgentRev } = await seedPublishedAgentRevision(
+    // 在 RouteSet 所属 Agent 下创建需要 memory 的新修订（Runtime 不提供 memory）
+    const memAgentRev = await createDraftRevision({
       tenantId,
-      ownerId,
-      "memory-agent",
-      ["event_stream", "memory"],
-      "mem-v1",
+      agentId,
+      sourceType: "code",
+      sourceRevision: "git:mem-v1",
+      instructionHash: "sha256:mem-v1",
+      agentArtifactRef: "oci://registry/agent@sha256:mem-v1",
+      modelPolicyJson: {},
+      permissionRequirementsJson: {},
+      delegationPolicyJson: {},
+      agentInterfaceRequirementsJson: { required: ["event_stream", "memory"], optional: [] },
+      createdBy: ownerId,
+    });
+    await createVerifiedAttestation(
+      tenantId,
+      "agent_revision",
+      memAgentRev.id,
+      "agent-content-mem-v1",
     );
+    await publishRevision(tenantId, memAgentRev.id, 2);
 
     await expect(
       upsertDeploymentRoute({
@@ -708,6 +768,184 @@ describe("V11 upsertDeploymentRoute", () => {
     expect(r2.route.id).toBe(r1.route.id); // 同一路由行
     expect(r2.route.trafficWeight).toBe(7000);
     expect(r2.routeSet.versionNo).toBe(3);
+
+    const revisions = await db
+      .select()
+      .from(routeRevision)
+      .where(eq(routeRevision.routeId, r1.route.id))
+      .orderBy(asc(routeRevision.revisionNo));
+    expect(revisions).toHaveLength(2);
+    expect(revisions[0]).toMatchObject({ revisionNo: 1, trafficWeight: 3000 });
+    expect(revisions[1]).toMatchObject({ revisionNo: 2, trafficWeight: 7000 });
+    expect(revisions[0]?.contentDigest).not.toBe(revisions[1]?.contentDigest);
+
+    const activations = await db
+      .select()
+      .from(routeActivation)
+      .where(eq(routeActivation.routeId, r1.route.id))
+      .orderBy(asc(routeActivation.activationSequence));
+    expect(activations).toHaveLength(2);
+    expect(activations[0]).toMatchObject({
+      routeRevisionId: revisions[0]?.id,
+      previousRouteRevisionId: null,
+      activationSequence: 1,
+    });
+    expect(activations[1]).toMatchObject({
+      routeRevisionId: revisions[1]?.id,
+      previousRouteRevisionId: revisions[0]?.id,
+      activationSequence: 2,
+    });
+    expect(r2.route.activeRouteRevisionId).toBe(revisions[1]?.id);
+
+    const outboxEvents = await db
+      .select()
+      .from(controlPlaneOutboxEvent)
+      .where(eq(controlPlaneOutboxEvent.aggregateId, r1.route.id));
+    expect(
+      outboxEvents.filter((event) => event.eventType === "route.revision.validated"),
+    ).toHaveLength(2);
+    expect(outboxEvents.filter((event) => event.eventType === "route.activated")).toHaveLength(2);
+  });
+
+  it("相同 Idempotency-Key 重试只保留一个修订和一个激活事实", async () => {
+    const command = {
+      tenantId,
+      routeSetId,
+      routeSetExpectedVersionNo: 1,
+      agentRevisionId,
+      runtimeRevisionId,
+      trafficWeight: 5000,
+      actor: buildActor(tenantId, "deploy-bot-001"),
+      requestId: "request-route-idempotency",
+      idempotencyKey: "route-idempotency-001",
+    };
+    const first = await upsertDeploymentRoute(command);
+    const replay = await upsertDeploymentRoute(command);
+
+    expect(replay.routeRevision.id).toBe(first.routeRevision.id);
+    expect(replay.routeActivation.id).toBe(first.routeActivation.id);
+    expect(
+      await db.select().from(routeRevision).where(eq(routeRevision.routeId, first.route.id)),
+    ).toHaveLength(1);
+    expect(
+      await db.select().from(routeActivation).where(eq(routeActivation.routeId, first.route.id)),
+    ).toHaveLength(1);
+  });
+
+  it("两个并发激活只有一个权威结果，冲突事务不留下修订或激活", async () => {
+    const results = await Promise.allSettled([
+      upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 1,
+        agentRevisionId,
+        runtimeRevisionId,
+        trafficWeight: 4000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+        idempotencyKey: "route-concurrent-a",
+      }),
+      upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 1,
+        agentRevisionId,
+        runtimeRevisionId,
+        trafficWeight: 6000,
+        actor: buildActor(tenantId, "deploy-bot-002"),
+        idempotencyKey: "route-concurrent-b",
+      }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected).toMatchObject({ reason: expect.any(RouteSetVersionConflictError) });
+
+    const routes = await listRoutesBySet(routeSetId);
+    expect(routes).toHaveLength(1);
+    const authoritativeRoute = routes[0];
+    if (!authoritativeRoute) throw new Error("并发激活未留下权威路由");
+    expect(
+      await db.select().from(routeRevision).where(eq(routeRevision.routeId, authoritativeRoute.id)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(routeActivation)
+        .where(eq(routeActivation.routeId, authoritativeRoute.id)),
+    ).toHaveLength(1);
+    expect((await getRouteSetById(tenantId, routeSetId))?.versionNo).toBe(2);
+  });
+
+  it.each([
+    "appendRevision",
+    "appendActivation",
+    "updateRouteProjection",
+    "advanceRouteSetVersion",
+    "appendAudit",
+    "appendOutbox",
+    "completeIdempotency",
+  ] as const)("%s 失败时回滚修订、激活、投影、Audit、Outbox 与幂等完成", async (step) => {
+    const idempotency = await insertProcessingRecord({
+      tenantId,
+      audience: "admin",
+      callerType: "service",
+      callerId: "deploy-bot-rollback",
+      commandScope: `route.update:${routeSetId}`,
+      idempotencyKey: `route-rollback-${step}`,
+      requestHash: "a".repeat(64),
+    });
+    const activate = createActivateRouteRevision({
+      store: failAfterRouteStep(mysqlRouteControlStore, step),
+    });
+    await expect(
+      activate({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 1,
+        content: {
+          agentRevisionId,
+          runtimeRevisionId,
+          policyRevisionId: null,
+          modelPolicyRevisionId: null,
+          toolsetRevisionId: null,
+          trafficWeight: 5000,
+          priorityNo: 0,
+          effectiveFrom: null,
+          effectiveUntil: null,
+          eligibilityConditions: {},
+        },
+        actor: { tenantId, actorType: "service", actorId: "deploy-bot-rollback" },
+        reason: "故障注入",
+        requestId: `request-route-rollback-${step}`,
+        idempotencyKey: `route-rollback-${step}`,
+        idempotency: {
+          recordId: idempotency.id,
+          httpStatus: 200,
+          serializeResponse: (result) =>
+            JSON.stringify({ route_revision_id: result.routeRevision.id }),
+        },
+      }),
+    ).rejects.toThrow(`injected failure after ${step}`);
+
+    expect(
+      await db.select().from(routeRevision).where(eq(routeRevision.routeSetId, routeSetId)),
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(routeActivation).where(eq(routeActivation.tenantId, tenantId)),
+    ).toHaveLength(0);
+    expect(await listRoutesBySet(routeSetId)).toHaveLength(0);
+    expect((await getRouteSetById(tenantId, routeSetId))?.versionNo).toBe(1);
+    expect(
+      await db
+        .select()
+        .from(controlPlaneOutboxEvent)
+        .where(
+          and(
+            eq(controlPlaneOutboxEvent.tenantId, tenantId),
+            eq(controlPlaneOutboxEvent.aggregateType, "deployment_route"),
+          ),
+        ),
+    ).toHaveLength(0);
+    expect((await getIdempotencyRecordById(idempotency.id))?.processingState).toBe("processing");
   });
 
   it("跨租户 RouteSet 不可见 → RouteSetNotFoundError", async () => {
@@ -1094,6 +1332,9 @@ describe("V11 回滚场景", () => {
       actor: buildActor(tenantId, "deploy-bot-001"),
     });
     expect(r5.routeSet.versionNo).toBe(6);
+    expect(r5.routeRevision.id).toBe(r1.routeRevision.id);
+    expect(r5.routeActivation.previousRouteRevisionId).toBe(r2.routeRevision.id);
+    expect(r5.routeActivation.activationSequence).toBe(3);
 
     // 验证回滚后：只有 1 条 enabled 路由（rev1 100%）
     const effectiveAfterRollback = await getEffectiveRoutes(tenantId, agentId, "prod");
@@ -1260,14 +1501,27 @@ describe("S03-W03 阶段验收场景", () => {
   });
 
   it("Runtime 缺少 required capability → Route 发布失败", async () => {
-    // 创建需要 memory 能力的 AgentRevision
-    const { revision: memAgentRev } = await seedPublishedAgentRevision(
+    // 在 RouteSet 所属 Agent 下创建需要 memory 的新修订
+    const memAgentRev = await createDraftRevision({
       tenantId,
-      ownerId,
-      "mem-agent",
-      ["event_stream", "memory"],
-      "mem-v1",
+      agentId,
+      sourceType: "code",
+      sourceRevision: "git:mem-v1",
+      instructionHash: "sha256:mem-v1",
+      agentArtifactRef: "oci://registry/agent@sha256:mem-v1",
+      modelPolicyJson: {},
+      permissionRequirementsJson: {},
+      delegationPolicyJson: {},
+      agentInterfaceRequirementsJson: { required: ["event_stream", "memory"], optional: [] },
+      createdBy: ownerId,
+    });
+    await createVerifiedAttestation(
+      tenantId,
+      "agent_revision",
+      memAgentRev.id,
+      "agent-content-mem-v1",
     );
+    await publishRevision(tenantId, memAgentRev.id, 2);
 
     // Runtime 不提供 memory → 路由发布失败
     await expect(

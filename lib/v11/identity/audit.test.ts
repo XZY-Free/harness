@@ -169,8 +169,8 @@ describe("V11 computeContentHash", () => {
 // ─── isKnownAuditActionType / assertAuditActionTypeKnown（纯逻辑）───
 
 describe("V11 isKnownAuditActionType", () => {
-  it("目录中所有动作类型均已知（S12-W05 后共 28 种）", () => {
-    expect(AUDIT_ACTION_TYPES.length).toBe(28);
+  it("目录中所有动作类型均已知（RouteRevision 接入后共 29 种）", () => {
+    expect(AUDIT_ACTION_TYPES.length).toBe(29);
     for (const actionType of AUDIT_ACTION_TYPES) {
       expect(isKnownAuditActionType(actionType)).toBe(true);
     }
@@ -785,7 +785,7 @@ describe("V11 recordAuditEvent", () => {
     expect(event.actorId).toBe("inv_01");
   });
 
-  it("所有已知动作类型均可成功写入（S12-W05 后共 28 种）", async () => {
+  it("所有已知动作类型均可成功写入（RouteRevision 接入后共 29 种）", async () => {
     for (const actionType of AUDIT_ACTION_TYPES) {
       await recordAuditEvent({
         actor: { tenantId, actorType: "user", actorId: userIdentityId },

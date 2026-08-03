@@ -10,7 +10,7 @@
  * 测试环境：APP_ENV=test，auth mode=dev（resolveV11Principal 使用 DEFAULT_USER_ID）。
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
+import { type KeyObject, createHash, generateKeyPairSync, sign } from "node:crypto";
 import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]:publish/route";
 import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations:verify/route";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
@@ -49,17 +49,14 @@ import {
   getRouteSetById,
   upsertDeploymentRoute,
 } from "@/lib/v11/control-plane/deployment-route-queries";
-import { MANDATORY_GATE_CASES } from "@/lib/v11/control-plane/runtime-conformance";
 import { createRuntime } from "@/lib/v11/control-plane/runtime-queries";
-import {
-  createDraftRuntimeRevision,
-  publishRuntimeRevision,
-} from "@/lib/v11/control-plane/runtime-revision-queries";
+import { createDraftRuntimeRevision } from "@/lib/v11/control-plane/runtime-revision-queries";
 import { findIdempotencyRecord } from "@/lib/v11/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/v11/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -151,10 +148,6 @@ function buildValidProvenance(): ProvenanceDocument {
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
   };
-}
-
-function passingConformanceResults() {
-  return MANDATORY_GATE_CASES.map((caseId) => ({ caseId, passed: true }));
 }
 
 // ─── 辅助：seed admin 用户 + action bindings ────────────────
@@ -305,7 +298,7 @@ async function seedPublishedRuntimeRevision(
     runtimeCapabilitiesJson: ["event_stream", "steer", "cancel", "tool_call"],
     identityMode: "managed",
     networkZone: "internal",
-    configHash: `sha256:config_${contentSuffix}`,
+    configHash: `sha256:${createHash("sha256").update(`config_${contentSuffix}`).digest("hex")}`,
     createdBy: ownerId,
   });
 
@@ -315,7 +308,11 @@ async function seedPublishedRuntimeRevision(
     revision.id,
     `runtime-content-${contentSuffix}`,
   );
-  await publishRuntimeRevision(tenantId, revision.id, 1, passingConformanceResults());
+  await publishTrustedRuntimeRevisionForTest({
+    tenantId,
+    revisionId: revision.id,
+    runtimeExpectedVersionNo: 1,
+  });
 
   return { runtime, revision };
 }
@@ -1032,6 +1029,51 @@ describe("PUT /admin/api/v1/deployment-routes/{route_id}", () => {
     const etag = response.headers.get("etag");
     expect(etag).toBeDefined();
     expect(etag).toContain(`route-set-${currentVersionNo + 1}`);
+  });
+
+  it("提交后使用相同 Idempotency-Key 重试返回原结果，不创建重复激活", async () => {
+    const requestBody = {
+      route_set_id: routeSetId,
+      agent_revision_id: agentRevisionId,
+      runtime_revision_id: runtimeRevisionId,
+      traffic_weight: 9000,
+      priority_no: 1,
+      route_state: "enabled",
+    };
+    const buildRequest = () =>
+      buildV11Request({
+        audience: "admin",
+        method: "PUT",
+        path: `/deployment-routes/${routeId}`,
+        idempotencyKey: "idem-put-route-retry-001",
+        ifMatch: `route-set-${currentVersionNo}`,
+        body: requestBody,
+      });
+
+    const first = await updateRoutePUT(buildRequest(), {
+      params: Promise.resolve({ route_id: routeId }),
+    });
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as Record<string, unknown>;
+    expect(firstBody.route_revision_id).toBeTruthy();
+    expect(firstBody.route_activation_id).toBeTruthy();
+
+    const replay = await updateRoutePUT(buildRequest(), {
+      params: Promise.resolve({ route_id: routeId }),
+    });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(firstBody);
+
+    const idempotency = await findIdempotencyRecord({
+      tenantId,
+      audience: "admin",
+      callerType: "user",
+      callerId: userIdentityId,
+      commandScope: `route.update:${routeId}`,
+      idempotencyKey: "idem-put-route-retry-001",
+    });
+    expect(idempotency?.processingState).toBe("completed");
+    expect(idempotency?.responseRedactedJson).toBe(JSON.stringify(firstBody));
   });
 
   it("缺少 If-Match → 400 REQUEST_SCHEMA_INVALID", async () => {

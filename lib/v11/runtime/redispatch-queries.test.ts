@@ -45,15 +45,8 @@ import {
   createRouteSet,
   upsertDeploymentRoute,
 } from "@/lib/v11/control-plane/deployment-route-queries";
-import {
-  type ConformanceCaseResult,
-  MANDATORY_GATE_CASES,
-} from "@/lib/v11/control-plane/runtime-conformance";
 import { createRuntime } from "@/lib/v11/control-plane/runtime-queries";
-import {
-  createDraftRuntimeRevision,
-  publishRuntimeRevision,
-} from "@/lib/v11/control-plane/runtime-revision-queries";
+import { createDraftRuntimeRevision } from "@/lib/v11/control-plane/runtime-revision-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import type { AuditActor } from "@/lib/v11/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
@@ -95,6 +88,7 @@ import {
   v11InvocationAttempt,
   v11RuntimeEventIngress,
 } from "@/lib/v11/schema/runtime";
+import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -138,10 +132,6 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
     if (!doc) throw new Error(`provenance not found: ${ref}`);
     return doc;
   }
-}
-
-function passingConformanceResults(): ConformanceCaseResult[] {
-  return MANDATORY_GATE_CASES.map((caseId) => ({ caseId, passed: true }));
 }
 
 function buildActor(tenantId: string, actorId: string): AuditActor {
@@ -293,7 +283,11 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     builderIdentity: "builder:redispatch",
   };
   await verifyAndPersistAttestation(rtInput, store, builderKeys, buildActor(tenantId, "ci-001"));
-  await publishRuntimeRevision(tenantId, runtimeRevision.id, 1, passingConformanceResults());
+  await publishTrustedRuntimeRevisionForTest({
+    tenantId,
+    revisionId: runtimeRevision.id,
+    runtimeExpectedVersionNo: 1,
+  });
 
   // Route（用于 ExecutionBinding.deploymentRouteId 引用）
   const routeSet = await createRouteSet({
