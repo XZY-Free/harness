@@ -14,7 +14,7 @@
  * 调度流程（单 Turn）：
  * 1. 读取 Turn + Thread（跨租户隔离）。
  * 2. 校验 Turn.turnState == accepted（否则 DispatchTurnStateError）。
- * 3. 解析 DeploymentRoute（getEffectiveRoutes，本阶段取首条 enabled，无流量权重分配）。
+ * 3. 通过正式 RouteResolver 解析 Active RouteRevision 与控制面资格事实。
  * 4. 无有效路由 → Turn 保持 accepted，返回 { dispatched: false }（不报错）。
  * 5. createInvocation（事务内：锁 Thread、分配 invocationSequence、INSERT Invocation、写 invocation.queued Event）。
  * 6. createExecutionBinding（不可变 1:1，configHash = SHA-256 规范化字段）。
@@ -36,10 +36,15 @@
  * - 重试 Attempt 时使用新的 runtime_execution_ref，不覆盖初始 ref。
  */
 import { randomUUID } from "node:crypto";
+import { mysqlRouteResolutionStore } from "@/lib/compatibility/routes/mysql-route-resolution-store";
 import { db } from "@/lib/db/client";
+import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
+import type {
+  RouteResolution,
+  RouteResolutionAttribute,
+} from "@/lib/routes/domain/route-resolution-policy";
 import { issueContextHandle } from "@/lib/v11/context/context-handle";
 import { getRevisionById } from "@/lib/v11/control-plane/agent-revision-queries";
-import { getEffectiveRoutes } from "@/lib/v11/control-plane/deployment-route-queries";
 import { getRuntimeRevisionById } from "@/lib/v11/control-plane/runtime-revision-queries";
 import { getItemById } from "@/lib/v11/conversation/thread-item-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/v11/conversation/thread-queries";
@@ -89,6 +94,8 @@ export const DEFAULT_ROUTE_SCOPE_KEY = "default";
 /** 默认模型 provider（modelPolicyJson 未显式声明时使用）。 */
 const DEFAULT_MODEL_PROVIDER = "default";
 
+const defaultRouteResolver = createResolveRoute({ store: mysqlRouteResolutionStore });
+
 /** 调度结果。 */
 export interface DispatchResult {
   /** 是否实际执行了调度（false = 无有效路由，Turn 保持 accepted）。 */
@@ -99,6 +106,8 @@ export interface DispatchResult {
   invocation?: V11Invocation;
   /** 调度的 ExecutionBinding（dispatched=true 时填）。 */
   binding?: V11ExecutionBinding;
+  /** 本次执行使用的确定性路由解析结果（dispatched=true 时填）。 */
+  routeResolution?: RouteResolution;
   /** 调度的 Attempt（dispatched=true 时填）。 */
   attempt?: V11InvocationAttempt;
   /** 更新后的 Turn（dispatched=true 时填，turnState=queued）。 */
@@ -196,6 +205,10 @@ export async function dispatchInvocationForTurn(params: {
   turnId: string;
   /** 路由 scope key（默认 "default"）。 */
   routeScopeKey?: string;
+  /** 参与 RouteRevision eligibility 匹配的标量属性。 */
+  routeAttributes?: Record<string, RouteResolutionAttribute>;
+  /** 正式路由解析器；默认使用 MySQL 权威事实源。 */
+  routeResolver?: RouteResolver;
   actorType?: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
@@ -233,27 +246,28 @@ export async function dispatchInvocationForTurn(params: {
     throw new DispatchTurnStateError(params.turnId, "thread_not_found");
   }
 
-  // 4. 解析 DeploymentRoute
-  const routes = await getEffectiveRoutes(params.tenantId, thread.primaryAgentId, routeScopeKey);
-  if (routes.length === 0) {
+  // 4. 确定性解析 Active RouteRevision，并在创建执行事实前完成全部资格检查
+  const routeOutcome = await (params.routeResolver ?? defaultRouteResolver)({
+    tenantId: params.tenantId,
+    agentId: thread.primaryAgentId,
+    routeScopeKey,
+    businessKey: { threadId: thread.id },
+    attributes: params.routeAttributes ?? {},
+  });
+  if (routeOutcome.status === "unresolved") {
     // 无有效路由 → Turn 保持 accepted，不报错
     return { dispatched: false, reason: "no_effective_route" };
   }
+  const routeResolution = routeOutcome.resolution;
 
-  // 5. 选择首条 enabled 路由（本阶段不实现流量权重分配）
-  const route = routes[0];
-  if (!route) {
-    return { dispatched: false, reason: "no_effective_route" };
-  }
-
-  // 6. 读取 AgentRevision（提取模型信息）
-  const agentRevision = await getRevisionById(route.agentRevisionId);
+  // 5. 读取解析结果冻结的 AgentRevision（提取模型信息）
+  const agentRevision = await getRevisionById(routeResolution.agentRevisionId);
   if (!agentRevision) {
     throw new DispatchTurnStateError(params.turnId, "agent_revision_not_found");
   }
   const modelInfo = extractModelInfo(agentRevision.modelPolicyJson, thread.defaultModelRef);
 
-  // 7. createInvocation（事务内：锁 Thread、分配 invocationSequence、写 invocation.queued Event）
+  // 6. createInvocation（事务内：锁 Thread、分配 invocationSequence、写 invocation.queued Event）
   const invocationParams: CreateInvocationParams = {
     tenantId: params.tenantId,
     threadId: thread.id,
@@ -266,23 +280,23 @@ export async function dispatchInvocationForTurn(params: {
   };
   const { invocation, event: invocationQueuedEvent } = await createInvocation(invocationParams);
 
-  // 8. createExecutionBinding（不可变 1:1）
+  // 7. createExecutionBinding（不可变 1:1）
   const bindingParams: CreateExecutionBindingParams = {
     invocationId: invocation.id,
     tenantId: params.tenantId,
-    agentRevisionId: route.agentRevisionId,
-    runtimeRevisionId: route.runtimeRevisionId,
-    deploymentRouteId: route.id,
+    agentRevisionId: routeResolution.agentRevisionId,
+    runtimeRevisionId: routeResolution.runtimeRevisionId,
+    deploymentRouteId: routeResolution.deploymentRouteId,
     modelProvider: modelInfo.modelProvider,
     modelId: modelInfo.modelId,
     modelRevisionRef: modelInfo.modelRevisionRef,
   };
   const binding = await createExecutionBinding(bindingParams);
 
-  // 9. createAttempt（attemptNo=1）
+  // 8. createAttempt（attemptNo=1）
   const attempt = await createAttempt({ invocationId: invocation.id });
 
-  // 10. 事务内：锁 Thread、分配 event sequence、CAS 更新 Turn accepted → queued、写 turn.queued Event
+  // 9. 事务内：锁 Thread、分配 event sequence、CAS 更新 Turn accepted → queued、写 turn.queued Event
   const { turn: updatedTurn, event: turnQueuedEvent } = await transitionTurnToQueued({
     threadId: thread.id,
     turn,
@@ -292,7 +306,7 @@ export async function dispatchInvocationForTurn(params: {
     correlationId: params.correlationId ?? null,
   });
 
-  // 11. S05-C02 扩展：调用 Runtime HTTP 启动 Invocation
+  // 10. S05-C02 扩展：调用 Runtime HTTP 启动 Invocation
   let runtimeDispatch: RuntimeDispatchResult | undefined;
   if (params.runtimeClient && params.runtimeEndpointResolver) {
     runtimeDispatch = await dispatchToRuntime({
@@ -301,7 +315,7 @@ export async function dispatchInvocationForTurn(params: {
       invocation,
       binding,
       agentRevision,
-      runtimeRevisionId: route.runtimeRevisionId,
+      runtimeRevisionId: routeResolution.runtimeRevisionId,
       turn,
       runtimeClient: params.runtimeClient,
       runtimeEndpointResolver: params.runtimeEndpointResolver,
@@ -325,6 +339,7 @@ export async function dispatchInvocationForTurn(params: {
     dispatched: true,
     invocation: finalInvocation,
     binding,
+    routeResolution,
     attempt,
     turn: updatedTurn,
     invocationQueuedEvent,
