@@ -335,6 +335,19 @@ export const v11ExecutionBinding = mysqlTable(
     workspaceBindingId: varchar("workspaceBindingId", { length: 36 }),
     policyRevisionId: varchar("policyRevisionId", { length: 36 }),
     contextCheckpointId: varchar("contextCheckpointId", { length: 36 }),
+    routeRevisionId: varchar("routeRevisionId", { length: 36 }),
+    routeActivationId: varchar("routeActivationId", { length: 36 }),
+    routeContentDigest: varchar("routeContentDigest", { length: 71 }),
+    agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
+    runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
+    runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }),
+    capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }),
+    agentAttestationIds: json("agentAttestationIds").$type<string[]>(),
+    runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>(),
+    agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }),
+    runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }),
+    conformanceRunId: varchar("conformanceRunId", { length: 36 }),
+    environmentDefinitionRevisionId: varchar("environmentDefinitionRevisionId", { length: 36 }),
     configHash: varchar("configHash", { length: 128 }).notNull(),
     boundAt: datetime("boundAt", { mode: "date", fsp: 3 })
       .notNull()
@@ -344,6 +357,8 @@ export const v11ExecutionBinding = mysqlTable(
     tenantIdx: index("V11ExecutionBinding_tenant_idx").on(t.tenantId),
     agentRevisionIdx: index("V11ExecutionBinding_agentRevision_idx").on(t.agentRevisionId),
     runtimeRevisionIdx: index("V11ExecutionBinding_runtimeRevision_idx").on(t.runtimeRevisionId),
+    routeRevisionIdx: index("V11ExecutionBinding_routeRevision_idx").on(t.routeRevisionId),
+    conformanceRunIdx: index("V11ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
   }),
 );
 
