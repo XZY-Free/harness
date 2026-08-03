@@ -59,7 +59,7 @@ export async function dispatchEmployeeTurn(params: {
     throw new Error(`Turn 调度失败：会话不存在 (${params.threadId})`);
   }
 
-  const route = await ensureHostedRouteForAgent({
+  await ensureHostedRouteForAgent({
     tenantId: params.tenantId,
     agentId: thread.primaryAgentId,
   });
@@ -95,7 +95,7 @@ export async function dispatchEmployeeTurn(params: {
         type: "runtime",
         tenantId: params.tenantId,
         invocationId: binding.invocationId,
-        runtimeRevisionId: route.runtimeRevisionId,
+        runtimeRevisionId: binding.runtimeRevisionId,
         audience: "runtime",
         expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
       }),
