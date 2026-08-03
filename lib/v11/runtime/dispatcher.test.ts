@@ -13,11 +13,9 @@
 import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import type { ResolveRouteCommand, RouteResolver } from "@/lib/routes/application/resolve-route";
 import { createAgent } from "@/lib/v11/control-plane/agent-queries";
-import {
-  createDraftRevision,
-  publishRevision,
-} from "@/lib/v11/control-plane/agent-revision-queries";
+import { createDraftRevision } from "@/lib/v11/control-plane/agent-revision-queries";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -72,6 +70,7 @@ import {
 } from "@/lib/v11/runtime/invocation-queries";
 import type { V11AgentRevision } from "@/lib/v11/schema/agent";
 import type { V11RuntimeRevision } from "@/lib/v11/schema/runtime";
+import { publishTrustedAgentRevisionForTest } from "@/lib/v11/test-support/publish-trusted-agent-revision";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -195,7 +194,7 @@ async function createVerifiedAttestation(
   artifactType: string,
   artifactRevisionId: string,
   artifactContent: string,
-): Promise<void> {
+) {
   const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
   const builderKeys: BuilderKeyRegistry = {
     "builder:company-agent-runtime": keyPair.publicKeyBase64,
@@ -221,7 +220,7 @@ async function createVerifiedAttestation(
     builderIdentity: "builder:company-agent-runtime",
   };
 
-  await verifyAndPersistAttestation(
+  return verifyAndPersistAttestation(
     input,
     store,
     builderKeys,
@@ -261,13 +260,19 @@ async function seedPublishedAgentRevision(
     createdBy: ownerId,
   });
 
-  await createVerifiedAttestation(
+  const attestation = await createVerifiedAttestation(
     tenantId,
     "agent_revision",
     revision.id,
     `agent-content-${contentSuffix}`,
   );
-  await publishRevision(tenantId, revision.id, 1);
+  await publishTrustedAgentRevisionForTest({
+    tenantId,
+    revisionId: revision.id,
+    agentExpectedVersionNo: 1,
+    attestationId: attestation.id,
+    actorId: ownerId,
+  });
 
   return { agent, revision };
 }
@@ -287,14 +292,18 @@ async function seedPublishedRuntimeRevision(
     displayName: `Runtime ${runtimeKey}`,
     runtimeKind: "hosted",
     ownerUserId: ownerId,
+    lifecycleState: "enabled",
   });
+
+  const artifactContent = `runtime-content-${contentSuffix}`;
+  const artifactDigest = computeArtifactDigest(artifactContent);
 
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
     protocolType: "a2a",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
-    runtimeArtifactRef: `oci://registry/runtime@sha256:${contentSuffix}`,
+    runtimeArtifactRef: `oci://registry/runtime@${artifactDigest}`,
     runtimeCapabilitiesJson: capabilities,
     identityMode: "managed",
     networkZone: "internal",
@@ -302,16 +311,17 @@ async function seedPublishedRuntimeRevision(
     createdBy: ownerId,
   });
 
-  await createVerifiedAttestation(
+  const attestation = await createVerifiedAttestation(
     tenantId,
     "runtime_revision",
     revision.id,
-    `runtime-content-${contentSuffix}`,
+    artifactContent,
   );
   await publishTrustedRuntimeRevisionForTest({
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,
+    attestationId: attestation.id,
   });
 
   return { runtime, revision };
@@ -849,6 +859,36 @@ describe("V11 InvocationAttempt 仓储", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("V11 Dispatcher 调度", () => {
+  it("dispatchInvocationForTurn 只消费正式 RouteResolver 的解析结果", async () => {
+    const ctx = await seedFullDispatchContext();
+    const commands: ResolveRouteCommand[] = [];
+    const routeResolver: RouteResolver = async (command) => {
+      commands.push(command);
+      return {
+        status: "unresolved",
+        reason: "no_eligible_route",
+        evaluatedCandidateCount: 1,
+      };
+    };
+
+    const result = await dispatchInvocationForTurn({
+      tenantId: ctx.tenantId,
+      turnId: ctx.turnId,
+      routeResolver,
+    });
+
+    expect(result).toEqual({ dispatched: false, reason: "no_effective_route" });
+    expect(commands).toEqual([
+      {
+        tenantId: ctx.tenantId,
+        agentId: ctx.agentId,
+        routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
+        businessKey: { threadId: ctx.threadId },
+        attributes: {},
+      },
+    ]);
+  });
+
   it("dispatchInvocationForTurn 完整链路：Invocation + Binding + Attempt + Turn→queued", async () => {
     const ctx = await seedFullDispatchContext();
 

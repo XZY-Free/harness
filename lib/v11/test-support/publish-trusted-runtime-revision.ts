@@ -1,24 +1,40 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/compatibility/runtimes/mysql-runtime-conformance-run-store";
+import { db } from "@/lib/db/client";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import {
   ALL_CONFORMANCE_CASES,
   canonicalizeRuntimeConformanceReport,
 } from "@/lib/runtimes/domain/runtime-conformance-run";
+import { getAttestationById } from "@/lib/v11/control-plane/artifact-attestation-queries";
 import { mysqlRuntimePublicationStore } from "@/lib/v11/control-plane/mysql-runtime-publication-store";
 import {
   getRuntimeRevisionById,
   updateDraftRuntimeRevisionContent,
 } from "@/lib/v11/control-plane/runtime-revision-queries";
+import { v11RuntimeRevision } from "@/lib/v11/schema/runtime";
+import { eq } from "drizzle-orm";
 
 /** 真实 MySQL + HMAC 的测试装配：先记录可信 Run，再通过正式发布服务发布。 */
 export async function publishTrustedRuntimeRevisionForTest(params: {
   tenantId: string;
   revisionId: string;
   runtimeExpectedVersionNo: number;
+  attestationId?: string;
 }) {
   let revision = await getRuntimeRevisionById(params.revisionId);
+  if (params.attestationId) {
+    const attestation = await getAttestationById(params.tenantId, params.attestationId);
+    if (!attestation?.artifactId || attestation.verificationState !== "verified") {
+      throw new Error(`测试 RuntimeRevision 缺少权威 Attestation: ${params.revisionId}`);
+    }
+    await db
+      .update(v11RuntimeRevision)
+      .set({ artifactId: attestation.artifactId, artifactDigest: attestation.artifactDigest })
+      .where(eq(v11RuntimeRevision.id, params.revisionId));
+    revision = await getRuntimeRevisionById(params.revisionId);
+  }
   if (revision && !/^sha256:[0-9a-f]{64}$/.test(revision.configHash)) {
     revision = await updateDraftRuntimeRevisionContent(revision.id, {
       configHash: `sha256:${createHash("sha256").update(revision.configHash).digest("hex")}`,
@@ -70,6 +86,7 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
     revisionId: revision.id,
     runtimeExpectedVersionNo: params.runtimeExpectedVersionNo,
     conformanceRunId: runId,
+    attestationId: params.attestationId,
     actor: {
       tenantId: params.tenantId,
       actorType: "system",

@@ -23,10 +23,7 @@ import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createAgent } from "@/lib/v11/control-plane/agent-queries";
-import {
-  createDraftRevision,
-  publishRevision,
-} from "@/lib/v11/control-plane/agent-revision-queries";
+import { createDraftRevision } from "@/lib/v11/control-plane/agent-revision-queries";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -89,6 +86,7 @@ import type {
 import { v11InvocationCommand, v11ThreadEvent, v11Turn } from "@/lib/v11/schema/conversation";
 import type { V11RuntimeRevision } from "@/lib/v11/schema/runtime";
 import { v11InvocationAttempt } from "@/lib/v11/schema/runtime";
+import { publishTrustedAgentRevisionForTest } from "@/lib/v11/test-support/publish-trusted-agent-revision";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -213,7 +211,7 @@ async function createVerifiedAttestation(
   artifactType: string,
   artifactRevisionId: string,
   artifactContent: string,
-): Promise<void> {
+) {
   const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
   const builderKeys: BuilderKeyRegistry = {
     "builder:company-agent-runtime": keyPair.publicKeyBase64,
@@ -239,7 +237,7 @@ async function createVerifiedAttestation(
     builderIdentity: "builder:company-agent-runtime",
   };
 
-  await verifyAndPersistAttestation(
+  return verifyAndPersistAttestation(
     input,
     store,
     builderKeys,
@@ -278,13 +276,19 @@ async function seedPublishedAgentRevision(
     createdBy: ownerId,
   });
 
-  await createVerifiedAttestation(
+  const attestation = await createVerifiedAttestation(
     tenantId,
     "agent_revision",
     revision.id,
     `agent-content-${contentSuffix}`,
   );
-  await publishRevision(tenantId, revision.id, 1);
+  await publishTrustedAgentRevisionForTest({
+    tenantId,
+    revisionId: revision.id,
+    agentExpectedVersionNo: 1,
+    attestationId: attestation.id,
+    actorId: ownerId,
+  });
 
   return { agent, revision };
 }
@@ -304,6 +308,7 @@ async function seedPublishedRuntimeRevision(
     displayName: `Runtime ${runtimeKey}`,
     runtimeKind: "hosted",
     ownerUserId: ownerId,
+    lifecycleState: "enabled",
   });
 
   const revision = await createDraftRuntimeRevision({
@@ -319,7 +324,7 @@ async function seedPublishedRuntimeRevision(
     createdBy: ownerId,
   });
 
-  await createVerifiedAttestation(
+  const attestation = await createVerifiedAttestation(
     tenantId,
     "runtime_revision",
     revision.id,
@@ -329,6 +334,7 @@ async function seedPublishedRuntimeRevision(
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,
+    attestationId: attestation.id,
   });
 
   return { runtime, revision };
