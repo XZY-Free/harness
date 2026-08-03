@@ -70,6 +70,7 @@ export async function GET(request: Request): Promise<Response> {
     route_state: route.routeState,
     effective_from: route.effectiveFrom?.toISOString() ?? null,
     effective_until: route.effectiveUntil?.toISOString() ?? null,
+    active_route_revision_id: route.activeRouteRevisionId,
   }));
 
   return v11Ok(

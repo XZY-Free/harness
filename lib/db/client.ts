@@ -2,6 +2,7 @@ import * as controlPlaneOutboxSchema from "@/lib/agents/persistence/control-plan
 import * as artifactRecordSchema from "@/lib/artifacts/persistence/artifact-record";
 import { dbConfig } from "@/lib/config";
 import * as publicationRecordSchema from "@/lib/publications/persistence/publication-record";
+import * as routeRevisionSchema from "@/lib/routes/persistence/route-revision-record";
 import * as runtimeConformanceRunSchema from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import * as v11AdminExportSchema from "@/lib/v11/schema/admin-export";
 import * as v11AgentSchema from "@/lib/v11/schema/agent";
@@ -36,6 +37,7 @@ const fullSchema = {
   ...artifactRecordSchema,
   ...publicationRecordSchema,
   ...runtimeConformanceRunSchema,
+  ...routeRevisionSchema,
   ...v11IdentitySchema,
   ...v11DeviceSchema,
   ...v11AuthorizationSchema,

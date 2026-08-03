@@ -69,7 +69,6 @@ import {
   buildReplayResponse,
   callerFromPrincipal,
   callerFromWorkloadPrincipal,
-  completeRecord,
   computeRequestHash,
   enforceIdempotency,
   failRecord,
@@ -200,15 +199,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
   );
   if (!scopeResult.ok) return scopeResult.response;
 
-  // 9. 校验 If-Match ETag 与 RouteSet 当前 versionNo 一致（提前拦截，避免进入 upsert 后冲突）
-  if (expectedVersionNo !== routeSet.versionNo) {
-    return v11EtagMismatch(
-      requestId,
-      `If-Match route-set-${expectedVersionNo} 与当前 route-set-${routeSet.versionNo} 不匹配`,
-    );
-  }
-
-  // 10. 计算请求 hash + 幂等守卫
+  // 9. 计算请求 hash + 幂等守卫。重放必须先于 ETag 校验，提交后断线重试仍返回原结果。
   const path = new URL(request.url).pathname;
   const requestHash = computeRequestHash("PUT", path, body);
   const caller = callerFromAdminPrincipal(principal);
@@ -249,11 +240,21 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
     recordId = reset.id;
   }
 
-  // 12. 执行业务：ETag 乐观锁 + attestation 门禁 + 能力子集 + 权重 + 审计
+  // 12. 新命令才校验当前 ETag；已完成命令已在上方重放。
+  if (expectedVersionNo !== routeSet.versionNo) {
+    await failRecord(recordId);
+    return v11EtagMismatch(
+      requestId,
+      `If-Match route-set-${expectedVersionNo} 与当前 route-set-${routeSet.versionNo} 不匹配`,
+    );
+  }
+
+  // 13. 执行业务：ETag 乐观锁 + attestation 门禁 + 能力子集 + 权重 + 审计
   try {
     const result = await upsertDeploymentRoute({
       tenantId: principal.tenantId,
       routeSetId: body.route_set_id,
+      routeId,
       routeSetExpectedVersionNo: expectedVersionNo,
       agentRevisionId: body.agent_revision_id,
       runtimeRevisionId: body.runtime_revision_id,
@@ -262,6 +263,25 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
       routeState: body.route_state as RouteState,
       actor: actorFromAdminPrincipal(principal),
       requestId,
+      idempotencyKey,
+      idempotency: {
+        recordId,
+        httpStatus: 200,
+        responseRef: routeId,
+        serializeResponse: (published) =>
+          JSON.stringify({
+            id: published.route.id,
+            route_set_id: published.routeSet.id,
+            agent_revision_id: published.route.agentRevisionId,
+            runtime_revision_id: published.route.runtimeRevisionId,
+            traffic_weight: published.route.trafficWeight,
+            route_set_version_no: published.routeSet.versionNo,
+            route_revision_id: published.routeRevision.id,
+            route_activation_id: published.routeActivation.id,
+            etag: published.etag,
+            affects_new_invocations_only: published.affectsNewInvocationsOnly,
+          }),
+      },
     });
 
     const responseBody = {
@@ -271,15 +291,11 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
       runtime_revision_id: result.route.runtimeRevisionId,
       traffic_weight: result.route.trafficWeight,
       route_set_version_no: result.routeSet.versionNo,
+      route_revision_id: result.routeRevision.id,
+      route_activation_id: result.routeActivation.id,
       etag: result.etag,
       affects_new_invocations_only: result.affectsNewInvocationsOnly,
     };
-
-    await completeRecord({
-      recordId,
-      httpStatus: 200,
-      responseRedactedJson: JSON.stringify(responseBody),
-    });
 
     return v11Ok(responseBody, {
       status: 200,

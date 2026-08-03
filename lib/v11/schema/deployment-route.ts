@@ -113,6 +113,8 @@ export const v11DeploymentRoute = mysqlTable(
     routeState: mysqlEnum("routeState", ROUTE_STATES).notNull().default("enabled"),
     effectiveFrom: datetime("effectiveFrom", { mode: "date", fsp: 3 }),
     effectiveUntil: datetime("effectiveUntil", { mode: "date", fsp: 3 }),
+    /** 当前权威 RouteRevision；旧列仅作为调度兼容投影继续保留。 */
+    activeRouteRevisionId: varchar("activeRouteRevisionId", { length: 36 }),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -130,6 +132,9 @@ export const v11DeploymentRoute = mysqlTable(
     setStateIdx: index("V11DeploymentRoute_set_state_idx").on(t.routeSetId, t.routeState),
     agentRevisionIdx: index("V11DeploymentRoute_agentRevision_idx").on(t.agentRevisionId),
     runtimeRevisionIdx: index("V11DeploymentRoute_runtimeRevision_idx").on(t.runtimeRevisionId),
+    activeRouteRevisionIdx: index("V11DeploymentRoute_activeRouteRevision_idx").on(
+      t.activeRouteRevisionId,
+    ),
   }),
 );
 export type V11DeploymentRoute = InferSelectModel<typeof v11DeploymentRoute>;

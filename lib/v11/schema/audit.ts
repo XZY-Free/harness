@@ -34,6 +34,7 @@ export const AUDIT_ACTION_TYPES = [
   "agent.publish",
   "agent.retract",
   "route.update",
+  "route.revision.create",
   "runtime.publish",
   "runtime.retract",
   "tool.schema.publish",
