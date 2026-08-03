@@ -4,6 +4,18 @@ export const ROUTE_TRAFFIC_WEIGHT_TOTAL = 10_000;
 
 export type RouteResolutionAttribute = string | number | boolean;
 
+export interface RouteControlPlaneEvidence {
+  agentArtifactDigest: string;
+  runtimeArtifactDigest: string;
+  runtimeConfigDigest: string;
+  capabilityManifestDigest: string;
+  agentAttestationIds: string[];
+  runtimeAttestationIds: string[];
+  agentPublicationRecordId: string;
+  runtimePublicationRecordId: string;
+  conformanceRunId: string;
+}
+
 export interface RouteResolutionCandidate {
   deploymentRouteId: string;
   routeSetId: string;
@@ -33,6 +45,7 @@ export interface RouteResolutionCandidate {
   runtimeEvidenceValid: boolean;
   runtimeConformanceValid: boolean;
   policyRevisionState: string | null;
+  controlPlaneEvidence: RouteControlPlaneEvidence | null;
 }
 
 export interface RouteResolution {
@@ -54,6 +67,7 @@ export interface RouteResolution {
   trafficBucket: number;
   resolutionKeyDigest: string;
   resolvedAt: Date;
+  controlPlaneEvidence: RouteControlPlaneEvidence;
 }
 
 export type RouteResolutionOutcome =
@@ -176,6 +190,9 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
       trafficBucket,
       resolutionKeyDigest,
       resolvedAt: input.now,
+      controlPlaneEvidence: cloneControlPlaneEvidence(
+        requireControlPlaneEvidence(selected.candidate),
+      ),
     },
     eligibleCandidateCount: group.length,
   };
@@ -219,8 +236,46 @@ function isControlPlaneEligible(candidate: RouteResolutionCandidate, now: Date):
     candidate.runtimePublicationActive &&
     candidate.runtimeEvidenceValid &&
     candidate.runtimeConformanceValid &&
+    candidate.controlPlaneEvidence !== null &&
     (candidate.policyRevisionId === null || candidate.policyRevisionState === "published")
   );
+}
+
+export function computeCapabilityManifestDigest(input: {
+  agentRevisionId: string;
+  agentInterfaceRequirements: unknown;
+  runtimeRevisionId: string;
+  runtimeCapabilities: unknown;
+}): string {
+  const canonical = JSON.stringify(sortKeys(input));
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
+function requireControlPlaneEvidence(
+  candidate: RouteResolutionCandidate,
+): RouteControlPlaneEvidence {
+  if (!candidate.controlPlaneEvidence) {
+    throw new Error("RouteResolver 已选候选缺少控制面证据");
+  }
+  return candidate.controlPlaneEvidence;
+}
+
+function cloneControlPlaneEvidence(evidence: RouteControlPlaneEvidence): RouteControlPlaneEvidence {
+  return {
+    ...evidence,
+    agentAttestationIds: [...evidence.agentAttestationIds].sort(),
+    runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
+  };
+}
+
+function sortKeys(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(sortKeys);
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    sorted[key] = sortKeys((value as Record<string, unknown>)[key]);
+  }
+  return sorted;
 }
 
 function eligibilitySpecificity(

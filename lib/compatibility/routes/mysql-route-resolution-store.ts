@@ -8,7 +8,10 @@ import {
   publicationRecord,
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
-import type { RouteResolutionCandidate } from "@/lib/routes/domain/route-resolution-policy";
+import {
+  type RouteResolutionCandidate,
+  computeCapabilityManifestDigest,
+} from "@/lib/routes/domain/route-resolution-policy";
 import type { RouteResolutionStore } from "@/lib/routes/persistence/route-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
@@ -155,6 +158,32 @@ export const mysqlRouteResolutionStore: RouteResolutionStore = {
                 .limit(1)
                 .then((rows) => rows[0]?.state ?? "missing")
             : null;
+          const controlPlaneEvidence =
+            agentPublication &&
+            runtimePublication &&
+            agentRevision.artifactDigest &&
+            runtimeRevision.artifactDigest &&
+            runtimePublication.conformanceRunId &&
+            agentEvidenceValid &&
+            runtimeEvidenceValid &&
+            runtimeConformanceValid
+              ? {
+                  agentArtifactDigest: agentRevision.artifactDigest,
+                  runtimeArtifactDigest: runtimeRevision.artifactDigest,
+                  runtimeConfigDigest: runtimeRevision.configHash,
+                  capabilityManifestDigest: computeCapabilityManifestDigest({
+                    agentRevisionId: agentRevision.id,
+                    agentInterfaceRequirements: agentRevision.agentInterfaceRequirementsJson,
+                    runtimeRevisionId: runtimeRevision.id,
+                    runtimeCapabilities: runtimeRevision.runtimeCapabilitiesJson,
+                  }),
+                  agentAttestationIds: [...agentPublication.attestationIds].sort(),
+                  runtimeAttestationIds: [...runtimePublication.attestationIds].sort(),
+                  agentPublicationRecordId: agentPublication.id,
+                  runtimePublicationRecordId: runtimePublication.id,
+                  conformanceRunId: runtimePublication.conformanceRunId,
+                }
+              : null;
 
           return {
             deploymentRouteId: route.id,
@@ -185,6 +214,7 @@ export const mysqlRouteResolutionStore: RouteResolutionStore = {
             runtimeEvidenceValid,
             runtimeConformanceValid,
             policyRevisionState,
+            controlPlaneEvidence,
           };
         }),
       );

@@ -36,8 +36,14 @@
  * - 重试 Attempt 时使用新的 runtime_execution_ref，不覆盖初始 ref。
  */
 import { randomUUID } from "node:crypto";
+import { mysqlExecutionBindingStore } from "@/lib/compatibility/executions/mysql-execution-binding-store";
 import { mysqlRouteResolutionStore } from "@/lib/compatibility/routes/mysql-route-resolution-store";
 import { db } from "@/lib/db/client";
+import {
+  type CreateExecutionBindingCommand,
+  createCreateExecutionBinding,
+} from "@/lib/executions/application/create-execution-binding";
+import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
 import type {
   RouteResolution,
@@ -54,10 +60,6 @@ import {
   RuntimeHttpClientError,
   RuntimeSessionBindingConflictError,
 } from "@/lib/v11/runtime/errors";
-import {
-  type CreateExecutionBindingParams,
-  createExecutionBinding,
-} from "@/lib/v11/runtime/execution-binding-queries";
 import { createAttempt } from "@/lib/v11/runtime/invocation-attempt-queries";
 import {
   type CreateInvocationParams,
@@ -95,6 +97,7 @@ export const DEFAULT_ROUTE_SCOPE_KEY = "default";
 const DEFAULT_MODEL_PROVIDER = "default";
 
 const defaultRouteResolver = createResolveRoute({ store: mysqlRouteResolutionStore });
+const createExecutionBinding = createCreateExecutionBinding({ store: mysqlExecutionBindingStore });
 
 /** 调度结果。 */
 export interface DispatchResult {
@@ -105,7 +108,7 @@ export interface DispatchResult {
   /** 调度的 Invocation（dispatched=true 时填）。 */
   invocation?: V11Invocation;
   /** 调度的 ExecutionBinding（dispatched=true 时填）。 */
-  binding?: V11ExecutionBinding;
+  binding?: ExecutionBinding;
   /** 本次执行使用的确定性路由解析结果（dispatched=true 时填）。 */
   routeResolution?: RouteResolution;
   /** 调度的 Attempt（dispatched=true 时填）。 */
@@ -281,7 +284,7 @@ export async function dispatchInvocationForTurn(params: {
   const { invocation, event: invocationQueuedEvent } = await createInvocation(invocationParams);
 
   // 7. createExecutionBinding（不可变 1:1）
-  const bindingParams: CreateExecutionBindingParams = {
+  const bindingParams: CreateExecutionBindingCommand = {
     invocationId: invocation.id,
     tenantId: params.tenantId,
     agentRevisionId: routeResolution.agentRevisionId,
@@ -290,6 +293,17 @@ export async function dispatchInvocationForTurn(params: {
     modelProvider: modelInfo.modelProvider,
     modelId: modelInfo.modelId,
     modelRevisionRef: modelInfo.modelRevisionRef,
+    initialEnvironmentLeaseId: null,
+    workspaceBindingId: null,
+    policyRevisionId: routeResolution.policyRevisionId,
+    contextCheckpointId: null,
+    environmentDefinitionRevisionId: null,
+    controlPlaneEvidence: {
+      routeRevisionId: routeResolution.routeRevisionId,
+      routeActivationId: routeResolution.routeActivationId,
+      routeContentDigest: routeResolution.routeContentDigest,
+      ...routeResolution.controlPlaneEvidence,
+    },
   };
   const binding = await createExecutionBinding(bindingParams);
 

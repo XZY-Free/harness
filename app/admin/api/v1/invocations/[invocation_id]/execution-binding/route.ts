@@ -1,3 +1,4 @@
+import { serializeExecutionBinding } from "@/lib/executions/application/serialize-execution-binding";
 import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
 import {
   type AdminPrincipal,
@@ -52,22 +53,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     return v11NotFound(requestId, `ExecutionBinding 不存在或无权访问: invocation=${invocationId}`);
   }
 
-  const body = {
-    invocation_id: binding.invocationId,
-    tenant_id: binding.tenantId,
-    agent_revision_id: binding.agentRevisionId,
-    runtime_revision_id: binding.runtimeRevisionId,
-    deployment_route_id: binding.deploymentRouteId,
-    model_provider: binding.modelProvider,
-    model_id: binding.modelId,
-    model_revision_ref: binding.modelRevisionRef,
-    initial_environment_lease_id: binding.initialEnvironmentLeaseId,
-    workspace_binding_id: binding.workspaceBindingId,
-    policy_revision_id: binding.policyRevisionId,
-    context_checkpoint_id: binding.contextCheckpointId,
-    config_hash: binding.configHash,
-    bound_at: binding.boundAt.toISOString(),
-  };
+  const body = serializeExecutionBinding(binding);
 
   return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }
