@@ -8,15 +8,19 @@ import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
 import { dispatchEmployeeTurn } from "@/lib/v11/runtime/employee-turn-dispatcher";
 import { subscribeThreadTransientEvents } from "@/lib/v11/runtime/transient-event-bus";
+import { installTrustedHostedControlPlaneEvidenceForTest } from "@/lib/v11/test-support/trusted-hosted-control-plane-evidence";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
   await resetDatabase(db);
+  restoreEvidence = installTrustedHostedControlPlaneEvidenceForTest();
 });
 
 afterEach(() => {
-  // 无外部状态
+  restoreEvidence();
 });
+
+let restoreEvidence: () => void;
 
 describe("dispatchEmployeeTurn", () => {
   it("接纳的 Turn 会经内置 Hosted Runtime 生成并持久化真实 Agent 回复", async () => {
