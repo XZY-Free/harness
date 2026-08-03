@@ -81,7 +81,7 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
     actor: { actorType: "system", actorId: "test/trusted-runtime-runner" },
   });
 
-  return createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore })({
+  const publication = await createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore })({
     tenantId: params.tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: params.runtimeExpectedVersionNo,
@@ -95,4 +95,5 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
     requestId: `test-publish:${revision.id}`,
     idempotencyKey: `test-publish:${revision.id}`,
   });
+  return { ...publication, conformanceRunId: runId };
 }

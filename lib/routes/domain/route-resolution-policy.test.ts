@@ -3,6 +3,20 @@ import { type RouteResolutionCandidate, resolveRouteCandidates } from "./route-r
 
 const NOW = new Date("2026-08-03T01:00:00.000Z");
 
+function evidence(id: string) {
+  return {
+    agentArtifactDigest: `sha256:${"1".repeat(64)}`,
+    runtimeArtifactDigest: `sha256:${"2".repeat(64)}`,
+    runtimeConfigDigest: `sha256:${"3".repeat(64)}`,
+    capabilityManifestDigest: `sha256:${"4".repeat(64)}`,
+    agentAttestationIds: [`agent-attestation-${id}`],
+    runtimeAttestationIds: [`runtime-attestation-${id}`],
+    agentPublicationRecordId: `agent-publication-${id}`,
+    runtimePublicationRecordId: `runtime-publication-${id}`,
+    conformanceRunId: `conformance-run-${id}`,
+  };
+}
+
 function candidate(
   id: string,
   overrides: Partial<RouteResolutionCandidate> = {},
@@ -36,8 +50,9 @@ function candidate(
     runtimeEvidenceValid: true,
     runtimeConformanceValid: true,
     policyRevisionState: null,
+    controlPlaneEvidence: evidence(id),
     ...overrides,
-  };
+  } as RouteResolutionCandidate;
 }
 
 function resolve(
@@ -85,7 +100,10 @@ describe("deterministic route resolution policy", () => {
 
     expect(result).toMatchObject({
       status: "resolved",
-      resolution: { routeRevisionId: eligible.routeRevisionId },
+      resolution: {
+        routeRevisionId: eligible.routeRevisionId,
+        controlPlaneEvidence: evidence("eligible"),
+      },
     });
   });
 

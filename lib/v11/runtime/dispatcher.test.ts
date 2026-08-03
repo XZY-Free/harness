@@ -10,12 +10,24 @@
  *
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
+import { type KeyObject, generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { mysqlExecutionBindingStore } from "@/lib/compatibility/executions/mysql-execution-binding-store";
+import { mysqlRouteResolutionStore } from "@/lib/compatibility/routes/mysql-route-resolution-store";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import type { ResolveRouteCommand, RouteResolver } from "@/lib/routes/application/resolve-route";
+import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
+import { ExecutionBindingAlreadyExistsError as StableExecutionBindingAlreadyExistsError } from "@/lib/executions/domain/execution-binding";
+import { withdrawalRecord } from "@/lib/publications/persistence/publication-record";
+import {
+  type ResolveRouteCommand,
+  type RouteResolver,
+  createResolveRoute,
+} from "@/lib/routes/application/resolve-route";
 import { createAgent } from "@/lib/v11/control-plane/agent-queries";
-import { createDraftRevision } from "@/lib/v11/control-plane/agent-revision-queries";
+import {
+  createDraftRevision,
+  getRevisionById,
+} from "@/lib/v11/control-plane/agent-revision-queries";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -33,7 +45,10 @@ import {
   upsertDeploymentRoute,
 } from "@/lib/v11/control-plane/deployment-route-queries";
 import { createRuntime } from "@/lib/v11/control-plane/runtime-queries";
-import { createDraftRuntimeRevision } from "@/lib/v11/control-plane/runtime-revision-queries";
+import {
+  createDraftRuntimeRevision,
+  getRuntimeRevisionById,
+} from "@/lib/v11/control-plane/runtime-revision-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
 import type { AuditActor } from "@/lib/v11/identity/audit";
@@ -266,7 +281,7 @@ async function seedPublishedAgentRevision(
     revision.id,
     `agent-content-${contentSuffix}`,
   );
-  await publishTrustedAgentRevisionForTest({
+  const publication = await publishTrustedAgentRevisionForTest({
     tenantId,
     revisionId: revision.id,
     agentExpectedVersionNo: 1,
@@ -274,7 +289,9 @@ async function seedPublishedAgentRevision(
     actorId: ownerId,
   });
 
-  return { agent, revision };
+  const publishedRevision = await getRevisionById(revision.id);
+  if (!publishedRevision) throw new Error("测试 AgentRevision 发布后无法回读");
+  return { agent, revision: publishedRevision, attestation, publication };
 }
 
 // ─── 辅助：seed Runtime + published RuntimeRevision + attestation ─
@@ -317,14 +334,16 @@ async function seedPublishedRuntimeRevision(
     revision.id,
     artifactContent,
   );
-  await publishTrustedRuntimeRevisionForTest({
+  const publication = await publishTrustedRuntimeRevisionForTest({
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,
     attestationId: attestation.id,
   });
 
-  return { runtime, revision };
+  const publishedRevision = await getRuntimeRevisionById(revision.id);
+  if (!publishedRevision) throw new Error("测试 RuntimeRevision 发布后无法回读");
+  return { runtime, revision: publishedRevision, attestation, publication };
 }
 
 // ─── 辅助：seed 完整调度上下文（Tenant + User + Agent + Runtime + Route + Thread + Turn） ─
@@ -335,6 +354,11 @@ interface FullDispatchContext {
   agentId: string;
   agentRevision: V11AgentRevision;
   runtimeRevision: V11RuntimeRevision;
+  agentAttestationId: string;
+  runtimeAttestationId: string;
+  agentPublicationRecordId: string;
+  runtimePublicationRecordId: string;
+  conformanceRunId: string;
   routeId: string;
   routeSetId: string;
   threadId: string;
@@ -345,15 +369,18 @@ interface FullDispatchContext {
 async function seedFullDispatchContext(): Promise<FullDispatchContext> {
   const { tenantId, ownerId } = await seedTenantAndOwner();
 
-  const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
-    tenantId,
-    ownerId,
-    "finance",
-    ["event_stream"],
-    "v1",
-  );
+  const {
+    agent,
+    revision: agentRevision,
+    attestation: agentAttestation,
+    publication: agentPublication,
+  } = await seedPublishedAgentRevision(tenantId, ownerId, "finance", ["event_stream"], "v1");
 
-  const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
+  const {
+    revision: runtimeRevision,
+    attestation: runtimeAttestation,
+    publication: runtimePublication,
+  } = await seedPublishedRuntimeRevision(
     tenantId,
     ownerId,
     "doubao-hosted",
@@ -403,6 +430,11 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     agentId: agent.id,
     agentRevision,
     runtimeRevision,
+    agentAttestationId: agentAttestation.id,
+    runtimeAttestationId: runtimeAttestation.id,
+    agentPublicationRecordId: agentPublication.publicationRecordId,
+    runtimePublicationRecordId: runtimePublication.publicationRecordId,
+    conformanceRunId: runtimePublication.conformanceRunId,
     routeId: routeResult.route.id,
     routeSetId: routeSet.id,
     threadId: thread.id,
@@ -914,6 +946,20 @@ describe("V11 Dispatcher 调度", () => {
     expect(result.binding?.agentRevisionId).toBe(ctx.agentRevision.id);
     expect(result.binding?.runtimeRevisionId).toBe(ctx.runtimeRevision.id);
     expect(result.binding?.deploymentRouteId).toBe(ctx.routeId);
+    expect(result.binding).toMatchObject({
+      routeRevisionId: result.routeResolution?.routeRevisionId,
+      routeActivationId: result.routeResolution?.routeActivationId,
+      routeContentDigest: result.routeResolution?.routeContentDigest,
+      agentArtifactDigest: ctx.agentRevision.artifactDigest,
+      runtimeArtifactDigest: ctx.runtimeRevision.artifactDigest,
+      runtimeConfigDigest: ctx.runtimeRevision.configHash,
+      capabilityManifestDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      agentAttestationIds: [ctx.agentAttestationId],
+      runtimeAttestationIds: [ctx.runtimeAttestationId],
+      agentPublicationRecordId: ctx.agentPublicationRecordId,
+      runtimePublicationRecordId: ctx.runtimePublicationRecordId,
+      conformanceRunId: ctx.conformanceRunId,
+    });
 
     // Attempt 验证
     expect(result.attempt?.invocationId).toBe(result.invocation?.id);
@@ -928,6 +974,130 @@ describe("V11 Dispatcher 调度", () => {
     // 事件写入
     expect(result.invocationQueuedEvent?.eventType).toBe("invocation.queued");
     expect(result.turnQueuedEvent?.eventType).toBe("turn.queued");
+  });
+
+  it("Resolver 后发生撤回时拒绝创建新的 ExecutionBinding", async () => {
+    const ctx = await seedFullDispatchContext();
+    const routeResolver = createResolveRoute({ store: mysqlRouteResolutionStore });
+    const staleOutcome = await routeResolver({
+      tenantId: ctx.tenantId,
+      agentId: ctx.agentId,
+      routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
+      businessKey: { threadId: ctx.threadId },
+    });
+    expect(staleOutcome.status).toBe("resolved");
+    await db.insert(withdrawalRecord).values({
+      id: randomUUID(),
+      tenantId: ctx.tenantId,
+      publicationRecordId: ctx.runtimePublicationRecordId,
+      subjectType: "runtime_revision",
+      subjectRevisionId: ctx.runtimeRevision.id,
+      reasonCode: "security",
+      reason: "binding race test",
+      withdrawnByType: "system",
+      withdrawnBy: "dispatcher-test",
+      withdrawnAt: new Date(),
+    });
+
+    await expect(
+      dispatchInvocationForTurn({
+        tenantId: ctx.tenantId,
+        turnId: ctx.turnId,
+        routeResolver: async () => staleOutcome,
+      }),
+    ).rejects.toThrow(/ExecutionBinding.*控制面证据/);
+    const invocations = await getInvocationsByTurn(ctx.tenantId, ctx.turnId);
+    expect(invocations).toHaveLength(1);
+    await expect(
+      getExecutionBindingByInvocation(ctx.tenantId, invocations[0]?.id ?? ""),
+    ).resolves.toBeNull();
+  });
+
+  it("同一 Invocation 并发绑定只有一个权威结果", async () => {
+    const ctx = await seedFullDispatchContext();
+    const { invocation } = await createInvocation({
+      tenantId: ctx.tenantId,
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationKind: "initial",
+    });
+    const outcome = await createResolveRoute({ store: mysqlRouteResolutionStore })({
+      tenantId: ctx.tenantId,
+      agentId: ctx.agentId,
+      routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
+      businessKey: { threadId: ctx.threadId },
+    });
+    if (outcome.status !== "resolved") throw new Error("测试路由未解析");
+    const resolution = outcome.resolution;
+    const command = {
+      invocationId: invocation.id,
+      tenantId: ctx.tenantId,
+      agentRevisionId: resolution.agentRevisionId,
+      runtimeRevisionId: resolution.runtimeRevisionId,
+      deploymentRouteId: resolution.deploymentRouteId,
+      modelProvider: "doubao",
+      modelId: "doubao-pro",
+      modelRevisionRef: null,
+      initialEnvironmentLeaseId: null,
+      workspaceBindingId: null,
+      policyRevisionId: resolution.policyRevisionId,
+      contextCheckpointId: null,
+      environmentDefinitionRevisionId: null,
+      controlPlaneEvidence: {
+        routeRevisionId: resolution.routeRevisionId,
+        routeActivationId: resolution.routeActivationId,
+        routeContentDigest: resolution.routeContentDigest,
+        ...resolution.controlPlaneEvidence,
+      },
+    };
+    const createBinding = createCreateExecutionBinding({ store: mysqlExecutionBindingStore });
+
+    const results = await Promise.allSettled([createBinding(command), createBinding(command)]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected).toMatchObject({
+      reason: expect.any(StableExecutionBindingAlreadyExistsError),
+    });
+    await expect(
+      getExecutionBindingByInvocation(ctx.tenantId, invocation.id),
+    ).resolves.toMatchObject({
+      routeRevisionId: resolution.routeRevisionId,
+      runtimePublicationRecordId: resolution.controlPlaneEvidence.runtimePublicationRecordId,
+    });
+  });
+
+  it("发布撤回不会改写已创建 Binding 的历史证据", async () => {
+    const ctx = await seedFullDispatchContext();
+    const result = await dispatchInvocationForTurn({ tenantId: ctx.tenantId, turnId: ctx.turnId });
+    const invocationId = result.invocation?.id;
+    if (!invocationId || !result.binding) throw new Error("测试 Binding 未创建");
+    const frozen = {
+      routeRevisionId: result.binding.routeRevisionId,
+      routeActivationId: result.binding.routeActivationId,
+      agentArtifactDigest: result.binding.agentArtifactDigest,
+      runtimeArtifactDigest: result.binding.runtimeArtifactDigest,
+      agentPublicationRecordId: result.binding.agentPublicationRecordId,
+      runtimePublicationRecordId: result.binding.runtimePublicationRecordId,
+      conformanceRunId: result.binding.conformanceRunId,
+      configHash: result.binding.configHash,
+    };
+    await db.insert(withdrawalRecord).values({
+      id: randomUUID(),
+      tenantId: ctx.tenantId,
+      publicationRecordId: ctx.runtimePublicationRecordId,
+      subjectType: "runtime_revision",
+      subjectRevisionId: ctx.runtimeRevision.id,
+      reasonCode: "security",
+      reason: "history freeze test",
+      withdrawnByType: "system",
+      withdrawnBy: "dispatcher-test",
+      withdrawnAt: new Date(),
+    });
+
+    await expect(
+      getExecutionBindingByInvocation(ctx.tenantId, invocationId),
+    ).resolves.toMatchObject(frozen);
   });
 
   it("dispatchInvocationForTurn 无有效路由 → Turn 保持 accepted（不报错）", async () => {

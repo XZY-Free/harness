@@ -94,8 +94,9 @@ async function seedAgentAuthority() {
     verificationState: "verified",
     verifiedAt: NOW,
   });
+  const agentPublicationId = randomUUID();
   await db.insert(publicationRecord).values({
-    id: randomUUID(),
+    id: agentPublicationId,
     tenantId: tenant.id,
     subjectType: "agent_revision",
     subjectRevisionId: agentRevisionId,
@@ -117,7 +118,15 @@ async function seedAgentAuthority() {
     routeScopeJson: { environment: "prod" },
     versionNo: 1,
   });
-  return { tenantId: tenant.id, agentId, agentRevisionId, routeSetId };
+  return {
+    tenantId: tenant.id,
+    agentId,
+    agentRevisionId,
+    agentArtifactDigest: digest,
+    agentAttestationId: attestationId,
+    agentPublicationId,
+    routeSetId,
+  };
 }
 
 async function addRuntimeRoute(
@@ -333,6 +342,29 @@ describe("RouteResolver MySQL authority", () => {
       resolveRoute(command(base, "sticky-thread")),
     ]);
     expect(repeated[1]).toEqual(repeated[0]);
+  });
+
+  it("解析结果冻结发布、证明、制品和 Conformance 权威证据", async () => {
+    const base = await seedAgentAuthority();
+    const fixture = await addRuntimeRoute(base, "evidence");
+
+    await expect(resolveRoute(command(base, "thread-evidence"))).resolves.toMatchObject({
+      status: "resolved",
+      resolution: {
+        routeRevisionId: fixture.routeRevisionId,
+        controlPlaneEvidence: {
+          agentArtifactDigest: base.agentArtifactDigest,
+          runtimeArtifactDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+          runtimeConfigDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+          capabilityManifestDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+          agentAttestationIds: [base.agentAttestationId],
+          runtimeAttestationIds: [fixture.runtimeAttestationId],
+          agentPublicationRecordId: base.agentPublicationId,
+          runtimePublicationRecordId: fixture.runtimePublicationId,
+          conformanceRunId: expect.any(String),
+        },
+      },
+    });
   });
 
   it("未来和已过期 RouteRevision 不参与解析", async () => {
