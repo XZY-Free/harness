@@ -46,9 +46,11 @@ import {
  */
 import {
   AgentCapabilityUnsupportedError,
+  ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
   RouteNotFoundError,
   RouteSetNotFoundError,
+  RouteSetRequiresAtomicUpdateError,
   RouteSetVersionConflictError,
   RouteWeightInvalidError,
   getRouteById,
@@ -276,8 +278,8 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
             runtime_revision_id: published.route.runtimeRevisionId,
             traffic_weight: published.route.trafficWeight,
             route_set_version_no: published.routeSet.versionNo,
-            route_revision_id: published.routeRevision.id,
-            route_activation_id: published.routeActivation.id,
+            route_revision_id: published.routeRevisionId,
+            route_activation_id: published.routeActivationId,
             etag: published.etag,
             affects_new_invocations_only: published.affectsNewInvocationsOnly,
           }),
@@ -291,8 +293,8 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
       runtime_revision_id: result.route.runtimeRevisionId,
       traffic_weight: result.route.trafficWeight,
       route_set_version_no: result.routeSet.versionNo,
-      route_revision_id: result.routeRevision.id,
-      route_activation_id: result.routeActivation.id,
+      route_revision_id: result.routeRevisionId,
+      route_activation_id: result.routeActivationId,
       etag: result.etag,
       affects_new_invocations_only: result.affectsNewInvocationsOnly,
     };
@@ -321,8 +323,14 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
     }
     // ArtifactNotVerifiedForRouteError 是 deployment-route-queries 内部类（未导出），
     // 通过 error.name 检测以避免修改 S03-C04 已完成文件。
+    if (err instanceof ArtifactNotVerifiedForRouteError) {
+      return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
+    }
     if (err instanceof Error && err.name === "ArtifactNotVerifiedForRouteError") {
       return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
+    }
+    if (err instanceof RouteSetRequiresAtomicUpdateError) {
+      return v11Error("ROUTE_SET_REQUIRES_ATOMIC_UPDATE", err.message, { requestId });
     }
     if (err instanceof AgentCapabilityUnsupportedError) {
       return v11Error(

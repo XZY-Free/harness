@@ -7,7 +7,7 @@
  * - runtime-conformance：validateConformanceGate（4 mandatory case）/ isCapabilitySubset / ConformanceGateError。
  * - 不可变性约束：published 业务内容不可改；withdrawn 不删除历史引用；revisionNo 单调递增。
  * - 生命周期约束：retired 终态不可变更；软删除仅 draft/disabled 允许。
- * - 乐观锁：versionNo 不匹配返回 null/false；publishRuntimeRevision 冲突抛 RuntimeVersionConflictError。
+ * - 乐观锁：versionNo 不匹配返回 null/false；publishRuntimeRevision 冲突抛 RuntimePublicationVersionConflictError。
  * - Conformance 门禁：mandatory case 失败 → publish 抛 ConformanceGateError，Revision 保持 draft。
  * - 跨租户隔离：getRuntimeById/listRuntimes 按 tenantId 过滤。
  */
@@ -41,7 +41,7 @@ import {
   RuntimeRevisionImmutableError,
   RuntimeRevisionNotFoundError,
   RuntimeRevisionStateError,
-  RuntimeVersionConflictError,
+  RuntimePublicationVersionConflictError,
   createDraftRuntimeRevision,
   getLatestPublishedRuntimeRevision,
   getRevisionsByRuntime,
@@ -671,7 +671,7 @@ describe("V11 runtime-revision-queries", () => {
   it("publishRuntimeRevision Runtime 乐观锁冲突抛 VersionConflictError", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     await expect(publishTrustedRevision(tenantId, rev.id, 999)).rejects.toThrow(
-      RuntimeVersionConflictError,
+      RuntimePublicationVersionConflictError,
     );
     // 发布事务整体回滚，不留下 Revision 已发布但 Runtime 指针未更新的部分状态。
     const after = await getRuntimeRevisionById(rev.id);

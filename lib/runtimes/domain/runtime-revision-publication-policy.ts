@@ -29,12 +29,15 @@ export type RuntimeRevisionPublicationState = "draft" | "published" | "withdrawn
 
 // ─── 发布资格错误 ────────────────────────────────────────
 
-export class ConformanceGateError extends Error {
+export class RuntimeConformanceCaseFailedError extends Error {
   constructor(public readonly failedCases: ConformanceCaseId[]) {
     super(`Conformance 门禁失败，缺失/失败的 mandatory case：${failedCases.join(", ")}`);
-    this.name = "ConformanceGateError";
+    this.name = "RuntimeConformanceCaseFailedError";
   }
 }
+
+/** @deprecated 使用 RuntimeConformanceCaseFailedError */
+export const ConformanceGateError = RuntimeConformanceCaseFailedError;
 
 export class RuntimeRevisionNotFoundError extends Error {
   constructor(public readonly revisionId: string) {
@@ -55,13 +58,13 @@ export class RuntimeRevisionStateError extends Error {
   }
 }
 
-export class RuntimeVersionConflictError extends Error {
+export class RuntimePublicationVersionConflictError extends Error {
   constructor(
     public readonly runtimeId: string,
     public readonly expectedVersionNo: number,
   ) {
     super(`Runtime ${runtimeId} versionNo 不匹配（期望 ${expectedVersionNo}），乐观锁冲突`);
-    this.name = "RuntimeVersionConflictError";
+    this.name = "RuntimePublicationVersionConflictError";
   }
 }
 

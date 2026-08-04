@@ -224,7 +224,7 @@ export async function PUT(
       reason: body.reason,
       requestId,
       idempotencyKey,
-      idempotency: {
+      idempotencyCompletion: {
         recordId,
         httpStatus: 200,
         serializeResponse: (r) =>

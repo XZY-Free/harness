@@ -18,7 +18,7 @@
 export {
   ALL_CONFORMANCE_CASES,
   MANDATORY_GATE_CASES,
-  ConformanceGateError,
+  RuntimeConformanceCaseFailedError,
   type ConformanceCaseId,
   type ConformanceCaseResult,
   type ConformanceGateResult,

@@ -6,7 +6,7 @@
 
 -- ─── NOT NULL 约束 ────────────────────────────────────────
 ALTER TABLE `RouteRevision`
-  MODIFY `routeGroupId` varchar(128) NOT NULL;
+  MODIFY `routeGroupId` varchar(128) NOT NULL DEFAULT 'primary';
 --> statement-breakpoint
 ALTER TABLE `RouteRevision`
   MODIFY `selectorDigest` varchar(71) NOT NULL;

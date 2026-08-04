@@ -35,7 +35,7 @@ import {
 } from "@/lib/runtimes/persistence/runtime-queries";
 import {
   RuntimeRevisionNotFoundError,
-  RuntimeVersionConflictError,
+  RuntimePublicationVersionConflictError,
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
 } from "@/lib/runtimes/persistence/runtime-revision-queries";

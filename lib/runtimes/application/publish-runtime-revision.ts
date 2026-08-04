@@ -3,7 +3,7 @@ import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/p
 import { validateCompleteConformanceResult } from "@/lib/runtimes/domain/runtime-conformance-contract";
 import {
   ArtifactEvidencePolicy,
-  ConformanceGateError,
+  RuntimeConformanceCaseFailedError,
   RuntimeArtifactAttestationInvalidError,
   RuntimeArtifactAttestationRequiredError,
   RuntimeConformanceRunInvalidError,
@@ -11,7 +11,7 @@ import {
   RuntimePublicationIdempotencyCompletionError,
   RuntimeRevisionNotFoundError,
   RuntimeRevisionStateError,
-  RuntimeVersionConflictError,
+  RuntimePublicationVersionConflictError,
 } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 import type {
   RuntimePublicationActorType,
@@ -111,7 +111,7 @@ export function createPublishRuntimeRevision(dependencies: {
       // 6. FOR UPDATE 读取 Runtime
       const runtime = await session.findRuntime(command.tenantId, revision.runtimeId);
       if (!runtime || runtime.versionNo !== command.runtimeExpectedVersionNo) {
-        throw new RuntimeVersionConflictError(revision.runtimeId, command.runtimeExpectedVersionNo);
+        throw new RuntimePublicationVersionConflictError(revision.runtimeId, command.runtimeExpectedVersionNo);
       }
 
       // 8-9. FOR UPDATE 读取 Attestation 证据快照，统一 Policy 验证
@@ -173,7 +173,7 @@ export function createPublishRuntimeRevision(dependencies: {
       // 14. 校验 Case 完整性和全部通过
       const caseValidation = validateCompleteConformanceResult(conformanceRun.results);
       if (!caseValidation.valid) {
-        throw new ConformanceGateError(
+        throw new RuntimeConformanceCaseFailedError(
           conformanceRun.results
             .filter((r) => !r.passed)
             .map((r) => r.caseId as import("@/lib/runtimes/domain/runtime-conformance-contract").ConformanceCaseId),
@@ -225,7 +225,7 @@ export function createPublishRuntimeRevision(dependencies: {
           updatedAt: publishedAt,
         }))
       ) {
-        throw new RuntimeVersionConflictError(revision.runtimeId, command.runtimeExpectedVersionNo);
+        throw new RuntimePublicationVersionConflictError(revision.runtimeId, command.runtimeExpectedVersionNo);
       }
 
       // 18. 写 Audit

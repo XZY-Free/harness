@@ -832,8 +832,8 @@ describe("V11 upsertDeploymentRoute", () => {
     const first = await upsertDeploymentRoute(command);
     const replay = await upsertDeploymentRoute(command);
 
-    expect(replay.routeRevision.id).toBe(first.routeRevision.id);
-    expect(replay.routeActivation.id).toBe(first.routeActivation.id);
+    expect(replay.routeRevisionId).toBe(first.routeRevisionId);
+    expect(replay.routeActivationId).toBe(first.routeActivationId);
     expect(
       await db.select().from(routeRevision).where(eq(routeRevision.routeId, first.route.id)),
     ).toHaveLength(1);
@@ -932,7 +932,7 @@ describe("V11 upsertDeploymentRoute", () => {
           recordId: idempotency.id,
           httpStatus: 200,
           serializeResponse: (result) =>
-            JSON.stringify({ route_revision_id: result.routeRevision.id }),
+            JSON.stringify({ route_revision_id: result.routeRevisionId }),
         },
       }),
     ).rejects.toThrow(`injected failure after ${step}`);
@@ -1343,9 +1343,14 @@ describe("V11 回滚场景", () => {
       actor: buildActor(tenantId, "deploy-bot-001"),
     });
     expect(r5.routeSet.versionNo).toBe(6);
-    expect(r5.routeRevision.id).toBe(r1.routeRevision.id);
-    expect(r5.routeActivation.previousRouteRevisionId).toBe(r2.routeRevision.id);
-    expect(r5.routeActivation.activationSequence).toBe(3);
+    expect(r5.routeRevisionId).toBe(r1.routeRevisionId);
+    // 验证 RouteActivation 在 DB 中的内部状态
+    const [r5Activation] = await db
+      .select()
+      .from(routeActivation)
+      .where(eq(routeActivation.id, r5.routeActivationId));
+    expect(r5Activation?.previousRouteRevisionId).toBe(r2.routeRevisionId);
+    expect(r5Activation?.activationSequence).toBe(3);
 
     // 验证回滚后：只有 1 条 enabled 路由（rev1 100%）
     const effectiveAfterRollback = await getEffectiveRoutes(tenantId, agentId, "prod");

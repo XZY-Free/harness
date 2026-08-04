@@ -140,6 +140,7 @@ function makeRoute(overrides: Partial<DesiredRoute> & Pick<DesiredRoute, "routeI
     effectiveFrom: null,
     effectiveUntil: null,
     activationState: "active",
+    routeRevisionId: undefined,
     ...overrides,
   };
 }
@@ -321,5 +322,17 @@ describe("validateRouteSetActivation", () => {
     });
     expect(result.valid).toBe(false);
     expect(result.validationErrors.some((e) => e.code === "ROUTE_TIME_INVALID")).toBe(true);
+  });
+
+  it("同一 RouteRevision 被重复激活拒绝", () => {
+    const result = validateRouteSetActivation({
+      ...BASE_INPUT,
+      desiredRoutes: [
+        makeRoute({ routeId: "r-1", routeRevisionId: "rev-1", trafficWeight: 5000 }),
+        makeRoute({ routeId: "r-2", routeRevisionId: "rev-1", trafficWeight: 5000 }),
+      ],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.validationErrors.some((e) => e.code === "ROUTE_REVISION_DUPLICATE")).toBe(true);
   });
 });

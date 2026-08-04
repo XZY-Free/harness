@@ -70,7 +70,7 @@ export interface ActivateRouteSetCommand {
   reason: string;
   requestId: string;
   idempotencyKey: string;
-  idempotency?: {
+  idempotencyCompletion?: {
     recordId: string;
     httpStatus: number;
     responseRef?: string | null;
@@ -272,7 +272,7 @@ export function createActivateRouteSet(dependencies: {
           actorId: command.actor.actorId,
           reason: command.reason,
           requestId: command.requestId,
-          idempotencyKey: `${command.idempotencyKey}:${routeId}`,
+          idempotencyKey: `${command.idempotencyCompletionKey}:${routeId}`,
           now: occurredAt,
         });
 
@@ -313,7 +313,7 @@ export function createActivateRouteSet(dependencies: {
               actorId: command.actor.actorId,
               reason: `${command.reason}（不在目标集合中）`,
               requestId: command.requestId,
-              idempotencyKey: `${command.idempotencyKey}:disable:${currentRoute.id}`,
+              idempotencyKey: `${command.idempotencyCompletionKey}:disable:${currentRoute.id}`,
               now: occurredAt,
             });
             await session.updateRouteProjection({
@@ -381,16 +381,16 @@ export function createActivateRouteSet(dependencies: {
       };
 
       // 20. 完成 Idempotency
-      if (command.idempotency) {
+      if (command.idempotencyCompletion) {
         const completed = await session.completeIdempotency({
-          recordId: command.idempotency.recordId,
-          httpStatus: command.idempotency.httpStatus,
-          responseRef: command.idempotency?.responseRef ?? command.routeSetId,
-          responseRedactedJson: command.idempotency.serializeResponse(result),
+          recordId: command.idempotencyCompletion.recordId,
+          httpStatus: command.idempotencyCompletion.httpStatus,
+          responseRef: command.idempotencyCompletion?.responseRef ?? command.routeSetId,
+          responseRedactedJson: command.idempotencyCompletion.serializeResponse(result),
           completedAt: occurredAt,
         });
         if (!completed) {
-          throw new Error(`RouteSetActivation 幂等记录完成失败: ${command.idempotency.recordId}`);
+          throw new Error(`RouteSetActivation 幂等记录完成失败: ${command.idempotencyCompletion.recordId}`);
         }
       }
 
