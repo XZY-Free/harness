@@ -1,25 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import {
+  ALL_CONFORMANCE_CASES,
+  type ConformanceCaseId,
+  CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtimes/domain/runtime-conformance-contract";
 
-export const ALL_CONFORMANCE_CASES = [
-  "dispatch-binds-immutable-config",
-  "event-batch-idempotent",
-  "event-payload-hash-conflict",
-  "attempt-sequence-continuity",
-  "steer-requires-ack",
-  "unsupported-steer",
-  "cancel-request-not-terminal",
-  "tool-schema-refresh",
-  "unknown-effect-no-replay",
-  "capability-search-not-use",
-  "memory-proposal-only",
-  "child-thread-isolation",
-  "child-cancel-requires-ack",
-  "credential-never-in-model-data",
-  "execution-ownership-epoch",
-  "session-does-not-claim-filesystem-recovery",
-] as const;
-
-export type RuntimeConformanceCaseId = (typeof ALL_CONFORMANCE_CASES)[number];
+export { ALL_CONFORMANCE_CASES, CONFORMANCE_SUITE_REVISION };
+export type RuntimeConformanceCaseId = ConformanceCaseId;
 export type RuntimeConformanceOverallResult = "passed" | "failed" | "error" | "cancelled";
 
 export interface RuntimeConformanceReport {
@@ -87,7 +74,9 @@ export function validateRuntimeConformanceReport(report: RuntimeConformanceRepor
     new Set(caseIds).size !== ALL_CONFORMANCE_CASES.length ||
     ALL_CONFORMANCE_CASES.some((caseId) => !caseIds.includes(caseId))
   ) {
-    throw new RuntimeConformanceTrustError("Conformance 报告必须包含全部且唯一的 16 个 case");
+    throw new RuntimeConformanceTrustError(
+      `Conformance 报告必须包含全部且唯一的 ${ALL_CONFORMANCE_CASES.length} 个 case`,
+    );
   }
   const startedAt = new Date(report.startedAt);
   const completedAt = new Date(report.completedAt);

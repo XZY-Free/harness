@@ -21,20 +21,18 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
   tenantId: string;
   revisionId: string;
   runtimeExpectedVersionNo: number;
-  attestationId?: string;
+  attestationId: string;
 }) {
   let revision = await getRuntimeRevisionById(params.revisionId);
-  if (params.attestationId) {
-    const attestation = await getAttestationById(params.tenantId, params.attestationId);
-    if (!attestation?.artifactId || attestation.verificationState !== "verified") {
-      throw new Error(`测试 RuntimeRevision 缺少权威 Attestation: ${params.revisionId}`);
-    }
-    await db
-      .update(v11RuntimeRevision)
-      .set({ artifactId: attestation.artifactId, artifactDigest: attestation.artifactDigest })
-      .where(eq(v11RuntimeRevision.id, params.revisionId));
-    revision = await getRuntimeRevisionById(params.revisionId);
+  const attestation = await getAttestationById(params.tenantId, params.attestationId);
+  if (!attestation?.artifactId || attestation.verificationState !== "verified") {
+    throw new Error(`测试 RuntimeRevision 缺少权威 Attestation: ${params.revisionId}`);
   }
+  await db
+    .update(v11RuntimeRevision)
+    .set({ artifactId: attestation.artifactId, artifactDigest: attestation.artifactDigest })
+    .where(eq(v11RuntimeRevision.id, params.revisionId));
+  revision = await getRuntimeRevisionById(params.revisionId);
   if (revision && !/^sha256:[0-9a-f]{64}$/.test(revision.configHash)) {
     revision = await updateDraftRuntimeRevisionContent(revision.id, {
       configHash: `sha256:${createHash("sha256").update(revision.configHash).digest("hex")}`,

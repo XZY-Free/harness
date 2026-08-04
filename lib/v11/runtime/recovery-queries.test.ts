@@ -258,11 +258,12 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     provenanceRef: rtProvRef,
     builderIdentity: "builder:recovery",
   };
-  await verifyAndPersistAttestation(rtInput, store, builderKeys, buildActor(tenantId, "ci-001"));
+  const rtAttestation = await verifyAndPersistAttestation(rtInput, store, builderKeys, buildActor(tenantId, "ci-001"));
   await publishTrustedRuntimeRevisionForTest({
     tenantId,
     revisionId: runtimeRevision.id,
     runtimeExpectedVersionNo: 1,
+    attestationId: rtAttestation.id,
   });
 
   // Route

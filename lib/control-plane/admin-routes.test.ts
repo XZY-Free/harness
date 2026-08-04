@@ -302,7 +302,7 @@ async function seedPublishedRuntimeRevision(
     createdBy: ownerId,
   });
 
-  await createVerifiedAttestationDirect(
+  const attestationId = await createVerifiedAttestationDirect(
     tenantId,
     "runtime_revision",
     revision.id,
@@ -312,6 +312,7 @@ async function seedPublishedRuntimeRevision(
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,
+    attestationId,
   });
 
   return { runtime, revision };

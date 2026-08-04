@@ -104,7 +104,7 @@ export interface DispatchResult {
   /** 是否实际执行了调度（false = 无有效路由，Turn 保持 accepted）。 */
   dispatched: boolean;
   /** 未调度原因（dispatched=false 时填）。 */
-  reason?: "no_effective_route";
+  reason?: "no_effective_route" | "ambiguous_route_configuration" | "invalid_traffic_weight_total";
   /** 调度的 Invocation（dispatched=true 时填）。 */
   invocation?: V11Invocation;
   /** 调度的 ExecutionBinding（dispatched=true 时填）。 */
@@ -259,7 +259,12 @@ export async function dispatchInvocationForTurn(params: {
   });
   if (routeOutcome.status === "unresolved") {
     // 无有效路由 → Turn 保持 accepted，不报错
-    return { dispatched: false, reason: "no_effective_route" };
+    const reason = routeOutcome.reason === "ambiguous_route_configuration"
+      ? "ambiguous_route_configuration"
+      : routeOutcome.reason === "invalid_traffic_weight_total"
+        ? "invalid_traffic_weight_total"
+        : "no_effective_route";
+    return { dispatched: false, reason };
   }
   const routeResolution = routeOutcome.resolution;
 

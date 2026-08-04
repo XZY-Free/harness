@@ -1,7 +1,11 @@
 /**
  * DeploymentRoute 查询与写入应用服务。
  *
- * 新写入全部委托 RouteRevision 激活事务；DeploymentRouteRow 作为调度器读取的当前投影。
+ * 单 Route 写入（upsertDeploymentRoute / disableDeploymentRoute）
+ * 作为薄适配器委托 RouteSet 整体激活服务（ActivateRouteSet），
+ * 确保聚合不变量始终校验。当单条修改会产生非法中间状态时，
+ * 抛 RouteSetRequiresAtomicUpdateError（409），
+ * 提示调用方使用 RouteSet 批量激活接口。
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
@@ -13,8 +17,12 @@ import {
   deploymentRouteSetTable,
   deploymentRouteTable,
 } from "@/lib/persistence/schema/control-plane";
-import { createActivateRouteRevision } from "@/lib/routes/application/activate-route-revision";
-import type { ActivateRouteRevisionResult } from "@/lib/routes/application/activate-route-revision";
+import {
+  createActivateRouteSet,
+  RouteSetRequiresAtomicUpdateError,
+  type ActivateRouteSetResult,
+} from "@/lib/routes/application/activate-route-set";
+import type { DesiredRoute } from "@/lib/routes/persistence/route-set-activation-store";
 import {
   AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
@@ -25,7 +33,7 @@ import {
   RouteSetVersionConflictError,
   RouteWeightInvalidError,
 } from "@/lib/routes/domain/route-revision";
-import { mysqlRouteControlStore } from "@/lib/routes/persistence/mysql-route-control-store";
+import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
 import { and, desc, eq } from "drizzle-orm";
 
 export const MAX_TRAFFIC_WEIGHT = MAX_ROUTE_TRAFFIC_WEIGHT;
@@ -35,11 +43,12 @@ export {
   RevisionNotPublishedError,
   RouteNotFoundError,
   RouteSetNotFoundError,
+  RouteSetRequiresAtomicUpdateError,
   RouteSetVersionConflictError,
   RouteWeightInvalidError,
 };
 
-const activateRouteRevision = createActivateRouteRevision({ store: mysqlRouteControlStore });
+const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 
 export async function createRouteSet(params: {
   tenantId: string;
@@ -135,11 +144,14 @@ export async function getEffectiveRoutes(
   return listRoutesBySet(routeSet.id, { routeState: "enabled" });
 }
 
+// ─── 结果类型 ──────────────────────────────────────────────
+
 export interface UpsertDeploymentRouteResult {
   route: DeploymentRouteRow;
   routeSet: DeploymentRouteSetRow;
-  routeRevision: ActivateRouteRevisionResult["routeRevision"];
-  routeActivation: ActivateRouteRevisionResult["routeActivation"];
+  routeRevisionId: string;
+  routeActivationId: string;
+  routeGroupId: string;
   etag: string;
   auditEventId: string;
   affectsNewInvocationsOnly: true;
@@ -150,6 +162,64 @@ export interface RouteIdempotencyCompletion {
   httpStatus: number;
   responseRef?: string | null;
   serializeResponse: (result: UpsertDeploymentRouteResult) => string;
+}
+
+// ─── 薄适配器：读取当前状态 → 应用单 Route 变更 → 委托 ActivateRouteSet ───
+
+/**
+ * 将现有 DeploymentRouteRow 转换为 DesiredRoute 格式。
+ * 投影行不含 routeGroupId / eligibilityConditions，使用默认值。
+ */
+function existingRouteToDesired(route: DeploymentRouteRow): DesiredRoute {
+  return {
+    routeId: route.id,
+    routeGroupId: "primary",
+    agentRevisionId: route.agentRevisionId,
+    runtimeRevisionId: route.runtimeRevisionId,
+    policyRevisionId: null,
+    trafficWeight: route.trafficWeight,
+    priorityNo: route.priorityNo,
+    effectiveFrom: route.effectiveFrom,
+    effectiveUntil: route.effectiveUntil,
+    eligibilityConditions: {},
+    activationState: route.routeState === "disabled" ? "disabled" : "active",
+  };
+}
+
+/**
+ * 从 ActivateRouteSet 结果中找到目标 Route 的激活记录，并重新读取投影行。
+ */
+async function buildUpsertResult(
+  result: ActivateRouteSetResult,
+  targetRouteId: string,
+): Promise<UpsertDeploymentRouteResult> {
+  const activation = result.activations.find((a) => a.routeId === targetRouteId);
+  if (!activation) throw new Error(`upsertDeploymentRoute: 目标 Route ${targetRouteId} 未在激活结果中`);
+
+  const [routeRow] = await db
+    .select()
+    .from(deploymentRouteTable)
+    .where(eq(deploymentRouteTable.id, targetRouteId))
+    .limit(1);
+  if (!routeRow) throw new Error(`upsertDeploymentRoute: Route 行未找到（id=${targetRouteId}）`);
+
+  const [routeSetRow] = await db
+    .select()
+    .from(deploymentRouteSetTable)
+    .where(eq(deploymentRouteSetTable.id, result.routeSetId))
+    .limit(1);
+  if (!routeSetRow) throw new Error(`upsertDeploymentRoute: RouteSet 行未找到`);
+
+  return {
+    route: routeRow,
+    routeSet: routeSetRow,
+    routeRevisionId: activation.routeRevisionId,
+    routeActivationId: activation.routeActivationId,
+    routeGroupId: activation.routeGroupId,
+    etag: `route-set-${result.routeSetVersionNo}`,
+    auditEventId: result.auditEventId,
+    affectsNewInvocationsOnly: true,
+  };
 }
 
 export async function upsertDeploymentRoute(params: {
@@ -169,40 +239,60 @@ export async function upsertDeploymentRoute(params: {
   idempotencyKey?: string;
   idempotency?: RouteIdempotencyCompletion;
 }): Promise<UpsertDeploymentRouteResult> {
-  const result = await activateRouteRevision({
+  // 1. 读取当前 RouteSet 的全部 Route
+  const currentRoutes = await listRoutesBySet(params.routeSetId);
+
+  // 2. 构造完整目标状态：保留其余 Route，替换/新增目标 Route
+  const desiredRoutes = currentRoutes
+    .filter((r) => r.id !== params.routeId)
+    .map(existingRouteToDesired);
+
+  // 添加目标 Route 的期望状态
+  const targetActivationState: "active" | "disabled" =
+    params.routeState === "disabled" ? "disabled" : "active";
+  desiredRoutes.push({
+    routeId: params.routeId,
+    routeGroupId: "primary",
+    agentRevisionId: params.agentRevisionId,
+    runtimeRevisionId: params.runtimeRevisionId,
+    policyRevisionId: null,
+    trafficWeight: params.trafficWeight,
+    priorityNo: params.priorityNo ?? 0,
+    effectiveFrom: params.effectiveFrom ?? null,
+    effectiveUntil: params.effectiveUntil ?? null,
+    eligibilityConditions: {},
+    activationState: targetActivationState,
+  });
+
+  // 3. 委托 ActivateRouteSet（聚合不变量由 Policy 在事务内校验）
+  const result = await activateRouteSet({
     tenantId: params.tenantId,
     routeSetId: params.routeSetId,
-    routeId: params.routeId,
-    routeSetExpectedVersionNo: params.routeSetExpectedVersionNo,
-    content: {
-      agentRevisionId: params.agentRevisionId,
-      runtimeRevisionId: params.runtimeRevisionId,
-      policyRevisionId: null,
-      modelPolicyRevisionId: null,
-      toolsetRevisionId: null,
-      trafficWeight: params.trafficWeight,
-      priorityNo: params.priorityNo ?? 0,
-      effectiveFrom: params.effectiveFrom ?? null,
-      effectiveUntil: params.effectiveUntil ?? null,
-      eligibilityConditions: {},
-    },
-    activationState: params.routeState === "disabled" ? "disabled" : "active",
+    expectedVersionNo: params.routeSetExpectedVersionNo,
+    desiredRoutes,
     actor: params.actor,
     reason:
-      params.routeState === "disabled"
+      targetActivationState === "disabled"
         ? "DeploymentRoute 禁用"
         : `DeploymentRoute 更新（${params.routeState ?? "enabled"}，权重 ${params.trafficWeight} 基点）`,
     requestId: params.requestId ?? randomUUID(),
     idempotencyKey: params.idempotencyKey ?? `route-activate:${randomUUID()}`,
-    idempotency: params.idempotency
+    idempotencyCompletion: params.idempotency
       ? {
-          ...params.idempotency,
-          serializeResponse: (value) =>
-            params.idempotency?.serializeResponse(value as UpsertDeploymentRouteResult) ?? "{}",
+          recordId: params.idempotency.recordId,
+          httpStatus: params.idempotency.httpStatus,
+          responseRef: params.idempotency.responseRef,
+          serializeResponse: (r) =>
+            params.idempotency?.serializeResponse(r as UpsertDeploymentRouteResult) ?? "{}",
         }
       : undefined,
   });
-  return result as UpsertDeploymentRouteResult;
+
+  // 4. 构造结果（重新读取投影行）
+  const targetRouteId = params.routeId ?? result.activations[0]?.routeId;
+  if (!targetRouteId) throw new Error("upsertDeploymentRoute: 无法确定目标 Route ID");
+
+  return buildUpsertResult(result, targetRouteId);
 }
 
 export type DisableDeploymentRouteResult = UpsertDeploymentRouteResult;
@@ -217,20 +307,44 @@ export async function disableDeploymentRoute(params: {
   idempotencyKey?: string;
   idempotency?: RouteIdempotencyCompletion;
 }): Promise<DisableDeploymentRouteResult> {
-  const route = await getRouteById(params.tenantId, params.routeId);
-  if (!route || route.routeSetId !== params.routeSetId)
+  // 1. 读取当前 RouteSet 的全部 Route
+  const currentRoutes = await listRoutesBySet(params.routeSetId);
+  const targetRoute = currentRoutes.find((r) => r.id === params.routeId);
+  if (!targetRoute || targetRoute.routeSetId !== params.routeSetId)
     throw new RouteNotFoundError(params.routeId);
-  return upsertDeploymentRoute({
-    ...params,
-    agentRevisionId: route.agentRevisionId,
-    runtimeRevisionId: route.runtimeRevisionId,
-    trafficWeight: route.trafficWeight,
-    priorityNo: route.priorityNo,
-    routeState: "disabled",
-    effectiveFrom: route.effectiveFrom,
-    effectiveUntil: route.effectiveUntil,
-    idempotencyKey: params.idempotencyKey ?? `route-disable:${randomUUID()}`,
+
+  // 2. 构造完整目标状态：保留其余 Route，目标 Route 设为 disabled
+  const desiredRoutes = currentRoutes
+    .filter((r) => r.id !== params.routeId)
+    .map(existingRouteToDesired);
+  desiredRoutes.push({
+    ...existingRouteToDesired(targetRoute),
+    activationState: "disabled" as const,
   });
+
+  // 3. 委托 ActivateRouteSet
+  const result = await activateRouteSet({
+    tenantId: params.tenantId,
+    routeSetId: params.routeSetId,
+    expectedVersionNo: params.routeSetExpectedVersionNo,
+    desiredRoutes,
+    actor: params.actor,
+    reason: "DeploymentRoute 禁用",
+    requestId: params.requestId ?? randomUUID(),
+    idempotencyKey: params.idempotencyKey ?? `route-disable:${randomUUID()}`,
+    idempotencyCompletion: params.idempotency
+      ? {
+          recordId: params.idempotency.recordId,
+          httpStatus: params.idempotency.httpStatus,
+          responseRef: params.idempotency.responseRef,
+          serializeResponse: (r) =>
+            params.idempotency?.serializeResponse(r as DisableDeploymentRouteResult) ?? "{}",
+        }
+      : undefined,
+  });
+
+  // 4. 构造结果
+  return buildUpsertResult(result, params.routeId);
 }
 
 export interface RouteSetSnapshot {

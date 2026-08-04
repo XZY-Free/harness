@@ -2,11 +2,13 @@ import type {
   ConformanceCaseResult,
   RuntimeRevisionPublicationState,
 } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
+import type { RuntimePublicationEvidenceSnapshot } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 
 export type RuntimePublicationActorType = "user" | "service" | "workload" | "system";
 
 export interface RuntimePublicationRevision {
   id: string;
+  tenantId: string;
   runtimeId: string;
   revisionNo: number;
   revisionState: RuntimeRevisionPublicationState;
@@ -23,10 +25,13 @@ export interface RuntimePublicationRuntime {
   versionNo: number;
 }
 
-export interface RuntimePublicationAttestation {
-  id: string;
-  artifactDigest: string;
-}
+/**
+ * Attestation 证据快照 — Store 读取后交给 ArtifactEvidencePolicy 统一验证。
+ *
+ * 替代旧 RuntimePublicationAttestation（仅含 id + artifactDigest），
+ * 使应用服务无需复制 Attestation 判断逻辑。
+ */
+export type RuntimePublicationAttestation = RuntimePublicationEvidenceSnapshot;
 
 export interface RuntimePublicationConformanceOptions {
   adapterDigest: string | null;
@@ -44,23 +49,43 @@ export interface StoredRuntimeConformanceResult {
   testedAt: Date;
 }
 
+/**
+ * ConformanceRun 完整结果 — 包含绑定校验所需字段。
+ */
+export interface RuntimePublicationConformanceRun {
+  id: string;
+  runtimeArtifactDigest: string;
+  runtimeConfigDigest: string;
+  protocolContractRevision: string;
+  evidenceManifestDigest: string;
+  results: StoredRuntimeConformanceResult[];
+}
+
 export interface RuntimePublicationSession {
   findRevision(tenantId: string, revisionId: string): Promise<RuntimePublicationRevision | null>;
   findRuntime(tenantId: string, runtimeId: string): Promise<RuntimePublicationRuntime | null>;
+  /**
+   * FOR UPDATE 读取 Attestation 证据快照。
+   *
+   * 返回完整 RuntimePublicationEvidenceSnapshot（含 artifactType、artifactRevisionId、
+   * verificationState、revokedAt、revocationRecordId），由 ArtifactEvidencePolicy 统一验证。
+   */
   findVerifiedAttestation(params: {
     tenantId: string;
     revisionId: string;
     attestationId: string;
-  }): Promise<RuntimePublicationAttestation | null>;
+  }): Promise<RuntimePublicationEvidenceSnapshot | null>;
+  /**
+   * FOR UPDATE 读取 Passed ConformanceRun 完整结果。
+   *
+   * 返回包含绑定校验字段（artifactDigest、configDigest、protocolContractRevision）
+   * 的完整 Run 数据，由应用服务校验与 Revision 绑定一致。
+   */
   findPassedConformanceRun(params: {
     tenantId: string;
     revisionId: string;
     conformanceRunId: string;
-  }): Promise<{
-    id: string;
-    evidenceManifestDigest: string;
-    results: StoredRuntimeConformanceResult[];
-  } | null>;
+  }): Promise<RuntimePublicationConformanceRun | null>;
   /** @deprecated 权威发布不再调用；只用于使旧 Store 装饰器显式失败而非静默 UPSERT。 */
   persistConformanceResults(params: {
     tenantId: string;

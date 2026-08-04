@@ -1,4 +1,11 @@
 import { createHash } from "node:crypto";
+import {
+  normalizeEligibility,
+  computeSpecificity,
+  isOverlapping,
+  isTimeWindowOverlapping,
+  type NormalizedEligibility,
+} from "@/lib/routes/domain/route-selector";
 
 export const ROUTE_TRAFFIC_WEIGHT_TOTAL = 10_000;
 
@@ -83,6 +90,12 @@ export type RouteResolutionOutcome =
     }
   | {
       status: "unresolved";
+      reason: "ambiguous_route_configuration";
+      eligibleCandidateCount: number;
+      groupIds: string[];
+    }
+  | {
+      status: "unresolved";
       reason: "invalid_traffic_weight_total";
       eligibleCandidateCount: number;
       trafficWeightTotal: number;
@@ -101,15 +114,34 @@ export interface ResolveRouteCandidatesInput {
 interface EligibleCandidate {
   candidate: RouteResolutionCandidate;
   specificity: number;
+  normalizedEligibility: NormalizedEligibility;
 }
 
+/**
+ * RouteResolver 正式裁决（任务 1.7 修正后）。
+ *
+ * 1. 过滤不匹配或无资格候选
+ * 2. 找最高 Specificity
+ * 3. 在其中找最高 Priority
+ * 4. 剩余候选必须属于同一个 Route Group（否则 ambiguous_route_configuration）
+ * 5. Group 权重必须合计 10000
+ * 6. 按 deploymentRouteId 稳定排序
+ * 7. 使用 Business Key 稳定 Bucket
+ */
 export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): RouteResolutionOutcome {
   const executionKey = requireExecutionKey(input.businessKey);
+
+  // 1. 过滤不匹配或无资格候选，使用 RouteSelector 统一规范化
   const eligible = input.candidates.flatMap((candidate): EligibleCandidate[] => {
-    const specificity = eligibilitySpecificity(candidate.eligibilityConditions, input.attributes);
-    if (specificity === null || !isControlPlaneEligible(candidate, input.now)) return [];
-    return [{ candidate, specificity }];
+    if (!isControlPlaneEligible(candidate, input.now)) return [];
+    const normalized = normalizeEligibility(candidate.eligibilityConditions);
+    if (!normalized) return [];
+    // 检查 eligibility 条件是否匹配输入属性
+    if (!eligibilityMatches(normalized, input.attributes)) return [];
+    const specificity = computeSpecificity(normalized);
+    return [{ candidate, specificity, normalizedEligibility: normalized }];
   });
+
   if (eligible.length === 0) {
     return {
       status: "unresolved",
@@ -118,31 +150,35 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
     };
   }
 
-  eligible.sort(compareResolutionPrecedence);
-  const highest = eligible[0];
-  if (!highest) {
-    throw new Error("RouteResolver eligible 集合异常为空");
+  // 2. 找最高 Specificity
+  const maxSpecificity = Math.max(...eligible.map((e) => e.specificity));
+  const bySpecificity = eligible.filter((e) => e.specificity === maxSpecificity);
+
+  // 3. 在其中找最高 Priority
+  const maxPriority = Math.max(...bySpecificity.map((e) => e.candidate.priorityNo));
+  const peers = bySpecificity.filter((e) => e.candidate.priorityNo === maxPriority);
+
+  // 4. 剩余候选必须属于同一个 Route Group
+  const groupIds = [...new Set(peers.map((e) => e.candidate.routeGroupId))];
+  if (groupIds.length > 1) {
+    return {
+      status: "unresolved",
+      reason: "ambiguous_route_configuration",
+      eligibleCandidateCount: peers.length,
+      groupIds,
+    };
   }
-  const precedencePeers = eligible.filter(
-    (item) =>
-      item.specificity === highest.specificity &&
-      item.candidate.priorityNo === highest.candidate.priorityNo &&
-      item.candidate.routeRevisionNo === highest.candidate.routeRevisionNo,
-  );
-  const selectedGroupId = [
-    ...new Set(precedencePeers.map((item) => item.candidate.routeGroupId)),
-  ].sort((left, right) => left.localeCompare(right))[0];
+  const selectedGroupId = groupIds[0];
   if (!selectedGroupId) throw new Error("RouteResolver traffic group 为空");
-  const group = precedencePeers
-    .filter((item) => item.candidate.routeGroupId === selectedGroupId)
-    .sort((left, right) =>
-      left.candidate.routeRevisionId.localeCompare(right.candidate.routeRevisionId),
-    );
-  const trafficWeightTotal = group.reduce((sum, item) => sum + item.candidate.trafficWeight, 0);
+
+  const group = peers.filter((e) => e.candidate.routeGroupId === selectedGroupId);
+
+  // 5. Group 权重必须合计 10000
+  const trafficWeightTotal = group.reduce((sum, e) => sum + e.candidate.trafficWeight, 0);
   if (
     trafficWeightTotal !== ROUTE_TRAFFIC_WEIGHT_TOTAL ||
     group.some(
-      (item) => !Number.isInteger(item.candidate.trafficWeight) || item.candidate.trafficWeight < 0,
+      (e) => !Number.isInteger(e.candidate.trafficWeight) || e.candidate.trafficWeight < 0,
     )
   ) {
     return {
@@ -153,6 +189,12 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
     };
   }
 
+  // 6. 按 deploymentRouteId 稳定排序
+  group.sort((left, right) =>
+    left.candidate.deploymentRouteId.localeCompare(right.candidate.deploymentRouteId),
+  );
+
+  // 7. 使用 Business Key 稳定 Bucket
   const resolutionKeyDigest = computeResolutionKeyDigest({
     tenantId: input.tenantId,
     executionKey,
@@ -161,8 +203,8 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
   });
   const trafficBucket = hashBucket(resolutionKeyDigest, ROUTE_TRAFFIC_WEIGHT_TOTAL);
   let upperBound = 0;
-  const selected = group.find((item) => {
-    upperBound += item.candidate.trafficWeight;
+  const selected = group.find((e) => {
+    upperBound += e.candidate.trafficWeight;
     return trafficBucket < upperBound;
   });
   if (!selected) {
@@ -198,6 +240,8 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
   };
 }
 
+// ─── 导出工具 ──────────────────────────────────────────────
+
 export function computeResolutionKeyDigest(input: {
   tenantId: string;
   executionKey: string;
@@ -212,6 +256,18 @@ export function computeResolutionKeyDigest(input: {
   ]);
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
+
+export function computeCapabilityManifestDigest(input: {
+  agentRevisionId: string;
+  agentInterfaceRequirements: unknown;
+  runtimeRevisionId: string;
+  runtimeCapabilities: unknown;
+}): string {
+  const canonical = JSON.stringify(sortKeys(input));
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
+// ─── 内部工具 ──────────────────────────────────────────────
 
 function requireExecutionKey(businessKey: { threadId?: string; jobId?: string }): string {
   const threadId = businessKey.threadId?.trim();
@@ -241,14 +297,18 @@ function isControlPlaneEligible(candidate: RouteResolutionCandidate, now: Date):
   );
 }
 
-export function computeCapabilityManifestDigest(input: {
-  agentRevisionId: string;
-  agentInterfaceRequirements: unknown;
-  runtimeRevisionId: string;
-  runtimeCapabilities: unknown;
-}): string {
-  const canonical = JSON.stringify(sortKeys(input));
-  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+/**
+ * 使用 RouteSelector.normalizeEligibility 的结果检查属性匹配。
+ * 替代旧 eligibilitySpecificity 中内联的属性匹配逻辑。
+ */
+function eligibilityMatches(
+  normalized: NormalizedEligibility,
+  attributes: Record<string, RouteResolutionAttribute>,
+): boolean {
+  for (const [key, expected] of Object.entries(normalized.all)) {
+    if (attributes[key] !== expected) return false;
+  }
+  return true;
 }
 
 function requireControlPlaneEvidence(
@@ -278,42 +338,7 @@ function sortKeys(value: unknown): unknown {
   return sorted;
 }
 
-function eligibilitySpecificity(
-  rawConditions: unknown,
-  attributes: Record<string, RouteResolutionAttribute>,
-): number | null {
-  if (!isPlainObject(rawConditions)) return null;
-  const keys = Object.keys(rawConditions);
-  if (keys.length === 0) return 0;
-  if (keys.length !== 1 || keys[0] !== "all") return null;
-  const all = rawConditions.all;
-  if (!isPlainObject(all)) return null;
-  const conditions = Object.entries(all);
-  for (const [key, expected] of conditions) {
-    if (!isScalar(expected) || attributes[key] !== expected) return null;
-  }
-  return conditions.length;
-}
-
-function compareResolutionPrecedence(left: EligibleCandidate, right: EligibleCandidate): number {
-  return (
-    right.specificity - left.specificity ||
-    right.candidate.priorityNo - left.candidate.priorityNo ||
-    right.candidate.routeRevisionNo - left.candidate.routeRevisionNo ||
-    left.candidate.routeGroupId.localeCompare(right.candidate.routeGroupId) ||
-    left.candidate.routeRevisionId.localeCompare(right.candidate.routeRevisionId)
-  );
-}
-
 function hashBucket(digest: string, modulus: number): number {
   const value = BigInt(`0x${digest.slice("sha256:".length, "sha256:".length + 16)}`);
   return Number(value % BigInt(modulus));
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isScalar(value: unknown): value is RouteResolutionAttribute {
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }

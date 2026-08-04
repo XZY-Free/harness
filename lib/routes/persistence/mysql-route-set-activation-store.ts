@@ -1,3 +1,6 @@
+/**
+ * RouteSet 整体激活 MySQL Store 实现。
+ */
 import { randomUUID } from "node:crypto";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
 import {
@@ -16,13 +19,13 @@ import {
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { RouteNotFoundError } from "@/lib/routes/domain/route-revision";
-import type { RouteControlStore } from "@/lib/routes/persistence/route-control-store";
-import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import {
   normalizeEligibility,
   computeSelectorDigest,
 } from "@/lib/routes/domain/route-selector";
-import { and, eq, isNotNull, isNull, max } from "drizzle-orm";
+import type { RouteSetActivationStore } from "@/lib/routes/persistence/route-set-activation-store";
+import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import { and, desc, eq, isNotNull, isNull, max } from "drizzle-orm";
 
 function requiredCapabilities(value: unknown): string[] {
   if (!value || typeof value !== "object") return [];
@@ -41,25 +44,104 @@ function runtimeCapabilities(value: unknown): string[] {
     : [];
 }
 
-export const mysqlRouteControlStore: RouteControlStore = {
+export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
   transaction: (operation) =>
     db.transaction(async (tx) =>
       operation({
-        async lockRouteSet(tenantId, routeSetId) {
+        async lockRouteSet(routeSetId) {
           const [row] = await tx
             .select()
             .from(deploymentRouteSetTable)
-            .where(
-              and(
-                eq(deploymentRouteSetTable.id, routeSetId),
-                eq(deploymentRouteSetTable.tenantId, tenantId),
-              ),
-            )
+            .where(eq(deploymentRouteSetTable.id, routeSetId))
             .limit(1)
             .for("update");
           return row ?? null;
         },
-        async resolveRouteIdentity(params) {
+
+        async listRoutesBySet(routeSetId) {
+          return tx
+            .select()
+            .from(deploymentRouteTable)
+            .where(eq(deploymentRouteTable.routeSetId, routeSetId))
+            .orderBy(desc(deploymentRouteTable.createdAt));
+        },
+
+        async findActiveRevision(routeId) {
+          const [row] = await tx
+            .select({ revision: routeRevision })
+            .from(routeRevision)
+            .innerJoin(routeActivation, eq(routeActivation.routeRevisionId, routeRevision.id))
+            .where(
+              and(
+                eq(routeRevision.routeId, routeId),
+                eq(routeActivation.activationState, "active"),
+              ),
+            )
+            .limit(1);
+          return row?.revision ?? null;
+        },
+
+        async findAgentRevision(id) {
+          const [row] = await tx
+            .select()
+            .from(agentRevisionTable)
+            .where(eq(agentRevisionTable.id, id))
+            .limit(1)
+            .for("share");
+          return row
+            ? {
+                id: row.id,
+                agentId: row.agentId,
+                revisionState: row.revisionState,
+                requiredCapabilities: requiredCapabilities(row.agentInterfaceRequirementsJson),
+              }
+            : null;
+        },
+
+        async findRuntimeRevision(id) {
+          const [row] = await tx
+            .select()
+            .from(runtimeRevisionTable)
+            .where(eq(runtimeRevisionTable.id, id))
+            .limit(1)
+            .for("share");
+          return row
+            ? {
+                id: row.id,
+                revisionState: row.revisionState,
+                capabilities: runtimeCapabilities(row.runtimeCapabilitiesJson),
+              }
+            : null;
+        },
+
+        async hasVerifiedAttestation(params) {
+          const [row] = await tx
+            .select({ id: artifactAttestation.id })
+            .from(artifactAttestation)
+            .innerJoin(artifact, eq(artifact.id, artifactAttestation.artifactId))
+            .leftJoin(
+              attestationRevocationRecord,
+              eq(attestationRevocationRecord.attestationId, artifactAttestation.id),
+            )
+            .where(
+              and(
+                eq(artifactAttestation.tenantId, params.tenantId),
+                eq(artifactAttestation.artifactType, params.artifactType),
+                eq(artifactAttestation.artifactRevisionId, params.revisionId),
+                eq(artifactAttestation.verificationState, "verified"),
+                isNotNull(artifactAttestation.artifactId),
+                eq(artifact.tenantId, params.tenantId),
+                eq(artifact.digest, artifactAttestation.artifactDigest),
+                isNull(artifactAttestation.revokedAt),
+                isNull(attestationRevocationRecord.id),
+              ),
+            )
+            .limit(1)
+            .for("share");
+          return Boolean(row);
+        },
+
+        async resolveOrCreateRouteIdentity(params) {
           const conditions = params.routeId
             ? and(
                 eq(deploymentRouteTable.id, params.routeId),
@@ -103,77 +185,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
           if (!created) throw new Error(`DeploymentRoute 稳定身份创建失败: ${id}`);
           return created;
         },
-        async findActivationByIdempotency(routeId, idempotencyKey) {
-          const [row] = await tx
-            .select({ activation: routeActivation, revision: routeRevision })
-            .from(routeActivation)
-            .innerJoin(routeRevision, eq(routeRevision.id, routeActivation.routeRevisionId))
-            .where(
-              and(
-                eq(routeActivation.routeId, routeId),
-                eq(routeActivation.idempotencyKey, idempotencyKey),
-              ),
-            )
-            .limit(1);
-          return row ?? null;
-        },
-        async findAgentRevision(id) {
-          const [row] = await tx
-            .select()
-            .from(agentRevisionTable)
-            .where(eq(agentRevisionTable.id, id))
-            .limit(1)
-            .for("share");
-          return row
-            ? {
-                id: row.id,
-                agentId: row.agentId,
-                revisionState: row.revisionState,
-                requiredCapabilities: requiredCapabilities(row.agentInterfaceRequirementsJson),
-              }
-            : null;
-        },
-        async findRuntimeRevision(id) {
-          const [row] = await tx
-            .select()
-            .from(runtimeRevisionTable)
-            .where(eq(runtimeRevisionTable.id, id))
-            .limit(1)
-            .for("share");
-          return row
-            ? {
-                id: row.id,
-                revisionState: row.revisionState,
-                capabilities: runtimeCapabilities(row.runtimeCapabilitiesJson),
-              }
-            : null;
-        },
-        async hasVerifiedAttestation(params) {
-          const [row] = await tx
-            .select({ id: artifactAttestation.id })
-            .from(artifactAttestation)
-            .innerJoin(artifact, eq(artifact.id, artifactAttestation.artifactId))
-            .leftJoin(
-              attestationRevocationRecord,
-              eq(attestationRevocationRecord.attestationId, artifactAttestation.id),
-            )
-            .where(
-              and(
-                eq(artifactAttestation.tenantId, params.tenantId),
-                eq(artifactAttestation.artifactType, params.artifactType),
-                eq(artifactAttestation.artifactRevisionId, params.revisionId),
-                eq(artifactAttestation.verificationState, "verified"),
-                isNotNull(artifactAttestation.artifactId),
-                eq(artifact.tenantId, params.tenantId),
-                eq(artifact.digest, artifactAttestation.artifactDigest),
-                isNull(artifactAttestation.revokedAt),
-                isNull(attestationRevocationRecord.id),
-              ),
-            )
-            .limit(1)
-            .for("share");
-          return Boolean(row);
-        },
+
         async findRevisionByContent(routeId, contentDigest) {
           const [row] = await tx
             .select()
@@ -187,6 +199,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
             .limit(1);
           return row ?? null;
         },
+
         async nextRevisionNo(routeId) {
           const [row] = await tx
             .select({ value: max(routeRevision.revisionNo) })
@@ -194,8 +207,8 @@ export const mysqlRouteControlStore: RouteControlStore = {
             .where(eq(routeRevision.routeId, routeId));
           return (row?.value ?? 0) + 1;
         },
+
         async appendRevision(params) {
-          // 使用 Store 接口传入的 selectorDigest，确保调用方和 Backfill 使用同一算法。
           const normalized = normalizeEligibility(params.content.eligibilityConditions);
           await tx.insert(routeRevision).values({
             id: params.id,
@@ -233,6 +246,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
           if (!row) throw new Error(`RouteRevision 写入失败: ${params.id}`);
           return row;
         },
+
         async nextActivationSequence(routeId) {
           const [row] = await tx
             .select({ value: max(routeActivation.activationSequence) })
@@ -240,6 +254,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
             .where(eq(routeActivation.routeId, routeId));
           return (row?.value ?? 0) + 1;
         },
+
         async appendActivation(params) {
           await tx.insert(routeActivation).values({
             id: params.id,
@@ -266,6 +281,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
           if (!row) throw new Error(`RouteActivation 写入失败: ${params.id}`);
           return row;
         },
+
         async updateRouteProjection(params) {
           await tx
             .update(deploymentRouteTable)
@@ -289,6 +305,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
           if (!row) throw new Error(`DeploymentRoute 投影更新失败: ${params.routeId}`);
           return row;
         },
+
         async advanceRouteSetVersion(params) {
           const result = await tx
             .update(deploymentRouteSetTable)
@@ -307,6 +324,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
             .limit(1);
           return row ?? null;
         },
+
         async appendAudit(params) {
           await tx.insert(auditEvent).values({
             id: params.id,
@@ -323,6 +341,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
             occurredAt: params.occurredAt,
           });
         },
+
         async appendOutbox(params) {
           await tx.insert(controlPlaneOutboxEvent).values({
             id: params.id,
@@ -335,6 +354,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
             occurredAt: params.occurredAt,
           });
         },
+
         async completeIdempotency(params) {
           const result = await tx
             .update(idempotencyRecord)

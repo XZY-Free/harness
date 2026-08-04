@@ -23,6 +23,8 @@ export const V11_ERROR_CODES = {
   ACTIVE_LEGAL_HOLD: { http: 409, retryable: false },
   AGENT_CAPABILITY_UNSUPPORTED: { http: 422, retryable: false },
   ARTIFACT_ATTESTATION_FAILED: { http: 422, retryable: false },
+  ARTIFACT_ATTESTATION_REVOKED: { http: 409, retryable: false },
+  ARTIFACT_BINDING_MISMATCH: { http: 409, retryable: false },
   ARTIFACT_NOT_VERIFIED: { http: 409, retryable: false },
   ATTESTATION_ALREADY_REVOKED: { http: 409, retryable: false },
   AUTHENTICATION_REQUIRED: { http: 401, retryable: false },
@@ -76,6 +78,13 @@ export const V11_ERROR_CODES = {
   WORKSPACE_WRITE_LOCK_CONFLICT: { http: 409, retryable: false },
   WORKSPACE_WRITE_LOCK_STATE_CONFLICT: { http: 409, retryable: false },
   WORKLOAD_TOKEN_REVOKED: { http: 401, retryable: false },
+  // ─── RouteSet 聚合激活（任务 1.5/1.6）──────────────────
+  ROUTE_WEIGHT_TOTAL_INVALID: { http: 422, retryable: false },
+  ROUTE_GROUP_SELECTOR_MISMATCH: { http: 422, retryable: false },
+  ROUTE_SELECTOR_AMBIGUOUS: { http: 422, retryable: false },
+  ROUTE_SET_REQUIRES_ATOMIC_UPDATE: { http: 409, retryable: false },
+  ROUTE_REVISION_NOT_ELIGIBLE: { http: 422, retryable: false },
+  ROUTE_SET_VERSION_CONFLICT: { http: 412, retryable: false },
 } as const satisfies Readonly<Record<string, V11ErrorDefinition>>;
 
 export type V11ErrorCode = keyof typeof V11_ERROR_CODES;

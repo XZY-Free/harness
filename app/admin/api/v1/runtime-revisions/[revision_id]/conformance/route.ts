@@ -20,6 +20,11 @@ import {
   recordRuntimeConformanceRun,
 } from "@/lib/runtimes/application/runtime-conformance-runs";
 import { ConformanceGateError } from "@/lib/runtimes/domain/runtime-conformance";
+import {
+  RuntimeArtifactAttestationInvalidError,
+  RuntimeArtifactAttestationRequiredError,
+  RuntimeConformanceRunInvalidError,
+} from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 /**
  * GET/POST /admin/api/v1/runtime-revisions/{revision_id}/conformance — RuntimeRevision conformance 结果（S05-C06）。
  *
@@ -43,8 +48,12 @@ import { ConformanceGateError } from "@/lib/runtimes/domain/runtime-conformance"
  * - Revision 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  * - 缺少 Idempotency-Key（POST） → 400 REQUEST_SCHEMA_INVALID
+ * - 缺少 artifact_attestation_id（publish=true） → 400 REQUEST_SCHEMA_INVALID
  * - 缺少 If-Match（publish=true） → 400 REQUEST_SCHEMA_INVALID
  * - If-Match 不匹配 → 412 ETAG_MISMATCH
+ * - Attestation 不存在或已撤销 → 409 ARTIFACT_NOT_VERIFIED / ARTIFACT_ATTESTATION_REVOKED
+ * - Attestation 绑定或 Digest 不匹配 → 409 ARTIFACT_BINDING_MISMATCH
+ * - Conformance 绑定不一致 → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - Conformance 门禁失败 → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - Runtime 乐观锁冲突 → 412 ETAG_MISMATCH
  */
@@ -97,9 +106,11 @@ interface ConformanceBody {
   publish?: boolean;
   /** Runtime 乐观锁期望版本号（publish=true 时必填）。 */
   expected_version_no?: number;
+  /** 已验证且与 Revision 绑定一致的 ArtifactAttestation ID（publish=true 时必填）。 */
+  artifact_attestation_id?: string;
 }
 
-/** 校验 POST 请求体。 */
+/** 校验 POST 请求体基础字段。 */
 function validateBody(body: unknown): body is ConformanceBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
@@ -110,6 +121,8 @@ function validateBody(body: unknown): body is ConformanceBody {
     b.expected_version_no !== undefined &&
     (typeof b.expected_version_no !== "number" || !Number.isInteger(b.expected_version_no))
   )
+    return false;
+  if (b.artifact_attestation_id !== undefined && typeof b.artifact_attestation_id !== "string")
     return false;
   return true;
 }
@@ -267,6 +280,10 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   let ifMatchEtag: string | null = null;
 
   if (shouldPublish) {
+    // 必填 artifact_attestation_id
+    if (!body.artifact_attestation_id) {
+      return v11SchemaInvalid(requestId, "publish=true 时必填 artifact_attestation_id");
+    }
     // 必填 expected_version_no
     if (typeof body.expected_version_no !== "number") {
       return v11SchemaInvalid(requestId, "publish=true 时必填 expected_version_no");
@@ -381,6 +398,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         revisionId,
         runtimeExpectedVersionNo: expectedVersionNo,
         conformanceRunId: recorded.run.id,
+        attestationId: body.artifact_attestation_id!,
         actor: actorFromAdminPrincipal(principal),
         requestId,
         idempotencyKey,
@@ -439,9 +457,27 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     if (
       err instanceof RuntimeConformanceTrustError ||
-      err instanceof RuntimeConformanceBindingError
+      err instanceof RuntimeConformanceBindingError ||
+      err instanceof RuntimeConformanceRunInvalidError
     ) {
       return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+    }
+    if (err instanceof RuntimeArtifactAttestationRequiredError) {
+      return v11SchemaInvalid(requestId, err.message);
+    }
+    if (err instanceof RuntimeArtifactAttestationInvalidError) {
+      // 区分撤销和绑定不匹配
+      if (err.reason.includes("已撤销")) {
+        return v11Error("ARTIFACT_ATTESTATION_REVOKED", err.message, { requestId });
+      }
+      if (
+        err.reason.includes("绑定") ||
+        err.reason.includes("Digest") ||
+        err.reason.includes("不一致")
+      ) {
+        return v11Error("ARTIFACT_BINDING_MISMATCH", err.message, { requestId });
+      }
+      return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
     if (err instanceof ConformanceGateError) {
       return v11Error(

@@ -74,6 +74,8 @@ export interface RouteControlSession {
     revisionNo: number;
     content: RouteRevisionContent;
     contentDigest: string;
+    /** Selector Digest — 由 RouteSelector.computeSelectorDigest 规范化计算。null 仅在 Eligibility 无法规范化时出现。 */
+    selectorDigest: string | null;
     actorType: RouteActorType;
     actorId: string;
     now: Date;
@@ -84,6 +86,8 @@ export interface RouteControlSession {
     tenantId: string;
     routeId: string;
     routeRevisionId: string;
+    /** 派生冗余列 — 始终 = 对应 RouteRevision.routeSetId，写入服务负责派生和断言。 */
+    routeSetId: string;
     activationSequence: number;
     activationState: "active" | "disabled";
     previousRouteRevisionId: string | null;

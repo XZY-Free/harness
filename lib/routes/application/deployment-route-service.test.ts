@@ -224,7 +224,7 @@ async function createVerifiedAttestation(
   artifactType: string,
   artifactRevisionId: string,
   artifactContent: string,
-): Promise<void> {
+): Promise<string> {
   const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
   const builderKeys: BuilderKeyRegistry = {
     "builder:company-agent-runtime": keyPair.publicKeyBase64,
@@ -250,12 +250,13 @@ async function createVerifiedAttestation(
     builderIdentity: "builder:company-agent-runtime",
   };
 
-  await verifyAndPersistAttestation(
+  const attestation = await verifyAndPersistAttestation(
     input,
     store,
     builderKeys,
     buildActor(tenantId, "ci-service-001"),
   );
+  return attestation.id;
 }
 
 // ─── 辅助：seed Agent + published AgentRevision + attestation ─
@@ -329,7 +330,7 @@ async function seedPublishedRuntimeRevision(
     createdBy: ownerId,
   });
 
-  await createVerifiedAttestation(
+  const attestationId = await createVerifiedAttestation(
     tenantId,
     "runtime_revision",
     revision.id,
@@ -339,6 +340,7 @@ async function seedPublishedRuntimeRevision(
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,
+    attestationId,
   });
 
   return { runtime, revision };
@@ -644,7 +646,7 @@ describe("V11 upsertDeploymentRoute", () => {
     ).rejects.toThrow(/attestation 未 verified/);
   });
 
-  it("RuntimeRevision attestation 未 verified → 抛错", async () => {
+  it("RuntimeRevision attestation 已撤销 → 抛错", async () => {
     // beforeEach 已 publish 第一个 Revision，Runtime.versionNo 递增到 2
     const newRuntimeRevision = await createDraftRuntimeRevision({
       tenantId,
@@ -658,11 +660,21 @@ describe("V11 upsertDeploymentRoute", () => {
       configHash: `sha256:${createHash("sha256").update("no-attest").digest("hex")}`,
       createdBy: ownerId,
     });
+    const rtAttestationId = await createVerifiedAttestation(
+      tenantId,
+      "runtime_revision",
+      newRuntimeRevision.id,
+      "runtime-content-no-attest",
+    );
     await publishTrustedRuntimeRevisionForTest({
       tenantId,
       revisionId: newRuntimeRevision.id,
       runtimeExpectedVersionNo: 2,
+      attestationId: rtAttestationId,
     });
+    // 撤销 attestation 使 route 层校验失败
+    const { revokeAttestation } = await import("@/lib/artifacts/persistence/artifact-attestation-queries");
+    await revokeAttestation(tenantId, rtAttestationId, buildActor(tenantId, "admin-001"), "测试撤销");
 
     await expect(
       upsertDeploymentRoute({
@@ -820,8 +832,8 @@ describe("V11 upsertDeploymentRoute", () => {
     const first = await upsertDeploymentRoute(command);
     const replay = await upsertDeploymentRoute(command);
 
-    expect(replay.routeRevision.id).toBe(first.routeRevision.id);
-    expect(replay.routeActivation.id).toBe(first.routeActivation.id);
+    expect(replay.routeRevisionId).toBe(first.routeRevisionId);
+    expect(replay.routeActivationId).toBe(first.routeActivationId);
     expect(
       await db.select().from(routeRevision).where(eq(routeRevision.routeId, first.route.id)),
     ).toHaveLength(1);
@@ -910,6 +922,7 @@ describe("V11 upsertDeploymentRoute", () => {
           effectiveFrom: null,
           effectiveUntil: null,
           eligibilityConditions: {},
+          routeGroupId: "primary",
         },
         actor: { tenantId, actorType: "service", actorId: "deploy-bot-rollback" },
         reason: "故障注入",
@@ -919,7 +932,7 @@ describe("V11 upsertDeploymentRoute", () => {
           recordId: idempotency.id,
           httpStatus: 200,
           serializeResponse: (result) =>
-            JSON.stringify({ route_revision_id: result.routeRevision.id }),
+            JSON.stringify({ route_revision_id: result.routeRevisionId }),
         },
       }),
     ).rejects.toThrow(`injected failure after ${step}`);
@@ -1330,9 +1343,14 @@ describe("V11 回滚场景", () => {
       actor: buildActor(tenantId, "deploy-bot-001"),
     });
     expect(r5.routeSet.versionNo).toBe(6);
-    expect(r5.routeRevision.id).toBe(r1.routeRevision.id);
-    expect(r5.routeActivation.previousRouteRevisionId).toBe(r2.routeRevision.id);
-    expect(r5.routeActivation.activationSequence).toBe(3);
+    expect(r5.routeRevisionId).toBe(r1.routeRevisionId);
+    // 验证 RouteActivation 在 DB 中的内部状态
+    const [r5Activation] = await db
+      .select()
+      .from(routeActivation)
+      .where(eq(routeActivation.id, r5.routeActivationId));
+    expect(r5Activation?.previousRouteRevisionId).toBe(r2.routeRevisionId);
+    expect(r5Activation?.activationSequence).toBe(3);
 
     // 验证回滚后：只有 1 条 enabled 路由（rev1 100%）
     const effectiveAfterRollback = await getEffectiveRoutes(tenantId, agentId, "prod");

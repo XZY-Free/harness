@@ -13,6 +13,8 @@ export interface RouteRevisionContent {
   effectiveFrom: Date | null;
   effectiveUntil: Date | null;
   eligibilityConditions: Record<string, unknown>;
+  /** Route Group 标识 — 同 Group 成员必须相同 eligibilityConditions、priorityNo、specificity、effectiveFrom、effectiveUntil。 */
+  routeGroupId: string;
 }
 
 export class RouteWeightInvalidError extends Error {
@@ -128,6 +130,7 @@ export function computeRouteRevisionContentDigest(content: RouteRevisionContent)
     model_policy_revision_id: content.modelPolicyRevisionId,
     toolset_revision_id: content.toolsetRevisionId,
     traffic_allocation: { weight_basis_points: content.trafficWeight },
+    route_group_id: content.routeGroupId,
     priority_no: content.priorityNo,
     effective_from: content.effectiveFrom?.toISOString() ?? null,
     effective_until: content.effectiveUntil?.toISOString() ?? null,

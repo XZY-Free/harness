@@ -7,12 +7,14 @@
  * - runtime-conformance：validateConformanceGate（4 mandatory case）/ isCapabilitySubset / ConformanceGateError。
  * - 不可变性约束：published 业务内容不可改；withdrawn 不删除历史引用；revisionNo 单调递增。
  * - 生命周期约束：retired 终态不可变更；软删除仅 draft/disabled 允许。
- * - 乐观锁：versionNo 不匹配返回 null/false；publishRuntimeRevision 冲突抛 RuntimeVersionConflictError。
+ * - 乐观锁：versionNo 不匹配返回 null/false；publishRuntimeRevision 冲突抛 RuntimePublicationVersionConflictError。
  * - Conformance 门禁：mandatory case 失败 → publish 抛 ConformanceGateError，Revision 保持 draft。
  * - 跨租户隔离：getRuntimeById/listRuntimes 按 tenantId 过滤。
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
+import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtimes/application/publish-runtime-revision-service";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import {
@@ -39,7 +41,7 @@ import {
   RuntimeRevisionImmutableError,
   RuntimeRevisionNotFoundError,
   RuntimeRevisionStateError,
-  RuntimeVersionConflictError,
+  RuntimePublicationVersionConflictError,
   createDraftRuntimeRevision,
   getLatestPublishedRuntimeRevision,
   getRevisionsByRuntime,
@@ -155,16 +157,40 @@ async function publishTrustedRevision(
     requestId: `request-${report.runId}`,
     actor: { actorType: "system", actorId: "test-trusted-runner" },
   });
+  const attestation = await createRecordArtifactAttestation({
+    store: mysqlArtifactAttestationPersistenceStore,
+  })({
+    tenantId,
+    artifactType: "runtime_revision",
+    artifactRevisionId: revisionId,
+    artifactDigest: revision.artifactDigest,
+    signatureBundleRef: `attestation:signature:${revisionId.slice(0, 8)}`,
+    sbomRef: `attestation:sbom:${revisionId.slice(0, 8)}`,
+    provenanceRef: `attestation:provenance:${revisionId.slice(0, 8)}`,
+    builderIdentity: "builder:lifecycle-test",
+    verificationState: "verified",
+    policyRevisionId: null,
+    failureCode: null,
+    verifiedAt: new Date(),
+    sourceRevision: null,
+    buildPipeline: null,
+    dependencyLockFileHash: null,
+    buildTime: null,
+    scanSummaryJson: null,
+    actor: { tenantId, actorType: "service", actorId: "test-builder" },
+    requestId: `attestation-request-${revisionId}`,
+  });
   const published = await publishRuntimeRevisionThroughControlPlane({
     tenantId,
     revisionId,
     runtimeExpectedVersionNo: expectedVersionNo,
     conformanceRunId: report.runId,
+    attestationId: attestation.id,
     actor: { tenantId, actorType: "system", actorId: "test-trusted-runner" },
     requestId: `publish-${report.runId}`,
     idempotencyKey: `publish-${report.runId}`,
   });
-  return { revision: published.revision, conformanceRunId: report.runId };
+  return { revision: published.revision, conformanceRunId: report.runId, attestationId: attestation.id };
 }
 
 /** 构造全部 mandatory case 通过的 conformance 结果。 */
@@ -634,6 +660,7 @@ describe("V11 runtime-revision-queries", () => {
         revisionId: rev.id,
         runtimeExpectedVersionNo: 2,
         conformanceRunId: firstPublication.conformanceRunId,
+        attestationId: firstPublication.attestationId,
         actor: { tenantId, actorType: "system", actorId: "test-trusted-runner" },
         requestId: "repeat-publish",
         idempotencyKey: "repeat-publish",
@@ -644,7 +671,7 @@ describe("V11 runtime-revision-queries", () => {
   it("publishRuntimeRevision Runtime 乐观锁冲突抛 VersionConflictError", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     await expect(publishTrustedRevision(tenantId, rev.id, 999)).rejects.toThrow(
-      RuntimeVersionConflictError,
+      RuntimePublicationVersionConflictError,
     );
     // 发布事务整体回滚，不留下 Revision 已发布但 Runtime 指针未更新的部分状态。
     const after = await getRuntimeRevisionById(rev.id);

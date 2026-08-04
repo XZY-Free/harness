@@ -30,7 +30,7 @@
  *   14. credential-never-in-model-data：adapter 设计保证（passed=true + reason=adapter_design_guarantee）
  *
  * 关键约束：
- * - mandatory case 失败 → publishRuntimeRevision 抛 ConformanceGateError，Revision 不可路由。
+ * - mandatory case 失败 → publishRuntimeRevision 抛 RuntimeConformanceCaseFailedError，Revision 不可路由。
  * - 本 runner 不直接调用 publishRuntimeRevision，仅返回结果供调用方决策。
  * - 测试不修改任何平台状态（纯 probe，不创建 Invocation/Item/Event）。
  */

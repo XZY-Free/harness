@@ -17,7 +17,7 @@
  *
  * Conformance 门禁：
  * - publishRevision 前必须通过 conformance 门禁（4 个 mandatory case）。
- * - 门禁失败抛 ConformanceGateError，Revision 保持 draft 状态。
+ * - 门禁失败抛 RuntimeConformanceCaseFailedError，Revision 保持 draft 状态。
  * - capabilities 必须来自探测和一致性测试，管理员不能手工勾选未支持能力。
  */
 import { randomUUID } from "node:crypto";
@@ -221,5 +221,5 @@ export { RUNTIME_REVISION_STATES } from "@/lib/persistence/schema/control-plane"
 export {
   RuntimeRevisionNotFoundError,
   RuntimeRevisionStateError,
-  RuntimeVersionConflictError,
+  RuntimePublicationVersionConflictError,
 } from "@/lib/runtimes/domain/runtime-revision-publication-policy";

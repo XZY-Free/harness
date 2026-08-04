@@ -26,6 +26,10 @@ export const routeRevision = mysqlTable(
     modelPolicyRevisionId: varchar("modelPolicyRevisionId", { length: 36 }),
     toolsetRevisionId: varchar("toolsetRevisionId", { length: 36 }),
     trafficAllocationJson: json("trafficAllocationJson").notNull(),
+    /** Route Group 标识 — 同 Group 成员必须相同 eligibilityConditions、priorityNo、specificity、effectiveFrom、effectiveUntil。 */
+    routeGroupId: varchar("routeGroupId", { length: 128 }).notNull().default("primary"),
+    /** Selector Digest — 由 RouteSelector.computeSelectorDigest 计算，含算法版本。 */
+    selectorDigest: varchar("selectorDigest", { length: 71 }).notNull(),
     trafficWeight: int("trafficWeight").notNull(),
     priorityNo: int("priorityNo").notNull(),
     effectiveFrom: datetime("effectiveFrom", { mode: "date", fsp: 3 }),
@@ -47,6 +51,16 @@ export const routeRevision = mysqlTable(
       table.contentDigest,
     ),
     routeSetIdx: index("RouteRevision_routeSet_idx").on(table.routeSetId, table.createdAt),
+    routeSetGroupIdPriorityIdx: index("RouteRevision_routeSetId_routeGroupId_priorityNo_idx").on(
+      table.routeSetId,
+      table.routeGroupId,
+      table.priorityNo,
+    ),
+    routeSetSelectorDigestPriorityIdx: index("RouteRevision_routeSetId_selectorDigest_priorityNo_idx").on(
+      table.routeSetId,
+      table.selectorDigest,
+      table.priorityNo,
+    ),
   }),
 );
 
@@ -57,6 +71,8 @@ export const routeActivation = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
     routeId: varchar("routeId", { length: 36 }).notNull(),
     routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
+    /** 派生冗余列 — 始终 = 对应 RouteRevision.routeSetId，写入服务负责派生和断言。 */
+    routeSetId: varchar("routeSetId", { length: 36 }).notNull(),
     activationSequence: bigint("activationSequence", { mode: "number", unsigned: true }).notNull(),
     activationState: mysqlEnum("activationState", ["active", "disabled"]).notNull(),
     previousRouteRevisionId: varchar("previousRouteRevisionId", { length: 36 }),
@@ -85,6 +101,10 @@ export const routeActivation = mysqlTable(
     revisionActivatedIdx: index("RouteActivation_revision_activated_idx").on(
       table.routeRevisionId,
       table.activatedAt,
+    ),
+    routeSetVersionIdx: index("RouteActivation_routeSetId_routeSetVersionNo_idx").on(
+      table.routeSetId,
+      table.routeSetVersionNo,
     ),
   }),
 );
