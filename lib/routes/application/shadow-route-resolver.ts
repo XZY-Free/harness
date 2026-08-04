@@ -5,6 +5,10 @@
  * 切换条件满足后：Projection 用于选择，Binding 做最终权威校验。
  *
  * 不记录敏感 Prompt 或用户数据。
+ *
+ * ⚠️ useProjectionForExecution 冻结为 false：Projection 当前不足以支撑
+ * ExecutionBinding 的完整执行证据，在正式切换前禁止打开。
+ * 参见：SnowHarness专题01全局统一与最终收敛方案 §0.4
  */
 
 import type {
@@ -50,7 +54,12 @@ export interface ShadowDiff {
 export interface ShadowResolverConfig {
   /** 是否启用 Shadow 对比（默认 true）。 */
   enabled: boolean;
-  /** 是否已切换到 Projection（默认 false — Authority 阶段）。 */
+  /**
+   * 是否已切换到 Projection（默认 false — Authority 阶段）。
+   *
+   * ⚠️ 冻结：当前 Projection 证据不完整，不足以支撑 ExecutionBinding。
+   * 生产环境启动时如果设为 true，直接启动失败。
+   */
   useProjectionForExecution: boolean;
 }
 
@@ -67,9 +76,21 @@ export interface CreateShadowRouteResolverDeps {
 
 /**
  * 创建 Shadow Route Resolver。
+ *
+ * 生产启动断言：useProjectionForExecution=true 时直接抛错，
+ * 防止误打开导致不完整证据进入执行链。
  */
 export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
   const config = { ...DEFAULT_CONFIG, ...deps.config };
+
+  // 生产启动断言：Projection 不能用于正式执行
+  if (config.useProjectionForExecution) {
+    throw new Error(
+      "FROZEN: useProjectionForExecution=true 不允许。" +
+      "Projection 当前证据不完整（缺少完整 Publication/Attestation/Conformance ID），" +
+      "不足以支撑 ExecutionBinding。参见专题01 §0.4。",
+    );
+  }
 
   return async function shadowResolveRoute(
     input: Omit<ResolveRouteCandidatesInput, "candidates"> & {
@@ -152,7 +173,7 @@ export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
         projectionMs,
       });
     } else {
-      logger.debug("[shadow-resolver] 一致", {
+      logger.info("[shadow-resolver] 一致", {
         tenantId: input.tenantId,
         authorityMs,
         projectionMs,

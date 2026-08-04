@@ -5,6 +5,9 @@
  * 步骤与 in-toto DSSE 类似，增加透明日志证明验证。
  *
  * 官方 SDK 只在此 Infrastructure Adapter 中 Import。
+ *
+ * ⚠️ 当前为 Fail-closed 骨架：真实 SDK 接入前统一返回 verified=false。
+ * 生产环境启动时，如果配置选择此 Verifier，直接启动失败。
  */
 
 import type {
@@ -22,20 +25,16 @@ export interface SigstoreBundleVerifierConfig {
 
 /**
  * 创建 Sigstore Bundle Verifier。
+ *
+ * Fail-closed：在真实 @sigstore/bundle SDK 接入前，所有验证返回
+ * verified=false + failureReason=verifier_not_implemented。
  */
 export function createSigstoreBundleVerifier(
   config: SigstoreBundleVerifierConfig,
 ): AttestationVerifier {
   return {
-    verify: async (input: VerifyAttestationInput): Promise<VerifyAttestationResult> => {
-      const base: VerifyAttestationResult = {
-        verified: false,
-        attestationFormat: "sigstore_bundle",
-        verificationEngine: "sigstore-bundle",
-        verificationEngineVersion: "1.0.0",
-      };
-
-      // 骨架验证 — 完整实现需要 @sigstore/bundle SDK
+    verify: async (_input: VerifyAttestationInput): Promise<VerifyAttestationResult> => {
+      // Fail-closed 骨架 — 完整实现需要 @sigstore/bundle SDK
       // 步骤:
       // 1. 解析 Sigstore Bundle
       // 2. 验证 DSSE Envelope 签名
@@ -46,12 +45,13 @@ export function createSigstoreBundleVerifier(
       // 7. 校验 Predicate Type
       // 8. 校验 Subject Digest
 
-      base.verified = true;
-      base.statementType = "https://in-toto.io/Statement/v1";
-      base.predicateType = input.expectedPredicateType;
-      base.subjectDigest = input.expectedArtifactDigest;
-
-      return base;
+      return {
+        verified: false,
+        attestationFormat: "sigstore_bundle",
+        verificationEngine: "sigstore-bundle",
+        verificationEngineVersion: "1.0.0",
+        failureReason: "verifier_not_implemented",
+      };
     },
   };
 }

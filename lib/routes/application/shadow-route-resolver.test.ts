@@ -4,6 +4,34 @@
 
 import { describe, it, expect, vi } from "vitest";
 import type { RouteResolutionCandidate, RouteResolutionOutcome } from "@/lib/routes/domain/route-resolution-policy";
+import { createShadowRouteResolver } from "./shadow-route-resolver";
+
+describe("Shadow Route Resolver 生产启动断言", () => {
+  it("useProjectionForExecution=true → 启动抛错（冻结）", () => {
+    const authorityStore = { loadCandidates: vi.fn() };
+    const projectionStore = { loadCandidates: vi.fn() };
+
+    expect(() =>
+      createShadowRouteResolver({
+        authorityStore: authorityStore as never,
+        projectionStore: projectionStore as never,
+        config: { useProjectionForExecution: true },
+      }),
+    ).toThrow(/FROZEN.*useProjectionForExecution/);
+  });
+
+  it("useProjectionForExecution=false（默认）→ 正常创建", () => {
+    const authorityStore = { loadCandidates: vi.fn() };
+    const projectionStore = { loadCandidates: vi.fn() };
+
+    expect(() =>
+      createShadowRouteResolver({
+        authorityStore: authorityStore as never,
+        projectionStore: projectionStore as never,
+      }),
+    ).not.toThrow();
+  });
+});
 
 describe("Shadow Route Resolver 差异记录", () => {
   it("computeDiffReason: status 不同", () => {

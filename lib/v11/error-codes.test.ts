@@ -31,8 +31,8 @@ describe("V11 error-codes projection", () => {
     expect(CONTRACT.contract_version).toBe("11.0.0");
   });
 
-  it("错误码 58 个（S12-W05 后 +EGRESS_BLOCKED/WORKLOAD_TOKEN_REVOKED）", () => {
-    expect(Object.keys(V11_ERROR_CODES)).toHaveLength(58);
+  it("错误码 67 个（S12-W05 后 +EGRESS_BLOCKED/WORKLOAD_TOKEN_REVOKED +ARTIFACT_ATTESTATION_REVOKED/ARTIFACT_BINDING_MISMATCH +ROUTE_*/FEATURE_NOT_READY）", () => {
+    expect(Object.keys(V11_ERROR_CODES)).toHaveLength(67);
   });
 
   it("errorDefinition 对未知码 fail-closed", () => {

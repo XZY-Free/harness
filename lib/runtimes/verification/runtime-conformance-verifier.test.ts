@@ -10,7 +10,7 @@ import {
 } from "./runtime-conformance-verifier";
 
 describe("createDSSEConformanceVerifier", () => {
-  it("DSSE 验证成功 → verified=true, format=standard_dsse", async () => {
+  it("Fail-closed 骨架: 未实现 SDK → verified=false, failureReason=verifier_not_implemented", async () => {
     const verifier = createDSSEConformanceVerifier({
       allowedRunnerIdentities: ["runner@ci.snowharness.dev"],
     });
@@ -22,9 +22,10 @@ describe("createDSSEConformanceVerifier", () => {
       expectedProtocolContractRevision: "v1",
       tenantId: "t1",
     });
-    expect(result.verified).toBe(true);
+    expect(result.verified).toBe(false);
     expect(result.conformanceFormat).toBe("standard_dsse");
     expect(result.predicateType).toBe(RUNTIME_CONFORMANCE_PREDICATE_TYPE);
+    expect(result.failureReason).toBe("verifier_not_implemented");
   });
 });
 

@@ -113,7 +113,7 @@ export function createHostedProvisioningWorker(
         logger.info("[hosted-provisioning-worker] 步骤完成", {
           requestId: request.id,
           step: result.step,
-          newState: result.state,
+          newState: result.newState,
         });
 
         // 如果步骤失败但不是终态，释放租约让 Worker 后续重试

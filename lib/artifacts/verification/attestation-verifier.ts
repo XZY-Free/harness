@@ -85,3 +85,11 @@ export class AttestationVerificationError extends Error {
     this.name = "AttestationVerificationError";
   }
 }
+
+/** Attestation 验证器不可用 — SDK 未实现。生产环境必须 Fail-closed。 */
+export class AttestationVerifierUnavailableError extends Error {
+  constructor(public readonly verifierName: string) {
+    super(`Attestation 验证器不可用：${verifierName} 未实现，生产环境必须 Fail-closed`);
+    this.name = "AttestationVerifierUnavailableError";
+  }
+}

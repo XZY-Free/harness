@@ -3,6 +3,10 @@
  *
  * 标准 Predicate Type 使用项目拥有的稳定 HTTPS URI。
  * 过渡期同时支持 legacy_hmac 和 standard_dsse。
+ *
+ * ⚠️ DSSE Conformance Verifier 当前为 Fail-closed 骨架：
+ * 真实 SDK 接入前统一返回 verified=false。
+ * 生产环境启动时，如果配置选择 DSSE Verifier，直接启动失败。
  */
 
 // ─── 标准 Predicate Type ──────────────────────────────────
@@ -15,6 +19,16 @@
  */
 export const RUNTIME_CONFORMANCE_PREDICATE_TYPE =
   "https://snowharness.dev/attestation/runtime-conformance/v1";
+
+// ─── 验证器不可用错误 ──────────────────────────────────────
+
+/** Conformance 验证器不可用 — SDK 未实现。生产环境必须 Fail-closed。 */
+export class RuntimeConformanceVerifierUnavailableError extends Error {
+  constructor(public readonly verifierName: string) {
+    super(`Conformance 验证器不可用：${verifierName} 未实现，生产环境必须 Fail-closed`);
+    this.name = "RuntimeConformanceVerifierUnavailableError";
+  }
+}
 
 // ─── 验证器接口 ──────────────────────────────────────────
 
@@ -53,13 +67,16 @@ export interface DSSEConformanceVerifierConfig {
 
 /**
  * 创建 DSSE Conformance Verifier — 验证 in-toto + DSSE 签名的 Conformance 报告。
+ *
+ * Fail-closed：在真实 DSSE 验签 SDK 接入前，所有验证返回
+ * verified=false + failureReason=verifier_not_implemented。
  */
 export function createDSSEConformanceVerifier(
-  config: DSSEConformanceVerifierConfig,
+  _config: DSSEConformanceVerifierConfig,
 ): RuntimeConformanceVerifier {
   return {
-    verify: async (input: VerifyConformanceInput): Promise<VerifyConformanceResult> => {
-      // 骨架验证 — 完整实现需要 DSSE 验签 SDK
+    verify: async (_input: VerifyConformanceInput): Promise<VerifyConformanceResult> => {
+      // Fail-closed 骨架 — 完整实现需要 DSSE 验签 SDK
       // 步骤:
       // 1. 读取 DSSE Envelope
       // 2. 验证签名
@@ -70,9 +87,10 @@ export function createDSSEConformanceVerifier(
       // 7. 校验 Case 结果完整
 
       return {
-        verified: true,
+        verified: false,
         conformanceFormat: "standard_dsse",
         predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
+        failureReason: "verifier_not_implemented",
       };
     },
   };

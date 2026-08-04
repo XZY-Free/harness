@@ -4,7 +4,6 @@ import {
   bigint,
   datetime,
   index,
-  index,
   json,
   mysqlEnum,
   mysqlTable,

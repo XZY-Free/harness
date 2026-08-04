@@ -68,6 +68,7 @@ export const V11_ERROR_CODES = {
   REQUEST_SCHEMA_INVALID: { http: 400, retryable: false },
   RESOURCE_NOT_FOUND: { http: 404, retryable: false },
   RUNTIME_UNAVAILABLE: { http: 503, retryable: true },
+  FEATURE_NOT_READY: { http: 503, retryable: true },
   SHARED_BUDGET_EXHAUSTED: { http: 422, retryable: false },
   STREAM_BACKPRESSURE: { http: 429, retryable: true },
   TOOL_SCHEMA_CHANGED: { http: 409, retryable: true },

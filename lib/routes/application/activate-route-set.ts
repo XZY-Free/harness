@@ -272,7 +272,7 @@ export function createActivateRouteSet(dependencies: {
           actorId: command.actor.actorId,
           reason: command.reason,
           requestId: command.requestId,
-          idempotencyKey: `${command.idempotencyCompletionKey}:${routeId}`,
+          idempotencyKey: `${command.idempotencyKey}:${routeId}`,
           now: occurredAt,
         });
 
@@ -313,7 +313,7 @@ export function createActivateRouteSet(dependencies: {
               actorId: command.actor.actorId,
               reason: `${command.reason}（不在目标集合中）`,
               requestId: command.requestId,
-              idempotencyKey: `${command.idempotencyCompletionKey}:disable:${currentRoute.id}`,
+              idempotencyKey: `${command.idempotencyKey}:disable:${currentRoute.id}`,
               now: occurredAt,
             });
             await session.updateRouteProjection({

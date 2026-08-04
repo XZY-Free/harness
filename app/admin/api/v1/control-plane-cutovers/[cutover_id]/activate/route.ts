@@ -1,27 +1,22 @@
 /**
  * POST /admin/api/v1/control-plane-cutovers/{cutover_id}/activate — 激活切换。
  *
- * 只有 Plan 为 ready_to_activate 时允许。
- * 调用 ActivateRouteSet 一次原子激活整个 RouteSet。
+ * ⚠️ 冻结：在真实 Cutover 工作流完成前，此端点返回 503 FEATURE_NOT_READY。
+ * 当前 Cutover activate 未真正调用 ActivateRouteSet，仅修改 Plan 状态，
+ * 可能宣称切换成功但真实 RouteSet 完全没有变化。
+ * 参见：SnowHarness专题01全局统一与最终收敛方案 §0.3
  */
 
 import {
   REQUEST_ID_HEADER,
   getRequestId,
   v11Error,
-  v11Ok,
 } from "@/lib/http";
-import { mysqlCutoverStore } from "@/lib/control-plane/cutover/persistence/mysql-cutover-store";
-import { isValidPlanTransition } from "@/lib/control-plane/cutover/domain/cutover-plan";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
-import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
-
-const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 
 export const dynamic = "force-dynamic";
 
@@ -42,41 +37,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     throw err;
   }
 
-  const plan = await mysqlCutoverStore.getPlanById({
-    tenantId: principal.tenantId,
-    planId,
-  });
-
-  if (!plan) {
-    return v11Error("RESOURCE_NOT_FOUND", `CutoverPlan 不存在: ${planId}`, { requestId });
-  }
-
-  // 只有 ready_to_activate 状态可以激活
-  if (plan.state !== "ready_to_activate") {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", `Plan 当前状态 ${plan.state}，必须为 ready_to_activate 才能激活`, { requestId });
-  }
-
-  // 检查所有 Item 是否就绪
-  const items = await mysqlCutoverStore.listItemsByPlan(planId);
-  const allReady = items.every((item) => item.state === "ready");
-  if (!allReady) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", "部分 CutoverItem 尚未就绪", { requestId });
-  }
-
-  // 转换到 activated 状态
-  const now = new Date();
-  const updated = await mysqlCutoverStore.updatePlanState({
-    planId,
-    state: "activated",
-    completedAt: now,
-  });
-
-  return v11Ok({
-    id: updated.id,
-    state: updated.state,
-    completed_at: updated.completedAt?.toISOString(),
-  }, {
-    status: 200,
-    headers: { [REQUEST_ID_HEADER]: requestId },
-  });
+  // 冻结：在真实 Cutover 工作流完成前，不允许激活
+  return v11Error(
+    "FEATURE_NOT_READY",
+    `Cutover 激活功能尚未实现。Plan ${planId} 未真正调用 ActivateRouteSet。` +
+    "在真实 Cutover 工作流完成前，此端点冻结。参见专题01 §0.3。",
+    { requestId },
+  );
 }
