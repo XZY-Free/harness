@@ -224,7 +224,7 @@ async function createVerifiedAttestation(
   artifactType: string,
   artifactRevisionId: string,
   artifactContent: string,
-): Promise<void> {
+): Promise<string> {
   const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
   const builderKeys: BuilderKeyRegistry = {
     "builder:company-agent-runtime": keyPair.publicKeyBase64,
@@ -250,12 +250,13 @@ async function createVerifiedAttestation(
     builderIdentity: "builder:company-agent-runtime",
   };
 
-  await verifyAndPersistAttestation(
+  const attestation = await verifyAndPersistAttestation(
     input,
     store,
     builderKeys,
     buildActor(tenantId, "ci-service-001"),
   );
+  return attestation.id;
 }
 
 // ─── 辅助：seed Agent + published AgentRevision + attestation ─
@@ -329,7 +330,7 @@ async function seedPublishedRuntimeRevision(
     createdBy: ownerId,
   });
 
-  await createVerifiedAttestation(
+  const attestationId = await createVerifiedAttestation(
     tenantId,
     "runtime_revision",
     revision.id,
@@ -339,6 +340,7 @@ async function seedPublishedRuntimeRevision(
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,
+    attestationId,
   });
 
   return { runtime, revision };
@@ -644,7 +646,7 @@ describe("V11 upsertDeploymentRoute", () => {
     ).rejects.toThrow(/attestation 未 verified/);
   });
 
-  it("RuntimeRevision attestation 未 verified → 抛错", async () => {
+  it("RuntimeRevision attestation 已撤销 → 抛错", async () => {
     // beforeEach 已 publish 第一个 Revision，Runtime.versionNo 递增到 2
     const newRuntimeRevision = await createDraftRuntimeRevision({
       tenantId,
@@ -658,11 +660,21 @@ describe("V11 upsertDeploymentRoute", () => {
       configHash: `sha256:${createHash("sha256").update("no-attest").digest("hex")}`,
       createdBy: ownerId,
     });
+    const rtAttestationId = await createVerifiedAttestation(
+      tenantId,
+      "runtime_revision",
+      newRuntimeRevision.id,
+      "runtime-content-no-attest",
+    );
     await publishTrustedRuntimeRevisionForTest({
       tenantId,
       revisionId: newRuntimeRevision.id,
       runtimeExpectedVersionNo: 2,
+      attestationId: rtAttestationId,
     });
+    // 撤销 attestation 使 route 层校验失败
+    const { revokeAttestation } = await import("@/lib/artifacts/persistence/artifact-attestation-queries");
+    await revokeAttestation(tenantId, rtAttestationId, buildActor(tenantId, "admin-001"), "测试撤销");
 
     await expect(
       upsertDeploymentRoute({

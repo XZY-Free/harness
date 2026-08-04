@@ -1,4 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
+import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
@@ -178,12 +180,36 @@ describe("RuntimeConformanceRun 权威记录", () => {
       actor: { actorType: "user", actorId: ownerId },
       ...signed,
     });
+    const attestation = await createRecordArtifactAttestation({
+      store: mysqlArtifactAttestationPersistenceStore,
+    })({
+      tenantId,
+      artifactType: "runtime_revision",
+      artifactRevisionId: revision.id,
+      artifactDigest: DIGEST_A,
+      signatureBundleRef: "attestation:signature:conformance-publication",
+      sbomRef: "attestation:sbom:conformance-publication",
+      provenanceRef: "attestation:provenance:conformance-publication",
+      builderIdentity: "builder:conformance-test",
+      verificationState: "verified",
+      policyRevisionId: null,
+      failureCode: null,
+      verifiedAt: new Date(),
+      sourceRevision: null,
+      buildPipeline: null,
+      dependencyLockFileHash: null,
+      buildTime: null,
+      scanSummaryJson: null,
+      actor: { tenantId, actorType: "service", actorId: "test-builder" },
+      requestId: `attestation-request-${revision.id}`,
+    });
     const publish = createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore });
     await publish({
       tenantId,
       revisionId: revision.id,
       runtimeExpectedVersionNo: runtime.versionNo,
       conformanceRunId: recorded.run.id,
+      attestationId: attestation.id,
       actor: { tenantId, actorType: "user", actorId: ownerId },
       requestId: "request-publication",
       idempotencyKey: "publication-001",

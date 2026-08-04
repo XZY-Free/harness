@@ -13,6 +13,8 @@
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
+import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtimes/application/publish-runtime-revision-service";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import {
@@ -155,16 +157,40 @@ async function publishTrustedRevision(
     requestId: `request-${report.runId}`,
     actor: { actorType: "system", actorId: "test-trusted-runner" },
   });
+  const attestation = await createRecordArtifactAttestation({
+    store: mysqlArtifactAttestationPersistenceStore,
+  })({
+    tenantId,
+    artifactType: "runtime_revision",
+    artifactRevisionId: revisionId,
+    artifactDigest: revision.artifactDigest,
+    signatureBundleRef: `attestation:signature:${revisionId.slice(0, 8)}`,
+    sbomRef: `attestation:sbom:${revisionId.slice(0, 8)}`,
+    provenanceRef: `attestation:provenance:${revisionId.slice(0, 8)}`,
+    builderIdentity: "builder:lifecycle-test",
+    verificationState: "verified",
+    policyRevisionId: null,
+    failureCode: null,
+    verifiedAt: new Date(),
+    sourceRevision: null,
+    buildPipeline: null,
+    dependencyLockFileHash: null,
+    buildTime: null,
+    scanSummaryJson: null,
+    actor: { tenantId, actorType: "service", actorId: "test-builder" },
+    requestId: `attestation-request-${revisionId}`,
+  });
   const published = await publishRuntimeRevisionThroughControlPlane({
     tenantId,
     revisionId,
     runtimeExpectedVersionNo: expectedVersionNo,
     conformanceRunId: report.runId,
+    attestationId: attestation.id,
     actor: { tenantId, actorType: "system", actorId: "test-trusted-runner" },
     requestId: `publish-${report.runId}`,
     idempotencyKey: `publish-${report.runId}`,
   });
-  return { revision: published.revision, conformanceRunId: report.runId };
+  return { revision: published.revision, conformanceRunId: report.runId, attestationId: attestation.id };
 }
 
 /** 构造全部 mandatory case 通过的 conformance 结果。 */
@@ -634,6 +660,7 @@ describe("V11 runtime-revision-queries", () => {
         revisionId: rev.id,
         runtimeExpectedVersionNo: 2,
         conformanceRunId: firstPublication.conformanceRunId,
+        attestationId: firstPublication.attestationId,
         actor: { tenantId, actorType: "system", actorId: "test-trusted-runner" },
         requestId: "repeat-publish",
         idempotencyKey: "repeat-publish",

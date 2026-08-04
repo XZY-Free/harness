@@ -381,6 +381,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         revisionId,
         runtimeExpectedVersionNo: expectedVersionNo,
         conformanceRunId: recorded.run.id,
+        // TODO: Task 1.2 - require artifact_attestation_id from request body
+        attestationId: (body as unknown as Record<string, unknown>).artifact_attestation_id as string,
         actor: actorFromAdminPrincipal(principal),
         requestId,
         idempotencyKey,

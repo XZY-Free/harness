@@ -10,7 +10,10 @@ import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/control-plane";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
-import type { ConformanceCaseId } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
+import {
+  ALL_CONFORMANCE_CASES,
+  type ConformanceCaseId,
+} from "@/lib/runtimes/domain/runtime-conformance-contract";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
@@ -24,7 +27,10 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
       operation({
         async findRevision(tenantId, revisionId) {
           const [row] = await tx
-            .select({ revision: runtimeRevisionTable })
+            .select({
+              revision: runtimeRevisionTable,
+              tenantId: runtimeTable.tenantId,
+            })
             .from(runtimeRevisionTable)
             .innerJoin(
               runtimeTable,
@@ -36,7 +42,8 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
             .where(eq(runtimeRevisionTable.id, revisionId))
             .limit(1)
             .for("update");
-          return row?.revision ?? null;
+          if (!row) return null;
+          return { ...row.revision, tenantId: row.tenantId };
         },
         async findRuntime(tenantId, runtimeId) {
           const [runtime] = await tx
@@ -47,12 +54,22 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
             .for("update");
           return runtime ?? null;
         },
+        /**
+         * FOR UPDATE 读取 Attestation 证据快照。
+         *
+         * 返回完整 EvidenceSnapshot（含 artifactType、artifactRevisionId、
+         * verificationState、revokedAt、revocationRecordId），
+         * 由 ArtifactEvidencePolicy 统一验证发布资格。
+         */
         async findVerifiedAttestation(params) {
-          const [attestation] = await tx
-            .select({ attestation: artifactAttestation })
+          const [row] = await tx
+            .select({
+              attestation: artifactAttestation,
+              artifact: artifact,
+              revocation: attestationRevocationRecord,
+            })
             .from(artifactAttestation)
             .innerJoin(artifact, eq(artifact.id, artifactAttestation.artifactId))
-            .innerJoin(runtimeRevisionTable, eq(runtimeRevisionTable.id, params.revisionId))
             .leftJoin(
               attestationRevocationRecord,
               eq(attestationRevocationRecord.attestationId, artifactAttestation.id),
@@ -64,18 +81,32 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
                 eq(artifactAttestation.artifactType, "runtime_revision"),
                 eq(artifactAttestation.artifactRevisionId, params.revisionId),
                 eq(artifactAttestation.verificationState, "verified"),
-                eq(artifact.tenantId, params.tenantId),
-                eq(artifact.digest, artifactAttestation.artifactDigest),
-                eq(runtimeRevisionTable.artifactId, artifact.id),
-                eq(runtimeRevisionTable.artifactDigest, artifact.digest),
-                isNull(attestationRevocationRecord.id),
                 isNull(artifactAttestation.revokedAt),
+                isNull(attestationRevocationRecord.id),
               ),
             )
             .limit(1)
             .for("update");
-          return attestation?.attestation ?? null;
+          if (!row || !row.attestation.artifactId) return null;
+          return {
+            id: row.attestation.id,
+            tenantId: row.attestation.tenantId,
+            artifactType: row.attestation.artifactType,
+            artifactRevisionId: row.attestation.artifactRevisionId,
+            artifactId: row.attestation.artifactId,
+            artifactDigest: row.attestation.artifactDigest,
+            verificationState: row.attestation.verificationState,
+            revokedAt: row.attestation.revokedAt,
+            revocationRecordId: row.revocation?.id ?? null,
+          };
         },
+        /**
+         * FOR UPDATE 读取 Passed ConformanceRun 完整结果。
+         *
+         * 返回包含绑定校验字段（runtimeArtifactDigest、runtimeConfigDigest、
+         * protocolContractRevision）的完整 Run，由应用服务校验与 Revision 一致。
+         * Case 完整性由 validateCompleteConformanceResult 统一判断。
+         */
         async findPassedConformanceRun(params) {
           const [run] = await tx
             .select()
@@ -91,27 +122,16 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
             .limit(1)
             .for("update");
           if (!run) return null;
-          const [revision] = await tx
-            .select()
-            .from(runtimeRevisionTable)
-            .where(eq(runtimeRevisionTable.id, params.revisionId))
-            .limit(1);
-          if (
-            !revision ||
-            revision.artifactDigest !== run.runtimeArtifactDigest ||
-            revision.configHash !== run.runtimeConfigDigest ||
-            revision.protocolContractRevision !== run.protocolContractRevision
-          ) {
-            return null;
-          }
           const rows = await tx
             .select()
             .from(runtimeConformanceCaseResult)
             .where(eq(runtimeConformanceCaseResult.runId, run.id))
             .orderBy(asc(runtimeConformanceCaseResult.caseId));
-          if (rows.length !== 16 || rows.some((row) => !row.passed)) return null;
           return {
             id: run.id,
+            runtimeArtifactDigest: run.runtimeArtifactDigest,
+            runtimeConfigDigest: run.runtimeConfigDigest,
+            protocolContractRevision: run.protocolContractRevision,
             evidenceManifestDigest: run.evidenceManifestDigest,
             results: rows.map((row) => ({
               caseId: row.caseId as ConformanceCaseId,

@@ -31,6 +31,7 @@ import type {
 } from "@/lib/runtimes/application/provision-hosted-runtime";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
+import { ALL_CONFORMANCE_CASES } from "@/lib/runtimes/domain/runtime-conformance-contract";
 import { getHostedControlPlaneEvidenceProvider } from "@/lib/runtimes/domain/hosted-control-plane-evidence";
 import { protocolContractRevision } from "@/lib/runtimes/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
@@ -344,7 +345,7 @@ async function loadPublishedRuntimeRevision(
     .select()
     .from(runtimeConformanceCaseResult)
     .where(eq(runtimeConformanceCaseResult.runId, run.id));
-  if (cases.length !== 16 || cases.some((item) => !item.passed)) return null;
+  if (cases.length !== ALL_CONFORMANCE_CASES.length || cases.some((item) => !item.passed)) return null;
   return { revisionId: revision.id, ...fact, conformanceRunId: fact.conformanceRunId };
 }
 

@@ -1,11 +1,14 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
+import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
+import { seedVerifiedRuntimeAttestation } from "@/lib/runtimes/test-support/seed-verified-runtime-attestation";
 import { MANDATORY_GATE_CASES } from "@/lib/runtimes/domain/runtime-conformance";
 import {
   ALL_CONFORMANCE_CASES,
@@ -108,6 +111,29 @@ async function seedRuntimePublicationFixture(suffix = "") {
     requestId: `request-${report.runId}`,
     actor: { actorType: "system", actorId: "test-trusted-runner" },
   });
+  const attestation = await createRecordArtifactAttestation({
+    store: mysqlArtifactAttestationPersistenceStore,
+  })({
+    tenantId: tenant.id,
+    artifactType: "runtime_revision",
+    artifactRevisionId: revision.id,
+    artifactDigest: `sha256:${"a".repeat(64)}`,
+    signatureBundleRef: `attestation:signature:${suffix || "default"}`,
+    sbomRef: `attestation:sbom:${suffix || "default"}`,
+    provenanceRef: `attestation:provenance:${suffix || "default"}`,
+    builderIdentity: "builder:publication-test",
+    verificationState: "verified",
+    policyRevisionId: null,
+    failureCode: null,
+    verifiedAt: new Date(),
+    sourceRevision: null,
+    buildPipeline: null,
+    dependencyLockFileHash: null,
+    buildTime: null,
+    scanSummaryJson: null,
+    actor: { tenantId: tenant.id, actorType: "service", actorId: "test-builder" },
+    requestId: `attestation-request-${revision.id}`,
+  });
   return {
     tenantId: tenant.id,
     ownerId: owner.id,
@@ -115,6 +141,7 @@ async function seedRuntimePublicationFixture(suffix = "") {
     revision,
     idempotency,
     conformanceRunId: report.runId,
+    attestationId: attestation.id,
   };
 }
 
@@ -164,6 +191,7 @@ function publicationCommand(fixture: Awaited<ReturnType<typeof seedRuntimePublic
     revisionId: fixture.revision.id,
     runtimeExpectedVersionNo: fixture.runtime.versionNo,
     conformanceRunId: fixture.conformanceRunId,
+    attestationId: fixture.attestationId,
     actor: {
       tenantId: fixture.tenantId,
       actorType: "user" as const,
@@ -211,7 +239,7 @@ describe("RuntimeRevision publication application boundary", () => {
     expect(publication).toMatchObject({
       subjectType: "runtime_revision",
       subjectRevisionId: revision.id,
-      attestationIds: [],
+      attestationIds: [fixture.attestationId],
       conformanceRunId: fixture.conformanceRunId,
       publishedByType: "user",
     });
@@ -242,6 +270,7 @@ describe("RuntimeRevision publication application boundary", () => {
       revisionId: fixture.revision.id,
       runtimeExpectedVersionNo: fixture.runtime.versionNo,
       conformanceRunId: fixture.conformanceRunId,
+      attestationId: fixture.attestationId,
       actor: {
         tenantId: fixture.tenantId,
         actorType: "user",
