@@ -22,6 +22,8 @@ export interface ExecutionBindingConfigInput {
   contextCheckpointId: string | null;
   environmentDefinitionRevisionId: string | null;
   controlPlaneEvidence: ExecutionBindingControlPlaneEvidence;
+  /** Projection 版本号 — Binding 用此检测 Projection 滞后。第三批新增。 */
+  projectionVersionNo: number;
 }
 
 export interface ExecutionBinding
@@ -49,6 +51,9 @@ export class ExecutionBindingAlreadyExistsError extends Error {
 
 export function computeExecutionBindingConfigHash(input: ExecutionBindingConfigInput): string {
   assertExecutionBindingEvidence(input.controlPlaneEvidence);
+  if (typeof input.projectionVersionNo !== "number" || input.projectionVersionNo < 0) {
+    throw new ExecutionBindingEvidenceError("projectionVersionNo 必须为非负整数");
+  }
   const canonical = JSON.stringify(
     sortKeys({
       ...input,
