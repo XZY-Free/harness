@@ -862,6 +862,13 @@
       "when": 1789424800000,
       "tag": "0122_outbox_relay_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "6",
+      "when": 1789511200000,
+      "tag": "0123_attestation_envelope_fields",
+      "breakpoints": true
     }
   ]
 }
