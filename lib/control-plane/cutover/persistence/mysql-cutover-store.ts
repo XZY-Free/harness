@@ -181,20 +181,20 @@ export const mysqlCutoverStore: CutoverStore = {
 
     // MySQL: SELECT ... FOR UPDATE SKIP LOCKED
     // Drizzle 不直接支持 SKIP LOCKED，使用 sql 模板标签参数化查询
-    const rows = await db.execute<{
-      id: string;
-    }>(sql`
-      SELECT id FROM CutoverItem
-      WHERE tenantId = ${tenantId}
-        AND state IN ('pending', 'failed')
-        AND (nextAttemptAt IS NULL OR nextAttemptAt <= ${nowStr})
-        AND (leaseExpiresAt IS NULL OR leaseExpiresAt < ${nowStr})
-      ORDER BY createdAt ASC
-      LIMIT ${batchSize}
-      FOR UPDATE SKIP LOCKED
-    `);
+    const rawResult = await db.execute(
+      sql`
+        SELECT id FROM CutoverItem
+        WHERE tenantId = ${tenantId}
+          AND state IN ('pending', 'failed')
+          AND (nextAttemptAt IS NULL OR nextAttemptAt <= ${nowStr})
+          AND (leaseExpiresAt IS NULL OR leaseExpiresAt < ${nowStr})
+        ORDER BY createdAt ASC
+        LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      `,
+    );
 
-    const ids = (rows.rows ?? []).map((r) => r.id);
+    const ids = (rawResult as unknown as { id: string }[]).map((r) => r.id);
     if (ids.length === 0) return [];
 
     // 设置租约

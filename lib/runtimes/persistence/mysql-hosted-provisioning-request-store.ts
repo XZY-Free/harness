@@ -120,19 +120,19 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
     const leaseExpiresAt = new Date(now.getTime() + leaseMs);
     const nowStr = now.toISOString().slice(0, 19).replace("T", " ");
 
-    const rows = await db.execute<{
-      id: string;
-    }>(sql`
-      SELECT id FROM HostedProvisioningRequest
-      WHERE state IN ('pending', 'retryable_failed')
-        AND (nextAttemptAt IS NULL OR nextAttemptAt <= ${nowStr})
-        AND (leaseExpiresAt IS NULL OR leaseExpiresAt < ${nowStr})
-      ORDER BY createdAt ASC
-      LIMIT ${batchSize}
-      FOR UPDATE SKIP LOCKED
-    `);
+    const rawResult = await db.execute(
+      sql`
+        SELECT id FROM HostedProvisioningRequest
+        WHERE state IN ('pending', 'retryable_failed')
+          AND (nextAttemptAt IS NULL OR nextAttemptAt <= ${nowStr})
+          AND (leaseExpiresAt IS NULL OR leaseExpiresAt < ${nowStr})
+        ORDER BY createdAt ASC
+        LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      `,
+    );
 
-    const ids = (rows.rows ?? []).map((r) => r.id);
+    const ids = (rawResult as unknown as { id: string }[]).map((r) => r.id);
     if (ids.length === 0) return [];
 
     await db

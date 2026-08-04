@@ -7,17 +7,9 @@
  * - 其他 → Item 进入 pending，需要 Replacement
  */
 
-import { db } from "@/lib/db/client";
-import {
-  agentRevisionTable,
-  runtimeRevisionTable,
-  runtimeTable,
-} from "@/lib/persistence/schema/control-plane";
 import type { QualificationCategory } from "./cutover-item";
-import { and, eq, isNull } from "drizzle-orm";
 import { getPublicationRecordBySubject, getWithdrawalRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
-import { getVerifiedAttestationForRevision, listAttestationsByRevision } from "@/lib/artifacts/persistence/artifact-attestation-queries";
-import { publicationRecord, withdrawalRecord } from "@/lib/publications/persistence/publication-record";
+import { getVerifiedAttestationForRevision } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 
 /** 扫描输入。 */
 export interface ScanInput {
@@ -171,34 +163,15 @@ export async function scanRevisionQualification(params: {
  * 扫描 RouteSet 下所有 Active Route 引用的 Revision。
  *
  * 返回所有需要资格评估的 Subject 列表（去重）。
+ *
+ * 注意：此函数需要从 DeploymentRoute 投影读取当前 active 的
+ * agentRevisionId/runtimeRevisionId，然后逐个调用 scanRevisionQualification。
+ * 具体实现委托给应用服务层，因为需要组合多个 Store 的查询。
  */
 export async function scanRouteSetActiveRevisions(
-  params: ScanInput,
+  _params: ScanInput,
 ): Promise<ScannedSubject[]> {
-  const { tenantId } = params;
-
-  // 读取所有 enabled Route 的 Active Revision 引用
-  const routes = await db
-    .select({
-      agentRevisionId: agentRevisionTable.id,
-      runtimeRevisionId: runtimeRevisionTable.id,
-      agentArtifactDigest: agentRevisionTable.artifactDigest,
-      runtimeArtifactDigest: runtimeRevisionTable.artifactDigest,
-    })
-    .from(runtimeRevisionTable)
-    .innerJoin(
-      agentRevisionTable,
-      eq(agentRevisionTable.id, runtimeRevisionTable.id), // placeholder - 实际需要通过 Route 投影连接
-    )
-    .where(eq(runtimeRevisionTable.tenantId, tenantId))
-    .limit(1000);
-
-  // 去重并扫描
-  const seen = new Set<string>();
-  const results: ScannedSubject[] = [];
-
-  // 实际实现需要从 DeploymentRoute 投影读取 agentRevisionId/runtimeRevisionId
-  // 此处提供扫描逻辑框架，具体 Route→Revision 连接在应用服务层完成
-
-  return results;
+  // 应用服务层实现：读取 DeploymentRoute 投影 → 去重 Revision ID → 逐个扫描
+  // 领域层只提供 scanRevisionQualification 单条扫描逻辑
+  return [];
 }
