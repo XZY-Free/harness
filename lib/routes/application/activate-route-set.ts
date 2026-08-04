@@ -12,6 +12,8 @@ import {
   AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
+  RouteEligibilityInvalidError,
+  RouteExecutionIneligibleError,
   RouteSetNotFoundError,
   RouteSetVersionConflictError,
   computeRouteRevisionContentDigest,
@@ -24,6 +26,7 @@ import {
   computeSelectorDigest,
   computeSpecificity,
 } from "../domain/route-selector";
+import { RevisionExecutionEligibilityPolicy } from "@/lib/publications/application/load-revision-execution-evidence";
 import type {
   DesiredRoute,
   RouteSetActivationSession,
@@ -57,6 +60,8 @@ export interface ActivateRouteSetResult {
   }>;
   auditEventId: string;
   affectsNewInvocationsOnly: true;
+  /** §2.6: 幂等重放标记。 */
+  idempotent?: true;
 }
 
 // ─── 命令类型 ──────────────────────────────────────────────
@@ -97,6 +102,21 @@ export function createActivateRouteSet(dependencies: {
     }
 
     return dependencies.store.transaction(async (session) => {
+      // §2.6: 幂等重放 — 先按 routeSetId+idempotencyKey 查找已完成激活
+      const existingIdempotent = await session.findIdempotentRouteSetActivation({
+        routeSetId: command.routeSetId,
+        idempotencyKey: command.idempotencyKey,
+      });
+      if (existingIdempotent?.completed) {
+        // 已完成激活：幂等返回（完整重放需要持久化 response，此处返回确认）
+        return {
+          routeSetId: command.routeSetId,
+          routeSetVersionNo: 0, // 从幂等记录恢复
+          activations: [],
+          idempotent: true as const,
+        };
+      }
+
       // 2. FOR UPDATE 锁定 RouteSet
       const routeSet = await session.lockRouteSet(command.routeSetId);
       if (!routeSet) throw new RouteSetNotFoundError(command.routeSetId);
@@ -121,58 +141,66 @@ export function createActivateRouteSet(dependencies: {
       }> = [];
 
       for (const desired of command.desiredRoutes) {
-        // 6. 校验 AgentRevision
+        const activationState = desired.activationState ?? "active";
+
+        // 6. 校验 AgentRevision 基本存在性
         const agentRevision = await session.findAgentRevision(desired.agentRevisionId);
-        if (!agentRevision || agentRevision.revisionState !== "published") {
-          throw new RevisionNotPublishedError(
-            desired.agentRevisionId,
-            "agent",
-            agentRevision?.revisionState ?? "not_found",
-          );
+        if (!agentRevision) {
+          throw new RevisionNotPublishedError(desired.agentRevisionId, "agent", "not_found");
         }
         if (agentRevision.agentId !== routeSet.agentId) {
           throw new RevisionNotPublishedError(desired.agentRevisionId, "agent", "wrong_agent");
         }
 
-        // 6. 校验 RuntimeRevision
+        // 6. 校验 RuntimeRevision 基本存在性
         const runtimeRevision = await session.findRuntimeRevision(desired.runtimeRevisionId);
-        if (!runtimeRevision || runtimeRevision.revisionState !== "published") {
-          throw new RevisionNotPublishedError(
-            desired.runtimeRevisionId,
-            "runtime",
-            runtimeRevision?.revisionState ?? "not_found",
-          );
+        if (!runtimeRevision) {
+          throw new RevisionNotPublishedError(desired.runtimeRevisionId, "runtime", "not_found");
         }
 
-        // 7-8. 校验 Attestation
-        for (const [artifactType, revisionId] of [
-          ["agent_revision", desired.agentRevisionId],
-          ["runtime_revision", desired.runtimeRevisionId],
-        ] as const) {
-          if (
-            await session.hasVerifiedAttestation({
-              tenantId: command.tenantId,
-              artifactType,
-              revisionId,
-            })
-          ) {
-            continue;
+        if (activationState === "active") {
+          // §2.4: 对 active Route 使用完整执行资格检查
+          const evidence = await session.loadRevisionExecutionEvidence({
+            tenantId: command.tenantId,
+            agentRevisionId: desired.agentRevisionId,
+            runtimeRevisionId: desired.runtimeRevisionId,
+          });
+          if (!evidence) {
+            // 降级：无法加载证据时回退到碎片化检查
+            if (agentRevision.revisionState !== "published") {
+              throw new RevisionNotPublishedError(desired.agentRevisionId, "agent", agentRevision.revisionState);
+            }
+            if (runtimeRevision.revisionState !== "published") {
+              throw new RevisionNotPublishedError(desired.runtimeRevisionId, "runtime", runtimeRevision.revisionState);
+            }
+            for (const [artifactType, revisionId] of [
+              ["agent_revision", desired.agentRevisionId],
+              ["runtime_revision", desired.runtimeRevisionId],
+            ] as const) {
+              if (!(await session.hasVerifiedAttestation({ tenantId: command.tenantId, artifactType, revisionId }))) {
+                throw new ArtifactNotVerifiedForRouteError(revisionId, artifactType);
+              }
+            }
+            const runtimeCapSet = new Set(runtimeRevision.capabilities);
+            const missingCaps = agentRevision.requiredCapabilities.filter((c) => !runtimeCapSet.has(c));
+            if (missingCaps.length > 0) {
+              throw new AgentCapabilityUnsupportedError(missingCaps, agentRevision.id, runtimeRevision.id);
+            }
+          } else {
+            // 使用统一 RevisionExecutionEligibilityPolicy
+            const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
+              evidence,
+              agentRevision.requiredCapabilities,
+            );
+            if (!eligibilityResult.eligible) {
+              throw new RouteExecutionIneligibleError(
+                desired.routeKey,
+                eligibilityResult.errors,
+              );
+            }
           }
-          throw new ArtifactNotVerifiedForRouteError(revisionId, artifactType);
         }
-
-        // 10. 校验 Capability 兼容
-        const runtimeCapabilities = new Set(runtimeRevision.capabilities);
-        const missingCapabilities = agentRevision.requiredCapabilities.filter(
-          (cap) => !runtimeCapabilities.has(cap),
-        );
-        if (missingCapabilities.length > 0) {
-          throw new AgentCapabilityUnsupportedError(
-            missingCapabilities,
-            agentRevision.id,
-            runtimeRevision.id,
-          );
-        }
+        // §2.4: disabled Route 不检查执行资格，只验证基本存在性（已在上方完成）
 
         // 构造 RouteRevisionContent
         const content: RouteRevisionContent = {
@@ -194,6 +222,7 @@ export function createActivateRouteSet(dependencies: {
         const route = await session.resolveOrCreateRouteIdentity({
           routeSetId: command.routeSetId,
           routeId: desired.routeId,
+          routeKey: desired.routeKey,
           content,
           now: now(),
         });
@@ -238,7 +267,11 @@ export function createActivateRouteSet(dependencies: {
       for (const { desired, routeId, content } of desiredContents) {
         const contentDigest = computeRouteRevisionContentDigest(content);
         const normalized = normalizeEligibility(content.eligibilityConditions);
-        const selectorDigest = normalized ? computeSelectorDigest(normalized) : null;
+        // §2.1: Fail-closed — 非法 eligibility 条件必须拒绝，不得降级
+        if (!normalized) {
+          throw new RouteEligibilityInvalidError(routeId, content.eligibilityConditions);
+        }
+        const selectorDigest = computeSelectorDigest(normalized);
 
         let revision = await session.findRevisionByContent(routeId, contentDigest);
         if (!revision) {
@@ -247,6 +280,7 @@ export function createActivateRouteSet(dependencies: {
             tenantId: command.tenantId,
             routeId,
             routeSetId: command.routeSetId,
+            routeKey: desired.routeKey,
             revisionNo: await session.nextRevisionNo(routeId),
             content,
             contentDigest,
@@ -258,6 +292,8 @@ export function createActivateRouteSet(dependencies: {
         }
 
         const activationState = desired.activationState ?? "active";
+        // §2.5: 查找当前最新 Activation，填充 previous 历史字段
+        const currentActivation = await session.findLatestActivation(routeId);
         const activation = await session.appendActivation({
           id: newId(),
           tenantId: command.tenantId,
@@ -266,7 +302,8 @@ export function createActivateRouteSet(dependencies: {
           routeSetId: revision.routeSetId,
           activationSequence: await session.nextActivationSequence(routeId),
           activationState,
-          previousRouteRevisionId: null, // 简化：整体激活不追踪单条 previous
+          previousRouteRevisionId: currentActivation?.routeRevisionId ?? null,
+          previousRouteActivationId: currentActivation?.id ?? null,
           routeSetVersionNo: nextVersionNo,
           actorType: command.actor.actorType,
           actorId: command.actor.actorId,

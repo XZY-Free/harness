@@ -35,10 +35,42 @@ describe("normalizeEligibility", () => {
     expect(normalizeEligibility(42)).toBeNull();
   });
 
-  it("非标量值被过滤", () => {
+  it("非标量值导致整体失败（Fail-closed）", () => {
+    // §2.1: 不再静默过滤，遇到不支持值返回 null
     const result = normalizeEligibility({ all: { env: "prod", nested: { a: 1 } } });
+    expect(result).toBeNull();
+  });
+
+  it("数组值导致整体失败", () => {
+    expect(normalizeEligibility({ all: { env: "prod", tags: ["a", "b"] } })).toBeNull();
+  });
+
+  it("null 值导致整体失败", () => {
+    expect(normalizeEligibility({ all: { env: "prod", region: null } })).toBeNull();
+  });
+
+  it("NaN 导致整体失败", () => {
+    expect(normalizeEligibility({ all: { env: "prod", version: NaN } })).toBeNull();
+  });
+
+  it("Infinity 导致整体失败", () => {
+    expect(normalizeEligibility({ all: { env: "prod", version: Infinity } })).toBeNull();
+  });
+
+  it("-Infinity 导致整体失败", () => {
+    expect(normalizeEligibility({ all: { env: "prod", version: -Infinity } })).toBeNull();
+  });
+
+  it("有限 number 值正常通过", () => {
+    const result = normalizeEligibility({ all: { env: "prod", version: 42 } });
     expect(result).not.toBeNull();
-    expect(Object.keys(result!.all)).toEqual(["env"]);
+    expect(result!.all.version).toBe(42);
+  });
+
+  it("boolean 值正常通过", () => {
+    const result = normalizeEligibility({ all: { env: "prod", active: true } });
+    expect(result).not.toBeNull();
+    expect(result!.all.active).toBe(true);
   });
 });
 

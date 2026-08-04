@@ -28,6 +28,8 @@ export interface RouteSetRow {
 export interface RouteRow {
   id: string;
   routeSetId: string;
+  /** §2.2: Route 稳定身份键。 */
+  routeKey: string;
   agentRevisionId: string;
   runtimeRevisionId: string;
   trafficWeight: number;
@@ -55,6 +57,8 @@ export interface RuntimeRevisionSummary {
 
 export interface DesiredRoute {
   routeId?: string;
+  /** §2.2: Route 稳定身份键 — 调用方必须显式指定。 */
+  routeKey: string;
   routeGroupId: string;
   agentRevisionId: string;
   runtimeRevisionId: string;
@@ -76,6 +80,13 @@ export interface RouteSetActivationSession {
   lockRouteSet(routeSetId: string): Promise<RouteSetRow | null>;
   listRoutesBySet(routeSetId: string): Promise<RouteRow[]>;
   findActiveRevision(routeId: string): Promise<RouteRevisionRecord | null>;
+  /** §2.5: 查找 Route 最新的 Activation（用于填充 previous 字段）。 */
+  findLatestActivation(routeId: string): Promise<RouteActivationRecord | null>;
+  /** §2.6: 按 routeSetId+idempotencyKey 查找已完成的 RouteSet 级幂等记录。 */
+  findIdempotentRouteSetActivation(params: {
+    routeSetId: string;
+    idempotencyKey: string;
+  }): Promise<{ completed: boolean; httpStatus: number; responseRef: string | null; responseRedactedJson: string } | null>;
   findAgentRevision(id: string): Promise<AgentRevisionSummary | null>;
   findRuntimeRevision(id: string): Promise<RuntimeRevisionSummary | null>;
   hasVerifiedAttestation(params: {
@@ -83,11 +94,19 @@ export interface RouteSetActivationSession {
     artifactType: "agent_revision" | "runtime_revision";
     revisionId: string;
   }): Promise<boolean>;
+  /** §2.4: 加载 Revision 完整执行资格快照。 */
+  loadRevisionExecutionEvidence(params: {
+    tenantId: string;
+    agentRevisionId: string;
+    runtimeRevisionId: string;
+  }): Promise<import("@/lib/publications/application/load-revision-execution-evidence").RevisionExecutionEvidenceSnapshot | null>;
 
   // ─── 写入 ──────────────────────────────────────────────
   resolveOrCreateRouteIdentity(params: {
     routeSetId: string;
     routeId?: string;
+    /** §2.2: Route 稳定身份键 — 用于查找已有 Route，不再用 agentRevisionId+runtimeRevisionId。 */
+    routeKey: string;
     content: RouteRevisionContent;
     now: Date;
   }): Promise<RouteRow>;
@@ -98,6 +117,8 @@ export interface RouteSetActivationSession {
     tenantId: string;
     routeId: string;
     routeSetId: string;
+    /** §2.2: Route 稳定身份键 — 派生冗余列。 */
+    routeKey: string;
     revisionNo: number;
     content: RouteRevisionContent;
     contentDigest: string;
@@ -116,6 +137,8 @@ export interface RouteSetActivationSession {
     activationSequence: number;
     activationState: "active" | "disabled";
     previousRouteRevisionId: string | null;
+    /** §2.5: 前一个 RouteActivation ID — 完整历史链路。 */
+    previousRouteActivationId: string | null;
     routeSetVersionNo: number;
     actorType: RouteActorType;
     actorId: string;

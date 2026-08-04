@@ -3,6 +3,7 @@ import {
   AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
+  RouteEligibilityInvalidError,
   RouteIdempotencyCompletionError,
   RouteSetNotFoundError,
   RouteSetVersionConflictError,
@@ -172,7 +173,11 @@ export function createActivateRouteRevision(dependencies: {
       const occurredAt = now();
       const contentDigest = computeRouteRevisionContentDigest(command.content);
       const normalizedEligibility = normalizeEligibility(command.content.eligibilityConditions);
-      const selectorDigest = normalizedEligibility ? computeSelectorDigest(normalizedEligibility) : null;
+      // §2.1: Fail-closed — 非法 eligibility 条件必须拒绝
+      if (!normalizedEligibility) {
+        throw new RouteEligibilityInvalidError(route.id, command.content.eligibilityConditions);
+      }
+      const selectorDigest = computeSelectorDigest(normalizedEligibility);
       let revision = await session.findRevisionByContent(route.id, contentDigest);
       let revisionAuditEventId: string | null = null;
       let revisionOutboxEventId: string | null = null;

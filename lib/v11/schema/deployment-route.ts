@@ -106,6 +106,8 @@ export const v11DeploymentRoute = mysqlTable(
     routeSetId: varchar("routeSetId", { length: 36 })
       .notNull()
       .references(() => v11DeploymentRouteSet.id),
+    /** §2.2: Route 稳定身份键 — 调用方显式指定，不再由 agentRevisionId+runtimeRevisionId 隐式推导。 */
+    routeKey: varchar("routeKey", { length: 128 }).notNull(),
     agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
     trafficWeight: int("trafficWeight").notNull(),
@@ -123,11 +125,10 @@ export const v11DeploymentRoute = mysqlTable(
       .$defaultFn(() => new Date()),
   },
   (t) => ({
-    // 同一 RouteSet 内同一组合唯一
-    setAgentRuntimeUq: uniqueIndex("V11DeploymentRoute_set_agent_runtime_uq").on(
+    // §2.2: Route 稳定身份 — 同一 RouteSet 内 routeKey 唯一
+    setRouteKeyUq: uniqueIndex("V11DeploymentRoute_set_routeKey_uq").on(
       t.routeSetId,
-      t.agentRevisionId,
-      t.runtimeRevisionId,
+      t.routeKey,
     ),
     setStateIdx: index("V11DeploymentRoute_set_state_idx").on(t.routeSetId, t.routeState),
     agentRevisionIdx: index("V11DeploymentRoute_agentRevision_idx").on(t.agentRevisionId),

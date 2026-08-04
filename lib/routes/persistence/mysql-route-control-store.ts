@@ -195,8 +195,13 @@ export const mysqlRouteControlStore: RouteControlStore = {
           return (row?.value ?? 0) + 1;
         },
         async appendRevision(params) {
-          // 使用 Store 接口传入的 selectorDigest，确保调用方和 Backfill 使用同一算法。
+          // §2.1: Fail-closed — 应用层已校验，此处为防御性断言
           const normalized = normalizeEligibility(params.content.eligibilityConditions);
+          if (!normalized) {
+            throw new Error(
+              `RouteRevision ${params.id} eligibilityConditions 格式非法（防御性断言）`,
+            );
+          }
           await tx.insert(routeRevision).values({
             id: params.id,
             tenantId: params.tenantId,

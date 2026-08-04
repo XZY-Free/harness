@@ -194,6 +194,8 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     );
 
     // 10. 计算选择属性
+    // §2.1: 读取路径防御性逻辑 — 应用层已拒绝非法 eligibility，此处 null 理论不可达。
+    // 若出现说明存在历史脏数据，specificity 降级为 0 但不阻塞投影构建。
     const normalized = normalizeEligibility(revision.eligibilityConditionsJson);
     const specificity = normalized ? computeSpecificity(normalized) : 0;
 

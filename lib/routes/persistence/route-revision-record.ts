@@ -19,6 +19,8 @@ export const routeRevision = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
     routeId: varchar("routeId", { length: 36 }).notNull(),
     routeSetId: varchar("routeSetId", { length: 36 }).notNull(),
+    /** §2.2: Route 稳定身份键 — 派生冗余列，始终 = 对应 DeploymentRoute.routeKey。 */
+    routeKey: varchar("routeKey", { length: 128 }).notNull(),
     revisionNo: bigint("revisionNo", { mode: "number", unsigned: true }).notNull(),
     agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
@@ -76,6 +78,8 @@ export const routeActivation = mysqlTable(
     activationSequence: bigint("activationSequence", { mode: "number", unsigned: true }).notNull(),
     activationState: mysqlEnum("activationState", ["active", "disabled"]).notNull(),
     previousRouteRevisionId: varchar("previousRouteRevisionId", { length: 36 }),
+    /** §2.5: 前一个 RouteActivation ID — 完整 Activation 历史链路。 */
+    previousRouteActivationId: varchar("previousRouteActivationId", { length: 36 }),
     routeSetVersionNo: bigint("routeSetVersionNo", { mode: "number", unsigned: true }).notNull(),
     activatedByType: mysqlEnum("activatedByType", [
       "user",
@@ -94,8 +98,9 @@ export const routeActivation = mysqlTable(
       table.routeId,
       table.activationSequence,
     ),
-    routeIdempotencyUq: uniqueIndex("RouteActivation_route_idempotency_uq").on(
-      table.routeId,
+    // §2.6: 幂等按 routeSetId+idempotencyKey，不再按 routeId+idempotencyKey
+    routeSetIdempotencyUq: uniqueIndex("RouteActivation_routeSet_idempotency_uq").on(
+      table.routeSetId,
       table.idempotencyKey,
     ),
     revisionActivatedIdx: index("RouteActivation_revision_activated_idx").on(

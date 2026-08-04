@@ -70,7 +70,8 @@ function makeRevisionRecord(overrides: Partial<RouteRevisionRecord> = {}): Route
     modelPolicyRevisionId: null,
     toolsetRevisionId: null,
     trafficAllocationJson: {},
-    routeGroupId: "primary",
+    routeKey: "primary",
+          routeGroupId: "primary",
     selectorDigest: "sha256:abc",
     trafficWeight: 10000,
     priorityNo: 0,
@@ -133,15 +134,19 @@ function createMockStore(overrides: {
         lockRouteSet: vi.fn(async () => routeSet),
         listRoutesBySet: vi.fn(async () => existingRoutes),
         findActiveRevision: vi.fn(async () => null),
+        findLatestActivation: vi.fn(async () => null),
+        loadRevisionExecutionEvidence: vi.fn(async () => null),
+        findIdempotentRouteSetActivation: vi.fn(async () => null),
         findAgentRevision: vi.fn(async (id: string) => agentRevisions.get(id) ?? null),
         findRuntimeRevision: vi.fn(async (id: string) => runtimeRevisions.get(id) ?? null),
         hasVerifiedAttestation: vi.fn(async (params: { tenantId: string; artifactType: string; revisionId: string }) =>
           attestationResults.get(`${params.artifactType}:${params.revisionId}`) ?? false),
-        resolveOrCreateRouteIdentity: vi.fn(async (params: { routeSetId: string; routeId?: string }) => {
+        resolveOrCreateRouteIdentity: vi.fn(async (params: { routeSetId: string; routeId?: string; routeKey: string }) => {
           const resolvedId = params.routeId ?? `route-${routeCounter++}`;
           return {
             id: resolvedId,
             routeSetId: params.routeSetId,
+            routeKey: params.routeKey,
             agentRevisionId: BASE_AGENT_REVISION.id,
             runtimeRevisionId: BASE_RUNTIME_REVISION.id,
             trafficWeight: 10000,
@@ -177,6 +182,7 @@ function createMockStore(overrides: {
         updateRouteProjection: vi.fn(async () => ({
           id: "route-1",
           routeSetId: ROUTE_SET_ID,
+          routeKey: "primary",
           agentRevisionId: BASE_AGENT_REVISION.id,
           runtimeRevisionId: BASE_RUNTIME_REVISION.id,
           trafficWeight: 10000,
@@ -210,7 +216,9 @@ function makeCommand(overrides: Partial<ActivateRouteSetCommand> = {}): Activate
     expectedVersionNo: 1,
     desiredRoutes: [
       {
-        routeGroupId: "primary",
+
+        routeKey: "primary",
+          routeGroupId: "primary",
         agentRevisionId: BASE_AGENT_REVISION.id,
         runtimeRevisionId: BASE_RUNTIME_REVISION.id,
         trafficWeight: 10000,
@@ -249,6 +257,8 @@ describe("activateRouteSet", () => {
     const result = await activateRouteSet(makeCommand({
       desiredRoutes: [
         {
+
+          routeKey: "primary",
           routeGroupId: "primary",
           agentRevisionId: BASE_AGENT_REVISION.id,
           runtimeRevisionId: BASE_RUNTIME_REVISION.id,
@@ -258,6 +268,8 @@ describe("activateRouteSet", () => {
           activationState: "active",
         },
         {
+
+          routeKey: "secondary",
           routeGroupId: "primary",
           agentRevisionId: BASE_AGENT_REVISION.id,
           runtimeRevisionId: BASE_RUNTIME_REVISION.id,
@@ -280,7 +292,9 @@ describe("activateRouteSet", () => {
       activateRouteSet(makeCommand({
         desiredRoutes: [
           {
-            routeGroupId: "primary",
+
+            routeKey: "primary",
+          routeGroupId: "primary",
             agentRevisionId: BASE_AGENT_REVISION.id,
             runtimeRevisionId: BASE_RUNTIME_REVISION.id,
             trafficWeight: 5000,
@@ -289,7 +303,9 @@ describe("activateRouteSet", () => {
             activationState: "active",
           },
           {
-            routeGroupId: "primary",
+
+            routeKey: "primary",
+          routeGroupId: "primary",
             agentRevisionId: BASE_AGENT_REVISION.id,
             runtimeRevisionId: BASE_RUNTIME_REVISION.id,
             trafficWeight: 4000,
@@ -310,6 +326,7 @@ describe("activateRouteSet", () => {
       activateRouteSet(makeCommand({
         desiredRoutes: [
           {
+            routeKey: "group-a",
             routeGroupId: "group-a",
             agentRevisionId: BASE_AGENT_REVISION.id,
             runtimeRevisionId: BASE_RUNTIME_REVISION.id,
@@ -319,6 +336,7 @@ describe("activateRouteSet", () => {
             activationState: "active",
           },
           {
+            routeKey: "group-b",
             routeGroupId: "group-b",
             agentRevisionId: BASE_AGENT_REVISION.id,
             runtimeRevisionId: BASE_RUNTIME_REVISION.id,
@@ -352,6 +370,7 @@ describe("activateRouteSet", () => {
     await expect(
       activateRouteSet(makeCommand({
         desiredRoutes: [{
+          routeKey: "primary",
           routeGroupId: "primary",
           agentRevisionId: "agent-rev-draft",
           runtimeRevisionId: BASE_RUNTIME_REVISION.id,

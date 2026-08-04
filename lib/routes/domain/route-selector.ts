@@ -29,8 +29,12 @@ export interface NormalizedEligibility {
  * 规则：
  * - 必须是 `{ all: { ... } }` 结构
  * - `all` 内每个键的值必须是标量(string/number/boolean)
+ * - number 值不得为 NaN、Infinity、-Infinity
+ * - **Fail-closed**：遇到任何不支持值时整体返回 null，不静默过滤
  * - 输出键按字母序排列
  * - 空条件（无约束）规范化为 `{ all: {} }`
+ *
+ * 参见：SnowHarness专题01全局统一与最终收敛方案 §2.1
  */
 export function normalizeEligibility(conditions: unknown): NormalizedEligibility | null {
   if (conditions === null || conditions === undefined) {
@@ -44,8 +48,15 @@ export function normalizeEligibility(conditions: unknown): NormalizedEligibility
   if (keys.length !== 1 || keys[0] !== "all") return null;
   const all = (conditions as Record<string, unknown>).all;
   if (!isPlainObject(all)) return null;
-  const entries = Object.entries(all as Record<string, unknown>)
-    .filter(([, value]) => isScalar(value))
+
+  const rawEntries = Object.entries(all as Record<string, unknown>);
+  // Fail-closed: 任何非标量或非有限数值 → 整体失败
+  for (const [key, value] of rawEntries) {
+    if (!isScalar(value)) return null;
+    if (typeof value === "number" && !Number.isFinite(value)) return null;
+  }
+
+  const entries = rawEntries
     .sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) {
     return { all: {} };

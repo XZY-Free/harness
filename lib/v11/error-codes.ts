@@ -86,6 +86,10 @@ export const V11_ERROR_CODES = {
   ROUTE_SET_REQUIRES_ATOMIC_UPDATE: { http: 409, retryable: false },
   ROUTE_REVISION_NOT_ELIGIBLE: { http: 422, retryable: false },
   ROUTE_SET_VERSION_CONFLICT: { http: 412, retryable: false },
+  /** §2.4: Route 执行资格不足。 */
+  ROUTE_EXECUTION_INELIGIBLE: { http: 422, retryable: false },
+  /** §2.1: Eligibility 条件格式非法。 */
+  ROUTE_ELIGIBILITY_INVALID: { http: 422, retryable: false },
 } as const satisfies Readonly<Record<string, V11ErrorDefinition>>;
 
 export type V11ErrorCode = keyof typeof V11_ERROR_CODES;

@@ -99,6 +99,35 @@ export class RouteIdempotencyCompletionError extends Error {
   }
 }
 
+/**
+ * §2.1: Eligibility 条件格式非法（非标量值、NaN、Infinity 等）。
+ * normalizeEligibility 返回 null 时抛出。
+ */
+export class RouteEligibilityInvalidError extends Error {
+  constructor(
+    public readonly routeId: string,
+    public readonly invalidConditions: unknown,
+  ) {
+    super(`Route ${routeId} eligibilityConditions 格式非法，normalizeEligibility 返回 null`);
+    this.name = "RouteEligibilityInvalidError";
+  }
+}
+
+/**
+ * §2.4: Route 执行资格不足 — 使用完整 RevisionExecutionEligibilityPolicy 判定。
+ */
+export class RouteExecutionIneligibleError extends Error {
+  constructor(
+    public readonly routeId: string,
+    public readonly errors: Array<{ dimension: string; code: string; message: string }>,
+  ) {
+    super(
+      `Route ${routeId} 执行资格不足: ${errors.map((e) => `${e.dimension}(${e.code})`).join(", ")}`,
+    );
+    this.name = "RouteExecutionIneligibleError";
+  }
+}
+
 export function validateRouteRevisionContent(content: RouteRevisionContent): void {
   if (
     !Number.isInteger(content.trafficWeight) ||
