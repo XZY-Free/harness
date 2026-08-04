@@ -23,6 +23,8 @@ export const V11_ERROR_CODES = {
   ACTIVE_LEGAL_HOLD: { http: 409, retryable: false },
   AGENT_CAPABILITY_UNSUPPORTED: { http: 422, retryable: false },
   ARTIFACT_ATTESTATION_FAILED: { http: 422, retryable: false },
+  ARTIFACT_ATTESTATION_REVOKED: { http: 409, retryable: false },
+  ARTIFACT_BINDING_MISMATCH: { http: 409, retryable: false },
   ARTIFACT_NOT_VERIFIED: { http: 409, retryable: false },
   ATTESTATION_ALREADY_REVOKED: { http: 409, retryable: false },
   AUTHENTICATION_REQUIRED: { http: 401, retryable: false },
