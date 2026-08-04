@@ -127,11 +127,19 @@ export function createPublishRuntimeRevision(dependencies: {
           "Attestation 不存在、不可用或已撤销",
         );
       }
-      ArtifactEvidencePolicy.validateForRuntimePublication(attestation, {
-        id: revision.id,
-        tenantId: revision.tenantId,
-        artifactDigest: revision.artifactDigest,
+      const evidenceResult = ArtifactEvidencePolicy.validateForPublication(attestation, {
+        expectedTenantId: revision.tenantId,
+        expectedArtifactType: "runtime_revision",
+        expectedRevisionId: revision.id,
+        expectedDigest: revision.artifactDigest,
       });
+      if (!evidenceResult.valid) {
+        throw new RuntimeArtifactAttestationInvalidError(
+          revision.id,
+          attestation.attestationId,
+          evidenceResult.errors.map((e) => e.message).join("; "),
+        );
+      }
 
       // 10-14. FOR UPDATE 读取 ConformanceRun，校验绑定一致性和 Case 完整性
       const conformanceRun = await session.findPassedConformanceRun({

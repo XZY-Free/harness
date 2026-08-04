@@ -2,7 +2,12 @@
  * RuntimeRevision 发布领域策略。
  *
  * Conformance 合同类型由 runtime-conformance-contract.ts 统一导出；
- * 本文件定义发布资格、错误类型和 Attestation 证据策略。
+ * 本文件定义发布资格和错误类型。
+ *
+ * ⚠️ Attestation 证据策略已迁移至统一模型：
+ * lib/artifacts/domain/artifact-evidence-policy.ts
+ * 本文件保留 Runtime 发布专有错误类型，不再定义 ArtifactEvidencePolicy。
+ * 参见：SnowHarness专题01全局统一与最终收敛方案 §1.1
  */
 import {
   ALL_CONFORMANCE_CASES,
@@ -24,6 +29,24 @@ export {
   type ConformanceGateResult,
   validateConformanceGate,
 };
+
+// Re-export 统一 Artifact Evidence Policy（替代本文件原 Runtime 专属实现）
+export {
+  ArtifactEvidencePolicy,
+  createArtifactEvidencePolicy,
+  type ArtifactEvidencePolicyConfig,
+} from "@/lib/artifacts/domain/artifact-evidence-policy";
+export type {
+  ArtifactEvidenceSnapshot,
+  ArtifactEvidenceValidationResult,
+  ArtifactEvidenceValidationError,
+  ArtifactEvidenceErrorCode,
+  ArtifactType as ArtifactEvidenceArtifactType,
+  AttestationFormat as ArtifactEvidenceAttestationFormat,
+} from "@/lib/artifacts/domain/artifact-evidence";
+
+/** @deprecated 使用 ArtifactEvidenceSnapshot */
+export type RuntimePublicationEvidenceSnapshot = import("@/lib/artifacts/domain/artifact-evidence").ArtifactEvidenceSnapshot;
 
 export type RuntimeRevisionPublicationState = "draft" | "published" | "withdrawn";
 
@@ -75,7 +98,7 @@ export class RuntimePublicationIdempotencyCompletionError extends Error {
   }
 }
 
-// ─── 新增：收紧发布合同错误类型 ──────────────────────────────
+// ─── 收紧发布合同错误类型 ──────────────────────────────
 
 /** 发布命令缺少必填 attestationId。 */
 export class RuntimeArtifactAttestationRequiredError extends Error {
@@ -122,77 +145,27 @@ export class RuntimeConformanceRunInvalidError extends Error {
 /** 保留旧名称作为向后兼容别名。 */
 export class RuntimePublicationPrerequisiteError extends RuntimeArtifactAttestationInvalidError {}
 
-// ─── Attestation 证据快照与统一策略 ──────────────────────────
-
-/**
- * Attestation 证据快照 — Store FOR UPDATE 读取的完整证据。
- *
- * 应用服务通过此快照调用 ArtifactEvidencePolicy，
- * 不在应用层复制 Attestation 判断逻辑。
- */
-export interface RuntimePublicationEvidenceSnapshot {
-  id: string;
-  tenantId: string;
-  artifactType: string;
-  artifactRevisionId: string;
-  artifactId: string;
-  artifactDigest: string;
-  verificationState: string;
-  revokedAt: Date | null;
-  revocationRecordId: string | null;
-}
-
-/**
- * Attestation 证据发布资格统一策略。
- *
- * 所有 Attestation 发布资格判断集中于此，
- * Store、Publication、Resolver 不得分别增加新的判断实现。
- */
-export const ArtifactEvidencePolicy = {
+/** @deprecated 使用统一 ArtifactEvidencePolicy.validateForPublication() */
+export const LegacyRuntimeArtifactEvidencePolicy = {
+  /**
+   * 旧 Runtime 专属验证入口 — 仅为向后兼容保留。
+   * 新代码必须使用统一 ArtifactEvidencePolicy.validateForPublication()。
+   */
   validateForRuntimePublication(
-    snapshot: RuntimePublicationEvidenceSnapshot,
+    snapshot: import("@/lib/artifacts/domain/artifact-evidence").ArtifactEvidenceSnapshot,
     revision: { id: string; tenantId: string; artifactDigest: string | null },
   ): void {
-    if (snapshot.tenantId !== revision.tenantId) {
+    const result = ArtifactEvidencePolicy.validateForPublication(snapshot, {
+      expectedTenantId: revision.tenantId,
+      expectedArtifactType: "runtime_revision",
+      expectedRevisionId: revision.id,
+      expectedDigest: revision.artifactDigest,
+    });
+    if (!result.valid) {
       throw new RuntimeArtifactAttestationInvalidError(
         revision.id,
-        snapshot.id,
-        `租户不一致（Attestation: ${snapshot.tenantId}, Revision: ${revision.tenantId}）`,
-      );
-    }
-    if (snapshot.artifactType !== "runtime_revision") {
-      throw new RuntimeArtifactAttestationInvalidError(
-        revision.id,
-        snapshot.id,
-        `制品类型不是 runtime_revision（实际: ${snapshot.artifactType}）`,
-      );
-    }
-    if (snapshot.artifactRevisionId !== revision.id) {
-      throw new RuntimeArtifactAttestationInvalidError(
-        revision.id,
-        snapshot.id,
-        `Attestation 绑定其他 Revision（${snapshot.artifactRevisionId}）`,
-      );
-    }
-    if (snapshot.verificationState !== "verified") {
-      throw new RuntimeArtifactAttestationInvalidError(
-        revision.id,
-        snapshot.id,
-        `验证状态不是 verified（实际: ${snapshot.verificationState}）`,
-      );
-    }
-    if (snapshot.revokedAt !== null) {
-      throw new RuntimeArtifactAttestationInvalidError(
-        revision.id,
-        snapshot.id,
-        "Attestation 已撤销",
-      );
-    }
-    if (revision.artifactDigest !== null && snapshot.artifactDigest !== revision.artifactDigest) {
-      throw new RuntimeArtifactAttestationInvalidError(
-        revision.id,
-        snapshot.id,
-        `Artifact Digest 不一致（Attestation: ${snapshot.artifactDigest}, Revision: ${revision.artifactDigest}）`,
+        snapshot.attestationId,
+        result.errors.map((e) => e.message).join("; "),
       );
     }
   },
