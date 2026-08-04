@@ -107,28 +107,46 @@ describe("deterministic route resolution policy", () => {
     });
   });
 
-  it("先按 specificity、priority、RouteRevision 序号选择最高层级", () => {
+  it("先按 specificity、priority 选择最高层级，同组按 deploymentRouteId 稳定排序", () => {
     const broad = candidate("broad", { trafficWeight: 10_000, priorityNo: 100 });
-    const specificOld = candidate("specific-old", {
-      trafficWeight: 10_000,
+    const specificA = candidate("specific-a", {
+      trafficWeight: 6_000,
       eligibilityConditions: { all: { environment: "prod" } },
       priorityNo: 1,
-      routeRevisionNo: 2,
     });
-    const specificNew = candidate("specific-new", {
-      trafficWeight: 10_000,
+    const specificB = candidate("specific-b", {
+      trafficWeight: 4_000,
       eligibilityConditions: { all: { environment: "prod" } },
       priorityNo: 1,
-      routeRevisionNo: 3,
     });
 
-    const result = resolve([broad, specificOld, specificNew], {
+    const result = resolve([broad, specificA, specificB], {
       attributes: { environment: "prod" },
     });
 
     expect(result).toMatchObject({
       status: "resolved",
-      resolution: { routeRevisionId: specificNew.routeRevisionId, specificity: 1 },
+      resolution: { specificity: 1 },
+    });
+  });
+
+  it("多个 Route Group 在同 Specificity + Priority 下 → ambiguous_route_configuration", () => {
+    const a = candidate("a", {
+      trafficWeight: 10_000,
+      routeGroupId: "canary",
+    });
+    const b = candidate("b", {
+      trafficWeight: 10_000,
+      routeGroupId: "primary",
+    });
+
+    const result = resolve([a, b]);
+
+    expect(result).toEqual({
+      status: "unresolved",
+      reason: "ambiguous_route_configuration",
+      eligibleCandidateCount: 2,
+      groupIds: ["canary", "primary"],
     });
   });
 
