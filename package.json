@@ -33,6 +33,9 @@
     "security:check": "pnpm security:license && pnpm security:audit",
     "v11:contracts": "node scripts/v11-contracts.mjs",
     "v11:contracts:write": "node scripts/v11-contracts.mjs --write",
+    "contracts:verify": "node scripts/v11-contracts.mjs",
+    "contracts:update": "node scripts/v11-contracts.mjs --write",
+    "architecture:check": "depcruise --config dependency-cruiser.config.cjs lib",
     "worker:hosted-provisioning": "tsx scripts/workers/hosted-provisioning-worker.ts",
     "worker:control-plane-outbox": "tsx scripts/workers/control-plane-outbox-worker.ts",
     "routes:rebuild-eligibility": "tsx scripts/routes-rebuild-eligibility.ts",
@@ -92,6 +95,7 @@
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@types/ws": "^8.5.13",
+    "dependency-cruiser": "^18.1.1",
     "drizzle-kit": "^0.25.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0",
@@ -111,6 +115,9 @@
   },
   "packageManager": "pnpm@10.32.1",
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
   }
 }

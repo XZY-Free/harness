@@ -26,6 +26,11 @@ export const runtimeConformanceRun = mysqlTable(
     startedAt: datetime("startedAt", { mode: "date", fsp: 3 }).notNull(),
     completedAt: datetime("completedAt", { mode: "date", fsp: 3 }).notNull(),
     overallResult: mysqlEnum("overallResult", ["passed", "failed", "error", "cancelled"]).notNull(),
+    /** Conformance 签名格式 — 第四批新增。过渡?期: legacy_hmac(默认) → standard_dsse(新)。 */
+    conformanceFormat: mysqlEnum("conformanceFormat", [
+      "legacy_hmac",
+      "standard_dsse",
+    ]).notNull().default("legacy_hmac"),
     evidenceManifestDigest: varchar("evidenceManifestDigest", { length: 71 }).notNull(),
     runnerSignature: varchar("runnerSignature", { length: 64 }).notNull(),
     idempotencyKey: varchar("idempotencyKey", { length: 255 }).notNull(),
