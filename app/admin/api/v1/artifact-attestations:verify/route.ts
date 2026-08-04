@@ -1,17 +1,7 @@
 import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  v11Error,
-  v11Ok,
-} from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
+  getBuilderKeyRegistry,
+  getManagedArtifactStore,
+} from "@/lib/artifacts/infrastructure/artifact-store-provider";
 /**
  * POST /admin/api/v1/artifact-attestations:verify — 验证制品证明（S03-C05）。
  *
@@ -42,16 +32,26 @@ import {
 import {
   ArtifactAttestationFailedError,
   verifyAndPersistAttestation,
-} from "@/lib/v11/control-plane/artifact-attestation-queries";
+} from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import {
-  getBuilderKeyRegistry,
-  getManagedArtifactStore,
-} from "@/lib/v11/control-plane/artifact-store-config";
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  getRequestId,
+  v11Error,
+  v11Ok,
+} from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
-} from "@/lib/v11/identity/audit";
+} from "@/lib/identity/audit";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  v11SchemaInvalid,
+} from "@/lib/v11/admin/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,

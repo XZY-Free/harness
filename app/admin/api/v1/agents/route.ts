@@ -1,3 +1,4 @@
+import { listAgents } from "@/lib/agents/persistence/agent-queries";
 import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
 /**
  * GET /admin/api/v1/agents — 列出当前租户下所有 Agent（S11-W02）。
@@ -24,7 +25,6 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { listAgents } from "@/lib/v11/control-plane/agent-queries";
 
 export const dynamic = "force-dynamic";
 

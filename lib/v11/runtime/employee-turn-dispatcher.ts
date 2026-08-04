@@ -1,6 +1,7 @@
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { logger } from "@/lib/logger";
+import { ensureHostedRouteForAgent } from "@/lib/runtimes/infrastructure/hosted-runtime-provisioner";
 import { getThreadById } from "@/lib/v11/conversation/thread-queries";
 import {
   WORKLOAD_TOKEN_DEFAULT_TTL_MS,
@@ -9,7 +10,6 @@ import {
 import type { HostedModelContext } from "@/lib/v11/runtime/adapters/hosted-adapter";
 import { dispatchInvocationForTurn } from "@/lib/v11/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/v11/runtime/event-ingress-queries";
-import { ensureHostedRouteForAgent } from "@/lib/v11/runtime/hosted-route-bootstrap";
 import { createInProcessHostedRuntimeClient } from "@/lib/v11/runtime/in-process-hosted-runtime";
 import { ingressTransientBatch } from "@/lib/v11/runtime/transient-events";
 import { streamText } from "ai";

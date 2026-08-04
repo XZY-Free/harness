@@ -29,7 +29,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { type AuditActor, recordAuditEvent } from "@/lib/v11/identity/audit";
+import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
 import {
   DRILL_CHECK_MATRIX,
   type RecoveryCheckState,

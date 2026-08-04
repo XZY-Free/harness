@@ -1,3 +1,16 @@
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
+import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
+import {
+  type BuilderKeyRegistry,
+  type ManagedArtifactStore,
+  type ProvenanceDocument,
+  type SbomDocument,
+  type SignatureBundle,
+  type VerifyAttestationInput,
+  computeArtifactDigest,
+} from "@/lib/artifacts/domain/artifact-attestation";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 /**
  * S09-C06：V11 Worker 重启恢复仓储集成测试（真实 MySQL 8）。
  *
@@ -15,35 +28,20 @@
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
-import {
-  createDraftRevision,
-  publishRevision,
-} from "@/lib/v11/control-plane/agent-revision-queries";
-import {
-  type BuilderKeyRegistry,
-  type ManagedArtifactStore,
-  type ProvenanceDocument,
-  type SbomDocument,
-  type SignatureBundle,
-  type VerifyAttestationInput,
-  computeArtifactDigest,
-} from "@/lib/v11/control-plane/artifact-attestation";
-import { verifyAndPersistAttestation } from "@/lib/v11/control-plane/artifact-attestation-queries";
+import { createExecutionBinding } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import type { AuditActor } from "@/lib/identity/audit";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
   upsertDeploymentRoute,
-} from "@/lib/v11/control-plane/deployment-route-queries";
-import { createRuntime } from "@/lib/v11/control-plane/runtime-queries";
-import { createDraftRuntimeRevision } from "@/lib/v11/control-plane/runtime-revision-queries";
+} from "@/lib/routes/application/deployment-route-service";
+import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
+import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
-import type { AuditActor } from "@/lib/v11/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
 import { InvocationAlreadyTerminalError, InvocationNotFoundError } from "@/lib/v11/runtime/errors";
-import { createExecutionBinding } from "@/lib/v11/runtime/execution-binding-queries";
 import { createAttempt } from "@/lib/v11/runtime/invocation-attempt-queries";
 import {
   type CreateInvocationParams,

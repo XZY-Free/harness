@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 /**
  * S12-W01：V11 事件投影运维操作集成测试（真实 MySQL 8）。
  *
@@ -12,7 +13,7 @@ import { randomUUID } from "node:crypto";
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
+import { listAuditEvents } from "@/lib/identity/audit-queries";
 import {
   getProjectionCheckpoint,
   initEventStreamFloor,
@@ -31,7 +32,6 @@ import {
 } from "@/lib/v11/conversation/projection-operations";
 import { projectThreadEvent } from "@/lib/v11/conversation/projector";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
-import { listAuditEvents } from "@/lib/v11/identity/audit-queries";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";

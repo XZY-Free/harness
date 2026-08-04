@@ -14,11 +14,11 @@
 import { GET as eventsGET } from "@/app/api/v1/threads/[thread_id]/events/route";
 import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import {
   initEventStreamFloor,
   updateEventStreamFloorEarliest,

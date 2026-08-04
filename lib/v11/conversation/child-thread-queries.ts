@@ -37,9 +37,9 @@
  *   必须由应用服务原子协调，Runtime 不能直写（§5.2 行 240）。
  */
 import { createHash, randomUUID } from "node:crypto";
+import { getAgentById } from "@/lib/agents/persistence/agent-queries";
+import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
 import { db } from "@/lib/db/client";
-import { getAgentById } from "@/lib/v11/control-plane/agent-queries";
-import { getRevisionById } from "@/lib/v11/control-plane/agent-revision-queries";
 import {
   ChildBudgetExceededError,
   ChildContextNotAllowedError,

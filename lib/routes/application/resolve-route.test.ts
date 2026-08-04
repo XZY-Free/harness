@@ -4,7 +4,6 @@ import {
   artifactAttestation,
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
-import { mysqlRouteResolutionStore } from "@/lib/compatibility/routes/mysql-route-resolution-store";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -12,6 +11,7 @@ import {
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";

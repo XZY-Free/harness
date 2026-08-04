@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 import {
-  type ConformanceCaseResult,
   ConformanceGateError,
   MANDATORY_GATE_CASES,
   RuntimePublicationIdempotencyCompletionError,
@@ -13,7 +12,6 @@ import {
 import type {
   RuntimePublicationActorType,
   RuntimePublicationAttestation,
-  RuntimePublicationConformanceOptions,
   RuntimePublicationRevision,
   RuntimePublicationStore,
   StoredRuntimeConformanceResult,
@@ -34,10 +32,6 @@ export interface PublishRuntimeRevisionCommand {
   runtimeExpectedVersionNo: number;
   /** 必须显式选择已完成且与 Revision 绑定一致的 Passed Run。 */
   conformanceRunId?: string;
-  /** @deprecated 调用方自报结果不再参与门禁，仅为旧调用方编译兼容保留。 */
-  conformanceResults?: ConformanceCaseResult[];
-  /** @deprecated 调用方自报元数据不再参与门禁。 */
-  conformanceOptions?: Partial<RuntimePublicationConformanceOptions>;
   attestationId?: string;
   actor: {
     tenantId: string;

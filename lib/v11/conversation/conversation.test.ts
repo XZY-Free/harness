@@ -1,3 +1,4 @@
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 /**
  * S04-C01：V11 会话域集成测试（真实 MySQL 8）。
  *
@@ -14,7 +15,6 @@
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import {
   GoalAlreadyActiveError,
   ItemSupersedeCycleError,

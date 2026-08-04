@@ -1,3 +1,4 @@
+import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
 /**
  * V11 命令调度器（S05-C04）。
  *
@@ -31,7 +32,7 @@
  * - Runtime 不可达时保持 dispatched（不报错，等待重试）。
  */
 import { db } from "@/lib/db/client";
-import { getRevisionById } from "@/lib/v11/control-plane/agent-revision-queries";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/v11/conversation/thread-queries";
 import {
   CommandAlreadyDispatchedError,
@@ -40,7 +41,6 @@ import {
   ResumeInvocationNotWaitingError,
   RuntimeHttpClientError,
 } from "@/lib/v11/runtime/errors";
-import { getExecutionBindingByInvocation } from "@/lib/v11/runtime/execution-binding-queries";
 import { getInvocationById, updateInvocationState } from "@/lib/v11/runtime/invocation-queries";
 import { redispatchInvocation } from "@/lib/v11/runtime/redispatch-queries";
 import type {

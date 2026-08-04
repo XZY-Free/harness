@@ -1,6 +1,6 @@
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import { listItemsByThread } from "@/lib/v11/conversation/thread-item-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn, getTurnById } from "@/lib/v11/conversation/turn-queries";

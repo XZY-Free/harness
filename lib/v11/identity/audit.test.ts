@@ -19,14 +19,14 @@ import {
   isKnownAuditActionType,
   recordAuditEvent,
   recordSystemAuditEvent,
-} from "@/lib/v11/identity/audit";
+} from "@/lib/identity/audit";
 import {
   type AuditEvent,
   appendAuditEvent,
   deleteExpiredAuditEvents,
   getAuditEventById,
   listAuditEvents,
-} from "@/lib/v11/identity/audit-queries";
+} from "@/lib/identity/audit-queries";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import type { V11Principal, V11WorkloadPrincipal } from "@/lib/v11/identity/resolver";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
@@ -875,7 +875,7 @@ describe("V11 审计账本不可修改语义", () => {
 
   it("audit-queries 模块不导出 update/delete 函数（仅 append/get/list/deleteExpired）", async () => {
     // 静态契约检查：模块导出符合只追加语义
-    const module = await import("@/lib/v11/identity/audit-queries");
+    const module = await import("@/lib/identity/audit-queries");
     expect(typeof module.appendAuditEvent).toBe("function");
     expect(typeof module.getAuditEventById).toBe("function");
     expect(typeof module.listAuditEvents).toBe("function");

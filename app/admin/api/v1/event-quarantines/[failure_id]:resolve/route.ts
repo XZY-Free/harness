@@ -36,6 +36,11 @@ import {
   v11Ok,
 } from "@/lib/http";
 import {
+  type AuditActor,
+  actorFromPrincipal,
+  actorFromWorkloadPrincipal,
+} from "@/lib/identity/audit";
+import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
@@ -47,11 +52,6 @@ import {
   getDeliveryFailureById,
   resolveQuarantine,
 } from "@/lib/v11/conversation/projection-operations";
-import {
-  type AuditActor,
-  actorFromPrincipal,
-  actorFromWorkloadPrincipal,
-} from "@/lib/v11/identity/audit";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,

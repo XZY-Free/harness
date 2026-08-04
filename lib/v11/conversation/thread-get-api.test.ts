@@ -8,11 +8,11 @@
  * - 跨租户 → 404 隐藏式（不存在的 thread_id）。
  */
 import { DELETE, GET } from "@/app/api/v1/threads/[thread_id]/route";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import { createGoal } from "@/lib/v11/conversation/goal-queries";
 import { createThread, getThreadById } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";

@@ -21,11 +21,11 @@ import {
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

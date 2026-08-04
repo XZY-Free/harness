@@ -22,9 +22,9 @@
  * - Child Thread 完成不等同于接管主责
  */
 import { randomUUID } from "node:crypto";
+import { createAgent, updateAgentLifecycle } from "@/lib/agents/persistence/agent-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent, updateAgentLifecycle } from "@/lib/v11/control-plane/agent-queries";
 import {
   HandoffAlreadyResolvedError,
   HandoffValidationError,

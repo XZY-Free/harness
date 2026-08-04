@@ -1,4 +1,8 @@
 import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import {
+  getRouteSetByAgentScope,
+  listRoutesBySet,
+} from "@/lib/routes/application/deployment-route-service";
 /**
  * GET /admin/api/v1/deployment-routes — 列出 DeploymentRoute（S11-W02）。
  *
@@ -24,10 +28,6 @@ import {
   resolveAdminPrincipalAsync,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import {
-  getRouteSetByAgentScope,
-  listRoutesBySet,
-} from "@/lib/v11/control-plane/deployment-route-queries";
 
 export const dynamic = "force-dynamic";
 

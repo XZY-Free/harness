@@ -20,8 +20,8 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { decodeCursor, encodeCursor } from "@/lib/http";
-import { recordAuditEvent } from "@/lib/v11/identity/audit";
-import type { AuditActor } from "@/lib/v11/identity/audit";
+import { recordAuditEvent } from "@/lib/identity/audit";
+import type { AuditActor } from "@/lib/identity/audit";
 import {
   type ExportFormat,
   type ExportKind,

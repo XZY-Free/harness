@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { mysqlRuntimeConformanceRunStore } from "@/lib/compatibility/runtimes/mysql-runtime-conformance-run-store";
+import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { db } from "@/lib/db/client";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
@@ -7,12 +7,12 @@ import {
   ALL_CONFORMANCE_CASES,
   canonicalizeRuntimeConformanceReport,
 } from "@/lib/runtimes/domain/runtime-conformance-run";
-import { getAttestationById } from "@/lib/v11/control-plane/artifact-attestation-queries";
-import { mysqlRuntimePublicationStore } from "@/lib/v11/control-plane/mysql-runtime-publication-store";
+import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
+import { mysqlRuntimePublicationStore } from "@/lib/runtimes/persistence/mysql-runtime-publication-store";
 import {
   getRuntimeRevisionById,
   updateDraftRuntimeRevisionContent,
-} from "@/lib/v11/control-plane/runtime-revision-queries";
+} from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { v11RuntimeRevision } from "@/lib/v11/schema/runtime";
 import { eq } from "drizzle-orm";
 

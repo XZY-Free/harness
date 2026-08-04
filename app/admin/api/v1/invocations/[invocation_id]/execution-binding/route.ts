@@ -1,11 +1,11 @@
 import { serializeExecutionBinding } from "@/lib/executions/application/serialize-execution-binding";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { getExecutionBindingByInvocation } from "@/lib/v11/runtime/execution-binding-queries";
 import { getInvocationById } from "@/lib/v11/runtime/invocation-queries";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/execution-binding — Invocation 的 ExecutionBinding（S11-W04）。

@@ -9,14 +9,10 @@ import {
   v11Ok,
 } from "@/lib/http";
 import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  parseRouteSetEtag,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11EtagMismatch,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
+  type AuditActor,
+  actorFromPrincipal,
+  actorFromWorkloadPrincipal,
+} from "@/lib/identity/audit";
 /**
  * PUT /admin/api/v1/deployment-routes/{route_id} — 更新 DeploymentRoute（S03-C05）。
  *
@@ -58,12 +54,16 @@ import {
   getRouteById,
   getRouteSetById,
   upsertDeploymentRoute,
-} from "@/lib/v11/control-plane/deployment-route-queries";
+} from "@/lib/routes/application/deployment-route-service";
 import {
-  type AuditActor,
-  actorFromPrincipal,
-  actorFromWorkloadPrincipal,
-} from "@/lib/v11/identity/audit";
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  parseRouteSetEtag,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  v11EtagMismatch,
+  v11SchemaInvalid,
+} from "@/lib/v11/admin/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,

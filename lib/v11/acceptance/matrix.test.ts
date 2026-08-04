@@ -1,3 +1,4 @@
+import { MANDATORY_GATE_CASES } from "@/lib/runtimes/domain/runtime-conformance";
 import {
   ALL_ACCEPTANCE_MATRIX_CATEGORIES,
   ALL_ERROR_MAPPING_DIMENSIONS,
@@ -26,7 +27,6 @@ import {
   createProvidersWithFailures,
   formatAcceptanceReport,
 } from "@/lib/v11/acceptance/matrix-runner";
-import { MANDATORY_GATE_CASES } from "@/lib/v11/control-plane/runtime-conformance";
 /**
  * S13-W06 全量验收矩阵集成测试。
  *

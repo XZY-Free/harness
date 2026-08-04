@@ -1,10 +1,10 @@
 import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { getAuditEventById } from "@/lib/identity/audit-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { getAuditEventById } from "@/lib/v11/identity/audit-queries";
 /**
  * GET /admin/api/v1/audit-events/{event_id} — AuditEvent 单资源详情（S11-W04）。
  *

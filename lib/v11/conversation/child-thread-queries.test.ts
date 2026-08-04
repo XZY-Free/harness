@@ -24,13 +24,11 @@
  * - 跨租户隔离：父 Thread 跨租户不可见
  */
 import { randomUUID } from "node:crypto";
+import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
+import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
+import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent, getAgentById } from "@/lib/v11/control-plane/agent-queries";
-import {
-  createDraftRevision,
-  publishRevision,
-} from "@/lib/v11/control-plane/agent-revision-queries";
 import {
   type ContextTransferPolicy,
   type DelegationBudgetPolicy,

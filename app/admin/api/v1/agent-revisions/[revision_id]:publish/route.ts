@@ -1,22 +1,3 @@
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  parseIfMatch,
-  v11Error,
-  v11NotFound,
-  v11Ok,
-} from "@/lib/http";
-import {
-  AGENT_REVISION_ETAG_PREFIX,
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  parseAgentRevisionEtag,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11EtagMismatch,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 /**
  * POST /admin/api/v1/agent-revisions/{revision_id}:publish — 发布 AgentRevision（S03-C05）。
  *
@@ -45,21 +26,40 @@ import {
  * - Agent 乐观锁冲突 → 412 ETAG_MISMATCH
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { getAgentById } from "@/lib/v11/control-plane/agent-queries";
+import { getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
   AgentVersionConflictError,
   RevisionStateError,
   getRevisionById,
-} from "@/lib/v11/control-plane/agent-revision-queries";
+} from "@/lib/agents/persistence/agent-revision-queries";
 import {
   ArtifactNotVerifiedError,
   publishAgentRevisionWithAttestation,
-} from "@/lib/v11/control-plane/artifact-attestation-queries";
+} from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  getRequestId,
+  parseIfMatch,
+  v11Error,
+  v11NotFound,
+  v11Ok,
+} from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
-} from "@/lib/v11/identity/audit";
+} from "@/lib/identity/audit";
+import {
+  AGENT_REVISION_ETAG_PREFIX,
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  parseAgentRevisionEtag,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  v11EtagMismatch,
+  v11SchemaInvalid,
+} from "@/lib/v11/admin/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,

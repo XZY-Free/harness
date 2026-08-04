@@ -14,7 +14,7 @@
  * - 空依赖列表返回空 packages（不抛错；空 SBOM 也是有效 SBOM）。
  * - 漏洞 provider 失败时 fail-closed（抛错，不静默跳过）。
  */
-import type { SbomDocument, SbomPackage } from "@/lib/v11/control-plane/artifact-attestation";
+import type { SbomDocument, SbomPackage } from "@/lib/artifacts/domain/artifact-attestation";
 import type { DependencyEntry } from "@/lib/v11/supply-chain/lockfile-parser";
 
 /** 漏洞查询接口（调用方注入，实现可以是 OSV / GHSA 适配器）。 */

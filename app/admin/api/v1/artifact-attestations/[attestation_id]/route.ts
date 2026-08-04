@@ -1,3 +1,4 @@
+import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 /**
  * GET /admin/api/v1/artifact-attestations/{attestation_id} — 按 id 查询制品证明（S12-W04）。
  *
@@ -21,7 +22,6 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { getAttestationById } from "@/lib/v11/control-plane/artifact-attestation-queries";
 
 export const dynamic = "force-dynamic";
 

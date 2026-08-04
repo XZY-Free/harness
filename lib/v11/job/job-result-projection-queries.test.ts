@@ -17,9 +17,9 @@
  * - JobEvent 不进入员工 Thread SSE；只有 job_result.published 才进入 ThreadEvent
  */
 import { randomUUID } from "node:crypto";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";

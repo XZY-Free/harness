@@ -1,10 +1,3 @@
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  v11NotFound,
-  v11Ok,
-} from "@/lib/http";
 /**
  * POST /api/v1/threads — 创建 Thread（S04-C03，§3.1）。
  *
@@ -26,7 +19,14 @@ import {
  * - Agent 不存在/非 enabled/跨租户 → 404 RESOURCE_NOT_FOUND
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
-import { getAgentById, listAgents } from "@/lib/v11/control-plane/agent-queries";
+import { getAgentById, listAgents } from "@/lib/agents/persistence/agent-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  getRequestId,
+  v11NotFound,
+  v11Ok,
+} from "@/lib/http";
 import {
   type V11Principal,
   employeeAuthErrorResponse,

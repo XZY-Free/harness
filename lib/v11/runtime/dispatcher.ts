@@ -36,22 +36,22 @@
  * - 重试 Attempt 时使用新的 runtime_execution_ref，不覆盖初始 ref。
  */
 import { randomUUID } from "node:crypto";
-import { mysqlExecutionBindingStore } from "@/lib/compatibility/executions/mysql-execution-binding-store";
-import { mysqlRouteResolutionStore } from "@/lib/compatibility/routes/mysql-route-resolution-store";
+import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
 import { db } from "@/lib/db/client";
 import {
   type CreateExecutionBindingCommand,
   createCreateExecutionBinding,
 } from "@/lib/executions/application/create-execution-binding";
 import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
+import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
 import type {
   RouteResolution,
   RouteResolutionAttribute,
 } from "@/lib/routes/domain/route-resolution-policy";
+import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
+import { getRuntimeRevisionById } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { issueContextHandle } from "@/lib/v11/context/context-handle";
-import { getRevisionById } from "@/lib/v11/control-plane/agent-revision-queries";
-import { getRuntimeRevisionById } from "@/lib/v11/control-plane/runtime-revision-queries";
 import { getItemById } from "@/lib/v11/conversation/thread-item-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/v11/conversation/thread-queries";
 import { getTurnById } from "@/lib/v11/conversation/turn-queries";

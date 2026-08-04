@@ -17,6 +17,8 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import type { AuditActor } from "@/lib/identity/audit";
+import { listAuditEvents } from "@/lib/identity/audit-queries";
 import {
   createAdminExport,
   getAdminExportById,
@@ -24,8 +26,6 @@ import {
   updateAdminExportResult,
   updateAdminExportStatus,
 } from "@/lib/v11/admin/export-queries";
-import type { AuditActor } from "@/lib/v11/identity/audit";
-import { listAuditEvents } from "@/lib/v11/identity/audit-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

@@ -30,8 +30,8 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { type AuditActor, recordAuditEvent } from "@/lib/v11/identity/audit";
-import { listAuditEvents } from "@/lib/v11/identity/audit-queries";
+import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
+import { listAuditEvents } from "@/lib/identity/audit-queries";
 import {
   CONTAINMENT_ACTION_MATRIX,
   type ContainmentActionType,

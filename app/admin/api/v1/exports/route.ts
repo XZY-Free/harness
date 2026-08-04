@@ -21,6 +21,11 @@ import {
   getRequestId,
   v11Ok,
 } from "@/lib/http";
+import {
+  type AuditActor,
+  actorFromPrincipal,
+  actorFromWorkloadPrincipal,
+} from "@/lib/identity/audit";
 import { createAdminExport, listAdminExportsByTenant } from "@/lib/v11/admin/export-queries";
 import { runAdminExport } from "@/lib/v11/admin/export-runner";
 import {
@@ -30,11 +35,6 @@ import {
   resolveAdminPrincipalAsync,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import {
-  type AuditActor,
-  actorFromPrincipal,
-  actorFromWorkloadPrincipal,
-} from "@/lib/v11/identity/audit";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,

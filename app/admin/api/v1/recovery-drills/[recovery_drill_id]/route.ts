@@ -18,17 +18,17 @@
  */
 import { REQUEST_ID_HEADER, getRequestId, v11Error, v11NotFound, v11Ok } from "@/lib/http";
 import {
+  type AuditActor,
+  actorFromPrincipal,
+  actorFromWorkloadPrincipal,
+} from "@/lib/identity/audit";
+import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import {
-  type AuditActor,
-  actorFromPrincipal,
-  actorFromWorkloadPrincipal,
-} from "@/lib/v11/identity/audit";
 import { runAllChecksForDrill } from "@/lib/v11/identity/recovery-consistency-checker";
 import {
   RecoveryDrillError,

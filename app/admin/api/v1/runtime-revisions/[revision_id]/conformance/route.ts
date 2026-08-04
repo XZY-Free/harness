@@ -1,9 +1,3 @@
-import { publishRuntimeRevisionThroughControlPlane } from "@/lib/compatibility/runtimes/publish-runtime-revision";
-import {
-  listRuntimeConformanceCaseResults,
-  listRuntimeConformanceRuns,
-  recordRuntimeConformanceRun,
-} from "@/lib/compatibility/runtimes/runtime-conformance-runs";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -14,6 +8,18 @@ import {
   v11NotFound,
   v11Ok,
 } from "@/lib/http";
+import {
+  type AuditActor,
+  actorFromPrincipal,
+  actorFromWorkloadPrincipal,
+} from "@/lib/identity/audit";
+import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtimes/application/publish-runtime-revision-service";
+import {
+  listRuntimeConformanceCaseResults,
+  listRuntimeConformanceRuns,
+  recordRuntimeConformanceRun,
+} from "@/lib/runtimes/application/runtime-conformance-runs";
+import { ConformanceGateError } from "@/lib/runtimes/domain/runtime-conformance";
 /**
  * GET/POST /admin/api/v1/runtime-revisions/{revision_id}/conformance — RuntimeRevision conformance 结果（S05-C06）。
  *
@@ -47,6 +53,12 @@ import {
   RuntimeConformanceBindingError,
   RuntimeConformanceTrustError,
 } from "@/lib/runtimes/domain/runtime-conformance-run";
+import { getRuntimeById } from "@/lib/runtimes/persistence/runtime-queries";
+import {
+  RuntimeRevisionNotFoundError,
+  RuntimeVersionConflictError,
+  getRuntimeRevisionById,
+} from "@/lib/runtimes/persistence/runtime-revision-queries";
 import {
   type AdminPrincipal,
   RUNTIME_REVISION_ETAG_PREFIX,
@@ -57,18 +69,6 @@ import {
   v11EtagMismatch,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import { ConformanceGateError } from "@/lib/v11/control-plane/runtime-conformance";
-import { getRuntimeById } from "@/lib/v11/control-plane/runtime-queries";
-import {
-  RuntimeRevisionNotFoundError,
-  RuntimeVersionConflictError,
-  getRuntimeRevisionById,
-} from "@/lib/v11/control-plane/runtime-revision-queries";
-import {
-  type AuditActor,
-  actorFromPrincipal,
-  actorFromWorkloadPrincipal,
-} from "@/lib/v11/identity/audit";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,

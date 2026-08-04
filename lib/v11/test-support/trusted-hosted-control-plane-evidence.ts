@@ -10,7 +10,7 @@ import {
   type HostedControlPlaneEvidenceProvider,
   resetHostedControlPlaneEvidenceProvider,
   setHostedControlPlaneEvidenceProvider,
-} from "@/lib/compatibility/hosted/hosted-control-plane-evidence";
+} from "@/lib/runtimes/domain/hosted-control-plane-evidence";
 import {
   ALL_CONFORMANCE_CASES,
   canonicalizeRuntimeConformanceReport,

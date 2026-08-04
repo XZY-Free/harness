@@ -1,3 +1,9 @@
+import {
+  AttestationAlreadyRevokedError,
+  AttestationNotFoundError,
+  getAttestationById,
+  revokeAttestation,
+} from "@/lib/artifacts/persistence/artifact-attestation-queries";
 /**
  * POST /admin/api/v1/artifact-attestations/{attestation_id}:revoke — 撤销制品证明（S12-W04）。
  *
@@ -22,23 +28,17 @@
  */
 import { REQUEST_ID_HEADER, getRequestId, v11Error, v11NotFound, v11Ok } from "@/lib/http";
 import {
+  type AuditActor,
+  actorFromPrincipal,
+  actorFromWorkloadPrincipal,
+} from "@/lib/identity/audit";
+import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import {
-  AttestationAlreadyRevokedError,
-  AttestationNotFoundError,
-  getAttestationById,
-  revokeAttestation,
-} from "@/lib/v11/control-plane/artifact-attestation-queries";
-import {
-  type AuditActor,
-  actorFromPrincipal,
-  actorFromWorkloadPrincipal,
-} from "@/lib/v11/identity/audit";
 
 export const dynamic = "force-dynamic";
 

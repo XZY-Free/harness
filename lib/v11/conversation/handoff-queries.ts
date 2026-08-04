@@ -34,8 +34,8 @@
  * - 目标 Agent 必须存在、同租户、lifecycleState=enabled，且不能等于当前主 Agent。
  */
 import { randomUUID } from "node:crypto";
+import { getAgentById } from "@/lib/agents/persistence/agent-queries";
 import { db } from "@/lib/db/client";
-import { getAgentById } from "@/lib/v11/control-plane/agent-queries";
 import {
   HandoffAlreadyResolvedError,
   HandoffValidationError,

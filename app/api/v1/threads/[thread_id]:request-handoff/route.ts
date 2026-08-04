@@ -1,10 +1,3 @@
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  v11NotFound,
-  v11Ok,
-} from "@/lib/http";
 /**
  * POST /api/v1/threads/{thread_id}:request-handoff — 发起主 Agent 交接请求（S10-W04，§3.3/§5.5）。
  *
@@ -40,7 +33,14 @@ import {
  * - HandoffVersionConflictError → 412 ETAG_MISMATCH
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
-import { getAgentById } from "@/lib/v11/control-plane/agent-queries";
+import { getAgentById } from "@/lib/agents/persistence/agent-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  getRequestId,
+  v11NotFound,
+  v11Ok,
+} from "@/lib/http";
 import { requestHandoff } from "@/lib/v11/conversation/handoff-queries";
 import {
   type V11Principal,

@@ -13,6 +13,7 @@
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { MANDATORY_GATE_CASES } from "@/lib/runtimes/domain/runtime-conformance";
 import {
   ALL_ERROR_MAPPING_DIMENSIONS,
   ALL_HTTP_OPERATION_DIMENSIONS,
@@ -21,7 +22,6 @@ import {
   type AcceptanceMatrixCategory,
   type AcceptanceMatrixItem,
 } from "@/lib/v11/acceptance/matrix-contract";
-import { MANDATORY_GATE_CASES } from "@/lib/v11/control-plane/runtime-conformance";
 
 // ─── 契约对象类型（从 JSON 解析后的结构子集） ────────────────
 

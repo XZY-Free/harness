@@ -1,3 +1,4 @@
+import { listAttestations } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 /**
  * GET /admin/api/v1/artifact-attestations — 列出租户内制品证明（S12-W04）。
  *
@@ -24,7 +25,6 @@ import {
   resolveAdminPrincipalAsync,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import { listAttestations } from "@/lib/v11/control-plane/artifact-attestation-queries";
 import { ARTIFACT_TYPES, VERIFICATION_STATES } from "@/lib/v11/schema/artifact";
 
 export const dynamic = "force-dynamic";

@@ -13,7 +13,7 @@
  * 不覆盖：
  * - 完整的 If-Match 412 ETAG_MISMATCH 和幂等重放 200 场景 —— 需要预置 action binding +
  *   真实资源（Route/Revision/Export），由单元测试覆盖：
- *   - lib/v11/control-plane/admin-api.test.ts（If-Match 412 + 幂等重放）
+ *   - lib/control-plane/admin-routes.test.ts（If-Match 412 + 幂等重放）
  *   - lib/v11/admin/export-queries.test.ts（导出 CRUD + 审计）
  *   - lib/v11/admin/export-runner.test.ts（导出执行 + 脱敏 + NDJSON）
  * - e2e 环境使用 dev 认证（APP_ENV=test → SNOW_AUTH_MODE=dev），默认用户无 V11 action binding，

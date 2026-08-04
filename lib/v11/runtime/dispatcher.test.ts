@@ -11,23 +11,11 @@
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { type KeyObject, generateKeyPairSync, randomUUID, sign } from "node:crypto";
-import { mysqlExecutionBindingStore } from "@/lib/compatibility/executions/mysql-execution-binding-store";
-import { mysqlRouteResolutionStore } from "@/lib/compatibility/routes/mysql-route-resolution-store";
-import { db } from "@/lib/db/client";
-import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
-import { ExecutionBindingAlreadyExistsError as StableExecutionBindingAlreadyExistsError } from "@/lib/executions/domain/execution-binding";
-import { withdrawalRecord } from "@/lib/publications/persistence/publication-record";
-import {
-  type ResolveRouteCommand,
-  type RouteResolver,
-  createResolveRoute,
-} from "@/lib/routes/application/resolve-route";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
   getRevisionById,
-} from "@/lib/v11/control-plane/agent-revision-queries";
+} from "@/lib/agents/persistence/agent-revision-queries";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -36,22 +24,39 @@ import {
   type SignatureBundle,
   type VerifyAttestationInput,
   computeArtifactDigest,
-} from "@/lib/v11/control-plane/artifact-attestation";
-import { verifyAndPersistAttestation } from "@/lib/v11/control-plane/artifact-attestation-queries";
+} from "@/lib/artifacts/domain/artifact-attestation";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { db } from "@/lib/db/client";
+import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
+import { ExecutionBindingAlreadyExistsError as StableExecutionBindingAlreadyExistsError } from "@/lib/executions/domain/execution-binding";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
+import {
+  computeBindingConfigHash,
+  createExecutionBinding,
+} from "@/lib/executions/test-support/create-unverified-execution-binding";
+import type { AuditActor } from "@/lib/identity/audit";
+import { withdrawalRecord } from "@/lib/publications/persistence/publication-record";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
   getEffectiveRoutes,
   upsertDeploymentRoute,
-} from "@/lib/v11/control-plane/deployment-route-queries";
-import { createRuntime } from "@/lib/v11/control-plane/runtime-queries";
+} from "@/lib/routes/application/deployment-route-service";
+import {
+  type ResolveRouteCommand,
+  type RouteResolver,
+  createResolveRoute,
+} from "@/lib/routes/application/resolve-route";
+import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
+import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
 import {
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
-} from "@/lib/v11/control-plane/runtime-revision-queries";
+} from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import type { AuditActor } from "@/lib/v11/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
@@ -64,11 +69,6 @@ import {
   InvocationNotFoundError,
   InvocationStateConflictError,
 } from "@/lib/v11/runtime/errors";
-import {
-  computeBindingConfigHash,
-  createExecutionBinding,
-  getExecutionBindingByInvocation,
-} from "@/lib/v11/runtime/execution-binding-queries";
 import {
   createAttempt,
   getAttemptById,

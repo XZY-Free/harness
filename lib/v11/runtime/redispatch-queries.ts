@@ -33,8 +33,9 @@
  * - 其他错误 → 抛出（调用方决定是否重试）。
  */
 import { db } from "@/lib/db/client";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { getRuntimeRevisionById } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { issueContextHandle } from "@/lib/v11/context/context-handle";
-import { getRuntimeRevisionById } from "@/lib/v11/control-plane/runtime-revision-queries";
 import { getItemById } from "@/lib/v11/conversation/thread-item-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/v11/conversation/thread-queries";
 import type { RuntimeEndpointResolution } from "@/lib/v11/runtime/dispatcher";
@@ -44,7 +45,6 @@ import {
   RuntimeHttpClientError,
   RuntimeSessionBindingConflictError,
 } from "@/lib/v11/runtime/errors";
-import { getExecutionBindingByInvocation } from "@/lib/v11/runtime/execution-binding-queries";
 import {
   createAttemptInternal,
   updateAttemptState,

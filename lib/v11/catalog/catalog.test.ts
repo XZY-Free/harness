@@ -14,6 +14,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { GET as catalogOptionsGET } from "@/app/api/v1/catalog/options/route";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { buildV11Request } from "@/lib/db/test/api-fixtures";
@@ -36,7 +37,6 @@ import {
   refreshCatalogEntry,
   removeCatalogEntry,
 } from "@/lib/v11/catalog/projector";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
 import { v11Agent } from "@/lib/v11/schema/agent";

@@ -26,7 +26,7 @@
  * - completed 要求所有 in-scope DeletionStep 含 evidenceRef（completeDeletionStep 强制）。
  * - 不写 ThreadEvent 冒充已删除，只写管理域 AuditEvent（updateDeletionRequestState 内部）。
  */
-import type { AuditActor } from "@/lib/v11/identity/audit";
+import type { AuditActor } from "@/lib/identity/audit";
 import {
   type DeletionRequestSummary,
   completeDeletionStep,

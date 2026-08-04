@@ -14,10 +14,8 @@
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
-import { db } from "@/lib/db/client";
-import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
-import { createDraftRevision } from "@/lib/v11/control-plane/agent-revision-queries";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -26,19 +24,21 @@ import {
   type SignatureBundle,
   type VerifyAttestationInput,
   computeArtifactDigest,
-} from "@/lib/v11/control-plane/artifact-attestation";
-import { verifyAndPersistAttestation } from "@/lib/v11/control-plane/artifact-attestation-queries";
+} from "@/lib/artifacts/domain/artifact-attestation";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { db } from "@/lib/db/client";
+import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import type { AuditActor } from "@/lib/identity/audit";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
   upsertDeploymentRoute,
-} from "@/lib/v11/control-plane/deployment-route-queries";
-import { createRuntime } from "@/lib/v11/control-plane/runtime-queries";
-import { createDraftRuntimeRevision } from "@/lib/v11/control-plane/runtime-revision-queries";
+} from "@/lib/routes/application/deployment-route-service";
+import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
+import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { EventSequenceGapError } from "@/lib/v11/conversation/errors";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import type { AuditActor } from "@/lib/v11/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";

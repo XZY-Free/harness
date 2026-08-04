@@ -1,3 +1,4 @@
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 /**
  * S04-C02：V11 投影与读模型集成测试（真实 MySQL 8）。
  *
@@ -15,7 +16,6 @@
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import { EventCursorExpiredError } from "@/lib/v11/conversation/errors";
 import {
   getDeliveryFailure,

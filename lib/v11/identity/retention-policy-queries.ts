@@ -22,7 +22,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { type AuditActor, recordAuditEvent } from "@/lib/v11/identity/audit";
+import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
 import {
   type RetentionObjectType,
   type V11RetentionPolicy,

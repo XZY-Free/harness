@@ -21,17 +21,17 @@
  */
 import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
 import {
+  type AuditActor,
+  actorFromPrincipal,
+  actorFromWorkloadPrincipal,
+} from "@/lib/identity/audit";
+import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import {
-  type AuditActor,
-  actorFromPrincipal,
-  actorFromWorkloadPrincipal,
-} from "@/lib/v11/identity/audit";
 import { revokeWorkloadToken } from "@/lib/v11/identity/workload-token-revocation-queries";
 
 export const dynamic = "force-dynamic";

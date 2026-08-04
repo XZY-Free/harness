@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { POST as contextQueryPOST } from "@/app/gateway/v1/context:query/route";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
+import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { createExecutionBinding } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import {
   createSkill,
   createSkillVersion,
@@ -24,17 +28,11 @@ import {
   SkillResolver,
   threadItemToFragment,
 } from "@/lib/v11/context/source-resolvers";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
-import {
-  createDraftRevision,
-  publishRevision,
-} from "@/lib/v11/control-plane/agent-revision-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
 import { issueWorkloadToken } from "@/lib/v11/identity/workload-token";
-import { createExecutionBinding } from "@/lib/v11/runtime/execution-binding-queries";
 import { createInvocation } from "@/lib/v11/runtime/invocation-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

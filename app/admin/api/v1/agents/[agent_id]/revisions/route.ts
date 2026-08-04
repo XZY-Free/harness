@@ -1,19 +1,3 @@
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  etagHeader,
-  getRequestId,
-  v11NotFound,
-  v11Ok,
-} from "@/lib/http";
-import {
-  AGENT_REVISION_ETAG_PREFIX,
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 /**
  * POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision（S03-C05）。
  *
@@ -38,17 +22,33 @@ import {
  * - Agent 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { getAgentById } from "@/lib/v11/control-plane/agent-queries";
+import { getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
   getRevisionsByAgent,
-} from "@/lib/v11/control-plane/agent-revision-queries";
+} from "@/lib/agents/persistence/agent-revision-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  etagHeader,
+  getRequestId,
+  v11NotFound,
+  v11Ok,
+} from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
   recordAuditEvent,
-} from "@/lib/v11/identity/audit";
+} from "@/lib/identity/audit";
+import {
+  AGENT_REVISION_ETAG_PREFIX,
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  v11SchemaInvalid,
+} from "@/lib/v11/admin/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,

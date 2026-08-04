@@ -4,6 +4,7 @@ import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/r
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { POST as interruptPOST } from "@/app/api/v1/turns/[turn_id]/interrupt/route";
 import { POST as steerPOST } from "@/app/api/v1/turns/[turn_id]/steer/route";
+import { createAgent } from "@/lib/agents/persistence/agent-queries";
 /**
  * S04-C06：V11 Fork / Regenerate / Interrupt / Steer API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
@@ -20,7 +21,6 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createAgent } from "@/lib/v11/control-plane/agent-queries";
 import { updateTurnState } from "@/lib/v11/conversation/turn-queries";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
