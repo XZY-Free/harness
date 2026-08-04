@@ -33,6 +33,7 @@
     "security:check": "pnpm security:license && pnpm security:audit",
     "v11:contracts": "node scripts/v11-contracts.mjs",
     "v11:contracts:write": "node scripts/v11-contracts.mjs --write",
+    "worker:hosted-provisioning": "tsx scripts/workers/hosted-provisioning-worker.ts",
     "verify": "node scripts/verify.mjs",
     "verify:quick": "VERIFY_SKIP_BUILD=1 node scripts/verify.mjs",
     "dev:desktop": "pnpm build:desktop && pnpm rebuild:desktop-native && electron desktop/package-app",

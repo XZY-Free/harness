@@ -1,7 +1,6 @@
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { logger } from "@/lib/logger";
-import { ensureHostedRouteForAgent } from "@/lib/runtimes/infrastructure/hosted-runtime-provisioner";
 import { getThreadById } from "@/lib/v11/conversation/thread-queries";
 import {
   WORKLOAD_TOKEN_DEFAULT_TTL_MS,
@@ -12,14 +11,30 @@ import { dispatchInvocationForTurn } from "@/lib/v11/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/v11/runtime/event-ingress-queries";
 import { createInProcessHostedRuntimeClient } from "@/lib/v11/runtime/in-process-hosted-runtime";
 import { ingressTransientBatch } from "@/lib/v11/runtime/transient-events";
+import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
+import { createRequestHostedProvisioning } from "@/lib/runtimes/application/request-hosted-provisioning";
+import { mysqlHostedProvisioningRequestStore } from "@/lib/runtimes/persistence/mysql-hosted-provisioning-request-store";
+import { db } from "@/lib/db/client";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
+import { and, eq } from "drizzle-orm";
 import { streamText } from "ai";
 
 type ModelFn = (message: string, context: HostedModelContext) => Promise<string>;
+
+const resolveRoute = createResolveRoute({ store: mysqlRouteResolutionStore });
+const requestHostedProvisioning = createRequestHostedProvisioning({
+  store: mysqlHostedProvisioningRequestStore,
+});
 
 export interface EmployeeTurnDispatchResult {
   dispatched: boolean;
   /** Agent Loop 的后台执行；HTTP 路由不等待它，测试可等待。 */
   completion: Promise<void>;
+  /** 当 dispatched=false 且 Hosted Route 尚未就绪时的供应状态。 */
+  provisioningRequestId?: string;
+  provisioningState?: string;
+  retryAfterMs?: number;
 }
 
 function configuredModelFn(): ModelFn {
@@ -44,8 +59,9 @@ function configuredModelFn(): ModelFn {
 /**
  * 调度员工发起的会话 Turn。
  *
- * 运行器与平台同进程，但仍严格通过 Invocation、ExecutionBinding 和 RuntimeEventIngress
- * 写回事件；不会绕开 V11 的会话事实源，也不会制造固定或回显式回复。
+ * 第二批改造：移除同步 Hosted 供应调用。
+ * 热路径只允许：读取 Ready Route → 创建 Invocation/Binding → 调度。
+ * 无 Ready Route 时幂等创建 ProvisioningRequest（不执行外部调用）。
  */
 export async function dispatchEmployeeTurn(params: {
   tenantId: string;
@@ -59,10 +75,45 @@ export async function dispatchEmployeeTurn(params: {
     throw new Error(`Turn 调度失败：会话不存在 (${params.threadId})`);
   }
 
-  await ensureHostedRouteForAgent({
+  // ─── 热路径：查询正式 RouteResolver ──────────────────────────
+  const routeOutcome = await resolveRoute({
     tenantId: params.tenantId,
     agentId: thread.primaryAgentId,
+    routeScopeKey: "default",
+    businessKey: { jobId: `hosted-provision:${thread.primaryAgentId}` },
   });
+
+  if (routeOutcome.status !== "resolved") {
+    // 无 Ready Route → 幂等请求 Hosted Provisioning（不执行外部调用）
+    const agentRevisionId = await loadCurrentAgentRevisionId(
+      params.tenantId,
+      thread.primaryAgentId,
+    );
+
+    const provisioningResult = await requestHostedProvisioning({
+      tenantId: params.tenantId,
+      agentId: thread.primaryAgentId,
+      agentRevisionId: agentRevisionId ?? "unknown",
+      routeScopeKey: "default",
+    });
+
+    logger.info("[v11] Hosted Route 未就绪，已请求异步供应", {
+      tenantId: params.tenantId,
+      agentId: thread.primaryAgentId,
+      provisioningRequestId: provisioningResult.requestId,
+      provisioningState: provisioningResult.state,
+    });
+
+    return {
+      dispatched: false,
+      completion: Promise.resolve(),
+      provisioningRequestId: provisioningResult.requestId,
+      provisioningState: provisioningResult.state,
+      retryAfterMs: provisioningResult.retryAfterMs,
+    };
+  }
+
+  // ─── 有 Ready Route → 继续调度（不变） ──────────────────────
   const modelRef = params.modelRef ?? aiConfig.chatModel;
   const client = createInProcessHostedRuntimeClient({
     modelRef,
@@ -121,4 +172,17 @@ export async function dispatchEmployeeTurn(params: {
     });
   });
   return { dispatched: true, completion };
+}
+
+/** 读取 Agent 当前 AgentRevision ID（用于 ProvisioningRequest）。 */
+async function loadCurrentAgentRevisionId(
+  tenantId: string,
+  agentId: string,
+): Promise<string | null> {
+  const [agent] = await db
+    .select({ currentRevisionId: agentTable.currentRevisionId })
+    .from(agentTable)
+    .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
+    .limit(1);
+  return agent?.currentRevisionId ?? null;
 }
