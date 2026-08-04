@@ -18,6 +18,10 @@ import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { RouteNotFoundError } from "@/lib/routes/domain/route-revision";
 import type { RouteControlStore } from "@/lib/routes/persistence/route-control-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import {
+  normalizeEligibility,
+  computeSelectorDigest,
+} from "@/lib/routes/domain/route-selector";
 import { and, eq, isNotNull, isNull, max } from "drizzle-orm";
 
 function requiredCapabilities(value: unknown): string[] {
@@ -191,6 +195,8 @@ export const mysqlRouteControlStore: RouteControlStore = {
           return (row?.value ?? 0) + 1;
         },
         async appendRevision(params) {
+          // 使用 Store 接口传入的 selectorDigest，确保调用方和 Backfill 使用同一算法。
+          const normalized = normalizeEligibility(params.content.eligibilityConditions);
           await tx.insert(routeRevision).values({
             id: params.id,
             tenantId: params.tenantId,
@@ -202,7 +208,12 @@ export const mysqlRouteControlStore: RouteControlStore = {
             policyRevisionId: params.content.policyRevisionId,
             modelPolicyRevisionId: params.content.modelPolicyRevisionId,
             toolsetRevisionId: params.content.toolsetRevisionId,
-            trafficAllocationJson: { weightBasisPoints: params.content.trafficWeight },
+            trafficAllocationJson: {
+              weightBasisPoints: params.content.trafficWeight,
+              ...(params.content.routeGroupId ? { groupId: params.content.routeGroupId } : {}),
+            },
+            routeGroupId: params.content.routeGroupId,
+            selectorDigest: params.selectorDigest ?? (normalized ? computeSelectorDigest(normalized) : null),
             trafficWeight: params.content.trafficWeight,
             priorityNo: params.content.priorityNo,
             effectiveFrom: params.content.effectiveFrom,
@@ -235,6 +246,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
             tenantId: params.tenantId,
             routeId: params.routeId,
             routeRevisionId: params.routeRevisionId,
+            routeSetId: params.routeSetId,
             activationSequence: params.activationSequence,
             activationState: params.activationState,
             previousRouteRevisionId: params.previousRouteRevisionId,

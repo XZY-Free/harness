@@ -225,6 +225,7 @@ export const mysqlHostedRuntimeControlPlane: HostedRuntimeControlPlane = {
         effectiveFrom: null,
         effectiveUntil: null,
         eligibilityConditions: {},
+        routeGroupId: "primary",
       },
       actor: { tenantId: command.tenantId, actorType: "system", actorId: HOSTED_ACTOR_ID },
       reason: "激活内置 Hosted Runtime 正式路由",

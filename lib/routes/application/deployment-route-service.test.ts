@@ -922,6 +922,7 @@ describe("V11 upsertDeploymentRoute", () => {
           effectiveFrom: null,
           effectiveUntil: null,
           eligibilityConditions: {},
+          routeGroupId: "primary",
         },
         actor: { tenantId, actorType: "service", actorId: "deploy-bot-rollback" },
         reason: "故障注入",

@@ -13,6 +13,10 @@ import {
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import {
+  normalizeEligibility,
+  computeSelectorDigest,
+} from "@/lib/routes/domain/route-selector";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
 import { v11Agent, v11AgentRevision } from "@/lib/v11/schema/agent";
@@ -268,6 +272,8 @@ async function addRuntimeRoute(
       weightBasisPoints: trafficWeight,
       groupId: options.routeGroupId ?? "primary",
     },
+    routeGroupId: options.routeGroupId ?? "primary",
+    selectorDigest: computeSelectorDigest(normalizeEligibility(options.eligibilityConditions ?? {}) ?? { all: {} }),
     trafficWeight,
     priorityNo: options.priorityNo ?? 0,
     effectiveFrom: options.effectiveFrom ?? null,
@@ -284,6 +290,7 @@ async function addRuntimeRoute(
     tenantId: base.tenantId,
     routeId,
     routeRevisionId,
+    routeSetId: base.routeSetId,
     activationSequence: 1,
     activationState: options.activationState ?? "active",
     previousRouteRevisionId: null,

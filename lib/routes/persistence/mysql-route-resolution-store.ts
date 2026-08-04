@@ -201,7 +201,7 @@ export const mysqlRouteResolutionStore: RouteResolutionStore = {
             policyRevisionId: revision.policyRevisionId,
             contentDigest: revision.contentDigest,
             trafficWeight: revision.trafficWeight,
-            routeGroupId: readRouteGroupId(revision.trafficAllocationJson, routeSet.id),
+            routeGroupId: readRouteGroupId(revision.routeGroupId, revision.trafficAllocationJson, routeSet.id),
             priorityNo: revision.priorityNo,
             effectiveFrom: revision.effectiveFrom,
             effectiveUntil: revision.effectiveUntil,
@@ -340,9 +340,18 @@ async function validateRuntimeConformance(
   );
 }
 
-function readRouteGroupId(value: unknown, fallback: string): string {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const groupId = (value as { groupId?: unknown }).groupId;
+/**
+ * 读取 routeGroupId — 优先使用 RouteRevision 新列，回退到 trafficAllocationJson。
+ *
+ * 新列在 Migration 0117 后 nullable，Backfill 完成后 NOT NULL（0118）。
+ * 此函数兼容两个阶段。
+ */
+function readRouteGroupId(columnValue: string | null, jsonValue: unknown, fallback: string): string {
+  // 1. 优先使用新列（0118 后此值始终非 null）
+  if (columnValue) return columnValue;
+  // 2. 回退到 trafficAllocationJson.groupId（0117 后 Backfill 之前）
+  if (jsonValue && typeof jsonValue === "object" && !Array.isArray(jsonValue)) {
+    const groupId = (jsonValue as { groupId?: unknown }).groupId;
     if (typeof groupId === "string" && groupId.trim()) return groupId;
   }
   return fallback;

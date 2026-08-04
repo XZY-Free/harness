@@ -26,6 +26,10 @@ export const routeRevision = mysqlTable(
     modelPolicyRevisionId: varchar("modelPolicyRevisionId", { length: 36 }),
     toolsetRevisionId: varchar("toolsetRevisionId", { length: 36 }),
     trafficAllocationJson: json("trafficAllocationJson").notNull(),
+    /** Route Group 标识 — 同 Group 成员必须相同 eligibilityConditions、priorityNo、specificity、effectiveFrom、effectiveUntil。 */
+    routeGroupId: varchar("routeGroupId", { length: 128 }),
+    /** Selector Digest — 由 RouteSelector.computeSelectorDigest 计算，含算法版本。 */
+    selectorDigest: varchar("selectorDigest", { length: 71 }),
     trafficWeight: int("trafficWeight").notNull(),
     priorityNo: int("priorityNo").notNull(),
     effectiveFrom: datetime("effectiveFrom", { mode: "date", fsp: 3 }),
@@ -47,6 +51,14 @@ export const routeRevision = mysqlTable(
       table.contentDigest,
     ),
     routeSetIdx: index("RouteRevision_routeSet_idx").on(table.routeSetId, table.createdAt),
+    routeSetGroupIdTmpIdx: index("RouteRevision_routeSetId_routeGroupId_tmp_idx").on(
+      table.routeSetId,
+      table.routeGroupId,
+    ),
+    routeSetSelectorDigestTmpIdx: index("RouteRevision_routeSetId_selectorDigest_tmp_idx").on(
+      table.routeSetId,
+      table.selectorDigest,
+    ),
   }),
 );
 
@@ -57,6 +69,8 @@ export const routeActivation = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
     routeId: varchar("routeId", { length: 36 }).notNull(),
     routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
+    /** 派生冗余列 — 始终 = 对应 RouteRevision.routeSetId，写入服务负责派生和断言。 */
+    routeSetId: varchar("routeSetId", { length: 36 }),
     activationSequence: bigint("activationSequence", { mode: "number", unsigned: true }).notNull(),
     activationState: mysqlEnum("activationState", ["active", "disabled"]).notNull(),
     previousRouteRevisionId: varchar("previousRouteRevisionId", { length: 36 }),
@@ -86,6 +100,7 @@ export const routeActivation = mysqlTable(
       table.routeRevisionId,
       table.activatedAt,
     ),
+    routeSetIdTmpIdx: index("RouteActivation_routeSetId_tmp_idx").on(table.routeSetId),
   }),
 );
 

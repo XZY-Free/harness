@@ -10,6 +10,10 @@ import {
   validateRouteRevisionContent,
 } from "../domain/route-revision";
 import type { RouteRevisionContent } from "../domain/route-revision";
+import {
+  normalizeEligibility,
+  computeSelectorDigest,
+} from "../domain/route-selector";
 import type {
   RouteActorType,
   RouteControlStore,
@@ -167,6 +171,8 @@ export function createActivateRouteRevision(dependencies: {
 
       const occurredAt = now();
       const contentDigest = computeRouteRevisionContentDigest(command.content);
+      const normalizedEligibility = normalizeEligibility(command.content.eligibilityConditions);
+      const selectorDigest = normalizedEligibility ? computeSelectorDigest(normalizedEligibility) : null;
       let revision = await session.findRevisionByContent(route.id, contentDigest);
       let revisionAuditEventId: string | null = null;
       let revisionOutboxEventId: string | null = null;
@@ -179,6 +185,7 @@ export function createActivateRouteRevision(dependencies: {
           revisionNo: await session.nextRevisionNo(route.id),
           content: command.content,
           contentDigest,
+          selectorDigest,
           actorType: command.actor.actorType,
           actorId: command.actor.actorId,
           now: occurredAt,
@@ -222,6 +229,7 @@ export function createActivateRouteRevision(dependencies: {
         tenantId: command.tenantId,
         routeId: route.id,
         routeRevisionId: revision.id,
+        routeSetId: revision.routeSetId,
         activationSequence: await session.nextActivationSequence(route.id),
         activationState: command.activationState ?? "active",
         previousRouteRevisionId: route.activeRouteRevisionId,

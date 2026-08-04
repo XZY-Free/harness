@@ -185,6 +185,7 @@ export async function upsertDeploymentRoute(params: {
       effectiveFrom: params.effectiveFrom ?? null,
       effectiveUntil: params.effectiveUntil ?? null,
       eligibilityConditions: {},
+      routeGroupId: "primary",
     },
     activationState: params.routeState === "disabled" ? "disabled" : "active",
     actor: params.actor,
