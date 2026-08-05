@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ArtifactNotVerifiedError } from "@/lib/artifacts/domain/artifact-attestation";
-import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import type { ArtifactAttestation } from "@/lib/artifacts/persistence/artifact-record";
 import type { AuditActor } from "@/lib/identity/audit";
 import type { RuntimeRevisionRow } from "@/lib/persistence/schema/control-plane";

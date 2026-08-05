@@ -22,7 +22,16 @@ import {
 import {
   isValidPlanTransition,
 } from "@/lib/control-plane/cutover/domain/cutover-plan";
+import { createReplacementAgentRevision } from "@/lib/control-plane/cutover/application/create-replacement-agent-revision";
+import { createReplacementRuntimeRevision } from "@/lib/control-plane/cutover/application/create-replacement-runtime-revision";
+import { getHostedControlPlaneEvidenceProvider } from "@/lib/runtimes/domain/hosted-control-plane-evidence";
+import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
+import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
+import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
 import { logger } from "@/lib/logger";
+
+const CUTOVER_ACTOR_ID = "cutover-executor";
 
 /** Worker 配置。 */
 interface CutoverWorkerConfig {
@@ -49,21 +58,63 @@ export function createCutoverWorker(configOverrides?: Partial<CutoverWorkerConfi
   const config = { ...DEFAULT_CONFIG, ...configOverrides };
   const store = mysqlCutoverStore;
 
-  // §7.2: Cutover 执行器配置 — 需要注入真实依赖
+  // 真实依赖注入
+  const evidenceProvider = getHostedControlPlaneEvidenceProvider();
+  const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
+  const resolveRoute = createResolveRoute({ store: mysqlRouteResolutionStore });
+
   const executor = createCutoverExecutor({
     store,
-    // 这些依赖需要从实际模块注入
-    createReplacementAgentRevision: async () => {
-      throw new Error("createReplacementAgentRevision: 需要注入真实实现");
+    createReplacementAgentRevision: async (params) => {
+      const result = await createReplacementAgentRevision({
+        tenantId: params.tenantId,
+        sourceRevisionId: params.sourceRevisionId,
+        newArtifactRef: params.newArtifactRef,
+        createdBy: params.createdBy,
+      });
+      return { replacementRevisionId: result.replacementRevisionId };
     },
-    createReplacementRuntimeRevision: async () => {
-      throw new Error("createReplacementRuntimeRevision: 需要注入真实实现");
+    createReplacementRuntimeRevision: async (params) => {
+      const result = await createReplacementRuntimeRevision({
+        tenantId: params.tenantId,
+        sourceRevisionId: params.sourceRevisionId,
+        newArtifactRef: params.newArtifactRef,
+        createdBy: params.createdBy,
+      });
+      return { replacementRevisionId: result.replacementRevisionId };
     },
-    resolveArtifactEvidence: async () => {
-      throw new Error("resolveArtifactEvidence: 需要注入真实实现");
+    resolveArtifactEvidence: async (params) => {
+      const evidence = await evidenceProvider.loadArtifactEvidence({
+        tenantId: params.tenantId,
+        artifactType: params.subjectType,
+      });
+      return { artifactRef: evidence.artifactRef };
     },
-    activateRouteSet: async () => {
-      throw new Error("activateRouteSet: 需要注入真实实现");
+    activateRouteSet: async (params) => {
+      const result = await activateRouteSet({
+        tenantId: params.tenantId,
+        routeSetId: params.routeSetId,
+        expectedVersionNo: params.expectedVersionNo,
+        desiredRoutes: params.desiredRoutes as any[],
+        actor: params.actor,
+        reason: params.reason,
+        requestId: params.requestId,
+        idempotencyKey: params.idempotencyKey,
+      });
+      return { routeSetVersionNo: result.routeSetVersionNo };
+    },
+    resolveRoute: async (params) => {
+      const outcome = await resolveRoute({
+        tenantId: params.tenantId,
+        agentId: params.agentId,
+        routeScopeKey: params.routeScopeKey, businessKey: { jobId: `cutover-verify:${params.agentId}` },
+      });
+      if (outcome.status !== "resolved") return null;
+      return {
+        status: outcome.status,
+        agentRevisionId: outcome.resolution.agentRevisionId,
+        runtimeRevisionId: outcome.resolution.runtimeRevisionId,
+      };
     },
     maxItemAttempts: config.maxItemAttempts,
   });

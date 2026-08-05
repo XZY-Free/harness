@@ -365,7 +365,7 @@ export async function activateCutoverPlan(config: CutoverExecutorConfig, params:
     await config.store.updatePlanState({
       planId,
       state: "activated",
-      targetRouteSetVersionNo,
+      targetRouteSetVersionNo: targetVersionNo,
       completedAt: new Date(),
     });
 

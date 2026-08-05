@@ -80,7 +80,7 @@ export function createInTotoDSSEVerifier(
         }
 
         // 步骤 5: 验证 OIDC Issuer
-        const oidcIssuer = sigResult.fields.oidcIssuer;
+        const oidcIssuer = sigResult.fields?.oidcIssuer;
         if (oidcIssuer && !config.allowedIssuers.includes(oidcIssuer)) {
           return {
             verified: false,
@@ -94,7 +94,7 @@ export function createInTotoDSSEVerifier(
         }
 
         // 步骤 6: 验证 Signing Identity
-        const signingIdentity = sigResult.fields.signingIdentity;
+        const signingIdentity = sigResult.fields?.signingIdentity;
         if (signingIdentity && !matchIdentity(signingIdentity, config.allowedSigningIdentities)) {
           return {
             verified: false,

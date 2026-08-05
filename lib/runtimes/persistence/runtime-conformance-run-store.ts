@@ -53,6 +53,7 @@ export interface RuntimeConformanceRunSession {
   appendOutbox(params: {
     id: string;
     tenantId: string;
+    eventKey: string;
     /** §3.2: 事件类型固定为 runtime.conformance.recorded。 */
     eventType: "runtime.conformance.recorded";
     aggregateId: string;

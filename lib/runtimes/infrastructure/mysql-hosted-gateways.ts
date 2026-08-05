@@ -1,3 +1,13 @@
+/**
+ * §6.5: MySQL Hosted Gateways 实现 — 纯适配器层。
+ *
+ * 将 mysql-hosted-runtime-control-plane.ts 单体拆分为 6 个职责清晰的 Gateway，
+ * 每个 Gateway 只做 DB 访问 + 对应领域调用。
+ * Saga 负责步骤编排；此文件只提供基础设施适配。
+ *
+ * 参见：SnowHarness专题01全局统一与最终收敛方案 §6.5
+ */
+
 import { createHash, randomUUID } from "node:crypto";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
@@ -9,22 +19,27 @@ import {
 import {
   getAttestationById,
   listAttestationsByRevision,
-} from "@/lib/artifacts/persistence/artifact-attestation-queries";
+} from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { aiConfig, runtimeConformanceConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
-import { deploymentRouteSetTable } from "@/lib/persistence/schema/control-plane";
+import {
+  agentRevisionTable,
+  agentTable,
+} from "@/lib/persistence/schema/agents";
+import { deploymentRouteSetTable } from "@/lib/persistence/schema/routes";
+import {
+  runtimeRevisionTable,
+  runtimeTable,
+} from "@/lib/persistence/schema/runtimes";
 import { tenantTable } from "@/lib/persistence/schema/control-plane";
-import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/control-plane";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { getWithdrawalRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
-import { createActivateRouteRevision } from "@/lib/routes/application/activate-route-revision";
+import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
-import { mysqlRouteControlStore } from "@/lib/routes/persistence/mysql-route-control-store";
 import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
+import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
 import type {
-  HostedRuntimeControlPlane,
   HostedRuntimeRoute,
   PublishedHostedAgentRevision,
   PublishedHostedRuntimeRevision,
@@ -36,11 +51,23 @@ import { getHostedControlPlaneEvidenceProvider } from "@/lib/runtimes/domain/hos
 import { protocolContractRevision } from "@/lib/runtimes/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtimes/persistence/mysql-runtime-publication-store";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
+import type {
+  HostedGateways,
+  HostedRouteReader,
+  HostedAgentPublicationGateway,
+  HostedRuntimePublicationGateway,
+  HostedRouteActivationGateway,
+  HostedArtifactEvidenceProvider,
+  HostedConformanceRunner,
+} from "@/lib/runtimes/infrastructure/hosted-gateways";
 import { and, desc, eq, max } from "drizzle-orm";
+
+// ─── 常量 ───────────────────────────────────────────────────
 
 const BUILTIN_HOSTED_RUNTIME_KEY = "builtin-hosted";
 const HOSTED_ACTOR_ID = "hosted-runtime-provisioner";
@@ -58,21 +85,25 @@ const HOSTED_RUNTIME_CONFIG_DIGEST = digest({
   networkZone: "internal",
 });
 
+// ─── 领域服务单例 ───────────────────────────────────────────
+
 const recordArtifactAttestation = createRecordArtifactAttestation({
   store: mysqlArtifactAttestationPersistenceStore,
 });
 const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 const recordRuntimeConformanceRun = createRecordRuntimeConformanceRun({
   store: mysqlRuntimeConformanceRunStore,
-  signingSecret: () => runtimeConformanceConfig.signingSecret,
+  verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
 });
 const publishRuntimeRevision = createPublishRuntimeRevision({
   store: mysqlRuntimePublicationStore,
 });
-const activateRouteRevision = createActivateRouteRevision({ store: mysqlRouteControlStore });
 const resolveRoute = createResolveRoute({ store: mysqlRouteResolutionStore });
+const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 
-export const mysqlHostedRuntimeControlPlane: HostedRuntimeControlPlane = {
+// ─── 1. HostedRouteReader ──────────────────────────────────
+
+const routeReader: HostedRouteReader = {
   async resolveEligibleRoute(command) {
     const outcome = await resolveRoute({
       ...command,
@@ -95,7 +126,11 @@ export const mysqlHostedRuntimeControlPlane: HostedRuntimeControlPlane = {
       runtimeRevisionId: outcome.resolution.runtimeRevisionId,
     };
   },
+};
 
+// ─── 2. HostedAgentPublicationGateway ──────────────────────
+
+const agentPublication: HostedAgentPublicationGateway = {
   async ensurePublishedAgentRevision(command) {
     const existing = await loadPublishedAgentRevision(command.tenantId, command.agentId);
     if (existing) return existing;
@@ -141,7 +176,11 @@ export const mysqlHostedRuntimeControlPlane: HostedRuntimeControlPlane = {
       throw error;
     }
   },
+};
 
+// ─── 3. HostedRuntimePublicationGateway ─────────────────────
+
+const runtimePublication: HostedRuntimePublicationGateway = {
   async ensurePublishedRuntimeRevision(command) {
     const existing = await loadPublishedRuntimeRevision(command.tenantId);
     if (existing) return existing;
@@ -198,7 +237,7 @@ export const mysqlHostedRuntimeControlPlane: HostedRuntimeControlPlane = {
       return {
         revisionId: result.revision.id,
         publicationRecordId: result.publicationRecordId,
-        attestationId: result.attestation?.id ?? "",
+        attestationId: result.attestation?.attestationId ?? "",
         conformanceRunId: run.run.id,
       };
     } catch (error) {
@@ -207,26 +246,38 @@ export const mysqlHostedRuntimeControlPlane: HostedRuntimeControlPlane = {
       throw error;
     }
   },
+};
 
+// ─── 4. HostedRouteActivationGateway ────────────────────────
+//
+// §6.5: 使用 ActivateRouteSet 原子激活替代旧 activateRouteRevision。
+// 将单 Route 激活转换为 RouteSet 原子激活：先 ensureRouteSet，
+// 再 activateRouteSet with desiredRoutes 含一条 active 路由。
+
+const routeActivation: HostedRouteActivationGateway = {
   async activateRoute(command) {
     const routeSet = await ensureRouteSet(command);
-    await activateRouteRevision({
+    await activateRouteSet({
       tenantId: command.tenantId,
       routeSetId: routeSet.id,
-      routeSetExpectedVersionNo: routeSet.versionNo,
-      content: {
-        agentRevisionId: command.agentRevision.revisionId,
-        runtimeRevisionId: command.runtimeRevision.revisionId,
-        policyRevisionId: null,
-        modelPolicyRevisionId: null,
-        toolsetRevisionId: null,
-        trafficWeight: 10_000,
-        priorityNo: 0,
-        effectiveFrom: null,
-        effectiveUntil: null,
-        eligibilityConditions: {},
-        routeGroupId: "primary",
-      },
+      expectedVersionNo: routeSet.versionNo,
+      desiredRoutes: [
+        {
+          routeKey: "primary",
+          agentRevisionId: command.agentRevision.revisionId,
+          runtimeRevisionId: command.runtimeRevision.revisionId,
+          policyRevisionId: null,
+          modelPolicyRevisionId: null,
+          toolsetRevisionId: null,
+          trafficWeight: 10_000,
+          priorityNo: 0,
+          effectiveFrom: null,
+          effectiveUntil: null,
+          eligibilityConditions: {},
+          routeGroupId: "primary",
+          activationState: "active",
+        },
+      ],
       actor: { tenantId: command.tenantId, actorType: "system", actorId: HOSTED_ACTOR_ID },
       reason: "激活内置 Hosted Runtime 正式路由",
       requestId: `hosted-route-activate:${command.agentId}`,
@@ -238,6 +289,120 @@ export const mysqlHostedRuntimeControlPlane: HostedRuntimeControlPlane = {
     });
   },
 };
+
+// ─── 5. HostedArtifactEvidenceProvider ──────────────────────
+//
+// §6.5: 委托给 getHostedControlPlaneEvidenceProvider()。
+
+const artifactEvidence: HostedArtifactEvidenceProvider = {
+  async loadAgentArtifactEvidence(command) {
+    const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
+      tenantId: command.tenantId,
+      artifactType: "agent_revision",
+    });
+    // 根据 agentRevisionId 查询具体 artifactRef/digest
+    const [revision] = await db
+      .select({
+        artifactId: agentRevisionTable.artifactId,
+        artifactDigest: agentRevisionTable.artifactDigest,
+      })
+      .from(agentRevisionTable)
+      .where(eq(agentRevisionTable.id, command.agentRevisionId))
+      .limit(1);
+    return {
+      artifactRef: revision?.artifactId ?? evidence.artifactRef,
+      artifactDigest: revision?.artifactDigest ?? evidence.artifactDigest,
+    };
+  },
+
+  async loadRuntimeArtifactEvidence(command) {
+    const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
+      tenantId: command.tenantId,
+      artifactType: "runtime_revision",
+    });
+    const [revision] = await db
+      .select({
+        artifactId: runtimeRevisionTable.artifactId,
+        artifactDigest: runtimeRevisionTable.artifactDigest,
+        configHash: runtimeRevisionTable.configHash,
+      })
+      .from(runtimeRevisionTable)
+      .where(eq(runtimeRevisionTable.id, command.runtimeRevisionId))
+      .limit(1);
+    return {
+      artifactRef: revision?.artifactId ?? evidence.artifactRef,
+      artifactDigest: revision?.artifactDigest ?? evidence.artifactDigest,
+      configHash: revision?.configHash ?? null,
+    };
+  },
+};
+
+// ─── 6. HostedConformanceRunner ─────────────────────────────
+//
+// §6.5: 使用 createRecordRuntimeConformanceRun + evidence provider 的 runRuntimeConformance。
+
+const conformanceRunner: HostedConformanceRunner = {
+  async runConformance(command) {
+    const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
+      tenantId: command.tenantId,
+      artifactType: "runtime_revision",
+    });
+    // 查找 RuntimeRevision 获取 configHash 和 protocolContractRevision
+    const [revision] = await db
+      .select({
+        configHash: runtimeRevisionTable.configHash,
+        protocolContractRevision: runtimeRevisionTable.protocolContractRevision,
+      })
+      .from(runtimeRevisionTable)
+      .where(eq(runtimeRevisionTable.id, command.runtimeRevisionId))
+      .limit(1);
+    if (!revision) {
+      throw new Error(`ConformanceRunner: RuntimeRevision 不存在 (${command.runtimeRevisionId})`);
+    }
+
+    const signedRun = await getHostedControlPlaneEvidenceProvider().runRuntimeConformance({
+      tenantId: command.tenantId,
+      runtimeRevisionId: command.runtimeRevisionId,
+      idempotencyKey: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
+      runtimeArtifactDigest: evidence.artifactDigest,
+      runtimeConfigDigest: revision.configHash,
+      protocolContractRevision: revision.protocolContractRevision,
+    });
+    const run = await recordRuntimeConformanceRun({
+      tenantId: command.tenantId,
+      runtimeRevisionId: command.runtimeRevisionId,
+      report: signedRun.report,
+      signature: signedRun.signature,
+      idempotencyKey: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
+      requestId: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
+      actor: { actorType: "system", actorId: HOSTED_ACTOR_ID },
+    });
+    return {
+      conformanceRunId: run.run.id,
+      overallResult: run.run.overallResult as "passed" | "failed",
+    };
+  },
+};
+
+// ─── 工厂函数 ──────────────────────────────────────────────
+
+/**
+ * §6.5: 创建 MySQL Hosted Gateways 实例。
+ * 返回 6 个 Gateway 的组合对象，供 Saga 编排使用。
+ */
+export function createMysqlHostedGateways(): HostedGateways {
+  return {
+    routeReader,
+    agentPublication,
+    runtimePublication,
+    routeActivation,
+    artifactEvidence,
+    conformanceRunner,
+  };
+}
+
+// ─── 内部辅助函数 ──────────────────────────────────────────
+// (从 mysql-hosted-runtime-control-plane.ts 搬运，逻辑不变)
 
 async function isBuiltinHostedRuntimeRevision(
   tenantId: string,

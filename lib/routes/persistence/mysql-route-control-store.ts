@@ -8,14 +8,14 @@ import {
 } from "@/lib/artifacts/persistence/artifact-record";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
-import { agentRevisionTable } from "@/lib/persistence/schema/control-plane";
+import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import {
   deploymentRouteSetTable,
   deploymentRouteTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/routes";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
-import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
+import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { RouteNotFoundError } from "@/lib/routes/domain/route-revision";
 import type { RouteControlStore } from "@/lib/routes/persistence/route-control-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
@@ -85,6 +85,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
           await tx.insert(deploymentRouteTable).values({
             id,
             routeSetId: params.routeSetId,
+            routeKey: `route-${id}`,
             agentRevisionId: params.content.agentRevisionId,
             runtimeRevisionId: params.content.runtimeRevisionId,
             trafficWeight: params.content.trafficWeight,
@@ -208,6 +209,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
             tenantId: params.tenantId,
             routeId: params.routeId,
             routeSetId: params.routeSetId,
+            routeKey: `route-${params.routeId}`,
             revisionNo: params.revisionNo,
             agentRevisionId: params.content.agentRevisionId,
             runtimeRevisionId: params.content.runtimeRevisionId,
@@ -219,7 +221,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
               ...(params.content.routeGroupId ? { groupId: params.content.routeGroupId } : {}),
             },
             routeGroupId: params.content.routeGroupId,
-            selectorDigest: params.selectorDigest ?? (normalized ? computeSelectorDigest(normalized) : null),
+            selectorDigest: params.selectorDigest ?? (normalized ? computeSelectorDigest(normalized) : ""),
             trafficWeight: params.content.trafficWeight,
             priorityNo: params.content.priorityNo,
             effectiveFrom: params.content.effectiveFrom,

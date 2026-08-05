@@ -89,7 +89,7 @@ export function createSigstoreBundleVerifier(
         }
 
         // 步骤 6: 验证 OIDC Issuer
-        const oidcIssuer = sdkResult.fields.oidcIssuer;
+        const oidcIssuer = sdkResult.fields?.oidcIssuer;
         if (oidcIssuer && !config.allowedIssuers.includes(oidcIssuer)) {
           return {
             verified: false,
@@ -103,7 +103,7 @@ export function createSigstoreBundleVerifier(
         }
 
         // 步骤 7: 验证 Signing Identity
-        const signingIdentity = sdkResult.fields.signingIdentity;
+        const signingIdentity = sdkResult.fields?.signingIdentity;
         if (signingIdentity && !matchIdentity(signingIdentity, config.allowedSigningIdentities)) {
           return {
             verified: false,

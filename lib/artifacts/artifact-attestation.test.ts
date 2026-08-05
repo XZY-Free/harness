@@ -4,10 +4,10 @@
  * 覆盖：
  * - artifact-attestation 纯逻辑：computeArtifactDigest / isValidArtifactDigest / isManagedRef / verifyArtifactAttestation。
  * - 验证服务校验链：artifactType/digest/受管引用/builder/签名/SBOM/provenance 全部场景。
- * - artifact-attestation-queries：insertAttestation/getAttestationById/listAttestationsByRevision/listAttestationsByDigest/getVerifiedAttestationForRevision。
+ * - artifact-attestation-reader：getAttestationById/listAttestationsByRevision/listAttestationsByDigest/getVerifiedAttestationForRevision。
+ * - artifact-attestation-queries：insertAttestation/verifyAndPersistAttestation/assertAttestationGate。
  * - verifyAndPersistAttestation：成功/失败持久化 + 审计 + 抛错。
  * - assertAttestationGate：发布门禁全部场景。
- * - publishAgentRevisionWithAttestation：attestation 门禁 + Agent 发布 + 审计。
  * - publishRuntimeRevisionWithAttestation：attestation + conformance 双门禁 + Runtime 发布 + 审计。
  * - 阶段验收：可变 tag 拒绝/失败持久化/门禁失败 RouteSet 不变/同 digest 多份证明。
  *
@@ -37,16 +37,22 @@ import {
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
-  assertAttestationGate,
   getAttestationById,
   getVerifiedAttestationForRevision,
-  insertAttestation,
   listAttestationsByDigest,
   listAttestationsByRevision,
-  publishAgentRevisionWithAttestation,
+} from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import {
+  assertAttestationGate,
+  insertAttestation,
   verifyAndPersistAttestation,
 } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { publishRuntimeRevisionWithAttestation } from "@/lib/artifacts/test-support/attempt-runtime-publication-with-attestation-without-trusted-run";
+import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
+import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
+import { AgentPublicationPrerequisiteError } from "@/lib/agents/domain/agent-revision-publication-policy";
+
+const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
@@ -54,7 +60,7 @@ import { listAuditEvents } from "@/lib/identity/audit-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import {
   type ConformanceCaseResult,
-  ConformanceGateError,
+  RuntimeConformanceCaseFailedError,
   MANDATORY_GATE_CASES,
 } from "@/lib/runtimes/domain/runtime-conformance";
 import { RuntimeLifecycleError, createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
@@ -1119,220 +1125,8 @@ describe("assertAttestationGate 发布门禁", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 6. publishAgentRevisionWithAttestation 发布门禁集成
+// 6. publishAgentRevisionWithAttestation 已退役（§8.5 领域违规删除）
 // ═══════════════════════════════════════════════════════════
-
-describe("publishAgentRevisionWithAttestation", () => {
-  let tenantId: string;
-  let ownerId: string;
-
-  beforeEach(async () => {
-    const seeded = await seedTenantAndOwner();
-    tenantId = seeded.tenantId;
-    ownerId = seeded.ownerId;
-  });
-
-  it("成功路径：门禁通过 + 发布 + agent.publish 审计", async () => {
-    const agent = await createAgent({
-      tenantId,
-      agentKey: "finance-agent",
-      displayName: "Finance Agent",
-      ownerUserId: ownerId,
-    });
-    const revision = await createDraftRevision({
-      tenantId,
-      agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:abc",
-      instructionHash: "sha256:instr-v1",
-      agentArtifactRef: "oci://registry/agent@sha256:abc",
-      modelPolicyJson: { model: "gpt-4" },
-      permissionRequirementsJson: { scopes: [] },
-      delegationPolicyJson: { allowed: false },
-      agentInterfaceRequirementsJson: { required: [] },
-      createdBy: ownerId,
-    });
-
-    const fixture = await createVerifiedAttestationFixture(
-      tenantId,
-      "agent_revision",
-      revision.id,
-      "agent.yaml content",
-    );
-
-    const result = await publishAgentRevisionWithAttestation(
-      tenantId,
-      revision.id,
-      agent.versionNo,
-      fixture.attestation.id,
-      buildActor(tenantId, "ci-001"),
-    );
-
-    expect(result.revision.revisionState).toBe("published");
-    expect(result.revision.publishedAt).toBeTruthy();
-    expect(result.attestation.id).toBe(fixture.attestation.id);
-    expect(result.revision.artifactId).toBe(fixture.attestation.artifactId);
-    expect(result.revision.artifactDigest).toBe(fixture.digest);
-
-    // agent.publish 审计
-    const auditEvents = await listAuditEvents({
-      tenantId,
-      actionType: "agent.publish",
-      targetType: "agent_revision",
-      targetId: revision.id,
-    });
-    expect(auditEvents).toHaveLength(1);
-  });
-
-  it("门禁失败：attestation 未 verified → ArtifactNotVerifiedError，Revision 保持 draft", async () => {
-    const agent = await createAgent({
-      tenantId,
-      agentKey: "agent-2",
-      displayName: "Agent 2",
-      ownerUserId: ownerId,
-    });
-    const revision = await createDraftRevision({
-      tenantId,
-      agentId: agent.id,
-      sourceType: "code",
-      sourceRevision: "git:def",
-      instructionHash: "sha256:instr-v2",
-      agentArtifactRef: "oci://reg/a@sha256:def",
-      modelPolicyJson: {},
-      permissionRequirementsJson: {},
-      delegationPolicyJson: {},
-      agentInterfaceRequirementsJson: {},
-      createdBy: ownerId,
-    });
-
-    // 创建一个 failed attestation
-    const failedAtt = await insertAttestation({
-      tenantId,
-      artifactType: "agent_revision",
-      artifactRevisionId: revision.id,
-      artifactDigest: computeArtifactDigest("c"),
-      signatureBundleRef: "attestation:sig:f",
-      sbomRef: "attestation:sbom:f",
-      provenanceRef: "attestation:prov:f",
-      builderIdentity: "builder:b",
-      verificationState: "failed",
-      failureCode: "signature_invalid",
-      verifiedAt: new Date(),
-    });
-
-    await expect(
-      publishAgentRevisionWithAttestation(
-        tenantId,
-        revision.id,
-        agent.versionNo,
-        failedAtt.id,
-        buildActor(tenantId, "ci-001"),
-      ),
-    ).rejects.toThrow(ArtifactNotVerifiedError);
-
-    // Revision 保持 draft
-    const after = await getRevisionById(revision.id);
-    expect(after?.revisionState).toBe("draft");
-    expect(after?.publishedAt).toBeNull();
-
-    // 不写 agent.publish 审计
-    const auditEvents = await listAuditEvents({
-      tenantId,
-      actionType: "agent.publish",
-      targetType: "agent_revision",
-      targetId: revision.id,
-    });
-    expect(auditEvents).toHaveLength(0);
-  });
-
-  it("发布失败：Revision 非 draft → RevisionStateError（门禁通过后）", async () => {
-    const agent = await createAgent({
-      tenantId,
-      agentKey: "agent-3",
-      displayName: "Agent 3",
-      ownerUserId: ownerId,
-    });
-    const revision = await createDraftRevision({
-      tenantId,
-      agentId: agent.id,
-      sourceType: "code",
-      sourceRevision: "git:ghi",
-      instructionHash: "sha256:instr-v3",
-      agentArtifactRef: "oci://reg/a@sha256:ghi",
-      modelPolicyJson: {},
-      permissionRequirementsJson: {},
-      delegationPolicyJson: {},
-      agentInterfaceRequirementsJson: {},
-      createdBy: ownerId,
-    });
-
-    const fixture = await createVerifiedAttestationFixture(
-      tenantId,
-      "agent_revision",
-      revision.id,
-      "content",
-    );
-
-    // 先发布一次（成功）
-    await publishAgentRevisionWithAttestation(
-      tenantId,
-      revision.id,
-      agent.versionNo,
-      fixture.attestation.id,
-      buildActor(tenantId, "ci-001"),
-    );
-
-    // 第二次发布（已 published）→ RevisionStateError
-    await expect(
-      publishAgentRevisionWithAttestation(
-        tenantId,
-        revision.id,
-        agent.versionNo + 1,
-        fixture.attestation.id,
-        buildActor(tenantId, "ci-001"),
-      ),
-    ).rejects.toThrow();
-  });
-
-  it("Revision绑定的Artifact Digest与Attestation不一致时拒绝发布", async () => {
-    const agent = await createAgent({
-      tenantId,
-      agentKey: "agent-digest-mismatch",
-      displayName: "Agent Digest Mismatch",
-      ownerUserId: ownerId,
-    });
-    const revision = await createDraftRevision({
-      tenantId,
-      agentId: agent.id,
-      sourceType: "code",
-      sourceRevision: "git:digest-mismatch",
-      instructionHash: "sha256:instruction-digest-mismatch",
-      agentArtifactRef: computeArtifactDigest("revision artifact"),
-      modelPolicyJson: {},
-      permissionRequirementsJson: {},
-      delegationPolicyJson: {},
-      agentInterfaceRequirementsJson: {},
-      createdBy: ownerId,
-    });
-    const fixture = await createVerifiedAttestationFixture(
-      tenantId,
-      "agent_revision",
-      revision.id,
-      "different attested artifact",
-    );
-
-    await expect(
-      publishAgentRevisionWithAttestation(
-        tenantId,
-        revision.id,
-        agent.versionNo,
-        fixture.attestation.id,
-        buildActor(tenantId, "ci-digest-mismatch"),
-      ),
-    ).rejects.toThrow(ArtifactNotVerifiedError);
-    expect((await getRevisionById(revision.id))?.revisionState).toBe("draft");
-  });
-});
 
 // ═══════════════════════════════════════════════════════════
 // 7. publishRuntimeRevisionWithAttestation 双门禁集成
@@ -1456,7 +1250,7 @@ describe("publishRuntimeRevisionWithAttestation 双门禁", () => {
     expect(after?.revisionState).toBe("draft");
   });
 
-  it("conformance 门禁失败 → ConformanceGateError，Revision 保持 draft（attestation 门禁已通过）", async () => {
+  it("conformance 门禁失败 → RuntimeConformanceCaseFailedError，Revision 保持 draft（attestation 门禁已通过）", async () => {
     const runtime = await createRuntime({
       tenantId,
       runtimeKey: "rt-3",
@@ -1500,7 +1294,7 @@ describe("publishRuntimeRevisionWithAttestation 双门禁", () => {
         fixture.attestation.id,
         buildActor(tenantId, "ci-001"),
       ),
-    ).rejects.toThrow(ConformanceGateError);
+    ).rejects.toThrow(RuntimeConformanceCaseFailedError);
 
     const after = await getRuntimeRevisionById(revision.id);
     expect(after?.revisionState).toBe("draft");
@@ -1652,14 +1446,16 @@ describe("S03-W04 阶段验收场景", () => {
 
     const beforeAgent = agent;
     await expect(
-      publishAgentRevisionWithAttestation(
+      publishAgentRevision({
         tenantId,
-        revision.id,
-        agent.versionNo,
-        failedAtt.id,
-        buildActor(tenantId, "ci-001"),
-      ),
-    ).rejects.toThrow(ArtifactNotVerifiedError);
+        revisionId: revision.id,
+        agentExpectedVersionNo: agent.versionNo,
+        attestationId: failedAtt.id,
+        actor: buildActor(tenantId, "ci-001"),
+        requestId: "test-publish-fail",
+        idempotencyKey: "test-publish-fail",
+      }),
+    ).rejects.toThrow(AgentPublicationPrerequisiteError);
 
     // Agent.currentRevisionId 保持 null（未发布）
     expect(beforeAgent.currentRevisionId).toBeNull();
@@ -1751,13 +1547,15 @@ describe("S03-W04 阶段验收场景", () => {
     expect(byDigest).toHaveLength(2);
 
     // 发布引用 verified 的那份 → 成功
-    const result = await publishAgentRevisionWithAttestation(
+    const result = await publishAgentRevision({
       tenantId,
-      revision.id,
-      agent.versionNo,
-      verifiedAtt.id,
-      buildActor(tenantId, "ci-002"),
-    );
+      revisionId: revision.id,
+      agentExpectedVersionNo: agent.versionNo,
+      attestationId: verifiedAtt.id,
+      actor: buildActor(tenantId, "ci-002"),
+      requestId: "test-publish-ok",
+      idempotencyKey: "test-publish-ok",
+    });
     expect(result.revision.revisionState).toBe("published");
   });
 

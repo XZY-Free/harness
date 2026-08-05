@@ -16,7 +16,7 @@ import {
   type RouteState,
   deploymentRouteSetTable,
   deploymentRouteTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/routes";
 import {
   createActivateRouteSet,
   RouteSetRequiresAtomicUpdateError,
@@ -155,7 +155,6 @@ export async function listEnabledRouteProjections(
  * 旧名仅作为兼容别名保留，将在下个 major 版本删除。
  * 执行链禁止调用此函数。
  */
-export const getEffectiveRoutes = listEnabledRouteProjections;
 
 // ─── 结果类型 ──────────────────────────────────────────────
 
@@ -308,7 +307,7 @@ export async function upsertDeploymentRoute(params: {
           httpStatus: params.idempotency.httpStatus,
           responseRef: params.idempotency.responseRef,
           serializeResponse: (r) =>
-            params.idempotency?.serializeResponse(r as UpsertDeploymentRouteResult) ?? "{}",
+            params.idempotency?.serializeResponse(r as unknown as UpsertDeploymentRouteResult) ?? "{}",
         }
       : undefined,
   });
@@ -363,7 +362,7 @@ export async function disableDeploymentRoute(params: {
           httpStatus: params.idempotency.httpStatus,
           responseRef: params.idempotency.responseRef,
           serializeResponse: (r) =>
-            params.idempotency?.serializeResponse(r as DisableDeploymentRouteResult) ?? "{}",
+            params.idempotency?.serializeResponse(r as unknown as DisableDeploymentRouteResult) ?? "{}",
         }
       : undefined,
   });
@@ -395,4 +394,4 @@ export type {
   RouteState,
   DeploymentRouteRow,
   DeploymentRouteSetRow,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/routes";

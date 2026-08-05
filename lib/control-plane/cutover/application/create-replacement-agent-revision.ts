@@ -20,7 +20,7 @@ import { db } from "@/lib/db/client";
 import {
   agentRevisionTable,
   agentTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/agents";
 import { and, desc, eq, max } from "drizzle-orm";
 
 export interface ReplacementAgentRevisionResult {

@@ -13,6 +13,7 @@ describe("createDSSEConformanceVerifier", () => {
   it("Fail-closed 骨架: 未实现 SDK → verified=false, failureReason=verifier_not_implemented", async () => {
     const verifier = createDSSEConformanceVerifier({
       allowedRunnerIdentities: ["runner@ci.snowharness.dev"],
+      readConformanceEnvelope: async () => Buffer.from("{}"),
     });
     const result = await verifier.verify({
       runId: "run-1",

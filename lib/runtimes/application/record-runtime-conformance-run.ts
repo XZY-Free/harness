@@ -119,6 +119,7 @@ export function createRecordRuntimeConformanceRun(dependencies: {
         await session.appendOutbox({
           id: newId(),
           tenantId: command.tenantId,
+          eventKey: `runtime-conformance-recorded:${run.id}`,
           eventType: "runtime.conformance.recorded",
           aggregateId: run.id,
           aggregateVersion: 0,

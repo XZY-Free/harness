@@ -23,7 +23,7 @@ import {
   ALL_CONFORMANCE_CASES,
   type ConformanceCaseId,
   type ConformanceCaseResult,
-  ConformanceGateError,
+  RuntimeConformanceCaseFailedError,
   MANDATORY_GATE_CASES,
   validateConformanceGate,
 } from "@/lib/runtimes/domain/runtime-conformance";
@@ -775,11 +775,11 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
   it("旧发布入口不能再用调用方自报结果发布", async () => {
     await expect(
       publishRuntimeRevision(tenantId, revisionId, 1, passingAllConformanceResults()),
-    ).rejects.toThrow(ConformanceGateError);
+    ).rejects.toThrow(RuntimeConformanceCaseFailedError);
     expect((await getRuntimeRevisionById(revisionId))?.revisionState).toBe("draft");
   });
 
-  it("publishRuntimeRevision 门禁失败 → 抛 ConformanceGateError + 不持久化结果", async () => {
+  it("publishRuntimeRevision 门禁失败 → 抛 RuntimeConformanceCaseFailedError + 不持久化结果", async () => {
     await expect(
       publishRuntimeRevision(
         tenantId,
@@ -787,7 +787,7 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
         1,
         failingConformanceResults("event-batch-idempotent"),
       ),
-    ).rejects.toThrow(ConformanceGateError);
+    ).rejects.toThrow(RuntimeConformanceCaseFailedError);
 
     // Revision 保持 draft
     const after = await getRuntimeRevisionById(revisionId);
@@ -809,7 +809,7 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
       publishRuntimeRevision(tenantId, revisionId, 1, passingConformanceResults(), {
         adapterDigest: "sha256:legacy",
       }),
-    ).rejects.toThrow(ConformanceGateError);
+    ).rejects.toThrow(RuntimeConformanceCaseFailedError);
     expect(await listConformanceResultsByRevision(revisionId)).toHaveLength(0);
   });
 });

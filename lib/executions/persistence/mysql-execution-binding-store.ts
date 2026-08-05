@@ -13,18 +13,20 @@ import type {
   ExecutionBindingStore,
   StoreExecutionBindingInput,
 } from "@/lib/executions/persistence/execution-binding-store";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import {
   deploymentRouteSetTable,
   deploymentRouteTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/routes";
 import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
 import {
   executionBindingTable,
   invocationTable,
+} from "@/lib/persistence/schema/executions";
+import {
   runtimeRevisionTable,
   runtimeTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/runtimes";
 import {
   publicationRecord,
   withdrawalRecord,

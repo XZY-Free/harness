@@ -26,7 +26,7 @@ import {
   type AgentRevisionRow,
   type AgentRevisionState,
   agentRevisionTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/agents";
 import { and, desc, eq, max } from "drizzle-orm";
 
 /** 创建 draft Revision 的入参。 */
@@ -232,8 +232,8 @@ export class AgentVersionConflictError extends Error {
 }
 
 /** Re-export 供外部统一从本模块引入类型。 */
-export type { AgentRevisionState, AgentRevisionRow } from "@/lib/persistence/schema/control-plane";
+export type { AgentRevisionState, AgentRevisionRow } from "@/lib/persistence/schema/agents";
 export {
   AGENT_REVISION_STATES,
   AGENT_REVISION_SOURCE_TYPES,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/agents";

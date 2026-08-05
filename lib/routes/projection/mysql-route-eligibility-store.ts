@@ -12,7 +12,7 @@ import type {
   UpsertProjectionInput,
 } from "./route-eligibility-store";
 import { and, eq, sql, inArray } from "drizzle-orm";
-import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
+import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 
 export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
   upsertProjection: async (input: UpsertProjectionInput) => {
@@ -129,7 +129,7 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
       .from(routeEligibilityProjection)
       .where(eq(routeEligibilityProjection.routeId, input.routeId))
       .limit(1);
-    return result;
+    return result!;
   },
 
   getProjectionByRoute: async (routeId: string) => {

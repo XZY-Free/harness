@@ -51,6 +51,7 @@ export interface ArtifactAttestationPersistenceSession {
   appendOutbox(params: {
     id: string;
     tenantId: string;
+    eventKey: string;
     /** §3.2: 事件类型固定为 artifact.attestation.recorded。 */
     eventType: "artifact.attestation.recorded";
     aggregateId: string;
@@ -215,6 +216,7 @@ export function createRecordArtifactAttestation(dependencies: {
       await session.appendOutbox({
         id: newId(),
         tenantId: command.tenantId,
+        eventKey: `artifact-attestation-recorded:${attestation.id}`,
         eventType: "artifact.attestation.recorded",
         aggregateId: attestation.id,
         aggregateVersion: 0,

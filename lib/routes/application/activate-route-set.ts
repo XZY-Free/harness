@@ -113,6 +113,8 @@ export function createActivateRouteSet(dependencies: {
           routeSetId: command.routeSetId,
           routeSetVersionNo: 0, // 从幂等记录恢复
           activations: [],
+          auditEventId: "",
+          affectsNewInvocationsOnly: true as const,
           idempotent: true as const,
         };
       }
@@ -343,8 +345,9 @@ export function createActivateRouteSet(dependencies: {
               routeRevisionId: lastRevision.id,
               routeSetId: lastRevision.routeSetId,
               activationSequence: await session.nextActivationSequence(currentRoute.id),
-              activationState: "disabled",
+              activationState: "disabled" as const,
               previousRouteRevisionId: lastRevision.id,
+              previousRouteActivationId: null,
               routeSetVersionNo: nextVersionNo,
               actorType: command.actor.actorType,
               actorId: command.actor.actorId,

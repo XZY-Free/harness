@@ -242,7 +242,6 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
       /** §4.6: 从候选透传 Projection 版本号。 */
       projectionVersionNo: selected.candidate.projectionVersionNo,
     },
-    },
     eligibleCandidateCount: group.length,
   };
 }

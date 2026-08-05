@@ -75,7 +75,7 @@ describe("detectProjectionDrift", () => {
       routeState: "enabled",
     }]);
     expect(result.hasDrift).toBe(true);
-    expect(result.drifts[0].kind).toBe("revision_mismatch");
+    expect(result.drifts[0]?.kind).toBe("revision_mismatch");
   });
 
   it("投影缺失 Route → missing_in_projection", () => {
@@ -92,7 +92,7 @@ describe("detectProjectionDrift", () => {
     });
     const result = detectProjectionDrift(state, []);
     expect(result.hasDrift).toBe(true);
-    expect(result.drifts[0].kind).toBe("missing_in_projection");
+    expect(result.drifts[0]?.kind).toBe("missing_in_projection");
   });
 
   it("状态不一致 → state_mismatch", () => {
@@ -116,6 +116,6 @@ describe("detectProjectionDrift", () => {
       routeState: "enabled",
     }]);
     expect(result.hasDrift).toBe(true);
-    expect(result.drifts[0].kind).toBe("state_mismatch");
+    expect(result.drifts[0]?.kind).toBe("state_mismatch");
   });
 });

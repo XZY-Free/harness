@@ -5,15 +5,15 @@
  * 1. Schema 阶段: 使用官方 CycloneDX JSON Schema 验证文档结构
  *    - Schema 失败 → `failed`
  *    - Schema 合法但证据不充分 → `indeterminate`
- * 2. Policy 阶段: 业务规则验证（保留为额外规则）
+ * 2. Policy 阶段: 业务规则验证
  *    - bomFormat = "CycloneDX"
  *    - specVersion ∈ 允许列表
  *    - license 使用 SPDX 表达
  *    - 依赖图完整性
- *
- * 当前手写检查保留为额外业务规则。
- * 完整 JSON Schema 验证需要引入 @cyclonedx/cyclonedx-schema 依赖。
  */
+
+import Ajv from "ajv";
+import cyclonedxSchema from "./schemas/cyclonedx-1.6.schema.json";
 
 /** CycloneDX 验证输入。 */
 export interface ValidateCycloneDXInput {
@@ -21,8 +21,6 @@ export interface ValidateCycloneDXInput {
   document: unknown;
   /** 允许的 specVersion 列表。 */
   allowedVersions?: string[];
-  /** §8.3: 是否使用完整 JSON Schema 验证（需要 Schema 依赖）。 */
-  useJsonSchema?: boolean;
 }
 
 /** CycloneDX 验证结果。 */
@@ -39,7 +37,7 @@ export interface ValidateCycloneDXResult {
   hasDependencyGraph?: boolean;
   /** 是否所有 license 使用 SPDX。 */
   allLicensesSpdx?: boolean;
-  /** §8.3: JSON Schema 验证结果。 */
+  /** JSON Schema 验证结果。 */
   schemaValid?: boolean;
   /** 失败原因。 */
   failureReasons?: string[];
@@ -47,10 +45,14 @@ export interface ValidateCycloneDXResult {
 
 const DEFAULT_ALLOWED_VERSIONS = ["1.6", "1.7"];
 
+// 初始化 Ajv + CycloneDX Schema 编译（模块级单例）
+const ajv = new Ajv({ strict: false });
+const validateCycloneDXSchema = ajv.compile(cyclonedxSchema);
+
 /**
  * §8.3: 验证 CycloneDX SBOM 文档 — 两阶段验证。
  *
- * Phase 1: JSON Schema 验证（如果启用且可用）
+ * Phase 1: JSON Schema 验证（使用官方 CycloneDX 1.6 Schema）
  * Phase 2: 业务 Policy 验证
  */
 export function validateCycloneDX(input: ValidateCycloneDXInput): ValidateCycloneDXResult {
@@ -64,32 +66,27 @@ export function validateCycloneDX(input: ValidateCycloneDXInput): ValidateCyclon
   const failures: string[] = [];
 
   // ─── Phase 1: JSON Schema 验证 ────────────────────────────
-  let schemaValid: boolean | undefined;
-
-  if (input.useJsonSchema) {
-    const schemaResult = validateAgainstCycloneDXSchema(doc);
-    schemaValid = schemaResult.valid;
-    if (!schemaResult.valid) {
-      // §8.3: Schema 失败 → failed
-      return {
-        status: "failed",
-        schemaValid: false,
-        failureReasons: [
-          `json_schema_validation_failed: ${schemaResult.errorCount} 个违规`,
-          ...schemaResult.errors.slice(0, 5), // 最多报告 5 个
-        ],
-      };
-    }
+  const schemaValid = validateCycloneDXSchema(doc) as boolean;
+  if (!schemaValid) {
+    const schemaErrors = (validateCycloneDXSchema.errors ?? []).map(
+      (e) => `${e.instancePath ?? "/"}: ${e.message ?? "unknown"}`,
+    );
+    return {
+      status: "failed",
+      schemaValid: false,
+      failureReasons: [
+        `json_schema_validation_failed: ${schemaErrors.length} 个违规`,
+        ...schemaErrors.slice(0, 5),
+      ],
+    };
   }
 
   // ─── Phase 2: 业务 Policy 验证 ────────────────────────────
 
   // 1. bomFormat
-  const bomFormat = doc.$schema !== undefined ? "CycloneDX" : (doc.bomFormat as string | undefined);
-  if (bomFormat !== "CycloneDX" && !doc.$schema?.toString().includes("cyclonedx")) {
-    if (!doc.$schema) {
-      failures.push("bomFormat 不是 CycloneDX 且无 $schema");
-    }
+  const bomFormat = doc.bomFormat as string | undefined;
+  if (bomFormat !== "CycloneDX") {
+    failures.push("bomFormat 不是 CycloneDX");
   }
 
   // 2. specVersion
@@ -143,12 +140,12 @@ export function validateCycloneDX(input: ValidateCycloneDXInput): ValidateCyclon
       componentCount,
       hasDependencyGraph,
       allLicensesSpdx,
-      schemaValid,
+      schemaValid: true,
       failureReasons: failures,
     };
   }
 
-  // §8.3: Schema 合法但证据不充分 → indeterminate
+  // Schema 合法但证据不充分 → indeterminate
   if (!hasDependencyGraph) {
     return {
       status: "indeterminate",
@@ -157,7 +154,7 @@ export function validateCycloneDX(input: ValidateCycloneDXInput): ValidateCyclon
       componentCount,
       hasDependencyGraph: false,
       allLicensesSpdx,
-      schemaValid,
+      schemaValid: true,
       failureReasons: ["缺少依赖图，无法确认依赖完整性"],
     };
   }
@@ -169,49 +166,6 @@ export function validateCycloneDX(input: ValidateCycloneDXInput): ValidateCyclon
     componentCount,
     hasDependencyGraph: true,
     allLicensesSpdx,
-    schemaValid,
-  };
-}
-
-/**
- * §8.3: 使用完整 CycloneDX JSON Schema 验证。
- *
- * 需要引入 @cyclonedx/cyclonedx-schema 依赖 + Ajv。
- * 未安装时 fallback 到基础验证（bomFormat + specVersion 检查）。
- */
-function validateAgainstCycloneDXSchema(doc: Record<string, unknown>): {
-  valid: boolean;
-  errorCount: number;
-  errors: string[];
-} {
-  // §8.3: 真实 Schema 验证接入点
-  // 安装 @cyclonedx/cyclonedx-schema + ajv 后替换:
-  //
-  // import Ajv from "ajv";
-  // import { schema as cyclonedxSchema } from "@cyclonedx/cyclonedx-schema";
-  // const ajv = new Ajv();
-  // const validate = ajv.compile(cyclonedxSchema);
-  // const valid = validate(doc);
-  // return { valid, errorCount: validate.errors?.length ?? 0, errors: validate.errors?.map(e => e.message ?? "") ?? [] };
-  //
-  // 当前 fallback: 基础结构检查
-  const errors: string[] = [];
-
-  if (!doc.bomFormat && !doc.$schema) {
-    errors.push("缺少 bomFormat 和 $schema");
-  }
-
-  if (!doc.specVersion) {
-    errors.push("缺少 specVersion");
-  }
-
-  if (!doc.metadata) {
-    errors.push("缺少 metadata");
-  }
-
-  return {
-    valid: errors.length === 0,
-    errorCount: errors.length,
-    errors,
+    schemaValid: true,
   };
 }

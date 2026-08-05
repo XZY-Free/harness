@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -206,10 +207,11 @@ export async function PUT(
       routeSetId,
       expectedVersionNo: body.expected_version_no,
       desiredRoutes: body.routes.map((r) => ({
-        routeId: r.route_id,
+        routeId: r.route_id ?? "",
+        routeKey: `route-${r.route_id ?? randomUUID()}`,
         routeGroupId: r.route_group_id,
-        agentRevisionId: r.agent_revision_id,
-        runtimeRevisionId: r.runtime_revision_id,
+        agentRevisionId: r.agent_revision_id ?? "",
+        runtimeRevisionId: r.runtime_revision_id ?? "",
         policyRevisionId: r.policy_revision_id ?? null,
         modelPolicyRevisionId: r.model_policy_revision_id ?? null,
         toolsetRevisionId: r.toolset_revision_id ?? null,
@@ -218,7 +220,7 @@ export async function PUT(
         effectiveFrom: r.effective_from ? new Date(r.effective_from) : null,
         effectiveUntil: r.effective_until ? new Date(r.effective_until) : null,
         eligibilityConditions: r.eligibility_conditions ?? {},
-        activationState: r.activation_state,
+        activationState: (r.activation_state ?? "active") as "active" | "disabled",
       })),
       actor: actorFromAdminPrincipal(principal),
       reason: body.reason,

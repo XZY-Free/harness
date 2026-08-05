@@ -12,6 +12,7 @@
  */
 
 import type {
+  RouteControlPlaneEvidence,
   RouteResolutionCandidate,
   RouteResolutionOutcome,
   ResolveRouteCandidatesInput,
@@ -230,7 +231,7 @@ function computeDiffReason(
 
 /** §4.6: 从 controlPlaneEvidence 提取证据 ID 集合。 */
 function extractEvidenceIds(
-  evidence: Record<string, unknown>,
+  evidence: RouteControlPlaneEvidence,
 ): { attestationIds: string[]; publicationRecordIds: string[]; conformanceRunIds: string[] } {
   const attestationIds: string[] = [];
   const publicationRecordIds: string[] = [];

@@ -35,10 +35,8 @@ import {
   setArtifactStoreOverride,
   setBuilderKeyRegistryOverride,
 } from "@/lib/artifacts/infrastructure/artifact-store-provider";
-import {
-  listAttestationsByRevision,
-  verifyAndPersistAttestation,
-} from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { listAttestationsByRevision } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";

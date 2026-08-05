@@ -193,7 +193,7 @@ export function createPublishRuntimeRevision(dependencies: {
 
       // 15. 创建 PublicationRecord — attestationIds 必须非空
       const publicationRecordId = newId();
-      const attestationIds = [attestation.id];
+      const attestationIds = [attestation.attestationId];
       await session.appendPublication({
         id: publicationRecordId,
         tenantId: command.tenantId,
@@ -248,7 +248,7 @@ export function createPublishRuntimeRevision(dependencies: {
           runtime_id: revision.runtimeId,
           revision_no: revision.revisionNo,
           revision_state: "published",
-          attestation_id: attestation.id,
+          attestation_id: attestation.attestationId,
           artifact_digest: attestation.artifactDigest,
           publication_record_id: publicationRecordId,
           conformance_run_id: conformanceRun.id,
@@ -271,7 +271,7 @@ export function createPublishRuntimeRevision(dependencies: {
           runtime_id: revision.runtimeId,
           revision_id: revision.id,
           revision_no: revision.revisionNo,
-          attestation_id: attestation.id,
+          attestation_id: attestation.attestationId,
           audit_event_id: auditEventId,
           publication_record_id: publicationRecordId,
           conformance_run_id: conformanceRun.id,

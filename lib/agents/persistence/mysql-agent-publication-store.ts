@@ -8,7 +8,7 @@ import {
 } from "@/lib/artifacts/persistence/artifact-record";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";

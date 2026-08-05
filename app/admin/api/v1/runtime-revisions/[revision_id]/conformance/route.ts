@@ -19,7 +19,7 @@ import {
   listRuntimeConformanceRuns,
   recordRuntimeConformanceRun,
 } from "@/lib/runtimes/application/runtime-conformance-runs";
-import { ConformanceGateError } from "@/lib/runtimes/domain/runtime-conformance";
+import { RuntimeConformanceCaseFailedError } from "@/lib/runtimes/domain/runtime-conformance";
 import {
   RuntimeArtifactAttestationInvalidError,
   RuntimeArtifactAttestationRequiredError,
@@ -65,7 +65,6 @@ import {
 import { getRuntimeById } from "@/lib/runtimes/persistence/runtime-queries";
 import {
   RuntimeRevisionNotFoundError,
-  RuntimeVersionConflictError,
   getRuntimeRevisionById,
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import {
@@ -479,17 +478,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       }
       return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
-    if (err instanceof ConformanceGateError) {
+    if (err instanceof RuntimeConformanceCaseFailedError) {
       return v11Error(
         "BUSINESS_CONSTRAINT_VIOLATION",
         `Conformance 门禁失败，缺失/失败的 mandatory case：${err.failedCases.join(", ")}`,
         { requestId },
-      );
-    }
-    if (err instanceof RuntimeVersionConflictError) {
-      return v11EtagMismatch(
-        requestId,
-        `Runtime ${err.runtimeId} versionNo 不匹配（期望 ${err.expectedVersionNo}），并发冲突`,
       );
     }
     if (err instanceof RuntimeRevisionNotFoundError) {

@@ -1,6 +1,6 @@
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
-import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { db } from "@/lib/db/client";
 import { v11AgentRevision } from "@/lib/v11/schema/agent";
 import { eq } from "drizzle-orm";

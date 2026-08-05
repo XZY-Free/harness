@@ -41,7 +41,7 @@ import { withdrawalRecord } from "@/lib/publications/persistence/publication-rec
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
-  getEffectiveRoutes,
+  listEnabledRouteProjections,
   upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
 import {
@@ -1248,19 +1248,19 @@ describe("V11 Dispatcher 调度", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("V11 路由解析与有效路由查询", () => {
-  it("getEffectiveRoutes 返回 enabled 路由", async () => {
+  it("listEnabledRouteProjections 返回 enabled 路由", async () => {
     const ctx = await seedFullDispatchContext();
 
-    const routes = await getEffectiveRoutes(ctx.tenantId, ctx.agentId, DEFAULT_ROUTE_SCOPE_KEY);
+    const routes = await listEnabledRouteProjections(ctx.tenantId, ctx.agentId, DEFAULT_ROUTE_SCOPE_KEY);
     expect(routes).toHaveLength(1);
     expect(routes[0]?.routeState).toBe("enabled");
     expect(routes[0]?.agentRevisionId).toBe(ctx.agentRevision.id);
   });
 
-  it("getEffectiveRoutes 跨租户返回空", async () => {
+  it("listEnabledRouteProjections 跨租户返回空", async () => {
     const ctx = await seedFullDispatchContext();
 
-    const routes = await getEffectiveRoutes(
+    const routes = await listEnabledRouteProjections(
       "11111111-1111-4111-8111-111111111111",
       ctx.agentId,
       DEFAULT_ROUTE_SCOPE_KEY,

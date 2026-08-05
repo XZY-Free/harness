@@ -1,7 +1,7 @@
+import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import {
   AttestationAlreadyRevokedError,
   AttestationNotFoundError,
-  getAttestationById,
   revokeAttestation,
 } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 /**

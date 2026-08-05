@@ -12,6 +12,7 @@
  */
 
 import type { HostedRuntimeControlPlane } from "@/lib/runtimes/application/provision-hosted-runtime";
+import type { HostedGateways } from "@/lib/runtimes/infrastructure/hosted-gateways";
 import type { HostedProvisioningRequestStore, StepCheckpoint } from "@/lib/runtimes/persistence/hosted-provisioning-request-store";
 import type { HostedProvisioningRequestRow } from "@/lib/runtimes/persistence/hosted-provisioning-request-record";
 import {
@@ -33,7 +34,10 @@ export interface SagaStepResult {
 
 /** Saga 配置。 */
 export interface SagaConfig {
-  controlPlane: HostedRuntimeControlPlane;
+  /** §6.5: Gateway 接口 — 优先使用，替代 controlPlane 单体。 */
+  gateways?: HostedGateways;
+  /** 旧单体接口 — 过渡期保留，gateways 优先。 */
+  controlPlane?: HostedRuntimeControlPlane;
   store: HostedProvisioningRequestStore;
   /** 最大重试次数。 */
   maxAttempts: number;
@@ -46,6 +50,16 @@ export interface SagaConfig {
  * §6.3: 使用细化步骤名称。
  */
 export function createHostedProvisioningSaga(config: SagaConfig) {
+  // §6.5: 解析控制面 — 优先使用 Gateway，回退到旧单体
+  const cp: HostedRuntimeControlPlane = config.gateways
+    ? {
+        resolveEligibleRoute: (cmd) => config.gateways!.routeReader.resolveEligibleRoute(cmd),
+        ensurePublishedAgentRevision: (cmd) => config.gateways!.agentPublication.ensurePublishedAgentRevision(cmd),
+        ensurePublishedRuntimeRevision: (cmd) => config.gateways!.runtimePublication.ensurePublishedRuntimeRevision(cmd),
+        activateRoute: (cmd) => config.gateways!.routeActivation.activateRoute(cmd),
+      }
+    : config.controlPlane!;
+
   return async function executeProvisioningSaga(
     request: HostedProvisioningRequestRow,
   ): Promise<SagaStepResult> {
@@ -112,7 +126,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       return { step: "publishing_agent", completed: true, newState: "running" };
     }
 
-    const agentRevision = await config.controlPlane.ensurePublishedAgentRevision({
+    const agentRevision = await cp.ensurePublishedAgentRevision({
       tenantId: request.tenantId,
       agentId: request.agentId,
     });
@@ -158,7 +172,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       return { step: "publishing_runtime", completed: true, newState: "running" };
     }
 
-    const runtimeRevision = await config.controlPlane.ensurePublishedRuntimeRevision({
+    const runtimeRevision = await cp.ensurePublishedRuntimeRevision({
       tenantId: request.tenantId,
       agentId: request.agentId,
     });
@@ -208,7 +222,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     };
 
     // 激活 Route
-    await config.controlPlane.activateRoute({
+    await config.controlPlane!.activateRoute({
       tenantId: request.tenantId,
       agentId: request.agentId,
       routeScopeKey: request.routeScopeKey,
@@ -231,7 +245,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     request: HostedProvisioningRequestRow,
   ): Promise<SagaStepResult> {
     // 最终验证：RouteResolver 通过
-    const route = await config.controlPlane.resolveEligibleRoute({
+    const route = await config.controlPlane!.resolveEligibleRoute({
       tenantId: request.tenantId,
       agentId: request.agentId,
       routeScopeKey: request.routeScopeKey,

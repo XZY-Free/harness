@@ -11,8 +11,8 @@
  * - 校验 Idempotency-Key（必填）+ If-Match（Revision ETag，必填）。
  * - 校验 Revision 存在且属于当前租户（跨租户隐藏为 404）。
  * - 校验 If-Match ETag 与 Revision 当前的 agent-revision-{revisionNo} 一致（412 ETAG_MISMATCH）。
- * - 读取 Agent 当前 versionNo（用于 publishAgentRevisionWithAttestation 乐观锁）。
- * - 调用 publishAgentRevisionWithAttestation Facade；正式 Application Service 负责发布事务。
+ * - 读取 Agent 当前 versionNo（用于乐观锁）。
+ * - 调用 publishAgentRevision Application Service 完成发布事务。
  * - Idempotency 完成与发布事实同事务提交，Route 只返回原有 200 投影。
  *
  * 错误映射：
@@ -33,9 +33,16 @@ import {
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
 import {
-  ArtifactNotVerifiedError,
-  publishAgentRevisionWithAttestation,
-} from "@/lib/artifacts/persistence/artifact-attestation-queries";
+  createPublishAgentRevision,
+} from "@/lib/agents/application/publish-agent-revision";
+import {
+  AgentPublicationPrerequisiteError,
+  AgentPublicationVersionConflictError,
+  AgentRevisionPublicationNotFoundError,
+  AgentRevisionPublicationStateError,
+} from "@/lib/agents/domain/agent-revision-publication-policy";
+import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
+import { ArtifactNotVerifiedError } from "@/lib/artifacts/domain/artifact-attestation";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -233,17 +240,21 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   }
 
   // 11. 执行业务：attestation 门禁 + publish + agent.publish 审计
+  const publishAgentRevision = createPublishAgentRevision({
+    store: mysqlAgentPublicationStore,
+  });
+
   try {
-    const result = await publishAgentRevisionWithAttestation(
-      principal.tenantId,
+    const publishResult = await publishAgentRevision({
+      tenantId: principal.tenantId,
       revisionId,
-      agent.versionNo,
-      body.artifact_attestation_id,
-      actorFromAdminPrincipal(principal),
+      agentExpectedVersionNo: agent.versionNo,
+      attestationId: body.artifact_attestation_id,
+      actor: actorFromAdminPrincipal(principal),
       requestId,
-      {
+      idempotencyKey,
+      idempotency: {
         recordId,
-        idempotencyKey,
         httpStatus: 200,
         responseRef: revisionId,
         serializeResponse: (published) =>
@@ -254,13 +265,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
             audit_event_id: published.auditEventId,
           }),
       },
-    );
+    });
 
     const responseBody = {
-      id: result.revision.id,
-      revision_state: result.revision.revisionState,
-      published_at: result.revision.publishedAt?.toISOString() ?? null,
-      audit_event_id: result.auditEventId,
+      id: publishResult.revision.id,
+      revision_state: publishResult.revision.revisionState,
+      published_at: publishResult.revision.publishedAt?.toISOString() ?? null,
+      audit_event_id: publishResult.auditEventId,
     };
 
     return v11Ok(responseBody, {
@@ -270,14 +281,22 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   } catch (err) {
     await failRecord(recordId);
 
+    if (err instanceof AgentPublicationPrerequisiteError) {
+      return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
+    }
     if (err instanceof ArtifactNotVerifiedError) {
       return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
-    if (err instanceof AgentVersionConflictError) {
+    if (err instanceof AgentPublicationVersionConflictError || err instanceof AgentVersionConflictError) {
+      const agentId = err instanceof AgentPublicationVersionConflictError ? err.agentId : err.agentId;
+      const expectedVersionNo = err instanceof AgentPublicationVersionConflictError ? err.expectedVersionNo : err.expectedVersionNo;
       return v11EtagMismatch(
         requestId,
-        `Agent ${err.agentId} versionNo 不匹配（期望 ${err.expectedVersionNo}），并发冲突`,
+        `Agent ${agentId} versionNo 不匹配（期望 ${expectedVersionNo}），并发冲突`,
       );
+    }
+    if (err instanceof AgentRevisionPublicationStateError) {
+      return v11EtagMismatch(requestId, `AgentRevision ${err.revisionId} 状态已并发变化`);
     }
     if (err instanceof RevisionStateError) {
       return v11EtagMismatch(requestId, `AgentRevision ${err.revisionId} 状态已并发变化`);

@@ -9,7 +9,7 @@ import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
-import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/control-plane";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import {
   ALL_CONFORMANCE_CASES,
@@ -90,15 +90,19 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
             .for("update");
           if (!row || !row.attestation.artifactId) return null;
           return {
-            id: row.attestation.id,
             tenantId: row.attestation.tenantId,
-            artifactType: row.attestation.artifactType,
+            artifactType: row.attestation.artifactType as "agent_revision" | "runtime_revision",
             artifactRevisionId: row.attestation.artifactRevisionId,
             artifactId: row.attestation.artifactId,
             artifactDigest: row.attestation.artifactDigest,
-            verificationState: row.attestation.verificationState,
+            attestationId: row.attestation.id,
+            verificationState: row.attestation.verificationState as "verified" | "failed" | "pending",
+            attestationFormat: (row.attestation.attestationFormat ?? "legacy_custom") as "legacy_custom" | "in_toto_dsse" | "sigstore_bundle",
+            verifiedAt: row.attestation.verifiedAt,
             revokedAt: row.attestation.revokedAt,
             revocationRecordId: row.revocation?.id ?? null,
+            verificationPolicyRevisionId: row.attestation.policyRevisionId ?? null,
+            bundleDigest: row.attestation.signatureBundleRef ?? null,
           };
         },
         /**

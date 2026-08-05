@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
-import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
+import { resolveOutboxAppend, type ControlPlaneOutboxAppendParams } from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
-import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/control-plane";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
@@ -122,7 +122,7 @@ export const mysqlRuntimeConformanceRunStore: RuntimeConformanceRunStore = {
             occurredAt: params.occurredAt,
           });
         },
-        async appendOutbox(params) {
+        async appendOutbox(params: ControlPlaneOutboxAppendParams) {
           const resolved = resolveOutboxAppend(params);
           await tx.insert(controlPlaneOutboxEvent).values({
             id: resolved.id,

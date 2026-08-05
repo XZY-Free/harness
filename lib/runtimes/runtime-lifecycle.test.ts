@@ -4,11 +4,11 @@
  * 覆盖：
  * - runtime-queries：createRuntime/getRuntimeById/getRuntimeByKey/listRuntimes/updateRuntimeLifecycle/setCurrentRuntimeRevision/softDeleteRuntime。
  * - runtime-revision-queries：createDraft/updateDraft/publish/withdraw/get/getByRuntime/getLatestPublished。
- * - runtime-conformance：validateConformanceGate（4 mandatory case）/ isCapabilitySubset / ConformanceGateError。
+ * - runtime-conformance：validateConformanceGate（4 mandatory case）/ isCapabilitySubset / RuntimeConformanceCaseFailedError。
  * - 不可变性约束：published 业务内容不可改；withdrawn 不删除历史引用；revisionNo 单调递增。
  * - 生命周期约束：retired 终态不可变更；软删除仅 draft/disabled 允许。
  * - 乐观锁：versionNo 不匹配返回 null/false；publishRuntimeRevision 冲突抛 RuntimePublicationVersionConflictError。
- * - Conformance 门禁：mandatory case 失败 → publish 抛 ConformanceGateError，Revision 保持 draft。
+ * - Conformance 门禁：mandatory case 失败 → publish 抛 RuntimeConformanceCaseFailedError，Revision 保持 draft。
  * - 跨租户隔离：getRuntimeById/listRuntimes 按 tenantId 过滤。
  */
 import { db } from "@/lib/db/client";
@@ -20,13 +20,14 @@ import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/re
 import {
   ALL_CONFORMANCE_CASES,
   type ConformanceCaseResult,
-  ConformanceGateError,
+  RuntimeConformanceCaseFailedError,
   MANDATORY_GATE_CASES,
   isCapabilitySubset,
   validateConformanceGate,
 } from "@/lib/runtimes/domain/runtime-conformance";
 import { canonicalizeRuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import {
   RuntimeLifecycleError,
   createRuntime,
@@ -144,7 +145,7 @@ async function publishTrustedRevision(
   };
   const record = createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    signingSecret: () => TRUSTED_SECRET,
+    verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
   });
   await record({
     tenantId,
@@ -278,8 +279,8 @@ describe("V11 runtime-conformance（纯逻辑）", () => {
     expect(result.missing).toEqual(["steer"]);
   });
 
-  it("ConformanceGateError 包含 failedCases", () => {
-    const error = new ConformanceGateError(["event-batch-idempotent"]);
+  it("RuntimeConformanceCaseFailedError 包含 failedCases", () => {
+    const error = new RuntimeConformanceCaseFailedError(["event-batch-idempotent"]);
     expect(error.failedCases).toEqual(["event-batch-idempotent"]);
     expect(error.message).toContain("event-batch-idempotent");
   });
@@ -612,7 +613,7 @@ describe("V11 runtime-revision-queries", () => {
     expect(runtimeRow?.versionNo).toBe(2);
   });
 
-  it("publishRuntimeRevision conformance 门禁失败 → 抛 ConformanceGateError，Revision 保持 draft", async () => {
+  it("publishRuntimeRevision conformance 门禁失败 → 抛 RuntimeConformanceCaseFailedError，Revision 保持 draft", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     await expect(
       publishRuntimeRevision(
@@ -621,7 +622,7 @@ describe("V11 runtime-revision-queries", () => {
         1,
         failingConformanceResults("event-batch-idempotent"),
       ),
-    ).rejects.toThrow(ConformanceGateError);
+    ).rejects.toThrow(RuntimeConformanceCaseFailedError);
 
     // Revision 保持 draft
     const after = await getRuntimeRevisionById(rev.id);
@@ -633,21 +634,21 @@ describe("V11 runtime-revision-queries", () => {
     expect(runtimeRow?.currentRevisionId).toBeNull();
   });
 
-  it("publishRuntimeRevision conformance 缺失 mandatory case → 抛 ConformanceGateError", async () => {
+  it("publishRuntimeRevision conformance 缺失 mandatory case → 抛 RuntimeConformanceCaseFailedError", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     // 只提交 3 个（缺 credential-never-in-model-data）
     const partialResults = passingConformanceResults().filter(
       (r) => r.caseId !== "credential-never-in-model-data",
     );
     await expect(publishRuntimeRevision(tenantId, rev.id, 1, partialResults)).rejects.toThrow(
-      ConformanceGateError,
+      RuntimeConformanceCaseFailedError,
     );
   });
 
-  it("publishRuntimeRevision conformance 空 results → 抛 ConformanceGateError（4 个全缺）", async () => {
+  it("publishRuntimeRevision conformance 空 results → 抛 RuntimeConformanceCaseFailedError（4 个全缺）", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     const error = await publishRuntimeRevision(tenantId, rev.id, 1, []).catch((e) => e);
-    expect(error).toBeInstanceOf(ConformanceGateError);
+    expect(error).toBeInstanceOf(RuntimeConformanceCaseFailedError);
     expect(error.failedCases).toHaveLength(16);
   });
 
@@ -799,7 +800,7 @@ describe("V11 S03-W02 阶段验收场景", () => {
       1,
       failingConformanceResults("cancel-request-not-terminal"),
     ).catch((e) => e);
-    expect(error).toBeInstanceOf(ConformanceGateError);
+    expect(error).toBeInstanceOf(RuntimeConformanceCaseFailedError);
     // Revision 仍为 draft
     const after = await getRuntimeRevisionById(rev.id);
     expect(after?.revisionState).toBe("draft");

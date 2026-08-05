@@ -45,7 +45,7 @@ describe("ArtifactEvidencePolicy 基础规则", () => {
       validContext,
     );
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe("evidence_tenant_mismatch");
+    expect(result.errors[0]?.code).toBe("evidence_tenant_mismatch");
   });
 
   it("制品类型不一致 → evidence_artifact_type_mismatch", () => {
@@ -54,7 +54,7 @@ describe("ArtifactEvidencePolicy 基础规则", () => {
       validContext,
     );
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe("evidence_artifact_type_mismatch");
+    expect(result.errors[0]?.code).toBe("evidence_artifact_type_mismatch");
   });
 
   it("Revision 绑定不一致 → evidence_revision_binding_mismatch", () => {
@@ -63,7 +63,7 @@ describe("ArtifactEvidencePolicy 基础规则", () => {
       validContext,
     );
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe("evidence_revision_binding_mismatch");
+    expect(result.errors[0]?.code).toBe("evidence_revision_binding_mismatch");
   });
 
   it("未验证 → evidence_not_verified", () => {
@@ -72,7 +72,7 @@ describe("ArtifactEvidencePolicy 基础规则", () => {
       validContext,
     );
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe("evidence_not_verified");
+    expect(result.errors[0]?.code).toBe("evidence_not_verified");
   });
 
   it("已撤销 → evidence_revoked", () => {
@@ -81,7 +81,7 @@ describe("ArtifactEvidencePolicy 基础规则", () => {
       validContext,
     );
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe("evidence_revoked");
+    expect(result.errors[0]?.code).toBe("evidence_revoked");
   });
 
   it("Digest 不一致 → evidence_digest_mismatch", () => {
@@ -90,7 +90,7 @@ describe("ArtifactEvidencePolicy 基础规则", () => {
       validContext,
     );
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe("evidence_digest_mismatch");
+    expect(result.errors[0]?.code).toBe("evidence_digest_mismatch");
   });
 
   it("expectedDigest=null 时跳过 Digest 检查", () => {
@@ -125,7 +125,7 @@ describe("ArtifactEvidencePolicy 三个入口", () => {
       validContext,
     );
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe("evidence_format_not_allowed");
+    expect(result.errors[0]?.code).toBe("evidence_format_not_allowed");
   });
 
   it("validateForNewExecution: in_toto_dsse 允许", () => {

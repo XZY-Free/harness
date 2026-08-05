@@ -59,8 +59,6 @@ export class RuntimeConformanceCaseFailedError extends Error {
   }
 }
 
-/** @deprecated 使用 RuntimeConformanceCaseFailedError */
-export const ConformanceGateError = RuntimeConformanceCaseFailedError;
 
 export class RuntimeRevisionNotFoundError extends Error {
   constructor(public readonly revisionId: string) {
@@ -141,32 +139,3 @@ export class RuntimeConformanceRunInvalidError extends Error {
     this.name = "RuntimeConformanceRunInvalidError";
   }
 }
-
-/** 保留旧名称作为向后兼容别名。 */
-export class RuntimePublicationPrerequisiteError extends RuntimeArtifactAttestationInvalidError {}
-
-/** @deprecated 使用统一 ArtifactEvidencePolicy.validateForPublication() */
-export const LegacyRuntimeArtifactEvidencePolicy = {
-  /**
-   * 旧 Runtime 专属验证入口 — 仅为向后兼容保留。
-   * 新代码必须使用统一 ArtifactEvidencePolicy.validateForPublication()。
-   */
-  validateForRuntimePublication(
-    snapshot: import("@/lib/artifacts/domain/artifact-evidence").ArtifactEvidenceSnapshot,
-    revision: { id: string; tenantId: string; artifactDigest: string | null },
-  ): void {
-    const result = ArtifactEvidencePolicy.validateForPublication(snapshot, {
-      expectedTenantId: revision.tenantId,
-      expectedArtifactType: "runtime_revision",
-      expectedRevisionId: revision.id,
-      expectedDigest: revision.artifactDigest,
-    });
-    if (!result.valid) {
-      throw new RuntimeArtifactAttestationInvalidError(
-        revision.id,
-        snapshot.attestationId,
-        result.errors.map((e) => e.message).join("; "),
-      );
-    }
-  },
-} as const;

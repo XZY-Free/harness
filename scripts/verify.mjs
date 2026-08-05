@@ -1,6 +1,6 @@
 // S01-W04：项目级统一验证入口。
 //
-// 把 V11 契约校验、类型检查、单元测试、真实 MySQL 集成测试、lint 和生产构建组合为
+// 把 契约校验、类型检查、单元测试、真实 MySQL 集成测试、lint 和生产构建组合为
 // 单一命令，作为后续阶段共同验收入口。任一步失败立即终止并返回非零退出码。
 //
 // 用法：node scripts/verify.mjs
@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 const skipBuild = process.env.VERIFY_SKIP_BUILD === "1";
 
 const steps = [
-  { name: "V11 契约校验", cmd: ["pnpm", ["v11:contracts"]] },
+  { name: "契约校验", cmd: ["pnpm", ["contracts:verify"]] },
   { name: "TypeScript 类型检查", cmd: ["pnpm", ["typecheck"]] },
   { name: "单元 + MySQL 集成测试", cmd: ["pnpm", ["test"]] },
   { name: "Lint (biome)", cmd: ["pnpm", ["lint"]] },

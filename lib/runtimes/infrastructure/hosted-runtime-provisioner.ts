@@ -1,11 +1,12 @@
 /** Hosted Runtime 接入的稳定组装入口。 */
 import "@/lib/runtimes/infrastructure/configured-hosted-control-plane-evidence";
 import { createProvisionHostedRuntime } from "@/lib/runtimes/application/provision-hosted-runtime";
-import { mysqlHostedRuntimeControlPlane } from "@/lib/runtimes/persistence/mysql-hosted-runtime-control-plane";
+import { createMysqlHostedGateways } from "@/lib/runtimes/infrastructure/mysql-hosted-gateways";
+import { createControlPlaneFromGateways } from "@/lib/runtimes/infrastructure/hosted-gateways";
 
-const provisionHostedRuntime = createProvisionHostedRuntime({
-  controlPlane: mysqlHostedRuntimeControlPlane,
-});
+const gateways = createMysqlHostedGateways();
+const controlPlane = createControlPlaneFromGateways(gateways);
+const provisionHostedRuntime = createProvisionHostedRuntime({ controlPlane });
 
 export interface HostedRouteBootstrapResult {
   routeId: string;

@@ -106,6 +106,8 @@ export const V11_ERROR_CODES = {
   HOSTED_REVISION_BINDING_INVALID: { http: 422, retryable: false },
   /** §7.1: Cutover Item Readiness 条件不满足。 */
   CUTOVER_ITEM_NOT_READY: { http: 422, retryable: false },
+  /** §7.3: Cutover 激活失败。 */
+  CUTOVER_ACTIVATION_FAILED: { http: 500, retryable: true },
 } as const satisfies Readonly<Record<string, V11ErrorDefinition>>;
 
 export type V11ErrorCode = keyof typeof V11_ERROR_CODES;

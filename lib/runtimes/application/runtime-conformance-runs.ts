@@ -2,6 +2,7 @@ import { runtimeConformanceConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
@@ -10,7 +11,7 @@ import { and, desc, eq } from "drizzle-orm";
 
 const record = createRecordRuntimeConformanceRun({
   store: mysqlRuntimeConformanceRunStore,
-  signingSecret: () => runtimeConformanceConfig.signingSecret,
+  verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
 });
 
 export const recordRuntimeConformanceRun = record;

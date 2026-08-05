@@ -21,7 +21,7 @@ import { db } from "@/lib/db/client";
 import {
   runtimeRevisionTable,
   runtimeTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/runtimes";
 import { protocolContractRevision } from "@/lib/runtimes/domain/runtime-conformance-run";
 import { and, eq, max } from "drizzle-orm";
 

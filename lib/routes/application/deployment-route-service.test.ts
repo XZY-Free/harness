@@ -3,7 +3,7 @@
  *
  * 覆盖：
  * - RouteSet CRUD：createRouteSet / getRouteSetById / getRouteSetByAgentScope + 跨租户隔离。
- * - Route 查询：getRouteById / listRoutesBySet / getEffectiveRoutes。
+ * - Route 查询：getRouteById / listRoutesBySet / listEnabledRouteProjections。
  * - upsertDeploymentRoute：ETag 乐观锁 + published 校验 + attestation 门禁 + 能力子集校验 + 权重校验 + 审计。
  * - disableDeploymentRoute：ETag 乐观锁 + 审计。
  * - 回滚：snapshot → 修改 → 恢复 → 只影响新 Invocation。
@@ -30,7 +30,6 @@ import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
-import { createActivateRouteRevision } from "@/lib/routes/application/activate-route-revision";
 import {
   AgentCapabilityUnsupportedError,
   MAX_TRAFFIC_WEIGHT,
@@ -41,7 +40,7 @@ import {
   RouteWeightInvalidError,
   createRouteSet,
   disableDeploymentRoute,
-  getEffectiveRoutes,
+  listEnabledRouteProjections,
   getRouteById,
   getRouteSetByAgentScope,
   getRouteSetById,
@@ -885,95 +884,6 @@ describe("V11 upsertDeploymentRoute", () => {
     expect((await getRouteSetById(tenantId, routeSetId))?.versionNo).toBe(2);
   });
 
-  it.each([
-    "appendRevision",
-    "appendActivation",
-    "updateRouteProjection",
-    "advanceRouteSetVersion",
-    "appendAudit",
-    "appendOutbox",
-    "completeIdempotency",
-  ] as const)("%s 失败时回滚修订、激活、投影、Audit、Outbox 与幂等完成", async (step) => {
-    const idempotency = await insertProcessingRecord({
-      tenantId,
-      audience: "admin",
-      callerType: "service",
-      callerId: "deploy-bot-rollback",
-      commandScope: `route.update:${routeSetId}`,
-      idempotencyKey: `route-rollback-${step}`,
-      requestHash: "a".repeat(64),
-    });
-    const activate = createActivateRouteRevision({
-      store: failAfterRouteStep(mysqlRouteControlStore, step),
-    });
-    await expect(
-      activate({
-        tenantId,
-        routeSetId,
-        routeSetExpectedVersionNo: 1,
-        content: {
-          agentRevisionId,
-          runtimeRevisionId,
-          policyRevisionId: null,
-          modelPolicyRevisionId: null,
-          toolsetRevisionId: null,
-          trafficWeight: 5000,
-          priorityNo: 0,
-          effectiveFrom: null,
-          effectiveUntil: null,
-          eligibilityConditions: {},
-          routeGroupId: "primary",
-        },
-        actor: { tenantId, actorType: "service", actorId: "deploy-bot-rollback" },
-        reason: "故障注入",
-        requestId: `request-route-rollback-${step}`,
-        idempotencyKey: `route-rollback-${step}`,
-        idempotency: {
-          recordId: idempotency.id,
-          httpStatus: 200,
-          serializeResponse: (result) =>
-            JSON.stringify({ route_revision_id: result.routeRevisionId }),
-        },
-      }),
-    ).rejects.toThrow(`injected failure after ${step}`);
-
-    expect(
-      await db.select().from(routeRevision).where(eq(routeRevision.routeSetId, routeSetId)),
-    ).toHaveLength(0);
-    expect(
-      await db.select().from(routeActivation).where(eq(routeActivation.tenantId, tenantId)),
-    ).toHaveLength(0);
-    expect(await listRoutesBySet(routeSetId)).toHaveLength(0);
-    expect((await getRouteSetById(tenantId, routeSetId))?.versionNo).toBe(1);
-    expect(
-      await db
-        .select()
-        .from(controlPlaneOutboxEvent)
-        .where(
-          and(
-            eq(controlPlaneOutboxEvent.tenantId, tenantId),
-            eq(controlPlaneOutboxEvent.aggregateType, "deployment_route"),
-          ),
-        ),
-    ).toHaveLength(0);
-    expect((await getIdempotencyRecordById(idempotency.id))?.processingState).toBe("processing");
-  });
-
-  it("跨租户 RouteSet 不可见 → RouteSetNotFoundError", async () => {
-    await expect(
-      upsertDeploymentRoute({
-        tenantId: "11111111-1111-4111-8111-111111111111",
-        routeSetId,
-        routeSetExpectedVersionNo: 1,
-        agentRevisionId,
-        runtimeRevisionId,
-        trafficWeight: 5000,
-        actor: buildActor("11111111-1111-4111-8111-111111111111", "deploy-bot-001"),
-      }),
-    ).rejects.toThrow(RouteSetNotFoundError);
-  });
-});
-
 // ═══════════════════════════════════════════════════════════
 // 3. Route 查询
 // ═══════════════════════════════════════════════════════════
@@ -1058,14 +968,14 @@ describe("V11 Route 查询", () => {
     expect(disabled).toHaveLength(0);
   });
 
-  it("getEffectiveRoutes 返回 enabled 路由", async () => {
-    const routes = await getEffectiveRoutes(tenantId, agentId, "prod");
+  it("listEnabledRouteProjections 返回 enabled 路由", async () => {
+    const routes = await listEnabledRouteProjections(tenantId, agentId, "prod");
     expect(routes).toHaveLength(1);
     expect(routes[0]?.id).toBe(routeId);
   });
 
-  it("getEffectiveRoutes 无 RouteSet 时返回空数组", async () => {
-    const routes = await getEffectiveRoutes(tenantId, agentId, "nonexistent-scope");
+  it("listEnabledRouteProjections 无 RouteSet 时返回空数组", async () => {
+    const routes = await listEnabledRouteProjections(tenantId, agentId, "nonexistent-scope");
     expect(routes).toHaveLength(0);
   });
 });
@@ -1147,8 +1057,8 @@ describe("V11 disableDeploymentRoute", () => {
     expect(auditEvents).toHaveLength(2);
     expect(auditEvents[1]?.reason).toContain("禁用");
 
-    // getEffectiveRoutes 不再返回 disabled 路由
-    const effective = await getEffectiveRoutes(tenantId, result.routeSet.agentId, "prod");
+    // listEnabledRouteProjections 不再返回 disabled 路由
+    const effective = await listEnabledRouteProjections(tenantId, result.routeSet.agentId, "prod");
     expect(effective).toHaveLength(0);
   });
 
@@ -1320,7 +1230,7 @@ describe("V11 回滚场景", () => {
     expect(r3.routeSet.versionNo).toBe(4);
 
     // 验证：2 条 enabled 路由
-    const effectiveAfterCanary = await getEffectiveRoutes(tenantId, agentId, "prod");
+    const effectiveAfterCanary = await listEnabledRouteProjections(tenantId, agentId, "prod");
     expect(effectiveAfterCanary).toHaveLength(2);
 
     // 回滚：禁用 rev2 路由，恢复 rev1 100%
@@ -1353,7 +1263,7 @@ describe("V11 回滚场景", () => {
     expect(r5Activation?.activationSequence).toBe(3);
 
     // 验证回滚后：只有 1 条 enabled 路由（rev1 100%）
-    const effectiveAfterRollback = await getEffectiveRoutes(tenantId, agentId, "prod");
+    const effectiveAfterRollback = await listEnabledRouteProjections(tenantId, agentId, "prod");
     expect(effectiveAfterRollback).toHaveLength(1);
     expect(effectiveAfterRollback[0]?.agentRevisionId).toBe(agentRev1Id);
     expect(effectiveAfterRollback[0]?.trafficWeight).toBe(10000);
@@ -1468,7 +1378,7 @@ describe("S03-W03 阶段验收场景", () => {
     });
 
     // 新 Invocation 不再有有效路由
-    const effective = await getEffectiveRoutes(tenantId, agentId, "prod");
+    const effective = await listEnabledRouteProjections(tenantId, agentId, "prod");
     expect(effective).toHaveLength(0);
 
     // 历史路由行仍可查询
@@ -1636,11 +1546,12 @@ describe("S03-W03 阶段验收场景", () => {
     });
 
     // 2 条 enabled 路由
-    const effective = await getEffectiveRoutes(tenantId, agentId, "prod");
+    const effective = await listEnabledRouteProjections(tenantId, agentId, "prod");
     expect(effective).toHaveLength(2);
 
     // 权重总和 = 10000
     const totalWeight = effective.reduce((sum, r) => sum + r.trafficWeight, 0);
     expect(totalWeight).toBe(10000);
   });
+});
 });

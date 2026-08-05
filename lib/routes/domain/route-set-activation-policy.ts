@@ -19,8 +19,11 @@ export const ROUTE_TRAFFIC_WEIGHT_TOTAL = 10_000;
 
 export interface DesiredRoute {
   routeId: string;
+  routeKey?: string;
   routeRevisionId?: string;
   routeGroupId: string;
+  agentRevisionId?: string;
+  runtimeRevisionId?: string;
   trafficWeight: number;
   priorityNo: number;
   eligibilityConditions: unknown;

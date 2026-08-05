@@ -4,13 +4,13 @@ import {
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
 import { db } from "@/lib/db/client";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import {
   deploymentRouteSetTable,
   deploymentRouteTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/routes";
 import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
-import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/control-plane";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import {
   publicationRecord,
   withdrawalRecord,

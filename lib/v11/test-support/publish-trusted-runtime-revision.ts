@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { db } from "@/lib/db/client";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
@@ -9,6 +9,7 @@ import {
 } from "@/lib/runtimes/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtimes/persistence/mysql-runtime-publication-store";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import {
   getRuntimeRevisionById,
   updateDraftRuntimeRevisionContent,
@@ -66,7 +67,7 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
   const secret = "route-test-trusted-runner-secret-32-bytes";
   await createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    signingSecret: () => secret,
+    verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
   })({
     tenantId: params.tenantId,
     runtimeRevisionId: revision.id,

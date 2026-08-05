@@ -9,7 +9,7 @@
 
 import type { QualificationCategory } from "./cutover-item";
 import { getPublicationRecordBySubject, getWithdrawalRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
-import { getVerifiedAttestationForRevision } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { getVerifiedAttestationForRevision } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 
 /** 扫描输入。 */
 export interface ScanInput {

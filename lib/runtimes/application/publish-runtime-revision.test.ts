@@ -8,6 +8,7 @@ import { listAuditEvents } from "@/lib/identity/audit-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { seedVerifiedRuntimeAttestation } from "@/lib/runtimes/test-support/seed-verified-runtime-attestation";
 import { MANDATORY_GATE_CASES } from "@/lib/runtimes/domain/runtime-conformance";
 import {
@@ -99,7 +100,7 @@ async function seedRuntimePublicationFixture(suffix = "") {
   const secret = "publication-test-secret-at-least-32-bytes";
   await createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    signingSecret: () => secret,
+    verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
   })({
     tenantId: tenant.id,
     runtimeRevisionId: revision.id,

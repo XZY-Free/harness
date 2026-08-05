@@ -72,7 +72,7 @@ export function resolveOutboxAppend(params: ControlPlaneOutboxAppendParams): {
     aggregateType,
     aggregateId: params.aggregateId,
     aggregateVersion: params.aggregateVersion,
-    payloadJson: parseResult.data,
+    payloadJson: parseResult.data as Record<string, unknown>,
     occurredAt: params.occurredAt,
   };
 }

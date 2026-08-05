@@ -1,5 +1,5 @@
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
-import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
+import { resolveOutboxAppend, type ControlPlaneOutboxAppendParams } from "@/lib/control-plane/events/outbox-append";
 import type {
   ArtifactAttestationPersistenceStore,
   RevisionArtifactBinding,
@@ -164,7 +164,7 @@ export const mysqlArtifactAttestationPersistenceStore: ArtifactAttestationPersis
             occurredAt: params.occurredAt,
           });
         },
-        async appendOutbox(params) {
+        async appendOutbox(params: ControlPlaneOutboxAppendParams) {
           const resolved = resolveOutboxAppend(params);
           await tx.insert(controlPlaneOutboxEvent).values({
             id: resolved.id,
@@ -251,7 +251,7 @@ export const mysqlAttestationRevocationStore: AttestationRevocationStore = {
             occurredAt: params.occurredAt,
           });
         },
-        async appendOutbox(params) {
+        async appendOutbox(params: ControlPlaneOutboxAppendParams) {
           const resolved = resolveOutboxAppend(params);
           await tx.insert(controlPlaneOutboxEvent).values({
             id: resolved.id,

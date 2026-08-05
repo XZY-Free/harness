@@ -37,6 +37,7 @@ export interface AttestationRevocationSession {
   appendOutbox(params: {
     id: string;
     tenantId: string;
+    eventKey: string;
     /** §3.2: 事件类型固定为 artifact.attestation.revoked。 */
     eventType: "artifact.attestation.revoked";
     aggregateId: string;
@@ -137,6 +138,7 @@ export function createRevokeArtifactAttestation(dependencies: {
       await session.appendOutbox({
         id: newId(),
         tenantId: command.tenantId,
+        eventKey: `artifact-attestation-revoked:${command.attestationId}`,
         eventType: "artifact.attestation.revoked",
         aggregateId: command.attestationId,
         aggregateVersion: 0,

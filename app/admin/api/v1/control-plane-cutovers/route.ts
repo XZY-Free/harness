@@ -59,7 +59,7 @@ export async function POST(request: Request): Promise<Response> {
     tenantId: principal.tenantId,
     routeSetId: body.route_set_id,
     sourceRouteSetVersionNo: routeSet.versionNo,
-    createdBy: principal.userIdentityId ?? principal.serviceId ?? "admin",
+    createdBy: ("userIdentityId" in principal ? principal.userIdentityId : null) ?? ("serviceId" in principal ? principal.serviceId : null) ?? "admin",
     createdAt: now,
   });
 

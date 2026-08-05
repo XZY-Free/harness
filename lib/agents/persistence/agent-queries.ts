@@ -24,7 +24,7 @@ import {
   type AgentLifecycleState,
   type AgentRow,
   agentTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/agents";
 import { and, eq, isNull } from "drizzle-orm";
 
 /** 创建稳定 Agent 身份。 */
@@ -222,5 +222,5 @@ export class AgentLifecycleError extends Error {
 }
 
 /** Re-export 供外部统一从本模块引入类型。 */
-export type { AgentLifecycleState, AgentRow } from "@/lib/persistence/schema/control-plane";
-export { AGENT_LIFECYCLE_STATES } from "@/lib/persistence/schema/control-plane";
+export type { AgentLifecycleState, AgentRow } from "@/lib/persistence/schema/agents";
+export { AGENT_LIFECYCLE_STATES } from "@/lib/persistence/schema/agents";

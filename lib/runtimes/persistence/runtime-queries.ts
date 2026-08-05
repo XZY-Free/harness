@@ -24,7 +24,7 @@ import {
   type RuntimeLifecycleState,
   type RuntimeRow,
   runtimeTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/runtimes";
 import { and, eq, isNull } from "drizzle-orm";
 
 /** 创建稳定 Runtime 身份。 */
@@ -230,5 +230,5 @@ export type {
   RuntimeKind,
   RuntimeLifecycleState,
   RuntimeRow,
-} from "@/lib/persistence/schema/control-plane";
-export { RUNTIME_KINDS, RUNTIME_LIFECYCLE_STATES } from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/runtimes";
+export { RUNTIME_KINDS, RUNTIME_LIFECYCLE_STATES } from "@/lib/persistence/schema/runtimes";

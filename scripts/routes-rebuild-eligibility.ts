@@ -9,7 +9,7 @@
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { db } from "@/lib/db/client";
-import { deploymentRouteTable } from "@/lib/persistence/schema/control-plane";
+import { deploymentRouteTable, deploymentRouteSetTable } from "@/lib/persistence/schema/routes";
 import { eq } from "drizzle-orm";
 
 const args = parseArgs(process.argv.slice(2));
@@ -17,6 +17,12 @@ const args = parseArgs(process.argv.slice(2));
 const buildRouteEligibility = createBuildRouteEligibility({
   store: mysqlRouteEligibilityStore,
 });
+
+interface RouteWithTenant {
+  id: string;
+  routeSetId: string;
+  tenantId: string;
+}
 
 async function main() {
   console.log("[routes:rebuild-eligibility] 开始重建", args);
@@ -27,7 +33,7 @@ async function main() {
   if (args.dryRun) {
     console.log("[routes:rebuild-eligibility] --dry-run 模式，不执行写入");
     for (const route of routes) {
-      console.log(`  routeId=${route.id} routeSetId=${route.routeSetId}`);
+      console.log(`  routeId=${route.id} routeSetId=${route.routeSetId} tenantId=${route.tenantId}`);
     }
     return;
   }
@@ -56,36 +62,31 @@ async function main() {
   console.log(`[routes:rebuild-eligibility] 完成: eligible=${eligible} ineligible=${ineligible} errors=${errors}`);
 }
 
-async function listTargetRoutes() {
+async function listTargetRoutes(): Promise<RouteWithTenant[]> {
+  // tenantId lives on the RouteSet, not on the Route — always join through routeSetId.
+  const baseQuery = db
+    .select({
+      id: deploymentRouteTable.id,
+      routeSetId: deploymentRouteTable.routeSetId,
+      tenantId: deploymentRouteSetTable.tenantId,
+    })
+    .from(deploymentRouteTable)
+    .innerJoin(deploymentRouteSetTable, eq(deploymentRouteSetTable.id, deploymentRouteTable.routeSetId));
+
   if (args.route) {
-    const [route] = await db
-      .select()
-      .from(deploymentRouteTable)
-      .where(eq(deploymentRouteTable.id, args.route))
-      .limit(1);
-    return route ? [route] : [];
+    return baseQuery.where(eq(deploymentRouteTable.id, args.route)).limit(1);
   }
 
-  let query = db.select().from(deploymentRouteTable);
   if (args.routeSet) {
-    // Filter by routeSetId
-    const routes = await db
-      .select()
-      .from(deploymentRouteTable)
-      .where(eq(deploymentRouteTable.routeSetId, args.routeSet));
-    return routes;
+    return baseQuery.where(eq(deploymentRouteTable.routeSetId, args.routeSet));
   }
 
   if (args.tenant) {
-    const routes = await db
-      .select()
-      .from(deploymentRouteTable)
-      .where(eq(deploymentRouteTable.tenantId, args.tenant));
-    return routes;
+    return baseQuery.where(eq(deploymentRouteSetTable.tenantId, args.tenant));
   }
 
   // All routes
-  return query;
+  return baseQuery;
 }
 
 interface RebuildArgs {

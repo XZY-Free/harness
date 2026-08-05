@@ -27,7 +27,7 @@ import {
   type RuntimeRevisionRow,
   type RuntimeRevisionState,
   runtimeRevisionTable,
-} from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/runtimes";
 import { protocolContractRevision } from "@/lib/runtimes/domain/runtime-conformance-run";
 import { RuntimeRevisionNotFoundError } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 import { and, desc, eq, max } from "drizzle-orm";
@@ -216,8 +216,8 @@ export class RuntimeRevisionImmutableError extends Error {
 export type {
   RuntimeRevisionState,
   RuntimeRevisionRow,
-} from "@/lib/persistence/schema/control-plane";
-export { RUNTIME_REVISION_STATES } from "@/lib/persistence/schema/control-plane";
+} from "@/lib/persistence/schema/runtimes";
+export { RUNTIME_REVISION_STATES } from "@/lib/persistence/schema/runtimes";
 export {
   RuntimeRevisionNotFoundError,
   RuntimeRevisionStateError,

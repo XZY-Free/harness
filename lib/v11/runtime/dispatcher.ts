@@ -127,7 +127,7 @@ export interface DispatchResult {
   /** 是否实际执行了调度（false = 无有效路由，Turn 保持 accepted）。 */
   dispatched: boolean;
   /** 未调度原因（dispatched=false 时填）。 */
-  reason?: "no_effective_route" | "ambiguous_route_configuration" | "invalid_traffic_weight_total";
+  reason?: "no_effective_route" | "ambiguous_route_configuration" | "invalid_traffic_weight_total" | "agent_revision_not_found";
   /** 调度的 Invocation（dispatched=true 时填）。 */
   invocation?: V11Invocation;
   /** 调度的 ExecutionBinding（dispatched=true 时填）。 */

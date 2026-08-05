@@ -9,8 +9,6 @@ import { validateBindingEligibility } from "@/lib/executions/application/validat
 export interface CreateExecutionBindingCommand extends ExecutionBindingConfigInput {
   invocationId: string;
   tenantId: string;
-  /** §4.6: Projection 版本号，用于 Binding 版本一致性校验（§5.2）。 */
-  projectionVersionNo?: number;
 }
 
 export function createCreateExecutionBinding(dependencies: {

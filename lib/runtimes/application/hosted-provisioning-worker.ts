@@ -4,10 +4,12 @@
  * 独立进程入口，不依赖 Next.js 请求生命周期。
  * 领取语义：FOR UPDATE SKIP LOCKED + 租约 + 退避。
  * Permanent Failure 与 Retryable Failure 分离。
+ *
+ * §6.5: 使用 Gateway 接口替代旧单体 HostedRuntimeControlPlane。
  */
 
 import { mysqlHostedProvisioningRequestStore } from "@/lib/runtimes/persistence/mysql-hosted-provisioning-request-store";
-import { mysqlHostedRuntimeControlPlane } from "@/lib/runtimes/persistence/mysql-hosted-runtime-control-plane";
+import { createMysqlHostedGateways } from "@/lib/runtimes/infrastructure/mysql-hosted-gateways";
 import { createHostedProvisioningSaga } from "@/lib/runtimes/application/hosted-provisioning-saga";
 import {
   computeProvisioningBackoff,
@@ -50,8 +52,11 @@ export function createHostedProvisioningWorker(
 ) {
   const config = { ...DEFAULT_CONFIG, ...configOverrides };
   const store = mysqlHostedProvisioningRequestStore;
+
+  // §6.5: 使用 Gateway 接口替代旧单体
+  const gateways = createMysqlHostedGateways();
   const saga = createHostedProvisioningSaga({
-    controlPlane: mysqlHostedRuntimeControlPlane,
+    gateways,
     store,
     maxAttempts: config.maxAttempts,
   });

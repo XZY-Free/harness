@@ -1,4 +1,4 @@
-import { listAttestations } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { listAttestations } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 /**
  * GET /admin/api/v1/artifact-attestations — 列出租户内制品证明（S12-W04）。
  *

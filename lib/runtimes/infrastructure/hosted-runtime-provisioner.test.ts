@@ -3,7 +3,7 @@ import { artifact, artifactAttestation } from "@/lib/artifacts/persistence/artif
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
-import { getEffectiveRoutes } from "@/lib/routes/application/deployment-route-service";
+import { listEnabledRouteProjections } from "@/lib/routes/application/deployment-route-service";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { resetHostedControlPlaneEvidenceProvider } from "@/lib/runtimes/domain/hosted-control-plane-evidence";
 import { ensureHostedRouteForAgent } from "@/lib/runtimes/infrastructure/hosted-runtime-provisioner";
@@ -51,7 +51,7 @@ describe("ensureHostedRouteForAgent", () => {
 
     const first = await ensureHostedRouteForAgent({ tenantId: tenant.id, agentId: agent.id });
     const second = await ensureHostedRouteForAgent({ tenantId: tenant.id, agentId: agent.id });
-    const routes = await getEffectiveRoutes(tenant.id, agent.id, "default");
+    const routes = await listEnabledRouteProjections(tenant.id, agent.id, "default");
 
     expect(second.routeId).toBe(first.routeId);
     expect(routes).toHaveLength(1);

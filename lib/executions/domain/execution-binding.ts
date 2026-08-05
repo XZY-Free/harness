@@ -23,7 +23,7 @@ export interface ExecutionBindingConfigInput {
   environmentDefinitionRevisionId: string | null;
   controlPlaneEvidence: ExecutionBindingControlPlaneEvidence;
   /** Projection 版本号 — Binding 用此检测 Projection 滞后。第三批新增。 */
-  projectionVersionNo: number;
+  projectionVersionNo?: number;
 }
 
 export interface ExecutionBinding

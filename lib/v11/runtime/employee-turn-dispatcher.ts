@@ -21,7 +21,7 @@ import { createRequestHostedProvisioning } from "@/lib/runtimes/application/requ
 import { mysqlHostedProvisioningRequestStore } from "@/lib/runtimes/persistence/mysql-hosted-provisioning-request-store";
 import { createRevisionValidator } from "@/lib/runtimes/application/validate-hosted-provisioning-revision";
 import { db } from "@/lib/db/client";
-import { agentTable } from "@/lib/persistence/schema/control-plane";
+import { agentTable } from "@/lib/persistence/schema/agents";
 import { and, eq } from "drizzle-orm";
 import { streamText } from "ai";
 

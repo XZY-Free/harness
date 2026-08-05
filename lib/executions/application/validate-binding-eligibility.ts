@@ -20,8 +20,8 @@
  */
 
 import { db } from "@/lib/db/client";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
-import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/control-plane";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { routeActivation } from "@/lib/routes/persistence/route-revision-record";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";

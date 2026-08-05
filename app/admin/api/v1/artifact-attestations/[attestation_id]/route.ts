@@ -1,4 +1,4 @@
-import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 /**
  * GET /admin/api/v1/artifact-attestations/{attestation_id} — 按 id 查询制品证明（S12-W04）。
  *

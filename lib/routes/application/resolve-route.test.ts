@@ -248,6 +248,7 @@ async function addRuntimeRoute(
   await db.insert(v11DeploymentRoute).values({
     id: routeId,
     routeSetId: base.routeSetId,
+    routeKey: `test-route-${routeId}`,
     agentRevisionId: base.agentRevisionId,
     runtimeRevisionId,
     trafficWeight,
@@ -262,6 +263,7 @@ async function addRuntimeRoute(
     tenantId: base.tenantId,
     routeId,
     routeSetId: base.routeSetId,
+    routeKey: `test-route-${routeId}`,
     revisionNo: routeRevisionNo,
     agentRevisionId: base.agentRevisionId,
     runtimeRevisionId,

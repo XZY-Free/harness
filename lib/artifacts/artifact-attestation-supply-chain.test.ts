@@ -25,14 +25,16 @@ import {
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
+  getAttestationById,
+  getVerifiedAttestationForRevision,
+  listAttestations,
+  listAttestationsByRevision,
+} from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import {
   AttestationAlreadyRevokedError,
   AttestationNotFoundError,
   assertAttestationGate,
-  getAttestationById,
-  getVerifiedAttestationForRevision,
   insertAttestation,
-  listAttestations,
-  listAttestationsByRevision,
   revokeAttestation,
   verifyAndPersistAttestation,
 } from "@/lib/artifacts/persistence/artifact-attestation-queries";

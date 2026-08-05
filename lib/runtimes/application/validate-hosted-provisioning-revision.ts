@@ -11,7 +11,7 @@
  */
 
 import { db } from "@/lib/db/client";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { and, eq } from "drizzle-orm";
 
 /** 验证结果。 */

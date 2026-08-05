@@ -22,7 +22,8 @@
  */
 
 import { db } from "@/lib/db/client";
-import { agentRevisionTable, runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
+import { agentRevisionTable } from "@/lib/persistence/schema/agents";
+import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { artifactAttestation } from "@/lib/artifacts/persistence/artifact-record";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";

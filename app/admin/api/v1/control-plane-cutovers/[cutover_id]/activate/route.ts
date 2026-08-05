@@ -39,12 +39,18 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   // §7.3: 真实 Cutover 激活
   try {
+    const plan = await mysqlCutoverStore.getPlanById({ tenantId: principal.tenantId, planId });
+    if (!plan) {
+      return v11Error("RESOURCE_NOT_FOUND", `Cutover plan ${planId} not found`, { requestId });
+    }
     const result = await activateCutoverPlan(
       { store: mysqlCutoverStore } as Parameters<typeof activateCutoverPlan>[0],
       {
         planId,
         tenantId: principal.tenantId,
-        actor: { tenantId: principal.tenantId, actorType: "user", actorId: principal.userId },
+        routeSetId: plan.routeSetId,
+        sourceRouteSetVersionNo: plan.sourceRouteSetVersionNo,
+        desiredRoutes: [],
       },
     );
 

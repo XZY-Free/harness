@@ -15,7 +15,7 @@
  * Migration 0118 验证零 NULL 后增加 NOT NULL + 最终索引。
  */
 import { db } from "@/lib/db/client";
-import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/control-plane";
+import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import {
   normalizeEligibility,
@@ -99,7 +99,7 @@ export async function backfillRouteGroupFields(): Promise<BackfillResult> {
     for (const revision of pendingRevisions) {
       // 计算 selectorDigest（使用正式 RouteSelector 算法）
       const normalized = normalizeEligibility(revision.eligibilityConditionsJson);
-      const selectorDigest = normalized ? computeSelectorDigest(normalized) : null;
+      const selectorDigest = normalized ? computeSelectorDigest(normalized) : undefined;
 
       // 确定 routeGroupId
       const routeGroupId = determineRouteGroupId(revision, routesBySet.get(revision.routeSetId) ?? []);
@@ -119,7 +119,7 @@ export async function backfillRouteGroupFields(): Promise<BackfillResult> {
         await db
           .update(routeRevision)
           .set({
-            routeGroupId,
+            routeGroupId: routeGroupId ?? undefined,
             selectorDigest,
           })
           .where(eq(routeRevision.id, revision.id));

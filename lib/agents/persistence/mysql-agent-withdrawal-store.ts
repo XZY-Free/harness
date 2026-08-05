@@ -3,7 +3,7 @@ import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plan
 import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
 import {
