@@ -33,6 +33,7 @@ function bindingInput() {
     contextCheckpointId: null,
     environmentDefinitionRevisionId: null,
     controlPlaneEvidence: EVIDENCE,
+    projectionVersionNo: 1,
   };
 }
 

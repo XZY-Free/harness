@@ -1,36 +1,38 @@
 /**
- * ExecutionBinding 最终校验 — 收缩版。
+ * ExecutionBinding 最终校验 — §5.1: 使用 Phase 1 统一 Policy/Snapshot。
  *
- * 不再重新构造全部证据图或逐个读取 Artifact 原始内容。
- * 只做最小化权威事实 Fail-closed 校验：
+ * 不再内联 loadActivePublication/validateAttestationsNotRevoked，
+ * 改用 Phase 1 的 loadActivePublicationSnapshot + loadArtifactEvidenceSnapshot +
+ * PublicationEligibilityPolicy + ArtifactEvidencePolicy。
+ *
+ * 核心校验（Projection 版本 + Route Activation）在 DB 事务内执行。
+ * Phase 1 Evidence Readers 使用全局 db（独立读取，不需要事务一致性）。
+ *
+ * Fail-closed 校验维度：
  *   1. Projection 版本和输入一致
  *   2. Route 当前 Active Revision 仍一致
- *   3. 双方 Publication 未 Withdrawal
- *   4. 所有 Attestation 无 Revocation
+ *   3. 双方 Publication 未 Withdrawal（PublicationEligibilityPolicy）
+ *   4. 所有 Attestation 无 Revocation + Verified（ArtifactEvidencePolicy）
  *   5. Agent/Runtime Revision 仍 Published
  *   6. Agent/Runtime 仍 Enabled
  *   7. ConformanceRun 仍 Passed 且绑定一致
  *   8. Policy 仍 Published
- *
- * SQL 往返与 Route 数量无关。
  */
 
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/control-plane";
 import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
-import {
-  publicationRecord,
-  withdrawalRecord,
-} from "@/lib/publications/persistence/publication-record";
-import {
-  artifactAttestation,
-  attestationRevocationRecord,
-} from "@/lib/artifacts/persistence/artifact-record";
-import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import { routeActivation } from "@/lib/routes/persistence/route-revision-record";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { and, eq, isNull } from "drizzle-orm";
+
+// §5.1: Phase 1 统一 Policy + Evidence 读取器
+import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
+import { ArtifactEvidencePolicy } from "@/lib/artifacts/domain/artifact-evidence-policy";
+import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
+import { PublicationEligibilityPolicy } from "@/lib/publications/domain/publication-eligibility";
 
 export interface BindingEligibilityInput {
   tenantId: string;
@@ -58,109 +60,148 @@ export interface BindingEligibilityResult {
 }
 
 /**
- * ExecutionBinding 最终 Fail-closed 校验。
+ * §5.1: ExecutionBinding 最终 Fail-closed 校验。
  *
- * 在 Projection 可能滞后的情况下，仍保证 Binding 只绑定真正合法的 Route。
- * 不重算完整 Route 候选，不逐个加载 Artifact 原始内容。
+ * 使用 Phase 1 统一 Policy/Snapshot。
+ * 核心校验在 DB 事务内，Evidence Readers 使用全局 db。
  */
 export async function validateBindingEligibility(
   input: BindingEligibilityInput,
 ): Promise<BindingEligibilityResult> {
-  // 1. 校验 Projection 版本
-  const [projection] = await db
-    .select()
-    .from(routeEligibilityProjection)
-    .where(eq(routeEligibilityProjection.routeId, input.routeId))
-    .limit(1);
-
-  const projectionVersionMatch = projection
-    ? projection.projectionVersionNo === input.projectionVersionNo
-    : false;
-
-  if (projection && !projectionVersionMatch) {
-    // Projection 已更新 → 之前的选择可能已失效
-    // 仍继续权威校验（不盲信 Projection，但也不盲目拒绝）
-  }
-
-  // 2. 校验 Route 当前 Active Revision 仍一致
-  const [currentActivation] = await db
-    .select()
-    .from(routeActivation)
-    .where(eq(routeActivation.routeId, input.routeId))
-    .limit(1);
-
-  if (!currentActivation || currentActivation.routeRevisionId !== input.routeRevisionId) {
-    return {
-      valid: false,
-      reason: "route_revision_mismatch",
-      projectionVersionMatch,
-    };
-  }
-
-  // 3. 并行校验 Agent + Runtime + Policy
-  const [agentCheck, runtimeCheck, policyCheck] = await Promise.all([
-    validateAgentRevision(input.tenantId, input.agentRevisionId),
-    validateRuntimeRevision(input.tenantId, input.runtimeRevisionId),
-    input.policyRevisionId
-      ? validatePolicyRevision(input.policyRevisionId)
-      : Promise.resolve({ valid: true }),
-  ]);
-
-  if (!agentCheck.valid) {
-    return { valid: false, reason: agentCheck.reason, projectionVersionMatch };
-  }
-  if (!runtimeCheck.valid) {
-    return { valid: false, reason: runtimeCheck.reason, projectionVersionMatch };
-  }
-  if (!policyCheck.valid) {
-    return { valid: false, reason: policyCheck.reason, projectionVersionMatch };
-  }
-
-  // 4. 批量校验双方 Publication 未 Withdrawal
-  const [agentPub, runtimePub] = await Promise.all([
-    loadActivePublication(input.tenantId, "agent_revision", input.agentRevisionId),
-    loadActivePublication(input.tenantId, "runtime_revision", input.runtimeRevisionId),
-  ]);
-
-  if (!agentPub) {
-    return { valid: false, reason: "agent_publication_withdrawn", projectionVersionMatch };
-  }
-  if (!runtimePub) {
-    return { valid: false, reason: "runtime_publication_withdrawn", projectionVersionMatch };
-  }
-
-  // 5. 批量校验 Attestation 无 Revocation
-  const [agentAttestationOk, runtimeAttestationOk] = await Promise.all([
-    validateAttestationsNotRevoked(input.tenantId, agentPub.attestationIds),
-    validateAttestationsNotRevoked(input.tenantId, runtimePub.attestationIds),
-  ]);
-
-  if (!agentAttestationOk) {
-    return { valid: false, reason: "agent_attestation_revoked", projectionVersionMatch };
-  }
-  if (!runtimeAttestationOk) {
-    return { valid: false, reason: "runtime_attestation_revoked", projectionVersionMatch };
-  }
-
-  // 6. 校验 ConformanceRun 仍 Passed 且绑定一致
-  if (runtimePub.conformanceRunId) {
-    const [run] = await db
+  // §5.1: 核心校验在事务内执行
+  return db.transaction(async (tx) => {
+    // 1. 校验 Projection 版本
+    const [projection] = await tx
       .select()
-      .from(runtimeConformanceRun)
-      .where(
-        and(
-          eq(runtimeConformanceRun.id, runtimePub.conformanceRunId),
-          eq(runtimeConformanceRun.tenantId, input.tenantId),
-        ),
-      )
+      .from(routeEligibilityProjection)
+      .where(eq(routeEligibilityProjection.routeId, input.routeId))
       .limit(1);
 
-    if (!run || run.overallResult !== "passed") {
-      return { valid: false, reason: "conformance_not_passed", projectionVersionMatch };
-    }
-  }
+    const projectionVersionMatch = projection
+      ? projection.projectionVersionNo === input.projectionVersionNo
+      : false;
 
-  return { valid: true, projectionVersionMatch };
+    // 2. 校验 Route 当前 Active Revision 仍一致
+    const [currentActivation] = await tx
+      .select()
+      .from(routeActivation)
+      .where(eq(routeActivation.routeId, input.routeId))
+      .limit(1);
+
+    if (!currentActivation || currentActivation.routeRevisionId !== input.routeRevisionId) {
+      return {
+        valid: false,
+        reason: "route_revision_mismatch",
+        projectionVersionMatch,
+      };
+    }
+
+    // 3. 并行校验 Agent + Runtime + Policy 生命周期（事务内）
+    const [agentCheck, runtimeCheck, policyCheck] = await Promise.all([
+      validateAgentRevision(input.tenantId, input.agentRevisionId),
+      validateRuntimeRevision(input.tenantId, input.runtimeRevisionId),
+      input.policyRevisionId
+        ? validatePolicyRevision(input.policyRevisionId)
+        : Promise.resolve({ valid: true as const }),
+    ]);
+
+    if (!agentCheck.valid) {
+      return { valid: false, reason: agentCheck.reason, projectionVersionMatch };
+    }
+    if (!runtimeCheck.valid) {
+      return { valid: false, reason: runtimeCheck.reason, projectionVersionMatch };
+    }
+    if (!policyCheck.valid) {
+      return { valid: false, reason: "policy_not_published", projectionVersionMatch };
+    }
+
+    // §5.1: 4. 使用 Phase 1 统一 PublicationEligibilityPolicy 校验 Publication
+    const [agentPubSnapshot, runtimePubSnapshot] = await Promise.all([
+      loadActivePublicationSnapshot({
+        tenantId: input.tenantId,
+        subjectType: "agent_revision",
+        subjectRevisionId: input.agentRevisionId,
+      }),
+      loadActivePublicationSnapshot({
+        tenantId: input.tenantId,
+        subjectType: "runtime_revision",
+        subjectRevisionId: input.runtimeRevisionId,
+      }),
+    ]);
+
+    const agentPubEligibility = PublicationEligibilityPolicy.isActive(agentPubSnapshot, input.tenantId);
+    if (!agentPubEligibility.active) {
+      return { valid: false, reason: `agent_publication_${agentPubEligibility.reason ?? "inactive"}`, projectionVersionMatch };
+    }
+
+    const runtimePubEligibility = PublicationEligibilityPolicy.isActive(runtimePubSnapshot, input.tenantId);
+    if (!runtimePubEligibility.active) {
+      return { valid: false, reason: `runtime_publication_${runtimePubEligibility.reason ?? "inactive"}`, projectionVersionMatch };
+    }
+
+    // §5.1: 5. 使用 Phase 1 统一 ArtifactEvidencePolicy 校验 Attestation
+    const [agentEvidence, runtimeEvidence] = await Promise.all([
+      loadArtifactEvidenceSnapshot({
+        tenantId: input.tenantId,
+        artifactType: "agent_revision",
+        artifactRevisionId: input.agentRevisionId,
+      }),
+      loadArtifactEvidenceSnapshot({
+        tenantId: input.tenantId,
+        artifactType: "runtime_revision",
+        artifactRevisionId: input.runtimeRevisionId,
+      }),
+    ]);
+
+    // 使用执行阶段入口（排除 legacy_custom 格式）
+    const agentEvidenceResult = agentEvidence
+      ? ArtifactEvidencePolicy.validateForNewExecution(agentEvidence, {
+          expectedTenantId: input.tenantId,
+          expectedArtifactType: "agent_revision",
+          expectedRevisionId: input.agentRevisionId,
+          expectedDigest: agentEvidence.artifactDigest,
+        })
+      : { valid: false as const, errors: [{ code: "no_evidence", message: "Agent 无 Artifact Evidence" }] };
+
+    if (!agentEvidenceResult.valid) {
+      const reason = agentEvidenceResult.errors.map((e) => e.code).join(",");
+      return { valid: false, reason: `agent_evidence_invalid:${reason}`, projectionVersionMatch };
+    }
+
+    const runtimeEvidenceResult = runtimeEvidence
+      ? ArtifactEvidencePolicy.validateForNewExecution(runtimeEvidence, {
+          expectedTenantId: input.tenantId,
+          expectedArtifactType: "runtime_revision",
+          expectedRevisionId: input.runtimeRevisionId,
+          expectedDigest: runtimeEvidence.artifactDigest,
+        })
+      : { valid: false as const, errors: [{ code: "no_evidence", message: "Runtime 无 Artifact Evidence" }] };
+
+    if (!runtimeEvidenceResult.valid) {
+      const reason = runtimeEvidenceResult.errors.map((e) => e.code).join(",");
+      return { valid: false, reason: `runtime_evidence_invalid:${reason}`, projectionVersionMatch };
+    }
+
+    // 6. Conformance — 从 Publication snapshot 获取 conformanceRunId
+    if (runtimePubSnapshot?.conformanceRunId) {
+      const [run] = await db
+        .select()
+        .from(runtimeConformanceRun)
+        .where(
+          and(
+            eq(runtimeConformanceRun.id, runtimePubSnapshot.conformanceRunId),
+            eq(runtimeConformanceRun.tenantId, input.tenantId),
+          ),
+        )
+        .limit(1);
+
+      if (!run || run.overallResult !== "passed") {
+        return { valid: false, reason: "conformance_not_passed", projectionVersionMatch };
+      }
+    }
+
+    return { valid: true, projectionVersionMatch };
+  });
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────
@@ -172,7 +213,7 @@ async function validateAgentRevision(tenantId: string, revisionId: string) {
     .where(eq(agentRevisionTable.id, revisionId))
     .limit(1);
   if (!revision || revision.revisionState !== "published") {
-    return { valid: false, reason: "agent_revision_not_published" };
+    return { valid: false as const, reason: "agent_revision_not_published" as const };
   }
   const [agent] = await db
     .select()
@@ -180,9 +221,9 @@ async function validateAgentRevision(tenantId: string, revisionId: string) {
     .where(and(eq(agentTable.id, revision.agentId), isNull(agentTable.deletedAt)))
     .limit(1);
   if (!agent || agent.lifecycleState !== "enabled") {
-    return { valid: false, reason: "agent_not_enabled" };
+    return { valid: false as const, reason: "agent_not_enabled" as const };
   }
-  return { valid: true };
+  return { valid: true as const };
 }
 
 async function validateRuntimeRevision(tenantId: string, revisionId: string) {
@@ -192,7 +233,7 @@ async function validateRuntimeRevision(tenantId: string, revisionId: string) {
     .where(eq(runtimeRevisionTable.id, revisionId))
     .limit(1);
   if (!revision || revision.revisionState !== "published") {
-    return { valid: false, reason: "runtime_revision_not_published" };
+    return { valid: false as const, reason: "runtime_revision_not_published" as const };
   }
   const [runtime] = await db
     .select()
@@ -200,9 +241,9 @@ async function validateRuntimeRevision(tenantId: string, revisionId: string) {
     .where(and(eq(runtimeTable.id, revision.runtimeId), isNull(runtimeTable.deletedAt)))
     .limit(1);
   if (!runtime || runtime.lifecycleState !== "enabled") {
-    return { valid: false, reason: "runtime_not_enabled" };
+    return { valid: false as const, reason: "runtime_not_enabled" as const };
   }
-  return { valid: true };
+  return { valid: true as const };
 }
 
 async function validatePolicyRevision(policyRevisionId: string) {
@@ -212,53 +253,7 @@ async function validatePolicyRevision(policyRevisionId: string) {
     .where(eq(policyRevisionTable.id, policyRevisionId))
     .limit(1);
   if (!policy || policy.revisionState !== "published") {
-    return { valid: false, reason: "policy_not_published" };
+    return { valid: false as const };
   }
-  return { valid: true };
-}
-
-async function loadActivePublication(
-  tenantId: string,
-  subjectType: "agent_revision" | "runtime_revision",
-  subjectRevisionId: string,
-) {
-  const [row] = await db
-    .select({ publication: publicationRecord, withdrawalId: withdrawalRecord.id })
-    .from(publicationRecord)
-    .leftJoin(withdrawalRecord, eq(withdrawalRecord.publicationRecordId, publicationRecord.id))
-    .where(
-      and(
-        eq(publicationRecord.tenantId, tenantId),
-        eq(publicationRecord.subjectType, subjectType),
-        eq(publicationRecord.subjectRevisionId, subjectRevisionId),
-      ),
-    )
-    .limit(1);
-  return row && !row.withdrawalId ? row.publication : null;
-}
-
-async function validateAttestationsNotRevoked(
-  tenantId: string,
-  attestationIds: unknown[],
-): Promise<boolean> {
-  if (!Array.isArray(attestationIds) || attestationIds.length === 0) return false;
-  for (const id of attestationIds) {
-    if (typeof id !== "string") return false;
-    const [row] = await db
-      .select({ revocationId: attestationRevocationRecord.id, revokedAt: artifactAttestation.revokedAt })
-      .from(artifactAttestation)
-      .leftJoin(
-        attestationRevocationRecord,
-        eq(attestationRevocationRecord.attestationId, artifactAttestation.id),
-      )
-      .where(
-        and(
-          eq(artifactAttestation.id, id),
-          eq(artifactAttestation.tenantId, tenantId),
-        ),
-      )
-      .limit(1);
-    if (!row || row.revocationId || row.revokedAt) return false;
-  }
-  return true;
+  return { valid: true as const };
 }
