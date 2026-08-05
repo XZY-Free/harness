@@ -1,7 +1,8 @@
 /**
  * §6.5: Hosted Provisioning Gateway 接口 — 纯适配器层。
  *
- * 6 个职责清晰的 Gateway 替代旧单体编排器。
+ * §7.1: 移除旧 HostedRuntimeControlPlane 兼容 facade。
+ * 6 个职责清晰的 Gateway 是唯一的供应接口。
  * Saga 负责步骤编排，每个 Gateway 只做 DB 访问 + 对应领域调用。
  *
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §6.5
@@ -93,11 +94,11 @@ export interface HostedConformanceRunner {
   }): Promise<{ conformanceRunId: string; overallResult: "passed" | "failed" }>;
 }
 
-// ─── 兼容 facade ─────────────────────────────────────────
+// ─── Gateway 聚合 ─────────────────────────────────────────
 
 /**
- * §6.5: 从 Gateway 组合出 HostedRuntimeControlPlane 兼容接口。
- * 过渡期使用，避免一次性修改所有调用方。
+ * §6.5: HostedGateways — 6 个 Gateway 的聚合。
+ * Saga 通过此聚合调用各个 Gateway，不再有 HostedRuntimeControlPlane 中间层。
  */
 export interface HostedGateways {
   routeReader: HostedRouteReader;
@@ -106,25 +107,4 @@ export interface HostedGateways {
   routeActivation: HostedRouteActivationGateway;
   artifactEvidence: HostedArtifactEvidenceProvider;
   conformanceRunner: HostedConformanceRunner;
-}
-
-// ─── 兼容 Facade 工厂 ────────────────────────────────────
-
-import type { HostedRuntimeControlPlane } from "@/lib/runtimes/application/provision-hosted-runtime";
-
-/**
- * §6.5: 从 HostedGateways 构造 HostedRuntimeControlPlane 兼容对象。
- * 过渡期: 允许旧调用方继续使用 HostedRuntimeControlPlane 接口。
- */
-export function createControlPlaneFromGateways(
-  gateways: HostedGateways,
-): HostedRuntimeControlPlane {
-  return {
-    resolveEligibleRoute: (command) => gateways.routeReader.resolveEligibleRoute(command),
-    ensurePublishedAgentRevision: (command) =>
-      gateways.agentPublication.ensurePublishedAgentRevision(command),
-    ensurePublishedRuntimeRevision: (command) =>
-      gateways.runtimePublication.ensurePublishedRuntimeRevision(command),
-    activateRoute: (command) => gateways.routeActivation.activateRoute(command),
-  };
 }

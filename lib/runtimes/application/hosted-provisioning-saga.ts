@@ -3,6 +3,7 @@
  *
  * §6.3: 修正工作流状态机 — 细化步骤名称。
  * §6.2: 持久化每一步输出 — Saga 后续步骤只使用已保存输出，不重新执行前置步骤。
+ * §7.1: 直接使用 HostedGateways，移除 HostedRuntimeControlPlane 兼容层。
  *
  * 步骤序列（§6.3）：
  *   start → publishing_agent → publishing_runtime → activating_route → verifying_route → ready
@@ -11,7 +12,6 @@
  * 外部调用不放在长数据库事务中。
  */
 
-import type { HostedRuntimeControlPlane } from "@/lib/runtimes/application/provision-hosted-runtime";
 import {
   classifyProvisioningError,
   computeProvisioningBackoff,
@@ -43,10 +43,8 @@ export interface SagaStepResult {
 
 /** Saga 配置。 */
 export interface SagaConfig {
-  /** §6.5: Gateway 接口 — 优先使用，替代 controlPlane 单体。 */
-  gateways?: HostedGateways;
-  /** 旧单体接口 — 过渡期保留，gateways 优先。 */
-  controlPlane?: HostedRuntimeControlPlane;
+  /** §7.1: Gateway 接口 — 唯一的供应控制面。 */
+  gateways: HostedGateways;
   store: HostedProvisioningRequestStore;
   /** 最大重试次数。 */
   maxAttempts: number;
@@ -57,19 +55,10 @@ export interface SagaConfig {
  *
  * §6.2: 每步完成后持久化产出到 Checkpoint 字段。
  * §6.3: 使用细化步骤名称。
+ * §7.1: 直接使用 gateways，不再有 controlPlane 中间层。
  */
 export function createHostedProvisioningSaga(config: SagaConfig) {
-  // §6.5: 解析控制面 — 优先使用 Gateway，回退到旧单体
-  const cp: HostedRuntimeControlPlane = config.gateways
-    ? {
-        resolveEligibleRoute: (cmd) => config.gateways!.routeReader.resolveEligibleRoute(cmd),
-        ensurePublishedAgentRevision: (cmd) =>
-          config.gateways!.agentPublication.ensurePublishedAgentRevision(cmd),
-        ensurePublishedRuntimeRevision: (cmd) =>
-          config.gateways!.runtimePublication.ensurePublishedRuntimeRevision(cmd),
-        activateRoute: (cmd) => config.gateways!.routeActivation.activateRoute(cmd),
-      }
-    : config.controlPlane!;
+  const gateways = config.gateways;
 
   return async function executeProvisioningSaga(
     request: HostedProvisioningRequestRow,
@@ -87,15 +76,6 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
         case "activating_route":
           return await stepActivateRoute(request);
         case "verifying_route":
-          return await stepVerifyRoute(request);
-        // §6.3 兼容旧步骤名 — 自动迁移到新步骤
-        case "ensure_agent_published":
-          return await stepPublishingAgent(request);
-        case "ensure_runtime_published":
-          return await stepPublishingRuntime(request);
-        case "activate_route":
-          return await stepActivateRoute(request);
-        case "verify_route":
           return await stepVerifyRoute(request);
         default:
           throw new Error(`未知供应步骤: ${step}`);
@@ -139,7 +119,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       return { step: "publishing_agent", completed: true, newState: "running" };
     }
 
-    const agentRevision = await cp.ensurePublishedAgentRevision({
+    const agentRevision = await gateways.agentPublication.ensurePublishedAgentRevision({
       tenantId: request.tenantId,
       agentId: request.agentId,
     });
@@ -190,7 +170,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       return { step: "publishing_runtime", completed: true, newState: "running" };
     }
 
-    const runtimeRevision = await cp.ensurePublishedRuntimeRevision({
+    const runtimeRevision = await gateways.runtimePublication.ensurePublishedRuntimeRevision({
       tenantId: request.tenantId,
       agentId: request.agentId,
     });
@@ -222,23 +202,48 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
   /**
    * §6.3: activating_route — 使用 Checkpoint 中已保存的 Revision 激活 Route。
    * §6.2: 不再重新调用 ensurePublished*，直接从 Checkpoint 读取。
+   * §7.1: 直接使用 gateways.routeActivation.activateRoute()。
    */
   async function stepActivateRoute(request: HostedProvisioningRequestRow): Promise<SagaStepResult> {
-    // §6.2: 从 Checkpoint 读取已保存的 Revision 产出
+    // §6.2: 从 Checkpoint 读取已保存的 Revision 产出。
+    // 状态机不变量：activating_route 步骤必须发生在 publishing_agent / publishing_runtime 完成之后，
+    // 因此这些 Checkpoint 字段必须存在；缺失则视为状态机破坏，永久失败。
+    const agentRevisionId = request.stepAgentRevisionId;
+    const agentPublicationRecordId = request.stepAgentPublicationRecordId;
+    const agentAttestationId = request.stepAgentAttestationId;
+    const runtimeRevisionId = request.stepRuntimeRevisionId;
+    const runtimePublicationRecordId = request.stepRuntimePublicationRecordId;
+    const runtimeAttestationId = request.stepRuntimeAttestationId;
+    const conformanceRunId = request.stepConformanceRunId;
+
+    if (
+      !agentRevisionId ||
+      !agentPublicationRecordId ||
+      !agentAttestationId ||
+      !runtimeRevisionId ||
+      !runtimePublicationRecordId ||
+      !runtimeAttestationId ||
+      !conformanceRunId
+    ) {
+      throw new Error(
+        `Checkpoint 不完整，无法激活 Route（状态机破坏）: request=${request.id}, step=activating_route`,
+      );
+    }
+
     const agentRevision = {
-      revisionId: request.stepAgentRevisionId!,
-      publicationRecordId: request.stepAgentPublicationRecordId!,
-      attestationId: request.stepAgentAttestationId!,
+      revisionId: agentRevisionId,
+      publicationRecordId: agentPublicationRecordId,
+      attestationId: agentAttestationId,
     };
     const runtimeRevision = {
-      revisionId: request.stepRuntimeRevisionId!,
-      publicationRecordId: request.stepRuntimePublicationRecordId!,
-      attestationId: request.stepRuntimeAttestationId!,
-      conformanceRunId: request.stepConformanceRunId!,
+      revisionId: runtimeRevisionId,
+      publicationRecordId: runtimePublicationRecordId,
+      attestationId: runtimeAttestationId,
+      conformanceRunId,
     };
 
-    // 激活 Route
-    await config.controlPlane!.activateRoute({
+    // §7.1: 直接调用 Gateway
+    await gateways.routeActivation.activateRoute({
       tenantId: request.tenantId,
       agentId: request.agentId,
       routeScopeKey: request.routeScopeKey,
@@ -257,9 +262,12 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     return { step: "activating_route", completed: true, newState: "running" };
   }
 
+  /**
+   * §7.1: 直接使用 gateways.routeReader.resolveEligibleRoute()。
+   */
   async function stepVerifyRoute(request: HostedProvisioningRequestRow): Promise<SagaStepResult> {
     // 最终验证：RouteResolver 通过
-    const route = await config.controlPlane!.resolveEligibleRoute({
+    const route = await gateways.routeReader.resolveEligibleRoute({
       tenantId: request.tenantId,
       agentId: request.agentId,
       routeScopeKey: request.routeScopeKey,
