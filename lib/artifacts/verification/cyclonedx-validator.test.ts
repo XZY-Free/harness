@@ -111,4 +111,46 @@ describe("validateCycloneDX", () => {
     expect(result.status).toBe("passed");
     expect(result.allLicensesSpdx).toBe(true);
   });
+
+  // ─── §8.3: JSON Schema 验证 ──────────────────────────────
+  it("useJsonSchema=true + 有效文档 → passed + schemaValid=true", () => {
+    const result = validateCycloneDX({
+      document: {
+        bomFormat: "CycloneDX",
+        specVersion: "1.6",
+        metadata: {},
+        components: [],
+        dependencies: [{ ref: "pkg:npm/a@1.0" }],
+      },
+      useJsonSchema: true,
+    });
+    expect(result.status).toBe("passed");
+    expect(result.schemaValid).toBe(true);
+  });
+
+  it("useJsonSchema=true + 缺 bomFormat/specVersion/metadata → failed + schemaValid=false", () => {
+    const result = validateCycloneDX({
+      document: {
+        components: [],
+      },
+      useJsonSchema: true,
+    });
+    expect(result.status).toBe("failed");
+    expect(result.schemaValid).toBe(false);
+  });
+
+  it("useJsonSchema=false → schemaValid undefined（不执行 Schema 验证）", () => {
+    const result = validateCycloneDX({
+      document: {
+        bomFormat: "CycloneDX",
+        specVersion: "1.6",
+        metadata: {},
+        components: [],
+        dependencies: [{ ref: "pkg:npm/a@1.0" }],
+      },
+      useJsonSchema: false,
+    });
+    expect(result.status).toBe("passed");
+    expect(result.schemaValid).toBeUndefined();
+  });
 });
