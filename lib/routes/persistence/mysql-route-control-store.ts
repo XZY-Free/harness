@@ -6,6 +6,7 @@ import {
 } from "@/lib/artifacts/persistence/artifact-record";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
+import { seedEventDeliveries } from "@/lib/control-plane/events/seed-event-deliveries";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import { agentRevisionTable } from "@/lib/persistence/schema/agents";
@@ -340,6 +341,8 @@ export const mysqlRouteControlStore: RouteControlStore = {
             payloadJson: resolved.payloadJson,
             occurredAt: resolved.occurredAt,
           });
+          // §14: 同事务创建 Delivery 行，确保 Relay Worker 能领取
+          await seedEventDeliveries(tx, resolved.id, resolved.eventType, resolved.occurredAt);
         },
         async completeIdempotency(params) {
           const result = await tx

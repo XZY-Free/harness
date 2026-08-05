@@ -11,11 +11,17 @@ import type { ControlPlaneEventType } from "./control-plane-event";
 import { controlPlaneEventDelivery } from "./control-plane-event-delivery";
 
 /**
+ * 接受 MySql2Database（db）或 MySqlTransaction（tx）的最小接口。
+ * 两者都继承自 MySqlDatabase，共享 insert 方法签名。
+ */
+type DbOrTx = Pick<MySql2Database, "insert">;
+
+/**
  * 为新事件创建所有消费者的 Delivery 行。
  * 在 Outbox 事件插入的同一事务中调用。
  */
 export async function seedEventDeliveries(
-  tx: MySql2Database,
+  tx: DbOrTx,
   eventId: string,
   eventType: ControlPlaneEventType | string,
   now: Date,
