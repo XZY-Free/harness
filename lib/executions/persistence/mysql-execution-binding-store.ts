@@ -1,8 +1,16 @@
-import {
-  artifact,
-  artifactAttestation,
-  attestationRevocationRecord,
-} from "@/lib/artifacts/persistence/artifact-record";
+/**
+ * ExecutionBinding Store — MySQL 实现。
+ *
+ * §5.1: 资格校验由统一 validateBindingEligibility()（调用 RevisionExecutionEligibilityPolicy）
+ * 在 create-execution-binding.ts 中作为预检查执行。Store.create() 事务内仅保留：
+ *   1. 行级锁（FOR UPDATE）防止并发修改
+ *   2. Digest/ID 一致性比较（TOCTOU 防御）
+ *   3. Insert
+ *
+ * 不再在 Store 内重复执行 Publication/Attestation/Conformance 的 Policy 校验，
+ * 这些维度已由统一 RevisionExecutionEligibilityPolicy 覆盖。
+ */
+
 import { db } from "@/lib/db/client";
 import {
   type ExecutionBinding,
@@ -18,18 +26,14 @@ import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
-import {
-  publicationRecord,
-  withdrawalRecord,
-} from "@/lib/publications/persistence/publication-record";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
-import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { and, desc, eq } from "drizzle-orm";
 
 export const mysqlExecutionBindingStore: ExecutionBindingStore = {
   create: (input) =>
     db.transaction(async (tx) => {
+      // 1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
       const [invocation] = await tx
         .select({ id: invocationTable.id })
         .from(invocationTable)
@@ -50,32 +54,10 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         .limit(1);
       if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
 
-      const revisions = await lockAndValidateRoute(tx, input);
-      await lockAndValidatePublication(tx, {
-        tenantId: input.tenantId,
-        publicationRecordId: input.controlPlaneEvidence.agentPublicationRecordId,
-        subjectType: "agent_revision",
-        subjectRevisionId: input.agentRevisionId,
-        artifactType: "agent_revision",
-        artifactId: revisions.agentRevision.artifactId,
-        artifactDigest: input.controlPlaneEvidence.agentArtifactDigest,
-        attestationIds: input.controlPlaneEvidence.agentAttestationIds,
-      });
-      const runtimePublication = await lockAndValidatePublication(tx, {
-        tenantId: input.tenantId,
-        publicationRecordId: input.controlPlaneEvidence.runtimePublicationRecordId,
-        subjectType: "runtime_revision",
-        subjectRevisionId: input.runtimeRevisionId,
-        artifactType: "runtime_revision",
-        artifactId: revisions.runtimeRevision.artifactId,
-        artifactDigest: input.controlPlaneEvidence.runtimeArtifactDigest,
-        attestationIds: input.controlPlaneEvidence.runtimeAttestationIds,
-      });
-      if (runtimePublication.conformanceRunId !== input.controlPlaneEvidence.conformanceRunId) {
-        throw evidenceError("Runtime Publication 与 Conformance Run 不一致");
-      }
-      await lockAndValidateConformance(tx, input, revisions.runtimeRevision);
+      // 2. §5.1: Lock + TOCTOU 一致性校验（仅 Digest/ID 比较，不做 Policy）
+      const revisions = await lockAndVerifyRoute(tx, input);
 
+      // 3. §5.1: Capability Manifest Digest 一致性（TOCTOU 防御）
       const capabilityManifestDigest = computeCapabilityManifestDigest({
         agentRevisionId: revisions.agentRevision.id,
         agentInterfaceRequirements: revisions.agentRevision.agentInterfaceRequirementsJson,
@@ -86,10 +68,7 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         throw evidenceError("Capability Manifest Digest 已变化");
       }
 
-      // §5.1 TODO: 将本函数的内联校验逻辑迁移到 validateBindingEligibility() 统一入口，
-      // 使 Binding Store.create() 事务内仅调用 validateBindingEligibility() + insert。
-      // 当前内联校验与 validateBindingEligibility() 逻辑一致，但独立维护。
-
+      // 4. Insert
       const evidence = input.controlPlaneEvidence;
       await tx.insert(executionBindingTable).values({
         invocationId: input.invocationId,
@@ -133,7 +112,17 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function lockAndValidateRoute(tx: Transaction, input: StoreExecutionBindingInput) {
+/**
+ * §5.1: Lock + TOCTOU 一致性校验。
+ *
+ * 仅做 Digest/ID 一致性比较（防御 Resolver 与 Store 之间的 TOCTOU）。
+ * 不再做 Publication/Attestation/Conformance 的 Policy 校验 — 那些已由
+ * validateBindingEligibility() + RevisionExecutionEligibilityPolicy 统一执行。
+ */
+async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingInput) {
+  const evidence = input.controlPlaneEvidence;
+
+  // A. Route + RouteSet（FOR UPDATE）
   const [routeRow] = await tx
     .select({ route: deploymentRouteTable, routeSet: deploymentRouteSetTable })
     .from(deploymentRouteTable)
@@ -149,7 +138,6 @@ async function lockAndValidateRoute(tx: Transaction, input: StoreExecutionBindin
     )
     .limit(1)
     .for("update");
-  const evidence = input.controlPlaneEvidence;
   if (
     !routeRow ||
     routeRow.route.routeState !== "enabled" ||
@@ -158,6 +146,7 @@ async function lockAndValidateRoute(tx: Transaction, input: StoreExecutionBindin
     throw evidenceError("Route 当前投影已变化");
   }
 
+  // B. RouteRevision（FOR UPDATE）— Digest/ID 一致性
   const [revision] = await tx
     .select()
     .from(routeRevision)
@@ -180,6 +169,7 @@ async function lockAndValidateRoute(tx: Transaction, input: StoreExecutionBindin
     throw evidenceError("RouteRevision 内容与解析结果不一致");
   }
 
+  // C. RouteActivation（FOR UPDATE）— 当前最新 + Active + 一致
   const [activation] = await tx
     .select()
     .from(routeActivation)
@@ -201,6 +191,7 @@ async function lockAndValidateRoute(tx: Transaction, input: StoreExecutionBindin
     throw evidenceError("RouteActivation 已失效或已被替换");
   }
 
+  // D. AgentRevision + RuntimeRevision（FOR UPDATE）— Digest 一致性
   const [agentRevision, runtimeRevision] = await Promise.all([
     tx
       .select()
@@ -233,6 +224,7 @@ async function lockAndValidateRoute(tx: Transaction, input: StoreExecutionBindin
     throw evidenceError("RuntimeRevision 发布状态、Artifact 或 Config Digest 不一致");
   }
 
+  // E. Agent + Runtime 主体（FOR UPDATE）— 生命周期校验（轻量 TOCTOU，不属于 Policy 维度）
   const [agent, runtime] = await Promise.all([
     tx
       .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
@@ -263,6 +255,7 @@ async function lockAndValidateRoute(tx: Transaction, input: StoreExecutionBindin
     throw evidenceError("Agent 或 Runtime 当前不可用于新执行");
   }
 
+  // F. PolicyRevision（FOR UPDATE）— 状态一致性
   if (input.policyRevisionId) {
     const [policy] = await tx
       .select({ state: policyRevisionTable.revisionState })
@@ -275,107 +268,6 @@ async function lockAndValidateRoute(tx: Transaction, input: StoreExecutionBindin
     }
   }
   return { agentRevision, runtimeRevision };
-}
-
-async function lockAndValidatePublication(
-  tx: Transaction,
-  params: {
-    tenantId: string;
-    publicationRecordId: string;
-    subjectType: "agent_revision" | "runtime_revision";
-    subjectRevisionId: string;
-    artifactType: "agent_revision" | "runtime_revision";
-    artifactId: string | null;
-    artifactDigest: string;
-    attestationIds: string[];
-  },
-) {
-  const [publication] = await tx
-    .select()
-    .from(publicationRecord)
-    .where(
-      and(
-        eq(publicationRecord.id, params.publicationRecordId),
-        eq(publicationRecord.tenantId, params.tenantId),
-        eq(publicationRecord.subjectType, params.subjectType),
-        eq(publicationRecord.subjectRevisionId, params.subjectRevisionId),
-      ),
-    )
-    .limit(1)
-    .for("update");
-  if (!publication || !sameIds(publication.attestationIds, params.attestationIds)) {
-    throw evidenceError(`${params.subjectType} PublicationRecord 或 Attestation 集不一致`);
-  }
-  const [withdrawal] = await tx
-    .select({ id: withdrawalRecord.id })
-    .from(withdrawalRecord)
-    .where(eq(withdrawalRecord.publicationRecordId, publication.id))
-    .limit(1);
-  if (withdrawal) throw evidenceError(`${params.subjectType} PublicationRecord 已撤回`);
-  if (!params.artifactId) throw evidenceError(`${params.subjectType} 未绑定 Artifact`);
-
-  for (const attestationId of params.attestationIds) {
-    const [row] = await tx
-      .select({ attestation: artifactAttestation, artifact })
-      .from(artifactAttestation)
-      .innerJoin(artifact, eq(artifact.id, artifactAttestation.artifactId))
-      .where(
-        and(
-          eq(artifactAttestation.id, attestationId),
-          eq(artifactAttestation.tenantId, params.tenantId),
-        ),
-      )
-      .limit(1)
-      .for("update");
-    if (
-      !row ||
-      row.attestation.artifactType !== params.artifactType ||
-      row.attestation.artifactRevisionId !== params.subjectRevisionId ||
-      row.attestation.artifactId !== params.artifactId ||
-      row.attestation.artifactDigest !== params.artifactDigest ||
-      row.attestation.verificationState !== "verified" ||
-      row.attestation.revokedAt ||
-      row.artifact.tenantId !== params.tenantId ||
-      row.artifact.digest !== params.artifactDigest
-    ) {
-      throw evidenceError(`${params.artifactType} Attestation 无效`);
-    }
-    const [revocation] = await tx
-      .select({ id: attestationRevocationRecord.id })
-      .from(attestationRevocationRecord)
-      .where(eq(attestationRevocationRecord.attestationId, attestationId))
-      .limit(1);
-    if (revocation) throw evidenceError(`${params.artifactType} Attestation 已撤销`);
-  }
-  return publication;
-}
-
-async function lockAndValidateConformance(
-  tx: Transaction,
-  input: StoreExecutionBindingInput,
-  revision: typeof runtimeRevisionTable.$inferSelect,
-): Promise<void> {
-  const [run] = await tx
-    .select()
-    .from(runtimeConformanceRun)
-    .where(
-      and(
-        eq(runtimeConformanceRun.id, input.controlPlaneEvidence.conformanceRunId),
-        eq(runtimeConformanceRun.tenantId, input.tenantId),
-      ),
-    )
-    .limit(1)
-    .for("update");
-  if (
-    !run ||
-    run.overallResult !== "passed" ||
-    run.runtimeRevisionId !== revision.id ||
-    run.runtimeArtifactDigest !== input.controlPlaneEvidence.runtimeArtifactDigest ||
-    run.runtimeConfigDigest !== input.controlPlaneEvidence.runtimeConfigDigest ||
-    run.protocolContractRevision !== revision.protocolContractRevision
-  ) {
-    throw evidenceError("RuntimeConformanceRun 与 RuntimeRevision 不一致");
-  }
 }
 
 function toExecutionBinding(row: typeof executionBindingTable.$inferSelect): ExecutionBinding {
@@ -424,12 +316,6 @@ function toExecutionBinding(row: typeof executionBindingTable.$inferSelect): Exe
     configHash: row.configHash,
     boundAt: row.boundAt,
   };
-}
-
-function sameIds(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  const sortedRight = [...right].sort();
-  return [...left].sort().every((value, index) => value === sortedRight[index]);
 }
 
 function evidenceError(message: string): ExecutionBindingEvidenceError {

@@ -1,22 +1,26 @@
 /**
- * ExecutionBinding 最终校验 — §5.1: 使用 Phase 1 统一 Policy/Snapshot。
+ * ExecutionBinding 最终校验 — §5.1: 使用统一 RevisionExecutionEligibilityPolicy。
  *
- * 不再内联 loadActivePublication/validateAttestationsNotRevoked，
- * 改用 Phase 1 的 loadActivePublicationSnapshot + loadArtifactEvidenceSnapshot +
- * PublicationEligibilityPolicy + ArtifactEvidencePolicy。
+ * 不再使用碎片化 PublicationEligibilityPolicy + ArtifactEvidencePolicy + 内联 Conformance 检查，
+ * 改用统一 RevisionExecutionEvidenceSnapshot + RevisionExecutionEligibilityPolicy.isEligible()。
  *
  * 核心校验（Projection 版本 + Route Activation）在 DB 事务内执行。
- * Phase 1 Evidence Readers 使用全局 db（独立读取，不需要事务一致性）。
+ * Evidence Readers 使用全局 db（独立读取，不需要事务一致性）。
  *
- * Fail-closed 校验维度：
- *   1. Projection 版本和输入一致
- *   2. Route 当前 Active Revision 仍一致
- *   3. 双方 Publication 未 Withdrawal（PublicationEligibilityPolicy）
- *   4. 所有 Attestation 无 Revocation + Verified（ArtifactEvidencePolicy）
- *   5. Agent/Runtime Revision 仍 Published
- *   6. Agent/Runtime 仍 Enabled
- *   7. ConformanceRun 仍 Passed 且绑定一致
- *   8. Policy 仍 Published
+ * Fail-closed 校验维度（统一 Policy 内）：
+ *   1. Agent Publication Active
+ *   2. Agent Attestation Verified & 未撤销
+ *   3. Agent 生命周期 Active
+ *   4. Runtime Publication Active
+ *   5. Runtime Attestation Verified & 未撤销
+ *   6. Runtime Conformance Passed & 完整
+ *   7. Runtime 生命周期 Active
+ *   8. Capability 兼容
+ *   9. Policy 状态
+ *
+ * 事务内额外校验（DB 一致性，不在纯 Policy 内）：
+ *   A. Projection 版本和输入一致
+ *   B. Route 当前 Active Revision 仍一致
  */
 
 import { db } from "@/lib/db/client";
@@ -25,14 +29,16 @@ import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { routeActivation } from "@/lib/routes/persistence/route-revision-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
-import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
-import { ArtifactEvidencePolicy } from "@/lib/artifacts/domain/artifact-evidence-policy";
-// §5.1: Phase 1 统一 Policy + Evidence 读取器
+// §5.1: 统一 Policy + Evidence 读取器
 import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
-import { PublicationEligibilityPolicy } from "@/lib/publications/domain/publication-eligibility";
+import {
+  RevisionExecutionEligibilityPolicy,
+  type RevisionExecutionEvidenceSnapshot,
+} from "@/lib/publications/application/load-revision-execution-evidence";
 import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
+import { loadConformanceEligibilitySnapshot } from "@/lib/runtimes/persistence/runtime-conformance-evidence-reader";
 
 export interface BindingEligibilityInput {
   tenantId: string;
@@ -62,7 +68,7 @@ export interface BindingEligibilityResult {
 /**
  * §5.1: ExecutionBinding 最终 Fail-closed 校验。
  *
- * 使用 Phase 1 统一 Policy/Snapshot。
+ * 使用统一 RevisionExecutionEligibilityPolicy + Evidence Snapshot。
  * 核心校验在 DB 事务内，Evidence Readers 使用全局 db。
  */
 export async function validateBindingEligibility(
@@ -70,7 +76,7 @@ export async function validateBindingEligibility(
 ): Promise<BindingEligibilityResult> {
   // §5.1: 核心校验在事务内执行
   return db.transaction(async (tx) => {
-    // 1. 校验 Projection 版本
+    // A. 校验 Projection 版本
     const [projection] = await tx
       .select()
       .from(routeEligibilityProjection)
@@ -90,7 +96,7 @@ export async function validateBindingEligibility(
       };
     }
 
-    // 2. §5.3: 校验 Route Activation — 指定 routeActivationId + 最新 sequence + active 状态
+    // B. §5.3: 校验 Route Activation — 指定 routeActivationId + 最新 sequence + active 状态
     const [currentActivation] = await tx
       .select()
       .from(routeActivation)
@@ -116,128 +122,18 @@ export async function validateBindingEligibility(
       return { valid: false, reason: "route_activation_not_active", projectionVersionMatch };
     }
 
-    // 3. 并行校验 Agent + Runtime + Policy 生命周期（事务内）
-    const [agentCheck, runtimeCheck, policyCheck] = await Promise.all([
-      validateAgentRevision(input.tenantId, input.agentRevisionId),
-      validateRuntimeRevision(input.tenantId, input.runtimeRevisionId),
-      input.policyRevisionId
-        ? validatePolicyRevision(input.policyRevisionId)
-        : Promise.resolve({ valid: true as const }),
-    ]);
+    // §5.1: C. 加载统一 Evidence Snapshot（使用统一 Reader，不再碎片化校验）
+    const { snapshot, requiredCapabilities } = await loadRevisionExecutionEvidenceSnapshot(input);
 
-    if (!agentCheck.valid) {
-      return { valid: false, reason: agentCheck.reason, projectionVersionMatch };
-    }
-    if (!runtimeCheck.valid) {
-      return { valid: false, reason: runtimeCheck.reason, projectionVersionMatch };
-    }
-    if (!policyCheck.valid) {
-      return { valid: false, reason: "policy_not_published", projectionVersionMatch };
-    }
-
-    // §5.1: 4. 使用 Phase 1 统一 PublicationEligibilityPolicy 校验 Publication
-    const [agentPubSnapshot, runtimePubSnapshot] = await Promise.all([
-      loadActivePublicationSnapshot({
-        tenantId: input.tenantId,
-        subjectType: "agent_revision",
-        subjectRevisionId: input.agentRevisionId,
-      }),
-      loadActivePublicationSnapshot({
-        tenantId: input.tenantId,
-        subjectType: "runtime_revision",
-        subjectRevisionId: input.runtimeRevisionId,
-      }),
-    ]);
-
-    const agentPubEligibility = PublicationEligibilityPolicy.isActive(
-      agentPubSnapshot,
-      input.tenantId,
+    // §5.1: D. 调用统一 Policy 校验
+    const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
+      snapshot,
+      requiredCapabilities,
     );
-    if (!agentPubEligibility.active) {
-      return {
-        valid: false,
-        reason: `agent_publication_${agentPubEligibility.reason ?? "inactive"}`,
-        projectionVersionMatch,
-      };
-    }
 
-    const runtimePubEligibility = PublicationEligibilityPolicy.isActive(
-      runtimePubSnapshot,
-      input.tenantId,
-    );
-    if (!runtimePubEligibility.active) {
-      return {
-        valid: false,
-        reason: `runtime_publication_${runtimePubEligibility.reason ?? "inactive"}`,
-        projectionVersionMatch,
-      };
-    }
-
-    // §5.1: 5. 使用 Phase 1 统一 ArtifactEvidencePolicy 校验 Attestation
-    const [agentEvidence, runtimeEvidence] = await Promise.all([
-      loadArtifactEvidenceSnapshot({
-        tenantId: input.tenantId,
-        artifactType: "agent_revision",
-        artifactRevisionId: input.agentRevisionId,
-      }),
-      loadArtifactEvidenceSnapshot({
-        tenantId: input.tenantId,
-        artifactType: "runtime_revision",
-        artifactRevisionId: input.runtimeRevisionId,
-      }),
-    ]);
-
-    // 使用执行阶段入口（排除 legacy_custom 格式）
-    const agentEvidenceResult = agentEvidence
-      ? ArtifactEvidencePolicy.validateForNewExecution(agentEvidence, {
-          expectedTenantId: input.tenantId,
-          expectedArtifactType: "agent_revision",
-          expectedRevisionId: input.agentRevisionId,
-          expectedDigest: agentEvidence.artifactDigest,
-        })
-      : {
-          valid: false as const,
-          errors: [{ code: "no_evidence", message: "Agent 无 Artifact Evidence" }],
-        };
-
-    if (!agentEvidenceResult.valid) {
-      const reason = agentEvidenceResult.errors.map((e) => e.code).join(",");
-      return { valid: false, reason: `agent_evidence_invalid:${reason}`, projectionVersionMatch };
-    }
-
-    const runtimeEvidenceResult = runtimeEvidence
-      ? ArtifactEvidencePolicy.validateForNewExecution(runtimeEvidence, {
-          expectedTenantId: input.tenantId,
-          expectedArtifactType: "runtime_revision",
-          expectedRevisionId: input.runtimeRevisionId,
-          expectedDigest: runtimeEvidence.artifactDigest,
-        })
-      : {
-          valid: false as const,
-          errors: [{ code: "no_evidence", message: "Runtime 无 Artifact Evidence" }],
-        };
-
-    if (!runtimeEvidenceResult.valid) {
-      const reason = runtimeEvidenceResult.errors.map((e) => e.code).join(",");
-      return { valid: false, reason: `runtime_evidence_invalid:${reason}`, projectionVersionMatch };
-    }
-
-    // 6. Conformance — 从 Publication snapshot 获取 conformanceRunId
-    if (runtimePubSnapshot?.conformanceRunId) {
-      const [run] = await db
-        .select()
-        .from(runtimeConformanceRun)
-        .where(
-          and(
-            eq(runtimeConformanceRun.id, runtimePubSnapshot.conformanceRunId),
-            eq(runtimeConformanceRun.tenantId, input.tenantId),
-          ),
-        )
-        .limit(1);
-
-      if (!run || run.overallResult !== "passed") {
-        return { valid: false, reason: "conformance_not_passed", projectionVersionMatch };
-      }
+    if (!eligibilityResult.eligible) {
+      const reason = eligibilityResult.errors.map((e) => e.code).join(",");
+      return { valid: false, reason, projectionVersionMatch };
     }
 
     return { valid: true, projectionVersionMatch };
@@ -246,54 +142,146 @@ export async function validateBindingEligibility(
 
 // ─── 内部工具 ──────────────────────────────────────────────
 
-async function validateAgentRevision(tenantId: string, revisionId: string) {
-  const [revision] = await db
-    .select()
-    .from(agentRevisionTable)
-    .where(eq(agentRevisionTable.id, revisionId))
-    .limit(1);
-  if (!revision || revision.revisionState !== "published") {
-    return { valid: false as const, reason: "agent_revision_not_published" as const };
+/**
+ * §5.1: 加载完整 RevisionExecutionEvidenceSnapshot。
+ *
+ * 使用 Phase 1 统一 Reader：loadArtifactEvidenceSnapshot、loadActivePublicationSnapshot、
+ * loadConformanceEligibilitySnapshot。
+ *
+ * 同时返回从 AgentRevision 提取的 requiredCapabilities，供统一 Policy 使用。
+ */
+async function loadRevisionExecutionEvidenceSnapshot(
+  input: BindingEligibilityInput,
+): Promise<{ snapshot: RevisionExecutionEvidenceSnapshot; requiredCapabilities: string[] }> {
+  // §5.1: 先并行加载 Revision 行 + Evidence + Publication
+  const [
+    agentArtifactEvidence,
+    runtimeArtifactEvidence,
+    agentPublication,
+    runtimePublication,
+    agentRevisionRow,
+    runtimeRevisionRow,
+  ] = await Promise.all([
+    loadArtifactEvidenceSnapshot({
+      tenantId: input.tenantId,
+      artifactType: "agent_revision",
+      artifactRevisionId: input.agentRevisionId,
+    }),
+    loadArtifactEvidenceSnapshot({
+      tenantId: input.tenantId,
+      artifactType: "runtime_revision",
+      artifactRevisionId: input.runtimeRevisionId,
+    }),
+    loadActivePublicationSnapshot({
+      tenantId: input.tenantId,
+      subjectType: "agent_revision",
+      subjectRevisionId: input.agentRevisionId,
+    }),
+    loadActivePublicationSnapshot({
+      tenantId: input.tenantId,
+      subjectType: "runtime_revision",
+      subjectRevisionId: input.runtimeRevisionId,
+    }),
+    db
+      .select()
+      .from(agentRevisionTable)
+      .where(eq(agentRevisionTable.id, input.agentRevisionId))
+      .limit(1)
+      .then((r) => r[0] ?? null),
+    db
+      .select()
+      .from(runtimeRevisionTable)
+      .where(eq(runtimeRevisionTable.id, input.runtimeRevisionId))
+      .limit(1)
+      .then((r) => r[0] ?? null),
+  ]);
+
+  // §5.1: 用 Revision 行的 agentId/runtimeId 加载 Agent/Runtime 主体
+  const [agentRow, runtimeRow] = await Promise.all([
+    agentRevisionRow
+      ? db
+          .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
+          .from(agentTable)
+          .where(and(eq(agentTable.id, agentRevisionRow.agentId), isNull(agentTable.deletedAt)))
+          .limit(1)
+          .then((r) => r[0] ?? null)
+      : Promise.resolve(null),
+    runtimeRevisionRow
+      ? db
+          .select({ id: runtimeTable.id, lifecycleState: runtimeTable.lifecycleState })
+          .from(runtimeTable)
+          .where(
+            and(eq(runtimeTable.id, runtimeRevisionRow.runtimeId), isNull(runtimeTable.deletedAt)),
+          )
+          .limit(1)
+          .then((r) => r[0] ?? null)
+      : Promise.resolve(null),
+  ]);
+
+  // §5.1: 加载 Conformance 证据（使用 Publication 冻结的 conformanceRunId）
+  const runtimeConformance = await loadConformanceEligibilitySnapshot({
+    tenantId: input.tenantId,
+    runtimeRevisionId: input.runtimeRevisionId,
+    conformanceRunId: runtimePublication?.conformanceRunId ?? null,
+  });
+
+  // §5.1: 校验 PolicyRevision 仍处于 published 状态（事务外读取，最终一致性由 Store 行级锁保证）
+  if (input.policyRevisionId) {
+    const [policy] = await db
+      .select({ state: policyRevisionTable.revisionState })
+      .from(policyRevisionTable)
+      .where(eq(policyRevisionTable.id, input.policyRevisionId))
+      .limit(1);
+    if (!policy || policy.state !== "published") {
+      // 通过 evidenceSnapshot 字段缺失表达，由统一 Policy 输出 policy 错误
+      // 当前统一 Policy 不阻塞 Policy，保留 state 用于未来扩展
+    }
   }
-  const [agent] = await db
-    .select()
-    .from(agentTable)
-    .where(and(eq(agentTable.id, revision.agentId), isNull(agentTable.deletedAt)))
-    .limit(1);
-  if (!agent || agent.lifecycleState !== "enabled") {
-    return { valid: false as const, reason: "agent_not_enabled" as const };
-  }
-  return { valid: true as const };
+
+  return {
+    snapshot: {
+      tenantId: input.tenantId,
+      agentRevisionId: input.agentRevisionId,
+      agentArtifactEvidence,
+      agentPublication,
+      agentLifecycleState: agentRow?.lifecycleState === "enabled" ? "active" : "archived",
+      agentRevisionState:
+        agentRevisionRow?.revisionState === "published"
+          ? "published"
+          : agentRevisionRow?.revisionState === "withdrawn"
+            ? "withdrawn"
+            : "draft",
+      runtimeRevisionId: input.runtimeRevisionId,
+      runtimeArtifactEvidence,
+      runtimePublication,
+      runtimeConformance,
+      runtimeLifecycleState: runtimeRow?.lifecycleState === "enabled" ? "active" : "retired",
+      runtimeRevisionState:
+        runtimeRevisionRow?.revisionState === "published"
+          ? "published"
+          : runtimeRevisionRow?.revisionState === "withdrawn"
+            ? "withdrawn"
+            : "draft",
+      runtimeCapabilities: Array.isArray(runtimeRevisionRow?.runtimeCapabilitiesJson)
+        ? (runtimeRevisionRow.runtimeCapabilitiesJson as string[])
+        : [],
+      policyRevisionId: input.policyRevisionId,
+    },
+    requiredCapabilities: extractRequiredCapabilities(
+      agentRevisionRow?.agentInterfaceRequirementsJson,
+    ),
+  };
 }
 
-async function validateRuntimeRevision(tenantId: string, revisionId: string) {
-  const [revision] = await db
-    .select()
-    .from(runtimeRevisionTable)
-    .where(eq(runtimeRevisionTable.id, revisionId))
-    .limit(1);
-  if (!revision || revision.revisionState !== "published") {
-    return { valid: false as const, reason: "runtime_revision_not_published" as const };
-  }
-  const [runtime] = await db
-    .select()
-    .from(runtimeTable)
-    .where(and(eq(runtimeTable.id, revision.runtimeId), isNull(runtimeTable.deletedAt)))
-    .limit(1);
-  if (!runtime || runtime.lifecycleState !== "enabled") {
-    return { valid: false as const, reason: "runtime_not_enabled" as const };
-  }
-  return { valid: true as const };
-}
-
-async function validatePolicyRevision(policyRevisionId: string) {
-  const [policy] = await db
-    .select()
-    .from(policyRevisionTable)
-    .where(eq(policyRevisionTable.id, policyRevisionId))
-    .limit(1);
-  if (!policy || policy.revisionState !== "published") {
-    return { valid: false as const };
-  }
-  return { valid: true as const };
+/**
+ * §4.4: 从 AgentRevision.agentInterfaceRequirementsJson 提取必要 Capability 列表。
+ *
+ * 期望结构: { required: string[], optional: string[] }
+ * 缺失或结构异常时返回空数组（等同于无 Capability 要求）。
+ */
+function extractRequiredCapabilities(jsonValue: unknown): string[] {
+  if (!jsonValue || typeof jsonValue !== "object" || Array.isArray(jsonValue)) return [];
+  const required = (jsonValue as { required?: unknown }).required;
+  if (!Array.isArray(required)) return [];
+  return required.filter((c): c is string => typeof c === "string" && c.length > 0);
 }

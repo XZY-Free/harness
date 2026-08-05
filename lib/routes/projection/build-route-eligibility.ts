@@ -30,6 +30,7 @@ import {
 } from "@/lib/publications/application/load-revision-execution-evidence";
 import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
 import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
+import { loadConformanceEligibilitySnapshot } from "@/lib/runtimes/persistence/runtime-conformance-evidence-reader";
 
 export interface BuildProjectionDependencies {
   store: RouteEligibilityStore;
@@ -219,6 +220,18 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
         }),
       ]);
 
+    // §4.3: 7.1 加载 Runtime Conformance 证据快照（不再硬编码 null）
+    const runtimeConformance = runtimePublication?.conformanceRunId
+      ? await loadConformanceEligibilitySnapshot({
+          tenantId: input.tenantId,
+          runtimeRevisionId: revision.runtimeRevisionId,
+          conformanceRunId: runtimePublication.conformanceRunId,
+        })
+      : await loadConformanceEligibilitySnapshot({
+          tenantId: input.tenantId,
+          runtimeRevisionId: revision.runtimeRevisionId,
+        });
+
     // 8. Policy
     const policyRevisionState = revision.policyRevisionId
       ? await db
@@ -245,7 +258,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       runtimeRevisionId: revision.runtimeRevisionId,
       runtimeArtifactEvidence,
       runtimePublication,
-      runtimeConformance: null, // §4.3 TODO: 需要 loadConformanceEligibilitySnapshot
+      runtimeConformance,
       runtimeLifecycleState: runtime?.lifecycleState === "enabled" ? "active" : "retired",
       runtimeRevisionState:
         runtimeRevision?.revisionState === "published"
@@ -260,9 +273,14 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     };
 
     // §4.3: 统一 Policy 判断
+    // §4.4: requiredCapabilities 从 AgentRevision.agentInterfaceRequirementsJson.required 推导，
+    // 不再硬编码空数组。
+    const requiredCapabilities = extractRequiredCapabilities(
+      agentRevision?.agentInterfaceRequirementsJson,
+    );
     const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
       evidenceSnapshot,
-      [], // requiredCapabilities 从 Route eligibilityConditions 推导，当前为空
+      requiredCapabilities,
     );
     const isEligible = eligibilityResult.eligible;
 
@@ -465,4 +483,17 @@ function readRouteGroupId(
     if (typeof groupId === "string" && groupId.trim()) return groupId;
   }
   return fallback;
+}
+
+/**
+ * §4.4: 从 AgentRevision.agentInterfaceRequirementsJson 提取必要 Capability 列表。
+ *
+ * 期望结构: { required: string[], optional: string[] }
+ * 缺失或结构异常时返回空数组（等同于无 Capability 要求）。
+ */
+function extractRequiredCapabilities(jsonValue: unknown): string[] {
+  if (!jsonValue || typeof jsonValue !== "object" || Array.isArray(jsonValue)) return [];
+  const required = (jsonValue as { required?: unknown }).required;
+  if (!Array.isArray(required)) return [];
+  return required.filter((c): c is string => typeof c === "string" && c.length > 0);
 }
