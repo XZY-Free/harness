@@ -24,6 +24,7 @@
  * - 失败原因摘要写入 audit.afterHash（不存原文），不泄露内部漏洞细节给无权调用者。
  */
 import { randomUUID } from "node:crypto";
+import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
 import {
   AttestationAlreadyRevokedError,
   AttestationNotFoundError,
@@ -40,27 +41,26 @@ import {
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
+  getAttestationById,
+  getVerifiedAttestationForRevision,
+  listAttestations,
+  listAttestationsByDigest,
+  listAttestationsByRevision,
+} from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import type { ListAttestationsOptions } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import {
   type ArtifactAttestation,
   artifact,
   artifactAttestation,
-  attestationRevocationRecord,
+  type attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
 import {
   mysqlArtifactAttestationPersistenceStore,
   mysqlAttestationRevocationStore,
 } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
-import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
 import { db } from "@/lib/db/client";
 import type { AuditActor } from "@/lib/identity/audit";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import {
-  getAttestationById,
-  listAttestationsByRevision,
-  listAttestationsByDigest,
-  listAttestations,
-  getVerifiedAttestationForRevision,
-} from "@/lib/artifacts/persistence/artifact-attestation-reader";
-import type { ListAttestationsOptions } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 
 const recordArtifactAttestation = createRecordArtifactAttestation({
   store: mysqlArtifactAttestationPersistenceStore,

@@ -57,11 +57,11 @@ import {
 import { createLegalHold } from "@/lib/identity/legal-hold-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import type {
+  DeletionStep,
   DeletionStoreType,
   DeletionSubjectType,
-  V11DeletionStep,
-} from "@/lib/v11/schema/deletion-request";
-import { tenant } from "@/lib/v11/schema/identity";
+} from "@/lib/persistence/schema/deletion-request";
+import { tenant } from "@/lib/persistence/schema/identity";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -135,7 +135,7 @@ function injectSuccessAdapters(): Map<DeletionStoreType, RecordingDeletionStoreA
 }
 
 /** 取 steps 首个元素的 id（测试 fixture 约定至少插入一条）。 */
-function firstStepId(steps: V11DeletionStep[]): string {
+function firstStepId(steps: DeletionStep[]): string {
   const first = steps[0];
   if (!first) throw new Error("测试设置错误：期望至少一条 step");
   return first.id;
@@ -761,7 +761,7 @@ describe("Step 管理", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("computeRequestSummary / deriveTerminalStateFromSteps", () => {
-  function makeStep(state: V11DeletionStep["stepState"]): V11DeletionStep {
+  function makeStep(state: DeletionStep["stepState"]): DeletionStep {
     return {
       id: "step-id",
       tenantId: "t-1",

@@ -21,17 +21,13 @@
  */
 import { apiPath } from "../../api-fetch";
 import { toVisibleError } from "./error-messages";
-import {
-  type V11SSEClientHandle,
-  V11_SSE_DEFAULT_MAX_RETRIES,
-  createSSEClient,
-} from "./sse-client";
+import { type SSEClientHandle, V11_SSE_DEFAULT_MAX_RETRIES, createSSEClient } from "./sse-client";
 import { createInitialState } from "./thread-reducer";
-import { type V11ThreadStore, createThreadStore } from "./thread-store";
-import type { V11ClientErrorBody, V11ClientEvent, V11ClientItemsResponse } from "./types";
+import { type ThreadStore, createThreadStore } from "./thread-store";
+import type { ClientErrorBody, ClientEvent, ClientItemsResponse } from "./types";
 
 /** Thread 客户端配置。 */
-export interface V11ThreadClientConfig {
+export interface ThreadClientConfig {
   readonly threadId: string;
   /** 自定义 fetch（测试用）。 */
   readonly fetchImpl?: typeof fetch;
@@ -42,8 +38,8 @@ export interface V11ThreadClientConfig {
 }
 
 /** Thread 客户端。 */
-export interface V11ThreadClient {
-  readonly store: V11ThreadStore;
+export interface ThreadClient {
+  readonly store: ThreadStore;
   /** 启动：先加载 snapshot，成功后启动 SSE。 */
   start(): Promise<void>;
   /** 停止：关闭 SSE，不重新加载。 */
@@ -55,17 +51,17 @@ export interface V11ThreadClient {
 /**
  * Item 事件有时只携带内容哈希而非完整投影；此时不能凭摘要构造消息，需重读权威快照。
  */
-export function requiresSnapshotRefresh(event: V11ClientEvent): boolean {
+export function requiresSnapshotRefresh(event: ClientEvent): boolean {
   if (event.event_type !== "item.created" && event.event_type !== "item.updated") return false;
   const payload = event.payload;
   return !payload || typeof payload !== "object" || !("item" in payload);
 }
 
 /** 创建 Thread 客户端。 */
-export function createV11ThreadClient(config: V11ThreadClientConfig): V11ThreadClient {
+export function createV11ThreadClient(config: ThreadClientConfig): ThreadClient {
   const fetchImpl = config.fetchImpl ?? fetch;
   const store = createThreadStore(createInitialState(config.threadId));
-  let sseHandle: V11SSEClientHandle | null = null;
+  let sseHandle: SSEClientHandle | null = null;
   let stopped = false;
   let resnapshotInFlight = false;
 
@@ -96,9 +92,9 @@ export function createV11ThreadClient(config: V11ThreadClientConfig): V11ThreadC
 
     if (!response.ok) {
       const bodyText = await response.text().catch(() => "");
-      let errorBody: V11ClientErrorBody | null = null;
+      let errorBody: ClientErrorBody | null = null;
       try {
-        errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+        errorBody = JSON.parse(bodyText) as ClientErrorBody;
       } catch {
         // ignore
       }
@@ -119,7 +115,7 @@ export function createV11ThreadClient(config: V11ThreadClientConfig): V11ThreadC
       return false;
     }
 
-    const data = (await response.json()) as V11ClientItemsResponse;
+    const data = (await response.json()) as ClientItemsResponse;
     store.dispatch({
       type: "snapshot.loaded",
       items: data.items,

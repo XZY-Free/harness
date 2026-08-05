@@ -26,17 +26,17 @@
 
 import { useV11Handoff } from "@/components/hooks/use-v11-handoff";
 import { useV11UserAction } from "@/components/hooks/use-v11-user-action";
+import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { cn } from "@/lib/utils";
-import type { V11ClientItem } from "@/lib/v11/client/types";
-import type { UserActionResolution } from "@/lib/v11/schema/user-action-request";
+import type { ClientItem } from "@/lib/v11/client/types";
 import { Check, CircleAlert, FilePenLine } from "lucide-react";
 import { useMemo, useState } from "react";
 
-interface V11UserActionItemProps {
+interface UserActionItemProps {
   /** 当前 Thread id；用于构造 :resolve 路径。 */
   readonly threadId: string;
   /** user_action ThreadItem。 */
-  readonly item: V11ClientItem;
+  readonly item: ClientItem;
 }
 
 /** user_action ThreadItem content 投影（按 request_type 收集所有可能字段）。 */
@@ -153,7 +153,7 @@ function extractInputFields(schema: Record<string, unknown> | undefined): InputF
   return fields;
 }
 
-export function V11UserActionItem({ threadId, item }: V11UserActionItemProps) {
+export function UserActionItem({ threadId, item }: UserActionItemProps) {
   const content = item.content as UserActionContent;
 
   // 两个 hook 都必须无条件调用（React hooks 规则）

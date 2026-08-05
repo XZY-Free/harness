@@ -1,12 +1,12 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import { getIngressByInvocation } from "@/lib/runtime/event-ingress-queries";
+import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import { getIngressByInvocation } from "@/lib/v11/runtime/event-ingress-queries";
-import { getInvocationById } from "@/lib/v11/runtime/invocation-queries";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/ingress — 列出 Invocation 的 RuntimeEventIngress（S11-W04）。
  *
@@ -55,13 +55,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
   let afterSequence: number | undefined;
   if (afterSequenceParam) {
     afterSequence = Number.parseInt(afterSequenceParam, 10);
     if (!Number.isFinite(afterSequence)) {
-      return v11SchemaInvalid(requestId, "after_sequence 必须是整数");
+      return schemaInvalidTable(requestId, "after_sequence 必须是整数");
     }
   }
 

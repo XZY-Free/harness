@@ -1,13 +1,13 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import { OBSERVATION_KINDS, type ObservationKind } from "@/lib/persistence/schema/trace";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import { listObservationsBySpan } from "@/lib/v11/observability/observation-queries";
 import { getSpanById } from "@/lib/v11/observability/trace-queries";
-import { OBSERVATION_KINDS, type ObservationKind } from "@/lib/v11/schema/trace";
 /**
  * GET /admin/api/v1/spans/{span_id}/observations — 列出 Span 下所有 Observation（S11-W05）。
  *
@@ -50,7 +50,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   let kind: ObservationKind | undefined;
   if (kindParam) {
     if (!VALID_KINDS.has(kindParam)) {
-      return v11SchemaInvalid(requestId, `kind 非法: ${kindParam}`);
+      return schemaInvalidTable(requestId, `kind 非法: ${kindParam}`);
     }
     kind = kindParam as ObservationKind;
   }

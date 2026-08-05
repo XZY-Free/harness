@@ -1,9 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
 import {
-  createActivateRouteSet,
-  RouteSetRequiresAtomicUpdateError,
   type ActivateRouteSetCommand,
   type ActivateRouteSetResult,
+  RouteSetRequiresAtomicUpdateError,
+  createActivateRouteSet,
 } from "@/lib/routes/application/activate-route-set";
 import {
   AgentCapabilityUnsupportedError,
@@ -12,18 +11,19 @@ import {
   RouteSetVersionConflictError,
 } from "@/lib/routes/domain/route-revision";
 import type {
+  RouteActivationRecord,
+  RouteRevisionRecord,
+} from "@/lib/routes/persistence/route-revision-record";
+import type {
+  AgentRevisionSummary,
   DesiredRoute,
+  RouteRow,
   RouteSetActivationSession,
   RouteSetActivationStore,
   RouteSetRow,
-  RouteRow,
-  AgentRevisionSummary,
   RuntimeRevisionSummary,
 } from "@/lib/routes/persistence/route-set-activation-store";
-import type {
-  RouteRevisionRecord,
-  RouteActivationRecord,
-} from "@/lib/routes/persistence/route-revision-record";
+import { describe, expect, it, vi } from "vitest";
 
 // ─── 测试 Fixtures ──────────────────────────────────────────
 
@@ -71,7 +71,7 @@ function makeRevisionRecord(overrides: Partial<RouteRevisionRecord> = {}): Route
     toolsetRevisionId: null,
     trafficAllocationJson: {},
     routeKey: "primary",
-          routeGroupId: "primary",
+    routeGroupId: "primary",
     selectorDigest: "sha256:abc",
     trafficWeight: 10000,
     priorityNo: 0,
@@ -87,7 +87,9 @@ function makeRevisionRecord(overrides: Partial<RouteRevisionRecord> = {}): Route
   } as RouteRevisionRecord;
 }
 
-function makeActivationRecord(overrides: Partial<RouteActivationRecord> = {}): RouteActivationRecord {
+function makeActivationRecord(
+  overrides: Partial<RouteActivationRecord> = {},
+): RouteActivationRecord {
   return {
     id: "act-1",
     tenantId: TENANT_ID,
@@ -120,16 +122,25 @@ function createMockStore(overrides: {
 }): RouteSetActivationStore {
   const routeSet = overrides.routeSet ?? BASE_ROUTE_SET;
   const existingRoutes = overrides.existingRoutes ?? [];
-  const agentRevisions = overrides.agentRevisions ?? new Map([[BASE_AGENT_REVISION.id, BASE_AGENT_REVISION]]);
-  const runtimeRevisions = overrides.runtimeRevisions ?? new Map([[BASE_RUNTIME_REVISION.id, BASE_RUNTIME_REVISION]]);
-  const attestationResults = overrides.attestationResults ?? new Map([["agent_revision:agent-rev-1", true], ["runtime_revision:runtime-rev-1", true]]);
+  const agentRevisions =
+    overrides.agentRevisions ?? new Map([[BASE_AGENT_REVISION.id, BASE_AGENT_REVISION]]);
+  const runtimeRevisions =
+    overrides.runtimeRevisions ?? new Map([[BASE_RUNTIME_REVISION.id, BASE_RUNTIME_REVISION]]);
+  const attestationResults =
+    overrides.attestationResults ??
+    new Map([
+      ["agent_revision:agent-rev-1", true],
+      ["runtime_revision:runtime-rev-1", true],
+    ]);
 
   let revisionNo = 1;
   let activationSeq = 1;
   let routeCounter = 1;
 
   return {
-    transaction: async <T>(operation: (session: RouteSetActivationSession) => Promise<T>): Promise<T> => {
+    transaction: async <T>(
+      operation: (session: RouteSetActivationSession) => Promise<T>,
+    ): Promise<T> => {
       const session: RouteSetActivationSession = {
         lockRouteSet: vi.fn(async () => routeSet),
         listRoutesBySet: vi.fn(async () => existingRoutes),
@@ -139,46 +150,54 @@ function createMockStore(overrides: {
         findIdempotentRouteSetActivation: vi.fn(async () => null),
         findAgentRevision: vi.fn(async (id: string) => agentRevisions.get(id) ?? null),
         findRuntimeRevision: vi.fn(async (id: string) => runtimeRevisions.get(id) ?? null),
-        hasVerifiedAttestation: vi.fn(async (params: { tenantId: string; artifactType: string; revisionId: string }) =>
-          attestationResults.get(`${params.artifactType}:${params.revisionId}`) ?? false),
-        resolveOrCreateRouteIdentity: vi.fn(async (params: { routeSetId: string; routeId?: string; routeKey: string }) => {
-          const resolvedId = params.routeId ?? `route-${routeCounter++}`;
-          return {
-            id: resolvedId,
-            routeSetId: params.routeSetId,
-            routeKey: params.routeKey,
-            agentRevisionId: BASE_AGENT_REVISION.id,
-            runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-            trafficWeight: 10000,
-            priorityNo: 0,
-            routeState: "enabled" as const,
-            effectiveFrom: null,
-            effectiveUntil: null,
-            activeRouteRevisionId: null,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          };
-        }),
+        hasVerifiedAttestation: vi.fn(
+          async (params: { tenantId: string; artifactType: string; revisionId: string }) =>
+            attestationResults.get(`${params.artifactType}:${params.revisionId}`) ?? false,
+        ),
+        resolveOrCreateRouteIdentity: vi.fn(
+          async (params: { routeSetId: string; routeId?: string; routeKey: string }) => {
+            const resolvedId = params.routeId ?? `route-${routeCounter++}`;
+            return {
+              id: resolvedId,
+              routeSetId: params.routeSetId,
+              routeKey: params.routeKey,
+              agentRevisionId: BASE_AGENT_REVISION.id,
+              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              trafficWeight: 10000,
+              priorityNo: 0,
+              routeState: "enabled" as const,
+              effectiveFrom: null,
+              effectiveUntil: null,
+              activeRouteRevisionId: null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            };
+          },
+        ),
         findRevisionByContent: vi.fn(async () => null),
         nextRevisionNo: vi.fn(async () => revisionNo++),
-        appendRevision: vi.fn(async (params: any) => makeRevisionRecord({
-          id: params.id,
-          routeId: params.routeId,
-          routeSetId: params.routeSetId,
-          revisionNo: params.revisionNo,
-          trafficWeight: params.content?.trafficWeight ?? 10000,
-          routeGroupId: params.content?.routeGroupId ?? "primary",
-        })),
+        appendRevision: vi.fn(async (params: any) =>
+          makeRevisionRecord({
+            id: params.id,
+            routeId: params.routeId,
+            routeSetId: params.routeSetId,
+            revisionNo: params.revisionNo,
+            trafficWeight: params.content?.trafficWeight ?? 10000,
+            routeGroupId: params.content?.routeGroupId ?? "primary",
+          }),
+        ),
         nextActivationSequence: vi.fn(async () => activationSeq++),
-        appendActivation: vi.fn(async (params: any) => makeActivationRecord({
-          id: params.id,
-          routeId: params.routeId,
-          routeRevisionId: params.routeRevisionId,
-          routeSetId: params.routeSetId,
-          activationSequence: params.activationSequence,
-          activationState: params.activationState,
-          routeSetVersionNo: params.routeSetVersionNo,
-        })),
+        appendActivation: vi.fn(async (params: any) =>
+          makeActivationRecord({
+            id: params.id,
+            routeId: params.routeId,
+            routeRevisionId: params.routeRevisionId,
+            routeSetId: params.routeSetId,
+            activationSequence: params.activationSequence,
+            activationState: params.activationState,
+            routeSetVersionNo: params.routeSetVersionNo,
+          }),
+        ),
         updateRouteProjection: vi.fn(async () => ({
           id: "route-1",
           routeSetId: ROUTE_SET_ID,
@@ -197,7 +216,8 @@ function createMockStore(overrides: {
         advanceRouteSetVersion: vi.fn(async () =>
           overrides.routeSetVersionConflict
             ? null
-            : { ...routeSet, versionNo: routeSet.versionNo + 1, updatedAt: new Date() }),
+            : { ...routeSet, versionNo: routeSet.versionNo + 1, updatedAt: new Date() },
+        ),
         appendAudit: vi.fn(async () => {}),
         appendOutbox: vi.fn(async () => {}),
         completeIdempotency: vi.fn(async () => true),
@@ -216,9 +236,8 @@ function makeCommand(overrides: Partial<ActivateRouteSetCommand> = {}): Activate
     expectedVersionNo: 1,
     desiredRoutes: [
       {
-
         routeKey: "primary",
-          routeGroupId: "primary",
+        routeGroupId: "primary",
         agentRevisionId: BASE_AGENT_REVISION.id,
         runtimeRevisionId: BASE_RUNTIME_REVISION.id,
         trafficWeight: 10000,
@@ -254,32 +273,32 @@ describe("activateRouteSet", () => {
     const store = createMockStore({});
     const activateRouteSet = createActivateRouteSet({ store, now: () => NOW });
 
-    const result = await activateRouteSet(makeCommand({
-      desiredRoutes: [
-        {
-
-          routeKey: "primary",
-          routeGroupId: "primary",
-          agentRevisionId: BASE_AGENT_REVISION.id,
-          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-          trafficWeight: 5000,
-          priorityNo: 0,
-          eligibilityConditions: {},
-          activationState: "active",
-        },
-        {
-
-          routeKey: "secondary",
-          routeGroupId: "primary",
-          agentRevisionId: BASE_AGENT_REVISION.id,
-          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-          trafficWeight: 5000,
-          priorityNo: 0,
-          eligibilityConditions: {},
-          activationState: "active",
-        },
-      ],
-    }));
+    const result = await activateRouteSet(
+      makeCommand({
+        desiredRoutes: [
+          {
+            routeKey: "primary",
+            routeGroupId: "primary",
+            agentRevisionId: BASE_AGENT_REVISION.id,
+            runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+            trafficWeight: 5000,
+            priorityNo: 0,
+            eligibilityConditions: {},
+            activationState: "active",
+          },
+          {
+            routeKey: "secondary",
+            routeGroupId: "primary",
+            agentRevisionId: BASE_AGENT_REVISION.id,
+            runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+            trafficWeight: 5000,
+            priorityNo: 0,
+            eligibilityConditions: {},
+            activationState: "active",
+          },
+        ],
+      }),
+    );
     expect(result.activations).toHaveLength(2);
     expect(result.routeSetVersionNo).toBe(2);
   });
@@ -289,32 +308,32 @@ describe("activateRouteSet", () => {
     const activateRouteSet = createActivateRouteSet({ store, now: () => NOW });
 
     await expect(
-      activateRouteSet(makeCommand({
-        desiredRoutes: [
-          {
-
-            routeKey: "primary",
-          routeGroupId: "primary",
-            agentRevisionId: BASE_AGENT_REVISION.id,
-            runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-            trafficWeight: 5000,
-            priorityNo: 0,
-            eligibilityConditions: {},
-            activationState: "active",
-          },
-          {
-
-            routeKey: "primary",
-          routeGroupId: "primary",
-            agentRevisionId: BASE_AGENT_REVISION.id,
-            runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-            trafficWeight: 4000,
-            priorityNo: 0,
-            eligibilityConditions: {},
-            activationState: "active",
-          },
-        ],
-      })),
+      activateRouteSet(
+        makeCommand({
+          desiredRoutes: [
+            {
+              routeKey: "primary",
+              routeGroupId: "primary",
+              agentRevisionId: BASE_AGENT_REVISION.id,
+              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              trafficWeight: 5000,
+              priorityNo: 0,
+              eligibilityConditions: {},
+              activationState: "active",
+            },
+            {
+              routeKey: "primary",
+              routeGroupId: "primary",
+              agentRevisionId: BASE_AGENT_REVISION.id,
+              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              trafficWeight: 4000,
+              priorityNo: 0,
+              eligibilityConditions: {},
+              activationState: "active",
+            },
+          ],
+        }),
+      ),
     ).rejects.toThrow(RouteSetRequiresAtomicUpdateError);
   });
 
@@ -323,30 +342,32 @@ describe("activateRouteSet", () => {
     const activateRouteSet = createActivateRouteSet({ store, now: () => NOW });
 
     await expect(
-      activateRouteSet(makeCommand({
-        desiredRoutes: [
-          {
-            routeKey: "group-a",
-            routeGroupId: "group-a",
-            agentRevisionId: BASE_AGENT_REVISION.id,
-            runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-            trafficWeight: 10000,
-            priorityNo: 0,
-            eligibilityConditions: {},
-            activationState: "active",
-          },
-          {
-            routeKey: "group-b",
-            routeGroupId: "group-b",
-            agentRevisionId: BASE_AGENT_REVISION.id,
-            runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-            trafficWeight: 10000,
-            priorityNo: 0,
-            eligibilityConditions: {},
-            activationState: "active",
-          },
-        ],
-      })),
+      activateRouteSet(
+        makeCommand({
+          desiredRoutes: [
+            {
+              routeKey: "group-a",
+              routeGroupId: "group-a",
+              agentRevisionId: BASE_AGENT_REVISION.id,
+              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              trafficWeight: 10000,
+              priorityNo: 0,
+              eligibilityConditions: {},
+              activationState: "active",
+            },
+            {
+              routeKey: "group-b",
+              routeGroupId: "group-b",
+              agentRevisionId: BASE_AGENT_REVISION.id,
+              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              trafficWeight: 10000,
+              priorityNo: 0,
+              eligibilityConditions: {},
+              activationState: "active",
+            },
+          ],
+        }),
+      ),
     ).rejects.toThrow(RouteSetRequiresAtomicUpdateError);
   });
 
@@ -354,32 +375,39 @@ describe("activateRouteSet", () => {
     const store = createMockStore({});
     const activateRouteSet = createActivateRouteSet({ store, now: () => NOW });
 
-    await expect(
-      activateRouteSet(makeCommand({ expectedVersionNo: 999 })),
-    ).rejects.toThrow(RouteSetVersionConflictError);
+    await expect(activateRouteSet(makeCommand({ expectedVersionNo: 999 }))).rejects.toThrow(
+      RouteSetVersionConflictError,
+    );
   });
 
   it("AgentRevision 非 published → RevisionNotPublishedError", async () => {
     const store = createMockStore({
       agentRevisions: new Map([
-        ["agent-rev-draft", { ...BASE_AGENT_REVISION, id: "agent-rev-draft", revisionState: "draft" }],
+        [
+          "agent-rev-draft",
+          { ...BASE_AGENT_REVISION, id: "agent-rev-draft", revisionState: "draft" },
+        ],
       ]),
     });
     const activateRouteSet = createActivateRouteSet({ store, now: () => NOW });
 
     await expect(
-      activateRouteSet(makeCommand({
-        desiredRoutes: [{
-          routeKey: "primary",
-          routeGroupId: "primary",
-          agentRevisionId: "agent-rev-draft",
-          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-          trafficWeight: 10000,
-          priorityNo: 0,
-          eligibilityConditions: {},
-          activationState: "active",
-        }],
-      })),
+      activateRouteSet(
+        makeCommand({
+          desiredRoutes: [
+            {
+              routeKey: "primary",
+              routeGroupId: "primary",
+              agentRevisionId: "agent-rev-draft",
+              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              trafficWeight: 10000,
+              priorityNo: 0,
+              eligibilityConditions: {},
+              activationState: "active",
+            },
+          ],
+        }),
+      ),
     ).rejects.toThrow(RevisionNotPublishedError);
   });
 
@@ -392,9 +420,7 @@ describe("activateRouteSet", () => {
     });
     const activateRouteSet = createActivateRouteSet({ store, now: () => NOW });
 
-    await expect(
-      activateRouteSet(makeCommand()),
-    ).rejects.toThrow(ArtifactNotVerifiedForRouteError);
+    await expect(activateRouteSet(makeCommand())).rejects.toThrow(ArtifactNotVerifiedForRouteError);
   });
 
   it("actor tenantId 与 command tenantId 不一致 → Error", async () => {
@@ -402,9 +428,11 @@ describe("activateRouteSet", () => {
     const activateRouteSet = createActivateRouteSet({ store, now: () => NOW });
 
     await expect(
-      activateRouteSet(makeCommand({
-        actor: { tenantId: "other-tenant", actorType: "user", actorId: "user-1" },
-      })),
+      activateRouteSet(
+        makeCommand({
+          actor: { tenantId: "other-tenant", actorType: "user", actorId: "user-1" },
+        }),
+      ),
     ).rejects.toThrow("actor tenant");
   });
 
@@ -419,8 +447,6 @@ describe("activateRouteSet", () => {
     });
     const activateRouteSet = createActivateRouteSet({ store, now: () => NOW });
 
-    await expect(
-      activateRouteSet(makeCommand()),
-    ).rejects.toThrow(AgentCapabilityUnsupportedError);
+    await expect(activateRouteSet(makeCommand())).rejects.toThrow(AgentCapabilityUnsupportedError);
   });
 });

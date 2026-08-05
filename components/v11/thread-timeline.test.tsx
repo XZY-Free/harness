@@ -1,4 +1,4 @@
-import type { V11ClientItem } from "@/lib/v11/client/types";
+import type { ClientItem } from "@/lib/v11/client/types";
 /**
  * S10-W02：ThreadTimeline 组件测试。
  *
@@ -17,7 +17,7 @@ afterEach(() => {
   cleanup();
 });
 
-function buildItem(overrides: Partial<V11ClientItem> = {}): V11ClientItem {
+function buildItem(overrides: Partial<ClientItem> = {}): ClientItem {
   return {
     id: "item-001",
     turn_id: "turn-001",
@@ -210,7 +210,7 @@ describe("ThreadTimeline", () => {
   it("未知 item_type 显示占位（不暴露内部细节）", () => {
     const items = [
       buildItem({
-        item_type: "unknown_future_type" as V11ClientItem["item_type"],
+        item_type: "unknown_future_type" as ClientItem["item_type"],
         content: {},
       }),
     ];

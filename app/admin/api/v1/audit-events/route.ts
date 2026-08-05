@@ -1,10 +1,10 @@
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 /**
  * GET /admin/api/v1/audit-events — 列出租户审计事件（S11-W04）。
@@ -54,7 +54,7 @@ export async function GET(request: Request): Promise<Response> {
   let actorType: "user" | "service" | "workload" | "system" | undefined;
   if (actorTypeParam) {
     if (!VALID_ACTOR_TYPES.has(actorTypeParam)) {
-      return v11SchemaInvalid(requestId, `actor_type 非法: ${actorTypeParam}`);
+      return schemaInvalidTable(requestId, `actor_type 非法: ${actorTypeParam}`);
     }
     actorType = actorTypeParam as "user" | "service" | "workload" | "system";
   }
@@ -63,7 +63,7 @@ export async function GET(request: Request): Promise<Response> {
   if (occurredFromParam) {
     occurredFrom = new Date(occurredFromParam);
     if (Number.isNaN(occurredFrom.getTime())) {
-      return v11SchemaInvalid(requestId, "occurred_from 不是合法 ISO 时间");
+      return schemaInvalidTable(requestId, "occurred_from 不是合法 ISO 时间");
     }
   }
 
@@ -71,13 +71,13 @@ export async function GET(request: Request): Promise<Response> {
   if (occurredToParam) {
     occurredTo = new Date(occurredToParam);
     if (Number.isNaN(occurredTo.getTime())) {
-      return v11SchemaInvalid(requestId, "occurred_to 不是合法 ISO 时间");
+      return schemaInvalidTable(requestId, "occurred_to 不是合法 ISO 时间");
     }
   }
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   // 3. 查询审计事件

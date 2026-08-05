@@ -1,16 +1,16 @@
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import type { CatalogResourceType } from "@/lib/persistence/schema/catalog";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import {
   CatalogQueryError,
   type CatalogSearchItem,
   searchCatalog,
 } from "@/lib/v11/catalog/catalog-queries";
-import type { CatalogResourceType } from "@/lib/v11/schema/catalog";
 /**
  * GET /admin/api/v1/catalog/search — Admin Catalog 搜索（S11-W03）。
  *
@@ -108,12 +108,12 @@ export async function GET(request: Request): Promise<Response> {
 
   // q 必填：缺失或空白均视为非法
   if (!queryParam || queryParam.trim().length === 0) {
-    return v11SchemaInvalid(requestId, "q 不能为空");
+    return schemaInvalidTable(requestId, "q 不能为空");
   }
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 20;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let resourceTypes: readonly CatalogResourceType[] | undefined;
@@ -123,7 +123,7 @@ export async function GET(request: Request): Promise<Response> {
     lifecycleStates = parseLifecycleStates(lifecycleStateParam);
   } catch (err) {
     if (err instanceof CatalogQueryError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }
@@ -141,7 +141,7 @@ export async function GET(request: Request): Promise<Response> {
     });
   } catch (err) {
     if (err instanceof CatalogQueryError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

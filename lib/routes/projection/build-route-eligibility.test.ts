@@ -5,14 +5,9 @@
  * 不测试数据库交互（留给集成测试）。
  */
 
-import { describe, it, expect } from "vitest";
-import {
-  normalizeEligibility,
-  computeSpecificity,
-} from "@/lib/routes/domain/route-selector";
-import {
-  computeCapabilityManifestDigest,
-} from "@/lib/routes/domain/route-resolution-policy";
+import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
+import { computeSpecificity, normalizeEligibility } from "@/lib/routes/domain/route-selector";
+import { describe, expect, it } from "vitest";
 
 /** §4.2: 权威组合版本计算 — 与 build-route-eligibility.ts 一致。 */
 function computeAuthoritativeVersion(
@@ -207,15 +202,21 @@ describe("§4.2 computeAuthoritativeVersion", () => {
   });
 
   it("routeSetVersionNo 递增 → 版本严格递增", () => {
-    expect(computeAuthoritativeVersion(2, 0, 0)).toBeGreaterThan(computeAuthoritativeVersion(1, 999, 999));
+    expect(computeAuthoritativeVersion(2, 0, 0)).toBeGreaterThan(
+      computeAuthoritativeVersion(1, 999, 999),
+    );
   });
 
   it("activationSequence 递增 → 版本严格递增", () => {
-    expect(computeAuthoritativeVersion(1, 2, 0)).toBeGreaterThan(computeAuthoritativeVersion(1, 1, 999));
+    expect(computeAuthoritativeVersion(1, 2, 0)).toBeGreaterThan(
+      computeAuthoritativeVersion(1, 1, 999),
+    );
   });
 
   it("aggregateVersion 递增 → 版本严格递增", () => {
-    expect(computeAuthoritativeVersion(1, 1, 2)).toBeGreaterThan(computeAuthoritativeVersion(1, 1, 1));
+    expect(computeAuthoritativeVersion(1, 1, 2)).toBeGreaterThan(
+      computeAuthoritativeVersion(1, 1, 1),
+    );
   });
 
   it("全零 → 0", () => {
@@ -238,15 +239,15 @@ function isControlPlaneEligibleFromProjection(c: {
 }): boolean {
   return Boolean(
     c.activationState === "active" &&
-    c.agentLifecycleState === "enabled" &&
-    c.agentRevisionState === "published" &&
-    c.agentPublicationActive === 1 &&
-    c.agentEvidenceValid === 1 &&
-    c.runtimeLifecycleState === "enabled" &&
-    c.runtimeRevisionState === "published" &&
-    c.runtimePublicationActive === 1 &&
-    c.runtimeEvidenceValid === 1 &&
-    c.runtimeConformanceValid === 1 &&
-    (c.policyRevisionState === null || c.policyRevisionState === "published"),
+      c.agentLifecycleState === "enabled" &&
+      c.agentRevisionState === "published" &&
+      c.agentPublicationActive === 1 &&
+      c.agentEvidenceValid === 1 &&
+      c.runtimeLifecycleState === "enabled" &&
+      c.runtimeRevisionState === "published" &&
+      c.runtimePublicationActive === 1 &&
+      c.runtimeEvidenceValid === 1 &&
+      c.runtimeConformanceValid === 1 &&
+      (c.policyRevisionState === null || c.policyRevisionState === "published"),
   );
 }

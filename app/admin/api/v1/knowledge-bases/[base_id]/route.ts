@@ -1,4 +1,10 @@
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import {
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  etagHeader,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,

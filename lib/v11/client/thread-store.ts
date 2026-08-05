@@ -9,23 +9,23 @@
  * 不依赖 React；可在纯 Node 测试环境使用。
  */
 import { threadProjectionReducer } from "./thread-reducer";
-import type { V11ThreadProjectionAction, V11ThreadProjectionState } from "./types";
+import type { ThreadProjectionAction, ThreadProjectionState } from "./types";
 
-export type V11ThreadStoreListener = (state: V11ThreadProjectionState) => void;
+export type ThreadStoreListener = (state: ThreadProjectionState) => void;
 
-export interface V11ThreadStore {
+export interface ThreadStore {
   /** 当前状态快照。 */
-  getState(): V11ThreadProjectionState;
+  getState(): ThreadProjectionState;
   /** 分发 action。 */
-  dispatch(action: V11ThreadProjectionAction): void;
+  dispatch(action: ThreadProjectionAction): void;
   /** 订阅状态变化。 */
-  subscribe(listener: V11ThreadStoreListener): () => void;
+  subscribe(listener: ThreadStoreListener): () => void;
 }
 
 /** 创建 Thread Store。 */
-export function createThreadStore(initialState: V11ThreadProjectionState): V11ThreadStore {
+export function createThreadStore(initialState: ThreadProjectionState): ThreadStore {
   let state = initialState;
-  const listeners = new Set<V11ThreadStoreListener>();
+  const listeners = new Set<ThreadStoreListener>();
 
   return {
     getState: () => state,

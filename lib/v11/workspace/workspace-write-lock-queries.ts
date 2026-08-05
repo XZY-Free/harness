@@ -22,17 +22,17 @@
  * - ThreadEvent sequence 通过锁定 thread.last_event_sequence 原子递增（§9.1）。
  */
 import { randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
 import {
   WorkspaceWriteLockConflictError,
   WorkspaceWriteLockNotFoundError,
   WorkspaceWriteLockStateError,
-} from "@/lib/v11/conversation/errors";
-import { allocateEventSequences, insertThreadEvent } from "@/lib/v11/conversation/thread-queries";
-import type { ThreadEventActorType } from "@/lib/v11/schema/conversation";
-import { v11Invocation } from "@/lib/v11/schema/runtime";
-import type { V11WorkspaceWriteLock } from "@/lib/v11/schema/workspace-lock";
-import { workspaceWriteLock } from "@/lib/v11/schema/workspace-lock";
+} from "@/lib/conversations/errors";
+import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
+import { db } from "@/lib/db/client";
+import type { ThreadEventActorType } from "@/lib/persistence/schema/conversation";
+import { invocationTable } from "@/lib/persistence/schema/runtime";
+import type { WorkspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
+import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { and, asc, eq, isNotNull, lt } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -63,7 +63,7 @@ export interface AcquireWorkspaceWriteLockParams {
 
 /** acquireWorkspaceWriteLock 返回结果。 */
 export interface AcquireWorkspaceWriteLockResult {
-  lock: V11WorkspaceWriteLock;
+  lock: WorkspaceWriteLock;
   /** workspace_write_lock.acquired 事件（若写 ThreadEvent 成功）。 */
   acquiredEvent: unknown | null;
 }
@@ -194,7 +194,7 @@ export interface ReleaseWorkspaceWriteLockParams {
  */
 export async function releaseWorkspaceWriteLock(
   params: ReleaseWorkspaceWriteLockParams,
-): Promise<V11WorkspaceWriteLock> {
+): Promise<WorkspaceWriteLock> {
   const actorType: ThreadEventActorType = params.actorType ?? "system";
 
   return db.transaction(async (tx) => {
@@ -280,7 +280,7 @@ export interface RevokeWorkspaceWriteLocksForInvocationParams {
  */
 export async function revokeWorkspaceWriteLocksForInvocation(
   params: RevokeWorkspaceWriteLocksForInvocationParams,
-): Promise<V11WorkspaceWriteLock[]> {
+): Promise<WorkspaceWriteLock[]> {
   const actorType: ThreadEventActorType = params.actorType ?? "system";
 
   return db.transaction(async (tx) => {
@@ -301,7 +301,7 @@ export async function revokeWorkspaceWriteLocksForInvocation(
     }
 
     const now = new Date();
-    const revoked: V11WorkspaceWriteLock[] = [];
+    const revoked: WorkspaceWriteLock[] = [];
     for (const lock of locks) {
       await tx
         .update(workspaceWriteLock)
@@ -366,7 +366,7 @@ export interface ReapExpiredWorkspaceWriteLocksParams {
  */
 export async function reapExpiredWorkspaceWriteLocks(
   params: ReapExpiredWorkspaceWriteLocksParams,
-): Promise<V11WorkspaceWriteLock[]> {
+): Promise<WorkspaceWriteLock[]> {
   const actorType: ThreadEventActorType = params.actorType ?? "system";
   const before = params.before ?? new Date();
 
@@ -389,7 +389,7 @@ export async function reapExpiredWorkspaceWriteLocks(
     }
 
     const now = new Date();
-    const expired: V11WorkspaceWriteLock[] = [];
+    const expired: WorkspaceWriteLock[] = [];
     for (const lock of locks) {
       await tx
         .update(workspaceWriteLock)
@@ -439,13 +439,11 @@ export async function reapExpiredWorkspaceWriteLocks(
 export async function getWorkspaceWriteLock(
   tenantId: string,
   lockId: string,
-): Promise<V11WorkspaceWriteLock | null> {
+): Promise<WorkspaceWriteLock | null> {
   const [lock] = await db
     .select()
     .from(workspaceWriteLock)
-    .where(
-      and(eq(workspaceWriteLock.tenantId, tenantId), eq(workspaceWriteLock.id, lockId)),
-    )
+    .where(and(eq(workspaceWriteLock.tenantId, tenantId), eq(workspaceWriteLock.id, lockId)))
     .limit(1);
   return lock ?? null;
 }
@@ -458,7 +456,7 @@ export async function getActiveLockByPath(
   tenantId: string,
   workspaceBindingId: string,
   pathFingerprint: string,
-): Promise<V11WorkspaceWriteLock | null> {
+): Promise<WorkspaceWriteLock | null> {
   const [lock] = await db
     .select()
     .from(workspaceWriteLock)
@@ -480,7 +478,7 @@ export async function getActiveLockByPath(
 export async function getActiveLocksByInvocation(
   tenantId: string,
   invocationId: string,
-): Promise<V11WorkspaceWriteLock[]> {
+): Promise<WorkspaceWriteLock[]> {
   return db
     .select()
     .from(workspaceWriteLock)
@@ -500,7 +498,7 @@ export async function getActiveLocksByInvocation(
 export async function getActiveLocksByBinding(
   tenantId: string,
   workspaceBindingId: string,
-): Promise<V11WorkspaceWriteLock[]> {
+): Promise<WorkspaceWriteLock[]> {
   return db
     .select()
     .from(workspaceWriteLock)
@@ -526,11 +524,11 @@ async function writeLockEventForInvocation(
   payload: Record<string, unknown>,
   correlationId: string | undefined,
 ): Promise<void> {
-  // 通过 invocationId 反查 v11Invocation.threadId（跨租户隔离）
+  // 通过 invocationId 反查 invocationTable.threadId（跨租户隔离）
   const [invocation] = await tx
-    .select({ threadId: v11Invocation.threadId })
-    .from(v11Invocation)
-    .where(and(eq(v11Invocation.tenantId, tenantId), eq(v11Invocation.id, invocationId)))
+    .select({ threadId: invocationTable.threadId })
+    .from(invocationTable)
+    .where(and(eq(invocationTable.tenantId, tenantId), eq(invocationTable.id, invocationId)))
     .limit(1);
 
   if (!invocation?.threadId) {

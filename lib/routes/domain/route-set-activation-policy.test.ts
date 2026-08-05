@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import {
   type NormalizedEligibility,
   SELECTOR_ALGORITHM_VERSION,
@@ -9,10 +8,11 @@ import {
   normalizeEligibility,
 } from "@/lib/routes/domain/route-selector";
 import {
-  ROUTE_TRAFFIC_WEIGHT_TOTAL,
   type DesiredRoute,
+  ROUTE_TRAFFIC_WEIGHT_TOTAL,
   validateRouteSetActivation,
 } from "@/lib/routes/domain/route-set-activation-policy";
+import { describe, expect, it } from "vitest";
 
 // ─── RouteSelector 测试 ──────────────────────────────────
 
@@ -50,15 +50,19 @@ describe("normalizeEligibility", () => {
   });
 
   it("NaN 导致整体失败", () => {
-    expect(normalizeEligibility({ all: { env: "prod", version: NaN } })).toBeNull();
+    expect(normalizeEligibility({ all: { env: "prod", version: Number.NaN } })).toBeNull();
   });
 
   it("Infinity 导致整体失败", () => {
-    expect(normalizeEligibility({ all: { env: "prod", version: Infinity } })).toBeNull();
+    expect(
+      normalizeEligibility({ all: { env: "prod", version: Number.POSITIVE_INFINITY } }),
+    ).toBeNull();
   });
 
   it("-Infinity 导致整体失败", () => {
-    expect(normalizeEligibility({ all: { env: "prod", version: -Infinity } })).toBeNull();
+    expect(
+      normalizeEligibility({ all: { env: "prod", version: Number.NEGATIVE_INFINITY } }),
+    ).toBeNull();
   });
 
   it("有限 number 值正常通过", () => {
@@ -237,7 +241,9 @@ describe("validateRouteSetActivation", () => {
       ],
     });
     expect(result.valid).toBe(false);
-    expect(result.validationErrors.some((e) => e.code === "ROUTE_GROUP_SELECTOR_MISMATCH")).toBe(true);
+    expect(result.validationErrors.some((e) => e.code === "ROUTE_GROUP_SELECTOR_MISMATCH")).toBe(
+      true,
+    );
   });
 
   it("不同 Group 相同 Selector 和 Priority 拒绝", () => {
@@ -292,7 +298,9 @@ describe("validateRouteSetActivation", () => {
       ],
     });
     expect(result.valid).toBe(false);
-    expect(result.validationErrors.some((e) => e.code === "ROUTE_GROUP_SELECTOR_MISMATCH")).toBe(true);
+    expect(result.validationErrors.some((e) => e.code === "ROUTE_GROUP_SELECTOR_MISMATCH")).toBe(
+      true,
+    );
   });
 
   it("两个 Group Selector 重叠但时间不重叠时允许", () => {

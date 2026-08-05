@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   getRouteSetByAgentScope,
   listRoutesBySet,
@@ -26,7 +26,7 @@ import {
   ROUTE_SET_ETAG_PREFIX,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +45,7 @@ export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const agentId = url.searchParams.get("agent_id");
   if (!agentId) {
-    return v11SchemaInvalid(requestId, "缺少必填查询参数 agent_id");
+    return schemaInvalidTable(requestId, "缺少必填查询参数 agent_id");
   }
   const scopeKey = url.searchParams.get("scope_key") ?? "default";
 

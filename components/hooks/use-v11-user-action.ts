@@ -12,7 +12,7 @@
  * - 支持 4 种 resolution：approve / deny / submit / cancel。
  * - input 类型 submit 时通过 responseRedactedJson 传入脱敏响应。
  * - 不处理 handoff（handoff 由 useV11Handoff 处理）；后端会拒绝 purpose=handoff 的请求。
- * - 错误转化为 V11ClientVisibleError。
+ * - 错误转化为 ClientVisibleError。
  *
  * 关键不变量：
  * - resolve 是同步命令（200，非 202）：后端事务内完成 UserActionRequest 状态变更 + Event 写入 +
@@ -31,13 +31,13 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-fetch";
+import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
 import type {
-  V11ClientErrorBody,
-  V11ClientUserActionResolveResponse,
-  V11ClientVisibleError,
+  ClientErrorBody,
+  ClientUserActionResolveResponse,
+  ClientVisibleError,
 } from "@/lib/v11/client/types";
-import type { UserActionResolution } from "@/lib/v11/schema/user-action-request";
 import { useCallback, useRef, useState } from "react";
 
 /** Hook 入参。 */
@@ -56,9 +56,9 @@ export interface UseV11UserActionResult {
   /** 是否有操作进行中。 */
   readonly busy: boolean;
   /** 错误。 */
-  readonly error: V11ClientVisibleError | null;
+  readonly error: ClientVisibleError | null;
   /** 最近一次解析结果（用于 UI 显示 "已同意/已拒绝/已提交/已取消" 状态）。 */
-  readonly lastResolve: V11ClientUserActionResolveResponse | null;
+  readonly lastResolve: ClientUserActionResolveResponse | null;
   /** 解析 UserAction 请求。返回 true 表示成功。 */
   readonly resolve: (
     requestId: string,
@@ -78,11 +78,11 @@ function generateIdempotencyKey(): string {
 }
 
 /** 解析错误响应为可见错误。 */
-async function parseError(response: Response): Promise<V11ClientVisibleError> {
+async function parseError(response: Response): Promise<ClientVisibleError> {
   const bodyText = await response.text().catch(() => "");
-  let errorBody: V11ClientErrorBody | null = null;
+  let errorBody: ClientErrorBody | null = null;
   try {
-    errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+    errorBody = JSON.parse(bodyText) as ClientErrorBody;
   } catch {
     // ignore
   }
@@ -100,8 +100,8 @@ async function parseError(response: Response): Promise<V11ClientVisibleError> {
 /** V11 通用 UserAction Hook。 */
 export function useV11UserAction({ threadId }: UseV11UserActionParams): UseV11UserActionResult {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<V11ClientVisibleError | null>(null);
-  const [lastResolve, setLastResolve] = useState<V11ClientUserActionResolveResponse | null>(null);
+  const [error, setError] = useState<ClientVisibleError | null>(null);
+  const [lastResolve, setLastResolve] = useState<ClientUserActionResolveResponse | null>(null);
   // 同步标志：用于 busy 期间拒绝重复触发，避免 setBusy 异步延迟导致的竞态。
   const busyRef = useRef(false);
 
@@ -160,7 +160,7 @@ export function useV11UserAction({ threadId }: UseV11UserActionParams): UseV11Us
           setError(visible);
           return false;
         }
-        const data = (await resp.json()) as V11ClientUserActionResolveResponse;
+        const data = (await resp.json()) as ClientUserActionResolveResponse;
         setLastResolve(data);
         return true;
       } catch {

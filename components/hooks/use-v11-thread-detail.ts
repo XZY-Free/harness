@@ -28,39 +28,39 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
 import type {
-  V11ClientErrorBody,
-  V11ClientThreadResponse,
-  V11ClientTurnsResponse,
-  V11ClientVisibleError,
+  ClientErrorBody,
+  ClientThreadResponse,
+  ClientTurnsResponse,
+  ClientVisibleError,
 } from "@/lib/v11/client/types";
 import { useCallback, useEffect, useState } from "react";
 
 /** Hook 返回值。 */
 export interface UseV11ThreadDetailResult {
   /** Thread 详情。 */
-  readonly thread: V11ClientThreadResponse["thread"] | null;
+  readonly thread: ClientThreadResponse["thread"] | null;
   /** active Goal。 */
-  readonly activeGoal: V11ClientThreadResponse["active_goal"] | null;
+  readonly activeGoal: ClientThreadResponse["active_goal"] | null;
   /** 最新 Turn。 */
-  readonly latestTurn: V11ClientThreadResponse["latest_turn"] | null;
+  readonly latestTurn: ClientThreadResponse["latest_turn"] | null;
   /** Turn 列表（按 turn_sequence 升序）。 */
-  readonly turns: V11ClientTurnsResponse["turns"];
+  readonly turns: ClientTurnsResponse["turns"];
   /** 加载状态。 */
   readonly loading: boolean;
   /** 错误。 */
-  readonly error: V11ClientVisibleError | null;
+  readonly error: ClientVisibleError | null;
   /** 手动刷新。 */
   readonly refresh: () => Promise<void>;
 }
 
 /** V11 Thread 详情 Hook。 */
 export function useV11ThreadDetail(threadId: string): UseV11ThreadDetailResult {
-  const [thread, setThread] = useState<V11ClientThreadResponse["thread"] | null>(null);
-  const [activeGoal, setActiveGoal] = useState<V11ClientThreadResponse["active_goal"] | null>(null);
-  const [latestTurn, setLatestTurn] = useState<V11ClientThreadResponse["latest_turn"] | null>(null);
-  const [turns, setTurns] = useState<V11ClientTurnsResponse["turns"]>([]);
+  const [thread, setThread] = useState<ClientThreadResponse["thread"] | null>(null);
+  const [activeGoal, setActiveGoal] = useState<ClientThreadResponse["active_goal"] | null>(null);
+  const [latestTurn, setLatestTurn] = useState<ClientThreadResponse["latest_turn"] | null>(null);
+  const [turns, setTurns] = useState<ClientTurnsResponse["turns"]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<V11ClientVisibleError | null>(null);
+  const [error, setError] = useState<ClientVisibleError | null>(null);
 
   // W4-1：区分「初始加载」与「后台刷新」。SSE 事件触发的 refresh 不动 loading 状态，
   // 否则每个 turn.accepted / turn.state_changed 都会把已渲染的会话替换成全屏 spinner，
@@ -89,9 +89,9 @@ export function useV11ThreadDetail(threadId: string): UseV11ThreadDetailResult {
         // 处理 Thread 详情响应
         if (!threadResp.ok) {
           const bodyText = await threadResp.text().catch(() => "");
-          let errorBody: V11ClientErrorBody | null = null;
+          let errorBody: ClientErrorBody | null = null;
           try {
-            errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+            errorBody = JSON.parse(bodyText) as ClientErrorBody;
           } catch {
             // ignore
           }
@@ -113,14 +113,14 @@ export function useV11ThreadDetail(threadId: string): UseV11ThreadDetailResult {
           return;
         }
 
-        const threadData = (await threadResp.json()) as V11ClientThreadResponse;
+        const threadData = (await threadResp.json()) as ClientThreadResponse;
         setThread(threadData.thread);
         setActiveGoal(threadData.active_goal);
         setLatestTurn(threadData.latest_turn);
 
         // 处理 Turn 列表响应（失败不阻断 Thread 详情）
         if (turnsResp.ok) {
-          const turnsData = (await turnsResp.json()) as V11ClientTurnsResponse;
+          const turnsData = (await turnsResp.json()) as ClientTurnsResponse;
           setTurns(turnsData.turns);
         }
       } catch {

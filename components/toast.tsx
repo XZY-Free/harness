@@ -8,7 +8,7 @@
  */
 
 import { createContext, useContext, useMemo } from "react";
-import { toast as sonnerToast, Toaster } from "sonner";
+import { Toaster, toast as sonnerToast } from "sonner";
 
 interface ToastApi {
   error: (message: string) => void;

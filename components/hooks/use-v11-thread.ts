@@ -27,10 +27,10 @@
 "use client";
 
 import {
-  type V11ClientItem,
-  type V11ClientStreamStatus,
-  type V11ClientVisibleError,
-  type V11ThreadClient,
+  type ClientItem,
+  type ClientStreamStatus,
+  type ClientVisibleError,
+  type ThreadClient,
   createV11ThreadClient,
 } from "@/lib/v11/client";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
@@ -40,9 +40,9 @@ export interface UseV11ThreadResult {
   /** 当前 Thread id。 */
   readonly threadId: string;
   /** Item 投影（按 item_sequence 升序）。 */
-  readonly items: readonly V11ClientItem[];
+  readonly items: readonly ClientItem[];
   /** SSE 连接状态。 */
-  readonly streamStatus: V11ClientStreamStatus;
+  readonly streamStatus: ClientStreamStatus;
   /** 当前重连尝试次数（0 = 未处于重连）。 */
   readonly reconnectAttempt: number;
   /** 重连次数上限。 */
@@ -50,7 +50,7 @@ export interface UseV11ThreadResult {
   /** snapshot 加载状态。 */
   readonly snapshotStatus: "idle" | "loading" | "ready" | "failed";
   /** 当前可见错误（已映射中文语义）。 */
-  readonly visibleError: V11ClientVisibleError | null;
+  readonly visibleError: ClientVisibleError | null;
   /** 已应用的最大 event sequence（诊断用）。 */
   readonly lastAppliedEventSequence: number;
   /** 手动重新加载 snapshot（用于恢复）。 */
@@ -60,8 +60,8 @@ export interface UseV11ThreadResult {
 /** V11 Thread Hook。 */
 export function useV11Thread(threadId: string): UseV11ThreadResult {
   // threadId 变化时重建客户端
-  const clientRef = useRef<V11ThreadClient | null>(null);
-  const client = useMemo<V11ThreadClient>(() => {
+  const clientRef = useRef<ThreadClient | null>(null);
+  const client = useMemo<ThreadClient>(() => {
     const next = createV11ThreadClient({ threadId });
     clientRef.current = next;
     return next;

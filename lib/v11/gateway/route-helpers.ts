@@ -11,11 +11,11 @@
  * 职责：
  * - resolveGatewayPrincipal：解析 Workload Token（audience=gateway）。
  * - gatewayAuthErrorResponse：把 WorkloadTokenError / AuthenticationError 转成 401 响应。
- * - v11GatewaySchemaInvalid：构造 400 REQUEST_SCHEMA_INVALID 响应。
- * - v11GatewayCapabilityNotAllowed：构造 404 CAPABILITY_NOT_ALLOWED 响应（隐藏式，跨租户统一返回）。
- * - v11GatewayCapabilityContentBlocked：构造 422 CAPABILITY_CONTENT_BLOCKED 响应。
- * - v11GatewayToolSchemaChanged：构造 409 TOOL_SCHEMA_CHANGED 响应（retryable）。
- * - v11GatewayCatalogRevisionInvalid：构造 400 CATALOG_REVISION_INVALID 响应。
+ * - gatewaySchemaInvalidTable：构造 400 REQUEST_SCHEMA_INVALID 响应。
+ * - gatewayCapabilityNotAllowedTable：构造 404 CAPABILITY_NOT_ALLOWED 响应（隐藏式，跨租户统一返回）。
+ * - gatewayCapabilityContentBlockedTable：构造 422 CAPABILITY_CONTENT_BLOCKED 响应。
+ * - gatewayToolSchemaChangedTable：构造 409 TOOL_SCHEMA_CHANGED 响应（retryable）。
+ * - gatewayCatalogRevisionInvalidTable：构造 400 CATALOG_REVISION_INVALID 响应。
  *
  * 安全边界：
  * - Gateway API 走 Workload Token（type=gateway），绑定 tenant + invocation。
@@ -92,7 +92,7 @@ export function gatewayAuthErrorResponse(error: unknown, requestId: string): Res
 }
 
 /** 构造 400 REQUEST_SCHEMA_INVALID 响应（请求体校验失败）。 */
-export function v11GatewaySchemaInvalid(requestId: string, message: string): Response {
+export function gatewaySchemaInvalidTable(requestId: string, message: string): Response {
   return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
 }
 
@@ -102,12 +102,12 @@ export function v11GatewaySchemaInvalid(requestId: string, message: string): Res
  * 资源不存在 / 跨租户不可见 / lifecycle 不允许 Gateway 读取，统一返回此错误，
  * 不暴露「存在但无权」与「不存在」的区别。
  */
-export function v11GatewayCapabilityNotAllowed(requestId: string, message: string): Response {
+export function gatewayCapabilityNotAllowedTable(requestId: string, message: string): Response {
   return apiError("CAPABILITY_NOT_ALLOWED", message, { requestId });
 }
 
 /** 构造 422 CAPABILITY_CONTENT_BLOCKED 响应（Skill 内容不可读，如未发布版本）。 */
-export function v11GatewayCapabilityContentBlocked(requestId: string, message: string): Response {
+export function gatewayCapabilityContentBlockedTable(requestId: string, message: string): Response {
   return apiError("CAPABILITY_CONTENT_BLOCKED", message, { requestId });
 }
 
@@ -116,7 +116,7 @@ export function v11GatewayCapabilityContentBlocked(requestId: string, message: s
  *
  * retryable=true：客户端应重新搜索目录 + 读取最新 currentSchemaRevisionId 后重试。
  */
-export function v11GatewayToolSchemaChanged(
+export function gatewayToolSchemaChangedTable(
   requestId: string,
   message: string,
   details?: Record<string, unknown>,
@@ -125,6 +125,6 @@ export function v11GatewayToolSchemaChanged(
 }
 
 /** 构造 400 CATALOG_REVISION_INVALID 响应（If-None-Match ETag 格式非法）。 */
-export function v11GatewayCatalogRevisionInvalid(requestId: string, message: string): Response {
+export function gatewayCatalogRevisionInvalidTable(requestId: string, message: string): Response {
   return apiError("CATALOG_REVISION_INVALID", message, { requestId });
 }

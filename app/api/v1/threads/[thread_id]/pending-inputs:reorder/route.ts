@@ -1,11 +1,3 @@
-import {
-  ETAG_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  parseIfMatch,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
 /**
  * POST /api/v1/threads/{thread_id}/pending-inputs:reorder — 重排 PendingInput 队列（S04-C04，§3.8）。
  *
@@ -26,16 +18,24 @@ import {
  * - ordered_ids 集合不一致 → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - 乐观锁冲突 → 412 ETAG_MISMATCH
  */
-import { reorderPendingInputs } from "@/lib/v11/conversation/pending-input-queries";
+import { reorderPendingInputs } from "@/lib/conversations/pending-input-queries";
 import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   parsePendingQueueEtag,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import {
+  ETAG_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  getRequestId,
+  parseIfMatch,
+  resourceNotFound,
+} from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -89,20 +89,20 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 解析 If-Match 队列 ETag（必填）
   const ifMatchRaw = parseIfMatch(request);
   if (!ifMatchRaw) {
-    return v11SchemaInvalid(requestId, "缺少必填头 If-Match（队列 ETag）");
+    return schemaInvalidTable(requestId, "缺少必填头 If-Match（队列 ETag）");
   }
 
   let expectedQueueVersionNo: number;
   try {
     expectedQueueVersionNo = parsePendingQueueEtag(ifMatchRaw);
   } catch {
-    return v11SchemaInvalid(requestId, `If-Match ETag 格式非法: ${ifMatchRaw}`);
+    return schemaInvalidTable(requestId, `If-Match ETag 格式非法: ${ifMatchRaw}`);
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：ordered_ids 必填且为非空 string 数组");
+    return schemaInvalidTable(requestId, "请求体非法：ordered_ids 必填且为非空 string 数组");
   }
 
   // 5. 执行业务：事务内重排 + 写 Event

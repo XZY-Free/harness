@@ -18,20 +18,20 @@
  * - Hold 不存在 → 404 RESOURCE_NOT_FOUND
  * - Hold 已解除 → 409 BUSINESS_CONSTRAINT_VIOLATION
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiError, apiSuccess, getRequestId } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
+import { LegalHoldError, releaseLegalHold } from "@/lib/identity/legal-hold-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import { LegalHoldError, releaseLegalHold } from "@/lib/identity/legal-hold-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -62,17 +62,17 @@ export async function POST(request: Request): Promise<Response> {
 
   const id = body?.id?.trim();
   if (!id) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 id");
+    return schemaInvalidTable(requestId, "缺少必填字段 id");
   }
 
   const releasedBy = body?.released_by?.trim();
   if (!releasedBy) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 released_by");
+    return schemaInvalidTable(requestId, "缺少必填字段 released_by");
   }
 
   const releaseReason = body?.release_reason?.trim();
   if (!releaseReason) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 release_reason");
+    return schemaInvalidTable(requestId, "缺少必填字段 release_reason");
   }
 
   // action scope 校验：按 tenant 维度授权

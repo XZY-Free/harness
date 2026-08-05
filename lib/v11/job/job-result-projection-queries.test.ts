@@ -18,13 +18,14 @@
  */
 import { randomUUID } from "node:crypto";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { createThread } from "@/lib/conversations/thread-queries";
+import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createThread } from "@/lib/v11/conversation/thread-queries";
-import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { threadItemTable } from "@/lib/persistence/schema/conversation";
 import { JobResultProjectionConflictError } from "@/lib/v11/job/errors";
 import { completeJob } from "@/lib/v11/job/job-control-queries";
 import { createJob, updateJobState } from "@/lib/v11/job/job-queries";
@@ -33,7 +34,6 @@ import {
   getJobResultProjectionByJob,
   projectJobResultToThread,
 } from "@/lib/v11/job/job-result-projection-queries";
-import { v11ThreadItem } from "@/lib/v11/schema/conversation";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -411,8 +411,8 @@ describe("JobResultProjection 查询", () => {
     // 直接查 ThreadItem 验证 itemType
     const [dbItem] = await db
       .select()
-      .from(v11ThreadItem)
-      .where(eq(v11ThreadItem.id, result.item.id))
+      .from(threadItemTable)
+      .where(eq(threadItemTable.id, result.item.id))
       .limit(1);
     expect(dbItem?.itemType).toBe("job_result");
     expect(dbItem?.invocationId).toBeNull();

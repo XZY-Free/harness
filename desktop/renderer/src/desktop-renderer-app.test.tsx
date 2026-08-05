@@ -7,10 +7,10 @@ const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock("@/lib/api-fetch", () => ({ apiFetch }));
 vi.mock("@/lib/desktop/capabilities", () => ({ getDesktopCapabilities: () => true }));
 vi.mock("@/components/v11/v11-thread-page", () => ({
-  V11ThreadPage: ({ threadId }: { readonly threadId: string }) => <div>会话 {threadId}</div>,
+  ThreadPage: ({ threadId }: { readonly threadId: string }) => <div>会话 {threadId}</div>,
 }));
 vi.mock("@/components/v11/v11-new-thread-page", () => ({
-  V11NewThreadPage: ({
+  NewThreadPage: ({
     onSubmit,
   }: {
     readonly onSubmit: (input: {

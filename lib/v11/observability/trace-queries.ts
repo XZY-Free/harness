@@ -18,17 +18,17 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { decodeCursor, encodeCursor } from "@/lib/http";
 import {
+  type Span,
   type SpanKind,
   type SpanState,
+  type Trace,
   type TraceContentMode,
   type TraceRootType,
   type TraceSamplingPolicy,
   type TraceState,
-  type V11Span,
-  type V11Trace,
-  v11Span,
-  v11Trace,
-} from "@/lib/v11/schema/trace";
+  spanTable,
+  traceTable,
+} from "@/lib/persistence/schema/trace";
 import { and, asc, desc, eq, lt, or } from "drizzle-orm";
 
 // ─── Trace ─────────────────────────────────────────────────
@@ -47,10 +47,10 @@ export interface CreateTraceParams {
 }
 
 /** 创建 Trace 根。 */
-export async function createTrace(params: CreateTraceParams): Promise<V11Trace> {
+export async function createTrace(params: CreateTraceParams): Promise<Trace> {
   const id = randomUUID();
   const startedAt = params.startedAt ?? new Date();
-  await db.insert(v11Trace).values({
+  await db.insert(traceTable).values({
     id,
     tenantId: params.tenantId,
     rootType: params.rootType,
@@ -69,8 +69,8 @@ export async function createTrace(params: CreateTraceParams): Promise<V11Trace> 
 
   const [row] = await db
     .select()
-    .from(v11Trace)
-    .where(and(eq(v11Trace.tenantId, params.tenantId), eq(v11Trace.id, id)))
+    .from(traceTable)
+    .where(and(eq(traceTable.tenantId, params.tenantId), eq(traceTable.id, id)))
     .limit(1);
   if (!row) {
     throw new Error(`createTrace: 行未找到（id=${id}）`);
@@ -79,11 +79,11 @@ export async function createTrace(params: CreateTraceParams): Promise<V11Trace> 
 }
 
 /** 按 id 获取 Trace（跨租户隔离）。 */
-export async function getTraceById(tenantId: string, traceId: string): Promise<V11Trace | null> {
+export async function getTraceById(tenantId: string, traceId: string): Promise<Trace | null> {
   const [row] = await db
     .select()
-    .from(v11Trace)
-    .where(and(eq(v11Trace.tenantId, tenantId), eq(v11Trace.id, traceId)))
+    .from(traceTable)
+    .where(and(eq(traceTable.tenantId, tenantId), eq(traceTable.id, traceId)))
     .limit(1);
   return row ?? null;
 }
@@ -93,15 +93,15 @@ export async function getTraceByRoot(
   tenantId: string,
   rootType: TraceRootType,
   rootId: string,
-): Promise<V11Trace | null> {
+): Promise<Trace | null> {
   const [row] = await db
     .select()
-    .from(v11Trace)
+    .from(traceTable)
     .where(
       and(
-        eq(v11Trace.tenantId, tenantId),
-        eq(v11Trace.rootType, rootType),
-        eq(v11Trace.rootId, rootId),
+        eq(traceTable.tenantId, tenantId),
+        eq(traceTable.rootType, rootType),
+        eq(traceTable.rootId, rootId),
       ),
     )
     .limit(1);
@@ -121,17 +121,17 @@ export interface ListTracesByTenantOptions {
 export async function listTracesByTenant(
   tenantId: string,
   options?: ListTracesByTenantOptions,
-): Promise<{ items: V11Trace[]; nextCursor: string | null }> {
+): Promise<{ items: Trace[]; nextCursor: string | null }> {
   const limit = Math.min(options?.limit ?? 50, 200);
-  const conditions = [eq(v11Trace.tenantId, tenantId)];
+  const conditions = [eq(traceTable.tenantId, tenantId)];
   if (options?.rootType) {
-    conditions.push(eq(v11Trace.rootType, options.rootType));
+    conditions.push(eq(traceTable.rootType, options.rootType));
   }
   if (options?.traceState) {
-    conditions.push(eq(v11Trace.traceState, options.traceState));
+    conditions.push(eq(traceTable.traceState, options.traceState));
   }
   if (options?.contentMode) {
-    conditions.push(eq(v11Trace.contentMode, options.contentMode));
+    conditions.push(eq(traceTable.contentMode, options.contentMode));
   }
 
   // cursor 解码：{ started_at, id }
@@ -156,8 +156,8 @@ export async function listTracesByTenant(
     // (started_at, id) < (afterStartedAt, afterId) in DESC order：
     // 使用 Drizzle 原生操作符确保 Date 参数绑定与列类型一致
     const cursorCond = or(
-      lt(v11Trace.startedAt, afterStartedAt),
-      and(eq(v11Trace.startedAt, afterStartedAt), lt(v11Trace.id, afterId)),
+      lt(traceTable.startedAt, afterStartedAt),
+      and(eq(traceTable.startedAt, afterStartedAt), lt(traceTable.id, afterId)),
     );
     if (cursorCond) conditions.push(cursorCond);
   }
@@ -165,9 +165,9 @@ export async function listTracesByTenant(
   // 取 limit+1 行：第 limit+1 行存在说明有下一页
   const rows = await db
     .select()
-    .from(v11Trace)
+    .from(traceTable)
     .where(and(...conditions))
-    .orderBy(desc(v11Trace.startedAt), desc(v11Trace.id))
+    .orderBy(desc(traceTable.startedAt), desc(traceTable.id))
     .limit(limit + 1);
 
   let nextCursor: string | null = null;
@@ -198,21 +198,21 @@ export async function updateTraceState(
   tenantId: string,
   traceId: string,
   updates: UpdateTraceStateParams,
-): Promise<V11Trace> {
-  const setClause: Partial<V11Trace> = { updatedAt: new Date() };
+): Promise<Trace> {
+  const setClause: Partial<Trace> = { updatedAt: new Date() };
   if (updates.traceState) setClause.traceState = updates.traceState;
   if (updates.finishedAt !== undefined) setClause.finishedAt = updates.finishedAt ?? null;
   if (updates.rootSpanId !== undefined) setClause.rootSpanId = updates.rootSpanId ?? null;
 
   await db
-    .update(v11Trace)
+    .update(traceTable)
     .set(setClause)
-    .where(and(eq(v11Trace.tenantId, tenantId), eq(v11Trace.id, traceId)));
+    .where(and(eq(traceTable.tenantId, tenantId), eq(traceTable.id, traceId)));
 
   const [row] = await db
     .select()
-    .from(v11Trace)
-    .where(and(eq(v11Trace.tenantId, tenantId), eq(v11Trace.id, traceId)))
+    .from(traceTable)
+    .where(and(eq(traceTable.tenantId, tenantId), eq(traceTable.id, traceId)))
     .limit(1);
   if (!row) {
     throw new Error(`updateTraceState: Trace 行未找到（id=${traceId}）`);
@@ -235,10 +235,10 @@ export interface CreateSpanParams {
 }
 
 /** 创建 Span。 */
-export async function createSpan(params: CreateSpanParams): Promise<V11Span> {
+export async function createSpan(params: CreateSpanParams): Promise<Span> {
   const id = randomUUID();
   const startedAt = params.startedAt ?? new Date();
-  await db.insert(v11Span).values({
+  await db.insert(spanTable).values({
     id,
     tenantId: params.tenantId,
     traceId: params.traceId,
@@ -256,8 +256,8 @@ export async function createSpan(params: CreateSpanParams): Promise<V11Span> {
 
   const [row] = await db
     .select()
-    .from(v11Span)
-    .where(and(eq(v11Span.tenantId, params.tenantId), eq(v11Span.id, id)))
+    .from(spanTable)
+    .where(and(eq(spanTable.tenantId, params.tenantId), eq(spanTable.id, id)))
     .limit(1);
   if (!row) {
     throw new Error(`createSpan: 行未找到（id=${id}）`);
@@ -266,31 +266,31 @@ export async function createSpan(params: CreateSpanParams): Promise<V11Span> {
 }
 
 /** 按 id 获取 Span。 */
-export async function getSpanById(tenantId: string, spanId: string): Promise<V11Span | null> {
+export async function getSpanById(tenantId: string, spanId: string): Promise<Span | null> {
   const [row] = await db
     .select()
-    .from(v11Span)
-    .where(and(eq(v11Span.tenantId, tenantId), eq(v11Span.id, spanId)))
+    .from(spanTable)
+    .where(and(eq(spanTable.tenantId, tenantId), eq(spanTable.id, spanId)))
     .limit(1);
   return row ?? null;
 }
 
 /** 列出 Trace 下所有 Span（按 startedAt 升序，构建 span 树）。 */
-export async function listSpansByTrace(tenantId: string, traceId: string): Promise<V11Span[]> {
+export async function listSpansByTrace(tenantId: string, traceId: string): Promise<Span[]> {
   return db
     .select()
-    .from(v11Span)
-    .where(and(eq(v11Span.tenantId, tenantId), eq(v11Span.traceId, traceId)))
-    .orderBy(asc(v11Span.startedAt), asc(v11Span.id));
+    .from(spanTable)
+    .where(and(eq(spanTable.tenantId, tenantId), eq(spanTable.traceId, traceId)))
+    .orderBy(asc(spanTable.startedAt), asc(spanTable.id));
 }
 
 /** 按 parent 列出子 Span。 */
-export async function listChildSpans(tenantId: string, parentSpanId: string): Promise<V11Span[]> {
+export async function listChildSpans(tenantId: string, parentSpanId: string): Promise<Span[]> {
   return db
     .select()
-    .from(v11Span)
-    .where(and(eq(v11Span.tenantId, tenantId), eq(v11Span.parentSpanId, parentSpanId)))
-    .orderBy(asc(v11Span.startedAt), asc(v11Span.id));
+    .from(spanTable)
+    .where(and(eq(spanTable.tenantId, tenantId), eq(spanTable.parentSpanId, parentSpanId)))
+    .orderBy(asc(spanTable.startedAt), asc(spanTable.id));
 }
 
 /** updateSpanState 入参。 */
@@ -305,21 +305,21 @@ export async function updateSpanState(
   tenantId: string,
   spanId: string,
   updates: UpdateSpanStateParams,
-): Promise<V11Span> {
-  const setClause: Partial<V11Span> = { updatedAt: new Date() };
+): Promise<Span> {
+  const setClause: Partial<Span> = { updatedAt: new Date() };
   if (updates.spanState) setClause.spanState = updates.spanState;
   if (updates.finishedAt !== undefined) setClause.finishedAt = updates.finishedAt ?? null;
   if (updates.eventsJson !== undefined) setClause.eventsJson = updates.eventsJson ?? null;
 
   await db
-    .update(v11Span)
+    .update(spanTable)
     .set(setClause)
-    .where(and(eq(v11Span.tenantId, tenantId), eq(v11Span.id, spanId)));
+    .where(and(eq(spanTable.tenantId, tenantId), eq(spanTable.id, spanId)));
 
   const [row] = await db
     .select()
-    .from(v11Span)
-    .where(and(eq(v11Span.tenantId, tenantId), eq(v11Span.id, spanId)))
+    .from(spanTable)
+    .where(and(eq(spanTable.tenantId, tenantId), eq(spanTable.id, spanId)))
     .limit(1);
   if (!row) {
     throw new Error(`updateSpanState: Span 行未找到（id=${spanId}）`);
@@ -336,6 +336,6 @@ export type {
   TraceRootType,
   TraceSamplingPolicy,
   TraceState,
-  V11Span,
-  V11Trace,
-} from "@/lib/v11/schema/trace";
+  Span,
+  Trace,
+} from "@/lib/persistence/schema/trace";

@@ -11,13 +11,17 @@
  *
  * 关键约束：
  * - 跨租户隔离：所有查询按 tenantId 过滤。
- * - V11Observation.containsSecret 永远为 false：写入前由 content-policy 脱敏。
+ * - Observation.containsSecret 永远为 false：写入前由 content-policy 脱敏。
  * - 不存储原始 secret/cookie/OTP/私钥/隐藏思维链（任何模式下均不可写入）。
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
+import {
+  type Observation,
+  type ObservationKind,
+  observationTable,
+} from "@/lib/persistence/schema/trace";
 import { redactContent } from "@/lib/v11/observability/content-policy";
-import { type ObservationKind, type V11Observation, v11Observation } from "@/lib/v11/schema/trace";
 import { and, asc, eq } from "drizzle-orm";
 
 /** createObservation 入参。 */
@@ -35,7 +39,7 @@ export interface CreateObservationParams {
 
 /** createObservation 返回值。 */
 export interface CreateObservationResult {
-  observation: V11Observation;
+  observation: Observation;
   redactionSummary: string | null;
 }
 
@@ -54,7 +58,7 @@ export async function createObservation(
 
   const id = randomUUID();
   const observedAt = params.observedAt ?? new Date();
-  await db.insert(v11Observation).values({
+  await db.insert(observationTable).values({
     id,
     tenantId: params.tenantId,
     traceId: params.traceId,
@@ -70,8 +74,8 @@ export async function createObservation(
 
   const [row] = await db
     .select()
-    .from(v11Observation)
-    .where(and(eq(v11Observation.tenantId, params.tenantId), eq(v11Observation.id, id)))
+    .from(observationTable)
+    .where(and(eq(observationTable.tenantId, params.tenantId), eq(observationTable.id, id)))
     .limit(1);
   if (!row) {
     throw new Error(`createObservation: 行未找到（id=${id}）`);
@@ -83,11 +87,11 @@ export async function createObservation(
 export async function getObservationById(
   tenantId: string,
   observationId: string,
-): Promise<V11Observation | null> {
+): Promise<Observation | null> {
   const [row] = await db
     .select()
-    .from(v11Observation)
-    .where(and(eq(v11Observation.tenantId, tenantId), eq(v11Observation.id, observationId)))
+    .from(observationTable)
+    .where(and(eq(observationTable.tenantId, tenantId), eq(observationTable.id, observationId)))
     .limit(1);
   return row ?? null;
 }
@@ -103,17 +107,20 @@ export async function listObservationsByTrace(
   tenantId: string,
   traceId: string,
   options?: ListObservationsOptions,
-): Promise<V11Observation[]> {
+): Promise<Observation[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
-  const conditions = [eq(v11Observation.tenantId, tenantId), eq(v11Observation.traceId, traceId)];
+  const conditions = [
+    eq(observationTable.tenantId, tenantId),
+    eq(observationTable.traceId, traceId),
+  ];
   if (options?.kind) {
-    conditions.push(eq(v11Observation.kind, options.kind));
+    conditions.push(eq(observationTable.kind, options.kind));
   }
   return db
     .select()
-    .from(v11Observation)
+    .from(observationTable)
     .where(and(...conditions))
-    .orderBy(asc(v11Observation.observedAt), asc(v11Observation.id))
+    .orderBy(asc(observationTable.observedAt), asc(observationTable.id))
     .limit(limit);
 }
 
@@ -122,17 +129,17 @@ export async function listObservationsBySpan(
   tenantId: string,
   spanId: string,
   options?: ListObservationsOptions,
-): Promise<V11Observation[]> {
+): Promise<Observation[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
-  const conditions = [eq(v11Observation.tenantId, tenantId), eq(v11Observation.spanId, spanId)];
+  const conditions = [eq(observationTable.tenantId, tenantId), eq(observationTable.spanId, spanId)];
   if (options?.kind) {
-    conditions.push(eq(v11Observation.kind, options.kind));
+    conditions.push(eq(observationTable.kind, options.kind));
   }
   return db
     .select()
-    .from(v11Observation)
+    .from(observationTable)
     .where(and(...conditions))
-    .orderBy(asc(v11Observation.observedAt), asc(v11Observation.id))
+    .orderBy(asc(observationTable.observedAt), asc(observationTable.id))
     .limit(limit);
 }
 
@@ -141,23 +148,23 @@ export async function listObservationsByInvocation(
   tenantId: string,
   invocationId: string,
   options?: ListObservationsOptions,
-): Promise<V11Observation[]> {
+): Promise<Observation[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
   const conditions = [
-    eq(v11Observation.tenantId, tenantId),
-    eq(v11Observation.invocationId, invocationId),
+    eq(observationTable.tenantId, tenantId),
+    eq(observationTable.invocationId, invocationId),
   ];
   if (options?.kind) {
-    conditions.push(eq(v11Observation.kind, options.kind));
+    conditions.push(eq(observationTable.kind, options.kind));
   }
   return db
     .select()
-    .from(v11Observation)
+    .from(observationTable)
     .where(and(...conditions))
-    .orderBy(asc(v11Observation.observedAt), asc(v11Observation.id))
+    .orderBy(asc(observationTable.observedAt), asc(observationTable.id))
     .limit(limit);
 }
 
 // ─── re-export 供外部统一从本模块引入类型 ───────────────────
 
-export type { ObservationKind, V11Observation } from "@/lib/v11/schema/trace";
+export type { ObservationKind, Observation } from "@/lib/persistence/schema/trace";

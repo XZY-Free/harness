@@ -1,8 +1,8 @@
 /** Hosted Runtime 接入的稳定组装入口。 */
 import "@/lib/runtimes/infrastructure/configured-hosted-control-plane-evidence";
 import { createProvisionHostedRuntime } from "@/lib/runtimes/application/provision-hosted-runtime";
-import { createMysqlHostedGateways } from "@/lib/runtimes/infrastructure/mysql-hosted-gateways";
 import { createControlPlaneFromGateways } from "@/lib/runtimes/infrastructure/hosted-gateways";
+import { createMysqlHostedGateways } from "@/lib/runtimes/infrastructure/mysql-hosted-gateways";
 
 const gateways = createMysqlHostedGateways();
 const controlPlane = createControlPlaneFromGateways(gateways);

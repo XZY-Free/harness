@@ -1,4 +1,4 @@
-import type { V11ClientTakeoverResponse } from "@/lib/v11/client/types";
+import type { ClientTakeoverResponse } from "@/lib/v11/client/types";
 // @vitest-environment happy-dom
 /**
  * S10-W07：useV11EnvironmentTakeover Hook 测试。
@@ -87,14 +87,14 @@ describe("useV11EnvironmentTakeover", () => {
 
     const { result } = renderHook(() => useV11EnvironmentTakeover());
 
-    let takeoverResult: V11ClientTakeoverResponse | null = null;
+    let takeoverResult: ClientTakeoverResponse | null = null;
     await act(async () => {
       takeoverResult = await result.current.requestTakeover("t1");
     });
 
     expect(takeoverResult).not.toBeNull();
     // act 闭包赋值后 TS 仍将 takeoverResult 收窄为 null，需经 unknown 中转断言
-    expect((takeoverResult as unknown as V11ClientTakeoverResponse).previous_lease_epoch).toBe(5);
+    expect((takeoverResult as unknown as ClientTakeoverResponse).previous_lease_epoch).toBe(5);
     expect(result.current.busy).toBe(false);
     expect(result.current.error).toBeNull();
     expect(result.current.lastTakeover?.ownership_id).toBe("own-1");

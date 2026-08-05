@@ -1,18 +1,28 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
   etagHeader,
   getRequestId,
   parseIfMatch,
-  apiError,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
 import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtimes/application/publish-runtime-revision-service";
 import {
   listRuntimeConformanceCaseResults,
@@ -20,11 +30,6 @@ import {
   recordRuntimeConformanceRun,
 } from "@/lib/runtimes/application/runtime-conformance-runs";
 import { RuntimeConformanceCaseFailedError } from "@/lib/runtimes/domain/runtime-conformance";
-import {
-  RuntimeArtifactAttestationInvalidError,
-  RuntimeArtifactAttestationRequiredError,
-  RuntimeConformanceRunInvalidError,
-} from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 /**
  * GET/POST /admin/api/v1/runtime-revisions/{revision_id}/conformance — RuntimeRevision conformance 结果（S05-C06）。
  *
@@ -62,6 +67,11 @@ import {
   RuntimeConformanceBindingError,
   RuntimeConformanceTrustError,
 } from "@/lib/runtimes/domain/runtime-conformance-run";
+import {
+  RuntimeArtifactAttestationInvalidError,
+  RuntimeArtifactAttestationRequiredError,
+  RuntimeConformanceRunInvalidError,
+} from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 import { getRuntimeById } from "@/lib/runtimes/persistence/runtime-queries";
 import {
   RuntimeRevisionNotFoundError,
@@ -71,22 +81,12 @@ import {
   type AdminPrincipal,
   RUNTIME_REVISION_ETAG_PREFIX,
   adminAuthErrorResponse,
+  etagMismatchTable,
   parseRuntimeRevisionEtag,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11EtagMismatch,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -243,13 +243,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 2. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 conformance_results 或字段类型不匹配");
+    return schemaInvalidTable(requestId, "请求体非法：缺少 conformance_results 或字段类型不匹配");
   }
 
   // 4. 校验 Revision 存在（跨租户隐藏为 404）
@@ -281,23 +281,23 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   if (shouldPublish) {
     // 必填 artifact_attestation_id
     if (!body.artifact_attestation_id) {
-      return v11SchemaInvalid(requestId, "publish=true 时必填 artifact_attestation_id");
+      return schemaInvalidTable(requestId, "publish=true 时必填 artifact_attestation_id");
     }
     // 必填 expected_version_no
     if (typeof body.expected_version_no !== "number") {
-      return v11SchemaInvalid(requestId, "publish=true 时必填 expected_version_no");
+      return schemaInvalidTable(requestId, "publish=true 时必填 expected_version_no");
     }
     expectedVersionNo = body.expected_version_no;
 
     // 必填 If-Match（RuntimeRevision ETag）
     const ifMatch = parseIfMatch(request);
     if (!ifMatch) {
-      return v11SchemaInvalid(requestId, "publish=true 时缺少必填头 If-Match");
+      return schemaInvalidTable(requestId, "publish=true 时缺少必填头 If-Match");
     }
     try {
       parseRuntimeRevisionEtag(ifMatch);
     } catch (err) {
-      return v11SchemaInvalid(
+      return schemaInvalidTable(
         requestId,
         err instanceof Error ? err.message : "If-Match ETag 格式非法",
       );
@@ -305,7 +305,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     // 校验 If-Match ETag 与 Revision 当前 revisionNo 一致
     const currentEtag = `${RUNTIME_REVISION_ETAG_PREFIX}${revision.revisionNo}`;
     if (ifMatch !== currentEtag) {
-      return v11EtagMismatch(requestId, `If-Match ${ifMatch} 与当前 ETag ${currentEtag} 不匹配`);
+      return etagMismatchTable(requestId, `If-Match ${ifMatch} 与当前 ETag ${currentEtag} 不匹配`);
     }
     ifMatchEtag = ifMatch;
   }
@@ -462,7 +462,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof RuntimeArtifactAttestationRequiredError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     if (err instanceof RuntimeArtifactAttestationInvalidError) {
       // 区分撤销和绑定不匹配

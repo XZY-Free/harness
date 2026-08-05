@@ -1,9 +1,9 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import { getJobEvents } from "@/lib/v11/job/job-event-queries";
 import { getJobById } from "@/lib/v11/job/job-queries";
@@ -54,7 +54,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   const events = await getJobEvents(principal.tenantId, jobId, { limit });

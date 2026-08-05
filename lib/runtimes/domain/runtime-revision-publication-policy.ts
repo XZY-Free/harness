@@ -12,10 +12,10 @@
 import {
   ALL_CONFORMANCE_CASES,
   CONFORMANCE_SUITE_REVISION,
-  MANDATORY_GATE_CASES,
   type ConformanceCaseId,
   type ConformanceCaseResult,
   type ConformanceGateResult,
+  MANDATORY_GATE_CASES,
   validateConformanceGate,
 } from "@/lib/runtimes/domain/runtime-conformance-contract";
 
@@ -58,7 +58,6 @@ export class RuntimeConformanceCaseFailedError extends Error {
     this.name = "RuntimeConformanceCaseFailedError";
   }
 }
-
 
 export class RuntimeRevisionNotFoundError extends Error {
   constructor(public readonly revisionId: string) {
@@ -113,7 +112,9 @@ export class RuntimeArtifactAttestationInvalidError extends Error {
     public readonly attestationId: string,
     public readonly reason: string,
   ) {
-    super(`RuntimeRevision ${revisionId} 的 Attestation ${attestationId} 不满足发布资格: ${reason}`);
+    super(
+      `RuntimeRevision ${revisionId} 的 Attestation ${attestationId} 不满足发布资格: ${reason}`,
+    );
     this.name = "RuntimeArtifactAttestationInvalidError";
   }
 }

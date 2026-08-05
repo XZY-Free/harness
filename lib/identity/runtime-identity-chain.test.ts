@@ -21,12 +21,12 @@ import { DEFAULT_TENANT_ID } from "@/lib/identity/tenant-queries";
  * - requiresIdentityChainVerification：Token 类型判断。
  */
 import type { WorkloadTokenClaims } from "@/lib/identity/workload-token";
-import type { V11EnvironmentLease } from "@/lib/v11/schema/environment";
+import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
 import { describe, expect, it } from "vitest";
 
 // ─── 辅助构造 ───────────────────────────────────────────────
 
-function buildLease(overrides: Partial<V11EnvironmentLease> = {}): V11EnvironmentLease {
+function buildLease(overrides: Partial<EnvironmentLease> = {}): EnvironmentLease {
   return {
     id: "lease-1",
     tenantId: DEFAULT_TENANT_ID,

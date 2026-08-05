@@ -1,10 +1,10 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { getInvocationById } from "@/lib/v11/runtime/invocation-queries";
 /**
  * GET /admin/api/v1/invocations/{invocation_id} — Invocation 单资源详情（S11-W04）。
  *

@@ -1,11 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import { listCostAggregatesByTenant } from "@/lib/v11/operations/usage-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   COST_GRANULARITIES,
   type CostGranularity,
@@ -13,7 +6,14 @@ import {
   USAGE_SCOPE_TYPES,
   type UsageDimension,
   type UsageScopeType,
-} from "@/lib/v11/schema/usage";
+} from "@/lib/persistence/schema/usage";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
+import { listCostAggregatesByTenant } from "@/lib/v11/operations/usage-queries";
 /**
  * GET /admin/api/v1/cost-aggregates — 列出租户内所有 CostAggregate（S11-W07）。
  *
@@ -59,13 +59,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let dimension: UsageDimension | undefined;
   if (dimensionParam) {
     if (!VALID_DIMENSIONS.has(dimensionParam)) {
-      return v11SchemaInvalid(requestId, `dimension 非法: ${dimensionParam}`);
+      return schemaInvalidTable(requestId, `dimension 非法: ${dimensionParam}`);
     }
     dimension = dimensionParam as UsageDimension;
   }
@@ -73,7 +73,7 @@ export async function GET(request: Request): Promise<Response> {
   let scopeType: UsageScopeType | undefined;
   if (scopeTypeParam) {
     if (!VALID_SCOPE_TYPES.has(scopeTypeParam)) {
-      return v11SchemaInvalid(requestId, `scope_type 非法: ${scopeTypeParam}`);
+      return schemaInvalidTable(requestId, `scope_type 非法: ${scopeTypeParam}`);
     }
     scopeType = scopeTypeParam as UsageScopeType;
   }
@@ -81,7 +81,7 @@ export async function GET(request: Request): Promise<Response> {
   let granularity: CostGranularity | undefined;
   if (granularityParam) {
     if (!VALID_GRANULARITIES.has(granularityParam)) {
-      return v11SchemaInvalid(requestId, `granularity 非法: ${granularityParam}`);
+      return schemaInvalidTable(requestId, `granularity 非法: ${granularityParam}`);
     }
     granularity = granularityParam as CostGranularity;
   }
@@ -90,7 +90,7 @@ export async function GET(request: Request): Promise<Response> {
   if (windowFromParam) {
     windowFrom = new Date(windowFromParam);
     if (Number.isNaN(windowFrom.getTime())) {
-      return v11SchemaInvalid(requestId, `window_from 不是合法 ISO 时间: ${windowFromParam}`);
+      return schemaInvalidTable(requestId, `window_from 不是合法 ISO 时间: ${windowFromParam}`);
     }
   }
 
@@ -98,7 +98,7 @@ export async function GET(request: Request): Promise<Response> {
   if (windowToParam) {
     windowTo = new Date(windowToParam);
     if (Number.isNaN(windowTo.getTime())) {
-      return v11SchemaInvalid(requestId, `window_to 不是合法 ISO 时间: ${windowToParam}`);
+      return schemaInvalidTable(requestId, `window_to 不是合法 ISO 时间: ${windowToParam}`);
     }
   }
 

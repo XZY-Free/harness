@@ -1,21 +1,12 @@
 import {
-  ETAG_HEADER,
-  REQUEST_ID_HEADER,
-  etagHeader,
-  getRequestId,
-  parseIfMatch,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
-import {
-  THREAD_SETTINGS_ETAG_PREFIX,
   type Principal,
+  THREAD_SETTINGS_ETAG_PREFIX,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   parseThreadSettingsEtag,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
 /**
  * PATCH /api/v1/threads/{thread_id}/settings — 更新 Thread 默认设置（S04-C03，§3.2）。
  *
@@ -34,8 +25,17 @@ import {
  * - ETag 格式非法 → 400 REQUEST_SCHEMA_INVALID
  * - 乐观锁冲突 → 412 ETAG_MISMATCH
  */
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
-import { updateThreadSettingsWithEvents } from "@/lib/v11/conversation/thread-settings-queries";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { updateThreadSettingsWithEvents } from "@/lib/conversations/thread-settings-queries";
+import {
+  ETAG_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  etagHeader,
+  getRequestId,
+  parseIfMatch,
+  resourceNotFound,
+} from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -94,20 +94,20 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
   // 3. 解析 If-Match（必填）
   const ifMatchRaw = parseIfMatch(request);
   if (!ifMatchRaw) {
-    return v11SchemaInvalid(requestId, "缺少必填头 If-Match");
+    return schemaInvalidTable(requestId, "缺少必填头 If-Match");
   }
 
   let expectedVersionNo: number;
   try {
     expectedVersionNo = parseThreadSettingsEtag(ifMatchRaw);
   } catch {
-    return v11SchemaInvalid(requestId, `If-Match ETag 格式非法: ${ifMatchRaw}`);
+    return schemaInvalidTable(requestId, `If-Match ETag 格式非法: ${ifMatchRaw}`);
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：至少一个字段（default_model_ref/default_workspace_id/default_environment_definition_id），值类型为 string 或 null",
     );

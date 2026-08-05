@@ -1,10 +1,11 @@
+import { listDeliveryFailures } from "@/lib/conversations/projection-operations";
 /**
  * GET /admin/api/v1/event-delivery — 列出租户事件交付失败记录（S12-W01）。
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。
  * - 支持查询参数 consumer_name、state、stream_type、stream_id、limit。
- * - 调用 listDeliveryFailures（租户隔离，inner join v11EventStreamFloor）。
+ * - 调用 listDeliveryFailures（租户隔离，inner join eventStreamFloorTable）。
  * - 投影为 snake_case。
  *
  * 错误映射：
@@ -13,20 +14,19 @@
  * - stream_type 非法 → 400 REQUEST_SCHEMA_INVALID
  * - limit 非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import { listDeliveryFailures } from "@/lib/v11/conversation/projection-operations";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   DELIVERY_FAILURE_STATES,
   type DeliveryFailureState,
   STREAM_TYPES,
   type StreamType,
-} from "@/lib/v11/schema/projection";
+} from "@/lib/persistence/schema/projection";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +57,7 @@ export async function GET(request: Request): Promise<Response> {
   let failureState: DeliveryFailureState | undefined;
   if (stateParam) {
     if (!VALID_STATES.has(stateParam)) {
-      return v11SchemaInvalid(requestId, `state 非法: ${stateParam}`);
+      return schemaInvalidTable(requestId, `state 非法: ${stateParam}`);
     }
     failureState = stateParam as DeliveryFailureState;
   }
@@ -65,14 +65,14 @@ export async function GET(request: Request): Promise<Response> {
   let streamType: StreamType | undefined;
   if (streamTypeParam) {
     if (!VALID_STREAM_TYPES.has(streamTypeParam)) {
-      return v11SchemaInvalid(requestId, `stream_type 非法: ${streamTypeParam}`);
+      return schemaInvalidTable(requestId, `stream_type 非法: ${streamTypeParam}`);
     }
     streamType = streamTypeParam as StreamType;
   }
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   // 3. 查询交付失败记录（租户隔离）
@@ -92,7 +92,7 @@ export async function GET(request: Request): Promise<Response> {
   );
 }
 
-/** 投影 V11EventDeliveryFailure 为 snake_case 响应体。 */
+/** 投影 EventDeliveryFailure 为 snake_case 响应体。 */
 function projectFailure(f: {
   id: string;
   consumerName: string;

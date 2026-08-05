@@ -9,13 +9,13 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { V11ClientItem } from "@/lib/v11/client/types";
+import type { ClientItem } from "@/lib/v11/client/types";
 
-interface V11JobResultItemProps {
-  readonly item: V11ClientItem;
+interface JobResultItemProps {
+  readonly item: ClientItem;
 }
 
-export function V11JobResultItem({ item }: V11JobResultItemProps) {
+export function JobResultItem({ item }: JobResultItemProps) {
   const content = item.content as {
     job_id?: string;
     job_type?: string;
@@ -34,9 +34,7 @@ export function V11JobResultItem({ item }: V11JobResultItemProps) {
       <div
         className={cn(
           "max-w-[80%] rounded-[var(--radius-lg)] border px-4 py-3",
-          isFailed
-            ? "border-destructive/40 bg-destructive/5"
-            : "border-border bg-muted",
+          isFailed ? "border-destructive/40 bg-destructive/5" : "border-border bg-muted",
         )}
       >
         <div className="flex items-center gap-2">
@@ -68,9 +66,7 @@ export function V11JobResultItem({ item }: V11JobResultItemProps) {
           </div>
 
           <div className="flex-1">
-            <div className="font-medium text-sm text-foreground">
-              {content.job_type ?? "Job"}
-            </div>
+            <div className="font-medium text-sm text-foreground">{content.job_type ?? "Job"}</div>
             <div className="mt-0.5 text-2xs text-muted-foreground">
               {isPending ? "执行中" : isCompleted ? "已完成" : "失败"}
             </div>

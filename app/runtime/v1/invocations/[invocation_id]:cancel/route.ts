@@ -18,18 +18,24 @@
  * - 缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
+  getRequestId,
+} from "@/lib/http";
 import { extractBearerToken } from "@/lib/identity/workload-token";
-import { getRouteHostedAdapter } from "@/lib/v11/runtime/adapters/hosted-adapter";
+import { getRouteHostedAdapter } from "@/lib/runtime/adapters/hosted-adapter";
 import {
   resolveRuntimePrincipal,
   runtimeAuthErrorResponse,
-  v11RuntimeSchemaInvalid,
-} from "@/lib/v11/runtime/route-helpers";
+  runtimeSchemaInvalidTable,
+} from "@/lib/runtime/route-helpers";
 import type {
   CancelInvocationRequestBody,
   CancelInvocationResponse,
-} from "@/lib/v11/runtime/runtime-client";
+} from "@/lib/runtime/runtime-client";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +64,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const invocationId = typeof rawValue === "string" ? rawValue : "";
 
   if (!invocationId) {
-    return v11RuntimeSchemaInvalid(requestId, "路径参数 invocation_id 缺失");
+    return runtimeSchemaInvalidTable(requestId, "路径参数 invocation_id 缺失");
   }
 
   // 1. 解析 Bearer Token（audience=runtime + invocation 绑定校验）
@@ -72,13 +78,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   // 2. 校验 Idempotency-Key（必填）
   if (!request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim()) {
-    return v11RuntimeSchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return runtimeSchemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11RuntimeSchemaInvalid(requestId, "请求体非法：reason 必填且为非空字符串");
+    return runtimeSchemaInvalidTable(requestId, "请求体非法：reason 必填且为非空字符串");
   }
 
   // 4. S05-C05 扩展：调用 RuntimeAdapter.handleCancel，异步回传 execution.cancelled 事件

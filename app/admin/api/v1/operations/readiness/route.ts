@@ -17,13 +17,13 @@
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - scope 非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import {
   type ReadinessScope,
@@ -61,7 +61,7 @@ export async function GET(request: Request): Promise<Response> {
   let scope: ReadinessScope | undefined;
   if (scopeParam) {
     if (!isKnownReadinessScope(scopeParam)) {
-      return v11SchemaInvalid(
+      return schemaInvalidTable(
         requestId,
         `scope 非法: ${scopeParam}，合法值: employee_api, runtime_dispatch, gateway, event_projection, job_scheduler, deletion`,
       );

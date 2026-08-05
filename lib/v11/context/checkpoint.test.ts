@@ -18,6 +18,10 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { db } from "@/lib/db/client";
 import { buildV11Request, withRollback } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
+import { contextCheckpoint } from "@/lib/persistence/schema/context-checkpoint";
 import {
   computeSourceRangesHash,
   computeSummaryHash,
@@ -27,10 +31,6 @@ import {
   getContextCheckpointsByInvocation,
   isValidSummaryHash,
 } from "@/lib/v11/context/checkpoint-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
-import { contextCheckpoint } from "@/lib/v11/schema/context-checkpoint";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -599,7 +599,7 @@ describe("POST /gateway/v1/context-checkpoints", () => {
     const { tenantId: tenant1 } = await seedContext();
     // 创建第二个租户（ensureDefaultTenant 只返回默认租户，手动创建）
     const tenant2 = randomUUID();
-    const { tenant: tenantTable } = await import("@/lib/v11/schema/identity");
+    const { tenant: tenantTable } = await import("@/lib/persistence/schema/identity");
     await db.insert(tenantTable).values({
       id: tenant2,
       key: `t-${tenant2.slice(0, 8)}`,

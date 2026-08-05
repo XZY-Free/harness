@@ -1,3 +1,4 @@
+import { listItemsByThread } from "@/lib/conversations/thread-item-queries";
 /**
  * V11 Context 源解析器（阶段 7 S07-C01 / S07-C04 / S07-C05）。
  *
@@ -20,6 +21,8 @@
  * - 模型不能绕过平台读取未挂载 Memory、Knowledge 或文件。
  */
 import { db } from "@/lib/db/client";
+import type { MemoryEntry, MemoryScopeType } from "@/lib/persistence/schema/memory";
+import { skillTable as skillTableTable } from "@/lib/persistence/schema/skill";
 import { getCurrentSkillVersion } from "@/lib/v11/capability/skill-queries";
 import {
   type ContextFragment,
@@ -36,9 +39,6 @@ import {
   searchKnowledgeEvidence,
 } from "@/lib/v11/context/knowledge-queries";
 import { listActiveMemoryEntriesByScopes } from "@/lib/v11/context/memory-queries";
-import { listItemsByThread } from "@/lib/v11/conversation/thread-item-queries";
-import type { MemoryScopeType, V11MemoryEntry } from "@/lib/v11/schema/memory";
-import { v11Skill as v11SkillTable } from "@/lib/v11/schema/skill";
 import { eq } from "drizzle-orm";
 
 // ─── 源结果状态 ─────────────────────────────────────────────
@@ -318,8 +318,8 @@ export class SkillResolver implements SourceResolver {
     // 查询 Skill（跨租户隔离由查询保证）
     const [skillRow] = await db
       .select()
-      .from(v11SkillTable)
-      .where(eq(v11SkillTable.id, this.skillId))
+      .from(skillTableTable)
+      .where(eq(skillTableTable.id, this.skillId))
       .limit(1);
 
     if (!skillRow || skillRow.tenantId !== ctx.tenantId) {
@@ -572,7 +572,7 @@ export class MemoryResolver implements SourceResolver {
  *
  * restricted sensitivity 的 Entry 不返回正文（text=undefined），仅保留引用。
  */
-function entryToFragment(entry: V11MemoryEntry): ContextFragment {
+function entryToFragment(entry: MemoryEntry): ContextFragment {
   const scopeMap: Record<MemoryScopeType, FragmentScope> = {
     thread: "thread",
     workspace: "project",

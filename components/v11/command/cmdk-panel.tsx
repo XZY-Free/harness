@@ -1,16 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Command } from "cmdk";
 import { Dialog, DialogContent, DialogOverlay } from "@/components/ui/dialog";
-import type { V11Agent } from "@/lib/v11/schema/agent";
-import type { V11Thread } from "@/lib/v11/schema/conversation";
+import type { Agent } from "@/lib/persistence/schema/agent";
+import type { Thread } from "@/lib/persistence/schema/conversation";
+import { Command } from "cmdk";
 import { FileSearch, FolderOpen, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 interface CmdkPanelProps {
-  readonly threads: readonly V11Thread[];
-  readonly agents: readonly V11Agent[];
+  readonly threads: readonly Thread[];
+  readonly agents: readonly Agent[];
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }
@@ -48,7 +48,7 @@ export function CmdkPanel({ threads, agents, open, onOpenChange }: CmdkPanelProp
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key >= "1" && e.key <= "9") {
         e.preventDefault();
-        const index = parseInt(e.key, 10) - 1;
+        const index = Number.parseInt(e.key, 10) - 1;
         const thread = filteredThreads[index];
         if (thread) {
           handleSelectThread(thread.id);
@@ -82,9 +82,7 @@ export function CmdkPanel({ threads, agents, open, onOpenChange }: CmdkPanelProp
                 >
                   <Plus className="size-4 text-muted-foreground" />
                   <span>新建会话</span>
-                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">
-                    ⌘N
-                  </span>
+                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘N</span>
                 </Command.Item>
                 <Command.Item
                   value="files"
@@ -93,9 +91,7 @@ export function CmdkPanel({ threads, agents, open, onOpenChange }: CmdkPanelProp
                 >
                   <FolderOpen className="size-4 text-muted-foreground" />
                   <span>文件和文件夹</span>
-                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">
-                    ⌘O
-                  </span>
+                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘O</span>
                 </Command.Item>
                 <Command.Item
                   value="search-files"
@@ -104,17 +100,13 @@ export function CmdkPanel({ threads, agents, open, onOpenChange }: CmdkPanelProp
                 >
                   <FileSearch className="size-4 text-muted-foreground" />
                   <span>搜索文件</span>
-                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">
-                    ⌘P
-                  </span>
+                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘P</span>
                 </Command.Item>
               </Command.Group>
             )}
             <Command.Group heading="会话">
               {filteredThreads.length === 0 ? (
-                <div className="py-6 text-center text-sm text-muted-foreground">
-                  没有匹配的会话
-                </div>
+                <div className="py-6 text-center text-sm text-muted-foreground">没有匹配的会话</div>
               ) : (
                 filteredThreads.slice(0, 9).map((thread, index) => {
                   const agent = agentMap.get(thread.primaryAgentId);
@@ -126,9 +118,7 @@ export function CmdkPanel({ threads, agents, open, onOpenChange }: CmdkPanelProp
                       onSelect={() => handleSelectThread(thread.id)}
                       className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-muted data-[selected=true]:bg-muted"
                     >
-                      <span className="flex-1 truncate">
-                        {thread.title ?? "新会话"}
-                      </span>
+                      <span className="flex-1 truncate">{thread.title ?? "新会话"}</span>
                       <span className="text-xs text-muted-foreground">{agentName}</span>
                       <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                         ⌘{index + 1}

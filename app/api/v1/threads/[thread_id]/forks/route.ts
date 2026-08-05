@@ -1,10 +1,3 @@
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
 /**
  * POST /api/v1/threads/{thread_id}/forks — Fork Thread（S04-C06，§3.10）。
  *
@@ -26,15 +19,22 @@ import {
  * - Fork 源 Turn 不属于源 Thread → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
-import { type ForkWorkspaceMode, forkThread } from "@/lib/v11/conversation/fork-queries";
+import { type ForkWorkspaceMode, forkThread } from "@/lib/conversations/fork-queries";
 import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -94,13 +94,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 from_turn_id 或字段类型错误");
+    return schemaInvalidTable(requestId, "请求体非法：缺少 from_turn_id 或字段类型错误");
   }
 
   // 5. 计算请求 hash + 幂等守卫

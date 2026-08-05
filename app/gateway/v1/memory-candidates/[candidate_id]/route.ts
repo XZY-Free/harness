@@ -16,7 +16,7 @@
  * - rejected candidate 不回显正文内容。
  * - Gateway Token 的 invocationId 必须与 candidate 的 invocationId 一致。
  */
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import { getMemoryCandidateByIdAndInvocation } from "@/lib/v11/context/memory-queries";
 import {
   type GatewayPrincipal,

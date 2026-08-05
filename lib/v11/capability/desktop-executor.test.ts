@@ -26,6 +26,10 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { registerDevice } from "@/lib/identity/device-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { invocationAttemptTable, invocationTable } from "@/lib/persistence/schema/runtime";
 import {
   BROWSER_STATE_LEAK_PATTERNS,
   BrowserStateLeakError,
@@ -53,7 +57,7 @@ import {
   createEffectTargets,
 } from "@/lib/v11/capability/effect-queries";
 import {
-  type V11ToolCall,
+  type ToolCall,
   computeArgumentsHash,
   createToolCall,
   updateToolCallState,
@@ -64,9 +68,6 @@ import {
   createEnvironmentDefinition,
   createEnvironmentLease,
 } from "@/lib/v11/environment/environment-queries";
-import { registerDevice } from "@/lib/identity/device-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   PermissionNotFoundError,
   ToolCallBlockedError,
@@ -74,7 +75,6 @@ import {
   recordPermissionDecision,
 } from "@/lib/v11/permission/permission-queries";
 import { resolveUserActionRequest } from "@/lib/v11/permission/user-action-queries";
-import { v11Invocation, v11InvocationAttempt } from "@/lib/v11/schema/runtime";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/v11/workspace/workspace-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -115,7 +115,7 @@ async function seedUserAndDevice(tenantId: string) {
 async function seedInvocation(tenantId: string, threadId: string = randomUUID()) {
   const id = randomUUID();
   const now = new Date();
-  await db.insert(v11Invocation).values({
+  await db.insert(invocationTable).values({
     id,
     tenantId,
     threadId,
@@ -145,7 +145,7 @@ async function seedInvocation(tenantId: string, threadId: string = randomUUID())
 async function seedAttempt(invocationId: string, attemptNo = 1) {
   const id = randomUUID();
   const now = new Date();
-  await db.insert(v11InvocationAttempt).values({
+  await db.insert(invocationAttemptTable).values({
     id,
     invocationId,
     attemptNo,
@@ -215,7 +215,7 @@ async function seedRunningToolCall(
   tenantId: string,
   invocationId: string,
   leaseId: string,
-): Promise<V11ToolCall> {
+): Promise<ToolCall> {
   const toolCall = await createToolCall({
     tenantId,
     invocationId,

@@ -10,13 +10,13 @@
  */
 "use client";
 
-import type { V11ClientItem } from "@/lib/v11/client/types";
+import type { ClientItem } from "@/lib/v11/client/types";
 
-interface V11AgentMessageItemProps {
-  readonly item: V11ClientItem;
+interface AgentMessageItemProps {
+  readonly item: ClientItem;
 }
 
-export function V11AgentMessageItem({ item }: V11AgentMessageItemProps) {
+export function AgentMessageItem({ item }: AgentMessageItemProps) {
   const content = item.content as { text?: string };
   const isPending = item.item_state === "pending";
   const isFailed = item.item_state === "failed";

@@ -17,25 +17,25 @@
  * - 请求 id 不存在 → 404 RESOURCE_NOT_FOUND
  * - include_steps 非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   computeRequestSummary,
   getDeletionRequestById,
   listDeletionSteps,
 } from "@/lib/identity/deletion-request-queries";
-import type { V11DeletionStep } from "@/lib/v11/schema/deletion-request";
+import type { DeletionStep } from "@/lib/persistence/schema/deletion-request";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
 /** 构造 step 投影（不含 Secret，仅 store_type / step_state / evidence_ref）。 */
-function projectStep(s: V11DeletionStep): Record<string, unknown> {
+function projectStep(s: DeletionStep): Record<string, unknown> {
   return {
     store_type: s.storeType,
     step_state: s.stepState,
@@ -71,7 +71,7 @@ export async function GET(
   // 3. 解析路径参数
   const { deletion_request_id: deletionRequestId } = await context.params;
   if (!deletionRequestId) {
-    return v11SchemaInvalid(requestId, "缺少路径参数 deletion_request_id");
+    return schemaInvalidTable(requestId, "缺少路径参数 deletion_request_id");
   }
 
   // 4. 解析 include_steps 查询参数
@@ -80,7 +80,7 @@ export async function GET(
   let includeSteps = false;
   if (includeStepsParam !== null) {
     if (includeStepsParam !== "true" && includeStepsParam !== "false") {
-      return v11SchemaInvalid(requestId, "include_steps 必须为 true 或 false");
+      return schemaInvalidTable(requestId, "include_steps 必须为 true 或 false");
     }
     includeSteps = includeStepsParam === "true";
   }

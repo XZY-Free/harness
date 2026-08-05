@@ -58,11 +58,9 @@ export const routeRevision = mysqlTable(
       table.routeGroupId,
       table.priorityNo,
     ),
-    routeSetSelectorDigestPriorityIdx: index("RouteRevision_routeSetId_selectorDigest_priorityNo_idx").on(
-      table.routeSetId,
-      table.selectorDigest,
-      table.priorityNo,
-    ),
+    routeSetSelectorDigestPriorityIdx: index(
+      "RouteRevision_routeSetId_selectorDigest_priorityNo_idx",
+    ).on(table.routeSetId, table.selectorDigest, table.priorityNo),
   }),
 );
 

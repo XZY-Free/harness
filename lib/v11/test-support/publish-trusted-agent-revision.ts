@@ -2,7 +2,7 @@ import { createPublishAgentRevision } from "@/lib/agents/application/publish-age
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { db } from "@/lib/db/client";
-import { v11AgentRevision } from "@/lib/v11/schema/agent";
+import { agentRevisionTable } from "@/lib/persistence/schema/agent";
 import { eq } from "drizzle-orm";
 
 /** 真实 MySQL 测试装配：绑定权威 Artifact 后通过正式应用服务发布 AgentRevision。 */
@@ -18,9 +18,9 @@ export async function publishTrustedAgentRevisionForTest(params: {
     throw new Error(`测试 AgentRevision 缺少权威 Attestation: ${params.revisionId}`);
   }
   await db
-    .update(v11AgentRevision)
+    .update(agentRevisionTable)
     .set({ artifactId: attestation.artifactId, artifactDigest: attestation.artifactDigest })
-    .where(eq(v11AgentRevision.id, params.revisionId));
+    .where(eq(agentRevisionTable.id, params.revisionId));
 
   return createPublishAgentRevision({ store: mysqlAgentPublicationStore })({
     tenantId: params.tenantId,

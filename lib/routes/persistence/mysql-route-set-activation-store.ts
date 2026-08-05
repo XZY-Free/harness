@@ -2,30 +2,24 @@
  * RouteSet 整体激活 MySQL Store 实现。
  */
 import { randomUUID } from "node:crypto";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
-import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import {
   artifact,
   artifactAttestation,
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
-import {
-  deploymentRouteSetTable,
-  deploymentRouteTable,
-} from "@/lib/persistence/schema/routes";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
+import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { RouteNotFoundError } from "@/lib/routes/domain/route-revision";
-import {
-  normalizeEligibility,
-  computeSelectorDigest,
-} from "@/lib/routes/domain/route-selector";
-import type { RouteSetActivationStore } from "@/lib/routes/persistence/route-set-activation-store";
+import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import type { RouteSetActivationStore } from "@/lib/routes/persistence/route-set-activation-store";
 import { and, desc, eq, isNotNull, isNull, like, max } from "drizzle-orm";
 
 function requiredCapabilities(value: unknown): string[] {
@@ -154,14 +148,34 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
 
         async loadRevisionExecutionEvidence(params) {
           // §2.4: 委托 Phase 1 统一证据读取器构建完整快照
-          const { loadArtifactEvidenceSnapshot } = await import("@/lib/artifacts/persistence/artifact-evidence-reader");
-          const { loadActivePublicationSnapshot } = await import("@/lib/publications/persistence/publication-evidence-reader");
+          const { loadArtifactEvidenceSnapshot } = await import(
+            "@/lib/artifacts/persistence/artifact-evidence-reader"
+          );
+          const { loadActivePublicationSnapshot } = await import(
+            "@/lib/publications/persistence/publication-evidence-reader"
+          );
 
           const [agentEvidence, runtimeEvidence, agentPub, runtimePub] = await Promise.all([
-            loadArtifactEvidenceSnapshot({ tenantId: params.tenantId, artifactType: "agent_revision" as const, artifactRevisionId: params.agentRevisionId }),
-            loadArtifactEvidenceSnapshot({ tenantId: params.tenantId, artifactType: "runtime_revision" as const, artifactRevisionId: params.runtimeRevisionId }),
-            loadActivePublicationSnapshot({ tenantId: params.tenantId, subjectType: "agent_revision" as const, subjectRevisionId: params.agentRevisionId }),
-            loadActivePublicationSnapshot({ tenantId: params.tenantId, subjectType: "runtime_revision" as const, subjectRevisionId: params.runtimeRevisionId }),
+            loadArtifactEvidenceSnapshot({
+              tenantId: params.tenantId,
+              artifactType: "agent_revision" as const,
+              artifactRevisionId: params.agentRevisionId,
+            }),
+            loadArtifactEvidenceSnapshot({
+              tenantId: params.tenantId,
+              artifactType: "runtime_revision" as const,
+              artifactRevisionId: params.runtimeRevisionId,
+            }),
+            loadActivePublicationSnapshot({
+              tenantId: params.tenantId,
+              subjectType: "agent_revision" as const,
+              subjectRevisionId: params.agentRevisionId,
+            }),
+            loadActivePublicationSnapshot({
+              tenantId: params.tenantId,
+              subjectType: "runtime_revision" as const,
+              subjectRevisionId: params.runtimeRevisionId,
+            }),
           ]);
 
           return {
@@ -196,7 +210,12 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
             .limit(1);
           if (rows.length === 0) return null;
           // 简化：找到匹配记录即视为已完成（完整实现需要独立的幂等记录表）
-          return { completed: true, httpStatus: 200, responseRef: params.routeSetId, responseRedactedJson: "{}" };
+          return {
+            completed: true,
+            httpStatus: 200,
+            responseRef: params.routeSetId,
+            responseRedactedJson: "{}",
+          };
         },
 
         async resolveOrCreateRouteIdentity(params) {
@@ -286,7 +305,8 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
               ...(params.content.routeGroupId ? { groupId: params.content.routeGroupId } : {}),
             },
             routeGroupId: params.content.routeGroupId,
-            selectorDigest: params.selectorDigest ?? (normalized ? computeSelectorDigest(normalized) : ""),
+            selectorDigest:
+              params.selectorDigest ?? (normalized ? computeSelectorDigest(normalized) : ""),
             trafficWeight: params.content.trafficWeight,
             priorityNo: params.content.priorityNo,
             effectiveFrom: params.content.effectiveFrom,

@@ -8,27 +8,12 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
   etagHeader,
   getRequestId,
-  apiError,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import {
-  type KnowledgeDocumentLifecycleState,
-  type KnowledgeSourceType,
-  KnowledgeValidationError,
-  createKnowledgeDocument,
-  getKnowledgeBaseById,
-  listKnowledgeDocuments,
-} from "@/lib/v11/context/knowledge-queries";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -40,6 +25,21 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
+import {
+  type KnowledgeDocumentLifecycleState,
+  type KnowledgeSourceType,
+  KnowledgeValidationError,
+  createKnowledgeDocument,
+  getKnowledgeBaseById,
+  listKnowledgeDocuments,
+} from "@/lib/v11/context/knowledge-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -138,7 +138,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const baseId = extractBaseId(request.url);
   if (!baseId) {
-    return v11SchemaInvalid(requestId, "路径缺少 base_id");
+    return schemaInvalidTable(requestId, "路径缺少 base_id");
   }
 
   // 校验 base 存在且属于该租户
@@ -161,7 +161,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   const lifecycleStates: KnowledgeDocumentLifecycleState[] | undefined = lifecycleParam
@@ -200,7 +200,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const baseId = extractBaseId(request.url);
   if (!baseId) {
-    return v11SchemaInvalid(requestId, "路径缺少 base_id");
+    return schemaInvalidTable(requestId, "路径缺少 base_id");
   }
 
   const base = await getKnowledgeBaseById(principal.tenantId, baseId);
@@ -227,12 +227,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：缺少 document_key/title/source_type 或字段类型错误",
     );
@@ -305,7 +305,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch (err) {
     await failRecord(recordId);
     if (err instanceof KnowledgeValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

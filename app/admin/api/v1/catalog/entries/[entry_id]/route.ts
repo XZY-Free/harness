@@ -1,11 +1,17 @@
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import {
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  etagHeader,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
+import type { CatalogEntry } from "@/lib/persistence/schema/catalog";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
 import { getCatalogEntryById } from "@/lib/v11/catalog/catalog-queries";
-import type { V11CatalogEntry } from "@/lib/v11/schema/catalog";
 /**
  * GET /admin/api/v1/catalog/entries/{entry_id} — Admin Catalog 单条详情（S11-W03）。
  *
@@ -31,8 +37,8 @@ interface RouteContext {
   params: Promise<{ entry_id: string }>;
 }
 
-/** 把 V11CatalogEntry 投影为 admin 响应体（snake_case）。 */
-function projectEntry(entry: V11CatalogEntry): Record<string, unknown> {
+/** 把 CatalogEntry 投影为 admin 响应体（snake_case）。 */
+function projectEntry(entry: CatalogEntry): Record<string, unknown> {
   return {
     id: entry.id,
     resource_type: entry.resourceType,

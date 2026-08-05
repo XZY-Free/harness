@@ -28,19 +28,19 @@ import { db } from "@/lib/db/client";
 import { decodeCursor, encodeCursor } from "@/lib/http";
 import {
   type CapacityScopeType,
+  type CapacitySnapshot,
+  type CostAggregate,
   type CostGranularity,
+  type ServiceLevelIndicator,
   type SliKey,
   type UsageDimension,
+  type UsageRecord,
   type UsageScopeType,
-  type V11CapacitySnapshot,
-  type V11CostAggregate,
-  type V11ServiceLevelIndicator,
-  type V11UsageRecord,
-  v11CapacitySnapshot,
-  v11CostAggregate,
-  v11ServiceLevelIndicator,
-  v11UsageRecord,
-} from "@/lib/v11/schema/usage";
+  capacitySnapshotTable,
+  costAggregateTable,
+  serviceLevelIndicatorTable,
+  usageRecordTable,
+} from "@/lib/persistence/schema/usage";
 import { and, desc, eq, gte, lt, lte, or, sql } from "drizzle-orm";
 
 // ─── UsageRecord ─────────────────────────────────────────
@@ -70,10 +70,10 @@ function toBigInt(value: bigint | number): bigint {
 }
 
 /** 创建 UsageRecord。 */
-export async function createUsageRecord(params: CreateUsageRecordParams): Promise<V11UsageRecord> {
+export async function createUsageRecord(params: CreateUsageRecordParams): Promise<UsageRecord> {
   const id = randomUUID();
   const observedAt = params.observedAt ?? new Date();
-  await db.insert(v11UsageRecord).values({
+  await db.insert(usageRecordTable).values({
     id,
     tenantId: params.tenantId,
     dimension: params.dimension,
@@ -93,8 +93,8 @@ export async function createUsageRecord(params: CreateUsageRecordParams): Promis
 
   const [row] = await db
     .select()
-    .from(v11UsageRecord)
-    .where(and(eq(v11UsageRecord.tenantId, params.tenantId), eq(v11UsageRecord.id, id)))
+    .from(usageRecordTable)
+    .where(and(eq(usageRecordTable.tenantId, params.tenantId), eq(usageRecordTable.id, id)))
     .limit(1);
   if (!row) {
     throw new Error(`createUsageRecord: 行未找到（id=${id}）`);
@@ -106,11 +106,11 @@ export async function createUsageRecord(params: CreateUsageRecordParams): Promis
 export async function getUsageRecordById(
   tenantId: string,
   recordId: string,
-): Promise<V11UsageRecord | null> {
+): Promise<UsageRecord | null> {
   const [row] = await db
     .select()
-    .from(v11UsageRecord)
-    .where(and(eq(v11UsageRecord.tenantId, tenantId), eq(v11UsageRecord.id, recordId)))
+    .from(usageRecordTable)
+    .where(and(eq(usageRecordTable.tenantId, tenantId), eq(usageRecordTable.id, recordId)))
     .limit(1);
   return row ?? null;
 }
@@ -129,20 +129,20 @@ export interface ListUsageRecordsByTenantOptions {
 export async function listUsageRecordsByTenant(
   tenantId: string,
   options?: ListUsageRecordsByTenantOptions,
-): Promise<{ items: V11UsageRecord[]; nextCursor: string | null }> {
+): Promise<{ items: UsageRecord[]; nextCursor: string | null }> {
   const limit = Math.min(options?.limit ?? 50, 200);
-  const conditions = [eq(v11UsageRecord.tenantId, tenantId)];
+  const conditions = [eq(usageRecordTable.tenantId, tenantId)];
   if (options?.dimension) {
-    conditions.push(eq(v11UsageRecord.dimension, options.dimension));
+    conditions.push(eq(usageRecordTable.dimension, options.dimension));
   }
   if (options?.scopeType) {
-    conditions.push(eq(v11UsageRecord.scopeType, options.scopeType));
+    conditions.push(eq(usageRecordTable.scopeType, options.scopeType));
   }
   if (options?.observedFrom) {
-    conditions.push(gte(v11UsageRecord.observedAt, options.observedFrom));
+    conditions.push(gte(usageRecordTable.observedAt, options.observedFrom));
   }
   if (options?.observedTo) {
-    conditions.push(lte(v11UsageRecord.observedAt, options.observedTo));
+    conditions.push(lte(usageRecordTable.observedAt, options.observedTo));
   }
 
   // cursor 解码：{ observed_at, id }
@@ -167,17 +167,17 @@ export async function listUsageRecordsByTenant(
     // (observed_at, id) < (afterObservedAt, afterId) in DESC order：
     // 使用 Drizzle 原生操作符确保 Date 参数绑定与列类型一致
     const cursorCond = or(
-      lt(v11UsageRecord.observedAt, afterObservedAt),
-      and(eq(v11UsageRecord.observedAt, afterObservedAt), lt(v11UsageRecord.id, afterId)),
+      lt(usageRecordTable.observedAt, afterObservedAt),
+      and(eq(usageRecordTable.observedAt, afterObservedAt), lt(usageRecordTable.id, afterId)),
     );
     if (cursorCond) conditions.push(cursorCond);
   }
 
   const rows = await db
     .select()
-    .from(v11UsageRecord)
+    .from(usageRecordTable)
     .where(and(...conditions))
-    .orderBy(desc(v11UsageRecord.observedAt), desc(v11UsageRecord.id))
+    .orderBy(desc(usageRecordTable.observedAt), desc(usageRecordTable.id))
     .limit(limit + 1);
 
   let nextCursor: string | null = null;
@@ -219,32 +219,32 @@ export interface CreateOrUpdateCostAggregateParams {
  */
 export async function createOrUpdateCostAggregate(
   params: CreateOrUpdateCostAggregateParams,
-): Promise<V11CostAggregate> {
+): Promise<CostAggregate> {
   const scopeRef = params.scopeRef ?? null;
 
   // 先查是否存在（MySQL UNIQUE 索引将 NULL 视为不同值，onDuplicateKeyUpdate 对 scope_ref=NULL 不生效）
   const lookupConditions = [
-    eq(v11CostAggregate.tenantId, params.tenantId),
-    eq(v11CostAggregate.dimension, params.dimension),
-    eq(v11CostAggregate.scopeType, params.scopeType),
-    eq(v11CostAggregate.windowStart, params.windowStart),
-    eq(v11CostAggregate.granularity, params.granularity),
+    eq(costAggregateTable.tenantId, params.tenantId),
+    eq(costAggregateTable.dimension, params.dimension),
+    eq(costAggregateTable.scopeType, params.scopeType),
+    eq(costAggregateTable.windowStart, params.windowStart),
+    eq(costAggregateTable.granularity, params.granularity),
   ];
   if (scopeRef !== null) {
-    lookupConditions.push(eq(v11CostAggregate.scopeRef, scopeRef));
+    lookupConditions.push(eq(costAggregateTable.scopeRef, scopeRef));
   } else {
-    lookupConditions.push(sql`${v11CostAggregate.scopeRef} IS NULL`);
+    lookupConditions.push(sql`${costAggregateTable.scopeRef} IS NULL`);
   }
   const [existing] = await db
     .select()
-    .from(v11CostAggregate)
+    .from(costAggregateTable)
     .where(and(...lookupConditions))
     .limit(1);
 
   if (existing) {
     // UPDATE 已有记录
     await db
-      .update(v11CostAggregate)
+      .update(costAggregateTable)
       .set({
         totalQuantity: toBigInt(params.totalQuantity),
         totalCostMicros: toBigInt(params.totalCostMicros),
@@ -252,7 +252,7 @@ export async function createOrUpdateCostAggregate(
         windowEnd: params.windowEnd,
         updatedAt: new Date(),
       })
-      .where(eq(v11CostAggregate.id, existing.id));
+      .where(eq(costAggregateTable.id, existing.id));
     return {
       ...existing,
       totalQuantity: toBigInt(params.totalQuantity),
@@ -265,7 +265,7 @@ export async function createOrUpdateCostAggregate(
 
   // INSERT 新记录
   const id = randomUUID();
-  await db.insert(v11CostAggregate).values({
+  await db.insert(costAggregateTable).values({
     id,
     tenantId: params.tenantId,
     dimension: params.dimension,
@@ -281,8 +281,8 @@ export async function createOrUpdateCostAggregate(
 
   const [row] = await db
     .select()
-    .from(v11CostAggregate)
-    .where(eq(v11CostAggregate.id, id))
+    .from(costAggregateTable)
+    .where(eq(costAggregateTable.id, id))
     .limit(1);
   if (!row) {
     throw new Error(
@@ -296,11 +296,11 @@ export async function createOrUpdateCostAggregate(
 export async function getCostAggregateById(
   tenantId: string,
   aggregateId: string,
-): Promise<V11CostAggregate | null> {
+): Promise<CostAggregate | null> {
   const [row] = await db
     .select()
-    .from(v11CostAggregate)
-    .where(and(eq(v11CostAggregate.tenantId, tenantId), eq(v11CostAggregate.id, aggregateId)))
+    .from(costAggregateTable)
+    .where(and(eq(costAggregateTable.tenantId, tenantId), eq(costAggregateTable.id, aggregateId)))
     .limit(1);
   return row ?? null;
 }
@@ -320,23 +320,23 @@ export interface ListCostAggregatesByTenantOptions {
 export async function listCostAggregatesByTenant(
   tenantId: string,
   options?: ListCostAggregatesByTenantOptions,
-): Promise<{ items: V11CostAggregate[]; nextCursor: string | null }> {
+): Promise<{ items: CostAggregate[]; nextCursor: string | null }> {
   const limit = Math.min(options?.limit ?? 50, 200);
-  const conditions = [eq(v11CostAggregate.tenantId, tenantId)];
+  const conditions = [eq(costAggregateTable.tenantId, tenantId)];
   if (options?.dimension) {
-    conditions.push(eq(v11CostAggregate.dimension, options.dimension));
+    conditions.push(eq(costAggregateTable.dimension, options.dimension));
   }
   if (options?.scopeType) {
-    conditions.push(eq(v11CostAggregate.scopeType, options.scopeType));
+    conditions.push(eq(costAggregateTable.scopeType, options.scopeType));
   }
   if (options?.granularity) {
-    conditions.push(eq(v11CostAggregate.granularity, options.granularity));
+    conditions.push(eq(costAggregateTable.granularity, options.granularity));
   }
   if (options?.windowFrom) {
-    conditions.push(gte(v11CostAggregate.windowStart, options.windowFrom));
+    conditions.push(gte(costAggregateTable.windowStart, options.windowFrom));
   }
   if (options?.windowTo) {
-    conditions.push(lte(v11CostAggregate.windowStart, options.windowTo));
+    conditions.push(lte(costAggregateTable.windowStart, options.windowTo));
   }
 
   // cursor 解码：{ window_start, id }
@@ -359,17 +359,17 @@ export async function listCostAggregatesByTenant(
 
   if (afterWindowStart && afterId) {
     const cursorCond = or(
-      lt(v11CostAggregate.windowStart, afterWindowStart),
-      and(eq(v11CostAggregate.windowStart, afterWindowStart), lt(v11CostAggregate.id, afterId)),
+      lt(costAggregateTable.windowStart, afterWindowStart),
+      and(eq(costAggregateTable.windowStart, afterWindowStart), lt(costAggregateTable.id, afterId)),
     );
     if (cursorCond) conditions.push(cursorCond);
   }
 
   const rows = await db
     .select()
-    .from(v11CostAggregate)
+    .from(costAggregateTable)
     .where(and(...conditions))
-    .orderBy(desc(v11CostAggregate.windowStart), desc(v11CostAggregate.id))
+    .orderBy(desc(costAggregateTable.windowStart), desc(costAggregateTable.id))
     .limit(limit + 1);
 
   let nextCursor: string | null = null;
@@ -408,10 +408,10 @@ export interface CreateCapacitySnapshotParams {
 /** 创建 CapacitySnapshot。 */
 export async function createCapacitySnapshot(
   params: CreateCapacitySnapshotParams,
-): Promise<V11CapacitySnapshot> {
+): Promise<CapacitySnapshot> {
   const id = randomUUID();
   const snapshotAt = params.snapshotAt ?? new Date();
-  await db.insert(v11CapacitySnapshot).values({
+  await db.insert(capacitySnapshotTable).values({
     id,
     tenantId: params.tenantId,
     scopeType: params.scopeType,
@@ -430,8 +430,10 @@ export async function createCapacitySnapshot(
 
   const [row] = await db
     .select()
-    .from(v11CapacitySnapshot)
-    .where(and(eq(v11CapacitySnapshot.tenantId, params.tenantId), eq(v11CapacitySnapshot.id, id)))
+    .from(capacitySnapshotTable)
+    .where(
+      and(eq(capacitySnapshotTable.tenantId, params.tenantId), eq(capacitySnapshotTable.id, id)),
+    )
     .limit(1);
   if (!row) {
     throw new Error(`createCapacitySnapshot: 行未找到（id=${id}）`);
@@ -443,11 +445,13 @@ export async function createCapacitySnapshot(
 export async function getCapacitySnapshotById(
   tenantId: string,
   snapshotId: string,
-): Promise<V11CapacitySnapshot | null> {
+): Promise<CapacitySnapshot | null> {
   const [row] = await db
     .select()
-    .from(v11CapacitySnapshot)
-    .where(and(eq(v11CapacitySnapshot.tenantId, tenantId), eq(v11CapacitySnapshot.id, snapshotId)))
+    .from(capacitySnapshotTable)
+    .where(
+      and(eq(capacitySnapshotTable.tenantId, tenantId), eq(capacitySnapshotTable.id, snapshotId)),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -464,14 +468,14 @@ export interface ListCapacitySnapshotsByTenantOptions {
 export async function listCapacitySnapshotsByTenant(
   tenantId: string,
   options?: ListCapacitySnapshotsByTenantOptions,
-): Promise<{ items: V11CapacitySnapshot[]; nextCursor: string | null }> {
+): Promise<{ items: CapacitySnapshot[]; nextCursor: string | null }> {
   const limit = Math.min(options?.limit ?? 50, 200);
-  const conditions = [eq(v11CapacitySnapshot.tenantId, tenantId)];
+  const conditions = [eq(capacitySnapshotTable.tenantId, tenantId)];
   if (options?.scopeType) {
-    conditions.push(eq(v11CapacitySnapshot.scopeType, options.scopeType));
+    conditions.push(eq(capacitySnapshotTable.scopeType, options.scopeType));
   }
   if (options?.scopeRef) {
-    conditions.push(eq(v11CapacitySnapshot.scopeRef, options.scopeRef));
+    conditions.push(eq(capacitySnapshotTable.scopeRef, options.scopeRef));
   }
 
   // cursor 解码：{ snapshot_at, id }
@@ -494,17 +498,20 @@ export async function listCapacitySnapshotsByTenant(
 
   if (afterSnapshotAt && afterId) {
     const cursorCond = or(
-      lt(v11CapacitySnapshot.snapshotAt, afterSnapshotAt),
-      and(eq(v11CapacitySnapshot.snapshotAt, afterSnapshotAt), lt(v11CapacitySnapshot.id, afterId)),
+      lt(capacitySnapshotTable.snapshotAt, afterSnapshotAt),
+      and(
+        eq(capacitySnapshotTable.snapshotAt, afterSnapshotAt),
+        lt(capacitySnapshotTable.id, afterId),
+      ),
     );
     if (cursorCond) conditions.push(cursorCond);
   }
 
   const rows = await db
     .select()
-    .from(v11CapacitySnapshot)
+    .from(capacitySnapshotTable)
     .where(and(...conditions))
-    .orderBy(desc(v11CapacitySnapshot.snapshotAt), desc(v11CapacitySnapshot.id))
+    .orderBy(desc(capacitySnapshotTable.snapshotAt), desc(capacitySnapshotTable.id))
     .limit(limit + 1);
 
   let nextCursor: string | null = null;
@@ -545,10 +552,10 @@ export interface CreateServiceLevelIndicatorParams {
 /** 创建 ServiceLevelIndicator。 */
 export async function createServiceLevelIndicator(
   params: CreateServiceLevelIndicatorParams,
-): Promise<V11ServiceLevelIndicator> {
+): Promise<ServiceLevelIndicator> {
   const id = randomUUID();
   const measuredAt = params.measuredAt ?? new Date();
-  await db.insert(v11ServiceLevelIndicator).values({
+  await db.insert(serviceLevelIndicatorTable).values({
     id,
     tenantId: params.tenantId,
     scopeType: params.scopeType,
@@ -565,11 +572,11 @@ export async function createServiceLevelIndicator(
 
   const [row] = await db
     .select()
-    .from(v11ServiceLevelIndicator)
+    .from(serviceLevelIndicatorTable)
     .where(
       and(
-        eq(v11ServiceLevelIndicator.tenantId, params.tenantId),
-        eq(v11ServiceLevelIndicator.id, id),
+        eq(serviceLevelIndicatorTable.tenantId, params.tenantId),
+        eq(serviceLevelIndicatorTable.id, id),
       ),
     )
     .limit(1);
@@ -583,14 +590,14 @@ export async function createServiceLevelIndicator(
 export async function getServiceLevelIndicatorById(
   tenantId: string,
   indicatorId: string,
-): Promise<V11ServiceLevelIndicator | null> {
+): Promise<ServiceLevelIndicator | null> {
   const [row] = await db
     .select()
-    .from(v11ServiceLevelIndicator)
+    .from(serviceLevelIndicatorTable)
     .where(
       and(
-        eq(v11ServiceLevelIndicator.tenantId, tenantId),
-        eq(v11ServiceLevelIndicator.id, indicatorId),
+        eq(serviceLevelIndicatorTable.tenantId, tenantId),
+        eq(serviceLevelIndicatorTable.id, indicatorId),
       ),
     )
     .limit(1);
@@ -611,17 +618,17 @@ export interface ListServiceLevelIndicatorsByTenantOptions {
 export async function listServiceLevelIndicatorsByTenant(
   tenantId: string,
   options?: ListServiceLevelIndicatorsByTenantOptions,
-): Promise<{ items: V11ServiceLevelIndicator[]; nextCursor: string | null }> {
+): Promise<{ items: ServiceLevelIndicator[]; nextCursor: string | null }> {
   const limit = Math.min(options?.limit ?? 50, 200);
-  const conditions = [eq(v11ServiceLevelIndicator.tenantId, tenantId)];
+  const conditions = [eq(serviceLevelIndicatorTable.tenantId, tenantId)];
   if (options?.scopeType) {
-    conditions.push(eq(v11ServiceLevelIndicator.scopeType, options.scopeType));
+    conditions.push(eq(serviceLevelIndicatorTable.scopeType, options.scopeType));
   }
   if (options?.indicatorKey) {
-    conditions.push(eq(v11ServiceLevelIndicator.indicatorKey, options.indicatorKey));
+    conditions.push(eq(serviceLevelIndicatorTable.indicatorKey, options.indicatorKey));
   }
   if (options?.breachOnly) {
-    conditions.push(eq(v11ServiceLevelIndicator.breach, true));
+    conditions.push(eq(serviceLevelIndicatorTable.breach, true));
   }
 
   // cursor 解码：{ measured_at, id }
@@ -644,10 +651,10 @@ export async function listServiceLevelIndicatorsByTenant(
 
   if (afterMeasuredAt && afterId) {
     const cursorCond = or(
-      lt(v11ServiceLevelIndicator.measuredAt, afterMeasuredAt),
+      lt(serviceLevelIndicatorTable.measuredAt, afterMeasuredAt),
       and(
-        eq(v11ServiceLevelIndicator.measuredAt, afterMeasuredAt),
-        lt(v11ServiceLevelIndicator.id, afterId),
+        eq(serviceLevelIndicatorTable.measuredAt, afterMeasuredAt),
+        lt(serviceLevelIndicatorTable.id, afterId),
       ),
     );
     if (cursorCond) conditions.push(cursorCond);
@@ -655,9 +662,9 @@ export async function listServiceLevelIndicatorsByTenant(
 
   const rows = await db
     .select()
-    .from(v11ServiceLevelIndicator)
+    .from(serviceLevelIndicatorTable)
     .where(and(...conditions))
-    .orderBy(desc(v11ServiceLevelIndicator.measuredAt), desc(v11ServiceLevelIndicator.id))
+    .orderBy(desc(serviceLevelIndicatorTable.measuredAt), desc(serviceLevelIndicatorTable.id))
     .limit(limit + 1);
 
   let nextCursor: string | null = null;
@@ -685,9 +692,9 @@ export async function listServiceLevelIndicatorsByTenant(
  */
 export interface CapacityAlertItem {
   /** breach SLI 本身。 */
-  indicator: V11ServiceLevelIndicator;
+  indicator: ServiceLevelIndicator;
   /** 同 scope 最近一次 snapshot（按 snapshotAt desc 取首条），无关联时为 null。 */
-  latestSnapshot: V11CapacitySnapshot | null;
+  latestSnapshot: CapacitySnapshot | null;
   /** 告警跳转 Invocation id（来自 SLI.alertInvocationId）。 */
   alertInvocationId: string | null;
   /** 告警跳转 Trace id（来自 SLI.alertTraceId）。 */
@@ -717,21 +724,21 @@ export async function getCapacityAlertsByTenant(
 ): Promise<{ items: CapacityAlertItem[] }> {
   const limit = Math.min(options?.limit ?? 100, 500);
   const conditions = [
-    eq(v11ServiceLevelIndicator.tenantId, tenantId),
-    eq(v11ServiceLevelIndicator.breach, true),
+    eq(serviceLevelIndicatorTable.tenantId, tenantId),
+    eq(serviceLevelIndicatorTable.breach, true),
   ];
   if (options?.scopeType) {
-    conditions.push(eq(v11ServiceLevelIndicator.scopeType, options.scopeType));
+    conditions.push(eq(serviceLevelIndicatorTable.scopeType, options.scopeType));
   }
   if (options?.scopeRef) {
-    conditions.push(eq(v11ServiceLevelIndicator.scopeRef, options.scopeRef));
+    conditions.push(eq(serviceLevelIndicatorTable.scopeRef, options.scopeRef));
   }
 
   const indicators = await db
     .select()
-    .from(v11ServiceLevelIndicator)
+    .from(serviceLevelIndicatorTable)
     .where(and(...conditions))
-    .orderBy(desc(v11ServiceLevelIndicator.measuredAt), desc(v11ServiceLevelIndicator.id))
+    .orderBy(desc(serviceLevelIndicatorTable.measuredAt), desc(serviceLevelIndicatorTable.id))
     .limit(limit);
 
   if (indicators.length === 0) {
@@ -743,19 +750,19 @@ export async function getCapacityAlertsByTenant(
   const items: CapacityAlertItem[] = await Promise.all(
     indicators.map(async (indicator) => {
       const snapshotConditions = [
-        eq(v11CapacitySnapshot.tenantId, tenantId),
-        eq(v11CapacitySnapshot.scopeType, indicator.scopeType),
+        eq(capacitySnapshotTable.tenantId, tenantId),
+        eq(capacitySnapshotTable.scopeType, indicator.scopeType),
       ];
       if (indicator.scopeRef !== null) {
-        snapshotConditions.push(eq(v11CapacitySnapshot.scopeRef, indicator.scopeRef));
+        snapshotConditions.push(eq(capacitySnapshotTable.scopeRef, indicator.scopeRef));
       } else {
-        snapshotConditions.push(sql`${v11CapacitySnapshot.scopeRef} IS NULL`);
+        snapshotConditions.push(sql`${capacitySnapshotTable.scopeRef} IS NULL`);
       }
       const [snapshot] = await db
         .select()
-        .from(v11CapacitySnapshot)
+        .from(capacitySnapshotTable)
         .where(and(...snapshotConditions))
-        .orderBy(desc(v11CapacitySnapshot.snapshotAt), desc(v11CapacitySnapshot.id))
+        .orderBy(desc(capacitySnapshotTable.snapshotAt), desc(capacitySnapshotTable.id))
         .limit(1);
       return {
         indicator,
@@ -777,8 +784,8 @@ export type {
   SliKey,
   UsageDimension,
   UsageScopeType,
-  V11CapacitySnapshot,
-  V11CostAggregate,
-  V11ServiceLevelIndicator,
-  V11UsageRecord,
-} from "@/lib/v11/schema/usage";
+  CapacitySnapshot,
+  CostAggregate,
+  ServiceLevelIndicator,
+  UsageRecord,
+} from "@/lib/persistence/schema/usage";

@@ -1,18 +1,18 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { getDelegateRelationsByParentThread } from "@/lib/conversations/child-thread-queries";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { getDelegateRelationsByParentThread } from "@/lib/v11/conversation/child-thread-queries";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
 /**
  * GET /admin/api/v1/threads/{thread_id}/child-threads — 列出父 Thread 的 delegate 子 Thread 关系（S11-W04）。
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。
  * - 校验 Thread 存在且属于当前租户（跨租户隐藏为 404）。
- * - 调用 getDelegateRelationsByParentThread 返回 V11ThreadRelation 列表（按 createdAt 升序）。
+ * - 调用 getDelegateRelationsByParentThread 返回 ThreadRelation 列表（按 createdAt 升序）。
  * - 投影为 snake_case。
  *
  * 错误映射：

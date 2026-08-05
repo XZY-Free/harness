@@ -6,7 +6,7 @@
  * - 校验 content hash 是否匹配。
  * - 验证 hash 格式（sha256: + 64 hex）。
  *
- * hash 前缀 `sha256:` 与项目约定一致（见 lib/v11/schema/skill.ts contentHash 字段）。
+ * hash 前缀 `sha256:` 与项目约定一致（见 lib/persistence/schema/skill.ts contentHash 字段）。
  */
 import { createHash } from "node:crypto";
 

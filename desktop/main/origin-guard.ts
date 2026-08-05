@@ -100,9 +100,7 @@ export function isTrustedServerOrigin(
   }
   // allowedOrigins 条目可能含 basePath，提取 origin 比对
   const allowedOriginSet = new Set(
-    allowedOrigins
-      .map((o) => extractOriginFromEntry(o))
-      .filter((o): o is string => o !== null),
+    allowedOrigins.map((o) => extractOriginFromEntry(o)).filter((o): o is string => o !== null),
   );
   if (!allowedOriginSet.has(origin)) {
     return false;

@@ -21,32 +21,32 @@
  * ```
  */
 export { createV11ThreadClient } from "./thread-client";
-export type { V11ThreadClient, V11ThreadClientConfig } from "./thread-client";
+export type { ThreadClient, ThreadClientConfig } from "./thread-client";
 
 export { createThreadStore } from "./thread-store";
-export type { V11ThreadStore, V11ThreadStoreListener } from "./thread-store";
+export type { ThreadStore, ThreadStoreListener } from "./thread-store";
 
 export { threadProjectionReducer, createInitialState } from "./thread-reducer";
 
 export { createSSEClient } from "./sse-client";
 export type {
-  V11SSEClientCallbacks,
-  V11SSEClientConfig,
-  V11SSEClientHandle,
+  SSEClientCallbacks,
+  SSEClientConfig,
+  SSEClientHandle,
 } from "./sse-client";
 
 export { toVisibleError, makeLocalVisibleError } from "./error-messages";
 
 export type {
-  V11ClientErrorBody,
-  V11ClientEvent,
-  V11ClientEventPayload,
-  V11ClientItem,
-  V11ClientItemsResponse,
-  V11ClientItemState,
-  V11ClientItemType,
-  V11ClientStreamStatus,
-  V11ClientVisibleError,
-  V11ThreadProjectionAction,
-  V11ThreadProjectionState,
+  ClientErrorBody,
+  ClientEvent,
+  ClientEventPayload,
+  ClientItem,
+  ClientItemsResponse,
+  ClientItemState,
+  ClientItemType,
+  ClientStreamStatus,
+  ClientVisibleError,
+  ThreadProjectionAction,
+  ThreadProjectionState,
 } from "./types";

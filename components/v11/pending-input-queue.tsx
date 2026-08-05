@@ -25,7 +25,7 @@
  *
  * 使用：
  * ```tsx
- * <V11PendingInputQueue
+ * <PendingInputQueue
  *   threadId={threadId}
  *   onSteer={async (item) => steer(extractText(item.input))}
  * />
@@ -41,29 +41,29 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import type { V11ClientPendingInput } from "@/lib/v11/client/types";
+import type { ClientPendingInput } from "@/lib/v11/client/types";
 import { ArrowDown, ArrowUp, CornerDownRight, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-interface V11PendingInputQueueProps {
+interface PendingInputQueueProps {
   readonly threadId: string;
   /**
    * 引导回调：把该条 PendingInput 文本升级为对当前 Turn 的即时引导。
    * 返回 true 表示引导请求已成功入队，父组件可继续删除该 PendingInput。
    * 不传时 ↳ 引导 按钮不渲染（如运行中 Turn 不存在的场景）。
    */
-  readonly onSteer?: (item: V11ClientPendingInput) => Promise<boolean>;
+  readonly onSteer?: (item: ClientPendingInput) => Promise<boolean>;
   /** 父组件操作进行中（如引导/停止正在请求），用于禁用所有按钮。 */
   readonly parentBusy?: boolean;
 }
 
 /** 从 PendingInput.input 提取可读文本。 */
-function extractText(input: V11ClientPendingInput["input"]): string {
+function extractText(input: ClientPendingInput["input"]): string {
   if (typeof input.text === "string") return input.text;
   return JSON.stringify(input);
 }
 
-export function V11PendingInputQueue({ threadId, onSteer, parentBusy }: V11PendingInputQueueProps) {
+export function PendingInputQueue({ threadId, onSteer, parentBusy }: PendingInputQueueProps) {
   const { pendingInputs, edit, remove, reorder, busy, error, refresh } =
     useV11PendingInputs(threadId);
 
@@ -80,7 +80,7 @@ export function V11PendingInputQueue({ threadId, onSteer, parentBusy }: V11Pendi
   // 当队列长度为 0 且无错误时不渲染（避免空容器跳动；有错误时仍渲染以展示错误）
   if (visibleQueue.length === 0 && !error) return null;
 
-  const startEdit = (item: V11ClientPendingInput) => {
+  const startEdit = (item: ClientPendingInput) => {
     setEditingId(item.id);
     setEditingText(extractText(item.input));
   };
@@ -90,13 +90,13 @@ export function V11PendingInputQueue({ threadId, onSteer, parentBusy }: V11Pendi
     setEditingText("");
   };
 
-  const confirmEdit = async (item: V11ClientPendingInput) => {
+  const confirmEdit = async (item: ClientPendingInput) => {
     if (!editingText.trim()) return;
     const ok = await edit(item.id, item.etag, { type: "message", text: editingText });
     if (ok) cancelEdit();
   };
 
-  const handleRemove = async (item: V11ClientPendingInput) => {
+  const handleRemove = async (item: ClientPendingInput) => {
     await remove(item.id, item.etag);
   };
 
@@ -125,7 +125,7 @@ export function V11PendingInputQueue({ threadId, onSteer, parentBusy }: V11Pendi
   };
 
   /** 引导：调用父组件 steer，成功后删除该 PendingInput（已被升级为正式引导）。 */
-  const handleSteer = async (item: V11ClientPendingInput) => {
+  const handleSteer = async (item: ClientPendingInput) => {
     if (!onSteer || actionBusy) return;
     setSteeringId(item.id);
     try {

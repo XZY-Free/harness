@@ -22,7 +22,7 @@
  *         ../v11-agentkit-platform/14-production-operations-security-and-retention.md §5。
  */
 import { randomUUID } from "node:crypto";
-import { API_STATUS, generateRequestId, apiError } from "@/lib/http";
+import { API_STATUS, apiError, generateRequestId } from "@/lib/http";
 import type { ApiAudience } from "@/lib/http";
 
 /** Workload Identity 类型（caller_type in idempotency_record）。 */

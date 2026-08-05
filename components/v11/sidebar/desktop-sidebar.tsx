@@ -8,9 +8,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { CmdkPanel } from "@/components/v11/command/cmdk-panel";
+import type { Agent } from "@/lib/persistence/schema/agent";
+import type { Thread } from "@/lib/persistence/schema/conversation";
 import { cn } from "@/lib/utils";
-import type { V11Agent } from "@/lib/v11/schema/agent";
-import type { V11Thread } from "@/lib/v11/schema/conversation";
 import { LogOut, PanelLeft, Plus, Search, Settings, User } from "lucide-react";
 /**
  * Desktop 会话侧栏（W3-2）。
@@ -31,8 +31,8 @@ import { type CSSProperties, useEffect, useState } from "react";
 import { useSidebar } from "./sidebar-context";
 
 interface DesktopSidebarProps {
-  readonly threads: readonly V11Thread[];
-  readonly agents: readonly V11Agent[];
+  readonly threads: readonly Thread[];
+  readonly agents: readonly Agent[];
   readonly currentThreadId?: string;
   readonly userName?: string;
   readonly hasNativeTitlebar?: boolean;
@@ -289,8 +289,8 @@ function ThreadGroupList({
   agents,
   currentThreadId,
 }: {
-  readonly threads: readonly V11Thread[];
-  readonly agents: readonly V11Agent[];
+  readonly threads: readonly Thread[];
+  readonly agents: readonly Agent[];
   readonly currentThreadId?: string;
 }) {
   const agentMap = new Map(agents.map((a) => [a.id, a]));
@@ -308,7 +308,7 @@ function ThreadGroupList({
   const grouped = threads.filter((t) => isUserChosenAgent(t.primaryAgentId));
 
   // 按 Agent 分组
-  const groupMap = new Map<string, V11Thread[]>();
+  const groupMap = new Map<string, Thread[]>();
   for (const t of grouped) {
     const list = groupMap.get(t.primaryAgentId) ?? [];
     list.push(t);
@@ -347,7 +347,7 @@ function ThreadListItem({
   thread,
   isActive,
 }: {
-  readonly thread: V11Thread;
+  readonly thread: Thread;
   readonly isActive: boolean;
 }) {
   return (

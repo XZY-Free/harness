@@ -2,6 +2,8 @@ import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { artifact, artifactAttestation } from "@/lib/artifacts/persistence/artifact-record";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import { listEnabledRouteProjections } from "@/lib/routes/application/deployment-route-service";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
@@ -11,8 +13,6 @@ import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { installTrustedHostedControlPlaneEvidenceForTest } from "@/lib/v11/test-support/trusted-hosted-control-plane-evidence";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

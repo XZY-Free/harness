@@ -28,6 +28,10 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { registerDevice } from "@/lib/identity/device-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { invocationAttemptTable, invocationTable } from "@/lib/persistence/schema/runtime";
 import {
   EnvironmentChangeRequestStateError,
   EnvironmentLeaseStateError,
@@ -69,10 +73,6 @@ import {
   releaseEnvironmentLease,
   releaseExecutionOwnership,
 } from "@/lib/v11/environment/environment-queries";
-import { registerDevice } from "@/lib/identity/device-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { v11Invocation, v11InvocationAttempt } from "@/lib/v11/schema/runtime";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -108,7 +108,7 @@ async function seedContext() {
 async function seedInvocation(tenantId: string, threadId: string = randomUUID()) {
   const id = randomUUID();
   const now = new Date();
-  await db.insert(v11Invocation).values({
+  await db.insert(invocationTable).values({
     id,
     tenantId,
     threadId,
@@ -138,7 +138,7 @@ async function seedInvocation(tenantId: string, threadId: string = randomUUID())
 async function seedAttempt(invocationId: string, attemptNo = 1) {
   const id = randomUUID();
   const now = new Date();
-  await db.insert(v11InvocationAttempt).values({
+  await db.insert(invocationAttemptTable).values({
     id,
     invocationId,
     attemptNo,

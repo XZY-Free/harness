@@ -1,11 +1,22 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  getRequestId,
   apiError,
-  resourceNotFound,
   apiSuccess,
+  getRequestId,
+  resourceNotFound,
 } from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
 /**
  * GET / POST /admin/api/v1/capability-reviews/{review_id} — CapabilityReview 单资源（阶段 6 S06-C05）。
  *
@@ -29,7 +40,7 @@ import {
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import {
   CapabilityReviewNotFoundError,
@@ -38,17 +49,6 @@ import {
   getCapabilityReviewById,
   resolveCapabilityReview,
 } from "@/lib/v11/capability/risk-review-queries";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -188,13 +188,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 2. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：缺少 decision（必须为 approved/rejected）或字段类型错误",
     );
@@ -286,7 +286,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       return resourceNotFound(requestId, err.message);
     }
     if (err instanceof CapabilityReviewValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     if (err instanceof CapabilityReviewStateError) {
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });

@@ -1,14 +1,3 @@
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, apiSuccess } from "@/lib/http";
-import { buildCatalogRevisionEtag, parseCatalogRevisionEtag } from "@/lib/v11/admin/route-helpers";
-import {
-  CatalogQueryError,
-  type CatalogSearchItem,
-  type ListCatalogOptionsResult,
-  type SearchCatalogResult,
-  listCatalogOptions,
-  searchCatalog,
-} from "@/lib/v11/catalog/catalog-queries";
-import { getCurrentCatalogRevision } from "@/lib/v11/catalog/projector";
 /**
  * GET /api/v1/catalog/options — Employee Catalog API（阶段 6 S06-C03）。
  *
@@ -32,10 +21,21 @@ import {
   type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
 import { API_ERROR_CODES } from "@/lib/error-codes";
-import type { CatalogResourceType } from "@/lib/v11/schema/catalog";
+import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
+import type { CatalogResourceType } from "@/lib/persistence/schema/catalog";
+import { buildCatalogRevisionEtag, parseCatalogRevisionEtag } from "@/lib/v11/admin/route-helpers";
+import {
+  CatalogQueryError,
+  type CatalogSearchItem,
+  type ListCatalogOptionsResult,
+  type SearchCatalogResult,
+  listCatalogOptions,
+  searchCatalog,
+} from "@/lib/v11/catalog/catalog-queries";
+import { getCurrentCatalogRevision } from "@/lib/v11/catalog/projector";
 
 export const dynamic = "force-dynamic";
 
@@ -123,7 +123,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let resourceTypes: readonly CatalogResourceType[] | undefined;
@@ -133,7 +133,7 @@ export async function GET(request: Request): Promise<Response> {
     lifecycleStates = parseLifecycleStates(lifecycleStateParam);
   } catch (err) {
     if (err instanceof CatalogQueryError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }
@@ -196,7 +196,7 @@ export async function GET(request: Request): Promise<Response> {
     }
   } catch (err) {
     if (err instanceof CatalogQueryError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

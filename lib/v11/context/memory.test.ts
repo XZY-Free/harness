@@ -36,6 +36,13 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { db } from "@/lib/db/client";
 import { buildV11Request, withRollback } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding } from "@/lib/identity/role-action-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
+import { tenant as tenantTable } from "@/lib/persistence/schema/identity";
+import { memoryCandidate, memoryEntry, memorySource } from "@/lib/persistence/schema/memory";
 import {
   MemoryCandidateAlreadyResolvedError,
   archiveMemoryEntry,
@@ -58,13 +65,6 @@ import {
   updateMemoryEntry,
 } from "@/lib/v11/context/memory-queries";
 import { MemoryResolver } from "@/lib/v11/context/source-resolvers";
-import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
-import { tenant as tenantTable } from "@/lib/v11/schema/identity";
-import { memoryCandidate, memoryEntry, memorySource } from "@/lib/v11/schema/memory";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -683,7 +683,7 @@ describe("memory-queries：resolveMemoryCandidate（DB 事务）", () => {
       });
 
       // 直接创建 rejected candidate（跳过 needs_review；rejected 状态满足
-      // V11MemoryCandidate_rejected_entry_ck：resolvedMemoryEntryId 必须为 null）
+      // MemoryCandidate_rejected_entry_ck：resolvedMemoryEntryId 必须为 null）
       const candidate = await insertMemoryCandidate({
         tenantId,
         invocationId: "inv_resolve_dup",

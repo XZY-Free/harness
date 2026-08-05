@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
-import { resolveOutboxAppend, type ControlPlaneOutboxAppendParams } from "@/lib/control-plane/events/outbox-append";
+import {
+  type ControlPlaneOutboxAppendParams,
+  resolveOutboxAppend,
+} from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";

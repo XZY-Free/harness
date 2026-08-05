@@ -27,16 +27,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
   type CandidateState,
+  type MemoryCandidate,
+  type MemoryEntry,
   type MemoryScopeType,
+  type MemorySource,
   type MemorySourceType,
   type SensitivityClass,
-  type V11MemoryCandidate,
-  type V11MemoryEntry,
-  type V11MemorySource,
   memoryCandidate,
   memoryEntry,
   memorySource,
-} from "@/lib/v11/schema/memory";
+} from "@/lib/persistence/schema/memory";
 import { and, eq, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -224,7 +224,7 @@ export function evaluateMemoryPolicy(params: {
 export async function findMemoryCandidateByCandidateKey(
   tenantId: string,
   candidateKey: string,
-): Promise<V11MemoryCandidate | null> {
+): Promise<MemoryCandidate | null> {
   const [row] = await db
     .select()
     .from(memoryCandidate)
@@ -239,7 +239,7 @@ export async function findMemoryCandidateByCandidateKey(
 export async function getMemoryCandidateById(
   tenantId: string,
   candidateId: string,
-): Promise<V11MemoryCandidate | null> {
+): Promise<MemoryCandidate | null> {
   const [row] = await db
     .select()
     .from(memoryCandidate)
@@ -256,7 +256,7 @@ export async function getMemoryCandidateByIdAndInvocation(
   tenantId: string,
   candidateId: string,
   invocationId: string,
-): Promise<V11MemoryCandidate | null> {
+): Promise<MemoryCandidate | null> {
   const [row] = await db
     .select()
     .from(memoryCandidate)
@@ -296,7 +296,7 @@ export async function insertMemoryCandidate(params: {
   /** 提交理由码（USER_EXPLICIT/REPEATED_PREFERENCE/PROJECT_FACT/TASK_DECISION 等）。 */
   rationaleCode: string;
   tx?: DbOrTx;
-}): Promise<V11MemoryCandidate> {
+}): Promise<MemoryCandidate> {
   const id = randomUUID();
   const now = new Date();
   const client = params.tx ?? db;
@@ -381,7 +381,7 @@ export async function createMemoryCandidateWithEntry(params: {
   /** 提交理由码（USER_EXPLICIT/REPEATED_PREFERENCE/PROJECT_FACT/TASK_DECISION 等）。 */
   rationaleCode: string;
   tx?: DbOrTx;
-}): Promise<{ candidate: V11MemoryCandidate; entry: V11MemoryEntry; source: V11MemorySource }> {
+}): Promise<{ candidate: MemoryCandidate; entry: MemoryEntry; source: MemorySource }> {
   const client = params.tx ?? db;
   const now = new Date();
   const { sourceType, sourceId } = deriveSourceFromCandidate({
@@ -481,7 +481,7 @@ export async function createMemoryCandidateWithEntry(params: {
 export async function getMemoryEntryById(
   tenantId: string,
   entryId: string,
-): Promise<V11MemoryEntry | null> {
+): Promise<MemoryEntry | null> {
   const [row] = await db
     .select()
     .from(memoryEntry)
@@ -516,9 +516,9 @@ export async function resolveMemoryCandidate(params: {
   reasonCodes?: string[] | null;
   reviewerNotes?: string | null;
 }): Promise<{
-  candidate: V11MemoryCandidate;
-  entry?: V11MemoryEntry;
-  source?: V11MemorySource;
+  candidate: MemoryCandidate;
+  entry?: MemoryEntry;
+  source?: MemorySource;
 }> {
   return db.transaction(async (tx) => {
     // 1. SELECT FOR UPDATE（锁行）
@@ -732,7 +732,7 @@ export async function listActiveMemoryEntriesByScopes(
     scopeRef?: string | null;
   }>,
   options?: { limit?: number },
-): Promise<V11MemoryEntry[]> {
+): Promise<MemoryEntry[]> {
   if (scopes.length === 0) return [];
 
   const limit = options?.limit ?? 20;
@@ -794,7 +794,7 @@ export async function listMemoryEntriesByScope(
   scopeType: MemoryScopeType,
   scopeRef?: string | null,
   options?: { limit?: number; includeArchived?: boolean },
-): Promise<V11MemoryEntry[]> {
+): Promise<MemoryEntry[]> {
   const limit = options?.limit ?? 50;
   const conditions = [eq(memoryEntry.tenantId, tenantId), eq(memoryEntry.scopeType, scopeType)];
   if (!options?.includeArchived) {
@@ -826,7 +826,7 @@ export async function listMemoryEntriesByScope(
 export async function archiveMemoryEntry(
   tenantId: string,
   entryId: string,
-): Promise<V11MemoryEntry | null> {
+): Promise<MemoryEntry | null> {
   await db
     .update(memoryEntry)
     .set({
@@ -855,12 +855,12 @@ export async function updateMemoryEntry(
     contentRef?: string;
     expiresAt?: Date | null;
   },
-): Promise<V11MemoryEntry | null> {
+): Promise<MemoryEntry | null> {
   // 先查询现有 Entry（contentRedacted 变更时需要 scopeType/scopeRef/memoryType 重算 entryKey）
   const existingEntry = await getMemoryEntryById(tenantId, entryId);
   if (!existingEntry) return null;
 
-  const updates: Partial<V11MemoryEntry> = { updatedAt: new Date() };
+  const updates: Partial<MemoryEntry> = { updatedAt: new Date() };
   if (params.contentRedacted !== undefined) {
     updates.contentRedacted = params.contentRedacted;
     updates.contentHash = computeMemoryContentHash(params.contentRedacted);

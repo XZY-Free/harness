@@ -18,23 +18,23 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
 import {
-  type V11WorkloadTokenRevocation,
-  v11WorkloadTokenRevocation,
-} from "@/lib/v11/schema/workload-token-revocation";
+  type WorkloadTokenRevocation,
+  workloadTokenRevocationTable,
+} from "@/lib/persistence/schema/workload-token-revocation";
 import { and, eq, lt } from "drizzle-orm";
 
 /** 撤销记录不存在时返回 null；存在时返回记录。 */
 export async function getRevocationByJti(
   tenantId: string,
   jti: string,
-): Promise<V11WorkloadTokenRevocation | null> {
+): Promise<WorkloadTokenRevocation | null> {
   const [row] = await db
     .select()
-    .from(v11WorkloadTokenRevocation)
+    .from(workloadTokenRevocationTable)
     .where(
       and(
-        eq(v11WorkloadTokenRevocation.tenantId, tenantId),
-        eq(v11WorkloadTokenRevocation.jti, jti),
+        eq(workloadTokenRevocationTable.tenantId, tenantId),
+        eq(workloadTokenRevocationTable.jti, jti),
       ),
     )
     .limit(1);
@@ -57,7 +57,7 @@ export async function revokeWorkloadToken(params: {
   expiresAt: Date;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11WorkloadTokenRevocation> {
+}): Promise<WorkloadTokenRevocation> {
   // 幂等保护：已撤销返回原记录
   const existing = await getRevocationByJti(params.tenantId, params.jti);
   if (existing) {
@@ -65,7 +65,7 @@ export async function revokeWorkloadToken(params: {
   }
 
   const id = randomUUID();
-  await db.insert(v11WorkloadTokenRevocation).values({
+  await db.insert(workloadTokenRevocationTable).values({
     id,
     tenantId: params.tenantId,
     jti: params.jti,
@@ -77,8 +77,8 @@ export async function revokeWorkloadToken(params: {
 
   const [row] = await db
     .select()
-    .from(v11WorkloadTokenRevocation)
-    .where(eq(v11WorkloadTokenRevocation.id, id))
+    .from(workloadTokenRevocationTable)
+    .where(eq(workloadTokenRevocationTable.id, id))
     .limit(1);
   if (!row) {
     throw new Error(`revokeWorkloadToken: 行未找到（id=${id}）`);
@@ -107,8 +107,8 @@ export async function revokeWorkloadToken(params: {
 /** 清理过期撤销记录（expiresAt < now）。返回删除行数。 */
 export async function deleteExpiredRevocations(now: Date = new Date()): Promise<number> {
   const result = await db
-    .delete(v11WorkloadTokenRevocation)
-    .where(lt(v11WorkloadTokenRevocation.expiresAt, now));
+    .delete(workloadTokenRevocationTable)
+    .where(lt(workloadTokenRevocationTable.expiresAt, now));
   // MySQL 返回 affected rows
   return (result as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 0;
 }

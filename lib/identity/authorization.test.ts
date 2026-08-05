@@ -42,7 +42,7 @@ import {
 } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import type { RoleActionBinding } from "@/lib/v11/schema/authorization";
+import type { RoleActionBinding } from "@/lib/persistence/schema/authorization";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {

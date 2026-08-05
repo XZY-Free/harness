@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { db } from "@/lib/db/client";
+import { runtimeRevisionTable } from "@/lib/persistence/schema/runtime";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import {
@@ -9,12 +10,11 @@ import {
 } from "@/lib/runtimes/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtimes/persistence/mysql-runtime-publication-store";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import {
   getRuntimeRevisionById,
   updateDraftRuntimeRevisionContent,
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { v11RuntimeRevision } from "@/lib/v11/schema/runtime";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { eq } from "drizzle-orm";
 
 /** 真实 MySQL + HMAC 的测试装配：先记录可信 Run，再通过正式发布服务发布。 */
@@ -30,9 +30,9 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
     throw new Error(`测试 RuntimeRevision 缺少权威 Attestation: ${params.revisionId}`);
   }
   await db
-    .update(v11RuntimeRevision)
+    .update(runtimeRevisionTable)
     .set({ artifactId: attestation.artifactId, artifactDigest: attestation.artifactDigest })
-    .where(eq(v11RuntimeRevision.id, params.revisionId));
+    .where(eq(runtimeRevisionTable.id, params.revisionId));
   revision = await getRuntimeRevisionById(params.revisionId);
   if (revision && !/^sha256:[0-9a-f]{64}$/.test(revision.configHash)) {
     revision = await updateDraftRuntimeRevisionContent(revision.id, {

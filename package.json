@@ -115,9 +115,6 @@
   },
   "packageManager": "pnpm@10.32.1",
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
-    ]
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
   }
 }

@@ -15,7 +15,7 @@
  * - Agent 只能收紧不能放宽平台策略（应用层校验，本仓储不强制）。
  * - Grant.scope 必须覆盖 ToolCall 所需 scope（应用层校验）。
  * - Grant 撤销后不可注入；过期后不可注入。
- * - credentialRefId 外键 → V11CredentialRef(id) ON DELETE RESTRICT。
+ * - credentialRefId 外键 → CredentialRef(id) ON DELETE RESTRICT。
  * - 终态 Grant 不可恢复。
  * - MySQL 不支持 .returning()：update + select 两步。
  */
@@ -25,17 +25,17 @@ import {
   GRANT_STATES,
   GRANT_TERMINAL_STATES,
   GRANT_TYPES,
+  type Grant,
   type GrantState,
   type GrantType,
-  type NewV11Grant,
-  type NewV11PermissionDecision,
-  type V11Grant,
-  type V11PermissionDecision,
-  type V11PermissionDecisionValue,
-  V11_PERMISSION_DECISIONS,
-  v11Grant,
-  v11PermissionDecision,
-} from "@/lib/v11/schema/permission";
+  type NewGrant,
+  type NewPermissionDecision,
+  PERMISSION_DECISION_VALUES,
+  type PermissionDecision,
+  type PermissionDecisionValue,
+  grantTable,
+  permissionDecisionTable,
+} from "@/lib/persistence/schema/permission";
 import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -121,11 +121,11 @@ export class ToolCallPausedError extends Error {
 
 // ─── 校验辅助 ──────────────────────────────────────────────
 
-const VALID_PERMISSION_DECISIONS = new Set<string>(V11_PERMISSION_DECISIONS);
+const VALID_PERMISSION_DECISIONS = new Set<string>(PERMISSION_DECISION_VALUES);
 const VALID_GRANT_TYPES = new Set<string>(GRANT_TYPES);
 const VALID_GRANT_STATES = new Set<string>(GRANT_STATES);
 
-export function isPermissionDecision(value: string): value is V11PermissionDecisionValue {
+export function isPermissionDecision(value: string): value is PermissionDecisionValue {
   return VALID_PERMISSION_DECISIONS.has(value);
 }
 
@@ -185,7 +185,7 @@ export function isScopeCoveredBy(
 export interface RecordPermissionDecisionInput {
   tenantId: string;
   toolCallId: string;
-  decision: V11PermissionDecisionValue;
+  decision: PermissionDecisionValue;
   policyRevisionId?: string | null;
   reasonCodes: string[];
   riskSummary?: Record<string, unknown> | null;
@@ -203,7 +203,7 @@ export interface RecordPermissionDecisionInput {
  */
 export async function recordPermissionDecision(
   input: RecordPermissionDecisionInput,
-): Promise<V11PermissionDecision> {
+): Promise<PermissionDecision> {
   if (!input.tenantId) throw new PermissionValidationError("tenantId 不能为空");
   if (!input.toolCallId) throw new PermissionValidationError("toolCallId 不能为空");
   if (!isPermissionDecision(input.decision)) {
@@ -220,12 +220,14 @@ export async function recordPermissionDecision(
 
   return db.transaction(async (tx) => {
     const [maxRow] = await tx
-      .select({ maxSeq: sql<number>`COALESCE(MAX(${v11PermissionDecision.decisionSequence}), 0)` })
-      .from(v11PermissionDecision)
-      .where(eq(v11PermissionDecision.toolCallId, input.toolCallId));
+      .select({
+        maxSeq: sql<number>`COALESCE(MAX(${permissionDecisionTable.decisionSequence}), 0)`,
+      })
+      .from(permissionDecisionTable)
+      .where(eq(permissionDecisionTable.toolCallId, input.toolCallId));
     const decisionSequence = (maxRow?.maxSeq ?? 0) + 1;
 
-    const insert: NewV11PermissionDecision = {
+    const insert: NewPermissionDecision = {
       id,
       tenantId: input.tenantId,
       toolCallId: input.toolCallId,
@@ -239,12 +241,12 @@ export async function recordPermissionDecision(
       decidedAt: now,
       createdAt: now,
     };
-    await tx.insert(v11PermissionDecision).values(insert);
+    await tx.insert(permissionDecisionTable).values(insert);
 
     const [row] = await tx
       .select()
-      .from(v11PermissionDecision)
-      .where(eq(v11PermissionDecision.id, id))
+      .from(permissionDecisionTable)
+      .where(eq(permissionDecisionTable.id, id))
       .limit(1);
     if (!row) {
       throw new PermissionNotFoundError(
@@ -258,11 +260,11 @@ export async function recordPermissionDecision(
 export async function getPermissionDecisionById(
   tenantId: string,
   id: string,
-): Promise<V11PermissionDecision | null> {
+): Promise<PermissionDecision | null> {
   const [row] = await db
     .select()
-    .from(v11PermissionDecision)
-    .where(and(eq(v11PermissionDecision.tenantId, tenantId), eq(v11PermissionDecision.id, id)))
+    .from(permissionDecisionTable)
+    .where(and(eq(permissionDecisionTable.tenantId, tenantId), eq(permissionDecisionTable.id, id)))
     .limit(1);
   return row ?? null;
 }
@@ -270,17 +272,17 @@ export async function getPermissionDecisionById(
 export async function getPermissionDecisionsByToolCall(
   tenantId: string,
   toolCallId: string,
-): Promise<V11PermissionDecision[]> {
+): Promise<PermissionDecision[]> {
   return db
     .select()
-    .from(v11PermissionDecision)
+    .from(permissionDecisionTable)
     .where(
       and(
-        eq(v11PermissionDecision.tenantId, tenantId),
-        eq(v11PermissionDecision.toolCallId, toolCallId),
+        eq(permissionDecisionTable.tenantId, tenantId),
+        eq(permissionDecisionTable.toolCallId, toolCallId),
       ),
     )
-    .orderBy(asc(v11PermissionDecision.decisionSequence));
+    .orderBy(asc(permissionDecisionTable.decisionSequence));
 }
 
 /**
@@ -290,17 +292,17 @@ export async function getPermissionDecisionsByToolCall(
 export async function getLatestPermissionDecision(
   tenantId: string,
   toolCallId: string,
-): Promise<V11PermissionDecision | null> {
+): Promise<PermissionDecision | null> {
   const [row] = await db
     .select()
-    .from(v11PermissionDecision)
+    .from(permissionDecisionTable)
     .where(
       and(
-        eq(v11PermissionDecision.tenantId, tenantId),
-        eq(v11PermissionDecision.toolCallId, toolCallId),
+        eq(permissionDecisionTable.tenantId, tenantId),
+        eq(permissionDecisionTable.toolCallId, toolCallId),
       ),
     )
-    .orderBy(desc(v11PermissionDecision.decisionSequence))
+    .orderBy(desc(permissionDecisionTable.decisionSequence))
     .limit(1);
   return row ?? null;
 }
@@ -317,7 +319,7 @@ export async function getLatestPermissionDecision(
 export async function assertToolCallAllowed(
   tenantId: string,
   toolCallId: string,
-): Promise<V11PermissionDecision> {
+): Promise<PermissionDecision> {
   const latest = await getLatestPermissionDecision(tenantId, toolCallId);
   if (!latest) {
     throw new PermissionNotFoundError(`ToolCall ${toolCallId} 尚未评估 PermissionDecision`);
@@ -354,11 +356,11 @@ export interface IssueGrantInput {
  *
  * 关键约束：
  * - scope 必须非空（至少包含一个权限声明）。
- * - credentialRefId 必须指向同一租户内的 V11CredentialRef（DB FK 保证）。
+ * - credentialRefId 必须指向同一租户内的 CredentialRef（DB FK 保证）。
  * - admin_override 类型必须由管理员发起（应用层校验，本仓储不强制）。
  * - 创建时 grantState=active；revokedAt=null。
  */
-export async function issueGrant(input: IssueGrantInput): Promise<V11Grant> {
+export async function issueGrant(input: IssueGrantInput): Promise<Grant> {
   if (!input.tenantId) throw new GrantValidationError("tenantId 不能为空");
   if (!input.userId) throw new GrantValidationError("userId 不能为空");
   if (!isGrantType(input.grantType)) {
@@ -375,7 +377,7 @@ export async function issueGrant(input: IssueGrantInput): Promise<V11Grant> {
 
   const id = randomUUID();
   const now = new Date();
-  const insert: NewV11Grant = {
+  const insert: NewGrant = {
     id,
     tenantId: input.tenantId,
     userId: input.userId,
@@ -392,20 +394,20 @@ export async function issueGrant(input: IssueGrantInput): Promise<V11Grant> {
     createdAt: now,
     updatedAt: now,
   };
-  await db.insert(v11Grant).values(insert);
+  await db.insert(grantTable).values(insert);
 
-  const [row] = await db.select().from(v11Grant).where(eq(v11Grant.id, id)).limit(1);
+  const [row] = await db.select().from(grantTable).where(eq(grantTable.id, id)).limit(1);
   if (!row) {
     throw new GrantNotFoundError(`Grant 创建后回查失败（tenantId=${input.tenantId}）`);
   }
   return row;
 }
 
-export async function getGrantById(tenantId: string, id: string): Promise<V11Grant | null> {
+export async function getGrantById(tenantId: string, id: string): Promise<Grant | null> {
   const [row] = await db
     .select()
-    .from(v11Grant)
-    .where(and(eq(v11Grant.tenantId, tenantId), eq(v11Grant.id, id)))
+    .from(grantTable)
+    .where(and(eq(grantTable.tenantId, tenantId), eq(grantTable.id, id)))
     .limit(1);
   return row ?? null;
 }
@@ -418,14 +420,14 @@ export async function listGrantsByUser(
   tenantId: string,
   userId: string,
   state?: GrantState,
-): Promise<V11Grant[]> {
-  const conditions = [eq(v11Grant.tenantId, tenantId), eq(v11Grant.userId, userId)];
-  if (state) conditions.push(eq(v11Grant.grantState, state));
+): Promise<Grant[]> {
+  const conditions = [eq(grantTable.tenantId, tenantId), eq(grantTable.userId, userId)];
+  if (state) conditions.push(eq(grantTable.grantState, state));
   return db
     .select()
-    .from(v11Grant)
+    .from(grantTable)
     .where(and(...conditions))
-    .orderBy(desc(v11Grant.issuedAt));
+    .orderBy(desc(grantTable.issuedAt));
 }
 
 /**
@@ -435,18 +437,18 @@ export async function listGrantsByUser(
 export async function listActiveGrantsForCredential(
   tenantId: string,
   credentialRefId: string,
-): Promise<V11Grant[]> {
+): Promise<Grant[]> {
   return db
     .select()
-    .from(v11Grant)
+    .from(grantTable)
     .where(
       and(
-        eq(v11Grant.tenantId, tenantId),
-        eq(v11Grant.credentialRefId, credentialRefId),
-        eq(v11Grant.grantState, "active"),
+        eq(grantTable.tenantId, tenantId),
+        eq(grantTable.credentialRefId, credentialRefId),
+        eq(grantTable.grantState, "active"),
       ),
     )
-    .orderBy(desc(v11Grant.issuedAt));
+    .orderBy(desc(grantTable.issuedAt));
 }
 
 /**
@@ -462,11 +464,11 @@ export async function revokeGrant(
   id: string,
   expectedVersionNo: number,
   revokeReasonCode?: string | null,
-): Promise<V11Grant> {
+): Promise<Grant> {
   const [current] = await db
     .select()
-    .from(v11Grant)
-    .where(and(eq(v11Grant.tenantId, tenantId), eq(v11Grant.id, id)))
+    .from(grantTable)
+    .where(and(eq(grantTable.tenantId, tenantId), eq(grantTable.id, id)))
     .limit(1);
   if (!current) {
     throw new GrantNotFoundError(`Grant 不存在或跨租户不可见: ${id}`);
@@ -484,7 +486,7 @@ export async function revokeGrant(
 
   const now = new Date();
   await db
-    .update(v11Grant)
+    .update(grantTable)
     .set({
       grantState: "revoked",
       revokedAt: now,
@@ -492,9 +494,9 @@ export async function revokeGrant(
       versionNo: current.versionNo + 1,
       updatedAt: now,
     })
-    .where(eq(v11Grant.id, id));
+    .where(eq(grantTable.id, id));
 
-  const [updated] = await db.select().from(v11Grant).where(eq(v11Grant.id, id)).limit(1);
+  const [updated] = await db.select().from(grantTable).where(eq(grantTable.id, id)).limit(1);
   if (!updated) {
     throw new GrantNotFoundError(`Grant 撤销后回查失败: ${id}`);
   }
@@ -510,17 +512,17 @@ export async function revokeGrant(
  */
 export async function markExpiredGrants(now: Date = new Date()): Promise<number> {
   const result = await db
-    .update(v11Grant)
+    .update(grantTable)
     .set({
       grantState: "expired",
-      versionNo: sql`${v11Grant.versionNo} + 1`,
+      versionNo: sql`${grantTable.versionNo} + 1`,
       updatedAt: now,
     })
     .where(
       and(
-        eq(v11Grant.grantState, "active"),
-        lt(v11Grant.expiresAt, now),
-        isNull(v11Grant.revokedAt),
+        eq(grantTable.grantState, "active"),
+        lt(grantTable.expiresAt, now),
+        isNull(grantTable.revokedAt),
       ),
     );
   return result[0]?.affectedRows ?? 0;
@@ -545,19 +547,19 @@ export async function getEffectiveGrantForToolCall(
   userId: string,
   requiredScopes: readonly string[],
   now: Date = new Date(),
-): Promise<V11Grant | null> {
+): Promise<Grant | null> {
   const grants = await db
     .select()
-    .from(v11Grant)
+    .from(grantTable)
     .where(
       and(
-        eq(v11Grant.tenantId, tenantId),
-        eq(v11Grant.userId, userId),
-        eq(v11Grant.grantState, "active"),
-        isNull(v11Grant.revokedAt),
+        eq(grantTable.tenantId, tenantId),
+        eq(grantTable.userId, userId),
+        eq(grantTable.grantState, "active"),
+        isNull(grantTable.revokedAt),
       ),
     )
-    .orderBy(desc(v11Grant.issuedAt));
+    .orderBy(desc(grantTable.issuedAt));
 
   for (const grant of grants) {
     // 过期检查（expiresAt=null 表示永不过期）
@@ -579,19 +581,19 @@ export async function getEffectiveGrantForToolCall(
 export async function listStaleExpiredGrants(
   tenantId: string,
   now: Date = new Date(),
-): Promise<V11Grant[]> {
+): Promise<Grant[]> {
   return db
     .select()
-    .from(v11Grant)
+    .from(grantTable)
     .where(
       and(
-        eq(v11Grant.tenantId, tenantId),
-        eq(v11Grant.grantState, "active"),
-        lt(v11Grant.expiresAt, now),
-        isNull(v11Grant.revokedAt),
+        eq(grantTable.tenantId, tenantId),
+        eq(grantTable.grantState, "active"),
+        lt(grantTable.expiresAt, now),
+        isNull(grantTable.revokedAt),
       ),
     )
-    .orderBy(asc(v11Grant.expiresAt));
+    .orderBy(asc(grantTable.expiresAt));
 }
 
 /**
@@ -600,11 +602,11 @@ export async function listStaleExpiredGrants(
  */
 export async function purgeTerminalGrants(tenantId: string): Promise<number> {
   const result = await db
-    .delete(v11Grant)
+    .delete(grantTable)
     .where(
       and(
-        eq(v11Grant.tenantId, tenantId),
-        inArray(v11Grant.grantState, [...GRANT_TERMINAL_STATES]),
+        eq(grantTable.tenantId, tenantId),
+        inArray(grantTable.grantState, [...GRANT_TERMINAL_STATES]),
       ),
     );
   return result[0]?.affectedRows ?? 0;

@@ -1,12 +1,12 @@
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import { CAPACITY_SCOPE_TYPES, type CapacityScopeType } from "@/lib/persistence/schema/usage";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import { listCapacitySnapshotsByTenant } from "@/lib/v11/operations/usage-queries";
-import { CAPACITY_SCOPE_TYPES, type CapacityScopeType } from "@/lib/v11/schema/usage";
 /**
  * GET /admin/api/v1/capacity-snapshots — 列出租户内所有 CapacitySnapshot（S11-W07）。
  *
@@ -47,13 +47,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let scopeType: CapacityScopeType | undefined;
   if (scopeTypeParam) {
     if (!VALID_SCOPE_TYPES.has(scopeTypeParam)) {
-      return v11SchemaInvalid(requestId, `scope_type 非法: ${scopeTypeParam}`);
+      return schemaInvalidTable(requestId, `scope_type 非法: ${scopeTypeParam}`);
     }
     scopeType = scopeTypeParam as CapacityScopeType;
   }

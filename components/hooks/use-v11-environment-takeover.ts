@@ -11,7 +11,7 @@
  * - 调用 POST /api/v1/threads/{thread_id}/environment:takeover 请求接管。
  * - 必填 Idempotency-Key（Hook 内部生成 crypto.randomUUID()）。
  * - busyRef 同步拦截防竞态：busy 期间拒绝重复触发。
- * - 错误转化为 V11ClientVisibleError，含 blocking_reasons 详情（422 时）。
+ * - 错误转化为 ClientVisibleError，含 blocking_reasons 详情（422 时）。
  * - 成功后返回 lastTakeover 供调用方触发环境状态刷新。
  *
  * 使用：
@@ -41,9 +41,9 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
 import type {
-  V11ClientErrorBody,
-  V11ClientTakeoverResponse,
-  V11ClientVisibleError,
+  ClientErrorBody,
+  ClientTakeoverResponse,
+  ClientVisibleError,
 } from "@/lib/v11/client/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -51,17 +51,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface UseV11EnvironmentTakeoverResult {
   /** 是否正在请求接管。 */
   readonly busy: boolean;
-  /** 错误（V11ClientVisibleError + 可选 blocking_reasons）。 */
-  readonly error:
-    | (V11ClientVisibleError & { readonly blocking_reasons?: readonly string[] })
-    | null;
+  /** 错误（ClientVisibleError + 可选 blocking_reasons）。 */
+  readonly error: (ClientVisibleError & { readonly blocking_reasons?: readonly string[] }) | null;
   /** 最近一次接管成功结果；null 表示尚未接管或上次失败。 */
-  readonly lastTakeover: V11ClientTakeoverResponse | null;
+  readonly lastTakeover: ClientTakeoverResponse | null;
   /** 请求接管。返回结果；失败返回 null 并设置 error。 */
   readonly requestTakeover: (
     threadId: string,
     reasonCode?: string,
-  ) => Promise<V11ClientTakeoverResponse | null>;
+  ) => Promise<ClientTakeoverResponse | null>;
   /** 清除错误。 */
   readonly clearError: () => void;
 }
@@ -70,9 +68,9 @@ export interface UseV11EnvironmentTakeoverResult {
 export function useV11EnvironmentTakeover(): UseV11EnvironmentTakeoverResult {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<
-    (V11ClientVisibleError & { readonly blocking_reasons?: readonly string[] }) | null
+    (ClientVisibleError & { readonly blocking_reasons?: readonly string[] }) | null
   >(null);
-  const [lastTakeover, setLastTakeover] = useState<V11ClientTakeoverResponse | null>(null);
+  const [lastTakeover, setLastTakeover] = useState<ClientTakeoverResponse | null>(null);
   const busyRef = useRef(false);
   const unmountedRef = useRef(false);
 
@@ -84,7 +82,7 @@ export function useV11EnvironmentTakeover(): UseV11EnvironmentTakeoverResult {
   }, []);
 
   const requestTakeover = useCallback(
-    async (threadId: string, reasonCode?: string): Promise<V11ClientTakeoverResponse | null> => {
+    async (threadId: string, reasonCode?: string): Promise<ClientTakeoverResponse | null> => {
       // 同步防竞态：busyRef 同步检查，避免 setState 异步延迟期间重复触发
       if (busyRef.current) return null;
       busyRef.current = true;
@@ -112,9 +110,9 @@ export function useV11EnvironmentTakeover(): UseV11EnvironmentTakeoverResult {
 
         if (!resp.ok) {
           const bodyText = await resp.text().catch(() => "");
-          let errorBody: V11ClientErrorBody | null = null;
+          let errorBody: ClientErrorBody | null = null;
           try {
-            errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+            errorBody = JSON.parse(bodyText) as ClientErrorBody;
           } catch {
             // ignore
           }
@@ -143,7 +141,7 @@ export function useV11EnvironmentTakeover(): UseV11EnvironmentTakeoverResult {
           return null;
         }
 
-        const data = (await resp.json()) as V11ClientTakeoverResponse;
+        const data = (await resp.json()) as ClientTakeoverResponse;
         if (!unmountedRef.current) {
           setLastTakeover(data);
           setBusy(false);

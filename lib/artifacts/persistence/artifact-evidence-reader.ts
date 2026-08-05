@@ -7,17 +7,17 @@
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §1.1
  */
 
-import { db } from "@/lib/db/client";
+import type {
+  ArtifactEvidenceSnapshot,
+  ArtifactType,
+} from "@/lib/artifacts/domain/artifact-evidence";
 import {
   artifact,
   artifactAttestation,
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
-import type {
-  ArtifactEvidenceSnapshot,
-  ArtifactType,
-} from "@/lib/artifacts/domain/artifact-evidence";
-import { and, desc, eq, isNull, isNotNull } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 
 /**
  * 读取指定 Revision 的最新有效 Attestation 证据快照。

@@ -18,7 +18,10 @@
  * - 共享 Knowledge、跨 Thread Memory、用户原始本地文件由 Adapter 返回 retained=true，不删除。
  */
 import { createHash } from "node:crypto";
-import type { DeletionStoreType, DeletionSubjectType } from "@/lib/v11/schema/deletion-request";
+import type {
+  DeletionStoreType,
+  DeletionSubjectType,
+} from "@/lib/persistence/schema/deletion-request";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 

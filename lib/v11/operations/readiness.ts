@@ -1,5 +1,5 @@
+import { listQuarantinedFailures } from "@/lib/conversations/projection-operations";
 import { db } from "@/lib/db/client";
-import { listQuarantinedFailures } from "@/lib/v11/conversation/projection-operations";
 import { getOverloadProtector } from "@/lib/v11/gateway/overload-protection";
 import { getSSEConnectionQuota } from "@/lib/v11/gateway/sse-connection-quota";
 /**

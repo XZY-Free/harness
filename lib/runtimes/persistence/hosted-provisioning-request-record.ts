@@ -33,7 +33,9 @@ export const hostedProvisioningRequestTable = mysqlTable(
     agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
     routeScopeKey: varchar("routeScopeKey", { length: 64 }).notNull(),
     desiredRuntimeKey: varchar("desiredRuntimeKey", { length: 64 }).notNull(),
-    state: mysqlEnum("state", [...PROVISIONING_STATES]).notNull().default("pending"),
+    state: mysqlEnum("state", [...PROVISIONING_STATES])
+      .notNull()
+      .default("pending"),
     currentStep: varchar("currentStep", { length: 64 }),
     attemptCount: int("attemptCount").notNull().default(0),
     nextAttemptAt: datetime("nextAttemptAt", { mode: "date", fsp: 3 }),
@@ -82,4 +84,6 @@ export const hostedProvisioningRequestTable = mysqlTable(
 );
 
 export type HostedProvisioningRequestRow = InferSelectModel<typeof hostedProvisioningRequestTable>;
-export type NewHostedProvisioningRequestRow = InferInsertModel<typeof hostedProvisioningRequestTable>;
+export type NewHostedProvisioningRequestRow = InferInsertModel<
+  typeof hostedProvisioningRequestTable
+>;

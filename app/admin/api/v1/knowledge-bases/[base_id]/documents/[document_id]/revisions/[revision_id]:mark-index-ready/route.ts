@@ -25,24 +25,10 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiSuccess,
   getRequestId,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import {
-  KnowledgeValidationError,
-  getKnowledgeBaseById,
-  getKnowledgeDocumentById,
-  getKnowledgeDocumentRevisionById,
-  markKnowledgeRevisionIndexState,
-} from "@/lib/v11/context/knowledge-queries";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -54,6 +40,20 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
+import {
+  KnowledgeValidationError,
+  getKnowledgeBaseById,
+  getKnowledgeDocumentById,
+  getKnowledgeDocumentRevisionById,
+  markKnowledgeRevisionIndexState,
+} from "@/lib/v11/context/knowledge-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -104,13 +104,13 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
   // 2. 解析路径
   const { baseId, documentId, revisionId } = extractPathIds(request.url);
   if (!baseId || !documentId || !revisionId) {
-    return v11SchemaInvalid(requestId, "路径缺少 base_id/document_id/revision_id");
+    return schemaInvalidTable(requestId, "路径缺少 base_id/document_id/revision_id");
   }
 
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 校验 Revision / Document / Base 存在 + 跨租户
@@ -191,7 +191,10 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
 
     if (!updated) {
       await failRecord(recordId);
-      return resourceNotFound(requestId, `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`);
+      return resourceNotFound(
+        requestId,
+        `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`,
+      );
     }
 
     const responseBody = {
@@ -216,7 +219,7 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
   } catch (err) {
     await failRecord(recordId);
     if (err instanceof KnowledgeValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

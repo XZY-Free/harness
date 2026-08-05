@@ -21,17 +21,17 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { decodeCursor, encodeCursor } from "@/lib/http";
 import {
+  type EvaluationCase,
   type EvaluationCaseState,
   type EvaluationComparator,
+  type EvaluationResult,
+  type EvaluationRun,
   type EvaluationRunState,
   type EvaluationStrategyKey,
-  type V11EvaluationCase,
-  type V11EvaluationResult,
-  type V11EvaluationRun,
-  v11EvaluationCase,
-  v11EvaluationResult,
-  v11EvaluationRun,
-} from "@/lib/v11/schema/evaluation";
+  evaluationCaseTable,
+  evaluationResultTable,
+  evaluationRunTable,
+} from "@/lib/persistence/schema/evaluation";
 import { and, asc, desc, eq, lt, or } from "drizzle-orm";
 
 // ─── EvaluationRun ────────────────────────────────────────
@@ -54,9 +54,9 @@ export interface CreateEvaluationRunParams {
 /** 创建 EvaluationRun。 */
 export async function createEvaluationRun(
   params: CreateEvaluationRunParams,
-): Promise<V11EvaluationRun> {
+): Promise<EvaluationRun> {
   const id = randomUUID();
-  await db.insert(v11EvaluationRun).values({
+  await db.insert(evaluationRunTable).values({
     id,
     tenantId: params.tenantId,
     jobId: params.jobId ?? null,
@@ -77,8 +77,8 @@ export async function createEvaluationRun(
 
   const [row] = await db
     .select()
-    .from(v11EvaluationRun)
-    .where(and(eq(v11EvaluationRun.tenantId, params.tenantId), eq(v11EvaluationRun.id, id)))
+    .from(evaluationRunTable)
+    .where(and(eq(evaluationRunTable.tenantId, params.tenantId), eq(evaluationRunTable.id, id)))
     .limit(1);
   if (!row) {
     throw new Error(`createEvaluationRun: 行未找到（id=${id}）`);
@@ -90,11 +90,11 @@ export async function createEvaluationRun(
 export async function getEvaluationRunById(
   tenantId: string,
   runId: string,
-): Promise<V11EvaluationRun | null> {
+): Promise<EvaluationRun | null> {
   const [row] = await db
     .select()
-    .from(v11EvaluationRun)
-    .where(and(eq(v11EvaluationRun.tenantId, tenantId), eq(v11EvaluationRun.id, runId)))
+    .from(evaluationRunTable)
+    .where(and(eq(evaluationRunTable.tenantId, tenantId), eq(evaluationRunTable.id, runId)))
     .limit(1);
   return row ?? null;
 }
@@ -111,14 +111,14 @@ export interface ListEvaluationRunsByTenantOptions {
 export async function listEvaluationRunsByTenant(
   tenantId: string,
   options?: ListEvaluationRunsByTenantOptions,
-): Promise<{ items: V11EvaluationRun[]; nextCursor: string | null }> {
+): Promise<{ items: EvaluationRun[]; nextCursor: string | null }> {
   const limit = Math.min(options?.limit ?? 50, 200);
-  const conditions = [eq(v11EvaluationRun.tenantId, tenantId)];
+  const conditions = [eq(evaluationRunTable.tenantId, tenantId)];
   if (options?.runState) {
-    conditions.push(eq(v11EvaluationRun.runState, options.runState));
+    conditions.push(eq(evaluationRunTable.runState, options.runState));
   }
   if (options?.agentRevisionId) {
-    conditions.push(eq(v11EvaluationRun.agentRevisionId, options.agentRevisionId));
+    conditions.push(eq(evaluationRunTable.agentRevisionId, options.agentRevisionId));
   }
 
   // cursor 解码：{ created_at, id }
@@ -143,8 +143,8 @@ export async function listEvaluationRunsByTenant(
     // (created_at, id) < (afterCreatedAt, afterId) in DESC order：
     // 使用 Drizzle 原生操作符确保 Date 参数绑定与列类型一致
     const cursorCond = or(
-      lt(v11EvaluationRun.createdAt, afterCreatedAt),
-      and(eq(v11EvaluationRun.createdAt, afterCreatedAt), lt(v11EvaluationRun.id, afterId)),
+      lt(evaluationRunTable.createdAt, afterCreatedAt),
+      and(eq(evaluationRunTable.createdAt, afterCreatedAt), lt(evaluationRunTable.id, afterId)),
     );
     if (cursorCond) conditions.push(cursorCond);
   }
@@ -152,9 +152,9 @@ export async function listEvaluationRunsByTenant(
   // 取 limit+1 行：第 limit+1 行存在说明有下一页
   const rows = await db
     .select()
-    .from(v11EvaluationRun)
+    .from(evaluationRunTable)
     .where(and(...conditions))
-    .orderBy(desc(v11EvaluationRun.createdAt), desc(v11EvaluationRun.id))
+    .orderBy(desc(evaluationRunTable.createdAt), desc(evaluationRunTable.id))
     .limit(limit + 1);
 
   let nextCursor: string | null = null;
@@ -185,21 +185,21 @@ export async function updateEvaluationRunState(
   tenantId: string,
   runId: string,
   updates: UpdateEvaluationRunStateParams,
-): Promise<V11EvaluationRun> {
-  const setClause: Partial<V11EvaluationRun> = { updatedAt: new Date() };
+): Promise<EvaluationRun> {
+  const setClause: Partial<EvaluationRun> = { updatedAt: new Date() };
   if (updates.runState) setClause.runState = updates.runState;
   if (updates.startedAt !== undefined) setClause.startedAt = updates.startedAt ?? null;
   if (updates.finishedAt !== undefined) setClause.finishedAt = updates.finishedAt ?? null;
 
   await db
-    .update(v11EvaluationRun)
+    .update(evaluationRunTable)
     .set(setClause)
-    .where(and(eq(v11EvaluationRun.tenantId, tenantId), eq(v11EvaluationRun.id, runId)));
+    .where(and(eq(evaluationRunTable.tenantId, tenantId), eq(evaluationRunTable.id, runId)));
 
   const [row] = await db
     .select()
-    .from(v11EvaluationRun)
-    .where(and(eq(v11EvaluationRun.tenantId, tenantId), eq(v11EvaluationRun.id, runId)))
+    .from(evaluationRunTable)
+    .where(and(eq(evaluationRunTable.tenantId, tenantId), eq(evaluationRunTable.id, runId)))
     .limit(1);
   if (!row) {
     throw new Error(`updateEvaluationRunState: EvaluationRun 行未找到（id=${runId}）`);
@@ -212,16 +212,16 @@ export async function updateEvaluationRunSummary(
   tenantId: string,
   runId: string,
   summaryJson: Record<string, unknown> | null,
-): Promise<V11EvaluationRun> {
+): Promise<EvaluationRun> {
   await db
-    .update(v11EvaluationRun)
+    .update(evaluationRunTable)
     .set({ summaryJson, updatedAt: new Date() })
-    .where(and(eq(v11EvaluationRun.tenantId, tenantId), eq(v11EvaluationRun.id, runId)));
+    .where(and(eq(evaluationRunTable.tenantId, tenantId), eq(evaluationRunTable.id, runId)));
 
   const [row] = await db
     .select()
-    .from(v11EvaluationRun)
-    .where(and(eq(v11EvaluationRun.tenantId, tenantId), eq(v11EvaluationRun.id, runId)))
+    .from(evaluationRunTable)
+    .where(and(eq(evaluationRunTable.tenantId, tenantId), eq(evaluationRunTable.id, runId)))
     .limit(1);
   if (!row) {
     throw new Error(`updateEvaluationRunSummary: EvaluationRun 行未找到（id=${runId}）`);
@@ -248,9 +248,9 @@ export interface CreateEvaluationCaseParams {
 /** 创建 EvaluationCase。 */
 export async function createEvaluationCase(
   params: CreateEvaluationCaseParams,
-): Promise<V11EvaluationCase> {
+): Promise<EvaluationCase> {
   const id = randomUUID();
-  await db.insert(v11EvaluationCase).values({
+  await db.insert(evaluationCaseTable).values({
     id,
     tenantId: params.tenantId,
     runId: params.runId,
@@ -266,8 +266,8 @@ export async function createEvaluationCase(
 
   const [row] = await db
     .select()
-    .from(v11EvaluationCase)
-    .where(and(eq(v11EvaluationCase.tenantId, params.tenantId), eq(v11EvaluationCase.id, id)))
+    .from(evaluationCaseTable)
+    .where(and(eq(evaluationCaseTable.tenantId, params.tenantId), eq(evaluationCaseTable.id, id)))
     .limit(1);
   if (!row) {
     throw new Error(`createEvaluationCase: 行未找到（id=${id}）`);
@@ -279,11 +279,11 @@ export async function createEvaluationCase(
 export async function getEvaluationCaseById(
   tenantId: string,
   caseId: string,
-): Promise<V11EvaluationCase | null> {
+): Promise<EvaluationCase | null> {
   const [row] = await db
     .select()
-    .from(v11EvaluationCase)
-    .where(and(eq(v11EvaluationCase.tenantId, tenantId), eq(v11EvaluationCase.id, caseId)))
+    .from(evaluationCaseTable)
+    .where(and(eq(evaluationCaseTable.tenantId, tenantId), eq(evaluationCaseTable.id, caseId)))
     .limit(1);
   return row ?? null;
 }
@@ -299,17 +299,20 @@ export async function listEvaluationCasesByRun(
   tenantId: string,
   runId: string,
   options?: ListEvaluationCasesByRunOptions,
-): Promise<V11EvaluationCase[]> {
+): Promise<EvaluationCase[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
-  const conditions = [eq(v11EvaluationCase.tenantId, tenantId), eq(v11EvaluationCase.runId, runId)];
+  const conditions = [
+    eq(evaluationCaseTable.tenantId, tenantId),
+    eq(evaluationCaseTable.runId, runId),
+  ];
   if (options?.caseState) {
-    conditions.push(eq(v11EvaluationCase.caseState, options.caseState));
+    conditions.push(eq(evaluationCaseTable.caseState, options.caseState));
   }
   return db
     .select()
-    .from(v11EvaluationCase)
+    .from(evaluationCaseTable)
     .where(and(...conditions))
-    .orderBy(asc(v11EvaluationCase.createdAt), asc(v11EvaluationCase.id))
+    .orderBy(asc(evaluationCaseTable.createdAt), asc(evaluationCaseTable.id))
     .limit(limit);
 }
 
@@ -330,9 +333,9 @@ export interface CreateEvaluationResultParams {
 /** 创建 EvaluationResult。 */
 export async function createEvaluationResult(
   params: CreateEvaluationResultParams,
-): Promise<V11EvaluationResult> {
+): Promise<EvaluationResult> {
   const id = randomUUID();
-  await db.insert(v11EvaluationResult).values({
+  await db.insert(evaluationResultTable).values({
     id,
     tenantId: params.tenantId,
     runId: params.runId,
@@ -346,8 +349,10 @@ export async function createEvaluationResult(
 
   const [row] = await db
     .select()
-    .from(v11EvaluationResult)
-    .where(and(eq(v11EvaluationResult.tenantId, params.tenantId), eq(v11EvaluationResult.id, id)))
+    .from(evaluationResultTable)
+    .where(
+      and(eq(evaluationResultTable.tenantId, params.tenantId), eq(evaluationResultTable.id, id)),
+    )
     .limit(1);
   if (!row) {
     throw new Error(`createEvaluationResult: 行未找到（id=${id}）`);
@@ -366,20 +371,20 @@ export async function listEvaluationResultsByRun(
   tenantId: string,
   runId: string,
   options?: ListEvaluationResultsByRunOptions,
-): Promise<V11EvaluationResult[]> {
+): Promise<EvaluationResult[]> {
   const limit = Math.min(options?.limit ?? 200, 1000);
   const conditions = [
-    eq(v11EvaluationResult.tenantId, tenantId),
-    eq(v11EvaluationResult.runId, runId),
+    eq(evaluationResultTable.tenantId, tenantId),
+    eq(evaluationResultTable.runId, runId),
   ];
   if (options?.metricKey) {
-    conditions.push(eq(v11EvaluationResult.metricKey, options.metricKey));
+    conditions.push(eq(evaluationResultTable.metricKey, options.metricKey));
   }
   return db
     .select()
-    .from(v11EvaluationResult)
+    .from(evaluationResultTable)
     .where(and(...conditions))
-    .orderBy(asc(v11EvaluationResult.createdAt), asc(v11EvaluationResult.id))
+    .orderBy(asc(evaluationResultTable.createdAt), asc(evaluationResultTable.id))
     .limit(limit);
 }
 
@@ -388,13 +393,15 @@ export async function listEvaluationResultsByCase(
   tenantId: string,
   caseId: string,
   options?: { limit?: number },
-): Promise<V11EvaluationResult[]> {
+): Promise<EvaluationResult[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
   return db
     .select()
-    .from(v11EvaluationResult)
-    .where(and(eq(v11EvaluationResult.tenantId, tenantId), eq(v11EvaluationResult.caseId, caseId)))
-    .orderBy(asc(v11EvaluationResult.createdAt), asc(v11EvaluationResult.id))
+    .from(evaluationResultTable)
+    .where(
+      and(eq(evaluationResultTable.tenantId, tenantId), eq(evaluationResultTable.caseId, caseId)),
+    )
+    .orderBy(asc(evaluationResultTable.createdAt), asc(evaluationResultTable.id))
     .limit(limit);
 }
 
@@ -405,7 +412,7 @@ export type {
   EvaluationComparator,
   EvaluationRunState,
   EvaluationStrategyKey,
-  V11EvaluationCase,
-  V11EvaluationResult,
-  V11EvaluationRun,
-} from "@/lib/v11/schema/evaluation";
+  EvaluationCase,
+  EvaluationResult,
+  EvaluationRun,
+} from "@/lib/persistence/schema/evaluation";

@@ -1,7 +1,7 @@
 /**
  * V11 CapabilityReview 仓储（阶段 6 S06-C05）。
  *
- * 事实源：lib/v11/schema/tool-call.ts、
+ * 事实源：lib/persistence/schema/tool-call.ts、
  *         ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §5（能力变化与审核）。
  *
  * 职责：
@@ -20,11 +20,11 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
+  type CapabilityReview,
   type CapabilityReviewResourceType,
   type CapabilityReviewState,
-  type V11CapabilityReview,
-  v11CapabilityReview,
-} from "@/lib/v11/schema/tool-call";
+  capabilityReviewTable,
+} from "@/lib/persistence/schema/tool-call";
 import { and, asc, eq, gte } from "drizzle-orm";
 
 // ─── 错误类 ────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export interface CreateCapabilityReviewParams {
  */
 export async function createCapabilityReview(
   params: CreateCapabilityReviewParams,
-): Promise<V11CapabilityReview> {
+): Promise<CapabilityReview> {
   if (!params.tenantId) {
     throw new CapabilityReviewValidationError("invalid_tenant_id", "tenantId 不能为空");
   }
@@ -142,7 +142,7 @@ export async function createCapabilityReview(
   }
 
   const id = randomUUID();
-  await db.insert(v11CapabilityReview).values({
+  await db.insert(capabilityReviewTable).values({
     id,
     tenantId: params.tenantId,
     resourceType: params.resourceType,
@@ -158,8 +158,8 @@ export async function createCapabilityReview(
 
   const [row] = await db
     .select()
-    .from(v11CapabilityReview)
-    .where(eq(v11CapabilityReview.id, id))
+    .from(capabilityReviewTable)
+    .where(eq(capabilityReviewTable.id, id))
     .limit(1);
   if (!row) {
     throw new Error(`createCapabilityReview: 行未找到（id=${id}）`);
@@ -173,14 +173,14 @@ export async function createCapabilityReview(
 export async function getCapabilityReviewById(params: {
   tenantId: string;
   reviewId: string;
-}): Promise<V11CapabilityReview | null> {
+}): Promise<CapabilityReview | null> {
   const [row] = await db
     .select()
-    .from(v11CapabilityReview)
+    .from(capabilityReviewTable)
     .where(
       and(
-        eq(v11CapabilityReview.tenantId, params.tenantId),
-        eq(v11CapabilityReview.id, params.reviewId),
+        eq(capabilityReviewTable.tenantId, params.tenantId),
+        eq(capabilityReviewTable.id, params.reviewId),
       ),
     )
     .limit(1);
@@ -204,7 +204,7 @@ export interface ListPendingReviewsParams {
 
 /** listPendingReviews 返回值。 */
 export interface ListPendingReviewsResult {
-  items: V11CapabilityReview[];
+  items: CapabilityReview[];
   nextCursor: string | null;
 }
 
@@ -222,7 +222,7 @@ export async function listPendingReviews(
   const reviewState: CapabilityReviewState = params.reviewState ?? "pending";
 
   // 构造 where 条件
-  const conditions = [eq(v11CapabilityReview.tenantId, params.tenantId)];
+  const conditions = [eq(capabilityReviewTable.tenantId, params.tenantId)];
 
   // 解析 cursor
   if (params.cursor) {
@@ -237,26 +237,26 @@ export async function listPendingReviews(
         // 为正确性，使用 gte + 应用层排除已包含项；为简化使用 (createdAt > cursor) 的严格大于 + OR 等价条件。
         // Drizzle 不支持 tuple 比较，因此用 OR 表达。
         // 此处简化：使用 gte + 限制 limit+1 然后在应用层去重 cursor 行。
-        conditions.push(gte(v11CapabilityReview.createdAt, cursorDate));
+        conditions.push(gte(capabilityReviewTable.createdAt, cursorDate));
       }
     }
   }
 
   if (params.resourceType) {
-    conditions.push(eq(v11CapabilityReview.resourceType, params.resourceType));
+    conditions.push(eq(capabilityReviewTable.resourceType, params.resourceType));
   }
   if (params.resourceId) {
-    conditions.push(eq(v11CapabilityReview.resourceId, params.resourceId));
+    conditions.push(eq(capabilityReviewTable.resourceId, params.resourceId));
   }
-  conditions.push(eq(v11CapabilityReview.reviewState, reviewState));
+  conditions.push(eq(capabilityReviewTable.reviewState, reviewState));
 
   const where = conditions.length === 1 ? conditions[0] : and(...conditions);
 
   const rows = await db
     .select()
-    .from(v11CapabilityReview)
+    .from(capabilityReviewTable)
     .where(where)
-    .orderBy(asc(v11CapabilityReview.createdAt), asc(v11CapabilityReview.id))
+    .orderBy(asc(capabilityReviewTable.createdAt), asc(capabilityReviewTable.id))
     .limit(limit + 1);
 
   // cursor 分页：若使用 gte 过滤，需在应用层去掉 cursor 之前的行（含 cursor 行自身）。
@@ -313,7 +313,7 @@ export interface ResolveCapabilityReviewParams {
  */
 export async function resolveCapabilityReview(
   params: ResolveCapabilityReviewParams,
-): Promise<V11CapabilityReview> {
+): Promise<CapabilityReview> {
   if (params.toState !== "approved" && params.toState !== "rejected") {
     throw new CapabilityReviewValidationError(
       "invalid_to_state",
@@ -337,15 +337,15 @@ export async function resolveCapabilityReview(
     if (params.reviewNotes !== undefined && params.reviewNotes !== current.reviewNotes) {
       const now = new Date();
       await db
-        .update(v11CapabilityReview)
+        .update(capabilityReviewTable)
         .set({
           reviewNotes: params.reviewNotes,
           updatedAt: now,
         })
         .where(
           and(
-            eq(v11CapabilityReview.tenantId, params.tenantId),
-            eq(v11CapabilityReview.id, params.reviewId),
+            eq(capabilityReviewTable.tenantId, params.tenantId),
+            eq(capabilityReviewTable.id, params.reviewId),
           ),
         );
       const refreshed = await getCapabilityReviewById({
@@ -371,7 +371,7 @@ export async function resolveCapabilityReview(
 
   const now = new Date();
   await db
-    .update(v11CapabilityReview)
+    .update(capabilityReviewTable)
     .set({
       reviewState: params.toState,
       reviewedBy: params.reviewedBy,
@@ -381,8 +381,8 @@ export async function resolveCapabilityReview(
     })
     .where(
       and(
-        eq(v11CapabilityReview.tenantId, params.tenantId),
-        eq(v11CapabilityReview.id, params.reviewId),
+        eq(capabilityReviewTable.tenantId, params.tenantId),
+        eq(capabilityReviewTable.id, params.reviewId),
       ),
     );
 
@@ -401,5 +401,5 @@ export async function resolveCapabilityReview(
 export type {
   CapabilityReviewResourceType,
   CapabilityReviewState,
-  V11CapabilityReview,
-} from "@/lib/v11/schema/tool-call";
+  CapabilityReview,
+} from "@/lib/persistence/schema/tool-call";

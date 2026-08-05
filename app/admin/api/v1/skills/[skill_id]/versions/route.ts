@@ -1,17 +1,28 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  getRequestId,
   apiError,
-  resourceNotFound,
   apiSuccess,
+  getRequestId,
+  resourceNotFound,
 } from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 /**
  * POST /admin/api/v1/skills/{skill_id}/versions — 创建 SkillVersion（阶段 6 S06-C01）。
@@ -45,17 +56,6 @@ import {
   getSkillById,
   listSkillVersions,
 } from "@/lib/v11/capability/skill-queries";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -169,13 +169,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 4. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 5. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 content_ref/content_hash 或字段类型错误");
+    return schemaInvalidTable(
+      requestId,
+      "请求体非法：缺少 content_ref/content_hash 或字段类型错误",
+    );
   }
 
   // 6. 计算请求 hash + 幂等守卫
@@ -249,7 +252,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       return resourceNotFound(requestId, err.message);
     }
     if (err instanceof SkillValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     if (err instanceof SkillLifecycleError) {
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
@@ -347,7 +350,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   // 4. 查询版本列表

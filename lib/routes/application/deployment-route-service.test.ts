@@ -14,7 +14,6 @@
 import { type KeyObject, createHash, generateKeyPairSync, sign } from "node:crypto";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import {
   type BuilderKeyRegistry,
@@ -26,10 +25,18 @@ import {
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
+import {
+  getIdempotencyRecordById,
+  insertProcessingRecord,
+} from "@/lib/identity/idempotency-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   AgentCapabilityUnsupportedError,
   MAX_TRAFFIC_WEIGHT,
@@ -40,11 +47,11 @@ import {
   RouteWeightInvalidError,
   createRouteSet,
   disableDeploymentRoute,
-  listEnabledRouteProjections,
   getRouteById,
   getRouteSetByAgentScope,
   getRouteSetById,
   getRouteSetSnapshot,
+  listEnabledRouteProjections,
   listRoutesBySet,
   upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
@@ -56,13 +63,6 @@ import type {
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import {
-  getIdempotencyRecordById,
-  insertProcessingRecord,
-} from "@/lib/identity/idempotency-queries";
-import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { and, asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -672,8 +672,15 @@ describe("V11 upsertDeploymentRoute", () => {
       attestationId: rtAttestationId,
     });
     // 撤销 attestation 使 route 层校验失败
-    const { revokeAttestation } = await import("@/lib/artifacts/persistence/artifact-attestation-queries");
-    await revokeAttestation(tenantId, rtAttestationId, buildActor(tenantId, "admin-001"), "测试撤销");
+    const { revokeAttestation } = await import(
+      "@/lib/artifacts/persistence/artifact-attestation-queries"
+    );
+    await revokeAttestation(
+      tenantId,
+      rtAttestationId,
+      buildActor(tenantId, "admin-001"),
+      "测试撤销",
+    );
 
     await expect(
       upsertDeploymentRoute({
@@ -884,674 +891,678 @@ describe("V11 upsertDeploymentRoute", () => {
     expect((await getRouteSetById(tenantId, routeSetId))?.versionNo).toBe(2);
   });
 
-// ═══════════════════════════════════════════════════════════
-// 3. Route 查询
-// ═══════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════
+  // 3. Route 查询
+  // ═══════════════════════════════════════════════════════════
 
-describe("V11 Route 查询", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let agentId: string;
-  let agentRevisionId: string;
-  let runtimeRevisionId: string;
-  let routeSetId: string;
-  let routeId: string;
+  describe("V11 Route 查询", () => {
+    let tenantId: string;
+    let ownerId: string;
+    let agentId: string;
+    let agentRevisionId: string;
+    let runtimeRevisionId: string;
+    let routeSetId: string;
+    let routeId: string;
 
-  beforeEach(async () => {
-    const seeded = await seedTenantAndOwner();
-    tenantId = seeded.tenantId;
-    ownerId = seeded.ownerId;
+    beforeEach(async () => {
+      const seeded = await seedTenantAndOwner();
+      tenantId = seeded.tenantId;
+      ownerId = seeded.ownerId;
 
-    const agentResult = await seedPublishedAgentRevision(
-      tenantId,
-      ownerId,
-      "finance",
-      ["event_stream"],
-      "v1",
-    );
-    agentId = agentResult.agent.id;
-    agentRevisionId = agentResult.revision.id;
+      const agentResult = await seedPublishedAgentRevision(
+        tenantId,
+        ownerId,
+        "finance",
+        ["event_stream"],
+        "v1",
+      );
+      agentId = agentResult.agent.id;
+      agentRevisionId = agentResult.revision.id;
 
-    const runtimeResult = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "doubao-hosted",
-      ["event_stream", "steer"],
-      "v1",
-    );
-    runtimeRevisionId = runtimeResult.revision.id;
+      const runtimeResult = await seedPublishedRuntimeRevision(
+        tenantId,
+        ownerId,
+        "doubao-hosted",
+        ["event_stream", "steer"],
+        "v1",
+      );
+      runtimeRevisionId = runtimeResult.revision.id;
 
-    const routeSet = await createRouteSet({
-      tenantId,
-      agentId,
-      routeScopeKey: "prod",
-      routeScopeJson: {},
-    });
-    routeSetId = routeSet.id;
+      const routeSet = await createRouteSet({
+        tenantId,
+        agentId,
+        routeScopeKey: "prod",
+        routeScopeJson: {},
+      });
+      routeSetId = routeSet.id;
 
-    const result = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 1,
-      agentRevisionId,
-      runtimeRevisionId,
-      trafficWeight: 10000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-    routeId = result.route.id;
-  });
-
-  it("getRouteById 存在时返回", async () => {
-    const route = await getRouteById(tenantId, routeId);
-    expect(route?.id).toBe(routeId);
-    expect(route?.trafficWeight).toBe(10000);
-  });
-
-  it("getRouteById 不存在返回 null", async () => {
-    expect(await getRouteById(tenantId, "missing-route")).toBeNull();
-  });
-
-  it("getRouteById 跨租户隔离", async () => {
-    expect(await getRouteById("11111111-1111-4111-8111-111111111111", routeId)).toBeNull();
-  });
-
-  it("listRoutesBySet 列出所有路由", async () => {
-    const list = await listRoutesBySet(routeSetId);
-    expect(list).toHaveLength(1);
-    expect(list[0]?.id).toBe(routeId);
-  });
-
-  it("listRoutesBySet 按 routeState 过滤", async () => {
-    const enabled = await listRoutesBySet(routeSetId, { routeState: "enabled" });
-    expect(enabled).toHaveLength(1);
-    const disabled = await listRoutesBySet(routeSetId, { routeState: "disabled" });
-    expect(disabled).toHaveLength(0);
-  });
-
-  it("listEnabledRouteProjections 返回 enabled 路由", async () => {
-    const routes = await listEnabledRouteProjections(tenantId, agentId, "prod");
-    expect(routes).toHaveLength(1);
-    expect(routes[0]?.id).toBe(routeId);
-  });
-
-  it("listEnabledRouteProjections 无 RouteSet 时返回空数组", async () => {
-    const routes = await listEnabledRouteProjections(tenantId, agentId, "nonexistent-scope");
-    expect(routes).toHaveLength(0);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
-// 4. disableDeploymentRoute
-// ═══════════════════════════════════════════════════════════
-
-describe("V11 disableDeploymentRoute", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let routeSetId: string;
-  let routeId: string;
-  let currentVersionNo: number;
-
-  beforeEach(async () => {
-    const seeded = await seedTenantAndOwner();
-    tenantId = seeded.tenantId;
-    ownerId = seeded.ownerId;
-
-    const { agent, revision: agentRev } = await seedPublishedAgentRevision(
-      tenantId,
-      ownerId,
-      "finance",
-      ["event_stream"],
-      "v1",
-    );
-    const { revision: runtimeRev } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "doubao-hosted",
-      ["event_stream"],
-      "v1",
-    );
-
-    const routeSet = await createRouteSet({
-      tenantId,
-      agentId: agent.id,
-      routeScopeKey: "prod",
-      routeScopeJson: {},
-    });
-    routeSetId = routeSet.id;
-
-    const result = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 1,
-      agentRevisionId: agentRev.id,
-      runtimeRevisionId: runtimeRev.id,
-      trafficWeight: 10000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-    routeId = result.route.id;
-    currentVersionNo = result.routeSet.versionNo;
-  });
-
-  it("成功路径：route 禁用 + versionNo 递增 + 审计", async () => {
-    const result = await disableDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: currentVersionNo,
-      routeId,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-
-    expect(result.route.routeState).toBe("disabled");
-    expect(result.routeSet.versionNo).toBe(currentVersionNo + 1);
-    expect(result.etag).toBe(`route-set-${currentVersionNo + 1}`);
-    expect(result.affectsNewInvocationsOnly).toBe(true);
-
-    // 审计写入
-    const auditEvents = await listAuditEvents({
-      tenantId,
-      actionType: "route.update",
-      targetType: "deployment_route",
-      targetId: routeId,
-    });
-    // 两次：upsert + disable
-    expect(auditEvents).toHaveLength(2);
-    expect(auditEvents[1]?.reason).toContain("禁用");
-
-    // listEnabledRouteProjections 不再返回 disabled 路由
-    const effective = await listEnabledRouteProjections(tenantId, result.routeSet.agentId, "prod");
-    expect(effective).toHaveLength(0);
-  });
-
-  it("ETag 不匹配 → RouteSetVersionConflictError", async () => {
-    await expect(
-      disableDeploymentRoute({
+      const result = await upsertDeploymentRoute({
         tenantId,
         routeSetId,
-        routeSetExpectedVersionNo: 99,
-        routeId,
+        routeSetExpectedVersionNo: 1,
+        agentRevisionId,
+        runtimeRevisionId,
+        trafficWeight: 10000,
         actor: buildActor(tenantId, "deploy-bot-001"),
-      }),
-    ).rejects.toThrow(RouteSetVersionConflictError);
+      });
+      routeId = result.route.id;
+    });
+
+    it("getRouteById 存在时返回", async () => {
+      const route = await getRouteById(tenantId, routeId);
+      expect(route?.id).toBe(routeId);
+      expect(route?.trafficWeight).toBe(10000);
+    });
+
+    it("getRouteById 不存在返回 null", async () => {
+      expect(await getRouteById(tenantId, "missing-route")).toBeNull();
+    });
+
+    it("getRouteById 跨租户隔离", async () => {
+      expect(await getRouteById("11111111-1111-4111-8111-111111111111", routeId)).toBeNull();
+    });
+
+    it("listRoutesBySet 列出所有路由", async () => {
+      const list = await listRoutesBySet(routeSetId);
+      expect(list).toHaveLength(1);
+      expect(list[0]?.id).toBe(routeId);
+    });
+
+    it("listRoutesBySet 按 routeState 过滤", async () => {
+      const enabled = await listRoutesBySet(routeSetId, { routeState: "enabled" });
+      expect(enabled).toHaveLength(1);
+      const disabled = await listRoutesBySet(routeSetId, { routeState: "disabled" });
+      expect(disabled).toHaveLength(0);
+    });
+
+    it("listEnabledRouteProjections 返回 enabled 路由", async () => {
+      const routes = await listEnabledRouteProjections(tenantId, agentId, "prod");
+      expect(routes).toHaveLength(1);
+      expect(routes[0]?.id).toBe(routeId);
+    });
+
+    it("listEnabledRouteProjections 无 RouteSet 时返回空数组", async () => {
+      const routes = await listEnabledRouteProjections(tenantId, agentId, "nonexistent-scope");
+      expect(routes).toHaveLength(0);
+    });
   });
 
-  it("Route 不存在 → RouteNotFoundError", async () => {
-    await expect(
-      disableDeploymentRoute({
+  // ═══════════════════════════════════════════════════════════
+  // 4. disableDeploymentRoute
+  // ═══════════════════════════════════════════════════════════
+
+  describe("V11 disableDeploymentRoute", () => {
+    let tenantId: string;
+    let ownerId: string;
+    let routeSetId: string;
+    let routeId: string;
+    let currentVersionNo: number;
+
+    beforeEach(async () => {
+      const seeded = await seedTenantAndOwner();
+      tenantId = seeded.tenantId;
+      ownerId = seeded.ownerId;
+
+      const { agent, revision: agentRev } = await seedPublishedAgentRevision(
+        tenantId,
+        ownerId,
+        "finance",
+        ["event_stream"],
+        "v1",
+      );
+      const { revision: runtimeRev } = await seedPublishedRuntimeRevision(
+        tenantId,
+        ownerId,
+        "doubao-hosted",
+        ["event_stream"],
+        "v1",
+      );
+
+      const routeSet = await createRouteSet({
+        tenantId,
+        agentId: agent.id,
+        routeScopeKey: "prod",
+        routeScopeJson: {},
+      });
+      routeSetId = routeSet.id;
+
+      const result = await upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 1,
+        agentRevisionId: agentRev.id,
+        runtimeRevisionId: runtimeRev.id,
+        trafficWeight: 10000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+      routeId = result.route.id;
+      currentVersionNo = result.routeSet.versionNo;
+    });
+
+    it("成功路径：route 禁用 + versionNo 递增 + 审计", async () => {
+      const result = await disableDeploymentRoute({
         tenantId,
         routeSetId,
         routeSetExpectedVersionNo: currentVersionNo,
-        routeId: "nonexistent-route",
-        actor: buildActor(tenantId, "deploy-bot-001"),
-      }),
-    ).rejects.toThrow(RouteNotFoundError);
-  });
-
-  it("Route 不属于该 RouteSet → RouteNotFoundError", async () => {
-    // 创建另一个 RouteSet
-    const otherRouteSet = await createRouteSet({
-      tenantId,
-      agentId: "some-other-agent-id",
-      routeScopeKey: "other",
-      routeScopeJson: {},
-    });
-    await expect(
-      disableDeploymentRoute({
-        tenantId,
-        routeSetId: otherRouteSet.id,
-        routeSetExpectedVersionNo: 1,
         routeId,
         actor: buildActor(tenantId, "deploy-bot-001"),
-      }),
-    ).rejects.toThrow(RouteNotFoundError);
-  });
-});
+      });
 
-// ═══════════════════════════════════════════════════════════
-// 5. 回滚场景
-// ═══════════════════════════════════════════════════════════
+      expect(result.route.routeState).toBe("disabled");
+      expect(result.routeSet.versionNo).toBe(currentVersionNo + 1);
+      expect(result.etag).toBe(`route-set-${currentVersionNo + 1}`);
+      expect(result.affectsNewInvocationsOnly).toBe(true);
 
-describe("V11 回滚场景", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let agentId: string;
-  let agentRev1Id: string;
-  let runtimeRev1Id: string;
-  let routeSetId: string;
+      // 审计写入
+      const auditEvents = await listAuditEvents({
+        tenantId,
+        actionType: "route.update",
+        targetType: "deployment_route",
+        targetId: routeId,
+      });
+      // 两次：upsert + disable
+      expect(auditEvents).toHaveLength(2);
+      expect(auditEvents[1]?.reason).toContain("禁用");
 
-  beforeEach(async () => {
-    const seeded = await seedTenantAndOwner();
-    tenantId = seeded.tenantId;
-    ownerId = seeded.ownerId;
-
-    const { agent, revision: agentRev } = await seedPublishedAgentRevision(
-      tenantId,
-      ownerId,
-      "finance",
-      ["event_stream"],
-      "v1",
-    );
-    agentId = agent.id;
-    agentRev1Id = agentRev.id;
-
-    const { revision: runtimeRev } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "doubao-hosted",
-      ["event_stream"],
-      "v1",
-    );
-    runtimeRev1Id = runtimeRev.id;
-
-    const routeSet = await createRouteSet({
-      tenantId,
-      agentId,
-      routeScopeKey: "prod",
-      routeScopeJson: {},
+      // listEnabledRouteProjections 不再返回 disabled 路由
+      const effective = await listEnabledRouteProjections(
+        tenantId,
+        result.routeSet.agentId,
+        "prod",
+      );
+      expect(effective).toHaveLength(0);
     });
-    routeSetId = routeSet.id;
-  });
 
-  it("snapshot → 修改 → 恢复 → 只影响新 Invocation", async () => {
-    // 初始：100% 流量到 rev1
-    const r1 = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 1,
-      agentRevisionId: agentRev1Id,
-      runtimeRevisionId: runtimeRev1Id,
-      trafficWeight: 10000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
+    it("ETag 不匹配 → RouteSetVersionConflictError", async () => {
+      await expect(
+        disableDeploymentRoute({
+          tenantId,
+          routeSetId,
+          routeSetExpectedVersionNo: 99,
+          routeId,
+          actor: buildActor(tenantId, "deploy-bot-001"),
+        }),
+      ).rejects.toThrow(RouteSetVersionConflictError);
     });
-    const route1Id = r1.route.id;
-    expect(r1.routeSet.versionNo).toBe(2);
 
-    // 快照
-    const snapshot = await getRouteSetSnapshot(tenantId, routeSetId);
-    expect(snapshot.versionNo).toBe(2);
-    expect(snapshot.enabledRoutes).toHaveLength(1);
-    expect(snapshot.enabledRoutes[0]?.id).toBe(route1Id);
-
-    // 修改：创建 rev2 并切换 100% 流量
-    const { revision: agentRev2 } = await seedPublishedAgentRevision(
-      tenantId,
-      ownerId,
-      "finance-v2",
-      ["event_stream"],
-      "v2",
-    );
-    // 需要创建第二个 Agent（agentKey 不同），但这会导致 agentId 不同
-    // 实际上灰度是在同一 Agent 的不同 Revision 之间
-    // 但我们的 seedPublishedAgentRevision 创建新 Agent。为了测试灰度，需要同一 Agent 的新 Revision。
-    // 这里简化：直接在 RouteSet 中添加第二条路由（不同组合）
-
-    // 实际上，为了在同一 Agent 上创建第二个 Revision：
-    const agentRev2Draft = await createDraftRevision({
-      tenantId,
-      agentId,
-      sourceType: "code",
-      sourceRevision: "git:v2",
-      instructionHash: "sha256:instruction_v2",
-      agentArtifactRef: "oci://registry/agent@sha256:v2",
-      modelPolicyJson: {},
-      permissionRequirementsJson: {},
-      delegationPolicyJson: {},
-      agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
-      createdBy: ownerId,
+    it("Route 不存在 → RouteNotFoundError", async () => {
+      await expect(
+        disableDeploymentRoute({
+          tenantId,
+          routeSetId,
+          routeSetExpectedVersionNo: currentVersionNo,
+          routeId: "nonexistent-route",
+          actor: buildActor(tenantId, "deploy-bot-001"),
+        }),
+      ).rejects.toThrow(RouteNotFoundError);
     });
-    await createVerifiedAttestation(
-      tenantId,
-      "agent_revision",
-      agentRev2Draft.id,
-      "agent-content-v2",
-    );
-    await publishRevision(tenantId, agentRev2Draft.id, 2); // versionNo=2
 
-    // 灰度：rev1 90%, rev2 10%
-    const r2 = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 2,
-      agentRevisionId: agentRev1Id,
-      runtimeRevisionId: runtimeRev1Id,
-      trafficWeight: 9000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
+    it("Route 不属于该 RouteSet → RouteNotFoundError", async () => {
+      // 创建另一个 RouteSet
+      const otherRouteSet = await createRouteSet({
+        tenantId,
+        agentId: "some-other-agent-id",
+        routeScopeKey: "other",
+        routeScopeJson: {},
+      });
+      await expect(
+        disableDeploymentRoute({
+          tenantId,
+          routeSetId: otherRouteSet.id,
+          routeSetExpectedVersionNo: 1,
+          routeId,
+          actor: buildActor(tenantId, "deploy-bot-001"),
+        }),
+      ).rejects.toThrow(RouteNotFoundError);
     });
-    expect(r2.routeSet.versionNo).toBe(3);
-
-    const r3 = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 3,
-      agentRevisionId: agentRev2Draft.id,
-      runtimeRevisionId: runtimeRev1Id,
-      trafficWeight: 1000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-    expect(r3.routeSet.versionNo).toBe(4);
-
-    // 验证：2 条 enabled 路由
-    const effectiveAfterCanary = await listEnabledRouteProjections(tenantId, agentId, "prod");
-    expect(effectiveAfterCanary).toHaveLength(2);
-
-    // 回滚：禁用 rev2 路由，恢复 rev1 100%
-    const r4 = await disableDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 4,
-      routeId: r3.route.id,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-    expect(r4.routeSet.versionNo).toBe(5);
-
-    const r5 = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 5,
-      agentRevisionId: agentRev1Id,
-      runtimeRevisionId: runtimeRev1Id,
-      trafficWeight: 10000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-    expect(r5.routeSet.versionNo).toBe(6);
-    expect(r5.routeRevisionId).toBe(r1.routeRevisionId);
-    // 验证 RouteActivation 在 DB 中的内部状态
-    const [r5Activation] = await db
-      .select()
-      .from(routeActivation)
-      .where(eq(routeActivation.id, r5.routeActivationId));
-    expect(r5Activation?.previousRouteRevisionId).toBe(r2.routeRevisionId);
-    expect(r5Activation?.activationSequence).toBe(3);
-
-    // 验证回滚后：只有 1 条 enabled 路由（rev1 100%）
-    const effectiveAfterRollback = await listEnabledRouteProjections(tenantId, agentId, "prod");
-    expect(effectiveAfterRollback).toHaveLength(1);
-    expect(effectiveAfterRollback[0]?.agentRevisionId).toBe(agentRev1Id);
-    expect(effectiveAfterRollback[0]?.trafficWeight).toBe(10000);
-
-    // versionNo 单调递增（回滚也递增，不回退）
-    expect(r5.routeSet.versionNo).toBeGreaterThan(snapshot.versionNo);
-
-    // 历史路由行仍可查询（不物理删除）
-    const allRoutes = await listRoutesBySet(routeSetId);
-    expect(allRoutes).toHaveLength(2);
-    const disabledRoutes = allRoutes.filter((r) => r.routeState === "disabled");
-    expect(disabledRoutes).toHaveLength(1);
-    expect(disabledRoutes[0]?.id).toBe(r3.route.id);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
-// 6. S03-W03 阶段验收场景
-// ═══════════════════════════════════════════════════════════
-
-describe("S03-W03 阶段验收场景", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let agentId: string;
-  let agentRevisionId: string;
-  let runtimeRevisionId: string;
-  let routeSetId: string;
-
-  beforeEach(async () => {
-    const seeded = await seedTenantAndOwner();
-    tenantId = seeded.tenantId;
-    ownerId = seeded.ownerId;
-
-    const { agent, revision: agentRev } = await seedPublishedAgentRevision(
-      tenantId,
-      ownerId,
-      "finance",
-      ["event_stream"],
-      "v1",
-    );
-    agentId = agent.id;
-    agentRevisionId = agentRev.id;
-
-    const { revision: runtimeRev } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "doubao-hosted",
-      ["event_stream"],
-      "v1",
-    );
-    runtimeRevisionId = runtimeRev.id;
-
-    const routeSet = await createRouteSet({
-      tenantId,
-      agentId,
-      routeScopeKey: "prod",
-      routeScopeJson: {},
-    });
-    routeSetId = routeSet.id;
   });
 
-  it("并发更新路由 → 旧 ETag 返回冲突，不出现部分权重", async () => {
-    // 第一次更新成功（versionNo 1→2）
-    const r1 = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 1,
-      agentRevisionId,
-      runtimeRevisionId,
-      trafficWeight: 5000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-    expect(r1.routeSet.versionNo).toBe(2);
+  // ═══════════════════════════════════════════════════════════
+  // 5. 回滚场景
+  // ═══════════════════════════════════════════════════════════
 
-    // 用旧 ETag（1）再次更新 → 冲突
-    await expect(
-      upsertDeploymentRoute({
+  describe("V11 回滚场景", () => {
+    let tenantId: string;
+    let ownerId: string;
+    let agentId: string;
+    let agentRev1Id: string;
+    let runtimeRev1Id: string;
+    let routeSetId: string;
+
+    beforeEach(async () => {
+      const seeded = await seedTenantAndOwner();
+      tenantId = seeded.tenantId;
+      ownerId = seeded.ownerId;
+
+      const { agent, revision: agentRev } = await seedPublishedAgentRevision(
+        tenantId,
+        ownerId,
+        "finance",
+        ["event_stream"],
+        "v1",
+      );
+      agentId = agent.id;
+      agentRev1Id = agentRev.id;
+
+      const { revision: runtimeRev } = await seedPublishedRuntimeRevision(
+        tenantId,
+        ownerId,
+        "doubao-hosted",
+        ["event_stream"],
+        "v1",
+      );
+      runtimeRev1Id = runtimeRev.id;
+
+      const routeSet = await createRouteSet({
+        tenantId,
+        agentId,
+        routeScopeKey: "prod",
+        routeScopeJson: {},
+      });
+      routeSetId = routeSet.id;
+    });
+
+    it("snapshot → 修改 → 恢复 → 只影响新 Invocation", async () => {
+      // 初始：100% 流量到 rev1
+      const r1 = await upsertDeploymentRoute({
         tenantId,
         routeSetId,
-        routeSetExpectedVersionNo: 1, // 旧 ETag
+        routeSetExpectedVersionNo: 1,
+        agentRevisionId: agentRev1Id,
+        runtimeRevisionId: runtimeRev1Id,
+        trafficWeight: 10000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+      const route1Id = r1.route.id;
+      expect(r1.routeSet.versionNo).toBe(2);
+
+      // 快照
+      const snapshot = await getRouteSetSnapshot(tenantId, routeSetId);
+      expect(snapshot.versionNo).toBe(2);
+      expect(snapshot.enabledRoutes).toHaveLength(1);
+      expect(snapshot.enabledRoutes[0]?.id).toBe(route1Id);
+
+      // 修改：创建 rev2 并切换 100% 流量
+      const { revision: agentRev2 } = await seedPublishedAgentRevision(
+        tenantId,
+        ownerId,
+        "finance-v2",
+        ["event_stream"],
+        "v2",
+      );
+      // 需要创建第二个 Agent（agentKey 不同），但这会导致 agentId 不同
+      // 实际上灰度是在同一 Agent 的不同 Revision 之间
+      // 但我们的 seedPublishedAgentRevision 创建新 Agent。为了测试灰度，需要同一 Agent 的新 Revision。
+      // 这里简化：直接在 RouteSet 中添加第二条路由（不同组合）
+
+      // 实际上，为了在同一 Agent 上创建第二个 Revision：
+      const agentRev2Draft = await createDraftRevision({
+        tenantId,
+        agentId,
+        sourceType: "code",
+        sourceRevision: "git:v2",
+        instructionHash: "sha256:instruction_v2",
+        agentArtifactRef: "oci://registry/agent@sha256:v2",
+        modelPolicyJson: {},
+        permissionRequirementsJson: {},
+        delegationPolicyJson: {},
+        agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
+        createdBy: ownerId,
+      });
+      await createVerifiedAttestation(
+        tenantId,
+        "agent_revision",
+        agentRev2Draft.id,
+        "agent-content-v2",
+      );
+      await publishRevision(tenantId, agentRev2Draft.id, 2); // versionNo=2
+
+      // 灰度：rev1 90%, rev2 10%
+      const r2 = await upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 2,
+        agentRevisionId: agentRev1Id,
+        runtimeRevisionId: runtimeRev1Id,
+        trafficWeight: 9000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+      expect(r2.routeSet.versionNo).toBe(3);
+
+      const r3 = await upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 3,
+        agentRevisionId: agentRev2Draft.id,
+        runtimeRevisionId: runtimeRev1Id,
+        trafficWeight: 1000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+      expect(r3.routeSet.versionNo).toBe(4);
+
+      // 验证：2 条 enabled 路由
+      const effectiveAfterCanary = await listEnabledRouteProjections(tenantId, agentId, "prod");
+      expect(effectiveAfterCanary).toHaveLength(2);
+
+      // 回滚：禁用 rev2 路由，恢复 rev1 100%
+      const r4 = await disableDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 4,
+        routeId: r3.route.id,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+      expect(r4.routeSet.versionNo).toBe(5);
+
+      const r5 = await upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 5,
+        agentRevisionId: agentRev1Id,
+        runtimeRevisionId: runtimeRev1Id,
+        trafficWeight: 10000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+      expect(r5.routeSet.versionNo).toBe(6);
+      expect(r5.routeRevisionId).toBe(r1.routeRevisionId);
+      // 验证 RouteActivation 在 DB 中的内部状态
+      const [r5Activation] = await db
+        .select()
+        .from(routeActivation)
+        .where(eq(routeActivation.id, r5.routeActivationId));
+      expect(r5Activation?.previousRouteRevisionId).toBe(r2.routeRevisionId);
+      expect(r5Activation?.activationSequence).toBe(3);
+
+      // 验证回滚后：只有 1 条 enabled 路由（rev1 100%）
+      const effectiveAfterRollback = await listEnabledRouteProjections(tenantId, agentId, "prod");
+      expect(effectiveAfterRollback).toHaveLength(1);
+      expect(effectiveAfterRollback[0]?.agentRevisionId).toBe(agentRev1Id);
+      expect(effectiveAfterRollback[0]?.trafficWeight).toBe(10000);
+
+      // versionNo 单调递增（回滚也递增，不回退）
+      expect(r5.routeSet.versionNo).toBeGreaterThan(snapshot.versionNo);
+
+      // 历史路由行仍可查询（不物理删除）
+      const allRoutes = await listRoutesBySet(routeSetId);
+      expect(allRoutes).toHaveLength(2);
+      const disabledRoutes = allRoutes.filter((r) => r.routeState === "disabled");
+      expect(disabledRoutes).toHaveLength(1);
+      expect(disabledRoutes[0]?.id).toBe(r3.route.id);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // 6. S03-W03 阶段验收场景
+  // ═══════════════════════════════════════════════════════════
+
+  describe("S03-W03 阶段验收场景", () => {
+    let tenantId: string;
+    let ownerId: string;
+    let agentId: string;
+    let agentRevisionId: string;
+    let runtimeRevisionId: string;
+    let routeSetId: string;
+
+    beforeEach(async () => {
+      const seeded = await seedTenantAndOwner();
+      tenantId = seeded.tenantId;
+      ownerId = seeded.ownerId;
+
+      const { agent, revision: agentRev } = await seedPublishedAgentRevision(
+        tenantId,
+        ownerId,
+        "finance",
+        ["event_stream"],
+        "v1",
+      );
+      agentId = agent.id;
+      agentRevisionId = agentRev.id;
+
+      const { revision: runtimeRev } = await seedPublishedRuntimeRevision(
+        tenantId,
+        ownerId,
+        "doubao-hosted",
+        ["event_stream"],
+        "v1",
+      );
+      runtimeRevisionId = runtimeRev.id;
+
+      const routeSet = await createRouteSet({
+        tenantId,
+        agentId,
+        routeScopeKey: "prod",
+        routeScopeJson: {},
+      });
+      routeSetId = routeSet.id;
+    });
+
+    it("并发更新路由 → 旧 ETag 返回冲突，不出现部分权重", async () => {
+      // 第一次更新成功（versionNo 1→2）
+      const r1 = await upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 1,
+        agentRevisionId,
+        runtimeRevisionId,
+        trafficWeight: 5000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+      expect(r1.routeSet.versionNo).toBe(2);
+
+      // 用旧 ETag（1）再次更新 → 冲突
+      await expect(
+        upsertDeploymentRoute({
+          tenantId,
+          routeSetId,
+          routeSetExpectedVersionNo: 1, // 旧 ETag
+          agentRevisionId,
+          runtimeRevisionId,
+          trafficWeight: 7000,
+          actor: buildActor(tenantId, "deploy-bot-002"),
+        }),
+      ).rejects.toThrow(RouteSetVersionConflictError);
+
+      // 验证权重未被第二次更新覆盖
+      const route = await getRouteById(tenantId, r1.route.id);
+      expect(route?.trafficWeight).toBe(5000);
+    });
+
+    it("回滚 → 只影响新 Invocation，历史路由行可查询", async () => {
+      // 初始路由
+      const r1 = await upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 1,
+        agentRevisionId,
+        runtimeRevisionId,
+        trafficWeight: 10000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+
+      // 禁用路由（模拟回滚到无流量）
+      const r2 = await disableDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: r1.routeSet.versionNo,
+        routeId: r1.route.id,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+
+      // 新 Invocation 不再有有效路由
+      const effective = await listEnabledRouteProjections(tenantId, agentId, "prod");
+      expect(effective).toHaveLength(0);
+
+      // 历史路由行仍可查询
+      const allRoutes = await listRoutesBySet(routeSetId);
+      expect(allRoutes).toHaveLength(1);
+      expect(allRoutes[0]?.routeState).toBe("disabled");
+      expect(allRoutes[0]?.id).toBe(r1.route.id);
+
+      // versionNo 单调递增
+      expect(r2.routeSet.versionNo).toBeGreaterThan(r1.routeSet.versionNo);
+    });
+
+    it("未验证制品 → 路由发布抛错，RouteSet 不变化（versionNo 不递增）", async () => {
+      // 创建未验证的 AgentRevision 并 publish
+      const unverifiedAgentRev = await createDraftRevision({
+        tenantId,
+        agentId,
+        sourceType: "code",
+        sourceRevision: "git:unverified",
+        instructionHash: "sha256:unverified",
+        agentArtifactRef: "oci://registry/agent@sha256:unverified",
+        modelPolicyJson: {},
+        permissionRequirementsJson: {},
+        delegationPolicyJson: {},
+        agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
+        createdBy: ownerId,
+      });
+      await publishRevision(tenantId, unverifiedAgentRev.id, 2);
+
+      // 路由更新应抛错
+      await expect(
+        upsertDeploymentRoute({
+          tenantId,
+          routeSetId,
+          routeSetExpectedVersionNo: 1,
+          agentRevisionId: unverifiedAgentRev.id,
+          runtimeRevisionId,
+          trafficWeight: 5000,
+          actor: buildActor(tenantId, "deploy-bot-001"),
+        }),
+      ).rejects.toThrow(/attestation 未 verified/);
+
+      // RouteSet versionNo 不变
+      const routeSet = await getRouteSetById(tenantId, routeSetId);
+      expect(routeSet?.versionNo).toBe(1);
+    });
+
+    it("Runtime 缺少 required capability → Route 发布失败", async () => {
+      // 在 RouteSet 所属 Agent 下创建需要 memory 的新修订
+      const memAgentRev = await createDraftRevision({
+        tenantId,
+        agentId,
+        sourceType: "code",
+        sourceRevision: "git:mem-v1",
+        instructionHash: "sha256:mem-v1",
+        agentArtifactRef: "oci://registry/agent@sha256:mem-v1",
+        modelPolicyJson: {},
+        permissionRequirementsJson: {},
+        delegationPolicyJson: {},
+        agentInterfaceRequirementsJson: { required: ["event_stream", "memory"], optional: [] },
+        createdBy: ownerId,
+      });
+      await createVerifiedAttestation(
+        tenantId,
+        "agent_revision",
+        memAgentRev.id,
+        "agent-content-mem-v1",
+      );
+      await publishRevision(tenantId, memAgentRev.id, 2);
+
+      // Runtime 不提供 memory → 路由发布失败
+      await expect(
+        upsertDeploymentRoute({
+          tenantId,
+          routeSetId,
+          routeSetExpectedVersionNo: 1,
+          agentRevisionId: memAgentRev.id,
+          runtimeRevisionId,
+          trafficWeight: 5000,
+          actor: buildActor(tenantId, "deploy-bot-001"),
+        }),
+      ).rejects.toThrow(AgentCapabilityUnsupportedError);
+
+      // RouteSet versionNo 不变
+      const routeSet = await getRouteSetById(tenantId, routeSetId);
+      expect(routeSet?.versionNo).toBe(1);
+    });
+
+    it("affectsNewInvocationsOnly 固定为 true", async () => {
+      const result = await upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 1,
+        agentRevisionId,
+        runtimeRevisionId,
+        trafficWeight: 10000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+      expect(result.affectsNewInvocationsOnly).toBe(true);
+    });
+
+    it("MAX_TRAFFIC_WEIGHT 为 10000", async () => {
+      expect(MAX_TRAFFIC_WEIGHT).toBe(10000);
+    });
+
+    it("route.update actionType 写入审计", async () => {
+      const result = await upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 1,
+        agentRevisionId,
+        runtimeRevisionId,
+        trafficWeight: 10000,
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
+
+      const auditEvents = await listAuditEvents({
+        tenantId,
+        actionType: "route.update",
+        targetType: "deployment_route",
+        targetId: result.route.id,
+      });
+      expect(auditEvents).toHaveLength(1);
+      expect(auditEvents[0]?.afterHash).toBeTruthy();
+    });
+
+    it("灰度：同 RouteSet 多条路由（不同组合）", async () => {
+      // 创建第二个 AgentRevision（同 Agent）
+      const agentRev2 = await createDraftRevision({
+        tenantId,
+        agentId,
+        sourceType: "code",
+        sourceRevision: "git:v2",
+        instructionHash: "sha256:v2",
+        agentArtifactRef: "oci://registry/agent@sha256:v2",
+        modelPolicyJson: {},
+        permissionRequirementsJson: {},
+        delegationPolicyJson: {},
+        agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
+        createdBy: ownerId,
+      });
+      await createVerifiedAttestation(tenantId, "agent_revision", agentRev2.id, "agent-content-v2");
+      await publishRevision(tenantId, agentRev2.id, 2);
+
+      // rev1: 70%
+      const r1 = await upsertDeploymentRoute({
+        tenantId,
+        routeSetId,
+        routeSetExpectedVersionNo: 1,
         agentRevisionId,
         runtimeRevisionId,
         trafficWeight: 7000,
-        actor: buildActor(tenantId, "deploy-bot-002"),
-      }),
-    ).rejects.toThrow(RouteSetVersionConflictError);
+        actor: buildActor(tenantId, "deploy-bot-001"),
+      });
 
-    // 验证权重未被第二次更新覆盖
-    const route = await getRouteById(tenantId, r1.route.id);
-    expect(route?.trafficWeight).toBe(5000);
-  });
-
-  it("回滚 → 只影响新 Invocation，历史路由行可查询", async () => {
-    // 初始路由
-    const r1 = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 1,
-      agentRevisionId,
-      runtimeRevisionId,
-      trafficWeight: 10000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-
-    // 禁用路由（模拟回滚到无流量）
-    const r2 = await disableDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: r1.routeSet.versionNo,
-      routeId: r1.route.id,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-
-    // 新 Invocation 不再有有效路由
-    const effective = await listEnabledRouteProjections(tenantId, agentId, "prod");
-    expect(effective).toHaveLength(0);
-
-    // 历史路由行仍可查询
-    const allRoutes = await listRoutesBySet(routeSetId);
-    expect(allRoutes).toHaveLength(1);
-    expect(allRoutes[0]?.routeState).toBe("disabled");
-    expect(allRoutes[0]?.id).toBe(r1.route.id);
-
-    // versionNo 单调递增
-    expect(r2.routeSet.versionNo).toBeGreaterThan(r1.routeSet.versionNo);
-  });
-
-  it("未验证制品 → 路由发布抛错，RouteSet 不变化（versionNo 不递增）", async () => {
-    // 创建未验证的 AgentRevision 并 publish
-    const unverifiedAgentRev = await createDraftRevision({
-      tenantId,
-      agentId,
-      sourceType: "code",
-      sourceRevision: "git:unverified",
-      instructionHash: "sha256:unverified",
-      agentArtifactRef: "oci://registry/agent@sha256:unverified",
-      modelPolicyJson: {},
-      permissionRequirementsJson: {},
-      delegationPolicyJson: {},
-      agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
-      createdBy: ownerId,
-    });
-    await publishRevision(tenantId, unverifiedAgentRev.id, 2);
-
-    // 路由更新应抛错
-    await expect(
-      upsertDeploymentRoute({
+      // rev2: 30%
+      const r2 = await upsertDeploymentRoute({
         tenantId,
         routeSetId,
-        routeSetExpectedVersionNo: 1,
-        agentRevisionId: unverifiedAgentRev.id,
+        routeSetExpectedVersionNo: r1.routeSet.versionNo,
+        agentRevisionId: agentRev2.id,
         runtimeRevisionId,
-        trafficWeight: 5000,
+        trafficWeight: 3000,
         actor: buildActor(tenantId, "deploy-bot-001"),
-      }),
-    ).rejects.toThrow(/attestation 未 verified/);
+      });
 
-    // RouteSet versionNo 不变
-    const routeSet = await getRouteSetById(tenantId, routeSetId);
-    expect(routeSet?.versionNo).toBe(1);
+      // 2 条 enabled 路由
+      const effective = await listEnabledRouteProjections(tenantId, agentId, "prod");
+      expect(effective).toHaveLength(2);
+
+      // 权重总和 = 10000
+      const totalWeight = effective.reduce((sum, r) => sum + r.trafficWeight, 0);
+      expect(totalWeight).toBe(10000);
+    });
   });
-
-  it("Runtime 缺少 required capability → Route 发布失败", async () => {
-    // 在 RouteSet 所属 Agent 下创建需要 memory 的新修订
-    const memAgentRev = await createDraftRevision({
-      tenantId,
-      agentId,
-      sourceType: "code",
-      sourceRevision: "git:mem-v1",
-      instructionHash: "sha256:mem-v1",
-      agentArtifactRef: "oci://registry/agent@sha256:mem-v1",
-      modelPolicyJson: {},
-      permissionRequirementsJson: {},
-      delegationPolicyJson: {},
-      agentInterfaceRequirementsJson: { required: ["event_stream", "memory"], optional: [] },
-      createdBy: ownerId,
-    });
-    await createVerifiedAttestation(
-      tenantId,
-      "agent_revision",
-      memAgentRev.id,
-      "agent-content-mem-v1",
-    );
-    await publishRevision(tenantId, memAgentRev.id, 2);
-
-    // Runtime 不提供 memory → 路由发布失败
-    await expect(
-      upsertDeploymentRoute({
-        tenantId,
-        routeSetId,
-        routeSetExpectedVersionNo: 1,
-        agentRevisionId: memAgentRev.id,
-        runtimeRevisionId,
-        trafficWeight: 5000,
-        actor: buildActor(tenantId, "deploy-bot-001"),
-      }),
-    ).rejects.toThrow(AgentCapabilityUnsupportedError);
-
-    // RouteSet versionNo 不变
-    const routeSet = await getRouteSetById(tenantId, routeSetId);
-    expect(routeSet?.versionNo).toBe(1);
-  });
-
-  it("affectsNewInvocationsOnly 固定为 true", async () => {
-    const result = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 1,
-      agentRevisionId,
-      runtimeRevisionId,
-      trafficWeight: 10000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-    expect(result.affectsNewInvocationsOnly).toBe(true);
-  });
-
-  it("MAX_TRAFFIC_WEIGHT 为 10000", async () => {
-    expect(MAX_TRAFFIC_WEIGHT).toBe(10000);
-  });
-
-  it("route.update actionType 写入审计", async () => {
-    const result = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 1,
-      agentRevisionId,
-      runtimeRevisionId,
-      trafficWeight: 10000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-
-    const auditEvents = await listAuditEvents({
-      tenantId,
-      actionType: "route.update",
-      targetType: "deployment_route",
-      targetId: result.route.id,
-    });
-    expect(auditEvents).toHaveLength(1);
-    expect(auditEvents[0]?.afterHash).toBeTruthy();
-  });
-
-  it("灰度：同 RouteSet 多条路由（不同组合）", async () => {
-    // 创建第二个 AgentRevision（同 Agent）
-    const agentRev2 = await createDraftRevision({
-      tenantId,
-      agentId,
-      sourceType: "code",
-      sourceRevision: "git:v2",
-      instructionHash: "sha256:v2",
-      agentArtifactRef: "oci://registry/agent@sha256:v2",
-      modelPolicyJson: {},
-      permissionRequirementsJson: {},
-      delegationPolicyJson: {},
-      agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
-      createdBy: ownerId,
-    });
-    await createVerifiedAttestation(tenantId, "agent_revision", agentRev2.id, "agent-content-v2");
-    await publishRevision(tenantId, agentRev2.id, 2);
-
-    // rev1: 70%
-    const r1 = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: 1,
-      agentRevisionId,
-      runtimeRevisionId,
-      trafficWeight: 7000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-
-    // rev2: 30%
-    const r2 = await upsertDeploymentRoute({
-      tenantId,
-      routeSetId,
-      routeSetExpectedVersionNo: r1.routeSet.versionNo,
-      agentRevisionId: agentRev2.id,
-      runtimeRevisionId,
-      trafficWeight: 3000,
-      actor: buildActor(tenantId, "deploy-bot-001"),
-    });
-
-    // 2 条 enabled 路由
-    const effective = await listEnabledRouteProjections(tenantId, agentId, "prod");
-    expect(effective).toHaveLength(2);
-
-    // 权重总和 = 10000
-    const totalWeight = effective.reduce((sum, r) => sum + r.trafficWeight, 0);
-    expect(totalWeight).toBe(10000);
-  });
-});
 });

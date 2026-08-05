@@ -1,11 +1,3 @@
-import { db } from "@/lib/db/client";
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
 /**
  * POST /api/v1/threads/{thread_id}/handoffs/{handoff_id}:resolve — 员工解析 Handoff 请求（S10-W04，§3.18）。
  *
@@ -39,15 +31,23 @@ import {
  * - HandoffVersionConflictError → 412 ETAG_MISMATCH
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
-import { resolveHandoff } from "@/lib/v11/conversation/handoff-queries";
+import { resolveHandoff } from "@/lib/conversations/handoff-queries";
 import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { db } from "@/lib/db/client";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -58,7 +58,7 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import { v11UserActionRequest } from "@/lib/v11/schema/user-action-request";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -112,24 +112,24 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：resolution 仅接受 approve/deny");
+    return schemaInvalidTable(requestId, "请求体非法：resolution 仅接受 approve/deny");
   }
 
   // 5. 校验 UserActionRequest 属于该 Thread + purpose=handoff + state=pending
   //    （非该 Thread / 非 handoff / 非 pending → 404 隐藏式，不泄露存在）
   const [requestRow] = await db
     .select()
-    .from(v11UserActionRequest)
+    .from(userActionRequestTable)
     .where(
       and(
-        eq(v11UserActionRequest.tenantId, principal.tenantId),
-        eq(v11UserActionRequest.id, handoffId),
+        eq(userActionRequestTable.tenantId, principal.tenantId),
+        eq(userActionRequestTable.id, handoffId),
       ),
     )
     .limit(1);

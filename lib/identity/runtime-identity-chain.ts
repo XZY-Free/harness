@@ -24,7 +24,7 @@
  * - runtime/route-helpers.ts：resolveRuntimePrincipal 调用本模块校验 Lease 绑定。
  */
 import type { WorkloadTokenClaims } from "@/lib/identity/workload-token";
-import type { V11EnvironmentLease } from "@/lib/v11/schema/environment";
+import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ const ACTIVE_LEASE_STATE = "active";
  *
  * @throws RuntimeIdentityChainError lease_not_active / lease_expired / lease_heartbeat_stale
  */
-export function assertRuntimeLeaseActive(lease: V11EnvironmentLease, now: Date = new Date()): void {
+export function assertRuntimeLeaseActive(lease: EnvironmentLease, now: Date = new Date()): void {
   if (lease.leaseState !== ACTIVE_LEASE_STATE) {
     throw new RuntimeIdentityChainError(
       "lease_not_active",
@@ -95,7 +95,7 @@ export function assertRuntimeLeaseActive(lease: V11EnvironmentLease, now: Date =
  * @throws RuntimeIdentityChainError lease_invocation_mismatch
  */
 export function assertRuntimeLeaseBoundToInvocation(
-  lease: V11EnvironmentLease,
+  lease: EnvironmentLease,
   invocationId: string,
 ): void {
   if (lease.invocationId !== invocationId) {
@@ -111,10 +111,7 @@ export function assertRuntimeLeaseBoundToInvocation(
  *
  * @throws RuntimeIdentityChainError lease_tenant_mismatch
  */
-export function assertRuntimeLeaseBoundToTenant(
-  lease: V11EnvironmentLease,
-  tenantId: string,
-): void {
+export function assertRuntimeLeaseBoundToTenant(lease: EnvironmentLease, tenantId: string): void {
   if (lease.tenantId !== tenantId) {
     throw new RuntimeIdentityChainError(
       "lease_tenant_mismatch",
@@ -132,7 +129,7 @@ export function assertRuntimeLeaseBoundToTenant(
  * @throws RuntimeIdentityChainError lease_capabilities_missing / lease_runtime_revision_mismatch
  */
 export function assertRuntimeLeaseBoundToRuntimeRevision(
-  lease: V11EnvironmentLease,
+  lease: EnvironmentLease,
   runtimeRevisionId: string,
 ): void {
   if (!lease.capabilitiesJson) {
@@ -172,7 +169,7 @@ export function assertRuntimeLeaseBoundToRuntimeRevision(
  */
 export function verifyRuntimeIdentityChain(params: {
   claims: WorkloadTokenClaims;
-  lease: V11EnvironmentLease;
+  lease: EnvironmentLease;
   now?: Date;
 }): void {
   const { claims, lease } = params;

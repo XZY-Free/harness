@@ -12,7 +12,7 @@
  * - 校验 Idempotency-Key（必填）+ computeRequestHash → enforceIdempotency。
  * - 校验请求体（checkpoint_type / source_ranges / summary / summary_hash / token_accounting）。
  * - invocationId 来自 Token claims，不信任请求体（请求体的 invocation_id 仅用于校验一致性）。
- * - 写入 V11ContextCheckpoint + 幂等记录（同事务）。
+ * - 写入 ContextCheckpoint + 幂等记录（同事务）。
  * - 返回 201 + checkpoint 投影。
  *
  * 错误映射：
@@ -32,22 +32,10 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  getRequestId,
   apiError,
   apiSuccess,
+  getRequestId,
 } from "@/lib/http";
-import {
-  computeSourceRangesHash,
-  createContextCheckpoint,
-  findContextCheckpointByUniqueKey,
-  isValidSummaryHash,
-} from "@/lib/v11/context/checkpoint-queries";
-import {
-  type GatewayPrincipal,
-  gatewayAuthErrorResponse,
-  resolveGatewayPrincipal,
-  v11GatewaySchemaInvalid,
-} from "@/lib/v11/gateway/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -63,7 +51,19 @@ import {
   CHECKPOINT_TYPES,
   type CheckpointType,
   type SourceRange,
-} from "@/lib/v11/schema/context-checkpoint";
+} from "@/lib/persistence/schema/context-checkpoint";
+import {
+  computeSourceRangesHash,
+  createContextCheckpoint,
+  findContextCheckpointByUniqueKey,
+  isValidSummaryHash,
+} from "@/lib/v11/context/checkpoint-queries";
+import {
+  type GatewayPrincipal,
+  gatewayAuthErrorResponse,
+  gatewaySchemaInvalidTable,
+  resolveGatewayPrincipal,
+} from "@/lib/v11/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -231,9 +231,7 @@ function parseSourceRanges(raw: unknown[]): SourceRange[] {
 }
 
 /** 从 GatewayPrincipal 构造 WorkloadPrincipal（供 callerFromWorkloadPrincipal 使用）。 */
-function toWorkloadPrincipal(
-  principal: GatewayPrincipal,
-): WorkloadPrincipal {
+function toWorkloadPrincipal(principal: GatewayPrincipal): WorkloadPrincipal {
   return {
     tenantId: principal.tenantId,
     audience: principal.audience,
@@ -263,7 +261,7 @@ export async function contextCheckpointPOST(request: Request): Promise<Response>
   // 2. 校验 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER);
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
-    return v11GatewaySchemaInvalid(requestId, "Idempotency-Key 头必填");
+    return gatewaySchemaInvalidTable(requestId, "Idempotency-Key 头必填");
   }
 
   // 3. 解析请求体
@@ -271,13 +269,13 @@ export async function contextCheckpointPOST(request: Request): Promise<Response>
   try {
     body = await request.json();
   } catch {
-    return v11GatewaySchemaInvalid(requestId, "请求体必须是合法 JSON");
+    return gatewaySchemaInvalidTable(requestId, "请求体必须是合法 JSON");
   }
 
   // 4. 校验请求体
   const [valid, errorMessage, parsed] = validateBody(body, principal.invocationId);
   if (!valid || !parsed) {
-    return v11GatewaySchemaInvalid(requestId, errorMessage);
+    return gatewaySchemaInvalidTable(requestId, errorMessage);
   }
 
   // 5. 幂等守卫
@@ -372,7 +370,7 @@ export async function contextCheckpointPOST(request: Request): Promise<Response>
   }
 }
 
-/** 把 V11ContextCheckpoint 行投影为 API 响应体。 */
+/** 把 ContextCheckpoint 行投影为 API 响应体。 */
 function projectCheckpoint(checkpoint: {
   id: string;
   invocationId: string;

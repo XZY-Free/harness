@@ -1,4 +1,4 @@
-import type { V11ClientGoal, V11ClientThread, V11ClientTurn } from "@/lib/v11/client/types";
+import type { ClientGoal, ClientThread, ClientTurn } from "@/lib/v11/client/types";
 /**
  * S10-W02：ThreadHeader 组件测试。
  *
@@ -16,7 +16,7 @@ afterEach(() => {
   cleanup();
 });
 
-function buildThread(overrides: Partial<V11ClientThread> = {}): V11ClientThread {
+function buildThread(overrides: Partial<ClientThread> = {}): ClientThread {
   return {
     id: "thread-001",
     title: "测试会话",
@@ -35,7 +35,7 @@ function buildThread(overrides: Partial<V11ClientThread> = {}): V11ClientThread 
   };
 }
 
-function buildTurn(turnState: V11ClientTurn["turn_state"]): V11ClientTurn {
+function buildTurn(turnState: ClientTurn["turn_state"]): ClientTurn {
   return {
     id: "turn-001",
     turn_sequence: 1,
@@ -56,7 +56,7 @@ function buildTurn(turnState: V11ClientTurn["turn_state"]): V11ClientTurn {
   };
 }
 
-function buildGoal(state: V11ClientGoal["goal_state"]): V11ClientGoal {
+function buildGoal(state: ClientGoal["goal_state"]): ClientGoal {
   return {
     id: "goal-001",
     thread_id: "thread-001",

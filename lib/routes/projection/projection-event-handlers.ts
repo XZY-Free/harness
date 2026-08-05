@@ -18,19 +18,22 @@
  * §4.4: 缺失对象清理 — Route/RouteSet 不存在时删除孤立投影。
  */
 
-import type { ControlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
-import type { RouteEligibilityStore } from "./route-eligibility-store";
-import type { BuildRouteEligibilityInput, BuildRouteEligibilityResult } from "./build-route-eligibility";
-import { validateEventPayload } from "@/lib/control-plane/events/event-contracts";
 import type { ControlPlaneEventType } from "@/lib/control-plane/events/control-plane-event";
+import type { ControlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import { validateEventPayload } from "@/lib/control-plane/events/event-contracts";
+import type {
+  BuildRouteEligibilityInput,
+  BuildRouteEligibilityResult,
+} from "./build-route-eligibility";
+import type { RouteEligibilityStore } from "./route-eligibility-store";
 
-export interface OutboxEventHandler {
-  (event: ControlPlaneOutboxEvent): Promise<void>;
-}
+export type OutboxEventHandler = (event: ControlPlaneOutboxEvent) => Promise<void>;
 
 export interface ProjectionEventHandlerDeps {
   store: RouteEligibilityStore;
-  buildRouteEligibility: (input: BuildRouteEligibilityInput) => Promise<BuildRouteEligibilityResult>;
+  buildRouteEligibility: (
+    input: BuildRouteEligibilityInput,
+  ) => Promise<BuildRouteEligibilityResult>;
 }
 
 /**
@@ -98,7 +101,12 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
       case "route.activated": {
         const routeId = payload.route_id as string;
         const tenantId = payload.tenant_id as string;
-        await deps.buildRouteEligibility({ tenantId, routeId, sourceEventId, sourceAggregateVersion });
+        await deps.buildRouteEligibility({
+          tenantId,
+          routeId,
+          sourceEventId,
+          sourceAggregateVersion,
+        });
         break;
       }
 
@@ -153,7 +161,11 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
       // ─── Conformance 事件 ────────────────────────
       case "runtime.conformance.recorded": {
         const runtimeRevisionId = payload.runtime_revision_id as string;
-        await rebuildProjectionsByRevision(runtimeRevisionId, sourceEventId, sourceAggregateVersion);
+        await rebuildProjectionsByRevision(
+          runtimeRevisionId,
+          sourceEventId,
+          sourceAggregateVersion,
+        );
         break;
       }
 
@@ -165,7 +177,10 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
         if (lifecycleState !== "enabled") {
           const projections = await deps.store.findProjectionsByAgentId(agentId);
           for (const projection of projections) {
-            await deps.store.markIneligible(projection.routeId, `agent_lifecycle_${lifecycleState}`);
+            await deps.store.markIneligible(
+              projection.routeId,
+              `agent_lifecycle_${lifecycleState}`,
+            );
           }
         } else {
           // Agent 重新 enabled → 重建所有相关投影
@@ -189,7 +204,10 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
           // Runtime 非 enabled → 标记相关投影 Ineligible
           const projections = await deps.store.findProjectionsByRuntimeId(runtimeId);
           for (const projection of projections) {
-            await deps.store.markIneligible(projection.routeId, `runtime_lifecycle_${lifecycleState}`);
+            await deps.store.markIneligible(
+              projection.routeId,
+              `runtime_lifecycle_${lifecycleState}`,
+            );
           }
         } else {
           // Runtime 重新 enabled → 重建相关投影
@@ -236,7 +254,12 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
       case "route.revision.validated": {
         const routeId = payload.route_id as string;
         const tenantId = payload.tenant_id as string;
-        await deps.buildRouteEligibility({ tenantId, routeId, sourceEventId, sourceAggregateVersion });
+        await deps.buildRouteEligibility({
+          tenantId,
+          routeId,
+          sourceEventId,
+          sourceAggregateVersion,
+        });
         break;
       }
 
@@ -278,7 +301,10 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
     }
   }
 
-  async function markProjectionsIneligibleByRevision(revisionId: string, reason: string): Promise<void> {
+  async function markProjectionsIneligibleByRevision(
+    revisionId: string,
+    reason: string,
+  ): Promise<void> {
     const projections = await deps.store.findProjectionsByRevision(revisionId);
     for (const projection of projections) {
       await deps.store.markIneligible(projection.routeId, reason);

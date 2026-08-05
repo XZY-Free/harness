@@ -49,7 +49,13 @@ export function isValidProvisioningTransition(
 ): boolean {
   const ALLOWED: Record<ProvisioningState, ProvisioningState[]> = {
     pending: ["running", "cancelled"],
-    running: ["waiting_external_evidence", "waiting_conformance", "ready", "retryable_failed", "permanent_failed"],
+    running: [
+      "waiting_external_evidence",
+      "waiting_conformance",
+      "ready",
+      "retryable_failed",
+      "permanent_failed",
+    ],
     waiting_external_evidence: ["running", "retryable_failed", "permanent_failed", "cancelled"],
     waiting_conformance: ["running", "retryable_failed", "permanent_failed", "cancelled"],
     ready: [],
@@ -61,10 +67,7 @@ export function isValidProvisioningTransition(
 }
 
 /** 判断是否可被 Worker 领取。 */
-export function isProvisioningClaimable(
-  request: HostedProvisioningRequest,
-  now: Date,
-): boolean {
+export function isProvisioningClaimable(request: HostedProvisioningRequest, now: Date): boolean {
   if (request.state !== "pending" && request.state !== "retryable_failed") return false;
   if (request.leaseExpiresAt && request.leaseExpiresAt > now) return false;
   if (request.nextAttemptAt && request.nextAttemptAt > now) return false;
@@ -74,8 +77,8 @@ export function isProvisioningClaimable(
 /** 计算供应请求的指数退避。 */
 export function computeProvisioningBackoff(
   attemptCount: number,
-  baseMs: number = 10_000,
-  maxMs: number = 600_000,
+  baseMs = 10_000,
+  maxMs = 600_000,
 ): Date {
   const delay = Math.min(baseMs * Math.pow(2, attemptCount), maxMs);
   return new Date(Date.now() + delay);

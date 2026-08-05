@@ -80,7 +80,9 @@ export interface RouteSetActivationResult {
  * 6. 生效时间合法
  * 7. 权重 10000 在 Group 完整有效窗口内持续成立
  */
-export function validateRouteSetActivation(input: RouteSetActivationInput): RouteSetActivationResult {
+export function validateRouteSetActivation(
+  input: RouteSetActivationInput,
+): RouteSetActivationResult {
   const errors: RouteSetValidationError[] = [];
   const activeRoutes = input.desiredRoutes.filter((r) => r.activationState === "active");
 
@@ -126,7 +128,11 @@ export function validateRouteSetActivation(input: RouteSetActivationInput): Rout
 
   // 6. 生效时间合法
   for (const route of input.desiredRoutes) {
-    if (route.effectiveFrom && route.effectiveUntil && route.effectiveFrom >= route.effectiveUntil) {
+    if (
+      route.effectiveFrom &&
+      route.effectiveUntil &&
+      route.effectiveFrom >= route.effectiveUntil
+    ) {
       errors.push({
         code: "ROUTE_TIME_INVALID",
         message: `Route ${route.routeId} effectiveFrom >= effectiveUntil`,

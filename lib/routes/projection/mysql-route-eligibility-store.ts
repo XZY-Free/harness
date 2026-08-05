@@ -3,16 +3,11 @@
  */
 
 import { db } from "@/lib/db/client";
-import { routeEligibilityProjection } from "./route-eligibility-projection-record";
-import type {
-  RouteEligibilityProjectionRecord,
-} from "./route-eligibility-projection-record";
-import type {
-  RouteEligibilityStore,
-  UpsertProjectionInput,
-} from "./route-eligibility-store";
-import { and, eq, sql, inArray } from "drizzle-orm";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { routeEligibilityProjection } from "./route-eligibility-projection-record";
+import type { RouteEligibilityProjectionRecord } from "./route-eligibility-projection-record";
+import type { RouteEligibilityStore, UpsertProjectionInput } from "./route-eligibility-store";
 
 export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
   upsertProjection: async (input: UpsertProjectionInput) => {

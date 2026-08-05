@@ -1,11 +1,11 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { V11ClientItem } from "@/lib/v11/client/types";
+import type { ClientItem } from "@/lib/v11/client/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface MessageLocatorProps {
-  readonly items: readonly V11ClientItem[];
+  readonly items: readonly ClientItem[];
   readonly scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -170,7 +170,7 @@ export function MessageLocator({ items, scrollContainerRef }: MessageLocatorProp
 function PreviewCard({
   tick,
   items,
-}: { readonly tick: Tick; readonly items: readonly V11ClientItem[] }) {
+}: { readonly tick: Tick; readonly items: readonly ClientItem[] }) {
   const userItem = items[tick.index]!;
   const userText = extractItemText(userItem);
 
@@ -193,7 +193,7 @@ function PreviewCard({
   );
 }
 
-function extractItemText(item: V11ClientItem): string {
+function extractItemText(item: ClientItem): string {
   if (!item.content) return "";
   if (typeof item.content === "string") return item.content;
   if (typeof item.content === "object" && item.content !== null) {

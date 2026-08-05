@@ -1,9 +1,9 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import {
   getEvaluationRunById,
@@ -59,7 +59,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   if (limitParam) {
     limit = Number.parseInt(limitParam, 10);
     if (!Number.isFinite(limit) || limit <= 0) {
-      return v11SchemaInvalid(requestId, "limit 必须是正整数");
+      return schemaInvalidTable(requestId, "limit 必须是正整数");
     }
   }
 

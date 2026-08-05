@@ -1,17 +1,17 @@
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import { listServiceLevelIndicatorsByTenant } from "@/lib/v11/operations/usage-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   CAPACITY_SCOPE_TYPES,
   type CapacityScopeType,
   SLI_KEYS,
   type SliKey,
-} from "@/lib/v11/schema/usage";
+} from "@/lib/persistence/schema/usage";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
+import { listServiceLevelIndicatorsByTenant } from "@/lib/v11/operations/usage-queries";
 /**
  * GET /admin/api/v1/service-level-indicators — 列出租户内所有 ServiceLevelIndicator（S11-W07）。
  *
@@ -54,13 +54,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let scopeType: CapacityScopeType | undefined;
   if (scopeTypeParam) {
     if (!VALID_SCOPE_TYPES.has(scopeTypeParam)) {
-      return v11SchemaInvalid(requestId, `scope_type 非法: ${scopeTypeParam}`);
+      return schemaInvalidTable(requestId, `scope_type 非法: ${scopeTypeParam}`);
     }
     scopeType = scopeTypeParam as CapacityScopeType;
   }
@@ -68,7 +68,7 @@ export async function GET(request: Request): Promise<Response> {
   let indicatorKey: SliKey | undefined;
   if (indicatorKeyParam) {
     if (!VALID_SLI_KEYS.has(indicatorKeyParam)) {
-      return v11SchemaInvalid(requestId, `indicator_key 非法: ${indicatorKeyParam}`);
+      return schemaInvalidTable(requestId, `indicator_key 非法: ${indicatorKeyParam}`);
     }
     indicatorKey = indicatorKeyParam as SliKey;
   }
@@ -77,7 +77,7 @@ export async function GET(request: Request): Promise<Response> {
   let breachOnly = false;
   if (breachOnlyParam !== null) {
     if (breachOnlyParam !== "true" && breachOnlyParam !== "false") {
-      return v11SchemaInvalid(requestId, `breach_only 必须为 true/false: ${breachOnlyParam}`);
+      return schemaInvalidTable(requestId, `breach_only 必须为 true/false: ${breachOnlyParam}`);
     }
     breachOnly = breachOnlyParam === "true";
   }

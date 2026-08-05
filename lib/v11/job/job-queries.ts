@@ -26,19 +26,19 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
 import {
+  type Job,
+  type JobEvent,
+  type JobEventActorType,
+  type JobState,
+  type JobType,
+  jobTable,
+} from "@/lib/persistence/schema/job";
+import {
   JobNotFoundError,
   JobStateConflictError,
   JobVersionConflictError,
 } from "@/lib/v11/job/errors";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/v11/job/job-event-queries";
-import {
-  type JobEventActorType,
-  type JobState,
-  type JobType,
-  type V11Job,
-  type V11JobEvent,
-  v11Job,
-} from "@/lib/v11/schema/job";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -85,16 +85,16 @@ export interface CreateJobParams {
 
 /** createJob 返回结果。 */
 export interface CreateJobResult {
-  job: V11Job;
+  job: Job;
   /** 写入的 job.queued Event（sequence=1）。 */
-  queuedEvent: V11JobEvent;
+  queuedEvent: JobEvent;
 }
 
 /**
  * 领域服务创建 Job。
  *
  * 流程（同事务）：
- * 1. INSERT V11Job（jobState=queued，lastEventSequence=0）
+ * 1. INSERT Job（jobState=queued，lastEventSequence=0）
  * 2. allocateJobEventSequences(1) → sequence=1
  * 3. insertJobEvent(job.queued) → JobEvent
  * 4. UPDATE Job.lastEventSequence（已在 allocateJobEventSequences 内完成）
@@ -123,8 +123,8 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
   const jobId = randomUUID();
 
   const result = await db.transaction(async (tx) => {
-    // 1. INSERT V11Job
-    await tx.insert(v11Job).values({
+    // 1. INSERT Job
+    await tx.insert(jobTable).values({
       id: jobId,
       tenantId: params.tenantId,
       agentId: params.agentId,
@@ -175,7 +175,7 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
     });
 
     // 4. 回读 Job
-    const [job] = await tx.select().from(v11Job).where(eq(v11Job.id, jobId)).limit(1);
+    const [job] = await tx.select().from(jobTable).where(eq(jobTable.id, jobId)).limit(1);
     if (!job) {
       throw new Error(`createJob: Job 行未找到（id=${jobId}）`);
     }
@@ -189,11 +189,11 @@ export async function createJob(params: CreateJobParams): Promise<CreateJobResul
 // ─── 查询 ────────────────────────────────────────────────────
 
 /** 按 id 获取 Job。不存在返回 null。 */
-export async function getJobById(tenantId: string, jobId: string): Promise<V11Job | null> {
+export async function getJobById(tenantId: string, jobId: string): Promise<Job | null> {
   const [row] = await db
     .select()
-    .from(v11Job)
-    .where(and(eq(v11Job.tenantId, tenantId), eq(v11Job.id, jobId)))
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
     .limit(1);
   return row ?? null;
 }
@@ -203,16 +203,16 @@ export async function listJobsByAgent(
   tenantId: string,
   agentId: string,
   options?: { limit?: number; jobState?: JobState },
-): Promise<V11Job[]> {
-  const conditions = [eq(v11Job.tenantId, tenantId), eq(v11Job.agentId, agentId)];
+): Promise<Job[]> {
+  const conditions = [eq(jobTable.tenantId, tenantId), eq(jobTable.agentId, agentId)];
   if (options?.jobState) {
-    conditions.push(eq(v11Job.jobState, options.jobState));
+    conditions.push(eq(jobTable.jobState, options.jobState));
   }
   return db
     .select()
-    .from(v11Job)
+    .from(jobTable)
     .where(and(...conditions))
-    .orderBy(desc(v11Job.createdAt))
+    .orderBy(desc(jobTable.createdAt))
     .limit(options?.limit ?? 100);
 }
 
@@ -221,12 +221,12 @@ export async function listJobsByState(
   tenantId: string,
   jobState: JobState,
   options?: { limit?: number },
-): Promise<V11Job[]> {
+): Promise<Job[]> {
   return db
     .select()
-    .from(v11Job)
-    .where(and(eq(v11Job.tenantId, tenantId), eq(v11Job.jobState, jobState)))
-    .orderBy(desc(v11Job.createdAt))
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.jobState, jobState)))
+    .orderBy(desc(jobTable.createdAt))
     .limit(options?.limit ?? 100);
 }
 
@@ -235,18 +235,18 @@ export async function listTerminalJobsByAgent(
   tenantId: string,
   agentId: string,
   options?: { limit?: number },
-): Promise<V11Job[]> {
+): Promise<Job[]> {
   return db
     .select()
-    .from(v11Job)
+    .from(jobTable)
     .where(
       and(
-        eq(v11Job.tenantId, tenantId),
-        eq(v11Job.agentId, agentId),
-        inArray(v11Job.jobState, [...TERMINAL_STATES]),
+        eq(jobTable.tenantId, tenantId),
+        eq(jobTable.agentId, agentId),
+        inArray(jobTable.jobState, [...TERMINAL_STATES]),
       ),
     )
-    .orderBy(desc(v11Job.createdAt))
+    .orderBy(desc(jobTable.createdAt))
     .limit(options?.limit ?? 100);
 }
 
@@ -269,11 +269,11 @@ export async function updateJobState(
   jobId: string,
   nextState: JobState,
   expectedVersionNo: number,
-): Promise<V11Job> {
+): Promise<Job> {
   const [current] = await tx
     .select()
-    .from(v11Job)
-    .where(and(eq(v11Job.tenantId, tenantId), eq(v11Job.id, jobId)))
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
     .for("update")
     .limit(1);
   if (!current) {
@@ -297,7 +297,7 @@ export async function updateJobState(
 
   // 计算 startedAt / finishedAt
   const now = new Date();
-  const updates: Partial<V11Job> = {
+  const updates: Partial<Job> = {
     jobState: nextState,
     versionNo: current.versionNo + 1,
     updatedAt: now,
@@ -309,9 +309,9 @@ export async function updateJobState(
     updates.finishedAt = now;
   }
 
-  await tx.update(v11Job).set(updates).where(eq(v11Job.id, jobId));
+  await tx.update(jobTable).set(updates).where(eq(jobTable.id, jobId));
 
-  const [updated] = await tx.select().from(v11Job).where(eq(v11Job.id, jobId)).limit(1);
+  const [updated] = await tx.select().from(jobTable).where(eq(jobTable.id, jobId)).limit(1);
   if (!updated) {
     throw new Error(`updateJobState: Job 行未找到（id=${jobId}）`);
   }
@@ -340,11 +340,11 @@ export async function recordJobResult(
     correlationId?: string;
     idempotencyKey?: string;
   },
-): Promise<{ job: V11Job; resultRecordedEvent: V11JobEvent }> {
+): Promise<{ job: Job; resultRecordedEvent: JobEvent }> {
   const [current] = await tx
     .select()
-    .from(v11Job)
-    .where(and(eq(v11Job.tenantId, tenantId), eq(v11Job.id, jobId)))
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
     .for("update")
     .limit(1);
   if (!current) {
@@ -353,13 +353,13 @@ export async function recordJobResult(
 
   // 写 resultRef/resultHash
   await tx
-    .update(v11Job)
+    .update(jobTable)
     .set({
       resultRef: result.resultRef,
       resultHash: result.resultHash,
       updatedAt: new Date(),
     })
-    .where(eq(v11Job.id, jobId));
+    .where(eq(jobTable.id, jobId));
 
   // 写 job.result_recorded Event
   const startSeq = await allocateJobEventSequences(tx, jobId, 1);
@@ -379,7 +379,7 @@ export async function recordJobResult(
       : undefined,
   });
 
-  const [updated] = await tx.select().from(v11Job).where(eq(v11Job.id, jobId)).limit(1);
+  const [updated] = await tx.select().from(jobTable).where(eq(jobTable.id, jobId)).limit(1);
   if (!updated) {
     throw new Error(`recordJobResult: Job 行未找到（id=${jobId}）`);
   }
@@ -390,12 +390,12 @@ export async function recordJobResult(
 // ─── re-export 供外部统一从本模块引入类型 ───────────────────
 
 export type {
-  V11Job,
-  V11JobEvent,
+  Job,
+  JobEvent,
   JobState,
   JobType,
   JobEventActorType,
-} from "@/lib/v11/schema/job";
+} from "@/lib/persistence/schema/job";
 
 // ─── S11-W04 管理面排障：跨 agent 列出租户所有 Job ─────────
 
@@ -418,23 +418,23 @@ export async function listJobsByTenant(
     limit?: number;
     afterCreatedAt?: Date;
   },
-): Promise<{ items: V11Job[]; nextCursor: string | null }> {
+): Promise<{ items: Job[]; nextCursor: string | null }> {
   const limit = Math.min(options?.limit ?? 50, 200);
-  const conditions = [eq(v11Job.tenantId, tenantId)];
+  const conditions = [eq(jobTable.tenantId, tenantId)];
   if (options?.jobState) {
-    conditions.push(eq(v11Job.jobState, options.jobState));
+    conditions.push(eq(jobTable.jobState, options.jobState));
   }
   if (options?.afterCreatedAt) {
     // 按 createdAt 降序取下一页：游标为上一页最后一条的 createdAt
-    conditions.push(sql`${v11Job.createdAt} < ${options.afterCreatedAt}`);
+    conditions.push(sql`${jobTable.createdAt} < ${options.afterCreatedAt}`);
   }
 
   // 取 limit+1 行：第 limit+1 行存在说明有下一页，其 createdAt 即下一个 cursor
   const rows = await db
     .select()
-    .from(v11Job)
+    .from(jobTable)
     .where(and(...conditions))
-    .orderBy(desc(v11Job.createdAt))
+    .orderBy(desc(jobTable.createdAt))
     .limit(limit + 1);
 
   let nextCursor: string | null = null;

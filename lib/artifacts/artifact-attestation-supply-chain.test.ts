@@ -13,7 +13,6 @@
  * 真实签名（ed25519）+ InMemoryManagedArtifactStore，复用 artifact-attestation.test.ts 的辅助模式。
  */
 import { type KeyObject, generateKeyPairSync, randomUUID, sign } from "node:crypto";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -25,12 +24,6 @@ import {
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
-  getAttestationById,
-  getVerifiedAttestationForRevision,
-  listAttestations,
-  listAttestationsByRevision,
-} from "@/lib/artifacts/persistence/artifact-attestation-reader";
-import {
   AttestationAlreadyRevokedError,
   AttestationNotFoundError,
   assertAttestationGate,
@@ -38,6 +31,13 @@ import {
   revokeAttestation,
   verifyAndPersistAttestation,
 } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import {
+  getAttestationById,
+  getVerifiedAttestationForRevision,
+  listAttestations,
+  listAttestationsByRevision,
+} from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
@@ -45,7 +45,10 @@ import { listAuditEvents } from "@/lib/identity/audit-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { ATTESTATION_FAILURE_CODES, type V11ArtifactAttestation } from "@/lib/v11/schema/artifact";
+import {
+  ATTESTATION_FAILURE_CODES,
+  type ArtifactAttestation,
+} from "@/lib/persistence/schema/artifact";
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -173,7 +176,7 @@ async function createVerifiedAttestation(
   artifactContent: string,
   builderIdentity = "builder:company-agent-runtime",
   actor: AuditActor = buildActor(tenantId, "ci-service-001"),
-): Promise<{ attestation: V11ArtifactAttestation; keyPair: BuilderKeyPair; digest: string }> {
+): Promise<{ attestation: ArtifactAttestation; keyPair: BuilderKeyPair; digest: string }> {
   const keyPair = generateBuilderKeyPair(builderIdentity);
   const builderKeys: BuilderKeyRegistry = { [builderIdentity]: keyPair.publicKeyBase64 };
   const digest = computeArtifactDigest(artifactContent);
@@ -417,7 +420,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
       WHERE \`tenantId\` = ${tenantId} AND \`digest\` = ${digest}
     `)) as unknown as [unknown[]];
     const [attestations] = (await db.execute(sql`
-      SELECT \`id\` FROM \`V11ArtifactAttestation\`
+      SELECT \`id\` FROM \`ArtifactAttestation\`
       WHERE \`tenantId\` = ${tenantId} AND \`artifactRevisionId\` = ${revisionId}
     `)) as unknown as [unknown[]];
     expect(artifacts).toHaveLength(0);
@@ -698,7 +701,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
 
     const [attestationRows] = (await db.execute(sql`
       SELECT \`revokedAt\`, \`revokedBy\`, \`revocationReason\`
-      FROM \`V11ArtifactAttestation\`
+      FROM \`ArtifactAttestation\`
       WHERE \`id\` = ${attestation.id}
     `)) as unknown as [
       Array<{ revokedAt: Date | null; revokedBy: string | null; revocationReason: string | null }>,

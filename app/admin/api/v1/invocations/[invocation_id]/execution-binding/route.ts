@@ -1,12 +1,12 @@
 import { serializeExecutionBinding } from "@/lib/executions/application/serialize-execution-binding";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { getInvocationById } from "@/lib/v11/runtime/invocation-queries";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/execution-binding — Invocation 的 ExecutionBinding（S11-W04）。
  *
@@ -50,7 +50,10 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const binding = await getExecutionBindingByInvocation(principal.tenantId, invocationId);
   if (!binding) {
-    return resourceNotFound(requestId, `ExecutionBinding 不存在或无权访问: invocation=${invocationId}`);
+    return resourceNotFound(
+      requestId,
+      `ExecutionBinding 不存在或无权访问: invocation=${invocationId}`,
+    );
   }
 
   const body = serializeExecutionBinding(binding);

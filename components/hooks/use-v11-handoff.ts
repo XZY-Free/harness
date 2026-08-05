@@ -11,7 +11,7 @@
  * 职责：
  * - resolveHandoff：员工解析 handoff 请求（POST /api/v1/threads/{thread_id}/handoffs/{handoff_id}:resolve）。
  * - 不在事务 ack 前宣称已解析：UI 状态固定为 "busy"，等待 200 响应后再更新 lastResolve。
- * - 错误转化为 V11ClientVisibleError。
+ * - 错误转化为 ClientVisibleError。
  *
  * 关键不变量：
  * - resolve 是同步命令（200，非 202）：后端事务内完成 Thread.primary_agent_id 变更 + Event 写入。
@@ -31,9 +31,9 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
 import type {
-  V11ClientErrorBody,
-  V11ClientHandoffResolveResponse,
-  V11ClientVisibleError,
+  ClientErrorBody,
+  ClientHandoffResolveResponse,
+  ClientVisibleError,
 } from "@/lib/v11/client/types";
 import { useCallback, useState } from "react";
 
@@ -47,9 +47,9 @@ export interface UseV11HandoffResult {
   /** 是否有操作进行中。 */
   readonly busy: boolean;
   /** 错误。 */
-  readonly error: V11ClientVisibleError | null;
+  readonly error: ClientVisibleError | null;
   /** 最近一次解析结果（用于 UI 显示 "已同意/已拒绝" 状态）。 */
-  readonly lastResolve: V11ClientHandoffResolveResponse | null;
+  readonly lastResolve: ClientHandoffResolveResponse | null;
   /** 解析 handoff 请求。返回 true 表示成功。 */
   readonly resolve: (handoffId: string, resolution: "approve" | "deny") => Promise<boolean>;
   /** 清除错误。 */
@@ -65,11 +65,11 @@ function generateIdempotencyKey(): string {
 }
 
 /** 解析错误响应为可见错误。 */
-async function parseError(response: Response): Promise<V11ClientVisibleError> {
+async function parseError(response: Response): Promise<ClientVisibleError> {
   const bodyText = await response.text().catch(() => "");
-  let errorBody: V11ClientErrorBody | null = null;
+  let errorBody: ClientErrorBody | null = null;
   try {
-    errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+    errorBody = JSON.parse(bodyText) as ClientErrorBody;
   } catch {
     // ignore
   }
@@ -87,8 +87,8 @@ async function parseError(response: Response): Promise<V11ClientVisibleError> {
 /** V11 Handoff Hook。 */
 export function useV11Handoff({ threadId }: UseV11HandoffParams): UseV11HandoffResult {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<V11ClientVisibleError | null>(null);
-  const [lastResolve, setLastResolve] = useState<V11ClientHandoffResolveResponse | null>(null);
+  const [error, setError] = useState<ClientVisibleError | null>(null);
+  const [lastResolve, setLastResolve] = useState<ClientHandoffResolveResponse | null>(null);
 
   const resolve = useCallback(
     async (handoffId: string, resolution: "approve" | "deny"): Promise<boolean> => {
@@ -122,7 +122,7 @@ export function useV11Handoff({ threadId }: UseV11HandoffParams): UseV11HandoffR
           setError(visible);
           return false;
         }
-        const data = (await resp.json()) as V11ClientHandoffResolveResponse;
+        const data = (await resp.json()) as ClientHandoffResolveResponse;
         setLastResolve(data);
         return true;
       } catch {

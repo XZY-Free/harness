@@ -13,15 +13,15 @@
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  */
 import { db } from "@/lib/db/client";
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import { workloadTokenRevocationTable } from "@/lib/persistence/schema/workload-token-revocation";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import { v11WorkloadTokenRevocation } from "@/lib/v11/schema/workload-token-revocation";
 import { and, desc, eq, lt } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -56,12 +56,12 @@ export async function GET(request: Request): Promise<Response> {
   const limitStr = url.searchParams.get("limit");
   const limit = limitStr ? Number.parseInt(limitStr, 10) : DEFAULT_LIMIT;
   if (!Number.isFinite(limit) || limit <= 0 || limit > MAX_LIMIT) {
-    return v11SchemaInvalid(requestId, `limit 必须为 1-${MAX_LIMIT} 之间的整数`);
+    return schemaInvalidTable(requestId, `limit 必须为 1-${MAX_LIMIT} 之间的整数`);
   }
 
   const tokenType = url.searchParams.get("token_type");
   if (tokenType && !VALID_TOKEN_TYPES.has(tokenType)) {
-    return v11SchemaInvalid(requestId, "token_type 必须为 runtime/gateway/service");
+    return schemaInvalidTable(requestId, "token_type 必须为 runtime/gateway/service");
   }
 
   const cursorRevokedAt = url.searchParams.get("cursor");
@@ -69,32 +69,32 @@ export async function GET(request: Request): Promise<Response> {
   if (cursorRevokedAt) {
     cursorDate = new Date(cursorRevokedAt);
     if (Number.isNaN(cursorDate.getTime())) {
-      return v11SchemaInvalid(requestId, "cursor 非合法 RFC 3339 时间");
+      return schemaInvalidTable(requestId, "cursor 非合法 RFC 3339 时间");
     }
   }
 
   // 构造查询条件（drizzle and() 组合多条件 WHERE）
-  const conditions = [eq(v11WorkloadTokenRevocation.tenantId, principal.tenantId)];
+  const conditions = [eq(workloadTokenRevocationTable.tenantId, principal.tenantId)];
   if (tokenType) {
-    conditions.push(eq(v11WorkloadTokenRevocation.tokenType, tokenType));
+    conditions.push(eq(workloadTokenRevocationTable.tokenType, tokenType));
   }
   if (cursorDate) {
-    conditions.push(lt(v11WorkloadTokenRevocation.revokedAt, cursorDate));
+    conditions.push(lt(workloadTokenRevocationTable.revokedAt, cursorDate));
   }
 
   const rows = await db
     .select({
-      id: v11WorkloadTokenRevocation.id,
-      jti: v11WorkloadTokenRevocation.jti,
-      token_type: v11WorkloadTokenRevocation.tokenType,
-      revoked_by: v11WorkloadTokenRevocation.revokedBy,
-      reason: v11WorkloadTokenRevocation.reason,
-      expires_at: v11WorkloadTokenRevocation.expiresAt,
-      revoked_at: v11WorkloadTokenRevocation.revokedAt,
+      id: workloadTokenRevocationTable.id,
+      jti: workloadTokenRevocationTable.jti,
+      token_type: workloadTokenRevocationTable.tokenType,
+      revoked_by: workloadTokenRevocationTable.revokedBy,
+      reason: workloadTokenRevocationTable.reason,
+      expires_at: workloadTokenRevocationTable.expiresAt,
+      revoked_at: workloadTokenRevocationTable.revokedAt,
     })
-    .from(v11WorkloadTokenRevocation)
+    .from(workloadTokenRevocationTable)
     .where(and(...conditions))
-    .orderBy(desc(v11WorkloadTokenRevocation.revokedAt))
+    .orderBy(desc(workloadTokenRevocationTable.revokedAt))
     .limit(limit + 1);
 
   const hasMore = rows.length > limit;

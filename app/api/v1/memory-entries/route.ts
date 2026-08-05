@@ -1,3 +1,9 @@
+import {
+  type Principal,
+  employeeAuthErrorResponse,
+  resolveEmployeePrincipal,
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
 /**
  * GET /api/v1/memory-entries — 列出当前用户可见的 MemoryEntry（阶段 7 S07-C04）。
  *
@@ -19,19 +25,13 @@
  * - 用户只能查看自己租户的 MemoryEntry（跨租户隔离）。
  * - restricted sensitivity 的 Entry 不回显正文。
  */
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
-import { listMemoryEntriesByScope } from "@/lib/v11/context/memory-queries";
-import {
-  type Principal,
-  employeeAuthErrorResponse,
-  resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   MEMORY_SCOPE_TYPES,
+  type MemoryEntry,
   type MemoryScopeType,
-  type V11MemoryEntry,
-} from "@/lib/v11/schema/memory";
+} from "@/lib/persistence/schema/memory";
+import { listMemoryEntriesByScope } from "@/lib/v11/context/memory-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -92,7 +92,7 @@ export async function GET(request: Request): Promise<Response> {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (error) {
     const authResponse = employeeAuthErrorResponse(error, requestId);
-    return authResponse ?? v11SchemaInvalid(requestId, "身份解析失败");
+    return authResponse ?? schemaInvalidTable(requestId, "身份解析失败");
   }
 
   // 2. 解析 query 参数
@@ -104,14 +104,14 @@ export async function GET(request: Request): Promise<Response> {
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
 
   if (limitParam && (!Number.isInteger(limit) || limit <= 0 || limit > 200)) {
-    return v11SchemaInvalid(requestId, "limit 必须是 1-200 之间的整数");
+    return schemaInvalidTable(requestId, "limit 必须是 1-200 之间的整数");
   }
 
   // 3. 校验 scope_type
   let scopeType: MemoryScopeType | null = null;
   if (scopeTypeParam) {
     if (!VALID_SCOPE_TYPES.has(scopeTypeParam)) {
-      return v11SchemaInvalid(
+      return schemaInvalidTable(
         requestId,
         `scope_type 必须是 ${MEMORY_SCOPE_TYPES.join(" / ")} 之一`,
       );
@@ -120,7 +120,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   // 4. 查询 MemoryEntry
-  let entries: V11MemoryEntry[];
+  let entries: MemoryEntry[];
   if (scopeType) {
     entries = await listMemoryEntriesByScope(principal.tenantId, scopeType, scopeRefParam, {
       limit,

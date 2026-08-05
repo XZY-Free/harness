@@ -2,7 +2,7 @@
  * V11 Tool / ToolProvider / Connection / CredentialRef / ToolSchemaRevision 仓储
  * （阶段 6 S06-C02）。
  *
- * 事实源：lib/v11/schema/tool.ts、阶段 6 Tool/Capability 模型。
+ * 事实源：lib/persistence/schema/tool.ts、阶段 6 Tool/Capability 模型。
  *
  * 职责：
  * - Connection 仓储：createConnection / getConnectionById / getConnectionByKey /
@@ -28,34 +28,34 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { isValidContentHash } from "@/lib/v11/capability/content-cache";
 import {
   CONNECTION_AUTH_METHODS,
   CONNECTION_TYPES,
+  type Connection,
   type ConnectionAuthMethod,
   type ConnectionLifecycleState,
   type ConnectionType,
+  type CredentialRef,
   type CredentialRefLifecycleState,
   TOOL_PROVIDER_TRUST_LEVELS,
   TOOL_PROVIDER_TYPES,
   TOOL_RISK_CLASSES,
+  type Tool,
   type ToolLifecycleState,
+  type ToolProvider,
   type ToolProviderLifecycleState,
   type ToolProviderTrustLevel,
   type ToolProviderType,
   type ToolRevisionState,
   type ToolRiskClass,
-  type V11Connection,
-  type V11CredentialRef,
-  type V11Tool,
-  type V11ToolProvider,
-  type V11ToolSchemaRevision,
-  v11Connection,
-  v11CredentialRef,
-  v11Tool,
-  v11ToolProvider,
-  v11ToolSchemaRevision,
-} from "@/lib/v11/schema/tool";
+  type ToolSchemaRevision,
+  connectionTable,
+  credentialRefTable,
+  toolProviderTable,
+  toolSchemaRevisionTable,
+  toolTable,
+} from "@/lib/persistence/schema/tool";
+import { isValidContentHash } from "@/lib/v11/capability/content-cache";
 import { and, asc, desc, eq, gt, inArray, isNull, max, or } from "drizzle-orm";
 
 // ─── 常量 ──────────────────────────────────────────────────
@@ -243,7 +243,7 @@ export async function createConnection(params: {
   endpointRef?: string | null;
   authMethod?: ConnectionAuthMethod;
   ownerUserId: string;
-}): Promise<V11Connection> {
+}): Promise<Connection> {
   assertValidKey(params.connectionKey, "connectionKey");
   assertValidConnectionType(params.connectionType);
   const authMethod = params.authMethod ?? "none";
@@ -274,7 +274,7 @@ export async function createConnection(params: {
 
   const id = randomUUID();
   try {
-    await db.insert(v11Connection).values({
+    await db.insert(connectionTable).values({
       id,
       tenantId: params.tenantId,
       connectionKey: params.connectionKey,
@@ -294,7 +294,7 @@ export async function createConnection(params: {
     throw err;
   }
 
-  const [row] = await db.select().from(v11Connection).where(eq(v11Connection.id, id)).limit(1);
+  const [row] = await db.select().from(connectionTable).where(eq(connectionTable.id, id)).limit(1);
   if (!row) {
     throw new Error(`createConnection: 行未找到（id=${id}）`);
   }
@@ -305,12 +305,15 @@ export async function createConnection(params: {
 export async function getConnectionById(params: {
   tenantId: string;
   connectionId: string;
-}): Promise<V11Connection | null> {
+}): Promise<Connection | null> {
   const [row] = await db
     .select()
-    .from(v11Connection)
+    .from(connectionTable)
     .where(
-      and(eq(v11Connection.tenantId, params.tenantId), eq(v11Connection.id, params.connectionId)),
+      and(
+        eq(connectionTable.tenantId, params.tenantId),
+        eq(connectionTable.id, params.connectionId),
+      ),
     )
     .limit(1);
   return row ?? null;
@@ -320,14 +323,14 @@ export async function getConnectionById(params: {
 export async function getConnectionByKey(params: {
   tenantId: string;
   connectionKey: string;
-}): Promise<V11Connection | null> {
+}): Promise<Connection | null> {
   const [row] = await db
     .select()
-    .from(v11Connection)
+    .from(connectionTable)
     .where(
       and(
-        eq(v11Connection.tenantId, params.tenantId),
-        eq(v11Connection.connectionKey, params.connectionKey),
+        eq(connectionTable.tenantId, params.tenantId),
+        eq(connectionTable.connectionKey, params.connectionKey),
       ),
     )
     .limit(1);
@@ -340,11 +343,14 @@ export async function listConnections(params: {
   lifecycleStates?: readonly ConnectionLifecycleState[];
   limit?: number;
   cursor?: string | null;
-}): Promise<{ items: V11Connection[]; nextCursor: string | null }> {
+}): Promise<{ items: Connection[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
-  const conditions = [eq(v11Connection.tenantId, params.tenantId), isNull(v11Connection.deletedAt)];
+  const conditions = [
+    eq(connectionTable.tenantId, params.tenantId),
+    isNull(connectionTable.deletedAt),
+  ];
   if (params.lifecycleStates && params.lifecycleStates.length > 0) {
-    conditions.push(inArray(v11Connection.lifecycleState, [...params.lifecycleStates]));
+    conditions.push(inArray(connectionTable.lifecycleState, [...params.lifecycleStates]));
   }
 
   if (params.cursor) {
@@ -352,8 +358,8 @@ export async function listConnections(params: {
     if (decoded) {
       const cursorDate = new Date(decoded.updatedAt);
       const cursorCondition = or(
-        gt(v11Connection.updatedAt, cursorDate),
-        and(eq(v11Connection.updatedAt, cursorDate), gt(v11Connection.id, decoded.id)),
+        gt(connectionTable.updatedAt, cursorDate),
+        and(eq(connectionTable.updatedAt, cursorDate), gt(connectionTable.id, decoded.id)),
       );
       if (cursorCondition) conditions.push(cursorCondition);
     }
@@ -361,9 +367,9 @@ export async function listConnections(params: {
 
   const rows = await db
     .select()
-    .from(v11Connection)
+    .from(connectionTable)
     .where(and(...conditions))
-    .orderBy(asc(v11Connection.updatedAt), asc(v11Connection.id))
+    .orderBy(asc(connectionTable.updatedAt), asc(connectionTable.id))
     .limit(limit + 1);
 
   const items = rows.slice(0, limit);
@@ -388,7 +394,7 @@ export async function updateConnection(params: {
   authMethod?: ConnectionAuthMethod;
   lifecycleState?: ConnectionLifecycleState;
   expectedVersionNo: number;
-}): Promise<V11Connection> {
+}): Promise<Connection> {
   const current = await getConnectionById({
     tenantId: params.tenantId,
     connectionId: params.connectionId,
@@ -438,13 +444,13 @@ export async function updateConnection(params: {
   if (params.lifecycleState !== undefined) updates.lifecycleState = params.lifecycleState;
 
   const result = await db
-    .update(v11Connection)
+    .update(connectionTable)
     .set(updates)
     .where(
       and(
-        eq(v11Connection.tenantId, params.tenantId),
-        eq(v11Connection.id, params.connectionId),
-        eq(v11Connection.versionNo, params.expectedVersionNo),
+        eq(connectionTable.tenantId, params.tenantId),
+        eq(connectionTable.id, params.connectionId),
+        eq(connectionTable.versionNo, params.expectedVersionNo),
       ),
     );
 
@@ -477,7 +483,7 @@ export async function createCredentialRef(params: {
   fingerprint: string;
   scopeJson?: unknown;
   expiresAt?: Date | null;
-}): Promise<V11CredentialRef> {
+}): Promise<CredentialRef> {
   if (!params.provider) {
     throw new ToolValidationError("invalid_provider", "provider 不能为空");
   }
@@ -498,7 +504,7 @@ export async function createCredentialRef(params: {
   }
 
   const id = randomUUID();
-  await db.insert(v11CredentialRef).values({
+  await db.insert(credentialRefTable).values({
     id,
     tenantId: params.tenantId,
     connectionId: params.connectionId ?? null,
@@ -512,8 +518,8 @@ export async function createCredentialRef(params: {
 
   const [row] = await db
     .select()
-    .from(v11CredentialRef)
-    .where(eq(v11CredentialRef.id, id))
+    .from(credentialRefTable)
+    .where(eq(credentialRefTable.id, id))
     .limit(1);
   if (!row) {
     throw new Error(`createCredentialRef: 行未找到（id=${id}）`);
@@ -525,31 +531,31 @@ export async function createCredentialRef(params: {
 export async function getCredentialRefsByConnection(params: {
   tenantId: string;
   connectionId: string;
-}): Promise<V11CredentialRef[]> {
+}): Promise<CredentialRef[]> {
   return db
     .select()
-    .from(v11CredentialRef)
+    .from(credentialRefTable)
     .where(
       and(
-        eq(v11CredentialRef.tenantId, params.tenantId),
-        eq(v11CredentialRef.connectionId, params.connectionId),
+        eq(credentialRefTable.tenantId, params.tenantId),
+        eq(credentialRefTable.connectionId, params.connectionId),
       ),
     )
-    .orderBy(desc(v11CredentialRef.createdAt));
+    .orderBy(desc(credentialRefTable.createdAt));
 }
 
 /** 撤销 CredentialRef（active/rotated → revoked，终态）。 */
 export async function revokeCredentialRef(params: {
   tenantId: string;
   credentialRefId: string;
-}): Promise<V11CredentialRef> {
+}): Promise<CredentialRef> {
   const [current] = await db
     .select()
-    .from(v11CredentialRef)
+    .from(credentialRefTable)
     .where(
       and(
-        eq(v11CredentialRef.tenantId, params.tenantId),
-        eq(v11CredentialRef.id, params.credentialRefId),
+        eq(credentialRefTable.tenantId, params.tenantId),
+        eq(credentialRefTable.id, params.credentialRefId),
       ),
     )
     .limit(1);
@@ -567,19 +573,19 @@ export async function revokeCredentialRef(params: {
   }
 
   await db
-    .update(v11CredentialRef)
+    .update(credentialRefTable)
     .set({ lifecycleState: "revoked", updatedAt: new Date() })
     .where(
       and(
-        eq(v11CredentialRef.tenantId, params.tenantId),
-        eq(v11CredentialRef.id, params.credentialRefId),
+        eq(credentialRefTable.tenantId, params.tenantId),
+        eq(credentialRefTable.id, params.credentialRefId),
       ),
     );
 
   const [updated] = await db
     .select()
-    .from(v11CredentialRef)
-    .where(eq(v11CredentialRef.id, params.credentialRefId))
+    .from(credentialRefTable)
+    .where(eq(credentialRefTable.id, params.credentialRefId))
     .limit(1);
   if (!updated) {
     throw new ToolNotFoundError(params.credentialRefId);
@@ -601,7 +607,7 @@ export async function createToolProvider(params: {
   displayName: string;
   description?: string | null;
   ownerUserId: string;
-}): Promise<V11ToolProvider> {
+}): Promise<ToolProvider> {
   assertValidKey(params.providerKey, "providerKey");
   assertValidProviderType(params.providerType);
   const trustLevel = params.trustLevel ?? "standard";
@@ -638,7 +644,7 @@ export async function createToolProvider(params: {
 
   const id = randomUUID();
   try {
-    await db.insert(v11ToolProvider).values({
+    await db.insert(toolProviderTable).values({
       id,
       tenantId: params.tenantId,
       providerKey: params.providerKey,
@@ -660,7 +666,11 @@ export async function createToolProvider(params: {
     throw err;
   }
 
-  const [row] = await db.select().from(v11ToolProvider).where(eq(v11ToolProvider.id, id)).limit(1);
+  const [row] = await db
+    .select()
+    .from(toolProviderTable)
+    .where(eq(toolProviderTable.id, id))
+    .limit(1);
   if (!row) {
     throw new Error(`createToolProvider: 行未找到（id=${id}）`);
   }
@@ -671,12 +681,15 @@ export async function createToolProvider(params: {
 export async function getToolProviderById(params: {
   tenantId: string;
   providerId: string;
-}): Promise<V11ToolProvider | null> {
+}): Promise<ToolProvider | null> {
   const [row] = await db
     .select()
-    .from(v11ToolProvider)
+    .from(toolProviderTable)
     .where(
-      and(eq(v11ToolProvider.tenantId, params.tenantId), eq(v11ToolProvider.id, params.providerId)),
+      and(
+        eq(toolProviderTable.tenantId, params.tenantId),
+        eq(toolProviderTable.id, params.providerId),
+      ),
     )
     .limit(1);
   return row ?? null;
@@ -686,14 +699,14 @@ export async function getToolProviderById(params: {
 export async function getToolProviderByKey(params: {
   tenantId: string;
   providerKey: string;
-}): Promise<V11ToolProvider | null> {
+}): Promise<ToolProvider | null> {
   const [row] = await db
     .select()
-    .from(v11ToolProvider)
+    .from(toolProviderTable)
     .where(
       and(
-        eq(v11ToolProvider.tenantId, params.tenantId),
-        eq(v11ToolProvider.providerKey, params.providerKey),
+        eq(toolProviderTable.tenantId, params.tenantId),
+        eq(toolProviderTable.providerKey, params.providerKey),
       ),
     )
     .limit(1);
@@ -707,17 +720,17 @@ export async function listToolProviders(params: {
   lifecycleStates?: readonly ToolProviderLifecycleState[];
   limit?: number;
   cursor?: string | null;
-}): Promise<{ items: V11ToolProvider[]; nextCursor: string | null }> {
+}): Promise<{ items: ToolProvider[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
   const conditions = [
-    eq(v11ToolProvider.tenantId, params.tenantId),
-    isNull(v11ToolProvider.deletedAt),
+    eq(toolProviderTable.tenantId, params.tenantId),
+    isNull(toolProviderTable.deletedAt),
   ];
   if (params.providerTypes && params.providerTypes.length > 0) {
-    conditions.push(inArray(v11ToolProvider.providerType, [...params.providerTypes]));
+    conditions.push(inArray(toolProviderTable.providerType, [...params.providerTypes]));
   }
   if (params.lifecycleStates && params.lifecycleStates.length > 0) {
-    conditions.push(inArray(v11ToolProvider.lifecycleState, [...params.lifecycleStates]));
+    conditions.push(inArray(toolProviderTable.lifecycleState, [...params.lifecycleStates]));
   }
 
   if (params.cursor) {
@@ -725,8 +738,8 @@ export async function listToolProviders(params: {
     if (decoded) {
       const cursorDate = new Date(decoded.updatedAt);
       const cursorCondition = or(
-        gt(v11ToolProvider.updatedAt, cursorDate),
-        and(eq(v11ToolProvider.updatedAt, cursorDate), gt(v11ToolProvider.id, decoded.id)),
+        gt(toolProviderTable.updatedAt, cursorDate),
+        and(eq(toolProviderTable.updatedAt, cursorDate), gt(toolProviderTable.id, decoded.id)),
       );
       if (cursorCondition) conditions.push(cursorCondition);
     }
@@ -734,9 +747,9 @@ export async function listToolProviders(params: {
 
   const rows = await db
     .select()
-    .from(v11ToolProvider)
+    .from(toolProviderTable)
     .where(and(...conditions))
-    .orderBy(asc(v11ToolProvider.updatedAt), asc(v11ToolProvider.id))
+    .orderBy(asc(toolProviderTable.updatedAt), asc(toolProviderTable.id))
     .limit(limit + 1);
 
   const items = rows.slice(0, limit);
@@ -763,7 +776,7 @@ export async function updateToolProvider(params: {
   connectionId?: string | null;
   lifecycleState?: ToolProviderLifecycleState;
   expectedVersionNo: number;
-}): Promise<V11ToolProvider> {
+}): Promise<ToolProvider> {
   const current = await getToolProviderById({
     tenantId: params.tenantId,
     providerId: params.providerId,
@@ -820,13 +833,13 @@ export async function updateToolProvider(params: {
   if (params.lifecycleState !== undefined) updates.lifecycleState = params.lifecycleState;
 
   const result = await db
-    .update(v11ToolProvider)
+    .update(toolProviderTable)
     .set(updates)
     .where(
       and(
-        eq(v11ToolProvider.tenantId, params.tenantId),
-        eq(v11ToolProvider.id, params.providerId),
-        eq(v11ToolProvider.versionNo, params.expectedVersionNo),
+        eq(toolProviderTable.tenantId, params.tenantId),
+        eq(toolProviderTable.id, params.providerId),
+        eq(toolProviderTable.versionNo, params.expectedVersionNo),
       ),
     );
 
@@ -858,7 +871,7 @@ export async function createTool(params: {
   displayName: string;
   description?: string | null;
   riskClass?: ToolRiskClass;
-}): Promise<V11Tool> {
+}): Promise<Tool> {
   assertValidKey(params.toolKey, "toolKey");
   if (!params.displayName || params.displayName.length === 0) {
     throw new ToolValidationError("invalid_display_name", "displayName 不能为空");
@@ -896,7 +909,7 @@ export async function createTool(params: {
 
   const id = randomUUID();
   try {
-    await db.insert(v11Tool).values({
+    await db.insert(toolTable).values({
       id,
       tenantId: params.tenantId,
       providerId: params.providerId,
@@ -913,7 +926,7 @@ export async function createTool(params: {
     throw err;
   }
 
-  const [row] = await db.select().from(v11Tool).where(eq(v11Tool.id, id)).limit(1);
+  const [row] = await db.select().from(toolTable).where(eq(toolTable.id, id)).limit(1);
   if (!row) {
     throw new Error(`createTool: 行未找到（id=${id}）`);
   }
@@ -924,11 +937,11 @@ export async function createTool(params: {
 export async function getToolById(params: {
   tenantId: string;
   toolId: string;
-}): Promise<V11Tool | null> {
+}): Promise<Tool | null> {
   const [row] = await db
     .select()
-    .from(v11Tool)
-    .where(and(eq(v11Tool.tenantId, params.tenantId), eq(v11Tool.id, params.toolId)))
+    .from(toolTable)
+    .where(and(eq(toolTable.tenantId, params.tenantId), eq(toolTable.id, params.toolId)))
     .limit(1);
   return row ?? null;
 }
@@ -938,15 +951,15 @@ export async function getToolByKey(params: {
   tenantId: string;
   providerId: string;
   toolKey: string;
-}): Promise<V11Tool | null> {
+}): Promise<Tool | null> {
   const [row] = await db
     .select()
-    .from(v11Tool)
+    .from(toolTable)
     .where(
       and(
-        eq(v11Tool.tenantId, params.tenantId),
-        eq(v11Tool.providerId, params.providerId),
-        eq(v11Tool.toolKey, params.toolKey),
+        eq(toolTable.tenantId, params.tenantId),
+        eq(toolTable.providerId, params.providerId),
+        eq(toolTable.toolKey, params.toolKey),
       ),
     )
     .limit(1);
@@ -961,17 +974,17 @@ export async function listTools(params: {
   riskClasses?: readonly ToolRiskClass[];
   limit?: number;
   cursor?: string | null;
-}): Promise<{ items: V11Tool[]; nextCursor: string | null }> {
+}): Promise<{ items: Tool[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
-  const conditions = [eq(v11Tool.tenantId, params.tenantId), isNull(v11Tool.deletedAt)];
+  const conditions = [eq(toolTable.tenantId, params.tenantId), isNull(toolTable.deletedAt)];
   if (params.providerId) {
-    conditions.push(eq(v11Tool.providerId, params.providerId));
+    conditions.push(eq(toolTable.providerId, params.providerId));
   }
   if (params.lifecycleStates && params.lifecycleStates.length > 0) {
-    conditions.push(inArray(v11Tool.lifecycleState, [...params.lifecycleStates]));
+    conditions.push(inArray(toolTable.lifecycleState, [...params.lifecycleStates]));
   }
   if (params.riskClasses && params.riskClasses.length > 0) {
-    conditions.push(inArray(v11Tool.riskClass, [...params.riskClasses]));
+    conditions.push(inArray(toolTable.riskClass, [...params.riskClasses]));
   }
 
   if (params.cursor) {
@@ -979,8 +992,8 @@ export async function listTools(params: {
     if (decoded) {
       const cursorDate = new Date(decoded.updatedAt);
       const cursorCondition = or(
-        gt(v11Tool.updatedAt, cursorDate),
-        and(eq(v11Tool.updatedAt, cursorDate), gt(v11Tool.id, decoded.id)),
+        gt(toolTable.updatedAt, cursorDate),
+        and(eq(toolTable.updatedAt, cursorDate), gt(toolTable.id, decoded.id)),
       );
       if (cursorCondition) conditions.push(cursorCondition);
     }
@@ -988,9 +1001,9 @@ export async function listTools(params: {
 
   const rows = await db
     .select()
-    .from(v11Tool)
+    .from(toolTable)
     .where(and(...conditions))
-    .orderBy(asc(v11Tool.updatedAt), asc(v11Tool.id))
+    .orderBy(asc(toolTable.updatedAt), asc(toolTable.id))
     .limit(limit + 1);
 
   const items = rows.slice(0, limit);
@@ -1016,7 +1029,7 @@ export async function updateTool(params: {
   riskClass?: ToolRiskClass;
   lifecycleState?: ToolLifecycleState;
   expectedVersionNo: number;
-}): Promise<V11Tool> {
+}): Promise<Tool> {
   const current = await getToolById({
     tenantId: params.tenantId,
     toolId: params.toolId,
@@ -1062,13 +1075,13 @@ export async function updateTool(params: {
   if (params.lifecycleState !== undefined) updates.lifecycleState = params.lifecycleState;
 
   const result = await db
-    .update(v11Tool)
+    .update(toolTable)
     .set(updates)
     .where(
       and(
-        eq(v11Tool.tenantId, params.tenantId),
-        eq(v11Tool.id, params.toolId),
-        eq(v11Tool.versionNo, params.expectedVersionNo),
+        eq(toolTable.tenantId, params.tenantId),
+        eq(toolTable.id, params.toolId),
+        eq(toolTable.versionNo, params.expectedVersionNo),
       ),
     );
 
@@ -1099,7 +1112,7 @@ export async function createToolSchemaRevision(params: {
   outputSchemaJson?: unknown;
   riskMetadataJson?: unknown;
   createdBy: string;
-}): Promise<V11ToolSchemaRevision> {
+}): Promise<ToolSchemaRevision> {
   if (!params.createdBy) {
     throw new ToolValidationError("invalid_created_by", "createdBy 不能为空");
   }
@@ -1139,7 +1152,7 @@ export async function createToolSchemaRevision(params: {
 
   const id = randomUUID();
   try {
-    await db.insert(v11ToolSchemaRevision).values({
+    await db.insert(toolSchemaRevisionTable).values({
       id,
       toolId: params.toolId,
       revisionNo,
@@ -1162,8 +1175,8 @@ export async function createToolSchemaRevision(params: {
 
   const [row] = await db
     .select()
-    .from(v11ToolSchemaRevision)
-    .where(eq(v11ToolSchemaRevision.id, id))
+    .from(toolSchemaRevisionTable)
+    .where(eq(toolSchemaRevisionTable.id, id))
     .limit(1);
   if (!row) {
     throw new Error(`createToolSchemaRevision: 行未找到（id=${id}）`);
@@ -1175,15 +1188,15 @@ export async function createToolSchemaRevision(params: {
 export async function getToolSchemaRevisionById(params: {
   tenantId: string;
   schemaRevisionId: string;
-}): Promise<V11ToolSchemaRevision | null> {
+}): Promise<ToolSchemaRevision | null> {
   const [row] = await db
-    .select({ revision: v11ToolSchemaRevision, tool: v11Tool })
-    .from(v11ToolSchemaRevision)
-    .innerJoin(v11Tool, eq(v11ToolSchemaRevision.toolId, v11Tool.id))
+    .select({ revision: toolSchemaRevisionTable, tool: toolTable })
+    .from(toolSchemaRevisionTable)
+    .innerJoin(toolTable, eq(toolSchemaRevisionTable.toolId, toolTable.id))
     .where(
       and(
-        eq(v11Tool.tenantId, params.tenantId),
-        eq(v11ToolSchemaRevision.id, params.schemaRevisionId),
+        eq(toolTable.tenantId, params.tenantId),
+        eq(toolSchemaRevisionTable.id, params.schemaRevisionId),
       ),
     )
     .limit(1);
@@ -1196,7 +1209,7 @@ export async function listToolSchemaRevisions(params: {
   toolId: string;
   revisionStates?: readonly ToolRevisionState[];
   limit?: number;
-}): Promise<V11ToolSchemaRevision[]> {
+}): Promise<ToolSchemaRevision[]> {
   const limit = Math.min(Math.max(params.limit ?? 100, 1), 500);
   // 先校验 toolId 属于 tenantId
   const tool = await getToolById({
@@ -1207,16 +1220,16 @@ export async function listToolSchemaRevisions(params: {
     throw new ToolNotFoundError(params.toolId);
   }
 
-  const conditions = [eq(v11ToolSchemaRevision.toolId, params.toolId)];
+  const conditions = [eq(toolSchemaRevisionTable.toolId, params.toolId)];
   if (params.revisionStates && params.revisionStates.length > 0) {
-    conditions.push(inArray(v11ToolSchemaRevision.revisionState, [...params.revisionStates]));
+    conditions.push(inArray(toolSchemaRevisionTable.revisionState, [...params.revisionStates]));
   }
 
   return db
     .select()
-    .from(v11ToolSchemaRevision)
+    .from(toolSchemaRevisionTable)
     .where(and(...conditions))
-    .orderBy(desc(v11ToolSchemaRevision.revisionNo))
+    .orderBy(desc(toolSchemaRevisionTable.revisionNo))
     .limit(limit);
 }
 
@@ -1224,7 +1237,7 @@ export async function listToolSchemaRevisions(params: {
 export async function getCurrentToolSchemaRevision(params: {
   tenantId: string;
   toolId: string;
-}): Promise<V11ToolSchemaRevision | null> {
+}): Promise<ToolSchemaRevision | null> {
   const tool = await getToolById({
     tenantId: params.tenantId,
     toolId: params.toolId,
@@ -1248,7 +1261,7 @@ export async function publishToolSchemaRevision(params: {
   tenantId: string;
   schemaRevisionId: string;
   publishedBy: string;
-}): Promise<{ tool: V11Tool; revision: V11ToolSchemaRevision }> {
+}): Promise<{ tool: Tool; revision: ToolSchemaRevision }> {
   const revision = await getToolSchemaRevisionById({
     tenantId: params.tenantId,
     schemaRevisionId: params.schemaRevisionId,
@@ -1285,21 +1298,21 @@ export async function publishToolSchemaRevision(params: {
     // 1. 旧 published → withdrawn（除当前正在发布的版本外）
     if (tool.currentSchemaRevisionId && tool.currentSchemaRevisionId !== params.schemaRevisionId) {
       await tx
-        .update(v11ToolSchemaRevision)
+        .update(toolSchemaRevisionTable)
         .set({ revisionState: "withdrawn" })
         .where(
           and(
-            eq(v11ToolSchemaRevision.toolId, tool.id),
-            eq(v11ToolSchemaRevision.revisionState, "published"),
+            eq(toolSchemaRevisionTable.toolId, tool.id),
+            eq(toolSchemaRevisionTable.revisionState, "published"),
           ),
         );
     }
 
     // 2. 新版本 draft → published
     const publishResult = await tx
-      .update(v11ToolSchemaRevision)
+      .update(toolSchemaRevisionTable)
       .set({ revisionState: "published", publishedAt: now })
-      .where(eq(v11ToolSchemaRevision.id, params.schemaRevisionId));
+      .where(eq(toolSchemaRevisionTable.id, params.schemaRevisionId));
     if (publishResult[0].affectedRows === 0) {
       throw new ToolVersionConflictError(
         `publishToolSchemaRevision: 更新 ToolSchemaRevision=${params.schemaRevisionId} 为 published 失败`,
@@ -1308,7 +1321,7 @@ export async function publishToolSchemaRevision(params: {
 
     // 3. Tool.currentSchemaRevisionId 更新（乐观锁）
     const toolUpdateResult = await tx
-      .update(v11Tool)
+      .update(toolTable)
       .set({
         currentSchemaRevisionId: params.schemaRevisionId,
         versionNo: expectedVersionNo + 1,
@@ -1316,9 +1329,9 @@ export async function publishToolSchemaRevision(params: {
       })
       .where(
         and(
-          eq(v11Tool.tenantId, params.tenantId),
-          eq(v11Tool.id, tool.id),
-          eq(v11Tool.versionNo, expectedVersionNo),
+          eq(toolTable.tenantId, params.tenantId),
+          eq(toolTable.id, tool.id),
+          eq(toolTable.versionNo, expectedVersionNo),
         ),
       );
     if (toolUpdateResult[0].affectedRows === 0) {
@@ -1351,9 +1364,9 @@ export async function publishToolSchemaRevision(params: {
 /** 计算 Tool 内下一个 revisionNo（max +1）。并发冲突由 UNIQUE 约束 fail-loud。 */
 async function nextRevisionNo(toolId: string): Promise<number> {
   const [row] = await db
-    .select({ maxNo: max(v11ToolSchemaRevision.revisionNo) })
-    .from(v11ToolSchemaRevision)
-    .where(eq(v11ToolSchemaRevision.toolId, toolId));
+    .select({ maxNo: max(toolSchemaRevisionTable.revisionNo) })
+    .from(toolSchemaRevisionTable)
+    .where(eq(toolSchemaRevisionTable.toolId, toolId));
   const currentMax = row?.maxNo;
   if (currentMax === null || currentMax === undefined) return 1;
   return currentMax + 1;
@@ -1389,12 +1402,12 @@ export type {
   ToolProviderType,
   ToolRevisionState,
   ToolRiskClass,
-  V11Connection,
-  V11CredentialRef,
-  V11Tool,
-  V11ToolProvider,
-  V11ToolSchemaRevision,
-} from "@/lib/v11/schema/tool";
+  Connection,
+  CredentialRef,
+  Tool,
+  ToolProvider,
+  ToolSchemaRevision,
+} from "@/lib/persistence/schema/tool";
 
 export {
   CONNECTION_AUTH_METHODS,
@@ -1407,4 +1420,4 @@ export {
   TOOL_PROVIDER_TYPES,
   TOOL_REVISION_STATES,
   TOOL_RISK_CLASSES,
-} from "@/lib/v11/schema/tool";
+} from "@/lib/persistence/schema/tool";

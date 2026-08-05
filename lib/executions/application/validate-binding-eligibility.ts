@@ -21,18 +21,18 @@
 
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
-import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { routeActivation } from "@/lib/routes/persistence/route-revision-record";
-import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
+import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
+import { ArtifactEvidencePolicy } from "@/lib/artifacts/domain/artifact-evidence-policy";
 // §5.1: Phase 1 统一 Policy + Evidence 读取器
 import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
-import { ArtifactEvidencePolicy } from "@/lib/artifacts/domain/artifact-evidence-policy";
-import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
 import { PublicationEligibilityPolicy } from "@/lib/publications/domain/publication-eligibility";
+import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
 
 export interface BindingEligibilityInput {
   tenantId: string;
@@ -149,14 +149,28 @@ export async function validateBindingEligibility(
       }),
     ]);
 
-    const agentPubEligibility = PublicationEligibilityPolicy.isActive(agentPubSnapshot, input.tenantId);
+    const agentPubEligibility = PublicationEligibilityPolicy.isActive(
+      agentPubSnapshot,
+      input.tenantId,
+    );
     if (!agentPubEligibility.active) {
-      return { valid: false, reason: `agent_publication_${agentPubEligibility.reason ?? "inactive"}`, projectionVersionMatch };
+      return {
+        valid: false,
+        reason: `agent_publication_${agentPubEligibility.reason ?? "inactive"}`,
+        projectionVersionMatch,
+      };
     }
 
-    const runtimePubEligibility = PublicationEligibilityPolicy.isActive(runtimePubSnapshot, input.tenantId);
+    const runtimePubEligibility = PublicationEligibilityPolicy.isActive(
+      runtimePubSnapshot,
+      input.tenantId,
+    );
     if (!runtimePubEligibility.active) {
-      return { valid: false, reason: `runtime_publication_${runtimePubEligibility.reason ?? "inactive"}`, projectionVersionMatch };
+      return {
+        valid: false,
+        reason: `runtime_publication_${runtimePubEligibility.reason ?? "inactive"}`,
+        projectionVersionMatch,
+      };
     }
 
     // §5.1: 5. 使用 Phase 1 统一 ArtifactEvidencePolicy 校验 Attestation
@@ -181,7 +195,10 @@ export async function validateBindingEligibility(
           expectedRevisionId: input.agentRevisionId,
           expectedDigest: agentEvidence.artifactDigest,
         })
-      : { valid: false as const, errors: [{ code: "no_evidence", message: "Agent 无 Artifact Evidence" }] };
+      : {
+          valid: false as const,
+          errors: [{ code: "no_evidence", message: "Agent 无 Artifact Evidence" }],
+        };
 
     if (!agentEvidenceResult.valid) {
       const reason = agentEvidenceResult.errors.map((e) => e.code).join(",");
@@ -195,7 +212,10 @@ export async function validateBindingEligibility(
           expectedRevisionId: input.runtimeRevisionId,
           expectedDigest: runtimeEvidence.artifactDigest,
         })
-      : { valid: false as const, errors: [{ code: "no_evidence", message: "Runtime 无 Artifact Evidence" }] };
+      : {
+          valid: false as const,
+          errors: [{ code: "no_evidence", message: "Runtime 无 Artifact Evidence" }],
+        };
 
     if (!runtimeEvidenceResult.valid) {
       const reason = runtimeEvidenceResult.errors.map((e) => e.code).join(",");

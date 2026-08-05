@@ -1,10 +1,10 @@
+import { validateBindingEligibility } from "@/lib/executions/application/validate-binding-eligibility";
 import {
   type ExecutionBinding,
   type ExecutionBindingConfigInput,
   computeExecutionBindingConfigHash,
 } from "@/lib/executions/domain/execution-binding";
 import type { ExecutionBindingStore } from "@/lib/executions/persistence/execution-binding-store";
-import { validateBindingEligibility } from "@/lib/executions/application/validate-binding-eligibility";
 
 export interface CreateExecutionBindingCommand extends ExecutionBindingConfigInput {
   invocationId: string;

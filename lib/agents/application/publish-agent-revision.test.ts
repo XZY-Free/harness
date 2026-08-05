@@ -10,15 +10,13 @@ import {
   getRevisionById,
   getRevisionsByAgent,
 } from "@/lib/agents/persistence/agent-revision-queries";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { insertAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { artifact } from "@/lib/artifacts/persistence/artifact-record";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
-import { publicationRecord } from "@/lib/publications/persistence/publication-record";
-import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import {
   getIdempotencyRecordById,
   insertProcessingRecord,
@@ -26,8 +24,10 @@ import {
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { v11AgentRevision } from "@/lib/v11/schema/agent";
-import { tenant } from "@/lib/v11/schema/identity";
+import { agentRevisionTable } from "@/lib/persistence/schema/agent";
+import { tenant } from "@/lib/persistence/schema/identity";
+import { publicationRecord } from "@/lib/publications/persistence/publication-record";
+import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -89,9 +89,9 @@ async function seedPublicationFixture() {
     .limit(1);
   if (!authority) throw new Error("Agent publication fixture Artifact 未创建");
   await db
-    .update(v11AgentRevision)
+    .update(agentRevisionTable)
     .set({ artifactId: authority.id, artifactDigest: authority.digest })
-    .where(eq(v11AgentRevision.id, revision.id));
+    .where(eq(agentRevisionTable.id, revision.id));
   const idempotency = await insertProcessingRecord({
     tenantId: tenant.id,
     audience: "admin",

@@ -2,8 +2,11 @@
  * Shadow Route Resolver 单元测试。
  */
 
-import { describe, it, expect, vi } from "vitest";
-import type { RouteResolutionCandidate, RouteResolutionOutcome } from "@/lib/routes/domain/route-resolution-policy";
+import type {
+  RouteResolutionCandidate,
+  RouteResolutionOutcome,
+} from "@/lib/routes/domain/route-resolution-policy";
+import { describe, expect, it, vi } from "vitest";
 import { createShadowRouteResolver } from "./shadow-route-resolver";
 
 describe("Shadow Route Resolver 生产启动断言", () => {
@@ -124,10 +127,14 @@ function makeMockRevision(routeRevisionId: string) {
     resolutionKeyDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     resolvedAt: new Date(),
     controlPlaneEvidence: {
-      agentArtifactDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      runtimeArtifactDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      runtimeConfigDigest: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-      capabilityManifestDigest: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      agentArtifactDigest:
+        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      runtimeArtifactDigest:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      runtimeConfigDigest:
+        "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      capabilityManifestDigest:
+        "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       agentAttestationIds: ["att-1"],
       runtimeAttestationIds: ["att-2"],
       agentPublicationRecordId: "pub-1",
@@ -152,8 +159,10 @@ function getShadowInternals() {
       if (authority.resolution.routeRevisionId !== projection.resolution.routeRevisionId) {
         return "different_route_revision_selected";
       }
-      if (authority.resolution.controlPlaneEvidence.agentArtifactDigest !==
-          projection.resolution.controlPlaneEvidence.agentArtifactDigest) {
+      if (
+        authority.resolution.controlPlaneEvidence.agentArtifactDigest !==
+        projection.resolution.controlPlaneEvidence.agentArtifactDigest
+      ) {
         return "evidence_digest_mismatch";
       }
     }

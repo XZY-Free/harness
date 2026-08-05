@@ -1,7 +1,7 @@
 /**
  * V11 CapabilityUse 仓储（阶段 6 S06-C04）。
  *
- * 事实源：lib/v11/schema/capability-use.ts、
+ * 事实源：lib/persistence/schema/capability-use.ts、
  *         ../v11-agentkit-platform/10-core-data-model.md §6.5（capability_use）、
  *         ../v11-agentkit-platform/12-capability-and-collaboration-api.md §3（Runtime Capability API）。
  *
@@ -19,11 +19,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
+  type CapabilityUse,
   type CapabilityUseSourceType,
   type CapabilityUseType,
-  type V11CapabilityUse,
-  v11CapabilityUse,
-} from "@/lib/v11/schema/capability-use";
+  capabilityUseTable,
+} from "@/lib/persistence/schema/capability-use";
 import { and, asc, eq } from "drizzle-orm";
 
 // ─── 错误类 ────────────────────────────────────────────────
@@ -142,7 +142,7 @@ export interface RecordCapabilityUseParams {
  */
 export async function recordCapabilityUse(
   params: RecordCapabilityUseParams,
-): Promise<V11CapabilityUse> {
+): Promise<CapabilityUse> {
   assertValidCapabilityType(params.capabilityType);
   const sourceType = params.sourceType ?? "dynamic_discovery";
   assertValidSourceType(sourceType);
@@ -176,7 +176,7 @@ export async function recordCapabilityUse(
 
   const id = randomUUID();
   try {
-    await db.insert(v11CapabilityUse).values({
+    await db.insert(capabilityUseTable).values({
       id,
       tenantId: params.tenantId,
       invocationId: params.invocationId,
@@ -205,8 +205,8 @@ export async function recordCapabilityUse(
 
   const [row] = await db
     .select()
-    .from(v11CapabilityUse)
-    .where(eq(v11CapabilityUse.id, id))
+    .from(capabilityUseTable)
+    .where(eq(capabilityUseTable.id, id))
     .limit(1);
   if (!row) {
     throw new Error(`recordCapabilityUse: 行未找到（id=${id}）`);
@@ -221,15 +221,15 @@ export async function getCapabilityUseByKey(params: {
   tenantId: string;
   invocationId: string;
   capabilityUseKey: string;
-}): Promise<V11CapabilityUse | null> {
+}): Promise<CapabilityUse | null> {
   const [row] = await db
     .select()
-    .from(v11CapabilityUse)
+    .from(capabilityUseTable)
     .where(
       and(
-        eq(v11CapabilityUse.tenantId, params.tenantId),
-        eq(v11CapabilityUse.invocationId, params.invocationId),
-        eq(v11CapabilityUse.capabilityUseKey, params.capabilityUseKey),
+        eq(capabilityUseTable.tenantId, params.tenantId),
+        eq(capabilityUseTable.invocationId, params.invocationId),
+        eq(capabilityUseTable.capabilityUseKey, params.capabilityUseKey),
       ),
     )
     .limit(1);
@@ -240,17 +240,17 @@ export async function getCapabilityUseByKey(params: {
 export async function listCapabilityUseByInvocation(params: {
   tenantId: string;
   invocationId: string;
-}): Promise<V11CapabilityUse[]> {
+}): Promise<CapabilityUse[]> {
   return db
     .select()
-    .from(v11CapabilityUse)
+    .from(capabilityUseTable)
     .where(
       and(
-        eq(v11CapabilityUse.tenantId, params.tenantId),
-        eq(v11CapabilityUse.invocationId, params.invocationId),
+        eq(capabilityUseTable.tenantId, params.tenantId),
+        eq(capabilityUseTable.invocationId, params.invocationId),
       ),
     )
-    .orderBy(asc(v11CapabilityUse.firstUsedAt), asc(v11CapabilityUse.id));
+    .orderBy(asc(capabilityUseTable.firstUsedAt), asc(capabilityUseTable.id));
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────
@@ -267,5 +267,5 @@ function isDuplicateEntryError(err: unknown): boolean {
 export type {
   CapabilityUseSourceType,
   CapabilityUseType,
-  V11CapabilityUse,
-} from "@/lib/v11/schema/capability-use";
+  CapabilityUse,
+} from "@/lib/persistence/schema/capability-use";

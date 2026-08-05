@@ -1,11 +1,11 @@
 import type { AgentPublicationStore } from "@/lib/agents/persistence/agent-publication-store";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
-import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import {
   artifact,
   artifactAttestation,
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";

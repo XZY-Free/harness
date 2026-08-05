@@ -27,6 +27,17 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
+  type Job,
+  type JobCommand,
+  type JobCommandState,
+  type JobCommandType,
+  type JobEvent,
+  type JobEventActorType,
+  jobCommandTable,
+  jobEventTable,
+  jobTable,
+} from "@/lib/persistence/schema/job";
+import {
   JobAlreadyTerminalError,
   JobCommandAlreadyTerminalError,
   JobCommandNotFoundError,
@@ -34,24 +45,13 @@ import {
   JobNotTerminalError,
 } from "@/lib/v11/job/errors";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/v11/job/job-event-queries";
-import {
-  type JobCommandState,
-  type JobCommandType,
-  type JobEventActorType,
-  type V11Job,
-  type V11JobCommand,
-  type V11JobEvent,
-  v11Job,
-  v11JobCommand,
-  v11JobEvent,
-} from "@/lib/v11/schema/job";
 import { and, desc, eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Job 终态集合。 */
-const TERMINAL_JOB_STATES: readonly V11Job["jobState"][] = ["completed", "failed", "cancelled"];
+const TERMINAL_JOB_STATES: readonly Job["jobState"][] = ["completed", "failed", "cancelled"];
 
 /** JobCommand 终态集合。 */
 const TERMINAL_COMMAND_STATES: readonly JobCommandState[] = ["acknowledged", "rejected"];
@@ -66,14 +66,14 @@ interface IdempotentCommandLookup {
  * 查找幂等键已存在的命令（相同 jobId + idempotencyKey 重放）。
  * 不存在返回 null。
  */
-async function findExistingCommand(lookup: IdempotentCommandLookup): Promise<V11JobCommand | null> {
+async function findExistingCommand(lookup: IdempotentCommandLookup): Promise<JobCommand | null> {
   const [row] = await db
     .select()
-    .from(v11JobCommand)
+    .from(jobCommandTable)
     .where(
       and(
-        eq(v11JobCommand.jobId, lookup.jobId),
-        eq(v11JobCommand.idempotencyKey, lookup.idempotencyKey),
+        eq(jobCommandTable.jobId, lookup.jobId),
+        eq(jobCommandTable.idempotencyKey, lookup.idempotencyKey),
       ),
     )
     .limit(1);
@@ -96,9 +96,9 @@ export interface CreateCancelCommandParams {
 
 /** createCancelCommand 返回结果。 */
 export interface CreateCancelCommandResult {
-  command: V11JobCommand;
+  command: JobCommand;
   /** 写入的 job.cancel_requested Event。 */
-  cancelRequestedEvent: V11JobEvent;
+  cancelRequestedEvent: JobEvent;
   /** 是否为幂等重放（true 时 command 是已有命令，未创建新命令）。 */
   replayed: boolean;
 }
@@ -109,7 +109,7 @@ export interface CreateCancelCommandResult {
  * 流程（同事务）：
  * 1. SELECT FOR UPDATE Job（必须非终态）
  * 2. 幂等检查：相同 (jobId, idempotencyKey) 命令已存在 → 返回原命令（replayed=true）
- * 3. INSERT V11JobCommand（commandType=cancel, commandState=queued）
+ * 3. INSERT JobCommand（commandType=cancel, commandState=queued）
  * 4. allocateJobEventSequences(1) + insertJobEvent(job.cancel_requested)
  *
  * 不变量（§6.12）：
@@ -130,17 +130,17 @@ export async function createCancelCommand(
     // 注意：原命令的 cancel_requested Event 已在第一次创建时写入
     const [firstEvent] = await db
       .select()
-      .from(v11JobEvent)
+      .from(jobEventTable)
       .where(
         and(
-          eq(v11JobEvent.jobId, params.jobId),
-          eq(v11JobEvent.idempotencyKey, `${params.idempotencyKey}:job-cancel-requested`),
+          eq(jobEventTable.jobId, params.jobId),
+          eq(jobEventTable.idempotencyKey, `${params.idempotencyKey}:job-cancel-requested`),
         ),
       )
       .limit(1);
     return {
       command: existing,
-      cancelRequestedEvent: firstEvent as V11JobEvent,
+      cancelRequestedEvent: firstEvent as JobEvent,
       replayed: true,
     };
   }
@@ -152,8 +152,8 @@ export async function createCancelCommand(
     // 1. SELECT FOR UPDATE Job
     const [job] = await tx
       .select()
-      .from(v11Job)
-      .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, params.jobId)))
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, params.jobId)))
       .for("update")
       .limit(1);
     if (!job) {
@@ -168,11 +168,11 @@ export async function createCancelCommand(
     // 2. 事务内再次幂等检查（防 race condition）
     const [raceExisting] = await tx
       .select()
-      .from(v11JobCommand)
+      .from(jobCommandTable)
       .where(
         and(
-          eq(v11JobCommand.jobId, params.jobId),
-          eq(v11JobCommand.idempotencyKey, params.idempotencyKey),
+          eq(jobCommandTable.jobId, params.jobId),
+          eq(jobCommandTable.idempotencyKey, params.idempotencyKey),
         ),
       )
       .limit(1);
@@ -180,24 +180,24 @@ export async function createCancelCommand(
       // 另一事务已创建相同幂等键命令；回读关联 Event
       const [firstEvent] = await tx
         .select()
-        .from(v11JobEvent)
+        .from(jobEventTable)
         .where(
           and(
-            eq(v11JobEvent.jobId, params.jobId),
-            eq(v11JobEvent.idempotencyKey, `${params.idempotencyKey}:job-cancel-requested`),
+            eq(jobEventTable.jobId, params.jobId),
+            eq(jobEventTable.idempotencyKey, `${params.idempotencyKey}:job-cancel-requested`),
           ),
         )
         .limit(1);
       return {
         command: raceExisting,
-        cancelRequestedEvent: firstEvent as V11JobEvent,
+        cancelRequestedEvent: firstEvent as JobEvent,
         replayed: true,
       };
     }
 
-    // 3. INSERT V11JobCommand
+    // 3. INSERT JobCommand
     const commandId = randomUUID();
-    await tx.insert(v11JobCommand).values({
+    await tx.insert(jobCommandTable).values({
       id: commandId,
       tenantId: params.tenantId,
       jobId: params.jobId,
@@ -234,8 +234,8 @@ export async function createCancelCommand(
     // 回读 command
     const [command] = await tx
       .select()
-      .from(v11JobCommand)
-      .where(eq(v11JobCommand.id, commandId))
+      .from(jobCommandTable)
+      .where(eq(jobCommandTable.id, commandId))
       .limit(1);
     if (!command) {
       throw new Error(`createCancelCommand: JobCommand 行未找到（id=${commandId}）`);
@@ -267,9 +267,9 @@ export interface CreateRetryCommandParams {
 
 /** createRetryCommand 返回结果。 */
 export interface CreateRetryCommandResult {
-  command: V11JobCommand;
+  command: JobCommand;
   /** 写入的 job.retry_requested Event。 */
-  retryRequestedEvent: V11JobEvent;
+  retryRequestedEvent: JobEvent;
   /** 是否为幂等重放。 */
   replayed: boolean;
 }
@@ -280,7 +280,7 @@ export interface CreateRetryCommandResult {
  * 流程（同事务）：
  * 1. SELECT FOR UPDATE Job（必须终态）
  * 2. 幂等检查：相同 (jobId, idempotencyKey) 命令已存在 → 返回原命令（replayed=true）
- * 3. INSERT V11JobCommand（commandType=retry, commandState=queued）
+ * 3. INSERT JobCommand（commandType=retry, commandState=queued）
  * 4. allocateJobEventSequences(1) + insertJobEvent(job.retry_requested)
  *
  * 不变量（§6.12）：
@@ -302,17 +302,17 @@ export async function createRetryCommand(
   if (existing) {
     const [firstEvent] = await db
       .select()
-      .from(v11JobEvent)
+      .from(jobEventTable)
       .where(
         and(
-          eq(v11JobEvent.jobId, params.jobId),
-          eq(v11JobEvent.idempotencyKey, `${params.idempotencyKey}:job-retry-requested`),
+          eq(jobEventTable.jobId, params.jobId),
+          eq(jobEventTable.idempotencyKey, `${params.idempotencyKey}:job-retry-requested`),
         ),
       )
       .limit(1);
     return {
       command: existing,
-      retryRequestedEvent: firstEvent as V11JobEvent,
+      retryRequestedEvent: firstEvent as JobEvent,
       replayed: true,
     };
   }
@@ -325,8 +325,8 @@ export async function createRetryCommand(
     // 1. SELECT FOR UPDATE Job
     const [job] = await tx
       .select()
-      .from(v11Job)
-      .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, params.jobId)))
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, params.jobId)))
       .for("update")
       .limit(1);
     if (!job) {
@@ -341,35 +341,35 @@ export async function createRetryCommand(
     // 2. 事务内幂等检查
     const [raceExisting] = await tx
       .select()
-      .from(v11JobCommand)
+      .from(jobCommandTable)
       .where(
         and(
-          eq(v11JobCommand.jobId, params.jobId),
-          eq(v11JobCommand.idempotencyKey, params.idempotencyKey),
+          eq(jobCommandTable.jobId, params.jobId),
+          eq(jobCommandTable.idempotencyKey, params.idempotencyKey),
         ),
       )
       .limit(1);
     if (raceExisting) {
       const [firstEvent] = await tx
         .select()
-        .from(v11JobEvent)
+        .from(jobEventTable)
         .where(
           and(
-            eq(v11JobEvent.jobId, params.jobId),
-            eq(v11JobEvent.idempotencyKey, `${params.idempotencyKey}:job-retry-requested`),
+            eq(jobEventTable.jobId, params.jobId),
+            eq(jobEventTable.idempotencyKey, `${params.idempotencyKey}:job-retry-requested`),
           ),
         )
         .limit(1);
       return {
         command: raceExisting,
-        retryRequestedEvent: firstEvent as V11JobEvent,
+        retryRequestedEvent: firstEvent as JobEvent,
         replayed: true,
       };
     }
 
-    // 3. INSERT V11JobCommand（replacementJobId 留空，由调度器 acknowledge 时回填）
+    // 3. INSERT JobCommand（replacementJobId 留空，由调度器 acknowledge 时回填）
     const commandId = randomUUID();
-    await tx.insert(v11JobCommand).values({
+    await tx.insert(jobCommandTable).values({
       id: commandId,
       tenantId: params.tenantId,
       jobId: params.jobId,
@@ -412,8 +412,8 @@ export async function createRetryCommand(
     // 回读 command
     const [command] = await tx
       .select()
-      .from(v11JobCommand)
-      .where(eq(v11JobCommand.id, commandId))
+      .from(jobCommandTable)
+      .where(eq(jobCommandTable.id, commandId))
       .limit(1);
     if (!command) {
       throw new Error(`createRetryCommand: JobCommand 行未找到（id=${commandId}）`);
@@ -444,13 +444,16 @@ export interface AcknowledgeCommandParams {
  * - 命令已终态（acknowledged/rejected）抛 JobCommandAlreadyTerminalError。
  * - retry 命令的 replacementJobId 在 acknowledge 时回填。
  */
-export async function acknowledgeCommand(params: AcknowledgeCommandParams): Promise<V11JobCommand> {
+export async function acknowledgeCommand(params: AcknowledgeCommandParams): Promise<JobCommand> {
   const result = await db.transaction(async (tx) => {
     const [current] = await tx
       .select()
-      .from(v11JobCommand)
+      .from(jobCommandTable)
       .where(
-        and(eq(v11JobCommand.tenantId, params.tenantId), eq(v11JobCommand.id, params.commandId)),
+        and(
+          eq(jobCommandTable.tenantId, params.tenantId),
+          eq(jobCommandTable.id, params.commandId),
+        ),
       )
       .for("update")
       .limit(1);
@@ -461,7 +464,7 @@ export async function acknowledgeCommand(params: AcknowledgeCommandParams): Prom
       throw new JobCommandAlreadyTerminalError(params.commandId, current.commandState);
     }
 
-    const updates: Partial<V11JobCommand> = {
+    const updates: Partial<JobCommand> = {
       commandState: "acknowledged",
       acknowledgedAt: new Date(),
     };
@@ -469,12 +472,12 @@ export async function acknowledgeCommand(params: AcknowledgeCommandParams): Prom
       updates.replacementJobId = params.replacementJobId;
     }
 
-    await tx.update(v11JobCommand).set(updates).where(eq(v11JobCommand.id, params.commandId));
+    await tx.update(jobCommandTable).set(updates).where(eq(jobCommandTable.id, params.commandId));
 
     const [updated] = await tx
       .select()
-      .from(v11JobCommand)
-      .where(eq(v11JobCommand.id, params.commandId))
+      .from(jobCommandTable)
+      .where(eq(jobCommandTable.id, params.commandId))
       .limit(1);
     if (!updated) {
       throw new Error(`acknowledgeCommand: JobCommand 行未找到（id=${params.commandId}）`);
@@ -503,13 +506,16 @@ export interface RejectCommandParams {
  * - JOB_OVERRIDE_NOT_ALLOWED：retry override 字段不被该 Job 类型支持
  * - JOB_INPUT_NO_LONGER_AVAILABLE：retry reuse_input 但输入已不可访问
  */
-export async function rejectCommand(params: RejectCommandParams): Promise<V11JobCommand> {
+export async function rejectCommand(params: RejectCommandParams): Promise<JobCommand> {
   const result = await db.transaction(async (tx) => {
     const [current] = await tx
       .select()
-      .from(v11JobCommand)
+      .from(jobCommandTable)
       .where(
-        and(eq(v11JobCommand.tenantId, params.tenantId), eq(v11JobCommand.id, params.commandId)),
+        and(
+          eq(jobCommandTable.tenantId, params.tenantId),
+          eq(jobCommandTable.id, params.commandId),
+        ),
       )
       .for("update")
       .limit(1);
@@ -521,19 +527,19 @@ export async function rejectCommand(params: RejectCommandParams): Promise<V11Job
     }
 
     await tx
-      .update(v11JobCommand)
+      .update(jobCommandTable)
       .set({
         commandState: "rejected",
         errorCode: params.errorCode,
         errorSummary: params.errorSummary ?? null,
         acknowledgedAt: new Date(),
       })
-      .where(eq(v11JobCommand.id, params.commandId));
+      .where(eq(jobCommandTable.id, params.commandId));
 
     const [updated] = await tx
       .select()
-      .from(v11JobCommand)
-      .where(eq(v11JobCommand.id, params.commandId))
+      .from(jobCommandTable)
+      .where(eq(jobCommandTable.id, params.commandId))
       .limit(1);
     if (!updated) {
       throw new Error(`rejectCommand: JobCommand 行未找到（id=${params.commandId}）`);
@@ -550,11 +556,11 @@ export async function rejectCommand(params: RejectCommandParams): Promise<V11Job
 export async function getJobCommandById(
   tenantId: string,
   commandId: string,
-): Promise<V11JobCommand | null> {
+): Promise<JobCommand | null> {
   const [row] = await db
     .select()
-    .from(v11JobCommand)
-    .where(and(eq(v11JobCommand.tenantId, tenantId), eq(v11JobCommand.id, commandId)))
+    .from(jobCommandTable)
+    .where(and(eq(jobCommandTable.tenantId, tenantId), eq(jobCommandTable.id, commandId)))
     .limit(1);
   return row ?? null;
 }
@@ -564,12 +570,12 @@ export async function getJobCommands(
   tenantId: string,
   jobId: string,
   options?: { limit?: number },
-): Promise<V11JobCommand[]> {
+): Promise<JobCommand[]> {
   return db
     .select()
-    .from(v11JobCommand)
-    .where(and(eq(v11JobCommand.tenantId, tenantId), eq(v11JobCommand.jobId, jobId)))
-    .orderBy(desc(v11JobCommand.createdAt))
+    .from(jobCommandTable)
+    .where(and(eq(jobCommandTable.tenantId, tenantId), eq(jobCommandTable.jobId, jobId)))
+    .orderBy(desc(jobCommandTable.createdAt))
     .limit(options?.limit ?? 100);
 }
 
@@ -577,11 +583,11 @@ export async function getJobCommands(
 export async function getPendingJobCommands(
   tenantId: string,
   jobId: string,
-): Promise<V11JobCommand[]> {
+): Promise<JobCommand[]> {
   const all = await getJobCommands(tenantId, jobId);
   return all.filter((c) => !TERMINAL_COMMAND_STATES.includes(c.commandState));
 }
 
 // ─── re-export 供外部统一从本模块引入类型 ───────────────────
 
-export type { V11JobCommand, JobCommandType, JobCommandState } from "@/lib/v11/schema/job";
+export type { JobCommand, JobCommandType, JobCommandState } from "@/lib/persistence/schema/job";

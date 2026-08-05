@@ -1,3 +1,4 @@
+import { createThread } from "@/lib/conversations/thread-queries";
 /**
  * V11 Workspace 集成测试（阶段 8 S08-C01）。
  *
@@ -21,7 +22,6 @@
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { registerDevice } from "@/lib/identity/device-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";

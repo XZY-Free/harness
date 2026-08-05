@@ -1,22 +1,24 @@
-import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound } from "@/lib/http";
-import { getEventStreamFloor } from "@/lib/v11/conversation/projection-checkpoint-queries";
+import { getEventStreamFloor } from "@/lib/conversations/projection-checkpoint-queries";
 import {
   type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
 import {
   type SSEStreamHandle,
   THREAD_EVENT_STREAM,
   createSSEStream,
   formatSSEMessage,
-} from "@/lib/v11/conversation/sse-transport";
+} from "@/lib/conversations/sse-transport";
 import {
   getLatestEventSequence,
   getThreadById,
   listThreadEvents,
-} from "@/lib/v11/conversation/thread-queries";
+} from "@/lib/conversations/thread-queries";
+import { REQUEST_ID_HEADER, apiError, getRequestId, resourceNotFound } from "@/lib/http";
+import type { ThreadEvent } from "@/lib/persistence/schema/conversation";
+import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
 /**
  * GET /api/v1/threads/{thread_id}/events — 订阅 Event（SSE，S04-C05，§3.6；S12-W02 连接配额）。
  *
@@ -42,8 +44,6 @@ import {
  */
 import { buildStreamBackpressureResponse } from "@/lib/v11/gateway/rate-limit-helpers";
 import { getSSEConnectionQuota } from "@/lib/v11/gateway/sse-connection-quota";
-import { subscribeThreadTransientEvents } from "@/lib/v11/runtime/transient-event-bus";
-import type { V11ThreadEvent } from "@/lib/v11/schema/conversation";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -76,7 +76,7 @@ function parseNonNegInt(value: string): number | null {
  * 输出字段：event_id、sequence、schema_version、thread_id、turn_id、item_id、occurred_at、payload。
  * turn_id/item_id 可为 null（如 thread.created 事件）。
  */
-function projectEvent(event: V11ThreadEvent): Record<string, unknown> {
+function projectEvent(event: ThreadEvent): Record<string, unknown> {
   return {
     event_id: event.id,
     sequence: event.eventSequence,
@@ -127,13 +127,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     // Last-Event-ID 存在时忽略 after_sequence
     const parsed = parseNonNegInt(lastEventIdHeader);
     if (parsed === null) {
-      return v11SchemaInvalid(requestId, "Last-Event-ID 必须为非负整数字符串");
+      return schemaInvalidTable(requestId, "Last-Event-ID 必须为非负整数字符串");
     }
     cursor = parsed;
   } else if (afterSequenceParam !== null) {
     const parsed = parseNonNegInt(afterSequenceParam);
     if (parsed === null) {
-      return v11SchemaInvalid(requestId, "after_sequence 必须为非负整数");
+      return schemaInvalidTable(requestId, "after_sequence 必须为非负整数");
     }
     cursor = parsed;
   } else {

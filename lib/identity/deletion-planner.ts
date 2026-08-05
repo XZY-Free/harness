@@ -21,8 +21,8 @@ import {
   type DeletionDeleteMode,
   type DeletionStoreType,
   type DeletionSubjectType,
-} from "@/lib/v11/schema/deletion-request";
-import type { LegalHoldTargetType } from "@/lib/v11/schema/retention-policy";
+} from "@/lib/persistence/schema/deletion-request";
+import type { LegalHoldTargetType } from "@/lib/persistence/schema/retention-policy";
 
 // ─── 规划结果 ──────────────────────────────────────────────
 

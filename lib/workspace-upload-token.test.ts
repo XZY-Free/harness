@@ -1,4 +1,3 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type ConsumedToken,
   type UploadTokenStore,
@@ -6,6 +5,7 @@ import {
   consumeUploadToken,
   issueUploadToken,
 } from "@/lib/workspace-upload-token";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * V10 Phase 7-2：Workspace 上传一次性下载凭证测试。

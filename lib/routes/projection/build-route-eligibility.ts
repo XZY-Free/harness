@@ -11,30 +11,25 @@
 
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
-import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
+import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
+import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
+import { computeSpecificity, normalizeEligibility } from "@/lib/routes/domain/route-selector";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
-import {
-  computeCapabilityManifestDigest,
-} from "@/lib/routes/domain/route-resolution-policy";
-import {
-  normalizeEligibility,
-  computeSpecificity,
-} from "@/lib/routes/domain/route-selector";
-import type { RouteEligibilityStore, UpsertProjectionInput } from "./route-eligibility-store";
 import { and, desc, eq, isNull } from "drizzle-orm";
+import type { RouteEligibilityStore, UpsertProjectionInput } from "./route-eligibility-store";
 
+import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
 // §4.3: Phase 1 统一 Policy + Evidence 读取器
 import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
-import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
 import {
+  type RevisionExecutionEligibilityError,
   RevisionExecutionEligibilityPolicy,
   type RevisionExecutionEvidenceSnapshot,
-  type RevisionExecutionEligibilityError,
 } from "@/lib/publications/application/load-revision-execution-evidence";
-import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
 import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
+import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
 
 export interface BuildProjectionDependencies {
   store: RouteEligibilityStore;
@@ -93,7 +88,9 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     // 3. 没有 activeRouteRevisionId → ineligible
     if (!route.activeRouteRevisionId) {
       const version = computeAuthoritativeVersion(
-        Number(routeSet.versionNo), 0, input.sourceAggregateVersion ?? 0,
+        Number(routeSet.versionNo),
+        0,
+        input.sourceAggregateVersion ?? 0,
       );
       await deps.store.upsertProjection({
         ...baseIneligible(route, routeSet),
@@ -101,7 +98,11 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
         projectionVersionNo: version,
         lastRebuiltAt: now,
       });
-      return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: version };
+      return {
+        routeId: input.routeId,
+        eligibilityState: "ineligible",
+        projectionVersionNo: version,
+      };
     }
 
     // 4. 读取 RouteRevision
@@ -117,7 +118,9 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       .limit(1);
     if (!revision) {
       const version = computeAuthoritativeVersion(
-        Number(routeSet.versionNo), 0, input.sourceAggregateVersion ?? 0,
+        Number(routeSet.versionNo),
+        0,
+        input.sourceAggregateVersion ?? 0,
       );
       await deps.store.upsertProjection({
         ...baseIneligible(route, routeSet),
@@ -125,7 +128,11 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
         projectionVersionNo: version,
         lastRebuiltAt: now,
       });
-      return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: version };
+      return {
+        routeId: input.routeId,
+        eligibilityState: "ineligible",
+        projectionVersionNo: version,
+      };
     }
 
     // 5. 读取 RouteActivation
@@ -137,7 +144,9 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       .limit(1);
     if (!activation || activation.routeRevisionId !== revision.id) {
       const version = computeAuthoritativeVersion(
-        Number(routeSet.versionNo), 0, input.sourceAggregateVersion ?? 0,
+        Number(routeSet.versionNo),
+        0,
+        input.sourceAggregateVersion ?? 0,
       );
       await deps.store.upsertProjection({
         ...baseIneligible(route, routeSet),
@@ -145,55 +154,75 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
         projectionVersionNo: version,
         lastRebuiltAt: now,
       });
-      return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: version };
+      return {
+        routeId: input.routeId,
+        eligibilityState: "ineligible",
+        projectionVersionNo: version,
+      };
     }
 
     // 6. 读取 Agent + AgentRevision + Runtime + RuntimeRevision（权威事实）
     const [agent, agentRevision, runtimeRevision] = await Promise.all([
-      db.select().from(agentTable)
+      db
+        .select()
+        .from(agentTable)
         .where(and(eq(agentTable.id, routeSet.agentId), isNull(agentTable.deletedAt)))
-        .limit(1).then((r) => r[0] ?? null),
-      db.select().from(agentRevisionTable)
+        .limit(1)
+        .then((r) => r[0] ?? null),
+      db
+        .select()
+        .from(agentRevisionTable)
         .where(eq(agentRevisionTable.id, revision.agentRevisionId))
-        .limit(1).then((r) => r[0] ?? null),
-      db.select().from(runtimeRevisionTable)
+        .limit(1)
+        .then((r) => r[0] ?? null),
+      db
+        .select()
+        .from(runtimeRevisionTable)
         .where(eq(runtimeRevisionTable.id, revision.runtimeRevisionId))
-        .limit(1).then((r) => r[0] ?? null),
+        .limit(1)
+        .then((r) => r[0] ?? null),
     ]);
 
-    const [runtime] = agent && runtimeRevision
-      ? await db.select().from(runtimeTable)
-          .where(and(eq(runtimeTable.id, runtimeRevision.runtimeId), isNull(runtimeTable.deletedAt)))
-          .limit(1)
-      : [null];
+    const [runtime] =
+      agent && runtimeRevision
+        ? await db
+            .select()
+            .from(runtimeTable)
+            .where(
+              and(eq(runtimeTable.id, runtimeRevision.runtimeId), isNull(runtimeTable.deletedAt)),
+            )
+            .limit(1)
+        : [null];
 
     // §4.3: 7. 使用 Phase 1 统一 Evidence 读取器加载完整快照
-    const [agentArtifactEvidence, runtimeArtifactEvidence, agentPublication, runtimePublication] = await Promise.all([
-      loadArtifactEvidenceSnapshot({
-        tenantId: input.tenantId,
-        artifactType: "agent_revision",
-        artifactRevisionId: revision.agentRevisionId,
-      }),
-      loadArtifactEvidenceSnapshot({
-        tenantId: input.tenantId,
-        artifactType: "runtime_revision",
-        artifactRevisionId: revision.runtimeRevisionId,
-      }),
-      loadActivePublicationSnapshot({
-        tenantId: input.tenantId,
-        subjectType: "agent_revision",
-        subjectRevisionId: revision.agentRevisionId,
-      }),
-      loadActivePublicationSnapshot({
-        tenantId: input.tenantId,
-        subjectType: "runtime_revision",
-        subjectRevisionId: revision.runtimeRevisionId,
-      }),
-    ]);
+    const [agentArtifactEvidence, runtimeArtifactEvidence, agentPublication, runtimePublication] =
+      await Promise.all([
+        loadArtifactEvidenceSnapshot({
+          tenantId: input.tenantId,
+          artifactType: "agent_revision",
+          artifactRevisionId: revision.agentRevisionId,
+        }),
+        loadArtifactEvidenceSnapshot({
+          tenantId: input.tenantId,
+          artifactType: "runtime_revision",
+          artifactRevisionId: revision.runtimeRevisionId,
+        }),
+        loadActivePublicationSnapshot({
+          tenantId: input.tenantId,
+          subjectType: "agent_revision",
+          subjectRevisionId: revision.agentRevisionId,
+        }),
+        loadActivePublicationSnapshot({
+          tenantId: input.tenantId,
+          subjectType: "runtime_revision",
+          subjectRevisionId: revision.runtimeRevisionId,
+        }),
+      ]);
 
     // 8. Policy
     const policyRevisionState = revision.policyRevisionId
-      ? await db.select({ state: policyRevisionTable.revisionState })
+      ? await db
+          .select({ state: policyRevisionTable.revisionState })
           .from(policyRevisionTable)
           .where(eq(policyRevisionTable.id, revision.policyRevisionId))
           .limit(1)
@@ -207,17 +236,25 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       agentArtifactEvidence,
       agentPublication,
       agentLifecycleState: agent?.lifecycleState === "enabled" ? "active" : "archived",
-      agentRevisionState: agentRevision?.revisionState === "published" ? "published"
-        : agentRevision?.revisionState === "withdrawn" ? "withdrawn" : "draft",
+      agentRevisionState:
+        agentRevision?.revisionState === "published"
+          ? "published"
+          : agentRevision?.revisionState === "withdrawn"
+            ? "withdrawn"
+            : "draft",
       runtimeRevisionId: revision.runtimeRevisionId,
       runtimeArtifactEvidence,
       runtimePublication,
       runtimeConformance: null, // §4.3 TODO: 需要 loadConformanceEligibilitySnapshot
       runtimeLifecycleState: runtime?.lifecycleState === "enabled" ? "active" : "retired",
-      runtimeRevisionState: runtimeRevision?.revisionState === "published" ? "published"
-        : runtimeRevision?.revisionState === "withdrawn" ? "withdrawn" : "draft",
+      runtimeRevisionState:
+        runtimeRevision?.revisionState === "published"
+          ? "published"
+          : runtimeRevision?.revisionState === "withdrawn"
+            ? "withdrawn"
+            : "draft",
       runtimeCapabilities: Array.isArray(runtimeRevision?.runtimeCapabilitiesJson)
-        ? runtimeRevision.runtimeCapabilitiesJson as string[]
+        ? (runtimeRevision.runtimeCapabilitiesJson as string[])
         : [],
       policyRevisionId: revision.policyRevisionId,
     };
@@ -236,7 +273,8 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     if (!runtime) ineligibilityReasons.push("runtime_not_found");
     if (!runtimeRevision) ineligibilityReasons.push("runtime_revision_not_found");
     if (activation.activationState !== "active") ineligibilityReasons.push("activation_not_active");
-    if (revision.policyRevisionId !== null && policyRevisionState !== "published") ineligibilityReasons.push("policy_not_published");
+    if (revision.policyRevisionId !== null && policyRevisionState !== "published")
+      ineligibilityReasons.push("policy_not_published");
     // 从统一 Policy 错误中提取原因
     for (const err of eligibilityResult.errors) {
       ineligibilityReasons.push(err.code);
@@ -246,14 +284,15 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     const normalized = normalizeEligibility(revision.eligibilityConditionsJson);
     const specificity = normalized ? computeSpecificity(normalized) : 0;
 
-    const capabilityCompatibilityDigest = agentRevision && runtimeRevision
-      ? computeCapabilityManifestDigest({
-          agentRevisionId: agentRevision.id,
-          agentInterfaceRequirements: agentRevision.agentInterfaceRequirementsJson,
-          runtimeRevisionId: runtimeRevision.id,
-          runtimeCapabilities: runtimeRevision.runtimeCapabilitiesJson,
-        })
-      : "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    const capabilityCompatibilityDigest =
+      agentRevision && runtimeRevision
+        ? computeCapabilityManifestDigest({
+            agentRevisionId: agentRevision.id,
+            agentInterfaceRequirements: agentRevision.agentInterfaceRequirementsJson,
+            runtimeRevisionId: runtimeRevision.id,
+            runtimeCapabilities: runtimeRevision.runtimeCapabilitiesJson,
+          })
+        : "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
     // 11. 构建 Projection 并写入
     const version = computeAuthoritativeVersion(
@@ -264,11 +303,23 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
 
     // §4.3: 从统一 Snapshot 提取布尔字段
     const agentPublicationActive = agentPublication ? 1 : 0;
-    const agentEvidenceValid = agentArtifactEvidence?.verificationState === "verified" && agentArtifactEvidence.revokedAt === null ? 1 : 0;
+    const agentEvidenceValid =
+      agentArtifactEvidence?.verificationState === "verified" &&
+      agentArtifactEvidence.revokedAt === null
+        ? 1
+        : 0;
     const runtimePublicationActive = runtimePublication ? 1 : 0;
-    const runtimeEvidenceValid = runtimeArtifactEvidence?.verificationState === "verified" && runtimeArtifactEvidence.revokedAt === null ? 1 : 0;
+    const runtimeEvidenceValid =
+      runtimeArtifactEvidence?.verificationState === "verified" &&
+      runtimeArtifactEvidence.revokedAt === null
+        ? 1
+        : 0;
     // Conformance: 从 Policy 错误判断
-    const runtimeConformanceValid = eligibilityResult.errors.some((e) => e.dimension === "runtime_conformance") ? 0 : 1;
+    const runtimeConformanceValid = eligibilityResult.errors.some(
+      (e) => e.dimension === "runtime_conformance",
+    )
+      ? 0
+      : 1;
 
     const projectionInput: UpsertProjectionInput = {
       routeId: route.id,
@@ -281,7 +332,11 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       routeRevisionNo: revision.revisionNo,
       routeActivationId: activation.id,
       routeActivationSequence: activation.activationSequence,
-      routeGroupId: readRouteGroupId(revision.routeGroupId, revision.trafficAllocationJson, routeSet.id),
+      routeGroupId: readRouteGroupId(
+        revision.routeGroupId,
+        revision.trafficAllocationJson,
+        routeSet.id,
+      ),
       selectorDigest: revision.selectorDigest,
       eligibilityConditionsJson: revision.eligibilityConditionsJson,
       specificity,
@@ -379,7 +434,8 @@ function baseIneligible(
     runtimeConformanceValid: 0,
     policyRevisionId: null,
     policyRevisionState: null,
-    capabilityCompatibilityDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    capabilityCompatibilityDigest:
+      "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     agentArtifactDigest: null,
     runtimeArtifactDigest: null,
     runtimeConfigDigest: null,
@@ -398,7 +454,11 @@ function baseIneligible(
   };
 }
 
-function readRouteGroupId(columnValue: string | null, jsonValue: unknown, fallback: string): string {
+function readRouteGroupId(
+  columnValue: string | null,
+  jsonValue: unknown,
+  fallback: string,
+): string {
   if (columnValue) return columnValue;
   if (jsonValue && typeof jsonValue === "object" && !Array.isArray(jsonValue)) {
     const groupId = (jsonValue as { groupId?: unknown }).groupId;

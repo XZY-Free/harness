@@ -22,7 +22,7 @@ import {
   type IdempotencyProcessingState,
   type IdempotencyRecord,
   idempotencyRecord,
-} from "@/lib/v11/schema/idempotency";
+} from "@/lib/persistence/schema/idempotency";
 import { and, eq, lte } from "drizzle-orm";
 
 /** 唯一键查询参数（与 UNIQUE 索引对齐）。 */
@@ -196,8 +196,8 @@ export type {
   IdempotencyAudience,
   IdempotencyCallerType,
   IdempotencyProcessingState,
-} from "@/lib/v11/schema/idempotency";
-export type { IdempotencyRecord } from "@/lib/v11/schema/idempotency";
+} from "@/lib/persistence/schema/idempotency";
+export type { IdempotencyRecord } from "@/lib/persistence/schema/idempotency";
 
 /** audience 兼容别名（lib/http.ts ApiAudience 与 IdempotencyAudience 同构）。 */
 export type { ApiAudience } from "@/lib/http";

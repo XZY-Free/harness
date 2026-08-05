@@ -62,7 +62,9 @@ function issueWorkloadToken(claims: {
 }
 
 /** 从响应解析 V11 错误体。 */
-async function parseErrorBody(response: { json: () => Promise<unknown> }): Promise<ApiErrorResponse> {
+async function parseErrorBody(response: {
+  json: () => Promise<unknown>;
+}): Promise<ApiErrorResponse> {
   return (await response.json()) as ApiErrorResponse;
 }
 

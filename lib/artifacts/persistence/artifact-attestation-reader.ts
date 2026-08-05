@@ -1,3 +1,4 @@
+import type { VerificationState } from "@/lib/artifacts/domain/artifact";
 /**
  * ArtifactAttestation 只读查询。
  *
@@ -15,7 +16,6 @@ import {
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
 import { db } from "@/lib/db/client";
-import type { VerificationState } from "@/lib/artifacts/domain/artifact";
 import { and, desc, eq, isNotNull, isNull, or } from "drizzle-orm";
 
 // ─── 仓储：查询 ────────────────────────────────────────────

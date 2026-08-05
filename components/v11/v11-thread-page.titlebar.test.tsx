@@ -38,13 +38,13 @@ vi.mock("./sidebar/sidebar-context", () => ({
   }),
 }));
 
-import { V11ThreadPage } from "./v11-thread-page";
+import { ThreadPage } from "./v11-thread-page";
 
 afterEach(cleanup);
 
-describe("V11ThreadPage Desktop 标题栏", () => {
+describe("ThreadPage Desktop 标题栏", () => {
   it("侧栏收起后拖拽区避开左侧窗口控件和右侧工作台按钮", () => {
-    render(<V11ThreadPage threadId="thread-1" variant="desktop" />);
+    render(<ThreadPage threadId="thread-1" variant="desktop" />);
 
     const titlebar = screen.getByRole("heading", { name: "新会话" }).parentElement;
     expect(titlebar?.className).not.toContain("[-webkit-app-region:drag]");
@@ -55,7 +55,7 @@ describe("V11ThreadPage Desktop 标题栏", () => {
   });
 
   it("侧栏收起时标题避开搜索、折叠和新建会话三个按钮", () => {
-    render(<V11ThreadPage threadId="thread-1" variant="desktop" />);
+    render(<ThreadPage threadId="thread-1" variant="desktop" />);
 
     const titlebar = screen.getByRole("heading", { name: "新会话" }).parentElement;
     expect(titlebar?.className).toContain("pl-48");

@@ -1,8 +1,8 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { v11AgentRevision } from "@/lib/v11/schema/agent";
-import { v11Thread } from "@/lib/v11/schema/conversation";
-import { v11ExecutionBinding, v11Invocation } from "@/lib/v11/schema/runtime";
+import { agentRevisionTable } from "@/lib/persistence/schema/agent";
+import { threadTable } from "@/lib/persistence/schema/conversation";
+import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/runtime";
 import { and, eq } from "drizzle-orm";
 
 export const CONTEXT_SOURCE_TYPES = [
@@ -121,27 +121,27 @@ function decode(handle: string): ContextHandleBinding {
 async function loadPersistedBinding(tenantId: string, invocationId: string) {
   const [row] = await db
     .select({
-      invocationId: v11Invocation.id,
-      threadId: v11Invocation.threadId,
-      triggerItemId: v11Invocation.triggerItemId,
-      userId: v11Thread.ownerUserId,
-      agentId: v11Thread.primaryAgentId,
-      workspaceId: v11Thread.defaultWorkspaceId,
-      agentRevisionId: v11ExecutionBinding.agentRevisionId,
-      workspaceBindingId: v11ExecutionBinding.workspaceBindingId,
-      policyRevisionId: v11ExecutionBinding.policyRevisionId,
-      permissionRequirementsJson: v11AgentRevision.permissionRequirementsJson,
+      invocationId: invocationTable.id,
+      threadId: invocationTable.threadId,
+      triggerItemId: invocationTable.triggerItemId,
+      userId: threadTable.ownerUserId,
+      agentId: threadTable.primaryAgentId,
+      workspaceId: threadTable.defaultWorkspaceId,
+      agentRevisionId: executionBindingTable.agentRevisionId,
+      workspaceBindingId: executionBindingTable.workspaceBindingId,
+      policyRevisionId: executionBindingTable.policyRevisionId,
+      permissionRequirementsJson: agentRevisionTable.permissionRequirementsJson,
     })
-    .from(v11Invocation)
-    .innerJoin(v11ExecutionBinding, eq(v11ExecutionBinding.invocationId, v11Invocation.id))
-    .innerJoin(v11Thread, eq(v11Thread.id, v11Invocation.threadId))
-    .leftJoin(v11AgentRevision, eq(v11AgentRevision.id, v11ExecutionBinding.agentRevisionId))
+    .from(invocationTable)
+    .innerJoin(executionBindingTable, eq(executionBindingTable.invocationId, invocationTable.id))
+    .innerJoin(threadTable, eq(threadTable.id, invocationTable.threadId))
+    .leftJoin(agentRevisionTable, eq(agentRevisionTable.id, executionBindingTable.agentRevisionId))
     .where(
       and(
-        eq(v11Invocation.tenantId, tenantId),
-        eq(v11Invocation.id, invocationId),
-        eq(v11ExecutionBinding.tenantId, tenantId),
-        eq(v11Thread.tenantId, tenantId),
+        eq(invocationTable.tenantId, tenantId),
+        eq(invocationTable.id, invocationId),
+        eq(executionBindingTable.tenantId, tenantId),
+        eq(threadTable.tenantId, tenantId),
       ),
     )
     .limit(1);

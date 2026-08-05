@@ -1,12 +1,12 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { listItemsByThread } from "@/lib/conversations/thread-item-queries";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import { listItemsByThread } from "@/lib/v11/conversation/thread-item-queries";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
 /**
  * GET /admin/api/v1/threads/{thread_id}/items — 列出 Thread 下所有 Item（S11-W04）。
  *
@@ -57,13 +57,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
   let afterSequence: number | undefined;
   if (afterSequenceParam) {
     afterSequence = Number.parseInt(afterSequenceParam, 10);
     if (!Number.isFinite(afterSequence)) {
-      return v11SchemaInvalid(requestId, "after_sequence 必须是整数");
+      return schemaInvalidTable(requestId, "after_sequence 必须是整数");
     }
   }
 

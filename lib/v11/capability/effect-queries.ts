@@ -22,26 +22,26 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { getToolCallById, updateToolCallState } from "@/lib/v11/capability/tool-call-queries";
 import {
   ADMIN_VERIFICATION_METHODS,
   EFFECT_STATES,
   EFFECT_TARGET_STATES,
   EFFECT_TYPES,
+  type EffectRecord,
   type EffectState,
+  type EffectTarget,
   type EffectTargetState,
   type EffectType,
   GATEWAY_VERIFICATION_METHODS,
-  type NewV11EffectRecord,
-  type NewV11EffectTarget,
-  type V11EffectRecord,
-  type V11EffectTarget,
+  type NewEffectRecord,
+  type NewEffectTarget,
   VERIFICATION_METHODS,
   type VerificationMethod,
-  v11EffectRecord,
-  v11EffectTarget,
-} from "@/lib/v11/schema/effect";
-import { type V11ToolCall, v11ToolCall } from "@/lib/v11/schema/tool-call";
+  effectRecordTable,
+  effectTargetTable,
+} from "@/lib/persistence/schema/effect";
+import { type ToolCall, toolCallTable } from "@/lib/persistence/schema/tool-call";
+import { getToolCallById, updateToolCallState } from "@/lib/v11/capability/tool-call-queries";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -203,7 +203,7 @@ export function deriveEffectStateFromTargets(targets: readonly EffectTargetState
 
 export interface CreateEffectRecordInput {
   tenantId: string;
-  /** 所属 ToolCall id（一对一；逻辑外键 → V11ToolCall.id）。 */
+  /** 所属 ToolCall id（一对一；逻辑外键 → ToolCall.id）。 */
   toolCallId: string;
   effectType: EffectType;
   /** 目标数量和脱敏摘要（JSON：{ total, description, ... }）。 */
@@ -224,7 +224,7 @@ export interface CreateEffectRecordInput {
  * - targetSummaryJson 必须为非空对象。
  * - 不创建 EffectTarget；调用方应紧接着调用 createEffectTargets。
  */
-export async function createEffectRecord(input: CreateEffectRecordInput): Promise<V11EffectRecord> {
+export async function createEffectRecord(input: CreateEffectRecordInput): Promise<EffectRecord> {
   if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
   if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
   if (!isEffectType(input.effectType)) {
@@ -255,7 +255,7 @@ export async function createEffectRecord(input: CreateEffectRecordInput): Promis
 
   const id = randomUUID();
   const now = new Date();
-  const insert: NewV11EffectRecord = {
+  const insert: NewEffectRecord = {
     id,
     tenantId: input.tenantId,
     toolCallId: input.toolCallId,
@@ -269,7 +269,7 @@ export async function createEffectRecord(input: CreateEffectRecordInput): Promis
     updatedAt: now,
   };
 
-  await db.insert(v11EffectRecord).values(insert);
+  await db.insert(effectRecordTable).values(insert);
   const created = await getEffectRecordById(input.tenantId, id);
   if (!created) {
     throw new EffectNotFoundError("EffectRecord 创建后回查失败");
@@ -309,7 +309,7 @@ export interface CreateEffectTargetsInput {
  */
 export async function createEffectTargets(
   input: CreateEffectTargetsInput,
-): Promise<V11EffectTarget[]> {
+): Promise<EffectTarget[]> {
   if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
   if (!input.effectRecordId) throw new EffectValidationError("effectRecordId 不能为空");
   if (!Array.isArray(input.targets) || input.targets.length === 0) {
@@ -318,7 +318,7 @@ export async function createEffectTargets(
 
   // 校验 + 去重检查
   const seenHashes = new Set<string>();
-  const rows: NewV11EffectTarget[] = [];
+  const rows: NewEffectTarget[] = [];
   const now = new Date();
   for (const item of input.targets) {
     if (!item.targetRef) throw new EffectValidationError("targetRef 不能为空");
@@ -354,12 +354,12 @@ export async function createEffectTargets(
     });
   }
 
-  await db.insert(v11EffectTarget).values(rows);
+  await db.insert(effectTargetTable).values(rows);
   return db
     .select()
-    .from(v11EffectTarget)
-    .where(eq(v11EffectTarget.effectRecordId, input.effectRecordId))
-    .orderBy(asc(v11EffectTarget.targetHash));
+    .from(effectTargetTable)
+    .where(eq(effectTargetTable.effectRecordId, input.effectRecordId))
+    .orderBy(asc(effectTargetTable.targetHash));
 }
 
 // ─── 查询 ─────────────────────────────────────────────────
@@ -367,11 +367,11 @@ export async function createEffectTargets(
 export async function getEffectRecordById(
   tenantId: string,
   effectRecordId: string,
-): Promise<V11EffectRecord | null> {
+): Promise<EffectRecord | null> {
   const [row] = await db
     .select()
-    .from(v11EffectRecord)
-    .where(and(eq(v11EffectRecord.tenantId, tenantId), eq(v11EffectRecord.id, effectRecordId)))
+    .from(effectRecordTable)
+    .where(and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.id, effectRecordId)))
     .limit(1);
   return row ?? null;
 }
@@ -379,11 +379,13 @@ export async function getEffectRecordById(
 export async function getEffectRecordByToolCall(
   tenantId: string,
   toolCallId: string,
-): Promise<V11EffectRecord | null> {
+): Promise<EffectRecord | null> {
   const [row] = await db
     .select()
-    .from(v11EffectRecord)
-    .where(and(eq(v11EffectRecord.tenantId, tenantId), eq(v11EffectRecord.toolCallId, toolCallId)))
+    .from(effectRecordTable)
+    .where(
+      and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.toolCallId, toolCallId)),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -391,17 +393,17 @@ export async function getEffectRecordByToolCall(
 export async function listEffectTargets(
   tenantId: string,
   effectRecordId: string,
-): Promise<V11EffectTarget[]> {
+): Promise<EffectTarget[]> {
   return db
     .select()
-    .from(v11EffectTarget)
+    .from(effectTargetTable)
     .where(
       and(
-        eq(v11EffectTarget.tenantId, tenantId),
-        eq(v11EffectTarget.effectRecordId, effectRecordId),
+        eq(effectTargetTable.tenantId, tenantId),
+        eq(effectTargetTable.effectRecordId, effectRecordId),
       ),
     )
-    .orderBy(asc(v11EffectTarget.targetHash));
+    .orderBy(asc(effectTargetTable.targetHash));
 }
 
 /**
@@ -413,21 +415,23 @@ export async function listEffectTargets(
 export async function listEffectRecordsByInvocation(
   tenantId: string,
   invocationId: string,
-): Promise<V11EffectRecord[]> {
+): Promise<EffectRecord[]> {
   const rows = await db
     .select({
-      record: v11EffectRecord,
+      record: effectRecordTable,
     })
-    .from(v11EffectRecord)
+    .from(effectRecordTable)
     .innerJoin(
-      v11ToolCall,
+      toolCallTable,
       and(
-        eq(v11EffectRecord.toolCallId, v11ToolCall.id),
-        eq(v11EffectRecord.tenantId, v11ToolCall.tenantId),
+        eq(effectRecordTable.toolCallId, toolCallTable.id),
+        eq(effectRecordTable.tenantId, toolCallTable.tenantId),
       ),
     )
-    .where(and(eq(v11EffectRecord.tenantId, tenantId), eq(v11ToolCall.invocationId, invocationId)))
-    .orderBy(asc(v11ToolCall.callSequence));
+    .where(
+      and(eq(effectRecordTable.tenantId, tenantId), eq(toolCallTable.invocationId, invocationId)),
+    )
+    .orderBy(asc(toolCallTable.callSequence));
 
   return rows.map((r) => r.record);
 }
@@ -439,13 +443,13 @@ export async function listEffectRecordsByState(
   tenantId: string,
   state: EffectState,
   options?: { limit?: number },
-): Promise<V11EffectRecord[]> {
+): Promise<EffectRecord[]> {
   const limit = options?.limit ?? 100;
   return db
     .select()
-    .from(v11EffectRecord)
-    .where(and(eq(v11EffectRecord.tenantId, tenantId), eq(v11EffectRecord.effectState, state)))
-    .orderBy(asc(v11EffectRecord.createdAt))
+    .from(effectRecordTable)
+    .where(and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.effectState, state)))
+    .orderBy(asc(effectRecordTable.createdAt))
     .limit(limit);
 }
 
@@ -486,10 +490,10 @@ export interface ReconcileEffectInput {
 }
 
 export interface ReconcileEffectResult {
-  effectRecord: V11EffectRecord;
-  effectTargets: V11EffectTarget[];
+  effectRecord: EffectRecord;
+  effectTargets: EffectTarget[];
   /** 核对后的 ToolCall（call_state 可能同步迁移）。 */
-  toolCall: V11ToolCall;
+  toolCall: ToolCall;
   /** 派生的目标计数（与 API 响应 targets 字段一致）。 */
   targetsCount: {
     total: number;
@@ -564,7 +568,7 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
   }
 
   const existingTargets = await listEffectTargets(input.tenantId, record.id);
-  const targetByHash = new Map<string, V11EffectTarget>();
+  const targetByHash = new Map<string, EffectTarget>();
   for (const t of existingTargets) {
     targetByHash.set(t.targetHash, t);
   }
@@ -599,13 +603,13 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
         setFields.notes = update.notes;
       }
       await tx
-        .update(v11EffectTarget)
+        .update(effectTargetTable)
         .set(setFields)
         .where(
           and(
-            eq(v11EffectTarget.tenantId, input.tenantId),
-            eq(v11EffectTarget.effectRecordId, record.id),
-            eq(v11EffectTarget.targetHash, update.targetHash),
+            eq(effectTargetTable.tenantId, input.tenantId),
+            eq(effectTargetTable.effectRecordId, record.id),
+            eq(effectTargetTable.targetHash, update.targetHash),
           ),
         );
     }
@@ -613,14 +617,14 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
     // 2. 重新查询所有 target，派生新的 effect_state
     const updatedTargets = await tx
       .select()
-      .from(v11EffectTarget)
+      .from(effectTargetTable)
       .where(
         and(
-          eq(v11EffectTarget.tenantId, input.tenantId),
-          eq(v11EffectTarget.effectRecordId, record.id),
+          eq(effectTargetTable.tenantId, input.tenantId),
+          eq(effectTargetTable.effectRecordId, record.id),
         ),
       )
-      .orderBy(asc(v11EffectTarget.targetHash));
+      .orderBy(asc(effectTargetTable.targetHash));
 
     const targetStates: EffectTargetState[] = updatedTargets.map((t) => t.targetState);
     const newEffectState = deriveEffectStateFromTargets(targetStates);
@@ -640,9 +644,11 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
       recordSetFields.externalResultRef = input.externalResultRef;
     }
     await tx
-      .update(v11EffectRecord)
+      .update(effectRecordTable)
       .set(recordSetFields)
-      .where(and(eq(v11EffectRecord.tenantId, input.tenantId), eq(v11EffectRecord.id, record.id)));
+      .where(
+        and(eq(effectRecordTable.tenantId, input.tenantId), eq(effectRecordTable.id, record.id)),
+      );
 
     // 4. 同步更新 ToolCall.call_state（§6.5）
     //    - confirmed_success/partial → succeeded
@@ -674,16 +680,18 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
         }
       }
       await tx
-        .update(v11ToolCall)
+        .update(toolCallTable)
         .set(toolCallSetFields)
-        .where(and(eq(v11ToolCall.tenantId, input.tenantId), eq(v11ToolCall.id, input.toolCallId)));
+        .where(
+          and(eq(toolCallTable.tenantId, input.tenantId), eq(toolCallTable.id, input.toolCallId)),
+        );
     }
 
     // 5. 回查最新状态
     const [updatedRecord] = await tx
       .select()
-      .from(v11EffectRecord)
-      .where(eq(v11EffectRecord.id, record.id))
+      .from(effectRecordTable)
+      .where(eq(effectRecordTable.id, record.id))
       .limit(1);
     if (!updatedRecord) {
       throw new EffectNotFoundError("EffectRecord reconcile 后回查失败");
@@ -691,8 +699,8 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
 
     const [updatedToolCall] = await tx
       .select()
-      .from(v11ToolCall)
-      .where(eq(v11ToolCall.id, input.toolCallId))
+      .from(toolCallTable)
+      .where(eq(toolCallTable.id, input.toolCallId))
       .limit(1);
     if (!updatedToolCall) {
       throw new EffectNotFoundError("ToolCall reconcile 后回查失败");
@@ -737,7 +745,7 @@ export async function markToolCallUnknownEffect(input: {
   targetSummaryJson: unknown;
   targets?: readonly CreateEffectTargetItem[];
   externalIdempotencyKey?: string | null;
-}): Promise<{ effectRecord: V11EffectRecord; effectTargets: V11EffectTarget[] }> {
+}): Promise<{ effectRecord: EffectRecord; effectTargets: EffectTarget[] }> {
   if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
   if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
 
@@ -764,7 +772,7 @@ export async function markToolCallUnknownEffect(input: {
     });
   }
 
-  let targets: V11EffectTarget[] = [];
+  let targets: EffectTarget[] = [];
   if (input.targets && input.targets.length > 0) {
     targets = await listEffectTargets(input.tenantId, record.id);
     if (targets.length === 0) {

@@ -14,24 +14,24 @@
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - 事故不存在 → 404 RESOURCE_NOT_FOUND
  */
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   computeContainmentSummary,
   getSecurityIncidentById,
   listIncidentContainments,
 } from "@/lib/identity/security-incident-queries";
-import type { V11IncidentContainment } from "@/lib/v11/schema/security-incident";
+import type { IncidentContainment } from "@/lib/persistence/schema/security-incident";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
-function projectContainment(c: V11IncidentContainment): Record<string, unknown> {
+function projectContainment(c: IncidentContainment): Record<string, unknown> {
   return {
     id: c.id,
     incident_id: c.incidentId,
@@ -76,7 +76,7 @@ export async function GET(
   // 3. 解析路径参数
   const { security_incident_id: incidentId } = await context.params;
   if (!incidentId) {
-    return v11SchemaInvalid(requestId, "缺少路径参数 security_incident_id");
+    return schemaInvalidTable(requestId, "缺少路径参数 security_incident_id");
   }
 
   // 4. 校验事故存在 + 跨租户隔离

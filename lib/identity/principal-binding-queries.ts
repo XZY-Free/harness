@@ -6,8 +6,8 @@
  * 不复制组织树——只保存稳定映射，授权层展开时再查。
  */
 import { db } from "@/lib/db/client";
-import { principalBinding } from "@/lib/v11/schema/identity";
-import type { PrincipalBinding, PrincipalSubjectType } from "@/lib/v11/schema/identity";
+import { principalBinding } from "@/lib/persistence/schema/identity";
+import type { PrincipalBinding, PrincipalSubjectType } from "@/lib/persistence/schema/identity";
 import { and, eq } from "drizzle-orm";
 
 /** 按 (tenantId, subjectType, externalId) upsert 主体绑定。 */

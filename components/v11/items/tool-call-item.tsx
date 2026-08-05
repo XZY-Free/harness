@@ -12,15 +12,15 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { V11ClientItem } from "@/lib/v11/client/types";
+import type { ClientItem } from "@/lib/v11/client/types";
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 
-interface V11ToolCallItemProps {
-  readonly item: V11ClientItem;
+interface ToolCallItemProps {
+  readonly item: ClientItem;
 }
 
-export function V11ToolCallItem({ item }: V11ToolCallItemProps) {
+export function ToolCallItem({ item }: ToolCallItemProps) {
   const [expanded, setExpanded] = useState(false);
   const content = item.content as {
     tool_name?: string;

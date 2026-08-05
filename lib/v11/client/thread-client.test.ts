@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { requiresSnapshotRefresh } from "./thread-client";
-import type { V11ClientEvent } from "./types";
+import type { ClientEvent } from "./types";
 
-function event(overrides: Partial<V11ClientEvent>): V11ClientEvent {
+function event(overrides: Partial<ClientEvent>): ClientEvent {
   return {
     event_id: "event-1",
     sequence: 1,

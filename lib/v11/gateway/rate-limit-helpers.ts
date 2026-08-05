@@ -1,3 +1,4 @@
+import type { ApiErrorCode } from "@/lib/error-codes";
 /**
  * V11 限流与过载保护路由助手（S12-W02）。
  *
@@ -17,7 +18,7 @@
  * - 过载保护 acquire/release 必须配对；enforceGatewayProtection 返回 ok 时附带回滚函数。
  */
 import { REQUEST_ID_HEADER, apiError } from "@/lib/http";
-import type { ApiErrorCode } from "@/lib/error-codes";
+import type { Principal } from "@/lib/identity/resolver";
 import {
   type OverloadResult,
   type RequestPriority,
@@ -30,7 +31,6 @@ import {
   getRateLimiter,
 } from "@/lib/v11/gateway/rate-limiter";
 import type { SSEQuotaResult } from "@/lib/v11/gateway/sse-connection-quota";
-import type { Principal } from "@/lib/identity/resolver";
 
 /** 限流检查请求参数。 */
 export interface RateLimitCheckParams {

@@ -75,7 +75,11 @@ export interface HostedArtifactEvidenceProvider {
   loadRuntimeArtifactEvidence(command: {
     tenantId: string;
     runtimeRevisionId: string;
-  }): Promise<{ artifactRef: string | null; artifactDigest: string | null; configHash: string | null }>;
+  }): Promise<{
+    artifactRef: string | null;
+    artifactDigest: string | null;
+    configHash: string | null;
+  }>;
 }
 
 // ─── 6. Conformance 运行 ─────────────────────────────────
@@ -112,11 +116,15 @@ import type { HostedRuntimeControlPlane } from "@/lib/runtimes/application/provi
  * §6.5: 从 HostedGateways 构造 HostedRuntimeControlPlane 兼容对象。
  * 过渡期: 允许旧调用方继续使用 HostedRuntimeControlPlane 接口。
  */
-export function createControlPlaneFromGateways(gateways: HostedGateways): HostedRuntimeControlPlane {
+export function createControlPlaneFromGateways(
+  gateways: HostedGateways,
+): HostedRuntimeControlPlane {
   return {
     resolveEligibleRoute: (command) => gateways.routeReader.resolveEligibleRoute(command),
-    ensurePublishedAgentRevision: (command) => gateways.agentPublication.ensurePublishedAgentRevision(command),
-    ensurePublishedRuntimeRevision: (command) => gateways.runtimePublication.ensurePublishedRuntimeRevision(command),
+    ensurePublishedAgentRevision: (command) =>
+      gateways.agentPublication.ensurePublishedAgentRevision(command),
+    ensurePublishedRuntimeRevision: (command) =>
+      gateways.runtimePublication.ensurePublishedRuntimeRevision(command),
     activateRoute: (command) => gateways.routeActivation.activateRoute(command),
   };
 }

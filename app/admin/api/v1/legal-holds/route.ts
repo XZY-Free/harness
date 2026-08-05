@@ -17,28 +17,24 @@
  * - 有效期已过 → 400 REQUEST_SCHEMA_INVALID
  * - 双人审批不满足 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiError, apiSuccess, getRequestId } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
+import { LegalHoldError, createLegalHold, listLegalHolds } from "@/lib/identity/legal-hold-queries";
+import {
+  LEGAL_HOLD_TARGET_TYPES,
+  type LegalHoldTargetType,
+} from "@/lib/persistence/schema/retention-policy";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import {
-  LegalHoldError,
-  createLegalHold,
-  listLegalHolds,
-} from "@/lib/identity/legal-hold-queries";
-import {
-  LEGAL_HOLD_TARGET_TYPES,
-  type LegalHoldTargetType,
-} from "@/lib/v11/schema/retention-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +69,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const targetType = body?.target_type?.trim();
   if (!targetType || !VALID_TARGET_TYPES.has(targetType)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "缺少或非法 target_type（期望 tenant/thread/invocation/job/artifact/agent_revision）",
     );
@@ -81,26 +77,26 @@ export async function POST(request: Request): Promise<Response> {
 
   const targetId = body?.target_id?.trim();
   if (!targetId) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 target_id");
+    return schemaInvalidTable(requestId, "缺少必填字段 target_id");
   }
 
   const reason = body?.reason?.trim();
   if (!reason) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 reason");
+    return schemaInvalidTable(requestId, "缺少必填字段 reason");
   }
 
   const approvedBy = body?.approved_by?.trim();
   if (!approvedBy) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 approved_by（需双人审批）");
+    return schemaInvalidTable(requestId, "缺少必填字段 approved_by（需双人审批）");
   }
 
   const validUntilStr = body?.valid_until?.trim();
   if (!validUntilStr) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 valid_until");
+    return schemaInvalidTable(requestId, "缺少必填字段 valid_until");
   }
   const validUntil = new Date(validUntilStr);
   if (Number.isNaN(validUntil.getTime())) {
-    return v11SchemaInvalid(requestId, "valid_until 非合法 RFC 3339 时间");
+    return schemaInvalidTable(requestId, "valid_until 非合法 RFC 3339 时间");
   }
 
   const createdBy =
@@ -150,7 +146,7 @@ export async function POST(request: Request): Promise<Response> {
       err instanceof LegalHoldError &&
       (err.code === "hold_expired" || err.code === "invalid_target")
     ) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }
@@ -176,15 +172,15 @@ export async function GET(request: Request): Promise<Response> {
   const cursor = url.searchParams.get("cursor") ?? undefined;
 
   if (targetTypeParam && !VALID_TARGET_TYPES.has(targetTypeParam)) {
-    return v11SchemaInvalid(requestId, "非法 target_type 查询参数");
+    return schemaInvalidTable(requestId, "非法 target_type 查询参数");
   }
   if (holdStateParam && holdStateParam !== "active" && holdStateParam !== "released") {
-    return v11SchemaInvalid(requestId, "非法 hold_state 查询参数");
+    return schemaInvalidTable(requestId, "非法 hold_state 查询参数");
   }
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
   if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
-    return v11SchemaInvalid(requestId, "非法 limit 查询参数");
+    return schemaInvalidTable(requestId, "非法 limit 查询参数");
   }
 
   // action scope 校验：按 tenant 维度授权

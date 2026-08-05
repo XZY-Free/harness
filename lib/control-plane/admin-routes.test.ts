@@ -20,7 +20,6 @@ import {
   createDraftRevision,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import {
   type BuilderKeyRegistry,
@@ -35,12 +34,18 @@ import {
   setArtifactStoreOverride,
   setBuilderKeyRegistryOverride,
 } from "@/lib/artifacts/infrastructure/artifact-store-provider";
-import { listAttestationsByRevision } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { listAttestationsByRevision } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { findIdempotencyRecord } from "@/lib/identity/idempotency-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding } from "@/lib/identity/role-action-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import {
   createRouteSet,
@@ -49,11 +54,6 @@ import {
 } from "@/lib/routes/application/deployment-route-service";
 import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { findIdempotencyRecord } from "@/lib/identity/idempotency-queries";
-import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

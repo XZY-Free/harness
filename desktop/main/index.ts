@@ -174,10 +174,15 @@ async function main(): Promise<void> {
 
   await app.whenReady();
 
-  const runtimeConfigPath = app.isPackaged ? join(process.resourcesPath, "runtime-config.json") : null;
+  const runtimeConfigPath = app.isPackaged
+    ? join(process.resourcesPath, "runtime-config.json")
+    : null;
   const runtimeEnv = loadRuntimeEnvironment({
     env: process.env,
-    configText: runtimeConfigPath && existsSync(runtimeConfigPath) ? readFileSync(runtimeConfigPath, "utf8") : undefined,
+    configText:
+      runtimeConfigPath && existsSync(runtimeConfigPath)
+        ? readFileSync(runtimeConfigPath, "utf8")
+        : undefined,
   });
   const serverOrigin = getServerOrigin(runtimeEnv);
   const allowInsecureRemoteOrigin = runtimeEnv.SNOW_ALLOW_INSECURE_REMOTE_ORIGIN;

@@ -59,7 +59,9 @@ module.exports = {
       name: "domain-no-v11",
       comment: "正式 Domain 不得依赖 lib/v11（含嵌套目录）",
       severity: "error",
-      from: { path: "^lib/(agents|runtimes|routes|executions|artifacts|publications|control-plane)/([^/]+/)*domain/" },
+      from: {
+        path: "^lib/(agents|runtimes|routes|executions|artifacts|publications|control-plane)/([^/]+/)*domain/",
+      },
       to: { path: "^lib/v11/" },
     },
 
@@ -115,7 +117,7 @@ module.exports = {
       comment: "§9.4: API Route 不得直接依赖 Drizzle Schema (error)",
       severity: "error",
       from: { path: "^app/" },
-      to: { path: "^lib/v11/schema/" },
+      to: { path: "^lib/persistence/schema/" },
     },
     {
       name: "api-no-mysql-store",

@@ -1,4 +1,3 @@
-import { apiError } from "@/lib/http";
 /**
  * V11 Admin API route handler 公共助手（S03-C05）。
  *
@@ -17,6 +16,7 @@ import { apiError } from "@/lib/http";
  * - ETag 格式不匹配 → 400 REQUEST_SCHEMA_INVALID（fail-closed，不静默接受）。
  */
 import { type ApiErrorCode, errorDefinition } from "@/lib/error-codes";
+import { apiError } from "@/lib/http";
 import type { ActionCode, ResourceScopeType } from "@/lib/identity/action-codes";
 import { requireActionScope } from "@/lib/identity/authorization";
 import {
@@ -340,14 +340,14 @@ export function parseCatalogRevisionEtag(etag: string): number {
 /**
  * 构造 400 REQUEST_SCHEMA_INVALID 响应（请求体校验失败）。
  */
-export function v11SchemaInvalid(requestId: string, message: string): Response {
+export function schemaInvalidTable(requestId: string, message: string): Response {
   return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
 }
 
 /**
  * 构造 412 ETAG_MISMATCH 响应（乐观锁冲突）。
  */
-export function v11EtagMismatch(requestId: string, message: string): Response {
+export function etagMismatchTable(requestId: string, message: string): Response {
   return apiError("ETAG_MISMATCH", message, { requestId });
 }
 

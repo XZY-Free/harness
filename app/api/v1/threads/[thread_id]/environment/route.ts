@@ -1,10 +1,9 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
-import { getEnvironmentStatus } from "@/lib/v11/conversation/environment-status-queries";
+import { getEnvironmentStatus } from "@/lib/conversations/environment-status-queries";
 import {
   EMPTY_CONDITIONS,
   type TakeoverConditions,
   getTakeoverConditions,
-} from "@/lib/v11/conversation/environment-takeover-queries";
+} from "@/lib/conversations/environment-takeover-queries";
 /**
  * GET /api/v1/threads/{thread_id}/environment — 查询 Thread 当前 Environment 状态（S10-W06 / S10-W07）。
  *
@@ -34,10 +33,11 @@ import {
   type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
-import { getTurnsByThread } from "@/lib/v11/conversation/turn-queries";
-import type { V11EnvironmentLease } from "@/lib/v11/schema/environment";
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { getTurnsByThread } from "@/lib/conversations/turn-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +66,7 @@ function projectEnvironmentDefinition(def: {
 }
 
 /** 投影 EnvironmentLease 为响应体（snake_case）。 */
-function projectLease(lease: V11EnvironmentLease): Record<string, unknown> {
+function projectLease(lease: EnvironmentLease): Record<string, unknown> {
   return {
     id: lease.id,
     environment_definition_id: lease.environmentDefinitionId,

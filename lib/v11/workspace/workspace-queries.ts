@@ -20,23 +20,23 @@
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
-  type V11Workspace,
-  type V11WorkspaceAttachment,
-  type V11WorkspaceAttachmentInsert,
-  type V11WorkspaceAttachmentUse,
-  type V11WorkspaceBinding,
-  type V11WorkspaceBindingInsert,
-  type V11WorkspaceInsert,
   WORKSPACE_BINDING_TYPES,
+  type Workspace,
+  type WorkspaceAttachment,
+  type WorkspaceAttachmentInsert,
+  type WorkspaceAttachmentUse,
+  type WorkspaceBinding,
+  type WorkspaceBindingInsert,
   type WorkspaceBindingState,
   type WorkspaceBindingType,
+  type WorkspaceInsert,
   type WorkspaceKind,
   type WorkspaceLifecycleState,
   workspace,
   workspaceAttachment,
   workspaceAttachmentUse,
   workspaceBinding,
-} from "@/lib/v11/schema/workspace";
+} from "@/lib/persistence/schema/workspace";
 import { and, eq, isNotNull, lt, ne } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -121,7 +121,7 @@ export interface CreateWorkspaceInput {
   defaultBindingId?: string;
 }
 
-export async function createWorkspace(input: CreateWorkspaceInput): Promise<V11Workspace> {
+export async function createWorkspace(input: CreateWorkspaceInput): Promise<Workspace> {
   if (!input.tenantId) throw new WorkspaceValidationError("tenantId 不能为空");
   if (!isValidWorkspaceKey(input.workspaceKey)) {
     throw new WorkspaceValidationError(
@@ -133,7 +133,7 @@ export async function createWorkspace(input: CreateWorkspaceInput): Promise<V11W
     throw new WorkspaceValidationError(`非法 workspaceKind: ${input.workspaceKind}`);
   }
 
-  const insert: V11WorkspaceInsert = {
+  const insert: WorkspaceInsert = {
     tenantId: input.tenantId,
     workspaceKey: input.workspaceKey,
     displayName: input.displayName,
@@ -151,7 +151,7 @@ export async function createWorkspace(input: CreateWorkspaceInput): Promise<V11W
   return created;
 }
 
-export async function getWorkspaceById(tenantId: string, id: string): Promise<V11Workspace | null> {
+export async function getWorkspaceById(tenantId: string, id: string): Promise<Workspace | null> {
   const [row] = await db
     .select()
     .from(workspace)
@@ -163,7 +163,7 @@ export async function getWorkspaceById(tenantId: string, id: string): Promise<V1
 export async function getWorkspaceByKey(
   tenantId: string,
   workspaceKey: string,
-): Promise<V11Workspace | null> {
+): Promise<Workspace | null> {
   const [row] = await db
     .select()
     .from(workspace)
@@ -180,7 +180,7 @@ export async function listWorkspaces(
     lifecycleState?: WorkspaceLifecycleState;
     limit?: number;
   },
-): Promise<V11Workspace[]> {
+): Promise<Workspace[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
   const conditions = [eq(workspace.tenantId, tenantId)];
 
@@ -208,7 +208,7 @@ export async function archiveWorkspace(
   tenantId: string,
   id: string,
   expectedVersionNo: string,
-): Promise<V11Workspace> {
+): Promise<Workspace> {
   const current = await getWorkspaceById(tenantId, id);
   if (!current) throw new WorkspaceNotFoundError(`Workspace ${id} 不存在`);
   if (current.versionNo !== expectedVersionNo) {
@@ -250,7 +250,7 @@ export interface CreateWorkspaceBindingInput {
 
 export async function createWorkspaceBinding(
   input: CreateWorkspaceBindingInput,
-): Promise<V11WorkspaceBinding> {
+): Promise<WorkspaceBinding> {
   if (!input.tenantId) throw new WorkspaceValidationError("tenantId 不能为空");
   if (!isWorkspaceBindingType(input.bindingType)) {
     throw new WorkspaceValidationError(`非法 bindingType: ${input.bindingType}`);
@@ -278,7 +278,7 @@ export async function createWorkspaceBinding(
     throw new WorkspaceValidationError("已删除的 Workspace 不能添加 binding");
   }
 
-  const insert: V11WorkspaceBindingInsert = {
+  const insert: WorkspaceBindingInsert = {
     tenantId: input.tenantId,
     workspaceId: input.workspaceId,
     bindingType: input.bindingType,
@@ -310,7 +310,7 @@ export async function createWorkspaceBinding(
 export async function getWorkspaceBindingById(
   tenantId: string,
   id: string,
-): Promise<V11WorkspaceBinding | null> {
+): Promise<WorkspaceBinding | null> {
   const [row] = await db
     .select()
     .from(workspaceBinding)
@@ -327,7 +327,7 @@ export async function listWorkspaceBindings(
     bindingType?: WorkspaceBindingType;
     limit?: number;
   },
-): Promise<V11WorkspaceBinding[]> {
+): Promise<WorkspaceBinding[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
   const conditions = [
     eq(workspaceBinding.tenantId, tenantId),
@@ -356,7 +356,7 @@ export async function updateWorkspaceBindingState(
   id: string,
   newState: WorkspaceBindingState,
   expectedVersionNo: string,
-): Promise<V11WorkspaceBinding> {
+): Promise<WorkspaceBinding> {
   const current = await getWorkspaceBindingById(tenantId, id);
   if (!current) throw new WorkspaceNotFoundError(`WorkspaceBinding ${id} 不存在`);
   if (current.versionNo !== expectedVersionNo) {
@@ -391,18 +391,18 @@ export interface CreateWorkspaceAttachmentInput {
   tenantId: string;
   threadId: string;
   workspaceBindingId: string;
-  resourceType: V11WorkspaceAttachmentInsert["resourceType"];
+  resourceType: WorkspaceAttachmentInsert["resourceType"];
   resourceRef: string;
   resourceFingerprint?: string;
   displayRef?: string;
-  accessMode?: V11WorkspaceAttachmentInsert["accessMode"];
+  accessMode?: WorkspaceAttachmentInsert["accessMode"];
   attachedBy: string;
   expiresAt?: Date;
 }
 
 export async function createWorkspaceAttachment(
   input: CreateWorkspaceAttachmentInput,
-): Promise<V11WorkspaceAttachment> {
+): Promise<WorkspaceAttachment> {
   if (!input.tenantId) throw new WorkspaceValidationError("tenantId 不能为空");
   if (!input.threadId) throw new WorkspaceValidationError("threadId 不能为空");
   if (!input.resourceRef) throw new WorkspaceValidationError("resourceRef 不能为空");
@@ -419,7 +419,7 @@ export async function createWorkspaceAttachment(
     );
   }
 
-  const insert: V11WorkspaceAttachmentInsert = {
+  const insert: WorkspaceAttachmentInsert = {
     tenantId: input.tenantId,
     threadId: input.threadId,
     workspaceBindingId: input.workspaceBindingId,
@@ -455,7 +455,7 @@ export async function createWorkspaceAttachment(
 export async function getWorkspaceAttachmentById(
   tenantId: string,
   id: string,
-): Promise<V11WorkspaceAttachment | null> {
+): Promise<WorkspaceAttachment | null> {
   const [row] = await db
     .select()
     .from(workspaceAttachment)
@@ -468,7 +468,7 @@ export async function listWorkspaceAttachmentsByThread(
   tenantId: string,
   threadId: string,
   options?: { includeDetached?: boolean; limit?: number },
-): Promise<V11WorkspaceAttachment[]> {
+): Promise<WorkspaceAttachment[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
   const conditions = [
     eq(workspaceAttachment.tenantId, tenantId),
@@ -491,7 +491,7 @@ export async function detachWorkspaceAttachment(
   tenantId: string,
   id: string,
   expectedVersionNo: string,
-): Promise<V11WorkspaceAttachment> {
+): Promise<WorkspaceAttachment> {
   const current = await getWorkspaceAttachmentById(tenantId, id);
   if (!current) throw new WorkspaceNotFoundError(`WorkspaceAttachment ${id} 不存在`);
   if (current.versionNo !== expectedVersionNo) {
@@ -567,7 +567,7 @@ export interface CreateWorkspaceAttachmentUseInput {
  */
 export async function createWorkspaceAttachmentUse(
   input: CreateWorkspaceAttachmentUseInput,
-): Promise<V11WorkspaceAttachmentUse> {
+): Promise<WorkspaceAttachmentUse> {
   if (!input.tenantId) throw new WorkspaceValidationError("tenantId 不能为空");
   if (!input.turnId) throw new WorkspaceValidationError("turnId 不能为空");
   if (!input.workspaceAttachmentId) {
@@ -630,7 +630,7 @@ export async function createWorkspaceAttachmentUse(
 export async function listWorkspaceAttachmentUsesByTurn(
   tenantId: string,
   turnId: string,
-): Promise<V11WorkspaceAttachmentUse[]> {
+): Promise<WorkspaceAttachmentUse[]> {
   return db
     .select()
     .from(workspaceAttachmentUse)

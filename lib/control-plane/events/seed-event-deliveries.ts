@@ -5,10 +5,10 @@
  * 创建 ControlPlaneEventDelivery 行。
  */
 
-import { controlPlaneEventDelivery } from "./control-plane-event-delivery";
+import type { MySql2Database } from "drizzle-orm/mysql2";
 import { getSubscribedConsumers } from "./consumer-registry";
 import type { ControlPlaneEventType } from "./control-plane-event";
-import type { MySql2Database } from "drizzle-orm/mysql2";
+import { controlPlaneEventDelivery } from "./control-plane-event-delivery";
 
 /**
  * 为新事件创建所有消费者的 Delivery 行。

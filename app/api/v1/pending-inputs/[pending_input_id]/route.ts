@@ -1,11 +1,3 @@
-import {
-  ETAG_HEADER,
-  REQUEST_ID_HEADER,
-  etagHeader,
-  getRequestId,
-  parseIfMatch,
-  apiSuccess,
-} from "@/lib/http";
 /**
  * PATCH  /api/v1/pending-inputs/{pending_input_id} — 编辑 PendingInput 内容（S04-C04，§3.9）。
  * DELETE /api/v1/pending-inputs/{pending_input_id} — 移除 PendingInput（S04-C04，§3.10）。
@@ -37,15 +29,23 @@ import {
   type PendingInputContent,
   editPendingInput,
   removePendingInput,
-} from "@/lib/v11/conversation/pending-input-queries";
+} from "@/lib/conversations/pending-input-queries";
 import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   parsePendingInputEtag,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import {
+  ETAG_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  etagHeader,
+  getRequestId,
+  parseIfMatch,
+} from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -99,20 +99,20 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
   // 2. 解析 If-Match 资源 ETag（必填）
   const ifMatchRaw = parseIfMatch(request);
   if (!ifMatchRaw) {
-    return v11SchemaInvalid(requestId, "缺少必填头 If-Match（资源 ETag）");
+    return schemaInvalidTable(requestId, "缺少必填头 If-Match（资源 ETag）");
   }
 
   let expectedVersionNo: number;
   try {
     expectedVersionNo = parsePendingInputEtag(ifMatchRaw);
   } catch {
-    return v11SchemaInvalid(requestId, `If-Match ETag 格式非法: ${ifMatchRaw}`);
+    return schemaInvalidTable(requestId, `If-Match ETag 格式非法: ${ifMatchRaw}`);
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateEditBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 input 或 input.type 为空");
+    return schemaInvalidTable(requestId, "请求体非法：缺少 input 或 input.type 为空");
   }
 
   // 4. 执行业务：事务内编辑 + 写 Event（隐藏式 404）
@@ -172,14 +172,14 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
   // 2. 解析 If-Match 资源 ETag（必填）
   const ifMatchRaw = parseIfMatch(request);
   if (!ifMatchRaw) {
-    return v11SchemaInvalid(requestId, "缺少必填头 If-Match（资源 ETag）");
+    return schemaInvalidTable(requestId, "缺少必填头 If-Match（资源 ETag）");
   }
 
   let expectedVersionNo: number;
   try {
     expectedVersionNo = parsePendingInputEtag(ifMatchRaw);
   } catch {
-    return v11SchemaInvalid(requestId, `If-Match ETag 格式非法: ${ifMatchRaw}`);
+    return schemaInvalidTable(requestId, `If-Match ETag 格式非法: ${ifMatchRaw}`);
   }
 
   // 3. 执行业务：事务内移除 + 写 Event（隐藏式 404）

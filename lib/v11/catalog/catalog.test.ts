@@ -19,6 +19,12 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { db } from "@/lib/db/client";
 import { buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { agentTable } from "@/lib/persistence/schema/agent";
+import { CATALOG_AUDIENCES, CATALOG_RESOURCE_TYPES } from "@/lib/persistence/schema/catalog";
+import { tenant } from "@/lib/persistence/schema/identity";
+import { toolProviderTable, toolTable } from "@/lib/persistence/schema/tool";
 import { buildCatalogRevisionEtag, parseCatalogRevisionEtag } from "@/lib/v11/admin/route-helpers";
 import { createSkill } from "@/lib/v11/capability/skill-queries";
 import {
@@ -37,12 +43,6 @@ import {
   refreshCatalogEntry,
   removeCatalogEntry,
 } from "@/lib/v11/catalog/projector";
-import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { v11Agent } from "@/lib/v11/schema/agent";
-import { CATALOG_AUDIENCES, CATALOG_RESOURCE_TYPES } from "@/lib/v11/schema/catalog";
-import { tenant } from "@/lib/v11/schema/identity";
-import { v11Tool, v11ToolProvider } from "@/lib/v11/schema/tool";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -134,7 +134,7 @@ async function seedTool(
 ) {
   const providerId = randomUUID();
   const toolId = randomUUID();
-  await db.insert(v11ToolProvider).values({
+  await db.insert(toolProviderTable).values({
     id: providerId,
     tenantId,
     providerKey: `provider-${toolKey}`,
@@ -145,7 +145,7 @@ async function seedTool(
     trustLevel: "standard",
     versionNo: 1,
   });
-  await db.insert(v11Tool).values({
+  await db.insert(toolTable).values({
     id: toolId,
     tenantId,
     providerId,
@@ -442,7 +442,7 @@ describe("refreshCatalogEntry", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("refreshCatalogByType", () => {
-  it("agent 类型：从 V11Agent 加载并投影", async () => {
+  it("agent 类型：从 Agent 加载并投影", async () => {
     const { tenantId, userIdentityId } = await seedContext();
     await seedAgent(tenantId, userIdentityId, "finance");
     await seedAgent(tenantId, userIdentityId, "hr");
@@ -460,7 +460,7 @@ describe("refreshCatalogByType", () => {
     );
   });
 
-  it("skill 类型：从 V11Skill 加载并投影", async () => {
+  it("skill 类型：从 Skill 加载并投影", async () => {
     const { tenantId, userIdentityId } = await seedContext();
     await seedSkill(tenantId, userIdentityId, "report-gen");
 
@@ -475,7 +475,7 @@ describe("refreshCatalogByType", () => {
     expect(result.items[0]?.resource_type).toBe("skill");
   });
 
-  it("tool 类型：从 V11Tool 加载并投影（join ToolProvider 取 owner）", async () => {
+  it("tool 类型：从 Tool 加载并投影（join ToolProvider 取 owner）", async () => {
     const { tenantId, userIdentityId } = await seedContext();
     await seedTool(tenantId, userIdentityId, "search-web");
 
@@ -510,7 +510,7 @@ describe("refreshCatalogByType", () => {
       lifecycleState: "enabled",
     });
     // 软删
-    await db.update(v11Agent).set({ deletedAt: new Date() }).where(eq(v11Agent.id, agent.id));
+    await db.update(agentTable).set({ deletedAt: new Date() }).where(eq(agentTable.id, agent.id));
 
     const count = await refreshCatalogByType({ tenantId, resourceType: "agent" });
     expect(count).toBe(0);

@@ -1,7 +1,7 @@
 /**
  * 稳定控制面 Schema 映射。
  *
- * 数据库物理表名在历史迁移兼容期继续保留 V11 前缀；正式模块只使用本文件导出的
+ * 数据库物理表名在历史迁移兼容期继续保留 前缀；正式模块只使用本文件导出的
  * 职责命名，避免方案版本进入领域和持久化实现。
  *
  * 生产代码应优先从独立 schema 文件导入：
@@ -32,13 +32,13 @@ export {
   AUDIT_ACTION_TYPES,
   AUDIT_ACTOR_TYPES,
   auditEvent,
-} from "@/lib/v11/schema/audit";
+} from "@/lib/persistence/schema/audit";
 export type {
   AuditActionType,
   AuditActorType,
   AuditEvent,
   NewAuditEvent,
-} from "@/lib/v11/schema/audit";
+} from "@/lib/persistence/schema/audit";
 
 // ─── Routes ───────────────────────────────────────────────────────
 export {
@@ -54,13 +54,13 @@ export type {
 } from "@/lib/persistence/schema/routes";
 
 // ─── Idempotency ──────────────────────────────────────────────────
-export { idempotencyRecord } from "@/lib/v11/schema/idempotency";
+export { idempotencyRecord } from "@/lib/persistence/schema/idempotency";
 
 // ─── Tenant ───────────────────────────────────────────────────────
-export { tenant as tenantTable } from "@/lib/v11/schema/identity";
+export { tenant as tenantTable } from "@/lib/persistence/schema/identity";
 
 // ─── Policy ───────────────────────────────────────────────────────
-export { v11PolicyRevision as policyRevisionTable } from "@/lib/v11/schema/permission";
+export { policyRevisionTable } from "@/lib/persistence/schema/permission";
 
 // ─── Runtime + Execution ──────────────────────────────────────────
 export {
@@ -84,6 +84,4 @@ export {
   executionBindingTable,
   invocationTable,
 } from "@/lib/persistence/schema/executions";
-export type {
-  ExecutionBindingRow,
-} from "@/lib/persistence/schema/executions";
+export type { ExecutionBindingRow } from "@/lib/persistence/schema/executions";

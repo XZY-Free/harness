@@ -22,19 +22,18 @@
  * - containment_pending → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - 非法 action 参数 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound, apiSuccess } from "@/lib/http";
+import {
+  REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import {
   SecurityIncidentError,
   computeContainmentSummary,
@@ -46,9 +45,16 @@ import {
   startInvestigation,
 } from "@/lib/identity/security-incident-queries";
 import type {
-  V11IncidentContainment,
-  V11SecurityIncident,
-} from "@/lib/v11/schema/security-incident";
+  IncidentContainment,
+  SecurityIncident,
+} from "@/lib/persistence/schema/security-incident";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +81,7 @@ function closedByFromAdminPrincipal(principal: AdminPrincipal): string {
     : (principal.serviceId ?? "unknown");
 }
 
-function projectIncident(incident: V11SecurityIncident): Record<string, unknown> {
+function projectIncident(incident: SecurityIncident): Record<string, unknown> {
   return {
     id: incident.id,
     incident_key: incident.incidentKey,
@@ -101,7 +107,7 @@ function projectIncident(incident: V11SecurityIncident): Record<string, unknown>
   };
 }
 
-function projectContainment(c: V11IncidentContainment): Record<string, unknown> {
+function projectContainment(c: IncidentContainment): Record<string, unknown> {
   return {
     id: c.id,
     incident_id: c.incidentId,
@@ -119,8 +125,8 @@ function projectContainment(c: V11IncidentContainment): Record<string, unknown> 
 }
 
 function projectIncidentDetail(
-  incident: V11SecurityIncident,
-  containments: V11IncidentContainment[],
+  incident: SecurityIncident,
+  containments: IncidentContainment[],
 ): Record<string, unknown> {
   const summary = computeContainmentSummary(containments);
   return {
@@ -164,7 +170,7 @@ export async function GET(
   // 3. 解析路径参数
   const { security_incident_id: incidentId } = await context.params;
   if (!incidentId) {
-    return v11SchemaInvalid(requestId, "缺少路径参数 security_incident_id");
+    return schemaInvalidTable(requestId, "缺少路径参数 security_incident_id");
   }
 
   // 4. 查询事故；不存在 → 404 RESOURCE_NOT_FOUND
@@ -200,7 +206,7 @@ export async function POST(
   // 2. 解析路径参数 + 请求体
   const { security_incident_id: incidentId } = await context.params;
   if (!incidentId) {
-    return v11SchemaInvalid(requestId, "缺少路径参数 security_incident_id");
+    return schemaInvalidTable(requestId, "缺少路径参数 security_incident_id");
   }
 
   const body = (await request.json().catch(() => null)) as {
@@ -210,7 +216,7 @@ export async function POST(
 
   const actionRaw = body?.action?.trim();
   if (!actionRaw || !VALID_ACTIONS.has(actionRaw as IncidentAction)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "缺少或非法 action（期望 investigate/contain/resolve/escalate）",
     );
@@ -230,7 +236,7 @@ export async function POST(
   const closureReason = body?.closure_reason?.trim() || undefined;
 
   try {
-    let updated: V11SecurityIncident;
+    let updated: SecurityIncident;
 
     if (action === "investigate") {
       updated = await startInvestigation({

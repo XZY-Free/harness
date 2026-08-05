@@ -12,13 +12,13 @@
  * - 未知错误码 fall through 到 GENERIC_UNKNOWN，保证员工始终看到可读语义而非堆栈。
  * - 不在客户端注入服务端 message；中文 title/description 由本表给出，避免被服务端任意文本覆盖。
  */
-import type { V11ClientErrorBody, V11ClientVisibleError } from "./types";
+import type { ClientErrorBody, ClientVisibleError } from "./types";
 
 /** 错误映射条目。 */
 interface ErrorMapping {
   readonly title: string;
   readonly description: string;
-  readonly recoveryAction: V11ClientVisibleError["recoveryAction"];
+  readonly recoveryAction: ClientVisibleError["recoveryAction"];
 }
 
 const GENERIC_UNKNOWN: ErrorMapping = {
@@ -141,14 +141,14 @@ const ERROR_MAPPINGS: Readonly<Record<string, ErrorMapping>> = {
 };
 
 /**
- * 把服务端错误 Envelope 映射为员工可理解的 V11ClientVisibleError。
+ * 把服务端错误 Envelope 映射为员工可理解的 ClientVisibleError。
  *
  * - code 在映射表中 → 使用映射的中文 title/description + recoveryAction。
  * - code 未列出 → 使用 GENERIC_UNKNOWN，避免泄露内部细节。
  * - retryable 直接采用服务端 envelope 字段（与契约保持一致）。
  * - requestId 保留用于诊断，但不直接展示给员工。
  */
-export function toVisibleError(body: V11ClientErrorBody): V11ClientVisibleError {
+export function toVisibleError(body: ClientErrorBody): ClientVisibleError {
   const code = body.error.code;
   const mapping = ERROR_MAPPINGS[code] ?? GENERIC_UNKNOWN;
   return {
@@ -166,7 +166,7 @@ export function makeLocalVisibleError(input: {
   readonly code: string;
   readonly retryable?: boolean;
   readonly requestId?: string | null;
-}): V11ClientVisibleError {
+}): ClientVisibleError {
   const mapping = ERROR_MAPPINGS[input.code] ?? GENERIC_UNKNOWN;
   return {
     code: input.code,

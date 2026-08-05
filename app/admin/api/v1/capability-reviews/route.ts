@@ -1,4 +1,20 @@
-import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
+import {
+  CAPABILITY_REVIEW_RESOURCE_TYPES,
+  type CapabilityReviewResourceType,
+  type CapabilityReviewState,
+} from "@/lib/persistence/schema/tool-call";
 /**
  * GET / POST /admin/api/v1/capability-reviews — CapabilityReview 集合（阶段 6 S06-C05）。
  *
@@ -21,7 +37,7 @@ import {
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import {
   type RiskDiffResult,
@@ -33,22 +49,6 @@ import {
   createCapabilityReview,
   listPendingReviews,
 } from "@/lib/v11/capability/risk-review-queries";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
-import {
-  CAPABILITY_REVIEW_RESOURCE_TYPES,
-  type CapabilityReviewResourceType,
-  type CapabilityReviewState,
-} from "@/lib/v11/schema/tool-call";
 
 export const dynamic = "force-dynamic";
 
@@ -191,7 +191,7 @@ export async function GET(request: Request): Promise<Response> {
   let resourceType: CapabilityReviewResourceType | null = null;
   if (resourceTypeParam) {
     if (!(CAPABILITY_REVIEW_RESOURCE_TYPES as readonly string[]).includes(resourceTypeParam)) {
-      return v11SchemaInvalid(requestId, `resource_type 非法: ${resourceTypeParam}`);
+      return schemaInvalidTable(requestId, `resource_type 非法: ${resourceTypeParam}`);
     }
     resourceType = resourceTypeParam as CapabilityReviewResourceType;
   }
@@ -199,14 +199,14 @@ export async function GET(request: Request): Promise<Response> {
   let reviewState: CapabilityReviewState | null = null;
   if (reviewStateParam) {
     if (!(VALID_REVIEW_STATES as readonly string[]).includes(reviewStateParam)) {
-      return v11SchemaInvalid(requestId, `review_state 非法: ${reviewStateParam}`);
+      return schemaInvalidTable(requestId, `review_state 非法: ${reviewStateParam}`);
     }
     reviewState = reviewStateParam as CapabilityReviewState;
   }
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   const { items, nextCursor } = await listPendingReviews({
@@ -248,13 +248,13 @@ export async function POST(request: Request): Promise<Response> {
   // 2. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：缺少 resource_type/resource_id/new_revision_id 或字段类型错误",
     );
@@ -284,7 +284,7 @@ export async function POST(request: Request): Promise<Response> {
   } else {
     // 内部计算 diff：要求 new_risk_metadata 必填
     if (!body.new_risk_metadata) {
-      return v11SchemaInvalid(requestId, "请求体非法：必须提供 risk_diff 或 new_risk_metadata");
+      return schemaInvalidTable(requestId, "请求体非法：必须提供 risk_diff 或 new_risk_metadata");
     }
     const oldMeta = body.old_risk_metadata as RiskMetadata | null;
     const newMeta = body.new_risk_metadata as RiskMetadata;
@@ -371,7 +371,7 @@ export async function POST(request: Request): Promise<Response> {
     await failRecord(recordId);
 
     if (err instanceof CapabilityReviewValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

@@ -1,3 +1,5 @@
+import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
+import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 /**
  * S03-C02：V11 Runtime 修订模型集成测试（真实 MySQL 8）。
  *
@@ -13,21 +15,21 @@
  */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
-import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtimes/application/publish-runtime-revision-service";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import {
   ALL_CONFORMANCE_CASES,
   type ConformanceCaseResult,
-  RuntimeConformanceCaseFailedError,
   MANDATORY_GATE_CASES,
+  RuntimeConformanceCaseFailedError,
   isCapabilitySubset,
   validateConformanceGate,
 } from "@/lib/runtimes/domain/runtime-conformance";
 import { canonicalizeRuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import {
   RuntimeLifecycleError,
   createRuntime,
@@ -39,10 +41,10 @@ import {
   updateRuntimeLifecycle,
 } from "@/lib/runtimes/persistence/runtime-queries";
 import {
+  RuntimePublicationVersionConflictError,
   RuntimeRevisionImmutableError,
   RuntimeRevisionNotFoundError,
   RuntimeRevisionStateError,
-  RuntimePublicationVersionConflictError,
   createDraftRuntimeRevision,
   getLatestPublishedRuntimeRevision,
   getRevisionsByRuntime,
@@ -51,9 +53,7 @@ import {
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { publishRuntimeRevision } from "@/lib/runtimes/test-support/attempt-runtime-publication-without-trusted-run";
 import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
-import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -191,7 +191,11 @@ async function publishTrustedRevision(
     requestId: `publish-${report.runId}`,
     idempotencyKey: `publish-${report.runId}`,
   });
-  return { revision: published.revision, conformanceRunId: report.runId, attestationId: attestation.id };
+  return {
+    revision: published.revision,
+    conformanceRunId: report.runId,
+    attestationId: attestation.id,
+  };
 }
 
 /** 构造全部 mandatory case 通过的 conformance 结果。 */

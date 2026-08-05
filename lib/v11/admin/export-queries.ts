@@ -23,13 +23,13 @@ import { decodeCursor, encodeCursor } from "@/lib/http";
 import { recordAuditEvent } from "@/lib/identity/audit";
 import type { AuditActor } from "@/lib/identity/audit";
 import {
+  type AdminExport,
   type ExportFormat,
   type ExportKind,
   type ExportPrincipalKind,
   type ExportStatus,
-  type V11AdminExport,
-  v11AdminExport,
-} from "@/lib/v11/schema/admin-export";
+  adminExportTable,
+} from "@/lib/persistence/schema/admin-export";
 import { and, desc, eq, lt, or } from "drizzle-orm";
 
 // ─── createAdminExport ────────────────────────────────────
@@ -51,9 +51,9 @@ export interface CreateAdminExportParams {
 }
 
 /** 创建导出任务（status=pending）+ 写审计 admin.export.requested。 */
-export async function createAdminExport(params: CreateAdminExportParams): Promise<V11AdminExport> {
+export async function createAdminExport(params: CreateAdminExportParams): Promise<AdminExport> {
   const id = randomUUID();
-  await db.insert(v11AdminExport).values({
+  await db.insert(adminExportTable).values({
     id,
     tenantId: params.tenantId,
     requestedBy: params.requestedBy,
@@ -73,8 +73,8 @@ export async function createAdminExport(params: CreateAdminExportParams): Promis
 
   const [row] = await db
     .select()
-    .from(v11AdminExport)
-    .where(and(eq(v11AdminExport.tenantId, params.tenantId), eq(v11AdminExport.id, id)))
+    .from(adminExportTable)
+    .where(and(eq(adminExportTable.tenantId, params.tenantId), eq(adminExportTable.id, id)))
     .limit(1);
   if (!row) {
     throw new Error(`createAdminExport: 行未找到（id=${id}）`);
@@ -98,11 +98,11 @@ export async function createAdminExport(params: CreateAdminExportParams): Promis
 export async function getAdminExportById(
   tenantId: string,
   exportId: string,
-): Promise<V11AdminExport | null> {
+): Promise<AdminExport | null> {
   const [row] = await db
     .select()
-    .from(v11AdminExport)
-    .where(and(eq(v11AdminExport.tenantId, tenantId), eq(v11AdminExport.id, exportId)))
+    .from(adminExportTable)
+    .where(and(eq(adminExportTable.tenantId, tenantId), eq(adminExportTable.id, exportId)))
     .limit(1);
   return row ?? null;
 }
@@ -122,17 +122,17 @@ export interface ListAdminExportsByTenantOptions {
 export async function listAdminExportsByTenant(
   tenantId: string,
   options?: ListAdminExportsByTenantOptions,
-): Promise<{ items: V11AdminExport[]; nextCursor: string | null }> {
+): Promise<{ items: AdminExport[]; nextCursor: string | null }> {
   const limit = Math.min(options?.limit ?? 50, 200);
-  const conditions = [eq(v11AdminExport.tenantId, tenantId)];
+  const conditions = [eq(adminExportTable.tenantId, tenantId)];
   if (options?.status) {
-    conditions.push(eq(v11AdminExport.status, options.status));
+    conditions.push(eq(adminExportTable.status, options.status));
   }
   if (options?.exportKind) {
-    conditions.push(eq(v11AdminExport.exportKind, options.exportKind));
+    conditions.push(eq(adminExportTable.exportKind, options.exportKind));
   }
   if (options?.requestedBy) {
-    conditions.push(eq(v11AdminExport.requestedBy, options.requestedBy));
+    conditions.push(eq(adminExportTable.requestedBy, options.requestedBy));
   }
 
   // cursor 解码：{ created_at, id }
@@ -157,17 +157,17 @@ export async function listAdminExportsByTenant(
     // (created_at, id) < (afterCreatedAt, afterId) in DESC order：
     // 使用 Drizzle 原生操作符确保 Date 参数绑定与列类型一致（sql 模板对 Date 的时区处理不一致）
     const cursorCond = or(
-      lt(v11AdminExport.createdAt, afterCreatedAt),
-      and(eq(v11AdminExport.createdAt, afterCreatedAt), lt(v11AdminExport.id, afterId)),
+      lt(adminExportTable.createdAt, afterCreatedAt),
+      and(eq(adminExportTable.createdAt, afterCreatedAt), lt(adminExportTable.id, afterId)),
     );
     if (cursorCond) conditions.push(cursorCond);
   }
 
   const rows = await db
     .select()
-    .from(v11AdminExport)
+    .from(adminExportTable)
     .where(and(...conditions))
-    .orderBy(desc(v11AdminExport.createdAt), desc(v11AdminExport.id))
+    .orderBy(desc(adminExportTable.createdAt), desc(adminExportTable.id))
     .limit(limit + 1);
 
   let nextCursor: string | null = null;
@@ -210,8 +210,8 @@ export interface UpdateAdminExportStatusParams {
  */
 export async function updateAdminExportStatus(
   params: UpdateAdminExportStatusParams,
-): Promise<V11AdminExport> {
-  const setClause: Partial<V11AdminExport> = {
+): Promise<AdminExport> {
+  const setClause: Partial<AdminExport> = {
     status: params.status,
     updatedAt: new Date(),
   };
@@ -223,17 +223,17 @@ export async function updateAdminExportStatus(
   }
 
   await db
-    .update(v11AdminExport)
+    .update(adminExportTable)
     .set(setClause)
     .where(
-      and(eq(v11AdminExport.tenantId, params.tenantId), eq(v11AdminExport.id, params.exportId)),
+      and(eq(adminExportTable.tenantId, params.tenantId), eq(adminExportTable.id, params.exportId)),
     );
 
   const [row] = await db
     .select()
-    .from(v11AdminExport)
+    .from(adminExportTable)
     .where(
-      and(eq(v11AdminExport.tenantId, params.tenantId), eq(v11AdminExport.id, params.exportId)),
+      and(eq(adminExportTable.tenantId, params.tenantId), eq(adminExportTable.id, params.exportId)),
     )
     .limit(1);
   if (!row) {
@@ -275,10 +275,10 @@ export interface UpdateAdminExportResultParams {
  */
 export async function updateAdminExportResult(
   params: UpdateAdminExportResultParams,
-): Promise<V11AdminExport> {
+): Promise<AdminExport> {
   const now = new Date();
   await db
-    .update(v11AdminExport)
+    .update(adminExportTable)
     .set({
       status: "completed",
       resultRef: params.resultRef,
@@ -288,14 +288,14 @@ export async function updateAdminExportResult(
       updatedAt: now,
     })
     .where(
-      and(eq(v11AdminExport.tenantId, params.tenantId), eq(v11AdminExport.id, params.exportId)),
+      and(eq(adminExportTable.tenantId, params.tenantId), eq(adminExportTable.id, params.exportId)),
     );
 
   const [row] = await db
     .select()
-    .from(v11AdminExport)
+    .from(adminExportTable)
     .where(
-      and(eq(v11AdminExport.tenantId, params.tenantId), eq(v11AdminExport.id, params.exportId)),
+      and(eq(adminExportTable.tenantId, params.tenantId), eq(adminExportTable.id, params.exportId)),
     )
     .limit(1);
   if (!row) {
@@ -325,5 +325,5 @@ export type {
   ExportKind,
   ExportPrincipalKind,
   ExportStatus,
-  V11AdminExport,
-} from "@/lib/v11/schema/admin-export";
+  AdminExport,
+} from "@/lib/persistence/schema/admin-export";

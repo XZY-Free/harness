@@ -1,12 +1,15 @@
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import {
+  EVALUATION_RUN_STATES,
+  type EvaluationRunState,
+} from "@/lib/persistence/schema/evaluation";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import { listEvaluationRunsByTenant } from "@/lib/v11/evaluation/evaluation-queries";
-import { EVALUATION_RUN_STATES, type EvaluationRunState } from "@/lib/v11/schema/evaluation";
 /**
  * GET /admin/api/v1/evaluation-runs — 列出租户内所有 EvaluationRun（S11-W06）。
  *
@@ -48,13 +51,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let runState: EvaluationRunState | undefined;
   if (stateParam) {
     if (!VALID_RUN_STATES.has(stateParam)) {
-      return v11SchemaInvalid(requestId, `state 非法: ${stateParam}`);
+      return schemaInvalidTable(requestId, `state 非法: ${stateParam}`);
     }
     runState = stateParam as EvaluationRunState;
   }

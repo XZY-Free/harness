@@ -43,16 +43,16 @@ import {
   updateRecoveryDrillState,
 } from "@/lib/identity/recovery-drill-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { v11DeletionRequest, v11DeletionStep } from "@/lib/v11/schema/deletion-request";
-import { tenant } from "@/lib/v11/schema/identity";
+import { deletionRequestTable, deletionStepTable } from "@/lib/persistence/schema/deletion-request";
+import { tenant } from "@/lib/persistence/schema/identity";
 import {
   DRILL_CHECK_MATRIX,
   type RecoveryCheckState,
   type RecoveryCheckType,
+  type RecoveryDrillCheck,
   type RecoveryDrillType,
-  type V11RecoveryDrillCheck,
-} from "@/lib/v11/schema/recovery-drill";
-import { v11Artifact } from "@/lib/v11/schema/runtime-artifact";
+} from "@/lib/persistence/schema/recovery-drill";
+import { artifactTable } from "@/lib/persistence/schema/runtime-artifact";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -100,7 +100,7 @@ async function seedExtraTenant(tenantId: string, key: string): Promise<void> {
 }
 
 /** 取 checks 首个元素的 id（测试 fixture 约定至少插入一条）。 */
-function firstCheckId(checks: V11RecoveryDrillCheck[]): string {
+function firstCheckId(checks: RecoveryDrillCheck[]): string {
   const first = checks[0];
   if (!first) throw new Error("测试设置错误：期望至少一条 check");
   return first.id;
@@ -1017,7 +1017,7 @@ describe("Check 管理", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("computeDrillSummary / deriveDrillTerminalState", () => {
-  function makeCheck(state: RecoveryCheckState): V11RecoveryDrillCheck {
+  function makeCheck(state: RecoveryCheckState): RecoveryDrillCheck {
     return {
       id: `check-${state}-${Math.random()}`,
       tenantId: "t",
@@ -1128,7 +1128,7 @@ describe("runConsistencyCheck", () => {
 
   it("artifact_ref：含非法 contentRef 返回 failed", async () => {
     const t = await ensureDefaultTenant();
-    await db.insert(v11Artifact).values({
+    await db.insert(artifactTable).values({
       id: "art-bad-001",
       tenantId: t.id,
       invocationId: "inv-001",
@@ -1149,7 +1149,7 @@ describe("runConsistencyCheck", () => {
 
   it("artifact_ref：受管前缀（s3://）返回 passed", async () => {
     const t = await ensureDefaultTenant();
-    await db.insert(v11Artifact).values({
+    await db.insert(artifactTable).values({
       id: "art-ok-001",
       tenantId: t.id,
       invocationId: "inv-002",
@@ -1184,7 +1184,7 @@ describe("runConsistencyCheck", () => {
   it("deletion_evidence：completed step 缺 evidenceRef 返回 failed", async () => {
     const t = await ensureDefaultTenant();
     // 直接插入 deletion request + step（绕过 queries，专注于核对器逻辑）
-    await db.insert(v11DeletionRequest).values({
+    await db.insert(deletionRequestTable).values({
       id: "del-req-001",
       tenantId: t.id,
       subjectType: "thread",
@@ -1195,7 +1195,7 @@ describe("runConsistencyCheck", () => {
       requestPrincipalKind: "user",
       requestState: "completed",
     });
-    await db.insert(v11DeletionStep).values({
+    await db.insert(deletionStepTable).values({
       id: "del-step-001",
       tenantId: t.id,
       requestId: "del-req-001",
@@ -1212,7 +1212,7 @@ describe("runConsistencyCheck", () => {
 
   it("deletion_evidence：completed step 含 evidenceRef 返回 passed", async () => {
     const t = await ensureDefaultTenant();
-    await db.insert(v11DeletionRequest).values({
+    await db.insert(deletionRequestTable).values({
       id: "del-req-002",
       tenantId: t.id,
       subjectType: "thread",
@@ -1223,7 +1223,7 @@ describe("runConsistencyCheck", () => {
       requestPrincipalKind: "user",
       requestState: "completed",
     });
-    await db.insert(v11DeletionStep).values({
+    await db.insert(deletionStepTable).values({
       id: "del-step-002",
       tenantId: t.id,
       requestId: "del-req-002",
@@ -1270,7 +1270,7 @@ describe("runConsistencyCheck", () => {
     const t = await ensureDefaultTenant();
     await seedExtraTenant(EXTRA_TENANT_ID, "extra");
     // 在 EXTRA_TENANT 插入非法 artifact
-    await db.insert(v11Artifact).values({
+    await db.insert(artifactTable).values({
       id: "art-other-001",
       tenantId: EXTRA_TENANT_ID,
       invocationId: "inv-other-001",
@@ -1368,7 +1368,7 @@ describe("runAllChecksForDrill", () => {
   it("含非法 artifact 时 db_restore 演练批量核对后 completeRecoveryDrill 抛 illegal_transition", async () => {
     const t = await ensureDefaultTenant();
     // 注入非法 artifact（artifact_ref check 会 failed）
-    await db.insert(v11Artifact).values({
+    await db.insert(artifactTable).values({
       id: "art-bad-drill-001",
       tenantId: t.id,
       invocationId: "inv-bad-drill-001",

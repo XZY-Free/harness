@@ -2,7 +2,7 @@
  * V11 Catalog 查询层（阶段 6 S06-C03）。
  *
  * 事实源：
- * - lib/v11/schema/catalog.ts
+ * - lib/persistence/schema/catalog.ts
  * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §2（Employee Catalog API）、§3.1（CatalogSearchItem）
  * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §2（统一目录）
  *
@@ -21,10 +21,10 @@
  */
 import { db } from "@/lib/db/client";
 import {
+  type CatalogEntry,
   type CatalogResourceType,
-  type V11CatalogEntry,
-  v11CatalogEntry,
-} from "@/lib/v11/schema/catalog";
+  catalogEntryTable,
+} from "@/lib/persistence/schema/catalog";
 import { and, asc, desc, eq, gt, inArray, like, or, sql } from "drizzle-orm";
 
 // ─── 常量 ──────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export async function listCatalogOptions(
   params: ListCatalogOptionsParams,
 ): Promise<ListCatalogOptionsResult> {
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
-  const conditions = [eq(v11CatalogEntry.tenantId, params.tenantId)];
+  const conditions = [eq(catalogEntryTable.tenantId, params.tenantId)];
 
   if (params.resourceTypes && params.resourceTypes.length > 0) {
     for (const rt of params.resourceTypes) {
@@ -116,10 +116,10 @@ export async function listCatalogOptions(
         throw new CatalogQueryError("invalid_resource_type", `resourceType 非法: ${rt}`);
       }
     }
-    conditions.push(inArray(v11CatalogEntry.resourceType, [...params.resourceTypes]));
+    conditions.push(inArray(catalogEntryTable.resourceType, [...params.resourceTypes]));
   }
   if (params.lifecycleStates && params.lifecycleStates.length > 0) {
-    conditions.push(inArray(v11CatalogEntry.lifecycleState, [...params.lifecycleStates]));
+    conditions.push(inArray(catalogEntryTable.lifecycleState, [...params.lifecycleStates]));
   }
 
   if (params.cursor) {
@@ -128,10 +128,10 @@ export async function listCatalogOptions(
       // 按 catalogRevision 降序取下一页：当前条目的 revision < cursor.revision
       // 或 revision 相等且 id > cursor.id（tie-breaker）
       const cursorCondition = or(
-        sql`${v11CatalogEntry.catalogRevision} < ${decoded.catalogRevision}`,
+        sql`${catalogEntryTable.catalogRevision} < ${decoded.catalogRevision}`,
         and(
-          eq(v11CatalogEntry.catalogRevision, decoded.catalogRevision),
-          gt(v11CatalogEntry.id, decoded.id),
+          eq(catalogEntryTable.catalogRevision, decoded.catalogRevision),
+          gt(catalogEntryTable.id, decoded.id),
         ),
       );
       if (cursorCondition) conditions.push(cursorCondition);
@@ -140,9 +140,9 @@ export async function listCatalogOptions(
 
   const rows = await db
     .select()
-    .from(v11CatalogEntry)
+    .from(catalogEntryTable)
     .where(and(...conditions))
-    .orderBy(desc(v11CatalogEntry.catalogRevision), asc(v11CatalogEntry.id))
+    .orderBy(desc(catalogEntryTable.catalogRevision), asc(catalogEntryTable.id))
     .limit(limit + 1);
 
   const items = rows.slice(0, limit);
@@ -205,10 +205,10 @@ export async function searchCatalog(params: SearchCatalogParams): Promise<Search
   const queryPattern = `%${params.query.trim()}%`;
 
   const conditions = [
-    eq(v11CatalogEntry.tenantId, params.tenantId),
+    eq(catalogEntryTable.tenantId, params.tenantId),
     or(
-      like(v11CatalogEntry.displayName, queryPattern),
-      like(v11CatalogEntry.description, queryPattern),
+      like(catalogEntryTable.displayName, queryPattern),
+      like(catalogEntryTable.description, queryPattern),
     ),
   ];
 
@@ -218,20 +218,20 @@ export async function searchCatalog(params: SearchCatalogParams): Promise<Search
         throw new CatalogQueryError("invalid_resource_type", `resourceType 非法: ${rt}`);
       }
     }
-    conditions.push(inArray(v11CatalogEntry.resourceType, [...params.resourceTypes]));
+    conditions.push(inArray(catalogEntryTable.resourceType, [...params.resourceTypes]));
   }
   if (params.lifecycleStates && params.lifecycleStates.length > 0) {
-    conditions.push(inArray(v11CatalogEntry.lifecycleState, [...params.lifecycleStates]));
+    conditions.push(inArray(catalogEntryTable.lifecycleState, [...params.lifecycleStates]));
   }
 
   if (params.cursor) {
     const decoded = decodeListCursor(params.cursor);
     if (decoded) {
       const cursorCondition = or(
-        sql`${v11CatalogEntry.catalogRevision} < ${decoded.catalogRevision}`,
+        sql`${catalogEntryTable.catalogRevision} < ${decoded.catalogRevision}`,
         and(
-          eq(v11CatalogEntry.catalogRevision, decoded.catalogRevision),
-          gt(v11CatalogEntry.id, decoded.id),
+          eq(catalogEntryTable.catalogRevision, decoded.catalogRevision),
+          gt(catalogEntryTable.id, decoded.id),
         ),
       );
       if (cursorCondition) conditions.push(cursorCondition);
@@ -240,9 +240,9 @@ export async function searchCatalog(params: SearchCatalogParams): Promise<Search
 
   const rows = await db
     .select()
-    .from(v11CatalogEntry)
+    .from(catalogEntryTable)
     .where(and(...conditions))
-    .orderBy(desc(v11CatalogEntry.catalogRevision), asc(v11CatalogEntry.id))
+    .orderBy(desc(catalogEntryTable.catalogRevision), asc(catalogEntryTable.id))
     .limit(limit + 1);
 
   const items = rows.slice(0, limit);
@@ -272,12 +272,15 @@ export async function searchCatalog(params: SearchCatalogParams): Promise<Search
 export async function getCatalogEntryById(params: {
   tenantId: string;
   entryId: string;
-}): Promise<V11CatalogEntry | null> {
+}): Promise<CatalogEntry | null> {
   const [row] = await db
     .select()
-    .from(v11CatalogEntry)
+    .from(catalogEntryTable)
     .where(
-      and(eq(v11CatalogEntry.tenantId, params.tenantId), eq(v11CatalogEntry.id, params.entryId)),
+      and(
+        eq(catalogEntryTable.tenantId, params.tenantId),
+        eq(catalogEntryTable.id, params.entryId),
+      ),
     )
     .limit(1);
   return row ?? null;
@@ -288,7 +291,7 @@ export async function getCatalogEntryByResource(params: {
   tenantId: string;
   resourceType: CatalogResourceType;
   resourceId: string;
-}): Promise<V11CatalogEntry | null> {
+}): Promise<CatalogEntry | null> {
   if (!isValidResourceType(params.resourceType)) {
     throw new CatalogQueryError(
       "invalid_resource_type",
@@ -297,12 +300,12 @@ export async function getCatalogEntryByResource(params: {
   }
   const [row] = await db
     .select()
-    .from(v11CatalogEntry)
+    .from(catalogEntryTable)
     .where(
       and(
-        eq(v11CatalogEntry.tenantId, params.tenantId),
-        eq(v11CatalogEntry.resourceType, params.resourceType),
-        eq(v11CatalogEntry.resourceId, params.resourceId),
+        eq(catalogEntryTable.tenantId, params.tenantId),
+        eq(catalogEntryTable.resourceType, params.resourceType),
+        eq(catalogEntryTable.resourceId, params.resourceId),
       ),
     )
     .limit(1);
@@ -316,8 +319,8 @@ function isValidResourceType(type: string): type is CatalogResourceType {
   return (VALID_RESOURCE_TYPES as readonly string[]).includes(type);
 }
 
-/** 把 V11CatalogEntry 行投影为 CatalogSearchItem（snake_case 输出）。 */
-function projectToSearchItem(row: V11CatalogEntry): CatalogSearchItem {
+/** 把 CatalogEntry 行投影为 CatalogSearchItem（snake_case 输出）。 */
+function projectToSearchItem(row: CatalogEntry): CatalogSearchItem {
   return {
     resource_type: row.resourceType,
     resource_id: row.resourceId,
@@ -357,5 +360,5 @@ function decodeListCursor(cursor: string): {
 
 export type {
   CatalogResourceType,
-  V11CatalogEntry,
-} from "@/lib/v11/schema/catalog";
+  CatalogEntry,
+} from "@/lib/persistence/schema/catalog";

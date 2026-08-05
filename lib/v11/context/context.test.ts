@@ -16,9 +16,14 @@
 import { randomUUID } from "node:crypto";
 import { POST as contextQueryPOST } from "@/app/gateway/v1/context:query/route";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
+import { createThread } from "@/lib/conversations/thread-queries";
+import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { computeContentHash } from "@/lib/v11/capability/content-cache";
 import {
   createSkill,
@@ -53,11 +58,6 @@ import {
   WorkspaceMapResolver,
   estimateTokens,
 } from "@/lib/v11/context/source-resolvers";
-import { createThread } from "@/lib/v11/conversation/thread-queries";
-import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;

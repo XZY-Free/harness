@@ -8,6 +8,7 @@
  * 现有单 Route 服务作为薄适配器委托此服务。
  */
 import { randomUUID } from "node:crypto";
+import { RevisionExecutionEligibilityPolicy } from "@/lib/publications/application/load-revision-execution-evidence";
 import {
   AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
@@ -20,27 +21,29 @@ import {
   validateRouteRevisionContent,
 } from "../domain/route-revision";
 import type { RouteRevisionContent } from "../domain/route-revision";
-import { validateRouteSetActivation } from "../domain/route-set-activation-policy";
 import {
-  normalizeEligibility,
   computeSelectorDigest,
   computeSpecificity,
+  normalizeEligibility,
 } from "../domain/route-selector";
-import { RevisionExecutionEligibilityPolicy } from "@/lib/publications/application/load-revision-execution-evidence";
+import { validateRouteSetActivation } from "../domain/route-set-activation-policy";
+import type {
+  RouteActivationRecord,
+  RouteRevisionRecord,
+} from "../persistence/route-revision-record";
 import type {
   DesiredRoute,
   RouteSetActivationSession,
   RouteSetActivationStore,
 } from "../persistence/route-set-activation-store";
-import type {
-  RouteActivationRecord,
-  RouteRevisionRecord,
-} from "../persistence/route-revision-record";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
 export class RouteSetRequiresAtomicUpdateError extends Error {
-  constructor(public readonly routeSetId: string, public readonly reason: string) {
+  constructor(
+    public readonly routeSetId: string,
+    public readonly reason: string,
+  ) {
     super(`RouteSet ${routeSetId} 需要原子更新: ${reason}`);
     this.name = "RouteSetRequiresAtomicUpdateError";
   }
@@ -71,7 +74,11 @@ export interface ActivateRouteSetCommand {
   routeSetId: string;
   expectedVersionNo: number;
   desiredRoutes: DesiredRoute[];
-  actor: { tenantId: string; actorType: "user" | "service" | "workload" | "system"; actorId: string };
+  actor: {
+    tenantId: string;
+    actorType: "user" | "service" | "workload" | "system";
+    actorId: string;
+  };
   reason: string;
   requestId: string;
   idempotencyKey: string;
@@ -170,23 +177,43 @@ export function createActivateRouteSet(dependencies: {
           if (!evidence) {
             // 降级：无法加载证据时回退到碎片化检查
             if (agentRevision.revisionState !== "published") {
-              throw new RevisionNotPublishedError(desired.agentRevisionId, "agent", agentRevision.revisionState);
+              throw new RevisionNotPublishedError(
+                desired.agentRevisionId,
+                "agent",
+                agentRevision.revisionState,
+              );
             }
             if (runtimeRevision.revisionState !== "published") {
-              throw new RevisionNotPublishedError(desired.runtimeRevisionId, "runtime", runtimeRevision.revisionState);
+              throw new RevisionNotPublishedError(
+                desired.runtimeRevisionId,
+                "runtime",
+                runtimeRevision.revisionState,
+              );
             }
             for (const [artifactType, revisionId] of [
               ["agent_revision", desired.agentRevisionId],
               ["runtime_revision", desired.runtimeRevisionId],
             ] as const) {
-              if (!(await session.hasVerifiedAttestation({ tenantId: command.tenantId, artifactType, revisionId }))) {
+              if (
+                !(await session.hasVerifiedAttestation({
+                  tenantId: command.tenantId,
+                  artifactType,
+                  revisionId,
+                }))
+              ) {
                 throw new ArtifactNotVerifiedForRouteError(revisionId, artifactType);
               }
             }
             const runtimeCapSet = new Set(runtimeRevision.capabilities);
-            const missingCaps = agentRevision.requiredCapabilities.filter((c) => !runtimeCapSet.has(c));
+            const missingCaps = agentRevision.requiredCapabilities.filter(
+              (c) => !runtimeCapSet.has(c),
+            );
             if (missingCaps.length > 0) {
-              throw new AgentCapabilityUnsupportedError(missingCaps, agentRevision.id, runtimeRevision.id);
+              throw new AgentCapabilityUnsupportedError(
+                missingCaps,
+                agentRevision.id,
+                runtimeRevision.id,
+              );
             }
           } else {
             // 使用统一 RevisionExecutionEligibilityPolicy
@@ -195,10 +222,7 @@ export function createActivateRouteSet(dependencies: {
               agentRevision.requiredCapabilities,
             );
             if (!eligibilityResult.eligible) {
-              throw new RouteExecutionIneligibleError(
-                desired.routeKey,
-                eligibilityResult.errors,
-              );
+              throw new RouteExecutionIneligibleError(desired.routeKey, eligibilityResult.errors);
             }
           }
         }
@@ -431,7 +455,9 @@ export function createActivateRouteSet(dependencies: {
           completedAt: occurredAt,
         });
         if (!completed) {
-          throw new Error(`RouteSetActivation 幂等记录完成失败: ${command.idempotencyCompletion.recordId}`);
+          throw new Error(
+            `RouteSetActivation 幂等记录完成失败: ${command.idempotencyCompletion.recordId}`,
+          );
         }
       }
 

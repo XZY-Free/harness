@@ -26,7 +26,12 @@ export interface RevisionValidationResult {
 export interface RevisionValidationFailure {
   valid: false;
   /** 错误码。 */
-  code: "REVISION_NOT_FOUND" | "REVISION_NOT_BELONG_TO_AGENT" | "REVISION_NOT_CURRENT" | "AGENT_NOT_FOUND" | "REVISION_ID_UNKNOWN";
+  code:
+    | "REVISION_NOT_FOUND"
+    | "REVISION_NOT_BELONG_TO_AGENT"
+    | "REVISION_NOT_CURRENT"
+    | "AGENT_NOT_FOUND"
+    | "REVISION_ID_UNKNOWN";
   /** 人类可读原因。 */
   reason: string;
 }

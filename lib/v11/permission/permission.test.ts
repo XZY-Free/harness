@@ -26,9 +26,10 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createCredentialRef } from "@/lib/v11/capability/tool-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { grantTable } from "@/lib/persistence/schema/permission";
+import { createCredentialRef } from "@/lib/v11/capability/tool-queries";
 import {
   GrantNotFoundError,
   GrantStateError,
@@ -54,7 +55,6 @@ import {
   recordPermissionDecision,
   revokeGrant,
 } from "@/lib/v11/permission/permission-queries";
-import { v11Grant } from "@/lib/v11/schema/permission";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -113,9 +113,9 @@ function pastTime(hours = 1): Date {
  */
 async function backdateGrantExpiry(grantId: string, hoursAgo = 1): Promise<void> {
   await db
-    .update(v11Grant)
+    .update(grantTable)
     .set({ expiresAt: pastTime(hoursAgo) })
-    .where(eq(v11Grant.id, grantId));
+    .where(eq(grantTable.id, grantId));
 }
 
 // ═══════════════════════════════════════════════════════════

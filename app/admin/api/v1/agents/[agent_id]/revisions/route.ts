@@ -30,10 +30,10 @@ import {
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiSuccess,
   etagHeader,
   getRequestId,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -41,14 +41,6 @@ import {
   actorFromWorkloadPrincipal,
   recordAuditEvent,
 } from "@/lib/identity/audit";
-import {
-  AGENT_REVISION_ETAG_PREFIX,
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -60,7 +52,15 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import type { V11AgentRevision } from "@/lib/v11/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import {
+  AGENT_REVISION_ETAG_PREFIX,
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -120,7 +120,7 @@ function createdByFromAdminPrincipal(principal: AdminPrincipal): string {
 }
 
 /** 投影 Revision 为响应体（snake_case + etag）。 */
-function projectRevision(revision: V11AgentRevision): Record<string, unknown> {
+function projectRevision(revision: AgentRevision): Record<string, unknown> {
   return {
     id: revision.id,
     agent_id: revision.agentId,
@@ -163,13 +163,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 4. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 5. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少必填字段或字段类型错误");
+    return schemaInvalidTable(requestId, "请求体非法：缺少必填字段或字段类型错误");
   }
 
   // 6. 计算请求 hash + 幂等守卫

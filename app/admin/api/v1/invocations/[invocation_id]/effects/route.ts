@@ -1,18 +1,18 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
 import { listEffectRecordsByInvocation } from "@/lib/v11/capability/effect-queries";
-import { getInvocationById } from "@/lib/v11/runtime/invocation-queries";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/effects — 列出 Invocation 的 EffectRecord（S11-W04）。
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。
  * - 校验 Invocation 存在且属于当前租户（跨租户隐藏为 404）。
- * - 调用 listEffectRecordsByInvocation（innerJoin V11ToolCall 按 call_sequence 升序）。
+ * - 调用 listEffectRecordsByInvocation（innerJoin ToolCall 按 call_sequence 升序）。
  * - 投影为 snake_case。
  *
  * 错误映射：

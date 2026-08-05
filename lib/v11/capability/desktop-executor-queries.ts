@@ -34,6 +34,15 @@
  * MySQL 不支持 .returning()：update + select 两步。
  */
 import { db } from "@/lib/db/client";
+import type { EffectTargetState, VerificationMethod } from "@/lib/persistence/schema/effect";
+import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
+import type { PermissionDecision } from "@/lib/persistence/schema/permission";
+import type { ToolCall } from "@/lib/persistence/schema/tool-call";
+import type {
+  UserActionRequestType,
+  UserActionResolution,
+} from "@/lib/persistence/schema/user-action-request";
+import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
 import {
   type CreateFileChangesInput,
   createFileChanges,
@@ -58,15 +67,6 @@ import {
   createUserActionRequest,
   getUserActionRequestById,
 } from "@/lib/v11/permission/user-action-queries";
-import type { EffectTargetState, VerificationMethod } from "@/lib/v11/schema/effect";
-import type { V11EnvironmentLease } from "@/lib/v11/schema/environment";
-import type { V11PermissionDecision } from "@/lib/v11/schema/permission";
-import type { V11ToolCall } from "@/lib/v11/schema/tool-call";
-import type {
-  UserActionRequestType,
-  UserActionResolution,
-} from "@/lib/v11/schema/user-action-request";
-import type { V11WorkspaceBinding } from "@/lib/v11/schema/workspace";
 import { getWorkspaceBindingById } from "@/lib/v11/workspace/workspace-queries";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -233,11 +233,11 @@ export interface DesktopExecutionContext {
   tenantId: string;
   toolCallId: string;
   invocationId: string;
-  lease: V11EnvironmentLease;
+  lease: EnvironmentLease;
   deviceId: string;
-  workspaceBinding: V11WorkspaceBinding;
-  permissionDecision: V11PermissionDecision;
-  toolCall: V11ToolCall;
+  workspaceBinding: WorkspaceBinding;
+  permissionDecision: PermissionDecision;
+  toolCall: ToolCall;
   deadline: Date;
 }
 
@@ -664,7 +664,7 @@ export async function recordDesktopFileChanges(
 export async function getCurrentPermissionDecision(
   tenantId: string,
   toolCallId: string,
-): Promise<V11PermissionDecision | null> {
+): Promise<PermissionDecision | null> {
   return getLatestPermissionDecision(tenantId, toolCallId);
 }
 
@@ -673,7 +673,7 @@ export async function getCurrentPermissionDecision(
 export type { EffectTargetState, ReconcileEffectInput, ReconcileEffectResult, VerificationMethod };
 export type { CreateUserActionRequestInput, CreateUserActionRequestResult };
 export type { UserActionRequestType, UserActionResolution };
-export type { V11EnvironmentLease, V11PermissionDecision, V11ToolCall, V11WorkspaceBinding };
+export type { EnvironmentLease, PermissionDecision, ToolCall, WorkspaceBinding };
 
 // 保留 db 引用以便未来扩展（当前接入层不直接操作 db）
 void db;

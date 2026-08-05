@@ -2,8 +2,8 @@
  * CycloneDX SBOM 验证器 单元测试。
  */
 
-import { describe, it, expect } from "vitest";
 import { validateCycloneDX } from "@/lib/artifacts/verification/cyclonedx-validator";
+import { describe, expect, it } from "vitest";
 
 describe("validateCycloneDX", () => {
   it("有效 CycloneDX 1.6 文档 → passed", () => {
@@ -122,7 +122,6 @@ describe("validateCycloneDX", () => {
         components: [],
         dependencies: [{ ref: "pkg:npm/a@1.0" }],
       },
-      
     });
     expect(result.status).toBe("passed");
     expect(result.schemaValid).toBe(true);
@@ -133,7 +132,6 @@ describe("validateCycloneDX", () => {
       document: {
         components: [],
       },
-      
     });
     expect(result.status).toBe("failed");
     expect(result.schemaValid).toBe(false);
@@ -148,7 +146,6 @@ describe("validateCycloneDX", () => {
         components: [],
         dependencies: [{ ref: "pkg:npm/a@1.0" }],
       },
-      
     });
     expect(result.status).toBe("passed");
     expect(result.schemaValid).toBeUndefined();

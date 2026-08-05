@@ -11,7 +11,7 @@
  * - 提供 refresh 手动刷新（SSE 事件到达时可触发）。
  * - AbortController 防竞态：多次快速刷新只保留最后一次结果。
  * - unmounted 守卫：组件卸载后不写入 state。
- * - 错误转化为 V11ClientVisibleError。
+ * - 错误转化为 ClientVisibleError。
  *
  * 使用：
  * ```tsx
@@ -28,29 +28,29 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
 import type {
-  V11ClientEnvironmentStatusResponse,
-  V11ClientErrorBody,
-  V11ClientVisibleError,
+  ClientEnvironmentStatusResponse,
+  ClientErrorBody,
+  ClientVisibleError,
 } from "@/lib/v11/client/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Hook 返回值。 */
 export interface UseV11EnvironmentResult {
   /** Environment 状态；null 表示尚未加载或加载失败。 */
-  readonly status: V11ClientEnvironmentStatusResponse | null;
+  readonly status: ClientEnvironmentStatusResponse | null;
   /** 加载状态。 */
   readonly loading: boolean;
   /** 错误。 */
-  readonly error: V11ClientVisibleError | null;
+  readonly error: ClientVisibleError | null;
   /** 手动刷新。 */
   readonly refresh: () => Promise<void>;
 }
 
 /** V11 Environment 状态 Hook。 */
 export function useV11Environment(threadId: string): UseV11EnvironmentResult {
-  const [status, setStatus] = useState<V11ClientEnvironmentStatusResponse | null>(null);
+  const [status, setStatus] = useState<ClientEnvironmentStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<V11ClientVisibleError | null>(null);
+  const [error, setError] = useState<ClientVisibleError | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const unmountedRef = useRef(false);
 
@@ -74,9 +74,9 @@ export function useV11Environment(threadId: string): UseV11EnvironmentResult {
 
       if (!resp.ok) {
         const bodyText = await resp.text().catch(() => "");
-        let errorBody: V11ClientErrorBody | null = null;
+        let errorBody: ClientErrorBody | null = null;
         try {
-          errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+          errorBody = JSON.parse(bodyText) as ClientErrorBody;
         } catch {
           // ignore
         }
@@ -97,7 +97,7 @@ export function useV11Environment(threadId: string): UseV11EnvironmentResult {
         return;
       }
 
-      const data = (await resp.json()) as V11ClientEnvironmentStatusResponse;
+      const data = (await resp.json()) as ClientEnvironmentStatusResponse;
       if (!unmountedRef.current) {
         setStatus(data);
         setLoading(false);

@@ -5,7 +5,7 @@
  * 后续多租户阶段扩展 createTenant / suspendTenant 等。
  */
 import { db } from "@/lib/db/client";
-import { tenant } from "@/lib/v11/schema/identity";
+import { tenant } from "@/lib/persistence/schema/identity";
 import { and, eq } from "drizzle-orm";
 
 /** 默认租户 key（单租户阶段固定）。 */

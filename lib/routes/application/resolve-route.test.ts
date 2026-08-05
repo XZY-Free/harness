@@ -6,22 +6,22 @@ import {
 } from "@/lib/artifacts/persistence/artifact-record";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agent";
+import {
+  deploymentRouteSetTable,
+  deploymentRouteTable,
+} from "@/lib/persistence/schema/deployment-route";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtime";
 import {
   publicationRecord,
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
 import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
-import {
-  normalizeEligibility,
-  computeSelectorDigest,
-} from "@/lib/routes/domain/route-selector";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { v11Agent, v11AgentRevision } from "@/lib/v11/schema/agent";
-import { v11DeploymentRoute, v11DeploymentRouteSet } from "@/lib/v11/schema/deployment-route";
-import { v11Runtime, v11RuntimeRevision } from "@/lib/v11/schema/runtime";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -55,7 +55,7 @@ async function seedAgentAuthority() {
   const artifactId = randomUUID();
   const attestationId = randomUUID();
   const digest = `sha256:${"a".repeat(64)}`;
-  await db.insert(v11Agent).values({
+  await db.insert(agentTable).values({
     id: agentId,
     tenantId: tenant.id,
     agentKey: `resolver-${agentId}`,
@@ -66,7 +66,7 @@ async function seedAgentAuthority() {
     versionNo: 2,
   });
   await db.insert(artifact).values({ id: artifactId, tenantId: tenant.id, kind: "agent", digest });
-  await db.insert(v11AgentRevision).values({
+  await db.insert(agentRevisionTable).values({
     id: agentRevisionId,
     agentId,
     revisionNo: 1,
@@ -114,7 +114,7 @@ async function seedAgentAuthority() {
     idempotencyKey: `publish-agent:${agentRevisionId}`,
   });
   const routeSetId = randomUUID();
-  await db.insert(v11DeploymentRouteSet).values({
+  await db.insert(deploymentRouteSetTable).values({
     id: routeSetId,
     tenantId: tenant.id,
     agentId,
@@ -154,7 +154,7 @@ async function addRuntimeRoute(
   const runtimeAttestationId = randomUUID();
   const artifactDigest = digest(`runtime-artifact:${suffix}`);
   const configDigest = digest(`runtime-config:${suffix}`);
-  await db.insert(v11Runtime).values({
+  await db.insert(runtimeTable).values({
     id: runtimeId,
     tenantId: base.tenantId,
     runtimeKey: `runtime-${suffix}`,
@@ -171,7 +171,7 @@ async function addRuntimeRoute(
     kind: "runtime",
     digest: artifactDigest,
   });
-  await db.insert(v11RuntimeRevision).values({
+  await db.insert(runtimeRevisionTable).values({
     id: runtimeRevisionId,
     runtimeId,
     revisionNo: 1,
@@ -245,7 +245,7 @@ async function addRuntimeRoute(
   const routeActivationId = randomUUID();
   const routeRevisionNo = options.routeRevisionNo ?? 1;
   const trafficWeight = options.trafficWeight ?? 10_000;
-  await db.insert(v11DeploymentRoute).values({
+  await db.insert(deploymentRouteTable).values({
     id: routeId,
     routeSetId: base.routeSetId,
     routeKey: `test-route-${routeId}`,
@@ -275,7 +275,9 @@ async function addRuntimeRoute(
       groupId: options.routeGroupId ?? "primary",
     },
     routeGroupId: options.routeGroupId ?? "primary",
-    selectorDigest: computeSelectorDigest(normalizeEligibility(options.eligibilityConditions ?? {}) ?? { all: {} }),
+    selectorDigest: computeSelectorDigest(
+      normalizeEligibility(options.eligibilityConditions ?? {}) ?? { all: {} },
+    ),
     trafficWeight,
     priorityNo: options.priorityNo ?? 0,
     effectiveFrom: options.effectiveFrom ?? null,
@@ -305,9 +307,9 @@ async function addRuntimeRoute(
     activatedAt: NOW,
   });
   await db
-    .update(v11DeploymentRoute)
+    .update(deploymentRouteTable)
     .set({ activeRouteRevisionId: routeRevisionId })
-    .where(eq(v11DeploymentRoute.id, routeId));
+    .where(eq(deploymentRouteTable.id, routeId));
   return {
     ...base,
     runtimePublicationId,
@@ -450,9 +452,9 @@ describe("RouteResolver MySQL authority", () => {
     const base = await seedAgentAuthority();
     await addRuntimeRoute(base, "frozen-route-set-version");
     await db
-      .update(v11DeploymentRouteSet)
+      .update(deploymentRouteSetTable)
       .set({ versionNo: 2 })
-      .where(eq(v11DeploymentRouteSet.id, base.routeSetId));
+      .where(eq(deploymentRouteSetTable.id, base.routeSetId));
 
     await expect(resolveRoute(command(base, "thread-frozen-version"))).resolves.toMatchObject({
       status: "resolved",

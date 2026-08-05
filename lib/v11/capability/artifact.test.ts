@@ -23,6 +23,8 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import type { WorkspaceBinding } from "@/lib/persistence/schema/workspace";
 import {
   ArtifactItemConflictError,
   ArtifactNotFoundError,
@@ -57,9 +59,7 @@ import {
   listFilesystemCheckpointsByWorkspaceBinding,
   validateFileChangeHashes,
 } from "@/lib/v11/capability/artifact-queries";
-import { type V11ToolCall, createToolCall } from "@/lib/v11/capability/tool-call-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import type { V11WorkspaceBinding } from "@/lib/v11/schema/workspace";
+import { type ToolCall, createToolCall } from "@/lib/v11/capability/tool-call-queries";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/v11/workspace/workspace-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -81,7 +81,7 @@ async function seedTenant() {
 async function seedWorkspaceAndBinding(
   tenantId: string,
   bindingType: "cloud" | "desktop" = "cloud",
-): Promise<{ workspaceId: string; binding: V11WorkspaceBinding }> {
+): Promise<{ workspaceId: string; binding: WorkspaceBinding }> {
   const workspace = await createWorkspace({
     tenantId,
     workspaceKey: `ws-${randomUUID()}`,
@@ -96,7 +96,7 @@ async function seedWorkspaceAndBinding(
   return { workspaceId: workspace.id, binding };
 }
 
-async function seedToolCall(tenantId: string): Promise<V11ToolCall> {
+async function seedToolCall(tenantId: string): Promise<ToolCall> {
   return createToolCall({
     tenantId,
     invocationId: randomUUID(),

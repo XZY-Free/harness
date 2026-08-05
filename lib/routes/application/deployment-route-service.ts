@@ -18,11 +18,10 @@ import {
   deploymentRouteTable,
 } from "@/lib/persistence/schema/routes";
 import {
-  createActivateRouteSet,
-  RouteSetRequiresAtomicUpdateError,
   type ActivateRouteSetResult,
+  RouteSetRequiresAtomicUpdateError,
+  createActivateRouteSet,
 } from "@/lib/routes/application/activate-route-set";
-import type { DesiredRoute } from "@/lib/routes/persistence/route-set-activation-store";
 import {
   AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
@@ -34,6 +33,7 @@ import {
   RouteWeightInvalidError,
 } from "@/lib/routes/domain/route-revision";
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
+import type { DesiredRoute } from "@/lib/routes/persistence/route-set-activation-store";
 import { and, desc, eq } from "drizzle-orm";
 
 export const MAX_TRAFFIC_WEIGHT = MAX_ROUTE_TRAFFIC_WEIGHT;
@@ -207,7 +207,8 @@ async function buildUpsertResult(
   targetRouteId: string,
 ): Promise<UpsertDeploymentRouteResult> {
   const activation = result.activations.find((a) => a.routeId === targetRouteId);
-  if (!activation) throw new Error(`upsertDeploymentRoute: 目标 Route ${targetRouteId} 未在激活结果中`);
+  if (!activation)
+    throw new Error(`upsertDeploymentRoute: 目标 Route ${targetRouteId} 未在激活结果中`);
 
   const [routeRow] = await db
     .select()
@@ -307,7 +308,8 @@ export async function upsertDeploymentRoute(params: {
           httpStatus: params.idempotency.httpStatus,
           responseRef: params.idempotency.responseRef,
           serializeResponse: (r) =>
-            params.idempotency?.serializeResponse(r as unknown as UpsertDeploymentRouteResult) ?? "{}",
+            params.idempotency?.serializeResponse(r as unknown as UpsertDeploymentRouteResult) ??
+            "{}",
         }
       : undefined,
   });
@@ -362,7 +364,8 @@ export async function disableDeploymentRoute(params: {
           httpStatus: params.idempotency.httpStatus,
           responseRef: params.idempotency.responseRef,
           serializeResponse: (r) =>
-            params.idempotency?.serializeResponse(r as unknown as DisableDeploymentRouteResult) ?? "{}",
+            params.idempotency?.serializeResponse(r as unknown as DisableDeploymentRouteResult) ??
+            "{}",
         }
       : undefined,
   });

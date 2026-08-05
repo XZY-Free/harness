@@ -30,6 +30,8 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { EFFECT_TERMINAL_STATES, type EffectTargetState } from "@/lib/persistence/schema/effect";
 import {
   EffectAlreadyConfirmedError,
   EffectNotFoundError,
@@ -55,14 +57,12 @@ import {
   reconcileEffect,
 } from "@/lib/v11/capability/effect-queries";
 import {
-  type V11ToolCall,
+  type ToolCall,
   computeArgumentsHash,
   createToolCall,
   getToolCallById,
   updateToolCallState,
 } from "@/lib/v11/capability/tool-call-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { EFFECT_TERMINAL_STATES, type EffectTargetState } from "@/lib/v11/schema/effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -87,7 +87,7 @@ async function seedToolCall(
     operationId?: string;
     initialState?: "proposed" | "running" | "unknown_effect";
   },
-): Promise<V11ToolCall> {
+): Promise<ToolCall> {
   const invocationId = randomUUID();
   const toolCall = await createToolCall({
     tenantId,

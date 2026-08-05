@@ -1,5 +1,3 @@
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
-import { resolveOutboxAppend, type ControlPlaneOutboxAppendParams } from "@/lib/control-plane/events/outbox-append";
 import type {
   ArtifactAttestationPersistenceStore,
   RevisionArtifactBinding,
@@ -10,6 +8,11 @@ import {
   artifactAttestation,
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import {
+  type ControlPlaneOutboxAppendParams,
+  resolveOutboxAppend,
+} from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";

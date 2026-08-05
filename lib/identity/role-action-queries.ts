@@ -25,9 +25,9 @@ import {
   serializeResourceScope,
   validateResourceScope,
 } from "@/lib/identity/resource-scope";
-import { roleActionBinding } from "@/lib/v11/schema/authorization";
-import type { RoleActionBinding } from "@/lib/v11/schema/authorization";
-import { principalBinding } from "@/lib/v11/schema/identity";
+import { roleActionBinding } from "@/lib/persistence/schema/authorization";
+import type { RoleActionBinding } from "@/lib/persistence/schema/authorization";
+import { principalBinding } from "@/lib/persistence/schema/identity";
 import { and, eq, gte, inArray, isNull, or } from "drizzle-orm";
 
 /**

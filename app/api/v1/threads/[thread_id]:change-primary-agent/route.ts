@@ -22,21 +22,21 @@
  */
 import { getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
-import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
-import { changePrimaryAgentWithEvent } from "@/lib/v11/conversation/thread-settings-queries";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { changePrimaryAgentWithEvent } from "@/lib/conversations/thread-settings-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -101,13 +101,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 agent_id 或 reason");
+    return schemaInvalidTable(requestId, "请求体非法：缺少 agent_id 或 reason");
   }
 
   // 5. 校验新 Agent 存在且 enabled（无权/不存在 → 404 隐藏式）

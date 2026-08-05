@@ -24,17 +24,17 @@ import { db } from "@/lib/db/client";
 import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
 import {
   type DeletionDeleteMode,
+  type DeletionRequest,
   type DeletionRequestPrincipalKind,
   type DeletionRequestState,
+  type DeletionStep,
   type DeletionStepState,
   type DeletionStoreType,
   type DeletionSubjectType,
   TERMINAL_REQUEST_STATES,
-  type V11DeletionRequest,
-  type V11DeletionStep,
-  v11DeletionRequest,
-  v11DeletionStep,
-} from "@/lib/v11/schema/deletion-request";
+  deletionRequestTable,
+  deletionStepTable,
+} from "@/lib/persistence/schema/deletion-request";
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -101,7 +101,7 @@ export async function createDeletionRequest(params: {
   requestPrincipalKind: DeletionRequestPrincipalKind;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11DeletionRequest> {
+}): Promise<DeletionRequest> {
   // 同一 (tenantId, subjectType, subjectId) 已有非终态请求时拒绝（避免重复受理）。
   const active = await getActiveDeletionRequestBySubject(
     params.tenantId,
@@ -116,7 +116,7 @@ export async function createDeletionRequest(params: {
   }
 
   const id = randomUUID();
-  await db.insert(v11DeletionRequest).values({
+  await db.insert(deletionRequestTable).values({
     id,
     tenantId: params.tenantId,
     subjectType: params.subjectType,
@@ -131,8 +131,8 @@ export async function createDeletionRequest(params: {
 
   const [row] = await db
     .select()
-    .from(v11DeletionRequest)
-    .where(eq(v11DeletionRequest.id, id))
+    .from(deletionRequestTable)
+    .where(eq(deletionRequestTable.id, id))
     .limit(1);
   if (!row) {
     throw new Error(`createDeletionRequest: 行未找到（id=${id}）`);
@@ -158,14 +158,14 @@ export async function createDeletionRequest(params: {
 
   // 回填审计事件 id（管理端响应需要 audit_event_id）。
   await db
-    .update(v11DeletionRequest)
+    .update(deletionRequestTable)
     .set({ auditEventId: auditEvent.id, updatedAt: new Date() })
-    .where(eq(v11DeletionRequest.id, id));
+    .where(eq(deletionRequestTable.id, id));
 
   const [finalRow] = await db
     .select()
-    .from(v11DeletionRequest)
-    .where(eq(v11DeletionRequest.id, id))
+    .from(deletionRequestTable)
+    .where(eq(deletionRequestTable.id, id))
     .limit(1);
   return finalRow ?? row;
 }
@@ -174,11 +174,11 @@ export async function createDeletionRequest(params: {
 export async function getDeletionRequestById(
   tenantId: string,
   id: string,
-): Promise<V11DeletionRequest | null> {
+): Promise<DeletionRequest | null> {
   const [row] = await db
     .select()
-    .from(v11DeletionRequest)
-    .where(and(eq(v11DeletionRequest.tenantId, tenantId), eq(v11DeletionRequest.id, id)))
+    .from(deletionRequestTable)
+    .where(and(eq(deletionRequestTable.tenantId, tenantId), eq(deletionRequestTable.id, id)))
     .limit(1);
   return row ?? null;
 }
@@ -188,18 +188,18 @@ export async function getActiveDeletionRequestBySubject(
   tenantId: string,
   subjectType: DeletionSubjectType,
   subjectId: string,
-): Promise<V11DeletionRequest | null> {
+): Promise<DeletionRequest | null> {
   const [row] = await db
     .select()
-    .from(v11DeletionRequest)
+    .from(deletionRequestTable)
     .where(
       and(
-        eq(v11DeletionRequest.tenantId, tenantId),
-        eq(v11DeletionRequest.subjectType, subjectType),
-        eq(v11DeletionRequest.subjectId, subjectId),
+        eq(deletionRequestTable.tenantId, tenantId),
+        eq(deletionRequestTable.subjectType, subjectType),
+        eq(deletionRequestTable.subjectId, subjectId),
       ),
     )
-    .orderBy(asc(v11DeletionRequest.acceptedAt))
+    .orderBy(asc(deletionRequestTable.acceptedAt))
     .limit(50);
   // 过滤终态，返回第一个非终态
   const active = row && !TERMINAL_REQUEST_STATES.has(row.requestState) ? row : null;
@@ -216,7 +216,7 @@ export async function updateDeletionRequestState(params: {
   actor: AuditActor;
   reason?: string;
   requestId?: string;
-}): Promise<V11DeletionRequest> {
+}): Promise<DeletionRequest> {
   const existing = await getDeletionRequestById(params.tenantId, params.id);
   if (!existing) {
     throw new DeletionRequestError("request_not_found", `删除请求不存在（id=${params.id}）`);
@@ -230,7 +230,7 @@ export async function updateDeletionRequestState(params: {
   assertLegalTransition(existing.requestState, params.nextState);
 
   const now = new Date();
-  const updates: Partial<V11DeletionRequest> = {
+  const updates: Partial<DeletionRequest> = {
     requestState: params.nextState,
     updatedAt: now,
   };
@@ -238,12 +238,12 @@ export async function updateDeletionRequestState(params: {
     updates.completedAt = now;
   }
 
-  await db.update(v11DeletionRequest).set(updates).where(eq(v11DeletionRequest.id, params.id));
+  await db.update(deletionRequestTable).set(updates).where(eq(deletionRequestTable.id, params.id));
 
   const [row] = await db
     .select()
-    .from(v11DeletionRequest)
-    .where(eq(v11DeletionRequest.id, params.id))
+    .from(deletionRequestTable)
+    .where(eq(deletionRequestTable.id, params.id))
     .limit(1);
   if (!row) {
     throw new Error(`updateDeletionRequestState: 行未找到（id=${params.id}）`);
@@ -270,13 +270,16 @@ export async function setBlockedReasonCodes(params: {
   reasonCodes: string[];
 }): Promise<void> {
   await db
-    .update(v11DeletionRequest)
+    .update(deletionRequestTable)
     .set({
       blockedReasonCodes: params.reasonCodes.length > 0 ? JSON.stringify(params.reasonCodes) : null,
       updatedAt: new Date(),
     })
     .where(
-      and(eq(v11DeletionRequest.tenantId, params.tenantId), eq(v11DeletionRequest.id, params.id)),
+      and(
+        eq(deletionRequestTable.tenantId, params.tenantId),
+        eq(deletionRequestTable.id, params.id),
+      ),
     );
 }
 
@@ -303,7 +306,7 @@ export interface DeletionRequestFilter {
 }
 
 export interface DeletionRequestPage {
-  items: V11DeletionRequest[];
+  items: DeletionRequest[];
   nextCursor: string | null;
 }
 
@@ -312,26 +315,26 @@ export async function listDeletionRequests(
   filter: DeletionRequestFilter,
 ): Promise<DeletionRequestPage> {
   const limit = Math.min(filter.limit ?? 50, 200);
-  const conditions = [eq(v11DeletionRequest.tenantId, filter.tenantId)];
+  const conditions = [eq(deletionRequestTable.tenantId, filter.tenantId)];
   if (filter.subjectType) {
-    conditions.push(eq(v11DeletionRequest.subjectType, filter.subjectType));
+    conditions.push(eq(deletionRequestTable.subjectType, filter.subjectType));
   }
   if (filter.requestState) {
-    conditions.push(eq(v11DeletionRequest.requestState, filter.requestState));
+    conditions.push(eq(deletionRequestTable.requestState, filter.requestState));
   }
   if (filter.requestedBy) {
-    conditions.push(eq(v11DeletionRequest.requestedBy, filter.requestedBy));
+    conditions.push(eq(deletionRequestTable.requestedBy, filter.requestedBy));
   }
   if (filter.cursor) {
     const cursorDate = new Date(filter.cursor);
-    conditions.push(gt(v11DeletionRequest.acceptedAt, cursorDate));
+    conditions.push(gt(deletionRequestTable.acceptedAt, cursorDate));
   }
 
   const rows = await db
     .select()
-    .from(v11DeletionRequest)
+    .from(deletionRequestTable)
     .where(and(...conditions))
-    .orderBy(asc(v11DeletionRequest.acceptedAt))
+    .orderBy(asc(deletionRequestTable.acceptedAt))
     .limit(limit + 1);
 
   const hasMore = rows.length > limit;
@@ -357,7 +360,7 @@ export async function insertDeletionSteps(params: {
   tenantId: string;
   requestId: string;
   steps: PlannedStep[];
-}): Promise<V11DeletionStep[]> {
+}): Promise<DeletionStep[]> {
   if (params.steps.length === 0) return [];
   const now = new Date();
   const rows = params.steps.map((s) => ({
@@ -375,12 +378,12 @@ export async function insertDeletionSteps(params: {
         ? now
         : null,
   }));
-  await db.insert(v11DeletionStep).values(rows);
+  await db.insert(deletionStepTable).values(rows);
 
   const inserted = await db
     .select()
-    .from(v11DeletionStep)
-    .where(eq(v11DeletionStep.requestId, params.requestId));
+    .from(deletionStepTable)
+    .where(eq(deletionStepTable.requestId, params.requestId));
   return inserted;
 }
 
@@ -388,12 +391,14 @@ export async function insertDeletionSteps(params: {
 export async function listDeletionSteps(
   tenantId: string,
   requestId: string,
-): Promise<V11DeletionStep[]> {
+): Promise<DeletionStep[]> {
   return db
     .select()
-    .from(v11DeletionStep)
-    .where(and(eq(v11DeletionStep.tenantId, tenantId), eq(v11DeletionStep.requestId, requestId)))
-    .orderBy(asc(v11DeletionStep.storeType), asc(v11DeletionStep.subjectRef));
+    .from(deletionStepTable)
+    .where(
+      and(eq(deletionStepTable.tenantId, tenantId), eq(deletionStepTable.requestId, requestId)),
+    )
+    .orderBy(asc(deletionStepTable.storeType), asc(deletionStepTable.subjectRef));
 }
 
 /** 按 (requestId, storeType, subjectRef) 查询单步；不存在返回 null。 */
@@ -402,16 +407,16 @@ export async function getDeletionStep(params: {
   requestId: string;
   storeType: DeletionStoreType;
   subjectRef: string;
-}): Promise<V11DeletionStep | null> {
+}): Promise<DeletionStep | null> {
   const [row] = await db
     .select()
-    .from(v11DeletionStep)
+    .from(deletionStepTable)
     .where(
       and(
-        eq(v11DeletionStep.tenantId, params.tenantId),
-        eq(v11DeletionStep.requestId, params.requestId),
-        eq(v11DeletionStep.storeType, params.storeType),
-        eq(v11DeletionStep.subjectRef, params.subjectRef),
+        eq(deletionStepTable.tenantId, params.tenantId),
+        eq(deletionStepTable.requestId, params.requestId),
+        eq(deletionStepTable.storeType, params.storeType),
+        eq(deletionStepTable.subjectRef, params.subjectRef),
       ),
     )
     .limit(1);
@@ -422,12 +427,12 @@ export async function getDeletionStep(params: {
 export async function markStepRunning(params: {
   tenantId: string;
   stepId: string;
-}): Promise<V11DeletionStep> {
+}): Promise<DeletionStep> {
   const [existing] = await db
     .select()
-    .from(v11DeletionStep)
+    .from(deletionStepTable)
     .where(
-      and(eq(v11DeletionStep.tenantId, params.tenantId), eq(v11DeletionStep.id, params.stepId)),
+      and(eq(deletionStepTable.tenantId, params.tenantId), eq(deletionStepTable.id, params.stepId)),
     )
     .limit(1);
   if (!existing) {
@@ -438,18 +443,18 @@ export async function markStepRunning(params: {
     return existing;
   }
   await db
-    .update(v11DeletionStep)
+    .update(deletionStepTable)
     .set({
       stepState: "running",
       attemptCount: existing.attemptCount + 1,
       updatedAt: new Date(),
     })
-    .where(eq(v11DeletionStep.id, params.stepId));
+    .where(eq(deletionStepTable.id, params.stepId));
 
   const [row] = await db
     .select()
-    .from(v11DeletionStep)
-    .where(eq(v11DeletionStep.id, params.stepId))
+    .from(deletionStepTable)
+    .where(eq(deletionStepTable.id, params.stepId))
     .limit(1);
   if (!row) {
     throw new Error(`markStepRunning: 行未找到（id=${params.stepId}）`);
@@ -462,7 +467,7 @@ export async function completeDeletionStep(params: {
   tenantId: string;
   stepId: string;
   evidenceRef: string;
-}): Promise<V11DeletionStep> {
+}): Promise<DeletionStep> {
   if (!params.evidenceRef) {
     throw new DeletionRequestError(
       "missing_evidence",
@@ -471,7 +476,7 @@ export async function completeDeletionStep(params: {
   }
   const now = new Date();
   await db
-    .update(v11DeletionStep)
+    .update(deletionStepTable)
     .set({
       stepState: "completed",
       evidenceRef: params.evidenceRef,
@@ -480,13 +485,13 @@ export async function completeDeletionStep(params: {
       updatedAt: now,
     })
     .where(
-      and(eq(v11DeletionStep.tenantId, params.tenantId), eq(v11DeletionStep.id, params.stepId)),
+      and(eq(deletionStepTable.tenantId, params.tenantId), eq(deletionStepTable.id, params.stepId)),
     );
 
   const [row] = await db
     .select()
-    .from(v11DeletionStep)
-    .where(eq(v11DeletionStep.id, params.stepId))
+    .from(deletionStepTable)
+    .where(eq(deletionStepTable.id, params.stepId))
     .limit(1);
   if (!row) {
     throw new Error(`completeDeletionStep: 行未找到（id=${params.stepId}）`);
@@ -499,19 +504,19 @@ export async function failDeletionStep(params: {
   tenantId: string;
   stepId: string;
   failureReason: string;
-}): Promise<V11DeletionStep> {
+}): Promise<DeletionStep> {
   const now = new Date();
   await db
-    .update(v11DeletionStep)
+    .update(deletionStepTable)
     .set({ stepState: "failed", failureReason: params.failureReason, updatedAt: now })
     .where(
-      and(eq(v11DeletionStep.tenantId, params.tenantId), eq(v11DeletionStep.id, params.stepId)),
+      and(eq(deletionStepTable.tenantId, params.tenantId), eq(deletionStepTable.id, params.stepId)),
     );
 
   const [row] = await db
     .select()
-    .from(v11DeletionStep)
-    .where(eq(v11DeletionStep.id, params.stepId))
+    .from(deletionStepTable)
+    .where(eq(deletionStepTable.id, params.stepId))
     .limit(1);
   if (!row) {
     throw new Error(`failDeletionStep: 行未找到（id=${params.stepId}）`);
@@ -524,10 +529,10 @@ export async function markStepRetained(params: {
   tenantId: string;
   stepId: string;
   reason: string;
-}): Promise<V11DeletionStep> {
+}): Promise<DeletionStep> {
   const now = new Date();
   await db
-    .update(v11DeletionStep)
+    .update(deletionStepTable)
     .set({
       stepState: "retained",
       failureReason: params.reason,
@@ -535,13 +540,13 @@ export async function markStepRetained(params: {
       updatedAt: now,
     })
     .where(
-      and(eq(v11DeletionStep.tenantId, params.tenantId), eq(v11DeletionStep.id, params.stepId)),
+      and(eq(deletionStepTable.tenantId, params.tenantId), eq(deletionStepTable.id, params.stepId)),
     );
 
   const [row] = await db
     .select()
-    .from(v11DeletionStep)
-    .where(eq(v11DeletionStep.id, params.stepId))
+    .from(deletionStepTable)
+    .where(eq(deletionStepTable.id, params.stepId))
     .limit(1);
   if (!row) {
     throw new Error(`markStepRetained: 行未找到（id=${params.stepId}）`);
@@ -554,19 +559,19 @@ export async function markStepBlocked(params: {
   tenantId: string;
   stepId: string;
   reason: string;
-}): Promise<V11DeletionStep> {
+}): Promise<DeletionStep> {
   const now = new Date();
   await db
-    .update(v11DeletionStep)
+    .update(deletionStepTable)
     .set({ stepState: "blocked", failureReason: params.reason, updatedAt: now })
     .where(
-      and(eq(v11DeletionStep.tenantId, params.tenantId), eq(v11DeletionStep.id, params.stepId)),
+      and(eq(deletionStepTable.tenantId, params.tenantId), eq(deletionStepTable.id, params.stepId)),
     );
 
   const [row] = await db
     .select()
-    .from(v11DeletionStep)
-    .where(eq(v11DeletionStep.id, params.stepId))
+    .from(deletionStepTable)
+    .where(eq(deletionStepTable.id, params.stepId))
     .limit(1);
   if (!row) {
     throw new Error(`markStepBlocked: 行未找到（id=${params.stepId}）`);
@@ -579,10 +584,10 @@ export async function markStepSkipped(params: {
   tenantId: string;
   stepId: string;
   reason: string;
-}): Promise<V11DeletionStep> {
+}): Promise<DeletionStep> {
   const now = new Date();
   await db
-    .update(v11DeletionStep)
+    .update(deletionStepTable)
     .set({
       stepState: "skipped",
       failureReason: params.reason,
@@ -590,13 +595,13 @@ export async function markStepSkipped(params: {
       updatedAt: now,
     })
     .where(
-      and(eq(v11DeletionStep.tenantId, params.tenantId), eq(v11DeletionStep.id, params.stepId)),
+      and(eq(deletionStepTable.tenantId, params.tenantId), eq(deletionStepTable.id, params.stepId)),
     );
 
   const [row] = await db
     .select()
-    .from(v11DeletionStep)
-    .where(eq(v11DeletionStep.id, params.stepId))
+    .from(deletionStepTable)
+    .where(eq(deletionStepTable.id, params.stepId))
     .limit(1);
   if (!row) {
     throw new Error(`markStepSkipped: 行未找到（id=${params.stepId}）`);
@@ -619,7 +624,7 @@ export interface DeletionRequestSummary {
 }
 
 /** 从步骤列表派生汇总。 */
-export function computeRequestSummary(steps: V11DeletionStep[]): DeletionRequestSummary {
+export function computeRequestSummary(steps: DeletionStep[]): DeletionRequestSummary {
   let completed = 0;
   let failed = 0;
   let blocked = 0;
@@ -663,9 +668,7 @@ export function computeRequestSummary(steps: V11DeletionStep[]): DeletionRequest
  *
  * 注意：blocked_by_hold 在请求级由 planner 处理，此处只看 step。
  */
-export function deriveTerminalStateFromSteps(
-  steps: V11DeletionStep[],
-): DeletionRequestState | null {
+export function deriveTerminalStateFromSteps(steps: DeletionStep[]): DeletionRequestState | null {
   if (steps.length === 0) return "completed"; // 无 in-scope step，直接完成
   let hasFailed = false;
   let hasBlocked = false;
@@ -695,18 +698,18 @@ export function deriveTerminalStateFromSteps(
 export async function listRunnableSteps(
   tenantId: string,
   requestId: string,
-): Promise<V11DeletionStep[]> {
+): Promise<DeletionStep[]> {
   return db
     .select()
-    .from(v11DeletionStep)
+    .from(deletionStepTable)
     .where(
       and(
-        eq(v11DeletionStep.tenantId, tenantId),
-        eq(v11DeletionStep.requestId, requestId),
-        inArray(v11DeletionStep.stepState, ["pending", "failed"]),
+        eq(deletionStepTable.tenantId, tenantId),
+        eq(deletionStepTable.requestId, requestId),
+        inArray(deletionStepTable.stepState, ["pending", "failed"]),
       ),
     )
-    .orderBy(asc(v11DeletionStep.storeType), asc(v11DeletionStep.subjectRef));
+    .orderBy(asc(deletionStepTable.storeType), asc(deletionStepTable.subjectRef));
 }
 
 /** 查询某状态集合的步骤数（用于状态判断）。 */
@@ -717,13 +720,13 @@ export async function countStepsByStates(
 ): Promise<number> {
   if (states.length === 0) return 0;
   const rows = await db
-    .select({ id: v11DeletionStep.id })
-    .from(v11DeletionStep)
+    .select({ id: deletionStepTable.id })
+    .from(deletionStepTable)
     .where(
       and(
-        eq(v11DeletionStep.tenantId, tenantId),
-        eq(v11DeletionStep.requestId, requestId),
-        inArray(v11DeletionStep.stepState, states),
+        eq(deletionStepTable.tenantId, tenantId),
+        eq(deletionStepTable.requestId, requestId),
+        inArray(deletionStepTable.stepState, states),
       ),
     );
   return rows.length;

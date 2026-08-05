@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
 import {
-  normalizeEligibility,
   computeSelectorDigest,
   computeSpecificity,
+  normalizeEligibility,
 } from "@/lib/routes/domain/route-selector";
+import { describe, expect, it } from "vitest";
 
 // ─── determineRouteGroupId 逻辑测试（不依赖数据库）───────────
 

@@ -86,7 +86,12 @@ export interface RouteSetActivationSession {
   findIdempotentRouteSetActivation(params: {
     routeSetId: string;
     idempotencyKey: string;
-  }): Promise<{ completed: boolean; httpStatus: number; responseRef: string | null; responseRedactedJson: string } | null>;
+  }): Promise<{
+    completed: boolean;
+    httpStatus: number;
+    responseRef: string | null;
+    responseRedactedJson: string;
+  } | null>;
   findAgentRevision(id: string): Promise<AgentRevisionSummary | null>;
   findRuntimeRevision(id: string): Promise<RuntimeRevisionSummary | null>;
   hasVerifiedAttestation(params: {
@@ -110,7 +115,10 @@ export interface RouteSetActivationSession {
     content: RouteRevisionContent;
     now: Date;
   }): Promise<RouteRow>;
-  findRevisionByContent(routeId: string, contentDigest: string): Promise<RouteRevisionRecord | null>;
+  findRevisionByContent(
+    routeId: string,
+    contentDigest: string,
+  ): Promise<RouteRevisionRecord | null>;
   nextRevisionNo(routeId: string): Promise<number>;
   appendRevision(params: {
     id: string;

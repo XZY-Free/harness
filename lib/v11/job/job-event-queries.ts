@@ -19,14 +19,14 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { JobNotFoundError } from "@/lib/v11/job/errors";
 import {
+  type JobEvent,
   type JobEventActorType,
   type JobEventType,
-  type V11JobEvent,
-  v11Job,
-  v11JobEvent,
-} from "@/lib/v11/schema/job";
+  jobEventTable,
+  jobTable,
+} from "@/lib/persistence/schema/job";
+import { JobNotFoundError } from "@/lib/v11/job/errors";
 import { and, asc, eq, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -59,9 +59,9 @@ export interface JobEventInput {
 export async function allocateJobEventSequences(tx: Tx, jobId: string, count = 1): Promise<number> {
   // SELECT ... FOR UPDATE 锁定 Job 行
   const [row] = await tx
-    .select({ lastEventSequence: v11Job.lastEventSequence })
-    .from(v11Job)
-    .where(eq(v11Job.id, jobId))
+    .select({ lastEventSequence: jobTable.lastEventSequence })
+    .from(jobTable)
+    .where(eq(jobTable.id, jobId))
     .for("update")
     .limit(1);
 
@@ -72,7 +72,7 @@ export async function allocateJobEventSequences(tx: Tx, jobId: string, count = 1
   const startSequence = row.lastEventSequence + 1;
   const newLast = row.lastEventSequence + count;
 
-  await tx.update(v11Job).set({ lastEventSequence: newLast }).where(eq(v11Job.id, jobId));
+  await tx.update(jobTable).set({ lastEventSequence: newLast }).where(eq(jobTable.id, jobId));
 
   return startSequence;
 }
@@ -91,10 +91,10 @@ export async function insertJobEvent(
   jobId: string,
   sequence: number,
   input: JobEventInput,
-): Promise<V11JobEvent> {
+): Promise<JobEvent> {
   const id = randomUUID();
   const now = new Date();
-  await tx.insert(v11JobEvent).values({
+  await tx.insert(jobEventTable).values({
     id,
     tenantId,
     jobId,
@@ -112,7 +112,7 @@ export async function insertJobEvent(
     ingestedAt: now,
   });
 
-  const [row] = await tx.select().from(v11JobEvent).where(eq(v11JobEvent.id, id)).limit(1);
+  const [row] = await tx.select().from(jobEventTable).where(eq(jobEventTable.id, id)).limit(1);
   if (!row) {
     throw new Error(`insertJobEvent: 行未找到（id=${id}）`);
   }
@@ -129,13 +129,13 @@ export async function getJobEvents(
   tenantId: string,
   jobId: string,
   options?: { limit?: number },
-): Promise<V11JobEvent[]> {
+): Promise<JobEvent[]> {
   const limit = options?.limit ?? 100;
   return db
     .select()
-    .from(v11JobEvent)
-    .where(and(eq(v11JobEvent.tenantId, tenantId), eq(v11JobEvent.jobId, jobId)))
-    .orderBy(asc(v11JobEvent.eventSequence))
+    .from(jobEventTable)
+    .where(and(eq(jobEventTable.tenantId, tenantId), eq(jobEventTable.jobId, jobId)))
+    .orderBy(asc(jobEventTable.eventSequence))
     .limit(limit);
 }
 
@@ -150,27 +150,27 @@ export async function getJobEventsSince(
   jobId: string,
   afterSequence: number,
   options?: { limit?: number },
-): Promise<V11JobEvent[]> {
+): Promise<JobEvent[]> {
   const limit = options?.limit ?? 100;
   // 先校验 Job 跨租户可见
   const [job] = await db
-    .select({ id: v11Job.id })
-    .from(v11Job)
-    .where(and(eq(v11Job.tenantId, tenantId), eq(v11Job.id, jobId)))
+    .select({ id: jobTable.id })
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
     .limit(1);
   if (!job) return [];
 
   return db
     .select()
-    .from(v11JobEvent)
+    .from(jobEventTable)
     .where(
       and(
-        eq(v11JobEvent.tenantId, tenantId),
-        eq(v11JobEvent.jobId, jobId),
-        sql`${v11JobEvent.eventSequence} > ${afterSequence}`,
+        eq(jobEventTable.tenantId, tenantId),
+        eq(jobEventTable.jobId, jobId),
+        sql`${jobEventTable.eventSequence} > ${afterSequence}`,
       ),
     )
-    .orderBy(asc(v11JobEvent.eventSequence))
+    .orderBy(asc(jobEventTable.eventSequence))
     .limit(limit);
 }
 
@@ -180,9 +180,9 @@ export async function getLatestJobEventSequence(
   jobId: string,
 ): Promise<number | null> {
   const [job] = await db
-    .select({ lastEventSequence: v11Job.lastEventSequence })
-    .from(v11Job)
-    .where(and(eq(v11Job.tenantId, tenantId), eq(v11Job.id, jobId)))
+    .select({ lastEventSequence: jobTable.lastEventSequence })
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
     .limit(1);
   if (!job) return null;
   return job.lastEventSequence;

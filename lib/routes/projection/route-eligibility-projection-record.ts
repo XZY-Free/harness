@@ -36,7 +36,10 @@ export const routeEligibilityProjection = mysqlTable(
     routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
     routeRevisionNo: bigint("routeRevisionNo", { mode: "number", unsigned: true }).notNull(),
     routeActivationId: varchar("routeActivationId", { length: 36 }).notNull(),
-    routeActivationSequence: bigint("routeActivationSequence", { mode: "number", unsigned: true }).notNull(),
+    routeActivationSequence: bigint("routeActivationSequence", {
+      mode: "number",
+      unsigned: true,
+    }).notNull(),
 
     // ─── 路由选择属性 ──────────────────────────────
     routeGroupId: varchar("routeGroupId", { length: 128 }).notNull(),
@@ -86,7 +89,9 @@ export const routeEligibilityProjection = mysqlTable(
 
     // ─── 证据摘要（用于 Binding 快速校验）────────
     /** 兼容性摘要 — 由 computeCapabilityCompatibilityDigest 计算。 */
-    capabilityCompatibilityDigest: varchar("capabilityCompatibilityDigest", { length: 71 }).notNull(),
+    capabilityCompatibilityDigest: varchar("capabilityCompatibilityDigest", {
+      length: 71,
+    }).notNull(),
     agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }),
@@ -101,7 +106,10 @@ export const routeEligibilityProjection = mysqlTable(
     ]).notNull(),
 
     /** 投影版本号 — 每次重建递增，Binding 用此检测 Projection 滞后。 */
-    projectionVersionNo: bigint("projectionVersionNo", { mode: "number", unsigned: true }).notNull(),
+    projectionVersionNo: bigint("projectionVersionNo", {
+      mode: "number",
+      unsigned: true,
+    }).notNull(),
     lastRebuiltAt: datetime("lastRebuiltAt", { mode: "date", fsp: 3 }).notNull(),
   },
   (table) => ({
@@ -129,11 +137,11 @@ export const routeEligibilityProjection = mysqlTable(
       table.priorityNo,
     ),
     // 租户索引
-    tenantIdx: index("RouteEligibilityProjection_tenant_idx").on(
-      table.tenantId,
-    ),
+    tenantIdx: index("RouteEligibilityProjection_tenant_idx").on(table.tenantId),
   }),
 );
 
 export type RouteEligibilityProjectionRecord = InferSelectModel<typeof routeEligibilityProjection>;
-export type NewRouteEligibilityProjectionRecord = InferInsertModel<typeof routeEligibilityProjection>;
+export type NewRouteEligibilityProjectionRecord = InferInsertModel<
+  typeof routeEligibilityProjection
+>;

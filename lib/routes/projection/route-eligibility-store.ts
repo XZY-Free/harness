@@ -93,7 +93,9 @@ export interface RouteEligibilityStore {
   findProjectionsByRuntimeId(runtimeId: string): Promise<RouteEligibilityProjectionRecord[]>;
 
   /** §4.4: 按 policyRevisionId 查找所有 Projection。 */
-  findProjectionsByPolicyRevisionId(policyRevisionId: string): Promise<RouteEligibilityProjectionRecord[]>;
+  findProjectionsByPolicyRevisionId(
+    policyRevisionId: string,
+  ): Promise<RouteEligibilityProjectionRecord[]>;
 
   /** §4.4: 删除 Projection 行（Route/RouteSet 删除时清理孤立投影）。 */
   deleteProjection(routeId: string): Promise<void>;
@@ -102,6 +104,7 @@ export interface RouteEligibilityStore {
   deleteProjectionsByRouteSet(routeSetId: string): Promise<void>;
 
   /** §4.5: 按 attestationId 查找引用该 Attestation 的所有 Projection（搜索 JSON 数组）。 */
-  findProjectionsByAttestationId(attestationId: string): Promise<RouteEligibilityProjectionRecord[]>;
-
+  findProjectionsByAttestationId(
+    attestationId: string,
+  ): Promise<RouteEligibilityProjectionRecord[]>;
 }

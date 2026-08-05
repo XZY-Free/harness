@@ -1,19 +1,11 @@
-import { db } from "@/lib/db/client";
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
 import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
 /**
  * POST /api/v1/threads/{thread_id}/user-actions/{request_id}:resolve — 员工解析通用 UserAction 请求（S10-W05，§3.18）。
  *
@@ -31,7 +23,7 @@ import { getThreadById } from "@/lib/v11/conversation/thread-queries";
  * - 拒绝 purpose=handoff（必须走 /handoffs/:resolve 专用路径）→ 422 BUSINESS_CONSTRAINT_VIOLATION。
  * - 调用 resolveGenericUserAction 事务内：
  *   - 原子 UPDATE UserActionRequest: pending → resolved
- *   - grant+approve 时创建 V11Grant + 回填 grant_id
+ *   - grant+approve 时创建 Grant + 回填 grant_id
  *   - input+submit 时写入 responseRedactedJson
  *   - UPDATE Invocation: waiting_user → running
  *   - 写 user_action.resolved Event
@@ -48,7 +40,15 @@ import { getThreadById } from "@/lib/v11/conversation/thread-queries";
  *   → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
-import { resolveGenericUserAction } from "@/lib/v11/conversation/user-action-resolve-queries";
+import { resolveGenericUserAction } from "@/lib/conversations/user-action-resolve-queries";
+import { db } from "@/lib/db/client";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -59,8 +59,8 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import { v11UserActionRequest } from "@/lib/v11/schema/user-action-request";
-import type { UserActionResolution } from "@/lib/v11/schema/user-action-request";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -133,13 +133,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：resolution 仅接受 approve/deny/submit/cancel；response_redacted 必须是对象",
     );
@@ -149,11 +149,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   //    （非该 Thread / 非 pending → 404 隐藏式，不泄露存在）
   const [requestRow] = await db
     .select()
-    .from(v11UserActionRequest)
+    .from(userActionRequestTable)
     .where(
       and(
-        eq(v11UserActionRequest.tenantId, principal.tenantId),
-        eq(v11UserActionRequest.id, userActionRequestId),
+        eq(userActionRequestTable.tenantId, principal.tenantId),
+        eq(userActionRequestTable.id, userActionRequestId),
       ),
     )
     .limit(1);

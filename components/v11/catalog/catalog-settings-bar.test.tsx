@@ -8,7 +8,7 @@
  * - busy 时禁用展开按钮。
  * - 展开后点击 Agent 选项触发 onAgentChange。
  */
-import type { V11ClientThread } from "@/lib/v11/client/types";
+import type { ClientThread } from "@/lib/v11/client/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,7 +26,7 @@ beforeEach(() => {
   fetchMock.mockReset();
 });
 
-function buildThread(overrides: Partial<V11ClientThread> = {}): V11ClientThread {
+function buildThread(overrides: Partial<ClientThread> = {}): ClientThread {
   return {
     id: "t1",
     title: "测试会话",

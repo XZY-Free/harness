@@ -8,7 +8,7 @@
  * 职责：
  * - 封装 PATCH /api/v1/threads/{id}/settings 调用。
  * - 维护 busy / error 状态，供 CatalogSettingsBar 禁用控件与展示错误。
- * - 错误转化为 V11ClientVisibleError。
+ * - 错误转化为 ClientVisibleError。
  * - 乐观锁：调用方传入 expectedVersionNo（来自 thread.version_no），hook 内构造 If-Match。
  *
  * 不变量：
@@ -18,7 +18,7 @@
  *
  * 使用：
  * ```tsx
- * function SettingsBar({ thread, onPatched }: { thread: V11ClientThread; onPatched: () => void }) {
+ * function SettingsBar({ thread, onPatched }: { thread: ClientThread; onPatched: () => void }) {
  *   const { patchSettings, busy, error, clearError } = useV11ThreadSettings({ threadId: thread.id });
  *   const handleModelChange = (modelRef: string) => {
  *     void patchSettings({
@@ -34,11 +34,11 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
-import type { V11ClientErrorBody, V11ClientVisibleError } from "@/lib/v11/client/types";
+import type { ClientErrorBody, ClientVisibleError } from "@/lib/v11/client/types";
 import { useCallback, useState } from "react";
 
 /** PATCH settings 更新字段（与服务端 UpdateSettingsBody 对齐）。 */
-export interface V11ThreadSettingsUpdate {
+export interface ThreadSettingsUpdate {
   readonly default_model_ref?: string | null;
   readonly default_workspace_id?: string | null;
   readonly default_environment_definition_id?: string | null;
@@ -49,11 +49,11 @@ export interface UseV11ThreadSettingsResult {
   /** 是否正在 PATCH。 */
   readonly busy: boolean;
   /** 错误。 */
-  readonly error: V11ClientVisibleError | null;
+  readonly error: ClientVisibleError | null;
   /** PATCH settings。返回 true 表示成功，false 表示失败（错误已写入 error）。 */
   readonly patchSettings: (params: {
     readonly expectedVersionNo: number;
-    readonly updates: V11ThreadSettingsUpdate;
+    readonly updates: ThreadSettingsUpdate;
   }) => Promise<boolean>;
   /** 清除错误。 */
   readonly clearError: () => void;
@@ -63,11 +63,11 @@ export interface UseV11ThreadSettingsResult {
 const THREAD_SETTINGS_ETAG_PREFIX = "thread-settings-";
 
 /** 解析错误响应为可见错误。 */
-async function parseError(response: Response): Promise<V11ClientVisibleError> {
+async function parseError(response: Response): Promise<ClientVisibleError> {
   const bodyText = await response.text().catch(() => "");
-  let errorBody: V11ClientErrorBody | null = null;
+  let errorBody: ClientErrorBody | null = null;
   try {
-    errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+    errorBody = JSON.parse(bodyText) as ClientErrorBody;
   } catch {
     // ignore
   }
@@ -91,7 +91,7 @@ export function useV11ThreadSettings({
   threadId,
 }: UseV11ThreadSettingsParams): UseV11ThreadSettingsResult {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<V11ClientVisibleError | null>(null);
+  const [error, setError] = useState<ClientVisibleError | null>(null);
 
   const patchSettings = useCallback(
     async ({
@@ -99,7 +99,7 @@ export function useV11ThreadSettings({
       updates,
     }: {
       readonly expectedVersionNo: number;
-      readonly updates: V11ThreadSettingsUpdate;
+      readonly updates: ThreadSettingsUpdate;
     }): Promise<boolean> => {
       const hasUpdate =
         updates.default_model_ref !== undefined ||

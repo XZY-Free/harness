@@ -11,16 +11,16 @@
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §0.4
  */
 
+import { logger } from "@/lib/logger";
 import type {
+  ResolveRouteCandidatesInput,
   RouteControlPlaneEvidence,
   RouteResolutionCandidate,
   RouteResolutionOutcome,
-  ResolveRouteCandidatesInput,
 } from "@/lib/routes/domain/route-resolution-policy";
 import { resolveRouteCandidates } from "@/lib/routes/domain/route-resolution-policy";
-import type { RouteResolutionStore } from "@/lib/routes/persistence/route-resolution-store";
 import type { RouteEligibilityResolutionStore } from "@/lib/routes/persistence/route-eligibility-resolution-store";
-import { logger } from "@/lib/logger";
+import type { RouteResolutionStore } from "@/lib/routes/persistence/route-resolution-store";
 
 export interface ShadowResolutionResult {
   /** 实际使用的结果（Authority 阶段为 authority，切换后为 projection）。 */
@@ -51,9 +51,17 @@ export interface ShadowDiff {
   /** Projection 候选数。 */
   projectionCandidateCount: number;
   /** §4.6: Authority 证据 ID 集合（Agent/Runtime Attestation + Publication + Conformance）。 */
-  authorityEvidenceIds?: { attestationIds: string[]; publicationRecordIds: string[]; conformanceRunIds: string[] };
+  authorityEvidenceIds?: {
+    attestationIds: string[];
+    publicationRecordIds: string[];
+    conformanceRunIds: string[];
+  };
   /** §4.6: Projection 证据 ID 集合。 */
-  projectionEvidenceIds?: { attestationIds: string[]; publicationRecordIds: string[]; conformanceRunIds: string[] };
+  projectionEvidenceIds?: {
+    attestationIds: string[];
+    publicationRecordIds: string[];
+    conformanceRunIds: string[];
+  };
   /** §4.6: Authority DB 查询次数。 */
   authorityQueryCount?: number;
   /** §4.6: Projection DB 查询次数。 */
@@ -96,8 +104,8 @@ export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
   if (config.useProjectionForExecution) {
     throw new Error(
       "FROZEN: useProjectionForExecution=true 不允许。" +
-      "Projection 当前证据不完整（缺少完整 Publication/Attestation/Conformance ID），" +
-      "不足以支撑 ExecutionBinding。参见专题01 §0.4。",
+        "Projection 当前证据不完整（缺少完整 Publication/Attestation/Conformance ID），" +
+        "不足以支撑 ExecutionBinding。参见专题01 §0.4。",
     );
   }
 
@@ -142,7 +150,10 @@ export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
     const projectionMs = Date.now() - projectionStart;
 
     const authorityOutcome = resolveRouteCandidates({ ...input, candidates: authorityCandidates });
-    const projectionOutcome = resolveRouteCandidates({ ...input, candidates: projectionCandidates });
+    const projectionOutcome = resolveRouteCandidates({
+      ...input,
+      candidates: projectionCandidates,
+    });
 
     const authorityResolved = authorityOutcome.status === "resolved";
     const projectionResolved = projectionOutcome.status === "resolved";
@@ -197,9 +208,7 @@ export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
     }
 
     // 决定使用哪个结果
-    const outcome = config.useProjectionForExecution
-      ? projectionOutcome
-      : authorityOutcome;
+    const outcome = config.useProjectionForExecution ? projectionOutcome : authorityOutcome;
 
     return { outcome, shadow };
   };
@@ -216,8 +225,10 @@ function computeDiffReason(
     if (authority.resolution.routeRevisionId !== projection.resolution.routeRevisionId) {
       return "different_route_revision_selected";
     }
-    if (authority.resolution.controlPlaneEvidence.agentArtifactDigest !==
-        projection.resolution.controlPlaneEvidence.agentArtifactDigest) {
+    if (
+      authority.resolution.controlPlaneEvidence.agentArtifactDigest !==
+      projection.resolution.controlPlaneEvidence.agentArtifactDigest
+    ) {
       return "evidence_digest_mismatch";
     }
   }
@@ -230,24 +241,34 @@ function computeDiffReason(
 }
 
 /** §4.6: 从 controlPlaneEvidence 提取证据 ID 集合。 */
-function extractEvidenceIds(
-  evidence: RouteControlPlaneEvidence,
-): { attestationIds: string[]; publicationRecordIds: string[]; conformanceRunIds: string[] } {
+function extractEvidenceIds(evidence: RouteControlPlaneEvidence): {
+  attestationIds: string[];
+  publicationRecordIds: string[];
+  conformanceRunIds: string[];
+} {
   const attestationIds: string[] = [];
   const publicationRecordIds: string[] = [];
   const conformanceRunIds: string[] = [];
 
   // Agent Attestation IDs
   const agentAttIds = evidence.agentAttestationIds;
-  if (Array.isArray(agentAttIds)) attestationIds.push(...agentAttIds.filter((id): id is string => typeof id === "string"));
+  if (Array.isArray(agentAttIds))
+    attestationIds.push(...agentAttIds.filter((id): id is string => typeof id === "string"));
   // Runtime Attestation IDs
   const runtimeAttIds = evidence.runtimeAttestationIds;
-  if (Array.isArray(runtimeAttIds)) attestationIds.push(...runtimeAttIds.filter((id): id is string => typeof id === "string"));
+  if (Array.isArray(runtimeAttIds))
+    attestationIds.push(...runtimeAttIds.filter((id): id is string => typeof id === "string"));
   // Publication Record IDs
-  if (typeof evidence.agentPublicationRecordId === "string" && evidence.agentPublicationRecordId) publicationRecordIds.push(evidence.agentPublicationRecordId);
-  if (typeof evidence.runtimePublicationRecordId === "string" && evidence.runtimePublicationRecordId) publicationRecordIds.push(evidence.runtimePublicationRecordId);
+  if (typeof evidence.agentPublicationRecordId === "string" && evidence.agentPublicationRecordId)
+    publicationRecordIds.push(evidence.agentPublicationRecordId);
+  if (
+    typeof evidence.runtimePublicationRecordId === "string" &&
+    evidence.runtimePublicationRecordId
+  )
+    publicationRecordIds.push(evidence.runtimePublicationRecordId);
   // Conformance Run IDs
-  if (typeof evidence.conformanceRunId === "string" && evidence.conformanceRunId) conformanceRunIds.push(evidence.conformanceRunId);
+  if (typeof evidence.conformanceRunId === "string" && evidence.conformanceRunId)
+    conformanceRunIds.push(evidence.conformanceRunId);
 
   return { attestationIds, publicationRecordIds, conformanceRunIds };
 }

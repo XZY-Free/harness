@@ -6,7 +6,7 @@
  * - 首次挂载触发 GET /api/v1/catalog/options。
  * - 200 响应解析 items + 提取 ETag。
  * - 304 响应保留现有 items。
- * - 错误响应转化为 V11ClientVisibleError。
+ * - 错误响应转化为 ClientVisibleError。
  * - 网络异常转化。
  * - resource_type 查询参数拼接。
  * - 组件卸载时不更新状态。
@@ -108,7 +108,7 @@ describe("useV11Catalog", () => {
     expect(result.current.items[0]?.display_name).toBe("Agent A");
   });
 
-  it("错误响应转化为 V11ClientVisibleError", async () => {
+  it("错误响应转化为 ClientVisibleError", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({

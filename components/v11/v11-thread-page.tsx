@@ -16,7 +16,7 @@
  * - SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）。
  * - 错误展示（visibleError → ErrorCard）。
  * - W3-4：输入区集成 ＋菜单、助手选择器、模型选择器；CatalogSettingsBar 撤除。
- * - W4-1：顶部 Steer/Stop 横条与时间线上方的待办队列移入 V11ThreadInput 内部，
+ * - W4-1：顶部 Steer/Stop 横条与时间线上方的待办队列移入 ThreadInput 内部，
  *   停止按钮复用 codex 形态（输入框右下圆钮变 ■），待办队列复用紧凑单行条。
  * - Desktop：右侧渲染任务工作台，提供文件、审阅、浏览器和会话上下文入口。
  *
@@ -24,12 +24,12 @@
  * ```tsx
  * // app/chat/[threadId]/page.tsx
  * export default function ChatPage({ params }: { params: { threadId: string } }) {
- *   return <V11ThreadPage threadId={params.threadId} />;
+ *   return <ThreadPage threadId={params.threadId} />;
  * }
  *
  * // app/desktop/chat/[threadId]/page.tsx
  * export default function DesktopChatPage({ params }: { params: { threadId: string } }) {
- *   return <V11ThreadPage threadId={params.threadId} variant="desktop" />;
+ *   return <ThreadPage threadId={params.threadId} variant="desktop" />;
  * }
  * ```
  */
@@ -46,10 +46,10 @@ import { DesktopWorkbench } from "../desktop/desktop-workbench";
 import type { AgentOption } from "./input/input-popovers";
 import { useOptionalSidebar } from "./sidebar/sidebar-context";
 import { ThreadHeader, deriveTaskStatus } from "./thread-header";
-import { V11ThreadInput } from "./thread-input";
+import { ThreadInput } from "./thread-input";
 import { ThreadTimeline } from "./thread-timeline";
 
-interface V11ThreadPageProps {
+interface ThreadPageProps {
   readonly threadId: string;
   /** 渲染变体：web（默认）= 仅时间线；desktop = 时间线 + 右侧工作台。 */
   readonly variant?: "web" | "desktop";
@@ -59,12 +59,12 @@ interface V11ThreadPageProps {
   readonly availableAgents?: readonly AgentOption[];
 }
 
-export function V11ThreadPage({
+export function ThreadPage({
   threadId,
   variant = "web",
   viewerId,
   availableAgents,
-}: V11ThreadPageProps) {
+}: ThreadPageProps) {
   const sidebar = useOptionalSidebar();
   const {
     items,
@@ -272,7 +272,7 @@ export function V11ThreadPage({
         threadId={threadId}
       />
       {thread && (
-        <V11ThreadInput
+        <ThreadInput
           threadId={threadId}
           latestTurn={latestTurn}
           thread={thread}
@@ -306,7 +306,7 @@ export function V11ThreadPage({
               locateItem={locateItem}
             />
             {thread && (
-              <V11ThreadInput
+              <ThreadInput
                 threadId={threadId}
                 latestTurn={latestTurn}
                 thread={thread}

@@ -36,22 +36,15 @@ import {
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  getRequestId,
   apiError,
   apiSuccess,
+  getRequestId,
 } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -62,7 +55,14 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import { ARTIFACT_TYPES, type V11ArtifactAttestation } from "@/lib/v11/schema/artifact";
+import { ARTIFACT_TYPES, type ArtifactAttestation } from "@/lib/persistence/schema/artifact";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +84,7 @@ interface VerifyBody {
   policy_revision_id?: string;
 }
 
-function projectResponse(attestation: V11ArtifactAttestation) {
+function projectResponse(attestation: ArtifactAttestation) {
   return {
     attestation_id: attestation.id,
     artifact_revision_id: attestation.artifactRevisionId,
@@ -150,13 +150,13 @@ export async function POST(request: Request): Promise<Response> {
   // 2. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：缺少 artifact_type/artifact_revision_id/artifact_digest/signature_bundle_ref/sbom_ref/provenance_ref/builder_identity",
     );

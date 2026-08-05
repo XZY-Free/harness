@@ -1,17 +1,17 @@
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import { listUsageRecordsByTenant } from "@/lib/v11/operations/usage-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   USAGE_DIMENSIONS,
   USAGE_SCOPE_TYPES,
   type UsageDimension,
   type UsageScopeType,
-} from "@/lib/v11/schema/usage";
+} from "@/lib/persistence/schema/usage";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
+import { listUsageRecordsByTenant } from "@/lib/v11/operations/usage-queries";
 /**
  * GET /admin/api/v1/usage-records — 列出租户内所有 UsageRecord（S11-W07）。
  *
@@ -57,13 +57,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let dimension: UsageDimension | undefined;
   if (dimensionParam) {
     if (!VALID_DIMENSIONS.has(dimensionParam)) {
-      return v11SchemaInvalid(requestId, `dimension 非法: ${dimensionParam}`);
+      return schemaInvalidTable(requestId, `dimension 非法: ${dimensionParam}`);
     }
     dimension = dimensionParam as UsageDimension;
   }
@@ -71,7 +71,7 @@ export async function GET(request: Request): Promise<Response> {
   let scopeType: UsageScopeType | undefined;
   if (scopeTypeParam) {
     if (!VALID_SCOPE_TYPES.has(scopeTypeParam)) {
-      return v11SchemaInvalid(requestId, `scope_type 非法: ${scopeTypeParam}`);
+      return schemaInvalidTable(requestId, `scope_type 非法: ${scopeTypeParam}`);
     }
     scopeType = scopeTypeParam as UsageScopeType;
   }
@@ -80,7 +80,7 @@ export async function GET(request: Request): Promise<Response> {
   if (observedFromParam) {
     observedFrom = new Date(observedFromParam);
     if (Number.isNaN(observedFrom.getTime())) {
-      return v11SchemaInvalid(requestId, `observed_from 不是合法 ISO 时间: ${observedFromParam}`);
+      return schemaInvalidTable(requestId, `observed_from 不是合法 ISO 时间: ${observedFromParam}`);
     }
   }
 
@@ -88,7 +88,7 @@ export async function GET(request: Request): Promise<Response> {
   if (observedToParam) {
     observedTo = new Date(observedToParam);
     if (Number.isNaN(observedTo.getTime())) {
-      return v11SchemaInvalid(requestId, `observed_to 不是合法 ISO 时间: ${observedToParam}`);
+      return schemaInvalidTable(requestId, `observed_to 不是合法 ISO 时间: ${observedToParam}`);
     }
   }
 

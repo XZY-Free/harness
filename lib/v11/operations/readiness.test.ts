@@ -11,19 +11,19 @@
  */
 import { randomUUID } from "node:crypto";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import { db } from "@/lib/db/client";
-import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
   initEventStreamFloor,
   recordDeliveryFailure,
   updateDeliveryFailureState,
-} from "@/lib/v11/conversation/projection-checkpoint-queries";
-import { createThread } from "@/lib/v11/conversation/thread-queries";
-import { resetOverloadProtector } from "@/lib/v11/gateway/overload-protection";
-import { resetSSEConnectionQuota } from "@/lib/v11/gateway/sse-connection-quota";
+} from "@/lib/conversations/projection-checkpoint-queries";
+import { createThread } from "@/lib/conversations/thread-queries";
+import { db } from "@/lib/db/client";
+import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { resetOverloadProtector } from "@/lib/v11/gateway/overload-protection";
+import { resetSSEConnectionQuota } from "@/lib/v11/gateway/sse-connection-quota";
 import {
   READINESS_SCOPES,
   checkReadiness,

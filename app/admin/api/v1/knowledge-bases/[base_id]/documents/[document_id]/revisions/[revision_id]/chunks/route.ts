@@ -21,25 +21,10 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiSuccess,
   getRequestId,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import {
-  KnowledgeValidationError,
-  createKnowledgeChunk,
-  getKnowledgeBaseById,
-  getKnowledgeDocumentById,
-  getKnowledgeDocumentRevisionById,
-  listKnowledgeChunksByRevision,
-} from "@/lib/v11/context/knowledge-queries";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -51,6 +36,21 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
+import {
+  KnowledgeValidationError,
+  createKnowledgeChunk,
+  getKnowledgeBaseById,
+  getKnowledgeDocumentById,
+  getKnowledgeDocumentRevisionById,
+  listKnowledgeChunksByRevision,
+} from "@/lib/v11/context/knowledge-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -141,7 +141,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const { baseId, documentId, revisionId } = extractPathIds(request.url);
   if (!baseId || !documentId || !revisionId) {
-    return v11SchemaInvalid(requestId, "路径缺少 base_id/document_id/revision_id");
+    return schemaInvalidTable(requestId, "路径缺少 base_id/document_id/revision_id");
   }
 
   // 校验 Revision / Document / Base 存在 + 跨租户
@@ -170,7 +170,7 @@ export async function GET(request: Request): Promise<Response> {
   const limitParam = url.searchParams.get("limit");
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 500;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   const items = await listKnowledgeChunksByRevision(principal.tenantId, revisionId, { limit });
@@ -200,7 +200,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const { baseId, documentId, revisionId } = extractPathIds(request.url);
   if (!baseId || !documentId || !revisionId) {
-    return v11SchemaInvalid(requestId, "路径缺少 base_id/document_id/revision_id");
+    return schemaInvalidTable(requestId, "路径缺少 base_id/document_id/revision_id");
   }
 
   const revision = await getKnowledgeDocumentRevisionById(principal.tenantId, revisionId);
@@ -218,7 +218,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // 已 published 的 Revision 不允许新增 Chunk（不可变性）
   if (revision.revisionState !== "draft") {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       `Revision 状态为 ${revision.revisionState}，不允许新增 Chunk（仅 draft 状态可写）`,
     );
@@ -234,12 +234,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：缺少 chunk_no/content_hash 或字段类型错误，content_ref 与 content_redacted 至少一个非空",
     );
@@ -309,7 +309,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch (err) {
     await failRecord(recordId);
     if (err instanceof KnowledgeValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

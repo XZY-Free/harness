@@ -16,14 +16,25 @@
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §4.6
  */
 
-import { createShadowRouteResolver, type ShadowResolutionResult, type ShadowResolverConfig } from "@/lib/routes/application/shadow-route-resolver";
-import type { RouteResolutionStore } from "@/lib/routes/persistence/route-resolution-store";
+import {
+  type ShadowResolutionResult,
+  type ShadowResolverConfig,
+  createShadowRouteResolver,
+} from "@/lib/routes/application/shadow-route-resolver";
+import type {
+  ResolveRouteCandidatesInput,
+  RouteResolutionAttribute,
+  RouteResolutionOutcome,
+} from "@/lib/routes/domain/route-resolution-policy";
 import type { RouteEligibilityResolutionStore } from "@/lib/routes/persistence/route-eligibility-resolution-store";
-import type { RouteResolutionAttribute, RouteResolutionOutcome, ResolveRouteCandidatesInput } from "@/lib/routes/domain/route-resolution-policy";
+import type { RouteResolutionStore } from "@/lib/routes/persistence/route-resolution-store";
 
 // ─── 类型导出 ──────────────────────────────────────────────
 
-export type { ShadowResolutionResult, ShadowDiff } from "@/lib/routes/application/shadow-route-resolver";
+export type {
+  ShadowResolutionResult,
+  ShadowDiff,
+} from "@/lib/routes/application/shadow-route-resolver";
 
 // ─── 输入/输出 ──────────────────────────────────────────────
 

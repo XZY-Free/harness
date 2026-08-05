@@ -1,4 +1,3 @@
-import { generateRequestId, apiError } from "@/lib/http";
 /**
  * 动作资源授权守卫。
  *
@@ -17,6 +16,7 @@ import { generateRequestId, apiError } from "@/lib/http";
  * - WorkloadPrincipal callerType=workload（runtime/gateway）→ 不走 action scope（由 ExecutionBinding 约束）→ 拒绝。
  */
 import type { ApiErrorCode } from "@/lib/error-codes";
+import { apiError, generateRequestId } from "@/lib/http";
 import {
   type ActionCode,
   type ResourceScopeType,

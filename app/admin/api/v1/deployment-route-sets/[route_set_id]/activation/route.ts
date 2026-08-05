@@ -2,46 +2,17 @@ import { randomUUID } from "node:crypto";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
   etagHeader,
   getRequestId,
   parseIfMatch,
-  apiError,
-  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-/**
- * PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation
- * — RouteSet 整体激活（任务 1.6）。
- *
- * 必填：Idempotency-Key header、If-Match header
- * 请求体：{ expected_version_no, reason, routes[] }
- *
- * 错误映射见 JSDoc 上方文档注释。
- */
-import {
-  RouteSetRequiresAtomicUpdateError,
-} from "@/lib/routes/application/activate-route-set";
-import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
-import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
-import {
-  AgentCapabilityUnsupportedError,
-  ArtifactNotVerifiedForRouteError,
-  RevisionNotPublishedError,
-  RouteSetNotFoundError,
-  RouteSetVersionConflictError,
-} from "@/lib/routes/domain/route-revision";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  parseRouteSetEtag,
-  resolveAdminPrincipalAsync,
-  v11EtagMismatch,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -52,6 +23,33 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+/**
+ * PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation
+ * — RouteSet 整体激活（任务 1.6）。
+ *
+ * 必填：Idempotency-Key header、If-Match header
+ * 请求体：{ expected_version_no, reason, routes[] }
+ *
+ * 错误映射见 JSDoc 上方文档注释。
+ */
+import { RouteSetRequiresAtomicUpdateError } from "@/lib/routes/application/activate-route-set";
+import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
+import {
+  AgentCapabilityUnsupportedError,
+  ArtifactNotVerifiedForRouteError,
+  RevisionNotPublishedError,
+  RouteSetNotFoundError,
+  RouteSetVersionConflictError,
+} from "@/lib/routes/domain/route-revision";
+import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  etagMismatchTable,
+  parseRouteSetEtag,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 
@@ -82,7 +80,8 @@ interface ActivationRequestBody {
 function validateBody(body: unknown): body is ActivationRequestBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
-  if (typeof b.expected_version_no !== "number" || !Number.isInteger(b.expected_version_no)) return false;
+  if (typeof b.expected_version_no !== "number" || !Number.isInteger(b.expected_version_no))
+    return false;
   if (typeof b.reason !== "string") return false;
   if (!Array.isArray(b.routes) || b.routes.length === 0) return false;
   for (const route of b.routes) {
@@ -129,19 +128,22 @@ export async function PUT(
   // 2. If-Match（必填）
   const ifMatch = parseIfMatch(request);
   if (!ifMatch) {
-    return v11SchemaInvalid(requestId, "缺少必填头 If-Match");
+    return schemaInvalidTable(requestId, "缺少必填头 If-Match");
   }
   let etagVersionNo: number;
   try {
     etagVersionNo = parseRouteSetEtag(ifMatch);
   } catch (err) {
-    return v11SchemaInvalid(requestId, err instanceof Error ? err.message : "If-Match ETag 格式非法");
+    return schemaInvalidTable(
+      requestId,
+      err instanceof Error ? err.message : "If-Match ETag 格式非法",
+    );
   }
 
   // 3. Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
@@ -149,16 +151,16 @@ export async function PUT(
   try {
     const raw = await request.json();
     if (!validateBody(raw)) {
-      return v11SchemaInvalid(requestId, "请求体格式非法");
+      return schemaInvalidTable(requestId, "请求体格式非法");
     }
     body = raw;
   } catch {
-    return v11SchemaInvalid(requestId, "请求体解析失败");
+    return schemaInvalidTable(requestId, "请求体解析失败");
   }
 
   // 5. If-Match 与 expected_version_no 一致
   if (body.expected_version_no !== etagVersionNo) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       `If-Match (${etagVersionNo}) 与 expected_version_no (${body.expected_version_no}) 不一致`,
     );
@@ -195,7 +197,11 @@ export async function PUT(
       requestHash,
     });
     if (!reset) {
-      return buildIdempotencyErrorResponse({ record: outcome.record, reason: "conflict", requestId });
+      return buildIdempotencyErrorResponse({
+        record: outcome.record,
+        reason: "conflict",
+        requestId,
+      });
     }
     recordId = reset.id;
   }
@@ -267,7 +273,7 @@ export async function PUT(
     }
     if (err instanceof RouteSetVersionConflictError) {
       await failRecord(recordId);
-      return v11EtagMismatch(requestId, err.message);
+      return etagMismatchTable(requestId, err.message);
     }
     if (err instanceof ArtifactNotVerifiedForRouteError) {
       await failRecord(recordId);

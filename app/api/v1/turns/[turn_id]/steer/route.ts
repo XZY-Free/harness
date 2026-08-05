@@ -1,17 +1,10 @@
 import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
-import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
 /**
  * POST /api/v1/turns/{turn_id}/steer — Steer Turn（S04-C06，§3.7）。
  *
@@ -33,9 +26,16 @@ import {
  * - Turn 非 running 状态 → 409 TURN_ALREADY_TERMINAL
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
-import { queueSteer } from "@/lib/v11/conversation/steer-queries";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
-import { getTurnById } from "@/lib/v11/conversation/turn-queries";
+import { queueSteer } from "@/lib/conversations/steer-queries";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { getTurnById } from "@/lib/conversations/turn-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -93,13 +93,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 guidance_text 或字段类型错误");
+    return schemaInvalidTable(requestId, "请求体非法：缺少 guidance_text 或字段类型错误");
   }
 
   // 5. 计算请求 hash + 幂等守卫

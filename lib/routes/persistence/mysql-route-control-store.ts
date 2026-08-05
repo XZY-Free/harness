@@ -1,28 +1,22 @@
 import { randomUUID } from "node:crypto";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
-import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import {
   artifact,
   artifactAttestation,
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
-import {
-  deploymentRouteSetTable,
-  deploymentRouteTable,
-} from "@/lib/persistence/schema/routes";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
+import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { RouteNotFoundError } from "@/lib/routes/domain/route-revision";
+import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
 import type { RouteControlStore } from "@/lib/routes/persistence/route-control-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
-import {
-  normalizeEligibility,
-  computeSelectorDigest,
-} from "@/lib/routes/domain/route-selector";
 import { and, eq, isNotNull, isNull, max } from "drizzle-orm";
 
 function requiredCapabilities(value: unknown): string[] {
@@ -221,7 +215,8 @@ export const mysqlRouteControlStore: RouteControlStore = {
               ...(params.content.routeGroupId ? { groupId: params.content.routeGroupId } : {}),
             },
             routeGroupId: params.content.routeGroupId,
-            selectorDigest: params.selectorDigest ?? (normalized ? computeSelectorDigest(normalized) : ""),
+            selectorDigest:
+              params.selectorDigest ?? (normalized ? computeSelectorDigest(normalized) : ""),
             trafficWeight: params.content.trafficWeight,
             priorityNo: params.content.priorityNo,
             effectiveFrom: params.content.effectiveFrom,

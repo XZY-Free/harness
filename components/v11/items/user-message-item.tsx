@@ -9,13 +9,13 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { V11ClientItem } from "@/lib/v11/client/types";
+import type { ClientItem } from "@/lib/v11/client/types";
 
-interface V11UserMessageItemProps {
-  readonly item: V11ClientItem;
+interface UserMessageItemProps {
+  readonly item: ClientItem;
 }
 
-export function V11UserMessageItem({ item }: V11UserMessageItemProps) {
+export function UserMessageItem({ item }: UserMessageItemProps) {
   const content = item.content as { text?: string; attachments?: unknown[] };
   const isGuidance = item.item_type === "user_guidance";
   const isPending = item.item_state === "pending";

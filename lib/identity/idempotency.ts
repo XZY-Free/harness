@@ -18,9 +18,9 @@
  * Tool 的 operation_id 由 ToolCall 单独负责，不是同一字段。
  */
 import { createHash } from "node:crypto";
-import { generateRequestId, apiError } from "@/lib/http";
-import type { ApiAudience } from "@/lib/http";
 import type { ApiErrorCode } from "@/lib/error-codes";
+import { apiError, generateRequestId } from "@/lib/http";
+import type { ApiAudience } from "@/lib/http";
 import {
   type IdempotencyUniqueKey,
   completeIdempotencyRecord,
@@ -30,7 +30,10 @@ import {
   resetFailedForRetry,
 } from "@/lib/identity/idempotency-queries";
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
-import type { IdempotencyCallerType, IdempotencyRecord } from "@/lib/v11/schema/idempotency";
+import type {
+  IdempotencyCallerType,
+  IdempotencyRecord,
+} from "@/lib/persistence/schema/idempotency";
 
 /** 幂等调用方（与 idempotency_record 唯一键对齐）。 */
 export interface IdempotencyCaller {

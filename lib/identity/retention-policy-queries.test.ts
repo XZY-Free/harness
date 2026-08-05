@@ -33,11 +33,11 @@ import {
   validateRetentionDays,
 } from "@/lib/identity/retention-policy-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { tenant } from "@/lib/v11/schema/identity";
+import { tenant } from "@/lib/persistence/schema/identity";
 import {
   RETENTION_OBJECT_TYPES,
   type RetentionObjectType,
-} from "@/lib/v11/schema/retention-policy";
+} from "@/lib/persistence/schema/retention-policy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {

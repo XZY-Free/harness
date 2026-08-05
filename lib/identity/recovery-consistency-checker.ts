@@ -24,14 +24,21 @@ import { randomUUID } from "node:crypto";
  * - 核对器不修改业务数据（只读核对）。
  */
 import { db } from "@/lib/db/client";
-import { v11Thread, v11ThreadEvent, v11ThreadItem } from "@/lib/v11/schema/conversation";
-import { v11DeletionStep } from "@/lib/v11/schema/deletion-request";
-import { v11Job } from "@/lib/v11/schema/job";
-import type { RecoveryCheckType, V11RecoveryDrillCheck } from "@/lib/v11/schema/recovery-drill";
-import { v11LegalHold } from "@/lib/v11/schema/retention-policy";
-import { v11Artifact } from "@/lib/v11/schema/runtime-artifact";
-import { v11ToolCall } from "@/lib/v11/schema/tool-call";
-import { v11UserActionRequest } from "@/lib/v11/schema/user-action-request";
+import {
+  threadEventTable,
+  threadItemTable,
+  threadTable,
+} from "@/lib/persistence/schema/conversation";
+import { deletionStepTable } from "@/lib/persistence/schema/deletion-request";
+import { jobTable } from "@/lib/persistence/schema/job";
+import type {
+  RecoveryCheckType,
+  RecoveryDrillCheck,
+} from "@/lib/persistence/schema/recovery-drill";
+import { legalHoldTable } from "@/lib/persistence/schema/retention-policy";
+import { artifactTable } from "@/lib/persistence/schema/runtime-artifact";
+import { toolCallTable } from "@/lib/persistence/schema/tool-call";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import { and, count, eq, gt, inArray, isNotNull, lte, or } from "drizzle-orm";
 
 // ─── 核对结果 ──────────────────────────────────────────────
@@ -125,17 +132,17 @@ async function dispatchCheck(
 async function checkEventSequence(
   tenantId: string,
 ): Promise<Omit<ConsistencyCheckResult, "durationMs">> {
-  // v11ThreadEvent 无 tenantId，通过 join v11Thread 实现租户隔离
+  // threadEventTable 无 tenantId，通过 join threadTable 实现租户隔离
   const events = await db
     .select({
-      threadId: v11ThreadEvent.threadId,
-      turnId: v11ThreadEvent.turnId,
-      maxSeq: count(v11ThreadEvent.eventSequence),
+      threadId: threadEventTable.threadId,
+      turnId: threadEventTable.turnId,
+      maxSeq: count(threadEventTable.eventSequence),
     })
-    .from(v11ThreadEvent)
-    .innerJoin(v11Thread, eq(v11ThreadEvent.threadId, v11Thread.id))
-    .where(eq(v11Thread.tenantId, tenantId))
-    .groupBy(v11ThreadEvent.threadId, v11ThreadEvent.turnId);
+    .from(threadEventTable)
+    .innerJoin(threadTable, eq(threadEventTable.threadId, threadTable.id))
+    .where(eq(threadTable.tenantId, tenantId))
+    .groupBy(threadEventTable.threadId, threadEventTable.turnId);
 
   const turnCount = events.length;
   const gapCount = 0;
@@ -175,17 +182,17 @@ async function checkEventSequence(
 async function checkProjectionCheckpoint(
   tenantId: string,
 ): Promise<Omit<ConsistencyCheckResult, "durationMs">> {
-  // v11ThreadItem 无 tenantId，通过 join v11Thread 实现租户隔离
+  // threadItemTable 无 tenantId，通过 join threadTable 实现租户隔离
   const items = await db
     .select({
-      id: v11ThreadItem.id,
-      threadId: v11ThreadItem.threadId,
-      itemSequence: v11ThreadItem.itemSequence,
-      supersededByItemId: v11ThreadItem.supersededByItemId,
+      id: threadItemTable.id,
+      threadId: threadItemTable.threadId,
+      itemSequence: threadItemTable.itemSequence,
+      supersededByItemId: threadItemTable.supersededByItemId,
     })
-    .from(v11ThreadItem)
-    .innerJoin(v11Thread, eq(v11ThreadItem.threadId, v11Thread.id))
-    .where(eq(v11Thread.tenantId, tenantId));
+    .from(threadItemTable)
+    .innerJoin(threadTable, eq(threadItemTable.threadId, threadTable.id))
+    .where(eq(threadTable.tenantId, tenantId));
 
   const itemCount = items.length;
   let cycleCount = 0;
@@ -226,11 +233,11 @@ async function checkArtifactRef(
 ): Promise<Omit<ConsistencyCheckResult, "durationMs">> {
   const artifacts = await db
     .select({
-      id: v11Artifact.id,
-      contentRef: v11Artifact.contentRef,
+      id: artifactTable.id,
+      contentRef: artifactTable.contentRef,
     })
-    .from(v11Artifact)
-    .where(eq(v11Artifact.tenantId, tenantId));
+    .from(artifactTable)
+    .where(eq(artifactTable.tenantId, tenantId));
 
   const artifactCount = artifacts.length;
   let invalidCount = 0;
@@ -276,11 +283,11 @@ async function checkLegalHold(
   const now = new Date();
   const activeHolds = await db
     .select({
-      id: v11LegalHold.id,
-      validUntil: v11LegalHold.validUntil,
+      id: legalHoldTable.id,
+      validUntil: legalHoldTable.validUntil,
     })
-    .from(v11LegalHold)
-    .where(and(eq(v11LegalHold.tenantId, tenantId), eq(v11LegalHold.holdState, "active")));
+    .from(legalHoldTable)
+    .where(and(eq(legalHoldTable.tenantId, tenantId), eq(legalHoldTable.holdState, "active")));
 
   const activeHoldCount = activeHolds.length;
   const expiredButActive = activeHolds.filter(
@@ -315,11 +322,13 @@ async function checkDeletionEvidence(
 ): Promise<Omit<ConsistencyCheckResult, "durationMs">> {
   const completedSteps = await db
     .select({
-      id: v11DeletionStep.id,
-      evidenceRef: v11DeletionStep.evidenceRef,
+      id: deletionStepTable.id,
+      evidenceRef: deletionStepTable.evidenceRef,
     })
-    .from(v11DeletionStep)
-    .where(and(eq(v11DeletionStep.tenantId, tenantId), eq(v11DeletionStep.stepState, "completed")));
+    .from(deletionStepTable)
+    .where(
+      and(eq(deletionStepTable.tenantId, tenantId), eq(deletionStepTable.stepState, "completed")),
+    );
 
   const completedStepCount = completedSteps.length;
   const missingEvidence = completedSteps.filter(
@@ -356,12 +365,12 @@ async function checkToolCallPending(
 ): Promise<Omit<ConsistencyCheckResult, "durationMs">> {
   // 查询 pending 状态的 ToolCall（proposed/paused/running）
   const pendingCalls = await db
-    .select({ id: v11ToolCall.id, callState: v11ToolCall.callState })
-    .from(v11ToolCall)
+    .select({ id: toolCallTable.id, callState: toolCallTable.callState })
+    .from(toolCallTable)
     .where(
       and(
-        eq(v11ToolCall.tenantId, tenantId),
-        inArray(v11ToolCall.callState, ["proposed", "paused", "running"]),
+        eq(toolCallTable.tenantId, tenantId),
+        inArray(toolCallTable.callState, ["proposed", "paused", "running"]),
       ),
     );
 
@@ -393,9 +402,11 @@ async function checkUnknownEffect(
   tenantId: string,
 ): Promise<Omit<ConsistencyCheckResult, "durationMs">> {
   const unknownCalls = await db
-    .select({ id: v11ToolCall.id })
-    .from(v11ToolCall)
-    .where(and(eq(v11ToolCall.tenantId, tenantId), eq(v11ToolCall.callState, "unknown_effect")));
+    .select({ id: toolCallTable.id })
+    .from(toolCallTable)
+    .where(
+      and(eq(toolCallTable.tenantId, tenantId), eq(toolCallTable.callState, "unknown_effect")),
+    );
 
   const evidenceRef = `unknown_effect:${tenantId}:${randomUUID()}`;
   return {
@@ -420,12 +431,12 @@ async function checkJobRecovery(
   tenantId: string,
 ): Promise<Omit<ConsistencyCheckResult, "durationMs">> {
   const activeJobs = await db
-    .select({ id: v11Job.id, jobState: v11Job.jobState })
-    .from(v11Job)
+    .select({ id: jobTable.id, jobState: jobTable.jobState })
+    .from(jobTable)
     .where(
       and(
-        eq(v11Job.tenantId, tenantId),
-        inArray(v11Job.jobState, ["queued", "running", "waiting_external"]),
+        eq(jobTable.tenantId, tenantId),
+        inArray(jobTable.jobState, ["queued", "running", "waiting_external"]),
       ),
     );
 
@@ -457,12 +468,12 @@ async function checkUserActionWait(
   tenantId: string,
 ): Promise<Omit<ConsistencyCheckResult, "durationMs">> {
   const pendingRequests = await db
-    .select({ id: v11UserActionRequest.id })
-    .from(v11UserActionRequest)
+    .select({ id: userActionRequestTable.id })
+    .from(userActionRequestTable)
     .where(
       and(
-        eq(v11UserActionRequest.tenantId, tenantId),
-        eq(v11UserActionRequest.requestState, "pending"),
+        eq(userActionRequestTable.tenantId, tenantId),
+        eq(userActionRequestTable.requestState, "pending"),
       ),
     );
 
@@ -491,13 +502,13 @@ async function checkUserActionWait(
 export async function runAllChecksForDrill(params: {
   tenantId: string;
   drillId: string;
-  checks: V11RecoveryDrillCheck[];
-}): Promise<V11RecoveryDrillCheck[]> {
+  checks: RecoveryDrillCheck[];
+}): Promise<RecoveryDrillCheck[]> {
   const { markCheckRunning, completeRecoveryDrillCheck, failRecoveryDrillCheck } = await import(
     "@/lib/identity/recovery-drill-queries"
   );
 
-  const updatedChecks: V11RecoveryDrillCheck[] = [];
+  const updatedChecks: RecoveryDrillCheck[] = [];
   for (const check of params.checks) {
     if (check.checkState !== "pending") {
       updatedChecks.push(check);

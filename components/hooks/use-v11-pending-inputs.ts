@@ -18,7 +18,7 @@
  * - pendingInputs 按 queue_position 升序。
  * - queueEtag 与服务端 queue_etag 同步，reorder 时用作 If-Match。
  * - 操作进行中 busy=true，防止重复触发。
- * - 错误转化为 V11ClientVisibleError，不暴露内部堆栈。
+ * - 错误转化为 ClientVisibleError，不暴露内部堆栈。
  *
  * 使用：
  * ```tsx
@@ -34,13 +34,13 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
 import type {
-  V11ClientCreatePendingInputResponse,
-  V11ClientDeletePendingInputResponse,
-  V11ClientEditPendingInputResponse,
-  V11ClientErrorBody,
-  V11ClientPendingInput,
-  V11ClientPendingInputListResponse,
-  V11ClientVisibleError,
+  ClientCreatePendingInputResponse,
+  ClientDeletePendingInputResponse,
+  ClientEditPendingInputResponse,
+  ClientErrorBody,
+  ClientPendingInput,
+  ClientPendingInputListResponse,
+  ClientVisibleError,
 } from "@/lib/v11/client/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -54,13 +54,13 @@ export interface PendingInputContentInput {
 /** Hook 返回值。 */
 export interface UseV11PendingInputsResult {
   /** 队列快照（按 queue_position 升序）。 */
-  readonly pendingInputs: readonly V11ClientPendingInput[];
+  readonly pendingInputs: readonly ClientPendingInput[];
   /** 队列 ETag（reorder 时用作 If-Match）。 */
   readonly queueEtag: string | null;
   /** 加载状态。 */
   readonly loading: boolean;
   /** 错误。 */
-  readonly error: V11ClientVisibleError | null;
+  readonly error: ClientVisibleError | null;
   /** 是否有操作进行中（create/edit/remove/reorder）。 */
   readonly busy: boolean;
   /** 创建 PendingInput。 */
@@ -88,11 +88,11 @@ function generateIdempotencyKey(): string {
 }
 
 /** 解析错误响应为可见错误。 */
-async function parseError(response: Response): Promise<V11ClientVisibleError> {
+async function parseError(response: Response): Promise<ClientVisibleError> {
   const bodyText = await response.text().catch(() => "");
-  let errorBody: V11ClientErrorBody | null = null;
+  let errorBody: ClientErrorBody | null = null;
   try {
-    errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+    errorBody = JSON.parse(bodyText) as ClientErrorBody;
   } catch {
     // ignore
   }
@@ -109,10 +109,10 @@ async function parseError(response: Response): Promise<V11ClientVisibleError> {
 
 /** V11 PendingInput 队列 Hook。 */
 export function useV11PendingInputs(threadId: string): UseV11PendingInputsResult {
-  const [pendingInputs, setPendingInputs] = useState<readonly V11ClientPendingInput[]>([]);
+  const [pendingInputs, setPendingInputs] = useState<readonly ClientPendingInput[]>([]);
   const [queueEtag, setQueueEtag] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<V11ClientVisibleError | null>(null);
+  const [error, setError] = useState<ClientVisibleError | null>(null);
   const [busy, setBusy] = useState(false);
 
   // 防止 threadId 切换后旧请求回填新状态。
@@ -135,7 +135,7 @@ export function useV11PendingInputs(threadId: string): UseV11PendingInputsResult
         setLoading(false);
         return;
       }
-      const data = (await resp.json()) as V11ClientPendingInputListResponse;
+      const data = (await resp.json()) as ClientPendingInputListResponse;
       // 按 queue_position 升序
       const sorted = [...data.pending_inputs].sort((a, b) => a.queue_position - b.queue_position);
       setPendingInputs(sorted);
@@ -183,10 +183,10 @@ export function useV11PendingInputs(threadId: string): UseV11PendingInputsResult
           setError(visible);
           return false;
         }
-        const data = (await resp.json()) as V11ClientCreatePendingInputResponse;
+        const data = (await resp.json()) as ClientCreatePendingInputResponse;
         // 乐观更新：把新建的 PendingInput 加入队列并按 queue_position 排序
         setPendingInputs((prev) => {
-          const next: V11ClientPendingInput = {
+          const next: ClientPendingInput = {
             id: data.pending_input.id,
             queue_position: data.pending_input.queue_position,
             input: data.pending_input.input,
@@ -237,7 +237,7 @@ export function useV11PendingInputs(threadId: string): UseV11PendingInputsResult
           setError(visible);
           return false;
         }
-        const data = (await resp.json()) as V11ClientEditPendingInputResponse;
+        const data = (await resp.json()) as ClientEditPendingInputResponse;
         setPendingInputs((prev) =>
           prev
             .map((p) =>
@@ -288,7 +288,7 @@ export function useV11PendingInputs(threadId: string): UseV11PendingInputsResult
         setError(visible);
         return false;
       }
-      const data = (await resp.json()) as V11ClientDeletePendingInputResponse;
+      const data = (await resp.json()) as ClientDeletePendingInputResponse;
       setPendingInputs((prev) => prev.filter((p) => p.id !== pendingInputId));
       setQueueEtag(data.queue_etag);
       return true;
@@ -338,7 +338,7 @@ export function useV11PendingInputs(threadId: string): UseV11PendingInputsResult
           setError(visible);
           return false;
         }
-        const data = (await resp.json()) as V11ClientPendingInputListResponse;
+        const data = (await resp.json()) as ClientPendingInputListResponse;
         setPendingInputs(
           [...data.pending_inputs].sort((a, b) => a.queue_position - b.queue_position),
         );

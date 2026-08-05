@@ -16,9 +16,9 @@
  */
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { ExecutionBindingAlreadyExistsError } from "@/lib/v11/runtime/errors";
-import type { V11ExecutionBinding } from "@/lib/v11/schema/runtime";
-import { v11ExecutionBinding } from "@/lib/v11/schema/runtime";
+import type { ExecutionBinding } from "@/lib/persistence/schema/runtime";
+import { executionBindingTable } from "@/lib/persistence/schema/runtime";
+import { ExecutionBindingAlreadyExistsError } from "@/lib/runtime/errors";
 import { eq } from "drizzle-orm";
 
 /** createExecutionBinding 入参。 */
@@ -100,12 +100,12 @@ function sortKeys(value: unknown): unknown {
  */
 export async function createExecutionBinding(
   params: CreateExecutionBindingParams,
-): Promise<V11ExecutionBinding> {
+): Promise<ExecutionBinding> {
   // 1. 校验同 invocationId 是否已有 Binding
   const [existing] = await db
-    .select({ id: v11ExecutionBinding.invocationId })
-    .from(v11ExecutionBinding)
-    .where(eq(v11ExecutionBinding.invocationId, params.invocationId))
+    .select({ id: executionBindingTable.invocationId })
+    .from(executionBindingTable)
+    .where(eq(executionBindingTable.invocationId, params.invocationId))
     .limit(1);
   if (existing) {
     throw new ExecutionBindingAlreadyExistsError(params.invocationId);
@@ -126,7 +126,7 @@ export async function createExecutionBinding(
   });
 
   // 3. INSERT ExecutionBinding（invocationId 为主键，1:1）
-  await db.insert(v11ExecutionBinding).values({
+  await db.insert(executionBindingTable).values({
     invocationId: params.invocationId,
     tenantId: params.tenantId,
     agentRevisionId: params.agentRevisionId,
@@ -145,8 +145,8 @@ export async function createExecutionBinding(
   // 4. 回读
   const [row] = await db
     .select()
-    .from(v11ExecutionBinding)
-    .where(eq(v11ExecutionBinding.invocationId, params.invocationId))
+    .from(executionBindingTable)
+    .where(eq(executionBindingTable.invocationId, params.invocationId))
     .limit(1);
   if (!row) {
     throw new Error(

@@ -3,16 +3,16 @@
  */
 
 import { db } from "@/lib/db/client";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import type { ProvisioningState } from "../domain/hosted-provisioning-request";
 import {
-  hostedProvisioningRequestTable,
   type HostedProvisioningRequestRow,
+  hostedProvisioningRequestTable,
 } from "./hosted-provisioning-request-record";
 import type {
   HostedProvisioningRequestStore,
   NewProvisioningRequestInput,
 } from "./hosted-provisioning-request-store";
-import type { ProvisioningState } from "../domain/hosted-provisioning-request";
-import { and, eq, inArray, sql } from "drizzle-orm";
 
 export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore = {
   async insert(input) {
@@ -106,17 +106,27 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
     // §6.2: Step Checkpoint 字段
     if (lastCompletedStep !== undefined) set.lastCompletedStep = lastCompletedStep;
     if (checkpoint) {
-      if (checkpoint.agentRevisionId !== undefined) set.stepAgentRevisionId = checkpoint.agentRevisionId;
-      if (checkpoint.agentPublicationRecordId !== undefined) set.stepAgentPublicationRecordId = checkpoint.agentPublicationRecordId;
-      if (checkpoint.agentAttestationId !== undefined) set.stepAgentAttestationId = checkpoint.agentAttestationId;
-      if (checkpoint.runtimeRevisionId !== undefined) set.stepRuntimeRevisionId = checkpoint.runtimeRevisionId;
-      if (checkpoint.runtimePublicationRecordId !== undefined) set.stepRuntimePublicationRecordId = checkpoint.runtimePublicationRecordId;
-      if (checkpoint.runtimeAttestationId !== undefined) set.stepRuntimeAttestationId = checkpoint.runtimeAttestationId;
-      if (checkpoint.conformanceRunId !== undefined) set.stepConformanceRunId = checkpoint.conformanceRunId;
+      if (checkpoint.agentRevisionId !== undefined)
+        set.stepAgentRevisionId = checkpoint.agentRevisionId;
+      if (checkpoint.agentPublicationRecordId !== undefined)
+        set.stepAgentPublicationRecordId = checkpoint.agentPublicationRecordId;
+      if (checkpoint.agentAttestationId !== undefined)
+        set.stepAgentAttestationId = checkpoint.agentAttestationId;
+      if (checkpoint.runtimeRevisionId !== undefined)
+        set.stepRuntimeRevisionId = checkpoint.runtimeRevisionId;
+      if (checkpoint.runtimePublicationRecordId !== undefined)
+        set.stepRuntimePublicationRecordId = checkpoint.runtimePublicationRecordId;
+      if (checkpoint.runtimeAttestationId !== undefined)
+        set.stepRuntimeAttestationId = checkpoint.runtimeAttestationId;
+      if (checkpoint.conformanceRunId !== undefined)
+        set.stepConformanceRunId = checkpoint.conformanceRunId;
       if (checkpoint.routeSetId !== undefined) set.stepRouteSetId = checkpoint.routeSetId;
-      if (checkpoint.routeSetVersionNo !== undefined) set.stepRouteSetVersionNo = checkpoint.routeSetVersionNo;
-      if (checkpoint.routeRevisionId !== undefined) set.stepRouteRevisionId = checkpoint.routeRevisionId;
-      if (checkpoint.routeActivationId !== undefined) set.stepRouteActivationId = checkpoint.routeActivationId;
+      if (checkpoint.routeSetVersionNo !== undefined)
+        set.stepRouteSetVersionNo = checkpoint.routeSetVersionNo;
+      if (checkpoint.routeRevisionId !== undefined)
+        set.stepRouteRevisionId = checkpoint.routeRevisionId;
+      if (checkpoint.routeActivationId !== undefined)
+        set.stepRouteActivationId = checkpoint.routeActivationId;
     }
 
     await db

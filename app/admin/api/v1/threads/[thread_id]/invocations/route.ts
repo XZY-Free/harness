@@ -1,12 +1,12 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import { listInvocationsByThread } from "@/lib/runtime/invocation-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
-import { listInvocationsByThread } from "@/lib/v11/runtime/invocation-queries";
 /**
  * GET /admin/api/v1/threads/{thread_id}/invocations — 列出 Thread 下的 Invocation（S11-W04）。
  *
@@ -14,7 +14,7 @@ import { listInvocationsByThread } from "@/lib/v11/runtime/invocation-queries";
  * - 解析 admin 主体（读操作，无需专门 action scope）。
  * - 校验 Thread 存在且属于当前租户（跨租户隐藏为 404）。
  * - 支持查询参数 after_sequence、limit。
- * - 调用 listInvocationsByThread 返回 V11Invocation 列表（按 invocation_sequence 升序）。
+ * - 调用 listInvocationsByThread 返回 Invocation 列表（按 invocation_sequence 升序）。
  * - 投影为 snake_case。
  *
  * 错误映射：
@@ -55,13 +55,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
   let afterSequence: number | undefined;
   if (afterSequenceParam) {
     afterSequence = Number.parseInt(afterSequenceParam, 10);
     if (!Number.isFinite(afterSequence)) {
-      return v11SchemaInvalid(requestId, "after_sequence 必须是整数");
+      return schemaInvalidTable(requestId, "after_sequence 必须是整数");
     }
   }
 

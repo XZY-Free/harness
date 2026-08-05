@@ -12,8 +12,8 @@
  * 退出码：0=通过，1=失败
  */
 
-import { readFileSync, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = process.cwd();
@@ -81,7 +81,10 @@ async function main() {
   // ─── 3. 错误码投影与契约一致 ──────────────────────────────
   console.log("\n=== 3. 错误码投影与契约一致 ===");
   try {
-    const contractPath = resolve(ROOT, "docs/solutions/v11-agentkit-platform/contracts/error-codes.json");
+    const contractPath = resolve(
+      ROOT,
+      "docs/solutions/v11-agentkit-platform/contracts/error-codes.json",
+    );
     const contract = JSON.parse(readFileSync(contractPath, "utf-8"));
     const { API_ERROR_CODES } = await import("../lib/error-codes");
     const contractCodes = Object.keys(contract.errors).sort();

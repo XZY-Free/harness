@@ -1,3 +1,9 @@
+import {
+  type Principal,
+  employeeAuthErrorResponse,
+  resolveEmployeePrincipal,
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
 /**
  * GET/PATCH/DELETE /api/v1/memory-entries/{entry_id} — 用户控制 MemoryEntry（阶段 7 S07-C04）。
  *
@@ -20,18 +26,12 @@
  * - restricted sensitivity 的 Entry 不回显正文。
  * - DELETE 不物理删除，归档后不再参与检索。
  */
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   archiveMemoryEntry,
   getMemoryEntryById,
   updateMemoryEntry,
 } from "@/lib/v11/context/memory-queries";
-import {
-  type Principal,
-  employeeAuthErrorResponse,
-  resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -96,7 +96,7 @@ export async function GET(request: Request): Promise<Response> {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (error) {
     const authResponse = employeeAuthErrorResponse(error, requestId);
-    return authResponse ?? v11SchemaInvalid(requestId, "身份解析失败");
+    return authResponse ?? schemaInvalidTable(requestId, "身份解析失败");
   }
 
   const entryId = extractEntryId(request.url);
@@ -124,7 +124,7 @@ export async function PATCH(request: Request): Promise<Response> {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (error) {
     const authResponse = employeeAuthErrorResponse(error, requestId);
-    return authResponse ?? v11SchemaInvalid(requestId, "身份解析失败");
+    return authResponse ?? schemaInvalidTable(requestId, "身份解析失败");
   }
 
   const entryId = extractEntryId(request.url);
@@ -134,7 +134,7 @@ export async function PATCH(request: Request): Promise<Response> {
 
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") {
-    return v11SchemaInvalid(requestId, "请求体必须是 JSON 对象");
+    return schemaInvalidTable(requestId, "请求体必须是 JSON 对象");
   }
   const b = body as Record<string, unknown>;
 
@@ -142,31 +142,31 @@ export async function PATCH(request: Request): Promise<Response> {
 
   if (b.content_redacted !== undefined) {
     if (typeof b.content_redacted !== "string" || b.content_redacted.length === 0) {
-      return v11SchemaInvalid(requestId, "content_redacted 必须是非空字符串");
+      return schemaInvalidTable(requestId, "content_redacted 必须是非空字符串");
     }
     if (b.content_redacted.length > 100_000) {
-      return v11SchemaInvalid(requestId, "content_redacted 超过最大长度 100000");
+      return schemaInvalidTable(requestId, "content_redacted 超过最大长度 100000");
     }
     updates.contentRedacted = b.content_redacted;
   }
 
   if (b.content_ref !== undefined && b.content_ref !== null) {
     if (typeof b.content_ref !== "string" || b.content_ref.length === 0) {
-      return v11SchemaInvalid(requestId, "content_ref 必须是非空字符串");
+      return schemaInvalidTable(requestId, "content_ref 必须是非空字符串");
     }
     if (b.content_ref.length > 512) {
-      return v11SchemaInvalid(requestId, "content_ref 超过最大长度 512");
+      return schemaInvalidTable(requestId, "content_ref 超过最大长度 512");
     }
     updates.contentRef = b.content_ref;
   }
 
   if (b.expires_at !== undefined && b.expires_at !== null) {
     if (typeof b.expires_at !== "string") {
-      return v11SchemaInvalid(requestId, "expires_at 必须是 ISO 8601 字符串");
+      return schemaInvalidTable(requestId, "expires_at 必须是 ISO 8601 字符串");
     }
     const expiresAt = new Date(b.expires_at);
     if (Number.isNaN(expiresAt.getTime())) {
-      return v11SchemaInvalid(requestId, "expires_at 必须是有效的 ISO 8601 日期");
+      return schemaInvalidTable(requestId, "expires_at 必须是有效的 ISO 8601 日期");
     }
     updates.expiresAt = expiresAt;
   } else if (b.expires_at === null) {
@@ -199,7 +199,7 @@ export async function DELETE(request: Request): Promise<Response> {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (error) {
     const authResponse = employeeAuthErrorResponse(error, requestId);
-    return authResponse ?? v11SchemaInvalid(requestId, "身份解析失败");
+    return authResponse ?? schemaInvalidTable(requestId, "身份解析失败");
   }
 
   const entryId = extractEntryId(request.url);

@@ -1,7 +1,7 @@
 /**
  * V11 ToolCall 仓储（阶段 6 S06-C05）。
  *
- * 事实源：lib/v11/schema/tool-call.ts、
+ * 事实源：lib/persistence/schema/tool-call.ts、
  *         ../v11-agentkit-platform/10-core-data-model.md §6.6（tool_call）、
  *         ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §4.3（Tool 稳定边界）、
  *         ../v11-agentkit-platform/12-capability-and-collaboration-api.md §3.2（TOOL_SCHEMA_CHANGED）。
@@ -27,8 +27,12 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
+import {
+  type ToolCall,
+  type ToolCallState,
+  toolCallTable,
+} from "@/lib/persistence/schema/tool-call";
 import { isValidContentHash } from "@/lib/v11/capability/content-cache";
-import { type ToolCallState, type V11ToolCall, v11ToolCall } from "@/lib/v11/schema/tool-call";
 import { and, asc, eq, max } from "drizzle-orm";
 
 // ─── 错误类 ────────────────────────────────────────────────
@@ -195,7 +199,7 @@ export interface CreateToolCallParams {
  * @throws ToolCallConflictError (toolId, operationId) 已存在但 argumentsHash 不匹配
  * @throws ToolCallSequenceConflictError callSequence 分配并发冲突
  */
-export async function createToolCall(params: CreateToolCallParams): Promise<V11ToolCall> {
+export async function createToolCall(params: CreateToolCallParams): Promise<ToolCall> {
   if (!params.tenantId) {
     throw new ToolCallValidationError("invalid_tenant_id", "tenantId 不能为空");
   }
@@ -245,7 +249,7 @@ export async function createToolCall(params: CreateToolCallParams): Promise<V11T
       // 分配 callSequence = max(callSequence) + 1（事务内）。
       const callSequence = await nextCallSequence(tx, params.invocationId);
 
-      await tx.insert(v11ToolCall).values({
+      await tx.insert(toolCallTable).values({
         id,
         tenantId: params.tenantId,
         invocationId: params.invocationId,
@@ -293,7 +297,7 @@ export async function createToolCall(params: CreateToolCallParams): Promise<V11T
     throw err;
   }
 
-  const [row] = await db.select().from(v11ToolCall).where(eq(v11ToolCall.id, id)).limit(1);
+  const [row] = await db.select().from(toolCallTable).where(eq(toolCallTable.id, id)).limit(1);
   if (!row) {
     throw new Error(`createToolCall: 行未找到（id=${id}）`);
   }
@@ -306,11 +310,13 @@ export async function createToolCall(params: CreateToolCallParams): Promise<V11T
 export async function getToolCallById(params: {
   tenantId: string;
   toolCallId: string;
-}): Promise<V11ToolCall | null> {
+}): Promise<ToolCall | null> {
   const [row] = await db
     .select()
-    .from(v11ToolCall)
-    .where(and(eq(v11ToolCall.tenantId, params.tenantId), eq(v11ToolCall.id, params.toolCallId)))
+    .from(toolCallTable)
+    .where(
+      and(eq(toolCallTable.tenantId, params.tenantId), eq(toolCallTable.id, params.toolCallId)),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -320,15 +326,15 @@ export async function getToolCallByOperation(params: {
   tenantId: string;
   toolId: string;
   operationId: string;
-}): Promise<V11ToolCall | null> {
+}): Promise<ToolCall | null> {
   const [row] = await db
     .select()
-    .from(v11ToolCall)
+    .from(toolCallTable)
     .where(
       and(
-        eq(v11ToolCall.tenantId, params.tenantId),
-        eq(v11ToolCall.toolId, params.toolId),
-        eq(v11ToolCall.operationId, params.operationId),
+        eq(toolCallTable.tenantId, params.tenantId),
+        eq(toolCallTable.toolId, params.toolId),
+        eq(toolCallTable.operationId, params.operationId),
       ),
     )
     .limit(1);
@@ -339,17 +345,17 @@ export async function getToolCallByOperation(params: {
 export async function listToolCallsByInvocation(params: {
   tenantId: string;
   invocationId: string;
-}): Promise<V11ToolCall[]> {
+}): Promise<ToolCall[]> {
   return db
     .select()
-    .from(v11ToolCall)
+    .from(toolCallTable)
     .where(
       and(
-        eq(v11ToolCall.tenantId, params.tenantId),
-        eq(v11ToolCall.invocationId, params.invocationId),
+        eq(toolCallTable.tenantId, params.tenantId),
+        eq(toolCallTable.invocationId, params.invocationId),
       ),
     )
-    .orderBy(asc(v11ToolCall.callSequence), asc(v11ToolCall.id));
+    .orderBy(asc(toolCallTable.callSequence), asc(toolCallTable.id));
 }
 
 // ─── updateToolCallState ──────────────────────────────────
@@ -397,7 +403,7 @@ export interface UpdateToolCallStateParams {
  * @throws ToolCallNotFoundError ToolCall 不存在或跨租户
  * @throws ToolCallStateError 状态机非法迁移
  */
-export async function updateToolCallState(params: UpdateToolCallStateParams): Promise<V11ToolCall> {
+export async function updateToolCallState(params: UpdateToolCallStateParams): Promise<ToolCall> {
   assertValidToolCallState(params.toState);
 
   const current = await getToolCallById({
@@ -450,9 +456,11 @@ export async function updateToolCallState(params: UpdateToolCallStateParams): Pr
   }
 
   await db
-    .update(v11ToolCall)
+    .update(toolCallTable)
     .set(updates)
-    .where(and(eq(v11ToolCall.tenantId, params.tenantId), eq(v11ToolCall.id, params.toolCallId)));
+    .where(
+      and(eq(toolCallTable.tenantId, params.tenantId), eq(toolCallTable.id, params.toolCallId)),
+    );
 
   const updated = await getToolCallById({
     tenantId: params.tenantId,
@@ -472,9 +480,9 @@ async function nextCallSequence(
   invocationId: string,
 ): Promise<number> {
   const [row] = await tx
-    .select({ maxSeq: max(v11ToolCall.callSequence) })
-    .from(v11ToolCall)
-    .where(eq(v11ToolCall.invocationId, invocationId));
+    .select({ maxSeq: max(toolCallTable.callSequence) })
+    .from(toolCallTable)
+    .where(eq(toolCallTable.invocationId, invocationId));
   const currentMax = row?.maxSeq;
   if (currentMax === null || currentMax === undefined) return 1;
   return currentMax + 1;
@@ -489,4 +497,4 @@ function isDuplicateEntryError(err: unknown): boolean {
 
 // ─── Re-exports ────────────────────────────────────────────
 
-export type { ToolCallState, V11ToolCall } from "@/lib/v11/schema/tool-call";
+export type { ToolCallState, ToolCall } from "@/lib/persistence/schema/tool-call";

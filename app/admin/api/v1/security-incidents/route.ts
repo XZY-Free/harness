@@ -18,19 +18,12 @@
  * - 同租户已有相同 incidentKey → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - 非法 enum 值 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiError, apiSuccess, getRequestId } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import {
   SecurityIncidentError,
   createSecurityIncident,
@@ -43,7 +36,14 @@ import {
   type IncidentSeverity,
   type IncidentState,
   type IncidentTargetType,
-} from "@/lib/v11/schema/security-incident";
+} from "@/lib/persistence/schema/security-incident";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -135,17 +135,17 @@ export async function POST(request: Request): Promise<Response> {
 
   const incidentKey = body?.incident_key?.trim();
   if (!incidentKey) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 incident_key");
+    return schemaInvalidTable(requestId, "缺少必填字段 incident_key");
   }
 
   const severity = body?.severity?.trim();
   if (!severity || !VALID_SEVERITIES.has(severity)) {
-    return v11SchemaInvalid(requestId, "缺少或非法 severity（期望 low/medium/high/critical）");
+    return schemaInvalidTable(requestId, "缺少或非法 severity（期望 low/medium/high/critical）");
   }
 
   const targetType = body?.target_type?.trim();
   if (!targetType || !VALID_TARGET_TYPES.has(targetType)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "缺少或非法 target_type（期望 agent/agent_revision/tool_provider/tool/credential/runtime/environment/workload_token/other）",
     );
@@ -153,7 +153,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const targetId = body?.target_id?.trim();
   if (!targetId) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 target_id");
+    return schemaInvalidTable(requestId, "缺少必填字段 target_id");
   }
 
   const summary = body?.summary?.trim() || undefined;
@@ -217,18 +217,18 @@ export async function GET(request: Request): Promise<Response> {
   const cursor = url.searchParams.get("cursor") ?? undefined;
 
   if (severityParam && !VALID_SEVERITIES.has(severityParam)) {
-    return v11SchemaInvalid(requestId, "非法 severity 查询参数");
+    return schemaInvalidTable(requestId, "非法 severity 查询参数");
   }
   if (stateParam && !VALID_STATES.has(stateParam)) {
-    return v11SchemaInvalid(requestId, "非法 incident_state 查询参数");
+    return schemaInvalidTable(requestId, "非法 incident_state 查询参数");
   }
   if (targetTypeParam && !VALID_TARGET_TYPES.has(targetTypeParam)) {
-    return v11SchemaInvalid(requestId, "非法 target_type 查询参数");
+    return schemaInvalidTable(requestId, "非法 target_type 查询参数");
   }
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
   if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
-    return v11SchemaInvalid(requestId, "非法 limit 查询参数");
+    return schemaInvalidTable(requestId, "非法 limit 查询参数");
   }
 
   // 3. action scope 校验：按 tenant 维度授权
@@ -262,7 +262,7 @@ export async function GET(request: Request): Promise<Response> {
   } catch (err) {
     if (err instanceof SecurityIncidentError && err.code === "illegal_transition") {
       // 非法 cursor
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

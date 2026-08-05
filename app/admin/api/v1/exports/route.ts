@@ -17,24 +17,15 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiSuccess,
   etagHeader,
   getRequestId,
-  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import { createAdminExport, listAdminExportsByTenant } from "@/lib/v11/admin/export-queries";
-import { runAdminExport } from "@/lib/v11/admin/export-runner";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -54,7 +45,16 @@ import {
   type ExportKind,
   type ExportPrincipalKind,
   type ExportStatus,
-} from "@/lib/v11/schema/admin-export";
+} from "@/lib/persistence/schema/admin-export";
+import { createAdminExport, listAdminExportsByTenant } from "@/lib/v11/admin/export-queries";
+import { runAdminExport } from "@/lib/v11/admin/export-runner";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -179,13 +179,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let status: ExportStatus | undefined;
   if (statusParam) {
     if (!VALID_STATUSES.has(statusParam)) {
-      return v11SchemaInvalid(requestId, `status 非法: ${statusParam}`);
+      return schemaInvalidTable(requestId, `status 非法: ${statusParam}`);
     }
     status = statusParam as ExportStatus;
   }
@@ -193,7 +193,7 @@ export async function GET(request: Request): Promise<Response> {
   let exportKind: ExportKind | undefined;
   if (exportKindParam) {
     if (!VALID_KINDS.has(exportKindParam)) {
-      return v11SchemaInvalid(requestId, `export_kind 非法: ${exportKindParam}`);
+      return schemaInvalidTable(requestId, `export_kind 非法: ${exportKindParam}`);
     }
     exportKind = exportKindParam as ExportKind;
   }
@@ -239,12 +239,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 export_kind 或字段类型错误");
+    return schemaInvalidTable(requestId, "请求体非法：缺少 export_kind 或字段类型错误");
   }
 
   const path = new URL(request.url).pathname;

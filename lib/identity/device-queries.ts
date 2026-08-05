@@ -13,8 +13,8 @@
  *         ../v11-agentkit-platform/11-api-and-event-boundaries.md §9。
  */
 import { db } from "@/lib/db/client";
-import { device } from "@/lib/v11/schema/device";
-import type { Device } from "@/lib/v11/schema/device";
+import { device } from "@/lib/persistence/schema/device";
+import type { Device } from "@/lib/persistence/schema/device";
 import { and, desc, eq, sql } from "drizzle-orm";
 
 /**

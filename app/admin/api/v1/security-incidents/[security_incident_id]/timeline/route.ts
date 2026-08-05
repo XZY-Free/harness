@@ -17,18 +17,18 @@
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - 事故不存在 → 404 RESOURCE_NOT_FOUND
  */
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import {
+  buildIncidentTimeline,
+  getSecurityIncidentById,
+} from "@/lib/identity/security-incident-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import {
-  buildIncidentTimeline,
-  getSecurityIncidentById,
-} from "@/lib/identity/security-incident-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +60,7 @@ export async function GET(
   // 3. 解析路径参数
   const { security_incident_id: incidentId } = await context.params;
   if (!incidentId) {
-    return v11SchemaInvalid(requestId, "缺少路径参数 security_incident_id");
+    return schemaInvalidTable(requestId, "缺少路径参数 security_incident_id");
   }
 
   // 4. 校验事故存在 + 跨租户隔离

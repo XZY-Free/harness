@@ -164,7 +164,7 @@ export interface DesktopDeviceRegistration {
 
 // ─── S10-W06：本地任务操作类型 ──────────────────────────────
 
-/** Desktop 操作类别（与 V11DesktopOperationCategory 一致）。 */
+/** Desktop 操作类别（与 DesktopOperationCategory 一致）。 */
 export type DesktopOperationCategory =
   | "shell"
   | "git"

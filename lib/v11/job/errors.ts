@@ -7,7 +7,7 @@
  *
  * Route 层根据 error 实例映射 HTTP 状态码和稳定 error_code。
  */
-import type { JobCommandState, JobState } from "@/lib/v11/schema/job";
+import type { JobCommandState, JobState } from "@/lib/persistence/schema/job";
 
 /** Job 不存在或跨租户不可见。映射 404 RESOURCE_NOT_FOUND（不泄露存在）。 */
 export class JobNotFoundError extends Error {

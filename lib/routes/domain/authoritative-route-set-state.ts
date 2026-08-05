@@ -121,5 +121,10 @@ export interface ProjectionDriftResult {
 
 export type ProjectionDrift =
   | { routeId: string; kind: "missing_in_projection" }
-  | { routeId: string; kind: "revision_mismatch"; authoritative: string | null; projection: string | null }
+  | {
+      routeId: string;
+      kind: "revision_mismatch";
+      authoritative: string | null;
+      projection: string | null;
+    }
   | { routeId: string; kind: "state_mismatch"; authoritative: string; projection: string };

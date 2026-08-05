@@ -1,16 +1,16 @@
 import { memoryCandidatePOST } from "@/app/gateway/v1/memory-candidates/route";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
+import { createThread } from "@/lib/conversations/thread-queries";
+import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { computeMemoryContentHash } from "@/lib/v11/context/memory-queries";
-import { createThread } from "@/lib/v11/conversation/thread-queries";
-import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { issueWorkloadToken } from "@/lib/identity/workload-token";
-import { createInvocation } from "@/lib/v11/runtime/invocation-queries";
+import { createInvocation } from "@/lib/runtime/invocation-queries";
+import { computeMemoryContentHash } from "@/lib/v11/context/memory-queries";
 import { beforeAll, describe, expect, it } from "vitest";
 
 beforeAll(async () => {
@@ -139,7 +139,7 @@ describe("Memory Candidate 机器契约与事实边界", () => {
   });
 
   it("接受时 Candidate 正文不回显到响应（rejected/accepted 投影不含 content）", async () => {
-    // 注：S07-C03 路由未接入 v11ThreadEvent 事件流（留待后续阶段）。
+    // 注：S07-C03 路由未接入 threadEventTable 事件流（留待后续阶段）。
     // 此测试改为固化当前行为：响应投影不含正文，保护 secretMarker 不外泄。
     const seed = await seedInvocation();
     const secretMarker = "non-secret-memory-event-marker";

@@ -1,10 +1,10 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
 /**
  * GET /admin/api/v1/threads/{thread_id} — Thread 单资源详情（S11-W04）。
  *

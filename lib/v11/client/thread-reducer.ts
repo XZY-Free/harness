@@ -26,14 +26,14 @@ import { makeLocalVisibleError } from "./error-messages";
  */
 import { V11_SSE_DEFAULT_MAX_RETRIES } from "./sse-client";
 import type {
-  V11ClientEvent,
-  V11ClientItem,
-  V11ThreadProjectionAction,
-  V11ThreadProjectionState,
+  ClientEvent,
+  ClientItem,
+  ThreadProjectionAction,
+  ThreadProjectionState,
 } from "./types";
 
 /** 创建初始空状态。 */
-export function createInitialState(threadId: string): V11ThreadProjectionState {
+export function createInitialState(threadId: string): ThreadProjectionState {
   return {
     threadId,
     items: [],
@@ -54,7 +54,7 @@ export function createInitialState(threadId: string): V11ThreadProjectionState {
  * 浅比较两个 Item 是否「投影等价」：id / item_state / item_type / content / created_at 相同。
  * 用于 snapshot.loaded 时保留旧引用，避免不必要的 React 重绘。
  */
-function isItemEqual(a: V11ClientItem, b: V11ClientItem): boolean {
+function isItemEqual(a: ClientItem, b: ClientItem): boolean {
   return (
     a.id === b.id &&
     a.item_state === b.item_state &&
@@ -80,10 +80,10 @@ function isItemEqual(a: V11ClientItem, b: V11ClientItem): boolean {
  * - 结果按 item_sequence 升序。
  */
 function mergeSnapshotItems(
-  snapshotItems: readonly V11ClientItem[],
-  prevItems: readonly V11ClientItem[],
-): readonly V11ClientItem[] {
-  const prevById: Record<string, V11ClientItem> = {};
+  snapshotItems: readonly ClientItem[],
+  prevItems: readonly ClientItem[],
+): readonly ClientItem[] {
+  const prevById: Record<string, ClientItem> = {};
   for (const item of prevItems) {
     prevById[item.id] = item;
   }
@@ -103,7 +103,7 @@ function mergeSnapshotItems(
     (item) => item.id.startsWith("stream-") && !completedTurnIds.has(item.turn_id),
   );
 
-  const merged: V11ClientItem[] = [];
+  const merged: ClientItem[] = [];
   for (const snapItem of snapshotItems) {
     const prev = prevById[snapItem.id];
     merged.push(prev && isItemEqual(prev, snapItem) ? prev : snapItem);
@@ -127,8 +127,8 @@ function mergeSnapshotItems(
 }
 
 /** 把 Item 数组重建为 itemsById 映射。 */
-function buildItemsById(items: readonly V11ClientItem[]): Readonly<Record<string, V11ClientItem>> {
-  const map: Record<string, V11ClientItem> = {};
+function buildItemsById(items: readonly ClientItem[]): Readonly<Record<string, ClientItem>> {
+  const map: Record<string, ClientItem> = {};
   for (const item of items) {
     map[item.id] = item;
   }
@@ -136,10 +136,7 @@ function buildItemsById(items: readonly V11ClientItem[]): Readonly<Record<string
 }
 
 /** 把 Item 按 item_sequence 插入到已升序数组的正确位置。 */
-function insertItemSorted(
-  items: readonly V11ClientItem[],
-  item: V11ClientItem,
-): readonly V11ClientItem[] {
+function insertItemSorted(items: readonly ClientItem[], item: ClientItem): readonly ClientItem[] {
   // 已存在则替换
   const existingIdx = items.findIndex((it) => it.id === item.id);
   if (existingIdx >= 0) {
@@ -165,10 +162,10 @@ function insertItemSorted(
 
 /** 把 Item 标记为 superseded。 */
 function markItemSuperseded(
-  items: readonly V11ClientItem[],
+  items: readonly ClientItem[],
   itemId: string,
   supersededByItemId: string | null,
-): readonly V11ClientItem[] {
+): readonly ClientItem[] {
   return items.map((it) =>
     it.id === itemId
       ? {
@@ -184,7 +181,7 @@ function markItemSuperseded(
 }
 
 /** 从事件 payload 提取 Item。payload 不符合预期返回 null（事件被忽略）。 */
-function extractItemFromPayload(payload: unknown): V11ClientItem | null {
+function extractItemFromPayload(payload: unknown): ClientItem | null {
   if (typeof payload !== "object" || payload === null) return null;
   const item = (payload as Record<string, unknown>).item;
   if (typeof item !== "object" || item === null) return null;
@@ -204,8 +201,8 @@ function extractItemFromPayload(payload: unknown): V11ClientItem | null {
     id: record.id,
     turn_id: record.turn_id,
     item_sequence: record.item_sequence,
-    item_type: record.item_type as V11ClientItem["item_type"],
-    item_state: record.item_state as V11ClientItem["item_state"],
+    item_type: record.item_type as ClientItem["item_type"],
+    item_state: record.item_state as ClientItem["item_state"],
     content: record.content,
     created_at: record.created_at,
   };
@@ -217,9 +214,9 @@ function extractItemFromPayload(payload: unknown): V11ClientItem | null {
  * 返回 null 表示该事件不影响 Item 投影（只更新 sequence）。
  */
 function applyEventToItems(
-  state: V11ThreadProjectionState,
-  event: V11ClientEvent,
-): readonly V11ClientItem[] | null {
+  state: ThreadProjectionState,
+  event: ClientEvent,
+): readonly ClientItem[] | null {
   switch (event.event_type) {
     case "item.created":
     case "item.updated": {
@@ -247,9 +244,9 @@ function applyEventToItems(
 
 /** Reducer：接收 action，返回新状态。纯函数，无副作用。 */
 export function threadProjectionReducer(
-  state: V11ThreadProjectionState,
-  action: V11ThreadProjectionAction,
-): V11ThreadProjectionState {
+  state: ThreadProjectionState,
+  action: ThreadProjectionAction,
+): ThreadProjectionState {
   switch (action.type) {
     case "snapshot.loading": {
       // W4-1：已有 items 时的 resnapshot 不改 snapshotStatus，避免 UI 显示全屏 spinner。
@@ -383,7 +380,7 @@ export function threadProjectionReducer(
           ? ((existing.content as Record<string, unknown>).transient_ids as string[])
           : [];
       if (appliedTransientIds.includes(event.transient_id)) return state;
-      const item: V11ClientItem = {
+      const item: ClientItem = {
         id: transientId,
         turn_id: event.turn_id,
         item_sequence:

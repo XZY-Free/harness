@@ -49,7 +49,7 @@ import {
   type DesktopTestRunParams,
   getDesktopBridge,
 } from "@/lib/desktop/capabilities";
-import type { V11DesktopOperationCapability } from "@/lib/v11/client/types";
+import type { DesktopOperationCapability } from "@/lib/v11/client/types";
 import { useCallback, useEffect, useState } from "react";
 
 /** Desktop 操作错误码。 */
@@ -69,7 +69,7 @@ export interface UseDesktopOperationsResult {
   /** 当前 Desktop 设备 id（如有）。 */
   readonly deviceId: string | null;
   /** 全部操作能力列表（操作面板渲染依据）。enabled=false 表示当前 Desktop 不支持。 */
-  readonly capabilities: readonly V11DesktopOperationCapability[];
+  readonly capabilities: readonly DesktopOperationCapability[];
   /** 最近一次操作结果（成功或失败）；null 表示尚未执行或上一次出错。 */
   readonly lastResult: DesktopOperationResult | null;
   /** 最近一次操作错误（仅环境降级或 IPC 失败）；null 表示无错误。 */
@@ -105,7 +105,7 @@ export interface UseDesktopOperationsResult {
  *
  * enabled 字段在运行时由 bridge 命名空间存在性决定，这里只声明展示信息。
  */
-const CAPABILITY_DESCRIPTORS: ReadonlyArray<Omit<V11DesktopOperationCapability, "enabled">> = [
+const CAPABILITY_DESCRIPTORS: ReadonlyArray<Omit<DesktopOperationCapability, "enabled">> = [
   {
     category: "shell",
     operation: "shell.exec",
@@ -224,7 +224,7 @@ export function useDesktopOperations(): UseDesktopOperationsResult {
   const isDesktop = bridge !== null;
   const deviceId = bridge?.capabilities.deviceId ?? null;
 
-  const capabilities: readonly V11DesktopOperationCapability[] = (() => {
+  const capabilities: readonly DesktopOperationCapability[] = (() => {
     if (!bridge) {
       return CAPABILITY_DESCRIPTORS.map((desc) => ({ ...desc, enabled: false }));
     }

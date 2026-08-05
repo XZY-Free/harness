@@ -29,20 +29,20 @@
 
 import { CatalogDisplayName } from "@/components/v11/catalog/catalog-display-name";
 import { cn } from "@/lib/utils";
-import type { V11ClientGoal, V11ClientThread, V11ClientTurn } from "@/lib/v11/client/types";
+import type { ClientGoal, ClientThread, ClientTurn } from "@/lib/v11/client/types";
 
 interface ThreadHeaderProps {
-  readonly thread: V11ClientThread;
-  readonly activeGoal: V11ClientGoal | null;
-  readonly latestTurn: V11ClientTurn | null;
+  readonly thread: ClientThread;
+  readonly activeGoal: ClientGoal | null;
+  readonly latestTurn: ClientTurn | null;
   /** 渲染变体：web（默认）= 完整 header；desktop = 仅次级信息行（Agent / Goal / 位置）。 */
   readonly variant?: "web" | "desktop";
 }
 
 /** 从 Turn 状态推导当前任务状态（中文）。
- * 导出供 V11ThreadPage desktop 标题栏复用（W2-2）。
+ * 导出供 ThreadPage desktop 标题栏复用（W2-2）。
  */
-export function deriveTaskStatus(turn: V11ClientTurn | null): {
+export function deriveTaskStatus(turn: ClientTurn | null): {
   readonly label: string;
   readonly tone: "idle" | "running" | "waiting" | "success" | "error" | "stopped";
 } {
@@ -71,7 +71,7 @@ export function deriveTaskStatus(turn: V11ClientTurn | null): {
 }
 
 /** Goal 状态中文。 */
-function goalStateLabel(state: V11ClientGoal["goal_state"]): string {
+function goalStateLabel(state: ClientGoal["goal_state"]): string {
   switch (state) {
     case "active":
       return "进行中";
@@ -92,7 +92,7 @@ export function ThreadHeader({
 }: ThreadHeaderProps) {
   const taskStatus = deriveTaskStatus(latestTurn);
 
-  // Desktop 形态：标题信息上移至 V11ThreadPage 的 38px 标题栏（W2-2），
+  // Desktop 形态：标题信息上移至 ThreadPage 的 38px 标题栏（W2-2），
   // 此处仅保留次级信息行（Agent / Goal / 位置）。
   if (variant === "desktop") {
     return (
@@ -180,10 +180,8 @@ export function ThreadHeader({
               <span
                 className={cn(
                   "rounded px-1 py-0.5 text-3xs",
-                  activeGoal.goal_state === "active" &&
-                    "bg-primary/10 text-primary",
-                  activeGoal.goal_state === "blocked" &&
-                    "bg-warning/10 text-warning",
+                  activeGoal.goal_state === "active" && "bg-primary/10 text-primary",
+                  activeGoal.goal_state === "blocked" && "bg-warning/10 text-warning",
                   activeGoal.goal_state === "completed" && "bg-success/10 text-success",
                   activeGoal.goal_state === "cancelled" &&
                     "bg-foreground-subtle/10 text-foreground-subtle",

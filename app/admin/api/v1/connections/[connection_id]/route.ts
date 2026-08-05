@@ -1,22 +1,33 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
   etagHeader,
   getRequestId,
   parseIfMatch,
-  apiError,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
 import {
   type AdminPrincipal,
   CONNECTION_ETAG_PREFIX,
   adminAuthErrorResponse,
+  etagMismatchTable,
   parseConnectionEtag,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11EtagMismatch,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 /**
  * GET / PATCH /admin/api/v1/connections/{connection_id} — Connection 单资源（阶段 6 S06-C02）。
@@ -52,17 +63,6 @@ import {
   getConnectionById,
   updateConnection,
 } from "@/lib/v11/capability/tool-queries";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -192,13 +192,13 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
   // 2. 解析 If-Match（必填）→ Connection ETag
   const ifMatch = parseIfMatch(request);
   if (!ifMatch) {
-    return v11SchemaInvalid(requestId, "缺少必填头 If-Match");
+    return schemaInvalidTable(requestId, "缺少必填头 If-Match");
   }
   let expectedVersionNo: number;
   try {
     expectedVersionNo = parseConnectionEtag(ifMatch);
   } catch (err) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       err instanceof Error ? err.message : "If-Match ETag 格式非法",
     );
@@ -207,13 +207,13 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validatePatchBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：endpoint_ref/auth_method/lifecycle_state 字段类型错误",
     );
@@ -236,7 +236,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
 
   // 7. 提前校验 ETag 与当前 versionNo 一致
   if (expectedVersionNo !== conn.versionNo) {
-    return v11EtagMismatch(
+    return etagMismatchTable(
       requestId,
       `If-Match connection-${expectedVersionNo} 与当前 connection-${conn.versionNo} 不匹配`,
     );
@@ -314,13 +314,13 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
       return resourceNotFound(requestId, err.message);
     }
     if (err instanceof ToolValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     if (err instanceof ToolLifecycleError) {
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof ToolVersionConflictError) {
-      return v11EtagMismatch(requestId, err.message);
+      return etagMismatchTable(requestId, err.message);
     }
     throw err;
   }

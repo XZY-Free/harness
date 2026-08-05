@@ -8,22 +8,19 @@
  */
 
 import { db } from "@/lib/db/client";
-import {
-  routeRevision,
-  routeActivation,
-} from "@/lib/routes/persistence/route-revision-record";
-import { v11DeploymentRouteSet } from "@/lib/v11/schema/deployment-route";
+import { deploymentRouteSetTable } from "@/lib/persistence/schema/deployment-route";
 import type {
   AuthoritativeRouteSetState,
   AuthoritativeRouteState,
 } from "@/lib/routes/domain/authoritative-route-set-state";
+import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { desc, eq } from "drizzle-orm";
 
 /**
  * 加载 RouteSet 的权威状态。
  *
  * 数据源：
- * - V11DeploymentRouteSet：基本信息
+ * - DeploymentRouteSet：基本信息
  * - RouteRevision：每条 Route 最新 Revision
  * - RouteActivation：每条 Route 最新 Activation
  */
@@ -33,8 +30,8 @@ export async function loadAuthoritativeRouteSetState(
   // 1. 读取 RouteSet 基本信息
   const [routeSet] = await db
     .select()
-    .from(v11DeploymentRouteSet)
-    .where(eq(v11DeploymentRouteSet.id, routeSetId))
+    .from(deploymentRouteSetTable)
+    .where(eq(deploymentRouteSetTable.id, routeSetId))
     .limit(1);
 
   if (!routeSet) return null;
@@ -48,7 +45,7 @@ export async function loadAuthoritativeRouteSetState(
     .orderBy(desc(routeRevision.routeId), desc(routeRevision.revisionNo));
 
   // 按 routeId 分组，取最新
-  const latestRevisions = new Map<string, typeof revisions[0]>();
+  const latestRevisions = new Map<string, (typeof revisions)[0]>();
   for (const rev of revisions) {
     if (!latestRevisions.has(rev.routeId)) {
       latestRevisions.set(rev.routeId, rev);
@@ -63,7 +60,7 @@ export async function loadAuthoritativeRouteSetState(
     .orderBy(desc(routeActivation.routeId), desc(routeActivation.activationSequence));
 
   // 按 routeId 分组，取最新
-  const latestActivations = new Map<string, typeof activations[0]>();
+  const latestActivations = new Map<string, (typeof activations)[0]>();
   for (const act of activations) {
     if (!latestActivations.has(act.routeId)) {
       latestActivations.set(act.routeId, act);

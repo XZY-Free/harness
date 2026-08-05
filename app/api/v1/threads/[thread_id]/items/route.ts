@@ -1,11 +1,3 @@
-import {
-  REQUEST_ID_HEADER,
-  decodeCursor,
-  encodeCursor,
-  getRequestId,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
 /**
  * GET /api/v1/threads/{thread_id}/items — 查询 Item（S04-C03，§3.5）。
  *
@@ -26,15 +18,23 @@ import {
  * - Thread 不存在/非 owner/跨租户 → 404 RESOURCE_NOT_FOUND
  * - cursor 非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { getItemSnapshotWithCursor } from "@/lib/v11/conversation/read-model-queries";
+import { getItemSnapshotWithCursor } from "@/lib/conversations/read-model-queries";
 import {
   type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
-import type { V11ThreadItem } from "@/lib/v11/schema/conversation";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import {
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  decodeCursor,
+  encodeCursor,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
+import type { ThreadItem } from "@/lib/persistence/schema/conversation";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +44,7 @@ interface RouteContext {
 }
 
 /** 投影 Item 为响应体（snake_case）。 */
-function projectItem(item: V11ThreadItem): Record<string, unknown> {
+function projectItem(item: ThreadItem): Record<string, unknown> {
   return {
     id: item.id,
     turn_id: item.turnId,
@@ -86,7 +86,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit < 1 || limit > 200) {
-    return v11SchemaInvalid(requestId, "limit 必须为 1–200 之间的整数");
+    return schemaInvalidTable(requestId, "limit 必须为 1–200 之间的整数");
   }
 
   // 解析 cursor（不透明 base64url JSON）
@@ -95,11 +95,11 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     try {
       const decoded = decodeCursor(cursor) as { after_sequence?: number };
       if (typeof decoded.after_sequence !== "number") {
-        return v11SchemaInvalid(requestId, "cursor 非法：缺少 after_sequence");
+        return schemaInvalidTable(requestId, "cursor 非法：缺少 after_sequence");
       }
       afterSequence = decoded.after_sequence;
     } catch {
-      return v11SchemaInvalid(requestId, "cursor 非法：无法解码");
+      return schemaInvalidTable(requestId, "cursor 非法：无法解码");
     }
   }
 

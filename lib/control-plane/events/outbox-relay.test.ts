@@ -2,12 +2,8 @@
  * Outbox Relay 领域逻辑单元测试。
  */
 
-import { describe, it, expect } from "vitest";
-import {
-  computeOutboxBackoff,
-  classifyOutboxError,
-  isOutboxEventClaimable,
-} from "./outbox-relay";
+import { describe, expect, it } from "vitest";
+import { classifyOutboxError, computeOutboxBackoff, isOutboxEventClaimable } from "./outbox-relay";
 
 describe("computeOutboxBackoff", () => {
   it("基础退避：attemptCount=0 返回约 baseMs", () => {
@@ -104,93 +100,141 @@ describe("isOutboxEventClaimable", () => {
   const now = new Date();
 
   it("正常未处理事件可领取", () => {
-    expect(isOutboxEventClaimable({
-      publishedAt: null,
-      deadLetteredAt: null,
-      nextAttemptAt: null,
-      lockExpiresAt: null,
-      maxAttempts: null,
-      attemptCount: 0,
-    }, now, 10)).toBe(true);
+    expect(
+      isOutboxEventClaimable(
+        {
+          publishedAt: null,
+          deadLetteredAt: null,
+          nextAttemptAt: null,
+          lockExpiresAt: null,
+          maxAttempts: null,
+          attemptCount: 0,
+        },
+        now,
+        10,
+      ),
+    ).toBe(true);
   });
 
   it("已发布不可领取", () => {
-    expect(isOutboxEventClaimable({
-      publishedAt: now,
-      deadLetteredAt: null,
-      nextAttemptAt: null,
-      lockExpiresAt: null,
-      maxAttempts: null,
-      attemptCount: 0,
-    }, now, 10)).toBe(false);
+    expect(
+      isOutboxEventClaimable(
+        {
+          publishedAt: now,
+          deadLetteredAt: null,
+          nextAttemptAt: null,
+          lockExpiresAt: null,
+          maxAttempts: null,
+          attemptCount: 0,
+        },
+        now,
+        10,
+      ),
+    ).toBe(false);
   });
 
   it("已死信不可领取", () => {
-    expect(isOutboxEventClaimable({
-      publishedAt: null,
-      deadLetteredAt: now,
-      nextAttemptAt: null,
-      lockExpiresAt: null,
-      maxAttempts: null,
-      attemptCount: 0,
-    }, now, 10)).toBe(false);
+    expect(
+      isOutboxEventClaimable(
+        {
+          publishedAt: null,
+          deadLetteredAt: now,
+          nextAttemptAt: null,
+          lockExpiresAt: null,
+          maxAttempts: null,
+          attemptCount: 0,
+        },
+        now,
+        10,
+      ),
+    ).toBe(false);
   });
 
   it("达到最大尝试次数不可领取", () => {
-    expect(isOutboxEventClaimable({
-      publishedAt: null,
-      deadLetteredAt: null,
-      nextAttemptAt: null,
-      lockExpiresAt: null,
-      maxAttempts: null,
-      attemptCount: 10,
-    }, now, 10)).toBe(false);
+    expect(
+      isOutboxEventClaimable(
+        {
+          publishedAt: null,
+          deadLetteredAt: null,
+          nextAttemptAt: null,
+          lockExpiresAt: null,
+          maxAttempts: null,
+          attemptCount: 10,
+        },
+        now,
+        10,
+      ),
+    ).toBe(false);
   });
 
   it("下次尝试时间未到不可领取", () => {
     const future = new Date(now.getTime() + 60000);
-    expect(isOutboxEventClaimable({
-      publishedAt: null,
-      deadLetteredAt: null,
-      nextAttemptAt: future,
-      lockExpiresAt: null,
-      maxAttempts: null,
-      attemptCount: 0,
-    }, now, 10)).toBe(false);
+    expect(
+      isOutboxEventClaimable(
+        {
+          publishedAt: null,
+          deadLetteredAt: null,
+          nextAttemptAt: future,
+          lockExpiresAt: null,
+          maxAttempts: null,
+          attemptCount: 0,
+        },
+        now,
+        10,
+      ),
+    ).toBe(false);
   });
 
   it("租约未过期不可领取", () => {
     const future = new Date(now.getTime() + 60000);
-    expect(isOutboxEventClaimable({
-      publishedAt: null,
-      deadLetteredAt: null,
-      nextAttemptAt: null,
-      lockExpiresAt: future,
-      maxAttempts: null,
-      attemptCount: 0,
-    }, now, 10)).toBe(false);
+    expect(
+      isOutboxEventClaimable(
+        {
+          publishedAt: null,
+          deadLetteredAt: null,
+          nextAttemptAt: null,
+          lockExpiresAt: future,
+          maxAttempts: null,
+          attemptCount: 0,
+        },
+        now,
+        10,
+      ),
+    ).toBe(false);
   });
 
   it("租约已过期可领取", () => {
     const past = new Date(now.getTime() - 1000);
-    expect(isOutboxEventClaimable({
-      publishedAt: null,
-      deadLetteredAt: null,
-      nextAttemptAt: null,
-      lockExpiresAt: past,
-      maxAttempts: null,
-      attemptCount: 0,
-    }, now, 10)).toBe(true);
+    expect(
+      isOutboxEventClaimable(
+        {
+          publishedAt: null,
+          deadLetteredAt: null,
+          nextAttemptAt: null,
+          lockExpiresAt: past,
+          maxAttempts: null,
+          attemptCount: 0,
+        },
+        now,
+        10,
+      ),
+    ).toBe(true);
   });
 
   it("自定义 maxAttempts 优先于配置", () => {
-    expect(isOutboxEventClaimable({
-      publishedAt: null,
-      deadLetteredAt: null,
-      nextAttemptAt: null,
-      lockExpiresAt: null,
-      maxAttempts: 3,
-      attemptCount: 3,
-    }, now, 10)).toBe(false);
+    expect(
+      isOutboxEventClaimable(
+        {
+          publishedAt: null,
+          deadLetteredAt: null,
+          nextAttemptAt: null,
+          lockExpiresAt: null,
+          maxAttempts: 3,
+          attemptCount: 3,
+        },
+        now,
+        10,
+      ),
+    ).toBe(false);
   });
 });

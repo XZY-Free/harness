@@ -2,17 +2,18 @@
  * HostedProvisioningRequest Store 接口。
  */
 
-import type {
-  HostedProvisioningRequestRow,
-} from "./hosted-provisioning-request-record";
 import type { ProvisioningState } from "../domain/hosted-provisioning-request";
+import type { HostedProvisioningRequestRow } from "./hosted-provisioning-request-record";
 
 export interface HostedProvisioningRequestStore {
   /** 插入请求。 */
   insert(input: NewProvisioningRequestInput): Promise<HostedProvisioningRequestRow>;
 
   /** 按 ID 读取。 */
-  getById(params: { tenantId: string; requestId: string }): Promise<HostedProvisioningRequestRow | null>;
+  getById(params: {
+    tenantId: string;
+    requestId: string;
+  }): Promise<HostedProvisioningRequestRow | null>;
 
   /** 按 AgentRevision + RouteScope + RuntimeKey 查找活跃请求。 */
   findActiveRequest(params: {

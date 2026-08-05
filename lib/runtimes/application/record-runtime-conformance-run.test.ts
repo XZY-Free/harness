@@ -1,9 +1,12 @@
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { createHmac, randomUUID } from "node:crypto";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { insertProcessingRecord } from "@/lib/identity/idempotency-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
@@ -19,10 +22,7 @@ import {
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { insertProcessingRecord } from "@/lib/identity/idempotency-queries";
-import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 

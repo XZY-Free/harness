@@ -187,7 +187,8 @@ async function verifyConformanceSignature(
   // §8.4: 真实 SDK 接入点 — 安装 DSSE 验签 SDK 后替换
   return {
     verified: false,
-    failureReason: "sdk_not_installed: conformance_signature_verification_requires_dsse_signing_sdk",
+    failureReason:
+      "sdk_not_installed: conformance_signature_verification_requires_dsse_signing_sdk",
   };
 }
 

@@ -14,7 +14,7 @@
  * - 缺少/非法 Token → 401 AUTHENTICATION_REQUIRED
  * - protocol_version 不支持 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiError, apiSuccess, getRequestId } from "@/lib/http";
 import {
   assertAudienceMatch,
   decodeWorkloadToken,
@@ -24,7 +24,7 @@ import {
 import {
   type RuntimeCapabilitiesResponse,
   defaultRuntimeCapabilities,
-} from "@/lib/v11/runtime/runtime-client";
+} from "@/lib/runtime/runtime-client";
 
 export const dynamic = "force-dynamic";
 

@@ -18,11 +18,11 @@
 "use client";
 
 import { useV11Catalog } from "@/components/hooks/use-v11-catalog";
-import type { V11ClientCatalogResourceType } from "@/lib/v11/client/types";
+import type { ClientCatalogResourceType } from "@/lib/v11/client/types";
 
 interface CatalogDisplayNameProps {
   readonly resourceId: string;
-  readonly resourceType: V11ClientCatalogResourceType;
+  readonly resourceType: ClientCatalogResourceType;
   /** 自定义 fallback 文本（默认为 resourceId 截断前 8 位）。 */
   readonly fallback?: string;
 }

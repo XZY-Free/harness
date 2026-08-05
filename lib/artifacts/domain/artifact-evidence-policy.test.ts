@@ -2,9 +2,9 @@
  * Artifact Evidence 统一策略 单元测试。
  */
 
-import { describe, it, expect } from "vitest";
-import { createArtifactEvidencePolicy, ArtifactEvidencePolicy } from "./artifact-evidence-policy";
+import { describe, expect, it } from "vitest";
 import type { ArtifactEvidenceSnapshot } from "./artifact-evidence";
+import { ArtifactEvidencePolicy, createArtifactEvidencePolicy } from "./artifact-evidence-policy";
 
 function makeSnapshot(overrides: Partial<ArtifactEvidenceSnapshot> = {}): ArtifactEvidenceSnapshot {
   return {

@@ -1,15 +1,18 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import {
+  EVALUATION_CASE_STATES,
+  type EvaluationCaseState,
+} from "@/lib/persistence/schema/evaluation";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import {
   getEvaluationRunById,
   listEvaluationCasesByRun,
 } from "@/lib/v11/evaluation/evaluation-queries";
-import { EVALUATION_CASE_STATES, type EvaluationCaseState } from "@/lib/v11/schema/evaluation";
 /**
  * GET /admin/api/v1/evaluation-runs/{run_id}/cases — 列出 Run 下所有 Case（S11-W06）。
  *
@@ -61,7 +64,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   let caseState: EvaluationCaseState | undefined;
   if (stateParam) {
     if (!VALID_CASE_STATES.has(stateParam)) {
-      return v11SchemaInvalid(requestId, `state 非法: ${stateParam}`);
+      return schemaInvalidTable(requestId, `state 非法: ${stateParam}`);
     }
     caseState = stateParam as EvaluationCaseState;
   }
@@ -70,7 +73,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   if (limitParam) {
     limit = Number.parseInt(limitParam, 10);
     if (!Number.isFinite(limit) || limit <= 0) {
-      return v11SchemaInvalid(requestId, "limit 必须是正整数");
+      return schemaInvalidTable(requestId, "limit 必须是正整数");
     }
   }
 

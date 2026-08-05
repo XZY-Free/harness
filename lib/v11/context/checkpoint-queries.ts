@@ -22,10 +22,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
   type CheckpointType,
+  type ContextCheckpoint,
   type SourceRange,
-  type V11ContextCheckpoint,
   contextCheckpoint,
-} from "@/lib/v11/schema/context-checkpoint";
+} from "@/lib/persistence/schema/context-checkpoint";
 import { and, asc, eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -65,7 +65,7 @@ function normalizeSourceRange(range: SourceRange): SourceRange {
  * 创建 Context Checkpoint。
  *
  * 事务内：
- * 1. INSERT V11ContextCheckpoint。
+ * 1. INSERT ContextCheckpoint。
  *
  * 调用方负责在同事务内完成幂等记录写入（completeRecord/failRecord）。
  *
@@ -83,7 +83,7 @@ export async function createContextCheckpoint(params: {
   tokenAccounting: { input: number; retained: number; compressed: number };
   expiresAt?: Date;
   tx?: Tx;
-}): Promise<V11ContextCheckpoint> {
+}): Promise<ContextCheckpoint> {
   const id = randomUUID();
   const now = new Date();
   const expiresAt = params.expiresAt ?? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -129,7 +129,7 @@ export async function findContextCheckpointByUniqueKey(params: {
   invocationId: string;
   checkpointType: CheckpointType;
   sourceRanges: SourceRange[];
-}): Promise<V11ContextCheckpoint | null> {
+}): Promise<ContextCheckpoint | null> {
   const sourceRangesHash = computeSourceRangesHash(params.sourceRanges);
   const [row] = await db
     .select()
@@ -150,7 +150,7 @@ export async function findContextCheckpointByUniqueKey(params: {
 export async function getContextCheckpointById(
   tenantId: string,
   checkpointId: string,
-): Promise<V11ContextCheckpoint | null> {
+): Promise<ContextCheckpoint | null> {
   const [row] = await db
     .select()
     .from(contextCheckpoint)
@@ -163,7 +163,7 @@ export async function getContextCheckpointById(
 export async function getContextCheckpointsByInvocation(
   tenantId: string,
   invocationId: string,
-): Promise<V11ContextCheckpoint[]> {
+): Promise<ContextCheckpoint[]> {
   const rows = await db
     .select()
     .from(contextCheckpoint)

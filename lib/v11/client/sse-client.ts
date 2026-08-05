@@ -23,30 +23,30 @@
 import { apiPath } from "../../api-fetch";
 import { makeLocalVisibleError, toVisibleError } from "./error-messages";
 import type {
-  V11ClientErrorBody,
-  V11ClientEvent,
-  V11ClientTransientDelta,
-  V11ClientVisibleError,
+  ClientErrorBody,
+  ClientEvent,
+  ClientTransientDelta,
+  ClientVisibleError,
 } from "./types";
 
 /** SSE 客户端回调。 */
-export interface V11SSEClientCallbacks {
+export interface SSEClientCallbacks {
   /** 收到事件（已通过基本解析，未做业务去重）。 */
-  onEvent(event: V11ClientEvent): void;
+  onEvent(event: ClientEvent): void;
   /** 收到不推进持久游标的模型正文增量。 */
-  onTransient(event: V11ClientTransientDelta): void;
+  onTransient(event: ClientTransientDelta): void;
   /** 连接打开（fetch 拿到 200 header）。 */
   onOpen(): void;
   /** 进入重连流程。 */
   onReconnecting(attempt: number): void;
   /** 服务端告知 cursor 过期。 */
-  onCursorExpired(error: V11ClientVisibleError): void;
+  onCursorExpired(error: ClientVisibleError): void;
   /** 无法恢复的失败。 */
-  onFailed(error: V11ClientVisibleError): void;
+  onFailed(error: ClientVisibleError): void;
 }
 
 /** SSE 客户端配置。 */
-export interface V11SSEClientConfig {
+export interface SSEClientConfig {
   /** Thread id。 */
   threadId: string;
   /** 初始 Last-Event-ID（断线重连时由调用方更新）。 */
@@ -60,7 +60,7 @@ export interface V11SSEClientConfig {
 }
 
 /** SSE 客户端句柄。 */
-export interface V11SSEClientHandle {
+export interface SSEClientHandle {
   /** 启动连接。 */
   start(): void;
   /** 主动关闭（不自动重连）。 */
@@ -107,9 +107,9 @@ function parseSSEChunk(buffer: string): {
 
 /** 创建 SSE 客户端。 */
 export function createSSEClient(
-  config: V11SSEClientConfig,
-  callbacks: V11SSEClientCallbacks,
-): V11SSEClientHandle {
+  config: SSEClientConfig,
+  callbacks: SSEClientCallbacks,
+): SSEClientHandle {
   const fetchImpl = config.fetchImpl ?? fetch;
   const maxRetries = config.maxRetries ?? V11_SSE_DEFAULT_MAX_RETRIES;
   const baseBackoffMs = config.baseBackoffMs ?? DEFAULT_BASE_BACKOFF_MS;
@@ -152,9 +152,9 @@ export function createSSEClient(
     // 错误分支
     if (!response.ok) {
       const bodyText = await response.text().catch(() => "");
-      let errorBody: V11ClientErrorBody | null = null;
+      let errorBody: ClientErrorBody | null = null;
       try {
-        errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+        errorBody = JSON.parse(bodyText) as ClientErrorBody;
       } catch {
         // 非 JSON 响应
       }

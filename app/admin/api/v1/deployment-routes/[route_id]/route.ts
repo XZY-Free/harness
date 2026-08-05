@@ -1,18 +1,29 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
   etagHeader,
   getRequestId,
   parseIfMatch,
-  apiError,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
+import { ROUTE_STATES, type RouteState } from "@/lib/persistence/schema/deployment-route";
 /**
  * PUT /admin/api/v1/deployment-routes/{route_id} — 更新 DeploymentRoute（S03-C05）。
  *
@@ -60,23 +71,12 @@ import {
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
+  etagMismatchTable,
   parseRouteSetEtag,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11EtagMismatch,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
-import { ROUTE_STATES, type RouteState } from "@/lib/v11/schema/deployment-route";
 
 export const dynamic = "force-dynamic";
 
@@ -145,13 +145,13 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
   // 2. 解析 If-Match（必填）→ RouteSet ETag
   const ifMatch = parseIfMatch(request);
   if (!ifMatch) {
-    return v11SchemaInvalid(requestId, "缺少必填头 If-Match");
+    return schemaInvalidTable(requestId, "缺少必填头 If-Match");
   }
   let expectedVersionNo: number;
   try {
     expectedVersionNo = parseRouteSetEtag(ifMatch);
   } catch (err) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       err instanceof Error ? err.message : "If-Match ETag 格式非法",
     );
@@ -160,13 +160,13 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：缺少 route_set_id/agent_revision_id/runtime_revision_id/traffic_weight/priority_no/route_state",
     );
@@ -180,7 +180,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
 
   // 6. 一致性校验：body.route_set_id 必须与 Route.routeSetId 一致
   if (body.route_set_id !== route.routeSetId) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       `route_set_id 不一致：body=${body.route_set_id}, route=${route.routeSetId}`,
     );
@@ -245,7 +245,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
   // 12. 新命令才校验当前 ETag；已完成命令已在上方重放。
   if (expectedVersionNo !== routeSet.versionNo) {
     await failRecord(recordId);
-    return v11EtagMismatch(
+    return etagMismatchTable(
       requestId,
       `If-Match route-set-${expectedVersionNo} 与当前 route-set-${routeSet.versionNo} 不匹配`,
     );
@@ -313,7 +313,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
       return resourceNotFound(requestId, err.message);
     }
     if (err instanceof RouteSetVersionConflictError) {
-      return v11EtagMismatch(
+      return etagMismatchTable(
         requestId,
         `RouteSet ${err.routeSetId} versionNo 不匹配（期望 ${err.expectedVersionNo}, 实际 ${err.actualVersionNo}），并发冲突`,
       );
@@ -343,7 +343,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof RouteWeightInvalidError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

@@ -21,15 +21,15 @@
  * - Invocation 已终态 → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - transient_sequence 不连续 → 409 EVENT_SEQUENCE_GAP（retryable）
  */
-import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   type WorkloadTokenClaims,
   ingressErrorToResponse,
   resolveRuntimePrincipal,
   runtimeAuthErrorResponse,
-  v11RuntimeSchemaInvalid,
-} from "@/lib/v11/runtime/route-helpers";
-import { ingressTransientBatch } from "@/lib/v11/runtime/transient-events";
+  runtimeSchemaInvalidTable,
+} from "@/lib/runtime/route-helpers";
+import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 
 export const dynamic = "force-dynamic";
 
@@ -81,7 +81,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const invocationId = typeof rawValue === "string" ? rawValue : "";
 
   if (!invocationId) {
-    return v11RuntimeSchemaInvalid(requestId, "路径参数 invocation_id 缺失");
+    return runtimeSchemaInvalidTable(requestId, "路径参数 invocation_id 缺失");
   }
 
   // 1. 解析 Bearer Token（audience=runtime + invocation 绑定校验）
@@ -96,13 +96,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   // 2. 校验 Idempotency-Key（必填）
   if (!request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim()) {
-    return v11RuntimeSchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return runtimeSchemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11RuntimeSchemaInvalid(
+    return runtimeSchemaInvalidTable(
       requestId,
       "请求体非法：transient_sequence_start 必填且≥1，events 必填且为非空数组，每个事件含 transient_id/transient_sequence/type/payload",
     );

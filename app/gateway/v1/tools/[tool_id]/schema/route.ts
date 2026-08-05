@@ -22,7 +22,7 @@
  * - If-None-Match 格式非法 → 400 CATALOG_REVISION_INVALID
  * - ToolSchemaRevision 不存在（currentSchemaRevisionId 悬空）→ 422 CAPABILITY_CONTENT_BLOCKED
  */
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
 import {
   TOOL_SCHEMA_REVISION_ETAG_PREFIX,
   parseToolSchemaRevisionEtag,
@@ -32,10 +32,10 @@ import { getCurrentToolSchemaRevision, getToolById } from "@/lib/v11/capability/
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
+  gatewayCapabilityContentBlockedTable,
+  gatewayCapabilityNotAllowedTable,
+  gatewayCatalogRevisionInvalidTable,
   resolveGatewayPrincipal,
-  v11GatewayCapabilityContentBlocked,
-  v11GatewayCapabilityNotAllowed,
-  v11GatewayCatalogRevisionInvalid,
 } from "@/lib/v11/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
@@ -100,12 +100,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 2. 校验 Tool 存在且属于当前租户（跨租户隐藏为 404 CAPABILITY_NOT_ALLOWED）
   const tool = await getToolById({ tenantId: claims.tenantId, toolId });
   if (!tool) {
-    return v11GatewayCapabilityNotAllowed(requestId, `Tool 不存在或无权访问: ${toolId}`);
+    return gatewayCapabilityNotAllowedTable(requestId, `Tool 不存在或无权访问: ${toolId}`);
   }
 
   // 3. 校验 Tool 有 currentSchemaRevisionId（无则 422 CAPABILITY_CONTENT_BLOCKED）
   if (!tool.currentSchemaRevisionId) {
-    return v11GatewayCapabilityContentBlocked(
+    return gatewayCapabilityContentBlockedTable(
       requestId,
       `Tool ${toolId} 当前未发布 SchemaRevision`,
     );
@@ -118,7 +118,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   });
   if (!revision) {
     // currentSchemaRevisionId 悬空（数据异常）：统一返回 422 隐藏内部状态。
-    return v11GatewayCapabilityContentBlocked(
+    return gatewayCapabilityContentBlockedTable(
       requestId,
       `Tool ${toolId} 当前 SchemaRevision 不可读`,
     );
@@ -131,7 +131,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     try {
       parsedRevisionNo = parseToolSchemaRevisionEtag(ifNoneMatch);
     } catch (err) {
-      return v11GatewayCatalogRevisionInvalid(
+      return gatewayCatalogRevisionInvalidTable(
         requestId,
         err instanceof Error ? err.message : `If-None-Match 格式非法: ${ifNoneMatch}`,
       );

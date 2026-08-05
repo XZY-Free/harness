@@ -11,7 +11,7 @@
  * - 实现 If-None-Match 客户端缓存：首次拉取后记录 ETag，后续请求带 If-None-Match；
  *   服务端返回 304 时不更新数据，仅清空 loading。
  * - 维护 loading / error 状态，供 UI 显示。
- * - 错误转化为 V11ClientVisibleError。
+ * - 错误转化为 ClientVisibleError。
  *
  * 不变量：
  * - 同一 resourceTypes 字符串相同时不重复并发拉取（通过 ref 守卫）。
@@ -28,18 +28,18 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
 import type {
-  V11ClientCatalogItem,
-  V11ClientCatalogListResponse,
-  V11ClientCatalogResourceType,
-  V11ClientErrorBody,
-  V11ClientVisibleError,
+  ClientCatalogItem,
+  ClientCatalogListResponse,
+  ClientCatalogResourceType,
+  ClientErrorBody,
+  ClientVisibleError,
 } from "@/lib/v11/client/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Hook 入参。 */
 interface UseV11CatalogParams {
   /** 资源类型过滤；不传则返回全部类型。 */
-  readonly resourceTypes?: readonly V11ClientCatalogResourceType[];
+  readonly resourceTypes?: readonly ClientCatalogResourceType[];
   /** lifecycle 状态过滤；默认 ["enabled"]。 */
   readonly lifecycleStates?: readonly string[];
   /** 是否自动拉取；默认 true。组件挂载时拉取一次。 */
@@ -49,11 +49,11 @@ interface UseV11CatalogParams {
 /** Hook 返回值。 */
 export interface UseV11CatalogResult {
   /** 目录条目（按 resource_type / display_name 排序稳定）。 */
-  readonly items: readonly V11ClientCatalogItem[];
+  readonly items: readonly ClientCatalogItem[];
   /** 是否正在拉取（首次或 refresh）。 */
   readonly loading: boolean;
   /** 错误。 */
-  readonly error: V11ClientVisibleError | null;
+  readonly error: ClientVisibleError | null;
   /** 当前缓存的 catalogRevision；null 表示尚未拉取过。 */
   readonly revision: number | null;
   /** 手动刷新（强制带 If-None-Match；304 视为未变化）。 */
@@ -63,7 +63,7 @@ export interface UseV11CatalogResult {
 }
 
 /** 把 resourceTypes 数组转为稳定 query 参数（按字母升序）。 */
-function stableResourceTypesParam(types?: readonly V11ClientCatalogResourceType[]): string {
+function stableResourceTypesParam(types?: readonly ClientCatalogResourceType[]): string {
   if (!types || types.length === 0) return "";
   return [...types].sort().join(",");
 }
@@ -74,11 +74,11 @@ function stableLifecycleStatesParam(states?: readonly string[]): string {
 }
 
 /** 解析错误响应为可见错误。 */
-async function parseError(response: Response): Promise<V11ClientVisibleError> {
+async function parseError(response: Response): Promise<ClientVisibleError> {
   const bodyText = await response.text().catch(() => "");
-  let errorBody: V11ClientErrorBody | null = null;
+  let errorBody: ClientErrorBody | null = null;
   try {
-    errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+    errorBody = JSON.parse(bodyText) as ClientErrorBody;
   } catch {
     // ignore
   }
@@ -99,9 +99,9 @@ export function useV11Catalog({
   lifecycleStates,
   autoFetch = true,
 }: UseV11CatalogParams = {}): UseV11CatalogResult {
-  const [items, setItems] = useState<readonly V11ClientCatalogItem[]>([]);
+  const [items, setItems] = useState<readonly ClientCatalogItem[]>([]);
   const [loading, setLoading] = useState<boolean>(autoFetch);
-  const [error, setError] = useState<V11ClientVisibleError | null>(null);
+  const [error, setError] = useState<ClientVisibleError | null>(null);
   const [revision, setRevision] = useState<number | null>(null);
 
   // 客户端缓存的 ETag；同 resourceTypes + lifecycleStates 组合下复用。
@@ -144,7 +144,7 @@ export function useV11Catalog({
         if (!unmountedRef.current) setError(visible);
         return;
       }
-      const data = (await resp.json()) as V11ClientCatalogListResponse;
+      const data = (await resp.json()) as ClientCatalogListResponse;
       // 提取 ETag（去引号）
       const etagHeader = resp.headers.get("etag") ?? resp.headers.get("ETag");
       const rawEtag = etagHeader ? etagHeader.replace(/^W\//, "").replace(/^"|"$/g, "") : null;

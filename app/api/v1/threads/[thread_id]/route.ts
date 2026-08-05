@@ -1,5 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
-import { getActiveGoalByThread } from "@/lib/v11/conversation/goal-queries";
+import { getActiveGoalByThread } from "@/lib/conversations/goal-queries";
 /**
  * GET /api/v1/threads/{thread_id} — 查询 Thread 详情（S10-W02，§3.1）。
  *
@@ -18,10 +17,11 @@ import {
   type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById, updateThreadLifecycle } from "@/lib/v11/conversation/thread-queries";
-import { getTurnsByThread } from "@/lib/v11/conversation/turn-queries";
-import type { V11Goal, V11Thread, V11Turn } from "@/lib/v11/schema/conversation";
+} from "@/lib/conversations/route-helpers";
+import { getThreadById, updateThreadLifecycle } from "@/lib/conversations/thread-queries";
+import { getTurnsByThread } from "@/lib/conversations/turn-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
+import type { Goal, Thread, Turn } from "@/lib/persistence/schema/conversation";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,7 @@ interface RouteContext {
 }
 
 /** 投影 Thread 为响应体（snake_case）。 */
-function projectThread(thread: V11Thread): Record<string, unknown> {
+function projectThread(thread: Thread): Record<string, unknown> {
   return {
     id: thread.id,
     title: thread.title,
@@ -50,7 +50,7 @@ function projectThread(thread: V11Thread): Record<string, unknown> {
 }
 
 /** 投影 Goal 为响应体（snake_case）。 */
-function projectGoal(goal: V11Goal): Record<string, unknown> {
+function projectGoal(goal: Goal): Record<string, unknown> {
   return {
     id: goal.id,
     thread_id: goal.threadId,
@@ -65,7 +65,7 @@ function projectGoal(goal: V11Goal): Record<string, unknown> {
 }
 
 /** 投影 Turn 为响应体（snake_case，仅最新 Turn 的摘要字段）。 */
-function projectTurnSummary(turn: V11Turn): Record<string, unknown> {
+function projectTurnSummary(turn: Turn): Record<string, unknown> {
   return {
     id: turn.id,
     turn_sequence: turn.turnSequence,

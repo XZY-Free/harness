@@ -1,8 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   ALL_CONFORMANCE_CASES,
-  type ConformanceCaseId,
   CONFORMANCE_SUITE_REVISION,
+  type ConformanceCaseId,
 } from "@/lib/runtimes/domain/runtime-conformance-contract";
 
 export { ALL_CONFORMANCE_CASES, CONFORMANCE_SUITE_REVISION };

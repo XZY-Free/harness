@@ -2,7 +2,7 @@
  * POST /admin/api/v1/workload-tokens:revoke — 撤销 Workload Token（S12-W05）。
  *
  * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §5
- *         （Workload Token 撤销机制：jti + V11WorkloadTokenRevocation 表）。
+ *         （Workload Token 撤销机制：jti + WorkloadTokenRevocation 表）。
  *
  * 行为：
  * - 解析 admin 主体（安全管理员）。
@@ -19,20 +19,20 @@
  * - 缺少必填字段 → 400 REQUEST_SCHEMA_INVALID
  * - 幂等：重复撤销返回原记录（不报错）
  */
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
+import { revokeWorkloadToken } from "@/lib/identity/workload-token-revocation-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import { revokeWorkloadToken } from "@/lib/identity/workload-token-revocation-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -67,17 +67,17 @@ export async function POST(request: Request): Promise<Response> {
 
   const jti = body?.jti?.trim();
   if (!jti) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 jti");
+    return schemaInvalidTable(requestId, "缺少必填字段 jti");
   }
 
   const tokenType = body?.token_type?.trim();
   if (!tokenType || !VALID_TOKEN_TYPES.has(tokenType)) {
-    return v11SchemaInvalid(requestId, "缺少或非法 token_type（期望 runtime/gateway/service）");
+    return schemaInvalidTable(requestId, "缺少或非法 token_type（期望 runtime/gateway/service）");
   }
 
   const reason = body?.reason?.trim();
   if (!reason) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 reason");
+    return schemaInvalidTable(requestId, "缺少必填字段 reason");
   }
 
   // expires_at 可选；缺省使用当前时间 + 1 小时（保证撤销记录有 TTL）
@@ -85,7 +85,7 @@ export async function POST(request: Request): Promise<Response> {
   if (body?.expires_at) {
     const parsed = new Date(body.expires_at);
     if (Number.isNaN(parsed.getTime())) {
-      return v11SchemaInvalid(requestId, "expires_at 非合法 RFC 3339 时间");
+      return schemaInvalidTable(requestId, "expires_at 非合法 RFC 3339 时间");
     }
     expiresAt = parsed;
   } else {

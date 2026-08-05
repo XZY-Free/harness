@@ -6,13 +6,18 @@
  */
 
 import { db } from "@/lib/db/client";
-import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import type { RouteResolutionCandidate } from "@/lib/routes/domain/route-resolution-policy";
-import type { RouteEligibilityResolutionStore, LoadProjectionCandidatesInput } from "./route-eligibility-resolution-store";
+import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { and, eq } from "drizzle-orm";
+import type {
+  LoadProjectionCandidatesInput,
+  RouteEligibilityResolutionStore,
+} from "./route-eligibility-resolution-store";
 
 export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionStore = {
-  loadCandidates: async (input: LoadProjectionCandidatesInput): Promise<RouteResolutionCandidate[]> => {
+  loadCandidates: async (
+    input: LoadProjectionCandidatesInput,
+  ): Promise<RouteResolutionCandidate[]> => {
     const projections = await db
       .select()
       .from(routeEligibilityProjection)
@@ -29,9 +34,7 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
     // Projection 只包含 eligible 条目，Resolver 纯内存选择
     return projections.map((p): RouteResolutionCandidate => {
       const controlPlaneEvidence =
-        p.agentArtifactDigest &&
-        p.runtimeArtifactDigest &&
-        p.runtimeConfigDigest
+        p.agentArtifactDigest && p.runtimeArtifactDigest && p.runtimeConfigDigest
           ? {
               agentArtifactDigest: p.agentArtifactDigest,
               runtimeArtifactDigest: p.runtimeArtifactDigest,

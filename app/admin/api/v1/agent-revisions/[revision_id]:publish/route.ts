@@ -1,3 +1,10 @@
+import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
+import {
+  AgentPublicationPrerequisiteError,
+  AgentPublicationVersionConflictError,
+  AgentRevisionPublicationNotFoundError,
+  AgentRevisionPublicationStateError,
+} from "@/lib/agents/domain/agent-revision-publication-policy";
 /**
  * POST /admin/api/v1/agent-revisions/{revision_id}:publish — 发布 AgentRevision（S03-C05）。
  *
@@ -32,41 +39,22 @@ import {
   RevisionStateError,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
-import {
-  createPublishAgentRevision,
-} from "@/lib/agents/application/publish-agent-revision";
-import {
-  AgentPublicationPrerequisiteError,
-  AgentPublicationVersionConflictError,
-  AgentRevisionPublicationNotFoundError,
-  AgentRevisionPublicationStateError,
-} from "@/lib/agents/domain/agent-revision-publication-policy";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { ArtifactNotVerifiedError } from "@/lib/artifacts/domain/artifact-attestation";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
   getRequestId,
   parseIfMatch,
-  apiError,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  AGENT_REVISION_ETAG_PREFIX,
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  parseAgentRevisionEtag,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11EtagMismatch,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -77,6 +65,16 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import {
+  AGENT_REVISION_ETAG_PREFIX,
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  etagMismatchTable,
+  parseAgentRevisionEtag,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -145,19 +143,19 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 2. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 解析 If-Match（必填）→ Revision ETag
   const ifMatch = parseIfMatch(request);
   if (!ifMatch) {
-    return v11SchemaInvalid(requestId, "缺少必填头 If-Match");
+    return schemaInvalidTable(requestId, "缺少必填头 If-Match");
   }
   // 校验 If-Match ETag 格式（agent-revision-{revisionNo}）
   try {
     parseAgentRevisionEtag(ifMatch);
   } catch (err) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       err instanceof Error ? err.message : "If-Match ETag 格式非法",
     );
@@ -180,7 +178,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   if (!scopeResult.ok) return scopeResult.response;
 
   // 6. 校验 Revision 属于当前租户的 Agent（跨租户隐藏为 404）
-  //    V11AgentRevision schema 无 tenantId 字段，通过 Agent 归属校验。
+  //    AgentRevision schema 无 tenantId 字段，通过 Agent 归属校验。
   const agent = await getAgentById(principal.tenantId, revision.agentId);
   if (!agent) {
     return resourceNotFound(requestId, `AgentRevision 不存在或无权访问: ${revisionId}`);
@@ -189,13 +187,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 7. 校验 If-Match ETag 与 Revision 当前 revisionNo 一致
   const currentEtag = `${AGENT_REVISION_ETAG_PREFIX}${revision.revisionNo}`;
   if (ifMatch !== currentEtag) {
-    return v11EtagMismatch(requestId, `If-Match ${ifMatch} 与当前 ETag ${currentEtag} 不匹配`);
+    return etagMismatchTable(requestId, `If-Match ${ifMatch} 与当前 ETag ${currentEtag} 不匹配`);
   }
 
   // 8. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 release_notes 或 artifact_attestation_id");
+    return schemaInvalidTable(
+      requestId,
+      "请求体非法：缺少 release_notes 或 artifact_attestation_id",
+    );
   }
 
   // 9. 计算请求 hash + 幂等守卫
@@ -287,19 +288,26 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     if (err instanceof ArtifactNotVerifiedError) {
       return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
-    if (err instanceof AgentPublicationVersionConflictError || err instanceof AgentVersionConflictError) {
-      const agentId = err instanceof AgentPublicationVersionConflictError ? err.agentId : err.agentId;
-      const expectedVersionNo = err instanceof AgentPublicationVersionConflictError ? err.expectedVersionNo : err.expectedVersionNo;
-      return v11EtagMismatch(
+    if (
+      err instanceof AgentPublicationVersionConflictError ||
+      err instanceof AgentVersionConflictError
+    ) {
+      const agentId =
+        err instanceof AgentPublicationVersionConflictError ? err.agentId : err.agentId;
+      const expectedVersionNo =
+        err instanceof AgentPublicationVersionConflictError
+          ? err.expectedVersionNo
+          : err.expectedVersionNo;
+      return etagMismatchTable(
         requestId,
         `Agent ${agentId} versionNo 不匹配（期望 ${expectedVersionNo}），并发冲突`,
       );
     }
     if (err instanceof AgentRevisionPublicationStateError) {
-      return v11EtagMismatch(requestId, `AgentRevision ${err.revisionId} 状态已并发变化`);
+      return etagMismatchTable(requestId, `AgentRevision ${err.revisionId} 状态已并发变化`);
     }
     if (err instanceof RevisionStateError) {
-      return v11EtagMismatch(requestId, `AgentRevision ${err.revisionId} 状态已并发变化`);
+      return etagMismatchTable(requestId, `AgentRevision ${err.revisionId} 状态已并发变化`);
     }
     throw err;
   }

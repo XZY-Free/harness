@@ -34,13 +34,13 @@ import {
   DRILL_CHECK_MATRIX,
   type RecoveryCheckState,
   type RecoveryCheckType,
+  type RecoveryDrill,
+  type RecoveryDrillCheck,
   type RecoveryDrillState,
   type RecoveryDrillType,
-  type V11RecoveryDrill,
-  type V11RecoveryDrillCheck,
-  v11RecoveryDrill,
-  v11RecoveryDrillCheck,
-} from "@/lib/v11/schema/recovery-drill";
+  recoveryDrillCheckTable,
+  recoveryDrillTable,
+} from "@/lib/persistence/schema/recovery-drill";
 import { and, asc, eq, gt, inArray, or } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -158,7 +158,7 @@ export interface RecoveryDrillSummary {
 }
 
 /** 从 check 列表派生汇总。 */
-export function computeDrillSummary(checks: V11RecoveryDrillCheck[]): RecoveryDrillSummary {
+export function computeDrillSummary(checks: RecoveryDrillCheck[]): RecoveryDrillSummary {
   const summary: RecoveryDrillSummary = {
     checkCount: checks.length,
     passedCount: 0,
@@ -195,9 +195,7 @@ export function computeDrillSummary(checks: V11RecoveryDrillCheck[]): RecoveryDr
  * - 含 failed 且无 pending/running → failed
  * - 含 pending/running → null（保持 running，不自动终态）
  */
-export function deriveDrillTerminalState(
-  checks: V11RecoveryDrillCheck[],
-): RecoveryDrillState | null {
+export function deriveDrillTerminalState(checks: RecoveryDrillCheck[]): RecoveryDrillState | null {
   if (checks.length === 0) return "completed";
   const hasPendingOrRunning = checks.some(
     (c) => c.checkState === "pending" || c.checkState === "running",
@@ -217,7 +215,7 @@ export function deriveDrillTerminalState(
  * 1. 校验 environmentTag 非空（隔离环境标识，不连接生产数据库）。
  * 2. 检查同租户同 drillType 是否已有非终态演练（避免并发演练冲突）。
  * 3. 计算 RPO/RTO 目标（未传时用 DRILL_RPO_RTO_DEFAULTS）。
- * 4. 插入 V11RecoveryDrill（state=scheduled）。
+ * 4. 插入 RecoveryDrill（state=scheduled）。
  * 5. 写审计 recovery.drill（targetType=recovery_drill, targetId=drill.id）。
  * 6. 按 DRILL_CHECK_MATRIX 预填 check 项（state=pending）。
  * 7. 回填 auditEventId。
@@ -235,7 +233,7 @@ export async function createRecoveryDrill(params: {
   rtoTargetSeconds?: number;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11RecoveryDrill> {
+}): Promise<RecoveryDrill> {
   // 1. 校验 environmentTag
   if (!params.environmentTag.trim()) {
     throw new RecoveryDrillError(
@@ -246,13 +244,13 @@ export async function createRecoveryDrill(params: {
 
   // 2. 检查同租户同 drillType 是否已有非终态演练
   const existing = await db
-    .select({ id: v11RecoveryDrill.id })
-    .from(v11RecoveryDrill)
+    .select({ id: recoveryDrillTable.id })
+    .from(recoveryDrillTable)
     .where(
       and(
-        eq(v11RecoveryDrill.tenantId, params.tenantId),
-        eq(v11RecoveryDrill.drillType, params.drillType),
-        inArray(v11RecoveryDrill.drillState, [...NON_TERMINAL_DRILL_STATES]),
+        eq(recoveryDrillTable.tenantId, params.tenantId),
+        eq(recoveryDrillTable.drillType, params.drillType),
+        inArray(recoveryDrillTable.drillState, [...NON_TERMINAL_DRILL_STATES]),
       ),
     )
     .limit(1);
@@ -271,7 +269,7 @@ export async function createRecoveryDrill(params: {
   // 4. 插入演练
   const drillId = randomUUID();
   const now = new Date();
-  await db.insert(v11RecoveryDrill).values({
+  await db.insert(recoveryDrillTable).values({
     id: drillId,
     tenantId: params.tenantId,
     drillType: params.drillType,
@@ -307,7 +305,7 @@ export async function createRecoveryDrill(params: {
   // 6. 预填 check 项
   const checkTypes = DRILL_CHECK_MATRIX[params.drillType];
   if (checkTypes.length > 0) {
-    const checkRows: Array<typeof v11RecoveryDrillCheck.$inferInsert> = checkTypes.map(
+    const checkRows: Array<typeof recoveryDrillCheckTable.$inferInsert> = checkTypes.map(
       (checkType) => ({
         id: randomUUID(),
         tenantId: params.tenantId,
@@ -318,14 +316,14 @@ export async function createRecoveryDrill(params: {
         updatedAt: now,
       }),
     );
-    await db.insert(v11RecoveryDrillCheck).values(checkRows);
+    await db.insert(recoveryDrillCheckTable).values(checkRows);
   }
 
   // 7. 回填 auditEventId
   await db
-    .update(v11RecoveryDrill)
+    .update(recoveryDrillTable)
     .set({ auditEventId: auditEvent.id, updatedAt: new Date() })
-    .where(eq(v11RecoveryDrill.id, drillId));
+    .where(eq(recoveryDrillTable.id, drillId));
 
   const created = await getRecoveryDrillById(params.tenantId, drillId);
   if (!created) {
@@ -340,11 +338,11 @@ export async function createRecoveryDrill(params: {
 export async function getRecoveryDrillById(
   tenantId: string,
   drillId: string,
-): Promise<V11RecoveryDrill | null> {
+): Promise<RecoveryDrill | null> {
   const rows = await db
     .select()
-    .from(v11RecoveryDrill)
-    .where(and(eq(v11RecoveryDrill.tenantId, tenantId), eq(v11RecoveryDrill.id, drillId)))
+    .from(recoveryDrillTable)
+    .where(and(eq(recoveryDrillTable.tenantId, tenantId), eq(recoveryDrillTable.id, drillId)))
     .limit(1);
   return rows[0] ?? null;
 }
@@ -357,17 +355,17 @@ export async function listRecoveryDrills(params: {
   executedBy?: string;
   limit?: number;
   cursor?: string;
-}): Promise<{ items: V11RecoveryDrill[]; nextCursor: string | null }> {
+}): Promise<{ items: RecoveryDrill[]; nextCursor: string | null }> {
   const limit = Math.min(params.limit ?? 50, 200);
-  const conditions = [eq(v11RecoveryDrill.tenantId, params.tenantId)];
+  const conditions = [eq(recoveryDrillTable.tenantId, params.tenantId)];
   if (params.drillType) {
-    conditions.push(eq(v11RecoveryDrill.drillType, params.drillType));
+    conditions.push(eq(recoveryDrillTable.drillType, params.drillType));
   }
   if (params.drillState) {
-    conditions.push(eq(v11RecoveryDrill.drillState, params.drillState));
+    conditions.push(eq(recoveryDrillTable.drillState, params.drillState));
   }
   if (params.executedBy) {
-    conditions.push(eq(v11RecoveryDrill.executedBy, params.executedBy));
+    conditions.push(eq(recoveryDrillTable.executedBy, params.executedBy));
   }
 
   // cursor 分页：scheduledAt ASC, id ASC（复合游标，处理同毫秒并发的场景）
@@ -382,10 +380,10 @@ export async function listRecoveryDrills(params: {
       cursorCondition = and(
         ...conditions,
         or(
-          gt(v11RecoveryDrill.scheduledAt, new Date(decoded.scheduledAt)),
+          gt(recoveryDrillTable.scheduledAt, new Date(decoded.scheduledAt)),
           and(
-            eq(v11RecoveryDrill.scheduledAt, new Date(decoded.scheduledAt)),
-            gt(v11RecoveryDrill.id, decoded.id),
+            eq(recoveryDrillTable.scheduledAt, new Date(decoded.scheduledAt)),
+            gt(recoveryDrillTable.id, decoded.id),
           ),
         ),
       );
@@ -396,9 +394,9 @@ export async function listRecoveryDrills(params: {
 
   const rows = await db
     .select()
-    .from(v11RecoveryDrill)
+    .from(recoveryDrillTable)
     .where(cursorCondition ?? and(...conditions))
-    .orderBy(asc(v11RecoveryDrill.scheduledAt), asc(v11RecoveryDrill.id))
+    .orderBy(asc(recoveryDrillTable.scheduledAt), asc(recoveryDrillTable.id))
     .limit(limit + 1);
 
   const items = rows.slice(0, limit);
@@ -436,7 +434,7 @@ export async function updateRecoveryDrillState(params: {
   rpoActualSeconds?: number;
   rtoActualSeconds?: number;
   failureReason?: string;
-}): Promise<V11RecoveryDrill> {
+}): Promise<RecoveryDrill> {
   const current = await getRecoveryDrillById(params.tenantId, params.id);
   if (!current) {
     throw new RecoveryDrillError("drill_not_found", `演练不存在（id=${params.id}）`);
@@ -444,7 +442,7 @@ export async function updateRecoveryDrillState(params: {
   assertLegalDrillTransition(current.drillState, params.nextState);
 
   const now = new Date();
-  const updateFields: Partial<typeof v11RecoveryDrill.$inferInsert> = {
+  const updateFields: Partial<typeof recoveryDrillTable.$inferInsert> = {
     drillState: params.nextState,
     updatedAt: now,
   };
@@ -481,9 +479,9 @@ export async function updateRecoveryDrillState(params: {
   });
 
   await db
-    .update(v11RecoveryDrill)
+    .update(recoveryDrillTable)
     .set({ ...updateFields, auditEventId: auditEvent.id })
-    .where(eq(v11RecoveryDrill.id, params.id));
+    .where(eq(recoveryDrillTable.id, params.id));
 
   const updated = await getRecoveryDrillById(params.tenantId, params.id);
   if (!updated) {
@@ -498,7 +496,7 @@ export async function startRecoveryDrill(params: {
   id: string;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11RecoveryDrill> {
+}): Promise<RecoveryDrill> {
   return updateRecoveryDrillState({
     ...params,
     nextState: "running",
@@ -517,7 +515,7 @@ export async function completeRecoveryDrill(params: {
   requestId?: string;
   rpoActualSeconds?: number;
   rtoActualSeconds?: number;
-}): Promise<V11RecoveryDrill> {
+}): Promise<RecoveryDrill> {
   const checks = await listRecoveryDrillChecks(params.tenantId, params.id);
   const terminal = deriveDrillTerminalState(checks);
   if (terminal !== "completed") {
@@ -535,12 +533,12 @@ export async function completeRecoveryDrill(params: {
 
   // 回填 consistencySummaryJson
   await db
-    .update(v11RecoveryDrill)
+    .update(recoveryDrillTable)
     .set({
       consistencySummaryJson: JSON.stringify(summary),
       updatedAt: new Date(),
     })
-    .where(eq(v11RecoveryDrill.id, params.id));
+    .where(eq(recoveryDrillTable.id, params.id));
 
   const refreshed = await getRecoveryDrillById(params.tenantId, params.id);
   if (!refreshed) {
@@ -558,7 +556,7 @@ export async function failRecoveryDrill(params: {
   requestId?: string;
   rpoActualSeconds?: number;
   rtoActualSeconds?: number;
-}): Promise<V11RecoveryDrill> {
+}): Promise<RecoveryDrill> {
   const checks = await listRecoveryDrillChecks(params.tenantId, params.id);
   const summary = computeDrillSummary(checks);
   const updated = await updateRecoveryDrillState({
@@ -569,12 +567,12 @@ export async function failRecoveryDrill(params: {
   });
 
   await db
-    .update(v11RecoveryDrill)
+    .update(recoveryDrillTable)
     .set({
       consistencySummaryJson: JSON.stringify(summary),
       updatedAt: new Date(),
     })
-    .where(eq(v11RecoveryDrill.id, params.id));
+    .where(eq(recoveryDrillTable.id, params.id));
 
   const refreshed = await getRecoveryDrillById(params.tenantId, params.id);
   if (!refreshed) {
@@ -590,7 +588,7 @@ export async function cancelRecoveryDrill(params: {
   actor: AuditActor;
   reason: string;
   requestId?: string;
-}): Promise<V11RecoveryDrill> {
+}): Promise<RecoveryDrill> {
   return updateRecoveryDrillState({
     ...params,
     nextState: "cancelled",
@@ -603,25 +601,30 @@ export async function cancelRecoveryDrill(params: {
 export async function listRecoveryDrillChecks(
   tenantId: string,
   drillId: string,
-): Promise<V11RecoveryDrillCheck[]> {
+): Promise<RecoveryDrillCheck[]> {
   return db
     .select()
-    .from(v11RecoveryDrillCheck)
+    .from(recoveryDrillCheckTable)
     .where(
-      and(eq(v11RecoveryDrillCheck.tenantId, tenantId), eq(v11RecoveryDrillCheck.drillId, drillId)),
+      and(
+        eq(recoveryDrillCheckTable.tenantId, tenantId),
+        eq(recoveryDrillCheckTable.drillId, drillId),
+      ),
     )
-    .orderBy(asc(v11RecoveryDrillCheck.checkType));
+    .orderBy(asc(recoveryDrillCheckTable.checkType));
 }
 
 /** 按 id 查询单个 check。 */
 export async function getRecoveryDrillCheck(
   tenantId: string,
   checkId: string,
-): Promise<V11RecoveryDrillCheck | null> {
+): Promise<RecoveryDrillCheck | null> {
   const rows = await db
     .select()
-    .from(v11RecoveryDrillCheck)
-    .where(and(eq(v11RecoveryDrillCheck.tenantId, tenantId), eq(v11RecoveryDrillCheck.id, checkId)))
+    .from(recoveryDrillCheckTable)
+    .where(
+      and(eq(recoveryDrillCheckTable.tenantId, tenantId), eq(recoveryDrillCheckTable.id, checkId)),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
@@ -630,7 +633,7 @@ export async function getRecoveryDrillCheck(
 export async function markCheckRunning(params: {
   tenantId: string;
   checkId: string;
-}): Promise<V11RecoveryDrillCheck> {
+}): Promise<RecoveryDrillCheck> {
   const current = await getRecoveryDrillCheck(params.tenantId, params.checkId);
   if (!current) {
     throw new RecoveryDrillError("check_not_found", `Check 不存在（id=${params.checkId}）`);
@@ -640,9 +643,9 @@ export async function markCheckRunning(params: {
     return current;
   }
   await db
-    .update(v11RecoveryDrillCheck)
+    .update(recoveryDrillCheckTable)
     .set({ checkState: "running", updatedAt: new Date() })
-    .where(eq(v11RecoveryDrillCheck.id, params.checkId));
+    .where(eq(recoveryDrillCheckTable.id, params.checkId));
   const updated = await getRecoveryDrillCheck(params.tenantId, params.checkId);
   if (!updated) {
     throw new RecoveryDrillError("check_not_found", `更新后查询失败（id=${params.checkId}）`);
@@ -660,7 +663,7 @@ export async function completeRecoveryDrillCheck(params: {
   evidenceRef: string;
   detailsJson?: string;
   durationMs?: number;
-}): Promise<V11RecoveryDrillCheck> {
+}): Promise<RecoveryDrillCheck> {
   if (!params.evidenceRef.trim()) {
     throw new RecoveryDrillError(
       "missing_evidence",
@@ -674,7 +677,7 @@ export async function completeRecoveryDrillCheck(params: {
   assertLegalCheckTransition(current.checkState, "passed");
   const now = new Date();
   await db
-    .update(v11RecoveryDrillCheck)
+    .update(recoveryDrillCheckTable)
     .set({
       checkState: "passed",
       evidenceRef: params.evidenceRef,
@@ -683,7 +686,7 @@ export async function completeRecoveryDrillCheck(params: {
       completedAt: now,
       updatedAt: now,
     })
-    .where(eq(v11RecoveryDrillCheck.id, params.checkId));
+    .where(eq(recoveryDrillCheckTable.id, params.checkId));
   const updated = await getRecoveryDrillCheck(params.tenantId, params.checkId);
   if (!updated) {
     throw new RecoveryDrillError("check_not_found", `完成后查询失败（id=${params.checkId}）`);
@@ -699,7 +702,7 @@ export async function failRecoveryDrillCheck(params: {
   failureReason: string;
   detailsJson?: string;
   durationMs?: number;
-}): Promise<V11RecoveryDrillCheck> {
+}): Promise<RecoveryDrillCheck> {
   if (!params.evidenceRef.trim()) {
     throw new RecoveryDrillError(
       "missing_evidence",
@@ -713,7 +716,7 @@ export async function failRecoveryDrillCheck(params: {
   assertLegalCheckTransition(current.checkState, "failed");
   const now = new Date();
   await db
-    .update(v11RecoveryDrillCheck)
+    .update(recoveryDrillCheckTable)
     .set({
       checkState: "failed",
       evidenceRef: params.evidenceRef,
@@ -723,7 +726,7 @@ export async function failRecoveryDrillCheck(params: {
       completedAt: now,
       updatedAt: now,
     })
-    .where(eq(v11RecoveryDrillCheck.id, params.checkId));
+    .where(eq(recoveryDrillCheckTable.id, params.checkId));
   const updated = await getRecoveryDrillCheck(params.tenantId, params.checkId);
   if (!updated) {
     throw new RecoveryDrillError("check_not_found", `失败后查询失败（id=${params.checkId}）`);
@@ -736,7 +739,7 @@ export async function skipRecoveryDrillCheck(params: {
   tenantId: string;
   checkId: string;
   reason: string;
-}): Promise<V11RecoveryDrillCheck> {
+}): Promise<RecoveryDrillCheck> {
   const current = await getRecoveryDrillCheck(params.tenantId, params.checkId);
   if (!current) {
     throw new RecoveryDrillError("check_not_found", `Check 不存在（id=${params.checkId}）`);
@@ -744,14 +747,14 @@ export async function skipRecoveryDrillCheck(params: {
   assertLegalCheckTransition(current.checkState, "skipped");
   const now = new Date();
   await db
-    .update(v11RecoveryDrillCheck)
+    .update(recoveryDrillCheckTable)
     .set({
       checkState: "skipped",
       failureReason: params.reason,
       completedAt: now,
       updatedAt: now,
     })
-    .where(eq(v11RecoveryDrillCheck.id, params.checkId));
+    .where(eq(recoveryDrillCheckTable.id, params.checkId));
   const updated = await getRecoveryDrillCheck(params.tenantId, params.checkId);
   if (!updated) {
     throw new RecoveryDrillError("check_not_found", `跳过后查询失败（id=${params.checkId}）`);

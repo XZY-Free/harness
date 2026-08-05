@@ -1,16 +1,16 @@
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { getTurnById } from "@/lib/conversations/turn-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
-import { getTurnById } from "@/lib/v11/conversation/turn-queries";
 /**
  * GET /admin/api/v1/threads/{thread_id}/turns/{turn_id} — Turn 单资源详情（S11-W04）。
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。
- * - 调用 getTurnById（innerJoin V11Thread 实现跨租户隔离 + threadId 校验）。
+ * - 调用 getTurnById（innerJoin Thread 实现跨租户隔离 + threadId 校验）。
  * - 校验 Turn 属于路径 thread_id（否则 404）。
  * - 投影为 snake_case。
  *

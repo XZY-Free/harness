@@ -16,19 +16,18 @@
  * - 非法状态转移 → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - 非法 action 参数 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound, apiSuccess } from "@/lib/http";
+import {
+  REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import { runAllChecksForDrill } from "@/lib/identity/recovery-consistency-checker";
 import {
   RecoveryDrillError,
@@ -40,7 +39,14 @@ import {
   listRecoveryDrillChecks,
   startRecoveryDrill,
 } from "@/lib/identity/recovery-drill-queries";
-import type { V11RecoveryDrill, V11RecoveryDrillCheck } from "@/lib/v11/schema/recovery-drill";
+import type { RecoveryDrill, RecoveryDrillCheck } from "@/lib/persistence/schema/recovery-drill";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +59,7 @@ function actorFromAdminPrincipal(principal: AdminPrincipal): AuditActor {
   return actorFromWorkloadPrincipal(principal);
 }
 
-function projectCheck(c: V11RecoveryDrillCheck): Record<string, unknown> {
+function projectCheck(c: RecoveryDrillCheck): Record<string, unknown> {
   return {
     id: c.id,
     check_type: c.checkType,
@@ -131,7 +137,7 @@ export async function GET(
   // 3. 解析路径参数
   const { recovery_drill_id: drillId } = await context.params;
   if (!drillId) {
-    return v11SchemaInvalid(requestId, "缺少路径参数 recovery_drill_id");
+    return schemaInvalidTable(requestId, "缺少路径参数 recovery_drill_id");
   }
 
   // 4. 查询演练；不存在 → 404 RESOURCE_NOT_FOUND
@@ -191,7 +197,7 @@ export async function POST(
   // 3. 解析路径参数 + 请求体
   const { recovery_drill_id: drillId } = await context.params;
   if (!drillId) {
-    return v11SchemaInvalid(requestId, "缺少路径参数 recovery_drill_id");
+    return schemaInvalidTable(requestId, "缺少路径参数 recovery_drill_id");
   }
 
   const body = (await request.json().catch(() => null)) as {
@@ -204,13 +210,13 @@ export async function POST(
 
   const action = body?.action?.trim();
   if (!action || !VALID_ACTIONS.has(action)) {
-    return v11SchemaInvalid(requestId, "缺少或非法 action（期望 start/complete/fail/cancel）");
+    return schemaInvalidTable(requestId, "缺少或非法 action（期望 start/complete/fail/cancel）");
   }
 
   const actor = actorFromAdminPrincipal(principal);
 
   try {
-    let updatedDrill: V11RecoveryDrill;
+    let updatedDrill: RecoveryDrill;
 
     if (action === "start") {
       // start：scheduled → running + 执行一致性核对
@@ -264,7 +270,7 @@ export async function POST(
     } else if (action === "fail") {
       const failureReason = body?.failure_reason?.trim();
       if (!failureReason) {
-        return v11SchemaInvalid(requestId, "fail 操作缺少 failure_reason");
+        return schemaInvalidTable(requestId, "fail 操作缺少 failure_reason");
       }
       updatedDrill = await failRecoveryDrill({
         tenantId: principal.tenantId,
@@ -315,7 +321,7 @@ export async function POST(
         return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
       }
       if (err.code === "missing_evidence") {
-        return v11SchemaInvalid(requestId, err.message);
+        return schemaInvalidTable(requestId, err.message);
       }
     }
     throw err;
@@ -323,7 +329,7 @@ export async function POST(
 }
 
 /** 从 checks 派生终态（简化版，避免循环依赖）。 */
-function deriveTerminalFromChecks(checks: V11RecoveryDrillCheck[]): "completed" | "failed" | null {
+function deriveTerminalFromChecks(checks: RecoveryDrillCheck[]): "completed" | "failed" | null {
   if (checks.length === 0) return "completed";
   const hasPendingOrRunning = checks.some(
     (c) => c.checkState === "pending" || c.checkState === "running",

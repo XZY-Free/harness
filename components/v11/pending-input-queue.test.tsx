@@ -1,4 +1,4 @@
-import type { V11ClientPendingInputListResponse } from "@/lib/v11/client/types";
+import type { ClientPendingInputListResponse } from "@/lib/v11/client/types";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,7 +47,7 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
   ),
 }));
 
-import { V11PendingInputQueue as PendingInputQueue } from "./pending-input-queue";
+import { PendingInputQueue } from "./pending-input-queue";
 
 afterEach(() => {
   cleanup();
@@ -60,7 +60,7 @@ beforeEach(() => {
 
 function buildListResponse(
   items: Array<{ id: string; text: string; position: number; etag: string }>,
-): V11ClientPendingInputListResponse {
+): ClientPendingInputListResponse {
   return {
     thread_id: "t1",
     queue_etag: "pq-1",

@@ -10,7 +10,11 @@ function mockValidator(
   return {
     async validateRevision(params) {
       if (params.agentRevisionId === "unknown" || !params.agentRevisionId) {
-        return { valid: false, code: "REVISION_ID_UNKNOWN", reason: 'agentRevisionId 不允许为 "unknown" 或空值' };
+        return {
+          valid: false,
+          code: "REVISION_ID_UNKNOWN",
+          reason: 'agentRevisionId 不允许为 "unknown" 或空值',
+        };
       }
       const agent = agents.get(`${params.tenantId}:${params.agentId}`);
       if (!agent) {
@@ -18,7 +22,11 @@ function mockValidator(
       }
       const revision = revisions.get(params.agentRevisionId);
       if (!revision) {
-        return { valid: false, code: "REVISION_NOT_FOUND", reason: `AgentRevision ${params.agentRevisionId} 不存在` };
+        return {
+          valid: false,
+          code: "REVISION_NOT_FOUND",
+          reason: `AgentRevision ${params.agentRevisionId} 不存在`,
+        };
       }
       if (revision.agentId !== params.agentId) {
         return { valid: false, code: "REVISION_NOT_BELONG_TO_AGENT", reason: "归属不匹配" };
@@ -26,13 +34,17 @@ function mockValidator(
       if (agent.currentRevisionId !== params.agentRevisionId) {
         return { valid: false, code: "REVISION_NOT_CURRENT", reason: "不是当前 Revision" };
       }
-      return { valid: true, revisionId: params.agentRevisionId, currentRevisionId: agent.currentRevisionId };
+      return {
+        valid: true,
+        revisionId: params.agentRevisionId,
+        currentRevisionId: agent.currentRevisionId,
+      };
     },
   };
 }
 
 describe("§6.1 validateHostedProvisioningRevision", () => {
-  it("禁止 agentRevisionId = \"unknown\"", async () => {
+  it('禁止 agentRevisionId = "unknown"', async () => {
     const validator = mockValidator(new Map(), new Map());
     const result = await validator.validateRevision({
       tenantId: "t1",
@@ -89,9 +101,7 @@ describe("§6.1 validateHostedProvisioningRevision", () => {
 
   it("AgentRevision 不是当前期望 Revision 时返回 REVISION_NOT_CURRENT", async () => {
     const agents = new Map([["t1:a1", { currentRevisionId: "rev-2" }]]);
-    const revisions = new Map([
-      ["rev-1", { agentId: "a1" }],
-    ]);
+    const revisions = new Map([["rev-1", { agentId: "a1" }]]);
     const validator = mockValidator(agents, revisions);
     const result = await validator.validateRevision({
       tenantId: "t1",

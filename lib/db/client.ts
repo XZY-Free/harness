@@ -1,31 +1,31 @@
-import * as controlPlaneOutboxSchema from "@/lib/control-plane/events/control-plane-outbox";
 import * as artifactRecordSchema from "@/lib/artifacts/persistence/artifact-record";
 import { dbConfig } from "@/lib/config";
+import * as controlPlaneOutboxSchema from "@/lib/control-plane/events/control-plane-outbox";
+import * as adminExportSchemaTable from "@/lib/persistence/schema/admin-export";
+import * as agentSchemaTable from "@/lib/persistence/schema/agent";
+import * as auditSchemaTable from "@/lib/persistence/schema/audit";
+import * as authorizationSchemaTable from "@/lib/persistence/schema/authorization";
+import * as deploymentRouteSchemaTable from "@/lib/persistence/schema/deployment-route";
+import * as deviceSchemaTable from "@/lib/persistence/schema/device";
+import * as effectSchemaTable from "@/lib/persistence/schema/effect";
+import * as environmentSchemaTable from "@/lib/persistence/schema/environment";
+import * as evaluationSchemaTable from "@/lib/persistence/schema/evaluation";
+import * as fileChangeSchemaTable from "@/lib/persistence/schema/file-change";
+import * as filesystemCheckpointSchemaTable from "@/lib/persistence/schema/filesystem-checkpoint";
+import * as idempotencySchemaTable from "@/lib/persistence/schema/idempotency";
+import * as identitySchemaTable from "@/lib/persistence/schema/identity";
+import * as permissionSchemaTable from "@/lib/persistence/schema/permission";
+import * as recoveryDrillSchemaTable from "@/lib/persistence/schema/recovery-drill";
+import * as runtimeSchemaTable from "@/lib/persistence/schema/runtime";
+import * as runtimeArtifactSchemaTable from "@/lib/persistence/schema/runtime-artifact";
+import * as securityIncidentSchemaTable from "@/lib/persistence/schema/security-incident";
+import * as traceSchemaTable from "@/lib/persistence/schema/trace";
+import * as usageSchemaTable from "@/lib/persistence/schema/usage";
+import * as userActionRequestSchemaTable from "@/lib/persistence/schema/user-action-request";
+import * as workspaceSchemaTable from "@/lib/persistence/schema/workspace";
 import * as publicationRecordSchema from "@/lib/publications/persistence/publication-record";
 import * as routeRevisionSchema from "@/lib/routes/persistence/route-revision-record";
 import * as runtimeConformanceRunSchema from "@/lib/runtimes/persistence/runtime-conformance-run-record";
-import * as v11AdminExportSchema from "@/lib/v11/schema/admin-export";
-import * as v11AgentSchema from "@/lib/v11/schema/agent";
-import * as v11AuditSchema from "@/lib/v11/schema/audit";
-import * as v11AuthorizationSchema from "@/lib/v11/schema/authorization";
-import * as v11DeploymentRouteSchema from "@/lib/v11/schema/deployment-route";
-import * as v11DeviceSchema from "@/lib/v11/schema/device";
-import * as v11EffectSchema from "@/lib/v11/schema/effect";
-import * as v11EnvironmentSchema from "@/lib/v11/schema/environment";
-import * as v11EvaluationSchema from "@/lib/v11/schema/evaluation";
-import * as v11FileChangeSchema from "@/lib/v11/schema/file-change";
-import * as v11FilesystemCheckpointSchema from "@/lib/v11/schema/filesystem-checkpoint";
-import * as v11IdempotencySchema from "@/lib/v11/schema/idempotency";
-import * as v11IdentitySchema from "@/lib/v11/schema/identity";
-import * as v11PermissionSchema from "@/lib/v11/schema/permission";
-import * as v11RecoveryDrillSchema from "@/lib/v11/schema/recovery-drill";
-import * as v11RuntimeSchema from "@/lib/v11/schema/runtime";
-import * as v11RuntimeArtifactSchema from "@/lib/v11/schema/runtime-artifact";
-import * as v11SecurityIncidentSchema from "@/lib/v11/schema/security-incident";
-import * as v11TraceSchema from "@/lib/v11/schema/trace";
-import * as v11UsageSchema from "@/lib/v11/schema/usage";
-import * as v11UserActionRequestSchema from "@/lib/v11/schema/user-action-request";
-import * as v11WorkspaceSchema from "@/lib/v11/schema/workspace";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import * as schema from "./schema";
@@ -38,28 +38,28 @@ const fullSchema = {
   ...publicationRecordSchema,
   ...runtimeConformanceRunSchema,
   ...routeRevisionSchema,
-  ...v11IdentitySchema,
-  ...v11DeviceSchema,
-  ...v11AuthorizationSchema,
-  ...v11IdempotencySchema,
-  ...v11AuditSchema,
-  ...v11AdminExportSchema,
-  ...v11AgentSchema,
-  ...v11RuntimeSchema,
-  ...v11DeploymentRouteSchema,
-  ...v11WorkspaceSchema,
-  ...v11EnvironmentSchema,
-  ...v11PermissionSchema,
-  ...v11UserActionRequestSchema,
-  ...v11EffectSchema,
-  ...v11RuntimeArtifactSchema,
-  ...v11FileChangeSchema,
-  ...v11FilesystemCheckpointSchema,
-  ...v11TraceSchema,
-  ...v11EvaluationSchema,
-  ...v11UsageSchema,
-  ...v11RecoveryDrillSchema,
-  ...v11SecurityIncidentSchema,
+  ...identitySchemaTable,
+  ...deviceSchemaTable,
+  ...authorizationSchemaTable,
+  ...idempotencySchemaTable,
+  ...auditSchemaTable,
+  ...adminExportSchemaTable,
+  ...agentSchemaTable,
+  ...runtimeSchemaTable,
+  ...deploymentRouteSchemaTable,
+  ...workspaceSchemaTable,
+  ...environmentSchemaTable,
+  ...permissionSchemaTable,
+  ...userActionRequestSchemaTable,
+  ...effectSchemaTable,
+  ...runtimeArtifactSchemaTable,
+  ...fileChangeSchemaTable,
+  ...filesystemCheckpointSchemaTable,
+  ...traceSchemaTable,
+  ...evaluationSchemaTable,
+  ...usageSchemaTable,
+  ...recoveryDrillSchemaTable,
+  ...securityIncidentSchemaTable,
 };
 
 /**

@@ -18,14 +18,13 @@
  * - 非法状态转移 → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - 缺少 evidence_ref / failure_reason → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
+  REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   SecurityIncidentError,
   getSecurityIncidentById,
@@ -33,13 +32,20 @@ import {
   markContainmentFailed,
   revertContainment,
 } from "@/lib/identity/security-incident-queries";
-import type { V11IncidentContainment } from "@/lib/v11/schema/security-incident";
+import type { IncidentContainment } from "@/lib/persistence/schema/security-incident";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
 const VALID_ACTIONS = new Set(["apply", "fail", "revert"]);
 
-function projectContainment(c: V11IncidentContainment): Record<string, unknown> {
+function projectContainment(c: IncidentContainment): Record<string, unknown> {
   return {
     id: c.id,
     incident_id: c.incidentId,
@@ -86,10 +92,10 @@ export async function POST(
   // 3. 解析路径参数 + 请求体
   const { security_incident_id: incidentId, containment_id: containmentId } = await context.params;
   if (!incidentId) {
-    return v11SchemaInvalid(requestId, "缺少路径参数 security_incident_id");
+    return schemaInvalidTable(requestId, "缺少路径参数 security_incident_id");
   }
   if (!containmentId) {
-    return v11SchemaInvalid(requestId, "缺少路径参数 containment_id");
+    return schemaInvalidTable(requestId, "缺少路径参数 containment_id");
   }
 
   const body = (await request.json().catch(() => null)) as {
@@ -102,7 +108,7 @@ export async function POST(
 
   const action = body?.action?.trim();
   if (!action || !VALID_ACTIONS.has(action)) {
-    return v11SchemaInvalid(requestId, "缺少或非法 action（期望 apply/fail/revert）");
+    return schemaInvalidTable(requestId, "缺少或非法 action（期望 apply/fail/revert）");
   }
 
   // 4. 校验事故存在 + 跨租户隔离（containment 隐式归属同租户）
@@ -112,12 +118,12 @@ export async function POST(
   }
 
   try {
-    let updated: V11IncidentContainment;
+    let updated: IncidentContainment;
 
     if (action === "apply") {
       const evidenceRef = body?.evidence_ref?.trim();
       if (!evidenceRef) {
-        return v11SchemaInvalid(
+        return schemaInvalidTable(
           requestId,
           "apply 操作缺少 evidence_ref（存储端证据，不能用日志文本冒充隔离成功）",
         );
@@ -132,7 +138,7 @@ export async function POST(
     } else if (action === "fail") {
       const failureReason = body?.failure_reason?.trim();
       if (!failureReason) {
-        return v11SchemaInvalid(requestId, "fail 操作缺少 failure_reason");
+        return schemaInvalidTable(requestId, "fail 操作缺少 failure_reason");
       }
       updated = await markContainmentFailed({
         tenantId: principal.tenantId,
@@ -161,7 +167,7 @@ export async function POST(
         return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
       }
       if (err.code === "missing_evidence") {
-        return v11SchemaInvalid(requestId, err.message);
+        return schemaInvalidTable(requestId, err.message);
       }
     }
     throw err;

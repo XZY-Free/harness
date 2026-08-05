@@ -15,19 +15,12 @@
  * - 缺少必填字段 → 400 REQUEST_SCHEMA_INVALID
  * - 策略已存在 → 409 BUSINESS_CONSTRAINT_VIOLATION
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiError, apiSuccess, getRequestId } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import {
   RetentionPolicyError,
   createRetentionPolicy,
@@ -36,7 +29,14 @@ import {
 import {
   RETENTION_OBJECT_TYPES,
   type RetentionObjectType,
-} from "@/lib/v11/schema/retention-policy";
+} from "@/lib/persistence/schema/retention-policy";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +72,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const objectType = body?.object_type?.trim();
   if (!objectType || !VALID_OBJECT_TYPES.has(objectType)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "缺少或非法 object_type（期望 thread/event/trace/audit/artifact/memory/knowledge/job/security_log）",
     );
@@ -80,22 +80,22 @@ export async function POST(request: Request): Promise<Response> {
 
   const retentionDays = body?.retention_days?.trim();
   if (!retentionDays) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 retention_days");
+    return schemaInvalidTable(requestId, "缺少必填字段 retention_days");
   }
 
   const dataClass = body?.data_class?.trim();
   if (!dataClass) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 data_class");
+    return schemaInvalidTable(requestId, "缺少必填字段 data_class");
   }
 
   const statutoryRequirements = body?.statutory_requirements?.trim();
   if (!statutoryRequirements) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 statutory_requirements");
+    return schemaInvalidTable(requestId, "缺少必填字段 statutory_requirements");
   }
 
   const description = body?.description?.trim();
   if (!description) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 description");
+    return schemaInvalidTable(requestId, "缺少必填字段 description");
   }
 
   const legalHoldDays = body?.legal_hold_days?.trim() || undefined;
@@ -147,7 +147,7 @@ export async function POST(request: Request): Promise<Response> {
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof RetentionPolicyError && err.code === "invalid_retention_days") {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }
@@ -172,12 +172,12 @@ export async function GET(request: Request): Promise<Response> {
   const cursor = url.searchParams.get("cursor") ?? undefined;
 
   if (objectTypeParam && !VALID_OBJECT_TYPES.has(objectTypeParam)) {
-    return v11SchemaInvalid(requestId, "非法 object_type 查询参数");
+    return schemaInvalidTable(requestId, "非法 object_type 查询参数");
   }
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
   if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
-    return v11SchemaInvalid(requestId, "非法 limit 查询参数");
+    return schemaInvalidTable(requestId, "非法 limit 查询参数");
   }
 
   // action scope 校验：按 tenant 维度授权

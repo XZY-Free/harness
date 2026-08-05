@@ -25,9 +25,9 @@ import { randomUUID } from "node:crypto";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  getRequestId,
   apiError,
   apiSuccess,
+  getRequestId,
 } from "@/lib/http";
 import {
   assertAudienceMatch,
@@ -35,13 +35,13 @@ import {
   extractBearerToken,
   workloadTokenErrorResponse,
 } from "@/lib/identity/workload-token";
-import { getRouteHostedAdapter } from "@/lib/v11/runtime/adapters/hosted-adapter";
+import { getRouteHostedAdapter } from "@/lib/runtime/adapters/hosted-adapter";
 import {
   type RuntimeCapabilitiesResponse,
   type StartInvocationRequestBody,
   type StartInvocationResponse,
   defaultRuntimeCapabilities,
-} from "@/lib/v11/runtime/runtime-client";
+} from "@/lib/runtime/runtime-client";
 
 export const dynamic = "force-dynamic";
 

@@ -28,21 +28,24 @@ import {
   ENVIRONMENT_LEASE_STATES,
   ENVIRONMENT_LEASE_TERMINAL_STATES,
   ENVIRONMENT_TYPES,
+  type EnvironmentChangeRequest,
+  type EnvironmentChangeRequestInsert,
   type EnvironmentChangeRequestState,
+  type EnvironmentDefinition,
+  type EnvironmentDefinitionInsert,
   type EnvironmentDefinitionLifecycleState,
+  type EnvironmentLease,
+  type EnvironmentLeaseInsert,
   type EnvironmentLeaseState,
   type EnvironmentType,
-  type V11EnvironmentChangeRequest,
-  type V11EnvironmentChangeRequestInsert,
-  type V11EnvironmentDefinition,
-  type V11EnvironmentDefinitionInsert,
-  type V11EnvironmentLease,
-  type V11EnvironmentLeaseInsert,
-  v11EnvironmentChangeRequest,
-  v11EnvironmentDefinition,
-  v11EnvironmentLease,
-} from "@/lib/v11/schema/environment";
-import { type ExecutionOwnershipState, v11ExecutionOwnership } from "@/lib/v11/schema/runtime";
+  environmentChangeRequestTable,
+  environmentDefinitionTable,
+  environmentLeaseTable,
+} from "@/lib/persistence/schema/environment";
+import {
+  type ExecutionOwnershipState,
+  executionOwnershipTable,
+} from "@/lib/persistence/schema/runtime";
 import { and, desc, eq, isNotNull, lt, ne } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -131,7 +134,7 @@ export const DEFAULT_ENVIRONMENT_POLICIES = {
   network: { allowDomains: [], denyDomains: [], allowEgress: false },
   resourceLimits: { cpuMillis: 1000, memoryMb: 1024, timeoutSeconds: 300, maxConcurrency: 1 },
   secret: { allowedCredentialRefIds: [], injectionMode: "env" as const },
-} satisfies V11EnvironmentDefinitionInsert["filesystemPolicyJson"];
+} satisfies EnvironmentDefinitionInsert["filesystemPolicyJson"];
 
 // ─── EnvironmentDefinition CRUD ───────────────────────────
 
@@ -141,15 +144,15 @@ export interface CreateEnvironmentDefinitionInput {
   displayName: string;
   description?: string;
   environmentType: EnvironmentType;
-  filesystemPolicyJson?: V11EnvironmentDefinitionInsert["filesystemPolicyJson"];
-  networkPolicyJson?: V11EnvironmentDefinitionInsert["networkPolicyJson"];
-  resourceLimitsJson?: V11EnvironmentDefinitionInsert["resourceLimitsJson"];
-  secretPolicyJson?: V11EnvironmentDefinitionInsert["secretPolicyJson"];
+  filesystemPolicyJson?: EnvironmentDefinitionInsert["filesystemPolicyJson"];
+  networkPolicyJson?: EnvironmentDefinitionInsert["networkPolicyJson"];
+  resourceLimitsJson?: EnvironmentDefinitionInsert["resourceLimitsJson"];
+  secretPolicyJson?: EnvironmentDefinitionInsert["secretPolicyJson"];
 }
 
 export async function createEnvironmentDefinition(
   input: CreateEnvironmentDefinitionInput,
-): Promise<V11EnvironmentDefinition> {
+): Promise<EnvironmentDefinition> {
   if (!input.tenantId) throw new EnvironmentValidationError("tenantId 不能为空");
   if (!isValidEnvironmentKey(input.environmentKey)) {
     throw new EnvironmentValidationError(
@@ -161,7 +164,7 @@ export async function createEnvironmentDefinition(
     throw new EnvironmentValidationError(`非法 environmentType: ${input.environmentType}`);
   }
 
-  const insert: V11EnvironmentDefinitionInsert = {
+  const insert: EnvironmentDefinitionInsert = {
     tenantId: input.tenantId,
     environmentKey: input.environmentKey,
     displayName: input.displayName,
@@ -173,7 +176,7 @@ export async function createEnvironmentDefinition(
     secretPolicyJson: input.secretPolicyJson ?? DEFAULT_ENVIRONMENT_POLICIES.secret,
   };
 
-  await db.insert(v11EnvironmentDefinition).values(insert);
+  await db.insert(environmentDefinitionTable).values(insert);
   // MySQL 不支持 .returning()，回查。
   const created = await getEnvironmentDefinitionByKey(input.tenantId, input.environmentKey);
   if (!created) throw new EnvironmentNotFoundError("EnvironmentDefinition 创建后回查失败");
@@ -183,12 +186,12 @@ export async function createEnvironmentDefinition(
 export async function getEnvironmentDefinitionById(
   tenantId: string,
   id: string,
-): Promise<V11EnvironmentDefinition | null> {
+): Promise<EnvironmentDefinition | null> {
   const [row] = await db
     .select()
-    .from(v11EnvironmentDefinition)
+    .from(environmentDefinitionTable)
     .where(
-      and(eq(v11EnvironmentDefinition.tenantId, tenantId), eq(v11EnvironmentDefinition.id, id)),
+      and(eq(environmentDefinitionTable.tenantId, tenantId), eq(environmentDefinitionTable.id, id)),
     )
     .limit(1);
   return row ?? null;
@@ -197,14 +200,14 @@ export async function getEnvironmentDefinitionById(
 export async function getEnvironmentDefinitionByKey(
   tenantId: string,
   environmentKey: string,
-): Promise<V11EnvironmentDefinition | null> {
+): Promise<EnvironmentDefinition | null> {
   const [row] = await db
     .select()
-    .from(v11EnvironmentDefinition)
+    .from(environmentDefinitionTable)
     .where(
       and(
-        eq(v11EnvironmentDefinition.tenantId, tenantId),
-        eq(v11EnvironmentDefinition.environmentKey, environmentKey),
+        eq(environmentDefinitionTable.tenantId, tenantId),
+        eq(environmentDefinitionTable.environmentKey, environmentKey),
       ),
     )
     .limit(1);
@@ -218,25 +221,25 @@ export async function listEnvironmentDefinitions(
     lifecycleState?: EnvironmentDefinitionLifecycleState;
     limit?: number;
   },
-): Promise<V11EnvironmentDefinition[]> {
+): Promise<EnvironmentDefinition[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
-  const conditions = [eq(v11EnvironmentDefinition.tenantId, tenantId)];
+  const conditions = [eq(environmentDefinitionTable.tenantId, tenantId)];
 
   if (options?.environmentType) {
-    conditions.push(eq(v11EnvironmentDefinition.environmentType, options.environmentType));
+    conditions.push(eq(environmentDefinitionTable.environmentType, options.environmentType));
   }
   if (options?.lifecycleState) {
-    conditions.push(eq(v11EnvironmentDefinition.lifecycleState, options.lifecycleState));
+    conditions.push(eq(environmentDefinitionTable.lifecycleState, options.lifecycleState));
   } else {
     // 默认排除 deleted。
-    conditions.push(ne(v11EnvironmentDefinition.lifecycleState, "deleted"));
+    conditions.push(ne(environmentDefinitionTable.lifecycleState, "deleted"));
   }
 
   return db
     .select()
-    .from(v11EnvironmentDefinition)
+    .from(environmentDefinitionTable)
     .where(and(...conditions))
-    .orderBy(desc(v11EnvironmentDefinition.updatedAt))
+    .orderBy(desc(environmentDefinitionTable.updatedAt))
     .limit(limit);
 }
 
@@ -244,7 +247,7 @@ export async function archiveEnvironmentDefinition(
   tenantId: string,
   id: string,
   expectedVersionNo: number,
-): Promise<V11EnvironmentDefinition> {
+): Promise<EnvironmentDefinition> {
   const current = await getEnvironmentDefinitionById(tenantId, id);
   if (!current) throw new EnvironmentNotFoundError(`EnvironmentDefinition ${id} 不存在`);
   if (current.versionNo !== expectedVersionNo) {
@@ -262,7 +265,7 @@ export async function archiveEnvironmentDefinition(
   }
 
   await db
-    .update(v11EnvironmentDefinition)
+    .update(environmentDefinitionTable)
     .set({
       lifecycleState: "archived",
       updatedAt: new Date(),
@@ -270,9 +273,9 @@ export async function archiveEnvironmentDefinition(
     })
     .where(
       and(
-        eq(v11EnvironmentDefinition.tenantId, tenantId),
-        eq(v11EnvironmentDefinition.id, id),
-        eq(v11EnvironmentDefinition.versionNo, expectedVersionNo),
+        eq(environmentDefinitionTable.tenantId, tenantId),
+        eq(environmentDefinitionTable.id, id),
+        eq(environmentDefinitionTable.versionNo, expectedVersionNo),
       ),
     );
 
@@ -290,13 +293,13 @@ export interface CreateEnvironmentLeaseInput {
   attemptId: string;
   deviceId?: string;
   workerRef?: string;
-  capabilitiesJson?: V11EnvironmentLeaseInsert["capabilitiesJson"];
+  capabilitiesJson?: EnvironmentLeaseInsert["capabilitiesJson"];
   expiresAt?: Date;
 }
 
 export async function createEnvironmentLease(
   input: CreateEnvironmentLeaseInput,
-): Promise<V11EnvironmentLease> {
+): Promise<EnvironmentLease> {
   if (!input.tenantId) throw new EnvironmentValidationError("tenantId 不能为空");
   if (!input.environmentDefinitionId) {
     throw new EnvironmentValidationError("environmentDefinitionId 不能为空");
@@ -329,7 +332,7 @@ export async function createEnvironmentLease(
     );
   }
 
-  const insert: V11EnvironmentLeaseInsert = {
+  const insert: EnvironmentLeaseInsert = {
     tenantId: input.tenantId,
     environmentDefinitionId: input.environmentDefinitionId,
     invocationId: input.invocationId,
@@ -341,15 +344,15 @@ export async function createEnvironmentLease(
     expiresAt: input.expiresAt ?? null,
   };
 
-  await db.insert(v11EnvironmentLease).values(insert);
+  await db.insert(environmentLeaseTable).values(insert);
   const [created] = await db
     .select()
-    .from(v11EnvironmentLease)
+    .from(environmentLeaseTable)
     .where(
       and(
-        eq(v11EnvironmentLease.tenantId, input.tenantId),
-        eq(v11EnvironmentLease.invocationId, input.invocationId),
-        eq(v11EnvironmentLease.attemptId, input.attemptId),
+        eq(environmentLeaseTable.tenantId, input.tenantId),
+        eq(environmentLeaseTable.invocationId, input.invocationId),
+        eq(environmentLeaseTable.attemptId, input.attemptId),
       ),
     )
     .limit(1);
@@ -360,11 +363,11 @@ export async function createEnvironmentLease(
 export async function getEnvironmentLeaseById(
   tenantId: string,
   id: string,
-): Promise<V11EnvironmentLease | null> {
+): Promise<EnvironmentLease | null> {
   const [row] = await db
     .select()
-    .from(v11EnvironmentLease)
-    .where(and(eq(v11EnvironmentLease.tenantId, tenantId), eq(v11EnvironmentLease.id, id)))
+    .from(environmentLeaseTable)
+    .where(and(eq(environmentLeaseTable.tenantId, tenantId), eq(environmentLeaseTable.id, id)))
     .limit(1);
   return row ?? null;
 }
@@ -372,17 +375,17 @@ export async function getEnvironmentLeaseById(
 export async function listEnvironmentLeasesByInvocation(
   tenantId: string,
   invocationId: string,
-): Promise<V11EnvironmentLease[]> {
+): Promise<EnvironmentLease[]> {
   return db
     .select()
-    .from(v11EnvironmentLease)
+    .from(environmentLeaseTable)
     .where(
       and(
-        eq(v11EnvironmentLease.tenantId, tenantId),
-        eq(v11EnvironmentLease.invocationId, invocationId),
+        eq(environmentLeaseTable.tenantId, tenantId),
+        eq(environmentLeaseTable.invocationId, invocationId),
       ),
     )
-    .orderBy(desc(v11EnvironmentLease.createdAt));
+    .orderBy(desc(environmentLeaseTable.createdAt));
 }
 
 /**
@@ -399,8 +402,8 @@ async function transitionLeaseState(
   leaseId: string,
   nextState: EnvironmentLeaseState,
   allowedFrom: EnvironmentLeaseState[],
-  patch: Partial<V11EnvironmentLease> = {},
-): Promise<V11EnvironmentLease> {
+  patch: Partial<EnvironmentLease> = {},
+): Promise<EnvironmentLease> {
   const current = await getEnvironmentLeaseById(tenantId, leaseId);
   if (!current) {
     throw new EnvironmentNotFoundError(`EnvironmentLease ${leaseId} 不存在`);
@@ -417,7 +420,7 @@ async function transitionLeaseState(
   }
 
   await db
-    .update(v11EnvironmentLease)
+    .update(environmentLeaseTable)
     .set({
       leaseState: nextState,
       updatedAt: new Date(),
@@ -425,9 +428,9 @@ async function transitionLeaseState(
     })
     .where(
       and(
-        eq(v11EnvironmentLease.tenantId, tenantId),
-        eq(v11EnvironmentLease.id, leaseId),
-        eq(v11EnvironmentLease.leaseState, current.leaseState),
+        eq(environmentLeaseTable.tenantId, tenantId),
+        eq(environmentLeaseTable.id, leaseId),
+        eq(environmentLeaseTable.leaseState, current.leaseState),
       ),
     );
 
@@ -441,7 +444,7 @@ export async function activateEnvironmentLease(
   tenantId: string,
   leaseId: string,
   heartbeatAt?: Date,
-): Promise<V11EnvironmentLease> {
+): Promise<EnvironmentLease> {
   return transitionLeaseState(tenantId, leaseId, "active", ["allocated"], {
     lastHeartbeatAt: heartbeatAt ?? new Date(),
   });
@@ -452,7 +455,7 @@ export async function heartbeatEnvironmentLease(
   tenantId: string,
   leaseId: string,
   heartbeatAt?: Date,
-): Promise<V11EnvironmentLease> {
+): Promise<EnvironmentLease> {
   const current = await getEnvironmentLeaseById(tenantId, leaseId);
   if (!current) throw new EnvironmentNotFoundError(`EnvironmentLease ${leaseId} 不存在`);
   if (ENVIRONMENT_LEASE_TERMINAL_STATES.includes(current.leaseState)) {
@@ -461,12 +464,14 @@ export async function heartbeatEnvironmentLease(
     );
   }
   await db
-    .update(v11EnvironmentLease)
+    .update(environmentLeaseTable)
     .set({
       lastHeartbeatAt: heartbeatAt ?? new Date(),
       updatedAt: new Date(),
     })
-    .where(and(eq(v11EnvironmentLease.tenantId, tenantId), eq(v11EnvironmentLease.id, leaseId)));
+    .where(
+      and(eq(environmentLeaseTable.tenantId, tenantId), eq(environmentLeaseTable.id, leaseId)),
+    );
   const updated = await getEnvironmentLeaseById(tenantId, leaseId);
   if (!updated) throw new EnvironmentNotFoundError("EnvironmentLease 心跳后回查失败");
   return updated;
@@ -476,7 +481,7 @@ export async function heartbeatEnvironmentLease(
 export async function beginReleaseEnvironmentLease(
   tenantId: string,
   leaseId: string,
-): Promise<V11EnvironmentLease> {
+): Promise<EnvironmentLease> {
   return transitionLeaseState(tenantId, leaseId, "releasing", ["active"]);
 }
 
@@ -484,7 +489,7 @@ export async function beginReleaseEnvironmentLease(
 export async function releaseEnvironmentLease(
   tenantId: string,
   leaseId: string,
-): Promise<V11EnvironmentLease> {
+): Promise<EnvironmentLease> {
   const current = await getEnvironmentLeaseById(tenantId, leaseId);
   if (!current) throw new EnvironmentNotFoundError(`EnvironmentLease ${leaseId} 不存在`);
   if (ENVIRONMENT_LEASE_TERMINAL_STATES.includes(current.leaseState)) {
@@ -493,7 +498,7 @@ export async function releaseEnvironmentLease(
     );
   }
   await db
-    .update(v11EnvironmentLease)
+    .update(environmentLeaseTable)
     .set({
       leaseState: "released",
       releasedAt: new Date(),
@@ -501,9 +506,9 @@ export async function releaseEnvironmentLease(
     })
     .where(
       and(
-        eq(v11EnvironmentLease.tenantId, tenantId),
-        eq(v11EnvironmentLease.id, leaseId),
-        eq(v11EnvironmentLease.leaseState, current.leaseState),
+        eq(environmentLeaseTable.tenantId, tenantId),
+        eq(environmentLeaseTable.id, leaseId),
+        eq(environmentLeaseTable.leaseState, current.leaseState),
       ),
     );
   const updated = await getEnvironmentLeaseById(tenantId, leaseId);
@@ -515,7 +520,7 @@ export async function releaseEnvironmentLease(
 export async function expireEnvironmentLease(
   tenantId: string,
   leaseId: string,
-): Promise<V11EnvironmentLease> {
+): Promise<EnvironmentLease> {
   const current = await getEnvironmentLeaseById(tenantId, leaseId);
   if (!current) throw new EnvironmentNotFoundError(`EnvironmentLease ${leaseId} 不存在`);
   if (ENVIRONMENT_LEASE_TERMINAL_STATES.includes(current.leaseState)) {
@@ -524,16 +529,16 @@ export async function expireEnvironmentLease(
     );
   }
   await db
-    .update(v11EnvironmentLease)
+    .update(environmentLeaseTable)
     .set({
       leaseState: "expired",
       updatedAt: new Date(),
     })
     .where(
       and(
-        eq(v11EnvironmentLease.tenantId, tenantId),
-        eq(v11EnvironmentLease.id, leaseId),
-        eq(v11EnvironmentLease.leaseState, current.leaseState),
+        eq(environmentLeaseTable.tenantId, tenantId),
+        eq(environmentLeaseTable.id, leaseId),
+        eq(environmentLeaseTable.leaseState, current.leaseState),
       ),
     );
   const updated = await getEnvironmentLeaseById(tenantId, leaseId);
@@ -545,7 +550,7 @@ export async function expireEnvironmentLease(
 export async function markLostEnvironmentLease(
   tenantId: string,
   leaseId: string,
-): Promise<V11EnvironmentLease> {
+): Promise<EnvironmentLease> {
   const current = await getEnvironmentLeaseById(tenantId, leaseId);
   if (!current) throw new EnvironmentNotFoundError(`EnvironmentLease ${leaseId} 不存在`);
   if (ENVIRONMENT_LEASE_TERMINAL_STATES.includes(current.leaseState)) {
@@ -554,16 +559,16 @@ export async function markLostEnvironmentLease(
     );
   }
   await db
-    .update(v11EnvironmentLease)
+    .update(environmentLeaseTable)
     .set({
       leaseState: "lost",
       updatedAt: new Date(),
     })
     .where(
       and(
-        eq(v11EnvironmentLease.tenantId, tenantId),
-        eq(v11EnvironmentLease.id, leaseId),
-        eq(v11EnvironmentLease.leaseState, current.leaseState),
+        eq(environmentLeaseTable.tenantId, tenantId),
+        eq(environmentLeaseTable.id, leaseId),
+        eq(environmentLeaseTable.leaseState, current.leaseState),
       ),
     );
   const updated = await getEnvironmentLeaseById(tenantId, leaseId);
@@ -581,19 +586,19 @@ export async function markExpiredEnvironmentLeases(
   now: Date = new Date(),
 ): Promise<number> {
   const result = await db
-    .update(v11EnvironmentLease)
+    .update(environmentLeaseTable)
     .set({
       leaseState: "expired",
       updatedAt: now,
     })
     .where(
       and(
-        eq(v11EnvironmentLease.tenantId, tenantId),
-        lt(v11EnvironmentLease.expiresAt, now),
-        ne(v11EnvironmentLease.leaseState, "released"),
-        ne(v11EnvironmentLease.leaseState, "expired"),
-        ne(v11EnvironmentLease.leaseState, "lost"),
-        isNotNull(v11EnvironmentLease.expiresAt),
+        eq(environmentLeaseTable.tenantId, tenantId),
+        lt(environmentLeaseTable.expiresAt, now),
+        ne(environmentLeaseTable.leaseState, "released"),
+        ne(environmentLeaseTable.leaseState, "expired"),
+        ne(environmentLeaseTable.leaseState, "lost"),
+        isNotNull(environmentLeaseTable.expiresAt),
       ),
     );
   return result[0].affectedRows;
@@ -612,19 +617,19 @@ export async function markLostEnvironmentLeasesByHeartbeat(
 ): Promise<number> {
   const cutoff = new Date(now.getTime() - heartbeatTimeoutMs);
   const result = await db
-    .update(v11EnvironmentLease)
+    .update(environmentLeaseTable)
     .set({
       leaseState: "lost",
       updatedAt: now,
     })
     .where(
       and(
-        eq(v11EnvironmentLease.tenantId, tenantId),
-        lt(v11EnvironmentLease.lastHeartbeatAt, cutoff),
-        ne(v11EnvironmentLease.leaseState, "released"),
-        ne(v11EnvironmentLease.leaseState, "expired"),
-        ne(v11EnvironmentLease.leaseState, "lost"),
-        isNotNull(v11EnvironmentLease.lastHeartbeatAt),
+        eq(environmentLeaseTable.tenantId, tenantId),
+        lt(environmentLeaseTable.lastHeartbeatAt, cutoff),
+        ne(environmentLeaseTable.leaseState, "released"),
+        ne(environmentLeaseTable.leaseState, "expired"),
+        ne(environmentLeaseTable.leaseState, "lost"),
+        isNotNull(environmentLeaseTable.lastHeartbeatAt),
       ),
     );
   return result[0].affectedRows;
@@ -645,7 +650,7 @@ export interface CreateEnvironmentChangeRequestInput {
 
 export async function createEnvironmentChangeRequest(
   input: CreateEnvironmentChangeRequestInput,
-): Promise<V11EnvironmentChangeRequest> {
+): Promise<EnvironmentChangeRequest> {
   if (!input.tenantId) throw new EnvironmentValidationError("tenantId 不能为空");
   if (!input.threadId) throw new EnvironmentValidationError("threadId 不能为空");
   if (!input.fromEnvironmentDefinitionId) {
@@ -695,7 +700,7 @@ export async function createEnvironmentChangeRequest(
     );
   }
 
-  const insert: V11EnvironmentChangeRequestInsert = {
+  const insert: EnvironmentChangeRequestInsert = {
     tenantId: input.tenantId,
     threadId: input.threadId,
     invocationId: input.invocationId ?? null,
@@ -707,18 +712,18 @@ export async function createEnvironmentChangeRequest(
     requestedBy: input.requestedBy,
   };
 
-  await db.insert(v11EnvironmentChangeRequest).values(insert);
+  await db.insert(environmentChangeRequestTable).values(insert);
   const [created] = await db
     .select()
-    .from(v11EnvironmentChangeRequest)
+    .from(environmentChangeRequestTable)
     .where(
       and(
-        eq(v11EnvironmentChangeRequest.tenantId, input.tenantId),
-        eq(v11EnvironmentChangeRequest.threadId, input.threadId),
-        eq(v11EnvironmentChangeRequest.requestedBy, input.requestedBy),
+        eq(environmentChangeRequestTable.tenantId, input.tenantId),
+        eq(environmentChangeRequestTable.threadId, input.threadId),
+        eq(environmentChangeRequestTable.requestedBy, input.requestedBy),
       ),
     )
-    .orderBy(desc(v11EnvironmentChangeRequest.createdAt))
+    .orderBy(desc(environmentChangeRequestTable.createdAt))
     .limit(1);
   if (!created) {
     throw new EnvironmentNotFoundError("EnvironmentChangeRequest 创建后回查失败");
@@ -729,14 +734,14 @@ export async function createEnvironmentChangeRequest(
 export async function getEnvironmentChangeRequestById(
   tenantId: string,
   id: string,
-): Promise<V11EnvironmentChangeRequest | null> {
+): Promise<EnvironmentChangeRequest | null> {
   const [row] = await db
     .select()
-    .from(v11EnvironmentChangeRequest)
+    .from(environmentChangeRequestTable)
     .where(
       and(
-        eq(v11EnvironmentChangeRequest.tenantId, tenantId),
-        eq(v11EnvironmentChangeRequest.id, id),
+        eq(environmentChangeRequestTable.tenantId, tenantId),
+        eq(environmentChangeRequestTable.id, id),
       ),
     )
     .limit(1);
@@ -747,20 +752,20 @@ export async function listEnvironmentChangeRequestsByThread(
   tenantId: string,
   threadId: string,
   options?: { requestState?: EnvironmentChangeRequestState; limit?: number },
-): Promise<V11EnvironmentChangeRequest[]> {
+): Promise<EnvironmentChangeRequest[]> {
   const limit = Math.min(options?.limit ?? 100, 500);
   const conditions = [
-    eq(v11EnvironmentChangeRequest.tenantId, tenantId),
-    eq(v11EnvironmentChangeRequest.threadId, threadId),
+    eq(environmentChangeRequestTable.tenantId, tenantId),
+    eq(environmentChangeRequestTable.threadId, threadId),
   ];
   if (options?.requestState) {
-    conditions.push(eq(v11EnvironmentChangeRequest.requestState, options.requestState));
+    conditions.push(eq(environmentChangeRequestTable.requestState, options.requestState));
   }
   return db
     .select()
-    .from(v11EnvironmentChangeRequest)
+    .from(environmentChangeRequestTable)
     .where(and(...conditions))
-    .orderBy(desc(v11EnvironmentChangeRequest.createdAt))
+    .orderBy(desc(environmentChangeRequestTable.createdAt))
     .limit(limit);
 }
 
@@ -769,7 +774,7 @@ export async function acceptForNextInvocationEnvironmentChangeRequest(
   tenantId: string,
   id: string,
   reasonCode?: string,
-): Promise<V11EnvironmentChangeRequest> {
+): Promise<EnvironmentChangeRequest> {
   return transitionChangeRequestState(
     tenantId,
     id,
@@ -784,7 +789,7 @@ export async function acknowledgeRuntimeMigrationEnvironmentChangeRequest(
   tenantId: string,
   id: string,
   reasonCode?: string,
-): Promise<V11EnvironmentChangeRequest> {
+): Promise<EnvironmentChangeRequest> {
   return transitionChangeRequestState(
     tenantId,
     id,
@@ -799,7 +804,7 @@ export async function rejectEnvironmentChangeRequest(
   tenantId: string,
   id: string,
   reasonCode?: string,
-): Promise<V11EnvironmentChangeRequest> {
+): Promise<EnvironmentChangeRequest> {
   return transitionChangeRequestState(tenantId, id, "rejected", ["pending"], reasonCode);
 }
 
@@ -808,7 +813,7 @@ export async function expireEnvironmentChangeRequest(
   tenantId: string,
   id: string,
   reasonCode?: string,
-): Promise<V11EnvironmentChangeRequest> {
+): Promise<EnvironmentChangeRequest> {
   return transitionChangeRequestState(
     tenantId,
     id,
@@ -824,7 +829,7 @@ async function transitionChangeRequestState(
   nextState: EnvironmentChangeRequestState,
   allowedFrom: EnvironmentChangeRequestState[],
   reasonCode?: string,
-): Promise<V11EnvironmentChangeRequest> {
+): Promise<EnvironmentChangeRequest> {
   const current = await getEnvironmentChangeRequestById(tenantId, id);
   if (!current) {
     throw new EnvironmentNotFoundError(`EnvironmentChangeRequest ${id} 不存在`);
@@ -841,7 +846,7 @@ async function transitionChangeRequestState(
   }
 
   await db
-    .update(v11EnvironmentChangeRequest)
+    .update(environmentChangeRequestTable)
     .set({
       requestState: nextState,
       reasonCode: reasonCode ?? current.reasonCode,
@@ -852,9 +857,9 @@ async function transitionChangeRequestState(
     })
     .where(
       and(
-        eq(v11EnvironmentChangeRequest.tenantId, tenantId),
-        eq(v11EnvironmentChangeRequest.id, id),
-        eq(v11EnvironmentChangeRequest.requestState, current.requestState),
+        eq(environmentChangeRequestTable.tenantId, tenantId),
+        eq(environmentChangeRequestTable.id, id),
+        eq(environmentChangeRequestTable.requestState, current.requestState),
       ),
     );
 
@@ -898,12 +903,12 @@ export async function acquireExecutionOwnership(
     // 锁定当前 Invocation 的所有 ownership 行，计算 next epoch。
     const rows = await tx
       .select({
-        id: v11ExecutionOwnership.id,
-        leaseEpoch: v11ExecutionOwnership.leaseEpoch,
-        ownershipState: v11ExecutionOwnership.ownershipState,
+        id: executionOwnershipTable.id,
+        leaseEpoch: executionOwnershipTable.leaseEpoch,
+        ownershipState: executionOwnershipTable.ownershipState,
       })
-      .from(v11ExecutionOwnership)
-      .where(eq(v11ExecutionOwnership.invocationId, input.invocationId))
+      .from(executionOwnershipTable)
+      .where(eq(executionOwnershipTable.invocationId, input.invocationId))
       .for("update");
 
     const activeRows = rows.filter((r) => r.ownershipState === "active");
@@ -911,18 +916,18 @@ export async function acquireExecutionOwnership(
       // 释放已有的 active ownership。
       for (const r of activeRows) {
         await tx
-          .update(v11ExecutionOwnership)
+          .update(executionOwnershipTable)
           .set({
             ownershipState: "released",
             releasedAt: new Date(),
           })
-          .where(eq(v11ExecutionOwnership.id, r.id));
+          .where(eq(executionOwnershipTable.id, r.id));
       }
     }
 
     const nextEpoch = rows.reduce((max, r) => Math.max(max, r.leaseEpoch), 0) + 1;
     const id = crypto.randomUUID();
-    await tx.insert(v11ExecutionOwnership).values({
+    await tx.insert(executionOwnershipTable).values({
       id,
       invocationId: input.invocationId,
       deviceId: input.deviceId ?? null,
@@ -951,11 +956,11 @@ export async function getActiveExecutionOwnership(invocationId: string): Promise
 } | null> {
   const [row] = await db
     .select()
-    .from(v11ExecutionOwnership)
+    .from(executionOwnershipTable)
     .where(
       and(
-        eq(v11ExecutionOwnership.invocationId, invocationId),
-        eq(v11ExecutionOwnership.ownershipState, "active"),
+        eq(executionOwnershipTable.invocationId, invocationId),
+        eq(executionOwnershipTable.ownershipState, "active"),
       ),
     )
     .limit(1);
@@ -968,16 +973,16 @@ export async function releaseExecutionOwnership(
   ownershipId: string,
 ): Promise<void> {
   const result = await db
-    .update(v11ExecutionOwnership)
+    .update(executionOwnershipTable)
     .set({
       ownershipState: "released",
       releasedAt: new Date(),
     })
     .where(
       and(
-        eq(v11ExecutionOwnership.id, ownershipId),
-        eq(v11ExecutionOwnership.invocationId, invocationId),
-        eq(v11ExecutionOwnership.ownershipState, "active"),
+        eq(executionOwnershipTable.id, ownershipId),
+        eq(executionOwnershipTable.invocationId, invocationId),
+        eq(executionOwnershipTable.ownershipState, "active"),
       ),
     );
   if (result[0].affectedRows === 0) {
@@ -993,15 +998,15 @@ export async function markLostExecutionOwnership(
   ownershipId: string,
 ): Promise<void> {
   const result = await db
-    .update(v11ExecutionOwnership)
+    .update(executionOwnershipTable)
     .set({
       ownershipState: "lost",
     })
     .where(
       and(
-        eq(v11ExecutionOwnership.id, ownershipId),
-        eq(v11ExecutionOwnership.invocationId, invocationId),
-        eq(v11ExecutionOwnership.ownershipState, "active"),
+        eq(executionOwnershipTable.id, ownershipId),
+        eq(executionOwnershipTable.invocationId, invocationId),
+        eq(executionOwnershipTable.ownershipState, "active"),
       ),
     );
   if (result[0].affectedRows === 0) {
@@ -1018,15 +1023,15 @@ export async function heartbeatExecutionOwnership(
   heartbeatAt?: Date,
 ): Promise<void> {
   const result = await db
-    .update(v11ExecutionOwnership)
+    .update(executionOwnershipTable)
     .set({
       lastHeartbeatAt: heartbeatAt ?? new Date(),
     })
     .where(
       and(
-        eq(v11ExecutionOwnership.id, ownershipId),
-        eq(v11ExecutionOwnership.invocationId, invocationId),
-        eq(v11ExecutionOwnership.ownershipState, "active"),
+        eq(executionOwnershipTable.id, ownershipId),
+        eq(executionOwnershipTable.invocationId, invocationId),
+        eq(executionOwnershipTable.ownershipState, "active"),
       ),
     );
   if (result[0].affectedRows === 0) {

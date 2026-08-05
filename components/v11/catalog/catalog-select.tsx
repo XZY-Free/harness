@@ -29,11 +29,11 @@
 
 import { useV11Catalog } from "@/components/hooks/use-v11-catalog";
 import { cn } from "@/lib/utils";
-import type { V11ClientCatalogResourceType } from "@/lib/v11/client/types";
+import type { ClientCatalogResourceType } from "@/lib/v11/client/types";
 import { useId } from "react";
 
 interface CatalogSelectProps {
-  readonly resourceType: V11ClientCatalogResourceType;
+  readonly resourceType: ClientCatalogResourceType;
   readonly value: string | null;
   readonly onChange: (value: string) => void;
   /** 标签（无障碍 aria-label）。 */

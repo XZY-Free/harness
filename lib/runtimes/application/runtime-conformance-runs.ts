@@ -2,11 +2,11 @@ import { runtimeConformanceConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { and, desc, eq } from "drizzle-orm";
 
 const record = createRecordRuntimeConformanceRun({

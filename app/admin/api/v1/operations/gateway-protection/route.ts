@@ -15,7 +15,7 @@
  * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  */
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,

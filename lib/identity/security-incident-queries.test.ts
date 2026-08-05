@@ -42,12 +42,12 @@ import {
   updateIncidentState,
 } from "@/lib/identity/security-incident-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { tenant } from "@/lib/v11/schema/identity";
+import { tenant } from "@/lib/persistence/schema/identity";
 import {
   CONTAINMENT_ACTION_MATRIX,
   type IncidentSeverity,
   type IncidentTargetType,
-} from "@/lib/v11/schema/security-incident";
+} from "@/lib/persistence/schema/security-incident";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {

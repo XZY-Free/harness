@@ -1,9 +1,9 @@
-import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import {
   AttestationAlreadyRevokedError,
   AttestationNotFoundError,
   revokeAttestation,
 } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 /**
  * POST /admin/api/v1/artifact-attestations/{attestation_id}:revoke — 撤销制品证明（S12-W04）。
  *
@@ -26,7 +26,13 @@ import {
  * - 已撤销 → 409 ATTESTATION_ALREADY_REVOKED
  * - 缺少 reason → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound, apiSuccess } from "@/lib/http";
+import {
+  REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -37,7 +43,7 @@ import {
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
@@ -85,7 +91,7 @@ export async function POST(
   const body = (await request.json().catch(() => null)) as { reason?: string } | null;
   const reason = body?.reason?.trim();
   if (!reason) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 reason");
+    return schemaInvalidTable(requestId, "缺少必填字段 reason");
   }
 
   // 执行撤销

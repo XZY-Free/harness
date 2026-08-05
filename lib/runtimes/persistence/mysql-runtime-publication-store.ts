@@ -1,10 +1,10 @@
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
-import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import {
   artifact,
   artifactAttestation,
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
@@ -96,8 +96,14 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
             artifactId: row.attestation.artifactId,
             artifactDigest: row.attestation.artifactDigest,
             attestationId: row.attestation.id,
-            verificationState: row.attestation.verificationState as "verified" | "failed" | "pending",
-            attestationFormat: (row.attestation.attestationFormat ?? "legacy_custom") as "legacy_custom" | "in_toto_dsse" | "sigstore_bundle",
+            verificationState: row.attestation.verificationState as
+              | "verified"
+              | "failed"
+              | "pending",
+            attestationFormat: (row.attestation.attestationFormat ?? "legacy_custom") as
+              | "legacy_custom"
+              | "in_toto_dsse"
+              | "sigstore_bundle",
             verifiedAt: row.attestation.verifiedAt,
             revokedAt: row.attestation.revokedAt,
             revocationRecordId: row.revocation?.id ?? null,

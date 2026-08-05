@@ -1,15 +1,20 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
+import {
+  getIdempotencyRecordById,
+  insertProcessingRecord,
+} from "@/lib/identity/idempotency-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
+import { listConformanceResultsByRevision } from "@/lib/runtime/runtime-conformance-result-queries";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
-import { seedVerifiedRuntimeAttestation } from "@/lib/runtimes/test-support/seed-verified-runtime-attestation";
 import { MANDATORY_GATE_CASES } from "@/lib/runtimes/domain/runtime-conformance";
 import {
   ALL_CONFORMANCE_CASES,
@@ -26,13 +31,8 @@ import {
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import {
-  getIdempotencyRecordById,
-  insertProcessingRecord,
-} from "@/lib/identity/idempotency-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { listConformanceResultsByRevision } from "@/lib/v11/runtime/runtime-conformance-result-queries";
+import { seedVerifiedRuntimeAttestation } from "@/lib/runtimes/test-support/seed-verified-runtime-attestation";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 

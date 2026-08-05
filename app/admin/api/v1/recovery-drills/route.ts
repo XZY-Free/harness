@@ -18,19 +18,12 @@
  * - 同租户已有未完成同类型演练 → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - environment_tag 为空 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiError, apiSuccess, getRequestId } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
 import {
   RecoveryDrillError,
   createRecoveryDrill,
@@ -41,7 +34,14 @@ import {
   RECOVERY_DRILL_TYPES,
   type RecoveryDrillState,
   type RecoveryDrillType,
-} from "@/lib/v11/schema/recovery-drill";
+} from "@/lib/persistence/schema/recovery-drill";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -121,7 +121,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const drillType = body?.drill_type?.trim();
   if (!drillType || !VALID_DRILL_TYPES.has(drillType)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "缺少或非法 drill_type（期望 db_restore/object_version/secret_restore/runtime_failover/queue_failover）",
     );
@@ -129,7 +129,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const environmentTag = body?.environment_tag?.trim();
   if (!environmentTag) {
-    return v11SchemaInvalid(requestId, "缺少必填字段 environment_tag（演练必须在隔离环境执行）");
+    return schemaInvalidTable(requestId, "缺少必填字段 environment_tag（演练必须在隔离环境执行）");
   }
 
   const reason = body?.reason?.trim() || undefined;
@@ -139,13 +139,13 @@ export async function POST(request: Request): Promise<Response> {
     rpoTargetSeconds !== undefined &&
     (!Number.isInteger(rpoTargetSeconds) || rpoTargetSeconds < 0)
   ) {
-    return v11SchemaInvalid(requestId, "rpo_target_seconds 必须为非负整数");
+    return schemaInvalidTable(requestId, "rpo_target_seconds 必须为非负整数");
   }
   if (
     rtoTargetSeconds !== undefined &&
     (!Number.isInteger(rtoTargetSeconds) || rtoTargetSeconds < 0)
   ) {
-    return v11SchemaInvalid(requestId, "rto_target_seconds 必须为非负整数");
+    return schemaInvalidTable(requestId, "rto_target_seconds 必须为非负整数");
   }
 
   // 3. action scope 校验：按 tenant 维度授权
@@ -184,7 +184,7 @@ export async function POST(request: Request): Promise<Response> {
       err instanceof RecoveryDrillError &&
       (err.code === "invalid_environment" || err.code === "illegal_transition")
     ) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }
@@ -212,15 +212,15 @@ export async function GET(request: Request): Promise<Response> {
   const cursor = url.searchParams.get("cursor") ?? undefined;
 
   if (drillTypeParam && !VALID_DRILL_TYPES.has(drillTypeParam)) {
-    return v11SchemaInvalid(requestId, "非法 drill_type 查询参数");
+    return schemaInvalidTable(requestId, "非法 drill_type 查询参数");
   }
   if (drillStateParam && !VALID_DRILL_STATES.has(drillStateParam)) {
-    return v11SchemaInvalid(requestId, "非法 drill_state 查询参数");
+    return schemaInvalidTable(requestId, "非法 drill_state 查询参数");
   }
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
   if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
-    return v11SchemaInvalid(requestId, "非法 limit 查询参数");
+    return schemaInvalidTable(requestId, "非法 limit 查询参数");
   }
 
   // 3. action scope 校验：按 tenant 维度授权

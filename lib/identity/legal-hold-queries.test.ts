@@ -26,12 +26,12 @@ import {
   releaseLegalHold,
 } from "@/lib/identity/legal-hold-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { tenant } from "@/lib/v11/schema/identity";
+import { tenant } from "@/lib/persistence/schema/identity";
 import {
+  type LegalHold,
   type LegalHoldTargetType,
-  type V11LegalHold,
-  v11LegalHold,
-} from "@/lib/v11/schema/retention-policy";
+  legalHoldTable,
+} from "@/lib/persistence/schema/retention-policy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -446,7 +446,7 @@ describe("isLegalHoldActive", () => {
     const t = await ensureDefaultTenant();
     // 直接插入一条已过期的 active Hold（绕过 createLegalHold 的有效期校验）
     const past = new Date(Date.now() - 60 * 1000);
-    await db.insert(v11LegalHold).values({
+    await db.insert(legalHoldTable).values({
       id: crypto.randomUUID(),
       tenantId: t.id,
       targetType: "thread",
@@ -601,7 +601,7 @@ describe("listExpiredActiveHolds", () => {
     // 插入一条过期的 active Hold（绕过 createLegalHold 的有效期校验）
     const past1 = new Date(Date.now() - 2 * 60 * 1000);
     const past2 = new Date(Date.now() - 1 * 60 * 1000);
-    await db.insert(v11LegalHold).values({
+    await db.insert(legalHoldTable).values({
       id: crypto.randomUUID(),
       tenantId: t.id,
       targetType: "thread",
@@ -612,7 +612,7 @@ describe("listExpiredActiveHolds", () => {
       approvedBy: "approver-001",
       validUntil: past1,
     });
-    await db.insert(v11LegalHold).values({
+    await db.insert(legalHoldTable).values({
       id: crypto.randomUUID(),
       tenantId: t.id,
       targetType: "thread",
@@ -627,7 +627,7 @@ describe("listExpiredActiveHolds", () => {
     const expired = await listExpiredActiveHolds(new Date());
     expect(expired.length).toBeGreaterThanOrEqual(2);
     // 升序
-    const expiredIds = expired.map((h: V11LegalHold) => h.targetId);
+    const expiredIds = expired.map((h: LegalHold) => h.targetId);
     expect(expiredIds.indexOf("expired-1")).toBeLessThan(expiredIds.indexOf("expired-2"));
   });
 
@@ -648,7 +648,7 @@ describe("listExpiredActiveHolds", () => {
   it("不返回已解除的过期 Hold", async () => {
     const t = await ensureDefaultTenant();
     const past = new Date(Date.now() - 60 * 1000);
-    await db.insert(v11LegalHold).values({
+    await db.insert(legalHoldTable).values({
       id: crypto.randomUUID(),
       tenantId: t.id,
       targetType: "thread",

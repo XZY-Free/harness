@@ -289,7 +289,8 @@ const DICT: Record<Locale, Record<string, string>> = {
 
     // ─── chat ────────────────────────────────────────
     "chat.empty.title": "想聊点什么？",
-    "chat.empty.subtitle": "有什么我可以帮你的吗？无论是编写代码、回答问题，还是讨论想法，我随时准备着。",
+    "chat.empty.subtitle":
+      "有什么我可以帮你的吗？无论是编写代码、回答问题，还是讨论想法，我随时准备着。",
     "chat.placeholder.send": "描述你想做的项目…（Shift+Enter 换行）",
     "chat.placeholder.newline": "描述你想做的项目…（⌘Enter 发送）",
     "chat.stop": "停止生成",

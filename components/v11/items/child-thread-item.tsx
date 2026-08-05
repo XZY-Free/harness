@@ -13,13 +13,13 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { V11ClientItem } from "@/lib/v11/client/types";
+import type { ClientItem } from "@/lib/v11/client/types";
 
-interface V11ChildThreadItemProps {
-  readonly item: V11ClientItem;
+interface ChildThreadItemProps {
+  readonly item: ClientItem;
 }
 
-export function V11ChildThreadItem({ item }: V11ChildThreadItemProps) {
+export function ChildThreadItem({ item }: ChildThreadItemProps) {
   const content = item.content as {
     relation_id?: string;
     child_thread_id?: string;

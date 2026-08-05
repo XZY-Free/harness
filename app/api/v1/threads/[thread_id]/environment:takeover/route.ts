@@ -1,26 +1,26 @@
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  apiError,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
-import { getEnvironmentStatus } from "@/lib/v11/conversation/environment-status-queries";
+import { getEnvironmentStatus } from "@/lib/conversations/environment-status-queries";
 import {
   NoActiveOwnershipError,
   TakeoverConditionsNotMetError,
   getTakeoverConditions,
   performTakeover,
-} from "@/lib/v11/conversation/environment-takeover-queries";
+} from "@/lib/conversations/environment-takeover-queries";
 import {
   type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
-import { getTurnsByThread } from "@/lib/v11/conversation/turn-queries";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { getTurnsByThread } from "@/lib/conversations/turn-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -116,13 +116,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体（可选 reason_code）
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：reason_code 必须是字符串（可选）");
+    return schemaInvalidTable(requestId, "请求体非法：reason_code 必须是字符串（可选）");
   }
   const reasonCode = body?.reason_code ?? "user_takeover";
 

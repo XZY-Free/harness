@@ -23,6 +23,8 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { jobTable } from "@/lib/persistence/schema/job";
 import {
   createEvaluationCase,
   createEvaluationResult,
@@ -36,8 +38,6 @@ import {
   updateEvaluationRunState,
   updateEvaluationRunSummary,
 } from "@/lib/v11/evaluation/evaluation-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { v11Job } from "@/lib/v11/schema/job";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -55,10 +55,10 @@ async function seedTenant() {
   return { tenantId: tenant.id };
 }
 
-/** 直接插入一个最小 V11Job 行（供 EvaluationRun.jobId FK 引用）。 */
+/** 直接插入一个最小 Job 行（供 EvaluationRun.jobId FK 引用）。 */
 async function seedJob(tenantId: string): Promise<string> {
   const jobId = randomUUID();
-  await db.insert(v11Job).values({
+  await db.insert(jobTable).values({
     id: jobId,
     tenantId,
     agentId: randomUUID(),

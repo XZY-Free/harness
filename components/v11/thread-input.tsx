@@ -3,7 +3,7 @@
  *
  * 结构：
  * - 大圆角（20px）容器，focus-within 边框加深 + 阴影浮起。
- * - 上方内嵌 V11PendingInputQueue（紧凑单行条，宽度与输入框对齐）。
+ * - 上方内嵌 PendingInputQueue（紧凑单行条，宽度与输入框对齐）。
  * - textarea 自增高，占位"随心输入，交给 Agent 处理…"。
  * - Enter 发送，Shift+Enter 换行，无常驻快捷键提示文字。
  * - 底部工具行：[＋] [助手选择器]（弹性空间）[模型选择器] [右下圆钮]
@@ -14,7 +14,7 @@
  * - 空闲 → Send 箭头（创建正式 Turn）。
  * - 已请求停止（lastInterrupt !== null）→ 圆钮禁用 + title 显示"已请求停止，等待 Runtime 确认"。
  *
- * W4-1 引导：V11PendingInputQueue 的 ↳ 引导 按钮调用本组件的 useV11TurnControls.steer，
+ * W4-1 引导：PendingInputQueue 的 ↳ 引导 按钮调用本组件的 useV11TurnControls.steer，
  * 把排队消息升级为对当前 Turn 的即时引导；成功后 PendingInputQueue 自行从队列移除。
  */
 "use client";
@@ -24,7 +24,7 @@ import { useV11ThreadInput } from "@/components/hooks/use-v11-thread-input";
 import { useV11TurnControls } from "@/components/hooks/use-v11-turn-controls";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { V11ClientPendingInput, V11ClientThread, V11ClientTurn } from "@/lib/v11/client/types";
+import type { ClientPendingInput, ClientThread, ClientTurn } from "@/lib/v11/client/types";
 import { Loader2, Send, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -33,12 +33,12 @@ import {
   ModelSelectorPopover,
   PlusMenuPopover,
 } from "./input/input-popovers";
-import { V11PendingInputQueue } from "./pending-input-queue";
+import { PendingInputQueue } from "./pending-input-queue";
 
-interface V11ThreadInputProps {
+interface ThreadInputProps {
   readonly threadId: string;
-  readonly latestTurn: V11ClientTurn | null;
-  readonly thread?: V11ClientThread | null;
+  readonly latestTurn: ClientTurn | null;
+  readonly thread?: ClientThread | null;
   /** Desktop 已加载的真实助手列表。 */
   readonly availableAgents?: readonly AgentOption[];
   readonly onAgentChange?: (agentId: string) => void;
@@ -53,12 +53,12 @@ interface V11ThreadInputProps {
 }
 
 /** 从 PendingInput.input 提取可读文本，作为引导请求体。 */
-function extractPendingInputText(input: V11ClientPendingInput["input"]): string {
+function extractPendingInputText(input: ClientPendingInput["input"]): string {
   if (typeof input.text === "string") return input.text;
   return JSON.stringify(input);
 }
 
-export function V11ThreadInput({
+export function ThreadInput({
   threadId,
   latestTurn,
   thread,
@@ -69,7 +69,7 @@ export function V11ThreadInput({
   onSubmitText,
   currentAgentId,
   currentModelRef,
-}: V11ThreadInputProps) {
+}: ThreadInputProps) {
   const {
     send,
     busy: threadBusy,
@@ -80,7 +80,7 @@ export function V11ThreadInput({
     threadId,
     latestTurn,
   });
-  // W4-1：停止/引导由 V11ThreadInput 内部承载，不再依赖顶部 TurnControls。
+  // W4-1：停止/引导由 ThreadInput 内部承载，不再依赖顶部 TurnControls。
   // onSubmitText 用于新建会话首条消息（无 Turn），此时不需要 steer/interrupt。
   const turnId = latestTurn?.id ?? "";
   const {
@@ -145,7 +145,7 @@ export function V11ThreadInput({
 
   /** 引导：把排队消息升级为对当前 Turn 的即时引导。 */
   const handleSteer = useCallback(
-    async (item: V11ClientPendingInput): Promise<boolean> => {
+    async (item: ClientPendingInput): Promise<boolean> => {
       if (!turnId) return false;
       return steer(extractPendingInputText(item.input));
     },
@@ -172,7 +172,7 @@ export function V11ThreadInput({
       <div className="mx-auto max-w-[720px]">
         {/* W4-1：待办队列移入输入框上方，宽度与输入框对齐。 */}
         {isRunning && !onSubmitText && (
-          <V11PendingInputQueue threadId={threadId} onSteer={handleSteer} parentBusy={turnBusy} />
+          <PendingInputQueue threadId={threadId} onSteer={handleSteer} parentBusy={turnBusy} />
         )}
 
         {visibleError && (

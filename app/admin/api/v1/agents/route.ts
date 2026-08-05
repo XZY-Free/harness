@@ -1,5 +1,5 @@
 import { listAgents } from "@/lib/agents/persistence/agent-queries";
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 /**
  * GET /admin/api/v1/agents — 列出当前租户下所有 Agent（S11-W02）。
  *

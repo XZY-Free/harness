@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest";
 import {
-  isValidProvisioningTransition,
-  isProvisioningClaimable,
-  computeProvisioningBackoff,
-  classifyProvisioningError,
   type ProvisioningState,
+  classifyProvisioningError,
+  computeProvisioningBackoff,
+  isProvisioningClaimable,
+  isValidProvisioningTransition,
 } from "@/lib/runtimes/domain/hosted-provisioning-request";
 import type { HostedProvisioningRequest } from "@/lib/runtimes/domain/hosted-provisioning-request";
+import { describe, expect, it } from "vitest";
 
 // ─── 状态机测试 ──────────────────────────────────────────────
 

@@ -19,9 +19,15 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createCredentialRef } from "@/lib/v11/capability/tool-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import {
+  ALLOWED_RESOLUTIONS_BY_TYPE,
+  type UserActionRequestType,
+  type UserActionResolution,
+} from "@/lib/persistence/schema/user-action-request";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
+import { createCredentialRef } from "@/lib/v11/capability/tool-queries";
 import {
   UserActionAlreadyResolvedError,
   UserActionAuthCallbackInvalidError,
@@ -42,12 +48,6 @@ import {
   markExpiredUserActionRequests,
   resolveUserActionRequest,
 } from "@/lib/v11/permission/user-action-queries";
-import {
-  ALLOWED_RESOLUTIONS_BY_TYPE,
-  type UserActionRequestType,
-  type UserActionResolution,
-} from "@/lib/v11/schema/user-action-request";
-import { v11UserActionRequest } from "@/lib/v11/schema/user-action-request";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -108,9 +108,9 @@ function pastTime(hours = 1): Date {
  */
 async function backdateRequestExpiry(requestId: string, hoursAgo = 1): Promise<void> {
   await db
-    .update(v11UserActionRequest)
+    .update(userActionRequestTable)
     .set({ expiresAt: pastTime(hoursAgo) })
-    .where(eq(v11UserActionRequest.id, requestId));
+    .where(eq(userActionRequestTable.id, requestId));
 }
 
 // ═══════════════════════════════════════════════════════════

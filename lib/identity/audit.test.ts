@@ -31,7 +31,7 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { AUDIT_ACTION_TYPES } from "@/lib/v11/schema/audit";
+import { AUDIT_ACTION_TYPES } from "@/lib/persistence/schema/audit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 import type { AgentOption } from "./input/input-popovers";
 import { useOptionalSidebar } from "./sidebar/sidebar-context";
-import { V11ThreadInput } from "./thread-input";
+import { ThreadInput } from "./thread-input";
 import { ThreadTimeline } from "./thread-timeline";
 
 export interface NewThreadSubmission {
@@ -13,19 +13,14 @@ export interface NewThreadSubmission {
   readonly modelRef: string | null;
 }
 
-interface V11NewThreadPageProps {
+interface NewThreadPageProps {
   readonly agents: readonly AgentOption[];
   readonly defaultAgentId: string;
   readonly error?: string | null;
   readonly onSubmit: (submission: NewThreadSubmission) => Promise<boolean>;
 }
 
-export function V11NewThreadPage({
-  agents,
-  defaultAgentId,
-  error,
-  onSubmit,
-}: V11NewThreadPageProps) {
+export function NewThreadPage({ agents, defaultAgentId, error, onSubmit }: NewThreadPageProps) {
   const sidebar = useOptionalSidebar();
   const [agentId, setAgentId] = useState(defaultAgentId);
   const [modelRef, setModelRef] = useState<string | null>(null);
@@ -60,7 +55,7 @@ export function V11NewThreadPage({
         </div>
       )}
       <ThreadTimeline items={[]} streamStatus="idle" />
-      <V11ThreadInput
+      <ThreadInput
         threadId="new"
         draftKey="new"
         latestTurn={null}

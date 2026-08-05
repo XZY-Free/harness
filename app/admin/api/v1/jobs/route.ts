@@ -1,9 +1,9 @@
-import { REQUEST_ID_HEADER, decodeCursor, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, decodeCursor, getRequestId } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import { listJobsByTenant } from "@/lib/v11/job/job-queries";
 /**
@@ -54,7 +54,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let jobState:
@@ -67,7 +67,7 @@ export async function GET(request: Request): Promise<Response> {
     | undefined;
   if (jobStateParam) {
     if (!VALID_JOB_STATES.has(jobStateParam)) {
-      return v11SchemaInvalid(requestId, `job_state 非法: ${jobStateParam}`);
+      return schemaInvalidTable(requestId, `job_state 非法: ${jobStateParam}`);
     }
     jobState = jobStateParam as
       | "queued"
@@ -83,14 +83,14 @@ export async function GET(request: Request): Promise<Response> {
     try {
       const decoded = decodeCursor(cursor) as { created_at?: string };
       if (typeof decoded.created_at !== "string") {
-        return v11SchemaInvalid(requestId, "cursor 缺少 created_at 字段");
+        return schemaInvalidTable(requestId, "cursor 缺少 created_at 字段");
       }
       afterCreatedAt = new Date(decoded.created_at);
       if (Number.isNaN(afterCreatedAt.getTime())) {
-        return v11SchemaInvalid(requestId, "cursor.created_at 不是合法 ISO 时间");
+        return schemaInvalidTable(requestId, "cursor.created_at 不是合法 ISO 时间");
       }
     } catch (err) {
-      return v11SchemaInvalid(requestId, `cursor 解析失败: ${(err as Error).message}`);
+      return schemaInvalidTable(requestId, `cursor 解析失败: ${(err as Error).message}`);
     }
   }
 

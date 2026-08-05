@@ -19,13 +19,13 @@
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §1.1
  */
 
-import {
-  type ArtifactEvidenceSnapshot,
-  type ArtifactEvidenceErrorCode,
-  type ArtifactEvidenceValidationError,
-  type ArtifactEvidenceValidationResult,
-  type ArtifactType,
-  type AttestationFormat,
+import type {
+  ArtifactEvidenceErrorCode,
+  ArtifactEvidenceSnapshot,
+  ArtifactEvidenceValidationError,
+  ArtifactEvidenceValidationResult,
+  ArtifactType,
+  AttestationFormat,
 } from "./artifact-evidence";
 
 // ─── 配置 ─────────────────────────────────────────────────
@@ -50,7 +50,12 @@ const DEFAULT_CONFIG: ArtifactEvidencePolicyConfig = {
 
 function validateBaseRules(
   snapshot: ArtifactEvidenceSnapshot,
-  context: { expectedTenantId: string; expectedArtifactType: ArtifactType; expectedRevisionId: string; expectedDigest: string | null },
+  context: {
+    expectedTenantId: string;
+    expectedArtifactType: ArtifactType;
+    expectedRevisionId: string;
+    expectedDigest: string | null;
+  },
   allowedFormats: AttestationFormat[],
 ): ArtifactEvidenceValidationError[] {
   const errors: ArtifactEvidenceValidationError[] = [];

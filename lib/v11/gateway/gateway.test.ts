@@ -23,6 +23,9 @@ import { db } from "@/lib/db/client";
 import { buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ETAG_HEADER, REQUEST_ID_HEADER } from "@/lib/http";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import {
   type CapabilityUseType,
   computeCapabilityUseKey,
@@ -50,9 +53,6 @@ import {
   updateToolProvider,
 } from "@/lib/v11/capability/tool-queries";
 import { refreshCatalogEntry } from "@/lib/v11/catalog/projector";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与其他 v11 集成测试一致）。

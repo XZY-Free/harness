@@ -1,7 +1,7 @@
 /**
  * V11 Skill 仓储（阶段 6 S06-C01）。
  *
- * 事实源：lib/v11/schema/skill.ts、阶段 6 Skill/Capability 模型。
+ * 事实源：lib/persistence/schema/skill.ts、阶段 6 Skill/Capability 模型。
  *
  * 职责：
  * - createSkill：创建稳定 Skill 身份（租户内 skillKey 唯一 + 正则校验）。
@@ -21,17 +21,17 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { isValidContentHash } from "@/lib/v11/capability/content-cache";
 import {
+  type Skill,
   type SkillLifecycleState,
   type SkillRevisionState,
   type SkillSourceType,
+  type SkillVersion,
   type SkillVisibilityScope,
-  type V11Skill,
-  type V11SkillVersion,
-  v11Skill,
-  v11SkillVersion,
-} from "@/lib/v11/schema/skill";
+  skillTable,
+  skillVersionTable,
+} from "@/lib/persistence/schema/skill";
+import { isValidContentHash } from "@/lib/v11/capability/content-cache";
 import { and, asc, desc, eq, gt, inArray, isNull, max, or } from "drizzle-orm";
 
 // ─── 常量 ──────────────────────────────────────────────────
@@ -149,7 +149,7 @@ export async function createSkill(params: {
   visibilityScope?: SkillVisibilityScope;
   sourceType?: SkillSourceType;
   createdBy: string;
-}): Promise<V11Skill> {
+}): Promise<Skill> {
   assertValidSkillKey(params.skillKey);
   if (!params.displayName || params.displayName.length === 0) {
     throw new SkillValidationError("invalid_display_name", "displayName 不能为空");
@@ -173,7 +173,7 @@ export async function createSkill(params: {
 
   const id = randomUUID();
   try {
-    await db.insert(v11Skill).values({
+    await db.insert(skillTable).values({
       id,
       tenantId: params.tenantId,
       skillKey: params.skillKey,
@@ -192,7 +192,7 @@ export async function createSkill(params: {
     throw err;
   }
 
-  const [row] = await db.select().from(v11Skill).where(eq(v11Skill.id, id)).limit(1);
+  const [row] = await db.select().from(skillTable).where(eq(skillTable.id, id)).limit(1);
   if (!row) {
     throw new Error(`createSkill: 行未找到（id=${id}）`);
   }
@@ -203,11 +203,11 @@ export async function createSkill(params: {
 export async function getSkillById(params: {
   tenantId: string;
   skillId: string;
-}): Promise<V11Skill | null> {
+}): Promise<Skill | null> {
   const [row] = await db
     .select()
-    .from(v11Skill)
-    .where(and(eq(v11Skill.tenantId, params.tenantId), eq(v11Skill.id, params.skillId)))
+    .from(skillTable)
+    .where(and(eq(skillTable.tenantId, params.tenantId), eq(skillTable.id, params.skillId)))
     .limit(1);
   return row ?? null;
 }
@@ -216,11 +216,11 @@ export async function getSkillById(params: {
 export async function getSkillByKey(params: {
   tenantId: string;
   skillKey: string;
-}): Promise<V11Skill | null> {
+}): Promise<Skill | null> {
   const [row] = await db
     .select()
-    .from(v11Skill)
-    .where(and(eq(v11Skill.tenantId, params.tenantId), eq(v11Skill.skillKey, params.skillKey)))
+    .from(skillTable)
+    .where(and(eq(skillTable.tenantId, params.tenantId), eq(skillTable.skillKey, params.skillKey)))
     .limit(1);
   return row ?? null;
 }
@@ -232,14 +232,14 @@ export async function listSkills(params: {
   visibilityScopes?: readonly SkillVisibilityScope[];
   limit?: number;
   cursor?: string | null;
-}): Promise<{ items: V11Skill[]; nextCursor: string | null }> {
+}): Promise<{ items: Skill[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
-  const conditions = [eq(v11Skill.tenantId, params.tenantId), isNull(v11Skill.deletedAt)];
+  const conditions = [eq(skillTable.tenantId, params.tenantId), isNull(skillTable.deletedAt)];
   if (params.lifecycleStates && params.lifecycleStates.length > 0) {
-    conditions.push(inArray(v11Skill.lifecycleState, [...params.lifecycleStates]));
+    conditions.push(inArray(skillTable.lifecycleState, [...params.lifecycleStates]));
   }
   if (params.visibilityScopes && params.visibilityScopes.length > 0) {
-    conditions.push(inArray(v11Skill.visibilityScope, [...params.visibilityScopes]));
+    conditions.push(inArray(skillTable.visibilityScope, [...params.visibilityScopes]));
   }
 
   // cursor 为 updatedAt（升序）+ id（升序）的复合编码：`${updatedAtIso}|${id}`。
@@ -252,8 +252,8 @@ export async function listSkills(params: {
     if (decoded) {
       const cursorDate = new Date(decoded.updatedAt);
       const cursorCondition = or(
-        gt(v11Skill.updatedAt, cursorDate),
-        and(eq(v11Skill.updatedAt, cursorDate), gt(v11Skill.id, decoded.id)),
+        gt(skillTable.updatedAt, cursorDate),
+        and(eq(skillTable.updatedAt, cursorDate), gt(skillTable.id, decoded.id)),
       );
       if (cursorCondition) conditions.push(cursorCondition);
     }
@@ -261,9 +261,9 @@ export async function listSkills(params: {
 
   const rows = await db
     .select()
-    .from(v11Skill)
+    .from(skillTable)
     .where(and(...conditions))
-    .orderBy(asc(v11Skill.updatedAt), asc(v11Skill.id))
+    .orderBy(asc(skillTable.updatedAt), asc(skillTable.id))
     .limit(limit + 1);
 
   const items = rows.slice(0, limit);
@@ -289,7 +289,7 @@ export async function updateSkill(params: {
   visibilityScope?: SkillVisibilityScope;
   lifecycleState?: SkillLifecycleState;
   expectedVersionNo: number;
-}): Promise<V11Skill> {
+}): Promise<Skill> {
   const current = await getSkillById({
     tenantId: params.tenantId,
     skillId: params.skillId,
@@ -336,13 +336,13 @@ export async function updateSkill(params: {
   if (params.lifecycleState !== undefined) updates.lifecycleState = params.lifecycleState;
 
   const result = await db
-    .update(v11Skill)
+    .update(skillTable)
     .set(updates)
     .where(
       and(
-        eq(v11Skill.tenantId, params.tenantId),
-        eq(v11Skill.id, params.skillId),
-        eq(v11Skill.versionNo, params.expectedVersionNo),
+        eq(skillTable.tenantId, params.tenantId),
+        eq(skillTable.id, params.skillId),
+        eq(skillTable.versionNo, params.expectedVersionNo),
       ),
     );
 
@@ -374,7 +374,7 @@ export async function createSkillVersion(params: {
   sourceType?: SkillSourceType;
   sourceRef?: string | null;
   createdBy: string;
-}): Promise<V11SkillVersion> {
+}): Promise<SkillVersion> {
   if (!params.contentRef || params.contentRef.length === 0) {
     throw new SkillValidationError("invalid_content_ref", "contentRef 不能为空");
   }
@@ -406,7 +406,7 @@ export async function createSkillVersion(params: {
   const versionNo = await nextVersionNo(params.skillId);
   const id = randomUUID();
   try {
-    await db.insert(v11SkillVersion).values({
+    await db.insert(skillVersionTable).values({
       id,
       skillId: params.skillId,
       versionNo,
@@ -427,7 +427,11 @@ export async function createSkillVersion(params: {
     throw err;
   }
 
-  const [row] = await db.select().from(v11SkillVersion).where(eq(v11SkillVersion.id, id)).limit(1);
+  const [row] = await db
+    .select()
+    .from(skillVersionTable)
+    .where(eq(skillVersionTable.id, id))
+    .limit(1);
   if (!row) {
     throw new Error(`createSkillVersion: 行未找到（id=${id}）`);
   }
@@ -438,13 +442,16 @@ export async function createSkillVersion(params: {
 export async function getSkillVersionById(params: {
   tenantId: string;
   skillVersionId: string;
-}): Promise<V11SkillVersion | null> {
+}): Promise<SkillVersion | null> {
   const [row] = await db
-    .select({ version: v11SkillVersion, skill: v11Skill })
-    .from(v11SkillVersion)
-    .innerJoin(v11Skill, eq(v11SkillVersion.skillId, v11Skill.id))
+    .select({ version: skillVersionTable, skill: skillTable })
+    .from(skillVersionTable)
+    .innerJoin(skillTable, eq(skillVersionTable.skillId, skillTable.id))
     .where(
-      and(eq(v11Skill.tenantId, params.tenantId), eq(v11SkillVersion.id, params.skillVersionId)),
+      and(
+        eq(skillTable.tenantId, params.tenantId),
+        eq(skillVersionTable.id, params.skillVersionId),
+      ),
     )
     .limit(1);
   return row?.version ?? null;
@@ -456,7 +463,7 @@ export async function listSkillVersions(params: {
   skillId: string;
   revisionStates?: readonly SkillRevisionState[];
   limit?: number;
-}): Promise<V11SkillVersion[]> {
+}): Promise<SkillVersion[]> {
   const limit = Math.min(Math.max(params.limit ?? 100, 1), 500);
   // 先校验 skillId 属于 tenantId
   const skill = await getSkillById({
@@ -467,16 +474,16 @@ export async function listSkillVersions(params: {
     throw new SkillNotFoundError(params.skillId);
   }
 
-  const conditions = [eq(v11SkillVersion.skillId, params.skillId)];
+  const conditions = [eq(skillVersionTable.skillId, params.skillId)];
   if (params.revisionStates && params.revisionStates.length > 0) {
-    conditions.push(inArray(v11SkillVersion.revisionState, [...params.revisionStates]));
+    conditions.push(inArray(skillVersionTable.revisionState, [...params.revisionStates]));
   }
 
   return db
     .select()
-    .from(v11SkillVersion)
+    .from(skillVersionTable)
     .where(and(...conditions))
-    .orderBy(desc(v11SkillVersion.versionNo))
+    .orderBy(desc(skillVersionTable.versionNo))
     .limit(limit);
 }
 
@@ -484,7 +491,7 @@ export async function listSkillVersions(params: {
 export async function getCurrentSkillVersion(params: {
   tenantId: string;
   skillId: string;
-}): Promise<V11SkillVersion | null> {
+}): Promise<SkillVersion | null> {
   const skill = await getSkillById({
     tenantId: params.tenantId,
     skillId: params.skillId,
@@ -507,7 +514,7 @@ export async function publishSkillVersion(params: {
   tenantId: string;
   skillVersionId: string;
   publishedBy: string;
-}): Promise<{ skill: V11Skill; version: V11SkillVersion }> {
+}): Promise<{ skill: Skill; version: SkillVersion }> {
   const version = await getSkillVersionById({
     tenantId: params.tenantId,
     skillVersionId: params.skillVersionId,
@@ -546,21 +553,21 @@ export async function publishSkillVersion(params: {
     // 1. 旧 published → withdrawn（除当前正在发布的版本外）
     if (skill.currentVersionId && skill.currentVersionId !== params.skillVersionId) {
       await tx
-        .update(v11SkillVersion)
+        .update(skillVersionTable)
         .set({ revisionState: "withdrawn" })
         .where(
           and(
-            eq(v11SkillVersion.skillId, skill.id),
-            eq(v11SkillVersion.revisionState, "published"),
+            eq(skillVersionTable.skillId, skill.id),
+            eq(skillVersionTable.revisionState, "published"),
           ),
         );
     }
 
     // 2. 新版本 draft → published
     const publishResult = await tx
-      .update(v11SkillVersion)
+      .update(skillVersionTable)
       .set({ revisionState: "published", publishedAt: now })
-      .where(eq(v11SkillVersion.id, params.skillVersionId));
+      .where(eq(skillVersionTable.id, params.skillVersionId));
     if (publishResult[0].affectedRows === 0) {
       throw new SkillVersionConflictError(
         `publishSkillVersion: 更新 SkillVersion=${params.skillVersionId} 为 published 失败`,
@@ -569,7 +576,7 @@ export async function publishSkillVersion(params: {
 
     // 3. Skill.currentVersionId 更新（乐观锁）
     const skillUpdateResult = await tx
-      .update(v11Skill)
+      .update(skillTable)
       .set({
         currentVersionId: params.skillVersionId,
         versionNo: expectedVersionNo + 1,
@@ -577,9 +584,9 @@ export async function publishSkillVersion(params: {
       })
       .where(
         and(
-          eq(v11Skill.tenantId, params.tenantId),
-          eq(v11Skill.id, skill.id),
-          eq(v11Skill.versionNo, expectedVersionNo),
+          eq(skillTable.tenantId, params.tenantId),
+          eq(skillTable.id, skill.id),
+          eq(skillTable.versionNo, expectedVersionNo),
         ),
       );
     if (skillUpdateResult[0].affectedRows === 0) {
@@ -612,9 +619,9 @@ export async function publishSkillVersion(params: {
 /** 计算 Skill 内下一个 versionNo（max +1）。并发冲突由 UNIQUE 约束 fail-loud。 */
 async function nextVersionNo(skillId: string): Promise<number> {
   const [row] = await db
-    .select({ maxNo: max(v11SkillVersion.versionNo) })
-    .from(v11SkillVersion)
-    .where(eq(v11SkillVersion.skillId, skillId));
+    .select({ maxNo: max(skillVersionTable.versionNo) })
+    .from(skillVersionTable)
+    .where(eq(skillVersionTable.skillId, skillId));
   const currentMax = row?.maxNo;
   if (currentMax === null || currentMax === undefined) return 1;
   return currentMax + 1;
@@ -651,6 +658,6 @@ export type {
   SkillRevisionState,
   SkillSourceType,
   SkillVisibilityScope,
-  V11Skill,
-  V11SkillVersion,
-} from "@/lib/v11/schema/skill";
+  Skill,
+  SkillVersion,
+} from "@/lib/persistence/schema/skill";

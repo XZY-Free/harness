@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * 幂等 Backfill 命令：回填 RouteRevision.routeGroupId / selectorDigest
  * 和 RouteActivation.routeSetId。
@@ -16,14 +17,13 @@
  */
 import { db } from "@/lib/db/client";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
-import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import {
-  normalizeEligibility,
-  computeSelectorDigest,
   SELECTOR_ALGORITHM_VERSION,
+  computeSelectorDigest,
+  normalizeEligibility,
 } from "@/lib/routes/domain/route-selector";
-import { createHash } from "node:crypto";
-import { and, eq, isNull, isNotNull, sql, inArray } from "drizzle-orm";
+import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 
 // ─── 回填结果 ──────────────────────────────────────────────
 
@@ -102,7 +102,10 @@ export async function backfillRouteGroupFields(): Promise<BackfillResult> {
       const selectorDigest = normalized ? computeSelectorDigest(normalized) : undefined;
 
       // 确定 routeGroupId
-      const routeGroupId = determineRouteGroupId(revision, routesBySet.get(revision.routeSetId) ?? []);
+      const routeGroupId = determineRouteGroupId(
+        revision,
+        routesBySet.get(revision.routeSetId) ?? [],
+      );
 
       if (routeGroupId === null) {
         // 无法安全归组 — 标记为 invalid（使用特殊值，0118 之前必须处理）

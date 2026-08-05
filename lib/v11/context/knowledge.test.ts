@@ -47,6 +47,18 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { db } from "@/lib/db/client";
 import { buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding } from "@/lib/identity/role-action-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { tenant as tenantTable } from "@/lib/persistence/schema/identity";
+import {
+  knowledgeBase,
+  knowledgeChunk,
+  knowledgeDocument,
+  knowledgeDocumentRevision,
+  knowledgeIndex,
+} from "@/lib/persistence/schema/knowledge";
 import {
   type KnowledgeEvidenceHit,
   KnowledgeRevisionAlreadyPublishedError,
@@ -80,18 +92,6 @@ import {
   upsertKnowledgeIndex,
 } from "@/lib/v11/context/knowledge-queries";
 import { KnowledgeResolver } from "@/lib/v11/context/source-resolvers";
-import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/identity/role-action-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import {
-  knowledgeBase,
-  knowledgeChunk,
-  knowledgeDocument,
-  knowledgeDocumentRevision,
-  knowledgeIndex,
-} from "@/lib/v11/schema/knowledge";
-import { tenant as tenantTable } from "@/lib/v11/schema/identity";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

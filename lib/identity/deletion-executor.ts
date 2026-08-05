@@ -43,10 +43,10 @@ import {
 import { DeletionStoreError } from "@/lib/identity/deletion-store-adapter";
 import { getDeletionStoreAdapter } from "@/lib/identity/deletion-store-config";
 import type {
+  DeletionRequest,
   DeletionRequestState,
-  V11DeletionRequest,
-  V11DeletionStep,
-} from "@/lib/v11/schema/deletion-request";
+  DeletionStep,
+} from "@/lib/persistence/schema/deletion-request";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
@@ -84,9 +84,9 @@ const EXECUTABLE_REQUEST_STATES: ReadonlySet<DeletionRequestState> = new Set([
 /** executor 执行结果（供 route 构建响应 + 测试断言）。 */
 export interface DeletionExecutionResult {
   /** 最终请求行（含状态机推进后的 state）。 */
-  request: V11DeletionRequest;
+  request: DeletionRequest;
   /** 全部 steps（按 storeType, subjectRef 排序）。 */
-  steps: V11DeletionStep[];
+  steps: DeletionStep[];
   /** 请求汇总（从 steps 派生）。 */
   summary: DeletionRequestSummary;
   /** 本次执行的 step 数（不含幂等跳过的 completed/retained/skipped/blocked）。 */
@@ -126,7 +126,7 @@ export interface DeletionExecutionResult {
  */
 export async function executeDeletionRequest(params: {
   tenantId: string;
-  /** 删除请求 id（V11DeletionRequest.id）。 */
+  /** 删除请求 id（DeletionRequest.id）。 */
   deletionRequestId: string;
   actor: AuditActor;
   /** HTTP X-Request-ID，用于审计关联（可选）。 */
@@ -277,7 +277,7 @@ export async function executeDeletionRequest(params: {
  */
 export async function retryDeletionRequest(params: {
   tenantId: string;
-  /** 删除请求 id（V11DeletionRequest.id）。 */
+  /** 删除请求 id（DeletionRequest.id）。 */
   deletionRequestId: string;
   actor: AuditActor;
   /** HTTP X-Request-ID，用于审计关联（可选）。 */

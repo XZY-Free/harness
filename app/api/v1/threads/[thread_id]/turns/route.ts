@@ -1,18 +1,11 @@
 import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  getRequestId,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
-import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
 /**
  * POST /api/v1/threads/{thread_id}/turns — 创建 Turn（S04-C03，§3.4）。
  *
@@ -33,9 +26,14 @@ import { getThreadById } from "@/lib/v11/conversation/thread-queries";
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
-import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import { logger } from "@/lib/logger";
-import { dispatchEmployeeTurn } from "@/lib/v11/runtime/employee-turn-dispatcher";
+import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -46,6 +44,8 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import { logger } from "@/lib/logger";
+import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
 
 export const dynamic = "force-dynamic";
 
@@ -112,13 +112,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 input 或字段类型错误（input.type 必填）");
+    return schemaInvalidTable(
+      requestId,
+      "请求体非法：缺少 input 或字段类型错误（input.type 必填）",
+    );
   }
 
   // 5. 计算请求 hash + 幂等守卫
@@ -233,11 +236,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
 // ─── GET /api/v1/threads/{thread_id}/turns — 查询 Turn 列表（S10-W02） ────────
 
-import { getTurnsByThread } from "@/lib/v11/conversation/turn-queries";
-import type { V11Turn } from "@/lib/v11/schema/conversation";
+import { getTurnsByThread } from "@/lib/conversations/turn-queries";
+import type { Turn } from "@/lib/persistence/schema/conversation";
 
 /** 投影 Turn 为响应体（snake_case）。 */
-function projectTurn(turn: V11Turn): Record<string, unknown> {
+function projectTurn(turn: Turn): Record<string, unknown> {
   return {
     id: turn.id,
     turn_sequence: turn.turnSequence,
@@ -298,7 +301,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const limitParam = url.searchParams.get("limit");
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit < 1 || limit > 200) {
-    return v11SchemaInvalid(requestId, "limit 必须为 1–200 之间的整数");
+    return schemaInvalidTable(requestId, "limit 必须为 1–200 之间的整数");
   }
 
   // 4. 查询 Turn 列表

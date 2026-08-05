@@ -114,7 +114,10 @@ export const ConformanceEligibilityPolicy = {
     const errors: ConformanceEligibilityError[] = [];
 
     if (!snapshot) {
-      return { eligible: false, errors: [{ code: "conformance_run_not_found", message: "ConformanceRun 不存在" }] };
+      return {
+        eligible: false,
+        errors: [{ code: "conformance_run_not_found", message: "ConformanceRun 不存在" }],
+      };
     }
 
     // Tenant 一致

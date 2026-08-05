@@ -40,11 +40,11 @@ export const artifact = mysqlTable(
 );
 
 /**
- * 物理表名在兼容期保持 V11ArtifactAttestation；正式代码只通过本稳定模块访问。
+ * 物理表名在兼容期保持 ArtifactAttestation；正式代码只通过本稳定模块访问。
  * revoked* 三列仅用于读取历史数据，新撤销事实写入 AttestationRevocationRecord。
  */
 export const artifactAttestation = mysqlTable(
-  "V11ArtifactAttestation",
+  "ArtifactAttestation",
   {
     id: varchar("id", { length: 36 }).primaryKey().notNull().$defaultFn(randomUUID),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
@@ -71,7 +71,9 @@ export const artifactAttestation = mysqlTable(
       "legacy_custom",
       "in_toto_dsse",
       "sigstore_bundle",
-    ]).notNull().default("legacy_custom"),
+    ])
+      .notNull()
+      .default("legacy_custom"),
     statementType: varchar("statementType", { length: 128 }),
     predicateType: varchar("predicateType", { length: 256 }),
     bundleRef: varchar("bundleRef", { length: 512 }),
@@ -97,27 +99,25 @@ export const artifactAttestation = mysqlTable(
       .$defaultFn(() => new Date()),
   },
   (table) => ({
-    tenantTypeRevDigestSigUq: uniqueIndex(
-      "V11ArtifactAttestation_tenant_type_rev_digest_sig_uq",
-    ).on(
+    tenantTypeRevDigestSigUq: uniqueIndex("ArtifactAttestation_tenant_type_rev_digest_sig_uq").on(
       table.tenantId,
       table.artifactType,
       table.artifactRevisionId,
       table.artifactDigest,
       table.signatureBundleRef,
     ),
-    artifactIdx: index("V11ArtifactAttestation_artifact_idx").on(table.artifactId),
-    tenantTypeRevStateIdx: index("V11ArtifactAttestation_tenant_type_rev_state_idx").on(
+    artifactIdx: index("ArtifactAttestation_artifact_idx").on(table.artifactId),
+    tenantTypeRevStateIdx: index("ArtifactAttestation_tenant_type_rev_state_idx").on(
       table.tenantId,
       table.artifactType,
       table.artifactRevisionId,
       table.verificationState,
     ),
-    tenantDigestIdx: index("V11ArtifactAttestation_tenant_digest_idx").on(
+    tenantDigestIdx: index("ArtifactAttestation_tenant_digest_idx").on(
       table.tenantId,
       table.artifactDigest,
     ),
-    tenantRevokedIdx: index("V11ArtifactAttestation_tenant_revoked_idx").on(
+    tenantRevokedIdx: index("ArtifactAttestation_tenant_revoked_idx").on(
       table.tenantId,
       table.revokedAt,
     ),

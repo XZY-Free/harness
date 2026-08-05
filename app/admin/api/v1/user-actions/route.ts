@@ -1,9 +1,9 @@
-import { REQUEST_ID_HEADER, decodeCursor, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, decodeCursor, getRequestId } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 import { listUserActionRequestsByTenant } from "@/lib/v11/permission/user-action-queries";
 /**
@@ -49,13 +49,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let requestState: "pending" | "resolved" | "expired" | undefined;
   if (requestStateParam) {
     if (!VALID_REQUEST_STATES.has(requestStateParam)) {
-      return v11SchemaInvalid(requestId, `request_state 非法: ${requestStateParam}`);
+      return schemaInvalidTable(requestId, `request_state 非法: ${requestStateParam}`);
     }
     requestState = requestStateParam as "pending" | "resolved" | "expired";
   }
@@ -63,7 +63,7 @@ export async function GET(request: Request): Promise<Response> {
   let requestType: "confirmation" | "auth" | "grant" | "input" | undefined;
   if (requestTypeParam) {
     if (!VALID_REQUEST_TYPES.has(requestTypeParam)) {
-      return v11SchemaInvalid(requestId, `request_type 非法: ${requestTypeParam}`);
+      return schemaInvalidTable(requestId, `request_type 非法: ${requestTypeParam}`);
     }
     requestType = requestTypeParam as "confirmation" | "auth" | "grant" | "input";
   }
@@ -73,14 +73,14 @@ export async function GET(request: Request): Promise<Response> {
     try {
       const decoded = decodeCursor(cursor) as { created_at?: string };
       if (typeof decoded.created_at !== "string") {
-        return v11SchemaInvalid(requestId, "cursor 缺少 created_at 字段");
+        return schemaInvalidTable(requestId, "cursor 缺少 created_at 字段");
       }
       afterCreatedAt = new Date(decoded.created_at);
       if (Number.isNaN(afterCreatedAt.getTime())) {
-        return v11SchemaInvalid(requestId, "cursor.created_at 不是合法 ISO 时间");
+        return schemaInvalidTable(requestId, "cursor.created_at 不是合法 ISO 时间");
       }
     } catch (err) {
-      return v11SchemaInvalid(requestId, `cursor 解析失败: ${(err as Error).message}`);
+      return schemaInvalidTable(requestId, `cursor 解析失败: ${(err as Error).message}`);
     }
   }
 

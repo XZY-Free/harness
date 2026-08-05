@@ -1,31 +1,31 @@
-import type { V11ClientItem } from "@/lib/v11/client/types";
+import type { ClientItem } from "@/lib/v11/client/types";
 /**
  * S10-W02：V11 Item 渲染组件测试。
  *
  * 覆盖 7 种 item_type 的关键渲染行为：
- * - V11UserMessageItem：user_message / user_guidance；pending 透明度；attachments 占位
- * - V11AgentMessageItem：pending 光标；failed 错误提示
- * - V11ToolCallItem：折叠/展开；状态标签；error 展示
- * - V11ArtifactItem：title/content_type/size 展示
- * - V11UserActionItem：request_type 中文映射；状态标签
- * - V11ChildThreadItem：state 中文映射；跳转链接
- * - V11JobResultItem：进度条；结果摘要；错误信息
+ * - UserMessageItem：user_message / user_guidance；pending 透明度；attachments 占位
+ * - AgentMessageItem：pending 光标；failed 错误提示
+ * - ToolCallItem：折叠/展开；状态标签；error 展示
+ * - ArtifactItem：title/content_type/size 展示
+ * - UserActionItem：request_type 中文映射；状态标签
+ * - ChildThreadItem：state 中文映射；跳转链接
+ * - JobResultItem：进度条；结果摘要；错误信息
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { V11AgentMessageItem } from "./items/agent-message-item";
-import { V11ArtifactItem } from "./items/artifact-item";
-import { V11ChildThreadItem } from "./items/child-thread-item";
-import { V11JobResultItem } from "./items/job-result-item";
-import { V11ToolCallItem } from "./items/tool-call-item";
-import { V11UserActionItem } from "./items/user-action-item";
-import { V11UserMessageItem } from "./items/user-message-item";
+import { AgentMessageItem } from "./items/agent-message-item";
+import { ArtifactItem } from "./items/artifact-item";
+import { ChildThreadItem } from "./items/child-thread-item";
+import { JobResultItem } from "./items/job-result-item";
+import { ToolCallItem } from "./items/tool-call-item";
+import { UserActionItem } from "./items/user-action-item";
+import { UserMessageItem } from "./items/user-message-item";
 
 afterEach(() => {
   cleanup();
 });
 
-function buildItem(overrides: Partial<V11ClientItem> = {}): V11ClientItem {
+function buildItem(overrides: Partial<ClientItem> = {}): ClientItem {
   return {
     id: "item-001",
     turn_id: "turn-001",
@@ -38,24 +38,24 @@ function buildItem(overrides: Partial<V11ClientItem> = {}): V11ClientItem {
   };
 }
 
-// ─── V11UserMessageItem ────────────────────────────────────
+// ─── UserMessageItem ────────────────────────────────────
 
-describe("V11UserMessageItem", () => {
+describe("UserMessageItem", () => {
   it("user_message 渲染文本", () => {
-    render(<V11UserMessageItem item={buildItem({ content: { text: "用户消息" } })} />);
+    render(<UserMessageItem item={buildItem({ content: { text: "用户消息" } })} />);
     const text = screen.getByText("用户消息");
     expect(text).not.toBeNull();
     expect(text.parentElement?.className).toContain("conversation-user-bubble");
   });
 
   it("text 为空时不生成假消息", () => {
-    const { container } = render(<V11UserMessageItem item={buildItem({ content: {} })} />);
+    const { container } = render(<UserMessageItem item={buildItem({ content: {} })} />);
     expect(container.innerHTML).toBe("");
   });
 
   it("user_guidance 显示「引导」标签", () => {
     render(
-      <V11UserMessageItem
+      <UserMessageItem
         item={buildItem({
           item_type: "user_guidance",
           content: { text: "请更详细" },
@@ -68,7 +68,7 @@ describe("V11UserMessageItem", () => {
 
   it("user_guidance pending 时显示「引导待确认」", () => {
     render(
-      <V11UserMessageItem
+      <UserMessageItem
         item={buildItem({
           item_type: "user_guidance",
           item_state: "pending",
@@ -80,24 +80,24 @@ describe("V11UserMessageItem", () => {
   });
 });
 
-// ─── V11AgentMessageItem ───────────────────────────────────
+// ─── AgentMessageItem ───────────────────────────────────
 
-describe("V11AgentMessageItem", () => {
+describe("AgentMessageItem", () => {
   it("渲染 Agent 消息文本", () => {
-    render(<V11AgentMessageItem item={buildItem({ content: { text: "Agent 回复" } })} />);
+    render(<AgentMessageItem item={buildItem({ content: { text: "Agent 回复" } })} />);
     const text = screen.getByText("Agent 回复");
     expect(text).not.toBeNull();
     expect(text.className).toContain("conversation-copy");
   });
 
   it("text 为空时不生成假消息", () => {
-    const { container } = render(<V11AgentMessageItem item={buildItem({ content: {} })} />);
+    const { container } = render(<AgentMessageItem item={buildItem({ content: {} })} />);
     expect(container.innerHTML).toBe("");
   });
 
   it("item_state=failed 时显示「生成失败」", () => {
     render(
-      <V11AgentMessageItem
+      <AgentMessageItem
         item={buildItem({
           item_state: "failed",
           content: { text: "部分回复" },
@@ -109,12 +109,12 @@ describe("V11AgentMessageItem", () => {
   });
 });
 
-// ─── V11ToolCallItem ───────────────────────────────────────
+// ─── ToolCallItem ───────────────────────────────────────
 
-describe("V11ToolCallItem", () => {
+describe("ToolCallItem", () => {
   it("渲染 tool_display_name 优先于 tool_name", () => {
     render(
-      <V11ToolCallItem
+      <ToolCallItem
         item={buildItem({
           item_type: "tool_call",
           content: {
@@ -130,7 +130,7 @@ describe("V11ToolCallItem", () => {
 
   it("无 tool_display_name 时回退到 tool_name", () => {
     render(
-      <V11ToolCallItem
+      <ToolCallItem
         item={buildItem({
           item_type: "tool_call",
           content: { tool_name: "write_file", status: "completed" },
@@ -142,7 +142,7 @@ describe("V11ToolCallItem", () => {
 
   it("点击展开后显示 input/output/error", () => {
     render(
-      <V11ToolCallItem
+      <ToolCallItem
         item={buildItem({
           item_type: "tool_call",
           content: {
@@ -165,7 +165,7 @@ describe("V11ToolCallItem", () => {
 
   it("pending 状态显示「执行中」", () => {
     render(
-      <V11ToolCallItem
+      <ToolCallItem
         item={buildItem({
           item_type: "tool_call",
           item_state: "pending",
@@ -177,12 +177,12 @@ describe("V11ToolCallItem", () => {
   });
 });
 
-// ─── V11ArtifactItem ───────────────────────────────────────
+// ─── ArtifactItem ───────────────────────────────────────
 
-describe("V11ArtifactItem", () => {
+describe("ArtifactItem", () => {
   it("渲染 title + content_type + size", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: {
@@ -200,7 +200,7 @@ describe("V11ArtifactItem", () => {
 
   it("无 title 时回退「未命名文件」", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: { content_type: "text/plain" },
@@ -212,7 +212,7 @@ describe("V11ArtifactItem", () => {
 
   it("无 size 时不展示文件大小", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: { title: "no_size.txt", content_type: "text/plain" },
@@ -224,7 +224,7 @@ describe("V11ArtifactItem", () => {
 
   it("展示来源 Turn/Invocation/ToolCall + hash + 位置（W05）", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: {
@@ -256,7 +256,7 @@ describe("V11ArtifactItem", () => {
 
   it("默认 availability=cloud，下载按钮 enabled", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: { artifact_id: "art_002", display_name: "a.txt", media_type: "text/plain" },
@@ -270,7 +270,7 @@ describe("V11ArtifactItem", () => {
   it("availability=cloud，点击按钮触发 onOpen", () => {
     let clicked: { id: string; avail: string } | null = null;
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: { artifact_id: "art_003", display_name: "a.txt", availability: "cloud" },
@@ -286,7 +286,7 @@ describe("V11ArtifactItem", () => {
 
   it("availability=local + Web 模式 → 显示「等待设备」+ 提示，按钮 disabled（不伪造本地访问）", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: {
@@ -307,7 +307,7 @@ describe("V11ArtifactItem", () => {
 
   it("availability=local + Desktop 模式 + device_id 匹配 → 「在 Desktop 打开」enabled", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: {
@@ -327,7 +327,7 @@ describe("V11ArtifactItem", () => {
 
   it("availability=local + Desktop 模式 + device_id 不匹配 → 等待设备 + 提示", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: {
@@ -349,7 +349,7 @@ describe("V11ArtifactItem", () => {
 
   it("availability=pending_device → 等待设备 + 上线提示", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: {
@@ -369,7 +369,7 @@ describe("V11ArtifactItem", () => {
 
   it("availability=unavailable → 暂不可用 + 提示", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: {
@@ -388,7 +388,7 @@ describe("V11ArtifactItem", () => {
 
   it("MB 级大小正确格式化", () => {
     render(
-      <V11ArtifactItem
+      <ArtifactItem
         item={buildItem({
           item_type: "artifact",
           content: {
@@ -403,12 +403,12 @@ describe("V11ArtifactItem", () => {
   });
 });
 
-// ─── V11UserActionItem ─────────────────────────────────────
+// ─── UserActionItem ─────────────────────────────────────
 
-describe("V11UserActionItem", () => {
+describe("UserActionItem", () => {
   it("带 diff 的高影响确认按原型显示查看差异、确认写入和目标文件", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -437,7 +437,7 @@ describe("V11UserActionItem", () => {
 
   it("带 diff 的确认完成后保留查看差异入口", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -462,7 +462,7 @@ describe("V11UserActionItem", () => {
 
   it("request_type=confirmation 显示「确认请求」", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -476,7 +476,7 @@ describe("V11UserActionItem", () => {
 
   it("request_type=auth 显示「授权请求」", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -489,7 +489,7 @@ describe("V11UserActionItem", () => {
 
   it("request_type=input 显示「输入请求」", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -502,7 +502,7 @@ describe("V11UserActionItem", () => {
 
   it("非 handoff pending 状态显示「待处理」+ 确认/拒绝按钮（enabled）", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -521,7 +521,7 @@ describe("V11UserActionItem", () => {
 
   it("request_type=grant 显示「权限授予请求」+ 同意授权/拒绝按钮", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -552,7 +552,7 @@ describe("V11UserActionItem", () => {
 
   it("request_type=auth 显示「授权请求」+ 去授权链接 + 取消授权按钮", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -575,7 +575,7 @@ describe("V11UserActionItem", () => {
 
   it("request_type=auth 无 auth_url 时显示「等待授权回调」", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -590,7 +590,7 @@ describe("V11UserActionItem", () => {
 
   it("request_type=input 显示输入表单 + 提交/取消按钮", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -619,7 +619,7 @@ describe("V11UserActionItem", () => {
 
   it("state=expired 显示「已超时」+ 无操作按钮", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -642,7 +642,7 @@ describe("V11UserActionItem", () => {
   it("expires_at 已过时显示「已超时」+ 无操作按钮", () => {
     const past = new Date(Date.now() - 60000).toISOString();
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -662,7 +662,7 @@ describe("V11UserActionItem", () => {
   it("expires_at 未来时间显示倒计时", () => {
     const future = new Date(Date.now() + 30 * 60000).toISOString(); // 30 分钟后
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -680,7 +680,7 @@ describe("V11UserActionItem", () => {
 
   it("handoff pending 状态显示「同意交接/拒绝」按钮（enabled）", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           id: "handoff-001",
@@ -710,7 +710,7 @@ describe("V11UserActionItem", () => {
 
   it("completed 状态显示「已完成」", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -726,7 +726,7 @@ describe("V11UserActionItem", () => {
 
   it("展示 impact 字段", () => {
     render(
-      <V11UserActionItem
+      <UserActionItem
         threadId="t1"
         item={buildItem({
           item_type: "user_action",
@@ -742,12 +742,12 @@ describe("V11UserActionItem", () => {
   });
 });
 
-// ─── V11ChildThreadItem ────────────────────────────────────
+// ─── ChildThreadItem ────────────────────────────────────
 
-describe("V11ChildThreadItem", () => {
+describe("ChildThreadItem", () => {
   it("active 状态显示「进行中」+ 跳转链接", () => {
     render(
-      <V11ChildThreadItem
+      <ChildThreadItem
         item={buildItem({
           item_type: "child_thread",
           content: {
@@ -765,7 +765,7 @@ describe("V11ChildThreadItem", () => {
 
   it("completed 状态显示「已完成」", () => {
     render(
-      <V11ChildThreadItem
+      <ChildThreadItem
         item={buildItem({
           item_type: "child_thread",
           content: { state: "completed" },
@@ -777,7 +777,7 @@ describe("V11ChildThreadItem", () => {
 
   it("cancelled 状态显示「已取消」", () => {
     render(
-      <V11ChildThreadItem
+      <ChildThreadItem
         item={buildItem({
           item_type: "child_thread",
           content: { state: "cancelled" },
@@ -789,7 +789,7 @@ describe("V11ChildThreadItem", () => {
 
   it("failed 状态显示「失败」+ error_summary", () => {
     render(
-      <V11ChildThreadItem
+      <ChildThreadItem
         item={buildItem({
           item_type: "child_thread",
           content: {
@@ -805,7 +805,7 @@ describe("V11ChildThreadItem", () => {
 
   it("展示 summary 字段", () => {
     render(
-      <V11ChildThreadItem
+      <ChildThreadItem
         item={buildItem({
           item_type: "child_thread",
           content: {
@@ -819,12 +819,12 @@ describe("V11ChildThreadItem", () => {
   });
 });
 
-// ─── V11JobResultItem ──────────────────────────────────────
+// ─── JobResultItem ──────────────────────────────────────
 
-describe("V11JobResultItem", () => {
+describe("JobResultItem", () => {
   it("pending 状态显示「进行中」+ 进度条", () => {
     render(
-      <V11JobResultItem
+      <JobResultItem
         item={buildItem({
           item_type: "job_result",
           item_state: "pending",
@@ -842,7 +842,7 @@ describe("V11JobResultItem", () => {
 
   it("completed 状态显示「完成」+ 结果摘要", () => {
     render(
-      <V11JobResultItem
+      <JobResultItem
         item={buildItem({
           item_type: "job_result",
           item_state: "completed",
@@ -860,7 +860,7 @@ describe("V11JobResultItem", () => {
 
   it("failed 状态显示「失败」+ error 信息", () => {
     render(
-      <V11JobResultItem
+      <JobResultItem
         item={buildItem({
           item_type: "job_result",
           item_state: "failed",
@@ -879,7 +879,7 @@ describe("V11JobResultItem", () => {
 
   it("job_type 缺失时回退为「Job」", () => {
     render(
-      <V11JobResultItem
+      <JobResultItem
         item={buildItem({
           item_type: "job_result",
           content: {},

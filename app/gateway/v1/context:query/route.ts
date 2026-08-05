@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiError, apiSuccess, getRequestId } from "@/lib/http";
 import { recordCapabilityUse } from "@/lib/v11/capability/capability-use-queries";
 import type { ContextBudgetConfig } from "@/lib/v11/context/budget";
 import {
@@ -22,8 +22,8 @@ import {
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
+  gatewaySchemaInvalidTable,
   resolveGatewayPrincipal,
-  v11GatewaySchemaInvalid,
 } from "@/lib/v11/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
@@ -133,14 +133,14 @@ export async function POST(request: Request): Promise<Response> {
 
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11GatewaySchemaInvalid(
+    return gatewaySchemaInvalidTable(
       requestId,
       "请求体必须且只能包含 context_handle、sources、query、limits",
     );
   }
   const limits = parseLimits(body.limits);
   if (!limits) {
-    return v11GatewaySchemaInvalid(
+    return gatewaySchemaInvalidTable(
       requestId,
       "limits 只能包含正整数 max_items/max_tokens 与合法 max_sensitivity",
     );
@@ -200,13 +200,16 @@ export async function POST(request: Request): Promise<Response> {
     return apiError("RESOURCE_NOT_FOUND", "请求的上下文来源当前不可用", { requestId });
   }
   if (view.failureReason) {
-    return v11GatewaySchemaInvalid(requestId, view.failureReason);
+    return gatewaySchemaInvalidTable(requestId, view.failureReason);
   }
 
   const selectedFragments = view.fragments.slice(0, limits.maxItems);
   const results = selectedFragments.map(projectContextResult);
   if (results.some((result) => result === null)) {
-    return v11GatewaySchemaInvalid(requestId, "请求源当前没有符合 Context Query oneOf 的结果形态");
+    return gatewaySchemaInvalidTable(
+      requestId,
+      "请求源当前没有符合 Context Query oneOf 的结果形态",
+    );
   }
 
   let capabilityUseRecorded = false;

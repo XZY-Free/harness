@@ -35,9 +35,7 @@ export interface InTotoDSSEVerifierConfig {
 /**
  * §8.2: 创建 in-toto DSSE Verifier — 真实验证流程。
  */
-export function createInTotoDSSEVerifier(
-  config: InTotoDSSEVerifierConfig,
-): AttestationVerifier {
+export function createInTotoDSSEVerifier(config: InTotoDSSEVerifierConfig): AttestationVerifier {
   return {
     verify: async (input: VerifyAttestationInput): Promise<VerifyAttestationResult> => {
       const engine = "in-toto-dsse";
@@ -136,7 +134,10 @@ export function createInTotoDSSEVerifier(
         }
 
         // 步骤 9: 校验 Predicate Type
-        if (input.expectedPredicateType && statement.predicateType !== input.expectedPredicateType) {
+        if (
+          input.expectedPredicateType &&
+          statement.predicateType !== input.expectedPredicateType
+        ) {
           return {
             verified: false,
             attestationFormat: "in_toto_dsse",
@@ -219,7 +220,8 @@ async function verifyEnvelopeSignature(
   // 当前 fail-closed: 签名验证不可跳过
   return {
     verified: false,
-    failureReason: "sdk_not_installed: envelope_signature_verification_requires_sigstore_sdk_or_kms_public_key",
+    failureReason:
+      "sdk_not_installed: envelope_signature_verification_requires_sigstore_sdk_or_kms_public_key",
     fields: {},
   };
 }

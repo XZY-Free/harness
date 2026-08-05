@@ -13,7 +13,7 @@
  */
 import { authConfig } from "@/lib/config";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
-import { type ApiAudience, generateRequestId, apiError } from "@/lib/http";
+import { type ApiAudience, apiError, generateRequestId } from "@/lib/http";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -141,9 +141,7 @@ export async function resolvePrincipal(
  * 无 Request 上下文时解析 主体（仅 dev 模式可用）。
  * trusted-headers 模式下因无 header 会抛 AuthenticationError。
  */
-export async function getCurrentPrincipal(
-  audience: ApiAudience = "employee",
-): Promise<Principal> {
+export async function getCurrentPrincipal(audience: ApiAudience = "employee"): Promise<Principal> {
   return resolvePrincipal(new Headers(), audience);
 }
 

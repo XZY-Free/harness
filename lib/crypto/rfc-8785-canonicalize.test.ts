@@ -2,8 +2,8 @@
  * RFC 8785 JSON Canonicalization 单元测试。
  */
 
-import { describe, it, expect } from "vitest";
-import { rfc8785Canonicalize, computeCanonicalDigest } from "./rfc-8785-canonicalize";
+import { describe, expect, it } from "vitest";
+import { computeCanonicalDigest, rfc8785Canonicalize } from "./rfc-8785-canonicalize";
 
 describe("rfc8785Canonicalize", () => {
   it("null → 'null'", () => {
@@ -35,15 +35,15 @@ describe("rfc8785Canonicalize", () => {
   });
 
   it("number: NaN → TypeError", () => {
-    expect(() => rfc8785Canonicalize(NaN)).toThrow(TypeError);
+    expect(() => rfc8785Canonicalize(Number.NaN)).toThrow(TypeError);
   });
 
   it("number: Infinity → TypeError", () => {
-    expect(() => rfc8785Canonicalize(Infinity)).toThrow(TypeError);
+    expect(() => rfc8785Canonicalize(Number.POSITIVE_INFINITY)).toThrow(TypeError);
   });
 
   it("number: -Infinity → TypeError", () => {
-    expect(() => rfc8785Canonicalize(-Infinity)).toThrow(TypeError);
+    expect(() => rfc8785Canonicalize(Number.NEGATIVE_INFINITY)).toThrow(TypeError);
   });
 
   it("undefined → TypeError", () => {

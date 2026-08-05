@@ -66,7 +66,16 @@ export interface RevisionExecutionEligibilityResult {
 
 /** 执行资格错误。 */
 export interface RevisionExecutionEligibilityError {
-  dimension: "agent_publication" | "agent_attestation" | "agent_lifecycle" | "runtime_publication" | "runtime_attestation" | "runtime_conformance" | "runtime_lifecycle" | "capability" | "policy";
+  dimension:
+    | "agent_publication"
+    | "agent_attestation"
+    | "agent_lifecycle"
+    | "runtime_publication"
+    | "runtime_attestation"
+    | "runtime_conformance"
+    | "runtime_lifecycle"
+    | "capability"
+    | "policy";
   code: string;
   message: string;
 }

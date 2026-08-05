@@ -4,10 +4,16 @@ import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
+import { createThread } from "@/lib/conversations/thread-queries";
+import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createExecutionBinding } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { issueWorkloadToken } from "@/lib/identity/workload-token";
+import { createInvocation } from "@/lib/runtime/invocation-queries";
 import {
   createSkill,
   createSkillVersion,
@@ -28,12 +34,6 @@ import {
   SkillResolver,
   threadItemToFragment,
 } from "@/lib/v11/context/source-resolvers";
-import { createThread } from "@/lib/v11/conversation/thread-queries";
-import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { issueWorkloadToken } from "@/lib/identity/workload-token";
-import { createInvocation } from "@/lib/v11/runtime/invocation-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const ORIGINAL_CONTEXT_HANDLE_SECRET = process.env.SNOW_CONTEXT_HANDLE_SECRET;
@@ -337,10 +337,10 @@ describe("短期 context_handle", () => {
       invocationId: seeded.invocationId,
     });
 
-    const { v11AgentRevision } = await import("@/lib/v11/schema/agent");
+    const { agentRevisionTable } = await import("@/lib/persistence/schema/agent");
     const { eq } = await import("drizzle-orm");
     await db
-      .update(v11AgentRevision)
+      .update(agentRevisionTable)
       .set({
         permissionRequirementsJson: {
           context_classification: "restricted",
@@ -348,7 +348,7 @@ describe("短期 context_handle", () => {
           context_skill_ids: [],
         },
       })
-      .where(eq(v11AgentRevision.id, seeded.agentRevisionId));
+      .where(eq(agentRevisionTable.id, seeded.agentRevisionId));
 
     await expect(
       resolveContextHandle(handle, {

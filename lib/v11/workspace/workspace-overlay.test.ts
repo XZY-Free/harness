@@ -17,19 +17,19 @@
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
-import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
   WorkspaceOverlayNotFoundError,
   WorkspaceOverlayStateError,
-} from "@/lib/v11/conversation/errors";
-import { createThread } from "@/lib/v11/conversation/thread-queries";
+} from "@/lib/conversations/errors";
+import { createThread } from "@/lib/conversations/thread-queries";
+import { db } from "@/lib/db/client";
+import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { registerDevice } from "@/lib/identity/device-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { v11ThreadRelation } from "@/lib/v11/schema/conversation";
-import { v11Invocation } from "@/lib/v11/schema/runtime";
+import { threadRelationTable } from "@/lib/persistence/schema/conversation";
+import { invocationTable } from "@/lib/persistence/schema/runtime";
 import {
   abandonWorkspaceOverlay,
   createWorkspaceOverlay,
@@ -106,7 +106,7 @@ async function seedMinimalInvocation(
 ): Promise<string> {
   const id = randomUUID();
   const now = new Date();
-  await db.insert(v11Invocation).values({
+  await db.insert(invocationTable).values({
     id,
     tenantId,
     threadId,
@@ -141,7 +141,7 @@ async function seedMinimalRelation(
 ): Promise<string> {
   const id = randomUUID();
   const now = new Date();
-  await db.insert(v11ThreadRelation).values({
+  await db.insert(threadRelationTable).values({
     id,
     parentThreadId,
     childThreadId,

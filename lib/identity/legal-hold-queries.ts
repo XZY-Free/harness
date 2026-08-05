@@ -22,10 +22,10 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
 import {
+  type LegalHold,
   type LegalHoldTargetType,
-  type V11LegalHold,
-  v11LegalHold,
-} from "@/lib/v11/schema/retention-policy";
+  legalHoldTable,
+} from "@/lib/persistence/schema/retention-policy";
 import { and, asc, eq, gt, lt } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -59,7 +59,7 @@ export async function createLegalHold(params: {
   validUntil: Date;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11LegalHold> {
+}): Promise<LegalHold> {
   // 唯一性检查：同一 target 不可重复 Hold
   const existing = await getLegalHoldByTarget(params.tenantId, params.targetType, params.targetId);
   if (existing) {
@@ -84,7 +84,7 @@ export async function createLegalHold(params: {
   }
 
   const id = randomUUID();
-  await db.insert(v11LegalHold).values({
+  await db.insert(legalHoldTable).values({
     id,
     tenantId: params.tenantId,
     targetType: params.targetType,
@@ -96,7 +96,7 @@ export async function createLegalHold(params: {
     validUntil: params.validUntil,
   });
 
-  const [row] = await db.select().from(v11LegalHold).where(eq(v11LegalHold.id, id)).limit(1);
+  const [row] = await db.select().from(legalHoldTable).where(eq(legalHoldTable.id, id)).limit(1);
   if (!row) {
     throw new Error(`createLegalHold: 行未找到（id=${id}）`);
   }
@@ -129,7 +129,7 @@ export async function releaseLegalHold(params: {
   releaseReason: string;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11LegalHold> {
+}): Promise<LegalHold> {
   const existing = await getLegalHoldById(params.tenantId, params.id);
   if (!existing) {
     throw new LegalHoldError("hold_not_found", `Legal Hold 不存在（id=${params.id}）`);
@@ -140,16 +140,20 @@ export async function releaseLegalHold(params: {
 
   const releasedAt = new Date();
   await db
-    .update(v11LegalHold)
+    .update(legalHoldTable)
     .set({
       holdState: "released",
       releasedAt,
       releasedBy: params.releasedBy,
       releaseReason: params.releaseReason,
     })
-    .where(eq(v11LegalHold.id, params.id));
+    .where(eq(legalHoldTable.id, params.id));
 
-  const [row] = await db.select().from(v11LegalHold).where(eq(v11LegalHold.id, params.id)).limit(1);
+  const [row] = await db
+    .select()
+    .from(legalHoldTable)
+    .where(eq(legalHoldTable.id, params.id))
+    .limit(1);
   if (!row) {
     throw new Error(`releaseLegalHold: 行未找到（id=${params.id}）`);
   }
@@ -177,11 +181,11 @@ export async function releaseLegalHold(params: {
 }
 
 /** 按 id 查询 Legal Hold；不存在返回 null。 */
-export async function getLegalHoldById(tenantId: string, id: string): Promise<V11LegalHold | null> {
+export async function getLegalHoldById(tenantId: string, id: string): Promise<LegalHold | null> {
   const [row] = await db
     .select()
-    .from(v11LegalHold)
-    .where(and(eq(v11LegalHold.tenantId, tenantId), eq(v11LegalHold.id, id)))
+    .from(legalHoldTable)
+    .where(and(eq(legalHoldTable.tenantId, tenantId), eq(legalHoldTable.id, id)))
     .limit(1);
   return row ?? null;
 }
@@ -191,15 +195,15 @@ export async function getLegalHoldByTarget(
   tenantId: string,
   targetType: LegalHoldTargetType,
   targetId: string,
-): Promise<V11LegalHold | null> {
+): Promise<LegalHold | null> {
   const [row] = await db
     .select()
-    .from(v11LegalHold)
+    .from(legalHoldTable)
     .where(
       and(
-        eq(v11LegalHold.tenantId, tenantId),
-        eq(v11LegalHold.targetType, targetType),
-        eq(v11LegalHold.targetId, targetId),
+        eq(legalHoldTable.tenantId, tenantId),
+        eq(legalHoldTable.targetType, targetType),
+        eq(legalHoldTable.targetId, targetId),
       ),
     )
     .limit(1);
@@ -211,16 +215,16 @@ export async function getActiveLegalHold(
   tenantId: string,
   targetType: LegalHoldTargetType,
   targetId: string,
-): Promise<V11LegalHold | null> {
+): Promise<LegalHold | null> {
   const [row] = await db
     .select()
-    .from(v11LegalHold)
+    .from(legalHoldTable)
     .where(
       and(
-        eq(v11LegalHold.tenantId, tenantId),
-        eq(v11LegalHold.targetType, targetType),
-        eq(v11LegalHold.targetId, targetId),
-        eq(v11LegalHold.holdState, "active"),
+        eq(legalHoldTable.tenantId, tenantId),
+        eq(legalHoldTable.targetType, targetType),
+        eq(legalHoldTable.targetId, targetId),
+        eq(legalHoldTable.holdState, "active"),
       ),
     )
     .limit(1);
@@ -256,33 +260,33 @@ export interface LegalHoldFilter {
 }
 
 export interface LegalHoldPage {
-  items: V11LegalHold[];
+  items: LegalHold[];
   nextCursor: string | null;
 }
 
 /** 列出 Legal Hold（cursor 分页，按 createdAt 降序）。 */
 export async function listLegalHolds(filter: LegalHoldFilter): Promise<LegalHoldPage> {
   const limit = Math.min(filter.limit ?? 50, 200);
-  const conditions = [eq(v11LegalHold.tenantId, filter.tenantId)];
+  const conditions = [eq(legalHoldTable.tenantId, filter.tenantId)];
   if (filter.targetType) {
-    conditions.push(eq(v11LegalHold.targetType, filter.targetType));
+    conditions.push(eq(legalHoldTable.targetType, filter.targetType));
   }
   if (filter.targetId) {
-    conditions.push(eq(v11LegalHold.targetId, filter.targetId));
+    conditions.push(eq(legalHoldTable.targetId, filter.targetId));
   }
   if (filter.holdState) {
-    conditions.push(eq(v11LegalHold.holdState, filter.holdState));
+    conditions.push(eq(legalHoldTable.holdState, filter.holdState));
   }
   if (filter.cursor) {
     const cursorDate = new Date(filter.cursor);
-    conditions.push(gt(v11LegalHold.createdAt, cursorDate));
+    conditions.push(gt(legalHoldTable.createdAt, cursorDate));
   }
 
   const rows = await db
     .select()
-    .from(v11LegalHold)
+    .from(legalHoldTable)
     .where(and(...conditions))
-    .orderBy(asc(v11LegalHold.createdAt))
+    .orderBy(asc(legalHoldTable.createdAt))
     .limit(limit + 1);
 
   const hasMore = rows.length > limit;
@@ -303,11 +307,11 @@ export async function listLegalHolds(filter: LegalHoldFilter): Promise<LegalHold
  *
  * @returns 过期但未解除的 Hold 列表
  */
-export async function listExpiredActiveHolds(now: Date = new Date()): Promise<V11LegalHold[]> {
+export async function listExpiredActiveHolds(now: Date = new Date()): Promise<LegalHold[]> {
   const rows = await db
     .select()
-    .from(v11LegalHold)
-    .where(and(eq(v11LegalHold.holdState, "active"), lt(v11LegalHold.validUntil, now)))
-    .orderBy(asc(v11LegalHold.validUntil));
+    .from(legalHoldTable)
+    .where(and(eq(legalHoldTable.holdState, "active"), lt(legalHoldTable.validUntil, now)))
+    .orderBy(asc(legalHoldTable.validUntil));
   return rows;
 }

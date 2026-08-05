@@ -1,4 +1,4 @@
-import type { V11ClientGoal, V11ClientItem, V11ClientTurn } from "@/lib/v11/client/types";
+import type { ClientGoal, ClientItem, ClientTurn } from "@/lib/v11/client/types";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -30,7 +30,7 @@ vi.mock("@/components/desktop/desktop-browser-surface", () => ({
 
 import { DesktopWorkbench } from "./desktop-workbench";
 
-const goal: V11ClientGoal = {
+const goal: ClientGoal = {
   id: "goal-1",
   thread_id: "thread-1",
   objective: "整理本周产品方案",
@@ -42,7 +42,7 @@ const goal: V11ClientGoal = {
   completed_at: null,
 };
 
-const latestTurn: V11ClientTurn = {
+const latestTurn: ClientTurn = {
   id: "turn-1",
   turn_sequence: 1,
   trigger_type: "message",
@@ -61,7 +61,7 @@ const latestTurn: V11ClientTurn = {
   finished_at: null,
 };
 
-const items: readonly V11ClientItem[] = [
+const items: readonly ClientItem[] = [
   {
     id: "action-1",
     turn_id: "turn-1",

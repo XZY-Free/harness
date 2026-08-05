@@ -2,10 +2,10 @@ import { StudioGatePage } from "@/components/studio/gate-page";
 import { StudioNav } from "@/components/studio/nav";
 import { StudioToastProvider } from "@/components/studio/toast-provider";
 import { AuthError, getCurrentUserFromRequest } from "@/lib/auth";
+import { resolvePrincipal } from "@/lib/identity/resolver";
 import { hasPermission } from "@/lib/rbac";
 import { computeStudioNavVisibility } from "@/lib/studio/nav-visibility";
 import type { StudioNavVisibility } from "@/lib/studio/nav-visibility";
-import { resolvePrincipal } from "@/lib/identity/resolver";
 import { headers } from "next/headers";
 
 /**

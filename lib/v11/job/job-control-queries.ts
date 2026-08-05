@@ -21,6 +21,15 @@
  */
 import { db } from "@/lib/db/client";
 import {
+  type Job,
+  type JobCommand,
+  type JobEvent,
+  type JobEventActorType,
+  jobCommandTable,
+  jobTable,
+} from "@/lib/persistence/schema/job";
+import { invocationTable } from "@/lib/persistence/schema/runtime";
+import {
   JobAlreadyTerminalError,
   JobNotFoundError,
   JobNotTerminalError,
@@ -28,15 +37,6 @@ import {
 import { acknowledgeCommand, rejectCommand } from "@/lib/v11/job/job-command-queries";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/v11/job/job-event-queries";
 import { createJob, recordJobResult, updateJobState } from "@/lib/v11/job/job-queries";
-import {
-  type JobEventActorType,
-  type V11Job,
-  type V11JobCommand,
-  type V11JobEvent,
-  v11Job,
-  v11JobCommand,
-} from "@/lib/v11/schema/job";
-import { v11Invocation } from "@/lib/v11/schema/runtime";
 import { and, eq, inArray } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -65,10 +65,10 @@ export interface ProcessCancelCommandParams {
 
 /** processCancelCommand 返回结果。 */
 export interface ProcessCancelCommandResult {
-  job: V11Job;
-  command: V11JobCommand;
+  job: Job;
+  command: JobCommand;
   /** 写入的 job.cancelled Event；pending 时为 null（等待 Invocation 终态）。 */
-  cancelledEvent: V11JobEvent | null;
+  cancelledEvent: JobEvent | null;
   /**
    * 处理结果：
    * - cancelled：Job 已成功取消
@@ -87,10 +87,10 @@ export interface ProcessCancelCommandResult {
  * 调度器编排 cancel 命令：核对 Invocation/Effect 后才 cancelled。
  *
  * 流程（同事务）：
- * 1. SELECT FOR UPDATE V11JobCommand + V11Job
+ * 1. SELECT FOR UPDATE JobCommand + Job
  * 2. 再次校验 Job 非终态（race condition：可能在 queued 后 Job 已自然终态）
  *    → 已终态：rejectCommand(JOB_ALREADY_TERMINAL)
- * 3. 查询所有关联 Invocation（v11Invocation.jobId = job.id）
+ * 3. 查询所有关联 Invocation（invocationTable.jobId = job.id）
  *    - 存在非终态 Invocation → 保留 commandState=queued，返回 waiting_invocations
  * 4. unknown_effect 核对（调用方回调）
  *    - 未核对 → rejectCommand(JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT)，返回 rejected_unknown_effect
@@ -110,8 +110,10 @@ export async function processCancelCommand(
   // 事务外预查询命令（轻量校验）
   const [cmd] = await db
     .select()
-    .from(v11JobCommand)
-    .where(and(eq(v11JobCommand.tenantId, params.tenantId), eq(v11JobCommand.id, params.commandId)))
+    .from(jobCommandTable)
+    .where(
+      and(eq(jobCommandTable.tenantId, params.tenantId), eq(jobCommandTable.id, params.commandId)),
+    )
     .limit(1);
   if (!cmd) {
     throw new JobNotFoundError(params.commandId);
@@ -122,12 +124,15 @@ export async function processCancelCommand(
   const unknownEffectOk = await verifier(cmd.jobId);
 
   const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE V11JobCommand
+    // 1. SELECT FOR UPDATE JobCommand
     const [current] = await tx
       .select()
-      .from(v11JobCommand)
+      .from(jobCommandTable)
       .where(
-        and(eq(v11JobCommand.tenantId, params.tenantId), eq(v11JobCommand.id, params.commandId)),
+        and(
+          eq(jobCommandTable.tenantId, params.tenantId),
+          eq(jobCommandTable.id, params.commandId),
+        ),
       )
       .for("update")
       .limit(1);
@@ -140,8 +145,8 @@ export async function processCancelCommand(
       // 重新查询 Job 状态以确定 outcome
       const [job] = await tx
         .select()
-        .from(v11Job)
-        .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, current.jobId)))
+        .from(jobTable)
+        .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, current.jobId)))
         .limit(1);
       return {
         job: job ?? null,
@@ -151,11 +156,11 @@ export async function processCancelCommand(
       };
     }
 
-    // 2. SELECT FOR UPDATE V11Job
+    // 2. SELECT FOR UPDATE Job
     const [job] = await tx
       .select()
-      .from(v11Job)
-      .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, current.jobId)))
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, current.jobId)))
       .for("update")
       .limit(1);
     if (!job) {
@@ -198,11 +203,11 @@ export async function processCancelCommand(
     // 4. 查询关联 Invocation 状态
     const invocations = await tx
       .select({
-        id: v11Invocation.id,
-        executionState: v11Invocation.executionState,
+        id: invocationTable.id,
+        executionState: invocationTable.executionState,
       })
-      .from(v11Invocation)
-      .where(eq(v11Invocation.jobId, job.id));
+      .from(invocationTable)
+      .where(eq(invocationTable.jobId, job.id));
 
     const pendingInvocations = invocations.filter(
       (inv) =>
@@ -297,10 +302,10 @@ export interface ProcessRetryCommandParams {
 /** processRetryCommand 返回结果。 */
 export interface ProcessRetryCommandResult {
   /** 原 Job（状态不变，retry 不修改原 Job）。 */
-  originalJob: V11Job;
+  originalJob: Job;
   /** replacement Job（state=queued，replacesJobId 指向原 Job）；rejection 路径下为 null。 */
-  replacementJob: V11Job | null;
-  command: V11JobCommand;
+  replacementJob: Job | null;
+  command: JobCommand;
   outcome:
     | "retry_created"
     | "rejected_unknown_effect"
@@ -313,7 +318,7 @@ export interface ProcessRetryCommandResult {
  * 调度器编排 retry 命令：核对 + 创建 replacement Job + acknowledgeCommand。
  *
  * 流程（同事务）：
- * 1. SELECT FOR UPDATE V11JobCommand + V11Job
+ * 1. SELECT FOR UPDATE JobCommand + Job
  * 2. 再次校验 Job 终态（race condition）→ 非终态：rejectCommand(JOB_NOT_TERMINAL)
  * 3. unknown_effect 核对（调用方回调）→ 未核对：rejectCommand(JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT)
  * 4. override 校验（调用方回调）→ 不允许：rejectCommand(JOB_OVERRIDE_NOT_ALLOWED)
@@ -334,8 +339,10 @@ export async function processRetryCommand(
   // 事务外预查询命令
   const [cmd] = await db
     .select()
-    .from(v11JobCommand)
-    .where(and(eq(v11JobCommand.tenantId, params.tenantId), eq(v11JobCommand.id, params.commandId)))
+    .from(jobCommandTable)
+    .where(
+      and(eq(jobCommandTable.tenantId, params.tenantId), eq(jobCommandTable.id, params.commandId)),
+    )
     .limit(1);
   if (!cmd) {
     throw new JobNotFoundError(params.commandId);
@@ -360,8 +367,8 @@ export async function processRetryCommand(
   // 事务外查询原 Job（用于 inputAvailabilityVerifier）
   const [preJob] = await db
     .select()
-    .from(v11Job)
-    .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, cmd.jobId)))
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, cmd.jobId)))
     .limit(1);
   if (!preJob) {
     throw new JobNotFoundError(cmd.jobId);
@@ -372,12 +379,15 @@ export async function processRetryCommand(
   );
 
   const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE V11JobCommand
+    // 1. SELECT FOR UPDATE JobCommand
     const [current] = await tx
       .select()
-      .from(v11JobCommand)
+      .from(jobCommandTable)
       .where(
-        and(eq(v11JobCommand.tenantId, params.tenantId), eq(v11JobCommand.id, params.commandId)),
+        and(
+          eq(jobCommandTable.tenantId, params.tenantId),
+          eq(jobCommandTable.id, params.commandId),
+        ),
       )
       .for("update")
       .limit(1);
@@ -388,19 +398,23 @@ export async function processRetryCommand(
     // 已终态命令直接返回
     if (current.commandState === "acknowledged" || current.commandState === "rejected") {
       // 查询 replacement Job（若有）
-      let replacementJob: V11Job | null = null;
+      let replacementJob: Job | null = null;
       if (current.replacementJobId) {
         const [rj] = await tx
           .select()
-          .from(v11Job)
-          .where(eq(v11Job.id, current.replacementJobId))
+          .from(jobTable)
+          .where(eq(jobTable.id, current.replacementJobId))
           .limit(1);
         replacementJob = rj ?? null;
       }
       if (!replacementJob) {
         throw new Error("processRetryCommand: 已 acknowledge 命令但 replacement Job 未找到");
       }
-      const [origJob] = await tx.select().from(v11Job).where(eq(v11Job.id, current.jobId)).limit(1);
+      const [origJob] = await tx
+        .select()
+        .from(jobTable)
+        .where(eq(jobTable.id, current.jobId))
+        .limit(1);
       return {
         originalJob: origJob,
         replacementJob,
@@ -409,11 +423,11 @@ export async function processRetryCommand(
       };
     }
 
-    // 2. SELECT FOR UPDATE V11Job
+    // 2. SELECT FOR UPDATE Job
     const [job] = await tx
       .select()
-      .from(v11Job)
-      .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, current.jobId)))
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, current.jobId)))
       .for("update")
       .limit(1);
     if (!job) {
@@ -498,8 +512,8 @@ export async function processRetryCommand(
 
     const [replacementJob] = await tx
       .select()
-      .from(v11Job)
-      .where(eq(v11Job.id, replacementJobId))
+      .from(jobTable)
+      .where(eq(jobTable.id, replacementJobId))
       .limit(1);
     if (!replacementJob) {
       throw new Error(`processRetryCommand: replacement Job 行未找到（id=${replacementJobId}）`);
@@ -548,9 +562,9 @@ export interface TerminateJobParams {
 
 /** completeJob / failJob 返回结果。 */
 export interface TerminateJobResult {
-  job: V11Job;
-  resultRecordedEvent: V11JobEvent;
-  terminalEvent: V11JobEvent;
+  job: Job;
+  resultRecordedEvent: JobEvent;
+  terminalEvent: JobEvent;
 }
 
 /**
@@ -570,8 +584,8 @@ export async function completeJob(params: TerminateJobParams): Promise<Terminate
     // 1. SELECT FOR UPDATE Job（获取当前 versionNo）
     const [job] = await tx
       .select()
-      .from(v11Job)
-      .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, params.jobId)))
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, params.jobId)))
       .for("update")
       .limit(1);
     if (!job) {
@@ -641,8 +655,8 @@ export async function failJob(params: TerminateJobParams): Promise<TerminateJobR
     // 1. SELECT FOR UPDATE Job
     const [job] = await tx
       .select()
-      .from(v11Job)
-      .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, params.jobId)))
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, params.jobId)))
       .for("update")
       .limit(1);
     if (!job) {
@@ -674,12 +688,12 @@ export async function failJob(params: TerminateJobParams): Promise<TerminateJobR
 
     // 3.1 写 errorCode/errorSummary
     await tx
-      .update(v11Job)
+      .update(jobTable)
       .set({
         errorCode: error.code,
         errorSummary: error.summary ?? null,
       })
-      .where(eq(v11Job.id, params.jobId));
+      .where(eq(jobTable.id, params.jobId));
 
     // 4. allocateJobEventSequences(1) + insertJobEvent("job.failed")
     const startSeq = await allocateJobEventSequences(tx, params.jobId, 1);
@@ -699,7 +713,11 @@ export async function failJob(params: TerminateJobParams): Promise<TerminateJobR
     });
 
     // 回读最终 Job
-    const [finalJob] = await tx.select().from(v11Job).where(eq(v11Job.id, params.jobId)).limit(1);
+    const [finalJob] = await tx
+      .select()
+      .from(jobTable)
+      .where(eq(jobTable.id, params.jobId))
+      .limit(1);
 
     return { job: finalJob ?? failedJob, resultRecordedEvent, terminalEvent };
   });
@@ -716,11 +734,11 @@ async function acknowledgeCommandInternal(
   tx: Tx,
   commandId: string,
   replacementJobId?: string,
-): Promise<V11JobCommand> {
+): Promise<JobCommand> {
   const [current] = await tx
     .select()
-    .from(v11JobCommand)
-    .where(eq(v11JobCommand.id, commandId))
+    .from(jobCommandTable)
+    .where(eq(jobCommandTable.id, commandId))
     .for("update")
     .limit(1);
   if (!current) {
@@ -734,7 +752,7 @@ async function acknowledgeCommandInternal(
     return current;
   }
 
-  const updates: Partial<V11JobCommand> = {
+  const updates: Partial<JobCommand> = {
     commandState: "acknowledged",
     acknowledgedAt: new Date(),
   };
@@ -742,12 +760,12 @@ async function acknowledgeCommandInternal(
     updates.replacementJobId = replacementJobId;
   }
 
-  await tx.update(v11JobCommand).set(updates).where(eq(v11JobCommand.id, commandId));
+  await tx.update(jobCommandTable).set(updates).where(eq(jobCommandTable.id, commandId));
 
   const [updated] = await tx
     .select()
-    .from(v11JobCommand)
-    .where(eq(v11JobCommand.id, commandId))
+    .from(jobCommandTable)
+    .where(eq(jobCommandTable.id, commandId))
     .limit(1);
   if (!updated) {
     throw new Error(`acknowledgeCommandInternal: JobCommand 行未找到（id=${commandId}）`);
@@ -761,11 +779,11 @@ async function rejectCommandInternal(
   commandId: string,
   errorCode: string,
   errorSummary: string,
-): Promise<V11JobCommand> {
+): Promise<JobCommand> {
   const [current] = await tx
     .select()
-    .from(v11JobCommand)
-    .where(eq(v11JobCommand.id, commandId))
+    .from(jobCommandTable)
+    .where(eq(jobCommandTable.id, commandId))
     .for("update")
     .limit(1);
   if (!current) {
@@ -780,19 +798,19 @@ async function rejectCommandInternal(
   }
 
   await tx
-    .update(v11JobCommand)
+    .update(jobCommandTable)
     .set({
       commandState: "rejected",
       errorCode,
       errorSummary,
       acknowledgedAt: new Date(),
     })
-    .where(eq(v11JobCommand.id, commandId));
+    .where(eq(jobCommandTable.id, commandId));
 
   const [updated] = await tx
     .select()
-    .from(v11JobCommand)
-    .where(eq(v11JobCommand.id, commandId))
+    .from(jobCommandTable)
+    .where(eq(jobCommandTable.id, commandId))
     .limit(1);
   if (!updated) {
     throw new Error(`rejectCommandInternal: JobCommand 行未找到（id=${commandId}）`);
@@ -803,7 +821,7 @@ async function rejectCommandInternal(
 /** 事务内创建 replacement Job（内联 createJob 逻辑，避免嵌套事务）。 */
 async function createReplacementJobInternal(
   tx: Tx,
-  originalJob: V11Job,
+  originalJob: Job,
   reuseInput: boolean,
   overrideJson: Record<string, unknown> | null,
   actorId?: string,
@@ -819,7 +837,7 @@ async function createReplacementJobInternal(
   const inputRef = reuseInput ? originalJob.inputRef : null;
   const inputHash = reuseInput ? originalJob.inputHash : null;
 
-  await tx.insert(v11Job).values({
+  await tx.insert(jobTable).values({
     id: jobId,
     tenantId: originalJob.tenantId,
     agentId: originalJob.agentId,

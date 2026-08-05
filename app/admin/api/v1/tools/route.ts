@@ -1,19 +1,30 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
   etagHeader,
   getRequestId,
-  apiError,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
 import {
   type AdminPrincipal,
   TOOL_ETAG_PREFIX,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 /**
  * GET / POST /admin/api/v1/tools — Tool 集合（阶段 6 S06-C02）。
@@ -45,17 +56,6 @@ import {
   getToolProviderById,
   listTools,
 } from "@/lib/v11/capability/tool-queries";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -143,7 +143,7 @@ export async function GET(request: Request): Promise<Response> {
   // tool.create action code 允许 ["provider", "tool"]，必须按 provider 资源做 scope 校验
   // 因此 GET /tools 必须提供 provider_id（与权限模型对齐）
   if (!providerIdParam) {
-    return v11SchemaInvalid(requestId, "缺少必填查询参数 provider_id");
+    return schemaInvalidTable(requestId, "缺少必填查询参数 provider_id");
   }
 
   // 校验 ToolProvider 存在且属于当前租户
@@ -172,7 +172,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   const lifecycleStates: ToolLifecycleState[] | undefined = lifecycleParam
@@ -227,13 +227,13 @@ export async function POST(request: Request): Promise<Response> {
   // 2. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：缺少 provider_id/tool_key/display_name 或字段类型错误",
     );
@@ -329,7 +329,7 @@ export async function POST(request: Request): Promise<Response> {
       return resourceNotFound(requestId, err.message);
     }
     if (err instanceof ToolValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     if (err instanceof ToolLifecycleError) {
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });

@@ -22,7 +22,7 @@
  * - compatible_change：兼容性变更（不触发审核）
  * - no_change：无变化
  *
- * riskMetadataJson 字段（与 lib/v11/schema/tool.ts ToolSchemaRevision 对齐）：
+ * riskMetadataJson 字段（与 lib/persistence/schema/tool.ts ToolSchemaRevision 对齐）：
  * - effect：read_only / write / destructive
  * - data_class：public / internal / confidential / restricted
  * - network_scope：none / internal / external / public
@@ -34,7 +34,7 @@
  * - side_effects：boolean
  * - destructive：boolean
  */
-import type { CapabilityReviewResourceType } from "@/lib/v11/schema/tool-call";
+import type { CapabilityReviewResourceType } from "@/lib/persistence/schema/tool-call";
 
 // ─── 常量 ──────────────────────────────────────────────────
 

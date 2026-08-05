@@ -96,22 +96,22 @@ afterEach(() => {
   });
 });
 
-import type { V11Agent } from "@/lib/v11/schema/agent";
-import type { V11Thread } from "@/lib/v11/schema/conversation";
+import type { Agent } from "@/lib/persistence/schema/agent";
+import type { Thread } from "@/lib/persistence/schema/conversation";
 import { DesktopSidebar } from "./desktop-sidebar";
 import { SidebarProvider } from "./sidebar-context";
 
 const agents = [
   { id: "a1", displayName: "报表助手", agentKey: "report-agent" },
   { id: "a0", displayName: "默认助手", agentKey: "default" },
-] as unknown as readonly V11Agent[];
+] as unknown as readonly Agent[];
 
 const threads = [
   { id: "t1", title: "月度报表整理", primaryAgentId: "a1" },
   { id: "t2", title: "六月发货对账", primaryAgentId: "a1" },
   { id: "t3", title: "随手记录", primaryAgentId: "no-such-agent" },
   { id: "t4", title: "系统兜底会话", primaryAgentId: "a0" },
-] as unknown as readonly V11Thread[];
+] as unknown as readonly Thread[];
 
 function renderSidebar(defaultCollapsed = false, hasNativeTitlebar = false) {
   return render(

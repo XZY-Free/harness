@@ -6,10 +6,10 @@
  * 必须可重复执行。每次重建幂等。
  */
 
+import { db } from "@/lib/db/client";
+import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
-import { db } from "@/lib/db/client";
-import { deploymentRouteTable, deploymentRouteSetTable } from "@/lib/persistence/schema/routes";
 import { eq } from "drizzle-orm";
 
 const args = parseArgs(process.argv.slice(2));
@@ -33,7 +33,9 @@ async function main() {
   if (args.dryRun) {
     console.log("[routes:rebuild-eligibility] --dry-run 模式，不执行写入");
     for (const route of routes) {
-      console.log(`  routeId=${route.id} routeSetId=${route.routeSetId} tenantId=${route.tenantId}`);
+      console.log(
+        `  routeId=${route.id} routeSetId=${route.routeSetId} tenantId=${route.tenantId}`,
+      );
     }
     return;
   }
@@ -59,7 +61,9 @@ async function main() {
     }
   }
 
-  console.log(`[routes:rebuild-eligibility] 完成: eligible=${eligible} ineligible=${ineligible} errors=${errors}`);
+  console.log(
+    `[routes:rebuild-eligibility] 完成: eligible=${eligible} ineligible=${ineligible} errors=${errors}`,
+  );
 }
 
 async function listTargetRoutes(): Promise<RouteWithTenant[]> {
@@ -71,7 +75,10 @@ async function listTargetRoutes(): Promise<RouteWithTenant[]> {
       tenantId: deploymentRouteSetTable.tenantId,
     })
     .from(deploymentRouteTable)
-    .innerJoin(deploymentRouteSetTable, eq(deploymentRouteSetTable.id, deploymentRouteTable.routeSetId));
+    .innerJoin(
+      deploymentRouteSetTable,
+      eq(deploymentRouteSetTable.id, deploymentRouteTable.routeSetId),
+    );
 
   if (args.route) {
     return baseQuery.where(eq(deploymentRouteTable.id, args.route)).limit(1);

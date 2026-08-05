@@ -1,11 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import { listTracesByTenant } from "@/lib/v11/observability/trace-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   TRACE_CONTENT_MODES,
   TRACE_ROOT_TYPES,
@@ -13,7 +6,14 @@ import {
   type TraceContentMode,
   type TraceRootType,
   type TraceState,
-} from "@/lib/v11/schema/trace";
+} from "@/lib/persistence/schema/trace";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
+import { listTracesByTenant } from "@/lib/v11/observability/trace-queries";
 /**
  * GET /admin/api/v1/traces — 列出租户内所有 Trace（S11-W05）。
  *
@@ -58,13 +58,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   let rootType: TraceRootType | undefined;
   if (rootTypeParam) {
     if (!VALID_ROOT_TYPES.has(rootTypeParam)) {
-      return v11SchemaInvalid(requestId, `root_type 非法: ${rootTypeParam}`);
+      return schemaInvalidTable(requestId, `root_type 非法: ${rootTypeParam}`);
     }
     rootType = rootTypeParam as TraceRootType;
   }
@@ -72,7 +72,7 @@ export async function GET(request: Request): Promise<Response> {
   let traceState: TraceState | undefined;
   if (traceStateParam) {
     if (!VALID_TRACE_STATES.has(traceStateParam)) {
-      return v11SchemaInvalid(requestId, `trace_state 非法: ${traceStateParam}`);
+      return schemaInvalidTable(requestId, `trace_state 非法: ${traceStateParam}`);
     }
     traceState = traceStateParam as TraceState;
   }
@@ -80,7 +80,7 @@ export async function GET(request: Request): Promise<Response> {
   let contentMode: TraceContentMode | undefined;
   if (contentModeParam) {
     if (!VALID_CONTENT_MODES.has(contentModeParam)) {
-      return v11SchemaInvalid(requestId, `content_mode 非法: ${contentModeParam}`);
+      return schemaInvalidTable(requestId, `content_mode 非法: ${contentModeParam}`);
     }
     contentMode = contentModeParam as TraceContentMode;
   }

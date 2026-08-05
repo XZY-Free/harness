@@ -1,18 +1,29 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  etagHeader,
-  getRequestId,
   apiError,
   apiSuccess,
+  etagHeader,
+  getRequestId,
 } from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
 import {
   type AdminPrincipal,
   SKILL_ETAG_PREFIX,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
 /**
  * GET / POST /admin/api/v1/skills — Skill 集合（阶段 6 S06-C01）。
@@ -38,17 +49,6 @@ import {
   createSkill,
   listSkills,
 } from "@/lib/v11/capability/skill-queries";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -170,7 +170,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   const lifecycleStates: SkillLifecycleState[] | undefined = lifecycleParam
@@ -235,13 +235,13 @@ export async function POST(request: Request): Promise<Response> {
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：缺少 skill_key/display_name/owner_user_id 或字段类型错误",
     );
@@ -318,7 +318,7 @@ export async function POST(request: Request): Promise<Response> {
     await failRecord(recordId);
 
     if (err instanceof SkillValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     if (err instanceof SkillVersionConflictError) {
       return apiError("IDEMPOTENCY_CONFLICT", err.message, { requestId });

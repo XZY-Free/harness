@@ -34,11 +34,11 @@
 
 import { CatalogSelect } from "@/components/v11/catalog/catalog-select";
 import { cn } from "@/lib/utils";
-import type { V11ClientThread } from "@/lib/v11/client/types";
+import type { ClientThread } from "@/lib/v11/client/types";
 import { useState } from "react";
 
 interface CatalogSettingsBarProps {
-  readonly thread: V11ClientThread;
+  readonly thread: ClientThread;
   /** Agent 变更请求（不直接 PATCH settings；走 :change-primary-agent）。 */
   readonly onAgentChange?: (agentId: string) => void;
   /** Model 变更（PATCH settings.default_model_ref）。 */

@@ -3,14 +3,14 @@
  */
 
 export {
-  v11DeploymentRoute as deploymentRouteTable,
-  v11DeploymentRouteSet as deploymentRouteSetTable,
-} from "@/lib/v11/schema/deployment-route";
+  deploymentRouteTable,
+  deploymentRouteSetTable,
+} from "@/lib/persistence/schema/deployment-route";
 
 export type {
   RouteState,
-  V11DeploymentRoute as DeploymentRouteRow,
-  V11DeploymentRouteInsert as NewDeploymentRouteRow,
-  V11DeploymentRouteSet as DeploymentRouteSetRow,
-  V11DeploymentRouteSetInsert as NewDeploymentRouteSetRow,
-} from "@/lib/v11/schema/deployment-route";
+  DeploymentRoute as DeploymentRouteRow,
+  DeploymentRouteInsert as NewDeploymentRouteRow,
+  DeploymentRouteSet as DeploymentRouteSetRow,
+  DeploymentRouteSetInsert as NewDeploymentRouteSetRow,
+} from "@/lib/persistence/schema/deployment-route";

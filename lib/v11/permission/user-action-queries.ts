@@ -15,27 +15,27 @@
  * - state/nonce 一次性消费，hash 后存储（sha256: 前缀 + 64 hex）。
  * - expires_at 超时后进入 expired 终态，不可再 resolve。
  * - block 决策不创建本表记录（由调用方在收到 block 时不创建）。
- * - grant 类型 approve 时同事务创建 V11Grant 行并回填 grant_id。
+ * - grant 类型 approve 时同事务创建 Grant 行并回填 grant_id。
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  * - MySQL 不支持 .returning()：update + select 两步。
  */
 import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
-import { issueGrant } from "@/lib/v11/permission/permission-queries";
 import {
   ALLOWED_RESOLUTIONS_BY_TYPE,
-  type NewV11UserActionRequest,
+  type NewUserActionRequest,
   USER_ACTION_REQUEST_STATES,
   USER_ACTION_REQUEST_TERMINAL_STATES,
   USER_ACTION_REQUEST_TYPES,
   USER_ACTION_RESOLUTIONS,
+  type UserActionRequest,
   type UserActionRequestState,
   type UserActionRequestType,
   type UserActionResolution,
-  type V11UserActionRequest,
-  v11UserActionRequest,
-} from "@/lib/v11/schema/user-action-request";
+  userActionRequestTable,
+} from "@/lib/persistence/schema/user-action-request";
+import { issueGrant } from "@/lib/v11/permission/permission-queries";
 import { and, asc, desc, eq, inArray, isNotNull, lt, ne, sql } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -171,7 +171,7 @@ export interface CreateUserActionRequestInput {
 }
 
 export interface CreateUserActionRequestResult {
-  request: V11UserActionRequest;
+  request: UserActionRequest;
   /** auth 类型：返回 state / nonce 原值（仅创建时一次性返回，后续查询不再返回原值）。 */
   authStatePlaintext?: string;
   noncePlaintext?: string;
@@ -232,7 +232,7 @@ export async function createUserActionRequest(
   }
 
   const id = randomUUID();
-  const insert: NewV11UserActionRequest = {
+  const insert: NewUserActionRequest = {
     id,
     tenantId: input.tenantId,
     threadId: input.threadId,
@@ -250,7 +250,7 @@ export async function createUserActionRequest(
     expiresAt: input.expiresAt ?? null,
   };
 
-  await db.insert(v11UserActionRequest).values(insert);
+  await db.insert(userActionRequestTable).values(insert);
   const created = await getUserActionRequestById(input.tenantId, id);
   if (!created) {
     throw new UserActionNotFoundError("UserActionRequest 创建后回查失败");
@@ -267,11 +267,13 @@ export async function createUserActionRequest(
 export async function getUserActionRequestById(
   tenantId: string,
   requestId: string,
-): Promise<V11UserActionRequest | null> {
+): Promise<UserActionRequest | null> {
   const [row] = await db
     .select()
-    .from(v11UserActionRequest)
-    .where(and(eq(v11UserActionRequest.tenantId, tenantId), eq(v11UserActionRequest.id, requestId)))
+    .from(userActionRequestTable)
+    .where(
+      and(eq(userActionRequestTable.tenantId, tenantId), eq(userActionRequestTable.id, requestId)),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -280,52 +282,52 @@ export async function getUserActionRequestsByInvocation(
   tenantId: string,
   invocationId: string,
   options?: { requestState?: UserActionRequestState },
-): Promise<V11UserActionRequest[]> {
+): Promise<UserActionRequest[]> {
   const conditions = [
-    eq(v11UserActionRequest.tenantId, tenantId),
-    eq(v11UserActionRequest.invocationId, invocationId),
+    eq(userActionRequestTable.tenantId, tenantId),
+    eq(userActionRequestTable.invocationId, invocationId),
   ];
   if (options?.requestState) {
-    conditions.push(eq(v11UserActionRequest.requestState, options.requestState));
+    conditions.push(eq(userActionRequestTable.requestState, options.requestState));
   }
   return db
     .select()
-    .from(v11UserActionRequest)
+    .from(userActionRequestTable)
     .where(and(...conditions))
-    .orderBy(asc(v11UserActionRequest.createdAt));
+    .orderBy(asc(userActionRequestTable.createdAt));
 }
 
 export async function getUserActionRequestsByToolCall(
   tenantId: string,
   toolCallId: string,
-): Promise<V11UserActionRequest[]> {
+): Promise<UserActionRequest[]> {
   return db
     .select()
-    .from(v11UserActionRequest)
+    .from(userActionRequestTable)
     .where(
       and(
-        eq(v11UserActionRequest.tenantId, tenantId),
-        eq(v11UserActionRequest.toolCallId, toolCallId),
+        eq(userActionRequestTable.tenantId, tenantId),
+        eq(userActionRequestTable.toolCallId, toolCallId),
       ),
     )
-    .orderBy(asc(v11UserActionRequest.createdAt));
+    .orderBy(asc(userActionRequestTable.createdAt));
 }
 
 export async function getPendingUserActionRequestForToolCall(
   tenantId: string,
   toolCallId: string,
-): Promise<V11UserActionRequest | null> {
+): Promise<UserActionRequest | null> {
   const [row] = await db
     .select()
-    .from(v11UserActionRequest)
+    .from(userActionRequestTable)
     .where(
       and(
-        eq(v11UserActionRequest.tenantId, tenantId),
-        eq(v11UserActionRequest.toolCallId, toolCallId),
-        eq(v11UserActionRequest.requestState, "pending"),
+        eq(userActionRequestTable.tenantId, tenantId),
+        eq(userActionRequestTable.toolCallId, toolCallId),
+        eq(userActionRequestTable.requestState, "pending"),
       ),
     )
-    .orderBy(desc(v11UserActionRequest.createdAt))
+    .orderBy(desc(userActionRequestTable.createdAt))
     .limit(1);
   return row ?? null;
 }
@@ -352,7 +354,7 @@ export interface ResolveUserActionRequestInput {
 }
 
 export interface ResolveUserActionRequestResult {
-  request: V11UserActionRequest;
+  request: UserActionRequest;
   /** grant 类型 approve 时返回新建的 Grant id。 */
   grantId?: string;
 }
@@ -364,7 +366,7 @@ export interface ResolveUserActionRequestResult {
  * - requestState 必须为 pending；否则抛 UserActionAlreadyResolvedError。
  * - resolution 必须在 ALLOWED_RESOLUTIONS_BY_TYPE 内；否则抛 UserActionResolutionMismatchError。
  * - auth 类型在本接口仅接受 cancel；approve 只能由 completeAuthCallback 写入。
- * - grant 类型 approve 时同事务创建 V11Grant 并回填 grantId。
+ * - grant 类型 approve 时同事务创建 Grant 并回填 grantId。
  * - input 类型 submit 时必须提供 responseRedactedJson（调用方按 inputSchemaJson 校验后传入）。
  * - 一次性消费：原子 UPDATE WHERE requestState='pending'，受影响行数=0 视为冲突。
  * - 不会在此处写 invocation_command resume；调用方在更高层（API/服务编排）同事务写入。
@@ -426,7 +428,7 @@ export async function resolveUserActionRequest(
 
   // 原子更新：UPDATE WHERE requestState='pending' 防并发重复 resolve
   const updateResult = await db
-    .update(v11UserActionRequest)
+    .update(userActionRequestTable)
     .set({
       requestState: "resolved",
       resolution: input.resolution,
@@ -438,10 +440,10 @@ export async function resolveUserActionRequest(
     })
     .where(
       and(
-        eq(v11UserActionRequest.id, current.id),
-        eq(v11UserActionRequest.tenantId, input.tenantId),
-        eq(v11UserActionRequest.requestState, "pending"),
-        eq(v11UserActionRequest.versionNo, current.versionNo),
+        eq(userActionRequestTable.id, current.id),
+        eq(userActionRequestTable.tenantId, input.tenantId),
+        eq(userActionRequestTable.requestState, "pending"),
+        eq(userActionRequestTable.versionNo, current.versionNo),
       ),
     );
 
@@ -469,9 +471,9 @@ export async function resolveUserActionRequest(
     });
     grantId = grant.id;
     await db
-      .update(v11UserActionRequest)
+      .update(userActionRequestTable)
       .set({ grantId, updatedAt: new Date() })
-      .where(eq(v11UserActionRequest.id, current.id));
+      .where(eq(userActionRequestTable.id, current.id));
   }
 
   const updated = await getUserActionRequestById(input.tenantId, current.id);
@@ -505,13 +507,13 @@ export interface CompleteAuthCallbackInput {
  * - authState / nonce 必须与创建时 hash 后存储的值匹配（一次性消费）。
  * - 成功后 requestState=resolved，resolution=approve（隐式，由 callback 写入）。
  * - 失败时抛 UserActionAuthCallbackInvalidError，请求保持 pending（员工可重试或 cancel）。
- * - 不会创建 V11Grant（auth 类型的 Grant 由后续 ToolCall 执行时按需创建）。
+ * - 不会创建 Grant（auth 类型的 Grant 由后续 ToolCall 执行时按需创建）。
  * - 实际 OAuth code → token 交换与 Credential 写入 Vault 由 Connection Adapter 完成；
  *   本函数只负责 UserActionRequest 表的状态变更与一次性消费校验。
  */
 export async function completeAuthCallback(
   input: CompleteAuthCallbackInput,
-): Promise<V11UserActionRequest> {
+): Promise<UserActionRequest> {
   if (!input.tenantId) throw new UserActionValidationError("tenantId 不能为空");
   if (!input.requestId) throw new UserActionValidationError("requestId 不能为空");
   if (!input.authState) throw new UserActionValidationError("authState 不能为空");
@@ -556,7 +558,7 @@ export async function completeAuthCallback(
 
   // 原子更新：确保 state/nonce 一次性消费
   const updateResult = await db
-    .update(v11UserActionRequest)
+    .update(userActionRequestTable)
     .set({
       requestState: "resolved",
       resolution: "approve",
@@ -567,10 +569,10 @@ export async function completeAuthCallback(
     })
     .where(
       and(
-        eq(v11UserActionRequest.id, current.id),
-        eq(v11UserActionRequest.tenantId, input.tenantId),
-        eq(v11UserActionRequest.requestState, "pending"),
-        eq(v11UserActionRequest.versionNo, current.versionNo),
+        eq(userActionRequestTable.id, current.id),
+        eq(userActionRequestTable.tenantId, input.tenantId),
+        eq(userActionRequestTable.requestState, "pending"),
+        eq(userActionRequestTable.versionNo, current.versionNo),
       ),
     );
 
@@ -600,16 +602,16 @@ export async function completeAuthCallback(
  */
 export async function markExpiredUserActionRequests(now: Date = new Date()): Promise<number> {
   const result = await db
-    .update(v11UserActionRequest)
+    .update(userActionRequestTable)
     .set({
       requestState: "expired",
       updatedAt: now,
     })
     .where(
       and(
-        eq(v11UserActionRequest.requestState, "pending"),
-        isNotNull(v11UserActionRequest.expiresAt),
-        lt(v11UserActionRequest.expiresAt, now),
+        eq(userActionRequestTable.requestState, "pending"),
+        isNotNull(userActionRequestTable.expiresAt),
+        lt(userActionRequestTable.expiresAt, now),
       ),
     );
   return result[0]?.affectedRows ?? 0;
@@ -623,19 +625,19 @@ export async function markExpiredUserActionRequests(now: Date = new Date()): Pro
 export async function listStaleExpiredUserActionRequests(
   tenantId: string,
   now: Date = new Date(),
-): Promise<V11UserActionRequest[]> {
+): Promise<UserActionRequest[]> {
   return db
     .select()
-    .from(v11UserActionRequest)
+    .from(userActionRequestTable)
     .where(
       and(
-        eq(v11UserActionRequest.tenantId, tenantId),
-        eq(v11UserActionRequest.requestState, "pending"),
-        isNotNull(v11UserActionRequest.expiresAt),
-        lt(v11UserActionRequest.expiresAt, now),
+        eq(userActionRequestTable.tenantId, tenantId),
+        eq(userActionRequestTable.requestState, "pending"),
+        isNotNull(userActionRequestTable.expiresAt),
+        lt(userActionRequestTable.expiresAt, now),
       ),
     )
-    .orderBy(asc(v11UserActionRequest.expiresAt));
+    .orderBy(asc(userActionRequestTable.expiresAt));
 }
 
 /**
@@ -658,26 +660,26 @@ export async function listUserActionRequestsByTenant(
     limit?: number;
     afterCreatedAt?: Date;
   },
-): Promise<{ items: V11UserActionRequest[]; nextCursor: string | null }> {
+): Promise<{ items: UserActionRequest[]; nextCursor: string | null }> {
   const limit = Math.min(options?.limit ?? 50, 200);
-  const conditions = [eq(v11UserActionRequest.tenantId, tenantId)];
+  const conditions = [eq(userActionRequestTable.tenantId, tenantId)];
   if (options?.requestState) {
-    conditions.push(eq(v11UserActionRequest.requestState, options.requestState));
+    conditions.push(eq(userActionRequestTable.requestState, options.requestState));
   }
   if (options?.requestType) {
-    conditions.push(eq(v11UserActionRequest.requestType, options.requestType));
+    conditions.push(eq(userActionRequestTable.requestType, options.requestType));
   }
   if (options?.afterCreatedAt) {
     // 按 createdAt 降序取下一页：游标为上一页最后一条的 createdAt
-    conditions.push(lt(v11UserActionRequest.createdAt, options.afterCreatedAt));
+    conditions.push(lt(userActionRequestTable.createdAt, options.afterCreatedAt));
   }
 
   // 取 limit+1 行：第 limit+1 行存在说明有下一页
   const rows = await db
     .select()
-    .from(v11UserActionRequest)
+    .from(userActionRequestTable)
     .where(and(...conditions))
-    .orderBy(desc(v11UserActionRequest.createdAt))
+    .orderBy(desc(userActionRequestTable.createdAt))
     .limit(limit + 1);
 
   let nextCursor: string | null = null;

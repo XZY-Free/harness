@@ -17,9 +17,9 @@ import {
 } from "@/lib/identity/principal-binding-queries";
 import {
   AuthenticationError,
+  authErrorResponse,
   getCurrentPrincipal,
   resolvePrincipal,
-  authErrorResponse,
 } from "@/lib/identity/resolver";
 import {
   DEFAULT_TENANT_ID,

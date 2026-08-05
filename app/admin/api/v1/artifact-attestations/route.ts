@@ -17,15 +17,15 @@ import { listAttestations } from "@/lib/artifacts/persistence/artifact-attestati
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - 参数非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import { ARTIFACT_TYPES, VERIFICATION_STATES } from "@/lib/persistence/schema/artifact";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
+  schemaInvalidTable,
 } from "@/lib/v11/admin/route-helpers";
-import { ARTIFACT_TYPES, VERIFICATION_STATES } from "@/lib/v11/schema/artifact";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +56,7 @@ export async function GET(request: Request): Promise<Response> {
   let artifactType: string | undefined;
   if (artifactTypeParam) {
     if (!VALID_ARTIFACT_TYPES.has(artifactTypeParam)) {
-      return v11SchemaInvalid(requestId, `artifact_type 非法: ${artifactTypeParam}`);
+      return schemaInvalidTable(requestId, `artifact_type 非法: ${artifactTypeParam}`);
     }
     artifactType = artifactTypeParam;
   }
@@ -64,7 +64,7 @@ export async function GET(request: Request): Promise<Response> {
   let verificationState: "verified" | "failed" | undefined;
   if (verificationStateParam) {
     if (!VALID_VERIFICATION_STATES.has(verificationStateParam)) {
-      return v11SchemaInvalid(requestId, `verification_state 非法: ${verificationStateParam}`);
+      return schemaInvalidTable(requestId, `verification_state 非法: ${verificationStateParam}`);
     }
     verificationState = verificationStateParam as "verified" | "failed";
   }
@@ -72,14 +72,14 @@ export async function GET(request: Request): Promise<Response> {
   let revoked: boolean | undefined;
   if (revokedParam !== null) {
     if (revokedParam !== "true" && revokedParam !== "false") {
-      return v11SchemaInvalid(requestId, `revoked 必须为 true/false: ${revokedParam}`);
+      return schemaInvalidTable(requestId, `revoked 必须为 true/false: ${revokedParam}`);
     }
     revoked = revokedParam === "true";
   }
 
   const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
   if (!Number.isFinite(limit) || limit <= 0) {
-    return v11SchemaInvalid(requestId, "limit 必须是正整数");
+    return schemaInvalidTable(requestId, "limit 必须是正整数");
   }
 
   // action scope 校验（artifact_type 过滤时按 artifact_type 资源校验，否则按 tenant）

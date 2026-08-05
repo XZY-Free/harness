@@ -20,6 +20,7 @@
 import { recordAuditEvent } from "@/lib/identity/audit";
 import type { AuditActor } from "@/lib/identity/audit";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
+import type { AdminExport, ExportKind } from "@/lib/persistence/schema/admin-export";
 import {
   getAdminExportById,
   updateAdminExportResult,
@@ -33,7 +34,6 @@ import {
   listCostAggregatesByTenant,
   listUsageRecordsByTenant,
 } from "@/lib/v11/operations/usage-queries";
-import type { ExportKind, V11AdminExport } from "@/lib/v11/schema/admin-export";
 
 /** runAdminExport 入参。 */
 export interface RunAdminExportParams {
@@ -47,7 +47,7 @@ export interface RunAdminExportParams {
 
 /** runAdminExport 结果。 */
 export interface RunAdminExportResult {
-  export: V11AdminExport;
+  export: AdminExport;
   /** NDJSON 字符串（download 端点直接返回）。 */
   ndjson: string;
   /** 实际记录数。 */

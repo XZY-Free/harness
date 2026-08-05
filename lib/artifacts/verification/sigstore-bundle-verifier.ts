@@ -131,7 +131,10 @@ export function createSigstoreBundleVerifier(
         }
 
         // 步骤 10: 校验 Predicate Type
-        if (input.expectedPredicateType && statement.predicateType !== input.expectedPredicateType) {
+        if (
+          input.expectedPredicateType &&
+          statement.predicateType !== input.expectedPredicateType
+        ) {
           return {
             verified: false,
             attestationFormat: "sigstore_bundle",
@@ -208,7 +211,8 @@ async function verifySignatureWithSDK(
   if (config.requireTransparencyLog) {
     return {
       verified: false,
-      failureReason: "sdk_not_installed: signature_and_transparency_log_verification_requires_@sigstore/verify",
+      failureReason:
+        "sdk_not_installed: signature_and_transparency_log_verification_requires_@sigstore/verify",
       fields: {},
     };
   }

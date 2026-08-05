@@ -33,15 +33,15 @@
  */
 "use client";
 
-import type { V11ClientItem } from "@/lib/v11/client/types";
+import type { ClientItem } from "@/lib/v11/client/types";
 import { File, Image as ImageIcon } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 
 /** 可用性取值。 */
-export type V11ArtifactAvailability = "local" | "cloud" | "pending_device" | "unavailable";
+export type ArtifactAvailability = "local" | "cloud" | "pending_device" | "unavailable";
 
 /** Artifact content 投影（兼容旧字段）。 */
-interface V11ArtifactContent {
+interface ArtifactContent {
   artifact_id?: string;
   display_name?: string;
   title?: string;
@@ -58,14 +58,14 @@ interface V11ArtifactContent {
   source_turn_id?: string;
   source_invocation_id?: string;
   source_tool_call_id?: string;
-  availability?: V11ArtifactAvailability;
+  availability?: ArtifactAvailability;
   device_id?: string;
   device_status?: "online" | "offline" | "unknown";
   expires_at?: string;
 }
 
-export interface V11ArtifactItemProps {
-  readonly item: V11ClientItem;
+export interface ArtifactItemProps {
+  readonly item: ClientItem;
   /**
    * 当前是否运行在 Desktop Shell 中。
    * - true：本地 Artifact（availability=local）允许"在 Desktop 打开"。
@@ -75,7 +75,7 @@ export interface V11ArtifactItemProps {
   /** 当前 Desktop 设备 id（isDesktop=true 时使用）；用于校验本地 Artifact 是否属于当前设备。 */
   readonly currentDeviceId?: string | null;
   /** 打开/下载回调（可选）；不传时按钮渲染但仅触发 console.info。 */
-  readonly onOpen?: (artifactId: string, availability: V11ArtifactAvailability) => void;
+  readonly onOpen?: (artifactId: string, availability: ArtifactAvailability) => void;
 }
 
 /** 文件类型 → Lucide 图标。 */
@@ -120,7 +120,7 @@ function formatLocation(ref: string | undefined): string | null {
 }
 
 /** 计算可用性。无显式 availability 时按 cloud 处理。 */
-function resolveAvailability(content: V11ArtifactContent): V11ArtifactAvailability {
+function resolveAvailability(content: ArtifactContent): ArtifactAvailability {
   if (content.availability) return content.availability;
   // 默认按云端可用处理（Web 安全默认；不伪造本地访问）
   return "cloud";
@@ -136,13 +136,13 @@ function SourceLink({ label, value }: { label: string; value: string }): ReactNo
   );
 }
 
-export function V11ArtifactItem({
+export function ArtifactItem({
   item,
   isDesktop = false,
   currentDeviceId = null,
   onOpen,
-}: V11ArtifactItemProps) {
-  const content = item.content as V11ArtifactContent;
+}: ArtifactItemProps) {
+  const content = item.content as ArtifactContent;
 
   const displayName = content.display_name ?? content.title ?? "未命名文件";
   const mediaType = content.media_type ?? content.content_type ?? "unknown";

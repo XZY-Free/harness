@@ -24,22 +24,22 @@
  * - ThreadEvent sequence 通过锁定 thread.last_event_sequence 原子递增（§9.1）。
  */
 import { randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
 import {
   WorkspaceOverlayMergeConflictError,
   WorkspaceOverlayNotFoundError,
   WorkspaceOverlayStateError,
-} from "@/lib/v11/conversation/errors";
-import { allocateEventSequences, insertThreadEvent } from "@/lib/v11/conversation/thread-queries";
-import type { ThreadEventActorType } from "@/lib/v11/schema/conversation";
-import { v11Invocation } from "@/lib/v11/schema/runtime";
+} from "@/lib/conversations/errors";
+import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
+import { db } from "@/lib/db/client";
+import type { ThreadEventActorType } from "@/lib/persistence/schema/conversation";
+import { invocationTable } from "@/lib/persistence/schema/runtime";
 import type {
-  V11WorkspaceMergeConflict,
-  V11WorkspaceOverlay,
+  WorkspaceMergeConflict,
   WorkspaceMergeConflictState,
+  WorkspaceOverlay,
   WorkspaceOverlayType,
-} from "@/lib/v11/schema/workspace-lock";
-import { workspaceMergeConflict, workspaceOverlay } from "@/lib/v11/schema/workspace-lock";
+} from "@/lib/persistence/schema/workspace-lock";
+import { workspaceMergeConflict, workspaceOverlay } from "@/lib/persistence/schema/workspace-lock";
 import { and, asc, eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -72,7 +72,7 @@ export interface CreateWorkspaceOverlayParams {
 
 /** createWorkspaceOverlay 返回结果。 */
 export interface CreateWorkspaceOverlayResult {
-  overlay: V11WorkspaceOverlay;
+  overlay: WorkspaceOverlay;
   /** workspace_overlay.created 事件。 */
   createdEvent: unknown | null;
 }
@@ -172,7 +172,7 @@ export interface MergeWorkspaceOverlayParams {
  */
 export async function mergeWorkspaceOverlay(
   params: MergeWorkspaceOverlayParams,
-): Promise<V11WorkspaceOverlay> {
+): Promise<WorkspaceOverlay> {
   const actorType: ThreadEventActorType = params.actorType ?? "system";
 
   return db.transaction(async (tx) => {
@@ -180,7 +180,10 @@ export async function mergeWorkspaceOverlay(
       .select()
       .from(workspaceOverlay)
       .where(
-        and(eq(workspaceOverlay.tenantId, params.tenantId), eq(workspaceOverlay.id, params.overlayId)),
+        and(
+          eq(workspaceOverlay.tenantId, params.tenantId),
+          eq(workspaceOverlay.id, params.overlayId),
+        ),
       )
       .for("update")
       .limit(1);
@@ -254,9 +257,9 @@ export interface ReportWorkspaceMergeConflictParams {
 
 /** reportWorkspaceMergeConflict 返回结果。 */
 export interface ReportWorkspaceMergeConflictResult {
-  overlay: V11WorkspaceOverlay;
+  overlay: WorkspaceOverlay;
   /** 创建的冲突记录列表。 */
-  conflicts: V11WorkspaceMergeConflict[];
+  conflicts: WorkspaceMergeConflict[];
 }
 
 /**
@@ -288,7 +291,10 @@ export async function reportWorkspaceMergeConflict(
       .select()
       .from(workspaceOverlay)
       .where(
-        and(eq(workspaceOverlay.tenantId, params.tenantId), eq(workspaceOverlay.id, params.overlayId)),
+        and(
+          eq(workspaceOverlay.tenantId, params.tenantId),
+          eq(workspaceOverlay.id, params.overlayId),
+        ),
       )
       .for("update")
       .limit(1);
@@ -303,7 +309,7 @@ export async function reportWorkspaceMergeConflict(
 
     // 1. INSERT 多条冲突记录
     const now = new Date();
-    const createdConflicts: V11WorkspaceMergeConflict[] = [];
+    const createdConflicts: WorkspaceMergeConflict[] = [];
     for (const c of params.conflicts) {
       const conflictId = randomUUID();
       await tx.insert(workspaceMergeConflict).values({
@@ -402,7 +408,7 @@ export interface ResolveWorkspaceMergeConflictParams {
  */
 export async function resolveWorkspaceMergeConflict(
   params: ResolveWorkspaceMergeConflictParams,
-): Promise<V11WorkspaceOverlay> {
+): Promise<WorkspaceOverlay> {
   const actorType: ThreadEventActorType = params.actorType ?? "system";
 
   return db.transaction(async (tx) => {
@@ -410,7 +416,10 @@ export async function resolveWorkspaceMergeConflict(
       .select()
       .from(workspaceOverlay)
       .where(
-        and(eq(workspaceOverlay.tenantId, params.tenantId), eq(workspaceOverlay.id, params.overlayId)),
+        and(
+          eq(workspaceOverlay.tenantId, params.tenantId),
+          eq(workspaceOverlay.id, params.overlayId),
+        ),
       )
       .for("update")
       .limit(1);
@@ -515,7 +524,7 @@ export interface AbandonWorkspaceOverlayParams {
  */
 export async function abandonWorkspaceOverlay(
   params: AbandonWorkspaceOverlayParams,
-): Promise<V11WorkspaceOverlay> {
+): Promise<WorkspaceOverlay> {
   const actorType: ThreadEventActorType = params.actorType ?? "system";
 
   return db.transaction(async (tx) => {
@@ -523,7 +532,10 @@ export async function abandonWorkspaceOverlay(
       .select()
       .from(workspaceOverlay)
       .where(
-        and(eq(workspaceOverlay.tenantId, params.tenantId), eq(workspaceOverlay.id, params.overlayId)),
+        and(
+          eq(workspaceOverlay.tenantId, params.tenantId),
+          eq(workspaceOverlay.id, params.overlayId),
+        ),
       )
       .for("update")
       .limit(1);
@@ -533,7 +545,11 @@ export async function abandonWorkspaceOverlay(
     }
 
     if (overlay.overlayState !== "active" && overlay.overlayState !== "conflict") {
-      throw new WorkspaceOverlayStateError(params.overlayId, overlay.overlayState, "active|conflict");
+      throw new WorkspaceOverlayStateError(
+        params.overlayId,
+        overlay.overlayState,
+        "active|conflict",
+      );
     }
 
     const now = new Date();
@@ -596,7 +612,7 @@ export async function abandonWorkspaceOverlay(
 export async function getWorkspaceOverlay(
   tenantId: string,
   overlayId: string,
-): Promise<V11WorkspaceOverlay | null> {
+): Promise<WorkspaceOverlay | null> {
   const [overlay] = await db
     .select()
     .from(workspaceOverlay)
@@ -609,11 +625,13 @@ export async function getWorkspaceOverlay(
 export async function getOverlaysByRelation(
   tenantId: string,
   relationId: string,
-): Promise<V11WorkspaceOverlay[]> {
+): Promise<WorkspaceOverlay[]> {
   return db
     .select()
     .from(workspaceOverlay)
-    .where(and(eq(workspaceOverlay.tenantId, tenantId), eq(workspaceOverlay.relationId, relationId)))
+    .where(
+      and(eq(workspaceOverlay.tenantId, tenantId), eq(workspaceOverlay.relationId, relationId)),
+    )
     .orderBy(asc(workspaceOverlay.createdAt));
 }
 
@@ -621,7 +639,7 @@ export async function getOverlaysByRelation(
 export async function getOverlaysByBinding(
   tenantId: string,
   parentWorkspaceBindingId: string,
-): Promise<V11WorkspaceOverlay[]> {
+): Promise<WorkspaceOverlay[]> {
   return db
     .select()
     .from(workspaceOverlay)
@@ -639,7 +657,7 @@ export async function getMergeConflictsByOverlay(
   tenantId: string,
   overlayId: string,
   conflictState?: WorkspaceMergeConflictState,
-): Promise<V11WorkspaceMergeConflict[]> {
+): Promise<WorkspaceMergeConflict[]> {
   const conditions = [
     eq(workspaceMergeConflict.tenantId, tenantId),
     eq(workspaceMergeConflict.overlayId, overlayId),
@@ -666,11 +684,11 @@ async function writeOverlayEventForInvocation(
   payload: Record<string, unknown>,
   correlationId: string | undefined,
 ): Promise<unknown | null> {
-  // 通过 invocationId 反查 v11Invocation.threadId（跨租户隔离）
+  // 通过 invocationId 反查 invocationTable.threadId（跨租户隔离）
   const [invocation] = await tx
-    .select({ threadId: v11Invocation.threadId })
-    .from(v11Invocation)
-    .where(and(eq(v11Invocation.tenantId, tenantId), eq(v11Invocation.id, invocationId)))
+    .select({ threadId: invocationTable.threadId })
+    .from(invocationTable)
+    .where(and(eq(invocationTable.tenantId, tenantId), eq(invocationTable.id, invocationId)))
     .limit(1);
 
   if (!invocation?.threadId) {

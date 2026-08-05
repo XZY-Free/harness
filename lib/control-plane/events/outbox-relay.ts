@@ -7,11 +7,7 @@
  */
 
 /** 指数退避计算。 */
-export function computeOutboxBackoff(
-  attemptCount: number,
-  baseMs: number,
-  maxMs: number,
-): Date {
+export function computeOutboxBackoff(attemptCount: number, baseMs: number, maxMs: number): Date {
   const delay = Math.min(baseMs * 2 ** attemptCount, maxMs);
   const jitter = Math.random() * 0.2 * delay; // 20% jitter
   return new Date(Date.now() + delay + jitter);
@@ -77,14 +73,18 @@ export function classifyOutboxError(error: unknown): {
 }
 
 /** 判断事件是否可领取。 */
-export function isOutboxEventClaimable(event: {
-  publishedAt: Date | null;
-  deadLetteredAt: Date | null;
-  nextAttemptAt: Date | null;
-  lockExpiresAt: Date | null;
-  maxAttempts: number | null;
-  attemptCount: number;
-}, now: Date, maxAttempts: number): boolean {
+export function isOutboxEventClaimable(
+  event: {
+    publishedAt: Date | null;
+    deadLetteredAt: Date | null;
+    nextAttemptAt: Date | null;
+    lockExpiresAt: Date | null;
+    maxAttempts: number | null;
+    attemptCount: number;
+  },
+  now: Date,
+  maxAttempts: number,
+): boolean {
   // 已发布
   if (event.publishedAt) return false;
   // 已死信

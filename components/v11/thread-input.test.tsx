@@ -1,4 +1,4 @@
-import type { V11ClientTurn } from "@/lib/v11/client/types";
+import type { ClientTurn } from "@/lib/v11/client/types";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,7 +41,7 @@ vi.mock("@/components/hooks/use-available-models", () => ({
   }),
 }));
 
-// W4-1：V11ThreadInput 内部承载 V11PendingInputQueue，需要把队列 hook 平铺为空队列，
+// W4-1：ThreadInput 内部承载 PendingInputQueue，需要把队列 hook 平铺为空队列，
 // 避免每个测试都得 mock GET /pending-inputs。
 vi.mock("@/components/hooks/use-v11-pending-inputs", () => ({
   useV11PendingInputs: () => ({
@@ -58,7 +58,7 @@ vi.mock("@/components/hooks/use-v11-pending-inputs", () => ({
   }),
 }));
 
-import { V11ThreadInput as ThreadInput } from "./thread-input";
+import { ThreadInput } from "./thread-input";
 
 afterEach(() => {
   cleanup();
@@ -70,7 +70,7 @@ beforeEach(() => {
   fetchMock.mockReset();
 });
 
-function buildTurn(turnState: V11ClientTurn["turn_state"]): V11ClientTurn {
+function buildTurn(turnState: ClientTurn["turn_state"]): ClientTurn {
   return {
     id: "turn-001",
     turn_sequence: 1,

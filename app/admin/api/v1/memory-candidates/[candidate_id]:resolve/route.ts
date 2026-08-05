@@ -38,25 +38,11 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  getRequestId,
   apiError,
-  resourceNotFound,
   apiSuccess,
+  getRequestId,
+  resourceNotFound,
 } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import {
-  MemoryCandidateAlreadyResolvedError,
-  getMemoryCandidateById,
-  isReviewableScopeType,
-  isScopeNarrowingValid,
-  resolveMemoryCandidate,
-} from "@/lib/v11/context/memory-queries";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -68,7 +54,21 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import { MEMORY_SCOPE_TYPES, type MemoryScopeType } from "@/lib/v11/schema/memory";
+import { MEMORY_SCOPE_TYPES, type MemoryScopeType } from "@/lib/persistence/schema/memory";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
+import {
+  MemoryCandidateAlreadyResolvedError,
+  getMemoryCandidateById,
+  isReviewableScopeType,
+  isScopeNarrowingValid,
+  resolveMemoryCandidate,
+} from "@/lib/v11/context/memory-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -197,20 +197,20 @@ export async function memoryCandidateResolvePOST(request: Request): Promise<Resp
   // 2. 校验 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 提取 candidate_id
   const candidateId = extractCandidateId(request.url);
   if (!candidateId) {
-    return v11SchemaInvalid(requestId, "路径缺少 candidate_id");
+    return schemaInvalidTable(requestId, "路径缺少 candidate_id");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   const [valid, errorMessage, parsed] = validateBody(body);
   if (!valid || !parsed) {
-    return v11SchemaInvalid(requestId, errorMessage);
+    return schemaInvalidTable(requestId, errorMessage);
   }
 
   // 5. 查询 Candidate（跨租户隔离）
@@ -251,7 +251,7 @@ export async function memoryCandidateResolvePOST(request: Request): Promise<Resp
     resolvedScopeType = parsed.scope.type as MemoryScopeType;
     resolvedScopeRef = parsed.scope.ref ?? null;
     if (!isScopeNarrowingValid(candidate.proposedScopeType as MemoryScopeType, resolvedScopeType)) {
-      return v11SchemaInvalid(
+      return schemaInvalidTable(
         requestId,
         `scope 收窄方向非法：proposed=${candidate.proposedScopeType} → resolved=${resolvedScopeType}（只能缩小，不能扩大）`,
       );

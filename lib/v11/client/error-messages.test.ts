@@ -10,9 +10,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { makeLocalVisibleError, toVisibleError } from "./error-messages";
-import type { V11ClientErrorBody } from "./types";
+import type { ClientErrorBody } from "./types";
 
-function envelope(code: string, retryable = false, requestId = "req_test"): V11ClientErrorBody {
+function envelope(code: string, retryable = false, requestId = "req_test"): ClientErrorBody {
   return {
     error: {
       code,

@@ -36,14 +36,14 @@ import {
   CONTAINMENT_ACTION_MATRIX,
   type ContainmentActionType,
   type ContainmentState,
+  type IncidentContainment,
   type IncidentSeverity,
   type IncidentState,
   type IncidentTargetType,
-  type V11IncidentContainment,
-  type V11SecurityIncident,
-  v11IncidentContainment,
-  v11SecurityIncident,
-} from "@/lib/v11/schema/security-incident";
+  type SecurityIncident,
+  incidentContainmentTable,
+  securityIncidentTable,
+} from "@/lib/persistence/schema/security-incident";
 import { and, asc, eq, gt, inArray, or } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -138,9 +138,7 @@ export interface ContainmentSummary {
 }
 
 /** 从 containment 列表派生汇总。 */
-export function computeContainmentSummary(
-  containments: V11IncidentContainment[],
-): ContainmentSummary {
+export function computeContainmentSummary(containments: IncidentContainment[]): ContainmentSummary {
   const summary: ContainmentSummary = {
     containmentCount: containments.length,
     appliedCount: 0,
@@ -172,7 +170,7 @@ export function computeContainmentSummary(
  * - 全 applied/failed（无 pending）→ true
  * - 含 pending → false
  */
-export function deriveIncidentContainable(containments: V11IncidentContainment[]): boolean {
+export function deriveIncidentContainable(containments: IncidentContainment[]): boolean {
   if (containments.length === 0) return true;
   return !containments.some((c) => c.actionState === "pending");
 }
@@ -184,7 +182,7 @@ export function deriveIncidentContainable(containments: V11IncidentContainment[]
  *
  * 流程：
  * 1. 检查同租户 incidentKey 是否已存在（业务幂等）。
- * 2. 插入 V11SecurityIncident（state=open）。
+ * 2. 插入 SecurityIncident（state=open）。
  * 3. 写审计 security.incident（targetType=security_incident, targetId=incident.id）。
  * 4. 按 CONTAINMENT_ACTION_MATRIX 预填 containment 项（state=pending）。
  * 5. 回填 auditEventId。
@@ -201,15 +199,15 @@ export async function createSecurityIncident(params: {
   detectedBy: string;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11SecurityIncident> {
+}): Promise<SecurityIncident> {
   // 1. 检查 incidentKey 唯一性
   const existing = await db
-    .select({ id: v11SecurityIncident.id })
-    .from(v11SecurityIncident)
+    .select({ id: securityIncidentTable.id })
+    .from(securityIncidentTable)
     .where(
       and(
-        eq(v11SecurityIncident.tenantId, params.tenantId),
-        eq(v11SecurityIncident.incidentKey, params.incidentKey),
+        eq(securityIncidentTable.tenantId, params.tenantId),
+        eq(securityIncidentTable.incidentKey, params.incidentKey),
       ),
     )
     .limit(1);
@@ -223,7 +221,7 @@ export async function createSecurityIncident(params: {
   // 2. 插入事故
   const incidentId = randomUUID();
   const now = new Date();
-  await db.insert(v11SecurityIncident).values({
+  await db.insert(securityIncidentTable).values({
     id: incidentId,
     tenantId: params.tenantId,
     incidentKey: params.incidentKey,
@@ -259,7 +257,7 @@ export async function createSecurityIncident(params: {
   // 4. 预填 containment 项
   const actionTypes = CONTAINMENT_ACTION_MATRIX[params.targetType];
   if (actionTypes.length > 0) {
-    const containmentRows: Array<typeof v11IncidentContainment.$inferInsert> = actionTypes.map(
+    const containmentRows: Array<typeof incidentContainmentTable.$inferInsert> = actionTypes.map(
       (actionType) => ({
         id: randomUUID(),
         tenantId: params.tenantId,
@@ -271,14 +269,14 @@ export async function createSecurityIncident(params: {
         updatedAt: now,
       }),
     );
-    await db.insert(v11IncidentContainment).values(containmentRows);
+    await db.insert(incidentContainmentTable).values(containmentRows);
   }
 
   // 5. 回填 auditEventId
   await db
-    .update(v11SecurityIncident)
+    .update(securityIncidentTable)
     .set({ auditEventId: auditEvent.id, updatedAt: new Date() })
-    .where(eq(v11SecurityIncident.id, incidentId));
+    .where(eq(securityIncidentTable.id, incidentId));
 
   const created = await getSecurityIncidentById(params.tenantId, incidentId);
   if (!created) {
@@ -293,11 +291,13 @@ export async function createSecurityIncident(params: {
 export async function getSecurityIncidentById(
   tenantId: string,
   incidentId: string,
-): Promise<V11SecurityIncident | null> {
+): Promise<SecurityIncident | null> {
   const rows = await db
     .select()
-    .from(v11SecurityIncident)
-    .where(and(eq(v11SecurityIncident.tenantId, tenantId), eq(v11SecurityIncident.id, incidentId)))
+    .from(securityIncidentTable)
+    .where(
+      and(eq(securityIncidentTable.tenantId, tenantId), eq(securityIncidentTable.id, incidentId)),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
@@ -306,14 +306,14 @@ export async function getSecurityIncidentById(
 export async function getSecurityIncidentByKey(
   tenantId: string,
   incidentKey: string,
-): Promise<V11SecurityIncident | null> {
+): Promise<SecurityIncident | null> {
   const rows = await db
     .select()
-    .from(v11SecurityIncident)
+    .from(securityIncidentTable)
     .where(
       and(
-        eq(v11SecurityIncident.tenantId, tenantId),
-        eq(v11SecurityIncident.incidentKey, incidentKey),
+        eq(securityIncidentTable.tenantId, tenantId),
+        eq(securityIncidentTable.incidentKey, incidentKey),
       ),
     )
     .limit(1);
@@ -329,20 +329,20 @@ export async function listSecurityIncidents(params: {
   detectedBy?: string;
   limit?: number;
   cursor?: string;
-}): Promise<{ items: V11SecurityIncident[]; nextCursor: string | null }> {
+}): Promise<{ items: SecurityIncident[]; nextCursor: string | null }> {
   const limit = Math.min(params.limit ?? 50, 200);
-  const conditions = [eq(v11SecurityIncident.tenantId, params.tenantId)];
+  const conditions = [eq(securityIncidentTable.tenantId, params.tenantId)];
   if (params.severity) {
-    conditions.push(eq(v11SecurityIncident.severity, params.severity));
+    conditions.push(eq(securityIncidentTable.severity, params.severity));
   }
   if (params.incidentState) {
-    conditions.push(eq(v11SecurityIncident.incidentState, params.incidentState));
+    conditions.push(eq(securityIncidentTable.incidentState, params.incidentState));
   }
   if (params.targetType) {
-    conditions.push(eq(v11SecurityIncident.targetType, params.targetType));
+    conditions.push(eq(securityIncidentTable.targetType, params.targetType));
   }
   if (params.detectedBy) {
-    conditions.push(eq(v11SecurityIncident.detectedBy, params.detectedBy));
+    conditions.push(eq(securityIncidentTable.detectedBy, params.detectedBy));
   }
 
   // cursor 分页：detectedAt ASC, id ASC（复合游标，处理同毫秒并发的场景）
@@ -356,10 +356,10 @@ export async function listSecurityIncidents(params: {
       cursorCondition = and(
         ...conditions,
         or(
-          gt(v11SecurityIncident.detectedAt, new Date(decoded.detectedAt)),
+          gt(securityIncidentTable.detectedAt, new Date(decoded.detectedAt)),
           and(
-            eq(v11SecurityIncident.detectedAt, new Date(decoded.detectedAt)),
-            gt(v11SecurityIncident.id, decoded.id),
+            eq(securityIncidentTable.detectedAt, new Date(decoded.detectedAt)),
+            gt(securityIncidentTable.id, decoded.id),
           ),
         ),
       );
@@ -370,9 +370,9 @@ export async function listSecurityIncidents(params: {
 
   const rows = await db
     .select()
-    .from(v11SecurityIncident)
+    .from(securityIncidentTable)
     .where(cursorCondition ?? and(...conditions))
-    .orderBy(asc(v11SecurityIncident.detectedAt), asc(v11SecurityIncident.id))
+    .orderBy(asc(securityIncidentTable.detectedAt), asc(securityIncidentTable.id))
     .limit(limit + 1);
 
   const items = rows.slice(0, limit);
@@ -408,7 +408,7 @@ export async function updateIncidentState(params: {
   closedBy?: string;
   closureReason?: string;
   requestId?: string;
-}): Promise<V11SecurityIncident> {
+}): Promise<SecurityIncident> {
   const existing = await getSecurityIncidentById(params.tenantId, params.id);
   if (!existing) {
     throw new SecurityIncidentError("incident_not_found", `安全事件不存在（id=${params.id}）`);
@@ -427,7 +427,7 @@ export async function updateIncidentState(params: {
   }
 
   const now = new Date();
-  const updates: Partial<V11SecurityIncident> = {
+  const updates: Partial<SecurityIncident> = {
     incidentState: params.nextState,
     updatedAt: now,
   };
@@ -451,12 +451,15 @@ export async function updateIncidentState(params: {
     updates.closureReason = params.closureReason ?? null;
   }
 
-  await db.update(v11SecurityIncident).set(updates).where(eq(v11SecurityIncident.id, params.id));
+  await db
+    .update(securityIncidentTable)
+    .set(updates)
+    .where(eq(securityIncidentTable.id, params.id));
 
   const [row] = await db
     .select()
-    .from(v11SecurityIncident)
-    .where(eq(v11SecurityIncident.id, params.id))
+    .from(securityIncidentTable)
+    .where(eq(securityIncidentTable.id, params.id))
     .limit(1);
   if (!row) {
     throw new Error(`updateIncidentState: 行未找到（id=${params.id}）`);
@@ -484,7 +487,7 @@ export async function startInvestigation(params: {
   id: string;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11SecurityIncident> {
+}): Promise<SecurityIncident> {
   return updateIncidentState({
     ...params,
     nextState: "investigating",
@@ -497,7 +500,7 @@ export async function containIncident(params: {
   id: string;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11SecurityIncident> {
+}): Promise<SecurityIncident> {
   return updateIncidentState({
     ...params,
     nextState: "contained",
@@ -512,7 +515,7 @@ export async function resolveIncident(params: {
   closedBy: string;
   closureReason?: string;
   requestId?: string;
-}): Promise<V11SecurityIncident> {
+}): Promise<SecurityIncident> {
   return updateIncidentState({
     ...params,
     nextState: "resolved",
@@ -527,7 +530,7 @@ export async function escalateIncident(params: {
   closedBy: string;
   closureReason?: string;
   requestId?: string;
-}): Promise<V11SecurityIncident> {
+}): Promise<SecurityIncident> {
   return updateIncidentState({
     ...params,
     nextState: "escalated",
@@ -540,17 +543,17 @@ export async function escalateIncident(params: {
 export async function listIncidentContainments(
   tenantId: string,
   incidentId: string,
-): Promise<V11IncidentContainment[]> {
+): Promise<IncidentContainment[]> {
   const rows = await db
     .select()
-    .from(v11IncidentContainment)
+    .from(incidentContainmentTable)
     .where(
       and(
-        eq(v11IncidentContainment.tenantId, tenantId),
-        eq(v11IncidentContainment.incidentId, incidentId),
+        eq(incidentContainmentTable.tenantId, tenantId),
+        eq(incidentContainmentTable.incidentId, incidentId),
       ),
     )
-    .orderBy(asc(v11IncidentContainment.actionType));
+    .orderBy(asc(incidentContainmentTable.actionType));
   return rows;
 }
 
@@ -558,14 +561,14 @@ export async function listIncidentContainments(
 export async function getContainment(
   tenantId: string,
   containmentId: string,
-): Promise<V11IncidentContainment | null> {
+): Promise<IncidentContainment | null> {
   const rows = await db
     .select()
-    .from(v11IncidentContainment)
+    .from(incidentContainmentTable)
     .where(
       and(
-        eq(v11IncidentContainment.tenantId, tenantId),
-        eq(v11IncidentContainment.id, containmentId),
+        eq(incidentContainmentTable.tenantId, tenantId),
+        eq(incidentContainmentTable.id, containmentId),
       ),
     )
     .limit(1);
@@ -582,7 +585,7 @@ export async function markContainmentApplied(params: {
   containmentId: string;
   evidenceRef: string;
   detailsJson?: string;
-}): Promise<V11IncidentContainment> {
+}): Promise<IncidentContainment> {
   const existing = await getContainment(params.tenantId, params.containmentId);
   if (!existing) {
     throw new SecurityIncidentError(
@@ -602,7 +605,7 @@ export async function markContainmentApplied(params: {
 
   const now = new Date();
   await db
-    .update(v11IncidentContainment)
+    .update(incidentContainmentTable)
     .set({
       actionState: "applied",
       evidenceRef: params.evidenceRef,
@@ -610,12 +613,12 @@ export async function markContainmentApplied(params: {
       appliedAt: now,
       updatedAt: now,
     })
-    .where(eq(v11IncidentContainment.id, params.containmentId));
+    .where(eq(incidentContainmentTable.id, params.containmentId));
 
   const [row] = await db
     .select()
-    .from(v11IncidentContainment)
-    .where(eq(v11IncidentContainment.id, params.containmentId))
+    .from(incidentContainmentTable)
+    .where(eq(incidentContainmentTable.id, params.containmentId))
     .limit(1);
   if (!row) {
     throw new Error(`markContainmentApplied: 行未找到（id=${params.containmentId}）`);
@@ -633,7 +636,7 @@ export async function markContainmentFailed(params: {
   containmentId: string;
   failureReason: string;
   evidenceRef?: string;
-}): Promise<V11IncidentContainment> {
+}): Promise<IncidentContainment> {
   const existing = await getContainment(params.tenantId, params.containmentId);
   if (!existing) {
     throw new SecurityIncidentError(
@@ -645,19 +648,19 @@ export async function markContainmentFailed(params: {
 
   const now = new Date();
   await db
-    .update(v11IncidentContainment)
+    .update(incidentContainmentTable)
     .set({
       actionState: "failed",
       failureReason: params.failureReason,
       evidenceRef: params.evidenceRef ?? null,
       updatedAt: now,
     })
-    .where(eq(v11IncidentContainment.id, params.containmentId));
+    .where(eq(incidentContainmentTable.id, params.containmentId));
 
   const [row] = await db
     .select()
-    .from(v11IncidentContainment)
-    .where(eq(v11IncidentContainment.id, params.containmentId))
+    .from(incidentContainmentTable)
+    .where(eq(incidentContainmentTable.id, params.containmentId))
     .limit(1);
   if (!row) {
     throw new Error(`markContainmentFailed: 行未找到（id=${params.containmentId}）`);
@@ -674,7 +677,7 @@ export async function revertContainment(params: {
   tenantId: string;
   containmentId: string;
   reason?: string;
-}): Promise<V11IncidentContainment> {
+}): Promise<IncidentContainment> {
   const existing = await getContainment(params.tenantId, params.containmentId);
   if (!existing) {
     throw new SecurityIncidentError(
@@ -686,18 +689,18 @@ export async function revertContainment(params: {
 
   const now = new Date();
   await db
-    .update(v11IncidentContainment)
+    .update(incidentContainmentTable)
     .set({
       actionState: "reverted",
       revertedAt: now,
       updatedAt: now,
     })
-    .where(eq(v11IncidentContainment.id, params.containmentId));
+    .where(eq(incidentContainmentTable.id, params.containmentId));
 
   const [row] = await db
     .select()
-    .from(v11IncidentContainment)
-    .where(eq(v11IncidentContainment.id, params.containmentId))
+    .from(incidentContainmentTable)
+    .where(eq(incidentContainmentTable.id, params.containmentId))
     .limit(1);
   if (!row) {
     throw new Error(`revertContainment: 行未找到（id=${params.containmentId}）`);
@@ -753,19 +756,19 @@ export async function getActiveIncidentByTarget(
   tenantId: string,
   targetType: IncidentTargetType,
   targetId: string,
-): Promise<V11SecurityIncident | null> {
+): Promise<SecurityIncident | null> {
   const rows = await db
     .select()
-    .from(v11SecurityIncident)
+    .from(securityIncidentTable)
     .where(
       and(
-        eq(v11SecurityIncident.tenantId, tenantId),
-        eq(v11SecurityIncident.targetType, targetType),
-        eq(v11SecurityIncident.targetId, targetId),
-        inArray(v11SecurityIncident.incidentState, [...NON_TERMINAL_INCIDENT_STATES]),
+        eq(securityIncidentTable.tenantId, tenantId),
+        eq(securityIncidentTable.targetType, targetType),
+        eq(securityIncidentTable.targetId, targetId),
+        inArray(securityIncidentTable.incidentState, [...NON_TERMINAL_INCIDENT_STATES]),
       ),
     )
-    .orderBy(asc(v11SecurityIncident.detectedAt))
+    .orderBy(asc(securityIncidentTable.detectedAt))
     .limit(1);
   return rows[0] ?? null;
 }

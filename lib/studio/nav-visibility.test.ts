@@ -11,13 +11,13 @@
  */
 import { authConfig } from "@/lib/config";
 import { DEFAULT_USER_ID } from "@/lib/constants";
+import type { Principal } from "@/lib/identity/resolver";
+import type { RoleActionBinding } from "@/lib/persistence/schema/authorization";
 import {
   NAV_ACTION_MAPPING,
   STUDIO_NAV_IDS,
   computeStudioNavVisibility,
 } from "@/lib/studio/nav-visibility";
-import type { Principal } from "@/lib/identity/resolver";
-import type { RoleActionBinding } from "@/lib/v11/schema/authorization";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock listActiveActionBindingsForUser（避免触发 DB）

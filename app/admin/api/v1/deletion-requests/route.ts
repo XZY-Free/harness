@@ -24,26 +24,16 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  getRequestId,
   apiError,
   apiSuccess,
+  getRequestId,
 } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import {
-  DeletionExecutorError,
-  executeDeletionRequest,
-} from "@/lib/identity/deletion-executor";
+import { DeletionExecutorError, executeDeletionRequest } from "@/lib/identity/deletion-executor";
 import { planDeletion } from "@/lib/identity/deletion-planner";
 import {
   DeletionRequestError,
@@ -70,7 +60,14 @@ import {
   type DeletionDeleteMode,
   type DeletionRequestPrincipalKind,
   type DeletionSubjectType,
-} from "@/lib/v11/schema/deletion-request";
+} from "@/lib/persistence/schema/deletion-request";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -190,13 +187,13 @@ export async function POST(request: Request): Promise<Response> {
   // 3. Idempotency-Key 必填
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 请求体校验
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：缺少 subject_type/subject_id/delete_mode/reason_code/policy_revision_id 或字段值非法",
     );

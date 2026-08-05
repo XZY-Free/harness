@@ -10,7 +10,7 @@
  * - Steer 运行中 Turn（POST /api/v1/turns/{id}/steer，202 Accepted，异步命令）。
  * - Interrupt（Stop）运行中 Turn（POST /api/v1/turns/{id}/interrupt，202 Accepted，异步命令）。
  * - 不在 Runtime ack 前宣称已引导/已停止：UI 状态固定为 "queued" / "requested"。
- * - 错误转化为 V11ClientVisibleError。
+ * - 错误转化为 ClientVisibleError。
  *
  * 关键不变量：
  * - Steer/Interrupt 是异步命令，调用后 Turn 状态未变（后端不立即改 turn_state）。
@@ -37,10 +37,10 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
 import type {
-  V11ClientErrorBody,
-  V11ClientInterruptResponse,
-  V11ClientSteerResponse,
-  V11ClientVisibleError,
+  ClientErrorBody,
+  ClientInterruptResponse,
+  ClientSteerResponse,
+  ClientVisibleError,
 } from "@/lib/v11/client/types";
 import { useCallback, useState } from "react";
 
@@ -49,11 +49,11 @@ export interface UseV11TurnControlsResult {
   /** 是否有操作进行中。 */
   readonly busy: boolean;
   /** 错误。 */
-  readonly error: V11ClientVisibleError | null;
+  readonly error: ClientVisibleError | null;
   /** 最近一次 Steer 结果（用于 UI 显示 "已请求引导" 状态）。 */
-  readonly lastSteer: V11ClientSteerResponse | null;
+  readonly lastSteer: ClientSteerResponse | null;
   /** 最近一次 Interrupt 结果（用于 UI 显示 "已请求停止" 状态）。 */
-  readonly lastInterrupt: V11ClientInterruptResponse | null;
+  readonly lastInterrupt: ClientInterruptResponse | null;
   /** 发送 Steer（运行中引导）。 */
   readonly steer: (guidanceText: string) => Promise<boolean>;
   /** 发送 Interrupt（停止）。 */
@@ -71,11 +71,11 @@ function generateIdempotencyKey(): string {
 }
 
 /** 解析错误响应为可见错误。 */
-async function parseError(response: Response): Promise<V11ClientVisibleError> {
+async function parseError(response: Response): Promise<ClientVisibleError> {
   const bodyText = await response.text().catch(() => "");
-  let errorBody: V11ClientErrorBody | null = null;
+  let errorBody: ClientErrorBody | null = null;
   try {
-    errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+    errorBody = JSON.parse(bodyText) as ClientErrorBody;
   } catch {
     // ignore
   }
@@ -93,9 +93,9 @@ async function parseError(response: Response): Promise<V11ClientVisibleError> {
 /** V11 Turn 控制 Hook。 */
 export function useV11TurnControls(turnId: string): UseV11TurnControlsResult {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<V11ClientVisibleError | null>(null);
-  const [lastSteer, setLastSteer] = useState<V11ClientSteerResponse | null>(null);
-  const [lastInterrupt, setLastInterrupt] = useState<V11ClientInterruptResponse | null>(null);
+  const [error, setError] = useState<ClientVisibleError | null>(null);
+  const [lastSteer, setLastSteer] = useState<ClientSteerResponse | null>(null);
+  const [lastInterrupt, setLastInterrupt] = useState<ClientInterruptResponse | null>(null);
 
   /** 发送 Steer。 */
   const steer = useCallback(
@@ -129,7 +129,7 @@ export function useV11TurnControls(turnId: string): UseV11TurnControlsResult {
           setError(visible);
           return false;
         }
-        const data = (await resp.json()) as V11ClientSteerResponse;
+        const data = (await resp.json()) as ClientSteerResponse;
         setLastSteer(data);
         return true;
       } catch {
@@ -173,7 +173,7 @@ export function useV11TurnControls(turnId: string): UseV11TurnControlsResult {
           setError(visible);
           return false;
         }
-        const data = (await resp.json()) as V11ClientInterruptResponse;
+        const data = (await resp.json()) as ClientInterruptResponse;
         setLastInterrupt(data);
         return true;
       } catch {

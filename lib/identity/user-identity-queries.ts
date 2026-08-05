@@ -6,8 +6,8 @@
  * MySQL 无 INSERT ... RETURNING：IGNORE + 回查，并发下也只建一行。
  */
 import { db } from "@/lib/db/client";
-import { userIdentity } from "@/lib/v11/schema/identity";
-import type { UserIdentity } from "@/lib/v11/schema/identity";
+import { userIdentity } from "@/lib/persistence/schema/identity";
+import type { UserIdentity } from "@/lib/persistence/schema/identity";
 import { and, eq } from "drizzle-orm";
 
 /** 按 (tenantId, externalSubject) upsert 用户身份。 */

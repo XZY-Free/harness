@@ -20,7 +20,8 @@
  * - resource_type 非法 → 400 REQUEST_SCHEMA_INVALID
  * - cursor 非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
+import { CATALOG_RESOURCE_TYPES, type CatalogResourceType } from "@/lib/persistence/schema/catalog";
 import {
   CatalogQueryError,
   type SearchCatalogResult,
@@ -30,11 +31,10 @@ import { getCurrentCatalogRevision } from "@/lib/v11/catalog/projector";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
+  gatewayCatalogRevisionInvalidTable,
+  gatewaySchemaInvalidTable,
   resolveGatewayPrincipal,
-  v11GatewayCatalogRevisionInvalid,
-  v11GatewaySchemaInvalid,
 } from "@/lib/v11/gateway/route-helpers";
-import { CATALOG_RESOURCE_TYPES, type CatalogResourceType } from "@/lib/v11/schema/catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -116,7 +116,7 @@ export async function POST(request: Request): Promise<Response> {
   // 2. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11GatewaySchemaInvalid(
+    return gatewaySchemaInvalidTable(
       requestId,
       "请求体非法：query 必填非空；resource_types / lifecycle_states 必须为字符串数组；limit 必须为正整数",
     );
@@ -148,7 +148,10 @@ export async function POST(request: Request): Promise<Response> {
   if (ifNoneMatch) {
     const parsedRevision = parseGatewayCatalogEtagRevision(ifNoneMatch);
     if (parsedRevision === null) {
-      return v11GatewayCatalogRevisionInvalid(requestId, `If-None-Match 格式非法: ${ifNoneMatch}`);
+      return gatewayCatalogRevisionInvalidTable(
+        requestId,
+        `If-None-Match 格式非法: ${ifNoneMatch}`,
+      );
     }
     if (parsedRevision === currentRevision) {
       return new Response(null, {
@@ -174,7 +177,7 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (err) {
     if (err instanceof CatalogQueryError) {
-      return v11GatewaySchemaInvalid(requestId, err.message);
+      return gatewaySchemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

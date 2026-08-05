@@ -1,3 +1,8 @@
+import {
+  type QuarantineResolution,
+  getDeliveryFailureById,
+  resolveQuarantine,
+} from "@/lib/conversations/projection-operations";
 /**
  * POST /admin/api/v1/event-quarantines/{failure_id}:resolve — 管理员处置 quarantined 事件交付失败（S12-W01）。
  *
@@ -30,28 +35,16 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  getRequestId,
   apiError,
-  resourceNotFound,
   apiSuccess,
+  getRequestId,
+  resourceNotFound,
 } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import {
-  type QuarantineResolution,
-  getDeliveryFailureById,
-  resolveQuarantine,
-} from "@/lib/v11/conversation/projection-operations";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -63,6 +56,13 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -138,14 +138,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 2. 校验 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   const [valid, errorMessage, parsed] = validateBody(body);
   if (!valid || !parsed) {
-    return v11SchemaInvalid(requestId, errorMessage);
+    return schemaInvalidTable(requestId, errorMessage);
   }
 
   // 4. 查询失败记录（租户隔离，跨租户 404）

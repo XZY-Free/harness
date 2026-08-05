@@ -18,30 +18,30 @@
  */
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { isValidContentHash } from "@/lib/v11/capability/content-cache";
 import {
   FILE_CHANGE_TYPES,
+  type FileChange,
   type FileChangeType,
-  type NewV11FileChange,
-  type V11FileChange,
-  v11FileChange,
-} from "@/lib/v11/schema/file-change";
+  type NewFileChange,
+  fileChangeTable,
+} from "@/lib/persistence/schema/file-change";
 import {
   FILESYSTEM_CHECKPOINT_TYPES,
+  type FilesystemCheckpoint,
   type FilesystemCheckpointType,
-  type NewV11FilesystemCheckpoint,
-  type V11FilesystemCheckpoint,
-  v11FilesystemCheckpoint,
-} from "@/lib/v11/schema/filesystem-checkpoint";
+  type NewFilesystemCheckpoint,
+  filesystemCheckpointTable,
+} from "@/lib/persistence/schema/filesystem-checkpoint";
 import {
-  type NewV11Artifact,
+  type Artifact,
+  type NewArtifact,
   RUNTIME_ARTIFACT_TYPES,
   type RuntimeArtifactType,
-  type V11Artifact,
   VISIBILITY_SCOPES,
   type VisibilityScope,
-  v11Artifact,
-} from "@/lib/v11/schema/runtime-artifact";
+  artifactTable,
+} from "@/lib/persistence/schema/runtime-artifact";
+import { isValidContentHash } from "@/lib/v11/capability/content-cache";
 import { and, asc, desc, eq, isNotNull, lt } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -259,7 +259,7 @@ export interface CreateArtifactInput {
  * @throws ArtifactValidationError 校验失败
  * @throws ArtifactItemConflictError 非空 itemId 已被占用
  */
-export async function createArtifact(input: CreateArtifactInput): Promise<V11Artifact> {
+export async function createArtifact(input: CreateArtifactInput): Promise<Artifact> {
   if (!input.tenantId) throw new ArtifactValidationError("tenantId 不能为空");
   if (!input.invocationId) throw new ArtifactValidationError("invocationId 不能为空");
   if (!input.displayName) throw new ArtifactValidationError("displayName 不能为空");
@@ -299,7 +299,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<V11Art
     throw new ArtifactValidationError("会话产物（threadId）与 Job 产物（jobId）互斥，不可同时填写");
   }
 
-  const row: NewV11Artifact = {
+  const row: NewArtifact = {
     tenantId: input.tenantId,
     invocationId: input.invocationId,
     threadId: input.threadId ?? null,
@@ -317,7 +317,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<V11Art
   };
 
   try {
-    await db.insert(v11Artifact).values(row);
+    await db.insert(artifactTable).values(row);
   } catch (err) {
     if (isDuplicateEntryError(err) && input.itemId) {
       throw new ArtifactItemConflictError(input.itemId);
@@ -327,9 +327,9 @@ export async function createArtifact(input: CreateArtifactInput): Promise<V11Art
 
   const [created] = await db
     .select()
-    .from(v11Artifact)
-    .where(eq(v11Artifact.contentHash, input.contentHash))
-    .orderBy(desc(v11Artifact.createdAt))
+    .from(artifactTable)
+    .where(eq(artifactTable.contentHash, input.contentHash))
+    .orderBy(desc(artifactTable.createdAt))
     .limit(1);
   if (!created) {
     throw new Error("createArtifact: 行未找到");
@@ -343,11 +343,11 @@ export async function createArtifact(input: CreateArtifactInput): Promise<V11Art
 export async function getArtifactById(
   tenantId: string,
   artifactId: string,
-): Promise<V11Artifact | null> {
+): Promise<Artifact | null> {
   const [row] = await db
     .select()
-    .from(v11Artifact)
-    .where(and(eq(v11Artifact.tenantId, tenantId), eq(v11Artifact.id, artifactId)))
+    .from(artifactTable)
+    .where(and(eq(artifactTable.tenantId, tenantId), eq(artifactTable.id, artifactId)))
     .limit(1);
   return row ?? null;
 }
@@ -356,11 +356,11 @@ export async function getArtifactById(
 export async function getArtifactByItemId(
   tenantId: string,
   itemId: string,
-): Promise<V11Artifact | null> {
+): Promise<Artifact | null> {
   const [row] = await db
     .select()
-    .from(v11Artifact)
-    .where(and(eq(v11Artifact.tenantId, tenantId), eq(v11Artifact.itemId, itemId)))
+    .from(artifactTable)
+    .where(and(eq(artifactTable.tenantId, tenantId), eq(artifactTable.itemId, itemId)))
     .limit(1);
   return row ?? null;
 }
@@ -369,33 +369,33 @@ export async function getArtifactByItemId(
 export async function listArtifactsByInvocation(
   tenantId: string,
   invocationId: string,
-): Promise<V11Artifact[]> {
+): Promise<Artifact[]> {
   return db
     .select()
-    .from(v11Artifact)
-    .where(and(eq(v11Artifact.tenantId, tenantId), eq(v11Artifact.invocationId, invocationId)))
-    .orderBy(asc(v11Artifact.createdAt), asc(v11Artifact.id));
+    .from(artifactTable)
+    .where(and(eq(artifactTable.tenantId, tenantId), eq(artifactTable.invocationId, invocationId)))
+    .orderBy(asc(artifactTable.createdAt), asc(artifactTable.id));
 }
 
 /** 列出某 Thread 的全部 Artifact（按 createdAt 升序）。 */
 export async function listArtifactsByThread(
   tenantId: string,
   threadId: string,
-): Promise<V11Artifact[]> {
+): Promise<Artifact[]> {
   return db
     .select()
-    .from(v11Artifact)
-    .where(and(eq(v11Artifact.tenantId, tenantId), eq(v11Artifact.threadId, threadId)))
-    .orderBy(asc(v11Artifact.createdAt), asc(v11Artifact.id));
+    .from(artifactTable)
+    .where(and(eq(artifactTable.tenantId, tenantId), eq(artifactTable.threadId, threadId)))
+    .orderBy(asc(artifactTable.createdAt), asc(artifactTable.id));
 }
 
 /** 列出某 Job 的全部 Artifact（按 createdAt 升序）。 */
-export async function listArtifactsByJob(tenantId: string, jobId: string): Promise<V11Artifact[]> {
+export async function listArtifactsByJob(tenantId: string, jobId: string): Promise<Artifact[]> {
   return db
     .select()
-    .from(v11Artifact)
-    .where(and(eq(v11Artifact.tenantId, tenantId), eq(v11Artifact.jobId, jobId)))
-    .orderBy(asc(v11Artifact.createdAt), asc(v11Artifact.id));
+    .from(artifactTable)
+    .where(and(eq(artifactTable.tenantId, tenantId), eq(artifactTable.jobId, jobId)))
+    .orderBy(asc(artifactTable.createdAt), asc(artifactTable.id));
 }
 
 // ─── createFileChanges ───────────────────────────────────
@@ -405,7 +405,7 @@ export interface CreateFileChangeItem {
   changeType: FileChangeType;
   beforeHash?: string | null;
   afterHash?: string | null;
-  /** 变更结果被上传为 Artifact 时关联；逻辑外键 → V11Artifact.id。 */
+  /** 变更结果被上传为 Artifact 时关联；逻辑外键 → Artifact.id。 */
   artifactId?: string | null;
 }
 
@@ -428,7 +428,7 @@ export interface CreateFileChangesInput {
  *
  * @throws FileChangeValidationError 校验失败
  */
-export async function createFileChanges(input: CreateFileChangesInput): Promise<V11FileChange[]> {
+export async function createFileChanges(input: CreateFileChangesInput): Promise<FileChange[]> {
   if (!input.tenantId) throw new FileChangeValidationError("tenantId 不能为空");
   if (!input.toolCallId) throw new FileChangeValidationError("toolCallId 不能为空");
   if (!input.workspaceBindingId) {
@@ -438,7 +438,7 @@ export async function createFileChanges(input: CreateFileChangesInput): Promise<
     throw new FileChangeValidationError("changes 必须是非空数组");
   }
 
-  const rows: NewV11FileChange[] = input.changes.map((c) => {
+  const rows: NewFileChange[] = input.changes.map((c) => {
     if (!c.pathRef) throw new FileChangeValidationError("pathRef 不能为空");
     if (c.pathRef.length > 512) {
       throw new FileChangeValidationError("pathRef 长度不能超过 512");
@@ -465,20 +465,20 @@ export async function createFileChanges(input: CreateFileChangesInput): Promise<
   });
 
   await db.transaction(async (tx) => {
-    await tx.insert(v11FileChange).values(rows);
+    await tx.insert(fileChangeTable).values(rows);
   });
 
   // 查询刚创建的行（按 toolCallId 过滤，按 createdAt 升序）
   return db
     .select()
-    .from(v11FileChange)
+    .from(fileChangeTable)
     .where(
       and(
-        eq(v11FileChange.tenantId, input.tenantId),
-        eq(v11FileChange.toolCallId, input.toolCallId),
+        eq(fileChangeTable.tenantId, input.tenantId),
+        eq(fileChangeTable.toolCallId, input.toolCallId),
       ),
     )
-    .orderBy(asc(v11FileChange.createdAt), asc(v11FileChange.id));
+    .orderBy(asc(fileChangeTable.createdAt), asc(fileChangeTable.id));
 }
 
 // ─── FileChange 查询 ─────────────────────────────────────
@@ -487,11 +487,11 @@ export async function createFileChanges(input: CreateFileChangesInput): Promise<
 export async function getFileChangeById(
   tenantId: string,
   fileChangeId: string,
-): Promise<V11FileChange | null> {
+): Promise<FileChange | null> {
   const [row] = await db
     .select()
-    .from(v11FileChange)
-    .where(and(eq(v11FileChange.tenantId, tenantId), eq(v11FileChange.id, fileChangeId)))
+    .from(fileChangeTable)
+    .where(and(eq(fileChangeTable.tenantId, tenantId), eq(fileChangeTable.id, fileChangeId)))
     .limit(1);
   return row ?? null;
 }
@@ -500,12 +500,12 @@ export async function getFileChangeById(
 export async function listFileChangesByToolCall(
   tenantId: string,
   toolCallId: string,
-): Promise<V11FileChange[]> {
+): Promise<FileChange[]> {
   return db
     .select()
-    .from(v11FileChange)
-    .where(and(eq(v11FileChange.tenantId, tenantId), eq(v11FileChange.toolCallId, toolCallId)))
-    .orderBy(asc(v11FileChange.createdAt), asc(v11FileChange.id));
+    .from(fileChangeTable)
+    .where(and(eq(fileChangeTable.tenantId, tenantId), eq(fileChangeTable.toolCallId, toolCallId)))
+    .orderBy(asc(fileChangeTable.createdAt), asc(fileChangeTable.id));
 }
 
 /** 列出某 WorkspaceBinding 的 FileChange（按 createdAt 降序；可限 limit）。 */
@@ -513,17 +513,17 @@ export async function listFileChangesByWorkspaceBinding(
   tenantId: string,
   workspaceBindingId: string,
   options?: { limit?: number },
-): Promise<V11FileChange[]> {
+): Promise<FileChange[]> {
   const query = db
     .select()
-    .from(v11FileChange)
+    .from(fileChangeTable)
     .where(
       and(
-        eq(v11FileChange.tenantId, tenantId),
-        eq(v11FileChange.workspaceBindingId, workspaceBindingId),
+        eq(fileChangeTable.tenantId, tenantId),
+        eq(fileChangeTable.workspaceBindingId, workspaceBindingId),
       ),
     )
-    .orderBy(desc(v11FileChange.createdAt), desc(v11FileChange.id));
+    .orderBy(desc(fileChangeTable.createdAt), desc(fileChangeTable.id));
   if (options?.limit && options.limit > 0) {
     return query.limit(options.limit);
   }
@@ -534,12 +534,12 @@ export async function listFileChangesByWorkspaceBinding(
 export async function listFileChangesByArtifact(
   tenantId: string,
   artifactId: string,
-): Promise<V11FileChange[]> {
+): Promise<FileChange[]> {
   return db
     .select()
-    .from(v11FileChange)
-    .where(and(eq(v11FileChange.tenantId, tenantId), eq(v11FileChange.artifactId, artifactId)))
-    .orderBy(asc(v11FileChange.createdAt), asc(v11FileChange.id));
+    .from(fileChangeTable)
+    .where(and(eq(fileChangeTable.tenantId, tenantId), eq(fileChangeTable.artifactId, artifactId)))
+    .orderBy(asc(fileChangeTable.createdAt), asc(fileChangeTable.id));
 }
 
 /**
@@ -556,7 +556,7 @@ export async function linkFileChangeToArtifact(
   tenantId: string,
   fileChangeId: string,
   artifactId: string,
-): Promise<V11FileChange> {
+): Promise<FileChange> {
   const current = await getFileChangeById(tenantId, fileChangeId);
   if (!current) {
     throw new FileChangeNotFoundError(`FileChange 不存在或跨租户不可见: ${fileChangeId}`);
@@ -568,14 +568,14 @@ export async function linkFileChangeToArtifact(
   }
 
   await db
-    .update(v11FileChange)
+    .update(fileChangeTable)
     .set({ artifactId })
-    .where(and(eq(v11FileChange.tenantId, tenantId), eq(v11FileChange.id, fileChangeId)));
+    .where(and(eq(fileChangeTable.tenantId, tenantId), eq(fileChangeTable.id, fileChangeId)));
 
   const [updated] = await db
     .select()
-    .from(v11FileChange)
-    .where(and(eq(v11FileChange.tenantId, tenantId), eq(v11FileChange.id, fileChangeId)))
+    .from(fileChangeTable)
+    .where(and(eq(fileChangeTable.tenantId, tenantId), eq(fileChangeTable.id, fileChangeId)))
     .limit(1);
   if (!updated) {
     throw new Error("linkFileChangeToArtifact: 行未找到");
@@ -609,7 +609,7 @@ export interface CreateFilesystemCheckpointInput {
  */
 export async function createFilesystemCheckpoint(
   input: CreateFilesystemCheckpointInput,
-): Promise<V11FilesystemCheckpoint> {
+): Promise<FilesystemCheckpoint> {
   if (!input.tenantId) throw new FilesystemCheckpointValidationError("tenantId 不能为空");
   if (!input.workspaceBindingId) {
     throw new FilesystemCheckpointValidationError("workspaceBindingId 不能为空");
@@ -642,7 +642,7 @@ export async function createFilesystemCheckpoint(
     }
   }
 
-  const row: NewV11FilesystemCheckpoint = {
+  const row: NewFilesystemCheckpoint = {
     tenantId: input.tenantId,
     workspaceBindingId: input.workspaceBindingId,
     invocationId: input.invocationId,
@@ -653,19 +653,19 @@ export async function createFilesystemCheckpoint(
     expiresAt: input.expiresAt ?? null,
   };
 
-  await db.insert(v11FilesystemCheckpoint).values(row);
+  await db.insert(filesystemCheckpointTable).values(row);
 
   const [created] = await db
     .select()
-    .from(v11FilesystemCheckpoint)
+    .from(filesystemCheckpointTable)
     .where(
       and(
-        eq(v11FilesystemCheckpoint.tenantId, input.tenantId),
-        eq(v11FilesystemCheckpoint.workspaceBindingId, input.workspaceBindingId),
-        eq(v11FilesystemCheckpoint.invocationId, input.invocationId),
+        eq(filesystemCheckpointTable.tenantId, input.tenantId),
+        eq(filesystemCheckpointTable.workspaceBindingId, input.workspaceBindingId),
+        eq(filesystemCheckpointTable.invocationId, input.invocationId),
       ),
     )
-    .orderBy(desc(v11FilesystemCheckpoint.createdAt))
+    .orderBy(desc(filesystemCheckpointTable.createdAt))
     .limit(1);
   if (!created) {
     throw new Error("createFilesystemCheckpoint: 行未找到");
@@ -679,14 +679,14 @@ export async function createFilesystemCheckpoint(
 export async function getFilesystemCheckpointById(
   tenantId: string,
   checkpointId: string,
-): Promise<V11FilesystemCheckpoint | null> {
+): Promise<FilesystemCheckpoint | null> {
   const [row] = await db
     .select()
-    .from(v11FilesystemCheckpoint)
+    .from(filesystemCheckpointTable)
     .where(
       and(
-        eq(v11FilesystemCheckpoint.tenantId, tenantId),
-        eq(v11FilesystemCheckpoint.id, checkpointId),
+        eq(filesystemCheckpointTable.tenantId, tenantId),
+        eq(filesystemCheckpointTable.id, checkpointId),
       ),
     )
     .limit(1);
@@ -697,51 +697,51 @@ export async function getFilesystemCheckpointById(
 export async function listFilesystemCheckpointsByInvocation(
   tenantId: string,
   invocationId: string,
-): Promise<V11FilesystemCheckpoint[]> {
+): Promise<FilesystemCheckpoint[]> {
   return db
     .select()
-    .from(v11FilesystemCheckpoint)
+    .from(filesystemCheckpointTable)
     .where(
       and(
-        eq(v11FilesystemCheckpoint.tenantId, tenantId),
-        eq(v11FilesystemCheckpoint.invocationId, invocationId),
+        eq(filesystemCheckpointTable.tenantId, tenantId),
+        eq(filesystemCheckpointTable.invocationId, invocationId),
       ),
     )
-    .orderBy(desc(v11FilesystemCheckpoint.createdAt), desc(v11FilesystemCheckpoint.id));
+    .orderBy(desc(filesystemCheckpointTable.createdAt), desc(filesystemCheckpointTable.id));
 }
 
 /** 列出某 WorkspaceBinding 的 FilesystemCheckpoint（按 createdAt 降序）。 */
 export async function listFilesystemCheckpointsByWorkspaceBinding(
   tenantId: string,
   workspaceBindingId: string,
-): Promise<V11FilesystemCheckpoint[]> {
+): Promise<FilesystemCheckpoint[]> {
   return db
     .select()
-    .from(v11FilesystemCheckpoint)
+    .from(filesystemCheckpointTable)
     .where(
       and(
-        eq(v11FilesystemCheckpoint.tenantId, tenantId),
-        eq(v11FilesystemCheckpoint.workspaceBindingId, workspaceBindingId),
+        eq(filesystemCheckpointTable.tenantId, tenantId),
+        eq(filesystemCheckpointTable.workspaceBindingId, workspaceBindingId),
       ),
     )
-    .orderBy(desc(v11FilesystemCheckpoint.createdAt), desc(v11FilesystemCheckpoint.id));
+    .orderBy(desc(filesystemCheckpointTable.createdAt), desc(filesystemCheckpointTable.id));
 }
 
 /** 获取某 WorkspaceBinding 的最近一条 FilesystemCheckpoint（按 createdAt 降序取首条）。 */
 export async function getLatestFilesystemCheckpoint(
   tenantId: string,
   workspaceBindingId: string,
-): Promise<V11FilesystemCheckpoint | null> {
+): Promise<FilesystemCheckpoint | null> {
   const [row] = await db
     .select()
-    .from(v11FilesystemCheckpoint)
+    .from(filesystemCheckpointTable)
     .where(
       and(
-        eq(v11FilesystemCheckpoint.tenantId, tenantId),
-        eq(v11FilesystemCheckpoint.workspaceBindingId, workspaceBindingId),
+        eq(filesystemCheckpointTable.tenantId, tenantId),
+        eq(filesystemCheckpointTable.workspaceBindingId, workspaceBindingId),
       ),
     )
-    .orderBy(desc(v11FilesystemCheckpoint.createdAt), desc(v11FilesystemCheckpoint.id))
+    .orderBy(desc(filesystemCheckpointTable.createdAt), desc(filesystemCheckpointTable.id))
     .limit(1);
   return row ?? null;
 }
@@ -750,15 +750,15 @@ export async function getLatestFilesystemCheckpoint(
 export async function listExpiredFilesystemCheckpoints(
   tenantId: string,
   now: Date = new Date(),
-): Promise<V11FilesystemCheckpoint[]> {
+): Promise<FilesystemCheckpoint[]> {
   return db
     .select()
-    .from(v11FilesystemCheckpoint)
+    .from(filesystemCheckpointTable)
     .where(
       and(
-        eq(v11FilesystemCheckpoint.tenantId, tenantId),
-        isNotNull(v11FilesystemCheckpoint.expiresAt),
-        lt(v11FilesystemCheckpoint.expiresAt, now),
+        eq(filesystemCheckpointTable.tenantId, tenantId),
+        isNotNull(filesystemCheckpointTable.expiresAt),
+        lt(filesystemCheckpointTable.expiresAt, now),
       ),
     );
 }

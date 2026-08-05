@@ -14,11 +14,14 @@
  * 真实签名（ed25519）+ 真实可查询 SBOM/provenance（InMemoryManagedArtifactStore），不使用"跳过验证"假配置。
  */
 import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
+import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
+import { AgentPublicationPrerequisiteError } from "@/lib/agents/domain/agent-revision-publication-policy";
 import { AgentLifecycleError, createAgent } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
+import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import {
   ArtifactAttestationFailedError,
   ArtifactNotVerifiedError,
@@ -37,41 +40,38 @@ import {
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
+  assertAttestationGate,
+  insertAttestation,
+  verifyAndPersistAttestation,
+} from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import {
   getAttestationById,
   getVerifiedAttestationForRevision,
   listAttestationsByDigest,
   listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
-import {
-  assertAttestationGate,
-  insertAttestation,
-  verifyAndPersistAttestation,
-} from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { publishRuntimeRevisionWithAttestation } from "@/lib/artifacts/test-support/attempt-runtime-publication-with-attestation-without-trusted-run";
-import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
-import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
-import { AgentPublicationPrerequisiteError } from "@/lib/agents/domain/agent-revision-publication-policy";
 
 const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { ARTIFACT_TYPES, type ArtifactAttestation } from "@/lib/persistence/schema/artifact";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import {
   type ConformanceCaseResult,
-  RuntimeConformanceCaseFailedError,
   MANDATORY_GATE_CASES,
+  RuntimeConformanceCaseFailedError,
 } from "@/lib/runtimes/domain/runtime-conformance";
 import { RuntimeLifecycleError, createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
 import {
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { ARTIFACT_TYPES, type V11ArtifactAttestation } from "@/lib/v11/schema/artifact";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -203,7 +203,7 @@ function passingConformanceResults(): ConformanceCaseResult[] {
 // ─── 辅助：构造完整 verifyAndPersistAttestation 入参 ─────────
 
 interface VerifiedAttestationFixture {
-  attestation: V11ArtifactAttestation;
+  attestation: ArtifactAttestation;
   store: InMemoryManagedArtifactStore;
   builderKeys: BuilderKeyRegistry;
   keyPair: BuilderKeyPair;

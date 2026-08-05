@@ -9,12 +9,12 @@
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
   datetime,
+  index,
   int,
   mysqlTable,
   text,
   uniqueIndex,
   varchar,
-  index,
 } from "drizzle-orm/mysql-core";
 
 /** Delivery 状态。 */

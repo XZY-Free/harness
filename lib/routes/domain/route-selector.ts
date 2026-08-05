@@ -56,8 +56,7 @@ export function normalizeEligibility(conditions: unknown): NormalizedEligibility
     if (typeof value === "number" && !Number.isFinite(value)) return null;
   }
 
-  const entries = rawEntries
-    .sort(([a], [b]) => a.localeCompare(b));
+  const entries = rawEntries.sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) {
     return { all: {} };
   }
@@ -95,10 +94,7 @@ export function computeSelectorDigest(normalized: NormalizedEligibility): string
  * - 如果存在同一个键但值不同 → 不重叠
  * - 否则 → 重叠（至少一组输入可同时满足）
  */
-export function isOverlapping(
-  left: NormalizedEligibility,
-  right: NormalizedEligibility,
-): boolean {
+export function isOverlapping(left: NormalizedEligibility, right: NormalizedEligibility): boolean {
   const leftEntries = Object.entries(left.all);
   for (const [key, leftValue] of leftEntries) {
     const rightValue = right.all[key];
@@ -120,10 +116,10 @@ export function isTimeWindowOverlapping(
   rightFrom: Date | null,
   rightUntil: Date | null,
 ): boolean {
-  const effectiveLeftFrom = leftFrom?.getTime() ?? -Infinity;
-  const effectiveLeftUntil = leftUntil?.getTime() ?? Infinity;
-  const effectiveRightFrom = rightFrom?.getTime() ?? -Infinity;
-  const effectiveRightUntil = rightUntil?.getTime() ?? Infinity;
+  const effectiveLeftFrom = leftFrom?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const effectiveLeftUntil = leftUntil?.getTime() ?? Number.POSITIVE_INFINITY;
+  const effectiveRightFrom = rightFrom?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const effectiveRightUntil = rightUntil?.getTime() ?? Number.POSITIVE_INFINITY;
 
   return effectiveLeftFrom < effectiveRightUntil && effectiveRightFrom < effectiveLeftUntil;
 }

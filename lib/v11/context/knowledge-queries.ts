@@ -35,22 +35,22 @@ import {
   KNOWLEDGE_INDEX_STATES,
   KNOWLEDGE_REVISION_STATES,
   KNOWLEDGE_SOURCE_TYPES,
+  type KnowledgeBase,
   type KnowledgeBaseLifecycleState,
+  type KnowledgeChunk,
+  type KnowledgeDocument,
   type KnowledgeDocumentLifecycleState,
+  type KnowledgeDocumentRevision,
+  type KnowledgeIndex,
   type KnowledgeIndexState,
   type KnowledgeRevisionState,
   type KnowledgeSourceType,
-  type V11KnowledgeBase,
-  type V11KnowledgeChunk,
-  type V11KnowledgeDocument,
-  type V11KnowledgeDocumentRevision,
-  type V11KnowledgeIndex,
   knowledgeBase,
   knowledgeChunk,
   knowledgeDocument,
   knowledgeDocumentRevision,
   knowledgeIndex,
-} from "@/lib/v11/schema/knowledge";
+} from "@/lib/persistence/schema/knowledge";
 import { and, eq, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -128,7 +128,7 @@ export async function createKnowledgeBase(params: {
   visibilityPolicyId?: string | null;
   createdBy: string;
   tx?: DbOrTx;
-}): Promise<V11KnowledgeBase> {
+}): Promise<KnowledgeBase> {
   if (!params.knowledgeKey || params.knowledgeKey.length === 0) {
     throw new KnowledgeValidationError("knowledgeKey 不能为空");
   }
@@ -170,7 +170,7 @@ export async function createKnowledgeBase(params: {
 export async function getKnowledgeBaseByKey(
   tenantId: string,
   knowledgeKey: string,
-): Promise<V11KnowledgeBase | null> {
+): Promise<KnowledgeBase | null> {
   const [row] = await db
     .select()
     .from(knowledgeBase)
@@ -183,7 +183,7 @@ export async function getKnowledgeBaseByKey(
 export async function getKnowledgeBaseById(
   tenantId: string,
   baseId: string,
-): Promise<V11KnowledgeBase | null> {
+): Promise<KnowledgeBase | null> {
   const [row] = await db
     .select()
     .from(knowledgeBase)
@@ -205,7 +205,7 @@ export async function listKnowledgeBases(
     lifecycleStates?: readonly KnowledgeBaseLifecycleState[];
     limit?: number;
   },
-): Promise<V11KnowledgeBase[]> {
+): Promise<KnowledgeBase[]> {
   const limit = options?.limit ?? 50;
   const conditions = [eq(knowledgeBase.tenantId, tenantId)];
   if (options?.lifecycleStates && options.lifecycleStates.length > 0) {
@@ -237,7 +237,7 @@ export async function archiveKnowledgeBase(params: {
   tenantId: string;
   baseId: string;
   expectedVersionNo: string;
-}): Promise<V11KnowledgeBase | null> {
+}): Promise<KnowledgeBase | null> {
   const existing = await getKnowledgeBaseById(params.tenantId, params.baseId);
   if (!existing) return null;
 
@@ -293,7 +293,7 @@ export async function createKnowledgeDocument(params: {
   sourceRef?: string | null;
   createdBy: string;
   tx?: DbOrTx;
-}): Promise<V11KnowledgeDocument> {
+}): Promise<KnowledgeDocument> {
   if (!params.documentKey || params.documentKey.length === 0) {
     throw new KnowledgeValidationError("documentKey 不能为空");
   }
@@ -337,7 +337,7 @@ export async function getKnowledgeDocumentByKey(
   tenantId: string,
   knowledgeBaseId: string,
   documentKey: string,
-): Promise<V11KnowledgeDocument | null> {
+): Promise<KnowledgeDocument | null> {
   const [row] = await db
     .select()
     .from(knowledgeDocument)
@@ -356,7 +356,7 @@ export async function getKnowledgeDocumentByKey(
 export async function getKnowledgeDocumentById(
   tenantId: string,
   documentId: string,
-): Promise<V11KnowledgeDocument | null> {
+): Promise<KnowledgeDocument | null> {
   const [row] = await db
     .select()
     .from(knowledgeDocument)
@@ -378,7 +378,7 @@ export async function listKnowledgeDocuments(
     lifecycleStates?: readonly KnowledgeDocumentLifecycleState[];
     limit?: number;
   },
-): Promise<V11KnowledgeDocument[]> {
+): Promise<KnowledgeDocument[]> {
   const limit = options?.limit ?? 100;
   const conditions = [
     eq(knowledgeDocument.tenantId, tenantId),
@@ -422,7 +422,7 @@ export async function createKnowledgeDocumentRevision(params: {
   aclSnapshotJson?: Record<string, unknown> | null;
   createdBy: string;
   tx?: DbOrTx;
-}): Promise<V11KnowledgeDocumentRevision> {
+}): Promise<KnowledgeDocumentRevision> {
   if (!params.revisionNo || params.revisionNo.length === 0) {
     throw new KnowledgeValidationError("revisionNo 不能为空");
   }
@@ -471,7 +471,7 @@ export async function createKnowledgeDocumentRevision(params: {
 export async function getKnowledgeDocumentRevisionById(
   tenantId: string,
   revisionId: string,
-): Promise<V11KnowledgeDocumentRevision | null> {
+): Promise<KnowledgeDocumentRevision | null> {
   const [row] = await db
     .select()
     .from(knowledgeDocumentRevision)
@@ -494,7 +494,7 @@ export async function listKnowledgeDocumentRevisions(
   tenantId: string,
   documentId: string,
   options?: { limit?: number },
-): Promise<V11KnowledgeDocumentRevision[]> {
+): Promise<KnowledgeDocumentRevision[]> {
   const limit = options?.limit ?? 50;
   const rows = await db
     .select()
@@ -534,9 +534,9 @@ export async function publishKnowledgeDocumentRevision(params: {
   aclSnapshotHash?: string | null;
   aclSnapshotJson?: Record<string, unknown> | null;
 }): Promise<{
-  revision: V11KnowledgeDocumentRevision;
-  document: V11KnowledgeDocument;
-  previousRevision?: V11KnowledgeDocumentRevision;
+  revision: KnowledgeDocumentRevision;
+  document: KnowledgeDocument;
+  previousRevision?: KnowledgeDocumentRevision;
 }> {
   return db.transaction(async (tx) => {
     // 1. 锁定目标 revision
@@ -592,7 +592,7 @@ export async function publishKnowledgeDocumentRevision(params: {
     }
 
     const now = new Date();
-    let previousRevision: V11KnowledgeDocumentRevision | undefined;
+    let previousRevision: KnowledgeDocumentRevision | undefined;
 
     // 5. 将当前 published revision（如有）改为 superseded
     if (docLocked.currentRevisionId) {
@@ -715,7 +715,7 @@ export async function retractKnowledgeDocumentRevision(params: {
   tenantId: string;
   revisionId: string;
   reasonCode: string;
-}): Promise<V11KnowledgeDocumentRevision> {
+}): Promise<KnowledgeDocumentRevision> {
   return db.transaction(async (tx) => {
     const [locked] = await tx
       .select()
@@ -774,7 +774,7 @@ export async function createKnowledgeChunk(params: {
   contentHash: string;
   metadataJson?: Record<string, unknown> | null;
   tx?: DbOrTx;
-}): Promise<V11KnowledgeChunk> {
+}): Promise<KnowledgeChunk> {
   if (!params.chunkNo || params.chunkNo.length === 0) {
     throw new KnowledgeValidationError("chunkNo 不能为空");
   }
@@ -816,7 +816,7 @@ export async function listKnowledgeChunksByRevision(
   tenantId: string,
   documentRevisionId: string,
   options?: { limit?: number },
-): Promise<V11KnowledgeChunk[]> {
+): Promise<KnowledgeChunk[]> {
   const limit = options?.limit ?? 500;
   const rows = await db
     .select()
@@ -847,7 +847,7 @@ export async function upsertKnowledgeIndex(params: {
   embeddingModelRef?: string | null;
   contentHash: string;
   tx?: DbOrTx;
-}): Promise<V11KnowledgeIndex> {
+}): Promise<KnowledgeIndex> {
   if (!params.indexProvider || params.indexProvider.length === 0) {
     throw new KnowledgeValidationError("indexProvider 不能为空");
   }
@@ -910,7 +910,7 @@ export async function markKnowledgeRevisionIndexState(params: {
   tenantId: string;
   revisionId: string;
   indexState: KnowledgeIndexState;
-}): Promise<V11KnowledgeDocumentRevision | null> {
+}): Promise<KnowledgeDocumentRevision | null> {
   if (!isKnowledgeIndexState(params.indexState)) {
     throw new KnowledgeValidationError(`非法 indexState: ${params.indexState}`);
   }
@@ -1284,9 +1284,9 @@ export type {
   KnowledgeIndexState,
   KnowledgeRevisionState,
   KnowledgeSourceType,
-  V11KnowledgeBase,
-  V11KnowledgeChunk,
-  V11KnowledgeDocument,
-  V11KnowledgeDocumentRevision,
-  V11KnowledgeIndex,
-} from "@/lib/v11/schema/knowledge";
+  KnowledgeBase,
+  KnowledgeChunk,
+  KnowledgeDocument,
+  KnowledgeDocumentRevision,
+  KnowledgeIndex,
+} from "@/lib/persistence/schema/knowledge";

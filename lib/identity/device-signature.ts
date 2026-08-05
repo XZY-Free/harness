@@ -20,7 +20,7 @@
  *         ../v11-agentkit-platform/14-production-operations-security-and-retention.md §5。
  */
 import { createHash, createPublicKey, verify } from "node:crypto";
-import type { Device } from "@/lib/v11/schema/device";
+import type { Device } from "@/lib/persistence/schema/device";
 
 /** Desktop 签名相关 header 名（小写）。 */
 export const DESKTOP_DEVICE_KEY_HEADER = "x-desktop-device-key";

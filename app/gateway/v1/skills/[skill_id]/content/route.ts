@@ -25,16 +25,16 @@
  * - Skill 无 currentVersionId 或 SkillVersion 非 published → 422 CAPABILITY_CONTENT_BLOCKED
  * - If-None-Match 格式非法 → 400 CATALOG_REVISION_INVALID
  */
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
 import { recordCapabilityUse } from "@/lib/v11/capability/capability-use-queries";
 import { getCurrentSkillVersion, getSkillById } from "@/lib/v11/capability/skill-queries";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
+  gatewayCapabilityContentBlockedTable,
+  gatewayCapabilityNotAllowedTable,
+  gatewayCatalogRevisionInvalidTable,
   resolveGatewayPrincipal,
-  v11GatewayCapabilityContentBlocked,
-  v11GatewayCapabilityNotAllowed,
-  v11GatewayCatalogRevisionInvalid,
 } from "@/lib/v11/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
@@ -119,18 +119,18 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 2. 校验 Skill 存在且属于当前租户（跨租户隐藏为 404 CAPABILITY_NOT_ALLOWED）
   const skill = await getSkillById({ tenantId: claims.tenantId, skillId });
   if (!skill) {
-    return v11GatewayCapabilityNotAllowed(requestId, `Skill 不存在或无权访问: ${skillId}`);
+    return gatewayCapabilityNotAllowedTable(requestId, `Skill 不存在或无权访问: ${skillId}`);
   }
 
   // 3. 校验 Skill lifecycleState=enabled（非 enabled 视为不可读，统一隐藏为 404）
   //    draft/disabled/retired 不应被 Runtime 读取；隐藏存在状态避免信息泄露。
   if (skill.lifecycleState !== "enabled") {
-    return v11GatewayCapabilityNotAllowed(requestId, `Skill 不存在或无权访问: ${skillId}`);
+    return gatewayCapabilityNotAllowedTable(requestId, `Skill 不存在或无权访问: ${skillId}`);
   }
 
   // 4. 校验 Skill 有 currentVersionId（无则 422 CAPABILITY_CONTENT_BLOCKED）
   if (!skill.currentVersionId) {
-    return v11GatewayCapabilityContentBlocked(requestId, `Skill ${skillId} 当前未发布内容版本`);
+    return gatewayCapabilityContentBlockedTable(requestId, `Skill ${skillId} 当前未发布内容版本`);
   }
 
   // 5. 读取当前 SkillVersion（跨租户隔离由 getSkillVersionById 内 join Skill 保证）
@@ -140,12 +140,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   });
   if (!version) {
     // currentVersionId 悬空（数据异常）：统一返回 422 隐藏内部状态。
-    return v11GatewayCapabilityContentBlocked(requestId, `Skill ${skillId} 当前内容版本不可读`);
+    return gatewayCapabilityContentBlockedTable(requestId, `Skill ${skillId} 当前内容版本不可读`);
   }
 
   // 6. 校验 SkillVersion revisionState=published（draft/withdrawn → 422）
   if (version.revisionState !== "published") {
-    return v11GatewayCapabilityContentBlocked(
+    return gatewayCapabilityContentBlockedTable(
       requestId,
       `Skill ${skillId} 版本 ${version.versionNo} 状态为 ${version.revisionState}，仅 published 可读`,
     );
@@ -158,7 +158,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     try {
       parsedVersionNo = parseSkillContentEtag(ifNoneMatch);
     } catch (err) {
-      return v11GatewayCatalogRevisionInvalid(
+      return gatewayCatalogRevisionInvalidTable(
         requestId,
         err instanceof Error ? err.message : `If-None-Match 格式非法: ${ifNoneMatch}`,
       );

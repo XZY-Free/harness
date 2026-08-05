@@ -12,13 +12,16 @@
  */
 
 import type { HostedRuntimeControlPlane } from "@/lib/runtimes/application/provision-hosted-runtime";
-import type { HostedGateways } from "@/lib/runtimes/infrastructure/hosted-gateways";
-import type { HostedProvisioningRequestStore, StepCheckpoint } from "@/lib/runtimes/persistence/hosted-provisioning-request-store";
-import type { HostedProvisioningRequestRow } from "@/lib/runtimes/persistence/hosted-provisioning-request-record";
 import {
   classifyProvisioningError,
   computeProvisioningBackoff,
 } from "@/lib/runtimes/domain/hosted-provisioning-request";
+import type { HostedGateways } from "@/lib/runtimes/infrastructure/hosted-gateways";
+import type { HostedProvisioningRequestRow } from "@/lib/runtimes/persistence/hosted-provisioning-request-record";
+import type {
+  HostedProvisioningRequestStore,
+  StepCheckpoint,
+} from "@/lib/runtimes/persistence/hosted-provisioning-request-store";
 
 /** Saga 步骤结果。 */
 export interface SagaStepResult {
@@ -27,7 +30,13 @@ export interface SagaStepResult {
   /** 是否完成（可以进入下一步）。 */
   completed: boolean;
   /** 请求的新状态。 */
-  newState: "running" | "waiting_external_evidence" | "waiting_conformance" | "ready" | "retryable_failed" | "permanent_failed";
+  newState:
+    | "running"
+    | "waiting_external_evidence"
+    | "waiting_conformance"
+    | "ready"
+    | "retryable_failed"
+    | "permanent_failed";
   /** §6.2: 步骤产出 Checkpoint。 */
   checkpoint?: StepCheckpoint;
 }
@@ -54,8 +63,10 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
   const cp: HostedRuntimeControlPlane = config.gateways
     ? {
         resolveEligibleRoute: (cmd) => config.gateways!.routeReader.resolveEligibleRoute(cmd),
-        ensurePublishedAgentRevision: (cmd) => config.gateways!.agentPublication.ensurePublishedAgentRevision(cmd),
-        ensurePublishedRuntimeRevision: (cmd) => config.gateways!.runtimePublication.ensurePublishedRuntimeRevision(cmd),
+        ensurePublishedAgentRevision: (cmd) =>
+          config.gateways!.agentPublication.ensurePublishedAgentRevision(cmd),
+        ensurePublishedRuntimeRevision: (cmd) =>
+          config.gateways!.runtimePublication.ensurePublishedRuntimeRevision(cmd),
         activateRoute: (cmd) => config.gateways!.routeActivation.activateRoute(cmd),
       }
     : config.controlPlane!;
@@ -96,9 +107,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
 
   // ─── 步骤实现 ────────────────────────────────────────────
 
-  async function stepStart(
-    request: HostedProvisioningRequestRow,
-  ): Promise<SagaStepResult> {
+  async function stepStart(request: HostedProvisioningRequestRow): Promise<SagaStepResult> {
     await config.store.updateState({
       requestId: request.id,
       state: "running",
@@ -116,7 +125,11 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     request: HostedProvisioningRequestRow,
   ): Promise<SagaStepResult> {
     // §6.2: 如果 Checkpoint 已有 agent 产出，跳过重复执行
-    if (request.stepAgentRevisionId && request.stepAgentPublicationRecordId && request.stepAgentAttestationId) {
+    if (
+      request.stepAgentRevisionId &&
+      request.stepAgentPublicationRecordId &&
+      request.stepAgentAttestationId
+    ) {
       await config.store.updateState({
         requestId: request.id,
         state: "running",
@@ -162,7 +175,12 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     request: HostedProvisioningRequestRow,
   ): Promise<SagaStepResult> {
     // §6.2: 如果 Checkpoint 已有 runtime 产出，跳过重复执行
-    if (request.stepRuntimeRevisionId && request.stepRuntimePublicationRecordId && request.stepRuntimeAttestationId && request.stepConformanceRunId) {
+    if (
+      request.stepRuntimeRevisionId &&
+      request.stepRuntimePublicationRecordId &&
+      request.stepRuntimeAttestationId &&
+      request.stepConformanceRunId
+    ) {
       await config.store.updateState({
         requestId: request.id,
         state: "running",
@@ -205,9 +223,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
    * §6.3: activating_route — 使用 Checkpoint 中已保存的 Revision 激活 Route。
    * §6.2: 不再重新调用 ensurePublished*，直接从 Checkpoint 读取。
    */
-  async function stepActivateRoute(
-    request: HostedProvisioningRequestRow,
-  ): Promise<SagaStepResult> {
+  async function stepActivateRoute(request: HostedProvisioningRequestRow): Promise<SagaStepResult> {
     // §6.2: 从 Checkpoint 读取已保存的 Revision 产出
     const agentRevision = {
       revisionId: request.stepAgentRevisionId!,
@@ -241,9 +257,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     return { step: "activating_route", completed: true, newState: "running" };
   }
 
-  async function stepVerifyRoute(
-    request: HostedProvisioningRequestRow,
-  ): Promise<SagaStepResult> {
+  async function stepVerifyRoute(request: HostedProvisioningRequestRow): Promise<SagaStepResult> {
     // 最终验证：RouteResolver 通过
     const route = await config.controlPlane!.resolveEligibleRoute({
       tenantId: request.tenantId,

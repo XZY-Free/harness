@@ -30,31 +30,13 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
   etagHeader,
   getRequestId,
   parseIfMatch,
-  apiError,
   resourceNotFound,
-  apiSuccess,
 } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  v11EtagMismatch,
-  v11SchemaInvalid,
-} from "@/lib/v11/admin/route-helpers";
-import {
-  KnowledgeRevisionAlreadyPublishedError,
-  KnowledgeRevisionIndexNotReadyError,
-  KnowledgeValidationError,
-  KnowledgeVersionConflictError,
-  getKnowledgeBaseById,
-  getKnowledgeDocumentById,
-  getKnowledgeDocumentRevisionById,
-  publishKnowledgeDocumentRevision,
-} from "@/lib/v11/context/knowledge-queries";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -66,6 +48,24 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  etagMismatchTable,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/v11/admin/route-helpers";
+import {
+  KnowledgeRevisionAlreadyPublishedError,
+  KnowledgeRevisionIndexNotReadyError,
+  KnowledgeValidationError,
+  KnowledgeVersionConflictError,
+  getKnowledgeBaseById,
+  getKnowledgeDocumentById,
+  getKnowledgeDocumentRevisionById,
+  publishKnowledgeDocumentRevision,
+} from "@/lib/v11/context/knowledge-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -130,23 +130,23 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
   // 2. 解析路径
   const { baseId, documentId, revisionId } = extractPathIds(request.url);
   if (!baseId || !documentId || !revisionId) {
-    return v11SchemaInvalid(requestId, "路径缺少 base_id/document_id/revision_id");
+    return schemaInvalidTable(requestId, "路径缺少 base_id/document_id/revision_id");
   }
 
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析 If-Match（必填，Document ETag：knowledge-document-{versionNo}）
   const ifMatch = parseIfMatch(request);
   if (!ifMatch) {
-    return v11SchemaInvalid(requestId, "缺少必填头 If-Match");
+    return schemaInvalidTable(requestId, "缺少必填头 If-Match");
   }
   const docVersionNo = parseDocumentEtag(ifMatch);
   if (docVersionNo === null) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       `If-Match ETag 格式非法：${ifMatch}（期望 knowledge-document-{versionNo}）`,
     );
@@ -174,7 +174,7 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
   // 6. 校验 If-Match ETag 与 Document 当前 versionNo 一致
   const currentEtag = `knowledge-document-${doc.versionNo}`;
   if (ifMatch !== currentEtag) {
-    return v11EtagMismatch(requestId, `If-Match ${ifMatch} 与当前 ETag ${currentEtag} 不匹配`);
+    return etagMismatchTable(requestId, `If-Match ${ifMatch} 与当前 ETag ${currentEtag} 不匹配`);
   }
 
   // 7. 校验 action scope
@@ -189,7 +189,7 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
   // 8. 解析请求体
   const body = await request.json().catch(() => ({}));
   if (!validateBody(body)) {
-    return v11SchemaInvalid(
+    return schemaInvalidTable(
       requestId,
       "请求体非法：acl_snapshot_hash/acl_snapshot_json 字段类型错误",
     );
@@ -300,13 +300,13 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
       );
     }
     if (err instanceof KnowledgeVersionConflictError) {
-      return v11EtagMismatch(
+      return etagMismatchTable(
         requestId,
         `Document ${err.resourceId} versionNo 不匹配（期望 ${err.expectedVersionNo}），并发冲突`,
       );
     }
     if (err instanceof KnowledgeValidationError) {
-      return v11SchemaInvalid(requestId, err.message);
+      return schemaInvalidTable(requestId, err.message);
     }
     throw err;
   }

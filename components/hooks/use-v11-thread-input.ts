@@ -10,7 +10,7 @@
  * - 空闲状态（无 Turn / completed / interrupted / failed / cancelled）→ 创建正式 Turn。
  * - 运行中状态（accepted / queued / running / waiting_user / regenerating）→ 创建 PendingInput。
  * - 维护发送状态（idle / sending / sent / error），供 UI 显示加载与错误。
- * - 错误转化为 V11ClientVisibleError。
+ * - 错误转化为 ClientVisibleError。
  *
  * 不变量：
  * - busy=true 时禁止重复触发。
@@ -18,7 +18,7 @@
  *
  * 使用：
  * ```tsx
- * function ThreadInput({ threadId, latestTurn }: { threadId: string; latestTurn: V11ClientTurn | null }) {
+ * function ThreadInput({ threadId, latestTurn }: { threadId: string; latestTurn: ClientTurn | null }) {
  *   const { send, busy, error, lastRoute } = useV11ThreadInput({ threadId, latestTurn });
  *   // ...
  * }
@@ -28,11 +28,7 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/v11/client/error-messages";
-import type {
-  V11ClientErrorBody,
-  V11ClientTurn,
-  V11ClientVisibleError,
-} from "@/lib/v11/client/types";
+import type { ClientErrorBody, ClientTurn, ClientVisibleError } from "@/lib/v11/client/types";
 import { useCallback, useState } from "react";
 
 /** 运行中状态集合（这些状态下发送消息走 PendingInput）。 */
@@ -46,7 +42,7 @@ export interface UseV11ThreadInputResult {
   /** 是否正在发送。 */
   readonly busy: boolean;
   /** 错误。 */
-  readonly error: V11ClientVisibleError | null;
+  readonly error: ClientVisibleError | null;
   /** 最近一次发送走哪条路由。 */
   readonly lastRoute: SendRoute;
   /** 根据当前 Turn 状态推断发送路由。 */
@@ -66,11 +62,11 @@ function generateIdempotencyKey(): string {
 }
 
 /** 解析错误响应为可见错误。 */
-async function parseError(response: Response): Promise<V11ClientVisibleError> {
+async function parseError(response: Response): Promise<ClientVisibleError> {
   const bodyText = await response.text().catch(() => "");
-  let errorBody: V11ClientErrorBody | null = null;
+  let errorBody: ClientErrorBody | null = null;
   try {
-    errorBody = JSON.parse(bodyText) as V11ClientErrorBody;
+    errorBody = JSON.parse(bodyText) as ClientErrorBody;
   } catch {
     // ignore
   }
@@ -86,7 +82,7 @@ async function parseError(response: Response): Promise<V11ClientVisibleError> {
 }
 
 /** 推断发送路由。 */
-export function deriveSendRoute(latestTurn: V11ClientTurn | null): SendRoute {
+export function deriveSendRoute(latestTurn: ClientTurn | null): SendRoute {
   if (!latestTurn) return "turn"; // 无 Turn → 空闲
   if (RUNNING_STATES.has(latestTurn.turn_state)) return "pending_input";
   return "turn"; // completed / interrupted / failed / cancelled → 空闲
@@ -94,7 +90,7 @@ export function deriveSendRoute(latestTurn: V11ClientTurn | null): SendRoute {
 
 interface UseV11ThreadInputParams {
   readonly threadId: string;
-  readonly latestTurn: V11ClientTurn | null;
+  readonly latestTurn: ClientTurn | null;
 }
 
 /** V11 发消息 Hook。 */
@@ -103,7 +99,7 @@ export function useV11ThreadInput({
   latestTurn,
 }: UseV11ThreadInputParams): UseV11ThreadInputResult {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<V11ClientVisibleError | null>(null);
+  const [error, setError] = useState<ClientVisibleError | null>(null);
   const [lastRoute, setLastRoute] = useState<SendRoute>("none");
 
   const route = deriveSendRoute(latestTurn);

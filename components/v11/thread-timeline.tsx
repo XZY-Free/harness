@@ -21,17 +21,17 @@
  */
 "use client";
 
-import type { V11ClientItem, V11ClientStreamStatus } from "@/lib/v11/client/types";
+import type { ClientItem, ClientStreamStatus } from "@/lib/v11/client/types";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
-import { V11AgentMessageItem } from "./items/agent-message-item";
-import { V11ArtifactItem } from "./items/artifact-item";
-import { V11ChildThreadItem } from "./items/child-thread-item";
-import { V11JobResultItem } from "./items/job-result-item";
-import { V11ToolCallItem } from "./items/tool-call-item";
-import { V11UserActionItem } from "./items/user-action-item";
-import { V11UserMessageItem } from "./items/user-message-item";
+import { AgentMessageItem } from "./items/agent-message-item";
+import { ArtifactItem } from "./items/artifact-item";
+import { ChildThreadItem } from "./items/child-thread-item";
+import { JobResultItem } from "./items/job-result-item";
+import { ToolCallItem } from "./items/tool-call-item";
+import { UserActionItem } from "./items/user-action-item";
+import { UserMessageItem } from "./items/user-message-item";
 import { MessageLocator } from "./message-locator";
 import { ProcessFold } from "./process-fold";
 
@@ -39,8 +39,8 @@ import { ProcessFold } from "./process-fold";
 const VIRTUALIZATION_THRESHOLD = 100;
 
 interface ThreadTimelineProps {
-  readonly items: readonly V11ClientItem[];
-  readonly streamStatus: V11ClientStreamStatus;
+  readonly items: readonly ClientItem[];
+  readonly streamStatus: ClientStreamStatus;
   /** 当前重连尝试次数（0 = 未处于重连），用于展示"正在重新连接 2/5"。 */
   readonly reconnectAttempt?: number;
   /** 重连次数上限。 */
@@ -60,10 +60,10 @@ interface ThreadTimelineProps {
  * 被 agent_message / 行动项打断后开新段。
  */
 type TimelineSegment =
-  | { readonly kind: "item"; readonly item: V11ClientItem }
-  | { readonly kind: "process"; readonly items: V11ClientItem[] };
+  | { readonly kind: "item"; readonly item: ClientItem }
+  | { readonly kind: "process"; readonly items: ClientItem[] };
 
-function buildSegments(items: readonly V11ClientItem[]): TimelineSegment[] {
+function buildSegments(items: readonly ClientItem[]): TimelineSegment[] {
   const segments: TimelineSegment[] = [];
   for (const item of items) {
     if (item.item_type === "tool_call") {
@@ -80,7 +80,7 @@ function buildSegments(items: readonly V11ClientItem[]): TimelineSegment[] {
   return segments;
 }
 
-function hasTextContent(item: V11ClientItem): boolean {
+function hasTextContent(item: ClientItem): boolean {
   if (item.item_type !== "user_message" && item.item_type !== "user_guidance") {
     if (item.item_type !== "agent_message") return true;
   }
@@ -91,24 +91,24 @@ function hasTextContent(item: V11ClientItem): boolean {
 }
 
 /** 单个 Item 渲染分发；外层包裹 data-item-id 供定位轴测量。 */
-function renderItem(item: V11ClientItem, threadId: string): React.ReactNode {
+function renderItem(item: ClientItem, threadId: string): React.ReactNode {
   const inner = (() => {
     switch (item.item_type) {
       case "user_message":
       case "user_guidance":
-        return <V11UserMessageItem item={item} />;
+        return <UserMessageItem item={item} />;
       case "agent_message":
-        return <V11AgentMessageItem item={item} />;
+        return <AgentMessageItem item={item} />;
       case "tool_call":
-        return <V11ToolCallItem item={item} />;
+        return <ToolCallItem item={item} />;
       case "artifact":
-        return <V11ArtifactItem item={item} />;
+        return <ArtifactItem item={item} />;
       case "user_action":
-        return <V11UserActionItem threadId={threadId} item={item} />;
+        return <UserActionItem threadId={threadId} item={item} />;
       case "child_thread":
-        return <V11ChildThreadItem item={item} />;
+        return <ChildThreadItem item={item} />;
       case "job_result":
-        return <V11JobResultItem item={item} />;
+        return <JobResultItem item={item} />;
       default:
         return (
           <div className="rounded-lg border border-border bg-muted px-4 py-3 text-muted-foreground text-sm">

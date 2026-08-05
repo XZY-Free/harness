@@ -8,12 +8,12 @@
  */
 
 import { db } from "@/lib/db/client";
+import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
+import type { PublicationSubjectType } from "@/lib/publications/domain/publication-record";
 import {
   publicationRecord,
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
-import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
-import type { PublicationSubjectType } from "@/lib/publications/domain/publication-record";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
 /**
@@ -37,10 +37,7 @@ export async function loadActivePublicationSnapshot(params: {
       wd: withdrawalRecord,
     })
     .from(publicationRecord)
-    .leftJoin(
-      withdrawalRecord,
-      eq(withdrawalRecord.publicationRecordId, publicationRecord.id),
-    )
+    .leftJoin(withdrawalRecord, eq(withdrawalRecord.publicationRecordId, publicationRecord.id))
     .where(
       and(
         eq(publicationRecord.tenantId, params.tenantId),

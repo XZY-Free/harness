@@ -9,15 +9,12 @@
  */
 
 import { db } from "@/lib/db/client";
-import { controlPlaneOutboxEvent } from "./control-plane-outbox";
-import { controlPlaneEventDelivery } from "./control-plane-event-delivery";
-import {
-  computeOutboxBackoff,
-  classifyOutboxError,
-} from "./outbox-relay";
-import type { OutboxEventHandler } from "@/lib/routes/projection/projection-event-handlers";
 import { logger } from "@/lib/logger";
+import type { OutboxEventHandler } from "@/lib/routes/projection/projection-event-handlers";
 import { and, eq, isNull, lte, sql } from "drizzle-orm";
+import { controlPlaneEventDelivery } from "./control-plane-event-delivery";
+import { controlPlaneOutboxEvent } from "./control-plane-outbox";
+import { classifyOutboxError, computeOutboxBackoff } from "./outbox-relay";
 
 /** Worker 配置。 */
 export interface OutboxRelayWorkerConfig {
@@ -155,7 +152,10 @@ export function createOutboxRelayWorker(
         const classification = classifyOutboxError(error);
         const message = classification.summary;
 
-        if (classification.category === "permanent" || delivery.attemptCount >= config.maxAttempts) {
+        if (
+          classification.category === "permanent" ||
+          delivery.attemptCount >= config.maxAttempts
+        ) {
           // 永久失败或达到最大次数 → 死信
           await markDeliveryDeadLettered(delivery.id, classification.code, message);
         } else {

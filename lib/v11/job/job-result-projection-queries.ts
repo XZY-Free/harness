@@ -22,30 +22,30 @@
  * - JobEvent 不进入员工 Thread SSE；只有 job_result.published 才进入 ThreadEvent
  */
 import { randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
-import { ThreadNotAcceptingTurnsError, ThreadNotFoundError } from "@/lib/v11/conversation/errors";
+import { ThreadNotAcceptingTurnsError, ThreadNotFoundError } from "@/lib/conversations/errors";
 import {
   allocateEventSequences,
   allocateItemSequence,
   allocateTurnSequence,
   computeEventPayloadHash,
   insertThreadEvent,
-} from "@/lib/v11/conversation/thread-queries";
-import { JobNotFoundError, JobResultProjectionConflictError } from "@/lib/v11/job/errors";
+} from "@/lib/conversations/thread-queries";
+import { db } from "@/lib/db/client";
 import {
   type ThreadEventActorType,
   type ThreadItemAuthorType,
-  v11Thread,
-  v11ThreadEvent,
-  v11ThreadItem,
-  v11Turn,
-} from "@/lib/v11/schema/conversation";
+  threadEventTable,
+  threadItemTable,
+  threadTable,
+  turnTable,
+} from "@/lib/persistence/schema/conversation";
 import {
-  type V11Job,
-  type V11JobResultProjection,
-  v11Job,
-  v11JobResultProjection,
-} from "@/lib/v11/schema/job";
+  type Job,
+  type JobResultProjection,
+  jobResultProjectionTable,
+  jobTable,
+} from "@/lib/persistence/schema/job";
+import { JobNotFoundError, JobResultProjectionConflictError } from "@/lib/v11/job/errors";
 import { and, asc, eq } from "drizzle-orm";
 
 /** 投影类型。 */
@@ -74,38 +74,38 @@ export interface ProjectJobResultToThreadParams {
 
 /** projectJobResultToThread 返回结果。 */
 export interface ProjectJobResultToThreadResult {
-  job: V11Job;
+  job: Job;
   /** 创建的 job_result ThreadItem。 */
-  item: V11ThreadItem;
+  item: ThreadItem;
   /** 创建的 JobResultProjection 行。 */
-  projection: V11JobResultProjection;
+  projection: JobResultProjection;
   /** 创建的 Turn（system_triggered_turn 时新创建；existing_source_turn 时回读现有）。 */
-  turn: V11Turn;
+  turn: Turn;
   /** ThreadEvent 列表：system_triggered_turn 写 4 条；existing_source_turn 写 2 条。 */
-  events: V11ThreadEvent[];
+  events: ThreadEvent[];
   /** 是否为幂等重放（已存在同 itemId 投影）。 */
   replayed: boolean;
 }
 
-// 为了类型完整，从 conversation schema 重新引入 V11ThreadItem / V11Turn / V11ThreadEvent
-import type { V11ThreadEvent, V11ThreadItem, V11Turn } from "@/lib/v11/schema/conversation";
+// 为了类型完整，从 conversation schema 重新引入 ThreadItem / Turn / ThreadEvent
+import type { ThreadEvent, ThreadItem, Turn } from "@/lib/persistence/schema/conversation";
 
 /**
  * Job 终态时将结果投影到 Thread。
  *
  * 流程（同事务）：
- * 1. SELECT FOR UPDATE V11Job（校验终态 + threadId 非空 + resultRef 非空）
- * 2. SELECT FOR UPDATE V11Thread（锁定事件流）
- * 3. 幂等检查：SELECT V11JobResultProjection WHERE jobId = ?
+ * 1. SELECT FOR UPDATE Job（校验终态 + threadId 非空 + resultRef 非空）
+ * 2. SELECT FOR UPDATE Thread（锁定事件流）
+ * 3. 幂等检查：SELECT JobResultProjection WHERE jobId = ?
  *    - 已存在：返回现有 projection（幂等）
  * 4. projectionKind 分支：
  *    a. system_triggered_turn：allocateTurnSequence + INSERT Turn（triggerType=job_result_projection, state=completed）
  *       + INSERT ThreadEvent turn.accepted + turn.completed
  *    b. existing_source_turn：校验 sourceTurnId 非空 + 属于 threadId；回读 Turn
- * 5. allocateItemSequence + INSERT V11ThreadItem（itemType=job_result, state=completed, authorType=system, invocationId=null）
- * 6. INSERT V11JobResultProjection（itemId=新 Item.id, jobId, sourceTurnId, projectionKind, resultRef, resultHash）
+ * 5. allocateItemSequence + INSERT ThreadItem（itemType=job_result, state=completed, authorType=system, invocationId=null）
+ * 6. INSERT JobResultProjection（itemId=新 Item.id, jobId, sourceTurnId, projectionKind, resultRef, resultHash）
  * 7. allocateEventSequences(2) + INSERT ThreadEvent item.created + job_result.published
- * 8. UPDATE V11Thread.lastActivityAt
+ * 8. UPDATE Thread.lastActivityAt
  *
  * 不变量（§5.4、§7.4）：
  * - Job 必须 completed/failed 终态（cancelled 不投影）
@@ -120,8 +120,8 @@ export async function projectJobResultToThread(
   // 事务外预查询 Job（轻量校验）
   const [preJob] = await db
     .select()
-    .from(v11Job)
-    .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, params.jobId)))
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, params.jobId)))
     .limit(1);
   if (!preJob) {
     throw new JobNotFoundError(params.jobId);
@@ -130,8 +130,8 @@ export async function projectJobResultToThread(
   // 幂等检查（事务外预查询，减少长事务持锁）
   const [existingProjection] = await db
     .select()
-    .from(v11JobResultProjection)
-    .where(eq(v11JobResultProjection.jobId, params.jobId))
+    .from(jobResultProjectionTable)
+    .where(eq(jobResultProjectionTable.jobId, params.jobId))
     .limit(1);
 
   const actorType: ThreadEventActorType = params.actorType ?? "system";
@@ -141,11 +141,11 @@ export async function projectJobResultToThread(
   const now = new Date();
 
   const result = await db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE V11Job
+    // 1. SELECT FOR UPDATE Job
     const [job] = await tx
       .select()
-      .from(v11Job)
-      .where(and(eq(v11Job.tenantId, params.tenantId), eq(v11Job.id, params.jobId)))
+      .from(jobTable)
+      .where(and(eq(jobTable.tenantId, params.tenantId), eq(jobTable.id, params.jobId)))
       .for("update")
       .limit(1);
     if (!job) {
@@ -176,11 +176,11 @@ export async function projectJobResultToThread(
       );
     }
 
-    // 2. SELECT FOR UPDATE V11Thread
+    // 2. SELECT FOR UPDATE Thread
     const [thread] = await tx
       .select()
-      .from(v11Thread)
-      .where(and(eq(v11Thread.tenantId, params.tenantId), eq(v11Thread.id, job.threadId)))
+      .from(threadTable)
+      .where(and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, job.threadId)))
       .for("update")
       .limit(1);
     if (!thread) {
@@ -193,15 +193,15 @@ export async function projectJobResultToThread(
     // 3. 事务内幂等检查
     const [txExistingProjection] = await tx
       .select()
-      .from(v11JobResultProjection)
-      .where(eq(v11JobResultProjection.jobId, job.id))
+      .from(jobResultProjectionTable)
+      .where(eq(jobResultProjectionTable.jobId, job.id))
       .limit(1);
     if (txExistingProjection) {
       // 幂等：回读现有 Item + Turn + Events
       const [existingItem] = await tx
         .select()
-        .from(v11ThreadItem)
-        .where(eq(v11ThreadItem.id, txExistingProjection.itemId))
+        .from(threadItemTable)
+        .where(eq(threadItemTable.id, txExistingProjection.itemId))
         .limit(1);
       if (!existingItem) {
         throw new JobResultProjectionConflictError(
@@ -211,8 +211,8 @@ export async function projectJobResultToThread(
       }
       const [existingTurn] = await tx
         .select()
-        .from(v11Turn)
-        .where(eq(v11Turn.id, txExistingProjection.sourceTurnId))
+        .from(turnTable)
+        .where(eq(turnTable.id, txExistingProjection.sourceTurnId))
         .limit(1);
       if (!existingTurn) {
         throw new JobResultProjectionConflictError(
@@ -222,9 +222,9 @@ export async function projectJobResultToThread(
       }
       const existingEvents = await tx
         .select()
-        .from(v11ThreadEvent)
-        .where(eq(v11ThreadEvent.itemId, existingItem.id))
-        .orderBy(asc(v11ThreadEvent.eventSequence));
+        .from(threadEventTable)
+        .where(eq(threadEventTable.itemId, existingItem.id))
+        .orderBy(asc(threadEventTable.eventSequence));
       return {
         job,
         item: existingItem,
@@ -247,7 +247,7 @@ export async function projectJobResultToThread(
       turnAcceptedSeq = await allocateEventSequences(tx, thread.id, 1);
       turnCompletedSeq = await allocateEventSequences(tx, thread.id, 1);
 
-      await tx.insert(v11Turn).values({
+      await tx.insert(turnTable).values({
         id: turnId,
         threadId: thread.id,
         turnSequence,
@@ -300,8 +300,8 @@ export async function projectJobResultToThread(
       }
       const [existingTurn] = await tx
         .select()
-        .from(v11Turn)
-        .where(and(eq(v11Turn.threadId, thread.id), eq(v11Turn.id, params.sourceTurnId)))
+        .from(turnTable)
+        .where(and(eq(turnTable.threadId, thread.id), eq(turnTable.id, params.sourceTurnId)))
         .limit(1);
       if (!existingTurn) {
         throw new JobResultProjectionConflictError(
@@ -312,7 +312,7 @@ export async function projectJobResultToThread(
       turnId = existingTurn.id;
     }
 
-    // 5. allocateItemSequence + INSERT V11ThreadItem（job_result）
+    // 5. allocateItemSequence + INSERT ThreadItem（job_result）
     const itemId = randomUUID();
     const itemSequence = await allocateItemSequence(tx, thread.id);
     const itemContent = {
@@ -324,7 +324,7 @@ export async function projectJobResultToThread(
       source_turn_id: turnId,
     };
     const itemContentHash = computeEventPayloadHash(itemContent);
-    await tx.insert(v11ThreadItem).values({
+    await tx.insert(threadItemTable).values({
       id: itemId,
       threadId: thread.id,
       turnId,
@@ -340,9 +340,9 @@ export async function projectJobResultToThread(
       updatedAt: now,
     });
 
-    // 6. INSERT V11JobResultProjection
+    // 6. INSERT JobResultProjection
     const projectionId = randomUUID();
-    await tx.insert(v11JobResultProjection).values({
+    await tx.insert(jobResultProjectionTable).values({
       id: projectionId,
       tenantId: params.tenantId,
       itemId,
@@ -399,57 +399,61 @@ export async function projectJobResultToThread(
       correlationId: params.correlationId,
     });
 
-    // 8. UPDATE V11Thread.lastActivityAt
+    // 8. UPDATE Thread.lastActivityAt
     await tx
-      .update(v11Thread)
+      .update(threadTable)
       .set({ lastActivityAt: now, updatedAt: now })
-      .where(eq(v11Thread.id, thread.id));
+      .where(eq(threadTable.id, thread.id));
 
     // 回读创建的行
     const [createdItem] = await tx
       .select()
-      .from(v11ThreadItem)
-      .where(eq(v11ThreadItem.id, itemId))
+      .from(threadItemTable)
+      .where(eq(threadItemTable.id, itemId))
       .limit(1);
     if (!createdItem) {
       throw new Error(`projectJobResultToThread: ThreadItem 行未找到（id=${itemId}）`);
     }
     const [createdProjection] = await tx
       .select()
-      .from(v11JobResultProjection)
-      .where(eq(v11JobResultProjection.id, projectionId))
+      .from(jobResultProjectionTable)
+      .where(eq(jobResultProjectionTable.id, projectionId))
       .limit(1);
     if (!createdProjection) {
       throw new Error(
         `projectJobResultToThread: JobResultProjection 行未找到（id=${projectionId}）`,
       );
     }
-    const [createdTurn] = await tx.select().from(v11Turn).where(eq(v11Turn.id, turnId)).limit(1);
+    const [createdTurn] = await tx
+      .select()
+      .from(turnTable)
+      .where(eq(turnTable.id, turnId))
+      .limit(1);
     if (!createdTurn) {
       throw new Error(`projectJobResultToThread: Turn 行未找到（id=${turnId}）`);
     }
 
     // 收集所有写入的 Event
-    const events: V11ThreadEvent[] = [];
+    const events: ThreadEvent[] = [];
     if (turnCreated && turnAcceptedSeq !== null && turnCompletedSeq !== null) {
       const [ta] = await tx
         .select()
-        .from(v11ThreadEvent)
+        .from(threadEventTable)
         .where(
           and(
-            eq(v11ThreadEvent.threadId, thread.id),
-            eq(v11ThreadEvent.eventSequence, turnAcceptedSeq),
+            eq(threadEventTable.threadId, thread.id),
+            eq(threadEventTable.eventSequence, turnAcceptedSeq),
           ),
         )
         .limit(1);
       if (ta) events.push(ta);
       const [tc] = await tx
         .select()
-        .from(v11ThreadEvent)
+        .from(threadEventTable)
         .where(
           and(
-            eq(v11ThreadEvent.threadId, thread.id),
-            eq(v11ThreadEvent.eventSequence, turnCompletedSeq),
+            eq(threadEventTable.threadId, thread.id),
+            eq(threadEventTable.eventSequence, turnCompletedSeq),
           ),
         )
         .limit(1);
@@ -481,12 +485,15 @@ export async function projectJobResultToThread(
 export async function getJobResultProjectionByJob(
   tenantId: string,
   jobId: string,
-): Promise<V11JobResultProjection | null> {
+): Promise<JobResultProjection | null> {
   const [row] = await db
     .select()
-    .from(v11JobResultProjection)
+    .from(jobResultProjectionTable)
     .where(
-      and(eq(v11JobResultProjection.tenantId, tenantId), eq(v11JobResultProjection.jobId, jobId)),
+      and(
+        eq(jobResultProjectionTable.tenantId, tenantId),
+        eq(jobResultProjectionTable.jobId, jobId),
+      ),
     )
     .limit(1);
   return row ?? null;
@@ -496,12 +503,15 @@ export async function getJobResultProjectionByJob(
 export async function getJobResultProjectionByItem(
   tenantId: string,
   itemId: string,
-): Promise<V11JobResultProjection | null> {
+): Promise<JobResultProjection | null> {
   const [row] = await db
     .select()
-    .from(v11JobResultProjection)
+    .from(jobResultProjectionTable)
     .where(
-      and(eq(v11JobResultProjection.tenantId, tenantId), eq(v11JobResultProjection.itemId, itemId)),
+      and(
+        eq(jobResultProjectionTable.tenantId, tenantId),
+        eq(jobResultProjectionTable.itemId, itemId),
+      ),
     )
     .limit(1);
   return row ?? null;

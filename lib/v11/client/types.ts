@@ -4,7 +4,7 @@
  * 事实源：
  * - docs/solutions/v11-agentkit-platform/11-api-and-event-boundaries.md §3.5/§3.6（Item 响应、SSE 投影）
  * - docs/solutions/v11-agentkit-platform/15-machine-contracts-and-conformance.md（错误 Envelope）
- * - lib/v11/schema/conversation.ts（V11Thread/V11ThreadItem/V11ThreadEvent 服务端 schema）
+ * - lib/persistence/schema/conversation.ts（Thread/ThreadItem/ThreadEvent 服务端 schema）
  *
  * 与 HTTP wire 对齐：
  * - 字段名一律使用 snake_case（与服务端 projectItem/projectEvent 输出一致）。
@@ -19,7 +19,7 @@ import type { DesktopOperationCategory, DesktopOperationResult } from "@/lib/des
 // ─── Item ────────────────────────────────────────────────────
 
 /** Item 类型（与服务端 THREAD_ITEM_TYPES 一致）。 */
-export type V11ClientItemType =
+export type ClientItemType =
   | "user_message"
   | "user_guidance"
   | "agent_message"
@@ -30,19 +30,19 @@ export type V11ClientItemType =
   | "user_action";
 
 /** Item 状态（与服务端 THREAD_ITEM_STATES 一致）。 */
-export type V11ClientItemState = "pending" | "completed" | "failed" | "superseded" | "cancelled";
+export type ClientItemState = "pending" | "completed" | "failed" | "superseded" | "cancelled";
 
 /**
  * GET /api/v1/threads/{thread_id}/items 返回的 Item 投影（§3.5）。
  *
  * 与服务端 app/api/v1/threads/[thread_id]/items/route.ts 的 projectItem 输出一致。
  */
-export interface V11ClientItem {
+export interface ClientItem {
   readonly id: string;
   readonly turn_id: string;
   readonly item_sequence: number;
-  readonly item_type: V11ClientItemType;
-  readonly item_state: V11ClientItemState;
+  readonly item_type: ClientItemType;
+  readonly item_state: ClientItemState;
   /** 已脱敏的内容 JSON，由 reducer 按 item_type 解读。 */
   readonly content: unknown;
   /** ISO 8601 时间字符串。 */
@@ -50,8 +50,8 @@ export interface V11ClientItem {
 }
 
 /** Item 列表响应（§3.5）。 */
-export interface V11ClientItemsResponse {
-  readonly items: readonly V11ClientItem[];
+export interface ClientItemsResponse {
+  readonly items: readonly ClientItem[];
   readonly next_cursor: string | null;
   readonly latest_event_cursor: {
     readonly sequence: number;
@@ -67,7 +67,7 @@ export interface V11ClientItemsResponse {
  * 与服务端 app/api/v1/threads/[thread_id]/events/route.ts 的 projectEvent 输出一致。
  * event_type 通过 SSE `event:` 行传递，不在 data 内重复。
  */
-export interface V11ClientEventPayload {
+export interface ClientEventPayload {
   readonly event_id: string;
   readonly sequence: number;
   readonly schema_version: number;
@@ -80,13 +80,13 @@ export interface V11ClientEventPayload {
 }
 
 /** 完整 SSE 事件（含 event 行）。 */
-export interface V11ClientEvent extends V11ClientEventPayload {
+export interface ClientEvent extends ClientEventPayload {
   /** SSE event 行（如 thread.created、turn.accepted、item.created、stream.resumed）。 */
   readonly event_type: string;
 }
 
 /** 不进入持久 sequence 的模型正文增量。 */
-export interface V11ClientTransientDelta {
+export interface ClientTransientDelta {
   readonly transient_id: string;
   readonly thread_id: string;
   readonly turn_id: string;
@@ -101,7 +101,7 @@ export interface V11ClientTransientDelta {
  *
  * 与服务端 lib/http.ts 的 apiError 输出一致。
  */
-export interface V11ClientErrorBody {
+export interface ClientErrorBody {
   readonly error: {
     readonly code: string;
     readonly message: string;
@@ -114,7 +114,7 @@ export interface V11ClientErrorBody {
 // ─── 流生命周期 ──────────────────────────────────────────────
 
 /** SSE 连接状态。 */
-export type V11ClientStreamStatus =
+export type ClientStreamStatus =
   /** 尚未连接。 */
   | "idle"
   /** 正在建立连接（fetch 未完成 header）。 */
@@ -143,13 +143,13 @@ export type V11ClientStreamStatus =
  * - appliedEventIds 是 lastAppliedEventSequence 的精确历史，用于跨重连去重。
  * - latestEventCursor 与服务端 latest_event_cursor 同步；断线重连以它作为 Last-Event-ID。
  */
-export interface V11ThreadProjectionState {
+export interface ThreadProjectionState {
   /** Thread id。 */
   readonly threadId: string;
   /** 当前 Item 投影（按 item_sequence 升序）。 */
-  readonly items: readonly V11ClientItem[];
+  readonly items: readonly ClientItem[];
   /** Item id → Item（快速查找，派生于 items）。 */
-  readonly itemsById: Readonly<Record<string, V11ClientItem>>;
+  readonly itemsById: Readonly<Record<string, ClientItem>>;
   /** 已应用的最大 event sequence。 */
   readonly lastAppliedEventSequence: number;
   /** 已应用的 event_id 集合（用于跨重连/重复 SSE 去重）。 */
@@ -168,19 +168,19 @@ export interface V11ThreadProjectionState {
    */
   readonly hasAppliedEventSinceSnapshot: boolean;
   /** SSE 连接状态。 */
-  readonly streamStatus: V11ClientStreamStatus;
+  readonly streamStatus: ClientStreamStatus;
   /** 当前重连尝试次数（0 = 未处于重连）。用于展示"正在重新连接 2/5"。 */
   readonly reconnectAttempt: number;
   /** 重连次数上限（与 SSE 客户端 maxRetries 一致）。 */
   readonly reconnectMax: number;
   /** 当前可见错误（中文语义 + 可恢复动作已映射）。null 表示无错误。 */
-  readonly visibleError: V11ClientVisibleError | null;
+  readonly visibleError: ClientVisibleError | null;
   /** snapshot 加载状态。 */
   readonly snapshotStatus: "idle" | "loading" | "ready" | "failed";
 }
 
 /** 已映射为员工可理解语义的错误。 */
-export interface V11ClientVisibleError {
+export interface ClientVisibleError {
   /** 稳定错误码（如 EVENT_CURSOR_EXPIRED）。 */
   readonly code: string;
   /** 中文标题（短句）。 */
@@ -198,7 +198,7 @@ export interface V11ClientVisibleError {
 // ─── Thread 详情（S10-W02） ──────────────────────────────────
 
 /** GET /api/v1/threads/{thread_id} 返回的 Thread 投影。 */
-export interface V11ClientThread {
+export interface ClientThread {
   readonly id: string;
   readonly title: string | null;
   readonly primary_agent_id: string;
@@ -215,7 +215,7 @@ export interface V11ClientThread {
 }
 
 /** GET /api/v1/threads/{thread_id} 返回的 Goal 投影。 */
-export interface V11ClientGoal {
+export interface ClientGoal {
   readonly id: string;
   readonly thread_id: string;
   readonly objective: string;
@@ -228,7 +228,7 @@ export interface V11ClientGoal {
 }
 
 /** GET /api/v1/threads/{thread_id}/turns 返回的 Turn 投影。 */
-export interface V11ClientTurn {
+export interface ClientTurn {
   readonly id: string;
   readonly turn_sequence: number;
   readonly trigger_type: string;
@@ -248,24 +248,24 @@ export interface V11ClientTurn {
 }
 
 /** GET /api/v1/threads/{thread_id} 响应体。 */
-export interface V11ClientThreadResponse {
-  readonly thread: V11ClientThread;
-  readonly active_goal: V11ClientGoal | null;
-  readonly latest_turn: V11ClientTurn | null;
+export interface ClientThreadResponse {
+  readonly thread: ClientThread;
+  readonly active_goal: ClientGoal | null;
+  readonly latest_turn: ClientTurn | null;
 }
 
 /** GET /api/v1/threads/{thread_id}/turns 响应体。 */
-export interface V11ClientTurnsResponse {
-  readonly turns: readonly V11ClientTurn[];
+export interface ClientTurnsResponse {
+  readonly turns: readonly ClientTurn[];
 }
 
 // ─── PendingInput（S10-W03） ────────────────────────────────
 
 /** PendingInput 状态（与服务端 PENDING_INPUT_STATES 一致）。 */
-export type V11ClientPendingInputState = "pending" | "admitted" | "removed";
+export type ClientPendingInputState = "pending" | "admitted" | "removed";
 
 /** GET /api/v1/threads/{thread_id}/pending-inputs 中的单条 PendingInput 投影。 */
-export interface V11ClientPendingInput {
+export interface ClientPendingInput {
   readonly id: string;
   readonly queue_position: number;
   /** 结构化输入，至少含 type 字段。 */
@@ -279,41 +279,41 @@ export interface V11ClientPendingInput {
 }
 
 /** GET /api/v1/threads/{thread_id}/pending-inputs 响应体。 */
-export interface V11ClientPendingInputListResponse {
+export interface ClientPendingInputListResponse {
   readonly thread_id: string;
   /** 队列 ETag（如 "pending-queue-5"）。 */
   readonly queue_etag: string;
-  readonly pending_inputs: readonly V11ClientPendingInput[];
+  readonly pending_inputs: readonly ClientPendingInput[];
 }
 
 /** POST /api/v1/threads/{thread_id}/pending-inputs 响应体（201）。 */
-export interface V11ClientCreatePendingInputResponse {
+export interface ClientCreatePendingInputResponse {
   readonly pending_input: {
     readonly id: string;
     readonly thread_id: string;
-    readonly input_state: V11ClientPendingInputState;
+    readonly input_state: ClientPendingInputState;
     readonly queue_position: number;
-    readonly input: V11ClientPendingInput["input"];
+    readonly input: ClientPendingInput["input"];
     readonly etag: string;
   };
   readonly queue_etag: string;
 }
 
 /** PATCH /api/v1/pending-inputs/{pending_input_id} 响应体（200）。 */
-export interface V11ClientEditPendingInputResponse {
+export interface ClientEditPendingInputResponse {
   readonly pending_input: {
     readonly id: string;
     readonly thread_id: string;
-    readonly input_state: V11ClientPendingInputState;
+    readonly input_state: ClientPendingInputState;
     readonly queue_position: number;
-    readonly input: V11ClientPendingInput["input"];
+    readonly input: ClientPendingInput["input"];
     readonly etag: string;
   };
   readonly queue_etag: string;
 }
 
 /** DELETE /api/v1/pending-inputs/{pending_input_id} 响应体（200）。 */
-export interface V11ClientDeletePendingInputResponse {
+export interface ClientDeletePendingInputResponse {
   readonly pending_input: {
     readonly id: string;
     readonly thread_id: string;
@@ -326,7 +326,7 @@ export interface V11ClientDeletePendingInputResponse {
 // ─── Steer / Interrupt（S10-W03） ──────────────────────────
 
 /** POST /api/v1/turns/{turn_id}/steer 响应体（202 Accepted，异步命令）。 */
-export interface V11ClientSteerResponse {
+export interface ClientSteerResponse {
   readonly turn_id: string;
   readonly turn_state: string;
   /** 固定 "queued"：命令已入队，等 Runtime ack。前端不应在 ack 前宣称已引导。 */
@@ -337,7 +337,7 @@ export interface V11ClientSteerResponse {
 }
 
 /** POST /api/v1/turns/{turn_id}/interrupt 响应体（202 Accepted，异步命令）。 */
-export interface V11ClientInterruptResponse {
+export interface ClientInterruptResponse {
   readonly turn_id: string;
   readonly turn_state: string;
   /** 固定 "requested"：停止请求已入队，等 Runtime ack。 */
@@ -351,7 +351,7 @@ export interface V11ClientInterruptResponse {
 // ─── Catalog（S10-W04） ─────────────────────────────────────
 
 /** Catalog 资源类型（与服务端 CatalogResourceType 一致）。 */
-export type V11ClientCatalogResourceType =
+export type ClientCatalogResourceType =
   | "agent"
   | "skill"
   | "tool"
@@ -361,8 +361,8 @@ export type V11ClientCatalogResourceType =
   | "connection";
 
 /** GET /api/v1/catalog/options 返回的单条目录条目（§3.1 CatalogSearchItem）。 */
-export interface V11ClientCatalogItem {
-  readonly resource_type: V11ClientCatalogResourceType;
+export interface ClientCatalogItem {
+  readonly resource_type: ClientCatalogResourceType;
   readonly resource_id: string;
   readonly display_name: string;
   readonly description: string | null;
@@ -376,8 +376,8 @@ export interface V11ClientCatalogItem {
 }
 
 /** GET /api/v1/catalog/options 响应体。 */
-export interface V11ClientCatalogListResponse {
-  readonly items: readonly V11ClientCatalogItem[];
+export interface ClientCatalogListResponse {
+  readonly items: readonly ClientCatalogItem[];
   readonly next_cursor: string | null;
   /** 当前租户+employee audience 的 catalogRevision。 */
   readonly catalog_revision: number;
@@ -386,7 +386,7 @@ export interface V11ClientCatalogListResponse {
 // ─── Handoff（S10-W04） ────────────────────────────────────
 
 /** POST /api/v1/threads/{thread_id}:request-handoff 响应体（200）。 */
-export interface V11ClientHandoffRequestResponse {
+export interface ClientHandoffRequestResponse {
   readonly thread_id: string;
   readonly request_id: string;
   readonly item_id: string;
@@ -402,7 +402,7 @@ export interface V11ClientHandoffRequestResponse {
 }
 
 /** POST /api/v1/threads/{thread_id}/handoffs/{handoff_id}:resolve 响应体（200）。 */
-export interface V11ClientHandoffResolveResponse {
+export interface ClientHandoffResolveResponse {
   readonly thread_id: string;
   readonly request_id: string;
   readonly resolution: "approve" | "deny";
@@ -420,7 +420,7 @@ export interface V11ClientHandoffResolveResponse {
 // ─── UserAction 通用解析（S10-W05） ────────────────────────
 
 /** POST /api/v1/threads/{thread_id}/user-actions/{request_id}:resolve 响应体（200）。 */
-export interface V11ClientUserActionResolveResponse {
+export interface ClientUserActionResolveResponse {
   readonly thread_id: string;
   readonly request_id: string;
   readonly request_type: "confirmation" | "auth" | "grant" | "input";
@@ -438,10 +438,10 @@ export interface V11ClientUserActionResolveResponse {
 // ─── Environment / Desktop 任务操作台（S10-W06） ───────────
 
 /** 环境类型（与服务端 ENVIRONMENT_TYPES 一致）。 */
-export type V11ClientEnvironmentType = "desktop" | "cloud" | "remote" | "sandbox";
+export type ClientEnvironmentType = "desktop" | "cloud" | "remote" | "sandbox";
 
 /** Lease 状态（与服务端 ENVIRONMENT_LEASE_STATES 一致）。 */
-export type V11ClientEnvironmentLeaseState =
+export type ClientEnvironmentLeaseState =
   | "allocated"
   | "active"
   | "releasing"
@@ -459,7 +459,7 @@ export type V11ClientEnvironmentLeaseState =
  * - pending_device：Desktop Lease active 但设备离线，或 leaseState 为 allocated/releasing。
  * - offline_desktop：Desktop Lease 终态（released/expired/lost）或 ExecutionOwnership released/lost。
  */
-export type V11ClientEnvironmentAvailability =
+export type ClientEnvironmentAvailability =
   | "no_environment"
   | "cloud"
   | "online_desktop"
@@ -467,24 +467,24 @@ export type V11ClientEnvironmentAvailability =
   | "offline_desktop";
 
 /** EnvironmentDefinition 投影（GET /threads/{id}/environment 返回）。 */
-export interface V11ClientEnvironmentDefinition {
+export interface ClientEnvironmentDefinition {
   readonly id: string;
   readonly environment_key: string;
   readonly display_name: string;
   readonly description: string | null;
-  readonly environment_type: V11ClientEnvironmentType;
+  readonly environment_type: ClientEnvironmentType;
   readonly lifecycle_state: "active" | "archived" | "deleted";
 }
 
 /** EnvironmentLease 投影。 */
-export interface V11ClientEnvironmentLease {
+export interface ClientEnvironmentLease {
   readonly id: string;
   readonly environment_definition_id: string;
   readonly invocation_id: string;
   readonly attempt_id: string;
   /** Desktop Lease 必含；Cloud/Remote/Sandbox 为 null。 */
   readonly device_id: string | null;
-  readonly lease_state: V11ClientEnvironmentLeaseState;
+  readonly lease_state: ClientEnvironmentLeaseState;
   readonly allocated_at: string;
   readonly last_heartbeat_at: string | null;
   readonly expires_at: string | null;
@@ -492,7 +492,7 @@ export interface V11ClientEnvironmentLease {
 }
 
 /** ExecutionOwnership 投影。 */
-export interface V11ClientExecutionOwnership {
+export interface ClientExecutionOwnership {
   readonly id: string;
   readonly invocation_id: string;
   readonly device_id: string | null;
@@ -505,24 +505,24 @@ export interface V11ClientExecutionOwnership {
 }
 
 /** GET /api/v1/threads/{thread_id}/environment 响应体。 */
-export interface V11ClientEnvironmentStatusResponse {
+export interface ClientEnvironmentStatusResponse {
   readonly thread_id: string;
   /** 当前 Thread 配置的默认 EnvironmentDefinition；null 表示未配置。 */
-  readonly environment_definition: V11ClientEnvironmentDefinition | null;
+  readonly environment_definition: ClientEnvironmentDefinition | null;
   /** 当前 active Invocation 的 Lease；null 表示无活跃 Lease。 */
-  readonly active_lease: V11ClientEnvironmentLease | null;
+  readonly active_lease: ClientEnvironmentLease | null;
   /** 当前 active Invocation 的 ExecutionOwnership；null 表示无活跃 ownership。 */
-  readonly active_ownership: V11ClientExecutionOwnership | null;
+  readonly active_ownership: ClientExecutionOwnership | null;
   /** 推导后的可用性状态（前端渲染依据）。 */
-  readonly availability: V11ClientEnvironmentAvailability;
+  readonly availability: ClientEnvironmentAvailability;
   /** 当前 active Invocation id；null 表示无活跃 Invocation。 */
   readonly active_invocation_id: string | null;
   /** S10-W07：接管条件聚合（无 active ownership 时为空 conditions）。 */
-  readonly takeover_conditions: V11ClientTakeoverConditions;
+  readonly takeover_conditions: ClientTakeoverConditions;
 }
 
 /** 接管条件聚合（GET /environment 返回）。 */
-export interface V11ClientTakeoverConditions {
+export interface ClientTakeoverConditions {
   /** 是否允许接管。 */
   readonly can_takeover: boolean;
   /** 阻塞原因列表（中文，前端直接展示）。 */
@@ -542,7 +542,7 @@ export interface V11ClientTakeoverConditions {
 }
 
 /** POST /api/v1/threads/{thread_id}/environment:takeover 响应体（S10-W07）。 */
-export interface V11ClientTakeoverResponse {
+export interface ClientTakeoverResponse {
   readonly thread_id: string;
   readonly ownership_id: string;
   readonly lease_id: string | null;
@@ -554,24 +554,12 @@ export interface V11ClientTakeoverResponse {
 
 // ─── Desktop 本地操作（S10-W06） ──────────────────────────
 
-/**
- * 本地操作类别（操作面板分组依据）。
- *
- * 与底层 `DesktopOperationCategory` 同源；V11 客户端类型不重复定义，
- * 直接复用底层类型，避免双源不一致。
- */
-export type V11DesktopOperationCategory = DesktopOperationCategory;
-
-/**
- * 本地操作执行结果。
- *
- * 与底层 `DesktopOperationResult` 同源；V11 客户端类型不重复定义。
- */
-export type V11DesktopOperationResult = DesktopOperationResult;
+// 直接复用底层类型，避免双源不一致。
+export type { DesktopOperationCategory, DesktopOperationResult } from "@/lib/desktop/capabilities";
 
 /** Desktop 操作能力描述（操作面板展示）。 */
-export interface V11DesktopOperationCapability {
-  readonly category: V11DesktopOperationCategory;
+export interface DesktopOperationCapability {
+  readonly category: DesktopOperationCategory;
   readonly operation: string;
   readonly display_name: string;
   readonly description: string;
@@ -584,32 +572,32 @@ export interface V11DesktopOperationCapability {
 // ─── Reducer Action ──────────────────────────────────────────
 
 /** Reducer 输入。 */
-export type V11ThreadProjectionAction =
+export type ThreadProjectionAction =
   /** 加载 snapshot 成功；重置 lastAppliedEventSequence 为 latest_event_cursor.sequence。 */
   | {
       readonly type: "snapshot.loaded";
-      readonly items: readonly V11ClientItem[];
+      readonly items: readonly ClientItem[];
       readonly latestEventCursor: {
         readonly sequence: number;
         readonly event_id: string | null;
       } | null;
     }
   /** snapshot 加载失败。 */
-  | { readonly type: "snapshot.failed"; readonly error: V11ClientVisibleError }
+  | { readonly type: "snapshot.failed"; readonly error: ClientVisibleError }
   /** snapshot 开始加载。 */
   | { readonly type: "snapshot.loading" }
   /** SSE 事件到达（已通过去重和 sequence 检查）。 */
-  | { readonly type: "event.received"; readonly event: V11ClientEvent }
+  | { readonly type: "event.received"; readonly event: ClientEvent }
   /** response.delta 到达；只更新临时 Agent Item，不推进持久游标。 */
-  | { readonly type: "stream.delta"; readonly event: V11ClientTransientDelta }
+  | { readonly type: "stream.delta"; readonly event: ClientTransientDelta }
   /** SSE 状态变化；reconnecting 时携带尝试次数与上限。 */
   | {
       readonly type: "stream.status";
-      readonly status: V11ClientStreamStatus;
+      readonly status: ClientStreamStatus;
       readonly reconnectAttempt?: number;
       readonly reconnectMax?: number;
     }
   /** 服务端告知 cursor 过期，需要 resnapshot。 */
-  | { readonly type: "stream.cursor_expired"; readonly error: V11ClientVisibleError }
+  | { readonly type: "stream.cursor_expired"; readonly error: ClientVisibleError }
   /** 出现不可恢复错误。 */
-  | { readonly type: "stream.failed"; readonly error: V11ClientVisibleError };
+  | { readonly type: "stream.failed"; readonly error: ClientVisibleError };

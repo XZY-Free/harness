@@ -23,16 +23,10 @@ import {
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { aiConfig, runtimeConformanceConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
-import {
-  agentRevisionTable,
-  agentTable,
-} from "@/lib/persistence/schema/agents";
-import { deploymentRouteSetTable } from "@/lib/persistence/schema/routes";
-import {
-  runtimeRevisionTable,
-  runtimeTable,
-} from "@/lib/persistence/schema/runtimes";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { tenantTable } from "@/lib/persistence/schema/control-plane";
+import { deploymentRouteSetTable } from "@/lib/persistence/schema/routes";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { getWithdrawalRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
@@ -46,25 +40,25 @@ import type {
 } from "@/lib/runtimes/application/provision-hosted-runtime";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
-import { ALL_CONFORMANCE_CASES } from "@/lib/runtimes/domain/runtime-conformance-contract";
 import { getHostedControlPlaneEvidenceProvider } from "@/lib/runtimes/domain/hosted-control-plane-evidence";
+import { ALL_CONFORMANCE_CASES } from "@/lib/runtimes/domain/runtime-conformance-contract";
 import { protocolContractRevision } from "@/lib/runtimes/domain/runtime-conformance-run";
+import type {
+  HostedAgentPublicationGateway,
+  HostedArtifactEvidenceProvider,
+  HostedConformanceRunner,
+  HostedGateways,
+  HostedRouteActivationGateway,
+  HostedRouteReader,
+  HostedRuntimePublicationGateway,
+} from "@/lib/runtimes/infrastructure/hosted-gateways";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtimes/persistence/mysql-runtime-publication-store";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
-import type {
-  HostedGateways,
-  HostedRouteReader,
-  HostedAgentPublicationGateway,
-  HostedRuntimePublicationGateway,
-  HostedRouteActivationGateway,
-  HostedArtifactEvidenceProvider,
-  HostedConformanceRunner,
-} from "@/lib/runtimes/infrastructure/hosted-gateways";
+import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { and, desc, eq, max } from "drizzle-orm";
 
 // ─── 常量 ───────────────────────────────────────────────────
@@ -511,7 +505,8 @@ async function loadPublishedRuntimeRevision(
     .select()
     .from(runtimeConformanceCaseResult)
     .where(eq(runtimeConformanceCaseResult.runId, run.id));
-  if (cases.length !== ALL_CONFORMANCE_CASES.length || cases.some((item) => !item.passed)) return null;
+  if (cases.length !== ALL_CONFORMANCE_CASES.length || cases.some((item) => !item.passed))
+    return null;
   return { revisionId: revision.id, ...fact, conformanceRunId: fact.conformanceRunId };
 }
 

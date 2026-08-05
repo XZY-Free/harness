@@ -82,7 +82,7 @@ export const maxDuration = 300; // B-4：原 60 砍断长任务；runner reaper 
  */
 async function generateThreadTitle(threadId: string, firstMessageText: string, modelId: string) {
   const dialog = firstMessageText.slice(0, 500).trim();
-  
+
   console.log("[generateThreadTitle] 开始生成标题", {
     threadId,
     dialogLength: dialog.length,
@@ -93,13 +93,13 @@ async function generateThreadTitle(threadId: string, firstMessageText: string, m
     console.warn("[generateThreadTitle] 跳过：无文本内容（可能是纯附件消息）");
     return; // 纯附件无文本 → 不生成（保留"新会话"占位，用户可手动重生成）
   }
-  
+
   const fallbackTitle = fallbackTitleFromUserText(dialog);
   console.log("[generateThreadTitle] 兜底标题已准备", { fallbackTitle });
 
   try {
     console.log("[generateThreadTitle] 调用LLM生成...", { modelId });
-    
+
     const { text } = await generateText({
       model: getChatModel(modelId),
       system:
@@ -109,13 +109,13 @@ async function generateThreadTitle(threadId: string, firstMessageText: string, m
       maxOutputTokens: 50,
     });
 
-    console.log("[generateThreadTitle] LLM返回", { 
+    console.log("[generateThreadTitle] LLM返回", {
       rawText: text,
-      textPreview: text?.slice(0, 100)
+      textPreview: text?.slice(0, 100),
     });
 
     const title = chooseThreadTitle(text, fallbackTitle);
-    
+
     console.log("[generateThreadTitle] 最终标题确定", {
       title,
       source: title === fallbackTitle ? "fallback" : "llm",
@@ -132,7 +132,7 @@ async function generateThreadTitle(threadId: string, firstMessageText: string, m
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
-    
+
     if (fallbackTitle) {
       console.log("[generateThreadTitle] 使用兜底标题", { fallbackTitle });
       await updateGeneratedTitle(threadId, fallbackTitle);
@@ -414,9 +414,10 @@ export async function POST(request: Request) {
   // C-1: 只要标题还是默认占位就触发标题生成（兼容前端提前创建 thread 的场景）。
   // 前端新建会话时会先 POST /api/threads 落库，导致此处 existingThread 已存在，
   // 原来放在 !existingThread 分支里的标题生成永远走不到。
-  
+
   // 更宽松的触发条件（不仅限于"新会话"）
-  const shouldGenerateTitle = !existingThread.title ||
+  const shouldGenerateTitle =
+    !existingThread.title ||
     existingThread.title === "新会话" ||
     existingThread.title.trim() === "" ||
     existingThread.title.startsWith("新会话");

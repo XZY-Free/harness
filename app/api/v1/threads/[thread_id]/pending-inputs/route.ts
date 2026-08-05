@@ -1,12 +1,3 @@
-import {
-  ETAG_HEADER,
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  etagHeader,
-  getRequestId,
-  resourceNotFound,
-  apiSuccess,
-} from "@/lib/http";
 /**
  * GET  /api/v1/threads/{thread_id}/pending-inputs — 查询 PendingInput 队列（S04-C04，§3.6）。
  * POST /api/v1/threads/{thread_id}/pending-inputs — 创建 PendingInput（S04-C04，§3.7）。
@@ -36,15 +27,24 @@ import {
   type PendingInputContent,
   createPendingInput,
   listPendingInputs,
-} from "@/lib/v11/conversation/pending-input-queries";
+} from "@/lib/conversations/pending-input-queries";
 import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
-  v11SchemaInvalid,
-} from "@/lib/v11/conversation/route-helpers";
-import { getThreadById } from "@/lib/v11/conversation/thread-queries";
+  schemaInvalidTable,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import {
+  ETAG_HEADER,
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  etagHeader,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -157,13 +157,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 解析 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11SchemaInvalid(requestId, "缺少必填头 Idempotency-Key");
+    return schemaInvalidTable(requestId, "缺少必填头 Idempotency-Key");
   }
 
   // 4. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateCreateBody(body)) {
-    return v11SchemaInvalid(requestId, "请求体非法：缺少 input 或 input.type 为空");
+    return schemaInvalidTable(requestId, "请求体非法：缺少 input 或 input.type 为空");
   }
 
   // 5. 计算请求 hash + 幂等守卫

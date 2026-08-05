@@ -18,9 +18,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { createInitialState, threadProjectionReducer } from "./thread-reducer";
-import type { V11ClientEvent, V11ClientItem, V11ThreadProjectionState } from "./types";
+import type { ClientEvent, ClientItem, ThreadProjectionState } from "./types";
 
-function makeItem(overrides: Partial<V11ClientItem> = {}): V11ClientItem {
+function makeItem(overrides: Partial<ClientItem> = {}): ClientItem {
   return {
     id: overrides.id ?? "item-1",
     turn_id: overrides.turn_id ?? "turn-1",
@@ -32,7 +32,7 @@ function makeItem(overrides: Partial<V11ClientItem> = {}): V11ClientItem {
   };
 }
 
-function makeEvent(overrides: Partial<V11ClientEvent> = {}): V11ClientEvent {
+function makeEvent(overrides: Partial<ClientEvent> = {}): ClientEvent {
   return {
     event_id: overrides.event_id ?? "evt-1",
     sequence: overrides.sequence ?? 1,
@@ -47,9 +47,9 @@ function makeEvent(overrides: Partial<V11ClientEvent> = {}): V11ClientEvent {
 }
 
 function loadedState(
-  items: readonly V11ClientItem[],
+  items: readonly ClientItem[],
   cursor: { sequence: number; event_id: string | null } | null,
-): V11ThreadProjectionState {
+): ThreadProjectionState {
   return threadProjectionReducer(createInitialState("thread-1"), {
     type: "snapshot.loaded",
     items,

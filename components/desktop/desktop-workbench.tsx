@@ -6,7 +6,7 @@ import { deriveTaskStatus } from "@/components/v11/thread-header";
 import { FileEditor } from "@/components/workspace-panel/file-editor";
 import { FileTree } from "@/components/workspace-panel/file-tree";
 import { cn } from "@/lib/utils";
-import type { V11ClientGoal, V11ClientItem, V11ClientTurn } from "@/lib/v11/client/types";
+import type { ClientGoal, ClientItem, ClientTurn } from "@/lib/v11/client/types";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -55,9 +55,9 @@ interface DesktopWorkbenchProps {
   /** Desktop Browser 的会话归属身份；由服务端路由传入，避免把 ThreadId 当身份使用。 */
   readonly viewerId?: string;
   readonly threadTitle?: string | null;
-  readonly activeGoal: V11ClientGoal | null;
-  readonly latestTurn: V11ClientTurn | null;
-  readonly items: readonly V11ClientItem[];
+  readonly activeGoal: ClientGoal | null;
+  readonly latestTurn: ClientTurn | null;
+  readonly items: readonly ClientItem[];
   /** 将工作台中的确认或产物定位到共同时间线，不在右侧复制执行入口。 */
   readonly onLocateItem: (itemId: string) => void;
 }
@@ -76,7 +76,7 @@ function readText(record: Record<string, unknown>, ...keys: string[]): string | 
   return null;
 }
 
-function collectReviews(items: readonly V11ClientItem[]): ReviewItem[] {
+function collectReviews(items: readonly ClientItem[]): ReviewItem[] {
   return items.flatMap((item) => {
     if (item.item_type !== "user_action" || item.item_state === "superseded") return [];
     const content = asRecord(item.content);
@@ -97,7 +97,7 @@ function collectReviews(items: readonly V11ClientItem[]): ReviewItem[] {
   });
 }
 
-function collectArtifacts(items: readonly V11ClientItem[]): ArtifactItem[] {
+function collectArtifacts(items: readonly ClientItem[]): ArtifactItem[] {
   const seen = new Set<string>();
   return items.flatMap((item) => {
     if (item.item_type !== "artifact" || item.item_state === "superseded") return [];

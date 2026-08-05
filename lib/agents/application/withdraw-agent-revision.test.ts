@@ -13,17 +13,12 @@ import type {
   AgentWithdrawalSession,
   AgentWithdrawalStore,
 } from "@/lib/agents/persistence/agent-withdrawal-store";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { mysqlAgentWithdrawalStore } from "@/lib/agents/persistence/mysql-agent-withdrawal-store";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
-import { publicationRecord } from "@/lib/publications/persistence/publication-record";
-import {
-  getPublicationRecordBySubject,
-  getWithdrawalRecordBySubject,
-} from "@/lib/publications/persistence/publication-record-queries";
 import {
   getIdempotencyRecordById,
   insertProcessingRecord,
@@ -31,6 +26,11 @@ import {
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { publicationRecord } from "@/lib/publications/persistence/publication-record";
+import {
+  getPublicationRecordBySubject,
+  getWithdrawalRecordBySubject,
+} from "@/lib/publications/persistence/publication-record-queries";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 

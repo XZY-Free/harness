@@ -36,26 +36,10 @@
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  getRequestId,
   apiError,
   apiSuccess,
+  getRequestId,
 } from "@/lib/http";
-import {
-  computeCandidateKey,
-  createMemoryCandidateWithEntry,
-  deriveSourceFromCandidate,
-  evaluateMemoryPolicy,
-  findMemoryCandidateByCandidateKey,
-  insertMemoryCandidate,
-  isValidMemoryContentHash,
-  verifyMemoryContentHash,
-} from "@/lib/v11/context/memory-queries";
-import {
-  type GatewayPrincipal,
-  gatewayAuthErrorResponse,
-  resolveGatewayPrincipal,
-  v11GatewaySchemaInvalid,
-} from "@/lib/v11/gateway/route-helpers";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -69,11 +53,27 @@ import {
 import type { WorkloadPrincipal } from "@/lib/identity/resolver";
 import {
   MEMORY_SCOPE_TYPES,
+  type MemoryCandidate,
   type MemoryScopeType,
   SENSITIVITY_CLASSES,
   type SensitivityClass,
-  type V11MemoryCandidate,
-} from "@/lib/v11/schema/memory";
+} from "@/lib/persistence/schema/memory";
+import {
+  computeCandidateKey,
+  createMemoryCandidateWithEntry,
+  deriveSourceFromCandidate,
+  evaluateMemoryPolicy,
+  findMemoryCandidateByCandidateKey,
+  insertMemoryCandidate,
+  isValidMemoryContentHash,
+  verifyMemoryContentHash,
+} from "@/lib/v11/context/memory-queries";
+import {
+  type GatewayPrincipal,
+  gatewayAuthErrorResponse,
+  gatewaySchemaInvalidTable,
+  resolveGatewayPrincipal,
+} from "@/lib/v11/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -244,9 +244,7 @@ function validateBody(
 }
 
 /** 从 GatewayPrincipal 构造 WorkloadPrincipal。 */
-function toWorkloadPrincipal(
-  principal: GatewayPrincipal,
-): WorkloadPrincipal {
+function toWorkloadPrincipal(principal: GatewayPrincipal): WorkloadPrincipal {
   return {
     tenantId: principal.tenantId,
     audience: principal.audience,
@@ -309,7 +307,7 @@ export async function memoryCandidatePOST(request: Request): Promise<Response> {
   // 2. 校验 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER);
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
-    return v11GatewaySchemaInvalid(requestId, "Idempotency-Key 头必填");
+    return gatewaySchemaInvalidTable(requestId, "Idempotency-Key 头必填");
   }
 
   // 3. 解析请求体
@@ -317,13 +315,13 @@ export async function memoryCandidatePOST(request: Request): Promise<Response> {
   try {
     body = await request.json();
   } catch {
-    return v11GatewaySchemaInvalid(requestId, "请求体必须是合法 JSON");
+    return gatewaySchemaInvalidTable(requestId, "请求体必须是合法 JSON");
   }
 
   // 4. 校验请求体
   const [valid, errorMessage, parsed] = validateBody(body, principal.invocationId);
   if (!valid || !parsed) {
-    return v11GatewaySchemaInvalid(requestId, errorMessage);
+    return gatewaySchemaInvalidTable(requestId, errorMessage);
   }
 
   // 5. 校验 content_hash 与 content.text 一致（若 text 提供）
@@ -399,7 +397,7 @@ export async function memoryCandidatePOST(request: Request): Promise<Response> {
     // 检查是否已有相同 candidate_key 的 Candidate（去重）
     const existing = await findMemoryCandidateByCandidateKey(principal.tenantId, candidateKey);
 
-    let candidate: V11MemoryCandidate;
+    let candidate: MemoryCandidate;
     if (existing) {
       // 已存在相同 Candidate，直接返回（去重）
       candidate = existing;

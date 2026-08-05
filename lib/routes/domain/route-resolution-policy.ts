@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import {
-  normalizeEligibility,
+  type NormalizedEligibility,
   computeSpecificity,
   isOverlapping,
   isTimeWindowOverlapping,
-  type NormalizedEligibility,
+  normalizeEligibility,
 } from "@/lib/routes/domain/route-selector";
 
 export const ROUTE_TRAFFIC_WEIGHT_TOTAL = 10_000;
@@ -181,9 +181,7 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
   const trafficWeightTotal = group.reduce((sum, e) => sum + e.candidate.trafficWeight, 0);
   if (
     trafficWeightTotal !== ROUTE_TRAFFIC_WEIGHT_TOTAL ||
-    group.some(
-      (e) => !Number.isInteger(e.candidate.trafficWeight) || e.candidate.trafficWeight < 0,
-    )
+    group.some((e) => !Number.isInteger(e.candidate.trafficWeight) || e.candidate.trafficWeight < 0)
   ) {
     return {
       status: "unresolved",

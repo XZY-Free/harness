@@ -10,8 +10,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { HostedProvisioningRequestStore } from "@/lib/runtimes/persistence/hosted-provisioning-request-store";
 import type { HostedProvisioningRequestRow } from "@/lib/runtimes/persistence/hosted-provisioning-request-record";
+import type { HostedProvisioningRequestStore } from "@/lib/runtimes/persistence/hosted-provisioning-request-store";
 import type { RevisionValidationDeps } from "./validate-hosted-provisioning-revision";
 
 export interface RequestHostedProvisioningResult {

@@ -25,9 +25,9 @@ import { db } from "@/lib/db/client";
 import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
 import {
   type RetentionObjectType,
-  type V11RetentionPolicy,
-  v11RetentionPolicy,
-} from "@/lib/v11/schema/retention-policy";
+  type RetentionPolicy,
+  retentionPolicyTable,
+} from "@/lib/persistence/schema/retention-policy";
 import { and, asc, eq, gt } from "drizzle-orm";
 
 // ─── 默认保留天数（按对象类型分级） ──────────────────────────
@@ -110,7 +110,7 @@ export async function createRetentionPolicy(params: {
   createdBy: string;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11RetentionPolicy> {
+}): Promise<RetentionPolicy> {
   validateRetentionDays(params.retentionDays);
   if (params.legalHoldDays) validateRetentionDays(params.legalHoldDays);
 
@@ -124,7 +124,7 @@ export async function createRetentionPolicy(params: {
   }
 
   const id = randomUUID();
-  await db.insert(v11RetentionPolicy).values({
+  await db.insert(retentionPolicyTable).values({
     id,
     tenantId: params.tenantId,
     objectType: params.objectType,
@@ -139,8 +139,8 @@ export async function createRetentionPolicy(params: {
 
   const [row] = await db
     .select()
-    .from(v11RetentionPolicy)
-    .where(eq(v11RetentionPolicy.id, id))
+    .from(retentionPolicyTable)
+    .where(eq(retentionPolicyTable.id, id))
     .limit(1);
   if (!row) {
     throw new Error(`createRetentionPolicy: 行未找到（id=${id}）`);
@@ -169,12 +169,15 @@ export async function createRetentionPolicy(params: {
 export async function getRetentionPolicy(
   tenantId: string,
   objectType: RetentionObjectType,
-): Promise<V11RetentionPolicy | null> {
+): Promise<RetentionPolicy | null> {
   const [row] = await db
     .select()
-    .from(v11RetentionPolicy)
+    .from(retentionPolicyTable)
     .where(
-      and(eq(v11RetentionPolicy.tenantId, tenantId), eq(v11RetentionPolicy.objectType, objectType)),
+      and(
+        eq(retentionPolicyTable.tenantId, tenantId),
+        eq(retentionPolicyTable.objectType, objectType),
+      ),
     )
     .limit(1);
   return row ?? null;
@@ -184,11 +187,11 @@ export async function getRetentionPolicy(
 export async function getRetentionPolicyById(
   tenantId: string,
   id: string,
-): Promise<V11RetentionPolicy | null> {
+): Promise<RetentionPolicy | null> {
   const [row] = await db
     .select()
-    .from(v11RetentionPolicy)
-    .where(and(eq(v11RetentionPolicy.tenantId, tenantId), eq(v11RetentionPolicy.id, id)))
+    .from(retentionPolicyTable)
+    .where(and(eq(retentionPolicyTable.tenantId, tenantId), eq(retentionPolicyTable.id, id)))
     .limit(1);
   return row ?? null;
 }
@@ -205,7 +208,7 @@ export async function updateRetentionPolicy(params: {
   updatedBy: string;
   actor: AuditActor;
   requestId?: string;
-}): Promise<V11RetentionPolicy> {
+}): Promise<RetentionPolicy> {
   const existing = await getRetentionPolicyById(params.tenantId, params.id);
   if (!existing) {
     throw new RetentionPolicyError("policy_not_found", `保留策略不存在（id=${params.id}）`);
@@ -214,7 +217,7 @@ export async function updateRetentionPolicy(params: {
   if (params.retentionDays !== undefined) validateRetentionDays(params.retentionDays);
   if (params.legalHoldDays) validateRetentionDays(params.legalHoldDays);
 
-  const updates: Partial<V11RetentionPolicy> = { updatedBy: params.updatedBy };
+  const updates: Partial<RetentionPolicy> = { updatedBy: params.updatedBy };
   if (params.retentionDays !== undefined) updates.retentionDays = params.retentionDays;
   if (params.legalHoldDays !== undefined) {
     updates.legalHoldDays = params.legalHoldDays === null ? null : params.legalHoldDays;
@@ -226,14 +229,14 @@ export async function updateRetentionPolicy(params: {
   if (params.description !== undefined) updates.description = params.description;
 
   await db
-    .update(v11RetentionPolicy)
+    .update(retentionPolicyTable)
     .set({ ...updates, updatedAt: new Date() })
-    .where(eq(v11RetentionPolicy.id, params.id));
+    .where(eq(retentionPolicyTable.id, params.id));
 
   const [row] = await db
     .select()
-    .from(v11RetentionPolicy)
-    .where(eq(v11RetentionPolicy.id, params.id))
+    .from(retentionPolicyTable)
+    .where(eq(retentionPolicyTable.id, params.id))
     .limit(1);
   if (!row) {
     throw new Error(`updateRetentionPolicy: 行未找到（id=${params.id}）`);
@@ -274,7 +277,7 @@ export async function deleteRetentionPolicy(params: {
     throw new RetentionPolicyError("policy_not_found", `保留策略不存在（id=${params.id}）`);
   }
 
-  await db.delete(v11RetentionPolicy).where(eq(v11RetentionPolicy.id, params.id));
+  await db.delete(retentionPolicyTable).where(eq(retentionPolicyTable.id, params.id));
 
   await recordAuditEvent({
     actor: params.actor,
@@ -302,7 +305,7 @@ export interface RetentionPolicyFilter {
 }
 
 export interface RetentionPolicyPage {
-  items: V11RetentionPolicy[];
+  items: RetentionPolicy[];
   nextCursor: string | null;
 }
 
@@ -311,23 +314,23 @@ export async function listRetentionPolicies(
   filter: RetentionPolicyFilter,
 ): Promise<RetentionPolicyPage> {
   const limit = Math.min(filter.limit ?? 50, 200);
-  const conditions = [eq(v11RetentionPolicy.tenantId, filter.tenantId)];
+  const conditions = [eq(retentionPolicyTable.tenantId, filter.tenantId)];
   if (filter.dataClass) {
-    conditions.push(eq(v11RetentionPolicy.dataClass, filter.dataClass));
+    conditions.push(eq(retentionPolicyTable.dataClass, filter.dataClass));
   }
   if (filter.objectType) {
-    conditions.push(eq(v11RetentionPolicy.objectType, filter.objectType));
+    conditions.push(eq(retentionPolicyTable.objectType, filter.objectType));
   }
   if (filter.cursor) {
     const cursorDate = new Date(filter.cursor);
-    conditions.push(gt(v11RetentionPolicy.createdAt, cursorDate));
+    conditions.push(gt(retentionPolicyTable.createdAt, cursorDate));
   }
 
   const rows = await db
     .select()
-    .from(v11RetentionPolicy)
+    .from(retentionPolicyTable)
     .where(and(...conditions))
-    .orderBy(asc(v11RetentionPolicy.createdAt))
+    .orderBy(asc(retentionPolicyTable.createdAt))
     .limit(limit + 1);
 
   const hasMore = rows.length > limit;

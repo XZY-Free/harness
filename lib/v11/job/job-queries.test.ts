@@ -30,6 +30,7 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { jobTable } from "@/lib/persistence/schema/job";
 import {
   JobAlreadyTerminalError,
   JobCommandAlreadyTerminalError,
@@ -64,7 +65,6 @@ import {
   recordJobResult,
   updateJobState,
 } from "@/lib/v11/job/job-queries";
-import { v11Job } from "@/lib/v11/schema/job";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -536,7 +536,7 @@ describe("recordJobResult", () => {
     expect(result.resultRecordedEvent.idempotencyKey).toBe("result-001:job-result-recorded");
 
     // Job.lastEventSequence 已递增
-    const [dbJob] = await db.select().from(v11Job).where(eq(v11Job.id, job.id)).limit(1);
+    const [dbJob] = await db.select().from(jobTable).where(eq(jobTable.id, job.id)).limit(1);
     expect(dbJob?.lastEventSequence).toBe(2);
     void running;
   });
@@ -568,7 +568,7 @@ describe("allocateJobEventSequences + insertJobEvent", () => {
     });
     expect(startSeq).toBe(2); // 从 2 开始
 
-    const [dbJob] = await db.select().from(v11Job).where(eq(v11Job.id, job.id)).limit(1);
+    const [dbJob] = await db.select().from(jobTable).where(eq(jobTable.id, job.id)).limit(1);
     expect(dbJob?.lastEventSequence).toBe(4); // 1 + 3 = 4
   });
 

@@ -15,7 +15,7 @@ import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attesta
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - 不存在或跨租户 → 404 NOT_FOUND
  */
-import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,

@@ -16,8 +16,8 @@ import { FailClosedDeletionStoreAdapter } from "@/lib/identity/deletion-store-ad
  * - 默认 fail-closed：getDeletionStoreAdapter 未命中 override 时返回 FailClosedDeletionStoreAdapter。
  * - Adapter 不可自报 completed；evidenceRef 由存储端产生，executor 校验非空后标记 completed。
  */
-import type { DeletionStoreType } from "@/lib/v11/schema/deletion-request";
-import { DELETION_STORE_TYPES } from "@/lib/v11/schema/deletion-request";
+import type { DeletionStoreType } from "@/lib/persistence/schema/deletion-request";
+import { DELETION_STORE_TYPES } from "@/lib/persistence/schema/deletion-request";
 
 // ─── 单例 + override ──────────────────────────────────────
 

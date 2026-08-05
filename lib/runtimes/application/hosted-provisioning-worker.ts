@@ -8,14 +8,14 @@
  * §6.5: 使用 Gateway 接口替代旧单体 HostedRuntimeControlPlane。
  */
 
-import { mysqlHostedProvisioningRequestStore } from "@/lib/runtimes/persistence/mysql-hosted-provisioning-request-store";
-import { createMysqlHostedGateways } from "@/lib/runtimes/infrastructure/mysql-hosted-gateways";
+import { logger } from "@/lib/logger";
 import { createHostedProvisioningSaga } from "@/lib/runtimes/application/hosted-provisioning-saga";
 import {
-  computeProvisioningBackoff,
   classifyProvisioningError,
+  computeProvisioningBackoff,
 } from "@/lib/runtimes/domain/hosted-provisioning-request";
-import { logger } from "@/lib/logger";
+import { createMysqlHostedGateways } from "@/lib/runtimes/infrastructure/mysql-hosted-gateways";
+import { mysqlHostedProvisioningRequestStore } from "@/lib/runtimes/persistence/mysql-hosted-provisioning-request-store";
 
 /** Worker 配置。 */
 export interface HostedProvisioningWorkerConfig {
@@ -37,7 +37,7 @@ export interface HostedProvisioningWorkerConfig {
 const DEFAULT_CONFIG: HostedProvisioningWorkerConfig = {
   workerId: `hosted-provisioner-${process.pid}`,
   batchSize: 5,
-  leaseMs: 120_000,     // 2 分钟租约
+  leaseMs: 120_000, // 2 分钟租约
   pollIntervalMs: 5_000, // 5 秒轮询
   maxAttempts: 10,
   baseBackoffMs: 10_000,
@@ -128,9 +128,12 @@ export function createHostedProvisioningWorker(
       } catch (error) {
         // Saga 本身抛错（不应该发生，saga 内部已处理）
         const classification = classifyProvisioningError(error);
-        const message = classification.category === "permanent"
-          ? String(error)
-          : (error instanceof Error ? error.message : String(error));
+        const message =
+          classification.category === "permanent"
+            ? String(error)
+            : error instanceof Error
+              ? error.message
+              : String(error);
 
         if (classification.category === "permanent" || request.attemptCount >= config.maxAttempts) {
           await store.updateState({
@@ -140,7 +143,11 @@ export function createHostedProvisioningWorker(
             lastAttemptAt: new Date(),
           });
         } else {
-          const backoff = computeProvisioningBackoff(request.attemptCount, config.baseBackoffMs, config.maxBackoffMs);
+          const backoff = computeProvisioningBackoff(
+            request.attemptCount,
+            config.baseBackoffMs,
+            config.maxBackoffMs,
+          );
           await store.updateState({
             requestId: request.id,
             state: "retryable_failed",

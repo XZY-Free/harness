@@ -3,15 +3,15 @@ import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/p
 import { validateCompleteConformanceResult } from "@/lib/runtimes/domain/runtime-conformance-contract";
 import {
   ArtifactEvidencePolicy,
-  RuntimeConformanceCaseFailedError,
   RuntimeArtifactAttestationInvalidError,
   RuntimeArtifactAttestationRequiredError,
+  RuntimeConformanceCaseFailedError,
   RuntimeConformanceRunInvalidError,
   RuntimeConformanceRunRequiredError,
   RuntimePublicationIdempotencyCompletionError,
+  RuntimePublicationVersionConflictError,
   RuntimeRevisionNotFoundError,
   RuntimeRevisionStateError,
-  RuntimePublicationVersionConflictError,
 } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 import type {
   RuntimePublicationActorType,
@@ -111,7 +111,10 @@ export function createPublishRuntimeRevision(dependencies: {
       // 6. FOR UPDATE 读取 Runtime
       const runtime = await session.findRuntime(command.tenantId, revision.runtimeId);
       if (!runtime || runtime.versionNo !== command.runtimeExpectedVersionNo) {
-        throw new RuntimePublicationVersionConflictError(revision.runtimeId, command.runtimeExpectedVersionNo);
+        throw new RuntimePublicationVersionConflictError(
+          revision.runtimeId,
+          command.runtimeExpectedVersionNo,
+        );
       }
 
       // 8-9. FOR UPDATE 读取 Attestation 证据快照，统一 Policy 验证
@@ -233,7 +236,10 @@ export function createPublishRuntimeRevision(dependencies: {
           updatedAt: publishedAt,
         }))
       ) {
-        throw new RuntimePublicationVersionConflictError(revision.runtimeId, command.runtimeExpectedVersionNo);
+        throw new RuntimePublicationVersionConflictError(
+          revision.runtimeId,
+          command.runtimeExpectedVersionNo,
+        );
       }
 
       // 18. 写 Audit

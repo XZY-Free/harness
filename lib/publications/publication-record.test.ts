@@ -2,14 +2,14 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agent";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtime";
 import {
   publicationRecord,
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
 import * as publicationQueries from "@/lib/publications/persistence/publication-record-queries";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { v11Agent, v11AgentRevision } from "@/lib/v11/schema/agent";
-import { v11Runtime, v11RuntimeRevision } from "@/lib/v11/schema/runtime";
 import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -170,14 +170,14 @@ describe("PublicationRecord 与 WithdrawalRecord", () => {
 
   it("迁移为既有 Agent 与 Runtime 的 published/withdrawn 投影建立可追溯正式事实", async () => {
     const tenant = await ensureDefaultTenant();
-    await db.insert(v11Agent).values({
+    await db.insert(agentTable).values({
       id: "migration-agent",
       tenantId: tenant.id,
       agentKey: "migration-agent",
       displayName: "Migration Agent",
       ownerUserId: "migration-owner",
     });
-    await db.insert(v11AgentRevision).values([
+    await db.insert(agentRevisionTable).values([
       {
         id: "migration-agent-published",
         agentId: "migration-agent",
@@ -211,7 +211,7 @@ describe("PublicationRecord 与 WithdrawalRecord", () => {
         publishedAt: new Date("2026-07-02T00:00:00.000Z"),
       },
     ]);
-    await db.insert(v11Runtime).values({
+    await db.insert(runtimeTable).values({
       id: "migration-runtime",
       tenantId: tenant.id,
       runtimeKey: "migration-runtime",
@@ -219,7 +219,7 @@ describe("PublicationRecord 与 WithdrawalRecord", () => {
       runtimeKind: "external",
       ownerUserId: "migration-owner",
     });
-    await db.insert(v11RuntimeRevision).values([
+    await db.insert(runtimeRevisionTable).values([
       {
         id: "migration-runtime-published",
         runtimeId: "migration-runtime",
