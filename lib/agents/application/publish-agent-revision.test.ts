@@ -10,7 +10,7 @@ import {
   getRevisionById,
   getRevisionsByAgent,
 } from "@/lib/agents/persistence/agent-revision-queries";
-import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { insertAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { artifact } from "@/lib/artifacts/persistence/artifact-record";

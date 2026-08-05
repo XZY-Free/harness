@@ -1,4 +1,4 @@
-import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import type {
   ArtifactAttestationPersistenceStore,

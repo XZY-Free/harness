@@ -1,5 +1,5 @@
 import type { AgentWithdrawalStore } from "@/lib/agents/persistence/agent-withdrawal-store";
-import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";

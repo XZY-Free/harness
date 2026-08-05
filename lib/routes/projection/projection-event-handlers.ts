@@ -18,7 +18,7 @@
  * §4.4: 缺失对象清理 — Route/RouteSet 不存在时删除孤立投影。
  */
 
-import type { ControlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import type { ControlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import type { RouteEligibilityStore } from "./route-eligibility-store";
 import type { BuildRouteEligibilityInput, BuildRouteEligibilityResult } from "./build-route-eligibility";
 import { validateEventPayload } from "@/lib/control-plane/events/event-contracts";

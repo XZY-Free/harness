@@ -14,7 +14,7 @@
 import { type KeyObject, createHash, generateKeyPairSync, sign } from "node:crypto";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
-import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import {
   type BuilderKeyRegistry,

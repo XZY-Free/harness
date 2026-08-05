@@ -13,7 +13,7 @@
  * 真实签名（ed25519）+ InMemoryManagedArtifactStore，复用 artifact-attestation.test.ts 的辅助模式。
  */
 import { type KeyObject, generateKeyPairSync, randomUUID, sign } from "node:crypto";
-import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,

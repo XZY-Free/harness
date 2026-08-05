@@ -1,4 +1,4 @@
-import * as controlPlaneOutboxSchema from "@/lib/agents/persistence/control-plane-outbox";
+import * as controlPlaneOutboxSchema from "@/lib/control-plane/events/control-plane-outbox";
 import * as artifactRecordSchema from "@/lib/artifacts/persistence/artifact-record";
 import { dbConfig } from "@/lib/config";
 import * as publicationRecordSchema from "@/lib/publications/persistence/publication-record";

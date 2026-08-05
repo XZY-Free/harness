@@ -13,7 +13,7 @@ import type {
   AgentWithdrawalSession,
   AgentWithdrawalStore,
 } from "@/lib/agents/persistence/agent-withdrawal-store";
-import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { mysqlAgentWithdrawalStore } from "@/lib/agents/persistence/mysql-agent-withdrawal-store";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import { db } from "@/lib/db/client";
