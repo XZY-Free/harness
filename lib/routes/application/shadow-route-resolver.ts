@@ -1,21 +1,22 @@
 /**
- * Shadow Route Resolver — 同时执行 Authority 和 Projection Resolver，记录差异。
+ * Route Resolver — Projection 作为唯一运行时解析数据源。
  *
- * 第一阶段：Authority 结果用于实际执行，Projection 结果仅对比。
- * 切换条件满足后：Projection 用于选择，Binding 做最终权威校验。
+ * §4.6: 切换完成 — Projection 是唯一的运行时 Route Resolver。
+ * Authority Store 不再参与运行时解析（仅由 build-route-eligibility.ts 构建投影时使用）。
+ *
+ * Shadow 对比模式保留为可选诊断工具：
+ * - 默认：仅查询 Projection（性能最优）
+ * - 诊断：同时查询 Authority 并记录差异（enabled=true 且 authorityStore 提供）
  *
  * 不记录敏感 Prompt 或用户数据。
  *
- * ⚠️ useProjectionForExecution 冻结为 false：Projection 当前不足以支撑
- * ExecutionBinding 的完整执行证据，在正式切换前禁止打开。
- * 参见：SnowHarness专题01全局统一与最终收敛方案 §0.4
+ * 参见：SnowHarness专题01全局统一与最终收敛方案 §4.6
  */
 
 import { logger } from "@/lib/logger";
 import type {
   ResolveRouteCandidatesInput,
   RouteControlPlaneEvidence,
-  RouteResolutionCandidate,
   RouteResolutionOutcome,
 } from "@/lib/routes/domain/route-resolution-policy";
 import { resolveRouteCandidates } from "@/lib/routes/domain/route-resolution-policy";
@@ -23,9 +24,9 @@ import type { RouteEligibilityResolutionStore } from "@/lib/routes/persistence/r
 import type { RouteResolutionStore } from "@/lib/routes/persistence/route-resolution-store";
 
 export interface ShadowResolutionResult {
-  /** 实际使用的结果（Authority 阶段为 authority，切换后为 projection）。 */
+  /** 实际使用的结果（Projection）。 */
   outcome: RouteResolutionOutcome;
-  /** Shadow 差异记录。 */
+  /** Shadow 差异记录（仅诊断模式启用时）。 */
   shadow?: ShadowDiff;
 }
 
@@ -62,50 +63,43 @@ export interface ShadowDiff {
     publicationRecordIds: string[];
     conformanceRunIds: string[];
   };
-  /** §4.6: Authority DB 查询次数。 */
-  authorityQueryCount?: number;
-  /** §4.6: Projection DB 查询次数。 */
-  projectionQueryCount?: number;
 }
 
 export interface ShadowResolverConfig {
-  /** 是否启用 Shadow 对比（默认 true）。 */
-  enabled: boolean;
   /**
-   * 是否已切换到 Projection（默认 false — Authority 阶段）。
+   * 是否启用 Shadow 对比诊断（默认 false）。
    *
-   * ⚠️ 冻结：当前 Projection 证据不完整，不足以支撑 ExecutionBinding。
-   * 生产环境启动时如果设为 true，直接启动失败。
+   * 启用时需提供 authorityStore，同时查询 Authority 与 Projection 并记录差异。
+   * 不启用时仅查询 Projection（生产默认）。
    */
-  useProjectionForExecution: boolean;
+  enabled: boolean;
 }
 
 const DEFAULT_CONFIG: ShadowResolverConfig = {
-  enabled: true,
-  useProjectionForExecution: false,
+  enabled: false,
 };
 
 export interface CreateShadowRouteResolverDeps {
-  authorityStore: RouteResolutionStore;
+  /** Projection Store — 运行时解析的唯一数据源。 */
   projectionStore: RouteEligibilityResolutionStore;
+  /** Authority Store — 仅诊断模式启用时使用。 */
+  authorityStore?: RouteResolutionStore;
   config?: Partial<ShadowResolverConfig>;
 }
 
 /**
- * 创建 Shadow Route Resolver。
+ * 创建 Route Resolver。
  *
- * 生产启动断言：useProjectionForExecution=true 时直接抛错，
- * 防止误打开导致不完整证据进入执行链。
+ * §4.6: Projection 是唯一运行时解析数据源。
+ * Shadow 对比为可选诊断模式，不参与实际选择。
  */
 export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
-  const config = { ...DEFAULT_CONFIG, ...deps.config };
+  const config: ShadowResolverConfig = { ...DEFAULT_CONFIG, ...deps.config };
 
-  // 生产启动断言：Projection 不能用于正式执行
-  if (config.useProjectionForExecution) {
+  if (config.enabled && !deps.authorityStore) {
     throw new Error(
-      "FROZEN: useProjectionForExecution=true 不允许。" +
-        "Projection 当前证据不完整（缺少完整 Publication/Attestation/Conformance ID），" +
-        "不足以支撑 ExecutionBinding。参见专题01 §0.4。",
+      "Shadow 对比模式启用时必须提供 authorityStore。" +
+        "若不需要诊断对比，请保持 enabled=false（默认）。",
     );
   }
 
@@ -116,18 +110,20 @@ export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
       routeScopeKey: string;
     },
   ): Promise<ShadowResolutionResult> {
-    if (!config.enabled) {
-      // Shadow 未启用 — 只用 Authority
-      const candidates = await deps.authorityStore.loadCandidates({
+    // 默认路径：仅查询 Projection
+    if (!config.enabled || !deps.authorityStore) {
+      const projectionStart = Date.now();
+      const candidates = await deps.projectionStore.loadCandidates({
         tenantId: input.tenantId,
         agentId: input.agentId,
         routeScopeKey: input.routeScopeKey,
       });
+      const projectionMs = Date.now() - projectionStart;
       const outcome = resolveRouteCandidates({ ...input, candidates });
       return { outcome };
     }
 
-    // 并行执行两个 Store 查询
+    // 诊断路径：并行查询 Authority + Projection，记录差异
     const authorityStart = Date.now();
     const authorityCandidatesP = deps.authorityStore.loadCandidates({
       tenantId: input.tenantId,
@@ -178,7 +174,6 @@ export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
       projectionMs,
       authorityCandidateCount: authorityCandidates.length,
       projectionCandidateCount: projectionCandidates.length,
-      // §4.6: 证据 ID 集合 — 用于差异诊断
       authorityEvidenceIds: authorityResolved
         ? extractEvidenceIds(authorityOutcome.resolution.controlPlaneEvidence)
         : undefined,
@@ -187,7 +182,6 @@ export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
         : undefined,
     };
 
-    // 记录差异日志（不记录敏感数据）
     if (!consistent) {
       logger.warn("[shadow-resolver] Authority 与 Projection 结果不一致", {
         tenantId: input.tenantId,
@@ -207,10 +201,8 @@ export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
       });
     }
 
-    // 决定使用哪个结果
-    const outcome = config.useProjectionForExecution ? projectionOutcome : authorityOutcome;
-
-    return { outcome, shadow };
+    // §4.6: 始终使用 Projection 结果（Authority 仅诊断）
+    return { outcome: projectionOutcome, shadow };
   };
 }
 
@@ -250,15 +242,12 @@ function extractEvidenceIds(evidence: RouteControlPlaneEvidence): {
   const publicationRecordIds: string[] = [];
   const conformanceRunIds: string[] = [];
 
-  // Agent Attestation IDs
   const agentAttIds = evidence.agentAttestationIds;
   if (Array.isArray(agentAttIds))
     attestationIds.push(...agentAttIds.filter((id): id is string => typeof id === "string"));
-  // Runtime Attestation IDs
   const runtimeAttIds = evidence.runtimeAttestationIds;
   if (Array.isArray(runtimeAttIds))
     attestationIds.push(...runtimeAttIds.filter((id): id is string => typeof id === "string"));
-  // Publication Record IDs
   if (typeof evidence.agentPublicationRecordId === "string" && evidence.agentPublicationRecordId)
     publicationRecordIds.push(evidence.agentPublicationRecordId);
   if (
@@ -266,7 +255,6 @@ function extractEvidenceIds(evidence: RouteControlPlaneEvidence): {
     evidence.runtimePublicationRecordId
   )
     publicationRecordIds.push(evidence.runtimePublicationRecordId);
-  // Conformance Run IDs
   if (typeof evidence.conformanceRunId === "string" && evidence.conformanceRunId)
     conformanceRunIds.push(evidence.conformanceRunId);
 

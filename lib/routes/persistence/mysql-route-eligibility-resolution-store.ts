@@ -1,8 +1,13 @@
 /**
  * MySQL Projection-based Route Resolution Store。
  *
- * 一次查询 RouteEligibilityProjection 表获取所有 eligible 候选。
+ * §4.6: Projection 是运行时唯一的 Route Resolver 数据源。
+ * 一次查询 RouteEligibilityProjection 表获取所有 eligible 候选 + 完整执行证据 ID。
  * 不随 Route 数量增加 SQL 往返。
+ *
+ * 完整证据 ID（agentAttestationIds、runtimeAttestationIds、publicationRecordId、conformanceRunId）
+ * 由 build-route-eligibility.ts 在构建投影时从权威事实写入。
+ * Binding 仍会对权威事实做 FOR UPDATE 最终校验。
  */
 
 import { db } from "@/lib/db/client";
@@ -34,19 +39,25 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
     // Projection 只包含 eligible 条目，Resolver 纯内存选择
     return projections.map((p): RouteResolutionCandidate => {
       const controlPlaneEvidence =
-        p.agentArtifactDigest && p.runtimeArtifactDigest && p.runtimeConfigDigest
+        p.agentArtifactDigest &&
+        p.runtimeArtifactDigest &&
+        p.runtimeConfigDigest &&
+        p.agentPublicationRecordId &&
+        p.runtimePublicationRecordId &&
+        p.conformanceRunId &&
+        Array.isArray(p.agentAttestationIds) &&
+        Array.isArray(p.runtimeAttestationIds)
           ? {
               agentArtifactDigest: p.agentArtifactDigest,
               runtimeArtifactDigest: p.runtimeArtifactDigest,
               runtimeConfigDigest: p.runtimeConfigDigest,
               capabilityManifestDigest: p.capabilityCompatibilityDigest,
-              // Attestation IDs 在 Projection 中不可用（非必要字段）
-              // Binding 阶段做最终权威校验时获取
-              agentAttestationIds: [],
-              runtimeAttestationIds: [],
-              agentPublicationRecordId: "",
-              runtimePublicationRecordId: "",
-              conformanceRunId: "",
+              // §4.1: 完整证据 ID 直接从 Projection 读取（不再 stub）
+              agentAttestationIds: [...p.agentAttestationIds],
+              runtimeAttestationIds: [...p.runtimeAttestationIds],
+              agentPublicationRecordId: p.agentPublicationRecordId,
+              runtimePublicationRecordId: p.runtimePublicationRecordId,
+              conformanceRunId: p.conformanceRunId,
             }
           : null;
 

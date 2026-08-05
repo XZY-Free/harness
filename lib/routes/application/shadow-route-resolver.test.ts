@@ -1,38 +1,73 @@
 /**
  * Shadow Route Resolver 单元测试。
+ *
+ * §4.6: Projection 已切换为唯一运行时解析数据源。
  */
 
-import type {
-  RouteResolutionCandidate,
-  RouteResolutionOutcome,
-} from "@/lib/routes/domain/route-resolution-policy";
+import type { RouteResolutionOutcome } from "@/lib/routes/domain/route-resolution-policy";
 import { describe, expect, it, vi } from "vitest";
 import { createShadowRouteResolver } from "./shadow-route-resolver";
 
-describe("Shadow Route Resolver 生产启动断言", () => {
-  it("useProjectionForExecution=true → 启动抛错（冻结）", () => {
-    const authorityStore = { loadCandidates: vi.fn() };
+describe("Shadow Route Resolver 配置断言", () => {
+  it("默认配置（enabled=false）→ 正常创建，仅使用 Projection", () => {
     const projectionStore = { loadCandidates: vi.fn() };
 
     expect(() =>
       createShadowRouteResolver({
-        authorityStore: authorityStore as never,
-        projectionStore: projectionStore as never,
-        config: { useProjectionForExecution: true },
-      }),
-    ).toThrow(/FROZEN.*useProjectionForExecution/);
-  });
-
-  it("useProjectionForExecution=false（默认）→ 正常创建", () => {
-    const authorityStore = { loadCandidates: vi.fn() };
-    const projectionStore = { loadCandidates: vi.fn() };
-
-    expect(() =>
-      createShadowRouteResolver({
-        authorityStore: authorityStore as never,
         projectionStore: projectionStore as never,
       }),
     ).not.toThrow();
+  });
+
+  it("enabled=true 但未提供 authorityStore → 启动抛错", () => {
+    const projectionStore = { loadCandidates: vi.fn() };
+
+    expect(() =>
+      createShadowRouteResolver({
+        projectionStore: projectionStore as never,
+        config: { enabled: true },
+      }),
+    ).toThrow(/Shadow 对比模式启用时必须提供 authorityStore/);
+  });
+
+  it("enabled=true 且提供 authorityStore → 正常创建", () => {
+    const authorityStore = { loadCandidates: vi.fn() };
+    const projectionStore = { loadCandidates: vi.fn() };
+
+    expect(() =>
+      createShadowRouteResolver({
+        projectionStore: projectionStore as never,
+        authorityStore: authorityStore as never,
+        config: { enabled: true },
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe("Shadow Route Resolver 默认路径（仅 Projection）", () => {
+  it("默认不查询 Authority Store", async () => {
+    const authorityLoadCandidates = vi.fn();
+    const projectionLoadCandidates = vi.fn().mockResolvedValue([]);
+    const projectionStore = { loadCandidates: projectionLoadCandidates };
+    const authorityStore = { loadCandidates: authorityLoadCandidates };
+
+    const resolve = createShadowRouteResolver({
+      projectionStore: projectionStore as never,
+      authorityStore: authorityStore as never,
+      // 默认 enabled=false
+    });
+
+    await resolve({
+      tenantId: "t-1",
+      agentId: "a-1",
+      routeScopeKey: "default",
+      businessKey: { threadId: "thread-1" },
+      attributes: {},
+      now: new Date(),
+    });
+
+    expect(projectionLoadCandidates).toHaveBeenCalledOnce();
+    expect(authorityLoadCandidates).not.toHaveBeenCalled();
   });
 });
 

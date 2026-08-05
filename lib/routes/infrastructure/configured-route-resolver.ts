@@ -4,14 +4,10 @@
  * 所有执行路径（Employee Turn、Dispatcher、Binding）必须共用此入口，
  * 不得在各自模块内单独组装 Resolver。
  *
- * Shadow 阶段：
- * - Authority = 实际执行结果
- * - Projection = 对比结果
- * - 差异记录到日志（不记录敏感数据）
- *
- * 切换后（useProjectionForExecution=true）：
- * - Projection 用于选择
- * - Binding 做最终权威校验（Fail-closed）
+ * §4.6 切换完成后：
+ * - Projection 是唯一运行时解析数据源
+ * - Authority Store 仅用于诊断对比（可选，默认不启用）
+ * - Binding 对权威事实做 FOR UPDATE 最终校验（Fail-closed）
  *
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §4.6
  */
@@ -50,7 +46,7 @@ export interface ConfiguredResolveRouteCommand {
 export interface ConfiguredResolveRouteResult {
   /** 解析结果。 */
   outcome: RouteResolutionOutcome;
-  /** Shadow 差异（仅 Shadow 阶段有值）。 */
+  /** Shadow 差异（仅诊断模式启用时）。 */
   shadow?: ShadowResolutionResult["shadow"];
   /** 解析耗时（ms）。 */
   resolveMs: number;
@@ -59,15 +55,17 @@ export interface ConfiguredResolveRouteResult {
 // ─── 配置 ────────────────────────────────────────────────
 
 export interface ConfiguredResolverConfig extends Partial<ShadowResolverConfig> {
-  /** Shadow 是否启用（默认 true）。 */
+  /** Shadow 是否启用（默认 false — Projection 唯一）。 */
   shadowEnabled?: boolean;
 }
 
 // ─── 依赖 ────────────────────────────────────────────────
 
 export interface ConfiguredResolverDependencies {
-  authorityStore: RouteResolutionStore;
+  /** Projection Store — 运行时解析的唯一数据源。 */
   projectionStore: RouteEligibilityResolutionStore;
+  /** Authority Store — 仅诊断模式启用时使用。 */
+  authorityStore?: RouteResolutionStore;
   config?: ConfiguredResolverConfig;
 }
 
@@ -90,13 +88,12 @@ export function createConfiguredRouteResolver(
   deps: ConfiguredResolverDependencies,
 ): ConfiguredRouteResolver {
   const shadowConfig: ShadowResolverConfig = {
-    enabled: deps.config?.shadowEnabled ?? true,
-    useProjectionForExecution: deps.config?.useProjectionForExecution ?? false,
+    enabled: deps.config?.shadowEnabled ?? false,
   };
 
   const shadowResolve = createShadowRouteResolver({
-    authorityStore: deps.authorityStore,
     projectionStore: deps.projectionStore,
+    authorityStore: deps.authorityStore,
     config: shadowConfig,
   });
 
@@ -123,3 +120,6 @@ export function createConfiguredRouteResolver(
     };
   };
 }
+
+// ─── 兼容：保持 ResolveRouteCandidatesInput 类型导出 ─────────────────────────
+export type { ResolveRouteCandidatesInput };
