@@ -58,7 +58,7 @@ import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { and, desc, eq, max } from "drizzle-orm";
 
 // ─── 常量 ───────────────────────────────────────────────────
@@ -87,7 +87,18 @@ const recordArtifactAttestation = createRecordArtifactAttestation({
 const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 const recordRuntimeConformanceRun = createRecordRuntimeConformanceRun({
   store: mysqlRuntimeConformanceRunStore,
-  verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+  verifier: createDSSEConformanceVerifier({
+    allowedRunnerIdentities: runtimeConformanceConfig.allowedRunnerIdentities,
+    readConformanceEnvelope: async (runId) => {
+      const [run] = await db
+        .select({ runnerSignature: runtimeConformanceRun.runnerSignature })
+        .from(runtimeConformanceRun)
+        .where(eq(runtimeConformanceRun.id, runId))
+        .limit(1);
+      if (!run) throw new Error(`ConformanceRun 不存在: ${runId}`);
+      return Buffer.from(run.runnerSignature, "utf-8");
+    },
+  }),
 });
 const publishRuntimeRevision = createPublishRuntimeRevision({
   store: mysqlRuntimePublicationStore,

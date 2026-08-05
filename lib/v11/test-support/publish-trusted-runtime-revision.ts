@@ -14,7 +14,7 @@ import {
   getRuntimeRevisionById,
   updateDraftRuntimeRevisionContent,
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import { createTrustedTestVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { eq } from "drizzle-orm";
 
 /** 真实 MySQL + HMAC 的测试装配：先记录可信 Run，再通过正式发布服务发布。 */
@@ -67,7 +67,7 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
   const secret = "route-test-trusted-runner-secret-32-bytes";
   await createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+    verifier: createTrustedTestVerifier(),
   })({
     tenantId: params.tenantId,
     runtimeRevisionId: revision.id,

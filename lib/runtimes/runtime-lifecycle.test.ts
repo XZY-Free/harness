@@ -53,7 +53,7 @@ import {
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { publishRuntimeRevision } from "@/lib/runtimes/test-support/attempt-runtime-publication-without-trusted-run";
 import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import { createTrustedTestVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -145,7 +145,7 @@ async function publishTrustedRevision(
   };
   const record = createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+    verifier: createTrustedTestVerifier(),
   });
   await record({
     tenantId,

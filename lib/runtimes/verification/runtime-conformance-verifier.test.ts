@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   RUNTIME_CONFORMANCE_PREDICATE_TYPE,
   createDSSEConformanceVerifier,
-  createLegacyHMACConformanceVerifier,
+  createTrustedTestVerifier,
 } from "./runtime-conformance-verifier";
 
 describe("createDSSEConformanceVerifier", () => {
@@ -30,11 +30,9 @@ describe("createDSSEConformanceVerifier", () => {
   });
 });
 
-describe("createLegacyHMACConformanceVerifier", () => {
-  it("过渡期: allowNewHmacReports=true → verified=true", async () => {
-    const verifier = createLegacyHMACConformanceVerifier({
-      allowNewHmacReports: true,
-    });
+describe("createTrustedTestVerifier", () => {
+  it("测试专用: 直接返回 verified=true", async () => {
+    const verifier = createTrustedTestVerifier();
     const result = await verifier.verify({
       runId: "run-1",
       expectedRuntimeRevisionId: "rt-rev-1",
@@ -44,23 +42,8 @@ describe("createLegacyHMACConformanceVerifier", () => {
       tenantId: "t1",
     });
     expect(result.verified).toBe(true);
-    expect(result.conformanceFormat).toBe("legacy_hmac");
-  });
-
-  it("生产: allowNewHmacReports=false → verified=false", async () => {
-    const verifier = createLegacyHMACConformanceVerifier({
-      allowNewHmacReports: false,
-    });
-    const result = await verifier.verify({
-      runId: "run-1",
-      expectedRuntimeRevisionId: "rt-rev-1",
-      expectedRuntimeArtifactDigest: "sha256:aaa",
-      expectedRuntimeConfigDigest: "sha256:bbb",
-      expectedProtocolContractRevision: "v1",
-      tenantId: "t1",
-    });
-    expect(result.verified).toBe(false);
-    expect(result.failureReason).toContain("拒绝新 legacy_hmac");
+    expect(result.conformanceFormat).toBe("standard_dsse");
+    expect(result.predicateType).toBe(RUNTIME_CONFORMANCE_PREDICATE_TYPE);
   });
 });
 

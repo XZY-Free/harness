@@ -48,7 +48,7 @@ export interface ConformanceEligibilitySnapshot {
   /** Suite Revision。 */
   suiteRevision: string;
   /** Conformance 格式。 */
-  conformanceFormat: "legacy_hmac" | "standard_dsse";
+  conformanceFormat: "standard_dsse";
   /** Case 结果列表。 */
   caseResults: Array<{ caseId: string; passed: boolean }>;
 }
@@ -91,14 +91,11 @@ export interface ConformanceEligibilityExpectation {
   expectedRuntimeArtifactDigest: string;
   expectedRuntimeConfigDigest: string;
   expectedProtocolContractRevision: string;
-  /** 允许的 Conformance 格式。过渡期含 legacy_hmac，正式期排除。 */
-  allowedFormats: ("legacy_hmac" | "standard_dsse")[];
+  /** 允许的 Conformance 格式。 */
+  allowedFormats: "standard_dsse"[];
 }
 
-const DEFAULT_ALLOWED_FORMATS: ("legacy_hmac" | "standard_dsse")[] = [
-  "legacy_hmac",
-  "standard_dsse",
-];
+const DEFAULT_ALLOWED_FORMATS: "standard_dsse"[] = ["standard_dsse"];
 
 /**
  * Conformance 资格策略 — 纯函数，无副作用。

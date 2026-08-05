@@ -103,10 +103,16 @@ export const dbConfig = {
   },
 } as const;
 
-/** 可信 Runtime Conformance Runner 回传报告的 HMAC 验签配置。缺失时 fail-closed。 */
+/** §4.8: Runtime Conformance DSSE 验签配置。缺失时 fail-closed。 */
 export const runtimeConformanceConfig = {
-  get signingSecret(): string {
-    return process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET ?? "";
+  /** 允许的 Runner Identity 列表（逗号分隔）。 */
+  get allowedRunnerIdentities(): string[] {
+    const raw = optionalEnv("SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS", "");
+    if (!raw) return [];
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
   },
 } as const;
 

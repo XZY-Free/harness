@@ -22,7 +22,7 @@ import {
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import { createTrustedTestVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -106,7 +106,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
     const signed = buildSignedReport(revision.id);
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,
-      verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+      verifier: createTrustedTestVerifier(),
     });
     const result = await record({
       tenantId,
@@ -129,7 +129,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
     const signed = buildSignedReport(revision.id);
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,
-      verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+      verifier: createTrustedTestVerifier(),
     });
     const command = {
       tenantId,
@@ -151,7 +151,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
     const signed = buildSignedReport(revision.id);
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,
-      verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+      verifier: createTrustedTestVerifier(),
     });
     const command = {
       tenantId,
@@ -171,7 +171,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
     const signed = buildSignedReport(revision.id);
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,
-      verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+      verifier: createTrustedTestVerifier(),
     });
     const recorded = await record({
       tenantId,
@@ -234,7 +234,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
             }),
           ),
       },
-      verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+      verifier: createTrustedTestVerifier(),
     });
     await expect(
       record({
@@ -265,7 +265,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
             }),
           ),
       },
-      verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+      verifier: createTrustedTestVerifier(),
     });
     await expect(
       record({
@@ -300,7 +300,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
             operation({ ...session, completeIdempotency: async () => false }),
           ),
       },
-      verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+      verifier: createTrustedTestVerifier(),
     });
     await expect(
       record({
@@ -326,7 +326,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
     const signed = buildSignedReport(revision.id);
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,
-      verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+      verifier: createTrustedTestVerifier(),
     });
     await expect(
       record({
@@ -346,7 +346,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
     const { tenantId, ownerId, revision } = await seedRevision();
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,
-      verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+      verifier: createTrustedTestVerifier(),
     });
     for (const [index, key] of ["retest-1", "retest-2"].entries()) {
       await record({

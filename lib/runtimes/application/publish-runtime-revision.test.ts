@@ -32,7 +32,7 @@ import {
   getRuntimeRevisionById,
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { seedVerifiedRuntimeAttestation } from "@/lib/runtimes/test-support/seed-verified-runtime-attestation";
-import { createLegacyHMACConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import { createTrustedTestVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -100,7 +100,7 @@ async function seedRuntimePublicationFixture(suffix = "") {
   const secret = "publication-test-secret-at-least-32-bytes";
   await createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    verifier: createLegacyHMACConformanceVerifier({ allowNewHmacReports: true }),
+    verifier: createTrustedTestVerifier(),
   })({
     tenantId: tenant.id,
     runtimeRevisionId: revision.id,

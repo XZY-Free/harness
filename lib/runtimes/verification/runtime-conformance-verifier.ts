@@ -1,12 +1,12 @@
 /**
  * Runtime Conformance 验证器接口和实现。
  *
- * §8.4: Conformance 录入改用 Verifier Port。
- * Application 不再接收 signingSecret()，Legacy HMAC 只作为历史读取兼容。
+ * §8.4/§4.8: Conformance 录入改用 Verifier Port。
+ * 移除 Legacy HMAC 成功分支 — DSSE 是唯一的验签路径。
  *
  * DSSE Conformance Verifier — 真实验证流程：
  * 1. 读取 DSSE Envelope               — ✅ 已实现
- * 2. 验证签名                          — ⏳ 需要 DSSE 验签 SDK
+ * 2. 验证签名                          — ⏳ 需要 DSSE 验签 SDK（未安装时 fail-closed）
  * 3. 验证 Runner Identity ∈ Policy     — ✅ 已实现
  * 4. 解析 in-toto Statement            — ✅ 已实现
  * 5. 校验 Predicate Type               — ✅ 已实现
@@ -54,7 +54,7 @@ export interface VerifyConformanceInput {
 
 export interface VerifyConformanceResult {
   verified: boolean;
-  conformanceFormat: "legacy_hmac" | "standard_dsse";
+  conformanceFormat: "standard_dsse";
   predicateType?: string;
   failureReason?: string;
 }
@@ -76,6 +76,7 @@ export interface DSSEConformanceVerifierConfig {
  * §8.4: 创建 DSSE Conformance Verifier — 真实验证流程。
  *
  * 步骤 2（签名验证）需要 DSSE 验签 SDK；未安装时 fail-closed。
+ * 即使 fail-closed 也回填 predicateType，便于诊断。
  */
 export function createDSSEConformanceVerifier(
   config: DSSEConformanceVerifierConfig,
@@ -94,6 +95,7 @@ export function createDSSEConformanceVerifier(
           return {
             verified: false,
             conformanceFormat: "standard_dsse",
+            predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
             failureReason: "dsse_envelope_json_parse_failed",
           };
         }
@@ -104,6 +106,7 @@ export function createDSSEConformanceVerifier(
           return {
             verified: false,
             conformanceFormat: "standard_dsse",
+            predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
             failureReason: sigResult.failureReason,
           };
         }
@@ -114,6 +117,7 @@ export function createDSSEConformanceVerifier(
           return {
             verified: false,
             conformanceFormat: "standard_dsse",
+            predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
             failureReason: `runner_identity_not_allowed: ${runnerIdentity}`,
           };
         }
@@ -124,6 +128,7 @@ export function createDSSEConformanceVerifier(
           return {
             verified: false,
             conformanceFormat: "standard_dsse",
+            predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
             failureReason: "in_toto_statement_parse_failed",
           };
         }
@@ -141,7 +146,7 @@ export function createDSSEConformanceVerifier(
         // 步骤 6: 校验 Subject Digest 绑定一致
         const subjectMatch = statement.subjects?.some(
           (s: { digest?: Record<string, string> }) =>
-            s.digest?.["sha256"] === input.expectedRuntimeArtifactDigest.replace("sha256:", ""),
+            s.digest?.sha256 === input.expectedRuntimeArtifactDigest.replace("sha256:", ""),
         );
         if (!subjectMatch) {
           return {
@@ -173,6 +178,7 @@ export function createDSSEConformanceVerifier(
         return {
           verified: false,
           conformanceFormat: "standard_dsse",
+          predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
           failureReason: error instanceof Error ? error.message : String(error),
         };
       }
@@ -187,8 +193,7 @@ async function verifyConformanceSignature(
   // §8.4: 真实 SDK 接入点 — 安装 DSSE 验签 SDK 后替换
   return {
     verified: false,
-    failureReason:
-      "sdk_not_installed: conformance_signature_verification_requires_dsse_signing_sdk",
+    failureReason: "verifier_not_implemented",
   };
 }
 
@@ -219,63 +224,20 @@ function extractConformanceStatement(envelope: unknown): {
   }
 }
 
-// ─── Legacy HMAC Conformance Verifier ────────────────────
-
-export interface LegacyHMACVerifierConfig {
-  /** §8.4: 是否允许新 HMAC 报告（过渡期 = true, 生产 = false）。 */
-  allowNewHmacReports: boolean;
-}
+// ─── 测试专用可信验证器 ───────────────────────────────────
 
 /**
- * §8.4: 创建 Legacy HMAC Conformance Verifier — 只读兼容。
+ * §4.8: 测试专用可信验证器 — 直接返回 verified=true。
  *
- * Application 不再接收 signingSecret()，新 Conformance 必须使用 DSSE。
- * Legacy HMAC 只作为历史读取兼容。
+ * 仅用于测试装配（publishTrustedRuntimeRevisionForTest 等），
+ * 生产代码禁止使用。取代已删除的 Legacy HMAC 成功分支。
  */
-export function createLegacyHMACConformanceVerifier(
-  config: LegacyHMACVerifierConfig,
-): RuntimeConformanceVerifier {
+export function createTrustedTestVerifier(): RuntimeConformanceVerifier {
   return {
-    verify: async (input: VerifyConformanceInput): Promise<VerifyConformanceResult> => {
-      if (!config.allowNewHmacReports) {
-        return {
-          verified: false,
-          conformanceFormat: "legacy_hmac",
-          failureReason: "生产环境拒绝新 legacy_hmac Conformance 报告",
-        };
-      }
-
-      // 过渡期: 仍允许验证 HMAC 报告
-      return {
-        verified: true,
-        conformanceFormat: "legacy_hmac",
-      };
-    },
-  };
-}
-
-// ─── 分发验证器 ─────────────────────────────────────────
-
-/**
- * 根据 conformanceFormat 选择验证器。
- *
- * 过渡期策略:
- * - standard_dsse → DSSE 验证器
- * - legacy_hmac → Legacy HMAC 验证器
- * - 新 Run 默认使用 standard_dsse
- */
-export function createConformanceVerifierDispatcher(deps: {
-  dssseVerifier: RuntimeConformanceVerifier;
-  legacyHmacVerifier: RuntimeConformanceVerifier;
-}) {
-  return async function verifyConformance(
-    input: VerifyConformanceInput & { conformanceFormat: "legacy_hmac" | "standard_dsse" },
-  ): Promise<VerifyConformanceResult> {
-    switch (input.conformanceFormat) {
-      case "standard_dsse":
-        return deps.dssseVerifier.verify(input);
-      case "legacy_hmac":
-        return deps.legacyHmacVerifier.verify(input);
-    }
+    verify: async (): Promise<VerifyConformanceResult> => ({
+      verified: true,
+      conformanceFormat: "standard_dsse",
+      predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
+    }),
   };
 }
