@@ -5,9 +5,8 @@
  * - RouteSet 激活（§2.4 整体激活使用完整执行资格）
  * - Projection 构建（§4.3 Builder 不再直接实现资格规则）
  * - ExecutionBinding 最终检查（§5.1 校验放入 Binding 事务）
- * - Cutover Readiness（§7.1 Item Ready 正式条件）
  *
- * 不要求四个模块共用一个巨大 Application Service，
+ * 不要求三个模块共用一个巨大 Application Service，
  * 但必须共用：Evidence Snapshot、纯 Policy、相同字段含义、相同错误码。
  *
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §1.4
@@ -75,7 +74,7 @@ export interface RevisionExecutionEligibilityError {
 /**
  * Revision 执行资格策略 — 纯函数，无副作用。
  *
- * 这是 RouteSet 激活、Projection、Binding、Cutover 共用的唯一资格判断。
+ * 这是 RouteSet 激活、Projection、Binding 共用的唯一资格判断。
  */
 export const RevisionExecutionEligibilityPolicy = {
   /**

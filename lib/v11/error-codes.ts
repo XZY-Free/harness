@@ -98,16 +98,10 @@ export const V11_ERROR_CODES = {
   CONTROL_PLANE_EVENT_CONTRACT_VIOLATION: { http: 422, retryable: false },
   /** §4.1: Projection 证据 ID 不完整。 */
   PROJECTION_EVIDENCE_INCOMPLETE: { http: 422, retryable: false },
-  /** §4.7: Projection 切换门槛不满足。 */
-  PROJECTION_CUTOVER_NOT_READY: { http: 422, retryable: false },
   /** §4.4: Projection 引用已删除 Route。 */
   PROJECTION_ORPHANED_ROUTE: { http: 422, retryable: false },
   /** §6.1: Hosted 供应 AgentRevision 绑定验证失败。 */
   HOSTED_REVISION_BINDING_INVALID: { http: 422, retryable: false },
-  /** §7.1: Cutover Item Readiness 条件不满足。 */
-  CUTOVER_ITEM_NOT_READY: { http: 422, retryable: false },
-  /** §7.3: Cutover 激活失败。 */
-  CUTOVER_ACTIVATION_FAILED: { http: 500, retryable: true },
 } as const satisfies Readonly<Record<string, V11ErrorDefinition>>;
 
 export type V11ErrorCode = keyof typeof V11_ERROR_CODES;

@@ -31,8 +31,8 @@ describe("V11 error-codes projection", () => {
     expect(CONTRACT.contract_version).toBe("11.0.0");
   });
 
-  it("错误码 76 个（+§7.1 CUTOVER_ITEM_NOT_READY）", () => {
-    expect(Object.keys(V11_ERROR_CODES)).toHaveLength(77);
+  it("错误码 75 个", () => {
+    expect(Object.keys(V11_ERROR_CODES)).toHaveLength(75);
   });
 
   it("errorDefinition 对未知码 fail-closed", () => {

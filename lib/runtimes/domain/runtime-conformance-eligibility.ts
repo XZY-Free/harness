@@ -15,7 +15,7 @@
  * - 全部 Passed
  * - 验证格式符合当前 Policy
  *
- * 所有模块（RouteSet 激活、Projection、Binding、Cutover）
+ * 所有模块（RouteSet 激活、Projection、Binding）
  * 必须通过此模型判断 Conformance 资格，不得各自实现。
  *
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §1.3

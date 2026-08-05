@@ -2,7 +2,7 @@
  * Artifact Evidence 统一快照 — 所有制品证据资格判断的唯一事实源。
  *
  * 供 Agent 发布、Runtime 发布、RouteSet 激活、Projection 构建、
- * ExecutionBinding 最终检查、Cutover Readiness 共同使用。
+ * ExecutionBinding 最终检查共同使用。
  *
  * 任何模块不得自行定义第二套证据快照。
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §1.1

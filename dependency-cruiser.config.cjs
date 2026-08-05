@@ -12,7 +12,7 @@
  *
  * §9.4 收口:
  * - API→DB 全部 error（不再 warn）
- * - 嵌套领域目录（control-plane/cutover/）遵守相同规则
+ * - 嵌套领域目录遵守相同规则
  * - Application 不得直接 import Drizzle/MySQL
  */
 

@@ -7,7 +7,7 @@
  * 2. 单条 10000 权重 Route → primary
  * 3. 多条 Route 无 Group ID → 由 selectorDigest + priorityNo + effectiveWindow
  *    生成确定性 legacy group ID
- * 4. 无法组成 10000 权重的集合 → 标记 legacy_route_set_invalid，留给后续 Cutover
+ * 4. 无法组成 10000 权重的集合 → 标记 legacy_route_set_invalid
  *
  * 重复执行结果一致（幂等）。输出无法安全归组的历史 RouteSet。
  *
