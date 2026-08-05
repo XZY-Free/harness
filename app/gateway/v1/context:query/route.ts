@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
 import { recordCapabilityUse } from "@/lib/v11/capability/capability-use-queries";
 import type { ContextBudgetConfig } from "@/lib/v11/context/budget";
 import {
@@ -154,13 +154,13 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (error) {
     if (error instanceof ContextHandleError) {
-      return v11Error("ACCESS_DENIED", error.message, { requestId });
+      return apiError("ACCESS_DENIED", error.message, { requestId });
     }
     throw error;
   }
 
   if (binding.classification === "restricted") {
-    return v11Error("ACCESS_DENIED", "restricted 数据不得通过 Context Query 返回正文", {
+    return apiError("ACCESS_DENIED", "restricted 数据不得通过 Context Query 返回正文", {
       requestId,
     });
   }
@@ -171,12 +171,12 @@ export async function POST(request: Request): Promise<Response> {
     (sensitivityRank.get(binding.classification) ?? Number.POSITIVE_INFINITY) >
     (sensitivityRank.get(limits.maxSensitivity) ?? -1)
   ) {
-    return v11Error("ACCESS_DENIED", "请求的敏感级别上限低于当前上下文分类", {
+    return apiError("ACCESS_DENIED", "请求的敏感级别上限低于当前上下文分类", {
       requestId,
     });
   }
   if (body.sources.some((source) => !binding.allowedSources.includes(source))) {
-    return v11Error("ACCESS_DENIED", "请求包含 context_handle 未授权的来源", { requestId });
+    return apiError("ACCESS_DENIED", "请求包含 context_handle 未授权的来源", { requestId });
   }
 
   const view = await assembleContextView({
@@ -194,10 +194,10 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   if (Object.values(view.sourceStatus).includes("denied")) {
-    return v11Error("ACCESS_DENIED", "上下文来源访问被拒绝", { requestId });
+    return apiError("ACCESS_DENIED", "上下文来源访问被拒绝", { requestId });
   }
   if (Object.values(view.sourceStatus).includes("unavailable")) {
-    return v11Error("RESOURCE_NOT_FOUND", "请求的上下文来源当前不可用", { requestId });
+    return apiError("RESOURCE_NOT_FOUND", "请求的上下文来源当前不可用", { requestId });
   }
   if (view.failureReason) {
     return v11GatewaySchemaInvalid(requestId, view.failureReason);
@@ -227,7 +227,7 @@ export async function POST(request: Request): Promise<Response> {
     capabilityUseRecorded = true;
   }
 
-  return v11Ok(
+  return apiSuccess(
     { results, capability_use_recorded: capabilityUseRecorded },
     {
       status: 200,

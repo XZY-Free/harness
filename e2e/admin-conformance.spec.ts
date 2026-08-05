@@ -33,7 +33,7 @@ const IF_MATCH_HEADER = "if-match";
 const NON_EXISTENT_UUID = "00000000-0000-4000-8000-000000000000";
 
 /** V11 错误响应体类型。 */
-interface V11ErrorBody {
+interface ApiErrorResponse {
   error: {
     code: string;
     message: string;
@@ -62,8 +62,8 @@ function issueWorkloadToken(claims: {
 }
 
 /** 从响应解析 V11 错误体。 */
-async function parseErrorBody(response: { json: () => Promise<unknown> }): Promise<V11ErrorBody> {
-  return (await response.json()) as V11ErrorBody;
+async function parseErrorBody(response: { json: () => Promise<unknown> }): Promise<ApiErrorResponse> {
+  return (await response.json()) as ApiErrorResponse;
 }
 
 test.describe("S11-W08 管理操作一致性", () => {

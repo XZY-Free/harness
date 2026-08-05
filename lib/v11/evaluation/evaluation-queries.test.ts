@@ -36,7 +36,7 @@ import {
   updateEvaluationRunState,
   updateEvaluationRunSummary,
 } from "@/lib/v11/evaluation/evaluation-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { v11Job } from "@/lib/v11/schema/job";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

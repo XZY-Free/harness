@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import { listAuditEvents } from "@/lib/identity/audit-queries";
 import {
   type AdminPrincipal,
@@ -109,7 +109,7 @@ export async function GET(request: Request): Promise<Response> {
     occurred_at: e.occurredAt.toISOString(),
   }));
 
-  return v11Ok(
+  return apiSuccess(
     { items: projected, total: projected.length },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );

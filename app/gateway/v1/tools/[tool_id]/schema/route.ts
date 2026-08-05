@@ -22,7 +22,7 @@
  * - If-None-Match 格式非法 → 400 CATALOG_REVISION_INVALID
  * - ToolSchemaRevision 不存在（currentSchemaRevisionId 悬空）→ 422 CAPABILITY_CONTENT_BLOCKED
  */
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, etagHeader, getRequestId, apiSuccess } from "@/lib/http";
 import {
   TOOL_SCHEMA_REVISION_ETAG_PREFIX,
   parseToolSchemaRevisionEtag,
@@ -165,7 +165,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   // 7. 返回 200 + ETag
   const body = projectSchemaRevision(revision);
-  return v11Ok(body, {
+  return apiSuccess(body, {
     status: 200,
     headers: {
       [REQUEST_ID_HEADER]: requestId,

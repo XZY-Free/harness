@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -41,7 +41,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 校验父 EffectRecord 存在且属于当前租户
   const effect = await getEffectRecordById(principal.tenantId, effectId);
   if (!effect) {
-    return v11NotFound(requestId, `EffectRecord 不存在或无权访问: ${effectId}`);
+    return resourceNotFound(requestId, `EffectRecord 不存在或无权访问: ${effectId}`);
   }
 
   const targets = await listEffectTargets(principal.tenantId, effectId);
@@ -61,7 +61,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     updated_at: t.updatedAt.toISOString(),
   }));
 
-  return v11Ok(
+  return apiSuccess(
     { items: projected, total: projected.length },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );

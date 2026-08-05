@@ -27,9 +27,9 @@ import {
   getContextCheckpointsByInvocation,
   isValidSummaryHash,
 } from "@/lib/v11/context/checkpoint-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
-import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/v11/identity/workload-token";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { contextCheckpoint } from "@/lib/v11/schema/context-checkpoint";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

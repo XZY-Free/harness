@@ -15,7 +15,7 @@ import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attesta
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - 不存在或跨租户 → 404 NOT_FOUND
  */
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -44,7 +44,7 @@ export async function GET(
 
   const attestation = await getAttestationById(principal.tenantId, attestationId);
   if (!attestation) {
-    return v11NotFound(requestId, `attestation 不存在或跨租户: ${attestationId}`);
+    return resourceNotFound(requestId, `attestation 不存在或跨租户: ${attestationId}`);
   }
 
   // action scope 校验（按 attestation 的 artifact_type 资源校验）
@@ -81,7 +81,7 @@ export async function GET(
     created_at: attestation.createdAt.toISOString(),
   };
 
-  return v11Ok(projected, {
+  return apiSuccess(projected, {
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
 }

@@ -3,8 +3,8 @@ import {
   REQUEST_ID_HEADER,
   etagHeader,
   getRequestId,
-  v11Error,
-  v11Ok,
+  apiError,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AdminPrincipal,
@@ -48,7 +48,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -196,7 +196,7 @@ export async function GET(request: Request): Promise<Response> {
     cursor: cursor ?? null,
   });
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: items.map(projectSkill),
       next_cursor: nextCursor,
@@ -307,7 +307,7 @@ export async function POST(request: Request): Promise<Response> {
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: {
         [REQUEST_ID_HEADER]: requestId,
@@ -321,7 +321,7 @@ export async function POST(request: Request): Promise<Response> {
       return v11SchemaInvalid(requestId, err.message);
     }
     if (err instanceof SkillVersionConflictError) {
-      return v11Error("IDEMPOTENCY_CONFLICT", err.message, { requestId });
+      return apiError("IDEMPOTENCY_CONFLICT", err.message, { requestId });
     }
     throw err;
   }

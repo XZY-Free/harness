@@ -7,7 +7,7 @@
  * - POST /admin/api/v1/artifact-attestations:verify — 验证制品证明。
  * - PUT /admin/api/v1/deployment-routes/{route_id} — 更新 DeploymentRoute。
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolveV11Principal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { type KeyObject, createHash, generateKeyPairSync, sign } from "node:crypto";
@@ -49,11 +49,11 @@ import {
 } from "@/lib/routes/application/deployment-route-service";
 import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { findIdempotencyRecord } from "@/lib/v11/identity/idempotency-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/v11/identity/role-action-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { findIdempotencyRecord } from "@/lib/identity/idempotency-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding } from "@/lib/identity/role-action-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

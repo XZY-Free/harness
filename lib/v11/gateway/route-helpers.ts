@@ -10,7 +10,7 @@
  *
  * 职责：
  * - resolveGatewayPrincipal：解析 Workload Token（audience=gateway）。
- * - gatewayAuthErrorResponse：把 WorkloadTokenError / V11AuthError 转成 401 响应。
+ * - gatewayAuthErrorResponse：把 WorkloadTokenError / AuthenticationError 转成 401 响应。
  * - v11GatewaySchemaInvalid：构造 400 REQUEST_SCHEMA_INVALID 响应。
  * - v11GatewayCapabilityNotAllowed：构造 404 CAPABILITY_NOT_ALLOWED 响应（隐藏式，跨租户统一返回）。
  * - v11GatewayCapabilityContentBlocked：构造 422 CAPABILITY_CONTENT_BLOCKED 响应。
@@ -22,8 +22,8 @@
  * - Token 的 invocationId 是 Invocation 唯一来源（route handler 不读 body 里的 invocation_id）。
  * - 跨租户隔离由仓储层保证（tenantId 来自 Token claims，不信任请求体）。
  */
-import { v11Error } from "@/lib/http";
-import { V11AuthError } from "@/lib/v11/identity/resolver";
+import { apiError } from "@/lib/http";
+import { AuthenticationError } from "@/lib/identity/resolver";
 import {
   type WorkloadTokenClaims,
   WorkloadTokenError,
@@ -31,8 +31,8 @@ import {
   decodeWorkloadToken,
   extractBearerToken,
   workloadTokenErrorResponse,
-} from "@/lib/v11/identity/workload-token";
-import { isTokenRevoked } from "@/lib/v11/identity/workload-token-revocation-queries";
+} from "@/lib/identity/workload-token";
+import { isTokenRevoked } from "@/lib/identity/workload-token-revocation-queries";
 
 // ─── 类型再导出（route handlers 统一从此处 import） ────────
 export type { WorkloadTokenClaims };
@@ -61,7 +61,7 @@ export type GatewayPrincipal = Omit<WorkloadTokenClaims, "invocationId"> & {
  * Route handler 直接从 claims.invocationId 读取，不信任请求体。
  *
  * @throws WorkloadTokenError 缺少/非法/过期 Token、audience 不匹配、token 已撤销
- * @throws V11AuthError 缺少 Token（包装为 missing_identity）
+ * @throws AuthenticationError 缺少 Token（包装为 missing_identity）
  */
 export async function resolveGatewayPrincipal(headers: Headers): Promise<GatewayPrincipal> {
   const token = extractBearerToken(headers);
@@ -82,18 +82,18 @@ export async function resolveGatewayPrincipal(headers: Headers): Promise<Gateway
 }
 
 /**
- * 把 WorkloadTokenError / V11AuthError 转成 401 响应；非身份错误返回 null。
+ * 把 WorkloadTokenError / AuthenticationError 转成 401 响应；非身份错误返回 null。
  */
 export function gatewayAuthErrorResponse(error: unknown, requestId: string): Response | null {
-  if (error instanceof V11AuthError) {
-    return v11Error("AUTHENTICATION_REQUIRED", error.message, { requestId });
+  if (error instanceof AuthenticationError) {
+    return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
   }
   return workloadTokenErrorResponse(error, requestId);
 }
 
 /** 构造 400 REQUEST_SCHEMA_INVALID 响应（请求体校验失败）。 */
 export function v11GatewaySchemaInvalid(requestId: string, message: string): Response {
-  return v11Error("REQUEST_SCHEMA_INVALID", message, { requestId });
+  return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
 }
 
 /**
@@ -103,12 +103,12 @@ export function v11GatewaySchemaInvalid(requestId: string, message: string): Res
  * 不暴露「存在但无权」与「不存在」的区别。
  */
 export function v11GatewayCapabilityNotAllowed(requestId: string, message: string): Response {
-  return v11Error("CAPABILITY_NOT_ALLOWED", message, { requestId });
+  return apiError("CAPABILITY_NOT_ALLOWED", message, { requestId });
 }
 
 /** 构造 422 CAPABILITY_CONTENT_BLOCKED 响应（Skill 内容不可读，如未发布版本）。 */
 export function v11GatewayCapabilityContentBlocked(requestId: string, message: string): Response {
-  return v11Error("CAPABILITY_CONTENT_BLOCKED", message, { requestId });
+  return apiError("CAPABILITY_CONTENT_BLOCKED", message, { requestId });
 }
 
 /**
@@ -121,10 +121,10 @@ export function v11GatewayToolSchemaChanged(
   message: string,
   details?: Record<string, unknown>,
 ): Response {
-  return v11Error("TOOL_SCHEMA_CHANGED", message, { requestId, ...(details ? { details } : {}) });
+  return apiError("TOOL_SCHEMA_CHANGED", message, { requestId, ...(details ? { details } : {}) });
 }
 
 /** 构造 400 CATALOG_REVISION_INVALID 响应（If-None-Match ETag 格式非法）。 */
 export function v11GatewayCatalogRevisionInvalid(requestId: string, message: string): Response {
-  return v11Error("CATALOG_REVISION_INVALID", message, { requestId });
+  return apiError("CATALOG_REVISION_INVALID", message, { requestId });
 }

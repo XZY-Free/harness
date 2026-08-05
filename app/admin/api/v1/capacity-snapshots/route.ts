@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -85,7 +85,7 @@ export async function GET(request: Request): Promise<Response> {
     created_at: s.createdAt.toISOString(),
   }));
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: projected,
       next_cursor: nextCursor,

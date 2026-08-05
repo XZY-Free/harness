@@ -48,9 +48,9 @@ import {
   REQUEST_ID_HEADER,
   getRequestId,
   parseIfMatch,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -76,7 +76,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -166,7 +166,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 4. 校验 Revision 存在（跨租户隐藏为 404）
   const revision = await getRevisionById(revisionId);
   if (!revision) {
-    return v11NotFound(requestId, `AgentRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `AgentRevision 不存在或无权访问: ${revisionId}`);
   }
 
   // 5. 校验 action scope（需要先读 Agent 拿 agentId 作为 resource id）
@@ -183,7 +183,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   //    V11AgentRevision schema 无 tenantId 字段，通过 Agent 归属校验。
   const agent = await getAgentById(principal.tenantId, revision.agentId);
   if (!agent) {
-    return v11NotFound(requestId, `AgentRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `AgentRevision 不存在或无权访问: ${revisionId}`);
   }
 
   // 7. 校验 If-Match ETag 与 Revision 当前 revisionNo 一致
@@ -274,7 +274,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       audit_event_id: publishResult.auditEventId,
     };
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
@@ -282,10 +282,10 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     await failRecord(recordId);
 
     if (err instanceof AgentPublicationPrerequisiteError) {
-      return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
+      return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
     if (err instanceof ArtifactNotVerifiedError) {
-      return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
+      return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
     if (err instanceof AgentPublicationVersionConflictError || err instanceof AgentVersionConflictError) {
       const agentId = err instanceof AgentPublicationVersionConflictError ? err.agentId : err.agentId;

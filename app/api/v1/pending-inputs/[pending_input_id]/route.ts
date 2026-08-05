@@ -4,7 +4,7 @@ import {
   etagHeader,
   getRequestId,
   parseIfMatch,
-  v11Ok,
+  apiSuccess,
 } from "@/lib/http";
 /**
  * PATCH  /api/v1/pending-inputs/{pending_input_id} — 编辑 PendingInput 内容（S04-C04，§3.9）。
@@ -39,7 +39,7 @@ import {
   removePendingInput,
 } from "@/lib/v11/conversation/pending-input-queries";
 import {
-  type V11Principal,
+  type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   parsePendingInputEtag,
@@ -87,7 +87,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
   const { pending_input_id: pendingInputId } = await context.params;
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -138,7 +138,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
       queue_etag: result.queue_etag,
     };
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: {
         [REQUEST_ID_HEADER]: requestId,
@@ -160,7 +160,7 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
   const { pending_input_id: pendingInputId } = await context.params;
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -202,7 +202,7 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
       queue_etag: result.queue_etag,
     };
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: {
         [REQUEST_ID_HEADER]: requestId,

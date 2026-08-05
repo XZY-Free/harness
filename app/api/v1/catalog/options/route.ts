@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, etagHeader, getRequestId, apiSuccess } from "@/lib/http";
 import { buildCatalogRevisionEtag, parseCatalogRevisionEtag } from "@/lib/v11/admin/route-helpers";
 import {
   CatalogQueryError,
@@ -29,12 +29,12 @@ import { getCurrentCatalogRevision } from "@/lib/v11/catalog/projector";
  * - If-None-Match 格式非法 → 400 CATALOG_REVISION_INVALID
  */
 import {
-  type V11Principal,
+  type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
   v11SchemaInvalid,
 } from "@/lib/v11/conversation/route-helpers";
-import { V11_ERROR_CODES } from "@/lib/v11/error-codes";
+import { API_ERROR_CODES } from "@/lib/error-codes";
 import type { CatalogResourceType } from "@/lib/v11/schema/catalog";
 
 export const dynamic = "force-dynamic";
@@ -94,7 +94,7 @@ function catalogRevisionInvalid(requestId: string, message: string): Response {
       },
     },
     {
-      status: V11_ERROR_CODES.CATALOG_REVISION_INVALID.http,
+      status: API_ERROR_CODES.CATALOG_REVISION_INVALID.http,
       headers: { [REQUEST_ID_HEADER]: requestId },
     },
   );
@@ -104,7 +104,7 @@ export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -202,7 +202,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   // 5. 返回 200 + ETag
-  return v11Ok(
+  return apiSuccess(
     {
       items: result.items,
       next_cursor: result.next_cursor,

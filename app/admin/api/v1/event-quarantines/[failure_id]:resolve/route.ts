@@ -31,9 +31,9 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -62,7 +62,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -132,7 +132,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     principal = await resolveAdminPrincipalAsync(request.headers);
   } catch (err) {
     const authResp = adminAuthErrorResponse(err, requestId);
-    return authResp ?? v11Error("AUTHENTICATION_REQUIRED", "身份解析失败", { requestId });
+    return authResp ?? apiError("AUTHENTICATION_REQUIRED", "身份解析失败", { requestId });
   }
 
   // 2. 校验 Idempotency-Key（必填）
@@ -151,12 +151,12 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 4. 查询失败记录（租户隔离，跨租户 404）
   const failure = await getDeliveryFailureById(principal.tenantId, failureId);
   if (!failure) {
-    return v11NotFound(requestId, `事件交付失败记录不存在或无权访问: ${failureId}`);
+    return resourceNotFound(requestId, `事件交付失败记录不存在或无权访问: ${failureId}`);
   }
 
   // 5. 校验 failure 处于 quarantined 状态
   if (failure.failureState !== "quarantined") {
-    return v11Error(
+    return apiError(
       "EVENT_QUARANTINE_RESOLUTION_NOT_ALLOWED",
       `failure 状态非 quarantined（当前 ${failure.failureState}），拒绝处置`,
       { requestId },
@@ -242,7 +242,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

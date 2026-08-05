@@ -99,7 +99,7 @@ export interface V11ClientTransientDelta {
 /**
  * V11 错误 Envelope（§3.4）。
  *
- * 与服务端 lib/http.ts 的 v11Error 输出一致。
+ * 与服务端 lib/http.ts 的 apiError 输出一致。
  */
 export interface V11ClientErrorBody {
   readonly error: {

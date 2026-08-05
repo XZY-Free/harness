@@ -1,4 +1,4 @@
-import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 /**
  * GET / POST /admin/api/v1/capability-reviews — CapabilityReview 集合（阶段 6 S06-C05）。
  *
@@ -43,7 +43,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 import {
   CAPABILITY_REVIEW_RESOURCE_TYPES,
   type CapabilityReviewResourceType,
@@ -218,7 +218,7 @@ export async function GET(request: Request): Promise<Response> {
     cursor: cursor ?? null,
   });
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: items.map(projectReview),
       next_cursor: nextCursor,
@@ -363,7 +363,7 @@ export async function POST(request: Request): Promise<Response> {
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

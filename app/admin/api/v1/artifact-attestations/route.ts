@@ -17,7 +17,7 @@ import { listAttestations } from "@/lib/artifacts/persistence/artifact-attestati
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - 参数非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -126,7 +126,7 @@ export async function GET(request: Request): Promise<Response> {
     created_at: a.createdAt.toISOString(),
   }));
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: projected,
       next_cursor: nextCursor,

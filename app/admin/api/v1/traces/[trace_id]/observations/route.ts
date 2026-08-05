@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -58,7 +58,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 校验 Trace 存在且属于当前租户
   const trace = await getTraceById(principal.tenantId, traceId);
   if (!trace) {
-    return v11NotFound(requestId, `Trace 不存在或无权访问: ${traceId}`);
+    return resourceNotFound(requestId, `Trace 不存在或无权访问: ${traceId}`);
   }
 
   const observations = await listObservationsByTrace(principal.tenantId, traceId, { kind });
@@ -78,7 +78,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     created_at: o.createdAt.toISOString(),
   }));
 
-  return v11Ok(
+  return apiSuccess(
     { items: projected, total: projected.length },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );

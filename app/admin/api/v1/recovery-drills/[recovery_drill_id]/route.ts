@@ -16,7 +16,7 @@
  * - 非法状态转移 → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - 非法 action 参数 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -29,7 +29,7 @@ import {
   resolveAdminPrincipalAsync,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import { runAllChecksForDrill } from "@/lib/v11/identity/recovery-consistency-checker";
+import { runAllChecksForDrill } from "@/lib/identity/recovery-consistency-checker";
 import {
   RecoveryDrillError,
   cancelRecoveryDrill,
@@ -39,7 +39,7 @@ import {
   getRecoveryDrillById,
   listRecoveryDrillChecks,
   startRecoveryDrill,
-} from "@/lib/v11/identity/recovery-drill-queries";
+} from "@/lib/identity/recovery-drill-queries";
 import type { V11RecoveryDrill, V11RecoveryDrillCheck } from "@/lib/v11/schema/recovery-drill";
 
 export const dynamic = "force-dynamic";
@@ -137,7 +137,7 @@ export async function GET(
   // 4. 查询演练；不存在 → 404 RESOURCE_NOT_FOUND
   const drill = await getRecoveryDrillById(principal.tenantId, drillId);
   if (!drill) {
-    return v11NotFound(requestId, "恢复演练不存在或无权访问");
+    return resourceNotFound(requestId, "恢复演练不存在或无权访问");
   }
 
   // 5. 列出 checks + 派生 summary
@@ -158,7 +158,7 @@ export async function GET(
     checks: checks.map(projectCheck),
   };
 
-  return v11Ok(responseBody, {
+  return apiSuccess(responseBody, {
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
 }
@@ -303,16 +303,16 @@ export async function POST(
       checks: checks.map(projectCheck),
     };
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
   } catch (err) {
     if (err instanceof RecoveryDrillError) {
       if (err.code === "drill_not_found") {
-        return v11NotFound(requestId, "恢复演练不存在或无权访问");
+        return resourceNotFound(requestId, "恢复演练不存在或无权访问");
       }
       if (err.code === "illegal_transition") {
-        return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+        return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
       }
       if (err.code === "missing_evidence") {
         return v11SchemaInvalid(requestId, err.message);

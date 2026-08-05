@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -39,7 +39,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const invocation = await getInvocationById(principal.tenantId, invocationId);
   if (!invocation) {
-    return v11NotFound(requestId, `Invocation 不存在或无权访问: ${invocationId}`);
+    return resourceNotFound(requestId, `Invocation 不存在或无权访问: ${invocationId}`);
   }
 
   const body = {
@@ -67,5 +67,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     updated_at: invocation.updatedAt.toISOString(),
   };
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

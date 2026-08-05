@@ -20,14 +20,14 @@
  * - restricted sensitivity 的 Entry 不回显正文。
  * - DELETE 不物理删除，归档后不再参与检索。
  */
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   archiveMemoryEntry,
   getMemoryEntryById,
   updateMemoryEntry,
 } from "@/lib/v11/context/memory-queries";
 import {
-  type V11Principal,
+  type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
   v11SchemaInvalid,
@@ -91,7 +91,7 @@ function projectEntry(entry: {
 export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
 
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (error) {
@@ -101,15 +101,15 @@ export async function GET(request: Request): Promise<Response> {
 
   const entryId = extractEntryId(request.url);
   if (!entryId) {
-    return v11NotFound(requestId, "entry_id 缺失");
+    return resourceNotFound(requestId, "entry_id 缺失");
   }
 
   const entry = await getMemoryEntryById(principal.tenantId, entryId);
   if (!entry) {
-    return v11NotFound(requestId, "MemoryEntry 不存在或无权访问");
+    return resourceNotFound(requestId, "MemoryEntry 不存在或无权访问");
   }
 
-  return v11Ok(projectEntry(entry), {
+  return apiSuccess(projectEntry(entry), {
     status: 200,
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
@@ -119,7 +119,7 @@ export async function GET(request: Request): Promise<Response> {
 export async function PATCH(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
 
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (error) {
@@ -129,7 +129,7 @@ export async function PATCH(request: Request): Promise<Response> {
 
   const entryId = extractEntryId(request.url);
   if (!entryId) {
-    return v11NotFound(requestId, "entry_id 缺失");
+    return resourceNotFound(requestId, "entry_id 缺失");
   }
 
   const body = await request.json().catch(() => null);
@@ -176,15 +176,15 @@ export async function PATCH(request: Request): Promise<Response> {
   // 校验 Entry 存在
   const existing = await getMemoryEntryById(principal.tenantId, entryId);
   if (!existing) {
-    return v11NotFound(requestId, "MemoryEntry 不存在或无权访问");
+    return resourceNotFound(requestId, "MemoryEntry 不存在或无权访问");
   }
 
   const updated = await updateMemoryEntry(principal.tenantId, entryId, updates);
   if (!updated) {
-    return v11NotFound(requestId, "MemoryEntry 不存在或无权访问");
+    return resourceNotFound(requestId, "MemoryEntry 不存在或无权访问");
   }
 
-  return v11Ok(projectEntry(updated), {
+  return apiSuccess(projectEntry(updated), {
     status: 200,
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
@@ -194,7 +194,7 @@ export async function PATCH(request: Request): Promise<Response> {
 export async function DELETE(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
 
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (error) {
@@ -204,21 +204,21 @@ export async function DELETE(request: Request): Promise<Response> {
 
   const entryId = extractEntryId(request.url);
   if (!entryId) {
-    return v11NotFound(requestId, "entry_id 缺失");
+    return resourceNotFound(requestId, "entry_id 缺失");
   }
 
   // 校验 Entry 存在
   const existing = await getMemoryEntryById(principal.tenantId, entryId);
   if (!existing) {
-    return v11NotFound(requestId, "MemoryEntry 不存在或无权访问");
+    return resourceNotFound(requestId, "MemoryEntry 不存在或无权访问");
   }
 
   const archived = await archiveMemoryEntry(principal.tenantId, entryId);
   if (!archived) {
-    return v11NotFound(requestId, "MemoryEntry 不存在或无权访问");
+    return resourceNotFound(requestId, "MemoryEntry 不存在或无权访问");
   }
 
-  return v11Ok(projectEntry(archived), {
+  return apiSuccess(projectEntry(archived), {
     status: 200,
     headers: { [REQUEST_ID_HEADER]: requestId },
   });

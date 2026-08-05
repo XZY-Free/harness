@@ -25,7 +25,7 @@
  * - Skill 无 currentVersionId 或 SkillVersion 非 published → 422 CAPABILITY_CONTENT_BLOCKED
  * - If-None-Match 格式非法 → 400 CATALOG_REVISION_INVALID
  */
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, etagHeader, getRequestId, apiSuccess } from "@/lib/http";
 import { recordCapabilityUse } from "@/lib/v11/capability/capability-use-queries";
 import { getCurrentSkillVersion, getSkillById } from "@/lib/v11/capability/skill-queries";
 import {
@@ -192,7 +192,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   // 9. 返回 200 + ETag
   const body = projectSkillContent(skill, version);
-  return v11Ok(body, {
+  return apiSuccess(body, {
     status: 200,
     headers: {
       [REQUEST_ID_HEADER]: requestId,

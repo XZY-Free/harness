@@ -83,9 +83,9 @@ async function main() {
   try {
     const contractPath = resolve(ROOT, "docs/solutions/v11-agentkit-platform/contracts/error-codes.json");
     const contract = JSON.parse(readFileSync(contractPath, "utf-8"));
-    const { V11_ERROR_CODES } = await import("../lib/v11/error-codes");
+    const { API_ERROR_CODES } = await import("../lib/error-codes");
     const contractCodes = Object.keys(contract.errors).sort();
-    const projectionCodes = Object.keys(V11_ERROR_CODES).sort();
+    const projectionCodes = Object.keys(API_ERROR_CODES).sort();
 
     if (contractCodes.length !== projectionCodes.length) {
       fail(`错误码数量不一致: 契约 ${contractCodes.length} vs 投影 ${projectionCodes.length}`);
@@ -93,7 +93,7 @@ async function main() {
 
     let mismatch = false;
     for (const code of contractCodes) {
-      if (!(code in V11_ERROR_CODES)) {
+      if (!(code in API_ERROR_CODES)) {
         fail(`投影缺少错误码: ${code}`);
         mismatch = true;
       }

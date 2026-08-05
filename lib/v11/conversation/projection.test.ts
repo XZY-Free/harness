@@ -39,9 +39,9 @@ import {
 } from "@/lib/v11/conversation/read-model-queries";
 import { createThread, listThreadEvents } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import type { V11ThreadEvent } from "@/lib/v11/schema/conversation";
 import { v11ThreadEvent } from "@/lib/v11/schema/conversation";
 import { eq } from "drizzle-orm";

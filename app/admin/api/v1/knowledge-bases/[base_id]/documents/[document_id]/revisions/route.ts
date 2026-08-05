@@ -23,8 +23,8 @@ import {
   REQUEST_ID_HEADER,
   etagHeader,
   getRequestId,
-  v11NotFound,
-  v11Ok,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AdminPrincipal,
@@ -50,7 +50,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -155,13 +155,13 @@ export async function GET(request: Request): Promise<Response> {
   // 校验 base 存在 + 跨租户隔离
   const base = await getKnowledgeBaseById(principal.tenantId, baseId);
   if (!base) {
-    return v11NotFound(requestId, "KnowledgeBase 不存在或无权访问");
+    return resourceNotFound(requestId, "KnowledgeBase 不存在或无权访问");
   }
 
   // 校验 document 存在 + 归属该 base
   const doc = await getKnowledgeDocumentById(principal.tenantId, documentId);
   if (!doc || doc.knowledgeBaseId !== baseId) {
-    return v11NotFound(requestId, "KnowledgeDocument 不存在或无权访问");
+    return resourceNotFound(requestId, "KnowledgeDocument 不存在或无权访问");
   }
 
   // action scope：使用 knowledge.document.publish（管理 Revision 需要 write 权限）
@@ -183,7 +183,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const items = await listKnowledgeDocumentRevisions(principal.tenantId, documentId, { limit });
 
-  return v11Ok(
+  return apiSuccess(
     { items: items.map(projectRevision) },
     {
       status: 200,
@@ -213,12 +213,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const base = await getKnowledgeBaseById(principal.tenantId, baseId);
   if (!base) {
-    return v11NotFound(requestId, "KnowledgeBase 不存在或无权访问");
+    return resourceNotFound(requestId, "KnowledgeBase 不存在或无权访问");
   }
 
   const doc = await getKnowledgeDocumentById(principal.tenantId, documentId);
   if (!doc || doc.knowledgeBaseId !== baseId) {
-    return v11NotFound(requestId, "KnowledgeDocument 不存在或无权访问");
+    return resourceNotFound(requestId, "KnowledgeDocument 不存在或无权访问");
   }
 
   // KnowledgeBase 与 Document 必须 active 才能创建 Revision
@@ -315,7 +315,7 @@ export async function POST(request: Request): Promise<Response> {
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: {
         [REQUEST_ID_HEADER]: requestId,

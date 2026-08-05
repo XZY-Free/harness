@@ -1,4 +1,4 @@
-import { v11Error } from "@/lib/http";
+import { apiError } from "@/lib/http";
 /**
  * V11 Admin API route handler 公共助手（S03-C05）。
  *
@@ -7,8 +7,8 @@ import { v11Error } from "@/lib/http";
  *
  * 职责：
  * - resolveAdminPrincipalAsync：admin audience 双身份解析（SSO Session 或 Service Identity Workload Token）。
- * - requireAdminActionScope：统一 action scope 校验入口（V11Principal 走 role_action_binding，
- *   V11WorkloadPrincipal callerType=service 走 CICD_SERVICE_ALLOWED_ACTIONS 白名单）。
+ * - requireAdminActionScope：统一 action scope 校验入口（Principal 走 role_action_binding，
+ *   WorkloadPrincipal callerType=service 走 CICD_SERVICE_ALLOWED_ACTIONS 白名单）。
  * - parseRouteSetEtag / parseAgentRevisionEtag：从 ETag 字符串提取版本号。
  *
  * 安全边界：
@@ -16,54 +16,54 @@ import { v11Error } from "@/lib/http";
  * - 缺少身份 → 401 AUTHENTICATION_REQUIRED；缺少 action scope → 403 ACTION_SCOPE_DENIED。
  * - ETag 格式不匹配 → 400 REQUEST_SCHEMA_INVALID（fail-closed，不静默接受）。
  */
-import { type V11ErrorCode, errorDefinition } from "@/lib/v11/error-codes";
-import type { ActionCode, ResourceScopeType } from "@/lib/v11/identity/action-codes";
-import { requireActionScope } from "@/lib/v11/identity/authorization";
+import { type ApiErrorCode, errorDefinition } from "@/lib/error-codes";
+import type { ActionCode, ResourceScopeType } from "@/lib/identity/action-codes";
+import { requireActionScope } from "@/lib/identity/authorization";
 import {
-  V11AuthError,
-  type V11Principal,
-  type V11WorkloadPrincipal,
-  resolveV11Principal,
-  resolveV11WorkloadPrincipal,
-} from "@/lib/v11/identity/resolver";
-import { WorkloadTokenError } from "@/lib/v11/identity/workload-token";
+  AuthenticationError,
+  type Principal,
+  type WorkloadPrincipal,
+  resolvePrincipal,
+  resolveWorkloadPrincipal,
+} from "@/lib/identity/resolver";
+import { WorkloadTokenError } from "@/lib/identity/workload-token";
 
 // ─── 身份解析 ──────────────────────────────────────────────
 
 /** admin audience 解析后的主体（SSO 用户或 Service Identity）。 */
-export type AdminPrincipal = V11Principal | V11WorkloadPrincipal;
+export type AdminPrincipal = Principal | WorkloadPrincipal;
 
 /**
  * 解析 admin audience 主体：优先 Service Identity Bearer Token，否则 SSO trusted-headers。
  *
  * 分发规则：
- * - 携带 `Authorization: Bearer <token>` → resolveV11WorkloadPrincipal(headers, "admin")。
+ * - 携带 `Authorization: Bearer <token>` → resolveWorkloadPrincipal(headers, "admin")。
  *   - type=service：CI/CD Service Identity（如 cicd）。
  *   - type=runtime/gateway：admin audience 不允许，assertAudienceMatch 通过但 callerType=workload，
  *     requireActionScope 会拒绝（workload_not_action_scoped）。
- * - 无 Authorization → resolveV11Principal(headers, "admin")（SSO 管理员）。
+ * - 无 Authorization → resolvePrincipal(headers, "admin")（SSO 管理员）。
  *
- * @throws V11AuthError 缺少身份（SSO 模式缺 header）
+ * @throws AuthenticationError 缺少身份（SSO 模式缺 header）
  * @throws WorkloadTokenError Bearer Token 解析/过期/audience 不匹配
  */
 export async function resolveAdminPrincipalAsync(headers: Headers): Promise<AdminPrincipal> {
   const authHeader = headers.get("authorization");
   if (authHeader?.trim().toLowerCase().startsWith("bearer ")) {
-    return resolveV11WorkloadPrincipal(headers, "admin");
+    return resolveWorkloadPrincipal(headers, "admin");
   }
-  return resolveV11Principal(headers, "admin");
+  return resolvePrincipal(headers, "admin");
 }
 
 /**
- * 把身份解析错误（V11AuthError / WorkloadTokenError）转成 401 响应。
+ * 把身份解析错误（AuthenticationError / WorkloadTokenError）转成 401 响应。
  * 非身份错误返回 null（调用方应向上抛）。
  */
 export function adminAuthErrorResponse(error: unknown, requestId: string): Response | null {
-  if (error instanceof V11AuthError) {
-    return v11Error("AUTHENTICATION_REQUIRED", error.message, { requestId });
+  if (error instanceof AuthenticationError) {
+    return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
   }
   if (error instanceof WorkloadTokenError) {
-    return v11Error("AUTHENTICATION_REQUIRED", `Workload Token 无效: ${error.message}`, {
+    return apiError("AUTHENTICATION_REQUIRED", `Workload Token 无效: ${error.message}`, {
       requestId,
     });
   }
@@ -76,9 +76,9 @@ export function adminAuthErrorResponse(error: unknown, requestId: string): Respo
  * 校验 admin 主体是否拥有指定 action scope，失败返回 403 响应。
  *
  * 复用 requireActionScope：
- * - V11Principal → 查 role_action_binding
- * - V11WorkloadPrincipal callerType=service → 查 CICD_SERVICE_ALLOWED_ACTIONS
- * - V11WorkloadPrincipal callerType=workload → 拒绝（workload_not_action_scoped）
+ * - Principal → 查 role_action_binding
+ * - WorkloadPrincipal callerType=service → 查 CICD_SERVICE_ALLOWED_ACTIONS
+ * - WorkloadPrincipal callerType=workload → 拒绝（workload_not_action_scoped）
  */
 export async function requireAdminActionScope(
   principal: AdminPrincipal,
@@ -341,19 +341,19 @@ export function parseCatalogRevisionEtag(etag: string): number {
  * 构造 400 REQUEST_SCHEMA_INVALID 响应（请求体校验失败）。
  */
 export function v11SchemaInvalid(requestId: string, message: string): Response {
-  return v11Error("REQUEST_SCHEMA_INVALID", message, { requestId });
+  return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
 }
 
 /**
  * 构造 412 ETAG_MISMATCH 响应（乐观锁冲突）。
  */
 export function v11EtagMismatch(requestId: string, message: string): Response {
-  return v11Error("ETAG_MISMATCH", message, { requestId });
+  return apiError("ETAG_MISMATCH", message, { requestId });
 }
 
 /**
  * 判断错误码是否 retryable（用于决定是否 failRecord 幂等记录）。
  */
-export function isRetryableErrorCode(code: V11ErrorCode): boolean {
+export function isRetryableErrorCode(code: ApiErrorCode): boolean {
   return errorDefinition(code).retryable;
 }

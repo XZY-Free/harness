@@ -51,9 +51,9 @@ import {
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { publishRuntimeRevision } from "@/lib/runtimes/test-support/attempt-runtime-publication-without-trusted-run";
 import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {

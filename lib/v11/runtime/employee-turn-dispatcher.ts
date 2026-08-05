@@ -5,7 +5,7 @@ import { getThreadById } from "@/lib/v11/conversation/thread-queries";
 import {
   WORKLOAD_TOKEN_DEFAULT_TTL_MS,
   issueWorkloadToken,
-} from "@/lib/v11/identity/workload-token";
+} from "@/lib/identity/workload-token";
 import type { HostedModelContext } from "@/lib/v11/runtime/adapters/hosted-adapter";
 import { dispatchInvocationForTurn } from "@/lib/v11/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/v11/runtime/event-ingress-queries";

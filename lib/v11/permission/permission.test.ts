@@ -27,8 +27,8 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createCredentialRef } from "@/lib/v11/capability/tool-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   GrantNotFoundError,
   GrantStateError,

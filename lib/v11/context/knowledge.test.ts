@@ -80,10 +80,10 @@ import {
   upsertKnowledgeIndex,
 } from "@/lib/v11/context/knowledge-queries";
 import { KnowledgeResolver } from "@/lib/v11/context/source-resolvers";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/v11/identity/role-action-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding } from "@/lib/identity/role-action-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   knowledgeBase,
   knowledgeChunk,

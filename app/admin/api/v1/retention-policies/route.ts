@@ -15,7 +15,7 @@
  * - 缺少必填字段 → 400 REQUEST_SCHEMA_INVALID
  * - 策略已存在 → 409 BUSINESS_CONSTRAINT_VIOLATION
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -32,7 +32,7 @@ import {
   RetentionPolicyError,
   createRetentionPolicy,
   listRetentionPolicies,
-} from "@/lib/v11/identity/retention-policy-queries";
+} from "@/lib/identity/retention-policy-queries";
 import {
   RETENTION_OBJECT_TYPES,
   type RetentionObjectType,
@@ -126,7 +126,7 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     });
 
-    return v11Ok(
+    return apiSuccess(
       {
         id: policy.id,
         object_type: policy.objectType,
@@ -144,7 +144,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (err) {
     if (err instanceof RetentionPolicyError && err.code === "policy_already_exists") {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof RetentionPolicyError && err.code === "invalid_retention_days") {
       return v11SchemaInvalid(requestId, err.message);
@@ -197,7 +197,7 @@ export async function GET(request: Request): Promise<Response> {
     cursor,
   });
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: page.items.map((p) => ({
         id: p.id,

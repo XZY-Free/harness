@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -45,7 +45,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 校验 Job 存在且属于当前租户
   const job = await getJobById(principal.tenantId, jobId);
   if (!job) {
-    return v11NotFound(requestId, `Job 不存在或无权访问: ${jobId}`);
+    return resourceNotFound(requestId, `Job 不存在或无权访问: ${jobId}`);
   }
 
   // 解析查询参数
@@ -77,7 +77,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     acknowledged_at: c.acknowledgedAt?.toISOString() ?? null,
   }));
 
-  return v11Ok(
+  return apiSuccess(
     { items: projected, total: projected.length },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );

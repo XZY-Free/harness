@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, etagHeader, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -81,18 +81,18 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 2. 校验 KnowledgeBase 存在且属于当前租户（跨租户隐藏为 404）
   const base = await getKnowledgeBaseById(principal.tenantId, baseId);
   if (!base) {
-    return v11NotFound(requestId, "KnowledgeBase 不存在或无权访问");
+    return resourceNotFound(requestId, "KnowledgeBase 不存在或无权访问");
   }
 
   // 3. 校验 KnowledgeDocument 存在、跨租户隔离、归属于该 base
   const doc = await getKnowledgeDocumentById(principal.tenantId, documentId);
   if (!doc || doc.knowledgeBaseId !== baseId) {
-    return v11NotFound(requestId, "KnowledgeDocument 不存在或无权访问");
+    return resourceNotFound(requestId, "KnowledgeDocument 不存在或无权访问");
   }
 
   // 4. 投影并返回 200 + ETag
   const responseBody = projectDocument(doc);
-  return v11Ok(responseBody, {
+  return apiSuccess(responseBody, {
     status: 200,
     headers: {
       [REQUEST_ID_HEADER]: requestId,

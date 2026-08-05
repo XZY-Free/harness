@@ -58,7 +58,7 @@ import {
   validateFileChangeHashes,
 } from "@/lib/v11/capability/artifact-queries";
 import { type V11ToolCall, createToolCall } from "@/lib/v11/capability/tool-call-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import type { V11WorkspaceBinding } from "@/lib/v11/schema/workspace";
 import { createWorkspace, createWorkspaceBinding } from "@/lib/v11/workspace/workspace-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

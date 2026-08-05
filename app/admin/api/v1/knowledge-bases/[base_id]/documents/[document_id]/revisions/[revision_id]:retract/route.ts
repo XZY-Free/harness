@@ -26,9 +26,9 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AdminPrincipal,
@@ -55,7 +55,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -131,20 +131,20 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
   // 4. 校验 Revision / Document / Base 存在 + 跨租户
   const revision = await getKnowledgeDocumentRevisionById(principal.tenantId, revisionId);
   if (!revision) {
-    return v11NotFound(requestId, `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`);
   }
   if (revision.documentId !== documentId) {
-    return v11NotFound(requestId, `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`);
   }
 
   const doc = await getKnowledgeDocumentById(principal.tenantId, documentId);
   if (!doc || doc.knowledgeBaseId !== baseId) {
-    return v11NotFound(requestId, `KnowledgeDocument 不存在或无权访问: ${documentId}`);
+    return resourceNotFound(requestId, `KnowledgeDocument 不存在或无权访问: ${documentId}`);
   }
 
   const base = await getKnowledgeBaseById(principal.tenantId, baseId);
   if (!base) {
-    return v11NotFound(requestId, `KnowledgeBase 不存在或无权访问: ${baseId}`);
+    return resourceNotFound(requestId, `KnowledgeBase 不存在或无权访问: ${baseId}`);
   }
 
   // 5. 校验 action scope
@@ -228,7 +228,7 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
@@ -236,7 +236,7 @@ export async function POST(request: Request, _context: RouteContext): Promise<Re
     await failRecord(recordId);
 
     if (err instanceof KnowledgeRevisionAlreadyPublishedError) {
-      return v11Error(
+      return apiError(
         "BUSINESS_CONSTRAINT_VIOLATION",
         `Revision 非 published 状态无法撤回（id=${err.revisionId}, currentState=${err.currentState}）`,
         { requestId },

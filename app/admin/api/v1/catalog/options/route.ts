@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -130,7 +130,7 @@ export async function GET(request: Request): Promise<Response> {
   });
 
   // 4. 投影并返回 200
-  return v11Ok(
+  return apiSuccess(
     {
       items: result.items.map((item) => projectItem(item, result.catalog_revision)),
       next_cursor: result.next_cursor,

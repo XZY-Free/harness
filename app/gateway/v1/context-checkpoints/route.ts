@@ -33,8 +33,8 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11Ok,
+  apiError,
+  apiSuccess,
 } from "@/lib/http";
 import {
   computeSourceRangesHash,
@@ -57,8 +57,8 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
-import type { V11WorkloadPrincipal } from "@/lib/v11/identity/resolver";
+} from "@/lib/identity/idempotency";
+import type { WorkloadPrincipal } from "@/lib/identity/resolver";
 import {
   CHECKPOINT_TYPES,
   type CheckpointType,
@@ -230,10 +230,10 @@ function parseSourceRanges(raw: unknown[]): SourceRange[] {
   });
 }
 
-/** 从 GatewayPrincipal 构造 V11WorkloadPrincipal（供 callerFromWorkloadPrincipal 使用）。 */
+/** 从 GatewayPrincipal 构造 WorkloadPrincipal（供 callerFromWorkloadPrincipal 使用）。 */
 function toWorkloadPrincipal(
   principal: GatewayPrincipal,
-): V11WorkloadPrincipal {
+): WorkloadPrincipal {
   return {
     tenantId: principal.tenantId,
     audience: principal.audience,
@@ -257,7 +257,7 @@ export async function contextCheckpointPOST(request: Request): Promise<Response>
     principal = await resolveGatewayPrincipal(request.headers);
   } catch (error) {
     const authResponse = gatewayAuthErrorResponse(error, requestId);
-    return authResponse ?? v11Error("AUTHENTICATION_REQUIRED", "身份解析失败", { requestId });
+    return authResponse ?? apiError("AUTHENTICATION_REQUIRED", "身份解析失败", { requestId });
   }
 
   // 2. 校验 Idempotency-Key（必填）
@@ -362,7 +362,7 @@ export async function contextCheckpointPOST(request: Request): Promise<Response>
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

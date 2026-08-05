@@ -1,7 +1,7 @@
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11NotFound } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound } from "@/lib/http";
 import { getEventStreamFloor } from "@/lib/v11/conversation/projection-checkpoint-queries";
 import {
-  type V11Principal,
+  type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
   v11SchemaInvalid,
@@ -94,7 +94,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const { thread_id: threadId } = await context.params;
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -106,7 +106,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 2. 校验 Thread 属于当前员工（非 owner → 404 隐藏式）
   const thread = await getThreadById(principal.tenantId, threadId);
   if (!thread || thread.ownerUserId !== principal.userIdentityId) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
   // 2.5 获取 SSE 连接配额（S12-W02）：超限 → 429 STREAM_BACKPRESSURE
@@ -147,7 +147,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     const floor = await getEventStreamFloor(THREAD_EVENT_STREAM, threadId);
     const earliest = floor?.earliestAvailableSequence ?? 1;
     if (cursor < earliest) {
-      return v11Error(
+      return apiError(
         "EVENT_CURSOR_EXPIRED",
         `Event 游标过期：stream ${threadId} 请求 sequence ${cursor} 早于最早可用 ${earliest}`,
         {

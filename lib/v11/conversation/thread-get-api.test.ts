@@ -16,8 +16,8 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createGoal } from "@/lib/v11/conversation/goal-queries";
 import { createThread, getThreadById } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 employee-api.test.ts 一致）。

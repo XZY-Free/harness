@@ -37,8 +37,8 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11Ok,
+  apiError,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -61,7 +61,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 import { ARTIFACT_TYPES, type V11ArtifactAttestation } from "@/lib/v11/schema/artifact";
 
 export const dynamic = "force-dynamic";
@@ -256,7 +256,7 @@ export async function POST(request: Request): Promise<Response> {
 
     const responseBody = projectResponse(attestation);
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
@@ -264,7 +264,7 @@ export async function POST(request: Request): Promise<Response> {
     await failRecord(recordId);
 
     if (err instanceof ArtifactAttestationFailedError) {
-      return v11Error(
+      return apiError(
         "ARTIFACT_ATTESTATION_FAILED",
         `制品证明验证失败（failure_code=${err.failureCode}）`,
         { requestId },

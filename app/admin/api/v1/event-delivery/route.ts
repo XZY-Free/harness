@@ -13,7 +13,7 @@
  * - stream_type 非法 → 400 REQUEST_SCHEMA_INVALID
  * - limit 非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -86,7 +86,7 @@ export async function GET(request: Request): Promise<Response> {
 
   // 4. 投影并返回 200
   const projected = failures.map(projectFailure);
-  return v11Ok(
+  return apiSuccess(
     { items: projected, total: projected.length },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );

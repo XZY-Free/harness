@@ -14,13 +14,13 @@
  * - 缺少/非法 Token → 401 AUTHENTICATION_REQUIRED
  * - protocol_version 不支持 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
 import {
   assertAudienceMatch,
   decodeWorkloadToken,
   extractBearerToken,
   workloadTokenErrorResponse,
-} from "@/lib/v11/identity/workload-token";
+} from "@/lib/identity/workload-token";
 import {
   type RuntimeCapabilitiesResponse,
   defaultRuntimeCapabilities,
@@ -37,7 +37,7 @@ export async function GET(request: Request): Promise<Response> {
   // 1. 解析 Bearer Token
   const token = extractBearerToken(request.headers);
   if (!token) {
-    return v11Error("AUTHENTICATION_REQUIRED", "缺少 Authorization Bearer Token", { requestId });
+    return apiError("AUTHENTICATION_REQUIRED", "缺少 Authorization Bearer Token", { requestId });
   }
 
   try {
@@ -54,7 +54,7 @@ export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const protocolVersion = url.searchParams.get("protocol_version");
   if (protocolVersion && !SUPPORTED_PROTOCOL_VERSIONS.includes(protocolVersion)) {
-    return v11Error(
+    return apiError(
       "REQUEST_SCHEMA_INVALID",
       `不支持的 protocol_version: ${protocolVersion}（当前支持 ${SUPPORTED_PROTOCOL_VERSIONS.join(", ")}）`,
       { requestId },
@@ -63,7 +63,7 @@ export async function GET(request: Request): Promise<Response> {
 
   // 3. 返回能力声明
   const capabilities: RuntimeCapabilitiesResponse = defaultRuntimeCapabilities();
-  return v11Ok(capabilities, {
+  return apiSuccess(capabilities, {
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
 }

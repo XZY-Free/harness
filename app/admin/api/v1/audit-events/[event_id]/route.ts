@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import { getAuditEventById } from "@/lib/identity/audit-queries";
 import {
   type AdminPrincipal,
@@ -41,7 +41,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // getAuditEventById 无 tenantId 参数；跨租户隔离通过返回值 tenantId 校验保证
   const event = await getAuditEventById(eventId);
   if (!event || event.tenantId !== principal.tenantId) {
-    return v11NotFound(requestId, `AuditEvent 不存在或无权访问: ${eventId}`);
+    return resourceNotFound(requestId, `AuditEvent 不存在或无权访问: ${eventId}`);
   }
 
   const body = {
@@ -59,5 +59,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     occurred_at: event.occurredAt.toISOString(),
   };
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

@@ -16,8 +16,8 @@
  * - Retry-After 头使用秒级整数（HTTP 标准），details.retry_after_ms 使用毫秒（机器友好）。
  * - 过载保护 acquire/release 必须配对；enforceGatewayProtection 返回 ok 时附带回滚函数。
  */
-import { REQUEST_ID_HEADER, v11Error } from "@/lib/http";
-import type { V11ErrorCode } from "@/lib/v11/error-codes";
+import { REQUEST_ID_HEADER, apiError } from "@/lib/http";
+import type { ApiErrorCode } from "@/lib/error-codes";
 import {
   type OverloadResult,
   type RequestPriority,
@@ -30,7 +30,7 @@ import {
   getRateLimiter,
 } from "@/lib/v11/gateway/rate-limiter";
 import type { SSEQuotaResult } from "@/lib/v11/gateway/sse-connection-quota";
-import type { V11Principal } from "@/lib/v11/identity/resolver";
+import type { Principal } from "@/lib/identity/resolver";
 
 /** 限流检查请求参数。 */
 export interface RateLimitCheckParams {
@@ -142,7 +142,7 @@ export function buildRateLimitResponse(result: RateLimitResult, requestId: strin
   const retryAfterSeconds = Math.ceil(result.retryAfterMs / 1000);
   const body = {
     error: {
-      code: "RATE_LIMITED" as V11ErrorCode,
+      code: "RATE_LIMITED" as ApiErrorCode,
       message: `请求被限流：维度 ${result.scopeType}（${result.scopeKey}）令牌不足，${result.retryAfterMs}ms 后可重试`,
       request_id: requestId,
       retryable: true,
@@ -183,7 +183,7 @@ export function buildStreamBackpressureResponse(
   const retryAfterSeconds = Math.ceil(result.retryAfterMs / 1000);
   const body = {
     error: {
-      code: "STREAM_BACKPRESSURE" as V11ErrorCode,
+      code: "STREAM_BACKPRESSURE" as ApiErrorCode,
       message: `SSE 连接配额超限：维度 ${result.scope}（活跃 ${result.active}/${result.max}），${result.retryAfterMs}ms 后可重试`,
       request_id: requestId,
       retryable: true,
@@ -213,7 +213,7 @@ export function buildStreamBackpressureResponse(
 export function buildOverloadResponse(result: OverloadResult, requestId: string): Response {
   // 绝对上限触发 → 503
   if (result.reason === "max_concurrent_reached") {
-    return v11Error(
+    return apiError(
       "RUNTIME_UNAVAILABLE",
       `服务过载：并发已达上限 ${result.maxConcurrent}，请稍后重试`,
       {
@@ -232,7 +232,7 @@ export function buildOverloadResponse(result: OverloadResult, requestId: string)
   const retryAfterSeconds = Math.ceil(result.retryAfterMs / 1000);
   const body = {
     error: {
-      code: "RATE_LIMITED" as V11ErrorCode,
+      code: "RATE_LIMITED" as ApiErrorCode,
       message: `请求被降级：优先级 ${result.priority} 在过载期间被拒绝（并发 ${result.concurrent}/${result.maxConcurrent}）`,
       request_id: requestId,
       retryable: true,
@@ -258,7 +258,7 @@ export function buildOverloadResponse(result: OverloadResult, requestId: string)
  * 从员工 Principal 提取限流参数。
  */
 export function rateLimitParamsFromPrincipal(
-  principal: V11Principal,
+  principal: Principal,
   options?: {
     threadId?: string;
     highCost?: boolean;

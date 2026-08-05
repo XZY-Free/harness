@@ -6,10 +6,10 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { computeMemoryContentHash } from "@/lib/v11/context/memory-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
-import { issueWorkloadToken } from "@/lib/v11/identity/workload-token";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { issueWorkloadToken } from "@/lib/identity/workload-token";
 import { createInvocation } from "@/lib/v11/runtime/invocation-queries";
 import { beforeAll, describe, expect, it } from "vitest";
 

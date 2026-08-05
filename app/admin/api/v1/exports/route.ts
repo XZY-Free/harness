@@ -19,7 +19,7 @@ import {
   REQUEST_ID_HEADER,
   etagHeader,
   getRequestId,
-  v11Ok,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -45,7 +45,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 import {
   EXPORT_FORMATS,
   EXPORT_KINDS,
@@ -206,7 +206,7 @@ export async function GET(request: Request): Promise<Response> {
     cursor: cursor ?? null,
   });
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: items.map(projectExport),
       next_cursor: nextCursor,
@@ -318,7 +318,7 @@ export async function POST(request: Request): Promise<Response> {
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: {
         [REQUEST_ID_HEADER]: requestId,

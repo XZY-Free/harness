@@ -15,7 +15,7 @@
  * - Export 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
  * - status 非 completed → 409 OPERATION_PAYLOAD_CONFLICT
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11NotFound } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -67,11 +67,11 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const exportRecord = await getAdminExportById(principal.tenantId, exportId);
   if (!exportRecord) {
-    return v11NotFound(requestId, `Export 不存在或无权访问: ${exportId}`);
+    return resourceNotFound(requestId, `Export 不存在或无权访问: ${exportId}`);
   }
 
   if (exportRecord.status !== "completed") {
-    return v11Error(
+    return apiError(
       "OPERATION_PAYLOAD_CONFLICT",
       `导出任务 ${exportId} 状态非 completed（当前 ${exportRecord.status}），拒绝下载`,
       { requestId },

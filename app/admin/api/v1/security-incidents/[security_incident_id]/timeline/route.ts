@@ -17,7 +17,7 @@
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - 事故不存在 → 404 RESOURCE_NOT_FOUND
  */
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -28,7 +28,7 @@ import {
 import {
   buildIncidentTimeline,
   getSecurityIncidentById,
-} from "@/lib/v11/identity/security-incident-queries";
+} from "@/lib/identity/security-incident-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -66,13 +66,13 @@ export async function GET(
   // 4. 校验事故存在 + 跨租户隔离
   const incident = await getSecurityIncidentById(principal.tenantId, incidentId);
   if (!incident) {
-    return v11NotFound(requestId, "安全事件不存在或无权访问");
+    return resourceNotFound(requestId, "安全事件不存在或无权访问");
   }
 
   // 5. 汇总时间线
   const timeline = await buildIncidentTimeline(principal.tenantId, incidentId);
 
-  return v11Ok(
+  return apiSuccess(
     {
       incident_id: incidentId,
       items: timeline.map((e) => ({

@@ -8,7 +8,7 @@
  * - 新事件推送：连接后新 Turn 产生的事件能被推送。
  * - 关闭连接后不影响其他操作。
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolveV11Principal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { GET as eventsGET } from "@/app/api/v1/threads/[thread_id]/events/route";
@@ -24,8 +24,8 @@ import {
   updateEventStreamFloorEarliest,
 } from "@/lib/v11/conversation/projection-checkpoint-queries";
 import { THREAD_EVENT_STREAM } from "@/lib/v11/conversation/projector";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { publishThreadTransientEvent } from "@/lib/v11/runtime/transient-event-bus";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

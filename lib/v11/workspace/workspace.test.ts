@@ -22,10 +22,10 @@
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
-import { registerDevice } from "@/lib/v11/identity/device-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { registerDevice } from "@/lib/identity/device-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   WorkspaceAttachmentExpiredError,
   WorkspaceNotFoundError,

@@ -26,7 +26,7 @@ import {
   updateAdminExportResult,
   updateAdminExportStatus,
 } from "@/lib/v11/admin/export-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {

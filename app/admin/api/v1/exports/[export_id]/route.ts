@@ -11,7 +11,7 @@
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - Export 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
  */
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, etagHeader, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import { getAdminExportById } from "@/lib/v11/admin/export-queries";
 import {
   type AdminPrincipal,
@@ -49,7 +49,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const exportRecord = await getAdminExportById(principal.tenantId, exportId);
   if (!exportRecord) {
-    return v11NotFound(requestId, `Export 不存在或无权访问: ${exportId}`);
+    return resourceNotFound(requestId, `Export 不存在或无权访问: ${exportId}`);
   }
 
   const body = {
@@ -72,7 +72,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     etag: `admin-export-${exportRecord.versionNo}`,
   };
 
-  return v11Ok(body, {
+  return apiSuccess(body, {
     headers: {
       [REQUEST_ID_HEADER]: requestId,
       ...etagHeader(`admin-export-${exportRecord.versionNo}`),

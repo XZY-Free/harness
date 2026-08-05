@@ -23,7 +23,7 @@
  * - hash 冲突 → 409 IDEMPOTENCY_CONFLICT（不可修复，原子终止）
  * - 未知 candidateType → 422 EVENT_SCHEMA_UNSUPPORTED
  */
-import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import { ingressEventBatch } from "@/lib/v11/runtime/event-ingress-queries";
 import {
   type WorkloadTokenClaims,
@@ -132,7 +132,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       })),
     };
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

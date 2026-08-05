@@ -10,7 +10,7 @@
  * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
  * - 失败记录不存在/跨租户 → 404 RESOURCE_NOT_FOUND
  */
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -39,7 +39,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const failure = await getDeliveryFailureById(principal.tenantId, failureId);
   if (!failure) {
-    return v11NotFound(requestId, `事件交付失败记录不存在或无权访问: ${failureId}`);
+    return resourceNotFound(requestId, `事件交付失败记录不存在或无权访问: ${failureId}`);
   }
 
   const body = {
@@ -61,5 +61,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     resolved_at: failure.resolvedAt ? failure.resolvedAt.toISOString() : null,
   };
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

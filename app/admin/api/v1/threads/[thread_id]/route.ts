@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -39,7 +39,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const thread = await getThreadById(principal.tenantId, threadId);
   if (!thread) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
   const body = {
@@ -64,5 +64,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     deleted_at: thread.deletedAt?.toISOString() ?? null,
   };
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

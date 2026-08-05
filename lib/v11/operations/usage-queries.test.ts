@@ -21,7 +21,7 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import {
   createCapacitySnapshot,
   createOrUpdateCostAggregate,

@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, etagHeader, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -74,12 +74,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   // 4. 不存在或跨租户 → 隐藏式 404
   if (!entry) {
-    return v11NotFound(requestId);
+    return resourceNotFound(requestId);
   }
 
   // 5. 投影并返回 200 + ETag
   const etag = `catalog-${entry.catalogRevision}`;
-  return v11Ok(projectEntry(entry), {
+  return apiSuccess(projectEntry(entry), {
     status: 200,
     headers: {
       [REQUEST_ID_HEADER]: requestId,

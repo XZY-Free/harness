@@ -32,9 +32,9 @@ import {
 } from "@/lib/v11/conversation/projection-operations";
 import { projectThreadEvent } from "@/lib/v11/conversation/projector";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { v11ThreadEvent } from "@/lib/v11/schema/conversation";
 import { tenant } from "@/lib/v11/schema/identity";
 import { eq } from "drizzle-orm";

@@ -4,9 +4,9 @@ import {
   etagHeader,
   getRequestId,
   parseIfMatch,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AdminPrincipal,
@@ -62,7 +62,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -173,10 +173,10 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 校验 ToolProvider 存在且属于当前租户
   const provider = await getToolProviderById({ tenantId: principal.tenantId, providerId });
   if (!provider) {
-    return v11NotFound(requestId, `ToolProvider 不存在或无权访问: ${providerId}`);
+    return resourceNotFound(requestId, `ToolProvider 不存在或无权访问: ${providerId}`);
   }
 
-  return v11Ok(projectProvider(provider), {
+  return apiSuccess(projectProvider(provider), {
     status: 200,
     headers: {
       [REQUEST_ID_HEADER]: requestId,
@@ -234,7 +234,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
   // 5. 校验 ToolProvider 存在且属于当前租户
   const provider = await getToolProviderById({ tenantId: principal.tenantId, providerId });
   if (!provider) {
-    return v11NotFound(requestId, `ToolProvider 不存在或无权访问: ${providerId}`);
+    return resourceNotFound(requestId, `ToolProvider 不存在或无权访问: ${providerId}`);
   }
 
   // 6. 校验 action scope
@@ -314,7 +314,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: {
         [REQUEST_ID_HEADER]: requestId,
@@ -325,13 +325,13 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Re
     await failRecord(recordId);
 
     if (err instanceof ToolNotFoundError) {
-      return v11NotFound(requestId, err.message);
+      return resourceNotFound(requestId, err.message);
     }
     if (err instanceof ToolValidationError) {
       return v11SchemaInvalid(requestId, err.message);
     }
     if (err instanceof ToolLifecycleError) {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof ToolVersionConflictError) {
       return v11EtagMismatch(requestId, err.message);

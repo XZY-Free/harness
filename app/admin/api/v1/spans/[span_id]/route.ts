@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -39,7 +39,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const span = await getSpanById(principal.tenantId, spanId);
   if (!span) {
-    return v11NotFound(requestId, `Span 不存在或无权访问: ${spanId}`);
+    return resourceNotFound(requestId, `Span 不存在或无权访问: ${spanId}`);
   }
 
   const body = {
@@ -60,5 +60,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     updated_at: span.updatedAt.toISOString(),
   };
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

@@ -18,7 +18,7 @@
  * - 同租户已有未完成同类型演练 → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - environment_tag 为空 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -35,7 +35,7 @@ import {
   RecoveryDrillError,
   createRecoveryDrill,
   listRecoveryDrills,
-} from "@/lib/v11/identity/recovery-drill-queries";
+} from "@/lib/identity/recovery-drill-queries";
 import {
   RECOVERY_DRILL_STATES,
   RECOVERY_DRILL_TYPES,
@@ -172,13 +172,13 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     });
 
-    return v11Ok(projectDrill(drill), {
+    return apiSuccess(projectDrill(drill), {
       status: 201,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
   } catch (err) {
     if (err instanceof RecoveryDrillError && err.code === "duplicate_active_drill") {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (
       err instanceof RecoveryDrillError &&
@@ -242,7 +242,7 @@ export async function GET(request: Request): Promise<Response> {
     cursor,
   });
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: page.items.map(projectDrill),
       next_cursor: page.nextCursor,

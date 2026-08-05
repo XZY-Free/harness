@@ -1,5 +1,5 @@
 import { listAgents } from "@/lib/agents/persistence/agent-queries";
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 /**
  * GET /admin/api/v1/agents — 列出当前租户下所有 Agent（S11-W02）。
  *
@@ -35,7 +35,7 @@ export async function GET(request: Request): Promise<Response> {
     principal = await resolveAdminPrincipalAsync(request.headers);
   } catch (error) {
     const resp = adminAuthErrorResponse(error, requestId);
-    return resp ?? v11Ok([]);
+    return resp ?? apiSuccess([]);
   }
 
   const agents = await listAgents(principal.tenantId);
@@ -53,7 +53,7 @@ export async function GET(request: Request): Promise<Response> {
     updated_at: agent.updatedAt?.toISOString() ?? null,
   }));
 
-  return v11Ok(
+  return apiSuccess(
     { items: projected, total: projected.length },
     {
       headers: { [REQUEST_ID_HEADER]: requestId },

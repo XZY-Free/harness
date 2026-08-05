@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -39,7 +39,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const snapshot = await getCapacitySnapshotById(principal.tenantId, snapshotId);
   if (!snapshot) {
-    return v11NotFound(requestId, `CapacitySnapshot 不存在或无权访问: ${snapshotId}`);
+    return resourceNotFound(requestId, `CapacitySnapshot 不存在或无权访问: ${snapshotId}`);
   }
 
   const body = {
@@ -62,5 +62,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     created_at: snapshot.createdAt.toISOString(),
   };
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

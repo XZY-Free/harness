@@ -24,10 +24,10 @@ import {
   WorkspaceOverlayStateError,
 } from "@/lib/v11/conversation/errors";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
-import { registerDevice } from "@/lib/v11/identity/device-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { registerDevice } from "@/lib/identity/device-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { v11ThreadRelation } from "@/lib/v11/schema/conversation";
 import { v11Invocation } from "@/lib/v11/schema/runtime";
 import {

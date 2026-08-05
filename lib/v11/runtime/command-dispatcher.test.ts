@@ -46,14 +46,14 @@ import { requestInterrupt } from "@/lib/v11/conversation/interrupt-queries";
 import { queueSteer } from "@/lib/v11/conversation/steer-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { updateTurnState } from "@/lib/v11/conversation/turn-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   WORKLOAD_TOKEN_DEFAULT_TTL_MS,
   type WorkloadTokenClaims,
   issueWorkloadToken,
-} from "@/lib/v11/identity/workload-token";
+} from "@/lib/identity/workload-token";
 import {
   type CommandDispatchResult,
   type CommandRuntimeEndpointResolution,

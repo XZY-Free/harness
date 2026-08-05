@@ -22,7 +22,7 @@
  * - containment_pending → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - 非法 action 参数 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -44,7 +44,7 @@ import {
   listIncidentContainments,
   resolveIncident,
   startInvestigation,
-} from "@/lib/v11/identity/security-incident-queries";
+} from "@/lib/identity/security-incident-queries";
 import type {
   V11IncidentContainment,
   V11SecurityIncident,
@@ -170,13 +170,13 @@ export async function GET(
   // 4. 查询事故；不存在 → 404 RESOURCE_NOT_FOUND
   const incident = await getSecurityIncidentById(principal.tenantId, incidentId);
   if (!incident) {
-    return v11NotFound(requestId, "安全事件不存在或无权访问");
+    return resourceNotFound(requestId, "安全事件不存在或无权访问");
   }
 
   // 5. 列出 containments
   const containments = await listIncidentContainments(principal.tenantId, incidentId);
 
-  return v11Ok(projectIncidentDetail(incident, containments), {
+  return apiSuccess(projectIncidentDetail(incident, containments), {
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
 }
@@ -269,16 +269,16 @@ export async function POST(
 
     // 返回更新后的事故详情 + containments
     const containments = await listIncidentContainments(principal.tenantId, incidentId);
-    return v11Ok(projectIncidentDetail(updated, containments), {
+    return apiSuccess(projectIncidentDetail(updated, containments), {
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
   } catch (err) {
     if (err instanceof SecurityIncidentError) {
       if (err.code === "incident_not_found") {
-        return v11NotFound(requestId, "安全事件不存在或无权访问");
+        return resourceNotFound(requestId, "安全事件不存在或无权访问");
       }
       if (err.code === "illegal_transition" || err.code === "containment_pending") {
-        return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+        return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
       }
     }
     throw err;

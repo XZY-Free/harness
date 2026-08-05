@@ -64,9 +64,9 @@ import {
   createEnvironmentDefinition,
   createEnvironmentLease,
 } from "@/lib/v11/environment/environment-queries";
-import { registerDevice } from "@/lib/v11/identity/device-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { registerDevice } from "@/lib/identity/device-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
   PermissionNotFoundError,
   ToolCallBlockedError,

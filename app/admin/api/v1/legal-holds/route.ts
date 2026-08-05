@@ -17,7 +17,7 @@
  * - 有效期已过 → 400 REQUEST_SCHEMA_INVALID
  * - 双人审批不满足 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -34,7 +34,7 @@ import {
   LegalHoldError,
   createLegalHold,
   listLegalHolds,
-} from "@/lib/v11/identity/legal-hold-queries";
+} from "@/lib/identity/legal-hold-queries";
 import {
   LEGAL_HOLD_TARGET_TYPES,
   type LegalHoldTargetType,
@@ -128,7 +128,7 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     });
 
-    return v11Ok(
+    return apiSuccess(
       {
         id: hold.id,
         target_type: hold.targetType,
@@ -144,7 +144,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (err) {
     if (err instanceof LegalHoldError && err.code === "hold_already_exists") {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (
       err instanceof LegalHoldError &&
@@ -205,7 +205,7 @@ export async function GET(request: Request): Promise<Response> {
     cursor,
   });
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: page.items.map((h) => ({
         id: h.id,

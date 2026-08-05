@@ -61,7 +61,7 @@ import {
   getToolCallById,
   updateToolCallState,
 } from "@/lib/v11/capability/tool-call-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { EFFECT_TERMINAL_STATES, type EffectTargetState } from "@/lib/v11/schema/effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

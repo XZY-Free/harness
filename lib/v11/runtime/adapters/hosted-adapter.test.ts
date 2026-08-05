@@ -38,10 +38,10 @@ import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-r
 import { listItemsByThread } from "@/lib/v11/conversation/thread-item-queries";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
-import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/v11/identity/workload-token";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import type { GatewayEndpoints } from "@/lib/v11/runtime/adapters/hosted-adapter";
 import {
   type CreateHostedAdapterParams,

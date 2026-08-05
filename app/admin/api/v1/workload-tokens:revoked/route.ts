@@ -13,7 +13,7 @@
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  */
 import { db } from "@/lib/db/client";
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -102,7 +102,7 @@ export async function GET(request: Request): Promise<Response> {
   const lastRow = page[page.length - 1];
   const nextCursor = hasMore && lastRow ? lastRow.revoked_at.toISOString() : null;
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: page.map((row) => ({
         id: row.id,

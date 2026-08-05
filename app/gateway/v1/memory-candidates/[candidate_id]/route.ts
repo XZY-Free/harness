@@ -16,7 +16,7 @@
  * - rejected candidate 不回显正文内容。
  * - Gateway Token 的 invocationId 必须与 candidate 的 invocationId 一致。
  */
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import { getMemoryCandidateByIdAndInvocation } from "@/lib/v11/context/memory-queries";
 import {
   type GatewayPrincipal,
@@ -93,13 +93,13 @@ export async function memoryCandidateGET(request: Request): Promise<Response> {
     principal = await resolveGatewayPrincipal(request.headers);
   } catch (error) {
     const authResponse = gatewayAuthErrorResponse(error, requestId);
-    return authResponse ?? v11NotFound(requestId, "身份解析失败");
+    return authResponse ?? resourceNotFound(requestId, "身份解析失败");
   }
 
   // 2. 提取 candidate_id
   const candidateId = extractCandidateId(request.url);
   if (!candidateId) {
-    return v11NotFound(requestId, "candidate_id 缺失");
+    return resourceNotFound(requestId, "candidate_id 缺失");
   }
 
   // 3. 按 (tenantId, candidateId, invocationId) 查询
@@ -111,12 +111,12 @@ export async function memoryCandidateGET(request: Request): Promise<Response> {
 
   if (!candidate) {
     // 不存在 / 跨租户 / 跨 Invocation → 隐藏式 404
-    return v11NotFound(requestId, "Memory Candidate 不存在或无权访问");
+    return resourceNotFound(requestId, "Memory Candidate 不存在或无权访问");
   }
 
   // 4. 返回 200 + 投影
   const responseBody = projectCandidate(candidate);
-  return v11Ok(responseBody, {
+  return apiSuccess(responseBody, {
     status: 200,
     headers: { [REQUEST_ID_HEADER]: requestId },
   });

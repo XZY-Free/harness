@@ -4,9 +4,9 @@ import {
   etagHeader,
   getRequestId,
   parseIfMatch,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -86,7 +86,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -181,13 +181,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 2. 校验 Revision 存在（跨租户隐藏为 404）
   const revision = await getRuntimeRevisionById(revisionId);
   if (!revision) {
-    return v11NotFound(requestId, `RuntimeRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `RuntimeRevision 不存在或无权访问: ${revisionId}`);
   }
 
   // 3. 校验 Revision 属于当前租户的 Runtime（跨租户隐藏为 404）
   const runtime = await getRuntimeById(principal.tenantId, revision.runtimeId);
   if (!runtime) {
-    return v11NotFound(requestId, `RuntimeRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `RuntimeRevision 不存在或无权访问: ${revisionId}`);
   }
 
   // 4. 校验 action scope（resource = runtime, id = runtimeId）
@@ -204,7 +204,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const latestRun = runs[0] ?? null;
   const results = latestRun ? await listRuntimeConformanceCaseResults(latestRun.id) : [];
 
-  return v11Ok(
+  return apiSuccess(
     {
       runtime_revision_id: revisionId,
       revision_state: revision.revisionState,
@@ -255,13 +255,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 4. 校验 Revision 存在（跨租户隐藏为 404）
   const revision = await getRuntimeRevisionById(revisionId);
   if (!revision) {
-    return v11NotFound(requestId, `RuntimeRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `RuntimeRevision 不存在或无权访问: ${revisionId}`);
   }
 
   // 5. 校验 Revision 属于当前租户的 Runtime（跨租户隐藏为 404）
   const runtime = await getRuntimeById(principal.tenantId, revision.runtimeId);
   if (!runtime) {
-    return v11NotFound(requestId, `RuntimeRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `RuntimeRevision 不存在或无权访问: ${revisionId}`);
   }
 
   // 6. 校验 action scope（resource = runtime, id = runtimeId）
@@ -450,7 +450,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       Object.assign(headers, etagHeader(responseBody.etag as string));
     }
 
-    return v11Ok(responseBody, { status: 200, headers });
+    return apiSuccess(responseBody, { status: 200, headers });
   } catch (err) {
     await failRecord(recordId);
 
@@ -459,7 +459,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       err instanceof RuntimeConformanceBindingError ||
       err instanceof RuntimeConformanceRunInvalidError
     ) {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof RuntimeArtifactAttestationRequiredError) {
       return v11SchemaInvalid(requestId, err.message);
@@ -467,26 +467,26 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     if (err instanceof RuntimeArtifactAttestationInvalidError) {
       // 区分撤销和绑定不匹配
       if (err.reason.includes("已撤销")) {
-        return v11Error("ARTIFACT_ATTESTATION_REVOKED", err.message, { requestId });
+        return apiError("ARTIFACT_ATTESTATION_REVOKED", err.message, { requestId });
       }
       if (
         err.reason.includes("绑定") ||
         err.reason.includes("Digest") ||
         err.reason.includes("不一致")
       ) {
-        return v11Error("ARTIFACT_BINDING_MISMATCH", err.message, { requestId });
+        return apiError("ARTIFACT_BINDING_MISMATCH", err.message, { requestId });
       }
-      return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
+      return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
     if (err instanceof RuntimeConformanceCaseFailedError) {
-      return v11Error(
+      return apiError(
         "BUSINESS_CONSTRAINT_VIOLATION",
         `Conformance 门禁失败，缺失/失败的 mandatory case：${err.failedCases.join(", ")}`,
         { requestId },
       );
     }
     if (err instanceof RuntimeRevisionNotFoundError) {
-      return v11NotFound(requestId, err.message);
+      return resourceNotFound(requestId, err.message);
     }
     throw err;
   }

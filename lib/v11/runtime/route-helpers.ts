@@ -16,7 +16,7 @@
  * - Token 的 invocationId 必须等于 path 的 invocation_id（assertInvocationMatch）。
  * - 跨租户隔离由仓储层保证（tenantId 来自 Token claims，不信任请求体）。
  */
-import { v11Error, v11NotFound } from "@/lib/http";
+import { apiError, resourceNotFound } from "@/lib/http";
 import {
   type WorkloadTokenClaims,
   WorkloadTokenError,
@@ -25,8 +25,8 @@ import {
   decodeWorkloadToken,
   extractBearerToken,
   workloadTokenErrorResponse,
-} from "@/lib/v11/identity/workload-token";
-import { isTokenRevoked } from "@/lib/v11/identity/workload-token-revocation-queries";
+} from "@/lib/identity/workload-token";
+import { isTokenRevoked } from "@/lib/identity/workload-token-revocation-queries";
 import {
   EventPayloadHashConflictError,
   IngressInvocationNotFoundError,
@@ -80,7 +80,7 @@ export function runtimeAuthErrorResponse(error: unknown, requestId: string): Res
 
 /** 构造 400 REQUEST_SCHEMA_INVALID 响应。 */
 export function v11RuntimeSchemaInvalid(requestId: string, message: string): Response {
-  return v11Error("REQUEST_SCHEMA_INVALID", message, { requestId });
+  return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
 }
 
 /**
@@ -103,22 +103,22 @@ export async function ingressErrorToResponse(
   requestId: string,
 ): Promise<Response | null> {
   if (error instanceof IngressInvocationNotFoundError) {
-    return v11NotFound(requestId, `Invocation 不存在或不可见: ${error.invocationId}`);
+    return resourceNotFound(requestId, `Invocation 不存在或不可见: ${error.invocationId}`);
   }
   if (error instanceof IngressInvocationTerminalError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
       requestId,
       details: { invocation_id: error.invocationId, current_state: error.currentState },
     });
   }
   if (error instanceof IngressBatchEmptyError) {
-    return v11Error("REQUEST_SCHEMA_INVALID", error.message, {
+    return apiError("REQUEST_SCHEMA_INVALID", error.message, {
       requestId,
       details: { invocation_id: error.invocationId },
     });
   }
   if (error instanceof IngressSequenceStartMismatchError) {
-    return v11Error("REQUEST_SCHEMA_INVALID", error.message, {
+    return apiError("REQUEST_SCHEMA_INVALID", error.message, {
       requestId,
       details: {
         invocation_id: error.invocationId,
@@ -128,7 +128,7 @@ export async function ingressErrorToResponse(
     });
   }
   if (error instanceof IngressCandidateTypeUnsupportedError) {
-    return v11Error("EVENT_SCHEMA_UNSUPPORTED", error.message, {
+    return apiError("EVENT_SCHEMA_UNSUPPORTED", error.message, {
       requestId,
       details: {
         invocation_id: error.invocationId,
@@ -137,7 +137,7 @@ export async function ingressErrorToResponse(
     });
   }
   if (error instanceof EventPayloadHashConflictError) {
-    return v11Error("IDEMPOTENCY_CONFLICT", error.message, {
+    return apiError("IDEMPOTENCY_CONFLICT", error.message, {
       requestId,
       details: {
         invocation_id: error.invocationId,
@@ -150,11 +150,11 @@ export async function ingressErrorToResponse(
   }
   // EventSequenceGapError 来自 conversation 域；按其 name 识别
   if (error instanceof Error && error.name === "EventSequenceGapError") {
-    return v11Error("EVENT_SEQUENCE_GAP", error.message, { requestId });
+    return apiError("EVENT_SEQUENCE_GAP", error.message, { requestId });
   }
   // TransientSequenceGapError 来自 transient 域
   if (error instanceof Error && error.name === "TransientSequenceGapError") {
-    return v11Error("EVENT_SEQUENCE_GAP", error.message, { requestId });
+    return apiError("EVENT_SEQUENCE_GAP", error.message, { requestId });
   }
   return null;
 }

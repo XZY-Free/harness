@@ -39,9 +39,9 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AdminPrincipal,
@@ -67,7 +67,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 import { MEMORY_SCOPE_TYPES, type MemoryScopeType } from "@/lib/v11/schema/memory";
 
 export const dynamic = "force-dynamic";
@@ -191,7 +191,7 @@ export async function memoryCandidateResolvePOST(request: Request): Promise<Resp
     principal = await resolveAdminPrincipalAsync(request.headers);
   } catch (err) {
     const authResp = adminAuthErrorResponse(err, requestId);
-    return authResp ?? v11Error("AUTHENTICATION_REQUIRED", "身份解析失败", { requestId });
+    return authResp ?? apiError("AUTHENTICATION_REQUIRED", "身份解析失败", { requestId });
   }
 
   // 2. 校验 Idempotency-Key（必填）
@@ -217,12 +217,12 @@ export async function memoryCandidateResolvePOST(request: Request): Promise<Resp
   const tenantId = principal.tenantId;
   const candidate = await getMemoryCandidateById(tenantId, candidateId);
   if (!candidate) {
-    return v11NotFound(requestId, "Memory Candidate 不存在或无权访问");
+    return resourceNotFound(requestId, "Memory Candidate 不存在或无权访问");
   }
 
   // 6. 校验 proposedScopeType 可复核（workspace/agent/organization）
   if (!isReviewableScopeType(candidate.proposedScopeType as MemoryScopeType)) {
-    return v11Error(
+    return apiError(
       "ACTION_SCOPE_DENIED",
       `Candidate 的 proposed_scope_type=${candidate.proposedScopeType} 不支持管理员复核`,
       { requestId },
@@ -320,7 +320,7 @@ export async function memoryCandidateResolvePOST(request: Request): Promise<Resp
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
@@ -328,7 +328,7 @@ export async function memoryCandidateResolvePOST(request: Request): Promise<Resp
     await failRecord(recordId);
 
     if (err instanceof MemoryCandidateAlreadyResolvedError) {
-      return v11Error(
+      return apiError(
         "MEMORY_CANDIDATE_ALREADY_RESOLVED",
         `Memory Candidate 已被复核（currentState=${err.currentState}）`,
         { requestId },

@@ -2,9 +2,9 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AdminPrincipal,
@@ -55,7 +55,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -163,7 +163,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 校验 Skill 存在且属于当前租户（跨租户隐藏为 404）
   const skill = await getSkillById({ tenantId: principal.tenantId, skillId });
   if (!skill) {
-    return v11NotFound(requestId, `Skill 不存在或无权访问: ${skillId}`);
+    return resourceNotFound(requestId, `Skill 不存在或无权访问: ${skillId}`);
   }
 
   // 4. 解析 Idempotency-Key（必填）
@@ -238,7 +238,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
@@ -246,16 +246,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     await failRecord(recordId);
 
     if (err instanceof SkillNotFoundError) {
-      return v11NotFound(requestId, err.message);
+      return resourceNotFound(requestId, err.message);
     }
     if (err instanceof SkillValidationError) {
       return v11SchemaInvalid(requestId, err.message);
     }
     if (err instanceof SkillLifecycleError) {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof SkillVersionConflictError) {
-      return v11Error("IDEMPOTENCY_CONFLICT", err.message, { requestId });
+      return apiError("IDEMPOTENCY_CONFLICT", err.message, { requestId });
     }
     throw err;
   }
@@ -328,7 +328,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 2. 校验 Skill 存在且属于当前租户（跨租户隐藏为 404）
   const skill = await getSkillById({ tenantId: principal.tenantId, skillId });
   if (!skill) {
-    return v11NotFound(requestId, `Skill 不存在或无权访问: ${skillId}`);
+    return resourceNotFound(requestId, `Skill 不存在或无权访问: ${skillId}`);
   }
 
   // 3. 解析查询参数 state / limit
@@ -359,7 +359,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   });
   const projected = versions.map(projectVersionForGet);
 
-  return v11Ok(
+  return apiSuccess(
     { items: projected, total: projected.length },
     {
       status: 200,

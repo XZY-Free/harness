@@ -25,11 +25,11 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11NotFound,
-  v11Ok,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
-  type V11Principal,
+  type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
@@ -46,7 +46,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -83,7 +83,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const threadId = rawSegment.split(":")[0] ?? "";
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -95,7 +95,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 2. 校验 Thread 属于当前员工（非 owner → 404 隐藏式）
   const thread = await getThreadById(principal.tenantId, threadId);
   if (!thread || thread.ownerUserId !== principal.userIdentityId) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
   // 3. 解析 Idempotency-Key（必填）
@@ -113,7 +113,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 5. 校验新 Agent 存在且 enabled（无权/不存在 → 404 隐藏式）
   const newAgent = await getAgentById(principal.tenantId, body.agent_id);
   if (!newAgent || newAgent.lifecycleState !== "enabled") {
-    return v11NotFound(requestId, `Agent 不存在或无权使用: ${body.agent_id}`);
+    return resourceNotFound(requestId, `Agent 不存在或无权使用: ${body.agent_id}`);
   }
 
   // 6. 计算请求 hash + 幂等守卫
@@ -184,7 +184,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

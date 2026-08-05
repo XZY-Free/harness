@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -39,7 +39,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const record = await getUsageRecordById(principal.tenantId, recordId);
   if (!record) {
-    return v11NotFound(requestId, `UsageRecord 不存在或无权访问: ${recordId}`);
+    return resourceNotFound(requestId, `UsageRecord 不存在或无权访问: ${recordId}`);
   }
 
   const body = {
@@ -61,5 +61,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     created_at: record.createdAt.toISOString(),
   };
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

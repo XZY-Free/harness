@@ -22,10 +22,10 @@ import { getPublicationRecordBySubject } from "@/lib/publications/persistence/pu
 import {
   getIdempotencyRecordById,
   insertProcessingRecord,
-} from "@/lib/v11/identity/idempotency-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+} from "@/lib/identity/idempotency-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { v11AgentRevision } from "@/lib/v11/schema/agent";
 import { tenant } from "@/lib/v11/schema/identity";
 import { and, eq } from "drizzle-orm";

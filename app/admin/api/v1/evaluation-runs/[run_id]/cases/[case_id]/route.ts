@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -44,12 +44,12 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 校验 Run 存在且属于当前租户
   const run = await getEvaluationRunById(principal.tenantId, runId);
   if (!run) {
-    return v11NotFound(requestId, `EvaluationRun 不存在或无权访问: ${runId}`);
+    return resourceNotFound(requestId, `EvaluationRun 不存在或无权访问: ${runId}`);
   }
 
   const caseRow = await getEvaluationCaseById(principal.tenantId, caseId);
   if (!caseRow || caseRow.runId !== runId) {
-    return v11NotFound(requestId, `EvaluationCase 不存在或无权访问: ${caseId}`);
+    return resourceNotFound(requestId, `EvaluationCase 不存在或无权访问: ${caseId}`);
   }
 
   const body = {
@@ -67,5 +67,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     created_at: caseRow.createdAt.toISOString(),
   };
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

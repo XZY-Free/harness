@@ -16,12 +16,12 @@ import {
   STUDIO_NAV_IDS,
   computeStudioNavVisibility,
 } from "@/lib/studio/nav-visibility";
-import type { V11Principal } from "@/lib/v11/identity/resolver";
+import type { Principal } from "@/lib/identity/resolver";
 import type { RoleActionBinding } from "@/lib/v11/schema/authorization";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock listActiveActionBindingsForUser（避免触发 DB）
-vi.mock("@/lib/v11/identity/role-action-queries", () => ({
+vi.mock("@/lib/identity/role-action-queries", () => ({
   listActiveActionBindingsForUser: vi.fn(),
 }));
 
@@ -30,9 +30,9 @@ vi.mock("@/lib/config", () => ({
   authConfig: { mode: "trusted-headers" },
 }));
 
-const { listActiveActionBindingsForUser } = await import("@/lib/v11/identity/role-action-queries");
+const { listActiveActionBindingsForUser } = await import("@/lib/identity/role-action-queries");
 
-function makePrincipal(externalSubject = DEFAULT_USER_ID): V11Principal {
+function makePrincipal(externalSubject = DEFAULT_USER_ID): Principal {
   return {
     tenantId: "tenant-test",
     tenantKey: "test",

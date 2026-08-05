@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, decodeCursor, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, decodeCursor, getRequestId, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -119,7 +119,7 @@ export async function GET(request: Request): Promise<Response> {
     ).toString("base64url");
   }
 
-  return v11Ok(
+  return apiSuccess(
     { items: projected, next_cursor: nextCursor, total: projected.length },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );

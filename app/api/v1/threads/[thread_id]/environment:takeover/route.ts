@@ -2,9 +2,9 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import { getEnvironmentStatus } from "@/lib/v11/conversation/environment-status-queries";
 import {
@@ -14,7 +14,7 @@ import {
   performTakeover,
 } from "@/lib/v11/conversation/environment-takeover-queries";
 import {
-  type V11Principal,
+  type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
   v11SchemaInvalid,
@@ -30,7 +30,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 /**
  * POST /api/v1/threads/{thread_id}/environment:takeover — 员工请求接管 Desktop Environment（S10-W07）。
  *
@@ -98,7 +98,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const { thread_id: threadId } = await context.params;
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -110,7 +110,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 2. 校验 Thread 属于当前员工（非 owner → 404 隐藏式）
   const thread = await getThreadById(principal.tenantId, threadId);
   if (!thread || thread.ownerUserId !== principal.userIdentityId) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
   // 3. 解析 Idempotency-Key（必填）
@@ -140,7 +140,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   // 6. 校验存在 active ExecutionOwnership
   if (!status.activeOwnership) {
-    return v11Error(
+    return apiError(
       "BUSINESS_CONSTRAINT_VIOLATION",
       `Thread ${threadId} 当前无活跃 ExecutionOwnership，无需接管`,
       {
@@ -202,7 +202,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   if (!conditions.can_takeover) {
     await failRecord(recordId);
-    return v11Error(
+    return apiError(
       "BUSINESS_CONSTRAINT_VIOLATION",
       `接管条件不满足：${conditions.blocking_reasons.join("；") || "未知原因"}`,
       {
@@ -250,20 +250,20 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
   } catch (err) {
     await failRecord(recordId);
     if (err instanceof NoActiveOwnershipError) {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, {
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, {
         requestId,
         details: { thread_id: threadId },
       });
     }
     if (err instanceof TakeoverConditionsNotMetError) {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, {
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, {
         requestId,
         details: {
           thread_id: threadId,

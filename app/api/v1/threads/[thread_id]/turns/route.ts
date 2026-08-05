@@ -2,11 +2,11 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11NotFound,
-  v11Ok,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
-  type V11Principal,
+  type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
@@ -45,7 +45,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -94,7 +94,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const { thread_id: threadId } = await context.params;
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -106,7 +106,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 2. 校验 Thread 属于当前员工（非 owner → 404 隐藏式）
   const thread = await getThreadById(principal.tenantId, threadId);
   if (!thread || thread.ownerUserId !== principal.userIdentityId) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
   // 3. 解析 Idempotency-Key（必填）
@@ -215,7 +215,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
@@ -278,7 +278,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const { thread_id: threadId } = await context.params;
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -290,7 +290,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 2. 校验 Thread 属于当前员工（非 owner → 404 隐藏式）
   const thread = await getThreadById(principal.tenantId, threadId);
   if (!thread || thread.ownerUserId !== principal.userIdentityId) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
   // 3. 解析查询参数
@@ -309,7 +309,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     turns: turns.slice(0, limit).map(projectTurn),
   };
 
-  return v11Ok(responseBody, {
+  return apiSuccess(responseBody, {
     status: 200,
     headers: { [REQUEST_ID_HEADER]: requestId },
   });

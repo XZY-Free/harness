@@ -18,7 +18,7 @@ import {
   computeSelectorDigest,
 } from "@/lib/routes/domain/route-selector";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { v11Agent, v11AgentRevision } from "@/lib/v11/schema/agent";
 import { v11DeploymentRoute, v11DeploymentRouteSet } from "@/lib/v11/schema/deployment-route";
 import { v11Runtime, v11RuntimeRevision } from "@/lib/v11/schema/runtime";

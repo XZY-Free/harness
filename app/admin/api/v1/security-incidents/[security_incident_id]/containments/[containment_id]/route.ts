@@ -18,7 +18,7 @@
  * - 非法状态转移 → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - 缺少 evidence_ref / failure_reason → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -32,7 +32,7 @@ import {
   markContainmentApplied,
   markContainmentFailed,
   revertContainment,
-} from "@/lib/v11/identity/security-incident-queries";
+} from "@/lib/identity/security-incident-queries";
 import type { V11IncidentContainment } from "@/lib/v11/schema/security-incident";
 
 export const dynamic = "force-dynamic";
@@ -108,7 +108,7 @@ export async function POST(
   // 4. 校验事故存在 + 跨租户隔离（containment 隐式归属同租户）
   const incident = await getSecurityIncidentById(principal.tenantId, incidentId);
   if (!incident) {
-    return v11NotFound(requestId, "安全事件不存在或无权访问");
+    return resourceNotFound(requestId, "安全事件不存在或无权访问");
   }
 
   try {
@@ -149,16 +149,16 @@ export async function POST(
       });
     }
 
-    return v11Ok(projectContainment(updated), {
+    return apiSuccess(projectContainment(updated), {
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
   } catch (err) {
     if (err instanceof SecurityIncidentError) {
       if (err.code === "containment_not_found") {
-        return v11NotFound(requestId, "隔离动作不存在或无权访问");
+        return resourceNotFound(requestId, "隔离动作不存在或无权访问");
       }
       if (err.code === "illegal_transition") {
-        return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+        return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
       }
       if (err.code === "missing_evidence") {
         return v11SchemaInvalid(requestId, err.message);

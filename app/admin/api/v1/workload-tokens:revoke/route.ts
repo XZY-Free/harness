@@ -19,7 +19,7 @@
  * - 缺少必填字段 → 400 REQUEST_SCHEMA_INVALID
  * - 幂等：重复撤销返回原记录（不报错）
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -32,7 +32,7 @@ import {
   resolveAdminPrincipalAsync,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import { revokeWorkloadToken } from "@/lib/v11/identity/workload-token-revocation-queries";
+import { revokeWorkloadToken } from "@/lib/identity/workload-token-revocation-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -114,7 +114,7 @@ export async function POST(request: Request): Promise<Response> {
     requestId,
   });
 
-  return v11Ok(
+  return apiSuccess(
     {
       id: revoked.id,
       jti: revoked.jti,

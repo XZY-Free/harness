@@ -26,15 +26,15 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11Ok,
+  apiError,
+  apiSuccess,
 } from "@/lib/http";
 import {
   assertAudienceMatch,
   decodeWorkloadToken,
   extractBearerToken,
   workloadTokenErrorResponse,
-} from "@/lib/v11/identity/workload-token";
+} from "@/lib/identity/workload-token";
 import { getRouteHostedAdapter } from "@/lib/v11/runtime/adapters/hosted-adapter";
 import {
   type RuntimeCapabilitiesResponse,
@@ -100,7 +100,7 @@ export async function POST(request: Request): Promise<Response> {
   // 1. 解析 Bearer Token（audience=runtime）
   const token = extractBearerToken(request.headers);
   if (!token) {
-    return v11Error("AUTHENTICATION_REQUIRED", "缺少 Authorization Bearer Token", { requestId });
+    return apiError("AUTHENTICATION_REQUIRED", "缺少 Authorization Bearer Token", { requestId });
   }
 
   try {
@@ -115,13 +115,13 @@ export async function POST(request: Request): Promise<Response> {
   // 2. 校验 Idempotency-Key（必填）
   const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER)?.trim();
   if (!idempotencyKey) {
-    return v11Error("REQUEST_SCHEMA_INVALID", "缺少必填头 Idempotency-Key", { requestId });
+    return apiError("REQUEST_SCHEMA_INVALID", "缺少必填头 Idempotency-Key", { requestId });
   }
 
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return v11Error(
+    return apiError(
       "REQUEST_SCHEMA_INVALID",
       "请求体非法：缺少 invocation_id/agent/gateway_endpoints/execution_limits 或字段类型错误",
       { requestId },
@@ -151,7 +151,7 @@ export async function POST(request: Request): Promise<Response> {
   if (turnContext) {
     const adapter = getRouteHostedAdapter();
     if (!adapter) {
-      return v11Error("RUNTIME_UNAVAILABLE", "Hosted Runtime 尚未配置模型执行器", { requestId });
+      return apiError("RUNTIME_UNAVAILABLE", "Hosted Runtime 尚未配置模型执行器", { requestId });
     }
     // fire-and-forget：loop 内部异步执行，不阻塞 dispatch 响应
     void adapter.startInvocation({
@@ -170,7 +170,7 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  return v11Ok(response, {
+  return apiSuccess(response, {
     status: 202,
     headers: { [REQUEST_ID_HEADER]: requestId },
   });

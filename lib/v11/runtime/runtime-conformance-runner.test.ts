@@ -12,7 +12,7 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
  * 3. publishRuntimeRevision 集成（4 例）：持久化 conformance 结果 + options + 失败不持久化。
  * 4. Admin API 路由（5 例）：GET 列表 / POST 持久化 / POST 发布 / 门禁失败 / 跨租户隔离。
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolveV11Principal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 DB mock。
  */
 import { db } from "@/lib/db/client";
@@ -41,11 +41,11 @@ import {
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { publishRuntimeRevision } from "@/lib/runtimes/test-support/attempt-runtime-publication-without-trusted-run";
 import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
-import { getIdempotencyRecordById } from "@/lib/v11/identity/idempotency-queries";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/v11/identity/role-action-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { getIdempotencyRecordById } from "@/lib/identity/idempotency-queries";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding } from "@/lib/identity/role-action-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import type {
   CancelParams,
   CancelResult,

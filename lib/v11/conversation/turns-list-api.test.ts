@@ -16,8 +16,8 @@ import { buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createThread } from "@/lib/v11/conversation/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/v11/conversation/turn-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;

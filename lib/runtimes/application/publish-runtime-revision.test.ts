@@ -29,9 +29,9 @@ import {
 import {
   getIdempotencyRecordById,
   insertProcessingRecord,
-} from "@/lib/v11/identity/idempotency-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+} from "@/lib/identity/idempotency-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { listConformanceResultsByRevision } from "@/lib/v11/runtime/runtime-conformance-result-queries";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";

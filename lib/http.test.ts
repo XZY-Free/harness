@@ -1,6 +1,6 @@
 import {
   REQUEST_ID_HEADER,
-  V11_STATUS,
+  API_STATUS,
   decodeCursor,
   encodeCursor,
   etagHeader,
@@ -10,9 +10,9 @@ import {
   jsonOk,
   omitThreadSecrets,
   parseIfMatch,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import { describe, expect, it } from "vitest";
 
@@ -73,12 +73,12 @@ describe("V11 request id", () => {
 });
 
 describe("V11 error envelope", () => {
-  it("v11Error 用错误码目录的 http 与 retryable", async () => {
-    const res = v11Error("TURN_ALREADY_TERMINAL", "本轮已结束", {
+  it("apiError 用错误码目录的 http 与 retryable", async () => {
+    const res = apiError("TURN_ALREADY_TERMINAL", "本轮已结束", {
       requestId: "req_1",
     });
     // TURN_ALREADY_TERMINAL -> 409, retryable false
-    expect(res.status).toBe(V11_STATUS.CONFLICT);
+    expect(res.status).toBe(API_STATUS.CONFLICT);
     const body = await res.json();
     expect(body).toEqual({
       error: {
@@ -92,26 +92,26 @@ describe("V11 error envelope", () => {
     expect(res.headers.get(REQUEST_ID_HEADER)).toBe("req_1");
   });
 
-  it("v11Error 支持 details 且 retryable 透传（RATE_LIMITED 可重试）", async () => {
-    const res = v11Error("RATE_LIMITED", "请求过多", {
+  it("apiError 支持 details 且 retryable 透传（RATE_LIMITED 可重试）", async () => {
+    const res = apiError("RATE_LIMITED", "请求过多", {
       requestId: "req_2",
       details: { retry_after_ms: 500 },
     });
-    expect(res.status).toBe(V11_STATUS.RATE_LIMITED);
+    expect(res.status).toBe(API_STATUS.RATE_LIMITED);
     const body = await res.json();
     expect(body.error.retryable).toBe(true);
     expect(body.error.details).toEqual({ retry_after_ms: 500 });
   });
 
-  it("v11Error ETAG_MISMATCH 映射 412 且可重试", async () => {
-    const res = v11Error("ETAG_MISMATCH", "版本冲突", { requestId: "req_3" });
-    expect(res.status).toBe(V11_STATUS.PRECONDITION_FAILED);
+  it("apiError ETAG_MISMATCH 映射 412 且可重试", async () => {
+    const res = apiError("ETAG_MISMATCH", "版本冲突", { requestId: "req_3" });
+    expect(res.status).toBe(API_STATUS.PRECONDITION_FAILED);
     expect((await res.json()).error.retryable).toBe(true);
   });
 
-  it("v11NotFound 返回 RESOURCE_NOT_FOUND + 隐藏式 404", async () => {
-    const res = v11NotFound("req_4");
-    expect(res.status).toBe(V11_STATUS.NOT_FOUND);
+  it("resourceNotFound 返回 RESOURCE_NOT_FOUND + 隐藏式 404", async () => {
+    const res = resourceNotFound("req_4");
+    expect(res.status).toBe(API_STATUS.NOT_FOUND);
     const body = await res.json();
     expect(body.error.code).toBe("RESOURCE_NOT_FOUND");
     expect(body.error.request_id).toBe("req_4");
@@ -119,13 +119,13 @@ describe("V11 error envelope", () => {
 });
 
 describe("V11 success response", () => {
-  it("v11Ok 直接返回资源，无 ok 包裹", async () => {
-    const res = v11Ok({ id: "thr_1", status: "idle" });
+  it("apiSuccess 直接返回资源，无 ok 包裹", async () => {
+    const res = apiSuccess({ id: "thr_1", status: "idle" });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ id: "thr_1", status: "idle" });
   });
-  it("v11Ok 支持自定义 init（如 202 异步命令）", async () => {
-    const res = v11Ok({ turn_id: "t1", status: "queued" }, { status: 202 });
+  it("apiSuccess 支持自定义 init（如 202 异步命令）", async () => {
+    const res = apiSuccess({ turn_id: "t1", status: "queued" }, { status: 202 });
     expect(res.status).toBe(202);
   });
 });
@@ -159,7 +159,7 @@ describe("V11 opaque cursor", () => {
 
 describe("V11 status boundaries", () => {
   it("覆盖 400/401/403/404/409/412/413/422/429/503", () => {
-    expect(V11_STATUS).toEqual({
+    expect(API_STATUS).toEqual({
       BAD_REQUEST: 400,
       UNAUTHORIZED: 401,
       FORBIDDEN: 403,

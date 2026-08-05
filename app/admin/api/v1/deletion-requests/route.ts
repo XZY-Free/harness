@@ -25,8 +25,8 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11Ok,
+  apiError,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -43,15 +43,15 @@ import {
 import {
   DeletionExecutorError,
   executeDeletionRequest,
-} from "@/lib/v11/identity/deletion-executor";
-import { planDeletion } from "@/lib/v11/identity/deletion-planner";
+} from "@/lib/identity/deletion-executor";
+import { planDeletion } from "@/lib/identity/deletion-planner";
 import {
   DeletionRequestError,
   createDeletionRequest,
   insertDeletionSteps,
   setBlockedReasonCodes,
   updateDeletionRequestState,
-} from "@/lib/v11/identity/deletion-request-queries";
+} from "@/lib/identity/deletion-request-queries";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -62,7 +62,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 import {
   DELETION_DELETE_MODES,
   DELETION_REASON_CODES,
@@ -319,7 +319,7 @@ export async function POST(request: Request): Promise<Response> {
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
@@ -328,11 +328,11 @@ export async function POST(request: Request): Promise<Response> {
 
     // 重复受理（同 subject 已有非终态请求）→ 409 BUSINESS_CONSTRAINT_VIOLATION
     if (err instanceof DeletionRequestError && err.code === "duplicate_active_request") {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     // 执行器状态非法（不应发生，防御性）→ 409 BUSINESS_CONSTRAINT_VIOLATION
     if (err instanceof DeletionExecutorError && err.code === "illegal_state_for_execution") {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     throw err;
   }

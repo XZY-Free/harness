@@ -17,7 +17,7 @@ import {
  * - PATCH  /api/v1/pending-inputs/{pending_input_id} — 编辑 PendingInput
  * - DELETE /api/v1/pending-inputs/{pending_input_id} — 移除 PendingInput
  *
- * 测试环境：APP_ENV=test，auth mode=dev（resolveV11Principal 使用 DEFAULT_USER_ID）。
+ * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
@@ -26,8 +26,8 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 employee-api.test.ts 一致）。
@@ -735,7 +735,7 @@ describe("跨租户隔离", () => {
       "pi-cross-patch",
     );
 
-    // 直接用不存在的 tenant 访问（dev 模式下 resolveV11Principal 返回默认 tenant）
+    // 直接用不存在的 tenant 访问（dev 模式下 resolvePrincipal 返回默认 tenant）
     // 这里模拟跨租户：用 non-existent pending_input_id
     const req = buildV11Request({
       audience: "employee",

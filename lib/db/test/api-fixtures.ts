@@ -6,7 +6,7 @@ import {
   REQUEST_ID_HEADER,
   generateRequestId,
 } from "@/lib/http";
-import type { V11Audience } from "@/lib/http";
+import type { ApiAudience } from "@/lib/http";
 /**
  * V11 四类 API 测试夹具（S01-W04）。
  *
@@ -25,12 +25,12 @@ type DbClient = typeof db;
 /** db.transaction 回调的 tx 参数类型（MySqlTransaction，无 $client）。 */
 type TxClient = Parameters<Parameters<DbClient["transaction"]>[0]>[0];
 
-// V11Audience / AUDIENCE_PREFIX 已迁移至 lib/http.ts（S02-C01：身份解析器需引用）。
-export type { V11Audience } from "@/lib/http";
+// ApiAudience / AUDIENCE_PREFIX 已迁移至 lib/http.ts（S02-C01：身份解析器需引用）。
+export type { ApiAudience } from "@/lib/http";
 export { AUDIENCE_PREFIX } from "@/lib/http";
 
 export interface BuildV11RequestOptions {
-  audience: V11Audience;
+  audience: ApiAudience;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   /** 路径，不含 audience 前缀，如 `/threads` 或 `/threads/{id}` 字面值。 */
   path: string;

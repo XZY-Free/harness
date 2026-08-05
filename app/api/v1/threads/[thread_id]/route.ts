@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import { getActiveGoalByThread } from "@/lib/v11/conversation/goal-queries";
 /**
  * GET /api/v1/threads/{thread_id} — 查询 Thread 详情（S10-W02，§3.1）。
@@ -15,7 +15,7 @@ import { getActiveGoalByThread } from "@/lib/v11/conversation/goal-queries";
  * - Thread 不存在/非 owner/跨租户 → 404 RESOURCE_NOT_FOUND
  */
 import {
-  type V11Principal,
+  type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
 } from "@/lib/v11/conversation/route-helpers";
@@ -89,7 +89,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const { thread_id: threadId } = await context.params;
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -105,7 +105,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     thread.ownerUserId !== principal.userIdentityId ||
     thread.lifecycleState === "deleted"
   ) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
   // 3. 读取 active Goal + 最新 Turn（并行）
@@ -124,7 +124,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     latest_turn: latestTurn ? projectTurnSummary(latestTurn) : null,
   };
 
-  return v11Ok(responseBody, {
+  return apiSuccess(responseBody, {
     status: 200,
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
@@ -139,7 +139,7 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
   const requestId = getRequestId(request);
   const { thread_id: threadId } = await context.params;
 
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -154,7 +154,7 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
     thread.ownerUserId !== principal.userIdentityId ||
     thread.lifecycleState === "deleted"
   ) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
   const deleted = await updateThreadLifecycle(
@@ -164,10 +164,10 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
     thread.versionNo,
   );
   if (!deleted) {
-    return v11NotFound(requestId, `Thread 已被更新或删除: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 已被更新或删除: ${threadId}`);
   }
 
-  return v11Ok(
+  return apiSuccess(
     { id: threadId, lifecycle_state: deleted.lifecycleState, deleted: true },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );

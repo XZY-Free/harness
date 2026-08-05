@@ -11,8 +11,8 @@ import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { installTrustedHostedControlPlaneEvidenceForTest } from "@/lib/v11/test-support/trusted-hosted-control-plane-evidence";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

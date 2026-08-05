@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import {
   getRouteSetByAgentScope,
   listRoutesBySet,
@@ -39,7 +39,7 @@ export async function GET(request: Request): Promise<Response> {
     principal = await resolveAdminPrincipalAsync(request.headers);
   } catch (err) {
     const authResp = adminAuthErrorResponse(err, requestId);
-    return authResp ?? v11Ok({ items: [], total: 0 });
+    return authResp ?? apiSuccess({ items: [], total: 0 });
   }
 
   const url = new URL(request.url);
@@ -52,7 +52,7 @@ export async function GET(request: Request): Promise<Response> {
   // 查询 RouteSet（不存在 → 200 空数组，Agent 未配置路由）
   const routeSet = await getRouteSetByAgentScope(principal.tenantId, agentId, scopeKey);
   if (!routeSet) {
-    return v11Ok(
+    return apiSuccess(
       { items: [], total: 0, route_set: null, etag: null },
       { headers: { [REQUEST_ID_HEADER]: requestId } },
     );
@@ -73,7 +73,7 @@ export async function GET(request: Request): Promise<Response> {
     active_route_revision_id: route.activeRouteRevisionId,
   }));
 
-  return v11Ok(
+  return apiSuccess(
     {
       items: projected,
       total: projected.length,

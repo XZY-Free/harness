@@ -24,11 +24,11 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11NotFound,
-  v11Ok,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
-  type V11Principal,
+  type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
   v11SchemaInvalid,
@@ -43,7 +43,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +55,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -68,7 +68,7 @@ export async function GET(request: Request): Promise<Response> {
     listThreadsForUser(principal.tenantId, principal.userIdentityId),
     listAgents(principal.tenantId, { lifecycleState: "enabled" }),
   ]);
-  return v11Ok(
+  return apiSuccess(
     {
       viewer_id: principal.userIdentityId,
       threads: threads.map((thread) => ({
@@ -128,7 +128,7 @@ export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -152,7 +152,7 @@ export async function POST(request: Request): Promise<Response> {
   // 4. 校验 Agent 存在且 enabled（无权/不存在 → 404 隐藏式，不泄露存在）
   const agent = await getAgentById(principal.tenantId, body.agent_id);
   if (!agent || agent.lifecycleState !== "enabled") {
-    return v11NotFound(requestId, `Agent 不存在或无权使用: ${body.agent_id}`);
+    return resourceNotFound(requestId, `Agent 不存在或无权使用: ${body.agent_id}`);
   }
 
   // 5. 计算请求 hash + 幂等守卫
@@ -217,7 +217,7 @@ export async function POST(request: Request): Promise<Response> {
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

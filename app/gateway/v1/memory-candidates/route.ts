@@ -37,8 +37,8 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11Ok,
+  apiError,
+  apiSuccess,
 } from "@/lib/http";
 import {
   computeCandidateKey,
@@ -65,8 +65,8 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
-import type { V11WorkloadPrincipal } from "@/lib/v11/identity/resolver";
+} from "@/lib/identity/idempotency";
+import type { WorkloadPrincipal } from "@/lib/identity/resolver";
 import {
   MEMORY_SCOPE_TYPES,
   type MemoryScopeType,
@@ -243,10 +243,10 @@ function validateBody(
   return [true, "", body as MemoryCandidateBody];
 }
 
-/** 从 GatewayPrincipal 构造 V11WorkloadPrincipal。 */
+/** 从 GatewayPrincipal 构造 WorkloadPrincipal。 */
 function toWorkloadPrincipal(
   principal: GatewayPrincipal,
-): V11WorkloadPrincipal {
+): WorkloadPrincipal {
   return {
     tenantId: principal.tenantId,
     audience: principal.audience,
@@ -303,7 +303,7 @@ export async function memoryCandidatePOST(request: Request): Promise<Response> {
     principal = await resolveGatewayPrincipal(request.headers);
   } catch (error) {
     const authResponse = gatewayAuthErrorResponse(error, requestId);
-    return authResponse ?? v11Error("AUTHENTICATION_REQUIRED", "身份解析失败", { requestId });
+    return authResponse ?? apiError("AUTHENTICATION_REQUIRED", "身份解析失败", { requestId });
   }
 
   // 2. 校验 Idempotency-Key（必填）
@@ -329,7 +329,7 @@ export async function memoryCandidatePOST(request: Request): Promise<Response> {
   // 5. 校验 content_hash 与 content.text 一致（若 text 提供）
   if (parsed.content.text) {
     if (!verifyMemoryContentHash(parsed.content.text, parsed.content_hash)) {
-      return v11Error("MEMORY_CONTENT_HASH_MISMATCH", "content_hash 与 content.text 不一致", {
+      return apiError("MEMORY_CONTENT_HASH_MISMATCH", "content_hash 与 content.text 不一致", {
         requestId,
       });
     }
@@ -497,7 +497,7 @@ export async function memoryCandidatePOST(request: Request): Promise<Response> {
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

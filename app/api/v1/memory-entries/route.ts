@@ -19,10 +19,10 @@
  * - 用户只能查看自己租户的 MemoryEntry（跨租户隔离）。
  * - restricted sensitivity 的 Entry 不回显正文。
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import { listMemoryEntriesByScope } from "@/lib/v11/context/memory-queries";
 import {
-  type V11Principal,
+  type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
   v11SchemaInvalid,
@@ -87,7 +87,7 @@ export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (error) {
@@ -137,7 +137,7 @@ export async function GET(request: Request): Promise<Response> {
 
   // 5. 返回 200 + 投影列表
   const results = entries.map(projectEntry);
-  return v11Ok(
+  return apiSuccess(
     { entries: results },
     {
       status: 200,

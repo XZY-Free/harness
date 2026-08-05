@@ -3,8 +3,8 @@ import {
   REQUEST_ID_HEADER,
   getRequestId,
   parseIfMatch,
-  v11NotFound,
-  v11Ok,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 /**
  * POST /api/v1/threads/{thread_id}/pending-inputs:reorder — 重排 PendingInput 队列（S04-C04，§3.8）。
@@ -28,7 +28,7 @@ import {
  */
 import { reorderPendingInputs } from "@/lib/v11/conversation/pending-input-queries";
 import {
-  type V11Principal,
+  type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   parsePendingQueueEtag,
@@ -71,7 +71,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const threadId = typeof rawValue === "string" ? rawValue : "";
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -83,7 +83,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 2. 校验 Thread 属于当前员工（非 owner → 404 隐藏式）
   const thread = await getThreadById(principal.tenantId, threadId);
   if (!thread || thread.ownerUserId !== principal.userIdentityId) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
   // 3. 解析 If-Match 队列 ETag（必填）
@@ -122,7 +122,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       pending_inputs: result.pending_inputs,
     };
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: {
         [REQUEST_ID_HEADER]: requestId,

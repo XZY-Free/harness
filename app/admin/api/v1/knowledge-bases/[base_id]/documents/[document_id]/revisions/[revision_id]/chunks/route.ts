@@ -22,8 +22,8 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11NotFound,
-  v11Ok,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AdminPrincipal,
@@ -50,7 +50,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -147,15 +147,15 @@ export async function GET(request: Request): Promise<Response> {
   // 校验 Revision / Document / Base 存在 + 跨租户
   const revision = await getKnowledgeDocumentRevisionById(principal.tenantId, revisionId);
   if (!revision || revision.documentId !== documentId) {
-    return v11NotFound(requestId, `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`);
   }
   const doc = await getKnowledgeDocumentById(principal.tenantId, documentId);
   if (!doc || doc.knowledgeBaseId !== baseId) {
-    return v11NotFound(requestId, `KnowledgeDocument 不存在或无权访问: ${documentId}`);
+    return resourceNotFound(requestId, `KnowledgeDocument 不存在或无权访问: ${documentId}`);
   }
   const base = await getKnowledgeBaseById(principal.tenantId, baseId);
   if (!base) {
-    return v11NotFound(requestId, `KnowledgeBase 不存在或无权访问: ${baseId}`);
+    return resourceNotFound(requestId, `KnowledgeBase 不存在或无权访问: ${baseId}`);
   }
 
   const scopeResult = await requireAdminActionScope(
@@ -175,7 +175,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const items = await listKnowledgeChunksByRevision(principal.tenantId, revisionId, { limit });
 
-  return v11Ok(
+  return apiSuccess(
     { items: items.map(projectChunk) },
     {
       status: 200,
@@ -205,15 +205,15 @@ export async function POST(request: Request): Promise<Response> {
 
   const revision = await getKnowledgeDocumentRevisionById(principal.tenantId, revisionId);
   if (!revision || revision.documentId !== documentId) {
-    return v11NotFound(requestId, `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`);
+    return resourceNotFound(requestId, `KnowledgeDocumentRevision 不存在或无权访问: ${revisionId}`);
   }
   const doc = await getKnowledgeDocumentById(principal.tenantId, documentId);
   if (!doc || doc.knowledgeBaseId !== baseId) {
-    return v11NotFound(requestId, `KnowledgeDocument 不存在或无权访问: ${documentId}`);
+    return resourceNotFound(requestId, `KnowledgeDocument 不存在或无权访问: ${documentId}`);
   }
   const base = await getKnowledgeBaseById(principal.tenantId, baseId);
   if (!base) {
-    return v11NotFound(requestId, `KnowledgeBase 不存在或无权访问: ${baseId}`);
+    return resourceNotFound(requestId, `KnowledgeBase 不存在或无权访问: ${baseId}`);
   }
 
   // 已 published 的 Revision 不允许新增 Chunk（不可变性）
@@ -302,7 +302,7 @@ export async function POST(request: Request): Promise<Response> {
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

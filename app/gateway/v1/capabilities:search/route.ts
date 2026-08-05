@@ -20,7 +20,7 @@
  * - resource_type 非法 → 400 REQUEST_SCHEMA_INVALID
  * - cursor 非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, etagHeader, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, etagHeader, getRequestId, apiSuccess } from "@/lib/http";
 import {
   CatalogQueryError,
   type SearchCatalogResult,
@@ -182,7 +182,7 @@ export async function POST(request: Request): Promise<Response> {
   // 7. 返回 200 + ETag
   //    Gateway 不在此处记录 CapabilityUse：搜索只返回目录元数据，
   //    实际能力使用账本在 GET /tools/{id}/schema 与 GET /skills/{id}/content 时记录。
-  return v11Ok(
+  return apiSuccess(
     {
       items: result.items,
       next_cursor: result.next_cursor,

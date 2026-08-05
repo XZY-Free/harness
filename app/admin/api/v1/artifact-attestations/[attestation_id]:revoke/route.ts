@@ -26,7 +26,7 @@ import {
  * - 已撤销 → 409 ATTESTATION_ALREADY_REVOKED
  * - 缺少 reason → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -69,7 +69,7 @@ export async function POST(
   // 先查 attestation 获取 artifact_type（用于 scope 校验）
   const existing = await getAttestationById(principal.tenantId, attestationId);
   if (!existing) {
-    return v11NotFound(requestId, `attestation 不存在或跨租户: ${attestationId}`);
+    return resourceNotFound(requestId, `attestation 不存在或跨租户: ${attestationId}`);
   }
 
   // action scope 校验
@@ -98,7 +98,7 @@ export async function POST(
       requestId,
     );
 
-    return v11Ok(
+    return apiSuccess(
       {
         id: updated.id,
         artifact_type: updated.artifactType,
@@ -113,10 +113,10 @@ export async function POST(
     );
   } catch (err) {
     if (err instanceof AttestationNotFoundError) {
-      return v11NotFound(requestId, err.message);
+      return resourceNotFound(requestId, err.message);
     }
     if (err instanceof AttestationAlreadyRevokedError) {
-      return v11Error("ATTESTATION_ALREADY_REVOKED", err.message, { requestId });
+      return apiError("ATTESTATION_ALREADY_REVOKED", err.message, { requestId });
     }
     throw err;
   }

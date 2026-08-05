@@ -25,7 +25,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 
-/** 四类 API audience（与 lib/http.ts V11Audience 对齐）。 */
+/** 四类 API audience（与 lib/http.ts ApiAudience 对齐）。 */
 export const IDEMPOTENCY_AUDIENCES = ["employee", "runtime", "gateway", "admin"] as const;
 export type IdempotencyAudience = (typeof IDEMPOTENCY_AUDIENCES)[number];
 

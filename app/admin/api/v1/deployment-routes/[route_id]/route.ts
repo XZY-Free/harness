@@ -4,9 +4,9 @@ import {
   etagHeader,
   getRequestId,
   parseIfMatch,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -75,7 +75,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 import { ROUTE_STATES, type RouteState } from "@/lib/v11/schema/deployment-route";
 
 export const dynamic = "force-dynamic";
@@ -175,7 +175,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
   // 5. 校验 Route 存在且属于当前租户（跨租户隐藏为 404）
   const route = await getRouteById(principal.tenantId, routeId);
   if (!route) {
-    return v11NotFound(requestId, `DeploymentRoute 不存在或无权访问: ${routeId}`);
+    return resourceNotFound(requestId, `DeploymentRoute 不存在或无权访问: ${routeId}`);
   }
 
   // 6. 一致性校验：body.route_set_id 必须与 Route.routeSetId 一致
@@ -189,7 +189,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
   // 7. 获取 RouteSet（用于 action scope 的 agentId + 再次验证 ETag）
   const routeSet = await getRouteSetById(principal.tenantId, body.route_set_id);
   if (!routeSet) {
-    return v11NotFound(requestId, `RouteSet 不存在或无权访问: ${body.route_set_id}`);
+    return resourceNotFound(requestId, `RouteSet 不存在或无权访问: ${body.route_set_id}`);
   }
 
   // 8. 校验 action scope（resource = agent, id = routeSet.agentId）
@@ -299,7 +299,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
       affects_new_invocations_only: result.affectsNewInvocationsOnly,
     };
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: {
         [REQUEST_ID_HEADER]: requestId,
@@ -310,7 +310,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
     await failRecord(recordId);
 
     if (err instanceof RouteSetNotFoundError) {
-      return v11NotFound(requestId, err.message);
+      return resourceNotFound(requestId, err.message);
     }
     if (err instanceof RouteSetVersionConflictError) {
       return v11EtagMismatch(
@@ -319,28 +319,28 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
       );
     }
     if (err instanceof RouteNotFoundError) {
-      return v11NotFound(requestId, err.message);
+      return resourceNotFound(requestId, err.message);
     }
     // ArtifactNotVerifiedForRouteError 是 deployment-route-queries 内部类（未导出），
     // 通过 error.name 检测以避免修改 S03-C04 已完成文件。
     if (err instanceof ArtifactNotVerifiedForRouteError) {
-      return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
+      return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
     if (err instanceof Error && err.name === "ArtifactNotVerifiedForRouteError") {
-      return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
+      return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
     if (err instanceof RouteSetRequiresAtomicUpdateError) {
-      return v11Error("ROUTE_SET_REQUIRES_ATOMIC_UPDATE", err.message, { requestId });
+      return apiError("ROUTE_SET_REQUIRES_ATOMIC_UPDATE", err.message, { requestId });
     }
     if (err instanceof AgentCapabilityUnsupportedError) {
-      return v11Error(
+      return apiError(
         "AGENT_CAPABILITY_UNSUPPORTED",
         `AgentRevision required capabilities [${err.missingCapabilities.join(", ")}] 不在 RuntimeRevision capabilities 内`,
         { requestId },
       );
     }
     if (err instanceof RevisionNotPublishedError) {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof RouteWeightInvalidError) {
       return v11SchemaInvalid(requestId, err.message);

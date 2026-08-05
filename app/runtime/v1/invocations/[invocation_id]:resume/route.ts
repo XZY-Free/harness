@@ -18,8 +18,8 @@
  * - 缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, v11Error, v11Ok } from "@/lib/http";
-import { extractBearerToken } from "@/lib/v11/identity/workload-token";
+import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
+import { extractBearerToken } from "@/lib/identity/workload-token";
 import { getRouteHostedAdapter } from "@/lib/v11/runtime/adapters/hosted-adapter";
 import {
   resolveRuntimePrincipal,
@@ -88,7 +88,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const authToken = extractBearerToken(request.headers) ?? undefined;
   const adapter = getRouteHostedAdapter();
   if (!adapter) {
-    return v11Error("RUNTIME_UNAVAILABLE", "Hosted Runtime 尚未配置模型执行器", { requestId });
+    return apiError("RUNTIME_UNAVAILABLE", "Hosted Runtime 尚未配置模型执行器", { requestId });
   }
   await adapter.handleResume({
     invocationId,
@@ -103,7 +103,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     attempt_no: 1,
   };
 
-  return v11Ok(response, {
+  return apiSuccess(response, {
     status: 200,
     headers: { [REQUEST_ID_HEADER]: requestId },
   });

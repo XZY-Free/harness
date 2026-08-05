@@ -18,7 +18,7 @@
  * - Hold 不存在 → 404 RESOURCE_NOT_FOUND
  * - Hold 已解除 → 409 BUSINESS_CONSTRAINT_VIOLATION
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Error, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiError, apiSuccess } from "@/lib/http";
 import {
   type AuditActor,
   actorFromPrincipal,
@@ -31,7 +31,7 @@ import {
   resolveAdminPrincipalAsync,
   v11SchemaInvalid,
 } from "@/lib/v11/admin/route-helpers";
-import { LegalHoldError, releaseLegalHold } from "@/lib/v11/identity/legal-hold-queries";
+import { LegalHoldError, releaseLegalHold } from "@/lib/identity/legal-hold-queries";
 
 export const dynamic = "force-dynamic";
 
@@ -94,7 +94,7 @@ export async function POST(request: Request): Promise<Response> {
       requestId,
     });
 
-    return v11Ok(
+    return apiSuccess(
       {
         id: released.id,
         target_type: released.targetType,
@@ -113,10 +113,10 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (err) {
     if (err instanceof LegalHoldError && err.code === "hold_not_found") {
-      return v11Error("RESOURCE_NOT_FOUND", err.message, { requestId });
+      return apiError("RESOURCE_NOT_FOUND", err.message, { requestId });
     }
     if (err instanceof LegalHoldError && err.code === "hold_already_released") {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     throw err;
   }

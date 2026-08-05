@@ -10,9 +10,9 @@ import {
   REQUEST_ID_HEADER,
   etagHeader,
   getRequestId,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AdminPrincipal,
@@ -39,7 +39,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -144,7 +144,7 @@ export async function GET(request: Request): Promise<Response> {
   // 校验 base 存在且属于该租户
   const base = await getKnowledgeBaseById(principal.tenantId, baseId);
   if (!base) {
-    return v11NotFound(requestId, "KnowledgeBase 不存在或无权访问");
+    return resourceNotFound(requestId, "KnowledgeBase 不存在或无权访问");
   }
 
   const scopeResult = await requireAdminActionScope(
@@ -177,7 +177,7 @@ export async function GET(request: Request): Promise<Response> {
     limit,
   });
 
-  return v11Ok(
+  return apiSuccess(
     { items: items.map(projectDocument) },
     {
       status: 200,
@@ -205,12 +205,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const base = await getKnowledgeBaseById(principal.tenantId, baseId);
   if (!base) {
-    return v11NotFound(requestId, "KnowledgeBase 不存在或无权访问");
+    return resourceNotFound(requestId, "KnowledgeBase 不存在或无权访问");
   }
 
   // KnowledgeBase 必须 active 才能创建 Document
   if (base.lifecycleState !== "active") {
-    return v11Error(
+    return apiError(
       "ACTION_SCOPE_DENIED",
       `KnowledgeBase lifecycle=${base.lifecycleState}，不允许创建 Document`,
       { requestId },
@@ -295,7 +295,7 @@ export async function POST(request: Request): Promise<Response> {
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: {
         [REQUEST_ID_HEADER]: requestId,

@@ -8,7 +8,7 @@
  *   观测与评测 / 安全与审计 / 运营 / 平台设置
  *
  * 职责：
- * - 给定 V11Principal，批量查询其 role_action_binding，按 8 个一级菜单的 action 集合
+ * - 给定 Principal，批量查询其 role_action_binding，按 8 个一级菜单的 action 集合
  *   计算可见性。
  * - 任何一个关联 action 允许 → 该菜单可见（"任意匹配"语义）。
  * - 部分菜单（运营 / 平台设置）暂未在 ACTION_CODES 中定义专门写操作，
@@ -27,9 +27,9 @@
  */
 import { authConfig } from "@/lib/config";
 import { DEFAULT_USER_ID } from "@/lib/constants";
-import { ACTION_CODES, type ActionCode } from "@/lib/v11/identity/action-codes";
-import type { V11Principal } from "@/lib/v11/identity/resolver";
-import { listActiveActionBindingsForUser } from "@/lib/v11/identity/role-action-queries";
+import { ACTION_CODES, type ActionCode } from "@/lib/identity/action-codes";
+import type { Principal } from "@/lib/identity/resolver";
+import { listActiveActionBindingsForUser } from "@/lib/identity/role-action-queries";
 
 /** 8 个一级菜单 ID（与 nav.tsx ITEMS 顺序一致）。 */
 export const STUDIO_NAV_IDS = [
@@ -125,7 +125,7 @@ const ALL_HIDDEN: StudioNavVisibility = {
  * 4. 任何异常 → 全部隐藏（fail-closed）。
  */
 export async function computeStudioNavVisibility(
-  principal: V11Principal,
+  principal: Principal,
 ): Promise<StudioNavVisibility> {
   // dev 模式 + 默认用户 → 全部可见（与 lib/rbac devOpen 行为一致）
   if (authConfig.mode === "dev" && principal.externalSubject === DEFAULT_USER_ID) {
@@ -171,7 +171,7 @@ export async function computeStudioNavVisibility(
  * 注意：此函数只查可见性，不替代服务端 Action Scope 校验。
  * 写操作仍需调用 requireActionScope。
  */
-export async function isNavVisible(principal: V11Principal, navId: StudioNavId): Promise<boolean> {
+export async function isNavVisible(principal: Principal, navId: StudioNavId): Promise<boolean> {
   const visibility = await computeStudioNavVisibility(principal);
   return visibility[navId];
 }

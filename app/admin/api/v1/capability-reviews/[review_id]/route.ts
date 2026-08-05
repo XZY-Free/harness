@@ -2,9 +2,9 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11Error,
-  v11NotFound,
-  v11Ok,
+  apiError,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 /**
  * GET / POST /admin/api/v1/capability-reviews/{review_id} — CapabilityReview 单资源（阶段 6 S06-C05）。
@@ -48,7 +48,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -160,10 +160,10 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     reviewId,
   });
   if (!review) {
-    return v11NotFound(requestId, `CapabilityReview 不存在或无权访问: ${reviewId}`);
+    return resourceNotFound(requestId, `CapabilityReview 不存在或无权访问: ${reviewId}`);
   }
 
-  return v11Ok(projectReview(review), {
+  return apiSuccess(projectReview(review), {
     status: 200,
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
@@ -206,7 +206,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     reviewId,
   });
   if (!review) {
-    return v11NotFound(requestId, `CapabilityReview 不存在或无权访问: ${reviewId}`);
+    return resourceNotFound(requestId, `CapabilityReview 不存在或无权访问: ${reviewId}`);
   }
 
   // 5. 校验 action scope：capability.review + tenant wildcard
@@ -275,7 +275,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
@@ -283,13 +283,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     await failRecord(recordId);
 
     if (err instanceof CapabilityReviewNotFoundError) {
-      return v11NotFound(requestId, err.message);
+      return resourceNotFound(requestId, err.message);
     }
     if (err instanceof CapabilityReviewValidationError) {
       return v11SchemaInvalid(requestId, err.message);
     }
     if (err instanceof CapabilityReviewStateError) {
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     throw err;
   }

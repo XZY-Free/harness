@@ -32,8 +32,8 @@ import {
   REQUEST_ID_HEADER,
   etagHeader,
   getRequestId,
-  v11NotFound,
-  v11Ok,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -59,7 +59,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 import type { V11AgentRevision } from "@/lib/v11/schema/agent";
 
 export const dynamic = "force-dynamic";
@@ -157,7 +157,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 3. 校验 Agent 存在且属于当前租户（跨租户隐藏为 404）
   const agent = await getAgentById(principal.tenantId, agentId);
   if (!agent) {
-    return v11NotFound(requestId, `Agent 不存在或无权访问: ${agentId}`);
+    return resourceNotFound(requestId, `Agent 不存在或无权访问: ${agentId}`);
   }
 
   // 4. 解析 Idempotency-Key（必填）
@@ -256,7 +256,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 201,
       headers: {
         [REQUEST_ID_HEADER]: requestId,
@@ -291,13 +291,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     principal = await resolveAdminPrincipalAsync(request.headers);
   } catch (err) {
     const authResp = adminAuthErrorResponse(err, requestId);
-    return authResp ?? v11NotFound(requestId);
+    return authResp ?? resourceNotFound(requestId);
   }
 
   // 校验 Agent 存在且属于当前租户
   const agent = await getAgentById(principal.tenantId, agentId);
   if (!agent) {
-    return v11NotFound(requestId, `Agent 不存在或无权访问: ${agentId}`);
+    return resourceNotFound(requestId, `Agent 不存在或无权访问: ${agentId}`);
   }
 
   // 解析查询参数 state
@@ -315,7 +315,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   );
   const projected = revisions.map(projectRevision);
 
-  return v11Ok(
+  return apiSuccess(
     { items: projected, total: projected.length },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );

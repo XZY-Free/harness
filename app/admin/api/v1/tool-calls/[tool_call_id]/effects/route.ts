@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -46,13 +46,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     toolCallId,
   });
   if (!toolCall) {
-    return v11NotFound(requestId, `ToolCall 不存在或无权访问: ${toolCallId}`);
+    return resourceNotFound(requestId, `ToolCall 不存在或无权访问: ${toolCallId}`);
   }
 
   const effect = await getEffectRecordByToolCall(principal.tenantId, toolCallId);
 
   if (!effect) {
-    return v11Ok({ item: null }, { headers: { [REQUEST_ID_HEADER]: requestId } });
+    return apiSuccess({ item: null }, { headers: { [REQUEST_ID_HEADER]: requestId } });
   }
 
   const body = {
@@ -72,5 +72,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     updated_at: effect.updatedAt.toISOString(),
   };
 
-  return v11Ok({ item: body }, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess({ item: body }, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

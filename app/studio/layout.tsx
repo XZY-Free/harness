@@ -5,7 +5,7 @@ import { AuthError, getCurrentUserFromRequest } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
 import { computeStudioNavVisibility } from "@/lib/studio/nav-visibility";
 import type { StudioNavVisibility } from "@/lib/studio/nav-visibility";
-import { resolveV11Principal } from "@/lib/v11/identity/resolver";
+import { resolvePrincipal } from "@/lib/identity/resolver";
 import { headers } from "next/headers";
 
 /**
@@ -14,7 +14,7 @@ import { headers } from "next/headers";
  * server component，在渲染子页前：
  * 1. 校验 SSO 身份（AuthError → 401 页）。
  * 2. 校验旧 studio.access 权限（PERMISSIONS 体系）→ 403 页。
- * 3. 解析 V11Principal（admin audience）→ 计算 8 大菜单可见性。
+ * 3. 解析 Principal（admin audience）→ 计算 8 大菜单可见性。
  * 4. 通过 → 左侧 <StudioNav visibleItems={...} /> + 右侧子页。
  *
  * 安全边界：
@@ -47,7 +47,7 @@ export default async function StudioLayout({
     return <StudioGatePage status={403} message="无 studio.access 权限" />;
   }
 
-  // S11-W01：解析 V11Principal 并计算 8 大菜单可见性。
+  // S11-W01：解析 Principal 并计算 8 大菜单可见性。
   // 解析失败 fail-open：保留 studio.access 入口校验，但菜单全部隐藏。
   let visibility: StudioNavVisibility = {
     agents: false,
@@ -61,7 +61,7 @@ export default async function StudioLayout({
   };
   try {
     const h = await headers();
-    const principal = await resolveV11Principal(h, "admin");
+    const principal = await resolvePrincipal(h, "admin");
     visibility = await computeStudioNavVisibility(principal);
   } catch {
     // dev 模式或身份解析失败：保留 studio.access 入口校验，菜单全部隐藏

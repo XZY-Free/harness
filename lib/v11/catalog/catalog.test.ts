@@ -37,8 +37,8 @@ import {
   refreshCatalogEntry,
   removeCatalogEntry,
 } from "@/lib/v11/catalog/projector";
-import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
+import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { v11Agent } from "@/lib/v11/schema/agent";
 import { CATALOG_AUDIENCES, CATALOG_RESOURCE_TYPES } from "@/lib/v11/schema/catalog";
 import { tenant } from "@/lib/v11/schema/identity";

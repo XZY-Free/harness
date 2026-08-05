@@ -17,7 +17,7 @@
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  * - scope 非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -73,7 +73,7 @@ export async function GET(request: Request): Promise<Response> {
   const result = await checkReadiness(principal.tenantId, scope);
 
   // 5. 返回 200 + 结构化结果
-  return v11Ok(result, {
+  return apiSuccess(result, {
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
 }

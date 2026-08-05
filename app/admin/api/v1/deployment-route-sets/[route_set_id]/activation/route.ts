@@ -5,8 +5,8 @@ import {
   etagHeader,
   getRequestId,
   parseIfMatch,
-  v11Error,
-  v11Ok,
+  apiError,
+  apiSuccess,
 } from "@/lib/http";
 import {
   type AuditActor,
@@ -51,7 +51,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 
@@ -239,7 +239,7 @@ export async function PUT(
 
     // 8. 返回 200 + ETag
     const etag = `route-set-${result.routeSetVersionNo}`;
-    return v11Ok(
+    return apiSuccess(
       {
         route_set_id: result.routeSetId,
         route_set_version_no: result.routeSetVersionNo,
@@ -263,7 +263,7 @@ export async function PUT(
   } catch (err) {
     if (err instanceof RouteSetNotFoundError) {
       await failRecord(recordId);
-      return v11Error("RESOURCE_NOT_FOUND", err.message, { requestId });
+      return apiError("RESOURCE_NOT_FOUND", err.message, { requestId });
     }
     if (err instanceof RouteSetVersionConflictError) {
       await failRecord(recordId);
@@ -271,19 +271,19 @@ export async function PUT(
     }
     if (err instanceof ArtifactNotVerifiedForRouteError) {
       await failRecord(recordId);
-      return v11Error("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
+      return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
     if (err instanceof RevisionNotPublishedError) {
       await failRecord(recordId);
-      return v11Error("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof AgentCapabilityUnsupportedError) {
       await failRecord(recordId);
-      return v11Error("AGENT_CAPABILITY_UNSUPPORTED", err.message, { requestId });
+      return apiError("AGENT_CAPABILITY_UNSUPPORTED", err.message, { requestId });
     }
     if (err instanceof RouteSetRequiresAtomicUpdateError) {
       await failRecord(recordId);
-      return v11Error("ROUTE_SET_REQUIRES_ATOMIC_UPDATE", err.message, { requestId });
+      return apiError("ROUTE_SET_REQUIRES_ATOMIC_UPDATE", err.message, { requestId });
     }
     throw err;
   }

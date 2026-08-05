@@ -1,4 +1,4 @@
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -40,7 +40,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
 
   const turn = await getTurnById(principal.tenantId, turnId);
   if (!turn || turn.threadId !== threadId) {
-    return v11NotFound(requestId, `Turn 不存在或无权访问: ${turnId}`);
+    return resourceNotFound(requestId, `Turn 不存在或无权访问: ${turnId}`);
   }
 
   const body = {
@@ -65,5 +65,5 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     version_no: turn.versionNo,
   };
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

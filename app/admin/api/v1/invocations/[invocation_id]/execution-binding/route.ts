@@ -1,6 +1,6 @@
 import { serializeExecutionBinding } from "@/lib/executions/application/serialize-execution-binding";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -45,15 +45,15 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 校验父 Invocation 存在且属于当前租户
   const invocation = await getInvocationById(principal.tenantId, invocationId);
   if (!invocation) {
-    return v11NotFound(requestId, `Invocation 不存在或无权访问: ${invocationId}`);
+    return resourceNotFound(requestId, `Invocation 不存在或无权访问: ${invocationId}`);
   }
 
   const binding = await getExecutionBindingByInvocation(principal.tenantId, invocationId);
   if (!binding) {
-    return v11NotFound(requestId, `ExecutionBinding 不存在或无权访问: invocation=${invocationId}`);
+    return resourceNotFound(requestId, `ExecutionBinding 不存在或无权访问: invocation=${invocationId}`);
   }
 
   const body = serializeExecutionBinding(binding);
 
-  return v11Ok(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
+  return apiSuccess(body, { headers: { [REQUEST_ID_HEADER]: requestId } });
 }

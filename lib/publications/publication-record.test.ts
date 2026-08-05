@@ -7,7 +7,7 @@ import {
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
 import * as publicationQueries from "@/lib/publications/persistence/publication-record-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { v11Agent, v11AgentRevision } from "@/lib/v11/schema/agent";
 import { v11Runtime, v11RuntimeRevision } from "@/lib/v11/schema/runtime";
 import { sql } from "drizzle-orm";

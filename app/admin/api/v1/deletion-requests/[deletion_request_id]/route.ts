@@ -17,7 +17,7 @@
  * - 请求 id 不存在 → 404 RESOURCE_NOT_FOUND
  * - include_steps 非法 → 400 REQUEST_SCHEMA_INVALID
  */
-import { REQUEST_ID_HEADER, getRequestId, v11NotFound, v11Ok } from "@/lib/http";
+import { REQUEST_ID_HEADER, getRequestId, resourceNotFound, apiSuccess } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -29,7 +29,7 @@ import {
   computeRequestSummary,
   getDeletionRequestById,
   listDeletionSteps,
-} from "@/lib/v11/identity/deletion-request-queries";
+} from "@/lib/identity/deletion-request-queries";
 import type { V11DeletionStep } from "@/lib/v11/schema/deletion-request";
 
 export const dynamic = "force-dynamic";
@@ -88,7 +88,7 @@ export async function GET(
   // 5. 查询请求；不存在 → 404 RESOURCE_NOT_FOUND（跨租户隔离由 getDeletionRequestById 保证）
   const deletionRequest = await getDeletionRequestById(principal.tenantId, deletionRequestId);
   if (!deletionRequest) {
-    return v11NotFound(requestId, "删除请求不存在或无权访问");
+    return resourceNotFound(requestId, "删除请求不存在或无权访问");
   }
 
   // 6. 列出全部 steps + 派生 summary
@@ -109,7 +109,7 @@ export async function GET(
     updated_at: deletionRequest.updatedAt.toISOString(),
   };
 
-  return v11Ok(responseBody, {
+  return apiSuccess(responseBody, {
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
 }

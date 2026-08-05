@@ -33,7 +33,7 @@ import {
  * - 非 owner 员工调用：调用方负责鉴权（route 层 404 隐藏式）。
  * - 不暴露内部堆栈或跨租户数据。
  */
-import { getDeviceById } from "@/lib/v11/identity/device-queries";
+import { getDeviceById } from "@/lib/identity/device-queries";
 import {
   ENVIRONMENT_LEASE_TERMINAL_STATES,
   type V11EnvironmentDefinition,

@@ -21,7 +21,7 @@
  * - Invocation 已终态 → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - transient_sequence 不连续 → 409 EVENT_SEQUENCE_GAP（retryable）
  */
-import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, v11Ok } from "@/lib/http";
+import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, getRequestId, apiSuccess } from "@/lib/http";
 import {
   type WorkloadTokenClaims,
   ingressErrorToResponse,
@@ -124,7 +124,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       persisted: result.persisted,
     };
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 200,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

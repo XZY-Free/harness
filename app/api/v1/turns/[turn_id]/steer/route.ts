@@ -2,11 +2,11 @@ import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   getRequestId,
-  v11NotFound,
-  v11Ok,
+  resourceNotFound,
+  apiSuccess,
 } from "@/lib/http";
 import {
-  type V11Principal,
+  type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
@@ -45,7 +45,7 @@ import {
   enforceIdempotency,
   failRecord,
   prepareRetryForFailedRecord,
-} from "@/lib/v11/identity/idempotency";
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -71,7 +71,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const { turn_id: turnId } = await context.params;
 
   // 1. 解析员工身份
-  let principal: V11Principal;
+  let principal: Principal;
   try {
     principal = await resolveEmployeePrincipal(request.headers);
   } catch (err) {
@@ -83,11 +83,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 2. 校验 Turn 属于当前员工（非 owner → 404 隐藏式）
   const turn = await getTurnById(principal.tenantId, turnId);
   if (!turn) {
-    return v11NotFound(requestId, `Turn 不存在或无权访问: ${turnId}`);
+    return resourceNotFound(requestId, `Turn 不存在或无权访问: ${turnId}`);
   }
   const thread = await getThreadById(principal.tenantId, turn.threadId);
   if (!thread || thread.ownerUserId !== principal.userIdentityId) {
-    return v11NotFound(requestId, `Turn 不存在或无权访问: ${turnId}`);
+    return resourceNotFound(requestId, `Turn 不存在或无权访问: ${turnId}`);
   }
 
   // 3. 解析 Idempotency-Key（必填）
@@ -172,7 +172,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
-    return v11Ok(responseBody, {
+    return apiSuccess(responseBody, {
       status: 202,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });

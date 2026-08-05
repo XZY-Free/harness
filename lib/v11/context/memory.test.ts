@@ -58,11 +58,11 @@ import {
   updateMemoryEntry,
 } from "@/lib/v11/context/memory-queries";
 import { MemoryResolver } from "@/lib/v11/context/source-resolvers";
-import { upsertPrincipalBinding } from "@/lib/v11/identity/principal-binding-queries";
-import { grantActionBinding } from "@/lib/v11/identity/role-action-queries";
-import { ensureDefaultTenant } from "@/lib/v11/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/v11/identity/user-identity-queries";
-import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/v11/identity/workload-token";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding } from "@/lib/identity/role-action-queries";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { tenant as tenantTable } from "@/lib/v11/schema/identity";
 import { memoryCandidate, memoryEntry, memorySource } from "@/lib/v11/schema/memory";
 import { eq } from "drizzle-orm";

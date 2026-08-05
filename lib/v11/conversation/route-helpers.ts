@@ -7,7 +7,7 @@
  *         §2.5（成功与错误格式）。
  *
  * 职责：
- * - resolveEmployeePrincipal：员工身份解析（resolveV11Principal + audience=employee）。
+ * - resolveEmployeePrincipal：员工身份解析（resolvePrincipal + audience=employee）。
  * - parseThreadSettingsEtag：从 Thread 设置 ETag 提取 versionNo。
  * - v11SchemaInvalid / v11EtagMismatch：错误响应工具（与 admin route-helpers 对齐）。
  * - conversationErrorToResponse：会话域 Error 实例 → HTTP 响应映射。
@@ -17,7 +17,7 @@
  * - Thread 不存在或非 owner 一律 404 RESOURCE_NOT_FOUND（隐藏式，不泄露存在）。
  * - Agent 必须 enabled 且同租户；否则 404（不泄露存在，§3.1 行 143）。
  */
-import { v11Error, v11NotFound } from "@/lib/http";
+import { apiError, resourceNotFound } from "@/lib/http";
 import {
   ForkSourceTurnMismatchError,
   HandoffAlreadyResolvedError,
@@ -35,7 +35,7 @@ import {
   TurnRequiresUserActionError,
   TurnStateConflictError,
 } from "@/lib/v11/conversation/errors";
-import { V11AuthError, type V11Principal, resolveV11Principal } from "@/lib/v11/identity/resolver";
+import { AuthenticationError, type Principal, resolvePrincipal } from "@/lib/identity/resolver";
 import {
   UserActionAlreadyResolvedError,
   UserActionNotFoundError,
@@ -45,29 +45,29 @@ import {
 } from "@/lib/v11/permission/user-action-queries";
 
 // ─── 类型再导出（route handlers 统一从此处 import） ────────
-export type { V11Principal };
+export type { Principal };
 
 // ─── 身份解析 ──────────────────────────────────────────────
 
 /**
  * 解析员工身份（employee audience）。
  *
- * 走 resolveV11Principal(headers, "employee")：
+ * 走 resolvePrincipal(headers, "employee")：
  * - dev 模式返回默认身份。
  * - trusted-headers 模式从 SSO 注入 header 解析。
  *
- * @throws V11AuthError 缺少身份（trusted-headers 模式缺 header）
+ * @throws AuthenticationError 缺少身份（trusted-headers 模式缺 header）
  */
-export async function resolveEmployeePrincipal(headers: Headers): Promise<V11Principal> {
-  return resolveV11Principal(headers, "employee");
+export async function resolveEmployeePrincipal(headers: Headers): Promise<Principal> {
+  return resolvePrincipal(headers, "employee");
 }
 
 /**
- * 把 V11AuthError 转成 401 响应；非身份错误返回 null。
+ * 把 AuthenticationError 转成 401 响应；非身份错误返回 null。
  */
 export function employeeAuthErrorResponse(error: unknown, requestId: string): Response | null {
-  if (error instanceof V11AuthError) {
-    return v11Error("AUTHENTICATION_REQUIRED", error.message, { requestId });
+  if (error instanceof AuthenticationError) {
+    return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
   }
   return null;
 }
@@ -161,12 +161,12 @@ export function parsePendingQueueEtag(etag: string): number {
 
 /** 构造 400 REQUEST_SCHEMA_INVALID 响应。 */
 export function v11SchemaInvalid(requestId: string, message: string): Response {
-  return v11Error("REQUEST_SCHEMA_INVALID", message, { requestId });
+  return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
 }
 
 /** 构造 412 ETAG_MISMATCH 响应（乐观锁冲突）。 */
 export function v11EtagMismatch(requestId: string, message: string): Response {
-  return v11Error("ETAG_MISMATCH", message, { requestId });
+  return apiError("ETAG_MISMATCH", message, { requestId });
 }
 
 /**
@@ -188,13 +188,13 @@ export function v11EtagMismatch(requestId: string, message: string): Response {
  */
 export function conversationErrorToResponse(error: unknown, requestId: string): Response | null {
   if (error instanceof ThreadNotFoundError) {
-    return v11NotFound(requestId, `Thread 不存在或无权访问: ${error.threadId}`);
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${error.threadId}`);
   }
   if (error instanceof TurnNotFoundError) {
-    return v11NotFound(requestId, `Turn 不存在或无权访问: ${error.turnId}`);
+    return resourceNotFound(requestId, `Turn 不存在或无权访问: ${error.turnId}`);
   }
   if (error instanceof ThreadNotAcceptingTurnsError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
       requestId,
       details: { thread_id: error.threadId, lifecycle_state: error.lifecycleState },
     });
@@ -206,7 +206,7 @@ export function conversationErrorToResponse(error: unknown, requestId: string): 
     );
   }
   if (error instanceof TurnStateConflictError) {
-    return v11Error("TURN_ALREADY_TERMINAL", error.message, {
+    return apiError("TURN_ALREADY_TERMINAL", error.message, {
       requestId,
       details: {
         turn_id: error.turnId,
@@ -216,16 +216,16 @@ export function conversationErrorToResponse(error: unknown, requestId: string): 
     });
   }
   if (error instanceof ItemSupersedeCycleError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
       requestId,
       details: { item_id: error.itemId, superseded_by_item_id: error.supersededByItemId },
     });
   }
   if (error instanceof PendingInputNotFoundError) {
-    return v11NotFound(requestId, `PendingInput 不存在或无权访问: ${error.pendingInputId}`);
+    return resourceNotFound(requestId, `PendingInput 不存在或无权访问: ${error.pendingInputId}`);
   }
   if (error instanceof PendingInputNotPendingError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
       requestId,
       details: {
         pending_input_id: error.pendingInputId,
@@ -235,7 +235,7 @@ export function conversationErrorToResponse(error: unknown, requestId: string): 
     });
   }
   if (error instanceof PendingInputReorderConflictError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
       requestId,
       details: {
         thread_id: error.threadId,
@@ -252,13 +252,13 @@ export function conversationErrorToResponse(error: unknown, requestId: string): 
     );
   }
   if (error instanceof TurnRequiresUserActionError) {
-    return v11Error("TURN_REQUIRES_USER_ACTION", error.message, {
+    return apiError("TURN_REQUIRES_USER_ACTION", error.message, {
       requestId,
       details: { turn_id: error.turnId, turn_state: error.currentState },
     });
   }
   if (error instanceof ForkSourceTurnMismatchError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
       requestId,
       details: {
         parent_thread_id: error.parentThreadId,
@@ -267,13 +267,13 @@ export function conversationErrorToResponse(error: unknown, requestId: string): 
     });
   }
   if (error instanceof HandoffValidationError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
       requestId,
       details: { reason: error.reason, code: error.code ?? "RESOLUTION_NOT_ALLOWED" },
     });
   }
   if (error instanceof HandoffAlreadyResolvedError) {
-    return v11Error("OPERATION_PAYLOAD_CONFLICT", error.message, {
+    return apiError("OPERATION_PAYLOAD_CONFLICT", error.message, {
       requestId,
       details: { request_id: error.requestId, current_state: error.currentState },
     });
@@ -286,13 +286,13 @@ export function conversationErrorToResponse(error: unknown, requestId: string): 
   }
   // ─── UserAction 域错误（S10-W05） ──────────────────────
   if (error instanceof UserActionNotFoundError) {
-    return v11NotFound(requestId, error.message);
+    return resourceNotFound(requestId, error.message);
   }
   if (error instanceof UserActionValidationError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, { requestId });
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, { requestId });
   }
   if (error instanceof UserActionResolutionMismatchError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
       requestId,
       details: {
         request_type: error.requestType,
@@ -301,10 +301,10 @@ export function conversationErrorToResponse(error: unknown, requestId: string): 
     });
   }
   if (error instanceof UserActionStateError) {
-    return v11Error("BUSINESS_CONSTRAINT_VIOLATION", error.message, { requestId });
+    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, { requestId });
   }
   if (error instanceof UserActionAlreadyResolvedError) {
-    return v11Error("OPERATION_PAYLOAD_CONFLICT", error.message, {
+    return apiError("OPERATION_PAYLOAD_CONFLICT", error.message, {
       requestId,
       details: { request_id: error.requestId, current_state: error.currentState },
     });
