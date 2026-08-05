@@ -36,6 +36,9 @@ import {
   type CutoverItemState,
   type QualificationCategory,
 } from "@/lib/control-plane/cutover/domain/cutover-item";
+import {
+  checkItemReadiness,
+} from "@/lib/control-plane/cutover/application/cutover-readiness-checker";
 
 /** Cutover 执行器配置。 */
 export interface CutoverExecutorConfig {
@@ -189,28 +192,41 @@ export function createCutoverExecutor(config: CutoverExecutorConfig) {
         replacementId = result.replacementRevisionId;
       }
 
-      // Replacement 创建成功 → 标记 ready
-      // 注意：新 Revision 的 Attestation/Publish 由其他流程完成
-      // Cutover Item 只负责创建 Replacement，后续由资格重建服务完成
+      // Replacement 创建成功 → 保存 replacementSubjectId
       await config.store.updateItemState({
         itemId: item.id,
         state: "publication_pending",
         replacementSubjectId: replacementId,
       });
 
-      // 简化假设：Replacement Revision 创建后即视为 ready
-      // 实际部署中，Attestation/Publish 由 Replacement 工作流异步完成
-      await config.store.updateItemState({
-        itemId: item.id,
-        state: "ready",
+      // §7.1: 真实 Readiness 检查 — 不能在创建 Draft 后直接 Ready
+      // 必须验证: Revision published + Artifact bound + Attestation verified + Publication active (+ Conformance passed for runtime)
+      const readiness = await checkItemReadiness({
+        subjectType: item.subjectType,
+        replacementRevisionId: replacementId,
       });
 
+      if (readiness.ready) {
+        await config.store.updateItemState({
+          itemId: item.id,
+          state: "ready",
+        });
+        return {
+          itemId: item.id,
+          subjectType: item.subjectType,
+          sourceSubjectId: item.sourceSubjectId,
+          replacementSubjectId: replacementId,
+          newState: "ready",
+        };
+      }
+
+      // §7.1: Readiness 条件不满足 — 保持在 publication_pending，由后续 Worker 轮询
       return {
         itemId: item.id,
         subjectType: item.subjectType,
         sourceSubjectId: item.sourceSubjectId,
         replacementSubjectId: replacementId,
-        newState: "ready",
+        newState: "publication_pending",
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
