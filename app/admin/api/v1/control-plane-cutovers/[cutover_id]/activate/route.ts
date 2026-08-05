@@ -1,10 +1,8 @@
 /**
  * POST /admin/api/v1/control-plane-cutovers/{cutover_id}/activate — 激活切换。
  *
- * ⚠️ 冻结：在真实 Cutover 工作流完成前，此端点返回 503 FEATURE_NOT_READY。
- * 当前 Cutover activate 未真正调用 ActivateRouteSet，仅修改 Plan 状态，
- * 可能宣称切换成功但真实 RouteSet 完全没有变化。
- * 参见：SnowHarness专题01全局统一与最终收敛方案 §0.3
+ * §7.3: 调用 activateCutoverPlan 执行真实 9 步激活流程。
+ * 前置条件：Cutover Worker 已完成所有 Item Readiness 检查，Plan 处于 ready_to_activate 状态。
  */
 
 import {
@@ -17,6 +15,8 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/v11/admin/route-helpers";
+import { activateCutoverPlan } from "@/lib/control-plane/cutover/application/execute-cutover";
+import { mysqlCutoverStore } from "@/lib/control-plane/cutover/persistence/mysql-cutover-store";
 
 export const dynamic = "force-dynamic";
 
@@ -37,11 +37,27 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     throw err;
   }
 
-  // 冻结：在真实 Cutover 工作流完成前，不允许激活
-  return v11Error(
-    "FEATURE_NOT_READY",
-    `Cutover 激活功能尚未实现。Plan ${planId} 未真正调用 ActivateRouteSet。` +
-    "在真实 Cutover 工作流完成前，此端点冻结。参见专题01 §0.3。",
-    { requestId },
-  );
+  // §7.3: 真实 Cutover 激活
+  try {
+    const result = await activateCutoverPlan(
+      { store: mysqlCutoverStore } as Parameters<typeof activateCutoverPlan>[0],
+      {
+        planId,
+        tenantId: principal.tenantId,
+        actor: { tenantId: principal.tenantId, actorType: "user", actorId: principal.userId },
+      },
+    );
+
+    return Response.json(
+      {
+        planId,
+        activated: true,
+        targetRouteSetVersionNo: result.targetRouteSetVersionNo,
+      },
+      { status: 200, headers: { [REQUEST_ID_HEADER]: requestId } },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return v11Error("CUTOVER_ACTIVATION_FAILED", message, { requestId });
+  }
 }

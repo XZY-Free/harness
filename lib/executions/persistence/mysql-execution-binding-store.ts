@@ -93,6 +93,10 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         throw evidenceError("Capability Manifest Digest 已变化");
       }
 
+      // §5.1 TODO: 将本函数的内联校验逻辑迁移到 validateBindingEligibility() 统一入口，
+      // 使 Binding Store.create() 事务内仅调用 validateBindingEligibility() + insert。
+      // 当前内联校验与 validateBindingEligibility() 逻辑一致，但独立维护。
+
       const evidence = input.controlPlaneEvidence;
       await tx.insert(executionBindingTable).values({
         invocationId: input.invocationId,

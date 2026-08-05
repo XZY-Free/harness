@@ -3,18 +3,19 @@ import {
   RuntimeConformanceBindingError,
   type RuntimeConformanceReport,
   validateRuntimeConformanceReport,
-  verifyRuntimeConformanceReportSignature,
 } from "@/lib/runtimes/domain/runtime-conformance-run";
 import type {
   RuntimeConformanceCaseResultRecord,
   RuntimeConformanceRunRecord,
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import type { RuntimeConformanceRunStore } from "@/lib/runtimes/persistence/runtime-conformance-run-store";
+import type { RuntimeConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 
 export interface RecordRuntimeConformanceRunCommand {
   tenantId: string;
   runtimeRevisionId: string;
   report: RuntimeConformanceReport;
+  /** §8.4: DSSE Envelope 签名（替代旧 HMAC signingSecret）。 */
   signature: string;
   idempotencyKey: string;
   requestId: string;
@@ -33,7 +34,11 @@ export interface RecordRuntimeConformanceRunCommand {
 
 export function createRecordRuntimeConformanceRun(dependencies: {
   store: RuntimeConformanceRunStore;
-  signingSecret: () => string;
+  /**
+   * §8.4: Conformance 验证器 — 替代 signingSecret。
+   * 新 Run 使用 DSSE Verifier；Legacy HMAC 仅历史读取兼容。
+   */
+  verifier: RuntimeConformanceVerifier;
   now?: () => Date;
   newId?: () => string;
 }) {
@@ -43,11 +48,22 @@ export function createRecordRuntimeConformanceRun(dependencies: {
     if (command.report.runtimeRevisionId !== command.runtimeRevisionId) {
       throw new RuntimeConformanceBindingError("Runner 报告 Revision 与命令不一致");
     }
-    verifyRuntimeConformanceReportSignature(
-      command.report,
-      command.signature,
-      dependencies.signingSecret(),
-    );
+
+    // §8.4: 使用 RuntimeConformanceVerifier 验证 — 替代旧 HMAC signingSecret 验签
+    const verifyResult = await dependencies.verifier.verify({
+      runId: command.report.runId,
+      expectedRuntimeRevisionId: command.runtimeRevisionId,
+      expectedRuntimeArtifactDigest: command.report.runtimeArtifactDigest,
+      expectedRuntimeConfigDigest: command.report.runtimeConfigDigest,
+      expectedProtocolContractRevision: command.report.protocolContractRevision,
+      tenantId: command.tenantId,
+    });
+    if (!verifyResult.verified) {
+      throw new RuntimeConformanceBindingError(
+        `Conformance 验证失败: ${verifyResult.failureReason ?? "unknown"}`,
+      );
+    }
+
     validateRuntimeConformanceReport(command.report);
 
     const existing = await dependencies.store.findByIdempotency(command);

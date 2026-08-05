@@ -11,8 +11,12 @@ import { dispatchInvocationForTurn } from "@/lib/v11/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/v11/runtime/event-ingress-queries";
 import { createInProcessHostedRuntimeClient } from "@/lib/v11/runtime/in-process-hosted-runtime";
 import { ingressTransientBatch } from "@/lib/v11/runtime/transient-events";
-import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import { createResolveRoute, type RouteResolver } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
+import {
+  createConfiguredRouteResolver,
+} from "@/lib/routes/infrastructure/configured-route-resolver";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { createRequestHostedProvisioning } from "@/lib/runtimes/application/request-hosted-provisioning";
 import { mysqlHostedProvisioningRequestStore } from "@/lib/runtimes/persistence/mysql-hosted-provisioning-request-store";
 import { createRevisionValidator } from "@/lib/runtimes/application/validate-hosted-provisioning-revision";
@@ -23,7 +27,21 @@ import { streamText } from "ai";
 
 type ModelFn = (message: string, context: HostedModelContext) => Promise<string>;
 
-const resolveRoute = createResolveRoute({ store: mysqlRouteResolutionStore });
+/** §4.6: 使用统一解析入口 — Shadow 对比在内部自动执行。 */
+const configuredResolver = createConfiguredRouteResolver({
+  authorityStore: mysqlRouteResolutionStore,
+  projectionStore: mysqlRouteEligibilityResolutionStore,
+});
+const resolveRoute: RouteResolver = async (input) => {
+  const result = await configuredResolver({
+    tenantId: input.tenantId,
+    agentId: input.agentId,
+    routeScopeKey: input.routeScopeKey,
+    businessKey: input.businessKey,
+    attributes: input.attributes,
+  });
+  return result.outcome;
+};
 
 /**
  * §6.1: 注入 Revision 验证器的 ProvisioningRequest 工厂。

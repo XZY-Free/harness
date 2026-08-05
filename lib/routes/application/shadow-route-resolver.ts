@@ -49,6 +49,14 @@ export interface ShadowDiff {
   authorityCandidateCount: number;
   /** Projection 候选数。 */
   projectionCandidateCount: number;
+  /** §4.6: Authority 证据 ID 集合（Agent/Runtime Attestation + Publication + Conformance）。 */
+  authorityEvidenceIds?: { attestationIds: string[]; publicationRecordIds: string[]; conformanceRunIds: string[] };
+  /** §4.6: Projection 证据 ID 集合。 */
+  projectionEvidenceIds?: { attestationIds: string[]; publicationRecordIds: string[]; conformanceRunIds: string[] };
+  /** §4.6: Authority DB 查询次数。 */
+  authorityQueryCount?: number;
+  /** §4.6: Projection DB 查询次数。 */
+  projectionQueryCount?: number;
 }
 
 export interface ShadowResolverConfig {
@@ -158,6 +166,13 @@ export function createShadowRouteResolver(deps: CreateShadowRouteResolverDeps) {
       projectionMs,
       authorityCandidateCount: authorityCandidates.length,
       projectionCandidateCount: projectionCandidates.length,
+      // §4.6: 证据 ID 集合 — 用于差异诊断
+      authorityEvidenceIds: authorityResolved
+        ? extractEvidenceIds(authorityOutcome.resolution.controlPlaneEvidence)
+        : undefined,
+      projectionEvidenceIds: projectionResolved
+        ? extractEvidenceIds(projectionOutcome.resolution.controlPlaneEvidence)
+        : undefined,
     };
 
     // 记录差异日志（不记录敏感数据）
@@ -211,4 +226,27 @@ function computeDiffReason(
     }
   }
   return "unknown";
+}
+
+/** §4.6: 从 controlPlaneEvidence 提取证据 ID 集合。 */
+function extractEvidenceIds(
+  evidence: Record<string, unknown>,
+): { attestationIds: string[]; publicationRecordIds: string[]; conformanceRunIds: string[] } {
+  const attestationIds: string[] = [];
+  const publicationRecordIds: string[] = [];
+  const conformanceRunIds: string[] = [];
+
+  // Agent Attestation IDs
+  const agentAttIds = evidence.agentAttestationIds;
+  if (Array.isArray(agentAttIds)) attestationIds.push(...agentAttIds.filter((id): id is string => typeof id === "string"));
+  // Runtime Attestation IDs
+  const runtimeAttIds = evidence.runtimeAttestationIds;
+  if (Array.isArray(runtimeAttIds)) attestationIds.push(...runtimeAttIds.filter((id): id is string => typeof id === "string"));
+  // Publication Record IDs
+  if (typeof evidence.agentPublicationRecordId === "string" && evidence.agentPublicationRecordId) publicationRecordIds.push(evidence.agentPublicationRecordId);
+  if (typeof evidence.runtimePublicationRecordId === "string" && evidence.runtimePublicationRecordId) publicationRecordIds.push(evidence.runtimePublicationRecordId);
+  // Conformance Run IDs
+  if (typeof evidence.conformanceRunId === "string" && evidence.conformanceRunId) conformanceRunIds.push(evidence.conformanceRunId);
+
+  return { attestationIds, publicationRecordIds, conformanceRunIds };
 }

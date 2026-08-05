@@ -77,6 +77,8 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
         runtimeConformanceValid: p.runtimeConformanceValid === 1,
         policyRevisionState: p.policyRevisionState,
         controlPlaneEvidence,
+        /** §4.6: Projection 版本号 — 来自 RouteEligibilityProjection。 */
+        projectionVersionNo: p.projectionVersionNo,
       };
     });
   },

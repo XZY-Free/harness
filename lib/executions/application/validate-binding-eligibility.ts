@@ -26,7 +26,7 @@ import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { routeActivation } from "@/lib/routes/persistence/route-revision-record";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 
 // §5.1: Phase 1 统一 Policy + Evidence 读取器
 import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
@@ -81,19 +81,39 @@ export async function validateBindingEligibility(
       ? projection.projectionVersionNo === input.projectionVersionNo
       : false;
 
-    // 2. 校验 Route 当前 Active Revision 仍一致
+    // §5.2: Projection 版本过时 → 拒绝 Binding，调用方必须重新解析
+    if (input.projectionVersionNo !== undefined && !projectionVersionMatch) {
+      return {
+        valid: false,
+        reason: "eligibility_snapshot_stale",
+        projectionVersionMatch,
+      };
+    }
+
+    // 2. §5.3: 校验 Route Activation — 指定 routeActivationId + 最新 sequence + active 状态
     const [currentActivation] = await tx
       .select()
       .from(routeActivation)
       .where(eq(routeActivation.routeId, input.routeId))
+      .orderBy(desc(routeActivation.activationSequence))
       .limit(1);
 
-    if (!currentActivation || currentActivation.routeRevisionId !== input.routeRevisionId) {
+    if (!currentActivation) {
+      return { valid: false, reason: "route_activation_not_found", projectionVersionMatch };
+    }
+    // 校验指定的 routeActivationId 是当前最新 Activation
+    if (currentActivation.id !== input.routeActivationId) {
+      return { valid: false, reason: "route_activation_superseded", projectionVersionMatch };
+    }
+    if (currentActivation.routeRevisionId !== input.routeRevisionId) {
       return {
         valid: false,
         reason: "route_revision_mismatch",
         projectionVersionMatch,
       };
+    }
+    if (currentActivation.activationState !== "active") {
+      return { valid: false, reason: "route_activation_not_active", projectionVersionMatch };
     }
 
     // 3. 并行校验 Agent + Runtime + Policy 生命周期（事务内）

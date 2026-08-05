@@ -36,7 +36,6 @@
  * - 重试 Attempt 时使用新的 runtime_execution_ref，不覆盖初始 ref。
  */
 import { randomUUID } from "node:crypto";
-import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
 import { db } from "@/lib/db/client";
 import {
   type CreateExecutionBindingCommand,
@@ -50,6 +49,16 @@ import type {
   RouteResolutionAttribute,
 } from "@/lib/routes/domain/route-resolution-policy";
 import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
+import {
+  createConfiguredRouteResolver,
+  type ConfiguredRouteResolver,
+} from "@/lib/routes/infrastructure/configured-route-resolver";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import {
+  resolveExecutionPlan,
+  type ExecutionPlan,
+  extractModelInfo,
+} from "@/lib/v11/runtime/resolve-execution-plan";
 import { getRuntimeRevisionById } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { issueContextHandle } from "@/lib/v11/context/context-handle";
 import { getItemById } from "@/lib/v11/conversation/thread-item-queries";
@@ -93,10 +102,24 @@ import { and, eq } from "drizzle-orm";
 /** 本阶段使用的默认路由 scope key（后续阶段从 Thread/Agent 配置解析）。 */
 export const DEFAULT_ROUTE_SCOPE_KEY = "default";
 
-/** 默认模型 provider（modelPolicyJson 未显式声明时使用）。 */
-const DEFAULT_MODEL_PROVIDER = "default";
+/** §4.6: 统一解析入口 — 所有执行路径必须共用此 Resolver。 */
+const configuredResolver = createConfiguredRouteResolver({
+  authorityStore: mysqlRouteResolutionStore,
+  projectionStore: mysqlRouteEligibilityResolutionStore,
+});
 
-const defaultRouteResolver = createResolveRoute({ store: mysqlRouteResolutionStore });
+/** §4.6: 将 ConfiguredRouteResolver 适配为 RouteResolver 接口，使 Dispatcher 透明使用统一入口。 */
+const defaultRouteResolver: RouteResolver = async (input) => {
+  const result = await configuredResolver({
+    tenantId: input.tenantId,
+    agentId: input.agentId,
+    routeScopeKey: input.routeScopeKey,
+    businessKey: input.businessKey,
+    attributes: input.attributes,
+  });
+  return result.outcome;
+};
+
 const createExecutionBinding = createCreateExecutionBinding({ store: mysqlExecutionBindingStore });
 
 /** 调度结果。 */
@@ -152,40 +175,6 @@ export interface RuntimeEndpointResolution {
     resume: string;
     steer: string;
   };
-}
-
-/** 从 AgentRevision.modelPolicyJson 提取模型信息。 */
-interface ModelInfo {
-  modelProvider: string;
-  modelId: string;
-  modelRevisionRef: string | null;
-}
-
-/**
- * 从 AgentRevision.modelPolicyJson 和 Thread.defaultModelRef 提取模型信息。
- *
- * modelPolicyJson 形如 { default: "doubao-pro", provider?: "doubao", revision?: "v1" }。
- * 优先级：modelPolicyJson > Thread.defaultModelRef > "default" 占位。
- */
-function extractModelInfo(
-  modelPolicyJson: unknown,
-  threadDefaultModelRef: string | null,
-): ModelInfo {
-  const policy = (modelPolicyJson ?? {}) as Record<string, unknown>;
-  const modelId =
-    (typeof policy.default === "string" && policy.default) ||
-    (typeof policy.modelId === "string" && policy.modelId) ||
-    threadDefaultModelRef ||
-    "default";
-  const modelProvider =
-    (typeof policy.provider === "string" && policy.provider) || DEFAULT_MODEL_PROVIDER;
-  const modelRevisionRef =
-    typeof policy.revision === "string"
-      ? policy.revision
-      : typeof policy.modelRevisionRef === "string"
-        ? policy.modelRevisionRef
-        : null;
-  return { modelProvider, modelId, modelRevisionRef };
 }
 
 /**
@@ -249,31 +238,22 @@ export async function dispatchInvocationForTurn(params: {
     throw new DispatchTurnStateError(params.turnId, "thread_not_found");
   }
 
-  // 4. 确定性解析 Active RouteRevision，并在创建执行事实前完成全部资格检查
-  const routeOutcome = await (params.routeResolver ?? defaultRouteResolver)({
+  // 4+5. §5.4: 单次解析执行计划（Route 解析 + AgentRevision + 模型信息）
+  const plan = await resolveExecutionPlan({
     tenantId: params.tenantId,
     agentId: thread.primaryAgentId,
     routeScopeKey,
     businessKey: { threadId: thread.id },
     attributes: params.routeAttributes ?? {},
-  });
-  if (routeOutcome.status === "unresolved") {
-    // 无有效路由 → Turn 保持 accepted，不报错
-    const reason = routeOutcome.reason === "ambiguous_route_configuration"
-      ? "ambiguous_route_configuration"
-      : routeOutcome.reason === "invalid_traffic_weight_total"
-        ? "invalid_traffic_weight_total"
-        : "no_effective_route";
-    return { dispatched: false, reason };
-  }
-  const routeResolution = routeOutcome.resolution;
+    threadDefaultModelRef: thread.defaultModelRef,
+    routeResolver: params.routeResolver,
+  }, defaultRouteResolver);
 
-  // 5. 读取解析结果冻结的 AgentRevision（提取模型信息）
-  const agentRevision = await getRevisionById(routeResolution.agentRevisionId);
-  if (!agentRevision) {
-    throw new DispatchTurnStateError(params.turnId, "agent_revision_not_found");
+  if (!plan.resolved) {
+    return { dispatched: false, reason: plan.reason };
   }
-  const modelInfo = extractModelInfo(agentRevision.modelPolicyJson, thread.defaultModelRef);
+  const routeResolution = plan.routeResolution;
+  const modelInfo = plan.modelInfo;
 
   // 6. createInvocation（事务内：锁 Thread、分配 invocationSequence、写 invocation.queued Event）
   const invocationParams: CreateInvocationParams = {
@@ -303,6 +283,8 @@ export async function dispatchInvocationForTurn(params: {
     policyRevisionId: routeResolution.policyRevisionId,
     contextCheckpointId: null,
     environmentDefinitionRevisionId: null,
+    /** §4.6: Projection 版本号，用于 Binding 版本一致性校验。 */
+    projectionVersionNo: routeResolution.projectionVersionNo,
     controlPlaneEvidence: {
       routeRevisionId: routeResolution.routeRevisionId,
       routeActivationId: routeResolution.routeActivationId,
@@ -333,7 +315,7 @@ export async function dispatchInvocationForTurn(params: {
       threadId: thread.id,
       invocation,
       binding,
-      agentRevision,
+      agentRevision: plan.agentRevision,
       runtimeRevisionId: routeResolution.runtimeRevisionId,
       turn,
       runtimeClient: params.runtimeClient,

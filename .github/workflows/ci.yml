@@ -45,8 +45,11 @@ jobs:
       - name: Contract verification
         run: pnpm contracts:verify
 
-      - name: Architecture check
+      - name: Architecture check (dependency-cruiser)
         run: pnpm architecture:check
+
+      - name: Architecture gate (5-item check)
+        run: pnpm architecture:gate
 
       - name: Type check
         run: pnpm typecheck
@@ -54,16 +57,16 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Test
+      - name: Migration (from empty schema)
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: mysql://test:test@127.0.0.1:3306/snow_test
+
+      - name: Test (unit + integration)
         run: pnpm test
 
       - name: Build
         run: pnpm build
-
-      - name: Migration smoke test
-        run: pnpm db:migrate
-        env:
-          DATABASE_URL: mysql://test:test@127.0.0.1:3306/snow_test
 
   security:
     runs-on: ubuntu-latest
@@ -77,4 +80,5 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm security:check
+      - name: Security check
+        run: pnpm security:check

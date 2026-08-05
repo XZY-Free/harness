@@ -53,6 +53,8 @@ export interface RouteResolutionCandidate {
   runtimeConformanceValid: boolean;
   policyRevisionState: string | null;
   controlPlaneEvidence: RouteControlPlaneEvidence | null;
+  /** §4.6: Projection 版本号（仅 Projection 候选有值，Authority 候选为 undefined）。 */
+  projectionVersionNo?: number;
 }
 
 export interface RouteResolution {
@@ -75,6 +77,8 @@ export interface RouteResolution {
   resolutionKeyDigest: string;
   resolvedAt: Date;
   controlPlaneEvidence: RouteControlPlaneEvidence;
+  /** §4.6: Projection 版本号（来自 RouteEligibilityProjection），用于 Binding 版本一致性校验。 */
+  projectionVersionNo?: number;
 }
 
 export type RouteResolutionOutcome =
@@ -235,6 +239,9 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
       controlPlaneEvidence: cloneControlPlaneEvidence(
         requireControlPlaneEvidence(selected.candidate),
       ),
+      /** §4.6: 从候选透传 Projection 版本号。 */
+      projectionVersionNo: selected.candidate.projectionVersionNo,
+    },
     },
     eligibleCandidateCount: group.length,
   };

@@ -1,18 +1,14 @@
 /**
  * V11 RuntimeConformanceResult 仓储（S05-C06）。
  *
- * 事实源：
+ * §9.3 @deprecated — 本模块已退役，仅保留历史读取兼容。
+ * 正式写入必须使用 RuntimeConformanceRun + RuntimeConformanceCaseResult。
+ * persistConformanceResults 和 deleteConformanceResultsByRevision 将在下一 major 版本移除。
+ *
+Facts source:
  * - ../v11-agentkit-platform/10-core-data-model.md §6.x（RuntimeConformanceResult）、
  *   §15-machine-contracts §5 L94-110
  * - ../v11-agentkit-platform-development-plan/05-runtime-protocol-dispatch-and-agent-loop.md S05-C06
- *
- * 职责：
- * - persistConformanceResults：UPSERT 一批 conformance 结果到 v11RuntimeConformanceResult。
- *   - 每个 (runtimeRevisionId, caseId) UPSERT 一行（passed/reason/adapterDigest/...）。
- *   - 在事务内执行，保证原子性。
- * - listConformanceResultsByRevision：列出 Revision 的全部 conformance 结果。
- * - getConformanceResult：查询单个 (runtimeRevisionId, caseId) 结果。
- * - deleteConformanceResultsByRevision：清空 Revision 的 conformance 结果（重新测试前调用）。
  *
  * 关键约束：
  * - UNIQUE(runtimeRevisionId, caseId)：每个 Revision 每个 case 只有一条结果（UPSERT）。
@@ -47,6 +43,7 @@ export interface PersistConformanceResultsParams {
 }
 
 /**
+ * @deprecated §9.3 — 旧 ConformanceResult 写入已退役。正式写入使用 RuntimeConformanceRunStore。
  * 持久化一批 conformance 结果（UPSERT 语义）。
  *
  * 对每个 result，UPSERT 到 v11RuntimeConformanceResult：
@@ -145,6 +142,7 @@ export async function getConformanceResult(
 }
 
 /**
+ * @deprecated §9.3 — 旧 ConformanceResult 写入已退役。正式操作使用 RuntimeConformanceRunStore。
  * 清空 Revision 的全部 conformance 结果（重新测试前调用）。
  *
  * @returns 删除的行数。
