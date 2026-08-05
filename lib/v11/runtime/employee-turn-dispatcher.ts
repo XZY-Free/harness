@@ -15,16 +15,23 @@ import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
 import { createRequestHostedProvisioning } from "@/lib/runtimes/application/request-hosted-provisioning";
 import { mysqlHostedProvisioningRequestStore } from "@/lib/runtimes/persistence/mysql-hosted-provisioning-request-store";
+import { createRevisionValidator } from "@/lib/runtimes/application/validate-hosted-provisioning-revision";
 import { db } from "@/lib/db/client";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
+import { agentTable } from "@/lib/persistence/schema/control-plane";
 import { and, eq } from "drizzle-orm";
 import { streamText } from "ai";
 
 type ModelFn = (message: string, context: HostedModelContext) => Promise<string>;
 
 const resolveRoute = createResolveRoute({ store: mysqlRouteResolutionStore });
+
+/**
+ * §6.1: 注入 Revision 验证器的 ProvisioningRequest 工厂。
+ * 禁止 agentRevisionId = "unknown"。
+ */
 const requestHostedProvisioning = createRequestHostedProvisioning({
   store: mysqlHostedProvisioningRequestStore,
+  revisionValidator: createRevisionValidator(),
 });
 
 export interface EmployeeTurnDispatchResult {
@@ -84,18 +91,44 @@ export async function dispatchEmployeeTurn(params: {
   });
 
   if (routeOutcome.status !== "resolved") {
-    // 无 Ready Route → 幂等请求 Hosted Provisioning（不执行外部调用）
+    // §6.1: 无 Ready Route → 读取当前 AgentRevision，验证后幂等请求 Hosted Provisioning
     const agentRevisionId = await loadCurrentAgentRevisionId(
       params.tenantId,
       thread.primaryAgentId,
     );
 
+    if (!agentRevisionId) {
+      // §6.1: Agent 无当前 Revision — 无法创建供应请求，返回明确失败
+      logger.warn("[v11] Agent 无当前 AgentRevision，无法请求 Hosted 供应", {
+        tenantId: params.tenantId,
+        agentId: thread.primaryAgentId,
+      });
+      return {
+        dispatched: false,
+        completion: Promise.resolve(),
+      };
+    }
+
     const provisioningResult = await requestHostedProvisioning({
       tenantId: params.tenantId,
       agentId: thread.primaryAgentId,
-      agentRevisionId: agentRevisionId ?? "unknown",
+      agentRevisionId,
       routeScopeKey: "default",
     });
+
+    // §6.1: Revision 验证失败 — 返回明确失败而非创建无效请求
+    if (!("requestId" in provisioningResult)) {
+      logger.warn("[v11] AgentRevision 验证失败，无法请求 Hosted 供应", {
+        tenantId: params.tenantId,
+        agentId: thread.primaryAgentId,
+        validationCode: provisioningResult.code,
+        validationReason: provisioningResult.reason,
+      });
+      return {
+        dispatched: false,
+        completion: Promise.resolve(),
+      };
+    }
 
     logger.info("[v11] Hosted Route 未就绪，已请求异步供应", {
       tenantId: params.tenantId,

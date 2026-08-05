@@ -4,11 +4,15 @@
  * 用户 Turn 发现无 Ready Route 时调用此入口。
  * 只写入 Request 记录，不执行外部网络调用。
  * Worker 异步执行供应 Saga。
+ *
+ * §6.1: 创建前必须验证 AgentRevision 存在、属于 Tenant/Agent、是当前期望 Revision。
+ * 禁止 agentRevisionId = "unknown"。
  */
 
 import { randomUUID } from "node:crypto";
 import type { HostedProvisioningRequestStore } from "@/lib/runtimes/persistence/hosted-provisioning-request-store";
 import type { HostedProvisioningRequestRow } from "@/lib/runtimes/persistence/hosted-provisioning-request-record";
+import type { RevisionValidationDeps } from "./validate-hosted-provisioning-revision";
 
 export interface RequestHostedProvisioningResult {
   /** 供应请求 ID。 */
@@ -19,11 +23,24 @@ export interface RequestHostedProvisioningResult {
   retryAfterMs: number;
 }
 
+/** §6.1: Revision 验证失败结果。 */
+export interface RequestHostedProvisioningRevisionInvalid {
+  valid: false;
+  /** 错误码。 */
+  code: string;
+  /** 人类可读原因。 */
+  reason: string;
+}
+
 /**
  * 创建幂等供应请求工厂。
+ *
+ * §6.1: 新增 revisionValidator 依赖，在创建前验证 AgentRevision。
  */
 export function createRequestHostedProvisioning(deps: {
   store: HostedProvisioningRequestStore;
+  /** §6.1: AgentRevision 验证器。 */
+  revisionValidator: RevisionValidationDeps;
 }) {
   return async function requestHostedProvisioning(params: {
     tenantId: string;
@@ -31,8 +48,23 @@ export function createRequestHostedProvisioning(deps: {
     agentRevisionId: string;
     routeScopeKey: string;
     desiredRuntimeKey?: string;
-  }): Promise<RequestHostedProvisioningResult> {
+  }): Promise<RequestHostedProvisioningResult | RequestHostedProvisioningRevisionInvalid> {
     const desiredRuntimeKey = params.desiredRuntimeKey ?? "builtin-hosted";
+
+    // §6.1: 验证 AgentRevision 精确绑定
+    const validation = await deps.revisionValidator.validateRevision({
+      tenantId: params.tenantId,
+      agentId: params.agentId,
+      agentRevisionId: params.agentRevisionId,
+    });
+
+    if (!validation.valid) {
+      return {
+        valid: false,
+        code: validation.code,
+        reason: validation.reason,
+      };
+    }
 
     // 幂等：查找已有请求
     const existing = await deps.store.findActiveRequest({

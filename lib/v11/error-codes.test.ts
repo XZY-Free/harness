@@ -31,8 +31,8 @@ describe("V11 error-codes projection", () => {
     expect(CONTRACT.contract_version).toBe("11.0.0");
   });
 
-  it("错误码 74 个（+PROJECTION_EVIDENCE_INCOMPLETE/PROJECTION_CUTOVER_NOT_READY/PROJECTION_ORPHANED_ROUTE）", () => {
-    expect(Object.keys(V11_ERROR_CODES)).toHaveLength(74);
+  it("错误码 75 个（+§6.1 HOSTED_REVISION_BINDING_INVALID）", () => {
+    expect(Object.keys(V11_ERROR_CODES)).toHaveLength(75);
   });
 
   it("errorDefinition 对未知码 fail-closed", () => {

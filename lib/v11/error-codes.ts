@@ -100,6 +100,8 @@ export const V11_ERROR_CODES = {
   PROJECTION_CUTOVER_NOT_READY: { http: 422, retryable: false },
   /** §4.4: Projection 引用已删除 Route。 */
   PROJECTION_ORPHANED_ROUTE: { http: 422, retryable: false },
+  /** §6.1: Hosted 供应 AgentRevision 绑定验证失败。 */
+  HOSTED_REVISION_BINDING_INVALID: { http: 422, retryable: false },
 } as const satisfies Readonly<Record<string, V11ErrorDefinition>>;
 
 export type V11ErrorCode = keyof typeof V11_ERROR_CODES;
