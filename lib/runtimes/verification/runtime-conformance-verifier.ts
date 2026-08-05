@@ -1,12 +1,17 @@
 /**
  * Runtime Conformance 验证器接口和实现。
  *
- * 标准 Predicate Type 使用项目拥有的稳定 HTTPS URI。
- * 过渡期同时支持 legacy_hmac 和 standard_dsse。
+ * §8.4: Conformance 录入改用 Verifier Port。
+ * Application 不再接收 signingSecret()，Legacy HMAC 只作为历史读取兼容。
  *
- * ⚠️ DSSE Conformance Verifier 当前为 Fail-closed 骨架：
- * 真实 SDK 接入前统一返回 verified=false。
- * 生产环境启动时，如果配置选择 DSSE Verifier，直接启动失败。
+ * DSSE Conformance Verifier — 真实验证流程：
+ * 1. 读取 DSSE Envelope               — ✅ 已实现
+ * 2. 验证签名                          — ⏳ 需要 DSSE 验签 SDK
+ * 3. 验证 Runner Identity ∈ Policy     — ✅ 已实现
+ * 4. 解析 in-toto Statement            — ✅ 已实现
+ * 5. 校验 Predicate Type               — ✅ 已实现
+ * 6. 校验 Subject Digest 绑定一致      — ✅ 已实现
+ * 7. 校验 Case 结果完整                — ✅ 已实现
  */
 
 // ─── 标准 Predicate Type ──────────────────────────────────
@@ -63,51 +68,168 @@ export interface RuntimeConformanceVerifier {
 export interface DSSEConformanceVerifierConfig {
   /** 允许的 Runner Identity 列表。 */
   allowedRunnerIdentities: string[];
+  /** 受管 Store 读取 DSSE Envelope 字节。 */
+  readConformanceEnvelope: (runId: string) => Promise<Buffer>;
 }
 
 /**
- * 创建 DSSE Conformance Verifier — 验证 in-toto + DSSE 签名的 Conformance 报告。
+ * §8.4: 创建 DSSE Conformance Verifier — 真实验证流程。
  *
- * Fail-closed：在真实 DSSE 验签 SDK 接入前，所有验证返回
- * verified=false + failureReason=verifier_not_implemented。
+ * 步骤 2（签名验证）需要 DSSE 验签 SDK；未安装时 fail-closed。
  */
 export function createDSSEConformanceVerifier(
-  _config: DSSEConformanceVerifierConfig,
+  config: DSSEConformanceVerifierConfig,
 ): RuntimeConformanceVerifier {
   return {
-    verify: async (_input: VerifyConformanceInput): Promise<VerifyConformanceResult> => {
-      // Fail-closed 骨架 — 完整实现需要 DSSE 验签 SDK
-      // 步骤:
-      // 1. 读取 DSSE Envelope
-      // 2. 验证签名
-      // 3. 验证 Runner Identity ∈ allowedRunnerIdentities
-      // 4. 解析 in-toto Statement
-      // 5. 校验 Predicate Type = RUNTIME_CONFORMANCE_PREDICATE_TYPE
-      // 6. 校验 Subject Digest 绑定一致
-      // 7. 校验 Case 结果完整
+    verify: async (input: VerifyConformanceInput): Promise<VerifyConformanceResult> => {
+      try {
+        // 步骤 1: 读取 DSSE Envelope
+        const envelopeBytes = await config.readConformanceEnvelope(input.runId);
 
-      return {
-        verified: false,
-        conformanceFormat: "standard_dsse",
-        predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
-        failureReason: "verifier_not_implemented",
-      };
+        // 解析 Envelope
+        let envelope: unknown;
+        try {
+          envelope = JSON.parse(envelopeBytes.toString("utf-8"));
+        } catch {
+          return {
+            verified: false,
+            conformanceFormat: "standard_dsse",
+            failureReason: "dsse_envelope_json_parse_failed",
+          };
+        }
+
+        // 步骤 2: 验证签名 — SDK 依赖
+        const sigResult = await verifyConformanceSignature(envelope);
+        if (!sigResult.verified) {
+          return {
+            verified: false,
+            conformanceFormat: "standard_dsse",
+            failureReason: sigResult.failureReason,
+          };
+        }
+
+        // 步骤 3: 验证 Runner Identity
+        const runnerIdentity = sigResult.runnerIdentity;
+        if (runnerIdentity && !config.allowedRunnerIdentities.includes(runnerIdentity)) {
+          return {
+            verified: false,
+            conformanceFormat: "standard_dsse",
+            failureReason: `runner_identity_not_allowed: ${runnerIdentity}`,
+          };
+        }
+
+        // 步骤 4: 解析 in-toto Statement
+        const statement = extractConformanceStatement(envelope);
+        if (!statement) {
+          return {
+            verified: false,
+            conformanceFormat: "standard_dsse",
+            failureReason: "in_toto_statement_parse_failed",
+          };
+        }
+
+        // 步骤 5: 校验 Predicate Type
+        if (statement.predicateType !== RUNTIME_CONFORMANCE_PREDICATE_TYPE) {
+          return {
+            verified: false,
+            conformanceFormat: "standard_dsse",
+            predicateType: statement.predicateType,
+            failureReason: `predicate_type_mismatch: expected=${RUNTIME_CONFORMANCE_PREDICATE_TYPE}, got=${statement.predicateType}`,
+          };
+        }
+
+        // 步骤 6: 校验 Subject Digest 绑定一致
+        const subjectMatch = statement.subjects?.some(
+          (s: { digest?: Record<string, string> }) =>
+            s.digest?.["sha256"] === input.expectedRuntimeArtifactDigest.replace("sha256:", ""),
+        );
+        if (!subjectMatch) {
+          return {
+            verified: false,
+            conformanceFormat: "standard_dsse",
+            predicateType: statement.predicateType,
+            failureReason: "subject_digest_mismatch",
+          };
+        }
+
+        // 步骤 7: 校验 Case 结果完整
+        const predicate = statement.predicate as Record<string, unknown> | undefined;
+        if (!predicate || !predicate.caseResults) {
+          return {
+            verified: false,
+            conformanceFormat: "standard_dsse",
+            predicateType: statement.predicateType,
+            failureReason: "case_results_missing",
+          };
+        }
+
+        // 全部通过
+        return {
+          verified: true,
+          conformanceFormat: "standard_dsse",
+          predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
+        };
+      } catch (error) {
+        return {
+          verified: false,
+          conformanceFormat: "standard_dsse",
+          failureReason: error instanceof Error ? error.message : String(error),
+        };
+      }
     },
   };
+}
+
+/** 步骤 2: 验证签名 — SDK 依赖，未安装时 fail-closed。 */
+async function verifyConformanceSignature(
+  _envelope: unknown,
+): Promise<{ verified: boolean; failureReason?: string; runnerIdentity?: string }> {
+  // §8.4: 真实 SDK 接入点 — 安装 DSSE 验签 SDK 后替换
+  return {
+    verified: false,
+    failureReason: "sdk_not_installed: conformance_signature_verification_requires_dsse_signing_sdk",
+  };
+}
+
+/** 从 DSSE Envelope 提取 in-toto Statement。 */
+function extractConformanceStatement(envelope: unknown): {
+  type: string;
+  predicateType: string;
+  subjects: Array<{ digest?: Record<string, string> }>;
+  predicate?: unknown;
+} | null {
+  if (!envelope || typeof envelope !== "object") return null;
+  const e = envelope as Record<string, unknown>;
+
+  const payloadB64 = e.payload as string | undefined;
+  if (!payloadB64) return null;
+
+  try {
+    const payloadJson = Buffer.from(payloadB64, "base64url").toString("utf-8");
+    const payload = JSON.parse(payloadJson);
+    return {
+      type: payload.type,
+      predicateType: payload.predicateType,
+      subjects: payload.subject ?? [],
+      predicate: payload.predicate,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ─── Legacy HMAC Conformance Verifier ────────────────────
 
 export interface LegacyHMACVerifierConfig {
-  /** 是否允许新 HMAC 报告（过渡期 = true, 生产 = false）。 */
+  /** §8.4: 是否允许新 HMAC 报告（过渡期 = true, 生产 = false）。 */
   allowNewHmacReports: boolean;
 }
 
 /**
- * 创建 Legacy HMAC Conformance Verifier — 只读兼容。
+ * §8.4: 创建 Legacy HMAC Conformance Verifier — 只读兼容。
  *
- * 过渡期: allowNewHmacReports=true 时仍接受新 HMAC 报告。
- * 生产: allowNewHmacReports=false 时拒绝新 HMAC 报告。
+ * Application 不再接收 signingSecret()，新 Conformance 必须使用 DSSE。
+ * Legacy HMAC 只作为历史读取兼容。
  */
 export function createLegacyHMACConformanceVerifier(
   config: LegacyHMACVerifierConfig,
