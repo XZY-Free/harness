@@ -1,8 +1,7 @@
 /**
  * ExecutionBinding 最终校验 — §5.1: 使用统一 RevisionExecutionEligibilityPolicy。
  *
- * 不再使用碎片化 PublicationEligibilityPolicy + ArtifactEvidencePolicy + 内联 Conformance 检查，
- * 改用统一 RevisionExecutionEvidenceSnapshot + RevisionExecutionEligibilityPolicy.isEligible()。
+ * §6.1: 校验在 Store.create() 事务内执行（接受 tx 参数），不再独立开事务。
  *
  * 核心校验（Projection 版本 + Route Activation）在 DB 事务内执行。
  * Evidence Readers 使用全局 db（独立读取，不需要事务一致性）。
@@ -17,10 +16,6 @@
  *   7. Runtime 生命周期 Active
  *   8. Capability 兼容
  *   9. Policy 状态
- *
- * 事务内额外校验（DB 一致性，不在纯 Policy 内）：
- *   A. Projection 版本和输入一致
- *   B. Route 当前 Active Revision 仍一致
  */
 
 import { db } from "@/lib/db/client";
@@ -65,17 +60,23 @@ export interface BindingEligibilityResult {
   projectionVersionMatch: boolean;
 }
 
+/** §6.1: 事务类型 — 与 db.transaction 回调签名一致。 */
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
- * §5.1: ExecutionBinding 最终 Fail-closed 校验。
+ * §6.1: ExecutionBinding 最终 Fail-closed 校验。
  *
- * 使用统一 RevisionExecutionEligibilityPolicy + Evidence Snapshot。
- * 核心校验在 DB 事务内，Evidence Readers 使用全局 db。
+ * 接受可选的 tx 参数：
+ * - tx 提供：在调用方事务内执行（统一事务模式）
+ * - tx 未提供：自行开事务执行（独立调用模式，向后兼容）
+ *
+ * Evidence Readers 始终使用全局 db（不需要事务一致性）。
  */
 export async function validateBindingEligibility(
   input: BindingEligibilityInput,
+  tx?: Transaction,
 ): Promise<BindingEligibilityResult> {
-  // §5.1: 核心校验在事务内执行
-  return db.transaction(async (tx) => {
+  const execute = async (tx: Transaction): Promise<BindingEligibilityResult> => {
     // A. 校验 Projection 版本
     const [projection] = await tx
       .select()
@@ -137,7 +138,14 @@ export async function validateBindingEligibility(
     }
 
     return { valid: true, projectionVersionMatch };
-  });
+  };
+
+  // §6.1: 统一事务模式 — tx 提供时直接复用
+  if (tx) {
+    return execute(tx);
+  }
+  // §6.1: 独立调用模式 — 自行开事务（向后兼容）
+  return db.transaction(execute);
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────

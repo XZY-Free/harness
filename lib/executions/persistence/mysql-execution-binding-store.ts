@@ -1,17 +1,20 @@
 /**
  * ExecutionBinding Store — MySQL 实现。
  *
- * §5.1: 资格校验由统一 validateBindingEligibility()（调用 RevisionExecutionEligibilityPolicy）
- * 在 create-execution-binding.ts 中作为预检查执行。Store.create() 事务内仅保留：
- *   1. 行级锁（FOR UPDATE）防止并发修改
- *   2. Digest/ID 一致性比较（TOCTOU 防御）
- *   3. Insert
+ * §6.1: 统一事务 — 资格校验 + 行级锁 + Insert 在单一 db.transaction 内完成。
+ * validateBindingEligibility(input, tx) 复用 Store 事务，避免双事务。
  *
- * 不再在 Store 内重复执行 Publication/Attestation/Conformance 的 Policy 校验，
- * 这些维度已由统一 RevisionExecutionEligibilityPolicy 覆盖。
+ * 事务内执行：
+ *   1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
+ *   2. §5.1: validateBindingEligibility(input, tx) — 统一 Policy 校验
+ *      （Projection 版本 + Route Activation + Evidence Snapshot + Policy）
+ *   3. §5.1: Lock + TOCTOU 一致性校验（FOR UPDATE + Digest/ID 比较）
+ *   4. §5.1: Capability Manifest Digest 一致性
+ *   5. Insert
  */
 
 import { db } from "@/lib/db/client";
+import { validateBindingEligibility } from "@/lib/executions/application/validate-binding-eligibility";
 import {
   type ExecutionBinding,
   ExecutionBindingAlreadyExistsError,
@@ -54,10 +57,29 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         .limit(1);
       if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
 
-      // 2. §5.1: Lock + TOCTOU 一致性校验（仅 Digest/ID 比较，不做 Policy）
+      // 2. §6.1: 统一资格校验（复用 Store 事务，不再独立开事务）
+      const evidence = input.controlPlaneEvidence;
+      const eligibility = await validateBindingEligibility(
+        {
+          tenantId: input.tenantId,
+          routeId: input.deploymentRouteId,
+          routeRevisionId: evidence.routeRevisionId,
+          routeActivationId: evidence.routeActivationId,
+          agentRevisionId: input.agentRevisionId,
+          runtimeRevisionId: input.runtimeRevisionId,
+          policyRevisionId: input.policyRevisionId,
+          projectionVersionNo: input.projectionVersionNo ?? 0,
+        },
+        tx,
+      );
+      if (!eligibility.valid) {
+        throw evidenceError(`Binding 资格校验失败: ${eligibility.reason}`);
+      }
+
+      // 3. §5.1: Lock + TOCTOU 一致性校验（仅 Digest/ID 比较，不做 Policy）
       const revisions = await lockAndVerifyRoute(tx, input);
 
-      // 3. §5.1: Capability Manifest Digest 一致性（TOCTOU 防御）
+      // 4. §5.1: Capability Manifest Digest 一致性（TOCTOU 防御）
       const capabilityManifestDigest = computeCapabilityManifestDigest({
         agentRevisionId: revisions.agentRevision.id,
         agentInterfaceRequirements: revisions.agentRevision.agentInterfaceRequirementsJson,
@@ -68,8 +90,7 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         throw evidenceError("Capability Manifest Digest 已变化");
       }
 
-      // 4. Insert
-      const evidence = input.controlPlaneEvidence;
+      // 5. Insert
       await tx.insert(executionBindingTable).values({
         invocationId: input.invocationId,
         tenantId: input.tenantId,
