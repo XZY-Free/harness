@@ -925,6 +925,13 @@
         "11": true,
         "12": true
       }
+    },
+    {
+      "idx": 131,
+      "version": "6",
+      "when": 1722825600000,
+      "tag": "0131_rename_v11_tables",
+      "breakpoints": true
     }
   ]
 }

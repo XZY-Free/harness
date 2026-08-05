@@ -77,7 +77,7 @@ export type VisibilityScope = (typeof VISIBILITY_SCOPES)[number];
  * - expiresAt 可在清理任务中用作筛选条件，但不更新状态字段。
  */
 export const artifactTable = mysqlTable(
-  "Artifact",
+  "RuntimeArtifact",
   {
     id: varchar("id", { length: 36 })
       .primaryKey()
@@ -117,11 +117,11 @@ export const artifactTable = mysqlTable(
     expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }),
   },
   (t) => ({
-    itemIdUq: uniqueIndex("Artifact_itemId_uq").on(t.itemId),
-    tenantInvocationIdx: index("Artifact_tenant_invocation_idx").on(t.tenantId, t.invocationId),
-    tenantThreadIdx: index("Artifact_tenant_thread_idx").on(t.tenantId, t.threadId),
-    tenantJobIdx: index("Artifact_tenant_job_idx").on(t.tenantId, t.jobId),
-    tenantExpiresIdx: index("Artifact_tenant_expires_idx").on(t.tenantId, t.expiresAt),
+    itemIdUq: uniqueIndex("RuntimeArtifact_itemId_uq").on(t.itemId),
+    tenantInvocationIdx: index("RuntimeArtifact_tenant_invocation_idx").on(t.tenantId, t.invocationId),
+    tenantThreadIdx: index("RuntimeArtifact_tenant_thread_idx").on(t.tenantId, t.threadId),
+    tenantJobIdx: index("RuntimeArtifact_tenant_job_idx").on(t.tenantId, t.jobId),
+    tenantExpiresIdx: index("RuntimeArtifact_tenant_expires_idx").on(t.tenantId, t.expiresAt),
   }),
 );
 

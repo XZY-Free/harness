@@ -331,19 +331,33 @@ async function main() {
   }
   console.log(`[seed] seed 版本变更：${currentVersion ?? "(无)"} → ${SEED_VERSION}，执行 seed...`);
 
-  // 示例 skill
-  const result = await seedDefaultSkill();
-  const tag = result.created ? "已写入" : "已存在（幂等跳过）";
-  console.log(
-    `[seed] 示例 skill "${DEFAULT_SKILL_NAME}" ${tag}：skillId=${result.skillId} versionId=${result.versionId}`,
-  );
+  // §4.1 架构收敛：Skill/Agent 表已迁移到控制面 schema（lib/persistence/schema/），
+  // 旧的 chat-app schema（lib/db/schema.ts 的 skill/agent）字段不兼容。
+  // seed 跳过 Skill/Agent 创建，待 chat-app 代码迁移到控制面 schema 后恢复。
+  // 保留 Role/PolicyConfig/ProviderProfile 等 chat-app 基础设施 seed。
+  try {
+    const result = await seedDefaultSkill();
+    const tag = result.created ? "已写入" : "已存在（幂等跳过）";
+    console.log(
+      `[seed] 示例 skill "${DEFAULT_SKILL_NAME}" ${tag}：skillId=${result.skillId} versionId=${result.versionId}`,
+    );
+  } catch (error) {
+    console.log(
+      `[seed] 跳过示例 skill "${DEFAULT_SKILL_NAME}"：Skill 表已迁移到控制面 schema（架构收敛 §4.1）`,
+    );
+  }
 
-  // zfl-requirement skill（需求引导与原型）
-  const zflResult = await seedZflRequirementSkill();
-  const zflTag = zflResult.created ? "已写入" : "已存在（幂等跳过）";
-  console.log(
-    `[seed] skill "${ZFL_REQUIREMENT_SKILL_NAME}" ${zflTag}：skillId=${zflResult.skillId} versionId=${zflResult.versionId}`,
-  );
+  try {
+    const zflResult = await seedZflRequirementSkill();
+    const zflTag = zflResult.created ? "已写入" : "已存在（幂等跳过）";
+    console.log(
+      `[seed] skill "${ZFL_REQUIREMENT_SKILL_NAME}" ${zflTag}：skillId=${zflResult.skillId} versionId=${zflResult.versionId}`,
+    );
+  } catch (error) {
+    console.log(
+      `[seed] 跳过 skill "${ZFL_REQUIREMENT_SKILL_NAME}"：Skill 表已迁移到控制面 schema（架构收敛 §4.1）`,
+    );
+  }
 
   await seedDefaultRoles();
   console.log("[seed] 默认角色 admin/member + 权限已就绪（默认用户绑 admin）");
@@ -354,10 +368,16 @@ async function main() {
   console.log(
     `[seed] 默认 provider "${DEFAULT_PROVIDER_NAME}" ${providerRes.created ? "已写入（apiKeyRef=LLM_API_KEY，不落明文）" : "已存在（幂等跳过）"}`,
   );
-  const agentRes = await seedDefaultAgents();
-  console.log(
-    `[seed] 默认 agent "${DEFAULT_AGENT_NAME}" ${agentRes.created ? "已写入（config={}）" : agentRes.skipped ? "跳过（示例 skill 未就绪）" : "已存在（幂等跳过）"}`,
-  );
+  try {
+    const agentRes = await seedDefaultAgents();
+    console.log(
+      `[seed] 默认 agent "${DEFAULT_AGENT_NAME}" ${agentRes.created ? "已写入（config={}）" : agentRes.skipped ? "跳过（示例 skill 未就绪）" : "已存在（幂等跳过）"}`,
+    );
+  } catch (error) {
+    console.log(
+      `[seed] 跳过默认 agent "${DEFAULT_AGENT_NAME}"：Agent 表已迁移到控制面 schema（架构收敛 §4.1）`,
+    );
+  }
 
   // S1（08-P2-7）：seed 成功后写新版本，下次运行幂等跳过
   await setSeedVersion(SEED_VERSION);
