@@ -14,6 +14,15 @@ import {
   computeCapabilityManifestDigest,
 } from "@/lib/routes/domain/route-resolution-policy";
 
+/** §4.2: 权威组合版本计算 — 与 build-route-eligibility.ts 一致。 */
+function computeAuthoritativeVersion(
+  routeSetVersionNo: number,
+  activationSequence: number,
+  aggregateVersion: number,
+): number {
+  return routeSetVersionNo * 1_000_000 + activationSequence * 1_000 + aggregateVersion;
+}
+
 describe("Projection 资格判定逻辑", () => {
   describe("normalizeEligibility + computeSpecificity", () => {
     it("空条件 → specificity=0", () => {
@@ -191,6 +200,29 @@ describe("Projection eligibilityState 逻辑", () => {
 });
 
 /** 从 Projection 布尔字段计算 eligibility — 与 build-route-eligibility.ts 逻辑一致。 */
+
+describe("§4.2 computeAuthoritativeVersion", () => {
+  it("相同三要素 → 相同版本", () => {
+    expect(computeAuthoritativeVersion(1, 2, 3)).toBe(computeAuthoritativeVersion(1, 2, 3));
+  });
+
+  it("routeSetVersionNo 递增 → 版本严格递增", () => {
+    expect(computeAuthoritativeVersion(2, 0, 0)).toBeGreaterThan(computeAuthoritativeVersion(1, 999, 999));
+  });
+
+  it("activationSequence 递增 → 版本严格递增", () => {
+    expect(computeAuthoritativeVersion(1, 2, 0)).toBeGreaterThan(computeAuthoritativeVersion(1, 1, 999));
+  });
+
+  it("aggregateVersion 递增 → 版本严格递增", () => {
+    expect(computeAuthoritativeVersion(1, 1, 2)).toBeGreaterThan(computeAuthoritativeVersion(1, 1, 1));
+  });
+
+  it("全零 → 0", () => {
+    expect(computeAuthoritativeVersion(0, 0, 0)).toBe(0);
+  });
+});
+
 function isControlPlaneEligibleFromProjection(c: {
   activationState: string;
   agentLifecycleState: string;

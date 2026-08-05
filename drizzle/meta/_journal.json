@@ -904,6 +904,13 @@
       "when": 1789943200000,
       "tag": "0128_event_delivery_table",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "5",
+      "when": 1722816000000,
+      "tag": "0129_projection_evidence_fields",
+      "breakpoints": true
     }
   ]
 }

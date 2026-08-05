@@ -11,7 +11,8 @@ import type {
   RouteEligibilityStore,
   UpsertProjectionInput,
 } from "./route-eligibility-store";
-import { and, eq, max, sql } from "drizzle-orm";
+import { and, eq, sql, inArray } from "drizzle-orm";
+import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
 
 export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
   upsertProjection: async (input: UpsertProjectionInput) => {
@@ -52,6 +53,16 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
       runtimeArtifactDigest: input.runtimeArtifactDigest,
       runtimeConfigDigest: input.runtimeConfigDigest,
       routeContentDigest: input.routeContentDigest,
+      agentPublicationRecordId: input.agentPublicationRecordId,
+      runtimePublicationRecordId: input.runtimePublicationRecordId,
+      agentAttestationIds: input.agentAttestationIds,
+      runtimeAttestationIds: input.runtimeAttestationIds,
+      conformanceRunId: input.conformanceRunId,
+      agentArtifactId: input.agentArtifactId,
+      runtimeArtifactId: input.runtimeArtifactId,
+      sourceEventId: input.sourceEventId,
+      sourceAggregateVersion: input.sourceAggregateVersion,
+      invalidReason: input.invalidReason,
       eligibilityState: input.eligibilityState,
       projectionVersionNo: input.projectionVersionNo,
       lastRebuiltAt: input.lastRebuiltAt,
@@ -97,6 +108,16 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
           runtimeArtifactDigest: sql`VALUES(runtimeArtifactDigest)`,
           runtimeConfigDigest: sql`VALUES(runtimeConfigDigest)`,
           routeContentDigest: sql`VALUES(routeContentDigest)`,
+          agentPublicationRecordId: sql`VALUES(agentPublicationRecordId)`,
+          runtimePublicationRecordId: sql`VALUES(runtimePublicationRecordId)`,
+          agentAttestationIds: sql`VALUES(agentAttestationIds)`,
+          runtimeAttestationIds: sql`VALUES(runtimeAttestationIds)`,
+          conformanceRunId: sql`VALUES(conformanceRunId)`,
+          agentArtifactId: sql`VALUES(agentArtifactId)`,
+          runtimeArtifactId: sql`VALUES(runtimeArtifactId)`,
+          sourceEventId: sql`VALUES(sourceEventId)`,
+          sourceAggregateVersion: sql`VALUES(sourceAggregateVersion)`,
+          invalidReason: sql`VALUES(invalidReason)`,
           eligibilityState: sql`VALUES(eligibilityState)`,
           projectionVersionNo: sql`VALUES(projectionVersionNo)`,
           lastRebuiltAt: sql`VALUES(lastRebuiltAt)`,
@@ -168,13 +189,58 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
       .where(eq(routeEligibilityProjection.routeSetId, routeSetId));
   },
 
-  getMaxProjectionVersionNo: async (tenantId: string) => {
-    const [result] = await db
-      .select({
-        maxVersion: max(routeEligibilityProjection.projectionVersionNo),
-      })
+  // ─── §4.4: 新增查询/删除方法 ─────────────────────────
+
+  findProjectionsByAgentId: async (agentId: string) => {
+    // AgentId → 查找引用该 agentId 的所有 Projection
+    return db
+      .select()
       .from(routeEligibilityProjection)
-      .where(eq(routeEligibilityProjection.tenantId, tenantId));
-    return result?.maxVersion ?? 0;
+      .where(eq(routeEligibilityProjection.agentId, agentId));
+  },
+
+  findProjectionsByRuntimeId: async (runtimeId: string) => {
+    // RuntimeId → 通过 runtimeRevision 关联查找 Projection
+    // 先查找该 runtime 下的所有 runtimeRevisionId
+    const revisions = await db
+      .select({ id: runtimeRevisionTable.id })
+      .from(runtimeRevisionTable)
+      .where(eq(runtimeRevisionTable.runtimeId, runtimeId));
+    if (revisions.length === 0) return [];
+    const revisionIds = revisions.map((r) => r.id);
+    return db
+      .select()
+      .from(routeEligibilityProjection)
+      .where(inArray(routeEligibilityProjection.runtimeRevisionId, revisionIds));
+  },
+
+  findProjectionsByPolicyRevisionId: async (policyRevisionId: string) => {
+    return db
+      .select()
+      .from(routeEligibilityProjection)
+      .where(eq(routeEligibilityProjection.policyRevisionId, policyRevisionId));
+  },
+
+  deleteProjection: async (routeId: string) => {
+    await db
+      .delete(routeEligibilityProjection)
+      .where(eq(routeEligibilityProjection.routeId, routeId));
+  },
+
+  deleteProjectionsByRouteSet: async (routeSetId: string) => {
+    await db
+      .delete(routeEligibilityProjection)
+      .where(eq(routeEligibilityProjection.routeSetId, routeSetId));
+  },
+
+  findProjectionsByAttestationId: async (attestationId: string) => {
+    // §4.5: 搜索 agentAttestationIds 或 runtimeAttestationIds JSON 数组包含该 attestationId
+    // 使用 JSON_CONTAINS MySQL 函数
+    return db
+      .select()
+      .from(routeEligibilityProjection)
+      .where(
+        sql`JSON_CONTAINS(${routeEligibilityProjection.agentAttestationIds}, ${JSON.stringify(attestationId)}) OR JSON_CONTAINS(${routeEligibilityProjection.runtimeAttestationIds}, ${JSON.stringify(attestationId)})`,
+      );
   },
 };

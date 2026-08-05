@@ -94,6 +94,12 @@ export const V11_ERROR_CODES = {
   CONTROL_PLANE_EVENT_UNSUPPORTED: { http: 422, retryable: false },
   /** §3.2: 事件合同验证失败。 */
   CONTROL_PLANE_EVENT_CONTRACT_VIOLATION: { http: 422, retryable: false },
+  /** §4.1: Projection 证据 ID 不完整。 */
+  PROJECTION_EVIDENCE_INCOMPLETE: { http: 422, retryable: false },
+  /** §4.7: Projection 切换门槛不满足。 */
+  PROJECTION_CUTOVER_NOT_READY: { http: 422, retryable: false },
+  /** §4.4: Projection 引用已删除 Route。 */
+  PROJECTION_ORPHANED_ROUTE: { http: 422, retryable: false },
 } as const satisfies Readonly<Record<string, V11ErrorDefinition>>;
 
 export type V11ErrorCode = keyof typeof V11_ERROR_CODES;

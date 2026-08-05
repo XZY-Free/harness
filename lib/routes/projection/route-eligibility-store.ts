@@ -44,6 +44,17 @@ export interface UpsertProjectionInput {
   runtimeArtifactDigest: string | null;
   runtimeConfigDigest: string | null;
   routeContentDigest: string;
+  // ─── §4.1: 完整执行证据 ID ──────────────────────
+  agentPublicationRecordId: string | null;
+  runtimePublicationRecordId: string | null;
+  agentAttestationIds: string[] | null;
+  runtimeAttestationIds: string[] | null;
+  conformanceRunId: string | null;
+  agentArtifactId: string | null;
+  runtimeArtifactId: string | null;
+  sourceEventId: string | null;
+  sourceAggregateVersion: number | null;
+  invalidReason: string | null;
   eligibilityState: "eligible" | "ineligible" | "pending_rebuild";
   projectionVersionNo: number;
   lastRebuiltAt: Date;
@@ -75,6 +86,22 @@ export interface RouteEligibilityStore {
   /** 按 RouteSetId 查找所有 Projection。 */
   findProjectionsByRouteSet(routeSetId: string): Promise<RouteEligibilityProjectionRecord[]>;
 
-  /** 获取当前最大 projectionVersionNo（用于递增）。 */
-  getMaxProjectionVersionNo(tenantId: string): Promise<number>;
+  /** §4.4: 按 agentId 查找所有 Projection。 */
+  findProjectionsByAgentId(agentId: string): Promise<RouteEligibilityProjectionRecord[]>;
+
+  /** §4.4: 按 runtimeId 查找所有 Projection（通过 runtimeRevision 关联）。 */
+  findProjectionsByRuntimeId(runtimeId: string): Promise<RouteEligibilityProjectionRecord[]>;
+
+  /** §4.4: 按 policyRevisionId 查找所有 Projection。 */
+  findProjectionsByPolicyRevisionId(policyRevisionId: string): Promise<RouteEligibilityProjectionRecord[]>;
+
+  /** §4.4: 删除 Projection 行（Route/RouteSet 删除时清理孤立投影）。 */
+  deleteProjection(routeId: string): Promise<void>;
+
+  /** §4.4: 删除 RouteSet 下所有 Projection。 */
+  deleteProjectionsByRouteSet(routeSetId: string): Promise<void>;
+
+  /** §4.5: 按 attestationId 查找引用该 Attestation 的所有 Projection（搜索 JSON 数组）。 */
+  findProjectionsByAttestationId(attestationId: string): Promise<RouteEligibilityProjectionRecord[]>;
+
 }

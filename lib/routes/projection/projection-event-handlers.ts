@@ -1,15 +1,21 @@
 /**
  * Projection 事件处理器 — 处理 Outbox 事件触发 Projection 重建。
  *
+ * §4.5: 所有事件类型均已实现，无 TODO 桩。
  * 每个 Handler 幂等。
+ *
  * 处理规则：
- * - Route 激活：重建该 Route
+ * - Route 激活/验证：重建该 Route 的 Projection
  * - Route 禁用：Projection 标记 Ineligible
- * - Revision 撤回：查找引用该 Revision 的 Route 并重建
- * - Attestation 撤销：查找 Publication 和 Route 并重建
+ * - RouteSet 激活：重建 RouteSet 下所有 Route
+ * - Revision 发布：查找引用该 Revision 的 Route 并重建
+ * - Revision 撤回：标记相关 Projection Ineligible
+ * - Attestation 撤销：标记相关 Projection Ineligible
  * - Runtime Conformance 记录：重建相关 Route
- * - Agent/Runtime 生命周期变更：相关 Route 全部 Ineligible
- * - Policy 发布/撤回：相关 Route 重建/Ineligible
+ * - Agent/Runtime 生命周期变更：标记相关 Projection Ineligible
+ * - Policy 发布/撤回：重建/标记相关 Projection
+ *
+ * §4.4: 缺失对象清理 — Route/RouteSet 不存在时删除孤立投影。
  */
 
 import type { ControlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
@@ -29,7 +35,7 @@ export interface ProjectionEventHandlerDeps {
 
 /**
  * §3.6: 未知事件错误 — Fail-loud。
- * 未知事件类型、非法 Payload、TODO 未实现处理逻辑
+ * 未知事件类型、非法 Payload、不可恢复的格式错误
  * 不能标记成功，必须抛出此错误让 Worker 进入 retry/dead_letter。
  */
 export class ControlPlaneEventUnsupportedError extends Error {
@@ -45,9 +51,8 @@ export class ControlPlaneEventUnsupportedError extends Error {
 /**
  * 创建 Outbox 事件处理器。
  *
- * §3.6: 根据 eventType 分派到具体 Projection 重建逻辑。
- * 未知事件类型 → 抛 ControlPlaneEventUnsupportedError（Fail-loud）。
- * Payload 不合法 → 抛 ControlPlaneEventUnsupportedError（Fail-loud）。
+ * §4.5: 所有事件类型均有完整实现。
+ * §4.4: 缺失对象时清理孤立投影。
  */
 export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): OutboxEventHandler {
   return async function handleOutboxEvent(event: ControlPlaneOutboxEvent): Promise<void> {
@@ -84,17 +89,21 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
 
     const payload = event.payloadJson as Record<string, unknown>;
 
+    // §4.2: 来源事件信息
+    const sourceEventId = event.id;
+    const sourceAggregateVersion = event.aggregateVersion;
+
     switch (event.eventType) {
       // ─── Route 事件 ──────────────────────────────
       case "route.activated": {
-        const routeId = payload.routeId as string;
-        const tenantId = payload.tenantId as string;
-        await deps.buildRouteEligibility({ tenantId, routeId });
+        const routeId = payload.route_id as string;
+        const tenantId = payload.tenant_id as string;
+        await deps.buildRouteEligibility({ tenantId, routeId, sourceEventId, sourceAggregateVersion });
         break;
       }
 
       case "route.disabled": {
-        const routeId = payload.routeId as string;
+        const routeId = payload.route_id as string;
         const reason = (payload.reason as string) ?? "route_disabled";
         await deps.store.markIneligible(routeId, reason);
         break;
@@ -102,82 +111,148 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
 
       // ─── Revision 事件 ───────────────────────────
       case "agent.revision.published": {
-        const revisionId = payload.revisionId as string;
-        await rebuildProjectionsByRevision(revisionId);
+        const revisionId = payload.revision_id as string;
+        await rebuildProjectionsByRevision(revisionId, sourceEventId, sourceAggregateVersion);
         break;
       }
 
       case "agent.revision.withdrawn": {
-        const revisionId = payload.revisionId as string;
+        const revisionId = payload.revision_id as string;
         await markProjectionsIneligibleByRevision(revisionId, "agent_revision_withdrawn");
         break;
       }
 
       case "runtime.revision.published": {
-        const revisionId = payload.revisionId as string;
-        await rebuildProjectionsByRevision(revisionId);
+        const revisionId = payload.revision_id as string;
+        await rebuildProjectionsByRevision(revisionId, sourceEventId, sourceAggregateVersion);
         break;
       }
 
       case "runtime.revision.withdrawn": {
-        const revisionId = payload.revisionId as string;
+        const revisionId = payload.revision_id as string;
         await markProjectionsIneligibleByRevision(revisionId, "runtime_revision_withdrawn");
         break;
       }
 
       // ─── Attestation 事件 ────────────────────────
       case "artifact.attestation.revoked": {
-        const revisionId = payload.revisionId as string;
-        await markProjectionsIneligibleByRevision(revisionId, "attestation_revoked");
+        // §4.5: 使用 attestation_id 搜索投影中的证据数组
+        const attestationId = payload.attestation_id as string;
+        const projections = await deps.store.findProjectionsByAttestationId(attestationId);
+        for (const projection of projections) {
+          await deps.buildRouteEligibility({
+            tenantId: projection.tenantId,
+            routeId: projection.routeId,
+            sourceEventId,
+            sourceAggregateVersion,
+          });
+        }
         break;
       }
 
       // ─── Conformance 事件 ────────────────────────
       case "runtime.conformance.recorded": {
-        const runtimeRevisionId = payload.runtimeRevisionId as string;
-        await rebuildProjectionsByRevision(runtimeRevisionId);
+        const runtimeRevisionId = payload.runtime_revision_id as string;
+        await rebuildProjectionsByRevision(runtimeRevisionId, sourceEventId, sourceAggregateVersion);
         break;
       }
 
-      // ─── 生命周期事件 — §3.6: TODO 未实现 → Fail-loud ────
+      // ─── §4.5: 生命周期事件 — 完整实现 ──────────────
       case "agent.lifecycle.changed": {
-        // §3.6: 未实现处理逻辑，Fail-loud
-        throw new ControlPlaneEventUnsupportedError(
-          event.eventType,
-          "agent.lifecycle.changed 处理逻辑未实现（需 store.findProjectionsByAgentId）",
-        );
+        const agentId = payload.agent_id as string;
+        const lifecycleState = payload.new_state as string;
+        // Agent 生命周期变为非 enabled → 标记所有相关投影 Ineligible
+        if (lifecycleState !== "enabled") {
+          const projections = await deps.store.findProjectionsByAgentId(agentId);
+          for (const projection of projections) {
+            await deps.store.markIneligible(projection.routeId, `agent_lifecycle_${lifecycleState}`);
+          }
+        } else {
+          // Agent 重新 enabled → 重建所有相关投影
+          const projections = await deps.store.findProjectionsByAgentId(agentId);
+          for (const projection of projections) {
+            await deps.buildRouteEligibility({
+              tenantId: projection.tenantId,
+              routeId: projection.routeId,
+              sourceEventId,
+              sourceAggregateVersion,
+            });
+          }
+        }
+        break;
       }
 
       case "runtime.lifecycle.changed": {
-        // §3.6: 未实现处理逻辑，Fail-loud
-        throw new ControlPlaneEventUnsupportedError(
-          event.eventType,
-          "runtime.lifecycle.changed 处理逻辑未实现（需 store.findProjectionsByRuntimeId）",
-        );
+        const runtimeId = payload.runtime_id as string;
+        const lifecycleState = payload.new_state as string;
+        if (lifecycleState !== "enabled") {
+          // Runtime 非 enabled → 标记相关投影 Ineligible
+          const projections = await deps.store.findProjectionsByRuntimeId(runtimeId);
+          for (const projection of projections) {
+            await deps.store.markIneligible(projection.routeId, `runtime_lifecycle_${lifecycleState}`);
+          }
+        } else {
+          // Runtime 重新 enabled → 重建相关投影
+          const projections = await deps.store.findProjectionsByRuntimeId(runtimeId);
+          for (const projection of projections) {
+            await deps.buildRouteEligibility({
+              tenantId: projection.tenantId,
+              routeId: projection.routeId,
+              sourceEventId,
+              sourceAggregateVersion,
+            });
+          }
+        }
+        break;
       }
 
-      // ─── Policy 事件 — §3.6: TODO 未实现 → Fail-loud ────
+      // ─── §4.5: Policy 事件 — 完整实现 ──────────────
       case "policy.revision.published": {
-        // §3.6: 未实现处理逻辑，Fail-loud
-        throw new ControlPlaneEventUnsupportedError(
-          event.eventType,
-          "policy.revision.published 处理逻辑未实现（需 store.findProjectionsByPolicyRevisionId）",
-        );
+        const policyRevisionId = payload.policy_revision_id as string;
+        // Policy 发布 → 重建引用该 Policy 的所有投影
+        const projections = await deps.store.findProjectionsByPolicyRevisionId(policyRevisionId);
+        for (const projection of projections) {
+          await deps.buildRouteEligibility({
+            tenantId: projection.tenantId,
+            routeId: projection.routeId,
+            sourceEventId,
+            sourceAggregateVersion,
+          });
+        }
+        break;
       }
 
       case "policy.revision.withdrawn": {
-        // §3.6: 未实现处理逻辑，Fail-loud
-        throw new ControlPlaneEventUnsupportedError(
-          event.eventType,
-          "policy.revision.withdrawn 处理逻辑未实现（需 store.findProjectionsByPolicyRevisionId）",
-        );
+        const policyRevisionId = payload.policy_revision_id as string;
+        // Policy 撤回 → 标记引用该 Policy 的投影 Ineligible
+        const projections = await deps.store.findProjectionsByPolicyRevisionId(policyRevisionId);
+        for (const projection of projections) {
+          await deps.store.markIneligible(projection.routeId, "policy_revision_withdrawn");
+        }
+        break;
       }
 
       // ─── Route 验证事件 ──────────────────────────
       case "route.revision.validated": {
-        const routeId = payload.routeId as string;
-        const tenantId = payload.tenantId as string;
-        await deps.buildRouteEligibility({ tenantId, routeId });
+        const routeId = payload.route_id as string;
+        const tenantId = payload.tenant_id as string;
+        await deps.buildRouteEligibility({ tenantId, routeId, sourceEventId, sourceAggregateVersion });
+        break;
+      }
+
+      // ─── §4.5: RouteSet 激活事件 — 完整实现 ────────
+      case "route_set.activated": {
+        const routeSetId = payload.route_set_id as string;
+        // RouteSet 激活 → 重建该 RouteSet 下所有 Route 的投影
+        const projections = await deps.store.findProjectionsByRouteSet(routeSetId);
+        for (const projection of projections) {
+          await deps.buildRouteEligibility({
+            tenantId: projection.tenantId,
+            routeId: projection.routeId,
+            sourceEventId,
+            sourceAggregateVersion,
+          });
+        }
         break;
       }
 
@@ -187,12 +262,18 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
     }
   };
 
-  async function rebuildProjectionsByRevision(revisionId: string): Promise<void> {
+  async function rebuildProjectionsByRevision(
+    revisionId: string,
+    sourceEventId?: string | null,
+    sourceAggregateVersion?: number | null,
+  ): Promise<void> {
     const projections = await deps.store.findProjectionsByRevision(revisionId);
     for (const projection of projections) {
       await deps.buildRouteEligibility({
         tenantId: projection.tenantId,
         routeId: projection.routeId,
+        sourceEventId,
+        sourceAggregateVersion,
       });
     }
   }
@@ -203,7 +284,4 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
       await deps.store.markIneligible(projection.routeId, reason);
     }
   }
-
-  // §3.6: 以下 helper 待 TODO 实现后恢复使用。
-  // 当前 lifecycle/policy 事件直接抛 ControlPlaneEventUnsupportedError。
 }

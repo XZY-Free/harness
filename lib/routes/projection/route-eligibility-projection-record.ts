@@ -72,6 +72,18 @@ export const routeEligibilityProjection = mysqlTable(
     policyRevisionId: varchar("policyRevisionId", { length: 36 }),
     policyRevisionState: varchar("policyRevisionState", { length: 32 }),
 
+    // ─── §4.1: 完整执行证据 ID（不可填空字符串）────────
+    agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }),
+    runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }),
+    agentAttestationIds: json("agentAttestationIds").$type<string[]>(),
+    runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>(),
+    conformanceRunId: varchar("conformanceRunId", { length: 36 }),
+    agentArtifactId: varchar("agentArtifactId", { length: 36 }),
+    runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }),
+    sourceEventId: varchar("sourceEventId", { length: 36 }),
+    sourceAggregateVersion: int("sourceAggregateVersion"),
+    invalidReason: varchar("invalidReason", { length: 255 }),
+
     // ─── 证据摘要（用于 Binding 快速校验）────────
     /** 兼容性摘要 — 由 computeCapabilityCompatibilityDigest 计算。 */
     capabilityCompatibilityDigest: varchar("capabilityCompatibilityDigest", { length: 71 }).notNull(),
