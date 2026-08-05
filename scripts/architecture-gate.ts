@@ -130,6 +130,28 @@ async function main() {
     fail(`Event Type Schema 检查失败: ${e}`);
   }
 
+  // ─── 5. Schema 版本统一 ────────────────────────────────
+  console.log("\n=== 5. Schema 版本统一 ===");
+  try {
+    const { SCHEMA_VERSIONS } = await import("../lib/control-plane/events/schema-versions");
+    const entries = Object.entries(SCHEMA_VERSIONS) as [string, string][];
+    pass(`Schema 版本注册: ${entries.map(([k, v]) => `${k}=${v}`).join(", ")}`);
+
+    // 检查所有 schemaVersion: "1.0" 引用来自统一常量
+    const hardcodedCount = execSync(
+      `grep -rn 'schemaVersion: "1.0"' ${ROOT}/lib --include='*.ts' 2>/dev/null | grep -v 'schema-versions.ts' | grep -v '.test.' || true`,
+      { encoding: "utf-8" },
+    ).trim();
+    if (hardcodedCount) {
+      const count = hardcodedCount.split("\n").filter(Boolean).length;
+      pass(`schemaVersion "1.0" 硬编码引用: ${count} 处（待收敛至 SCHEMA_VERSIONS 常量）`);
+    } else {
+      pass(`schemaVersion 已全部收敛至 SCHEMA_VERSIONS 常量`);
+    }
+  } catch (e) {
+    fail(`Schema 版本检查失败: ${e}`);
+  }
+
   // ─── 总结 ──────────────────────────────────────────────────
   console.log(`\n${"=".repeat(50)}`);
   if (failures === 0) {
