@@ -48,7 +48,7 @@ jobs:
       - name: Architecture check (dependency-cruiser)
         run: pnpm architecture:check
 
-      - name: Architecture gate (5-item check)
+      - name: Architecture gate (8-item check)
         run: pnpm architecture:gate
 
       - name: Type check

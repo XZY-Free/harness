@@ -1223,14 +1223,14 @@ describe("场景10：Hosted 无 Route 时创建精确 Revision 请求", () => {
       routeScopeKey: "prod",
     });
 
-    expect(result.state).toBeDefined();
     if ("valid" in result && result.valid === false) {
       throw new Error(`Revision 验证失败: ${result.reason}`);
     }
-    expect("requestId" in result).toBe(true);
-    if ("requestId" in result) {
-      expect(result.requestId).toBeTruthy();
+    if (!("requestId" in result)) {
+      throw new Error("Expected RequestHostedProvisioningResult but got invalid revision");
     }
+    expect(result.state).toBeDefined();
+    expect(result.requestId).toBeTruthy();
 
     // 验证请求精确绑定了 agentRevisionId
     const requests = await db.select().from(hostedProvisioningRequestTable);
