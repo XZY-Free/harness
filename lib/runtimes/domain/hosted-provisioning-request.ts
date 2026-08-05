@@ -4,6 +4,9 @@
  * 第二批核心对象：将 Hosted 供应从用户 Turn 热路径迁入后台工作流。
  * 用户 Turn 发现无 Ready Route 时只幂等创建 ProvisioningRequest，
  * 不执行外部网络调用。Worker 异步执行供应 Saga。
+ *
+ * §6.3: 工作流步骤名称细化：
+ *   start → publishing_agent → publishing_runtime → activating_route → verifying_route → done
  */
 
 /** ProvisioningRequest 状态机。 */

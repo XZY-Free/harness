@@ -43,6 +43,23 @@ export const hostedProvisioningRequestTable = mysqlTable(
     lastAttemptAt: datetime("lastAttemptAt", { mode: "date", fsp: 3 }),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 }).notNull(),
     updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 }).notNull(),
+
+    // ─── §6.2: Step Checkpoint 字段 ────────────────────────
+    stepAgentRevisionId: varchar("stepAgentRevisionId", { length: 36 }),
+    stepAgentPublicationRecordId: varchar("stepAgentPublicationRecordId", { length: 36 }),
+    stepAgentAttestationId: varchar("stepAgentAttestationId", { length: 36 }),
+    stepRuntimeRevisionId: varchar("stepRuntimeRevisionId", { length: 36 }),
+    stepRuntimePublicationRecordId: varchar("stepRuntimePublicationRecordId", { length: 36 }),
+    stepRuntimeAttestationId: varchar("stepRuntimeAttestationId", { length: 36 }),
+    stepConformanceRunId: varchar("stepConformanceRunId", { length: 36 }),
+    stepRouteSetId: varchar("stepRouteSetId", { length: 36 }),
+    stepRouteSetVersionNo: int("stepRouteSetVersionNo"),
+    stepRouteRevisionId: varchar("stepRouteRevisionId", { length: 36 }),
+    stepRouteActivationId: varchar("stepRouteActivationId", { length: 36 }),
+    /** §6.3: 工作流版本标识。 */
+    workflowVersion: varchar("workflowVersion", { length: 16 }).notNull().default("2.0"),
+    /** §6.2: 最近完成的步骤名称。 */
+    lastCompletedStep: varchar("lastCompletedStep", { length: 64 }),
   },
   (table) => ({
     /** 同一 AgentRevision + RouteScope + RuntimeKey 只能有一个活跃请求。 */

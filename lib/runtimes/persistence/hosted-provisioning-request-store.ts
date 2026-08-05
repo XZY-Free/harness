@@ -40,6 +40,10 @@ export interface HostedProvisioningRequestStore {
     leaseExpiresAt?: Date | null;
     lastError?: string | null;
     lastAttemptAt?: Date | null;
+    /** §6.2: Step Checkpoint 更新。 */
+    checkpoint?: StepCheckpoint;
+    /** §6.2: 最近完成的步骤。 */
+    lastCompletedStep?: string | null;
   }): Promise<HostedProvisioningRequestRow>;
 
   /** 领取可处理的请求（FOR UPDATE SKIP LOCKED）。 */
@@ -64,4 +68,19 @@ export interface NewProvisioningRequestInput {
   state?: ProvisioningState;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** §6.2: Step Checkpoint — Saga 每步完成后的产出数据。 */
+export interface StepCheckpoint {
+  agentRevisionId?: string | null;
+  agentPublicationRecordId?: string | null;
+  agentAttestationId?: string | null;
+  runtimeRevisionId?: string | null;
+  runtimePublicationRecordId?: string | null;
+  runtimeAttestationId?: string | null;
+  conformanceRunId?: string | null;
+  routeSetId?: string | null;
+  routeSetVersionNo?: number | null;
+  routeRevisionId?: string | null;
+  routeActivationId?: string | null;
 }

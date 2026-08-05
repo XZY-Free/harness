@@ -911,6 +911,27 @@
       "when": 1722816000000,
       "tag": "0129_projection_evidence_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1722825600000,
+      "tag": "0130_hosted_provisioning_checkpoint",
+      "breakpoints": {
+        "0": true,
+        "1": true,
+        "2": true,
+        "3": true,
+        "4": true,
+        "5": true,
+        "6": true,
+        "7": true,
+        "8": true,
+        "9": true,
+        "10": true,
+        "11": true,
+        "12": true
+      }
     }
   ]
 }

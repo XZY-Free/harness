@@ -1,15 +1,18 @@
 /**
  * HostedProvisioningSaga — Hosted 供应的异步步骤编排。
  *
- * 拆分自 mysql-hosted-runtime-control-plane.ts，将同步编排改为
- * 每步幂等的 Saga 步骤，由 Worker 异步驱动。
+ * §6.3: 修正工作流状态机 — 细化步骤名称。
+ * §6.2: 持久化每一步输出 — Saga 后续步骤只使用已保存输出，不重新执行前置步骤。
+ *
+ * 步骤序列（§6.3）：
+ *   start → publishing_agent → publishing_runtime → activating_route → verifying_route → ready
  *
  * 每步必须幂等：重复执行结果一致。
  * 外部调用不放在长数据库事务中。
  */
 
 import type { HostedRuntimeControlPlane } from "@/lib/runtimes/application/provision-hosted-runtime";
-import type { HostedProvisioningRequestStore } from "@/lib/runtimes/persistence/hosted-provisioning-request-store";
+import type { HostedProvisioningRequestStore, StepCheckpoint } from "@/lib/runtimes/persistence/hosted-provisioning-request-store";
 import type { HostedProvisioningRequestRow } from "@/lib/runtimes/persistence/hosted-provisioning-request-record";
 import {
   classifyProvisioningError,
@@ -24,8 +27,8 @@ export interface SagaStepResult {
   completed: boolean;
   /** 请求的新状态。 */
   newState: "running" | "waiting_external_evidence" | "waiting_conformance" | "ready" | "retryable_failed" | "permanent_failed";
-  /** 步骤产出数据（JSON 可序列化）。 */
-  output?: Record<string, string>;
+  /** §6.2: 步骤产出 Checkpoint。 */
+  checkpoint?: StepCheckpoint;
 }
 
 /** Saga 配置。 */
@@ -38,6 +41,9 @@ export interface SagaConfig {
 
 /**
  * 创建 Hosted 供应 Saga 执行器。
+ *
+ * §6.2: 每步完成后持久化产出到 Checkpoint 字段。
+ * §6.3: 使用细化步骤名称。
  */
 export function createHostedProvisioningSaga(config: SagaConfig) {
   return async function executeProvisioningSaga(
@@ -49,10 +55,19 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       switch (step) {
         case "start":
           return await stepStart(request);
+        case "publishing_agent":
+          return await stepPublishingAgent(request);
+        case "publishing_runtime":
+          return await stepPublishingRuntime(request);
+        case "activating_route":
+          return await stepActivateRoute(request);
+        case "verifying_route":
+          return await stepVerifyRoute(request);
+        // §6.3 兼容旧步骤名 — 自动迁移到新步骤
         case "ensure_agent_published":
-          return await stepEnsureAgentPublished(request);
+          return await stepPublishingAgent(request);
         case "ensure_runtime_published":
-          return await stepEnsureRuntimePublished(request);
+          return await stepPublishingRuntime(request);
         case "activate_route":
           return await stepActivateRoute(request);
         case "verify_route":
@@ -73,81 +88,124 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     await config.store.updateState({
       requestId: request.id,
       state: "running",
-      currentStep: "ensure_agent_published",
+      currentStep: "publishing_agent",
       lastAttemptAt: new Date(),
     });
     return { step: "start", completed: true, newState: "running" };
   }
 
-  async function stepEnsureAgentPublished(
+  /**
+   * §6.3: publishing_agent — Agent 证据解析 + Attestation + Publish。
+   * §6.2: 完成后保存 agentRevisionId, agentPublicationRecordId, agentAttestationId 到 Checkpoint。
+   */
+  async function stepPublishingAgent(
     request: HostedProvisioningRequestRow,
   ): Promise<SagaStepResult> {
-    // 外部调用：Evidence Service + Attestation + Publish
+    // §6.2: 如果 Checkpoint 已有 agent 产出，跳过重复执行
+    if (request.stepAgentRevisionId && request.stepAgentPublicationRecordId && request.stepAgentAttestationId) {
+      await config.store.updateState({
+        requestId: request.id,
+        state: "running",
+        currentStep: "publishing_runtime",
+        lastAttemptAt: new Date(),
+      });
+      return { step: "publishing_agent", completed: true, newState: "running" };
+    }
+
     const agentRevision = await config.controlPlane.ensurePublishedAgentRevision({
       tenantId: request.tenantId,
       agentId: request.agentId,
     });
 
+    const checkpoint: StepCheckpoint = {
+      agentRevisionId: agentRevision.revisionId,
+      agentPublicationRecordId: agentRevision.publicationRecordId,
+      agentAttestationId: agentRevision.attestationId,
+    };
+
     await config.store.updateState({
       requestId: request.id,
       state: "running",
-      currentStep: "ensure_runtime_published",
+      currentStep: "publishing_runtime",
       lastAttemptAt: new Date(),
+      lastCompletedStep: "publishing_agent",
+      checkpoint,
     });
 
     return {
-      step: "ensure_agent_published",
+      step: "publishing_agent",
       completed: true,
       newState: "running",
-      output: {
-        agentRevisionId: agentRevision.revisionId,
-        agentPublicationRecordId: agentRevision.publicationRecordId,
-        agentAttestationId: agentRevision.attestationId,
-      },
+      checkpoint,
     };
   }
 
-  async function stepEnsureRuntimePublished(
+  /**
+   * §6.3: publishing_runtime — Runtime 证据 + Conformance + Attestation + Publish。
+   * §6.2: 完成后保存 runtimeRevisionId, runtimePublicationRecordId, runtimeAttestationId, conformanceRunId。
+   */
+  async function stepPublishingRuntime(
     request: HostedProvisioningRequestRow,
   ): Promise<SagaStepResult> {
-    // 外部调用：Evidence Service + Attestation + Conformance + Publish
+    // §6.2: 如果 Checkpoint 已有 runtime 产出，跳过重复执行
+    if (request.stepRuntimeRevisionId && request.stepRuntimePublicationRecordId && request.stepRuntimeAttestationId && request.stepConformanceRunId) {
+      await config.store.updateState({
+        requestId: request.id,
+        state: "running",
+        currentStep: "activating_route",
+        lastAttemptAt: new Date(),
+      });
+      return { step: "publishing_runtime", completed: true, newState: "running" };
+    }
+
     const runtimeRevision = await config.controlPlane.ensurePublishedRuntimeRevision({
       tenantId: request.tenantId,
       agentId: request.agentId,
     });
 
+    const checkpoint: StepCheckpoint = {
+      runtimeRevisionId: runtimeRevision.revisionId,
+      runtimePublicationRecordId: runtimeRevision.publicationRecordId,
+      runtimeAttestationId: runtimeRevision.attestationId,
+      conformanceRunId: runtimeRevision.conformanceRunId,
+    };
+
     await config.store.updateState({
       requestId: request.id,
       state: "running",
-      currentStep: "activate_route",
+      currentStep: "activating_route",
       lastAttemptAt: new Date(),
+      lastCompletedStep: "publishing_runtime",
+      checkpoint,
     });
 
     return {
-      step: "ensure_runtime_published",
+      step: "publishing_runtime",
       completed: true,
       newState: "running",
-      output: {
-        runtimeRevisionId: runtimeRevision.revisionId,
-        runtimePublicationRecordId: runtimeRevision.publicationRecordId,
-        runtimeAttestationId: runtimeRevision.attestationId,
-        conformanceRunId: runtimeRevision.conformanceRunId,
-      },
+      checkpoint,
     };
   }
 
+  /**
+   * §6.3: activating_route — 使用 Checkpoint 中已保存的 Revision 激活 Route。
+   * §6.2: 不再重新调用 ensurePublished*，直接从 Checkpoint 读取。
+   */
   async function stepActivateRoute(
     request: HostedProvisioningRequestRow,
   ): Promise<SagaStepResult> {
-    // 先获取 published revisions
-    const agentRevision = await config.controlPlane.ensurePublishedAgentRevision({
-      tenantId: request.tenantId,
-      agentId: request.agentId,
-    });
-    const runtimeRevision = await config.controlPlane.ensurePublishedRuntimeRevision({
-      tenantId: request.tenantId,
-      agentId: request.agentId,
-    });
+    // §6.2: 从 Checkpoint 读取已保存的 Revision 产出
+    const agentRevision = {
+      revisionId: request.stepAgentRevisionId!,
+      publicationRecordId: request.stepAgentPublicationRecordId!,
+      attestationId: request.stepAgentAttestationId!,
+    };
+    const runtimeRevision = {
+      revisionId: request.stepRuntimeRevisionId!,
+      publicationRecordId: request.stepRuntimePublicationRecordId!,
+      attestationId: request.stepRuntimeAttestationId!,
+      conformanceRunId: request.stepConformanceRunId!,
+    };
 
     // 激活 Route
     await config.controlPlane.activateRoute({
@@ -161,11 +219,12 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     await config.store.updateState({
       requestId: request.id,
       state: "running",
-      currentStep: "verify_route",
+      currentStep: "verifying_route",
       lastAttemptAt: new Date(),
+      lastCompletedStep: "activating_route",
     });
 
-    return { step: "activate_route", completed: true, newState: "running" };
+    return { step: "activating_route", completed: true, newState: "running" };
   }
 
   async function stepVerifyRoute(
@@ -184,13 +243,19 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       await config.store.updateState({
         requestId: request.id,
         state: "retryable_failed",
-        currentStep: "verify_route",
+        currentStep: "verifying_route",
         nextAttemptAt: backoff,
         lastError: "Route 激活后未通过正式 RouteResolver 门禁",
         lastAttemptAt: new Date(),
       });
-      return { step: "verify_route", completed: false, newState: "retryable_failed" };
+      return { step: "verifying_route", completed: false, newState: "retryable_failed" };
     }
+
+    // §6.2: 保存 Route 验证产出到 Checkpoint
+    const checkpoint: StepCheckpoint = {
+      routeRevisionId: route.routeRevisionId,
+      routeActivationId: route.routeActivationId,
+    };
 
     // 全部完成
     await config.store.updateState({
@@ -198,9 +263,11 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       state: "ready",
       currentStep: "done",
       lastAttemptAt: new Date(),
+      lastCompletedStep: "verifying_route",
+      checkpoint,
     });
 
-    return { step: "verify_route", completed: true, newState: "ready" };
+    return { step: "verifying_route", completed: true, newState: "ready", checkpoint };
   }
 
   // ─── 错误处理 ────────────────────────────────────────────
