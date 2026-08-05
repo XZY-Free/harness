@@ -31,8 +31,8 @@ describe("V11 error-codes projection", () => {
     expect(CONTRACT.contract_version).toBe("11.0.0");
   });
 
-  it("错误码 69 个（+ROUTE_EXECUTION_INELIGIBLE/ROUTE_ELIGIBILITY_INVALID）", () => {
-    expect(Object.keys(V11_ERROR_CODES)).toHaveLength(69);
+  it("错误码 71 个（+ROUTE_EXECUTION_INELIGIBLE/ROUTE_ELIGIBILITY_INVALID/CONTROL_PLANE_EVENT_UNSUPPORTED/CONTROL_PLANE_EVENT_CONTRACT_VIOLATION）", () => {
+    expect(Object.keys(V11_ERROR_CODES)).toHaveLength(71);
   });
 
   it("errorDefinition 对未知码 fail-closed", () => {

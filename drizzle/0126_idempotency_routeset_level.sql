@@ -4,5 +4,7 @@
 -- 1. 删除旧的 routeId+idempotencyKey 唯一约束
 DROP INDEX `RouteActivation_route_idempotency_uq` ON `RouteActivation`;
 
+--> statement-breakpoint
+
 -- 2. 创建新的 routeSetId+idempotencyKey 唯一约束
 CREATE UNIQUE INDEX `RouteActivation_routeSet_idempotency_uq` ON `RouteActivation` (`routeSetId`, `idempotencyKey`);

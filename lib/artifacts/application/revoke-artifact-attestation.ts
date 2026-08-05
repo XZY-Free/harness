@@ -37,9 +37,13 @@ export interface AttestationRevocationSession {
   appendOutbox(params: {
     id: string;
     tenantId: string;
-    attestationId: string;
-    revokedAt: Date;
-    reason: string;
+    /** §3.2: 事件类型固定为 artifact.attestation.revoked。 */
+    eventType: "artifact.attestation.revoked";
+    aggregateId: string;
+    /** §3.1: 聚合版本号。 */
+    aggregateVersion: number;
+    payload: Record<string, unknown>;
+    occurredAt: Date;
   }): Promise<void>;
 }
 
@@ -133,9 +137,16 @@ export function createRevokeArtifactAttestation(dependencies: {
       await session.appendOutbox({
         id: newId(),
         tenantId: command.tenantId,
-        attestationId: command.attestationId,
-        revokedAt,
-        reason: command.reason,
+        eventType: "artifact.attestation.revoked",
+        aggregateId: command.attestationId,
+        aggregateVersion: 0,
+        payload: {
+          attestation_id: command.attestationId,
+          artifact_id: current.attestation.artifactId ?? "",
+          revoked_at: revokedAt.toISOString(),
+          reason: command.reason,
+        },
+        occurredAt: revokedAt,
       });
       return { attestation: current.attestation, revocation };
     });

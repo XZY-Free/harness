@@ -400,7 +400,8 @@ export function createActivateRouteSet(dependencies: {
         tenantId: command.tenantId,
         eventKey: `route-set-activation:${command.routeSetId}:${nextVersionNo}`,
         eventType: "route_set.activated",
-        routeId: command.routeSetId,
+        aggregateId: command.routeSetId,
+        aggregateVersion: nextVersionNo,
         payload: {
           route_set_id: command.routeSetId,
           route_set_version_no: nextVersionNo,

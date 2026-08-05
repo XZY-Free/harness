@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
@@ -122,19 +123,18 @@ export const mysqlRuntimeConformanceRunStore: RuntimeConformanceRunStore = {
           });
         },
         async appendOutbox(params) {
+          const resolved = resolveOutboxAppend(params);
           await tx.insert(controlPlaneOutboxEvent).values({
-            id: params.id,
-            tenantId: params.tenantId,
-            eventKey: `runtime-conformance-run-completed:${params.runId}`,
-            eventType: "runtime.conformance.run.completed",
-            aggregateType: "runtime_conformance_run",
-            aggregateId: params.runId,
-            payloadJson: {
-              run_id: params.runId,
-              runtime_revision_id: params.runtimeRevisionId,
-              overall_result: params.overallResult,
-            },
-            occurredAt: params.occurredAt,
+            id: resolved.id,
+            tenantId: resolved.tenantId,
+            schemaVersion: "1.0",
+            eventKey: `runtime-conformance-recorded:${resolved.aggregateId}`,
+            eventType: resolved.eventType,
+            aggregateType: resolved.aggregateType,
+            aggregateId: resolved.aggregateId,
+            aggregateVersion: resolved.aggregateVersion,
+            payloadJson: resolved.payloadJson,
+            occurredAt: resolved.occurredAt,
           });
         },
         async completeIdempotency(params) {

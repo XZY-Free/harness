@@ -130,10 +130,12 @@ export interface RuntimePublicationSession {
     id: string;
     tenantId: string;
     eventKey: string;
-    eventType: string;
-    aggregateType: string;
+    /** §3.2: 事件类型 — 必须来自合同，aggregateType 由合同推导。 */
+    eventType: "runtime.revision.published";
     aggregateId: string;
-    payload: unknown;
+    /** §3.1: 聚合版本号。 */
+    aggregateVersion: number;
+    payload: Record<string, unknown>;
     occurredAt: Date;
   }): Promise<void>;
   completeIdempotency(params: {

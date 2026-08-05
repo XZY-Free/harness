@@ -218,7 +218,8 @@ export function createActivateRouteRevision(dependencies: {
           tenantId: command.tenantId,
           eventKey: `route-revision-validated:${revision.id}`,
           eventType: "route.revision.validated",
-          routeId: route.id,
+          aggregateId: route.id,
+          aggregateVersion: revision.revisionNo,
           payload: {
             route_revision_id: revision.id,
             revision_no: revision.revisionNo,
@@ -286,8 +287,10 @@ export function createActivateRouteRevision(dependencies: {
         tenantId: command.tenantId,
         eventKey: `route-activation:${activation.id}`,
         eventType: activation.activationState === "disabled" ? "route.disabled" : "route.activated",
-        routeId: route.id,
+        aggregateId: route.id,
+        aggregateVersion: nextVersionNo,
         payload: {
+          route_id: route.id,
           route_revision_id: revision.id,
           route_activation_id: activation.id,
           previous_route_revision_id: activation.previousRouteRevisionId,

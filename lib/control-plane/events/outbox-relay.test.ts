@@ -82,6 +82,22 @@ describe("classifyOutboxError", () => {
     const result = classifyOutboxError(err);
     expect(result.category).toBe("permanent");
   });
+
+  it("§3.6: ControlPlaneEventUnsupportedError → permanent (Fail-loud)", () => {
+    const err = new Error("控制面事件不支持: eventType=unknown.event, reason=未知事件类型");
+    err.name = "ControlPlaneEventUnsupportedError";
+    const result = classifyOutboxError(err);
+    expect(result.category).toBe("permanent");
+    expect(result.code).toBe("UNSUPPORTED_EVENT");
+  });
+
+  it("§3.2: ControlPlaneEventContractError → permanent", () => {
+    const err = new Error("事件 agent.revision.published Payload 校验失败");
+    err.name = "ControlPlaneEventContractError";
+    const result = classifyOutboxError(err);
+    expect(result.category).toBe("permanent");
+    expect(result.code).toBe("EVENT_CONTRACT_VIOLATION");
+  });
 });
 
 describe("isOutboxEventClaimable", () => {

@@ -869,6 +869,41 @@
       "when": 1789511200000,
       "tag": "0123_attestation_envelope_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "6",
+      "when": 1789597600000,
+      "tag": "0124_route_stable_identity_routeKey",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "6",
+      "when": 1789684000000,
+      "tag": "0125_activation_history_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "6",
+      "when": 1789770400000,
+      "tag": "0126_idempotency_routeset_level",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "6",
+      "when": 1789856800000,
+      "tag": "0127_outbox_envelope_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "6",
+      "when": 1789943200000,
+      "tag": "0128_event_delivery_table",
+      "breakpoints": true
     }
   ]
 }

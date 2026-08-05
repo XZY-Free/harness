@@ -1,4 +1,5 @@
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import type {
   ArtifactAttestationPersistenceStore,
   RevisionArtifactBinding,
@@ -164,18 +165,17 @@ export const mysqlArtifactAttestationPersistenceStore: ArtifactAttestationPersis
           });
         },
         async appendOutbox(params) {
+          const resolved = resolveOutboxAppend(params);
           await tx.insert(controlPlaneOutboxEvent).values({
-            id: params.id,
-            tenantId: params.tenantId,
-            eventKey: `artifact-attestation-recorded:${params.attestationId}`,
-            eventType: "artifact.attestation.recorded",
-            aggregateType: "artifact_attestation",
-            aggregateId: params.attestationId,
-            payloadJson: {
-              attestation_id: params.attestationId,
-              artifact_id: params.artifactId,
-              verification_state: params.verificationState,
-            },
+            id: resolved.id,
+            tenantId: resolved.tenantId,
+            schemaVersion: "1.0",
+            eventKey: `artifact-attestation-recorded:${resolved.aggregateId}`,
+            eventType: resolved.eventType,
+            aggregateType: resolved.aggregateType,
+            aggregateId: resolved.aggregateId,
+            aggregateVersion: resolved.aggregateVersion,
+            payloadJson: resolved.payloadJson,
             occurredAt: params.occurredAt,
           });
         },
@@ -252,19 +252,18 @@ export const mysqlAttestationRevocationStore: AttestationRevocationStore = {
           });
         },
         async appendOutbox(params) {
+          const resolved = resolveOutboxAppend(params);
           await tx.insert(controlPlaneOutboxEvent).values({
-            id: params.id,
-            tenantId: params.tenantId,
-            eventKey: `artifact-attestation-revoked:${params.attestationId}`,
-            eventType: "artifact.attestation.revoked",
-            aggregateType: "artifact_attestation",
-            aggregateId: params.attestationId,
-            payloadJson: {
-              attestation_id: params.attestationId,
-              revoked_at: params.revokedAt.toISOString(),
-              reason: params.reason,
-            },
-            occurredAt: params.revokedAt,
+            id: resolved.id,
+            tenantId: resolved.tenantId,
+            schemaVersion: "1.0",
+            eventKey: `artifact-attestation-revoked:${resolved.aggregateId}`,
+            eventType: resolved.eventType,
+            aggregateType: resolved.aggregateType,
+            aggregateId: resolved.aggregateId,
+            aggregateVersion: resolved.aggregateVersion,
+            payloadJson: resolved.payloadJson,
+            occurredAt: resolved.occurredAt,
           });
         },
       }),

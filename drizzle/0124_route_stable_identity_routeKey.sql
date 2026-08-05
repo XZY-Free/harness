@@ -4,15 +4,26 @@
 -- 1. RouteRevision 增加 routeKey 列
 ALTER TABLE `RouteRevision` ADD COLUMN `routeKey` varchar(128) NOT NULL DEFAULT '' AFTER `routeSetId`;
 
+--> statement-breakpoint
+
 -- 2. V11DeploymentRoute 增加 routeKey 列
 ALTER TABLE `V11DeploymentRoute` ADD COLUMN `routeKey` varchar(128) NOT NULL DEFAULT '' AFTER `routeSetId`;
 
+--> statement-breakpoint
+
 -- 3. 回填 routeKey：使用 agentRevisionId + runtimeRevisionId 组合作为过渡期 routeKey
 UPDATE `V11DeploymentRoute` SET `routeKey` = CONCAT(`agentRevisionId`, ':', `runtimeRevisionId`) WHERE `routeKey` = '';
+
+--> statement-breakpoint
+
 UPDATE `RouteRevision` SET `routeKey` = CONCAT(`agentRevisionId`, ':', `runtimeRevisionId`) WHERE `routeKey` = '';
+
+--> statement-breakpoint
 
 -- 4. 删除旧的唯一约束（agentRevisionId + runtimeRevisionId）
 DROP INDEX `V11DeploymentRoute_set_agent_runtime_uq` ON `V11DeploymentRoute`;
+
+--> statement-breakpoint
 
 -- 5. 创建新的唯一约束（routeSetId + routeKey）
 CREATE UNIQUE INDEX `V11DeploymentRoute_set_routeKey_uq` ON `V11DeploymentRoute` (`routeSetId`, `routeKey`);

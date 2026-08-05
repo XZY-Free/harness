@@ -90,6 +90,10 @@ export const V11_ERROR_CODES = {
   ROUTE_EXECUTION_INELIGIBLE: { http: 422, retryable: false },
   /** §2.1: Eligibility 条件格式非法。 */
   ROUTE_ELIGIBILITY_INVALID: { http: 422, retryable: false },
+  /** §3.6: 控制面事件类型不支持或 Payload 不合法。 */
+  CONTROL_PLANE_EVENT_UNSUPPORTED: { http: 422, retryable: false },
+  /** §3.2: 事件合同验证失败。 */
+  CONTROL_PLANE_EVENT_CONTRACT_VIOLATION: { http: 422, retryable: false },
 } as const satisfies Readonly<Record<string, V11ErrorDefinition>>;
 
 export type V11ErrorCode = keyof typeof V11_ERROR_CODES;

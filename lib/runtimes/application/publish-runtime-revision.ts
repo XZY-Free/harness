@@ -265,8 +265,8 @@ export function createPublishRuntimeRevision(dependencies: {
         tenantId: command.tenantId,
         eventKey: `runtime-revision-published:${revision.id}`,
         eventType: "runtime.revision.published",
-        aggregateType: "runtime_revision",
         aggregateId: revision.id,
+        aggregateVersion: revision.revisionNo,
         payload: {
           runtime_id: revision.runtimeId,
           revision_id: revision.id,

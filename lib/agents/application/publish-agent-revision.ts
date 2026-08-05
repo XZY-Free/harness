@@ -152,8 +152,8 @@ export function createPublishAgentRevision(dependencies: {
         tenantId: command.tenantId,
         eventKey: `agent-revision-published:${revision.id}`,
         eventType: "agent.revision.published",
-        aggregateType: "agent_revision",
         aggregateId: revision.id,
+        aggregateVersion: revision.revisionNo,
         payload: {
           agent_id: revision.agentId,
           revision_id: revision.id,

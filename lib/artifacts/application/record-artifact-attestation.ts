@@ -51,9 +51,12 @@ export interface ArtifactAttestationPersistenceSession {
   appendOutbox(params: {
     id: string;
     tenantId: string;
-    attestationId: string;
-    artifactId: string | null;
-    verificationState: string;
+    /** §3.2: 事件类型固定为 artifact.attestation.recorded。 */
+    eventType: "artifact.attestation.recorded";
+    aggregateId: string;
+    /** §3.1: 聚合版本号。 */
+    aggregateVersion: number;
+    payload: Record<string, unknown>;
     occurredAt: Date;
   }): Promise<void>;
   completeIdempotency?(params: {
@@ -212,9 +215,14 @@ export function createRecordArtifactAttestation(dependencies: {
       await session.appendOutbox({
         id: newId(),
         tenantId: command.tenantId,
-        attestationId: attestation.id,
-        artifactId: authority?.id ?? null,
-        verificationState: command.verificationState,
+        eventType: "artifact.attestation.recorded",
+        aggregateId: attestation.id,
+        aggregateVersion: 0,
+        payload: {
+          attestation_id: attestation.id,
+          artifact_id: authority?.id ?? "",
+          verification_state: command.verificationState,
+        },
         occurredAt: command.verifiedAt,
       });
 

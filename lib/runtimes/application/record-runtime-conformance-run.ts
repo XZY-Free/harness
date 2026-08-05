@@ -103,9 +103,14 @@ export function createRecordRuntimeConformanceRun(dependencies: {
         await session.appendOutbox({
           id: newId(),
           tenantId: command.tenantId,
-          runId: run.id,
-          runtimeRevisionId: command.runtimeRevisionId,
-          overallResult: run.overallResult,
+          eventType: "runtime.conformance.recorded",
+          aggregateId: run.id,
+          aggregateVersion: 0,
+          payload: {
+            run_id: run.id,
+            runtime_revision_id: command.runtimeRevisionId,
+            overall_result: run.overallResult as "passed" | "failed",
+          },
           occurredAt: recordedAt,
         });
         const result = { run, caseResults, replayed: false as const };

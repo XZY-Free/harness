@@ -1,5 +1,6 @@
 import type { AgentPublicationStore } from "@/lib/agents/persistence/agent-publication-store";
 import { controlPlaneOutboxEvent } from "@/lib/agents/persistence/control-plane-outbox";
+import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import {
   artifact,
   artifactAttestation,
@@ -130,15 +131,18 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
           });
         },
         async appendOutbox(params) {
+          const resolved = resolveOutboxAppend(params);
           await tx.insert(controlPlaneOutboxEvent).values({
-            id: params.id,
-            tenantId: params.tenantId,
-            eventKey: params.eventKey,
-            eventType: params.eventType,
-            aggregateType: params.aggregateType,
-            aggregateId: params.aggregateId,
-            payloadJson: params.payload,
-            occurredAt: params.occurredAt,
+            id: resolved.id,
+            tenantId: resolved.tenantId,
+            schemaVersion: "1.0",
+            eventKey: resolved.eventKey,
+            eventType: resolved.eventType,
+            aggregateType: resolved.aggregateType,
+            aggregateId: resolved.aggregateId,
+            aggregateVersion: resolved.aggregateVersion,
+            payloadJson: resolved.payloadJson,
+            occurredAt: resolved.occurredAt,
           });
         },
         async completeIdempotency(params) {

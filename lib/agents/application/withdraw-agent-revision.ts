@@ -141,8 +141,8 @@ export function createWithdrawAgentRevision(dependencies: {
         tenantId: command.tenantId,
         eventKey: `agent-revision-withdrawn:${revision.id}`,
         eventType: "agent.revision.withdrawn",
-        aggregateType: "agent_revision",
         aggregateId: revision.id,
+        aggregateVersion: revision.revisionNo,
         payload: {
           agent_id: revision.agentId,
           revision_id: revision.id,

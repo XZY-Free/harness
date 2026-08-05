@@ -126,9 +126,12 @@ export interface RouteControlSession {
     id: string;
     tenantId: string;
     eventKey: string;
+    /** §3.2: 事件类型 — 必须来自合同，aggregateType 由合同推导。 */
     eventType: "route.revision.validated" | "route.activated" | "route.disabled";
-    routeId: string;
-    payload: unknown;
+    aggregateId: string;
+    /** §3.1: 聚合版本号。 */
+    aggregateVersion: number;
+    payload: Record<string, unknown>;
     occurredAt: Date;
   }): Promise<void>;
   completeIdempotency(params: {

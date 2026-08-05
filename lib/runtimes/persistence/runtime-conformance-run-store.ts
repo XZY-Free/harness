@@ -53,9 +53,12 @@ export interface RuntimeConformanceRunSession {
   appendOutbox(params: {
     id: string;
     tenantId: string;
-    runId: string;
-    runtimeRevisionId: string;
-    overallResult: string;
+    /** §3.2: 事件类型固定为 runtime.conformance.recorded。 */
+    eventType: "runtime.conformance.recorded";
+    aggregateId: string;
+    /** §3.1: 聚合版本号。 */
+    aggregateVersion: number;
+    payload: Record<string, unknown>;
     occurredAt: Date;
   }): Promise<void>;
   completeIdempotency(params: {
