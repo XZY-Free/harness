@@ -29,6 +29,7 @@ import {
   listRuntimeConformanceRuns,
   recordRuntimeConformanceRun,
 } from "@/lib/runtimes/application/runtime-conformance-runs";
+import { RuntimeConformanceIdempotencyConflictError } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import { RuntimeConformanceCaseFailedError } from "@/lib/runtimes/domain/runtime-conformance";
 /**
  * GET/POST /admin/api/v1/runtime-revisions/{revision_id}/conformance — RuntimeRevision conformance 结果（S05-C06）。
@@ -62,7 +63,6 @@ import { RuntimeConformanceCaseFailedError } from "@/lib/runtimes/domain/runtime
  * - Conformance 门禁失败 → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - Runtime 乐观锁冲突 → 412 ETAG_MISMATCH
  */
-import type { RuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
 import {
   RuntimeConformanceBindingError,
   RuntimeConformanceTrustError,
@@ -98,9 +98,8 @@ interface RouteContext {
 /** 单个 conformance case 结果（请求体格式）。 */
 /** POST 请求体 schema。 */
 interface ConformanceBody {
-  /** 隔离 Runner 生成并签名的完整报告；管理员不能自行提交 passed。 */
-  runner_report: RuntimeConformanceReport;
-  runner_signature: string;
+  /** Runner 生成并签名的 DSSE Envelope JSON。 */
+  dsse_envelope: string;
   /** 是否同时发布 Revision（默认 false）。 */
   publish?: boolean;
   /** Runtime 乐观锁期望版本号（publish=true 时必填）。 */
@@ -113,8 +112,7 @@ interface ConformanceBody {
 function validateBody(body: unknown): body is ConformanceBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
-  if (!b.runner_report || typeof b.runner_report !== "object") return false;
-  if (typeof b.runner_signature !== "string") return false;
+  if (typeof b.dsse_envelope !== "string" || !b.dsse_envelope) return false;
   if (b.publish !== undefined && typeof b.publish !== "boolean") return false;
   if (
     b.expected_version_no !== undefined &&
@@ -356,8 +354,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const recorded = await recordRuntimeConformanceRun({
       tenantId: principal.tenantId,
       runtimeRevisionId: revisionId,
-      report: body.runner_report,
-      signature: body.runner_signature,
+      dsseEnvelope: body.dsse_envelope,
       idempotencyKey,
       requestId,
       actor: actorFromAdminPrincipal(principal),
@@ -460,6 +457,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       err instanceof RuntimeConformanceRunInvalidError
     ) {
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
+    }
+    if (err instanceof RuntimeConformanceIdempotencyConflictError) {
+      return apiError("IDEMPOTENCY_CONFLICT", err.message, { requestId });
     }
     if (err instanceof RuntimeArtifactAttestationRequiredError) {
       return schemaInvalidTable(requestId, err.message);

@@ -32,7 +32,17 @@ export interface RuntimeConformanceRunSession {
   appendRun(params: {
     tenantId: string;
     report: RuntimeConformanceReport;
-    runnerSignature: string;
+    verification: {
+      envelopeDigest: string;
+      envelopeJson: string;
+      payloadDigest: string;
+      signingKeyId: string;
+      runnerIdentity: string;
+      verificationEngine: string;
+      verificationEngineVersion: string;
+      predicateType: string;
+      verifiedAt: Date;
+    };
     idempotencyKey: string;
     requestId: string;
     recordedAt: Date;

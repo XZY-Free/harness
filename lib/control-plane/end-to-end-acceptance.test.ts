@@ -104,10 +104,14 @@ import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysq
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import {
   ALL_CONFORMANCE_CASES,
-  canonicalizeRuntimeConformanceReport,
+  type RuntimeConformanceReport,
 } from "@/lib/runtimes/domain/runtime-conformance-run";
 import type { ConformanceEligibilitySnapshot } from "@/lib/runtimes/domain/runtime-conformance-eligibility";
-import { createTrustedTestVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import {
+  buildDsseConformanceEnvelope,
+  generateTestRunnerKey,
+} from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
+import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
@@ -123,6 +127,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-routes.test.ts 一致）。
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+
+const RUNNER_KEY = generateTestRunnerKey("e2e-test-runner");
+const RUNNER_IDENTITY = "ci/runtime-conformance";
 
 beforeEach(async () => {
   process.env.SNOW_AUTH_MODE = "dev";
@@ -461,20 +468,19 @@ async function seedEndToEndFixture(suffix: string) {
   };
 }
 
-// ─── 辅助：构造可信 Conformance 报告 + 签名 ───────────────
+// ─── 辅助：构造可信 Conformance DSSE Envelope ───────────────
 
 function buildSignedConformanceReport(revisionId: string, runtimeArtifactDigest: string, runtimeConfigDigest: string, protocolContractRevision: string, overrides: Record<string, unknown> = {}) {
-  const secret = "test-runner-secret-with-at-least-32-bytes";
   const startedAt = new Date("2026-08-02T01:00:00.000Z");
   const report = {
-    runId: crypto.randomUUID(),
+    runId: randomUUID(),
     runtimeRevisionId: revisionId,
     runtimeArtifactDigest,
     runtimeConfigDigest,
     protocolContractRevision,
     suiteRevision: "runtime-conformance@1",
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
-    runnerIdentity: "ci/runtime-conformance",
+    runnerIdentity: RUNNER_IDENTITY,
     testEnvironmentRevision: "isolated-mysql8@1",
     startedAt: startedAt.toISOString(),
     completedAt: new Date(startedAt.getTime() + 1000).toISOString(),
@@ -488,14 +494,10 @@ function buildSignedConformanceReport(revisionId: string, runtimeArtifactDigest:
     })),
     ...overrides,
   };
-  const signature = createHmacSha256(secret, canonicalizeRuntimeConformanceReport(report));
-  return { report, signature };
-}
-
-function createHmacSha256(secret: string, payload: string): string {
-  return createHash("sha256")
-    .update(createHash("sha256").update(`${secret}${payload}`).digest())
-    .digest("hex");
+  return buildDsseConformanceEnvelope(
+    report as RuntimeConformanceReport,
+    RUNNER_KEY,
+  );
 }
 
 // ─── 辅助：插入测试用 Invocation 行 ──────────────────────
@@ -806,7 +808,7 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
       createdBy: owner.id,
     });
 
-    const signed = buildSignedConformanceReport(
+    const dsseEnvelope = buildSignedConformanceReport(
       revision.id,
       `sha256:${"a".repeat(64)}`,
       `sha256:${"b".repeat(64)}`,
@@ -815,7 +817,10 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
 
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,
-      verifier: createTrustedTestVerifier(),
+      verifier: createDSSEConformanceVerifier({
+        allowedRunnerIdentities: [RUNNER_IDENTITY],
+        trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 },
+      }),
     });
     const result = await record({
       tenantId: tenant.id,
@@ -823,8 +828,7 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
       idempotencyKey: "e2e-run-001",
       requestId: "e2e-request-001",
       actor: { actorType: "user", actorId: owner.id },
-      report: signed.report,
-      signature: signed.signature,
+      dsseEnvelope,
     });
 
     expect(result.run.overallResult).toBe("passed");

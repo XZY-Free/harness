@@ -89,15 +89,7 @@ const recordRuntimeConformanceRun = createRecordRuntimeConformanceRun({
   store: mysqlRuntimeConformanceRunStore,
   verifier: createDSSEConformanceVerifier({
     allowedRunnerIdentities: runtimeConformanceConfig.allowedRunnerIdentities,
-    readConformanceEnvelope: async (runId) => {
-      const [run] = await db
-        .select({ runnerSignature: runtimeConformanceRun.runnerSignature })
-        .from(runtimeConformanceRun)
-        .where(eq(runtimeConformanceRun.id, runId))
-        .limit(1);
-      if (!run) throw new Error(`ConformanceRun 不存在: ${runId}`);
-      return Buffer.from(run.runnerSignature, "utf-8");
-    },
+    trustedRunnerKeys: runtimeConformanceConfig.trustedRunnerKeys,
   }),
 });
 const publishRuntimeRevision = createPublishRuntimeRevision({
@@ -221,8 +213,7 @@ const runtimePublication: HostedRuntimePublicationGateway = {
     const run = await recordRuntimeConformanceRun({
       tenantId: command.tenantId,
       runtimeRevisionId: revision.id,
-      report: signedRun.report,
-      signature: signedRun.signature,
+      dsseEnvelope: signedRun.dsseEnvelope,
       idempotencyKey: `hosted-runtime-conformance:${revision.id}`,
       requestId: `hosted-runtime-conformance:${revision.id}`,
       actor: { actorType: "system", actorId: HOSTED_ACTOR_ID },
@@ -376,8 +367,7 @@ const conformanceRunner: HostedConformanceRunner = {
     const run = await recordRuntimeConformanceRun({
       tenantId: command.tenantId,
       runtimeRevisionId: command.runtimeRevisionId,
-      report: signedRun.report,
-      signature: signedRun.signature,
+      dsseEnvelope: signedRun.dsseEnvelope,
       idempotencyKey: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
       requestId: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
       actor: { actorType: "system", actorId: HOSTED_ACTOR_ID },

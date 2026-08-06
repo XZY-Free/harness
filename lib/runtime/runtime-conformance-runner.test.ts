@@ -2,6 +2,8 @@ import {
   GET as conformanceGET,
   POST as conformancePOST,
 } from "@/app/admin/api/v1/runtime-revisions/[revision_id]/conformance/route";
+import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
+import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 /**
  * S05-C06：V11 Runtime Conformance runner + 结果持久化 + Admin API 集成测试（真实 MySQL 8）。
@@ -59,10 +61,12 @@ import {
   type ConformanceCaseId,
   type ConformanceCaseResult,
   MANDATORY_GATE_CASES,
-  RuntimeConformanceCaseFailedError,
   validateConformanceGate,
 } from "@/lib/runtimes/domain/runtime-conformance";
-import { canonicalizeRuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
+import {
+  buildDsseConformanceEnvelope,
+  generateTestRunnerKey,
+} from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
 import {
   createRuntime,
   getRuntimeById,
@@ -76,25 +80,33 @@ import {
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { publishRuntimeRevision } from "@/lib/runtimes/test-support/attempt-runtime-publication-without-trusted-run";
 import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
+import { RuntimeConformanceRunInvalidError } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-api.test.ts 一致）。
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
-const ORIGINAL_CONFORMANCE_SECRET = process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET;
-const CONFORMANCE_SECRET = "test-runtime-conformance-secret-32-bytes";
+const ORIGINAL_CONFORMANCE_RUNNERS = process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS;
+const ORIGINAL_CONFORMANCE_KEYS = process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON;
+const TEST_RUNNER_KEY = generateTestRunnerKey("runner-api-test");
+const RUNNER_IDENTITY = "ci/runtime-conformance";
+const TRUSTED_KEYS_JSON = JSON.stringify({
+  [TEST_RUNNER_KEY.keyid]: TEST_RUNNER_KEY.publicKeyBase64,
+});
 const RUNTIME_DIGEST = `sha256:${"a".repeat(64)}`;
 const CONFIG_DIGEST = `sha256:${"b".repeat(64)}`;
 const RUNNER_DIGEST = `sha256:${"c".repeat(64)}`;
 
 beforeEach(async () => {
   process.env.SNOW_AUTH_MODE = "dev";
-  process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET = CONFORMANCE_SECRET;
+  process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = RUNNER_IDENTITY;
+  process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = TRUSTED_KEYS_JSON;
   await resetDatabase(db);
 });
 
 afterEach(() => {
   process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
-  process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET = ORIGINAL_CONFORMANCE_SECRET;
+  process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = ORIGINAL_CONFORMANCE_RUNNERS;
+  process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = ORIGINAL_CONFORMANCE_KEYS;
 });
 
 // ─── 辅助：seed 租户 + 用户 + Runtime + draft Revision ──
@@ -163,7 +175,7 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
     protocolContractRevision: "agent-runtime-protocol@1",
     suiteRevision: "runtime-conformance@1",
     runnerArtifactDigest: RUNNER_DIGEST,
-    runnerIdentity: "ci/runtime-conformance",
+    runnerIdentity: RUNNER_IDENTITY,
     testEnvironmentRevision: "isolated-mysql8@1",
     startedAt: "2026-08-02T01:00:00.000Z",
     completedAt: "2026-08-02T01:00:01.000Z",
@@ -177,10 +189,10 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
     })),
   };
   return {
-    runner_report: report,
-    runner_signature: createHmac("sha256", CONFORMANCE_SECRET)
-      .update(canonicalizeRuntimeConformanceReport(report))
-      .digest("hex"),
+    dsse_envelope: buildDsseConformanceEnvelope(
+      report as Parameters<typeof buildDsseConformanceEnvelope>[0],
+      TEST_RUNNER_KEY,
+    ),
   };
 }
 
@@ -775,11 +787,11 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
   it("旧发布入口不能再用调用方自报结果发布", async () => {
     await expect(
       publishRuntimeRevision(tenantId, revisionId, 1, passingAllConformanceResults()),
-    ).rejects.toThrow(RuntimeConformanceCaseFailedError);
+    ).rejects.toThrow(RuntimeConformanceRunInvalidError);
     expect((await getRuntimeRevisionById(revisionId))?.revisionState).toBe("draft");
   });
 
-  it("publishRuntimeRevision 门禁失败 → 抛 RuntimeConformanceCaseFailedError + 不持久化结果", async () => {
+  it("publishRuntimeRevision 门禁失败 → 抛 RuntimeConformanceRunInvalidError + 不持久化结果", async () => {
     await expect(
       publishRuntimeRevision(
         tenantId,
@@ -787,7 +799,7 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
         1,
         failingConformanceResults("event-batch-idempotent"),
       ),
-    ).rejects.toThrow(RuntimeConformanceCaseFailedError);
+    ).rejects.toThrow(RuntimeConformanceRunInvalidError);
 
     // Revision 保持 draft
     const after = await getRuntimeRevisionById(revisionId);
@@ -801,7 +813,7 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
   it("缺少显式 Passed Run 时全部 16 个 required case 均视为缺失", async () => {
     await expect(
       publishRuntimeRevision(tenantId, revisionId, 1, passingConformanceResults()),
-    ).rejects.toMatchObject({ failedCases: ALL_CONFORMANCE_CASES });
+    ).rejects.toThrow(RuntimeConformanceRunInvalidError);
   });
 
   it("旧式 options 不会创建或覆盖任何 conformance 事实", async () => {
@@ -809,7 +821,7 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
       publishRuntimeRevision(tenantId, revisionId, 1, passingConformanceResults(), {
         adapterDigest: "sha256:legacy",
       }),
-    ).rejects.toThrow(RuntimeConformanceCaseFailedError);
+    ).rejects.toThrow(RuntimeConformanceRunInvalidError);
     expect(await listConformanceResultsByRevision(revisionId)).toHaveLength(0);
   });
 });
@@ -899,10 +911,34 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
   });
 
   it("POST /conformance publish=true 通过门禁 → 发布 Revision", async () => {
+    const attestation = await createRecordArtifactAttestation({
+      store: mysqlArtifactAttestationPersistenceStore,
+    })({
+      tenantId,
+      artifactType: "runtime_revision",
+      artifactRevisionId: revisionId,
+      artifactDigest: RUNTIME_DIGEST,
+      signatureBundleRef: "attestation:signature:conformance-publish",
+      sbomRef: "attestation:sbom:conformance-publish",
+      provenanceRef: "attestation:provenance:conformance-publish",
+      builderIdentity: "builder:conformance-test",
+      verificationState: "verified",
+      policyRevisionId: null,
+      failureCode: null,
+      verifiedAt: new Date(),
+      sourceRevision: null,
+      buildPipeline: null,
+      dependencyLockFileHash: null,
+      buildTime: null,
+      scanSummaryJson: null,
+      actor: { tenantId, actorType: "service", actorId: "test-builder" },
+      requestId: `attestation-${revisionId}`,
+    });
     const signedBody = {
       ...trustedRunnerBody(revisionId),
       publish: true,
       expected_version_no: 1,
+      artifact_attestation_id: attestation.id,
     };
     const request = buildV11Request({
       audience: "admin",
@@ -953,6 +989,29 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
   });
 
   it("POST /conformance publish=true 的 Failed Run 被发布门禁阻断", async () => {
+    const attestation = await createRecordArtifactAttestation({
+      store: mysqlArtifactAttestationPersistenceStore,
+    })({
+      tenantId,
+      artifactType: "runtime_revision",
+      artifactRevisionId: revisionId,
+      artifactDigest: RUNTIME_DIGEST,
+      signatureBundleRef: "attestation:signature:conformance-fail",
+      sbomRef: "attestation:sbom:conformance-fail",
+      provenanceRef: "attestation:provenance:conformance-fail",
+      builderIdentity: "builder:conformance-test",
+      verificationState: "verified",
+      policyRevisionId: null,
+      failureCode: null,
+      verifiedAt: new Date(),
+      sourceRevision: null,
+      buildPipeline: null,
+      dependencyLockFileHash: null,
+      buildTime: null,
+      scanSummaryJson: null,
+      actor: { tenantId, actorType: "service", actorId: "test-builder" },
+      requestId: `attestation-fail-${revisionId}`,
+    });
     const request = buildV11Request({
       audience: "admin",
       method: "POST",
@@ -963,6 +1022,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
         ...trustedRunnerBody(revisionId, false),
         publish: true,
         expected_version_no: 1,
+        artifact_attestation_id: attestation.id,
       },
     });
 
@@ -975,6 +1035,29 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
   });
 
   it("POST /conformance publish=true 缺少 If-Match → 400 REQUEST_SCHEMA_INVALID", async () => {
+    const attestation = await createRecordArtifactAttestation({
+      store: mysqlArtifactAttestationPersistenceStore,
+    })({
+      tenantId,
+      artifactType: "runtime_revision",
+      artifactRevisionId: revisionId,
+      artifactDigest: RUNTIME_DIGEST,
+      signatureBundleRef: "attestation:signature:conformance-no-ifmatch",
+      sbomRef: "attestation:sbom:conformance-no-ifmatch",
+      provenanceRef: "attestation:provenance:conformance-no-ifmatch",
+      builderIdentity: "builder:conformance-test",
+      verificationState: "verified",
+      policyRevisionId: null,
+      failureCode: null,
+      verifiedAt: new Date(),
+      sourceRevision: null,
+      buildPipeline: null,
+      dependencyLockFileHash: null,
+      buildTime: null,
+      scanSummaryJson: null,
+      actor: { tenantId, actorType: "service", actorId: "test-builder" },
+      requestId: `attestation-no-ifmatch-${revisionId}`,
+    });
     const request = buildV11Request({
       audience: "admin",
       method: "POST",
@@ -984,6 +1067,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
         ...trustedRunnerBody(revisionId),
         publish: true,
         expected_version_no: 1,
+        artifact_attestation_id: attestation.id,
       },
     });
 
@@ -1060,4 +1144,4 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     expect(body.error.code).toBe("RESOURCE_NOT_FOUND");
   });
 });
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";

@@ -3,7 +3,6 @@ import type {
   BuilderKeyRegistry,
   ManagedArtifactStore,
 } from "@/lib/artifacts/domain/artifact-attestation";
-import type { RuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
 
 export interface HostedArtifactEvidence {
   artifactDigest: string;
@@ -32,10 +31,9 @@ export interface HostedControlPlaneEvidenceProvider {
     tenantId: string;
     artifactType: Extract<ArtifactKind, "agent_revision" | "runtime_revision">;
   }): Promise<HostedArtifactEvidence>;
-  /** 调用可信 Runner，返回与 draft RuntimeRevision 精确绑定且幂等的签名报告。 */
+  /** 调用可信 Runner，返回与 draft RuntimeRevision 精确绑定且幂等的 DSSE 签名 Envelope。 */
   runRuntimeConformance(input: HostedRuntimeConformanceInput): Promise<{
-    report: RuntimeConformanceReport;
-    signature: string;
+    dsseEnvelope: string;
   }>;
 }
 

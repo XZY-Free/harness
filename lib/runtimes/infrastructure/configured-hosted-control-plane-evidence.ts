@@ -11,7 +11,6 @@ import type {
   HostedRuntimeConformanceInput,
 } from "@/lib/runtimes/domain/hosted-control-plane-evidence";
 import { setDefaultHostedControlPlaneEvidenceProvider } from "@/lib/runtimes/domain/hosted-control-plane-evidence";
-import type { RuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
 
 export interface HostedEvidenceServiceConfig {
   readonly endpoint: string;
@@ -60,14 +59,11 @@ export function createConfiguredHostedControlPlaneEvidenceProvider(dependencies:
         conformanceRequest(input),
         input.idempotencyKey,
       );
-      const report = payload.report;
-      if (!report || typeof report !== "object" || Array.isArray(report)) {
-        throw new Error("Hosted 证据服务返回的 Conformance 报告非法");
+      const dsseEnvelope = payload.dsse_envelope;
+      if (typeof dsseEnvelope !== "string" || !dsseEnvelope) {
+        throw new Error("Hosted 证据服务返回的 DSSE Envelope 非法");
       }
-      return {
-        report: report as RuntimeConformanceReport,
-        signature: requireString(payload, "signature"),
-      };
+      return { dsseEnvelope };
     },
   };
 }

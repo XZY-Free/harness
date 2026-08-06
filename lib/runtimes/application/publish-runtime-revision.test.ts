@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
@@ -16,10 +16,7 @@ import { listConformanceResultsByRevision } from "@/lib/runtime/runtime-conforma
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import { MANDATORY_GATE_CASES } from "@/lib/runtimes/domain/runtime-conformance";
-import {
-  ALL_CONFORMANCE_CASES,
-  canonicalizeRuntimeConformanceReport,
-} from "@/lib/runtimes/domain/runtime-conformance-run";
+import { ALL_CONFORMANCE_CASES } from "@/lib/runtimes/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtimes/persistence/mysql-runtime-publication-store";
 import type {
@@ -32,13 +29,20 @@ import {
   getRuntimeRevisionById,
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { seedVerifiedRuntimeAttestation } from "@/lib/runtimes/test-support/seed-verified-runtime-attestation";
-import { createTrustedTestVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import {
+  buildDsseConformanceEnvelope,
+  generateTestRunnerKey,
+} from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
+import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
   await resetDatabase(db);
 });
+
+const RUNNER_KEY = generateTestRunnerKey("publication-test-runner");
+const RUNNER_IDENTITY = "ci/runtime-conformance";
 
 async function seedRuntimePublicationFixture(suffix = "") {
   const tenant = await ensureDefaultTenant();
@@ -97,17 +101,17 @@ async function seedRuntimePublicationFixture(suffix = "") {
       evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
     })),
   };
-  const secret = "publication-test-secret-at-least-32-bytes";
+  const dsseEnvelope = buildDsseConformanceEnvelope(report, RUNNER_KEY);
   await createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    verifier: createTrustedTestVerifier(),
+    verifier: createDSSEConformanceVerifier({
+      allowedRunnerIdentities: [RUNNER_IDENTITY],
+      trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 },
+    }),
   })({
     tenantId: tenant.id,
     runtimeRevisionId: revision.id,
-    report,
-    signature: createHmac("sha256", secret)
-      .update(canonicalizeRuntimeConformanceReport(report))
-      .digest("hex"),
+    dsseEnvelope,
     idempotencyKey: `run-${report.runId}`,
     requestId: `request-${report.runId}`,
     actor: { actorType: "system", actorId: "test-trusted-runner" },

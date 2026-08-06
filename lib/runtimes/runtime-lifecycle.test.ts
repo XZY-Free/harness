@@ -28,7 +28,7 @@ import {
   isCapabilitySubset,
   validateConformanceGate,
 } from "@/lib/runtimes/domain/runtime-conformance";
-import { canonicalizeRuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
+import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtimes/domain/runtime-conformance-contract";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
 import {
   RuntimeLifecycleError,
@@ -53,7 +53,12 @@ import {
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
 import { publishRuntimeRevision } from "@/lib/runtimes/test-support/attempt-runtime-publication-without-trusted-run";
 import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
-import { createTrustedTestVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import { RuntimeConformanceRunInvalidError } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
+import {
+  buildDsseConformanceEnvelope,
+  generateTestRunnerKey,
+} from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
+import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -112,7 +117,8 @@ function buildDraftParams(
   };
 }
 
-const TRUSTED_SECRET = "runtime-test-trusted-secret-at-least-32-bytes";
+const RUNNER_KEY = generateTestRunnerKey("lifecycle-test-runner");
+const RUNNER_IDENTITY = "ci/runtime-conformance";
 const RUNNER_DIGEST = `sha256:${"c".repeat(64)}`;
 
 async function publishTrustedRevision(
@@ -128,7 +134,7 @@ async function publishTrustedRevision(
     runtimeArtifactDigest: revision.artifactDigest,
     runtimeConfigDigest: revision.configHash,
     protocolContractRevision: revision.protocolContractRevision,
-    suiteRevision: "runtime-conformance@1",
+    suiteRevision: CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: RUNNER_DIGEST,
     runnerIdentity: "ci/runtime-conformance",
     testEnvironmentRevision: "isolated-mysql8@1",
@@ -143,17 +149,18 @@ async function publishTrustedRevision(
       evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
     })),
   };
+  const dsseEnvelope = buildDsseConformanceEnvelope(report, RUNNER_KEY);
   const record = createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    verifier: createTrustedTestVerifier(),
+    verifier: createDSSEConformanceVerifier({
+      allowedRunnerIdentities: [RUNNER_IDENTITY],
+      trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 },
+    }),
   });
   await record({
     tenantId,
     runtimeRevisionId: revisionId,
-    report,
-    signature: createHmac("sha256", TRUSTED_SECRET)
-      .update(canonicalizeRuntimeConformanceReport(report))
-      .digest("hex"),
+    dsseEnvelope,
     idempotencyKey: `test-run-${report.runId}`,
     requestId: `request-${report.runId}`,
     actor: { actorType: "system", actorId: "test-trusted-runner" },
@@ -617,7 +624,7 @@ describe("V11 runtime-revision-queries", () => {
     expect(runtimeRow?.versionNo).toBe(2);
   });
 
-  it("publishRuntimeRevision conformance 门禁失败 → 抛 RuntimeConformanceCaseFailedError，Revision 保持 draft", async () => {
+  it("publishRuntimeRevision conformance 门禁失败 → 抛 RuntimeConformanceRunInvalidError，Revision 保持 draft", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     await expect(
       publishRuntimeRevision(
@@ -626,7 +633,7 @@ describe("V11 runtime-revision-queries", () => {
         1,
         failingConformanceResults("event-batch-idempotent"),
       ),
-    ).rejects.toThrow(RuntimeConformanceCaseFailedError);
+    ).rejects.toThrow(RuntimeConformanceRunInvalidError);
 
     // Revision 保持 draft
     const after = await getRuntimeRevisionById(rev.id);
@@ -638,22 +645,22 @@ describe("V11 runtime-revision-queries", () => {
     expect(runtimeRow?.currentRevisionId).toBeNull();
   });
 
-  it("publishRuntimeRevision conformance 缺失 mandatory case → 抛 RuntimeConformanceCaseFailedError", async () => {
+  it("publishRuntimeRevision conformance 缺失 mandatory case → 抛 RuntimeConformanceRunInvalidError", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     // 只提交 3 个（缺 credential-never-in-model-data）
     const partialResults = passingConformanceResults().filter(
       (r) => r.caseId !== "credential-never-in-model-data",
     );
     await expect(publishRuntimeRevision(tenantId, rev.id, 1, partialResults)).rejects.toThrow(
-      RuntimeConformanceCaseFailedError,
+      RuntimeConformanceRunInvalidError,
     );
   });
 
-  it("publishRuntimeRevision conformance 空 results → 抛 RuntimeConformanceCaseFailedError（4 个全缺）", async () => {
+  it("publishRuntimeRevision conformance 空 results → 抛 RuntimeConformanceRunInvalidError（缺少可信 Run）", async () => {
     const rev = await createDraftRuntimeRevision(buildDraftParams(tenantId, runtimeId, ownerId));
     const error = await publishRuntimeRevision(tenantId, rev.id, 1, []).catch((e) => e);
-    expect(error).toBeInstanceOf(RuntimeConformanceCaseFailedError);
-    expect(error.failedCases).toHaveLength(16);
+    expect(error).toBeInstanceOf(RuntimeConformanceRunInvalidError);
+    expect(error.reason).toContain("不存在或未通过");
   });
 
   it("publishRuntimeRevision published 状态再 publish 抛 StateError", async () => {
@@ -804,7 +811,7 @@ describe("V11 S03-W02 阶段验收场景", () => {
       1,
       failingConformanceResults("cancel-request-not-terminal"),
     ).catch((e) => e);
-    expect(error).toBeInstanceOf(RuntimeConformanceCaseFailedError);
+    expect(error).toBeInstanceOf(RuntimeConformanceRunInvalidError);
     // Revision 仍为 draft
     const after = await getRuntimeRevisionById(rev.id);
     expect(after?.revisionState).toBe("draft");
@@ -825,4 +832,4 @@ describe("V11 S03-W02 阶段验收场景", () => {
     expect(fail.missing).toEqual(["memory"]);
   });
 });
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";

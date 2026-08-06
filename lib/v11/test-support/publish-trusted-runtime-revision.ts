@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { db } from "@/lib/db/client";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtime";
@@ -6,18 +6,25 @@ import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import {
   ALL_CONFORMANCE_CASES,
-  canonicalizeRuntimeConformanceReport,
-} from "@/lib/runtimes/domain/runtime-conformance-run";
+  CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtimes/domain/runtime-conformance-contract";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtimes/persistence/mysql-runtime-publication-store";
 import {
   getRuntimeRevisionById,
   updateDraftRuntimeRevisionContent,
 } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { createTrustedTestVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import {
+  buildDsseConformanceEnvelope,
+  generateTestRunnerKey,
+} from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
+import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { eq } from "drizzle-orm";
 
-/** 真实 MySQL + HMAC 的测试装配：先记录可信 Run，再通过正式发布服务发布。 */
+const TRUSTED_RUNNER_KEY = generateTestRunnerKey("test-trusted-runner");
+const RUNNER_IDENTITY = "test/trusted-runtime-runner";
+
+/** 真实 MySQL + DSSE 的测试装配：先记录可信 Run，再通过正式发布服务发布。 */
 export async function publishTrustedRuntimeRevisionForTest(params: {
   tenantId: string;
   revisionId: string;
@@ -49,9 +56,9 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
     runtimeArtifactDigest: revision.artifactDigest,
     runtimeConfigDigest: revision.configHash,
     protocolContractRevision: revision.protocolContractRevision,
-    suiteRevision: "runtime-conformance@1",
+    suiteRevision: CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
-    runnerIdentity: "test/trusted-runtime-runner",
+    runnerIdentity: RUNNER_IDENTITY,
     testEnvironmentRevision: "mysql8-testcontainers@1",
     startedAt: "2026-08-02T01:00:00.000Z",
     completedAt: "2026-08-02T01:00:01.000Z",
@@ -64,20 +71,20 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
       evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
     })),
   };
-  const secret = "route-test-trusted-runner-secret-32-bytes";
+  const dsseEnvelope = buildDsseConformanceEnvelope(report, TRUSTED_RUNNER_KEY);
   await createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    verifier: createTrustedTestVerifier(),
+    verifier: createDSSEConformanceVerifier({
+      allowedRunnerIdentities: [RUNNER_IDENTITY],
+      trustedRunnerKeys: { [TRUSTED_RUNNER_KEY.keyid]: TRUSTED_RUNNER_KEY.publicKeyBase64 },
+    }),
   })({
     tenantId: params.tenantId,
     runtimeRevisionId: revision.id,
-    report,
-    signature: createHmac("sha256", secret)
-      .update(canonicalizeRuntimeConformanceReport(report))
-      .digest("hex"),
+    dsseEnvelope,
     idempotencyKey: `runtime-conformance:${runId}`,
     requestId: `test-run:${runId}`,
-    actor: { actorType: "system", actorId: "test/trusted-runtime-runner" },
+    actor: { actorType: "system", actorId: RUNNER_IDENTITY },
   });
 
   const publication = await createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore })({
@@ -89,7 +96,7 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
     actor: {
       tenantId: params.tenantId,
       actorType: "system",
-      actorId: "test/trusted-runtime-runner",
+      actorId: RUNNER_IDENTITY,
     },
     requestId: `test-publish:${revision.id}`,
     idempotencyKey: `test-publish:${revision.id}`,

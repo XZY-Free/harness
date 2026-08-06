@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   RuntimeConformanceBindingError,
   type RuntimeConformanceReport,
@@ -14,9 +14,8 @@ import type { RuntimeConformanceVerifier } from "@/lib/runtimes/verification/run
 export interface RecordRuntimeConformanceRunCommand {
   tenantId: string;
   runtimeRevisionId: string;
-  report: RuntimeConformanceReport;
-  /** §8.4: DSSE Envelope 签名（替代旧 HMAC signingSecret）。 */
-  signature: string;
+  /** 原始 DSSE Envelope JSON 字符串。 */
+  dsseEnvelope: string;
   idempotencyKey: string;
   requestId: string;
   actor: { actorType: "user" | "service" | "workload" | "system"; actorId: string };
@@ -32,11 +31,18 @@ export interface RecordRuntimeConformanceRunCommand {
   };
 }
 
+export class RuntimeConformanceIdempotencyConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeConformanceIdempotencyConflictError";
+  }
+}
+
 export function createRecordRuntimeConformanceRun(dependencies: {
   store: RuntimeConformanceRunStore;
   /**
    * §8.4: Conformance 验证器 — 替代 signingSecret。
-   * 新 Run 使用 DSSE Verifier；Legacy HMAC 仅历史读取兼容。
+   * 使用 DSSE Verifier 验证 Ed25519 签名的 Envelope。
    */
   verifier: RuntimeConformanceVerifier;
   now?: () => Date;
@@ -45,17 +51,28 @@ export function createRecordRuntimeConformanceRun(dependencies: {
   const now = dependencies.now ?? (() => new Date());
   const newId = dependencies.newId ?? randomUUID;
   return async (command: RecordRuntimeConformanceRunCommand) => {
-    if (command.report.runtimeRevisionId !== command.runtimeRevisionId) {
-      throw new RuntimeConformanceBindingError("Runner 报告 Revision 与命令不一致");
+    const envelopeBytes = Buffer.from(command.dsseEnvelope, "utf-8");
+    const envelopeDigest = `sha256:${createHash("sha256").update(envelopeBytes).digest("hex")}`;
+
+    // §01.7 步骤 2-4: 幂等检查 — 比较 envelopeDigest
+    const existing = await dependencies.store.findByIdempotency({
+      tenantId: command.tenantId,
+      runtimeRevisionId: command.runtimeRevisionId,
+      idempotencyKey: command.idempotencyKey,
+    });
+    if (existing) {
+      if (existing.run.envelopeDigest !== envelopeDigest) {
+        throw new RuntimeConformanceIdempotencyConflictError(
+          "Idempotency-Key 已绑定不同的 DSSE Envelope",
+        );
+      }
+      return { ...existing, replayed: true };
     }
 
-    // §8.4: 使用 RuntimeConformanceVerifier 验证 — 替代旧 HMAC signingSecret 验签
+    // §01.7 步骤 5-6: 验证 Envelope（绑定校验由事务内 findRevision 后执行）
     const verifyResult = await dependencies.verifier.verify({
-      runId: command.report.runId,
+      dsseEnvelopeBytes: envelopeBytes,
       expectedRuntimeRevisionId: command.runtimeRevisionId,
-      expectedRuntimeArtifactDigest: command.report.runtimeArtifactDigest,
-      expectedRuntimeConfigDigest: command.report.runtimeConfigDigest,
-      expectedProtocolContractRevision: command.report.protocolContractRevision,
       tenantId: command.tenantId,
     });
     if (!verifyResult.verified) {
@@ -64,18 +81,15 @@ export function createRecordRuntimeConformanceRun(dependencies: {
       );
     }
 
-    validateRuntimeConformanceReport(command.report);
+    const claims = verifyResult.claims;
+    const report = claims.report;
 
-    const existing = await dependencies.store.findByIdempotency(command);
-    if (existing) {
-      if (existing.run.id !== command.report.runId) {
-        throw new RuntimeConformanceBindingError("Idempotency-Key 已绑定其他 Conformance Run");
-      }
-      return { ...existing, replayed: true };
-    }
+    // §01.7 步骤 11: 校验 Report 完整性
+    validateRuntimeConformanceReport(report);
 
     try {
       return await dependencies.store.transaction(async (session) => {
+        // §01.7 步骤 8-9: 锁 Revision + 校验仍为 draft
         const revision = await session.findRevision(command.tenantId, command.runtimeRevisionId);
         if (!revision) throw new RuntimeConformanceBindingError("RuntimeRevision 不存在或跨租户");
         if (revision.revisionState !== "draft") {
@@ -83,25 +97,37 @@ export function createRecordRuntimeConformanceRun(dependencies: {
             "只有 draft RuntimeRevision 可创建 Conformance Run",
           );
         }
+        // §01.7 步骤 10: 校验 Verified Claims 与 Revision 一致
         if (
-          revision.artifactDigest !== command.report.runtimeArtifactDigest ||
-          revision.configHash !== command.report.runtimeConfigDigest ||
-          revision.protocolContractRevision !== command.report.protocolContractRevision
+          revision.artifactDigest !== report.runtimeArtifactDigest ||
+          revision.configHash !== report.runtimeConfigDigest ||
+          revision.protocolContractRevision !== report.protocolContractRevision
         ) {
           throw new RuntimeConformanceBindingError(
             "Runner 报告绑定与 RuntimeRevision 当前事实不一致",
           );
         }
         const recordedAt = now();
+        const verifiedAt = now();
         const run = await session.appendRun({
           tenantId: command.tenantId,
-          report: command.report,
-          runnerSignature: command.signature,
+          report,
+          verification: {
+            envelopeDigest,
+            envelopeJson: command.dsseEnvelope,
+            payloadDigest: claims.payloadDigest,
+            signingKeyId: claims.signingKeyId,
+            runnerIdentity: claims.runnerIdentity,
+            verificationEngine: claims.verificationEngine,
+            verificationEngineVersion: claims.verificationEngineVersion,
+            predicateType: claims.predicateType,
+            verifiedAt,
+          },
           idempotencyKey: command.idempotencyKey,
           requestId: command.requestId,
           recordedAt,
         });
-        const caseResults = await session.appendCaseResults(command.report);
+        const caseResults = await session.appendCaseResults(report);
         await session.appendAudit({
           id: newId(),
           tenantId: command.tenantId,
@@ -113,6 +139,7 @@ export function createRecordRuntimeConformanceRun(dependencies: {
             runtime_revision_id: command.runtimeRevisionId,
             overall_result: run.overallResult,
             evidence_manifest_digest: run.evidenceManifestDigest,
+            envelope_digest: run.envelopeDigest,
           },
           occurredAt: recordedAt,
         });
@@ -145,8 +172,14 @@ export function createRecordRuntimeConformanceRun(dependencies: {
       });
     } catch (error) {
       // 两个相同命令并发越过预读时，数据库唯一约束选出权威 Run；输家重读返回同一事实。
-      const winner = await dependencies.store.findByIdempotency(command);
-      if (winner?.run.id === command.report.runId) return { ...winner, replayed: true };
+      const winner = await dependencies.store.findByIdempotency({
+        tenantId: command.tenantId,
+        runtimeRevisionId: command.runtimeRevisionId,
+        idempotencyKey: command.idempotencyKey,
+      });
+      if (winner && winner.run.envelopeDigest === envelopeDigest) {
+        return { ...winner, replayed: true };
+      }
       throw error;
     }
   };

@@ -64,7 +64,7 @@ export const mysqlRuntimeConformanceRunStore: RuntimeConformanceRunStore = {
           return row?.revision ?? null;
         },
         async appendRun(params) {
-          const { report } = params;
+          const { report, verification } = params;
           await tx.insert(runtimeConformanceRun).values({
             id: report.runId,
             tenantId: params.tenantId,
@@ -80,7 +80,14 @@ export const mysqlRuntimeConformanceRunStore: RuntimeConformanceRunStore = {
             completedAt: new Date(report.completedAt),
             overallResult: report.overallResult,
             evidenceManifestDigest: report.evidenceManifestDigest,
-            runnerSignature: params.runnerSignature,
+            envelopeDigest: verification.envelopeDigest,
+            envelopeJson: verification.envelopeJson,
+            payloadDigest: verification.payloadDigest,
+            signingKeyId: verification.signingKeyId,
+            verificationEngine: verification.verificationEngine,
+            verificationEngineVersion: verification.verificationEngineVersion,
+            predicateType: verification.predicateType,
+            verifiedAt: verification.verifiedAt,
             idempotencyKey: params.idempotencyKey,
             requestId: params.requestId,
             recordedAt: params.recordedAt,

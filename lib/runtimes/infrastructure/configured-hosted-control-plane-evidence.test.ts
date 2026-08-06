@@ -64,14 +64,14 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
   });
 
   it("把幂等键和精确 RuntimeRevision 绑定发送给独立 Runner", async () => {
-    const report = { runId: "run-1" };
+    const dsseEnvelope = JSON.stringify({ payloadType: "application/vnd.in-toto+json" });
     const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("hosted-run:revision-1");
       expect(JSON.parse(String(init?.body))).toMatchObject({
         runtime_revision_id: "revision-1",
         runtime_artifact_digest: `sha256:${"b".repeat(64)}`,
       });
-      return jsonResponse({ report, signature: "signed-report" });
+      return jsonResponse({ dsse_envelope: dsseEnvelope });
     });
     const provider = createConfiguredHostedControlPlaneEvidenceProvider({
       config: CONFIG,
@@ -87,7 +87,7 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
         runtimeConfigDigest: `sha256:${"c".repeat(64)}`,
         protocolContractRevision: "agent-runtime-protocol@1",
       }),
-    ).resolves.toEqual({ report, signature: "signed-report" });
+    ).resolves.toEqual({ dsseEnvelope });
   });
 
   it("缺少服务地址、Token 或 Builder 信任锚时失败关闭", async () => {

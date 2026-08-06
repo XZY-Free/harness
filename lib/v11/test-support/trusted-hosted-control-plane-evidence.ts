@@ -1,4 +1,4 @@
-import { type KeyObject, createHash, createHmac, generateKeyPairSync, sign } from "node:crypto";
+import { type KeyObject, createHash, generateKeyPairSync, sign } from "node:crypto";
 import type {
   BuilderKeyRegistry,
   ManagedArtifactStore,
@@ -11,12 +11,15 @@ import {
   resetHostedControlPlaneEvidenceProvider,
   setHostedControlPlaneEvidenceProvider,
 } from "@/lib/runtimes/domain/hosted-control-plane-evidence";
+import { ALL_CONFORMANCE_CASES } from "@/lib/runtimes/domain/runtime-conformance-contract";
+import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtimes/domain/runtime-conformance-contract";
 import {
-  ALL_CONFORMANCE_CASES,
-  canonicalizeRuntimeConformanceReport,
-} from "@/lib/runtimes/domain/runtime-conformance-run";
+  buildDsseConformanceEnvelope,
+  generateTestRunnerKey,
+} from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
 
-const CONFORMANCE_SECRET = "hosted-control-plane-test-secret-32-bytes";
+const TRUSTED_RUNNER_KEY = generateTestRunnerKey("hosted-control-plane-runner");
+const RUNNER_IDENTITY = "ci/hosted-runtime-conformance";
 
 class TestManagedArtifactStore implements ManagedArtifactStore {
   readonly signatures = new Map<string, SignatureBundle>();
@@ -47,12 +50,9 @@ export function installTrustedHostedControlPlaneEvidenceForTest(options?: {
   corruptArtifactSignatureFor?: "agent_revision" | "runtime_revision";
   delaySecondAgentEvidenceMs?: number;
 }): () => void {
-  const originalSecret = process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET;
-  process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET = CONFORMANCE_SECRET;
   setHostedControlPlaneEvidenceProvider(createEvidenceProvider(options));
   return () => {
     resetHostedControlPlaneEvidenceProvider();
-    process.env.SNOW_RUNTIME_CONFORMANCE_SIGNING_SECRET = originalSecret;
   };
 }
 
@@ -128,9 +128,9 @@ function createEvidenceProvider(options?: {
         runtimeArtifactDigest: input.runtimeArtifactDigest,
         runtimeConfigDigest: input.runtimeConfigDigest,
         protocolContractRevision: input.protocolContractRevision,
-        suiteRevision: "runtime-conformance@1",
+        suiteRevision: CONFORMANCE_SUITE_REVISION,
         runnerArtifactDigest: digest("snow-harness:isolated-hosted-runner:release-1"),
-        runnerIdentity: "ci/hosted-runtime-conformance",
+        runnerIdentity: RUNNER_IDENTITY,
         testEnvironmentRevision: "isolated-mysql8@1",
         startedAt: "2026-08-03T00:01:00.000Z",
         completedAt: "2026-08-03T00:01:01.000Z",
@@ -143,12 +143,8 @@ function createEvidenceProvider(options?: {
           evidenceDigest: digest(`${input.runtimeRevisionId}:${caseId}`),
         })),
       };
-      return {
-        report,
-        signature: createHmac("sha256", CONFORMANCE_SECRET)
-          .update(canonicalizeRuntimeConformanceReport(report))
-          .digest("hex"),
-      };
+      const dsseEnvelope = buildDsseConformanceEnvelope(report, TRUSTED_RUNNER_KEY);
+      return { dsseEnvelope };
     },
   };
 }

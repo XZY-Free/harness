@@ -114,6 +114,18 @@ export const runtimeConformanceConfig = {
       .map((s) => s.trim())
       .filter(Boolean);
   },
+  get trustedRunnerKeys(): Record<string, string> {
+    const raw = optionalEnv("SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON", "");
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, string>)
+        : {};
+    } catch {
+      return {};
+    }
+  },
 } as const;
 
 /** Hosted 制品证明与独立 Conformance Runner 的受管服务配置。 */

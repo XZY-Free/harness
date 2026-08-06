@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   ALL_CONFORMANCE_CASES,
   CONFORMANCE_SUITE_REVISION,
@@ -38,23 +37,6 @@ export function canonicalizeRuntimeConformanceReport(report: RuntimeConformanceR
     ...report,
     caseResults: [...report.caseResults].sort((a, b) => a.caseId.localeCompare(b.caseId)),
   });
-}
-
-export function verifyRuntimeConformanceReportSignature(
-  report: RuntimeConformanceReport,
-  signature: string,
-  secret: string,
-): void {
-  if (secret.length < 32) throw new RuntimeConformanceTrustError("Runner 签名密钥未安全配置");
-  if (!/^[0-9a-f]{64}$/.test(signature))
-    throw new RuntimeConformanceTrustError("Runner 签名格式非法");
-  const expected = createHmac("sha256", secret)
-    .update(canonicalizeRuntimeConformanceReport(report))
-    .digest();
-  const supplied = Buffer.from(signature, "hex");
-  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
-    throw new RuntimeConformanceTrustError("Runner 报告签名校验失败");
-  }
 }
 
 export function validateRuntimeConformanceReport(report: RuntimeConformanceReport): void {
