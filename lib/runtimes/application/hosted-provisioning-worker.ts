@@ -59,6 +59,7 @@ export function createHostedProvisioningWorker(
     gateways,
     store,
     maxAttempts: config.maxAttempts,
+    workerId: config.workerId,
   });
 
   let running = false;
@@ -123,7 +124,7 @@ export function createHostedProvisioningWorker(
 
         // 如果步骤失败但不是终态，释放租约让 Worker 后续重试
         if (result.newState === "retryable_failed") {
-          await store.releaseLease({ requestId: request.id });
+          await store.releaseLease({ requestId: request.id, workerId: config.workerId });
         }
       } catch (error) {
         // Saga 本身抛错（不应该发生，saga 内部已处理）
@@ -157,7 +158,7 @@ export function createHostedProvisioningWorker(
           });
         }
 
-        await store.releaseLease({ requestId: request.id });
+        await store.releaseLease({ requestId: request.id, workerId: config.workerId });
       }
     }
 

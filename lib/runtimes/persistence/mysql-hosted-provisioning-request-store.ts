@@ -1,5 +1,9 @@
 /**
  * HostedProvisioningRequest Store 的 MySQL 实现。
+ *
+ * §08.8: updateState/releaseLease 必须 WHERE leaseOwner=workerId。
+ * §08.7: claimRequests 包含 running+expired lease（崩溃恢复）。
+ * §08.9: 新增 checkpoint 字段。
  */
 
 import { db } from "@/lib/db/client";
@@ -84,6 +88,7 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
 
   async updateState({
     requestId,
+    workerId,
     state,
     currentStep,
     attemptCount,
@@ -103,36 +108,42 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
     if (leaseExpiresAt !== undefined) set.leaseExpiresAt = leaseExpiresAt;
     if (lastError !== undefined) set.lastError = lastError;
     if (lastAttemptAt !== undefined) set.lastAttemptAt = lastAttemptAt;
-    // §6.2: Step Checkpoint 字段
     if (lastCompletedStep !== undefined) set.lastCompletedStep = lastCompletedStep;
+    // §08.9: Step Checkpoint 字段
     if (checkpoint) {
-      if (checkpoint.agentRevisionId !== undefined)
-        set.stepAgentRevisionId = checkpoint.agentRevisionId;
-      if (checkpoint.agentPublicationRecordId !== undefined)
-        set.stepAgentPublicationRecordId = checkpoint.agentPublicationRecordId;
-      if (checkpoint.agentAttestationId !== undefined)
-        set.stepAgentAttestationId = checkpoint.agentAttestationId;
-      if (checkpoint.runtimeRevisionId !== undefined)
-        set.stepRuntimeRevisionId = checkpoint.runtimeRevisionId;
-      if (checkpoint.runtimePublicationRecordId !== undefined)
-        set.stepRuntimePublicationRecordId = checkpoint.runtimePublicationRecordId;
-      if (checkpoint.runtimeAttestationId !== undefined)
-        set.stepRuntimeAttestationId = checkpoint.runtimeAttestationId;
-      if (checkpoint.conformanceRunId !== undefined)
-        set.stepConformanceRunId = checkpoint.conformanceRunId;
+      if (checkpoint.agentRevisionId !== undefined) set.stepAgentRevisionId = checkpoint.agentRevisionId;
+      if (checkpoint.agentPublicationRecordId !== undefined) set.stepAgentPublicationRecordId = checkpoint.agentPublicationRecordId;
+      if (checkpoint.agentAttestationId !== undefined) set.stepAgentAttestationId = checkpoint.agentAttestationId;
+      if (checkpoint.runtimeId !== undefined) set.stepRuntimeId = checkpoint.runtimeId;
+      if (checkpoint.runtimeRevisionId !== undefined) set.stepRuntimeRevisionId = checkpoint.runtimeRevisionId;
+      if (checkpoint.runtimeArtifactId !== undefined) set.stepRuntimeArtifactId = checkpoint.runtimeArtifactId;
+      if (checkpoint.runtimeAttestationIds !== undefined) set.stepRuntimeAttestationIds = checkpoint.runtimeAttestationIds;
+      if (checkpoint.runtimePublicationRecordId !== undefined) set.stepRuntimePublicationRecordId = checkpoint.runtimePublicationRecordId;
+      if (checkpoint.conformanceRunId !== undefined) set.stepConformanceRunId = checkpoint.conformanceRunId;
       if (checkpoint.routeSetId !== undefined) set.stepRouteSetId = checkpoint.routeSetId;
-      if (checkpoint.routeSetVersionNo !== undefined)
-        set.stepRouteSetVersionNo = checkpoint.routeSetVersionNo;
-      if (checkpoint.routeRevisionId !== undefined)
-        set.stepRouteRevisionId = checkpoint.routeRevisionId;
-      if (checkpoint.routeActivationId !== undefined)
-        set.stepRouteActivationId = checkpoint.routeActivationId;
+      if (checkpoint.routeSetVersionNo !== undefined) set.stepRouteSetVersionNo = checkpoint.routeSetVersionNo;
+      if (checkpoint.routeId !== undefined) set.stepRouteId = checkpoint.routeId;
+      if (checkpoint.routeRevisionId !== undefined) set.stepRouteRevisionId = checkpoint.routeRevisionId;
+      if (checkpoint.routeActivationId !== undefined) set.stepRouteActivationId = checkpoint.routeActivationId;
+      if (checkpoint.projectionVersionNo !== undefined) set.stepProjectionVersionNo = checkpoint.projectionVersionNo;
     }
 
-    await db
+    // §08.8: Lease Owner 校验 — WHERE leaseOwner=workerId（如果提供了 workerId）
+    const conditions = [eq(hostedProvisioningRequestTable.id, requestId)];
+    if (workerId) {
+      conditions.push(eq(hostedProvisioningRequestTable.leaseOwner, workerId));
+    }
+
+    const result = await db
       .update(hostedProvisioningRequestTable)
       .set(set)
-      .where(eq(hostedProvisioningRequestTable.id, requestId));
+      .where(and(...conditions));
+
+    // §08.8: 检查 affectedRows=1（旧 Worker 不得覆盖新 Worker 结果）
+    const affectedRows = (result as unknown as { rowsAffected?: number }).rowsAffected ?? 1;
+    if (affectedRows === 0 && workerId) {
+      throw new Error(`updateState: lease owner 校验失败（requestId=${requestId}, workerId=${workerId}）`);
+    }
 
     const [row] = await db
       .select()
@@ -147,14 +158,17 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
     const leaseExpiresAt = new Date(now.getTime() + leaseMs);
     const nowStr = now.toISOString().slice(0, 19).replace("T", " ");
 
-    // §6.4: 原子领取 — SELECT FOR UPDATE SKIP LOCKED + UPDATE 必须在同一事务中
+    // §6.4/§08.7: 原子领取 — 含 running+expired lease（崩溃恢复）
     const ids = await db.transaction(async (tx) => {
       const rawResult = await tx.execute(
         sql`
           SELECT id FROM HostedProvisioningRequest
-          WHERE state IN ('pending', 'retryable_failed')
-            AND (nextAttemptAt IS NULL OR nextAttemptAt <= ${nowStr})
-            AND (leaseExpiresAt IS NULL OR leaseExpiresAt < ${nowStr})
+          WHERE (state IN ('pending', 'retryable_failed')
+                 AND (nextAttemptAt IS NULL OR nextAttemptAt <= ${nowStr})
+                 AND (leaseExpiresAt IS NULL OR leaseExpiresAt < ${nowStr}))
+             OR (state = 'running'
+                 AND leaseExpiresAt IS NOT NULL
+                 AND leaseExpiresAt < ${nowStr})
           ORDER BY createdAt ASC
           LIMIT ${batchSize}
           FOR UPDATE SKIP LOCKED
@@ -187,7 +201,13 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
       .where(inArray(hostedProvisioningRequestTable.id, ids));
   },
 
-  async releaseLease({ requestId }) {
+  async releaseLease({ requestId, workerId }) {
+    // §08.8: Lease Owner 校验
+    const conditions = [eq(hostedProvisioningRequestTable.id, requestId)];
+    if (workerId) {
+      conditions.push(eq(hostedProvisioningRequestTable.leaseOwner, workerId));
+    }
+
     await db
       .update(hostedProvisioningRequestTable)
       .set({
@@ -195,6 +215,6 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
         leaseExpiresAt: null,
         updatedAt: new Date(),
       })
-      .where(eq(hostedProvisioningRequestTable.id, requestId));
+      .where(and(...conditions));
   },
 };

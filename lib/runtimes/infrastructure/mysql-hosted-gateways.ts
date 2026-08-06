@@ -50,7 +50,10 @@ import type {
   HostedGateways,
   HostedRouteActivationGateway,
   HostedRouteReader,
-  HostedRuntimePublicationGateway,
+  HostedRuntimePrepareGateway,
+  HostedRuntimeArtifactVerifyGateway,
+  HostedRuntimeConformanceGateway,
+  HostedRuntimePublishGateway,
 } from "@/lib/runtimes/infrastructure/hosted-gateways";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtimes/persistence/mysql-runtime-publication-store";
@@ -121,6 +124,7 @@ const routeReader: HostedRouteReader = {
       routeActivationId: outcome.resolution.routeActivationId,
       agentRevisionId: outcome.resolution.agentRevisionId,
       runtimeRevisionId: outcome.resolution.runtimeRevisionId,
+      projectionVersionNo: outcome.resolution.projectionVersionNo ?? null,
     };
   },
 };
@@ -129,8 +133,23 @@ const routeReader: HostedRouteReader = {
 
 const agentPublication: HostedAgentPublicationGateway = {
   async ensurePublishedAgentRevision(command) {
-    const existing = await loadPublishedAgentRevision(command.tenantId, command.agentId);
-    if (existing) return existing;
+    // §08.2: 如果请求指定了 agentRevisionId，验证已有发布一致
+    if (command.agentRevisionId) {
+      const existing = await loadPublishedAgentRevision(command.tenantId, command.agentId);
+      if (existing) {
+        if (existing.revisionId !== command.agentRevisionId) {
+          const err = new Error(
+            `HOSTED_AGENT_REVISION_MISMATCH: 已发布 revisionId=${existing.revisionId}，请求要求=${command.agentRevisionId}`,
+          );
+          err.name = "HostedProvisioningPermanentError";
+          throw err;
+        }
+        return existing;
+      }
+    } else {
+      const existing = await loadPublishedAgentRevision(command.tenantId, command.agentId);
+      if (existing) return existing;
+    }
 
     const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
       tenantId: command.tenantId,
@@ -175,13 +194,11 @@ const agentPublication: HostedAgentPublicationGateway = {
   },
 };
 
-// ─── 3. HostedRuntimePublicationGateway ─────────────────────
+// ─── 3. Runtime Step Gateways（§08.3: 拆开过粗 Gateway）───
 
-const runtimePublication: HostedRuntimePublicationGateway = {
-  async ensurePublishedRuntimeRevision(command) {
-    const existing = await loadPublishedRuntimeRevision(command.tenantId);
-    if (existing) return existing;
-
+/** §08.3: prepareRuntimeRevision */
+const runtimePrepare: HostedRuntimePrepareGateway = {
+  async prepareRuntimeRevision(command) {
     const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
       tenantId: command.tenantId,
       artifactType: "runtime_revision",
@@ -191,56 +208,93 @@ const runtimePublication: HostedRuntimePublicationGateway = {
       ownerUserId: await loadAgentOwner(command.tenantId, command.agentId),
       artifactRef: evidence.artifactRef,
     });
-    if (revision.revisionState === "published") {
-      const winner = await loadPublishedRuntimeRevision(command.tenantId);
-      if (winner?.revisionId === revision.id) return winner;
-      throw new Error("Hosted RuntimeRevision 当前指针缺少有效发布证据");
-    }
+    return { runtimeId: runtime.id, runtimeRevisionId: revision.id };
+  },
+};
+
+/** §08.3: verifyRuntimeArtifact */
+const runtimeArtifactVerify: HostedRuntimeArtifactVerifyGateway = {
+  async verifyRuntimeArtifact(command) {
+    const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
+      tenantId: command.tenantId,
+      artifactType: "runtime_revision",
+    });
     const attestation = await ensureVerifiedAttestation({
       tenantId: command.tenantId,
       artifactType: "runtime_revision",
-      artifactRevisionId: revision.id,
+      artifactRevisionId: command.runtimeRevisionId,
       evidence,
     });
+    return {
+      runtimeArtifactId: attestation.artifactId ?? "",
+      runtimeAttestationIds: [attestation.id],
+    };
+  },
+};
+
+/** §08.3: recordRuntimeConformance */
+const runtimeConformance: HostedRuntimeConformanceGateway = {
+  async recordRuntimeConformance(command) {
+    const [revision] = await db
+      .select({
+        configHash: runtimeRevisionTable.configHash,
+        protocolContractRevision: runtimeRevisionTable.protocolContractRevision,
+        artifactDigest: runtimeRevisionTable.artifactDigest,
+      })
+      .from(runtimeRevisionTable)
+      .where(eq(runtimeRevisionTable.id, command.runtimeRevisionId))
+      .limit(1);
+    if (!revision) throw new Error(`RuntimeRevision 不存在 (${command.runtimeRevisionId})`);
+
     const signedRun = await getHostedControlPlaneEvidenceProvider().runRuntimeConformance({
       tenantId: command.tenantId,
-      runtimeRevisionId: revision.id,
-      idempotencyKey: `hosted-runtime-conformance:${revision.id}`,
-      runtimeArtifactDigest: attestation.artifactDigest,
+      runtimeRevisionId: command.runtimeRevisionId,
+      idempotencyKey: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
+      runtimeArtifactDigest: revision.artifactDigest ?? "",
       runtimeConfigDigest: revision.configHash,
       protocolContractRevision: revision.protocolContractRevision,
     });
     const run = await recordRuntimeConformanceRun({
       tenantId: command.tenantId,
-      runtimeRevisionId: revision.id,
+      runtimeRevisionId: command.runtimeRevisionId,
       dsseEnvelope: signedRun.dsseEnvelope,
-      idempotencyKey: `hosted-runtime-conformance:${revision.id}`,
-      requestId: `hosted-runtime-conformance:${revision.id}`,
+      idempotencyKey: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
+      requestId: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
       actor: { actorType: "system", actorId: HOSTED_ACTOR_ID },
     });
+    return {
+      conformanceRunId: run.run.id,
+      overallResult: run.run.overallResult as "passed" | "failed",
+    };
+  },
+};
 
-    try {
-      const result = await publishRuntimeRevision({
-        tenantId: command.tenantId,
-        revisionId: revision.id,
-        runtimeExpectedVersionNo: runtime.versionNo,
-        conformanceRunId: run.run.id,
-        attestationId: attestation.id,
-        actor: { tenantId: command.tenantId, actorType: "system", actorId: HOSTED_ACTOR_ID },
-        requestId: `hosted-runtime-publish:${revision.id}`,
-        idempotencyKey: `hosted-runtime-publish:${revision.id}`,
-      });
-      return {
-        revisionId: result.revision.id,
-        publicationRecordId: result.publicationRecordId,
-        attestationId: result.attestation?.attestationId ?? "",
-        conformanceRunId: run.run.id,
-      };
-    } catch (error) {
-      const winner = await loadPublishedRuntimeRevision(command.tenantId);
-      if (winner?.revisionId === revision.id) return winner;
-      throw error;
-    }
+/** §08.3: publishRuntimeRevision */
+const runtimePublish: HostedRuntimePublishGateway = {
+  async publishRuntimeRevision(command) {
+    const [runtime] = await db
+      .select()
+      .from(runtimeTable)
+      .where(
+        and(
+          eq(runtimeTable.tenantId, command.tenantId),
+          eq(runtimeTable.runtimeKey, BUILTIN_HOSTED_RUNTIME_KEY),
+        ),
+      )
+      .limit(1);
+    if (!runtime) throw new Error("Hosted Runtime 不存在");
+
+    const result = await publishRuntimeRevision({
+      tenantId: command.tenantId,
+      revisionId: command.runtimeRevisionId,
+      runtimeExpectedVersionNo: runtime.versionNo,
+      conformanceRunId: "", // 由 Saga Checkpoint 传入
+      attestationId: "", // 由 Saga Checkpoint 传入
+      actor: { tenantId: command.tenantId, actorType: "system", actorId: HOSTED_ACTOR_ID },
+      requestId: `hosted-runtime-publish:${command.runtimeRevisionId}`,
+      idempotencyKey: `hosted-runtime-publish:${command.runtimeRevisionId}`,
+    });
+    return { runtimePublicationRecordId: result.publicationRecordId };
   },
 };
 
@@ -253,7 +307,7 @@ const runtimePublication: HostedRuntimePublicationGateway = {
 const routeActivation: HostedRouteActivationGateway = {
   async activateRoute(command) {
     const routeSet = await ensureRouteSet(command);
-    await activateRouteSet({
+    const activated = await activateRouteSet({
       tenantId: command.tenantId,
       routeSetId: routeSet.id,
       expectedVersionNo: routeSet.versionNo,
@@ -283,6 +337,15 @@ const routeActivation: HostedRouteActivationGateway = {
         command.runtimeRevision.revisionId,
       ].join(":"),
     });
+
+    // §08.10: 返回路由详情
+    return {
+      routeSetId: activated.routeSetId,
+      routeSetVersionNo: activated.routeSetVersionNo,
+      routeId: activated.activations[0]?.routeId ?? "",
+      routeRevisionId: activated.activations[0]?.routeRevisionId ?? "",
+      routeActivationId: activated.activations[0]?.routeActivationId ?? "",
+    };
   },
 };
 
@@ -382,14 +445,17 @@ const conformanceRunner: HostedConformanceRunner = {
 // ─── 工厂函数 ──────────────────────────────────────────────
 
 /**
- * §6.5: 创建 MySQL Hosted Gateways 实例。
- * 返回 6 个 Gateway 的组合对象，供 Saga 编排使用。
+ * §08.3: 创建 MySQL Hosted Gateways 实例。
+ * 返回 9 个 Gateway 的组合对象，供 Saga 编排使用。
  */
 export function createMysqlHostedGateways(): HostedGateways {
   return {
     routeReader,
     agentPublication,
-    runtimePublication,
+    runtimePrepare,
+    runtimeArtifactVerify,
+    runtimeConformance,
+    runtimePublish,
     routeActivation,
     artifactEvidence,
     conformanceRunner,

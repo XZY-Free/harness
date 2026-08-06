@@ -19,10 +19,6 @@ describe("isValidProvisioningTransition", () => {
     expect(isValidProvisioningTransition("pending", "cancelled")).toBe(true);
   });
 
-  it("running → waiting_external_evidence 允许", () => {
-    expect(isValidProvisioningTransition("running", "waiting_external_evidence")).toBe(true);
-  });
-
   it("running → ready 允许", () => {
     expect(isValidProvisioningTransition("running", "ready")).toBe(true);
   });
@@ -33,10 +29,6 @@ describe("isValidProvisioningTransition", () => {
 
   it("running → permanent_failed 允许", () => {
     expect(isValidProvisioningTransition("running", "permanent_failed")).toBe(true);
-  });
-
-  it("waiting_external_evidence → running 允许", () => {
-    expect(isValidProvisioningTransition("waiting_external_evidence", "running")).toBe(true);
   });
 
   it("retryable_failed → pending 允许（Worker 重新领取）", () => {
@@ -53,6 +45,17 @@ describe("isValidProvisioningTransition", () => {
 
   it("cancelled → any 禁止（终态）", () => {
     expect(isValidProvisioningTransition("cancelled", "pending")).toBe(false);
+  });
+
+  // §08.5: waiting_external_evidence / waiting_conformance 已删除
+  it("§08.5: waiting_external_evidence 不再是合法状态", () => {
+    // 这些状态已从 PROVISIONING_STATES 中移除
+    // TypeScript 已阻止直接使用，此处验证运行? 确保它们不会被意外加回
+    const states: readonly string[] = [
+      "pending", "running", "ready", "retryable_failed", "permanent_failed", "cancelled",
+    ];
+    expect(states).not.toContain("waiting_external_evidence");
+    expect(states).not.toContain("waiting_conformance");
   });
 });
 
@@ -91,8 +94,15 @@ describe("isProvisioningClaimable", () => {
     expect(isProvisioningClaimable(makeRequest({ state: "retryable_failed" }), now)).toBe(true);
   });
 
-  it("running → 不可领取", () => {
+  it("running 无过期租约 → 不可领取", () => {
     expect(isProvisioningClaimable(makeRequest({ state: "running" }), now)).toBe(false);
+  });
+
+  it("§08.7: running + expired lease → 可领取（崩溃恢复）", () => {
+    const past = new Date(now.getTime() - 60_000);
+    expect(
+      isProvisioningClaimable(makeRequest({ state: "running", leaseExpiresAt: past }), now),
+    ).toBe(true);
   });
 
   it("ready → 不可领取", () => {
@@ -142,6 +152,12 @@ describe("classifyProvisioningError", () => {
   it("ArtifactAttestationFailedError → permanent", () => {
     const err = new Error("签名无效");
     err.name = "ArtifactAttestationFailedError";
+    expect(classifyProvisioningError(err).category).toBe("permanent");
+  });
+
+  it("§08.2: HostedProvisioningPermanentError → permanent", () => {
+    const err = new Error("HOSTED_AGENT_REVISION_MISMATCH");
+    err.name = "HostedProvisioningPermanentError";
     expect(classifyProvisioningError(err).category).toBe("permanent");
   });
 

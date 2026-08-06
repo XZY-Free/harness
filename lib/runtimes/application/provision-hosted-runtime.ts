@@ -12,6 +12,8 @@ export interface HostedRuntimeRoute {
   routeActivationId: string;
   agentRevisionId: string;
   runtimeRevisionId: string;
+  /** §08.11: Projection 版本号，用于精确 ID 验证。 */
+  projectionVersionNo?: number | null;
 }
 
 export interface PublishedHostedAgentRevision {

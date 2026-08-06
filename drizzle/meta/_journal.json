@@ -960,6 +960,13 @@
       "when": 1723171200000,
       "tag": "0135_outbox_remove_consumer_state",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1722933600000,
+      "tag": "0136_hosted_saga_v3",
+      "breakpoints": []
     }
   ]
 }

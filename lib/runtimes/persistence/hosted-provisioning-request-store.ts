@@ -30,9 +30,11 @@ export interface HostedProvisioningRequestStore {
     routeScopeKey: string;
   }): Promise<HostedProvisioningRequestRow | null>;
 
-  /** 更新状态。 */
+  /** 更新状态。§08.8: 必须提供 workerId 进行 lease owner 校验。 */
   updateState(params: {
     requestId: string;
+    /** §08.8: Lease Owner 校验 — WHERE leaseOwner = workerId。 */
+    workerId?: string;
     state: ProvisioningState;
     currentStep?: string | null;
     attemptCount?: number;
@@ -55,8 +57,8 @@ export interface HostedProvisioningRequestStore {
     now: Date;
   }): Promise<HostedProvisioningRequestRow[]>;
 
-  /** 释放租约。 */
-  releaseLease(params: { requestId: string }): Promise<void>;
+  /** 释放租约。§08.8: 必须提供 workerId。 */
+  releaseLease(params: { requestId: string; workerId: string }): Promise<void>;
 }
 
 export interface NewProvisioningRequestInput {
@@ -71,17 +73,21 @@ export interface NewProvisioningRequestInput {
   updatedAt: Date;
 }
 
-/** §6.2: Step Checkpoint — Saga 每步完成后的产出数据。 */
+/** §08.9: Step Checkpoint — Saga 每步完成后的产出数据。 */
 export interface StepCheckpoint {
   agentRevisionId?: string | null;
   agentPublicationRecordId?: string | null;
   agentAttestationId?: string | null;
+  runtimeId?: string | null;
   runtimeRevisionId?: string | null;
+  runtimeArtifactId?: string | null;
+  runtimeAttestationIds?: string[] | null;
   runtimePublicationRecordId?: string | null;
-  runtimeAttestationId?: string | null;
   conformanceRunId?: string | null;
   routeSetId?: string | null;
   routeSetVersionNo?: number | null;
+  routeId?: string | null;
   routeRevisionId?: string | null;
   routeActivationId?: string | null;
+  projectionVersionNo?: number | null;
 }
