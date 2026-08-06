@@ -16,16 +16,20 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
         return jsonResponse({
           artifact_digest: `sha256:${"a".repeat(64)}`,
           artifact_ref: `oci://registry/agent@sha256:${"a".repeat(64)}`,
-          signature_bundle_ref: "managed://hosted/agent/signature",
+          dsse_envelope_ref: "managed://hosted/agent/dsse-envelope",
           sbom_ref: "managed://hosted/agent/sbom",
           provenance_ref: "managed://hosted/agent/provenance",
           builder_identity: "builder:hosted",
         });
       }
       const body = JSON.parse(String(init?.body)) as { document_type: string };
-      if (body.document_type === "signature_bundle") {
+      if (body.document_type === "dsse_envelope") {
         return jsonResponse({
-          document: { algorithm: "ed25519", publicKey: "public-key", signature: "signature" },
+          document: {
+            payloadType: "application/vnd.in-toto+json",
+            payload: "e30=",
+            signatures: [{ keyid: "builder:hosted", sig: "signature" }],
+          },
         });
       }
       if (body.document_type === "sbom") {
@@ -51,8 +55,8 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
     });
 
     await expect(
-      evidence.managedStore.readSignatureBundle(evidence.signatureBundleRef),
-    ).resolves.toMatchObject({ algorithm: "ed25519" });
+      evidence.managedStore.readDsseEnvelope(evidence.dsseEnvelopeRef),
+    ).resolves.toBeInstanceOf(Buffer);
     await expect(evidence.managedStore.readSbom(evidence.sbomRef)).resolves.toEqual({
       packages: [],
     });

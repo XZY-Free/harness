@@ -20,7 +20,7 @@ function makeSnapshot(overrides: Partial<ArtifactEvidenceSnapshot> = {}): Artifa
     revokedAt: null,
     revocationRecordId: null,
     verificationPolicyRevisionId: null,
-    bundleDigest: "sha256:bbb",
+    envelopeDigest: "sha256:bbb",
     ...overrides,
   };
 }
@@ -102,30 +102,21 @@ describe("ArtifactEvidencePolicy 基础规则", () => {
   });
 });
 
-describe("ArtifactEvidencePolicy 三个入口", () => {
-  it("validateForPublication: legacy_custom 允许", () => {
+describe("ArtifactEvidencePolicy 三个入口 — in_toto_dsse 唯一正式格式", () => {
+  it("validateForPublication: in_toto_dsse 允许", () => {
     const result = ArtifactEvidencePolicy.validateForPublication(
-      makeSnapshot({ attestationFormat: "legacy_custom" }),
+      makeSnapshot({ attestationFormat: "in_toto_dsse" }),
       validContext,
     );
     expect(result.valid).toBe(true);
   });
 
-  it("validateForRouteActivation: legacy_custom 允许", () => {
+  it("validateForRouteActivation: in_toto_dsse 允许", () => {
     const result = ArtifactEvidencePolicy.validateForRouteActivation(
-      makeSnapshot({ attestationFormat: "legacy_custom" }),
+      makeSnapshot({ attestationFormat: "in_toto_dsse" }),
       validContext,
     );
     expect(result.valid).toBe(true);
-  });
-
-  it("validateForNewExecution: legacy_custom 拒绝", () => {
-    const result = ArtifactEvidencePolicy.validateForNewExecution(
-      makeSnapshot({ attestationFormat: "legacy_custom" }),
-      validContext,
-    );
-    expect(result.valid).toBe(false);
-    expect(result.errors[0]?.code).toBe("evidence_format_not_allowed");
   });
 
   it("validateForNewExecution: in_toto_dsse 允许", () => {
@@ -140,10 +131,10 @@ describe("ArtifactEvidencePolicy 三个入口", () => {
 describe("createArtifactEvidencePolicy 自定义配置", () => {
   it("自定义执行允许格式", () => {
     const policy = createArtifactEvidencePolicy({
-      allowedFormatsForExecution: ["legacy_custom", "in_toto_dsse"],
+      allowedFormatsForExecution: ["in_toto_dsse"],
     });
     const result = policy.validateForNewExecution(
-      makeSnapshot({ attestationFormat: "legacy_custom" }),
+      makeSnapshot({ attestationFormat: "in_toto_dsse" }),
       validContext,
     );
     expect(result.valid).toBe(true);

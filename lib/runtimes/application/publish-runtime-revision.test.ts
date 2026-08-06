@@ -123,7 +123,7 @@ async function seedRuntimePublicationFixture(suffix = "") {
     artifactType: "runtime_revision",
     artifactRevisionId: revision.id,
     artifactDigest: `sha256:${"a".repeat(64)}`,
-    signatureBundleRef: `attestation:signature:${suffix || "default"}`,
+    dsseEnvelopeRef: `attestation:signature:${suffix || "default"}`,
     sbomRef: `attestation:sbom:${suffix || "default"}`,
     provenanceRef: `attestation:provenance:${suffix || "default"}`,
     builderIdentity: "builder:publication-test",

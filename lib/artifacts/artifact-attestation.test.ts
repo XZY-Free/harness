@@ -13,7 +13,6 @@
  *
  * 真实签名（ed25519）+ 真实可查询 SBOM/provenance（InMemoryManagedArtifactStore），不使用"跳过验证"假配置。
  */
-import { type KeyObject, generateKeyPairSync, sign } from "node:crypto";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { AgentPublicationPrerequisiteError } from "@/lib/agents/domain/agent-revision-publication-policy";
 import { AgentLifecycleError, createAgent } from "@/lib/agents/persistence/agent-queries";
@@ -31,8 +30,6 @@ import {
   MANAGED_REF_PREFIXES,
   type ManagedArtifactStore,
   type ProvenanceDocument,
-  type SbomDocument,
-  type SignatureBundle,
   type VerifyAttestationInput,
   computeArtifactDigest,
   isManagedRef,
@@ -51,6 +48,12 @@ import {
   listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { publishRuntimeRevisionWithAttestation } from "@/lib/artifacts/test-support/attempt-runtime-publication-with-attestation-without-trusted-run";
+import {
+  buildDsseArtifactAttestationEnvelope,
+  buildMalformedDsseEnvelope,
+  generateTestBuilderKey,
+  type TestBuilderKey,
+} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 
 const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 import { db } from "@/lib/db/client";
@@ -86,26 +89,26 @@ afterEach(() => {
 
 /** 内存受管对象存储（测试用；模拟"独立读取"语义）。 */
 class InMemoryManagedArtifactStore implements ManagedArtifactStore {
-  private signatures = new Map<string, SignatureBundle>();
-  private sboms = new Map<string, SbomDocument>();
+  private envelopes = new Map<string, Buffer>();
+  private sboms = new Map<string, unknown>();
   private provenances = new Map<string, ProvenanceDocument>();
 
-  writeSignatureBundle(ref: string, bundle: SignatureBundle): void {
-    this.signatures.set(ref, bundle);
+  writeDsseEnvelope(ref: string, envelope: Buffer): void {
+    this.envelopes.set(ref, envelope);
   }
-  writeSbom(ref: string, doc: SbomDocument): void {
+  writeSbom(ref: string, doc: unknown): void {
     this.sboms.set(ref, doc);
   }
   writeProvenance(ref: string, doc: ProvenanceDocument): void {
     this.provenances.set(ref, doc);
   }
 
-  async readSignatureBundle(ref: string): Promise<SignatureBundle> {
-    const bundle = this.signatures.get(ref);
-    if (!bundle) throw new Error(`signature bundle not found: ${ref}`);
-    return bundle;
+  async readDsseEnvelope(ref: string): Promise<Buffer> {
+    const envelope = this.envelopes.get(ref);
+    if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
+    return envelope;
   }
-  async readSbom(ref: string): Promise<SbomDocument> {
+  async readSbom(ref: string): Promise<unknown> {
     const doc = this.sboms.get(ref);
     if (!doc) throw new Error(`sbom not found: ${ref}`);
     return doc;
@@ -117,49 +120,58 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
   }
 }
 
-// ─── 辅助：ed25519 密钥对 + 签名 ───────────────────────────
+// ─── 辅助：ed25519 密钥对 + DSSE Envelope ───────────────────
+// generateTestBuilderKey / buildDsseArtifactAttestationEnvelope 来自 test-support。
 
-interface BuilderKeyPair {
-  builderIdentity: string;
-  publicKeyBase64: string;
-  privateKey: KeyObject;
-}
-
-/** 生成 ed25519 密钥对（builder identity 用）。 */
-function generateBuilderKeyPair(builderIdentity: string): BuilderKeyPair {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  // 导出 raw 32 字节公钥（DER → 提取最后 32 字节）
-  const der = publicKey.export({ type: "spki", format: "der" });
-  const rawPublicKey = Buffer.from(der.subarray(der.length - 32));
+function buildCleanCycloneDXSbom(): unknown {
   return {
-    builderIdentity,
-    publicKeyBase64: rawPublicKey.toString("base64"),
-    privateKey,
-  };
-}
-
-/** 用 ed25519 私钥对 payload 签名，返回 base64 签名。 */
-function signEd25519(privateKey: BuilderKeyPair["privateKey"], payload: string): string {
-  const sig = sign(null, Buffer.from(payload, "utf-8"), privateKey);
-  return sig.toString("base64");
-}
-
-// ─── 辅助：构造校验通过的 signature bundle / SBOM / provenance ─
-
-function buildValidSignatureBundle(keyPair: BuilderKeyPair, digest: string): SignatureBundle {
-  return {
-    algorithm: "ed25519",
-    publicKey: keyPair.publicKeyBase64,
-    signature: signEd25519(keyPair.privateKey, digest),
-  };
-}
-
-function buildCleanSbom(): SbomDocument {
-  return {
-    packages: [
-      { name: "lodash", version: "4.17.21", licenses: ["MIT"], vulnerabilities: [] },
-      { name: "express", version: "4.18.2", licenses: ["MIT"], vulnerabilities: [] },
+    $schema: "http://cyclonedx.org/schema/bom-1.6.schema.json",
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: {
+      timestamp: "2026-07-15T01:00:00.000Z",
+      tools: [{ name: "test-tool" }],
+    },
+    components: [
+      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
+      { type: "library", name: "express", version: "4.18.2", licenses: [{ license: { id: "MIT" } }] },
     ],
+    dependencies: [
+      { ref: "pkg:npm/lodash@4.17.21", dependsOn: [] },
+      { ref: "pkg:npm/express@4.18.2", dependsOn: ["pkg:npm/lodash@4.17.21"] },
+    ],
+  };
+}
+
+/** 构造包含指定漏洞的 CycloneDX SBOM。 */
+function buildCycloneDXWithVulns(vulns: Array<{ id: string; severity: string }>): unknown {
+  return {
+    $schema: "http://cyclonedx.org/schema/bom-1.6.schema.json",
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: { timestamp: "2026-07-15T01:00:00.000Z", tools: [{ name: "test-tool" }] },
+    components: [{ type: "library", name: "vulnerable-lib", version: "1.0", licenses: [{ license: { id: "MIT" } }] }],
+    vulnerabilities: vulns.map((v) => ({
+      id: v.id,
+      ratings: [{ severity: v.severity, method: "CVSSv31", score: v.severity === "critical" ? 9.8 : 7.5 }],
+      affects: [{ ref: "pkg:npm/vulnerable-lib@1.0" }],
+    })),
+    dependencies: [{ ref: "pkg:npm/vulnerable-lib@1.0", dependsOn: [] }],
+  };
+}
+
+/** 构造包含指定许可证的 CycloneDX SBOM。 */
+function buildCycloneDXWithLicense(licenseId: string, name = "lic-lib"): unknown {
+  return {
+    $schema: "http://cyclonedx.org/schema/bom-1.6.schema.json",
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: { timestamp: "2026-07-15T01:00:00.000Z", tools: [{ name: "test-tool" }] },
+    components: [{ type: "library", name, version: "1.0", licenses: [{ license: { id: licenseId } }] }],
+    dependencies: [{ ref: `pkg:npm/${name}@1.0`, dependsOn: [] }],
   };
 }
 
@@ -206,7 +218,7 @@ interface VerifiedAttestationFixture {
   attestation: ArtifactAttestation;
   store: InMemoryManagedArtifactStore;
   builderKeys: BuilderKeyRegistry;
-  keyPair: BuilderKeyPair;
+  keyPair: TestBuilderKey;
   digest: string;
 }
 
@@ -218,22 +230,22 @@ async function createVerifiedAttestationFixture(
   artifactContent: string,
   builderIdentity = "builder:company-agent-runtime",
   overrides: Partial<{
-    signatureBundleRef: string;
+    dsseEnvelopeRef: string;
     sbomRef: string;
     provenanceRef: string;
   }> = {},
 ): Promise<VerifiedAttestationFixture> {
-  const keyPair = generateBuilderKeyPair(builderIdentity);
+  const keyPair = generateTestBuilderKey(builderIdentity);
   const builderKeys: BuilderKeyRegistry = { [builderIdentity]: keyPair.publicKeyBase64 };
   const digest = computeArtifactDigest(artifactContent);
-  const signatureBundleRef =
-    overrides.signatureBundleRef ?? `attestation:signature:${digest.slice(7, 19)}`;
+  const dsseEnvelopeRef =
+    overrides.dsseEnvelopeRef ?? `attestation:signature:${digest.slice(7, 19)}`;
   const sbomRef = overrides.sbomRef ?? `attestation:sbom:${digest.slice(7, 19)}`;
   const provenanceRef = overrides.provenanceRef ?? `attestation:provenance:${digest.slice(7, 19)}`;
 
   const store = new InMemoryManagedArtifactStore();
-  store.writeSignatureBundle(signatureBundleRef, buildValidSignatureBundle(keyPair, digest));
-  store.writeSbom(sbomRef, buildCleanSbom());
+  store.writeDsseEnvelope(dsseEnvelopeRef, buildDsseArtifactAttestationEnvelope(keyPair, digest));
+  store.writeSbom(sbomRef, buildCleanCycloneDXSbom());
   store.writeProvenance(provenanceRef, buildValidProvenance());
 
   const input: VerifyAttestationInput = {
@@ -241,7 +253,7 @@ async function createVerifiedAttestationFixture(
     artifactType,
     artifactRevisionId,
     artifactDigest: digest,
-    signatureBundleRef,
+    dsseEnvelopeRef,
     sbomRef,
     provenanceRef,
     builderIdentity,
@@ -356,29 +368,29 @@ describe("artifact-attestation 纯逻辑", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("verifyArtifactAttestation 校验链", () => {
-  let keyPair: BuilderKeyPair;
+  let keyPair: TestBuilderKey;
   let builderKeys: BuilderKeyRegistry;
   let store: InMemoryManagedArtifactStore;
   let digest: string;
   let validInput: VerifyAttestationInput;
 
   beforeEach(() => {
-    keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
+    keyPair = generateTestBuilderKey("builder:company-agent-runtime");
     builderKeys = { "builder:company-agent-runtime": keyPair.publicKeyBase64 };
     digest = computeArtifactDigest("agent.yaml content v1");
     store = new InMemoryManagedArtifactStore();
-    store.writeSignatureBundle(
+    store.writeDsseEnvelope(
       "attestation:signature:v1",
-      buildValidSignatureBundle(keyPair, digest),
+      buildDsseArtifactAttestationEnvelope(keyPair, digest),
     );
-    store.writeSbom("attestation:sbom:v1", buildCleanSbom());
+    store.writeSbom("attestation:sbom:v1", buildCleanCycloneDXSbom());
     store.writeProvenance("attestation:provenance:v1", buildValidProvenance());
     validInput = {
       tenantId: "tenant-1",
       artifactType: "agent_revision",
       artifactRevisionId: "rev-1",
       artifactDigest: digest,
-      signatureBundleRef: "attestation:signature:v1",
+      dsseEnvelopeRef: "attestation:signature:v1",
       sbomRef: "attestation:sbom:v1",
       provenanceRef: "attestation:provenance:v1",
       builderIdentity: "builder:company-agent-runtime",
@@ -420,9 +432,9 @@ describe("verifyArtifactAttestation 校验链", () => {
     expect(result.failureCode).toBe("digest_format_invalid");
   });
 
-  it("signature_bundle_ref 非受管（http://）→ failed", async () => {
+  it("dsse_envelope_ref 非受管（http://）→ failed", async () => {
     const result = await verifyArtifactAttestation(
-      { ...validInput, signatureBundleRef: "http://evil.com/sig.json" },
+      { ...validInput, dsseEnvelopeRef: "http://evil.com/sig.json" },
       store,
       builderKeys,
     );
@@ -458,53 +470,45 @@ describe("verifyArtifactAttestation 校验链", () => {
 
   it("签名 bundle 读取失败（ref 不存在）→ failed", async () => {
     const result = await verifyArtifactAttestation(
-      { ...validInput, signatureBundleRef: "attestation:signature:missing" },
+      { ...validInput, dsseEnvelopeRef: "attestation:signature:missing" },
       store,
       builderKeys,
     );
-    expect(result.failureCode).toBe("signature_bundle_unreadable");
+    expect(result.failureCode).toBe("dsse_envelope_unreadable");
   });
 
-  it("签名算法非 ed25519 → failed (signature_algorithm_unsupported)", async () => {
-    store.writeSignatureBundle("attestation:signature:v1", {
-      algorithm: "rsa" as SignatureBundle["algorithm"],
-      publicKey: keyPair.publicKeyBase64,
-      signature: "fake",
-    });
+  it("DSSE Envelope 非法 JSON → failed (dsse_envelope_parse_failed)", async () => {
+    store.writeDsseEnvelope("attestation:signature:v1", buildMalformedDsseEnvelope());
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
-    expect(result.failureCode).toBe("signature_algorithm_unsupported");
+    expect(result.failureCode).toBe("dsse_envelope_parse_failed");
   });
 
-  it("签名 bundle 公钥与白名单不一致 → failed (builder_key_mismatch)", async () => {
-    const otherKey = generateBuilderKeyPair("builder:other");
-    store.writeSignatureBundle("attestation:signature:v1", {
-      algorithm: "ed25519",
-      publicKey: otherKey.publicKeyBase64,
-      signature: "fake",
-    });
+  it("DSSE 签名 keyid 与 builderIdentity 不一致 → failed (builder_key_mismatch)", async () => {
+    const otherKey = generateTestBuilderKey("builder:other");
+    store.writeDsseEnvelope(
+      "attestation:signature:v1",
+      buildDsseArtifactAttestationEnvelope(otherKey, digest, { keyid: "builder:other" }),
+    );
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
     expect(result.failureCode).toBe("builder_key_mismatch");
   });
 
   it("ed25519 验签失败（签名被篡改）→ failed (signature_invalid)", async () => {
-    const tamperedSignature = Buffer.from(signEd25519(keyPair.privateKey, digest));
-    tamperedSignature[0] = (tamperedSignature[0] ?? 0) ^ 0xff; // 翻转一位
-    store.writeSignatureBundle("attestation:signature:v1", {
-      algorithm: "ed25519",
-      publicKey: keyPair.publicKeyBase64,
-      signature: tamperedSignature.toString("base64"),
-    });
+    store.writeDsseEnvelope(
+      "attestation:signature:v1",
+      buildDsseArtifactAttestationEnvelope(keyPair, digest, { tamperSignature: true }),
+    );
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
     expect(result.failureCode).toBe("signature_invalid");
   });
 
-  it("签名 payload 与 digest 不一致 → failed (signature_invalid)", async () => {
-    // 用不同 payload 签名
-    store.writeSignatureBundle("attestation:signature:v1", {
-      algorithm: "ed25519",
-      publicKey: keyPair.publicKeyBase64,
-      signature: signEd25519(keyPair.privateKey, "sha256:different"),
-    });
+  it("DSSE subject digest 与 artifactDigest 不一致 → failed (signature_invalid)", async () => {
+    store.writeDsseEnvelope(
+      "attestation:signature:v1",
+      buildDsseArtifactAttestationEnvelope(keyPair, digest, {
+        subjectDigest: "sha256:different",
+      }),
+    );
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
     expect(result.failureCode).toBe("signature_invalid");
   });
@@ -519,77 +523,37 @@ describe("verifyArtifactAttestation 校验链", () => {
   });
 
   it("SBOM 命中 critical 漏洞 → failed (sbom_blocked_vulnerability)", async () => {
-    store.writeSbom("attestation:sbom:v1", {
-      packages: [
-        {
-          name: "vulnerable-lib",
-          version: "1.0",
-          licenses: ["MIT"],
-          vulnerabilities: [{ id: "CVE-2026-001", severity: "critical" }],
-        },
-      ],
-    });
+    store.writeSbom("attestation:sbom:v1", buildCycloneDXWithVulns([{ id: "CVE-2026-001", severity: "critical" }]));
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
     expect(result.failureCode).toBe("sbom_blocked_vulnerability");
   });
 
   it("SBOM 命中 high 漏洞 → failed", async () => {
-    store.writeSbom("attestation:sbom:v1", {
-      packages: [
-        {
-          name: "vulnerable-lib",
-          version: "1.0",
-          licenses: ["MIT"],
-          vulnerabilities: [{ id: "CVE-2026-002", severity: "high" }],
-        },
-      ],
-    });
+    store.writeSbom("attestation:sbom:v1", buildCycloneDXWithVulns([{ id: "CVE-2026-002", severity: "high" }]));
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
     expect(result.failureCode).toBe("sbom_blocked_vulnerability");
   });
 
   it("SBOM 命中 GPL-3.0 许可证 → failed (sbom_blocked_license)", async () => {
-    store.writeSbom("attestation:sbom:v1", {
-      packages: [{ name: "gpl-lib", version: "1.0", licenses: ["GPL-3.0"], vulnerabilities: [] }],
-    });
+    store.writeSbom("attestation:sbom:v1", buildCycloneDXWithLicense("GPL-3.0", "gpl-lib"));
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
     expect(result.failureCode).toBe("sbom_blocked_license");
   });
 
   it("SBOM 命中 AGPL-3.0 许可证 → failed", async () => {
-    store.writeSbom("attestation:sbom:v1", {
-      packages: [{ name: "agpl-lib", version: "1.0", licenses: ["AGPL-3.0"], vulnerabilities: [] }],
-    });
+    store.writeSbom("attestation:sbom:v1", buildCycloneDXWithLicense("AGPL-3.0", "agpl-lib"));
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
     expect(result.failureCode).toBe("sbom_blocked_license");
   });
 
   it("SBOM 命中 medium 漏洞 → verified（非阻断等级）", async () => {
-    store.writeSbom("attestation:sbom:v1", {
-      packages: [
-        {
-          name: "lib",
-          version: "1.0",
-          licenses: ["MIT"],
-          vulnerabilities: [{ id: "CVE-2026-003", severity: "medium" }],
-        },
-      ],
-    });
+    store.writeSbom("attestation:sbom:v1", buildCycloneDXWithVulns([{ id: "CVE-2026-003", severity: "medium" }]));
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
     expect(result.verificationState).toBe("verified");
   });
 
   it("SBOM 命中 low 漏洞 → verified（非阻断等级）", async () => {
-    store.writeSbom("attestation:sbom:v1", {
-      packages: [
-        {
-          name: "lib",
-          version: "1.0",
-          licenses: ["MIT"],
-          vulnerabilities: [{ id: "CVE-2026-004", severity: "low" }],
-        },
-      ],
-    });
+    store.writeSbom("attestation:sbom:v1", buildCycloneDXWithVulns([{ id: "CVE-2026-004", severity: "low" }]));
     const result = await verifyArtifactAttestation(validInput, store, builderKeys);
     expect(result.verificationState).toBe("verified");
   });
@@ -659,7 +623,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("content"),
-        signatureBundleRef: "attestation:signature:1",
+        dsseEnvelopeRef: "attestation:signature:1",
         sbomRef: "attestation:sbom:1",
         provenanceRef: "attestation:provenance:1",
         builderIdentity: "builder:company-agent-runtime",
@@ -681,7 +645,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("content"),
-        signatureBundleRef: "attestation:signature:1",
+        dsseEnvelopeRef: "attestation:signature:1",
         sbomRef: "attestation:sbom:1",
         provenanceRef: "attestation:provenance:1",
         builderIdentity: "builder:company-agent-runtime",
@@ -698,7 +662,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("content"),
-        signatureBundleRef: "attestation:signature:1",
+        dsseEnvelopeRef: "attestation:signature:1",
         sbomRef: "attestation:sbom:1",
         provenanceRef: "attestation:provenance:1",
         builderIdentity: "builder:company-agent-runtime",
@@ -720,7 +684,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
           artifactType: "agent_revision",
           artifactRevisionId: "rev-1",
           artifactDigest: digest,
-          signatureBundleRef: `attestation:signature:${i}`,
+          dsseEnvelopeRef: `attestation:signature:${i}`,
           sbomRef: `attestation:sbom:${i}`,
           provenanceRef: `attestation:provenance:${i}`,
           builderIdentity: "builder:company-agent-runtime",
@@ -740,7 +704,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
-        signatureBundleRef: "attestation:signature:0",
+        dsseEnvelopeRef: "attestation:signature:0",
         sbomRef: "attestation:sbom:0",
         provenanceRef: "attestation:provenance:0",
         builderIdentity: "builder:b",
@@ -752,7 +716,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
-        signatureBundleRef: "attestation:signature:1",
+        dsseEnvelopeRef: "attestation:signature:1",
         sbomRef: "attestation:sbom:1",
         provenanceRef: "attestation:provenance:1",
         builderIdentity: "builder:b",
@@ -773,7 +737,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("c"),
-        signatureBundleRef: "attestation:signature:0",
+        dsseEnvelopeRef: "attestation:signature:0",
         sbomRef: "attestation:sbom:0",
         provenanceRef: "attestation:provenance:0",
         builderIdentity: "builder:b",
@@ -793,7 +757,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-a",
         artifactDigest: digest,
-        signatureBundleRef: "attestation:signature:a",
+        dsseEnvelopeRef: "attestation:signature:a",
         sbomRef: "attestation:sbom:a",
         provenanceRef: "attestation:provenance:a",
         builderIdentity: "builder:b",
@@ -805,7 +769,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "runtime_revision",
         artifactRevisionId: "rev-b",
         artifactDigest: digest,
-        signatureBundleRef: "attestation:signature:b",
+        dsseEnvelopeRef: "attestation:signature:b",
         sbomRef: "attestation:sbom:b",
         provenanceRef: "attestation:provenance:b",
         builderIdentity: "builder:b",
@@ -825,7 +789,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
-        signatureBundleRef: "attestation:signature:0",
+        dsseEnvelopeRef: "attestation:signature:0",
         sbomRef: "attestation:sbom:0",
         provenanceRef: "attestation:provenance:0",
         builderIdentity: "builder:b",
@@ -838,7 +802,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
-        signatureBundleRef: "attestation:signature:1",
+        dsseEnvelopeRef: "attestation:signature:1",
         sbomRef: "attestation:sbom:1",
         provenanceRef: "attestation:provenance:1",
         builderIdentity: "builder:b",
@@ -856,7 +820,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("c"),
-        signatureBundleRef: "attestation:signature:0",
+        dsseEnvelopeRef: "attestation:signature:0",
         sbomRef: "attestation:sbom:0",
         provenanceRef: "attestation:provenance:0",
         builderIdentity: "builder:b",
@@ -914,19 +878,20 @@ describe("verifyAndPersistAttestation 完整流程", () => {
   });
 
   it("失败路径：failed + 持久化 failureCode + 审计 + 抛 ArtifactAttestationFailedError", async () => {
-    const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
+    const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
     const builderKeys: BuilderKeyRegistry = {
       "builder:company-agent-runtime": keyPair.publicKeyBase64,
     };
     const digest = computeArtifactDigest("content");
     const store = new InMemoryManagedArtifactStore();
-    // 故意用错误 payload 签名 → 验签失败
-    store.writeSignatureBundle("attestation:signature:bad", {
-      algorithm: "ed25519",
-      publicKey: keyPair.publicKeyBase64,
-      signature: signEd25519(keyPair.privateKey, "sha256:wrong"),
-    });
-    store.writeSbom("attestation:sbom:bad", buildCleanSbom());
+    // 故意用错误 subject digest 签名 → 验签失败
+    store.writeDsseEnvelope(
+      "attestation:signature:bad",
+      buildDsseArtifactAttestationEnvelope(keyPair, digest, {
+        subjectDigest: "sha256:wrong",
+      }),
+    );
+    store.writeSbom("attestation:sbom:bad", buildCleanCycloneDXSbom());
     store.writeProvenance("attestation:provenance:bad", buildValidProvenance());
 
     const input: VerifyAttestationInput = {
@@ -934,7 +899,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
       artifactType: "agent_revision",
       artifactRevisionId: "rev-1",
       artifactDigest: digest,
-      signatureBundleRef: "attestation:signature:bad",
+      dsseEnvelopeRef: "attestation:signature:bad",
       sbomRef: "attestation:sbom:bad",
       provenanceRef: "attestation:provenance:bad",
       builderIdentity: "builder:company-agent-runtime",
@@ -965,10 +930,10 @@ describe("verifyAndPersistAttestation 完整流程", () => {
     const digest = computeArtifactDigest("shared-content");
 
     // builder A
-    const keyA = generateBuilderKeyPair("builder:company-agent-runtime");
+    const keyA = generateTestBuilderKey("builder:company-agent-runtime");
     const storeA = new InMemoryManagedArtifactStore();
-    storeA.writeSignatureBundle("attestation:signature:a", buildValidSignatureBundle(keyA, digest));
-    storeA.writeSbom("attestation:sbom:a", buildCleanSbom());
+    storeA.writeDsseEnvelope("attestation:signature:a", buildDsseArtifactAttestationEnvelope(keyA, digest));
+    storeA.writeSbom("attestation:sbom:a", buildCleanCycloneDXSbom());
     storeA.writeProvenance("attestation:provenance:a", buildValidProvenance());
     await verifyAndPersistAttestation(
       {
@@ -976,7 +941,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
-        signatureBundleRef: "attestation:signature:a",
+        dsseEnvelopeRef: "attestation:signature:a",
         sbomRef: "attestation:sbom:a",
         provenanceRef: "attestation:provenance:a",
         builderIdentity: "builder:company-agent-runtime",
@@ -987,10 +952,10 @@ describe("verifyAndPersistAttestation 完整流程", () => {
     );
 
     // builder B
-    const keyB = generateBuilderKeyPair("builder:company-runtime-host");
+    const keyB = generateTestBuilderKey("builder:company-runtime-host");
     const storeB = new InMemoryManagedArtifactStore();
-    storeB.writeSignatureBundle("attestation:signature:b", buildValidSignatureBundle(keyB, digest));
-    storeB.writeSbom("attestation:sbom:b", buildCleanSbom());
+    storeB.writeDsseEnvelope("attestation:signature:b", buildDsseArtifactAttestationEnvelope(keyB, digest));
+    storeB.writeSbom("attestation:sbom:b", buildCleanCycloneDXSbom());
     storeB.writeProvenance("attestation:provenance:b", buildValidProvenance());
     await verifyAndPersistAttestation(
       {
@@ -998,7 +963,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
-        signatureBundleRef: "attestation:signature:b",
+        dsseEnvelopeRef: "attestation:signature:b",
         sbomRef: "attestation:sbom:b",
         provenanceRef: "attestation:provenance:b",
         builderIdentity: "builder:company-runtime-host",
@@ -1023,7 +988,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
       artifactType: "agent_revision",
       artifactRevisionId: "r",
       artifactDigest: computeArtifactDigest("c"),
-      signatureBundleRef: "attestation:sig:1",
+      dsseEnvelopeRef: "attestation:sig:1",
       sbomRef: "attestation:sbom:1",
       provenanceRef: "attestation:prov:1",
       builderIdentity: "builder:b",
@@ -1086,7 +1051,7 @@ describe("assertAttestationGate 发布门禁", () => {
       artifactType: "agent_revision",
       artifactRevisionId: "rev-1",
       artifactDigest: computeArtifactDigest("c"),
-      signatureBundleRef: "attestation:sig:1",
+      dsseEnvelopeRef: "attestation:sig:1",
       sbomRef: "attestation:sbom:1",
       provenanceRef: "attestation:prov:1",
       builderIdentity: "builder:b",
@@ -1226,7 +1191,7 @@ describe("publishRuntimeRevisionWithAttestation 双门禁", () => {
       artifactType: "runtime_revision",
       artifactRevisionId: revision.id,
       artifactDigest: computeArtifactDigest("c"),
-      signatureBundleRef: "attestation:sig:f",
+      dsseEnvelopeRef: "attestation:sig:f",
       sbomRef: "attestation:sbom:f",
       provenanceRef: "attestation:prov:f",
       builderIdentity: "builder:b",
@@ -1316,28 +1281,27 @@ describe("S03-W04 阶段验收场景", () => {
   });
 
   it("制品 digest 不接受可变 tag（v1.0 / latest / git tag）", async () => {
-    const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
+    const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
     const builderKeys: BuilderKeyRegistry = {
       "builder:company-agent-runtime": keyPair.publicKeyBase64,
     };
     const store = new InMemoryManagedArtifactStore();
-    store.writeSbom("attestation:sbom:1", buildCleanSbom());
+    store.writeSbom("attestation:sbom:1", buildCleanCycloneDXSbom());
     store.writeProvenance("attestation:provenance:1", buildValidProvenance());
 
-    // 可变 tag 作为 digest → 验证失败
+    // 可变 tag 作为 digest → 验证失败（digest 格式校验在读取 DSSE Envelope 之前）
     for (const badDigest of ["v1.0", "latest", "main", "git:abc"]) {
-      store.writeSignatureBundle("attestation:sig:1", {
-        algorithm: "ed25519",
-        publicKey: keyPair.publicKeyBase64,
-        signature: signEd25519(keyPair.privateKey, badDigest),
-      });
+      store.writeDsseEnvelope(
+        "attestation:sig:1",
+        buildDsseArtifactAttestationEnvelope(keyPair, badDigest),
+      );
       const result = await verifyArtifactAttestation(
         {
           tenantId,
           artifactType: "agent_revision",
           artifactRevisionId: "rev-1",
           artifactDigest: badDigest,
-          signatureBundleRef: "attestation:sig:1",
+          dsseEnvelopeRef: "attestation:sig:1",
           sbomRef: "attestation:sbom:1",
           provenanceRef: "attestation:provenance:1",
           builderIdentity: "builder:company-agent-runtime",
@@ -1351,24 +1315,15 @@ describe("S03-W04 阶段验收场景", () => {
   });
 
   it("验证失败写 AuditEvent + 持久化失败记录，不泄露内部漏洞细节", async () => {
-    const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
+    const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
     const builderKeys: BuilderKeyRegistry = {
       "builder:company-agent-runtime": keyPair.publicKeyBase64,
     };
     const digest = computeArtifactDigest("content");
     const store = new InMemoryManagedArtifactStore();
     // SBOM 命中 critical 漏洞
-    store.writeSignatureBundle("attestation:sig:1", buildValidSignatureBundle(keyPair, digest));
-    store.writeSbom("attestation:sbom:1", {
-      packages: [
-        {
-          name: "vuln-lib",
-          version: "1.0",
-          licenses: ["MIT"],
-          vulnerabilities: [{ id: "CVE-2026-critical", severity: "critical" }],
-        },
-      ],
-    });
+    store.writeDsseEnvelope("attestation:sig:1", buildDsseArtifactAttestationEnvelope(keyPair, digest));
+    store.writeSbom("attestation:sbom:1", buildCycloneDXWithVulns([{ id: "CVE-2026-critical", severity: "critical" }]));
     store.writeProvenance("attestation:provenance:1", buildValidProvenance());
 
     await expect(
@@ -1378,7 +1333,7 @@ describe("S03-W04 阶段验收场景", () => {
           artifactType: "agent_revision",
           artifactRevisionId: "rev-1",
           artifactDigest: digest,
-          signatureBundleRef: "attestation:sig:1",
+          dsseEnvelopeRef: "attestation:sig:1",
           sbomRef: "attestation:sbom:1",
           provenanceRef: "attestation:provenance:1",
           builderIdentity: "builder:company-agent-runtime",
@@ -1435,7 +1390,7 @@ describe("S03-W04 阶段验收场景", () => {
       artifactType: "agent_revision",
       artifactRevisionId: revision.id,
       artifactDigest: computeArtifactDigest("c"),
-      signatureBundleRef: "attestation:sig:f",
+      dsseEnvelopeRef: "attestation:sig:f",
       sbomRef: "attestation:sbom:f",
       provenanceRef: "attestation:prov:f",
       builderIdentity: "builder:b",
@@ -1487,20 +1442,11 @@ describe("S03-W04 阶段验收场景", () => {
     });
 
     // builder A 验证失败（SBOM 命中漏洞）
-    const keyA = generateBuilderKeyPair("builder:company-agent-runtime");
+    const keyA = generateTestBuilderKey("builder:company-agent-runtime");
     const digest = computeArtifactDigest("shared-content");
     const storeA = new InMemoryManagedArtifactStore();
-    storeA.writeSignatureBundle("attestation:sig:a", buildValidSignatureBundle(keyA, digest));
-    storeA.writeSbom("attestation:sbom:a", {
-      packages: [
-        {
-          name: "vuln",
-          version: "1",
-          licenses: ["MIT"],
-          vulnerabilities: [{ id: "CVE-X", severity: "critical" }],
-        },
-      ],
-    });
+    storeA.writeDsseEnvelope("attestation:sig:a", buildDsseArtifactAttestationEnvelope(keyA, digest));
+    storeA.writeSbom("attestation:sbom:a", buildCycloneDXWithVulns([{ id: "CVE-X", severity: "critical" }]));
     storeA.writeProvenance("attestation:prov:a", buildValidProvenance());
     await expect(
       verifyAndPersistAttestation(
@@ -1509,7 +1455,7 @@ describe("S03-W04 阶段验收场景", () => {
           artifactType: "agent_revision",
           artifactRevisionId: revision.id,
           artifactDigest: digest,
-          signatureBundleRef: "attestation:sig:a",
+          dsseEnvelopeRef: "attestation:sig:a",
           sbomRef: "attestation:sbom:a",
           provenanceRef: "attestation:prov:a",
           builderIdentity: "builder:company-agent-runtime",
@@ -1521,10 +1467,10 @@ describe("S03-W04 阶段验收场景", () => {
     ).rejects.toThrow(ArtifactAttestationFailedError);
 
     // builder B 验证通过（干净 SBOM）
-    const keyB = generateBuilderKeyPair("builder:company-runtime-host");
+    const keyB = generateTestBuilderKey("builder:company-runtime-host");
     const storeB = new InMemoryManagedArtifactStore();
-    storeB.writeSignatureBundle("attestation:sig:b", buildValidSignatureBundle(keyB, digest));
-    storeB.writeSbom("attestation:sbom:b", buildCleanSbom());
+    storeB.writeDsseEnvelope("attestation:sig:b", buildDsseArtifactAttestationEnvelope(keyB, digest));
+    storeB.writeSbom("attestation:sbom:b", buildCleanCycloneDXSbom());
     storeB.writeProvenance("attestation:prov:b", buildValidProvenance());
     const verifiedAtt = await verifyAndPersistAttestation(
       {
@@ -1532,7 +1478,7 @@ describe("S03-W04 阶段验收场景", () => {
         artifactType: "agent_revision",
         artifactRevisionId: revision.id,
         artifactDigest: digest,
-        signatureBundleRef: "attestation:sig:b",
+        dsseEnvelopeRef: "attestation:sig:b",
         sbomRef: "attestation:sbom:b",
         provenanceRef: "attestation:prov:b",
         builderIdentity: "builder:company-runtime-host",

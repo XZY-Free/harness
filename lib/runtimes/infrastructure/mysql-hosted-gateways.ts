@@ -736,7 +736,7 @@ async function ensureVerifiedAttestation(params: {
   const matching = existing.find(
     (item) =>
       item.artifactDigest === params.evidence.artifactDigest &&
-      item.signatureBundleRef === params.evidence.signatureBundleRef &&
+      item.dsseEnvelopeRef === params.evidence.dsseEnvelopeRef &&
       !item.revokedAt,
   );
   if (matching) return matching;
@@ -747,7 +747,7 @@ async function ensureVerifiedAttestation(params: {
       artifactType: params.artifactType,
       artifactRevisionId: params.artifactRevisionId,
       artifactDigest: params.evidence.artifactDigest,
-      signatureBundleRef: params.evidence.signatureBundleRef,
+      dsseEnvelopeRef: params.evidence.dsseEnvelopeRef,
       sbomRef: params.evidence.sbomRef,
       provenanceRef: params.evidence.provenanceRef,
       builderIdentity: params.evidence.builderIdentity,
@@ -763,7 +763,7 @@ async function ensureVerifiedAttestation(params: {
       artifactType: params.artifactType,
       artifactRevisionId: params.artifactRevisionId,
       artifactDigest: params.evidence.artifactDigest,
-      signatureBundleRef: params.evidence.signatureBundleRef,
+      dsseEnvelopeRef: params.evidence.dsseEnvelopeRef,
       sbomRef: params.evidence.sbomRef,
       provenanceRef: params.evidence.provenanceRef,
       builderIdentity: params.evidence.builderIdentity,
@@ -789,7 +789,7 @@ async function ensureVerifiedAttestation(params: {
     ).find(
       (item) =>
         item.artifactDigest === params.evidence.artifactDigest &&
-        item.signatureBundleRef === params.evidence.signatureBundleRef &&
+        item.dsseEnvelopeRef === params.evidence.dsseEnvelopeRef &&
         item.verificationState === verification.verificationState &&
         !item.revokedAt,
     );

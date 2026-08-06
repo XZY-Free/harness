@@ -107,7 +107,7 @@ export async function GET(request: Request): Promise<Response> {
     artifact_type: a.artifactType,
     artifact_revision_id: a.artifactRevisionId,
     artifact_digest: a.artifactDigest,
-    signature_bundle_ref: a.signatureBundleRef,
+    dsse_envelope_ref: a.dsseEnvelopeRef,
     sbom_ref: a.sbomRef,
     provenance_ref: a.provenanceRef,
     builder_identity: a.builderIdentity,

@@ -5,17 +5,26 @@
  * 移除 Legacy HMAC 成功分支 — DSSE 是唯一的验签路径。
  *
  * DSSE Conformance Verifier — 真实验证流程：
- * 1. 解析 DSSE Envelope JSON
- * 2. 校验 payloadType / payload / signatures 字段
- * 3. Base64 解码 Payload
- * 4. 构造 DSSE PAE（Pre-Authentication Encoding）
- * 5. Ed25519 验签（使用 trustedRunnerKeys）
- * 6. 解析 in-toto Statement
- * 7. 校验 Predicate Type / Subject Digest / Report 绑定
- * 8. 校验 Case 结果完整
+ * 1. 解析 DSSE Envelope JSON（共享底座 lib/crypto/dsse）
+ * 2. Base64 解码 Payload
+ * 3. 构造 DSSE PAE 并 Ed25519 验签（使用共享底座 + trustedRunnerKeys）
+ * 4. 解析 in-toto Statement
+ * 5. 校验 Predicate Type / Subject Digest / Report 绑定
+ * 6. 校验 Case 结果完整
+ *
+ * 共享底座（PAE / Ed25519 / Envelope 解析）位于 lib/crypto/dsse，
+ * 与 Artifact Attestation 共用，本模块仅保留 Conformance 特有的语义校验。
  */
 
-import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
+import {
+  computeEnvelopeDigest,
+  computePayloadDigest,
+  parseDSSEEnvelope,
+  verifyDSSEEnvelopeSignatures,
+  parseIntotoStatement,
+  validatePayloadType,
+  validateStatementSubject,
+} from "@/lib/crypto/dsse";
 import {
   ALL_CONFORMANCE_CASES,
   CONFORMANCE_SUITE_REVISION,
@@ -101,86 +110,38 @@ export function createDSSEConformanceVerifier(
 ): RuntimeConformanceVerifier {
   return {
     verify: async (input: VerifyConformanceInput): Promise<VerifyConformanceResult> => {
-      // 步骤 1: 解析 Envelope JSON
-      let envelope: unknown;
-      try {
-        envelope = JSON.parse(input.dsseEnvelopeBytes.toString("utf-8"));
-      } catch {
-        return fail("dsse_envelope_json_parse_failed");
+      // 步骤 1: 解析 Envelope JSON（共享底座）
+      const parsed = parseDSSEEnvelope(input.dsseEnvelopeBytes);
+      if (!parsed.ok) {
+        return fail(parsed.reason);
       }
-      if (!envelope || typeof envelope !== "object") {
-        return fail("dsse_envelope_json_parse_failed");
-      }
-      const env = envelope as Record<string, unknown>;
+      const { envelope, payloadBytes } = parsed;
 
-      // 步骤 2: 校验 payloadType 字段存在且为字符串
-      if (typeof env.payloadType !== "string") {
-        return fail("dsse_payload_type_missing");
+      // 步骤 2: Ed25519 验签（共享底座）
+      const sigResult = verifyDSSEEnvelopeSignatures(
+        envelope,
+        payloadBytes,
+        config.trustedRunnerKeys,
+      );
+      if (!sigResult.verified) {
+        return fail(sigResult.failureReason ?? "signature_invalid");
       }
-      const payloadType = env.payloadType;
+      const verifiedKeyId = sigResult.verifiedKeyId as string;
 
-      // 步骤 3: 校验 payload 字段存在且为字符串
-      if (typeof env.payload !== "string") {
-        return fail("dsse_payload_missing");
+      // 步骤 3: 解析 in-toto Statement（共享底座）
+      const stmtResult = parseIntotoStatement(payloadBytes);
+      if (!stmtResult.ok) {
+        return fail(stmtResult.reason);
       }
+      const statement = stmtResult.statement;
 
-      // 步骤 4: 校验 signatures 数组存在且非空
-      if (!Array.isArray(env.signatures) || env.signatures.length === 0) {
-        return fail("dsse_signatures_missing");
-      }
-      const signatures = env.signatures as Array<Record<string, unknown>>;
-
-      // 步骤 5: Base64 解码 Payload 字节
-      let payloadBytes: Buffer;
-      try {
-        payloadBytes = Buffer.from(env.payload, "base64");
-      } catch {
-        return fail("dsse_payload_base64_decode_failed");
+      // 步骤 3b: 校验 payloadType（共享底座）
+      const ptResult = validatePayloadType(envelope.payloadType);
+      if (!ptResult.ok) {
+        return fail(ptResult.reason);
       }
 
-      // 步骤 6: 构造 DSSE PAE
-      const pae = computeDssePae(payloadType, payloadBytes);
-
-      // 步骤 7-8: Ed25519 验签
-      let verifiedKeyId: string | null = null;
-      for (const sig of signatures) {
-        const keyid = typeof sig.keyid === "string" ? sig.keyid : "";
-        const sigStr = typeof sig.sig === "string" ? sig.sig : "";
-        if (!keyid || !sigStr) continue;
-
-        const publicKeyBase64 = config.trustedRunnerKeys[keyid];
-        if (!publicKeyBase64) {
-          continue; // unknown_keyid — 尝试下一个签名
-        }
-        if (!verifyEd25519(publicKeyBase64, pae, sigStr)) {
-          continue; // signature_invalid — 尝试下一个签名
-        }
-        verifiedKeyId = keyid;
-        break;
-      }
-      if (verifiedKeyId === null) {
-        // 判断具体失败原因
-        const allUnknown = signatures.every((sig) => {
-          const keyid = typeof sig.keyid === "string" ? sig.keyid : "";
-          return !config.trustedRunnerKeys[keyid];
-        });
-        return fail(allUnknown ? "unknown_keyid" : "signature_invalid");
-      }
-
-      // 步骤 9: 解析 in-toto Statement
-      let statement: Record<string, unknown>;
-      try {
-        statement = JSON.parse(payloadBytes.toString("utf-8")) as Record<string, unknown>;
-      } catch {
-        return fail("in_toto_statement_parse_failed");
-      }
-
-      // 步骤 9b: 校验 _type
-      if (statement._type !== "https://in-toto.io/Statement/v1") {
-        return fail("in_toto_statement_type_invalid");
-      }
-
-      // 步骤 10: 校验 predicateType
+      // 步骤 4: 校验 predicateType
       const stmtPredicateType = statement.predicateType;
       if (stmtPredicateType !== RUNTIME_CONFORMANCE_PREDICATE_TYPE) {
         return fail(
@@ -189,32 +150,31 @@ export function createDSSEConformanceVerifier(
         );
       }
 
-      // 步骤 11: 校验 subject 数组存在且非空
-      if (!Array.isArray(statement.subject) || statement.subject.length === 0) {
-        return fail("subject_missing");
+      // 步骤 5: 校验 subject digest 绑定（共享底座）
+      const subResult = validateStatementSubject(statement);
+      if (!subResult.ok) {
+        return fail(subResult.reason);
       }
 
-      // 步骤 12: 从 predicate 中解析 RuntimeConformanceReport
+      // 步骤 6: 从 predicate 中解析 RuntimeConformanceReport
       const predicate = statement.predicate as Record<string, unknown> | undefined;
       if (!predicate || typeof predicate !== "object") {
         return fail("predicate_missing");
       }
       const report = predicate as unknown as RuntimeConformanceReport;
 
-      // 步骤 13: 校验 Subject Artifact Digest 与 Report 自洽
-      const subject0 = statement.subject[0] as Record<string, unknown> | undefined;
-      const subjectDigest = (subject0?.digest as Record<string, unknown> | undefined)?.sha256;
+      // 步骤 7: 校验 Subject Artifact Digest 与 Report 自洽
       const reportArtifactDigestRaw = report.runtimeArtifactDigest.replace("sha256:", "");
-      if (typeof subjectDigest !== "string" || subjectDigest !== reportArtifactDigestRaw) {
+      if (subResult.subjectDigestHex !== reportArtifactDigestRaw) {
         return fail("subject_digest_mismatch");
       }
 
-      // 步骤 14: 校验 runtimeRevisionId（绑定校验，必填）
+      // 步骤 8: 校验 runtimeRevisionId（绑定校验，必填）
       if (report.runtimeRevisionId !== input.expectedRuntimeRevisionId) {
         return fail("runtime_revision_mismatch");
       }
 
-      // 步骤 15: 校验 runtimeArtifactDigest（可选绑定校验）
+      // 步骤 9: 校验 runtimeArtifactDigest（可选绑定校验）
       if (
         input.expectedRuntimeArtifactDigest &&
         report.runtimeArtifactDigest !== input.expectedRuntimeArtifactDigest
@@ -222,7 +182,7 @@ export function createDSSEConformanceVerifier(
         return fail("artifact_digest_mismatch");
       }
 
-      // 步骤 16: 校验 runtimeConfigDigest（可选绑定校验）
+      // 步骤 10: 校验 runtimeConfigDigest（可选绑定校验）
       if (
         input.expectedRuntimeConfigDigest &&
         report.runtimeConfigDigest !== input.expectedRuntimeConfigDigest
@@ -230,7 +190,7 @@ export function createDSSEConformanceVerifier(
         return fail("config_digest_mismatch");
       }
 
-      // 步骤 17: 校验 protocolContractRevision（可选绑定校验）
+      // 步骤 11: 校验 protocolContractRevision（可选绑定校验）
       if (
         input.expectedProtocolContractRevision &&
         report.protocolContractRevision !== input.expectedProtocolContractRevision
@@ -238,17 +198,17 @@ export function createDSSEConformanceVerifier(
         return fail("protocol_revision_mismatch");
       }
 
-      // 步骤 18: 校验 suiteRevision
+      // 步骤 12: 校验 suiteRevision
       if (report.suiteRevision !== CONFORMANCE_SUITE_REVISION) {
         return fail("suite_revision_mismatch");
       }
 
-      // 步骤 19: 校验 Runner Identity ∈ allowedRunnerIdentities
+      // 步骤 13: 校验 Runner Identity ∈ allowedRunnerIdentities
       if (!config.allowedRunnerIdentities.includes(report.runnerIdentity)) {
         return fail("runner_identity_not_allowed");
       }
 
-      // 步骤 20: 校验 Case 集合完整（使用 ALL_CONFORMANCE_CASES）
+      // 步骤 14: 校验 Case 集合完整（使用 ALL_CONFORMANCE_CASES）
       if (!Array.isArray(report.caseResults)) {
         return fail("case_results_incomplete");
       }
@@ -258,29 +218,27 @@ export function createDSSEConformanceVerifier(
         return fail("case_results_incomplete");
       }
 
-      // 步骤 21: 校验 Case ID 唯一（在长度校验之前，确保重复 case 被正确识别）
+      // 步骤 14b: 校验 Case ID 唯一（在长度校验之前，确保重复 case 被正确识别）
       if (new Set(caseIds).size !== caseIds.length) {
         return fail("case_results_not_unique");
       }
 
-      // 步骤 21b: 校验 Case 数量精确匹配（无多余 case）
+      // 步骤 14c: 校验 Case 数量精确匹配（无多余 case）
       if (caseIds.length !== ALL_CONFORMANCE_CASES.length) {
         return fail("case_results_incomplete");
       }
 
-      // 步骤 22: 计算 Overall Result 与 Case 结果一致
+      // 步骤 15: 计算 Overall Result 与 Case 结果一致
       const allPassed = report.caseResults.every((r) => r.passed);
       if ((report.overallResult === "passed") !== allPassed) {
         return fail("overall_result_inconsistent");
       }
 
-      // 步骤 23: 计算 envelopeDigest
-      const envelopeDigest = `sha256:${createHash("sha256").update(input.dsseEnvelopeBytes).digest("hex")}`;
+      // 步骤 16: 计算 envelopeDigest / payloadDigest（共享底座）
+      const envelopeDigest = computeEnvelopeDigest(input.dsseEnvelopeBytes);
+      const payloadDigest = computePayloadDigest(payloadBytes);
 
-      // 步骤 24: 计算 payloadDigest
-      const payloadDigest = `sha256:${createHash("sha256").update(payloadBytes).digest("hex")}`;
-
-      // 步骤 25: 返回 VerifiedRuntimeConformanceClaims
+      // 步骤 17: 返回 VerifiedRuntimeConformanceClaims
       return {
         verified: true,
         claims: {
@@ -301,45 +259,4 @@ export function createDSSEConformanceVerifier(
 
 function fail(reason: string, predicateType?: string): VerifyConformanceResult {
   return { verified: false, failureReason: reason, predicateType };
-}
-
-// ─── DSSE PAE ────────────────────────────────────────────
-
-/**
- * 构造 DSSE Pre-Authentication Encoding。
- *
- * PAE = "DSSEv1" + SP + str(len(payloadType)) + SP + payloadType + SP + str(len(payloadBytes)) + SP + payloadBytes
- */
-function computeDssePae(payloadType: string, payload: Buffer): Buffer {
-  const prefix = Buffer.from(`DSSEv1 ${payloadType.length} ${payloadType} ${payload.length} `);
-  return Buffer.concat([prefix, payload]);
-}
-
-// ─── Ed25519 验签 ────────────────────────────────────────
-
-/**
- * 使用 Ed25519 验证 DSSE 签名。
- *
- * publicKeyBase64: base64 编码的 32 字节 raw Ed25519 公钥。
- * data: 待验证的 PAE 字节。
- * signatureBase64: base64 编码的 64 字节签名。
- */
-function verifyEd25519(publicKeyBase64: string, data: Buffer, signatureBase64: string): boolean {
-  const publicKeyBytes = Buffer.from(publicKeyBase64, "base64");
-  if (publicKeyBytes.length !== 32) return false;
-  let publicKey: ReturnType<typeof createPublicKey>;
-  try {
-    publicKey = createPublicKey({
-      key: {
-        kty: "OKP",
-        crv: "Ed25519",
-        x: publicKeyBytes.toString("base64url"),
-      },
-      format: "jwk",
-    });
-  } catch {
-    return false;
-  }
-  const signature = Buffer.from(signatureBase64, "base64");
-  return cryptoVerify(null, data, publicKey, signature);
 }

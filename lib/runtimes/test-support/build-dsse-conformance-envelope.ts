@@ -12,6 +12,7 @@ import {
   sign as cryptoSign,
   randomUUID,
 } from "node:crypto";
+import { computeDssePae } from "@/lib/crypto/dsse";
 import {
   ALL_CONFORMANCE_CASES,
   CONFORMANCE_SUITE_REVISION,
@@ -83,11 +84,6 @@ export function buildDsseConformanceEnvelope(
     signatures: [{ keyid: runnerKey.keyid, sig: signature.toString("base64") }],
   };
   return JSON.stringify(envelope);
-}
-
-function computeDssePae(payloadType: string, payload: Buffer): Buffer {
-  const prefix = Buffer.from(`DSSEv1 ${payloadType.length} ${payloadType} ${payload.length} `);
-  return Buffer.concat([prefix, payload]);
 }
 
 /**

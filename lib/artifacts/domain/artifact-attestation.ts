@@ -1,5 +1,5 @@
 /**
- * 制品证明独立验证策略。
+ * 制品证明独立验证策略 — DSSE Envelope + in-toto Statement 统一信任协议。
  *
  * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §4.1-4.2、
  *         ../v11-agentkit-platform/11-api-and-event-boundaries.md §6（artifact-attestations:verify）、
@@ -7,21 +7,39 @@
  *         ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md S03-W04。
  *
  * 核心原则（零信任供应链）：
- * - 调用方只能提交引用（signature_bundle_ref / sbom_ref / provenance_ref），不能自报 verification_state。
- * - 验证服务独立读取签名、SBOM 和 provenance 后决定结果。
- * - 本地开发验证使用真实签名（ed25519）和可查询 SBOM/provenance 产物，不使用"跳过验证"假配置。
+ * - 调用方只能提交引用（dsse_envelope_ref / sbom_ref / provenance_ref），不能自报 verification_state。
+ * - 验证服务独立读取 DSSE Envelope、SBOM 和 provenance 后决定结果。
+ * - DSSE Envelope payload 必须是 in-toto Statement v1，subject digest 绑定 artifactDigest。
+ * - 签名验证使用共享 DSSE 底座（lib/crypto/dsse），与 Runtime Conformance 共用。
+ * - builder_identity 必须在白名单中，且 DSSE Envelope 签名 keyid 必须与 builder_identity 一致。
  * - digest 必须是 sha256:<hex> 格式，不接受可变 tag 作为历史依据。
  * - 引用必须是受管对象（attestation: / oci:// / managed:// 前缀），不接受任意公网 URL。
- * - builder_identity 必须在白名单中，签名 bundle 公钥必须与白名单一致。
  * - 验证失败也持久化记录（安全摘要 + AuditEvent），响应不泄露内部漏洞细节给无权调用者。
  *
  * 本模块是纯逻辑（不访问 DB）；持久化与审计在 artifact-attestation-queries.ts。
  */
-import { createHash, createPublicKey, verify } from "node:crypto";
+import { createHash } from "node:crypto";
+import {
+  parseDSSEEnvelope,
+  verifyDSSEEnvelopeSignatures,
+  parseIntotoStatement,
+  validatePayloadType,
+  validateStatementSubject,
+} from "@/lib/crypto/dsse";
+import { validateCycloneDX } from "@/lib/artifacts/verification/cyclonedx-validator";
 import { ARTIFACT_KINDS, type ArtifactKind } from "./artifact";
 
 const ARTIFACT_TYPES = ARTIFACT_KINDS;
 export type ArtifactType = ArtifactKind;
+
+/**
+ * Artifact Attestation 标准 Predicate Type。
+ *
+ * 必须是项目长期拥有并可维护的稳定 HTTPS URI。
+ * 与 Runtime Conformance 的 Predicate Type 区分，专用于制品 provenance 声明。
+ */
+export const ARTIFACT_ATTESTATION_PREDICATE_TYPE =
+  "https://snowharness.dev/attestation/artifact-provenance/v1";
 
 export const ATTESTATION_FAILURE_CODES = [
   "unknown_artifact_type",
@@ -30,12 +48,13 @@ export const ATTESTATION_FAILURE_CODES = [
   "sbom_ref_not_managed",
   "provenance_ref_not_managed",
   "builder_not_allowed",
-  "signature_bundle_unreadable",
+  "dsse_envelope_unreadable",
   "sbom_unreadable",
   "provenance_unreadable",
-  "signature_algorithm_unsupported",
+  "dsse_envelope_parse_failed",
   "builder_key_mismatch",
   "signature_invalid",
+  "cyclonedx_schema_failed",
   "sbom_blocked_vulnerability",
   "sbom_blocked_license",
   "provenance_missing_field",
@@ -67,7 +86,7 @@ export function isValidArtifactDigest(digest: string): boolean {
 
 /**
  * 受管对象引用前缀（白名单）。
- * - attestation: 本地 attestation 存储（如 attestation:signature:901）。
+ * - attestation: 本地 attestation 存储（如 attestation:dsse:901）。
  * - oci:// OCI 制品仓库（受管 registry，digest 寻址）。
  * - managed:// 平台受管对象存储（如 managed://sbom/2026/07/abc.json）。
  *
@@ -83,17 +102,7 @@ export function isManagedRef(ref: string): boolean {
   return MANAGED_REF_PREFIXES.some((prefix) => ref.startsWith(prefix));
 }
 
-// ─── Signature Bundle / SBOM / Provenance ──────────────────
-
-/** 签名 bundle JSON 结构（由受管存储返回）。 */
-export interface SignatureBundle {
-  /** 签名算法；当前仅支持 ed25519。 */
-  algorithm: "ed25519";
-  /** 签名公钥（base64 编码的 32 字节 raw ed25519 公钥）。 */
-  publicKey: string;
-  /** 签名值（base64 编码的 64 字节 ed25519 签名）。 */
-  signature: string;
-}
+// ─── SBOM / Provenance ─────────────────────────────────────
 
 /** SBOM 包条目。 */
 export interface SbomPackage {
@@ -126,16 +135,21 @@ export interface ProvenanceDocument {
 // ─── Managed Artifact Store ────────────────────────────────
 
 /**
- * 受管对象存储接口：通过 ref 查询签名 bundle / SBOM / provenance 内容。
+ * 受管对象存储接口：通过 ref 查询 DSSE Envelope / SBOM / provenance 内容。
  *
  * "独立读取"语义：验证服务通过此接口读取内容，调用方不能自报 verified。
  * 实现可以是 in-memory（测试）、文件系统、对象存储或 OCI registry。
  *
+ * readDsseEnvelope 返回原始 DSSE Envelope JSON 字节（未解析），由共享 DSSE 底座解析验签。
+ * readSbom 返回原始 SBOM JSON 对象（未解析），由 CycloneDX 验证器校验后提取策略数据。
+ *
  * 读取失败（ref 不存在、内容损坏、解码失败）应抛错；verifyArtifactAttestation 会捕获并返回 failed。
  */
 export interface ManagedArtifactStore {
-  readSignatureBundle(ref: string): Promise<SignatureBundle>;
-  readSbom(ref: string): Promise<SbomDocument>;
+  /** 读取 DSSE Envelope 原始字节（JSON 编码的 DSSE Envelope）。 */
+  readDsseEnvelope(ref: string): Promise<Buffer>;
+  /** 读取 SBOM 原始 JSON 对象（CycloneDX 格式，由验证器校验）。 */
+  readSbom(ref: string): Promise<unknown>;
   readProvenance(ref: string): Promise<ProvenanceDocument>;
 }
 
@@ -157,12 +171,14 @@ export const BLOCKED_LICENSES = [
 // ─── Builder Key Registry ──────────────────────────────────
 
 /**
- * builder identity → 公钥映射（受管白名单）。
+ * builder identity → 公钥映射（受管白名单 / DSSE 信任锚）。
  *
  * key 是 builder identity（如 "builder:company-agent-runtime"），
+ * 同时用作 DSSE Envelope 签名的 keyid。
  * value 是 base64 编码的 32 字节 raw ed25519 公钥。
  *
  * 调用方注入此映射（生产环境从配置/PolicyRevision 读取，测试环境动态生成密钥对）。
+ * 与共享 DSSE 底座的 trustedKeys 参数兼容（Record<string, string>）。
  */
 export type BuilderKeyRegistry = Record<string, string>;
 
@@ -174,7 +190,8 @@ export interface VerifyAttestationInput {
   artifactType: string;
   artifactRevisionId: string;
   artifactDigest: string;
-  signatureBundleRef: string;
+  /** DSSE Envelope 受管引用（包含 in-toto Statement 签名 payload）。 */
+  dsseEnvelopeRef: string;
   sbomRef: string;
   provenanceRef: string;
   builderIdentity: string;
@@ -207,18 +224,19 @@ export interface VerifyAttestationResult {
 // ─── Verification Service ──────────────────────────────────
 
 /**
- * 验证 attestation（独立读取签名/SBOM/provenance，调用方不能自报 verified）。
+ * 验证 attestation（独立读取 DSSE Envelope/SBOM/provenance，调用方不能自报 verified）。
  *
  * 校验链（任一失败即返回 failed，不短路以便审计完整原因）：
  * 1. artifactType 在允许枚举内。
  * 2. artifactDigest 是 sha256:<hex> 格式。
- * 3. signatureBundleRef / sbomRef / provenanceRef 是受管引用。
+ * 3. dsseEnvelopeRef / sbomRef / provenanceRef 是受管引用。
  * 4. builderIdentity 在白名单中。
- * 5. 独立读取签名 bundle（受管存储）。
- * 6. 签名算法是 ed25519，公钥与 builder 白名单一致。
- * 7. ed25519 验签（payload = artifactDigest 字符串）。
- * 8. 独立读取 SBOM，校验阻断漏洞与阻断许可证。
- * 9. 独立读取 provenance，校验必填字段与 buildTime 有效性。
+ * 5. 独立读取 DSSE Envelope 字节（受管存储）。
+ * 6. 解析 DSSE Envelope（共享底座 parseDSSEEnvelope）。
+ * 7. Ed25519 验签（共享底座 verifyDSSEEnvelopeSignatures），keyid 必须与 builderIdentity 一致。
+ * 8. 解析 in-toto Statement，校验 _type / predicateType / subject digest 绑定。
+ * 9. 独立读取 SBOM，校验阻断漏洞与阻断许可证。
+ * 10. 独立读取 provenance，校验必填字段与 buildTime 有效性。
  *
  * 本函数是纯逻辑（不访问 DB，不写审计）；持久化与审计在 verifyAndPersistAttestation。
  */
@@ -246,11 +264,11 @@ export async function verifyArtifactAttestation(
   }
 
   // 3. 受管引用校验（拒绝公网 URL）
-  if (!isManagedRef(input.signatureBundleRef)) {
+  if (!isManagedRef(input.dsseEnvelopeRef)) {
     return {
       verificationState: "failed",
       failureCode: "signature_ref_not_managed",
-      failureReason: "signature_bundle_ref 非受管引用",
+      failureReason: "dsse_envelope_ref 非受管引用",
     };
   }
   if (!isManagedRef(input.sbomRef)) {
@@ -278,49 +296,97 @@ export async function verifyArtifactAttestation(
     };
   }
 
-  // 5. 独立读取签名 bundle（调用方不能自报）
-  let signatureBundle: SignatureBundle;
+  // 5. 独立读取 DSSE Envelope 字节（调用方不能自报）
+  let envelopeBytes: Buffer;
   try {
-    signatureBundle = await store.readSignatureBundle(input.signatureBundleRef);
+    envelopeBytes = await store.readDsseEnvelope(input.dsseEnvelopeRef);
   } catch {
     return {
       verificationState: "failed",
-      failureCode: "signature_bundle_unreadable",
-      failureReason: "无法读取签名 bundle",
+      failureCode: "dsse_envelope_unreadable",
+      failureReason: "无法读取 DSSE Envelope",
     };
   }
 
-  // 6. 签名算法与公钥一致性校验
-  if (signatureBundle.algorithm !== "ed25519") {
+  // 6. 解析 DSSE Envelope（共享底座）
+  const parsed = parseDSSEEnvelope(envelopeBytes);
+  if (!parsed.ok) {
     return {
       verificationState: "failed",
-      failureCode: "signature_algorithm_unsupported",
-      failureReason: `不支持算法: ${signatureBundle.algorithm}`,
+      failureCode: "dsse_envelope_parse_failed",
+      failureReason: parsed.reason,
     };
   }
-  if (signatureBundle.publicKey !== expectedPublicKey) {
+  const { envelope, payloadBytes } = parsed;
+
+  // 7. Ed25519 验签（共享底座）— 仅信任 builderIdentity 对应的公钥
+  const sigResult = verifyDSSEEnvelopeSignatures(envelope, payloadBytes, {
+    [input.builderIdentity]: expectedPublicKey,
+  });
+  if (!sigResult.verified) {
+    // unknown_keyid 表示 Envelope 签名 keyid 与 builderIdentity 不一致 → builder_key_mismatch
+    // signature_invalid 表示签名验证失败
+    const failureCode: AttestationFailureCode =
+      sigResult.failureReason === "unknown_keyid" ? "builder_key_mismatch" : "signature_invalid";
     return {
       verificationState: "failed",
-      failureCode: "builder_key_mismatch",
-      failureReason: "签名 bundle 公钥与 builder 白名单不一致",
+      failureCode,
+      failureReason: sigResult.failureReason ?? "signature_invalid",
     };
   }
 
-  // 7. ed25519 验签（payload = artifactDigest 字符串）
-  try {
-    verifyEd25519Signature(expectedPublicKey, input.artifactDigest, signatureBundle.signature);
-  } catch {
+  // 8. 解析 in-toto Statement 并校验语义绑定（共享底座）
+  const stmtResult = parseIntotoStatement(payloadBytes);
+  if (!stmtResult.ok) {
+    return {
+      verificationState: "failed",
+      failureCode: "dsse_envelope_parse_failed",
+      failureReason: stmtResult.reason,
+    };
+  }
+  const statement = stmtResult.statement;
+
+  // 8b. 校验 payloadType（DSSE Envelope 层，共享底座）
+  const ptResult = validatePayloadType(envelope.payloadType);
+  if (!ptResult.ok) {
+    return {
+      verificationState: "failed",
+      failureCode: "dsse_envelope_parse_failed",
+      failureReason: ptResult.reason,
+    };
+  }
+
+  // 8c. 校验 predicateType
+  if (statement.predicateType !== ARTIFACT_ATTESTATION_PREDICATE_TYPE) {
+    return {
+      verificationState: "failed",
+      failureCode: "dsse_envelope_parse_failed",
+      failureReason: `predicate_type_mismatch: ${String(statement.predicateType)}`,
+    };
+  }
+
+  // 8d. 校验 subject digest 与 artifactDigest 绑定（共享底座）
+  const subResult = validateStatementSubject(statement);
+  if (!subResult.ok) {
+    return {
+      verificationState: "failed",
+      failureCode: "dsse_envelope_parse_failed",
+      failureReason: subResult.reason,
+    };
+  }
+  const expectedDigestHex = input.artifactDigest.replace("sha256:", "");
+  if (subResult.subjectDigestHex !== expectedDigestHex) {
     return {
       verificationState: "failed",
       failureCode: "signature_invalid",
-      failureReason: "ed25519 验签失败",
+      failureReason: "subject_digest_mismatch",
     };
   }
 
-  // 8. 独立读取 SBOM
-  let sbom: SbomDocument;
+  // 9. 独立读取 SBOM（原始 JSON，供 CycloneDX 验证器校验）
+  let sbomDoc: unknown;
   try {
-    sbom = await store.readSbom(input.sbomRef);
+    sbomDoc = await store.readSbom(input.sbomRef);
   } catch {
     return {
       verificationState: "failed",
@@ -329,33 +395,65 @@ export async function verifyArtifactAttestation(
     };
   }
 
-  // 9. SBOM 阻断漏洞与阻断许可证校验
-  let vulnerabilityCount = 0;
+  // 10. CycloneDX 完整 Schema 验证 + 业务 Policy
+  const cyclonedxResult = validateCycloneDX({ document: sbomDoc });
+  if (cyclonedxResult.status === "failed") {
+    return {
+      verificationState: "failed",
+      failureCode: "cyclonedx_schema_failed",
+      failureReason: `CycloneDX 验证失败: ${cyclonedxResult.failureReasons?.join("; ") ?? "unknown"}`,
+    };
+  }
+
+  // 11. License 策略 — 从 CycloneDX components 提取许可证并检查阻断列表
+  const components = (sbomDoc as Record<string, unknown>)?.components;
   let blockedLicenseCount = 0;
-  for (const pkg of sbom.packages) {
-    for (const vuln of pkg.vulnerabilities) {
+  if (Array.isArray(components)) {
+    for (const comp of components) {
+      const c = comp as Record<string, unknown>;
+      if (c.licenses && Array.isArray(c.licenses)) {
+        for (const lic of c.licenses) {
+          const l = lic as Record<string, unknown>;
+          // CycloneDX license.id (SPDX) 或 license.expression
+          const licenseId =
+            l.license && typeof l.license === "object"
+              ? ((l.license as Record<string, unknown>).id ?? (l.license as Record<string, unknown>).expression)
+              : null;
+          if (typeof licenseId === "string" && (BLOCKED_LICENSES as readonly string[]).includes(licenseId)) {
+            blockedLicenseCount++;
+            return {
+              verificationState: "failed",
+              failureCode: "sbom_blocked_license",
+              failureReason: `阻断许可证: ${c.name ?? "unknown"} ${licenseId}`,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // 12. 漏洞策略 — 从 CycloneDX 顶层 vulnerabilities 提取并检查阻断等级
+  let vulnerabilityCount = 0;
+  const vulnArray = (sbomDoc as Record<string, unknown>)?.vulnerabilities;
+  if (Array.isArray(vulnArray)) {
+    for (const vuln of vulnArray) {
       vulnerabilityCount++;
-      if ((BLOCKED_VULNERABILITY_SEVERITIES as readonly string[]).includes(vuln.severity)) {
+      const v = vuln as Record<string, unknown>;
+      const ratings = v.ratings;
+      const severity = Array.isArray(ratings)
+        ? ((ratings as Record<string, unknown>[])[0]?.severity as string)
+        : (v.severity as string | undefined);
+      if (severity && (BLOCKED_VULNERABILITY_SEVERITIES as readonly string[]).includes(severity)) {
         return {
           verificationState: "failed",
           failureCode: "sbom_blocked_vulnerability",
-          failureReason: `阻断漏洞: ${pkg.name}@${pkg.version} ${vuln.id} (${vuln.severity})`,
-        };
-      }
-    }
-    for (const license of pkg.licenses) {
-      if ((BLOCKED_LICENSES as readonly string[]).includes(license)) {
-        blockedLicenseCount++;
-        return {
-          verificationState: "failed",
-          failureCode: "sbom_blocked_license",
-          failureReason: `阻断许可证: ${pkg.name}@${pkg.version} ${license}`,
+          failureReason: `阻断漏洞: ${v.id ?? "unknown"} (${severity})`,
         };
       }
     }
   }
 
-  // 10. 独立读取 provenance
+  // 13. 独立读取 provenance
   let provenance: ProvenanceDocument;
   try {
     provenance = await store.readProvenance(input.provenanceRef);
@@ -367,7 +465,7 @@ export async function verifyArtifactAttestation(
     };
   }
 
-  // 11. provenance 必填字段校验
+  // 14. provenance 必填字段校验
   if (
     !provenance.sourceRevision ||
     !provenance.buildPipeline ||
@@ -382,7 +480,7 @@ export async function verifyArtifactAttestation(
     };
   }
 
-  // 12. provenance buildTime 有效性校验
+  // 15. provenance buildTime 有效性校验
   if (Number.isNaN(Date.parse(provenance.buildTime))) {
     return {
       verificationState: "failed",
@@ -400,66 +498,11 @@ export async function verifyArtifactAttestation(
       buildTime: provenance.buildTime,
     },
     scanSummary: {
-      packagesScanned: sbom.packages.length,
+      packagesScanned: cyclonedxResult.componentCount ?? (Array.isArray(components) ? components.length : 0),
       vulnerabilityCount,
       blockedLicenseCount,
     },
   };
-}
-
-// ─── Ed25519 Verification ──────────────────────────────────
-
-/**
- * ed25519 验签（payload = artifactDigest 字符串）。
- *
- * 公钥是 base64 编码的 32 字节 raw ed25519 公钥，需手动包装为 SPKI DER（RFC 8410）。
- * 实现与 device-signature.ts 一致，但本模块独立维护以避免跨模块耦合。
- *
- * @throws Error 验签失败或公钥/签名格式错误
- */
-function verifyEd25519Signature(
-  publicKeyBase64: string,
-  payload: string,
-  signatureBase64: string,
-): void {
-  let signatureBuf: Buffer;
-  try {
-    signatureBuf = Buffer.from(signatureBase64, "base64");
-  } catch {
-    throw new Error("签名 base64 解码失败");
-  }
-  if (signatureBuf.length !== 64) {
-    throw new Error(`ed25519 签名长度非 64 字节（实际 ${signatureBuf.length}）`);
-  }
-
-  let publicKeyBuf: Buffer;
-  try {
-    publicKeyBuf = Buffer.from(publicKeyBase64, "base64");
-  } catch {
-    throw new Error("公钥 base64 解码失败");
-  }
-  if (publicKeyBuf.length !== 32) {
-    throw new Error(`ed25519 公钥长度非 32 字节（实际 ${publicKeyBuf.length}）`);
-  }
-
-  // SPKI DER 前缀 for ed25519（RFC 8410）：
-  // 30 2a 30 05 06 03 2b 65 70 03 21 00 <32-byte key>
-  const spkiPrefix = Buffer.from([
-    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
-  ]);
-  const der = Buffer.concat([spkiPrefix, publicKeyBuf]);
-
-  const pubkey = createPublicKey({ key: der, format: "der", type: "spki" });
-
-  const isValid = verify(
-    null, // ed25519 无算法参数
-    Buffer.from(payload, "utf-8"),
-    pubkey,
-    signatureBuf,
-  );
-  if (!isValid) {
-    throw new Error("ed25519 签名校验失败");
-  }
 }
 
 // ─── Errors ────────────────────────────────────────────────

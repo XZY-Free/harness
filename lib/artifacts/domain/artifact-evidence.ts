@@ -8,8 +8,8 @@
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §1.1
  */
 
-/** Attestation 格式枚举。 */
-export const ATTESTATION_FORMATS = ["legacy_custom", "in_toto_dsse", "sigstore_bundle"] as const;
+/** Attestation 格式枚举 — DSSE + in-toto 是唯一正式协议。 */
+export const ATTESTATION_FORMATS = ["in_toto_dsse"] as const;
 export type AttestationFormat = (typeof ATTESTATION_FORMATS)[number];
 
 /** 制品类型枚举 — AgentRevision 和 RuntimeRevision 的制品证据共享同一模型。 */
@@ -47,8 +47,8 @@ export interface ArtifactEvidenceSnapshot {
   revocationRecordId: string | null;
   /** 验证策略 Revision ID。 */
   verificationPolicyRevisionId: string | null;
-  /** Bundle Digest（in-toto / sigstore 模式）。 */
-  bundleDigest: string | null;
+  /** Envelope Digest（DSSE in-toto 模式）。 */
+  envelopeDigest: string | null;
 }
 
 /**

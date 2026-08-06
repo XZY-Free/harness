@@ -172,7 +172,7 @@ async function publishTrustedRevision(
     artifactType: "runtime_revision",
     artifactRevisionId: revisionId,
     artifactDigest: revision.artifactDigest,
-    signatureBundleRef: `attestation:signature:${revisionId.slice(0, 8)}`,
+    dsseEnvelopeRef: `attestation:signature:${revisionId.slice(0, 8)}`,
     sbomRef: `attestation:sbom:${revisionId.slice(0, 8)}`,
     provenanceRef: `attestation:provenance:${revisionId.slice(0, 8)}`,
     builderIdentity: "builder:lifecycle-test",

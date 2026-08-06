@@ -47,7 +47,7 @@ export async function seedVerifiedRuntimeAttestation(
     artifactType: "runtime_revision",
     artifactRevisionId: revisionId,
     artifactDigest,
-    signatureBundleRef: `attestation:signature:${artifactDigest.slice(7, 19)}`,
+    dsseEnvelopeRef: `attestation:dsse:${artifactDigest.slice(7, 19)}`,
     sbomRef: `attestation:sbom:${artifactDigest.slice(7, 19)}`,
     provenanceRef: `attestation:provenance:${artifactDigest.slice(7, 19)}`,
     builderIdentity: "builder:company-agent-runtime",

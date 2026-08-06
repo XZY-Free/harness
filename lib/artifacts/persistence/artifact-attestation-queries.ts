@@ -77,7 +77,7 @@ export async function insertAttestation(params: {
   artifactType: string;
   artifactRevisionId: string;
   artifactDigest: string;
-  signatureBundleRef: string;
+  dsseEnvelopeRef: string;
   sbomRef: string;
   provenanceRef: string;
   builderIdentity: string;
@@ -124,7 +124,7 @@ export async function insertAttestation(params: {
       artifactType: params.artifactType,
       artifactRevisionId: params.artifactRevisionId,
       artifactDigest: params.artifactDigest,
-      signatureBundleRef: params.signatureBundleRef,
+      dsseEnvelopeRef: params.dsseEnvelopeRef,
       sbomRef: params.sbomRef,
       provenanceRef: params.provenanceRef,
       builderIdentity: params.builderIdentity,
@@ -185,7 +185,7 @@ export async function verifyAndPersistAttestation(
     artifactType: input.artifactType,
     artifactRevisionId: input.artifactRevisionId,
     artifactDigest: input.artifactDigest,
-    signatureBundleRef: input.signatureBundleRef,
+    dsseEnvelopeRef: input.dsseEnvelopeRef,
     sbomRef: input.sbomRef,
     provenanceRef: input.provenanceRef,
     builderIdentity: input.builderIdentity,

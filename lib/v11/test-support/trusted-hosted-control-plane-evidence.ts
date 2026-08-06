@@ -1,11 +1,15 @@
-import { type KeyObject, createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash } from "node:crypto";
 import type {
   BuilderKeyRegistry,
   ManagedArtifactStore,
   ProvenanceDocument,
   SbomDocument,
-  SignatureBundle,
 } from "@/lib/artifacts/domain/artifact-attestation";
+import {
+  buildDsseArtifactAttestationEnvelope,
+  generateTestBuilderKey,
+  type TestBuilderKey,
+} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import {
   type HostedControlPlaneEvidenceProvider,
   resetHostedControlPlaneEvidenceProvider,
@@ -20,15 +24,16 @@ import {
 
 const TRUSTED_RUNNER_KEY = generateTestRunnerKey("hosted-control-plane-runner");
 const RUNNER_IDENTITY = "ci/hosted-runtime-conformance";
+const BUILDER_IDENTITY = "builder:snow-harness-hosted-release";
 
 class TestManagedArtifactStore implements ManagedArtifactStore {
-  readonly signatures = new Map<string, SignatureBundle>();
+  readonly envelopes = new Map<string, Buffer>();
   readonly sboms = new Map<string, SbomDocument>();
   readonly provenances = new Map<string, ProvenanceDocument>();
 
-  async readSignatureBundle(ref: string) {
-    const value = this.signatures.get(ref);
-    if (!value) throw new Error(`signature bundle not found: ${ref}`);
+  async readDsseEnvelope(ref: string): Promise<Buffer> {
+    const value = this.envelopes.get(ref);
+    if (!value) throw new Error(`DSSE envelope not found: ${ref}`);
     return value;
   }
 
@@ -62,9 +67,10 @@ function createEvidenceProvider(options?: {
   delaySecondAgentEvidenceMs?: number;
 }): HostedControlPlaneEvidenceProvider {
   const store = new TestManagedArtifactStore();
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const builderIdentity = "builder:snow-harness-hosted-release";
-  const builderKeys: BuilderKeyRegistry = { [builderIdentity]: rawPublicKey(publicKey) };
+  const builderKey: TestBuilderKey = generateTestBuilderKey(BUILDER_IDENTITY);
+  const builderKeys: BuilderKeyRegistry = {
+    [BUILDER_IDENTITY]: builderKey.publicKeyBase64,
+  };
   let remainingConformanceFailures = options?.failRuntimeConformanceAttempts ?? 0;
   let agentEvidenceCalls = 0;
 
@@ -78,22 +84,15 @@ function createEvidenceProvider(options?: {
       }
       const artifactDigest = digest(`snow-harness:${artifactType}:release-1`);
       const prefix = `managed://snow-harness/${artifactType}/release-1`;
-      const signatureBundleRef = `${prefix}/signature`;
+      const dsseEnvelopeRef = `${prefix}/dsse-envelope`;
       const sbomRef = `${prefix}/sbom`;
       const provenanceRef = `${prefix}/provenance`;
-      store.signatures.set(signatureBundleRef, {
-        algorithm: "ed25519",
-        publicKey: builderKeys[builderIdentity] as string,
-        signature: sign(
-          null,
-          Buffer.from(
-            options?.corruptArtifactSignatureFor === artifactType
-              ? `${artifactDigest}:corrupted`
-              : artifactDigest,
-          ),
-          privateKey,
-        ).toString("base64"),
-      });
+      store.envelopes.set(
+        dsseEnvelopeRef,
+        buildDsseArtifactAttestationEnvelope(builderKey, artifactDigest, {
+          tamperSignature: options?.corruptArtifactSignatureFor === artifactType,
+        }),
+      );
       store.sboms.set(sbomRef, {
         packages: [
           { name: "snow-harness", version: "release-1", licenses: ["MIT"], vulnerabilities: [] },
@@ -108,10 +107,10 @@ function createEvidenceProvider(options?: {
       return {
         artifactDigest,
         artifactRef: `managed://snow-harness/${artifactType}@${artifactDigest}`,
-        signatureBundleRef,
+        dsseEnvelopeRef,
         sbomRef,
         provenanceRef,
-        builderIdentity,
+        builderIdentity: BUILDER_IDENTITY,
         managedStore: store,
         builderKeys,
       };
@@ -147,11 +146,6 @@ function createEvidenceProvider(options?: {
       return { dsseEnvelope };
     },
   };
-}
-
-function rawPublicKey(publicKey: KeyObject): string {
-  const der = publicKey.export({ type: "spki", format: "der" });
-  return Buffer.from(der.subarray(der.length - 32)).toString("base64");
 }
 
 function digest(value: string): string {

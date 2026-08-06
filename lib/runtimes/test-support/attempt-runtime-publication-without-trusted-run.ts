@@ -39,7 +39,7 @@ export async function publishRuntimeRevision(
     artifactType: "runtime_revision",
     artifactRevisionId: revisionId,
     artifactDigest,
-    signatureBundleRef: `attestation:signature:${revisionId}`,
+    dsseEnvelopeRef: `attestation:dsse:${revisionId}`,
     sbomRef: `attestation:sbom:${revisionId}`,
     provenanceRef: `attestation:provenance:${revisionId}`,
     builderIdentity: "builder:conformance-test-support",

@@ -80,7 +80,7 @@ export interface RecordArtifactAttestationCommand {
   artifactType: string;
   artifactRevisionId: string;
   artifactDigest: string;
-  signatureBundleRef: string;
+  dsseEnvelopeRef: string;
   sbomRef: string;
   provenanceRef: string;
   builderIdentity: string;
@@ -158,7 +158,7 @@ export function createRecordArtifactAttestation(dependencies: {
         artifactType: command.artifactType,
         artifactRevisionId: command.artifactRevisionId,
         artifactDigest: command.artifactDigest,
-        signatureBundleRef: command.signatureBundleRef,
+        dsseEnvelopeRef: command.dsseEnvelopeRef,
         sbomRef: command.sbomRef,
         provenanceRef: command.provenanceRef,
         builderIdentity: command.builderIdentity,

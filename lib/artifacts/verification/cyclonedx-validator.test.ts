@@ -5,16 +5,28 @@
 import { validateCycloneDX } from "@/lib/artifacts/verification/cyclonedx-validator";
 import { describe, expect, it } from "vitest";
 
+/** 构造 schema 合法的最小 CycloneDX 1.6 文档。 */
+function buildMinimalDoc(overrides: Record<string, unknown> = {}) {
+  return {
+    $schema: "http://cyclonedx.org/schema/bom-1.6.schema.json",
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: {
+      timestamp: "2026-08-06T00:00:00Z",
+      tools: [{ name: "test-tool", version: "1.0.0" }],
+    },
+    components: [],
+    ...overrides,
+  };
+}
+
 describe("validateCycloneDX", () => {
   it("有效 CycloneDX 1.6 文档 → passed", () => {
     const result = validateCycloneDX({
-      document: {
-        bomFormat: "CycloneDX",
-        specVersion: "1.6",
-        metadata: { component: {} },
-        components: [],
+      document: buildMinimalDoc({
         dependencies: [{ ref: "pkg:npm/a@1.0" }],
-      },
+      }),
     });
     expect(result.status).toBe("passed");
     expect(result.bomFormat).toBe("CycloneDX");
@@ -24,13 +36,11 @@ describe("validateCycloneDX", () => {
 
   it("有效 CycloneDX 1.7 文档 → passed", () => {
     const result = validateCycloneDX({
-      document: {
-        bomFormat: "CycloneDX",
+      document: buildMinimalDoc({
         specVersion: "1.7",
-        metadata: {},
-        components: [{ name: "foo", version: "1.0" }],
+        components: [{ type: "library", name: "foo", version: "1.0" }],
         dependencies: [{ ref: "pkg:npm/foo@1.0" }],
-      },
+      }),
     });
     expect(result.status).toBe("passed");
     expect(result.specVersion).toBe("1.7");
@@ -38,12 +48,9 @@ describe("validateCycloneDX", () => {
 
   it("缺依赖图 → indeterminate", () => {
     const result = validateCycloneDX({
-      document: {
-        bomFormat: "CycloneDX",
-        specVersion: "1.6",
-        metadata: {},
-        components: [{ name: "foo" }],
-      },
+      document: buildMinimalDoc({
+        components: [{ type: "library", name: "foo" }],
+      }),
     });
     expect(result.status).toBe("indeterminate");
     expect(result.hasDependencyGraph).toBe(false);
@@ -51,12 +58,7 @@ describe("validateCycloneDX", () => {
 
   it("不支持的 specVersion → failed", () => {
     const result = validateCycloneDX({
-      document: {
-        bomFormat: "CycloneDX",
-        specVersion: "1.4",
-        metadata: {},
-        components: [],
-      },
+      document: buildMinimalDoc({ specVersion: "1.4" }),
     });
     expect(result.status).toBe("failed");
     expect(result.failureReasons).toBeDefined();
@@ -81,13 +83,10 @@ describe("validateCycloneDX", () => {
 
   it("自定义 allowedVersions", () => {
     const result = validateCycloneDX({
-      document: {
-        bomFormat: "CycloneDX",
+      document: buildMinimalDoc({
         specVersion: "1.5",
-        metadata: {},
-        components: [],
         dependencies: [{ ref: "pkg:npm/a@1.0" }],
-      },
+      }),
       allowedVersions: ["1.5", "1.6"],
     });
     expect(result.status).toBe("passed");
@@ -95,18 +94,16 @@ describe("validateCycloneDX", () => {
 
   it("components 带 SPDX license", () => {
     const result = validateCycloneDX({
-      document: {
-        bomFormat: "CycloneDX",
-        specVersion: "1.6",
-        metadata: {},
+      document: buildMinimalDoc({
         components: [
           {
+            type: "library",
             name: "foo",
             licenses: [{ license: { id: "MIT" } }],
           },
         ],
         dependencies: [{ ref: "pkg:npm/foo@1.0" }],
-      },
+      }),
     });
     expect(result.status).toBe("passed");
     expect(result.allLicensesSpdx).toBe(true);
@@ -115,13 +112,9 @@ describe("validateCycloneDX", () => {
   // ─── §8.3: JSON Schema 验证 ──────────────────────────────
   it("有效文档 → passed + schemaValid=true", () => {
     const result = validateCycloneDX({
-      document: {
-        bomFormat: "CycloneDX",
-        specVersion: "1.6",
-        metadata: {},
-        components: [],
+      document: buildMinimalDoc({
         dependencies: [{ ref: "pkg:npm/a@1.0" }],
-      },
+      }),
     });
     expect(result.status).toBe("passed");
     expect(result.schemaValid).toBe(true);
@@ -137,17 +130,13 @@ describe("validateCycloneDX", () => {
     expect(result.schemaValid).toBe(false);
   });
 
-  it("Schema 验证始终执行", () => {
+  it("Schema 验证始终执行（passed 时 schemaValid=true）", () => {
     const result = validateCycloneDX({
-      document: {
-        bomFormat: "CycloneDX",
-        specVersion: "1.6",
-        metadata: {},
-        components: [],
+      document: buildMinimalDoc({
         dependencies: [{ ref: "pkg:npm/a@1.0" }],
-      },
+      }),
     });
     expect(result.status).toBe("passed");
-    expect(result.schemaValid).toBeUndefined();
+    expect(result.schemaValid).toBe(true);
   });
 });

@@ -101,15 +101,13 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
               | "verified"
               | "failed"
               | "pending",
-            attestationFormat: (row.attestation.attestationFormat ?? "legacy_custom") as
-              | "legacy_custom"
-              | "in_toto_dsse"
-              | "sigstore_bundle",
+            attestationFormat: (row.attestation.attestationFormat ?? "in_toto_dsse") as
+              | "in_toto_dsse",
             verifiedAt: row.attestation.verifiedAt,
             revokedAt: row.attestation.revokedAt,
             revocationRecordId: row.revocation?.id ?? null,
             verificationPolicyRevisionId: row.attestation.policyRevisionId ?? null,
-            bundleDigest: row.attestation.signatureBundleRef ?? null,
+            envelopeDigest: row.attestation.bundleDigest ?? null,
           };
         },
         /**

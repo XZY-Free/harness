@@ -78,8 +78,8 @@ export async function loadArtifactEvidenceSnapshot(params: {
     verifiedAt: att.verifiedAt,
     revokedAt: null, // 已过滤无撤销记录
     revocationRecordId: null,
-    verificationPolicyRevisionId: att.verificationPolicyRevisionId,
-    bundleDigest: att.bundleDigest,
+    verificationPolicyRevisionId: att.policyRevisionId,
+    envelopeDigest: att.bundleDigest,
   };
 }
 

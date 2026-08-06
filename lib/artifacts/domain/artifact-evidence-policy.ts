@@ -40,10 +40,9 @@ export interface ArtifactEvidencePolicyConfig {
 }
 
 const DEFAULT_CONFIG: ArtifactEvidencePolicyConfig = {
-  // 过渡期：legacy_custom 仍允许，正式后收紧
-  allowedFormatsForPublication: ["legacy_custom", "in_toto_dsse", "sigstore_bundle"],
-  allowedFormatsForRouteActivation: ["legacy_custom", "in_toto_dsse", "sigstore_bundle"],
-  allowedFormatsForExecution: ["in_toto_dsse", "sigstore_bundle"],
+  allowedFormatsForPublication: ["in_toto_dsse"],
+  allowedFormatsForRouteActivation: ["in_toto_dsse"],
+  allowedFormatsForExecution: ["in_toto_dsse"],
 };
 
 // ─── 基础规则 ────────────────────────────────────────────
@@ -174,7 +173,6 @@ export function createArtifactEvidencePolicy(
      *
      * 供 ExecutionBinding 创建使用。
      * 基础规则 + 格式允许检查。
-     * 正式阶段排除 legacy_custom 格式。
      */
     validateForNewExecution(
       snapshot: ArtifactEvidenceSnapshot,

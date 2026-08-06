@@ -13,6 +13,7 @@
  */
 
 import Ajv from "ajv";
+import addFormats from "ajv-formats";
 import cyclonedxSchema from "./schemas/cyclonedx-1.6.schema.json";
 
 /** CycloneDX 验证输入。 */
@@ -46,7 +47,28 @@ export interface ValidateCycloneDXResult {
 const DEFAULT_ALLOWED_VERSIONS = ["1.6", "1.7"];
 
 // 初始化 Ajv + CycloneDX Schema 编译（模块级单例）
+// CycloneDX 1.6 schema 引用外部 spdx / jsf-0.82 / model_card schema；
+// 提供宽松 stub（含 referenced definitions）以完成编译。
+// Phase 2 业务 Policy 仍会校验 bomFormat / specVersion / metadata 等关键字段。
 const ajv = new Ajv({ strict: false });
+addFormats(ajv);
+// CycloneDX schema 使用 iri-reference / idn-email 格式，ajv-formats 未内置
+ajv.addFormat("iri-reference", /^.{1,}$/);
+ajv.addFormat("idn-email", /^[^\s@]+@[^\s@]+\.[^\s@]+$/);
+ajv.addSchema({
+  $id: "http://cyclonedx.org/schema/spdx.schema.json",
+  description: "stub for external CycloneDX SPDX $ref",
+  oneOf: [{ type: "string" }, { type: "object", properties: { expression: { type: "string" }, id: { type: "string" } } }],
+});
+ajv.addSchema({
+  $id: "http://cyclonedx.org/schema/jsf-0.82.schema.json",
+  description: "stub for external CycloneDX JSF $ref",
+  definitions: { signature: {} },
+});
+ajv.addSchema({
+  $id: "http://cyclonedx.org/schema/model_card.schema.json",
+  description: "stub for external CycloneDX model_card $ref",
+});
 const validateCycloneDXSchema = ajv.compile(cyclonedxSchema);
 
 /**

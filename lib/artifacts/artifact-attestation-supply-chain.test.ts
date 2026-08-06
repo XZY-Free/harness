@@ -12,17 +12,21 @@
  *
  * 真实签名（ed25519）+ InMemoryManagedArtifactStore，复用 artifact-attestation.test.ts 的辅助模式。
  */
-import { type KeyObject, generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
   type ProvenanceDocument,
   type SbomDocument,
-  type SignatureBundle,
   type VerifyAttestationInput,
   computeArtifactDigest,
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
+import {
+  buildDsseArtifactAttestationEnvelope,
+  generateTestBuilderKey,
+  type TestBuilderKey,
+} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import {
   AttestationAlreadyRevokedError,
   AttestationNotFoundError,
@@ -63,12 +67,12 @@ afterEach(() => {
 // ─── 辅助：InMemoryManagedArtifactStore（与 artifact-attestation.test.ts 一致） ──
 
 class InMemoryManagedArtifactStore implements ManagedArtifactStore {
-  private signatures = new Map<string, SignatureBundle>();
+  private envelopes = new Map<string, Buffer>();
   private sboms = new Map<string, SbomDocument>();
   private provenances = new Map<string, ProvenanceDocument>();
 
-  writeSignatureBundle(ref: string, bundle: SignatureBundle): void {
-    this.signatures.set(ref, bundle);
+  writeDsseEnvelope(ref: string, envelope: Buffer): void {
+    this.envelopes.set(ref, envelope);
   }
   writeSbom(ref: string, doc: SbomDocument): void {
     this.sboms.set(ref, doc);
@@ -77,10 +81,10 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
     this.provenances.set(ref, doc);
   }
 
-  async readSignatureBundle(ref: string): Promise<SignatureBundle> {
-    const bundle = this.signatures.get(ref);
-    if (!bundle) throw new Error(`signature bundle not found: ${ref}`);
-    return bundle;
+  async readDsseEnvelope(ref: string): Promise<Buffer> {
+    const envelope = this.envelopes.get(ref);
+    if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
+    return envelope;
   }
   async readSbom(ref: string): Promise<SbomDocument> {
     const doc = this.sboms.get(ref);
@@ -94,37 +98,7 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
   }
 }
 
-// ─── 辅助：ed25519 密钥对 + 签名 ───────────────────────────
-
-interface BuilderKeyPair {
-  builderIdentity: string;
-  publicKeyBase64: string;
-  privateKey: KeyObject;
-}
-
-function generateBuilderKeyPair(builderIdentity: string): BuilderKeyPair {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const der = publicKey.export({ type: "spki", format: "der" });
-  const rawPublicKey = Buffer.from(der.subarray(der.length - 32));
-  return {
-    builderIdentity,
-    publicKeyBase64: rawPublicKey.toString("base64"),
-    privateKey,
-  };
-}
-
-function signEd25519(privateKey: BuilderKeyPair["privateKey"], payload: string): string {
-  const sig = sign(null, Buffer.from(payload, "utf-8"), privateKey);
-  return sig.toString("base64");
-}
-
-function buildValidSignatureBundle(keyPair: BuilderKeyPair, digest: string): SignatureBundle {
-  return {
-    algorithm: "ed25519",
-    publicKey: keyPair.publicKeyBase64,
-    signature: signEd25519(keyPair.privateKey, digest),
-  };
-}
+// ─── 辅助：ed25519 密钥对 + DSSE Envelope（来自 test-support） ──
 
 function buildCleanSbom(): SbomDocument {
   return {
@@ -176,16 +150,16 @@ async function createVerifiedAttestation(
   artifactContent: string,
   builderIdentity = "builder:company-agent-runtime",
   actor: AuditActor = buildActor(tenantId, "ci-service-001"),
-): Promise<{ attestation: ArtifactAttestation; keyPair: BuilderKeyPair; digest: string }> {
-  const keyPair = generateBuilderKeyPair(builderIdentity);
+): Promise<{ attestation: ArtifactAttestation; keyPair: TestBuilderKey; digest: string }> {
+  const keyPair = generateTestBuilderKey(builderIdentity);
   const builderKeys: BuilderKeyRegistry = { [builderIdentity]: keyPair.publicKeyBase64 };
   const digest = computeArtifactDigest(artifactContent);
-  const signatureBundleRef = `attestation:signature:${digest.slice(7, 19)}`;
+  const dsseEnvelopeRef = `attestation:signature:${digest.slice(7, 19)}`;
   const sbomRef = `attestation:sbom:${digest.slice(7, 19)}`;
   const provenanceRef = `attestation:provenance:${digest.slice(7, 19)}`;
 
   const store = new InMemoryManagedArtifactStore();
-  store.writeSignatureBundle(signatureBundleRef, buildValidSignatureBundle(keyPair, digest));
+  store.writeDsseEnvelope(dsseEnvelopeRef, buildDsseArtifactAttestationEnvelope(keyPair, digest));
   store.writeSbom(sbomRef, buildCleanSbom());
   store.writeProvenance(provenanceRef, buildValidProvenance());
 
@@ -194,7 +168,7 @@ async function createVerifiedAttestation(
     artifactType,
     artifactRevisionId,
     artifactDigest: digest,
-    signatureBundleRef,
+    dsseEnvelopeRef,
     sbomRef,
     provenanceRef,
     builderIdentity,
@@ -264,18 +238,19 @@ describe("S12-W04 provenance 摘要持久化", () => {
   });
 
   it("验证失败记录不持久化 provenance 摘要（failureCode 写入但 provenance 字段为 null）", async () => {
-    const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
+    const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
     const builderKeys: BuilderKeyRegistry = {
       "builder:company-agent-runtime": keyPair.publicKeyBase64,
     };
     const digest = computeArtifactDigest("failure content");
     const store = new InMemoryManagedArtifactStore();
-    // 故意用错误 payload 签名 → 验签失败
-    store.writeSignatureBundle("attestation:signature:fail", {
-      algorithm: "ed25519",
-      publicKey: keyPair.publicKeyBase64,
-      signature: signEd25519(keyPair.privateKey, "sha256:wrong"),
-    });
+    // 故意用错误 subject digest → 验签失败
+    store.writeDsseEnvelope(
+      "attestation:signature:fail",
+      buildDsseArtifactAttestationEnvelope(keyPair, digest, {
+        subjectDigest: "sha256:wrong",
+      }),
+    );
     store.writeSbom("attestation:sbom:fail", buildCleanSbom());
     store.writeProvenance("attestation:provenance:fail", buildValidProvenance());
 
@@ -284,7 +259,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
       artifactType: "agent_revision",
       artifactRevisionId: "rev-fail-1",
       artifactDigest: digest,
-      signatureBundleRef: "attestation:signature:fail",
+      dsseEnvelopeRef: "attestation:signature:fail",
       sbomRef: "attestation:sbom:fail",
       provenanceRef: "attestation:provenance:fail",
       builderIdentity: "builder:company-agent-runtime",
@@ -308,15 +283,15 @@ describe("S12-W04 provenance 摘要持久化", () => {
   });
 
   it("verifyArtifactAttestation 成功返回 provenanceSummary 与 scanSummary", async () => {
-    const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
+    const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
     const builderKeys: BuilderKeyRegistry = {
       "builder:company-agent-runtime": keyPair.publicKeyBase64,
     };
     const digest = computeArtifactDigest("pure-logic content");
     const store = new InMemoryManagedArtifactStore();
-    store.writeSignatureBundle(
+    store.writeDsseEnvelope(
       "attestation:signature:pure",
-      buildValidSignatureBundle(keyPair, digest),
+      buildDsseArtifactAttestationEnvelope(keyPair, digest),
     );
     store.writeSbom("attestation:sbom:pure", buildCleanSbom());
     store.writeProvenance("attestation:provenance:pure", buildValidProvenance());
@@ -327,7 +302,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
         artifactType: "agent_revision",
         artifactRevisionId: "rev-pure-1",
         artifactDigest: digest,
-        signatureBundleRef: "attestation:signature:pure",
+        dsseEnvelopeRef: "attestation:signature:pure",
         sbomRef: "attestation:sbom:pure",
         provenanceRef: "attestation:provenance:pure",
         builderIdentity: "builder:company-agent-runtime",
@@ -451,7 +426,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
         artifactType: "agent_revision",
         artifactRevisionId: `rev-list-${i}`,
         artifactDigest: digest,
-        signatureBundleRef: `attestation:signature:list-${i}`,
+        dsseEnvelopeRef: `attestation:signature:list-${i}`,
         sbomRef: `attestation:sbom:list-${i}`,
         provenanceRef: `attestation:provenance:list-${i}`,
         builderIdentity: "builder:company-agent-runtime",
@@ -467,7 +442,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
       artifactType: "agent_revision",
       artifactRevisionId: "rev-list-latest",
       artifactDigest: digest,
-      signatureBundleRef: "attestation:signature:list-latest",
+      dsseEnvelopeRef: "attestation:signature:list-latest",
       sbomRef: "attestation:sbom:list-latest",
       provenanceRef: "attestation:provenance:list-latest",
       builderIdentity: "builder:company-agent-runtime",
@@ -491,7 +466,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
         artifactType: "agent_revision",
         artifactRevisionId: `rev-page-${i}`,
         artifactDigest: digest,
-        signatureBundleRef: `attestation:signature:page-${i}`,
+        dsseEnvelopeRef: `attestation:signature:page-${i}`,
         sbomRef: `attestation:sbom:page-${i}`,
         provenanceRef: `attestation:provenance:page-${i}`,
         builderIdentity: "builder:company-agent-runtime",
@@ -513,7 +488,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
       artifactType: "agent_revision",
       artifactRevisionId: "rev-filter-1",
       artifactDigest: digest,
-      signatureBundleRef: "attestation:signature:f1",
+      dsseEnvelopeRef: "attestation:signature:f1",
       sbomRef: "attestation:sbom:f1",
       provenanceRef: "attestation:provenance:f1",
       builderIdentity: "builder:company-agent-runtime",
@@ -525,7 +500,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
       artifactType: "runtime_revision",
       artifactRevisionId: "rev-filter-2",
       artifactDigest: digest,
-      signatureBundleRef: "attestation:signature:f2",
+      dsseEnvelopeRef: "attestation:signature:f2",
       sbomRef: "attestation:sbom:f2",
       provenanceRef: "attestation:provenance:f2",
       builderIdentity: "builder:company-agent-runtime",
@@ -548,7 +523,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
       artifactType: "agent_revision",
       artifactRevisionId: "rev-state-1",
       artifactDigest: digest,
-      signatureBundleRef: "attestation:signature:s1",
+      dsseEnvelopeRef: "attestation:signature:s1",
       sbomRef: "attestation:sbom:s1",
       provenanceRef: "attestation:provenance:s1",
       builderIdentity: "builder:company-agent-runtime",
@@ -560,7 +535,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
       artifactType: "agent_revision",
       artifactRevisionId: "rev-state-2",
       artifactDigest: digest,
-      signatureBundleRef: "attestation:signature:s2",
+      dsseEnvelopeRef: "attestation:signature:s2",
       sbomRef: "attestation:sbom:s2",
       provenanceRef: "attestation:provenance:s2",
       builderIdentity: "builder:company-agent-runtime",
@@ -619,7 +594,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
       artifactType: "agent_revision",
       artifactRevisionId: "rev-iso-1",
       artifactDigest: computeArtifactDigest("iso"),
-      signatureBundleRef: "attestation:signature:iso",
+      dsseEnvelopeRef: "attestation:signature:iso",
       sbomRef: "attestation:sbom:iso",
       provenanceRef: "attestation:provenance:iso",
       builderIdentity: "builder:company-agent-runtime",

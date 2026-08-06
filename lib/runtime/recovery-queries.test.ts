@@ -6,10 +6,13 @@ import {
   type ManagedArtifactStore,
   type ProvenanceDocument,
   type SbomDocument,
-  type SignatureBundle,
   type VerifyAttestationInput,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
+import {
+  buildDsseArtifactAttestationEnvelope,
+  generateTestBuilderKey,
+} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { createThread } from "@/lib/conversations/thread-queries";
 /**
@@ -75,12 +78,12 @@ afterEach(() => {
 // ─── 辅助：InMemoryManagedArtifactStore（与 command-dispatcher.test.ts 一致） ──
 
 class InMemoryManagedArtifactStore implements ManagedArtifactStore {
-  private signatures = new Map<string, SignatureBundle>();
+  private envelopes = new Map<string, Buffer>();
   private sboms = new Map<string, SbomDocument>();
   private provenances = new Map<string, ProvenanceDocument>();
 
-  writeSignatureBundle(ref: string, bundle: SignatureBundle): void {
-    this.signatures.set(ref, bundle);
+  writeDsseEnvelope(ref: string, envelope: Buffer): void {
+    this.envelopes.set(ref, envelope);
   }
   writeSbom(ref: string, doc: SbomDocument): void {
     this.sboms.set(ref, doc);
@@ -89,10 +92,10 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
     this.provenances.set(ref, doc);
   }
 
-  async readSignatureBundle(ref: string): Promise<SignatureBundle> {
-    const bundle = this.signatures.get(ref);
-    if (!bundle) throw new Error(`signature bundle not found: ${ref}`);
-    return bundle;
+  async readDsseEnvelope(ref: string): Promise<Buffer> {
+    const envelope = this.envelopes.get(ref);
+    if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
+    return envelope;
   }
   async readSbom(ref: string): Promise<SbomDocument> {
     const doc = this.sboms.get(ref);
@@ -155,25 +158,20 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     createdBy: ownerId,
   });
 
-  // 创建 attestation（简化：跳过真实签名，直接使用 verifyAndPersistAttestation）
-  const { generateKeyPairSync, sign } = await import("node:crypto");
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const der = publicKey.export({ type: "spki", format: "der" });
-  const rawPublicKey = Buffer.from(der.subarray(der.length - 32));
-  const publicKeyBase64 = rawPublicKey.toString("base64");
+  // 创建 attestation（DSSE Envelope + 真实 ed25519 签名）
+  const builderKey = generateTestBuilderKey("builder:recovery");
+  const publicKeyBase64 = builderKey.publicKeyBase64;
   const content = "agent-content-recovery-v1";
   const digest = computeArtifactDigest(content);
-  const sigRef = "attestation:signature:recovery-v1";
+  const dsseEnvelopeRef = "attestation:signature:recovery-v1";
   const sbomRef = "attestation:sbom:recovery-v1";
   const provRef = "attestation:provenance:recovery-v1";
 
   const store = new InMemoryManagedArtifactStore();
-  const sig = sign(null, Buffer.from(digest, "utf-8"), privateKey);
-  store.writeSignatureBundle(sigRef, {
-    algorithm: "ed25519",
-    publicKey: publicKeyBase64,
-    signature: sig.toString("base64"),
-  });
+  store.writeDsseEnvelope(
+    dsseEnvelopeRef,
+    buildDsseArtifactAttestationEnvelope(builderKey, digest),
+  );
   store.writeSbom(sbomRef, {
     packages: [{ name: "lodash", version: "4.17.21", licenses: ["MIT"], vulnerabilities: [] }],
   });
@@ -193,7 +191,7 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     artifactType: "agent_revision",
     artifactRevisionId: agentRevision.id,
     artifactDigest: digest,
-    signatureBundleRef: sigRef,
+    dsseEnvelopeRef,
     sbomRef,
     provenanceRef: provRef,
     builderIdentity: "builder:recovery",
@@ -223,18 +221,16 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     createdBy: ownerId,
   });
 
-  // Runtime attestation
+  // Runtime attestation（DSSE Envelope，复用同一 builderKey）
   const rtContent = "runtime-content-recovery-v1";
   const rtDigest = computeArtifactDigest(rtContent);
-  const rtSigRef = "attestation:signature:rt-recovery-v1";
+  const rtDsseEnvelopeRef = "attestation:signature:rt-recovery-v1";
   const rtSbomRef = "attestation:sbom:rt-recovery-v1";
   const rtProvRef = "attestation:provenance:rt-recovery-v1";
-  const rtSig = sign(null, Buffer.from(rtDigest, "utf-8"), privateKey);
-  store.writeSignatureBundle(rtSigRef, {
-    algorithm: "ed25519",
-    publicKey: publicKeyBase64,
-    signature: rtSig.toString("base64"),
-  });
+  store.writeDsseEnvelope(
+    rtDsseEnvelopeRef,
+    buildDsseArtifactAttestationEnvelope(builderKey, rtDigest),
+  );
   store.writeSbom(rtSbomRef, {
     packages: [{ name: "lodash", version: "4.17.21", licenses: ["MIT"], vulnerabilities: [] }],
   });
@@ -250,7 +246,7 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     artifactType: "runtime_revision",
     artifactRevisionId: runtimeRevision.id,
     artifactDigest: rtDigest,
-    signatureBundleRef: rtSigRef,
+    dsseEnvelopeRef: rtDsseEnvelopeRef,
     sbomRef: rtSbomRef,
     provenanceRef: rtProvRef,
     builderIdentity: "builder:recovery",

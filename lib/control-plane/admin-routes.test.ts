@@ -10,7 +10,7 @@
  * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { type KeyObject, createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash } from "node:crypto";
 import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]:publish/route";
 import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations:verify/route";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
@@ -26,9 +26,13 @@ import {
   type ManagedArtifactStore,
   type ProvenanceDocument,
   type SbomDocument,
-  type SignatureBundle,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
+import {
+  buildDsseArtifactAttestationEnvelope,
+  generateTestBuilderKey,
+  type TestBuilderKey,
+} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import {
   resetArtifactStoreOverrides,
   setArtifactStoreOverride,
@@ -74,12 +78,12 @@ afterEach(() => {
 // ─── 辅助：InMemoryManagedArtifactStore ────────────────────
 
 class InMemoryManagedArtifactStore implements ManagedArtifactStore {
-  private signatures = new Map<string, SignatureBundle>();
+  private envelopes = new Map<string, Buffer>();
   private sboms = new Map<string, SbomDocument>();
   private provenances = new Map<string, ProvenanceDocument>();
 
-  writeSignatureBundle(ref: string, bundle: SignatureBundle): void {
-    this.signatures.set(ref, bundle);
+  writeDsseEnvelope(ref: string, envelope: Buffer): void {
+    this.envelopes.set(ref, envelope);
   }
   writeSbom(ref: string, doc: SbomDocument): void {
     this.sboms.set(ref, doc);
@@ -88,10 +92,10 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
     this.provenances.set(ref, doc);
   }
 
-  async readSignatureBundle(ref: string): Promise<SignatureBundle> {
-    const bundle = this.signatures.get(ref);
-    if (!bundle) throw new Error(`signature bundle not found: ${ref}`);
-    return bundle;
+  async readDsseEnvelope(ref: string): Promise<Buffer> {
+    const envelope = this.envelopes.get(ref);
+    if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
+    return envelope;
   }
   async readSbom(ref: string): Promise<SbomDocument> {
     const doc = this.sboms.get(ref);
@@ -105,33 +109,7 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
   }
 }
 
-// ─── 辅助：ed25519 密钥对 + 签名 ───────────────────────────
-
-interface BuilderKeyPair {
-  builderIdentity: string;
-  publicKeyBase64: string;
-  privateKey: KeyObject;
-}
-
-function generateBuilderKeyPair(builderIdentity: string): BuilderKeyPair {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const der = publicKey.export({ type: "spki", format: "der" });
-  const rawPublicKey = Buffer.from(der.subarray(der.length - 32));
-  return { builderIdentity, publicKeyBase64: rawPublicKey.toString("base64"), privateKey };
-}
-
-function signEd25519(privateKey: KeyObject, payload: string): string {
-  const sig = sign(null, Buffer.from(payload, "utf-8"), privateKey);
-  return sig.toString("base64");
-}
-
-function buildValidSignatureBundle(keyPair: BuilderKeyPair, digest: string): SignatureBundle {
-  return {
-    algorithm: "ed25519",
-    publicKey: keyPair.publicKeyBase64,
-    signature: signEd25519(keyPair.privateKey, digest),
-  };
-}
+// ─── 辅助：ed25519 密钥对 + DSSE Envelope（来自 test-support） ──
 
 function buildCleanSbom(): SbomDocument {
   return {
@@ -200,7 +178,7 @@ async function createVerifiedAttestationDirect(
   artifactRevisionId: string,
   artifactContent: string,
 ): Promise<string> {
-  const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
+  const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
   const builderKeys: BuilderKeyRegistry = {
     "builder:company-agent-runtime": keyPair.publicKeyBase64,
   };
@@ -209,7 +187,7 @@ async function createVerifiedAttestationDirect(
   const sbomRef = `attestation:sbom:${digest.slice(7, 15)}`;
   const provRef = `attestation:provenance:${digest.slice(7, 15)}`;
   const store = new InMemoryManagedArtifactStore();
-  store.writeSignatureBundle(sigRef, buildValidSignatureBundle(keyPair, digest));
+  store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest));
   store.writeSbom(sbomRef, buildCleanSbom());
   store.writeProvenance(provRef, buildValidProvenance());
   const attestation = await verifyAndPersistAttestation(
@@ -218,7 +196,7 @@ async function createVerifiedAttestationDirect(
       artifactType,
       artifactRevisionId,
       artifactDigest: digest,
-      signatureBundleRef: sigRef,
+      dsseEnvelopeRef: sigRef,
       sbomRef,
       provenanceRef: provRef,
       builderIdentity: "builder:company-agent-runtime",
@@ -353,7 +331,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     });
 
     // 准备 store override + builder keys override
-    const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
+    const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
     const builderKeys: BuilderKeyRegistry = {
       "builder:company-agent-runtime": keyPair.publicKeyBase64,
     };
@@ -362,7 +340,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const sbomRef = `attestation:sbom:${digest.slice(7, 15)}`;
     const provRef = `attestation:provenance:${digest.slice(7, 15)}`;
     const store = new InMemoryManagedArtifactStore();
-    store.writeSignatureBundle(sigRef, buildValidSignatureBundle(keyPair, digest));
+    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest));
     store.writeSbom(sbomRef, buildCleanSbom());
     store.writeProvenance(provRef, buildValidProvenance());
     setArtifactStoreOverride(store);
@@ -377,7 +355,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
         artifact_type: "agent_revision",
         artifact_revision_id: draftRevision.id,
         artifact_digest: digest,
-        signature_bundle_ref: sigRef,
+        dsse_envelope_ref: sigRef,
         sbom_ref: sbomRef,
         provenance_ref: provRef,
         builder_identity: "builder:company-agent-runtime",
@@ -405,7 +383,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
         artifact_type: "agent_revision",
         artifact_revision_id: "rev-1",
         artifact_digest: digest,
-        signature_bundle_ref: "attestation:signature:x",
+        dsse_envelope_ref: "attestation:signature:x",
         sbom_ref: "attestation:sbom:x",
         provenance_ref: "attestation:provenance:x",
         builder_identity: "builder:company-agent-runtime",
@@ -420,8 +398,8 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
 
   it("验证失败 → 422 ARTIFACT_ATTESTATION_FAILED", async () => {
     // 用错误的密钥签名 → 验签失败
-    const goodKeyPair = generateBuilderKeyPair("builder:company-agent-runtime");
-    const badKeyPair = generateBuilderKeyPair("builder:attacker");
+    const goodKeyPair = generateTestBuilderKey("builder:company-agent-runtime");
+    const badKeyPair = generateTestBuilderKey("builder:attacker");
     const builderKeys: BuilderKeyRegistry = {
       "builder:company-agent-runtime": goodKeyPair.publicKeyBase64,
     };
@@ -431,7 +409,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const provRef = "attestation:provenance:bad";
     const store = new InMemoryManagedArtifactStore();
     // 用 badKeyPair 签名（公钥与白名单不一致）
-    store.writeSignatureBundle(sigRef, buildValidSignatureBundle(badKeyPair, digest));
+    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(badKeyPair, digest));
     store.writeSbom(sbomRef, buildCleanSbom());
     store.writeProvenance(provRef, buildValidProvenance());
     setArtifactStoreOverride(store);
@@ -441,7 +419,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
       artifact_type: "agent_revision",
       artifact_revision_id: "rev-bad-sig",
       artifact_digest: digest,
-      signature_bundle_ref: sigRef,
+      dsse_envelope_ref: sigRef,
       sbom_ref: sbomRef,
       provenance_ref: provRef,
       builder_identity: "builder:company-agent-runtime",
@@ -479,7 +457,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
   });
 
   it("幂等重放 → 200 (same response)", async () => {
-    const keyPair = generateBuilderKeyPair("builder:company-agent-runtime");
+    const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
     const builderKeys: BuilderKeyRegistry = {
       "builder:company-agent-runtime": keyPair.publicKeyBase64,
     };
@@ -488,7 +466,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const sbomRef = "attestation:sbom:replay";
     const provRef = "attestation:provenance:replay";
     const store = new InMemoryManagedArtifactStore();
-    store.writeSignatureBundle(sigRef, buildValidSignatureBundle(keyPair, digest));
+    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest));
     store.writeSbom(sbomRef, buildCleanSbom());
     store.writeProvenance(provRef, buildValidProvenance());
     setArtifactStoreOverride(store);
@@ -498,7 +476,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
       artifact_type: "agent_revision",
       artifact_revision_id: "rev-replay",
       artifact_digest: digest,
-      signature_bundle_ref: sigRef,
+      dsse_envelope_ref: sigRef,
       sbom_ref: sbomRef,
       provenance_ref: provRef,
       builder_identity: "builder:company-agent-runtime",

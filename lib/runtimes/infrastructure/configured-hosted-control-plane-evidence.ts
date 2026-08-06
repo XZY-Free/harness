@@ -3,7 +3,6 @@ import type {
   ManagedArtifactStore,
   ProvenanceDocument,
   SbomDocument,
-  SignatureBundle,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import { hostedControlPlaneConfig } from "@/lib/config";
 import type {
@@ -41,7 +40,7 @@ export function createConfiguredHostedControlPlaneEvidenceProvider(dependencies:
       return {
         artifactDigest: requireString(payload, "artifact_digest"),
         artifactRef: requireString(payload, "artifact_ref"),
-        signatureBundleRef: requireString(payload, "signature_bundle_ref"),
+        dsseEnvelopeRef: requireString(payload, "dsse_envelope_ref"),
         sbomRef: requireString(payload, "sbom_ref"),
         provenanceRef: requireString(payload, "provenance_ref"),
         builderIdentity: requireString(payload, "builder_identity"),
@@ -93,13 +92,10 @@ function createHttpManagedArtifactStore(
   }
 
   return {
-    async readSignatureBundle(ref): Promise<SignatureBundle> {
-      const document = await readDocument(ref, "signature_bundle");
-      return {
-        algorithm: requireString(document, "algorithm"),
-        publicKey: requireString(document, "publicKey"),
-        signature: requireString(document, "signature"),
-      } as SignatureBundle;
+    async readDsseEnvelope(ref): Promise<Buffer> {
+      const document = await readDocument(ref, "dsse_envelope");
+      const envelopeJson = JSON.stringify(document);
+      return Buffer.from(envelopeJson, "utf-8");
     },
     async readSbom(ref): Promise<SbomDocument> {
       const document = await readDocument(ref, "sbom");

@@ -52,7 +52,7 @@ export const artifactAttestation = mysqlTable(
     artifactType: varchar("artifactType", { length: 32 }).notNull(),
     artifactRevisionId: varchar("artifactRevisionId", { length: 36 }).notNull(),
     artifactDigest: varchar("artifactDigest", { length: 128 }).notNull(),
-    signatureBundleRef: varchar("signatureBundleRef", { length: 512 }),
+    dsseEnvelopeRef: varchar("dsseEnvelopeRef", { length: 512 }),
     sbomRef: varchar("sbomRef", { length: 512 }),
     provenanceRef: varchar("provenanceRef", { length: 512 }),
     builderIdentity: varchar("builderIdentity", { length: 256 }),
@@ -66,45 +66,36 @@ export const artifactAttestation = mysqlTable(
     failureCode: varchar("failureCode", { length: 64 }),
     verifiedAt: datetime("verifiedAt", { mode: "date", fsp: 3 }),
 
-    // ─── 第四批新增: Attestation Envelope 标准字段 ──────
+    // ─── DSSE + in-toto 唯一正式协议 ──────
     attestationFormat: mysqlEnum("attestationFormat", [
-      "legacy_custom",
       "in_toto_dsse",
-      "sigstore_bundle",
     ])
       .notNull()
-      .default("legacy_custom"),
+      .default("in_toto_dsse"),
     statementType: varchar("statementType", { length: 128 }),
     predicateType: varchar("predicateType", { length: 256 }),
-    bundleRef: varchar("bundleRef", { length: 512 }),
     bundleDigest: varchar("bundleDigest", { length: 71 }),
     subjectName: varchar("subjectName", { length: 256 }),
     subjectDigest: varchar("subjectDigest", { length: 71 }),
-    signingIdentity: varchar("signingIdentity", { length: 256 }),
-    oidcIssuer: varchar("oidcIssuer", { length: 256 }),
-    certificateFingerprint: varchar("certificateFingerprint", { length: 128 }),
-    transparencyLogId: varchar("transparencyLogId", { length: 128 }),
-    transparencyLogIndex: bigint("transparencyLogIndex", { mode: "number" }),
-    verificationPolicyRevisionId: varchar("verificationPolicyRevisionId", { length: 36 }),
     verificationEngine: varchar("verificationEngine", { length: 64 }),
     verificationEngineVersion: varchar("verificationEngineVersion", { length: 32 }),
-    /** @deprecated 兼容历史行；新撤销不得修改此列。 */
+    /** @deprecated 兼容历史行；新撤销不得修改此列。任务09/10干净基线时删除。 */
     revokedAt: datetime("revokedAt", { mode: "date", fsp: 3 }),
-    /** @deprecated 兼容历史行；新撤销不得修改此列。 */
+    /** @deprecated 兼容历史行；任务09/10干净基线时删除。 */
     revokedBy: varchar("revokedBy", { length: 128 }),
-    /** @deprecated 兼容历史行；新撤销不得修改此列。 */
+    /** @deprecated 兼容历史行；任务09/10干净基线时删除。 */
     revocationReason: text("revocationReason"),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
       .notNull()
       .$defaultFn(() => new Date()),
   },
   (table) => ({
-    tenantTypeRevDigestSigUq: uniqueIndex("ArtifactAttestation_tenant_type_rev_digest_sig_uq").on(
+    tenantTypeRevDigestSigU4Uq: uniqueIndex("ArtifactAttestation_tenant_type_rev_digest_env_uq").on(
       table.tenantId,
       table.artifactType,
       table.artifactRevisionId,
       table.artifactDigest,
-      table.signatureBundleRef,
+      table.dsseEnvelopeRef,
     ),
     artifactIdx: index("ArtifactAttestation_artifact_idx").on(table.artifactId),
     tenantTypeRevStateIdx: index("ArtifactAttestation_tenant_type_rev_state_idx").on(

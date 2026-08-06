@@ -62,7 +62,7 @@ export async function GET(
     artifact_type: attestation.artifactType,
     artifact_revision_id: attestation.artifactRevisionId,
     artifact_digest: attestation.artifactDigest,
-    signature_bundle_ref: attestation.signatureBundleRef,
+    dsse_envelope_ref: attestation.dsseEnvelopeRef,
     sbom_ref: attestation.sbomRef,
     provenance_ref: attestation.provenanceRef,
     builder_identity: attestation.builderIdentity,

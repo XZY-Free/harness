@@ -75,7 +75,7 @@ async function seedPublicationFixture() {
     artifactType: "agent_revision",
     artifactRevisionId: revision.id,
     artifactDigest,
-    signatureBundleRef: "attestation:signature:publication",
+    dsseEnvelopeRef: "attestation:signature:publication",
     sbomRef: "attestation:sbom:publication",
     provenanceRef: "attestation:provenance:publication",
     builderIdentity: "builder:publication-test",

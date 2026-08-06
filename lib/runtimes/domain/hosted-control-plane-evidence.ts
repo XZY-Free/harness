@@ -7,7 +7,7 @@ import type {
 export interface HostedArtifactEvidence {
   artifactDigest: string;
   artifactRef: string;
-  signatureBundleRef: string;
+  dsseEnvelopeRef: string;
   sbomRef: string;
   provenanceRef: string;
   builderIdentity: string;

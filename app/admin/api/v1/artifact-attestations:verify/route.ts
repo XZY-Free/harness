@@ -70,14 +70,14 @@ export const dynamic = "force-dynamic";
  * 请求体 schema。
  *
  * OpenAPI 契约字段：artifact_type, artifact_revision_id, artifact_digest,
- * signature_bundle_ref, sbom_ref, provenance_ref。
+ * dsse_envelope_ref, sbom_ref, provenance_ref。
  * 扩展字段：builder_identity（验证必需）、policy_revision_id（可选）。
  */
 interface VerifyBody {
   artifact_type: string;
   artifact_revision_id: string;
   artifact_digest: string;
-  signature_bundle_ref: string;
+  dsse_envelope_ref: string;
   sbom_ref: string;
   provenance_ref: string;
   builder_identity: string;
@@ -109,7 +109,7 @@ function validateBody(body: unknown): body is VerifyBody {
   if (typeof b.artifact_revision_id !== "string" || b.artifact_revision_id.length === 0)
     return false;
   if (typeof b.artifact_digest !== "string" || b.artifact_digest.length === 0) return false;
-  if (typeof b.signature_bundle_ref !== "string" || b.signature_bundle_ref.length === 0)
+  if (typeof b.dsse_envelope_ref !== "string" || b.dsse_envelope_ref.length === 0)
     return false;
   if (typeof b.sbom_ref !== "string" || b.sbom_ref.length === 0) return false;
   if (typeof b.provenance_ref !== "string" || b.provenance_ref.length === 0) return false;
@@ -158,7 +158,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!validateBody(body)) {
     return schemaInvalidTable(
       requestId,
-      "请求体非法：缺少 artifact_type/artifact_revision_id/artifact_digest/signature_bundle_ref/sbom_ref/provenance_ref/builder_identity",
+      "请求体非法：缺少 artifact_type/artifact_revision_id/artifact_digest/dsse_envelope_ref/sbom_ref/provenance_ref/builder_identity",
     );
   }
 
@@ -225,7 +225,7 @@ export async function POST(request: Request): Promise<Response> {
         artifactType: body.artifact_type,
         artifactRevisionId: body.artifact_revision_id,
         artifactDigest: body.artifact_digest,
-        signatureBundleRef: body.signature_bundle_ref,
+        dsseEnvelopeRef: body.dsse_envelope_ref,
         sbomRef: body.sbom_ref,
         provenanceRef: body.provenance_ref,
         builderIdentity: body.builder_identity,

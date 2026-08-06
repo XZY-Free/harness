@@ -10,7 +10,7 @@
  * - 测试环境通过 setArtifactStoreOverride / setBuilderKeyRegistryOverride 注入真实密钥与产物。
  *
  * 安全边界：
- * - 默认 in-memory store 为空，任何 verify 调用都会因 readSignatureBundle 抛错而 failed（fail-closed）。
+ * - 默认 in-memory store 为空，任何 verify 调用都会因 readDsseEnvelope 抛错而 failed（fail-closed）。
  * - builder 密钥注册表默认为空，任何 builder_identity 都不在白名单（fail-closed）。
  * - override 仅供测试使用；生产环境通过 SNOW_HOSTED_BUILDER_KEYS_JSON 注入。
  */
@@ -19,7 +19,6 @@ import type {
   ManagedArtifactStore,
   ProvenanceDocument,
   SbomDocument,
-  SignatureBundle,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import { hostedControlPlaneConfig } from "@/lib/config";
 
@@ -32,8 +31,8 @@ import { hostedControlPlaneConfig } from "@/lib/config";
  * 测试环境通过 setArtifactStoreOverride 注入填充了产物的 store。
  */
 class EmptyManagedArtifactStore implements ManagedArtifactStore {
-  async readSignatureBundle(_ref: string): Promise<SignatureBundle> {
-    throw new Error(`EmptyManagedArtifactStore: signature bundle not found: ${_ref}`);
+  async readDsseEnvelope(_ref: string): Promise<Buffer> {
+    throw new Error(`EmptyManagedArtifactStore: DSSE envelope not found: ${_ref}`);
   }
   async readSbom(_ref: string): Promise<SbomDocument> {
     throw new Error(`EmptyManagedArtifactStore: sbom not found: ${_ref}`);
