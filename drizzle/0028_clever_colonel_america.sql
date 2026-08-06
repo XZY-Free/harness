@@ -1,1 +1,0 @@
-ALTER TABLE `Thread` ADD `lastMessageId` varchar(36);

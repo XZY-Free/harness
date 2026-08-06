@@ -1,1 +1,0 @@
-ALTER TABLE `ToolRun` ADD `runId` varchar(36);

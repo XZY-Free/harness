@@ -1,1 +1,0 @@
-ALTER TABLE `SkillVersion` ADD `requiredCapabilities` json;

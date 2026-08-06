@@ -1,1 +1,0 @@
-CREATE INDEX `Message_threadId_createdAt_idx` ON `Message` (`threadId`,`createdAt`);

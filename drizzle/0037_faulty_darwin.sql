@@ -1,1 +1,0 @@
-ALTER TABLE `Thread` MODIFY COLUMN `cicdApiToken` text;

@@ -1,1 +1,0 @@
-ALTER TABLE `Thread` ADD `titleUpdatedAt` datetime;
