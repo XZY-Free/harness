@@ -145,32 +145,6 @@ export const mysqlRouteControlStore: RouteControlStore = {
               }
             : null;
         },
-        async hasVerifiedAttestation(params) {
-          const [row] = await tx
-            .select({ id: artifactAttestation.id })
-            .from(artifactAttestation)
-            .innerJoin(artifact, eq(artifact.id, artifactAttestation.artifactId))
-            .leftJoin(
-              attestationRevocationRecord,
-              eq(attestationRevocationRecord.attestationId, artifactAttestation.id),
-            )
-            .where(
-              and(
-                eq(artifactAttestation.tenantId, params.tenantId),
-                eq(artifactAttestation.artifactType, params.artifactType),
-                eq(artifactAttestation.artifactRevisionId, params.revisionId),
-                eq(artifactAttestation.verificationState, "verified"),
-                isNotNull(artifactAttestation.artifactId),
-                eq(artifact.tenantId, params.tenantId),
-                eq(artifact.digest, artifactAttestation.artifactDigest),
-                isNull(artifactAttestation.revokedAt),
-                isNull(attestationRevocationRecord.id),
-              ),
-            )
-            .limit(1)
-            .for("share");
-          return Boolean(row);
-        },
         async findRevisionByContent(routeId, contentDigest) {
           const [row] = await tx
             .select()

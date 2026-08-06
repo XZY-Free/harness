@@ -56,11 +56,7 @@ export interface RouteControlSession {
   ): Promise<{ revision: RouteRevisionRecord; activation: RouteActivationRecord } | null>;
   findAgentRevision(id: string): Promise<PublishedAgentRevision | null>;
   findRuntimeRevision(id: string): Promise<PublishedRuntimeRevision | null>;
-  hasVerifiedAttestation(params: {
-    tenantId: string;
-    artifactType: "agent_revision" | "runtime_revision";
-    revisionId: string;
-  }): Promise<boolean>;
+  /** §03: 已删除 hasVerifiedAttestation — 使用统一 Reader。 */
   findRevisionByContent(
     routeId: string,
     contentDigest: string,

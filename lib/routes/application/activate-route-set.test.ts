@@ -146,14 +146,9 @@ function createMockStore(overrides: {
         listRoutesBySet: vi.fn(async () => existingRoutes),
         findActiveRevision: vi.fn(async () => null),
         findLatestActivation: vi.fn(async () => null),
-        loadRevisionExecutionEvidence: vi.fn(async () => null),
         findIdempotentRouteSetActivation: vi.fn(async () => null),
         findAgentRevision: vi.fn(async (id: string) => agentRevisions.get(id) ?? null),
         findRuntimeRevision: vi.fn(async (id: string) => runtimeRevisions.get(id) ?? null),
-        hasVerifiedAttestation: vi.fn(
-          async (params: { tenantId: string; artifactType: string; revisionId: string }) =>
-            attestationResults.get(`${params.artifactType}:${params.revisionId}`) ?? false,
-        ),
         resolveOrCreateRouteIdentity: vi.fn(
           async (params: { routeSetId: string; routeId?: string; routeKey: string }) => {
             const resolvedId = params.routeId ?? `route-${routeCounter++}`;

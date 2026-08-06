@@ -8,7 +8,12 @@
  * 现有单 Route 服务作为薄适配器委托此服务。
  */
 import { randomUUID } from "node:crypto";
-import { RevisionExecutionEligibilityPolicy } from "@/lib/publications/application/load-revision-execution-evidence";
+import { RevisionExecutionEligibilityPolicy, extractRequiredCapabilities } from "@/lib/control-plane/domain/revision-execution-eligibility";
+import type { RevisionExecutionEvidenceReader } from "@/lib/control-plane/application/revision-execution-evidence-reader";
+import { createMySqlRevisionExecutionEvidenceReader } from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
+import { db } from "@/lib/db/client";
+import { agentRevisionTable } from "@/lib/persistence/schema/agents";
+import { eq } from "drizzle-orm";
 import {
   AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
@@ -94,11 +99,14 @@ export interface ActivateRouteSetCommand {
 
 export function createActivateRouteSet(dependencies: {
   store: RouteSetActivationStore;
+  /** §03: 可选证据 Reader 注入（默认使用 MySQL 实现，测试可注入 mock）。 */
+  evidenceReader?: RevisionExecutionEvidenceReader;
   now?: () => Date;
   newId?: () => string;
 }) {
   const now = dependencies.now ?? (() => new Date());
   const newId = dependencies.newId ?? randomUUID;
+  const evidenceReader = dependencies.evidenceReader ?? createMySqlRevisionExecutionEvidenceReader({ db });
 
   return async function activateRouteSet(
     command: ActivateRouteSetCommand,
@@ -168,62 +176,29 @@ export function createActivateRouteSet(dependencies: {
         }
 
         if (activationState === "active") {
-          // §2.4: 对 active Route 使用完整执行资格检查
-          const evidence = await session.loadRevisionExecutionEvidence({
+          // §03: 使用统一 Reader + Policy 进行完整执行资格检查（删除 hasVerifiedAttestation 旁路）
+          const evidence = await evidenceReader.loadCurrentEvidence({
             tenantId: command.tenantId,
             agentRevisionId: desired.agentRevisionId,
             runtimeRevisionId: desired.runtimeRevisionId,
+            policyRevisionId: desired.policyRevisionId ?? null,
           });
-          if (!evidence) {
-            // 降级：无法加载证据时回退到碎片化检查
-            if (agentRevision.revisionState !== "published") {
-              throw new RevisionNotPublishedError(
-                desired.agentRevisionId,
-                "agent",
-                agentRevision.revisionState,
-              );
-            }
-            if (runtimeRevision.revisionState !== "published") {
-              throw new RevisionNotPublishedError(
-                desired.runtimeRevisionId,
-                "runtime",
-                runtimeRevision.revisionState,
-              );
-            }
-            for (const [artifactType, revisionId] of [
-              ["agent_revision", desired.agentRevisionId],
-              ["runtime_revision", desired.runtimeRevisionId],
-            ] as const) {
-              if (
-                !(await session.hasVerifiedAttestation({
-                  tenantId: command.tenantId,
-                  artifactType,
-                  revisionId,
-                }))
-              ) {
-                throw new ArtifactNotVerifiedForRouteError(revisionId, artifactType);
-              }
-            }
-            const runtimeCapSet = new Set(runtimeRevision.capabilities);
-            const missingCaps = agentRevision.requiredCapabilities.filter(
-              (c) => !runtimeCapSet.has(c),
-            );
-            if (missingCaps.length > 0) {
-              throw new AgentCapabilityUnsupportedError(
-                missingCaps,
-                agentRevision.id,
-                runtimeRevision.id,
-              );
-            }
-          } else {
-            // 使用统一 RevisionExecutionEligibilityPolicy
-            const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
-              evidence,
-              agentRevision.requiredCapabilities,
-            );
-            if (!eligibilityResult.eligible) {
-              throw new RouteExecutionIneligibleError(desired.routeKey, eligibilityResult.errors);
-            }
+          // §03: 使用统一 RevisionExecutionEligibilityPolicy（fail-closed，无降级路径）
+          // 从 DB 读取完整 agentRevision 行以获取 agentInterfaceRequirementsJson
+          const [fullAgentRevision] = await db
+            .select({ agentInterfaceRequirementsJson: agentRevisionTable.agentInterfaceRequirementsJson })
+            .from(agentRevisionTable)
+            .where(eq(agentRevisionTable.id, desired.agentRevisionId))
+            .limit(1);
+          const requiredCapabilities = extractRequiredCapabilities(
+            fullAgentRevision?.agentInterfaceRequirementsJson,
+          );
+          const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
+            evidence,
+            requiredCapabilities,
+          );
+          if (!eligibilityResult.eligible) {
+            throw new RouteExecutionIneligibleError(desired.routeKey, eligibilityResult.errors);
           }
         }
         // §2.4: disabled Route 不检查执行资格，只验证基本存在性（已在上方完成）

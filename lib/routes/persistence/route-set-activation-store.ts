@@ -94,17 +94,7 @@ export interface RouteSetActivationSession {
   } | null>;
   findAgentRevision(id: string): Promise<AgentRevisionSummary | null>;
   findRuntimeRevision(id: string): Promise<RuntimeRevisionSummary | null>;
-  hasVerifiedAttestation(params: {
-    tenantId: string;
-    artifactType: "agent_revision" | "runtime_revision";
-    revisionId: string;
-  }): Promise<boolean>;
-  /** §2.4: 加载 Revision 完整执行资格快照。 */
-  loadRevisionExecutionEvidence(params: {
-    tenantId: string;
-    agentRevisionId: string;
-    runtimeRevisionId: string;
-  }): Promise<import("@/lib/publications/application/load-revision-execution-evidence").RevisionExecutionEvidenceSnapshot | null>;
+  /** §03: 已删除 hasVerifiedAttestation 和 loadRevisionExecutionEvidence — 使用统一 Reader。 */
 
   // ─── 写入 ──────────────────────────────────────────────
   resolveOrCreateRouteIdentity(params: {

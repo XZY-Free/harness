@@ -110,33 +110,6 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
             : null;
         },
 
-        async hasVerifiedAttestation(params) {
-          const [row] = await tx
-            .select({ id: artifactAttestation.id })
-            .from(artifactAttestation)
-            .innerJoin(artifact, eq(artifact.id, artifactAttestation.artifactId))
-            .leftJoin(
-              attestationRevocationRecord,
-              eq(attestationRevocationRecord.attestationId, artifactAttestation.id),
-            )
-            .where(
-              and(
-                eq(artifactAttestation.tenantId, params.tenantId),
-                eq(artifactAttestation.artifactType, params.artifactType),
-                eq(artifactAttestation.artifactRevisionId, params.revisionId),
-                eq(artifactAttestation.verificationState, "verified"),
-                isNotNull(artifactAttestation.artifactId),
-                eq(artifact.tenantId, params.tenantId),
-                eq(artifact.digest, artifactAttestation.artifactDigest),
-                isNull(artifactAttestation.revokedAt),
-                isNull(attestationRevocationRecord.id),
-              ),
-            )
-            .limit(1)
-            .for("share");
-          return Boolean(row);
-        },
-
         async findLatestActivation(routeId) {
           const [row] = await tx
             .select()
@@ -145,56 +118,6 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
             .orderBy(desc(routeActivation.activationSequence))
             .limit(1);
           return row ?? null;
-        },
-
-        async loadRevisionExecutionEvidence(params) {
-          // §2.4: 委托 Phase 1 统一证据读取器构建完整快照
-          const { loadArtifactEvidenceSnapshot } = await import(
-            "@/lib/artifacts/persistence/artifact-evidence-reader"
-          );
-          const { loadActivePublicationSnapshot } = await import(
-            "@/lib/publications/persistence/publication-evidence-reader"
-          );
-
-          const [agentEvidence, runtimeEvidence, agentPub, runtimePub] = await Promise.all([
-            loadArtifactEvidenceSnapshot({
-              tenantId: params.tenantId,
-              artifactType: "agent_revision" as const,
-              artifactRevisionId: params.agentRevisionId,
-            }),
-            loadArtifactEvidenceSnapshot({
-              tenantId: params.tenantId,
-              artifactType: "runtime_revision" as const,
-              artifactRevisionId: params.runtimeRevisionId,
-            }),
-            loadActivePublicationSnapshot({
-              tenantId: params.tenantId,
-              subjectType: "agent_revision" as const,
-              subjectRevisionId: params.agentRevisionId,
-            }),
-            loadActivePublicationSnapshot({
-              tenantId: params.tenantId,
-              subjectType: "runtime_revision" as const,
-              subjectRevisionId: params.runtimeRevisionId,
-            }),
-          ]);
-
-          return {
-            tenantId: params.tenantId,
-            agentRevisionId: params.agentRevisionId,
-            agentArtifactEvidence: agentEvidence,
-            agentPublication: agentPub,
-            agentLifecycleState: "active" as const,
-            agentRevisionState: agentPub ? "published" : "draft",
-            runtimeRevisionId: params.runtimeRevisionId,
-            runtimeArtifactEvidence: runtimeEvidence,
-            runtimePublication: runtimePub,
-            runtimeConformance: null,
-            runtimeLifecycleState: "active" as const,
-            runtimeRevisionState: runtimePub ? "published" : "draft",
-            runtimeCapabilities: [],
-            policyRevisionId: null,
-          };
         },
 
         async findIdempotentRouteSetActivation(params) {

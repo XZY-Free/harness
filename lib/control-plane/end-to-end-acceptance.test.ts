@@ -25,7 +25,6 @@ import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
   type ProvenanceDocument,
-  type SbomDocument,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
@@ -151,13 +150,13 @@ afterEach(() => {
 
 class InMemoryManagedArtifactStore implements ManagedArtifactStore {
   private envelopes = new Map<string, Buffer>();
-  private sboms = new Map<string, SbomDocument>();
+  private sboms = new Map<string, unknown>();
   private provenances = new Map<string, ProvenanceDocument>();
 
   writeDsseEnvelope(ref: string, envelope: Buffer): void {
     this.envelopes.set(ref, envelope);
   }
-  writeSbom(ref: string, doc: SbomDocument): void {
+  writeSbom(ref: string, doc: unknown): void {
     this.sboms.set(ref, doc);
   }
   writeProvenance(ref: string, doc: ProvenanceDocument): void {
@@ -169,7 +168,7 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
     if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
     return envelope;
   }
-  async readSbom(ref: string): Promise<SbomDocument> {
+  async readSbom(ref: string): Promise<unknown> {
     const doc = this.sboms.get(ref);
     if (!doc) throw new Error(`sbom not found: ${ref}`);
     return doc;
@@ -183,9 +182,20 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
 
 // ─── 辅助：ed25519 密钥对 + DSSE Envelope（来自 test-support）─────────
 
-function buildCleanSbom(): SbomDocument {
+function buildCleanSbom(): unknown {
   return {
-    packages: [{ name: "lodash", version: "4.17.21", licenses: ["MIT"], vulnerabilities: [] }],
+    $schema: "http://cyclonedx.org/schema/bom-1.6.schema.json",
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: {
+      timestamp: "2026-08-06T00:00:00Z",
+      tools: [{ name: "e2e-test", version: "1.0.0" }],
+    },
+    components: [
+      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
+    ],
+    dependencies: [{ ref: "pkg:npm/lodash@4.17.21" }],
   };
 }
 
@@ -491,81 +501,11 @@ async function seedInvocation(tenantId: string, invocationId: string): Promise<v
   });
 }
 
-// ─── 辅助：Eligible RouteSetActivationStore（修复 Phase 1 stub 的 loadRevisionExecutionEvidence）─
-// mysqlRouteSetActivationStore.loadRevisionExecutionEvidence 是 Phase 1 stub，
-// 硬编码 runtimeConformance=null 和 runtimeCapabilities=[]，导致统一资格策略
-// 报 runtime_conformance(no_conformance_run) + capability(capability_unsupported)。
-// 此 wrapper 在事务内拦截 session，从 DB 加载真实的 ConformanceRun 和 Capabilities。
-
-const eligibleRouteSetActivationStore: RouteSetActivationStore = {
-  transaction: (operation) =>
-    mysqlRouteSetActivationStore.transaction(async (session) => {
-      const eligibleSession: RouteSetActivationSession = {
-        ...session,
-        async loadRevisionExecutionEvidence(params) {
-          const baseEvidence = await session.loadRevisionExecutionEvidence(params);
-          if (!baseEvidence) return null;
-
-          // 从 RuntimeRevision 表加载真实 capabilities
-          const [runtimeRev] = await db
-            .select()
-            .from(runtimeRevisionTable)
-            .where(eq(runtimeRevisionTable.id, params.runtimeRevisionId))
-            .limit(1);
-
-          let runtimeCapabilities: string[] = [];
-          const capsJson = runtimeRev?.runtimeCapabilitiesJson;
-          if (Array.isArray(capsJson)) {
-            runtimeCapabilities = capsJson.filter(
-              (c: unknown): c is string => typeof c === "string",
-            );
-          }
-
-          // 从 Publication 的 conformanceRunId 加载真实 ConformanceRun
-          let runtimeConformance: ConformanceEligibilitySnapshot | null = null;
-          const conformanceRunId = baseEvidence.runtimePublication?.conformanceRunId;
-          if (conformanceRunId) {
-            const [run] = await db
-              .select()
-              .from(runtimeConformanceRun)
-              .where(eq(runtimeConformanceRun.id, conformanceRunId))
-              .limit(1);
-            if (run) {
-              const caseResults = await db
-                .select()
-                .from(runtimeConformanceCaseResult)
-                .where(eq(runtimeConformanceCaseResult.runId, run.id));
-              runtimeConformance = {
-                runId: run.id,
-                tenantId: run.tenantId,
-                runtimeRevisionId: run.runtimeRevisionId,
-                overallResult: run.overallResult,
-                runtimeArtifactDigest: run.runtimeArtifactDigest,
-                runtimeConfigDigest: run.runtimeConfigDigest,
-                protocolContractRevision: run.protocolContractRevision,
-                suiteRevision: run.suiteRevision,
-                conformanceFormat: run.conformanceFormat,
-                caseResults: caseResults.map((c) => ({
-                  caseId: c.caseId,
-                  passed: c.passed,
-                })),
-              };
-            }
-          }
-
-          return {
-            ...baseEvidence,
-            runtimeCapabilities,
-            runtimeConformance,
-          };
-        },
-      };
-      return operation(eligibleSession);
-    }),
-};
+// §03: 已删除 mysqlRouteSetActivationStore wrapper — 统一 Reader 直接读取真实证据，
+// 不再需要拦截 session 的 loadRevisionExecutionEvidence。
 
 const activateRouteSetForTest = createActivateRouteSet({
-  store: eligibleRouteSetActivationStore,
+  store: mysqlRouteSetActivationStore,
 });
 
 // ─── 辅助：upsertDeploymentRouteForTest（使用 eligible store 绕过 Phase 1 stub）─
@@ -916,7 +856,7 @@ describe("场景5：RouteSet 原子激活", () => {
     });
 
     const activateRouteSet = createActivateRouteSet({
-      store: eligibleRouteSetActivationStore,
+      store: mysqlRouteSetActivationStore,
     });
 
     const result = await activateRouteSet({

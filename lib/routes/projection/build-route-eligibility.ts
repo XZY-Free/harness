@@ -1,7 +1,7 @@
 /**
  * Route Eligibility Projection 构建器。
  *
- * §4.3: 不再直接实现资格规则 — 委托 Phase 1 统一 Policy + Snapshot。
+ * §4.3/§03: 使用统一 RevisionExecutionEligibilityPolicy + Reader，
  * 构建器只做：读取 Snapshot → 调用 Policy → 组装 Projection → Upsert。
  *
  * 权威事实：RouteRevision, RouteActivation, Agent/AgentRevision,
@@ -11,7 +11,6 @@
 
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
-import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
@@ -20,14 +19,21 @@ import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-r
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { RouteEligibilityStore, UpsertProjectionInput } from "./route-eligibility-store";
 
-import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
-// §4.3: Phase 1 统一 Policy + Evidence 读取器
-import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
+// §03: 统一 Policy + Reader（从 control-plane/domain）
 import {
   type RevisionExecutionEligibilityError,
   RevisionExecutionEligibilityPolicy,
   type RevisionExecutionEvidenceSnapshot,
-} from "@/lib/publications/application/load-revision-execution-evidence";
+  extractRequiredCapabilities,
+  extractRuntimeCapabilities,
+  EligibilityError,
+} from "@/lib/control-plane/domain/revision-execution-eligibility";
+import {
+  createMySqlRevisionExecutionEvidenceReader,
+} from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
+
+import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
+import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
 import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
 import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
 import { loadConformanceEligibilitySnapshot } from "@/lib/runtimes/persistence/runtime-conformance-evidence-reader";
@@ -53,8 +59,7 @@ export interface BuildRouteEligibilityResult {
 /**
  * 创建 Projection 构建器。
  *
- * §4.3: 构建器不再直接实现 loadActivePublication/validatePublicationEvidence/
- * validateRuntimeConformance，改用 Phase 1 的统一 Evidence Snapshot + Policy。
+ * §4.3/§03: 构建器使用统一 Reader 加载证据 + 统一 Policy 判断资格。
  */
 export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
   return async function buildRouteEligibility(
@@ -195,94 +200,29 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
             .limit(1)
         : [null];
 
-    // §4.3: 7. 使用 Phase 1 统一 Evidence 读取器加载完整快照
-    const [agentArtifactEvidence, runtimeArtifactEvidence, agentPublication, runtimePublication] =
-      await Promise.all([
-        loadArtifactEvidenceSnapshot({
-          tenantId: input.tenantId,
-          artifactType: "agent_revision",
-          artifactRevisionId: revision.agentRevisionId,
-        }),
-        loadArtifactEvidenceSnapshot({
-          tenantId: input.tenantId,
-          artifactType: "runtime_revision",
-          artifactRevisionId: revision.runtimeRevisionId,
-        }),
-        loadActivePublicationSnapshot({
-          tenantId: input.tenantId,
-          subjectType: "agent_revision",
-          subjectRevisionId: revision.agentRevisionId,
-        }),
-        loadActivePublicationSnapshot({
-          tenantId: input.tenantId,
-          subjectType: "runtime_revision",
-          subjectRevisionId: revision.runtimeRevisionId,
-        }),
-      ]);
-
-    // §4.3: 7.1 加载 Runtime Conformance 证据快照（不再硬编码 null）
-    const runtimeConformance = runtimePublication?.conformanceRunId
-      ? await loadConformanceEligibilitySnapshot({
-          tenantId: input.tenantId,
-          runtimeRevisionId: revision.runtimeRevisionId,
-          conformanceRunId: runtimePublication.conformanceRunId,
-        })
-      : await loadConformanceEligibilitySnapshot({
-          tenantId: input.tenantId,
-          runtimeRevisionId: revision.runtimeRevisionId,
-        });
-
-    // 8. Policy
-    const policyRevisionState = revision.policyRevisionId
-      ? await db
-          .select({ state: policyRevisionTable.revisionState })
-          .from(policyRevisionTable)
-          .where(eq(policyRevisionTable.id, revision.policyRevisionId))
-          .limit(1)
-          .then((r) => r[0]?.state ?? "missing")
-      : null;
-
-    // §4.3: 9. 使用 Phase 1 统一 Policy 计算资格
-    const evidenceSnapshot: RevisionExecutionEvidenceSnapshot = {
+    // §03: 7. 使用统一 Reader 加载完整证据快照
+    const evidenceReader = createMySqlRevisionExecutionEvidenceReader({ db });
+    const evidenceSnapshot = await evidenceReader.loadCurrentEvidence({
       tenantId: input.tenantId,
       agentRevisionId: revision.agentRevisionId,
-      agentArtifactEvidence,
-      agentPublication,
-      agentLifecycleState: agent?.lifecycleState === "enabled" ? "active" : "archived",
-      agentRevisionState:
-        agentRevision?.revisionState === "published"
-          ? "published"
-          : agentRevision?.revisionState === "withdrawn"
-            ? "withdrawn"
-            : "draft",
       runtimeRevisionId: revision.runtimeRevisionId,
-      runtimeArtifactEvidence,
-      runtimePublication,
-      runtimeConformance,
-      runtimeLifecycleState: runtime?.lifecycleState === "enabled" ? "active" : "retired",
-      runtimeRevisionState:
-        runtimeRevision?.revisionState === "published"
-          ? "published"
-          : runtimeRevision?.revisionState === "withdrawn"
-            ? "withdrawn"
-            : "draft",
-      runtimeCapabilities: Array.isArray(runtimeRevision?.runtimeCapabilitiesJson)
-        ? (runtimeRevision.runtimeCapabilitiesJson as string[])
-        : [],
       policyRevisionId: revision.policyRevisionId,
-    };
+    });
 
-    // §4.3: 统一 Policy 判断
-    // §4.4: requiredCapabilities 从 AgentRevision.agentInterfaceRequirementsJson.required 推导，
-    // 不再硬编码空数组。
+    // §03: 8. 从 AgentRevision 提取 requiredCapabilities（fail-closed）
     const requiredCapabilities = extractRequiredCapabilities(
       agentRevision?.agentInterfaceRequirementsJson,
     );
+
+    // §03: 9. 使用统一 Policy 判断资格
     const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
       evidenceSnapshot,
       requiredCapabilities,
     );
     const isEligible = eligibilityResult.eligible;
+
+    // Policy revision state for projection
+    const policyRevisionState = evidenceSnapshot.policyRevision?.revisionState ?? null;
 
     // 收集 ineligibility 原因
     const ineligibilityReasons: string[] = [];
@@ -291,8 +231,6 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     if (!runtime) ineligibilityReasons.push("runtime_not_found");
     if (!runtimeRevision) ineligibilityReasons.push("runtime_revision_not_found");
     if (activation.activationState !== "active") ineligibilityReasons.push("activation_not_active");
-    if (revision.policyRevisionId !== null && policyRevisionState !== "published")
-      ineligibilityReasons.push("policy_not_published");
     // 从统一 Policy 错误中提取原因
     for (const err of eligibilityResult.errors) {
       ineligibilityReasons.push(err.code);
@@ -319,17 +257,17 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       input.sourceAggregateVersion ?? revision.revisionNo,
     );
 
-    // §4.3: 从统一 Snapshot 提取布尔字段
-    const agentPublicationActive = agentPublication ? 1 : 0;
+    // §03: 从统一 Snapshot 提取布尔字段
+    const agentPublicationActive = evidenceSnapshot.agentPublication ? 1 : 0;
     const agentEvidenceValid =
-      agentArtifactEvidence?.verificationState === "verified" &&
-      agentArtifactEvidence.revokedAt === null
+      evidenceSnapshot.agentArtifactEvidence?.verificationState === "verified" &&
+      evidenceSnapshot.agentArtifactEvidence.revokedAt === null
         ? 1
         : 0;
-    const runtimePublicationActive = runtimePublication ? 1 : 0;
+    const runtimePublicationActive = evidenceSnapshot.runtimePublication ? 1 : 0;
     const runtimeEvidenceValid =
-      runtimeArtifactEvidence?.verificationState === "verified" &&
-      runtimeArtifactEvidence.revokedAt === null
+      evidenceSnapshot.runtimeArtifactEvidence?.verificationState === "verified" &&
+      evidenceSnapshot.runtimeArtifactEvidence.revokedAt === null
         ? 1
         : 0;
     // Conformance: 从 Policy 错误判断
@@ -381,13 +319,13 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       runtimeConfigDigest: runtimeRevision?.configHash ?? null,
       routeContentDigest: revision.contentDigest,
       // ─── §4.1: 完整执行证据 ID ──────────────────────
-      agentPublicationRecordId: agentPublication?.publicationRecordId ?? null,
-      runtimePublicationRecordId: runtimePublication?.publicationRecordId ?? null,
-      agentAttestationIds: agentPublication?.attestationIds ?? null,
-      runtimeAttestationIds: runtimePublication?.attestationIds ?? null,
-      conformanceRunId: runtimePublication?.conformanceRunId ?? null,
-      agentArtifactId: agentArtifactEvidence?.artifactId ?? null,
-      runtimeArtifactId: runtimeArtifactEvidence?.artifactId ?? null,
+      agentPublicationRecordId: evidenceSnapshot.agentPublication?.publicationRecordId ?? null,
+      runtimePublicationRecordId: evidenceSnapshot.runtimePublication?.publicationRecordId ?? null,
+      agentAttestationIds: evidenceSnapshot.agentPublication?.attestationIds ?? null,
+      runtimeAttestationIds: evidenceSnapshot.runtimePublication?.attestationIds ?? null,
+      conformanceRunId: evidenceSnapshot.runtimePublication?.conformanceRunId ?? null,
+      agentArtifactId: evidenceSnapshot.agentArtifactEvidence?.artifactId ?? null,
+      runtimeArtifactId: evidenceSnapshot.runtimeArtifactEvidence?.artifactId ?? null,
       sourceEventId: input.sourceEventId ?? null,
       sourceAggregateVersion: input.sourceAggregateVersion ?? null,
       invalidReason: isEligible ? null : ineligibilityReasons.join(","),
@@ -483,17 +421,4 @@ function readRouteGroupId(
     if (typeof groupId === "string" && groupId.trim()) return groupId;
   }
   return fallback;
-}
-
-/**
- * §4.4: 从 AgentRevision.agentInterfaceRequirementsJson 提取必要 Capability 列表。
- *
- * 期望结构: { required: string[], optional: string[] }
- * 缺失或结构异常时返回空数组（等同于无 Capability 要求）。
- */
-function extractRequiredCapabilities(jsonValue: unknown): string[] {
-  if (!jsonValue || typeof jsonValue !== "object" || Array.isArray(jsonValue)) return [];
-  const required = (jsonValue as { required?: unknown }).required;
-  if (!Array.isArray(required)) return [];
-  return required.filter((c): c is string => typeof c === "string" && c.length > 0);
 }
