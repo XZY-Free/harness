@@ -7,16 +7,11 @@
 
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { computeSpecificity, normalizeEligibility } from "@/lib/routes/domain/route-selector";
+import {
+  computeNextVersion,
+  computeProjectionContentDigest,
+} from "@/lib/routes/projection/build-route-eligibility";
 import { describe, expect, it } from "vitest";
-
-/** §4.2: 权威组合版本计算 — 与 build-route-eligibility.ts 一致。 */
-function computeAuthoritativeVersion(
-  routeSetVersionNo: number,
-  activationSequence: number,
-  aggregateVersion: number,
-): number {
-  return routeSetVersionNo * 1_000_000 + activationSequence * 1_000 + aggregateVersion;
-}
 
 describe("Projection 资格判定逻辑", () => {
   describe("normalizeEligibility + computeSpecificity", () => {
@@ -196,31 +191,55 @@ describe("Projection eligibilityState 逻辑", () => {
 
 /** 从 Projection 布尔字段计算 eligibility — 与 build-route-eligibility.ts 逻辑一致。 */
 
-describe("§4.2 computeAuthoritativeVersion", () => {
-  it("相同三要素 → 相同版本", () => {
-    expect(computeAuthoritativeVersion(1, 2, 3)).toBe(computeAuthoritativeVersion(1, 2, 3));
+// ─── §05.5: projectionContentDigest 测试 ──────────────────────
+
+describe("§05.5 computeProjectionContentDigest", () => {
+  it("相同字段产生相同 digest", () => {
+    const fields = { routeId: "r1", agentId: "a1", eligibilityState: "eligible" };
+    const d1 = computeProjectionContentDigest(fields);
+    const d2 = computeProjectionContentDigest(fields);
+    expect(d1).toBe(d2);
+    expect(d1).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
-  it("routeSetVersionNo 递增 → 版本严格递增", () => {
-    expect(computeAuthoritativeVersion(2, 0, 0)).toBeGreaterThan(
-      computeAuthoritativeVersion(1, 999, 999),
-    );
+  it("不同字段产生不同 digest", () => {
+    const d1 = computeProjectionContentDigest({ routeId: "r1", agentId: "a1" });
+    const d2 = computeProjectionContentDigest({ routeId: "r2", agentId: "a1" });
+    expect(d1).not.toBe(d2);
   });
 
-  it("activationSequence 递增 → 版本严格递增", () => {
-    expect(computeAuthoritativeVersion(1, 2, 0)).toBeGreaterThan(
-      computeAuthoritativeVersion(1, 1, 999),
-    );
+  it("字段顺序不影响 digest", () => {
+    const d1 = computeProjectionContentDigest({ a: 1, b: 2 });
+    const d2 = computeProjectionContentDigest({ b: 2, a: 1 });
+    expect(d1).toBe(d2);
+  });
+});
+
+describe("§05.5 computeNextVersion", () => {
+  it("现有行不存在 → version = 1", () => {
+    expect(computeNextVersion(null, "sha256:abc")).toBe(1);
   });
 
-  it("aggregateVersion 递增 → 版本严格递增", () => {
-    expect(computeAuthoritativeVersion(1, 1, 2)).toBeGreaterThan(
-      computeAuthoritativeVersion(1, 1, 1),
-    );
+  it("Digest 相同 → 不增加版本", () => {
+    const existing = { projectionVersionNo: 3, projectionContentDigest: "sha256:abc" };
+    expect(computeNextVersion(existing, "sha256:abc")).toBe(3);
   });
 
-  it("全零 → 0", () => {
-    expect(computeAuthoritativeVersion(0, 0, 0)).toBe(0);
+  it("Digest 变化 → 版本 +1", () => {
+    const existing = { projectionVersionNo: 3, projectionContentDigest: "sha256:abc" };
+    expect(computeNextVersion(existing, "sha256:def")).toBe(4);
+  });
+
+  it("连续变化 → 递增", () => {
+    let existing: { projectionVersionNo: number; projectionContentDigest: string } | null = null;
+    existing = { projectionVersionNo: computeNextVersion(existing, "sha256:v1"), projectionContentDigest: "sha256:v1" };
+    expect(existing.projectionVersionNo).toBe(1);
+    existing = { projectionVersionNo: computeNextVersion(existing, "sha256:v2"), projectionContentDigest: "sha256:v2" };
+    expect(existing.projectionVersionNo).toBe(2);
+    existing = { projectionVersionNo: computeNextVersion(existing, "sha256:v2"), projectionContentDigest: "sha256:v2" };
+    expect(existing.projectionVersionNo).toBe(2); // same digest → no increase
+    existing = { projectionVersionNo: computeNextVersion(existing, "sha256:v3"), projectionContentDigest: "sha256:v3" };
+    expect(existing.projectionVersionNo).toBe(3);
   });
 });
 

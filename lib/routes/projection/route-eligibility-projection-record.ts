@@ -105,7 +105,11 @@ export const routeEligibilityProjection = mysqlTable(
       "pending_rebuild",
     ]).notNull(),
 
-    /** 投影版本号 — 每次重建递增，Binding 用此检测 Projection 滞后。 */
+    /** §05.5: 投影内容摘要 — 用于幂等版本判断。 */
+    projectionContentDigest: varchar("projectionContentDigest", {
+      length: 71,
+    }).notNull(),
+    /** 投影版本号 — digest 变化时递增，相同 digest 不增加。 */
     projectionVersionNo: bigint("projectionVersionNo", {
       mode: "number",
       unsigned: true,

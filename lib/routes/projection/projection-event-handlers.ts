@@ -1,21 +1,11 @@
 /**
  * Projection 事件处理器 — 处理 Outbox 事件触发 Projection 重建。
  *
- * §4.5: 所有事件类型均已实现，无 TODO 桩。
+ * §05.3: 所有事件使用 RouteEligibilitySourceReader 从权威事实发现受影响 Route，
+ * 不再通过 Projection 表的 findProjectionsByXxx() 来发现 Route。
+ * Projection 不存在时也能发现 Route — 首次构建的前提。
+ *
  * 每个 Handler 幂等。
- *
- * 处理规则：
- * - Route 激活/验证：重建该 Route 的 Projection
- * - Route 禁用：Projection 标记 Ineligible
- * - RouteSet 激活：重建 RouteSet 下所有 Route
- * - Revision 发布：查找引用该 Revision 的 Route 并重建
- * - Revision 撤回：标记相关 Projection Ineligible
- * - Attestation 撤销：标记相关 Projection Ineligible
- * - Runtime Conformance 记录：重建相关 Route
- * - Agent/Runtime 生命周期变更：标记相关 Projection Ineligible
- * - Policy 发布/撤回：重建/标记相关 Projection
- *
- * §4.4: 缺失对象清理 — Route/RouteSet 不存在时删除孤立投影。
  */
 
 import type { ControlPlaneEventType } from "@/lib/control-plane/events/control-plane-event";
@@ -25,12 +15,15 @@ import type {
   BuildRouteEligibilityInput,
   BuildRouteEligibilityResult,
 } from "./build-route-eligibility";
+import type { RouteEligibilitySourceReader } from "./route-eligibility-source-reader";
 import type { RouteEligibilityStore } from "./route-eligibility-store";
 
 export type OutboxEventHandler = (event: ControlPlaneOutboxEvent) => Promise<void>;
 
 export interface ProjectionEventHandlerDeps {
   store: RouteEligibilityStore;
+  /** §05.3: 权威事实 SourceReader — 替代 findProjectionsByXxx。 */
+  sourceReader: RouteEligibilitySourceReader;
   buildRouteEligibility: (
     input: BuildRouteEligibilityInput,
   ) => Promise<BuildRouteEligibilityResult>;
@@ -54,8 +47,8 @@ export class ControlPlaneEventUnsupportedError extends Error {
 /**
  * 创建 Outbox 事件处理器。
  *
- * §4.5: 所有事件类型均有完整实现。
- * §4.4: 缺失对象时清理孤立投影。
+ * §05.3: 所有事件通过 SourceReader 从权威事实发现 Route。
+ * Projection 不存在时也能发现 Route。
  */
 export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): OutboxEventHandler {
   return async function handleOutboxEvent(event: ControlPlaneOutboxEvent): Promise<void> {
@@ -92,7 +85,7 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
 
     const payload = event.payloadJson as Record<string, unknown>;
 
-    // §4.2: 来源事件信息
+    // §4.2/§05.7: 来源事件信息
     const sourceEventId = event.id;
     const sourceAggregateVersion = event.aggregateVersion;
 
@@ -117,82 +110,84 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
         break;
       }
 
-      // ─── Revision 事件 ───────────────────────────
+      // ─── Revision 事件 — §05.3: 通过 SourceReader 从权威事实发现 Route ───
       case "agent.revision.published": {
         const revisionId = payload.revision_id as string;
-        await rebuildProjectionsByRevision(revisionId, sourceEventId, sourceAggregateVersion);
-        break;
-      }
-
-      case "agent.revision.withdrawn": {
-        const revisionId = payload.revision_id as string;
-        await markProjectionsIneligibleByRevision(revisionId, "agent_revision_withdrawn");
-        break;
-      }
-
-      case "runtime.revision.published": {
-        const revisionId = payload.revision_id as string;
-        await rebuildProjectionsByRevision(revisionId, sourceEventId, sourceAggregateVersion);
-        break;
-      }
-
-      case "runtime.revision.withdrawn": {
-        const revisionId = payload.revision_id as string;
-        await markProjectionsIneligibleByRevision(revisionId, "runtime_revision_withdrawn");
-        break;
-      }
-
-      // ─── Attestation 事件 ────────────────────────
-      case "artifact.attestation.revoked": {
-        // §4.5: 使用 attestation_id 搜索投影中的证据数组
-        const attestationId = payload.attestation_id as string;
-        const projections = await deps.store.findProjectionsByAttestationId(attestationId);
-        for (const projection of projections) {
-          await deps.buildRouteEligibility({
-            tenantId: projection.tenantId,
-            routeId: projection.routeId,
-            sourceEventId,
-            sourceAggregateVersion,
-          });
-        }
-        break;
-      }
-
-      // ─── Conformance 事件 ────────────────────────
-      case "runtime.conformance.recorded": {
-        const runtimeRevisionId = payload.runtime_revision_id as string;
-        await rebuildProjectionsByRevision(
-          runtimeRevisionId,
+        await rebuildFromAuthority(
+          () => deps.sourceReader.listRouteIdsByAgentRevision(revisionId),
           sourceEventId,
           sourceAggregateVersion,
         );
         break;
       }
 
-      // ─── §4.5: 生命周期事件 — 完整实现 ──────────────
+      case "agent.revision.withdrawn": {
+        const revisionId = payload.revision_id as string;
+        await markIneligibleFromAuthority(
+          () => deps.sourceReader.listRouteIdsByAgentRevision(revisionId),
+          "agent_revision_withdrawn",
+        );
+        break;
+      }
+
+      case "runtime.revision.published": {
+        const revisionId = payload.revision_id as string;
+        await rebuildFromAuthority(
+          () => deps.sourceReader.listRouteIdsByRuntimeRevision(revisionId),
+          sourceEventId,
+          sourceAggregateVersion,
+        );
+        break;
+      }
+
+      case "runtime.revision.withdrawn": {
+        const revisionId = payload.revision_id as string;
+        await markIneligibleFromAuthority(
+          () => deps.sourceReader.listRouteIdsByRuntimeRevision(revisionId),
+          "runtime_revision_withdrawn",
+        );
+        break;
+      }
+
+      // ─── Attestation 事件 — §05.3: 通过 PublicationRecord → RouteRevision 发现 ───
+      case "artifact.attestation.revoked": {
+        const attestationId = payload.attestation_id as string;
+        await rebuildFromAuthority(
+          () => deps.sourceReader.listRouteIdsByAttestation(attestationId),
+          sourceEventId,
+          sourceAggregateVersion,
+        );
+        break;
+      }
+
+      // ─── Conformance 事件 — §05.3: 通过 RuntimeRevision 发现 ───
+      case "runtime.conformance.recorded": {
+        const runtimeRevisionId = payload.runtime_revision_id as string;
+        await rebuildFromAuthority(
+          () => deps.sourceReader.listRouteIdsByRuntimeRevision(runtimeRevisionId),
+          sourceEventId,
+          sourceAggregateVersion,
+        );
+        break;
+      }
+
+      // ─── §05.3: 生命周期事件 — 通过 SourceReader 从权威事实发现 ───
       case "agent.lifecycle.changed": {
         const agentId = payload.agent_id as string;
         const lifecycleState = payload.new_state as string;
-        // Agent 生命周期变为非 enabled → 标记所有相关投影 Ineligible
         if (lifecycleState !== "enabled") {
-          const projections = await deps.store.findProjectionsByAgentId(agentId);
-          for (const projection of projections) {
-            await deps.store.markIneligible(
-              projection.routeId,
-              `agent_lifecycle_${lifecycleState}`,
-            );
-          }
+          // Agent 非 enabled → 标记所有相关投影 Ineligible
+          await markIneligibleFromAuthority(
+            () => deps.sourceReader.listRouteIdsByAgent(agentId),
+            `agent_lifecycle_${lifecycleState}`,
+          );
         } else {
           // Agent 重新 enabled → 重建所有相关投影
-          const projections = await deps.store.findProjectionsByAgentId(agentId);
-          for (const projection of projections) {
-            await deps.buildRouteEligibility({
-              tenantId: projection.tenantId,
-              routeId: projection.routeId,
-              sourceEventId,
-              sourceAggregateVersion,
-            });
-          }
+          await rebuildFromAuthority(
+            () => deps.sourceReader.listRouteIdsByAgent(agentId),
+            sourceEventId,
+            sourceAggregateVersion,
+          );
         }
         break;
       }
@@ -202,51 +197,38 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
         const lifecycleState = payload.new_state as string;
         if (lifecycleState !== "enabled") {
           // Runtime 非 enabled → 标记相关投影 Ineligible
-          const projections = await deps.store.findProjectionsByRuntimeId(runtimeId);
-          for (const projection of projections) {
-            await deps.store.markIneligible(
-              projection.routeId,
-              `runtime_lifecycle_${lifecycleState}`,
-            );
-          }
+          await markIneligibleFromAuthority(
+            () => deps.sourceReader.listRouteIdsByRuntime(runtimeId),
+            `runtime_lifecycle_${lifecycleState}`,
+          );
         } else {
           // Runtime 重新 enabled → 重建相关投影
-          const projections = await deps.store.findProjectionsByRuntimeId(runtimeId);
-          for (const projection of projections) {
-            await deps.buildRouteEligibility({
-              tenantId: projection.tenantId,
-              routeId: projection.routeId,
-              sourceEventId,
-              sourceAggregateVersion,
-            });
-          }
+          await rebuildFromAuthority(
+            () => deps.sourceReader.listRouteIdsByRuntime(runtimeId),
+            sourceEventId,
+            sourceAggregateVersion,
+          );
         }
         break;
       }
 
-      // ─── §4.5: Policy 事件 — 完整实现 ──────────────
+      // ─── §05.3: Policy 事件 — 通过 SourceReader 从权威事实发现 ───
       case "policy.revision.published": {
         const policyRevisionId = payload.policy_revision_id as string;
-        // Policy 发布 → 重建引用该 Policy 的所有投影
-        const projections = await deps.store.findProjectionsByPolicyRevisionId(policyRevisionId);
-        for (const projection of projections) {
-          await deps.buildRouteEligibility({
-            tenantId: projection.tenantId,
-            routeId: projection.routeId,
-            sourceEventId,
-            sourceAggregateVersion,
-          });
-        }
+        await rebuildFromAuthority(
+          () => deps.sourceReader.listRouteIdsByPolicyRevision(policyRevisionId),
+          sourceEventId,
+          sourceAggregateVersion,
+        );
         break;
       }
 
       case "policy.revision.withdrawn": {
         const policyRevisionId = payload.policy_revision_id as string;
-        // Policy 撤回 → 标记引用该 Policy 的投影 Ineligible
-        const projections = await deps.store.findProjectionsByPolicyRevisionId(policyRevisionId);
-        for (const projection of projections) {
-          await deps.store.markIneligible(projection.routeId, "policy_revision_withdrawn");
-        }
+        await markIneligibleFromAuthority(
+          () => deps.sourceReader.listRouteIdsByPolicyRevision(policyRevisionId),
+          "policy_revision_withdrawn",
+        );
         break;
       }
 
@@ -263,18 +245,27 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
         break;
       }
 
-      // ─── §4.5: RouteSet 激活事件 — 完整实现 ────────
+      // ─── §05.3: RouteSet 激活事件 — 通过 SourceReader 从权威事实发现 ───
       case "route_set.activated": {
         const routeSetId = payload.route_set_id as string;
-        // RouteSet 激活 → 重建该 RouteSet 下所有 Route 的投影
-        const projections = await deps.store.findProjectionsByRouteSet(routeSetId);
-        for (const projection of projections) {
-          await deps.buildRouteEligibility({
-            tenantId: projection.tenantId,
-            routeId: projection.routeId,
+        // §05.3: payload 中可能包含 route_ids，优先使用；否则按 RouteSet 查权威 Route
+        const routeIds = payload.route_ids as string[] | undefined;
+        if (routeIds && routeIds.length > 0) {
+          const tenantId = payload.tenant_id as string;
+          for (const routeId of routeIds) {
+            await deps.buildRouteEligibility({
+              tenantId,
+              routeId,
+              sourceEventId,
+              sourceAggregateVersion,
+            });
+          }
+        } else {
+          await rebuildFromAuthority(
+            () => deps.sourceReader.listRouteIdsByRouteSet(routeSetId),
             sourceEventId,
             sourceAggregateVersion,
-          });
+          );
         }
         break;
       }
@@ -285,29 +276,36 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
     }
   };
 
-  async function rebuildProjectionsByRevision(
-    revisionId: string,
+  /**
+   * §05.3: 从权威事实发现受影响 Route 并重建 Projection。
+   * Projection 不存在时也能发现 Route — buildRouteEligibility 会创建新 Projection。
+   */
+  async function rebuildFromAuthority(
+    findRoutes: () => Promise<Array<{ routeId: string; tenantId: string }>>,
     sourceEventId?: string | null,
     sourceAggregateVersion?: number | null,
   ): Promise<void> {
-    const projections = await deps.store.findProjectionsByRevision(revisionId);
-    for (const projection of projections) {
+    const routes = await findRoutes();
+    for (const { routeId, tenantId } of routes) {
       await deps.buildRouteEligibility({
-        tenantId: projection.tenantId,
-        routeId: projection.routeId,
+        tenantId,
+        routeId,
         sourceEventId,
         sourceAggregateVersion,
       });
     }
   }
 
-  async function markProjectionsIneligibleByRevision(
-    revisionId: string,
+  /**
+   * §05.3: 从权威事实发现受影响 Route 并标记 Ineligible。
+   */
+  async function markIneligibleFromAuthority(
+    findRoutes: () => Promise<Array<{ routeId: string; tenantId: string }>>,
     reason: string,
   ): Promise<void> {
-    const projections = await deps.store.findProjectionsByRevision(revisionId);
-    for (const projection of projections) {
-      await deps.store.markIneligible(projection.routeId, reason);
+    const routes = await findRoutes();
+    for (const { routeId } of routes) {
+      await deps.store.markIneligible(routeId, reason);
     }
   }
 }

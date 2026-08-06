@@ -1,14 +1,20 @@
 /**
  * Route Eligibility Projection 构建器。
  *
- * §4.3/§03: 使用统一 RevisionExecutionEligibilityPolicy + Reader，
- * 构建器只做：读取 Snapshot → 调用 Policy → 组装 Projection → Upsert。
+ * §05.4/§05.5: 使用统一 RevisionExecutionEligibilityPolicy + Reader，
+ * 构建器只做：读取 Snapshot → 调用 Policy → 组装 Projection → 计算 Digest → 幂等 UPSERT。
+ *
+ * §05.5: 投影版本规则：
+ * - 现有行不存在 → projectionVersionNo = 1
+ * - Digest 相同 → 不增加版本
+ * - Digest 变化 → projectionVersionNo + 1
  *
  * 权威事实：RouteRevision, RouteActivation, Agent/AgentRevision,
  *           Runtime/RuntimeRevision, PublicationRecord, Attestation, Conformance, Policy。
  * 投影不是新的权威事实源。
  */
 
+import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
@@ -21,22 +27,12 @@ import type { RouteEligibilityStore, UpsertProjectionInput } from "./route-eligi
 
 // §03: 统一 Policy + Reader（从 control-plane/domain）
 import {
-  type RevisionExecutionEligibilityError,
   RevisionExecutionEligibilityPolicy,
-  type RevisionExecutionEvidenceSnapshot,
   extractRequiredCapabilities,
-  extractRuntimeCapabilities,
-  EligibilityError,
 } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import {
   createMySqlRevisionExecutionEvidenceReader,
 } from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
-
-import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
-import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
-import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
-import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
-import { loadConformanceEligibilitySnapshot } from "@/lib/runtimes/persistence/runtime-conformance-evidence-reader";
 
 export interface BuildProjectionDependencies {
   store: RouteEligibilityStore;
@@ -59,7 +55,8 @@ export interface BuildRouteEligibilityResult {
 /**
  * 创建 Projection 构建器。
  *
- * §4.3/§03: 构建器使用统一 Reader 加载证据 + 统一 Policy 判断资格。
+ * §05.4/§05.5: 构建器使用统一 Reader 加载证据 + 统一 Policy 判断资格，
+ * 计算 projectionContentDigest 实现幂等版本。
  */
 export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
   return async function buildRouteEligibility(
@@ -74,7 +71,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       .where(eq(deploymentRouteTable.id, input.routeId))
       .limit(1);
     if (!route) {
-      // §4.4: Route 不存在 → 删除孤立投影
+      // §05.4: Route 不存在 → 删除孤立投影
       await deps.store.deleteProjection(input.routeId);
       return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
     }
@@ -86,20 +83,19 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       .where(eq(deploymentRouteSetTable.id, route.routeSetId))
       .limit(1);
     if (!routeSet) {
-      // §4.4: RouteSet 不存在 → 删除孤立投影
+      // §05.4: RouteSet 不存在 → 删除孤立投影
       await deps.store.deleteProjection(input.routeId);
       return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
     }
 
     // 3. 没有 activeRouteRevisionId → ineligible
     if (!route.activeRouteRevisionId) {
-      const version = computeAuthoritativeVersion(
-        Number(routeSet.versionNo),
-        0,
-        input.sourceAggregateVersion ?? 0,
-      );
+      const digest = computeProjectionContentDigest(baseIneligibleFields(route, routeSet));
+      const existing = await deps.store.getProjectionByRoute(input.routeId);
+      const version = computeNextVersion(existing, digest);
       await deps.store.upsertProjection({
         ...baseIneligible(route, routeSet),
+        projectionContentDigest: digest,
         eligibilityState: "ineligible",
         projectionVersionNo: version,
         lastRebuiltAt: now,
@@ -123,13 +119,12 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       )
       .limit(1);
     if (!revision) {
-      const version = computeAuthoritativeVersion(
-        Number(routeSet.versionNo),
-        0,
-        input.sourceAggregateVersion ?? 0,
-      );
+      const digest = computeProjectionContentDigest(baseIneligibleFields(route, routeSet));
+      const existing = await deps.store.getProjectionByRoute(input.routeId);
+      const version = computeNextVersion(existing, digest);
       await deps.store.upsertProjection({
         ...baseIneligible(route, routeSet),
+        projectionContentDigest: digest,
         eligibilityState: "ineligible",
         projectionVersionNo: version,
         lastRebuiltAt: now,
@@ -149,13 +144,12 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       .orderBy(desc(routeActivation.activationSequence))
       .limit(1);
     if (!activation || activation.routeRevisionId !== revision.id) {
-      const version = computeAuthoritativeVersion(
-        Number(routeSet.versionNo),
-        0,
-        input.sourceAggregateVersion ?? 0,
-      );
+      const digest = computeProjectionContentDigest(baseIneligibleFields(route, routeSet));
+      const existing = await deps.store.getProjectionByRoute(input.routeId);
+      const version = computeNextVersion(existing, digest);
       await deps.store.upsertProjection({
         ...baseIneligible(route, routeSet),
+        projectionContentDigest: digest,
         eligibilityState: "ineligible",
         projectionVersionNo: version,
         lastRebuiltAt: now,
@@ -250,13 +244,6 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
           })
         : "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
-    // 11. 构建 Projection 并写入
-    const version = computeAuthoritativeVersion(
-      activation.routeSetVersionNo,
-      activation.activationSequence,
-      input.sourceAggregateVersion ?? revision.revisionNo,
-    );
-
     // §03: 从统一 Snapshot 提取布尔字段
     const agentPublicationActive = evidenceSnapshot.agentPublication ? 1 : 0;
     const agentEvidenceValid =
@@ -277,7 +264,8 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       ? 0
       : 1;
 
-    const projectionInput: UpsertProjectionInput = {
+    // §05.5: 11. 计算 projectionContentDigest 并确定版本号
+    const projectionFields = {
       routeId: route.id,
       tenantId: input.tenantId,
       agentId: routeSet.agentId,
@@ -298,8 +286,8 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       specificity,
       priorityNo: revision.priorityNo,
       trafficWeight: revision.trafficWeight,
-      effectiveFrom: revision.effectiveFrom,
-      effectiveUntil: revision.effectiveUntil,
+      effectiveFrom: revision.effectiveFrom?.toISOString() ?? null,
+      effectiveUntil: revision.effectiveUntil?.toISOString() ?? null,
       agentRevisionId: revision.agentRevisionId,
       agentRevisionState: agentRevision?.revisionState ?? "missing",
       agentLifecycleState: agent?.lifecycleState ?? "missing",
@@ -318,7 +306,6 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       runtimeArtifactDigest: runtimeRevision?.artifactDigest ?? null,
       runtimeConfigDigest: runtimeRevision?.configHash ?? null,
       routeContentDigest: revision.contentDigest,
-      // ─── §4.1: 完整执行证据 ID ──────────────────────
       agentPublicationRecordId: evidenceSnapshot.agentPublication?.publicationRecordId ?? null,
       runtimePublicationRecordId: evidenceSnapshot.runtimePublication?.publicationRecordId ?? null,
       agentAttestationIds: evidenceSnapshot.agentPublication?.attestationIds ?? null,
@@ -329,8 +316,19 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       sourceEventId: input.sourceEventId ?? null,
       sourceAggregateVersion: input.sourceAggregateVersion ?? null,
       invalidReason: isEligible ? null : ineligibilityReasons.join(","),
-      eligibilityState: isEligible ? "eligible" : "ineligible",
-      projectionVersionNo: version,
+      eligibilityState: (isEligible ? "eligible" : "ineligible") as "eligible" | "ineligible",
+    };
+
+    const projectionContentDigest = computeProjectionContentDigest(projectionFields);
+    const existing = await deps.store.getProjectionByRoute(input.routeId);
+    const projectionVersionNo = computeNextVersion(existing, projectionContentDigest);
+
+    const projectionInput: UpsertProjectionInput = {
+      ...projectionFields,
+      effectiveFrom: revision.effectiveFrom,
+      effectiveUntil: revision.effectiveUntil,
+      projectionContentDigest,
+      projectionVersionNo,
       lastRebuiltAt: now,
     };
 
@@ -338,26 +336,46 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     return {
       routeId: input.routeId,
       eligibilityState: isEligible ? "eligible" : "ineligible",
-      projectionVersionNo: version,
+      projectionVersionNo,
     };
   };
+}
 
-  /** §4.2: 权威组合版本 — 替代 MAX+1，防止并发重复/乱序。 */
-  function computeAuthoritativeVersion(
-    routeSetVersionNo: number,
-    activationSequence: number,
-    aggregateVersion: number,
-  ): number {
-    return routeSetVersionNo * 1_000_000 + activationSequence * 1_000 + aggregateVersion;
-  }
+// ─── §05.5: projectionContentDigest 计算 ──────────────────────
+
+/**
+ * 计算投影内容摘要 — 对所有投影字段规范化后 SHA-256。
+ * 相同权威事实必须产生相同 digest，不同事实必须产生不同 digest。
+ */
+export function computeProjectionContentDigest(fields: Record<string, unknown>): string {
+  const canonical = JSON.stringify(fields, Object.keys(fields).sort());
+  const hash = createHash("sha256").update(canonical).digest("hex");
+  return `sha256:${hash}`;
+}
+
+/**
+ * §05.5: Digest-based 版本规则。
+ *
+ * - 现有行不存在 → projectionVersionNo = 1
+ * - Digest 相同 → 不增加版本（返回现有版本）
+ * - Digest 变化 → projectionVersionNo + 1
+ */
+export function computeNextVersion(
+  existing: { projectionVersionNo: number; projectionContentDigest: string } | null,
+  newDigest: string,
+): number {
+  if (!existing) return 1;
+  if (existing.projectionContentDigest === newDigest) return existing.projectionVersionNo;
+  return existing.projectionVersionNo + 1;
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────
 
-function baseIneligible(
+/** 返回 ineligible 投影的可 digest 字段（不含 Date 对象）。 */
+function baseIneligibleFields(
   route: { id: string; routeSetId: string; tenantId?: string },
   routeSet: { agentId: string; routeScopeKey: string },
-): Omit<UpsertProjectionInput, "eligibilityState" | "projectionVersionNo" | "lastRebuiltAt"> {
+): Record<string, unknown> {
   return {
     routeId: route.id,
     tenantId: route.tenantId ?? "",
@@ -396,7 +414,62 @@ function baseIneligible(
     runtimeArtifactDigest: null,
     runtimeConfigDigest: null,
     routeContentDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-    // ─── §4.1: 证据字段 — ineligible 时为 null（不可填空字符串）
+    agentPublicationRecordId: null,
+    runtimePublicationRecordId: null,
+    agentAttestationIds: null,
+    runtimeAttestationIds: null,
+    conformanceRunId: null,
+    agentArtifactId: null,
+    runtimeArtifactId: null,
+    sourceEventId: null,
+    sourceAggregateVersion: null,
+    invalidReason: "base_ineligible",
+    eligibilityState: "ineligible",
+  };
+}
+
+function baseIneligible(
+  route: { id: string; routeSetId: string; tenantId?: string },
+  routeSet: { agentId: string; routeScopeKey: string },
+): Omit<UpsertProjectionInput, "projectionContentDigest" | "eligibilityState" | "projectionVersionNo" | "lastRebuiltAt"> {
+  return {
+    routeId: route.id,
+    tenantId: route.tenantId ?? "",
+    agentId: routeSet.agentId,
+    routeSetId: route.routeSetId,
+    routeScopeKey: routeSet.routeScopeKey,
+    routeSetVersionNo: 0,
+    routeRevisionId: "",
+    routeRevisionNo: 0,
+    routeActivationId: "",
+    routeActivationSequence: 0,
+    routeGroupId: "primary",
+    selectorDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    eligibilityConditionsJson: {},
+    specificity: 0,
+    priorityNo: 0,
+    trafficWeight: 0,
+    effectiveFrom: null,
+    effectiveUntil: null,
+    agentRevisionId: "",
+    agentRevisionState: "missing",
+    agentLifecycleState: "missing",
+    agentPublicationActive: 0,
+    agentEvidenceValid: 0,
+    runtimeRevisionId: "",
+    runtimeRevisionState: "missing",
+    runtimeLifecycleState: "missing",
+    runtimePublicationActive: 0,
+    runtimeEvidenceValid: 0,
+    runtimeConformanceValid: 0,
+    policyRevisionId: null,
+    policyRevisionState: null,
+    capabilityCompatibilityDigest:
+      "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    agentArtifactDigest: null,
+    runtimeArtifactDigest: null,
+    runtimeConfigDigest: null,
+    routeContentDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     agentPublicationRecordId: null,
     runtimePublicationRecordId: null,
     agentAttestationIds: null,

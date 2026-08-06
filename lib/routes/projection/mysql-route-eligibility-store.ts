@@ -1,10 +1,11 @@
 /**
  * MySQL RouteEligibilityProjection Store 实现。
+ *
+ * §05.1: 只做 Projection CRUD，权威事实读取由 SourceReader 完成。
  */
 
 import { db } from "@/lib/db/client";
-import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { routeEligibilityProjection } from "./route-eligibility-projection-record";
 import type { RouteEligibilityProjectionRecord } from "./route-eligibility-projection-record";
 import type { RouteEligibilityStore, UpsertProjectionInput } from "./route-eligibility-store";
@@ -59,6 +60,7 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
       sourceAggregateVersion: input.sourceAggregateVersion,
       invalidReason: input.invalidReason,
       eligibilityState: input.eligibilityState,
+      projectionContentDigest: input.projectionContentDigest,
       projectionVersionNo: input.projectionVersionNo,
       lastRebuiltAt: input.lastRebuiltAt,
     };
@@ -114,6 +116,7 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
           sourceAggregateVersion: sql`VALUES(sourceAggregateVersion)`,
           invalidReason: sql`VALUES(invalidReason)`,
           eligibilityState: sql`VALUES(eligibilityState)`,
+          projectionContentDigest: sql`VALUES(projectionContentDigest)`,
           projectionVersionNo: sql`VALUES(projectionVersionNo)`,
           lastRebuiltAt: sql`VALUES(lastRebuiltAt)`,
         },
@@ -141,12 +144,7 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
       .select()
       .from(routeEligibilityProjection)
       .where(
-        and(
-          eq(routeEligibilityProjection.tenantId, input.tenantId),
-          eq(routeEligibilityProjection.agentId, input.agentId),
-          eq(routeEligibilityProjection.routeScopeKey, input.routeScopeKey),
-          eq(routeEligibilityProjection.eligibilityState, "eligible"),
-        ),
+        sql`${routeEligibilityProjection.tenantId} = ${input.tenantId} AND ${routeEligibilityProjection.agentId} = ${input.agentId} AND ${routeEligibilityProjection.routeScopeKey} = ${input.routeScopeKey} AND ${routeEligibilityProjection.eligibilityState} = 'eligible'`,
       );
   },
 
@@ -168,54 +166,6 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
       .where(eq(routeEligibilityProjection.routeId, routeId));
   },
 
-  findProjectionsByRevision: async (revisionId: string) => {
-    return db
-      .select()
-      .from(routeEligibilityProjection)
-      .where(
-        sql`${routeEligibilityProjection.agentRevisionId} = ${revisionId} OR ${routeEligibilityProjection.runtimeRevisionId} = ${revisionId}`,
-      );
-  },
-
-  findProjectionsByRouteSet: async (routeSetId: string) => {
-    return db
-      .select()
-      .from(routeEligibilityProjection)
-      .where(eq(routeEligibilityProjection.routeSetId, routeSetId));
-  },
-
-  // ─── §4.4: 新增查询/删除方法 ─────────────────────────
-
-  findProjectionsByAgentId: async (agentId: string) => {
-    // AgentId → 查找引用该 agentId 的所有 Projection
-    return db
-      .select()
-      .from(routeEligibilityProjection)
-      .where(eq(routeEligibilityProjection.agentId, agentId));
-  },
-
-  findProjectionsByRuntimeId: async (runtimeId: string) => {
-    // RuntimeId → 通过 runtimeRevision 关联查找 Projection
-    // 先查找该 runtime 下的所有 runtimeRevisionId
-    const revisions = await db
-      .select({ id: runtimeRevisionTable.id })
-      .from(runtimeRevisionTable)
-      .where(eq(runtimeRevisionTable.runtimeId, runtimeId));
-    if (revisions.length === 0) return [];
-    const revisionIds = revisions.map((r) => r.id);
-    return db
-      .select()
-      .from(routeEligibilityProjection)
-      .where(inArray(routeEligibilityProjection.runtimeRevisionId, revisionIds));
-  },
-
-  findProjectionsByPolicyRevisionId: async (policyRevisionId: string) => {
-    return db
-      .select()
-      .from(routeEligibilityProjection)
-      .where(eq(routeEligibilityProjection.policyRevisionId, policyRevisionId));
-  },
-
   deleteProjection: async (routeId: string) => {
     await db
       .delete(routeEligibilityProjection)
@@ -228,14 +178,16 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
       .where(eq(routeEligibilityProjection.routeSetId, routeSetId));
   },
 
-  findProjectionsByAttestationId: async (attestationId: string) => {
-    // §4.5: 搜索 agentAttestationIds 或 runtimeAttestationIds JSON 数组包含该 attestationId
-    // 使用 JSON_CONTAINS MySQL 函数
+  listAllProjectionRouteIds: async () => {
     return db
-      .select()
+      .select({ routeId: routeEligibilityProjection.routeId })
+      .from(routeEligibilityProjection);
+  },
+
+  listProjectionRouteIdsByRouteSet: async (routeSetId: string) => {
+    return db
+      .select({ routeId: routeEligibilityProjection.routeId })
       .from(routeEligibilityProjection)
-      .where(
-        sql`JSON_CONTAINS(${routeEligibilityProjection.agentAttestationIds}, ${JSON.stringify(attestationId)}) OR JSON_CONTAINS(${routeEligibilityProjection.runtimeAttestationIds}, ${JSON.stringify(attestationId)})`,
-      );
+      .where(eq(routeEligibilityProjection.routeSetId, routeSetId));
   },
 };

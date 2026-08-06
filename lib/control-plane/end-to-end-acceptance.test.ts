@@ -56,6 +56,7 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { controlPlaneEventDelivery } from "@/lib/control-plane/events/control-plane-event-delivery";
 import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
+import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -1753,6 +1754,7 @@ describe("场景18：重复事件消费保持幂等", () => {
     // 事件处理器
     const handler = createProjectionEventHandler({
       store: mysqlRouteEligibilityStore,
+      sourceReader: mysqlRouteEligibilitySourceReader,
       buildRouteEligibility,
     });
 

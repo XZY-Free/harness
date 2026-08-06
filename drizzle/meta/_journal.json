@@ -946,6 +946,13 @@
       "when": 1722998400000,
       "tag": "0133_artifact_attestation_dsse_protocol",
       "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "6",
+      "when": 1723084800000,
+      "tag": "0134_projection_content_digest",
+      "breakpoints": true
     }
   ]
 }
