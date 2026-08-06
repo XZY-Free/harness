@@ -10,8 +10,8 @@
 import { startTestMysql } from "./mysql-harness";
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
-  const { connectionString, stop } = await startTestMysql();
-  process.env.DATABASE_URL = connectionString;
-  console.log("[global-setup] DATABASE_URL =", connectionString);
-  return stop;
+ const { connectionString, stop } = await startTestMysql();
+ process.env.DATABASE_URL = connectionString;
+ console.log("[global-setup] DATABASE_URL =", connectionString);
+ return stop;
 }

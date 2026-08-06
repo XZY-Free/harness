@@ -21,12 +21,12 @@ import { tenant } from "./identity";
 
 /** 导出数据种类。 */
 export const EXPORT_KINDS = [
-  "audit_events",
-  "usage_records",
-  "cost_aggregates",
-  "capacity_snapshots",
-  "traces",
-  "evaluation_runs",
+ "audit_events",
+ "usage_records",
+ "cost_aggregates",
+ "capacity_snapshots",
+ "traces",
+ "evaluation_runs",
 ] as const;
 export type ExportKind = (typeof EXPORT_KINDS)[number];
 
@@ -51,53 +51,53 @@ export type ExportPrincipalKind = (typeof EXPORT_PRINCIPAL_KINDS)[number];
 // ─── AdminExport ───────────────────────────────────────
 
 export const adminExportTable = mysqlTable(
-  "admin_export",
-  {
-    id: varchar("id", { length: 36 }).primaryKey(),
-    tenantId: varchar("tenant_id", { length: 36 })
-      .notNull()
-      .references(() => tenant.id),
-    /** 请求人 userIdentity 或 serviceId。 */
-    requestedBy: varchar("requested_by", { length: 128 }).notNull(),
-    /** 请求主体类型（user/service）。 */
-    requestPrincipalKind: varchar("request_principal_kind", { length: 16 })
-      .$type<ExportPrincipalKind>()
-      .notNull(),
-    /** 导出数据种类（EXPORT_KINDS）。 */
-    exportKind: varchar("export_kind", { length: 32 }).$type<ExportKind>().notNull(),
-    /** 导出参数：scope_type/scope_ref/dimension/state/window_from/window_to 等。 */
-    filterJson: json("filter_json").$type<Record<string, unknown>>(),
-    /** 任务状态（EXPORT_STATUSES）。 */
-    status: varchar("status", { length: 32 }).$type<ExportStatus>().notNull().default("pending"),
-    /** 导出结果引用：/exports/{id}/download 或对象存储 key。 */
-    resultRef: varchar("result_ref", { length: 512 }),
-    /** 导出结果格式（默认 ndjson）。 */
-    resultFormat: varchar("result_format", { length: 16 })
-      .$type<ExportFormat>()
-      .notNull()
-      .default("ndjson"),
-    /** 导出记录数。 */
-    recordCount: int("record_count").notNull().default(0),
-    /** 脱敏摘要：哪些字段被脱敏。 */
-    redactionSummary: varchar("redaction_summary", { length: 256 }),
-    /** 失败原因（status=failed 时填）。 */
-    failureReason: varchar("failure_reason", { length: 256 }),
-    /** 乐观锁版本号。 */
-    versionNo: varchar("version_no", { length: 36 }).notNull().default("1"),
-    createdAt: datetime("created_at", { mode: "date", fsp: 3 })
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP(3)`),
-    updatedAt: datetime("updated_at", { mode: "date", fsp: 3 })
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP(3)`),
-    /** 完成时间（status=completed/failed/cancelled 时填）。 */
-    completedAt: datetime("completed_at", { mode: "date", fsp: 3 }),
-  },
-  (table) => ({
-    tenantStatusIdx: index("tenant_status_idx").on(table.tenantId, table.status),
-    tenantKindIdx: index("tenant_kind_idx").on(table.tenantId, table.exportKind),
-    tenantRequestedByIdx: index("tenant_requested_by_idx").on(table.tenantId, table.requestedBy),
-  }),
+ "admin_export",
+ {
+ id: varchar("id", { length: 36 }).primaryKey(),
+ tenantId: varchar("tenant_id", { length: 36 })
+ .notNull()
+ .references(() => tenant.id),
+ /** 请求人 userIdentity 或 serviceId。 */
+ requestedBy: varchar("requested_by", { length: 128 }).notNull(),
+ /** 请求主体类型（user/service）。 */
+ requestPrincipalKind: varchar("request_principal_kind", { length: 16 })
+ .$type<ExportPrincipalKind>()
+ .notNull(),
+ /** 导出数据种类（EXPORT_KINDS）。 */
+ exportKind: varchar("export_kind", { length: 32 }).$type<ExportKind>().notNull(),
+ /** 导出参数：scope_type/scope_ref/dimension/state/window_from/window_to 等。 */
+ filterJson: json("filter_json").$type<Record<string, unknown>>(),
+ /** 任务状态（EXPORT_STATUSES）。 */
+ status: varchar("status", { length: 32 }).$type<ExportStatus>().notNull().default("pending"),
+ /** 导出结果引用：/exports/{id}/download 或对象存储 key。 */
+ resultRef: varchar("result_ref", { length: 512 }),
+ /** 导出结果格式（默认 ndjson）。 */
+ resultFormat: varchar("result_format", { length: 16 })
+ .$type<ExportFormat>()
+ .notNull()
+ .default("ndjson"),
+ /** 导出记录数。 */
+ recordCount: int("record_count").notNull().default(0),
+ /** 脱敏摘要：哪些字段被脱敏。 */
+ redactionSummary: varchar("redaction_summary", { length: 256 }),
+ /** 失败原因（status=failed 时填）。 */
+ failureReason: varchar("failure_reason", { length: 256 }),
+ /** 乐观锁版本号。 */
+ versionNo: varchar("version_no", { length: 36 }).notNull().default("1"),
+ createdAt: datetime("created_at", { mode: "date", fsp: 3 })
+ .notNull()
+ .default(sql`CURRENT_TIMESTAMP(3)`),
+ updatedAt: datetime("updated_at", { mode: "date", fsp: 3 })
+ .notNull()
+ .default(sql`CURRENT_TIMESTAMP(3)`),
+ /** 完成时间（status=completed/failed/cancelled 时填）。 */
+ completedAt: datetime("completed_at", { mode: "date", fsp: 3 }),
+ },
+ (table) => ({
+ tenantStatusIdx: index("tenant_status_idx").on(table.tenantId, table.status),
+ tenantKindIdx: index("tenant_kind_idx").on(table.tenantId, table.exportKind),
+ tenantRequestedByIdx: index("tenant_requested_by_idx").on(table.tenantId, table.requestedBy),
+ }),
 );
 
 export type AdminExport = typeof adminExportTable.$inferSelect;

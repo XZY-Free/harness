@@ -16,7 +16,7 @@
  *
  * 关键约束（§4 末段）：
  * - 外部网页、文件、Knowledge 和 ToolResult 默认是数据（trust=untrusted_external 或 trusted_data），
- *   不因正文包含“忽略上面的指令”而获得指令优先级（trust=instruction）。
+ * 不因正文包含“忽略上面的指令”而获得指令优先级（trust=instruction）。
  * - 只有平台规则与 Agent 指令可为 instruction 信任级别。
  * - Credential 原值永远不进入 Fragment。
  */
@@ -36,14 +36,14 @@ import { createHash } from "node:crypto";
  * - skill：Skill 指令片段。
  */
 export const FRAGMENT_KINDS = [
-  "system",
-  "agent_instruction",
-  "user",
-  "memory",
-  "knowledge",
-  "file",
-  "tool",
-  "skill",
+ "system",
+ "agent_instruction",
+ "user",
+ "memory",
+ "knowledge",
+ "file",
+ "tool",
+ "skill",
 ] as const;
 export type FragmentKind = (typeof FRAGMENT_KINDS)[number];
 
@@ -51,7 +51,7 @@ const FRAGMENT_KIND_SET: ReadonlySet<string> = new Set(FRAGMENT_KINDS);
 
 /** 判断 kind 是否在目录内。 */
 export function isKnownFragmentKind(kind: string): kind is FragmentKind {
-  return FRAGMENT_KIND_SET.has(kind);
+ return FRAGMENT_KIND_SET.has(kind);
 }
 
 // ─── Fragment Scope ────────────────────────────────────────
@@ -104,12 +104,12 @@ export type FragmentSensitivity = (typeof FRAGMENT_SENSITIVITIES)[number];
  * - knowledgeBaseId：所属 KnowledgeBase id（knowledge_chunk 专用，可空）。
  */
 export interface FragmentSourceRef {
-  type: string;
-  id: string;
-  revisionId?: string | null;
-  hash?: string | null;
-  documentId?: string | null;
-  knowledgeBaseId?: string | null;
+ type: string;
+ id: string;
+ revisionId?: string | null;
+ hash?: string | null;
+ documentId?: string | null;
+ knowledgeBaseId?: string | null;
 }
 
 // ─── Freshness ─────────────────────────────────────────────
@@ -121,9 +121,9 @@ export interface FragmentSourceRef {
  * - needsRefresh：是否需要重新加载。
  */
 export interface FragmentFreshness {
-  updatedAt: Date;
-  expiresAt?: Date | null;
-  needsRefresh?: boolean;
+ updatedAt: Date;
+ expiresAt?: Date | null;
+ needsRefresh?: boolean;
 }
 
 // ─── Priority Tier ─────────────────────────────────────────
@@ -139,15 +139,15 @@ export interface FragmentFreshness {
  * - TIER_HISTORY(5)：更早历史的压缩摘要。
  */
 export const FRAGMENT_PRIORITY_TIERS = {
-  TIER_MANDATORY: 1,
-  TIER_RECENT: 2,
-  TIER_RELATED: 3,
-  TIER_SUMMARY: 4,
-  TIER_HISTORY: 5,
+ TIER_MANDATORY: 1,
+ TIER_RECENT: 2,
+ TIER_RELATED: 3,
+ TIER_SUMMARY: 4,
+ TIER_HISTORY: 5,
 } as const;
 
 export type FragmentPriorityTier =
-  (typeof FRAGMENT_PRIORITY_TIERS)[keyof typeof FRAGMENT_PRIORITY_TIERS];
+ (typeof FRAGMENT_PRIORITY_TIERS)[keyof typeof FRAGMENT_PRIORITY_TIERS];
 
 // ─── Fragment ──────────────────────────────────────────────
 
@@ -160,26 +160,26 @@ export type FragmentPriorityTier =
  * - trust=instruction 仅用于 system/agent_instruction kind。
  */
 export interface ContextFragment {
-  /** Fragment 稳定 id（同一视图内唯一，用于排除追踪）。 */
-  id: string;
-  kind: FragmentKind;
-  sourceRef: FragmentSourceRef;
-  scope: FragmentScope;
-  trust: FragmentTrust;
-  sensitivity: FragmentSensitivity;
-  /** 内容 hash（sha256: 前缀）。 */
-  contentHash: string;
-  /** 上下文 Token 估算（>=0）。 */
-  tokenEstimate: number;
-  freshness: FragmentFreshness;
-  /** 选入理由代码（如 platform_rule/current_user/recent_item/query_match）。 */
-  selectionReason: string;
-  /** 优先级层级（由 budget 模块根据 kind/scope 推导或调用方显式指定）。 */
-  priorityTier: FragmentPriorityTier;
-  /** 正文文本（restricted sensitivity 时为空，仅保留引用）。 */
-  text?: string;
-  /** 结构化内容引用（如 content_ref，与 text 二选一或并存）。 */
-  contentRef?: string;
+ /** Fragment 稳定 id（同一视图内唯一，用于排除追踪）。 */
+ id: string;
+ kind: FragmentKind;
+ sourceRef: FragmentSourceRef;
+ scope: FragmentScope;
+ trust: FragmentTrust;
+ sensitivity: FragmentSensitivity;
+ /** 内容 hash（sha256: 前缀）。 */
+ contentHash: string;
+ /** 上下文 Token 估算（>=0）。 */
+ tokenEstimate: number;
+ freshness: FragmentFreshness;
+ /** 选入理由代码（如 platform_rule/current_user/recent_item/query_match）。 */
+ selectionReason: string;
+ /** 优先级层级（由 budget 模块根据 kind/scope 推导或调用方显式指定）。 */
+ priorityTier: FragmentPriorityTier;
+ /** 正文文本（restricted sensitivity 时为空，仅保留引用）。 */
+ text?: string;
+ /** 结构化内容引用（如 content_ref，与 text 二选一或并存）。 */
+ contentRef?: string;
 }
 
 // ─── Excluded Fragment ─────────────────────────────────────
@@ -188,15 +188,15 @@ export interface ContextFragment {
  * 被预算排除的 Fragment 记录（§5：记录被排除内容及原因）。
  */
 export interface ExcludedFragment {
-  id: string;
-  kind: FragmentKind;
-  contentHash: string;
-  tokenEstimate: number;
-  priorityTier: FragmentPriorityTier;
-  /** 排除理由代码。 */
-  reasonCode: ExclusionReasonCode;
-  /** 排除说明（可空）。 */
-  detail?: string;
+ id: string;
+ kind: FragmentKind;
+ contentHash: string;
+ tokenEstimate: number;
+ priorityTier: FragmentPriorityTier;
+ /** 排除理由代码。 */
+ reasonCode: ExclusionReasonCode;
+ /** 排除说明（可空）。 */
+ detail?: string;
 }
 
 /**
@@ -208,12 +208,12 @@ export interface ExcludedFragment {
  * - mandatory_overflow：关键内容仍无法容纳（触发显式失败）。
  */
 export const EXCLUSION_REASON_CODES = [
-  "budget_exhausted",
-  "duplicate",
-  "requeryable",
-  "low_priority",
-  "mandatory_overflow",
-  "tool_pair_incomplete",
+ "budget_exhausted",
+ "duplicate",
+ "requeryable",
+ "low_priority",
+ "mandatory_overflow",
+ "tool_pair_incomplete",
 ] as const;
 export type ExclusionReasonCode = (typeof EXCLUSION_REASON_CODES)[number];
 
@@ -234,26 +234,26 @@ export type ExclusionReasonCode = (typeof EXCLUSION_REASON_CODES)[number];
  * 本函数对 tool 返回 TIER_RECENT，调用方可通过显式 priorityTier 覆盖。
  */
 export function derivePriorityTier(
-  kind: FragmentKind,
-  scope?: FragmentScope,
+ kind: FragmentKind,
+ scope?: FragmentScope,
 ): FragmentPriorityTier {
-  switch (kind) {
-    case "system":
-    case "agent_instruction":
-      return FRAGMENT_PRIORITY_TIERS.TIER_MANDATORY;
-    case "user":
-      return FRAGMENT_PRIORITY_TIERS.TIER_RECENT;
-    case "tool":
-      return FRAGMENT_PRIORITY_TIERS.TIER_RECENT;
-    case "file":
-    case "knowledge":
-    case "memory":
-    case "skill":
-      return FRAGMENT_PRIORITY_TIERS.TIER_RELATED;
-    default:
-      // 历史压缩摘要等未列出的 kind → 最低优先级
-      return FRAGMENT_PRIORITY_TIERS.TIER_HISTORY;
-  }
+ switch (kind) {
+ case "system":
+ case "agent_instruction":
+ return FRAGMENT_PRIORITY_TIERS.TIER_MANDATORY;
+ case "user":
+ return FRAGMENT_PRIORITY_TIERS.TIER_RECENT;
+ case "tool":
+ return FRAGMENT_PRIORITY_TIERS.TIER_RECENT;
+ case "file":
+ case "knowledge":
+ case "memory":
+ case "skill":
+ return FRAGMENT_PRIORITY_TIERS.TIER_RELATED;
+ default:
+ // 历史压缩摘要等未列出的 kind → 最低优先级
+ return FRAGMENT_PRIORITY_TIERS.TIER_HISTORY;
+ }
 }
 
 // ─── 内容 hash 工具 ─────────────────────────────────────────
@@ -265,18 +265,18 @@ export function derivePriorityTier(
  * 规范化：递归排序对象 key 后取 sha256。
  */
 export function computeFragmentContentHash(text: string): string {
-  return `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
+ return `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 }
 
 /** Context 统一 Token 估算，所有 Provider 与运行时守卫使用同一实现。 */
 export function estimateFragmentTokens(text: string): number {
-  if (!text) return 0;
-  return Math.max(1, Math.ceil(text.length / 3));
+ if (!text) return 0;
+ return Math.max(1, Math.ceil(text.length / 3));
 }
 
 /** 校验 contentHash 是否符合 sha256: 前缀格式。 */
 export function isValidFragmentContentHash(hash: string): boolean {
-  return /^sha256:[0-9a-f]{64}$/.test(hash);
+ return /^sha256:[0-9a-f]{64}$/.test(hash);
 }
 
 /**
@@ -284,7 +284,7 @@ export function isValidFragmentContentHash(hash: string): boolean {
  * @returns true 一致；false 不一致（调用方应触发 CONTEXT_SOURCE_HASH_MISMATCH 或对应错误）。
  */
 export function verifyFragmentContentHash(text: string, expectedHash: string): boolean {
-  return computeFragmentContentHash(text) === expectedHash;
+ return computeFragmentContentHash(text) === expectedHash;
 }
 
 /**
@@ -292,44 +292,44 @@ export function verifyFragmentContentHash(text: string, expectedHash: string): b
  * 类型只能约束编译期；数据库内容、Provider 返回和 JSON 均须经过此运行时守卫。
  */
 export function assertContextFragment(fragment: ContextFragment): void {
-  if (!isKnownFragmentKind(fragment.kind)) {
-    throw new Error(`Fragment kind 非法: ${String(fragment.kind)}`);
-  }
-  if (
-    fragment.trust === "instruction" &&
-    fragment.kind !== "system" &&
-    fragment.kind !== "agent_instruction"
-  ) {
-    throw new Error(`Fragment instruction trust 不允许用于 kind=${fragment.kind}`);
-  }
-  if (
-    fragment.sensitivity === "restricted" &&
-    (fragment.text !== undefined || fragment.contentRef === undefined)
-  ) {
-    throw new Error("restricted Fragment 只能携带受控引用，禁止携带正文");
-  }
-  if (!fragment.sourceRef?.type || !fragment.sourceRef.id) {
-    throw new Error("Fragment sourceRef 不完整");
-  }
-  if (!isValidFragmentContentHash(fragment.contentHash)) {
-    throw new Error("Fragment contentHash 格式非法");
-  }
-  if (
-    fragment.text !== undefined &&
-    !verifyFragmentContentHash(fragment.text, fragment.contentHash)
-  ) {
-    throw new Error("Fragment contentHash 与正文不一致");
-  }
-  if (!Number.isInteger(fragment.tokenEstimate) || fragment.tokenEstimate < 0) {
-    throw new Error("Fragment tokenEstimate 必须是非负整数");
-  }
-  if (
-    fragment.text !== undefined &&
-    fragment.tokenEstimate !== estimateFragmentTokens(fragment.text)
-  ) {
-    throw new Error("Fragment tokenEstimate 与正文不一致");
-  }
-  if (!(fragment.freshness.updatedAt instanceof Date) || !fragment.selectionReason) {
-    throw new Error("Fragment freshness/reason 不完整");
-  }
+ if (!isKnownFragmentKind(fragment.kind)) {
+ throw new Error(`Fragment kind 非法: ${String(fragment.kind)}`);
+ }
+ if (
+ fragment.trust === "instruction" &&
+ fragment.kind !== "system" &&
+ fragment.kind !== "agent_instruction"
+ ) {
+ throw new Error(`Fragment instruction trust 不允许用于 kind=${fragment.kind}`);
+ }
+ if (
+ fragment.sensitivity === "restricted" &&
+ (fragment.text !== undefined || fragment.contentRef === undefined)
+ ) {
+ throw new Error("restricted Fragment 只能携带受控引用，禁止携带正文");
+ }
+ if (!fragment.sourceRef?.type || !fragment.sourceRef.id) {
+ throw new Error("Fragment sourceRef 不完整");
+ }
+ if (!isValidFragmentContentHash(fragment.contentHash)) {
+ throw new Error("Fragment contentHash 格式非法");
+ }
+ if (
+ fragment.text !== undefined &&
+ !verifyFragmentContentHash(fragment.text, fragment.contentHash)
+ ) {
+ throw new Error("Fragment contentHash 与正文不一致");
+ }
+ if (!Number.isInteger(fragment.tokenEstimate) || fragment.tokenEstimate < 0) {
+ throw new Error("Fragment tokenEstimate 必须是非负整数");
+ }
+ if (
+ fragment.text !== undefined &&
+ fragment.tokenEstimate !== estimateFragmentTokens(fragment.text)
+ ) {
+ throw new Error("Fragment tokenEstimate 与正文不一致");
+ }
+ if (!(fragment.freshness.updatedAt instanceof Date) || !fragment.selectionReason) {
+ throw new Error("Fragment freshness/reason 不完整");
+ }
 }

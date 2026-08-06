@@ -3,19 +3,19 @@
  */
 
 export {
-  RUNTIME_KINDS,
-  RUNTIME_LIFECYCLE_STATES,
-  RUNTIME_REVISION_STATES,
-  runtimeTable,
-  runtimeRevisionTable,
+ RUNTIME_KINDS,
+ RUNTIME_LIFECYCLE_STATES,
+ RUNTIME_REVISION_STATES,
+ runtimeTable,
+ runtimeRevisionTable,
 } from "@/lib/persistence/schema/runtime";
 
 export type {
-  RuntimeKind,
-  RuntimeLifecycleState,
-  RuntimeRevisionState,
-  Runtime as RuntimeRow,
-  RuntimeRevision as RuntimeRevisionRow,
-  NewRuntime as NewRuntimeRow,
-  NewRuntimeRevision as NewRuntimeRevisionRow,
+ RuntimeKind,
+ RuntimeLifecycleState,
+ RuntimeRevisionState,
+ Runtime as RuntimeRow,
+ RuntimeRevision as RuntimeRevisionRow,
+ NewRuntime as NewRuntimeRow,
+ NewRuntimeRevision as NewRuntimeRevisionRow,
 } from "@/lib/persistence/schema/runtime";

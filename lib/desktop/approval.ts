@@ -1,20 +1,20 @@
 /**
- * V10 Phase 6：审批策略模块。
+ * ：审批策略模块。
  *
- * 实现 03-agent-bridge-security.md §7 与 02-desktop-browser-architecture.md §6.2
+ * 实现 03-agent-bridge-security.md §7 与 02-desktop-browser-architecture.md 
  * 规定的风险矩阵与审批决策。Desktop 不盲信 Server —— 必须对过期、不匹配、
  * 超范围 approval 拒绝执行。RPC 信封中的 approvalId 必须对当前 command + scope 有效。
  *
  * 风险矩阵：
- * | 类型        | 示例                          | 默认                |
+ * | 类型 | 示例 | 默认 |
  * |------------|------------------------------|--------------------|
- * | read       | DOM/console/screenshot       | allow              |
- * | navigation | 打开公开 URL、后退、刷新         | 视网络策略            |
- * | local_write| 下载到 Thread Workspace        | allow + 审计        |
- * | external_write | 提交表单、发送、发布       | 必须审批             |
- * | destructive | 删除记录、取消服务            | 必须审批             |
- * | financial  | 付款、下单、转账               | 必须审批，禁止批量通配 |
- * | credential | 密码、验证码、Passkey          | 用户手动（绝不通过 AI） |
+ * | read | DOM/console/screenshot | allow |
+ * | navigation | 打开公开 URL、后退、刷新 | 视网络策略 |
+ * | local_write| 下载到 Thread Workspace | allow + 审计 |
+ * | external_write | 提交表单、发送、发布 | 必须审批 |
+ * | destructive | 删除记录、取消服务 | 必须审批 |
+ * | financial | 付款、下单、转账 | 必须审批，禁止批量通配 |
+ * | credential | 密码、验证码、Passkey | 用户手动（绝不通过 AI） |
  *
  * 安全约束：
  * - credential 风险一律拒绝（用户必须手动输入，AI 不得代填）
@@ -28,13 +28,13 @@ import { ACTION_COMMANDS, READ_COMMANDS, isActionCommand, isReadCommand } from "
  * 风险等级。
  */
 export type RiskLevel =
-  | "read"
-  | "navigation"
-  | "local_write"
-  | "external_write"
-  | "destructive"
-  | "financial"
-  | "credential";
+ | "read"
+ | "navigation"
+ | "local_write"
+ | "external_write"
+ | "destructive"
+ | "financial"
+ | "credential";
 
 /**
  * 审批决策。
@@ -50,31 +50,31 @@ export type ApprovalDecision = "allow" | "require_approval" | "deny";
  * - credential（修改密码）单独处理
  */
 export const SENSITIVE_ACTION_KEYWORDS = [
-  "删除",
-  "delete",
-  "remove",
-  "destroy",
-  "提交",
-  "submit",
-  "send",
-  "发送",
-  "发布",
-  "publish",
-  "post",
-  "付款",
-  "pay",
-  "purchase",
-  "buy",
-  "checkout",
-  "取消",
-  "cancel",
-  "确认",
-  "confirm",
-  "转账",
-  "transfer",
-  "修改密码",
-  "change password",
-  "reset password",
+ "删除",
+ "delete",
+ "remove",
+ "destroy",
+ "提交",
+ "submit",
+ "send",
+ "发送",
+ "发布",
+ "publish",
+ "post",
+ "付款",
+ "pay",
+ "purchase",
+ "buy",
+ "checkout",
+ "取消",
+ "cancel",
+ "确认",
+ "confirm",
+ "转账",
+ "transfer",
+ "修改密码",
+ "change password",
+ "reset password",
 ] as const;
 
 /**
@@ -86,31 +86,31 @@ export const SENSITIVE_ACTION_KEYWORDS = [
  * credential: 修改密码 / 重置密码 等
  */
 const KEYWORD_RISK_MAP: Record<string, RiskLevel> = {
-  删除: "destructive",
-  delete: "destructive",
-  remove: "destructive",
-  destroy: "destructive",
-  取消: "destructive",
-  cancel: "destructive",
-  提交: "external_write",
-  submit: "external_write",
-  send: "external_write",
-  发送: "external_write",
-  发布: "external_write",
-  publish: "external_write",
-  post: "external_write",
-  确认: "external_write",
-  confirm: "external_write",
-  付款: "financial",
-  pay: "financial",
-  purchase: "financial",
-  buy: "financial",
-  checkout: "financial",
-  转账: "financial",
-  transfer: "financial",
-  修改密码: "credential",
-  "change password": "credential",
-  "reset password": "credential",
+ 删除: "destructive",
+ delete: "destructive",
+ remove: "destructive",
+ destroy: "destructive",
+ 取消: "destructive",
+ cancel: "destructive",
+ 提交: "external_write",
+ submit: "external_write",
+ send: "external_write",
+ 发送: "external_write",
+ 发布: "external_write",
+ publish: "external_write",
+ post: "external_write",
+ 确认: "external_write",
+ confirm: "external_write",
+ 付款: "financial",
+ pay: "financial",
+ purchase: "financial",
+ buy: "financial",
+ checkout: "financial",
+ 转账: "financial",
+ transfer: "financial",
+ 修改密码: "credential",
+ "change password": "credential",
+ "reset password": "credential",
 };
 
 /**
@@ -119,13 +119,13 @@ const KEYWORD_RISK_MAP: Record<string, RiskLevel> = {
  * 这些命令受网络策略管控，但默认不需要 approval（如刷新、后退、切换 tab）。
  */
 const NAVIGATION_COMMANDS = new Set<string>([
-  "browser.navigate",
-  "browser.reload",
-  "browser.goBack",
-  "browser.goForward",
-  "browser.newTab",
-  "browser.closeTab",
-  "browser.switchTab",
+ "browser.navigate",
+ "browser.reload",
+ "browser.goBack",
+ "browser.goForward",
+ "browser.newTab",
+ "browser.closeTab",
+ "browser.switchTab",
 ]);
 
 /**
@@ -143,16 +143,16 @@ const KNOWN_COMMANDS = new Set<string>([...READ_COMMANDS, ...ACTION_COMMANDS]);
  * scope 是否覆盖当前命令。任一字段不匹配即拒绝执行。
  */
 export interface ApprovalScope {
-  /** 绑定的命令名（必须精确匹配） */
-  command: string;
-  /** 绑定的 thread ID */
-  threadId: string;
-  /** 绑定的 tab ID（可选，仅在双方都存在时校验） */
-  tabId?: string;
-  /** 绑定的 URL（可选，用于 navigate 命令） */
-  url?: string;
-  /** 过期时间（epoch ms） */
-  expiresAt: number;
+ /** 绑定的命令名（必须精确匹配） */
+ command: string;
+ /** 绑定的 thread ID */
+ threadId: string;
+ /** 绑定的 tab ID（可选，仅在双方都存在时校验） */
+ tabId?: string;
+ /** 绑定的 URL（可选，用于 navigate 命令） */
+ url?: string;
+ /** 过期时间（epoch ms） */
+ expiresAt: number;
 }
 
 /**
@@ -163,13 +163,13 @@ export interface ApprovalScope {
  * @returns 字段值为字符串时返回，否则返回 undefined
  */
 function getStringField(payload: unknown, field: string): string | undefined {
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    const value = (payload as Record<string, unknown>)[field];
-    if (typeof value === "string") {
-      return value;
-    }
-  }
-  return undefined;
+ if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+ const value = (payload as Record<string, unknown>)[field];
+ if (typeof value === "string") {
+ return value;
+ }
+ }
+ return undefined;
 }
 
 /**
@@ -179,14 +179,14 @@ function getStringField(payload: unknown, field: string): string | undefined {
  * @returns 命中关键词返回对应风险等级，未命中返回 null
  */
 function riskFromDescription(description: string | undefined): RiskLevel | null {
-  if (!description) return null;
-  const lower = description.toLowerCase();
-  for (const keyword of SENSITIVE_ACTION_KEYWORDS) {
-    if (lower.includes(keyword.toLowerCase())) {
-      return KEYWORD_RISK_MAP[keyword] ?? null;
-    }
-  }
-  return null;
+ if (!description) return null;
+ const lower = description.toLowerCase();
+ for (const keyword of SENSITIVE_ACTION_KEYWORDS) {
+ if (lower.includes(keyword.toLowerCase())) {
+ return KEYWORD_RISK_MAP[keyword] ?? null;
+ }
+ }
+ return null;
 }
 
 /**
@@ -199,14 +199,14 @@ function riskFromDescription(description: string | undefined): RiskLevel | null 
  * @returns 包含敏感关键词返回 true
  */
 export function containsSensitiveKeyword(description: string): boolean {
-  if (!description) return false;
-  const lower = description.toLowerCase();
-  for (const keyword of SENSITIVE_ACTION_KEYWORDS) {
-    if (lower.includes(keyword.toLowerCase())) {
-      return true;
-    }
-  }
-  return false;
+ if (!description) return false;
+ const lower = description.toLowerCase();
+ for (const keyword of SENSITIVE_ACTION_KEYWORDS) {
+ if (lower.includes(keyword.toLowerCase())) {
+ return true;
+ }
+ }
+ return false;
 }
 
 /**
@@ -217,7 +217,7 @@ export function containsSensitiveKeyword(description: string): boolean {
  * 2. navigation 命令（navigate / reload / goBack / goForward / newTab / closeTab / switchTab）→ navigation
  * 3. browser.scroll → read（不修改页面状态）
  * 4. browser.click / browser.doubleClick → 检查 description，命中敏感关键词按关键词映射，
- *    未命中 → read（点击按钮多用于导航，视同读取）
+ * 未命中 → read（点击按钮多用于导航，视同读取）
  * 5. browser.type → 检查 selector 是否含 password / pwd，是 → credential；否 → local_write
  * 6. browser.press / browser.select / browser.uploadWorkspaceFile → local_write
  * 7. 未知命令 → external_write（保守需审批，由上层兜底拒绝）
@@ -227,63 +227,63 @@ export function containsSensitiveKeyword(description: string): boolean {
  * @returns 风险等级
  */
 export function classifyCommandRisk(command: string, payload: unknown): RiskLevel {
-  // 1. 读取类命令
-  if (isReadCommand(command)) {
-    return "read";
-  }
+ // 1. 读取类命令
+ if (isReadCommand(command)) {
+ return "read";
+ }
 
-  // 2. 操作类命令进一步分类
-  if (isActionCommand(command)) {
-    // 2a. 导航类命令
-    if (NAVIGATION_COMMANDS.has(command)) {
-      return "navigation";
-    }
+ // 2. 操作类命令进一步分类
+ if (isActionCommand(command)) {
+ // 2a. 导航类命令
+ if (NAVIGATION_COMMANDS.has(command)) {
+ return "navigation";
+ }
 
-    // 2b. scroll 不修改页面状态 → read
-    if (command === "browser.scroll") {
-      return "read";
-    }
+ // 2b. scroll 不修改页面状态 → read
+ if (command === "browser.scroll") {
+ return "read";
+ }
 
-    // 2c. click / doubleClick：依据 description 判定
-    if (command === "browser.click" || command === "browser.doubleClick") {
-      const description = getStringField(payload, "description");
-      const risk = riskFromDescription(description);
-      if (risk) {
-        return risk;
-      }
-      return "read";
-    }
+ // 2c. click / doubleClick：依据 description 判定
+ if (command === "browser.click" || command === "browser.doubleClick") {
+ const description = getStringField(payload, "description");
+ const risk = riskFromDescription(description);
+ if (risk) {
+ return risk;
+ }
+ return "read";
+ }
 
-    // 2d. type：检查 selector 是否指向密码字段
-    if (command === "browser.type") {
-      const selector = getStringField(payload, "selector");
-      if (selector) {
-        const lower = selector.toLowerCase();
-        if (lower.includes("password") || lower.includes("pwd")) {
-          return "credential";
-        }
-      }
-      return "local_write";
-    }
+ // 2d. type：检查 selector 是否指向密码字段
+ if (command === "browser.type") {
+ const selector = getStringField(payload, "selector");
+ if (selector) {
+ const lower = selector.toLowerCase();
+ if (lower.includes("password") || lower.includes("pwd")) {
+ return "credential";
+ }
+ }
+ return "local_write";
+ }
 
-    // 2e. press / select / uploadWorkspaceFile → local_write
-    if (
-      command === "browser.press" ||
-      command === "browser.select" ||
-      command === "browser.uploadWorkspaceFile"
-    ) {
-      return "local_write";
-    }
-  }
+ // 2e. press / select / uploadWorkspaceFile → local_write
+ if (
+ command === "browser.press" ||
+ command === "browser.select" ||
+ command === "browser.uploadWorkspaceFile"
+ ) {
+ return "local_write";
+ }
+ }
 
-  // 3. 未知命令（不在 KNOWN_COMMANDS 内）：保守视为 external_write（需审批）
-  //    READ_COMMANDS / ACTION_COMMANDS 在此引用，确保命令白名单与 commands.ts 一致
-  if (!KNOWN_COMMANDS.has(command)) {
-    return "external_write";
-  }
+ // 3. 未知命令（不在 KNOWN_COMMANDS 内）：保守视为 external_write（需审批）
+ // READ_COMMANDS / ACTION_COMMANDS 在此引用，确保命令白名单与 commands.ts 一致
+ if (!KNOWN_COMMANDS.has(command)) {
+ return "external_write";
+ }
 
-  // 4. 已知命令但未匹配上述分支：保守视为 external_write
-  return "external_write";
+ // 4. 已知命令但未匹配上述分支：保守视为 external_write
+ return "external_write";
 }
 
 /**
@@ -298,8 +298,8 @@ export function classifyCommandRisk(command: string, payload: unknown): RiskLeve
  * @returns 需要审批返回 true
  */
 export function requiresApproval(command: string, payload: unknown): boolean {
-  const risk = classifyCommandRisk(command, payload);
-  return risk === "external_write" || risk === "destructive" || risk === "financial";
+ const risk = classifyCommandRisk(command, payload);
+ return risk === "external_write" || risk === "destructive" || risk === "financial";
 }
 
 /**
@@ -314,19 +314,19 @@ export function requiresApproval(command: string, payload: unknown): boolean {
  * @returns allow / require_approval / deny
  */
 export function decideApproval(command: string, payload: unknown): ApprovalDecision {
-  const risk = classifyCommandRisk(command, payload);
-  switch (risk) {
-    case "read":
-    case "navigation":
-    case "local_write":
-      return "allow";
-    case "external_write":
-    case "destructive":
-    case "financial":
-      return "require_approval";
-    case "credential":
-      return "deny";
-  }
+ const risk = classifyCommandRisk(command, payload);
+ switch (risk) {
+ case "read":
+ case "navigation":
+ case "local_write":
+ return "allow";
+ case "external_write":
+ case "destructive":
+ case "financial":
+ return "require_approval";
+ case "credential":
+ return "deny";
+ }
 }
 
 /**
@@ -347,42 +347,42 @@ export function decideApproval(command: string, payload: unknown): ApprovalDecis
  * @returns 校验通过返回 { ok: true }，失败返回 { ok: false, reason }
  */
 export function validateApprovalScope(
-  scope: ApprovalScope,
-  command: string,
-  payload: unknown,
-  now: number,
+ scope: ApprovalScope,
+ command: string,
+ payload: unknown,
+ now: number,
 ): { ok: true } | { ok: false; reason: string } {
-  // 1. 命令名精确匹配
-  if (scope.command !== command) {
-    return { ok: false, reason: "command_mismatch" };
-  }
+ // 1. 命令名精确匹配
+ if (scope.command !== command) {
+ return { ok: false, reason: "command_mismatch" };
+ }
 
-  // 2. 未过期（expiresAt === now 视为已过期）
-  if (scope.expiresAt <= now) {
-    return { ok: false, reason: "expired" };
-  }
+ // 2. 未过期（expiresAt === now 视为已过期）
+ if (scope.expiresAt <= now) {
+ return { ok: false, reason: "expired" };
+ }
 
-  // 3. threadId 匹配（payload 含 threadId 时校验）
-  const payloadThreadId = getStringField(payload, "threadId");
-  if (typeof payloadThreadId === "string" && scope.threadId !== payloadThreadId) {
-    return { ok: false, reason: "thread_mismatch" };
-  }
+ // 3. threadId 匹配（payload 含 threadId 时校验）
+ const payloadThreadId = getStringField(payload, "threadId");
+ if (typeof payloadThreadId === "string" && scope.threadId !== payloadThreadId) {
+ return { ok: false, reason: "thread_mismatch" };
+ }
 
-  // 4. tabId 匹配（双方都存在时校验，防跨 tab 越权）
-  const payloadTabId = getStringField(payload, "tabId");
-  if (
-    typeof payloadTabId === "string" &&
-    typeof scope.tabId === "string" &&
-    scope.tabId !== payloadTabId
-  ) {
-    return { ok: false, reason: "tab_mismatch" };
-  }
+ // 4. tabId 匹配（双方都存在时校验，防跨 tab 越权）
+ const payloadTabId = getStringField(payload, "tabId");
+ if (
+ typeof payloadTabId === "string" &&
+ typeof scope.tabId === "string" &&
+ scope.tabId !== payloadTabId
+ ) {
+ return { ok: false, reason: "tab_mismatch" };
+ }
 
-  // 5. url 匹配（双方都存在时校验，用于 navigate 命令防 URL 篡改）
-  const payloadUrl = getStringField(payload, "url");
-  if (typeof payloadUrl === "string" && typeof scope.url === "string" && scope.url !== payloadUrl) {
-    return { ok: false, reason: "url_mismatch" };
-  }
+ // 5. url 匹配（双方都存在时校验，用于 navigate 命令防 URL 篡改）
+ const payloadUrl = getStringField(payload, "url");
+ if (typeof payloadUrl === "string" && typeof scope.url === "string" && scope.url !== payloadUrl) {
+ return { ok: false, reason: "url_mismatch" };
+ }
 
-  return { ok: true };
+ return { ok: true };
 }

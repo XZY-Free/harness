@@ -6,19 +6,19 @@
  */
 
 export {
-  AGENT_LIFECYCLE_STATES,
-  AGENT_REVISION_SOURCE_TYPES,
-  AGENT_REVISION_STATES,
-  agentTable,
-  agentRevisionTable,
+ AGENT_LIFECYCLE_STATES,
+ AGENT_REVISION_SOURCE_TYPES,
+ AGENT_REVISION_STATES,
+ agentTable,
+ agentRevisionTable,
 } from "@/lib/persistence/schema/agent";
 
 export type {
-  AgentLifecycleState,
-  AgentRevisionSourceType,
-  AgentRevisionState,
-  Agent as AgentRow,
-  AgentRevision as AgentRevisionRow,
-  NewAgent as NewAgentRow,
-  NewAgentRevision as NewAgentRevisionRow,
+ AgentLifecycleState,
+ AgentRevisionSourceType,
+ AgentRevisionState,
+ Agent as AgentRow,
+ AgentRevision as AgentRevisionRow,
+ NewAgent as NewAgentRow,
+ NewAgentRevision as NewAgentRevisionRow,
 } from "@/lib/persistence/schema/agent";

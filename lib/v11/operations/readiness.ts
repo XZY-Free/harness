@@ -6,7 +6,7 @@ import { getSSEConnectionQuota } from "@/lib/v11/gateway/sse-connection-quota";
  * V11 服务就绪状态检查器（S12-W03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md §7.1（查询系统就绪状态）
+ * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md （查询系统就绪状态）
  * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W03
  *
  * 职责：
@@ -21,14 +21,14 @@ import { getSSEConnectionQuota } from "@/lib/v11/gateway/sse-connection-quota";
  */
 import { sql } from "drizzle-orm";
 
-/** Readiness scope 类型（spec §7.1）。 */
+/** Readiness scope 类型（spec ）。 */
 export const READINESS_SCOPES = [
-  "employee_api",
-  "runtime_dispatch",
-  "gateway",
-  "event_projection",
-  "job_scheduler",
-  "deletion",
+ "employee_api",
+ "runtime_dispatch",
+ "gateway",
+ "event_projection",
+ "job_scheduler",
+ "deletion",
 ] as const;
 export type ReadinessScope = (typeof READINESS_SCOPES)[number];
 
@@ -36,7 +36,7 @@ const READINESS_SCOPE_SET: ReadonlySet<string> = new Set(READINESS_SCOPES);
 
 /** 判断 scope 是否合法。 */
 export function isKnownReadinessScope(scope: string): scope is ReadinessScope {
-  return READINESS_SCOPE_SET.has(scope);
+ return READINESS_SCOPE_SET.has(scope);
 }
 
 /** 组件状态。 */
@@ -44,31 +44,31 @@ export type ComponentState = "ready" | "degraded" | "unavailable";
 
 /** 单个组件检查结果。 */
 export interface ReadinessComponent {
-  /** 组件名称（等于 scope 或子组件名）。 */
-  name: string;
-  /** 组件状态。 */
-  state: ComponentState;
-  /** 状态原因码（如 QUARANTINED_STREAMS_PRESENT、MIGRATION_PENDING）。 */
-  reason_codes: string[];
-  /** 结构化指标（如 max_lag_events、quarantined_streams）。 */
-  metrics: Record<string, number | string | boolean | null>;
+ /** 组件名称（等于 scope 或子组件名）。 */
+ name: string;
+ /** 组件状态。 */
+ state: ComponentState;
+ /** 状态原因码（如 QUARANTINED_STREAMS_PRESENT、MIGRATION_PENDING）。 */
+ reason_codes: string[];
+ /** 结构化指标（如 max_lag_events、quarantined_streams）。 */
+ metrics: Record<string, number | string | boolean | null>;
 }
 
 /** Readiness 聚合结果。 */
 export interface ReadinessResult {
-  /** 整体状态：任一组件 unavailable → unavailable；任一 degraded → degraded；否则 ready。 */
-  overall_state: ComponentState;
-  /** 检查时间（ISO 8601 UTC）。 */
-  checked_at: string;
-  /** 组件列表。 */
-  components: ReadinessComponent[];
+ /** 整体状态：任一组件 unavailable → unavailable；任一 degraded → degraded；否则 ready。 */
+ overall_state: ComponentState;
+ /** 检查时间（ISO 8601 UTC）。 */
+ checked_at: string;
+ /** 组件列表。 */
+ components: ReadinessComponent[];
 }
 
 /** Drizzle migrations 表行（内部查询用）。 */
 interface DrizzleMigrationRow {
-  id: number;
-  hash: string;
-  created_at: string;
+ id: number;
+ hash: string;
+ created_at: string;
 }
 
 /**
@@ -78,59 +78,59 @@ interface DrizzleMigrationRow {
  * 失败 → unavailable（MIGRATION_TABLE_INACCESSIBLE）。
  */
 async function checkDatabaseMigration(): Promise<ReadinessComponent> {
-  try {
-    const [rows] = (await db.execute(
-      sql`SELECT id, hash, created_at FROM __drizzle_migrations ORDER BY id DESC LIMIT 1`,
-    )) as unknown as [DrizzleMigrationRow[]];
-    const count = Array.isArray(rows) ? rows.length : 0;
-    const latest = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-    return {
-      name: "database_migration",
-      state: count > 0 ? "ready" : "unavailable",
-      reason_codes: count > 0 ? [] : ["MIGRATION_TABLE_EMPTY"],
-      metrics: {
-        applied_migration_count: count,
-        latest_migration_id: latest?.id ?? null,
-      },
-    };
-  } catch {
-    return {
-      name: "database_migration",
-      state: "unavailable",
-      reason_codes: ["MIGRATION_TABLE_INACCESSIBLE"],
-      metrics: {},
-    };
-  }
+ try {
+ const [rows] = (await db.execute(
+ sql`SELECT id, hash, created_at FROM __drizzle_migrations ORDER BY id DESC LIMIT 1`,
+ )) as unknown as [DrizzleMigrationRow[]];
+ const count = Array.isArray(rows) ? rows.length : 0;
+ const latest = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+ return {
+ name: "database_migration",
+ state: count > 0 ? "ready" : "unavailable",
+ reason_codes: count > 0 ? [] : ["MIGRATION_TABLE_EMPTY"],
+ metrics: {
+ applied_migration_count: count,
+ latest_migration_id: latest?.id ?? null,
+ },
+ };
+ } catch {
+ return {
+ name: "database_migration",
+ state: "unavailable",
+ reason_codes: ["MIGRATION_TABLE_INACCESSIBLE"],
+ metrics: {},
+ };
+ }
 }
 
 /**
- * 检查事件投影状态（spec §7.1 示例：max_lag_events + quarantined_streams）。
+ * 检查事件投影状态（spec 示例：max_lag_events + quarantined_streams）。
  *
  * - 统计租户内 quarantined stream 数。
  * - quarantined_streams > 0 → degraded（QUARANTINED_STREAMS_PRESENT）。
  * - 查询失败 → unavailable。
  */
 async function checkEventProjection(tenantId: string): Promise<ReadinessComponent> {
-  try {
-    const quarantined = await listQuarantinedFailures(tenantId, 500);
-    const quarantinedCount = quarantined.length;
-    const state: ComponentState = quarantinedCount > 0 ? "degraded" : "ready";
-    return {
-      name: "event_projection",
-      state,
-      reason_codes: quarantinedCount > 0 ? ["QUARANTINED_STREAMS_PRESENT"] : [],
-      metrics: {
-        quarantined_streams: quarantinedCount,
-      },
-    };
-  } catch {
-    return {
-      name: "event_projection",
-      state: "unavailable",
-      reason_codes: ["PROJECTION_CHECK_FAILED"],
-      metrics: {},
-    };
-  }
+ try {
+ const quarantined = await listQuarantinedFailures(tenantId, 500);
+ const quarantinedCount = quarantined.length;
+ const state: ComponentState = quarantinedCount > 0 ? "degraded" : "ready";
+ return {
+ name: "event_projection",
+ state,
+ reason_codes: quarantinedCount > 0 ? ["QUARANTINED_STREAMS_PRESENT"] : [],
+ metrics: {
+ quarantined_streams: quarantinedCount,
+ },
+ };
+ } catch {
+ return {
+ name: "event_projection",
+ state: "unavailable",
+ reason_codes: ["PROJECTION_CHECK_FAILED"],
+ metrics: {},
+ };
+ }
 }
 
 /**
@@ -140,47 +140,47 @@ async function checkEventProjection(tenantId: string): Promise<ReadinessComponen
  * - 达到绝对上限 → unavailable（OVERLOAD_MAX_REACHED）。
  */
 function checkGateway(): ReadinessComponent {
-  try {
-    const protector = getOverloadProtector();
-    const config = protector.getConfig();
-    const concurrent = protector.getConcurrent();
-    const ratio = config.maxConcurrent > 0 ? concurrent / config.maxConcurrent : 0;
+ try {
+ const protector = getOverloadProtector();
+ const config = protector.getConfig();
+ const concurrent = protector.getConcurrent();
+ const ratio = config.maxConcurrent > 0 ? concurrent / config.maxConcurrent : 0;
 
-    const sseQuota = getSSEConnectionQuota();
-    const sseSnapshot = sseQuota.getSnapshot();
+ const sseQuota = getSSEConnectionQuota();
+ const sseSnapshot = sseQuota.getSnapshot();
 
-    let state: ComponentState = "ready";
-    const reasonCodes: string[] = [];
+ let state: ComponentState = "ready";
+ const reasonCodes: string[] = [];
 
-    if (ratio >= 1.0) {
-      state = "unavailable";
-      reasonCodes.push("OVERLOAD_MAX_REACHED");
-    } else if (ratio >= 0.9) {
-      state = "degraded";
-      reasonCodes.push("OVERLOAD_NEAR_LIMIT");
-    }
+ if (ratio >= 1.0) {
+ state = "unavailable";
+ reasonCodes.push("OVERLOAD_MAX_REACHED");
+ } else if (ratio >= 0.9) {
+ state = "degraded";
+ reasonCodes.push("OVERLOAD_NEAR_LIMIT");
+ }
 
-    return {
-      name: "gateway",
-      state,
-      reason_codes: reasonCodes,
-      metrics: {
-        concurrent_requests: concurrent,
-        max_concurrent: config.maxConcurrent,
-        concurrent_ratio: Number.parseFloat(ratio.toFixed(4)),
-        sse_active_tenant: sseSnapshot.totalActive.tenant,
-        sse_active_user: sseSnapshot.totalActive.user,
-        sse_active_thread: sseSnapshot.totalActive.thread,
-      },
-    };
-  } catch {
-    return {
-      name: "gateway",
-      state: "unavailable",
-      reason_codes: ["GATEWAY_CHECK_FAILED"],
-      metrics: {},
-    };
-  }
+ return {
+ name: "gateway",
+ state,
+ reason_codes: reasonCodes,
+ metrics: {
+ concurrent_requests: concurrent,
+ max_concurrent: config.maxConcurrent,
+ concurrent_ratio: Number.parseFloat(ratio.toFixed(4)),
+ sse_active_tenant: sseSnapshot.totalActive.tenant,
+ sse_active_user: sseSnapshot.totalActive.user,
+ sse_active_thread: sseSnapshot.totalActive.thread,
+ },
+ };
+ } catch {
+ return {
+ name: "gateway",
+ state: "unavailable",
+ reason_codes: ["GATEWAY_CHECK_FAILED"],
+ metrics: {},
+ };
+ }
 }
 
 /**
@@ -189,16 +189,16 @@ function checkGateway(): ReadinessComponent {
  * Employee API 依赖数据库可用。迁移状态不 ready → degraded。
  */
 async function checkEmployeeApi(): Promise<ReadinessComponent> {
-  const migration = await checkDatabaseMigration();
-  const state: ComponentState = migration.state === "ready" ? "ready" : "degraded";
-  return {
-    name: "employee_api",
-    state,
-    reason_codes: migration.reason_codes.length > 0 ? migration.reason_codes : [],
-    metrics: {
-      migration_state: migration.state,
-    },
-  };
+ const migration = await checkDatabaseMigration();
+ const state: ComponentState = migration.state === "ready" ? "ready" : "degraded";
+ return {
+ name: "employee_api",
+ state,
+ reason_codes: migration.reason_codes.length > 0 ? migration.reason_codes : [],
+ metrics: {
+ migration_state: migration.state,
+ },
+ };
 }
 
 /**
@@ -207,31 +207,31 @@ async function checkEmployeeApi(): Promise<ReadinessComponent> {
  * Runtime 调度依赖数据库 + 网关。任一 degraded → degraded。
  */
 async function checkRuntimeDispatch(): Promise<ReadinessComponent> {
-  const migration = await checkDatabaseMigration();
-  const gateway = checkGateway();
+ const migration = await checkDatabaseMigration();
+ const gateway = checkGateway();
 
-  let state: ComponentState = "ready";
-  const reasonCodes: string[] = [];
+ let state: ComponentState = "ready";
+ const reasonCodes: string[] = [];
 
-  if (migration.state === "unavailable" || gateway.state === "unavailable") {
-    state = "unavailable";
-    reasonCodes.push("RUNTIME_DISPATCH_BLOCKED");
-  } else if (migration.state === "degraded" || gateway.state === "degraded") {
-    state = "degraded";
-    if (gateway.reason_codes.length > 0) {
-      reasonCodes.push(...gateway.reason_codes);
-    }
-  }
+ if (migration.state === "unavailable" || gateway.state === "unavailable") {
+ state = "unavailable";
+ reasonCodes.push("RUNTIME_DISPATCH_BLOCKED");
+ } else if (migration.state === "degraded" || gateway.state === "degraded") {
+ state = "degraded";
+ if (gateway.reason_codes.length > 0) {
+ reasonCodes.push(...gateway.reason_codes);
+ }
+ }
 
-  return {
-    name: "runtime_dispatch",
-    state,
-    reason_codes: reasonCodes,
-    metrics: {
-      migration_state: migration.state,
-      gateway_state: gateway.state,
-    },
-  };
+ return {
+ name: "runtime_dispatch",
+ state,
+ reason_codes: reasonCodes,
+ metrics: {
+ migration_state: migration.state,
+ gateway_state: gateway.state,
+ },
+ };
 }
 
 /**
@@ -240,15 +240,15 @@ async function checkRuntimeDispatch(): Promise<ReadinessComponent> {
  * 目前依赖数据库可用。后续可扩展为检查队列积压、调度器心跳。
  */
 async function checkJobScheduler(): Promise<ReadinessComponent> {
-  const migration = await checkDatabaseMigration();
-  return {
-    name: "job_scheduler",
-    state: migration.state === "ready" ? "ready" : "degraded",
-    reason_codes: migration.state !== "ready" ? migration.reason_codes : [],
-    metrics: {
-      migration_state: migration.state,
-    },
-  };
+ const migration = await checkDatabaseMigration();
+ return {
+ name: "job_scheduler",
+ state: migration.state === "ready" ? "ready" : "degraded",
+ reason_codes: migration.state !== "ready" ? migration.reason_codes : [],
+ metrics: {
+ migration_state: migration.state,
+ },
+ };
 }
 
 /**
@@ -258,15 +258,15 @@ async function checkJobScheduler(): Promise<ReadinessComponent> {
  * W07 实施后扩展为检查活跃删除请求、超期请求、步骤失败率。
  */
 async function checkDeletion(): Promise<ReadinessComponent> {
-  return {
-    name: "deletion",
-    state: "ready",
-    reason_codes: [],
-    metrics: {
-      active_requests: 0,
-      overdue_requests: 0,
-    },
-  };
+ return {
+ name: "deletion",
+ state: "ready",
+ reason_codes: [],
+ metrics: {
+ active_requests: 0,
+ overdue_requests: 0,
+ },
+ };
 }
 
 /**
@@ -277,9 +277,9 @@ async function checkDeletion(): Promise<ReadinessComponent> {
  * - 全部 ready → ready
  */
 function aggregateState(components: ReadinessComponent[]): ComponentState {
-  if (components.some((c) => c.state === "unavailable")) return "unavailable";
-  if (components.some((c) => c.state === "degraded")) return "degraded";
-  return "ready";
+ if (components.some((c) => c.state === "unavailable")) return "unavailable";
+ if (components.some((c) => c.state === "degraded")) return "degraded";
+ return "ready";
 }
 
 /**
@@ -290,33 +290,33 @@ function aggregateState(components: ReadinessComponent[]): ComponentState {
  * @returns readiness 聚合结果
  */
 export async function checkReadiness(
-  tenantId: string,
-  scope?: ReadinessScope,
+ tenantId: string,
+ scope?: ReadinessScope,
 ): Promise<ReadinessResult> {
-  const components: ReadinessComponent[] = [];
+ const components: ReadinessComponent[] = [];
 
-  if (!scope || scope === "employee_api") {
-    components.push(await checkEmployeeApi());
-  }
-  if (!scope || scope === "runtime_dispatch") {
-    components.push(await checkRuntimeDispatch());
-  }
-  if (!scope || scope === "gateway") {
-    components.push(checkGateway());
-  }
-  if (!scope || scope === "event_projection") {
-    components.push(await checkEventProjection(tenantId));
-  }
-  if (!scope || scope === "job_scheduler") {
-    components.push(await checkJobScheduler());
-  }
-  if (!scope || scope === "deletion") {
-    components.push(await checkDeletion());
-  }
+ if (!scope || scope === "employee_api") {
+ components.push(await checkEmployeeApi());
+ }
+ if (!scope || scope === "runtime_dispatch") {
+ components.push(await checkRuntimeDispatch());
+ }
+ if (!scope || scope === "gateway") {
+ components.push(checkGateway());
+ }
+ if (!scope || scope === "event_projection") {
+ components.push(await checkEventProjection(tenantId));
+ }
+ if (!scope || scope === "job_scheduler") {
+ components.push(await checkJobScheduler());
+ }
+ if (!scope || scope === "deletion") {
+ components.push(await checkDeletion());
+ }
 
-  return {
-    overall_state: aggregateState(components),
-    checked_at: new Date().toISOString(),
-    components,
-  };
+ return {
+ overall_state: aggregateState(components),
+ checked_at: new Date().toISOString(),
+ components,
+ };
 }

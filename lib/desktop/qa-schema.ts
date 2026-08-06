@@ -1,5 +1,5 @@
 /**
- * V10 Phase 7-5：QA 结果 schema 统一层。
+ * ：QA 结果 schema 统一层。
  *
  * 这是 Server 与 Desktop 共享的纯类型边界，无运行时依赖（与 `lib/desktop/redaction.ts`
  * 同构约束）。Web Playwright QA 与 Desktop CDP QA 产出同一形状的结果，AI 工具
@@ -26,8 +26,8 @@ export type QaRunner = "web-playwright" | "desktop-cdp";
 
 /** 视口尺寸（width × height）。 */
 export interface QaViewport {
-  width: number;
-  height: number;
+ width: number;
+ height: number;
 }
 
 /** Console 消息级别（含未捕获异常 pageerror）。与 `ConsoleEntry.level` 对齐。 */
@@ -41,10 +41,10 @@ export type QaConsoleLevel = "error" | "warning" | "pageerror" | "log" | "info";
  * - `pageerror` 经独立钩子（`onPageError`）触发，但归入同一 level 枚举
  */
 export interface QaConsoleMessage {
-  level: QaConsoleLevel;
-  text: string;
-  url?: string;
-  lineNumber?: number;
+ level: QaConsoleLevel;
+ text: string;
+ url?: string;
+ lineNumber?: number;
 }
 
 /**
@@ -54,12 +54,12 @@ export interface QaConsoleMessage {
  * best-effort 填充（可选字段，缺失不阻断）。
  */
 export interface QaNetworkResponse {
-  url: string;
-  status: number;
-  method?: string;
-  statusText?: string;
-  mimeType?: string;
-  duration?: number;
+ url: string;
+ status: number;
+ method?: string;
+ statusText?: string;
+ mimeType?: string;
+ duration?: number;
 }
 
 /**
@@ -68,16 +68,16 @@ export interface QaNetworkResponse {
  * 与 Playwright `storageState` 同构，QA 隐藏 context 可继承用户登录态。
  */
 export interface QaStorageState {
-  cookies: Array<{
-    name: string;
-    value: string;
-    domain: string;
-    path: string;
-  }>;
-  origins: Array<{
-    origin: string;
-    localStorage: Array<{ name: string; value: string }>;
-  }>;
+ cookies: Array<{
+ name: string;
+ value: string;
+ domain: string;
+ path: string;
+ }>;
+ origins: Array<{
+ origin: string;
+ localStorage: Array<{ name: string; value: string }>;
+ }>;
 }
 
 /**
@@ -89,20 +89,20 @@ export interface QaStorageState {
  * 相同的检查规则。
  */
 export interface QaPage {
-  readonly viewport: QaViewport;
-  goto(url: string, timeoutMs?: number): Promise<void>;
-  screenshotFullPage(): Promise<Buffer>;
-  evaluate<T>(script: string): Promise<T>;
-  close(): Promise<void>;
+ readonly viewport: QaViewport;
+ goto(url: string, timeoutMs?: number): Promise<void>;
+ screenshotFullPage(): Promise<Buffer>;
+ evaluate<T>(script: string): Promise<T>;
+ close(): Promise<void>;
 }
 
 /** QA Page 生命周期事件钩子，在 `goto` 期间收集（Web push 模型；Desktop 可用适配器桥接）。 */
 export interface QaPageHooks {
-  headers?: Record<string, string>;
-  storageState?: QaStorageState;
-  onConsole?(msg: QaConsoleMessage): void;
-  onPageError?(errorText: string): void;
-  onResponse?(res: QaNetworkResponse): void;
+ headers?: Record<string, string>;
+ storageState?: QaStorageState;
+ onConsole?(msg: QaConsoleMessage): void;
+ onPageError?(errorText: string): void;
+ onResponse?(res: QaNetworkResponse): void;
 }
 
 /**
@@ -115,31 +115,31 @@ export interface QaPageHooks {
  * browser_unavailable / capture_failed 等。
  */
 export interface QaFailure {
-  type: string;
-  viewport?: number;
-  detail: string;
-  artifactPath?: string | null;
+ type: string;
+ viewport?: number;
+ detail: string;
+ artifactPath?: string | null;
 }
 
-/** `qa.check_passed` 事件 payload（plan §4.2）。 */
+/** `qa.check_passed` 事件 payload（plan ）。 */
 export type QaCheckPassedPayload = {
-  checkId: QaCheckId;
-  kind: QaCheckKind;
-  viewports: number[];
-  durationMs: number;
-  artifactPath?: string | null;
-  runner?: QaRunner;
+ checkId: QaCheckId;
+ kind: QaCheckKind;
+ viewports: number[];
+ durationMs: number;
+ artifactPath?: string | null;
+ runner?: QaRunner;
 };
 
-/** `qa.check_failed` 事件 payload（plan §4.2）。 */
+/** `qa.check_failed` 事件 payload（plan ）。 */
 export type QaCheckFailedPayload = {
-  checkId: QaCheckId;
-  kind: QaCheckKind;
-  viewports: number[];
-  failures: QaFailure[];
-  durationMs: number;
-  artifactPath?: string | null;
-  runner?: QaRunner;
+ checkId: QaCheckId;
+ kind: QaCheckKind;
+ viewports: number[];
+ failures: QaFailure[];
+ durationMs: number;
+ artifactPath?: string | null;
+ runner?: QaRunner;
 };
 
 /**
@@ -149,33 +149,33 @@ export type QaCheckFailedPayload = {
  * 与未来 Desktop 端等价函数都返回此形状，便于 AI 工具与 Studio 不区分产出者消费。
  */
 export interface QaCheckResult {
-  ok: boolean;
-  kind: QaCheckKind;
-  failures: QaFailure[];
-  viewports: number[];
-  durationMs: number;
-  artifactPath?: string | null;
-  runner?: QaRunner;
+ ok: boolean;
+ kind: QaCheckKind;
+ failures: QaFailure[];
+ viewports: number[];
+ durationMs: number;
+ artifactPath?: string | null;
+ runner?: QaRunner;
 }
 
 /** QA gate 结果（保留 skipped/error 语义）。 */
 export interface QaGateResult {
-  ok: boolean;
-  skipped: boolean;
-  kind: "gate";
-  failures?: QaFailure[];
-  error?: string;
-  evidencePath?: string | null;
-  durationMs: number;
-  runner?: QaRunner;
+ ok: boolean;
+ skipped: boolean;
+ kind: "gate";
+ failures?: QaFailure[];
+ error?: string;
+ evidencePath?: string | null;
+ durationMs: number;
+ runner?: QaRunner;
 }
 
 /** 截图结果（单 viewport，无 failures）。 */
 export interface QaCaptureResult {
-  ok: boolean;
-  viewport: number;
-  durationMs: number;
-  screenshotPath?: string | null;
-  error?: string;
-  runner?: QaRunner;
+ ok: boolean;
+ viewport: number;
+ durationMs: number;
+ screenshotPath?: string | null;
+ error?: string;
+ runner?: QaRunner;
 }

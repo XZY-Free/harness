@@ -3,9 +3,9 @@
  *
  * 事实源：
  * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §3（Gateway API）、
- *   §2.2（身份与授权：Gateway API 走 Workload Token，audience=gateway）、
- *   §2.3（公共请求头：Idempotency-Key / X-Request-ID）、
- *   §2.5（成功与错误格式）。
+ * （身份与授权：Gateway API 走 Workload Token，audience=gateway）、
+ * （公共请求头：Idempotency-Key / X-Request-ID）、
+ * （成功与错误格式）。
  * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §3（Runtime Capability API）。
  *
  * 职责：
@@ -25,12 +25,12 @@
 import { apiError } from "@/lib/http";
 import { AuthenticationError } from "@/lib/identity/resolver";
 import {
-  type WorkloadTokenClaims,
-  WorkloadTokenError,
-  assertAudienceMatch,
-  decodeWorkloadToken,
-  extractBearerToken,
-  workloadTokenErrorResponse,
+ type WorkloadTokenClaims,
+ WorkloadTokenError,
+ assertAudienceMatch,
+ decodeWorkloadToken,
+ extractBearerToken,
+ workloadTokenErrorResponse,
 } from "@/lib/identity/workload-token";
 import { isTokenRevoked } from "@/lib/identity/workload-token-revocation-queries";
 
@@ -44,7 +44,7 @@ export type { WorkloadTokenClaims };
  * 此类型供 route handler 直接读取，避免在调用处使用 non-null assertion。
  */
 export type GatewayPrincipal = Omit<WorkloadTokenClaims, "invocationId"> & {
-  invocationId: string;
+ invocationId: string;
 };
 
 /**
@@ -64,36 +64,36 @@ export type GatewayPrincipal = Omit<WorkloadTokenClaims, "invocationId"> & {
  * @throws AuthenticationError 缺少 Token（包装为 missing_identity）
  */
 export async function resolveGatewayPrincipal(headers: Headers): Promise<GatewayPrincipal> {
-  const token = extractBearerToken(headers);
-  if (!token) {
-    throw new WorkloadTokenError("missing_token", "缺少 Authorization Bearer Token");
-  }
-  const claims = decodeWorkloadToken(token);
-  assertAudienceMatch(claims, "gateway");
-  if (!claims.invocationId) {
-    // decodeWorkloadToken 已强制要求 type=gateway 必须有 invocationId；此处只是类型守卫。
-    throw new WorkloadTokenError("malformed_token", "Gateway Token 缺失 invocationId");
-  }
-  // S12-W05：撤销校验（DB 查询）
-  if (await isTokenRevoked(claims.tenantId, claims.jti)) {
-    throw new WorkloadTokenError("token_revoked", `Workload Token 已被撤销（jti=${claims.jti}）`);
-  }
-  return { ...claims, invocationId: claims.invocationId };
+ const token = extractBearerToken(headers);
+ if (!token) {
+ throw new WorkloadTokenError("missing_token", "缺少 Authorization Bearer Token");
+ }
+ const claims = decodeWorkloadToken(token);
+ assertAudienceMatch(claims, "gateway");
+ if (!claims.invocationId) {
+ // decodeWorkloadToken 已强制要求 type=gateway 必须有 invocationId；此处只是类型守卫。
+ throw new WorkloadTokenError("malformed_token", "Gateway Token 缺失 invocationId");
+ }
+ // S12-W05：撤销校验（DB 查询）
+ if (await isTokenRevoked(claims.tenantId, claims.jti)) {
+ throw new WorkloadTokenError("token_revoked", `Workload Token 已被撤销（jti=${claims.jti}）`);
+ }
+ return { ...claims, invocationId: claims.invocationId };
 }
 
 /**
  * 把 WorkloadTokenError / AuthenticationError 转成 401 响应；非身份错误返回 null。
  */
 export function gatewayAuthErrorResponse(error: unknown, requestId: string): Response | null {
-  if (error instanceof AuthenticationError) {
-    return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
-  }
-  return workloadTokenErrorResponse(error, requestId);
+ if (error instanceof AuthenticationError) {
+ return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
+ }
+ return workloadTokenErrorResponse(error, requestId);
 }
 
 /** 构造 400 REQUEST_SCHEMA_INVALID 响应（请求体校验失败）。 */
 export function gatewaySchemaInvalidTable(requestId: string, message: string): Response {
-  return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
+ return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
 }
 
 /**
@@ -103,12 +103,12 @@ export function gatewaySchemaInvalidTable(requestId: string, message: string): R
  * 不暴露「存在但无权」与「不存在」的区别。
  */
 export function gatewayCapabilityNotAllowedTable(requestId: string, message: string): Response {
-  return apiError("CAPABILITY_NOT_ALLOWED", message, { requestId });
+ return apiError("CAPABILITY_NOT_ALLOWED", message, { requestId });
 }
 
 /** 构造 422 CAPABILITY_CONTENT_BLOCKED 响应（Skill 内容不可读，如未发布版本）。 */
 export function gatewayCapabilityContentBlockedTable(requestId: string, message: string): Response {
-  return apiError("CAPABILITY_CONTENT_BLOCKED", message, { requestId });
+ return apiError("CAPABILITY_CONTENT_BLOCKED", message, { requestId });
 }
 
 /**
@@ -117,14 +117,14 @@ export function gatewayCapabilityContentBlockedTable(requestId: string, message:
  * retryable=true：客户端应重新搜索目录 + 读取最新 currentSchemaRevisionId 后重试。
  */
 export function gatewayToolSchemaChangedTable(
-  requestId: string,
-  message: string,
-  details?: Record<string, unknown>,
+ requestId: string,
+ message: string,
+ details?: Record<string, unknown>,
 ): Response {
-  return apiError("TOOL_SCHEMA_CHANGED", message, { requestId, ...(details ? { details } : {}) });
+ return apiError("TOOL_SCHEMA_CHANGED", message, { requestId, ...(details ? { details } : {}) });
 }
 
 /** 构造 400 CATALOG_REVISION_INVALID 响应（If-None-Match ETag 格式非法）。 */
 export function gatewayCatalogRevisionInvalidTable(requestId: string, message: string): Response {
-  return apiError("CATALOG_REVISION_INVALID", message, { requestId });
+ return apiError("CATALOG_REVISION_INVALID", message, { requestId });
 }

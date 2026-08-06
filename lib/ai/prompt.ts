@@ -6,10 +6,10 @@
  * - 工具常驻（readFile/writeFile/runCommand/runTests/listFiles/reportReady），不再只在 codegen 挂载
  * - Agent 自主判断何时读/写/运行/测试，不靠 step 推进
  *
- * Phase 3 Skill Registry 落地后，本常量是示例 skill `build-from-idea` v1 的
+ * Skill Registry 落地后，本常量是示例 skill `build-from-idea` v1 的
  * promptTemplate 来源（lib/db/seed.ts 引用灌库）；route.ts 在 skill 解析失败
  * （库未 seed）时回退到此常量，保证不回归。旧的 step-based lib/skill/steps.ts
- * 已于 Phase 3 移除。新增/修改策略应走 skill_versions，不再直接改本常量作运行时唯一来源。
+ * 已于 移除。新增/修改策略应走 skill_versions，不再直接改本常量作运行时唯一来源。
  */
 
 export const AGENT_SYSTEM_PROMPT = `你是 SnowHarness 平台的 AI 开发助手。SnowHarness 是一个「从想法到上线」的 AI 引导式开发平台。

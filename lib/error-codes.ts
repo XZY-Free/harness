@@ -11,106 +11,106 @@
  * - HTTP 映射集以契约为准（400/401/403/404/409/412/413/422/429/503）。
  */
 export interface ApiErrorDefinition {
-  /** HTTP 状态码，与 error-codes.json 的 http 字段一致。 */
-  readonly http: number;
-  /** 是否允许客户端按 retry_after/退避重试。 */
-  readonly retryable: boolean;
+ /** HTTP 状态码，与 error-codes.json 的 http 字段一致。 */
+ readonly http: number;
+ /** 是否允许客户端按 retry_after/退避重试。 */
+ readonly retryable: boolean;
 }
 
 export const API_ERROR_CODES = {
-  ACCESS_DENIED: { http: 403, retryable: false },
-  ACTION_SCOPE_DENIED: { http: 403, retryable: false },
-  ACTIVE_LEGAL_HOLD: { http: 409, retryable: false },
-  AGENT_CAPABILITY_UNSUPPORTED: { http: 422, retryable: false },
-  ARTIFACT_ATTESTATION_FAILED: { http: 422, retryable: false },
-  ARTIFACT_ATTESTATION_REVOKED: { http: 409, retryable: false },
-  ARTIFACT_BINDING_MISMATCH: { http: 409, retryable: false },
-  ARTIFACT_NOT_VERIFIED: { http: 409, retryable: false },
-  ATTESTATION_ALREADY_REVOKED: { http: 409, retryable: false },
-  AUTHENTICATION_REQUIRED: { http: 401, retryable: false },
-  BUSINESS_CONSTRAINT_VIOLATION: { http: 422, retryable: false },
-  CAPABILITY_CONTENT_BLOCKED: { http: 422, retryable: false },
-  CAPABILITY_NOT_ALLOWED: { http: 404, retryable: false },
-  CATALOG_REVISION_INVALID: { http: 400, retryable: false },
-  CHILD_BUDGET_EXCEEDED: { http: 422, retryable: false },
-  CHILD_BUDGET_EXHAUSTED: { http: 422, retryable: false },
-  CHILD_CONTEXT_NOT_ALLOWED: { http: 403, retryable: false },
-  CHILD_THREAD_ALREADY_TERMINAL: { http: 409, retryable: false },
-  CONTEXT_CHECKPOINT_TOO_LARGE: { http: 413, retryable: false },
-  CONTEXT_SOURCE_HASH_MISMATCH: { http: 409, retryable: true },
-  DELEGATION_DEPTH_EXCEEDED: { http: 422, retryable: false },
-  DELEGATION_NOT_ALLOWED: { http: 403, retryable: false },
-  DELETION_STEP_FAILED: { http: 503, retryable: true },
-  ENVIRONMENT_CHANGE_NOT_SAFE: { http: 422, retryable: false },
-  ETAG_MISMATCH: { http: 412, retryable: true },
-  EGRESS_BLOCKED: { http: 422, retryable: false },
-  EVENT_CURSOR_EXPIRED: { http: 409, retryable: false },
-  EVENT_QUARANTINE_RESOLUTION_NOT_ALLOWED: { http: 422, retryable: false },
-  EVENT_SCHEMA_UNSUPPORTED: { http: 422, retryable: false },
-  EVENT_SEQUENCE_GAP: { http: 409, retryable: true },
-  EXECUTION_OWNERSHIP_CHANGED: { http: 409, retryable: false },
-  IDEMPOTENCY_CONFLICT: { http: 409, retryable: false },
-  JOB_ALREADY_TERMINAL: { http: 409, retryable: false },
-  JOB_INPUT_NO_LONGER_AVAILABLE: { http: 422, retryable: false },
-  JOB_USER_ACTION_NOT_ALLOWED: { http: 409, retryable: false },
-  JOB_NOT_TERMINAL: { http: 409, retryable: false },
-  JOB_OVERRIDE_NOT_ALLOWED: { http: 422, retryable: false },
-  JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT: { http: 409, retryable: false },
-  MEMORY_CANDIDATE_ALREADY_RESOLVED: { http: 409, retryable: false },
-  MEMORY_CONTENT_HASH_MISMATCH: { http: 409, retryable: false },
-  MEMORY_SCOPE_NOT_ALLOWED: { http: 403, retryable: false },
-  MEMORY_SENSITIVE_CONTENT: { http: 422, retryable: false },
-  MEMORY_SOURCE_NOT_ALLOWED: { http: 403, retryable: false },
-  OPERATION_PAYLOAD_CONFLICT: { http: 409, retryable: false },
-  PARENT_INVOCATION_NOT_ACTIVE: { http: 409, retryable: false },
-  POLICY_BLOCKED: { http: 403, retryable: false },
-  RATE_LIMITED: { http: 429, retryable: true },
-  REQUEST_SCHEMA_INVALID: { http: 400, retryable: false },
-  RESOURCE_NOT_FOUND: { http: 404, retryable: false },
-  RUNTIME_UNAVAILABLE: { http: 503, retryable: true },
-  FEATURE_NOT_READY: { http: 503, retryable: true },
-  SHARED_BUDGET_EXHAUSTED: { http: 422, retryable: false },
-  STREAM_BACKPRESSURE: { http: 429, retryable: true },
-  TOOL_SCHEMA_CHANGED: { http: 409, retryable: true },
-  TURN_REQUIRES_USER_ACTION: { http: 409, retryable: false },
-  TURN_ALREADY_TERMINAL: { http: 409, retryable: false },
-  WORKSPACE_OVERLAY_MERGE_CONFLICT: { http: 409, retryable: false },
-  WORKSPACE_OVERLAY_STATE_CONFLICT: { http: 409, retryable: false },
-  WORKSPACE_WRITE_LOCK_CONFLICT: { http: 409, retryable: false },
-  WORKSPACE_WRITE_LOCK_STATE_CONFLICT: { http: 409, retryable: false },
-  WORKLOAD_TOKEN_REVOKED: { http: 401, retryable: false },
-  // ─── RouteSet 聚合激活（任务 1.5/1.6）──────────────────
-  ROUTE_WEIGHT_TOTAL_INVALID: { http: 422, retryable: false },
-  ROUTE_GROUP_SELECTOR_MISMATCH: { http: 422, retryable: false },
-  ROUTE_SELECTOR_AMBIGUOUS: { http: 422, retryable: false },
-  ROUTE_SET_REQUIRES_ATOMIC_UPDATE: { http: 409, retryable: false },
-  ROUTE_REVISION_NOT_ELIGIBLE: { http: 422, retryable: false },
-  ROUTE_SET_VERSION_CONFLICT: { http: 412, retryable: false },
-  /** §2.4: Route 执行资格不足。 */
-  ROUTE_EXECUTION_INELIGIBLE: { http: 422, retryable: false },
-  /** §2.1: Eligibility 条件格式非法。 */
-  ROUTE_ELIGIBILITY_INVALID: { http: 422, retryable: false },
-  /** §5.2: Projection 版本过时，Binding 必须拒绝并触发重新解析。 */
-  ELIGIBILITY_SNAPSHOT_STALE: { http: 409, retryable: true },
-  /** §3.6: 控制面事件类型不支持或 Payload 不合法。 */
-  CONTROL_PLANE_EVENT_UNSUPPORTED: { http: 422, retryable: false },
-  /** §3.2: 事件合同验证失败。 */
-  CONTROL_PLANE_EVENT_CONTRACT_VIOLATION: { http: 422, retryable: false },
-  /** §4.1: Projection 证据 ID 不完整。 */
-  PROJECTION_EVIDENCE_INCOMPLETE: { http: 422, retryable: false },
-  /** §4.4: Projection 引用已删除 Route。 */
-  PROJECTION_ORPHANED_ROUTE: { http: 422, retryable: false },
-  /** §6.1: Hosted 供应 AgentRevision 绑定验证失败。 */
-  HOSTED_REVISION_BINDING_INVALID: { http: 422, retryable: false },
+ ACCESS_DENIED: { http: 403, retryable: false },
+ ACTION_SCOPE_DENIED: { http: 403, retryable: false },
+ ACTIVE_LEGAL_HOLD: { http: 409, retryable: false },
+ AGENT_CAPABILITY_UNSUPPORTED: { http: 422, retryable: false },
+ ARTIFACT_ATTESTATION_FAILED: { http: 422, retryable: false },
+ ARTIFACT_ATTESTATION_REVOKED: { http: 409, retryable: false },
+ ARTIFACT_BINDING_MISMATCH: { http: 409, retryable: false },
+ ARTIFACT_NOT_VERIFIED: { http: 409, retryable: false },
+ ATTESTATION_ALREADY_REVOKED: { http: 409, retryable: false },
+ AUTHENTICATION_REQUIRED: { http: 401, retryable: false },
+ BUSINESS_CONSTRAINT_VIOLATION: { http: 422, retryable: false },
+ CAPABILITY_CONTENT_BLOCKED: { http: 422, retryable: false },
+ CAPABILITY_NOT_ALLOWED: { http: 404, retryable: false },
+ CATALOG_REVISION_INVALID: { http: 400, retryable: false },
+ CHILD_BUDGET_EXCEEDED: { http: 422, retryable: false },
+ CHILD_BUDGET_EXHAUSTED: { http: 422, retryable: false },
+ CHILD_CONTEXT_NOT_ALLOWED: { http: 403, retryable: false },
+ CHILD_THREAD_ALREADY_TERMINAL: { http: 409, retryable: false },
+ CONTEXT_CHECKPOINT_TOO_LARGE: { http: 413, retryable: false },
+ CONTEXT_SOURCE_HASH_MISMATCH: { http: 409, retryable: true },
+ DELEGATION_DEPTH_EXCEEDED: { http: 422, retryable: false },
+ DELEGATION_NOT_ALLOWED: { http: 403, retryable: false },
+ DELETION_STEP_FAILED: { http: 503, retryable: true },
+ ENVIRONMENT_CHANGE_NOT_SAFE: { http: 422, retryable: false },
+ ETAG_MISMATCH: { http: 412, retryable: true },
+ EGRESS_BLOCKED: { http: 422, retryable: false },
+ EVENT_CURSOR_EXPIRED: { http: 409, retryable: false },
+ EVENT_QUARANTINE_RESOLUTION_NOT_ALLOWED: { http: 422, retryable: false },
+ EVENT_SCHEMA_UNSUPPORTED: { http: 422, retryable: false },
+ EVENT_SEQUENCE_GAP: { http: 409, retryable: true },
+ EXECUTION_OWNERSHIP_CHANGED: { http: 409, retryable: false },
+ IDEMPOTENCY_CONFLICT: { http: 409, retryable: false },
+ JOB_ALREADY_TERMINAL: { http: 409, retryable: false },
+ JOB_INPUT_NO_LONGER_AVAILABLE: { http: 422, retryable: false },
+ JOB_USER_ACTION_NOT_ALLOWED: { http: 409, retryable: false },
+ JOB_NOT_TERMINAL: { http: 409, retryable: false },
+ JOB_OVERRIDE_NOT_ALLOWED: { http: 422, retryable: false },
+ JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT: { http: 409, retryable: false },
+ MEMORY_CANDIDATE_ALREADY_RESOLVED: { http: 409, retryable: false },
+ MEMORY_CONTENT_HASH_MISMATCH: { http: 409, retryable: false },
+ MEMORY_SCOPE_NOT_ALLOWED: { http: 403, retryable: false },
+ MEMORY_SENSITIVE_CONTENT: { http: 422, retryable: false },
+ MEMORY_SOURCE_NOT_ALLOWED: { http: 403, retryable: false },
+ OPERATION_PAYLOAD_CONFLICT: { http: 409, retryable: false },
+ PARENT_INVOCATION_NOT_ACTIVE: { http: 409, retryable: false },
+ POLICY_BLOCKED: { http: 403, retryable: false },
+ RATE_LIMITED: { http: 429, retryable: true },
+ REQUEST_SCHEMA_INVALID: { http: 400, retryable: false },
+ RESOURCE_NOT_FOUND: { http: 404, retryable: false },
+ RUNTIME_UNAVAILABLE: { http: 503, retryable: true },
+ FEATURE_NOT_READY: { http: 503, retryable: true },
+ SHARED_BUDGET_EXHAUSTED: { http: 422, retryable: false },
+ STREAM_BACKPRESSURE: { http: 429, retryable: true },
+ TOOL_SCHEMA_CHANGED: { http: 409, retryable: true },
+ TURN_REQUIRES_USER_ACTION: { http: 409, retryable: false },
+ TURN_ALREADY_TERMINAL: { http: 409, retryable: false },
+ WORKSPACE_OVERLAY_MERGE_CONFLICT: { http: 409, retryable: false },
+ WORKSPACE_OVERLAY_STATE_CONFLICT: { http: 409, retryable: false },
+ WORKSPACE_WRITE_LOCK_CONFLICT: { http: 409, retryable: false },
+ WORKSPACE_WRITE_LOCK_STATE_CONFLICT: { http: 409, retryable: false },
+ WORKLOAD_TOKEN_REVOKED: { http: 401, retryable: false },
+ // ─── RouteSet 聚合激活（任务 1.5/1.6）──────────────────
+ ROUTE_WEIGHT_TOTAL_INVALID: { http: 422, retryable: false },
+ ROUTE_GROUP_SELECTOR_MISMATCH: { http: 422, retryable: false },
+ ROUTE_SELECTOR_AMBIGUOUS: { http: 422, retryable: false },
+ ROUTE_SET_REQUIRES_ATOMIC_UPDATE: { http: 409, retryable: false },
+ ROUTE_REVISION_NOT_ELIGIBLE: { http: 422, retryable: false },
+ ROUTE_SET_VERSION_CONFLICT: { http: 412, retryable: false },
+ /** Route 执行资格不足。 */
+ ROUTE_EXECUTION_INELIGIBLE: { http: 422, retryable: false },
+ /** Eligibility 条件格式非法。 */
+ ROUTE_ELIGIBILITY_INVALID: { http: 422, retryable: false },
+ /** : Projection 版本过时，Binding 必须拒绝并触发重新解析。 */
+ ELIGIBILITY_SNAPSHOT_STALE: { http: 409, retryable: true },
+ /** : 控制面事件类型不支持或 Payload 不合法。 */
+ CONTROL_PLANE_EVENT_UNSUPPORTED: { http: 422, retryable: false },
+ /** : 事件合同验证失败。 */
+ CONTROL_PLANE_EVENT_CONTRACT_VIOLATION: { http: 422, retryable: false },
+ /** : Projection 证据 ID 不完整。 */
+ PROJECTION_EVIDENCE_INCOMPLETE: { http: 422, retryable: false },
+ /** : Projection 引用已删除 Route。 */
+ PROJECTION_ORPHANED_ROUTE: { http: 422, retryable: false },
+ /** : Hosted 供应 AgentRevision 绑定验证失败。 */
+ HOSTED_REVISION_BINDING_INVALID: { http: 422, retryable: false },
 } as const satisfies Readonly<Record<string, ApiErrorDefinition>>;
 
 export type ApiErrorCode = keyof typeof API_ERROR_CODES;
 
 /** 查询错误码定义；未知码抛错（fail-closed，禁止运行时凭空调用）。 */
 export function errorDefinition(code: string): ApiErrorDefinition {
-  const def = API_ERROR_CODES[code as ApiErrorCode];
-  if (!def) {
-    throw new Error(`unknown error code: ${code}`);
-  }
-  return def;
+ const def = API_ERROR_CODES[code as ApiErrorCode];
+ if (!def) {
+ throw new Error(`unknown error code: ${code}`);
+ }
+ return def;
 }

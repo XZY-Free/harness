@@ -2,10 +2,10 @@
  * 文件变更 schema：FileChange（阶段 8 S08-C06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md §7.4（file_change）、§9 不变量第 11 条
- *   （本地路径必须与 Desktop device/binding 一起解释）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §5.3（FileChange 通过 WorkspaceBinding + before/after hash 引用）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md S08-W06。
+ * - ../v11-agentkit-platform/10-core-data-model.md （file_change）、§9 不变量第 11 条
+ * （本地路径必须与 Desktop device/binding 一起解释）。
+ * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （FileChange 通过 WorkspaceBinding + before/after hash 引用）。
+ * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
  *
  * 关键不变量：
  * - Desktop 原地修改不强制上传；使用 FileChange + WorkspaceBinding + before/after hash 记录。
@@ -43,7 +43,7 @@ export type FileChangeType = (typeof FILE_CHANGE_TYPES)[number];
 // ─── FileChange 表 ────────────────────────────────────
 
 /**
- * FileChange 表：Desktop/Tool 执行产生的文件变更记录（§7.4）。
+ * FileChange 表：Desktop/Tool 执行产生的文件变更记录（）。
  *
  * 关键约束：
  * - workspaceBindingId 外键 → WorkspaceBinding(id) ON DELETE CASCADE。
@@ -53,40 +53,40 @@ export type FileChangeType = (typeof FILE_CHANGE_TYPES)[number];
  * - 写入后不可变。
  */
 export const fileChangeTable = mysqlTable(
-  "FileChange",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    tenantId: varchar("tenantId", { length: 36 })
-      .notNull()
-      .references(() => tenant.id),
-    /** 产生此变更的 ToolCall id（逻辑外键 → ToolCall.id；必填）。 */
-    toolCallId: varchar("toolCallId", { length: 36 }).notNull(),
-    /** 路径解释所必需的 Binding（DB 级 FK → WorkspaceBinding.id ON DELETE CASCADE）。 */
-    workspaceBindingId: varchar("workspaceBindingId", { length: 36 })
-      .notNull()
-      .references(() => workspaceBinding.id),
-    /** 相对 Binding 的路径引用；不得为绝对路径（/、C:\、\\）。 */
-    pathRef: varchar("pathRef", { length: 512 }).notNull(),
-    /** 变更类型。 */
-    changeType: mysqlEnum("changeType", FILE_CHANGE_TYPES).notNull(),
-    /** 变更前内容 hash（create 时为 null；update/delete/rename/move 时必填）。 */
-    beforeHash: varchar("beforeHash", { length: 128 }),
-    /** 变更后内容 hash（delete 时为 null；create/update/rename/move 时必填）。 */
-    afterHash: varchar("afterHash", { length: 128 }),
-    /** 变更结果被上传为 Artifact 时关联（逻辑外键 → Artifact.id；可为 null）。 */
-    artifactId: varchar("artifactId", { length: 36 }),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    tenantToolCallIdx: index("FileChange_tenant_toolCall_idx").on(t.tenantId, t.toolCallId),
-    tenantBindingIdx: index("FileChange_tenant_binding_idx").on(t.tenantId, t.workspaceBindingId),
-    tenantArtifactIdx: index("FileChange_tenant_artifact_idx").on(t.tenantId, t.artifactId),
-  }),
+ "FileChange",
+ {
+ id: varchar("id", { length: 36 })
+ .primaryKey()
+ .notNull()
+ .$defaultFn(() => randomUUID()),
+ tenantId: varchar("tenantId", { length: 36 })
+ .notNull()
+ .references(() => tenant.id),
+ /** 产生此变更的 ToolCall id（逻辑外键 → ToolCall.id；必填）。 */
+ toolCallId: varchar("toolCallId", { length: 36 }).notNull(),
+ /** 路径解释所必需的 Binding（DB 级 FK → WorkspaceBinding.id ON DELETE CASCADE）。 */
+ workspaceBindingId: varchar("workspaceBindingId", { length: 36 })
+ .notNull()
+ .references(() => workspaceBinding.id),
+ /** 相对 Binding 的路径引用；不得为绝对路径（/、C:\、\\）。 */
+ pathRef: varchar("pathRef", { length: 512 }).notNull(),
+ /** 变更类型。 */
+ changeType: mysqlEnum("changeType", FILE_CHANGE_TYPES).notNull(),
+ /** 变更前内容 hash（create 时为 null；update/delete/rename/move 时必填）。 */
+ beforeHash: varchar("beforeHash", { length: 128 }),
+ /** 变更后内容 hash（delete 时为 null；create/update/rename/move 时必填）。 */
+ afterHash: varchar("afterHash", { length: 128 }),
+ /** 变更结果被上传为 Artifact 时关联（逻辑外键 → Artifact.id；可为 null）。 */
+ artifactId: varchar("artifactId", { length: 36 }),
+ createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+ .notNull()
+ .$defaultFn(() => new Date()),
+ },
+ (t) => ({
+ tenantToolCallIdx: index("FileChange_tenant_toolCall_idx").on(t.tenantId, t.toolCallId),
+ tenantBindingIdx: index("FileChange_tenant_binding_idx").on(t.tenantId, t.workspaceBindingId),
+ tenantArtifactIdx: index("FileChange_tenant_artifact_idx").on(t.tenantId, t.artifactId),
+ }),
 );
 
 export type FileChange = InferSelectModel<typeof fileChangeTable>;

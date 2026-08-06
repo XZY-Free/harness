@@ -1,7 +1,7 @@
 import { readWorkspaceFile, safeJoin } from "@/lib/workspace";
 
 /**
- * S1 修复（06-P1-3）：文件级项目记忆（对标 Claude Code CLAUDE.md）。
+ * 文件级项目记忆（对标 Claude Code CLAUDE.md）。
  *
  * 从 workspace 根读取项目记忆文件（CLAUDE.md / SNOW.md / AGENTS.md），返回拼接文本供
  * 注入上下文（作为 protected note，类似 pinned facts）。文件不存在 → 空串（零回归）。
@@ -22,22 +22,22 @@ const MAX_FILE_BYTES = 16_000;
  * 无任何文件 → 空串。
  */
 export async function loadProjectMemoryFiles(threadId: string): Promise<string> {
-  const sections: string[] = [];
-  for (const name of PROJECT_MEMORY_FILES) {
-    try {
-      const content = await readWorkspaceFile(threadId, name);
-      if (content && content.trim().length > 0) {
-        const capped =
-          content.length > MAX_FILE_BYTES
-            ? `${content.slice(0, MAX_FILE_BYTES)}\n[...已截断...]`
-            : content;
-        sections.push(`# 项目记忆（${name}）\n${capped}`);
-      }
-    } catch {
-      // 文件不存在 / 读失败 → 跳过（零回归）
-    }
-  }
-  return sections.join("\n\n");
+ const sections: string[] = [];
+ for (const name of PROJECT_MEMORY_FILES) {
+ try {
+ const content = await readWorkspaceFile(threadId, name);
+ if (content && content.trim().length > 0) {
+ const capped =
+ content.length > MAX_FILE_BYTES
+ ? `${content.slice(0, MAX_FILE_BYTES)}\n[...已截断...]`
+ : content;
+ sections.push(`# 项目记忆（${name}）\n${capped}`);
+ }
+ } catch {
+ // 文件不存在 / 读失败 → 跳过（零回归）
+ }
+ }
+ return sections.join("\n\n");
 }
 
 /** 仅供测试：暴露约定文件名。 */

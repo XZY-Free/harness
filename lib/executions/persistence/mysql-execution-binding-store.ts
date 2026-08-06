@@ -1,28 +1,28 @@
 /**
  * ExecutionBinding Store — MySQL 实现。
  *
- * §6.1: 统一事务 — 资格校验 + 行级锁 + Insert 在单一 db.transaction 内完成。
- * §07.2: validateBindingEligibility(tx, input) — tx 必须传入，复用 Store 事务。
+ * : 统一事务 — 资格校验 + 行级锁 + Insert 在单一 db.transaction 内完成。
+ * : validateBindingEligibility(tx, input) — tx 必须传入，复用 Store 事务。
  *
  * 事务内执行：
- *   1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
- *   2. §5.1/§07.2: validateBindingEligibility(tx, input) — tx 必传，统一 Policy 校验
- *      （Projection 版本 + Route Activation + Evidence Snapshot + Policy）
- *   3. §5.1: Lock + TOCTOU 一致性校验（FOR UPDATE + Digest/ID 比较）
- *   4. §5.1: Capability Manifest Digest 一致性
- *   5. Insert
+ * 1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
+ * 2. /: validateBindingEligibility(tx, input) — tx 必传，统一 Policy 校验
+ * （Projection 版本 + Route Activation + Evidence Snapshot + Policy）
+ * 3. : Lock + TOCTOU 一致性校验（FOR UPDATE + Digest/ID 比较）
+ * 4. : Capability Manifest Digest 一致性
+ * 5. Insert
  */
 
 import { db } from "@/lib/db/client";
 import { validateBindingEligibility } from "@/lib/executions/application/validate-binding-eligibility";
 import {
-  type ExecutionBinding,
-  ExecutionBindingAlreadyExistsError,
-  ExecutionBindingEvidenceError,
+ type ExecutionBinding,
+ ExecutionBindingAlreadyExistsError,
+ ExecutionBindingEvidenceError,
 } from "@/lib/executions/domain/execution-binding";
 import type {
-  ExecutionBindingStore,
-  StoreExecutionBindingInput,
+ ExecutionBindingStore,
+ StoreExecutionBindingInput,
 } from "@/lib/executions/persistence/execution-binding-store";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
@@ -34,315 +34,315 @@ import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-r
 import { and, desc, eq } from "drizzle-orm";
 
 export const mysqlExecutionBindingStore: ExecutionBindingStore = {
-  create: (input) =>
-    db.transaction(async (tx) => {
-      // 1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
-      const [invocation] = await tx
-        .select({ id: invocationTable.id })
-        .from(invocationTable)
-        .where(
-          and(
-            eq(invocationTable.id, input.invocationId),
-            eq(invocationTable.tenantId, input.tenantId),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (!invocation) throw evidenceError("Invocation 不存在或租户不匹配");
+ create: (input) =>
+ db.transaction(async (tx) => {
+ // 1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
+ const [invocation] = await tx
+ .select({ id: invocationTable.id })
+ .from(invocationTable)
+ .where(
+ and(
+ eq(invocationTable.id, input.invocationId),
+ eq(invocationTable.tenantId, input.tenantId),
+ ),
+ )
+ .limit(1)
+ .for("update");
+ if (!invocation) throw evidenceError("Invocation 不存在或租户不匹配");
 
-      const [existing] = await tx
-        .select({ id: executionBindingTable.invocationId })
-        .from(executionBindingTable)
-        .where(eq(executionBindingTable.invocationId, input.invocationId))
-        .limit(1);
-      if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
+ const [existing] = await tx
+ .select({ id: executionBindingTable.invocationId })
+ .from(executionBindingTable)
+ .where(eq(executionBindingTable.invocationId, input.invocationId))
+ .limit(1);
+ if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
 
-      // 2. §6.1/§07.2: 统一资格校验（tx 必须传入，复用 Store 事务）
-      const evidence = input.controlPlaneEvidence;
-      const eligibility = await validateBindingEligibility(tx, {
-        tenantId: input.tenantId,
-        routeId: input.deploymentRouteId,
-        routeRevisionId: evidence.routeRevisionId,
-        routeActivationId: evidence.routeActivationId,
-        agentRevisionId: input.agentRevisionId,
-        runtimeRevisionId: input.runtimeRevisionId,
-        policyRevisionId: input.policyRevisionId,
-        projectionVersionNo: input.projectionVersionNo ?? 0,
-        frozenEvidence: {
-          agentPublicationRecordId: evidence.agentPublicationRecordId,
-          runtimePublicationRecordId: evidence.runtimePublicationRecordId,
-          agentAttestationIds: [...evidence.agentAttestationIds].sort(),
-          runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
-          conformanceRunId: evidence.conformanceRunId,
-        },
-      });
-      if (!eligibility.valid) {
-        throw evidenceError(`Binding 资格校验失败: ${eligibility.reason}`);
-      }
+ // 2. /: 统一资格校验（tx 必须传入，复用 Store 事务）
+ const evidence = input.controlPlaneEvidence;
+ const eligibility = await validateBindingEligibility(tx, {
+ tenantId: input.tenantId,
+ routeId: input.deploymentRouteId,
+ routeRevisionId: evidence.routeRevisionId,
+ routeActivationId: evidence.routeActivationId,
+ agentRevisionId: input.agentRevisionId,
+ runtimeRevisionId: input.runtimeRevisionId,
+ policyRevisionId: input.policyRevisionId,
+ projectionVersionNo: input.projectionVersionNo ?? 0,
+ frozenEvidence: {
+ agentPublicationRecordId: evidence.agentPublicationRecordId,
+ runtimePublicationRecordId: evidence.runtimePublicationRecordId,
+ agentAttestationIds: [...evidence.agentAttestationIds].sort(),
+ runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
+ conformanceRunId: evidence.conformanceRunId,
+ },
+ });
+ if (!eligibility.valid) {
+ throw evidenceError(`Binding 资格校验失败: ${eligibility.reason}`);
+ }
 
-      // 3. §5.1: Lock + TOCTOU 一致性校验（仅 Digest/ID 比较，不做 Policy）
-      const revisions = await lockAndVerifyRoute(tx, input);
+ // 3. : Lock + TOCTOU 一致性校验（仅 Digest/ID 比较，不做 Policy）
+ const revisions = await lockAndVerifyRoute(tx, input);
 
-      // 4. §5.1: Capability Manifest Digest 一致性（TOCTOU 防御）
-      const capabilityManifestDigest = computeCapabilityManifestDigest({
-        agentRevisionId: revisions.agentRevision.id,
-        agentInterfaceRequirements: revisions.agentRevision.agentInterfaceRequirementsJson,
-        runtimeRevisionId: revisions.runtimeRevision.id,
-        runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
-      });
-      if (capabilityManifestDigest !== input.controlPlaneEvidence.capabilityManifestDigest) {
-        throw evidenceError("Capability Manifest Digest 已变化");
-      }
+ // 4. : Capability Manifest Digest 一致性（TOCTOU 防御）
+ const capabilityManifestDigest = computeCapabilityManifestDigest({
+ agentRevisionId: revisions.agentRevision.id,
+ agentInterfaceRequirements: revisions.agentRevision.agentInterfaceRequirementsJson,
+ runtimeRevisionId: revisions.runtimeRevision.id,
+ runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
+ });
+ if (capabilityManifestDigest !== input.controlPlaneEvidence.capabilityManifestDigest) {
+ throw evidenceError("Capability Manifest Digest 已变化");
+ }
 
-      // 5. Insert
-      await tx.insert(executionBindingTable).values({
-        invocationId: input.invocationId,
-        tenantId: input.tenantId,
-        agentRevisionId: input.agentRevisionId,
-        runtimeRevisionId: input.runtimeRevisionId,
-        deploymentRouteId: input.deploymentRouteId,
-        modelProvider: input.modelProvider,
-        modelId: input.modelId,
-        modelRevisionRef: input.modelRevisionRef,
-        initialEnvironmentLeaseId: input.initialEnvironmentLeaseId,
-        workspaceBindingId: input.workspaceBindingId,
-        policyRevisionId: input.policyRevisionId,
-        contextCheckpointId: input.contextCheckpointId,
-        routeRevisionId: evidence.routeRevisionId,
-        routeActivationId: evidence.routeActivationId,
-        routeContentDigest: evidence.routeContentDigest,
-        agentArtifactDigest: evidence.agentArtifactDigest,
-        runtimeArtifactDigest: evidence.runtimeArtifactDigest,
-        runtimeConfigDigest: evidence.runtimeConfigDigest,
-        capabilityManifestDigest: evidence.capabilityManifestDigest,
-        agentAttestationIds: [...evidence.agentAttestationIds].sort(),
-        runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
-        agentPublicationRecordId: evidence.agentPublicationRecordId,
-        runtimePublicationRecordId: evidence.runtimePublicationRecordId,
-        conformanceRunId: evidence.conformanceRunId,
-        environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
-        configHash: input.configHash,
-        boundAt: input.boundAt,
-      });
+ // 5. Insert
+ await tx.insert(executionBindingTable).values({
+ invocationId: input.invocationId,
+ tenantId: input.tenantId,
+ agentRevisionId: input.agentRevisionId,
+ runtimeRevisionId: input.runtimeRevisionId,
+ deploymentRouteId: input.deploymentRouteId,
+ modelProvider: input.modelProvider,
+ modelId: input.modelId,
+ modelRevisionRef: input.modelRevisionRef,
+ initialEnvironmentLeaseId: input.initialEnvironmentLeaseId,
+ workspaceBindingId: input.workspaceBindingId,
+ policyRevisionId: input.policyRevisionId,
+ contextCheckpointId: input.contextCheckpointId,
+ routeRevisionId: evidence.routeRevisionId,
+ routeActivationId: evidence.routeActivationId,
+ routeContentDigest: evidence.routeContentDigest,
+ agentArtifactDigest: evidence.agentArtifactDigest,
+ runtimeArtifactDigest: evidence.runtimeArtifactDigest,
+ runtimeConfigDigest: evidence.runtimeConfigDigest,
+ capabilityManifestDigest: evidence.capabilityManifestDigest,
+ agentAttestationIds: [...evidence.agentAttestationIds].sort(),
+ runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
+ agentPublicationRecordId: evidence.agentPublicationRecordId,
+ runtimePublicationRecordId: evidence.runtimePublicationRecordId,
+ conformanceRunId: evidence.conformanceRunId,
+ environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
+ configHash: input.configHash,
+ boundAt: input.boundAt,
+ });
 
-      const [created] = await tx
-        .select()
-        .from(executionBindingTable)
-        .where(eq(executionBindingTable.invocationId, input.invocationId))
-        .limit(1);
-      if (!created) throw new Error("ExecutionBinding 插入后无法回读");
-      return toExecutionBinding(created);
-    }),
+ const [created] = await tx
+ .select()
+ .from(executionBindingTable)
+ .where(eq(executionBindingTable.invocationId, input.invocationId))
+ .limit(1);
+ if (!created) throw new Error("ExecutionBinding 插入后无法回读");
+ return toExecutionBinding(created);
+ }),
 };
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * §5.1: Lock + TOCTOU 一致性校验。
+ * : Lock + TOCTOU 一致性校验。
  *
  * 仅做 Digest/ID 一致性比较（防御 Resolver 与 Store 之间的 TOCTOU）。
  * 不再做 Publication/Attestation/Conformance 的 Policy 校验 — 那些已由
  * validateBindingEligibility() + RevisionExecutionEligibilityPolicy 统一执行。
  */
 async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingInput) {
-  const evidence = input.controlPlaneEvidence;
+ const evidence = input.controlPlaneEvidence;
 
-  // A. Route + RouteSet（FOR UPDATE）
-  const [routeRow] = await tx
-    .select({ route: deploymentRouteTable, routeSet: deploymentRouteSetTable })
-    .from(deploymentRouteTable)
-    .innerJoin(
-      deploymentRouteSetTable,
-      eq(deploymentRouteSetTable.id, deploymentRouteTable.routeSetId),
-    )
-    .where(
-      and(
-        eq(deploymentRouteTable.id, input.deploymentRouteId),
-        eq(deploymentRouteSetTable.tenantId, input.tenantId),
-      ),
-    )
-    .limit(1)
-    .for("update");
-  if (
-    !routeRow ||
-    routeRow.route.routeState !== "enabled" ||
-    routeRow.route.activeRouteRevisionId !== evidence.routeRevisionId
-  ) {
-    throw evidenceError("Route 当前投影已变化");
-  }
+ // A. Route + RouteSet（FOR UPDATE）
+ const [routeRow] = await tx
+ .select({ route: deploymentRouteTable, routeSet: deploymentRouteSetTable })
+ .from(deploymentRouteTable)
+ .innerJoin(
+ deploymentRouteSetTable,
+ eq(deploymentRouteSetTable.id, deploymentRouteTable.routeSetId),
+ )
+ .where(
+ and(
+ eq(deploymentRouteTable.id, input.deploymentRouteId),
+ eq(deploymentRouteSetTable.tenantId, input.tenantId),
+ ),
+ )
+ .limit(1)
+ .for("update");
+ if (
+ !routeRow ||
+ routeRow.route.routeState !== "enabled" ||
+ routeRow.route.activeRouteRevisionId !== evidence.routeRevisionId
+ ) {
+ throw evidenceError("Route 当前投影已变化");
+ }
 
-  // B. RouteRevision（FOR UPDATE）— Digest/ID 一致性
-  const [revision] = await tx
-    .select()
-    .from(routeRevision)
-    .where(
-      and(
-        eq(routeRevision.id, evidence.routeRevisionId),
-        eq(routeRevision.tenantId, input.tenantId),
-        eq(routeRevision.routeId, input.deploymentRouteId),
-      ),
-    )
-    .limit(1)
-    .for("update");
-  if (
-    !revision ||
-    revision.agentRevisionId !== input.agentRevisionId ||
-    revision.runtimeRevisionId !== input.runtimeRevisionId ||
-    revision.policyRevisionId !== input.policyRevisionId ||
-    revision.contentDigest !== evidence.routeContentDigest
-  ) {
-    throw evidenceError("RouteRevision 内容与解析结果不一致");
-  }
+ // B. RouteRevision（FOR UPDATE）— Digest/ID 一致性
+ const [revision] = await tx
+ .select()
+ .from(routeRevision)
+ .where(
+ and(
+ eq(routeRevision.id, evidence.routeRevisionId),
+ eq(routeRevision.tenantId, input.tenantId),
+ eq(routeRevision.routeId, input.deploymentRouteId),
+ ),
+ )
+ .limit(1)
+ .for("update");
+ if (
+ !revision ||
+ revision.agentRevisionId !== input.agentRevisionId ||
+ revision.runtimeRevisionId !== input.runtimeRevisionId ||
+ revision.policyRevisionId !== input.policyRevisionId ||
+ revision.contentDigest !== evidence.routeContentDigest
+ ) {
+ throw evidenceError("RouteRevision 内容与解析结果不一致");
+ }
 
-  // C. RouteActivation（FOR UPDATE）— 当前最新 + Active + 一致
-  const [activation] = await tx
-    .select()
-    .from(routeActivation)
-    .where(
-      and(
-        eq(routeActivation.tenantId, input.tenantId),
-        eq(routeActivation.routeId, input.deploymentRouteId),
-      ),
-    )
-    .orderBy(desc(routeActivation.activationSequence))
-    .limit(1)
-    .for("update");
-  if (
-    !activation ||
-    activation.id !== evidence.routeActivationId ||
-    activation.routeRevisionId !== evidence.routeRevisionId ||
-    activation.activationState !== "active"
-  ) {
-    throw evidenceError("RouteActivation 已失效或已被替换");
-  }
+ // C. RouteActivation（FOR UPDATE）— 当前最新 + Active + 一致
+ const [activation] = await tx
+ .select()
+ .from(routeActivation)
+ .where(
+ and(
+ eq(routeActivation.tenantId, input.tenantId),
+ eq(routeActivation.routeId, input.deploymentRouteId),
+ ),
+ )
+ .orderBy(desc(routeActivation.activationSequence))
+ .limit(1)
+ .for("update");
+ if (
+ !activation ||
+ activation.id !== evidence.routeActivationId ||
+ activation.routeRevisionId !== evidence.routeRevisionId ||
+ activation.activationState !== "active"
+ ) {
+ throw evidenceError("RouteActivation 已失效或已被替换");
+ }
 
-  // D. AgentRevision + RuntimeRevision（FOR UPDATE）— Digest 一致性
-  const [agentRevision, runtimeRevision] = await Promise.all([
-    tx
-      .select()
-      .from(agentRevisionTable)
-      .where(eq(agentRevisionTable.id, input.agentRevisionId))
-      .limit(1)
-      .for("update")
-      .then((rows) => rows[0] ?? null),
-    tx
-      .select()
-      .from(runtimeRevisionTable)
-      .where(eq(runtimeRevisionTable.id, input.runtimeRevisionId))
-      .limit(1)
-      .for("update")
-      .then((rows) => rows[0] ?? null),
-  ]);
-  if (
-    !agentRevision ||
-    agentRevision.revisionState !== "published" ||
-    agentRevision.artifactDigest !== evidence.agentArtifactDigest
-  ) {
-    throw evidenceError("AgentRevision 发布状态或 Artifact Digest 不一致");
-  }
-  if (
-    !runtimeRevision ||
-    runtimeRevision.revisionState !== "published" ||
-    runtimeRevision.artifactDigest !== evidence.runtimeArtifactDigest ||
-    runtimeRevision.configHash !== evidence.runtimeConfigDigest
-  ) {
-    throw evidenceError("RuntimeRevision 发布状态、Artifact 或 Config Digest 不一致");
-  }
+ // D. AgentRevision + RuntimeRevision（FOR UPDATE）— Digest 一致性
+ const [agentRevision, runtimeRevision] = await Promise.all([
+ tx
+ .select()
+ .from(agentRevisionTable)
+ .where(eq(agentRevisionTable.id, input.agentRevisionId))
+ .limit(1)
+ .for("update")
+ .then((rows) => rows[0] ?? null),
+ tx
+ .select()
+ .from(runtimeRevisionTable)
+ .where(eq(runtimeRevisionTable.id, input.runtimeRevisionId))
+ .limit(1)
+ .for("update")
+ .then((rows) => rows[0] ?? null),
+ ]);
+ if (
+ !agentRevision ||
+ agentRevision.revisionState !== "published" ||
+ agentRevision.artifactDigest !== evidence.agentArtifactDigest
+ ) {
+ throw evidenceError("AgentRevision 发布状态或 Artifact Digest 不一致");
+ }
+ if (
+ !runtimeRevision ||
+ runtimeRevision.revisionState !== "published" ||
+ runtimeRevision.artifactDigest !== evidence.runtimeArtifactDigest ||
+ runtimeRevision.configHash !== evidence.runtimeConfigDigest
+ ) {
+ throw evidenceError("RuntimeRevision 发布状态、Artifact 或 Config Digest 不一致");
+ }
 
-  // E. Agent + Runtime 主体（FOR UPDATE）— 生命周期校验（轻量 TOCTOU，不属于 Policy 维度）
-  const [agent, runtime] = await Promise.all([
-    tx
-      .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
-      .from(agentTable)
-      .where(and(eq(agentTable.id, agentRevision.agentId), eq(agentTable.tenantId, input.tenantId)))
-      .limit(1)
-      .for("update")
-      .then((rows) => rows[0] ?? null),
-    tx
-      .select({ id: runtimeTable.id, lifecycleState: runtimeTable.lifecycleState })
-      .from(runtimeTable)
-      .where(
-        and(
-          eq(runtimeTable.id, runtimeRevision.runtimeId),
-          eq(runtimeTable.tenantId, input.tenantId),
-        ),
-      )
-      .limit(1)
-      .for("update")
-      .then((rows) => rows[0] ?? null),
-  ]);
-  if (
-    !agent ||
-    agent.lifecycleState !== "enabled" ||
-    !runtime ||
-    runtime.lifecycleState !== "enabled"
-  ) {
-    throw evidenceError("Agent 或 Runtime 当前不可用于新执行");
-  }
+ // E. Agent + Runtime 主体（FOR UPDATE）— 生命周期校验（轻量 TOCTOU，不属于 Policy 维度）
+ const [agent, runtime] = await Promise.all([
+ tx
+ .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
+ .from(agentTable)
+ .where(and(eq(agentTable.id, agentRevision.agentId), eq(agentTable.tenantId, input.tenantId)))
+ .limit(1)
+ .for("update")
+ .then((rows) => rows[0] ?? null),
+ tx
+ .select({ id: runtimeTable.id, lifecycleState: runtimeTable.lifecycleState })
+ .from(runtimeTable)
+ .where(
+ and(
+ eq(runtimeTable.id, runtimeRevision.runtimeId),
+ eq(runtimeTable.tenantId, input.tenantId),
+ ),
+ )
+ .limit(1)
+ .for("update")
+ .then((rows) => rows[0] ?? null),
+ ]);
+ if (
+ !agent ||
+ agent.lifecycleState !== "enabled" ||
+ !runtime ||
+ runtime.lifecycleState !== "enabled"
+ ) {
+ throw evidenceError("Agent 或 Runtime 当前不可用于新执行");
+ }
 
-  // F. PolicyRevision（FOR UPDATE）— 状态一致性
-  if (input.policyRevisionId) {
-    const [policy] = await tx
-      .select({ state: policyRevisionTable.revisionState })
-      .from(policyRevisionTable)
-      .where(eq(policyRevisionTable.id, input.policyRevisionId))
-      .limit(1)
-      .for("update");
-    if (!policy || policy.state !== "published") {
-      throw evidenceError("PolicyRevision 不可用于新执行");
-    }
-  }
-  return { agentRevision, runtimeRevision };
+ // F. PolicyRevision（FOR UPDATE）— 状态一致性
+ if (input.policyRevisionId) {
+ const [policy] = await tx
+ .select({ state: policyRevisionTable.revisionState })
+ .from(policyRevisionTable)
+ .where(eq(policyRevisionTable.id, input.policyRevisionId))
+ .limit(1)
+ .for("update");
+ if (!policy || policy.state !== "published") {
+ throw evidenceError("PolicyRevision 不可用于新执行");
+ }
+ }
+ return { agentRevision, runtimeRevision };
 }
 
 function toExecutionBinding(row: typeof executionBindingTable.$inferSelect): ExecutionBinding {
-  if (
-    !row.routeRevisionId ||
-    !row.routeActivationId ||
-    !row.routeContentDigest ||
-    !row.agentArtifactDigest ||
-    !row.runtimeArtifactDigest ||
-    !row.runtimeConfigDigest ||
-    !row.capabilityManifestDigest ||
-    !row.agentAttestationIds ||
-    !row.runtimeAttestationIds ||
-    !row.agentPublicationRecordId ||
-    !row.runtimePublicationRecordId ||
-    !row.conformanceRunId
-  ) {
-    throw evidenceError("新建 Binding 回读时证据字段不完整");
-  }
-  return {
-    invocationId: row.invocationId,
-    tenantId: row.tenantId,
-    agentRevisionId: row.agentRevisionId,
-    runtimeRevisionId: row.runtimeRevisionId,
-    deploymentRouteId: row.deploymentRouteId,
-    modelProvider: row.modelProvider,
-    modelId: row.modelId,
-    modelRevisionRef: row.modelRevisionRef,
-    initialEnvironmentLeaseId: row.initialEnvironmentLeaseId,
-    workspaceBindingId: row.workspaceBindingId,
-    policyRevisionId: row.policyRevisionId,
-    contextCheckpointId: row.contextCheckpointId,
-    environmentDefinitionRevisionId: row.environmentDefinitionRevisionId,
-    routeRevisionId: row.routeRevisionId,
-    routeActivationId: row.routeActivationId,
-    routeContentDigest: row.routeContentDigest,
-    agentArtifactDigest: row.agentArtifactDigest,
-    runtimeArtifactDigest: row.runtimeArtifactDigest,
-    runtimeConfigDigest: row.runtimeConfigDigest,
-    capabilityManifestDigest: row.capabilityManifestDigest,
-    agentAttestationIds: [...row.agentAttestationIds],
-    runtimeAttestationIds: [...row.runtimeAttestationIds],
-    agentPublicationRecordId: row.agentPublicationRecordId,
-    runtimePublicationRecordId: row.runtimePublicationRecordId,
-    conformanceRunId: row.conformanceRunId,
-    configHash: row.configHash,
-    boundAt: row.boundAt,
-  };
+ if (
+ !row.routeRevisionId ||
+ !row.routeActivationId ||
+ !row.routeContentDigest ||
+ !row.agentArtifactDigest ||
+ !row.runtimeArtifactDigest ||
+ !row.runtimeConfigDigest ||
+ !row.capabilityManifestDigest ||
+ !row.agentAttestationIds ||
+ !row.runtimeAttestationIds ||
+ !row.agentPublicationRecordId ||
+ !row.runtimePublicationRecordId ||
+ !row.conformanceRunId
+ ) {
+ throw evidenceError("新建 Binding 回读时证据字段不完整");
+ }
+ return {
+ invocationId: row.invocationId,
+ tenantId: row.tenantId,
+ agentRevisionId: row.agentRevisionId,
+ runtimeRevisionId: row.runtimeRevisionId,
+ deploymentRouteId: row.deploymentRouteId,
+ modelProvider: row.modelProvider,
+ modelId: row.modelId,
+ modelRevisionRef: row.modelRevisionRef,
+ initialEnvironmentLeaseId: row.initialEnvironmentLeaseId,
+ workspaceBindingId: row.workspaceBindingId,
+ policyRevisionId: row.policyRevisionId,
+ contextCheckpointId: row.contextCheckpointId,
+ environmentDefinitionRevisionId: row.environmentDefinitionRevisionId,
+ routeRevisionId: row.routeRevisionId,
+ routeActivationId: row.routeActivationId,
+ routeContentDigest: row.routeContentDigest,
+ agentArtifactDigest: row.agentArtifactDigest,
+ runtimeArtifactDigest: row.runtimeArtifactDigest,
+ runtimeConfigDigest: row.runtimeConfigDigest,
+ capabilityManifestDigest: row.capabilityManifestDigest,
+ agentAttestationIds: [...row.agentAttestationIds],
+ runtimeAttestationIds: [...row.runtimeAttestationIds],
+ agentPublicationRecordId: row.agentPublicationRecordId,
+ runtimePublicationRecordId: row.runtimePublicationRecordId,
+ conformanceRunId: row.conformanceRunId,
+ configHash: row.configHash,
+ boundAt: row.boundAt,
+ };
 }
 
 function evidenceError(message: string): ExecutionBindingEvidenceError {
-  return new ExecutionBindingEvidenceError(message);
+ return new ExecutionBindingEvidenceError(message);
 }

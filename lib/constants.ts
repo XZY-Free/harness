@@ -3,5 +3,5 @@ export const DEFAULT_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEFAULT_USER_EMAIL = "owner@snow-harness.local";
 export const DEFAULT_USER_NAME = "SnowHarness 管理员";
 
-/** Deprecated: do not use for user-facing routes after Phase 4-3. 首页改为按当前用户取最近 thread。 */
+/** Deprecated: 首页改为按当前用户取最近 thread。 */
 export const DEFAULT_THREAD_ID = "00000000-0000-4000-8000-0000000000c1";

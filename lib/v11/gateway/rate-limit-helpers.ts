@@ -3,7 +3,7 @@ import type { ApiErrorCode } from "@/lib/error-codes";
  * V11 限流与过载保护路由助手（S12-W02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md §2.2
+ * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md 
  * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W02
  *
  * 职责：
@@ -20,42 +20,42 @@ import type { ApiErrorCode } from "@/lib/error-codes";
 import { REQUEST_ID_HEADER, apiError } from "@/lib/http";
 import type { Principal } from "@/lib/identity/resolver";
 import {
-  type OverloadResult,
-  type RequestPriority,
-  getOverloadProtector,
-  inferPriority,
+ type OverloadResult,
+ type RequestPriority,
+ getOverloadProtector,
+ inferPriority,
 } from "@/lib/v11/gateway/overload-protection";
 import {
-  type RateLimitResult,
-  type RateLimitScopeType,
-  getRateLimiter,
+ type RateLimitResult,
+ type RateLimitScopeType,
+ getRateLimiter,
 } from "@/lib/v11/gateway/rate-limiter";
 import type { SSEQuotaResult } from "@/lib/v11/gateway/sse-connection-quota";
 
 /** 限流检查请求参数。 */
 export interface RateLimitCheckParams {
-  /** 租户 ID。 */
-  tenantId: string;
-  /** 用户 ID（员工 API 必填；Gateway API 可为 runtimeId）。 */
-  userId?: string;
-  /** Thread ID（Thread 级限流时必填）。 */
-  threadId?: string;
-  /** Runtime ID（Gateway API 级限流时必填）。 */
-  runtimeId?: string;
-  /** 是否高成本操作（导出、重建等）。 */
-  highCost?: boolean;
-  /** 消耗令牌数（默认 1）。 */
-  cost?: number;
+ /** 租户 ID。 */
+ tenantId: string;
+ /** 用户 ID（员工 API 必填；Gateway API 可为 runtimeId）。 */
+ userId?: string;
+ /** Thread ID（Thread 级限流时必填）。 */
+ threadId?: string;
+ /** Runtime ID（Gateway API 级限流时必填）。 */
+ runtimeId?: string;
+ /** 是否高成本操作（导出、重建等）。 */
+ highCost?: boolean;
+ /** 消耗令牌数（默认 1）。 */
+ cost?: number;
 }
 
 /** 限流检查结果。 */
 export interface GatewayProtectionResult {
-  /** 是否放行。 */
-  ok: boolean;
-  /** 被拒绝时的 HTTP 响应。 */
-  response: Response | null;
-  /** 过载保护释放函数（ok=true 时必填，请求结束后调用）。 */
-  releaseOverload: (() => void) | null;
+ /** 是否放行。 */
+ ok: boolean;
+ /** 被拒绝时的 HTTP 响应。 */
+ response: Response | null;
+ /** 过载保护释放函数（ok=true 时必填，请求结束后调用）。 */
+ releaseOverload: (() => void) | null;
 }
 
 /**
@@ -72,60 +72,60 @@ export interface GatewayProtectionResult {
  * @returns 保护检查结果
  */
 export function enforceGatewayProtection(
-  method: string,
-  path: string,
-  requestId: string,
-  params: RateLimitCheckParams,
+ method: string,
+ path: string,
+ requestId: string,
+ params: RateLimitCheckParams,
 ): GatewayProtectionResult {
-  // 1. 过载保护检查（按优先级）
-  const priority = inferPriority(method, path);
-  const protector = getOverloadProtector();
-  const overloadResult = protector.acquire(priority);
+ // 1. 过载保护检查（按优先级）
+ const priority = inferPriority(method, path);
+ const protector = getOverloadProtector();
+ const overloadResult = protector.acquire(priority);
 
-  if (!overloadResult.allowed) {
-    return {
-      ok: false,
-      response: buildOverloadResponse(overloadResult, requestId),
-      releaseOverload: null,
-    };
-  }
+ if (!overloadResult.allowed) {
+ return {
+ ok: false,
+ response: buildOverloadResponse(overloadResult, requestId),
+ releaseOverload: null,
+ };
+ }
 
-  // 2. 限流检查（多维度批量）
-  const scopes: Array<{ scopeType: RateLimitScopeType; scopeId: string; cost?: number }> = [
-    { scopeType: "tenant", scopeId: params.tenantId, cost: params.cost },
-  ];
-  if (params.userId) {
-    scopes.push({ scopeType: "user", scopeId: params.userId, cost: params.cost });
-  }
-  if (params.threadId) {
-    scopes.push({ scopeType: "thread", scopeId: params.threadId, cost: params.cost });
-  }
-  if (params.runtimeId) {
-    scopes.push({ scopeType: "runtime", scopeId: params.runtimeId, cost: params.cost });
-  }
-  if (params.highCost) {
-    scopes.push({ scopeType: "high_cost", scopeId: params.tenantId, cost: params.cost ?? 5 });
-  }
+ // 2. 限流检查（多维度批量）
+ const scopes: Array<{ scopeType: RateLimitScopeType; scopeId: string; cost?: number }> = [
+ { scopeType: "tenant", scopeId: params.tenantId, cost: params.cost },
+ ];
+ if (params.userId) {
+ scopes.push({ scopeType: "user", scopeId: params.userId, cost: params.cost });
+ }
+ if (params.threadId) {
+ scopes.push({ scopeType: "thread", scopeId: params.threadId, cost: params.cost });
+ }
+ if (params.runtimeId) {
+ scopes.push({ scopeType: "runtime", scopeId: params.runtimeId, cost: params.cost });
+ }
+ if (params.highCost) {
+ scopes.push({ scopeType: "high_cost", scopeId: params.tenantId, cost: params.cost ?? 5 });
+ }
 
-  const limiter = getRateLimiter();
-  const rateLimitResult = limiter.checkAndConsumeBatch(scopes);
+ const limiter = getRateLimiter();
+ const rateLimitResult = limiter.checkAndConsumeBatch(scopes);
 
-  if (!rateLimitResult.allowed) {
-    // 限流拒绝：释放过载槽位（因为不执行业务）
-    protector.release(priority);
-    return {
-      ok: false,
-      response: buildRateLimitResponse(rateLimitResult, requestId),
-      releaseOverload: null,
-    };
-  }
+ if (!rateLimitResult.allowed) {
+ // 限流拒绝：释放过载槽位（因为不执行业务）
+ protector.release(priority);
+ return {
+ ok: false,
+ response: buildRateLimitResponse(rateLimitResult, requestId),
+ releaseOverload: null,
+ };
+ }
 
-  // 3. 全部通过
-  return {
-    ok: true,
-    response: null,
-    releaseOverload: () => protector.release(priority),
-  };
+ // 3. 全部通过
+ return {
+ ok: true,
+ response: null,
+ releaseOverload: () => protector.release(priority),
+ };
 }
 
 /**
@@ -139,29 +139,29 @@ export function enforceGatewayProtection(
  * - details.limit（桶容量）
  */
 export function buildRateLimitResponse(result: RateLimitResult, requestId: string): Response {
-  const retryAfterSeconds = Math.ceil(result.retryAfterMs / 1000);
-  const body = {
-    error: {
-      code: "RATE_LIMITED" as ApiErrorCode,
-      message: `请求被限流：维度 ${result.scopeType}（${result.scopeKey}）令牌不足，${result.retryAfterMs}ms 后可重试`,
-      request_id: requestId,
-      retryable: true,
-      details: {
-        scope: result.scopeType,
-        scope_key: result.scopeKey,
-        retry_after_ms: result.retryAfterMs,
-        remaining: result.remaining,
-        limit: result.limit,
-      },
-    },
-  };
-  return Response.json(body, {
-    status: 429,
-    headers: {
-      [REQUEST_ID_HEADER]: requestId,
-      "Retry-After": String(retryAfterSeconds),
-    },
-  });
+ const retryAfterSeconds = Math.ceil(result.retryAfterMs / 1000);
+ const body = {
+ error: {
+ code: "RATE_LIMITED" as ApiErrorCode,
+ message: `请求被限流：维度 ${result.scopeType}（${result.scopeKey}）令牌不足，${result.retryAfterMs}ms 后可重试`,
+ request_id: requestId,
+ retryable: true,
+ details: {
+ scope: result.scopeType,
+ scope_key: result.scopeKey,
+ retry_after_ms: result.retryAfterMs,
+ remaining: result.remaining,
+ limit: result.limit,
+ },
+ },
+ };
+ return Response.json(body, {
+ status: 429,
+ headers: {
+ [REQUEST_ID_HEADER]: requestId,
+ "Retry-After": String(retryAfterSeconds),
+ },
+ });
 }
 
 /**
@@ -177,31 +177,31 @@ export function buildRateLimitResponse(result: RateLimitResult, requestId: strin
  * - details.max（最大连接数）
  */
 export function buildStreamBackpressureResponse(
-  result: SSEQuotaResult,
-  requestId: string,
+ result: SSEQuotaResult,
+ requestId: string,
 ): Response {
-  const retryAfterSeconds = Math.ceil(result.retryAfterMs / 1000);
-  const body = {
-    error: {
-      code: "STREAM_BACKPRESSURE" as ApiErrorCode,
-      message: `SSE 连接配额超限：维度 ${result.scope}（活跃 ${result.active}/${result.max}），${result.retryAfterMs}ms 后可重试`,
-      request_id: requestId,
-      retryable: true,
-      details: {
-        scope: result.scope,
-        retry_after_ms: result.retryAfterMs,
-        active: result.active,
-        max: result.max,
-      },
-    },
-  };
-  return Response.json(body, {
-    status: 429,
-    headers: {
-      [REQUEST_ID_HEADER]: requestId,
-      "Retry-After": String(retryAfterSeconds),
-    },
-  });
+ const retryAfterSeconds = Math.ceil(result.retryAfterMs / 1000);
+ const body = {
+ error: {
+ code: "STREAM_BACKPRESSURE" as ApiErrorCode,
+ message: `SSE 连接配额超限：维度 ${result.scope}（活跃 ${result.active}/${result.max}），${result.retryAfterMs}ms 后可重试`,
+ request_id: requestId,
+ retryable: true,
+ details: {
+ scope: result.scope,
+ retry_after_ms: result.retryAfterMs,
+ active: result.active,
+ max: result.max,
+ },
+ },
+ };
+ return Response.json(body, {
+ status: 429,
+ headers: {
+ [REQUEST_ID_HEADER]: requestId,
+ "Retry-After": String(retryAfterSeconds),
+ },
+ });
 }
 
 /**
@@ -211,67 +211,67 @@ export function buildStreamBackpressureResponse(
  * 但如果只是优先级阈值触发（非绝对上限），使用 429 RATE_LIMITED 更合适。
  */
 export function buildOverloadResponse(result: OverloadResult, requestId: string): Response {
-  // 绝对上限触发 → 503
-  if (result.reason === "max_concurrent_reached") {
-    return apiError(
-      "RUNTIME_UNAVAILABLE",
-      `服务过载：并发已达上限 ${result.maxConcurrent}，请稍后重试`,
-      {
-        requestId,
-        details: {
-          reason: result.reason,
-          concurrent: result.concurrent,
-          max_concurrent: result.maxConcurrent,
-          retry_after_ms: result.retryAfterMs,
-        },
-      },
-    );
-  }
+ // 绝对上限触发 → 503
+ if (result.reason === "max_concurrent_reached") {
+ return apiError(
+ "RUNTIME_UNAVAILABLE",
+ `服务过载：并发已达上限 ${result.maxConcurrent}，请稍后重试`,
+ {
+ requestId,
+ details: {
+ reason: result.reason,
+ concurrent: result.concurrent,
+ max_concurrent: result.maxConcurrent,
+ retry_after_ms: result.retryAfterMs,
+ },
+ },
+ );
+ }
 
-  // 优先级阈值触发 → 429
-  const retryAfterSeconds = Math.ceil(result.retryAfterMs / 1000);
-  const body = {
-    error: {
-      code: "RATE_LIMITED" as ApiErrorCode,
-      message: `请求被降级：优先级 ${result.priority} 在过载期间被拒绝（并发 ${result.concurrent}/${result.maxConcurrent}）`,
-      request_id: requestId,
-      retryable: true,
-      details: {
-        reason: result.reason,
-        priority: result.priority,
-        concurrent: result.concurrent,
-        max_concurrent: result.maxConcurrent,
-        retry_after_ms: result.retryAfterMs,
-      },
-    },
-  };
-  return Response.json(body, {
-    status: 429,
-    headers: {
-      [REQUEST_ID_HEADER]: requestId,
-      "Retry-After": String(retryAfterSeconds),
-    },
-  });
+ // 优先级阈值触发 → 429
+ const retryAfterSeconds = Math.ceil(result.retryAfterMs / 1000);
+ const body = {
+ error: {
+ code: "RATE_LIMITED" as ApiErrorCode,
+ message: `请求被降级：优先级 ${result.priority} 在过载期间被拒绝（并发 ${result.concurrent}/${result.maxConcurrent}）`,
+ request_id: requestId,
+ retryable: true,
+ details: {
+ reason: result.reason,
+ priority: result.priority,
+ concurrent: result.concurrent,
+ max_concurrent: result.maxConcurrent,
+ retry_after_ms: result.retryAfterMs,
+ },
+ },
+ };
+ return Response.json(body, {
+ status: 429,
+ headers: {
+ [REQUEST_ID_HEADER]: requestId,
+ "Retry-After": String(retryAfterSeconds),
+ },
+ });
 }
 
 /**
  * 从员工 Principal 提取限流参数。
  */
 export function rateLimitParamsFromPrincipal(
-  principal: Principal,
-  options?: {
-    threadId?: string;
-    highCost?: boolean;
-    cost?: number;
-  },
+ principal: Principal,
+ options?: {
+ threadId?: string;
+ highCost?: boolean;
+ cost?: number;
+ },
 ): RateLimitCheckParams {
-  return {
-    tenantId: principal.tenantId,
-    userId: principal.userIdentityId,
-    threadId: options?.threadId,
-    highCost: options?.highCost,
-    cost: options?.cost,
-  };
+ return {
+ tenantId: principal.tenantId,
+ userId: principal.userIdentityId,
+ threadId: options?.threadId,
+ highCost: options?.highCost,
+ cost: options?.cost,
+ };
 }
 
 /**
@@ -282,13 +282,13 @@ export function rateLimitParamsFromPrincipal(
  * - ok=true → 执行业务后调用 release
  */
 export function acquireOverloadGuard(
-  priority: RequestPriority,
-  requestId: string,
+ priority: RequestPriority,
+ requestId: string,
 ): [boolean, Response | null, (() => void) | null] {
-  const protector = getOverloadProtector();
-  const result = protector.acquire(priority);
-  if (!result.allowed) {
-    return [false, buildOverloadResponse(result, requestId), null];
-  }
-  return [true, null, () => protector.release(priority)];
+ const protector = getOverloadProtector();
+ const result = protector.acquire(priority);
+ if (!result.allowed) {
+ return [false, buildOverloadResponse(result, requestId), null];
+ }
+ return [true, null, () => protector.release(priority)];
 }

@@ -32,34 +32,34 @@ import * as schema from "./schema";
 
 /** 合并旧 schema 与 V11 schema，使 db.query.* 关系查询覆盖 V11 表。 */
 const fullSchema = {
-  ...schema,
-  ...controlPlaneOutboxSchema,
-  ...artifactRecordSchema,
-  ...publicationRecordSchema,
-  ...runtimeConformanceRunSchema,
-  ...routeRevisionSchema,
-  ...identitySchemaTable,
-  ...deviceSchemaTable,
-  ...authorizationSchemaTable,
-  ...idempotencySchemaTable,
-  ...auditSchemaTable,
-  ...adminExportSchemaTable,
-  ...agentSchemaTable,
-  ...runtimeSchemaTable,
-  ...deploymentRouteSchemaTable,
-  ...workspaceSchemaTable,
-  ...environmentSchemaTable,
-  ...permissionSchemaTable,
-  ...userActionRequestSchemaTable,
-  ...effectSchemaTable,
-  ...runtimeArtifactSchemaTable,
-  ...fileChangeSchemaTable,
-  ...filesystemCheckpointSchemaTable,
-  ...traceSchemaTable,
-  ...evaluationSchemaTable,
-  ...usageSchemaTable,
-  ...recoveryDrillSchemaTable,
-  ...securityIncidentSchemaTable,
+ ...schema,
+ ...controlPlaneOutboxSchema,
+ ...artifactRecordSchema,
+ ...publicationRecordSchema,
+ ...runtimeConformanceRunSchema,
+ ...routeRevisionSchema,
+ ...identitySchemaTable,
+ ...deviceSchemaTable,
+ ...authorizationSchemaTable,
+ ...idempotencySchemaTable,
+ ...auditSchemaTable,
+ ...adminExportSchemaTable,
+ ...agentSchemaTable,
+ ...runtimeSchemaTable,
+ ...deploymentRouteSchemaTable,
+ ...workspaceSchemaTable,
+ ...environmentSchemaTable,
+ ...permissionSchemaTable,
+ ...userActionRequestSchemaTable,
+ ...effectSchemaTable,
+ ...runtimeArtifactSchemaTable,
+ ...fileChangeSchemaTable,
+ ...filesystemCheckpointSchemaTable,
+ ...traceSchemaTable,
+ ...evaluationSchemaTable,
+ ...usageSchemaTable,
+ ...recoveryDrillSchemaTable,
+ ...securityIncidentSchemaTable,
 };
 
 /**
@@ -73,29 +73,29 @@ const fullSchema = {
  */
 
 const connectionString =
-  dbConfig.url || "mysql://build-placeholder:build-placeholder@127.0.0.1:3306/placeholder";
+ dbConfig.url || "mysql://build-placeholder:build-placeholder@127.0.0.1:3306/placeholder";
 
-// S1（08-P1-5）：连接池参数可配置（原仅用连接串默认 connectionLimit=10）。
+// 连接池参数可配置（原仅用连接串默认 connectionLimit=10）。
 const poolOptions: mysql.PoolOptions = {
-  connectionLimit: Number.parseInt(process.env.SNOW_DB_CONNECTION_LIMIT ?? "10", 10),
-  waitForConnections: true,
-  queueLimit: Number.parseInt(process.env.SNOW_DB_QUEUE_LIMIT ?? "100", 10),
+ connectionLimit: Number.parseInt(process.env.SNOW_DB_CONNECTION_LIMIT ?? "10", 10),
+ waitForConnections: true,
+ queueLimit: Number.parseInt(process.env.SNOW_DB_QUEUE_LIMIT ?? "100", 10),
 };
 
 const globalForDb = globalThis as unknown as {
-  __snowMysqlPool?: mysql.Pool;
+ __snowMysqlPool?: mysql.Pool;
 };
 
 const pool =
-  globalForDb.__snowMysqlPool ?? mysql.createPool({ uri: connectionString, ...poolOptions });
+ globalForDb.__snowMysqlPool ?? mysql.createPool({ uri: connectionString, ...poolOptions });
 if (!globalForDb.__snowMysqlPool) {
-  globalForDb.__snowMysqlPool = pool;
+ globalForDb.__snowMysqlPool = pool;
 }
 
 export const db = drizzle(pool, { schema: fullSchema, mode: "default" });
 
 /**
- * §07.3: DB 或事务的公共查询接口类型。
+ * : DB 或事务的公共查询接口类型。
  *
  * Drizzle 的 MySqlTransaction 和 MySql2Database 共享 .select()/.from()/.where()
  * 等查询构建器方法，但 TypeScript 类型系统未建立继承关系（Transaction 缺少 $client）。

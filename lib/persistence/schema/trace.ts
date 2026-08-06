@@ -46,41 +46,41 @@ export type TraceSamplingPolicy = (typeof TRACE_SAMPLING_POLICIES)[number];
 // ─── Trace ──────────────────────────────────────────────
 
 export const traceTable = mysqlTable(
-  "trace",
-  {
-    id: varchar("id", { length: 36 }).primaryKey(),
-    tenantId: varchar("tenant_id", { length: 36 })
-      .notNull()
-      .references(() => tenant.id),
-    /** Trace 根资源类型：invocation/job/thread。 */
-    rootType: varchar("root_type", { length: 32 }).notNull(),
-    /** Trace 根资源 id（Invocation.id / Job.id / Thread.id）。 */
-    rootId: varchar("root_id", { length: 36 }).notNull(),
-    /** W3C trace_id。 */
-    traceKey: varchar("trace_key", { length: 128 }).notNull(),
-    /** 关联 span.id（根 Span）。 */
-    rootSpanId: varchar("root_span_id", { length: 36 }),
-    contentMode: varchar("content_mode", { length: 32 }).notNull().default("metadata"),
-    samplingPolicy: varchar("sampling_policy", { length: 32 }).notNull().default("always"),
-    /** 0-1 概率（samplingPolicy=probabilistic 时生效）。 */
-    samplingRate: json("sampling_rate"),
-    traceState: varchar("trace_state", { length: 32 }).notNull().default("active"),
-    startedAt: datetime("started_at", { mode: "date", fsp: 3 }).notNull(),
-    finishedAt: datetime("finished_at", { mode: "date", fsp: 3 }),
-    attributesJson: json("attributes_json"),
-    versionNo: varchar("version_no", { length: 36 }).notNull().default("1"),
-    createdAt: datetime("created_at", { mode: "date", fsp: 3 })
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP(3)`),
-    updatedAt: datetime("updated_at", { mode: "date", fsp: 3 })
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP(3)`),
-  },
-  (table) => ({
-    tenantRootIdx: index("tenant_root_idx").on(table.tenantId, table.rootType, table.rootId),
-    tenantTraceKeyIdx: index("tenant_trace_key_idx").on(table.tenantId, table.traceKey),
-    tenantStateIdx: index("tenant_state_idx").on(table.tenantId, table.traceState),
-  }),
+ "trace",
+ {
+ id: varchar("id", { length: 36 }).primaryKey(),
+ tenantId: varchar("tenant_id", { length: 36 })
+ .notNull()
+ .references(() => tenant.id),
+ /** Trace 根资源类型：invocation/job/thread。 */
+ rootType: varchar("root_type", { length: 32 }).notNull(),
+ /** Trace 根资源 id（Invocation.id / Job.id / Thread.id）。 */
+ rootId: varchar("root_id", { length: 36 }).notNull(),
+ /** W3C trace_id。 */
+ traceKey: varchar("trace_key", { length: 128 }).notNull(),
+ /** 关联 span.id（根 Span）。 */
+ rootSpanId: varchar("root_span_id", { length: 36 }),
+ contentMode: varchar("content_mode", { length: 32 }).notNull().default("metadata"),
+ samplingPolicy: varchar("sampling_policy", { length: 32 }).notNull().default("always"),
+ /** 0-1 概率（samplingPolicy=probabilistic 时生效）。 */
+ samplingRate: json("sampling_rate"),
+ traceState: varchar("trace_state", { length: 32 }).notNull().default("active"),
+ startedAt: datetime("started_at", { mode: "date", fsp: 3 }).notNull(),
+ finishedAt: datetime("finished_at", { mode: "date", fsp: 3 }),
+ attributesJson: json("attributes_json"),
+ versionNo: varchar("version_no", { length: 36 }).notNull().default("1"),
+ createdAt: datetime("created_at", { mode: "date", fsp: 3 })
+ .notNull()
+ .default(sql`CURRENT_TIMESTAMP(3)`),
+ updatedAt: datetime("updated_at", { mode: "date", fsp: 3 })
+ .notNull()
+ .default(sql`CURRENT_TIMESTAMP(3)`),
+ },
+ (table) => ({
+ tenantRootIdx: index("tenant_root_idx").on(table.tenantId, table.rootType, table.rootId),
+ tenantTraceKeyIdx: index("tenant_trace_key_idx").on(table.tenantId, table.traceKey),
+ tenantStateIdx: index("tenant_state_idx").on(table.tenantId, table.traceState),
+ }),
 );
 
 export type Trace = typeof traceTable.$inferSelect;
@@ -89,16 +89,16 @@ export type TraceInsert = typeof traceTable.$inferInsert;
 // ─── Span Kind / State ─────────────────────────────────────
 
 export const SPAN_KINDS = [
-  "model",
-  "skill",
-  "tool",
-  "knowledge",
-  "memory",
-  "desktop",
-  "browser",
-  "workspace",
-  "permission",
-  "subtask",
+ "model",
+ "skill",
+ "tool",
+ "knowledge",
+ "memory",
+ "desktop",
+ "browser",
+ "workspace",
+ "permission",
+ "subtask",
 ] as const;
 export type SpanKind = (typeof SPAN_KINDS)[number];
 
@@ -108,38 +108,38 @@ export type SpanState = (typeof SPAN_STATES)[number];
 // ─── Span ───────────────────────────────────────────────
 
 export const spanTable = mysqlTable(
-  "span",
-  {
-    id: varchar("id", { length: 36 }).primaryKey(),
-    tenantId: varchar("tenant_id", { length: 36 })
-      .notNull()
-      .references(() => tenant.id),
-    traceId: varchar("trace_id", { length: 36 }).notNull(),
-    /** 父 Span id（自引用，根 Span 为 null）。 */
-    parentSpanId: varchar("parent_span_id", { length: 36 }),
-    /** W3C span_id。 */
-    spanKey: varchar("span_key", { length: 36 }).notNull(),
-    name: varchar("name", { length: 256 }).notNull(),
-    kind: varchar("kind", { length: 32 }).notNull(),
-    spanState: varchar("span_state", { length: 32 }).notNull().default("active"),
-    startedAt: datetime("started_at", { mode: "date", fsp: 3 }).notNull(),
-    finishedAt: datetime("finished_at", { mode: "date", fsp: 3 }),
-    attributesJson: json("attributes_json"),
-    /** Span 事件数组。 */
-    eventsJson: json("events_json"),
-    versionNo: varchar("version_no", { length: 36 }).notNull().default("1"),
-    createdAt: datetime("created_at", { mode: "date", fsp: 3 })
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP(3)`),
-    updatedAt: datetime("updated_at", { mode: "date", fsp: 3 })
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP(3)`),
-  },
-  (table) => ({
-    tenantTraceIdx: index("tenant_trace_idx").on(table.tenantId, table.traceId),
-    tenantParentIdx: index("tenant_parent_idx").on(table.tenantId, table.parentSpanId),
-    tenantKindIdx: index("tenant_kind_idx").on(table.tenantId, table.kind),
-  }),
+ "span",
+ {
+ id: varchar("id", { length: 36 }).primaryKey(),
+ tenantId: varchar("tenant_id", { length: 36 })
+ .notNull()
+ .references(() => tenant.id),
+ traceId: varchar("trace_id", { length: 36 }).notNull(),
+ /** 父 Span id（自引用，根 Span 为 null）。 */
+ parentSpanId: varchar("parent_span_id", { length: 36 }),
+ /** W3C span_id。 */
+ spanKey: varchar("span_key", { length: 36 }).notNull(),
+ name: varchar("name", { length: 256 }).notNull(),
+ kind: varchar("kind", { length: 32 }).notNull(),
+ spanState: varchar("span_state", { length: 32 }).notNull().default("active"),
+ startedAt: datetime("started_at", { mode: "date", fsp: 3 }).notNull(),
+ finishedAt: datetime("finished_at", { mode: "date", fsp: 3 }),
+ attributesJson: json("attributes_json"),
+ /** Span 事件数组。 */
+ eventsJson: json("events_json"),
+ versionNo: varchar("version_no", { length: 36 }).notNull().default("1"),
+ createdAt: datetime("created_at", { mode: "date", fsp: 3 })
+ .notNull()
+ .default(sql`CURRENT_TIMESTAMP(3)`),
+ updatedAt: datetime("updated_at", { mode: "date", fsp: 3 })
+ .notNull()
+ .default(sql`CURRENT_TIMESTAMP(3)`),
+ },
+ (table) => ({
+ tenantTraceIdx: index("tenant_trace_idx").on(table.tenantId, table.traceId),
+ tenantParentIdx: index("tenant_parent_idx").on(table.tenantId, table.parentSpanId),
+ tenantKindIdx: index("tenant_kind_idx").on(table.tenantId, table.kind),
+ }),
 );
 
 export type Span = typeof spanTable.$inferSelect;
@@ -154,35 +154,35 @@ export const OBSERVATION_CONTENT_MODES = TRACE_CONTENT_MODES;
 export type ObservationContentMode = TraceContentMode;
 
 export const observationTable = mysqlTable(
-  "observation",
-  {
-    id: varchar("id", { length: 36 }).primaryKey(),
-    tenantId: varchar("tenant_id", { length: 36 })
-      .notNull()
-      .references(() => tenant.id),
-    traceId: varchar("trace_id", { length: 36 }).notNull(),
-    /** 关联 Span（可选）。 */
-    spanId: varchar("span_id", { length: 36 }),
-    /** 关联 Invocation（可选，用于跨 Span 聚合查询）。 */
-    invocationId: varchar("invocation_id", { length: 36 }),
-    kind: varchar("kind", { length: 32 }).notNull(),
-    contentMode: varchar("content_mode", { length: 32 }).notNull().default("metadata"),
-    /** 已脱敏的内容（由 content-policy 处理）。 */
-    contentJson: json("content_json"),
-    /** 强制 false：写入前已脱敏，永不存储原始 secret。 */
-    containsSecret: json("contains_secret").notNull().default(sql`false`),
-    redactionSummary: varchar("redaction_summary", { length: 256 }),
-    observedAt: datetime("observed_at", { mode: "date", fsp: 3 }).notNull(),
-    createdAt: datetime("created_at", { mode: "date", fsp: 3 })
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP(3)`),
-  },
-  (table) => ({
-    tenantTraceIdx: index("tenant_trace_idx").on(table.tenantId, table.traceId),
-    tenantSpanIdx: index("tenant_span_idx").on(table.tenantId, table.spanId),
-    tenantInvocationIdx: index("tenant_invocation_idx").on(table.tenantId, table.invocationId),
-    tenantKindIdx: index("tenant_kind_idx").on(table.tenantId, table.kind),
-  }),
+ "observation",
+ {
+ id: varchar("id", { length: 36 }).primaryKey(),
+ tenantId: varchar("tenant_id", { length: 36 })
+ .notNull()
+ .references(() => tenant.id),
+ traceId: varchar("trace_id", { length: 36 }).notNull(),
+ /** 关联 Span（可选）。 */
+ spanId: varchar("span_id", { length: 36 }),
+ /** 关联 Invocation（可选，用于跨 Span 聚合查询）。 */
+ invocationId: varchar("invocation_id", { length: 36 }),
+ kind: varchar("kind", { length: 32 }).notNull(),
+ contentMode: varchar("content_mode", { length: 32 }).notNull().default("metadata"),
+ /** 已脱敏的内容（由 content-policy 处理）。 */
+ contentJson: json("content_json"),
+ /** 强制 false：写入前已脱敏，永不存储原始 secret。 */
+ containsSecret: json("contains_secret").notNull().default(sql`false`),
+ redactionSummary: varchar("redaction_summary", { length: 256 }),
+ observedAt: datetime("observed_at", { mode: "date", fsp: 3 }).notNull(),
+ createdAt: datetime("created_at", { mode: "date", fsp: 3 })
+ .notNull()
+ .default(sql`CURRENT_TIMESTAMP(3)`),
+ },
+ (table) => ({
+ tenantTraceIdx: index("tenant_trace_idx").on(table.tenantId, table.traceId),
+ tenantSpanIdx: index("tenant_span_idx").on(table.tenantId, table.spanId),
+ tenantInvocationIdx: index("tenant_invocation_idx").on(table.tenantId, table.invocationId),
+ tenantKindIdx: index("tenant_kind_idx").on(table.tenantId, table.kind),
+ }),
 );
 
 export type Observation = typeof observationTable.$inferSelect;

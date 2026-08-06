@@ -1,5 +1,5 @@
 /**
- * S1（08-P2-3）：高风险 json 列的 zod 校验 schema。
+ * 高风险 json 列的 zod 校验 schema。
  *
  * db 层 33 个 json 列此前写入前零校验，脏数据（非数组 / 缺字段 / 类型错）直接落库，
  * 后续读取时才报错（难追溯）。本模块为高风险 json 列定义 zod schema，写入函数入口校验，
@@ -25,10 +25,10 @@ export const toolRunOutputSchema = z.record(z.string(), z.unknown());
 
 /** customTool.inputSchema：JSON Schema 声明，必须是对象（至少有 type 字段）。 */
 export const customToolInputSchemaSchema = z
-  .object({
-    type: z.string().optional(),
-  })
-  .passthrough();
+ .object({
+ type: z.string().optional(),
+ })
+ .passthrough();
 
 /** customTool.executorConfig：executor 配置，必须是对象。webhook/script 各自字段由 registry 校验。 */
 export const customToolExecutorConfigSchema = z.record(z.string(), z.unknown());
@@ -44,21 +44,21 @@ export const contextSnapshotChecksumsSchema = z.record(z.string(), z.string());
  * availableSkillCount + uiSelectedSkillIds（不含完整 SKILL.md）。
  */
 export const contextSnapshotSkillResolverInputSchema = z
-  .object({
-    availableSkillCount: z.number().optional(),
-    uiSelectedSkillIds: z.array(z.string()).optional(),
-  })
-  .passthrough();
+ .object({
+ availableSkillCount: z.number().optional(),
+ uiSelectedSkillIds: z.array(z.string()).optional(),
+ })
+ .passthrough();
 
 /**
  * V8：contextSnapshot.skillResolverOutput — Resolver 输出摘要。
  * selectedSkillVersions（精简，仅 id/role/source）+ decisionReason + ignoredUiSelectedSkillIds。
  */
 export const contextSnapshotSkillResolverOutputSchema = z
-  .object({
-    decisionReason: z.string().optional(),
-  })
-  .passthrough();
+ .object({
+ decisionReason: z.string().optional(),
+ })
+ .passthrough();
 
 /**
  * V8：contextSnapshot.skillLoadEvidence — readSkillFile 加载证据数组。
@@ -71,15 +71,15 @@ export const threadPinnedFactsSchema = z.array(z.string()).nullable();
 
 /** memoryEntry.provenance：来源数组，每项 { kind, refId, threadId?, summary? }。 */
 export const memoryProvenanceSchema = z
-  .array(
-    z.object({
-      kind: z.enum(["tool_run", "message", "user"]),
-      refId: z.string(),
-      threadId: z.string().optional(),
-      summary: z.string().optional(),
-    }),
-  )
-  .min(1, "provenance 必须非空（防孤儿记忆）");
+ .array(
+ z.object({
+ kind: z.enum(["tool_run", "message", "user"]),
+ refId: z.string(),
+ threadId: z.string().optional(),
+ summary: z.string().optional(),
+ }),
+ )
+ .min(1, "provenance 必须非空（防孤儿记忆）");
 
 /**
  * 校验并通过返回原值（zod 通过即原值，不做转换）。
@@ -87,14 +87,14 @@ export const memoryProvenanceSchema = z
  * column 名仅用于错误消息上下文（zod 4 不再接受 path 选项）。
  */
 export function validateJsonColumn<T>(value: unknown, schema: z.ZodType<T>, column: string): T {
-  const result = schema.safeParse(value);
-  if (!result.success) {
-    // 包装错误消息，附上列名便于排查；保留 zod issue 结构
-    const issue = result.error.issues[0];
-    const msg = issue
-      ? `[json-column:${column}] ${issue.message} (path=${JSON.stringify(issue.path)})`
-      : `[json-column:${column}] 校验失败`;
-    throw new Error(msg);
-  }
-  return result.data;
+ const result = schema.safeParse(value);
+ if (!result.success) {
+ // 包装错误消息，附上列名便于排查；保留 zod issue 结构
+ const issue = result.error.issues[0];
+ const msg = issue
+ ? `[json-column:${column}] ${issue.message} (path=${JSON.stringify(issue.path)})`
+ : `[json-column:${column}] 校验失败`;
+ throw new Error(msg);
+ }
+ return result.data;
 }

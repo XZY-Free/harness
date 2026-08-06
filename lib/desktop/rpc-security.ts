@@ -1,5 +1,5 @@
 /**
- * V10 Phase 5：RPC 安全校验。
+ * ：RPC 安全校验。
  *
  * Desktop 收到 Server 发来的 RPC 请求后，必须经过完整的安全校验才能执行：
  * 1. schema 解析（字段完整、类型正确）
@@ -16,9 +16,9 @@
 import { isAllowedCommand, validateCommandPayload } from "./commands";
 import { isCompatibleVersion } from "./protocol";
 import {
-  type RpcRequestEnvelope,
-  getEnvelopeSignPayload,
-  rpcRequestEnvelopeSchema,
+ type RpcRequestEnvelope,
+ getEnvelopeSignPayload,
+ rpcRequestEnvelopeSchema,
 } from "./rpc-envelope";
 import { verifySignature } from "./signing";
 
@@ -26,8 +26,8 @@ import { verifySignature } from "./signing";
  * RPC 校验结果类型。
  */
 export type RpcValidationResult =
-  | { ok: true; envelope: RpcRequestEnvelope }
-  | { ok: false; code: string; message: string };
+ | { ok: true; envelope: RpcRequestEnvelope }
+ | { ok: false; code: string; message: string };
 
 /**
  * Nonce 去重器（有界窗口）。
@@ -36,58 +36,58 @@ export type RpcValidationResult =
  * 调用 cleanup() 可主动清理过期 nonce。
  */
 export class NonceDeduplicator {
-  private nonces = new Map<string, number>();
-  private maxSize: number;
+ private nonces = new Map<string, number>();
+ private maxSize: number;
 
-  constructor(maxSize = 10000) {
-    this.maxSize = maxSize;
-  }
+ constructor(maxSize = 10000) {
+ this.maxSize = maxSize;
+ }
 
-  /**
-   * 检查并记录 nonce。
-   *
-   * @param nonce 待检查的 nonce
-   * @param expiresAt nonce 的过期时间（epoch ms）
-   * @returns 首次见到返回 true，重复返回 false
-   */
-  checkAndAdd(nonce: string, expiresAt: number): boolean {
-    if (this.nonces.has(nonce)) {
-      return false;
-    }
-    // 超出容量时淘汰最旧条目（Map 保持插入顺序）
-    if (this.nonces.size >= this.maxSize) {
-      const oldestKey = this.nonces.keys().next().value;
-      if (oldestKey !== undefined) {
-        this.nonces.delete(oldestKey);
-      }
-    }
-    this.nonces.set(nonce, expiresAt);
-    return true;
-  }
+ /**
+ * 检查并记录 nonce。
+ *
+ * @param nonce 待检查的 nonce
+ * @param expiresAt nonce 的过期时间（epoch ms）
+ * @returns 首次见到返回 true，重复返回 false
+ */
+ checkAndAdd(nonce: string, expiresAt: number): boolean {
+ if (this.nonces.has(nonce)) {
+ return false;
+ }
+ // 超出容量时淘汰最旧条目（Map 保持插入顺序）
+ if (this.nonces.size >= this.maxSize) {
+ const oldestKey = this.nonces.keys().next().value;
+ if (oldestKey !== undefined) {
+ this.nonces.delete(oldestKey);
+ }
+ }
+ this.nonces.set(nonce, expiresAt);
+ return true;
+ }
 
-  /**
-   * 清理过期 nonce。
-   *
-   * @param now 当前时间（epoch ms）
-   * @returns 清理的 nonce 数量
-   */
-  cleanup(now: number): number {
-    let cleaned = 0;
-    for (const [key, expiresAt] of this.nonces) {
-      if (expiresAt < now) {
-        this.nonces.delete(key);
-        cleaned++;
-      }
-    }
-    return cleaned;
-  }
+ /**
+ * 清理过期 nonce。
+ *
+ * @param now 当前时间（epoch ms）
+ * @returns 清理的 nonce 数量
+ */
+ cleanup(now: number): number {
+ let cleaned = 0;
+ for (const [key, expiresAt] of this.nonces) {
+ if (expiresAt < now) {
+ this.nonces.delete(key);
+ cleaned++;
+ }
+ }
+ return cleaned;
+ }
 
-  /**
-   * 当前 nonce 数量。
-   */
-  size(): number {
-    return this.nonces.size;
-  }
+ /**
+ * 当前 nonce 数量。
+ */
+ size(): number {
+ return this.nonces.size;
+ }
 }
 
 /**
@@ -103,93 +103,93 @@ export class NonceDeduplicator {
  * @returns 校验结果
  */
 export function validateRpcEnvelope(
-  rawEnvelope: unknown,
-  expectedDeviceId: string,
-  expectedUserId: string | null,
-  serverPublicKeyBase64: string,
-  now: number,
+ rawEnvelope: unknown,
+ expectedDeviceId: string,
+ expectedUserId: string | null,
+ serverPublicKeyBase64: string,
+ now: number,
 ): RpcValidationResult {
-  // 1. schema 解析
-  const parseResult = rpcRequestEnvelopeSchema.safeParse(rawEnvelope);
-  if (!parseResult.success) {
-    return {
-      ok: false,
-      code: "rpc_invalid_payload",
-      message: "信封 schema 校验失败",
-    };
-  }
-  const envelope = parseResult.data;
+ // 1. schema 解析
+ const parseResult = rpcRequestEnvelopeSchema.safeParse(rawEnvelope);
+ if (!parseResult.success) {
+ return {
+ ok: false,
+ code: "rpc_invalid_payload",
+ message: "信封 schema 校验失败",
+ };
+ }
+ const envelope = parseResult.data;
 
-  // 2. 协议版本检查
-  if (!isCompatibleVersion(envelope.protocolVersion)) {
-    return {
-      ok: false,
-      code: "protocol_mismatch",
-      message: `协议版本不兼容：期望 ${1}，收到 ${envelope.protocolVersion}`,
-    };
-  }
+ // 2. 协议版本检查
+ if (!isCompatibleVersion(envelope.protocolVersion)) {
+ return {
+ ok: false,
+ code: "protocol_mismatch",
+ message: `协议版本不兼容：期望 ${1}，收到 ${envelope.protocolVersion}`,
+ };
+ }
 
-  // 3. deviceId 匹配
-  if (envelope.deviceId !== expectedDeviceId) {
-    return {
-      ok: false,
-      code: "unauthorized",
-      message: `deviceId 不匹配：期望 ${expectedDeviceId}，收到 ${envelope.deviceId}`,
-    };
-  }
+ // 3. deviceId 匹配
+ if (envelope.deviceId !== expectedDeviceId) {
+ return {
+ ok: false,
+ code: "unauthorized",
+ message: `deviceId 不匹配：期望 ${expectedDeviceId}，收到 ${envelope.deviceId}`,
+ };
+ }
 
-  // 4. userId 匹配（如果 expectedUserId 不为 null）
-  if (expectedUserId !== null && envelope.userId !== expectedUserId) {
-    return {
-      ok: false,
-      code: "unauthorized",
-      message: `userId 不匹配：期望 ${expectedUserId}，收到 ${envelope.userId}`,
-    };
-  }
+ // 4. userId 匹配（如果 expectedUserId 不为 null）
+ if (expectedUserId !== null && envelope.userId !== expectedUserId) {
+ return {
+ ok: false,
+ code: "unauthorized",
+ message: `userId 不匹配：期望 ${expectedUserId}，收到 ${envelope.userId}`,
+ };
+ }
 
-  // 5. 过期检查
-  if (now > envelope.expiresAt) {
-    return {
-      ok: false,
-      code: "rpc_timeout",
-      message: `请求已过期：expiresAt=${envelope.expiresAt}，now=${now}`,
-    };
-  }
+ // 5. 过期检查
+ if (now > envelope.expiresAt) {
+ return {
+ ok: false,
+ code: "rpc_timeout",
+ message: `请求已过期：expiresAt=${envelope.expiresAt}，now=${now}`,
+ };
+ }
 
-  // 6. 签名验证
-  const signPayload = getEnvelopeSignPayload(envelope);
-  let signatureValid: boolean;
-  try {
-    signatureValid = verifySignature(signPayload, envelope.signature, serverPublicKeyBase64);
-  } catch {
-    signatureValid = false;
-  }
-  if (!signatureValid) {
-    return {
-      ok: false,
-      code: "rpc_invalid_signature",
-      message: "签名验证失败",
-    };
-  }
+ // 6. 签名验证
+ const signPayload = getEnvelopeSignPayload(envelope);
+ let signatureValid: boolean;
+ try {
+ signatureValid = verifySignature(signPayload, envelope.signature, serverPublicKeyBase64);
+ } catch {
+ signatureValid = false;
+ }
+ if (!signatureValid) {
+ return {
+ ok: false,
+ code: "rpc_invalid_signature",
+ message: "签名验证失败",
+ };
+ }
 
-  // 7. 命令白名单检查
-  if (!isAllowedCommand(envelope.command)) {
-    return {
-      ok: false,
-      code: "unknown_command",
-      message: `未知命令：${envelope.command}`,
-    };
-  }
+ // 7. 命令白名单检查
+ if (!isAllowedCommand(envelope.command)) {
+ return {
+ ok: false,
+ code: "unknown_command",
+ message: `未知命令：${envelope.command}`,
+ };
+ }
 
-  // 8. payload schema 校验
-  const payloadResult = validateCommandPayload(envelope.command, envelope.payload);
-  if (!payloadResult.ok) {
-    return {
-      ok: false,
-      code: "rpc_invalid_payload",
-      message: `payload 校验失败：${payloadResult.error}`,
-    };
-  }
+ // 8. payload schema 校验
+ const payloadResult = validateCommandPayload(envelope.command, envelope.payload);
+ if (!payloadResult.ok) {
+ return {
+ ok: false,
+ code: "rpc_invalid_payload",
+ message: `payload 校验失败：${payloadResult.error}`,
+ };
+ }
 
-  return { ok: true, envelope };
+ return { ok: true, envelope };
 }

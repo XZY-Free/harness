@@ -2,9 +2,9 @@
  * V11 Runtime API route handler 公共助手（S05-C03）。
  *
  * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §4（Runtime Protocol API）、
- *         §2.2（身份与授权：Runtime API 走 Workload Token，audience=runtime）、
- *         §2.3（公共请求头：Idempotency-Key / X-Request-ID）、
- *         §2.5（成功与错误格式）。
+ * （身份与授权：Runtime API 走 Workload Token，audience=runtime）、
+ * （公共请求头：Idempotency-Key / X-Request-ID）、
+ * （成功与错误格式）。
  *
  * 职责：
  * - resolveRuntimePrincipal：解析 Workload Token（audience=runtime + invocation 绑定校验）。
@@ -18,24 +18,24 @@
  */
 import { apiError, resourceNotFound } from "@/lib/http";
 import {
-  type WorkloadTokenClaims,
-  WorkloadTokenError,
-  assertAudienceMatch,
-  assertInvocationMatch,
-  decodeWorkloadToken,
-  extractBearerToken,
-  workloadTokenErrorResponse,
+ type WorkloadTokenClaims,
+ WorkloadTokenError,
+ assertAudienceMatch,
+ assertInvocationMatch,
+ decodeWorkloadToken,
+ extractBearerToken,
+ workloadTokenErrorResponse,
 } from "@/lib/identity/workload-token";
 import { isTokenRevoked } from "@/lib/identity/workload-token-revocation-queries";
 import {
-  EventPayloadHashConflictError,
-  IngressInvocationNotFoundError,
-  IngressInvocationTerminalError,
+ EventPayloadHashConflictError,
+ IngressInvocationNotFoundError,
+ IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
 import {
-  IngressBatchEmptyError,
-  IngressCandidateTypeUnsupportedError,
-  IngressSequenceStartMismatchError,
+ IngressBatchEmptyError,
+ IngressCandidateTypeUnsupportedError,
+ IngressSequenceStartMismatchError,
 } from "@/lib/runtime/event-ingress-queries";
 
 // ─── 类型再导出（route handlers 统一从此处 import） ────────
@@ -54,33 +54,33 @@ export type { WorkloadTokenClaims };
  * @throws WorkloadTokenError 缺少/非法/过期 Token、audience 不匹配、invocation 不匹配、token 已撤销
  */
 export async function resolveRuntimePrincipal(
-  headers: Headers,
-  invocationId: string,
+ headers: Headers,
+ invocationId: string,
 ): Promise<WorkloadTokenClaims> {
-  const token = extractBearerToken(headers);
-  if (!token) {
-    throw new WorkloadTokenError("missing_token", "缺少 Authorization Bearer Token");
-  }
-  const claims = decodeWorkloadToken(token);
-  assertAudienceMatch(claims, "runtime");
-  assertInvocationMatch(claims, invocationId);
-  // S12-W05：撤销校验（DB 查询）
-  if (await isTokenRevoked(claims.tenantId, claims.jti)) {
-    throw new WorkloadTokenError("token_revoked", `Workload Token 已被撤销（jti=${claims.jti}）`);
-  }
-  return claims;
+ const token = extractBearerToken(headers);
+ if (!token) {
+ throw new WorkloadTokenError("missing_token", "缺少 Authorization Bearer Token");
+ }
+ const claims = decodeWorkloadToken(token);
+ assertAudienceMatch(claims, "runtime");
+ assertInvocationMatch(claims, invocationId);
+ // S12-W05：撤销校验（DB 查询）
+ if (await isTokenRevoked(claims.tenantId, claims.jti)) {
+ throw new WorkloadTokenError("token_revoked", `Workload Token 已被撤销（jti=${claims.jti}）`);
+ }
+ return claims;
 }
 
 /**
  * 把 WorkloadTokenError 转成 401 响应；非身份错误返回 null。
  */
 export function runtimeAuthErrorResponse(error: unknown, requestId: string): Response | null {
-  return workloadTokenErrorResponse(error, requestId);
+ return workloadTokenErrorResponse(error, requestId);
 }
 
 /** 构造 400 REQUEST_SCHEMA_INVALID 响应。 */
 export function runtimeSchemaInvalidTable(requestId: string, message: string): Response {
-  return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
+ return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
 }
 
 /**
@@ -99,62 +99,62 @@ export function runtimeSchemaInvalidTable(requestId: string, message: string): R
  * 非 Error 实例返回 null（调用方应向上抛或自行构造响应）。
  */
 export async function ingressErrorToResponse(
-  error: unknown,
-  requestId: string,
+ error: unknown,
+ requestId: string,
 ): Promise<Response | null> {
-  if (error instanceof IngressInvocationNotFoundError) {
-    return resourceNotFound(requestId, `Invocation 不存在或不可见: ${error.invocationId}`);
-  }
-  if (error instanceof IngressInvocationTerminalError) {
-    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
-      requestId,
-      details: { invocation_id: error.invocationId, current_state: error.currentState },
-    });
-  }
-  if (error instanceof IngressBatchEmptyError) {
-    return apiError("REQUEST_SCHEMA_INVALID", error.message, {
-      requestId,
-      details: { invocation_id: error.invocationId },
-    });
-  }
-  if (error instanceof IngressSequenceStartMismatchError) {
-    return apiError("REQUEST_SCHEMA_INVALID", error.message, {
-      requestId,
-      details: {
-        invocation_id: error.invocationId,
-        declared_start: error.declaredStart,
-        first_event_sequence: error.firstEventSequence,
-      },
-    });
-  }
-  if (error instanceof IngressCandidateTypeUnsupportedError) {
-    return apiError("EVENT_SCHEMA_UNSUPPORTED", error.message, {
-      requestId,
-      details: {
-        invocation_id: error.invocationId,
-        candidate_type: error.candidateType,
-      },
-    });
-  }
-  if (error instanceof EventPayloadHashConflictError) {
-    return apiError("IDEMPOTENCY_CONFLICT", error.message, {
-      requestId,
-      details: {
-        invocation_id: error.invocationId,
-        producer_event_id: error.producerEventId,
-        producer_sequence: error.producerSequence,
-        expected_hash: error.expectedHash,
-        actual_hash: error.actualHash,
-      },
-    });
-  }
-  // EventSequenceGapError 来自 conversation 域；按其 name 识别
-  if (error instanceof Error && error.name === "EventSequenceGapError") {
-    return apiError("EVENT_SEQUENCE_GAP", error.message, { requestId });
-  }
-  // TransientSequenceGapError 来自 transient 域
-  if (error instanceof Error && error.name === "TransientSequenceGapError") {
-    return apiError("EVENT_SEQUENCE_GAP", error.message, { requestId });
-  }
-  return null;
+ if (error instanceof IngressInvocationNotFoundError) {
+ return resourceNotFound(requestId, `Invocation 不存在或不可见: ${error.invocationId}`);
+ }
+ if (error instanceof IngressInvocationTerminalError) {
+ return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
+ requestId,
+ details: { invocation_id: error.invocationId, current_state: error.currentState },
+ });
+ }
+ if (error instanceof IngressBatchEmptyError) {
+ return apiError("REQUEST_SCHEMA_INVALID", error.message, {
+ requestId,
+ details: { invocation_id: error.invocationId },
+ });
+ }
+ if (error instanceof IngressSequenceStartMismatchError) {
+ return apiError("REQUEST_SCHEMA_INVALID", error.message, {
+ requestId,
+ details: {
+ invocation_id: error.invocationId,
+ declared_start: error.declaredStart,
+ first_event_sequence: error.firstEventSequence,
+ },
+ });
+ }
+ if (error instanceof IngressCandidateTypeUnsupportedError) {
+ return apiError("EVENT_SCHEMA_UNSUPPORTED", error.message, {
+ requestId,
+ details: {
+ invocation_id: error.invocationId,
+ candidate_type: error.candidateType,
+ },
+ });
+ }
+ if (error instanceof EventPayloadHashConflictError) {
+ return apiError("IDEMPOTENCY_CONFLICT", error.message, {
+ requestId,
+ details: {
+ invocation_id: error.invocationId,
+ producer_event_id: error.producerEventId,
+ producer_sequence: error.producerSequence,
+ expected_hash: error.expectedHash,
+ actual_hash: error.actualHash,
+ },
+ });
+ }
+ // EventSequenceGapError 来自 conversation 域；按其 name 识别
+ if (error instanceof Error && error.name === "EventSequenceGapError") {
+ return apiError("EVENT_SEQUENCE_GAP", error.message, { requestId });
+ }
+ // TransientSequenceGapError 来自 transient 域
+ if (error instanceof Error && error.name === "TransientSequenceGapError") {
+ return apiError("EVENT_SEQUENCE_GAP", error.message, { requestId });
+ }
+ return null;
 }

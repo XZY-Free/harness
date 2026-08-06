@@ -9,15 +9,15 @@
 import type { RouteResolutionCandidate } from "../domain/route-resolution-policy";
 
 export interface LoadProjectionCandidatesInput {
-  tenantId: string;
-  agentId: string;
-  routeScopeKey: string;
+ tenantId: string;
+ agentId: string;
+ routeScopeKey: string;
 }
 
 export interface RouteEligibilityResolutionStore {
-  /**
-   * 单次SQL查询从Projection表读取eligible候选。
-   * 返回值可直接供 resolveRouteCandidates() 使用。
-   */
-  loadCandidates(input: LoadProjectionCandidatesInput): Promise<RouteResolutionCandidate[]>;
+ /**
+ * 单次SQL查询从Projection表读取eligible候选。
+ * 返回值可直接供 resolveRouteCandidates() 使用。
+ */
+ loadCandidates(input: LoadProjectionCandidatesInput): Promise<RouteResolutionCandidate[]>;
 }

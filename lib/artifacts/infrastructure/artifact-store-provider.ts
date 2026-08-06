@@ -1,8 +1,8 @@
 /**
  * 制品存储与 builder 密钥注册表的运行时配置入口。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §4.1-4.2、
- *         ../v11-agentkit-platform/11-api-and-event-boundaries.md §6（artifact-attestations:verify）。
+ * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md -4.2、
+ * ../v11-agentkit-platform/11-api-and-event-boundaries.md §6（artifact-attestations:verify）。
  *
  * 职责：
  * - 为 admin route handler 提供 ManagedArtifactStore 与 BuilderKeyRegistry 的运行时实例。
@@ -15,10 +15,10 @@
  * - override 仅供测试使用；生产环境通过 SNOW_HOSTED_BUILDER_KEYS_JSON 注入。
  */
 import type {
-  BuilderKeyRegistry,
-  ManagedArtifactStore,
-  ProvenanceDocument,
-  SbomDocument,
+ BuilderKeyRegistry,
+ ManagedArtifactStore,
+ ProvenanceDocument,
+ SbomDocument,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import { hostedControlPlaneConfig } from "@/lib/config";
 
@@ -31,15 +31,15 @@ import { hostedControlPlaneConfig } from "@/lib/config";
  * 测试环境通过 setArtifactStoreOverride 注入填充了产物的 store。
  */
 class EmptyManagedArtifactStore implements ManagedArtifactStore {
-  async readDsseEnvelope(_ref: string): Promise<Buffer> {
-    throw new Error(`EmptyManagedArtifactStore: DSSE envelope not found: ${_ref}`);
-  }
-  async readSbom(_ref: string): Promise<SbomDocument> {
-    throw new Error(`EmptyManagedArtifactStore: sbom not found: ${_ref}`);
-  }
-  async readProvenance(_ref: string): Promise<ProvenanceDocument> {
-    throw new Error(`EmptyManagedArtifactStore: provenance not found: ${_ref}`);
-  }
+ async readDsseEnvelope(_ref: string): Promise<Buffer> {
+ throw new Error(`EmptyManagedArtifactStore: DSSE envelope not found: ${_ref}`);
+ }
+ async readSbom(_ref: string): Promise<SbomDocument> {
+ throw new Error(`EmptyManagedArtifactStore: sbom not found: ${_ref}`);
+ }
+ async readProvenance(_ref: string): Promise<ProvenanceDocument> {
+ throw new Error(`EmptyManagedArtifactStore: provenance not found: ${_ref}`);
+ }
 }
 
 // ─── 单例 + override ──────────────────────────────────────
@@ -55,12 +55,12 @@ let defaultRegistry: BuilderKeyRegistry | null = null;
  * 优先级：test override > 环境变量配置 > 空 store（fail-closed）。
  */
 export function getManagedArtifactStore(): ManagedArtifactStore {
-  if (storeOverride) return storeOverride;
-  if (!defaultStore) {
-    // 生产环境从配置读取（阶段 11 接入）；当前阶段使用空 store。
-    defaultStore = new EmptyManagedArtifactStore();
-  }
-  return defaultStore;
+ if (storeOverride) return storeOverride;
+ if (!defaultStore) {
+ // 生产环境从配置读取（阶段 11 接入）；当前阶段使用空 store。
+ defaultStore = new EmptyManagedArtifactStore();
+ }
+ return defaultStore;
 }
 
 /**
@@ -69,11 +69,11 @@ export function getManagedArtifactStore(): ManagedArtifactStore {
  * 优先级：test override > SNOW_HOSTED_BUILDER_KEYS_JSON > 空注册表（fail-closed）。
  */
 export function getBuilderKeyRegistry(): BuilderKeyRegistry {
-  if (registryOverride) return registryOverride;
-  if (!defaultRegistry) {
-    defaultRegistry = hostedControlPlaneConfig.builderKeys;
-  }
-  return defaultRegistry;
+ if (registryOverride) return registryOverride;
+ if (!defaultRegistry) {
+ defaultRegistry = hostedControlPlaneConfig.builderKeys;
+ }
+ return defaultRegistry;
 }
 
 // ─── 测试 override API（仅供测试使用）─────────────────────
@@ -83,7 +83,7 @@ export function getBuilderKeyRegistry(): BuilderKeyRegistry {
  * 调用 resetArtifactStoreOverrides 在测试结束后清理。
  */
 export function setArtifactStoreOverride(store: ManagedArtifactStore | null): void {
-  storeOverride = store;
+ storeOverride = store;
 }
 
 /**
@@ -91,11 +91,11 @@ export function setArtifactStoreOverride(store: ManagedArtifactStore | null): vo
  * 调用 resetArtifactStoreOverrides 在测试结束后清理。
  */
 export function setBuilderKeyRegistryOverride(registry: BuilderKeyRegistry | null): void {
-  registryOverride = registry;
+ registryOverride = registry;
 }
 
 /** 清理所有 test override（在 afterEach 中调用）。 */
 export function resetArtifactStoreOverrides(): void {
-  storeOverride = null;
-  registryOverride = null;
+ storeOverride = null;
+ registryOverride = null;
 }

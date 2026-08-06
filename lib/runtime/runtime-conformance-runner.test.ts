@@ -6,13 +6,12 @@ import { createRecordArtifactAttestation } from "@/lib/artifacts/application/rec
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 /**
- * S05-C06：V11 Runtime Conformance runner + 结果持久化 + Admin API 集成测试（真实 MySQL 8）。
+ * Runtime Conformance runner + 结果持久化 + Admin API 集成测试（真实 MySQL 8）。
  *
- * 覆盖 4 类（30+ 例）：
- * 1. runtime-conformance-result-queries（4 例）：persist / list / get / delete。
- * 2. runtime-conformance-runner（12 例）：runConformanceSuite 基础场景 + 失败场景 + 边界。
- * 3. publishRuntimeRevision 集成（4 例）：持久化 conformance 结果 + options + 失败不持久化。
- * 4. Admin API 路由（5 例）：GET 列表 / POST 持久化 / POST 发布 / 门禁失败 / 跨租户隔离。
+ * 覆盖 3 类：
+ * 1. runtime-conformance-runner（12 例）：runConformanceSuite 基础场景 + 失败场景 + 边界。
+ * 2. publishRuntimeRevision 集成（4 例）：持久化 conformance 结果 + options + 失败不持久化。
+ * 3. Admin API 路由（5 例）：GET 列表 / POST 持久化 / POST 发布 / 门禁失败 / 跨租户隔离。
  *
  * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 DB mock。
@@ -45,12 +44,6 @@ import {
 } from "@/lib/runtime/adapters/hosted-adapter";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import type { RuntimeCapabilitiesResponse } from "@/lib/runtime/runtime-client";
-import {
-  deleteConformanceResultsByRevision,
-  getConformanceResult,
-  listConformanceResultsByRevision,
-  persistConformanceResults,
-} from "@/lib/runtime/runtime-conformance-result-queries";
 import {
   ConformanceRunnerError,
   type RunConformanceSuiteParams,
@@ -329,114 +322,7 @@ async function seedAdminWithRuntimePublish() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 1. runtime-conformance-result-queries（持久化）
-// ═══════════════════════════════════════════════════════════
-
-describe("S05-C06 runtime-conformance-result-queries（持久化）", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let revisionId: string;
-
-  beforeEach(async () => {
-    const ctx = await seedTenantAndOwner();
-    tenantId = ctx.tenantId;
-    ownerId = ctx.ownerId;
-    const { revision } = await seedRuntimeAndRevision(tenantId, ownerId);
-    revisionId = revision.id;
-  });
-
-  it("旧结果投影仍可读取全部 required case（不再作为发布依据）", async () => {
-    const results = await persistConformanceResults({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      results: passingConformanceResults(),
-      adapterDigest: "sha256:adapter-v1",
-      testEnvironment: "testcontainers-mysql-8",
-      evidenceRef: "log://test/abc",
-    });
-
-    expect(results).toHaveLength(16);
-    expect(results[0]?.caseId).toBe("attempt-sequence-continuity");
-    expect(results[0]?.passed).toBe(true);
-    expect(results[0]?.adapterDigest).toBe("sha256:adapter-v1");
-    expect(results[0]?.testEnvironment).toBe("testcontainers-mysql-8");
-    expect(results[0]?.evidenceRef).toBe("log://test/abc");
-  });
-
-  it("persistConformanceResults UPSERT 同 (revisionId, caseId) 更新而非插入", async () => {
-    // 首次写入
-    await persistConformanceResults({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      results: passingConformanceResults(),
-    });
-
-    // 再次写入（同一组 case，passed 改为 false）
-    const updatedResults = passingConformanceResults().map((r) => ({
-      ...r,
-      passed: false,
-      reason: "重新测试失败",
-    }));
-    await persistConformanceResults({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      results: updatedResults,
-    });
-
-    const all = await listConformanceResultsByRevision(revisionId);
-    expect(all).toHaveLength(16);
-    // 全部应为 false（UPSERT 更新）
-    expect(all.every((r) => r.passed === false)).toBe(true);
-    expect(all[0]?.reason).toBe("重新测试失败");
-  });
-
-  it("listConformanceResultsByRevision 按 caseId 升序返回", async () => {
-    await persistConformanceResults({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      results: passingConformanceResults(),
-    });
-
-    const list = await listConformanceResultsByRevision(revisionId);
-    const caseIds = list.map((r) => r.caseId);
-    expect(caseIds).toEqual([...caseIds].sort());
-  });
-
-  it("getConformanceResult 查询单个 (revisionId, caseId) 结果", async () => {
-    await persistConformanceResults({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      results: passingConformanceResults(),
-    });
-
-    const result = await getConformanceResult(revisionId, "event-batch-idempotent");
-    expect(result?.caseId).toBe("event-batch-idempotent");
-    expect(result?.passed).toBe(true);
-  });
-
-  it("getConformanceResult 不存在返回 null", async () => {
-    expect(await getConformanceResult(revisionId, "event-batch-idempotent")).toBeNull();
-  });
-
-  it("deleteConformanceResultsByRevision 清空 Revision 的全部结果", async () => {
-    await persistConformanceResults({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      results: passingConformanceResults(),
-    });
-
-    const deleted = await deleteConformanceResultsByRevision(revisionId);
-    expect(deleted).toBe(16);
-    expect(await listConformanceResultsByRevision(revisionId)).toHaveLength(0);
-  });
-
-  it("listConformanceResultsByRevision 空结果返回空数组", async () => {
-    expect(await listConformanceResultsByRevision(revisionId)).toHaveLength(0);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
-// 2. runtime-conformance-runner（adapter probe）
+// runtime-conformance-runner（adapter probe）
 // ═══════════════════════════════════════════════════════════
 
 describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
@@ -805,9 +691,7 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
     const after = await getRuntimeRevisionById(revisionId);
     expect(after?.revisionState).toBe("draft");
 
-    // conformance 结果未持久化
-    const results = await listConformanceResultsByRevision(revisionId);
-    expect(results).toHaveLength(0);
+    // conformance 结果未持久化（旧表已停用，不再验证）
   });
 
   it("缺少显式 Passed Run 时全部 16 个 required case 均视为缺失", async () => {
@@ -822,7 +706,7 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
         adapterDigest: "sha256:legacy",
       }),
     ).rejects.toThrow(RuntimeConformanceRunInvalidError);
-    expect(await listConformanceResultsByRevision(revisionId)).toHaveLength(0);
+    // 旧表已停用，不再验证旧格式结果
   });
 });
 
@@ -861,28 +745,6 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     expect(body.runtime_revision_id).toBe(revisionId);
     expect(body.revision_state).toBe("draft");
     expect(Array.isArray(body.results)).toBe(true);
-    expect(body.results).toHaveLength(0);
-  });
-
-  it("GET /conformance 不把旧可覆盖投影冒充权威 Run", async () => {
-    // 先持久化一些结果
-    await persistConformanceResults({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      results: passingConformanceResults(),
-    });
-
-    const request = buildV11Request({
-      audience: "admin",
-      method: "GET",
-      path: `/runtime-revisions/${revisionId}/conformance`,
-    });
-
-    const response = await conformanceGET(request, {
-      params: Promise.resolve({ revision_id: revisionId }),
-    });
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as { results: unknown[] };
     expect(body.results).toHaveLength(0);
   });
 

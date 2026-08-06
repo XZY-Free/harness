@@ -1,5 +1,5 @@
 /**
- * P2 修复（12 Studio P1-4 / 00-summary 阶段4）：Analytics 聚合查询 TTL 内存缓存。
+ * Analytics 聚合查询 TTL 内存缓存。
  *
  * analytics 7 指标直接查 DB(threadSuccessRate/toolFailureBreakdown/perSkillPerformance
  * 涉及 groupBy + join),/studio 总览页每次刷新全跑,无缓存。数据量增长后慢。
@@ -22,15 +22,15 @@ const cache = new Map<string, CacheEntry>();
 
 /** 稳定序列化 scope 作为 cache key(与 keyPrefix 组合)。 */
 function scopeKey(scope: unknown): string {
-  if (scope === undefined || scope === null) return "global";
-  try {
-    // key 排序保证 {a,b} 与 {b,a} 同 key
-    const sorted = JSON.stringify(scope, Object.keys(scope as object).sort());
-    return sorted;
-  } catch {
-    // scope 含循环引用等异常 → 退化为全局 key(不缓存区分,但仍可缓存)
-    return "scope-unserializable";
-  }
+ if (scope === undefined || scope === null) return "global";
+ try {
+ // key 排序保证 {a,b} 与 {b,a} 同 key
+ const sorted = JSON.stringify(scope, Object.keys(scope as object).sort());
+ return sorted;
+ } catch {
+ // scope 含循环引用等异常 → 退化为全局 key(不缓存区分,但仍可缓存)
+ return "scope-unserializable";
+ }
 }
 
 /**
@@ -42,26 +42,26 @@ function scopeKey(scope: unknown): string {
  * @returns 聚合结果(命中缓存返回缓存值,否则 loader 结果并缓存)
  */
 export async function withAnalyticsCache<T>(
-  keyPrefix: string,
-  scope: unknown,
-  loader: () => Promise<T>,
+ keyPrefix: string,
+ scope: unknown,
+ loader: () => Promise<T>,
 ): Promise<T> {
-  // TTL=0 表示禁用缓存(保留旧行为,供排查/测试)
-  if (TTL_MS === 0) return loader();
+ // TTL=0 表示禁用缓存(保留旧行为,供排查/测试)
+ if (TTL_MS === 0) return loader();
 
-  const key = `${keyPrefix}:${scopeKey(scope)}`;
-  const now = Date.now();
-  const hit = cache.get(key);
-  if (hit && hit.expiresAt > now) {
-    return hit.value as T;
-  }
+ const key = `${keyPrefix}:${scopeKey(scope)}`;
+ const now = Date.now();
+ const hit = cache.get(key);
+ if (hit && hit.expiresAt > now) {
+ return hit.value as T;
+ }
 
-  const value = await loader();
-  cache.set(key, { value, expiresAt: now + TTL_MS });
-  return value;
+ const value = await loader();
+ cache.set(key, { value, expiresAt: now + TTL_MS });
+ return value;
 }
 
 /** 清空全部 analytics 缓存(供测试隔离与强制刷新)。 */
 export function clearAnalyticsCache(): void {
-  cache.clear();
+ cache.clear();
 }

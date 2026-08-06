@@ -10,22 +10,22 @@
 export const CONFORMANCE_SUITE_REVISION = "runtime-conformance@1";
 
 export const ALL_CONFORMANCE_CASES = [
-  "dispatch-binds-immutable-config",
-  "event-batch-idempotent",
-  "event-payload-hash-conflict",
-  "attempt-sequence-continuity",
-  "steer-requires-ack",
-  "unsupported-steer",
-  "cancel-request-not-terminal",
-  "tool-schema-refresh",
-  "unknown-effect-no-replay",
-  "capability-search-not-use",
-  "memory-proposal-only",
-  "child-thread-isolation",
-  "child-cancel-requires-ack",
-  "credential-never-in-model-data",
-  "execution-ownership-epoch",
-  "session-does-not-claim-filesystem-recovery",
+ "dispatch-binds-immutable-config",
+ "event-batch-idempotent",
+ "event-payload-hash-conflict",
+ "attempt-sequence-continuity",
+ "steer-requires-ack",
+ "unsupported-steer",
+ "cancel-request-not-terminal",
+ "tool-schema-refresh",
+ "unknown-effect-no-replay",
+ "capability-search-not-use",
+ "memory-proposal-only",
+ "child-thread-isolation",
+ "child-cancel-requires-ack",
+ "credential-never-in-model-data",
+ "execution-ownership-epoch",
+ "session-does-not-claim-filesystem-recovery",
 ] as const;
 
 export type ConformanceCaseId = (typeof ALL_CONFORMANCE_CASES)[number];
@@ -33,20 +33,20 @@ export type ConformanceCaseId = (typeof ALL_CONFORMANCE_CASES)[number];
 export const MANDATORY_GATE_CASES: readonly ConformanceCaseId[] = ALL_CONFORMANCE_CASES;
 
 export interface ConformanceCaseResult {
-  caseId: ConformanceCaseId;
-  passed: boolean;
-  reason?: string;
+ caseId: ConformanceCaseId;
+ passed: boolean;
+ reason?: string;
 }
 
 export interface ConformanceGateResult {
-  passed: boolean;
-  failedCases: ConformanceCaseId[];
+ passed: boolean;
+ failedCases: ConformanceCaseId[];
 }
 
 export function validateConformanceGate(results: ConformanceCaseResult[]): ConformanceGateResult {
-  const resultMap = new Map(results.map((result) => [result.caseId, result]));
-  const failedCases = MANDATORY_GATE_CASES.filter((caseId) => !resultMap.get(caseId)?.passed);
-  return { passed: failedCases.length === 0, failedCases };
+ const resultMap = new Map(results.map((result) => [result.caseId, result]));
+ const failedCases = MANDATORY_GATE_CASES.filter((caseId) => !resultMap.get(caseId)?.passed);
+ return { passed: failedCases.length === 0, failedCases };
 }
 
 /**
@@ -57,29 +57,29 @@ export function validateConformanceGate(results: ConformanceCaseResult[]): Confo
  * 由 Store 层 FOR UPDATE 读取时校验，此处只校验结果完整性。
  */
 export function validateCompleteConformanceResult(
-  results: Array<{ caseId: string; passed: boolean }>,
+ results: Array<{ caseId: string; passed: boolean }>,
 ): { valid: true } | { valid: false; reason: string } {
-  if (results.length !== ALL_CONFORMANCE_CASES.length) {
-    return {
-      valid: false,
-      reason: `Conformance 结果不完整：期望 ${ALL_CONFORMANCE_CASES.length} 个 Case，实际 ${results.length} 个`,
-    };
-  }
-  const caseIdSet = new Set(results.map((r) => r.caseId));
-  for (const caseId of ALL_CONFORMANCE_CASES) {
-    if (!caseIdSet.has(caseId)) {
-      return {
-        valid: false,
-        reason: `Conformance 结果缺少必要 Case: ${caseId}`,
-      };
-    }
-  }
-  const failedCase = results.find((r) => !r.passed);
-  if (failedCase) {
-    return {
-      valid: false,
-      reason: `Conformance Case 失败: ${failedCase.caseId}`,
-    };
-  }
-  return { valid: true };
+ if (results.length !== ALL_CONFORMANCE_CASES.length) {
+ return {
+ valid: false,
+ reason: `Conformance 结果不完整：期望 ${ALL_CONFORMANCE_CASES.length} 个 Case，实际 ${results.length} 个`,
+ };
+ }
+ const caseIdSet = new Set(results.map((r) => r.caseId));
+ for (const caseId of ALL_CONFORMANCE_CASES) {
+ if (!caseIdSet.has(caseId)) {
+ return {
+ valid: false,
+ reason: `Conformance 结果缺少必要 Case: ${caseId}`,
+ };
+ }
+ }
+ const failedCase = results.find((r) => !r.passed);
+ if (failedCase) {
+ return {
+ valid: false,
+ reason: `Conformance Case 失败: ${failedCase.caseId}`,
+ };
+ }
+ return { valid: true };
 }

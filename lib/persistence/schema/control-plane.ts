@@ -5,52 +5,52 @@
  * 职责命名，避免方案版本进入领域和持久化实现。
  *
  * 生产代码应优先从独立 schema 文件导入：
- *   agents.ts, runtimes.ts, routes.ts, executions.ts, artifacts.ts, publications.ts
+ * agents.ts, runtimes.ts, routes.ts, executions.ts, artifacts.ts, publications.ts
  * 本文件仅保留 audit / idempotency / tenant / policy 的 re-export。
  */
 
 // ─── Agent ────────────────────────────────────────────────────────
 export {
-  AGENT_LIFECYCLE_STATES,
-  AGENT_REVISION_SOURCE_TYPES,
-  AGENT_REVISION_STATES,
-  agentTable,
-  agentRevisionTable,
+ AGENT_LIFECYCLE_STATES,
+ AGENT_REVISION_SOURCE_TYPES,
+ AGENT_REVISION_STATES,
+ agentTable,
+ agentRevisionTable,
 } from "@/lib/persistence/schema/agents";
 export type {
-  AgentLifecycleState,
-  AgentRevisionSourceType,
-  AgentRevisionState,
-  AgentRow,
-  AgentRevisionRow,
-  NewAgentRow,
-  NewAgentRevisionRow,
+ AgentLifecycleState,
+ AgentRevisionSourceType,
+ AgentRevisionState,
+ AgentRow,
+ AgentRevisionRow,
+ NewAgentRow,
+ NewAgentRevisionRow,
 } from "@/lib/persistence/schema/agents";
 
 // ─── Audit ────────────────────────────────────────────────────────
 export {
-  AUDIT_ACTION_TYPES,
-  AUDIT_ACTOR_TYPES,
-  auditEvent,
+ AUDIT_ACTION_TYPES,
+ AUDIT_ACTOR_TYPES,
+ auditEvent,
 } from "@/lib/persistence/schema/audit";
 export type {
-  AuditActionType,
-  AuditActorType,
-  AuditEvent,
-  NewAuditEvent,
+ AuditActionType,
+ AuditActorType,
+ AuditEvent,
+ NewAuditEvent,
 } from "@/lib/persistence/schema/audit";
 
 // ─── Routes ───────────────────────────────────────────────────────
 export {
-  deploymentRouteTable,
-  deploymentRouteSetTable,
+ deploymentRouteTable,
+ deploymentRouteSetTable,
 } from "@/lib/persistence/schema/routes";
 export type {
-  RouteState,
-  DeploymentRouteRow,
-  NewDeploymentRouteRow,
-  DeploymentRouteSetRow,
-  NewDeploymentRouteSetRow,
+ RouteState,
+ DeploymentRouteRow,
+ NewDeploymentRouteRow,
+ DeploymentRouteSetRow,
+ NewDeploymentRouteSetRow,
 } from "@/lib/persistence/schema/routes";
 
 // ─── Idempotency ──────────────────────────────────────────────────
@@ -64,24 +64,24 @@ export { policyRevisionTable } from "@/lib/persistence/schema/permission";
 
 // ─── Runtime + Execution ──────────────────────────────────────────
 export {
-  RUNTIME_KINDS,
-  RUNTIME_LIFECYCLE_STATES,
-  RUNTIME_REVISION_STATES,
-  runtimeTable,
-  runtimeRevisionTable,
+ RUNTIME_KINDS,
+ RUNTIME_LIFECYCLE_STATES,
+ RUNTIME_REVISION_STATES,
+ runtimeTable,
+ runtimeRevisionTable,
 } from "@/lib/persistence/schema/runtimes";
 export type {
-  NewRuntimeRow,
-  NewRuntimeRevisionRow,
-  RuntimeKind,
-  RuntimeLifecycleState,
-  RuntimeRevisionState,
-  RuntimeRow,
-  RuntimeRevisionRow,
+ NewRuntimeRow,
+ NewRuntimeRevisionRow,
+ RuntimeKind,
+ RuntimeLifecycleState,
+ RuntimeRevisionState,
+ RuntimeRow,
+ RuntimeRevisionRow,
 } from "@/lib/persistence/schema/runtimes";
 
 export {
-  executionBindingTable,
-  invocationTable,
+ executionBindingTable,
+ invocationTable,
 } from "@/lib/persistence/schema/executions";
 export type { ExecutionBindingRow } from "@/lib/persistence/schema/executions";

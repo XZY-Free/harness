@@ -20,15 +20,15 @@ import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
-  bigint,
-  datetime,
-  index,
-  json,
-  mysqlEnum,
-  mysqlTable,
-  text,
-  uniqueIndex,
-  varchar,
+ bigint,
+ datetime,
+ index,
+ json,
+ mysqlEnum,
+ mysqlTable,
+ text,
+ uniqueIndex,
+ varchar,
 } from "drizzle-orm/mysql-core";
 
 // ─── Skill Lifecycle ───────────────────────────────────────
@@ -79,44 +79,44 @@ export type SkillSourceType = (typeof SKILL_SOURCE_TYPES)[number];
 // ─── Skill ─────────────────────────────────────────────────
 
 export const skillTable = mysqlTable(
-  "Skill",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    tenantId: varchar("tenantId", { length: 36 })
-      .notNull()
-      .references(() => tenant.id),
-    /** 租户内稳定唯一 key（slug），正则 `^[a-z0-9]+(-[a-z0-9]+)*$`，1-64 字符（应用层校验）。 */
-    skillKey: varchar("skillKey", { length: 128 }).notNull(),
-    displayName: varchar("displayName", { length: 256 }).notNull(),
-    description: text("description"),
-    /** 负责人 userIdentityId（逻辑外键 → UserIdentity.id）。 */
-    ownerUserId: varchar("ownerUserId", { length: 36 }).notNull(),
-    lifecycleState: mysqlEnum("lifecycleState", SKILL_LIFECYCLE_STATES).notNull().default("draft"),
-    /** 当前生效 SkillVersion id（逻辑外键 → SkillVersion.id）；null 表示未发布。 */
-    currentVersionId: varchar("currentVersionId", { length: 36 }),
-    visibilityScope: varchar("visibilityScope", { length: 32 }).notNull().default("tenant"),
-    sourceType: varchar("sourceType", { length: 32 }).notNull().default("local"),
-    /** 乐观并发版本号。 */
-    versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    deletedAt: datetime("deletedAt", { mode: "date", fsp: 3 }),
-  },
-  (t) => ({
-    tenantKeyUq: uniqueIndex("Skill_tenant_skillKey_uq").on(t.tenantId, t.skillKey),
-    tenantLifecycleUpdatedIdx: index("Skill_tenant_lifecycle_updated_idx").on(
-      t.tenantId,
-      t.lifecycleState,
-      t.updatedAt,
-    ),
-  }),
+ "Skill",
+ {
+ id: varchar("id", { length: 36 })
+ .primaryKey()
+ .notNull()
+ .$defaultFn(() => randomUUID()),
+ tenantId: varchar("tenantId", { length: 36 })
+ .notNull()
+ .references(() => tenant.id),
+ /** 租户内稳定唯一 key（slug），正则 `^[a-z0-9]+(-[a-z0-9]+)*$`，1-64 字符（应用层校验）。 */
+ skillKey: varchar("skillKey", { length: 128 }).notNull(),
+ displayName: varchar("displayName", { length: 256 }).notNull(),
+ description: text("description"),
+ /** 负责人 userIdentityId（逻辑外键 → UserIdentity.id）。 */
+ ownerUserId: varchar("ownerUserId", { length: 36 }).notNull(),
+ lifecycleState: mysqlEnum("lifecycleState", SKILL_LIFECYCLE_STATES).notNull().default("draft"),
+ /** 当前生效 SkillVersion id（逻辑外键 → SkillVersion.id）；null 表示未发布。 */
+ currentVersionId: varchar("currentVersionId", { length: 36 }),
+ visibilityScope: varchar("visibilityScope", { length: 32 }).notNull().default("tenant"),
+ sourceType: varchar("sourceType", { length: 32 }).notNull().default("local"),
+ /** 乐观并发版本号。 */
+ versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
+ createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+ .notNull()
+ .$defaultFn(() => new Date()),
+ updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+ .notNull()
+ .$defaultFn(() => new Date()),
+ deletedAt: datetime("deletedAt", { mode: "date", fsp: 3 }),
+ },
+ (t) => ({
+ tenantKeyUq: uniqueIndex("Skill_tenant_skillKey_uq").on(t.tenantId, t.skillKey),
+ tenantLifecycleUpdatedIdx: index("Skill_tenant_lifecycle_updated_idx").on(
+ t.tenantId,
+ t.lifecycleState,
+ t.updatedAt,
+ ),
+ }),
 );
 
 export type Skill = InferSelectModel<typeof skillTable>;
@@ -125,38 +125,38 @@ export type NewSkill = InferInsertModel<typeof skillTable>;
 // ─── SkillVersion ──────────────────────────────────────────
 
 export const skillVersionTable = mysqlTable(
-  "SkillVersion",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    skillId: varchar("skillId", { length: 36 })
-      .notNull()
-      .references(() => skillTable.id),
-    /** Skill 内单调递增版本号。 */
-    versionNo: bigint("versionNo", { mode: "number" }).notNull(),
-    /** 内容引用（git commitSha 或制品引用）。 */
-    contentRef: varchar("contentRef", { length: 512 }).notNull(),
-    /** 内容 hash（sha256: 前缀）。 */
-    contentHash: varchar("contentHash", { length: 128 }).notNull(),
-    /** Skill frontmatter 序列化（name/description/tools/model/runtime）。 */
-    manifestJson: json("manifestJson"),
-    revisionState: mysqlEnum("revisionState", SKILL_REVISION_STATES).notNull().default("draft"),
-    sourceType: varchar("sourceType", { length: 32 }).notNull().default("local"),
-    /** 来源引用（capability-market 远端 id 等）。 */
-    sourceRef: varchar("sourceRef", { length: 256 }),
-    /** 创建者 userIdentityId 或 serviceId。 */
-    createdBy: varchar("createdBy", { length: 128 }).notNull(),
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    publishedAt: datetime("publishedAt", { mode: "date", fsp: 3 }),
-  },
-  (t) => ({
-    skillVersionNoUq: uniqueIndex("SkillVersion_skill_versionNo_uq").on(t.skillId, t.versionNo),
-    skillStateIdx: index("SkillVersion_skill_state_idx").on(t.skillId, t.revisionState),
-  }),
+ "SkillVersion",
+ {
+ id: varchar("id", { length: 36 })
+ .primaryKey()
+ .notNull()
+ .$defaultFn(() => randomUUID()),
+ skillId: varchar("skillId", { length: 36 })
+ .notNull()
+ .references(() => skillTable.id),
+ /** Skill 内单调递增版本号。 */
+ versionNo: bigint("versionNo", { mode: "number" }).notNull(),
+ /** 内容引用（git commitSha 或制品引用）。 */
+ contentRef: varchar("contentRef", { length: 512 }).notNull(),
+ /** 内容 hash（sha256: 前缀）。 */
+ contentHash: varchar("contentHash", { length: 128 }).notNull(),
+ /** Skill frontmatter 序列化（name/description/tools/model/runtime）。 */
+ manifestJson: json("manifestJson"),
+ revisionState: mysqlEnum("revisionState", SKILL_REVISION_STATES).notNull().default("draft"),
+ sourceType: varchar("sourceType", { length: 32 }).notNull().default("local"),
+ /** 来源引用（capability-market 远端 id 等）。 */
+ sourceRef: varchar("sourceRef", { length: 256 }),
+ /** 创建者 userIdentityId 或 serviceId。 */
+ createdBy: varchar("createdBy", { length: 128 }).notNull(),
+ createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+ .notNull()
+ .$defaultFn(() => new Date()),
+ publishedAt: datetime("publishedAt", { mode: "date", fsp: 3 }),
+ },
+ (t) => ({
+ skillVersionNoUq: uniqueIndex("SkillVersion_skill_versionNo_uq").on(t.skillId, t.versionNo),
+ skillStateIdx: index("SkillVersion_skill_state_idx").on(t.skillId, t.revisionState),
+ }),
 );
 
 export type SkillVersion = InferSelectModel<typeof skillVersionTable>;

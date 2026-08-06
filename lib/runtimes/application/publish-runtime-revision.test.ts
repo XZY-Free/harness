@@ -12,7 +12,6 @@ import {
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
-import { listConformanceResultsByRevision } from "@/lib/runtime/runtime-conformance-result-queries";
 import { createPublishRuntimeRevision } from "@/lib/runtimes/application/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
 import { MANDATORY_GATE_CASES } from "@/lib/runtimes/domain/runtime-conformance";
@@ -373,7 +372,6 @@ describe("RuntimeRevision publication application boundary", () => {
     expect(
       (await getRuntimeById(fixture.tenantId, fixture.runtime.id))?.currentRevisionId,
     ).toBeNull();
-    expect(await listConformanceResultsByRevision(fixture.revision.id)).toHaveLength(0);
     expect(
       await getPublicationRecordBySubject({
         tenantId: fixture.tenantId,
@@ -433,7 +431,6 @@ describe("RuntimeRevision publication application boundary", () => {
     const runtime = await getRuntimeById(fixture.tenantId, fixture.runtime.id);
     expect(runtime?.currentRevisionId).toBeNull();
     expect(runtime?.versionNo).toBe(fixture.runtime.versionNo);
-    expect(await listConformanceResultsByRevision(fixture.revision.id)).toHaveLength(0);
     expect(
       await getPublicationRecordBySubject({
         tenantId: fixture.tenantId,

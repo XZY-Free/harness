@@ -12,71 +12,71 @@ import { and, eq } from "drizzle-orm";
 
 /** 按 (tenantId, externalSubject) upsert 用户身份。 */
 export async function upsertUserIdentity(params: {
-  tenantId: string;
-  externalSubject: string;
-  email: string;
-  displayName: string | null;
+ tenantId: string;
+ externalSubject: string;
+ email: string;
+ displayName: string | null;
 }): Promise<UserIdentity> {
-  const { tenantId, externalSubject: subject, email, displayName } = params;
+ const { tenantId, externalSubject: subject, email, displayName } = params;
 
-  const [existing] = await db
-    .select()
-    .from(userIdentity)
-    .where(and(eq(userIdentity.tenantId, tenantId), eq(userIdentity.externalSubject, subject)))
-    .limit(1);
+ const [existing] = await db
+ .select()
+ .from(userIdentity)
+ .where(and(eq(userIdentity.tenantId, tenantId), eq(userIdentity.externalSubject, subject)))
+ .limit(1);
 
-  if (existing) {
-    // email / displayName 漂移才轻量 update，避免无谓写入。
-    if (existing.email !== email || existing.displayName !== displayName) {
-      await db
-        .update(userIdentity)
-        .set({ email, displayName })
-        .where(eq(userIdentity.id, existing.id));
-      return { ...existing, email, displayName };
-    }
-    return existing;
-  }
+ if (existing) {
+ // email / displayName 漂移才轻量 update，避免无谓写入。
+ if (existing.email !== email || existing.displayName !== displayName) {
+ await db
+ .update(userIdentity)
+ .set({ email, displayName })
+ .where(eq(userIdentity.id, existing.id));
+ return { ...existing, email, displayName };
+ }
+ return existing;
+ }
 
-  // INSERT IGNORE + 回查（并发竞态下也只建一行）。
-  await db.insert(userIdentity).ignore().values({
-    tenantId,
-    externalSubject: subject,
-    email,
-    displayName,
-    status: "active",
-  });
+ // INSERT IGNORE + 回查（并发竞态下也只建一行）。
+ await db.insert(userIdentity).ignore().values({
+ tenantId,
+ externalSubject: subject,
+ email,
+ displayName,
+ status: "active",
+ });
 
-  const [created] = await db
-    .select()
-    .from(userIdentity)
-    .where(and(eq(userIdentity.tenantId, tenantId), eq(userIdentity.externalSubject, subject)))
-    .limit(1);
+ const [created] = await db
+ .select()
+ .from(userIdentity)
+ .where(and(eq(userIdentity.tenantId, tenantId), eq(userIdentity.externalSubject, subject)))
+ .limit(1);
 
-  if (!created) {
-    throw new Error("无法创建或读取用户身份");
-  }
-  return created;
+ if (!created) {
+ throw new Error("无法创建或读取用户身份");
+ }
+ return created;
 }
 
 /** 按 id 查找用户身份。 */
 export async function getUserIdentityById(id: string): Promise<UserIdentity | null> {
-  const [row] = await db.select().from(userIdentity).where(eq(userIdentity.id, id)).limit(1);
-  return row ?? null;
+ const [row] = await db.select().from(userIdentity).where(eq(userIdentity.id, id)).limit(1);
+ return row ?? null;
 }
 
 /** 按 (tenantId, externalSubject) 查找用户身份。 */
 export async function getUserIdentityBySubject(
-  tenantId: string,
-  externalSubject: string,
+ tenantId: string,
+ externalSubject: string,
 ): Promise<UserIdentity | null> {
-  const [row] = await db
-    .select()
-    .from(userIdentity)
-    .where(
-      and(eq(userIdentity.tenantId, tenantId), eq(userIdentity.externalSubject, externalSubject)),
-    )
-    .limit(1);
-  return row ?? null;
+ const [row] = await db
+ .select()
+ .from(userIdentity)
+ .where(
+ and(eq(userIdentity.tenantId, tenantId), eq(userIdentity.externalSubject, externalSubject)),
+ )
+ .limit(1);
+ return row ?? null;
 }
 
 /**
@@ -84,13 +84,13 @@ export async function getUserIdentityBySubject(
  * 跨租户访问返回 null（调用方应返回 404 隐藏存在性）。
  */
 export async function getUserIdentityForTenant(
-  userIdentityId: string,
-  tenantId: string,
+ userIdentityId: string,
+ tenantId: string,
 ): Promise<UserIdentity | null> {
-  const [row] = await db
-    .select()
-    .from(userIdentity)
-    .where(and(eq(userIdentity.id, userIdentityId), eq(userIdentity.tenantId, tenantId)))
-    .limit(1);
-  return row ?? null;
+ const [row] = await db
+ .select()
+ .from(userIdentity)
+ .where(and(eq(userIdentity.id, userIdentityId), eq(userIdentity.tenantId, tenantId)))
+ .limit(1);
+ return row ?? null;
 }

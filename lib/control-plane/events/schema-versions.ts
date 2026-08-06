@@ -1,5 +1,5 @@
 /**
- * §9.1: Schema 版本治理 — 集中管理所有 schema version 常量。
+ * : Schema 版本治理 — 集中管理所有 schema version 常量。
  *
  * 所有 Store 写入 Outbox 事件时引用此文件中的常量，
  * 不得各自硬编码 "1.0" 字符串。
@@ -24,9 +24,9 @@ export const BINDING_SCHEMA_VERSION = "1.0" as const;
  * 新增 schema 版本时必须在此注册。
  */
 export const SCHEMA_VERSIONS = {
-  event: EVENT_SCHEMA_VERSION,
-  projection: PROJECTION_SCHEMA_VERSION,
-  binding: BINDING_SCHEMA_VERSION,
+ event: EVENT_SCHEMA_VERSION,
+ projection: PROJECTION_SCHEMA_VERSION,
+ binding: BINDING_SCHEMA_VERSION,
 } as const;
 
 export type SchemaName = keyof typeof SCHEMA_VERSIONS;

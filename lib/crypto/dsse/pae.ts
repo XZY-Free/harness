@@ -16,8 +16,8 @@
  * @returns PAE 字节流，用于 Ed25519 验签输入
  */
 export function computeDssePae(payloadType: string, payload: Buffer): Buffer {
-  const prefix = Buffer.from(
-    `DSSEv1 ${payloadType.length} ${payloadType} ${payload.length} `,
-  );
-  return Buffer.concat([prefix, payload]);
+ const prefix = Buffer.from(
+ `DSSEv1 ${payloadType.length} ${payloadType} ${payload.length} `,
+ );
+ return Buffer.concat([prefix, payload]);
 }

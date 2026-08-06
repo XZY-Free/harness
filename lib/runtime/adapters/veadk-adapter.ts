@@ -19,9 +19,9 @@
  * - 能力声明相同（VeADK 支持相同能力集）。
  */
 import {
-  type CreateHostedAdapterParams,
-  type RuntimeAdapter,
-  createHostedAdapter,
+ type CreateHostedAdapterParams,
+ type RuntimeAdapter,
+ createHostedAdapter,
 } from "@/lib/runtime/adapters/hosted-adapter";
 
 // ─── VeADK Adapter 工厂 ──────────────────────────────────
@@ -33,8 +33,8 @@ import {
  * 额外要求 appId（VeADK 应用标识）。
  */
 export interface CreateVeadkAdapterParams extends CreateHostedAdapterParams {
-  /** VeADK 应用标识（如 "crm-assistant"），用于生成 `veadk-${appId}-` 前缀的 ref。 */
-  appId: string;
+ /** VeADK 应用标识（如 "crm-assistant"），用于生成 `veadk-${appId}-` 前缀的 ref。 */
+ appId: string;
 }
 
 /**
@@ -48,9 +48,9 @@ export interface CreateVeadkAdapterParams extends CreateHostedAdapterParams {
  * @returns RuntimeAdapter 实例（VeADK 变体）
  */
 export function createVeadkAdapter(params: CreateVeadkAdapterParams): RuntimeAdapter {
-  const { appId, ...hostedParams } = params;
-  return createHostedAdapter({
-    ...hostedParams,
-    refPrefix: `veadk-${appId}`,
-  });
+ const { appId, ...hostedParams } = params;
+ return createHostedAdapter({
+ ...hostedParams,
+ refPrefix: `veadk-${appId}`,
+ });
 }
