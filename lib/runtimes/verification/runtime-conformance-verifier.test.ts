@@ -14,6 +14,8 @@ import {
   buildTestConformanceReport,
   generateTestRunnerKey,
 } from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
+import { createPrivateKey, sign as cryptoSign } from "node:crypto";
+import { computeDssePae } from "@/lib/crypto/dsse";
 import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtimes/domain/runtime-conformance-contract";
 
 const RUNNER_IDENTITY = "ci/runtime-conformance";
@@ -190,6 +192,45 @@ describe("createDSSEConformanceVerifier", () => {
     if (!result.verified) expect(result.failureReason).toBe("runtime_revision_mismatch");
   });
 
+  it("Artifact Digest 不一致 → artifact_digest_mismatch", async () => {
+    const key = generateTestRunnerKey("runner-key-1");
+    const verifier = createVerifierWithKey(key);
+    const report = buildTestConformanceReport("rev-1");
+    const envelope = buildDsseConformanceEnvelope(report, key);
+    const result = await verifier.verify({
+      ...createBaseInput(envelope, report),
+      expectedRuntimeArtifactDigest: `sha256:${"f".repeat(64)}`,
+    });
+    expect(result.verified).toBe(false);
+    if (!result.verified) expect(result.failureReason).toBe("artifact_digest_mismatch");
+  });
+
+  it("Config Digest 不一致 → config_digest_mismatch", async () => {
+    const key = generateTestRunnerKey("runner-key-1");
+    const verifier = createVerifierWithKey(key);
+    const report = buildTestConformanceReport("rev-1");
+    const envelope = buildDsseConformanceEnvelope(report, key);
+    const result = await verifier.verify({
+      ...createBaseInput(envelope, report),
+      expectedRuntimeConfigDigest: `sha256:${"f".repeat(64)}`,
+    });
+    expect(result.verified).toBe(false);
+    if (!result.verified) expect(result.failureReason).toBe("config_digest_mismatch");
+  });
+
+  it("Protocol Revision 不一致 → protocol_revision_mismatch", async () => {
+    const key = generateTestRunnerKey("runner-key-1");
+    const verifier = createVerifierWithKey(key);
+    const report = buildTestConformanceReport("rev-1");
+    const envelope = buildDsseConformanceEnvelope(report, key);
+    const result = await verifier.verify({
+      ...createBaseInput(envelope, report),
+      expectedProtocolContractRevision: "wrong-protocol@1",
+    });
+    expect(result.verified).toBe(false);
+    if (!result.verified) expect(result.failureReason).toBe("protocol_revision_mismatch");
+  });
+
   it("Runner Identity 不允许 → runner_identity_not_allowed", async () => {
     const key = generateTestRunnerKey("runner-key-1");
     const verifier = createDSSEConformanceVerifier({
@@ -268,11 +309,7 @@ function buildEnvelopeWithPayload(
   key: ReturnType<typeof generateTestRunnerKey>,
 ): string {
   const payloadType = "application/vnd.in-toto+json";
-  const pae = Buffer.concat([
-    Buffer.from(`DSSEv1 ${payloadType.length} ${payloadType} ${payloadBytes.length} `),
-    payloadBytes,
-  ]);
-  const { createPrivateKey, sign: cryptoSign } = require("node:crypto");
+  const pae = computeDssePae(payloadType, payloadBytes);
   const privateKey = createPrivateKey({
     key: {
       kty: "OKP",

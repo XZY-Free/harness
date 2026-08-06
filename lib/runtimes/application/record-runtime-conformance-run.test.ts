@@ -199,7 +199,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
       artifactType: "runtime_revision",
       artifactRevisionId: revision.id,
       artifactDigest: DIGEST_A,
-      signatureBundleRef: "attestation:signature:conformance-publication",
+      dsseEnvelopeRef: "attestation:signature:conformance-publication",
       sbomRef: "attestation:sbom:conformance-publication",
       provenanceRef: "attestation:provenance:conformance-publication",
       builderIdentity: "builder:conformance-test",
@@ -356,6 +356,36 @@ describe("RuntimeConformanceRun 权威记录", () => {
       }),
     ).rejects.toThrow("Conformance 验证失败");
     expect(await db.select().from(runtimeConformanceRun)).toHaveLength(0);
+  });
+
+  it("相同 Idempotency-Key 但不同 Envelope → RuntimeConformanceIdempotencyConflictError", async () => {
+    const { tenantId, ownerId, revision } = await seedRevision();
+    const record = createRecordRuntimeConformanceRun({
+      store: mysqlRuntimeConformanceRunStore,
+      verifier: createTestVerifier(),
+    });
+    const dsseEnvelope1 = buildDsseEnvelope(revision.id);
+    await record({
+      tenantId,
+      runtimeRevisionId: revision.id,
+      idempotencyKey: "conflict-key",
+      requestId: "request-conflict-1",
+      actor: { actorType: "user", actorId: ownerId },
+      dsseEnvelope: dsseEnvelope1,
+    });
+    const dsseEnvelope2 = buildDsseEnvelope(revision.id, {
+      evidenceManifestDigest: `sha256:${"9".repeat(64)}`,
+    });
+    await expect(
+      record({
+        tenantId,
+        runtimeRevisionId: revision.id,
+        idempotencyKey: "conflict-key",
+        requestId: "request-conflict-2",
+        actor: { actorType: "user", actorId: ownerId },
+        dsseEnvelope: dsseEnvelope2,
+      }),
+    ).rejects.toThrow("Idempotency-Key 已绑定不同的 DSSE Envelope");
   });
 
   it("不同 Idempotency-Key 的复测只追加新 Run，历史 Run 不被覆盖", async () => {
