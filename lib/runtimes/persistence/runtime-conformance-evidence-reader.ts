@@ -7,7 +7,7 @@
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §1.3
  */
 
-import { db } from "@/lib/db/client";
+import { db, type DbOrTx } from "@/lib/db/client";
 import type { ConformanceEligibilitySnapshot } from "@/lib/runtimes/domain/runtime-conformance-eligibility";
 import {
   runtimeConformanceCaseResult,
@@ -22,13 +22,18 @@ import { and, desc, eq } from "drizzle-orm";
  * 未传入 runId 时返回该 Revision 下最新一条 Run。
  *
  * 不存在返回 null。
+ *
+ * §07.3: 接受 dbOrTx 参数，默认全局 db（向后兼容）。
  */
 export async function loadConformanceEligibilitySnapshot(params: {
   tenantId: string;
   runtimeRevisionId: string;
   /** 可选：指定 Run ID（用于 Binding 校验冻结的精确 Run）。 */
   conformanceRunId?: string | null;
+  /** §07.3: 事务内传入 tx，默认使用全局 db。 */
+  dbOrTx?: DbOrTx;
 }): Promise<ConformanceEligibilitySnapshot | null> {
+  const conn = params.dbOrTx ?? db;
   const runQuery = params.conformanceRunId
     ? and(
         eq(runtimeConformanceRun.id, params.conformanceRunId),
@@ -40,7 +45,7 @@ export async function loadConformanceEligibilitySnapshot(params: {
         eq(runtimeConformanceRun.runtimeRevisionId, params.runtimeRevisionId),
       );
 
-  const [run] = await db
+  const [run] = await conn
     .select()
     .from(runtimeConformanceRun)
     .where(runQuery)
@@ -49,7 +54,7 @@ export async function loadConformanceEligibilitySnapshot(params: {
 
   if (!run) return null;
 
-  const caseResults = await db
+  const caseResults = await conn
     .select({
       caseId: runtimeConformanceCaseResult.caseId,
       passed: runtimeConformanceCaseResult.passed,

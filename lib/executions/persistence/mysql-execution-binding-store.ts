@@ -2,11 +2,11 @@
  * ExecutionBinding Store — MySQL 实现。
  *
  * §6.1: 统一事务 — 资格校验 + 行级锁 + Insert 在单一 db.transaction 内完成。
- * validateBindingEligibility(input, tx) 复用 Store 事务，避免双事务。
+ * §07.2: validateBindingEligibility(tx, input) — tx 必须传入，复用 Store 事务。
  *
  * 事务内执行：
  *   1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
- *   2. §5.1: validateBindingEligibility(input, tx) — 统一 Policy 校验
+ *   2. §5.1/§07.2: validateBindingEligibility(tx, input) — tx 必传，统一 Policy 校验
  *      （Projection 版本 + Route Activation + Evidence Snapshot + Policy）
  *   3. §5.1: Lock + TOCTOU 一致性校验（FOR UPDATE + Digest/ID 比较）
  *   4. §5.1: Capability Manifest Digest 一致性
@@ -57,21 +57,25 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         .limit(1);
       if (existing) throw new ExecutionBindingAlreadyExistsError(input.invocationId);
 
-      // 2. §6.1: 统一资格校验（复用 Store 事务，不再独立开事务）
+      // 2. §6.1/§07.2: 统一资格校验（tx 必须传入，复用 Store 事务）
       const evidence = input.controlPlaneEvidence;
-      const eligibility = await validateBindingEligibility(
-        {
-          tenantId: input.tenantId,
-          routeId: input.deploymentRouteId,
-          routeRevisionId: evidence.routeRevisionId,
-          routeActivationId: evidence.routeActivationId,
-          agentRevisionId: input.agentRevisionId,
-          runtimeRevisionId: input.runtimeRevisionId,
-          policyRevisionId: input.policyRevisionId,
-          projectionVersionNo: input.projectionVersionNo ?? 0,
+      const eligibility = await validateBindingEligibility(tx, {
+        tenantId: input.tenantId,
+        routeId: input.deploymentRouteId,
+        routeRevisionId: evidence.routeRevisionId,
+        routeActivationId: evidence.routeActivationId,
+        agentRevisionId: input.agentRevisionId,
+        runtimeRevisionId: input.runtimeRevisionId,
+        policyRevisionId: input.policyRevisionId,
+        projectionVersionNo: input.projectionVersionNo ?? 0,
+        frozenEvidence: {
+          agentPublicationRecordId: evidence.agentPublicationRecordId,
+          runtimePublicationRecordId: evidence.runtimePublicationRecordId,
+          agentAttestationIds: [...evidence.agentAttestationIds].sort(),
+          runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
+          conformanceRunId: evidence.conformanceRunId,
         },
-        tx,
-      );
+      });
       if (!eligibility.valid) {
         throw evidenceError(`Binding 资格校验失败: ${eligibility.reason}`);
       }

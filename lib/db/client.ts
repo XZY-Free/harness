@@ -93,3 +93,12 @@ if (!globalForDb.__snowMysqlPool) {
 }
 
 export const db = drizzle(pool, { schema: fullSchema, mode: "default" });
+
+/**
+ * §07.3: DB 或事务的公共查询接口类型。
+ *
+ * Drizzle 的 MySqlTransaction 和 MySql2Database 共享 .select()/.from()/.where()
+ * 等查询构建器方法，但 TypeScript 类型系统未建立继承关系（Transaction 缺少 $client）。
+ * 运行时两者完全兼容 — 所有需要事务内读取的 Reader 均应使用此类型。
+ */
+export type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];

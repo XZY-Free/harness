@@ -7,7 +7,7 @@
  * 参见：SnowHarness专题01全局统一与最终收敛方案 §1.2
  */
 
-import { db } from "@/lib/db/client";
+import { db, type DbOrTx } from "@/lib/db/client";
 import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
 import type { PublicationSubjectType } from "@/lib/publications/domain/publication-record";
 import {
@@ -25,13 +25,18 @@ import { and, desc, eq, isNull } from "drizzle-orm";
  * - tenantId 匹配
  *
  * 不存在或已撤回返回 null。
+ *
+ * §07.3: 接受 dbOrTx 参数，默认全局 db（向后兼容）。
  */
 export async function loadActivePublicationSnapshot(params: {
   tenantId: string;
   subjectType: PublicationSubjectType;
   subjectRevisionId: string;
+  /** §07.3: 事务内传入 tx，默认使用全局 db。 */
+  dbOrTx?: DbOrTx;
 }): Promise<ActivePublicationSnapshot | null> {
-  const [row] = await db
+  const conn = params.dbOrTx ?? db;
+  const [row] = await conn
     .select({
       pub: publicationRecord,
       wd: withdrawalRecord,
@@ -71,6 +76,8 @@ export async function loadActivePublicationSnapshot(params: {
 export async function loadActivePublicationSnapshots(params: {
   tenantId: string;
   revisions: Array<{ subjectType: PublicationSubjectType; subjectRevisionId: string }>;
+  /** §07.3: 事务内传入 tx，默认使用全局 db。 */
+  dbOrTx?: DbOrTx;
 }): Promise<Map<string, ActivePublicationSnapshot>> {
   const result = new Map<string, ActivePublicationSnapshot>();
 
@@ -79,6 +86,7 @@ export async function loadActivePublicationSnapshots(params: {
       tenantId: params.tenantId,
       subjectType: rev.subjectType,
       subjectRevisionId: rev.subjectRevisionId,
+      dbOrTx: params.dbOrTx,
     });
     if (snapshot) {
       result.set(rev.subjectRevisionId, snapshot);

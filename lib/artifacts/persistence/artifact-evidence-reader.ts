@@ -16,7 +16,7 @@ import {
   artifactAttestation,
   attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
-import { db } from "@/lib/db/client";
+import { db, type DbOrTx } from "@/lib/db/client";
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 
 /**
@@ -30,13 +30,18 @@ import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
  * - 无 AttestationRevocationRecord
  *
  * 不存在返回 null。
+ *
+ * §07.3: 接受 dbOrTx 参数，默认全局 db（向后兼容）。
  */
 export async function loadArtifactEvidenceSnapshot(params: {
   tenantId: string;
   artifactType: ArtifactType;
   artifactRevisionId: string;
+  /** §07.3: 事务内传入 tx，默认使用全局 db。 */
+  dbOrTx?: DbOrTx;
 }): Promise<ArtifactEvidenceSnapshot | null> {
-  const [row] = await db
+  const conn = params.dbOrTx ?? db;
+  const [row] = await conn
     .select({
       attestation: artifactAttestation,
       revocation: attestationRevocationRecord,
@@ -91,6 +96,8 @@ export async function loadArtifactEvidenceSnapshot(params: {
 export async function loadArtifactEvidenceSnapshots(params: {
   tenantId: string;
   revisions: Array<{ artifactType: ArtifactType; artifactRevisionId: string }>;
+  /** §07.3: 事务内传入 tx，默认使用全局 db。 */
+  dbOrTx?: DbOrTx;
 }): Promise<Map<string, ArtifactEvidenceSnapshot>> {
   const result = new Map<string, ArtifactEvidenceSnapshot>();
 
@@ -101,6 +108,7 @@ export async function loadArtifactEvidenceSnapshots(params: {
       tenantId: params.tenantId,
       artifactType: rev.artifactType,
       artifactRevisionId: rev.artifactRevisionId,
+      dbOrTx: params.dbOrTx,
     });
     if (snapshot) {
       result.set(rev.artifactRevisionId, snapshot);

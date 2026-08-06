@@ -24,15 +24,15 @@ import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents"
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { and, eq, isNull } from "drizzle-orm";
-import type { db as DbType } from "@/lib/db/client";
+import type { db as DbType, DbOrTx } from "@/lib/db/client";
 
 /**
  * MySQL 实现的依赖注入。
  *
- * §03.3: 所有 DB 访问必须通过 db 参数，禁止内部使用全局 db。
+ * §03.3/§07.3: 所有 DB 访问必须通过 dbOrTx 参数，禁止内部使用全局 db。
  */
 export interface MySqlRevisionExecutionEvidenceReaderDeps {
-  db: typeof DbType;
+  db: DbOrTx;
 }
 
 /**
@@ -56,7 +56,7 @@ export function createMySqlRevisionExecutionEvidenceReader(
 
 // ─── 内部实现 ─────────────────────────────────────────────
 
-type DbLike = typeof DbType;
+type DbLike = DbOrTx;
 
 /**
  * 核心证据加载逻辑 — loadCurrentEvidence 和 loadExactEvidence 共用。
@@ -85,21 +85,25 @@ async function loadEvidence(
       tenantId: input.tenantId,
       artifactType: "agent_revision",
       artifactRevisionId: input.agentRevisionId,
+      dbOrTx: dbOrTx,
     }),
     loadArtifactEvidenceSnapshot({
       tenantId: input.tenantId,
       artifactType: "runtime_revision",
       artifactRevisionId: input.runtimeRevisionId,
+      dbOrTx: dbOrTx,
     }),
     loadActivePublicationSnapshot({
       tenantId: input.tenantId,
       subjectType: "agent_revision",
       subjectRevisionId: input.agentRevisionId,
+      dbOrTx: dbOrTx,
     }),
     loadActivePublicationSnapshot({
       tenantId: input.tenantId,
       subjectType: "runtime_revision",
       subjectRevisionId: input.runtimeRevisionId,
+      dbOrTx: dbOrTx,
     }),
     dbOrTx
       .select()
@@ -143,6 +147,7 @@ async function loadEvidence(
     tenantId: input.tenantId,
     runtimeRevisionId: input.runtimeRevisionId,
     conformanceRunId,
+    dbOrTx: dbOrTx,
   });
 
   // Phase 4: §03.4: 加载 Policy Revision 快照（真实读取，不再仅存 id）
