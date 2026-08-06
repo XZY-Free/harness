@@ -144,8 +144,8 @@ function createMockStore(overrides: {
       const session: RouteSetActivationSession = {
         lockRouteSet: vi.fn(async () => routeSet),
         listRoutesBySet: vi.fn(async () => existingRoutes),
-        findActiveRevision: vi.fn(async () => null),
         findLatestActivation: vi.fn(async () => null),
+        findRevisionById: vi.fn(async () => null),
         findIdempotentRouteSetActivation: vi.fn(async () => null),
         findAgentRevision: vi.fn(async (id: string) => agentRevisions.get(id) ?? null),
         findRuntimeRevision: vi.fn(async (id: string) => runtimeRevisions.get(id) ?? null),

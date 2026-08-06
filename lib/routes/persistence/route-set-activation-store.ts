@@ -77,9 +77,11 @@ export interface DesiredRoute {
 
 export interface RouteSetActivationSession {
   // ─── 读取 ──────────────────────────────────────────────
-  lockRouteSet(routeSetId: string): Promise<RouteSetRow | null>;
+  /** §04.4: 按 tenantId + routeSetId 锁定 RouteSet（跨租户隔离）。 */
+  lockRouteSet(params: { tenantId: string; routeSetId: string }): Promise<RouteSetRow | null>;
   listRoutesBySet(routeSetId: string): Promise<RouteRow[]>;
-  findActiveRevision(routeId: string): Promise<RouteRevisionRecord | null>;
+  /** §04.5: 已删除 findActiveRevision — 使用 findLatestActivation + routeRevision 关联。 */
+  findRevisionById(id: string): Promise<RouteRevisionRecord | null>;
   /** §2.5: 查找 Route 最新的 Activation（用于填充 previous 字段）。 */
   findLatestActivation(routeId: string): Promise<RouteActivationRecord | null>;
   /** §2.6: 按 routeSetId+idempotencyKey 查找已完成的 RouteSet 级幂等记录。 */

@@ -135,7 +135,7 @@ export function createActivateRouteSet(dependencies: {
       }
 
       // 2. FOR UPDATE 锁定 RouteSet
-      const routeSet = await session.lockRouteSet(command.routeSetId);
+      const routeSet = await session.lockRouteSet({ tenantId: command.tenantId, routeSetId: command.routeSetId });
       if (!routeSet) throw new RouteSetNotFoundError(command.routeSetId);
 
       // 3. 校验 expectedVersionNo
@@ -335,17 +335,18 @@ export function createActivateRouteSet(dependencies: {
       const desiredRouteIds = new Set(desiredContents.map((d) => d.routeId));
       for (const currentRoute of currentRoutes) {
         if (!desiredRouteIds.has(currentRoute.id) && currentRoute.routeState === "enabled") {
-          const lastRevision = await session.findActiveRevision(currentRoute.id);
-          if (lastRevision) {
+          // §04.5: 使用 findLatestActivation 获取最新 Activation + Revision
+          const lastActivation = await session.findLatestActivation(currentRoute.id);
+          if (lastActivation) {
             await session.appendActivation({
               id: newId(),
               tenantId: command.tenantId,
               routeId: currentRoute.id,
-              routeRevisionId: lastRevision.id,
-              routeSetId: lastRevision.routeSetId,
+              routeRevisionId: lastActivation.routeRevisionId,
+              routeSetId: command.routeSetId,
               activationSequence: await session.nextActivationSequence(currentRoute.id),
               activationState: "disabled" as const,
-              previousRouteRevisionId: lastRevision.id,
+              previousRouteRevisionId: lastActivation.routeRevisionId,
               previousRouteActivationId: null,
               routeSetVersionNo: nextVersionNo,
               actorType: command.actor.actorType,
@@ -355,6 +356,9 @@ export function createActivateRouteSet(dependencies: {
               idempotencyKey: `${command.idempotencyKey}:disable:${currentRoute.id}`,
               now: occurredAt,
             });
+            // §04.5: 从 activation 的 routeRevisionId 查询完整 Revision
+            const lastRevision = await session.findRevisionById(lastActivation.routeRevisionId);
+            if (!lastRevision) continue;
             await session.updateRouteProjection({
               routeId: currentRoute.id,
               revision: lastRevision,

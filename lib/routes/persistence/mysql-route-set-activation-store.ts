@@ -44,11 +44,16 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
   transaction: (operation) =>
     db.transaction(async (tx) =>
       operation({
-        async lockRouteSet(routeSetId) {
+        async lockRouteSet(params) {
           const [row] = await tx
             .select()
             .from(deploymentRouteSetTable)
-            .where(eq(deploymentRouteSetTable.id, routeSetId))
+            .where(
+              and(
+                eq(deploymentRouteSetTable.id, params.routeSetId),
+                eq(deploymentRouteSetTable.tenantId, params.tenantId),
+              ),
+            )
             .limit(1)
             .for("update");
           return row ?? null;
@@ -62,19 +67,14 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
             .orderBy(desc(deploymentRouteTable.createdAt));
         },
 
-        async findActiveRevision(routeId) {
+        // §04.5: findRevisionById — 通过 ID 查询 RouteRevisionRecord
+        async findRevisionById(id) {
           const [row] = await tx
-            .select({ revision: routeRevision })
+            .select()
             .from(routeRevision)
-            .innerJoin(routeActivation, eq(routeActivation.routeRevisionId, routeRevision.id))
-            .where(
-              and(
-                eq(routeRevision.routeId, routeId),
-                eq(routeActivation.activationState, "active"),
-              ),
-            )
+            .where(eq(routeRevision.id, id))
             .limit(1);
-          return row?.revision ?? null;
+          return row ?? null;
         },
 
         async findAgentRevision(id) {
