@@ -92,7 +92,6 @@ import type {
   RouteSetActivationSession,
   RouteSetActivationStore,
 } from "@/lib/routes/persistence/route-set-activation-store";
-import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";

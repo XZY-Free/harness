@@ -19,14 +19,14 @@ import {
 } from "@/lib/publications/persistence/publication-record";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
-import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const NOW = new Date("2026-08-03T01:00:00.000Z");
-const resolveRoute = createResolveRoute({ store: mysqlRouteResolutionStore });
+const resolveRoute = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
 
 interface AuthorityFixture {
   tenantId: string;

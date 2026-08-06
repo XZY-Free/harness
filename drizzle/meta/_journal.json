@@ -953,6 +953,13 @@
       "when": 1723084800000,
       "tag": "0134_projection_content_digest",
       "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "6",
+      "when": 1723171200000,
+      "tag": "0135_outbox_remove_consumer_state",
+      "breakpoints": true
     }
   ]
 }

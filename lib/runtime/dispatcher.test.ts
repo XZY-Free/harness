@@ -59,7 +59,7 @@ import {
   type RouteResolver,
   createResolveRoute,
 } from "@/lib/routes/application/resolve-route";
-import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { DEFAULT_ROUTE_SCOPE_KEY, dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import {
   DispatchTurnStateError,
@@ -955,7 +955,7 @@ describe("V11 Dispatcher 调度", () => {
 
   it("Resolver 后发生撤回时拒绝创建新的 ExecutionBinding", async () => {
     const ctx = await seedFullDispatchContext();
-    const routeResolver = createResolveRoute({ store: mysqlRouteResolutionStore });
+    const routeResolver = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
     const staleOutcome = await routeResolver({
       tenantId: ctx.tenantId,
       agentId: ctx.agentId,
@@ -998,7 +998,7 @@ describe("V11 Dispatcher 调度", () => {
       turnId: ctx.turnId,
       invocationKind: "initial",
     });
-    const outcome = await createResolveRoute({ store: mysqlRouteResolutionStore })({
+    const outcome = await createResolveRoute({ store: mysqlRouteEligibilityResolutionStore })({
       tenantId: ctx.tenantId,
       agentId: ctx.agentId,
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,

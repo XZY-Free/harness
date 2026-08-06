@@ -69,7 +69,6 @@ import {
   createConfiguredRouteResolver,
 } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
-import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
 import {
   DispatchTurnStateError,
   RuntimeHttpClientError,
@@ -105,9 +104,8 @@ import { and, eq } from "drizzle-orm";
 /** 本阶段使用的默认路由 scope key（后续阶段从 Thread/Agent 配置解析）。 */
 export const DEFAULT_ROUTE_SCOPE_KEY = "default";
 
-/** §4.6: 统一解析入口 — 所有执行路径必须共用此 Resolver。 */
+/** §06.3: 统一解析入口 — Projection 是唯一数据源。 */
 const configuredResolver = createConfiguredRouteResolver({
-  authorityStore: mysqlRouteResolutionStore,
   projectionStore: mysqlRouteEligibilityResolutionStore,
 });
 

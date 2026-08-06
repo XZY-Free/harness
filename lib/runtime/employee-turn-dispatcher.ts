@@ -8,7 +8,6 @@ import { agentTable } from "@/lib/persistence/schema/agents";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
-import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
 import type { HostedModelContext } from "@/lib/runtime/adapters/hosted-adapter";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
@@ -22,9 +21,8 @@ import { and, eq } from "drizzle-orm";
 
 type ModelFn = (message: string, context: HostedModelContext) => Promise<string>;
 
-/** §4.6: 使用统一解析入口 — Shadow 对比在内部自动执行。 */
+/** §06.3: 使用统一解析入口 — Projection 是唯一数据源。 */
 const configuredResolver = createConfiguredRouteResolver({
-  authorityStore: mysqlRouteResolutionStore,
   projectionStore: mysqlRouteEligibilityResolutionStore,
 });
 const resolveRoute: RouteResolver = async (input) => {

@@ -3,7 +3,7 @@ import {
   type RouteResolutionOutcome,
   resolveRouteCandidates,
 } from "../domain/route-resolution-policy";
-import type { RouteResolutionStore } from "../persistence/route-resolution-store";
+import type { RouteEligibilityResolutionStore } from "../persistence/route-eligibility-resolution-store";
 
 export interface ResolveRouteCommand {
   tenantId: string;
@@ -16,8 +16,11 @@ export interface ResolveRouteCommand {
 
 export type RouteResolver = (command: ResolveRouteCommand) => Promise<RouteResolutionOutcome>;
 
+/**
+ * §06.3: 唯一 Resolver — 使用 Projection 作为唯一数据源。
+ */
 export function createResolveRoute(dependencies: {
-  store: RouteResolutionStore;
+  store: RouteEligibilityResolutionStore;
   now?: () => Date;
 }): RouteResolver {
   const clock = dependencies.now ?? (() => new Date());

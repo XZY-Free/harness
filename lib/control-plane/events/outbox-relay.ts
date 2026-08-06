@@ -1,12 +1,11 @@
 /**
  * Outbox Relay 领域逻辑。
  *
- * 领取语义：FOR UPDATE SKIP LOCKED + 租约 + 指数退避。
- * 永久错误与可重试错误分离。
- * 死信模型：达到 maxAttempts 后进入 deadLetteredAt。
+ * §06.4: 消费状态判断已移至 Delivery 表。
+ * 此模块只保留错误分类和退避计算（供 Relay Worker 使用）。
  */
 
-/** 指数退避计算。 */
+/** �, 指数退避计算。 */
 export function computeOutboxBackoff(attemptCount: number, baseMs: number, maxMs: number): Date {
   const delay = Math.min(baseMs * 2 ** attemptCount, maxMs);
   const jitter = Math.random() * 0.2 * delay; // 20% jitter
@@ -70,31 +69,4 @@ export function classifyOutboxError(error: unknown): {
     code: "UNKNOWN_ERROR",
     summary: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
   };
-}
-
-/** 判断事件是否可领取。 */
-export function isOutboxEventClaimable(
-  event: {
-    publishedAt: Date | null;
-    deadLetteredAt: Date | null;
-    nextAttemptAt: Date | null;
-    lockExpiresAt: Date | null;
-    maxAttempts: number | null;
-    attemptCount: number;
-  },
-  now: Date,
-  maxAttempts: number,
-): boolean {
-  // 已发布
-  if (event.publishedAt) return false;
-  // 已死信
-  if (event.deadLetteredAt) return false;
-  // 达到最大尝试次数
-  const effectiveMax = event.maxAttempts ?? maxAttempts;
-  if (event.attemptCount >= effectiveMax) return false;
-  // 尚未到下次尝试时间
-  if (event.nextAttemptAt && event.nextAttemptAt > now) return false;
-  // 租约未过期
-  if (event.lockExpiresAt && event.lockExpiresAt > now) return false;
-  return true;
 }

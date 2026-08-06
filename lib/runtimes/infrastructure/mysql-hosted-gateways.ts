@@ -31,7 +31,7 @@ import { getPublicationRecordBySubject } from "@/lib/publications/persistence/pu
 import { getWithdrawalRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
-import { mysqlRouteResolutionStore } from "@/lib/routes/persistence/mysql-route-resolution-store";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
 import type {
   HostedRuntimeRoute,
@@ -95,7 +95,7 @@ const recordRuntimeConformanceRun = createRecordRuntimeConformanceRun({
 const publishRuntimeRevision = createPublishRuntimeRevision({
   store: mysqlRuntimePublicationStore,
 });
-const resolveRoute = createResolveRoute({ store: mysqlRouteResolutionStore });
+const resolveRoute = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
 const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 
 // ─── 1. HostedRouteReader ──────────────────────────────────
