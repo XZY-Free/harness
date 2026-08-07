@@ -1039,6 +1039,34 @@ describe("场景7：Projection Consumer 构建完整 eligible Projection", () =>
     });
   });
 
+  it("跨租户异常 activation 不会遮蔽本租户 latest activation", async () => {
+    const fixture = await seedEndToEndFixture("projection-authority-cross-tenant-activation");
+    await db.insert(routeActivation).values({
+      id: randomUUID(),
+      tenantId: randomUUID(),
+      routeId: fixture.route.id,
+      routeRevisionId: randomUUID(),
+      routeSetId: fixture.routeSet.id,
+      activationSequence: 2,
+      activationState: "active",
+      previousRouteRevisionId: fixture.routeRevisionId,
+      previousRouteActivationId: fixture.routeActivationId,
+      routeSetVersionNo: 2,
+      activatedByType: "system",
+      activatedBy: "cross-tenant-corruption-test",
+      reason: "verify tenant-scoped latest activation",
+      requestId: randomUUID(),
+      idempotencyKey: `cross-tenant-${randomUUID()}`,
+      activatedAt: new Date(),
+    });
+
+    const sourceRefs = await mysqlRouteEligibilitySourceReader.listRouteIdsByAgentRevision(
+      fixture.agentRevision.id,
+    );
+
+    expect(sourceRefs).toContainEqual({ routeId: fixture.route.id, tenantId: fixture.tenantId });
+  });
+
   it("disabled route 保留真实 authority IDs 的 ineligible 投影且 Resolver 不选择", async () => {
     const fixture = await seedEndToEndFixture("projection-authority-disabled");
     await db

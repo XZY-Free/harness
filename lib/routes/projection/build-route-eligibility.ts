@@ -14,7 +14,7 @@
  * 投影不是新的权威事实源。
  */
 
-import { createHash } from "node:crypto";
+import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
@@ -64,15 +64,25 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
  ): Promise<BuildRouteEligibilityResult> {
  const now = new Date();
 
- // 1. 查找 DeploymentRoute
+ // 1. 通过所属 RouteSet 同时确认 DeploymentRoute 的租户归属。
  const [route] = await db
- .select()
+ .select({
+ id: deploymentRouteTable.id,
+ routeSetId: deploymentRouteTable.routeSetId,
+ routeState: deploymentRouteTable.routeState,
+ })
  .from(deploymentRouteTable)
+ .innerJoin(
+ deploymentRouteSetTable,
+ and(
+ eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+ eq(deploymentRouteSetTable.tenantId, input.tenantId),
+ ),
+ )
  .where(eq(deploymentRouteTable.id, input.routeId))
  .limit(1);
  if (!route) {
- // : Route 不存在 → 删除孤立投影
- await deps.store.deleteProjection(input.routeId);
+ // 无法区分 Route 不存在与属于其他租户；未确认租户前禁止按 routeId 删除。
  return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
  }
 
@@ -349,9 +359,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
  * 相同权威事实必须产生相同 digest，不同事实必须产生不同 digest。
  */
 export function computeProjectionContentDigest(fields: Record<string, unknown>): string {
- const canonical = JSON.stringify(fields, Object.keys(fields).sort());
- const hash = createHash("sha256").update(canonical).digest("hex");
- return `sha256:${hash}`;
+ return computeCanonicalDigest(fields);
 }
 
 /**

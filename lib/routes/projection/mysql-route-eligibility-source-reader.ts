@@ -27,6 +27,8 @@ const latestActivationCondition = sql`${routeActivation.activationSequence} = (
  SELECT MAX(latest_activation.activationSequence)
  FROM RouteActivation AS latest_activation
  WHERE latest_activation.routeId = ${deploymentRouteTable.id}
+ AND latest_activation.tenantId = ${deploymentRouteSetTable.tenantId}
+ AND latest_activation.routeSetId = ${deploymentRouteSetTable.id}
 )`;
 
 export function createMySqlRouteEligibilitySourceReader(

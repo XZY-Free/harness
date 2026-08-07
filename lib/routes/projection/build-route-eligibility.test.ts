@@ -21,6 +21,7 @@ const builderMocks = vi.hoisted(() => {
     const result = queryResults.shift() ?? [];
     const query = {
       from: vi.fn(),
+      innerJoin: vi.fn(),
       where: vi.fn(),
       orderBy: vi.fn(),
       limit: vi.fn(),
@@ -28,6 +29,7 @@ const builderMocks = vi.hoisted(() => {
       then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(result).then(resolve),
     };
     query.from.mockReturnValue(query);
+    query.innerJoin.mockReturnValue(query);
     query.where.mockReturnValue(query);
     query.orderBy.mockReturnValue(query);
     query.limit.mockReturnValue(query);
@@ -161,6 +163,19 @@ describe("Projection authority", () => {
     await createBuildRouteEligibility({ store })({ tenantId: "tenant-1", routeId: "route-1" });
 
     expect(store.deleteProjection).toHaveBeenCalledWith("route-1");
+    expect(store.upsertProjection).not.toHaveBeenCalled();
+  });
+
+  it("错误 tenantId 不能删除其他租户的既有投影", async () => {
+    const store = createStoreMock();
+    builderMocks.queryResults.push([]);
+
+    await createBuildRouteEligibility({ store })({
+      tenantId: "foreign-tenant",
+      routeId: "route-1",
+    });
+
+    expect(store.deleteProjection).not.toHaveBeenCalled();
     expect(store.upsertProjection).not.toHaveBeenCalled();
   });
 
@@ -384,6 +399,22 @@ describe("§05.5 computeProjectionContentDigest", () => {
     const d1 = computeProjectionContentDigest({ a: 1, b: 2 });
     const d2 = computeProjectionContentDigest({ b: 2, a: 1 });
     expect(d1).toBe(d2);
+  });
+
+  it("eligibilityConditionsJson 嵌套条件变化会改变 digest 和版本", () => {
+    const d1 = computeProjectionContentDigest({
+      routeId: "r1",
+      eligibilityConditionsJson: { all: { environment: "prod", region: "cn" } },
+    });
+    const d2 = computeProjectionContentDigest({
+      routeId: "r1",
+      eligibilityConditionsJson: { all: { environment: "staging", region: "cn" } },
+    });
+
+    expect(d2).not.toBe(d1);
+    expect(
+      computeNextVersion({ projectionVersionNo: 4, projectionContentDigest: d1 }, d2),
+    ).toBe(5);
   });
 });
 
