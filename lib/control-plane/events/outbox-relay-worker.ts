@@ -99,6 +99,18 @@ export function createOutboxRelayWorker(
  /** 单轮轮询：领取 → 处理 → 标记。 */
  async function poll(): Promise<number> {
  const now = new Date();
+
+ // §10: 崩溃恢复 — 将租约过期的 running Delivery 重置为 pending
+ await db
+  .update(controlPlaneEventDelivery)
+  .set({ state: "pending", lockedBy: null, lockExpiresAt: null })
+  .where(
+   and(
+   eq(controlPlaneEventDelivery.state, "running"),
+   lte(controlPlaneEventDelivery.lockExpiresAt, now),
+   ),
+  );
+
  const deliveries = await claimDeliveries(now);
  if (deliveries.length === 0) return 0;
 
