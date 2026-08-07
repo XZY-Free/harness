@@ -738,19 +738,14 @@ describe("buildReplayResponse", () => {
     expect(body).toEqual({ id: "thr_1" });
   });
 
-  it("completed + 空 responseRedactedJson → 返回 redacted + resource_ref", async () => {
+  it("completed + 空 responseRedactedJson → fail-closed", () => {
     const record = buildCompletedRecord({ responseRedactedJson: null });
-    const response = buildReplayResponse(record);
-    expect(response.status).toBe(201);
-    const body = await response.json();
-    expect(body).toEqual({ redacted: true, resource_ref: "thr_1" });
+    expect(() => buildReplayResponse(record)).toThrow("completed 记录缺失完整响应");
   });
 
-  it("completed + 非法 responseRedactedJson → 返回 redacted 占位", async () => {
+  it("completed + 非法 responseRedactedJson → fail-closed", () => {
     const record = buildCompletedRecord({ responseRedactedJson: "not json" });
-    const response = buildReplayResponse(record);
-    const body = await response.json();
-    expect(body).toEqual({ redacted: true });
+    expect(() => buildReplayResponse(record)).toThrow("completed 记录响应损坏");
   });
 
   it("非 completed 记录抛错", () => {

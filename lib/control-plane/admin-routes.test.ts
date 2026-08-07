@@ -47,6 +47,8 @@ import type { ActivateRouteSetResponse } from "@/lib/control-plane-client/contra
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { auditEvent } from "@/lib/persistence/schema/control-plane";
+import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { findIdempotencyRecord } from "@/lib/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/identity/role-action-queries";
@@ -58,6 +60,13 @@ import {
   getRouteSetById,
   upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
+import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
+import { RouteIdempotencyCompletionError } from "@/lib/routes/domain/route-revision";
+import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
+import {
+  routeActivation,
+  routeRevision,
+} from "@/lib/routes/persistence/route-revision-record";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
@@ -369,6 +378,27 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
     expect(firstActivation).toHaveProperty("previous_route_revision_id", null);
     expect(firstActivation).toHaveProperty("previous_route_activation_id", null);
 
+    const replayResponse = await activateRouteSetPUT(
+      buildActivationRequest(1, "idem-route-set-api-001"),
+      { params: Promise.resolve({ route_set_id: routeSet.id }) },
+    );
+    expect(replayResponse.status).toBe(200);
+    expect(await replayResponse.json()).toEqual(firstBody);
+
+    const idempotency = await findIdempotencyRecord({
+      tenantId,
+      audience: "admin",
+      callerType: "user",
+      callerId: userIdentityId,
+      commandScope: `route_set.activate:${routeSet.id}`,
+      idempotencyKey: "idem-route-set-api-001",
+    });
+    expect(idempotency?.processingState).toBe("completed");
+    expect(idempotency?.responseRedactedJson).toBe(JSON.stringify(firstBody));
+    expect(
+      await db.select().from(routeActivation).where(eq(routeActivation.routeSetId, routeSet.id)),
+    ).toHaveLength(1);
+
     const secondResponse = await activateRouteSetPUT(
       buildActivationRequest(2, "idem-route-set-api-002", firstActivation.route_id),
       { params: Promise.resolve({ route_set_id: routeSet.id }) },
@@ -378,6 +408,82 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
     const secondActivation = secondBody.activations[0]!;
     expect(secondActivation.previous_route_revision_id).toBe(firstActivation.route_revision_id);
     expect(secondActivation.previous_route_activation_id).toBe(firstActivation.route_activation_id);
+  });
+
+  it("IdempotencyRecord authority 缺失时事务不留下任何 RouteSet 激活事实", async () => {
+    const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
+    const agentResult = await seedPublishedAgentRevision(
+      tenantId,
+      userIdentityId,
+      "route-set-missing-authority-agent",
+      "route-set-missing-authority-agent-v1",
+      "enabled",
+    );
+    const runtimeResult = await seedPublishedRuntimeRevision(
+      tenantId,
+      userIdentityId,
+      "route-set-missing-authority-runtime",
+      "route-set-missing-authority-runtime-v1",
+      "enabled",
+    );
+    const routeSet = await createRouteSet({
+      tenantId,
+      agentId: agentResult.agent.id,
+      routeScopeKey: "missing-authority",
+      routeScopeJson: {},
+    });
+    const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
+
+    await expect(
+      activateRouteSet({
+        tenantId,
+        routeSetId: routeSet.id,
+        expectedVersionNo: 1,
+        desiredRoutes: [
+          {
+            routeKey: "primary",
+            routeGroupId: "primary",
+            agentRevisionId: agentResult.revision.id,
+            runtimeRevisionId: runtimeResult.revision.id,
+            trafficWeight: 10000,
+            priorityNo: 1,
+            activationState: "active",
+          },
+        ],
+        actor: { tenantId, actorType: "user", actorId: userIdentityId },
+        reason: "验证 authority 缺失回滚",
+        requestId: "req-route-set-missing-authority",
+        idempotencyKey: "idem-route-set-missing-authority",
+        idempotencyCompletion: {
+          recordId: "missing-idempotency-record",
+          httpStatus: 200,
+          serializeResponse: JSON.stringify,
+        },
+      }),
+    ).rejects.toThrow(RouteIdempotencyCompletionError);
+
+    expect(
+      await db.select().from(routeRevision).where(eq(routeRevision.routeSetId, routeSet.id)),
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(routeActivation).where(eq(routeActivation.routeSetId, routeSet.id)),
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(deploymentRouteTable)
+        .where(eq(deploymentRouteTable.routeSetId, routeSet.id)),
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(auditEvent).where(eq(auditEvent.targetId, routeSet.id)),
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(controlPlaneOutboxEvent)
+        .where(eq(controlPlaneOutboxEvent.aggregateId, routeSet.id)),
+    ).toHaveLength(0);
+    expect((await getRouteSetById(tenantId, routeSet.id))?.versionNo).toBe(1);
   });
 });
 

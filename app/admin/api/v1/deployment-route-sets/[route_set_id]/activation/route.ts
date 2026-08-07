@@ -32,7 +32,10 @@ import {
  *
  * 错误映射见 JSDoc 上方文档注释。
  */
-import { RouteSetRequiresAtomicUpdateError } from "@/lib/routes/application/activate-route-set";
+import {
+  type ActivateRouteSetResult,
+  RouteSetRequiresAtomicUpdateError,
+} from "@/lib/routes/application/activate-route-set";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import {
   AgentCapabilityUnsupportedError,
@@ -106,6 +109,23 @@ function actorFromAdminPrincipal(principal: AdminPrincipal): AuditActor {
   return actorFromWorkloadPrincipal(principal);
 }
 
+function buildActivationResponse(result: ActivateRouteSetResult) {
+  return {
+    route_set_id: result.routeSetId,
+    route_set_version_no: result.routeSetVersionNo,
+    activations: result.activations.map((activation) => ({
+      route_id: activation.routeId,
+      route_revision_id: activation.routeRevisionId,
+      route_activation_id: activation.routeActivationId,
+      activation_state: activation.activationState,
+      route_group_id: activation.routeGroupId,
+      previous_route_revision_id: activation.previousRouteRevisionId,
+      previous_route_activation_id: activation.previousRouteActivationId,
+    })),
+    affected_new_invocations_only: result.affectsNewInvocationsOnly,
+  };
+}
+
 // ─── PUT handler ───────────────────────────────────────────
 
 export async function PUT(
@@ -167,10 +187,16 @@ export async function PUT(
   }
 
   // 6. 幂等守卫
-  const path = new URL(request.url).pathname;
-  const requestHash = computeRequestHash("PUT", path, body);
   const caller = callerFromAdminPrincipal(principal);
-  const commandScope = `route_set.activation:${routeSetId}`;
+  const actor = actorFromAdminPrincipal(principal);
+  const commandScope = `route_set.activate:${routeSetId}`;
+  const requestHash = computeRequestHash("PUT", commandScope, {
+    routeSetId,
+    expectedVersionNo: body.expected_version_no,
+    desiredRoutes: body.routes,
+    actor,
+    reason: body.reason,
+  });
 
   const outcome = await enforceIdempotency({
     caller,
@@ -228,38 +254,21 @@ export async function PUT(
         eligibilityConditions: r.eligibility_conditions ?? {},
         activationState: (r.activation_state ?? "active") as "active" | "disabled",
       })),
-      actor: actorFromAdminPrincipal(principal),
+      actor,
       reason: body.reason,
       requestId,
       idempotencyKey,
       idempotencyCompletion: {
         recordId,
         httpStatus: 200,
-        serializeResponse: (r) =>
-          JSON.stringify({
-            route_set_id: r.routeSetId,
-            route_set_version_no: r.routeSetVersionNo,
-          }),
+        serializeResponse: (activationResult) =>
+          JSON.stringify(buildActivationResponse(activationResult)),
       },
     });
 
     // 8. 返回 200 + ETag
     const etag = `route-set-${result.routeSetVersionNo}`;
-    return apiSuccess(
-      {
-        route_set_id: result.routeSetId,
-        route_set_version_no: result.routeSetVersionNo,
-        activations: result.activations.map((a) => ({
-          route_id: a.routeId,
-          route_revision_id: a.routeRevisionId,
-          route_activation_id: a.routeActivationId,
-          activation_state: a.activationState,
-          route_group_id: a.routeGroupId,
-          previous_route_revision_id: a.previousRouteRevisionId,
-          previous_route_activation_id: a.previousRouteActivationId,
-        })),
-        affected_new_invocations_only: true,
-      },
+    return apiSuccess(buildActivationResponse(result),
       {
         status: 200,
         headers: {
@@ -269,28 +278,23 @@ export async function PUT(
       },
     );
   } catch (err) {
+    await failRecord(recordId);
     if (err instanceof RouteSetNotFoundError) {
-      await failRecord(recordId);
       return apiError("RESOURCE_NOT_FOUND", err.message, { requestId });
     }
     if (err instanceof RouteSetVersionConflictError) {
-      await failRecord(recordId);
       return etagMismatchTable(requestId, err.message);
     }
     if (err instanceof ArtifactNotVerifiedForRouteError) {
-      await failRecord(recordId);
       return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
     if (err instanceof RevisionNotPublishedError) {
-      await failRecord(recordId);
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
     }
     if (err instanceof AgentCapabilityUnsupportedError) {
-      await failRecord(recordId);
       return apiError("AGENT_CAPABILITY_UNSUPPORTED", err.message, { requestId });
     }
     if (err instanceof RouteSetRequiresAtomicUpdateError) {
-      await failRecord(recordId);
       return apiError("ROUTE_SET_REQUIRES_ATOMIC_UPDATE", err.message, { requestId });
     }
     throw err;

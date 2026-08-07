@@ -262,9 +262,7 @@ export function callerFromWorkloadPrincipal(principal: WorkloadPrincipal): Idemp
 /**
  * 构造重放响应：从 completed 记录恢复原 HTTP 状态码与响应体。
  *
- * - 若 responseRedactedJson 非空，解析后作为响应体（JSON）。
- * - 若 responseRedactedJson 为空（大响应只存摘要），返回原状态码 + 空 JSON 体 + responseRef 头，
- * 调用方应引导客户端 GET responseRef 获取完整资源。
+ * - responseRedactedJson 必须包含可解析的完整响应；缺失或损坏时 fail-closed。
  * - record 非 completed 时抛错（调用方应先判断 outcome.kind）。
  */
 export function buildReplayResponse(record: IdempotencyRecord, requestId?: string): Response {
@@ -279,17 +277,16 @@ export function buildReplayResponse(record: IdempotencyRecord, requestId?: strin
  if (record.responseRef) {
  headers["x-idempotent-resource-ref"] = record.responseRef;
  }
- if (record.responseRedactedJson) {
+ if (!record.responseRedactedJson) {
+ throw new Error("buildReplayResponse: completed 记录缺失完整响应");
+ }
  let body: unknown;
  try {
  body = JSON.parse(record.responseRedactedJson);
  } catch {
- body = { redacted: true };
+ throw new Error("buildReplayResponse: completed 记录响应损坏");
  }
  return Response.json(body, { status, headers });
- }
- // 大响应只存摘要：返回原状态码 + 引导客户端 GET responseRef。
- return Response.json({ redacted: true, resource_ref: record.responseRef }, { status, headers });
 }
 
 /**

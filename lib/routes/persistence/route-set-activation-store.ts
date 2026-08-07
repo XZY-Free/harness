@@ -89,16 +89,6 @@ export interface RouteSetActivationSession {
  findRevisionById(id: string): Promise<RouteRevisionRecord | null>;
  /** : 查找 Route 最新的 Activation（用于填充 previous 字段）。 */
  findLatestActivation(routeId: string): Promise<RouteActivationRecord | null>;
- /** : 按 routeSetId+idempotencyKey 查找已完成的 RouteSet 级幂等记录。 */
- findIdempotentRouteSetActivation(params: {
- routeSetId: string;
- idempotencyKey: string;
- }): Promise<{
- completed: boolean;
- httpStatus: number;
- responseRef: string | null;
- responseRedactedJson: string;
- } | null>;
  findAgentRevision(id: string): Promise<AgentRevisionSummary | null>;
  findRuntimeRevision(id: string): Promise<RuntimeRevisionSummary | null>;
  /** §03: 已删除 hasVerifiedAttestation 和 loadRevisionExecutionEvidence — 使用统一 Reader。 */
@@ -189,6 +179,8 @@ export interface RouteSetActivationSession {
  }): Promise<void>;
  completeIdempotency(params: {
  recordId: string;
+ tenantId: string;
+ commandScope: string;
  httpStatus: number;
  responseRef: string | null;
  responseRedactedJson: string;

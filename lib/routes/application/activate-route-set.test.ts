@@ -8,6 +8,7 @@ import {
   AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
+  RouteIdempotencyCompletionError,
   RouteSetVersionConflictError,
 } from "@/lib/routes/domain/route-revision";
 import type {
@@ -170,6 +171,7 @@ function createMockStore(overrides: {
   revisionsById?: Map<string, RouteRevisionRecord>;
   appendAudit?: ReturnType<typeof vi.fn>;
   appendOutbox?: ReturnType<typeof vi.fn>;
+  completeIdempotency?: ReturnType<typeof vi.fn>;
 }): RouteSetActivationStore {
   const routeSet = overrides.routeSet ?? BASE_ROUTE_SET;
   const existingRoutes = overrides.existingRoutes ?? [];
@@ -205,7 +207,6 @@ function createMockStore(overrides: {
         findRevisionById: vi.fn(
           async (id: string) => overrides.revisionsById?.get(id) ?? null,
         ),
-        findIdempotentRouteSetActivation: vi.fn(async () => null),
         findAgentRevision: vi.fn(async (id: string) => agentRevisions.get(id) ?? null),
         findRuntimeRevision: vi.fn(async (id: string) => runtimeRevisions.get(id) ?? null),
         resolveOrCreateRouteIdentity: vi.fn(
@@ -276,7 +277,7 @@ function createMockStore(overrides: {
         ),
         appendAudit: overrides.appendAudit ?? vi.fn(async () => {}),
         appendOutbox: overrides.appendOutbox ?? vi.fn(async () => {}),
-        completeIdempotency: vi.fn(async () => true),
+        completeIdempotency: overrides.completeIdempotency ?? vi.fn(async () => true),
       };
       return operation(session);
     },
@@ -686,5 +687,46 @@ describe("activateRouteSet", () => {
     const activateRouteSet = createActivateRouteSet({ store: storeWithCapDb, evidenceReaderForTest: mockEvidenceReader, now: () => NOW });
 
     await expect(activateRouteSet(makeCommand())).rejects.toThrow("执行资格不足");
+  });
+
+  it("IdempotencyRecord authority 缺失时拒绝提交", async () => {
+    const store = createMockStore({ completeIdempotency: vi.fn(async () => false) });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
+
+    await expect(
+      activateRouteSet(
+        makeCommand({
+          idempotencyCompletion: {
+            recordId: "missing-record",
+            httpStatus: 200,
+            serializeResponse: JSON.stringify,
+          },
+        }),
+      ),
+    ).rejects.toThrow(RouteIdempotencyCompletionError);
+  });
+
+  it("历史 Activation 不属于当前 tenant/Route/RouteSet 时 fail-closed", async () => {
+    const store = createMockStore({
+      latestActivations: new Map([
+        [
+          "route-1",
+          makeActivationRecord({ tenantId: "other-tenant", routeId: "route-1" }),
+        ],
+      ]),
+    });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
+
+    await expect(activateRouteSet(makeCommand())).rejects.toThrow(
+      "历史 Activation 与当前 Route authority 不一致",
+    );
   });
 });

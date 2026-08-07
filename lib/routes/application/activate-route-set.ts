@@ -19,6 +19,7 @@ import {
  RevisionNotPublishedError,
  RouteEligibilityInvalidError,
  RouteExecutionIneligibleError,
+ RouteIdempotencyCompletionError,
  RouteSetNotFoundError,
  RouteSetVersionConflictError,
  computeRouteRevisionContentDigest,
@@ -123,31 +124,6 @@ export function createActivateRouteSet(dependencies: {
  // §04: 事务级 Evidence Reader — 生产路径从事务内创建，测试可注入 mock
  const evidenceReader: RevisionExecutionEvidenceReader =
   dependencies.evidenceReaderForTest ?? createMySqlRevisionExecutionEvidenceReader({ db: session.getDbOrTx() });
- // : 幂等重放 — 先按 routeSetId+idempotencyKey 查找已完成激活
- const existingIdempotent = await session.findIdempotentRouteSetActivation({
- routeSetId: command.routeSetId,
- idempotencyKey: command.idempotencyKey,
- });
- if (existingIdempotent?.completed) {
- // §05: 幂等重放 — 从持久化记录恢复完整响应
- if (existingIdempotent.responseRedactedJson) {
- try {
- const restored = JSON.parse(existingIdempotent.responseRedactedJson) as ActivateRouteSetResult;
- return { ...restored, idempotent: true as const };
- } catch {
- // JSON 损坏 → 降级返回确认
- }
- }
- return {
- routeSetId: command.routeSetId,
- routeSetVersionNo: 0,
- activations: [],
- auditEventId: "",
- affectsNewInvocationsOnly: true as const,
- idempotent: true as const,
- };
- }
-
  // 2. FOR UPDATE 锁定 RouteSet
  const routeSet = await session.lockRouteSet({ tenantId: command.tenantId, routeSetId: command.routeSetId });
  if (!routeSet) throw new RouteSetNotFoundError(command.routeSetId);
@@ -309,6 +285,14 @@ export function createActivateRouteSet(dependencies: {
  const activationState = desired.activationState ?? "active";
  // : 查找当前最新 Activation，填充 previous 历史字段
  const currentActivation = await session.findLatestActivation(routeId);
+ if (
+ currentActivation &&
+ (currentActivation.tenantId !== command.tenantId ||
+ currentActivation.routeId !== routeId ||
+ currentActivation.routeSetId !== command.routeSetId)
+ ) {
+ throw new Error(`历史 Activation 与当前 Route authority 不一致: ${currentActivation.id}`);
+ }
  const activation = await session.appendActivation({
  id: newId(),
  tenantId: command.tenantId,
@@ -356,12 +340,26 @@ export function createActivateRouteSet(dependencies: {
  if (!lastActivation) {
  throw new Error(`隐式禁用 Route ${currentRoute.id} 时找不到历史 Activation`);
  }
+ if (
+ lastActivation.tenantId !== command.tenantId ||
+ lastActivation.routeId !== currentRoute.id ||
+ lastActivation.routeSetId !== command.routeSetId
+ ) {
+ throw new Error(`历史 Activation 与当前 Route authority 不一致: ${lastActivation.id}`);
+ }
  // : 从 activation 的 routeRevisionId 查询完整 Revision
  const lastRevision = await session.findRevisionById(lastActivation.routeRevisionId);
  if (!lastRevision) {
  throw new Error(
  `隐式禁用 Route ${currentRoute.id} 时找不到历史 Revision ${lastActivation.routeRevisionId}`,
  );
+ }
+ if (
+ lastRevision.tenantId !== command.tenantId ||
+ lastRevision.routeId !== currentRoute.id ||
+ lastRevision.routeSetId !== command.routeSetId
+ ) {
+ throw new Error(`历史 Revision 与当前 Route authority 不一致: ${lastRevision.id}`);
  }
  const activation = await session.appendActivation({
  id: newId(),
@@ -462,15 +460,15 @@ export function createActivateRouteSet(dependencies: {
  if (command.idempotencyCompletion) {
  const completed = await session.completeIdempotency({
  recordId: command.idempotencyCompletion.recordId,
+ tenantId: command.tenantId,
+ commandScope: `route_set.activate:${command.routeSetId}`,
  httpStatus: command.idempotencyCompletion.httpStatus,
  responseRef: command.idempotencyCompletion?.responseRef ?? command.routeSetId,
  responseRedactedJson: command.idempotencyCompletion.serializeResponse(result),
  completedAt: occurredAt,
  });
  if (!completed) {
- throw new Error(
- `RouteSetActivation 幂等记录完成失败: ${command.idempotencyCompletion.recordId}`,
- );
+ throw new RouteIdempotencyCompletionError(command.idempotencyCompletion.recordId);
  }
  }
 

@@ -21,7 +21,7 @@ import { RouteNotFoundError } from "@/lib/routes/domain/route-revision";
 import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import type { RouteSetActivationStore } from "@/lib/routes/persistence/route-set-activation-store";
-import { and, desc, eq, isNotNull, isNull, like, max } from "drizzle-orm";
+import { and, desc, eq, max } from "drizzle-orm";
 
 function requiredCapabilities(value: unknown): string[] {
  if (!value || typeof value !== "object") return [];
@@ -123,28 +123,6 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
  .orderBy(desc(routeActivation.activationSequence))
  .limit(1);
  return row ?? null;
- },
-
- async findIdempotentRouteSetActivation(params) {
- // : 查找 RouteSet 级幂等记录 — 检查同一 routeSetId 下是否有匹配的 idempotencyKey 前缀
- const rows = await tx
- .select()
- .from(routeActivation)
- .where(
- and(
- eq(routeActivation.routeSetId, params.routeSetId),
- like(routeActivation.idempotencyKey, `${params.idempotencyKey}%`),
- ),
- )
- .limit(1);
- if (rows.length === 0) return null;
- // 简化：找到匹配记录即视为已完成（完整实现需要独立的幂等记录表）
- return {
- completed: true,
- httpStatus: 200,
- responseRef: params.routeSetId,
- responseRedactedJson: "{}",
- };
  },
 
  async resolveOrCreateRouteIdentity(params) {
@@ -384,6 +362,8 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
  .where(
  and(
  eq(idempotencyRecord.id, params.recordId),
+ eq(idempotencyRecord.tenantId, params.tenantId),
+ eq(idempotencyRecord.commandScope, params.commandScope),
  eq(idempotencyRecord.processingState, "processing"),
  ),
  );
