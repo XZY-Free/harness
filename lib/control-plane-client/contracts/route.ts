@@ -101,6 +101,8 @@ export interface ActivateRouteSetResponse {
     route_activation_id: string;
     activation_state: RouteActivationState;
     route_group_id: string;
+    previous_route_revision_id: string | null;
+    previous_route_activation_id: string | null;
   }>;
   affected_new_invocations_only: boolean;
 }

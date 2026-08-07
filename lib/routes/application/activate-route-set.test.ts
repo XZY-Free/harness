@@ -168,6 +168,7 @@ function createMockStore(overrides: {
   routeSetVersionConflict?: boolean;
   latestActivations?: Map<string, RouteActivationRecord>;
   revisionsById?: Map<string, RouteRevisionRecord>;
+  appendAudit?: ReturnType<typeof vi.fn>;
   appendOutbox?: ReturnType<typeof vi.fn>;
 }): RouteSetActivationStore {
   const routeSet = overrides.routeSet ?? BASE_ROUTE_SET;
@@ -273,7 +274,7 @@ function createMockStore(overrides: {
             ? null
             : { ...routeSet, versionNo: routeSet.versionNo + 1, updatedAt: new Date() },
         ),
-        appendAudit: vi.fn(async () => {}),
+        appendAudit: overrides.appendAudit ?? vi.fn(async () => {}),
         appendOutbox: overrides.appendOutbox ?? vi.fn(async () => {}),
         completeIdempotency: vi.fn(async () => true),
       };
@@ -313,6 +314,7 @@ function makeCommand(overrides: Partial<ActivateRouteSetCommand> = {}): Activate
 
 describe("activateRouteSet", () => {
   it("完整 replacement 把隐式 disabled Route 同时写入结果和 outbox", async () => {
+    const appendAudit = vi.fn(async () => {});
     const appendOutbox = vi.fn(async () => {});
     const previousActivation = makeActivationRecord({
       id: "act-previous",
@@ -344,6 +346,7 @@ describe("activateRouteSet", () => {
       ],
       latestActivations: new Map([["route-removed", previousActivation]]),
       revisionsById: new Map([["rev-removed", previousRevision]]),
+      appendAudit,
       appendOutbox,
     });
     const activateRouteSet = createActivateRouteSet({
@@ -378,6 +381,14 @@ describe("activateRouteSet", () => {
       expect.objectContaining({
         payload: expect.objectContaining({
           tenant_id: TENANT_ID,
+          route_ids: result.activations.map((activation) => activation.routeId),
+          activation_ids: result.activations.map((activation) => activation.routeActivationId),
+        }),
+      }),
+    );
+    expect(appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: expect.objectContaining({
           route_ids: result.activations.map((activation) => activation.routeId),
           activation_ids: result.activations.map((activation) => activation.routeActivationId),
         }),

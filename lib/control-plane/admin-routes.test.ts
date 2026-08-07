@@ -15,6 +15,7 @@ import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revisio
 import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations:verify/route";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { PUT as updateRoutePUT } from "@/app/admin/api/v1/deployment-routes/[route_id]/route";
+import { PUT as activateRouteSetPUT } from "@/app/admin/api/v1/deployment-route-sets/[route_set_id]/activation/route";
 import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
@@ -42,6 +43,7 @@ import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifac
 import { listAttestationsByRevision } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import type { ActivateRouteSetResponse } from "@/lib/control-plane-client/contracts/route";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -223,12 +225,14 @@ async function seedPublishedAgentRevision(
   ownerId: string,
   agentKey: string,
   contentSuffix: string,
+  lifecycleState: "draft" | "enabled" = "draft",
 ) {
   const agent = await createAgent({
     tenantId,
     agentKey,
     displayName: `Agent ${agentKey}`,
     ownerUserId: ownerId,
+    lifecycleState,
   });
 
   const revision = await createDraftRevision({
@@ -263,6 +267,7 @@ async function seedPublishedRuntimeRevision(
   ownerId: string,
   runtimeKey: string,
   contentSuffix: string,
+  lifecycleState: "draft" | "enabled" = "draft",
 ) {
   const runtime = await createRuntime({
     tenantId,
@@ -270,6 +275,7 @@ async function seedPublishedRuntimeRevision(
     displayName: `Runtime ${runtimeKey}`,
     runtimeKind: "hosted",
     ownerUserId: ownerId,
+    lifecycleState,
   });
 
   const revision = await createDraftRuntimeRevision({
@@ -300,6 +306,80 @@ async function seedPublishedRuntimeRevision(
 
   return { runtime, revision };
 }
+
+describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", () => {
+  it("连续激活同一 Route 时返回完整 previous Activation 历史", async () => {
+    const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
+    const agentResult = await seedPublishedAgentRevision(
+      tenantId,
+      userIdentityId,
+      "route-set-api-agent",
+      "route-set-api-agent-v1",
+      "enabled",
+    );
+    const runtimeResult = await seedPublishedRuntimeRevision(
+      tenantId,
+      userIdentityId,
+      "route-set-api-runtime",
+      "route-set-api-runtime-v1",
+      "enabled",
+    );
+    const routeSet = await createRouteSet({
+      tenantId,
+      agentId: agentResult.agent.id,
+      routeScopeKey: "prod",
+      routeScopeJson: { networkZone: "internal" },
+    });
+
+    const buildActivationRequest = (
+      expectedVersionNo: number,
+      idempotencyKey: string,
+      routeId?: string,
+    ) =>
+      buildV11Request({
+        audience: "admin",
+        method: "PUT",
+        path: `/deployment-route-sets/${routeSet.id}/activation`,
+        idempotencyKey,
+        ifMatch: `route-set-${expectedVersionNo}`,
+        body: {
+          expected_version_no: expectedVersionNo,
+          reason: "验证 RouteSet Activation 历史字段",
+          routes: [
+            {
+              ...(routeId ? { route_id: routeId } : {}),
+              route_group_id: "primary",
+              agent_revision_id: agentResult.revision.id,
+              runtime_revision_id: runtimeResult.revision.id,
+              traffic_weight: 10000,
+              priority_no: 1,
+              activation_state: "active",
+            },
+          ],
+        },
+      });
+
+    const firstResponse = await activateRouteSetPUT(
+      buildActivationRequest(1, "idem-route-set-api-001"),
+      { params: Promise.resolve({ route_set_id: routeSet.id }) },
+    );
+    expect(firstResponse.status).toBe(200);
+    const firstBody = (await firstResponse.json()) as ActivateRouteSetResponse;
+    const firstActivation = firstBody.activations[0]!;
+    expect(firstActivation).toHaveProperty("previous_route_revision_id", null);
+    expect(firstActivation).toHaveProperty("previous_route_activation_id", null);
+
+    const secondResponse = await activateRouteSetPUT(
+      buildActivationRequest(2, "idem-route-set-api-002", firstActivation.route_id),
+      { params: Promise.resolve({ route_set_id: routeSet.id }) },
+    );
+    expect(secondResponse.status).toBe(200);
+    const secondBody = (await secondResponse.json()) as ActivateRouteSetResponse;
+    const secondActivation = secondBody.activations[0]!;
+    expect(secondActivation.previous_route_revision_id).toBe(firstActivation.route_revision_id);
+    expect(secondActivation.previous_route_activation_id).toBe(firstActivation.route_activation_id);
+  });
+});
 
 // ═══════════════════════════════════════════════════════════
 // 1. POST /admin/api/v1/artifact-attestations:verify

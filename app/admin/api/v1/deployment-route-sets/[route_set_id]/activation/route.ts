@@ -255,6 +255,8 @@ export async function PUT(
           route_activation_id: a.routeActivationId,
           activation_state: a.activationState,
           route_group_id: a.routeGroupId,
+          previous_route_revision_id: a.previousRouteRevisionId,
+          previous_route_activation_id: a.previousRouteActivationId,
         })),
         affected_new_invocations_only: true,
       },

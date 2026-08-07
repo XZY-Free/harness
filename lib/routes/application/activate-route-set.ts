@@ -423,6 +423,8 @@ export function createActivateRouteSet(dependencies: {
  route_set_version_no: nextVersionNo,
  activated_count: activations.filter((a) => a.activationState === "active").length,
  disabled_count: activations.filter((a) => a.activationState === "disabled").length,
+ route_ids: activations.map((activation) => activation.routeId),
+ activation_ids: activations.map((activation) => activation.routeActivationId),
  },
  reason: command.reason,
  requestId: command.requestId,
