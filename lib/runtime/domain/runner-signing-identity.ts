@@ -49,6 +49,10 @@ export class RunnerSigningIdentityRegistry {
  constructor(entries: readonly RunnerSigningIdentity[]) {
   for (const entry of entries) {
    const existing = this.byKeyId.get(entry.keyId) ?? [];
+   const registeredPublicKey = existing[0]?.publicKey;
+   if (registeredPublicKey !== undefined && registeredPublicKey !== entry.publicKey) {
+    throw new Error(`runner_key_public_key_conflict:${entry.keyId}`);
+   }
    existing.push(entry);
    this.byKeyId.set(entry.keyId, existing);
   }

@@ -90,6 +90,20 @@ describe("runtimeConformanceConfig.runnerSigningIdentities", () => {
     expect(runtimeConformanceConfig.runnerSigningIdentities).toEqual([identity]);
   });
 
+  it("同一 keyId 配置不同 publicKey 时返回空注册集并 fail-closed", () => {
+    process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = JSON.stringify([
+      identity,
+      {
+        ...identity,
+        publicKey: "different-public-key",
+        runnerIdentity: "ci/other-runtime-conformance",
+        tenantScope: "tenant-2",
+      },
+    ]);
+
+    expect(runtimeConformanceConfig.runnerSigningIdentities).toEqual([]);
+  });
+
   it.each([
     ["缺失", undefined],
     ["空字符串", ""],

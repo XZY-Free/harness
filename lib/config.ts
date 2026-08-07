@@ -127,7 +127,8 @@ export const runtimeConformanceConfig = {
  try {
  const parsed = JSON.parse(raw) as unknown;
  if (!Array.isArray(parsed) || parsed.length === 0) return [];
- return parsed.every(isRunnerSigningIdentity) ? parsed : [];
+ if (!parsed.every(isRunnerSigningIdentity)) return [];
+ return hasConsistentRunnerPublicKeys(parsed) ? parsed : [];
  } catch {
  return [];
  }
@@ -164,6 +165,18 @@ function isIsoTimestamp(value: unknown): value is string {
  if (typeof value !== "string") return false;
  const timestamp = Date.parse(value);
  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+}
+
+function hasConsistentRunnerPublicKeys(
+ entries: readonly { keyId: string; publicKey: string }[],
+): boolean {
+ const publicKeyByKeyId = new Map<string, string>();
+ for (const entry of entries) {
+  const existing = publicKeyByKeyId.get(entry.keyId);
+  if (existing !== undefined && existing !== entry.publicKey) return false;
+  publicKeyByKeyId.set(entry.keyId, entry.publicKey);
+ }
+ return true;
 }
 
 /** Hosted 制品证明与独立 Conformance Runner 的受管服务配置。 */

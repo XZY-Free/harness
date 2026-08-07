@@ -31,6 +31,52 @@ function makeEntry(overrides: Partial<RunnerSigningIdentity> = {}): RunnerSignin
 }
 
 describe("RunnerSigningIdentityRegistry", () => {
+ describe("constructor", () => {
+  it("同一 keyId 使用不同 publicKey 时拒绝构建注册表", () => {
+   expect(
+    () =>
+     new RunnerSigningIdentityRegistry([
+      makeEntry({ keyId: "key-a", publicKey: "pk-a", runnerIdentity: "runner-1" }),
+      makeEntry({ keyId: "key-a", publicKey: "pk-b", runnerIdentity: "runner-2" }),
+     ]),
+   ).toThrow("runner_key_public_key_conflict:key-a");
+  });
+
+  it("同一 keyId 与 publicKey 可包含多条显式 Runner 和租户授权", () => {
+   const registry = new RunnerSigningIdentityRegistry([
+    makeEntry({
+     keyId: "key-a",
+     publicKey: "pk-a",
+     runnerIdentity: "runner-1",
+     tenantScope: "tenant-1",
+    }),
+    makeEntry({
+     keyId: "key-a",
+     publicKey: "pk-a",
+     runnerIdentity: "runner-2",
+     tenantScope: "tenant-2",
+    }),
+   ]);
+
+   expect(
+    registry.validate({
+     keyId: "key-a",
+     runnerIdentity: "runner-1",
+     tenantId: "tenant-1",
+     now: NOW,
+    }).ok,
+   ).toBe(true);
+   expect(
+    registry.validate({
+     keyId: "key-a",
+     runnerIdentity: "runner-2",
+     tenantId: "tenant-2",
+     now: NOW,
+    }).ok,
+   ).toBe(true);
+  });
+ });
+
  describe("validate", () => {
   it("Key-Identity 绑定匹配 → 校验通过", () => {
    const registry = new RunnerSigningIdentityRegistry([
