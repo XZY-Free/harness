@@ -265,7 +265,11 @@ export function callerFromWorkloadPrincipal(principal: WorkloadPrincipal): Idemp
  * - responseRedactedJson 必须包含可解析的完整响应；缺失或损坏时 fail-closed。
  * - record 非 completed 时抛错（调用方应先判断 outcome.kind）。
  */
-export function buildReplayResponse(record: IdempotencyRecord, requestId?: string): Response {
+export function buildReplayResponse(
+ record: IdempotencyRecord,
+ requestId?: string,
+ validateBody?: (body: Record<string, unknown>) => boolean,
+): Response {
  if (record.processingState !== "completed") {
  throw new Error(
  `buildReplayResponse: 记录非 completed（state=${record.processingState as string}）`,
@@ -296,6 +300,9 @@ export function buildReplayResponse(record: IdempotencyRecord, requestId?: strin
  Object.keys(body).length === 0
  ) {
  throw new Error("buildReplayResponse: completed 记录响应不是非空 JSON object");
+ }
+ if (validateBody && !validateBody(body as Record<string, unknown>)) {
+ throw new Error("buildReplayResponse: completed 记录响应结构非法");
  }
  return Response.json(body, { status, headers });
 }

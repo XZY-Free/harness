@@ -126,6 +126,44 @@ function buildActivationResponse(result: ActivateRouteSetResult) {
   };
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isNullableNonEmptyString(value: unknown): value is string | null {
+  return value === null || isNonEmptyString(value);
+}
+
+function isActivationResponseBody(
+  body: Record<string, unknown>,
+  routeSetId: string,
+  expectedVersionNo: number,
+): boolean {
+  if (body.route_set_id !== routeSetId) return false;
+  if (
+    !Number.isInteger(body.route_set_version_no) ||
+    body.route_set_version_no !== expectedVersionNo + 1
+  ) {
+    return false;
+  }
+  if (body.affected_new_invocations_only !== true) return false;
+  if (!Array.isArray(body.activations) || body.activations.length === 0) return false;
+
+  return body.activations.every((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+    const activation = candidate as Record<string, unknown>;
+    return (
+      isNonEmptyString(activation.route_id) &&
+      isNonEmptyString(activation.route_revision_id) &&
+      isNonEmptyString(activation.route_activation_id) &&
+      (activation.activation_state === "active" || activation.activation_state === "disabled") &&
+      isNonEmptyString(activation.route_group_id) &&
+      isNullableNonEmptyString(activation.previous_route_revision_id) &&
+      isNullableNonEmptyString(activation.previous_route_activation_id)
+    );
+  });
+}
+
 // ─── PUT handler ───────────────────────────────────────────
 
 export async function PUT(
@@ -206,7 +244,9 @@ export async function PUT(
   });
 
   if (outcome.kind === "replay") {
-    return buildReplayResponse(outcome.record, requestId);
+    return buildReplayResponse(outcome.record, requestId, (responseBody) =>
+      isActivationResponseBody(responseBody, routeSetId, body.expected_version_no),
+    );
   }
   if (outcome.kind === "in_flight" || outcome.kind === "conflict") {
     return buildIdempotencyErrorResponse({

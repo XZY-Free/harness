@@ -47,7 +47,7 @@ import type { ActivateRouteSetResponse } from "@/lib/control-plane-client/contra
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { auditEvent } from "@/lib/persistence/schema/control-plane";
+import { auditEvent, idempotencyRecord } from "@/lib/persistence/schema/control-plane";
 import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { findIdempotencyRecord } from "@/lib/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
@@ -398,6 +398,21 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
     expect(
       await db.select().from(routeActivation).where(eq(routeActivation.routeSetId, routeSet.id)),
     ).toHaveLength(1);
+
+    if (!idempotency) throw new Error("RouteSet IdempotencyRecord 未创建");
+    await db
+      .update(idempotencyRecord)
+      .set({ responseRedactedJson: '{"foo":"bar"}' })
+      .where(eq(idempotencyRecord.id, idempotency.id));
+    await expect(
+      activateRouteSetPUT(buildActivationRequest(1, "idem-route-set-api-001"), {
+        params: Promise.resolve({ route_set_id: routeSet.id }),
+      }),
+    ).rejects.toThrow("completed 记录响应结构非法");
+    await db
+      .update(idempotencyRecord)
+      .set({ responseRedactedJson: JSON.stringify(firstBody) })
+      .where(eq(idempotencyRecord.id, idempotency.id));
 
     const secondResponse = await activateRouteSetPUT(
       buildActivationRequest(2, "idem-route-set-api-002", firstActivation.route_id),
