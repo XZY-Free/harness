@@ -143,8 +143,19 @@ describe("validateEventPayload", () => {
     const result = validateEventPayload("route_set.activated", {
       route_set_id: "00000000-0000-0000-0000-000000000001",
       route_set_version_no: 2,
+      tenant_id: "00000000-0000-0000-0000-000000000008",
+      route_ids: ["00000000-0000-0000-0000-000000000009"],
       activation_ids: ["00000000-0000-0000-0000-000000000010"],
     });
-    expect(result.valid).toBe(true);
+    expect(result).toEqual({
+      valid: true,
+      data: {
+        route_set_id: "00000000-0000-0000-0000-000000000001",
+        route_set_version_no: 2,
+        tenant_id: "00000000-0000-0000-0000-000000000008",
+        route_ids: ["00000000-0000-0000-0000-000000000009"],
+        activation_ids: ["00000000-0000-0000-0000-000000000010"],
+      },
+    });
   });
 });

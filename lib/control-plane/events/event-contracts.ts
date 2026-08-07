@@ -114,6 +114,8 @@ export const RouteRevisionValidatedPayload = z.object({
 export const RouteSetActivatedPayload = z.object({
  route_set_id: id,
  route_set_version_no: z.number().int().positive(),
+ tenant_id: id,
+ route_ids: z.array(id),
  activation_ids: z.array(id),
 });
 

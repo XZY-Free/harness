@@ -145,6 +145,7 @@ function makeActivationRecord(
     activationSequence: 1,
     activationState: "active",
     previousRouteRevisionId: null,
+    previousRouteActivationId: null,
     routeSetVersionNo: 2,
     activatedByType: "user",
     activatedBy: "user-1",
@@ -165,6 +166,9 @@ function createMockStore(overrides: {
   runtimeRevisions?: Map<string, RuntimeRevisionSummary>;
   attestationResults?: Map<string, boolean>;
   routeSetVersionConflict?: boolean;
+  latestActivations?: Map<string, RouteActivationRecord>;
+  revisionsById?: Map<string, RouteRevisionRecord>;
+  appendOutbox?: ReturnType<typeof vi.fn>;
 }): RouteSetActivationStore {
   const routeSet = overrides.routeSet ?? BASE_ROUTE_SET;
   const existingRoutes = overrides.existingRoutes ?? [];
@@ -194,8 +198,12 @@ function createMockStore(overrides: {
         getDbOrTx: vi.fn(() => mockDbOrTx),
         lockRouteSet: vi.fn(async () => routeSet),
         listRoutesBySet: vi.fn(async () => existingRoutes),
-        findLatestActivation: vi.fn(async () => null),
-        findRevisionById: vi.fn(async () => null),
+        findLatestActivation: vi.fn(
+          async (routeId: string) => overrides.latestActivations?.get(routeId) ?? null,
+        ),
+        findRevisionById: vi.fn(
+          async (id: string) => overrides.revisionsById?.get(id) ?? null,
+        ),
         findIdempotentRouteSetActivation: vi.fn(async () => null),
         findAgentRevision: vi.fn(async (id: string) => agentRevisions.get(id) ?? null),
         findRuntimeRevision: vi.fn(async (id: string) => runtimeRevisions.get(id) ?? null),
@@ -240,6 +248,8 @@ function createMockStore(overrides: {
             routeSetId: params.routeSetId,
             activationSequence: params.activationSequence,
             activationState: params.activationState,
+            previousRouteRevisionId: params.previousRouteRevisionId,
+            previousRouteActivationId: params.previousRouteActivationId,
             routeSetVersionNo: params.routeSetVersionNo,
           }),
         ),
@@ -264,7 +274,7 @@ function createMockStore(overrides: {
             : { ...routeSet, versionNo: routeSet.versionNo + 1, updatedAt: new Date() },
         ),
         appendAudit: vi.fn(async () => {}),
-        appendOutbox: vi.fn(async () => {}),
+        appendOutbox: overrides.appendOutbox ?? vi.fn(async () => {}),
         completeIdempotency: vi.fn(async () => true),
       };
       return operation(session);
@@ -302,6 +312,151 @@ function makeCommand(overrides: Partial<ActivateRouteSetCommand> = {}): Activate
 // ─── 测试 ──────────────────────────────────────────────────
 
 describe("activateRouteSet", () => {
+  it("完整 replacement 把隐式 disabled Route 同时写入结果和 outbox", async () => {
+    const appendOutbox = vi.fn(async () => {});
+    const previousActivation = makeActivationRecord({
+      id: "act-previous",
+      routeId: "route-removed",
+      routeRevisionId: "rev-removed",
+    });
+    const previousRevision = makeRevisionRecord({
+      id: "rev-removed",
+      routeId: "route-removed",
+      routeGroupId: "removed-group",
+    });
+    const store = createMockStore({
+      existingRoutes: [
+        {
+          id: "route-removed",
+          routeSetId: ROUTE_SET_ID,
+          routeKey: "removed",
+          agentRevisionId: BASE_AGENT_REVISION.id,
+          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+          trafficWeight: 10000,
+          priorityNo: 0,
+          routeState: "enabled",
+          effectiveFrom: null,
+          effectiveUntil: null,
+          activeRouteRevisionId: "rev-removed",
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+      ],
+      latestActivations: new Map([["route-removed", previousActivation]]),
+      revisionsById: new Map([["rev-removed", previousRevision]]),
+      appendOutbox,
+    });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
+
+    const result = await activateRouteSet(makeCommand());
+
+    expect(result.activations).toEqual([
+      {
+        routeId: "route-1",
+        routeRevisionId: expect.any(String),
+        routeActivationId: expect.any(String),
+        activationState: "active",
+        routeGroupId: "primary",
+        previousRouteRevisionId: null,
+        previousRouteActivationId: null,
+      },
+      {
+        routeId: "route-removed",
+        routeRevisionId: "rev-removed",
+        routeActivationId: expect.any(String),
+        activationState: "disabled",
+        routeGroupId: "removed-group",
+        previousRouteRevisionId: "rev-removed",
+        previousRouteActivationId: "act-previous",
+      },
+    ]);
+    expect(appendOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          tenant_id: TENANT_ID,
+          route_ids: result.activations.map((activation) => activation.routeId),
+          activation_ids: result.activations.map((activation) => activation.routeActivationId),
+        }),
+      }),
+    );
+  });
+
+  it("隐式 disabled Route 的历史 Revision 缺失时拒绝部分成功", async () => {
+    const store = createMockStore({
+      existingRoutes: [
+        {
+          id: "route-removed",
+          routeSetId: ROUTE_SET_ID,
+          routeKey: "removed",
+          agentRevisionId: BASE_AGENT_REVISION.id,
+          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+          trafficWeight: 10000,
+          priorityNo: 0,
+          routeState: "enabled",
+          effectiveFrom: null,
+          effectiveUntil: null,
+          activeRouteRevisionId: "rev-missing",
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+      ],
+      latestActivations: new Map([
+        [
+          "route-removed",
+          makeActivationRecord({
+            id: "act-previous",
+            routeId: "route-removed",
+            routeRevisionId: "rev-missing",
+          }),
+        ],
+      ]),
+    });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
+
+    await expect(activateRouteSet(makeCommand())).rejects.toThrow(
+      "隐式禁用 Route route-removed 时找不到历史 Revision rev-missing",
+    );
+  });
+
+  it("隐式 disabled Route 的历史 Activation 缺失时拒绝部分成功", async () => {
+    const store = createMockStore({
+      existingRoutes: [
+        {
+          id: "route-removed",
+          routeSetId: ROUTE_SET_ID,
+          routeKey: "removed",
+          agentRevisionId: BASE_AGENT_REVISION.id,
+          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+          trafficWeight: 10000,
+          priorityNo: 0,
+          routeState: "enabled",
+          effectiveFrom: null,
+          effectiveUntil: null,
+          activeRouteRevisionId: "rev-missing",
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+      ],
+    });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
+
+    await expect(activateRouteSet(makeCommand())).rejects.toThrow(
+      "隐式禁用 Route route-removed 时找不到历史 Activation",
+    );
+  });
+
   it("单条 10000 权重激活 — 成功", async () => {
     const store = createMockStore({});
     const activateRouteSet = createActivateRouteSet({ store, evidenceReaderForTest: mockEvidenceReader, now: () => NOW });

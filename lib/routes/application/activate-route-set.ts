@@ -64,6 +64,8 @@ export interface ActivateRouteSetResult {
  routeActivationId: string;
  activationState: "active" | "disabled";
  routeGroupId: string;
+ previousRouteRevisionId: string | null;
+ previousRouteActivationId: string | null;
  }>;
  auditEventId: string;
  affectsNewInvocationsOnly: true;
@@ -340,6 +342,8 @@ export function createActivateRouteSet(dependencies: {
  routeActivationId: activation.id,
  activationState,
  routeGroupId: desired.routeGroupId,
+ previousRouteRevisionId: activation.previousRouteRevisionId,
+ previousRouteActivationId: activation.previousRouteActivationId,
  });
  }
 
@@ -349,8 +353,17 @@ export function createActivateRouteSet(dependencies: {
  if (!desiredRouteIds.has(currentRoute.id) && currentRoute.routeState === "enabled") {
  // : 使用 findLatestActivation 获取最新 Activation + Revision
  const lastActivation = await session.findLatestActivation(currentRoute.id);
- if (lastActivation) {
- await session.appendActivation({
+ if (!lastActivation) {
+ throw new Error(`隐式禁用 Route ${currentRoute.id} 时找不到历史 Activation`);
+ }
+ // : 从 activation 的 routeRevisionId 查询完整 Revision
+ const lastRevision = await session.findRevisionById(lastActivation.routeRevisionId);
+ if (!lastRevision) {
+ throw new Error(
+ `隐式禁用 Route ${currentRoute.id} 时找不到历史 Revision ${lastActivation.routeRevisionId}`,
+ );
+ }
+ const activation = await session.appendActivation({
  id: newId(),
  tenantId: command.tenantId,
  routeId: currentRoute.id,
@@ -368,16 +381,21 @@ export function createActivateRouteSet(dependencies: {
  idempotencyKey: `${command.idempotencyKey}:disable:${currentRoute.id}`,
  now: occurredAt,
  });
- // : 从 activation 的 routeRevisionId 查询完整 Revision
- const lastRevision = await session.findRevisionById(lastActivation.routeRevisionId);
- if (!lastRevision) continue;
  await session.updateRouteProjection({
  routeId: currentRoute.id,
  revision: lastRevision,
  routeState: "disabled",
  now: occurredAt,
  });
- }
+ activations.push({
+ routeId: currentRoute.id,
+ routeRevisionId: lastRevision.id,
+ routeActivationId: activation.id,
+ activationState: "disabled",
+ routeGroupId: lastRevision.routeGroupId,
+ previousRouteRevisionId: activation.previousRouteRevisionId,
+ previousRouteActivationId: activation.previousRouteActivationId,
+ });
  }
  }
 
@@ -423,6 +441,8 @@ export function createActivateRouteSet(dependencies: {
  payload: {
  route_set_id: command.routeSetId,
  route_set_version_no: nextVersionNo,
+ tenant_id: command.tenantId,
+ route_ids: activations.map((a) => a.routeId),
  activation_ids: activations.map((a) => a.routeActivationId),
  },
  occurredAt,
