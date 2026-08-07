@@ -236,6 +236,10 @@ async function buildUpsertResult(
  };
 }
 
+/**
+ * §11: @deprecated 单 Route 兼容写入口 — 已委托给 RouteSet 原子激活。
+ * 新代码必须直接使用 activateRouteSet。此函数将在 Task 17 全仓删除中移除。
+ */
 export async function upsertDeploymentRoute(params: {
  tenantId: string;
  routeSetId: string;
