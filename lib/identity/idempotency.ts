@@ -271,8 +271,11 @@ export function buildReplayResponse(record: IdempotencyRecord, requestId?: strin
  `buildReplayResponse: 记录非 completed（state=${record.processingState as string}）`,
  );
  }
+ const status = record.httpStatus;
+ if (status === null || !Number.isInteger(status) || status < 100 || status > 599) {
+ throw new Error("buildReplayResponse: completed 记录 HTTP status 非法");
+ }
  const rid = requestId ?? generateRequestId();
- const status = record.httpStatus ?? 200;
  const headers: Record<string, string> = { "x-request-id": rid };
  if (record.responseRef) {
  headers["x-idempotent-resource-ref"] = record.responseRef;
@@ -285,6 +288,14 @@ export function buildReplayResponse(record: IdempotencyRecord, requestId?: strin
  body = JSON.parse(record.responseRedactedJson);
  } catch {
  throw new Error("buildReplayResponse: completed 记录响应损坏");
+ }
+ if (
+ typeof body !== "object" ||
+ body === null ||
+ Array.isArray(body) ||
+ Object.keys(body).length === 0
+ ) {
+ throw new Error("buildReplayResponse: completed 记录响应不是非空 JSON object");
  }
  return Response.json(body, { status, headers });
 }

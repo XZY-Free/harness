@@ -748,6 +748,25 @@ describe("buildReplayResponse", () => {
     expect(() => buildReplayResponse(record)).toThrow("completed 记录响应损坏");
   });
 
+  it.each([
+    ["null", "null"],
+    ["数组", "[]"],
+    ["空对象", "{}"],
+  ])("completed + %s responseRedactedJson → fail-closed", (_label, responseRedactedJson) => {
+    const record = buildCompletedRecord({ responseRedactedJson });
+    expect(() => buildReplayResponse(record)).toThrow("completed 记录响应不是非空 JSON object");
+  });
+
+  it("completed + 缺失 httpStatus → fail-closed", () => {
+    const record = buildCompletedRecord({ httpStatus: null });
+    expect(() => buildReplayResponse(record)).toThrow("completed 记录 HTTP status 非法");
+  });
+
+  it.each([99, 600, 200.5])("completed + 非法 httpStatus=%s → fail-closed", (httpStatus) => {
+    const record = buildCompletedRecord({ httpStatus });
+    expect(() => buildReplayResponse(record)).toThrow("completed 记录 HTTP status 非法");
+  });
+
   it("非 completed 记录抛错", () => {
     const record = buildCompletedRecord({ processingState: "processing" });
     expect(() => buildReplayResponse(record)).toThrow(/非 completed/);
