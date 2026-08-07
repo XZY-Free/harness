@@ -205,6 +205,15 @@ export const RevisionExecutionEligibilityPolicy = {
  });
  }
 
+ // 3b. Agent Revision 发布状态
+ if (snapshot.agentRevisionState !== "published") {
+  errors.push({
+  dimension: "agent_publication",
+  code: "agent_revision_not_published",
+  message: `AgentRevision ${snapshot.agentRevisionId} 状态为 ${snapshot.agentRevisionState}，要求 published`,
+  });
+ }
+
  // 4. Runtime Publication Active
  if (!snapshot.runtimePublication) {
  errors.push({
@@ -257,6 +266,15 @@ export const RevisionExecutionEligibilityPolicy = {
  code: "runtime_not_active",
  message: `Runtime 生命周期状态为 ${snapshot.runtimeLifecycleState}，要求 active`,
  });
+ }
+
+ // 7b. Runtime Revision 发布状态
+ if (snapshot.runtimeRevisionState !== "published") {
+  errors.push({
+  dimension: "runtime_publication",
+  code: "runtime_revision_not_published",
+  message: `RuntimeRevision ${snapshot.runtimeRevisionId} 状态为 ${snapshot.runtimeRevisionState}，要求 published`,
+  });
  }
 
  // 8. Capability 兼容

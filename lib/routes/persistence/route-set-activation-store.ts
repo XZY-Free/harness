@@ -9,6 +9,7 @@ import type {
  RouteActivationRecord,
  RouteRevisionRecord,
 } from "@/lib/routes/persistence/route-revision-record";
+import type { DbOrTx } from "@/lib/db/client";
 
 // ─── 类型 ──────────────────────────────────────────────────
 
@@ -76,6 +77,10 @@ export interface DesiredRoute {
 // ─── Session 接口 ─────────────────────────────────────────
 
 export interface RouteSetActivationSession {
+ // ─── 事务连接 ──────────────────────────────────────────
+ /** §04: 暴露事务级 DB 连接，确保所有资格读取在同一事务内。 */
+ getDbOrTx(): DbOrTx;
+
  // ─── 读取 ──────────────────────────────────────────────
  /** : 按 tenantId + routeSetId 锁定 RouteSet（跨租户隔离）。 */
  lockRouteSet(params: { tenantId: string; routeSetId: string }): Promise<RouteSetRow | null>;

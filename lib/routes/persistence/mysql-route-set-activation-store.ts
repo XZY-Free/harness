@@ -44,6 +44,11 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
  transaction: (operation) =>
  db.transaction(async (tx) =>
  operation({
+ /** §04: 事务级 DB 连接 — 所有资格读取必须在同一事务。 */
+ getDbOrTx() {
+  return tx;
+ },
+
  async lockRouteSet(params) {
  const [row] = await tx
  .select()

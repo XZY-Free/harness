@@ -11,7 +11,6 @@ import { randomUUID } from "node:crypto";
 import { RevisionExecutionEligibilityPolicy, extractRequiredCapabilities } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import type { RevisionExecutionEvidenceReader } from "@/lib/control-plane/application/revision-execution-evidence-reader";
 import { createMySqlRevisionExecutionEvidenceReader } from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
-import { db } from "@/lib/db/client";
 import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { eq } from "drizzle-orm";
 import {
@@ -99,14 +98,16 @@ export interface ActivateRouteSetCommand {
 
 export function createActivateRouteSet(dependencies: {
  store: RouteSetActivationStore;
- /** §03: 可选证据 Reader 注入（默认使用 MySQL 实现，测试可注入 mock）。 */
- evidenceReader?: RevisionExecutionEvidenceReader;
+ /**
+  * §04: 可选证据 Reader 注入（仅用于测试 mock）。
+  * 生产路径始终从事务内创建 MySQL Evidence Reader。
+  */
+ evidenceReaderForTest?: RevisionExecutionEvidenceReader;
  now?: () => Date;
  newId?: () => string;
 }) {
  const now = dependencies.now ?? (() => new Date());
  const newId = dependencies.newId ?? randomUUID;
- const evidenceReader = dependencies.evidenceReader ?? createMySqlRevisionExecutionEvidenceReader({ db });
 
  return async function activateRouteSet(
  command: ActivateRouteSetCommand,
@@ -117,6 +118,9 @@ export function createActivateRouteSet(dependencies: {
  }
 
  return dependencies.store.transaction(async (session) => {
+ // §04: 事务级 Evidence Reader — 生产路径从事务内创建，测试可注入 mock
+ const evidenceReader: RevisionExecutionEvidenceReader =
+  dependencies.evidenceReaderForTest ?? createMySqlRevisionExecutionEvidenceReader({ db: session.getDbOrTx() });
  // : 幂等重放 — 先按 routeSetId+idempotencyKey 查找已完成激活
  const existingIdempotent = await session.findIdempotentRouteSetActivation({
  routeSetId: command.routeSetId,
@@ -184,8 +188,8 @@ export function createActivateRouteSet(dependencies: {
  policyRevisionId: desired.policyRevisionId ?? null,
  });
  // §03: 使用统一 RevisionExecutionEligibilityPolicy（fail-closed，无降级路径）
- // 从 DB 读取完整 agentRevision 行以获取 agentInterfaceRequirementsJson
- const [fullAgentRevision] = await db
+ // §04: 从同一事务读取 agentInterfaceRequirementsJson
+ const [fullAgentRevision] = await session.getDbOrTx()
  .select({ agentInterfaceRequirementsJson: agentRevisionTable.agentInterfaceRequirementsJson })
  .from(agentRevisionTable)
  .where(eq(agentRevisionTable.id, desired.agentRevisionId))
