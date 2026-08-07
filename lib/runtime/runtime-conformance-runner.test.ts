@@ -55,25 +55,25 @@ import {
   type ConformanceCaseResult,
   MANDATORY_GATE_CASES,
   validateConformanceGate,
-} from "@/lib/runtimes/domain/runtime-conformance";
+} from "@/lib/runtime/domain/runtime-conformance";
 import {
   buildDsseConformanceEnvelope,
   generateTestRunnerKey,
-} from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
+} from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import {
   createRuntime,
   getRuntimeById,
   getRuntimeByKey,
-} from "@/lib/runtimes/persistence/runtime-queries";
+} from "@/lib/runtime/persistence/runtime-queries";
 import {
   RuntimePublicationVersionConflictError,
   RuntimeRevisionNotFoundError,
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
-} from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { publishRuntimeRevision } from "@/lib/runtimes/test-support/attempt-runtime-publication-without-trusted-run";
-import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
-import { RuntimeConformanceRunInvalidError } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
+} from "@/lib/runtime/persistence/runtime-revision-queries";
+import { publishRuntimeRevision } from "@/lib/runtime/test-support/attempt-runtime-publication-without-trusted-run";
+import { withdrawRuntimeRevision } from "@/lib/runtime/test-support/withdraw-runtime-revision";
+import { RuntimeConformanceRunInvalidError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-api.test.ts 一致）。

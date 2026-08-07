@@ -8,8 +8,8 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { listEvaluationRunsByTenant } from "@/lib/v11/evaluation/evaluation-queries";
+} from "@/lib/admin/route-helpers";
+import { listEvaluationRunsByTenant } from "@/lib/evaluation/evaluation-queries";
 /**
  * GET /admin/api/v1/evaluation-runs — 列出租户内所有 EvaluationRun（S11-W06）。
  *

@@ -5,9 +5,9 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { listObservationsByTrace } from "@/lib/v11/observability/observation-queries";
-import { getTraceById } from "@/lib/v11/observability/trace-queries";
+} from "@/lib/admin/route-helpers";
+import { listObservationsByTrace } from "@/lib/observability/observation-queries";
+import { getTraceById } from "@/lib/observability/trace-queries";
 /**
  * GET /admin/api/v1/traces/{trace_id}/observations — 列出 Trace 下所有 Observation（S11-W05）。
  *

@@ -25,7 +25,7 @@ import * as userActionRequestSchemaTable from "@/lib/persistence/schema/user-act
 import * as workspaceSchemaTable from "@/lib/persistence/schema/workspace";
 import * as publicationRecordSchema from "@/lib/publications/persistence/publication-record";
 import * as routeRevisionSchema from "@/lib/routes/persistence/route-revision-record";
-import * as runtimeConformanceRunSchema from "@/lib/runtimes/persistence/runtime-conformance-run-record";
+import * as runtimeConformanceRunSchema from "@/lib/runtime/persistence/runtime-conformance-run-record";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import * as schema from "./schema";

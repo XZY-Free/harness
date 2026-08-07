@@ -91,35 +91,35 @@ import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-r
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
-import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
-import { createDraftRuntimeRevision, getRuntimeRevisionById } from "@/lib/runtimes/persistence/runtime-revision-queries";
+import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
+import { createDraftRuntimeRevision, getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
-} from "@/lib/runtimes/persistence/runtime-conformance-run-record";
-import { mysqlRuntimeConformanceRunStore } from "@/lib/runtimes/persistence/mysql-runtime-conformance-run-store";
-import { createRecordRuntimeConformanceRun } from "@/lib/runtimes/application/record-runtime-conformance-run";
+} from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
+import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import {
   ALL_CONFORMANCE_CASES,
   type RuntimeConformanceReport,
-} from "@/lib/runtimes/domain/runtime-conformance-run";
-import type { ConformanceEligibilitySnapshot } from "@/lib/runtimes/domain/runtime-conformance-eligibility";
+} from "@/lib/runtime/domain/runtime-conformance-run";
+import type { ConformanceEligibilitySnapshot } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 import {
   buildDsseConformanceEnvelope,
   generateTestRunnerKey,
-} from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
-import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
-import { createRegistryFromLegacyConfig } from "@/lib/runtimes/domain/runner-signing-identity";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
-import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
+} from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
+import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
+import { createRegistryFromLegacyConfig } from "@/lib/runtime/domain/runner-signing-identity";
+import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
+import { withdrawRuntimeRevision } from "@/lib/runtime/test-support/withdraw-runtime-revision";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
-import { createHostedProvisioningSaga } from "@/lib/runtimes/application/hosted-provisioning-saga";
-import { createRequestHostedProvisioning } from "@/lib/runtimes/application/request-hosted-provisioning";
-import { validateAgentRevisionForProvisioning } from "@/lib/runtimes/application/validate-hosted-provisioning-revision";
-import { createMysqlHostedGateways } from "@/lib/runtimes/infrastructure/mysql-hosted-gateways";
-import { mysqlHostedProvisioningRequestStore } from "@/lib/runtimes/persistence/mysql-hosted-provisioning-request-store";
-import { hostedProvisioningRequestTable } from "@/lib/runtimes/persistence/hosted-provisioning-request-record";
+import { createHostedProvisioningSaga } from "@/lib/runtime/provisioning/hosted-provisioning-saga";
+import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
+import { validateAgentRevisionForProvisioning } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
+import { createMysqlHostedGateways } from "@/lib/runtime/infrastructure/mysql-hosted-gateways";
+import { mysqlHostedProvisioningRequestStore } from "@/lib/runtime/persistence/mysql-hosted-provisioning-request-store";
+import { hostedProvisioningRequestTable } from "@/lib/runtime/persistence/hosted-provisioning-request-record";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { eq, inArray, sql } from "drizzle-orm";

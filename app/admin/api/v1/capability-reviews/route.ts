@@ -38,17 +38,17 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 import {
   type RiskDiffResult,
   type RiskMetadata,
   compareSchemaRevisions,
-} from "@/lib/v11/capability/risk-diff";
+} from "@/lib/capability/risk-diff";
 import {
   CapabilityReviewValidationError,
   createCapabilityReview,
   listPendingReviews,
-} from "@/lib/v11/capability/risk-review-queries";
+} from "@/lib/capability/risk-review-queries";
 
 export const dynamic = "force-dynamic";
 

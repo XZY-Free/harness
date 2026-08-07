@@ -33,12 +33,12 @@ import {
  type EnvironmentDefinition,
  type EnvironmentLease,
 } from "@/lib/persistence/schema/environment";
-import type { ClientEnvironmentAvailability } from "@/lib/v11/client/types";
+import type { ClientEnvironmentAvailability } from "@/lib/client/types";
 import {
  getActiveExecutionOwnership,
  getEnvironmentDefinitionById,
  listEnvironmentLeasesByInvocation,
-} from "@/lib/v11/environment/environment-queries";
+} from "@/lib/environment/environment-queries";
 import {
  DEVICE_HEARTBEAT_TIMEOUT_MS,
  isDeviceHeartbeatStale,

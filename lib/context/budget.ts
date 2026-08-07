@@ -1,261 +1,299 @@
-import { contextConfig } from "@/lib/config";
-import type { ChatMessage } from "@/lib/types";
-
 /**
- * a Stage B：预算估算与阈值判定。
+ * V11 Context 预算策略（阶段 7 S07-C01）。
  *
- * 关键不变式：`resolveTokenBudget` 在无 per-model contextWindow 配置时返回 `Infinity`，
- * `shouldCompress` 对 `Infinity` 预算恒为 false → **永不压缩 → 零回归**。
- * 即使没配 `SNOW_CONTEXT_WINDOWS`，也不破坏现有 chat 行为。
+ * 事实源：../v11-agentkit-platform/03-context-memory-and-knowledge.md §5（优先级与预算）。
  *
- * S1 修复（03-升级真 tokenizer）：原 CJK 友好的 char 估算（CJK=1, ASCII=char/4）只是
- * 过渡方案，对中英混排/代码仍偏差。改用 `gpt-tokenizer`（o200k_base，GPT-4o 编码，纯 JS BPE）
- * 做真实 token 计数；tokenizer 不可用或异常时回退到 CJK 估算（fail-soft，不阻断）。
- * o200k_base 对 GLM/Qwen/Kimi 等中文模型略有偏差但远优于 char/4。
- */
-
-/** CJK 字符范围：中日韩统一表意文字 + 扩展 A + 全角标点/符号。tokenizer 不可用时的回退估算用。 */
-const CJK_RANGES: Array<[number, number]> = [
- [0x3000, 0x303f], // CJK 标点和符号
- [0x3040, 0x309f], // 平假名
- [0x30a0, 0x30ff], // 片假名
- [0x3400, 0x4dbf], // CJK 扩展 A
- [0x4e00, 0x9fff], // CJK 统一表意文字（基本区）
- [0xf900, 0xfaff], // CJK 兼容表意文字
- [0xff00, 0xffef], // 全角形式
-];
-
-function isCjk(code: number): boolean {
- for (const [lo, hi] of CJK_RANGES) {
- if (code >= lo && code <= hi) return true;
- }
- return false;
-}
-
-/** CJK 友好的回退估算（tokenizer 不可用时）：CJK=1 token/字符，ASCII=char/4。 */
-function estimateTokensFallback(text: string): number {
- if (text.length === 0) return 0;
- let cjkCount = 0;
- let otherCount = 0;
- for (const ch of text) {
- if (isCjk(ch.codePointAt(0) ?? 0)) cjkCount++;
- else otherCount++;
- }
- return Math.ceil(cjkCount + otherCount / 4);
-}
-
-// ─── 真 tokenizer（懒加载 + 缓存） ───────────────────────────
-let encodeFn: ((text: string) => number[]) | null | undefined;
-/** 文本 → token 数缓存（上限 512 条，超出清空避免无界增长）。 */
-const tokenCache = new Map<string, number>();
-const TOKEN_CACHE_MAX = 512;
-
-async function loadTokenizer(): Promise<((text: string) => number[]) | null> {
- if (encodeFn !== undefined) return encodeFn ? (t) => encodeFn?.(t) ?? [] : null;
- try {
- const mod = await import("gpt-tokenizer");
- encodeFn = (text: string) => mod.encode(text);
- return (t: string) => encodeFn?.(t) ?? [];
- } catch {
- // gpt-tokenizer 不可用 → 返回 null 供调用方走 CJK 估算回退
- encodeFn = null;
- return null;
- }
-}
-
-/**
- * 预热 tokenizer。
+ * 平台先为模型输出和 Tool 结果预留空间，再按优先级顺序选择 Fragment：
+ * 1. 平台强制规则和当前 Agent 指令（TIER_MANDATORY）。
+ * 2. 当前用户要求与运行中引导（TIER_MANDATORY）。
+ * 3. 已确认约束、决定、Goal 和未完成事项（TIER_MANDATORY）。
+ * 4. 最近原始对话与直接相关结果（TIER_RECENT）。
+ * 5. 任务相关的 Workspace、Knowledge、Memory 和 Skill（TIER_RELATED）。
+ * 6. Tool 结果摘要与 Child Thread 结果（TIER_SUMMARY）。
+ * 7. 更早历史的压缩摘要（TIER_HISTORY）。
  *
- * 装配路径（buildContextPackage）入口调一次，加载 gpt-tokenizer 后，后续 sync `estimateTokens`/
- * `estimateMessagesTokens` 自动用真 BPE 计数（见 estimateTokens 的 `if (encodeFn)` 分支）。
- * 避免把核心路径每个 estimateTokens 调用都改成 async。失败静默回退到 CJK 估算（fail-soft）。
+ * 预算不足时（§5）：
+ * - 先删重复日志、无关进度和可重新查询内容。
+ * - 保留 ToolCall 与 ToolResult 配对。
+ * - 把长结果转为结构化摘要和引用。
+ * - 记录被排除内容及原因。
+ * - 如果关键内容（TIER_MANDATORY）仍无法容纳，明确失败或换用允许的长上下文模型，
+ * 不能静默丢掉约束。
  */
-export async function warmupTokenizer(): Promise<void> {
- await loadTokenizer();
-}
+import {
+ type ContextFragment,
+ type ExcludedFragment,
+ type ExclusionReasonCode,
+ FRAGMENT_PRIORITY_TIERS,
+ type FragmentPriorityTier,
+ assertContextFragment,
+} from "@/lib/context/fragment";
+
+// ─── 预算配置 ───────────────────────────────────────────────
 
 /**
- * 真 token 计数（异步，经 gpt-tokenizer o200k_base）。失败回退 CJK 估算。
- * 带 token 缓存。供异步路径（package-builder 装配前估算）使用。
- */
-export async function countTokens(text: string): Promise<number> {
- if (text.length === 0) return 0;
- const cached = tokenCache.get(text);
- if (cached !== undefined) return cached;
- const enc = await loadTokenizer();
- let n: number;
- if (enc === null) {
- // tokenizer 不可用，走 CJK 估算回退
- n = estimateTokensFallback(text);
- } else {
- try {
- const tokens = enc(text);
- n = tokens.length;
- } catch {
- n = estimateTokensFallback(text);
- }
- }
- if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear();
- tokenCache.set(text, n);
- return n;
-}
-
-/**
- * 同步 token 估算（CJK 友好回退）。
+ * Context 预算配置。
  *
- * 保留同步入口供不宜 await 的路径（如 shouldCompress 判定）。异步路径优先用 `countTokens`。
- * 若已加载过 tokenizer，用之；否则用 CJK 回退（不阻塞）。
- */
-export function estimateTokens(text: string): number {
- if (text.length === 0) return 0;
- if (encodeFn) {
- try {
- return encodeFn(text).length;
- } catch {
- // fallthrough to fallback
- }
- }
- return estimateTokensFallback(text);
-}
-
-/**
- * 解析 model 的 token 预算。
- * 查 `contextConfig.contextWindowByModel`；未配置或非法 → `Infinity`（永不压缩）。
- */
-export function resolveTokenBudget(model: string): number {
- const windows = contextConfig.contextWindowByModel;
- const win = windows[model];
- return typeof win === "number" && Number.isFinite(win) && win > 0
- ? win
- : Number.POSITIVE_INFINITY;
-}
-
-/**
- * 判定是否应触发压缩：`estimatedTokens > budget * threshold`。
- * `budget` 为 `Infinity`（无配置）时恒返回 false。
- */
-export function shouldCompress(
- estimatedTokens: number,
- budget: number,
- threshold: number = contextConfig.budgetThreshold,
-): boolean {
- if (!Number.isFinite(budget) || budget <= 0) return false;
- return estimatedTokens > budget * threshold;
-}
-
-/**
- * 估算一条消息内单个 part 的 token 数。
+ * - totalBudget：本次模型上下文 Token 总预算。
+ * - modelOutputReserve：为模型输出预留的 Token（不分配给输入 Fragment）。
+ * - toolResultReserve：为 Tool 结果预留的 Token（保证 ToolResult 有空间）。
  *
- * 原对非文本 part 用 `JSON.stringify(whole part)` 高估（含 type/toolCallId/
- * state 等元数据）。改为按 part 语义提取有效内容：
- * - text part → 文本本身
- * - tool-call part → toolName + JSON(input)（input 是模型产出的真实负载）
- * - tool-result part → JSON(output)（output 是工具返回的真实负载）
- * - 其他 → 空串（元数据不计入，避免高估）
- * 每条 tool part 额外 +8 token 固定开销（近似 AI SDK 的 part 框架开销）。
+ * 可用输入预算 = totalBudget - modelOutputReserve。
+ * ToolResult 保留空间从可用输入预算中划出，保证最近 ToolResult 优先容纳。
  */
-function estimatePartTokens(part: unknown): number {
- if (!part || typeof part !== "object") return 0;
- const p = part as {
- type?: string;
- text?: unknown;
- toolName?: unknown;
- input?: unknown;
- output?: unknown;
- };
- if (p.type === "text" && typeof p.text === "string") {
- return estimateTokens(p.text);
- }
- if (p.type === "tool-call") {
- const toolName = typeof p.toolName === "string" ? p.toolName : "";
- const inputStr = p.input !== undefined ? JSON.stringify(p.input) : "";
- return estimateTokens(`${toolName} ${inputStr}`) + 8;
- }
- if (p.type === "tool-result") {
- const outputStr = p.output !== undefined ? JSON.stringify(p.output) : "";
- return estimateTokens(outputStr) + 8;
- }
- // 其他 part（data-* / reasoning 等）元数据不计入，避免高估
- return 0;
+export interface ContextBudgetConfig {
+ totalBudget: number;
+ modelOutputReserve: number;
+ toolResultReserve: number;
 }
 
-/** 估算一组 UIMessage 的总 token（按 parts 有效内容求和）。 */
-export function estimateMessagesTokens(messages: ChatMessage[]): number {
- return messages.reduce(
- (sum, m) => sum + (m.parts ?? []).reduce((s, p) => s + estimatePartTokens(p), 0),
- 0,
- );
-}
-
-/** 异步版本：用真 tokenizer 计数（装配前精确估算用）。 */
-export async function countMessagesTokens(messages: ChatMessage[]): Promise<number> {
- let total = 0;
- for (const m of messages) {
- for (const p of m.parts ?? []) {
- if (!p || typeof p !== "object") continue;
- const part = p as {
- type?: string;
- text?: unknown;
- toolName?: unknown;
- input?: unknown;
- output?: unknown;
- };
- if (part.type === "text" && typeof part.text === "string") {
- total += await countTokens(part.text);
- } else if (part.type === "tool-call") {
- const toolName = typeof part.toolName === "string" ? part.toolName : "";
- const inputStr = part.input !== undefined ? JSON.stringify(part.input) : "";
- total += (await countTokens(`${toolName} ${inputStr}`)) + 8;
- } else if (part.type === "tool-result") {
- const outputStr = part.output !== undefined ? JSON.stringify(part.output) : "";
- total += (await countTokens(outputStr)) + 8;
- }
- }
- }
- return total;
-}
-
-/**
- * 上下文窗口可视化状态（供 Studio 实时展示占用/阈值）。
- *
- * 纯函数：接收消息 + model，返回 {budget, used, thresholds, loadLevel}。
- * budget=Infinity（未配 contextWindow）时 loadLevel=unknown，used 仍返回估算值。
- * loadLevel：normal(<soft) / soft(soft..budget) / hard(>budget) / critical(>critical)。
- */
-export type ContextWindowStatus = {
- budget: number;
- used: number;
- softThreshold: number;
- budgetThreshold: number;
- criticalThreshold: number;
- loadLevel: "normal" | "soft" | "hard" | "critical" | "unknown";
- configured: boolean;
+/** 默认预算配置（可由调用方覆盖）。 */
+export const DEFAULT_BUDGET_CONFIG: ContextBudgetConfig = {
+ totalBudget: 128_000,
+ modelOutputReserve: 8_000,
+ toolResultReserve: 16_000,
 };
 
-export async function computeContextWindowStatus(
- messages: ChatMessage[],
- model: string,
-): Promise<ContextWindowStatus> {
- await warmupTokenizer();
- const budget = resolveTokenBudget(model);
- const used = await countMessagesTokens(messages);
- const soft = contextConfig.softThreshold;
- const hard = contextConfig.budgetThreshold;
- const crit = contextConfig.criticalThreshold;
- const configured = Number.isFinite(budget);
- let loadLevel: ContextWindowStatus["loadLevel"] = "unknown";
- if (configured) {
- const ratio = used / budget;
- loadLevel =
- ratio >= crit ? "critical" : ratio >= hard ? "hard" : ratio >= soft ? "soft" : "normal";
- }
- return {
- budget,
- used,
- softThreshold: soft,
- budgetThreshold: hard,
- criticalThreshold: crit,
- loadLevel,
- configured,
+// ─── 预算选择结果 ───────────────────────────────────────────
+
+/**
+ * 预算选择结果。
+ *
+ * - selected：选入视图的 Fragment（按优先级与插入顺序）。
+ * - excluded：被排除的 Fragment 及原因。
+ * - totalInputTokens：选入 Fragment 的 Token 总和。
+ * - failureReason：关键内容无法容纳时的失败原因（非空表示应显式失败或切换模型）。
+ */
+export interface BudgetSelectionResult {
+ selected: ContextFragment[];
+ excluded: ExcludedFragment[];
+ totalInputTokens: number;
+ /** 可用输入预算（totalBudget - modelOutputReserve）。 */
+ availableInputBudget: number;
+ /** 关键内容无法容纳时的失败原因；非空调用方应显式失败。 */
+ failureReason: string | null;
+}
+
+// ─── 内部：去重 key ─────────────────────────────────────────
+
+/**
+ * 计算去重 key：相同 contentHash 视为重复内容。
+ * 不同来源但相同正文视为重复，保留首个。
+ */
+function dedupKey(fragment: ContextFragment): string {
+ return fragment.contentHash;
+}
+
+// ─── 预算选择 ───────────────────────────────────────────────
+
+/**
+ * 按预算与优先级选择 Fragment（§5）。
+ *
+ * 流程：
+ * 1. 计算可用输入预算 = totalBudget - modelOutputReserve。
+ * 2. 按优先级层级稳定排序（同层保持插入顺序）。
+ * 3. 去重：相同 contentHash 只保留首个，其余标记 duplicate 排除。
+ * 4. 按优先级由高到低依次选入：
+ * - TIER_MANDATORY 必须容纳；若超出预算 → failureReason = mandatory_overflow。
+ * - TIER_RECENT 的 ToolResult 优先使用 toolResultReserve 空间。
+ * - 低优先级（TIER_SUMMARY/TIER_HISTORY）在预算不足时优先排除（requeryable/low_priority）。
+ * 5. 剩余预算耗尽后，未选入的按 budget_exhausted 排除。
+ *
+ * 关键不变量：
+ * - 不静默丢弃 TIER_MANDATORY（约束/规则/当前用户要求）。
+ * - failureReason 非空时调用方应显式失败或切换长上下文模型。
+ *
+ * @param candidates 候选 Fragment（已由 source resolvers 产生）。
+ * @param config 预算配置；默认 DEFAULT_BUDGET_CONFIG。
+ */
+export function selectFragmentsByBudget(
+ candidates: readonly ContextFragment[],
+ config: ContextBudgetConfig = DEFAULT_BUDGET_CONFIG,
+): BudgetSelectionResult {
+ const availableInputBudget = Math.max(0, config.totalBudget - config.modelOutputReserve);
+ const reservedForToolResults = Math.min(
+ Math.max(0, config.toolResultReserve),
+ availableInputBudget,
+ );
+ const regularInputBudget = availableInputBudget - reservedForToolResults;
+ const selected: ContextFragment[] = [];
+ const excluded: ExcludedFragment[] = [];
+ const seenHashes = new Set<string>();
+ let totalInputTokens = 0;
+ let regularTokens = 0;
+ let toolReserveTokens = 0;
+ let failureReason: string | null = null;
+
+ for (const fragment of candidates) assertContextFragment(fragment);
+
+ type SelectionUnit = {
+ fragments: ContextFragment[];
+ priorityTier: FragmentPriorityTier;
+ operationId?: string;
  };
+ const toolGroups = new Map<string, ContextFragment[]>();
+ const units: SelectionUnit[] = [];
+ for (const fragment of candidates) {
+ if (
+ fragment.kind === "tool" &&
+ (fragment.sourceRef.type === "tool_call" || fragment.sourceRef.type === "tool_result")
+ ) {
+ const group = toolGroups.get(fragment.sourceRef.id) ?? [];
+ group.push(fragment);
+ toolGroups.set(fragment.sourceRef.id, group);
+ } else {
+ units.push({ fragments: [fragment], priorityTier: fragment.priorityTier });
+ }
+ }
+ for (const [operationId, fragments] of toolGroups) {
+ const hasCall = fragments.some((fragment) => fragment.sourceRef.type === "tool_call");
+ const hasResult = fragments.some((fragment) => fragment.sourceRef.type === "tool_result");
+ if (!hasCall || !hasResult) {
+ for (const fragment of fragments) {
+ excluded.push(
+ toExcluded(
+ fragment,
+ "tool_pair_incomplete",
+ `Tool operation ${operationId} 缺少 ${hasCall ? "tool_result" : "tool_call"}`,
+ ),
+ );
+ }
+ continue;
+ }
+ units.push({
+ fragments,
+ priorityTier: Math.min(
+ ...fragments.map((fragment) => fragment.priorityTier),
+ ) as FragmentPriorityTier,
+ operationId,
+ });
+ }
+ units.sort((a, b) => a.priorityTier - b.priorityTier);
+
+ for (const unit of units) {
+ const duplicate = unit.fragments.find((fragment) => seenHashes.has(dedupKey(fragment)));
+ if (duplicate) {
+ for (const fragment of unit.fragments) {
+ excluded.push(toExcluded(fragment, "duplicate", "与已选入 Fragment 内容重复"));
+ }
+ continue;
+ }
+
+ const resultTokens = unit.fragments
+ .filter((fragment) => fragment.sourceRef.type === "tool_result")
+ .reduce((sum, fragment) => sum + fragment.tokenEstimate, 0);
+ const nonResultTokens =
+ unit.fragments.reduce((sum, fragment) => sum + fragment.tokenEstimate, 0) - resultTokens;
+ const resultReserveAvailable = reservedForToolResults - toolReserveTokens;
+ const reserveUse = Math.min(resultTokens, resultReserveAvailable);
+ const requiredRegular = nonResultTokens + resultTokens - reserveUse;
+ const regularAvailable = regularInputBudget - regularTokens;
+ const mandatory = unit.priorityTier === FRAGMENT_PRIORITY_TIERS.TIER_MANDATORY;
+
+ if (requiredRegular > regularAvailable) {
+ const reasonCode: ExclusionReasonCode = mandatory
+ ? "mandatory_overflow"
+ : unit.priorityTier >= FRAGMENT_PRIORITY_TIERS.TIER_SUMMARY
+ ? "low_priority"
+ : unit.priorityTier === FRAGMENT_PRIORITY_TIERS.TIER_RELATED
+ ? "requeryable"
+ : "budget_exhausted";
+ const pairDetail = unit.operationId
+ ? `Tool operation ${unit.operationId} 必须成组选择，预算不足`
+ : mandatory
+ ? "关键内容超出普通输入预算"
+ : "输入预算耗尽";
+ for (const fragment of unit.fragments) {
+ excluded.push(toExcluded(fragment, reasonCode, pairDetail));
+ }
+ if (mandatory) {
+ failureReason = `关键内容 Token 超出普通输入预算 ${regularInputBudget}，不能静默丢弃约束`;
+ }
+ continue;
+ }
+
+ for (const fragment of unit.fragments) {
+ selected.push(fragment);
+ seenHashes.add(dedupKey(fragment));
+ totalInputTokens += fragment.tokenEstimate;
+ }
+ regularTokens += requiredRegular;
+ toolReserveTokens += reserveUse;
+ }
+
+ return {
+ selected,
+ excluded,
+ totalInputTokens,
+ availableInputBudget,
+ failureReason,
+ };
+}
+
+// ─── 内部工具 ───────────────────────────────────────────────
+
+function toExcluded(
+ frag: ContextFragment,
+ reasonCode: ExclusionReasonCode,
+ detail?: string,
+): ExcludedFragment {
+ return {
+ id: frag.id,
+ kind: frag.kind,
+ contentHash: frag.contentHash,
+ tokenEstimate: frag.tokenEstimate,
+ priorityTier: frag.priorityTier,
+ reasonCode,
+ detail,
+ };
+}
+
+// ─── ToolCall/ToolResult 配对校验 ───────────────────────────
+
+/**
+ * 校验选入 Fragment 中 ToolCall 与 ToolResult 是否配对（§5：保留 ToolCall 与 ToolResult 配对）。
+ *
+ * 规则：每个 tool_call sourceRef 应有对应 tool_result（同 operationId/source id 配对）。
+ * 若 ToolCall 选入但对应 ToolResult 被排除，返回需要补回的 ToolResult fragment id 列表。
+ *
+ * 本函数仅做检测；调用方决定是否从 excluded 中补回（预算允许时）。
+ *
+ * @returns unpairedToolCallIds：选入了 ToolCall 但缺少配对 ToolResult 的来源 id。
+ */
+export function detectUnpairedToolResults(
+ selected: readonly ContextFragment[],
+ excluded: readonly ExcludedFragment[],
+): {
+ unpairedToolCallSourceIds: string[];
+ recoverableToolResultFragmentIds: string[];
+} {
+ const toolCalls = selected.filter((f) => f.kind === "tool" && f.sourceRef.type === "tool_call");
+ const toolResults = selected.filter(
+ (f) => f.kind === "tool" && f.sourceRef.type === "tool_result",
+ );
+ const pairedResultIds = new Set(toolResults.map((r) => r.sourceRef.id));
+
+ const unpairedToolCallSourceIds: string[] = [];
+ for (const call of toolCalls) {
+ // 约定：tool_call 的 sourceRef.id 与对应 tool_result 的 sourceRef.id 相同（operationId）。
+ if (!pairedResultIds.has(call.sourceRef.id)) {
+ unpairedToolCallSourceIds.push(call.sourceRef.id);
+ }
+ }
+
+ // 从 excluded 中找出可补回的 ToolResult（对应未配对的 tool_call）
+ const recoverableToolResultFragmentIds: string[] = [];
+ if (unpairedToolCallSourceIds.length > 0) {
+ const unpairedSet = new Set(unpairedToolCallSourceIds);
+ for (const ex of excluded) {
+ // excluded 是 ExcludedFragment，不含 sourceRef；通过 id 关联回原 fragment 由调用方处理。
+ // 此处仅返回 excluded 中 kind=tool 的 fragment id，调用方按需匹配。
+ if (ex.kind === "tool") {
+ recoverableToolResultFragmentIds.push(ex.id);
+ }
+ }
+ void unpairedSet;
+ }
+
+ return { unpairedToolCallSourceIds, recoverableToolResultFragmentIds };
 }

@@ -28,7 +28,7 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET / PATCH /admin/api/v1/skills/{skill_id} — Skill 单资源（阶段 6 S06-C01）。
  *
@@ -61,7 +61,7 @@ import {
   getCurrentSkillVersion,
   getSkillById,
   updateSkill,
-} from "@/lib/v11/capability/skill-queries";
+} from "@/lib/capability/skill-queries";
 
 export const dynamic = "force-dynamic";
 

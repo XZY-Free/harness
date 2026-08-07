@@ -4,9 +4,9 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { getJobEvents } from "@/lib/v11/job/job-event-queries";
-import { getJobById } from "@/lib/v11/job/job-queries";
+} from "@/lib/admin/route-helpers";
+import { getJobEvents } from "@/lib/job/job-event-queries";
+import { getJobById } from "@/lib/job/job-queries";
 /**
  * GET /admin/api/v1/jobs/{job_id}/events — 列出 Job 事件流（S11-W04）。
  *

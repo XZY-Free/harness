@@ -70,13 +70,13 @@ import { getPublicationRecordBySubject } from "@/lib/publications/persistence/pu
 import {
   type ConformanceCaseResult,
   MANDATORY_GATE_CASES,
-} from "@/lib/runtimes/domain/runtime-conformance";
-import { RuntimeConformanceRunInvalidError } from "@/lib/runtimes/domain/runtime-revision-publication-policy";
-import { RuntimeLifecycleError, createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
+} from "@/lib/runtime/domain/runtime-conformance";
+import { RuntimeConformanceRunInvalidError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
+import { RuntimeLifecycleError, createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import {
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
-} from "@/lib/runtimes/persistence/runtime-revision-queries";
+} from "@/lib/runtime/persistence/runtime-revision-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {

@@ -9,7 +9,7 @@
 
 import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
 import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
-import type { ConformanceEligibilitySnapshot } from "@/lib/runtimes/domain/runtime-conformance-eligibility";
+import type { ConformanceEligibilitySnapshot } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 
 // ─── Policy Revision Snapshot ────────────────────────────
 

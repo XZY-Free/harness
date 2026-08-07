@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getObservationById } from "@/lib/v11/observability/observation-queries";
+} from "@/lib/admin/route-helpers";
+import { getObservationById } from "@/lib/observability/observation-queries";
 /**
  * GET /admin/api/v1/observations/{observation_id} — Observation 单资源详情（S11-W05）。
  *

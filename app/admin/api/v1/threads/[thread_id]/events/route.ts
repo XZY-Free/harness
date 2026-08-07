@@ -5,7 +5,7 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/threads/{thread_id}/events — 列出 Thread 事件流（S11-W04）。
  *

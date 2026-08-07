@@ -26,8 +26,8 @@
  * - If-None-Match 格式非法 → 400 CATALOG_REVISION_INVALID
  */
 import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
-import { recordCapabilityUse } from "@/lib/v11/capability/capability-use-queries";
-import { getCurrentSkillVersion, getSkillById } from "@/lib/v11/capability/skill-queries";
+import { recordCapabilityUse } from "@/lib/capability/capability-use-queries";
+import { getCurrentSkillVersion, getSkillById } from "@/lib/capability/skill-queries";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
@@ -35,7 +35,7 @@ import {
   gatewayCapabilityNotAllowedTable,
   gatewayCatalogRevisionInvalidTable,
   resolveGatewayPrincipal,
-} from "@/lib/v11/gateway/route-helpers";
+} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

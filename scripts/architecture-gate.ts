@@ -183,7 +183,7 @@ async function main() {
     const stablePattern = stableModules.join("|");
     // 查找正式稳定模块（非 test、非 lib/v11 自身）中对 @/lib/v11 的引用
     const violations = execSync(
-      `grep -rln "from ['\\\"]@/lib/v11/" ${ROOT}/lib --include='*.ts' 2>/dev/null | grep -v '/v11/' | grep -v '\\.test\\.' | grep -v '/test-support/' | grep -E '/(${stablePattern})/' || true`,
+      `grep -rln "from ['\\\"]@/lib/" ${ROOT}/lib --include='*.ts' 2>/dev/null | grep -v '/v11/' | grep -v '\\.test\\.' | grep -v '/test-support/' | grep -E '/(${stablePattern})/' || true`,
       { encoding: "utf-8" },
     ).trim();
     if (violations) {

@@ -26,7 +26,7 @@ import {
 import { API_ERROR_CODES } from "@/lib/error-codes";
 import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
 import type { CatalogResourceType } from "@/lib/persistence/schema/catalog";
-import { buildCatalogRevisionEtag, parseCatalogRevisionEtag } from "@/lib/v11/admin/route-helpers";
+import { buildCatalogRevisionEtag, parseCatalogRevisionEtag } from "@/lib/admin/route-helpers";
 import {
   CatalogQueryError,
   type CatalogSearchItem,
@@ -34,8 +34,8 @@ import {
   type SearchCatalogResult,
   listCatalogOptions,
   searchCatalog,
-} from "@/lib/v11/catalog/catalog-queries";
-import { getCurrentCatalogRevision } from "@/lib/v11/catalog/projector";
+} from "@/lib/catalog/catalog-queries";
+import { getCurrentCatalogRevision } from "@/lib/catalog/projector";
 
 export const dynamic = "force-dynamic";
 

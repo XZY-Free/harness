@@ -42,8 +42,8 @@ import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bu
  * - 连接配额 acquire/release 必须配对（在所有退出路径释放：流关闭/断开/错误）。
  * - 隐藏式 404：Thread 不存在或非 owner 一律 404 RESOURCE_NOT_FOUND。
  */
-import { buildStreamBackpressureResponse } from "@/lib/v11/gateway/rate-limit-helpers";
-import { getSSEConnectionQuota } from "@/lib/v11/gateway/sse-connection-quota";
+import { buildStreamBackpressureResponse } from "@/lib/gateway/rate-limit-helpers";
+import { getSSEConnectionQuota } from "@/lib/gateway/sse-connection-quota";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

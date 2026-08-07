@@ -2041,7 +2041,7 @@ export type DesktopDevice = InferSelectModel<typeof desktopDevice>;
 
 // ─── V11 Schema（阶段 2 起拆入身份、授权、幂等、审计表组）─────────
 export * from "@/lib/persistence/schema/identity";
-export * from "@/lib/runtimes/persistence/runtime-conformance-run-record";
+export * from "@/lib/runtime/persistence/runtime-conformance-run-record";
 export * from "@/lib/persistence/schema/device";
 export * from "@/lib/persistence/schema/authorization";
 export * from "@/lib/persistence/schema/idempotency";

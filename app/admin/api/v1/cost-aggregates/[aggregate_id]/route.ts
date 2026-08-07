@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getCostAggregateById } from "@/lib/v11/operations/usage-queries";
+} from "@/lib/admin/route-helpers";
+import { getCostAggregateById } from "@/lib/operations/usage-queries";
 /**
  * GET /admin/api/v1/cost-aggregates/{aggregate_id} — CostAggregate 单资源详情（S11-W07）。
  *

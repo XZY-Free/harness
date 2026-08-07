@@ -5,8 +5,8 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { listCapacitySnapshotsByTenant } from "@/lib/v11/operations/usage-queries";
+} from "@/lib/admin/route-helpers";
+import { listCapacitySnapshotsByTenant } from "@/lib/operations/usage-queries";
 /**
  * GET /admin/api/v1/capacity-snapshots — 列出租户内所有 CapacitySnapshot（S11-W07）。
  *

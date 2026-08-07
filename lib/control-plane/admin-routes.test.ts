@@ -56,9 +56,9 @@ import {
   getRouteSetById,
   upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
-import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
-import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
+import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
+import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

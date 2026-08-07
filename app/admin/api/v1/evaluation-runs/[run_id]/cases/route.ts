@@ -8,11 +8,11 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 import {
   getEvaluationRunById,
   listEvaluationCasesByRun,
-} from "@/lib/v11/evaluation/evaluation-queries";
+} from "@/lib/evaluation/evaluation-queries";
 /**
  * GET /admin/api/v1/evaluation-runs/{run_id}/cases — 列出 Run 下所有 Case（S11-W06）。
  *

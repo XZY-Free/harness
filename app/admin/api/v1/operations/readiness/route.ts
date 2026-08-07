@@ -24,12 +24,12 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 import {
   type ReadinessScope,
   checkReadiness,
   isKnownReadinessScope,
-} from "@/lib/v11/operations/readiness";
+} from "@/lib/operations/readiness";
 
 export const dynamic = "force-dynamic";
 

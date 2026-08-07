@@ -10,8 +10,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getCatalogEntryById } from "@/lib/v11/catalog/catalog-queries";
+} from "@/lib/admin/route-helpers";
+import { getCatalogEntryById } from "@/lib/catalog/catalog-queries";
 /**
  * GET /admin/api/v1/catalog/entries/{entry_id} — Admin Catalog 单条详情（S11-W03）。
  *

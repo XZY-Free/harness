@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getEffectRecordById } from "@/lib/v11/capability/effect-queries";
+} from "@/lib/admin/route-helpers";
+import { getEffectRecordById } from "@/lib/capability/effect-queries";
 /**
  * GET /admin/api/v1/effects/{effect_id} — EffectRecord 单资源详情（S11-W04）。
  *

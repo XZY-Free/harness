@@ -5,7 +5,7 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/threads/{thread_id}/child-threads — 列出父 Thread 的 delegate 子 Thread 关系（S11-W04）。
  *

@@ -46,15 +46,15 @@ import {
   type ExportPrincipalKind,
   type ExportStatus,
 } from "@/lib/persistence/schema/admin-export";
-import { createAdminExport, listAdminExportsByTenant } from "@/lib/v11/admin/export-queries";
-import { runAdminExport } from "@/lib/v11/admin/export-runner";
+import { createAdminExport, listAdminExportsByTenant } from "@/lib/admin/export-queries";
+import { runAdminExport } from "@/lib/admin/export-runner";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

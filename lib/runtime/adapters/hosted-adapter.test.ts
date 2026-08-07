@@ -56,10 +56,10 @@ import { DEFAULT_ROUTE_SCOPE_KEY, dispatchInvocationForTurn } from "@/lib/runtim
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
-import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
-import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { publishTrustedAgentRevisionForTest } from "@/lib/v11/test-support/publish-trusted-agent-revision";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
+import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
+import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
+import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // ─── 全局 setup/teardown ──────────────────────────────────

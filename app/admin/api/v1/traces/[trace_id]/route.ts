@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getTraceById } from "@/lib/v11/observability/trace-queries";
+} from "@/lib/admin/route-helpers";
+import { getTraceById } from "@/lib/observability/trace-queries";
 /**
  * GET /admin/api/v1/traces/{trace_id} — Trace 单资源详情（S11-W05）。
  *

@@ -42,7 +42,7 @@ import {
  UserActionResolutionMismatchError,
  UserActionStateError,
  UserActionValidationError,
-} from "@/lib/v11/permission/user-action-queries";
+} from "@/lib/permission/user-action-queries";
 
 // ─── 类型再导出（route handlers 统一从此处 import） ────────
 export type { Principal };

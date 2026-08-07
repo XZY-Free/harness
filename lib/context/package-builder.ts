@@ -18,7 +18,7 @@ import { logger } from "@/lib/logger";
 import { summarizeProvenance } from "@/lib/memory/provenance";
 import type { ChatMessage } from "@/lib/types";
 import { type ModelMessage, convertToModelMessages } from "ai";
-import { estimateMessagesTokens, estimateTokens, shouldCompress, warmupTokenizer } from "./budget";
+import { estimateMessagesTokens, estimateTokens, shouldCompress, warmupTokenizer } from "./budget-estimation";
 import { type ProtectedRef, computeProtectedRefs, renderInjectedProtected } from "./protected-refs";
 import {
  extractDecisionLog,

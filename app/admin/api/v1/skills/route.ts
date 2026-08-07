@@ -24,7 +24,7 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET / POST /admin/api/v1/skills — Skill 集合（阶段 6 S06-C01）。
  *
@@ -48,7 +48,7 @@ import {
   type SkillVisibilityScope,
   createSkill,
   listSkills,
-} from "@/lib/v11/capability/skill-queries";
+} from "@/lib/capability/skill-queries";
 
 export const dynamic = "force-dynamic";
 

@@ -97,8 +97,8 @@ import {
  getSessionBindingsByThread,
  updateLastUsedAt,
 } from "@/lib/runtime/session-binding-queries";
-import { getRuntimeRevisionById } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { issueContextHandle } from "@/lib/v11/context/context-handle";
+import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { issueContextHandle } from "@/lib/context/context-handle";
 import { and, eq } from "drizzle-orm";
 
 /** 本阶段使用的默认路由 scope key（后续阶段从 Thread/Agent 配置解析）。 */

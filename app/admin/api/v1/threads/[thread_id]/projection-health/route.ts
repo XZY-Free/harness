@@ -4,7 +4,7 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/threads/{thread_id}/projection-health — 投影健康检查（S11-W04）。
  *

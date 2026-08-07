@@ -6,7 +6,7 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/threads/{thread_id}/invocations — 列出 Thread 下的 Invocation（S11-W04）。
  *

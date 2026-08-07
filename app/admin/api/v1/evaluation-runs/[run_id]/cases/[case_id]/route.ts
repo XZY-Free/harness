@@ -3,11 +3,11 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 import {
   getEvaluationCaseById,
   getEvaluationRunById,
-} from "@/lib/v11/evaluation/evaluation-queries";
+} from "@/lib/evaluation/evaluation-queries";
 /**
  * GET /admin/api/v1/evaluation-runs/{run_id}/cases/{case_id} — Case 单资源详情（S11-W06）。
  *

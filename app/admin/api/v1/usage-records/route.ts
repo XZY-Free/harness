@@ -10,8 +10,8 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { listUsageRecordsByTenant } from "@/lib/v11/operations/usage-queries";
+} from "@/lib/admin/route-helpers";
+import { listUsageRecordsByTenant } from "@/lib/operations/usage-queries";
 /**
  * GET /admin/api/v1/usage-records — 列出租户内所有 UsageRecord（S11-W07）。
  *

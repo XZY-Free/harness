@@ -31,7 +31,7 @@ import {
   archiveMemoryEntry,
   getMemoryEntryById,
   updateMemoryEntry,
-} from "@/lib/v11/context/memory-queries";
+} from "@/lib/context/memory-queries";
 
 export const dynamic = "force-dynamic";
 

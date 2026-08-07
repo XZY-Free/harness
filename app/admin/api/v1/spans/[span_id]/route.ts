@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getSpanById } from "@/lib/v11/observability/trace-queries";
+} from "@/lib/admin/route-helpers";
+import { getSpanById } from "@/lib/observability/trace-queries";
 /**
  * GET /admin/api/v1/spans/{span_id} — Span 单资源详情（S11-W05）。
  *

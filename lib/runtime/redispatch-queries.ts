@@ -71,8 +71,8 @@ import {
  markSessionBindingLost,
  updateLastUsedAt,
 } from "@/lib/runtime/session-binding-queries";
-import { getRuntimeRevisionById } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { issueContextHandle } from "@/lib/v11/context/context-handle";
+import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { issueContextHandle } from "@/lib/context/context-handle";
 import { and, eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */

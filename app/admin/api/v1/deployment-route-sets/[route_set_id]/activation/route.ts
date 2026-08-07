@@ -49,7 +49,7 @@ import {
   parseRouteSetEtag,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 
 const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 

@@ -40,9 +40,9 @@ import {
 import { invocationTable } from "@/lib/persistence/schema/runtime";
 import type { ToolCallState } from "@/lib/persistence/schema/tool-call";
 import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
-import { listEffectRecordsByInvocation } from "@/lib/v11/capability/effect-queries";
-import { listToolCallsByInvocation } from "@/lib/v11/capability/tool-call-queries";
-import { getActiveLocksByInvocation } from "@/lib/v11/workspace/workspace-write-lock-queries";
+import { listEffectRecordsByInvocation } from "@/lib/capability/effect-queries";
+import { listToolCallsByInvocation } from "@/lib/capability/tool-call-queries";
+import { getActiveLocksByInvocation } from "@/lib/workspace/workspace-write-lock-queries";
 import { and, eq } from "drizzle-orm";
 
 // ─── 常量 ──────────────────────────────────────────────────

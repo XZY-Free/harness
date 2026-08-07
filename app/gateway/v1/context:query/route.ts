@@ -1,6 +1,6 @@
 import { REQUEST_ID_HEADER, apiError, apiSuccess, getRequestId } from "@/lib/http";
-import { recordCapabilityUse } from "@/lib/v11/capability/capability-use-queries";
-import type { ContextBudgetConfig } from "@/lib/v11/context/budget";
+import { recordCapabilityUse } from "@/lib/capability/capability-use-queries";
+import type { ContextBudgetConfig } from "@/lib/context/budget";
 import {
   CONTEXT_CLASSIFICATIONS,
   CONTEXT_SOURCE_TYPES,
@@ -8,9 +8,9 @@ import {
   ContextHandleError,
   type ContextSourceType,
   resolveContextHandle,
-} from "@/lib/v11/context/context-handle";
-import { assembleContextView } from "@/lib/v11/context/context-query";
-import type { ContextFragment } from "@/lib/v11/context/fragment";
+} from "@/lib/context/context-handle";
+import { assembleContextView } from "@/lib/context/context-query";
+import type { ContextFragment } from "@/lib/context/fragment";
 import {
   KnowledgeResolver,
   MemoryResolver,
@@ -18,13 +18,13 @@ import {
   SkillResolver,
   type SourceResolver,
   WorkspaceMapResolver,
-} from "@/lib/v11/context/source-resolvers";
+} from "@/lib/context/source-resolvers";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
   gatewaySchemaInvalidTable,
   resolveGatewayPrincipal,
-} from "@/lib/v11/gateway/route-helpers";
+} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

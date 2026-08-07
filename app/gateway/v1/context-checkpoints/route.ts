@@ -57,13 +57,13 @@ import {
   createContextCheckpoint,
   findContextCheckpointByUniqueKey,
   isValidSummaryHash,
-} from "@/lib/v11/context/checkpoint-queries";
+} from "@/lib/context/checkpoint-queries";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
   gatewaySchemaInvalidTable,
   resolveGatewayPrincipal,
-} from "@/lib/v11/gateway/route-helpers";
+} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

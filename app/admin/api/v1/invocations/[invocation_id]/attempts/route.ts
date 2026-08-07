@@ -5,7 +5,7 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/attempts — 列出 Invocation 的执行尝试（S11-W04）。
  *

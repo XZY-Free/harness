@@ -18,7 +18,7 @@ import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-e
 import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
 import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
 import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
-import { loadConformanceEligibilitySnapshot } from "@/lib/runtimes/persistence/runtime-conformance-evidence-reader";
+import { loadConformanceEligibilitySnapshot } from "@/lib/runtime/persistence/runtime-conformance-evidence-reader";
 
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";

@@ -12,8 +12,8 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { listTracesByTenant } from "@/lib/v11/observability/trace-queries";
+} from "@/lib/admin/route-helpers";
+import { listTracesByTenant } from "@/lib/observability/trace-queries";
 /**
  * GET /admin/api/v1/traces — 列出租户内所有 Trace（S11-W05）。
  *

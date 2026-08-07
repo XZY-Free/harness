@@ -26,9 +26,9 @@ import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/h
 import {
   TOOL_SCHEMA_REVISION_ETAG_PREFIX,
   parseToolSchemaRevisionEtag,
-} from "@/lib/v11/admin/route-helpers";
-import { recordCapabilityUse } from "@/lib/v11/capability/capability-use-queries";
-import { getCurrentToolSchemaRevision, getToolById } from "@/lib/v11/capability/tool-queries";
+} from "@/lib/admin/route-helpers";
+import { recordCapabilityUse } from "@/lib/capability/capability-use-queries";
+import { getCurrentToolSchemaRevision, getToolById } from "@/lib/capability/tool-queries";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
@@ -36,7 +36,7 @@ import {
   gatewayCapabilityNotAllowedTable,
   gatewayCatalogRevisionInvalidTable,
   resolveGatewayPrincipal,
-} from "@/lib/v11/gateway/route-helpers";
+} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

@@ -31,7 +31,7 @@ describe("Agent 控制面稳定路径边界", () => {
     const violations = stableControlPlaneRoots.flatMap((root) =>
       listProductionTypeScriptFiles(join(repositoryRoot, root)).flatMap((file) => {
         const source = readFileSync(file, "utf8");
-        return source.includes("@/lib/v11/") || source.includes("@/lib/compatibility/")
+        return source.includes("@/lib/deprecated/") || source.includes("@/lib/compatibility/")
           ? [relative(repositoryRoot, file)]
           : [];
       }),

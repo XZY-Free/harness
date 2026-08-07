@@ -55,14 +55,14 @@ import {
  userActionRequestTable,
 } from "@/lib/persistence/schema/user-action-request";
 import { updateInvocationState } from "@/lib/runtime/invocation-queries";
-import { issueGrant } from "@/lib/v11/permission/permission-queries";
+import { issueGrant } from "@/lib/permission/permission-queries";
 import {
  UserActionAlreadyResolvedError,
  UserActionNotFoundError,
  UserActionResolutionMismatchError,
  UserActionStateError,
  UserActionValidationError,
-} from "@/lib/v11/permission/user-action-queries";
+} from "@/lib/permission/user-action-queries";
 import { and, eq } from "drizzle-orm";
 
 /** resolveGenericUserAction 入参。 */

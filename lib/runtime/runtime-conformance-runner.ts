@@ -46,7 +46,7 @@ import {
  ALL_CONFORMANCE_CASES,
  type ConformanceCaseId,
  type ConformanceCaseResult,
-} from "@/lib/runtimes/domain/runtime-conformance";
+} from "@/lib/runtime/domain/runtime-conformance";
 
 // ─── 类型定义 ──────────────────────────────────────────────
 

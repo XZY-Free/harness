@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { estimateTokens } from "@/lib/context/budget";
+import { estimateTokens } from "@/lib/context/budget-estimation";
 import { type ContextPackage, buildContextPackage } from "@/lib/context/package-builder";
 import type { SubagentDefinition, ThreadPlan, ThreadPlanItem, ToolRun } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";

@@ -4,8 +4,8 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { listJobsByTenant } from "@/lib/v11/job/job-queries";
+} from "@/lib/admin/route-helpers";
+import { listJobsByTenant } from "@/lib/job/job-queries";
 /**
  * GET /admin/api/v1/jobs — 跨 agent 列出租户所有 Job（S11-W04）。
  *

@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getCapacitySnapshotById } from "@/lib/v11/operations/usage-queries";
+} from "@/lib/admin/route-helpers";
+import { getCapacitySnapshotById } from "@/lib/operations/usage-queries";
 /**
  * GET /admin/api/v1/capacity-snapshots/{snapshot_id} — CapacitySnapshot 单资源详情（S11-W07）。
  *

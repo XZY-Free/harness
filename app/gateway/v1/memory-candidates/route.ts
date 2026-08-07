@@ -67,13 +67,13 @@ import {
   insertMemoryCandidate,
   isValidMemoryContentHash,
   verifyMemoryContentHash,
-} from "@/lib/v11/context/memory-queries";
+} from "@/lib/context/memory-queries";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
   gatewaySchemaInvalidTable,
   resolveGatewayPrincipal,
-} from "@/lib/v11/gateway/route-helpers";
+} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

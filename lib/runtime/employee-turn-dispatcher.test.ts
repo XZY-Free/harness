@@ -8,7 +8,7 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
 import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
-import { installTrustedHostedControlPlaneEvidenceForTest } from "@/lib/v11/test-support/trusted-hosted-control-plane-evidence";
+import { installTrustedHostedControlPlaneEvidenceForTest } from "@/lib/test-support/trusted-hosted-control-plane-evidence";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {

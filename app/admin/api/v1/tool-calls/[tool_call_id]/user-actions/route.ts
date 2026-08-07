@@ -3,9 +3,9 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getToolCallById } from "@/lib/v11/capability/tool-call-queries";
-import { getUserActionRequestsByToolCall } from "@/lib/v11/permission/user-action-queries";
+} from "@/lib/admin/route-helpers";
+import { getToolCallById } from "@/lib/capability/tool-call-queries";
+import { getUserActionRequestsByToolCall } from "@/lib/permission/user-action-queries";
 /**
  * GET /admin/api/v1/tool-calls/{tool_call_id}/user-actions — 列出 ToolCall 的 UserActionRequest（S11-W04）。
  *

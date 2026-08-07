@@ -3,9 +3,9 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getEffectRecordByToolCall } from "@/lib/v11/capability/effect-queries";
-import { getToolCallById } from "@/lib/v11/capability/tool-call-queries";
+} from "@/lib/admin/route-helpers";
+import { getEffectRecordByToolCall } from "@/lib/capability/effect-queries";
+import { getToolCallById } from "@/lib/capability/tool-call-queries";
 /**
  * GET /admin/api/v1/tool-calls/{tool_call_id}/effects — 查询 ToolCall 的 EffectRecord（S11-W04）。
  *

@@ -21,14 +21,14 @@ import {
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import { getAdminExportById } from "@/lib/v11/admin/export-queries";
-import { recordExportDownloadedAudit, renderExportNdjson } from "@/lib/v11/admin/export-runner";
+import { getAdminExportById } from "@/lib/admin/export-queries";
+import { recordExportDownloadedAudit, renderExportNdjson } from "@/lib/admin/export-runner";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

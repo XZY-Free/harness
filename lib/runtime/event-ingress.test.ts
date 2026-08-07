@@ -60,10 +60,10 @@ import {
 } from "@/lib/runtime/event-ingress-queries";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { TransientSequenceGapError, ingressTransientBatch } from "@/lib/runtime/transient-events";
-import { createRuntime } from "@/lib/runtimes/persistence/runtime-queries";
-import { createDraftRuntimeRevision } from "@/lib/runtimes/persistence/runtime-revision-queries";
-import { publishTrustedAgentRevisionForTest } from "@/lib/v11/test-support/publish-trusted-agent-revision";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
+import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
+import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
+import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {

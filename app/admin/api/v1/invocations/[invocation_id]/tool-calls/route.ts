@@ -4,8 +4,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { listToolCallsByInvocation } from "@/lib/v11/capability/tool-call-queries";
+} from "@/lib/admin/route-helpers";
+import { listToolCallsByInvocation } from "@/lib/capability/tool-call-queries";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/tool-calls — 列出 Invocation 的 ToolCall（S11-W04）。
  *

@@ -6,7 +6,7 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/ingress — 列出 Invocation 的 RuntimeEventIngress（S11-W04）。
  *

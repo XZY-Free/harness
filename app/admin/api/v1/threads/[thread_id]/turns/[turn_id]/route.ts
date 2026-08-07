@@ -4,7 +4,7 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/threads/{thread_id}/turns/{turn_id} — Turn 单资源详情（S11-W04）。
  *

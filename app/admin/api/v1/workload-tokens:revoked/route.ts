@@ -21,7 +21,7 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 import { and, desc, eq, lt } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";

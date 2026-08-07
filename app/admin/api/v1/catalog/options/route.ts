@@ -5,12 +5,12 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 import {
   CatalogQueryError,
   type CatalogSearchItem,
   listCatalogOptions,
-} from "@/lib/v11/catalog/catalog-queries";
+} from "@/lib/catalog/catalog-queries";
 /**
  * GET /admin/api/v1/catalog/options — Admin Catalog 列表（S11-W03）。
  *

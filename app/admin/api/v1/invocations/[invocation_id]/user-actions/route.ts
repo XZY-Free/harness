@@ -4,8 +4,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getUserActionRequestsByInvocation } from "@/lib/v11/permission/user-action-queries";
+} from "@/lib/admin/route-helpers";
+import { getUserActionRequestsByInvocation } from "@/lib/permission/user-action-queries";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/user-actions — 列出 Invocation 的 UserActionRequest（S11-W04）。
  *

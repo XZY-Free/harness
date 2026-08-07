@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getEffectRecordById, listEffectTargets } from "@/lib/v11/capability/effect-queries";
+} from "@/lib/admin/route-helpers";
+import { getEffectRecordById, listEffectTargets } from "@/lib/capability/effect-queries";
 /**
  * GET /admin/api/v1/effects/{effect_id}/targets — 列出 EffectRecord 的所有 EffectTarget（S11-W04）。
  *

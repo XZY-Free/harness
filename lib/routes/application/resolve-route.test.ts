@@ -21,7 +21,7 @@ import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
-import { runtimeConformanceRun } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
+import { runtimeConformanceRun } from "@/lib/runtime/persistence/runtime-conformance-run-record";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

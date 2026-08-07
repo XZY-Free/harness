@@ -4,9 +4,9 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { getJobCommands } from "@/lib/v11/job/job-command-queries";
-import { getJobById } from "@/lib/v11/job/job-queries";
+} from "@/lib/admin/route-helpers";
+import { getJobCommands } from "@/lib/job/job-command-queries";
+import { getJobById } from "@/lib/job/job-queries";
 /**
  * GET /admin/api/v1/jobs/{job_id}/commands — 列出 Job 命令（S11-W04）。
  *

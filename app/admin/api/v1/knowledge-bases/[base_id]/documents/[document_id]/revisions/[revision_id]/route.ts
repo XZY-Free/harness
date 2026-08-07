@@ -9,12 +9,12 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 import {
   getKnowledgeBaseById,
   getKnowledgeDocumentById,
   getKnowledgeDocumentRevisionById,
-} from "@/lib/v11/context/knowledge-queries";
+} from "@/lib/context/knowledge-queries";
 /**
  * GET /admin/api/v1/knowledge-bases/{base_id}/documents/{document_id}/revisions/{revision_id}
  *   — KnowledgeDocumentRevision 单资源详情（S11-W03）。

@@ -23,7 +23,7 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * POST /admin/api/v1/tools/{tool_id}/schema-revisions — 创建 ToolSchemaRevision
  * （阶段 6 S06-C02）。
@@ -58,7 +58,7 @@ import {
   createToolSchemaRevision,
   getToolById,
   listToolSchemaRevisions,
-} from "@/lib/v11/capability/tool-queries";
+} from "@/lib/capability/tool-queries";
 
 export const dynamic = "force-dynamic";
 

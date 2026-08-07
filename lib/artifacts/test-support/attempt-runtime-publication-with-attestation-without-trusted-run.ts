@@ -5,18 +5,18 @@ import { ArtifactNotVerifiedError } from "@/lib/artifacts/domain/artifact-attest
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import type { ArtifactAttestation } from "@/lib/artifacts/persistence/artifact-record";
 import type { AuditActor } from "@/lib/identity/audit";
-import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtimes/domain/runtime-conformance-contract";
-import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtimes/application/publish-runtime-revision-service";
+import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtime/provisioning/publish-runtime-revision-service";
 import {
   RuntimeArtifactAttestationInvalidError,
   RuntimeConformanceRunRequiredError,
-} from "@/lib/runtimes/domain/runtime-revision-publication-policy";
+} from "@/lib/runtime/domain/runtime-revision-publication-policy";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
 import type { RuntimeRevisionRow } from "@/lib/persistence/schema/control-plane";
 import {
   runtimeConformanceRun,
   runtimeConformanceCaseResult,
-} from "@/lib/runtimes/persistence/runtime-conformance-run-record";
+} from "@/lib/runtime/persistence/runtime-conformance-run-record";
 
 export interface PublishRuntimeRevisionWithAttestationResult {
   revision: RuntimeRevisionRow;

@@ -4,8 +4,8 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { listUserActionRequestsByTenant } from "@/lib/v11/permission/user-action-queries";
+} from "@/lib/admin/route-helpers";
+import { listUserActionRequestsByTenant } from "@/lib/permission/user-action-queries";
 /**
  * GET /admin/api/v1/user-actions — 跨 invocation 列出租户所有 UserActionRequest（S11-W04）。
  *

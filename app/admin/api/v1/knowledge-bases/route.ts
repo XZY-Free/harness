@@ -40,13 +40,13 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 import {
   type KnowledgeBaseLifecycleState,
   KnowledgeValidationError,
   createKnowledgeBase,
   listKnowledgeBases,
-} from "@/lib/v11/context/knowledge-queries";
+} from "@/lib/context/knowledge-queries";
 
 export const dynamic = "force-dynamic";
 

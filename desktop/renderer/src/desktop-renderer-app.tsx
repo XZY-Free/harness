@@ -1,8 +1,8 @@
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
-import { DesktopSidebar } from "@/components/v11/sidebar/desktop-sidebar";
-import { SidebarProvider } from "@/components/v11/sidebar/sidebar-context";
-import { NewThreadPage, type NewThreadSubmission } from "@/components/v11/v11-new-thread-page";
-import { ThreadPage } from "@/components/v11/v11-thread-page";
+import { DesktopSidebar } from "@/components/desktop/sidebar/desktop-sidebar";
+import { SidebarProvider } from "@/components/desktop/sidebar/sidebar-context";
+import { NewThreadPage, type NewThreadSubmission } from "@/components/thread/v11-new-thread-page";
+import { ThreadPage } from "@/components/thread/v11-thread-page";
 import { apiFetch } from "@/lib/api-fetch";
 import { getDesktopCapabilities } from "@/lib/desktop/capabilities";
 import { fallbackTitleFromUserText } from "@/lib/thread-title";

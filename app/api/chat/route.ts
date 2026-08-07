@@ -12,7 +12,7 @@ import {
   estimateTokens,
   resolveTokenBudget,
   shouldCompress,
-} from "@/lib/context/budget";
+} from "@/lib/context/budget-estimation";
 import { recordContextSnapshot } from "@/lib/context/manifest";
 import { assembleModelMessages, buildContextPackage } from "@/lib/context/package-builder";
 import { getPinnedFacts } from "@/lib/context/pinned-facts";

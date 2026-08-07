@@ -53,7 +53,7 @@ import {
  IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
-import { redactForV11 } from "@/lib/v11/security/unified-redaction";
+import { redactForV11 } from "@/lib/security/unified-redaction";
 import { and, asc, eq, gt } from "drizzle-orm";
 
 /** 事务句柄类型。 */

@@ -6,10 +6,10 @@ const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 
 vi.mock("@/lib/api-fetch", () => ({ apiFetch }));
 vi.mock("@/lib/desktop/capabilities", () => ({ getDesktopCapabilities: () => true }));
-vi.mock("@/components/v11/v11-thread-page", () => ({
+vi.mock("@/components/thread/v11-thread-page", () => ({
   ThreadPage: ({ threadId }: { readonly threadId: string }) => <div>会话 {threadId}</div>,
 }));
-vi.mock("@/components/v11/v11-new-thread-page", () => ({
+vi.mock("@/components/thread/v11-new-thread-page", () => ({
   NewThreadPage: ({
     onSubmit,
   }: {
@@ -29,7 +29,7 @@ vi.mock("@/components/v11/v11-new-thread-page", () => ({
     </button>
   ),
 }));
-vi.mock("@/components/v11/sidebar/desktop-sidebar", () => ({
+vi.mock("@/components/desktop/sidebar/desktop-sidebar", () => ({
   DesktopSidebar: ({ threads }: { readonly threads: readonly { id: string }[] }) => (
     <div data-testid="desktop-thread-list">{threads.map((thread) => thread.id).join(",")}</div>
   ),

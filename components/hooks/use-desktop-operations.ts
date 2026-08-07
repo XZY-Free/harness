@@ -49,7 +49,7 @@ import {
   type DesktopTestRunParams,
   getDesktopBridge,
 } from "@/lib/desktop/capabilities";
-import type { DesktopOperationCapability } from "@/lib/v11/client/types";
+import type { DesktopOperationCapability } from "@/lib/client/types";
 import { useCallback, useEffect, useState } from "react";
 
 /** Desktop 操作错误码。 */

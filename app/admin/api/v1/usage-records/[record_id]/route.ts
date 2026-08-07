@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getUsageRecordById } from "@/lib/v11/operations/usage-queries";
+} from "@/lib/admin/route-helpers";
+import { getUsageRecordById } from "@/lib/operations/usage-queries";
 /**
  * GET /admin/api/v1/usage-records/{record_id} — UsageRecord 单资源详情（S11-W07）。
  *

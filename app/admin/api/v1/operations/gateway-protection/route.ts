@@ -21,10 +21,10 @@ import {
   adminAuthErrorResponse,
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getOverloadProtector } from "@/lib/v11/gateway/overload-protection";
-import { getRateLimiter } from "@/lib/v11/gateway/rate-limiter";
-import { getSSEConnectionQuota } from "@/lib/v11/gateway/sse-connection-quota";
+} from "@/lib/admin/route-helpers";
+import { getOverloadProtector } from "@/lib/gateway/overload-protection";
+import { getRateLimiter } from "@/lib/gateway/rate-limiter";
+import { getSSEConnectionQuota } from "@/lib/gateway/sse-connection-quota";
 
 export const dynamic = "force-dynamic";
 

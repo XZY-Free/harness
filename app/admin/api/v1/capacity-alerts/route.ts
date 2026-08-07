@@ -5,8 +5,8 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { getCapacityAlertsByTenant } from "@/lib/v11/operations/usage-queries";
+} from "@/lib/admin/route-helpers";
+import { getCapacityAlertsByTenant } from "@/lib/operations/usage-queries";
 /**
  * GET /admin/api/v1/capacity-alerts — 当前活跃告警（S11-W07）。
  *

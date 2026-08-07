@@ -8,7 +8,7 @@ import {
   estimateTokens,
   resolveTokenBudget,
   shouldCompress,
-} from "./budget";
+} from "./budget-estimation";
 
 function uiMsg(role: "user" | "assistant", text: string): ChatMessage {
   return {

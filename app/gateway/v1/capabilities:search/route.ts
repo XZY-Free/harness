@@ -26,15 +26,15 @@ import {
   CatalogQueryError,
   type SearchCatalogResult,
   searchCatalog,
-} from "@/lib/v11/catalog/catalog-queries";
-import { getCurrentCatalogRevision } from "@/lib/v11/catalog/projector";
+} from "@/lib/catalog/catalog-queries";
+import { getCurrentCatalogRevision } from "@/lib/catalog/projector";
 import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
   gatewayCatalogRevisionInvalidTable,
   gatewaySchemaInvalidTable,
   resolveGatewayPrincipal,
-} from "@/lib/v11/gateway/route-helpers";
+} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

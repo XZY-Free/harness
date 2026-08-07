@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getUserActionRequestById } from "@/lib/v11/permission/user-action-queries";
+} from "@/lib/admin/route-helpers";
+import { getUserActionRequestById } from "@/lib/permission/user-action-queries";
 /**
  * GET /admin/api/v1/user-actions/{request_id} — UserActionRequest 单资源详情（S11-W04）。
  *

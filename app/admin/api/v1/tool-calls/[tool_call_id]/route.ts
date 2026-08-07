@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getToolCallById } from "@/lib/v11/capability/tool-call-queries";
+} from "@/lib/admin/route-helpers";
+import { getToolCallById } from "@/lib/capability/tool-call-queries";
 /**
  * GET /admin/api/v1/tool-calls/{tool_call_id} — ToolCall 单资源详情（S11-W04）。
  *

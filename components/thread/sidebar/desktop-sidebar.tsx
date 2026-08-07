@@ -1,0 +1,367 @@
+"use client";
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { CmdkPanel } from "@/components/thread/command/cmdk-panel";
+import type { Agent } from "@/lib/persistence/schema/agent";
+import type { Thread } from "@/lib/persistence/schema/conversation";
+import { cn } from "@/lib/utils";
+import { LogOut, PanelLeft, Plus, Search, Settings, User } from "lucide-react";
+/**
+ * Desktop 会话侧栏（W3-2）。
+ *
+ * 结构（自上而下）：
+ * 1. macOS 红绿灯安全区（普通窗口 32px，原生全屏 / Web 预览为 0）。
+ * 2. 品牌行：SnowHarness + 搜索按钮（打开 ⌘K）。
+ * 3. 新建会话。
+ * 4. "会话"区标题。
+ * 5. 会话列表（按主智能体分组；未选助手的平铺顶部）。
+ * 6. 底部账号行（点击弹出菜单：设置 / 退出登录）。
+ *
+ * 侧栏可收起（⌘\ 或品牌行按钮），收起后主区左移。
+ */
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { type CSSProperties, useEffect, useState } from "react";
+import { useSidebar } from "./sidebar-context";
+
+interface DesktopSidebarProps {
+  readonly threads: readonly Thread[];
+  readonly agents: readonly Agent[];
+  readonly currentThreadId?: string;
+  readonly userName?: string;
+  readonly hasNativeTitlebar?: boolean;
+}
+
+interface DesktopWindowControls {
+  getFrameState(): Promise<{ isFullScreen: boolean }>;
+  onFrameStateChange(callback: (state: { isFullScreen: boolean }) => void): () => void;
+}
+
+const nativeNoDragStyle = { WebkitAppRegion: "no-drag" } as unknown as CSSProperties;
+
+export function DesktopSidebar({
+  threads,
+  agents,
+  currentThreadId: currentThreadIdProp,
+  userName,
+  hasNativeTitlebar = false,
+}: DesktopSidebarProps) {
+  const { collapsed, toggle } = useSidebar();
+  const pathname = usePathname();
+  const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [nativeTitlebar, setNativeTitlebar] = useState(hasNativeTitlebar);
+  const [nativeIsFullScreen, setNativeIsFullScreen] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const controls = (
+      globalThis as unknown as {
+        snowDesktop?: { windowControls?: DesktopWindowControls };
+      }
+    ).snowDesktop?.windowControls;
+    if (!controls) return;
+
+    setNativeTitlebar(true);
+
+    let active = true;
+    void controls
+      .getFrameState()
+      .then((state) => {
+        if (active) setNativeIsFullScreen(state.isFullScreen);
+      })
+      .catch(() => {
+        // 旧 preload 不支持窗口状态时，保守保持普通窗口布局。
+      });
+    const unsubscribe = controls.onFrameStateChange((state) => {
+      setNativeIsFullScreen(state.isFullScreen);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  // ⌘K 快捷键
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setCmdkOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // 从 /desktop/chat/[threadId] 推导当前会话 id；prop 优先
+  const currentThreadId =
+    currentThreadIdProp ?? pathname?.replace("/desktop/chat/", "").split("/")[0];
+  const isFullScreen = nativeTitlebar && nativeIsFullScreen === true;
+  // 无论普通窗口还是原生全屏，顶部都要为窗口控制保留一行，避免与品牌行重叠。
+  const titlebarSpacerClass = nativeTitlebar ? "h-8" : "h-0";
+  const titlebarControlsClass = nativeTitlebar && !isFullScreen ? "top-2 left-20" : "top-2 left-3";
+  const titlebarIconClass =
+    "flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40";
+  const panelButton = (
+    <button
+      type="button"
+      onClick={toggle}
+      style={nativeNoDragStyle}
+      className={titlebarIconClass}
+      aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
+    >
+      <PanelLeft className="size-4" strokeWidth={1.5} />
+    </button>
+  );
+  const searchButton = (
+    <button
+      type="button"
+      onClick={() => setCmdkOpen(true)}
+      style={nativeNoDragStyle}
+      className={titlebarIconClass}
+      aria-label="搜索会话"
+    >
+      <Search className="size-4" strokeWidth={1.5} />
+    </button>
+  );
+  const newThreadButton = (
+    <Link
+      href="/desktop/new"
+      aria-label="新建会话"
+      style={nativeNoDragStyle}
+      className={titlebarIconClass}
+    >
+      <Plus className="size-4" strokeWidth={1.5} />
+    </Link>
+  );
+
+  return (
+    <>
+      <CmdkPanel threads={threads} agents={agents} open={cmdkOpen} onOpenChange={setCmdkOpen} />
+      <div
+        data-testid="desktop-titlebar-controls"
+        className={cn(
+          "fixed z-20 flex items-center gap-1 [-webkit-app-region:no-drag]",
+          titlebarControlsClass,
+        )}
+      >
+        {isFullScreen ? (
+          collapsed ? (
+            <>
+              {panelButton}
+              {newThreadButton}
+              {searchButton}
+            </>
+          ) : (
+            <>
+              <span
+                data-testid="desktop-titlebar-brand"
+                className="px-1 font-semibold text-sm text-foreground"
+              >
+                SnowHarness
+              </span>
+              {searchButton}
+              {panelButton}
+            </>
+          )
+        ) : (
+          <>
+            {searchButton}
+            {panelButton}
+            {collapsed && newThreadButton}
+          </>
+        )}
+      </div>
+      <aside
+        aria-label="会话侧栏"
+        className={cn(
+          "relative h-full shrink-0 overflow-visible transition-[width] duration-200 ease-out",
+          collapsed ? "w-0" : "w-[236px]",
+        )}
+      >
+        <div
+          aria-hidden={collapsed}
+          className={cn(
+            "absolute inset-y-0 left-0 flex w-[236px] flex-col border-r border-border bg-muted/85 transition-[opacity,transform] duration-200 ease-out",
+            collapsed
+              ? "pointer-events-none -translate-x-2 opacity-0"
+              : "translate-x-0 opacity-100",
+          )}
+        >
+          {nativeTitlebar && !isFullScreen && (
+            <div
+              data-testid="desktop-titlebar-drag-zone"
+              aria-hidden="true"
+              className="absolute top-0 right-0 left-[140px] h-8 [-webkit-app-region:drag]"
+            />
+          )}
+
+          {/* macOS 红绿灯安全区 */}
+          <div
+            data-testid="desktop-titlebar-spacer"
+            className={cn(titlebarSpacerClass, "shrink-0")}
+          />
+
+          {/* 全屏时品牌移到标题栏，避免首行重复 */}
+          {!isFullScreen && (
+            <div className="px-4 py-1.5 [-webkit-app-region:no-drag]">
+              <span className="font-semibold text-sm text-foreground">SnowHarness</span>
+            </div>
+          )}
+
+          {/* 新建会话 */}
+          <div className="px-3 py-1 [-webkit-app-region:no-drag]">
+            <Link
+              href="/desktop/new"
+              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+            >
+              <Plus className="size-4 text-muted-foreground" />
+              新建会话
+            </Link>
+          </div>
+
+          {/* 会话区标题 */}
+          <div className="px-4 py-2">
+            <h2 className="text-sm font-semibold text-foreground">会话</h2>
+          </div>
+
+          {/* 会话列表 */}
+          <ThreadGroupList threads={threads} agents={agents} currentThreadId={currentThreadId} />
+
+          {/* 底部账号行 */}
+          <div className="mt-auto [-webkit-app-region:no-drag]">
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex w-full items-center gap-2 border-t border-border px-4 py-2.5 text-left transition hover:bg-secondary">
+                <div className="flex size-7 items-center justify-center rounded-full bg-secondary text-xs font-medium text-secondary-foreground">
+                  <User className="size-3.5" />
+                </div>
+                <span className="truncate text-sm text-foreground">{userName ?? "用户"}</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="start" className="w-48">
+                <DropdownMenuItem
+                  onSelect={() => {
+                    /* W3-5 后接入设置面板；现阶段无操作 */
+                  }}
+                >
+                  <Settings className="size-4" />
+                  设置
+                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘,</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={async () => {
+                    const desktop = (
+                      window as unknown as {
+                        desktop?: { auth?: { logout: () => Promise<{ ok: boolean }> } };
+                      }
+                    ).desktop;
+                    if (desktop?.auth?.logout) {
+                      await desktop.auth.logout();
+                    }
+                  }}
+                >
+                  <LogOut className="size-4" />
+                  退出登录
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/**
+ * 按主智能体分组的会话列表。
+ * - 未选助手的会话平铺在顶部。
+ * - 下方按 Agent 分组（◉ + Agent 名）。
+ * - 当前会话浅灰底高亮。
+ */
+function ThreadGroupList({
+  threads,
+  agents,
+  currentThreadId,
+}: {
+  readonly threads: readonly Thread[];
+  readonly agents: readonly Agent[];
+  readonly currentThreadId?: string;
+}) {
+  const agentMap = new Map(agents.map((a) => [a.id, a]));
+  // 系统兜底 agent（agentKey === "default"）≠ 用户主动选择：
+  // V11 要求 Thread 必须绑主 Agent，新会话自动绑 default 兜底；
+  // 设计语义上这类会话属"未选助手"，平铺顶部、不建分组。
+  const isUserChosenAgent = (agentId: string) => {
+    const a = agentMap.get(agentId);
+    return !!a && a.agentKey !== "default";
+  };
+
+  // 未选助手的会话（无匹配 agent，或仅绑了系统兜底 default）
+  const ungrouped = threads.filter((t) => !isUserChosenAgent(t.primaryAgentId));
+  // 用户主动选择助手的会话
+  const grouped = threads.filter((t) => isUserChosenAgent(t.primaryAgentId));
+
+  // 按 Agent 分组
+  const groupMap = new Map<string, Thread[]>();
+  for (const t of grouped) {
+    const list = groupMap.get(t.primaryAgentId) ?? [];
+    list.push(t);
+    groupMap.set(t.primaryAgentId, list);
+  }
+
+  return (
+    <nav className="flex-1 overflow-y-auto px-3 [-webkit-app-region:no-drag]" aria-label="会话列表">
+      {/* 未分组会话 */}
+      {ungrouped.map((t) => (
+        <ThreadListItem key={t.id} thread={t} isActive={t.id === currentThreadId} />
+      ))}
+
+      {/* 按 Agent 分组 */}
+      {Array.from(groupMap.entries()).map(([agentId, list]) => {
+        const agent = agentMap.get(agentId);
+        return (
+          <div key={agentId} className="mt-2">
+            <div className="flex items-center gap-1.5 px-3 py-1">
+              <span className="size-1.5 rounded-full bg-primary" />
+              <span className="text-2xs font-medium text-muted-foreground">
+                {agent?.displayName ?? agent?.agentKey ?? agentId.slice(0, 8)}
+              </span>
+            </div>
+            {list.map((t) => (
+              <ThreadListItem key={t.id} thread={t} isActive={t.id === currentThreadId} />
+            ))}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
+function ThreadListItem({
+  thread,
+  isActive,
+}: {
+  readonly thread: Thread;
+  readonly isActive: boolean;
+}) {
+  return (
+    <Link
+      href={`/desktop/chat/${thread.id}`}
+      className={cn(
+        "block truncate rounded-md px-3 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+        isActive
+          ? "bg-secondary font-medium text-foreground"
+          : "text-foreground hover:bg-secondary/60",
+      )}
+      title={thread.title ?? "新会话"}
+    >
+      {thread.title ?? "新会话"}
+    </Link>
+  );
+}

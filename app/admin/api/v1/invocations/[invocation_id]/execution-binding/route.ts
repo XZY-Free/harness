@@ -6,7 +6,7 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/execution-binding — Invocation 的 ExecutionBinding（S11-W04）。
  *

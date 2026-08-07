@@ -61,14 +61,14 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 import {
   MemoryCandidateAlreadyResolvedError,
   getMemoryCandidateById,
   isReviewableScopeType,
   isScopeNarrowingValid,
   resolveMemoryCandidate,
-} from "@/lib/v11/context/memory-queries";
+} from "@/lib/context/memory-queries";
 
 export const dynamic = "force-dynamic";
 

@@ -4,8 +4,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { listEffectRecordsByInvocation } from "@/lib/v11/capability/effect-queries";
+} from "@/lib/admin/route-helpers";
+import { listEffectRecordsByInvocation } from "@/lib/capability/effect-queries";
 /**
  * GET /admin/api/v1/invocations/{invocation_id}/effects — 列出 Invocation 的 EffectRecord（S11-W04）。
  *

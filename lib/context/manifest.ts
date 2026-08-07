@@ -160,7 +160,7 @@ export type ContextManifest = {
  * 原本模块自带 char/4 估算，与 budget.ts 的 CJK 友好版各算各的，中文场景 manifest 低估。
  * 改用 budget.estimateTokens（tokenizer 加载后用真 BPE，否则 CJK 回退），口径与 package-builder 一致。
  */
-import { estimateTokens } from "./budget";
+import { estimateTokens } from "./budget-estimation";
 
 function sha256(content: string): string {
  return createHash("sha256").update(content).digest("hex").slice(0, 16);

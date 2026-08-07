@@ -31,7 +31,7 @@ import {
   type MemoryEntry,
   type MemoryScopeType,
 } from "@/lib/persistence/schema/memory";
-import { listMemoryEntriesByScope } from "@/lib/v11/context/memory-queries";
+import { listMemoryEntriesByScope } from "@/lib/context/memory-queries";
 
 export const dynamic = "force-dynamic";
 

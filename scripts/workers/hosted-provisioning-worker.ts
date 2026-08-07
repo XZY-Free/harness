@@ -5,7 +5,7 @@
  * 用法: pnpm worker:hosted-provisioning
  */
 
-import { createHostedProvisioningWorker } from "@/lib/runtimes/application/hosted-provisioning-worker";
+import { createHostedProvisioningWorker } from "@/lib/runtime/provisioning/hosted-provisioning-worker";
 
 const worker = createHostedProvisioningWorker();
 

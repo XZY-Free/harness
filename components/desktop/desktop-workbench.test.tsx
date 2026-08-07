@@ -1,4 +1,4 @@
-import type { ClientGoal, ClientItem, ClientTurn } from "@/lib/v11/client/types";
+import type { ClientGoal, ClientItem, ClientTurn } from "@/lib/client/types";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

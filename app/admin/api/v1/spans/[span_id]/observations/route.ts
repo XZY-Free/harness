@@ -5,9 +5,9 @@ import {
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
-import { listObservationsBySpan } from "@/lib/v11/observability/observation-queries";
-import { getSpanById } from "@/lib/v11/observability/trace-queries";
+} from "@/lib/admin/route-helpers";
+import { listObservationsBySpan } from "@/lib/observability/observation-queries";
+import { getSpanById } from "@/lib/observability/trace-queries";
 /**
  * GET /admin/api/v1/spans/{span_id}/observations — 列出 Span 下所有 Observation（S11-W05）。
  *

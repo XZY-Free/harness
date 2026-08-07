@@ -23,14 +23,14 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtimes/application/publish-runtime-revision-service";
+import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtime/provisioning/publish-runtime-revision-service";
 import {
   listRuntimeConformanceCaseResults,
   listRuntimeConformanceRuns,
   recordRuntimeConformanceRun,
-} from "@/lib/runtimes/application/runtime-conformance-runs";
-import { RuntimeConformanceIdempotencyConflictError } from "@/lib/runtimes/application/record-runtime-conformance-run";
-import { RuntimeConformanceCaseFailedError } from "@/lib/runtimes/domain/runtime-conformance";
+} from "@/lib/runtime/provisioning/runtime-conformance-runs";
+import { RuntimeConformanceIdempotencyConflictError } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
+import { RuntimeConformanceCaseFailedError } from "@/lib/runtime/domain/runtime-conformance";
 /**
  * GET/POST /admin/api/v1/runtime-revisions/{revision_id}/conformance — RuntimeRevision conformance 结果（S05-C06）。
  *
@@ -66,17 +66,17 @@ import { RuntimeConformanceCaseFailedError } from "@/lib/runtimes/domain/runtime
 import {
   RuntimeConformanceBindingError,
   RuntimeConformanceTrustError,
-} from "@/lib/runtimes/domain/runtime-conformance-run";
+} from "@/lib/runtime/domain/runtime-conformance-run";
 import {
   RuntimeArtifactAttestationInvalidError,
   RuntimeArtifactAttestationRequiredError,
   RuntimeConformanceRunInvalidError,
-} from "@/lib/runtimes/domain/runtime-revision-publication-policy";
-import { getRuntimeById } from "@/lib/runtimes/persistence/runtime-queries";
+} from "@/lib/runtime/domain/runtime-revision-publication-policy";
+import { getRuntimeById } from "@/lib/runtime/persistence/runtime-queries";
 import {
   RuntimeRevisionNotFoundError,
   getRuntimeRevisionById,
-} from "@/lib/runtimes/persistence/runtime-revision-queries";
+} from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
   type AdminPrincipal,
   RUNTIME_REVISION_ETAG_PREFIX,
@@ -86,7 +86,7 @@ import {
   requireAdminActionScope,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
-} from "@/lib/v11/admin/route-helpers";
+} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

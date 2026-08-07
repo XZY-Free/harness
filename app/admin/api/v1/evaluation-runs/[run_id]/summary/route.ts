@@ -3,8 +3,8 @@ import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
-} from "@/lib/v11/admin/route-helpers";
-import { getEvaluationRunById } from "@/lib/v11/evaluation/evaluation-queries";
+} from "@/lib/admin/route-helpers";
+import { getEvaluationRunById } from "@/lib/evaluation/evaluation-queries";
 /**
  * GET /admin/api/v1/evaluation-runs/{run_id}/summary — Run Summary 投影（S11-W06）。
  *

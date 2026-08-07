@@ -13,9 +13,9 @@ import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
-import { createRequestHostedProvisioning } from "@/lib/runtimes/application/request-hosted-provisioning";
-import { createRevisionValidator } from "@/lib/runtimes/application/validate-hosted-provisioning-revision";
-import { mysqlHostedProvisioningRequestStore } from "@/lib/runtimes/persistence/mysql-hosted-provisioning-request-store";
+import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
+import { createRevisionValidator } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
+import { mysqlHostedProvisioningRequestStore } from "@/lib/runtime/persistence/mysql-hosted-provisioning-request-store";
 import { streamText } from "ai";
 import { and, eq } from "drizzle-orm";
 
