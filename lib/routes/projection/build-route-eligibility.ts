@@ -315,8 +315,6 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
  conformanceRunId: evidenceSnapshot.runtimePublication?.conformanceRunId ?? null,
  agentArtifactId: evidenceSnapshot.agentArtifactEvidence?.artifactId ?? null,
  runtimeArtifactId: evidenceSnapshot.runtimeArtifactEvidence?.artifactId ?? null,
- sourceEventId: input.sourceEventId ?? null,
- sourceAggregateVersion: input.sourceAggregateVersion ?? null,
  invalidReason: isEligible ? null : ineligibilityReasons.join(","),
  eligibilityState: (isEligible ? "eligible" : "ineligible") as "eligible" | "ineligible",
  };
@@ -332,6 +330,9 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
  projectionContentDigest,
  projectionVersionNo,
  lastRebuiltAt: now,
+ // §06: 事件元数据存入 DB 但不参与 Digest 计算
+ sourceEventId: input.sourceEventId ?? null,
+ sourceAggregateVersion: input.sourceAggregateVersion ?? null,
  };
 
  await deps.store.upsertProjection(projectionInput);
