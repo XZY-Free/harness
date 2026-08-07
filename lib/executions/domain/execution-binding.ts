@@ -7,6 +7,8 @@ export interface ExecutionBindingControlPlaneEvidence extends RouteControlPlaneE
  routeRevisionId: string;
  routeActivationId: string;
  routeContentDigest: string;
+ /** §07: Resolver 输入摘要 — 冻结解析时刻的请求参数 Digest。 */
+ resolutionInputDigest: string;
 }
 
 export interface ExecutionBindingConfigInput {
@@ -86,6 +88,7 @@ export function assertExecutionBindingEvidence(
  evidence.runtimeArtifactDigest,
  evidence.runtimeConfigDigest,
  evidence.capabilityManifestDigest,
+ evidence.resolutionInputDigest,
  ];
  if (digests.some((value) => !SHA256.test(value))) {
  throw new ExecutionBindingEvidenceError("Digest 格式非法");

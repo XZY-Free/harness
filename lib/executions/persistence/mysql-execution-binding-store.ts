@@ -120,6 +120,8 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
  agentPublicationRecordId: evidence.agentPublicationRecordId,
  runtimePublicationRecordId: evidence.runtimePublicationRecordId,
  conformanceRunId: evidence.conformanceRunId,
+ resolutionInputDigest: evidence.resolutionInputDigest,
+ projectionVersionNo: input.projectionVersionNo ?? 0,
  environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
  configHash: input.configHash,
  boundAt: input.boundAt,
@@ -338,6 +340,8 @@ function toExecutionBinding(row: typeof executionBindingTable.$inferSelect): Exe
  agentPublicationRecordId: row.agentPublicationRecordId,
  runtimePublicationRecordId: row.runtimePublicationRecordId,
  conformanceRunId: row.conformanceRunId,
+ resolutionInputDigest: row.resolutionInputDigest ?? "",
+ projectionVersionNo: row.projectionVersionNo ?? 0,
  configHash: row.configHash,
  boundAt: row.boundAt,
  };

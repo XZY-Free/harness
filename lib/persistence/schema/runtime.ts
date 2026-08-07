@@ -347,6 +347,10 @@ export const executionBindingTable = mysqlTable(
  agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }),
  runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }),
  conformanceRunId: varchar("conformanceRunId", { length: 36 }),
+ /** §07: Resolver 输入摘要 — 冻结解析时刻的请求参数 Digest。 */
+ resolutionInputDigest: varchar("resolutionInputDigest", { length: 71 }),
+ /** §07: Projection 版本号 — Binding 用此检测 Projection 滞后。 */
+ projectionVersionNo: int("projectionVersionNo"),
  environmentDefinitionRevisionId: varchar("environmentDefinitionRevisionId", { length: 36 }),
  configHash: varchar("configHash", { length: 128 }).notNull(),
  boundAt: datetime("boundAt", { mode: "date", fsp: 3 })

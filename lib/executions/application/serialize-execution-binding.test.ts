@@ -28,6 +28,8 @@ const binding: ExecutionBinding = {
   agentPublicationRecordId: "agent-publication-1",
   runtimePublicationRecordId: "runtime-publication-1",
   conformanceRunId: "conformance-run-1",
+  resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  projectionVersionNo: 1,
   configHash: `sha256:${"6".repeat(64)}`,
   boundAt: new Date("2026-08-03T01:02:03.000Z"),
 };

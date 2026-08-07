@@ -23,6 +23,8 @@ export interface SerializableExecutionBinding {
  agentPublicationRecordId: string | null;
  runtimePublicationRecordId: string | null;
  conformanceRunId: string | null;
+ resolutionInputDigest: string | null;
+ projectionVersionNo?: number | null | undefined;
  environmentDefinitionRevisionId: string | null;
  configHash: string;
  boundAt: Date;
@@ -54,6 +56,8 @@ export function serializeExecutionBinding(binding: SerializableExecutionBinding)
  agent_publication_record_id: binding.agentPublicationRecordId,
  runtime_publication_record_id: binding.runtimePublicationRecordId,
  conformance_run_id: binding.conformanceRunId,
+ resolution_input_digest: binding.resolutionInputDigest,
+ projection_version_no: binding.projectionVersionNo,
  environment_definition_revision_id: binding.environmentDefinitionRevisionId,
  config_hash: binding.configHash,
  bound_at: binding.boundAt.toISOString(),

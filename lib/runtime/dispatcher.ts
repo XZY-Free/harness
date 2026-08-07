@@ -297,6 +297,7 @@ export async function dispatchInvocationForTurn(params: {
  routeRevisionId: routeResolution.routeRevisionId,
  routeActivationId: routeResolution.routeActivationId,
  routeContentDigest: routeResolution.routeContentDigest,
+ resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
  ...routeResolution.controlPlaneEvidence,
  },
  };

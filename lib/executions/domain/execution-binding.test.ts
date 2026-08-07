@@ -17,6 +17,7 @@ const EVIDENCE = {
   agentPublicationRecordId: "agent-publication-1",
   runtimePublicationRecordId: "runtime-publication-1",
   conformanceRunId: "conformance-run-1",
+  resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 };
 
 function bindingInput() {

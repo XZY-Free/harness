@@ -932,6 +932,7 @@ describe("V11 Dispatcher 调度", () => {
       routeRevisionId: result.routeResolution?.routeRevisionId,
       routeActivationId: result.routeResolution?.routeActivationId,
       routeContentDigest: result.routeResolution?.routeContentDigest,
+      resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       agentArtifactDigest: ctx.agentRevision.artifactDigest,
       runtimeArtifactDigest: ctx.runtimeRevision.artifactDigest,
       runtimeConfigDigest: ctx.runtimeRevision.configHash,
@@ -1029,6 +1030,7 @@ describe("V11 Dispatcher 调度", () => {
         routeRevisionId: resolution.routeRevisionId,
         routeActivationId: resolution.routeActivationId,
         routeContentDigest: resolution.routeContentDigest,
+        resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
         ...resolution.controlPlaneEvidence,
       },
     };
