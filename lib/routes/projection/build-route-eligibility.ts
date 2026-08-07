@@ -216,7 +216,9 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
  const isEligible = eligibilityResult.eligible;
 
  // Policy revision state for projection
- const policyRevisionState = evidenceSnapshot.policyRevision?.revisionState ?? null;
+ const policyRevisionState = evidenceSnapshot.policyRequirement.kind === "referenced"
+  ? evidenceSnapshot.policyRequirement.policyRevision.revisionState
+  : null;
 
  // 收集 ineligibility 原因
  const ineligibilityReasons: string[] = [];

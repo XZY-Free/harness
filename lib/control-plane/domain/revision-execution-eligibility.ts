@@ -25,6 +25,49 @@ export interface PolicyRevisionSnapshot {
  publishedAt: Date | null;
 }
 
+// ─── Policy Requirement (: Fail-closed) ───────────────
+
+/**
+ * Policy 引用需求 — 明确区分"没有引用"和"引用了但读取失败"。
+ *
+ * { kind: "none" } → Route 故意不引用 Policy（允许）
+ * { kind: "referenced", policyRevisionId, policyRevision } → Route 引用了 Policy
+ *
+ * 此类型消除了 policyRevisionId: null 的歧义：
+ * - 旧语义：null 同时表示"没引用"和"引用失败"
+ * - 新语义：kind="none" 表示"没引用"，kind="referenced" 且 policyRevision 存在表示"引用有效"
+ */
+export type PolicyRequirement =
+ | { kind: "none" }
+ | {
+    kind: "referenced";
+    policyRevisionId: string;
+    policyRevision: PolicyRevisionSnapshot;
+   };
+
+/**
+ * Policy 引用读取失败码。
+ *
+ * 传入 Policy ID 但读取异常时的精确分类，替代笼统的 null。
+ */
+export const POLICY_REQUIREMENT_FAILURE_CODES = [
+ "policy_revision_not_found",
+ "policy_revision_cross_tenant",
+ "policy_revision_not_published",
+ "policy_revision_withdrawn",
+] as const;
+export type PolicyRequirementFailureCode = (typeof POLICY_REQUIREMENT_FAILURE_CODES)[number];
+
+/**
+ * Policy 引用读取结果。
+ *
+ * ok=true → PolicyRequirement（kind="none" 或 kind="referenced"）
+ * ok=false → 读取失败（精确失败码）
+ */
+export type PolicyRequirementResult =
+ | { ok: true; requirement: PolicyRequirement }
+ | { ok: false; failureCode: PolicyRequirementFailureCode; failureReason: string };
+
 // ─── Evidence Snapshot ───────────────────────────────────
 
 /**
@@ -66,8 +109,8 @@ export interface RevisionExecutionEvidenceSnapshot {
  /** Runtime Capabilities（: 必须经过 fail-closed 解析）。 */
  runtimeCapabilities: string[];
 
- /** : Policy Revision 快照。null = Route 未引用 Policy。 */
- policyRevision: PolicyRevisionSnapshot | null;
+ /** : Policy 引用需求。kind="none" = Route 未引用 Policy；kind="referenced" = 引用了 Policy。 */
+ policyRequirement: PolicyRequirement;
 }
 
 // ─── Eligibility Result ──────────────────────────────────
@@ -227,20 +270,22 @@ export const RevisionExecutionEligibilityPolicy = {
  });
  }
 
- // 9. : Policy 状态 — 正式阻断
- // Route 引用了 Policy → 必须存在且 revisionState = "published"（非 draft/withdrawn）
- if (snapshot.policyRevision !== null) {
- if (snapshot.policyRevision.revisionState === "withdrawn") {
+ // 9. : Policy 引用 — Fail-closed 校验
+ // kind="referenced" → Policy 必须存在且 revisionState = "published"（非 draft/withdrawn）
+ // kind="none" → Route 不引用 Policy，不阻断
+ if (snapshot.policyRequirement.kind === "referenced") {
+ const policy = snapshot.policyRequirement.policyRevision;
+ if (policy.revisionState === "withdrawn") {
  errors.push({
  dimension: "policy",
  code: "policy_withdrawn",
- message: `PolicyRevision ${snapshot.policyRevision.id} 已撤回`,
+ message: `PolicyRevision ${policy.id} 已撤回`,
  });
- } else if (snapshot.policyRevision.revisionState !== "published") {
+ } else if (policy.revisionState !== "published") {
  errors.push({
  dimension: "policy",
  code: "policy_not_published",
- message: `PolicyRevision ${snapshot.policyRevision.id} 状态为 ${snapshot.policyRevision.revisionState}，要求 published`,
+ message: `PolicyRevision ${policy.id} 状态为 ${policy.revisionState}，要求 published`,
  });
  }
  }

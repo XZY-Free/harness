@@ -60,7 +60,7 @@ export { idempotencyRecord } from "@/lib/persistence/schema/idempotency";
 export { tenant as tenantTable } from "@/lib/persistence/schema/identity";
 
 // ─── Policy ───────────────────────────────────────────────────────
-export { policyRevisionTable } from "@/lib/persistence/schema/permission";
+export { policyRevisionTable, policySetTable } from "@/lib/persistence/schema/permission";
 
 // ─── Runtime + Execution ──────────────────────────────────────────
 export {

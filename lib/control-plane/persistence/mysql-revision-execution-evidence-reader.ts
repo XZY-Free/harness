@@ -10,7 +10,7 @@
  * 参见：SnowHarness专题01最终差距整改与正式链路收口实施方案 
  */
 
-import type { RevisionExecutionEvidenceSnapshot, PolicyRevisionSnapshot } from "../domain/revision-execution-eligibility";
+import type { RevisionExecutionEvidenceSnapshot, PolicyRevisionSnapshot, PolicyRequirementResult } from "../domain/revision-execution-eligibility";
 import type { RevisionExecutionEvidenceReader, LoadEvidenceInput, LoadExactEvidenceInput } from "../application/revision-execution-evidence-reader";
 import { extractRuntimeCapabilities, EligibilityError } from "../domain/revision-execution-eligibility";
 
@@ -22,7 +22,7 @@ import { loadConformanceEligibilitySnapshot } from "@/lib/runtimes/persistence/r
 
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
-import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
+import { policyRevisionTable, policySetTable } from "@/lib/persistence/schema/control-plane";
 import { and, eq, isNull } from "drizzle-orm";
 import type { db as DbType, DbOrTx } from "@/lib/db/client";
 
@@ -150,8 +150,12 @@ async function loadEvidence(
  dbOrTx: dbOrTx,
  });
 
- // Phase 4: : 加载 Policy Revision 快照（真实读取，不再仅存 id）
- const policyRevision = await loadPolicyRevisionSnapshot(dbOrTx, input.policyRevisionId);
+ // Phase 4: : 加载 Policy Requirement（Fail-closed，含租户校验）
+ const policyResult = await loadPolicyRequirement(dbOrTx, input.policyRevisionId, input.tenantId);
+ if (!policyResult.ok) {
+  throw new EligibilityError(policyResult.failureCode, policyResult.failureReason);
+ }
+ const policyRequirement = policyResult.requirement;
 
  // : Fail-closed Capability 解析
  const runtimeCapabilities = extractRuntimeCapabilities(runtimeRevisionRow?.runtimeCapabilitiesJson);
@@ -181,37 +185,72 @@ async function loadEvidence(
  ? "withdrawn"
  : "draft",
  runtimeCapabilities,
- policyRevision,
+ policyRequirement,
  };
 }
 
 /**
- * : 加载 Policy Revision 快照。
+ * : 加载 Policy Requirement — Fail-closed。
  *
- * policyRevisionId 为 null → Route 未引用 Policy → 返回 null
- * policyRevisionId 非 null → 必须读取完整状态（id, revisionState, publishedAt, withdrawnAt）
+ * policyRevisionId 为 null → Route 未引用 Policy → { kind: "none" }
+ * policyRevisionId 非 null → 必须读取完整状态，校验租户范围，返回 PolicyRequirementResult。
+ *
+ * 失败场景（精确分类）：
+ * - policy_revision_not_found: 引用的 Policy 不存在
+ * - policy_revision_cross_tenant: Policy 属于其他租户
  */
-async function loadPolicyRevisionSnapshot(
+async function loadPolicyRequirement(
  dbOrTx: DbLike,
  policyRevisionId: string | null,
-): Promise<PolicyRevisionSnapshot | null> {
- if (!policyRevisionId) return null;
+ tenantId: string,
+): Promise<PolicyRequirementResult> {
+ // 未引用 Policy → 合法，返回 none
+ if (!policyRevisionId) {
+  return { ok: true, requirement: { kind: "none" } };
+ }
 
+ // 读取 Policy Revision（JOIN PolicySet 表校验租户）
  const [row] = await dbOrTx
  .select({
- id: policyRevisionTable.id,
- revisionState: policyRevisionTable.revisionState,
- publishedAt: policyRevisionTable.publishedAt,
+  id: policyRevisionTable.id,
+  revisionState: policyRevisionTable.revisionState,
+  publishedAt: policyRevisionTable.publishedAt,
+  tenantId: policySetTable.tenantId,
  })
  .from(policyRevisionTable)
+ .innerJoin(policySetTable, eq(policyRevisionTable.policySetId, policySetTable.id))
  .where(eq(policyRevisionTable.id, policyRevisionId))
  .limit(1);
 
- if (!row) return null;
+ // 引用了但不存在 → fail-closed
+ if (!row) {
+  return {
+   ok: false,
+   failureCode: "policy_revision_not_found",
+   failureReason: `PolicyRevision ${policyRevisionId} 不存在`,
+  };
+ }
 
+ // 跨租户 → fail-closed
+ if (row.tenantId !== tenantId) {
+  return {
+   ok: false,
+   failureCode: "policy_revision_cross_tenant",
+   failureReason: `PolicyRevision ${policyRevisionId} 属于租户 ${row.tenantId}，当前租户 ${tenantId}`,
+  };
+ }
+
+ // 引用有效 → 返回 referenced
  return {
- id: row.id,
- revisionState: row.revisionState as PolicyRevisionSnapshot["revisionState"],
- publishedAt: row.publishedAt,
+  ok: true,
+  requirement: {
+   kind: "referenced",
+   policyRevisionId,
+   policyRevision: {
+    id: row.id,
+    revisionState: row.revisionState as PolicyRevisionSnapshot["revisionState"],
+    publishedAt: row.publishedAt,
+   },
+  },
  };
 }
