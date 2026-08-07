@@ -7,11 +7,30 @@ import {
  runtimeConformanceRun,
 } from "@/lib/runtimes/persistence/runtime-conformance-run-record";
 import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import {
+ RunnerSigningIdentityRegistry,
+ createRegistryFromLegacyConfig,
+} from "@/lib/runtimes/domain/runner-signing-identity";
 import { and, desc, eq } from "drizzle-orm";
+
+/**
+ * 从配置构建 RunnerSigningIdentityRegistry。
+ * 优先使用精确绑定，否则从旧配置推导。
+ */
+function buildRegistry(): RunnerSigningIdentityRegistry {
+ const identities = runtimeConformanceConfig.runnerSigningIdentities;
+ if (identities) {
+  return new RunnerSigningIdentityRegistry(identities);
+ }
+ return createRegistryFromLegacyConfig({
+  trustedRunnerKeys: runtimeConformanceConfig.trustedRunnerKeys,
+  allowedRunnerIdentities: runtimeConformanceConfig.allowedRunnerIdentities,
+ });
+}
 
 const record = createRecordRuntimeConformanceRun({
  store: mysqlRuntimeConformanceRunStore,
- verifier: createDSSEConformanceVerifier(runtimeConformanceConfig),
+ verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: buildRegistry() }),
 });
 
 export const recordRuntimeConformanceRun = record;

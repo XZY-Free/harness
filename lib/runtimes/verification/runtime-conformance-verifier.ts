@@ -30,6 +30,7 @@ import {
  CONFORMANCE_SUITE_REVISION,
 } from "@/lib/runtimes/domain/runtime-conformance-contract";
 import type { RuntimeConformanceReport } from "@/lib/runtimes/domain/runtime-conformance-run";
+import type { RunnerSigningIdentityRegistry } from "@/lib/runtimes/domain/runner-signing-identity";
 
 // ─── 标准 Predicate Type ──────────────────────────────────
 
@@ -90,10 +91,8 @@ export interface RuntimeConformanceVerifier {
 // ─── DSSE Conformance Verifier ───────────────────────────
 
 export interface DSSEConformanceVerifierConfig {
- /** 允许的 Runner Identity 列表。 */
- allowedRunnerIdentities: string[];
- /** keyid → base64 编码的 Ed25519 公钥（32 字节 raw）。 */
- trustedRunnerKeys: Record<string, string>;
+ /** Runner 签名身份注册表（keyId ↔ runnerIdentity 一一绑定）。 */
+ runnerIdentityRegistry: RunnerSigningIdentityRegistry;
 }
 
 const VERIFICATION_ENGINE = "dsse-ed25519";
@@ -117,11 +116,13 @@ export function createDSSEConformanceVerifier(
  }
  const { envelope, payloadBytes } = parsed;
 
- // 步骤 2: Ed25519 验签（共享底座）
+ // 步骤 2: Ed25519 验签（共享底座，使用注册表中活跃的公钥）
+ const now = new Date();
+ const activeKeys = config.runnerIdentityRegistry.getActivePublicKeys(now);
  const sigResult = verifyDSSEEnvelopeSignatures(
  envelope,
  payloadBytes,
- config.trustedRunnerKeys,
+ activeKeys,
  );
  if (!sigResult.verified) {
  return fail(sigResult.failureReason ?? "signature_invalid");
@@ -203,9 +204,16 @@ export function createDSSEConformanceVerifier(
  return fail("suite_revision_mismatch");
  }
 
- // 步骤 13: 校验 Runner Identity ∈ allowedRunnerIdentities
- if (!config.allowedRunnerIdentities.includes(report.runnerIdentity)) {
- return fail("runner_identity_not_allowed");
+ // 步骤 13: 校验 Runner Key ↔ Runner Identity 绑定（注册表权威校验）
+ // 验签通过的 keyId 必须与 report.runnerIdentity 存在显式授权绑定
+ const identityResult = config.runnerIdentityRegistry.validate({
+  keyId: verifiedKeyId,
+  runnerIdentity: report.runnerIdentity,
+  tenantId: input.tenantId,
+  now,
+ });
+ if (!identityResult.ok) {
+  return fail(identityResult.failureReason);
  }
 
  // 步骤 14: 校验 Case 集合完整（使用 ALL_CONFORMANCE_CASES）

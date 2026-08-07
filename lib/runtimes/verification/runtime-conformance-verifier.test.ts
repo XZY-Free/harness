@@ -17,14 +17,17 @@ import {
 import { createPrivateKey, sign as cryptoSign } from "node:crypto";
 import { computeDssePae } from "@/lib/crypto/dsse";
 import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtimes/domain/runtime-conformance-contract";
+import { createRegistryFromLegacyConfig } from "@/lib/runtimes/domain/runner-signing-identity";
 
 const RUNNER_IDENTITY = "ci/runtime-conformance";
 const ALLOWED_IDENTITIES = [RUNNER_IDENTITY];
 
 function createVerifierWithKey(key: ReturnType<typeof generateTestRunnerKey>) {
   return createDSSEConformanceVerifier({
-    allowedRunnerIdentities: ALLOWED_IDENTITIES,
-    trustedRunnerKeys: { [key.keyid]: key.publicKeyBase64 },
+    runnerIdentityRegistry: createRegistryFromLegacyConfig({
+      trustedRunnerKeys: { [key.keyid]: key.publicKeyBase64 },
+      allowedRunnerIdentities: ALLOWED_IDENTITIES,
+    }),
   });
 }
 
@@ -231,17 +234,19 @@ describe("createDSSEConformanceVerifier", () => {
     if (!result.verified) expect(result.failureReason).toBe("protocol_revision_mismatch");
   });
 
-  it("Runner Identity 不允许 → runner_identity_not_allowed", async () => {
+  it("Runner Identity 不允许 → runner_key_identity_mismatch", async () => {
     const key = generateTestRunnerKey("runner-key-1");
     const verifier = createDSSEConformanceVerifier({
-      allowedRunnerIdentities: ["other-runner"],
-      trustedRunnerKeys: { [key.keyid]: key.publicKeyBase64 },
+      runnerIdentityRegistry: createRegistryFromLegacyConfig({
+        trustedRunnerKeys: { [key.keyid]: key.publicKeyBase64 },
+        allowedRunnerIdentities: ["other-runner"],
+      }),
     });
     const report = buildTestConformanceReport("rev-1");
     const envelope = buildDsseConformanceEnvelope(report, key);
     const result = await verifier.verify(createBaseInput(envelope, report));
     expect(result.verified).toBe(false);
-    if (!result.verified) expect(result.failureReason).toBe("runner_identity_not_allowed");
+    if (!result.verified) expect(result.failureReason).toBe("runner_key_identity_mismatch");
   });
 
   it("suiteRevision 不一致 → suite_revision_mismatch", async () => {

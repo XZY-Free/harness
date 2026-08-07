@@ -126,6 +126,33 @@ export const runtimeConformanceConfig = {
  return {};
  }
  },
+ /**
+  * Runner 签名身份注册表 JSON（SNOW_RUNNER_SIGNING_IDENTITIES_JSON）。
+  *
+  * 格式：RunnerSigningIdentity[]（keyId + publicKey + runnerIdentity + tenantScope +
+  * validFrom + validUntil + revokedAt）。
+  *
+  * 若未设置，从旧的 trustedRunnerKeys + allowedRunnerIdentities 自动推导
+  * （每个 key × 每个 identity = 一条绑定，兼容过渡期）。
+  */
+ get runnerSigningIdentities(): Array<{
+ keyId: string;
+ publicKey: string;
+ runnerIdentity: string;
+ tenantScope: string | null;
+ validFrom: string;
+ validUntil: string | null;
+ revokedAt: string | null;
+ }> | null {
+ const raw = optionalEnv("SNOW_RUNNER_SIGNING_IDENTITIES_JSON", "");
+ if (!raw) return null;
+ try {
+ const parsed = JSON.parse(raw);
+ return Array.isArray(parsed) ? parsed : null;
+ } catch {
+ return null;
+ }
+ },
 } as const;
 
 /** Hosted 制品证明与独立 Conformance Runner 的受管服务配置。 */

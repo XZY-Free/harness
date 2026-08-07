@@ -22,6 +22,10 @@ import {
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { aiConfig, runtimeConformanceConfig } from "@/lib/config";
+import {
+ RunnerSigningIdentityRegistry,
+ createRegistryFromLegacyConfig,
+} from "@/lib/runtimes/domain/runner-signing-identity";
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { tenantTable } from "@/lib/persistence/schema/control-plane";
@@ -64,6 +68,26 @@ import {
 import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
 import { and, desc, eq, max } from "drizzle-orm";
 
+// ─── Runner Identity Registry 构建 ──────────────────────────
+
+/**
+ * 从配置构建 RunnerSigningIdentityRegistry。
+ *
+ * 优先使用 SNOW_RUNNER_SIGNING_IDENTITIES_JSON（精确绑定），
+ * 否则从旧的 trustedRunnerKeys + allowedRunnerIdentities 推导（兼容过渡期）。
+ */
+function buildRunnerIdentityRegistry(): RunnerSigningIdentityRegistry {
+ const identities = runtimeConformanceConfig.runnerSigningIdentities;
+ if (identities) {
+  return new RunnerSigningIdentityRegistry(identities);
+ }
+ // 兼容过渡：从旧配置推导（每个 key × 每个 identity = 一条绑定）
+ return createRegistryFromLegacyConfig({
+  trustedRunnerKeys: runtimeConformanceConfig.trustedRunnerKeys,
+  allowedRunnerIdentities: runtimeConformanceConfig.allowedRunnerIdentities,
+ });
+}
+
 // ─── 常量 ───────────────────────────────────────────────────
 
 const BUILTIN_HOSTED_RUNTIME_KEY = "builtin-hosted";
@@ -91,8 +115,7 @@ const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPubli
 const recordRuntimeConformanceRun = createRecordRuntimeConformanceRun({
  store: mysqlRuntimeConformanceRunStore,
  verifier: createDSSEConformanceVerifier({
- allowedRunnerIdentities: runtimeConformanceConfig.allowedRunnerIdentities,
- trustedRunnerKeys: runtimeConformanceConfig.trustedRunnerKeys,
+  runnerIdentityRegistry: buildRunnerIdentityRegistry(),
  }),
 });
 const publishRuntimeRevision = createPublishRuntimeRevision({

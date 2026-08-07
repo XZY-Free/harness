@@ -29,6 +29,7 @@ import {
   type TestRunnerKey,
 } from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
 import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import { createRegistryFromLegacyConfig } from "@/lib/runtimes/domain/runner-signing-identity";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -39,10 +40,7 @@ const DIGEST_B = `sha256:${"b".repeat(64)}`;
 const DIGEST_C = `sha256:${"c".repeat(64)}`;
 
 function createTestVerifier() {
-  return createDSSEConformanceVerifier({
-    allowedRunnerIdentities: [RUNNER_IDENTITY],
-    trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 },
-  });
+  return createDSSEConformanceVerifier({ runnerIdentityRegistry: createRegistryFromLegacyConfig({ trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 }, allowedRunnerIdentities: [RUNNER_IDENTITY] }) });
 }
 
 async function seedRevision() {

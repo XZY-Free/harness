@@ -59,6 +59,7 @@ import {
   generateTestRunnerKey,
 } from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
 import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import { createRegistryFromLegacyConfig } from "@/lib/runtimes/domain/runner-signing-identity";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -152,10 +153,7 @@ async function publishTrustedRevision(
   const dsseEnvelope = buildDsseConformanceEnvelope(report, RUNNER_KEY);
   const record = createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    verifier: createDSSEConformanceVerifier({
-      allowedRunnerIdentities: [RUNNER_IDENTITY],
-      trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 },
-    }),
+    verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: createRegistryFromLegacyConfig({ trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 }, allowedRunnerIdentities: [RUNNER_IDENTITY] }) }),
   });
   await record({
     tenantId,

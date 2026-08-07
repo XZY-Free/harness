@@ -109,6 +109,7 @@ import {
   generateTestRunnerKey,
 } from "@/lib/runtimes/test-support/build-dsse-conformance-envelope";
 import { createDSSEConformanceVerifier } from "@/lib/runtimes/verification/runtime-conformance-verifier";
+import { createRegistryFromLegacyConfig } from "@/lib/runtimes/domain/runner-signing-identity";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/v11/test-support/publish-trusted-runtime-revision";
 import { withdrawRuntimeRevision } from "@/lib/runtimes/test-support/withdraw-runtime-revision";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
@@ -735,10 +736,7 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
 
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,
-      verifier: createDSSEConformanceVerifier({
-        allowedRunnerIdentities: [RUNNER_IDENTITY],
-        trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 },
-      }),
+      verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: createRegistryFromLegacyConfig({ trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 }, allowedRunnerIdentities: [RUNNER_IDENTITY] }) }),
     });
     const result = await record({
       tenantId: tenant.id,
