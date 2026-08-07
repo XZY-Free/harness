@@ -78,28 +78,33 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-api.test.ts 一致）。
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
-const ORIGINAL_CONFORMANCE_RUNNERS = process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS;
-const ORIGINAL_CONFORMANCE_KEYS = process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON;
+const ORIGINAL_RUNNER_SIGNING_IDENTITIES = process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON;
 const TEST_RUNNER_KEY = generateTestRunnerKey("runner-api-test");
 const RUNNER_IDENTITY = "ci/runtime-conformance";
-const TRUSTED_KEYS_JSON = JSON.stringify({
-  [TEST_RUNNER_KEY.keyid]: TEST_RUNNER_KEY.publicKeyBase64,
-});
+const RUNNER_SIGNING_IDENTITIES_JSON = JSON.stringify([
+  {
+    keyId: TEST_RUNNER_KEY.keyid,
+    publicKey: TEST_RUNNER_KEY.publicKeyBase64,
+    runnerIdentity: RUNNER_IDENTITY,
+    tenantScope: null,
+    validFrom: "2020-01-01T00:00:00.000Z",
+    validUntil: null,
+    revokedAt: null,
+  },
+]);
 const RUNTIME_DIGEST = `sha256:${"a".repeat(64)}`;
 const CONFIG_DIGEST = `sha256:${"b".repeat(64)}`;
 const RUNNER_DIGEST = `sha256:${"c".repeat(64)}`;
 
 beforeEach(async () => {
   process.env.SNOW_AUTH_MODE = "dev";
-  process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = RUNNER_IDENTITY;
-  process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = TRUSTED_KEYS_JSON;
+  process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = RUNNER_SIGNING_IDENTITIES_JSON;
   await resetDatabase(db);
 });
 
 afterEach(() => {
   process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
-  process.env.SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS = ORIGINAL_CONFORMANCE_RUNNERS;
-  process.env.SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON = ORIGINAL_CONFORMANCE_KEYS;
+  process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = ORIGINAL_RUNNER_SIGNING_IDENTITIES;
 });
 
 // ─── 辅助：seed 租户 + 用户 + Runtime + draft Revision ──

@@ -7,33 +7,28 @@ import {
  runtimeConformanceRun,
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
-import {
- RunnerSigningIdentityRegistry,
- createRegistryFromLegacyConfig,
-} from "@/lib/runtime/domain/runner-signing-identity";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { and, desc, eq } from "drizzle-orm";
 
-/**
- * 从配置构建 RunnerSigningIdentityRegistry。
- * 优先使用精确绑定，否则从旧配置推导。
- */
+/** 从唯一的正式配置构建 RunnerSigningIdentityRegistry。 */
 function buildRegistry(): RunnerSigningIdentityRegistry {
- const identities = runtimeConformanceConfig.runnerSigningIdentities;
- if (identities) {
-  return new RunnerSigningIdentityRegistry(identities);
- }
- return createRegistryFromLegacyConfig({
-  trustedRunnerKeys: runtimeConformanceConfig.trustedRunnerKeys,
-  allowedRunnerIdentities: runtimeConformanceConfig.allowedRunnerIdentities,
- });
+ return new RunnerSigningIdentityRegistry(runtimeConformanceConfig.runnerSigningIdentities);
 }
 
-const record = createRecordRuntimeConformanceRun({
- store: mysqlRuntimeConformanceRunStore,
- verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: buildRegistry() }),
-});
+type RecordRuntimeConformanceRunCommand = Parameters<
+ ReturnType<typeof createRecordRuntimeConformanceRun>
+>[0];
 
-export const recordRuntimeConformanceRun = record;
+/**
+ * 每次录入时从正式配置构建 verifier，避免模块加载阶段冻结尚未加载的环境配置。
+ * instrumentation 会先加载环境文件再接收请求；缺失或非法配置仍构建空注册表并拒绝验签。
+ */
+export function recordRuntimeConformanceRun(command: RecordRuntimeConformanceRunCommand) {
+ return createRecordRuntimeConformanceRun({
+  store: mysqlRuntimeConformanceRunStore,
+  verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: buildRegistry() }),
+ })(command);
+}
 
 export async function listRuntimeConformanceRuns(tenantId: string, runtimeRevisionId: string) {
  return db

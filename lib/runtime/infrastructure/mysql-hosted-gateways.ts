@@ -22,10 +22,7 @@ import {
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { aiConfig, runtimeConformanceConfig } from "@/lib/config";
-import {
- RunnerSigningIdentityRegistry,
- createRegistryFromLegacyConfig,
-} from "@/lib/runtime/domain/runner-signing-identity";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { tenantTable } from "@/lib/persistence/schema/control-plane";
@@ -73,19 +70,10 @@ import { and, desc, eq, max } from "drizzle-orm";
 /**
  * 从配置构建 RunnerSigningIdentityRegistry。
  *
- * 优先使用 SNOW_RUNNER_SIGNING_IDENTITIES_JSON（精确绑定），
- * 否则从旧的 trustedRunnerKeys + allowedRunnerIdentities 推导（兼容过渡期）。
+ * 仅使用 SNOW_RUNNER_SIGNING_IDENTITIES_JSON；缺失或非法时为空并 fail-closed。
  */
 function buildRunnerIdentityRegistry(): RunnerSigningIdentityRegistry {
- const identities = runtimeConformanceConfig.runnerSigningIdentities;
- if (identities) {
-  return new RunnerSigningIdentityRegistry(identities);
- }
- // 兼容过渡：从旧配置推导（每个 key × 每个 identity = 一条绑定）
- return createRegistryFromLegacyConfig({
-  trustedRunnerKeys: runtimeConformanceConfig.trustedRunnerKeys,
-  allowedRunnerIdentities: runtimeConformanceConfig.allowedRunnerIdentities,
- });
+ return new RunnerSigningIdentityRegistry(runtimeConformanceConfig.runnerSigningIdentities);
 }
 
 // ─── 常量 ───────────────────────────────────────────────────

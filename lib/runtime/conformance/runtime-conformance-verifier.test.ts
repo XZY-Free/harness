@@ -17,17 +17,23 @@ import {
 import { createPrivateKey, sign as cryptoSign } from "node:crypto";
 import { computeDssePae } from "@/lib/crypto/dsse";
 import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
-import { createRegistryFromLegacyConfig } from "@/lib/runtime/domain/runner-signing-identity";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 
 const RUNNER_IDENTITY = "ci/runtime-conformance";
-const ALLOWED_IDENTITIES = [RUNNER_IDENTITY];
 
 function createVerifierWithKey(key: ReturnType<typeof generateTestRunnerKey>) {
   return createDSSEConformanceVerifier({
-    runnerIdentityRegistry: createRegistryFromLegacyConfig({
-      trustedRunnerKeys: { [key.keyid]: key.publicKeyBase64 },
-      allowedRunnerIdentities: ALLOWED_IDENTITIES,
-    }),
+    runnerIdentityRegistry: new RunnerSigningIdentityRegistry([
+      {
+        keyId: key.keyid,
+        publicKey: key.publicKeyBase64,
+        runnerIdentity: RUNNER_IDENTITY,
+        tenantScope: null,
+        validFrom: "2020-01-01T00:00:00.000Z",
+        validUntil: null,
+        revokedAt: null,
+      },
+    ]),
   });
 }
 
@@ -237,10 +243,17 @@ describe("createDSSEConformanceVerifier", () => {
   it("Runner Identity 不允许 → runner_key_identity_mismatch", async () => {
     const key = generateTestRunnerKey("runner-key-1");
     const verifier = createDSSEConformanceVerifier({
-      runnerIdentityRegistry: createRegistryFromLegacyConfig({
-        trustedRunnerKeys: { [key.keyid]: key.publicKeyBase64 },
-        allowedRunnerIdentities: ["other-runner"],
-      }),
+      runnerIdentityRegistry: new RunnerSigningIdentityRegistry([
+        {
+          keyId: key.keyid,
+          publicKey: key.publicKeyBase64,
+          runnerIdentity: "other-runner",
+          tenantScope: null,
+          validFrom: "2020-01-01T00:00:00.000Z",
+          validUntil: null,
+          revokedAt: null,
+        },
+      ]),
     });
     const report = buildTestConformanceReport("rev-1");
     const envelope = buildDsseConformanceEnvelope(report, key);

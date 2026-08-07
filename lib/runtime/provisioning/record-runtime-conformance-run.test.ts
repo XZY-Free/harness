@@ -29,7 +29,7 @@ import {
   type TestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
-import { createRegistryFromLegacyConfig } from "@/lib/runtime/domain/runner-signing-identity";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -40,7 +40,19 @@ const DIGEST_B = `sha256:${"b".repeat(64)}`;
 const DIGEST_C = `sha256:${"c".repeat(64)}`;
 
 function createTestVerifier() {
-  return createDSSEConformanceVerifier({ runnerIdentityRegistry: createRegistryFromLegacyConfig({ trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 }, allowedRunnerIdentities: [RUNNER_IDENTITY] }) });
+  return createDSSEConformanceVerifier({
+    runnerIdentityRegistry: new RunnerSigningIdentityRegistry([
+      {
+        keyId: RUNNER_KEY.keyid,
+        publicKey: RUNNER_KEY.publicKeyBase64,
+        runnerIdentity: RUNNER_IDENTITY,
+        tenantScope: null,
+        validFrom: "2020-01-01T00:00:00.000Z",
+        validUntil: null,
+        revokedAt: null,
+      },
+    ]),
+  });
 }
 
 async function seedRevision() {

@@ -105,35 +105,13 @@ export const dbConfig = {
 
 /** : Runtime Conformance DSSE 验签配置。缺失时 fail-closed。 */
 export const runtimeConformanceConfig = {
- /** 允许的 Runner Identity 列表（逗号分隔）。 */
- get allowedRunnerIdentities(): string[] {
- const raw = optionalEnv("SNOW_RUNTIME_CONFORMANCE_ALLOWED_RUNNERS", "");
- if (!raw) return [];
- return raw
- .split(",")
- .map((s) => s.trim())
- .filter(Boolean);
- },
- get trustedRunnerKeys(): Record<string, string> {
- const raw = optionalEnv("SNOW_RUNTIME_CONFORMANCE_TRUSTED_KEYS_JSON", "");
- if (!raw) return {};
- try {
- const parsed = JSON.parse(raw);
- return parsed && typeof parsed === "object" && !Array.isArray(parsed)
- ? (parsed as Record<string, string>)
- : {};
- } catch {
- return {};
- }
- },
  /**
   * Runner 签名身份注册表 JSON（SNOW_RUNNER_SIGNING_IDENTITIES_JSON）。
   *
   * 格式：RunnerSigningIdentity[]（keyId + publicKey + runnerIdentity + tenantScope +
   * validFrom + validUntil + revokedAt）。
   *
-  * 若未设置，从旧的 trustedRunnerKeys + allowedRunnerIdentities 自动推导
-  * （每个 key × 每个 identity = 一条绑定，兼容过渡期）。
+  * 缺失、空值、非法 JSON 或任一非法记录均返回空数组，使验签 fail-closed。
   */
  get runnerSigningIdentities(): Array<{
  keyId: string;
@@ -143,17 +121,50 @@ export const runtimeConformanceConfig = {
  validFrom: string;
  validUntil: string | null;
  revokedAt: string | null;
- }> | null {
+ }> {
  const raw = optionalEnv("SNOW_RUNNER_SIGNING_IDENTITIES_JSON", "");
- if (!raw) return null;
+ if (!raw) return [];
  try {
- const parsed = JSON.parse(raw);
- return Array.isArray(parsed) ? parsed : null;
+ const parsed = JSON.parse(raw) as unknown;
+ if (!Array.isArray(parsed) || parsed.length === 0) return [];
+ return parsed.every(isRunnerSigningIdentity) ? parsed : [];
  } catch {
- return null;
+ return [];
  }
  },
 } as const;
+
+function isRunnerSigningIdentity(value: unknown): value is {
+ keyId: string;
+ publicKey: string;
+ runnerIdentity: string;
+ tenantScope: string | null;
+ validFrom: string;
+ validUntil: string | null;
+ revokedAt: string | null;
+} {
+ if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+ const entry = value as Record<string, unknown>;
+ return (
+ typeof entry.keyId === "string" &&
+ entry.keyId.length > 0 &&
+ typeof entry.publicKey === "string" &&
+ entry.publicKey.length > 0 &&
+ typeof entry.runnerIdentity === "string" &&
+ entry.runnerIdentity.length > 0 &&
+ (entry.tenantScope === null ||
+ (typeof entry.tenantScope === "string" && entry.tenantScope.length > 0)) &&
+ isIsoTimestamp(entry.validFrom) &&
+ (entry.validUntil === null || isIsoTimestamp(entry.validUntil)) &&
+ (entry.revokedAt === null || isIsoTimestamp(entry.revokedAt))
+ );
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+ if (typeof value !== "string") return false;
+ const timestamp = Date.parse(value);
+ return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+}
 
 /** Hosted 制品证明与独立 Conformance Runner 的受管服务配置。 */
 export const hostedControlPlaneConfig = {

@@ -19,7 +19,7 @@ import {
  generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
-import { createRegistryFromLegacyConfig } from "@/lib/runtime/domain/runner-signing-identity";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { eq } from "drizzle-orm";
 
 const TRUSTED_RUNNER_KEY = generateTestRunnerKey("test-trusted-runner");
@@ -75,7 +75,19 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
  const dsseEnvelope = buildDsseConformanceEnvelope(report, TRUSTED_RUNNER_KEY);
  await createRecordRuntimeConformanceRun({
  store: mysqlRuntimeConformanceRunStore,
- verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: createRegistryFromLegacyConfig({ trustedRunnerKeys: { [TRUSTED_RUNNER_KEY.keyid]: TRUSTED_RUNNER_KEY.publicKeyBase64 }, allowedRunnerIdentities: [RUNNER_IDENTITY] }) }),
+ verifier: createDSSEConformanceVerifier({
+  runnerIdentityRegistry: new RunnerSigningIdentityRegistry([
+   {
+    keyId: TRUSTED_RUNNER_KEY.keyid,
+    publicKey: TRUSTED_RUNNER_KEY.publicKeyBase64,
+    runnerIdentity: RUNNER_IDENTITY,
+    tenantScope: null,
+    validFrom: "2020-01-01T00:00:00.000Z",
+    validUntil: null,
+    revokedAt: null,
+   },
+  ]),
+ }),
  })({
  tenantId: params.tenantId,
  runtimeRevisionId: revision.id,

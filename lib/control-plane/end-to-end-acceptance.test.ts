@@ -109,7 +109,7 @@ import {
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
-import { createRegistryFromLegacyConfig } from "@/lib/runtime/domain/runner-signing-identity";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { withdrawRuntimeRevision } from "@/lib/runtime/test-support/withdraw-runtime-revision";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
@@ -736,7 +736,19 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
 
     const record = createRecordRuntimeConformanceRun({
       store: mysqlRuntimeConformanceRunStore,
-      verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: createRegistryFromLegacyConfig({ trustedRunnerKeys: { [RUNNER_KEY.keyid]: RUNNER_KEY.publicKeyBase64 }, allowedRunnerIdentities: [RUNNER_IDENTITY] }) }),
+      verifier: createDSSEConformanceVerifier({
+        runnerIdentityRegistry: new RunnerSigningIdentityRegistry([
+          {
+            keyId: RUNNER_KEY.keyid,
+            publicKey: RUNNER_KEY.publicKeyBase64,
+            runnerIdentity: RUNNER_IDENTITY,
+            tenantScope: null,
+            validFrom: "2020-01-01T00:00:00.000Z",
+            validUntil: null,
+            revokedAt: null,
+          },
+        ]),
+      }),
     });
     const result = await record({
       tenantId: tenant.id,

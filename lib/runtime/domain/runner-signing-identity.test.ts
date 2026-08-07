@@ -12,7 +12,6 @@
 import { describe, expect, it } from "vitest";
 import {
  RunnerSigningIdentityRegistry,
- createRegistryFromLegacyConfig,
  type RunnerSigningIdentity,
 } from "./runner-signing-identity";
 
@@ -195,36 +194,5 @@ describe("RunnerSigningIdentityRegistry", () => {
    const registry = new RunnerSigningIdentityRegistry([]);
    expect(registry.getActivePublicKeys(NOW)).toEqual({});
   });
- });
-});
-
-describe("createRegistryFromLegacyConfig", () => {
- it("每个 key × 每个 identity = 一条绑定", () => {
-  const registry = createRegistryFromLegacyConfig({
-   trustedRunnerKeys: { "key-a": "pk-a", "key-b": "pk-b" },
-   allowedRunnerIdentities: ["runner-1", "runner-2"],
-  });
-  // key-a + runner-1
-  const r1 = registry.validate({ keyId: "key-a", runnerIdentity: "runner-1", tenantId: "t1", now: NOW });
-  expect(r1.ok).toBe(true);
-  // key-a + runner-2
-  const r2 = registry.validate({ keyId: "key-a", runnerIdentity: "runner-2", tenantId: "t1", now: NOW });
-  expect(r2.ok).toBe(true);
-  // key-b + runner-1
-  const r3 = registry.validate({ keyId: "key-b", runnerIdentity: "runner-1", tenantId: "t1", now: NOW });
-  expect(r3.ok).toBe(true);
-  // key-a + unknown-runner（不在 allowedRunnerIdentities 中）
-  const r4 = registry.validate({ keyId: "key-a", runnerIdentity: "runner-3", tenantId: "t1", now: NOW });
-  expect(r4.ok).toBe(false);
- });
-
- it("空配置 → 任何校验都失败", () => {
-  const registry = createRegistryFromLegacyConfig({
-   trustedRunnerKeys: {},
-   allowedRunnerIdentities: [],
-  });
-  const result = registry.validate({ keyId: "key-a", runnerIdentity: "runner-1", tenantId: "t1", now: NOW });
-  expect(result.ok).toBe(false);
-  if (!result.ok) expect(result.failureReason).toBe("runner_key_not_registered");
  });
 });

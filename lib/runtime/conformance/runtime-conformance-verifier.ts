@@ -7,7 +7,7 @@
  * DSSE Conformance Verifier — 真实验证流程：
  * 1. 解析 DSSE Envelope JSON（共享底座 lib/crypto/dsse）
  * 2. Base64 解码 Payload
- * 3. 构造 DSSE PAE 并 Ed25519 验签（使用共享底座 + trustedRunnerKeys）
+ * 3. 构造 DSSE PAE 并 Ed25519 验签（使用共享底座 + Runner 签名身份注册表）
  * 4. 解析 in-toto Statement
  * 5. 校验 Predicate Type / Subject Digest / Report 绑定
  * 6. 校验 Case 结果完整

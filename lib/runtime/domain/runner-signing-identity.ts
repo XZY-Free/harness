@@ -135,36 +135,3 @@ export class RunnerSigningIdentityRegistry {
   return result;
  }
 }
-
-// ─── 辅助：从旧格式迁移 ──────────────────────────────────
-
-/**
- * 从旧的 trustedRunnerKeys + allowedRunnerIdentities 格式创建注册表。
- *
- * 仅用于配置迁移兼容；新配置应直接提供 RunnerSigningIdentity[]。
- *
- * 警告：此函数创建的注册表不包含有效期和撤销信息，
- * 所有条目视为永久有效且未撤销。
- */
-export function createRegistryFromLegacyConfig(params: {
- trustedRunnerKeys: Record<string, string>;
- allowedRunnerIdentities: string[];
-}): RunnerSigningIdentityRegistry {
- const entries: RunnerSigningIdentity[] = [];
-
- for (const [keyId, publicKey] of Object.entries(params.trustedRunnerKeys)) {
-  for (const runnerIdentity of params.allowedRunnerIdentities) {
-   entries.push({
-    keyId,
-    publicKey,
-    runnerIdentity,
-    tenantScope: null,
-    validFrom: "2020-01-01T00:00:00.000Z",
-    validUntil: null,
-    revokedAt: null,
-   });
-  }
- }
-
- return new RunnerSigningIdentityRegistry(entries);
-}
