@@ -321,6 +321,8 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  const result = await gateways.runtimePublish.publishRuntimeRevision({
  tenantId: request.tenantId,
  runtimeRevisionId,
+ conformanceRunId: request.stepConformanceRunId ?? "",
+ runtimeAttestationIds: request.stepRuntimeAttestationIds ?? [],
  });
 
  const checkpoint: StepCheckpoint = {
@@ -342,7 +344,8 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  const conformanceRunId = request.stepConformanceRunId;
 
  if (!agentRevisionId || !agentPublicationRecordId || !agentAttestationId ||
- !runtimeRevisionId || !runtimePublicationRecordId || !conformanceRunId) {
+ !runtimeRevisionId || !runtimePublicationRecordId || !conformanceRunId ||
+ !request.stepRuntimeAttestationIds?.length) {
  throw permanentError("CHECKPOINT_BROKEN", "Checkpoint 不完整，无法激活 Route");
  }
 
@@ -359,7 +362,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  const runtimeRevision = {
  revisionId: runtimeRevisionId,
  publicationRecordId: runtimePublicationRecordId,
- attestationId: (request.stepRuntimeAttestationIds?.[0]) ?? "",
+ attestationId: request.stepRuntimeAttestationIds![0]!,
  conformanceRunId,
  };
 

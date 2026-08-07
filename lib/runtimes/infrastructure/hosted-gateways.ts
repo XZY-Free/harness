@@ -82,9 +82,12 @@ export interface HostedRuntimeConformanceGateway {
 
 /** : 发布 Runtime Revision。 */
 export interface HostedRuntimePublishGateway {
+ /** §08: 发布 Runtime Revision — 必须传入精确的 conformanceRunId 和 runtimeAttestationIds。 */
  publishRuntimeRevision(command: {
  tenantId: string;
  runtimeRevisionId: string;
+ conformanceRunId: string;
+ runtimeAttestationIds: string[];
  }): Promise<{
  runtimePublicationRecordId: string;
  }>;

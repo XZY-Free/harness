@@ -311,8 +311,8 @@ const runtimePublish: HostedRuntimePublishGateway = {
  tenantId: command.tenantId,
  revisionId: command.runtimeRevisionId,
  runtimeExpectedVersionNo: runtime.versionNo,
- conformanceRunId: "", // 由 Saga Checkpoint 传入
- attestationId: "", // 由 Saga Checkpoint 传入
+ conformanceRunId: command.conformanceRunId,
+ attestationId: command.runtimeAttestationIds[0] ?? "",
  actor: { tenantId: command.tenantId, actorType: "system", actorId: HOSTED_ACTOR_ID },
  requestId: `hosted-runtime-publish:${command.runtimeRevisionId}`,
  idempotencyKey: `hosted-runtime-publish:${command.runtimeRevisionId}`,
