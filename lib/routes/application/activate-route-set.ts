@@ -127,10 +127,18 @@ export function createActivateRouteSet(dependencies: {
  idempotencyKey: command.idempotencyKey,
  });
  if (existingIdempotent?.completed) {
- // 已完成激活：幂等返回（完整重放需要持久化 response，此处返回确认）
+ // §05: 幂等重放 — 从持久化记录恢复完整响应
+ if (existingIdempotent.responseRedactedJson) {
+ try {
+ const restored = JSON.parse(existingIdempotent.responseRedactedJson) as ActivateRouteSetResult;
+ return { ...restored, idempotent: true as const };
+ } catch {
+ // JSON 损坏 → 降级返回确认
+ }
+ }
  return {
  routeSetId: command.routeSetId,
- routeSetVersionNo: 0, // 从幂等记录恢复
+ routeSetVersionNo: 0,
  activations: [],
  auditEventId: "",
  affectsNewInvocationsOnly: true as const,
@@ -351,7 +359,7 @@ export function createActivateRouteSet(dependencies: {
  activationSequence: await session.nextActivationSequence(currentRoute.id),
  activationState: "disabled" as const,
  previousRouteRevisionId: lastActivation.routeRevisionId,
- previousRouteActivationId: null,
+ previousRouteActivationId: lastActivation.id,
  routeSetVersionNo: nextVersionNo,
  actorType: command.actor.actorType,
  actorId: command.actor.actorId,
