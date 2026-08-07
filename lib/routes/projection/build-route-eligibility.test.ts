@@ -10,8 +10,180 @@ import { computeSpecificity, normalizeEligibility } from "@/lib/routes/domain/ro
 import {
   computeNextVersion,
   computeProjectionContentDigest,
+  createBuildRouteEligibility,
 } from "@/lib/routes/projection/build-route-eligibility";
-import { describe, expect, it } from "vitest";
+import type { RouteEligibilityStore } from "@/lib/routes/projection/route-eligibility-store";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const builderMocks = vi.hoisted(() => {
+  const queryResults: unknown[][] = [];
+  const select = vi.fn(() => {
+    const result = queryResults.shift() ?? [];
+    const query = {
+      from: vi.fn(),
+      where: vi.fn(),
+      orderBy: vi.fn(),
+      limit: vi.fn(),
+      // biome-ignore lint/suspicious/noThenProperty: 模拟 Drizzle QueryPromise 的 awaitable query。
+      then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(result).then(resolve),
+    };
+    query.from.mockReturnValue(query);
+    query.where.mockReturnValue(query);
+    query.orderBy.mockReturnValue(query);
+    query.limit.mockReturnValue(query);
+    return query;
+  });
+  return {
+    queryResults,
+    select,
+    loadCurrentEvidence: vi.fn(),
+  };
+});
+
+vi.mock("@/lib/db/client", () => ({
+  db: { select: builderMocks.select },
+}));
+
+vi.mock("@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader", () => ({
+  createMySqlRevisionExecutionEvidenceReader: () => ({
+    loadCurrentEvidence: builderMocks.loadCurrentEvidence,
+  }),
+}));
+
+function createStoreMock(): RouteEligibilityStore {
+  return {
+    upsertProjection: vi.fn(async (input) => input as never),
+    getProjectionByRoute: vi.fn(async () => null),
+    listEligibleProjections: vi.fn(async () => []),
+    markIneligible: vi.fn(async () => undefined),
+    markPendingRebuild: vi.fn(async () => undefined),
+    deleteProjection: vi.fn(async () => undefined),
+    deleteProjectionsByRouteSet: vi.fn(async () => undefined),
+    listAllProjectionRouteIds: vi.fn(async () => []),
+    listProjectionRouteIdsByRouteSet: vi.fn(async () => []),
+  };
+}
+
+const route = {
+  id: "route-1",
+  routeSetId: "route-set-1",
+  activeRouteRevisionId: null,
+  routeState: "enabled",
+};
+const routeSet = {
+  id: "route-set-1",
+  tenantId: "tenant-1",
+  agentId: "agent-1",
+  routeScopeKey: "prod",
+};
+const activation = {
+  id: "activation-2",
+  routeId: "route-1",
+  routeRevisionId: "revision-2",
+  routeSetId: "route-set-1",
+  routeSetVersionNo: 2,
+  activationSequence: 2,
+  activationState: "active",
+};
+const revision = {
+  id: "revision-2",
+  tenantId: "tenant-1",
+  routeId: "route-1",
+  routeSetId: "route-set-1",
+  agentRevisionId: "agent-revision-1",
+  runtimeRevisionId: "runtime-revision-1",
+  policyRevisionId: null,
+  revisionNo: 2,
+  routeGroupId: "primary",
+  trafficAllocationJson: null,
+  selectorDigest: "sha256:selector",
+  eligibilityConditionsJson: {},
+  priorityNo: 10,
+  trafficWeight: 100,
+  effectiveFrom: null,
+  effectiveUntil: null,
+  contentDigest: "sha256:route-content",
+};
+
+describe("Projection authority", () => {
+  beforeEach(() => {
+    builderMocks.queryResults.length = 0;
+    builderMocks.select.mockClear();
+    builderMocks.loadCurrentEvidence.mockReset();
+  });
+
+  it("忽略漂移的 activeRouteRevisionId 并按 latest activation 指向的 revision 构建", async () => {
+    const store = createStoreMock();
+    builderMocks.queryResults.push(
+      [{ ...route, activeRouteRevisionId: null }],
+      [activation],
+      [revision],
+      [routeSet],
+      [{ id: "agent-1", lifecycleState: "enabled", deletedAt: null }],
+      [{ id: "agent-revision-1", revisionState: "published", artifactDigest: "sha256:agent", agentInterfaceRequirementsJson: {} }],
+      [{ id: "runtime-revision-1", runtimeId: "runtime-1", revisionState: "published", artifactDigest: "sha256:runtime", configHash: "sha256:config", runtimeCapabilitiesJson: {} }],
+      [{ id: "runtime-1", lifecycleState: "enabled", deletedAt: null }],
+    );
+    builderMocks.loadCurrentEvidence.mockResolvedValue({
+      tenantId: "tenant-1",
+      agentRevisionId: "agent-revision-1",
+      agentArtifactEvidence: { artifactId: "agent-artifact-1", verificationState: "verified", revokedAt: null },
+      agentPublication: { publicationRecordId: "agent-publication-1", attestationIds: ["agent-attestation-1"] },
+      agentLifecycleState: "active",
+      agentRevisionState: "published",
+      runtimeRevisionId: "runtime-revision-1",
+      runtimeArtifactEvidence: { artifactId: "runtime-artifact-1", verificationState: "verified", revokedAt: null },
+      runtimePublication: { publicationRecordId: "runtime-publication-1", attestationIds: ["runtime-attestation-1"], conformanceRunId: "conformance-1" },
+      runtimeConformance: { overallResult: "passed" },
+      runtimeLifecycleState: "active",
+      runtimeRevisionState: "published",
+      runtimeCapabilities: [],
+      policyRequirement: { kind: "none" },
+    });
+
+    await createBuildRouteEligibility({ store })({ tenantId: "tenant-1", routeId: "route-1" });
+
+    expect(store.upsertProjection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeRevisionId: "revision-2",
+        routeActivationId: "activation-2",
+      }),
+    );
+  });
+
+  it("latest activation 缺失时删除既有投影且不写 placeholder", async () => {
+    const store = createStoreMock();
+    builderMocks.queryResults.push(
+      [{ ...route, activeRouteRevisionId: "drifted-revision" }],
+      [],
+    );
+
+    await createBuildRouteEligibility({ store })({ tenantId: "tenant-1", routeId: "route-1" });
+
+    expect(store.deleteProjection).toHaveBeenCalledWith("route-1");
+    expect(store.upsertProjection).not.toHaveBeenCalled();
+  });
+
+  it("latest activation 指向的 revision 缺失时删除既有投影", async () => {
+    const store = createStoreMock();
+    builderMocks.queryResults.push([route], [activation], []);
+
+    await createBuildRouteEligibility({ store })({ tenantId: "tenant-1", routeId: "route-1" });
+
+    expect(store.deleteProjection).toHaveBeenCalledWith("route-1");
+    expect(store.upsertProjection).not.toHaveBeenCalled();
+  });
+
+  it("authority RouteSet 缺失时删除既有投影", async () => {
+    const store = createStoreMock();
+    builderMocks.queryResults.push([route], [activation], [revision], []);
+
+    await createBuildRouteEligibility({ store })({ tenantId: "tenant-1", routeId: "route-1" });
+
+    expect(store.deleteProjection).toHaveBeenCalledWith("route-1");
+    expect(store.upsertProjection).not.toHaveBeenCalled();
+  });
+});
 
 describe("Projection 资格判定逻辑", () => {
   describe("normalizeEligibility + computeSpecificity", () => {

@@ -8,9 +8,9 @@
 import { db } from "@/lib/db/client";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
-import { routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
-import { eq, inArray, sql } from "drizzle-orm";
+import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type {
  RouteEligibilitySourceReader,
  RouteSourceRef,
@@ -21,6 +21,13 @@ const routeSourceRefSelect = {
  routeId: deploymentRouteTable.id,
  tenantId: deploymentRouteSetTable.tenantId,
 } as const;
+
+/** 只接受每条 Route activationSequence 最大的权威激活记录。 */
+const latestActivationCondition = sql`${routeActivation.activationSequence} = (
+ SELECT MAX(latest_activation.activationSequence)
+ FROM RouteActivation AS latest_activation
+ WHERE latest_activation.routeId = ${deploymentRouteTable.id}
+)`;
 
 export function createMySqlRouteEligibilitySourceReader(
  _deps: { db: typeof db },
@@ -39,35 +46,43 @@ export function createMySqlRouteEligibilitySourceReader(
  },
 
  async listRouteIdsByAgentRevision(agentRevisionId: string): Promise<RouteSourceRef[]> {
- // 权威：RouteRevision.agentRevisionId → DeploymentRoute → RouteSet
+ // 权威：latest RouteActivation → RouteRevision.agentRevisionId → DeploymentRoute → RouteSet
  return db
  .select(routeSourceRefSelect)
- .from(routeRevision)
+ .from(routeActivation)
  .innerJoin(
  deploymentRouteTable,
- eq(deploymentRouteTable.activeRouteRevisionId, routeRevision.id),
+ eq(routeActivation.routeId, deploymentRouteTable.id),
+ )
+ .innerJoin(
+ routeRevision,
+ eq(routeActivation.routeRevisionId, routeRevision.id),
  )
  .innerJoin(
  deploymentRouteSetTable,
  eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
  )
- .where(eq(routeRevision.agentRevisionId, agentRevisionId));
+ .where(and(latestActivationCondition, eq(routeRevision.agentRevisionId, agentRevisionId)));
  },
 
  async listRouteIdsByRuntimeRevision(runtimeRevisionId: string): Promise<RouteSourceRef[]> {
  // 权威：RouteRevision.runtimeRevisionId → DeploymentRoute → RouteSet
  return db
  .select(routeSourceRefSelect)
- .from(routeRevision)
+ .from(routeActivation)
  .innerJoin(
  deploymentRouteTable,
- eq(deploymentRouteTable.activeRouteRevisionId, routeRevision.id),
+ eq(routeActivation.routeId, deploymentRouteTable.id),
+ )
+ .innerJoin(
+ routeRevision,
+ eq(routeActivation.routeRevisionId, routeRevision.id),
  )
  .innerJoin(
  deploymentRouteSetTable,
  eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
  )
- .where(eq(routeRevision.runtimeRevisionId, runtimeRevisionId));
+ .where(and(latestActivationCondition, eq(routeRevision.runtimeRevisionId, runtimeRevisionId)));
  },
 
  async listRouteIdsByAgent(agentId: string): Promise<RouteSourceRef[]> {
@@ -92,32 +107,40 @@ export function createMySqlRouteEligibilitySourceReader(
  const revisionIds = revisions.map((r) => r.id);
  return db
  .select(routeSourceRefSelect)
- .from(routeRevision)
+ .from(routeActivation)
  .innerJoin(
  deploymentRouteTable,
- eq(deploymentRouteTable.activeRouteRevisionId, routeRevision.id),
+ eq(routeActivation.routeId, deploymentRouteTable.id),
+ )
+ .innerJoin(
+ routeRevision,
+ eq(routeActivation.routeRevisionId, routeRevision.id),
  )
  .innerJoin(
  deploymentRouteSetTable,
  eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
  )
- .where(inArray(routeRevision.runtimeRevisionId, revisionIds));
+ .where(and(latestActivationCondition, inArray(routeRevision.runtimeRevisionId, revisionIds)));
  },
 
  async listRouteIdsByPolicyRevision(policyRevisionId: string): Promise<RouteSourceRef[]> {
  // 权威：RouteRevision.policyRevisionId → DeploymentRoute → RouteSet
  return db
  .select(routeSourceRefSelect)
- .from(routeRevision)
+ .from(routeActivation)
  .innerJoin(
  deploymentRouteTable,
- eq(deploymentRouteTable.activeRouteRevisionId, routeRevision.id),
+ eq(routeActivation.routeId, deploymentRouteTable.id),
+ )
+ .innerJoin(
+ routeRevision,
+ eq(routeActivation.routeRevisionId, routeRevision.id),
  )
  .innerJoin(
  deploymentRouteSetTable,
  eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
  )
- .where(eq(routeRevision.policyRevisionId, policyRevisionId));
+ .where(and(latestActivationCondition, eq(routeRevision.policyRevisionId, policyRevisionId)));
  },
 
  async listRouteIdsByAttestation(attestationId: string): Promise<RouteSourceRef[]> {
@@ -148,32 +171,40 @@ export function createMySqlRouteEligibilitySourceReader(
  if (agentRevisionIds.length > 0) {
  const agentRows = await db
  .select(routeSourceRefSelect)
- .from(routeRevision)
+ .from(routeActivation)
  .innerJoin(
  deploymentRouteTable,
- eq(deploymentRouteTable.activeRouteRevisionId, routeRevision.id),
+ eq(routeActivation.routeId, deploymentRouteTable.id),
+ )
+ .innerJoin(
+ routeRevision,
+ eq(routeActivation.routeRevisionId, routeRevision.id),
  )
  .innerJoin(
  deploymentRouteSetTable,
  eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
  )
- .where(inArray(routeRevision.agentRevisionId, agentRevisionIds));
+ .where(and(latestActivationCondition, inArray(routeRevision.agentRevisionId, agentRevisionIds)));
  results.push(...agentRows);
  }
 
  if (runtimeRevisionIds.length > 0) {
  const runtimeRows = await db
  .select(routeSourceRefSelect)
- .from(routeRevision)
+ .from(routeActivation)
  .innerJoin(
  deploymentRouteTable,
- eq(deploymentRouteTable.activeRouteRevisionId, routeRevision.id),
+ eq(routeActivation.routeId, deploymentRouteTable.id),
+ )
+ .innerJoin(
+ routeRevision,
+ eq(routeActivation.routeRevisionId, routeRevision.id),
  )
  .innerJoin(
  deploymentRouteSetTable,
  eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
  )
- .where(inArray(routeRevision.runtimeRevisionId, runtimeRevisionIds));
+ .where(and(latestActivationCondition, inArray(routeRevision.runtimeRevisionId, runtimeRevisionIds)));
  results.push(...runtimeRows);
  }
 
@@ -187,15 +218,19 @@ export function createMySqlRouteEligibilitySourceReader(
  },
 
  async listAllCurrentlyActivatedRouteIds(): Promise<RouteSourceRef[]> {
- // 权威：DeploymentRoute where routeState = 'enabled', JOIN RouteSet for tenantId
+ // 权威：存在 latest RouteActivation 的全部 Route；disabled 也必须重建为真实 ineligible 投影。
  return db
  .select(routeSourceRefSelect)
- .from(deploymentRouteTable)
+ .from(routeActivation)
+ .innerJoin(
+ deploymentRouteTable,
+ eq(routeActivation.routeId, deploymentRouteTable.id),
+ )
  .innerJoin(
  deploymentRouteSetTable,
  eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
  )
- .where(eq(deploymentRouteTable.routeState, "enabled"));
+ .where(latestActivationCondition);
  },
  };
 }

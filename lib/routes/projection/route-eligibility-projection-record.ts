@@ -40,6 +40,7 @@ export const routeEligibilityProjection = mysqlTable(
  mode: "number",
  unsigned: true,
  }).notNull(),
+ activationState: mysqlEnum("activationState", ["active", "disabled"]).notNull(),
 
  // ─── 路由选择属性 ──────────────────────────────
  routeGroupId: varchar("routeGroupId", { length: 128 }).notNull(),

@@ -44,6 +44,6 @@ export interface RouteEligibilitySourceReader {
  */
  listRouteIdsByAttestation(attestationId: string): Promise<RouteSourceRef[]>;
 
- /** 查询所有当前激活（routeState = 'enabled'）的 Route。 */
+ /** 查询所有存在 latest RouteActivation 的 Route，包含 disabled。 */
  listAllCurrentlyActivatedRouteIds(): Promise<RouteSourceRef[]>;
 }

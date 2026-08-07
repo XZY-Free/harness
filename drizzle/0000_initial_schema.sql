@@ -2027,6 +2027,7 @@ CREATE TABLE `RouteEligibilityProjection` (
 	`routeRevisionNo` bigint unsigned NOT NULL,
 	`routeActivationId` varchar(36) NOT NULL,
 	`routeActivationSequence` bigint unsigned NOT NULL,
+	`activationState` enum('active','disabled') NOT NULL,
 	`routeGroupId` varchar(128) NOT NULL,
 	`selectorDigest` varchar(71) NOT NULL,
 	`eligibilityConditionsJson` json NOT NULL,

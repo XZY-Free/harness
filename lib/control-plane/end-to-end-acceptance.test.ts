@@ -1004,6 +1004,79 @@ describe("场景7：Projection Consumer 构建完整 eligible Projection", () =>
     expect(projection?.agentAttestationIds).toHaveLength(1);
     expect(projection?.runtimeAttestationIds).toHaveLength(1);
   });
+
+  it("activeRouteRevisionId 漂移时仍按 latest activation 自愈并被 SourceReader 发现", async () => {
+    const fixture = await seedEndToEndFixture("projection-authority-drift");
+    await db
+      .update(deploymentRouteTable)
+      .set({ activeRouteRevisionId: null })
+      .where(eq(deploymentRouteTable.id, fixture.route.id));
+
+    const sourceRefs = await mysqlRouteEligibilitySourceReader.listRouteIdsByAgentRevision(
+      fixture.agentRevision.id,
+    );
+    expect(sourceRefs).toContainEqual({ routeId: fixture.route.id, tenantId: fixture.tenantId });
+    const fullRebuildRefs = await mysqlRouteEligibilitySourceReader.listAllCurrentlyActivatedRouteIds();
+    expect(fullRebuildRefs).toContainEqual({
+      routeId: fixture.route.id,
+      tenantId: fixture.tenantId,
+    });
+
+    await createBuildRouteEligibility({ store: mysqlRouteEligibilityStore })({
+      tenantId: fixture.tenantId,
+      routeId: fixture.route.id,
+    });
+    const [projection] = await db
+      .select()
+      .from(routeEligibilityProjection)
+      .where(eq(routeEligibilityProjection.routeId, fixture.route.id));
+
+    expect(projection).toMatchObject({
+      routeRevisionId: fixture.routeRevisionId,
+      routeActivationId: fixture.routeActivationId,
+      activationState: "active",
+      eligibilityState: "eligible",
+    });
+  });
+
+  it("disabled route 保留真实 authority IDs 的 ineligible 投影且 Resolver 不选择", async () => {
+    const fixture = await seedEndToEndFixture("projection-authority-disabled");
+    await db
+      .update(deploymentRouteTable)
+      .set({ routeState: "disabled" })
+      .where(eq(deploymentRouteTable.id, fixture.route.id));
+    await db
+      .update(routeActivation)
+      .set({ activationState: "disabled" })
+      .where(eq(routeActivation.id, fixture.routeActivationId));
+
+    const result = await createBuildRouteEligibility({ store: mysqlRouteEligibilityStore })({
+      tenantId: fixture.tenantId,
+      routeId: fixture.route.id,
+    });
+    const [projection] = await db
+      .select()
+      .from(routeEligibilityProjection)
+      .where(eq(routeEligibilityProjection.routeId, fixture.route.id));
+
+    expect(result.eligibilityState).toBe("ineligible");
+    expect(projection).toMatchObject({
+      routeRevisionId: fixture.routeRevisionId,
+      routeActivationId: fixture.routeActivationId,
+      activationState: "disabled",
+      eligibilityState: "ineligible",
+    });
+
+    const resolution = await createResolveRoute({
+      store: mysqlRouteEligibilityResolutionStore,
+    })({
+      tenantId: fixture.tenantId,
+      agentId: fixture.agent.id,
+      routeScopeKey: "prod",
+      businessKey: { threadId: "disabled-projection" },
+    });
+    expect(resolution.status).toBe("unresolved");
+  });
 });
 
 // ═══════════════════════════════════════════════════════════

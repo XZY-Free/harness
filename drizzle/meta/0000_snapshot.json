@@ -16931,6 +16931,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "activationState": {
+          "name": "activationState",
+          "type": "enum('active','disabled')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "routeGroupId": {
           "name": "routeGroupId",
           "type": "varchar(128)",

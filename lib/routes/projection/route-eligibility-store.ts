@@ -18,6 +18,7 @@ export interface UpsertProjectionInput {
  routeRevisionNo: number;
  routeActivationId: string;
  routeActivationSequence: number;
+ activationState: "active" | "disabled";
  routeGroupId: string;
  selectorDigest: string;
  eligibilityConditionsJson: unknown;

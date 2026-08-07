@@ -76,92 +76,57 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
  return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
  }
 
- // 2. 查找 RouteSet（获取 agentId, routeScopeKey）
- const [routeSet] = await db
+ // 2. latest RouteActivation 是当前 revision 的唯一入口。
+ const [activation] = await db
  .select()
- .from(deploymentRouteSetTable)
- .where(eq(deploymentRouteSetTable.id, route.routeSetId))
+ .from(routeActivation)
+ .where(
+ and(
+ eq(routeActivation.routeId, route.id),
+ eq(routeActivation.tenantId, input.tenantId),
+ ),
+ )
+ .orderBy(desc(routeActivation.activationSequence))
  .limit(1);
- if (!routeSet) {
- // : RouteSet 不存在 → 删除孤立投影
+ if (!activation) {
  await deps.store.deleteProjection(input.routeId);
  return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
  }
 
- // 3. 没有 activeRouteRevisionId → ineligible
- if (!route.activeRouteRevisionId) {
- const digest = computeProjectionContentDigest(baseIneligibleFields(route, routeSet));
- const existing = await deps.store.getProjectionByRoute(input.routeId);
- const version = computeNextVersion(existing, digest);
- await deps.store.upsertProjection({
- ...baseIneligible(route, routeSet),
- projectionContentDigest: digest,
- eligibilityState: "ineligible",
- projectionVersionNo: version,
- lastRebuiltAt: now,
- });
- return {
- routeId: input.routeId,
- eligibilityState: "ineligible",
- projectionVersionNo: version,
- };
- }
-
- // 4. 读取 RouteRevision
+ // 3. revision 必须由 latest activation.routeRevisionId 指向，禁止读取 route.activeRouteRevisionId。
  const [revision] = await db
  .select()
  .from(routeRevision)
  .where(
  and(
- eq(routeRevision.id, route.activeRouteRevisionId),
+ eq(routeRevision.id, activation.routeRevisionId),
+ eq(routeRevision.routeId, route.id),
  eq(routeRevision.tenantId, input.tenantId),
  ),
  )
  .limit(1);
  if (!revision) {
- const digest = computeProjectionContentDigest(baseIneligibleFields(route, routeSet));
- const existing = await deps.store.getProjectionByRoute(input.routeId);
- const version = computeNextVersion(existing, digest);
- await deps.store.upsertProjection({
- ...baseIneligible(route, routeSet),
- projectionContentDigest: digest,
- eligibilityState: "ineligible",
- projectionVersionNo: version,
- lastRebuiltAt: now,
- });
- return {
- routeId: input.routeId,
- eligibilityState: "ineligible",
- projectionVersionNo: version,
- };
+ await deps.store.deleteProjection(input.routeId);
+ return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
  }
 
- // 5. 读取 RouteActivation
- const [activation] = await db
+ // 4. RouteSet 必须与 Route、Activation、Revision 的真实外键一致。
+ const [routeSet] = await db
  .select()
- .from(routeActivation)
- .where(eq(routeActivation.routeId, route.id))
- .orderBy(desc(routeActivation.activationSequence))
+ .from(deploymentRouteSetTable)
+ .where(eq(deploymentRouteSetTable.id, revision.routeSetId))
  .limit(1);
- if (!activation || activation.routeRevisionId !== revision.id) {
- const digest = computeProjectionContentDigest(baseIneligibleFields(route, routeSet));
- const existing = await deps.store.getProjectionByRoute(input.routeId);
- const version = computeNextVersion(existing, digest);
- await deps.store.upsertProjection({
- ...baseIneligible(route, routeSet),
- projectionContentDigest: digest,
- eligibilityState: "ineligible",
- projectionVersionNo: version,
- lastRebuiltAt: now,
- });
- return {
- routeId: input.routeId,
- eligibilityState: "ineligible",
- projectionVersionNo: version,
- };
+ if (
+ !routeSet ||
+ route.routeSetId !== routeSet.id ||
+ activation.routeSetId !== routeSet.id ||
+ routeSet.tenantId !== input.tenantId
+ ) {
+ await deps.store.deleteProjection(input.routeId);
+ return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
  }
 
- // 6. 读取 Agent + AgentRevision + Runtime + RuntimeRevision（权威事实）
+ // 5. 读取 Agent + AgentRevision + Runtime + RuntimeRevision（权威事实）
  const [agent, agentRevision, runtimeRevision] = await Promise.all([
  db
  .select()
@@ -208,12 +173,27 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
  agentRevision?.agentInterfaceRequirementsJson,
  );
 
- // §03: 9. 使用统一 Policy 判断资格
+ // 8. Route 自身、latest activation、revision 窗口和 selector 共同参与资格判断。
+ const normalized = normalizeEligibility(revision.eligibilityConditionsJson);
+ const routeAuthorityEligible =
+ route.routeState === "enabled" &&
+ activation.activationState === "active" &&
+ (!revision.effectiveFrom || revision.effectiveFrom <= now) &&
+ (!revision.effectiveUntil || revision.effectiveUntil > now) &&
+ normalized !== null;
+
+ // §03: 9. 使用统一 Policy 判断证据资格
  const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
  evidenceSnapshot,
  requiredCapabilities,
  );
- const isEligible = eligibilityResult.eligible;
+ const entityLifecycleEligible =
+ agent?.lifecycleState === "enabled" &&
+ agentRevision?.revisionState === "published" &&
+ runtime?.lifecycleState === "enabled" &&
+ runtimeRevision?.revisionState === "published";
+ const isEligible =
+ routeAuthorityEligible && entityLifecycleEligible && eligibilityResult.eligible;
 
  // Policy revision state for projection
  const policyRevisionState = evidenceSnapshot.policyRequirement.kind === "referenced"
@@ -222,29 +202,46 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
 
  // 收集 ineligibility 原因
  const ineligibilityReasons: string[] = [];
+ if (route.routeState !== "enabled") ineligibilityReasons.push("route_not_enabled");
+ if (activation.activationState !== "active") ineligibilityReasons.push("activation_not_active");
+ if (revision.effectiveFrom && revision.effectiveFrom > now) {
+ ineligibilityReasons.push("revision_not_effective_yet");
+ }
+ if (revision.effectiveUntil && revision.effectiveUntil <= now) {
+ ineligibilityReasons.push("revision_expired");
+ }
+ if (!normalized) ineligibilityReasons.push("selector_invalid");
  if (!agent) ineligibilityReasons.push("agent_not_found");
  if (!agentRevision) ineligibilityReasons.push("agent_revision_not_found");
  if (!runtime) ineligibilityReasons.push("runtime_not_found");
  if (!runtimeRevision) ineligibilityReasons.push("runtime_revision_not_found");
- if (activation.activationState !== "active") ineligibilityReasons.push("activation_not_active");
+ if (agent && agent.lifecycleState !== "enabled") {
+ ineligibilityReasons.push("agent_not_enabled");
+ }
+ if (agentRevision && agentRevision.revisionState !== "published") {
+ ineligibilityReasons.push("agent_revision_not_published");
+ }
+ if (runtime && runtime.lifecycleState !== "enabled") {
+ ineligibilityReasons.push("runtime_not_enabled");
+ }
+ if (runtimeRevision && runtimeRevision.revisionState !== "published") {
+ ineligibilityReasons.push("runtime_revision_not_published");
+ }
  // 从统一 Policy 错误中提取原因
  for (const err of eligibilityResult.errors) {
  ineligibilityReasons.push(err.code);
  }
 
  // 10. 计算选择属性
- const normalized = normalizeEligibility(revision.eligibilityConditionsJson);
  const specificity = normalized ? computeSpecificity(normalized) : 0;
 
  const capabilityCompatibilityDigest =
- agentRevision && runtimeRevision
- ? computeCapabilityManifestDigest({
- agentRevisionId: agentRevision.id,
- agentInterfaceRequirements: agentRevision.agentInterfaceRequirementsJson,
- runtimeRevisionId: runtimeRevision.id,
- runtimeCapabilities: runtimeRevision.runtimeCapabilitiesJson,
- })
- : "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+ computeCapabilityManifestDigest({
+ agentRevisionId: revision.agentRevisionId,
+ agentInterfaceRequirements: agentRevision?.agentInterfaceRequirementsJson ?? null,
+ runtimeRevisionId: revision.runtimeRevisionId,
+ runtimeCapabilities: runtimeRevision?.runtimeCapabilitiesJson ?? null,
+ });
 
  // §03: 从统一 Snapshot 提取布尔字段
  const agentPublicationActive = evidenceSnapshot.agentPublication ? 1 : 0;
@@ -278,6 +275,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
  routeRevisionNo: revision.revisionNo,
  routeActivationId: activation.id,
  routeActivationSequence: activation.activationSequence,
+ activationState: activation.activationState,
  routeGroupId: readRouteGroupId(
  revision.routeGroupId,
  revision.trafficAllocationJson,
@@ -373,118 +371,6 @@ export function computeNextVersion(
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────
-
-/** 返回 ineligible 投影的可 digest 字段（不含 Date 对象）。 */
-function baseIneligibleFields(
- route: { id: string; routeSetId: string; tenantId?: string },
- routeSet: { agentId: string; routeScopeKey: string },
-): Record<string, unknown> {
- return {
- routeId: route.id,
- tenantId: route.tenantId ?? "",
- agentId: routeSet.agentId,
- routeSetId: route.routeSetId,
- routeScopeKey: routeSet.routeScopeKey,
- routeSetVersionNo: 0,
- routeRevisionId: "",
- routeRevisionNo: 0,
- routeActivationId: "",
- routeActivationSequence: 0,
- routeGroupId: "primary",
- selectorDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
- eligibilityConditionsJson: {},
- specificity: 0,
- priorityNo: 0,
- trafficWeight: 0,
- effectiveFrom: null,
- effectiveUntil: null,
- agentRevisionId: "",
- agentRevisionState: "missing",
- agentLifecycleState: "missing",
- agentPublicationActive: 0,
- agentEvidenceValid: 0,
- runtimeRevisionId: "",
- runtimeRevisionState: "missing",
- runtimeLifecycleState: "missing",
- runtimePublicationActive: 0,
- runtimeEvidenceValid: 0,
- runtimeConformanceValid: 0,
- policyRevisionId: null,
- policyRevisionState: null,
- capabilityCompatibilityDigest:
- "sha256:0000000000000000000000000000000000000000000000000000000000000000",
- agentArtifactDigest: null,
- runtimeArtifactDigest: null,
- runtimeConfigDigest: null,
- routeContentDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
- agentPublicationRecordId: null,
- runtimePublicationRecordId: null,
- agentAttestationIds: null,
- runtimeAttestationIds: null,
- conformanceRunId: null,
- agentArtifactId: null,
- runtimeArtifactId: null,
- sourceEventId: null,
- sourceAggregateVersion: null,
- invalidReason: "base_ineligible",
- eligibilityState: "ineligible",
- };
-}
-
-function baseIneligible(
- route: { id: string; routeSetId: string; tenantId?: string },
- routeSet: { agentId: string; routeScopeKey: string },
-): Omit<UpsertProjectionInput, "projectionContentDigest" | "eligibilityState" | "projectionVersionNo" | "lastRebuiltAt"> {
- return {
- routeId: route.id,
- tenantId: route.tenantId ?? "",
- agentId: routeSet.agentId,
- routeSetId: route.routeSetId,
- routeScopeKey: routeSet.routeScopeKey,
- routeSetVersionNo: 0,
- routeRevisionId: "",
- routeRevisionNo: 0,
- routeActivationId: "",
- routeActivationSequence: 0,
- routeGroupId: "primary",
- selectorDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
- eligibilityConditionsJson: {},
- specificity: 0,
- priorityNo: 0,
- trafficWeight: 0,
- effectiveFrom: null,
- effectiveUntil: null,
- agentRevisionId: "",
- agentRevisionState: "missing",
- agentLifecycleState: "missing",
- agentPublicationActive: 0,
- agentEvidenceValid: 0,
- runtimeRevisionId: "",
- runtimeRevisionState: "missing",
- runtimeLifecycleState: "missing",
- runtimePublicationActive: 0,
- runtimeEvidenceValid: 0,
- runtimeConformanceValid: 0,
- policyRevisionId: null,
- policyRevisionState: null,
- capabilityCompatibilityDigest:
- "sha256:0000000000000000000000000000000000000000000000000000000000000000",
- agentArtifactDigest: null,
- runtimeArtifactDigest: null,
- runtimeConfigDigest: null,
- routeContentDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
- agentPublicationRecordId: null,
- runtimePublicationRecordId: null,
- agentAttestationIds: null,
- runtimeAttestationIds: null,
- conformanceRunId: null,
- agentArtifactId: null,
- runtimeArtifactId: null,
- sourceEventId: null,
- sourceAggregateVersion: null,
- invalidReason: "base_ineligible",
- };
-}
 
 function readRouteGroupId(
  columnValue: string | null,

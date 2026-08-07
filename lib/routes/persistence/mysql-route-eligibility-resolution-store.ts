@@ -79,7 +79,7 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
  effectiveFrom: p.effectiveFrom,
  effectiveUntil: p.effectiveUntil,
  eligibilityConditions: p.eligibilityConditionsJson,
- activationState: "active", // eligible 投影必然 active
+ activationState: p.activationState,
  agentLifecycleState: p.agentLifecycleState,
  agentRevisionState: p.agentRevisionState,
  agentPublicationActive: p.agentPublicationActive === 1,
