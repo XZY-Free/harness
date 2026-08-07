@@ -19,7 +19,6 @@ import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
   type ProvenanceDocument,
-  type SbomDocument,
   type VerifyAttestationInput,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
@@ -86,13 +85,13 @@ afterEach(() => {
 
 class InMemoryManagedArtifactStore implements ManagedArtifactStore {
   private envelopes = new Map<string, Buffer>();
-  private sboms = new Map<string, SbomDocument>();
+  private sboms = new Map<string, unknown>();
   private provenances = new Map<string, ProvenanceDocument>();
 
   writeDsseEnvelope(ref: string, envelope: Buffer): void {
     this.envelopes.set(ref, envelope);
   }
-  writeSbom(ref: string, doc: SbomDocument): void {
+  writeSbom(ref: string, doc: unknown): void {
     this.sboms.set(ref, doc);
   }
   writeProvenance(ref: string, doc: ProvenanceDocument): void {
@@ -104,7 +103,7 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
     if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
     return envelope;
   }
-  async readSbom(ref: string): Promise<SbomDocument> {
+  async readSbom(ref: string): Promise<unknown> {
     const doc = this.sboms.get(ref);
     if (!doc) throw new Error(`sbom not found: ${ref}`);
     return doc;
@@ -119,9 +118,15 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
 // ─── 辅助：DSSE Envelope 构造（来自 test-support） ─────────
 // generateTestBuilderKey / buildDsseArtifactAttestationEnvelope 来自 test-support。
 
-function buildCleanSbom(): SbomDocument {
+function buildCleanSbom(): unknown {
   return {
-    packages: [{ name: "lodash", version: "4.17.21", licenses: ["MIT"], vulnerabilities: [] }],
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
+    components: [
+      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
+    ],
   };
 }
 
@@ -178,7 +183,7 @@ async function createVerifiedAttestation(
   const store = new InMemoryManagedArtifactStore();
   store.writeDsseEnvelope(
     dsseEnvelopeRef,
-    buildDsseArtifactAttestationEnvelope(keyPair, digest),
+    buildDsseArtifactAttestationEnvelope(keyPair, digest, { sbomRef, sbomContent: buildCleanSbom(), provenanceRef: provRef, provenanceContent: buildValidProvenance() }),
   );
   store.writeSbom(sbomRef, buildCleanSbom());
   store.writeProvenance(provRef, buildValidProvenance());
@@ -189,8 +194,6 @@ async function createVerifiedAttestation(
     artifactRevisionId,
     artifactDigest: digest,
     dsseEnvelopeRef,
-    sbomRef,
-    provenanceRef: provRef,
     builderIdentity: "builder:company-agent-runtime",
   };
 

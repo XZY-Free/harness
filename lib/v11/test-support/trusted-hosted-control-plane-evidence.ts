@@ -3,7 +3,6 @@ import type {
  BuilderKeyRegistry,
  ManagedArtifactStore,
  ProvenanceDocument,
- SbomDocument,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
  buildDsseArtifactAttestationEnvelope,
@@ -28,7 +27,7 @@ const BUILDER_IDENTITY = "builder:snow-harness-hosted-release";
 
 class TestManagedArtifactStore implements ManagedArtifactStore {
  readonly envelopes = new Map<string, Buffer>();
- readonly sboms = new Map<string, SbomDocument>();
+ readonly sboms = new Map<string, unknown>();
  readonly provenances = new Map<string, ProvenanceDocument>();
 
  async readDsseEnvelope(ref: string): Promise<Buffer> {
@@ -89,13 +88,40 @@ function createEvidenceProvider(options?: {
  const provenanceRef = `${prefix}/provenance`;
  store.envelopes.set(
  dsseEnvelopeRef,
- buildDsseArtifactAttestationEnvelope(builderKey, artifactDigest, {
+ buildDsseArtifactAttestationEnvelope(
+ builderKey,
+ artifactDigest,
+ {
+ sbomRef,
+ sbomContent: {
+ bomFormat: "CycloneDX",
+ specVersion: "1.6",
+ version: 1,
+ metadata: { component: { type: "application", name: "snow-harness", version: "release-1" } },
+ components: [
+ { type: "library", name: "snow-harness", version: "release-1", licenses: [{ license: { id: "MIT" } }] },
+ ],
+ },
+ provenanceRef,
+ provenanceContent: {
+ sourceRevision: "git:hosted-release-1",
+ buildPipeline: "ci/hosted-release",
+ dependencyLockFile: "pnpm-lock.yaml:sha256:hosted-release-1",
+ buildTime: "2026-08-03T00:00:00.000Z",
+ },
+ },
+ {
  tamperSignature: options?.corruptArtifactSignatureFor === artifactType,
- }),
+ },
+ ),
  );
  store.sboms.set(sbomRef, {
- packages: [
- { name: "snow-harness", version: "release-1", licenses: ["MIT"], vulnerabilities: [] },
+ bomFormat: "CycloneDX",
+ specVersion: "1.6",
+ version: 1,
+ metadata: { component: { type: "application", name: "snow-harness", version: "release-1" } },
+ components: [
+ { type: "library", name: "snow-harness", version: "release-1", licenses: [{ license: { id: "MIT" } }] },
  ],
  });
  store.provenances.set(provenanceRef, {

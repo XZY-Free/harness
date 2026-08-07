@@ -54,6 +54,9 @@ export const ATTESTATION_FAILURE_CODES = [
  "dsse_envelope_parse_failed",
  "builder_key_mismatch",
  "signature_invalid",
+ "predicate_field_missing",
+ "sbom_digest_mismatch",
+ "provenance_digest_mismatch",
  "cyclonedx_schema_failed",
  "sbom_blocked_vulnerability",
  "sbom_blocked_license",
@@ -132,6 +135,71 @@ export interface ProvenanceDocument {
  buildTime: string;
 }
 
+// ─── Signed Predicate (in-toto Statement payload) ──────────
+
+/**
+ * Artifact Provenance Predicate — DSSE 签名保护的全量供应链证据。
+ *
+ * 此结构是 in-toto Statement 的 predicate 字段，受 DSSE 签名保护。
+ * SBOM 和 Provenance 引用及其 digest 必须在签名范围内，
+ * 消除"有效签名 + 替换证据"的可能。
+ *
+ * 验证顺序：
+ * 1. 验签 DSSE Envelope
+ * 2. 解析已签名 Statement → 提取此 Predicate
+ * 3. 从 Predicate 取得 sbom_ref / provenance_ref
+ * 4. 读取受管对象
+ * 5. 计算对象 digest
+ * 6. 与 Predicate 中的 sbom_digest / provenance_digest 精确比较
+ * 7. 执行 CycloneDX Schema / License / Vulnerability / Provenance Policy
+ * 8. 写 ArtifactAttestation
+ */
+export interface ArtifactProvenancePredicate {
+ /** 制品 subject 名称。 */
+ artifactSubject: string;
+ /** 制品 digest（sha256:<hex>，与 Statement subject[0].digest.sha256 一致）。 */
+ artifactDigest: string;
+ /** 制品类型（agent_revision / runtime_revision）。 */
+ artifactType: string;
+ /** 所属 Revision ID。 */
+ revisionId: string;
+ /** 构建者身份（与 DSSE 签名 keyid 一致）。 */
+ builderIdentity: string;
+ /** 源代码 revision（git commit sha 等）。 */
+ sourceRevision: string;
+ /** 构建流水线标识。 */
+ buildPipeline: string;
+ /** SBOM 受管引用。 */
+ sbomRef: string;
+ /** SBOM 内容 digest（sha256:<hex>）。 */
+ sbomDigest: string;
+ /** Provenance 受管引用。 */
+ provenanceRef: string;
+ /** Provenance 内容 digest（sha256:<hex>）。 */
+ provenanceDigest: string;
+ /** 依赖锁文件 digest（sha256:<hex>）。 */
+ dependencyLockDigest: string;
+ /** 构建时间（RFC 3339）。 */
+ buildTime: string;
+}
+
+/** ArtifactProvenancePredicate 必填字段名列表。 */
+const PREDICATE_REQUIRED_FIELDS: ReadonlyArray<keyof ArtifactProvenancePredicate> = [
+ "artifactSubject",
+ "artifactDigest",
+ "artifactType",
+ "revisionId",
+ "builderIdentity",
+ "sourceRevision",
+ "buildPipeline",
+ "sbomRef",
+ "sbomDigest",
+ "provenanceRef",
+ "provenanceDigest",
+ "dependencyLockDigest",
+ "buildTime",
+];
+
 // ─── Managed Artifact Store ────────────────────────────────
 
 /**
@@ -184,16 +252,14 @@ export type BuilderKeyRegistry = Record<string, string>;
 
 // ─── Verify Input / Result ─────────────────────────────────
 
-/** verifyArtifactAttestation 入参（调用方只能提交引用，不能自报 verification_state）。 */
+/** verifyArtifactAttestation 入参（调用方只能提交 DSSE Envelope 引用，不能自报 verification_state）。 */
 export interface VerifyAttestationInput {
  tenantId: string;
  artifactType: string;
  artifactRevisionId: string;
  artifactDigest: string;
- /** DSSE Envelope 受管引用（包含 in-toto Statement 签名 payload）。 */
+ /** DSSE Envelope 受管引用（包含 in-toto Statement 签名 payload，Predicate 含全量供应链证据）。 */
  dsseEnvelopeRef: string;
- sbomRef: string;
- provenanceRef: string;
  builderIdentity: string;
  /** 验证所用策略修订 id（可选；本地白名单 fallback 时为 null）。 */
  policyRevisionId?: string;
@@ -206,6 +272,10 @@ export interface VerifyAttestationResult {
  failureCode?: AttestationFailureCode;
  /** 失败原因摘要（持久化到审计，不泄露内部漏洞细节给无权调用者）。 */
  failureReason?: string;
+ /** 从签名 Predicate 提取的 SBOM 引用（verified 时必存在）。 */
+ sbomRef?: string;
+ /** 从签名 Predicate 提取的 Provenance 引用（verified 时必存在）。 */
+ provenanceRef?: string;
  /** 成功时返回的 provenance 摘要（用于持久化到 MySQL，满足 可查询要求）。 */
  provenanceSummary?: {
  sourceRevision: string;
@@ -226,17 +296,21 @@ export interface VerifyAttestationResult {
 /**
  * 验证 attestation（独立读取 DSSE Envelope/SBOM/provenance，调用方不能自报 verified）。
  *
- * 校验链（任一失败即返回 failed，不短路以便审计完整原因）：
+ * 校验链（任一失败即返回 failed）：
  * 1. artifactType 在允许枚举内。
  * 2. artifactDigest 是 sha256:<hex> 格式。
- * 3. dsseEnvelopeRef / sbomRef / provenanceRef 是受管引用。
+ * 3. dsseEnvelopeRef 是受管引用。
  * 4. builderIdentity 在白名单中。
  * 5. 独立读取 DSSE Envelope 字节（受管存储）。
  * 6. 解析 DSSE Envelope（共享底座 parseDSSEEnvelope）。
  * 7. Ed25519 验签（共享底座 verifyDSSEEnvelopeSignatures），keyid 必须与 builderIdentity 一致。
  * 8. 解析 in-toto Statement，校验 _type / predicateType / subject digest 绑定。
- * 9. 独立读取 SBOM，校验阻断漏洞与阻断许可证。
- * 10. 独立读取 provenance，校验必填字段与 buildTime 有效性。
+ * 9. 解析已签名 Predicate（ArtifactProvenancePredicate），校验全部必填字段。
+ * 10. 校验 Predicate 中的 sbomRef / provenanceRef 为受管引用。
+ * 11. 独立读取 SBOM，计算 digest 并与 Predicate 中的 sbomDigest 精确比较。
+ * 12. CycloneDX Schema + License + Vulnerability Policy。
+ * 13. 独立读取 Provenance，计算 digest 并与 Predicate 中的 provenanceDigest 精确比较。
+ * 14. Provenance 必填字段与 buildTime 有效性校验。
  *
  * 本函数是纯逻辑（不访问 DB，不写审计）；持久化与审计在 verifyAndPersistAttestation。
  */
@@ -269,20 +343,6 @@ export async function verifyArtifactAttestation(
  verificationState: "failed",
  failureCode: "signature_ref_not_managed",
  failureReason: "dsse_envelope_ref 非受管引用",
- };
- }
- if (!isManagedRef(input.sbomRef)) {
- return {
- verificationState: "failed",
- failureCode: "sbom_ref_not_managed",
- failureReason: "sbom_ref 非受管引用",
- };
- }
- if (!isManagedRef(input.provenanceRef)) {
- return {
- verificationState: "failed",
- failureCode: "provenance_ref_not_managed",
- failureReason: "provenance_ref 非受管引用",
  };
  }
 
@@ -324,8 +384,6 @@ export async function verifyArtifactAttestation(
  [input.builderIdentity]: expectedPublicKey,
  });
  if (!sigResult.verified) {
- // unknown_keyid 表示 Envelope 签名 keyid 与 builderIdentity 不一致 → builder_key_mismatch
- // signature_invalid 表示签名验证失败
  const failureCode: AttestationFailureCode =
  sigResult.failureReason === "unknown_keyid" ? "builder_key_mismatch" : "signature_invalid";
  return {
@@ -383,10 +441,40 @@ export async function verifyArtifactAttestation(
  };
  }
 
- // 9. 独立读取 SBOM（原始 JSON，供 CycloneDX 验证器校验）
+ // 9. 解析已签名 Predicate — 全量供应链证据受 DSSE 签名保护
+ const predicate = statement.predicate as Record<string, unknown>;
+ const missingField = PREDICATE_REQUIRED_FIELDS.find((f) => predicate[f] == null);
+ if (missingField) {
+ return {
+ verificationState: "failed",
+ failureCode: "predicate_field_missing",
+ failureReason: `签名 Predicate 缺少必填字段: ${missingField}`,
+ };
+ }
+ const signedPredicate = predicate as unknown as ArtifactProvenancePredicate;
+
+ // 10. 校验 Predicate 中的 sbomRef / provenanceRef 为受管引用
+ if (!isManagedRef(signedPredicate.sbomRef)) {
+ return {
+ verificationState: "failed",
+ failureCode: "sbom_ref_not_managed",
+ failureReason: "签名 Predicate 中 sbomRef 非受管引用",
+ };
+ }
+ if (!isManagedRef(signedPredicate.provenanceRef)) {
+ return {
+ verificationState: "failed",
+ failureCode: "provenance_ref_not_managed",
+ failureReason: "签名 Predicate 中 provenanceRef 非受管引用",
+ };
+ }
+
+ // 11. 独立读取 SBOM → 计算 digest → 与签名 Predicate 中 sbomDigest 精确比较
  let sbomDoc: unknown;
+ let sbomRawBytes: Buffer;
  try {
- sbomDoc = await store.readSbom(input.sbomRef);
+ sbomDoc = await store.readSbom(signedPredicate.sbomRef);
+ sbomRawBytes = Buffer.from(JSON.stringify(sbomDoc), "utf-8");
  } catch {
  return {
  verificationState: "failed",
@@ -394,8 +482,16 @@ export async function verifyArtifactAttestation(
  failureReason: "无法读取 SBOM",
  };
  }
+ const actualSbomDigest = computeArtifactDigest(sbomRawBytes);
+ if (actualSbomDigest !== signedPredicate.sbomDigest) {
+ return {
+ verificationState: "failed",
+ failureCode: "sbom_digest_mismatch",
+ failureReason: "SBOM digest 与签名 Predicate 中 sbomDigest 不一致",
+ };
+ }
 
- // 10. CycloneDX 完整 Schema 验证 + 业务 Policy
+ // 12. CycloneDX 完整 Schema 验证 + 业务 Policy
  const cyclonedxResult = validateCycloneDX({ document: sbomDoc });
  if (cyclonedxResult.status === "failed") {
  return {
@@ -405,7 +501,7 @@ export async function verifyArtifactAttestation(
  };
  }
 
- // 11. License 策略 — 从 CycloneDX components 提取许可证并检查阻断列表
+ // 13. License 策略 — 从 CycloneDX components 提取许可证并检查阻断列表
  const components = (sbomDoc as Record<string, unknown>)?.components;
  let blockedLicenseCount = 0;
  if (Array.isArray(components)) {
@@ -414,7 +510,6 @@ export async function verifyArtifactAttestation(
  if (c.licenses && Array.isArray(c.licenses)) {
  for (const lic of c.licenses) {
  const l = lic as Record<string, unknown>;
- // CycloneDX license.id (SPDX) 或 license.expression
  const licenseId =
  l.license && typeof l.license === "object"
  ? ((l.license as Record<string, unknown>).id ?? (l.license as Record<string, unknown>).expression)
@@ -432,7 +527,7 @@ export async function verifyArtifactAttestation(
  }
  }
 
- // 12. 漏洞策略 — 从 CycloneDX 顶层 vulnerabilities 提取并检查阻断等级
+ // 14. 漏洞策略 — 从 CycloneDX 顶层 vulnerabilities 提取并检查阻断等级
  let vulnerabilityCount = 0;
  const vulnArray = (sbomDoc as Record<string, unknown>)?.vulnerabilities;
  if (Array.isArray(vulnArray)) {
@@ -453,10 +548,12 @@ export async function verifyArtifactAttestation(
  }
  }
 
- // 13. 独立读取 provenance
+ // 15. 独立读取 Provenance → 计算 digest → 与签名 Predicate 中 provenanceDigest 精确比较
  let provenance: ProvenanceDocument;
+ let provenanceRawBytes: Buffer;
  try {
- provenance = await store.readProvenance(input.provenanceRef);
+ provenance = await store.readProvenance(signedPredicate.provenanceRef);
+ provenanceRawBytes = Buffer.from(JSON.stringify(provenance), "utf-8");
  } catch {
  return {
  verificationState: "failed",
@@ -464,8 +561,16 @@ export async function verifyArtifactAttestation(
  failureReason: "无法读取 provenance",
  };
  }
+ const actualProvenanceDigest = computeArtifactDigest(provenanceRawBytes);
+ if (actualProvenanceDigest !== signedPredicate.provenanceDigest) {
+ return {
+ verificationState: "failed",
+ failureCode: "provenance_digest_mismatch",
+ failureReason: "Provenance digest 与签名 Predicate 中 provenanceDigest 不一致",
+ };
+ }
 
- // 14. provenance 必填字段校验
+ // 16. provenance 必填字段校验
  if (
  !provenance.sourceRevision ||
  !provenance.buildPipeline ||
@@ -480,7 +585,7 @@ export async function verifyArtifactAttestation(
  };
  }
 
- // 15. provenance buildTime 有效性校验
+ // 17. provenance buildTime 有效性校验
  if (Number.isNaN(Date.parse(provenance.buildTime))) {
  return {
  verificationState: "failed",
@@ -491,6 +596,8 @@ export async function verifyArtifactAttestation(
 
  return {
  verificationState: "verified",
+ sbomRef: signedPredicate.sbomRef,
+ provenanceRef: signedPredicate.provenanceRef,
  provenanceSummary: {
  sourceRevision: provenance.sourceRevision,
  buildPipeline: provenance.buildPipeline,

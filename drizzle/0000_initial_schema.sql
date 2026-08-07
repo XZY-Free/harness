@@ -1645,7 +1645,7 @@ CREATE TABLE `observation` (
 	`kind` varchar(32) NOT NULL,
 	`content_mode` varchar(32) NOT NULL DEFAULT 'metadata',
 	`content_json` json,
-	`contains_secret` json NOT NULL DEFAULT false,
+	`contains_secret` json NOT NULL DEFAULT (CAST(false AS JSON)),
 	`redaction_summary` varchar(256),
 	`observed_at` datetime(3) NOT NULL,
 	`created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -2156,7 +2156,7 @@ ALTER TABLE `admin_export` ADD CONSTRAINT `admin_export_tenant_id_Tenant_id_fk` 
 ALTER TABLE `AgentRevision` ADD CONSTRAINT `AgentRevision_agentId_Agent_id_fk` FOREIGN KEY (`agentId`) REFERENCES `Agent`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Agent` ADD CONSTRAINT `Agent_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ArtifactAttestation` ADD CONSTRAINT `ArtifactAttestation_artifactId_Artifact_id_fk` FOREIGN KEY (`artifactId`) REFERENCES `Artifact`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `AttestationRevocationRecord` ADD CONSTRAINT `AttestationRevocationRecord_attestationId_ArtifactAttestation_id_fk` FOREIGN KEY (`attestationId`) REFERENCES `ArtifactAttestation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AttestationRevocationRecord` ADD CONSTRAINT `AttestationRevocationRecord_attestationId_Artifa_f57eacd76a91` FOREIGN KEY (`attestationId`) REFERENCES `ArtifactAttestation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `AuditEvent` ADD CONSTRAINT `AuditEvent_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RoleActionBinding` ADD CONSTRAINT `RoleActionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RoleActionBinding` ADD CONSTRAINT `RoleActionBinding_principalBindingId_PrincipalBinding_id_fk` FOREIGN KEY (`principalBindingId`) REFERENCES `PrincipalBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2190,11 +2190,11 @@ ALTER TABLE `EffectRecord` ADD CONSTRAINT `EffectRecord_tenantId_Tenant_id_fk` F
 ALTER TABLE `EffectTarget` ADD CONSTRAINT `EffectTarget_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EffectTarget` ADD CONSTRAINT `EffectTarget_effectRecordId_EffectRecord_id_fk` FOREIGN KEY (`effectRecordId`) REFERENCES `EffectRecord`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_fromEnvironmentDefinitionId_EnvironmentDefinition_id_fk` FOREIGN KEY (`fromEnvironmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_requestedEnvironmentDefinitionId_EnvironmentDefinition_id_fk` FOREIGN KEY (`requestedEnvironmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_fromEnvironmentDefiniti_18e95bf6afbf` FOREIGN KEY (`fromEnvironmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_requestedEnvironmentDef_489e30c492a5` FOREIGN KEY (`requestedEnvironmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentDefinition` ADD CONSTRAINT `EnvironmentDefinition_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_environmentDefinitionId_EnvironmentDefinition_id_fk` FOREIGN KEY (`environmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_environmentDefinitionId_Environ_383c90c99128` FOREIGN KEY (`environmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `evaluation_case` ADD CONSTRAINT `evaluation_case_tenant_id_Tenant_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `evaluation_case` ADD CONSTRAINT `evaluation_case_run_id_evaluation_run_id_fk` FOREIGN KEY (`run_id`) REFERENCES `evaluation_run`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2216,7 +2216,7 @@ ALTER TABLE `JobResultProjection` ADD CONSTRAINT `JobResultProjection_tenantId_T
 ALTER TABLE `Job` ADD CONSTRAINT `Job_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `KnowledgeBase` ADD CONSTRAINT `KnowledgeBase_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `KnowledgeChunk` ADD CONSTRAINT `KnowledgeChunk_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `KnowledgeChunk` ADD CONSTRAINT `KnowledgeChunk_documentRevisionId_KnowledgeDocumentRevision_id_fk` FOREIGN KEY (`documentRevisionId`) REFERENCES `KnowledgeDocumentRevision`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `KnowledgeChunk` ADD CONSTRAINT `KnowledgeChunk_documentRevisionId_KnowledgeDocum_743d74fba03a` FOREIGN KEY (`documentRevisionId`) REFERENCES `KnowledgeDocumentRevision`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `KnowledgeDocument` ADD CONSTRAINT `KnowledgeDocument_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `KnowledgeDocument` ADD CONSTRAINT `KnowledgeDocument_knowledgeBaseId_KnowledgeBase_id_fk` FOREIGN KEY (`knowledgeBaseId`) REFERENCES `KnowledgeBase`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `KnowledgeDocumentRevision` ADD CONSTRAINT `KnowledgeDocumentRevision_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2282,7 +2282,7 @@ ALTER TABLE `WorkspaceAttachment` ADD CONSTRAINT `WorkspaceAttachment_tenantId_T
 ALTER TABLE `WorkspaceAttachment` ADD CONSTRAINT `WorkspaceAttachment_threadId_Thread_id_fk` FOREIGN KEY (`threadId`) REFERENCES `Thread`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceAttachment` ADD CONSTRAINT `WorkspaceAttachment_workspaceBindingId_WorkspaceBinding_id_fk` FOREIGN KEY (`workspaceBindingId`) REFERENCES `WorkspaceBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceAttachmentUse` ADD CONSTRAINT `WorkspaceAttachmentUse_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `WorkspaceAttachmentUse` ADD CONSTRAINT `WorkspaceAttachmentUse_workspaceAttachmentId_WorkspaceAttachment_id_fk` FOREIGN KEY (`workspaceAttachmentId`) REFERENCES `WorkspaceAttachment`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `WorkspaceAttachmentUse` ADD CONSTRAINT `WorkspaceAttachmentUse_workspaceAttachmentId_Wor_715fbb15d4da` FOREIGN KEY (`workspaceAttachmentId`) REFERENCES `WorkspaceAttachment`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceBinding` ADD CONSTRAINT `WorkspaceBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceBinding` ADD CONSTRAINT `WorkspaceBinding_workspaceId_Workspace_id_fk` FOREIGN KEY (`workspaceId`) REFERENCES `Workspace`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `WorkspaceBinding` ADD CONSTRAINT `WorkspaceBinding_deviceId_Device_id_fk` FOREIGN KEY (`deviceId`) REFERENCES `Device`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint

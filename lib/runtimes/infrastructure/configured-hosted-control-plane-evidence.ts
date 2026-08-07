@@ -2,7 +2,6 @@ import type {
  BuilderKeyRegistry,
  ManagedArtifactStore,
  ProvenanceDocument,
- SbomDocument,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import { hostedControlPlaneConfig } from "@/lib/config";
 import type {
@@ -97,12 +96,12 @@ function createHttpManagedArtifactStore(
  const envelopeJson = JSON.stringify(document);
  return Buffer.from(envelopeJson, "utf-8");
  },
- async readSbom(ref): Promise<SbomDocument> {
+ async readSbom(ref): Promise<unknown> {
  const document = await readDocument(ref, "sbom");
- if (!Array.isArray(document.packages)) {
+ if (!document || typeof document !== "object") {
  throw new Error("Hosted 证据服务返回的 SBOM 文档非法");
  }
- return document as unknown as SbomDocument;
+ return document;
  },
  async readProvenance(ref): Promise<ProvenanceDocument> {
  const document = await readDocument(ref, "provenance");

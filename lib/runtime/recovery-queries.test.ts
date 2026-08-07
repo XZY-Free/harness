@@ -5,12 +5,12 @@ import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
   type ProvenanceDocument,
-  type SbomDocument,
   type VerifyAttestationInput,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
   buildDsseArtifactAttestationEnvelope,
+  type PredicateSupplyChain,
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
@@ -79,13 +79,13 @@ afterEach(() => {
 
 class InMemoryManagedArtifactStore implements ManagedArtifactStore {
   private envelopes = new Map<string, Buffer>();
-  private sboms = new Map<string, SbomDocument>();
+  private sboms = new Map<string, unknown>();
   private provenances = new Map<string, ProvenanceDocument>();
 
   writeDsseEnvelope(ref: string, envelope: Buffer): void {
     this.envelopes.set(ref, envelope);
   }
-  writeSbom(ref: string, doc: SbomDocument): void {
+  writeSbom(ref: string, doc: unknown): void {
     this.sboms.set(ref, doc);
   }
   writeProvenance(ref: string, doc: ProvenanceDocument): void {
@@ -97,7 +97,7 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
     if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
     return envelope;
   }
-  async readSbom(ref: string): Promise<SbomDocument> {
+  async readSbom(ref: string): Promise<unknown> {
     const doc = this.sboms.get(ref);
     if (!doc) throw new Error(`sbom not found: ${ref}`);
     return doc;
@@ -167,20 +167,21 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
   const sbomRef = "attestation:sbom:recovery-v1";
   const provRef = "attestation:provenance:recovery-v1";
 
-  const store = new InMemoryManagedArtifactStore();
-  store.writeDsseEnvelope(
-    dsseEnvelopeRef,
-    buildDsseArtifactAttestationEnvelope(builderKey, digest),
-  );
-  store.writeSbom(sbomRef, {
-    packages: [{ name: "lodash", version: "4.17.21", licenses: ["MIT"], vulnerabilities: [] }],
-  });
-  store.writeProvenance(provRef, {
+  const sbomDoc = { bomFormat: "CycloneDX", specVersion: "1.6", version: 1, metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } }, components: [{ type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] }] };
+  const provDoc = {
     sourceRevision: "git:abc123",
     buildPipeline: "ci-1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
-  });
+  };
+  const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
+  const store = new InMemoryManagedArtifactStore();
+  store.writeDsseEnvelope(
+    dsseEnvelopeRef,
+    buildDsseArtifactAttestationEnvelope(builderKey, digest, supplyChain),
+  );
+  store.writeSbom(sbomRef, sbomDoc);
+  store.writeProvenance(provRef, provDoc);
 
   const builderKeys: BuilderKeyRegistry = {
     "builder:recovery": publicKeyBase64,
@@ -192,8 +193,6 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     artifactRevisionId: agentRevision.id,
     artifactDigest: digest,
     dsseEnvelopeRef,
-    sbomRef,
-    provenanceRef: provRef,
     builderIdentity: "builder:recovery",
   };
   await verifyAndPersistAttestation(input, store, builderKeys, buildActor(tenantId, "ci-001"));
@@ -227,19 +226,20 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
   const rtDsseEnvelopeRef = "attestation:signature:rt-recovery-v1";
   const rtSbomRef = "attestation:sbom:rt-recovery-v1";
   const rtProvRef = "attestation:provenance:rt-recovery-v1";
-  store.writeDsseEnvelope(
-    rtDsseEnvelopeRef,
-    buildDsseArtifactAttestationEnvelope(builderKey, rtDigest),
-  );
-  store.writeSbom(rtSbomRef, {
-    packages: [{ name: "lodash", version: "4.17.21", licenses: ["MIT"], vulnerabilities: [] }],
-  });
-  store.writeProvenance(rtProvRef, {
+  const rtSbomDoc = { bomFormat: "CycloneDX", specVersion: "1.6", version: 1, metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } }, components: [{ type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] }] };
+  const rtProvDoc = {
     sourceRevision: "git:abc123",
     buildPipeline: "ci-1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
-  });
+  };
+  const rtSupplyChain: PredicateSupplyChain = { sbomRef: rtSbomRef, sbomContent: rtSbomDoc, provenanceRef: rtProvRef, provenanceContent: rtProvDoc };
+  store.writeDsseEnvelope(
+    rtDsseEnvelopeRef,
+    buildDsseArtifactAttestationEnvelope(builderKey, rtDigest, rtSupplyChain),
+  );
+  store.writeSbom(rtSbomRef, rtSbomDoc);
+  store.writeProvenance(rtProvRef, rtProvDoc);
 
   const rtInput: VerifyAttestationInput = {
     tenantId,
@@ -247,8 +247,6 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     artifactRevisionId: runtimeRevision.id,
     artifactDigest: rtDigest,
     dsseEnvelopeRef: rtDsseEnvelopeRef,
-    sbomRef: rtSbomRef,
-    provenanceRef: rtProvRef,
     builderIdentity: "builder:recovery",
   };
   const rtAttestation = await verifyAndPersistAttestation(

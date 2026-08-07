@@ -17,7 +17,6 @@ import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
   type ProvenanceDocument,
-  type SbomDocument,
   type VerifyAttestationInput,
   computeArtifactDigest,
   verifyArtifactAttestation,
@@ -25,6 +24,7 @@ import {
 import {
   buildDsseArtifactAttestationEnvelope,
   generateTestBuilderKey,
+  type PredicateSupplyChain,
   type TestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import {
@@ -68,13 +68,13 @@ afterEach(() => {
 
 class InMemoryManagedArtifactStore implements ManagedArtifactStore {
   private envelopes = new Map<string, Buffer>();
-  private sboms = new Map<string, SbomDocument>();
+  private sboms = new Map<string, unknown>();
   private provenances = new Map<string, ProvenanceDocument>();
 
   writeDsseEnvelope(ref: string, envelope: Buffer): void {
     this.envelopes.set(ref, envelope);
   }
-  writeSbom(ref: string, doc: SbomDocument): void {
+  writeSbom(ref: string, doc: unknown): void {
     this.sboms.set(ref, doc);
   }
   writeProvenance(ref: string, doc: ProvenanceDocument): void {
@@ -86,7 +86,7 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
     if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
     return envelope;
   }
-  async readSbom(ref: string): Promise<SbomDocument> {
+  async readSbom(ref: string): Promise<unknown> {
     const doc = this.sboms.get(ref);
     if (!doc) throw new Error(`sbom not found: ${ref}`);
     return doc;
@@ -100,11 +100,16 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
 
 // ─── 辅助：ed25519 密钥对 + DSSE Envelope（来自 test-support） ──
 
-function buildCleanSbom(): SbomDocument {
+/** 构造符合 CycloneDX 1.6 Schema 的干净 SBOM（与 artifact-attestation.test.ts 一致）。 */
+function buildCleanSbom(): unknown {
   return {
-    packages: [
-      { name: "lodash", version: "4.17.21", licenses: ["MIT"], vulnerabilities: [] },
-      { name: "express", version: "4.18.2", licenses: ["MIT"], vulnerabilities: [] },
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
+    components: [
+      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
+      { type: "library", name: "express", version: "4.18.2", licenses: [{ license: { id: "MIT" } }] },
     ],
   };
 }
@@ -158,10 +163,14 @@ async function createVerifiedAttestation(
   const sbomRef = `attestation:sbom:${digest.slice(7, 19)}`;
   const provenanceRef = `attestation:provenance:${digest.slice(7, 19)}`;
 
+  const sbomContent = buildCleanSbom();
+  const provenanceContent = buildValidProvenance();
+  const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent, provenanceRef, provenanceContent };
+
   const store = new InMemoryManagedArtifactStore();
-  store.writeDsseEnvelope(dsseEnvelopeRef, buildDsseArtifactAttestationEnvelope(keyPair, digest));
-  store.writeSbom(sbomRef, buildCleanSbom());
-  store.writeProvenance(provenanceRef, buildValidProvenance());
+  store.writeDsseEnvelope(dsseEnvelopeRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+  store.writeSbom(sbomRef, sbomContent);
+  store.writeProvenance(provenanceRef, provenanceContent);
 
   const input: VerifyAttestationInput = {
     tenantId,
@@ -169,8 +178,6 @@ async function createVerifiedAttestation(
     artifactRevisionId,
     artifactDigest: digest,
     dsseEnvelopeRef,
-    sbomRef,
-    provenanceRef,
     builderIdentity,
   };
 
@@ -243,16 +250,21 @@ describe("S12-W04 provenance 摘要持久化", () => {
       "builder:company-agent-runtime": keyPair.publicKeyBase64,
     };
     const digest = computeArtifactDigest("failure content");
+    const failSbomRef = "attestation:sbom:fail";
+    const failProvRef = "attestation:provenance:fail";
+    const failSbomContent = buildCleanSbom();
+    const failProvContent = buildValidProvenance();
+    const failSupplyChain: PredicateSupplyChain = { sbomRef: failSbomRef, sbomContent: failSbomContent, provenanceRef: failProvRef, provenanceContent: failProvContent };
     const store = new InMemoryManagedArtifactStore();
     // 故意用错误 subject digest → 验签失败
     store.writeDsseEnvelope(
       "attestation:signature:fail",
-      buildDsseArtifactAttestationEnvelope(keyPair, digest, {
+      buildDsseArtifactAttestationEnvelope(keyPair, digest, failSupplyChain, {
         subjectDigest: "sha256:wrong",
       }),
     );
-    store.writeSbom("attestation:sbom:fail", buildCleanSbom());
-    store.writeProvenance("attestation:provenance:fail", buildValidProvenance());
+    store.writeSbom(failSbomRef, failSbomContent);
+    store.writeProvenance(failProvRef, failProvContent);
 
     const input: VerifyAttestationInput = {
       tenantId,
@@ -260,8 +272,6 @@ describe("S12-W04 provenance 摘要持久化", () => {
       artifactRevisionId: "rev-fail-1",
       artifactDigest: digest,
       dsseEnvelopeRef: "attestation:signature:fail",
-      sbomRef: "attestation:sbom:fail",
-      provenanceRef: "attestation:provenance:fail",
       builderIdentity: "builder:company-agent-runtime",
     };
 
@@ -288,13 +298,18 @@ describe("S12-W04 provenance 摘要持久化", () => {
       "builder:company-agent-runtime": keyPair.publicKeyBase64,
     };
     const digest = computeArtifactDigest("pure-logic content");
+    const pureSbomRef = "attestation:sbom:pure";
+    const pureProvRef = "attestation:provenance:pure";
+    const pureSbomContent = buildCleanSbom();
+    const pureProvContent = buildValidProvenance();
+    const pureSupplyChain: PredicateSupplyChain = { sbomRef: pureSbomRef, sbomContent: pureSbomContent, provenanceRef: pureProvRef, provenanceContent: pureProvContent };
     const store = new InMemoryManagedArtifactStore();
     store.writeDsseEnvelope(
       "attestation:signature:pure",
-      buildDsseArtifactAttestationEnvelope(keyPair, digest),
+      buildDsseArtifactAttestationEnvelope(keyPair, digest, pureSupplyChain),
     );
-    store.writeSbom("attestation:sbom:pure", buildCleanSbom());
-    store.writeProvenance("attestation:provenance:pure", buildValidProvenance());
+    store.writeSbom(pureSbomRef, pureSbomContent);
+    store.writeProvenance(pureProvRef, pureProvContent);
 
     const result = await verifyArtifactAttestation(
       {
@@ -303,8 +318,6 @@ describe("S12-W04 provenance 摘要持久化", () => {
         artifactRevisionId: "rev-pure-1",
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:signature:pure",
-        sbomRef: "attestation:sbom:pure",
-        provenanceRef: "attestation:provenance:pure",
         builderIdentity: "builder:company-agent-runtime",
       },
       store,

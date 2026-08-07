@@ -25,12 +25,12 @@ import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
   type ProvenanceDocument,
-  type SbomDocument,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
   buildDsseArtifactAttestationEnvelope,
   generateTestBuilderKey,
+  type PredicateSupplyChain,
   type TestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import {
@@ -79,13 +79,13 @@ afterEach(() => {
 
 class InMemoryManagedArtifactStore implements ManagedArtifactStore {
   private envelopes = new Map<string, Buffer>();
-  private sboms = new Map<string, SbomDocument>();
+  private sboms = new Map<string, unknown>();
   private provenances = new Map<string, ProvenanceDocument>();
 
   writeDsseEnvelope(ref: string, envelope: Buffer): void {
     this.envelopes.set(ref, envelope);
   }
-  writeSbom(ref: string, doc: SbomDocument): void {
+  writeSbom(ref: string, doc: unknown): void {
     this.sboms.set(ref, doc);
   }
   writeProvenance(ref: string, doc: ProvenanceDocument): void {
@@ -97,7 +97,7 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
     if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
     return envelope;
   }
-  async readSbom(ref: string): Promise<SbomDocument> {
+  async readSbom(ref: string): Promise<unknown> {
     const doc = this.sboms.get(ref);
     if (!doc) throw new Error(`sbom not found: ${ref}`);
     return doc;
@@ -111,9 +111,15 @@ class InMemoryManagedArtifactStore implements ManagedArtifactStore {
 
 // ─── 辅助：ed25519 密钥对 + DSSE Envelope（来自 test-support） ──
 
-function buildCleanSbom(): SbomDocument {
+function buildCleanSbom(): unknown {
   return {
-    packages: [{ name: "lodash", version: "4.17.21", licenses: ["MIT"], vulnerabilities: [] }],
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
+    components: [
+      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
+    ],
   };
 }
 
@@ -187,9 +193,12 @@ async function createVerifiedAttestationDirect(
   const sbomRef = `attestation:sbom:${digest.slice(7, 15)}`;
   const provRef = `attestation:provenance:${digest.slice(7, 15)}`;
   const store = new InMemoryManagedArtifactStore();
-  store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest));
-  store.writeSbom(sbomRef, buildCleanSbom());
-  store.writeProvenance(provRef, buildValidProvenance());
+  const sbomContent = buildCleanSbom();
+  const provenanceContent = buildValidProvenance();
+  const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent, provenanceRef: provRef, provenanceContent };
+  store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+  store.writeSbom(sbomRef, sbomContent);
+  store.writeProvenance(provRef, provenanceContent);
   const attestation = await verifyAndPersistAttestation(
     {
       tenantId,
@@ -197,8 +206,6 @@ async function createVerifiedAttestationDirect(
       artifactRevisionId,
       artifactDigest: digest,
       dsseEnvelopeRef: sigRef,
-      sbomRef,
-      provenanceRef: provRef,
       builderIdentity: "builder:company-agent-runtime",
     },
     store,
@@ -339,10 +346,13 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const sigRef = `attestation:signature:${digest.slice(7, 15)}`;
     const sbomRef = `attestation:sbom:${digest.slice(7, 15)}`;
     const provRef = `attestation:provenance:${digest.slice(7, 15)}`;
+    const sbomDoc = buildCleanSbom();
+    const provDoc = buildValidProvenance();
+    const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
     const store = new InMemoryManagedArtifactStore();
-    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest));
-    store.writeSbom(sbomRef, buildCleanSbom());
-    store.writeProvenance(provRef, buildValidProvenance());
+    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+    store.writeSbom(sbomRef, sbomDoc);
+    store.writeProvenance(provRef, provDoc);
     setArtifactStoreOverride(store);
     setBuilderKeyRegistryOverride(builderKeys);
 
@@ -407,11 +417,14 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const sigRef = "attestation:signature:bad";
     const sbomRef = "attestation:sbom:bad";
     const provRef = "attestation:provenance:bad";
+    const sbomDoc = buildCleanSbom();
+    const provDoc = buildValidProvenance();
+    const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
     const store = new InMemoryManagedArtifactStore();
     // 用 badKeyPair 签名（公钥与白名单不一致）
-    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(badKeyPair, digest));
-    store.writeSbom(sbomRef, buildCleanSbom());
-    store.writeProvenance(provRef, buildValidProvenance());
+    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(badKeyPair, digest, supplyChain));
+    store.writeSbom(sbomRef, sbomDoc);
+    store.writeProvenance(provRef, provDoc);
     setArtifactStoreOverride(store);
     setBuilderKeyRegistryOverride(builderKeys);
 
@@ -465,10 +478,13 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const sigRef = "attestation:signature:replay";
     const sbomRef = "attestation:sbom:replay";
     const provRef = "attestation:provenance:replay";
+    const sbomDoc = buildCleanSbom();
+    const provDoc = buildValidProvenance();
+    const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
     const store = new InMemoryManagedArtifactStore();
-    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest));
-    store.writeSbom(sbomRef, buildCleanSbom());
-    store.writeProvenance(provRef, buildValidProvenance());
+    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+    store.writeSbom(sbomRef, sbomDoc);
+    store.writeProvenance(provRef, provDoc);
     setArtifactStoreOverride(store);
     setBuilderKeyRegistryOverride(builderKeys);
 

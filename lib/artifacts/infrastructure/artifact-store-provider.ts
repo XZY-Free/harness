@@ -18,7 +18,6 @@ import type {
  BuilderKeyRegistry,
  ManagedArtifactStore,
  ProvenanceDocument,
- SbomDocument,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import { hostedControlPlaneConfig } from "@/lib/config";
 
@@ -34,7 +33,7 @@ class EmptyManagedArtifactStore implements ManagedArtifactStore {
  async readDsseEnvelope(_ref: string): Promise<Buffer> {
  throw new Error(`EmptyManagedArtifactStore: DSSE envelope not found: ${_ref}`);
  }
- async readSbom(_ref: string): Promise<SbomDocument> {
+ async readSbom(_ref: string): Promise<unknown> {
  throw new Error(`EmptyManagedArtifactStore: sbom not found: ${_ref}`);
  }
  async readProvenance(_ref: string): Promise<ProvenanceDocument> {

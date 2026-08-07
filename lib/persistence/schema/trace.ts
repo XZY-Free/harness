@@ -170,7 +170,7 @@ export const observationTable = mysqlTable(
  /** 已脱敏的内容（由 content-policy 处理）。 */
  contentJson: json("content_json"),
  /** 强制 false：写入前已脱敏，永不存储原始 secret。 */
- containsSecret: json("contains_secret").notNull().default(sql`false`),
+ containsSecret: json("contains_secret").notNull().default(sql`CAST(false AS JSON)`),
  redactionSummary: varchar("redaction_summary", { length: 256 }),
  observedAt: datetime("observed_at", { mode: "date", fsp: 3 }).notNull(),
  createdAt: datetime("created_at", { mode: "date", fsp: 3 })
