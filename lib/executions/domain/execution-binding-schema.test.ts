@@ -18,4 +18,22 @@ describe("ExecutionBinding Attestation JSON 基线约束", () => {
  );
  }
  });
+
+ it("Artifact ID 在 Schema、基线 SQL 与 Snapshot 中均为必填并带索引", () => {
+ const schema = projectFile("lib/persistence/schema/runtime.ts");
+ const baseline = projectFile("drizzle/0000_initial_schema.sql");
+ const snapshot = projectFile("drizzle/meta/0000_snapshot.json");
+
+ for (const [column, indexName] of [
+ ["agentArtifactId", "ExecutionBinding_agentArtifact_idx"],
+ ["runtimeArtifactId", "ExecutionBinding_runtimeArtifact_idx"],
+ ] as const) {
+ expect(schema).toContain(`${column}: varchar("${column}", { length: 36 }).notNull()`);
+ expect(baseline).toContain(`\`${column}\` varchar(36) NOT NULL`);
+ expect(snapshot).toContain(`"name": "${column}"`);
+ expect(schema).toContain(indexName);
+ expect(baseline).toContain(indexName);
+ expect(snapshot).toContain(indexName);
+ }
+ });
 });

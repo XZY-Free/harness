@@ -2158,6 +2158,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "agentArtifactId": {
+          "name": "agentArtifactId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeArtifactId": {
+          "name": "runtimeArtifactId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "agentArtifactDigest": {
           "name": "agentArtifactDigest",
           "type": "varchar(71)",
@@ -2283,6 +2297,20 @@
           "name": "ExecutionBinding_routeRevision_idx",
           "columns": [
             "routeRevisionId"
+          ],
+          "isUnique": false
+        },
+        "ExecutionBinding_agentArtifact_idx": {
+          "name": "ExecutionBinding_agentArtifact_idx",
+          "columns": [
+            "agentArtifactId"
+          ],
+          "isUnique": false
+        },
+        "ExecutionBinding_runtimeArtifact_idx": {
+          "name": "ExecutionBinding_runtimeArtifact_idx",
+          "columns": [
+            "runtimeArtifactId"
           ],
           "isUnique": false
         },

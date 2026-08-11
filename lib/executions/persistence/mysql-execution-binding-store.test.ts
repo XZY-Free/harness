@@ -35,6 +35,8 @@ const bindingRow: BindingRow = {
  routeRevisionId: "route-revision-1",
  routeActivationId: "route-activation-1",
  routeContentDigest: `sha256:${"1".repeat(64)}`,
+ agentArtifactId: "agent-artifact-1",
+ runtimeArtifactId: "runtime-artifact-1",
  agentArtifactDigest: `sha256:${"2".repeat(64)}`,
  runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
  runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
@@ -270,6 +272,9 @@ describe("ExecutionBinding authority final validation", () => {
  expect(source.indexOf(".from(artifact)")).toBeLessThan(
  source.indexOf(".from(artifactAttestation)"),
  );
+ expect(source).toContain("artifactId: evidence.agentArtifactId");
+ expect(source).toContain("artifactId: evidence.runtimeArtifactId");
+ expect(source).not.toContain("artifactId: attestationKey.artifactId");
  });
 
  it("Publication evidenceSetDigest 必须由完整锁后证据重算一致", () => {
@@ -417,6 +422,8 @@ describe("ExecutionBinding authority final validation", () => {
  runtimeRevisionId: "runtime-revision-1",
  policyRevisionId: "policy-revision-1",
  routeContentDigest: `sha256:${"1".repeat(64)}`,
+ agentArtifactId: "agent-artifact-1",
+ runtimeArtifactId: "runtime-artifact-1",
  agentArtifactDigest: `sha256:${"2".repeat(64)}`,
  runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
  runtimeConfigDigest: `sha256:${"4".repeat(64)}`,

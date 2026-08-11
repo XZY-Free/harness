@@ -36,6 +36,7 @@ interface AuthorityFixture {
   runtimePublicationId: string;
   runtimeAttestationId: string;
   runtimeRevisionId: string;
+  runtimeArtifactId: string;
   routeId: string;
   routeRevisionId: string;
 }
@@ -126,6 +127,7 @@ async function seedAgentAuthority() {
     tenantId: tenant.id,
     agentId,
     agentRevisionId,
+    agentArtifactId: artifactId,
     agentArtifactDigest: digest,
     agentAttestationId: attestationId,
     agentPublicationId,
@@ -323,6 +325,7 @@ async function addRuntimeRoute(
     runtimePublicationId,
     runtimeAttestationId,
     runtimeRevisionId,
+    runtimeArtifactId: artifactId,
     routeId,
     routeRevisionId,
   };
@@ -372,6 +375,8 @@ describe("RouteResolver MySQL authority", () => {
       resolution: {
         routeRevisionId: fixture.routeRevisionId,
         controlPlaneEvidence: {
+          agentArtifactId: base.agentArtifactId,
+          runtimeArtifactId: fixture.runtimeArtifactId,
           agentArtifactDigest: base.agentArtifactDigest,
           runtimeArtifactDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
           runtimeConfigDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),

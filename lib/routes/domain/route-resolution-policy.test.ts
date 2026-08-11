@@ -6,6 +6,8 @@ const NOW = new Date("2026-08-03T01:00:00.000Z");
 
 function evidence(id: string) {
   return {
+    agentArtifactId: `agent-artifact-${id}`,
+    runtimeArtifactId: `runtime-artifact-${id}`,
     agentArtifactDigest: `sha256:${"1".repeat(64)}`,
     runtimeArtifactDigest: `sha256:${"2".repeat(64)}`,
     runtimeConfigDigest: `sha256:${"3".repeat(64)}`,

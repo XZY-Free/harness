@@ -138,6 +138,8 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
  routeRevisionId: evidence.routeRevisionId,
  routeActivationId: evidence.routeActivationId,
  routeContentDigest: evidence.routeContentDigest,
+ agentArtifactId: evidence.agentArtifactId,
+ runtimeArtifactId: evidence.runtimeArtifactId,
  agentArtifactDigest: evidence.agentArtifactDigest,
  runtimeArtifactDigest: evidence.runtimeArtifactDigest,
  runtimeConfigDigest: evidence.runtimeConfigDigest,
@@ -405,6 +407,8 @@ async function lockAndVerifyProjection(
  runtimeRevisionId: routeEligibilityProjection.runtimeRevisionId,
  policyRevisionId: routeEligibilityProjection.policyRevisionId,
  routeContentDigest: routeEligibilityProjection.routeContentDigest,
+ agentArtifactId: routeEligibilityProjection.agentArtifactId,
+ runtimeArtifactId: routeEligibilityProjection.runtimeArtifactId,
  agentArtifactDigest: routeEligibilityProjection.agentArtifactDigest,
  runtimeArtifactDigest: routeEligibilityProjection.runtimeArtifactDigest,
  runtimeConfigDigest: routeEligibilityProjection.runtimeConfigDigest,
@@ -442,6 +446,8 @@ async function lockAndVerifyProjection(
  capabilityManifestDigest: evidence.capabilityManifestDigest,
  agentPublicationRecordId: evidence.agentPublicationRecordId,
  runtimePublicationRecordId: evidence.runtimePublicationRecordId,
+ agentArtifactId: evidence.agentArtifactId,
+ runtimeArtifactId: evidence.runtimeArtifactId,
  agentAttestationIds: evidence.agentAttestationIds,
  runtimeAttestationIds: evidence.runtimeAttestationIds,
  conformanceRunId: evidence.conformanceRunId,
@@ -461,6 +467,8 @@ type FrozenProjectionRow = {
  runtimeRevisionId: string;
  policyRevisionId: string | null;
  routeContentDigest: string;
+ agentArtifactId: string | null;
+ runtimeArtifactId: string | null;
  agentArtifactDigest: string | null;
  runtimeArtifactDigest: string | null;
  runtimeConfigDigest: string | null;
@@ -482,6 +490,8 @@ type FrozenProjectionExpectation = {
  runtimeRevisionId: string;
  policyRevisionId: string | null;
  routeContentDigest: string;
+ agentArtifactId: string;
+ runtimeArtifactId: string;
  agentArtifactDigest: string;
  runtimeArtifactDigest: string;
  runtimeConfigDigest: string;
@@ -511,6 +521,8 @@ export function validateFrozenProjectionAuthority(input: {
  projection.runtimeRevisionId !== expected.runtimeRevisionId ||
  projection.policyRevisionId !== expected.policyRevisionId ||
  projection.routeContentDigest !== expected.routeContentDigest ||
+ projection.agentArtifactId !== expected.agentArtifactId ||
+ projection.runtimeArtifactId !== expected.runtimeArtifactId ||
  projection.agentArtifactDigest !== expected.agentArtifactDigest ||
  projection.runtimeArtifactDigest !== expected.runtimeArtifactDigest ||
  projection.runtimeConfigDigest !== expected.runtimeConfigDigest ||
@@ -785,10 +797,13 @@ async function lockAndVerifyAttestations(
  if (!attestationKey?.artifactId) {
  throw evidenceError(`冻结 Attestation ${attestationId} 缺少 Artifact`);
  }
+ if (attestationKey.artifactId !== evidence.agentArtifactId) {
+ throw evidenceError(`冻结 Attestation ${attestationId} 的 Artifact 已漂移`);
+ }
  const [artifactRow] = await tx
  .select({ id: artifact.id, tenantId: artifact.tenantId, kind: artifact.kind, digest: artifact.digest })
  .from(artifact)
- .where(eq(artifact.id, attestationKey.artifactId))
+ .where(eq(artifact.id, evidence.agentArtifactId))
  .limit(1)
  .for("update");
  const [attestation] = await tx
@@ -810,7 +825,7 @@ async function lockAndVerifyAttestations(
  artifact: artifactRow ?? null,
  attestationArtifactId: attestation?.artifactId ?? null,
  expected: {
- artifactId: attestationKey.artifactId,
+ artifactId: evidence.agentArtifactId,
  tenantId: input.tenantId,
  artifactKind: "agent_revision",
  artifactDigest: evidence.agentArtifactDigest,
@@ -844,10 +859,13 @@ async function lockAndVerifyAttestations(
  if (!attestationKey?.artifactId) {
  throw evidenceError(`冻结 Attestation ${attestationId} 缺少 Artifact`);
  }
+ if (attestationKey.artifactId !== evidence.runtimeArtifactId) {
+ throw evidenceError(`冻结 Attestation ${attestationId} 的 Artifact 已漂移`);
+ }
  const [artifactRow] = await tx
  .select({ id: artifact.id, tenantId: artifact.tenantId, kind: artifact.kind, digest: artifact.digest })
  .from(artifact)
- .where(eq(artifact.id, attestationKey.artifactId))
+ .where(eq(artifact.id, evidence.runtimeArtifactId))
  .limit(1)
  .for("update");
  const [attestation] = await tx
@@ -869,7 +887,7 @@ async function lockAndVerifyAttestations(
  artifact: artifactRow ?? null,
  attestationArtifactId: attestation?.artifactId ?? null,
  expected: {
- artifactId: attestationKey.artifactId,
+ artifactId: evidence.runtimeArtifactId,
  tenantId: input.tenantId,
  artifactKind: "runtime_revision",
  artifactDigest: evidence.runtimeArtifactDigest,
@@ -1029,6 +1047,8 @@ export function toExecutionBinding(
  !row.routeRevisionId ||
  !row.routeActivationId ||
  !row.routeContentDigest ||
+ !row.agentArtifactId ||
+ !row.runtimeArtifactId ||
  !row.agentArtifactDigest ||
  !row.runtimeArtifactDigest ||
  !row.runtimeConfigDigest ||
@@ -1061,6 +1081,8 @@ export function toExecutionBinding(
  routeRevisionId: row.routeRevisionId,
  routeActivationId: row.routeActivationId,
  routeContentDigest: row.routeContentDigest,
+ agentArtifactId: row.agentArtifactId,
+ runtimeArtifactId: row.runtimeArtifactId,
  agentArtifactDigest: row.agentArtifactDigest,
  runtimeArtifactDigest: row.runtimeArtifactDigest,
  runtimeConfigDigest: row.runtimeConfigDigest,

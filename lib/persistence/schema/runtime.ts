@@ -340,6 +340,8 @@ export const executionBindingTable = mysqlTable(
  routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
  routeActivationId: varchar("routeActivationId", { length: 36 }).notNull(),
  routeContentDigest: varchar("routeContentDigest", { length: 71 }).notNull(),
+ agentArtifactId: varchar("agentArtifactId", { length: 36 }).notNull(),
+ runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }).notNull(),
  agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }).notNull(),
  runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }).notNull(),
  runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
@@ -364,6 +366,8 @@ export const executionBindingTable = mysqlTable(
  agentRevisionIdx: index("ExecutionBinding_agentRevision_idx").on(t.agentRevisionId),
  runtimeRevisionIdx: index("ExecutionBinding_runtimeRevision_idx").on(t.runtimeRevisionId),
  routeRevisionIdx: index("ExecutionBinding_routeRevision_idx").on(t.routeRevisionId),
+ agentArtifactIdx: index("ExecutionBinding_agentArtifact_idx").on(t.agentArtifactId),
+ runtimeArtifactIdx: index("ExecutionBinding_runtimeArtifact_idx").on(t.runtimeArtifactId),
  conformanceRunIdx: index("ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
  agentAttestationIdsNonEmpty: check(
  "ExecutionBinding_agentAttestationIds_non_empty",

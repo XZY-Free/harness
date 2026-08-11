@@ -14,6 +14,8 @@ export interface SerializableExecutionBinding {
  routeRevisionId: string;
  routeActivationId: string;
  routeContentDigest: string;
+ agentArtifactId: string;
+ runtimeArtifactId: string;
  agentArtifactDigest: string;
  runtimeArtifactDigest: string;
  runtimeConfigDigest: string;
@@ -47,6 +49,8 @@ export function serializeExecutionBinding(binding: SerializableExecutionBinding)
  route_revision_id: binding.routeRevisionId,
  route_activation_id: binding.routeActivationId,
  route_content_digest: binding.routeContentDigest,
+ agent_artifact_id: binding.agentArtifactId,
+ runtime_artifact_id: binding.runtimeArtifactId,
  agent_artifact_digest: binding.agentArtifactDigest,
  runtime_artifact_digest: binding.runtimeArtifactDigest,
  runtime_config_digest: binding.runtimeConfigDigest,

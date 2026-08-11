@@ -13,6 +13,8 @@ export const ROUTE_TRAFFIC_WEIGHT_TOTAL = 10_000;
 export type RouteResolutionAttribute = string | number | boolean;
 
 export interface RouteControlPlaneEvidence {
+ agentArtifactId: string;
+ runtimeArtifactId: string;
  agentArtifactDigest: string;
  runtimeArtifactDigest: string;
  runtimeConfigDigest: string;

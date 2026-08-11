@@ -262,6 +262,8 @@ CREATE TABLE `ExecutionBinding` (
 	`routeRevisionId` varchar(36) NOT NULL,
 	`routeActivationId` varchar(36) NOT NULL,
 	`routeContentDigest` varchar(71) NOT NULL,
+	`agentArtifactId` varchar(36) NOT NULL,
+	`runtimeArtifactId` varchar(36) NOT NULL,
 	`agentArtifactDigest` varchar(71) NOT NULL,
 	`runtimeArtifactDigest` varchar(71) NOT NULL,
 	`runtimeConfigDigest` varchar(71) NOT NULL,
@@ -2325,6 +2327,8 @@ CREATE INDEX `ExecutionBinding_tenant_idx` ON `ExecutionBinding` (`tenantId`);--
 CREATE INDEX `ExecutionBinding_agentRevision_idx` ON `ExecutionBinding` (`agentRevisionId`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_runtimeRevision_idx` ON `ExecutionBinding` (`runtimeRevisionId`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_routeRevision_idx` ON `ExecutionBinding` (`routeRevisionId`);--> statement-breakpoint
+CREATE INDEX `ExecutionBinding_agentArtifact_idx` ON `ExecutionBinding` (`agentArtifactId`);--> statement-breakpoint
+CREATE INDEX `ExecutionBinding_runtimeArtifact_idx` ON `ExecutionBinding` (`runtimeArtifactId`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_conformanceRun_idx` ON `ExecutionBinding` (`conformanceRunId`);--> statement-breakpoint
 CREATE INDEX `IdempotencyRecord_tenant_expires_idx` ON `IdempotencyRecord` (`tenantId`,`expiresAt`);--> statement-breakpoint
 CREATE INDEX `Invocation_tenant_state_idx` ON `Invocation` (`tenantId`,`executionState`);--> statement-breakpoint

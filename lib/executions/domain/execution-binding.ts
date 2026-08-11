@@ -75,6 +75,8 @@ export function assertExecutionBindingEvidence(
  const identifiers = [
  evidence.routeRevisionId,
  evidence.routeActivationId,
+ evidence.agentArtifactId,
+ evidence.runtimeArtifactId,
  evidence.agentPublicationRecordId,
  evidence.runtimePublicationRecordId,
  evidence.conformanceRunId,

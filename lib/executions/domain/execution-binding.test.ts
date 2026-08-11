@@ -8,6 +8,8 @@ const EVIDENCE = {
   routeRevisionId: "route-revision-1",
   routeActivationId: "route-activation-1",
   routeContentDigest: `sha256:${"1".repeat(64)}`,
+  agentArtifactId: "agent-artifact-1",
+  runtimeArtifactId: "runtime-artifact-1",
   agentArtifactDigest: `sha256:${"2".repeat(64)}`,
   runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
   runtimeConfigDigest: `sha256:${"4".repeat(64)}`,

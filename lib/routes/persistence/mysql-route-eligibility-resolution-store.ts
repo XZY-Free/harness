@@ -41,6 +41,8 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
  const controlPlaneEvidence =
  p.agentArtifactDigest &&
  p.runtimeArtifactDigest &&
+ p.agentArtifactId &&
+ p.runtimeArtifactId &&
  p.runtimeConfigDigest &&
  p.agentPublicationRecordId &&
  p.runtimePublicationRecordId &&
@@ -48,6 +50,8 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
  Array.isArray(p.agentAttestationIds) &&
  Array.isArray(p.runtimeAttestationIds)
  ? {
+ agentArtifactId: p.agentArtifactId,
+ runtimeArtifactId: p.runtimeArtifactId,
  agentArtifactDigest: p.agentArtifactDigest,
  runtimeArtifactDigest: p.runtimeArtifactDigest,
  runtimeConfigDigest: p.runtimeConfigDigest,
