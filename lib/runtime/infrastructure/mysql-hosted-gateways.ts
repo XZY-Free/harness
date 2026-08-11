@@ -21,7 +21,7 @@ import {
  listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
-import { aiConfig, runtimeConformanceConfig } from "@/lib/config";
+import { runtimeConformanceConfig } from "@/lib/config";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { db } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
@@ -78,7 +78,6 @@ function buildRunnerIdentityRegistry(): RunnerSigningIdentityRegistry {
 
 const BUILTIN_HOSTED_RUNTIME_KEY = "builtin-hosted";
 const HOSTED_ACTOR_ID = "hosted-runtime-provisioner";
-const HOSTED_SOURCE_REVISION = "builtin-hosted-release";
 const HOSTED_RUNTIME_ENDPOINT = "in-process://hosted";
 const HOSTED_RUNTIME_CAPABILITIES = {
  capabilities: ["event_stream"],
@@ -142,37 +141,34 @@ const routeReader: HostedRouteReader = {
 
 const agentPublication: HostedAgentPublicationGateway = {
  async ensurePublishedAgentRevision(command) {
- // : 如果请求指定了 agentRevisionId，验证已有发布一致
- if (command.agentRevisionId) {
- const existing = await loadPublishedAgentRevision(command.tenantId, command.agentId);
- if (existing) {
- if (existing.revisionId !== command.agentRevisionId) {
- const err = new Error(
- `HOSTED_AGENT_REVISION_MISMATCH: 已发布 revisionId=${existing.revisionId}，请求要求=${command.agentRevisionId}`,
+ const existing = await loadPublishedAgentRevision(
+ command.tenantId,
+ command.agentId,
+ command.expectedAgentRevisionId,
  );
- err.name = "HostedProvisioningPermanentError";
- throw err;
- }
- return existing;
- }
- } else {
- const existing = await loadPublishedAgentRevision(command.tenantId, command.agentId);
  if (existing) return existing;
- }
 
+ const { agent, revision } = await loadExpectedAgentRevision({
+ tenantId: command.tenantId,
+ agentId: command.agentId,
+ expectedAgentRevisionId: command.expectedAgentRevisionId,
+ });
+ if (revision.revisionState === "published") {
+ const winner = await loadPublishedAgentRevision(
+ command.tenantId,
+ command.agentId,
+ command.expectedAgentRevisionId,
+ );
+ if (winner) return winner;
+ throw hostedPermanentError(
+ "HOSTED_AGENT_REVISION_EVIDENCE_INVALID",
+ `指定 AgentRevision 缺少有效发布证据 (${command.expectedAgentRevisionId})`,
+ );
+ }
  const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
  tenantId: command.tenantId,
  artifactType: "agent_revision",
  });
- const { agent, revision } = await ensureAgentDraft({
- ...command,
- artifactRef: evidence.artifactRef,
- });
- if (revision.revisionState === "published") {
- const winner = await loadPublishedAgentRevision(command.tenantId, command.agentId);
- if (winner?.revisionId === revision.id) return winner;
- throw new Error("Hosted AgentRevision 当前指针缺少有效发布证据");
- }
  const attestation = await ensureVerifiedAttestation({
  tenantId: command.tenantId,
  artifactType: "agent_revision",
@@ -196,8 +192,12 @@ const agentPublication: HostedAgentPublicationGateway = {
  attestationId: result.attestation.id,
  };
  } catch (error) {
- const winner = await loadPublishedAgentRevision(command.tenantId, command.agentId);
- if (winner?.revisionId === revision.id) return winner;
+ const winner = await loadPublishedAgentRevision(
+ command.tenantId,
+ command.agentId,
+ command.expectedAgentRevisionId,
+ );
+ if (winner) return winner;
  throw error;
  }
  },
@@ -214,7 +214,11 @@ const runtimePrepare: HostedRuntimePrepareGateway = {
  });
  const { runtime, revision } = await ensureRuntimeDraft({
  tenantId: command.tenantId,
- ownerUserId: await loadAgentOwner(command.tenantId, command.agentId),
+ ownerUserId: await loadAgentRevisionOwner(
+ command.tenantId,
+ command.agentId,
+ command.agentRevisionId,
+ ),
  artifactRef: evidence.artifactRef,
  });
  return { runtimeId: runtime.id, runtimeRevisionId: revision.id };
@@ -409,19 +413,18 @@ async function isBuiltinHostedRuntimeRevision(
 async function loadPublishedAgentRevision(
  tenantId: string,
  agentId: string,
+ expectedAgentRevisionId: string,
 ): Promise<PublishedHostedAgentRevision | null> {
- const [agent] = await db
- .select()
- .from(agentTable)
- .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
- .limit(1);
- if (!agent?.currentRevisionId) return null;
  const [revision] = await db
- .select()
+ .select({ revision: agentRevisionTable })
  .from(agentRevisionTable)
+ .innerJoin(
+ agentTable,
+ and(eq(agentTable.id, agentRevisionTable.agentId), eq(agentTable.tenantId, tenantId)),
+ )
  .where(
  and(
- eq(agentRevisionTable.id, agent.currentRevisionId),
+ eq(agentRevisionTable.id, expectedAgentRevisionId),
  eq(agentRevisionTable.agentId, agentId),
  eq(agentRevisionTable.revisionState, "published"),
  ),
@@ -431,11 +434,11 @@ async function loadPublishedAgentRevision(
  const fact = await loadPublicationFact({
  tenantId,
  subjectType: "agent_revision",
- revisionId: revision.id,
- artifactId: revision.artifactId,
- artifactDigest: revision.artifactDigest,
+ revisionId: revision.revision.id,
+ artifactId: revision.revision.artifactId,
+ artifactDigest: revision.revision.artifactDigest,
  });
- return fact ? { revisionId: revision.id, ...fact } : null;
+ return fact ? { revisionId: revision.revision.id, ...fact } : null;
 }
 
 async function loadPublishedRuntimeRevision(
@@ -538,10 +541,10 @@ async function loadPublicationFact(params: {
  };
 }
 
-async function ensureAgentDraft(params: {
+async function loadExpectedAgentRevision(params: {
  tenantId: string;
  agentId: string;
- artifactRef: string;
+ expectedAgentRevisionId: string;
 }) {
  return db.transaction(async (tx) => {
  const [agent] = await tx
@@ -550,63 +553,37 @@ async function ensureAgentDraft(params: {
  .where(and(eq(agentTable.tenantId, params.tenantId), eq(agentTable.id, params.agentId)))
  .limit(1)
  .for("update");
- if (!agent) throw new Error(`Hosted Route 初始化失败：助手不存在 (${params.agentId})`);
- if (agent.currentRevisionId) {
- const [current] = await tx
- .select()
- .from(agentRevisionTable)
- .where(
- and(
- eq(agentRevisionTable.id, agent.currentRevisionId),
- eq(agentRevisionTable.agentId, agent.id),
- eq(agentRevisionTable.revisionState, "published"),
- ),
- )
- .limit(1);
- if (!current) throw new Error("Hosted AgentRevision 当前指针无效");
- return { agent, revision: current };
+ if (!agent) {
+ throw hostedPermanentError(
+ "HOSTED_AGENT_REVISION_MISMATCH",
+ `指定 Agent 不存在 (${params.agentId})`,
+ );
  }
- const [existing] = await tx
- .select()
- .from(agentRevisionTable)
- .where(
- and(
- eq(agentRevisionTable.agentId, agent.id),
- eq(agentRevisionTable.agentArtifactRef, params.artifactRef),
- eq(agentRevisionTable.revisionState, "draft"),
- ),
- )
- .orderBy(desc(agentRevisionTable.revisionNo))
- .limit(1);
- if (existing) return { agent, revision: existing };
- const [sequence] = await tx
- .select({ value: max(agentRevisionTable.revisionNo) })
- .from(agentRevisionTable)
- .where(eq(agentRevisionTable.agentId, agent.id));
- const id = randomUUID();
- await tx.insert(agentRevisionTable).values({
- id,
- agentId: agent.id,
- revisionNo: (sequence?.value ?? 0) + 1,
- sourceType: "code",
- sourceRevision: HOSTED_SOURCE_REVISION,
- instructionHash: digest("snow-harness:builtin-hosted-agent-instructions"),
- agentArtifactRef: params.artifactRef,
- modelPolicyJson: { default: aiConfig.chatModel, provider: "server-config" },
- permissionRequirementsJson: {},
- delegationPolicyJson: {},
- agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
- revisionState: "draft",
- createdBy: agent.ownerUserId,
- });
  const [revision] = await tx
  .select()
  .from(agentRevisionTable)
- .where(eq(agentRevisionTable.id, id))
- .limit(1);
- if (!revision) throw new Error("Hosted AgentRevision 创建失败");
+ .where(
+ and(
+ eq(agentRevisionTable.id, params.expectedAgentRevisionId),
+ eq(agentRevisionTable.agentId, agent.id),
+ ),
+ )
+ .limit(1)
+ .for("update");
+ if (!revision || (revision.revisionState !== "draft" && revision.revisionState !== "published")) {
+ throw hostedPermanentError(
+ "HOSTED_AGENT_REVISION_MISMATCH",
+ `指定 AgentRevision 不存在或不可发布 (${params.expectedAgentRevisionId})`,
+ );
+ }
  return { agent, revision };
  });
+}
+
+function hostedPermanentError(code: string, message: string): Error {
+ const error = new Error(`[${code}] ${message}`);
+ error.name = "HostedProvisioningPermanentError";
+ return error;
 }
 
 async function ensureRuntimeDraft(params: {
@@ -789,13 +766,30 @@ async function ensureVerifiedAttestation(params: {
  return recorded;
 }
 
-async function loadAgentOwner(tenantId: string, agentId: string): Promise<string> {
+async function loadAgentRevisionOwner(
+ tenantId: string,
+ agentId: string,
+ agentRevisionId: string,
+): Promise<string> {
  const [agent] = await db
  .select({ ownerUserId: agentTable.ownerUserId })
  .from(agentTable)
+ .innerJoin(
+ agentRevisionTable,
+ and(
+ eq(agentRevisionTable.id, agentRevisionId),
+ eq(agentRevisionTable.agentId, agentTable.id),
+ eq(agentRevisionTable.revisionState, "published"),
+ ),
+ )
  .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
  .limit(1);
- if (!agent) throw new Error(`Hosted Route 初始化失败：助手不存在 (${agentId})`);
+ if (!agent) {
+ throw hostedPermanentError(
+ "HOSTED_AGENT_REVISION_MISMATCH",
+ `指定 AgentRevision 不属于请求 Agent 或尚未发布 (${agentRevisionId})`,
+ );
+ }
  return agent.ownerUserId;
 }
 

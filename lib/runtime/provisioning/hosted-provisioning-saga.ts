@@ -180,6 +180,12 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  ): Promise<SagaStepResult> {
  // Checkpoint 跳过
  if (request.stepAgentRevisionId && request.stepAgentPublicationRecordId) {
+ if (request.stepAgentRevisionId !== request.agentRevisionId) {
+ throw permanentError(
+ "HOSTED_AGENT_REVISION_MISMATCH",
+ `Agent 发布 Checkpoint revisionId=${request.stepAgentRevisionId}，请求要求=${request.agentRevisionId}`,
+ );
+ }
  return advanceStep(request, "ensure_agent_publication");
  }
 
@@ -187,7 +193,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  const agentRevision = await gateways.agentPublication.ensurePublishedAgentRevision({
  tenantId: request.tenantId,
  agentId: request.agentId,
- agentRevisionId: request.agentRevisionId,
+ expectedAgentRevisionId: request.agentRevisionId,
  });
 
  // : 验证 Revision 一致性
@@ -348,6 +354,12 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  !request.stepRuntimeAttestationIds?.length) {
  throw permanentError("CHECKPOINT_BROKEN", "Checkpoint 不完整，无法激活 Route");
  }
+ if (agentRevisionId !== request.agentRevisionId) {
+ throw permanentError(
+ "HOSTED_AGENT_REVISION_MISMATCH",
+ `Route 激活 Checkpoint revisionId=${agentRevisionId}，请求要求=${request.agentRevisionId}`,
+ );
+ }
 
  // Checkpoint 跳过（已激活）
  if (request.stepRouteSetId && request.stepRouteRevisionId && request.stepRouteActivationId) {
@@ -355,7 +367,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  }
 
  const agentRevision = {
- revisionId: agentRevisionId,
+ revisionId: request.agentRevisionId,
  publicationRecordId: agentPublicationRecordId,
  attestationId: agentAttestationId,
  };
@@ -417,6 +429,8 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  return { step: "await_projection", completed: false, newState: "retryable_failed" };
  }
 
+ assertResolvedRouteMatchesRequest(request, route);
+
  // 保存 Projection 信息到 Checkpoint
  const checkpoint: StepCheckpoint = {
  routeRevisionId: route.routeRevisionId,
@@ -453,7 +467,22 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  return { step: "verify_route", completed: false, newState: "retryable_failed" };
  }
 
+ assertResolvedRouteMatchesRequest(request, route);
+
  // : 精确 ID 验证
+ // 全部完成
+ const checkpoint: StepCheckpoint = {
+ routeRevisionId: route.routeRevisionId,
+ routeActivationId: route.routeActivationId,
+ };
+
+ return advanceStep(request, "verify_route", checkpoint);
+ }
+
+ function assertResolvedRouteMatchesRequest(
+ request: HostedProvisioningRequestRow,
+ route: Awaited<ReturnType<HostedGateways["routeReader"]["resolveEligibleRoute"]>> & {},
+ ): void {
  const mismatches: string[] = [];
  if (route.agentRevisionId !== request.agentRevisionId) {
  mismatches.push(`agentRevisionId: route=${route.agentRevisionId} != request=${request.agentRevisionId}`);
@@ -474,14 +503,6 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  `Route ID 验证失败: ${mismatches.join("; ")}`,
  );
  }
-
- // 全部完成
- const checkpoint: StepCheckpoint = {
- routeRevisionId: route.routeRevisionId,
- routeActivationId: route.routeActivationId,
- };
-
- return advanceStep(request, "verify_route", checkpoint);
  }
 
  // ─── 错误处理 ────────────────────────────────────────────

@@ -39,7 +39,7 @@ export interface HostedAgentPublicationGateway {
  tenantId: string;
  agentId: string;
  /** : 请求冻结的 AgentRevisionId，贯穿全流程。 */
- agentRevisionId: string;
+ expectedAgentRevisionId: string;
  }): Promise<PublishedHostedAgentRevision>;
 }
 
@@ -119,12 +119,6 @@ export interface HostedRouteActivationGateway {
  routeActivationId: string;
  }>;
 }
-
-// ─── 5. Artifact Evidence 读取 ────────────────────────────
-
-
-// ─── 6. Conformance 运行 ─────────────────────────────────
-
 
 // ─── Gateway 聚合 ─────────────────────────────────────────
 
