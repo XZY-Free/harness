@@ -1,3 +1,5 @@
+import type { ExecutionBindingDTO } from "@/lib/control-plane-client/contracts/execution";
+
 export interface SerializableExecutionBinding {
  invocationId: string;
  tenantId: string;
@@ -32,7 +34,9 @@ export interface SerializableExecutionBinding {
  boundAt: Date;
 }
 
-export function serializeExecutionBinding(binding: SerializableExecutionBinding) {
+export function serializeExecutionBinding(
+ binding: SerializableExecutionBinding,
+): ExecutionBindingDTO {
  return {
  invocation_id: binding.invocationId,
  tenant_id: binding.tenantId,

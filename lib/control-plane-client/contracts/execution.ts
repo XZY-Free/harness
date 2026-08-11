@@ -21,23 +21,25 @@ export interface ExecutionBindingDTO {
   context_checkpoint_id: string | null;
   environment_definition_revision_id: string | null;
   /** 冻结的 Route 证据。 */
-  route_revision_id: string | null;
-  route_activation_id: string | null;
-  route_content_digest: string | null;
+  route_revision_id: string;
+  route_activation_id: string;
+  route_content_digest: string;
   /** 冻结的 Agent 证据。 */
-  agent_artifact_digest: string | null;
-  agent_attestation_ids: string[] | null;
-  agent_publication_record_id: string | null;
+  agent_artifact_id: string;
+  agent_artifact_digest: string;
+  agent_attestation_ids: string[];
+  agent_publication_record_id: string;
   /** 冻结的 Runtime 证据。 */
-  runtime_artifact_digest: string | null;
-  runtime_config_digest: string | null;
-  runtime_attestation_ids: string[] | null;
-  runtime_publication_record_id: string | null;
-  conformance_run_id: string | null;
+  runtime_artifact_id: string;
+  runtime_artifact_digest: string;
+  runtime_config_digest: string;
+  runtime_attestation_ids: string[];
+  runtime_publication_record_id: string;
+  conformance_run_id: string;
   /** 冻结的 Policy / Capability 证据。 */
-  capability_manifest_digest: string | null;
-  resolution_input_digest: string | null;
-  projection_version_no: number | null;
+  capability_manifest_digest: string;
+  resolution_input_digest: string;
+  projection_version_no: number;
   config_hash: string;
   bound_at: string;
 }
