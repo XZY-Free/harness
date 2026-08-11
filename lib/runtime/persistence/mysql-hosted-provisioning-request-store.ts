@@ -18,6 +18,33 @@ import type {
  NewProvisioningRequestInput,
 } from "./hosted-provisioning-request-store";
 
+export class HostedProvisioningLeaseLostError extends Error {
+ constructor(params: {
+ operation: "updateState" | "releaseLease";
+ requestId: string;
+ workerId: string;
+ affectedRows: number | undefined;
+ }) {
+ super(
+ `${params.operation}: lease owner （requestId=${params.requestId}, workerId=${params.workerId}, affectedRows=${String(params.affectedRows)}）`,
+ );
+ this.name = "HostedProvisioningLeaseLostError";
+ }
+}
+
+export function assertAffectedRowsExactlyOne(
+ affectedRows: number | undefined,
+ context: {
+ operation: "updateState" | "releaseLease";
+ requestId: string;
+ workerId: string;
+ },
+): void {
+ if (affectedRows !== 1) {
+ throw new HostedProvisioningLeaseLostError({ ...context, affectedRows });
+ }
+}
+
 export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore = {
  async insert(input) {
  await db.insert(hostedProvisioningRequestTable).values({
@@ -128,22 +155,21 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
  if (checkpoint.projectionVersionNo !== undefined) set.stepProjectionVersionNo = checkpoint.projectionVersionNo;
  }
 
- // : Lease Owner 校验 — WHERE leaseOwner=workerId（如果提供了 workerId）
- const conditions = [eq(hostedProvisioningRequestTable.id, requestId)];
- if (workerId) {
- conditions.push(eq(hostedProvisioningRequestTable.leaseOwner, workerId));
- }
-
  const result = await db
  .update(hostedProvisioningRequestTable)
  .set(set)
- .where(and(...conditions));
+ .where(
+ and(
+ eq(hostedProvisioningRequestTable.id, requestId),
+ eq(hostedProvisioningRequestTable.leaseOwner, workerId),
+ ),
+ );
 
- // : 检查 affectedRows=1（旧 Worker 不得覆盖新 Worker 结果）
- const affectedRows = (result as unknown as { rowsAffected?: number }).rowsAffected ?? 1;
- if (affectedRows === 0 && workerId) {
- throw new Error(`updateState: lease owner 校验失败（requestId=${requestId}, workerId=${workerId}）`);
- }
+ assertAffectedRowsExactlyOne(result[0]?.affectedRows, {
+ operation: "updateState",
+ requestId,
+ workerId,
+ });
 
  const [row] = await db
  .select()
@@ -202,19 +228,24 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
  },
 
  async releaseLease({ requestId, workerId }) {
- // : Lease Owner 校验
- const conditions = [eq(hostedProvisioningRequestTable.id, requestId)];
- if (workerId) {
- conditions.push(eq(hostedProvisioningRequestTable.leaseOwner, workerId));
- }
-
- await db
+ const result = await db
  .update(hostedProvisioningRequestTable)
  .set({
  leaseOwner: null,
  leaseExpiresAt: null,
  updatedAt: new Date(),
  })
- .where(and(...conditions));
+ .where(
+ and(
+ eq(hostedProvisioningRequestTable.id, requestId),
+ eq(hostedProvisioningRequestTable.leaseOwner, workerId),
+ ),
+ );
+
+ assertAffectedRowsExactlyOne(result[0]?.affectedRows, {
+ operation: "releaseLease",
+ requestId,
+ workerId,
+ });
  },
 };

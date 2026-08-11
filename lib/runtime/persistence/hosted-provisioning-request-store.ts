@@ -34,7 +34,7 @@ export interface HostedProvisioningRequestStore {
  updateState(params: {
  requestId: string;
  /** : Lease Owner 校验 — WHERE leaseOwner = workerId。 */
- workerId?: string;
+ workerId: string;
  state: ProvisioningState;
  currentStep?: string | null;
  attemptCount?: number;

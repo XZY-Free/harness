@@ -139,6 +139,7 @@ export function createHostedProvisioningWorker(
  if (classification.category === "permanent" || request.attemptCount >= config.maxAttempts) {
  await store.updateState({
  requestId: request.id,
+ workerId: config.workerId,
  state: "permanent_failed",
  lastError: message,
  lastAttemptAt: new Date(),
@@ -151,6 +152,7 @@ export function createHostedProvisioningWorker(
  );
  await store.updateState({
  requestId: request.id,
+ workerId: config.workerId,
  state: "retryable_failed",
  nextAttemptAt: backoff,
  lastError: message,
