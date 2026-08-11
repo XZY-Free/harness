@@ -32,6 +32,13 @@ export class HostedProvisioningLeaseLostError extends Error {
  }
 }
 
+export class HostedProvisioningClaimError extends Error {
+ constructor(message: string) {
+ super(message);
+ this.name = "HostedProvisioningClaimError";
+ }
+}
+
 export function assertAffectedRowsExactlyOne(
  affectedRows: number | undefined,
  context: {
@@ -42,6 +49,40 @@ export function assertAffectedRowsExactlyOne(
 ): void {
  if (affectedRows !== 1) {
  throw new HostedProvisioningLeaseLostError({ ...context, affectedRows });
+ }
+}
+
+export function extractClaimableRequestIds(rawResult: unknown): string[] {
+ if (!Array.isArray(rawResult) || !Array.isArray(rawResult[0])) {
+ throw new HostedProvisioningClaimError("claimRequests: mysql2 result tuple malformed");
+ }
+
+ const ids = rawResult[0].map((row: unknown) => {
+ if (
+ !row ||
+ typeof row !== "object" ||
+ !("id" in row) ||
+ typeof row.id !== "string" ||
+ row.id.length === 0
+ ) {
+ throw new HostedProvisioningClaimError("claimRequests: selected row id malformed");
+ }
+ return row.id;
+ });
+ if (new Set(ids).size !== ids.length) {
+ throw new HostedProvisioningClaimError("claimRequests: duplicate selected request id");
+ }
+ return ids;
+}
+
+export function assertClaimAffectedRows(
+ affectedRows: number | undefined,
+ requestIds: readonly string[],
+): void {
+ if (affectedRows !== requestIds.length) {
+ throw new HostedProvisioningClaimError(
+ `claimRequests: selected ${requestIds.length} rows but updated ${String(affectedRows)}`,
+ );
  }
 }
 
@@ -201,10 +242,10 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
  `,
  );
 
- const claimableIds = (rawResult as unknown as { id: string }[]).map((r) => r.id);
+ const claimableIds = extractClaimableRequestIds(rawResult);
  if (claimableIds.length === 0) return claimableIds;
 
- await tx
+ const claimResult = await tx
  .update(hostedProvisioningRequestTable)
  .set({
  state: "running",
@@ -215,6 +256,8 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
  updatedAt: now,
  })
  .where(inArray(hostedProvisioningRequestTable.id, claimableIds));
+
+ assertClaimAffectedRows(claimResult[0]?.affectedRows, claimableIds);
 
  return claimableIds;
  });

@@ -71,6 +71,26 @@ function harness() {
 }
 
 describe("HostedProvisioningSaga exact AgentRevision authority", () => {
+  it("非终态步骤返回 pending，与已提交数据库状态一致", async () => {
+    const { gateways, saga, updateState } = harness();
+    vi.mocked(gateways.agentPublication.ensurePublishedAgentRevision).mockResolvedValue({
+      revisionId: "agent-revision-frozen",
+      publicationRecordId: "publication-1",
+      attestationId: "attestation-1",
+    });
+
+    const result = await saga(request());
+
+    expect(result.newState).toBe("pending");
+    expect(updateState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: "pending",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      }),
+    );
+  });
+
   it("把请求冻结 revision 作为 expectedAgentRevisionId 传入发布网关", async () => {
     const { gateways, saga } = harness();
     vi.mocked(gateways.agentPublication.ensurePublishedAgentRevision).mockResolvedValue({

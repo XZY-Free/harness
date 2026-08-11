@@ -59,7 +59,7 @@ export interface SagaStepResult {
  completed: boolean;
  /** 请求的新状态。 */
  newState:
- | "running"
+ | "pending"
  | "ready"
  | "retryable_failed"
  | "permanent_failed";
@@ -159,7 +159,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
  leaseExpiresAt: null,
  nextAttemptAt: new Date(), // 立即可被领取
  });
- return { step: completedStep, completed: true, newState: "running", checkpoint };
+ return { step: completedStep, completed: true, newState: "pending", checkpoint };
  }
 
  // ─── 步骤实现 ────────────────────────────────────────────

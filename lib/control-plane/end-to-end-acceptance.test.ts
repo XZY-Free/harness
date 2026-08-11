@@ -123,11 +123,14 @@ import { createHostedProvisioningSaga } from "@/lib/runtime/provisioning/hosted-
 import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
 import { validateAgentRevisionForProvisioning } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
 import { createMysqlHostedGateways } from "@/lib/runtime/infrastructure/mysql-hosted-gateways";
-import { mysqlHostedProvisioningRequestStore } from "@/lib/runtime/persistence/mysql-hosted-provisioning-request-store";
+import {
+  HostedProvisioningLeaseLostError,
+  mysqlHostedProvisioningRequestStore,
+} from "@/lib/runtime/persistence/mysql-hosted-provisioning-request-store";
 import { hostedProvisioningRequestTable } from "@/lib/runtime/persistence/hosted-provisioning-request-record";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-routes.test.ts 一致）。
@@ -1672,66 +1675,8 @@ describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", ()
 // 场景 17：Worker 崩溃后租约可恢复
 // ═══════════════════════════════════════════════════════════
 
-// ─── 辅助：claimRequestsForTest ──────────────────────────
-// mysqlHostedProvisioningRequestStore.claimRequests 使用 tx.execute(sql`...`) 获取
-// 原始 SQL 结果，但 drizzle-orm 0.34.1 的 execute 返回 [rows, fields] 元组，
-// store 直接将元组当作 { id: string }[] 处理，导致 claimableIds 为 [undefined, undefined]，
-// 最终返回空数组。此 helper 修复结果解析（取 rawResult[0] 作为 rows）。
-
-async function claimRequestsForTest(params: {
-  workerId: string;
-  leaseMs: number;
-  batchSize: number;
-  now: Date;
-}) {
-  const leaseExpiresAt = new Date(params.now.getTime() + params.leaseMs);
-  const nowStr = params.now.toISOString().slice(0, 19).replace("T", " ");
-
-  const ids = await db.transaction(async (tx) => {
-    const rawResult = await tx.execute(
-      sql`
-        SELECT id FROM HostedProvisioningRequest
-        WHERE state IN ('pending', 'retryable_failed')
-          AND (nextAttemptAt IS NULL OR nextAttemptAt <= ${nowStr})
-          AND (leaseExpiresAt IS NULL OR leaseExpiresAt < ${nowStr})
-        ORDER BY createdAt ASC
-        LIMIT ${params.batchSize}
-        FOR UPDATE SKIP LOCKED
-      `,
-    );
-
-    // drizzle-orm 0.34.1: tx.execute 返回 [rows, fields]；rows 是 rawResult[0]
-    const rows = (Array.isArray(rawResult) && Array.isArray(rawResult[0])
-      ? (rawResult[0] as unknown as { id: string }[])
-      : (rawResult as unknown as { id: string }[]));
-    const claimableIds = rows.map((r) => r.id);
-    if (claimableIds.length === 0) return claimableIds;
-
-    await tx
-      .update(hostedProvisioningRequestTable)
-      .set({
-        state: "running",
-        leaseOwner: params.workerId,
-        leaseExpiresAt,
-        lastAttemptAt: params.now,
-        attemptCount: sql`${hostedProvisioningRequestTable.attemptCount} + 1`,
-        updatedAt: params.now,
-      })
-      .where(inArray(hostedProvisioningRequestTable.id, claimableIds));
-
-    return claimableIds;
-  });
-
-  if (ids.length === 0) return [];
-
-  return db
-    .select()
-    .from(hostedProvisioningRequestTable)
-    .where(inArray(hostedProvisioningRequestTable.id, ids));
-}
-
 describe("场景17：Worker 崩溃后租约可恢复", () => {
-  it("HostedProvisioningRequest 租约过期后新 Worker 可重新领取", async () => {
+  it("B 从 A 的最后 checkpoint 重领，A 恢复后不能覆盖或释放 B 的租约", async () => {
     const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
     const { agent, revision } = await seedPublishedAgentRevision(
       tenantId,
@@ -1753,36 +1698,84 @@ describe("场景17：Worker 崩溃后租约可恢复", () => {
     });
     if (!("requestId" in result)) throw new Error("请求创建失败");
 
-    // 模拟 Worker 1 领取（持有租约）
     const now = new Date();
     const worker1Id = "worker-crashed-001";
-    const claimedByWorker1 = await claimRequestsForTest({
+    const [initialClaim] = await mysqlHostedProvisioningRequestStore.claimRequests({
       workerId: worker1Id,
       leaseMs: 60_000,
       batchSize: 5,
       now,
     });
-    expect(claimedByWorker1).toHaveLength(1);
-    expect(claimedByWorker1[0]?.leaseOwner).toBe(worker1Id);
+    expect(initialClaim?.id).toBe(result.requestId);
 
-    // 模拟 Worker 1 崩溃（租约过期）
-    const pastDate = new Date(now.getTime() - 120_000); // 2 分钟前过期
-    await db
-      .update(hostedProvisioningRequestTable)
-      .set({ leaseExpiresAt: pastDate, state: "retryable_failed" })
-      .where(eq(hostedProvisioningRequestTable.id, result.requestId));
+    // 先原子提交一个正式 checkpoint，再由 A 领取下一步并崩溃。
+    await mysqlHostedProvisioningRequestStore.updateState({
+      requestId: result.requestId,
+      workerId: worker1Id,
+      state: "pending",
+      currentStep: "prepare_runtime_revision",
+      lastCompletedStep: "ensure_agent_publication",
+      checkpoint: {
+        agentRevisionId: revision.id,
+        agentPublicationRecordId: "publication-checkpoint-001",
+        agentAttestationId: "attestation-checkpoint-001",
+      },
+      nextAttemptAt: now,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
 
-    // Worker 2 可领取（租约已过期）
+    const [claimedByWorker1] = await mysqlHostedProvisioningRequestStore.claimRequests({
+      workerId: worker1Id,
+      leaseMs: 60_000,
+      batchSize: 5,
+      now: new Date(now.getTime() + 1_000),
+    });
+    expect(claimedByWorker1?.leaseOwner).toBe(worker1Id);
+    expect(claimedByWorker1?.lastCompletedStep).toBe("ensure_agent_publication");
+    expect(claimedByWorker1?.stepAgentRevisionId).toBe(revision.id);
+
     const worker2Id = "worker-recovery-002";
-    const claimedByWorker2 = await claimRequestsForTest({
+    const [claimedByWorker2] = await mysqlHostedProvisioningRequestStore.claimRequests({
       workerId: worker2Id,
       leaseMs: 60_000,
       batchSize: 5,
-      now: new Date(now.getTime() + 130_000), // 当前时间推进到租约过期之后
+      now: new Date(now.getTime() + 62_000),
     });
-    expect(claimedByWorker2).toHaveLength(1);
-    expect(claimedByWorker2[0]?.id).toBe(result.requestId);
-    expect(claimedByWorker2[0]?.leaseOwner).toBe(worker2Id);
+    expect(claimedByWorker2?.id).toBe(result.requestId);
+    expect(claimedByWorker2?.leaseOwner).toBe(worker2Id);
+    expect(claimedByWorker2?.currentStep).toBe("prepare_runtime_revision");
+    expect(claimedByWorker2?.lastCompletedStep).toBe("ensure_agent_publication");
+    expect(claimedByWorker2?.stepAgentRevisionId).toBe(revision.id);
+
+    await expect(
+      mysqlHostedProvisioningRequestStore.updateState({
+        requestId: result.requestId,
+        workerId: worker1Id,
+        state: "permanent_failed",
+        lastError: "stale worker overwrite",
+      }),
+    ).rejects.toBeInstanceOf(HostedProvisioningLeaseLostError);
+    await expect(
+      mysqlHostedProvisioningRequestStore.releaseLease({
+        requestId: result.requestId,
+        workerId: worker1Id,
+      }),
+    ).rejects.toBeInstanceOf(HostedProvisioningLeaseLostError);
+
+    const resumed = await mysqlHostedProvisioningRequestStore.updateState({
+      requestId: result.requestId,
+      workerId: worker2Id,
+      state: "pending",
+      currentStep: "prepare_runtime_revision",
+      nextAttemptAt: new Date(now.getTime() + 62_000),
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+    expect(resumed.state).toBe("pending");
+    expect(resumed.leaseOwner).toBeNull();
+    expect(resumed.lastCompletedStep).toBe("ensure_agent_publication");
+    expect(resumed.stepAgentRevisionId).toBe(revision.id);
   });
 });
 
