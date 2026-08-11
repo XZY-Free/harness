@@ -67,7 +67,7 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
  agentRevisionId: input.agentRevisionId,
  runtimeRevisionId: input.runtimeRevisionId,
  policyRevisionId: input.policyRevisionId,
- projectionVersionNo: input.projectionVersionNo ?? 0,
+ projectionVersionNo: input.projectionVersionNo,
  frozenEvidence: {
  agentPublicationRecordId: evidence.agentPublicationRecordId,
  runtimePublicationRecordId: evidence.runtimePublicationRecordId,
@@ -121,7 +121,7 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
  runtimePublicationRecordId: evidence.runtimePublicationRecordId,
  conformanceRunId: evidence.conformanceRunId,
  resolutionInputDigest: evidence.resolutionInputDigest,
- projectionVersionNo: input.projectionVersionNo ?? 0,
+ projectionVersionNo: input.projectionVersionNo,
  environmentDefinitionRevisionId: input.environmentDefinitionRevisionId,
  configHash: input.configHash,
  boundAt: input.boundAt,
@@ -297,7 +297,9 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
  return { agentRevision, runtimeRevision };
 }
 
-function toExecutionBinding(row: typeof executionBindingTable.$inferSelect): ExecutionBinding {
+export function toExecutionBinding(
+ row: typeof executionBindingTable.$inferSelect,
+): ExecutionBinding {
  if (
  !row.routeRevisionId ||
  !row.routeActivationId ||
@@ -310,7 +312,10 @@ function toExecutionBinding(row: typeof executionBindingTable.$inferSelect): Exe
  !row.runtimeAttestationIds ||
  !row.agentPublicationRecordId ||
  !row.runtimePublicationRecordId ||
- !row.conformanceRunId
+ !row.conformanceRunId ||
+ !row.resolutionInputDigest ||
+ !Number.isInteger(row.projectionVersionNo) ||
+ row.projectionVersionNo < 0
  ) {
  throw evidenceError("新建 Binding 回读时证据字段不完整");
  }
@@ -340,8 +345,8 @@ function toExecutionBinding(row: typeof executionBindingTable.$inferSelect): Exe
  agentPublicationRecordId: row.agentPublicationRecordId,
  runtimePublicationRecordId: row.runtimePublicationRecordId,
  conformanceRunId: row.conformanceRunId,
- resolutionInputDigest: row.resolutionInputDigest ?? "",
- projectionVersionNo: row.projectionVersionNo ?? 0,
+ resolutionInputDigest: row.resolutionInputDigest,
+ projectionVersionNo: row.projectionVersionNo,
  configHash: row.configHash,
  boundAt: row.boundAt,
  };
