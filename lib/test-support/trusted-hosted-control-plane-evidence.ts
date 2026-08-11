@@ -20,10 +20,25 @@ import {
  buildDsseConformanceEnvelope,
  generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
+import type { RunnerSigningIdentity } from "@/lib/runtime/domain/runner-signing-identity";
 
 const TRUSTED_RUNNER_KEY = generateTestRunnerKey("hosted-control-plane-runner");
 const RUNNER_IDENTITY = "ci/hosted-runtime-conformance";
 const BUILDER_IDENTITY = "builder:snow-harness-hosted-release";
+
+export function trustedHostedRunnerSigningIdentityForTest(
+ tenantId: string,
+): RunnerSigningIdentity {
+ return {
+ keyId: TRUSTED_RUNNER_KEY.keyid,
+ publicKey: TRUSTED_RUNNER_KEY.publicKeyBase64,
+ runnerIdentity: RUNNER_IDENTITY,
+ tenantScope: tenantId,
+ validFrom: "2020-01-01T00:00:00.000Z",
+ validUntil: null,
+ revokedAt: null,
+ };
+}
 
 class TestManagedArtifactStore implements ManagedArtifactStore {
  readonly envelopes = new Map<string, Buffer>();

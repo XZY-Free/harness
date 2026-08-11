@@ -97,12 +97,6 @@ const recordArtifactAttestation = createRecordArtifactAttestation({
  store: mysqlArtifactAttestationPersistenceStore,
 });
 const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
-const recordRuntimeConformanceRun = createRecordRuntimeConformanceRun({
- store: mysqlRuntimeConformanceRunStore,
- verifier: createDSSEConformanceVerifier({
-  runnerIdentityRegistry: buildRunnerIdentityRegistry(),
- }),
-});
 const publishRuntimeRevision = createPublishRuntimeRevision({
  store: mysqlRuntimePublicationStore,
 });
@@ -246,7 +240,10 @@ const runtimeArtifactVerify: HostedRuntimeArtifactVerifyGateway = {
 };
 
 /** : recordRuntimeConformance */
-const runtimeConformance: HostedRuntimeConformanceGateway = {
+function createRuntimeConformanceGateway(
+ recordRuntimeConformanceRun: ReturnType<typeof createRecordRuntimeConformanceRun>,
+): HostedRuntimeConformanceGateway {
+ return {
  async recordRuntimeConformance(command) {
  const [revision] = await db
  .select({
@@ -280,7 +277,8 @@ const runtimeConformance: HostedRuntimeConformanceGateway = {
  overallResult: run.run.overallResult as "passed" | "failed",
  };
  },
-};
+ };
+}
 
 /** : publishRuntimeRevision */
 const runtimePublish: HostedRuntimePublishGateway = {
@@ -374,13 +372,26 @@ const routeActivation: HostedRouteActivationGateway = {
  * : 创建 MySQL Hosted Gateways 实例。
  * 返回 7 个 Gateway 的组合对象，供 Saga 编排使用。
  */
-export function createMysqlHostedGateways(): HostedGateways {
+export interface MysqlHostedGatewaysDependencies {
+ runnerSigningIdentityRegistry?: RunnerSigningIdentityRegistry;
+}
+
+export function createMysqlHostedGateways(
+ dependencies: MysqlHostedGatewaysDependencies = {},
+): HostedGateways {
+ const recordRuntimeConformanceRun = createRecordRuntimeConformanceRun({
+ store: mysqlRuntimeConformanceRunStore,
+ verifier: createDSSEConformanceVerifier({
+ runnerIdentityRegistry:
+ dependencies.runnerSigningIdentityRegistry ?? buildRunnerIdentityRegistry(),
+ }),
+ });
  return {
  routeReader,
  agentPublication,
  runtimePrepare,
  runtimeArtifactVerify,
- runtimeConformance,
+ runtimeConformance: createRuntimeConformanceGateway(recordRuntimeConformanceRun),
  runtimePublish,
  routeActivation,
  };

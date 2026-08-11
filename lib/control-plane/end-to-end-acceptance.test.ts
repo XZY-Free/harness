@@ -49,6 +49,7 @@ import { withdrawRevision } from "@/lib/agents/test-support/withdraw-agent-revis
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { controlPlaneEventDelivery } from "@/lib/control-plane/events/control-plane-event-delivery";
+import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
 import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
 import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
 import { db } from "@/lib/db/client";
@@ -120,6 +121,7 @@ import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { createHostedProvisioningSaga } from "@/lib/runtime/provisioning/hosted-provisioning-saga";
+import { createHostedProvisioningWorker } from "@/lib/runtime/provisioning/hosted-provisioning-worker";
 import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
 import { validateAgentRevisionForProvisioning } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
 import { createMysqlHostedGateways } from "@/lib/runtime/infrastructure/mysql-hosted-gateways";
@@ -129,6 +131,10 @@ import {
 } from "@/lib/runtime/persistence/mysql-hosted-provisioning-request-store";
 import { hostedProvisioningRequestTable } from "@/lib/runtime/persistence/hosted-provisioning-request-record";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
+import {
+  installTrustedHostedControlPlaneEvidenceForTest,
+  trustedHostedRunnerSigningIdentityForTest,
+} from "@/lib/test-support/trusted-hosted-control-plane-evidence";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -1346,16 +1352,6 @@ describe("场景10：Hosted 无 Route 时创建精确 Revision 请求", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活", () => {
-  // TODO: 待实现 — Hosted Worker 完整 Saga 需要 createMysqlHostedGateways() 提供的
-  // 6 个 Gateway（agentPublication, runtimePublication, routeActivation, routeReader,
-  // artifactEvidence, conformanceRunner），这些 Gateway 依赖真实的 hosted runtime
-  // 基础设施（Artifact 证据、Conformance Runner）。当前测试环境缺少 hosted runtime
-  // 探测和 Conformance 自动执行能力。完整 E2E 需要：
-  // 1. 准备 hosted runtime 容器
-  // 2. 注入 Artifact 证据
-  // 3. 执行 Conformance Suite
-  // 4. 激活 Route
-  // 待 hosted runtime 测试基础设施就绪后补全。
   it("Hosted Provisioning Saga 从 start 到 ready 完成全部步骤", async () => {
     const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
     const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
@@ -1365,7 +1361,6 @@ describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活",
       "hosted-saga-agent-v1",
     );
 
-    // 创建 HostedProvisioningRequest
     const requestHostedProvisioning = createRequestHostedProvisioning({
       store: mysqlHostedProvisioningRequestStore,
       revisionValidator: { validateRevision: validateAgentRevisionForProvisioning },
@@ -1381,49 +1376,79 @@ describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活",
     expect("requestId" in request!).toBe(true);
     const requestId = (request as { requestId: string }).requestId;
 
-    // 领取请求
-    const workerId = `test-worker-${crypto.randomUUID()}`;
-    const [claimed] = await mysqlHostedProvisioningRequestStore.claimRequests({
-      workerId,
-      leaseMs: 120_000,
-      batchSize: 1,
-      now: new Date(),
-    });
-    expect(claimed).toBeTruthy();
-    expect(claimed!.id).toBe(requestId);
+    const restoreEvidence = installTrustedHostedControlPlaneEvidenceForTest();
+    try {
+      const workerId = `test-worker-${crypto.randomUUID()}`;
+      const runnerIdentityRegistry = new RunnerSigningIdentityRegistry([
+        trustedHostedRunnerSigningIdentityForTest(tenantId),
+      ]);
+      const saga = createHostedProvisioningSaga({
+        gateways: createMysqlHostedGateways({
+          runnerSigningIdentityRegistry: runnerIdentityRegistry,
+        }),
+        store: mysqlHostedProvisioningRequestStore,
+        maxAttempts: 10,
+        workerId,
+      });
+      const hostedWorker = createHostedProvisioningWorker(
+        { workerId, batchSize: 1, leaseMs: 120_000, maxAttempts: 10 },
+        { store: mysqlHostedProvisioningRequestStore, saga },
+      );
+      const projectionHandler = createProjectionEventHandler({
+        store: mysqlRouteEligibilityStore,
+        sourceReader: mysqlRouteEligibilitySourceReader,
+        buildRouteEligibility: createBuildRouteEligibility({ store: mysqlRouteEligibilityStore }),
+      });
+      const outboxWorker = createOutboxRelayWorker(projectionHandler, {
+        workerId: `projection-worker-${crypto.randomUUID()}`,
+        consumerName: "route_projection",
+        batchSize: 100,
+        leaseMs: 120_000,
+      });
 
-    // 创建 Saga 并逐步执行直到终态
-    const gateways = createMysqlHostedGateways();
-    const saga = createHostedProvisioningSaga({
-      gateways,
-      store: mysqlHostedProvisioningRequestStore,
-      maxAttempts: 10,
-      workerId,
-    });
-
-    // 反复调用 saga 直到到达终态或超过最大步数
-    let currentState = claimed!.state;
-    let stepCount = 0;
-    const maxSteps = 30; // 10 个步骤 × 每步最多 3 次
-    while (currentState !== "ready" && currentState !== "permanent_failed" && stepCount < maxSteps) {
-      const result = await saga(claimed!);
-      currentState = result.newState;
-      stepCount++;
-
-      if (currentState === "retryable_failed") {
-        // 释放租约，允许重新领取
-        await mysqlHostedProvisioningRequestStore.releaseLease({
-          requestId: claimed!.id,
-          workerId,
-        });
-        break; // 不重试，直接结束测试
+      let persisted = await mysqlHostedProvisioningRequestStore.getById({ tenantId, requestId });
+      for (let step = 0; step < 12 && persisted?.state !== "ready"; step++) {
+        expect(persisted?.state).toBe("pending");
+        expect(await hostedWorker.pollOnce()).toBe(1);
+        for (let batch = 0; batch < 10; batch++) {
+          if ((await outboxWorker.pollOnce()) === 0) break;
+        }
+        persisted = await mysqlHostedProvisioningRequestStore.getById({ tenantId, requestId });
+        expect(persisted?.state).not.toBe("retryable_failed");
+        expect(persisted?.state).not.toBe("permanent_failed");
       }
-    }
 
-    // Saga 应到达 ready 状态（如果 hosted runtime 基础设施完整）
-    // 在当前测试环境中，saga 可能因缺少真实 hosted runtime 而进入 retryable_failed，
-    // 但不会进入 permanent_failed（除非数据本身有问题）
-    expect(currentState).not.toBe("permanent_failed");
+      expect(persisted?.state).toBe("ready");
+      expect(persisted?.currentStep).toBe("done");
+      expect(persisted?.stepAgentRevisionId).toBe(agentRevision.id);
+      expect(persisted?.stepAgentPublicationRecordId).toBeTruthy();
+      expect(persisted?.stepRuntimeRevisionId).toBeTruthy();
+      expect(persisted?.stepRuntimeArtifactId).toBeTruthy();
+      expect(persisted?.stepRuntimeAttestationIds).toHaveLength(1);
+      expect(persisted?.stepConformanceRunId).toBeTruthy();
+      expect(persisted?.stepRuntimePublicationRecordId).toBeTruthy();
+      expect(persisted?.stepRouteSetId).toBeTruthy();
+      expect(persisted?.stepRouteRevisionId).toBeTruthy();
+      expect(persisted?.stepRouteActivationId).toBeTruthy();
+      expect(persisted?.stepProjectionVersionNo).toBeGreaterThan(0);
+
+      const resolved = await createResolveRoute({
+        store: mysqlRouteEligibilityResolutionStore,
+      })({
+        tenantId,
+        agentId: agent.id,
+        routeScopeKey: "prod",
+        businessKey: { threadId: `hosted-e2e-${requestId}` },
+      });
+      expect(resolved.status).toBe("resolved");
+      if (resolved.status !== "resolved") throw new Error(`Hosted Route 未解析: ${resolved.reason}`);
+      expect(resolved.resolution.agentRevisionId).toBe(agentRevision.id);
+      expect(resolved.resolution.runtimeRevisionId).toBe(persisted?.stepRuntimeRevisionId);
+      expect(resolved.resolution.routeRevisionId).toBe(persisted?.stepRouteRevisionId);
+      expect(resolved.resolution.routeActivationId).toBe(persisted?.stepRouteActivationId);
+    } finally {
+      restoreEvidence();
+    }
   });
 });
 
