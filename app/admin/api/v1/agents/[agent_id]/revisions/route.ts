@@ -71,8 +71,8 @@ interface RouteContext {
 
 /** 请求体 schema（与 OpenAPI requestBody 对齐）。 */
 interface CreateRevisionBody {
-  source: Record<string, unknown>;
-  artifact_digest: string;
+  source: { source_type: "code" | "agent_yaml" | "veadk"; source_revision: string };
+  artifact_ref: string;
   instruction_hash: string;
   model_policy: Record<string, unknown>;
   permission_requirements: Record<string, unknown>;
@@ -84,13 +84,16 @@ interface CreateRevisionBody {
 function validateBody(body: unknown): body is CreateRevisionBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
-  if (!b.source || typeof b.source !== "object") return false;
-  if (typeof b.artifact_digest !== "string" || b.artifact_digest.length === 0) return false;
+  if (!b.source || typeof b.source !== "object" || Array.isArray(b.source)) return false;
+  const source = b.source as Record<string, unknown>;
+  if (!new Set(["code", "agent_yaml", "veadk"]).has(String(source.source_type))) return false;
+  if (typeof source.source_revision !== "string" || !source.source_revision.trim()) return false;
+  if (typeof b.artifact_ref !== "string" || !b.artifact_ref.trim()) return false;
   if (typeof b.instruction_hash !== "string" || b.instruction_hash.length === 0) return false;
-  if (!b.model_policy || typeof b.model_policy !== "object") return false;
-  if (!b.permission_requirements || typeof b.permission_requirements !== "object") return false;
-  if (!b.delegation_policy || typeof b.delegation_policy !== "object") return false;
-  if (!b.agent_interface_requirements || typeof b.agent_interface_requirements !== "object")
+  if (!b.model_policy || typeof b.model_policy !== "object" || Array.isArray(b.model_policy)) return false;
+  if (!b.permission_requirements || typeof b.permission_requirements !== "object" || Array.isArray(b.permission_requirements)) return false;
+  if (!b.delegation_policy || typeof b.delegation_policy !== "object" || Array.isArray(b.delegation_policy)) return false;
+  if (!b.agent_interface_requirements || typeof b.agent_interface_requirements !== "object" || Array.isArray(b.agent_interface_requirements))
     return false;
   return true;
 }
@@ -216,14 +219,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
   // 8. 执行业务：创建 draft Revision
   try {
-    const sourceRevision = JSON.stringify(body.source);
     const revision = await createDraftRevision({
       tenantId: principal.tenantId,
       agentId,
-      sourceType: "agent_yaml",
-      sourceRevision,
+      sourceType: body.source.source_type,
+      sourceRevision: body.source.source_revision,
       instructionHash: body.instruction_hash,
-      agentArtifactRef: body.artifact_digest,
+      agentArtifactRef: body.artifact_ref,
       modelPolicyJson: body.model_policy,
       permissionRequirementsJson: body.permission_requirements,
       delegationPolicyJson: body.delegation_policy,

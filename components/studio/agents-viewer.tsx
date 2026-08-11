@@ -10,9 +10,10 @@ import { useEffect, useState } from "react";
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 
 const LIFECYCLE_LABEL: Record<AgentDTO["lifecycle_state"], string> = {
+  draft: "草稿",
   enabled: "已启用",
   disabled: "已停用",
-  deleted: "已删除",
+  retired: "已退役",
 };
 
 export function AgentsViewer() {

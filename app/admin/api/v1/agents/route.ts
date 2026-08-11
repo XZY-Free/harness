@@ -1,3 +1,4 @@
+import { projectAgentAdmin } from "@/lib/agents/application/agent-admin-projection";
 import { listAgents } from "@/lib/agents/persistence/agent-queries";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 /**
@@ -40,18 +41,8 @@ export async function GET(request: Request): Promise<Response> {
 
   const agents = await listAgents(principal.tenantId);
 
-  // 投影：保留关键字段，省略 versionNo/createdAt/updatedAt 等内部字段
-  const projected = agents.map((agent) => ({
-    id: agent.id,
-    agent_key: agent.agentKey,
-    display_name: agent.displayName,
-    description: agent.description,
-    lifecycle_state: agent.lifecycleState,
-    current_revision_id: agent.currentRevisionId,
-    owner_user_id: agent.ownerUserId,
-    visibility_policy_id: agent.visibilityPolicyId,
-    updated_at: agent.updatedAt?.toISOString() ?? null,
-  }));
+  // 统一控制面 DTO 投影。
+  const projected = agents.map(projectAgentAdmin);
 
   return apiSuccess(
     { items: projected, total: projected.length },

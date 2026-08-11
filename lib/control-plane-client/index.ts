@@ -19,8 +19,13 @@ export type {
   AgentRevisionState,
   AgentRevisionSourceType,
   AgentRevisionDTO,
+  AgentRevisionSummaryDTO,
   AgentRevisionListResponse,
   CreateAgentRevisionRequest,
+  PublishAgentRevisionRequest,
+  PublishAgentRevisionResponse,
+  WithdrawAgentRevisionRequest,
+  WithdrawAgentRevisionResponse,
 } from "./contracts/agent";
 
 export type {

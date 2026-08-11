@@ -20,6 +20,7 @@ beforeEach(() => {
           current_revision_id: "revision-1",
           owner_user_id: "user-1",
           visibility_policy_id: null,
+          version_no: 2,
           updated_at: "2026-08-11T00:00:00.000Z",
         },
       ],

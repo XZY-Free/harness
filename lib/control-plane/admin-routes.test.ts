@@ -12,8 +12,11 @@
  */
 import { createHash } from "node:crypto";
 import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]:publish/route";
+import { POST as withdrawAgentRevisionPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]:withdraw/route";
+import { GET as getAgentRevisionGET } from "@/app/admin/api/v1/agent-revisions/[revision_id]/route";
 import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations:verify/route";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
+import { GET as getAgentGET } from "@/app/admin/api/v1/agents/[agent_id]/route";
 import { POST as disableRoutePOST } from "@/app/admin/api/v1/deployment-routes/[route_id]:disable/route";
 import { PUT as activateRouteSetPUT } from "@/app/admin/api/v1/deployment-route-sets/[route_set_id]/activation/route";
 import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
@@ -164,6 +167,12 @@ async function seedAdminWithActionBindings() {
     tenantId: tenant.id,
     principalBindingId: binding.id,
     actionCode: "agent.revision.create",
+    resourceScope: { type: "agent", wildcard: true },
+  });
+  await grantActionBinding({
+    tenantId: tenant.id,
+    principalBindingId: binding.id,
+    actionCode: "agent.retract",
     resourceScope: { type: "agent", wildcard: true },
   });
   await grantActionBinding({
@@ -757,11 +766,11 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
       path: "/agents/test-agent-id/revisions",
       idempotencyKey: "idem-create-rev-001",
       body: {
-        source: { source_type: "import", ref: "test-ref" },
-        artifact_digest: artifactDigest,
+        source: { source_type: "agent_yaml", source_revision: "git:test-ref" },
+        artifact_ref: `oci://registry/agent@${artifactDigest}`,
         instruction_hash: instructionHash,
         model_policy: { model: "gpt-4" },
-        permission_requirements: [],
+        permission_requirements: {},
         delegation_policy: { max_depth: 0 },
         agent_interface_requirements: { required: [], optional: [] },
       },
@@ -786,11 +795,11 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
       method: "POST",
       path: "/agents/test-agent-id/revisions",
       body: {
-        source: { source_type: "import", ref: "test-ref" },
-        artifact_digest: computeArtifactDigest("no-idem"),
+        source: { source_type: "agent_yaml", source_revision: "git:no-idem" },
+        artifact_ref: `oci://registry/agent@${computeArtifactDigest("no-idem")}`,
         instruction_hash: computeArtifactDigest("no-idem-instr"),
         model_policy: { model: "gpt-4" },
-        permission_requirements: [],
+        permission_requirements: {},
         delegation_policy: { max_depth: 0 },
         agent_interface_requirements: { required: [], optional: [] },
       },
@@ -813,11 +822,11 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
       requestId: crossTenantRequestId,
       idempotencyKey: "idem-cross-tenant-001",
       body: {
-        source: { source_type: "import", ref: "test-ref" },
-        artifact_digest: computeArtifactDigest("cross-tenant"),
+        source: { source_type: "agent_yaml", source_revision: "git:cross-tenant" },
+        artifact_ref: `oci://registry/agent@${computeArtifactDigest("cross-tenant")}`,
         instruction_hash: computeArtifactDigest("cross-tenant-instr"),
         model_policy: { model: "gpt-4" },
-        permission_requirements: [],
+        permission_requirements: {},
         delegation_policy: { max_depth: 0 },
         agent_interface_requirements: { required: [], optional: [] },
       },
@@ -832,7 +841,83 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 3. POST /admin/api/v1/agent-revisions/{revision_id}:publish
+// 3. Agent / AgentRevision 权威查询与撤回
+// ═══════════════════════════════════════════════════════════
+
+describe("Agent control-plane detail and withdrawal", () => {
+  it("详情由服务端投影执行资格，撤回后同一详情立即不可执行", async () => {
+    const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
+    const { agent, revision } = await seedPublishedAgentRevision(
+      tenantId,
+      userIdentityId,
+      "agent-detail",
+      "detail-v1",
+      "enabled",
+    );
+
+    const agentResponse = await getAgentGET(
+      buildV11Request({ audience: "admin", method: "GET", path: `/agents/${agent.id}` }),
+      { params: Promise.resolve({ agent_id: agent.id }) },
+    );
+    expect(agentResponse.status).toBe(200);
+    expect(await agentResponse.json()).toMatchObject({
+      id: agent.id,
+      current_revision_id: revision.id,
+      lifecycle_state: "enabled",
+      version_no: 2,
+    });
+
+    const getRevision = () =>
+      getAgentRevisionGET(
+        buildV11Request({
+          audience: "admin",
+          method: "GET",
+          path: `/agent-revisions/${revision.id}`,
+        }),
+        { params: Promise.resolve({ revision_id: revision.id }) },
+      );
+    const before = await getRevision();
+    expect(before.status).toBe(200);
+    const beforeBody = (await before.json()) as Record<string, unknown>;
+    expect(beforeBody.execution_eligible).toBe(true);
+    expect(beforeBody.publication_record_id).toEqual(expect.any(String));
+    expect(beforeBody.attestation_ids).toEqual([expect.any(String)]);
+
+    const requestBody = { reason_code: "security_response", reason: "发现风险" };
+    const buildWithdrawRequest = () =>
+      buildV11Request({
+        audience: "admin",
+        method: "POST",
+        path: `/agent-revisions/${revision.id}:withdraw`,
+        idempotencyKey: "idem-agent-withdraw-detail",
+        ifMatch: `agent-revision-${revision.revisionNo}`,
+        body: requestBody,
+      });
+    const withdrawn = await withdrawAgentRevisionPOST(buildWithdrawRequest(), {
+      params: Promise.resolve({ "revision_id:withdraw": `${revision.id}:withdraw` }),
+    });
+    expect(withdrawn.status).toBe(200);
+    expect(await withdrawn.json()).toMatchObject({
+      id: revision.id,
+      revision_state: "withdrawn",
+      withdrawal_record_id: expect.any(String),
+    });
+
+    const replay = await withdrawAgentRevisionPOST(buildWithdrawRequest(), {
+      params: Promise.resolve({ "revision_id:withdraw": `${revision.id}:withdraw` }),
+    });
+    expect(replay.status).toBe(200);
+
+    const after = await getRevision();
+    const afterBody = (await after.json()) as Record<string, unknown>;
+    expect(afterBody.execution_eligible).toBe(false);
+    expect(afterBody.ineligibility_reasons).toContain("publication_withdrawn");
+    expect(afterBody.withdrawal_record_id).toEqual(expect.any(String));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 4. POST /admin/api/v1/agent-revisions/{revision_id}:publish
 // ═══════════════════════════════════════════════════════════
 
 describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
