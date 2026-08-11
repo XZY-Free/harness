@@ -46,8 +46,6 @@ import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-
 import { protocolContractRevision } from "@/lib/runtime/domain/runtime-conformance-run";
 import type {
  HostedAgentPublicationGateway,
- HostedArtifactEvidenceProvider,
- HostedConformanceRunner,
  HostedGateways,
  HostedRouteActivationGateway,
  HostedRouteReader,
@@ -362,102 +360,15 @@ const routeActivation: HostedRouteActivationGateway = {
 
 // ─── 5. HostedArtifactEvidenceProvider ──────────────────────
 //
-// : 委托给 getHostedControlPlaneEvidenceProvider()。
-
-const artifactEvidence: HostedArtifactEvidenceProvider = {
- async loadAgentArtifactEvidence(command) {
- const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
- tenantId: command.tenantId,
- artifactType: "agent_revision",
- });
- // 根据 agentRevisionId 查询具体 artifactRef/digest
- const [revision] = await db
- .select({
- artifactId: agentRevisionTable.artifactId,
- artifactDigest: agentRevisionTable.artifactDigest,
- })
- .from(agentRevisionTable)
- .where(eq(agentRevisionTable.id, command.agentRevisionId))
- .limit(1);
- return {
- artifactRef: revision?.artifactId ?? evidence.artifactRef,
- artifactDigest: revision?.artifactDigest ?? evidence.artifactDigest,
- };
- },
-
- async loadRuntimeArtifactEvidence(command) {
- const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
- tenantId: command.tenantId,
- artifactType: "runtime_revision",
- });
- const [revision] = await db
- .select({
- artifactId: runtimeRevisionTable.artifactId,
- artifactDigest: runtimeRevisionTable.artifactDigest,
- configHash: runtimeRevisionTable.configHash,
- })
- .from(runtimeRevisionTable)
- .where(eq(runtimeRevisionTable.id, command.runtimeRevisionId))
- .limit(1);
- return {
- artifactRef: revision?.artifactId ?? evidence.artifactRef,
- artifactDigest: revision?.artifactDigest ?? evidence.artifactDigest,
- configHash: revision?.configHash ?? null,
- };
- },
-};
 
 // ─── 6. HostedConformanceRunner ─────────────────────────────
 //
-// : 使用 createRecordRuntimeConformanceRun + evidence provider 的 runRuntimeConformance。
-
-const conformanceRunner: HostedConformanceRunner = {
- async runConformance(command) {
- const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
- tenantId: command.tenantId,
- artifactType: "runtime_revision",
- });
- // 查找 RuntimeRevision 获取 configHash 和 protocolContractRevision
- const [revision] = await db
- .select({
- configHash: runtimeRevisionTable.configHash,
- protocolContractRevision: runtimeRevisionTable.protocolContractRevision,
- })
- .from(runtimeRevisionTable)
- .where(eq(runtimeRevisionTable.id, command.runtimeRevisionId))
- .limit(1);
- if (!revision) {
- throw new Error(`ConformanceRunner: RuntimeRevision 不存在 (${command.runtimeRevisionId})`);
- }
-
- const signedRun = await getHostedControlPlaneEvidenceProvider().runRuntimeConformance({
- tenantId: command.tenantId,
- runtimeRevisionId: command.runtimeRevisionId,
- idempotencyKey: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
- runtimeArtifactDigest: evidence.artifactDigest,
- runtimeConfigDigest: revision.configHash,
- protocolContractRevision: revision.protocolContractRevision,
- });
- const run = await recordRuntimeConformanceRun({
- tenantId: command.tenantId,
- runtimeRevisionId: command.runtimeRevisionId,
- dsseEnvelope: signedRun.dsseEnvelope,
- idempotencyKey: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
- requestId: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
- actor: { actorType: "system", actorId: HOSTED_ACTOR_ID },
- });
- return {
- conformanceRunId: run.run.id,
- overallResult: run.run.overallResult as "passed" | "failed",
- };
- },
-};
 
 // ─── 工厂函数 ──────────────────────────────────────────────
 
 /**
  * : 创建 MySQL Hosted Gateways 实例。
- * 返回 9 个 Gateway 的组合对象，供 Saga 编排使用。
+ * 返回 7 个 Gateway 的组合对象，供 Saga 编排使用。
  */
 export function createMysqlHostedGateways(): HostedGateways {
  return {
@@ -468,8 +379,6 @@ export function createMysqlHostedGateways(): HostedGateways {
  runtimeConformance,
  runtimePublish,
  routeActivation,
- artifactEvidence,
- conformanceRunner,
  };
 }
 

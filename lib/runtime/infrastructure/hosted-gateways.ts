@@ -122,40 +122,14 @@ export interface HostedRouteActivationGateway {
 
 // ─── 5. Artifact Evidence 读取 ────────────────────────────
 
-/** Artifact Evidence 读取 Gateway。 */
-export interface HostedArtifactEvidenceProvider {
- /** 读取 Agent Revision 的 Artifact Evidence。 */
- loadAgentArtifactEvidence(command: {
- tenantId: string;
- agentRevisionId: string;
- }): Promise<{ artifactRef: string | null; artifactDigest: string | null }>;
-
- /** 读取 Runtime Revision 的 Artifact Evidence。 */
- loadRuntimeArtifactEvidence(command: {
- tenantId: string;
- runtimeRevisionId: string;
- }): Promise<{
- artifactRef: string | null;
- artifactDigest: string | null;
- configHash: string | null;
- }>;
-}
 
 // ─── 6. Conformance 运行 ─────────────────────────────────
 
-/** Conformance 运行 Gateway。 */
-export interface HostedConformanceRunner {
- /** 运行 Runtime Conformance 并返回 Run ID。 */
- runConformance(command: {
- tenantId: string;
- runtimeRevisionId: string;
- }): Promise<{ conformanceRunId: string; overallResult: "passed" | "failed" }>;
-}
 
 // ─── Gateway 聚合 ─────────────────────────────────────────
 
 /**
- * : HostedGateways — 9 个 Gateway 的聚合。
+ * HostedGateways — 7 个 Gateway 的聚合。
  * Saga 通过此聚合调用各个 Gateway。
  */
 export interface HostedGateways {
@@ -167,6 +141,4 @@ export interface HostedGateways {
  runtimeConformance: HostedRuntimeConformanceGateway;
  runtimePublish: HostedRuntimePublishGateway;
  routeActivation: HostedRouteActivationGateway;
- artifactEvidence: HostedArtifactEvidenceProvider;
- conformanceRunner: HostedConformanceRunner;
 }
