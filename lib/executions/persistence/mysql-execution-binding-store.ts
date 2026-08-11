@@ -33,6 +33,15 @@ import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resol
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { and, desc, eq } from "drizzle-orm";
 
+/** 唯一固定锁序：同一事务内必须逐条获取，禁止 Promise.all 并行锁。 */
+export const EXECUTION_BINDING_AUTHORITY_LOCK_ORDER = [
+ "Invocation", "DeploymentRoute+DeploymentRouteSet", "RouteActivation", "RouteRevision",
+ "Agent", "AgentRevision", "Runtime", "RuntimeRevision",
+ "AgentPublicationRecord", "AgentWithdrawalRecord", "RuntimePublicationRecord", "RuntimeWithdrawalRecord",
+ "AgentArtifactAttestation", "AgentAttestationRevocation", "RuntimeArtifactAttestation", "RuntimeAttestationRevocation",
+ "RuntimeConformanceRun", "RuntimeConformanceCaseResult", "PolicyRevision", "RouteEligibilityProjection",
+] as const;
+
 export const mysqlExecutionBindingStore: ExecutionBindingStore = {
  create: (input) =>
  db.transaction(async (tx) => {
@@ -165,38 +174,11 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
  )
  .limit(1)
  .for("update");
- if (
- !routeRow ||
- routeRow.route.routeState !== "enabled" ||
- routeRow.route.activeRouteRevisionId !== evidence.routeRevisionId
- ) {
+ if (!routeRow || routeRow.route.routeState !== "enabled") {
  throw evidenceError("Route 当前投影已变化");
  }
 
- // B. RouteRevision（FOR UPDATE）— Digest/ID 一致性
- const [revision] = await tx
- .select()
- .from(routeRevision)
- .where(
- and(
- eq(routeRevision.id, evidence.routeRevisionId),
- eq(routeRevision.tenantId, input.tenantId),
- eq(routeRevision.routeId, input.deploymentRouteId),
- ),
- )
- .limit(1)
- .for("update");
- if (
- !revision ||
- revision.agentRevisionId !== input.agentRevisionId ||
- revision.runtimeRevisionId !== input.runtimeRevisionId ||
- revision.policyRevisionId !== input.policyRevisionId ||
- revision.contentDigest !== evidence.routeContentDigest
- ) {
- throw evidenceError("RouteRevision 内容与解析结果不一致");
- }
-
- // C. RouteActivation（FOR UPDATE）— 当前最新 + Active + 一致
+ // B. RouteActivation（FOR UPDATE）— 当前最新 + Active + 一致
  const [activation] = await tx
  .select()
  .from(routeActivation)
@@ -213,73 +195,96 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
  !activation ||
  activation.id !== evidence.routeActivationId ||
  activation.routeRevisionId !== evidence.routeRevisionId ||
+ activation.routeSetId !== routeRow.routeSet.id ||
  activation.activationState !== "active"
  ) {
  throw evidenceError("RouteActivation 已失效或已被替换");
  }
 
- // D. AgentRevision + RuntimeRevision（FOR UPDATE）— Digest 一致性
- const [agentRevision, runtimeRevision] = await Promise.all([
- tx
+ // C. RouteRevision（FOR UPDATE）— 仅 latest Activation 指向的 Revision 是权威
+ const [revision] = await tx
+ .select()
+ .from(routeRevision)
+ .where(eq(routeRevision.id, activation.routeRevisionId))
+ .limit(1)
+ .for("update");
+ if (
+ !revision ||
+ revision.tenantId !== input.tenantId ||
+ revision.routeId !== input.deploymentRouteId ||
+ revision.routeSetId !== routeRow.routeSet.id ||
+ revision.agentRevisionId !== input.agentRevisionId ||
+ revision.runtimeRevisionId !== input.runtimeRevisionId ||
+ revision.policyRevisionId !== input.policyRevisionId ||
+ revision.contentDigest !== evidence.routeContentDigest
+ ) {
+ throw evidenceError("RouteRevision 内容与解析结果不一致");
+ }
+
+ // D. Agent → AgentRevision（FOR UPDATE），只用预读键定位主体，最终判断全部基于锁后行
+ const [agentRevisionKey] = await tx
+ .select({ agentId: agentRevisionTable.agentId })
+ .from(agentRevisionTable)
+ .where(eq(agentRevisionTable.id, input.agentRevisionId))
+ .limit(1);
+ if (!agentRevisionKey) throw evidenceError("AgentRevision 不存在");
+ const [agent] = await tx
+ .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
+ .from(agentTable)
+ .where(and(eq(agentTable.id, agentRevisionKey.agentId), eq(agentTable.tenantId, input.tenantId)))
+ .limit(1)
+ .for("update");
+ const [agentRevision] = await tx
  .select()
  .from(agentRevisionTable)
  .where(eq(agentRevisionTable.id, input.agentRevisionId))
  .limit(1)
- .for("update")
- .then((rows) => rows[0] ?? null),
- tx
+ .for("update");
+ if (
+ !agent ||
+ agent.lifecycleState !== "enabled" ||
+ !agentRevision ||
+ agentRevision.agentId !== agent.id ||
+ agentRevision.revisionState !== "published" ||
+ agentRevision.artifactDigest !== evidence.agentArtifactDigest
+ ) {
+ throw evidenceError("Agent 或 AgentRevision 当前权威事实不一致");
+ }
+
+ // E. Runtime → RuntimeRevision（FOR UPDATE），严格串行获取
+ const [runtimeRevisionKey] = await tx
+ .select({ runtimeId: runtimeRevisionTable.runtimeId })
+ .from(runtimeRevisionTable)
+ .where(eq(runtimeRevisionTable.id, input.runtimeRevisionId))
+ .limit(1);
+ if (!runtimeRevisionKey) throw evidenceError("RuntimeRevision 不存在");
+ const [runtime] = await tx
+ .select({ id: runtimeTable.id, lifecycleState: runtimeTable.lifecycleState })
+ .from(runtimeTable)
+ .where(
+ and(
+ eq(runtimeTable.id, runtimeRevisionKey.runtimeId),
+ eq(runtimeTable.tenantId, input.tenantId),
+ ),
+ )
+ .limit(1)
+ .for("update");
+ const [runtimeRevision] = await tx
  .select()
  .from(runtimeRevisionTable)
  .where(eq(runtimeRevisionTable.id, input.runtimeRevisionId))
  .limit(1)
- .for("update")
- .then((rows) => rows[0] ?? null),
- ]);
+ .for("update");
  if (
- !agentRevision ||
- agentRevision.revisionState !== "published" ||
- agentRevision.artifactDigest !== evidence.agentArtifactDigest
- ) {
- throw evidenceError("AgentRevision 发布状态或 Artifact Digest 不一致");
- }
- if (
+ !runtime ||
+ runtime.lifecycleState !== "enabled" ||
  !runtimeRevision ||
+ runtimeRevision.runtimeId !== runtime.id ||
  runtimeRevision.revisionState !== "published" ||
  runtimeRevision.artifactDigest !== evidence.runtimeArtifactDigest ||
  runtimeRevision.configHash !== evidence.runtimeConfigDigest
  ) {
  throw evidenceError("RuntimeRevision 发布状态、Artifact 或 Config Digest 不一致");
- }
-
- // E. Agent + Runtime 主体（FOR UPDATE）— 生命周期校验（轻量 TOCTOU，不属于 Policy 维度）
- const [agent, runtime] = await Promise.all([
- tx
- .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
- .from(agentTable)
- .where(and(eq(agentTable.id, agentRevision.agentId), eq(agentTable.tenantId, input.tenantId)))
- .limit(1)
- .for("update")
- .then((rows) => rows[0] ?? null),
- tx
- .select({ id: runtimeTable.id, lifecycleState: runtimeTable.lifecycleState })
- .from(runtimeTable)
- .where(
- and(
- eq(runtimeTable.id, runtimeRevision.runtimeId),
- eq(runtimeTable.tenantId, input.tenantId),
- ),
- )
- .limit(1)
- .for("update")
- .then((rows) => rows[0] ?? null),
- ]);
- if (
- !agent ||
- agent.lifecycleState !== "enabled" ||
- !runtime ||
- runtime.lifecycleState !== "enabled"
- ) {
- throw evidenceError("Agent 或 Runtime 当前不可用于新执行");
  }
 
  // F. PolicyRevision（FOR UPDATE）— 状态一致性

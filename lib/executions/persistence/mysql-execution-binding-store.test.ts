@@ -1,4 +1,8 @@
-import { toExecutionBinding } from "@/lib/executions/persistence/mysql-execution-binding-store";
+import {
+ EXECUTION_BINDING_AUTHORITY_LOCK_ORDER,
+ toExecutionBinding,
+} from "@/lib/executions/persistence/mysql-execution-binding-store";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 type BindingRow = Parameters<typeof toExecutionBinding>[0];
@@ -53,5 +57,36 @@ describe("toExecutionBinding", () => {
  expect(() =>
  toExecutionBinding({ ...bindingRow, projectionVersionNo: -1 }),
  ).toThrow(/证据字段不完整/);
+ });
+});
+
+describe("ExecutionBinding authority final validation", () => {
+ it("公开固定的串行锁序并禁止旧 Route authority", () => {
+ expect(EXECUTION_BINDING_AUTHORITY_LOCK_ORDER).toEqual([
+ "Invocation",
+ "DeploymentRoute+DeploymentRouteSet",
+ "RouteActivation",
+ "RouteRevision",
+ "Agent",
+ "AgentRevision",
+ "Runtime",
+ "RuntimeRevision",
+ "AgentPublicationRecord",
+ "AgentWithdrawalRecord",
+ "RuntimePublicationRecord",
+ "RuntimeWithdrawalRecord",
+ "AgentArtifactAttestation",
+ "AgentAttestationRevocation",
+ "RuntimeArtifactAttestation",
+ "RuntimeAttestationRevocation",
+ "RuntimeConformanceRun",
+ "RuntimeConformanceCaseResult",
+ "PolicyRevision",
+ "RouteEligibilityProjection",
+ ]);
+
+ const source = readFileSync(new URL("./mysql-execution-binding-store.ts", import.meta.url), "utf8");
+ expect(source).not.toContain("activeRouteRevisionId");
+ expect(source).not.toContain("Promise.all(");
  });
 });
