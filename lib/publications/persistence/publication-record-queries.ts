@@ -6,7 +6,7 @@ import {
  publicationRecord,
  withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 export async function getPublicationRecordById(params: {
  tenantId: string;
@@ -44,6 +44,23 @@ export async function getPublicationRecordBySubject(params: {
  return record ?? null;
 }
 
+export async function listPublicationRecords(params: {
+  tenantId: string;
+  subjectType?: PublicationSubjectType;
+  subjectRevisionId?: string;
+}): Promise<PublicationRecord[]> {
+  const conditions = [eq(publicationRecord.tenantId, params.tenantId)];
+  if (params.subjectType) conditions.push(eq(publicationRecord.subjectType, params.subjectType));
+  if (params.subjectRevisionId) {
+    conditions.push(eq(publicationRecord.subjectRevisionId, params.subjectRevisionId));
+  }
+  return db
+    .select()
+    .from(publicationRecord)
+    .where(and(...conditions))
+    .orderBy(desc(publicationRecord.publicationSequence));
+}
+
 export async function getWithdrawalRecordBySubject(params: {
  tenantId: string;
  subjectType: PublicationSubjectType;
@@ -61,4 +78,38 @@ export async function getWithdrawalRecordBySubject(params: {
  )
  .limit(1);
  return record ?? null;
+}
+
+export async function getWithdrawalRecordById(params: {
+  tenantId: string;
+  withdrawalRecordId: string;
+}): Promise<WithdrawalRecord | null> {
+  const [record] = await db
+    .select()
+    .from(withdrawalRecord)
+    .where(
+      and(
+        eq(withdrawalRecord.tenantId, params.tenantId),
+        eq(withdrawalRecord.id, params.withdrawalRecordId),
+      ),
+    )
+    .limit(1);
+  return record ?? null;
+}
+
+export async function listWithdrawalRecords(params: {
+  tenantId: string;
+  subjectType?: PublicationSubjectType;
+  subjectRevisionId?: string;
+}): Promise<WithdrawalRecord[]> {
+  const conditions = [eq(withdrawalRecord.tenantId, params.tenantId)];
+  if (params.subjectType) conditions.push(eq(withdrawalRecord.subjectType, params.subjectType));
+  if (params.subjectRevisionId) {
+    conditions.push(eq(withdrawalRecord.subjectRevisionId, params.subjectRevisionId));
+  }
+  return db
+    .select()
+    .from(withdrawalRecord)
+    .where(and(...conditions))
+    .orderBy(desc(withdrawalRecord.withdrawnAt));
 }

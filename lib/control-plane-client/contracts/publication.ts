@@ -10,21 +10,23 @@
 export type PublicationSubjectType = "agent_revision" | "runtime_revision";
 
 /** Publication 执行者类型。 */
-export type PublicationActorType = "user" | "system" | "workload";
+export type PublicationActorType = "user" | "service" | "workload" | "system";
 
 /** PublicationRecord 详情。 */
 export interface PublicationRecordDTO {
   id: string;
   tenant_id: string;
   subject_type: PublicationSubjectType;
-  subject_id: string;
+  subject_revision_id: string;
+  publication_sequence: number;
+  evidence_set_digest: string;
   actor_type: PublicationActorType;
   actor_id: string;
   /** 发布时绑定的 Attestation — 不可变。 */
   attestation_ids: string[];
   /** 发布时绑定的 Conformance Run — 不可变。 */
   conformance_run_id: string | null;
-  reason: string | null;
+  approvals: unknown[];
   published_at: string;
 }
 
@@ -33,9 +35,11 @@ export interface WithdrawalRecordDTO {
   id: string;
   tenant_id: string;
   subject_type: PublicationSubjectType;
-  subject_id: string;
+  subject_revision_id: string;
+  publication_record_id: string;
   actor_type: PublicationActorType;
   actor_id: string;
+  reason_code: string;
   reason: string;
   withdrawn_at: string;
 }
