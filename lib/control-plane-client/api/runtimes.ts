@@ -6,6 +6,7 @@ import type {
   PublishRuntimeRevisionRequest,
   RecordConformanceRunRequest,
   RuntimeConformanceRunDTO,
+  RuntimeConformanceSubmissionDTO,
   RuntimeDTO,
   RuntimeListResponse,
   RuntimeRevisionDTO,
@@ -33,7 +34,8 @@ export interface RuntimeApiClient {
   recordConformanceRun(
     revisionId: string,
     body: RecordConformanceRunRequest,
-  ): Promise<RuntimeConformanceRunDTO>;
+    opts: { idempotencyKey: string },
+  ): Promise<RuntimeConformanceSubmissionDTO>;
   /** 获取 Conformance Run 详情。 */
   getConformanceRun(runId: string): Promise<RuntimeConformanceRunDTO>;
 }
@@ -61,12 +63,13 @@ export function createRuntimeApiClient(config: ApiClientConfig): RuntimeApiClien
         method: "POST",
         body: JSON.stringify({ reason }),
       }),
-    recordConformanceRun: (revisionId, body) =>
-      request<RuntimeConformanceRunDTO>(
+    recordConformanceRun: (revisionId, body, opts) =>
+      request<RuntimeConformanceSubmissionDTO>(
         `/admin/api/v1/runtime-revisions/${revisionId}/conformance`,
         {
           method: "POST",
           body: JSON.stringify(body),
+          headers: { "Idempotency-Key": opts.idempotencyKey },
         },
       ),
     getConformanceRun: (runId) =>

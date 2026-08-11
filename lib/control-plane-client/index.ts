@@ -38,8 +38,11 @@ export type {
   RuntimeConformanceOverallResult,
   RuntimeConformanceCaseResultDTO,
   RuntimeConformanceRunDTO,
+  RuntimeConformanceSubmissionDTO,
   PublishRuntimeRevisionRequest,
   RecordConformanceRunRequest,
+  WithdrawRuntimeRevisionRequest,
+  WithdrawRuntimeRevisionResponse,
 } from "./contracts/runtime";
 
 export type {

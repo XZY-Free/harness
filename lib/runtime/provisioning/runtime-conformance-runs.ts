@@ -43,6 +43,15 @@ export async function listRuntimeConformanceRuns(tenantId: string, runtimeRevisi
  .orderBy(desc(runtimeConformanceRun.completedAt));
 }
 
+export async function getRuntimeConformanceRunById(tenantId: string, runId: string) {
+ const [run] = await db
+ .select()
+ .from(runtimeConformanceRun)
+ .where(and(eq(runtimeConformanceRun.tenantId, tenantId), eq(runtimeConformanceRun.id, runId)))
+ .limit(1);
+ return run ?? null;
+}
+
 export async function listRuntimeConformanceCaseResults(runId: string) {
  return db
  .select()
