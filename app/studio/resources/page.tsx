@@ -1,7 +1,7 @@
 import { AgentsViewer } from "@/components/studio/agents-viewer";
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { ProvidersViewer } from "@/components/studio/providers-viewer";
-import { listAgents, listProviders } from "@/lib/db/queries";
+import { listProviders } from "@/lib/db/queries";
 import { hasPermission } from "@/lib/rbac";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 import Link from "next/link";
@@ -74,9 +74,9 @@ export default async function ResourcesPage({
             {tab === "agents" && canReadAgents && (
               <>
                 <p className="mb-2 text-[13px] text-[var(--fg-muted)]">
-                  agent 档案只读展示（模型 + skill 绑定）。仅档案存储,不接 runtime 执行链。
+                  智能体控制面档案与当前修订。
                 </p>
-                <AgentsViewer agents={await listAgents()} />
+                <AgentsViewer />
               </>
             )}
             {tab === "providers" && canReadProviders && (

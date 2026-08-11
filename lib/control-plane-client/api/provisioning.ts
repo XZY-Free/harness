@@ -6,32 +6,21 @@ import type {
   HostedProvisioningRequestDTO,
   RequestHostedProvisioningRequest,
 } from "../contracts/provisioning";
-import type { ApiClientConfig } from "./agents";
+import { type ApiClientConfig, createControlPlaneRequest } from "../http-client";
 
 /** Provisioning API Client。 */
 export interface ProvisioningApiClient {
   /** 请求 Hosted 供应。 */
-  requestProvisioning(body: RequestHostedProvisioningRequest): Promise<HostedProvisioningRequestDTO>;
+  requestProvisioning(
+    body: RequestHostedProvisioningRequest,
+  ): Promise<HostedProvisioningRequestDTO>;
   /** 获取供应请求详情。 */
   getProvisioningRequest(requestId: string): Promise<HostedProvisioningRequestDTO>;
 }
 
 /** 创建 Provisioning API Client。 */
 export function createProvisioningApiClient(config: ApiClientConfig): ProvisioningApiClient {
-  async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const url = `${config.baseUrl}${path}`;
-    const headers = { ...config.headers(), "Content-Type": "application/json" };
-    const res = await fetch(url, { ...init, headers: { ...headers, ...(init?.headers ?? {}) } });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw Object.assign(new Error(body.message ?? `HTTP ${res.status}`), {
-        code: body.code,
-        request_id: body.request_id,
-        details: body.details,
-      });
-    }
-    return res.json();
-  }
+  const request = createControlPlaneRequest(config);
 
   return {
     requestProvisioning: (body) =>

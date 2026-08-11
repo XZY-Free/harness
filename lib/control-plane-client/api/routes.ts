@@ -13,7 +13,7 @@ import type {
   DisableRouteRequest,
   DisableRouteResponse,
 } from "../contracts/route";
-import type { ApiClientConfig } from "./agents";
+import { type ApiClientConfig, createControlPlaneRequest } from "../http-client";
 
 /** Route API Client。 */
 export interface RouteApiClient {
@@ -39,20 +39,7 @@ export interface RouteApiClient {
 
 /** 创建 Route API Client。 */
 export function createRouteApiClient(config: ApiClientConfig): RouteApiClient {
-  async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const url = `${config.baseUrl}${path}`;
-    const headers = { ...config.headers(), "Content-Type": "application/json" };
-    const res = await fetch(url, { ...init, headers: { ...headers, ...(init?.headers ?? {}) } });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw Object.assign(new Error(body.message ?? `HTTP ${res.status}`), {
-        code: body.code,
-        request_id: body.request_id,
-        details: body.details,
-      });
-    }
-    return res.json();
-  }
+  const request = createControlPlaneRequest(config);
 
   return {
     getRouteSet: (routeSetId) =>

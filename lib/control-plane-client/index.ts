@@ -67,6 +67,7 @@ export type {
   ActivateRouteSetRequest,
   ActivateRouteSetResponse,
   DisableRouteRequest,
+  DisableRouteResponse,
 } from "./contracts/route";
 
 export type {
@@ -93,7 +94,10 @@ export {
 
 // ─── API Clients ───────────────────────────────────────────
 
-export type { ApiClientConfig } from "./api/agents";
+export type { ApiClientConfig } from "./http-client";
+export { ControlPlaneRequestError } from "./http-client";
+export type { ControlPlaneClient } from "./client";
+export { createControlPlaneClient } from "./client";
 export type { AgentApiClient } from "./api/agents";
 export { createAgentApiClient } from "./api/agents";
 

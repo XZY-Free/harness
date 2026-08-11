@@ -8,7 +8,7 @@ import type {
   VerifyAttestationRequest,
   VerifyAttestationResultDTO,
 } from "../contracts/artifact";
-import type { ApiClientConfig } from "./agents";
+import { type ApiClientConfig, createControlPlaneRequest } from "../http-client";
 
 /** Artifact API Client。 */
 export interface ArtifactApiClient {
@@ -24,20 +24,7 @@ export interface ArtifactApiClient {
 
 /** 创建 Artifact API Client。 */
 export function createArtifactApiClient(config: ApiClientConfig): ArtifactApiClient {
-  async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const url = `${config.baseUrl}${path}`;
-    const headers = { ...config.headers(), "Content-Type": "application/json" };
-    const res = await fetch(url, { ...init, headers: { ...headers, ...(init?.headers ?? {}) } });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw Object.assign(new Error(body.message ?? `HTTP ${res.status}`), {
-        code: body.code,
-        request_id: body.request_id,
-        details: body.details,
-      });
-    }
-    return res.json();
-  }
+  const request = createControlPlaneRequest(config);
 
   return {
     list: () => request<ArtifactAttestationListResponse>("/admin/api/v1/artifact-attestations"),
@@ -49,9 +36,12 @@ export function createArtifactApiClient(config: ApiClientConfig): ArtifactApiCli
         body: JSON.stringify(body),
       }),
     revoke: (attestationId, reason) =>
-      request<ArtifactAttestationDTO>(`/admin/api/v1/artifact-attestations/${attestationId}:revoke`, {
-        method: "POST",
-        body: JSON.stringify({ reason }),
-      }),
+      request<ArtifactAttestationDTO>(
+        `/admin/api/v1/artifact-attestations/${attestationId}:revoke`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        },
+      ),
   };
 }

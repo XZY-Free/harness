@@ -3,12 +3,12 @@
  */
 
 import type {
-  PublicationRecordDTO,
   PublicationListResponse,
-  WithdrawalRecordDTO,
+  PublicationRecordDTO,
   WithdrawalListResponse,
+  WithdrawalRecordDTO,
 } from "../contracts/publication";
-import type { ApiClientConfig } from "./agents";
+import { type ApiClientConfig, createControlPlaneRequest } from "../http-client";
 
 /** Publication API Client。 */
 export interface PublicationApiClient {
@@ -24,28 +24,18 @@ export interface PublicationApiClient {
 
 /** 创建 Publication API Client。 */
 export function createPublicationApiClient(config: ApiClientConfig): PublicationApiClient {
-  async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const url = `${config.baseUrl}${path}`;
-    const headers = { ...config.headers(), "Content-Type": "application/json" };
-    const res = await fetch(url, { ...init, headers: { ...headers, ...(init?.headers ?? {}) } });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw Object.assign(new Error(body.message ?? `HTTP ${res.status}`), {
-        code: body.code,
-        request_id: body.request_id,
-        details: body.details,
-      });
-    }
-    return res.json();
-  }
+  const request = createControlPlaneRequest(config);
 
   return {
     list: (subjectType, subjectId) =>
-      request<PublicationListResponse>(`/admin/api/v1/publications?subject_type=${subjectType}&subject_id=${subjectId}`),
-    get: (recordId) =>
-      request<PublicationRecordDTO>(`/admin/api/v1/publications/${recordId}`),
+      request<PublicationListResponse>(
+        `/admin/api/v1/publications?subject_type=${subjectType}&subject_id=${subjectId}`,
+      ),
+    get: (recordId) => request<PublicationRecordDTO>(`/admin/api/v1/publications/${recordId}`),
     listWithdrawals: (subjectType, subjectId) =>
-      request<WithdrawalListResponse>(`/admin/api/v1/withdrawals?subject_type=${subjectType}&subject_id=${subjectId}`),
+      request<WithdrawalListResponse>(
+        `/admin/api/v1/withdrawals?subject_type=${subjectType}&subject_id=${subjectId}`,
+      ),
     getWithdrawal: (recordId) =>
       request<WithdrawalRecordDTO>(`/admin/api/v1/withdrawals/${recordId}`),
   };

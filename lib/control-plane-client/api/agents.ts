@@ -11,13 +11,7 @@ import type {
   AgentRevisionListResponse,
   CreateAgentRevisionRequest,
 } from "../contracts/agent";
-import type { ControlPlaneError } from "../errors/control-plane-error";
-
-/** API Client 基础配置。 */
-export interface ApiClientConfig {
-  baseUrl: string;
-  headers: () => Record<string, string>;
-}
+import { type ApiClientConfig, createControlPlaneRequest } from "../http-client";
 
 /** Agent API Client。 */
 export interface AgentApiClient {
@@ -39,20 +33,7 @@ export interface AgentApiClient {
 
 /** 创建 Agent API Client。 */
 export function createAgentApiClient(config: ApiClientConfig): AgentApiClient {
-  async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const url = `${config.baseUrl}${path}`;
-    const headers = { ...config.headers(), "Content-Type": "application/json" };
-    const res = await fetch(url, { ...init, headers: { ...headers, ...(init?.headers ?? {}) } });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw Object.assign(new Error(body.message ?? `HTTP ${res.status}`), {
-        code: body.code,
-        request_id: body.request_id,
-        details: body.details,
-      } as ControlPlaneError);
-    }
-    return res.json();
-  }
+  const request = createControlPlaneRequest(config);
 
   return {
     list: () => request<AgentListResponse>("/admin/api/v1/agents"),

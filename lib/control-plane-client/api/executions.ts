@@ -5,7 +5,7 @@
  */
 
 import type { ExecutionBindingDTO } from "../contracts/execution";
-import type { ApiClientConfig } from "./agents";
+import { type ApiClientConfig, createControlPlaneRequest } from "../http-client";
 
 /** Execution API Client。 */
 export interface ExecutionApiClient {
@@ -15,20 +15,7 @@ export interface ExecutionApiClient {
 
 /** 创建 Execution API Client。 */
 export function createExecutionApiClient(config: ApiClientConfig): ExecutionApiClient {
-  async function request<T>(path: string, init?: RequestInit): Promise<T> {
-    const url = `${config.baseUrl}${path}`;
-    const headers = { ...config.headers(), "Content-Type": "application/json" };
-    const res = await fetch(url, { ...init, headers: { ...headers, ...(init?.headers ?? {}) } });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw Object.assign(new Error(body.message ?? `HTTP ${res.status}`), {
-        code: body.code,
-        request_id: body.request_id,
-        details: body.details,
-      });
-    }
-    return res.json();
-  }
+  const request = createControlPlaneRequest(config);
 
   return {
     getBinding: (invocationId) =>
