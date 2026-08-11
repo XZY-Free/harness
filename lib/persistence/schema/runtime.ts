@@ -24,9 +24,11 @@
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
  bigint,
  boolean,
+ check,
  datetime,
  index,
  int,
@@ -335,22 +337,22 @@ export const executionBindingTable = mysqlTable(
  workspaceBindingId: varchar("workspaceBindingId", { length: 36 }),
  policyRevisionId: varchar("policyRevisionId", { length: 36 }),
  contextCheckpointId: varchar("contextCheckpointId", { length: 36 }),
- routeRevisionId: varchar("routeRevisionId", { length: 36 }),
- routeActivationId: varchar("routeActivationId", { length: 36 }),
- routeContentDigest: varchar("routeContentDigest", { length: 71 }),
- agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
- runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
- runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }),
- capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }),
- agentAttestationIds: json("agentAttestationIds").$type<string[]>(),
- runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>(),
- agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }),
- runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }),
- conformanceRunId: varchar("conformanceRunId", { length: 36 }),
+ routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
+ routeActivationId: varchar("routeActivationId", { length: 36 }).notNull(),
+ routeContentDigest: varchar("routeContentDigest", { length: 71 }).notNull(),
+ agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }).notNull(),
+ runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }).notNull(),
+ runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
+ capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
+ agentAttestationIds: json("agentAttestationIds").$type<string[]>().notNull(),
+ runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>().notNull(),
+ agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }).notNull(),
+ runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }).notNull(),
+ conformanceRunId: varchar("conformanceRunId", { length: 36 }).notNull(),
  /** §07: Resolver 输入摘要 — 冻结解析时刻的请求参数 Digest。 */
- resolutionInputDigest: varchar("resolutionInputDigest", { length: 71 }),
+ resolutionInputDigest: varchar("resolutionInputDigest", { length: 71 }).notNull(),
  /** §07: Projection 版本号 — Binding 用此检测 Projection 滞后。 */
- projectionVersionNo: int("projectionVersionNo"),
+ projectionVersionNo: int("projectionVersionNo").notNull(),
  environmentDefinitionRevisionId: varchar("environmentDefinitionRevisionId", { length: 36 }),
  configHash: varchar("configHash", { length: 128 }).notNull(),
  boundAt: datetime("boundAt", { mode: "date", fsp: 3 })
@@ -363,6 +365,14 @@ export const executionBindingTable = mysqlTable(
  runtimeRevisionIdx: index("ExecutionBinding_runtimeRevision_idx").on(t.runtimeRevisionId),
  routeRevisionIdx: index("ExecutionBinding_routeRevision_idx").on(t.routeRevisionId),
  conformanceRunIdx: index("ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
+ agentAttestationIdsNonEmpty: check(
+ "ExecutionBinding_agentAttestationIds_non_empty",
+ sql`JSON_LENGTH(${t.agentAttestationIds}) >= 1`,
+ ),
+ runtimeAttestationIdsNonEmpty: check(
+ "ExecutionBinding_runtimeAttestationIds_non_empty",
+ sql`JSON_LENGTH(${t.runtimeAttestationIds}) >= 1`,
+ ),
  }),
 );
 
@@ -673,4 +683,3 @@ export const runtimeEventIngressTable = mysqlTable(
 
 export type RuntimeEventIngress = InferSelectModel<typeof runtimeEventIngressTable>;
 export type NewRuntimeEventIngress = InferInsertModel<typeof runtimeEventIngressTable>;
-

@@ -16,10 +16,33 @@
  */
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
+import type { ExecutionBindingControlPlaneEvidence } from "@/lib/executions/domain/execution-binding";
 import type { ExecutionBinding } from "@/lib/persistence/schema/runtime";
 import { executionBindingTable } from "@/lib/persistence/schema/runtime";
 import { ExecutionBindingAlreadyExistsError } from "@/lib/runtime/errors";
 import { eq } from "drizzle-orm";
+
+/** 旧状态机测试显式写入的完整、不可空 Binding 证据。 */
+export const TEST_EXECUTION_BINDING_EVIDENCE: ExecutionBindingControlPlaneEvidence = {
+ routeRevisionId: "test-route-revision",
+ routeActivationId: "test-route-activation",
+ routeContentDigest: `sha256:${"1".repeat(64)}`,
+ agentArtifactDigest: `sha256:${"2".repeat(64)}`,
+ runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
+ runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
+ capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
+ agentAttestationIds: ["test-agent-attestation"],
+ runtimeAttestationIds: ["test-runtime-attestation"],
+ agentPublicationRecordId: "test-agent-publication",
+ runtimePublicationRecordId: "test-runtime-publication",
+ conformanceRunId: "test-conformance-run",
+ resolutionInputDigest: `sha256:${"6".repeat(64)}`,
+};
+
+export const TEST_EXECUTION_BINDING_REQUIRED_FIELDS = {
+ controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
+ projectionVersionNo: 1,
+} as const;
 
 /** createExecutionBinding 入参。 */
 export interface CreateExecutionBindingParams {
@@ -35,6 +58,9 @@ export interface CreateExecutionBindingParams {
  workspaceBindingId?: string | null;
  policyRevisionId?: string | null;
  contextCheckpointId?: string | null;
+ environmentDefinitionRevisionId?: string | null;
+ controlPlaneEvidence: ExecutionBindingControlPlaneEvidence;
+ projectionVersionNo: number;
 }
 
 /** computeBindingConfigHash 入参（与 CreateExecutionBindingParams 字段一致，便于规范化）。 */
@@ -139,6 +165,21 @@ export async function createExecutionBinding(
  workspaceBindingId: params.workspaceBindingId ?? null,
  policyRevisionId: params.policyRevisionId ?? null,
  contextCheckpointId: params.contextCheckpointId ?? null,
+ routeRevisionId: params.controlPlaneEvidence.routeRevisionId,
+ routeActivationId: params.controlPlaneEvidence.routeActivationId,
+ routeContentDigest: params.controlPlaneEvidence.routeContentDigest,
+ agentArtifactDigest: params.controlPlaneEvidence.agentArtifactDigest,
+ runtimeArtifactDigest: params.controlPlaneEvidence.runtimeArtifactDigest,
+ runtimeConfigDigest: params.controlPlaneEvidence.runtimeConfigDigest,
+ capabilityManifestDigest: params.controlPlaneEvidence.capabilityManifestDigest,
+ agentAttestationIds: params.controlPlaneEvidence.agentAttestationIds,
+ runtimeAttestationIds: params.controlPlaneEvidence.runtimeAttestationIds,
+ agentPublicationRecordId: params.controlPlaneEvidence.agentPublicationRecordId,
+ runtimePublicationRecordId: params.controlPlaneEvidence.runtimePublicationRecordId,
+ conformanceRunId: params.controlPlaneEvidence.conformanceRunId,
+ resolutionInputDigest: params.controlPlaneEvidence.resolutionInputDigest,
+ projectionVersionNo: params.projectionVersionNo,
+ environmentDefinitionRevisionId: params.environmentDefinitionRevisionId ?? null,
  configHash,
  });
 

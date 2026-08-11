@@ -2141,84 +2141,98 @@
           "name": "routeRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "routeActivationId": {
           "name": "routeActivationId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "routeContentDigest": {
           "name": "routeContentDigest",
           "type": "varchar(71)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "agentArtifactDigest": {
           "name": "agentArtifactDigest",
           "type": "varchar(71)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "runtimeArtifactDigest": {
           "name": "runtimeArtifactDigest",
           "type": "varchar(71)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "runtimeConfigDigest": {
           "name": "runtimeConfigDigest",
           "type": "varchar(71)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "capabilityManifestDigest": {
           "name": "capabilityManifestDigest",
           "type": "varchar(71)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "agentAttestationIds": {
           "name": "agentAttestationIds",
           "type": "json",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "runtimeAttestationIds": {
           "name": "runtimeAttestationIds",
           "type": "json",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "agentPublicationRecordId": {
           "name": "agentPublicationRecordId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "runtimePublicationRecordId": {
           "name": "runtimePublicationRecordId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "conformanceRunId": {
           "name": "conformanceRunId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolutionInputDigest": {
+          "name": "resolutionInputDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "projectionVersionNo": {
+          "name": "projectionVersionNo",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "environmentDefinitionRevisionId": {

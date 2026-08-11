@@ -41,6 +41,7 @@ import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-e
 import {
   computeBindingConfigHash,
   createExecutionBinding,
+  TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
@@ -685,6 +686,7 @@ describe("V11 ExecutionBinding 仓储", () => {
 
   it("createExecutionBinding 创建不可变 1:1 绑定", async () => {
     const binding = await createExecutionBinding({
+      ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
       invocationId,
       tenantId: ctx.tenantId,
       agentRevisionId: ctx.agentRevision.id,
@@ -707,6 +709,7 @@ describe("V11 ExecutionBinding 仓储", () => {
 
   it("createExecutionBinding 同 invocationId 重复创建 → ExecutionBindingAlreadyExistsError", async () => {
     await createExecutionBinding({
+      ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
       invocationId,
       tenantId: ctx.tenantId,
       agentRevisionId: ctx.agentRevision.id,
@@ -718,6 +721,7 @@ describe("V11 ExecutionBinding 仓储", () => {
 
     await expect(
       createExecutionBinding({
+        ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
         invocationId,
         tenantId: ctx.tenantId,
         agentRevisionId: ctx.agentRevision.id,
@@ -731,6 +735,7 @@ describe("V11 ExecutionBinding 仓储", () => {
 
   it("getExecutionBindingByInvocation 跨租户隔离（返回 null）", async () => {
     await createExecutionBinding({
+      ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
       invocationId,
       tenantId: ctx.tenantId,
       agentRevisionId: ctx.agentRevision.id,
@@ -1048,6 +1053,7 @@ describe("V11 Dispatcher 调度", () => {
       policyRevisionId: resolution.policyRevisionId,
       contextCheckpointId: null,
       environmentDefinitionRevisionId: null,
+      projectionVersionNo: resolution.projectionVersionNo ?? 0,
       controlPlaneEvidence: {
         routeRevisionId: resolution.routeRevisionId,
         routeActivationId: resolution.routeActivationId,

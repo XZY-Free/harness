@@ -39,13 +39,13 @@ export interface BindingEligibilityInput {
  /** Projection 版本号 — 用于检测 Projection 滞后。 */
  projectionVersionNo: number;
  /** : Resolver 冻结的精确证据 ID。 */
- frozenEvidence?: {
- agentPublicationRecordId: string | null;
- runtimePublicationRecordId: string | null;
- agentAttestationIds: string[] | null;
- runtimeAttestationIds: string[] | null;
- conformanceRunId: string | null;
- } | null;
+ frozenEvidence: {
+ agentPublicationRecordId: string;
+ runtimePublicationRecordId: string;
+ agentAttestationIds: string[];
+ runtimeAttestationIds: string[];
+ conformanceRunId: string;
+ };
 }
 
 export interface BindingEligibilityResult {
@@ -126,37 +126,31 @@ export async function validateBindingEligibility(
  agentRevisionId: input.agentRevisionId,
  runtimeRevisionId: input.runtimeRevisionId,
  policyRevisionId: input.policyRevisionId,
- conformanceRunId: null,
+ conformanceRunId: input.frozenEvidence.conformanceRunId,
  });
 
  // : D. 验证精确证据 ID — Projection 冻结的证据 ID 必须与当前权威一致
- if (input.frozenEvidence) {
+ {
  const fe = input.frozenEvidence;
  const currentAgentPubId = snapshot.agentPublication?.publicationRecordId ?? null;
  const currentRuntimePubId = snapshot.runtimePublication?.publicationRecordId ?? null;
  const currentConformanceRunId = snapshot.runtimePublication?.conformanceRunId ?? null;
 
- if (fe.agentPublicationRecordId !== null && fe.agentPublicationRecordId !== currentAgentPubId) {
+ if (fe.agentPublicationRecordId !== currentAgentPubId) {
  return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
  }
- if (fe.runtimePublicationRecordId !== null && fe.runtimePublicationRecordId !== currentRuntimePubId) {
+ if (fe.runtimePublicationRecordId !== currentRuntimePubId) {
  return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
  }
- if (fe.conformanceRunId !== null && fe.conformanceRunId !== currentConformanceRunId) {
+ if (fe.conformanceRunId !== currentConformanceRunId) {
  return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
  }
- // Attestation IDs — 投影冻结的 IDs 必须是当前权威的子集
- if (fe.agentAttestationIds && snapshot.agentPublication?.attestationIds) {
- const currentIds = new Set(snapshot.agentPublication.attestationIds);
- if (!fe.agentAttestationIds.every((id) => currentIds.has(id))) {
+ // Attestation IDs 必须与 Publication 绑定的完整集合精确相等。
+ if (!exactEvidenceIdsEqual(fe.agentAttestationIds, snapshot.agentPublication?.attestationIds ?? [])) {
  return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
  }
- }
- if (fe.runtimeAttestationIds && snapshot.runtimePublication?.attestationIds) {
- const currentIds = new Set(snapshot.runtimePublication.attestationIds);
- if (!fe.runtimeAttestationIds.every((id) => currentIds.has(id))) {
+ if (!exactEvidenceIdsEqual(fe.runtimeAttestationIds, snapshot.runtimePublication?.attestationIds ?? [])) {
  return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
- }
  }
  }
 
@@ -172,6 +166,13 @@ export async function validateBindingEligibility(
  }
 
  return { valid: true, projectionVersionMatch };
+}
+
+export function exactEvidenceIdsEqual(frozenIds: string[], currentIds: string[]): boolean {
+ if (frozenIds.length !== currentIds.length) return false;
+ const frozen = [...frozenIds].sort();
+ const current = [...currentIds].sort();
+ return frozen.every((id, index) => id === current[index]);
 }
 
 /**

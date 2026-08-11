@@ -67,4 +67,13 @@ describe("ExecutionBinding domain", () => {
       }),
     ).toThrow(ExecutionBindingEvidenceError);
   });
+
+  it("projectionVersionNo 必须是非负整数", () => {
+    expect(() =>
+      computeExecutionBindingConfigHash({
+        ...bindingInput(),
+        projectionVersionNo: 1.5,
+      }),
+    ).toThrow(ExecutionBindingEvidenceError);
+  });
 });

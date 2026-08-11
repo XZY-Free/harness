@@ -278,6 +278,10 @@ export async function dispatchInvocationForTurn(params: {
  const { invocation, event: invocationQueuedEvent } = await createInvocation(invocationParams);
 
  // 7. createExecutionBinding（不可变 1:1）
+ const projectionVersionNo = routeResolution.projectionVersionNo;
+ if (projectionVersionNo === undefined || !Number.isInteger(projectionVersionNo) || projectionVersionNo < 0) {
+ throw new Error("RouteResolution 缺少有效 projectionVersionNo");
+ }
  const bindingParams: CreateExecutionBindingCommand = {
  invocationId: invocation.id,
  tenantId: params.tenantId,
@@ -293,7 +297,7 @@ export async function dispatchInvocationForTurn(params: {
  contextCheckpointId: null,
  environmentDefinitionRevisionId: null,
  /** : Projection 版本号，用于 Binding 版本一致性校验。 */
- projectionVersionNo: routeResolution.projectionVersionNo,
+ projectionVersionNo,
  controlPlaneEvidence: {
  routeRevisionId: routeResolution.routeRevisionId,
  routeActivationId: routeResolution.routeActivationId,

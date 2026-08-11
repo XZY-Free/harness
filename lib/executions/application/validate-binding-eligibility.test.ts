@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EligibilitySnapshotStaleError,
+  exactEvidenceIdsEqual,
   type BindingEligibilityInput,
   type BindingEligibilityResult,
 } from "./validate-binding-eligibility";
@@ -49,40 +50,17 @@ describe("BindingEligibilityInput frozenEvidence", () => {
         conformanceRunId: "cr1",
       },
     };
-    expect(input.frozenEvidence?.agentPublicationRecordId).toBe("apr1");
-    expect(input.frozenEvidence?.runtimePublicationRecordId).toBe("rpr1");
-    expect(input.frozenEvidence?.agentAttestationIds).toEqual(["aat1", "aat2"]);
-    expect(input.frozenEvidence?.runtimeAttestationIds).toEqual(["rat1"]);
-    expect(input.frozenEvidence?.conformanceRunId).toBe("cr1");
+    expect(input.frozenEvidence.agentPublicationRecordId).toBe("apr1");
+    expect(input.frozenEvidence.runtimePublicationRecordId).toBe("rpr1");
+    expect(input.frozenEvidence.agentAttestationIds).toEqual(["aat1", "aat2"]);
+    expect(input.frozenEvidence.runtimeAttestationIds).toEqual(["rat1"]);
+    expect(input.frozenEvidence.conformanceRunId).toBe("cr1");
   });
 
-  it("§07.5: frozenEvidence 可为 null（兼容旧路径）", () => {
-    const input: BindingEligibilityInput = {
-      tenantId: "t1",
-      routeId: "r1",
-      routeRevisionId: "rr1",
-      routeActivationId: "ra1",
-      agentRevisionId: "ar1",
-      runtimeRevisionId: "rvr1",
-      policyRevisionId: null,
-      projectionVersionNo: 1,
-      frozenEvidence: null,
-    };
-    expect(input.frozenEvidence).toBeNull();
-  });
-
-  it("§07.5: frozenEvidence 可省略（向后兼容）", () => {
-    const input: BindingEligibilityInput = {
-      tenantId: "t1",
-      routeId: "r1",
-      routeRevisionId: "rr1",
-      routeActivationId: "ra1",
-      agentRevisionId: "ar1",
-      runtimeRevisionId: "rvr1",
-      policyRevisionId: null,
-      projectionVersionNo: 1,
-    };
-    expect(input.frozenEvidence).toBeUndefined();
+  it("§07.5: Attestation ID 必须与 Publication 绑定全集精确相等", () => {
+    expect(exactEvidenceIdsEqual(["a2", "a1"], ["a1", "a2"])).toBe(true);
+    expect(exactEvidenceIdsEqual(["a1"], ["a1", "a2"])).toBe(false);
+    expect(exactEvidenceIdsEqual(["a1", "a3"], ["a1", "a2"])).toBe(false);
   });
 });
 

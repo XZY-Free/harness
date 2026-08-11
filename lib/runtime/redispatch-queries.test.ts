@@ -42,7 +42,10 @@ import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifac
 import { createThread } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { createExecutionBinding } from "@/lib/executions/test-support/create-unverified-execution-binding";
+import {
+  createExecutionBinding,
+  TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
+} from "@/lib/executions/test-support/create-unverified-execution-binding";
 import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
@@ -384,6 +387,7 @@ async function seedInvocation(params: {
 
   // 创建 ExecutionBinding
   const binding = await createExecutionBinding({
+    ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
     invocationId: invocation.id,
     tenantId: params.tenantId,
     agentRevisionId: params.agentRevision.id,

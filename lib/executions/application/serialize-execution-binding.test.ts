@@ -54,28 +54,4 @@ describe("serializeExecutionBinding", () => {
       bound_at: "2026-08-03T01:02:03.000Z",
     });
   });
-
-  it("历史 Binding 缺少新增证据时仍可读取", () => {
-    expect(
-      serializeExecutionBinding({
-        ...binding,
-        routeRevisionId: null,
-        routeActivationId: null,
-        routeContentDigest: null,
-        agentArtifactDigest: null,
-        runtimeArtifactDigest: null,
-        runtimeConfigDigest: null,
-        capabilityManifestDigest: null,
-        agentAttestationIds: null,
-        runtimeAttestationIds: null,
-        agentPublicationRecordId: null,
-        runtimePublicationRecordId: null,
-        conformanceRunId: null,
-      }),
-    ).toMatchObject({
-      invocation_id: "invocation-1",
-      route_revision_id: null,
-      conformance_run_id: null,
-    });
-  });
 });
