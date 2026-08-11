@@ -119,6 +119,15 @@ export interface PublishRuntimeRevisionRequest {
   conformance_run_id: string;
 }
 
+export interface PublishRuntimeRevisionResponse {
+  id: string;
+  revision_state: "published";
+  published_at: string;
+  publication_record_id: string;
+  conformance_run_id: string;
+  audit_event_id: string;
+}
+
 /** 记录 Conformance Run 请求。 */
 export interface RecordConformanceRunRequest {
   dsse_envelope: string;

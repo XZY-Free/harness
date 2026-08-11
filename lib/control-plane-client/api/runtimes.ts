@@ -4,12 +4,15 @@
 
 import type {
   PublishRuntimeRevisionRequest,
+  PublishRuntimeRevisionResponse,
   RecordConformanceRunRequest,
   RuntimeConformanceRunDTO,
   RuntimeConformanceSubmissionDTO,
   RuntimeDTO,
   RuntimeListResponse,
   RuntimeRevisionDTO,
+  WithdrawRuntimeRevisionRequest,
+  WithdrawRuntimeRevisionResponse,
 } from "../contracts/runtime";
 import { type ApiClientConfig, createControlPlaneRequest } from "../http-client";
 
@@ -27,9 +30,14 @@ export interface RuntimeApiClient {
   publishRevision(
     revisionId: string,
     body: PublishRuntimeRevisionRequest,
-  ): Promise<RuntimeRevisionDTO>;
+    opts: { idempotencyKey: string; ifMatch: string },
+  ): Promise<PublishRuntimeRevisionResponse>;
   /** 撤回 RuntimeRevision。 */
-  withdrawRevision(revisionId: string, reason: string): Promise<RuntimeRevisionDTO>;
+  withdrawRevision(
+    revisionId: string,
+    body: WithdrawRuntimeRevisionRequest,
+    opts: { idempotencyKey: string; ifMatch: string },
+  ): Promise<WithdrawRuntimeRevisionResponse>;
   /** 记录 Conformance Run。 */
   recordConformanceRun(
     revisionId: string,
@@ -53,16 +61,30 @@ export function createRuntimeApiClient(config: ApiClientConfig): RuntimeApiClien
       ),
     getRevision: (revisionId) =>
       request<RuntimeRevisionDTO>(`/admin/api/v1/runtime-revisions/${revisionId}`),
-    publishRevision: (revisionId, body) =>
-      request<RuntimeRevisionDTO>(`/admin/api/v1/runtime-revisions/${revisionId}:publish`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    withdrawRevision: (revisionId, reason) =>
-      request<RuntimeRevisionDTO>(`/admin/api/v1/runtime-revisions/${revisionId}:withdraw`, {
-        method: "POST",
-        body: JSON.stringify({ reason }),
-      }),
+    publishRevision: (revisionId, body, opts) =>
+      request<PublishRuntimeRevisionResponse>(
+        `/admin/api/v1/runtime-revisions/${revisionId}:publish`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: {
+            "Idempotency-Key": opts.idempotencyKey,
+            "If-Match": opts.ifMatch,
+          },
+        },
+      ),
+    withdrawRevision: (revisionId, body, opts) =>
+      request<WithdrawRuntimeRevisionResponse>(
+        `/admin/api/v1/runtime-revisions/${revisionId}:withdraw`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: {
+            "Idempotency-Key": opts.idempotencyKey,
+            "If-Match": opts.ifMatch,
+          },
+        },
+      ),
     recordConformanceRun: (revisionId, body, opts) =>
       request<RuntimeConformanceSubmissionDTO>(
         `/admin/api/v1/runtime-revisions/${revisionId}/conformance`,

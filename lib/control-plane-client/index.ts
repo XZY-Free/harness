@@ -40,6 +40,7 @@ export type {
   RuntimeConformanceRunDTO,
   RuntimeConformanceSubmissionDTO,
   PublishRuntimeRevisionRequest,
+  PublishRuntimeRevisionResponse,
   RecordConformanceRunRequest,
   WithdrawRuntimeRevisionRequest,
   WithdrawRuntimeRevisionResponse,
