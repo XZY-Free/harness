@@ -32,7 +32,7 @@ import {
 /**
  * GET / PATCH /admin/api/v1/skills/{skill_id} — Skill 单资源（阶段 6 S06-C01）。
  *
- * 事实源：阶段 6 Skill/Capability 模型（参考 deployment-routes/[route_id]/route.ts 模式）。
+ * 事实源：阶段 6 Skill/Capability 模型。
  *
  * 行为：
  * - GET：获取单个 Skill（含 currentVersion 摘要）。

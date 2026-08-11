@@ -42,8 +42,8 @@ import type { RuntimeRevision } from "@/lib/persistence/schema/runtime";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
-  upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
+import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { DEFAULT_ROUTE_SCOPE_KEY, dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import {
   EventPayloadHashConflictError,
@@ -334,7 +334,7 @@ async function seedFullIngressContext(): Promise<FullIngressContext> {
     routeScopeJson: { networkZone: "internal" },
   });
 
-  const routeResult = await upsertDeploymentRoute({
+  const routeResult = await activateSingleRouteForTest({
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,

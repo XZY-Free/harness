@@ -41,8 +41,8 @@ import type { RuntimeRevision } from "@/lib/persistence/schema/runtime";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
-  upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
+import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { createHostedAdapter, setRouteHostedAdapter } from "@/lib/runtime/adapters/hosted-adapter";
 import {
   DEFAULT_ROUTE_SCOPE_KEY,
@@ -342,7 +342,7 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     routeScopeJson: { networkZone: "internal" },
   });
 
-  const routeResult = await upsertDeploymentRoute({
+  const routeResult = await activateSingleRouteForTest({
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,

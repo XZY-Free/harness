@@ -64,8 +64,8 @@ import { invocationAttemptTable } from "@/lib/persistence/schema/runtime";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
-  upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
+import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import {
   type CommandDispatchResult,
   type CommandRuntimeEndpointResolution,
@@ -364,7 +364,7 @@ async function seedFullCommandContext(): Promise<FullCommandContext> {
     routeScopeJson: { networkZone: "internal" },
   });
 
-  const routeResult = await upsertDeploymentRoute({
+  const routeResult = await activateSingleRouteForTest({
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,

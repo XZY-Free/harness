@@ -54,8 +54,8 @@ import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
   listEnabledRouteProjections,
-  upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
+import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import {
   type ResolveRouteCommand,
   type RouteResolver,
@@ -379,7 +379,7 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     routeScopeJson: { networkZone: "internal" },
   });
 
-  const routeResult = await upsertDeploymentRoute({
+  const routeResult = await activateSingleRouteForTest({
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
@@ -1217,7 +1217,7 @@ describe("V11 Dispatcher 调度", () => {
       routeScopeJson: {},
     });
 
-    const routeResult = await upsertDeploymentRoute({
+    const routeResult = await activateSingleRouteForTest({
       tenantId,
       routeSetId: routeSet.id,
       routeSetExpectedVersionNo: 1,

@@ -5,7 +5,7 @@
  * - POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision。
  * - POST /admin/api/v1/agent-revisions/{revision_id}:publish — 发布 AgentRevision（attestation 门禁）。
  * - POST /admin/api/v1/artifact-attestations:verify — 验证制品证明。
- * - PUT /admin/api/v1/deployment-routes/{route_id} — 更新 DeploymentRoute。
+ * - POST /admin/api/v1/deployment-routes/{route_id}:disable — 禁用 DeploymentRoute。
  *
  * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]:publish/route";
 import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations:verify/route";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
-import { PUT as updateRoutePUT } from "@/app/admin/api/v1/deployment-routes/[route_id]/route";
+import { POST as disableRoutePOST } from "@/app/admin/api/v1/deployment-routes/[route_id]:disable/route";
 import { PUT as activateRouteSetPUT } from "@/app/admin/api/v1/deployment-route-sets/[route_set_id]/activation/route";
 import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
@@ -58,11 +58,11 @@ import { getPublicationRecordBySubject } from "@/lib/publications/persistence/pu
 import {
   createRouteSet,
   getRouteSetById,
-  upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import { RouteIdempotencyCompletionError } from "@/lib/routes/domain/route-revision";
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
+import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import {
   routeActivation,
   routeRevision,
@@ -1138,10 +1138,10 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 4. PUT /admin/api/v1/deployment-routes/{route_id}
+// 4. POST /admin/api/v1/deployment-routes/{route_id}:disable
 // ═══════════════════════════════════════════════════════════
 
-describe("PUT /admin/api/v1/deployment-routes/{route_id}", () => {
+describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
   let tenantId: string;
   let userIdentityId: string;
   let agentId: string;
@@ -1159,7 +1159,7 @@ describe("PUT /admin/api/v1/deployment-routes/{route_id}", () => {
     const agentResult = await seedPublishedAgentRevision(
       tenantId,
       userIdentityId,
-      "route-put-agent",
+      "route-disable-agent",
       "agent-v1",
     );
     agentId = agentResult.agent.id;
@@ -1168,7 +1168,7 @@ describe("PUT /admin/api/v1/deployment-routes/{route_id}", () => {
     const runtimeResult = await seedPublishedRuntimeRevision(
       tenantId,
       userIdentityId,
-      "route-put-runtime",
+      "route-disable-runtime",
       "runtime-v1",
     );
     runtimeRevisionId = runtimeResult.revision.id;
@@ -1181,79 +1181,82 @@ describe("PUT /admin/api/v1/deployment-routes/{route_id}", () => {
     });
     routeSetId = routeSet.id;
 
-    const upsertResult = await upsertDeploymentRoute({
+    const activated = await activateSingleRouteForTest({
       tenantId,
       routeSetId,
       routeSetExpectedVersionNo: 1,
       agentRevisionId,
       runtimeRevisionId,
-      trafficWeight: 5000,
+      trafficWeight: 10_000,
       priorityNo: 1,
       actor: { tenantId, actorType: "service", actorId: "test-deploy-bot" },
     });
-    routeId = upsertResult.route.id;
-    currentVersionNo = upsertResult.routeSet.versionNo;
+    routeId = activated.route.id;
+    currentVersionNo = activated.routeSet.versionNo;
   });
 
-  it("成功更新 → 200 + 新 ETag", async () => {
+  it("禁用只追加 Activation，复用当前 Revision，并推进 RouteSet ETag", async () => {
+    const [currentActivation] = await db
+      .select()
+      .from(routeActivation)
+      .where(eq(routeActivation.routeId, routeId));
+    expect(currentActivation).toBeDefined();
+
     const request = buildV11Request({
       audience: "admin",
-      method: "PUT",
-      path: `/deployment-routes/${routeId}`,
-      idempotencyKey: "idem-put-route-001",
+      method: "POST",
+      path: `/deployment-routes/${routeId}:disable`,
+      idempotencyKey: "idem-disable-route-001",
       ifMatch: `route-set-${currentVersionNo}`,
-      body: {
-        route_set_id: routeSetId,
-        agent_revision_id: agentRevisionId,
-        runtime_revision_id: runtimeRevisionId,
-        traffic_weight: 10000,
-        priority_no: 1,
-        route_state: "enabled",
-      },
+      body: { reason: "人工停用" },
     });
 
-    const response = await updateRoutePUT(request, {
-      params: Promise.resolve({ route_id: routeId }),
+    const response = await disableRoutePOST(request, {
+      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.etag).toBe(`route-set-${currentVersionNo + 1}`);
     expect(body.route_set_version_no).toBe(currentVersionNo + 1);
-    expect(body.traffic_weight).toBe(10000);
-    const etag = response.headers.get("etag");
-    expect(etag).toBeDefined();
-    expect(etag).toContain(`route-set-${currentVersionNo + 1}`);
+    expect(body.route_revision_id).toBe(currentActivation?.routeRevisionId);
+    expect(body.previous_route_activation_id).toBe(currentActivation?.id);
+    expect(body.route_activation_id).not.toBe(currentActivation?.id);
+    expect(body.activation_state).toBe("disabled");
+    expect(response.headers.get("etag")).toContain(`route-set-${currentVersionNo + 1}`);
+
+    const revisions = await db
+      .select({ id: routeRevision.id })
+      .from(routeRevision)
+      .where(eq(routeRevision.routeId, routeId));
+    const activations = await db
+      .select({ id: routeActivation.id })
+      .from(routeActivation)
+      .where(eq(routeActivation.routeId, routeId));
+    expect(revisions).toHaveLength(1);
+    expect(activations).toHaveLength(2);
   });
 
-  it("提交后使用相同 Idempotency-Key 重试返回原结果，不创建重复激活", async () => {
-    const requestBody = {
-      route_set_id: routeSetId,
-      agent_revision_id: agentRevisionId,
-      runtime_revision_id: runtimeRevisionId,
-      traffic_weight: 9000,
-      priority_no: 1,
-      route_state: "enabled",
-    };
+  it("相同 Idempotency-Key 重试返回原结果，不创建第三条 Activation", async () => {
+    const requestBody = { reason: "人工停用" };
     const buildRequest = () =>
       buildV11Request({
         audience: "admin",
-        method: "PUT",
-        path: `/deployment-routes/${routeId}`,
-        idempotencyKey: "idem-put-route-retry-001",
+        method: "POST",
+        path: `/deployment-routes/${routeId}:disable`,
+        idempotencyKey: "idem-disable-route-retry-001",
         ifMatch: `route-set-${currentVersionNo}`,
         body: requestBody,
       });
 
-    const first = await updateRoutePUT(buildRequest(), {
-      params: Promise.resolve({ route_id: routeId }),
+    const first = await disableRoutePOST(buildRequest(), {
+      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
     });
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as Record<string, unknown>;
     expect(firstBody.route_revision_id).toBeTruthy();
     expect(firstBody.route_activation_id).toBeTruthy();
 
-    const replay = await updateRoutePUT(buildRequest(), {
-      params: Promise.resolve({ route_id: routeId }),
+    const replay = await disableRoutePOST(buildRequest(), {
+      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
     });
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
@@ -1263,31 +1266,29 @@ describe("PUT /admin/api/v1/deployment-routes/{route_id}", () => {
       audience: "admin",
       callerType: "user",
       callerId: userIdentityId,
-      commandScope: `route.update:${routeId}`,
-      idempotencyKey: "idem-put-route-retry-001",
+      commandScope: `route.disable:${routeId}`,
+      idempotencyKey: "idem-disable-route-retry-001",
     });
     expect(idempotency?.processingState).toBe("completed");
     expect(idempotency?.responseRedactedJson).toBe(JSON.stringify(firstBody));
+    const activations = await db
+      .select({ id: routeActivation.id })
+      .from(routeActivation)
+      .where(eq(routeActivation.routeId, routeId));
+    expect(activations).toHaveLength(2);
   });
 
   it("缺少 If-Match → 400 REQUEST_SCHEMA_INVALID", async () => {
     const request = buildV11Request({
       audience: "admin",
-      method: "PUT",
-      path: `/deployment-routes/${routeId}`,
-      idempotencyKey: "idem-put-no-ifmatch-001",
-      body: {
-        route_set_id: routeSetId,
-        agent_revision_id: agentRevisionId,
-        runtime_revision_id: runtimeRevisionId,
-        traffic_weight: 8000,
-        priority_no: 1,
-        route_state: "enabled",
-      },
+      method: "POST",
+      path: `/deployment-routes/${routeId}:disable`,
+      idempotencyKey: "idem-disable-no-ifmatch-001",
+      body: { reason: "人工停用" },
     });
 
-    const response = await updateRoutePUT(request, {
-      params: Promise.resolve({ route_id: routeId }),
+    const response = await disableRoutePOST(request, {
+      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
     });
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: { code: string } };
@@ -1297,22 +1298,15 @@ describe("PUT /admin/api/v1/deployment-routes/{route_id}", () => {
   it("ETag 不匹配 → 412 ETAG_MISMATCH", async () => {
     const request = buildV11Request({
       audience: "admin",
-      method: "PUT",
-      path: `/deployment-routes/${routeId}`,
-      idempotencyKey: "idem-put-etag-mismatch-001",
+      method: "POST",
+      path: `/deployment-routes/${routeId}:disable`,
+      idempotencyKey: "idem-disable-etag-mismatch-001",
       ifMatch: "route-set-999",
-      body: {
-        route_set_id: routeSetId,
-        agent_revision_id: agentRevisionId,
-        runtime_revision_id: runtimeRevisionId,
-        traffic_weight: 8000,
-        priority_no: 1,
-        route_state: "enabled",
-      },
+      body: { reason: "人工停用" },
     });
 
-    const response = await updateRoutePUT(request, {
-      params: Promise.resolve({ route_id: routeId }),
+    const response = await disableRoutePOST(request, {
+      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
     });
     expect(response.status).toBe(412);
     const body = (await response.json()) as { error: { code: string } };
@@ -1323,24 +1317,17 @@ describe("PUT /admin/api/v1/deployment-routes/{route_id}", () => {
     const crossTenantRequestId = "req-cross-tenant-route";
     const request = buildV11Request({
       audience: "admin",
-      method: "PUT",
-      path: "/deployment-routes/random-uuid",
+      method: "POST",
+      path: "/deployment-routes/random-uuid:disable",
       requestId: crossTenantRequestId,
-      idempotencyKey: "idem-put-cross-tenant-001",
+      idempotencyKey: "idem-disable-cross-tenant-001",
       ifMatch: `route-set-${currentVersionNo}`,
-      body: {
-        route_set_id: routeSetId,
-        agent_revision_id: agentRevisionId,
-        runtime_revision_id: runtimeRevisionId,
-        traffic_weight: 8000,
-        priority_no: 1,
-        route_state: "enabled",
-      },
+      body: { reason: "人工停用" },
     });
 
     const randomRouteId = "99999999-9999-4999-8999-999999999999";
-    const response = await updateRoutePUT(request, {
-      params: Promise.resolve({ route_id: randomRouteId }),
+    const response = await disableRoutePOST(request, {
+      params: Promise.resolve({ "route_id:disable": `${randomRouteId}:disable` }),
     });
     await assertCrossTenantHidden(response, crossTenantRequestId);
   });

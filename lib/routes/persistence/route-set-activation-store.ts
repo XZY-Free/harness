@@ -170,7 +170,7 @@ export interface RouteSetActivationSession {
  tenantId: string;
  eventKey: string;
  /** : 事件类型 — 必须来自合同，aggregateType 由合同推导。 */
- eventType: "route_set.activated";
+ eventType: "route_set.activated" | "route.disabled";
  aggregateId: string;
  /** : 聚合版本号。 */
  aggregateVersion: number;

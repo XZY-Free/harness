@@ -46,8 +46,8 @@ import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/sch
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
-  upsertDeploymentRoute,
 } from "@/lib/routes/application/deployment-route-service";
+import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { InvocationAlreadyTerminalError, InvocationNotFoundError } from "@/lib/runtime/errors";
 import { createAttempt } from "@/lib/runtime/invocation-attempt-queries";
 import {
@@ -272,7 +272,7 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     routeScopeKey: "default",
     routeScopeJson: { networkZone: "internal" },
   });
-  const routeResult = await upsertDeploymentRoute({
+  const routeResult = await activateSingleRouteForTest({
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,

@@ -6,11 +6,12 @@
  */
 
 import type {
-  DeploymentRouteSetDTO,
-  DeploymentRouteDTO,
   ActivateRouteSetRequest,
   ActivateRouteSetResponse,
+  DeploymentRouteDTO,
+  DeploymentRouteSetDTO,
   DisableRouteRequest,
+  DisableRouteResponse,
 } from "../contracts/route";
 import type { ApiClientConfig } from "./agents";
 
@@ -29,7 +30,11 @@ export interface RouteApiClient {
     opts: { idempotencyKey: string; ifMatch: string },
   ): Promise<ActivateRouteSetResponse>;
   /** 禁用 Route — 调用正式 DisableRoute。 */
-  disableRoute(routeId: string, body: DisableRouteRequest): Promise<DeploymentRouteDTO>;
+  disableRoute(
+    routeId: string,
+    body: DisableRouteRequest,
+    opts: { idempotencyKey: string; ifMatch: string },
+  ): Promise<DisableRouteResponse>;
 }
 
 /** 创建 Route API Client。 */
@@ -53,7 +58,9 @@ export function createRouteApiClient(config: ApiClientConfig): RouteApiClient {
     getRouteSet: (routeSetId) =>
       request<DeploymentRouteSetDTO>(`/admin/api/v1/deployment-route-sets/${routeSetId}`),
     listRoutes: (routeSetId) =>
-      request<{ items: DeploymentRouteDTO[]; total: number }>(`/admin/api/v1/deployment-route-sets/${routeSetId}/routes`),
+      request<{ items: DeploymentRouteDTO[]; total: number }>(
+        `/admin/api/v1/deployment-route-sets/${routeSetId}/routes`,
+      ),
     getRoute: (routeId) =>
       request<DeploymentRouteDTO>(`/admin/api/v1/deployment-routes/${routeId}`),
     activateRouteSet: (routeSetId, body, opts) =>
@@ -68,10 +75,14 @@ export function createRouteApiClient(config: ApiClientConfig): RouteApiClient {
           },
         },
       ),
-    disableRoute: (routeId, body) =>
-      request<DeploymentRouteDTO>(`/admin/api/v1/deployment-routes/${routeId}:disable`, {
+    disableRoute: (routeId, body, opts) =>
+      request<DisableRouteResponse>(`/admin/api/v1/deployment-routes/${routeId}:disable`, {
         method: "POST",
         body: JSON.stringify(body),
+        headers: {
+          "Idempotency-Key": opts.idempotencyKey,
+          "If-Match": opts.ifMatch,
+        },
       }),
   };
 }

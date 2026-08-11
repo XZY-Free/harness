@@ -55,14 +55,13 @@ import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { invocationTable } from "@/lib/persistence/schema/runtime";
-import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
+import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import {
@@ -70,27 +69,15 @@ import {
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
 import {
-  type DeploymentRouteRow,
-  type DeploymentRouteSetRow,
-  type RouteState,
-  type UpsertDeploymentRouteResult,
   createRouteSet,
   getRouteSetById,
-  listRoutesBySet,
 } from "@/lib/routes/application/deployment-route-service";
+import { activateSingleRouteForTest as activateRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
+import { createDisableRoute } from "@/lib/routes/application/disable-route";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
-import {
-  type ActivateRouteSetResult,
-  RouteSetRequiresAtomicUpdateError,
-} from "@/lib/routes/application/activate-route-set";
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
-import type {
-  DesiredRoute,
-  RouteSetActivationSession,
-  RouteSetActivationStore,
-} from "@/lib/routes/persistence/route-set-activation-store";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
@@ -443,7 +430,7 @@ async function seedEndToEndFixture(suffix: string) {
     routeScopeJson: { networkZone: "internal" },
   });
 
-  const upsertResult = await upsertDeploymentRouteForTest({
+  const upsertResult = await activateRouteForTest({
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
@@ -591,129 +578,7 @@ async function expectBindingAbsent(tenantId: string, invocationId: string): Prom
 const activateRouteSetForTest = createActivateRouteSet({
   store: mysqlRouteSetActivationStore,
 });
-
-// ─── 辅助：upsertDeploymentRouteForTest（使用 eligible store 绕过 Phase 1 stub）─
-
-function existingRouteToDesired(route: DeploymentRouteRow): DesiredRoute {
-  return {
-    routeId: route.id,
-    routeKey: route.routeKey ?? "primary",
-    routeGroupId: "primary",
-    agentRevisionId: route.agentRevisionId,
-    runtimeRevisionId: route.runtimeRevisionId,
-    policyRevisionId: null,
-    trafficWeight: route.trafficWeight,
-    priorityNo: route.priorityNo,
-    effectiveFrom: route.effectiveFrom,
-    effectiveUntil: route.effectiveUntil,
-    eligibilityConditions: {},
-    activationState: route.routeState === "disabled" ? "disabled" : "active",
-  };
-}
-
-async function upsertDeploymentRouteForTest(params: {
-  tenantId: string;
-  routeSetId: string;
-  routeId?: string;
-  routeSetExpectedVersionNo: number;
-  agentRevisionId: string;
-  runtimeRevisionId: string;
-  trafficWeight: number;
-  priorityNo?: number;
-  routeState?: RouteState;
-  effectiveFrom?: Date | null;
-  effectiveUntil?: Date | null;
-  actor: AuditActor;
-  requestId?: string;
-  idempotencyKey?: string;
-}): Promise<UpsertDeploymentRouteResult> {
-  const currentRoutes = await listRoutesBySet(params.routeSetId);
-  const otherRoutes = currentRoutes.filter((r) => r.id !== params.routeId);
-  if (otherRoutes.length > 0) {
-    throw new RouteSetRequiresAtomicUpdateError(
-      params.routeSetId,
-      "Upsert 接口仅支持单 Route 简单 RouteSet，复杂 RouteSet 请使用 PUT activation",
-    );
-  }
-
-  const desiredRoutes = currentRoutes
-    .filter((r) => r.id !== params.routeId)
-    .map(existingRouteToDesired);
-
-  const targetActivationState: "active" | "disabled" =
-    params.routeState === "disabled" ? "disabled" : "active";
-  desiredRoutes.push({
-    routeId: params.routeId,
-    routeKey: "primary",
-    routeGroupId: "primary",
-    agentRevisionId: params.agentRevisionId,
-    runtimeRevisionId: params.runtimeRevisionId,
-    policyRevisionId: null,
-    trafficWeight: params.trafficWeight,
-    priorityNo: params.priorityNo ?? 0,
-    effectiveFrom: params.effectiveFrom ?? null,
-    effectiveUntil: params.effectiveUntil ?? null,
-    eligibilityConditions: {},
-    activationState: targetActivationState,
-  });
-
-  const result = await activateRouteSetForTest({
-    tenantId: params.tenantId,
-    routeSetId: params.routeSetId,
-    expectedVersionNo: params.routeSetExpectedVersionNo,
-    desiredRoutes,
-    actor: params.actor,
-    reason:
-      targetActivationState === "disabled"
-        ? "DeploymentRoute 禁用"
-        : `DeploymentRoute 更新（${params.routeState ?? "enabled"}，权重 ${params.trafficWeight} 基点）`,
-    requestId: params.requestId ?? randomUUID(),
-    idempotencyKey: params.idempotencyKey ?? `route-activate:${randomUUID()}`,
-  });
-
-  const targetRouteId = params.routeId ?? result.activations[0]?.routeId;
-  if (!targetRouteId) {
-    throw new Error("upsertDeploymentRouteForTest: 无法确定目标 Route ID");
-  }
-
-  const activation = result.activations.find((a) => a.routeId === targetRouteId);
-  if (!activation) {
-    throw new Error(
-      `upsertDeploymentRouteForTest: 目标 Route ${targetRouteId} 未在激活结果中`,
-    );
-  }
-
-  const [routeRow] = await db
-    .select()
-    .from(deploymentRouteTable)
-    .where(eq(deploymentRouteTable.id, targetRouteId))
-    .limit(1);
-  if (!routeRow) {
-    throw new Error(
-      `upsertDeploymentRouteForTest: Route 行未找到（id=${targetRouteId}）`,
-    );
-  }
-
-  const [routeSetRow] = await db
-    .select()
-    .from(deploymentRouteSetTable)
-    .where(eq(deploymentRouteSetTable.id, result.routeSetId))
-    .limit(1);
-  if (!routeSetRow) {
-    throw new Error("upsertDeploymentRouteForTest: RouteSet 行未找到");
-  }
-
-  return {
-    route: routeRow,
-    routeSet: routeSetRow,
-    routeRevisionId: activation.routeRevisionId,
-    routeActivationId: activation.routeActivationId,
-    routeGroupId: activation.routeGroupId,
-    etag: `route-set-${result.routeSetVersionNo}`,
-    auditEventId: result.auditEventId,
-    affectsNewInvocationsOnly: true,
-  };
-}
+const disableRouteForTest = createDisableRoute({ store: mysqlRouteSetActivationStore });
 
 // ═══════════════════════════════════════════════════════════
 // 场景 1：真实签名 Artifact Attestation 通过
@@ -1637,7 +1502,7 @@ describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", ()
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
-    const nextRoute = await upsertDeploymentRouteForTest({
+    const nextRoute = await activateRouteForTest({
       tenantId: fixture.tenantId,
       routeSetId: fixture.routeSet.id,
       routeSetExpectedVersionNo: 2,
@@ -1675,19 +1540,17 @@ describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", ()
     );
     expect(frozenFromDatabase).toEqual(binding);
 
-    const disabledRoute = await upsertDeploymentRouteForTest({
+    const disabledRoute = await disableRouteForTest({
       tenantId: fixture.tenantId,
       routeSetId: fixture.routeSet.id,
-      routeSetExpectedVersionNo: 2,
       routeId: fixture.route.id,
-      agentRevisionId: fixture.agentRevision.id,
-      runtimeRevisionId: fixture.runtimeRevision.id,
-      trafficWeight: 0,
-      priorityNo: 1,
-      routeState: "disabled",
+      expectedVersionNo: 2,
       actor: { tenantId: fixture.tenantId, actorType: "service", actorId: "test-disabler" },
+      reason: "验收测试禁用 Route",
+      requestId: randomUUID(),
+      idempotencyKey: `scenario16-disable:${randomUUID()}`,
     });
-    expect(disabledRoute.routeRevisionId).not.toBe(binding.routeRevisionId);
+    expect(disabledRoute.routeRevisionId).toBe(binding.routeRevisionId);
     expect(disabledRoute.routeActivationId).not.toBe(binding.routeActivationId);
 
     const afterDisable = await getExecutionBindingByInvocation(fixture.tenantId, invocationId);
@@ -1917,7 +1780,7 @@ describe("场景19：Route Key 在 Revision 变化后保持不变", () => {
     const routeSetBefore = await getRouteSetById(fixture.tenantId, fixture.routeSet.id);
     const expectedVersion = routeSetBefore?.versionNo ?? 1;
 
-    await upsertDeploymentRouteForTest({
+    await activateRouteForTest({
       tenantId: fixture.tenantId,
       routeSetId: fixture.routeSet.id,
       routeSetExpectedVersionNo: expectedVersion,

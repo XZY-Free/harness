@@ -111,3 +111,15 @@ export interface ActivateRouteSetResponse {
 export interface DisableRouteRequest {
   reason: string;
 }
+
+/** 禁用 Route 响应。禁用只追加 Activation，不创建新 Revision。 */
+export interface DisableRouteResponse {
+  route_id: string;
+  route_set_id: string;
+  route_set_version_no: number;
+  route_revision_id: string;
+  route_activation_id: string;
+  previous_route_activation_id: string;
+  activation_state: "disabled";
+  affects_new_invocations_only: true;
+}
