@@ -29,6 +29,10 @@ import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
+import {
+ publicationRecord,
+ withdrawalRecord,
+} from "@/lib/publications/persistence/publication-record";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { and, desc, eq } from "drizzle-orm";
@@ -287,7 +291,10 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
  throw evidenceError("RuntimeRevision 发布状态、Artifact 或 Config Digest 不一致");
  }
 
- // F. PolicyRevision（FOR UPDATE）— 状态一致性
+ // F. 冻结 Publication → Withdrawal（FOR UPDATE）— 严格串行、精确全集
+ await lockAndVerifyPublications(tx, input);
+
+ // G. PolicyRevision（FOR UPDATE）— 状态一致性
  if (input.policyRevisionId) {
  const [policy] = await tx
  .select({ state: policyRevisionTable.revisionState })
@@ -300,6 +307,139 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
  }
  }
  return { agentRevision, runtimeRevision };
+}
+
+async function lockAndVerifyPublications(
+ tx: Transaction,
+ input: StoreExecutionBindingInput,
+): Promise<void> {
+ const evidence = input.controlPlaneEvidence;
+
+ const [agentPublication] = await tx
+ .select({
+ id: publicationRecord.id,
+ tenantId: publicationRecord.tenantId,
+ subjectType: publicationRecord.subjectType,
+ subjectRevisionId: publicationRecord.subjectRevisionId,
+ attestationIds: publicationRecord.attestationIds,
+ conformanceRunId: publicationRecord.conformanceRunId,
+ })
+ .from(publicationRecord)
+ .where(eq(publicationRecord.id, evidence.agentPublicationRecordId))
+ .limit(1)
+ .for("update");
+ const [agentWithdrawal] = await tx
+ .select({ id: withdrawalRecord.id })
+ .from(withdrawalRecord)
+ .where(eq(withdrawalRecord.publicationRecordId, evidence.agentPublicationRecordId))
+ .limit(1)
+ .for("update");
+ validateFrozenPublicationAuthority({
+ publication: agentPublication ?? null,
+ withdrawal: agentWithdrawal ?? null,
+ expected: {
+ publicationRecordId: evidence.agentPublicationRecordId,
+ tenantId: input.tenantId,
+ subjectType: "agent_revision",
+ subjectRevisionId: input.agentRevisionId,
+ attestationIds: evidence.agentAttestationIds,
+ conformanceRunId: null,
+ },
+ });
+
+ const [runtimePublication] = await tx
+ .select({
+ id: publicationRecord.id,
+ tenantId: publicationRecord.tenantId,
+ subjectType: publicationRecord.subjectType,
+ subjectRevisionId: publicationRecord.subjectRevisionId,
+ attestationIds: publicationRecord.attestationIds,
+ conformanceRunId: publicationRecord.conformanceRunId,
+ })
+ .from(publicationRecord)
+ .where(eq(publicationRecord.id, evidence.runtimePublicationRecordId))
+ .limit(1)
+ .for("update");
+ const [runtimeWithdrawal] = await tx
+ .select({ id: withdrawalRecord.id })
+ .from(withdrawalRecord)
+ .where(eq(withdrawalRecord.publicationRecordId, evidence.runtimePublicationRecordId))
+ .limit(1)
+ .for("update");
+ validateFrozenPublicationAuthority({
+ publication: runtimePublication ?? null,
+ withdrawal: runtimeWithdrawal ?? null,
+ expected: {
+ publicationRecordId: evidence.runtimePublicationRecordId,
+ tenantId: input.tenantId,
+ subjectType: "runtime_revision",
+ subjectRevisionId: input.runtimeRevisionId,
+ attestationIds: evidence.runtimeAttestationIds,
+ conformanceRunId: evidence.conformanceRunId,
+ },
+ });
+}
+
+type FrozenPublicationRow = {
+ id: string;
+ tenantId: string;
+ subjectType: "agent_revision" | "runtime_revision";
+ subjectRevisionId: string;
+ attestationIds: string[];
+ conformanceRunId: string | null;
+};
+
+type FrozenPublicationExpectation = {
+ publicationRecordId: string;
+ tenantId: string;
+ subjectType: "agent_revision" | "runtime_revision";
+ subjectRevisionId: string;
+ attestationIds: string[];
+ conformanceRunId: string | null;
+};
+
+export function validateFrozenPublicationAuthority(input: {
+ publication: FrozenPublicationRow | null;
+ withdrawal: { id: string } | null;
+ expected: FrozenPublicationExpectation;
+}): void {
+ const { publication, withdrawal, expected } = input;
+ if (
+ !publication ||
+ publication.id !== expected.publicationRecordId ||
+ publication.tenantId !== expected.tenantId ||
+ publication.subjectType !== expected.subjectType ||
+ publication.subjectRevisionId !== expected.subjectRevisionId
+ ) {
+ throw evidenceError("冻结 Publication 与租户、主体或 Revision 不一致");
+ }
+ if (withdrawal) {
+ throw evidenceError(`冻结 Publication ${publication.id} 已撤回`);
+ }
+ if (!areExactNonEmptyIdSets(publication.attestationIds, expected.attestationIds)) {
+ throw evidenceError("冻结 Publication 的 Attestation IDs 不是当前精确全集");
+ }
+ if (publication.conformanceRunId !== expected.conformanceRunId) {
+ throw evidenceError("冻结 Publication 的 ConformanceRun 不一致");
+ }
+}
+
+function areExactNonEmptyIdSets(current: string[], frozen: string[]): boolean {
+ if (current.length === 0 || frozen.length === 0) return false;
+ if (
+ current.some((id) => id.length === 0) ||
+ frozen.some((id) => id.length === 0) ||
+ new Set(current).size !== current.length ||
+ new Set(frozen).size !== frozen.length
+ ) {
+ return false;
+ }
+ const sortedCurrent = [...current].sort();
+ const sortedFrozen = [...frozen].sort();
+ return (
+ sortedCurrent.length === sortedFrozen.length &&
+ sortedCurrent.every((id, index) => id === sortedFrozen[index])
+ );
 }
 
 export function toExecutionBinding(

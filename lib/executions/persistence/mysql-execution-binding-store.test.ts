@@ -1,6 +1,7 @@
 import {
  EXECUTION_BINDING_AUTHORITY_LOCK_ORDER,
  toExecutionBinding,
+ validateFrozenPublicationAuthority,
 } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -88,5 +89,88 @@ describe("ExecutionBinding authority final validation", () => {
  const source = readFileSync(new URL("./mysql-execution-binding-store.ts", import.meta.url), "utf8");
  expect(source).not.toContain("activeRouteRevisionId");
  expect(source).not.toContain("Promise.all(");
+ });
+
+ it("只接受租户、主体、修订、证明全集和 ConformanceRun 精确一致的冻结 Publication", () => {
+ const base = {
+ publication: {
+ id: "publication-1",
+ tenantId: "tenant-1",
+ subjectType: "runtime_revision" as const,
+ subjectRevisionId: "runtime-revision-1",
+ attestationIds: ["attestation-b", "attestation-a"],
+ conformanceRunId: "conformance-run-1",
+ },
+ withdrawal: null,
+ expected: {
+ publicationRecordId: "publication-1",
+ tenantId: "tenant-1",
+ subjectType: "runtime_revision" as const,
+ subjectRevisionId: "runtime-revision-1",
+ attestationIds: ["attestation-a", "attestation-b"],
+ conformanceRunId: "conformance-run-1",
+ },
+ };
+
+ expect(() => validateFrozenPublicationAuthority(base)).not.toThrow();
+ expect(() =>
+ validateFrozenPublicationAuthority({
+ ...base,
+ publication: { ...base.publication, tenantId: "other-tenant" },
+ }),
+ ).toThrow(/Publication/);
+ expect(() =>
+ validateFrozenPublicationAuthority({
+ ...base,
+ publication: { ...base.publication, attestationIds: ["attestation-a"] },
+ }),
+ ).toThrow(/Attestation/);
+ expect(() =>
+ validateFrozenPublicationAuthority({
+ ...base,
+ publication: { ...base.publication, conformanceRunId: "other-run" },
+ }),
+ ).toThrow(/ConformanceRun/);
+ expect(() =>
+ validateFrozenPublicationAuthority({
+ ...base,
+ withdrawal: { id: "withdrawal-1" },
+ }),
+ ).toThrow(/撤回/);
+ });
+
+ it("拒绝空、重复或非精确全集的 Attestation IDs", () => {
+ const input = {
+ publication: {
+ id: "publication-1",
+ tenantId: "tenant-1",
+ subjectType: "agent_revision" as const,
+ subjectRevisionId: "agent-revision-1",
+ attestationIds: ["attestation-1"],
+ conformanceRunId: null,
+ },
+ withdrawal: null,
+ expected: {
+ publicationRecordId: "publication-1",
+ tenantId: "tenant-1",
+ subjectType: "agent_revision" as const,
+ subjectRevisionId: "agent-revision-1",
+ attestationIds: ["attestation-1"],
+ conformanceRunId: null,
+ },
+ };
+
+ expect(() =>
+ validateFrozenPublicationAuthority({
+ ...input,
+ expected: { ...input.expected, attestationIds: [] },
+ }),
+ ).toThrow(/Attestation/);
+ expect(() =>
+ validateFrozenPublicationAuthority({
+ ...input,
+ publication: { ...input.publication, attestationIds: ["attestation-1", "attestation-1"] },
+ }),
+ ).toThrow(/Attestation/);
  });
 });
