@@ -47,6 +47,7 @@ export type {
   ArtifactKind,
   AttestationState,
   ArtifactAttestationDTO,
+  ArtifactAttestationListParams,
   ArtifactAttestationListResponse,
   VerifyAttestationRequest,
   VerifyAttestationResultDTO,

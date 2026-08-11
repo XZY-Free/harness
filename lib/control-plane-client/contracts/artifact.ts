@@ -9,34 +9,47 @@
 export type AttestationFormat = "in_toto_dsse";
 
 /** Artifact 类型。 */
-export type ArtifactKind = "agent" | "runtime";
+export type ArtifactKind =
+  | "agent_revision"
+  | "runtime_revision"
+  | "skill_package"
+  | "tool_provider"
+  | "policy_bundle";
 
 /** Attestation 状态 — 由验证流程决定。 */
-export type AttestationState = "verified" | "pending" | "failed" | "revoked";
+export type AttestationState = "verified" | "failed";
 
 /** Attestation 详情。 */
 export interface ArtifactAttestationDTO {
   id: string;
   tenant_id: string;
-  subject_ref: string;
-  subject_digest: string;
+  artifact_id: string | null;
   artifact_type: ArtifactKind;
-  attestation_format: AttestationFormat;
-  attestation_state: AttestationState;
-  key_id: string;
-  runner_identity: string;
-  predicate_type: string;
-  /** 签名验证结果 — verified 时保证完整信任链。 */
-  signature_valid: boolean;
-  /** Provenance Predicate 关键字段摘要。 */
-  builder_identity: string | null;
-  source_revision: string | null;
+  artifact_revision_id: string;
+  artifact_digest: string;
+  dsse_envelope_ref: string | null;
   sbom_ref: string | null;
-  sbom_digest: string | null;
   provenance_ref: string | null;
-  provenance_digest: string | null;
-  /** 撤销信息。 */
+  builder_identity: string | null;
+  verification_state: AttestationState;
+  policy_revision_id: string | null;
+  source_revision: string | null;
+  build_pipeline: string | null;
+  dependency_lock_file_hash: string | null;
+  build_time: string | null;
+  scan_summary: unknown;
+  failure_code: string | null;
+  verified_at: string | null;
+  attestation_format: AttestationFormat;
+  statement_type: string | null;
+  predicate_type: string | null;
+  bundle_digest: string | null;
+  subject_name: string | null;
+  subject_digest: string | null;
+  verification_engine: string | null;
+  verification_engine_version: string | null;
   revoked_at: string | null;
+  revoked_by: string | null;
   revocation_reason: string | null;
   created_at: string;
 }
@@ -44,23 +57,38 @@ export interface ArtifactAttestationDTO {
 /** Attestation 列表响应。 */
 export interface ArtifactAttestationListResponse {
   items: ArtifactAttestationDTO[];
+  next_cursor: string | null;
+  has_more: boolean;
   total: number;
 }
 
 /** 验证 Attestation 请求。 */
 export interface VerifyAttestationRequest {
-  dsse_envelope_b64: string;
-  subject_ref: string;
-  subject_digest: string;
   artifact_type: ArtifactKind;
+  artifact_revision_id: string;
+  artifact_digest: string;
+  dsse_envelope_ref: string;
+  builder_identity: string;
+  policy_revision_id?: string;
 }
 
 /** 验证 Attestation 结果。 */
 export interface VerifyAttestationResultDTO {
   attestation_id: string;
-  attestation_state: AttestationState;
-  signature_valid: boolean;
-  builder_identity: string;
-  sbom_ref: string | null;
-  provenance_ref: string | null;
+  artifact_revision_id: string;
+  artifact_digest: string;
+  verification_state: AttestationState;
+  builder_identity: string | null;
+  policy_revision_id: string | null;
+  verified_at: string | null;
+}
+
+export interface ArtifactAttestationListParams {
+  artifact_type?: ArtifactKind;
+  artifact_revision_id?: string;
+  artifact_digest?: string;
+  verification_state?: AttestationState;
+  revoked?: boolean;
+  limit?: number;
+  cursor?: string;
 }

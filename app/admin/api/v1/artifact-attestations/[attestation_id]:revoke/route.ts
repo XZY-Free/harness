@@ -1,4 +1,12 @@
 import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
+import { projectArtifactAttestation } from "@/lib/artifacts/application/artifact-admin-projection";
+import {
   AttestationAlreadyRevokedError,
   AttestationNotFoundError,
   revokeAttestation,
@@ -38,13 +46,6 @@ import {
   actorFromPrincipal,
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -104,19 +105,9 @@ export async function POST(
       requestId,
     );
 
-    return apiSuccess(
-      {
-        id: updated.id,
-        artifact_type: updated.artifactType,
-        artifact_revision_id: updated.artifactRevisionId,
-        artifact_digest: updated.artifactDigest,
-        verification_state: updated.verificationState,
-        revoked_at: updated.revokedAt?.toISOString() ?? null,
-        revoked_by: updated.revokedBy,
-        revocation_reason: updated.revocationReason,
-      },
-      { headers: { [REQUEST_ID_HEADER]: requestId } },
-    );
+    return apiSuccess(projectArtifactAttestation(updated), {
+      headers: { [REQUEST_ID_HEADER]: requestId },
+    });
   } catch (err) {
     if (err instanceof AttestationNotFoundError) {
       return resourceNotFound(requestId, err.message);

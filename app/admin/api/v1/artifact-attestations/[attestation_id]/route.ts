@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+} from "@/lib/admin/route-helpers";
+import { projectArtifactAttestation } from "@/lib/artifacts/application/artifact-admin-projection";
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 /**
  * GET /admin/api/v1/artifact-attestations/{attestation_id} — 按 id 查询制品证明（S12-W04）。
@@ -16,12 +23,6 @@ import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attesta
  * - 不存在或跨租户 → 404 NOT_FOUND
  */
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -56,30 +57,7 @@ export async function GET(
   );
   if (!scopeResult.ok) return scopeResult.response;
 
-  const projected = {
-    id: attestation.id,
-    tenant_id: attestation.tenantId,
-    artifact_type: attestation.artifactType,
-    artifact_revision_id: attestation.artifactRevisionId,
-    artifact_digest: attestation.artifactDigest,
-    dsse_envelope_ref: attestation.dsseEnvelopeRef,
-    sbom_ref: attestation.sbomRef,
-    provenance_ref: attestation.provenanceRef,
-    builder_identity: attestation.builderIdentity,
-    verification_state: attestation.verificationState,
-    policy_revision_id: attestation.policyRevisionId,
-    source_revision: attestation.sourceRevision,
-    build_pipeline: attestation.buildPipeline,
-    dependency_lock_file_hash: attestation.dependencyLockFileHash,
-    build_time: attestation.buildTime?.toISOString() ?? null,
-    scan_summary: attestation.scanSummaryJson,
-    failure_code: attestation.failureCode,
-    verified_at: attestation.verifiedAt?.toISOString() ?? null,
-    revoked_at: attestation.revokedAt?.toISOString() ?? null,
-    revoked_by: attestation.revokedBy,
-    revocation_reason: attestation.revocationReason,
-    created_at: attestation.createdAt.toISOString(),
-  };
+  const projected = projectArtifactAttestation(attestation);
 
   return apiSuccess(projected, {
     headers: { [REQUEST_ID_HEADER]: requestId },

@@ -1,3 +1,11 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
+import { projectArtifactAttestation } from "@/lib/artifacts/application/artifact-admin-projection";
 import { listAttestations } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 /**
  * GET /admin/api/v1/artifact-attestations — 列出租户内制品证明（S12-W04）。
@@ -19,13 +27,6 @@ import { listAttestations } from "@/lib/artifacts/persistence/artifact-attestati
  */
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import { ARTIFACT_TYPES, VERIFICATION_STATES } from "@/lib/persistence/schema/artifact";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -101,30 +102,7 @@ export async function GET(request: Request): Promise<Response> {
     ...(cursor ? {} : {}),
   });
 
-  const projected = items.map((a) => ({
-    id: a.id,
-    tenant_id: a.tenantId,
-    artifact_type: a.artifactType,
-    artifact_revision_id: a.artifactRevisionId,
-    artifact_digest: a.artifactDigest,
-    dsse_envelope_ref: a.dsseEnvelopeRef,
-    sbom_ref: a.sbomRef,
-    provenance_ref: a.provenanceRef,
-    builder_identity: a.builderIdentity,
-    verification_state: a.verificationState,
-    policy_revision_id: a.policyRevisionId,
-    source_revision: a.sourceRevision,
-    build_pipeline: a.buildPipeline,
-    dependency_lock_file_hash: a.dependencyLockFileHash,
-    build_time: a.buildTime?.toISOString() ?? null,
-    scan_summary: a.scanSummaryJson,
-    failure_code: a.failureCode,
-    verified_at: a.verifiedAt?.toISOString() ?? null,
-    revoked_at: a.revokedAt?.toISOString() ?? null,
-    revoked_by: a.revokedBy,
-    revocation_reason: a.revocationReason,
-    created_at: a.createdAt.toISOString(),
-  }));
+  const projected = items.map(projectArtifactAttestation);
 
   return apiSuccess(
     {
