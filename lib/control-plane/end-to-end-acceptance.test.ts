@@ -64,7 +64,10 @@ import { invocationTable } from "@/lib/persistence/schema/runtime";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
-import { publicationRecord } from "@/lib/publications/persistence/publication-record";
+import {
+  publicationRecord,
+  withdrawalRecord,
+} from "@/lib/publications/persistence/publication-record";
 import {
   type DeploymentRouteRow,
   type DeploymentRouteSetRow,
@@ -76,6 +79,7 @@ import {
 } from "@/lib/routes/application/deployment-route-service";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
 import {
   type ActivateRouteSetResult,
   RouteSetRequiresAtomicUpdateError,
@@ -111,8 +115,9 @@ import {
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
-import { withdrawRuntimeRevision } from "@/lib/runtime/test-support/withdraw-runtime-revision";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
+import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { createHostedProvisioningSaga } from "@/lib/runtime/provisioning/hosted-provisioning-saga";
 import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
@@ -122,7 +127,7 @@ import { mysqlHostedProvisioningRequestStore } from "@/lib/runtime/persistence/m
 import { hostedProvisioningRequestTable } from "@/lib/runtime/persistence/hosted-provisioning-request-record";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-routes.test.ts 一致）。
@@ -497,6 +502,78 @@ async function seedInvocation(tenantId: string, invocationId: string): Promise<v
     executionState: "queued",
     versionNo: 1,
   });
+}
+
+async function resolveFrozenRouteForBinding(
+  fixture: Awaited<ReturnType<typeof seedEndToEndFixture>>,
+  threadId: string,
+): Promise<RouteResolution> {
+  await createBuildRouteEligibility({ store: mysqlRouteEligibilityStore })({
+    tenantId: fixture.tenantId,
+    routeId: fixture.route.id,
+  });
+
+  const outcome = await createResolveRoute({
+    store: mysqlRouteEligibilityResolutionStore,
+  })({
+    tenantId: fixture.tenantId,
+    agentId: fixture.agent.id,
+    routeScopeKey: "prod",
+    businessKey: { threadId },
+  });
+  if (outcome.status !== "resolved") {
+    throw new Error(`测试前置 Route Resolution 失败: ${outcome.reason}`);
+  }
+  if (!/^sha256:[0-9a-f]{64}$/.test(outcome.resolution.resolutionInputDigest)) {
+    throw new Error("Route Resolution 缺少有效 resolutionInputDigest");
+  }
+  if (
+    !Number.isInteger(outcome.resolution.projectionVersionNo) ||
+    outcome.resolution.projectionVersionNo === undefined ||
+    outcome.resolution.projectionVersionNo < 0
+  ) {
+    throw new Error("Route Resolution 缺少有效 projectionVersionNo");
+  }
+  return outcome.resolution;
+}
+
+async function createBindingFromResolved(params: {
+  tenantId: string;
+  invocationId: string;
+  resolution: RouteResolution;
+}): Promise<ExecutionBinding> {
+  const projectionVersionNo = params.resolution.projectionVersionNo;
+  if (!Number.isInteger(projectionVersionNo) || projectionVersionNo === undefined || projectionVersionNo < 0) {
+    throw new Error("Route Resolution 缺少有效 projectionVersionNo");
+  }
+
+  return createCreateExecutionBinding({ store: mysqlExecutionBindingStore })({
+    invocationId: params.invocationId,
+    tenantId: params.tenantId,
+    agentRevisionId: params.resolution.agentRevisionId,
+    runtimeRevisionId: params.resolution.runtimeRevisionId,
+    deploymentRouteId: params.resolution.deploymentRouteId,
+    modelProvider: "doubao",
+    modelId: "doubao-pro",
+    modelRevisionRef: null,
+    initialEnvironmentLeaseId: null,
+    workspaceBindingId: null,
+    policyRevisionId: params.resolution.policyRevisionId,
+    contextCheckpointId: null,
+    environmentDefinitionRevisionId: null,
+    controlPlaneEvidence: {
+      ...params.resolution.controlPlaneEvidence,
+      routeRevisionId: params.resolution.routeRevisionId,
+      routeActivationId: params.resolution.routeActivationId,
+      routeContentDigest: params.resolution.routeContentDigest,
+      resolutionInputDigest: params.resolution.resolutionInputDigest,
+    },
+    projectionVersionNo,
+  });
+}
+
+async function expectBindingAbsent(tenantId: string, invocationId: string): Promise<void> {
+  expect(await getExecutionBindingByInvocation(tenantId, invocationId)).toBeNull();
 }
 
 // §03: 已删除 mysqlRouteSetActivationStore wrapper — 统一 Reader 直接读取真实证据，
@@ -1162,66 +1239,21 @@ describe("场景8：Employee Turn 只执行一次 Route Resolution", () => {
 describe("场景9：Binding 在同一事务完成最终资格校验", () => {
   it("ExecutionBinding 创建在单事务内完成资格校验 + 行级锁 + Insert", async () => {
     const fixture = await seedEndToEndFixture("binding-tx");
-
-    // 构建投影
-    const buildRouteEligibility = createBuildRouteEligibility({
-      store: mysqlRouteEligibilityStore,
-    });
-    const projResult = await buildRouteEligibility({
-      tenantId: fixture.tenantId,
-      routeId: fixture.route.id,
-    });
-
-    // 准备 Invocation
+    const resolution = await resolveFrozenRouteForBinding(fixture, "thread-binding-e2e");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
-    // 从投影读取控制面证据
-    const resolveRoute = createResolveRoute({
-      store: mysqlRouteEligibilityResolutionStore,
-    });
-    const resolution = await resolveRoute({
+    const binding = await createBindingFromResolved({
       tenantId: fixture.tenantId,
-      agentId: fixture.agent.id,
-      routeScopeKey: "prod",
-      businessKey: { threadId: "thread-binding-e2e" },
-    });
-    expect(resolution.status).toBe("resolved");
-    if (resolution.status !== "resolved") return;
-
-    const createExecutionBinding = createCreateExecutionBinding({
-      store: mysqlExecutionBindingStore,
-    });
-
-    const binding = await createExecutionBinding({
       invocationId,
-      tenantId: fixture.tenantId,
-      agentRevisionId: fixture.agentRevision.id,
-      runtimeRevisionId: fixture.runtimeRevision.id,
-      deploymentRouteId: fixture.route.id,
-      modelProvider: "doubao",
-      modelId: "doubao-pro",
-      modelRevisionRef: null,
-      initialEnvironmentLeaseId: null,
-      workspaceBindingId: null,
-      policyRevisionId: null,
-      contextCheckpointId: null,
-      environmentDefinitionRevisionId: null,
-      controlPlaneEvidence: {
-        ...resolution.resolution.controlPlaneEvidence,
-        routeRevisionId: resolution.resolution.routeRevisionId,
-        routeActivationId: resolution.resolution.routeActivationId,
-        routeContentDigest: resolution.resolution.routeContentDigest,
-        resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      },
-      projectionVersionNo: resolution.resolution.projectionVersionNo ?? projResult.projectionVersionNo,
+      resolution,
     });
 
     // 验证 Binding 包含完整不可变控制面证据
     expect(binding.agentRevisionId).toBe(fixture.agentRevision.id);
     expect(binding.runtimeRevisionId).toBe(fixture.runtimeRevision.id);
-    expect(binding.routeRevisionId).toBe(resolution.resolution.routeRevisionId);
-    expect(binding.routeActivationId).toBe(resolution.resolution.routeActivationId);
+    expect(binding.routeRevisionId).toBe(resolution.routeRevisionId);
+    expect(binding.routeActivationId).toBe(resolution.routeActivationId);
     expect(binding.agentPublicationRecordId).toBeTruthy();
     expect(binding.runtimePublicationRecordId).toBeTruthy();
     expect(binding.conformanceRunId).toBeTruthy();
@@ -1399,56 +1431,14 @@ describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活",
 describe("场景12：最终调度继续使用 Request 冻结的 AgentRevision", () => {
   it("已创建 ExecutionBinding 不因 Agent 新 Revision 发布而变化", async () => {
     const fixture = await seedEndToEndFixture("frozen-revision");
-
-    const buildRouteEligibility = createBuildRouteEligibility({
-      store: mysqlRouteEligibilityStore,
-    });
-    await buildRouteEligibility({
-      tenantId: fixture.tenantId,
-      routeId: fixture.route.id,
-    });
-
+    const resolution = await resolveFrozenRouteForBinding(fixture, "thread-frozen");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
-    const resolveRoute = createResolveRoute({
-      store: mysqlRouteEligibilityResolutionStore,
-    });
-    const resolution = await resolveRoute({
+    const binding = await createBindingFromResolved({
       tenantId: fixture.tenantId,
-      agentId: fixture.agent.id,
-      routeScopeKey: "prod",
-      businessKey: { threadId: "thread-frozen" },
-    });
-    if (resolution.status !== "resolved") {
-      throw new Error("Route 解析失败");
-    }
-
-    const createExecutionBinding = createCreateExecutionBinding({
-      store: mysqlExecutionBindingStore,
-    });
-    const binding = await createExecutionBinding({
       invocationId,
-      tenantId: fixture.tenantId,
-      agentRevisionId: fixture.agentRevision.id,
-      runtimeRevisionId: fixture.runtimeRevision.id,
-      deploymentRouteId: fixture.route.id,
-      modelProvider: "doubao",
-      modelId: "doubao-pro",
-      modelRevisionRef: null,
-      initialEnvironmentLeaseId: null,
-      workspaceBindingId: null,
-      policyRevisionId: null,
-      contextCheckpointId: null,
-      environmentDefinitionRevisionId: null,
-      controlPlaneEvidence: {
-        ...resolution.resolution.controlPlaneEvidence,
-        routeRevisionId: resolution.resolution.routeRevisionId,
-        routeActivationId: resolution.resolution.routeActivationId,
-        routeContentDigest: resolution.resolution.routeContentDigest,
-        resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      },
-      projectionVersionNo: resolution.resolution.projectionVersionNo ?? 0,
+      resolution,
     });
 
     const frozenConfigHash = binding.configHash;
@@ -1489,70 +1479,31 @@ describe("场景12：最终调度继续使用 Request 冻结的 AgentRevision", 
 // ═══════════════════════════════════════════════════════════
 
 describe("场景13：Publication 撤回后拒绝新 Binding", () => {
-  it("AgentRevision 撤回后新 ExecutionBinding 创建失败", async () => {
+  it("Resolver 冻结 Publication 后新增 Withdrawal，旧 Resolution 创建 Binding 必须失败", async () => {
     const fixture = await seedEndToEndFixture("withdrawn-pub");
-
-    const buildRouteEligibility = createBuildRouteEligibility({
-      store: mysqlRouteEligibilityStore,
-    });
-    await buildRouteEligibility({
-      tenantId: fixture.tenantId,
-      routeId: fixture.route.id,
-    });
-
-    // 撤回 AgentRevision
-    await withdrawRevision(fixture.agentRevision.id);
-    const withdrawn = await getRevisionById(fixture.agentRevision.id);
-    expect(withdrawn?.revisionState).toBe("withdrawn");
-
-    // 尝试创建新 Binding → 应失败
+    const resolution = await resolveFrozenRouteForBinding(fixture, "thread-withdrawn");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
-    const resolveRoute = createResolveRoute({
-      store: mysqlRouteEligibilityResolutionStore,
-    });
-    const resolution = await resolveRoute({
-      tenantId: fixture.tenantId,
-      agentId: fixture.agent.id,
-      routeScopeKey: "prod",
-      businessKey: { threadId: "thread-withdrawn" },
-    });
+    // 正式 Withdrawal API 会在真实 MySQL 同事务新增 WithdrawalRecord 并撤回 Revision。
+    await withdrawRevision(fixture.agentRevision.id);
+    const withdrawn = await getRevisionById(fixture.agentRevision.id);
+    expect(withdrawn?.revisionState).toBe("withdrawn");
+    const [withdrawal] = await db
+      .select()
+      .from(withdrawalRecord)
+      .where(
+        eq(
+          withdrawalRecord.publicationRecordId,
+          resolution.controlPlaneEvidence.agentPublicationRecordId,
+        ),
+      );
+    expect(withdrawal).toBeDefined();
 
-    // Resolution 可能 unresolved（因投影标记 ineligible）或 resolved 但 Binding 失败
-    if (resolution.status === "resolved") {
-      const createExecutionBinding = createCreateExecutionBinding({
-        store: mysqlExecutionBindingStore,
-      });
-      await expect(
-        createExecutionBinding({
-          invocationId,
-          tenantId: fixture.tenantId,
-          agentRevisionId: fixture.agentRevision.id,
-          runtimeRevisionId: fixture.runtimeRevision.id,
-          deploymentRouteId: fixture.route.id,
-          modelProvider: "doubao",
-          modelId: "doubao-pro",
-          modelRevisionRef: null,
-          initialEnvironmentLeaseId: null,
-          workspaceBindingId: null,
-          policyRevisionId: null,
-          contextCheckpointId: null,
-          environmentDefinitionRevisionId: null,
-          controlPlaneEvidence: {
-        ...resolution.resolution.controlPlaneEvidence,
-        routeRevisionId: resolution.resolution.routeRevisionId,
-        routeActivationId: resolution.resolution.routeActivationId,
-        routeContentDigest: resolution.resolution.routeContentDigest,
-        resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      },
-          projectionVersionNo: resolution.resolution.projectionVersionNo ?? 0,
-        }),
-      ).rejects.toThrow();
-    } else {
-      // 投影已标记 ineligible → resolution unresolved，符合预期
-      expect(resolution.status).toBe("unresolved");
-    }
+    await expect(
+      createBindingFromResolved({ tenantId: fixture.tenantId, invocationId, resolution }),
+    ).rejects.toThrow();
+    await expectBindingAbsent(fixture.tenantId, invocationId);
   });
 });
 
@@ -1561,19 +1512,15 @@ describe("场景13：Publication 撤回后拒绝新 Binding", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("场景14：Attestation 撤销后拒绝新 Binding", () => {
-  it("AgentRevision Attestation 撤销后新 ExecutionBinding 创建失败", async () => {
+  it("Resolver 冻结 Attestation 后新增 Revocation，旧 Resolution 创建 Binding 必须失败", async () => {
     const fixture = await seedEndToEndFixture("revoked-attest");
+    const resolution = await resolveFrozenRouteForBinding(fixture, "thread-revoked");
+    const invocationId = crypto.randomUUID();
+    await seedInvocation(fixture.tenantId, invocationId);
 
-    // 查找 AgentRevision 的 Attestation ID
-    const attestations = await listAttestationsByRevision(
-      fixture.tenantId,
-      "agent_revision",
-      fixture.agentRevision.id,
-    );
-    expect(attestations).toHaveLength(1);
-    const attestationId = attestations[0]!.id;
+    const [attestationId] = resolution.controlPlaneEvidence.agentAttestationIds;
+    if (!attestationId) throw new Error("冻结 Resolution 缺少 Agent Attestation");
 
-    // 撤销 Attestation
     const revokeArtifactAttestation = createRevokeArtifactAttestation({
       store: mysqlAttestationRevocationStore,
     });
@@ -1585,61 +1532,10 @@ describe("场景14：Attestation 撤销后拒绝新 Binding", () => {
       requestId: "req-revoke-attest-001",
     });
 
-    // 重建投影（反映撤销）
-    const buildRouteEligibility = createBuildRouteEligibility({
-      store: mysqlRouteEligibilityStore,
-    });
-    await buildRouteEligibility({
-      tenantId: fixture.tenantId,
-      routeId: fixture.route.id,
-    });
-
-    // 尝试创建新 Binding → 应失败
-    const invocationId = crypto.randomUUID();
-    await seedInvocation(fixture.tenantId, invocationId);
-
-    const resolveRoute = createResolveRoute({
-      store: mysqlRouteEligibilityResolutionStore,
-    });
-    const resolution = await resolveRoute({
-      tenantId: fixture.tenantId,
-      agentId: fixture.agent.id,
-      routeScopeKey: "prod",
-      businessKey: { threadId: "thread-revoked" },
-    });
-
-    if (resolution.status === "resolved") {
-      const createExecutionBinding = createCreateExecutionBinding({
-        store: mysqlExecutionBindingStore,
-      });
-      await expect(
-        createExecutionBinding({
-          invocationId,
-          tenantId: fixture.tenantId,
-          agentRevisionId: fixture.agentRevision.id,
-          runtimeRevisionId: fixture.runtimeRevision.id,
-          deploymentRouteId: fixture.route.id,
-          modelProvider: "doubao",
-          modelId: "doubao-pro",
-          modelRevisionRef: null,
-          initialEnvironmentLeaseId: null,
-          workspaceBindingId: null,
-          policyRevisionId: null,
-          contextCheckpointId: null,
-          environmentDefinitionRevisionId: null,
-          controlPlaneEvidence: {
-        ...resolution.resolution.controlPlaneEvidence,
-        routeRevisionId: resolution.resolution.routeRevisionId,
-        routeActivationId: resolution.resolution.routeActivationId,
-        routeContentDigest: resolution.resolution.routeContentDigest,
-        resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      },
-          projectionVersionNo: resolution.resolution.projectionVersionNo ?? 0,
-        }),
-      ).rejects.toThrow();
-    } else {
-      expect(resolution.status).toBe("unresolved");
-    }
+    await expect(
+      createBindingFromResolved({ tenantId: fixture.tenantId, invocationId, resolution }),
+    ).rejects.toThrow();
+    await expectBindingAbsent(fixture.tenantId, invocationId);
   });
 });
 
@@ -1648,72 +1544,54 @@ describe("场景14：Attestation 撤销后拒绝新 Binding", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("场景15：Runtime Conformance 失效后拒绝新 Binding", () => {
-  it("RuntimeRevision 撤回后新 ExecutionBinding 创建失败", async () => {
+  it("Resolver 冻结 Conformance 后权威 Run/Case 变为不合格，旧 Resolution 创建 Binding 必须失败", async () => {
     const fixture = await seedEndToEndFixture("conformance-invalid");
-
-    const buildRouteEligibility = createBuildRouteEligibility({
-      store: mysqlRouteEligibilityStore,
-    });
-    await buildRouteEligibility({
-      tenantId: fixture.tenantId,
-      routeId: fixture.route.id,
-    });
-
-    // 撤回 RuntimeRevision → Conformance 证据失效
-    await withdrawRuntimeRevision(fixture.runtimeRevision.id);
-
-    // 重建投影
-    await buildRouteEligibility({
-      tenantId: fixture.tenantId,
-      routeId: fixture.route.id,
-    });
-
-    // 尝试创建新 Binding → 应失败
+    const resolution = await resolveFrozenRouteForBinding(
+      fixture,
+      "thread-conformance-fail",
+    );
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
-    const resolveRoute = createResolveRoute({
-      store: mysqlRouteEligibilityResolutionStore,
-    });
-    const resolution = await resolveRoute({
-      tenantId: fixture.tenantId,
-      agentId: fixture.agent.id,
-      routeScopeKey: "prod",
-      businessKey: { threadId: "thread-conformance-fail" },
-    });
+    // Conformance 事实是不可变记录，没有“撤销 Run”应用 API；这里直接改变真实 MySQL
+    // 权威行来模拟 resolve 与 bind 之间的并发失效，不用 mock 或内存替代。
+    const conformanceRunId = resolution.controlPlaneEvidence.conformanceRunId;
+    const caseId = ALL_CONFORMANCE_CASES[0];
+    if (!caseId) throw new Error("Conformance 合同未定义 Case");
+    await db
+      .update(runtimeConformanceRun)
+      .set({ overallResult: "failed" })
+      .where(eq(runtimeConformanceRun.id, conformanceRunId));
+    await db
+      .update(runtimeConformanceCaseResult)
+      .set({ passed: false, reason: "TOCTOU invalidation" })
+      .where(
+        and(
+          eq(runtimeConformanceCaseResult.runId, conformanceRunId),
+          eq(runtimeConformanceCaseResult.caseId, caseId),
+        ),
+      );
 
-    if (resolution.status === "resolved") {
-      const createExecutionBinding = createCreateExecutionBinding({
-        store: mysqlExecutionBindingStore,
-      });
-      await expect(
-        createExecutionBinding({
-          invocationId,
-          tenantId: fixture.tenantId,
-          agentRevisionId: fixture.agentRevision.id,
-          runtimeRevisionId: fixture.runtimeRevision.id,
-          deploymentRouteId: fixture.route.id,
-          modelProvider: "doubao",
-          modelId: "doubao-pro",
-          modelRevisionRef: null,
-          initialEnvironmentLeaseId: null,
-          workspaceBindingId: null,
-          policyRevisionId: null,
-          contextCheckpointId: null,
-          environmentDefinitionRevisionId: null,
-          controlPlaneEvidence: {
-        ...resolution.resolution.controlPlaneEvidence,
-        routeRevisionId: resolution.resolution.routeRevisionId,
-        routeActivationId: resolution.resolution.routeActivationId,
-        routeContentDigest: resolution.resolution.routeContentDigest,
-        resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      },
-          projectionVersionNo: resolution.resolution.projectionVersionNo ?? 0,
-        }),
-      ).rejects.toThrow();
-    } else {
-      expect(resolution.status).toBe("unresolved");
-    }
+    const [invalidRun] = await db
+      .select({ overallResult: runtimeConformanceRun.overallResult })
+      .from(runtimeConformanceRun)
+      .where(eq(runtimeConformanceRun.id, conformanceRunId));
+    const [invalidCase] = await db
+      .select({ passed: runtimeConformanceCaseResult.passed })
+      .from(runtimeConformanceCaseResult)
+      .where(
+        and(
+          eq(runtimeConformanceCaseResult.runId, conformanceRunId),
+          eq(runtimeConformanceCaseResult.caseId, caseId),
+        ),
+      );
+    expect(invalidRun?.overallResult).toBe("failed");
+    expect(invalidCase?.passed).toBe(false);
+
+    await expect(
+      createBindingFromResolved({ tenantId: fixture.tenantId, invocationId, resolution }),
+    ).rejects.toThrow();
+    await expectBindingAbsent(fixture.tenantId, invocationId);
   });
 });
 
@@ -1722,66 +1600,54 @@ describe("场景15：Runtime Conformance 失效后拒绝新 Binding", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", () => {
-  it("Binding 创建后 Route 更新不修改已有 Binding 证据", async () => {
-    const fixture = await seedEndToEndFixture("immutable-binding");
-
-    const buildRouteEligibility = createBuildRouteEligibility({
-      store: mysqlRouteEligibilityStore,
-    });
-    await buildRouteEligibility({
-      tenantId: fixture.tenantId,
-      routeId: fixture.route.id,
-    });
-
+  it("Resolver 冻结 Route 后出现新 Revision/Activation，旧 Resolution 创建 Binding 必须失败", async () => {
+    const fixture = await seedEndToEndFixture("stale-route-activation");
+    const resolution = await resolveFrozenRouteForBinding(
+      fixture,
+      "thread-stale-route-activation",
+    );
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
-    const resolveRoute = createResolveRoute({
-      store: mysqlRouteEligibilityResolutionStore,
-    });
-    const resolution = await resolveRoute({
+    const nextRoute = await upsertDeploymentRouteForTest({
       tenantId: fixture.tenantId,
-      agentId: fixture.agent.id,
-      routeScopeKey: "prod",
-      businessKey: { threadId: "thread-immutable" },
-    });
-    if (resolution.status !== "resolved") {
-      throw new Error("Route 解析失败");
-    }
-
-    const createExecutionBinding = createCreateExecutionBinding({
-      store: mysqlExecutionBindingStore,
-    });
-    const binding = await createExecutionBinding({
-      invocationId,
-      tenantId: fixture.tenantId,
+      routeSetId: fixture.routeSet.id,
+      routeSetExpectedVersionNo: 2,
+      routeId: fixture.route.id,
       agentRevisionId: fixture.agentRevision.id,
       runtimeRevisionId: fixture.runtimeRevision.id,
-      deploymentRouteId: fixture.route.id,
-      modelProvider: "doubao",
-      modelId: "doubao-pro",
-      modelRevisionRef: null,
-      initialEnvironmentLeaseId: null,
-      workspaceBindingId: null,
-      policyRevisionId: null,
-      contextCheckpointId: null,
-      environmentDefinitionRevisionId: null,
-      controlPlaneEvidence: {
-        ...resolution.resolution.controlPlaneEvidence,
-        routeRevisionId: resolution.resolution.routeRevisionId,
-        routeActivationId: resolution.resolution.routeActivationId,
-        routeContentDigest: resolution.resolution.routeContentDigest,
-        resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      },
-      projectionVersionNo: resolution.resolution.projectionVersionNo ?? 0,
+      trafficWeight: 10000,
+      priorityNo: 2,
+      routeState: "enabled",
+      actor: { tenantId: fixture.tenantId, actorType: "service", actorId: "test-updater" },
     });
+    expect(nextRoute.routeRevisionId).not.toBe(resolution.routeRevisionId);
+    expect(nextRoute.routeActivationId).not.toBe(resolution.routeActivationId);
 
-    const frozenRouteRevisionId = binding.routeRevisionId;
-    const frozenRouteActivationId = binding.routeActivationId;
-    const frozenConfigHash = binding.configHash;
+    await expect(
+      createBindingFromResolved({ tenantId: fixture.tenantId, invocationId, resolution }),
+    ).rejects.toThrow();
+    await expectBindingAbsent(fixture.tenantId, invocationId);
+  });
 
-    // 禁用 Route（影响新 Invocation，不修改已有 Binding）
-    await upsertDeploymentRouteForTest({
+  it("Binding 创建后新禁用 Activation 不修改数据库中的任何冻结字段", async () => {
+    const fixture = await seedEndToEndFixture("immutable-binding");
+    const resolution = await resolveFrozenRouteForBinding(fixture, "thread-immutable");
+    const invocationId = crypto.randomUUID();
+    await seedInvocation(fixture.tenantId, invocationId);
+
+    const binding = await createBindingFromResolved({
+      tenantId: fixture.tenantId,
+      invocationId,
+      resolution,
+    });
+    const frozenFromDatabase = await getExecutionBindingByInvocation(
+      fixture.tenantId,
+      invocationId,
+    );
+    expect(frozenFromDatabase).toEqual(binding);
+
+    const disabledRoute = await upsertDeploymentRouteForTest({
       tenantId: fixture.tenantId,
       routeSetId: fixture.routeSet.id,
       routeSetExpectedVersionNo: 2,
@@ -1793,11 +1659,12 @@ describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", ()
       routeState: "disabled",
       actor: { tenantId: fixture.tenantId, actorType: "service", actorId: "test-disabler" },
     });
+    expect(disabledRoute.routeRevisionId).not.toBe(binding.routeRevisionId);
+    expect(disabledRoute.routeActivationId).not.toBe(binding.routeActivationId);
 
-    // 已有 Binding 的字段不变
-    expect(binding.routeRevisionId).toBe(frozenRouteRevisionId);
-    expect(binding.routeActivationId).toBe(frozenRouteActivationId);
-    expect(binding.configHash).toBe(frozenConfigHash);
+    const afterDisable = await getExecutionBindingByInvocation(fixture.tenantId, invocationId);
+    expect(afterDisable).toEqual(frozenFromDatabase);
+    expect(afterDisable?.configHash).toBe(binding.configHash);
   });
 });
 
