@@ -9,18 +9,21 @@
 export type RouteState = "enabled" | "disabled";
 
 /** Route Activation 状态。 */
-export type RouteActivationState = "active" | "superseded" | "disabled";
+export type RouteActivationState = "active" | "disabled";
 
 /** Route Eligibility 状态。 */
-export type RouteEligibilityState = "eligible" | "ineligible" | "unknown";
+export type RouteEligibilityState = "eligible" | "ineligible" | "pending_rebuild" | "missing";
 
 /** DeploymentRouteSet 详情。 */
 export interface DeploymentRouteSetDTO {
   id: string;
   tenant_id: string;
   agent_id: string;
+  route_scope_key: string;
+  route_scope: unknown;
   version_no: number;
-  updated_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /** DeploymentRoute 详情。 */
@@ -28,21 +31,24 @@ export interface DeploymentRouteDTO {
   id: string;
   route_set_id: string;
   route_key: string;
-  route_group_id: string;
+  route_group_id: string | null;
   route_state: RouteState;
   agent_revision_id: string | null;
   runtime_revision_id: string | null;
   policy_revision_id: string | null;
-  traffic_weight: number;
-  priority_no: number;
+  traffic_weight: number | null;
+  priority_no: number | null;
   effective_from: string | null;
   effective_until: string | null;
   active_route_revision_id: string | null;
   active_route_activation_id: string | null;
+  activation_state: RouteActivationState | null;
+  route_content_digest: string | null;
   /** Eligibility — 由服务端 Projection 计算。 */
   eligibility_state: RouteEligibilityState;
   ineligibility_reasons: string[];
-  updated_at: string | null;
+  projection_version_no: number | null;
+  updated_at: string;
 }
 
 /** RouteRevision 详情。 */

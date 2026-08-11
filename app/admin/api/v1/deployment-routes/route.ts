@@ -1,8 +1,3 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
-import {
-  getRouteSetByAgentScope,
-  listRoutesBySet,
-} from "@/lib/routes/application/deployment-route-service";
 /**
  * GET /admin/api/v1/deployment-routes — 列出 DeploymentRoute（S11-W02）。
  *
@@ -28,6 +23,16 @@ import {
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import {
+  getRouteSetByAgentScope,
+  listRoutesBySet,
+} from "@/lib/routes/application/deployment-route-service";
+import {
+  projectAdminRoute,
+  projectAdminRouteSet,
+} from "@/lib/routes/application/route-admin-projection";
+import { readAdminRoute } from "@/lib/routes/persistence/route-admin-reader";
 
 export const dynamic = "force-dynamic";
 
@@ -60,29 +65,15 @@ export async function GET(request: Request): Promise<Response> {
 
   // 查询 Route 列表
   const routes = await listRoutesBySet(routeSet.id);
-  const projected = routes.map((route) => ({
-    id: route.id,
-    route_set_id: route.routeSetId,
-    agent_revision_id: route.agentRevisionId,
-    runtime_revision_id: route.runtimeRevisionId,
-    traffic_weight: route.trafficWeight,
-    priority_no: route.priorityNo,
-    route_state: route.routeState,
-    effective_from: route.effectiveFrom?.toISOString() ?? null,
-    effective_until: route.effectiveUntil?.toISOString() ?? null,
-    active_route_revision_id: route.activeRouteRevisionId,
-  }));
+  const projected = await Promise.all(
+    routes.map(async (route) => projectAdminRoute(await readAdminRoute(principal.tenantId, route))),
+  );
 
   return apiSuccess(
     {
       items: projected,
       total: projected.length,
-      route_set: {
-        id: routeSet.id,
-        agent_id: routeSet.agentId,
-        route_scope_key: routeSet.routeScopeKey,
-        version_no: routeSet.versionNo,
-      },
+      route_set: projectAdminRouteSet(routeSet),
       etag: `${ROUTE_SET_ETAG_PREFIX}${routeSet.versionNo}`,
     },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
