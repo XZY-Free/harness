@@ -1,6 +1,7 @@
 import {
  EXECUTION_BINDING_AUTHORITY_LOCK_ORDER,
  toExecutionBinding,
+ validateFrozenAttestationAuthority,
  validateFrozenPublicationAuthority,
 } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { readFileSync } from "node:fs";
@@ -173,4 +174,53 @@ describe("ExecutionBinding authority final validation", () => {
  }),
  ).toThrow(/Attestation/);
  });
-});
+
+ it("冻结 Attestation 必须精确绑定租户、类型、Revision、Digest 且有效未撤销", () => {
+ const base = {
+ attestation: {
+ id: "attestation-1",
+ tenantId: "tenant-1",
+ artifactType: "runtime_revision",
+ artifactRevisionId: "runtime-revision-1",
+ artifactDigest: `sha256:${"a".repeat(64)}`,
+ verificationState: "verified" as const,
+ revokedAt: null,
+ },
+ revocation: null,
+ expected: {
+ attestationId: "attestation-1",
+ tenantId: "tenant-1",
+ artifactType: "runtime_revision" as const,
+ artifactRevisionId: "runtime-revision-1",
+ artifactDigest: `sha256:${"a".repeat(64)}`,
+ },
+ };
+
+ expect(() => validateFrozenAttestationAuthority(base)).not.toThrow();
+ for (const attestation of [
+ { ...base.attestation, tenantId: "other-tenant" },
+ { ...base.attestation, artifactType: "agent_revision" },
+ { ...base.attestation, artifactRevisionId: "other-revision" },
+ { ...base.attestation, artifactDigest: `sha256:${"b".repeat(64)}` },
+ { ...base.attestation, verificationState: "failed" as const },
+ { ...base.attestation, revokedAt: new Date("2026-08-11T00:00:00.000Z") },
+ ]) {
+ expect(() => validateFrozenAttestationAuthority({ ...base, attestation })).toThrow(
+ /Attestation/,
+ );
+ }
+ expect(() =>
+ validateFrozenAttestationAuthority({
+ ...base,
+ revocation: { id: "revocation-1" },
+ }),
+ ).toThrow(/撤销/);
+ });
+
+ it("按冻结 ID 排序逐条锁 Attestation 及其 Revocation", () => {
+ const source = readFileSync(new URL("./mysql-execution-binding-store.ts", import.meta.url), "utf8");
+ expect(source).toContain("for (const attestationId of [...evidence.agentAttestationIds].sort())");
+ expect(source).toContain("for (const attestationId of [...evidence.runtimeAttestationIds].sort())");
+ expect(source).toContain("eq(attestationRevocationRecord.attestationId, attestationId)");
+ });
+ });

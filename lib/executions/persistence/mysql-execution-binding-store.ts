@@ -14,6 +14,10 @@
  */
 
 import { db } from "@/lib/db/client";
+import {
+ artifactAttestation,
+ attestationRevocationRecord,
+} from "@/lib/artifacts/persistence/artifact-record";
 import { validateBindingEligibility } from "@/lib/executions/application/validate-binding-eligibility";
 import {
  type ExecutionBinding,
@@ -294,7 +298,10 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
  // F. 冻结 Publication → Withdrawal（FOR UPDATE）— 严格串行、精确全集
  await lockAndVerifyPublications(tx, input);
 
- // G. PolicyRevision（FOR UPDATE）— 状态一致性
+ // G. 冻结 Attestation → Revocation（FOR UPDATE）— 按冻结 ID 排序逐条锁
+ await lockAndVerifyAttestations(tx, input);
+
+ // H. PolicyRevision（FOR UPDATE）— 状态一致性
  if (input.policyRevisionId) {
  const [policy] = await tx
  .select({ state: policyRevisionTable.revisionState })
@@ -378,6 +385,122 @@ async function lockAndVerifyPublications(
  conformanceRunId: evidence.conformanceRunId,
  },
  });
+}
+
+async function lockAndVerifyAttestations(
+ tx: Transaction,
+ input: StoreExecutionBindingInput,
+): Promise<void> {
+ const evidence = input.controlPlaneEvidence;
+
+ for (const attestationId of [...evidence.agentAttestationIds].sort()) {
+ const [attestation] = await tx
+ .select({
+ id: artifactAttestation.id,
+ tenantId: artifactAttestation.tenantId,
+ artifactType: artifactAttestation.artifactType,
+ artifactRevisionId: artifactAttestation.artifactRevisionId,
+ artifactDigest: artifactAttestation.artifactDigest,
+ verificationState: artifactAttestation.verificationState,
+ revokedAt: artifactAttestation.revokedAt,
+ })
+ .from(artifactAttestation)
+ .where(eq(artifactAttestation.id, attestationId))
+ .limit(1)
+ .for("update");
+ const [revocation] = await tx
+ .select({ id: attestationRevocationRecord.id })
+ .from(attestationRevocationRecord)
+ .where(eq(attestationRevocationRecord.attestationId, attestationId))
+ .limit(1)
+ .for("update");
+ validateFrozenAttestationAuthority({
+ attestation: attestation ?? null,
+ revocation: revocation ?? null,
+ expected: {
+ attestationId,
+ tenantId: input.tenantId,
+ artifactType: "agent_revision",
+ artifactRevisionId: input.agentRevisionId,
+ artifactDigest: evidence.agentArtifactDigest,
+ },
+ });
+ }
+
+ for (const attestationId of [...evidence.runtimeAttestationIds].sort()) {
+ const [attestation] = await tx
+ .select({
+ id: artifactAttestation.id,
+ tenantId: artifactAttestation.tenantId,
+ artifactType: artifactAttestation.artifactType,
+ artifactRevisionId: artifactAttestation.artifactRevisionId,
+ artifactDigest: artifactAttestation.artifactDigest,
+ verificationState: artifactAttestation.verificationState,
+ revokedAt: artifactAttestation.revokedAt,
+ })
+ .from(artifactAttestation)
+ .where(eq(artifactAttestation.id, attestationId))
+ .limit(1)
+ .for("update");
+ const [revocation] = await tx
+ .select({ id: attestationRevocationRecord.id })
+ .from(attestationRevocationRecord)
+ .where(eq(attestationRevocationRecord.attestationId, attestationId))
+ .limit(1)
+ .for("update");
+ validateFrozenAttestationAuthority({
+ attestation: attestation ?? null,
+ revocation: revocation ?? null,
+ expected: {
+ attestationId,
+ tenantId: input.tenantId,
+ artifactType: "runtime_revision",
+ artifactRevisionId: input.runtimeRevisionId,
+ artifactDigest: evidence.runtimeArtifactDigest,
+ },
+ });
+ }
+}
+
+type FrozenAttestationRow = {
+ id: string;
+ tenantId: string;
+ artifactType: string;
+ artifactRevisionId: string;
+ artifactDigest: string;
+ verificationState: "pending" | "verified" | "failed";
+ revokedAt: Date | null;
+};
+
+type FrozenAttestationExpectation = {
+ attestationId: string;
+ tenantId: string;
+ artifactType: "agent_revision" | "runtime_revision";
+ artifactRevisionId: string;
+ artifactDigest: string;
+};
+
+export function validateFrozenAttestationAuthority(input: {
+ attestation: FrozenAttestationRow | null;
+ revocation: { id: string } | null;
+ expected: FrozenAttestationExpectation;
+}): void {
+ const { attestation, revocation, expected } = input;
+ if (
+ !attestation ||
+ attestation.id !== expected.attestationId ||
+ attestation.tenantId !== expected.tenantId ||
+ attestation.artifactType !== expected.artifactType ||
+ attestation.artifactRevisionId !== expected.artifactRevisionId ||
+ attestation.artifactDigest !== expected.artifactDigest ||
+ attestation.verificationState !== "verified" ||
+ attestation.revokedAt !== null
+ ) {
+ throw evidenceError("冻结 Attestation 与当前制品权威或验证状态不一致");
+ }
+ if (revocation) {
+ throw evidenceError(`冻结 Attestation ${attestation.id} 已有撤销记录`);
+ }
 }
 
 type FrozenPublicationRow = {
