@@ -24,6 +24,7 @@ export interface ConfiguredResolveRouteCommand {
  routeScopeKey: string;
  businessKey: { threadId?: string; jobId?: string };
  attributes?: Record<string, RouteResolutionAttribute>;
+ threadDefaultModelRef?: string | null;
  now?: Date;
 }
 
@@ -77,6 +78,7 @@ export function createConfiguredRouteResolver(
  routeScopeKey: command.routeScopeKey,
  businessKey: command.businessKey,
  attributes: command.attributes ?? {},
+ threadDefaultModelRef: command.threadDefaultModelRef,
  candidates,
  now: command.now ?? new Date(),
  });

@@ -32,6 +32,7 @@ const resolveRoute: RouteResolver = async (input) => {
  routeScopeKey: input.routeScopeKey,
  businessKey: input.businessKey,
  attributes: input.attributes,
+ threadDefaultModelRef: input.threadDefaultModelRef,
  });
  return result.outcome;
 };
@@ -99,6 +100,7 @@ export async function dispatchEmployeeTurn(params: {
  agentId: thread.primaryAgentId,
  routeScopeKey: "default",
  businessKey: { jobId: `hosted-provision:${thread.primaryAgentId}` },
+ threadDefaultModelRef: thread.defaultModelRef,
  });
 
  if (routeOutcome.status !== "resolved") {

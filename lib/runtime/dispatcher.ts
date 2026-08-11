@@ -117,6 +117,7 @@ const defaultRouteResolver: RouteResolver = async (input) => {
  routeScopeKey: input.routeScopeKey,
  businessKey: input.businessKey,
  attributes: input.attributes,
+ threadDefaultModelRef: input.threadDefaultModelRef,
  });
  return result.outcome;
 };
@@ -297,7 +298,7 @@ export async function dispatchInvocationForTurn(params: {
  routeRevisionId: routeResolution.routeRevisionId,
  routeActivationId: routeResolution.routeActivationId,
  routeContentDigest: routeResolution.routeContentDigest,
- resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+ resolutionInputDigest: routeResolution.resolutionInputDigest,
  ...routeResolution.controlPlaneEvidence,
  },
  };

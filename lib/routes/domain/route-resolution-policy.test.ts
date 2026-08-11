@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { computeResolutionInputDigest } from "./resolution-input-digest";
 import { type RouteResolutionCandidate, resolveRouteCandidates } from "./route-resolution-policy";
 
 const NOW = new Date("2026-08-03T01:00:00.000Z");
@@ -81,6 +82,33 @@ describe("deterministic route resolution policy", () => {
 
     expect(forward.status).toBe("resolved");
     expect(reverse).toEqual(forward);
+  });
+
+  it("resolved 结果携带本次完整输入的 resolutionInputDigest", () => {
+    const input = {
+      tenantId: "tenant-1",
+      agentId: "agent-1",
+      routeScopeKey: "prod",
+      businessKey: { threadId: "thread-1" },
+      attributes: { environment: "prod" },
+      threadDefaultModelRef: "model-v1",
+    };
+    const result = resolve(
+      [
+        candidate("digest", {
+          trafficWeight: 10_000,
+          eligibilityConditions: { all: { environment: "prod" } },
+        }),
+      ],
+      input,
+    );
+
+    expect(result).toMatchObject({
+      status: "resolved",
+      resolution: {
+        resolutionInputDigest: computeResolutionInputDigest(input),
+      },
+    });
   });
 
   it("只接受 active、窗口内且控制面资格仍有效的 RouteRevision", () => {

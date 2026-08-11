@@ -11,6 +11,7 @@ export interface ResolveRouteCommand {
  routeScopeKey: string;
  businessKey: { threadId?: string; jobId?: string };
  attributes?: Record<string, RouteResolutionAttribute>;
+ threadDefaultModelRef?: string | null;
  now?: Date;
 }
 
@@ -36,6 +37,7 @@ export function createResolveRoute(dependencies: {
  routeScopeKey: command.routeScopeKey,
  businessKey: command.businessKey,
  attributes: command.attributes ?? {},
+ threadDefaultModelRef: command.threadDefaultModelRef,
  candidates,
  now: command.now ?? clock(),
  });

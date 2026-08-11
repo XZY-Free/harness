@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { computeResolutionInputDigest } from "@/lib/routes/domain/resolution-input-digest";
 import {
  type NormalizedEligibility,
  computeSpecificity,
@@ -75,6 +76,7 @@ export interface RouteResolution {
  trafficWeight: number;
  trafficBucket: number;
  resolutionKeyDigest: string;
+ resolutionInputDigest: string;
  resolvedAt: Date;
  controlPlaneEvidence: RouteControlPlaneEvidence;
  /** : Projection 版本号（来自 RouteEligibilityProjection），用于 Binding 版本一致性校验。 */
@@ -111,6 +113,7 @@ export interface ResolveRouteCandidatesInput {
  routeScopeKey: string;
  businessKey: { threadId?: string; jobId?: string };
  attributes: Record<string, RouteResolutionAttribute>;
+ threadDefaultModelRef?: string | null;
  candidates: RouteResolutionCandidate[];
  now: Date;
 }
@@ -233,6 +236,14 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
  trafficWeight: selected.candidate.trafficWeight,
  trafficBucket,
  resolutionKeyDigest,
+ resolutionInputDigest: computeResolutionInputDigest({
+ tenantId: input.tenantId,
+ agentId: input.agentId,
+ routeScopeKey: input.routeScopeKey,
+ businessKey: input.businessKey,
+ attributes: input.attributes,
+ threadDefaultModelRef: input.threadDefaultModelRef,
+ }),
  resolvedAt: input.now,
  controlPlaneEvidence: cloneControlPlaneEvidence(
  requireControlPlaneEvidence(selected.candidate),

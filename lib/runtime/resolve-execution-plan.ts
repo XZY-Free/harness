@@ -123,6 +123,7 @@ export async function resolveExecutionPlan(
  routeScopeKey: input.routeScopeKey,
  businessKey: input.businessKey,
  attributes: input.attributes ?? {},
+ threadDefaultModelRef: input.threadDefaultModelRef,
  });
 
  if (routeOutcome.status === "unresolved") {

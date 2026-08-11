@@ -899,6 +899,7 @@ describe("V11 Dispatcher 调度", () => {
         routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
         businessKey: { threadId: ctx.threadId },
         attributes: {},
+        threadDefaultModelRef: null,
       },
     ]);
   });
@@ -932,7 +933,7 @@ describe("V11 Dispatcher 调度", () => {
       routeRevisionId: result.routeResolution?.routeRevisionId,
       routeActivationId: result.routeResolution?.routeActivationId,
       routeContentDigest: result.routeResolution?.routeContentDigest,
-      resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      resolutionInputDigest: result.routeResolution?.resolutionInputDigest,
       agentArtifactDigest: ctx.agentRevision.artifactDigest,
       runtimeArtifactDigest: ctx.runtimeRevision.artifactDigest,
       runtimeConfigDigest: ctx.runtimeRevision.configHash,
@@ -957,6 +958,27 @@ describe("V11 Dispatcher 调度", () => {
     // 事件写入
     expect(result.invocationQueuedEvent?.eventType).toBe("invocation.queued");
     expect(result.turnQueuedEvent?.eventType).toBe("turn.queued");
+  });
+
+  it("Dispatcher 只复制 Resolver 返回的 resolutionInputDigest", async () => {
+    const ctx = await seedFullDispatchContext();
+    const realResolver = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
+    const customDigest = `sha256:${"f".repeat(64)}`;
+    const result = await dispatchInvocationForTurn({
+      tenantId: ctx.tenantId,
+      turnId: ctx.turnId,
+      routeResolver: async (command) => {
+        const outcome = await realResolver(command);
+        if (outcome.status !== "resolved") return outcome;
+        return {
+          ...outcome,
+          resolution: { ...outcome.resolution, resolutionInputDigest: customDigest },
+        };
+      },
+    });
+
+    expect(result.binding?.resolutionInputDigest).toBe(customDigest);
+    expect(result.routeResolution?.resolutionInputDigest).toBe(customDigest);
   });
 
   it("Resolver 后发生撤回时拒绝创建新的 ExecutionBinding", async () => {
@@ -1030,7 +1052,7 @@ describe("V11 Dispatcher 调度", () => {
         routeRevisionId: resolution.routeRevisionId,
         routeActivationId: resolution.routeActivationId,
         routeContentDigest: resolution.routeContentDigest,
-        resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        resolutionInputDigest: resolution.resolutionInputDigest,
         ...resolution.controlPlaneEvidence,
       },
     };
