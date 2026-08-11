@@ -62,6 +62,12 @@ describe("BindingEligibilityInput frozenEvidence", () => {
     expect(exactEvidenceIdsEqual(["a1"], ["a1", "a2"])).toBe(false);
     expect(exactEvidenceIdsEqual(["a1", "a3"], ["a1", "a2"])).toBe(false);
   });
+
+  it("§07.5: 空集合、重复 ID 或空 ID 即使两边相同也拒绝", () => {
+    expect(exactEvidenceIdsEqual([], [])).toBe(false);
+    expect(exactEvidenceIdsEqual(["a1", "a1"], ["a1", "a1"])).toBe(false);
+    expect(exactEvidenceIdsEqual([""], [""])).toBe(false);
+  });
 });
 
 describe("BindingEligibilityResult", () => {

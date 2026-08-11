@@ -169,10 +169,15 @@ export async function validateBindingEligibility(
 }
 
 export function exactEvidenceIdsEqual(frozenIds: string[], currentIds: string[]): boolean {
+ if (!validEvidenceIds(frozenIds) || !validEvidenceIds(currentIds)) return false;
  if (frozenIds.length !== currentIds.length) return false;
  const frozen = [...frozenIds].sort();
  const current = [...currentIds].sort();
  return frozen.every((id, index) => id === current[index]);
+}
+
+function validEvidenceIds(ids: string[]): boolean {
+ return ids.length > 0 && ids.every((id) => id.length > 0) && new Set(ids).size === ids.length;
 }
 
 /**

@@ -277,8 +277,8 @@ CREATE TABLE `ExecutionBinding` (
 	`configHash` varchar(128) NOT NULL,
 	`boundAt` datetime(3) NOT NULL,
 	CONSTRAINT `ExecutionBinding_invocationId` PRIMARY KEY(`invocationId`),
-	CONSTRAINT `ExecutionBinding_agentAttestationIds_non_empty` CHECK (JSON_LENGTH(`agentAttestationIds`) >= 1),
-	CONSTRAINT `ExecutionBinding_runtimeAttestationIds_non_empty` CHECK (JSON_LENGTH(`runtimeAttestationIds`) >= 1)
+	CONSTRAINT `ExecutionBinding_agentAttestationIds_non_empty` CHECK (JSON_TYPE(`agentAttestationIds`) = 'ARRAY' AND JSON_LENGTH(`agentAttestationIds`) >= 1),
+	CONSTRAINT `ExecutionBinding_runtimeAttestationIds_non_empty` CHECK (JSON_TYPE(`runtimeAttestationIds`) = 'ARRAY' AND JSON_LENGTH(`runtimeAttestationIds`) >= 1)
 );
 --> statement-breakpoint
 CREATE TABLE `IdempotencyRecord` (

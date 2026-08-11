@@ -367,11 +367,11 @@ export const executionBindingTable = mysqlTable(
  conformanceRunIdx: index("ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
  agentAttestationIdsNonEmpty: check(
  "ExecutionBinding_agentAttestationIds_non_empty",
- sql`JSON_LENGTH(${t.agentAttestationIds}) >= 1`,
+ sql`JSON_TYPE(${t.agentAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.agentAttestationIds}) >= 1`,
  ),
  runtimeAttestationIdsNonEmpty: check(
  "ExecutionBinding_runtimeAttestationIds_non_empty",
- sql`JSON_LENGTH(${t.runtimeAttestationIds}) >= 1`,
+ sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.runtimeAttestationIds}) >= 1`,
  ),
  }),
 );
