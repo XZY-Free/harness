@@ -2,8 +2,13 @@ import {
  EXECUTION_BINDING_AUTHORITY_LOCK_ORDER,
  toExecutionBinding,
  validateFrozenAttestationAuthority,
+ validateFrozenConformanceAuthority,
  validateFrozenPublicationAuthority,
 } from "@/lib/executions/persistence/mysql-execution-binding-store";
+import {
+ ALL_CONFORMANCE_CASES,
+ CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -222,5 +227,71 @@ describe("ExecutionBinding authority final validation", () => {
  expect(source).toContain("for (const attestationId of [...evidence.agentAttestationIds].sort())");
  expect(source).toContain("for (const attestationId of [...evidence.runtimeAttestationIds].sort())");
  expect(source).toContain("eq(attestationRevocationRecord.attestationId, attestationId)");
+ });
+
+ it("冻结 ConformanceRun 必须完成且满足正式合同 Case 精确全集", () => {
+ const caseResults = ALL_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true }));
+ const base = {
+ run: {
+ id: "conformance-run-1",
+ tenantId: "tenant-1",
+ runtimeRevisionId: "runtime-revision-1",
+ runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
+ runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
+ protocolContractRevision: "agent-runtime-protocol@1",
+ suiteRevision: CONFORMANCE_SUITE_REVISION,
+ overallResult: "passed" as const,
+ conformanceFormat: "standard_dsse" as const,
+ startedAt: new Date("2026-08-11T00:00:00.000Z"),
+ completedAt: new Date("2026-08-11T00:01:00.000Z"),
+ verifiedAt: new Date("2026-08-11T00:01:01.000Z"),
+ },
+ caseResults,
+ expected: {
+ conformanceRunId: "conformance-run-1",
+ tenantId: "tenant-1",
+ runtimeRevisionId: "runtime-revision-1",
+ runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
+ runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
+ protocolContractRevision: "agent-runtime-protocol@1",
+ },
+ };
+
+ expect(() => validateFrozenConformanceAuthority(base)).not.toThrow();
+ expect(() =>
+ validateFrozenConformanceAuthority({
+ ...base,
+ run: { ...base.run, id: "other-run" },
+ }),
+ ).toThrow(/ConformanceRun/);
+ expect(() =>
+ validateFrozenConformanceAuthority({
+ ...base,
+ run: { ...base.run, completedAt: null },
+ }),
+ ).toThrow(/完成/);
+ expect(() =>
+ validateFrozenConformanceAuthority({
+ ...base,
+ caseResults: caseResults.slice(1),
+ }),
+ ).toThrow(/Conformance/);
+ expect(() =>
+ validateFrozenConformanceAuthority({
+ ...base,
+ caseResults: [
+ ...caseResults.slice(0, -1),
+ { caseId: "unknown-case", passed: true },
+ ],
+ }),
+ ).toThrow(/Case/);
+ expect(() =>
+ validateFrozenConformanceAuthority({
+ ...base,
+ caseResults: caseResults.map((result, index) =>
+ index === 0 ? { ...result, passed: false } : result,
+ ),
+ }),
+ ).toThrow(/Conformance/);
  });
  });

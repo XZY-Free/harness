@@ -39,7 +39,13 @@ import {
 } from "@/lib/publications/persistence/publication-record";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
-import { and, desc, eq } from "drizzle-orm";
+import { validateCompleteConformanceResult } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { ConformanceEligibilityPolicy } from "@/lib/runtime/domain/runtime-conformance-eligibility";
+import {
+ runtimeConformanceCaseResult,
+ runtimeConformanceRun,
+} from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 /** 唯一固定锁序：同一事务内必须逐条获取，禁止 Promise.all 并行锁。 */
 export const EXECUTION_BINDING_AUTHORITY_LOCK_ORDER = [
@@ -301,7 +307,10 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
  // G. 冻结 Attestation → Revocation（FOR UPDATE）— 按冻结 ID 排序逐条锁
  await lockAndVerifyAttestations(tx, input);
 
- // H. PolicyRevision（FOR UPDATE）— 状态一致性
+ // H. 冻结 ConformanceRun → CaseResult（FOR UPDATE）— 精确 Run 与完整合同
+ await lockAndVerifyConformance(tx, input, runtimeRevision);
+
+ // I. PolicyRevision（FOR UPDATE）— 状态一致性
  if (input.policyRevisionId) {
  const [policy] = await tx
  .select({ state: policyRevisionTable.revisionState })
@@ -385,6 +394,132 @@ async function lockAndVerifyPublications(
  conformanceRunId: evidence.conformanceRunId,
  },
  });
+}
+
+async function lockAndVerifyConformance(
+ tx: Transaction,
+ input: StoreExecutionBindingInput,
+ runtimeRevision: typeof runtimeRevisionTable.$inferSelect,
+): Promise<void> {
+ const evidence = input.controlPlaneEvidence;
+ const [run] = await tx
+ .select({
+ id: runtimeConformanceRun.id,
+ tenantId: runtimeConformanceRun.tenantId,
+ runtimeRevisionId: runtimeConformanceRun.runtimeRevisionId,
+ runtimeArtifactDigest: runtimeConformanceRun.runtimeArtifactDigest,
+ runtimeConfigDigest: runtimeConformanceRun.runtimeConfigDigest,
+ protocolContractRevision: runtimeConformanceRun.protocolContractRevision,
+ suiteRevision: runtimeConformanceRun.suiteRevision,
+ overallResult: runtimeConformanceRun.overallResult,
+ conformanceFormat: runtimeConformanceRun.conformanceFormat,
+ startedAt: runtimeConformanceRun.startedAt,
+ completedAt: runtimeConformanceRun.completedAt,
+ verifiedAt: runtimeConformanceRun.verifiedAt,
+ })
+ .from(runtimeConformanceRun)
+ .where(eq(runtimeConformanceRun.id, evidence.conformanceRunId))
+ .limit(1)
+ .for("update");
+ const caseResults = await tx
+ .select({
+ caseId: runtimeConformanceCaseResult.caseId,
+ passed: runtimeConformanceCaseResult.passed,
+ })
+ .from(runtimeConformanceCaseResult)
+ .where(eq(runtimeConformanceCaseResult.runId, evidence.conformanceRunId))
+ .orderBy(asc(runtimeConformanceCaseResult.caseId))
+ .for("update");
+
+ validateFrozenConformanceAuthority({
+ run: run ?? null,
+ caseResults,
+ expected: {
+ conformanceRunId: evidence.conformanceRunId,
+ tenantId: input.tenantId,
+ runtimeRevisionId: input.runtimeRevisionId,
+ runtimeArtifactDigest: evidence.runtimeArtifactDigest,
+ runtimeConfigDigest: evidence.runtimeConfigDigest,
+ protocolContractRevision: runtimeRevision.protocolContractRevision,
+ },
+ });
+}
+
+type FrozenConformanceRun = {
+ id: string;
+ tenantId: string;
+ runtimeRevisionId: string;
+ runtimeArtifactDigest: string;
+ runtimeConfigDigest: string;
+ protocolContractRevision: string;
+ suiteRevision: string;
+ overallResult: "passed" | "failed" | "error" | "cancelled";
+ conformanceFormat: "standard_dsse";
+ startedAt: Date;
+ completedAt: Date | null;
+ verifiedAt: Date | null;
+};
+
+type FrozenConformanceExpectation = {
+ conformanceRunId: string;
+ tenantId: string;
+ runtimeRevisionId: string;
+ runtimeArtifactDigest: string;
+ runtimeConfigDigest: string;
+ protocolContractRevision: string;
+};
+
+export function validateFrozenConformanceAuthority(input: {
+ run: FrozenConformanceRun | null;
+ caseResults: Array<{ caseId: string; passed: boolean }>;
+ expected: FrozenConformanceExpectation;
+}): void {
+ const { run, caseResults, expected } = input;
+ if (!run || run.id !== expected.conformanceRunId) {
+ throw evidenceError("冻结 ConformanceRun 不存在或 ID 不一致");
+ }
+ if (
+ !(run.completedAt instanceof Date) ||
+ !Number.isFinite(run.completedAt.getTime()) ||
+ run.completedAt < run.startedAt ||
+ !(run.verifiedAt instanceof Date) ||
+ !Number.isFinite(run.verifiedAt.getTime())
+ ) {
+ throw evidenceError("冻结 ConformanceRun 未完成或未验证");
+ }
+
+ const completeResult = validateCompleteConformanceResult(caseResults);
+ if (!completeResult.valid) {
+ throw evidenceError(completeResult.reason);
+ }
+
+ const eligibility = ConformanceEligibilityPolicy.isEligible(
+ {
+ runId: run.id,
+ tenantId: run.tenantId,
+ runtimeRevisionId: run.runtimeRevisionId,
+ overallResult: run.overallResult,
+ runtimeArtifactDigest: run.runtimeArtifactDigest,
+ runtimeConfigDigest: run.runtimeConfigDigest,
+ protocolContractRevision: run.protocolContractRevision,
+ suiteRevision: run.suiteRevision,
+ conformanceFormat: run.conformanceFormat,
+ caseResults,
+ },
+ {
+ expectedTenantId: expected.tenantId,
+ expectedRuntimeRevisionId: expected.runtimeRevisionId,
+ expectedRuntimeArtifactDigest: expected.runtimeArtifactDigest,
+ expectedRuntimeConfigDigest: expected.runtimeConfigDigest,
+ expectedProtocolContractRevision: expected.protocolContractRevision,
+ allowedFormats: ["standard_dsse"],
+ },
+ );
+ if (!eligibility.eligible) {
+ throw evidenceError(
+ `冻结 ConformanceRun 不满足执行资格: ${eligibility.errors.map((error) => error.code).join(",")}`,
+ );
+ }
 }
 
 async function lockAndVerifyAttestations(
