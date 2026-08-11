@@ -33,11 +33,14 @@ export interface HostedProvisioningRequestDTO {
   agent_id: string;
   agent_revision_id: string;
   route_scope_key: string;
+  desired_runtime_key: string;
   state: HostedProvisioningState;
   current_step: ProvisioningStep | null;
   last_completed_step: ProvisioningStep | null;
   attempt_count: number;
   next_attempt_at: string | null;
+  last_attempt_at: string | null;
+  lease_expires_at: string | null;
   last_error: string | null;
   /** Checkpoint 字段 — 步骤产出。 */
   agent_revision_id_checkpoint: string | null;
@@ -55,8 +58,9 @@ export interface HostedProvisioningRequestDTO {
   route_revision_id: string | null;
   route_activation_id: string | null;
   projection_version_no: number | null;
+  workflow_version: string;
   created_at: string;
-  updated_at: string | null;
+  updated_at: string;
 }
 
 /** 请求 Hosted 供应。 */
@@ -64,4 +68,5 @@ export interface RequestHostedProvisioningRequest {
   agent_id: string;
   agent_revision_id: string;
   route_scope_key: string;
+  desired_runtime_key?: string;
 }
