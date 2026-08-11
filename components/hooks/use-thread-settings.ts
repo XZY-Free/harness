@@ -1,5 +1,5 @@
 /**
- * V11 员工端 Thread 默认设置 Hook（S10-W04）。
+ * 员工端 Thread 默认设置 Hook。
  *
  * 事实源：
  * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
@@ -19,7 +19,7 @@
  * 使用：
  * ```tsx
  * function SettingsBar({ thread, onPatched }: { thread: ClientThread; onPatched: () => void }) {
- *   const { patchSettings, busy, error, clearError } = useV11ThreadSettings({ threadId: thread.id });
+ *   const { patchSettings, busy, error, clearError } = useThreadSettings({ threadId: thread.id });
  *   const handleModelChange = (modelRef: string) => {
  *     void patchSettings({
  *       expectedVersionNo: thread.version_no,
@@ -45,7 +45,7 @@ export interface ThreadSettingsUpdate {
 }
 
 /** Hook 返回值。 */
-export interface UseV11ThreadSettingsResult {
+export interface UseThreadSettingsResult {
   /** 是否正在 PATCH。 */
   readonly busy: boolean;
   /** 错误。 */
@@ -82,14 +82,14 @@ async function parseError(response: Response): Promise<ClientVisibleError> {
   };
 }
 
-interface UseV11ThreadSettingsParams {
+interface UseThreadSettingsParams {
   readonly threadId: string;
 }
 
-/** V11 Thread 设置 Hook。 */
-export function useV11ThreadSettings({
+/** Thread 设置 Hook。 */
+export function useThreadSettings({
   threadId,
-}: UseV11ThreadSettingsParams): UseV11ThreadSettingsResult {
+}: UseThreadSettingsParams): UseThreadSettingsResult {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ClientVisibleError | null>(null);
 

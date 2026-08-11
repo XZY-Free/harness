@@ -1,7 +1,7 @@
 "use client";
 
-import { cn } from "@/lib/utils";
 import type { ClientNewThreadSubmission } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 import type { AgentOption } from "./input/input-popovers";
 import { useOptionalSidebar } from "./sidebar/sidebar-context";

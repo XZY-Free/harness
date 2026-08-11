@@ -1,5 +1,5 @@
 /**
- * V11 员工端 Thread 客户端（高层 API）。
+ * 员工端 Thread 客户端（高层 API）。
  *
  * 职责（S10-W01）：
  * - 加载 snapshot（GET /api/v1/threads/{id}/items），建立基线。

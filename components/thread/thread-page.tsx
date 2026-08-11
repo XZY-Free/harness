@@ -1,5 +1,5 @@
 /**
- * V11 Thread 页面（S10-W02 + S10-W03 + S10-W04 + S10-W06）。
+ * Thread 页面。
  *
  * 事实源：
  * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
@@ -12,7 +12,7 @@
  *
  * 职责：
  * - 组合 ThreadHeader（顶部固定）+ ThreadTimeline（时间线）+ ThreadInput（输入框，内嵌运行控制与待办队列）。
- * - 加载 Thread 详情（useV11ThreadDetail）+ Item 投影（useV11Thread）。
+ * - 加载 Thread 详情（useThreadDetail）+ Item 投影（useThread）。
  * - SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）。
  * - 错误展示（visibleError → ErrorCard）。
  * - W3-4：输入区集成 ＋菜单、助手选择器、模型选择器；CatalogSettingsBar 撤除。
@@ -35,9 +35,9 @@
  */
 "use client";
 
-import { useV11Thread } from "@/components/hooks/use-thread";
-import { useV11ThreadDetail } from "@/components/hooks/use-thread-detail";
-import { useV11ThreadSettings } from "@/components/hooks/use-thread-settings";
+import { useThread } from "@/components/hooks/use-thread";
+import { useThreadDetail } from "@/components/hooks/use-thread-detail";
+import { useThreadSettings } from "@/components/hooks/use-thread-settings";
 import { apiFetch } from "@/lib/api-fetch";
 import { cn } from "@/lib/utils";
 import { PanelRight } from "lucide-react";
@@ -75,12 +75,12 @@ export function ThreadPage({
     visibleError,
     lastAppliedEventSequence,
     resnapshot,
-  } = useV11Thread(threadId);
+  } = useThread(threadId);
 
-  const { thread, activeGoal, latestTurn, loading, error, refresh } = useV11ThreadDetail(threadId);
+  const { thread, activeGoal, latestTurn, loading, error, refresh } = useThreadDetail(threadId);
 
   // W04：Thread 默认设置 PATCH（Model / Environment）
-  const { patchSettings, busy: settingsBusy } = useV11ThreadSettings({ threadId });
+  const { patchSettings, busy: settingsBusy } = useThreadSettings({ threadId });
   const [locateItem, setLocateItem] = useState<{ itemId: string; requestId: number } | null>(null);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
 

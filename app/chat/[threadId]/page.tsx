@@ -1,4 +1,4 @@
-import { ThreadPage } from "@/components/thread/v11-thread-page";
+import { ThreadPage } from "@/components/thread/thread-page";
 import { WebNewThreadPage } from "@/components/thread/web-new-thread-page";
 import { notFound } from "next/navigation";
 

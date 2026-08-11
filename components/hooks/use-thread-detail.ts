@@ -1,5 +1,5 @@
 /**
- * V11 员工端 Thread 详情 Hook（S10-W02）。
+ * 员工端 Thread 详情 Hook。
  *
  * 事实源：
  * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
@@ -8,7 +8,7 @@
  * 职责：
  * - 加载 Thread 详情（含 active Goal + 最新 Turn）。
  * - 加载 Turn 列表（用于推导当前任务状态）。
- * - 与 useV11Thread 独立：Thread 详情不走 SSE 事件流，是按需查询。
+ * - 与 useThread 独立：Thread 详情不走 SSE 事件流，是按需查询。
  * - 当 SSE 事件到达时（turn.accepted / turn.state_changed / thread.updated），
  *   客户端可调用 refresh() 重新加载 Thread 详情。
  *
@@ -16,7 +16,7 @@
  * ```tsx
  * function ThreadHeader({ threadId }: { threadId: string }) {
  *   const { thread, activeGoal, latestTurn, turns, loading, error, refresh } =
- *     useV11ThreadDetail(threadId);
+ *     useThreadDetail(threadId);
  *   if (loading) return <Spinner />;
  *   if (error) return <ErrorCard error={error} onRetry={refresh} />;
  *   return <Header thread={thread} goal={activeGoal} turn={latestTurn} />;
@@ -36,7 +36,7 @@ import type {
 import { useCallback, useEffect, useState } from "react";
 
 /** Hook 返回值。 */
-export interface UseV11ThreadDetailResult {
+export interface UseThreadDetailResult {
   /** Thread 详情。 */
   readonly thread: ClientThreadResponse["thread"] | null;
   /** active Goal。 */
@@ -53,8 +53,8 @@ export interface UseV11ThreadDetailResult {
   readonly refresh: () => Promise<void>;
 }
 
-/** V11 Thread 详情 Hook。 */
-export function useV11ThreadDetail(threadId: string): UseV11ThreadDetailResult {
+/** Thread 详情 Hook。 */
+export function useThreadDetail(threadId: string): UseThreadDetailResult {
   const [thread, setThread] = useState<ClientThreadResponse["thread"] | null>(null);
   const [activeGoal, setActiveGoal] = useState<ClientThreadResponse["active_goal"] | null>(null);
   const [latestTurn, setLatestTurn] = useState<ClientThreadResponse["latest_turn"] | null>(null);
@@ -144,7 +144,7 @@ export function useV11ThreadDetail(threadId: string): UseV11ThreadDetailResult {
   }, [load]);
 
   // refresh 供 SSE 事件触发的后台刷新使用 → silent=true 不打断已显示的 UI。
-  // 显式重试场景（错误页「重试」按钮）走 useV11Thread 的 resnapshot()，不走 refresh。
+  // 显式重试场景（错误页「重试」按钮）走 useThread 的 resnapshot()，不走 refresh。
   const refresh = useCallback(() => load({ silent: true }), [load]);
 
   return {

@@ -1,5 +1,5 @@
 /**
- * V11 员工端共享类型。
+ * Thread Client Types（线程客户端类型）。
  *
  * 事实源：
  * - docs/solutions/v11-agentkit-platform/11-api-and-event-boundaries.md /（Item 响应、SSE 投影）
@@ -123,7 +123,7 @@ export interface ClientTransientDelta {
 // ─── Error ───────────────────────────────────────────────────
 
 /**
- * V11 错误 Envelope（）。
+ * API Error Envelope（接口错误封装）。
  *
  * 与服务端 lib/http.ts 的 apiError 输出一致。
  */

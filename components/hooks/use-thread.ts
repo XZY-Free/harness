@@ -1,5 +1,5 @@
 /**
- * V11 员工端 Thread Hook（S10-W01）。
+ * 员工端 Thread Hook。
  *
  * 事实源：
  * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
@@ -15,7 +15,7 @@
  * ```tsx
  * function ThreadView({ threadId }: { threadId: string }) {
  *   const { items, streamStatus, visibleError, snapshotStatus, resnapshot } =
- *     useV11Thread(threadId);
+ *     useThread(threadId);
  *   if (snapshotStatus === "loading") return <Spinner />;
  *   if (visibleError) return <ErrorCard error={visibleError} onRetry={resnapshot} />;
  *   return <Timeline items={items} streamStatus={streamStatus} />;
@@ -36,7 +36,7 @@ import {
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 /** Hook 返回值。 */
-export interface UseV11ThreadResult {
+export interface UseThreadResult {
   /** 当前 Thread id。 */
   readonly threadId: string;
   /** Item 投影（按 item_sequence 升序）。 */
@@ -57,8 +57,8 @@ export interface UseV11ThreadResult {
   readonly resnapshot: () => Promise<void>;
 }
 
-/** V11 Thread Hook。 */
-export function useV11Thread(threadId: string): UseV11ThreadResult {
+/** Thread Hook。 */
+export function useThread(threadId: string): UseThreadResult {
   // threadId 变化时重建客户端
   const clientRef = useRef<ThreadClient | null>(null);
   const client = useMemo<ThreadClient>(() => {

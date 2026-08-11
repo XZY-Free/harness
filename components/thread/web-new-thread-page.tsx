@@ -5,7 +5,7 @@ import { createNewThreadSession, loadThreadShell } from "@/lib/client/new-thread
 import type { ClientThreadShellResponse } from "@/lib/client/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { NewThreadPage } from "./v11-new-thread-page";
+import { NewThreadPage } from "./new-thread-page";
 
 export function WebNewThreadPage() {
   const router = useRouter();

@@ -1,8 +1,8 @@
-import { DesktopSidebar } from "@/components/desktop/sidebar/desktop-sidebar";
-import { SidebarProvider } from "@/components/desktop/sidebar/sidebar-context";
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
-import { NewThreadPage } from "@/components/thread/v11-new-thread-page";
-import { ThreadPage } from "@/components/thread/v11-thread-page";
+import { NewThreadPage } from "@/components/thread/new-thread-page";
+import { DesktopSidebar } from "@/components/thread/sidebar/desktop-sidebar";
+import { SidebarProvider } from "@/components/thread/sidebar/sidebar-context";
+import { ThreadPage } from "@/components/thread/thread-page";
 import { createNewThreadSession, loadThreadShell } from "@/lib/client/new-thread-session";
 import type {
   ClientNewThreadSubmission,

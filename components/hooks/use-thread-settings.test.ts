@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import { useV11ThreadSettings } from "./use-thread-settings";
+import { useThreadSettings } from "./use-thread-settings";
 
 afterEach(() => {
   fetchMock.mockReset();
@@ -29,14 +29,14 @@ beforeEach(() => {
   fetchMock.mockReset();
 });
 
-describe("useV11ThreadSettings", () => {
+describe("useThreadSettings", () => {
   it("PATCH 成功返回 true 且无 error", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ thread_id: "t1", etag: "thread-settings-2" }), {
         status: 200,
       }),
     );
-    const { result } = renderHook(() => useV11ThreadSettings({ threadId: "t1" }));
+    const { result } = renderHook(() => useThreadSettings({ threadId: "t1" }));
     let ok = false;
     await act(async () => {
       ok = await result.current.patchSettings({
@@ -68,7 +68,7 @@ describe("useV11ThreadSettings", () => {
         { status: 412 },
       ),
     );
-    const { result } = renderHook(() => useV11ThreadSettings({ threadId: "t1" }));
+    const { result } = renderHook(() => useThreadSettings({ threadId: "t1" }));
     let ok = true;
     await act(async () => {
       ok = await result.current.patchSettings({
@@ -94,7 +94,7 @@ describe("useV11ThreadSettings", () => {
         { status: 400 },
       ),
     );
-    const { result } = renderHook(() => useV11ThreadSettings({ threadId: "t1" }));
+    const { result } = renderHook(() => useThreadSettings({ threadId: "t1" }));
     await act(async () => {
       await result.current.patchSettings({
         expectedVersionNo: 1,
@@ -106,7 +106,7 @@ describe("useV11ThreadSettings", () => {
 
   it("网络异常转化为 NETWORK_ERROR", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
-    const { result } = renderHook(() => useV11ThreadSettings({ threadId: "t1" }));
+    const { result } = renderHook(() => useThreadSettings({ threadId: "t1" }));
     let ok = true;
     await act(async () => {
       ok = await result.current.patchSettings({
@@ -119,7 +119,7 @@ describe("useV11ThreadSettings", () => {
   });
 
   it("空更新（无字段）返回 false 并设置参数错误", async () => {
-    const { result } = renderHook(() => useV11ThreadSettings({ threadId: "t1" }));
+    const { result } = renderHook(() => useThreadSettings({ threadId: "t1" }));
     let ok = true;
     await act(async () => {
       ok = await result.current.patchSettings({
@@ -141,7 +141,7 @@ describe("useV11ThreadSettings", () => {
           resolveFirst = resolve;
         }),
     );
-    const { result } = renderHook(() => useV11ThreadSettings({ threadId: "t1" }));
+    const { result } = renderHook(() => useThreadSettings({ threadId: "t1" }));
     // 发起第一次 PATCH（不等待完成）
     let firstOk: boolean | null = null;
     act(() => {
@@ -183,7 +183,7 @@ describe("useV11ThreadSettings", () => {
 
   it("clearError 清空错误", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
-    const { result } = renderHook(() => useV11ThreadSettings({ threadId: "t1" }));
+    const { result } = renderHook(() => useThreadSettings({ threadId: "t1" }));
     await act(async () => {
       await result.current.patchSettings({
         expectedVersionNo: 1,
@@ -203,7 +203,7 @@ describe("useV11ThreadSettings", () => {
         status: 200,
       }),
     );
-    const { result } = renderHook(() => useV11ThreadSettings({ threadId: "t1" }));
+    const { result } = renderHook(() => useThreadSettings({ threadId: "t1" }));
     await act(async () => {
       await result.current.patchSettings({
         expectedVersionNo: 41,
