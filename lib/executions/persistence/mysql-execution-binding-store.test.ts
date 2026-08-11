@@ -1,12 +1,15 @@
 import {
  EXECUTION_BINDING_AUTHORITY_LOCK_ORDER,
  toExecutionBinding,
+ validateFrozenArtifactAuthority,
  validateFrozenAttestationAuthority,
  validateFrozenConformanceAuthority,
  validateFrozenPolicyAuthority,
  validateFrozenProjectionAuthority,
  validateFrozenPublicationAuthority,
+ validateFrozenPublicationEvidenceDigest,
 } from "@/lib/executions/persistence/mysql-execution-binding-store";
+import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 import {
  ALL_CONFORMANCE_CASES,
  CONFORMANCE_SUITE_REVISION,
@@ -84,12 +87,15 @@ describe("ExecutionBinding authority final validation", () => {
  "AgentWithdrawalRecord",
  "RuntimePublicationRecord",
  "RuntimeWithdrawalRecord",
+ "AgentArtifact",
  "AgentArtifactAttestation",
  "AgentAttestationRevocation",
+ "RuntimeArtifact",
  "RuntimeArtifactAttestation",
  "RuntimeAttestationRevocation",
  "RuntimeConformanceRun",
  "RuntimeConformanceCaseResult",
+ "PolicySet",
  "PolicyRevision",
  "RouteEligibilityProjection",
  ]);
@@ -231,6 +237,79 @@ describe("ExecutionBinding authority final validation", () => {
  expect(source).toContain("eq(attestationRevocationRecord.attestationId, attestationId)");
  });
 
+ it("先锁 Artifact 并精确校验 Attestation 指向的制品", () => {
+ const artifact = {
+ id: "artifact-1",
+ tenantId: "tenant-1",
+ kind: "runtime_revision",
+ digest: `sha256:${"a".repeat(64)}`,
+ };
+ const expected = {
+ artifactId: "artifact-1",
+ tenantId: "tenant-1",
+ artifactKind: "runtime_revision" as const,
+ artifactDigest: `sha256:${"a".repeat(64)}`,
+ };
+ expect(() =>
+ validateFrozenArtifactAuthority({ artifact, attestationArtifactId: "artifact-1", expected }),
+ ).not.toThrow();
+ expect(() =>
+ validateFrozenArtifactAuthority({ artifact, attestationArtifactId: null, expected }),
+ ).toThrow(/Artifact/);
+ expect(() =>
+ validateFrozenArtifactAuthority({
+ artifact: { ...artifact, digest: `sha256:${"b".repeat(64)}` },
+ attestationArtifactId: "artifact-1",
+ expected,
+ }),
+ ).toThrow(/Artifact/);
+
+ const source = readFileSync(new URL("./mysql-execution-binding-store.ts", import.meta.url), "utf8");
+ expect(source).toContain('"AgentArtifact"');
+ expect(source).toContain('"RuntimeArtifact"');
+ expect(source.indexOf(".from(artifact)")).toBeLessThan(
+ source.indexOf(".from(artifactAttestation)"),
+ );
+ });
+
+ it("Publication evidenceSetDigest 必须由完整锁后证据重算一致", () => {
+ const agent = {
+ evidenceSetDigest: computePublicationEvidenceSetDigest({
+ attestationIds: ["attestation-1"],
+ conformanceRunId: null,
+ approvals: [],
+ }),
+ attestationIds: ["attestation-1"],
+ conformanceRunId: null,
+ approvals: [],
+ };
+ expect(() => validateFrozenPublicationEvidenceDigest({ publication: agent })).not.toThrow();
+
+ const runtime = {
+ evidenceSetDigest: computePublicationEvidenceSetDigest({
+ attestationIds: ["attestation-2"],
+ conformanceRunId: "run-1",
+ approvals: [],
+ additionalEvidence: { evidenceManifestDigest: "sha256:manifest" },
+ }),
+ attestationIds: ["attestation-2"],
+ conformanceRunId: "run-1",
+ approvals: [],
+ };
+ expect(() =>
+ validateFrozenPublicationEvidenceDigest({
+ publication: runtime,
+ additionalEvidence: { evidenceManifestDigest: "sha256:manifest" },
+ }),
+ ).not.toThrow();
+ expect(() =>
+ validateFrozenPublicationEvidenceDigest({
+ publication: { ...runtime, evidenceSetDigest: `sha256:${"0".repeat(64)}` },
+ additionalEvidence: { evidenceManifestDigest: "sha256:manifest" },
+ }),
+ ).toThrow(/Evidence Set Digest/);
+ });
+
  it("冻结 ConformanceRun 必须完成且满足正式合同 Case 精确全集", () => {
  const caseResults = ALL_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true }));
  const base = {
@@ -247,6 +326,7 @@ describe("ExecutionBinding authority final validation", () => {
  startedAt: new Date("2026-08-11T00:00:00.000Z"),
  completedAt: new Date("2026-08-11T00:01:00.000Z"),
  verifiedAt: new Date("2026-08-11T00:01:01.000Z"),
+ evidenceManifestDigest: `sha256:${"c".repeat(64)}`,
  },
  caseResults,
  expected: {
@@ -299,8 +379,17 @@ describe("ExecutionBinding authority final validation", () => {
 
  it("冻结 Policy 必须属于当前租户且保持 published", () => {
  const base = {
- policy: { id: "policy-revision-1", tenantId: "tenant-1", revisionState: "published" },
- expected: { policyRevisionId: "policy-revision-1", tenantId: "tenant-1" },
+ policy: {
+ id: "policy-revision-1",
+ policySetId: "policy-set-1",
+ tenantId: "tenant-1",
+ revisionState: "published",
+ },
+ expected: {
+ policyRevisionId: "policy-revision-1",
+ policySetId: "policy-set-1",
+ tenantId: "tenant-1",
+ },
  };
  expect(() => validateFrozenPolicyAuthority(base)).not.toThrow();
  expect(() =>
@@ -368,5 +457,12 @@ describe("ExecutionBinding authority final validation", () => {
  const projectionLock = source.indexOf("await lockAndVerifyProjection(tx, input)");
  expect(policyLock).toBeGreaterThan(0);
  expect(projectionLock).toBeGreaterThan(policyLock);
+ expect(source).not.toContain(".innerJoin(policySetTable");
+ const policyKeyRead = source.indexOf("const [policyKey]", policyLock);
+ const policySetLock = source.indexOf("const [policySet]", policyKeyRead);
+ const policyRevisionLock = source.indexOf("const [policyRevision]", policySetLock);
+ expect(policyKeyRead).toBeGreaterThan(policyLock);
+ expect(policySetLock).toBeGreaterThan(policyKeyRead);
+ expect(policyRevisionLock).toBeGreaterThan(policySetLock);
  });
  });

@@ -15,6 +15,7 @@
 
 import { db } from "@/lib/db/client";
 import {
+ artifact,
  artifactAttestation,
  attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
@@ -37,6 +38,7 @@ import {
  publicationRecord,
  withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
+import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
@@ -53,8 +55,9 @@ export const EXECUTION_BINDING_AUTHORITY_LOCK_ORDER = [
  "Invocation", "DeploymentRoute+DeploymentRouteSet", "RouteActivation", "RouteRevision",
  "Agent", "AgentRevision", "Runtime", "RuntimeRevision",
  "AgentPublicationRecord", "AgentWithdrawalRecord", "RuntimePublicationRecord", "RuntimeWithdrawalRecord",
- "AgentArtifactAttestation", "AgentAttestationRevocation", "RuntimeArtifactAttestation", "RuntimeAttestationRevocation",
- "RuntimeConformanceRun", "RuntimeConformanceCaseResult", "PolicyRevision", "RouteEligibilityProjection",
+ "AgentArtifact", "AgentArtifactAttestation", "AgentAttestationRevocation",
+ "RuntimeArtifact", "RuntimeArtifactAttestation", "RuntimeAttestationRevocation",
+ "RuntimeConformanceRun", "RuntimeConformanceCaseResult", "PolicySet", "PolicyRevision", "RouteEligibilityProjection",
 ] as const;
 
 export const mysqlExecutionBindingStore: ExecutionBindingStore = {
@@ -303,13 +306,17 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
  }
 
  // F. 冻结 Publication → Withdrawal（FOR UPDATE）— 严格串行、精确全集
- await lockAndVerifyPublications(tx, input);
+ const publications = await lockAndVerifyPublications(tx, input);
 
  // G. 冻结 Attestation → Revocation（FOR UPDATE）— 按冻结 ID 排序逐条锁
  await lockAndVerifyAttestations(tx, input);
 
  // H. 冻结 ConformanceRun → CaseResult（FOR UPDATE）— 精确 Run 与完整合同
- await lockAndVerifyConformance(tx, input, runtimeRevision);
+ const conformanceRun = await lockAndVerifyConformance(tx, input, runtimeRevision);
+ validateFrozenPublicationEvidenceDigest({
+ publication: publications.runtimePublication,
+ additionalEvidence: { evidenceManifestDigest: conformanceRun.evidenceManifestDigest },
+ });
 
  // I. PolicyRevision → Projection（FOR UPDATE）— 最终 authority 锁与精确冻结校验
  await lockAndVerifyPolicy(tx, input);
@@ -322,33 +329,57 @@ async function lockAndVerifyPolicy(
  input: StoreExecutionBindingInput,
 ): Promise<void> {
  if (!input.policyRevisionId) return;
- const [policy] = await tx
+ const [policyKey] = await tx
+ .select({ policySetId: policyRevisionTable.policySetId })
+ .from(policyRevisionTable)
+ .where(eq(policyRevisionTable.id, input.policyRevisionId))
+ .limit(1);
+ if (!policyKey) throw staleEvidenceError("PolicyRevision 已漂移");
+ const [policySet] = await tx
+ .select({
+ id: policySetTable.id,
+ tenantId: policySetTable.tenantId,
+ })
+ .from(policySetTable)
+ .where(eq(policySetTable.id, policyKey.policySetId))
+ .limit(1)
+ .for("update");
+ const [policyRevision] = await tx
  .select({
  id: policyRevisionTable.id,
- tenantId: policySetTable.tenantId,
+ policySetId: policyRevisionTable.policySetId,
  revisionState: policyRevisionTable.revisionState,
  })
  .from(policyRevisionTable)
- .innerJoin(policySetTable, eq(policySetTable.id, policyRevisionTable.policySetId))
  .where(eq(policyRevisionTable.id, input.policyRevisionId))
  .limit(1)
  .for("update");
  validateFrozenPolicyAuthority({
- policy: policy ?? null,
+ policy:
+ policySet && policyRevision
+ ? {
+ id: policyRevision.id,
+ policySetId: policyRevision.policySetId,
+ tenantId: policySet.tenantId,
+ revisionState: policyRevision.revisionState,
+ }
+ : null,
  expected: {
  policyRevisionId: input.policyRevisionId,
+ policySetId: policyKey.policySetId,
  tenantId: input.tenantId,
  },
  });
 }
 
 export function validateFrozenPolicyAuthority(input: {
- policy: { id: string; tenantId: string; revisionState: string } | null;
- expected: { policyRevisionId: string; tenantId: string };
+ policy: { id: string; policySetId: string; tenantId: string; revisionState: string } | null;
+ expected: { policyRevisionId: string; policySetId: string; tenantId: string };
 }): void {
  if (
  !input.policy ||
  input.policy.id !== input.expected.policyRevisionId ||
+ input.policy.policySetId !== input.expected.policySetId ||
  input.policy.tenantId !== input.expected.tenantId ||
  input.policy.revisionState !== "published"
  ) {
@@ -503,7 +534,10 @@ function staleEvidenceError(detail: string): ExecutionBindingEvidenceError {
 async function lockAndVerifyPublications(
  tx: Transaction,
  input: StoreExecutionBindingInput,
-): Promise<void> {
+): Promise<{
+ agentPublication: LockedPublicationEvidence;
+ runtimePublication: LockedPublicationEvidence;
+}> {
  const evidence = input.controlPlaneEvidence;
 
  const [agentPublication] = await tx
@@ -514,6 +548,8 @@ async function lockAndVerifyPublications(
  subjectRevisionId: publicationRecord.subjectRevisionId,
  attestationIds: publicationRecord.attestationIds,
  conformanceRunId: publicationRecord.conformanceRunId,
+ evidenceSetDigest: publicationRecord.evidenceSetDigest,
+ approvals: publicationRecord.approvals,
  })
  .from(publicationRecord)
  .where(eq(publicationRecord.id, evidence.agentPublicationRecordId))
@@ -537,6 +573,8 @@ async function lockAndVerifyPublications(
  conformanceRunId: null,
  },
  });
+ if (!agentPublication) throw evidenceError("冻结 Agent Publication 不存在");
+ validateFrozenPublicationEvidenceDigest({ publication: agentPublication });
 
  const [runtimePublication] = await tx
  .select({
@@ -546,6 +584,8 @@ async function lockAndVerifyPublications(
  subjectRevisionId: publicationRecord.subjectRevisionId,
  attestationIds: publicationRecord.attestationIds,
  conformanceRunId: publicationRecord.conformanceRunId,
+ evidenceSetDigest: publicationRecord.evidenceSetDigest,
+ approvals: publicationRecord.approvals,
  })
  .from(publicationRecord)
  .where(eq(publicationRecord.id, evidence.runtimePublicationRecordId))
@@ -569,13 +609,42 @@ async function lockAndVerifyPublications(
  conformanceRunId: evidence.conformanceRunId,
  },
  });
+ if (!runtimePublication) throw evidenceError("冻结 Runtime Publication 不存在");
+ return {
+ agentPublication,
+ runtimePublication,
+ };
+}
+
+type LockedPublicationEvidence = {
+ evidenceSetDigest: string;
+ attestationIds: string[];
+ conformanceRunId: string | null;
+ approvals: unknown[];
+};
+
+export function validateFrozenPublicationEvidenceDigest(input: {
+ publication: LockedPublicationEvidence;
+ additionalEvidence?: unknown;
+}): void {
+ const actual = computePublicationEvidenceSetDigest({
+ attestationIds: input.publication.attestationIds,
+ conformanceRunId: input.publication.conformanceRunId,
+ approvals: input.publication.approvals,
+ ...(input.additionalEvidence === undefined
+ ? {}
+ : { additionalEvidence: input.additionalEvidence }),
+ });
+ if (actual !== input.publication.evidenceSetDigest) {
+ throw evidenceError("Publication Evidence Set Digest 与锁后证据不一致");
+ }
 }
 
 async function lockAndVerifyConformance(
  tx: Transaction,
  input: StoreExecutionBindingInput,
  runtimeRevision: typeof runtimeRevisionTable.$inferSelect,
-): Promise<void> {
+): Promise<FrozenConformanceRun> {
  const evidence = input.controlPlaneEvidence;
  const [run] = await tx
  .select({
@@ -591,6 +660,7 @@ async function lockAndVerifyConformance(
  startedAt: runtimeConformanceRun.startedAt,
  completedAt: runtimeConformanceRun.completedAt,
  verifiedAt: runtimeConformanceRun.verifiedAt,
+ evidenceManifestDigest: runtimeConformanceRun.evidenceManifestDigest,
  })
  .from(runtimeConformanceRun)
  .where(eq(runtimeConformanceRun.id, evidence.conformanceRunId))
@@ -618,6 +688,8 @@ async function lockAndVerifyConformance(
  protocolContractRevision: runtimeRevision.protocolContractRevision,
  },
  });
+ if (!run) throw evidenceError("冻结 ConformanceRun 不存在");
+ return run;
 }
 
 type FrozenConformanceRun = {
@@ -633,6 +705,7 @@ type FrozenConformanceRun = {
  startedAt: Date;
  completedAt: Date | null;
  verifiedAt: Date | null;
+ evidenceManifestDigest: string;
 };
 
 type FrozenConformanceExpectation = {
@@ -704,9 +777,24 @@ async function lockAndVerifyAttestations(
  const evidence = input.controlPlaneEvidence;
 
  for (const attestationId of [...evidence.agentAttestationIds].sort()) {
+ const [attestationKey] = await tx
+ .select({ artifactId: artifactAttestation.artifactId })
+ .from(artifactAttestation)
+ .where(eq(artifactAttestation.id, attestationId))
+ .limit(1);
+ if (!attestationKey?.artifactId) {
+ throw evidenceError(`冻结 Attestation ${attestationId} 缺少 Artifact`);
+ }
+ const [artifactRow] = await tx
+ .select({ id: artifact.id, tenantId: artifact.tenantId, kind: artifact.kind, digest: artifact.digest })
+ .from(artifact)
+ .where(eq(artifact.id, attestationKey.artifactId))
+ .limit(1)
+ .for("update");
  const [attestation] = await tx
  .select({
  id: artifactAttestation.id,
+ artifactId: artifactAttestation.artifactId,
  tenantId: artifactAttestation.tenantId,
  artifactType: artifactAttestation.artifactType,
  artifactRevisionId: artifactAttestation.artifactRevisionId,
@@ -718,6 +806,16 @@ async function lockAndVerifyAttestations(
  .where(eq(artifactAttestation.id, attestationId))
  .limit(1)
  .for("update");
+ validateFrozenArtifactAuthority({
+ artifact: artifactRow ?? null,
+ attestationArtifactId: attestation?.artifactId ?? null,
+ expected: {
+ artifactId: attestationKey.artifactId,
+ tenantId: input.tenantId,
+ artifactKind: "agent_revision",
+ artifactDigest: evidence.agentArtifactDigest,
+ },
+ });
  const [revocation] = await tx
  .select({ id: attestationRevocationRecord.id })
  .from(attestationRevocationRecord)
@@ -738,9 +836,24 @@ async function lockAndVerifyAttestations(
  }
 
  for (const attestationId of [...evidence.runtimeAttestationIds].sort()) {
+ const [attestationKey] = await tx
+ .select({ artifactId: artifactAttestation.artifactId })
+ .from(artifactAttestation)
+ .where(eq(artifactAttestation.id, attestationId))
+ .limit(1);
+ if (!attestationKey?.artifactId) {
+ throw evidenceError(`冻结 Attestation ${attestationId} 缺少 Artifact`);
+ }
+ const [artifactRow] = await tx
+ .select({ id: artifact.id, tenantId: artifact.tenantId, kind: artifact.kind, digest: artifact.digest })
+ .from(artifact)
+ .where(eq(artifact.id, attestationKey.artifactId))
+ .limit(1)
+ .for("update");
  const [attestation] = await tx
  .select({
  id: artifactAttestation.id,
+ artifactId: artifactAttestation.artifactId,
  tenantId: artifactAttestation.tenantId,
  artifactType: artifactAttestation.artifactType,
  artifactRevisionId: artifactAttestation.artifactRevisionId,
@@ -752,6 +865,16 @@ async function lockAndVerifyAttestations(
  .where(eq(artifactAttestation.id, attestationId))
  .limit(1)
  .for("update");
+ validateFrozenArtifactAuthority({
+ artifact: artifactRow ?? null,
+ attestationArtifactId: attestation?.artifactId ?? null,
+ expected: {
+ artifactId: attestationKey.artifactId,
+ tenantId: input.tenantId,
+ artifactKind: "runtime_revision",
+ artifactDigest: evidence.runtimeArtifactDigest,
+ },
+ });
  const [revocation] = await tx
  .select({ id: attestationRevocationRecord.id })
  .from(attestationRevocationRecord)
@@ -769,6 +892,30 @@ async function lockAndVerifyAttestations(
  artifactDigest: evidence.runtimeArtifactDigest,
  },
  });
+ }
+}
+
+export function validateFrozenArtifactAuthority(input: {
+ artifact: { id: string; tenantId: string; kind: string; digest: string } | null;
+ attestationArtifactId: string | null;
+ expected: {
+ artifactId: string;
+ tenantId: string;
+ artifactKind: "agent_revision" | "runtime_revision";
+ artifactDigest: string;
+ };
+}): void {
+ const { artifact: artifactRow, attestationArtifactId, expected } = input;
+ if (
+ !artifactRow ||
+ !attestationArtifactId ||
+ artifactRow.id !== expected.artifactId ||
+ attestationArtifactId !== artifactRow.id ||
+ artifactRow.tenantId !== expected.tenantId ||
+ artifactRow.kind !== expected.artifactKind ||
+ artifactRow.digest !== expected.artifactDigest
+ ) {
+ throw evidenceError("冻结 Attestation 的 Artifact 权威已漂移");
  }
 }
 
