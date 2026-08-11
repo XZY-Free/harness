@@ -29,7 +29,7 @@ import type {
  StoreExecutionBindingInput,
 } from "@/lib/executions/persistence/execution-binding-store";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
-import { policyRevisionTable } from "@/lib/persistence/schema/control-plane";
+import { policyRevisionTable, policySetTable } from "@/lib/persistence/schema/control-plane";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
@@ -39,6 +39,7 @@ import {
 } from "@/lib/publications/persistence/publication-record";
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { validateCompleteConformanceResult } from "@/lib/runtime/domain/runtime-conformance-contract";
 import { ConformanceEligibilityPolicy } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 import {
@@ -310,19 +311,193 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
  // H. 冻结 ConformanceRun → CaseResult（FOR UPDATE）— 精确 Run 与完整合同
  await lockAndVerifyConformance(tx, input, runtimeRevision);
 
- // I. PolicyRevision（FOR UPDATE）— 状态一致性
- if (input.policyRevisionId) {
+ // I. PolicyRevision → Projection（FOR UPDATE）— 最终 authority 锁与精确冻结校验
+ await lockAndVerifyPolicy(tx, input);
+ await lockAndVerifyProjection(tx, input);
+ return { agentRevision, runtimeRevision };
+}
+
+async function lockAndVerifyPolicy(
+ tx: Transaction,
+ input: StoreExecutionBindingInput,
+): Promise<void> {
+ if (!input.policyRevisionId) return;
  const [policy] = await tx
- .select({ state: policyRevisionTable.revisionState })
+ .select({
+ id: policyRevisionTable.id,
+ tenantId: policySetTable.tenantId,
+ revisionState: policyRevisionTable.revisionState,
+ })
  .from(policyRevisionTable)
+ .innerJoin(policySetTable, eq(policySetTable.id, policyRevisionTable.policySetId))
  .where(eq(policyRevisionTable.id, input.policyRevisionId))
  .limit(1)
  .for("update");
- if (!policy || policy.state !== "published") {
- throw evidenceError("PolicyRevision 不可用于新执行");
+ validateFrozenPolicyAuthority({
+ policy: policy ?? null,
+ expected: {
+ policyRevisionId: input.policyRevisionId,
+ tenantId: input.tenantId,
+ },
+ });
+}
+
+export function validateFrozenPolicyAuthority(input: {
+ policy: { id: string; tenantId: string; revisionState: string } | null;
+ expected: { policyRevisionId: string; tenantId: string };
+}): void {
+ if (
+ !input.policy ||
+ input.policy.id !== input.expected.policyRevisionId ||
+ input.policy.tenantId !== input.expected.tenantId ||
+ input.policy.revisionState !== "published"
+ ) {
+ throw staleEvidenceError("PolicyRevision 已漂移");
  }
+}
+
+async function lockAndVerifyProjection(
+ tx: Transaction,
+ input: StoreExecutionBindingInput,
+): Promise<void> {
+ const evidence = input.controlPlaneEvidence;
+ const [projection] = await tx
+ .select({
+ routeId: routeEligibilityProjection.routeId,
+ tenantId: routeEligibilityProjection.tenantId,
+ eligibilityState: routeEligibilityProjection.eligibilityState,
+ activationState: routeEligibilityProjection.activationState,
+ projectionVersionNo: routeEligibilityProjection.projectionVersionNo,
+ routeRevisionId: routeEligibilityProjection.routeRevisionId,
+ routeActivationId: routeEligibilityProjection.routeActivationId,
+ agentRevisionId: routeEligibilityProjection.agentRevisionId,
+ runtimeRevisionId: routeEligibilityProjection.runtimeRevisionId,
+ policyRevisionId: routeEligibilityProjection.policyRevisionId,
+ routeContentDigest: routeEligibilityProjection.routeContentDigest,
+ agentArtifactDigest: routeEligibilityProjection.agentArtifactDigest,
+ runtimeArtifactDigest: routeEligibilityProjection.runtimeArtifactDigest,
+ runtimeConfigDigest: routeEligibilityProjection.runtimeConfigDigest,
+ capabilityCompatibilityDigest: routeEligibilityProjection.capabilityCompatibilityDigest,
+ agentPublicationRecordId: routeEligibilityProjection.agentPublicationRecordId,
+ runtimePublicationRecordId: routeEligibilityProjection.runtimePublicationRecordId,
+ agentAttestationIds: routeEligibilityProjection.agentAttestationIds,
+ runtimeAttestationIds: routeEligibilityProjection.runtimeAttestationIds,
+ conformanceRunId: routeEligibilityProjection.conformanceRunId,
+ })
+ .from(routeEligibilityProjection)
+ .where(
+ and(
+ eq(routeEligibilityProjection.routeId, input.deploymentRouteId),
+ eq(routeEligibilityProjection.tenantId, input.tenantId),
+ ),
+ )
+ .limit(1)
+ .for("update");
+ validateFrozenProjectionAuthority({
+ projection: projection ?? null,
+ expected: {
+ routeId: input.deploymentRouteId,
+ tenantId: input.tenantId,
+ projectionVersionNo: input.projectionVersionNo,
+ routeRevisionId: evidence.routeRevisionId,
+ routeActivationId: evidence.routeActivationId,
+ agentRevisionId: input.agentRevisionId,
+ runtimeRevisionId: input.runtimeRevisionId,
+ policyRevisionId: input.policyRevisionId,
+ routeContentDigest: evidence.routeContentDigest,
+ agentArtifactDigest: evidence.agentArtifactDigest,
+ runtimeArtifactDigest: evidence.runtimeArtifactDigest,
+ runtimeConfigDigest: evidence.runtimeConfigDigest,
+ capabilityManifestDigest: evidence.capabilityManifestDigest,
+ agentPublicationRecordId: evidence.agentPublicationRecordId,
+ runtimePublicationRecordId: evidence.runtimePublicationRecordId,
+ agentAttestationIds: evidence.agentAttestationIds,
+ runtimeAttestationIds: evidence.runtimeAttestationIds,
+ conformanceRunId: evidence.conformanceRunId,
+ },
+ });
+}
+
+type FrozenProjectionRow = {
+ routeId: string;
+ tenantId: string;
+ eligibilityState: "eligible" | "ineligible" | "pending_rebuild";
+ activationState: "active" | "disabled";
+ projectionVersionNo: number;
+ routeRevisionId: string;
+ routeActivationId: string;
+ agentRevisionId: string;
+ runtimeRevisionId: string;
+ policyRevisionId: string | null;
+ routeContentDigest: string;
+ agentArtifactDigest: string | null;
+ runtimeArtifactDigest: string | null;
+ runtimeConfigDigest: string | null;
+ capabilityCompatibilityDigest: string;
+ agentPublicationRecordId: string | null;
+ runtimePublicationRecordId: string | null;
+ agentAttestationIds: string[] | null;
+ runtimeAttestationIds: string[] | null;
+ conformanceRunId: string | null;
+};
+
+type FrozenProjectionExpectation = {
+ routeId: string;
+ tenantId: string;
+ projectionVersionNo: number;
+ routeRevisionId: string;
+ routeActivationId: string;
+ agentRevisionId: string;
+ runtimeRevisionId: string;
+ policyRevisionId: string | null;
+ routeContentDigest: string;
+ agentArtifactDigest: string;
+ runtimeArtifactDigest: string;
+ runtimeConfigDigest: string;
+ capabilityManifestDigest: string;
+ agentPublicationRecordId: string;
+ runtimePublicationRecordId: string;
+ agentAttestationIds: string[];
+ runtimeAttestationIds: string[];
+ conformanceRunId: string;
+};
+
+export function validateFrozenProjectionAuthority(input: {
+ projection: FrozenProjectionRow | null;
+ expected: FrozenProjectionExpectation;
+}): void {
+ const { projection, expected } = input;
+ if (
+ !projection ||
+ projection.routeId !== expected.routeId ||
+ projection.tenantId !== expected.tenantId ||
+ projection.eligibilityState !== "eligible" ||
+ projection.activationState !== "active" ||
+ projection.projectionVersionNo !== expected.projectionVersionNo ||
+ projection.routeRevisionId !== expected.routeRevisionId ||
+ projection.routeActivationId !== expected.routeActivationId ||
+ projection.agentRevisionId !== expected.agentRevisionId ||
+ projection.runtimeRevisionId !== expected.runtimeRevisionId ||
+ projection.policyRevisionId !== expected.policyRevisionId ||
+ projection.routeContentDigest !== expected.routeContentDigest ||
+ projection.agentArtifactDigest !== expected.agentArtifactDigest ||
+ projection.runtimeArtifactDigest !== expected.runtimeArtifactDigest ||
+ projection.runtimeConfigDigest !== expected.runtimeConfigDigest ||
+ projection.capabilityCompatibilityDigest !== expected.capabilityManifestDigest ||
+ projection.agentPublicationRecordId !== expected.agentPublicationRecordId ||
+ projection.runtimePublicationRecordId !== expected.runtimePublicationRecordId ||
+ projection.conformanceRunId !== expected.conformanceRunId ||
+ !projection.agentAttestationIds ||
+ !projection.runtimeAttestationIds ||
+ !areExactNonEmptyIdSets(projection.agentAttestationIds, expected.agentAttestationIds) ||
+ !areExactNonEmptyIdSets(projection.runtimeAttestationIds, expected.runtimeAttestationIds)
+ ) {
+ throw staleEvidenceError("RouteEligibilityProjection 已漂移");
  }
- return { agentRevision, runtimeRevision };
+}
+
+function staleEvidenceError(detail: string): ExecutionBindingEvidenceError {
+ return evidenceError(`eligibility_snapshot_stale: ${detail}`);
 }
 
 async function lockAndVerifyPublications(

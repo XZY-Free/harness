@@ -3,6 +3,8 @@ import {
  toExecutionBinding,
  validateFrozenAttestationAuthority,
  validateFrozenConformanceAuthority,
+ validateFrozenPolicyAuthority,
+ validateFrozenProjectionAuthority,
  validateFrozenPublicationAuthority,
 } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import {
@@ -293,5 +295,78 @@ describe("ExecutionBinding authority final validation", () => {
  ),
  }),
  ).toThrow(/Conformance/);
+ });
+
+ it("冻结 Policy 必须属于当前租户且保持 published", () => {
+ const base = {
+ policy: { id: "policy-revision-1", tenantId: "tenant-1", revisionState: "published" },
+ expected: { policyRevisionId: "policy-revision-1", tenantId: "tenant-1" },
+ };
+ expect(() => validateFrozenPolicyAuthority(base)).not.toThrow();
+ expect(() =>
+ validateFrozenPolicyAuthority({
+ ...base,
+ policy: { ...base.policy, tenantId: "other-tenant" },
+ }),
+ ).toThrow(/stale/);
+ expect(() =>
+ validateFrozenPolicyAuthority({
+ ...base,
+ policy: { ...base.policy, revisionState: "withdrawn" },
+ }),
+ ).toThrow(/stale/);
+ });
+
+ it("最终 Projection 必须与所有冻结 authority 字段精确一致", () => {
+ const expected = {
+ routeId: "route-1",
+ tenantId: "tenant-1",
+ projectionVersionNo: 7,
+ routeRevisionId: "route-revision-1",
+ routeActivationId: "activation-1",
+ agentRevisionId: "agent-revision-1",
+ runtimeRevisionId: "runtime-revision-1",
+ policyRevisionId: "policy-revision-1",
+ routeContentDigest: `sha256:${"1".repeat(64)}`,
+ agentArtifactDigest: `sha256:${"2".repeat(64)}`,
+ runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
+ runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
+ capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
+ agentPublicationRecordId: "agent-publication-1",
+ runtimePublicationRecordId: "runtime-publication-1",
+ agentAttestationIds: ["agent-attestation-1"],
+ runtimeAttestationIds: ["runtime-attestation-1"],
+ conformanceRunId: "conformance-run-1",
+ };
+ const projection = {
+ ...expected,
+ eligibilityState: "eligible" as const,
+ activationState: "active" as const,
+ capabilityCompatibilityDigest: expected.capabilityManifestDigest,
+ };
+
+ expect(() => validateFrozenProjectionAuthority({ projection, expected })).not.toThrow();
+ for (const changed of [
+ { projectionVersionNo: 8 },
+ { routeActivationId: "new-activation" },
+ { eligibilityState: "ineligible" as const },
+ { activationState: "disabled" as const },
+ { runtimeArtifactDigest: `sha256:${"9".repeat(64)}` },
+ { capabilityCompatibilityDigest: `sha256:${"9".repeat(64)}` },
+ { agentAttestationIds: ["agent-attestation-1", "agent-attestation-2"] },
+ { runtimeAttestationIds: [] },
+ ]) {
+ expect(() =>
+ validateFrozenProjectionAuthority({ projection: { ...projection, ...changed }, expected }),
+ ).toThrow(/stale/);
+ }
+ });
+
+ it("Policy 后最终锁 Projection", () => {
+ const source = readFileSync(new URL("./mysql-execution-binding-store.ts", import.meta.url), "utf8");
+ const policyLock = source.indexOf("await lockAndVerifyPolicy(tx, input)");
+ const projectionLock = source.indexOf("await lockAndVerifyProjection(tx, input)");
+ expect(policyLock).toBeGreaterThan(0);
+ expect(projectionLock).toBeGreaterThan(policyLock);
  });
  });
