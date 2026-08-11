@@ -1,41 +1,17 @@
-import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
 import { DesktopSidebar } from "@/components/desktop/sidebar/desktop-sidebar";
 import { SidebarProvider } from "@/components/desktop/sidebar/sidebar-context";
-import { NewThreadPage, type NewThreadSubmission } from "@/components/thread/v11-new-thread-page";
+import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
+import { NewThreadPage } from "@/components/thread/v11-new-thread-page";
 import { ThreadPage } from "@/components/thread/v11-thread-page";
-import { apiFetch } from "@/lib/api-fetch";
+import { createNewThreadSession, loadThreadShell } from "@/lib/client/new-thread-session";
+import type {
+  ClientNewThreadSubmission,
+  ClientThreadShellResponse,
+} from "@/lib/client/types";
 import { getDesktopCapabilities } from "@/lib/desktop/capabilities";
-import { fallbackTitleFromUserText } from "@/lib/thread-title";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { parseDesktopRoute } from "../desktop-route";
 import { navigateDesktop, usePathname } from "../next-navigation";
-
-interface DesktopThreadSummary {
-  readonly id: string;
-  readonly title: string | null;
-  readonly primary_agent_id: string;
-}
-
-interface DesktopAgentSummary {
-  readonly id: string;
-  readonly agent_key: string;
-  readonly display_name: string;
-}
-
-interface DesktopShellResponse {
-  readonly viewer_id: string;
-  readonly threads: readonly DesktopThreadSummary[];
-  readonly agents: readonly DesktopAgentSummary[];
-}
-
-interface PendingNewThread {
-  readonly thread: DesktopThreadSummary;
-  readonly turnIdempotencyKey: string;
-}
-
-function createIdempotencyKey(): string {
-  return crypto.randomUUID();
-}
 
 function DesktopError({ children }: { readonly children: ReactNode }) {
   return (
@@ -48,18 +24,14 @@ function DesktopError({ children }: { readonly children: ReactNode }) {
 function DesktopShell() {
   const pathname = usePathname();
   const route = parseDesktopRoute(pathname);
-  const [shell, setShell] = useState<DesktopShellResponse | null>(null);
+  const [shell, setShell] = useState<ClientThreadShellResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newThreadError, setNewThreadError] = useState<string | null>(null);
-  const pendingNewThread = useRef<PendingNewThread | null>(null);
+  const newThreadSession = useRef(createNewThreadSession()).current;
 
   useEffect(() => {
     let active = true;
-    void apiFetch("/api/v1/threads", { credentials: "include", cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("无法读取会话列表");
-        return (await response.json()) as DesktopShellResponse;
-      })
+    void loadThreadShell()
       .then((data) => {
         if (active) setShell(data);
       })
@@ -81,62 +53,24 @@ function DesktopShell() {
     text,
     agentId,
     modelRef,
-  }: NewThreadSubmission): Promise<boolean> => {
+  }: ClientNewThreadSubmission): Promise<boolean> => {
     setNewThreadError(null);
     try {
-      let pending = pendingNewThread.current;
-      if (!pending) {
-        const title = fallbackTitleFromUserText(text) || "新会话";
-        const response = await apiFetch("/api/v1/threads", {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "content-type": "application/json",
-            "idempotency-key": createIdempotencyKey(),
-          },
-          body: JSON.stringify({ agent_id: agentId, title }),
-        });
-        if (!response.ok) throw new Error("创建会话失败，请稍后重试。");
-        const created = (await response.json()) as { id: string; title?: string | null };
-        pending = {
-          thread: {
-            id: created.id,
-            title: created.title ?? title,
-            primary_agent_id: agentId,
-          },
-          turnIdempotencyKey: createIdempotencyKey(),
-        };
-        pendingNewThread.current = pending;
-      }
-
-      const turnResponse = await apiFetch(`/api/v1/threads/${pending.thread.id}/turns`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": pending.turnIdempotencyKey,
-        },
-        body: JSON.stringify({
-          input: { type: "message", text },
-          ...(modelRef ? { selected_model: modelRef } : {}),
-        }),
-      });
-      if (!turnResponse.ok) throw new Error("消息发送失败，请稍后重试。");
+      const thread = await newThreadSession.submit({ text, agentId, modelRef });
 
       setShell((current) =>
         current
           ? {
               ...current,
               threads: [
-                pending.thread,
-                ...current.threads.filter((item) => item.id !== pending.thread.id),
+                thread,
+                ...current.threads.filter((item) => item.id !== thread.id),
               ],
             }
           : current,
       );
-      pendingNewThread.current = null;
       clearStoredThreadDraft("new");
-      navigateDesktop(`/desktop/chat/${pending.thread.id}`, true);
+      navigateDesktop(`/desktop/chat/${thread.id}`, true);
       return true;
     } catch (submitError) {
       setNewThreadError(

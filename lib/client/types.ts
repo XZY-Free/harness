@@ -16,6 +16,32 @@
 
 import type { DesktopOperationCategory, DesktopOperationResult } from "@/lib/desktop/capabilities";
 
+// ─── Thread Shell 与创建 ────────────────────────────────────
+
+export interface ClientThreadSummary {
+ readonly id: string;
+ readonly title: string | null;
+ readonly primary_agent_id: string;
+}
+
+export interface ClientAgentSummary {
+ readonly id: string;
+ readonly agent_key: string;
+ readonly display_name: string;
+}
+
+export interface ClientThreadShellResponse {
+ readonly viewer_id: string;
+ readonly threads: readonly ClientThreadSummary[];
+ readonly agents: readonly ClientAgentSummary[];
+}
+
+export interface ClientNewThreadSubmission {
+ readonly text: string;
+ readonly agentId: string;
+ readonly modelRef: string | null;
+}
+
 // ─── Item ────────────────────────────────────────────────────
 
 /** Item 类型（与服务端 THREAD_ITEM_TYPES 一致）。 */
