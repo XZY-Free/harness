@@ -685,27 +685,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "revokedAt": {
-          "name": "revokedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "revokedBy": {
-          "name": "revokedBy",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "revocationReason": {
-          "name": "revocationReason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "createdAt": {
           "name": "createdAt",
           "type": "datetime(3)",
@@ -748,14 +727,6 @@
           "columns": [
             "tenantId",
             "artifactDigest"
-          ],
-          "isUnique": false
-        },
-        "ArtifactAttestation_tenant_revoked_idx": {
-          "name": "ArtifactAttestation_tenant_revoked_idx",
-          "columns": [
-            "tenantId",
-            "revokedAt"
           ],
           "isUnique": false
         }
@@ -13703,7 +13674,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "false"
+          "default": "CAST(false AS JSON)"
         },
         "redaction_summary": {
           "name": "redaction_summary",

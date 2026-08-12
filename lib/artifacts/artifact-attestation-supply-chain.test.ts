@@ -237,11 +237,11 @@ describe("S12-W04 provenance 摘要持久化", () => {
 
     const fetched = await getAttestationById(tenantId, attestation.id);
     expect(fetched).not.toBeNull();
-    expect(fetched?.sourceRevision).toBe("git:abc123def456");
-    expect(fetched?.buildPipeline).toBe("ci-cd-pipeline-1");
-    expect(fetched?.dependencyLockFileHash).toBe("package-lock.json:sha256:lockhash");
-    expect(fetched?.buildTime).toEqual(new Date("2026-07-15T01:00:00.000Z"));
-    expect(fetched?.scanSummaryJson).not.toBeNull();
+    expect(fetched?.attestation.sourceRevision).toBe("git:abc123def456");
+    expect(fetched?.attestation.buildPipeline).toBe("ci-cd-pipeline-1");
+    expect(fetched?.attestation.dependencyLockFileHash).toBe("package-lock.json:sha256:lockhash");
+    expect(fetched?.attestation.buildTime).toEqual(new Date("2026-07-15T01:00:00.000Z"));
+    expect(fetched?.attestation.scanSummaryJson).not.toBeNull();
   });
 
   it("验证失败记录不持久化 provenance 摘要（failureCode 写入但 provenance 字段为 null）", async () => {
@@ -282,14 +282,14 @@ describe("S12-W04 provenance 摘要持久化", () => {
     const list = await listAttestationsByRevision(tenantId, "agent_revision", "rev-fail-1");
     expect(list).toHaveLength(1);
     const failed = list[0];
-    expect(failed?.verificationState).toBe("failed");
-    expect(failed?.failureCode).toBe("signature_invalid");
+    expect(failed?.attestation.verificationState).toBe("failed");
+    expect(failed?.attestation.failureCode).toBe("signature_invalid");
     // 验证失败不持久化 provenance 摘要（按当前实现：result.provenanceSummary 仅成功时存在）
-    expect(failed?.sourceRevision).toBeNull();
-    expect(failed?.buildPipeline).toBeNull();
-    expect(failed?.dependencyLockFileHash).toBeNull();
-    expect(failed?.buildTime).toBeNull();
-    expect(failed?.scanSummaryJson).toBeNull();
+    expect(failed?.attestation.sourceRevision).toBeNull();
+    expect(failed?.attestation.buildPipeline).toBeNull();
+    expect(failed?.attestation.dependencyLockFileHash).toBeNull();
+    expect(failed?.attestation.buildTime).toBeNull();
+    expect(failed?.attestation.scanSummaryJson).toBeNull();
   });
 
   it("verifyArtifactAttestation 成功返回 provenanceSummary 与 scanSummary", async () => {
@@ -468,7 +468,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
     expect(result.items).toHaveLength(4);
     expect(result.nextCursor).toBeNull();
     // 最新创建的排第一
-    expect(result.items[0]?.id).toBe(fourth.id);
+    expect(result.items[0]?.attestation.id).toBe(fourth.id);
   });
 
   it("limit 触发分页 → 返回 nextCursor", async () => {
@@ -526,7 +526,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
       limit: 10,
     });
     expect(result.items).toHaveLength(1);
-    expect(result.items[0]?.artifactType).toBe("runtime_revision");
+    expect(result.items[0]?.attestation.artifactType).toBe("runtime_revision");
   });
 
   it("按 verificationState 过滤", async () => {
@@ -562,14 +562,14 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
       limit: 10,
     });
     expect(verified.items).toHaveLength(1);
-    expect(verified.items[0]?.verificationState).toBe("verified");
+    expect(verified.items[0]?.attestation.verificationState).toBe("verified");
 
     const failed = await listAttestations(tenantId, {
       verificationState: "failed",
       limit: 10,
     });
     expect(failed.items).toHaveLength(1);
-    expect(failed.items[0]?.verificationState).toBe("failed");
+    expect(failed.items[0]?.attestation.verificationState).toBe("failed");
   });
 
   it("按 revoked=true 过滤仅返回已撤销", async () => {
@@ -591,14 +591,14 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
 
     const revokedOnly = await listAttestations(tenantId, { revoked: true, limit: 10 });
     expect(revokedOnly.items).toHaveLength(1);
-    expect(revokedOnly.items[0]?.id).toBe(att1.id);
-    expect(revokedOnly.items[0]?.revokedAt).not.toBeNull();
+    expect(revokedOnly.items[0]?.attestation.id).toBe(att1.id);
+    expect(revokedOnly.items[0]?.revocation?.revokedAt).not.toBeNull();
 
     const activeOnly = await listAttestations(tenantId, { revoked: false, limit: 10 });
     // 仅返回未撤销；rev-revoke-filter-2 创建的 attestation 未撤销
-    const activeIds = activeOnly.items.map((a) => a.id);
+    const activeIds = activeOnly.items.map((a) => a.attestation.id);
     expect(activeIds).not.toContain(att1.id);
-    expect(activeOnly.items.every((a) => a.revokedAt === null)).toBe(true);
+    expect(activeOnly.items.every((a) => a.revocation === null)).toBe(true);
   });
 
   it("跨租户隔离：他租户不可见", async () => {
@@ -633,7 +633,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
     tenantId = seeded.tenantId;
   });
 
-  it("成功撤销：设置 revokedAt/revokedBy/revocationReason + 写审计", async () => {
+  it("成功撤销：追加 AttestationRevocationRecord 权威事实 + 写审计", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
       "agent_revision",
@@ -645,15 +645,15 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
     const actor = buildActor(tenantId, "security-admin-001");
     const updated = await revokeAttestation(tenantId, attestation.id, actor, reason);
 
-    expect(updated.revokedAt).not.toBeNull();
-    expect(updated.revokedBy).toBe("security-admin-001");
-    expect(updated.revocationReason).toBe(reason);
+    expect(updated.revocation?.revokedAt).not.toBeNull();
+    expect(updated.revocation?.revokedBy).toBe("security-admin-001");
+    expect(updated.revocation?.reason).toBe(reason);
 
     // 重新读取验证持久化
     const fetched = await getAttestationById(tenantId, attestation.id);
-    expect(fetched?.revokedAt).not.toBeNull();
-    expect(fetched?.revokedBy).toBe("security-admin-001");
-    expect(fetched?.revocationReason).toBe(reason);
+    expect(fetched?.revocation?.revokedAt).not.toBeNull();
+    expect(fetched?.revocation?.revokedBy).toBe("security-admin-001");
+    expect(fetched?.revocation?.reason).toBe(reason);
 
     // 审计写入 artifact.attestation.revoke
     const auditEvents = await listAuditEvents({
@@ -687,17 +687,23 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
       "供应链密钥泄露",
     );
 
+    // 原 Attestation 事实未被改写：撤销权威在独立 AttestationRevocationRecord，
+    // ArtifactAttestation 的权威字段保持不变（撤销列已物理移除，结构上不可能被改写）。
     const [attestationRows] = (await db.execute(sql`
-      SELECT \`revokedAt\`, \`revokedBy\`, \`revocationReason\`
+      SELECT \`verificationState\`, \`artifactDigest\`, \`verificationEngineVersion\`
       FROM \`ArtifactAttestation\`
       WHERE \`id\` = ${attestation.id}
     `)) as unknown as [
-      Array<{ revokedAt: Date | null; revokedBy: string | null; revocationReason: string | null }>,
+      Array<{
+        verificationState: string;
+        artifactDigest: string;
+        verificationEngineVersion: string | null;
+      }>,
     ];
     expect(attestationRows[0]).toEqual({
-      revokedAt: null,
-      revokedBy: null,
-      revocationReason: null,
+      verificationState: attestation.verificationState,
+      artifactDigest: attestation.artifactDigest,
+      verificationEngineVersion: attestation.verificationEngineVersion,
     });
 
     const [revocations] = (await db.execute(sql`
@@ -865,7 +871,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
       "rev-revoke-verified-1",
     );
     expect(before).not.toBeNull();
-    expect(before?.id).toBe(attestation.id);
+    expect(before?.attestation.id).toBe(attestation.id);
 
     // 撤销
     await revokeAttestation(

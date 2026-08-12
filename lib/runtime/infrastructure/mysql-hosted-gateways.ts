@@ -533,15 +533,15 @@ async function loadPublicationFact(params: {
  if (!publication || withdrawal || !params.artifactId || !params.artifactDigest) return null;
  const attestationId = publication.attestationIds[0];
  if (!attestationId) return null;
- const attestation = await getAttestationById(params.tenantId, attestationId);
+ const found = await getAttestationById(params.tenantId, attestationId);
  if (
- !attestation ||
- attestation.verificationState !== "verified" ||
- attestation.revokedAt ||
- attestation.artifactRevisionId !== params.revisionId ||
- attestation.artifactType !== params.subjectType ||
- attestation.artifactId !== params.artifactId ||
- attestation.artifactDigest !== params.artifactDigest
+ !found ||
+ found.revocation ||
+ found.attestation.verificationState !== "verified" ||
+ found.attestation.artifactRevisionId !== params.revisionId ||
+ found.attestation.artifactType !== params.subjectType ||
+ found.attestation.artifactId !== params.artifactId ||
+ found.attestation.artifactDigest !== params.artifactDigest
  ) {
  return null;
  }
@@ -708,12 +708,12 @@ async function ensureVerifiedAttestation(params: {
  { verificationState: "verified" },
  );
  const matching = existing.find(
- (item) =>
- item.artifactDigest === params.evidence.artifactDigest &&
- item.dsseEnvelopeRef === params.evidence.dsseEnvelopeRef &&
- !item.revokedAt,
+ ({ attestation, revocation }) =>
+ attestation.artifactDigest === params.evidence.artifactDigest &&
+ attestation.dsseEnvelopeRef === params.evidence.dsseEnvelopeRef &&
+ !revocation,
  );
- if (matching) return matching;
+ if (matching) return matching.attestation;
 
  const verification = await verifyArtifactAttestation(
  {
@@ -759,14 +759,14 @@ async function ensureVerifiedAttestation(params: {
  params.artifactRevisionId,
  )
  ).find(
- (item) =>
- item.artifactDigest === params.evidence.artifactDigest &&
- item.dsseEnvelopeRef === params.evidence.dsseEnvelopeRef &&
- item.verificationState === verification.verificationState &&
- !item.revokedAt,
+ ({ attestation, revocation }) =>
+ attestation.artifactDigest === params.evidence.artifactDigest &&
+ attestation.dsseEnvelopeRef === params.evidence.dsseEnvelopeRef &&
+ attestation.verificationState === verification.verificationState &&
+ !revocation,
  );
  if (!winner) throw error;
- recorded = winner;
+ recorded = winner.attestation;
  }
  if (verification.verificationState === "failed") {
  throw new ArtifactAttestationFailedError(

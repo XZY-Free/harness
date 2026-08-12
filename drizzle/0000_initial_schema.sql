@@ -86,9 +86,6 @@ CREATE TABLE `ArtifactAttestation` (
 	`subjectDigest` varchar(71),
 	`verificationEngine` varchar(64),
 	`verificationEngineVersion` varchar(32),
-	`revokedAt` datetime(3),
-	`revokedBy` varchar(128),
-	`revocationReason` text,
 	`createdAt` datetime(3) NOT NULL,
 	CONSTRAINT `ArtifactAttestation_id` PRIMARY KEY(`id`),
 	CONSTRAINT `ArtifactAttestation_tenant_type_rev_digest_env_uq` UNIQUE(`tenantId`,`artifactType`,`artifactRevisionId`,`artifactDigest`,`dsseEnvelopeRef`)
@@ -2303,7 +2300,6 @@ CREATE INDEX `Agent_tenant_lifecycle_updated_idx` ON `Agent` (`tenantId`,`lifecy
 CREATE INDEX `ArtifactAttestation_artifact_idx` ON `ArtifactAttestation` (`artifactId`);--> statement-breakpoint
 CREATE INDEX `ArtifactAttestation_tenant_type_rev_state_idx` ON `ArtifactAttestation` (`tenantId`,`artifactType`,`artifactRevisionId`,`verificationState`);--> statement-breakpoint
 CREATE INDEX `ArtifactAttestation_tenant_digest_idx` ON `ArtifactAttestation` (`tenantId`,`artifactDigest`);--> statement-breakpoint
-CREATE INDEX `ArtifactAttestation_tenant_revoked_idx` ON `ArtifactAttestation` (`tenantId`,`revokedAt`);--> statement-breakpoint
 CREATE INDEX `AttestationRevocationRecord_tenant_revoked_idx` ON `AttestationRevocationRecord` (`tenantId`,`revokedAt`);--> statement-breakpoint
 CREATE INDEX `Artifact_tenant_kind_created_idx` ON `Artifact` (`tenantId`,`kind`,`createdAt`);--> statement-breakpoint
 CREATE INDEX `AuditEvent_tenant_occurred_idx` ON `AuditEvent` (`tenantId`,`occurredAt`);--> statement-breakpoint
