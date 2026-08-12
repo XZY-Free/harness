@@ -8,7 +8,7 @@
 import { db } from "@/lib/db/client";
 import { logger } from "@/lib/logger";
 import type { OutboxEventHandler } from "@/lib/routes/projection/projection-event-handlers";
-import { and, eq, lte, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   type ControlPlaneEventDelivery,
   controlPlaneEventDelivery,
@@ -294,36 +294,49 @@ export function createOutboxRelayWorker(
 
 export const mysqlOutboxRelayWorkerStore: OutboxRelayWorkerStore = {
   async recoverExpired(now) {
-    await db
-      .update(controlPlaneEventDelivery)
-      .set({ state: "pending", lockedBy: null, lockExpiresAt: null })
-      .where(
-        and(
-          eq(controlPlaneEventDelivery.state, "running"),
-          lte(controlPlaneEventDelivery.lockExpiresAt, now),
-        ),
-      );
+    // 租约列 lockExpiresAt 由 claimDeliveries 的 raw SQL 写入。raw 模板的 Date 绑定
+    // 按会话时区（本地）格式化，而 query-builder 的 datetime(3) 参数按 UTC 格式化，
+    // 二者混用会造成 8h 错位（见 claimDeliveries 注释）。故此处与 claim 保持一致，
+    // 用显式 UTC 字符串比较（与 query-builder 的 UTC 绑定同语义）。
+    const nowStr = toDatetimeUtc(now);
+    await db.execute(sql`
+      UPDATE ControlPlaneEventDelivery
+      SET state = 'pending',
+          lockedBy = NULL,
+          lockExpiresAt = NULL
+      WHERE state = 'running'
+        AND lockExpiresAt IS NOT NULL
+        AND lockExpiresAt <= ${nowStr}
+    `);
   },
 
   async claimDeliveries({ now, workerId, consumerName, batchSize, leaseMs }) {
     const lockExpiresAt = new Date(now.getTime() + leaseMs);
+    // MySQL 不允许在 IN 子查询中带 LIMIT（error 1235），须改用 UPDATE...JOIN 派生表：
+    // 派生表先按 SKIP LOCKED 挑选待投递行，再 JOIN 回原表加锁更新。
+    // nextAttemptAt/lockExpiresAt 为 datetime(3)（毫秒精度）。raw 模板的 Date 绑定按
+    // 会话时区（本地）格式化，而 query-builder（renew/retry 写这些列）按 UTC 格式化，
+    // 二者混用会错位。故把用于比较与写入的 now/lockExpiresAt 显式转为 UTC 字符串，
+    // 使 raw 与 query-builder 统一为 UTC naive datetime（见 recoverExpired 注释）。
+    const nowStr = toDatetimeUtc(now);
+    const lockExpiresAtStr = toDatetimeUtc(lockExpiresAt);
     await db.execute(sql`
-      UPDATE ControlPlaneEventDelivery
-      SET lockedBy = ${workerId},
-          lockExpiresAt = ${lockExpiresAt},
-          state = 'running',
-          attemptCount = attemptCount + 1
-      WHERE id IN (
+      UPDATE ControlPlaneEventDelivery AS t
+      JOIN (
         SELECT id FROM ControlPlaneEventDelivery
         WHERE consumerName = ${consumerName}
           AND state = 'pending'
           AND deadLetteredAt IS NULL
-          AND (nextAttemptAt IS NULL OR nextAttemptAt <= ${now})
-          AND (lockExpiresAt IS NULL OR lockExpiresAt <= ${now})
+          AND (nextAttemptAt IS NULL OR nextAttemptAt <= ${nowStr})
+          AND (lockExpiresAt IS NULL OR lockExpiresAt <= ${nowStr})
         ORDER BY createdAt ASC, id ASC
         LIMIT ${batchSize}
         FOR UPDATE SKIP LOCKED
-      )
+      ) AS sel ON sel.id = t.id
+      SET t.lockedBy = ${workerId},
+          t.lockExpiresAt = ${lockExpiresAtStr},
+          t.state = 'running',
+          t.attemptCount = t.attemptCount + 1
     `);
     return db
       .select()
@@ -421,4 +434,9 @@ export const mysqlOutboxRelayWorkerStore: OutboxRelayWorkerStore = {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 把 Date 转成 UTC naive datetime(3) 字符串，供 raw SQL 比较/写入（query-builder 同语义）。 */
+function toDatetimeUtc(d: Date): string {
+  return d.toISOString().slice(0, 23).replace("T", " ");
 }

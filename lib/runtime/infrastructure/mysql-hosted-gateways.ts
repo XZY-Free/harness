@@ -79,10 +79,11 @@ function buildRunnerIdentityRegistry(): RunnerSigningIdentityRegistry {
 const BUILTIN_HOSTED_RUNTIME_KEY = "builtin-hosted";
 const HOSTED_ACTOR_ID = "hosted-runtime-provisioner";
 const HOSTED_RUNTIME_ENDPOINT = "in-process://hosted";
-const HOSTED_RUNTIME_CAPABILITIES = {
- capabilities: ["event_stream"],
- limits: { max_invocation_seconds: 600, max_event_bytes: 1_048_576 },
-};
+// runtimeCapabilitiesJson 的权威契约是 string[]（能力名列表），
+// 见 extractRuntimeCapabilities / mysql-route-control-store（Route 资格权威）。
+// hosted runtime 声明 event_stream 能力；执行限额（600s / 1MB）由
+// dispatcher/redispatch 的默认值承载，二者数值一致，故不在此对象承载。
+const HOSTED_RUNTIME_CAPABILITIES = ["event_stream"];
 const HOSTED_RUNTIME_CONFIG_DIGEST = digest({
  protocolType: "in_process",
  endpointRef: HOSTED_RUNTIME_ENDPOINT,

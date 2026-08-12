@@ -223,7 +223,9 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
 
  async claimRequests({ workerId, leaseMs, batchSize, now }) {
  const leaseExpiresAt = new Date(now.getTime() + leaseMs);
- const nowStr = now.toISOString().slice(0, 19).replace("T", " ");
+ // nextAttemptAt/leaseExpiresAt 为 datetime(3)（毫秒精度），比较须保留毫秒，
+ // 否则 saga 在同一秒内设置的 nextAttemptAt=new Date() 会被截断为秒而永不满足 nextAttemptAt<=now。
+ const nowStr = now.toISOString().slice(0, 23).replace("T", " ");
 
  // /: 原子领取 — 含 running+expired lease（崩溃恢复）
  const ids = await db.transaction(async (tx) => {
