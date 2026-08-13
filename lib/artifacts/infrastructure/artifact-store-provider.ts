@@ -1,8 +1,8 @@
 /**
  * 制品存储与 builder 密钥注册表的运行时配置入口。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md -4.2、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md §6（artifact-attestations:verify）。
+ * 事实源：docs/architecture/security.md -4.2、
+ * docs/architecture/api-and-events.md §6（artifact-attestations:verify）。
  *
  * 职责：
  * - 为 admin route handler 提供 ManagedArtifactStore 与 BuilderKeyRegistry 的运行时实例。

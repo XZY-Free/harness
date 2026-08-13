@@ -1,10 +1,10 @@
 /**
  * ArtifactAttestation 仓储与发布门禁。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md -4.2、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md §6（artifact-attestations:verify）、
- * ../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md 。
+ * 事实源：docs/architecture/security.md -4.2、
+ * docs/architecture/api-and-events.md §6（artifact-attestations:verify）、
+ * docs/architecture/persistence.md 、
+ * docs/architecture/agent-control-plane.md 。
  *
  * 职责：
  * - insertAttestation：数据写入。
@@ -47,7 +47,10 @@ import {
  listAttestationsByDigest,
  listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
-import type { ListAttestationsOptions } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import type {
+ ArtifactAttestationWithRevocation,
+ ListAttestationsOptions,
+} from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import {
  type ArtifactAttestation,
  artifact,
@@ -241,23 +244,24 @@ export async function assertAttestationGate(
  expectedRevisionId: string,
  attestationId: string,
 ): Promise<ArtifactAttestation> {
- const attestation = await getAttestationById(tenantId, attestationId);
- if (!attestation) {
+ const found = await getAttestationById(tenantId, attestationId);
+ if (!found) {
  throw new ArtifactNotVerifiedError(
  attestationId,
  `attestation 不存在或跨租户: ${attestationId}`,
  );
  }
+ const { attestation, revocation } = found;
  if (attestation.verificationState !== "verified") {
  throw new ArtifactNotVerifiedError(
  attestationId,
  `attestation 未验证（state=${attestation.verificationState}, failureCode=${attestation.failureCode ?? "n/a"}）`,
  );
  }
- if (attestation.revokedAt !== null) {
+ if (revocation) {
  throw new ArtifactNotVerifiedError(
  attestationId,
- `attestation 已撤销（revokedAt=${attestation.revokedAt.toISOString()}, reason=${attestation.revocationReason ?? "n/a"}）`,
+ `attestation 已撤销（revokedAt=${revocation.revokedAt.toISOString()}, reason=${revocation.reason}）`,
  );
  }
  if (attestation.artifactType !== expectedArtifactType) {
@@ -320,7 +324,7 @@ export async function revokeAttestation(
  actor: AuditActor,
  reason: string,
  requestId?: string,
-): Promise<ArtifactAttestation> {
+): Promise<ArtifactAttestationWithRevocation> {
  const result = await revokeArtifactAttestation({
  tenantId,
  attestationId,
@@ -328,20 +332,7 @@ export async function revokeAttestation(
  reason,
  requestId: requestId ?? randomUUID(),
  });
- return withEffectiveRevocation(result.attestation, result.revocation);
-}
-
-function withEffectiveRevocation(
- attestation: ArtifactAttestation,
- revocation: typeof attestationRevocationRecord.$inferSelect | null,
-): ArtifactAttestation {
- if (!revocation) return attestation;
- return {
- ...attestation,
- revokedAt: revocation.revokedAt,
- revokedBy: revocation.revokedBy,
- revocationReason: revocation.reason,
- };
+ return { attestation: result.attestation, revocation: result.revocation };
 }
 
 // ─── Re-exports ────────────────────────────────────────────
@@ -353,7 +344,10 @@ export {
  listAttestations,
  getVerifiedAttestationForRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
-export type { ListAttestationsOptions } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+export type {
+ ArtifactAttestationWithRevocation,
+ ListAttestationsOptions,
+} from "@/lib/artifacts/persistence/artifact-attestation-reader";
 
 export type { ArtifactAttestation } from "@/lib/artifacts/persistence/artifact-record";
 export { AttestationAlreadyRevokedError, AttestationNotFoundError };

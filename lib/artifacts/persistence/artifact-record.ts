@@ -40,8 +40,8 @@ export const artifact = mysqlTable(
 );
 
 /**
- * 物理表名在兼容期保持 ArtifactAttestation；正式代码只通过本稳定模块访问。
- * revoked* 三列仅用于读取历史数据，新撤销事实写入 AttestationRevocationRecord。
+ * 物理表名保持 ArtifactAttestation；正式代码只通过本稳定模块访问。
+ * 撤销事实的唯一 Authority 是 AttestationRevocationRecord，本表不承载撤销状态。
  */
 export const artifactAttestation = mysqlTable(
  "ArtifactAttestation",
@@ -79,12 +79,6 @@ export const artifactAttestation = mysqlTable(
  subjectDigest: varchar("subjectDigest", { length: 71 }),
  verificationEngine: varchar("verificationEngine", { length: 64 }),
  verificationEngineVersion: varchar("verificationEngineVersion", { length: 32 }),
- /** @deprecated 历史行，新撤销不得修改此列。待基线重建时删除。 */
- revokedAt: datetime("revokedAt", { mode: "date", fsp: 3 }),
- /** @deprecated 历史行，待基线重建时删除。 */
- revokedBy: varchar("revokedBy", { length: 128 }),
- /** @deprecated 历史行，待基线重建时删除。 */
- revocationReason: text("revocationReason"),
  createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
  .notNull()
  .$defaultFn(() => new Date()),
@@ -107,10 +101,6 @@ export const artifactAttestation = mysqlTable(
  tenantDigestIdx: index("ArtifactAttestation_tenant_digest_idx").on(
  table.tenantId,
  table.artifactDigest,
- ),
- tenantRevokedIdx: index("ArtifactAttestation_tenant_revoked_idx").on(
- table.tenantId,
- table.revokedAt,
  ),
  }),
 );

@@ -13,6 +13,7 @@ import {
   createBuildRouteEligibility,
 } from "@/lib/routes/projection/build-route-eligibility";
 import type { RouteEligibilityStore } from "@/lib/routes/projection/route-eligibility-store";
+import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const builderMocks = vi.hoisted(() => {
@@ -123,7 +124,7 @@ describe("Projection authority", () => {
       [routeSet],
       [{ id: "agent-1", lifecycleState: "enabled", deletedAt: null }],
       [{ id: "agent-revision-1", revisionState: "published", artifactDigest: "sha256:agent", agentInterfaceRequirementsJson: {} }],
-      [{ id: "runtime-revision-1", runtimeId: "runtime-1", revisionState: "published", artifactDigest: "sha256:runtime", configHash: "sha256:config", runtimeCapabilitiesJson: {} }],
+      [{ id: "runtime-revision-1", runtimeId: "runtime-1", revisionState: "published", artifactDigest: "sha256:runtime", configHash: "sha256:config", protocolContractRevision: "agent-runtime-protocol@1", runtimeCapabilitiesJson: {} }],
       [{ id: "runtime-1", lifecycleState: "enabled", deletedAt: null }],
     );
     builderMocks.loadCurrentEvidence.mockResolvedValue({
@@ -136,7 +137,18 @@ describe("Projection authority", () => {
       runtimeRevisionId: "runtime-revision-1",
       runtimeArtifactEvidence: { artifactId: "runtime-artifact-1", verificationState: "verified", revokedAt: null },
       runtimePublication: { publicationRecordId: "runtime-publication-1", attestationIds: ["runtime-attestation-1"], conformanceRunId: "conformance-1" },
-      runtimeConformance: { overallResult: "passed" },
+      runtimeConformance: {
+        runId: "conformance-1",
+        tenantId: "tenant-1",
+        runtimeRevisionId: "runtime-revision-1",
+        overallResult: "passed",
+        runtimeArtifactDigest: "sha256:runtime",
+        runtimeConfigDigest: "sha256:config",
+        protocolContractRevision: "agent-runtime-protocol@1",
+        suiteRevision: "runtime-conformance@1",
+        conformanceFormat: "standard_dsse",
+        caseResults: ALL_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true })),
+      },
       runtimeLifecycleState: "active",
       runtimeRevisionState: "published",
       runtimeCapabilities: [],

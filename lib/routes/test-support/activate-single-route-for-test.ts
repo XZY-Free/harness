@@ -8,7 +8,16 @@ import type {
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import { getRouteById, getRouteSetById } from "@/lib/routes/application/deployment-route-service";
 import { createDisableRoute } from "@/lib/routes/application/disable-route";
+import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
+import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
+
+// : Resolver 只读 RouteEligibilityProjection（投影是运行时唯一解析数据源）。
+// 测试夹具在权威事实变更（激活/禁用）后须同步构建投影，解析器才能命中正确候选。
+const buildRouteEligibility = createBuildRouteEligibility({ store: mysqlRouteEligibilityStore });
+async function buildProjection(tenantId: string, routeId: string): Promise<void> {
+  await buildRouteEligibility({ tenantId, routeId });
+}
 
 export interface ActivatedSingleRouteForTestResult {
   route: DeploymentRouteRow;
@@ -57,6 +66,7 @@ export async function activateSingleRouteForTest(params: {
     });
     const routeSet = await getRouteSetById(params.tenantId, params.routeSetId);
     if (!routeSet) throw new Error(`测试 RouteSet 不存在: ${params.routeSetId}`);
+    await buildProjection(params.tenantId, params.routeId);
     return {
       route: disabled.route as DeploymentRouteRow,
       routeSet,
@@ -103,6 +113,7 @@ export async function activateSingleRouteForTest(params: {
   const route = await getRouteById(params.tenantId, activation.routeId);
   const routeSet = await getRouteSetById(params.tenantId, params.routeSetId);
   if (!route || !routeSet) throw new Error("测试 Route 激活事实读取失败");
+  await buildProjection(params.tenantId, activation.routeId);
   return {
     route,
     routeSet,

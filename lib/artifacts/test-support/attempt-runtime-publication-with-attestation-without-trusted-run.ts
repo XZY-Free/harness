@@ -132,11 +132,11 @@ export async function publishRuntimeRevisionWithAttestation(
       requestId: requestId ?? `runtime-publish:${randomUUID()}`,
       idempotencyKey: `runtime-attested-publish:${revisionId}`,
     });
-    const attestation = await getAttestationById(tenantId, attestationId);
-    if (!attestation) throw new ArtifactNotVerifiedError(attestationId, "attestation 不存在");
+    const found = await getAttestationById(tenantId, attestationId);
+    if (!found) throw new ArtifactNotVerifiedError(attestationId, "attestation 不存在");
     return {
       revision: result.revision as RuntimeRevisionRow,
-      attestation,
+      attestation: found.attestation,
       auditEventId: result.auditEventId,
     };
   } catch (error) {

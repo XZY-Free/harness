@@ -95,11 +95,10 @@ export function createRevokeArtifactAttestation(dependencies: {
  return dependencies.store.transaction(async (session) => {
  const current = await session.findForUpdate(command.tenantId, command.attestationId);
  if (!current) throw new AttestationNotFoundError(command.attestationId);
- const legacyRevokedAt = current.attestation.revokedAt;
- if (current.revocation || legacyRevokedAt) {
+ if (current.revocation) {
  throw new AttestationAlreadyRevokedError(
  command.attestationId,
- current.revocation?.revokedAt ?? legacyRevokedAt ?? now(),
+ current.revocation.revokedAt,
  );
  }
 

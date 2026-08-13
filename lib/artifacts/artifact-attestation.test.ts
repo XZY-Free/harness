@@ -1,5 +1,5 @@
 /**
- * S03-C03：V11 制品验证门禁集成测试（真实 MySQL 8）。
+ * S03-C03：制品验证门禁集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - artifact-attestation 纯逻辑：computeArtifactDigest / isValidArtifactDigest / isManagedRef / verifyArtifactAttestation。
@@ -787,7 +787,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
 
       const fetched = await getAttestationById(tenantId, att.id);
       expect(fetched).not.toBeNull();
-      expect(fetched?.id).toBe(att.id);
+      expect(fetched?.attestation.id).toBe(att.id);
     });
 
     it("跨租户隔离：他租户查询返回 null", async () => {
@@ -879,7 +879,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
         verificationState: "verified",
       });
       expect(verified).toHaveLength(1);
-      expect(verified[0]?.verificationState).toBe("verified");
+      expect(verified[0]?.attestation.verificationState).toBe("verified");
     });
 
     it("跨租户隔离：他租户 revision 不可见", async () => {
@@ -962,7 +962,7 @@ describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
       });
       const fetched = await getVerifiedAttestationForRevision(tenantId, "agent_revision", "rev-1");
       expect(fetched).not.toBeNull();
-      expect(fetched?.id).toBe(latest.id);
+      expect(fetched?.attestation.id).toBe(latest.id);
     });
 
     it("无 verified 时返回 null", async () => {
@@ -1014,7 +1014,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
     // 持久化校验
     const fetched = await getAttestationById(tenantId, fixture.attestation.id);
     expect(fetched).not.toBeNull();
-    expect(fetched?.verificationState).toBe("verified");
+    expect(fetched?.attestation.verificationState).toBe("verified");
 
     // 审计写入
     const auditEvents = await listAuditEvents({
@@ -1069,15 +1069,15 @@ describe("verifyAndPersistAttestation 完整流程", () => {
     // 失败也持久化
     const list = await listAttestationsByRevision(tenantId, "agent_revision", "rev-1");
     expect(list).toHaveLength(1);
-    expect(list[0]?.verificationState).toBe("failed");
-    expect(list[0]?.failureCode).toBe("signature_invalid");
+    expect(list[0]?.attestation.verificationState).toBe("failed");
+    expect(list[0]?.attestation.failureCode).toBe("signature_invalid");
 
     // 失败也写审计
     const auditEvents = await listAuditEvents({
       tenantId,
       actionType: "artifact.attestation.verify",
       targetType: "artifact_attestation",
-      targetId: list[0]?.id ?? "",
+      targetId: list[0]?.attestation.id ?? "",
     });
     expect(auditEvents).toHaveLength(1);
     expect(auditEvents[0]?.reason).toContain("失败");
@@ -1140,7 +1140,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
 
     const list = await listAttestationsByDigest(tenantId, digest);
     expect(list).toHaveLength(2);
-    expect(new Set(list.map((a) => a.builderIdentity))).toEqual(
+    expect(new Set(list.map((a) => a.attestation.builderIdentity))).toEqual(
       new Set(["builder:company-agent-runtime", "builder:company-runtime-host"]),
     );
   });
@@ -1519,15 +1519,15 @@ describe("S03-W04 阶段验收场景", () => {
     // 失败记录持久化
     const list = await listAttestationsByRevision(tenantId, "agent_revision", "rev-1");
     expect(list).toHaveLength(1);
-    expect(list[0]?.verificationState).toBe("failed");
-    expect(list[0]?.failureCode).toBe("sbom_blocked_vulnerability");
+    expect(list[0]?.attestation.verificationState).toBe("failed");
+    expect(list[0]?.attestation.failureCode).toBe("sbom_blocked_vulnerability");
 
     // 审计写入（afterHash 是 hash，不存原文漏洞详情）
     const auditEvents = await listAuditEvents({
       tenantId,
       actionType: "artifact.attestation.verify",
       targetType: "artifact_attestation",
-      targetId: list[0]?.id ?? "",
+      targetId: list[0]?.attestation.id ?? "",
     });
     expect(auditEvents).toHaveLength(1);
     expect(auditEvents[0]?.afterHash).toBeTruthy();

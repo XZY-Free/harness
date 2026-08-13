@@ -171,9 +171,6 @@ export function createRecordArtifactAttestation(dependencies: {
  dependencyLockFileHash: command.dependencyLockFileHash,
  buildTime: command.buildTime,
  scanSummaryJson: command.scanSummaryJson,
- revokedAt: null,
- revokedBy: null,
- revocationReason: null,
  createdAt: command.verifiedAt,
  });
 

@@ -4,7 +4,7 @@
  * 所有模块必须通过此 Reader 读取发布事实，
  * 不得自行构造 SQL 查询判断 Publication 是否 Active。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案 
+ * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
 
 import { db, type DbOrTx } from "@/lib/db/client";

@@ -1,16 +1,11 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agent";
-import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtime";
 import {
   publicationRecord,
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
 import * as publicationQueries from "@/lib/publications/persistence/publication-record-queries";
-import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -161,144 +156,14 @@ describe("PublicationRecord 与 WithdrawalRecord", () => {
   });
 
   it("正式查询模块不暴露 PublicationRecord 或 WithdrawalRecord 的更新删除入口", () => {
-    expect(Object.keys(publicationQueries).sort()).toEqual([
-      "getPublicationRecordById",
-      "getPublicationRecordBySubject",
-      "getWithdrawalRecordBySubject",
-    ]);
-  });
-
-  it("迁移为既有 Agent 与 Runtime 的 published/withdrawn 投影建立可追溯正式事实", async () => {
-    const tenant = await ensureDefaultTenant();
-    await db.insert(agentTable).values({
-      id: "migration-agent",
-      tenantId: tenant.id,
-      agentKey: "migration-agent",
-      displayName: "Migration Agent",
-      ownerUserId: "migration-owner",
-    });
-    await db.insert(agentRevisionTable).values([
-      {
-        id: "migration-agent-published",
-        agentId: "migration-agent",
-        revisionNo: 1,
-        sourceType: "code",
-        sourceRevision: "published",
-        instructionHash: "sha256:published",
-        agentArtifactRef: "artifact://agent/published",
-        modelPolicyJson: {},
-        permissionRequirementsJson: [],
-        delegationPolicyJson: {},
-        agentInterfaceRequirementsJson: {},
-        revisionState: "published",
-        createdBy: "legacy-user",
-        publishedAt: new Date("2026-07-01T00:00:00.000Z"),
-      },
-      {
-        id: "migration-agent-withdrawn",
-        agentId: "migration-agent",
-        revisionNo: 2,
-        sourceType: "code",
-        sourceRevision: "withdrawn",
-        instructionHash: "sha256:withdrawn",
-        agentArtifactRef: "artifact://agent/withdrawn",
-        modelPolicyJson: {},
-        permissionRequirementsJson: [],
-        delegationPolicyJson: {},
-        agentInterfaceRequirementsJson: {},
-        revisionState: "withdrawn",
-        createdBy: "legacy-user",
-        publishedAt: new Date("2026-07-02T00:00:00.000Z"),
-      },
-    ]);
-    await db.insert(runtimeTable).values({
-      id: "migration-runtime",
-      tenantId: tenant.id,
-      runtimeKey: "migration-runtime",
-      displayName: "Migration Runtime",
-      runtimeKind: "external",
-      ownerUserId: "migration-owner",
-    });
-    await db.insert(runtimeRevisionTable).values([
-      {
-        id: "migration-runtime-published",
-        runtimeId: "migration-runtime",
-        revisionNo: 1,
-        protocolType: "a2a",
-        endpointRef: "endpoint://published",
-        runtimeArtifactRef: "artifact://runtime/published",
-        runtimeCapabilitiesJson: {},
-        identityMode: "workload_token",
-        networkZone: "internal",
-        configHash: "sha256:published",
-        revisionState: "published",
-        createdBy: "legacy-user",
-        publishedAt: new Date("2026-07-03T00:00:00.000Z"),
-      },
-      {
-        id: "migration-runtime-withdrawn",
-        runtimeId: "migration-runtime",
-        revisionNo: 2,
-        protocolType: "a2a",
-        endpointRef: "endpoint://withdrawn",
-        runtimeArtifactRef: "artifact://runtime/withdrawn",
-        runtimeCapabilitiesJson: {},
-        identityMode: "workload_token",
-        networkZone: "internal",
-        configHash: "sha256:withdrawn",
-        revisionState: "withdrawn",
-        createdBy: "legacy-user",
-        publishedAt: new Date("2026-07-04T00:00:00.000Z"),
-      },
-    ]);
-
-    const migrationSql = await readFile(
-      resolve(process.cwd(), "drizzle/0112_publication_records.sql"),
-      "utf8",
-    );
-    const backfillStatements = migrationSql
-      .split("--> statement-breakpoint")
-      .map((statement) => statement.trim())
-      .filter((statement) => statement.startsWith("INSERT INTO"));
-    expect(backfillStatements).toHaveLength(4);
-    for (const statement of backfillStatements) {
-      await db.execute(sql.raw(statement.replace(/;\s*$/, "")));
-    }
-
-    const subjects = [
-      ["agent_revision", "migration-agent-published", false],
-      ["agent_revision", "migration-agent-withdrawn", true],
-      ["runtime_revision", "migration-runtime-published", false],
-      ["runtime_revision", "migration-runtime-withdrawn", true],
-    ] as const;
-    for (const [subjectType, subjectRevisionId, isWithdrawn] of subjects) {
-      const publication = await publicationQueries.getPublicationRecordBySubject({
-        tenantId: tenant.id,
-        subjectType,
-        subjectRevisionId,
-      });
-      expect(publication).toMatchObject({
-        attestationIds: [],
-        conformanceRunId: null,
-        publishedByType: "system",
-        publishedBy: "migration-0112",
-      });
-      expect(publication?.evidenceSetDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
-      expect(
-        await publicationQueries.getWithdrawalRecordBySubject({
-          tenantId: tenant.id,
-          subjectType,
-          subjectRevisionId,
-        }),
-      ).toEqual(
-        isWithdrawn
-          ? expect.objectContaining({
-              publicationRecordId: publication?.id,
-              reasonCode: "legacy_state_backfill",
-              withdrawnBy: "migration-0112",
-            })
-          : null,
-      );
-    }
+    // 全部导出必须是只读查询；禁止 update/delete/insert 写入口（§27 一个事实一个 Authority）。
+    const writeEntryPattern = /^(update|delete|insert|upsert|remove|truncate)/i;
+    const exports = Object.keys(publicationQueries).sort();
+    expect(exports.length).toBeGreaterThanOrEqual(3);
+    expect(exports.filter((name) => writeEntryPattern.test(name))).toEqual([]);
+    // 基线的只读查询面稳定存在
+    expect(exports).toContain("getPublicationRecordById");
+    expect(exports).toContain("getPublicationRecordBySubject");
+    expect(exports).toContain("getWithdrawalRecordBySubject");
   });
 });

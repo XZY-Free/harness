@@ -4,7 +4,7 @@
  * 提供 FOR UPDATE 读取能力，供发布、RouteSet 激活等事务内使用。
  * 所有模块必须通过此 Reader 读取证据，不得自行构造 SQL 查询。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案 
+ * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
 
 import type {
@@ -61,7 +61,6 @@ export async function loadArtifactEvidenceSnapshot(params: {
  eq(artifact.tenantId, params.tenantId),
  eq(artifact.digest, artifactAttestation.artifactDigest),
  isNull(attestationRevocationRecord.id),
- isNull(artifactAttestation.revokedAt),
  ),
  )
  .orderBy(desc(artifactAttestation.createdAt))

@@ -19,9 +19,15 @@ import {
 } from "@/lib/publications/persistence/publication-record";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
+import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
+import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
-import { runtimeConformanceRun } from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  runtimeConformanceCaseResult,
+  runtimeConformanceRun,
+} from "@/lib/runtime/persistence/runtime-conformance-run-record";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -234,6 +240,19 @@ async function addRuntimeRoute(
     requestId: `resolver:${runtimeRevisionId}`,
     recordedAt: NOW,
   });
+  // : 权威 ConformanceEligibilityPolicy 要求 16 个 Case 全部通过（见
+  // runtime-conformance-contract 的 ALL_CONFORMANCE_CASES）。播种 ConformanceRun
+  // 后须同步播种完整 Case 结果，投影的 Conformance 资格才会放行。
+  await db.insert(runtimeConformanceCaseResult).values(
+    ALL_CONFORMANCE_CASES.map((caseId) => ({
+      id: randomUUID(),
+      runId: conformanceRunId,
+      caseId,
+      passed: true,
+      reason: null,
+      evidenceDigest: digest(`conformance-case:${caseId}`),
+    })),
+  );
   const runtimePublicationId = randomUUID();
   await db.insert(publicationRecord).values({
     id: runtimePublicationId,
@@ -320,6 +339,12 @@ async function addRuntimeRoute(
     .update(deploymentRouteTable)
     .set({ activeRouteRevisionId: routeRevisionId })
     .where(eq(deploymentRouteTable.id, routeId));
+  // : Resolver 只读 RouteEligibilityProjection（投影是运行时唯一解析数据源），
+  // 播种权威表后须构建投影，解析器才能命中 eligible 候选。
+  await createBuildRouteEligibility({ store: mysqlRouteEligibilityStore })({
+    tenantId: base.tenantId,
+    routeId,
+  });
   return {
     ...base,
     runtimePublicationId,
@@ -421,6 +446,12 @@ describe("RouteResolver MySQL authority", () => {
       requestId: "resolver-revoke",
       revokedAt: NOW,
     });
+    // : 撤销 Authority 记录后须重建投影（模拟 outbox relay 的
+    // artifact.attestation.revoked → rebuildFromAuthority），解析器才会 fail-closed。
+    await createBuildRouteEligibility({ store: mysqlRouteEligibilityStore })({
+      tenantId: base.tenantId,
+      routeId: fixture.routeId,
+    });
     await expect(resolveRoute(command(base, "thread-after-revoke"))).resolves.toMatchObject({
       status: "unresolved",
       reason: "no_eligible_route",
@@ -442,7 +473,12 @@ describe("RouteResolver MySQL authority", () => {
       withdrawnBy: "resolver-test",
       withdrawnAt: NOW,
     });
-
+    // : 撤回 Authority 记录后须重建投影（模拟 outbox relay 的
+    // runtime.revision.withdrawn → rebuildFromAuthority），解析器才会 fail-closed。
+    await createBuildRouteEligibility({ store: mysqlRouteEligibilityStore })({
+      tenantId: base.tenantId,
+      routeId: fixture.routeId,
+    });
     await expect(resolveRoute(command(base, "thread-withdrawn"))).resolves.toMatchObject({
       status: "unresolved",
       reason: "no_eligible_route",

@@ -1,9 +1,9 @@
 /**
  * AgentRevision 仓储。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform/09-unified-domain-model.md 、
- * ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md 。
+ * 事实源：docs/architecture/persistence.md 、
+ * docs/architecture/domain-model.md 、
+ * docs/architecture/agent-control-plane.md 。
  *
  * 职责：
  * - createDraftRevision：创建 draft Revision（revisionNo 在 Agent 内单调递增）。

@@ -62,7 +62,6 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
  eq(agentRevisionTable.artifactId, artifact.id),
  eq(agentRevisionTable.artifactDigest, artifact.digest),
  isNull(attestationRevocationRecord.id),
- isNull(artifactAttestation.revokedAt),
  ),
  )
  .limit(1)

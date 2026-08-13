@@ -96,8 +96,11 @@ export async function loadAgentRevisionAdminProjection(
     listAttestationsByRevision(tenantId, "agent_revision", revision.id),
   ]);
   const verifiedActiveAttestationIds = attestations
-    .filter((item) => item.verificationState === "verified" && item.revokedAt === null)
-    .map((item) => item.id)
+    .filter(
+      ({ attestation, revocation }) =>
+        attestation.verificationState === "verified" && revocation === null,
+    )
+    .map(({ attestation }) => attestation.id)
     .sort();
   const publicationAttestationIds = [...(publication?.attestationIds ?? [])].sort();
   const eligibility = computeAgentRevisionEligibility({

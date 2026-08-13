@@ -22,7 +22,7 @@ import {
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import { withdrawRevision } from "@/lib/agents/test-support/withdraw-agent-revision";
 /**
- * S03-C01：V11 Agent 修订模型集成测试（真实 MySQL 8）。
+ * S03-C01：Agent 修订模型集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - agent-queries：createAgent/getAgentById/getAgentByKey/listAgents/updateAgentLifecycle/setCurrentRevision/softDeleteAgent。
@@ -97,7 +97,7 @@ function buildDraftParams(
 
 // ─── agent-queries（DB）──────────────────────────────────
 
-describe("V11 agent-queries", () => {
+describe("agent-queries", () => {
   let tenantId: string;
   let ownerId: string;
 
@@ -389,7 +389,7 @@ describe("V11 agent-queries", () => {
 
 // ─── agent-revision-queries（DB）─────────────────────────
 
-describe("V11 agent-revision-queries", () => {
+describe("agent-revision-queries", () => {
   let tenantId: string;
   let ownerId: string;
   let agentId: string;
@@ -623,7 +623,7 @@ describe("V11 agent-revision-queries", () => {
 
 // ─── 阶段验收场景（S03-W01）──────────────────────────────
 
-describe("V11 S03-W01 阶段验收场景", () => {
+describe("S03-W01 阶段验收场景", () => {
   let tenantId: string;
   let ownerId: string;
   let agentId: string;

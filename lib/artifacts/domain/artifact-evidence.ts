@@ -5,7 +5,7 @@
  * ExecutionBinding 最终检查共同使用。
  *
  * 任何模块不得自行定义第二套证据快照。
- * 参见：SnowHarness专题01全局统一与最终收敛方案 
+ * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
 
 /** Attestation 格式枚举 — DSSE + in-toto 是唯一正式协议。 */

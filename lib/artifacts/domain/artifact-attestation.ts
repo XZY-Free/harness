@@ -1,10 +1,10 @@
 /**
  * 制品证明独立验证策略 — DSSE Envelope + in-toto Statement 统一信任协议。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md -4.2、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md §6（artifact-attestations:verify）、
- * ../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md 。
+ * 事实源：docs/architecture/security.md -4.2、
+ * docs/architecture/api-and-events.md §6（artifact-attestations:verify）、
+ * docs/architecture/persistence.md 、
+ * docs/architecture/agent-control-plane.md 。
  *
  * 核心原则（零信任供应链）：
  * - 调用方只能提交引用（dsse_envelope_ref / sbom_ref / provenance_ref），不能自报 verification_state。

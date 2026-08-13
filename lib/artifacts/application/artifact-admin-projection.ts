@@ -1,5 +1,5 @@
 import { ARTIFACT_KINDS, type ArtifactKind } from "@/lib/artifacts/domain/artifact";
-import type { ArtifactAttestation } from "@/lib/artifacts/persistence/artifact-record";
+import type { ArtifactAttestationWithRevocation } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import type { ArtifactAttestationDTO } from "@/lib/control-plane-client/contracts/artifact";
 
 function assertArtifactKind(value: string): ArtifactKind {
@@ -10,8 +10,9 @@ function assertArtifactKind(value: string): ArtifactKind {
 }
 
 export function projectArtifactAttestation(
-  attestation: ArtifactAttestation,
+  input: ArtifactAttestationWithRevocation,
 ): ArtifactAttestationDTO {
+  const { attestation, revocation } = input;
   return {
     id: attestation.id,
     tenant_id: attestation.tenantId,
@@ -40,9 +41,9 @@ export function projectArtifactAttestation(
     subject_digest: attestation.subjectDigest,
     verification_engine: attestation.verificationEngine,
     verification_engine_version: attestation.verificationEngineVersion,
-    revoked_at: attestation.revokedAt?.toISOString() ?? null,
-    revoked_by: attestation.revokedBy,
-    revocation_reason: attestation.revocationReason,
+    revoked_at: revocation?.revokedAt.toISOString() ?? null,
+    revoked_by: revocation?.revokedBy ?? null,
+    revocation_reason: revocation?.reason ?? null,
     created_at: attestation.createdAt.toISOString(),
   };
 }

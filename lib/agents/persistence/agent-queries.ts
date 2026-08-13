@@ -1,8 +1,8 @@
 /**
  * Agent 仓储。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md -4.2、
- * ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md 。
+ * 事实源：docs/architecture/persistence.md -4.2、
+ * docs/architecture/agent-control-plane.md 。
  *
  * 职责：
  * - createAgent：创建稳定 Agent 身份（租户内 agentKey 唯一）。
