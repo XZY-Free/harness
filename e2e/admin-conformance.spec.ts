@@ -2,7 +2,7 @@
  * S11-W08 端到端管理一致性测试。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md
+ * - docs/architecture/runtime-control-plane.md
  *   S11-W08：「管理操作一致性与实际验证」
  *
  * 职责：
@@ -14,9 +14,9 @@
  * - 完整的 If-Match 412 ETAG_MISMATCH 和幂等重放 200 场景 —— 需要预置 action binding +
  *   真实资源（Route/Revision/Export），由单元测试覆盖：
  *   - lib/control-plane/admin-routes.test.ts（If-Match 412 + 幂等重放）
- *   - lib/v11/admin/export-queries.test.ts（导出 CRUD + 审计）
- *   - lib/v11/admin/export-runner.test.ts（导出执行 + 脱敏 + NDJSON）
- * - e2e 环境使用 dev 认证（APP_ENV=test → SNOW_AUTH_MODE=dev），默认用户无 V11 action binding，
+ *   - lib/admin/export-queries.test.ts（导出 CRUD + 审计）
+ *   - lib/admin/export-runner.test.ts（导出执行 + 脱敏 + NDJSON）
+ * - e2e 环境使用 dev 认证（APP_ENV=test → SNOW_AUTH_MODE=dev），默认用户无 action binding，
  *   action scope 校验返回 403；header 守卫（If-Match/Idempotency-Key）在 action scope 之前校验。
  *
  * 运行：
@@ -32,7 +32,7 @@ const IF_MATCH_HEADER = "if-match";
 /** 不存在的 UUID（全零）。用于 404 测试。 */
 const NON_EXISTENT_UUID = "00000000-0000-4000-8000-000000000000";
 
-/** V11 错误响应体类型。 */
+/** API 错误响应体类型。 */
 interface ApiErrorResponse {
   error: {
     code: string;
@@ -44,7 +44,7 @@ interface ApiErrorResponse {
 }
 
 /**
- * 构造 Workload Token（base64url(JSON)），与 lib/v11/identity/workload-token.ts 的
+ * 构造 Workload Token（base64url(JSON)），与 lib/identity/workload-token.ts 的
  * issueWorkloadToken 一致。仅供 e2e 测试构造错误 audience 的 token；生产 token 由
  * 网关 / Invocation Dispatcher 颁发。
  */
@@ -61,7 +61,7 @@ function issueWorkloadToken(claims: {
   return Buffer.from(JSON.stringify(full), "utf-8").toString("base64url");
 }
 
-/** 从响应解析 V11 错误体。 */
+/** 从响应解析 API 错误体。 */
 async function parseErrorBody(response: {
   json: () => Promise<unknown>;
 }): Promise<ApiErrorResponse> {

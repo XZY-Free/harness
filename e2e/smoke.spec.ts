@@ -2,7 +2,7 @@
  * S10-W08 e2e 冒烟测试。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/conversations.md
  *   S10-W08：「Web 用真实浏览器完成端到端任务」
  *
  * 职责：
@@ -11,7 +11,7 @@
  * - 验证 /chat/<uuid> 渲染 Workspace 组件（无 500 错误）。
  *
  * 不覆盖：
- * - 完整 V11 Thread 生命周期（创建/执行/排队/确认/断线恢复）—— 需要 V11 Runtime + SSE，
+ * - 完整 Thread 生命周期（创建/执行/排队/确认/断线恢复）—— 需要正式 Runtime + SSE，
  *   由阶段 10 阶段验证在集成环境完成，不在此冒烟测试范围。
  * - Desktop Electron Shell 本地任务 —— 需要 Electron 运行环境，由阶段 10 阶段验证。
  *

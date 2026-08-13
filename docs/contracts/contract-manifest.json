@@ -1,0 +1,18 @@
+{
+  "contract_version": "11.0.0",
+  "artifacts": [
+    {"path": "openapi.json", "kind": "openapi", "source": "generated", "generator": "scripts/generate_openapi.py"},
+    {"path": "event-envelope.schema.json", "kind": "json_schema", "source": "normative"},
+    {"path": "event-catalog.json", "kind": "event_catalog", "source": "normative"},
+    {"path": "error-codes.json", "kind": "error_catalog", "source": "normative"},
+    {"path": "runtime-conformance.json", "kind": "conformance_suite", "source": "normative"}
+  ],
+  "compatibility": {
+    "openapi_add_optional_field": "minor",
+    "openapi_add_required_field": "major",
+    "event_add_optional_payload_field": "compatible",
+    "event_remove_or_retype_field": "new_schema_version",
+    "remove_error_code": "major",
+    "change_error_retryable_semantics": "major"
+  }
+}

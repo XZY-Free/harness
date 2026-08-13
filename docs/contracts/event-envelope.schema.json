@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://snow.example.com/contracts/event-envelope.schema.json",
+  "title": "SnowHarness Persistent Event Envelope",
+  "type": "object",
+  "required": [
+    "event_id",
+    "stream_type",
+    "sequence",
+    "event_type",
+    "schema_version",
+    "actor",
+    "occurred_at",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "stream_type": {"enum": ["thread", "job"]},
+    "sequence": {"type": "integer", "minimum": 1},
+    "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"},
+    "schema_version": {"type": "integer", "minimum": 1, "maximum": 32767},
+    "thread_id": {"type": "string", "minLength": 1},
+    "job_id": {"type": "string", "minLength": 1},
+    "turn_id": {"type": ["string", "null"]},
+    "item_id": {"type": ["string", "null"]},
+    "invocation_id": {"type": ["string", "null"]},
+    "actor": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {"enum": ["user", "agent", "runtime", "tool", "system", "admin", "service"]},
+        "id": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "correlation_id": {"type": ["string", "null"]},
+    "causation_id": {"type": ["string", "null"]},
+    "idempotency_key": {"type": ["string", "null"], "maxLength": 128},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "payload": {"type": "object"}
+  },
+  "oneOf": [
+    {
+      "properties": {"stream_type": {"const": "thread"}},
+      "required": ["thread_id"],
+      "not": {"required": ["job_id"]}
+    },
+    {
+      "properties": {"stream_type": {"const": "job"}},
+      "required": ["job_id"],
+      "not": {"required": ["thread_id"]}
+    }
+  ],
+  "additionalProperties": false
+}

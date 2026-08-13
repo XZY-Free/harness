@@ -2,8 +2,8 @@
  * S10-W08 e2e 测试配置（Playwright）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
- *   S10-W08：「Web 用真实浏览器完成端到端任务」「UI 验证使用真实 V11 API 与 MySQL，
+ * - docs/architecture/conversations.md
+ *   S10-W08：「Web 用真实浏览器完成端到端任务」「UI 验证使用正式 Conversation API 与 MySQL，
  *           不用静态 HTML、截图或 typed mock 代替完成」
  *
  * 职责：

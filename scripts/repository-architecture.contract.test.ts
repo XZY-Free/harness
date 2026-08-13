@@ -3,7 +3,17 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
-const SCAN_ROOTS = ["app", "components", "desktop", "lib", "scripts", "docs", "tests"];
+const SCAN_ROOTS = [
+  "app",
+  "components",
+  "desktop",
+  "lib",
+  "scripts",
+  "docs",
+  "tests",
+  "e2e",
+  "playwright.config.ts",
+];
 const retiredVersion = `v${11}`;
 const forbidden = new RegExp(
   [`/${retiredVersion}/`, `/${retiredVersion.toUpperCase()}/`, `${retiredVersion}-`, `use${retiredVersion.toUpperCase()}`, `build${retiredVersion.toUpperCase()}`].join("|"),
@@ -33,6 +43,21 @@ describe("repository architecture naming contract", () => {
   });
 
   it("keeps permanent contracts and validation entry points", () => {
+    for (const document of [
+      "agent-control-plane.md",
+      "runtime-control-plane.md",
+      "artifact-trust.md",
+      "publication.md",
+      "routing.md",
+      "execution-binding.md",
+      "hosted-provisioning.md",
+      "conversations.md",
+      "api-and-events.md",
+      "security.md",
+      "persistence.md",
+    ]) {
+      expect(existsSync(join(ROOT, "docs", "architecture", document))).toBe(true);
+    }
     expect(existsSync(join(ROOT, "docs/contracts/openapi.json"))).toBe(true);
     expect(existsSync(join(ROOT, "scripts/contracts.mjs"))).toBe(true);
     expect(existsSync(join(ROOT, `scripts/${retiredVersion}-contracts.mjs`))).toBe(false);
