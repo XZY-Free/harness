@@ -2,12 +2,12 @@
  * POST /api/v1/threads/{thread_id}/handoffs/{handoff_id}:resolve — 员工解析 Handoff 请求（S10-W04，§3.18）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §3.18（解析 UserActionRequest）、
+ * - docs/architecture/api-and-events.md §3.18（解析 UserActionRequest）、
  *   §7.2（handoff.completed Event）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §5（Handoff 统一规则）
- * - ../v11-agentkit-platform/07-decision-ledger.md 行 52、174（Workflow Handoff 必须员工确认）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md S09-W03
- * - ../v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md S10-W04
+ * - docs/architecture/capability-and-collaboration-api.md §5（Handoff 统一规则）
+ * - docs/architecture/decision-ledger.md 行 52、174（Workflow Handoff 必须员工确认）
+ * - docs/architecture/conversations.md S09-W03
+ * - docs/architecture/product-surfaces-and-admin.md S10-W04
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

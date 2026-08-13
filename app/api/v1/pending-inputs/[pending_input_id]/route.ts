@@ -2,8 +2,8 @@
  * PATCH  /api/v1/pending-inputs/{pending_input_id} — 编辑 PendingInput 内容（S04-C04，§3.9）。
  * DELETE /api/v1/pending-inputs/{pending_input_id} — 移除 PendingInput（S04-C04，§3.10）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.9-3.10、
- *         ../v11-agentkit-platform/02-agent-thread-and-runtime.md §3.17（删除不生成 user_message Item）。
+ * 事实源：docs/architecture/api-and-events.md §3.9-3.10、
+ *         docs/architecture/agent-control-plane.md §3.17（删除不生成 user_message Item）。
  *
  * 行为（PATCH）：
  * - 解析员工身份。

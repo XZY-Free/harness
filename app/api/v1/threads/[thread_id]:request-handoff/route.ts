@@ -2,11 +2,11 @@
  * POST /api/v1/threads/{thread_id}:request-handoff — 发起主 Agent 交接请求（S10-W04，§3.3/§5.5）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §3.3（更换主 Agent 命令）、
+ * - docs/architecture/api-and-events.md §3.3（更换主 Agent 命令）、
  *   §5.5（发起 UserActionRequest）、§7.2（handoff.requested Event）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §5（Handoff 统一规则）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md S09-W03
- * - ../v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md S10-W04
+ * - docs/architecture/capability-and-collaboration-api.md §5（Handoff 统一规则）
+ * - docs/architecture/conversations.md S09-W03
+ * - docs/architecture/product-surfaces-and-admin.md S10-W04
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

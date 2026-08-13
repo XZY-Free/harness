@@ -2,8 +2,8 @@
  * GET  /api/v1/threads/{thread_id}/pending-inputs — 查询 PendingInput 队列（S04-C04，§3.6）。
  * POST /api/v1/threads/{thread_id}/pending-inputs — 创建 PendingInput（S04-C04，§3.7）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.6-3.7、
- *         ../v11-agentkit-platform/02-agent-thread-and-runtime.md §3.14（创建不生成 user_message Item）。
+ * 事实源：docs/architecture/api-and-events.md §3.6-3.7、
+ *         docs/architecture/agent-control-plane.md §3.14（创建不生成 user_message Item）。
  *
  * 行为（GET）：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

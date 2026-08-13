@@ -8,8 +8,8 @@ import {
 /**
  * POST /api/v1/turns/{turn_id}/steer — Steer Turn（S04-C06，§3.7）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.7、
- *         ../v11-agentkit-platform/02-agent-thread-and-runtime.md §3.7（Steer）。
+ * 事实源：docs/architecture/api-and-events.md §3.7、
+ *         docs/architecture/agent-control-plane.md §3.7（Steer）。
  *
  * 行为：
  * - 解析员工身份 + 校验 Turn 属于当前员工（非 owner → 404 隐藏式）。

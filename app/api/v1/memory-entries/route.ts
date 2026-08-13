@@ -8,8 +8,8 @@ import {
  * GET /api/v1/memory-entries — 列出当前用户可见的 MemoryEntry（阶段 7 S07-C04）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §8（作用域）、§11（用户控制）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §3（Employee API）。
+ * - docs/architecture/context-memory-and-knowledge.md §8（作用域）、§11（用户控制）。
+ * - docs/architecture/api-and-events.md §3（Employee API）。
  *
  * 行为：
  * - 解析员工身份（employee audience）。

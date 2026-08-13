@@ -1,8 +1,8 @@
 /**
  * POST /api/v1/threads/{thread_id}:change-primary-agent — 更换 Thread 主 Agent（S04-C03，§3.3）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.3、
- *         ../v11-agentkit-platform-development-plan/04-thread-turn-item-and-event-core.md S04-W01。
+ * 事实源：docs/architecture/api-and-events.md §3.3、
+ *         docs/architecture/conversations.md S04-W01。
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

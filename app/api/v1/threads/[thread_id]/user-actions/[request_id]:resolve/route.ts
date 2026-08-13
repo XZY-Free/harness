@@ -10,10 +10,10 @@ import { getThreadById } from "@/lib/conversations/thread-queries";
  * POST /api/v1/threads/{thread_id}/user-actions/{request_id}:resolve — 员工解析通用 UserAction 请求（S10-W05，§3.18）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §3.18（解析 UserActionRequest）、
+ * - docs/architecture/api-and-events.md §3.18（解析 UserActionRequest）、
  *   §3.19（auth callback）、§7.2（user_action.resolved Event）
- * - ../v11-agentkit-platform/10-core-data-model.md §6.8（user_action_request 表）
- * - ../v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md S10-W05
+ * - docs/architecture/persistence.md §6.8（user_action_request 表）
+ * - docs/architecture/product-surfaces-and-admin.md S10-W05
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

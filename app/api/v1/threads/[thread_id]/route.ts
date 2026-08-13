@@ -2,8 +2,8 @@ import { getActiveGoalByThread } from "@/lib/conversations/goal-queries";
 /**
  * GET /api/v1/threads/{thread_id} — 查询 Thread 详情（S10-W02，§3.1）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.1、
- *         ../v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md S10-W02。
+ * 事实源：docs/architecture/api-and-events.md §3.1、
+ *         docs/architecture/product-surfaces-and-admin.md S10-W02。
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

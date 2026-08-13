@@ -9,8 +9,8 @@ import { getThreadById } from "@/lib/conversations/thread-queries";
 /**
  * POST /api/v1/threads/{thread_id}/turns — 创建 Turn（S04-C03，§3.4）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.4、
- *         ../v11-agentkit-platform-development-plan/04-thread-turn-item-and-event-core.md S04-W02。
+ * 事实源：docs/architecture/api-and-events.md §3.4、
+ *         docs/architecture/conversations.md S04-W02。
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。
@@ -223,7 +223,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
   } catch (err) {
-    logger.error("[v11] Turn 接纳或调度失败", {
+    logger.error("[runtime] Turn 接纳或调度失败", {
       threadId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -264,8 +264,8 @@ function projectTurn(turn: Turn): Record<string, unknown> {
 /**
  * GET /api/v1/threads/{thread_id}/turns — 查询 Thread 的 Turn 列表（S10-W02，§3.4）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.4、
- *         ../v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md S10-W02。
+ * 事实源：docs/architecture/api-and-events.md §3.4、
+ *         docs/architecture/product-surfaces-and-admin.md S10-W02。
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

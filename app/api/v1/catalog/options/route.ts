@@ -1,7 +1,7 @@
 /**
  * GET /api/v1/catalog/options — Employee Catalog API（阶段 6 S06-C03）。
  *
- * 事实源：../v11-agentkit-platform/12-capability-and-collaboration-api.md §2（Employee Catalog API）、
+ * 事实源：docs/architecture/capability-and-collaboration-api.md §2（Employee Catalog API）、
  *         §3.1（CatalogSearchItem）。
  *
  * 行为：

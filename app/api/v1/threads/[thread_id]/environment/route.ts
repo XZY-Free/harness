@@ -8,7 +8,7 @@ import {
  * GET /api/v1/threads/{thread_id}/environment — 查询 Thread 当前 Environment 状态（S10-W06 / S10-W07）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W06：「Desktop 复用共同时间线，在右侧增加文件、页面和内部系统任务操作面板」
  *   「本地 Shell、Git、测试、构建、浏览器和应用操作显示实际执行设备、目录、权限和结果」
  *   S10-W07：「页面显示当前 Environment owner、在线状态、租约和接管条件」

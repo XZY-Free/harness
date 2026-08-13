@@ -22,8 +22,8 @@ import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bu
 /**
  * GET /api/v1/threads/{thread_id}/events — 订阅 Event（SSE，S04-C05，§3.6；S12-W02 连接配额）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.6、
- *         ../v11-agentkit-platform/14-production-operations-security-and-retention.md §2.2。
+ * 事实源：docs/architecture/api-and-events.md §3.6、
+ *         docs/architecture/security.md §2.2。
  *
  * 行为：
  * 1. 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

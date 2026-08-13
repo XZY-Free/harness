@@ -1,9 +1,9 @@
 /**
  * POST /api/v1/threads/{thread_id}/forks — Fork Thread（S04-C06，§3.10）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.10、
- *         ../v11-agentkit-platform/02-agent-thread-and-runtime.md §3.10（Fork）、
- *         ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §4（Fork 语义）。
+ * 事实源：docs/architecture/api-and-events.md §3.10、
+ *         docs/architecture/agent-control-plane.md §3.10（Fork）、
+ *         docs/architecture/conversations.md §4（Fork 语义）。
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

@@ -1,8 +1,8 @@
 /**
  * POST /api/v1/threads — 创建 Thread（S04-C03，§3.1）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3.1、
- *         ../v11-agentkit-platform-development-plan/04-thread-turn-item-and-event-core.md S04-W01。
+ * 事实源：docs/architecture/api-and-events.md §3.1、
+ *         docs/architecture/conversations.md S04-W01。
  *
  * 行为：
  * - 解析员工身份（employee audience）。
@@ -51,7 +51,7 @@ export const dynamic = "force-dynamic";
  * GET /api/v1/threads — Desktop 本地渲染 Shell 的启动数据。
  *
  * Electron 不再加载服务端 /desktop 页面；本地 renderer 通过此端点读取当前员工的
- * 会话列表、可用助手和稳定的 viewer id，再用相对路径调用其余 V11 API。
+ * 会话列表、可用助手和稳定的 viewer id，再用相对路径调用其余 API。
  */
 export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
