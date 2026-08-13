@@ -37,3 +37,13 @@ describe("ExecutionBinding Attestation JSON 基线约束", () => {
     }
   });
 });
+
+describe("Route 历史表 append-only 基线约束", () => {
+  it.each(["RouteRevision", "RouteActivation"])("%s 禁止 UPDATE", (table) => {
+    const baseline = projectFile("drizzle/0000_initial_schema.sql");
+
+    expect(baseline).toContain(`CREATE TRIGGER \`${table}_prevent_update\``);
+    expect(baseline).toContain(`BEFORE UPDATE ON \`${table}\``);
+    expect(baseline).toContain(`MESSAGE_TEXT = '${table} is append-only'`);
+  });
+});
