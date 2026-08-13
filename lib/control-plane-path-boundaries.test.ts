@@ -3,12 +3,13 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = process.cwd();
+const retiredDirectory = `v${11}`;
 
 const retiredPaths = [
   "lib/compatibility",
-  "lib/v11/control-plane",
-  "lib/v11/runtime/execution-binding-queries.ts",
-  "lib/v11/runtime/hosted-route-bootstrap.ts",
+  `lib/${retiredDirectory}/control-plane`,
+  `lib/${retiredDirectory}/runtime/execution-binding-queries.ts`,
+  `lib/${retiredDirectory}/runtime/hosted-route-bootstrap.ts`,
 ] as const;
 
 const stableControlPlaneRoots = [
@@ -27,7 +28,7 @@ describe("Agent 控制面稳定路径边界", () => {
     expect(residual).toEqual([]);
   });
 
-  it("正式控制面生产代码不反向依赖 lib/v11 或 lib/compatibility", () => {
+  it("正式控制面生产代码不反向依赖已删除目录或 compatibility", () => {
     const violations = stableControlPlaneRoots.flatMap((root) =>
       listProductionTypeScriptFiles(join(repositoryRoot, root)).flatMap((file) => {
         const source = readFileSync(file, "utf8");

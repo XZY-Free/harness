@@ -53,7 +53,7 @@ import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay
 import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
 import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
 import { db } from "@/lib/db/client";
-import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
+import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/identity/role-action-queries";
@@ -328,7 +328,8 @@ async function seedPublishedAgentRevision(
   );
 
   // 链接 Artifact 到 AgentRevision（createPublishAgentRevision 要求 artifactId/artifactDigest 一致）
-  const attestation = await getAttestationById(tenantId, attestationId);
+  const found = await getAttestationById(tenantId, attestationId);
+  const attestation = found?.attestation;
   if (!attestation?.artifactId || !attestation.artifactDigest) {
     throw new Error(`测试 AgentRevision 缺少权威 Attestation: ${revision.id}`);
   }
@@ -639,8 +640,8 @@ describe("场景1：真实签名 Artifact Attestation 通过", () => {
       draftRevision.id,
     );
     expect(attestations).toHaveLength(1);
-    expect(attestations[0]?.verificationState).toBe("verified");
-    expect(attestations[0]?.revokedAt).toBeNull();
+    expect(attestations[0]?.attestation.verificationState).toBe("verified");
+    expect(attestations[0]?.revocation).toBeNull();
   });
 });
 
@@ -1829,7 +1830,7 @@ describe("场景20：跨租户访问全部 Fail-closed", () => {
     });
 
     const crossTenantRequestId = "req-e2e-cross-tenant-001";
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agents/random-uuid/revisions",

@@ -1,5 +1,5 @@
 /**
- * S03-C05：V11 Admin API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
+ * S03-C05：Admin API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖 4 个 Admin API 路由：
  * - POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision。
@@ -24,7 +24,7 @@ import {
   createDraftRevision,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
-import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
+import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -48,7 +48,7 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import type { ActivateRouteSetResponse } from "@/lib/control-plane-client/contracts/route";
 import { db } from "@/lib/db/client";
-import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
+import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { auditEvent, idempotencyRecord } from "@/lib/persistence/schema/control-plane";
 import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
@@ -267,13 +267,19 @@ async function seedPublishedAgentRevision(
     createdBy: ownerId,
   });
 
-  await createVerifiedAttestationDirect(
+  const attestationId = await createVerifiedAttestationDirect(
     tenantId,
     "agent_revision",
     revision.id,
     `agent-content-${contentSuffix}`,
   );
-  await publishRevision(tenantId, revision.id, 1);
+  await publishTrustedAgentRevisionForTest({
+    tenantId,
+    revisionId: revision.id,
+    agentExpectedVersionNo: 1,
+    attestationId,
+    actorId: ownerId,
+  });
 
   return { agent, revision };
 }
@@ -354,7 +360,7 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
       idempotencyKey: string,
       routeId?: string,
     ) =>
-      buildV11Request({
+      buildApiRequest({
         audience: "admin",
         method: "PUT",
         path: `/deployment-route-sets/${routeSet.id}/activation`,
@@ -566,7 +572,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     setArtifactStoreOverride(store);
     setBuilderKeyRegistryOverride(builderKeys);
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/artifact-attestations:verify",
@@ -595,7 +601,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
 
   it("缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
     const digest = computeArtifactDigest("no-idem-content");
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/artifact-attestations:verify",
@@ -648,7 +654,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
       builder_identity: "builder:company-agent-runtime",
     };
     const buildRequest = () =>
-      buildV11Request({
+      buildApiRequest({
         audience: "admin",
         method: "POST",
         path: "/artifact-attestations:verify",
@@ -708,7 +714,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
       builder_identity: "builder:company-agent-runtime",
     };
 
-    const request1 = buildV11Request({
+    const request1 = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/artifact-attestations:verify",
@@ -719,7 +725,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     expect(response1.status).toBe(200);
     const body1 = (await response1.json()) as Record<string, unknown>;
 
-    const request2 = buildV11Request({
+    const request2 = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/artifact-attestations:verify",
@@ -760,7 +766,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
   it("成功创建 → 201 + ETag", async () => {
     const artifactDigest = computeArtifactDigest("test-artifact-content");
     const instructionHash = computeArtifactDigest("test-instruction-content");
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agents/test-agent-id/revisions",
@@ -790,7 +796,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
   });
 
   it("缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agents/test-agent-id/revisions",
@@ -815,7 +821,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
 
   it("跨租户 Agent → 404 RESOURCE_NOT_FOUND", async () => {
     const crossTenantRequestId = "req-cross-tenant-rev";
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agents/random-uuid/revisions",
@@ -856,7 +862,7 @@ describe("Agent control-plane detail and withdrawal", () => {
     );
 
     const agentResponse = await getAgentGET(
-      buildV11Request({ audience: "admin", method: "GET", path: `/agents/${agent.id}` }),
+      buildApiRequest({ audience: "admin", method: "GET", path: `/agents/${agent.id}` }),
       { params: Promise.resolve({ agent_id: agent.id }) },
     );
     expect(agentResponse.status).toBe(200);
@@ -869,7 +875,7 @@ describe("Agent control-plane detail and withdrawal", () => {
 
     const getRevision = () =>
       getAgentRevisionGET(
-        buildV11Request({
+        buildApiRequest({
           audience: "admin",
           method: "GET",
           path: `/agent-revisions/${revision.id}`,
@@ -885,7 +891,7 @@ describe("Agent control-plane detail and withdrawal", () => {
 
     const requestBody = { reason_code: "security_response", reason: "发现风险" };
     const buildWithdrawRequest = () =>
-      buildV11Request({
+      buildApiRequest({
         audience: "admin",
         method: "POST",
         path: `/agent-revisions/${revision.id}:withdraw`,
@@ -957,7 +963,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
       "publish-artifact-content",
     );
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agent-revisions/rev:publish",
@@ -1010,7 +1016,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
       publishedBy: userIdentityId,
     });
 
-    const replayRequest = buildV11Request({
+    const replayRequest = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agent-revisions/rev:publish",
@@ -1061,7 +1067,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
       "concurrent-publish-content",
     );
     const buildRequest = (idempotencyKey: string) =>
-      buildV11Request({
+      buildApiRequest({
         audience: "admin",
         method: "POST",
         path: "/agent-revisions/rev:publish",
@@ -1114,7 +1120,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
       createdBy: userIdentityId,
     });
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agent-revisions/rev:publish",
@@ -1160,7 +1166,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
       "etag-mismatch-content",
     );
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agent-revisions/rev:publish",
@@ -1201,7 +1207,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
       createdBy: userIdentityId,
     });
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agent-revisions/rev:publish",
@@ -1246,6 +1252,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
       userIdentityId,
       "route-disable-agent",
       "agent-v1",
+      "enabled",
     );
     agentId = agentResult.agent.id;
     agentRevisionId = agentResult.revision.id;
@@ -1255,6 +1262,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
       userIdentityId,
       "route-disable-runtime",
       "runtime-v1",
+      "enabled",
     );
     runtimeRevisionId = runtimeResult.revision.id;
 
@@ -1287,7 +1295,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
       .where(eq(routeActivation.routeId, routeId));
     expect(currentActivation).toBeDefined();
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: `/deployment-routes/${routeId}:disable`,
@@ -1323,7 +1331,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
   it("相同 Idempotency-Key 重试返回原结果，不创建第三条 Activation", async () => {
     const requestBody = { reason: "人工停用" };
     const buildRequest = () =>
-      buildV11Request({
+      buildApiRequest({
         audience: "admin",
         method: "POST",
         path: `/deployment-routes/${routeId}:disable`,
@@ -1364,7 +1372,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
   });
 
   it("缺少 If-Match → 400 REQUEST_SCHEMA_INVALID", async () => {
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: `/deployment-routes/${routeId}:disable`,
@@ -1381,7 +1389,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
   });
 
   it("ETag 不匹配 → 412 ETAG_MISMATCH", async () => {
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: `/deployment-routes/${routeId}:disable`,
@@ -1400,7 +1408,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
 
   it("跨租户 Route → 404 RESOURCE_NOT_FOUND", async () => {
     const crossTenantRequestId = "req-cross-tenant-route";
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/deployment-routes/random-uuid:disable",

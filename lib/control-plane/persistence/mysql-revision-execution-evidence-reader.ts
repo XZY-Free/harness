@@ -7,7 +7,7 @@
  * 所有低层 Reader 接受调用方传入的 DB Session 或 Transaction，
  * 本模块禁止内部使用全局 db（规则）。
  *
- * 参见：SnowHarness专题01最终差距整改与正式链路收口实施方案 
+ * 参见：SnowHarness专题01最终差距整改与正式链路收口实施方案
  */
 
 import type { RevisionExecutionEvidenceSnapshot, PolicyRevisionSnapshot, PolicyRequirementResult } from "../domain/revision-execution-eligibility";

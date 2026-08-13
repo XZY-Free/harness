@@ -7,7 +7,7 @@
  *
  * 不得创建第三套 Reader。
  *
- * 参见：SnowHarness专题01最终差距整改与正式链路收口实施方案 
+ * 参见：SnowHarness专题01最终差距整改与正式链路收口实施方案
  */
 
 import type { RevisionExecutionEvidenceSnapshot } from "../domain/revision-execution-eligibility";
