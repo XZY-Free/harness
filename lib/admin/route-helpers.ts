@@ -1,8 +1,8 @@
 /**
- * V11 Admin API route handler 公共助手（S03-C05）。
+ * Admin API route handler 公共助手（S03-C05）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §6、§9、
- * ../v11-agentkit-platform/14-production-operations-security-and-retention.md §5。
+ * 事实源：docs/architecture/api-and-events.md §6、§9、
+ * docs/architecture/security.md §5。
  *
  * 职责：
  * - resolveAdminPrincipalAsync：admin audience 双身份解析（SSO Session 或 Service Identity Workload Token）。

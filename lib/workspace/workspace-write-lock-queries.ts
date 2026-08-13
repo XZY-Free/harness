@@ -1,11 +1,11 @@
 /**
- * V11 Workspace 写锁仓储（S09-C07）。
+ * Workspace 写锁仓储（S09-C07）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §13（并发 Workspace）、
+ * - docs/architecture/conversations.md §13（并发 Workspace）、
  * §17（调度与资源可靠性——Workspace 写锁）
- * - ../v11-agentkit-platform/10-core-data-model.md （WorkspaceBinding 不可变）、（Event 只 INSERT）、§9（事务边界）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C07
+ * - docs/architecture/persistence.md （WorkspaceBinding 不可变）、（Event 只 INSERT）、§9（事务边界）
+ * - docs/architecture/conversations.md 、S09-C07
  *
  * 职责：
  * - acquireWorkspaceWriteLock：Desktop 同路径写锁获取；已持锁抛 WorkspaceWriteLockConflictError（§13 禁止后完成者覆盖）。

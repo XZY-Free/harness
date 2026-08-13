@@ -1,10 +1,10 @@
 import type { ApiErrorCode } from "@/lib/error-codes";
 /**
- * V11 限流与过载保护路由助手（S12-W02）。
+ * 限流与过载保护路由助手（S12-W02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md 
- * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W02
+ * - docs/architecture/security.md
+ * - docs/architecture/security.md S12-W02
  *
  * 职责：
  * - 构建 RATE_LIMITED (429) 响应，包含 retry_after_ms 和 Retry-After 头。

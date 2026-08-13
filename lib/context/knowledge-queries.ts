@@ -1,13 +1,13 @@
 /**
- * V11 Knowledge 仓储 + 证据检索服务。
+ * Knowledge 仓储 + 证据检索服务。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （knowledge_base/document/revision 字段）、
+ * - docs/architecture/persistence.md （knowledge_base/document/revision 字段）、
  * （knowledge_chunk / knowledge_index 索引表）。
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §12（Knowledge Base）、
+ * - docs/architecture/context-memory-and-knowledge.md §12（Knowledge Base）、
  * §13（Knowledge 加载：先目录后证据 / 数据保持最新 / 检索失败区分）、§14（与 Skill/Tool 边界）。
- * - ../v11-agentkit-platform/09-unified-domain-model.md §6（域模型边界）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md 。
+ * - docs/architecture/domain-model.md §6（域模型边界）。
+ * - docs/architecture/context-memory-and-knowledge.md 。
  *
  * 职责：
  * - computeKnowledgeContentHash / computeKnowledgeRevisionKey：规范化 hash 与去重键。

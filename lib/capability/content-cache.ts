@@ -1,5 +1,5 @@
 /**
- * V11 内容寻址缓存工具（阶段 6 S06-C01）。
+ * 内容寻址缓存工具（阶段 6 S06-C01）。
  *
  * 用于 SkillVersion 内容 hash 计算与校验：
  * - 计算 content hash（sha256: 前缀 + 64 hex）。

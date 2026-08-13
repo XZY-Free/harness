@@ -1,10 +1,10 @@
 /**
- * V11 ToolCall 仓储（阶段 6 S06-C05）。
+ * ToolCall 仓储（阶段 6 S06-C05）。
  *
  * 事实源：lib/persistence/schema/tool-call.ts、
- * ../v11-agentkit-platform/10-core-data-model.md （tool_call）、
- * ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md （Tool 稳定边界）、
- * ../v11-agentkit-platform/12-capability-and-collaboration-api.md （TOOL_SCHEMA_CHANGED）。
+ * docs/architecture/persistence.md （tool_call）、
+ * docs/architecture/capabilities-and-security.md （Tool 稳定边界）、
+ * docs/architecture/capability-and-collaboration-api.md （TOOL_SCHEMA_CHANGED）。
  *
  * 职责：
  * - computeArgumentsHash：计算脱敏参数的 sha256 hash（sha256: 前缀 + 64 hex）。

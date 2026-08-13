@@ -1,10 +1,10 @@
 /**
- * V11 Catalog 查询层（阶段 6 S06-C03）。
+ * Catalog 查询层（阶段 6 S06-C03）。
  *
  * 事实源：
  * - lib/persistence/schema/catalog.ts
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §2（Employee Catalog API）、（CatalogSearchItem）
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §2（统一目录）
+ * - docs/architecture/capability-and-collaboration-api.md §2（Employee Catalog API）、（CatalogSearchItem）
+ * - docs/architecture/capabilities-and-security.md §2（统一目录）
  *
  * 职责：
  * - listCatalogOptions：列出目录条目（按 resourceType / lifecycleState 过滤 + 分页）。

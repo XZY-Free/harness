@@ -1,7 +1,7 @@
 /**
- * V11 Observation 内容策略（S11-W05）。
+ * Observation 内容策略（S11-W05）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W05。
+ * 事实源：docs/architecture/runtime-control-plane.md S11-W05。
  *
  * 内容模式：
  * - metadata：仅元数据（kind/name/时长/状态/计数），不含内容。

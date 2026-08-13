@@ -1,11 +1,11 @@
 /**
- * V11 Catalog 投影器（阶段 6 S06-C03）。
+ * Catalog 投影器（阶段 6 S06-C03）。
  *
  * 事实源：
  * - lib/persistence/schema/catalog.ts
- * - ../v11-agentkit-platform/10-core-data-model.md （catalog_entry 读模型）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §2（Employee Catalog API）
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §2（统一目录）
+ * - docs/architecture/persistence.md （catalog_entry 读模型）
+ * - docs/architecture/capability-and-collaboration-api.md §2（Employee Catalog API）
+ * - docs/architecture/capabilities-and-security.md §2（统一目录）
  *
  * 职责：
  * - refreshCatalogEntry：从事实源读取单条资源并 upsert CatalogEntry；同事务内推进 CatalogRevision。

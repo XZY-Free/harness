@@ -1,9 +1,9 @@
 /**
- * V11 SSE 并发连接配额管理（S12-W02）。
+ * SSE 并发连接配额管理（S12-W02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md 
- * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W02
+ * - docs/architecture/security.md
+ * - docs/architecture/security.md S12-W02
  *
  * 职责：
  * - 按租户、用户、Thread 维度跟踪活跃 SSE 连接数。

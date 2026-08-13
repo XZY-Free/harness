@@ -1,7 +1,7 @@
 /**
- * V11 Context 查询编排器（阶段 7 S07-C01）。
+ * Context 查询编排器（阶段 7 S07-C01）。
  *
- * 事实源：../v11-agentkit-platform/03-context-memory-and-knowledge.md §3（渐进加载）、§5（优先级与预算）。
+ * 事实源：docs/architecture/context-memory-and-knowledge.md §3（渐进加载）、§5（优先级与预算）。
  *
  * 职责：
  * - assembleContextView：运行所有源解析器，收集 Fragment，应用预算策略，返回 ContextView。

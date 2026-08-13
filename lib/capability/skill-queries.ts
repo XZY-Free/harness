@@ -1,5 +1,5 @@
 /**
- * V11 Skill 仓储（阶段 6 S06-C01）。
+ * Skill 仓储（阶段 6 S06-C01）。
  *
  * 事实源：lib/persistence/schema/skill.ts、阶段 6 Skill/Capability 模型。
  *

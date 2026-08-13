@@ -1,5 +1,5 @@
 /**
- * V11 Tool / ToolProvider / Connection / CredentialRef / ToolSchemaRevision 仓储
+ * Tool / ToolProvider / Connection / CredentialRef / ToolSchemaRevision 仓储
  * （阶段 6 S06-C02）。
  *
  * 事实源：lib/persistence/schema/tool.ts、阶段 6 Tool/Capability 模型。

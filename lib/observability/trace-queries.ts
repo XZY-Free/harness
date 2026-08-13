@@ -1,9 +1,9 @@
 /**
- * V11 Trace 仓储（S11-W05）。
+ * Trace 仓储（S11-W05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md §11（Observability），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W05。
+ * - docs/architecture/persistence.md §11（Observability），
+ * - docs/architecture/runtime-control-plane.md S11-W05。
  *
  * 职责：
  * - createTrace / getTraceById / getTraceByRoot / listTracesByTenant / updateTraceState。
@@ -12,7 +12,7 @@
  * 关键约束：
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  * - 不扩展 Runtime ingress 协议；Trace 由 admin API 或未来 runtime 适配器写入。
- * - cursor 分页采用 limit+1 策略（与 lib/v11/job/job-queries.ts 的 listJobsByTenant 一致）。
+ * - cursor 分页采用 limit+1 策略（与 lib/job/job-queries.ts 的 listJobsByTenant 一致）。
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";

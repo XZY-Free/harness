@@ -1,9 +1,9 @@
 /**
- * V11 Observation 仓储（S11-W05）。
+ * Observation 仓储（S11-W05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md §11（Observability），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W05。
+ * - docs/architecture/persistence.md §11（Observability），
+ * - docs/architecture/runtime-control-plane.md S11-W05。
  *
  * 职责：
  * - createObservation：写入前调用 content-policy.redactContent 脱敏，containsSecret 强制 false。

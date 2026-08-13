@@ -1,12 +1,12 @@
 /**
- * V11 Gateway API route handler 公共助手（阶段 6 S06-C04）。
+ * Gateway API route handler 公共助手（阶段 6 S06-C04）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §3（Gateway API）、
+ * - docs/architecture/api-and-events.md §3（Gateway API）、
  * （身份与授权：Gateway API 走 Workload Token，audience=gateway）、
  * （公共请求头：Idempotency-Key / X-Request-ID）、
  * （成功与错误格式）。
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §3（Runtime Capability API）。
+ * - docs/architecture/capability-and-collaboration-api.md §3（Runtime Capability API）。
  *
  * 职责：
  * - resolveGatewayPrincipal：解析 Workload Token（audience=gateway）。

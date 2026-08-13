@@ -3,11 +3,11 @@ import { db } from "@/lib/db/client";
 import { getOverloadProtector } from "@/lib/gateway/overload-protection";
 import { getSSEConnectionQuota } from "@/lib/gateway/sse-connection-quota";
 /**
- * V11 服务就绪状态检查器（S12-W03）。
+ * 服务就绪状态检查器（S12-W03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md （查询系统就绪状态）
- * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W03
+ * - docs/architecture/security.md （查询系统就绪状态）
+ * - docs/architecture/security.md S12-W03
  *
  * 职责：
  * - 按 scope 检查真实组件状态（DB 迁移、事件投影、网关保护、Job 调度、删除）。

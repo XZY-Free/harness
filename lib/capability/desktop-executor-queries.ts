@@ -1,20 +1,20 @@
 /**
- * V11 Desktop Executor 接入层（阶段 8 S08-C07）。
+ * Desktop Executor 接入层（阶段 8 S08-C07）。
  *
  * 事实源：
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md
+ * - docs/architecture/capabilities-and-security.md
  * （4 条不变量）、§"API 范围"（Desktop Bridge 内部命令继续使用签名协议）、
  * §"迁移与删除"（本地路径必须补 device）、§"阶段验收"（Web 打开本地任务、本地文件输出、
  * Credential 泄漏扫描）。
- * - ../v11-agentkit-platform/10-core-data-model.md （workspace_binding.device_id 与
+ * - docs/architecture/persistence.md （workspace_binding.device_id 与
  * lease.device_id 一致性）、（Desktop Lease 必含 deviceId）、（execution_ownership）、
  * （tool_call.environment_lease_id）、（effect_record 与 reconcile）、
  * （user_action_request confirmation）、（file_change.pathRef 结合 binding/device 解释）、
  * §9 不变量第 11 条（本地路径必须与 Desktop device/binding 一起解释）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （tool-call 入口）、
+ * - docs/architecture/api-and-events.md （tool-call 入口）、
  * （effect reconcile）、（user-action-requests）、（Desktop 本地路径四重校验）、
  * （API 响应不返回 Credential 原值/隐藏思维链/未授权绝对路径/跨租户存在性）。
- * - ../v11-agentkit-platform/09-unified-domain-model.md （Binding 位置标识只在相应执行域内有效）、
+ * - docs/architecture/domain-model.md （Binding 位置标识只在相应执行域内有效）、
  * §10 不变量第 19 条（活跃 Invocation 不因另一设备打开 Thread 而迁移）。
  *
  * 关键不变量（W07 自身条款）：

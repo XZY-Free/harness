@@ -1,9 +1,9 @@
 /**
- * V11 CapabilityUse 仓储（阶段 6 S06-C04）。
+ * CapabilityUse 仓储（阶段 6 S06-C04）。
  *
  * 事实源：lib/persistence/schema/capability-use.ts、
- * ../v11-agentkit-platform/10-core-data-model.md （capability_use）、
- * ../v11-agentkit-platform/12-capability-and-collaboration-api.md §3（Runtime Capability API）。
+ * docs/architecture/persistence.md （capability_use）、
+ * docs/architecture/capability-and-collaboration-api.md §3（Runtime Capability API）。
  *
  * 职责：
  * - computeCapabilityUseKey：计算幂等键 sha256(type|id|revision|content-hash|schema-hash)。

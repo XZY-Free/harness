@@ -1,12 +1,12 @@
 /**
- * V11 PermissionDecision + Grant 仓储（阶段 8 S08-C03）。
+ * PermissionDecision + Grant 仓储（阶段 8 S08-C03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （permission_decision、
+ * - docs/architecture/persistence.md （permission_decision、
  * user_action_request 与 grant）、（ToolCall、Effect 与 Credential）。
- * - ../v11-agentkit-platform/09-unified-domain-model.md （PermissionDecision）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §10（block 不可被绕过）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/domain-model.md （PermissionDecision）。
+ * - docs/architecture/api-and-events.md §10（block 不可被绕过）。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 关键不变量：
  * - PermissionDecision：UNIQUE(toolCallId, decisionSequence)；每次评估新增行，

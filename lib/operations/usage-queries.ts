@@ -1,9 +1,9 @@
 /**
- * V11 Usage / Capacity / SLI 仓储（S11-W07）。
+ * Usage / Capacity / SLI 仓储（S11-W07）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md §11（Observability），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W07。
+ * - docs/architecture/persistence.md §11（Observability），
+ * - docs/architecture/runtime-control-plane.md S11-W07。
  *
  * 职责：
  * - createUsageRecord / getUsageRecordById / listUsageRecordsByTenant (cursor 分页)
@@ -21,7 +21,7 @@
  * - bigint 字段（quantity / totalQuantity / totalCostMicros / unitCostMicros / limitTokensPerMinute /
  * limitCostPerHourMicros）使用 BigInt mode，路由层序列化为 string。
  * - 告警从可执行阈值产生，并能跳转相关 Invocation/Event/Trace，不建设无来源的装饰仪表盘。
- * - cursor 分页采用 limit+1 策略（与 lib/v11/evaluation/evaluation-queries.ts 的 listEvaluationRunsByTenant 一致）。
+ * - cursor 分页采用 limit+1 策略（与 lib/evaluation/evaluation-queries.ts 的 listEvaluationRunsByTenant 一致）。
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
@@ -544,7 +544,7 @@ export interface CreateServiceLevelIndicatorParams {
  breach?: boolean;
  alertInvocationId?: string | null;
  alertTraceId?: string | null;
- /** S12-W03：告警错误码（breach=true 时填入触发的 V11 错误码）。 */
+ /** S12-W03：告警错误码（breach=true 时填入触发的 错误码）。 */
  errorCode?: string | null;
  measuredAt?: Date;
 }

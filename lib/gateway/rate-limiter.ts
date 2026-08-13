@@ -1,9 +1,9 @@
 /**
- * V11 多维度令牌桶限流器（S12-W02）。
+ * 多维度令牌桶限流器（S12-W02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md 
- * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W02
+ * - docs/architecture/security.md
+ * - docs/architecture/security.md S12-W02
  *
  * 职责：
  * - 为 tenant、user、thread、runtime、high_cost 五个维度提供独立令牌桶。

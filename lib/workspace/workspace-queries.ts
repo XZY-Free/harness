@@ -1,12 +1,12 @@
 /**
- * V11 Workspace 仓储：Workspace / WorkspaceBinding / WorkspaceAttachment /
+ * Workspace 仓储：Workspace / WorkspaceBinding / WorkspaceAttachment /
  * WorkspaceAttachmentUse CRUD + 位置优先级 + 跨租户隔离。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （workspace/binding/attachment）。
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §9—16（执行位置语义）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md 、3.12（Attachment API）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/persistence.md （workspace/binding/attachment）。
+ * - docs/architecture/capabilities-and-security.md §9—16（执行位置语义）。
+ * - docs/architecture/api-and-events.md 、3.12（Attachment API）。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 关键不变量：
  * - Desktop binding 必须同时有 deviceId 和 locationRef（创建时校验）。

@@ -1,8 +1,8 @@
 /**
- * V11 优先级过载保护（S12-W02）。
+ * 优先级过载保护（S12-W02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W02
+ * - docs/architecture/security.md S12-W02
  *
  * 职责：
  * - 跟踪进程级并发请求数，按优先级分级拒绝。

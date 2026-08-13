@@ -1,12 +1,12 @@
 /**
- * V11 Artifact + FileChange + FilesystemCheckpoint 仓储（阶段 8 S08-C06）。
+ * Artifact + FileChange + FilesystemCheckpoint 仓储（阶段 8 S08-C06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md -7.4、（Item 多态 artifact）、
+ * - docs/architecture/persistence.md -7.4、（Item 多态 artifact）、
  * （invocation_attempt.checkpoint_ref）、（tool_call.result_artifact_id）、
  * §9 不变量第 11 条（本地路径必须与 Desktop device/binding 一起解释）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （Artifact 上传 API）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/api-and-events.md （Artifact 上传 API）。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 关键不变量：
  * - 三张表都是不可变事实记录（无状态机、无 versionNo 乐观锁）。

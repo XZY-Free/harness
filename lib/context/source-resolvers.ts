@@ -1,11 +1,11 @@
 import { listItemsByThread } from "@/lib/conversations/thread-item-queries";
 /**
- * V11 Context 源解析器（阶段 7 S07-C01 / S07-C04 / S07-C05）。
+ * Context 源解析器（阶段 7 S07-C01 / S07-C04 / S07-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §3（渐进加载）、§8（作用域）、§9（挂载与检索）、
+ * - docs/architecture/context-memory-and-knowledge.md §3（渐进加载）、§8（作用域）、§9（挂载与检索）、
  * §13（Knowledge 加载：先目录后证据 / 数据保持最新 / 检索失败区分）、§15（失败与恢复）。
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §3（Context Checkpoint API）。
+ * - docs/architecture/memory-and-job-api.md §3（Context Checkpoint API）。
  *
  * 职责：
  * - 定义 SourceResolver 接口与四种稳定结果状态（ok/empty/denied/unavailable）。

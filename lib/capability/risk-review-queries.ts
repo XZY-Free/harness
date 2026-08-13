@@ -1,8 +1,8 @@
 /**
- * V11 CapabilityReview 仓储（阶段 6 S06-C05）。
+ * CapabilityReview 仓储（阶段 6 S06-C05）。
  *
  * 事实源：lib/persistence/schema/tool-call.ts、
- * ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §5（能力变化与审核）。
+ * docs/architecture/capabilities-and-security.md §5（能力变化与审核）。
  *
  * 职责：
  * - createCapabilityReview：创建审核记录（resourceType/resourceId/oldRevisionId/newRevisionId/

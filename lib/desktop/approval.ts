@@ -1,7 +1,7 @@
 /**
  * ：审批策略模块。
  *
- * 实现 03-agent-bridge-security.md §7 与 02-desktop-browser-architecture.md 
+ * 实现 03-agent-bridge-security.md §7 与 02-desktop-browser-architecture.md
  * 规定的风险矩阵与审批决策。Desktop 不盲信 Server —— 必须对过期、不匹配、
  * 超范围 approval 拒绝执行。RPC 信封中的 approvalId 必须对当前 command + scope 有效。
  *

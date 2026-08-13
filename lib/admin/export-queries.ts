@@ -1,9 +1,9 @@
 /**
- * V11 AdminExport 仓储（S11-W08）。
+ * AdminExport 仓储（S11-W08）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md（管理导出任务），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W08。
+ * - docs/architecture/persistence.md（管理导出任务），
+ * - docs/architecture/runtime-control-plane.md S11-W08。
  *
  * 职责：
  * - createAdminExport：登记新导出任务（status=pending）+ 写审计 admin.export.requested。
@@ -15,7 +15,7 @@
  * 关键约束：
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  * - 写入时审计：requested/completed/failed 三种审计事件由本模块触发。
- * - cursor 分页采用 limit+1 策略（与 lib/v11/operations/usage-queries.ts 一致）。
+ * - cursor 分页采用 limit+1 策略（与 lib/operations/usage-queries.ts 一致）。
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";

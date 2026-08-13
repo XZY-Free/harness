@@ -1,11 +1,11 @@
 /**
- * V11 Context Checkpoint 仓储。
+ * Context Checkpoint 仓储。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （context_checkpoint 表）。
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §6（压缩）、§15（失败与恢复）。
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §3（Context Checkpoint API）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md 。
+ * - docs/architecture/persistence.md （context_checkpoint 表）。
+ * - docs/architecture/context-memory-and-knowledge.md §6（压缩）、§15（失败与恢复）。
+ * - docs/architecture/memory-and-job-api.md §3（Context Checkpoint API）。
+ * - docs/architecture/context-memory-and-knowledge.md 。
  *
  * 职责：
  * - createContextCheckpoint：原子写入 Checkpoint + 幂等记录（同事务）。

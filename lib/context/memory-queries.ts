@@ -1,13 +1,13 @@
 /**
- * V11 Memory 仓储 + Policy 服务。
+ * Memory 仓储 + Policy 服务。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （memory_candidate / memory_entry / memory_source / memory_index）。
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §8（作用域）、§9（挂载与检索）、
+ * - docs/architecture/persistence.md （memory_candidate / memory_entry / memory_source / memory_index）。
+ * - docs/architecture/context-memory-and-knowledge.md §8（作用域）、§9（挂载与检索）、
  * §10（写入路径）、§11（禁止内容与用户控制）。
- * - ../v11-agentkit-platform/09-unified-domain-model.md （Memory 域模型边界）。
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §2（Memory Candidate API）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md 。
+ * - docs/architecture/domain-model.md （Memory 域模型边界）。
+ * - docs/architecture/memory-and-job-api.md §2（Memory Candidate API）。
+ * - docs/architecture/context-memory-and-knowledge.md 。
  *
  * 职责：
  * - computeCandidateKey：规范化 sha256(invocation_id|source_type|source_id|content_hash|scope_type|scope_ref-or-empty)。

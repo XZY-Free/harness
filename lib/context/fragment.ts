@@ -1,7 +1,7 @@
 /**
- * V11 Context Fragment 领域类型（阶段 7 S07-C01）。
+ * Context Fragment 领域类型（阶段 7 S07-C01）。
  *
- * 事实源：../v11-agentkit-platform/03-context-memory-and-knowledge.md §4（Fragment）、§5（优先级与预算）。
+ * 事实源：docs/architecture/context-memory-and-knowledge.md §4（Fragment）、§5（优先级与预算）。
  *
  * Fragment 是模型本次视图中的有限内容单元，带来源和策略：
  * - kind：内容类型（system/agent_instruction/user/memory/knowledge/file/tool/skill）。

@@ -1,7 +1,7 @@
 /**
- * V11 Context 预算策略（阶段 7 S07-C01）。
+ * Context 预算策略（阶段 7 S07-C01）。
  *
- * 事实源：../v11-agentkit-platform/03-context-memory-and-knowledge.md §5（优先级与预算）。
+ * 事实源：docs/architecture/context-memory-and-knowledge.md §5（优先级与预算）。
  *
  * 平台先为模型输出和 Tool 结果预留空间，再按优先级顺序选择 Fragment：
  * 1. 平台强制规则和当前 Agent 指令（TIER_MANDATORY）。

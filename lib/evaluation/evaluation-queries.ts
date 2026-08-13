@@ -1,9 +1,9 @@
 /**
- * V11 Evaluation 仓储（S11-W06）。
+ * Evaluation 仓储（S11-W06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md（Evaluation 域），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W06。
+ * - docs/architecture/persistence.md（Evaluation 域），
+ * - docs/architecture/runtime-control-plane.md S11-W06。
  *
  * 职责：
  * - createEvaluationRun / getEvaluationRunById / listEvaluationRunsByTenant (cursor 分页)
@@ -15,7 +15,7 @@
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  * - 评测对象明确绑定 AgentRevision、RuntimeRevision、Route、模型、数据集和评测策略。
  * - 结果保留案例级证据、版本引用、失败原因和可比较指标；阈值只按 Agent 风险配置，不一刀切。
- * - cursor 分页采用 limit+1 策略（与 lib/v11/observability/trace-queries.ts 的 listTracesByTenant 一致）。
+ * - cursor 分页采用 limit+1 策略（与 lib/observability/trace-queries.ts 的 listTracesByTenant 一致）。
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";

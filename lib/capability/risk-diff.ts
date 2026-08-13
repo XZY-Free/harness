@@ -1,9 +1,9 @@
 /**
- * V11 风险差异分析器（阶段 6 S06-C05）。
+ * 风险差异分析器（阶段 6 S06-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §5（能力变化与审核）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md （TOOL_SCHEMA_CHANGED）
+ * - docs/architecture/capabilities-and-security.md §5（能力变化与审核）
+ * - docs/architecture/capability-and-collaboration-api.md （TOOL_SCHEMA_CHANGED）
  *
  * 职责：
  * - compareSchemaRevisions：对比新旧 SchemaRevision 的 riskMetadataJson，输出 RiskDiffResult。

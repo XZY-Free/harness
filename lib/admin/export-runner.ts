@@ -1,9 +1,9 @@
 /**
- * V11 Admin Export Runner（S11-W08）。
+ * Admin Export Runner（S11-W08）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md（管理导出任务），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W08。
+ * - docs/architecture/persistence.md（管理导出任务），
+ * - docs/architecture/runtime-control-plane.md S11-W08。
  *
  * 职责：
  * - runAdminExport：根据 exportKind 调用对应仓储 list* 函数拉取数据。
