@@ -1,8 +1,8 @@
 /**
- * V11 统一管理后台导航可见性解析（S11-W01）。
+ * 统一管理后台导航可见性解析（S11-W01）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md
+ * - docs/architecture/runtime-control-plane.md
  * S11-W01：「菜单可见性与服务端 Action Scope 同源；隐藏菜单不能代替授权校验」
  * 「后台信息架构」8 个一级导航：智能体 / 能力与知识 / 会话与协作 / Runtime 与环境 /
  * 观测与评测 / 安全与审计 / 运营 / 平台设置

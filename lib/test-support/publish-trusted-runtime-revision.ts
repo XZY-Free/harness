@@ -33,7 +33,8 @@ export async function publishTrustedRuntimeRevisionForTest(params: {
  attestationId: string;
 }) {
  let revision = await getRuntimeRevisionById(params.revisionId);
- const attestation = await getAttestationById(params.tenantId, params.attestationId);
+ const found = await getAttestationById(params.tenantId, params.attestationId);
+ const attestation = found?.attestation;
  if (!attestation?.artifactId || attestation.verificationState !== "verified") {
  throw new Error(`测试 RuntimeRevision 缺少权威 Attestation: ${params.revisionId}`);
  }

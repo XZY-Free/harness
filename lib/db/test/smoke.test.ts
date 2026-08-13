@@ -1,4 +1,6 @@
 import { db } from "@/lib/db/client";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { agentTable } from "@/lib/persistence/schema/agent";
 import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetDatabase } from "./mysql-harness";
@@ -24,14 +26,17 @@ describe("mysql harness smoke", () => {
   });
 
   it("插 1 行 → reset → 归 0（隔离生效）", async () => {
-    await db.execute(
-      sql`INSERT INTO User (id, externalId, email, name, createdAt) VALUES ('u1','u1','u@x','U',NOW())`,
-    );
-    await db.execute(
-      sql`INSERT INTO Thread (id, userId, title, status, createdAt, updatedAt) VALUES ('t1','u1','x','idle',NOW(),NOW())`,
-    );
+    const tenant = await ensureDefaultTenant();
+    await db.insert(agentTable).values({
+      id: "smoke-agent-1",
+      tenantId: tenant.id,
+      agentKey: "smoke-agent",
+      displayName: "Smoke Agent",
+      ownerUserId: "smoke-owner",
+      lifecycleState: "enabled",
+    });
     await resetDatabase(db);
-    const [rows] = (await db.execute(sql`SELECT COUNT(*) AS c FROM Thread`)) as unknown as [
+    const [rows] = (await db.execute(sql`SELECT COUNT(*) AS c FROM Agent`)) as unknown as [
       Array<{ c: number }>,
     ];
     expect(rows[0]?.c).toBe(0);

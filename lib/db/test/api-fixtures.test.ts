@@ -1,16 +1,18 @@
 import { db } from "@/lib/db/client";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { agentTable } from "@/lib/persistence/schema/agent";
 import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   AUDIENCE_PREFIX,
   assertCrossTenantHidden,
   assertIdempotencyConflict,
-  buildV11Request,
+  buildApiRequest,
   withRollback,
 } from "./api-fixtures";
 import { resetDatabase } from "./mysql-harness";
 
-describe("V11 api-fixtures: buildV11Request", () => {
+describe("api-fixtures: buildApiRequest", () => {
   it("为四类 audience 生成正确路径前缀与 X-Request-ID", () => {
     const cases = [
       { audience: "employee" as const, prefix: "/api/v1" },
@@ -19,14 +21,14 @@ describe("V11 api-fixtures: buildV11Request", () => {
       { audience: "admin" as const, prefix: "/admin/api/v1" },
     ];
     for (const { audience, prefix } of cases) {
-      const req = buildV11Request({ audience, method: "GET", path: "/threads" });
+      const req = buildApiRequest({ audience, method: "GET", path: "/threads" });
       expect(req.url).toBe(`https://snow.test${prefix}/threads`);
       expect(req.headers.get("x-request-id")).toMatch(/^req_/);
     }
   });
 
   it("POST 携带 Idempotency-Key 与 body；PUT/PATCH 携带 If-Match", async () => {
-    const post = buildV11Request({
+    const post = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -36,7 +38,7 @@ describe("V11 api-fixtures: buildV11Request", () => {
     expect(post.headers.get("idempotency-key")).toBe("idem_1");
     expect(await post.json()).toEqual({ agent_id: "a1" });
 
-    const patch = buildV11Request({
+    const patch = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: "/threads/thr_1/settings",
@@ -47,14 +49,14 @@ describe("V11 api-fixtures: buildV11Request", () => {
   });
 
   it("显式 requestId 透传；缺失时生成", () => {
-    const a = buildV11Request({
+    const a = buildApiRequest({
       audience: "admin",
       method: "GET",
       path: "/agents",
       requestId: "req_explicit",
     });
     expect(a.headers.get("x-request-id")).toBe("req_explicit");
-    const b = buildV11Request({ audience: "admin", method: "GET", path: "/agents" });
+    const b = buildApiRequest({ audience: "admin", method: "GET", path: "/agents" });
     expect(b.headers.get("x-request-id")).not.toBe("req_explicit");
   });
 
@@ -68,19 +70,25 @@ describe("V11 api-fixtures: buildV11Request", () => {
   });
 });
 
-describe("V11 api-fixtures: withRollback", () => {
+describe("api-fixtures: withRollback", () => {
   beforeEach(async () => {
     await resetDatabase(db);
   });
 
   it("事务回滚不污染共享 DB", async () => {
+    const tenant = await ensureDefaultTenant();
     await withRollback(db, async (tx) => {
-      await tx.execute(
-        sql`INSERT INTO User (id, externalId, email, name, createdAt) VALUES ('u_rb','u_rb','rb@x','RB',NOW())`,
-      );
+      await tx.insert(agentTable).values({
+        id: "rollback-agent-1",
+        tenantId: tenant.id,
+        agentKey: "rollback-agent",
+        displayName: "Rollback Agent",
+        ownerUserId: "rollback-owner",
+        lifecycleState: "enabled",
+      });
     });
     const [rows] = (await db.execute(
-      sql`SELECT COUNT(*) AS c FROM User WHERE id = 'u_rb'`,
+      sql`SELECT COUNT(*) AS c FROM Agent WHERE id = 'rollback-agent-1'`,
     )) as unknown as [Array<{ c: number }>];
     expect(rows[0]?.c).toBe(0);
   });
@@ -99,7 +107,7 @@ describe("V11 api-fixtures: withRollback", () => {
   });
 });
 
-describe("V11 api-fixtures: 断言夹具", () => {
+describe("api-fixtures: 断言夹具", () => {
   it("assertIdempotencyConflict 校验 409 + IDEMPOTENCY_CONFLICT", async () => {
     const res = Response.json(
       {

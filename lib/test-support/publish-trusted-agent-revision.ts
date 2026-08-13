@@ -13,7 +13,8 @@ export async function publishTrustedAgentRevisionForTest(params: {
  attestationId: string;
  actorId: string;
 }) {
- const attestation = await getAttestationById(params.tenantId, params.attestationId);
+ const found = await getAttestationById(params.tenantId, params.attestationId);
+ const attestation = found?.attestation;
  if (!attestation?.artifactId || attestation.verificationState !== "verified") {
  throw new Error(`测试 AgentRevision 缺少权威 Attestation: ${params.revisionId}`);
  }

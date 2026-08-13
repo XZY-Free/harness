@@ -8,10 +8,10 @@ import {
 } from "@/lib/http";
 import type { ApiAudience } from "@/lib/http";
 /**
- * V11 四类 API 测试夹具（）。
+ * 四类 API 测试夹具（）。
  *
  * 为 employee/runtime/gateway/admin 四类 audience 建立统一测试夹具：
- * - `buildV11Request`：统一请求身份（X-Request-ID、Idempotency-Key、If-Match、Authorization）。
+ * - `buildApiRequest`：统一请求身份（X-Request-ID、Idempotency-Key、If-Match、Authorization）。
  * - `withRollback`：事务回滚夹具，保证有副作用的测试不污染共享 DB。
  * - `assertIdempotencyConflict` / `assertCrossTenantHidden`：幂等重放与跨租户拒绝的断言夹具；
  * 阶段 2 引入 idempotency_record 与 tenant 表后，路由实际执行这些语义，本夹具直接复用。
@@ -29,7 +29,7 @@ type TxClient = Parameters<Parameters<DbClient["transaction"]>[0]>[0];
 export type { ApiAudience } from "@/lib/http";
 export { AUDIENCE_PREFIX } from "@/lib/http";
 
-export interface BuildV11RequestOptions {
+export interface BuildApiRequestOptions {
  audience: ApiAudience;
  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  /** 路径，不含 audience 前缀，如 `/threads` 或 `/threads/{id}` 字面值。 */
@@ -49,10 +49,10 @@ export interface BuildV11RequestOptions {
 }
 
 /**
- * 构造一个带 V11 公共协议头的 Request，供路由 handler 单元/集成测试使用。
+ * 构造一个带 公共协议头的 Request，供路由 handler 单元/集成测试使用。
  * 不发起网络请求，仅构造对象，路由以 `handler(req)` 方式调用。
  */
-export function buildV11Request(options: BuildV11RequestOptions): Request {
+export function buildApiRequest(options: BuildApiRequestOptions): Request {
  const requestId = options.requestId ?? generateRequestId();
  const url = `https://snow.test${AUDIENCE_PREFIX[options.audience]}${options.path}`;
  const headers: Record<string, string> = {
