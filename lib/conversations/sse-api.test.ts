@@ -14,19 +14,16 @@
 import { GET as eventsGET } from "@/app/api/v1/threads/[thread_id]/events/route";
 import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
-import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import {
   initEventStreamFloor,
   updateEventStreamFloorEarliest,
 } from "@/lib/conversations/projection-checkpoint-queries";
 import { THREAD_EVENT_STREAM } from "@/lib/conversations/projector";
 import { db } from "@/lib/db/client";
-import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
+import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { publishThreadTransientEvent } from "@/lib/runtime/transient-event-bus";
+import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 employee-api.test.ts 一致）。
@@ -41,24 +38,18 @@ afterEach(() => {
   process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
 });
 
-// ─── 辅助：seed 默认身份 + Agent ───────────────────────────
+// ─── 辅助：seed 默认身份 + 可调度的 Agent + Ready Route ─────
+//
+// SSE 事件流测试需要 Turn 真正被调度（dispatched=true）才会产生
+// item.created / turn.accepted 之外的执行事件。因此这里用
+// seedDispatchableTurn 建出完整正式链上下文（§27"测试必须证明生产链"），
+// 仅暴露测试用到的 agent.id 与 tenantId，保持调用点不变。
 
 async function seedContext() {
-  const tenant = await ensureDefaultTenant();
-  const identity = await upsertUserIdentity({
-    tenantId: tenant.id,
-    externalSubject: DEFAULT_USER_ID,
-    email: DEFAULT_USER_EMAIL,
-    displayName: DEFAULT_USER_NAME,
-  });
-  const agent = await createAgent({
-    tenantId: tenant.id,
+  const { tenantId, agentId, ownerId } = await seedDispatchableTurn({
     agentKey: "sse-agent",
-    displayName: "SSE Agent",
-    ownerUserId: identity.id,
-    lifecycleState: "enabled",
   });
-  return { tenantId: tenant.id, userIdentityId: identity.id, agent };
+  return { tenantId, userIdentityId: ownerId, agent: { id: agentId } };
 }
 
 /**
@@ -66,7 +57,7 @@ async function seedContext() {
  * thread.created(1) + turn.accepted(2) + item.created(3)。
  */
 async function seedThreadWithTurn(agentId: string, key: string): Promise<string> {
-  const createReq = buildV11Request({
+  const createReq = buildApiRequest({
     audience: "employee",
     method: "POST",
     path: "/threads",
@@ -76,7 +67,7 @@ async function seedThreadWithTurn(agentId: string, key: string): Promise<string>
   const createResp = await createThreadPOST(createReq);
   const { id: threadId } = (await createResp.json()) as { id: string };
 
-  const turnReq = buildV11Request({
+  const turnReq = buildApiRequest({
     audience: "employee",
     method: "POST",
     path: `/threads/${threadId}/turns`,
@@ -92,7 +83,7 @@ async function seedThreadWithTurn(agentId: string, key: string): Promise<string>
 
 /** 再创建一个 Turn，产生 turn.accepted(4) + item.created(5)（不含 thread.created）。 */
 async function createAnotherTurn(threadId: string, key: string): Promise<void> {
-  const turnReq = buildV11Request({
+  const turnReq = buildApiRequest({
     audience: "employee",
     method: "POST",
     path: `/threads/${threadId}/turns`,
@@ -207,7 +198,7 @@ async function callEventsRoute(
   const path = query.toString()
     ? `/threads/${threadId}/events?${query}`
     : `/threads/${threadId}/events`;
-  const request = buildV11Request({
+  const request = buildApiRequest({
     audience: "employee",
     method: "GET",
     path,
@@ -335,7 +326,7 @@ describe("GET /api/v1/threads/{thread_id}/events — 错误场景", () => {
 
   it("跨租户访问 → 404 隐藏式", async () => {
     const requestId = "req-sse-cross-tenant";
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: "/threads/other-tenant-thread/events",
@@ -487,7 +478,7 @@ describe("GET /api/v1/threads/{thread_id}/events — 新事件推送", () => {
   it("response.delta 通过无 id 的 transient SSE 立即推送", async () => {
     const { agent } = await seedContext();
     const createResponse = await createThreadPOST(
-      buildV11Request({
+      buildApiRequest({
         audience: "employee",
         method: "POST",
         path: "/threads",

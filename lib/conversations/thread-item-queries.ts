@@ -1,11 +1,11 @@
 import { ItemSupersedeCycleError, ThreadItemNotFoundError } from "@/lib/conversations/errors";
 /**
- * V11 ThreadItem 仓储。
+ * ThreadItem 仓储。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （ThreadItem 表）、（事务边界）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Item 当前投影）
- * - ../v11-agentkit-platform-development-plan/04-thread-turn-item-and-event-core.md 
+ * - docs/architecture/persistence.md （ThreadItem 表）、（事务边界）
+ * - docs/architecture/agent-control-plane.md §6（Item 当前投影）
+ * - docs/architecture/conversations.md
  *
  * 职责：
  * - getItemById/getItemsByThread/getItemsByTurn：查询（跨租户隔离）。

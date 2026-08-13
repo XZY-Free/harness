@@ -1,12 +1,12 @@
 import type { ChildThreadBudgetUsage } from "@/lib/conversations/child-thread-queries";
 import { SharedBudgetExhaustedError } from "@/lib/conversations/errors";
 /**
- * V11 共享父任务总预算聚合校验（S09-C07）。
+ * 共享父任务总预算聚合校验（S09-C07）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §18 行 352-362（预算硬上限时副作用先核对）
- * - ../v11-agentkit-platform/10-core-data-model.md （ThreadRelation.budgetUsedJson）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md S09-C07
+ * - docs/architecture/conversations.md §18 行 352-362（预算硬上限时副作用先核对）
+ * - docs/architecture/persistence.md （ThreadRelation.budgetUsedJson）
+ * - docs/architecture/conversations.md S09-C07
  *
  * 职责：
  * - getSharedBudgetUsage：聚合父 Thread 下所有 active delegate ThreadRelation 的 budgetUsedJson。

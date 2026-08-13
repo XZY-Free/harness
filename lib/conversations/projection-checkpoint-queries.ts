@@ -1,11 +1,11 @@
 import { EventCursorExpiredError } from "@/lib/conversations/errors";
 /**
- * V11 投影检查点与交付失败仓储。
+ * 投影检查点与交付失败仓储。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （projection_checkpoint/event_delivery_failure/event_stream_floor）、（Outbox + checkpoint 协议）
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md （投影消费协议七条规则）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （顺序与去重）
+ * - docs/architecture/persistence.md （projection_checkpoint/event_delivery_failure/event_stream_floor）、（Outbox + checkpoint 协议）
+ * - docs/architecture/security.md （投影消费协议七条规则）
+ * - docs/architecture/api-and-events.md （顺序与去重）
  *
  * 职责：
  * - getProjectionCheckpoint / upsertProjectionCheckpoint / advanceProjectionCheckpoint：checkpoint 前移协议（同事务）。

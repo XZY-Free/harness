@@ -1,12 +1,12 @@
 /**
- * V11 通用 UserAction 解析应用服务（S10-W05）。
+ * 通用 UserAction 解析应用服务（S10-W05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （解析 UserActionRequest）、
+ * - docs/architecture/api-and-events.md （解析 UserActionRequest）、
  * （auth callback）、（user_action.resolved Event）
- * - ../v11-agentkit-platform/10-core-data-model.md （user_action_request 表）、
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §5（Handoff 统一规则）
- * - ../v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md S10-W05
+ * - docs/architecture/persistence.md （user_action_request 表）、
+ * - docs/architecture/capability-and-collaboration-api.md §5（Handoff 统一规则）
+ * - docs/architecture/product-surfaces-and-admin.md S10-W05
  *
  * 职责：
  * - resolveGenericUserAction：员工解析非 handoff 的 UserAction 请求（confirmation 非 handoff / grant / input / auth cancel）。

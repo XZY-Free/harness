@@ -1,10 +1,10 @@
 /**
- * V11 ThreadRelation 仓储。
+ * ThreadRelation 仓储。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （ThreadRelation 表）
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §4（Fork 语义）
- * - ../v11-agentkit-platform-development-plan/04-thread-turn-item-and-event-core.md 
+ * - docs/architecture/persistence.md （ThreadRelation 表）
+ * - docs/architecture/conversations.md §4（Fork 语义）
+ * - docs/architecture/conversations.md
  *
  * 职责：
  * - createThreadRelation：创建 fork/delegate/workflow_child 关系。

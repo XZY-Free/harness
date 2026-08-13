@@ -40,7 +40,7 @@ import {
   updateTurnState,
 } from "@/lib/conversations/turn-queries";
 /**
- * S04-C01：V11 会话域集成测试（真实 MySQL 8）。
+ * S04-C01：会话域集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - thread-queries：createThread/getThreadById/requireThread/listThreadsForUser/updateThreadLifecycle/updateThreadSettings/changePrimaryAgent。

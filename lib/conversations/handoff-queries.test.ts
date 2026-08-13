@@ -1,5 +1,5 @@
 /**
- * S09-C03：V11 主 Agent Handoff 应用服务集成测试（真实 MySQL 8 Testcontainers）。
+ * S09-C03：主 Agent Handoff 应用服务集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖：
  * - requestHandoff：成功 + UserActionRequest + user_action ThreadItem + 3 条 Event +

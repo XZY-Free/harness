@@ -1,12 +1,11 @@
 import { POST as regeneratePOST } from "@/app/api/v1/turns/[turn_id]:regenerate/route";
 import { POST as forkPOST } from "@/app/api/v1/threads/[thread_id]/forks/route";
-import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { POST as interruptPOST } from "@/app/api/v1/turns/[turn_id]/interrupt/route";
 import { POST as steerPOST } from "@/app/api/v1/turns/[turn_id]/steer/route";
-import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 /**
- * S04-C06：V11 Fork / Regenerate / Interrupt / Steer API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
+ * S04-C06：Fork / Regenerate / Interrupt / Steer API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖 4 个 API 路由：
  * - POST /api/v1/threads/{thread_id}/forks — Fork Thread
@@ -17,18 +16,16 @@ import { createAgent } from "@/lib/agents/persistence/agent-queries";
  * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
-import { updateTurnState } from "@/lib/conversations/turn-queries";
+import { acceptUserMessageTurn, updateTurnState } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
-import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
+import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import type { TurnState } from "@/lib/persistence/schema/conversation";
 import {
   invocationCommandTable,
   threadEventTable,
   threadItemTable,
+  threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
 import { eq } from "drizzle-orm";
@@ -46,29 +43,22 @@ afterEach(() => {
   process.env.SNOW_AUTH_MODE = ORIGINAL_AUTH_MODE;
 });
 
-// ─── 辅助：seed 默认身份 + Agent ───────────────────────────
+// ─── 辅助：seed 默认身份 + 可调度 Agent + Ready Route ───────
+//
+// fork/regenerate/steer 测试需要 Turn 真正被调度（dispatched=true），
+// 因此用 seedDispatchableTurn 建出完整正式链上下文（§27"测试必须证明
+// 生产链"），仅暴露测试用到的 agent.id 与 tenantId，保持调用点不变。
 
 async function seedContext() {
-  const tenant = await ensureDefaultTenant();
-  const identity = await upsertUserIdentity({
-    tenantId: tenant.id,
-    externalSubject: DEFAULT_USER_ID,
-    email: DEFAULT_USER_EMAIL,
-    displayName: DEFAULT_USER_NAME,
-  });
-  const agent = await createAgent({
-    tenantId: tenant.id,
+  const { tenantId, agentId, ownerId } = await seedDispatchableTurn({
     agentKey: "fork-regen-agent",
-    displayName: "ForkRegen Agent",
-    ownerUserId: identity.id,
-    lifecycleState: "enabled",
   });
-  return { tenantId: tenant.id, userIdentityId: identity.id, agent };
+  return { tenantId, userIdentityId: ownerId, agent: { id: agentId } };
 }
 
 /** 创建 Thread 并返回 threadId。 */
 async function createThread(agentId: string, idempotencyKey: string): Promise<string> {
-  const req = buildV11Request({
+  const req = buildApiRequest({
     audience: "employee",
     method: "POST",
     path: "/threads",
@@ -80,20 +70,32 @@ async function createThread(agentId: string, idempotencyKey: string): Promise<st
   return body.id;
 }
 
-/** 创建 Turn 并返回 turnId（acceptUserMessageTurn 创建 accepted 状态 Turn）。 */
+/**
+ * 创建 Turn 并返回 turnId。
+ *
+ * 直接走 `acceptUserMessageTurn`（即 POST /turns 路由 dispatch 之前的同一步），
+ * 产出 accepted 状态的 Turn。这些 fork/regenerate/interrupt/steer 测试只把 Turn
+ * 当作命令面的前置条件，不验证调度执行本身——因此刻意不走路由触发 dispatch，
+ * 避免 dispatch 异步 launch 的 Hosted 执行与本测试后续的 SELECT ... FOR UPDATE 死锁
+ * （§27 只要求"调度测试"证明生产链，命令面测试无需真正执行）。
+ */
 async function createTurn(threadId: string, idempotencyKey: string): Promise<string> {
-  const req = buildV11Request({
-    audience: "employee",
-    method: "POST",
-    path: `/threads/${threadId}/turns`,
+  const [thread] = await db
+    .select()
+    .from(threadTable)
+    .where(eq(threadTable.id, threadId))
+    .limit(1);
+  if (!thread) throw new Error(`Thread 不存在: ${threadId}`);
+
+  const { turn } = await acceptUserMessageTurn({
+    tenantId: thread.tenantId,
+    threadId,
+    ownerUserId: thread.ownerUserId,
+    content: { text: "测试消息" },
+    actorId: thread.ownerUserId,
     idempotencyKey,
-    body: { input: { type: "text", text: "测试消息" } },
   });
-  const resp = await createTurnPOST(req, {
-    params: Promise.resolve({ thread_id: threadId }),
-  });
-  const body = (await resp.json()) as { turn: { id: string } };
-  return body.turn.id;
+  return turn.id;
 }
 
 /** 直接查 DB 获取 Turn 行（绕过 tenant 隔离，测试内部使用）。 */
@@ -143,7 +145,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     const threadId = await createThread(agent.id, "fork-thread-001");
     const turnId = await createTurn(threadId, "fork-turn-001");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/forks`,
@@ -186,7 +188,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     const threadId = await createThread(agent.id, "fork-thread-002");
     const turnId = await createTurn(threadId, "fork-turn-002");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/forks`,
@@ -205,7 +207,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "fork-thread-003");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/forks`,
@@ -222,7 +224,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
   });
 
   it("Thread 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads/non-existent/forks",
@@ -244,7 +246,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     const threadId2 = await createThread(agent.id, "fork-thread-005b");
     const turnId2 = await createTurn(threadId2, "fork-turn-005b"); // 属于 thread2
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId1}/forks`,
@@ -265,7 +267,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     const threadId = await createThread(agent.id, "fork-thread-006");
     const turnId = await createTurn(threadId, "fork-turn-006");
 
-    const req1 = buildV11Request({
+    const req1 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/forks`,
@@ -279,7 +281,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     const body1 = (await resp1.json()) as { thread: { id: string } };
 
     // 同 Idempotency-Key 重放
-    const req2 = buildV11Request({
+    const req2 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/forks`,
@@ -308,7 +310,7 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}:regenerate`,
@@ -351,7 +353,7 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
   });
 
   it("Turn 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/turns/non-existent:regenerate",
@@ -374,7 +376,7 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}:regenerate`,
@@ -395,7 +397,7 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const turnId = await createTurn(threadId, "regen-turn-004");
     // Turn 保持 accepted 状态（非 completed/interrupted/failed）
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}:regenerate`,
@@ -417,7 +419,7 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const turnId = await createTurn(threadId, "regen-turn-005");
     await transitionTurn(tenantId, turnId, "cancelled");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}:regenerate`,
@@ -440,7 +442,7 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
 
-    const req1 = buildV11Request({
+    const req1 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}:regenerate`,
@@ -454,7 +456,7 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const body1 = (await resp1.json()) as { invocation_id: string };
 
     // 同 Idempotency-Key 重放
-    const req2 = buildV11Request({
+    const req2 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}:regenerate`,
@@ -481,7 +483,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     const turnId = await createTurn(threadId, "intr-turn-001");
     await transitionTurn(tenantId, turnId, "running");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/interrupt`,
@@ -531,7 +533,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "waiting_user");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/interrupt`,
@@ -548,7 +550,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
   });
 
   it("Turn 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/turns/non-existent/interrupt",
@@ -570,7 +572,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     const turnId = await createTurn(threadId, "intr-turn-004");
     await transitionTurn(tenantId, turnId, "running");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/interrupt`,
@@ -592,7 +594,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/interrupt`,
@@ -614,7 +616,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     const turnId = await createTurn(threadId, "intr-turn-006");
     await transitionTurn(tenantId, turnId, "running");
 
-    const req1 = buildV11Request({
+    const req1 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/interrupt`,
@@ -627,7 +629,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
     expect(resp1.status).toBe(202);
     const body1 = (await resp1.json()) as { command: { id: string } };
 
-    const req2 = buildV11Request({
+    const req2 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/interrupt`,
@@ -654,7 +656,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     const turnId = await createTurn(threadId, "steer-turn-001");
     await transitionTurn(tenantId, turnId, "running");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/steer`,
@@ -704,7 +706,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
   });
 
   it("Turn 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/turns/non-existent/steer",
@@ -726,7 +728,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     const turnId = await createTurn(threadId, "steer-turn-003");
     await transitionTurn(tenantId, turnId, "running");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/steer`,
@@ -748,7 +750,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "waiting_user");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/steer`,
@@ -770,7 +772,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     const turnId = await createTurn(threadId, "steer-turn-005");
     // Turn 保持 accepted 状态（非 running）
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/steer`,
@@ -792,7 +794,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     const turnId = await createTurn(threadId, "steer-turn-006");
     await transitionTurn(tenantId, turnId, "running");
 
-    const req1 = buildV11Request({
+    const req1 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/steer`,
@@ -805,7 +807,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
     expect(resp1.status).toBe(202);
     const body1 = (await resp1.json()) as { guidance_item_id: string };
 
-    const req2 = buildV11Request({
+    const req2 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/steer`,
@@ -834,7 +836,7 @@ describe("跨租户隔离（隐藏式 404）", () => {
     // 模拟跨租户：使用不存在的 tenantId（dev 模式下 principal.tenantId 来自 default tenant）
     // 由于 dev 模式固定身份，这里直接测试 Thread 不存在的情况
     const requestId = "req-xtenant-fork-001";
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads/non-existent-tenant/forks",
@@ -850,7 +852,7 @@ describe("跨租户隔离（隐藏式 404）", () => {
   });
 
   it("跨租户 Regenerate → 404 RESOURCE_NOT_FOUND（不泄露存在）", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/turns/non-existent-tenant:regenerate",
@@ -879,7 +881,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
     const turnId2 = await createTurn(threadId, "idem-fork-turn2");
 
     // 第一次请求
-    const req1 = buildV11Request({
+    const req1 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/forks`,
@@ -892,7 +894,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
     expect(resp1.status).toBe(201);
 
     // 同 Idempotency-Key 但不同 body
-    const req2 = buildV11Request({
+    const req2 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/forks`,
@@ -914,7 +916,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
     await transitionTurn(tenantId, turnId, "running");
 
     // 第一次请求
-    const req1 = buildV11Request({
+    const req1 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/steer`,
@@ -927,7 +929,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
     expect(resp1.status).toBe(202);
 
     // 同 Idempotency-Key 但不同 body
-    const req2 = buildV11Request({
+    const req2 = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/turns/${turnId}/steer`,

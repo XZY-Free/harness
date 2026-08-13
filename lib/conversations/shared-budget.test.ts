@@ -1,5 +1,5 @@
 /**
- * S09-C07：V11 共享父任务总预算 + Child Thread 新预算字段集成测试（真实 MySQL 8）。
+ * S09-C07：共享父任务总预算 + Child Thread 新预算字段集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - computeSharedBudgetUsage（纯函数，4 例）：空 relations / 单 relation / 多 relation 累加 /

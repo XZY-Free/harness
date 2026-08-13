@@ -1,10 +1,10 @@
 /**
- * V11 Goal 仓储。
+ * Goal 仓储。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Goal 表）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Goal 域模型）
- * - ../v11-agentkit-platform-development-plan/04-thread-turn-item-and-event-core.md 
+ * - docs/architecture/persistence.md （Goal 表）
+ * - docs/architecture/agent-control-plane.md §6（Goal 域模型）
+ * - docs/architecture/conversations.md
  *
  * 职责：
  * - createGoal：创建 Goal（一个 Thread 最多一个 active）。

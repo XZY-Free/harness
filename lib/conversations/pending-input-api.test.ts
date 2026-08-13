@@ -8,7 +8,7 @@ import {
   GET as listPendingInputsGET,
 } from "@/app/api/v1/threads/[thread_id]/pending-inputs/route";
 /**
- * S04-C04：V11 PendingInput API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
+ * S04-C04：PendingInput API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖 5 个 PendingInput API 路由：
  * - GET  /api/v1/threads/{thread_id}/pending-inputs — 查询队列
@@ -24,7 +24,7 @@ import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
-import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
+import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -64,7 +64,7 @@ async function seedContext() {
 
 /** 创建 Thread 并返回 threadId。 */
 async function createThread(agentId: string, idempotencyKey: string): Promise<string> {
-  const req = buildV11Request({
+  const req = buildApiRequest({
     audience: "employee",
     method: "POST",
     path: "/threads",
@@ -85,7 +85,7 @@ async function createPendingInput(
   pending_input: { id: string; etag: string; queue_position: number; input_state: string };
   queue_etag: string;
 }> {
-  const req = buildV11Request({
+  const req = buildApiRequest({
     audience: "employee",
     method: "POST",
     path: `/threads/${threadId}/pending-inputs`,
@@ -110,7 +110,7 @@ describe("GET /api/v1/threads/{thread_id}/pending-inputs", () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-get-empty");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${threadId}/pending-inputs`,
@@ -137,7 +137,7 @@ describe("GET /api/v1/threads/{thread_id}/pending-inputs", () => {
     await createPendingInput(threadId, { type: "text", text: "第一条" }, "pi-1");
     await createPendingInput(threadId, { type: "text", text: "第二条" }, "pi-2");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${threadId}/pending-inputs`,
@@ -159,7 +159,7 @@ describe("GET /api/v1/threads/{thread_id}/pending-inputs", () => {
   });
 
   it("Thread 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: "/threads/non-existent/pending-inputs",
@@ -183,7 +183,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-create-thread");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs`,
@@ -229,7 +229,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-create-no-idem");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs`,
@@ -246,7 +246,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-create-bad-body");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs`,
@@ -265,7 +265,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
     const threadId = await createThread(agent.id, "pending-create-idempotent");
 
     const buildReq = () =>
-      buildV11Request({
+      buildApiRequest({
         audience: "employee",
         method: "POST",
         path: `/threads/${threadId}/pending-inputs`,
@@ -291,7 +291,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-create-conflict");
 
-    const firstReq = buildV11Request({
+    const firstReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs`,
@@ -302,7 +302,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
       params: Promise.resolve({ thread_id: threadId }),
     });
 
-    const secondReq = buildV11Request({
+    const secondReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs`,
@@ -318,7 +318,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
   });
 
   it("Thread 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads/non-existent/pending-inputs",
@@ -347,7 +347,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
     const c = await createPendingInput(threadId, { type: "text", text: "C" }, "pi-reorder-3");
 
     // 原始顺序 A(1000) B(2000) C(3000)，重排为 C B A
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs:reorder`,
@@ -377,7 +377,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-reorder-no-ifmatch");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs:reorder`,
@@ -398,7 +398,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
     const b = await createPendingInput(threadId, { type: "text", text: "B" }, "pi-inc-2");
 
     // 只传 A，缺少 B
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs:reorder`,
@@ -421,7 +421,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
     const a = await createPendingInput(threadId, { type: "text", text: "A" }, "pi-extra-1");
 
     // 传了 A + 不存在的 id
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs:reorder`,
@@ -441,7 +441,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
 
     await createPendingInput(threadId, { type: "text", text: "A" }, "pi-stale-1");
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/pending-inputs:reorder`,
@@ -472,7 +472,7 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
       "pi-edit-1",
     );
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: `/pending-inputs/${created.pending_input.id}`,
@@ -507,7 +507,7 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
       "pi-edit-no-im",
     );
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: `/pending-inputs/${created.pending_input.id}`,
@@ -529,7 +529,7 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
       "pi-edit-bad",
     );
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: `/pending-inputs/${created.pending_input.id}`,
@@ -552,7 +552,7 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
       "pi-edit-stale",
     );
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: `/pending-inputs/${created.pending_input.id}`,
@@ -567,7 +567,7 @@ describe("PATCH /api/v1/pending-inputs/{pending_input_id}", () => {
   });
 
   it("PendingInput 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: "/pending-inputs/non-existent",
@@ -596,7 +596,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
       "pi-delete-1",
     );
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "DELETE",
       path: `/pending-inputs/${created.pending_input.id}`,
@@ -624,7 +624,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
       "pi-del-no-im",
     );
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "DELETE",
       path: `/pending-inputs/${created.pending_input.id}`,
@@ -645,7 +645,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
       "pi-del-stale",
     );
 
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "DELETE",
       path: `/pending-inputs/${created.pending_input.id}`,
@@ -659,7 +659,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
   });
 
   it("PendingInput 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "DELETE",
       path: "/pending-inputs/non-existent",
@@ -679,7 +679,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
     await createPendingInput(threadId, { type: "text", text: "B" }, "pi-del-v-2");
 
     // 删除 A
-    const delReq = buildV11Request({
+    const delReq = buildApiRequest({
       audience: "employee",
       method: "DELETE",
       path: `/pending-inputs/${a.pending_input.id}`,
@@ -690,7 +690,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
     });
 
     // 查询队列，应只剩 B
-    const getReq = buildV11Request({
+    const getReq = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${threadId}/pending-inputs`,
@@ -713,7 +713,7 @@ describe("DELETE /api/v1/pending-inputs/{pending_input_id}", () => {
 describe("跨租户隔离", () => {
   it("跨租户 GET pending-inputs → 404 RESOURCE_NOT_FOUND", async () => {
     const requestId = "req-cross-tenant-pending-get";
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: "/threads/other-tenant-thread/pending-inputs",
@@ -737,7 +737,7 @@ describe("跨租户隔离", () => {
 
     // 直接用不存在的 tenant 访问（dev 模式下 resolvePrincipal 返回默认 tenant）
     // 这里模拟跨租户：用 non-existent pending_input_id
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: "/pending-inputs/non-existent-tenant-input",
@@ -754,7 +754,7 @@ describe("跨租户隔离", () => {
   });
 
   it("跨租户 DELETE pending-input → 404 RESOURCE_NOT_FOUND（隐藏式）", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "DELETE",
       path: "/pending-inputs/non-existent-tenant-input",
@@ -768,7 +768,7 @@ describe("跨租户隔离", () => {
   });
 
   it("跨租户 reorder → 404 RESOURCE_NOT_FOUND", async () => {
-    const req = buildV11Request({
+    const req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads/other-tenant-thread/pending-inputs:reorder",

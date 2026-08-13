@@ -1,12 +1,12 @@
 import { ThreadNotFoundError, ThreadVersionConflictError } from "@/lib/conversations/errors";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
- * V11 Thread 设置与主 Agent 变更仓储（事务性，同事务写 Event）。
+ * Thread 设置与主 Agent 变更仓储（事务性，同事务写 Event）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （更新 Thread 默认设置）、（更换 Thread 主 Agent）
- * - ../v11-agentkit-platform/10-core-data-model.md （事务边界：当前状态更新和 Event 追加同事务）
- * - ../v11-agentkit-platform/contracts/event-catalog.json（thread.model_changed / thread.environment_changed / thread.primary_agent_changed）
+ * - docs/architecture/api-and-events.md （更新 Thread 默认设置）、（更换 Thread 主 Agent）
+ * - docs/architecture/persistence.md （事务边界：当前状态更新和 Event 追加同事务）
+ * - docs/contracts/event-catalog.json（thread.model_changed / thread.environment_changed / thread.primary_agent_changed）
  *
  * 职责：
  * - updateThreadSettingsWithEvents：事务内锁定 Thread → 乐观锁校验 → 更新默认设置 → 按 field 变化写对应 Event。

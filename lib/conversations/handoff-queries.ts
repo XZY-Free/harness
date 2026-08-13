@@ -1,16 +1,16 @@
 /**
- * V11 主 Agent Handoff 应用服务（S09-C03）。
+ * 主 Agent Handoff 应用服务（S09-C03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §12（Handoff 规则）
- * - ../v11-agentkit-platform/09-unified-domain-model.md （父子 Thread；Handoff 不创建第二个 Thread）
- * - ../v11-agentkit-platform/10-core-data-model.md （thread.primary_agent_id）、
+ * - docs/architecture/conversations.md §12（Handoff 规则）
+ * - docs/architecture/domain-model.md （父子 Thread；Handoff 不创建第二个 Thread）
+ * - docs/architecture/persistence.md （thread.primary_agent_id）、
  * （thread_relation：handoff 不创建 ThreadRelation）、（user_action_request.purpose）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （更换主 Agent 命令）、
+ * - docs/architecture/api-and-events.md （更换主 Agent 命令）、
  * （解析 UserActionRequest）、（发起 UserActionRequest）、（handoff.requested / handoff.completed Event）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §5（Handoff 统一规则）
- * - ../v11-agentkit-platform/07-decision-ledger.md 行 52、174（Workflow Handoff 必须员工确认；统一 UserActionRequest）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C03
+ * - docs/architecture/capability-and-collaboration-api.md §5（Handoff 统一规则）
+ * - docs/architecture/decision-ledger.md 行 52、174（Workflow Handoff 必须员工确认；统一 UserActionRequest）
+ * - docs/architecture/conversations.md 、S09-C03
  *
  * 职责：
  * - requestHandoff：Workflow/Runtime 发起 handoff 请求 → 创建 purpose=handoff 的 confirmation

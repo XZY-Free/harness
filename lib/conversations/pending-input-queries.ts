@@ -1,10 +1,10 @@
 /**
- * V11 PendingInput 仓储（事务性，同事务写 Event）。
+ * PendingInput 仓储（事务性，同事务写 Event）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （PendingInput 表，行 324-339）、（事务边界）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md （创建 PendingInput 不生成 user_message Item）、（删除 PendingInput 不生成 user_message Item）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md -3.10（PendingInput API）
+ * - docs/architecture/persistence.md （PendingInput 表，行 324-339）、（事务边界）
+ * - docs/architecture/agent-control-plane.md （创建 PendingInput 不生成 user_message Item）、（删除 PendingInput 不生成 user_message Item）
+ * - docs/architecture/api-and-events.md -3.10（PendingInput API）
  *
  * 职责：
  * - listPendingInputs：查询 Thread 当前 pending 队列 + queue_etag。

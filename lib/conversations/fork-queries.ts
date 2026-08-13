@@ -1,10 +1,10 @@
 /**
- * V11 Fork 仓储（事务性，同事务写 Event + ThreadRelation）。
+ * Fork 仓储（事务性，同事务写 Event + ThreadRelation）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （ThreadRelation 表）、行 504（InvocationCommand 表）
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §4（Fork 语义）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md （Fork）
+ * - docs/architecture/persistence.md （ThreadRelation 表）、行 504（InvocationCommand 表）
+ * - docs/architecture/conversations.md §4（Fork 语义）
+ * - docs/architecture/agent-control-plane.md （Fork）
  *
  * 职责：
  * - forkThread：事务内创建子 Thread + 父子关系 + 两条 Event（thread.created/child_thread.created）。

@@ -1,9 +1,9 @@
 /**
- * V11 SSE 传输层（S04-C05）。
+ * SSE 传输层（S04-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （订阅 Event：SSE id = 十进制 event_sequence）
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md （SSE 背压与 cursor_expired）
+ * - docs/architecture/api-and-events.md （订阅 Event：SSE id = 十进制 event_sequence）
+ * - docs/architecture/security.md （SSE 背压与 cursor_expired）
  *
  * 职责：
  * - formatSSEMessage：把 {id, event, data} 格式化为 SSE 文本（id 可选，transient 事件不传 id）。

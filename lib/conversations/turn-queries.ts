@@ -1,11 +1,11 @@
 /**
- * V11 Turn 仓储。
+ * Turn 仓储。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Turn 表）、（接纳事务边界）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §7（Turn 接纳周期）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （创建 Turn API）
- * - ../v11-agentkit-platform-development-plan/04-thread-turn-item-and-event-core.md 
+ * - docs/architecture/persistence.md （Turn 表）、（接纳事务边界）
+ * - docs/architecture/agent-control-plane.md §7（Turn 接纳周期）
+ * - docs/architecture/api-and-events.md （创建 Turn API）
+ * - docs/architecture/conversations.md
  *
  * 职责：
  * - acceptUserMessageTurn：原子接纳用户消息 + Turn + item.created + turn.accepted（同事务）。

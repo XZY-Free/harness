@@ -1,8 +1,8 @@
 /**
- * V11 会话域共享错误类。
+ * 会话域共享错误类。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md §5、§9、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md 。
+ * 事实源：docs/architecture/persistence.md §5、§9、
+ * docs/architecture/api-and-events.md 。
  *
  * Route 层根据 error 实例映射 HTTP 状态码和稳定 error_code。
  */
@@ -164,8 +164,8 @@ export class ProjectionFailureError extends Error {
 /**
  * PendingInput 不存在或跨租户不可见。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md -3.10。
+ * 事实源：docs/architecture/persistence.md 、
+ * docs/architecture/api-and-events.md -3.10。
  * 映射 404 RESOURCE_NOT_FOUND（隐藏式，不泄露存在）。
  */
 export class PendingInputNotFoundError extends Error {
@@ -196,7 +196,7 @@ export class PendingInputNotPendingError extends Error {
  * PendingInput 重排冲突：ordered_ids 集合与当前 pending 集合不一致
  * （不完整或包含非 pending id）。
  *
- * 事实源：、../v11-agentkit-platform/11-api-and-event-boundaries.md 。
+ * 事实源：、docs/architecture/api-and-events.md 。
  * 映射 409 BUSINESS_CONSTRAINT_VIOLATION。
  */
 export class PendingInputReorderConflictError extends Error {
@@ -233,7 +233,7 @@ export class PendingInputVersionConflictError extends Error {
 /**
  * Steer 调用于 waiting_user Turn（必须解析对应 UserActionRequest）。
  *
- * 事实源：../v11-agentkit-platform/02-agent-thread-and-runtime.md 行 366
+ * 事实源：docs/architecture/agent-control-plane.md 行 366
  * "waiting_user 必须解析对应 UserActionRequest，不能用 Steer 绕过"。
  * 映射 409 TURN_REQUIRES_USER_ACTION。
  */
@@ -250,7 +250,7 @@ export class TurnRequiresUserActionError extends Error {
 /**
  * Fork 源 Turn 不属于源 Thread（from_turn_id 不属于 parent_thread_id）。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md （ThreadRelation.source_turn_id）。
+ * 事实源：docs/architecture/persistence.md （ThreadRelation.source_turn_id）。
  * 映射 409 BUSINESS_CONSTRAINT_VIOLATION。
  */
 export class ForkSourceTurnMismatchError extends Error {

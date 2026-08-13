@@ -14,7 +14,7 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
-import { buildV11Request } from "@/lib/db/test/api-fixtures";
+import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -82,7 +82,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
       actorId: userIdentityId,
     });
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${thread.id}/turns`,
@@ -123,7 +123,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
       });
     }
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${thread.id}/turns?limit=2`,
@@ -151,7 +151,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
       actorId: userIdentityId,
     });
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${thread.id}/turns?limit=999`,
@@ -175,7 +175,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
       actorId: userIdentityId,
     });
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${thread.id}/turns?limit=abc`,
@@ -199,7 +199,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
       actorId: userIdentityId,
     });
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${thread.id}/turns`,
@@ -225,7 +225,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
       actorId: otherOwner,
     });
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${thread.id}/turns`,
@@ -242,7 +242,7 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
   it("跨租户（不存在的 thread_id）→ 404 隐藏式", async () => {
     await seedContext();
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: "/threads/non-existent-thread-id/turns",

@@ -1,10 +1,10 @@
 /**
- * V11 Thread 仓储。
+ * Thread 仓储。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Thread 表）、（事务边界）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §5（Thread 容器）
- * - ../v11-agentkit-platform-development-plan/04-thread-turn-item-and-event-core.md 
+ * - docs/architecture/persistence.md （Thread 表）、（事务边界）
+ * - docs/architecture/agent-control-plane.md §5（Thread 容器）
+ * - docs/architecture/conversations.md
  *
  * 职责：
  * - createThread：创建 Thread 绑定租户、所有者和主 Agent；同事务写 thread.created Event。

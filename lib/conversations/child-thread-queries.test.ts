@@ -1,5 +1,5 @@
 /**
- * S09-C01 + S09-C02：V11 Child Thread / Delegate 仓储集成测试（真实 MySQL 8 Testcontainers）。
+ * S09-C01 + S09-C02：Child Thread / Delegate 仓储集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖：
  * - delegateChildThread：成功 + 子 Thread + delegate 关系 + 两条 Event + policy 校验

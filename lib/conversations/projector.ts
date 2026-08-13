@@ -8,12 +8,12 @@ import {
 } from "@/lib/conversations/projection-checkpoint-queries";
 import { listThreadEvents } from "@/lib/conversations/thread-queries";
 /**
- * V11 会话事件投影器。
+ * 会话事件投影器。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （projection_checkpoint/event_delivery_failure/event_stream_floor）、（Outbox + checkpoint 协议）、§11（查询读模型）
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md （投影消费协议七条规则）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （顺序与去重：Item 投影器按 Event sequence 幂等更新，checkpoint 只在事务提交后前移）
+ * - docs/architecture/persistence.md （projection_checkpoint/event_delivery_failure/event_stream_floor）、（Outbox + checkpoint 协议）、§11（查询读模型）
+ * - docs/architecture/security.md （投影消费协议七条规则）
+ * - docs/architecture/api-and-events.md （顺序与去重：Item 投影器按 Event sequence 幂等更新，checkpoint 只在事务提交后前移）
  *
  * 职责：
  * - projectThreadEvent：消费单个 ThreadEvent，按 event sequence 幂等更新 thread_list_projection 和 turn_timeline_projection。
@@ -383,7 +383,7 @@ async function projectToThreadList(
  case "turn.steer_queued":
  case "turn.steered": {
  // S04-C06 新增事件类型：thread_list_projection 无对应字段，只前移 cursor
- // 事实源：../v11-agentkit-platform/02-agent-thread-and-runtime.md -3.10
+ // 事实源：docs/architecture/agent-control-plane.md -3.10
  // - child_thread.created：父 Thread 流中事件，标记 Fork 关系建立（投影列无 fork 计数）
  // - turn.regeneration_started/failed：Regenerate 进行中/失败（turn 状态由 turn.regenerating 事件更新）
  // - turn.interrupt_requested：Interrupt 命令入队（Turn 状态未变，等 Runtime ack）
@@ -411,7 +411,7 @@ async function projectToThreadList(
  case "invocation.attempt_failed":
  case "invocation.resumed": {
  // S05-C01 新增 Invocation 事件：thread_list_projection 无对应字段，只前移 cursor
- // 事实源：../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）
+ // 事实源：docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
  // - invocation.queued/started/waiting_user/completed/failed/cancelled/lost：Invocation 状态机事件
  // - invocation.attempt_*：Attempt 基础设施重调度事件
  // - invocation.resumed：Resume 命令成功后，Invocation 从 waiting_user 回到 running（S05-C04）
@@ -664,7 +664,7 @@ async function projectToTurnTimeline(
  // - turn.regeneration_failed：Turn 状态由 turn.failed/interrupted 等终态事件更新
  // - turn.interrupt_requested：Turn 状态未变（Runtime ack 后才进入终态）
  // - turn.steer_queued/steered：user_guidance Item 由 item.created 投影
- // 事实源：../v11-agentkit-platform/02-agent-thread-and-runtime.md -3.10
+ // 事实源：docs/architecture/agent-control-plane.md -3.10
  await tx
  .update(turnTimelineProjectionTable)
  .set({
@@ -687,7 +687,7 @@ async function projectToTurnTimeline(
  case "invocation.attempt_failed":
  case "invocation.resumed": {
  // S05-C01 新增 Invocation 事件：turn_timeline_projection 只前移 cursor
- // 事实源：../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）
+ // 事实源：docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
  // - Invocation 状态不冗余到 turn_timeline_projection（Turn 状态由 turn.* 事件更新）
  // - Attempt 事件同理，只前移 cursor
  // - invocation.resumed（S05-C04）：Invocation 从 waiting_user 回到 running，

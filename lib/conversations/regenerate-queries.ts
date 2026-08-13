@@ -1,9 +1,9 @@
 /**
- * V11 Regenerate 仓储（事务性，同事务写 Event + InvocationCommand + Turn 状态）。
+ * Regenerate 仓储（事务性，同事务写 Event + InvocationCommand + Turn 状态）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md 行 504（InvocationCommand 表）、（Turn 表）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md （Regenerate）
+ * - docs/architecture/persistence.md 行 504（InvocationCommand 表）、（Turn 表）
+ * - docs/architecture/agent-control-plane.md （Regenerate）
  *
  * 职责：
  * - startRegeneration：事务内启动 Regenerate，生成新 invocationId + 写 InvocationCommand + 更新 Turn 状态 + 写事件。

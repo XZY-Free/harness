@@ -2,10 +2,10 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
 import { db } from "@/lib/db/client";
 import { type ThreadEventActorType, threadTable } from "@/lib/persistence/schema/conversation";
 /**
- * V11 多设备 ownership 与接管（S10-W07）。
+ * 多设备 ownership 与接管（S10-W07）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  * S10-W07：
  * 「页面显示当前 Environment owner、在线状态、租约和接管条件」
  * 「Web 发起的本地任务在指定 Desktop 离线时进入等待，不静默迁移到 Cloud」

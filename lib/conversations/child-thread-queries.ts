@@ -1,12 +1,12 @@
 /**
- * V11 Child Thread / Delegate 仓储（S09-C01 + S09-C02）。
+ * Child Thread / Delegate 仓储（S09-C01 + S09-C02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （ThreadRelation 表）、
+ * - docs/architecture/persistence.md （ThreadRelation 表）、
  * （Invocation）、行 504（InvocationCommand 表）
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §9（Delegate 语义、状态机）、§16（取消）、§18（预算）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §4（delegateChildThread 契约）、（结果投影）、（取消协议）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md /W02
+ * - docs/architecture/conversations.md §9（Delegate 语义、状态机）、§16（取消）、§18（预算）
+ * - docs/architecture/capability-and-collaboration-api.md §4（delegateChildThread 契约）、（结果投影）、（取消协议）
+ * - docs/architecture/conversations.md /W02
  *
  * 职责：
  * - delegateChildThread：事务内创建子 Thread + 父子 delegate 关系 + ChildThread Item + 三条 Event

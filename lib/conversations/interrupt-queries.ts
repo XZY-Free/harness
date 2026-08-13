@@ -1,9 +1,9 @@
 /**
- * V11 Interrupt 仓储（事务性，同事务写 Event + InvocationCommand，不立即变更 Turn 状态）。
+ * Interrupt 仓储（事务性，同事务写 Event + InvocationCommand，不立即变更 Turn 状态）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md 行 504（InvocationCommand 表）、（Turn 表）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md （Stop/Interrupt）
+ * - docs/architecture/persistence.md 行 504（InvocationCommand 表）、（Turn 表）
+ * - docs/architecture/agent-control-plane.md （Stop/Interrupt）
  *
  * 职责：
  * - requestInterrupt：事务内入队 Interrupt 命令 + 写 turn.interrupt_requested Event。

@@ -3,7 +3,7 @@ import { GET as listItemsGET } from "@/app/api/v1/threads/[thread_id]/items/rout
 import { PATCH as updateSettingsPATCH } from "@/app/api/v1/threads/[thread_id]/settings/route";
 import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
 /**
- * S04-C03：V11 Employee Interaction API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
+ * S04-C03：Employee Interaction API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖 5 个 Employee API 路由：
  * - POST /api/v1/threads — 创建 Thread
@@ -17,9 +17,10 @@ import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/r
  */
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
-import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
+import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -80,7 +81,7 @@ describe("POST /api/v1/threads", () => {
   it("成功创建 Thread → 201 + thread.created Event", async () => {
     const { tenantId, agent } = await seedContext();
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -107,7 +108,7 @@ describe("POST /api/v1/threads", () => {
   it("缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
     await seedContext();
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -123,7 +124,7 @@ describe("POST /api/v1/threads", () => {
   it("Agent 不存在 → 404 RESOURCE_NOT_FOUND（不泄露存在）", async () => {
     await seedContext();
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -148,7 +149,7 @@ describe("POST /api/v1/threads", () => {
       lifecycleState: "draft",
     });
 
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -164,7 +165,7 @@ describe("POST /api/v1/threads", () => {
     const { agent } = await seedContext();
 
     const buildReq = () =>
-      buildV11Request({
+      buildApiRequest({
         audience: "employee",
         method: "POST",
         path: "/threads",
@@ -185,7 +186,7 @@ describe("POST /api/v1/threads", () => {
   it("幂等冲突：同 Idempotency-Key + 不同 body → 409 IDEMPOTENCY_CONFLICT", async () => {
     const { agent } = await seedContext();
 
-    const firstReq = buildV11Request({
+    const firstReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -194,7 +195,7 @@ describe("POST /api/v1/threads", () => {
     });
     await createThreadPOST(firstReq);
 
-    const secondReq = buildV11Request({
+    const secondReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -217,7 +218,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     const { agent } = await seedContext();
 
     // 先创建 Thread
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -229,7 +230,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     const threadId = threadBody.id;
 
     // PATCH 设置（初始 versionNo=1）
-    const patchReq = buildV11Request({
+    const patchReq = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: `/threads/${threadId}/settings`,
@@ -259,7 +260,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
 
   it("只更新 workspace_id → 200 + event_ids 为空（不写持久 Event）", async () => {
     const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -269,7 +270,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
-    const patchReq = buildV11Request({
+    const patchReq = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: `/threads/${threadId}/settings`,
@@ -288,7 +289,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
 
   it("缺少 If-Match → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -298,7 +299,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
-    const patchReq = buildV11Request({
+    const patchReq = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: `/threads/${threadId}/settings`,
@@ -313,7 +314,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
 
   it("ETag 不匹配 → 412 ETAG_MISMATCH", async () => {
     const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -323,7 +324,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
-    const patchReq = buildV11Request({
+    const patchReq = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: `/threads/${threadId}/settings`,
@@ -340,7 +341,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
   });
 
   it("Thread 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const patchReq = buildV11Request({
+    const patchReq = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: "/threads/non-existent-thread/settings",
@@ -366,7 +367,7 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
     const newAgent = await seedEnabledAgent(tenantId, userIdentityId, "risk-agent");
 
     // 创建 Thread
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -377,7 +378,7 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
     const { id: threadId } = (await createResp.json()) as { id: string };
 
     // 更换主 Agent
-    const changeReq = buildV11Request({
+    const changeReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}:change-primary-agent`,
@@ -404,7 +405,7 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
 
   it("新 Agent 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
     const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -414,7 +415,7 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
-    const changeReq = buildV11Request({
+    const changeReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}:change-primary-agent`,
@@ -432,7 +433,7 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
 
   it("缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -442,7 +443,7 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
-    const changeReq = buildV11Request({
+    const changeReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}:change-primary-agent`,
@@ -459,7 +460,7 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
 
   it("Thread 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
     const { agent } = await seedContext();
-    const changeReq = buildV11Request({
+    const changeReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads/non-existent:change-primary-agent",
@@ -482,18 +483,18 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
 
 describe("POST /api/v1/threads/{thread_id}/turns", () => {
   it("成功创建 Turn → 201 + turn + input_item + event_cursor", async () => {
-    const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const { agentId } = await seedDispatchableTurn();
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
       idempotencyKey: "turn-thread-create",
-      body: { agent_id: agent.id },
+      body: { agent_id: agentId },
     });
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
-    const turnReq = buildV11Request({
+    const turnReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/turns`,
@@ -529,19 +530,19 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
   });
 
   it("幂等重放：同 Idempotency-Key 返回同一 Turn", async () => {
-    const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const { agentId } = await seedDispatchableTurn();
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
       idempotencyKey: "turn-idempotent-create",
-      body: { agent_id: agent.id },
+      body: { agent_id: agentId },
     });
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
     const buildTurnReq = () =>
-      buildV11Request({
+      buildApiRequest({
         audience: "employee",
         method: "POST",
         path: `/threads/${threadId}/turns`,
@@ -564,7 +565,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
   });
 
   it("Thread 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const turnReq = buildV11Request({
+    const turnReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads/non-existent/turns",
@@ -580,7 +581,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
 
   it("缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -590,7 +591,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
-    const turnReq = buildV11Request({
+    const turnReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/turns`,
@@ -605,7 +606,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
 
   it("请求体非法（缺少 input） → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -615,7 +616,7 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
-    const turnReq = buildV11Request({
+    const turnReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/turns`,
@@ -636,19 +637,19 @@ describe("POST /api/v1/threads/{thread_id}/turns", () => {
 
 describe("GET /api/v1/threads/{thread_id}/items", () => {
   it("成功查询 Item 列表 + latest_event_cursor", async () => {
-    const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const { agentId } = await seedDispatchableTurn();
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
       idempotencyKey: "items-thread-create",
-      body: { agent_id: agent.id },
+      body: { agent_id: agentId },
     });
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
     // 创建一个 Turn（产生 user_message Item）
-    const turnReq = buildV11Request({
+    const turnReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/turns`,
@@ -660,7 +661,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     });
 
     // 查询 Item
-    const getReq = buildV11Request({
+    const getReq = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${threadId}/items`,
@@ -684,19 +685,19 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
   });
 
   it("turn_id 过滤：只返回指定 Turn 的 Item", async () => {
-    const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const { agentId } = await seedDispatchableTurn();
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
       idempotencyKey: "items-turn-filter-create",
-      body: { agent_id: agent.id },
+      body: { agent_id: agentId },
     });
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
     // 创建 2 个 Turn
-    const turn1Req = buildV11Request({
+    const turn1Req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/turns`,
@@ -708,7 +709,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     });
     const turn1Body = (await turn1Resp.json()) as { turn: { id: string } };
 
-    const turn2Req = buildV11Request({
+    const turn2Req = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: `/threads/${threadId}/turns`,
@@ -720,7 +721,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     });
 
     // 查询指定 turn_id 的 Item
-    const getReq = buildV11Request({
+    const getReq = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${threadId}/items?turn_id=${turn1Body.turn.id}`,
@@ -735,7 +736,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
   });
 
   it("Thread 不存在 → 404 RESOURCE_NOT_FOUND", async () => {
-    const getReq = buildV11Request({
+    const getReq = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: "/threads/non-existent/items",
@@ -749,7 +750,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
 
   it("limit 超出范围 → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { agent } = await seedContext();
-    const createReq = buildV11Request({
+    const createReq = buildApiRequest({
       audience: "employee",
       method: "POST",
       path: "/threads",
@@ -759,7 +760,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
     const createResp = await createThreadPOST(createReq);
     const { id: threadId } = (await createResp.json()) as { id: string };
 
-    const getReq = buildV11Request({
+    const getReq = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: `/threads/${threadId}/items?limit=300`,
@@ -779,7 +780,7 @@ describe("GET /api/v1/threads/{thread_id}/items", () => {
 describe("跨租户隔离", () => {
   it("跨租户访问 Thread → 404 RESOURCE_NOT_FOUND（隐藏式）", async () => {
     const requestId = "req-cross-tenant-001";
-    const otherReq = buildV11Request({
+    const otherReq = buildApiRequest({
       audience: "employee",
       method: "GET",
       path: "/threads/other-tenant-thread-id/items",
@@ -793,7 +794,7 @@ describe("跨租户隔离", () => {
   });
 
   it("跨租户 PATCH settings → 404 RESOURCE_NOT_FOUND", async () => {
-    const patchReq = buildV11Request({
+    const patchReq = buildApiRequest({
       audience: "employee",
       method: "PATCH",
       path: "/threads/other-tenant-thread/settings",

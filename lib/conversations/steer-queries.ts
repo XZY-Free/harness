@@ -1,9 +1,9 @@
 /**
- * V11 Steer 仓储（事务性，同事务写 user_guidance Item + InvocationCommand + Event）。
+ * Steer 仓储（事务性，同事务写 user_guidance Item + InvocationCommand + Event）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md 行 504（InvocationCommand 表）、（ThreadItem 表）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md （Steer）
+ * - docs/architecture/persistence.md 行 504（InvocationCommand 表）、（ThreadItem 表）
+ * - docs/architecture/agent-control-plane.md （Steer）
  *
  * 职责：
  * - queueSteer：事务内创建 user_guidance Item + 入队 Steer 命令 + 写 turn.steer_queued Event。

@@ -23,7 +23,7 @@ import {
 import { createThread, listThreadEvents } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 /**
- * S04-C02：V11 投影与读模型集成测试（真实 MySQL 8）。
+ * S04-C02：投影与读模型集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - 同毫秒多 Event sequence 全部可续读（§7.4 顺序与去重）。

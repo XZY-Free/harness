@@ -1,9 +1,9 @@
 /**
- * V11 会话读模型查询。
+ * 会话读模型查询。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md §11（查询读模型：thread_list_projection / turn_timeline_projection）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （Item 列表响应含 latest_event_cursor）、（恢复规则：Item 快照和 latest_event_cursor 在同一一致性读点）
+ * - docs/architecture/persistence.md §11（查询读模型：thread_list_projection / turn_timeline_projection）
+ * - docs/architecture/api-and-events.md （Item 列表响应含 latest_event_cursor）、（恢复规则：Item 快照和 latest_event_cursor 在同一一致性读点）
  *
  * 职责：
  * - listThreadProjectionsForUser：员工会话列表（按 lastActivityAt 降序，跨租户隔离）。

@@ -16,9 +16,9 @@ import {
  TurnStateConflictError,
 } from "@/lib/conversations/errors";
 /**
- * V11 Employee Interaction API route handler 公共助手（S04-C03）。
+ * Employee Interaction API route handler 公共助手（S04-C03）。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md §3（Employee Interaction API）、
+ * 事实源：docs/architecture/api-and-events.md §3（Employee Interaction API）、
  * （身份与授权：Employee API 走员工 SSO Session/OAuth Token）、
  * （公共请求头：Idempotency-Key / If-Match / X-Request-ID）、
  * （成功与错误格式）。

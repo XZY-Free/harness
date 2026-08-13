@@ -19,7 +19,7 @@ import {
 import { projectThreadEvent } from "@/lib/conversations/projector";
 import { createThread } from "@/lib/conversations/thread-queries";
 /**
- * S12-W01：V11 事件投影运维操作集成测试（真实 MySQL 8）。
+ * S12-W01：事件投影运维操作集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - quarantineIfExceeded：attemptCount 达到阈值自动隔离 / 未达到不隔离 / 非 retrying 不隔离

@@ -1,12 +1,12 @@
 import { projectThreadEvent } from "@/lib/conversations/projector";
 import { listThreadEvents } from "@/lib/conversations/thread-queries";
 /**
- * V11 事件投影运维操作（S12-W01）。
+ * 事件投影运维操作（S12-W01）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md （投影消费协议七条规则）
- * - ../v11-agentkit-platform/10-core-data-model.md （event_delivery_failure）
- * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W01
+ * - docs/architecture/security.md （投影消费协议七条规则）
+ * - docs/architecture/persistence.md （event_delivery_failure）
+ * - docs/architecture/security.md S12-W01
  *
  * 职责：
  * - quarantineIfExceeded：attemptCount 达到阈值时将 failure 从 retrying → quarantined
