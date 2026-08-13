@@ -45,10 +45,10 @@ jobs:
       - name: Contract verification
         run: pnpm contracts:verify
 
-      - name: Architecture check (dependency-cruiser)
+      - name: Dependency architecture
         run: pnpm architecture:check
 
-      - name: Architecture gate (8-item check)
+      - name: Architecture gate
         run: pnpm architecture:gate
 
       - name: Type check
@@ -57,16 +57,34 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Migration (from empty schema)
+      - name: Empty MySQL migration
         run: pnpm db:migrate
         env:
           DATABASE_URL: mysql://test:test@127.0.0.1:3306/snow_test
 
-      - name: Test (unit + integration)
+      - name: Seed
+        run: pnpm db:seed
+
+      - name: Unit and MySQL integration tests
         run: pnpm test
 
-      - name: Build
-        run: pnpm build
+      - name: Control-plane and Hosted E2E
+        run: pnpm vitest run lib/control-plane/end-to-end-acceptance.test.ts
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Web Playwright E2E
+        run: pnpm test:e2e
+
+      - name: Desktop build
+        run: pnpm build:desktop
+
+      - name: Desktop smoke
+        run: pnpm vitest run --project unit desktop/main/local-renderer-server.test.ts desktop/renderer/desktop-route.test.ts desktop/renderer/src/desktop-renderer-app.test.tsx
+
+      - name: Production Web build
+        run: pnpm build:prod
 
   security:
     runs-on: ubuntu-latest
