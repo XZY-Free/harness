@@ -1,3 +1,8 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+} from "@/lib/admin/route-helpers";
 import { getDeliveryFailureById } from "@/lib/conversations/projection-operations";
 /**
  * GET /admin/api/v1/event-delivery/{failure_id} — 事件交付失败单资源详情（S12-W01）。
@@ -12,11 +17,6 @@ import { getDeliveryFailureById } from "@/lib/conversations/projection-operation
  * - 失败记录不存在/跨租户 → 404 RESOURCE_NOT_FOUND
  */
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

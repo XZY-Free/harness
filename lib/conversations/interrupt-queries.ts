@@ -27,9 +27,9 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
 import { db } from "@/lib/db/client";
 import type { ThreadEventActorType, TurnState } from "@/lib/persistence/schema/conversation";
 import {
- invocationCommandTable,
- threadTable,
- turnTable,
+  invocationCommandTable,
+  threadTable,
+  turnTable,
 } from "@/lib/persistence/schema/conversation";
 import { eq } from "drizzle-orm";
 
@@ -41,29 +41,29 @@ export type InterruptReasonCode = string;
 
 /** requestInterrupt 返回结果。 */
 export interface RequestInterruptResult {
- /** Turn id。 */
- turnId: string;
- /** Turn 当前状态（未变，Interrupt 命令不立即改变 Turn 状态）。 */
- turnState: TurnState;
- /** Interrupt 命令状态（固定 "requested" 表示命令已入队，等 Runtime ack）。 */
- interruptState: "requested";
- /** InvocationCommand 记录（state=queued）。 */
- command: {
- id: string;
- commandState: "queued";
- };
- /** 已完成副作用是否保留（固定 true，行 393：Stop 不撤销已发生副作用）。 */
- alreadyCompletedEffectsPreserved: true;
- /** turn.interrupt_requested 事件 id。 */
- eventId: string;
+  /** Turn id。 */
+  turnId: string;
+  /** Turn 当前状态（未变，Interrupt 命令不立即改变 Turn 状态）。 */
+  turnState: TurnState;
+  /** Interrupt 命令状态（固定 "requested" 表示命令已入队，等 Runtime ack）。 */
+  interruptState: "requested";
+  /** InvocationCommand 记录（state=queued）。 */
+  command: {
+    id: string;
+    commandState: "queued";
+  };
+  /** 已完成副作用是否保留（固定 true，行 393：Stop 不撤销已发生副作用）。 */
+  alreadyCompletedEffectsPreserved: true;
+  /** turn.interrupt_requested 事件 id。 */
+  eventId: string;
 }
 
 /** 允许 Interrupt 的 Turn 状态集合（终态 → TurnStateConflictError）。 */
 const INTERRUPTIBLE_STATES: readonly TurnState[] = [
- "accepted",
- "queued",
- "running",
- "waiting_user",
+  "accepted",
+  "queued",
+  "running",
+  "waiting_user",
 ];
 
 /**
@@ -79,115 +79,115 @@ const INTERRUPTIBLE_STATES: readonly TurnState[] = [
  * Turn 已终态 → TurnStateConflictError（409 TURN_ALREADY_TERMINAL）。
  */
 export async function requestInterrupt(params: {
- tenantId: string;
- ownerUserId: string;
- turnId: string;
- reasonCode: InterruptReasonCode;
- preservePendingInputs?: boolean;
- idempotencyKey: string;
- correlationId?: string;
+  tenantId: string;
+  ownerUserId: string;
+  turnId: string;
+  reasonCode: InterruptReasonCode;
+  preservePendingInputs?: boolean;
+  idempotencyKey: string;
+  correlationId?: string;
 }): Promise<RequestInterruptResult> {
- const commandId = randomUUID();
- const now = new Date();
- const preservePendingInputs = params.preservePendingInputs ?? true;
+  const commandId = randomUUID();
+  const now = new Date();
+  const preservePendingInputs = params.preservePendingInputs ?? true;
 
- const meta = await db.transaction(async (tx) => {
- // 1. SELECT FOR UPDATE Turn
- const [turn] = await tx
- .select()
- .from(turnTable)
- .where(eq(turnTable.id, params.turnId))
- .for("update")
- .limit(1);
+  const meta = await db.transaction(async (tx) => {
+    // 1. SELECT FOR UPDATE Turn
+    const [turn] = await tx
+      .select()
+      .from(turnTable)
+      .where(eq(turnTable.id, params.turnId))
+      .for("update")
+      .limit(1);
 
- if (!turn) {
- throw new TurnNotFoundError(params.turnId);
- }
+    if (!turn) {
+      throw new TurnNotFoundError(params.turnId);
+    }
 
- // SELECT FOR UPDATE Thread（隐藏式 404：跨租户/非 owner → NotFound）
- const [thread] = await tx
- .select()
- .from(threadTable)
- .where(eq(threadTable.id, turn.threadId))
- .for("update")
- .limit(1);
+    // SELECT FOR UPDATE Thread（隐藏式 404：跨租户/非 owner → NotFound）
+    const [thread] = await tx
+      .select()
+      .from(threadTable)
+      .where(eq(threadTable.id, turn.threadId))
+      .for("update")
+      .limit(1);
 
- if (
- !thread ||
- thread.tenantId !== params.tenantId ||
- thread.ownerUserId !== params.ownerUserId
- ) {
- throw new TurnNotFoundError(params.turnId);
- }
+    if (
+      !thread ||
+      thread.tenantId !== params.tenantId ||
+      thread.ownerUserId !== params.ownerUserId
+    ) {
+      throw new TurnNotFoundError(params.turnId);
+    }
 
- // 2. 校验 Turn 状态为 accepted/queued/running/waiting_user（终态 → TurnStateConflictError）
- if (!INTERRUPTIBLE_STATES.includes(turn.turnState)) {
- throw new TurnStateConflictError(params.turnId, turn.turnState, "interrupt");
- }
+    // 2. 校验 Turn 状态为 accepted/queued/running/waiting_user（终态 → TurnStateConflictError）
+    if (!INTERRUPTIBLE_STATES.includes(turn.turnState)) {
+      throw new TurnStateConflictError(params.turnId, turn.turnState, "interrupt");
+    }
 
- // 3. 创建 InvocationCommand（command_type=interrupt, state=queued）
- // invocation_id 为空（Runtime 拉取后才绑定；本阶段 Runtime 未接入）
- const commandPayload: Record<string, unknown> = {
- reason_code: params.reasonCode,
- preserve_pending_inputs: preservePendingInputs,
- };
- const commandPayloadHash = computeInvocationCommandPayloadHash(commandPayload);
+    // 3. 创建 InvocationCommand（command_type=interrupt, state=queued）
+    // invocation_id 为空（Runtime 拉取后才绑定；本阶段 Runtime 未接入）
+    const commandPayload: Record<string, unknown> = {
+      reason_code: params.reasonCode,
+      preserve_pending_inputs: preservePendingInputs,
+    };
+    const commandPayloadHash = computeInvocationCommandPayloadHash(commandPayload);
 
- await tx.insert(invocationCommandTable).values({
- id: commandId,
- invocationId: null, // queued 状态 invocation_id 可空
- threadId: thread.id,
- turnId: turn.id,
- commandType: "interrupt",
- commandPayloadJson: commandPayload,
- commandPayloadHash,
- commandState: "queued",
- runtimeExecutionRef: null,
- idempotencyKey: params.idempotencyKey,
- errorCode: null,
- errorMessage: null,
- createdAt: now,
- dispatchedAt: null,
- acknowledgedAt: null,
- failedAt: null,
- updatedAt: now,
- });
+    await tx.insert(invocationCommandTable).values({
+      id: commandId,
+      invocationId: null, // queued 状态 invocation_id 可空
+      threadId: thread.id,
+      turnId: turn.id,
+      commandType: "interrupt",
+      commandPayloadJson: commandPayload,
+      commandPayloadHash,
+      commandState: "queued",
+      runtimeExecutionRef: null,
+      idempotencyKey: params.idempotencyKey,
+      errorCode: null,
+      errorMessage: null,
+      createdAt: now,
+      dispatchedAt: null,
+      acknowledgedAt: null,
+      failedAt: null,
+      updatedAt: now,
+    });
 
- // 4. 写 turn.interrupt_requested Event（不立即改变 Turn 状态）
- // Runtime ack 后才会写 turn.interrupted/failed 终态事件
- const eventSeq = await allocateEventSequences(tx, thread.id, 1);
- const event = await insertThreadEvent(tx, thread.id, eventSeq, {
- eventType: "turn.interrupt_requested",
- turnId: turn.id,
- invocationId: turn.activeInvocationId ?? undefined, // 关联当前活动 invocation（可能为空）
- actorType: "user" as ThreadEventActorType,
- actorId: params.ownerUserId,
- payload: {
- reason_code: params.reasonCode,
- preserve_pending_inputs: preservePendingInputs,
- command_id: commandId,
- },
- idempotencyKey: params.idempotencyKey,
- correlationId: params.correlationId,
- });
+    // 4. 写 turn.interrupt_requested Event（不立即改变 Turn 状态）
+    // Runtime ack 后才会写 turn.interrupted/failed 终态事件
+    const eventSeq = await allocateEventSequences(tx, thread.id, 1);
+    const event = await insertThreadEvent(tx, thread.id, eventSeq, {
+      eventType: "turn.interrupt_requested",
+      turnId: turn.id,
+      invocationId: turn.activeInvocationId ?? undefined, // 关联当前活动 invocation（可能为空）
+      actorType: "user" as ThreadEventActorType,
+      actorId: params.ownerUserId,
+      payload: {
+        reason_code: params.reasonCode,
+        preserve_pending_inputs: preservePendingInputs,
+        command_id: commandId,
+      },
+      idempotencyKey: params.idempotencyKey,
+      correlationId: params.correlationId,
+    });
 
- return {
- turnState: turn.turnState,
- eventId: event.id,
- };
- });
+    return {
+      turnState: turn.turnState,
+      eventId: event.id,
+    };
+  });
 
- return {
- turnId: params.turnId,
- turnState: meta.turnState,
- interruptState: "requested",
- command: {
- id: commandId,
- commandState: "queued",
- },
- alreadyCompletedEffectsPreserved: true,
- eventId: meta.eventId,
- };
+  return {
+    turnId: params.turnId,
+    turnState: meta.turnState,
+    interruptState: "requested",
+    command: {
+      id: commandId,
+      commandState: "queued",
+    },
+    alreadyCompletedEffectsPreserved: true,
+    eventId: meta.eventId,
+  };
 }
 
 // 导出事务句柄类型供外部组合事务使用

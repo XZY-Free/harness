@@ -16,9 +16,6 @@ import {
   getThreadById,
   listThreadEvents,
 } from "@/lib/conversations/thread-queries";
-import { REQUEST_ID_HEADER, apiError, getRequestId, resourceNotFound } from "@/lib/http";
-import type { ThreadEvent } from "@/lib/persistence/schema/conversation";
-import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
 /**
  * GET /api/v1/threads/{thread_id}/events — 订阅 Event（SSE，S04-C05，§3.6；S12-W02 连接配额）。
  *
@@ -44,6 +41,9 @@ import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bu
  */
 import { buildStreamBackpressureResponse } from "@/lib/gateway/rate-limit-helpers";
 import { getSSEConnectionQuota } from "@/lib/gateway/sse-connection-quota";
+import { REQUEST_ID_HEADER, apiError, getRequestId, resourceNotFound } from "@/lib/http";
+import type { ThreadEvent } from "@/lib/persistence/schema/conversation";
+import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

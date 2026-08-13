@@ -183,7 +183,6 @@ export function ThreadTimeline({
   // 用 scrollTo({ behavior: "auto" }) 覆盖 CSS scroll-behavior: smooth，
   // 让自动滚动瞬间完成，不产生「从上到下」的平滑滚动动画。
   const prevSegmentCountRef = useRef(segments.length);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅依赖 segments.length 数值变化
   useEffect(() => {
     const prevCount = prevSegmentCountRef.current;
     prevSegmentCountRef.current = segments.length;

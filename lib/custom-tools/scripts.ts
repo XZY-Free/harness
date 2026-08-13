@@ -6,14 +6,14 @@
  */
 
 export type ScriptRunner = (
- args: Record<string, unknown>,
+  args: Record<string, unknown>,
 ) => Promise<{ ok: true; content: unknown } | { ok: false; error: string }>;
 
 const SCRIPTS = new Map<string, ScriptRunner>();
 
 /** 注册一个平台预置脚本（启动时登记）。 */
 function register(scriptId: string, runner: ScriptRunner): void {
- SCRIPTS.set(scriptId, runner);
+  SCRIPTS.set(scriptId, runner);
 }
 
 // ─── 平台预置脚本 ─────────────────────────────────────────
@@ -27,14 +27,14 @@ export const SCRIPT_WHITELIST: ReadonlyMap<string, ScriptRunner> = SCRIPTS;
 
 /** 运行白名单脚本；非白名单 scriptId 拒绝。 */
 export async function runWhitelistedScript(
- scriptId: string,
- args: Record<string, unknown>,
+  scriptId: string,
+  args: Record<string, unknown>,
 ): Promise<{ ok: true; content: unknown } | { ok: false; error: string }> {
- const runner = SCRIPTS.get(scriptId);
- if (!runner) return { ok: false, error: `script scriptId 不在白名单: ${scriptId}` };
- try {
- return await runner(args);
- } catch (e) {
- return { ok: false, error: e instanceof Error ? e.message : String(e) };
- }
+  const runner = SCRIPTS.get(scriptId);
+  if (!runner) return { ok: false, error: `script scriptId 不在白名单: ${scriptId}` };
+  try {
+    return await runner(args);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }

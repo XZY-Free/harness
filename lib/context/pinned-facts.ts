@@ -18,24 +18,24 @@ import { getThreadById, mutateThreadPinnedFacts, updateThreadPinnedFacts } from 
 
 /** 取某 thread 的 pinned facts（无则空数组）。只读快照,不锁。 */
 export async function getPinnedFacts(threadId: string): Promise<string[]> {
- const t = await getThreadById(threadId);
- if (!t || !t.pinnedFacts) return [];
- return Array.isArray(t.pinnedFacts) ? (t.pinnedFacts as string[]) : [];
+  const t = await getThreadById(threadId);
+  if (!t || !t.pinnedFacts) return [];
+  return Array.isArray(t.pinnedFacts) ? (t.pinnedFacts as string[]) : [];
 }
 
 /** 追加一条 pinned fact（去重）。事务内原子读-改-写，并发安全。 */
 export async function addPinnedFact(threadId: string, fact: string): Promise<string[]> {
- return mutateThreadPinnedFacts(threadId, (current) =>
- current.includes(fact) ? current : [...current, fact],
- );
+  return mutateThreadPinnedFacts(threadId, (current) =>
+    current.includes(fact) ? current : [...current, fact],
+  );
 }
 
 /** 移除一条 pinned fact。事务内原子读-改-写，并发安全。清空时落 null。 */
 export async function removePinnedFact(threadId: string, fact: string): Promise<string[]> {
- return mutateThreadPinnedFacts(threadId, (current) => {
- const next = current.filter((f) => f !== fact);
- return next.length > 0 ? next : null;
- });
+  return mutateThreadPinnedFacts(threadId, (current) => {
+    const next = current.filter((f) => f !== fact);
+    return next.length > 0 ? next : null;
+  });
 }
 
 /**
@@ -43,5 +43,5 @@ export async function removePinnedFact(threadId: string, fact: string): Promise<
  * P0 后改 DB 持久化,本函数清 DB 行（测试间隔离）。
  */
 export async function _clearPinnedFactsForTest(threadId: string): Promise<void> {
- await updateThreadPinnedFacts(threadId, null);
+  await updateThreadPinnedFacts(threadId, null);
 }

@@ -26,129 +26,129 @@
 import { randomUUID } from "node:crypto";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
 import {
- AttestationAlreadyRevokedError,
- AttestationNotFoundError,
- createRevokeArtifactAttestation,
+  AttestationAlreadyRevokedError,
+  AttestationNotFoundError,
+  createRevokeArtifactAttestation,
 } from "@/lib/artifacts/application/revoke-artifact-attestation";
 import { type VerificationState, isSha256Digest } from "@/lib/artifacts/domain/artifact";
 import {
- ArtifactAttestationFailedError,
- ArtifactNotVerifiedError,
- type AttestationFailureCode,
- type BuilderKeyRegistry,
- type ManagedArtifactStore,
- type VerifyAttestationInput,
- verifyArtifactAttestation,
+  ArtifactAttestationFailedError,
+  ArtifactNotVerifiedError,
+  type AttestationFailureCode,
+  type BuilderKeyRegistry,
+  type ManagedArtifactStore,
+  type VerifyAttestationInput,
+  verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
- getAttestationById,
- getVerifiedAttestationForRevision,
- listAttestations,
- listAttestationsByDigest,
- listAttestationsByRevision,
+  getAttestationById,
+  getVerifiedAttestationForRevision,
+  listAttestations,
+  listAttestationsByDigest,
+  listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import type {
- ArtifactAttestationWithRevocation,
- ListAttestationsOptions,
+  ArtifactAttestationWithRevocation,
+  ListAttestationsOptions,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import {
- type ArtifactAttestation,
- artifact,
- artifactAttestation,
- type attestationRevocationRecord,
+  type ArtifactAttestation,
+  artifact,
+  artifactAttestation,
+  type attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
 import {
- mysqlArtifactAttestationPersistenceStore,
- mysqlAttestationRevocationStore,
+  mysqlArtifactAttestationPersistenceStore,
+  mysqlAttestationRevocationStore,
 } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { db } from "@/lib/db/client";
 import type { AuditActor } from "@/lib/identity/audit";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 
 const recordArtifactAttestation = createRecordArtifactAttestation({
- store: mysqlArtifactAttestationPersistenceStore,
+  store: mysqlArtifactAttestationPersistenceStore,
 });
 const revokeArtifactAttestation = createRevokeArtifactAttestation({
- store: mysqlAttestationRevocationStore,
+  store: mysqlAttestationRevocationStore,
 });
 
 // ─── 仓储：insertAttestation ───────────────────────────────
 
 /** 插入 attestation 记录。 */
 export async function insertAttestation(params: {
- tenantId: string;
- artifactType: string;
- artifactRevisionId: string;
- artifactDigest: string;
- dsseEnvelopeRef: string;
- sbomRef: string;
- provenanceRef: string;
- builderIdentity: string;
- verificationState: VerificationState;
- policyRevisionId?: string | null;
- failureCode?: string | null;
- verifiedAt?: Date | null;
- sourceRevision?: string | null;
- buildPipeline?: string | null;
- dependencyLockFileHash?: string | null;
- buildTime?: Date | null;
- scanSummaryJson?: Record<string, unknown> | null;
+  tenantId: string;
+  artifactType: string;
+  artifactRevisionId: string;
+  artifactDigest: string;
+  dsseEnvelopeRef: string;
+  sbomRef: string;
+  provenanceRef: string;
+  builderIdentity: string;
+  verificationState: VerificationState;
+  policyRevisionId?: string | null;
+  failureCode?: string | null;
+  verifiedAt?: Date | null;
+  sourceRevision?: string | null;
+  buildPipeline?: string | null;
+  dependencyLockFileHash?: string | null;
+  buildTime?: Date | null;
+  scanSummaryJson?: Record<string, unknown> | null;
 }): Promise<ArtifactAttestation> {
- const id = randomUUID();
- return db.transaction(async (tx) => {
- let authorityId: string | null = null;
- if (isSha256Digest(params.artifactDigest)) {
- const [existing] = await tx
- .select()
- .from(artifact)
- .where(
- and(eq(artifact.tenantId, params.tenantId), eq(artifact.digest, params.artifactDigest)),
- )
- .limit(1);
- if (existing) {
- authorityId = existing.id;
- } else {
- authorityId = randomUUID();
- await tx.insert(artifact).values({
- id: authorityId,
- tenantId: params.tenantId,
- kind: params.artifactType as typeof artifact.$inferInsert.kind,
- digest: params.artifactDigest,
- sourceRevision: params.sourceRevision ?? null,
- buildMetadata: null,
- createdAt: params.verifiedAt ?? new Date(),
- });
- }
- }
- await tx.insert(artifactAttestation).values({
- id,
- tenantId: params.tenantId,
- artifactId: authorityId,
- artifactType: params.artifactType,
- artifactRevisionId: params.artifactRevisionId,
- artifactDigest: params.artifactDigest,
- dsseEnvelopeRef: params.dsseEnvelopeRef,
- sbomRef: params.sbomRef,
- provenanceRef: params.provenanceRef,
- builderIdentity: params.builderIdentity,
- verificationState: params.verificationState,
- policyRevisionId: params.policyRevisionId ?? null,
- failureCode: params.failureCode ?? null,
- verifiedAt: params.verifiedAt ?? null,
- sourceRevision: params.sourceRevision ?? null,
- buildPipeline: params.buildPipeline ?? null,
- dependencyLockFileHash: params.dependencyLockFileHash ?? null,
- buildTime: params.buildTime ?? null,
- scanSummaryJson: params.scanSummaryJson ?? null,
- });
- const [row] = await tx
- .select()
- .from(artifactAttestation)
- .where(eq(artifactAttestation.id, id))
- .limit(1);
- if (!row) throw new Error(`insertAttestation: 行未找到（id=${id}）`);
- return row;
- });
+  const id = randomUUID();
+  return db.transaction(async (tx) => {
+    let authorityId: string | null = null;
+    if (isSha256Digest(params.artifactDigest)) {
+      const [existing] = await tx
+        .select()
+        .from(artifact)
+        .where(
+          and(eq(artifact.tenantId, params.tenantId), eq(artifact.digest, params.artifactDigest)),
+        )
+        .limit(1);
+      if (existing) {
+        authorityId = existing.id;
+      } else {
+        authorityId = randomUUID();
+        await tx.insert(artifact).values({
+          id: authorityId,
+          tenantId: params.tenantId,
+          kind: params.artifactType as typeof artifact.$inferInsert.kind,
+          digest: params.artifactDigest,
+          sourceRevision: params.sourceRevision ?? null,
+          buildMetadata: null,
+          createdAt: params.verifiedAt ?? new Date(),
+        });
+      }
+    }
+    await tx.insert(artifactAttestation).values({
+      id,
+      tenantId: params.tenantId,
+      artifactId: authorityId,
+      artifactType: params.artifactType,
+      artifactRevisionId: params.artifactRevisionId,
+      artifactDigest: params.artifactDigest,
+      dsseEnvelopeRef: params.dsseEnvelopeRef,
+      sbomRef: params.sbomRef,
+      provenanceRef: params.provenanceRef,
+      builderIdentity: params.builderIdentity,
+      verificationState: params.verificationState,
+      policyRevisionId: params.policyRevisionId ?? null,
+      failureCode: params.failureCode ?? null,
+      verifiedAt: params.verifiedAt ?? null,
+      sourceRevision: params.sourceRevision ?? null,
+      buildPipeline: params.buildPipeline ?? null,
+      dependencyLockFileHash: params.dependencyLockFileHash ?? null,
+      buildTime: params.buildTime ?? null,
+      scanSummaryJson: params.scanSummaryJson ?? null,
+    });
+    const [row] = await tx
+      .select()
+      .from(artifactAttestation)
+      .where(eq(artifactAttestation.id, id))
+      .limit(1);
+    if (!row) throw new Error(`insertAttestation: 行未找到（id=${id}）`);
+    return row;
+  });
 }
 
 // ─── 完整验证流程：verifyAndPersistAttestation ─────────────
@@ -168,61 +168,61 @@ export async function insertAttestation(params: {
  * @throws ArtifactAttestationFailedError 验证失败（已持久化失败记录与审计）
  */
 export async function verifyAndPersistAttestation(
- input: VerifyAttestationInput,
- store: ManagedArtifactStore,
- builderKeys: BuilderKeyRegistry,
- actor: AuditActor,
- requestId?: string,
- idempotency?: {
- recordId: string;
- httpStatus: number | ((verificationState: VerificationState) => number);
- responseRef?: string | null;
- serializeResponse: (attestation: ArtifactAttestation) => string;
- },
+  input: VerifyAttestationInput,
+  store: ManagedArtifactStore,
+  builderKeys: BuilderKeyRegistry,
+  actor: AuditActor,
+  requestId?: string,
+  idempotency?: {
+    recordId: string;
+    httpStatus: number | ((verificationState: VerificationState) => number);
+    responseRef?: string | null;
+    serializeResponse: (attestation: ArtifactAttestation) => string;
+  },
 ): Promise<ArtifactAttestation> {
- const result = await verifyArtifactAttestation(input, store, builderKeys);
- const now = new Date();
+  const result = await verifyArtifactAttestation(input, store, builderKeys);
+  const now = new Date();
 
- const attestation = await recordArtifactAttestation({
- tenantId: input.tenantId,
- artifactType: input.artifactType,
- artifactRevisionId: input.artifactRevisionId,
- artifactDigest: input.artifactDigest,
- dsseEnvelopeRef: input.dsseEnvelopeRef,
- sbomRef: result.sbomRef ?? "",
- provenanceRef: result.provenanceRef ?? "",
- builderIdentity: input.builderIdentity,
- verificationState: result.verificationState,
- policyRevisionId: input.policyRevisionId ?? null,
- failureCode: result.failureCode ?? null,
- verifiedAt: now,
- sourceRevision: result.provenanceSummary?.sourceRevision ?? null,
- buildPipeline: result.provenanceSummary?.buildPipeline ?? null,
- dependencyLockFileHash: result.provenanceSummary?.dependencyLockFile ?? null,
- buildTime: result.provenanceSummary ? new Date(result.provenanceSummary.buildTime) : null,
- scanSummaryJson: result.scanSummary ?? null,
- actor,
- requestId: requestId ?? randomUUID(),
- idempotency: idempotency
- ? {
- ...idempotency,
- httpStatus:
- typeof idempotency.httpStatus === "function"
- ? idempotency.httpStatus(result.verificationState)
- : idempotency.httpStatus,
- }
- : undefined,
- });
+  const attestation = await recordArtifactAttestation({
+    tenantId: input.tenantId,
+    artifactType: input.artifactType,
+    artifactRevisionId: input.artifactRevisionId,
+    artifactDigest: input.artifactDigest,
+    dsseEnvelopeRef: input.dsseEnvelopeRef,
+    sbomRef: result.sbomRef ?? "",
+    provenanceRef: result.provenanceRef ?? "",
+    builderIdentity: input.builderIdentity,
+    verificationState: result.verificationState,
+    policyRevisionId: input.policyRevisionId ?? null,
+    failureCode: result.failureCode ?? null,
+    verifiedAt: now,
+    sourceRevision: result.provenanceSummary?.sourceRevision ?? null,
+    buildPipeline: result.provenanceSummary?.buildPipeline ?? null,
+    dependencyLockFileHash: result.provenanceSummary?.dependencyLockFile ?? null,
+    buildTime: result.provenanceSummary ? new Date(result.provenanceSummary.buildTime) : null,
+    scanSummaryJson: result.scanSummary ?? null,
+    actor,
+    requestId: requestId ?? randomUUID(),
+    idempotency: idempotency
+      ? {
+          ...idempotency,
+          httpStatus:
+            typeof idempotency.httpStatus === "function"
+              ? idempotency.httpStatus(result.verificationState)
+              : idempotency.httpStatus,
+        }
+      : undefined,
+  });
 
- // 失败时抛错（已持久化失败记录与审计）
- if (result.verificationState === "failed") {
- throw new ArtifactAttestationFailedError(
- result.failureCode as AttestationFailureCode,
- result.failureReason ?? "制品证明验证失败",
- );
- }
+  // 失败时抛错（已持久化失败记录与审计）
+  if (result.verificationState === "failed") {
+    throw new ArtifactAttestationFailedError(
+      result.failureCode as AttestationFailureCode,
+      result.failureReason ?? "制品证明验证失败",
+    );
+  }
 
- return attestation;
+  return attestation;
 }
 
 // ─── 发布门禁：assertAttestationGate ───────────────────────
@@ -239,64 +239,64 @@ export async function verifyAndPersistAttestation(
  * @throws ArtifactNotVerifiedError 任一校验失败
  */
 export async function assertAttestationGate(
- tenantId: string,
- expectedArtifactType: string,
- expectedRevisionId: string,
- attestationId: string,
+  tenantId: string,
+  expectedArtifactType: string,
+  expectedRevisionId: string,
+  attestationId: string,
 ): Promise<ArtifactAttestation> {
- const found = await getAttestationById(tenantId, attestationId);
- if (!found) {
- throw new ArtifactNotVerifiedError(
- attestationId,
- `attestation 不存在或跨租户: ${attestationId}`,
- );
- }
- const { attestation, revocation } = found;
- if (attestation.verificationState !== "verified") {
- throw new ArtifactNotVerifiedError(
- attestationId,
- `attestation 未验证（state=${attestation.verificationState}, failureCode=${attestation.failureCode ?? "n/a"}）`,
- );
- }
- if (revocation) {
- throw new ArtifactNotVerifiedError(
- attestationId,
- `attestation 已撤销（revokedAt=${revocation.revokedAt.toISOString()}, reason=${revocation.reason}）`,
- );
- }
- if (attestation.artifactType !== expectedArtifactType) {
- throw new ArtifactNotVerifiedError(
- attestationId,
- `attestation artifactType 不匹配（期望 ${expectedArtifactType}, 实际 ${attestation.artifactType}）`,
- );
- }
- if (attestation.artifactRevisionId !== expectedRevisionId) {
- throw new ArtifactNotVerifiedError(
- attestationId,
- `attestation artifactRevisionId 不匹配（期望 ${expectedRevisionId}, 实际 ${attestation.artifactRevisionId}）`,
- );
- }
- if (!attestation.artifactId) {
- throw new ArtifactNotVerifiedError(attestationId, "attestation 未引用权威 Artifact");
- }
- const [authority] = await db
- .select({ id: artifact.id })
- .from(artifact)
- .where(
- and(
- eq(artifact.id, attestation.artifactId),
- eq(artifact.tenantId, tenantId),
- eq(artifact.digest, attestation.artifactDigest),
- ),
- )
- .limit(1);
- if (!authority) {
- throw new ArtifactNotVerifiedError(
- attestationId,
- "attestation 的 Artifact ID 与 digest 不一致",
- );
- }
- return attestation;
+  const found = await getAttestationById(tenantId, attestationId);
+  if (!found) {
+    throw new ArtifactNotVerifiedError(
+      attestationId,
+      `attestation 不存在或跨租户: ${attestationId}`,
+    );
+  }
+  const { attestation, revocation } = found;
+  if (attestation.verificationState !== "verified") {
+    throw new ArtifactNotVerifiedError(
+      attestationId,
+      `attestation 未验证（state=${attestation.verificationState}, failureCode=${attestation.failureCode ?? "n/a"}）`,
+    );
+  }
+  if (revocation) {
+    throw new ArtifactNotVerifiedError(
+      attestationId,
+      `attestation 已撤销（revokedAt=${revocation.revokedAt.toISOString()}, reason=${revocation.reason}）`,
+    );
+  }
+  if (attestation.artifactType !== expectedArtifactType) {
+    throw new ArtifactNotVerifiedError(
+      attestationId,
+      `attestation artifactType 不匹配（期望 ${expectedArtifactType}, 实际 ${attestation.artifactType}）`,
+    );
+  }
+  if (attestation.artifactRevisionId !== expectedRevisionId) {
+    throw new ArtifactNotVerifiedError(
+      attestationId,
+      `attestation artifactRevisionId 不匹配（期望 ${expectedRevisionId}, 实际 ${attestation.artifactRevisionId}）`,
+    );
+  }
+  if (!attestation.artifactId) {
+    throw new ArtifactNotVerifiedError(attestationId, "attestation 未引用权威 Artifact");
+  }
+  const [authority] = await db
+    .select({ id: artifact.id })
+    .from(artifact)
+    .where(
+      and(
+        eq(artifact.id, attestation.artifactId),
+        eq(artifact.tenantId, tenantId),
+        eq(artifact.digest, attestation.artifactDigest),
+      ),
+    )
+    .limit(1);
+  if (!authority) {
+    throw new ArtifactNotVerifiedError(
+      attestationId,
+      "attestation 的 Artifact ID 与 digest 不一致",
+    );
+  }
+  return attestation;
 }
 
 // ─── 撤销：revokeAttestation ───────────────────────────────
@@ -319,34 +319,34 @@ export async function assertAttestationGate(
  * @throws AttestationAlreadyRevokedError 已撤销
  */
 export async function revokeAttestation(
- tenantId: string,
- attestationId: string,
- actor: AuditActor,
- reason: string,
- requestId?: string,
+  tenantId: string,
+  attestationId: string,
+  actor: AuditActor,
+  reason: string,
+  requestId?: string,
 ): Promise<ArtifactAttestationWithRevocation> {
- const result = await revokeArtifactAttestation({
- tenantId,
- attestationId,
- actor,
- reason,
- requestId: requestId ?? randomUUID(),
- });
- return { attestation: result.attestation, revocation: result.revocation };
+  const result = await revokeArtifactAttestation({
+    tenantId,
+    attestationId,
+    actor,
+    reason,
+    requestId: requestId ?? randomUUID(),
+  });
+  return { attestation: result.attestation, revocation: result.revocation };
 }
 
 // ─── Re-exports ────────────────────────────────────────────
 
 export {
- getAttestationById,
- listAttestationsByRevision,
- listAttestationsByDigest,
- listAttestations,
- getVerifiedAttestationForRevision,
+  getAttestationById,
+  listAttestationsByRevision,
+  listAttestationsByDigest,
+  listAttestations,
+  getVerifiedAttestationForRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 export type {
- ArtifactAttestationWithRevocation,
- ListAttestationsOptions,
+  ArtifactAttestationWithRevocation,
+  ListAttestationsOptions,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 
 export type { ArtifactAttestation } from "@/lib/artifacts/persistence/artifact-record";
@@ -354,14 +354,14 @@ export { AttestationAlreadyRevokedError, AttestationNotFoundError };
 export type { VerificationState } from "@/lib/artifacts/domain/artifact";
 export type { AttestationFailureCode } from "@/lib/artifacts/domain/artifact-attestation";
 export {
- ArtifactAttestationFailedError,
- ArtifactNotVerifiedError,
- type BuilderKeyRegistry,
- type ManagedArtifactStore,
- type VerifyAttestationInput,
- type VerifyAttestationResult,
- computeArtifactDigest,
- isManagedRef,
- isValidArtifactDigest,
- verifyArtifactAttestation,
+  ArtifactAttestationFailedError,
+  ArtifactNotVerifiedError,
+  type BuilderKeyRegistry,
+  type ManagedArtifactStore,
+  type VerifyAttestationInput,
+  type VerifyAttestationResult,
+  computeArtifactDigest,
+  isManagedRef,
+  isValidArtifactDigest,
+  verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";

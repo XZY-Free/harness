@@ -19,10 +19,10 @@ import {
 } from "@/lib/publications/persistence/publication-record";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
-import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
-import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
+import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   runtimeConformanceCaseResult,

@@ -21,25 +21,25 @@ type DbOrTx = Pick<MySql2Database, "insert">;
  * 在 Outbox 事件插入的同一事务中调用。
  */
 export async function seedEventDeliveries(
- tx: DbOrTx,
- eventId: string,
- eventType: ControlPlaneEventType | string,
- now: Date,
+  tx: DbOrTx,
+  eventId: string,
+  eventType: ControlPlaneEventType | string,
+  now: Date,
 ): Promise<void> {
- const consumers = getSubscribedConsumers(eventType);
- if (consumers.length === 0) return;
+  const consumers = getSubscribedConsumers(eventType);
+  if (consumers.length === 0) return;
 
- const rows = consumers.map((consumer) => ({
- id: crypto.randomUUID(),
- eventId,
- consumerName: consumer.name,
- state: "pending" as const,
- attemptCount: 0,
- createdAt: now,
- }));
+  const rows = consumers.map((consumer) => ({
+    id: crypto.randomUUID(),
+    eventId,
+    consumerName: consumer.name,
+    state: "pending" as const,
+    attemptCount: 0,
+    createdAt: now,
+  }));
 
- // 批量插入
- for (const row of rows) {
- await tx.insert(controlPlaneEventDelivery).values(row);
- }
+  // 批量插入
+  for (const row of rows) {
+    await tx.insert(controlPlaneEventDelivery).values(row);
+  }
 }

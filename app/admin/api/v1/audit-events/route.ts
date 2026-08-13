@@ -1,11 +1,11 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
-import { listAuditEvents } from "@/lib/identity/audit-queries";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import { listAuditEvents } from "@/lib/identity/audit-queries";
 /**
  * GET /admin/api/v1/audit-events — 列出租户审计事件（S11-W04）。
  *

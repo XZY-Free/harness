@@ -29,19 +29,19 @@ import type { NetworkPolicy, NetworkPolicyMode } from "./types";
  * 继承全局 `networkPolicyConfig.default`。per-thread 覆盖可指定 mode。host 模式恒为 open（不可限制）。
  */
 export function resolveNetworkPolicy(opts?: {
- threadOverride?: Partial<NetworkPolicy>;
- runtimeType?: "host" | "container";
+  threadOverride?: Partial<NetworkPolicy>;
+  runtimeType?: "host" | "container";
 }): NetworkPolicy {
- // host 模式恒为 open（信任平台，不可限制 egress）
- if (opts?.runtimeType === "host") {
- return { mode: "open" };
- }
+  // host 模式恒为 open（信任平台，不可限制 egress）
+  if (opts?.runtimeType === "host") {
+    return { mode: "open" };
+  }
 
- // P2-9: 运行时枚举校验——TS 类型仅编译时,无效 DB 值(如历史 "allowlist")静默变开放网络。
- // fail-closed:非 disabled/open 一律降级为 disabled(断网)。
- const raw = opts?.threadOverride?.mode ?? networkPolicyConfig.default;
- const mode: NetworkPolicyMode = raw === "open" || raw === "disabled" ? raw : "disabled";
- return { mode };
+  // P2-9: 运行时枚举校验——TS 类型仅编译时,无效 DB 值(如历史 "allowlist")静默变开放网络。
+  // fail-closed:非 disabled/open 一律降级为 disabled(断网)。
+  const raw = opts?.threadOverride?.mode ?? networkPolicyConfig.default;
+  const mode: NetworkPolicyMode = raw === "open" || raw === "disabled" ? raw : "disabled";
+  return { mode };
 }
 
 /**
@@ -51,6 +51,6 @@ export function resolveNetworkPolicy(opts?: {
  * - `open` → `undefined`（默认 bridge，不加 `--network`）
  */
 export function dockerNetworkMode(policy: NetworkPolicy): string | undefined {
- if (policy.mode === "disabled") return "none";
- return undefined;
+  if (policy.mode === "disabled") return "none";
+  return undefined;
 }

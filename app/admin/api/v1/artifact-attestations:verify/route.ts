@@ -1,4 +1,11 @@
 import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
+import {
   getBuilderKeyRegistry,
   getManagedArtifactStore,
 } from "@/lib/artifacts/infrastructure/artifact-store-provider";
@@ -56,13 +63,6 @@ import {
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
 import { ARTIFACT_TYPES, type ArtifactAttestation } from "@/lib/persistence/schema/artifact";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -107,8 +107,7 @@ function validateBody(body: unknown): body is VerifyBody {
   if (typeof b.artifact_revision_id !== "string" || b.artifact_revision_id.length === 0)
     return false;
   if (typeof b.artifact_digest !== "string" || b.artifact_digest.length === 0) return false;
-  if (typeof b.dsse_envelope_ref !== "string" || b.dsse_envelope_ref.length === 0)
-    return false;
+  if (typeof b.dsse_envelope_ref !== "string" || b.dsse_envelope_ref.length === 0) return false;
   if (typeof b.builder_identity !== "string" || b.builder_identity.length === 0) return false;
   if (b.policy_revision_id !== undefined && typeof b.policy_revision_id !== "string") return false;
   return true;

@@ -8,22 +8,22 @@ import { encryptCicdToken } from "@/lib/runtime/secret-crypto";
 import { broadcastThreadEvent } from "@/lib/runtime/thread-events-bus";
 import { escapeLikeWildcards } from "@/lib/utils";
 import {
- type AnyColumn,
- and,
- asc,
- desc,
- eq,
- gt,
- gte,
- inArray,
- isNotNull,
- isNull,
- like,
- lt,
- max,
- ne,
- or,
- sql,
+  type AnyColumn,
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lt,
+  max,
+  ne,
+  or,
+  sql,
 } from "drizzle-orm";
 import type { MySqlTable } from "drizzle-orm/mysql-core";
 import { db } from "./client";
@@ -34,137 +34,137 @@ import { db } from "./client";
  */
 export type DbTxClient = Parameters<Parameters<typeof db.transaction>[0]>[0];
 import {
- type AdminAuditAction,
- type AdminAuditLog,
- type AdminAuditOutcome,
- type Agent,
- type ApprovalRequestStatus,
- type ApprovalScope,
- type BackgroundTask,
- type BackgroundTaskKind,
- type BackgroundTaskStatus,
- type ContextSnapshot,
- type ContextSummary,
- type ContextSummaryType,
- type CustomTool,
- type DBMessage,
- type Deployment,
- type DeploymentStatus,
- type GitCheckpoint,
- type McpServerConfig,
- type MemoryConfidence,
- type MemoryEmbedding,
- type MemoryEntry,
- type MemoryKind,
- type MemoryProvenanceEntry,
- type MemoryScope,
- type MemoryStatus,
- type PermissionDecision,
- type PermissionScope,
- type ProviderProfile,
- type Role,
- type RunTranscriptChunk,
- type RunTranscriptChunkKind,
- type SecretMount,
- type SecretMountScope,
- type SecretMountStatus,
- type Skill,
- type SkillSource,
- type SkillStatus,
- type SkillSyncMapping,
- type SkillSyncState,
- type SkillVersion,
- type SkillVersionStatus,
- type SubagentDefinition,
- type SubagentRole,
- type SubagentRun,
- type SubagentRunStatus,
- type ThreadEvent,
- type ThreadEventType,
- type ThreadPlan,
- type ThreadPlanItem,
- type ThreadPlanItemStatus,
- type ThreadRun,
- type ThreadRunSkill,
- type ThreadRunSkillRole,
- type ThreadRunSkillSource,
- type ThreadRunStatus,
- type ThreadRunTriggerType,
- type ThreadStatus,
- type ToolApprovalRequest,
- type ToolPermissionRule,
- type ToolRun,
- type ToolRunStatus,
- type User,
- adminAuditLog,
- agent,
- auditFailureLog,
- backgroundTask,
- contextSnapshot,
- contextSummary,
- customTool,
- deployment,
- gitCheckpoint,
- mcpServerConfig,
- memoryEmbedding,
- memoryEntry,
- message,
- messageTypeForRole,
- policyConfig,
- policyConfigHistory,
- providerProfile,
- role,
- rolePermission,
- runTranscriptChunk,
- secretMount,
- skill,
- skillSyncMapping,
- skillVersion,
- subagentDefinition,
- subagentRun,
- thread,
- threadEvent,
- threadPlan,
- threadPlanItem,
- threadRun,
- threadRunSkill,
- toolApprovalRequest,
- toolPermissionRule,
- toolRun,
- user,
- userRole,
+  type AdminAuditAction,
+  type AdminAuditLog,
+  type AdminAuditOutcome,
+  type Agent,
+  type ApprovalRequestStatus,
+  type ApprovalScope,
+  type BackgroundTask,
+  type BackgroundTaskKind,
+  type BackgroundTaskStatus,
+  type ContextSnapshot,
+  type ContextSummary,
+  type ContextSummaryType,
+  type CustomTool,
+  type DBMessage,
+  type Deployment,
+  type DeploymentStatus,
+  type GitCheckpoint,
+  type McpServerConfig,
+  type MemoryConfidence,
+  type MemoryEmbedding,
+  type MemoryEntry,
+  type MemoryKind,
+  type MemoryProvenanceEntry,
+  type MemoryScope,
+  type MemoryStatus,
+  type PermissionDecision,
+  type PermissionScope,
+  type ProviderProfile,
+  type Role,
+  type RunTranscriptChunk,
+  type RunTranscriptChunkKind,
+  type SecretMount,
+  type SecretMountScope,
+  type SecretMountStatus,
+  type Skill,
+  type SkillSource,
+  type SkillStatus,
+  type SkillSyncMapping,
+  type SkillSyncState,
+  type SkillVersion,
+  type SkillVersionStatus,
+  type SubagentDefinition,
+  type SubagentRole,
+  type SubagentRun,
+  type SubagentRunStatus,
+  type ThreadEvent,
+  type ThreadEventType,
+  type ThreadPlan,
+  type ThreadPlanItem,
+  type ThreadPlanItemStatus,
+  type ThreadRun,
+  type ThreadRunSkill,
+  type ThreadRunSkillRole,
+  type ThreadRunSkillSource,
+  type ThreadRunStatus,
+  type ThreadRunTriggerType,
+  type ThreadStatus,
+  type ToolApprovalRequest,
+  type ToolPermissionRule,
+  type ToolRun,
+  type ToolRunStatus,
+  type User,
+  adminAuditLog,
+  agent,
+  auditFailureLog,
+  backgroundTask,
+  contextSnapshot,
+  contextSummary,
+  customTool,
+  deployment,
+  gitCheckpoint,
+  mcpServerConfig,
+  memoryEmbedding,
+  memoryEntry,
+  message,
+  messageTypeForRole,
+  policyConfig,
+  policyConfigHistory,
+  providerProfile,
+  role,
+  rolePermission,
+  runTranscriptChunk,
+  secretMount,
+  skill,
+  skillSyncMapping,
+  skillVersion,
+  subagentDefinition,
+  subagentRun,
+  thread,
+  threadEvent,
+  threadPlan,
+  threadPlanItem,
+  threadRun,
+  threadRunSkill,
+  toolApprovalRequest,
+  toolPermissionRule,
+  toolRun,
+  user,
+  userRole,
 } from "./schema";
 import {
- contextSnapshotChecksumsSchema,
- contextSnapshotLayersSchema,
- contextSnapshotSkillLoadEvidenceSchema,
- contextSnapshotSkillResolverInputSchema,
- contextSnapshotSkillResolverOutputSchema,
- customToolExecutorConfigSchema,
- customToolInputSchemaSchema,
- memoryProvenanceSchema,
- threadPinnedFactsSchema,
- toolRunInputSchema,
- toolRunOutputSchema,
- validateJsonColumn,
+  contextSnapshotChecksumsSchema,
+  contextSnapshotLayersSchema,
+  contextSnapshotSkillLoadEvidenceSchema,
+  contextSnapshotSkillResolverInputSchema,
+  contextSnapshotSkillResolverOutputSchema,
+  customToolExecutorConfigSchema,
+  customToolInputSchemaSchema,
+  memoryProvenanceSchema,
+  threadPinnedFactsSchema,
+  toolRunInputSchema,
+  toolRunOutputSchema,
+  validateJsonColumn,
 } from "./schemas/json-columns";
 
 // ─── Thread Queries ──────────────────────────────────────────
 
 /** 取 thread（含软删）。仅供 purge/存在性判断等需看软删的场景；HTTP 入口与内部调用应用 getThreadById。 */
 export async function getThreadByIdIncludingDeleted(id: string) {
- const [row] = await db.select().from(thread).where(eq(thread.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(thread).where(eq(thread.id, id)).limit(1);
+  return row ?? null;
 }
 
 /** 取未软删 thread。HTTP 入口与内部调用默认口径：软删 thread 不可见（与 getThreadByIdForUser/listThreadsForUser 一致）。 */
 export async function getThreadById(id: string) {
- const [row] = await db
- .select()
- .from(thread)
- .where(and(eq(thread.id, id), isNull(thread.deletedAt)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(thread)
+    .where(and(eq(thread.id, id), isNull(thread.deletedAt)))
+    .limit(1);
+  return row ?? null;
 }
 
 // ─── Owner-scoped Thread Queries () ────────────────
@@ -174,30 +174,30 @@ export async function getThreadById(id: string) {
 /** 取属于指定用户且未软删的 thread；不属于或已软删则返回 null（HTTP 入口据此返回 404）。
  * C-3：与 listThreadsForUser / getLatestThreadForUser 口径一致，软删 thread 内容不可访问。 */
 export async function getThreadByIdForUser(id: string, userId: string) {
- const [row] = await db
- .select()
- .from(thread)
- .where(and(eq(thread.id, id), eq(thread.userId, userId), isNull(thread.deletedAt)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(thread)
+    .where(and(eq(thread.id, id), eq(thread.userId, userId), isNull(thread.deletedAt)))
+    .limit(1);
+  return row ?? null;
 }
 
 /** requireThreadForUser：语义同 getThreadByIdForUser，命名表达「入口校验」意图。 */
 export async function requireThreadForUser(id: string, userId: string) {
- return getThreadByIdForUser(id, userId);
+  return getThreadByIdForUser(id, userId);
 }
 
 /** 取用户最近一个 thread（首页按用户恢复会话用）；无则 null。B-8: 按 updatedAt desc。
  * C-3: 过滤掉软删（deletedAt 非 null）的会话——与 listThreadsForUser 口径一致，
  * 避免软删会话在首页恢复入口复活。 */
 export async function getLatestThreadForUser(userId: string) {
- const [row] = await db
- .select()
- .from(thread)
- .where(and(eq(thread.userId, userId), isNull(thread.deletedAt)))
- .orderBy(desc(thread.updatedAt))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(thread)
+    .where(and(eq(thread.userId, userId), isNull(thread.deletedAt)))
+    .orderBy(desc(thread.updatedAt))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -211,45 +211,45 @@ export async function getLatestThreadForUser(userId: string) {
  * - E-6: lastMessageId 冗余列（消息级未读判定用）。
  */
 export async function listThreadsForUser(
- userId: string,
- opts: { limit?: number; before?: { updatedAt: Date; id: string }; search?: string } = {},
+  userId: string,
+  opts: { limit?: number; before?: { updatedAt: Date; id: string }; search?: string } = {},
 ) {
- const limit = Math.min(200, Math.max(1, Math.floor(opts.limit ?? 50)));
- const conds = [eq(thread.userId, userId), isNull(thread.deletedAt)];
- if (opts.before) {
- // C-9: 复合游标 (updatedAt, id) —— updatedAt 相同时按 id desc 续传，防同秒并列漏/重。
- const beforeCond = or(
- lt(thread.updatedAt, opts.before.updatedAt),
- and(eq(thread.updatedAt, opts.before.updatedAt), lt(thread.id, opts.before.id)),
- );
- if (beforeCond) conds.push(beforeCond);
- }
- // E-2: 后端模糊搜索（title 或 lastMessagePreview 包含关键词）
- // 审计修复 M3：转义 SQL LIKE 通配符（原代码未转义 % 和 _，用户搜索 "%" 会匹配全部行，
- // 可探测数据形状并在大表上触发全表扫描）。
- if (opts.search?.trim()) {
- const escaped = escapeLikeWildcards(opts.search.trim());
- const kw = `%${escaped}%`;
- const searchCond = or(like(thread.title, kw), like(thread.lastMessagePreview, kw));
- if (searchCond) conds.push(searchCond);
- }
- return db
- .select({
- id: thread.id,
- title: thread.title,
- status: thread.status,
- model: thread.model,
- createdAt: thread.createdAt,
- updatedAt: thread.updatedAt,
- pinnedAt: thread.pinnedAt,
- previewUrl: thread.previewUrl,
- lastMessagePreview: thread.lastMessagePreview,
- lastMessageId: thread.lastMessageId,
- })
- .from(thread)
- .where(and(...conds))
- .orderBy(desc(thread.pinnedAt), desc(thread.updatedAt), desc(thread.id))
- .limit(limit);
+  const limit = Math.min(200, Math.max(1, Math.floor(opts.limit ?? 50)));
+  const conds = [eq(thread.userId, userId), isNull(thread.deletedAt)];
+  if (opts.before) {
+    // C-9: 复合游标 (updatedAt, id) —— updatedAt 相同时按 id desc 续传，防同秒并列漏/重。
+    const beforeCond = or(
+      lt(thread.updatedAt, opts.before.updatedAt),
+      and(eq(thread.updatedAt, opts.before.updatedAt), lt(thread.id, opts.before.id)),
+    );
+    if (beforeCond) conds.push(beforeCond);
+  }
+  // E-2: 后端模糊搜索（title 或 lastMessagePreview 包含关键词）
+  // 审计修复 M3：转义 SQL LIKE 通配符（原代码未转义 % 和 _，用户搜索 "%" 会匹配全部行，
+  // 可探测数据形状并在大表上触发全表扫描）。
+  if (opts.search?.trim()) {
+    const escaped = escapeLikeWildcards(opts.search.trim());
+    const kw = `%${escaped}%`;
+    const searchCond = or(like(thread.title, kw), like(thread.lastMessagePreview, kw));
+    if (searchCond) conds.push(searchCond);
+  }
+  return db
+    .select({
+      id: thread.id,
+      title: thread.title,
+      status: thread.status,
+      model: thread.model,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      pinnedAt: thread.pinnedAt,
+      previewUrl: thread.previewUrl,
+      lastMessagePreview: thread.lastMessagePreview,
+      lastMessageId: thread.lastMessageId,
+    })
+    .from(thread)
+    .where(and(...conds))
+    .orderBy(desc(thread.pinnedAt), desc(thread.updatedAt), desc(thread.id))
+    .limit(limit);
 }
 
 /**
@@ -258,22 +258,22 @@ export async function listThreadsForUser(
  * 故跨实例的他实例 run 状态变化也能被各实例 SSE 端点轮询感知）。用于 SSE 端点补推他实例变更。
  */
 export async function listThreadStatusChanges(userId: string, sinceUpdatedAt: Date) {
- return db
- .select({
- threadId: thread.id,
- status: thread.status,
- updatedAt: thread.updatedAt,
- })
- .from(thread)
- .where(
- and(
- eq(thread.userId, userId),
- isNull(thread.deletedAt),
- gt(thread.updatedAt, sinceUpdatedAt),
- ),
- )
- .orderBy(asc(thread.updatedAt))
- .limit(200);
+  return db
+    .select({
+      threadId: thread.id,
+      status: thread.status,
+      updatedAt: thread.updatedAt,
+    })
+    .from(thread)
+    .where(
+      and(
+        eq(thread.userId, userId),
+        isNull(thread.deletedAt),
+        gt(thread.updatedAt, sinceUpdatedAt),
+      ),
+    )
+    .orderBy(asc(thread.updatedAt))
+    .limit(200);
 }
 
 /**
@@ -281,68 +281,68 @@ export async function listThreadStatusChanges(userId: string, sinceUpdatedAt: Da
  * foreign thread → null（调用方据此 404，不泄露消息）。
  */
 export async function getMessagesByThreadIdForUser(
- threadId: string,
- userId: string,
+  threadId: string,
+  userId: string,
 ): Promise<DBMessage[] | null> {
- const owned = await getThreadByIdForUser(threadId, userId);
- if (!owned) return null;
- return getMessagesByThreadId(threadId);
+  const owned = await getThreadByIdForUser(threadId, userId);
+  if (!owned) return null;
+  return getMessagesByThreadId(threadId);
 }
 
 export async function saveThread({
- id,
- userId,
- title,
- model,
+  id,
+  userId,
+  title,
+  model,
 }: {
- id: string;
- userId: string;
- title: string;
- model?: string | null;
+  id: string;
+  userId: string;
+  title: string;
+  model?: string | null;
 }) {
- // B-8: updatedAt 与 createdAt 同步初始化
- const now = new Date();
- // MySQL 无 onConflictDoNothing：用 INSERT IGNORE（drizzle .ignore()）做幂等写入
- await db
- .insert(thread)
- .ignore()
- .values({ id, userId, title, model: model ?? null, createdAt: now, updatedAt: now });
+  // B-8: updatedAt 与 createdAt 同步初始化
+  const now = new Date();
+  // MySQL 无 onConflictDoNothing：用 INSERT IGNORE（drizzle .ignore()）做幂等写入
+  await db
+    .insert(thread)
+    .ignore()
+    .values({ id, userId, title, model: model ?? null, createdAt: now, updatedAt: now });
 }
 
 /** B-8: 刷新 thread 最后活动时间（发消息 / 状态变更 / 模型变更等场景调用）。 */
 export async function touchThread(threadId: string) {
- await db.update(thread).set({ updatedAt: new Date() }).where(eq(thread.id, threadId));
+  await db.update(thread).set({ updatedAt: new Date() }).where(eq(thread.id, threadId));
 }
 
 /** C-2: 重命名会话标题。 */
 export async function updateThreadTitle(threadId: string, title: string) {
- await db.update(thread).set({ title, updatedAt: new Date() }).where(eq(thread.id, threadId));
+  await db.update(thread).set({ title, updatedAt: new Date() }).where(eq(thread.id, threadId));
 }
 
 /** C-1: LLM 生成标题后更新 title（+ updatedAt）。C-1 重构后删 titleUpdatedAt 防抖守门，
  * 自动生成（chat route 首条并行）与手动「重新生成标题」均走此函数，语义同 updateThreadTitle。 */
 export async function updateGeneratedTitle(threadId: string, title: string) {
- await db.update(thread).set({ title, updatedAt: new Date() }).where(eq(thread.id, threadId));
+  await db.update(thread).set({ title, updatedAt: new Date() }).where(eq(thread.id, threadId));
 }
 
 /** E-5: 切换置顶（有 pinnedAt 则清除，无则设 NOW()）。返回是否已置顶。 */
 export async function togglePinThread(threadId: string) {
- const [row] = await db
- .select({ pinnedAt: thread.pinnedAt })
- .from(thread)
- .where(eq(thread.id, threadId))
- .limit(1);
- const pinnedAt = row?.pinnedAt ? null : new Date();
- await db.update(thread).set({ pinnedAt, updatedAt: new Date() }).where(eq(thread.id, threadId));
- return pinnedAt !== null;
+  const [row] = await db
+    .select({ pinnedAt: thread.pinnedAt })
+    .from(thread)
+    .where(eq(thread.id, threadId))
+    .limit(1);
+  const pinnedAt = row?.pinnedAt ? null : new Date();
+  await db.update(thread).set({ pinnedAt, updatedAt: new Date() }).where(eq(thread.id, threadId));
+  return pinnedAt !== null;
 }
 
 /** C-3: 软删除会话（标记 deletedAt，列表查询过滤 deletedAt IS NULL）。 */
 export async function softDeleteThread(threadId: string) {
- await db
- .update(thread)
- .set({ deletedAt: new Date(), updatedAt: new Date() })
- .where(eq(thread.id, threadId));
+  await db
+    .update(thread)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(eq(thread.id, threadId));
 }
 
 /**
@@ -352,31 +352,31 @@ export async function softDeleteThread(threadId: string) {
  * 大部分子表用 threadId 关联;subagentRun 用 parentThreadId,故以 {table, column} 显式标注列名。
  */
 const THREAD_CHILD_TABLES: ReadonlyArray<{
- table: MySqlTable;
- column: AnyColumn;
+  table: MySqlTable;
+  column: AnyColumn;
 }> = [
- // : V7/V8 新增三表对 threadId 建了 DB FK(noAction),必须先删,否则 delete thread 触发 FK 违反。
- // 依赖顺序:ThreadRunSkill + RunTranscriptChunk 引用 ThreadRun → 先于 ThreadRun 删。
- { table: threadRunSkill, column: threadRunSkill.threadId },
- { table: runTranscriptChunk, column: runTranscriptChunk.threadId },
- { table: threadRun, column: threadRun.threadId },
- { table: toolApprovalRequest, column: toolApprovalRequest.threadId },
- { table: backgroundTask, column: backgroundTask.threadId },
- { table: subagentRun, column: subagentRun.parentThreadId },
- { table: gitCheckpoint, column: gitCheckpoint.threadId },
- { table: contextSnapshot, column: contextSnapshot.threadId },
- { table: contextSummary, column: contextSummary.threadId },
- { table: toolRun, column: toolRun.threadId },
- { table: threadEvent, column: threadEvent.threadId },
- { table: threadPlanItem, column: threadPlanItem.threadId },
- { table: threadPlan, column: threadPlan.threadId },
- { table: message, column: message.threadId },
- // P0-1: deployment.threadId 是 DB 级 FK(NO ACTION),漏删会触发 FK 违约导致整个物理删除事务回滚。
- { table: deployment, column: deployment.threadId },
- // P0-1: auditFailureLog.threadId 无 DB FK(逻辑外键),漏删会留孤儿行,一并清理。
- { table: auditFailureLog, column: auditFailureLog.threadId },
- // ：V9 浏览器表（browserSession/browserDownload/userBrowserProfile）
- // 已由 migration 0059 删除，物理删除级联清单不再包含它们。
+  // : V7/V8 新增三表对 threadId 建了 DB FK(noAction),必须先删,否则 delete thread 触发 FK 违反。
+  // 依赖顺序:ThreadRunSkill + RunTranscriptChunk 引用 ThreadRun → 先于 ThreadRun 删。
+  { table: threadRunSkill, column: threadRunSkill.threadId },
+  { table: runTranscriptChunk, column: runTranscriptChunk.threadId },
+  { table: threadRun, column: threadRun.threadId },
+  { table: toolApprovalRequest, column: toolApprovalRequest.threadId },
+  { table: backgroundTask, column: backgroundTask.threadId },
+  { table: subagentRun, column: subagentRun.parentThreadId },
+  { table: gitCheckpoint, column: gitCheckpoint.threadId },
+  { table: contextSnapshot, column: contextSnapshot.threadId },
+  { table: contextSummary, column: contextSummary.threadId },
+  { table: toolRun, column: toolRun.threadId },
+  { table: threadEvent, column: threadEvent.threadId },
+  { table: threadPlanItem, column: threadPlanItem.threadId },
+  { table: threadPlan, column: threadPlan.threadId },
+  { table: message, column: message.threadId },
+  // P0-1: deployment.threadId 是 DB 级 FK(NO ACTION),漏删会触发 FK 违约导致整个物理删除事务回滚。
+  { table: deployment, column: deployment.threadId },
+  // P0-1: auditFailureLog.threadId 无 DB FK(逻辑外键),漏删会留孤儿行,一并清理。
+  { table: auditFailureLog, column: auditFailureLog.threadId },
+  // ：V9 浏览器表（browserSession/browserDownload/userBrowserProfile）
+  // 已由 migration 0059 删除，物理删除级联清单不再包含它们。
 ];
 
 /**
@@ -394,12 +394,12 @@ const THREAD_CHILD_TABLES: ReadonlyArray<{
  * ① admin 显式彻底删除入口;② retention 软删超期后的主记录物理清理(可配,默认关)。
  */
 export async function deleteThreadRecursive(threadId: string): Promise<void> {
- await db.transaction(async (tx) => {
- for (const { table, column } of THREAD_CHILD_TABLES) {
- await tx.delete(table).where(eq(column, threadId));
- }
- await tx.delete(thread).where(eq(thread.id, threadId));
- });
+  await db.transaction(async (tx) => {
+    for (const { table, column } of THREAD_CHILD_TABLES) {
+      await tx.delete(table).where(eq(column, threadId));
+    }
+    await tx.delete(thread).where(eq(thread.id, threadId));
+  });
 }
 
 /**
@@ -412,20 +412,20 @@ export async function deleteThreadRecursive(threadId: string): Promise<void> {
  * @returns 是否实际更新了行(expectedFrom 不匹配时返回 false)
  */
 export async function updateThreadStatus(
- threadId: string,
- status: ThreadStatus,
- expectedFrom?: ThreadStatus | ThreadStatus[],
+  threadId: string,
+  status: ThreadStatus,
+  expectedFrom?: ThreadStatus | ThreadStatus[],
 ): Promise<boolean> {
- const conds = [eq(thread.id, threadId)];
- if (expectedFrom) {
- const froms = Array.isArray(expectedFrom) ? expectedFrom : [expectedFrom];
- conds.push(inArray(thread.status, froms));
- }
- const result = await db
- .update(thread)
- .set({ status, updatedAt: new Date() })
- .where(and(...conds));
- return (result as unknown as { affectedRows?: number }).affectedRows !== 0;
+  const conds = [eq(thread.id, threadId)];
+  if (expectedFrom) {
+    const froms = Array.isArray(expectedFrom) ? expectedFrom : [expectedFrom];
+    conds.push(inArray(thread.status, froms));
+  }
+  const result = await db
+    .update(thread)
+    .set({ status, updatedAt: new Date() })
+    .where(and(...conds));
+  return (result as unknown as { affectedRows?: number }).affectedRows !== 0;
 }
 
 /**
@@ -433,27 +433,27 @@ export async function updateThreadStatus(
  * 原子累加，fail-open（调用方 catch）。冗余列用于 header 免 SUM 事件流展示。
  */
 export async function incrementThreadTokens(
- threadId: string,
- usage: { inputTokens: number; outputTokens: number; totalTokens: number },
+  threadId: string,
+  usage: { inputTokens: number; outputTokens: number; totalTokens: number },
 ) {
- await db
- .update(thread)
- .set({
- promptTokens: sql`${thread.promptTokens} + ${usage.inputTokens}`,
- completionTokens: sql`${thread.completionTokens} + ${usage.outputTokens}`,
- totalTokens: sql`${thread.totalTokens} + ${usage.totalTokens}`,
- })
- .where(eq(thread.id, threadId));
+  await db
+    .update(thread)
+    .set({
+      promptTokens: sql`${thread.promptTokens} + ${usage.inputTokens}`,
+      completionTokens: sql`${thread.completionTokens} + ${usage.outputTokens}`,
+      totalTokens: sql`${thread.totalTokens} + ${usage.totalTokens}`,
+    })
+    .where(eq(thread.id, threadId));
 }
 
 /** 活跃态 thread status（reaper 可回收的「卡死」候选）。终态 idle/ready_for_review/failed 等不动。 */
 export const ACTIVE_THREAD_STATUSES: ThreadStatus[] = [
- "executing",
- "planning",
- "awaiting_input",
- "awaiting_approval",
- "verifying",
- "delivering",
+  "executing",
+  "planning",
+  "awaiting_input",
+  "awaiting_approval",
+  "verifying",
+  "delivering",
 ];
 
 /**
@@ -466,56 +466,56 @@ export const ACTIVE_THREAD_STATUSES: ThreadStatus[] = [
  * @returns 被回收的 threadId 列表（供日志/审计）
  */
 export async function reapStaleThreads(maxAgeMs = 10 * 60_000): Promise<string[]> {
- const cutoff = new Date(Date.now() - maxAgeMs);
- const stale = await db
- .select({ id: thread.id, status: thread.status })
- .from(thread)
- .where(and(inArray(thread.status, ACTIVE_THREAD_STATUSES), lt(thread.updatedAt, cutoff)));
- if (stale.length === 0) return [];
- // : 多实例部署下,排除有"新鲜活跃 run"(他实例正在跑)的 thread,防误杀。
- // 新鲜活跃 run = status=running 且 lastSeenAt > cutoff(心跳近期刷新)。
- // 单实例下不构成影响(本进程 run 心跳刷新 lastSeenAt,不会被本 reaper 误判)。
- const freshRuns = await db
- .select({ threadId: threadRun.threadId })
- .from(threadRun)
- .where(
- and(
- inArray(
- threadRun.threadId,
- stale.map((r) => r.id),
- ),
- eq(threadRun.status, "running"),
- gt(threadRun.lastSeenAt, cutoff),
- ),
- );
- const freshThreadIds = new Set(freshRuns.map((r) => r.threadId));
- const ids = stale.filter((r) => !freshThreadIds.has(r.id)).map((r) => r.id);
- if (ids.length === 0) return [];
- await db
- .update(thread)
- .set({ status: "failed", updatedAt: new Date() })
- .where(and(inArray(thread.id, ids), lt(thread.updatedAt, cutoff)));
- // 落审计事件（fail-open，不阻塞回收）
- await Promise.all(
- ids.map((id) =>
- appendThreadEvent(id, "agent.status_changed", {
- from: stale.find((r) => r.id === id)?.status ?? "executing",
- to: "failed",
- reason: "reaper_timeout",
- }).catch(() => {}),
- ),
- );
- return ids;
+  const cutoff = new Date(Date.now() - maxAgeMs);
+  const stale = await db
+    .select({ id: thread.id, status: thread.status })
+    .from(thread)
+    .where(and(inArray(thread.status, ACTIVE_THREAD_STATUSES), lt(thread.updatedAt, cutoff)));
+  if (stale.length === 0) return [];
+  // : 多实例部署下,排除有"新鲜活跃 run"(他实例正在跑)的 thread,防误杀。
+  // 新鲜活跃 run = status=running 且 lastSeenAt > cutoff(心跳近期刷新)。
+  // 单实例下不构成影响(本进程 run 心跳刷新 lastSeenAt,不会被本 reaper 误判)。
+  const freshRuns = await db
+    .select({ threadId: threadRun.threadId })
+    .from(threadRun)
+    .where(
+      and(
+        inArray(
+          threadRun.threadId,
+          stale.map((r) => r.id),
+        ),
+        eq(threadRun.status, "running"),
+        gt(threadRun.lastSeenAt, cutoff),
+      ),
+    );
+  const freshThreadIds = new Set(freshRuns.map((r) => r.threadId));
+  const ids = stale.filter((r) => !freshThreadIds.has(r.id)).map((r) => r.id);
+  if (ids.length === 0) return [];
+  await db
+    .update(thread)
+    .set({ status: "failed", updatedAt: new Date() })
+    .where(and(inArray(thread.id, ids), lt(thread.updatedAt, cutoff)));
+  // 落审计事件（fail-open，不阻塞回收）
+  await Promise.all(
+    ids.map((id) =>
+      appendThreadEvent(id, "agent.status_changed", {
+        from: stale.find((r) => r.id === id)?.status ?? "executing",
+        to: "failed",
+        reason: "reaper_timeout",
+      }).catch(() => {}),
+    ),
+  );
+  return ids;
 }
 
 export async function updateThreadModel(threadId: string, model: string) {
- // B-8: 模型变更同步刷新 updatedAt
- await db.update(thread).set({ model, updatedAt: new Date() }).where(eq(thread.id, threadId));
+  // B-8: 模型变更同步刷新 updatedAt
+  await db.update(thread).set({ model, updatedAt: new Date() }).where(eq(thread.id, threadId));
 }
 
 export async function updateThreadPreviewUrl(threadId: string, previewUrl: string | null) {
- // B-8: 预览变更同步刷新 updatedAt
- await db.update(thread).set({ previewUrl, updatedAt: new Date() }).where(eq(thread.id, threadId));
+  // B-8: 预览变更同步刷新 updatedAt
+  await db.update(thread).set({ previewUrl, updatedAt: new Date() }).where(eq(thread.id, threadId));
 }
 
 /**
@@ -525,10 +525,10 @@ export async function updateThreadPreviewUrl(threadId: string, previewUrl: strin
  * 落 DB json 列持久化。null=清空。同步刷新 updatedAt。
  */
 export async function updateThreadPinnedFacts(threadId: string, pinnedFacts: string[] | null) {
- await db
- .update(thread)
- .set({ pinnedFacts, updatedAt: new Date() })
- .where(eq(thread.id, threadId));
+  await db
+    .update(thread)
+    .set({ pinnedFacts, updatedAt: new Date() })
+    .where(eq(thread.id, threadId));
 }
 
 /**
@@ -539,25 +539,25 @@ export async function updateThreadPinnedFacts(threadId: string, pinnedFacts: str
  * 调用 mutator 计算新值 + UPDATE，保证并发安全。mutator 接收当前数组返回新数组（null=清空）。
  */
 export async function mutateThreadPinnedFacts(
- threadId: string,
- mutator: (current: string[]) => string[] | null,
+  threadId: string,
+  mutator: (current: string[]) => string[] | null,
 ): Promise<string[]> {
- return db.transaction(async (tx) => {
- const [row] = await tx
- .select({ pinnedFacts: thread.pinnedFacts })
- .from(thread)
- .where(eq(thread.id, threadId))
- .for("update");
- const current = Array.isArray(row?.pinnedFacts) ? (row.pinnedFacts as string[]) : [];
- const next = mutator(current);
- // json 列 zod 校验（fail-closed，mutator 返回非法结构抛错不落库）
- validateJsonColumn(next, threadPinnedFactsSchema, "pinnedFacts");
- await tx
- .update(thread)
- .set({ pinnedFacts: next, updatedAt: new Date() })
- .where(eq(thread.id, threadId));
- return next ?? [];
- });
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ pinnedFacts: thread.pinnedFacts })
+      .from(thread)
+      .where(eq(thread.id, threadId))
+      .for("update");
+    const current = Array.isArray(row?.pinnedFacts) ? (row.pinnedFacts as string[]) : [];
+    const next = mutator(current);
+    // json 列 zod 校验（fail-closed，mutator 返回非法结构抛错不落库）
+    validateJsonColumn(next, threadPinnedFactsSchema, "pinnedFacts");
+    await tx
+      .update(thread)
+      .set({ pinnedFacts: next, updatedAt: new Date() })
+      .where(eq(thread.id, threadId));
+    return next ?? [];
+  });
 }
 
 /**
@@ -567,10 +567,10 @@ export async function mutateThreadPinnedFacts(
  * 停止 agent 自动重试,防烧 token。同步刷新 updatedAt。
  */
 export async function updateThreadReviewState(threadId: string, reviewState: string | null) {
- await db
- .update(thread)
- .set({ reviewState, updatedAt: new Date() })
- .where(eq(thread.id, threadId));
+  await db
+    .update(thread)
+    .set({ reviewState, updatedAt: new Date() })
+    .where(eq(thread.id, threadId));
 }
 
 /**
@@ -579,14 +579,14 @@ export async function updateThreadReviewState(threadId: string, reviewState: str
  * null 表示清除（回退到全局 cicdApiToken）。
  */
 export async function updateThreadCicdToken(threadId: string, cicdApiToken: string | null) {
- let stored: string | null = null;
- if (cicdApiToken !== null) {
- stored = encryptCicdToken(cicdApiToken);
- }
- await db
- .update(thread)
- .set({ cicdApiToken: stored, updatedAt: new Date() })
- .where(eq(thread.id, threadId));
+  let stored: string | null = null;
+  if (cicdApiToken !== null) {
+    stored = encryptCicdToken(cicdApiToken);
+  }
+  await db
+    .update(thread)
+    .set({ cicdApiToken: stored, updatedAt: new Date() })
+    .where(eq(thread.id, threadId));
 }
 
 // ─── Message Queries ─────────────────────────────────────────
@@ -600,73 +600,72 @@ export async function updateThreadCicdToken(threadId: string, cicdApiToken: stri
  * P0 修复（08 DB ）：orderBy 加 id 作 tie-breaker,防同毫秒消息乱序。
  */
 export async function getMessagesByThreadId(
- threadId: string,
- opts?: { limit?: number; before?: { createdAt: Date; id: string } },
+  threadId: string,
+  opts?: { limit?: number; before?: { createdAt: Date; id: string } },
 ): Promise<DBMessage[]> {
- const limit = Math.min(Math.max(opts?.limit ?? 500, 1), 5000);
- const conds = [eq(message.threadId, threadId)];
- if (opts?.before) {
- conds.push(
- or(
- lt(message.createdAt, opts.before.createdAt),
- and(eq(message.createdAt, opts.before.createdAt), lt(message.id, opts.before.id)),
- )!,
- );
- }
- return db
- .select()
- .from(message)
- .where(and(...conds))
- .orderBy(asc(message.createdAt), asc(message.id))
- .limit(limit);
+  const limit = Math.min(Math.max(opts?.limit ?? 500, 1), 5000);
+  const conds = [eq(message.threadId, threadId)];
+  if (opts?.before) {
+    const cursorCondition = or(
+      lt(message.createdAt, opts.before.createdAt),
+      and(eq(message.createdAt, opts.before.createdAt), lt(message.id, opts.before.id)),
+    );
+    if (cursorCondition) conds.push(cursorCondition);
+  }
+  return db
+    .select()
+    .from(message)
+    .where(and(...conds))
+    .orderBy(asc(message.createdAt), asc(message.id))
+    .limit(limit);
 }
 
 export async function saveMessages(
- rows: Array<{
- id: string;
- threadId: string;
- role: string;
- parts: unknown;
- type?: string | null;
- runId?: string | null;
- }>,
+  rows: Array<{
+    id: string;
+    threadId: string;
+    role: string;
+    parts: unknown;
+    type?: string | null;
+    runId?: string | null;
+  }>,
 ) {
- if (rows.length === 0) {
- return;
- }
- // json 列轻量校验。parts 须为数组且每项有 type 字符串（防脏数据写入）。
- // 校验失败 fail-open：过滤非法 part 后继续写入（不阻断 chat）。
- const validatedRows = rows.map((r) => {
- if (!Array.isArray(r.parts)) return r;
- const validParts = r.parts.filter(
- (p) => p && typeof p === "object" && typeof (p as { type?: unknown }).type === "string",
- );
- return { ...r, parts: validParts.length > 0 ? validParts : r.parts };
- });
- // IGNORE 批量写入，重复消息 id 自动跳过；type 缺省按 role 推导，保证分层非空
- await db
- .insert(message)
- .ignore()
- .values(
- validatedRows.map((r) => ({
- id: r.id,
- threadId: r.threadId,
- role: r.role,
- parts: r.parts,
- type: r.type ?? messageTypeForRole(r.role),
- runId: r.runId ?? null,
- createdAt: new Date(),
- })),
- );
- // C-8 + E-6: 冗余更新 thread.lastMessagePreview（截断 60 字）+ lastMessageId（消息级未读判定）
- const last = rows[rows.length - 1];
- if (last) {
- const preview = extractTextFromParts(last.parts).slice(0, 60) || null;
- await db
- .update(thread)
- .set({ lastMessagePreview: preview, lastMessageId: last.id, updatedAt: new Date() })
- .where(eq(thread.id, last.threadId));
- }
+  if (rows.length === 0) {
+    return;
+  }
+  // json 列轻量校验。parts 须为数组且每项有 type 字符串（防脏数据写入）。
+  // 校验失败 fail-open：过滤非法 part 后继续写入（不阻断 chat）。
+  const validatedRows = rows.map((r) => {
+    if (!Array.isArray(r.parts)) return r;
+    const validParts = r.parts.filter(
+      (p) => p && typeof p === "object" && typeof (p as { type?: unknown }).type === "string",
+    );
+    return { ...r, parts: validParts.length > 0 ? validParts : r.parts };
+  });
+  // IGNORE 批量写入，重复消息 id 自动跳过；type 缺省按 role 推导，保证分层非空
+  await db
+    .insert(message)
+    .ignore()
+    .values(
+      validatedRows.map((r) => ({
+        id: r.id,
+        threadId: r.threadId,
+        role: r.role,
+        parts: r.parts,
+        type: r.type ?? messageTypeForRole(r.role),
+        runId: r.runId ?? null,
+        createdAt: new Date(),
+      })),
+    );
+  // C-8 + E-6: 冗余更新 thread.lastMessagePreview（截断 60 字）+ lastMessageId（消息级未读判定）
+  const last = rows[rows.length - 1];
+  if (last) {
+    const preview = extractTextFromParts(last.parts).slice(0, 60) || null;
+    await db
+      .update(thread)
+      .set({ lastMessagePreview: preview, lastMessageId: last.id, updatedAt: new Date() })
+      .where(eq(thread.id, last.threadId));
+  }
 }
 
 /**
@@ -677,64 +676,64 @@ export async function saveMessages(
  * 不更新，无法捕获最终 partial）。user 消息仍用 saveMessages（route 层一次性写入）。
  */
 export async function upsertMessageParts(
- rows: Array<{
- id: string;
- threadId: string;
- role: string;
- parts: unknown;
- type?: string | null;
- runId?: string | null;
- }>,
+  rows: Array<{
+    id: string;
+    threadId: string;
+    role: string;
+    parts: unknown;
+    type?: string | null;
+    runId?: string | null;
+  }>,
 ) {
- if (rows.length === 0) return;
- await db
- .insert(message)
- .values(
- rows.map((r) => ({
- id: r.id,
- threadId: r.threadId,
- role: r.role,
- parts: r.parts,
- type: r.type ?? messageTypeForRole(r.role),
- runId: r.runId ?? null,
- createdAt: new Date(),
- })),
- )
- .onDuplicateKeyUpdate({
- // runId 纳入覆盖：重试换 runId 时，同 message id 的旧 runId 要被新 runId 覆盖，
- // 保证 runId 始终指向最后一次产出该消息的 run（B-3 隔离语义）。
- set: { parts: sql`VALUES(parts)`, type: sql`VALUES(type)`, runId: sql`VALUES(runId)` },
- });
- // C-8 + E-6: 同步冗余更新 thread.lastMessagePreview + lastMessageId
- const last = rows[rows.length - 1];
- if (last) {
- const preview = extractTextFromParts(last.parts).slice(0, 60) || null;
- await db
- .update(thread)
- .set({ lastMessagePreview: preview, lastMessageId: last.id, updatedAt: new Date() })
- .where(eq(thread.id, last.threadId));
- }
+  if (rows.length === 0) return;
+  await db
+    .insert(message)
+    .values(
+      rows.map((r) => ({
+        id: r.id,
+        threadId: r.threadId,
+        role: r.role,
+        parts: r.parts,
+        type: r.type ?? messageTypeForRole(r.role),
+        runId: r.runId ?? null,
+        createdAt: new Date(),
+      })),
+    )
+    .onDuplicateKeyUpdate({
+      // runId 纳入覆盖：重试换 runId 时，同 message id 的旧 runId 要被新 runId 覆盖，
+      // 保证 runId 始终指向最后一次产出该消息的 run（B-3 隔离语义）。
+      set: { parts: sql`VALUES(parts)`, type: sql`VALUES(type)`, runId: sql`VALUES(runId)` },
+    });
+  // C-8 + E-6: 同步冗余更新 thread.lastMessagePreview + lastMessageId
+  const last = rows[rows.length - 1];
+  if (last) {
+    const preview = extractTextFromParts(last.parts).slice(0, 60) || null;
+    await db
+      .update(thread)
+      .set({ lastMessagePreview: preview, lastMessageId: last.id, updatedAt: new Date() })
+      .where(eq(thread.id, last.threadId));
+  }
 }
 
 /** 从 message parts（json 数组）提取预览文本：优先 text part 拼接；
  * 无 text part（纯工具调用 / 纯附件收尾）时取首个工具或附件 part 的语义占位，
  * 避免列表预览为空导致用户无法区分会话（C-8）。 */
 function extractTextFromParts(parts: unknown): string {
- if (!Array.isArray(parts)) return "";
- const arr = parts as Array<{ type?: string; text?: string }>;
- const text = arr
- .filter((p) => p?.type === "text")
- .map((p) => p.text ?? "")
- .join("");
- if (text.trim()) return text;
- // 无 text：取首个工具 / 附件 part 的占位（reasoning 是内部推理，不作为预览）
- const placeholder = arr.find((p) => {
- const t = p?.type ?? "";
- return t !== "text" && t !== "reasoning" && (t.includes("tool") || t.includes("attachment"));
- });
- if (placeholder?.type?.includes("attachment")) return "附件";
- if (placeholder) return "工具调用";
- return "";
+  if (!Array.isArray(parts)) return "";
+  const arr = parts as Array<{ type?: string; text?: string }>;
+  const text = arr
+    .filter((p) => p?.type === "text")
+    .map((p) => p.text ?? "")
+    .join("");
+  if (text.trim()) return text;
+  // 无 text：取首个工具 / 附件 part 的占位（reasoning 是内部推理，不作为预览）
+  const placeholder = arr.find((p) => {
+    const t = p?.type ?? "";
+    return t !== "text" && t !== "reasoning" && (t.includes("tool") || t.includes("attachment"));
+  });
+  if (placeholder?.type?.includes("attachment")) return "附件";
+  if (placeholder) return "工具调用";
+  return "";
 }
 
 /**
@@ -746,24 +745,24 @@ function extractTextFromParts(parts: unknown): string {
  * @returns 被删除的行数
  */
 export async function deleteMessagesFromId(threadId: string, messageId: string): Promise<number> {
- const [target] = await db
- .select({ createdAt: message.createdAt, id: message.id })
- .from(message)
- .where(and(eq(message.id, messageId), eq(message.threadId, threadId)));
- if (!target) return 0;
- // (createdAt, id) 复合比较，避免同毫秒消息误删（原 createdAt >= 删同秒 id 更大的）。
- const result = await db
- .delete(message)
- .where(
- and(
- eq(message.threadId, threadId),
- or(
- gt(message.createdAt, target.createdAt),
- and(eq(message.createdAt, target.createdAt), gte(message.id, target.id)),
- ),
- ),
- );
- return result[0].affectedRows ?? 0;
+  const [target] = await db
+    .select({ createdAt: message.createdAt, id: message.id })
+    .from(message)
+    .where(and(eq(message.id, messageId), eq(message.threadId, threadId)));
+  if (!target) return 0;
+  // (createdAt, id) 复合比较，避免同毫秒消息误删（原 createdAt >= 删同秒 id 更大的）。
+  const result = await db
+    .delete(message)
+    .where(
+      and(
+        eq(message.threadId, threadId),
+        or(
+          gt(message.createdAt, target.createdAt),
+          and(eq(message.createdAt, target.createdAt), gte(message.id, target.id)),
+        ),
+      ),
+    );
+  return result[0].affectedRows ?? 0;
 }
 
 // ─── Thread Event Queries (append-only 事件流) ───────
@@ -774,11 +773,11 @@ export async function deleteMessagesFromId(threadId: string, messageId: string):
  * 原子性由 appendThreadEvent 的 unique 冲突重试保证（非此函数）。
  */
 async function nextSequence(threadId: string): Promise<number> {
- const [row] = await db
- .select({ value: max(threadEvent.sequence) })
- .from(threadEvent)
- .where(eq(threadEvent.threadId, threadId));
- return (row?.value ?? 0) + 1;
+  const [row] = await db
+    .select({ value: max(threadEvent.sequence) })
+    .from(threadEvent)
+    .where(eq(threadEvent.threadId, threadId));
+  return (row?.value ?? 0) + 1;
 }
 
 /**
@@ -789,54 +788,54 @@ async function nextSequence(threadId: string): Promise<number> {
  * @param payload - 事件负载（JSON 可序列化对象）
  */
 export async function appendThreadEvent(
- threadId: string,
- type: ThreadEventType,
- payload: Record<string, unknown>,
- /** 归属 ThreadRun（nullable（历史事件和纯 thread 管理事件可空））。 */
- runId?: string | null,
+  threadId: string,
+  type: ThreadEventType,
+  payload: Record<string, unknown>,
+  /** 归属 ThreadRun（nullable（历史事件和纯 thread 管理事件可空））。 */
+  runId?: string | null,
 ): Promise<ThreadEvent> {
- // P2-11: 事务内 FOR UPDATE thread 行串行化同 thread 事件写入,原子取 seq + insert,
- // 防 nextSequence MAX+1 在多实例并发下撞 unique(threadId, sequence) 耗尽 5 次重试。
- return db.transaction(async (tx) => {
- await tx.select({ id: thread.id }).from(thread).where(eq(thread.id, threadId)).for("update");
- const [row] = await tx
- .select({ value: max(threadEvent.sequence) })
- .from(threadEvent)
- .where(eq(threadEvent.threadId, threadId));
- const seq = (row?.value ?? 0) + 1;
- const event: ThreadEvent = {
- id: randomUUID(),
- threadId,
- sequence: seq,
- type,
- payload,
- runId: runId ?? null,
- createdAt: new Date(),
- };
- await tx.insert(threadEvent).values(event);
- // 12-成功落库后广播到进程内事件总线，供 SSE 端点即时推送各面板。
- // 跨实例变更由 SSE 端点 DB 轮询补推（ThreadEvent 表是跨实例真相源）。
- broadcastThreadEvent({
- threadId,
- type,
- payload,
- sequence: seq,
- createdAt: event.createdAt,
- });
- return event;
- });
+  // P2-11: 事务内 FOR UPDATE thread 行串行化同 thread 事件写入,原子取 seq + insert,
+  // 防 nextSequence MAX+1 在多实例并发下撞 unique(threadId, sequence) 耗尽 5 次重试。
+  return db.transaction(async (tx) => {
+    await tx.select({ id: thread.id }).from(thread).where(eq(thread.id, threadId)).for("update");
+    const [row] = await tx
+      .select({ value: max(threadEvent.sequence) })
+      .from(threadEvent)
+      .where(eq(threadEvent.threadId, threadId));
+    const seq = (row?.value ?? 0) + 1;
+    const event: ThreadEvent = {
+      id: randomUUID(),
+      threadId,
+      sequence: seq,
+      type,
+      payload,
+      runId: runId ?? null,
+      createdAt: new Date(),
+    };
+    await tx.insert(threadEvent).values(event);
+    // 12-成功落库后广播到进程内事件总线，供 SSE 端点即时推送各面板。
+    // 跨实例变更由 SSE 端点 DB 轮询补推（ThreadEvent 表是跨实例真相源）。
+    broadcastThreadEvent({
+      threadId,
+      type,
+      payload,
+      sequence: seq,
+      createdAt: event.createdAt,
+    });
+    return event;
+  });
 }
 
 /**
  * 查询某 thread 的全部事件（按 sequence 升序）。
  */
 export async function listThreadEvents(threadId: string): Promise<ThreadEvent[]> {
- return db
- .select()
- .from(threadEvent)
- .where(eq(threadEvent.threadId, threadId))
- .orderBy(asc(threadEvent.sequence))
- .limit(500);
+  return db
+    .select()
+    .from(threadEvent)
+    .where(eq(threadEvent.threadId, threadId))
+    .orderBy(asc(threadEvent.sequence))
+    .limit(500);
 }
 
 /**
@@ -845,12 +844,12 @@ export async function listThreadEvents(threadId: string): Promise<ThreadEvent[]>
  * 与 listThreadStatusChanges 互补：本查询面向单 thread 全事件类型，供详情页各面板订阅。
  */
 export async function listThreadEventsSince(threadId: string, since: Date): Promise<ThreadEvent[]> {
- return db
- .select()
- .from(threadEvent)
- .where(and(eq(threadEvent.threadId, threadId), gt(threadEvent.createdAt, since)))
- .orderBy(asc(threadEvent.sequence))
- .limit(500);
+  return db
+    .select()
+    .from(threadEvent)
+    .where(and(eq(threadEvent.threadId, threadId), gt(threadEvent.createdAt, since)))
+    .orderBy(asc(threadEvent.sequence))
+    .limit(500);
 }
 
 /**
@@ -858,16 +857,16 @@ export async function listThreadEventsSince(threadId: string, since: Date): Prom
  * （最近在前，供 Studio QA 面板展示）。不改既有查询语义，只追加新查询。
  */
 export async function listQaEventsByThread(threadId: string): Promise<ThreadEvent[]> {
- return db
- .select()
- .from(threadEvent)
- .where(
- and(
- eq(threadEvent.threadId, threadId),
- inArray(threadEvent.type, ["qa.check_passed", "qa.check_failed"]),
- ),
- )
- .orderBy(desc(threadEvent.sequence));
+  return db
+    .select()
+    .from(threadEvent)
+    .where(
+      and(
+        eq(threadEvent.threadId, threadId),
+        inArray(threadEvent.type, ["qa.check_passed", "qa.check_failed"]),
+      ),
+    )
+    .orderBy(desc(threadEvent.sequence));
 }
 
 /**
@@ -879,23 +878,23 @@ export async function listQaEventsByThread(threadId: string): Promise<ThreadEven
  * @returns 连续失败次数(0 表示最近一次通过或无 QA 事件)
  */
 export async function countConsecutiveQaGateFailures(threadId: string): Promise<number> {
- const events = await db
- .select({ type: threadEvent.type })
- .from(threadEvent)
- .where(
- and(
- eq(threadEvent.threadId, threadId),
- inArray(threadEvent.type, ["qa.check_passed", "qa.check_failed"]),
- ),
- )
- .orderBy(desc(threadEvent.sequence))
- .limit(50); // 扫最近 50 条足够,避免长历史全量扫
- let count = 0;
- for (const e of events) {
- if (e.type === "qa.check_failed") count++;
- else break; // 遇到 passed 停止
- }
- return count;
+  const events = await db
+    .select({ type: threadEvent.type })
+    .from(threadEvent)
+    .where(
+      and(
+        eq(threadEvent.threadId, threadId),
+        inArray(threadEvent.type, ["qa.check_passed", "qa.check_failed"]),
+      ),
+    )
+    .orderBy(desc(threadEvent.sequence))
+    .limit(50); // 扫最近 50 条足够,避免长历史全量扫
+  let count = 0;
+  for (const e of events) {
+    if (e.type === "qa.check_failed") count++;
+    else break; // 遇到 passed 停止
+  }
+  return count;
 }
 
 // ─── Tool Run Queries (结构化工具执行记录) ───────────
@@ -908,55 +907,55 @@ export async function countConsecutiveQaGateFailures(threadId: string): Promise<
  * @returns 新创建的 ToolRun（含 id，用于后续 finish 调用）
  */
 export async function createToolRun(params: {
- threadId: string;
- toolName: string;
- input: Record<string, unknown>;
- status?: ToolRunStatus;
- /** 归属 ThreadRun（nullable（历史记录可空））。 */
- runId?: string | null;
+  threadId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  status?: ToolRunStatus;
+  /** 归属 ThreadRun（nullable（历史记录可空））。 */
+  runId?: string | null;
 }): Promise<ToolRun> {
- // json 列 zod 校验（fail-closed，脏数据抛错不落库）
- const input = validateJsonColumn(params.input, toolRunInputSchema, "input");
- // MySQL 不支持 RETURNING，自行生成主键并构造返回对象。
- const run: ToolRun = {
- id: randomUUID(),
- threadId: params.threadId,
- toolName: params.toolName,
- status: params.status ?? "running",
- input,
- output: null,
- error: null,
- startedAt: new Date(),
- finishedAt: null,
- runId: params.runId ?? null,
- };
- await db.insert(toolRun).values(run);
- return run;
+  // json 列 zod 校验（fail-closed，脏数据抛错不落库）
+  const input = validateJsonColumn(params.input, toolRunInputSchema, "input");
+  // MySQL 不支持 RETURNING，自行生成主键并构造返回对象。
+  const run: ToolRun = {
+    id: randomUUID(),
+    threadId: params.threadId,
+    toolName: params.toolName,
+    status: params.status ?? "running",
+    input,
+    output: null,
+    error: null,
+    startedAt: new Date(),
+    finishedAt: null,
+    runId: params.runId ?? null,
+  };
+  await db.insert(toolRun).values(run);
+  return run;
 }
 
 /**
  * 标记 tool run 为成功，回填 output / finishedAt。
  */
 export async function finishToolRunSuccess(
- toolRunId: string,
- output: Record<string, unknown>,
+  toolRunId: string,
+  output: Record<string, unknown>,
 ): Promise<void> {
- // json 列 zod 校验（fail-closed）
- const validatedOutput = validateJsonColumn(output, toolRunOutputSchema, "output");
- await db
- .update(toolRun)
- .set({ status: "succeeded", output: validatedOutput, finishedAt: new Date() })
- .where(and(eq(toolRun.id, toolRunId), eq(toolRun.status, "running")));
+  // json 列 zod 校验（fail-closed）
+  const validatedOutput = validateJsonColumn(output, toolRunOutputSchema, "output");
+  await db
+    .update(toolRun)
+    .set({ status: "succeeded", output: validatedOutput, finishedAt: new Date() })
+    .where(and(eq(toolRun.id, toolRunId), eq(toolRun.status, "running")));
 }
 
 /**
  * 标记 tool run 为失败，回填 error / finishedAt。
  */
 export async function finishToolRunFailure(toolRunId: string, error: string): Promise<void> {
- await db
- .update(toolRun)
- .set({ status: "failed", error, finishedAt: new Date() })
- .where(and(eq(toolRun.id, toolRunId), eq(toolRun.status, "running")));
+  await db
+    .update(toolRun)
+    .set({ status: "failed", error, finishedAt: new Date() })
+    .where(and(eq(toolRun.id, toolRunId), eq(toolRun.status, "running")));
 }
 
 /**
@@ -967,18 +966,18 @@ export async function finishToolRunFailure(toolRunId: string, error: string): Pr
  * （finishedAt=null）。Studio 的 tool-trace 面板和按 status 过滤的查询会看到幽灵条目。
  */
 export async function failRunningToolRunsForThread(
- threadId: string,
- reason: string,
- runId?: string,
+  threadId: string,
+  reason: string,
+  runId?: string,
 ): Promise<void> {
- // : 限定 runId 防误杀——cancel/markFailed 后用户立即发新消息触发新 run,
- // 旧批量 fail 若不带 runId 会把新 run 刚 createToolRun(status=running) 的工具也标 failed。
- const conds = [eq(toolRun.threadId, threadId), eq(toolRun.status, "running")];
- if (runId) conds.push(eq(toolRun.runId, runId));
- await db
- .update(toolRun)
- .set({ status: "failed", error: reason, finishedAt: new Date() })
- .where(and(...conds));
+  // : 限定 runId 防误杀——cancel/markFailed 后用户立即发新消息触发新 run,
+  // 旧批量 fail 若不带 runId 会把新 run 刚 createToolRun(status=running) 的工具也标 failed。
+  const conds = [eq(toolRun.threadId, threadId), eq(toolRun.status, "running")];
+  if (runId) conds.push(eq(toolRun.runId, runId));
+  await db
+    .update(toolRun)
+    .set({ status: "failed", error: reason, finishedAt: new Date() })
+    .where(and(...conds));
 }
 
 // ─── Tool Run 查询 (a 上下文压缩数据源) ──────────────────
@@ -988,24 +987,24 @@ export async function failRunningToolRunsForThread(
  * limit 默认 100、上限 500、下限 1。
  */
 export async function listToolRunsByThread(threadId: string, limit = 100): Promise<ToolRun[]> {
- const clamped = Math.min(500, Math.max(1, Math.floor(limit)));
- return db
- .select()
- .from(toolRun)
- .where(eq(toolRun.threadId, threadId))
- .orderBy(desc(toolRun.startedAt))
- .limit(clamped);
+  const clamped = Math.min(500, Math.max(1, Math.floor(limit)));
+  return db
+    .select()
+    .from(toolRun)
+    .where(eq(toolRun.threadId, threadId))
+    .orderBy(desc(toolRun.startedAt))
+    .limit(clamped);
 }
 
 /** 取 thread 最近一次失败的 toolRun（按 startedAt desc），无则 null。供 protected recentFailure。 */
 export async function getRecentFailedToolRun(threadId: string): Promise<ToolRun | null> {
- const [row] = await db
- .select()
- .from(toolRun)
- .where(and(eq(toolRun.threadId, threadId), eq(toolRun.status, "failed")))
- .orderBy(desc(toolRun.startedAt))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(toolRun)
+    .where(and(eq(toolRun.threadId, threadId), eq(toolRun.status, "failed")))
+    .orderBy(desc(toolRun.startedAt))
+    .limit(1);
+  return row ?? null;
 }
 
 // ─── Skill Registry Queries (Phase 3) ────────────────────────
@@ -1015,10 +1014,10 @@ export async function getRecentFailedToolRun(threadId: string): Promise<ToolRun 
  * 无版本返回 null。
  */
 export async function getCurrentSkillVersionBySkill(skill: {
- currentVersionId: string | null;
+  currentVersionId: string | null;
 }): Promise<SkillVersion | null> {
- if (!skill.currentVersionId) return null;
- return getSkillVersion(skill.currentVersionId);
+  if (!skill.currentVersionId) return null;
+  return getSkillVersion(skill.currentVersionId);
 }
 
 /**
@@ -1033,67 +1032,67 @@ export async function getCurrentSkillVersionBySkill(skill: {
  * V8：不再有"默认 skill"概念，build-from-idea 是普通 skill 可被 Resolver 选中。
  */
 export async function listActiveSkillsForMatching(): Promise<Skill[]> {
- const activeSyncedSkillIds = db
- .select({ id: skillSyncMapping.localSkillId })
- .from(skillSyncMapping)
- .where(eq(skillSyncMapping.syncState, "active"));
- return db
- .select()
- .from(skill)
- .where(
- and(
- eq(skill.visibility, "public"),
- eq(skill.status, "active"),
- or(eq(skill.source, "local"), inArray(skill.id, activeSyncedSkillIds)),
- ),
- )
- .orderBy(asc(skill.createdAt));
+  const activeSyncedSkillIds = db
+    .select({ id: skillSyncMapping.localSkillId })
+    .from(skillSyncMapping)
+    .where(eq(skillSyncMapping.syncState, "active"));
+  return db
+    .select()
+    .from(skill)
+    .where(
+      and(
+        eq(skill.visibility, "public"),
+        eq(skill.status, "active"),
+        or(eq(skill.source, "local"), inArray(skill.id, activeSyncedSkillIds)),
+      ),
+    )
+    .orderBy(asc(skill.createdAt));
 }
 
 /**
  * 按 name 取 skill。
  */
 export async function getSkillByName(name: string): Promise<Skill | null> {
- const [row] = await db.select().from(skill).where(eq(skill.name, name)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(skill).where(eq(skill.name, name)).limit(1);
+  return row ?? null;
 }
 
 /**
  * 按 id 取 skill。
  */
 export async function getSkillById(id: string): Promise<Skill | null> {
- const [row] = await db.select().from(skill).where(eq(skill.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(skill).where(eq(skill.id, id)).limit(1);
+  return row ?? null;
 }
 
 /**
  * 按 id 取 skill 版本。
  */
 export async function getSkillVersion(id: string): Promise<SkillVersion | null> {
- const [row] = await db.select().from(skillVersion).where(eq(skillVersion.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(skillVersion).where(eq(skillVersion.id, id)).limit(1);
+  return row ?? null;
 }
 
 /** 按 skill + commitSha 查版本，用于 git commit 已成功但 DB 写入失败后的可重试恢复。 */
 export async function getSkillVersionByCommitSha(
- skillId: string,
- commitSha: string,
+  skillId: string,
+  commitSha: string,
 ): Promise<SkillVersion | null> {
- const [row] = await db
- .select()
- .from(skillVersion)
- .where(and(eq(skillVersion.skillId, skillId), eq(skillVersion.commitSha, commitSha)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(skillVersion)
+    .where(and(eq(skillVersion.skillId, skillId), eq(skillVersion.commitSha, commitSha)))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 取 skill 当前最大版本号；无版本返回 0。 */
 export async function getMaxSkillVersionNumber(skillId: string): Promise<number> {
- const [row] = await db
- .select({ value: max(skillVersion.version) })
- .from(skillVersion)
- .where(eq(skillVersion.skillId, skillId));
- return Number(row?.value ?? 0);
+  const [row] = await db
+    .select({ value: max(skillVersion.version) })
+    .from(skillVersion)
+    .where(eq(skillVersion.skillId, skillId));
+  return Number(row?.value ?? 0);
 }
 
 /**
@@ -1101,9 +1100,9 @@ export async function getMaxSkillVersionNumber(skillId: string): Promise<number>
  * 无 skill 或未设置 currentVersionId 时返回 null。
  */
 export async function getCurrentSkillVersion(skillId: string): Promise<SkillVersion | null> {
- const sk = await getSkillById(skillId);
- if (!sk || !sk.currentVersionId) return null;
- return getSkillVersion(sk.currentVersionId);
+  const sk = await getSkillById(skillId);
+  if (!sk || !sk.currentVersionId) return null;
+  return getSkillVersion(sk.currentVersionId);
 }
 
 // V8 阶段 8：getActiveSkillForThread 已删除。
@@ -1116,33 +1115,33 @@ export async function getCurrentSkillVersion(skillId: string): Promise<SkillVers
  * source=local（本地自建，默认）或 capability-market（同步镜像，由同步服务写入）。
  */
 export async function createSkill(
- params: {
- name: string;
- description?: string | null;
- category?: string | null;
- visibility?: string;
- status?: SkillStatus;
- ownerUserId?: string | null;
- source?: SkillSource;
- },
- tx?: DbTxClient,
+  params: {
+    name: string;
+    description?: string | null;
+    category?: string | null;
+    visibility?: string;
+    status?: SkillStatus;
+    ownerUserId?: string | null;
+    source?: SkillSource;
+  },
+  tx?: DbTxClient,
 ): Promise<Skill> {
- const client = tx ?? db;
- const row: Skill = {
- id: randomUUID(),
- name: params.name,
- description: params.description ?? null,
- category: params.category ?? null,
- visibility: params.visibility ?? "public",
- status: params.status ?? "active",
- currentVersionId: null,
- ownerUserId: params.ownerUserId ?? null,
- source: params.source ?? "local",
- createdAt: new Date(),
- deletedAt: null,
- };
- await client.insert(skill).values(row);
- return row;
+  const client = tx ?? db;
+  const row: Skill = {
+    id: randomUUID(),
+    name: params.name,
+    description: params.description ?? null,
+    category: params.category ?? null,
+    visibility: params.visibility ?? "public",
+    status: params.status ?? "active",
+    currentVersionId: null,
+    ownerUserId: params.ownerUserId ?? null,
+    source: params.source ?? "local",
+    createdAt: new Date(),
+    deletedAt: null,
+  };
+  await client.insert(skill).values(row);
+  return row;
 }
 
 /**
@@ -1150,43 +1149,43 @@ export async function createSkill(
  * 不自动切换 currentVersionId——由 setCurrentVersion 显式完成，便于 seed/迁移分步。
  */
 export async function createSkillVersion(
- params: {
- skillId: string;
- version: number;
- /** 保留；目录形态下新版本留空，内容由 skills/<name>/SKILL.md 承载 */
- promptTemplate?: string | null;
- /** 目录形态版本快照引用（skills/ git repo 的 commit sha）；迁移期旧版本可能为空 */
- commitSha?: string | null;
- allowedTools?: string[] | null;
- /** V8：能力声明（string[]），只用于 Resolver 判断和 Studio 提示，不限制工具可见性 */
- requiredCapabilities?: string[] | null;
- defaultModelProfile?: string | null;
- completionCriteria?: Record<string, unknown> | null;
- reviewMode?: string;
- artifactPolicy?: Record<string, unknown> | null;
- status?: SkillVersionStatus;
- runtimeType?: string | null;
- },
- tx?: DbTxClient,
+  params: {
+    skillId: string;
+    version: number;
+    /** 保留；目录形态下新版本留空，内容由 skills/<name>/SKILL.md 承载 */
+    promptTemplate?: string | null;
+    /** 目录形态版本快照引用（skills/ git repo 的 commit sha）；迁移期旧版本可能为空 */
+    commitSha?: string | null;
+    allowedTools?: string[] | null;
+    /** V8：能力声明（string[]），只用于 Resolver 判断和 Studio 提示，不限制工具可见性 */
+    requiredCapabilities?: string[] | null;
+    defaultModelProfile?: string | null;
+    completionCriteria?: Record<string, unknown> | null;
+    reviewMode?: string;
+    artifactPolicy?: Record<string, unknown> | null;
+    status?: SkillVersionStatus;
+    runtimeType?: string | null;
+  },
+  tx?: DbTxClient,
 ): Promise<SkillVersion> {
- const row: SkillVersion = {
- id: randomUUID(),
- skillId: params.skillId,
- version: params.version,
- promptTemplate: params.promptTemplate ?? null,
- commitSha: params.commitSha ?? null,
- allowedTools: params.allowedTools ?? null,
- requiredCapabilities: params.requiredCapabilities ?? null,
- defaultModelProfile: params.defaultModelProfile ?? null,
- completionCriteria: params.completionCriteria ?? null,
- reviewMode: params.reviewMode ?? "auto",
- artifactPolicy: params.artifactPolicy ?? null,
- runtimeType: params.runtimeType ?? null,
- status: params.status ?? "active",
- createdAt: new Date(),
- };
- await (tx ?? db).insert(skillVersion).values(row);
- return row;
+  const row: SkillVersion = {
+    id: randomUUID(),
+    skillId: params.skillId,
+    version: params.version,
+    promptTemplate: params.promptTemplate ?? null,
+    commitSha: params.commitSha ?? null,
+    allowedTools: params.allowedTools ?? null,
+    requiredCapabilities: params.requiredCapabilities ?? null,
+    defaultModelProfile: params.defaultModelProfile ?? null,
+    completionCriteria: params.completionCriteria ?? null,
+    reviewMode: params.reviewMode ?? "auto",
+    artifactPolicy: params.artifactPolicy ?? null,
+    runtimeType: params.runtimeType ?? null,
+    status: params.status ?? "active",
+    createdAt: new Date(),
+  };
+  await (tx ?? db).insert(skillVersion).values(row);
+  return row;
 }
 
 /**
@@ -1195,21 +1194,21 @@ export async function createSkillVersion(
  * 可变内容（SKILL.md / 支持文件）不在本函数：编辑工作副本 + 发布新版本走 skill repo。
  */
 export async function updateSkill(
- skillId: string,
- patch: {
- name?: string;
- description?: string | null;
- category?: string | null;
- visibility?: string;
- },
+  skillId: string,
+  patch: {
+    name?: string;
+    description?: string | null;
+    category?: string | null;
+    visibility?: string;
+  },
 ): Promise<void> {
- const sets: Record<string, unknown> = {};
- if (patch.name !== undefined) sets.name = patch.name;
- if (patch.description !== undefined) sets.description = patch.description;
- if (patch.category !== undefined) sets.category = patch.category;
- if (patch.visibility !== undefined) sets.visibility = patch.visibility;
- if (Object.keys(sets).length === 0) return;
- await db.update(skill).set(sets).where(eq(skill.id, skillId));
+  const sets: Record<string, unknown> = {};
+  if (patch.name !== undefined) sets.name = patch.name;
+  if (patch.description !== undefined) sets.description = patch.description;
+  if (patch.category !== undefined) sets.category = patch.category;
+  if (patch.visibility !== undefined) sets.visibility = patch.visibility;
+  if (Object.keys(sets).length === 0) return;
+  await db.update(skill).set(sets).where(eq(skill.id, skillId));
 }
 
 /**
@@ -1222,26 +1221,26 @@ export async function updateSkill(
  * @returns 是否实际更新(expectedFrom 不匹配返回 false)
  */
 export async function setCurrentVersion(
- skillId: string,
- versionId: string,
- expectedCurrentVersionId?: string | null,
- tx?: DbTxClient,
+  skillId: string,
+  versionId: string,
+  expectedCurrentVersionId?: string | null,
+  tx?: DbTxClient,
 ): Promise<boolean> {
- const client = tx ?? db;
- const conds = [eq(skill.id, skillId)];
- if (expectedCurrentVersionId !== undefined) {
- // currentVersionId 可空:null 用 isNull,否则 eq
- if (expectedCurrentVersionId === null) {
- conds.push(isNull(skill.currentVersionId));
- } else {
- conds.push(eq(skill.currentVersionId, expectedCurrentVersionId));
- }
- }
- const result = await client
- .update(skill)
- .set({ currentVersionId: versionId })
- .where(and(...conds));
- return (result as unknown as { affectedRows?: number }).affectedRows !== 0;
+  const client = tx ?? db;
+  const conds = [eq(skill.id, skillId)];
+  if (expectedCurrentVersionId !== undefined) {
+    // currentVersionId 可空:null 用 isNull,否则 eq
+    if (expectedCurrentVersionId === null) {
+      conds.push(isNull(skill.currentVersionId));
+    } else {
+      conds.push(eq(skill.currentVersionId, expectedCurrentVersionId));
+    }
+  }
+  const result = await client
+    .update(skill)
+    .set({ currentVersionId: versionId })
+    .where(and(...conds));
+  return (result as unknown as { affectedRows?: number }).affectedRows !== 0;
 }
 
 /**
@@ -1250,122 +1249,122 @@ export async function setCurrentVersion(
  * : CAS——仅 status != archived 时归档(防并发 unarchive/archive 竞态)。
  */
 export async function archiveSkill(skillId: string): Promise<boolean> {
- const result = await db
- .update(skill)
- .set({ status: "archived" })
- .where(and(eq(skill.id, skillId), ne(skill.status, "archived")));
- return (result as unknown as { affectedRows?: number }).affectedRows !== 0;
+  const result = await db
+    .update(skill)
+    .set({ status: "archived" })
+    .where(and(eq(skill.id, skillId), ne(skill.status, "archived")));
+  return (result as unknown as { affectedRows?: number }).affectedRows !== 0;
 }
 
 /** 创建 skill 失败补偿：仅用于还没有对外生效的新 skill，先删版本再删身份层。 */
 export async function deleteSkillWithVersions(skillId: string): Promise<void> {
- await db.delete(skillVersion).where(eq(skillVersion.skillId, skillId));
- await db.delete(skill).where(eq(skill.id, skillId));
+  await db.delete(skillVersion).where(eq(skillVersion.skillId, skillId));
+  await db.delete(skill).where(eq(skill.id, skillId));
 }
 
 // ─── SkillSyncMapping（02 文档 同步映射）────────────────
 
 /** 按远端 asset_id 查映射（同步入口：判断是否已有映射、复用 localName）。 */
 export async function getSyncMappingByRemoteAsset(
- remoteAssetId: string,
+  remoteAssetId: string,
 ): Promise<SkillSyncMapping | null> {
- const [row] = await db
- .select()
- .from(skillSyncMapping)
- .where(eq(skillSyncMapping.remoteAssetId, remoteAssetId))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(skillSyncMapping)
+    .where(eq(skillSyncMapping.remoteAssetId, remoteAssetId))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 按本地 skill id 查映射（Studio 详情展示、只读判断）。 */
 export async function getSyncMappingByLocalSkill(
- localSkillId: string,
+  localSkillId: string,
 ): Promise<SkillSyncMapping | null> {
- const [row] = await db
- .select()
- .from(skillSyncMapping)
- .where(eq(skillSyncMapping.localSkillId, localSkillId))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(skillSyncMapping)
+    .where(eq(skillSyncMapping.localSkillId, localSkillId))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 列出全部映射（同步服务比对远端资产是否仍存在）。 */
 export async function listAllSyncMappings(): Promise<SkillSyncMapping[]> {
- return db.select().from(skillSyncMapping).orderBy(asc(skillSyncMapping.remoteAssetId));
+  return db.select().from(skillSyncMapping).orderBy(asc(skillSyncMapping.remoteAssetId));
 }
 
 /** 创建同步映射（首次导入远端 asset 时）。 */
 export async function createSyncMapping(
- params: {
- remoteAssetId: string;
- remoteName: string | null;
- remoteDisplayName: string | null;
- remoteVersion: string | null;
- remoteVersionId: string | null;
- remoteContentHash: string | null;
- localSkillId: string;
- localSkillVersionId: string | null;
- localName: string;
- syncState?: SkillSyncState;
- lastError?: string | null;
- },
- tx?: DbTxClient,
+  params: {
+    remoteAssetId: string;
+    remoteName: string | null;
+    remoteDisplayName: string | null;
+    remoteVersion: string | null;
+    remoteVersionId: string | null;
+    remoteContentHash: string | null;
+    localSkillId: string;
+    localSkillVersionId: string | null;
+    localName: string;
+    syncState?: SkillSyncState;
+    lastError?: string | null;
+  },
+  tx?: DbTxClient,
 ): Promise<SkillSyncMapping> {
- const client = tx ?? db;
- const now = new Date();
- const row: SkillSyncMapping = {
- id: randomUUID(),
- source: "capability-market",
- remoteAssetId: params.remoteAssetId,
- remoteName: params.remoteName,
- remoteDisplayName: params.remoteDisplayName,
- remoteVersion: params.remoteVersion,
- remoteVersionId: params.remoteVersionId,
- remoteContentHash: params.remoteContentHash,
- localSkillId: params.localSkillId,
- localSkillVersionId: params.localSkillVersionId,
- localName: params.localName,
- syncState: params.syncState ?? "active",
- lastSyncedAt: params.syncState === "active" || params.syncState === undefined ? now : null,
- lastCheckedAt: now,
- lastError: params.lastError ?? null,
- createdAt: now,
- updatedAt: now,
- };
- await client.insert(skillSyncMapping).values(row);
- return row;
+  const client = tx ?? db;
+  const now = new Date();
+  const row: SkillSyncMapping = {
+    id: randomUUID(),
+    source: "capability-market",
+    remoteAssetId: params.remoteAssetId,
+    remoteName: params.remoteName,
+    remoteDisplayName: params.remoteDisplayName,
+    remoteVersion: params.remoteVersion,
+    remoteVersionId: params.remoteVersionId,
+    remoteContentHash: params.remoteContentHash,
+    localSkillId: params.localSkillId,
+    localSkillVersionId: params.localSkillVersionId,
+    localName: params.localName,
+    syncState: params.syncState ?? "active",
+    lastSyncedAt: params.syncState === "active" || params.syncState === undefined ? now : null,
+    lastCheckedAt: now,
+    lastError: params.lastError ?? null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await client.insert(skillSyncMapping).values(row);
+  return row;
 }
 
 /** 更新映射（同步成功 / 状态变化 / 错误记录）。仅写传入字段。 */
 export async function updateSyncMapping(
- mappingId: string,
- patch: {
- remoteName?: string | null;
- remoteDisplayName?: string | null;
- remoteVersion?: string | null;
- remoteVersionId?: string | null;
- remoteContentHash?: string | null;
- localSkillVersionId?: string | null;
- syncState?: SkillSyncState;
- lastSyncedAt?: Date | null;
- lastCheckedAt?: Date | null;
- lastError?: string | null;
- },
- tx?: DbTxClient,
+  mappingId: string,
+  patch: {
+    remoteName?: string | null;
+    remoteDisplayName?: string | null;
+    remoteVersion?: string | null;
+    remoteVersionId?: string | null;
+    remoteContentHash?: string | null;
+    localSkillVersionId?: string | null;
+    syncState?: SkillSyncState;
+    lastSyncedAt?: Date | null;
+    lastCheckedAt?: Date | null;
+    lastError?: string | null;
+  },
+  tx?: DbTxClient,
 ): Promise<void> {
- const client = tx ?? db;
- const sets: Record<string, unknown> = { updatedAt: new Date() };
- if (patch.remoteName !== undefined) sets.remoteName = patch.remoteName;
- if (patch.remoteDisplayName !== undefined) sets.remoteDisplayName = patch.remoteDisplayName;
- if (patch.remoteVersion !== undefined) sets.remoteVersion = patch.remoteVersion;
- if (patch.remoteVersionId !== undefined) sets.remoteVersionId = patch.remoteVersionId;
- if (patch.remoteContentHash !== undefined) sets.remoteContentHash = patch.remoteContentHash;
- if (patch.localSkillVersionId !== undefined) sets.localSkillVersionId = patch.localSkillVersionId;
- if (patch.syncState !== undefined) sets.syncState = patch.syncState;
- if (patch.lastSyncedAt !== undefined) sets.lastSyncedAt = patch.lastSyncedAt;
- if (patch.lastCheckedAt !== undefined) sets.lastCheckedAt = patch.lastCheckedAt;
- if (patch.lastError !== undefined) sets.lastError = patch.lastError;
- await client.update(skillSyncMapping).set(sets).where(eq(skillSyncMapping.id, mappingId));
+  const client = tx ?? db;
+  const sets: Record<string, unknown> = { updatedAt: new Date() };
+  if (patch.remoteName !== undefined) sets.remoteName = patch.remoteName;
+  if (patch.remoteDisplayName !== undefined) sets.remoteDisplayName = patch.remoteDisplayName;
+  if (patch.remoteVersion !== undefined) sets.remoteVersion = patch.remoteVersion;
+  if (patch.remoteVersionId !== undefined) sets.remoteVersionId = patch.remoteVersionId;
+  if (patch.remoteContentHash !== undefined) sets.remoteContentHash = patch.remoteContentHash;
+  if (patch.localSkillVersionId !== undefined) sets.localSkillVersionId = patch.localSkillVersionId;
+  if (patch.syncState !== undefined) sets.syncState = patch.syncState;
+  if (patch.lastSyncedAt !== undefined) sets.lastSyncedAt = patch.lastSyncedAt;
+  if (patch.lastCheckedAt !== undefined) sets.lastCheckedAt = patch.lastCheckedAt;
+  if (patch.lastError !== undefined) sets.lastError = patch.lastError;
+  await client.update(skillSyncMapping).set(sets).where(eq(skillSyncMapping.id, mappingId));
 }
 
 // V8 阶段 8：setThreadSkill 已删除。
@@ -1379,17 +1378,17 @@ export async function updateSyncMapping(
  * 按 key 取角色（seed 幂等键）。admin / member 为系统内置角色。
  */
 export async function getRoleByKey(key: string): Promise<Role | null> {
- const [row] = await db.select().from(role).where(eq(role.key, key)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(role).where(eq(role.key, key)).limit(1);
+  return row ?? null;
 }
 
 /** 取角色的全部权限名。 */
 export async function getRolePermissions(roleId: string): Promise<string[]> {
- const rows = await db
- .select({ permission: rolePermission.permission })
- .from(rolePermission)
- .where(eq(rolePermission.roleId, roleId));
- return rows.map((r) => r.permission);
+  const rows = await db
+    .select({ permission: rolePermission.permission })
+    .from(rolePermission)
+    .where(eq(rolePermission.roleId, roleId));
+  return rows.map((r) => r.permission);
 }
 
 /**
@@ -1397,62 +1396,62 @@ export async function getRolePermissions(roleId: string): Promise<string[]> {
  * 不做 devOpen 注入——那是 lib/rbac.ts 的策略层职责；本函数只做纯数据查询。
  */
 export async function getPermissionsForUserRaw(userId: string): Promise<string[]> {
- const rows = await db
- .select({ permission: rolePermission.permission })
- .from(userRole)
- .innerJoin(rolePermission, eq(userRole.roleId, rolePermission.roleId))
- .where(eq(userRole.userId, userId));
- return rows.map((r) => r.permission);
+  const rows = await db
+    .select({ permission: rolePermission.permission })
+    .from(userRole)
+    .innerJoin(rolePermission, eq(userRole.roleId, rolePermission.roleId))
+    .where(eq(userRole.userId, userId));
+  return rows.map((r) => r.permission);
 }
 
 /** 创建角色（身份层）。 */
 export async function createRole(params: {
- key: string;
- name: string;
- isSystem?: boolean;
+  key: string;
+  name: string;
+  isSystem?: boolean;
 }): Promise<Role> {
- const row: Role = {
- id: randomUUID(),
- key: params.key,
- name: params.name,
- isSystem: params.isSystem ?? false,
- createdAt: new Date(),
- };
- await db.insert(role).values(row);
- return row;
+  const row: Role = {
+    id: randomUUID(),
+    key: params.key,
+    name: params.name,
+    isSystem: params.isSystem ?? false,
+    createdAt: new Date(),
+  };
+  await db.insert(role).values(row);
+  return row;
 }
 
 /**
  * 覆盖角色的权限集合（删旧 + 插新）。幂等：重复 seed 同一角色得到同一权限集。
  */
 export async function setRolePermissions(roleId: string, permissions: string[]): Promise<void> {
- await db.delete(rolePermission).where(eq(rolePermission.roleId, roleId));
- if (permissions.length === 0) return;
- await db.insert(rolePermission).values(permissions.map((p) => ({ roleId, permission: p })));
+  await db.delete(rolePermission).where(eq(rolePermission.roleId, roleId));
+  if (permissions.length === 0) return;
+  await db.insert(rolePermission).values(permissions.map((p) => ({ roleId, permission: p })));
 }
 
 /**
  * 重命名角色（seed 升级用：把旧英文 name 修正为中文）。仅在 name 不同时写，幂等。
  */
 export async function renameRole(roleId: string, name: string): Promise<void> {
- await db.update(role).set({ name }).where(eq(role.id, roleId));
+  await db.update(role).set({ name }).where(eq(role.id, roleId));
 }
 
 /**
  * 给用户绑角色（幂等：INSERT IGNORE，重复绑定不报错）。
  */
 export async function assignRoleToUser(userId: string, roleId: string): Promise<void> {
- await db.insert(userRole).ignore().values({ userId, roleId, createdAt: new Date() });
+  await db.insert(userRole).ignore().values({ userId, roleId, createdAt: new Date() });
 }
 
 /** 判断用户是否已绑定某角色（seed 幂等检查用）。 */
 export async function userHasRole(userId: string, roleId: string): Promise<boolean> {
- const [row] = await db
- .select({ userId: userRole.userId })
- .from(userRole)
- .where(and(eq(userRole.userId, userId), eq(userRole.roleId, roleId)))
- .limit(1);
- return Boolean(row);
+  const [row] = await db
+    .select({ userId: userRole.userId })
+    .from(userRole)
+    .where(and(eq(userRole.userId, userId), eq(userRole.roleId, roleId)))
+    .limit(1);
+  return Boolean(row);
 }
 
 // ─── Settings 用户/角色管理 Queries () ──────
@@ -1462,27 +1461,27 @@ export async function userHasRole(userId: string, roleId: string): Promise<boole
 
 /** Settings 用户列表项：用户基础信息 + 绑定的角色摘要。 */
 export type UserWithRoles = {
- id: string;
- email: string;
- name: string | null;
- externalId: string;
- createdAt: Date;
- roles: Array<{ id: string; key: string; name: string; isSystem: boolean }>;
+  id: string;
+  email: string;
+  name: string | null;
+  externalId: string;
+  createdAt: Date;
+  roles: Array<{ id: string; key: string; name: string; isSystem: boolean }>;
 };
 
 /** Settings 角色列表项：角色身份 + 权限名数组（只读展示，不在此编辑）。 */
 export type RoleWithPermissions = {
- id: string;
- key: string;
- name: string;
- isSystem: boolean;
- permissions: string[];
+  id: string;
+  key: string;
+  name: string;
+  isSystem: boolean;
+  permissions: string[];
 };
 
 /** 按 id 取用户；Settings PUT 用于区分目标用户不存在和角色校验失败。 */
 export async function getUserById(id: string): Promise<User | null> {
- const [row] = await db.select().from(user).where(eq(user.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(user).where(eq(user.id, id)).limit(1);
+  return row ?? null;
 }
 
 /**
@@ -1490,71 +1489,71 @@ export async function getUserById(id: string): Promise<User | null> {
  * leftJoin：无角色用户也返回，roles=[]。角色按 key asc 稳定排序。
  */
 export async function listUsersWithRoles(): Promise<UserWithRoles[]> {
- const rows = await db
- .select({
- id: user.id,
- email: user.email,
- name: user.name,
- externalId: user.externalId,
- createdAt: user.createdAt,
- roleId: userRole.roleId,
- roleKey: role.key,
- roleName: role.name,
- roleIsSystem: role.isSystem,
- })
- .from(user)
- .leftJoin(userRole, eq(user.id, userRole.userId))
- .leftJoin(role, eq(userRole.roleId, role.id))
- .orderBy(asc(user.createdAt), asc(role.key));
- const byUser = new Map<string, UserWithRoles>();
- for (const r of rows) {
- let u = byUser.get(r.id);
- if (!u) {
- u = {
- id: r.id,
- email: r.email,
- name: r.name,
- externalId: r.externalId,
- createdAt: r.createdAt,
- roles: [],
- };
- byUser.set(r.id, u);
- }
- if (r.roleId && r.roleKey) {
- u.roles.push({
- id: r.roleId,
- key: r.roleKey,
- name: r.roleName ?? "",
- isSystem: r.roleIsSystem ?? false,
- });
- }
- }
- return [...byUser.values()];
+  const rows = await db
+    .select({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      externalId: user.externalId,
+      createdAt: user.createdAt,
+      roleId: userRole.roleId,
+      roleKey: role.key,
+      roleName: role.name,
+      roleIsSystem: role.isSystem,
+    })
+    .from(user)
+    .leftJoin(userRole, eq(user.id, userRole.userId))
+    .leftJoin(role, eq(userRole.roleId, role.id))
+    .orderBy(asc(user.createdAt), asc(role.key));
+  const byUser = new Map<string, UserWithRoles>();
+  for (const r of rows) {
+    let u = byUser.get(r.id);
+    if (!u) {
+      u = {
+        id: r.id,
+        email: r.email,
+        name: r.name,
+        externalId: r.externalId,
+        createdAt: r.createdAt,
+        roles: [],
+      };
+      byUser.set(r.id, u);
+    }
+    if (r.roleId && r.roleKey) {
+      u.roles.push({
+        id: r.roleId,
+        key: r.roleKey,
+        name: r.roleName ?? "",
+        isSystem: r.roleIsSystem ?? false,
+      });
+    }
+  }
+  return [...byUser.values()];
 }
 
 /** 列全部角色及其权限名（按 key asc），只读展示。 */
 export async function listRolesWithPermissions(): Promise<RoleWithPermissions[]> {
- const rows = await db
- .select({
- id: role.id,
- key: role.key,
- name: role.name,
- isSystem: role.isSystem,
- permission: rolePermission.permission,
- })
- .from(role)
- .leftJoin(rolePermission, eq(role.id, rolePermission.roleId))
- .orderBy(asc(role.key), asc(rolePermission.permission));
- const byRole = new Map<string, RoleWithPermissions>();
- for (const r of rows) {
- let rl = byRole.get(r.id);
- if (!rl) {
- rl = { id: r.id, key: r.key, name: r.name, isSystem: r.isSystem, permissions: [] };
- byRole.set(r.id, rl);
- }
- if (r.permission) rl.permissions.push(r.permission);
- }
- return [...byRole.values()];
+  const rows = await db
+    .select({
+      id: role.id,
+      key: role.key,
+      name: role.name,
+      isSystem: role.isSystem,
+      permission: rolePermission.permission,
+    })
+    .from(role)
+    .leftJoin(rolePermission, eq(role.id, rolePermission.roleId))
+    .orderBy(asc(role.key), asc(rolePermission.permission));
+  const byRole = new Map<string, RoleWithPermissions>();
+  for (const r of rows) {
+    let rl = byRole.get(r.id);
+    if (!rl) {
+      rl = { id: r.id, key: r.key, name: r.name, isSystem: r.isSystem, permissions: [] };
+      byRole.set(r.id, rl);
+    }
+    if (r.permission) rl.permissions.push(r.permission);
+  }
+  return [...byRole.values()];
 }
 
 /**
@@ -1563,12 +1562,12 @@ export async function listRolesWithPermissions(): Promise<RoleWithPermissions[]>
  * 空 roleIds → []（不发起查询）。
  */
 export async function getPermissionsForRoleIds(roleIds: string[]): Promise<string[]> {
- if (roleIds.length === 0) return [];
- const rows = await db
- .select({ permission: rolePermission.permission })
- .from(rolePermission)
- .where(inArray(rolePermission.roleId, roleIds));
- return [...new Set(rows.map((r) => r.permission))];
+  if (roleIds.length === 0) return [];
+  const rows = await db
+    .select({ permission: rolePermission.permission })
+    .from(rolePermission)
+    .where(inArray(rolePermission.roleId, roleIds));
+  return [...new Set(rows.map((r) => r.permission))];
 }
 
 /**
@@ -1576,12 +1575,12 @@ export async function getPermissionsForRoleIds(roleIds: string[]): Promise<strin
  * 空 roleIds → 用户无角色（Settings 允许，由 role-safety 守卫不锁死系统）。
  */
 export async function replaceUserRoles(userId: string, roleIds: string[]): Promise<void> {
- await db.transaction(async (tx) => {
- await tx.delete(userRole).where(eq(userRole.userId, userId));
- if (roleIds.length === 0) return;
- const now = new Date();
- await tx.insert(userRole).values(roleIds.map((roleId) => ({ userId, roleId, createdAt: now })));
- });
+  await db.transaction(async (tx) => {
+    await tx.delete(userRole).where(eq(userRole.userId, userId));
+    if (roleIds.length === 0) return;
+    const now = new Date();
+    await tx.insert(userRole).values(roleIds.map((roleId) => ({ userId, roleId, createdAt: now })));
+  });
 }
 
 /**
@@ -1595,32 +1594,32 @@ export async function replaceUserRoles(userId: string, roleIds: string[]): Promi
  * 最后按 replacement 补 1。数据量小，两步查询保持清晰。
  */
 export async function countUsersWithPermission(
- permission: string,
- replacement?: { userId: string; roleIds: string[] },
+  permission: string,
+  replacement?: { userId: string; roleIds: string[] },
 ): Promise<number> {
- const grantingRoles = await db
- .select({ roleId: rolePermission.roleId })
- .from(rolePermission)
- .where(eq(rolePermission.permission, permission));
- const grantingRoleIds = new Set(grantingRoles.map((r) => r.roleId));
- if (grantingRoleIds.size === 0) return 0;
+  const grantingRoles = await db
+    .select({ roleId: rolePermission.roleId })
+    .from(rolePermission)
+    .where(eq(rolePermission.permission, permission));
+  const grantingRoleIds = new Set(grantingRoles.map((r) => r.roleId));
+  if (grantingRoleIds.size === 0) return 0;
 
- const roleIdList = [...grantingRoleIds];
- const userRows = replacement
- ? await db
- .select({ userId: userRole.userId })
- .from(userRole)
- .where(and(inArray(userRole.roleId, roleIdList), ne(userRole.userId, replacement.userId)))
- : await db
- .select({ userId: userRole.userId })
- .from(userRole)
- .where(inArray(userRole.roleId, roleIdList));
- const distinct = new Set(userRows.map((u) => u.userId));
- let count = distinct.size;
- if (replacement?.roleIds.some((rid) => grantingRoleIds.has(rid))) {
- count += 1;
- }
- return count;
+  const roleIdList = [...grantingRoleIds];
+  const userRows = replacement
+    ? await db
+        .select({ userId: userRole.userId })
+        .from(userRole)
+        .where(and(inArray(userRole.roleId, roleIdList), ne(userRole.userId, replacement.userId)))
+    : await db
+        .select({ userId: userRole.userId })
+        .from(userRole)
+        .where(inArray(userRole.roleId, roleIdList));
+  const distinct = new Set(userRows.map((u) => u.userId));
+  let count = distinct.size;
+  if (replacement?.roleIds.some((rid) => grantingRoleIds.has(rid))) {
+    count += 1;
+  }
+  return count;
 }
 
 // ─── Policy Config 写入 () ──────────────────
@@ -1632,20 +1631,20 @@ export async function countUsersWithPermission(
  * 避免单行 upsert 留下未更新的脏行。调用方负责先用 validatePolicyRows 规范化。
  */
 export async function replacePolicyConfigRows(
- rows: Array<{ key: string; value: unknown }>,
+  rows: Array<{ key: string; value: unknown }>,
 ): Promise<void> {
- const keys = rows.map((r) => r.key);
- const now = new Date();
- await db.transaction(async (tx) => {
- if (keys.length > 0) {
- await tx.delete(policyConfig).where(inArray(policyConfig.key, keys));
- }
- if (rows.length > 0) {
- await tx
- .insert(policyConfig)
- .values(rows.map((r) => ({ key: r.key, value: r.value, updatedAt: now })));
- }
- });
+  const keys = rows.map((r) => r.key);
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    if (keys.length > 0) {
+      await tx.delete(policyConfig).where(inArray(policyConfig.key, keys));
+    }
+    if (rows.length > 0) {
+      await tx
+        .insert(policyConfig)
+        .values(rows.map((r) => ({ key: r.key, value: r.value, updatedAt: now })));
+    }
+  });
 }
 
 /**
@@ -1653,18 +1652,18 @@ export async function replacePolicyConfigRows(
  * 由 PUT /studio/api/policies 在 replacePolicyConfigRows 后调用。
  */
 export async function insertPolicyConfigHistory(params: {
- changedBy: string;
- beforeSnapshot: string;
- afterSnapshot: string;
- changedKeys: string | null;
+  changedBy: string;
+  beforeSnapshot: string;
+  afterSnapshot: string;
+  changedKeys: string | null;
 }): Promise<void> {
- await db.insert(policyConfigHistory).values({
- changedBy: params.changedBy,
- beforeSnapshot: params.beforeSnapshot,
- afterSnapshot: params.afterSnapshot,
- changedKeys: params.changedKeys,
- changedAt: new Date(),
- });
+  await db.insert(policyConfigHistory).values({
+    changedBy: params.changedBy,
+    beforeSnapshot: params.beforeSnapshot,
+    afterSnapshot: params.afterSnapshot,
+    changedKeys: params.changedKeys,
+    changedAt: new Date(),
+  });
 }
 
 // ─── Agent / Provider Profile Queries (: 只读档案) ────
@@ -1678,13 +1677,13 @@ export async function insertPolicyConfigHistory(params: {
  * 默认过滤 deletedAt isNull(软删不展示);includeDeleted=true 看全部(含已软删)。
  */
 export async function listAgents(opts?: { includeDeleted?: boolean }): Promise<Agent[]> {
- const conds = opts?.includeDeleted ? undefined : isNull(agent.deletedAt);
- return db.select().from(agent).where(conds).orderBy(asc(agent.createdAt));
+  const conds = opts?.includeDeleted ? undefined : isNull(agent.deletedAt);
+  return db.select().from(agent).where(conds).orderBy(asc(agent.createdAt));
 }
 
 /** 列全部 provider 档案，按 createdAt asc。 */
 export async function listProviders(): Promise<ProviderProfile[]> {
- return db.select().from(providerProfile).orderBy(asc(providerProfile.createdAt));
+  return db.select().from(providerProfile).orderBy(asc(providerProfile.createdAt));
 }
 
 /**
@@ -1694,18 +1693,18 @@ export async function listProviders(): Promise<ProviderProfile[]> {
  * 避免软删后重复建同名 agent)。
  */
 export async function getAgentByName(
- name: string,
- opts?: { includeDeleted?: boolean },
+  name: string,
+  opts?: { includeDeleted?: boolean },
 ): Promise<Agent | null> {
- const conds = opts?.includeDeleted
- ? [eq(agent.name, name)]
- : [eq(agent.name, name), isNull(agent.deletedAt)];
- const [row] = await db
- .select()
- .from(agent)
- .where(and(...conds))
- .limit(1);
- return row ?? null;
+  const conds = opts?.includeDeleted
+    ? [eq(agent.name, name)]
+    : [eq(agent.name, name), isNull(agent.deletedAt)];
+  const [row] = await db
+    .select()
+    .from(agent)
+    .where(and(...conds))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -1713,63 +1712,63 @@ export async function getAgentByName(
  * agent 无 status 字段(非 skill 的 active/archived 生命周期),deletedAt 是唯一软删字段。
  */
 export async function archiveAgent(agentId: string): Promise<void> {
- await db
- .update(agent)
- .set({ deletedAt: new Date(), updatedAt: new Date() })
- .where(eq(agent.id, agentId));
+  await db
+    .update(agent)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(eq(agent.id, agentId));
 }
 
 /** 按 name 取 provider（seed 幂等键）。 */
 export async function getProviderByName(name: string): Promise<ProviderProfile | null> {
- const [row] = await db
- .select()
- .from(providerProfile)
- .where(eq(providerProfile.name, name))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(providerProfile)
+    .where(eq(providerProfile.name, name))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 创建 agent 档案。config 由调用方显式传入（应用层写 {}，不依赖 DB default）。 */
 export async function createAgent(params: {
- name: string;
- description?: string | null;
- model: string;
- skillId?: string | null;
- config: Record<string, unknown>;
+  name: string;
+  description?: string | null;
+  model: string;
+  skillId?: string | null;
+  config: Record<string, unknown>;
 }): Promise<Agent> {
- const row: Agent = {
- id: randomUUID(),
- name: params.name,
- description: params.description ?? null,
- model: params.model,
- skillId: params.skillId ?? null,
- config: params.config,
- createdAt: new Date(),
- updatedAt: new Date(),
- deletedAt: null,
- };
- await db.insert(agent).values(row);
- return row;
+  const row: Agent = {
+    id: randomUUID(),
+    name: params.name,
+    description: params.description ?? null,
+    model: params.model,
+    skillId: params.skillId ?? null,
+    config: params.config,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+  };
+  await db.insert(agent).values(row);
+  return row;
 }
 
 /** 创建 provider 档案。apiKeyRef 存 env 引用名，不落明文 secret。 */
 export async function createProvider(params: {
- name: string;
- baseUrl: string;
- apiKeyRef: string;
- isDefault?: boolean;
+  name: string;
+  baseUrl: string;
+  apiKeyRef: string;
+  isDefault?: boolean;
 }): Promise<ProviderProfile> {
- const row: ProviderProfile = {
- id: randomUUID(),
- name: params.name,
- baseUrl: params.baseUrl,
- apiKeyRef: params.apiKeyRef,
- isDefault: params.isDefault ?? false,
- createdAt: new Date(),
- updatedAt: new Date(),
- };
- await db.insert(providerProfile).values(row);
- return row;
+  const row: ProviderProfile = {
+    id: randomUUID(),
+    name: params.name,
+    baseUrl: params.baseUrl,
+    apiKeyRef: params.apiKeyRef,
+    isDefault: params.isDefault ?? false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  await db.insert(providerProfile).values(row);
+  return row;
 }
 
 // ─── Admin Audit Queries (切片 C: append-only 审计) ──
@@ -1778,12 +1777,12 @@ export async function createProvider(params: {
 // lib/studio/admin-audit.ts#sanitizeAuditMetadata 脱敏后传入；本层不做二次脱敏。
 
 export type AppendAdminAuditLogInput = {
- actorUserId: string;
- action: AdminAuditAction;
- targetType: string;
- targetId: string;
- outcome: AdminAuditOutcome;
- metadata: Record<string, unknown>;
+  actorUserId: string;
+  action: AdminAuditAction;
+  targetType: string;
+  targetId: string;
+  outcome: AdminAuditOutcome;
+  metadata: Record<string, unknown>;
 };
 
 /**
@@ -1791,26 +1790,26 @@ export type AppendAdminAuditLogInput = {
  * metadata 必须是可 JSON 序列化的对象（调用方负责脱敏）。
  */
 export async function appendAdminAuditLog(
- input: AppendAdminAuditLogInput,
- tx?: DbTxClient,
+  input: AppendAdminAuditLogInput,
+  tx?: DbTxClient,
 ): Promise<AdminAuditLog> {
- const row = buildAdminAuditLogRow(input);
- await (tx ?? db).insert(adminAuditLog).values(row);
- return row;
+  const row = buildAdminAuditLogRow(input);
+  await (tx ?? db).insert(adminAuditLog).values(row);
+  return row;
 }
 
 /** 构造一条审计行（不落库），供 appendAdminAuditLog 与事务内插入复用。 */
 function buildAdminAuditLogRow(input: AppendAdminAuditLogInput): AdminAuditLog {
- return {
- id: randomUUID(),
- actorUserId: input.actorUserId,
- action: input.action,
- targetType: input.targetType,
- targetId: input.targetId,
- outcome: input.outcome,
- metadata: input.metadata,
- createdAt: new Date(),
- };
+  return {
+    id: randomUUID(),
+    actorUserId: input.actorUserId,
+    action: input.action,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    outcome: input.outcome,
+    metadata: input.metadata,
+    createdAt: new Date(),
+  };
 }
 
 /**
@@ -1822,44 +1821,44 @@ function buildAdminAuditLogRow(input: AppendAdminAuditLogInput): AdminAuditLog {
  * actor 已删档 → actorName/actorEmail=null（leftJoin）。
  */
 export type AuditLogRow = AdminAuditLog & {
- actorName: string | null;
- actorEmail: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
 };
 
 export async function listAdminAuditLogs(params?: {
- limit?: number;
- actorUserId?: string;
- targetType?: string;
- targetId?: string;
- action?: AdminAuditAction;
+  limit?: number;
+  actorUserId?: string;
+  targetType?: string;
+  targetId?: string;
+  action?: AdminAuditAction;
 }): Promise<AuditLogRow[]> {
- const rawLimit = params?.limit;
- const limit =
- typeof rawLimit === "number" && Number.isFinite(rawLimit)
- ? Math.min(200, Math.max(1, Math.floor(rawLimit)))
- : 100;
- const conds = [];
- if (params?.actorUserId) conds.push(eq(adminAuditLog.actorUserId, params.actorUserId));
- if (params?.action) conds.push(eq(adminAuditLog.action, params.action));
- if (params?.targetType) conds.push(eq(adminAuditLog.targetType, params.targetType));
- if (params?.targetId) conds.push(eq(adminAuditLog.targetId, params.targetId));
- const base = db
- .select({
- id: adminAuditLog.id,
- actorUserId: adminAuditLog.actorUserId,
- action: adminAuditLog.action,
- targetType: adminAuditLog.targetType,
- targetId: adminAuditLog.targetId,
- outcome: adminAuditLog.outcome,
- metadata: adminAuditLog.metadata,
- createdAt: adminAuditLog.createdAt,
- actorName: user.name,
- actorEmail: user.email,
- })
- .from(adminAuditLog)
- .leftJoin(user, eq(adminAuditLog.actorUserId, user.id));
- const query = conds.length > 0 ? base.where(and(...conds)) : base;
- return query.orderBy(desc(adminAuditLog.createdAt), desc(adminAuditLog.id)).limit(limit);
+  const rawLimit = params?.limit;
+  const limit =
+    typeof rawLimit === "number" && Number.isFinite(rawLimit)
+      ? Math.min(200, Math.max(1, Math.floor(rawLimit)))
+      : 100;
+  const conds = [];
+  if (params?.actorUserId) conds.push(eq(adminAuditLog.actorUserId, params.actorUserId));
+  if (params?.action) conds.push(eq(adminAuditLog.action, params.action));
+  if (params?.targetType) conds.push(eq(adminAuditLog.targetType, params.targetType));
+  if (params?.targetId) conds.push(eq(adminAuditLog.targetId, params.targetId));
+  const base = db
+    .select({
+      id: adminAuditLog.id,
+      actorUserId: adminAuditLog.actorUserId,
+      action: adminAuditLog.action,
+      targetType: adminAuditLog.targetType,
+      targetId: adminAuditLog.targetId,
+      outcome: adminAuditLog.outcome,
+      metadata: adminAuditLog.metadata,
+      createdAt: adminAuditLog.createdAt,
+      actorName: user.name,
+      actorEmail: user.email,
+    })
+    .from(adminAuditLog)
+    .leftJoin(user, eq(adminAuditLog.actorUserId, user.id));
+  const query = conds.length > 0 ? base.where(and(...conds)) : base;
+  return query.orderBy(desc(adminAuditLog.createdAt), desc(adminAuditLog.id)).limit(limit);
 }
 
 // ─── Admin Audit + 业务写 事务封装 (切片 C) ─────────
@@ -1870,11 +1869,11 @@ export async function listAdminAuditLogs(params?: {
 
 /** 取用户当前绑定的 roleId 列表（角色覆盖审计 roleIdsBefore 用）。 */
 export async function getUserRoleIds(userId: string): Promise<string[]> {
- const rows = await db
- .select({ roleId: userRole.roleId })
- .from(userRole)
- .where(eq(userRole.userId, userId));
- return rows.map((r) => r.roleId);
+  const rows = await db
+    .select({ roleId: userRole.roleId })
+    .from(userRole)
+    .where(eq(userRole.userId, userId));
+  return rows.map((r) => r.roleId);
 }
 
 /**
@@ -1882,30 +1881,30 @@ export async function getUserRoleIds(userId: string): Promise<string[]> {
  * 都不生效），调用方据此返回 500 audit_failed。auditInput.metadata 应已脱敏。
  */
 export async function replaceUserRolesWithAudit(
- userId: string,
- roleIds: string[],
- auditInput: Pick<AppendAdminAuditLogInput, "actorUserId" | "targetId" | "metadata"> & {
- action: AdminAuditAction;
- },
+  userId: string,
+  roleIds: string[],
+  auditInput: Pick<AppendAdminAuditLogInput, "actorUserId" | "targetId" | "metadata"> & {
+    action: AdminAuditAction;
+  },
 ): Promise<void> {
- const auditRow = buildAdminAuditLogRow({
- actorUserId: auditInput.actorUserId,
- action: auditInput.action,
- targetType: "user",
- targetId: auditInput.targetId,
- outcome: "succeeded",
- metadata: auditInput.metadata,
- });
- await db.transaction(async (tx) => {
- await tx.delete(userRole).where(eq(userRole.userId, userId));
- if (roleIds.length > 0) {
- const now = new Date();
- await tx
- .insert(userRole)
- .values(roleIds.map((roleId) => ({ userId, roleId, createdAt: now })));
- }
- await tx.insert(adminAuditLog).values(auditRow);
- });
+  const auditRow = buildAdminAuditLogRow({
+    actorUserId: auditInput.actorUserId,
+    action: auditInput.action,
+    targetType: "user",
+    targetId: auditInput.targetId,
+    outcome: "succeeded",
+    metadata: auditInput.metadata,
+  });
+  await db.transaction(async (tx) => {
+    await tx.delete(userRole).where(eq(userRole.userId, userId));
+    if (roleIds.length > 0) {
+      const now = new Date();
+      await tx
+        .insert(userRole)
+        .values(roleIds.map((roleId) => ({ userId, roleId, createdAt: now })));
+    }
+    await tx.insert(adminAuditLog).values(auditRow);
+  });
 }
 
 // ─── Context Snapshot Queries (Stage C) ────────────────
@@ -1915,74 +1914,74 @@ export async function replaceUserRolesWithAudit(
 
 /** 创建一条 context snapshot（MySQL 不支持 RETURNING，自行生成主键并构造返回对象）。 */
 export async function saveContextSnapshot(params: {
- threadId: string;
- trigger: string;
- model: string;
- runtimeType?: string | null;
- activeSkillVersionId?: string | null;
- toolNames: string[];
- layers: unknown;
- protectedRefs: unknown;
- excludedCandidates: unknown;
- checksums: Record<string, string>;
- estimatedTokens: number;
- /** 本轮是否压缩装配（与真实模型输入一致）。 */
- compressed?: boolean;
- /** 本轮装配后真实模型输入 token（nullable（旧快照可空））。 */
- afterTokens?: number | null;
- /** V8：本轮 Skill Resolver 输入摘要（availableSkillCount / uiSelectedSkillIds）。 */
- skillResolverInput?: unknown;
- /** V8：本轮 Skill Resolver 输出摘要。 */
- skillResolverOutput?: unknown;
- /** V8：readSkillFile 加载证据（运行结束 flush 写入；创建时省略）。 */
- skillLoadEvidence?: unknown;
- /** 归属 ThreadRun（nullable（历史快照可空））。 */
- runId?: string | null;
+  threadId: string;
+  trigger: string;
+  model: string;
+  runtimeType?: string | null;
+  activeSkillVersionId?: string | null;
+  toolNames: string[];
+  layers: unknown;
+  protectedRefs: unknown;
+  excludedCandidates: unknown;
+  checksums: Record<string, string>;
+  estimatedTokens: number;
+  /** 本轮是否压缩装配（与真实模型输入一致）。 */
+  compressed?: boolean;
+  /** 本轮装配后真实模型输入 token（nullable（旧快照可空））。 */
+  afterTokens?: number | null;
+  /** V8：本轮 Skill Resolver 输入摘要（availableSkillCount / uiSelectedSkillIds）。 */
+  skillResolverInput?: unknown;
+  /** V8：本轮 Skill Resolver 输出摘要。 */
+  skillResolverOutput?: unknown;
+  /** V8：readSkillFile 加载证据（运行结束 flush 写入；创建时省略）。 */
+  skillLoadEvidence?: unknown;
+  /** 归属 ThreadRun（nullable（历史快照可空））。 */
+  runId?: string | null;
 }): Promise<ContextSnapshot> {
- // json 列 zod 校验（fail-closed，脏数据抛错不落库）
- const layers = validateJsonColumn(params.layers, contextSnapshotLayersSchema, "layers");
- const checksums = validateJsonColumn(
- params.checksums,
- contextSnapshotChecksumsSchema,
- "checksums",
- );
- const skillResolverInput = params.skillResolverInput
- ? validateJsonColumn(
- params.skillResolverInput,
- contextSnapshotSkillResolverInputSchema,
- "skillResolverInput",
- )
- : null;
- const skillResolverOutput = params.skillResolverOutput
- ? validateJsonColumn(
- params.skillResolverOutput,
- contextSnapshotSkillResolverOutputSchema,
- "skillResolverOutput",
- )
- : null;
- const row: ContextSnapshot = {
- id: randomUUID(),
- threadId: params.threadId,
- trigger: params.trigger,
- model: params.model,
- runtimeType: params.runtimeType ?? null,
- activeSkillVersionId: params.activeSkillVersionId ?? null,
- toolNames: params.toolNames,
- layers,
- protectedRefs: params.protectedRefs,
- excludedCandidates: params.excludedCandidates,
- checksums,
- estimatedTokens: params.estimatedTokens,
- compressed: params.compressed ?? false,
- afterTokens: params.afterTokens ?? null,
- skillResolverInput,
- skillResolverOutput,
- skillLoadEvidence: null,
- runId: params.runId ?? null,
- createdAt: new Date(),
- };
- await db.insert(contextSnapshot).values(row);
- return row;
+  // json 列 zod 校验（fail-closed，脏数据抛错不落库）
+  const layers = validateJsonColumn(params.layers, contextSnapshotLayersSchema, "layers");
+  const checksums = validateJsonColumn(
+    params.checksums,
+    contextSnapshotChecksumsSchema,
+    "checksums",
+  );
+  const skillResolverInput = params.skillResolverInput
+    ? validateJsonColumn(
+        params.skillResolverInput,
+        contextSnapshotSkillResolverInputSchema,
+        "skillResolverInput",
+      )
+    : null;
+  const skillResolverOutput = params.skillResolverOutput
+    ? validateJsonColumn(
+        params.skillResolverOutput,
+        contextSnapshotSkillResolverOutputSchema,
+        "skillResolverOutput",
+      )
+    : null;
+  const row: ContextSnapshot = {
+    id: randomUUID(),
+    threadId: params.threadId,
+    trigger: params.trigger,
+    model: params.model,
+    runtimeType: params.runtimeType ?? null,
+    activeSkillVersionId: params.activeSkillVersionId ?? null,
+    toolNames: params.toolNames,
+    layers,
+    protectedRefs: params.protectedRefs,
+    excludedCandidates: params.excludedCandidates,
+    checksums,
+    estimatedTokens: params.estimatedTokens,
+    compressed: params.compressed ?? false,
+    afterTokens: params.afterTokens ?? null,
+    skillResolverInput,
+    skillResolverOutput,
+    skillLoadEvidence: null,
+    runId: params.runId ?? null,
+    createdAt: new Date(),
+  };
+  await db.insert(contextSnapshot).values(row);
+  return row;
 }
 
 /**
@@ -1992,46 +1991,46 @@ export async function saveContextSnapshot(params: {
  * 同时支持 null evidence（清空占位，理论上不使用）。
  */
 export async function attachSkillLoadEvidence(runId: string, evidence: unknown): Promise<void> {
- try {
- const validated = validateJsonColumn(
- evidence,
- contextSnapshotSkillLoadEvidenceSchema,
- "skillLoadEvidence",
- );
- // 取该 run 最近一条快照（run 维度，通常只有一条 chat.user_message 触发）
- const [latest] = await db
- .select({ id: contextSnapshot.id })
- .from(contextSnapshot)
- .where(eq(contextSnapshot.runId, runId))
- .orderBy(desc(contextSnapshot.createdAt), desc(contextSnapshot.id))
- .limit(1);
- if (!latest) return;
- await db
- .update(contextSnapshot)
- .set({ skillLoadEvidence: validated })
- .where(eq(contextSnapshot.id, latest.id));
- } catch (error) {
- logger.warn("[attachSkillLoadEvidence] 写入失败（fail-open）", {
- runId,
- error: error instanceof Error ? error.message : String(error),
- });
- }
+  try {
+    const validated = validateJsonColumn(
+      evidence,
+      contextSnapshotSkillLoadEvidenceSchema,
+      "skillLoadEvidence",
+    );
+    // 取该 run 最近一条快照（run 维度，通常只有一条 chat.user_message 触发）
+    const [latest] = await db
+      .select({ id: contextSnapshot.id })
+      .from(contextSnapshot)
+      .where(eq(contextSnapshot.runId, runId))
+      .orderBy(desc(contextSnapshot.createdAt), desc(contextSnapshot.id))
+      .limit(1);
+    if (!latest) return;
+    await db
+      .update(contextSnapshot)
+      .set({ skillLoadEvidence: validated })
+      .where(eq(contextSnapshot.id, latest.id));
+  } catch (error) {
+    logger.warn("[attachSkillLoadEvidence] 写入失败（fail-open）", {
+      runId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /**
  * 取某 thread 最近的 context snapshot（按 createdAt desc）。limit 默认 20、上限 100、下限 1。
  */
 export async function listContextSnapshotsForThread(
- threadId: string,
- limit = 20,
+  threadId: string,
+  limit = 20,
 ): Promise<ContextSnapshot[]> {
- const clamped = Math.min(100, Math.max(1, Math.floor(limit)));
- return db
- .select()
- .from(contextSnapshot)
- .where(eq(contextSnapshot.threadId, threadId))
- .orderBy(desc(contextSnapshot.createdAt), desc(contextSnapshot.id))
- .limit(clamped);
+  const clamped = Math.min(100, Math.max(1, Math.floor(limit)));
+  return db
+    .select()
+    .from(contextSnapshot)
+    .where(eq(contextSnapshot.threadId, threadId))
+    .orderBy(desc(contextSnapshot.createdAt), desc(contextSnapshot.id))
+    .limit(clamped);
 }
 
 // ─── Context Summary Queries (a) ────────────────────────
@@ -2042,30 +2041,30 @@ export async function listContextSnapshotsForThread(
 
 /** 创建一条 ContextSummary。 */
 export async function createContextSummary(params: {
- threadId: string;
- type: ContextSummaryType;
- scope: unknown;
- summaryText: string;
- checksum: string;
- tokenEstimate: number;
- originalTokenEstimate: number;
- protectedRefs: unknown;
+  threadId: string;
+  type: ContextSummaryType;
+  scope: unknown;
+  summaryText: string;
+  checksum: string;
+  tokenEstimate: number;
+  originalTokenEstimate: number;
+  protectedRefs: unknown;
 }): Promise<ContextSummary> {
- const row: ContextSummary = {
- id: randomUUID(),
- threadId: params.threadId,
- type: params.type,
- scope: params.scope,
- summaryText: params.summaryText,
- checksum: params.checksum,
- tokenEstimate: params.tokenEstimate,
- originalTokenEstimate: params.originalTokenEstimate,
- protectedRefs: params.protectedRefs,
- supersededById: null,
- createdAt: new Date(),
- };
- await db.insert(contextSummary).values(row);
- return row;
+  const row: ContextSummary = {
+    id: randomUUID(),
+    threadId: params.threadId,
+    type: params.type,
+    scope: params.scope,
+    summaryText: params.summaryText,
+    checksum: params.checksum,
+    tokenEstimate: params.tokenEstimate,
+    originalTokenEstimate: params.originalTokenEstimate,
+    protectedRefs: params.protectedRefs,
+    supersededById: null,
+    createdAt: new Date(),
+  };
+  await db.insert(contextSummary).values(row);
+  return row;
 }
 
 /**
@@ -2073,21 +2072,21 @@ export async function createContextSummary(params: {
  * 返回 null 表示无可用复用。
  */
 export async function getActiveSummaryByChecksum(
- threadId: string,
- checksum: string,
+  threadId: string,
+  checksum: string,
 ): Promise<ContextSummary | null> {
- const [row] = await db
- .select()
- .from(contextSummary)
- .where(
- and(
- eq(contextSummary.threadId, threadId),
- eq(contextSummary.checksum, checksum),
- isNull(contextSummary.supersededById),
- ),
- )
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(contextSummary)
+    .where(
+      and(
+        eq(contextSummary.threadId, threadId),
+        eq(contextSummary.checksum, checksum),
+        isNull(contextSummary.supersededById),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -2095,20 +2094,20 @@ export async function getActiveSummaryByChecksum(
  * includeSuperseded=true 时返回全部（含历史链）。
  */
 export async function listSummariesByThread(
- threadId: string,
- options?: { limit?: number; includeSuperseded?: boolean },
+  threadId: string,
+  options?: { limit?: number; includeSuperseded?: boolean },
 ): Promise<ContextSummary[]> {
- const limit = Math.min(200, Math.max(1, Math.floor(options?.limit ?? 50)));
- const conditions = [eq(contextSummary.threadId, threadId)];
- if (!options?.includeSuperseded) {
- conditions.push(isNull(contextSummary.supersededById));
- }
- return db
- .select()
- .from(contextSummary)
- .where(and(...conditions))
- .orderBy(desc(contextSummary.createdAt), desc(contextSummary.id))
- .limit(limit);
+  const limit = Math.min(200, Math.max(1, Math.floor(options?.limit ?? 50)));
+  const conditions = [eq(contextSummary.threadId, threadId)];
+  if (!options?.includeSuperseded) {
+    conditions.push(isNull(contextSummary.supersededById));
+  }
+  return db
+    .select()
+    .from(contextSummary)
+    .where(and(...conditions))
+    .orderBy(desc(contextSummary.createdAt), desc(contextSummary.id))
+    .limit(limit);
 }
 
 /**
@@ -2116,13 +2115,13 @@ export async function listSummariesByThread(
  * 旧 summary.supersededById 指向新 summary id；之后查询不再返回旧 summary。
  */
 export async function supersedeSummary(params: {
- oldSummaryId: string;
- newSummaryId: string;
+  oldSummaryId: string;
+  newSummaryId: string;
 }): Promise<void> {
- await db
- .update(contextSummary)
- .set({ supersededById: params.newSummaryId })
- .where(eq(contextSummary.id, params.oldSummaryId));
+  await db
+    .update(contextSummary)
+    .set({ supersededById: params.newSummaryId })
+    .where(eq(contextSummary.id, params.oldSummaryId));
 }
 
 /**
@@ -2134,13 +2133,13 @@ export async function supersedeSummary(params: {
  * @returns 删除条数
  */
 export async function cleanupSupersededSummaries(retainDays = 7): Promise<number> {
- const cutoff = new Date(Date.now() - retainDays * 24 * 60 * 60 * 1000);
- const result = await db
- .delete(contextSummary)
- .where(and(isNotNull(contextSummary.supersededById), lt(contextSummary.createdAt, cutoff)));
- // drizzle mysql delete 返回affected rows在result[0].affectedRows
- const affected = (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
- return affected;
+  const cutoff = new Date(Date.now() - retainDays * 24 * 60 * 60 * 1000);
+  const result = await db
+    .delete(contextSummary)
+    .where(and(isNotNull(contextSummary.supersededById), lt(contextSummary.createdAt, cutoff)));
+  // drizzle mysql delete 返回affected rows在result[0].affectedRows
+  const affected = (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
+  return affected;
 }
 
 /**
@@ -2148,32 +2147,32 @@ export async function cleanupSupersededSummaries(retainDays = 7): Promise<number
  * 由 retention 定时任务调用。@returns 删除条数
  */
 export async function cleanupOldSubagentRuns(retainDays = 14): Promise<number> {
- const cutoff = new Date(Date.now() - retainDays * 24 * 60 * 60 * 1000);
- const terminal: SubagentRunStatus[] = ["completed", "failed", "cancelled", "timed_out"];
- // : 先 select 待删 run 的 transcriptPath,删行前 unlink 文件,防孤儿 transcript 累积
- const rows = await db
- .select({ id: subagentRun.id, transcriptPath: subagentRun.transcriptPath })
- .from(subagentRun)
- .where(and(inArray(subagentRun.status, terminal), lt(subagentRun.finishedAt, cutoff)));
- if (rows.length === 0) return 0;
- await Promise.all(
- rows.map(async (r) => {
- if (r.transcriptPath) {
- try {
- await unlink(r.transcriptPath);
- } catch {
- // best-effort:文件可能已不存在或路径不可达
- }
- }
- }),
- );
- const result = await db.delete(subagentRun).where(
- inArray(
- subagentRun.id,
- rows.map((r) => r.id),
- ),
- );
- return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
+  const cutoff = new Date(Date.now() - retainDays * 24 * 60 * 60 * 1000);
+  const terminal: SubagentRunStatus[] = ["completed", "failed", "cancelled", "timed_out"];
+  // : 先 select 待删 run 的 transcriptPath,删行前 unlink 文件,防孤儿 transcript 累积
+  const rows = await db
+    .select({ id: subagentRun.id, transcriptPath: subagentRun.transcriptPath })
+    .from(subagentRun)
+    .where(and(inArray(subagentRun.status, terminal), lt(subagentRun.finishedAt, cutoff)));
+  if (rows.length === 0) return 0;
+  await Promise.all(
+    rows.map(async (r) => {
+      if (r.transcriptPath) {
+        try {
+          await unlink(r.transcriptPath);
+        } catch {
+          // best-effort:文件可能已不存在或路径不可达
+        }
+      }
+    }),
+  );
+  const result = await db.delete(subagentRun).where(
+    inArray(
+      subagentRun.id,
+      rows.map((r) => r.id),
+    ),
+  );
+  return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
 }
 
 // ─── Thread Plan / Todo Queries (Stage D) ──────────────
@@ -2184,47 +2183,47 @@ export async function cleanupOldSubagentRuns(retainDays = 14): Promise<number> {
 
 /** 创建一个 thread plan（状态默认 active）。同时追加 plan.created 事件。 */
 export async function createThreadPlan(params: {
- threadId: string;
- title: string;
- source?: string;
+  threadId: string;
+  title: string;
+  source?: string;
 }): Promise<ThreadPlan> {
- const now = new Date();
- const row: ThreadPlan = {
- id: randomUUID(),
- threadId: params.threadId,
- title: params.title,
- status: "active",
- source: params.source ?? "system",
- createdAt: now,
- updatedAt: now,
- };
- await db.insert(threadPlan).values(row);
- await appendThreadEvent(params.threadId, "plan.created", {
- planId: row.id,
- title: row.title,
- source: row.source,
- });
- return row;
+  const now = new Date();
+  const row: ThreadPlan = {
+    id: randomUUID(),
+    threadId: params.threadId,
+    title: params.title,
+    status: "active",
+    source: params.source ?? "system",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.insert(threadPlan).values(row);
+  await appendThreadEvent(params.threadId, "plan.created", {
+    planId: row.id,
+    title: row.title,
+    source: row.source,
+  });
+  return row;
 }
 
 /** 取 thread 当前 active plan（最近创建的一条 active）。无则 null。 */
 export async function getActiveThreadPlan(threadId: string): Promise<ThreadPlan | null> {
- const [row] = await db
- .select()
- .from(threadPlan)
- .where(and(eq(threadPlan.threadId, threadId), eq(threadPlan.status, "active")))
- .orderBy(desc(threadPlan.createdAt), desc(threadPlan.id))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(threadPlan)
+    .where(and(eq(threadPlan.threadId, threadId), eq(threadPlan.status, "active")))
+    .orderBy(desc(threadPlan.createdAt), desc(threadPlan.id))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 列 thread 全部 plan（按 createdAt desc）。 */
 export async function listThreadPlans(threadId: string): Promise<ThreadPlan[]> {
- return db
- .select()
- .from(threadPlan)
- .where(eq(threadPlan.threadId, threadId))
- .orderBy(desc(threadPlan.createdAt), desc(threadPlan.id));
+  return db
+    .select()
+    .from(threadPlan)
+    .where(eq(threadPlan.threadId, threadId))
+    .orderBy(desc(threadPlan.createdAt), desc(threadPlan.id));
 }
 
 /**
@@ -2232,107 +2231,107 @@ export async function listThreadPlans(threadId: string): Promise<ThreadPlan[]> {
  * 任一非 undefined 字段），否则插入。返回最终行（MySQL 无 RETURNING，按入参构造）。
  */
 export async function upsertThreadPlanItem(params: {
- id: string;
- planId: string;
- threadId: string;
- title?: string;
- position?: number;
- status?: ThreadPlanItemStatus;
- evidence?: unknown;
- parentId?: string | null;
+  id: string;
+  planId: string;
+  threadId: string;
+  title?: string;
+  position?: number;
+  status?: ThreadPlanItemStatus;
+  evidence?: unknown;
+  parentId?: string | null;
 }): Promise<ThreadPlanItem> {
- // 先探存在性
- const [existing] = await db
- .select()
- .from(threadPlanItem)
- .where(eq(threadPlanItem.id, params.id))
- .limit(1);
- const now = new Date();
- if (existing) {
- const sets: Record<string, unknown> = { updatedAt: now };
- if (params.title !== undefined) sets.title = params.title;
- if (params.position !== undefined) sets.position = params.position;
- if (params.status !== undefined) sets.status = params.status;
- if (params.evidence !== undefined) sets.evidence = params.evidence;
- if (params.parentId !== undefined) sets.parentId = params.parentId;
- await db.update(threadPlanItem).set(sets).where(eq(threadPlanItem.id, params.id));
- return { ...existing, ...sets } as ThreadPlanItem;
- }
- const row: ThreadPlanItem = {
- id: params.id,
- planId: params.planId,
- threadId: params.threadId,
- parentId: params.parentId ?? null,
- position: params.position ?? 0,
- title: params.title ?? "",
- status: params.status ?? "pending",
- evidence: params.evidence ?? null,
- createdAt: now,
- updatedAt: now,
- };
- await db.insert(threadPlanItem).values(row);
- return row;
+  // 先探存在性
+  const [existing] = await db
+    .select()
+    .from(threadPlanItem)
+    .where(eq(threadPlanItem.id, params.id))
+    .limit(1);
+  const now = new Date();
+  if (existing) {
+    const sets: Record<string, unknown> = { updatedAt: now };
+    if (params.title !== undefined) sets.title = params.title;
+    if (params.position !== undefined) sets.position = params.position;
+    if (params.status !== undefined) sets.status = params.status;
+    if (params.evidence !== undefined) sets.evidence = params.evidence;
+    if (params.parentId !== undefined) sets.parentId = params.parentId;
+    await db.update(threadPlanItem).set(sets).where(eq(threadPlanItem.id, params.id));
+    return { ...existing, ...sets } as ThreadPlanItem;
+  }
+  const row: ThreadPlanItem = {
+    id: params.id,
+    planId: params.planId,
+    threadId: params.threadId,
+    parentId: params.parentId ?? null,
+    position: params.position ?? 0,
+    title: params.title ?? "",
+    status: params.status ?? "pending",
+    evidence: params.evidence ?? null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.insert(threadPlanItem).values(row);
+  return row;
 }
 
 /** 列 plan items（按 position asc）。planId 省略时取该 thread 全部 items。 */
 export async function listThreadPlanItems(
- threadId: string,
- planId?: string,
+  threadId: string,
+  planId?: string,
 ): Promise<ThreadPlanItem[]> {
- const conds = [eq(threadPlanItem.threadId, threadId)];
- if (planId) conds.push(eq(threadPlanItem.planId, planId));
- return db
- .select()
- .from(threadPlanItem)
- .where(and(...conds))
- .orderBy(asc(threadPlanItem.position));
+  const conds = [eq(threadPlanItem.threadId, threadId)];
+  if (planId) conds.push(eq(threadPlanItem.planId, planId));
+  return db
+    .select()
+    .from(threadPlanItem)
+    .where(and(...conds))
+    .orderBy(asc(threadPlanItem.position));
 }
 
 /**
  * 更新 item 状态，并写 plan.item_updated 事件。返回更新后的行（按入参 + existing 合并）。
  */
 export async function updateThreadPlanItemStatus(params: {
- id: string;
- status: ThreadPlanItemStatus;
+  id: string;
+  status: ThreadPlanItemStatus;
 }): Promise<ThreadPlanItem | null> {
- const [existing] = await db
- .select()
- .from(threadPlanItem)
- .where(eq(threadPlanItem.id, params.id))
- .limit(1);
- if (!existing) return null;
- const now = new Date();
- await db
- .update(threadPlanItem)
- .set({ status: params.status, updatedAt: now })
- .where(eq(threadPlanItem.id, params.id));
- await appendThreadEvent(existing.threadId, "plan.item_updated", {
- itemId: existing.id,
- planId: existing.planId,
- status: params.status,
- });
- return { ...existing, status: params.status, updatedAt: now };
+  const [existing] = await db
+    .select()
+    .from(threadPlanItem)
+    .where(eq(threadPlanItem.id, params.id))
+    .limit(1);
+  if (!existing) return null;
+  const now = new Date();
+  await db
+    .update(threadPlanItem)
+    .set({ status: params.status, updatedAt: now })
+    .where(eq(threadPlanItem.id, params.id));
+  await appendThreadEvent(existing.threadId, "plan.item_updated", {
+    itemId: existing.id,
+    planId: existing.planId,
+    status: params.status,
+  });
+  return { ...existing, status: params.status, updatedAt: now };
 }
 
 /** 放弃 plan（status → abandoned），并写 plan.updated 事件。 */
 export async function abandonThreadPlan(planId: string): Promise<void> {
- const now = new Date();
- await db
- .update(threadPlan)
- .set({ status: "abandoned", updatedAt: now })
- .where(eq(threadPlan.id, planId));
- // 取 planId 的 threadId 用于事件归属
- const [row] = await db
- .select({ threadId: threadPlan.threadId })
- .from(threadPlan)
- .where(eq(threadPlan.id, planId))
- .limit(1);
- if (row) {
- await appendThreadEvent(row.threadId, "plan.updated", {
- planId,
- status: "abandoned",
- });
- }
+  const now = new Date();
+  await db
+    .update(threadPlan)
+    .set({ status: "abandoned", updatedAt: now })
+    .where(eq(threadPlan.id, planId));
+  // 取 planId 的 threadId 用于事件归属
+  const [row] = await db
+    .select({ threadId: threadPlan.threadId })
+    .from(threadPlan)
+    .where(eq(threadPlan.id, planId))
+    .limit(1);
+  if (row) {
+    await appendThreadEvent(row.threadId, "plan.updated", {
+      planId,
+      status: "abandoned",
+    });
+  }
 }
 
 // ─── Tool Permission Rule / Approval Request Queries () ──
@@ -2343,7 +2342,7 @@ export async function abandonThreadPlan(planId: string): Promise<void> {
 
 /** 列全部持久化权限规则（默认规则的 DB 覆盖）。按 priority 降序。 */
 export async function listPermissionRules(): Promise<ToolPermissionRule[]> {
- return db.select().from(toolPermissionRule).orderBy(desc(toolPermissionRule.priority));
+  return db.select().from(toolPermissionRule).orderBy(desc(toolPermissionRule.priority));
 }
 
 /**
@@ -2353,51 +2352,51 @@ export async function listPermissionRules(): Promise<ToolPermissionRule[]> {
  * seed 等无 actor 场景不传 actorUserId，不写审计（seed 行为可由 git 历史/部署日志追溯）。
  */
 export async function createPermissionRule(params: {
- scope?: PermissionScope;
- scopeRef?: string | null;
- toolPattern: string;
- argMatcher?: Record<string, unknown> | null;
- decision: PermissionDecision;
- reason?: string | null;
- priority?: number;
- /** 操作者用户 id（非空时落审计）。 */
- actorUserId?: string | null;
+  scope?: PermissionScope;
+  scopeRef?: string | null;
+  toolPattern: string;
+  argMatcher?: Record<string, unknown> | null;
+  decision: PermissionDecision;
+  reason?: string | null;
+  priority?: number;
+  /** 操作者用户 id（非空时落审计）。 */
+  actorUserId?: string | null;
 }): Promise<ToolPermissionRule> {
- const now = new Date();
- const row: ToolPermissionRule = {
- id: randomUUID(),
- scope: params.scope ?? "global",
- scopeRef: params.scopeRef ?? null,
- toolPattern: params.toolPattern,
- argMatcher: params.argMatcher ?? null,
- decision: params.decision,
- reason: params.reason ?? null,
- priority: params.priority ?? 0,
- createdAt: now,
- updatedAt: now,
- };
- const auditRow =
- params.actorUserId != null
- ? buildAdminAuditLogRow({
- actorUserId: params.actorUserId,
- action: "permission_rule.created",
- targetType: "permission_rule",
- targetId: row.id,
- outcome: "succeeded",
- metadata: {
- scope: row.scope,
- scopeRef: row.scopeRef,
- toolPattern: row.toolPattern,
- decision: row.decision,
- priority: row.priority,
- },
- })
- : null;
- await db.transaction(async (tx) => {
- await tx.insert(toolPermissionRule).values(row);
- if (auditRow) await tx.insert(adminAuditLog).values(auditRow);
- });
- return row;
+  const now = new Date();
+  const row: ToolPermissionRule = {
+    id: randomUUID(),
+    scope: params.scope ?? "global",
+    scopeRef: params.scopeRef ?? null,
+    toolPattern: params.toolPattern,
+    argMatcher: params.argMatcher ?? null,
+    decision: params.decision,
+    reason: params.reason ?? null,
+    priority: params.priority ?? 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const auditRow =
+    params.actorUserId != null
+      ? buildAdminAuditLogRow({
+          actorUserId: params.actorUserId,
+          action: "permission_rule.created",
+          targetType: "permission_rule",
+          targetId: row.id,
+          outcome: "succeeded",
+          metadata: {
+            scope: row.scope,
+            scopeRef: row.scopeRef,
+            toolPattern: row.toolPattern,
+            decision: row.decision,
+            priority: row.priority,
+          },
+        })
+      : null;
+  await db.transaction(async (tx) => {
+    await tx.insert(toolPermissionRule).values(row);
+    if (auditRow) await tx.insert(adminAuditLog).values(auditRow);
+  });
+  return row;
 }
 
 /**
@@ -2407,52 +2406,52 @@ export async function createPermissionRule(params: {
  * 规则不存在 → 返回 null（调用方据此 404）。
  */
 export async function updatePermissionRule(
- id: string,
- patch: {
- scope?: PermissionScope;
- scopeRef?: string | null;
- toolPattern?: string;
- argMatcher?: Record<string, unknown> | null;
- decision?: PermissionDecision;
- reason?: string | null;
- priority?: number;
- },
- actorUserId?: string | null,
+  id: string,
+  patch: {
+    scope?: PermissionScope;
+    scopeRef?: string | null;
+    toolPattern?: string;
+    argMatcher?: Record<string, unknown> | null;
+    decision?: PermissionDecision;
+    reason?: string | null;
+    priority?: number;
+  },
+  actorUserId?: string | null,
 ): Promise<ToolPermissionRule | null> {
- const [existing] = await db
- .select()
- .from(toolPermissionRule)
- .where(eq(toolPermissionRule.id, id))
- .limit(1);
- if (!existing) return null;
- const sets: Record<string, unknown> = { updatedAt: new Date() };
- for (const [k, v] of Object.entries(patch)) {
- if (v !== undefined) sets[k] = v;
- }
- const auditRow =
- actorUserId != null
- ? buildAdminAuditLogRow({
- actorUserId,
- action: "permission_rule.updated",
- targetType: "permission_rule",
- targetId: id,
- outcome: "succeeded",
- metadata: {
- before: {
- scope: existing.scope,
- toolPattern: existing.toolPattern,
- decision: existing.decision,
- priority: existing.priority,
- },
- after: sets,
- },
- })
- : null;
- await db.transaction(async (tx) => {
- await tx.update(toolPermissionRule).set(sets).where(eq(toolPermissionRule.id, id));
- if (auditRow) await tx.insert(adminAuditLog).values(auditRow);
- });
- return { ...existing, ...sets } as ToolPermissionRule;
+  const [existing] = await db
+    .select()
+    .from(toolPermissionRule)
+    .where(eq(toolPermissionRule.id, id))
+    .limit(1);
+  if (!existing) return null;
+  const sets: Record<string, unknown> = { updatedAt: new Date() };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) sets[k] = v;
+  }
+  const auditRow =
+    actorUserId != null
+      ? buildAdminAuditLogRow({
+          actorUserId,
+          action: "permission_rule.updated",
+          targetType: "permission_rule",
+          targetId: id,
+          outcome: "succeeded",
+          metadata: {
+            before: {
+              scope: existing.scope,
+              toolPattern: existing.toolPattern,
+              decision: existing.decision,
+              priority: existing.priority,
+            },
+            after: sets,
+          },
+        })
+      : null;
+  await db.transaction(async (tx) => {
+    await tx.update(toolPermissionRule).set(sets).where(eq(toolPermissionRule.id, id));
+    if (auditRow) await tx.insert(adminAuditLog).values(auditRow);
+  });
+  return { ...existing, ...sets } as ToolPermissionRule;
 }
 
 /**
@@ -2460,35 +2459,35 @@ export async function updatePermissionRule(
  * actorUserId 非空时落 permission_rule.deleted 审计。规则不存在 → 返回 false（调用方据此 404）。
  */
 export async function deletePermissionRule(
- id: string,
- actorUserId?: string | null,
+  id: string,
+  actorUserId?: string | null,
 ): Promise<boolean> {
- const [existing] = await db
- .select()
- .from(toolPermissionRule)
- .where(eq(toolPermissionRule.id, id))
- .limit(1);
- if (!existing) return false;
- const auditRow =
- actorUserId != null
- ? buildAdminAuditLogRow({
- actorUserId,
- action: "permission_rule.deleted",
- targetType: "permission_rule",
- targetId: id,
- outcome: "succeeded",
- metadata: {
- scope: existing.scope,
- toolPattern: existing.toolPattern,
- decision: existing.decision,
- },
- })
- : null;
- await db.transaction(async (tx) => {
- await tx.delete(toolPermissionRule).where(eq(toolPermissionRule.id, id));
- if (auditRow) await tx.insert(adminAuditLog).values(auditRow);
- });
- return true;
+  const [existing] = await db
+    .select()
+    .from(toolPermissionRule)
+    .where(eq(toolPermissionRule.id, id))
+    .limit(1);
+  if (!existing) return false;
+  const auditRow =
+    actorUserId != null
+      ? buildAdminAuditLogRow({
+          actorUserId,
+          action: "permission_rule.deleted",
+          targetType: "permission_rule",
+          targetId: id,
+          outcome: "succeeded",
+          metadata: {
+            scope: existing.scope,
+            toolPattern: existing.toolPattern,
+            decision: existing.decision,
+          },
+        })
+      : null;
+  await db.transaction(async (tx) => {
+    await tx.delete(toolPermissionRule).where(eq(toolPermissionRule.id, id));
+    if (auditRow) await tx.insert(adminAuditLog).values(auditRow);
+  });
+  return true;
 }
 
 /**
@@ -2496,34 +2495,34 @@ export async function deletePermissionRule(
  * expiresAt 缺省时按 24h 过期设置（）。
  */
 export async function createApprovalRequest(params: {
- threadId: string;
- toolRunId: string;
- toolName: string;
- permissionKey: string;
- argFingerprint: string;
- argSummary: string;
- expiresAt?: Date | null;
- projectId?: string | null;
+  threadId: string;
+  toolRunId: string;
+  toolName: string;
+  permissionKey: string;
+  argFingerprint: string;
+  argSummary: string;
+  expiresAt?: Date | null;
+  projectId?: string | null;
 }): Promise<ToolApprovalRequest> {
- const now = new Date();
- const row: ToolApprovalRequest = {
- id: randomUUID(),
- threadId: params.threadId,
- toolRunId: params.toolRunId,
- toolName: params.toolName,
- permissionKey: params.permissionKey,
- argFingerprint: params.argFingerprint,
- argSummary: params.argSummary,
- status: "pending",
- approvedScope: null,
- projectId: params.projectId ?? null,
- resolvedBy: null,
- resolvedAt: null,
- createdAt: now,
- expiresAt: params.expiresAt ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
- };
- await db.insert(toolApprovalRequest).values(row);
- return row;
+  const now = new Date();
+  const row: ToolApprovalRequest = {
+    id: randomUUID(),
+    threadId: params.threadId,
+    toolRunId: params.toolRunId,
+    toolName: params.toolName,
+    permissionKey: params.permissionKey,
+    argFingerprint: params.argFingerprint,
+    argSummary: params.argSummary,
+    status: "pending",
+    approvedScope: null,
+    projectId: params.projectId ?? null,
+    resolvedBy: null,
+    resolvedAt: null,
+    createdAt: now,
+    expiresAt: params.expiresAt ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
+  };
+  await db.insert(toolApprovalRequest).values(row);
+  return row;
 }
 
 /**
@@ -2533,102 +2532,102 @@ export async function createApprovalRequest(params: {
  * 卡在 executing。本函数在单事务内完成三步，保证原子性。事件追加在事务外（append-only best-effort）。
  */
 export async function requestApprovalAtomic(params: {
- threadId: string;
- toolName: string;
- input: Record<string, unknown>;
- permissionKey: string;
- argFingerprint: string;
- argSummary: string;
- projectId?: string | null;
- /** 归属 ThreadRun（nullable（历史记录可空））。 */
- runId?: string | null;
+  threadId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  permissionKey: string;
+  argFingerprint: string;
+  argSummary: string;
+  projectId?: string | null;
+  /** 归属 ThreadRun（nullable（历史记录可空））。 */
+  runId?: string | null;
 }): Promise<{ run: ToolRun; approval: ToolApprovalRequest }> {
- // 与 createToolRun 同构：json 列 zod 校验（fail-closed，脏数据抛错不落库）。
- const input = validateJsonColumn(params.input, toolRunInputSchema, "input");
- return db.transaction(async (tx) => {
- const now = new Date();
- const run: ToolRun = {
- id: randomUUID(),
- threadId: params.threadId,
- toolName: params.toolName,
- status: "awaiting_approval",
- input,
- output: null,
- error: null,
- startedAt: now,
- finishedAt: null,
- runId: params.runId ?? null,
- };
- await tx.insert(toolRun).values(run);
+  // 与 createToolRun 同构：json 列 zod 校验（fail-closed，脏数据抛错不落库）。
+  const input = validateJsonColumn(params.input, toolRunInputSchema, "input");
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const run: ToolRun = {
+      id: randomUUID(),
+      threadId: params.threadId,
+      toolName: params.toolName,
+      status: "awaiting_approval",
+      input,
+      output: null,
+      error: null,
+      startedAt: now,
+      finishedAt: null,
+      runId: params.runId ?? null,
+    };
+    await tx.insert(toolRun).values(run);
 
- const approval: ToolApprovalRequest = {
- id: randomUUID(),
- threadId: params.threadId,
- toolRunId: run.id,
- toolName: params.toolName,
- permissionKey: params.permissionKey,
- argFingerprint: params.argFingerprint,
- argSummary: params.argSummary,
- status: "pending",
- approvedScope: null,
- // 审批请求记录 projectId，供 project scope 跨 thread 匹配
- projectId: params.projectId ?? null,
- resolvedBy: null,
- resolvedAt: null,
- createdAt: now,
- expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
- };
- await tx.insert(toolApprovalRequest).values(approval);
+    const approval: ToolApprovalRequest = {
+      id: randomUUID(),
+      threadId: params.threadId,
+      toolRunId: run.id,
+      toolName: params.toolName,
+      permissionKey: params.permissionKey,
+      argFingerprint: params.argFingerprint,
+      argSummary: params.argSummary,
+      status: "pending",
+      approvedScope: null,
+      // 审批请求记录 projectId，供 project scope 跨 thread 匹配
+      projectId: params.projectId ?? null,
+      resolvedBy: null,
+      resolvedAt: null,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    };
+    await tx.insert(toolApprovalRequest).values(approval);
 
- await tx
- .update(thread)
- .set({ status: "awaiting_approval", updatedAt: now })
- .where(eq(thread.id, params.threadId));
+    await tx
+      .update(thread)
+      .set({ status: "awaiting_approval", updatedAt: now })
+      .where(eq(thread.id, params.threadId));
 
- return { run, approval };
- });
+    return { run, approval };
+  });
 }
 
 /** 按 id 取审批请求。 */
 export async function getApprovalRequest(id: string): Promise<ToolApprovalRequest | null> {
- const [row] = await db
- .select()
- .from(toolApprovalRequest)
- .where(eq(toolApprovalRequest.id, id))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(toolApprovalRequest)
+    .where(eq(toolApprovalRequest.id, id))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 列 thread 的 pending 审批请求（按 createdAt asc）。 */
 export async function getPendingApprovalsByThread(
- threadId: string,
+  threadId: string,
 ): Promise<ToolApprovalRequest[]> {
- return db
- .select()
- .from(toolApprovalRequest)
- .where(
- and(eq(toolApprovalRequest.threadId, threadId), eq(toolApprovalRequest.status, "pending")),
- )
- .orderBy(asc(toolApprovalRequest.createdAt));
+  return db
+    .select()
+    .from(toolApprovalRequest)
+    .where(
+      and(eq(toolApprovalRequest.threadId, threadId), eq(toolApprovalRequest.status, "pending")),
+    )
+    .orderBy(asc(toolApprovalRequest.createdAt));
 }
 
 /** 列 thread 最近已决议的审批请求（approved/denied，按 createdAt desc，限 50）。 */
 export async function getResolvedApprovalsByThread(
- threadId: string,
- limit = 50,
+  threadId: string,
+  limit = 50,
 ): Promise<ToolApprovalRequest[]> {
- const clamped = Math.min(200, Math.max(1, Math.floor(limit)));
- return db
- .select()
- .from(toolApprovalRequest)
- .where(
- and(
- eq(toolApprovalRequest.threadId, threadId),
- inArray(toolApprovalRequest.status, ["approved", "denied"]),
- ),
- )
- .orderBy(desc(toolApprovalRequest.createdAt), desc(toolApprovalRequest.id))
- .limit(clamped);
+  const clamped = Math.min(200, Math.max(1, Math.floor(limit)));
+  return db
+    .select()
+    .from(toolApprovalRequest)
+    .where(
+      and(
+        eq(toolApprovalRequest.threadId, threadId),
+        inArray(toolApprovalRequest.status, ["approved", "denied"]),
+      ),
+    )
+    .orderBy(desc(toolApprovalRequest.createdAt), desc(toolApprovalRequest.id))
+    .limit(clamped);
 }
 
 /**
@@ -2636,33 +2635,33 @@ export async function getResolvedApprovalsByThread(
  * 写 tool.approval_resolved 事件由调用方（API 层）负责，本函数只更新请求行。
  */
 export async function resolveApprovalRequest(params: {
- id: string;
- decision: "approved" | "denied";
- scope: ApprovalScope;
- resolvedBy: string;
+  id: string;
+  decision: "approved" | "denied";
+  scope: ApprovalScope;
+  resolvedBy: string;
 }): Promise<ToolApprovalRequest | null> {
- const existing = await getApprovalRequest(params.id);
- if (!existing || existing.status !== "pending") return null;
- const now = new Date();
- const patch: Partial<ToolApprovalRequest> = {
- status: params.decision as ApprovalRequestStatus,
- approvedScope: params.scope,
- resolvedBy: params.resolvedBy,
- resolvedAt: now,
- };
- // session scope（07-）：决议时把 expiresAt 收紧到短 TTL，
- // 区别于 thread/always 的 24h。过期后引擎 isApprovalExpired 与 findMatchingApprovals
- // 同步失效，实现"同 thread 短期复用"语义。denied 不必调整 TTL（已拒绝不再复用）。
- if (params.decision === "approved" && params.scope === "session") {
- patch.expiresAt = new Date(now.getTime() + approvalConfig.sessionTtlMs);
- }
- // 审计修复(TOCTOU)：WHERE 加 status='pending' 守卫，affectedRows=0 说明已被并发决议
- const result = await db
- .update(toolApprovalRequest)
- .set(patch)
- .where(and(eq(toolApprovalRequest.id, params.id), eq(toolApprovalRequest.status, "pending")));
- if (affectedRowsOf(result) === 0) return null;
- return { ...existing, ...patch };
+  const existing = await getApprovalRequest(params.id);
+  if (!existing || existing.status !== "pending") return null;
+  const now = new Date();
+  const patch: Partial<ToolApprovalRequest> = {
+    status: params.decision as ApprovalRequestStatus,
+    approvedScope: params.scope,
+    resolvedBy: params.resolvedBy,
+    resolvedAt: now,
+  };
+  // session scope（07-）：决议时把 expiresAt 收紧到短 TTL，
+  // 区别于 thread/always 的 24h。过期后引擎 isApprovalExpired 与 findMatchingApprovals
+  // 同步失效，实现"同 thread 短期复用"语义。denied 不必调整 TTL（已拒绝不再复用）。
+  if (params.decision === "approved" && params.scope === "session") {
+    patch.expiresAt = new Date(now.getTime() + approvalConfig.sessionTtlMs);
+  }
+  // 审计修复(TOCTOU)：WHERE 加 status='pending' 守卫，affectedRows=0 说明已被并发决议
+  const result = await db
+    .update(toolApprovalRequest)
+    .set(patch)
+    .where(and(eq(toolApprovalRequest.id, params.id), eq(toolApprovalRequest.status, "pending")));
+  if (affectedRowsOf(result) === 0) return null;
+  return { ...existing, ...patch };
 }
 
 /**
@@ -2672,67 +2671,67 @@ export async function resolveApprovalRequest(params: {
  * scope 适用性（thread/project/always）由引擎纯函数判断；本查询返回候选集。
  */
 export async function findMatchingApprovals(params: {
- permissionKey: string;
- argFingerprint: string;
- threadId?: string;
- projectId?: string | null;
+  permissionKey: string;
+  argFingerprint: string;
+  threadId?: string;
+  projectId?: string | null;
 }): Promise<ToolApprovalRequest[]> {
- // scopeFilter 增加 project scope 跨 thread 匹配
- const threadFilter = params.threadId
- ? eq(toolApprovalRequest.threadId, params.threadId)
- : undefined;
- const projectFilter = params.projectId
- ? and(
- eq(toolApprovalRequest.approvedScope, "project"),
- eq(toolApprovalRequest.projectId, params.projectId),
- )
- : undefined;
- const scopeFilter =
- threadFilter || projectFilter
- ? or(eq(toolApprovalRequest.approvedScope, "always"), threadFilter, projectFilter)
- : undefined;
- return db
- .select()
- .from(toolApprovalRequest)
- .where(
- and(
- eq(toolApprovalRequest.permissionKey, params.permissionKey),
- eq(toolApprovalRequest.argFingerprint, params.argFingerprint),
- eq(toolApprovalRequest.status, "approved"),
- or(isNull(toolApprovalRequest.expiresAt), gt(toolApprovalRequest.expiresAt, new Date())),
- scopeFilter,
- ),
- )
- .orderBy(desc(toolApprovalRequest.resolvedAt));
+  // scopeFilter 增加 project scope 跨 thread 匹配
+  const threadFilter = params.threadId
+    ? eq(toolApprovalRequest.threadId, params.threadId)
+    : undefined;
+  const projectFilter = params.projectId
+    ? and(
+        eq(toolApprovalRequest.approvedScope, "project"),
+        eq(toolApprovalRequest.projectId, params.projectId),
+      )
+    : undefined;
+  const scopeFilter =
+    threadFilter || projectFilter
+      ? or(eq(toolApprovalRequest.approvedScope, "always"), threadFilter, projectFilter)
+      : undefined;
+  return db
+    .select()
+    .from(toolApprovalRequest)
+    .where(
+      and(
+        eq(toolApprovalRequest.permissionKey, params.permissionKey),
+        eq(toolApprovalRequest.argFingerprint, params.argFingerprint),
+        eq(toolApprovalRequest.status, "approved"),
+        or(isNull(toolApprovalRequest.expiresAt), gt(toolApprovalRequest.expiresAt, new Date())),
+        scopeFilter,
+      ),
+    )
+    .orderBy(desc(toolApprovalRequest.resolvedAt));
 }
 
 /** 从不同 drizzle/mysql adapter 的 update 结果里提取 affectedRows。 */
 function affectedRowsOf(result: unknown): number {
- const candidate = Array.isArray(result) ? result[0] : result;
- if (
- candidate &&
- typeof candidate === "object" &&
- "affectedRows" in candidate &&
- typeof (candidate as { affectedRows: unknown }).affectedRows === "number"
- ) {
- return (candidate as { affectedRows: number }).affectedRows;
- }
- return 0;
+  const candidate = Array.isArray(result) ? result[0] : result;
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    "affectedRows" in candidate &&
+    typeof (candidate as { affectedRows: unknown }).affectedRows === "number"
+  ) {
+    return (candidate as { affectedRows: number }).affectedRows;
+  }
+  return 0;
 }
 
 /** 原子消费一次性 approval，抢到消费权才返回 true。 */
 export async function consumeOnceApproval(id: string): Promise<boolean> {
- const result = await db
- .update(toolApprovalRequest)
- .set({ status: "superseded" })
- .where(
- and(
- eq(toolApprovalRequest.id, id),
- eq(toolApprovalRequest.status, "approved"),
- eq(toolApprovalRequest.approvedScope, "once"),
- ),
- );
- return affectedRowsOf(result) === 1;
+  const result = await db
+    .update(toolApprovalRequest)
+    .set({ status: "superseded" })
+    .where(
+      and(
+        eq(toolApprovalRequest.id, id),
+        eq(toolApprovalRequest.status, "approved"),
+        eq(toolApprovalRequest.approvedScope, "once"),
+      ),
+    );
+  return affectedRowsOf(result) === 1;
 }
 
 /**
@@ -2740,20 +2739,20 @@ export async function consumeOnceApproval(id: string): Promise<boolean> {
  * 供 chat route 恢复路径判断：thread 处于 awaiting_approval 时，最近决议决定恢复语义。
  */
 export async function getLatestResolvedApprovalByThread(
- threadId: string,
+  threadId: string,
 ): Promise<ToolApprovalRequest | null> {
- const [row] = await db
- .select()
- .from(toolApprovalRequest)
- .where(
- and(
- eq(toolApprovalRequest.threadId, threadId),
- inArray(toolApprovalRequest.status, ["approved", "denied"]),
- ),
- )
- .orderBy(desc(toolApprovalRequest.resolvedAt))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(toolApprovalRequest)
+    .where(
+      and(
+        eq(toolApprovalRequest.threadId, threadId),
+        inArray(toolApprovalRequest.status, ["approved", "denied"]),
+      ),
+    )
+    .orderBy(desc(toolApprovalRequest.resolvedAt))
+    .limit(1);
+  return row ?? null;
 }
 
 // ─── Background Task Queries () ─────────────────────────
@@ -2764,49 +2763,49 @@ export async function getLatestResolvedApprovalByThread(
 
 /** 创建一条后台任务记录（status=starting）。MySQL 无 RETURNING，自行生成主键并构造返回对象。 */
 export async function createBackgroundTask(params: {
- threadId: string;
- toolRunId?: string | null;
- kind: BackgroundTaskKind;
- command: string;
- runtimeType: string;
- logPath: string;
- port?: number | null;
+  threadId: string;
+  toolRunId?: string | null;
+  kind: BackgroundTaskKind;
+  command: string;
+  runtimeType: string;
+  logPath: string;
+  port?: number | null;
 }): Promise<BackgroundTask> {
- const now = new Date();
- const row: BackgroundTask = {
- id: randomUUID(),
- threadId: params.threadId,
- toolRunId: params.toolRunId ?? null,
- kind: params.kind,
- command: params.command,
- runtimeType: params.runtimeType,
- status: "starting",
- pid: null,
- containerName: null,
- port: params.port ?? null,
- logPath: params.logPath,
- exitCode: null,
- startedAt: now,
- finishedAt: null,
- lastActivityAt: now,
- };
- await db.insert(backgroundTask).values(row);
- return row;
+  const now = new Date();
+  const row: BackgroundTask = {
+    id: randomUUID(),
+    threadId: params.threadId,
+    toolRunId: params.toolRunId ?? null,
+    kind: params.kind,
+    command: params.command,
+    runtimeType: params.runtimeType,
+    status: "starting",
+    pid: null,
+    containerName: null,
+    port: params.port ?? null,
+    logPath: params.logPath,
+    exitCode: null,
+    startedAt: now,
+    finishedAt: null,
+    lastActivityAt: now,
+  };
+  await db.insert(backgroundTask).values(row);
+  return row;
 }
 
 /** 按 id 取后台任务。 */
 export async function getBackgroundTask(id: string): Promise<BackgroundTask | null> {
- const [row] = await db.select().from(backgroundTask).where(eq(backgroundTask.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(backgroundTask).where(eq(backgroundTask.id, id)).limit(1);
+  return row ?? null;
 }
 
 /** 列 thread 的全部后台任务（按 startedAt desc）。 */
 export async function listBackgroundTasksByThread(threadId: string): Promise<BackgroundTask[]> {
- return db
- .select()
- .from(backgroundTask)
- .where(eq(backgroundTask.threadId, threadId))
- .orderBy(desc(backgroundTask.startedAt));
+  return db
+    .select()
+    .from(backgroundTask)
+    .where(eq(backgroundTask.threadId, threadId))
+    .orderBy(desc(backgroundTask.startedAt));
 }
 
 /**
@@ -2814,34 +2813,34 @@ export async function listBackgroundTasksByThread(threadId: string): Promise<Bac
  * 返回更新后的行（按入参 + existing 合并；MySQL 无 RETURNING）。
  */
 export async function updateBackgroundTask(
- id: string,
- patch: {
- status?: BackgroundTaskStatus;
- pid?: number | null;
- containerName?: string | null;
- port?: number | null;
- logPath?: string;
- exitCode?: number | null;
- finishedAt?: Date | null;
- lastActivityAt?: Date;
- },
+  id: string,
+  patch: {
+    status?: BackgroundTaskStatus;
+    pid?: number | null;
+    containerName?: string | null;
+    port?: number | null;
+    logPath?: string;
+    exitCode?: number | null;
+    finishedAt?: Date | null;
+    lastActivityAt?: Date;
+  },
 ): Promise<BackgroundTask | null> {
- const [existing] = await db
- .select()
- .from(backgroundTask)
- .where(eq(backgroundTask.id, id))
- .limit(1);
- if (!existing) return null;
- const sets: Record<string, unknown> = { lastActivityAt: patch.lastActivityAt ?? new Date() };
- if (patch.status !== undefined) sets.status = patch.status;
- if (patch.pid !== undefined) sets.pid = patch.pid;
- if (patch.containerName !== undefined) sets.containerName = patch.containerName;
- if (patch.port !== undefined) sets.port = patch.port;
- if (patch.logPath !== undefined) sets.logPath = patch.logPath;
- if (patch.exitCode !== undefined) sets.exitCode = patch.exitCode;
- if (patch.finishedAt !== undefined) sets.finishedAt = patch.finishedAt;
- await db.update(backgroundTask).set(sets).where(eq(backgroundTask.id, id));
- return { ...existing, ...sets } as BackgroundTask;
+  const [existing] = await db
+    .select()
+    .from(backgroundTask)
+    .where(eq(backgroundTask.id, id))
+    .limit(1);
+  if (!existing) return null;
+  const sets: Record<string, unknown> = { lastActivityAt: patch.lastActivityAt ?? new Date() };
+  if (patch.status !== undefined) sets.status = patch.status;
+  if (patch.pid !== undefined) sets.pid = patch.pid;
+  if (patch.containerName !== undefined) sets.containerName = patch.containerName;
+  if (patch.port !== undefined) sets.port = patch.port;
+  if (patch.logPath !== undefined) sets.logPath = patch.logPath;
+  if (patch.exitCode !== undefined) sets.exitCode = patch.exitCode;
+  if (patch.finishedAt !== undefined) sets.finishedAt = patch.finishedAt;
+  await db.update(backgroundTask).set(sets).where(eq(backgroundTask.id, id));
+  return { ...existing, ...sets } as BackgroundTask;
 }
 
 /**
@@ -2849,18 +2848,18 @@ export async function updateBackgroundTask(
  * 供 stopAllByThread / idle sweep 逐个回收。
  */
 export async function listActiveBackgroundTasksByThread(
- threadId: string,
+  threadId: string,
 ): Promise<BackgroundTask[]> {
- return db
- .select()
- .from(backgroundTask)
- .where(
- and(
- eq(backgroundTask.threadId, threadId),
- inArray(backgroundTask.status, ["starting", "running"]),
- ),
- )
- .orderBy(asc(backgroundTask.startedAt));
+  return db
+    .select()
+    .from(backgroundTask)
+    .where(
+      and(
+        eq(backgroundTask.threadId, threadId),
+        inArray(backgroundTask.status, ["starting", "running"]),
+      ),
+    )
+    .orderBy(asc(backgroundTask.startedAt));
 }
 
 /**
@@ -2868,11 +2867,11 @@ export async function listActiveBackgroundTasksByThread(
  * 供进程退出 closeAllBackgroundTasks / idle sweep 全量扫描。
  */
 export async function listActiveBackgroundTasks(): Promise<BackgroundTask[]> {
- return db
- .select()
- .from(backgroundTask)
- .where(inArray(backgroundTask.status, ["starting", "running"]))
- .orderBy(asc(backgroundTask.startedAt));
+  return db
+    .select()
+    .from(backgroundTask)
+    .where(inArray(backgroundTask.status, ["starting", "running"]))
+    .orderBy(asc(backgroundTask.startedAt));
 }
 
 /**
@@ -2881,14 +2880,14 @@ export async function listActiveBackgroundTasks(): Promise<BackgroundTask[]> {
  * 返回被标记的任务列表（registry 可据此追加事件或仅作日志）。
  */
 export async function markOrphanBackgroundTasksOnStartup(): Promise<BackgroundTask[]> {
- const orphans = await listActiveBackgroundTasks();
- if (orphans.length === 0) return [];
- const now = new Date();
- await db
- .update(backgroundTask)
- .set({ status: "orphaned", finishedAt: now, lastActivityAt: now })
- .where(inArray(backgroundTask.status, ["starting", "running"]));
- return orphans.map((o) => ({ ...o, status: "orphaned", finishedAt: now }));
+  const orphans = await listActiveBackgroundTasks();
+  if (orphans.length === 0) return [];
+  const now = new Date();
+  await db
+    .update(backgroundTask)
+    .set({ status: "orphaned", finishedAt: now, lastActivityAt: now })
+    .where(inArray(backgroundTask.status, ["starting", "running"]));
+  return orphans.map((o) => ({ ...o, status: "orphaned", finishedAt: now }));
 }
 
 // ─── Git Checkpoint Queries () ──────────────────────────
@@ -2898,50 +2897,50 @@ export async function markOrphanBackgroundTasksOnStartup(): Promise<BackgroundTa
 
 /** 创建一条 checkpoint 记录。MySQL 无 RETURNING，自行生成主键并构造返回对象。 */
 export async function createCheckpointRow(params: {
- threadId: string;
- tag: string;
- commitSha: string;
- reason: string;
- createdByToolRunId?: string | null;
- filesChanged?: string | null;
+  threadId: string;
+  tag: string;
+  commitSha: string;
+  reason: string;
+  createdByToolRunId?: string | null;
+  filesChanged?: string | null;
 }): Promise<GitCheckpoint> {
- const row: GitCheckpoint = {
- id: randomUUID(),
- threadId: params.threadId,
- tag: params.tag,
- commitSha: params.commitSha,
- reason: params.reason,
- createdByToolRunId: params.createdByToolRunId ?? null,
- restoredAt: null,
- filesChanged: params.filesChanged ?? null,
- createdAt: new Date(),
- };
- await db.insert(gitCheckpoint).values(row);
- return row;
+  const row: GitCheckpoint = {
+    id: randomUUID(),
+    threadId: params.threadId,
+    tag: params.tag,
+    commitSha: params.commitSha,
+    reason: params.reason,
+    createdByToolRunId: params.createdByToolRunId ?? null,
+    restoredAt: null,
+    filesChanged: params.filesChanged ?? null,
+    createdAt: new Date(),
+  };
+  await db.insert(gitCheckpoint).values(row);
+  return row;
 }
 
 /** 按 id 取 checkpoint。 */
 export async function getCheckpoint(id: string): Promise<GitCheckpoint | null> {
- const [row] = await db.select().from(gitCheckpoint).where(eq(gitCheckpoint.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(gitCheckpoint).where(eq(gitCheckpoint.id, id)).limit(1);
+  return row ?? null;
 }
 
 /** 列 thread 的全部 checkpoint（按 createdAt desc，最近在前）。 */
 export async function listCheckpointsByThread(threadId: string): Promise<GitCheckpoint[]> {
- return db
- .select()
- .from(gitCheckpoint)
- .where(eq(gitCheckpoint.threadId, threadId))
- .orderBy(desc(gitCheckpoint.createdAt), desc(gitCheckpoint.id));
+  return db
+    .select()
+    .from(gitCheckpoint)
+    .where(eq(gitCheckpoint.threadId, threadId))
+    .orderBy(desc(gitCheckpoint.createdAt), desc(gitCheckpoint.id));
 }
 
 /** 标记 checkpoint 已被 restore（回填 restoredAt）。返回更新后的行（按 existing 合并）。 */
 export async function markCheckpointRestored(id: string): Promise<GitCheckpoint | null> {
- const [existing] = await db.select().from(gitCheckpoint).where(eq(gitCheckpoint.id, id)).limit(1);
- if (!existing) return null;
- const now = new Date();
- await db.update(gitCheckpoint).set({ restoredAt: now }).where(eq(gitCheckpoint.id, id));
- return { ...existing, restoredAt: now };
+  const [existing] = await db.select().from(gitCheckpoint).where(eq(gitCheckpoint.id, id)).limit(1);
+  if (!existing) return null;
+  const now = new Date();
+  await db.update(gitCheckpoint).set({ restoredAt: now }).where(eq(gitCheckpoint.id, id));
+  return { ...existing, restoredAt: now };
 }
 
 // ─── Memory Queries (b) ─────────────────────────────────
@@ -2949,104 +2948,104 @@ export async function markCheckpointRestored(id: string): Promise<GitCheckpoint 
 // MemoryEntry CRUD。store.ts 做去重/provenance 校验/soft delete/事件，这里只做纯 DB 操作。
 
 export async function createMemoryRow(params: {
- scope: MemoryScope;
- scopeRef: string | null;
- kind: MemoryKind;
- text: string;
- textHash: string;
- provenance: MemoryProvenanceEntry[];
- confidence: MemoryConfidence;
- expiresAt: Date | null;
- createdByToolRunId: string | null;
+  scope: MemoryScope;
+  scopeRef: string | null;
+  kind: MemoryKind;
+  text: string;
+  textHash: string;
+  provenance: MemoryProvenanceEntry[];
+  confidence: MemoryConfidence;
+  expiresAt: Date | null;
+  createdByToolRunId: string | null;
 }): Promise<MemoryEntry> {
- // json 列 zod 校验（fail-closed，provenance 必须非空防孤儿记忆）
- const provenance = validateJsonColumn(params.provenance, memoryProvenanceSchema, "provenance");
- const row: MemoryEntry = {
- id: randomUUID(),
- scope: params.scope,
- scopeRef: params.scopeRef,
- kind: params.kind,
- text: params.text,
- textHash: params.textHash,
- provenance,
- confidence: params.confidence,
- status: "active",
- expiresAt: params.expiresAt,
- createdByToolRunId: params.createdByToolRunId,
- createdAt: new Date(),
- updatedAt: new Date(),
- };
- await db.insert(memoryEntry).values(row);
- return row;
+  // json 列 zod 校验（fail-closed，provenance 必须非空防孤儿记忆）
+  const provenance = validateJsonColumn(params.provenance, memoryProvenanceSchema, "provenance");
+  const row: MemoryEntry = {
+    id: randomUUID(),
+    scope: params.scope,
+    scopeRef: params.scopeRef,
+    kind: params.kind,
+    text: params.text,
+    textHash: params.textHash,
+    provenance,
+    confidence: params.confidence,
+    status: "active",
+    expiresAt: params.expiresAt,
+    createdByToolRunId: params.createdByToolRunId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  await db.insert(memoryEntry).values(row);
+  return row;
 }
 
 export async function getMemoryRow(id: string): Promise<MemoryEntry | null> {
- const [row] = await db.select().from(memoryEntry).where(eq(memoryEntry.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(memoryEntry).where(eq(memoryEntry.id, id)).limit(1);
+  return row ?? null;
 }
 
 export async function listMemoryRows(filter: {
- scope: MemoryScope;
- scopeRef: string | null;
- kind?: MemoryKind;
- status?: "active" | "revoked";
+  scope: MemoryScope;
+  scopeRef: string | null;
+  kind?: MemoryKind;
+  status?: "active" | "revoked";
 }): Promise<MemoryEntry[]> {
- const conds = [eq(memoryEntry.scope, filter.scope)];
- if (filter.scopeRef !== null) conds.push(eq(memoryEntry.scopeRef, filter.scopeRef));
- else conds.push(isNull(memoryEntry.scopeRef));
- if (filter.kind) conds.push(eq(memoryEntry.kind, filter.kind));
- conds.push(eq(memoryEntry.status, filter.status ?? "active"));
- return db
- .select()
- .from(memoryEntry)
- .where(and(...conds))
- .orderBy(desc(memoryEntry.updatedAt), desc(memoryEntry.id));
+  const conds = [eq(memoryEntry.scope, filter.scope)];
+  if (filter.scopeRef !== null) conds.push(eq(memoryEntry.scopeRef, filter.scopeRef));
+  else conds.push(isNull(memoryEntry.scopeRef));
+  if (filter.kind) conds.push(eq(memoryEntry.kind, filter.kind));
+  conds.push(eq(memoryEntry.status, filter.status ?? "active"));
+  return db
+    .select()
+    .from(memoryEntry)
+    .where(and(...conds))
+    .orderBy(desc(memoryEntry.updatedAt), desc(memoryEntry.id));
 }
 
 export async function findDuplicateMemory(params: {
- scope: MemoryScope;
- scopeRef: string | null;
- kind: MemoryKind;
- textHash: string;
+  scope: MemoryScope;
+  scopeRef: string | null;
+  kind: MemoryKind;
+  textHash: string;
 }): Promise<MemoryEntry | null> {
- const conds = [
- eq(memoryEntry.scope, params.scope),
- eq(memoryEntry.kind, params.kind),
- eq(memoryEntry.textHash, params.textHash),
- eq(memoryEntry.status, "active"),
- ];
- if (params.scopeRef !== null) conds.push(eq(memoryEntry.scopeRef, params.scopeRef));
- else conds.push(isNull(memoryEntry.scopeRef));
- const [row] = await db
- .select()
- .from(memoryEntry)
- .where(and(...conds))
- .limit(1);
- return row ?? null;
+  const conds = [
+    eq(memoryEntry.scope, params.scope),
+    eq(memoryEntry.kind, params.kind),
+    eq(memoryEntry.textHash, params.textHash),
+    eq(memoryEntry.status, "active"),
+  ];
+  if (params.scopeRef !== null) conds.push(eq(memoryEntry.scopeRef, params.scopeRef));
+  else conds.push(isNull(memoryEntry.scopeRef));
+  const [row] = await db
+    .select()
+    .from(memoryEntry)
+    .where(and(...conds))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function updateMemoryRow(
- id: string,
- patch: {
- status?: "active" | "revoked";
- confidence?: MemoryConfidence;
- provenance?: MemoryProvenanceEntry[];
- expiresAt?: Date | null;
- /** text 更新（同步 textHash）。 */
- text?: string;
- textHash?: string;
- },
+  id: string,
+  patch: {
+    status?: "active" | "revoked";
+    confidence?: MemoryConfidence;
+    provenance?: MemoryProvenanceEntry[];
+    expiresAt?: Date | null;
+    /** text 更新（同步 textHash）。 */
+    text?: string;
+    textHash?: string;
+  },
 ): Promise<MemoryEntry | null> {
- const set: Record<string, unknown> = { updatedAt: new Date() };
- if (patch.status !== undefined) set.status = patch.status;
- if (patch.confidence !== undefined) set.confidence = patch.confidence;
- if (patch.provenance !== undefined) set.provenance = patch.provenance;
- if (patch.expiresAt !== undefined) set.expiresAt = patch.expiresAt;
- if (patch.text !== undefined) set.text = patch.text;
- if (patch.textHash !== undefined) set.textHash = patch.textHash;
- await db.update(memoryEntry).set(set).where(eq(memoryEntry.id, id));
- const [row] = await db.select().from(memoryEntry).where(eq(memoryEntry.id, id)).limit(1);
- return row ?? null;
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  if (patch.status !== undefined) set.status = patch.status;
+  if (patch.confidence !== undefined) set.confidence = patch.confidence;
+  if (patch.provenance !== undefined) set.provenance = patch.provenance;
+  if (patch.expiresAt !== undefined) set.expiresAt = patch.expiresAt;
+  if (patch.text !== undefined) set.text = patch.text;
+  if (patch.textHash !== undefined) set.textHash = patch.textHash;
+  await db.update(memoryEntry).set(set).where(eq(memoryEntry.id, id));
+  const [row] = await db.select().from(memoryEntry).where(eq(memoryEntry.id, id)).limit(1);
+  return row ?? null;
 }
 
 // ─── Memory Embedding Queries () ──────────────
@@ -3055,61 +3054,61 @@ export async function updateMemoryRow(
 // getActiveEmbeddingRow 供 retrieveMemories semantic rerank：只取 status=active 的向量。
 
 export async function upsertEmbeddingRow(params: {
- memoryId: string;
- provider: string;
- model: string;
- vector: number[];
- dim: number;
- status: "active" | "stale" | "error";
- errorMessage?: string | null;
+  memoryId: string;
+  provider: string;
+  model: string;
+  vector: number[];
+  dim: number;
+  status: "active" | "stale" | "error";
+  errorMessage?: string | null;
 }): Promise<MemoryEmbedding> {
- // : 改 INSERT ... ON DUPLICATE KEY UPDATE(依赖 memoryId+provider 唯一索引),
- // 消除原 SELECT-then-INSERT 竞态:并发双方都 select 空 → 都 INSERT → 一方撞唯一约束失败。
- const now = new Date();
- const row = {
- id: randomUUID(),
- memoryId: params.memoryId,
- provider: params.provider,
- model: params.model,
- vector: params.vector,
- dim: params.dim,
- status: params.status,
- errorMessage: params.errorMessage ?? null,
- createdAt: now,
- updatedAt: now,
- };
- await db
- .insert(memoryEmbedding)
- .values(row)
- .onDuplicateKeyUpdate({
- set: {
- model: sql`VALUES(model)`,
- vector: sql`VALUES(vector)`,
- dim: sql`VALUES(dim)`,
- status: sql`VALUES(status)`,
- errorMessage: sql`VALUES(errorMessage)`,
- updatedAt: sql`VALUES(updatedAt)`,
- },
- });
- return row;
+  // : 改 INSERT ... ON DUPLICATE KEY UPDATE(依赖 memoryId+provider 唯一索引),
+  // 消除原 SELECT-then-INSERT 竞态:并发双方都 select 空 → 都 INSERT → 一方撞唯一约束失败。
+  const now = new Date();
+  const row = {
+    id: randomUUID(),
+    memoryId: params.memoryId,
+    provider: params.provider,
+    model: params.model,
+    vector: params.vector,
+    dim: params.dim,
+    status: params.status,
+    errorMessage: params.errorMessage ?? null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db
+    .insert(memoryEmbedding)
+    .values(row)
+    .onDuplicateKeyUpdate({
+      set: {
+        model: sql`VALUES(model)`,
+        vector: sql`VALUES(vector)`,
+        dim: sql`VALUES(dim)`,
+        status: sql`VALUES(status)`,
+        errorMessage: sql`VALUES(errorMessage)`,
+        updatedAt: sql`VALUES(updatedAt)`,
+      },
+    });
+  return row;
 }
 
 export async function getActiveEmbeddingRow(
- memoryId: string,
- provider: string,
+  memoryId: string,
+  provider: string,
 ): Promise<MemoryEmbedding | null> {
- const [row] = await db
- .select()
- .from(memoryEmbedding)
- .where(
- and(
- eq(memoryEmbedding.memoryId, memoryId),
- eq(memoryEmbedding.provider, provider),
- eq(memoryEmbedding.status, "active"),
- ),
- )
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(memoryEmbedding)
+    .where(
+      and(
+        eq(memoryEmbedding.memoryId, memoryId),
+        eq(memoryEmbedding.provider, provider),
+        eq(memoryEmbedding.status, "active"),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -3117,23 +3116,23 @@ export async function getActiveEmbeddingRow(
  * 返回 Map<memoryId, MemoryEmbedding>（仅当前 provider 的 active 行）。
  */
 export async function listActiveEmbeddingRows(
- memoryIds: string[],
- provider: string,
+  memoryIds: string[],
+  provider: string,
 ): Promise<Map<string, MemoryEmbedding>> {
- const out = new Map<string, MemoryEmbedding>();
- if (memoryIds.length === 0) return out;
- const rows = await db
- .select()
- .from(memoryEmbedding)
- .where(
- and(
- inArray(memoryEmbedding.memoryId, memoryIds),
- eq(memoryEmbedding.provider, provider),
- eq(memoryEmbedding.status, "active"),
- ),
- );
- for (const r of rows) out.set(r.memoryId, r);
- return out;
+  const out = new Map<string, MemoryEmbedding>();
+  if (memoryIds.length === 0) return out;
+  const rows = await db
+    .select()
+    .from(memoryEmbedding)
+    .where(
+      and(
+        inArray(memoryEmbedding.memoryId, memoryIds),
+        eq(memoryEmbedding.provider, provider),
+        eq(memoryEmbedding.status, "active"),
+      ),
+    );
+  for (const r of rows) out.set(r.memoryId, r);
+  return out;
 }
 
 /**
@@ -3142,14 +3141,14 @@ export async function listActiveEmbeddingRows(
  * 供 cosine 粗排（维度可能不匹配 → 调用方需校验 dim）。无则 null。
  */
 export async function getActiveEmbeddingRowAnyProvider(
- memoryId: string,
+  memoryId: string,
 ): Promise<MemoryEmbedding | null> {
- const [row] = await db
- .select()
- .from(memoryEmbedding)
- .where(and(eq(memoryEmbedding.memoryId, memoryId), eq(memoryEmbedding.status, "active")))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(memoryEmbedding)
+    .where(and(eq(memoryEmbedding.memoryId, memoryId), eq(memoryEmbedding.status, "active")))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -3157,21 +3156,21 @@ export async function getActiveEmbeddingRowAnyProvider(
  * 单查询 IN(...) 取所有 memoryId 的 active embedding 行，每个 memoryId 至多取一条。
  */
 export async function listActiveEmbeddingRowsAnyProvider(
- memoryIds: string[],
+  memoryIds: string[],
 ): Promise<Map<string, MemoryEmbedding>> {
- const out = new Map<string, MemoryEmbedding>();
- if (memoryIds.length === 0) return out;
- const rows = await db
- .select()
- .from(memoryEmbedding)
- .where(and(inArray(memoryEmbedding.memoryId, memoryIds), eq(memoryEmbedding.status, "active")));
- // 同一 memoryId 可能有多条（不同 provider），取第一条（任意 provider）
- for (const row of rows) {
- if (!out.has(row.memoryId)) {
- out.set(row.memoryId, row);
- }
- }
- return out;
+  const out = new Map<string, MemoryEmbedding>();
+  if (memoryIds.length === 0) return out;
+  const rows = await db
+    .select()
+    .from(memoryEmbedding)
+    .where(and(inArray(memoryEmbedding.memoryId, memoryIds), eq(memoryEmbedding.status, "active")));
+  // 同一 memoryId 可能有多条（不同 provider），取第一条（任意 provider）
+  for (const row of rows) {
+    if (!out.has(row.memoryId)) {
+      out.set(row.memoryId, row);
+    }
+  }
+  return out;
 }
 
 /**
@@ -3179,19 +3178,19 @@ export async function listActiveEmbeddingRowsAnyProvider(
  * 由 retention 定时任务调用。@returns 删除条数
  */
 export async function cleanupExpiredMemories(): Promise<number> {
- const now = new Date();
- const expired = await db
- .select({ id: memoryEntry.id })
- .from(memoryEntry)
- .where(and(lt(memoryEntry.expiresAt, now), eq(memoryEntry.status, "active")));
- if (expired.length === 0) return 0;
- const ids = expired.map((r) => r.id);
- // 事务化删除：embeddings + entries 要么一起成功要么一起回滚，防半删导致语义搜索失效
- return db.transaction(async (tx) => {
- await tx.delete(memoryEmbedding).where(inArray(memoryEmbedding.memoryId, ids));
- const result = await tx.delete(memoryEntry).where(inArray(memoryEntry.id, ids));
- return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
- });
+  const now = new Date();
+  const expired = await db
+    .select({ id: memoryEntry.id })
+    .from(memoryEntry)
+    .where(and(lt(memoryEntry.expiresAt, now), eq(memoryEntry.status, "active")));
+  if (expired.length === 0) return 0;
+  const ids = expired.map((r) => r.id);
+  // 事务化删除：embeddings + entries 要么一起成功要么一起回滚，防半删导致语义搜索失效
+  return db.transaction(async (tx) => {
+    await tx.delete(memoryEmbedding).where(inArray(memoryEmbedding.memoryId, ids));
+    const result = await tx.delete(memoryEntry).where(inArray(memoryEntry.id, ids));
+    return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
+  });
 }
 
 /**
@@ -3203,10 +3202,10 @@ export async function cleanupExpiredMemories(): Promise<number> {
  * 区别于全局 retentionDays（90 天）。其他表仍用全局保留期。
  */
 export async function cleanupOldSnapshots(retainDays?: number): Promise<number> {
- const days = retainDays ?? dbConfig.snapshotRetentionDays;
- const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
- const result = await db.delete(contextSnapshot).where(lt(contextSnapshot.createdAt, cutoff));
- return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
+  const days = retainDays ?? dbConfig.snapshotRetentionDays;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const result = await db.delete(contextSnapshot).where(lt(contextSnapshot.createdAt, cutoff));
+  return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
 }
 
 /**
@@ -3214,28 +3213,28 @@ export async function cleanupOldSnapshots(retainDays?: number): Promise<number> 
  * 用 policyConfig 表 key="seed_version" 存储，避免新表。seed.ts 执行前检查版本，已执行则跳过。
  */
 export async function getSeedVersion(): Promise<string | null> {
- const [row] = await db
- .select()
- .from(policyConfig)
- .where(eq(policyConfig.key, "seed_version"))
- .limit(1);
- return (row?.value as string) ?? null;
+  const [row] = await db
+    .select()
+    .from(policyConfig)
+    .where(eq(policyConfig.key, "seed_version"))
+    .limit(1);
+  return (row?.value as string) ?? null;
 }
 
 export async function setSeedVersion(version: string): Promise<void> {
- const [existing] = await db
- .select()
- .from(policyConfig)
- .where(eq(policyConfig.key, "seed_version"))
- .limit(1);
- if (existing) {
- await db
- .update(policyConfig)
- .set({ value: version })
- .where(eq(policyConfig.key, "seed_version"));
- } else {
- await db.insert(policyConfig).values({ key: "seed_version", value: version });
- }
+  const [existing] = await db
+    .select()
+    .from(policyConfig)
+    .where(eq(policyConfig.key, "seed_version"))
+    .limit(1);
+  if (existing) {
+    await db
+      .update(policyConfig)
+      .set({ value: version })
+      .where(eq(policyConfig.key, "seed_version"));
+  } else {
+    await db.insert(policyConfig).values({ key: "seed_version", value: version });
+  }
 }
 
 /**
@@ -3243,7 +3242,7 @@ export async function setSeedVersion(version: string): Promise<void> {
  * 供 markEmbeddingStale（标 stale 需先读现有行）与 Studio 诊断。
  */
 export async function listEmbeddingRowsByMemory(memoryId: string): Promise<MemoryEmbedding[]> {
- return db.select().from(memoryEmbedding).where(eq(memoryEmbedding.memoryId, memoryId));
+  return db.select().from(memoryEmbedding).where(eq(memoryEmbedding.memoryId, memoryId));
 }
 
 // ─── MCP Server Config Queries () ───────────────────────
@@ -3252,86 +3251,86 @@ export async function listEmbeddingRowsByMemory(memoryId: string): Promise<Memor
 // 调用时注入真实 env——本层只做纯 DB 操作，不做脱敏。权限走 ToolPermissionRule（mcp.<name>.<tool>）。
 
 export async function createMcpServerConfig(params: {
- name: string;
- transport: "stdio" | "http" | "sse";
- command?: string | null;
- args?: string[] | null;
- url?: string | null;
- env?: Record<string, string> | null;
- allowedTools?: string[] | null;
- enabled?: boolean;
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  command?: string | null;
+  args?: string[] | null;
+  url?: string | null;
+  env?: Record<string, string> | null;
+  allowedTools?: string[] | null;
+  enabled?: boolean;
 }): Promise<McpServerConfig> {
- const row: McpServerConfig = {
- id: randomUUID(),
- name: params.name,
- transport: params.transport,
- command: params.command ?? null,
- args: params.args ?? null,
- url: params.url ?? null,
- env: params.env ?? null,
- allowedTools: params.allowedTools ?? null,
- enabled: params.enabled ?? true,
- // 协商字段建时为 null,连接成功后 recordMcpServerHandshake 回写
- lastServerVersion: null,
- lastCapabilities: null,
- lastConnectedAt: null,
- createdAt: new Date(),
- updatedAt: new Date(),
- };
- await db.insert(mcpServerConfig).values(row);
- return row;
+  const row: McpServerConfig = {
+    id: randomUUID(),
+    name: params.name,
+    transport: params.transport,
+    command: params.command ?? null,
+    args: params.args ?? null,
+    url: params.url ?? null,
+    env: params.env ?? null,
+    allowedTools: params.allowedTools ?? null,
+    enabled: params.enabled ?? true,
+    // 协商字段建时为 null,连接成功后 recordMcpServerHandshake 回写
+    lastServerVersion: null,
+    lastCapabilities: null,
+    lastConnectedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  await db.insert(mcpServerConfig).values(row);
+  return row;
 }
 
 export async function getMcpServerConfig(id: string): Promise<McpServerConfig | null> {
- const [row] = await db.select().from(mcpServerConfig).where(eq(mcpServerConfig.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(mcpServerConfig).where(eq(mcpServerConfig.id, id)).limit(1);
+  return row ?? null;
 }
 
 export async function getMcpServerConfigByName(name: string): Promise<McpServerConfig | null> {
- const [row] = await db
- .select()
- .from(mcpServerConfig)
- .where(eq(mcpServerConfig.name, name))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(mcpServerConfig)
+    .where(eq(mcpServerConfig.name, name))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function listMcpServerConfigs(): Promise<McpServerConfig[]> {
- return db.select().from(mcpServerConfig).orderBy(asc(mcpServerConfig.createdAt));
+  return db.select().from(mcpServerConfig).orderBy(asc(mcpServerConfig.createdAt));
 }
 
 export async function listEnabledMcpServerConfigs(): Promise<McpServerConfig[]> {
- return db
- .select()
- .from(mcpServerConfig)
- .where(eq(mcpServerConfig.enabled, true))
- .orderBy(asc(mcpServerConfig.createdAt));
+  return db
+    .select()
+    .from(mcpServerConfig)
+    .where(eq(mcpServerConfig.enabled, true))
+    .orderBy(asc(mcpServerConfig.createdAt));
 }
 
 export async function updateMcpServerConfig(
- id: string,
- patch: {
- name?: string;
- transport?: "stdio" | "http" | "sse";
- command?: string | null;
- args?: string[] | null;
- url?: string | null;
- env?: Record<string, string> | null;
- allowedTools?: string[] | null;
- enabled?: boolean;
- },
+  id: string,
+  patch: {
+    name?: string;
+    transport?: "stdio" | "http" | "sse";
+    command?: string | null;
+    args?: string[] | null;
+    url?: string | null;
+    env?: Record<string, string> | null;
+    allowedTools?: string[] | null;
+    enabled?: boolean;
+  },
 ): Promise<McpServerConfig | null> {
- const set: Record<string, unknown> = { updatedAt: new Date() };
- for (const [k, v] of Object.entries(patch)) {
- if (v !== undefined) set[k] = v;
- }
- await db.update(mcpServerConfig).set(set).where(eq(mcpServerConfig.id, id));
- const [row] = await db.select().from(mcpServerConfig).where(eq(mcpServerConfig.id, id)).limit(1);
- return row ?? null;
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) set[k] = v;
+  }
+  await db.update(mcpServerConfig).set(set).where(eq(mcpServerConfig.id, id));
+  const [row] = await db.select().from(mcpServerConfig).where(eq(mcpServerConfig.id, id)).limit(1);
+  return row ?? null;
 }
 
 export async function deleteMcpServerConfig(id: string): Promise<void> {
- await db.delete(mcpServerConfig).where(eq(mcpServerConfig.id, id));
+  await db.delete(mcpServerConfig).where(eq(mcpServerConfig.id, id));
 }
 
 /**
@@ -3342,18 +3341,18 @@ export async function deleteMcpServerConfig(id: string): Promise<void> {
  * 按 name 定位(server name 唯一);best-effort——失败仅记日志不阻断连接。
  */
 export async function recordMcpServerHandshake(
- serverName: string,
- info: { serverVersion?: string | null; capabilities?: Record<string, unknown> | null },
+  serverName: string,
+  info: { serverVersion?: string | null; capabilities?: Record<string, unknown> | null },
 ): Promise<void> {
- await db
- .update(mcpServerConfig)
- .set({
- lastServerVersion: info.serverVersion ?? null,
- lastCapabilities: info.capabilities ?? null,
- lastConnectedAt: new Date(),
- updatedAt: new Date(),
- })
- .where(eq(mcpServerConfig.name, serverName));
+  await db
+    .update(mcpServerConfig)
+    .set({
+      lastServerVersion: info.serverVersion ?? null,
+      lastCapabilities: info.capabilities ?? null,
+      lastConnectedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(mcpServerConfig.name, serverName));
 }
 
 // ─── Custom Tool Queries () ──────────────────────────────
@@ -3363,83 +3362,83 @@ export async function recordMcpServerHandshake(
 // 权限走 ToolPermissionRule（custom.<name>，默认 ask）。
 
 export async function createCustomTool(params: {
- name: string;
- description: string;
- inputSchema: Record<string, unknown>;
- executorType: "webhook" | "script";
- executorConfig: Record<string, unknown>;
- enabled?: boolean;
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  executorType: "webhook" | "script";
+  executorConfig: Record<string, unknown>;
+  enabled?: boolean;
 }): Promise<CustomTool> {
- // json 列 zod 校验（fail-closed，脏数据抛错不落库）
- const inputSchema = validateJsonColumn(
- params.inputSchema,
- customToolInputSchemaSchema,
- "inputSchema",
- );
- const executorConfig = validateJsonColumn(
- params.executorConfig,
- customToolExecutorConfigSchema,
- "executorConfig",
- );
- const row: CustomTool = {
- id: randomUUID(),
- name: params.name,
- description: params.description,
- inputSchema,
- executorType: params.executorType,
- executorConfig,
- enabled: params.enabled ?? true,
- createdAt: new Date(),
- updatedAt: new Date(),
- };
- await db.insert(customTool).values(row);
- return row;
+  // json 列 zod 校验（fail-closed，脏数据抛错不落库）
+  const inputSchema = validateJsonColumn(
+    params.inputSchema,
+    customToolInputSchemaSchema,
+    "inputSchema",
+  );
+  const executorConfig = validateJsonColumn(
+    params.executorConfig,
+    customToolExecutorConfigSchema,
+    "executorConfig",
+  );
+  const row: CustomTool = {
+    id: randomUUID(),
+    name: params.name,
+    description: params.description,
+    inputSchema,
+    executorType: params.executorType,
+    executorConfig,
+    enabled: params.enabled ?? true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  await db.insert(customTool).values(row);
+  return row;
 }
 
 export async function getCustomTool(id: string): Promise<CustomTool | null> {
- const [row] = await db.select().from(customTool).where(eq(customTool.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(customTool).where(eq(customTool.id, id)).limit(1);
+  return row ?? null;
 }
 
 export async function getCustomToolByName(name: string): Promise<CustomTool | null> {
- const [row] = await db.select().from(customTool).where(eq(customTool.name, name)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(customTool).where(eq(customTool.name, name)).limit(1);
+  return row ?? null;
 }
 
 export async function listCustomTools(): Promise<CustomTool[]> {
- return db.select().from(customTool).orderBy(asc(customTool.createdAt));
+  return db.select().from(customTool).orderBy(asc(customTool.createdAt));
 }
 
 export async function listEnabledCustomTools(): Promise<CustomTool[]> {
- return db
- .select()
- .from(customTool)
- .where(eq(customTool.enabled, true))
- .orderBy(asc(customTool.createdAt));
+  return db
+    .select()
+    .from(customTool)
+    .where(eq(customTool.enabled, true))
+    .orderBy(asc(customTool.createdAt));
 }
 
 export async function updateCustomTool(
- id: string,
- patch: {
- name?: string;
- description?: string;
- inputSchema?: Record<string, unknown>;
- executorType?: "webhook" | "script";
- executorConfig?: Record<string, unknown>;
- enabled?: boolean;
- },
+  id: string,
+  patch: {
+    name?: string;
+    description?: string;
+    inputSchema?: Record<string, unknown>;
+    executorType?: "webhook" | "script";
+    executorConfig?: Record<string, unknown>;
+    enabled?: boolean;
+  },
 ): Promise<CustomTool | null> {
- const set: Record<string, unknown> = { updatedAt: new Date() };
- for (const [k, v] of Object.entries(patch)) {
- if (v !== undefined) set[k] = v;
- }
- await db.update(customTool).set(set).where(eq(customTool.id, id));
- const [row] = await db.select().from(customTool).where(eq(customTool.id, id)).limit(1);
- return row ?? null;
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) set[k] = v;
+  }
+  await db.update(customTool).set(set).where(eq(customTool.id, id));
+  const [row] = await db.select().from(customTool).where(eq(customTool.id, id)).limit(1);
+  return row ?? null;
 }
 
 export async function deleteCustomTool(id: string): Promise<void> {
- await db.delete(customTool).where(eq(customTool.id, id));
+  await db.delete(customTool).where(eq(customTool.id, id));
 }
 
 // ─── External Source 审计查询 () ────────────────────────
@@ -3448,37 +3447,37 @@ export async function deleteCustomTool(id: string): Promise<void> {
 // 列某 thread 最近的外部资料访问记录，供 Studio external 审计面板用。
 
 export type ExternalFetchedEvent = {
- id: string;
- threadId: string;
- createdAt: Date;
- payload: {
- sourceUrl?: string;
- fetchedAt?: string;
- expiresAt?: string | null;
- contentHash?: string;
- artifactPath?: string;
- contentType?: string;
- bytes?: number;
- truncated?: boolean;
- };
+  id: string;
+  threadId: string;
+  createdAt: Date;
+  payload: {
+    sourceUrl?: string;
+    fetchedAt?: string;
+    expiresAt?: string | null;
+    contentHash?: string;
+    artifactPath?: string;
+    contentType?: string;
+    bytes?: number;
+    truncated?: boolean;
+  };
 };
 
 export async function listExternalFetchedEvents(
- threadId: string,
- limit = 50,
+  threadId: string,
+  limit = 50,
 ): Promise<ExternalFetchedEvent[]> {
- const rows = await db
- .select()
- .from(threadEvent)
- .where(and(eq(threadEvent.threadId, threadId), eq(threadEvent.type, "external.fetched")))
- .orderBy(desc(threadEvent.createdAt))
- .limit(limit);
- return rows.map((r) => ({
- id: r.id,
- threadId: r.threadId,
- createdAt: r.createdAt,
- payload: r.payload as ExternalFetchedEvent["payload"],
- }));
+  const rows = await db
+    .select()
+    .from(threadEvent)
+    .where(and(eq(threadEvent.threadId, threadId), eq(threadEvent.type, "external.fetched")))
+    .orderBy(desc(threadEvent.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    threadId: r.threadId,
+    createdAt: r.createdAt,
+    payload: r.payload as ExternalFetchedEvent["payload"],
+  }));
 }
 
 // ─── Subagent Definition / Run Queries () ───────────────
@@ -3489,88 +3488,88 @@ export async function listExternalFetchedEvents(
 
 /** 创建一个子代理定义（模板）。MySQL 无 RETURNING，自行生成主键并构造返回对象。 */
 export async function createSubagentDefinition(params: {
- name: string;
- role: SubagentRole;
- modelProfileId?: string | null;
- allowedTools: string[];
- contextPolicy: Record<string, unknown>;
- outputSchema?: Record<string, unknown> | null;
- defaultWriteScope?: string[] | null;
+  name: string;
+  role: SubagentRole;
+  modelProfileId?: string | null;
+  allowedTools: string[];
+  contextPolicy: Record<string, unknown>;
+  outputSchema?: Record<string, unknown> | null;
+  defaultWriteScope?: string[] | null;
 }): Promise<SubagentDefinition> {
- const now = new Date();
- const row: SubagentDefinition = {
- id: randomUUID(),
- name: params.name,
- role: params.role,
- modelProfileId: params.modelProfileId ?? null,
- allowedTools: params.allowedTools,
- contextPolicy: params.contextPolicy,
- outputSchema: params.outputSchema ?? null,
- defaultWriteScope: params.defaultWriteScope ?? null,
- createdAt: now,
- updatedAt: now,
- };
- await db.insert(subagentDefinition).values(row);
- return row;
+  const now = new Date();
+  const row: SubagentDefinition = {
+    id: randomUUID(),
+    name: params.name,
+    role: params.role,
+    modelProfileId: params.modelProfileId ?? null,
+    allowedTools: params.allowedTools,
+    contextPolicy: params.contextPolicy,
+    outputSchema: params.outputSchema ?? null,
+    defaultWriteScope: params.defaultWriteScope ?? null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.insert(subagentDefinition).values(row);
+  return row;
 }
 
 /** 按 id 取子代理定义。 */
 export async function getSubagentDefinition(id: string): Promise<SubagentDefinition | null> {
- const [row] = await db
- .select()
- .from(subagentDefinition)
- .where(eq(subagentDefinition.id, id))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(subagentDefinition)
+    .where(eq(subagentDefinition.id, id))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 列全部子代理定义（按 createdAt asc）。 */
 export async function listSubagentDefinitions(): Promise<SubagentDefinition[]> {
- return db.select().from(subagentDefinition).orderBy(asc(subagentDefinition.createdAt));
+  return db.select().from(subagentDefinition).orderBy(asc(subagentDefinition.createdAt));
 }
 
 /** 创建一条 SubagentRun（status=queued）。writeScope/event 由 registry 编排，本层只落行。 */
 export async function createSubagentRun(params: {
- parentThreadId: string;
- definitionId: string;
- goal: string;
- contextHints?: string[] | null;
- writeScope?: string[] | null;
- transcriptPath?: string | null;
+  parentThreadId: string;
+  definitionId: string;
+  goal: string;
+  contextHints?: string[] | null;
+  writeScope?: string[] | null;
+  transcriptPath?: string | null;
 }): Promise<SubagentRun> {
- const row: SubagentRun = {
- id: randomUUID(),
- parentThreadId: params.parentThreadId,
- definitionId: params.definitionId,
- goal: params.goal,
- contextHints: params.contextHints ?? null,
- status: "queued",
- writeScope: params.writeScope ?? null,
- resultSummary: null,
- outputArtifactId: null,
- transcriptPath: params.transcriptPath ?? null,
- errorMessage: null,
- startedAt: null,
- finishedAt: null,
- createdAt: new Date(),
- };
- await db.insert(subagentRun).values(row);
- return row;
+  const row: SubagentRun = {
+    id: randomUUID(),
+    parentThreadId: params.parentThreadId,
+    definitionId: params.definitionId,
+    goal: params.goal,
+    contextHints: params.contextHints ?? null,
+    status: "queued",
+    writeScope: params.writeScope ?? null,
+    resultSummary: null,
+    outputArtifactId: null,
+    transcriptPath: params.transcriptPath ?? null,
+    errorMessage: null,
+    startedAt: null,
+    finishedAt: null,
+    createdAt: new Date(),
+  };
+  await db.insert(subagentRun).values(row);
+  return row;
 }
 
 /** 按 id 取 SubagentRun。 */
 export async function getSubagentRun(id: string): Promise<SubagentRun | null> {
- const [row] = await db.select().from(subagentRun).where(eq(subagentRun.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(subagentRun).where(eq(subagentRun.id, id)).limit(1);
+  return row ?? null;
 }
 
 /** 列 thread 的全部 SubagentRun（按 createdAt desc，最近在前）。 */
 export async function listSubagentRunsByThread(parentThreadId: string): Promise<SubagentRun[]> {
- return db
- .select()
- .from(subagentRun)
- .where(eq(subagentRun.parentThreadId, parentThreadId))
- .orderBy(desc(subagentRun.createdAt), desc(subagentRun.id));
+  return db
+    .select()
+    .from(subagentRun)
+    .where(eq(subagentRun.parentThreadId, parentThreadId))
+    .orderBy(desc(subagentRun.createdAt), desc(subagentRun.id));
 }
 
 /**
@@ -3578,18 +3577,18 @@ export async function listSubagentRunsByThread(parentThreadId: string): Promise<
  * 供 writeScope 互斥校验与并发上限判定（queued 也占写范围名额，fail-closed）。
  */
 export async function listActiveSubagentRunsByThread(
- parentThreadId: string,
+  parentThreadId: string,
 ): Promise<SubagentRun[]> {
- return db
- .select()
- .from(subagentRun)
- .where(
- and(
- eq(subagentRun.parentThreadId, parentThreadId),
- inArray(subagentRun.status, ["queued", "running"]),
- ),
- )
- .orderBy(asc(subagentRun.createdAt));
+  return db
+    .select()
+    .from(subagentRun)
+    .where(
+      and(
+        eq(subagentRun.parentThreadId, parentThreadId),
+        inArray(subagentRun.status, ["queued", "running"]),
+      ),
+    )
+    .orderBy(asc(subagentRun.createdAt));
 }
 
 /**
@@ -3600,11 +3599,11 @@ export async function listActiveSubagentRunsByThread(
  * 不含 queued（queued 未启动,可恢复执行,不算 orphan）。
  */
 export async function listAllRunningSubagentRuns(): Promise<SubagentRun[]> {
- return db
- .select()
- .from(subagentRun)
- .where(eq(subagentRun.status, "running"))
- .orderBy(asc(subagentRun.createdAt));
+  return db
+    .select()
+    .from(subagentRun)
+    .where(eq(subagentRun.status, "running"))
+    .orderBy(asc(subagentRun.createdAt));
 }
 
 /**
@@ -3621,23 +3620,23 @@ export async function listAllRunningSubagentRuns(): Promise<SubagentRun[]> {
  * 可精确判断归属（见 04-subagent.md G3 建议）。
  */
 export async function markOrphanSubagentRunsOnStartup(): Promise<SubagentRun[]> {
- const orphans = await listAllRunningSubagentRuns();
- if (orphans.length === 0) return [];
- const now = new Date();
- await db
- .update(subagentRun)
- .set({
- status: "cancelled",
- finishedAt: now,
- errorMessage: "进程重启：活跃子代理执行丢失（orphan 清理）",
- })
- .where(eq(subagentRun.status, "running"));
- return orphans.map((o) => ({
- ...o,
- status: "cancelled" as const,
- finishedAt: now,
- errorMessage: "进程重启：活跃子代理执行丢失（orphan 清理）",
- }));
+  const orphans = await listAllRunningSubagentRuns();
+  if (orphans.length === 0) return [];
+  const now = new Date();
+  await db
+    .update(subagentRun)
+    .set({
+      status: "cancelled",
+      finishedAt: now,
+      errorMessage: "进程重启：活跃子代理执行丢失（orphan 清理）",
+    })
+    .where(eq(subagentRun.status, "running"));
+  return orphans.map((o) => ({
+    ...o,
+    status: "cancelled" as const,
+    finishedAt: now,
+    errorMessage: "进程重启：活跃子代理执行丢失（orphan 清理）",
+  }));
 }
 
 /**
@@ -3645,176 +3644,176 @@ export async function markOrphanSubagentRunsOnStartup(): Promise<SubagentRun[]> 
  * 返回更新后的行（按入参 + existing 合并；MySQL 无 RETURNING）。状态机校验由 registry 负责。
  */
 export async function updateSubagentRun(
- id: string,
- patch: {
- status?: SubagentRunStatus;
- contextHints?: string[] | null;
- resultSummary?: string | null;
- outputArtifactId?: string | null;
- errorMessage?: string | null;
- transcriptPath?: string | null;
- startedAt?: Date | null;
- finishedAt?: Date | null;
- /** : CAS——仅当当前 status 匹配时才更新,防并发状态机覆盖。 */
- expectedStatus?: SubagentRunStatus;
- },
+  id: string,
+  patch: {
+    status?: SubagentRunStatus;
+    contextHints?: string[] | null;
+    resultSummary?: string | null;
+    outputArtifactId?: string | null;
+    errorMessage?: string | null;
+    transcriptPath?: string | null;
+    startedAt?: Date | null;
+    finishedAt?: Date | null;
+    /** : CAS——仅当当前 status 匹配时才更新,防并发状态机覆盖。 */
+    expectedStatus?: SubagentRunStatus;
+  },
 ): Promise<SubagentRun | null> {
- const [existing] = await db.select().from(subagentRun).where(eq(subagentRun.id, id)).limit(1);
- if (!existing) return null;
- // : CAS 校验——若调用方传了 expectedStatus 且与当前不符,视为并发冲突返回 null。
- if (patch.expectedStatus !== undefined && existing.status !== patch.expectedStatus) {
- return null;
- }
- const sets: Record<string, unknown> = {};
- if (patch.status !== undefined) sets.status = patch.status;
- if (patch.contextHints !== undefined) sets.contextHints = patch.contextHints;
- if (patch.resultSummary !== undefined) sets.resultSummary = patch.resultSummary;
- if (patch.outputArtifactId !== undefined) sets.outputArtifactId = patch.outputArtifactId;
- if (patch.errorMessage !== undefined) sets.errorMessage = patch.errorMessage;
- if (patch.transcriptPath !== undefined) sets.transcriptPath = patch.transcriptPath;
- if (patch.startedAt !== undefined) sets.startedAt = patch.startedAt;
- if (patch.finishedAt !== undefined) sets.finishedAt = patch.finishedAt;
- if (Object.keys(sets).length === 0) return existing;
- // : UPDATE 也带 status 守卫,防 select 与 update 之间的 TOCTOU。
- const conds = [eq(subagentRun.id, id)];
- if (patch.expectedStatus !== undefined) conds.push(eq(subagentRun.status, patch.expectedStatus));
- const result = await db
- .update(subagentRun)
- .set(sets)
- .where(and(...conds));
- if ((result as unknown as { affectedRows?: number }).affectedRows === 0) return null;
- return { ...existing, ...sets } as SubagentRun;
+  const [existing] = await db.select().from(subagentRun).where(eq(subagentRun.id, id)).limit(1);
+  if (!existing) return null;
+  // : CAS 校验——若调用方传了 expectedStatus 且与当前不符,视为并发冲突返回 null。
+  if (patch.expectedStatus !== undefined && existing.status !== patch.expectedStatus) {
+    return null;
+  }
+  const sets: Record<string, unknown> = {};
+  if (patch.status !== undefined) sets.status = patch.status;
+  if (patch.contextHints !== undefined) sets.contextHints = patch.contextHints;
+  if (patch.resultSummary !== undefined) sets.resultSummary = patch.resultSummary;
+  if (patch.outputArtifactId !== undefined) sets.outputArtifactId = patch.outputArtifactId;
+  if (patch.errorMessage !== undefined) sets.errorMessage = patch.errorMessage;
+  if (patch.transcriptPath !== undefined) sets.transcriptPath = patch.transcriptPath;
+  if (patch.startedAt !== undefined) sets.startedAt = patch.startedAt;
+  if (patch.finishedAt !== undefined) sets.finishedAt = patch.finishedAt;
+  if (Object.keys(sets).length === 0) return existing;
+  // : UPDATE 也带 status 守卫,防 select 与 update 之间的 TOCTOU。
+  const conds = [eq(subagentRun.id, id)];
+  if (patch.expectedStatus !== undefined) conds.push(eq(subagentRun.status, patch.expectedStatus));
+  const result = await db
+    .update(subagentRun)
+    .set(sets)
+    .where(and(...conds));
+  if ((result as unknown as { affectedRows?: number }).affectedRows === 0) return null;
+  return { ...existing, ...sets } as SubagentRun;
 }
 
 // ─── : SecretMount Queries ──────────────────────────────
 
 /** 创建 secret mount（加密存储）。 */
 export async function createSecretMount(params: {
- name: string;
- scope: SecretMountScope;
- scopeRef?: string | null;
- keyId: string;
- ciphertext: string;
+  name: string;
+  scope: SecretMountScope;
+  scopeRef?: string | null;
+  keyId: string;
+  ciphertext: string;
 }): Promise<SecretMount> {
- const now = new Date();
- const row: SecretMount = {
- id: randomUUID(),
- name: params.name,
- scope: params.scope,
- scopeRef: params.scopeRef ?? null,
- keyId: params.keyId,
- ciphertext: params.ciphertext,
- status: "active",
- createdAt: now,
- updatedAt: now,
- rotatedAt: null,
- };
- await db.insert(secretMount).values(row);
- return row;
+  const now = new Date();
+  const row: SecretMount = {
+    id: randomUUID(),
+    name: params.name,
+    scope: params.scope,
+    scopeRef: params.scopeRef ?? null,
+    keyId: params.keyId,
+    ciphertext: params.ciphertext,
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+    rotatedAt: null,
+  };
+  await db.insert(secretMount).values(row);
+  return row;
 }
 
 /** 按 id 取 secret mount。 */
 export async function getSecretMount(id: string): Promise<SecretMount | null> {
- const [row] = await db.select().from(secretMount).where(eq(secretMount.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(secretMount).where(eq(secretMount.id, id)).limit(1);
+  return row ?? null;
 }
 
 /** 列 scope 内 active 的 secret mount（按 name）。 */
 export async function listActiveSecretsByScope(
- scope: SecretMountScope,
- scopeRef: string | null,
+  scope: SecretMountScope,
+  scopeRef: string | null,
 ): Promise<SecretMount[]> {
- const conditions = [eq(secretMount.scope, scope), eq(secretMount.status, "active")];
- if (scopeRef !== null) {
- conditions.push(eq(secretMount.scopeRef, scopeRef));
- } else {
- conditions.push(isNull(secretMount.scopeRef));
- }
- return db
- .select()
- .from(secretMount)
- .where(and(...conditions))
- .orderBy(asc(secretMount.name));
+  const conditions = [eq(secretMount.scope, scope), eq(secretMount.status, "active")];
+  if (scopeRef !== null) {
+    conditions.push(eq(secretMount.scopeRef, scopeRef));
+  } else {
+    conditions.push(isNull(secretMount.scopeRef));
+  }
+  return db
+    .select()
+    .from(secretMount)
+    .where(and(...conditions))
+    .orderBy(asc(secretMount.name));
 }
 
 /** 列 scope 内全部 secret mount（含 revoked，admin 管理用）。 */
 export async function listSecretsByScope(
- scope: SecretMountScope,
- scopeRef: string | null,
+  scope: SecretMountScope,
+  scopeRef: string | null,
 ): Promise<SecretMount[]> {
- const conditions = [eq(secretMount.scope, scope)];
- if (scopeRef !== null) {
- conditions.push(eq(secretMount.scopeRef, scopeRef));
- } else {
- conditions.push(isNull(secretMount.scopeRef));
- }
- return db
- .select()
- .from(secretMount)
- .where(and(...conditions))
- .orderBy(desc(secretMount.createdAt), desc(secretMount.id));
+  const conditions = [eq(secretMount.scope, scope)];
+  if (scopeRef !== null) {
+    conditions.push(eq(secretMount.scopeRef, scopeRef));
+  } else {
+    conditions.push(isNull(secretMount.scopeRef));
+  }
+  return db
+    .select()
+    .from(secretMount)
+    .where(and(...conditions))
+    .orderBy(desc(secretMount.createdAt), desc(secretMount.id));
 }
 
 /** 轮换 secret：新密文覆盖 + rotatedAt 更新。 */
 export async function rotateSecretMount(
- id: string,
- newCiphertext: string,
- keyId: string,
+  id: string,
+  newCiphertext: string,
+  keyId: string,
 ): Promise<SecretMount | null> {
- const now = new Date();
- await db
- .update(secretMount)
- .set({ ciphertext: newCiphertext, keyId, rotatedAt: now, updatedAt: now, status: "active" })
- .where(eq(secretMount.id, id));
- return getSecretMount(id);
+  const now = new Date();
+  await db
+    .update(secretMount)
+    .set({ ciphertext: newCiphertext, keyId, rotatedAt: now, updatedAt: now, status: "active" })
+    .where(eq(secretMount.id, id));
+  return getSecretMount(id);
 }
 
 /** 撤销 secret：status=revoked，停止注入。 */
 export async function revokeSecretMount(id: string): Promise<SecretMount | null> {
- const now = new Date();
- await db
- .update(secretMount)
- .set({ status: "revoked", updatedAt: now })
- .where(eq(secretMount.id, id));
- return getSecretMount(id);
+  const now = new Date();
+  await db
+    .update(secretMount)
+    .set({ status: "revoked", updatedAt: now })
+    .where(eq(secretMount.id, id));
+  return getSecretMount(id);
 }
 
 /** 删除 secret mount（物理删除，admin 操作）。 */
 export async function deleteSecretMount(id: string): Promise<void> {
- await db.delete(secretMount).where(eq(secretMount.id, id));
+  await db.delete(secretMount).where(eq(secretMount.id, id));
 }
 
 // ─── : Deployment Queries ───────────────────────────────
 
 /** 创建部署记录。 */
 export async function createDeployment(params: {
- threadId: string;
- environment: string;
- commitSha?: string | null;
- imageTag?: string | null;
- artifactRef?: string | null;
- cicdJobId?: string | null;
- cicdJobUrl?: string | null;
- previousDeploymentId?: string | null;
+  threadId: string;
+  environment: string;
+  commitSha?: string | null;
+  imageTag?: string | null;
+  artifactRef?: string | null;
+  cicdJobId?: string | null;
+  cicdJobUrl?: string | null;
+  previousDeploymentId?: string | null;
 }): Promise<Deployment> {
- const row: Deployment = {
- id: randomUUID(),
- threadId: params.threadId,
- environment: params.environment,
- commitSha: params.commitSha ?? null,
- imageTag: params.imageTag ?? null,
- artifactRef: params.artifactRef ?? null,
- cicdJobId: params.cicdJobId ?? null,
- cicdJobUrl: params.cicdJobUrl ?? null,
- status: "pending",
- previousDeploymentId: params.previousDeploymentId ?? null,
- deployedAt: null,
- rolledBackAt: null,
- errorMessage: null,
- createdAt: new Date(),
- };
- await db.insert(deployment).values(row);
- return row;
+  const row: Deployment = {
+    id: randomUUID(),
+    threadId: params.threadId,
+    environment: params.environment,
+    commitSha: params.commitSha ?? null,
+    imageTag: params.imageTag ?? null,
+    artifactRef: params.artifactRef ?? null,
+    cicdJobId: params.cicdJobId ?? null,
+    cicdJobUrl: params.cicdJobUrl ?? null,
+    status: "pending",
+    previousDeploymentId: params.previousDeploymentId ?? null,
+    deployedAt: null,
+    rolledBackAt: null,
+    errorMessage: null,
+    createdAt: new Date(),
+  };
+  await db.insert(deployment).values(row);
+  return row;
 }
 
 /**
@@ -3824,109 +3823,109 @@ export async function createDeployment(params: {
  * @returns { deployment } 占用成功;{ busy: true } 已有 deploying。
  */
 export async function claimDeployingSlot(params: {
- threadId: string;
- environment: string;
- commitSha?: string | null;
- imageTag?: string | null;
- artifactRef?: string | null;
- previousDeploymentId?: string | null;
+  threadId: string;
+  environment: string;
+  commitSha?: string | null;
+  imageTag?: string | null;
+  artifactRef?: string | null;
+  previousDeploymentId?: string | null;
 }): Promise<{ deployment: Deployment } | { busy: true }> {
- return db.transaction(async (tx) => {
- // 锁 thread 行,串行化同 thread 的并发 claim
- await tx
- .select({ id: thread.id })
- .from(thread)
- .where(eq(thread.id, params.threadId))
- .for("update");
- const existing = await tx
- .select({ id: deployment.id })
- .from(deployment)
- .where(and(eq(deployment.threadId, params.threadId), eq(deployment.status, "deploying")))
- .limit(1);
- if (existing.length > 0) return { busy: true as const };
- // P0-1: 直接 insert deploying(非 pending),使并发 claim 的 busy 检查命中。
- // FOR UPDATE 已锁 thread 行串行化,第二个 claim 进事务后查到 deploying→busy,
- // 杜绝并发部署触发两次 CI/CD(原 claim 插 pending 导致两个 claim 都过 busy 检查)。
- const row: Deployment = {
- id: randomUUID(),
- threadId: params.threadId,
- environment: params.environment,
- commitSha: params.commitSha ?? null,
- imageTag: params.imageTag ?? null,
- artifactRef: params.artifactRef ?? null,
- cicdJobId: null,
- cicdJobUrl: null,
- status: "deploying",
- previousDeploymentId: params.previousDeploymentId ?? null,
- deployedAt: null,
- rolledBackAt: null,
- errorMessage: null,
- createdAt: new Date(),
- };
- await tx.insert(deployment).values(row);
- return { deployment: row };
- });
+  return db.transaction(async (tx) => {
+    // 锁 thread 行,串行化同 thread 的并发 claim
+    await tx
+      .select({ id: thread.id })
+      .from(thread)
+      .where(eq(thread.id, params.threadId))
+      .for("update");
+    const existing = await tx
+      .select({ id: deployment.id })
+      .from(deployment)
+      .where(and(eq(deployment.threadId, params.threadId), eq(deployment.status, "deploying")))
+      .limit(1);
+    if (existing.length > 0) return { busy: true as const };
+    // P0-1: 直接 insert deploying(非 pending),使并发 claim 的 busy 检查命中。
+    // FOR UPDATE 已锁 thread 行串行化,第二个 claim 进事务后查到 deploying→busy,
+    // 杜绝并发部署触发两次 CI/CD(原 claim 插 pending 导致两个 claim 都过 busy 检查)。
+    const row: Deployment = {
+      id: randomUUID(),
+      threadId: params.threadId,
+      environment: params.environment,
+      commitSha: params.commitSha ?? null,
+      imageTag: params.imageTag ?? null,
+      artifactRef: params.artifactRef ?? null,
+      cicdJobId: null,
+      cicdJobUrl: null,
+      status: "deploying",
+      previousDeploymentId: params.previousDeploymentId ?? null,
+      deployedAt: null,
+      rolledBackAt: null,
+      errorMessage: null,
+      createdAt: new Date(),
+    };
+    await tx.insert(deployment).values(row);
+    return { deployment: row };
+  });
 }
 
 /** 按 id 取部署记录。 */
 export async function getDeployment(id: string): Promise<Deployment | null> {
- const [row] = await db.select().from(deployment).where(eq(deployment.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(deployment).where(eq(deployment.id, id)).limit(1);
+  return row ?? null;
 }
 
 /** 列 thread 的部署记录（按 createdAt desc）。 */
 export async function listDeploymentsByThread(threadId: string): Promise<Deployment[]> {
- return db
- .select()
- .from(deployment)
- .where(eq(deployment.threadId, threadId))
- .orderBy(desc(deployment.createdAt));
+  return db
+    .select()
+    .from(deployment)
+    .where(eq(deployment.threadId, threadId))
+    .orderBy(desc(deployment.createdAt));
 }
 
 /** 取 thread 最新一次成功部署。 */
 export async function getLatestDeployedByThread(threadId: string): Promise<Deployment | null> {
- const [row] = await db
- .select()
- .from(deployment)
- .where(and(eq(deployment.threadId, threadId), eq(deployment.status, "deployed")))
- .orderBy(desc(deployment.createdAt))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(deployment)
+    .where(and(eq(deployment.threadId, threadId), eq(deployment.status, "deployed")))
+    .orderBy(desc(deployment.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
  * 列所有 deploying 状态的 deployment（跨 thread，供后台轮询）。
  */
 export async function listDeployingDeployments(): Promise<Deployment[]> {
- return db.select().from(deployment).where(eq(deployment.status, "deploying"));
+  return db.select().from(deployment).where(eq(deployment.status, "deploying"));
 }
 
 /** 更新部署状态与终态字段。 */
 export async function updateDeployment(
- id: string,
- patch: {
- status?: DeploymentStatus;
- cicdJobId?: string | null;
- cicdJobUrl?: string | null;
- deployedAt?: Date | null;
- rolledBackAt?: Date | null;
- errorMessage?: string | null;
- artifactRef?: string | null;
- },
+  id: string,
+  patch: {
+    status?: DeploymentStatus;
+    cicdJobId?: string | null;
+    cicdJobUrl?: string | null;
+    deployedAt?: Date | null;
+    rolledBackAt?: Date | null;
+    errorMessage?: string | null;
+    artifactRef?: string | null;
+  },
 ): Promise<Deployment | null> {
- const [existing] = await db.select().from(deployment).where(eq(deployment.id, id)).limit(1);
- if (!existing) return null;
- const sets: Record<string, unknown> = {};
- if (patch.status !== undefined) sets.status = patch.status;
- if (patch.cicdJobId !== undefined) sets.cicdJobId = patch.cicdJobId;
- if (patch.cicdJobUrl !== undefined) sets.cicdJobUrl = patch.cicdJobUrl;
- if (patch.deployedAt !== undefined) sets.deployedAt = patch.deployedAt;
- if (patch.rolledBackAt !== undefined) sets.rolledBackAt = patch.rolledBackAt;
- if (patch.errorMessage !== undefined) sets.errorMessage = patch.errorMessage;
- if (patch.artifactRef !== undefined) sets.artifactRef = patch.artifactRef;
- if (Object.keys(sets).length === 0) return existing;
- await db.update(deployment).set(sets).where(eq(deployment.id, id));
- return { ...existing, ...sets } as Deployment;
+  const [existing] = await db.select().from(deployment).where(eq(deployment.id, id)).limit(1);
+  if (!existing) return null;
+  const sets: Record<string, unknown> = {};
+  if (patch.status !== undefined) sets.status = patch.status;
+  if (patch.cicdJobId !== undefined) sets.cicdJobId = patch.cicdJobId;
+  if (patch.cicdJobUrl !== undefined) sets.cicdJobUrl = patch.cicdJobUrl;
+  if (patch.deployedAt !== undefined) sets.deployedAt = patch.deployedAt;
+  if (patch.rolledBackAt !== undefined) sets.rolledBackAt = patch.rolledBackAt;
+  if (patch.errorMessage !== undefined) sets.errorMessage = patch.errorMessage;
+  if (patch.artifactRef !== undefined) sets.artifactRef = patch.artifactRef;
+  if (Object.keys(sets).length === 0) return existing;
+  await db.update(deployment).set(sets).where(eq(deployment.id, id));
+  return { ...existing, ...sets } as Deployment;
 }
 
 // ─── V7: ThreadRun 查询与状态迁移 ─────────────────────────────
@@ -3939,58 +3938,58 @@ export async function updateDeployment(
  * 落库前就拿到 runId 做审计（Resolver 是纯函数，runId 只用于 decisionReason）。
  */
 export async function createThreadRun(params: {
- id?: string;
- threadId: string;
- model: string;
- triggerType?: ThreadRunTriggerType;
- triggerMessageId?: string;
- skillId?: string;
- skillVersionId?: string;
- runtimeType?: string;
- status?: ThreadRunStatus;
+  id?: string;
+  threadId: string;
+  model: string;
+  triggerType?: ThreadRunTriggerType;
+  triggerMessageId?: string;
+  skillId?: string;
+  skillVersionId?: string;
+  runtimeType?: string;
+  status?: ThreadRunStatus;
 }): Promise<ThreadRun> {
- const now = new Date();
- const row: ThreadRun = {
- id: params.id ?? randomUUID(),
- threadId: params.threadId,
- status: params.status ?? "queued",
- triggerType: params.triggerType ?? "user_message",
- triggerMessageId: params.triggerMessageId ?? null,
- model: params.model,
- skillId: params.skillId ?? null,
- skillVersionId: params.skillVersionId ?? null,
- runtimeType: params.runtimeType ?? null,
- startedAt: params.status === "running" ? now : null,
- finishedAt: null,
- lastSeenAt: params.status === "running" ? now : null,
- cancelReason: null,
- error: null,
- promptTokens: 0,
- completionTokens: 0,
- totalTokens: 0,
- metadata: null,
- createdAt: now,
- updatedAt: now,
- };
- await db.insert(threadRun).values(row);
- return row;
+  const now = new Date();
+  const row: ThreadRun = {
+    id: params.id ?? randomUUID(),
+    threadId: params.threadId,
+    status: params.status ?? "queued",
+    triggerType: params.triggerType ?? "user_message",
+    triggerMessageId: params.triggerMessageId ?? null,
+    model: params.model,
+    skillId: params.skillId ?? null,
+    skillVersionId: params.skillVersionId ?? null,
+    runtimeType: params.runtimeType ?? null,
+    startedAt: params.status === "running" ? now : null,
+    finishedAt: null,
+    lastSeenAt: params.status === "running" ? now : null,
+    cancelReason: null,
+    error: null,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    metadata: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.insert(threadRun).values(row);
+  return row;
 }
 
 /** 将 ThreadRun 设为 running，记录 startedAt 和 lastSeenAt。 */
 export async function markThreadRunRunning(runId: string): Promise<void> {
- const now = new Date();
- await db
- .update(threadRun)
- .set({ status: "running", startedAt: now, lastSeenAt: now, updatedAt: now })
- .where(eq(threadRun.id, runId));
+  const now = new Date();
+  await db
+    .update(threadRun)
+    .set({ status: "running", startedAt: now, lastSeenAt: now, updatedAt: now })
+    .where(eq(threadRun.id, runId));
 }
 
 /** 更新 ThreadRun 心跳时间。 */
 export async function heartbeatThreadRun(runId: string): Promise<void> {
- await db
- .update(threadRun)
- .set({ lastSeenAt: new Date(), updatedAt: new Date() })
- .where(eq(threadRun.id, runId));
+  await db
+    .update(threadRun)
+    .set({ lastSeenAt: new Date(), updatedAt: new Date() })
+    .where(eq(threadRun.id, runId));
 }
 
 /** ThreadRun 活跃态:仅这些状态可迁移到终态(completed/failed/cancelled)。 */
@@ -3998,48 +3997,48 @@ const THREAD_RUN_ACTIVE_STATUSES = ["queued", "running", "awaiting_approval"] as
 
 /** 标记 ThreadRun 正常完成，写入 token 用量和 finishedAt。 */
 export async function completeThreadRun(
- runId: string,
- tokens: { promptTokens: number; completionTokens: number; totalTokens: number },
+  runId: string,
+  tokens: { promptTokens: number; completionTokens: number; totalTokens: number },
 ): Promise<void> {
- const now = new Date();
- // :CAS 守卫——仅活跃态可迁 completed,防 cancel/markFailed/stale reaper 并发覆盖终态。
- await db
- .update(threadRun)
- .set({
- status: "completed",
- finishedAt: now,
- updatedAt: now,
- promptTokens: tokens.promptTokens,
- completionTokens: tokens.completionTokens,
- totalTokens: tokens.totalTokens,
- })
- .where(
- and(eq(threadRun.id, runId), inArray(threadRun.status, [...THREAD_RUN_ACTIVE_STATUSES])),
- );
+  const now = new Date();
+  // :CAS 守卫——仅活跃态可迁 completed,防 cancel/markFailed/stale reaper 并发覆盖终态。
+  await db
+    .update(threadRun)
+    .set({
+      status: "completed",
+      finishedAt: now,
+      updatedAt: now,
+      promptTokens: tokens.promptTokens,
+      completionTokens: tokens.completionTokens,
+      totalTokens: tokens.totalTokens,
+    })
+    .where(
+      and(eq(threadRun.id, runId), inArray(threadRun.status, [...THREAD_RUN_ACTIVE_STATUSES])),
+    );
 }
 
 /** 标记 ThreadRun 失败，写入错误信息和 finishedAt。 */
 export async function failThreadRun(runId: string, error: string): Promise<void> {
- const now = new Date();
- // :CAS 守卫——仅活跃态可迁 failed,防已终态 run 被覆盖。
- await db
- .update(threadRun)
- .set({ status: "failed", error, finishedAt: now, updatedAt: now })
- .where(
- and(eq(threadRun.id, runId), inArray(threadRun.status, [...THREAD_RUN_ACTIVE_STATUSES])),
- );
+  const now = new Date();
+  // :CAS 守卫——仅活跃态可迁 failed,防已终态 run 被覆盖。
+  await db
+    .update(threadRun)
+    .set({ status: "failed", error, finishedAt: now, updatedAt: now })
+    .where(
+      and(eq(threadRun.id, runId), inArray(threadRun.status, [...THREAD_RUN_ACTIVE_STATUSES])),
+    );
 }
 
 /** 标记 ThreadRun 取消，写入取消原因和 finishedAt。 */
 export async function cancelThreadRun(runId: string, cancelReason: string): Promise<void> {
- const now = new Date();
- // :CAS 守卫——仅活跃态可迁 cancelled,防已终态 run 被覆盖。
- await db
- .update(threadRun)
- .set({ status: "cancelled", cancelReason, finishedAt: now, updatedAt: now })
- .where(
- and(eq(threadRun.id, runId), inArray(threadRun.status, [...THREAD_RUN_ACTIVE_STATUSES])),
- );
+  const now = new Date();
+  // :CAS 守卫——仅活跃态可迁 cancelled,防已终态 run 被覆盖。
+  await db
+    .update(threadRun)
+    .set({ status: "cancelled", cancelReason, finishedAt: now, updatedAt: now })
+    .where(
+      and(eq(threadRun.id, runId), inArray(threadRun.status, [...THREAD_RUN_ACTIVE_STATUSES])),
+    );
 }
 
 /**
@@ -4049,86 +4048,86 @@ export async function cancelThreadRun(runId: string, cancelReason: string): Prom
  * 返回被标记 stale 的 run 数量。
  */
 export async function markStaleThreadRuns(cutoff: Date): Promise<number> {
- const now = new Date();
- // 查找符合条件的 run（含 threadId 用于后续更新 Thread 和写事件）
- const staleRuns = await db
- .select({ id: threadRun.id, threadId: threadRun.threadId })
- .from(threadRun)
- .where(
- and(
- eq(threadRun.status, "running"),
- or(
- lt(threadRun.lastSeenAt, cutoff),
- and(isNull(threadRun.lastSeenAt), lt(threadRun.startedAt, cutoff)),
- ),
- ),
- );
- if (staleRuns.length === 0) return 0;
- const ids = staleRuns.map((r) => r.id);
- // : CAS——UPDATE 加 status='running' 守卫,防 select 后 run 被 cancelRun 标 cancelled
- // 仍被这里覆盖为 stale(审计时序混乱);并发 reaper 第二个 affectedRows=0 自然空跑。
- await db
- .update(threadRun)
- .set({ status: "stale", updatedAt: now })
- .where(and(inArray(threadRun.id, ids), eq(threadRun.status, "running")));
- // 逐 run 写 ThreadEvent 审计事件 + 更新 Thread.status
- for (const run of staleRuns) {
- try {
- await appendThreadEvent(
- run.threadId,
- "agent.status_changed",
- {
- from: "executing",
- to: "failed",
- reason: "run_stale",
- runId: run.id,
- },
- run.id,
- );
- } catch {
- // fail-open：事件写入失败不影响 stale 标记
- }
- }
- // 去重 threadId，批量把 executing 的 Thread 标 failed
- const staleThreadIds = [...new Set(staleRuns.map((r) => r.threadId))];
- await db
- .update(thread)
- .set({ status: "failed", updatedAt: now })
- .where(
- and(
- inArray(thread.id, staleThreadIds),
- eq(thread.status, "executing"),
- lt(thread.updatedAt, cutoff),
- ),
- );
- return ids.length;
+  const now = new Date();
+  // 查找符合条件的 run（含 threadId 用于后续更新 Thread 和写事件）
+  const staleRuns = await db
+    .select({ id: threadRun.id, threadId: threadRun.threadId })
+    .from(threadRun)
+    .where(
+      and(
+        eq(threadRun.status, "running"),
+        or(
+          lt(threadRun.lastSeenAt, cutoff),
+          and(isNull(threadRun.lastSeenAt), lt(threadRun.startedAt, cutoff)),
+        ),
+      ),
+    );
+  if (staleRuns.length === 0) return 0;
+  const ids = staleRuns.map((r) => r.id);
+  // : CAS——UPDATE 加 status='running' 守卫,防 select 后 run 被 cancelRun 标 cancelled
+  // 仍被这里覆盖为 stale(审计时序混乱);并发 reaper 第二个 affectedRows=0 自然空跑。
+  await db
+    .update(threadRun)
+    .set({ status: "stale", updatedAt: now })
+    .where(and(inArray(threadRun.id, ids), eq(threadRun.status, "running")));
+  // 逐 run 写 ThreadEvent 审计事件 + 更新 Thread.status
+  for (const run of staleRuns) {
+    try {
+      await appendThreadEvent(
+        run.threadId,
+        "agent.status_changed",
+        {
+          from: "executing",
+          to: "failed",
+          reason: "run_stale",
+          runId: run.id,
+        },
+        run.id,
+      );
+    } catch {
+      // fail-open：事件写入失败不影响 stale 标记
+    }
+  }
+  // 去重 threadId，批量把 executing 的 Thread 标 failed
+  const staleThreadIds = [...new Set(staleRuns.map((r) => r.threadId))];
+  await db
+    .update(thread)
+    .set({ status: "failed", updatedAt: now })
+    .where(
+      and(
+        inArray(thread.id, staleThreadIds),
+        eq(thread.status, "executing"),
+        lt(thread.updatedAt, cutoff),
+      ),
+    );
+  return ids.length;
 }
 
 /** 查询 thread 最新一条 ThreadRun（按 createdAt desc）。 */
 export async function getLatestThreadRun(threadId: string): Promise<ThreadRun | null> {
- const [row] = await db
- .select()
- .from(threadRun)
- .where(eq(threadRun.threadId, threadId))
- .orderBy(desc(threadRun.createdAt))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(threadRun)
+    .where(eq(threadRun.threadId, threadId))
+    .orderBy(desc(threadRun.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 查询 thread 当前活跃的 ThreadRun（queued / running / awaiting_approval）。 */
 export async function getActiveThreadRun(threadId: string): Promise<ThreadRun | null> {
- const [row] = await db
- .select()
- .from(threadRun)
- .where(
- and(
- eq(threadRun.threadId, threadId),
- inArray(threadRun.status, ["queued", "running", "awaiting_approval"]),
- ),
- )
- .orderBy(desc(threadRun.createdAt))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(threadRun)
+    .where(
+      and(
+        eq(threadRun.threadId, threadId),
+        inArray(threadRun.status, ["queued", "running", "awaiting_approval"]),
+      ),
+    )
+    .orderBy(desc(threadRun.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -4136,16 +4135,16 @@ export async function getActiveThreadRun(threadId: string): Promise<ThreadRun | 
  * 非 owner 返回 null（与 getThreadByIdForUser 一致的 404 语义）。
  */
 export async function getThreadRunByIdForUser(
- runId: string,
- userId: string,
+  runId: string,
+  userId: string,
 ): Promise<ThreadRun | null> {
- const [row] = await db
- .select({ run: threadRun })
- .from(threadRun)
- .innerJoin(thread, eq(threadRun.threadId, thread.id))
- .where(and(eq(threadRun.id, runId), eq(thread.userId, userId), isNull(thread.deletedAt)))
- .limit(1);
- return row?.run ?? null;
+  const [row] = await db
+    .select({ run: threadRun })
+    .from(threadRun)
+    .innerJoin(thread, eq(threadRun.threadId, thread.id))
+    .where(and(eq(threadRun.id, runId), eq(thread.userId, userId), isNull(thread.deletedAt)))
+    .limit(1);
+  return row?.run ?? null;
 }
 
 /**
@@ -4154,52 +4153,52 @@ export async function getThreadRunByIdForUser(
  * 返回 null 表示 run 不存在或无权访问。
  */
 export async function getRunDetail(threadId: string, runId: string, userId: string) {
- // 1. 验证归属：run 属于 thread，thread 属于 user
- const [row] = await db
- .select({ run: threadRun })
- .from(threadRun)
- .innerJoin(thread, eq(threadRun.threadId, thread.id))
- .where(
- and(
- eq(threadRun.id, runId),
- eq(threadRun.threadId, threadId),
- eq(thread.userId, userId),
- isNull(thread.deletedAt),
- ),
- )
- .limit(1);
- if (!row) return null;
+  // 1. 验证归属：run 属于 thread，thread 属于 user
+  const [row] = await db
+    .select({ run: threadRun })
+    .from(threadRun)
+    .innerJoin(thread, eq(threadRun.threadId, thread.id))
+    .where(
+      and(
+        eq(threadRun.id, runId),
+        eq(threadRun.threadId, threadId),
+        eq(thread.userId, userId),
+        isNull(thread.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
 
- // 2. 并行查 5 张表的 runId 归属数据（V8 新增 ThreadRunSkill）
- const [messages, events, toolRuns, snapshots, runSkills] = await Promise.all([
- db
- .select()
- .from(message)
- .where(and(eq(message.threadId, threadId), eq(message.runId, runId)))
- .orderBy(asc(message.createdAt)),
- db
- .select()
- .from(threadEvent)
- .where(and(eq(threadEvent.threadId, threadId), eq(threadEvent.runId, runId)))
- .orderBy(asc(threadEvent.sequence)),
- db
- .select()
- .from(toolRun)
- .where(and(eq(toolRun.threadId, threadId), eq(toolRun.runId, runId)))
- .orderBy(asc(toolRun.startedAt)),
- db
- .select()
- .from(contextSnapshot)
- .where(and(eq(contextSnapshot.threadId, threadId), eq(contextSnapshot.runId, runId))),
- // V8 阶段 7：run 级 Skill 使用记录（供 ThreadRunPanel 展示 selected SkillVersions）
- db
- .select()
- .from(threadRunSkill)
- .where(eq(threadRunSkill.runId, runId))
- .orderBy(asc(threadRunSkill.createdAt)),
- ]);
+  // 2. 并行查 5 张表的 runId 归属数据（V8 新增 ThreadRunSkill）
+  const [messages, events, toolRuns, snapshots, runSkills] = await Promise.all([
+    db
+      .select()
+      .from(message)
+      .where(and(eq(message.threadId, threadId), eq(message.runId, runId)))
+      .orderBy(asc(message.createdAt)),
+    db
+      .select()
+      .from(threadEvent)
+      .where(and(eq(threadEvent.threadId, threadId), eq(threadEvent.runId, runId)))
+      .orderBy(asc(threadEvent.sequence)),
+    db
+      .select()
+      .from(toolRun)
+      .where(and(eq(toolRun.threadId, threadId), eq(toolRun.runId, runId)))
+      .orderBy(asc(toolRun.startedAt)),
+    db
+      .select()
+      .from(contextSnapshot)
+      .where(and(eq(contextSnapshot.threadId, threadId), eq(contextSnapshot.runId, runId))),
+    // V8 阶段 7：run 级 Skill 使用记录（供 ThreadRunPanel 展示 selected SkillVersions）
+    db
+      .select()
+      .from(threadRunSkill)
+      .where(eq(threadRunSkill.runId, runId))
+      .orderBy(asc(threadRunSkill.createdAt)),
+  ]);
 
- return { run: row.run, messages, events, toolRuns, contextSnapshots: snapshots, runSkills };
+  return { run: row.run, messages, events, toolRuns, contextSnapshots: snapshots, runSkills };
 }
 
 // ─── : RunTranscriptChunk Queries ────────────────────
@@ -4212,67 +4211,67 @@ export async function getRunDetail(threadId: string, runId: string, userId: stri
  * 避免并发写入导致顺序错乱。
  */
 export async function appendRunTranscriptChunk(params: {
- threadId: string;
- runId: string;
- kind: RunTranscriptChunkKind;
- payload: unknown;
- /** 可选：由调用方预分配 sequence；未传时由 DB 自动分配。 */
- sequence?: number;
+  threadId: string;
+  runId: string;
+  kind: RunTranscriptChunkKind;
+  payload: unknown;
+  /** 可选：由调用方预分配 sequence；未传时由 DB 自动分配。 */
+  sequence?: number;
 }): Promise<RunTranscriptChunk> {
- // P2-5:套用 appendThreadEvent 的重试模式——未预分配 sequence 时,SELECT MAX+1 在并发下
- // 可能撞 unique(runId, sequence),INSERT 失败重新取 max+1 重试(最多 5 次)。
- // 预分配 sequence(broadcaster 单线程)冲突 → 不重试(覆盖会破坏内存流顺序),抛错。
- let lastError: unknown;
- for (let attempt = 0; attempt < 5; attempt++) {
- // 1. 计算 sequence：调用方预分配优先,否则查当前 max + 1(每次重试重新查)
- let nextSequence = params.sequence;
- if (nextSequence === undefined) {
- const [maxRow] = await db
- .select({ maxSeq: max(runTranscriptChunk.sequence) })
- .from(runTranscriptChunk)
- .where(eq(runTranscriptChunk.runId, params.runId))
- .limit(1);
- nextSequence = (maxRow?.maxSeq ?? 0) + 1;
- }
+  // P2-5:套用 appendThreadEvent 的重试模式——未预分配 sequence 时,SELECT MAX+1 在并发下
+  // 可能撞 unique(runId, sequence),INSERT 失败重新取 max+1 重试(最多 5 次)。
+  // 预分配 sequence(broadcaster 单线程)冲突 → 不重试(覆盖会破坏内存流顺序),抛错。
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    // 1. 计算 sequence：调用方预分配优先,否则查当前 max + 1(每次重试重新查)
+    let nextSequence = params.sequence;
+    if (nextSequence === undefined) {
+      const [maxRow] = await db
+        .select({ maxSeq: max(runTranscriptChunk.sequence) })
+        .from(runTranscriptChunk)
+        .where(eq(runTranscriptChunk.runId, params.runId))
+        .limit(1);
+      nextSequence = (maxRow?.maxSeq ?? 0) + 1;
+    }
 
- try {
- // 2. 插入新 chunk
- const [inserted] = await db
- .insert(runTranscriptChunk)
- .values({
- threadId: params.threadId,
- runId: params.runId,
- sequence: nextSequence,
- kind: params.kind,
- payload: params.payload,
- })
- .$returningId();
+    try {
+      // 2. 插入新 chunk
+      const [inserted] = await db
+        .insert(runTranscriptChunk)
+        .values({
+          threadId: params.threadId,
+          runId: params.runId,
+          sequence: nextSequence,
+          kind: params.kind,
+          payload: params.payload,
+        })
+        .$returningId();
 
- if (!inserted) {
- throw new Error("Failed to insert RunTranscriptChunk");
- }
+      if (!inserted) {
+        throw new Error("Failed to insert RunTranscriptChunk");
+      }
 
- // 3. 查询完整行返回
- const [row] = await db
- .select()
- .from(runTranscriptChunk)
- .where(eq(runTranscriptChunk.id, inserted.id))
- .limit(1);
+      // 3. 查询完整行返回
+      const [row] = await db
+        .select()
+        .from(runTranscriptChunk)
+        .where(eq(runTranscriptChunk.id, inserted.id))
+        .limit(1);
 
- if (!row) {
- throw new Error("Failed to retrieve inserted RunTranscriptChunk");
- }
+      if (!row) {
+        throw new Error("Failed to retrieve inserted RunTranscriptChunk");
+      }
 
- return row;
- } catch (error) {
- lastError = error;
- const msg = error instanceof Error ? error.message : String(error);
- // unique 冲突(ER_DUP_ENTRY 1062)→ 重试;预分配 sequence 冲突不重试(破坏顺序)
- if (!/1062|duplicate|ER_DUP/i.test(msg)) throw error;
- if (params.sequence !== undefined) throw error;
- }
- }
- throw lastError ?? new Error("appendRunTranscriptChunk 重试耗尽");
+      return row;
+    } catch (error) {
+      lastError = error;
+      const msg = error instanceof Error ? error.message : String(error);
+      // unique 冲突(ER_DUP_ENTRY 1062)→ 重试;预分配 sequence 冲突不重试(破坏顺序)
+      if (!/1062|duplicate|ER_DUP/i.test(msg)) throw error;
+      if (params.sequence !== undefined) throw error;
+    }
+  }
+  throw lastError ?? new Error("appendRunTranscriptChunk 重试耗尽");
 }
 
 /**
@@ -4282,22 +4281,22 @@ export async function appendRunTranscriptChunk(params: {
  * @param limit 可选，默认 1000，最大 10000
  */
 export async function listRunTranscriptChunks(
- runId: string,
- opts: { afterSeq?: number; limit?: number } = {},
+  runId: string,
+  opts: { afterSeq?: number; limit?: number } = {},
 ): Promise<RunTranscriptChunk[]> {
- const limit = Math.min(10000, Math.max(1, Math.floor(opts.limit ?? 1000)));
+  const limit = Math.min(10000, Math.max(1, Math.floor(opts.limit ?? 1000)));
 
- const conds = [eq(runTranscriptChunk.runId, runId)];
- if (opts.afterSeq !== undefined) {
- conds.push(gt(runTranscriptChunk.sequence, opts.afterSeq));
- }
+  const conds = [eq(runTranscriptChunk.runId, runId)];
+  if (opts.afterSeq !== undefined) {
+    conds.push(gt(runTranscriptChunk.sequence, opts.afterSeq));
+  }
 
- return db
- .select()
- .from(runTranscriptChunk)
- .where(and(...conds))
- .orderBy(asc(runTranscriptChunk.sequence))
- .limit(limit);
+  return db
+    .select()
+    .from(runTranscriptChunk)
+    .where(and(...conds))
+    .orderBy(asc(runTranscriptChunk.sequence))
+    .limit(limit);
 }
 
 // ─── V8: ThreadRunSkill 查询（Run 级 Skill 使用事实）─────────
@@ -4315,36 +4314,36 @@ export async function listRunTranscriptChunks(
  * - 同一 runId 多次调用会累积行（不做 upsert）；恢复场景由调用方先读原 run 再写新 run。
  */
 export async function saveThreadRunSkills(params: {
- runId: string;
- threadId: string;
- skills: Array<{
- skillId: string;
- skillVersionId: string;
- role?: ThreadRunSkillRole;
- source?: ThreadRunSkillSource;
- reason?: string | null;
- contentHash?: string | null;
- }>;
+  runId: string;
+  threadId: string;
+  skills: Array<{
+    skillId: string;
+    skillVersionId: string;
+    role?: ThreadRunSkillRole;
+    source?: ThreadRunSkillSource;
+    reason?: string | null;
+    contentHash?: string | null;
+  }>;
 }): Promise<ThreadRunSkill[]> {
- if (params.skills.length === 0) {
- return [];
- }
- const rows = params.skills.map((s) => ({
- runId: params.runId,
- threadId: params.threadId,
- skillId: s.skillId,
- skillVersionId: s.skillVersionId,
- role: (s.role ?? "primary") as ThreadRunSkillRole,
- source: (s.source ?? "resolver") as ThreadRunSkillSource,
- reason: s.reason ?? null,
- contentHash: s.contentHash ?? null,
- }));
- // P2-5: 幂等——重试/并发调用先删本 run 旧记录再插,防重复行(对比 saveMessages 用 .ignore)。
- await db.transaction(async (tx) => {
- await tx.delete(threadRunSkill).where(eq(threadRunSkill.runId, params.runId));
- await tx.insert(threadRunSkill).values(rows);
- });
- return listThreadRunSkillsByRun(params.runId);
+  if (params.skills.length === 0) {
+    return [];
+  }
+  const rows = params.skills.map((s) => ({
+    runId: params.runId,
+    threadId: params.threadId,
+    skillId: s.skillId,
+    skillVersionId: s.skillVersionId,
+    role: (s.role ?? "primary") as ThreadRunSkillRole,
+    source: (s.source ?? "resolver") as ThreadRunSkillSource,
+    reason: s.reason ?? null,
+    contentHash: s.contentHash ?? null,
+  }));
+  // P2-5: 幂等——重试/并发调用先删本 run 旧记录再插,防重复行(对比 saveMessages 用 .ignore)。
+  await db.transaction(async (tx) => {
+    await tx.delete(threadRunSkill).where(eq(threadRunSkill.runId, params.runId));
+    await tx.insert(threadRunSkill).values(rows);
+  });
+  return listThreadRunSkillsByRun(params.runId);
 }
 
 /**
@@ -4354,11 +4353,11 @@ export async function saveThreadRunSkills(params: {
  * 基础 agent（无 Skill）返回空数组。
  */
 export async function listThreadRunSkillsByRun(runId: string): Promise<ThreadRunSkill[]> {
- return db
- .select()
- .from(threadRunSkill)
- .where(eq(threadRunSkill.runId, runId))
- .orderBy(asc(threadRunSkill.createdAt));
+  return db
+    .select()
+    .from(threadRunSkill)
+    .where(eq(threadRunSkill.runId, runId))
+    .orderBy(asc(threadRunSkill.createdAt));
 }
 
 /**
@@ -4367,14 +4366,14 @@ export async function listThreadRunSkillsByRun(runId: string): Promise<ThreadRun
  * 用途：Studio 展示 thread 的 Skill 使用时间线。不作为运行时解析依据（每轮独立 Resolver）。
  */
 export async function listThreadRunSkillsByThread(
- threadId: string,
- opts: { limit?: number } = {},
+  threadId: string,
+  opts: { limit?: number } = {},
 ): Promise<ThreadRunSkill[]> {
- const limit = Math.min(1000, Math.max(1, Math.floor(opts.limit ?? 200)));
- return db
- .select()
- .from(threadRunSkill)
- .where(eq(threadRunSkill.threadId, threadId))
- .orderBy(asc(threadRunSkill.createdAt))
- .limit(limit);
+  const limit = Math.min(1000, Math.max(1, Math.floor(opts.limit ?? 200)));
+  return db
+    .select()
+    .from(threadRunSkill)
+    .where(eq(threadRunSkill.threadId, threadId))
+    .orderBy(asc(threadRunSkill.createdAt))
+    .limit(limit);
 }

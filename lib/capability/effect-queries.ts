@@ -21,43 +21,43 @@
  * - MySQL 不支持 .returning()：update + select 两步。
  */
 import { createHash, randomUUID } from "node:crypto";
+import { getToolCallById, updateToolCallState } from "@/lib/capability/tool-call-queries";
 import { db } from "@/lib/db/client";
 import {
- ADMIN_VERIFICATION_METHODS,
- EFFECT_STATES,
- EFFECT_TARGET_STATES,
- EFFECT_TYPES,
- type EffectRecord,
- type EffectState,
- type EffectTarget,
- type EffectTargetState,
- type EffectType,
- GATEWAY_VERIFICATION_METHODS,
- type NewEffectRecord,
- type NewEffectTarget,
- VERIFICATION_METHODS,
- type VerificationMethod,
- effectRecordTable,
- effectTargetTable,
+  ADMIN_VERIFICATION_METHODS,
+  EFFECT_STATES,
+  EFFECT_TARGET_STATES,
+  EFFECT_TYPES,
+  type EffectRecord,
+  type EffectState,
+  type EffectTarget,
+  type EffectTargetState,
+  type EffectType,
+  GATEWAY_VERIFICATION_METHODS,
+  type NewEffectRecord,
+  type NewEffectTarget,
+  VERIFICATION_METHODS,
+  type VerificationMethod,
+  effectRecordTable,
+  effectTargetTable,
 } from "@/lib/persistence/schema/effect";
 import { type ToolCall, toolCallTable } from "@/lib/persistence/schema/tool-call";
-import { getToolCallById, updateToolCallState } from "@/lib/capability/tool-call-queries";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
 export class EffectValidationError extends Error {
- constructor(message: string) {
- super(message);
- this.name = "EffectValidationError";
- }
+  constructor(message: string) {
+    super(message);
+    this.name = "EffectValidationError";
+  }
 }
 
 export class EffectNotFoundError extends Error {
- constructor(message: string) {
- super(message);
- this.name = "EffectNotFoundError";
- }
+  constructor(message: string) {
+    super(message);
+    this.name = "EffectNotFoundError";
+  }
 }
 
 /**
@@ -66,17 +66,17 @@ export class EffectNotFoundError extends Error {
  * unknown_effect 不属于终态，可多次 reconcile 直到所有 target 都确认。
  */
 export class EffectAlreadyConfirmedError extends Error {
- public readonly currentState: EffectState;
- public readonly effectRecordId: string;
+  public readonly currentState: EffectState;
+  public readonly effectRecordId: string;
 
- constructor(effectRecordId: string, currentState: EffectState) {
- super(
- `EffectRecord ${effectRecordId} 已进入终态（currentState=${currentState}），不可再 reconcile`,
- );
- this.name = "EffectAlreadyConfirmedError";
- this.currentState = currentState;
- this.effectRecordId = effectRecordId;
- }
+  constructor(effectRecordId: string, currentState: EffectState) {
+    super(
+      `EffectRecord ${effectRecordId} 已进入终态（currentState=${currentState}），不可再 reconcile`,
+    );
+    this.name = "EffectAlreadyConfirmedError";
+    this.currentState = currentState;
+    this.effectRecordId = effectRecordId;
+  }
 }
 
 /**
@@ -85,43 +85,43 @@ export class EffectAlreadyConfirmedError extends Error {
  * 调用方应先查询 listEffectTargets 获取合法 targetHash 列表。
  */
 export class EffectTargetNotFoundError extends Error {
- public readonly targetHash: string;
+  public readonly targetHash: string;
 
- constructor(targetHash: string) {
- super(`EffectTarget 不存在或跨租户不可见: ${targetHash}`);
- this.name = "EffectTargetNotFoundError";
- this.targetHash = targetHash;
- }
+  constructor(targetHash: string) {
+    super(`EffectTarget 不存在或跨租户不可见: ${targetHash}`);
+    this.name = "EffectTargetNotFoundError";
+    this.targetHash = targetHash;
+  }
 }
 
 /**
  * operation_id 与原 ToolCall 不匹配（Gateway 即时核对路径要求一致）。
  */
 export class EffectOperationMismatchError extends Error {
- public readonly expectedOperationId: string;
- public readonly actualOperationId: string;
+  public readonly expectedOperationId: string;
+  public readonly actualOperationId: string;
 
- constructor(expectedOperationId: string, actualOperationId: string) {
- super(`operation_id 不匹配：期望 ${expectedOperationId}，实际 ${actualOperationId}`);
- this.name = "EffectOperationMismatchError";
- this.expectedOperationId = expectedOperationId;
- this.actualOperationId = actualOperationId;
- }
+  constructor(expectedOperationId: string, actualOperationId: string) {
+    super(`operation_id 不匹配：期望 ${expectedOperationId}，实际 ${actualOperationId}`);
+    this.name = "EffectOperationMismatchError";
+    this.expectedOperationId = expectedOperationId;
+    this.actualOperationId = actualOperationId;
+  }
 }
 
 /**
  * 核对方式不被当前路径允许（如 Gateway 路径使用 manual_evidence）。
  */
 export class EffectVerificationMethodNotAllowedError extends Error {
- public readonly method: VerificationMethod;
- public readonly allowedMethods: readonly VerificationMethod[];
+  public readonly method: VerificationMethod;
+  public readonly allowedMethods: readonly VerificationMethod[];
 
- constructor(method: VerificationMethod, allowedMethods: readonly VerificationMethod[]) {
- super(`verification_method=${method} 不被当前路径允许；合法值：${allowedMethods.join(", ")}`);
- this.name = "EffectVerificationMethodNotAllowedError";
- this.method = method;
- this.allowedMethods = allowedMethods;
- }
+  constructor(method: VerificationMethod, allowedMethods: readonly VerificationMethod[]) {
+    super(`verification_method=${method} 不被当前路径允许；合法值：${allowedMethods.join(", ")}`);
+    this.name = "EffectVerificationMethodNotAllowedError";
+    this.method = method;
+    this.allowedMethods = allowedMethods;
+  }
 }
 
 // ─── 校验辅助 ──────────────────────────────────────────────
@@ -132,19 +132,19 @@ const VALID_TARGET_STATES = new Set<string>(EFFECT_TARGET_STATES);
 const VALID_VERIFICATION_METHODS = new Set<string>(VERIFICATION_METHODS);
 
 export function isEffectType(value: string): value is EffectType {
- return VALID_EFFECT_TYPES.has(value);
+  return VALID_EFFECT_TYPES.has(value);
 }
 
 export function isEffectState(value: string): value is EffectState {
- return VALID_EFFECT_STATES.has(value);
+  return VALID_EFFECT_STATES.has(value);
 }
 
 export function isEffectTargetState(value: string): value is EffectTargetState {
- return VALID_TARGET_STATES.has(value);
+  return VALID_TARGET_STATES.has(value);
 }
 
 export function isVerificationMethod(value: string): value is VerificationMethod {
- return VALID_VERIFICATION_METHODS.has(value);
+  return VALID_VERIFICATION_METHODS.has(value);
 }
 
 /**
@@ -152,9 +152,9 @@ export function isVerificationMethod(value: string): value is VerificationMethod
  * 与 ToolCall.argumentsHash / schemaHash 一致风格。
  */
 export function isValidTargetHash(hash: string): boolean {
- if (!hash.startsWith("sha256:")) return false;
- const hex = hash.slice("sha256:".length);
- return /^[0-9a-f]{64}$/.test(hex);
+  if (!hash.startsWith("sha256:")) return false;
+  const hex = hash.slice("sha256:".length);
+  return /^[0-9a-f]{64}$/.test(hex);
 }
 
 /**
@@ -164,11 +164,11 @@ export function isValidTargetHash(hash: string): boolean {
  * 输入为目标引用字符串（如 "user:email:foo@example.com"）。
  */
 export function computeTargetHash(targetRef: string): string {
- if (!targetRef || typeof targetRef !== "string") {
- throw new EffectValidationError("targetRef 不能为空");
- }
- const hex = createHash("sha256").update(targetRef, "utf-8").digest("hex");
- return `sha256:${hex}`;
+  if (!targetRef || typeof targetRef !== "string") {
+    throw new EffectValidationError("targetRef 不能为空");
+  }
+  const hex = createHash("sha256").update(targetRef, "utf-8").digest("hex");
+  return `sha256:${hex}`;
 }
 
 /**
@@ -182,38 +182,38 @@ export function computeTargetHash(targetRef: string): string {
  * - 空数组 → unknown_effect（无法核对）
  */
 export function deriveEffectStateFromTargets(targets: readonly EffectTargetState[]): EffectState {
- if (targets.length === 0) return "unknown_effect";
+  if (targets.length === 0) return "unknown_effect";
 
- let successCount = 0;
- let failureCount = 0;
- let unknownCount = 0;
- for (const s of targets) {
- if (s === "confirmed_success") successCount++;
- else if (s === "confirmed_failure") failureCount++;
- else unknownCount++;
- }
+  let successCount = 0;
+  let failureCount = 0;
+  let unknownCount = 0;
+  for (const s of targets) {
+    if (s === "confirmed_success") successCount++;
+    else if (s === "confirmed_failure") failureCount++;
+    else unknownCount++;
+  }
 
- if (unknownCount > 0) return "unknown_effect";
- if (successCount === targets.length) return "confirmed_success";
- if (failureCount === targets.length) return "confirmed_failure";
- return "confirmed_partial";
+  if (unknownCount > 0) return "unknown_effect";
+  if (successCount === targets.length) return "confirmed_success";
+  if (failureCount === targets.length) return "confirmed_failure";
+  return "confirmed_partial";
 }
 
 // ─── createEffectRecord ──────────────────────────────────
 
 export interface CreateEffectRecordInput {
- tenantId: string;
- /** 所属 ToolCall id（一对一；逻辑外键 → ToolCall.id）。 */
- toolCallId: string;
- effectType: EffectType;
- /** 目标数量和脱敏摘要（JSON：{ total, description, ... }）。 */
- targetSummaryJson: unknown;
- /** 目标系统幂等键（如外部 API 的 Idempotency-Key）。 */
- externalIdempotencyKey?: string | null;
- /** 初始外部结果引用（通常创建时为空，reconcile 后回填）。 */
- externalResultRef?: string | null;
- /** 初始 effect_state；默认 not_started。 */
- initialEffectState?: EffectState | null;
+  tenantId: string;
+  /** 所属 ToolCall id（一对一；逻辑外键 → ToolCall.id）。 */
+  toolCallId: string;
+  effectType: EffectType;
+  /** 目标数量和脱敏摘要（JSON：{ total, description, ... }）。 */
+  targetSummaryJson: unknown;
+  /** 目标系统幂等键（如外部 API 的 Idempotency-Key）。 */
+  externalIdempotencyKey?: string | null;
+  /** 初始外部结果引用（通常创建时为空，reconcile 后回填）。 */
+  externalResultRef?: string | null;
+  /** 初始 effect_state；默认 not_started。 */
+  initialEffectState?: EffectState | null;
 }
 
 /**
@@ -225,79 +225,79 @@ export interface CreateEffectRecordInput {
  * - 不创建 EffectTarget；调用方应紧接着调用 createEffectTargets。
  */
 export async function createEffectRecord(input: CreateEffectRecordInput): Promise<EffectRecord> {
- if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
- if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
- if (!isEffectType(input.effectType)) {
- throw new EffectValidationError(`非法 effectType: ${input.effectType}`);
- }
- if (!input.targetSummaryJson || typeof input.targetSummaryJson !== "object") {
- throw new EffectValidationError("targetSummaryJson 必须是对象");
- }
- if (input.externalIdempotencyKey !== undefined && input.externalIdempotencyKey !== null) {
- if (
- typeof input.externalIdempotencyKey !== "string" ||
- input.externalIdempotencyKey.length === 0
- ) {
- throw new EffectValidationError("externalIdempotencyKey 不能为空字符串");
- }
- if (input.externalIdempotencyKey.length > 128) {
- throw new EffectValidationError("externalIdempotencyKey 长度不能超过 128");
- }
- }
+  if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
+  if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
+  if (!isEffectType(input.effectType)) {
+    throw new EffectValidationError(`非法 effectType: ${input.effectType}`);
+  }
+  if (!input.targetSummaryJson || typeof input.targetSummaryJson !== "object") {
+    throw new EffectValidationError("targetSummaryJson 必须是对象");
+  }
+  if (input.externalIdempotencyKey !== undefined && input.externalIdempotencyKey !== null) {
+    if (
+      typeof input.externalIdempotencyKey !== "string" ||
+      input.externalIdempotencyKey.length === 0
+    ) {
+      throw new EffectValidationError("externalIdempotencyKey 不能为空字符串");
+    }
+    if (input.externalIdempotencyKey.length > 128) {
+      throw new EffectValidationError("externalIdempotencyKey 长度不能超过 128");
+    }
+  }
 
- // 幂等回查：同一 toolCallId 已存在时拒绝（不返回已存在行，强制调用方走查询路径）。
- const existing = await getEffectRecordByToolCall(input.tenantId, input.toolCallId);
- if (existing) {
- throw new EffectValidationError(
- `EffectRecord 已存在（toolCallId=${input.toolCallId}）；一对一约束禁止二次创建`,
- );
- }
+  // 幂等回查：同一 toolCallId 已存在时拒绝（不返回已存在行，强制调用方走查询路径）。
+  const existing = await getEffectRecordByToolCall(input.tenantId, input.toolCallId);
+  if (existing) {
+    throw new EffectValidationError(
+      `EffectRecord 已存在（toolCallId=${input.toolCallId}）；一对一约束禁止二次创建`,
+    );
+  }
 
- const id = randomUUID();
- const now = new Date();
- const insert: NewEffectRecord = {
- id,
- tenantId: input.tenantId,
- toolCallId: input.toolCallId,
- effectType: input.effectType,
- targetSummaryJson: input.targetSummaryJson,
- effectState: input.initialEffectState ?? "not_started",
- externalIdempotencyKey: input.externalIdempotencyKey ?? null,
- externalResultRef: input.externalResultRef ?? null,
- versionNo: 1,
- createdAt: now,
- updatedAt: now,
- };
+  const id = randomUUID();
+  const now = new Date();
+  const insert: NewEffectRecord = {
+    id,
+    tenantId: input.tenantId,
+    toolCallId: input.toolCallId,
+    effectType: input.effectType,
+    targetSummaryJson: input.targetSummaryJson,
+    effectState: input.initialEffectState ?? "not_started",
+    externalIdempotencyKey: input.externalIdempotencyKey ?? null,
+    externalResultRef: input.externalResultRef ?? null,
+    versionNo: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
 
- await db.insert(effectRecordTable).values(insert);
- const created = await getEffectRecordById(input.tenantId, id);
- if (!created) {
- throw new EffectNotFoundError("EffectRecord 创建后回查失败");
- }
- return created;
+  await db.insert(effectRecordTable).values(insert);
+  const created = await getEffectRecordById(input.tenantId, id);
+  if (!created) {
+    throw new EffectNotFoundError("EffectRecord 创建后回查失败");
+  }
+  return created;
 }
 
 // ─── createEffectTargets ─────────────────────────────────
 
 export interface CreateEffectTargetItem {
- /** 目标引用（如 user:email:foo@example.com）。 */
- targetRef: string;
- /** 目标摘要 hash；不传则由 computeTargetHash(targetRef) 计算。 */
- targetHash?: string;
- /** 初始状态；默认 unknown。 */
- initialTargetState?: EffectTargetState | null;
- /** 初始外部结果引用；通常创建时为空。 */
- externalResultRef?: string | null;
- /** 初始证据；通常创建时为空。 */
- evidenceJson?: unknown | null;
- /** 备注。 */
- notes?: string | null;
+  /** 目标引用（如 user:email:foo@example.com）。 */
+  targetRef: string;
+  /** 目标摘要 hash；不传则由 computeTargetHash(targetRef) 计算。 */
+  targetHash?: string;
+  /** 初始状态；默认 unknown。 */
+  initialTargetState?: EffectTargetState | null;
+  /** 初始外部结果引用；通常创建时为空。 */
+  externalResultRef?: string | null;
+  /** 初始证据；通常创建时为空。 */
+  evidenceJson?: unknown | null;
+  /** 备注。 */
+  notes?: string | null;
 }
 
 export interface CreateEffectTargetsInput {
- tenantId: string;
- effectRecordId: string;
- targets: readonly CreateEffectTargetItem[];
+  tenantId: string;
+  effectRecordId: string;
+  targets: readonly CreateEffectTargetItem[];
 }
 
 /**
@@ -308,102 +308,102 @@ export interface CreateEffectTargetsInput {
  * - 调用方应在 createEffectRecord 后紧接着调用本函数。
  */
 export async function createEffectTargets(
- input: CreateEffectTargetsInput,
+  input: CreateEffectTargetsInput,
 ): Promise<EffectTarget[]> {
- if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
- if (!input.effectRecordId) throw new EffectValidationError("effectRecordId 不能为空");
- if (!Array.isArray(input.targets) || input.targets.length === 0) {
- throw new EffectValidationError("targets 必须是非空数组");
- }
+  if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
+  if (!input.effectRecordId) throw new EffectValidationError("effectRecordId 不能为空");
+  if (!Array.isArray(input.targets) || input.targets.length === 0) {
+    throw new EffectValidationError("targets 必须是非空数组");
+  }
 
- // 校验 + 去重检查
- const seenHashes = new Set<string>();
- const rows: NewEffectTarget[] = [];
- const now = new Date();
- for (const item of input.targets) {
- if (!item.targetRef) throw new EffectValidationError("targetRef 不能为空");
- if (item.targetRef.length > 512) {
- throw new EffectValidationError("targetRef 长度不能超过 512");
- }
- const hash = item.targetHash ?? computeTargetHash(item.targetRef);
- if (!isValidTargetHash(hash)) {
- throw new EffectValidationError(`targetHash 格式非法: ${hash}`);
- }
- if (item.initialTargetState !== undefined && item.initialTargetState !== null) {
- if (!isEffectTargetState(item.initialTargetState)) {
- throw new EffectValidationError(`非法 initialTargetState: ${item.initialTargetState}`);
- }
- }
- if (seenHashes.has(hash)) {
- throw new EffectValidationError(`targets 内 targetHash 重复: ${hash}`);
- }
- seenHashes.add(hash);
+  // 校验 + 去重检查
+  const seenHashes = new Set<string>();
+  const rows: NewEffectTarget[] = [];
+  const now = new Date();
+  for (const item of input.targets) {
+    if (!item.targetRef) throw new EffectValidationError("targetRef 不能为空");
+    if (item.targetRef.length > 512) {
+      throw new EffectValidationError("targetRef 长度不能超过 512");
+    }
+    const hash = item.targetHash ?? computeTargetHash(item.targetRef);
+    if (!isValidTargetHash(hash)) {
+      throw new EffectValidationError(`targetHash 格式非法: ${hash}`);
+    }
+    if (item.initialTargetState !== undefined && item.initialTargetState !== null) {
+      if (!isEffectTargetState(item.initialTargetState)) {
+        throw new EffectValidationError(`非法 initialTargetState: ${item.initialTargetState}`);
+      }
+    }
+    if (seenHashes.has(hash)) {
+      throw new EffectValidationError(`targets 内 targetHash 重复: ${hash}`);
+    }
+    seenHashes.add(hash);
 
- rows.push({
- id: randomUUID(),
- tenantId: input.tenantId,
- effectRecordId: input.effectRecordId,
- targetRef: item.targetRef,
- targetHash: hash,
- targetState: item.initialTargetState ?? "unknown",
- externalResultRef: item.externalResultRef ?? null,
- evidenceJson: item.evidenceJson ?? null,
- notes: item.notes ?? null,
- createdAt: now,
- updatedAt: now,
- });
- }
+    rows.push({
+      id: randomUUID(),
+      tenantId: input.tenantId,
+      effectRecordId: input.effectRecordId,
+      targetRef: item.targetRef,
+      targetHash: hash,
+      targetState: item.initialTargetState ?? "unknown",
+      externalResultRef: item.externalResultRef ?? null,
+      evidenceJson: item.evidenceJson ?? null,
+      notes: item.notes ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 
- await db.insert(effectTargetTable).values(rows);
- return db
- .select()
- .from(effectTargetTable)
- .where(eq(effectTargetTable.effectRecordId, input.effectRecordId))
- .orderBy(asc(effectTargetTable.targetHash));
+  await db.insert(effectTargetTable).values(rows);
+  return db
+    .select()
+    .from(effectTargetTable)
+    .where(eq(effectTargetTable.effectRecordId, input.effectRecordId))
+    .orderBy(asc(effectTargetTable.targetHash));
 }
 
 // ─── 查询 ─────────────────────────────────────────────────
 
 export async function getEffectRecordById(
- tenantId: string,
- effectRecordId: string,
+  tenantId: string,
+  effectRecordId: string,
 ): Promise<EffectRecord | null> {
- const [row] = await db
- .select()
- .from(effectRecordTable)
- .where(and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.id, effectRecordId)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(effectRecordTable)
+    .where(and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.id, effectRecordId)))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function getEffectRecordByToolCall(
- tenantId: string,
- toolCallId: string,
+  tenantId: string,
+  toolCallId: string,
 ): Promise<EffectRecord | null> {
- const [row] = await db
- .select()
- .from(effectRecordTable)
- .where(
- and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.toolCallId, toolCallId)),
- )
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(effectRecordTable)
+    .where(
+      and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.toolCallId, toolCallId)),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 export async function listEffectTargets(
- tenantId: string,
- effectRecordId: string,
+  tenantId: string,
+  effectRecordId: string,
 ): Promise<EffectTarget[]> {
- return db
- .select()
- .from(effectTargetTable)
- .where(
- and(
- eq(effectTargetTable.tenantId, tenantId),
- eq(effectTargetTable.effectRecordId, effectRecordId),
- ),
- )
- .orderBy(asc(effectTargetTable.targetHash));
+  return db
+    .select()
+    .from(effectTargetTable)
+    .where(
+      and(
+        eq(effectTargetTable.tenantId, tenantId),
+        eq(effectTargetTable.effectRecordId, effectRecordId),
+      ),
+    )
+    .orderBy(asc(effectTargetTable.targetHash));
 }
 
 /**
@@ -413,94 +413,94 @@ export async function listEffectTargets(
  * - 跨租户隔离：tool_call.tenantId + effect_record.tenantId 双重过滤。
  */
 export async function listEffectRecordsByInvocation(
- tenantId: string,
- invocationId: string,
+  tenantId: string,
+  invocationId: string,
 ): Promise<EffectRecord[]> {
- const rows = await db
- .select({
- record: effectRecordTable,
- })
- .from(effectRecordTable)
- .innerJoin(
- toolCallTable,
- and(
- eq(effectRecordTable.toolCallId, toolCallTable.id),
- eq(effectRecordTable.tenantId, toolCallTable.tenantId),
- ),
- )
- .where(
- and(eq(effectRecordTable.tenantId, tenantId), eq(toolCallTable.invocationId, invocationId)),
- )
- .orderBy(asc(toolCallTable.callSequence));
+  const rows = await db
+    .select({
+      record: effectRecordTable,
+    })
+    .from(effectRecordTable)
+    .innerJoin(
+      toolCallTable,
+      and(
+        eq(effectRecordTable.toolCallId, toolCallTable.id),
+        eq(effectRecordTable.tenantId, toolCallTable.tenantId),
+      ),
+    )
+    .where(
+      and(eq(effectRecordTable.tenantId, tenantId), eq(toolCallTable.invocationId, invocationId)),
+    )
+    .orderBy(asc(toolCallTable.callSequence));
 
- return rows.map((r) => r.record);
+  return rows.map((r) => r.record);
 }
 
 /**
  * 列出某租户内指定状态的 EffectRecord（用于扫描 unknown_effect 待核对任务）。
  */
 export async function listEffectRecordsByState(
- tenantId: string,
- state: EffectState,
- options?: { limit?: number },
+  tenantId: string,
+  state: EffectState,
+  options?: { limit?: number },
 ): Promise<EffectRecord[]> {
- const limit = options?.limit ?? 100;
- return db
- .select()
- .from(effectRecordTable)
- .where(and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.effectState, state)))
- .orderBy(asc(effectRecordTable.createdAt))
- .limit(limit);
+  const limit = options?.limit ?? 100;
+  return db
+    .select()
+    .from(effectRecordTable)
+    .where(and(eq(effectRecordTable.tenantId, tenantId), eq(effectRecordTable.effectState, state)))
+    .orderBy(asc(effectRecordTable.createdAt))
+    .limit(limit);
 }
 
 // ─── reconcileEffect ─────────────────────────────────────
 
 export interface ReconcileTargetUpdate {
- /** 必须匹配现有 EffectTarget.targetHash。 */
- targetHash: string;
- /** 新的核对状态。 */
- targetState: EffectTargetState;
- /** 该目标的外部结果引用；不传则不改。 */
- externalResultRef?: string | null;
- /** 该目标的证据摘要；不传则不改。 */
- evidenceJson?: unknown | null;
- /** 备注；不传则不改。 */
- notes?: string | null;
+  /** 必须匹配现有 EffectTarget.targetHash。 */
+  targetHash: string;
+  /** 新的核对状态。 */
+  targetState: EffectTargetState;
+  /** 该目标的外部结果引用；不传则不改。 */
+  externalResultRef?: string | null;
+  /** 该目标的证据摘要；不传则不改。 */
+  evidenceJson?: unknown | null;
+  /** 备注；不传则不改。 */
+  notes?: string | null;
 }
 
 export type ReconcilePath = "gateway" | "admin";
 
 export interface ReconcileEffectInput {
- tenantId: string;
- toolCallId: string;
- /** 调用路径：gateway（仅 provider_query + operation_id 校验）或 admin（三种 method）。 */
- path: ReconcilePath;
- /** 核对方式。 */
- verificationMethod: VerificationMethod;
- /** 各目标的核对结果；可为空（仅刷新总体 verifiedAt）。 */
- targetUpdates: readonly ReconcileTargetUpdate[];
- /** 整体证据；不传则不改。 */
- evidenceJson?: unknown | null;
- /** 整体外部结果引用；不传则不改。 */
- externalResultRef?: string | null;
- /** Gateway 路径必填：必须与原 ToolCall.operationId 一致。 */
- expectedOperationId?: string;
- /** 调用者标识（用于审计；本仓储不写 AuditEvent，由调用方在更高层补充）。 */
- reconciledBy?: string;
+  tenantId: string;
+  toolCallId: string;
+  /** 调用路径：gateway（仅 provider_query + operation_id 校验）或 admin（三种 method）。 */
+  path: ReconcilePath;
+  /** 核对方式。 */
+  verificationMethod: VerificationMethod;
+  /** 各目标的核对结果；可为空（仅刷新总体 verifiedAt）。 */
+  targetUpdates: readonly ReconcileTargetUpdate[];
+  /** 整体证据；不传则不改。 */
+  evidenceJson?: unknown | null;
+  /** 整体外部结果引用；不传则不改。 */
+  externalResultRef?: string | null;
+  /** Gateway 路径必填：必须与原 ToolCall.operationId 一致。 */
+  expectedOperationId?: string;
+  /** 调用者标识（用于审计；本仓储不写 AuditEvent，由调用方在更高层补充）。 */
+  reconciledBy?: string;
 }
 
 export interface ReconcileEffectResult {
- effectRecord: EffectRecord;
- effectTargets: EffectTarget[];
- /** 核对后的 ToolCall（call_state 可能同步迁移）。 */
- toolCall: ToolCall;
- /** 派生的目标计数（与 API 响应 targets 字段一致）。 */
- targetsCount: {
- total: number;
- confirmed_success: number;
- confirmed_failure: number;
- unknown: number;
- };
+  effectRecord: EffectRecord;
+  effectTargets: EffectTarget[];
+  /** 核对后的 ToolCall（call_state 可能同步迁移）。 */
+  toolCall: ToolCall;
+  /** 派生的目标计数（与 API 响应 targets 字段一致）。 */
+  targetsCount: {
+    total: number;
+    confirmed_success: number;
+    confirmed_failure: number;
+    unknown: number;
+  };
 }
 
 /**
@@ -518,216 +518,216 @@ export interface ReconcileEffectResult {
  * 注意：ThreadEvent / AuditEvent 不在本仓储写入；由调用方在更高层同事务或后续写入。
  */
 export async function reconcileEffect(input: ReconcileEffectInput): Promise<ReconcileEffectResult> {
- if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
- if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
- if (input.path !== "gateway" && input.path !== "admin") {
- throw new EffectValidationError(`非法 path: ${input.path}`);
- }
- if (!isVerificationMethod(input.verificationMethod)) {
- throw new EffectValidationError(`非法 verificationMethod: ${input.verificationMethod}`);
- }
+  if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
+  if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
+  if (input.path !== "gateway" && input.path !== "admin") {
+    throw new EffectValidationError(`非法 path: ${input.path}`);
+  }
+  if (!isVerificationMethod(input.verificationMethod)) {
+    throw new EffectValidationError(`非法 verificationMethod: ${input.verificationMethod}`);
+  }
 
- // 路径与方法校验
- const allowedMethods =
- input.path === "gateway" ? GATEWAY_VERIFICATION_METHODS : ADMIN_VERIFICATION_METHODS;
- if (!allowedMethods.includes(input.verificationMethod)) {
- throw new EffectVerificationMethodNotAllowedError(input.verificationMethod, allowedMethods);
- }
- if (input.path === "gateway" && !input.expectedOperationId) {
- throw new EffectValidationError("gateway 路径必须提供 expectedOperationId");
- }
+  // 路径与方法校验
+  const allowedMethods =
+    input.path === "gateway" ? GATEWAY_VERIFICATION_METHODS : ADMIN_VERIFICATION_METHODS;
+  if (!allowedMethods.includes(input.verificationMethod)) {
+    throw new EffectVerificationMethodNotAllowedError(input.verificationMethod, allowedMethods);
+  }
+  if (input.path === "gateway" && !input.expectedOperationId) {
+    throw new EffectValidationError("gateway 路径必须提供 expectedOperationId");
+  }
 
- // 查询现有 EffectRecord + ToolCall + Targets
- const record = await getEffectRecordByToolCall(input.tenantId, input.toolCallId);
- if (!record) {
- throw new EffectNotFoundError(
- `EffectRecord 不存在或跨租户不可见（toolCallId=${input.toolCallId}）`,
- );
- }
+  // 查询现有 EffectRecord + ToolCall + Targets
+  const record = await getEffectRecordByToolCall(input.tenantId, input.toolCallId);
+  if (!record) {
+    throw new EffectNotFoundError(
+      `EffectRecord 不存在或跨租户不可见（toolCallId=${input.toolCallId}）`,
+    );
+  }
 
- // 终态校验：confirmed_* 不可再 reconcile；unknown_effect / not_started 允许
- if (
- record.effectState === "confirmed_success" ||
- record.effectState === "confirmed_partial" ||
- record.effectState === "confirmed_failure"
- ) {
- throw new EffectAlreadyConfirmedError(record.id, record.effectState);
- }
+  // 终态校验：confirmed_* 不可再 reconcile；unknown_effect / not_started 允许
+  if (
+    record.effectState === "confirmed_success" ||
+    record.effectState === "confirmed_partial" ||
+    record.effectState === "confirmed_failure"
+  ) {
+    throw new EffectAlreadyConfirmedError(record.id, record.effectState);
+  }
 
- const toolCall = await getToolCallById({
- tenantId: input.tenantId,
- toolCallId: input.toolCallId,
- });
- if (!toolCall) {
- throw new EffectNotFoundError(`ToolCall 不存在或跨租户不可见: ${input.toolCallId}`);
- }
+  const toolCall = await getToolCallById({
+    tenantId: input.tenantId,
+    toolCallId: input.toolCallId,
+  });
+  if (!toolCall) {
+    throw new EffectNotFoundError(`ToolCall 不存在或跨租户不可见: ${input.toolCallId}`);
+  }
 
- // Gateway 路径 operation_id 校验
- if (input.path === "gateway" && input.expectedOperationId !== toolCall.operationId) {
- throw new EffectOperationMismatchError(input.expectedOperationId ?? "", toolCall.operationId);
- }
+  // Gateway 路径 operation_id 校验
+  if (input.path === "gateway" && input.expectedOperationId !== toolCall.operationId) {
+    throw new EffectOperationMismatchError(input.expectedOperationId ?? "", toolCall.operationId);
+  }
 
- const existingTargets = await listEffectTargets(input.tenantId, record.id);
- const targetByHash = new Map<string, EffectTarget>();
- for (const t of existingTargets) {
- targetByHash.set(t.targetHash, t);
- }
+  const existingTargets = await listEffectTargets(input.tenantId, record.id);
+  const targetByHash = new Map<string, EffectTarget>();
+  for (const t of existingTargets) {
+    targetByHash.set(t.targetHash, t);
+  }
 
- // 校验 targetUpdates 中的 targetHash 都存在
- for (const update of input.targetUpdates) {
- if (!targetByHash.has(update.targetHash)) {
- throw new EffectTargetNotFoundError(update.targetHash);
- }
- if (!isEffectTargetState(update.targetState)) {
- throw new EffectValidationError(`非法 targetState: ${update.targetState}`);
- }
- }
+  // 校验 targetUpdates 中的 targetHash 都存在
+  for (const update of input.targetUpdates) {
+    if (!targetByHash.has(update.targetHash)) {
+      throw new EffectTargetNotFoundError(update.targetHash);
+    }
+    if (!isEffectTargetState(update.targetState)) {
+      throw new EffectValidationError(`非法 targetState: ${update.targetState}`);
+    }
+  }
 
- // 在事务内更新 effect_target + effect_record + tool_call.call_state
- const now = new Date();
- return db.transaction(async (tx) => {
- // 1. 更新各 EffectTarget
- for (const update of input.targetUpdates) {
- const setFields: Record<string, unknown> = {
- targetState: update.targetState,
- verifiedAt: now,
- updatedAt: now,
- };
- if (update.externalResultRef !== undefined) {
- setFields.externalResultRef = update.externalResultRef;
- }
- if (update.evidenceJson !== undefined) {
- setFields.evidenceJson = update.evidenceJson;
- }
- if (update.notes !== undefined) {
- setFields.notes = update.notes;
- }
- await tx
- .update(effectTargetTable)
- .set(setFields)
- .where(
- and(
- eq(effectTargetTable.tenantId, input.tenantId),
- eq(effectTargetTable.effectRecordId, record.id),
- eq(effectTargetTable.targetHash, update.targetHash),
- ),
- );
- }
+  // 在事务内更新 effect_target + effect_record + tool_call.call_state
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    // 1. 更新各 EffectTarget
+    for (const update of input.targetUpdates) {
+      const setFields: Record<string, unknown> = {
+        targetState: update.targetState,
+        verifiedAt: now,
+        updatedAt: now,
+      };
+      if (update.externalResultRef !== undefined) {
+        setFields.externalResultRef = update.externalResultRef;
+      }
+      if (update.evidenceJson !== undefined) {
+        setFields.evidenceJson = update.evidenceJson;
+      }
+      if (update.notes !== undefined) {
+        setFields.notes = update.notes;
+      }
+      await tx
+        .update(effectTargetTable)
+        .set(setFields)
+        .where(
+          and(
+            eq(effectTargetTable.tenantId, input.tenantId),
+            eq(effectTargetTable.effectRecordId, record.id),
+            eq(effectTargetTable.targetHash, update.targetHash),
+          ),
+        );
+    }
 
- // 2. 重新查询所有 target，派生新的 effect_state
- const updatedTargets = await tx
- .select()
- .from(effectTargetTable)
- .where(
- and(
- eq(effectTargetTable.tenantId, input.tenantId),
- eq(effectTargetTable.effectRecordId, record.id),
- ),
- )
- .orderBy(asc(effectTargetTable.targetHash));
+    // 2. 重新查询所有 target，派生新的 effect_state
+    const updatedTargets = await tx
+      .select()
+      .from(effectTargetTable)
+      .where(
+        and(
+          eq(effectTargetTable.tenantId, input.tenantId),
+          eq(effectTargetTable.effectRecordId, record.id),
+        ),
+      )
+      .orderBy(asc(effectTargetTable.targetHash));
 
- const targetStates: EffectTargetState[] = updatedTargets.map((t) => t.targetState);
- const newEffectState = deriveEffectStateFromTargets(targetStates);
+    const targetStates: EffectTargetState[] = updatedTargets.map((t) => t.targetState);
+    const newEffectState = deriveEffectStateFromTargets(targetStates);
 
- // 3. 更新 EffectRecord
- const recordSetFields: Record<string, unknown> = {
- effectState: newEffectState,
- verificationMethod: input.verificationMethod,
- verifiedAt: now,
- versionNo: record.versionNo + 1,
- updatedAt: now,
- };
- if (input.evidenceJson !== undefined) {
- recordSetFields.evidenceJson = input.evidenceJson;
- }
- if (input.externalResultRef !== undefined) {
- recordSetFields.externalResultRef = input.externalResultRef;
- }
- await tx
- .update(effectRecordTable)
- .set(recordSetFields)
- .where(
- and(eq(effectRecordTable.tenantId, input.tenantId), eq(effectRecordTable.id, record.id)),
- );
+    // 3. 更新 EffectRecord
+    const recordSetFields: Record<string, unknown> = {
+      effectState: newEffectState,
+      verificationMethod: input.verificationMethod,
+      verifiedAt: now,
+      versionNo: record.versionNo + 1,
+      updatedAt: now,
+    };
+    if (input.evidenceJson !== undefined) {
+      recordSetFields.evidenceJson = input.evidenceJson;
+    }
+    if (input.externalResultRef !== undefined) {
+      recordSetFields.externalResultRef = input.externalResultRef;
+    }
+    await tx
+      .update(effectRecordTable)
+      .set(recordSetFields)
+      .where(
+        and(eq(effectRecordTable.tenantId, input.tenantId), eq(effectRecordTable.id, record.id)),
+      );
 
- // 4. 同步更新 ToolCall.call_state（）
- // - confirmed_success/partial → succeeded
- // - confirmed_failure → failed
- // - unknown_effect 保持原状（仍为 unknown_effect 或其他）
- // - not_started 不应该出现在 reconcile（ EffectRecord 创建时若已有副作用应直接进入 unknown_effect；
- // 但若所有 target 都是 unknown，新派生状态也是 unknown_effect）
- let newCallState: typeof toolCall.callState | null = null;
- if (newEffectState === "confirmed_success" || newEffectState === "confirmed_partial") {
- newCallState = "succeeded";
- } else if (newEffectState === "confirmed_failure") {
- newCallState = "failed";
- }
- // unknown_effect 保持原状；其他情况不迁移
+    // 4. 同步更新 ToolCall.call_state（）
+    // - confirmed_success/partial → succeeded
+    // - confirmed_failure → failed
+    // - unknown_effect 保持原状（仍为 unknown_effect 或其他）
+    // - not_started 不应该出现在 reconcile（ EffectRecord 创建时若已有副作用应直接进入 unknown_effect；
+    // 但若所有 target 都是 unknown，新派生状态也是 unknown_effect）
+    let newCallState: typeof toolCall.callState | null = null;
+    if (newEffectState === "confirmed_success" || newEffectState === "confirmed_partial") {
+      newCallState = "succeeded";
+    } else if (newEffectState === "confirmed_failure") {
+      newCallState = "failed";
+    }
+    // unknown_effect 保持原状；其他情况不迁移
 
- if (newCallState && toolCall.callState !== newCallState) {
- // 直接 DB 更新（不调用 updateToolCallState，因为 reconcile 是状态机的合法路径但
- // 该函数使用全局 db 而非 tx；此处需在事务内更新以保证原子性）。
- // 状态机已校验：unknown_effect → succeeded/failed 是合法迁移
- // （见 tool-call-queries.ts TOOL_CALL_STATE_TRANSITIONS）。
- const toolCallSetFields: Record<string, unknown> = {
- callState: newCallState,
- updatedAt: now,
- };
- // 进入 succeeded/failed 时设置 finishedAt（若尚未设置）
- if (newCallState === "succeeded" || newCallState === "failed") {
- if (!toolCall.finishedAt) {
- toolCallSetFields.finishedAt = now;
- }
- }
- await tx
- .update(toolCallTable)
- .set(toolCallSetFields)
- .where(
- and(eq(toolCallTable.tenantId, input.tenantId), eq(toolCallTable.id, input.toolCallId)),
- );
- }
+    if (newCallState && toolCall.callState !== newCallState) {
+      // 直接 DB 更新（不调用 updateToolCallState，因为 reconcile 是状态机的合法路径但
+      // 该函数使用全局 db 而非 tx；此处需在事务内更新以保证原子性）。
+      // 状态机已校验：unknown_effect → succeeded/failed 是合法迁移
+      // （见 tool-call-queries.ts TOOL_CALL_STATE_TRANSITIONS）。
+      const toolCallSetFields: Record<string, unknown> = {
+        callState: newCallState,
+        updatedAt: now,
+      };
+      // 进入 succeeded/failed 时设置 finishedAt（若尚未设置）
+      if (newCallState === "succeeded" || newCallState === "failed") {
+        if (!toolCall.finishedAt) {
+          toolCallSetFields.finishedAt = now;
+        }
+      }
+      await tx
+        .update(toolCallTable)
+        .set(toolCallSetFields)
+        .where(
+          and(eq(toolCallTable.tenantId, input.tenantId), eq(toolCallTable.id, input.toolCallId)),
+        );
+    }
 
- // 5. 回查最新状态
- const [updatedRecord] = await tx
- .select()
- .from(effectRecordTable)
- .where(eq(effectRecordTable.id, record.id))
- .limit(1);
- if (!updatedRecord) {
- throw new EffectNotFoundError("EffectRecord reconcile 后回查失败");
- }
+    // 5. 回查最新状态
+    const [updatedRecord] = await tx
+      .select()
+      .from(effectRecordTable)
+      .where(eq(effectRecordTable.id, record.id))
+      .limit(1);
+    if (!updatedRecord) {
+      throw new EffectNotFoundError("EffectRecord reconcile 后回查失败");
+    }
 
- const [updatedToolCall] = await tx
- .select()
- .from(toolCallTable)
- .where(eq(toolCallTable.id, input.toolCallId))
- .limit(1);
- if (!updatedToolCall) {
- throw new EffectNotFoundError("ToolCall reconcile 后回查失败");
- }
+    const [updatedToolCall] = await tx
+      .select()
+      .from(toolCallTable)
+      .where(eq(toolCallTable.id, input.toolCallId))
+      .limit(1);
+    if (!updatedToolCall) {
+      throw new EffectNotFoundError("ToolCall reconcile 后回查失败");
+    }
 
- // 计算目标计数
- let successCount = 0;
- let failureCount = 0;
- let unknownCount = 0;
- for (const t of updatedTargets) {
- if (t.targetState === "confirmed_success") successCount++;
- else if (t.targetState === "confirmed_failure") failureCount++;
- else unknownCount++;
- }
+    // 计算目标计数
+    let successCount = 0;
+    let failureCount = 0;
+    let unknownCount = 0;
+    for (const t of updatedTargets) {
+      if (t.targetState === "confirmed_success") successCount++;
+      else if (t.targetState === "confirmed_failure") failureCount++;
+      else unknownCount++;
+    }
 
- return {
- effectRecord: updatedRecord,
- effectTargets: updatedTargets,
- toolCall: updatedToolCall,
- targetsCount: {
- total: updatedTargets.length,
- confirmed_success: successCount,
- confirmed_failure: failureCount,
- unknown: unknownCount,
- },
- };
- });
+    return {
+      effectRecord: updatedRecord,
+      effectTargets: updatedTargets,
+      toolCall: updatedToolCall,
+      targetsCount: {
+        total: updatedTargets.length,
+        confirmed_success: successCount,
+        confirmed_failure: failureCount,
+        unknown: unknownCount,
+      },
+    };
+  });
 }
 
 // ─── 便捷函数 ─────────────────────────────────────────────
@@ -739,59 +739,59 @@ export async function reconcileEffect(input: ReconcileEffectInput): Promise<Reco
  * 调用方应在 Tool 执行超时时调用本函数，避免直接置为 failed（）。
  */
 export async function markToolCallUnknownEffect(input: {
- tenantId: string;
- toolCallId: string;
- effectType: EffectType;
- targetSummaryJson: unknown;
- targets?: readonly CreateEffectTargetItem[];
- externalIdempotencyKey?: string | null;
+  tenantId: string;
+  toolCallId: string;
+  effectType: EffectType;
+  targetSummaryJson: unknown;
+  targets?: readonly CreateEffectTargetItem[];
+  externalIdempotencyKey?: string | null;
 }): Promise<{ effectRecord: EffectRecord; effectTargets: EffectTarget[] }> {
- if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
- if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
+  if (!input.tenantId) throw new EffectValidationError("tenantId 不能为空");
+  if (!input.toolCallId) throw new EffectValidationError("toolCallId 不能为空");
 
- // 先校验 ToolCall 存在（跨租户隔离）——必须在创建 EffectRecord 之前，
- // 否则跨租户调用会因 tenantId FK 约束直接抛底层 DB 错误而非 EffectNotFoundError。
- const toolCall = await getToolCallById({
- tenantId: input.tenantId,
- toolCallId: input.toolCallId,
- });
- if (!toolCall) {
- throw new EffectNotFoundError(`ToolCall 不存在或跨租户不可见: ${input.toolCallId}`);
- }
+  // 先校验 ToolCall 存在（跨租户隔离）——必须在创建 EffectRecord 之前，
+  // 否则跨租户调用会因 tenantId FK 约束直接抛底层 DB 错误而非 EffectNotFoundError。
+  const toolCall = await getToolCallById({
+    tenantId: input.tenantId,
+    toolCallId: input.toolCallId,
+  });
+  if (!toolCall) {
+    throw new EffectNotFoundError(`ToolCall 不存在或跨租户不可见: ${input.toolCallId}`);
+  }
 
- // 幂等：若 EffectRecord 已存在，跳过创建
- let record = await getEffectRecordByToolCall(input.tenantId, input.toolCallId);
- if (!record) {
- record = await createEffectRecord({
- tenantId: input.tenantId,
- toolCallId: input.toolCallId,
- effectType: input.effectType,
- targetSummaryJson: input.targetSummaryJson,
- externalIdempotencyKey: input.externalIdempotencyKey ?? null,
- initialEffectState: "unknown_effect",
- });
- }
+  // 幂等：若 EffectRecord 已存在，跳过创建
+  let record = await getEffectRecordByToolCall(input.tenantId, input.toolCallId);
+  if (!record) {
+    record = await createEffectRecord({
+      tenantId: input.tenantId,
+      toolCallId: input.toolCallId,
+      effectType: input.effectType,
+      targetSummaryJson: input.targetSummaryJson,
+      externalIdempotencyKey: input.externalIdempotencyKey ?? null,
+      initialEffectState: "unknown_effect",
+    });
+  }
 
- let targets: EffectTarget[] = [];
- if (input.targets && input.targets.length > 0) {
- targets = await listEffectTargets(input.tenantId, record.id);
- if (targets.length === 0) {
- targets = await createEffectTargets({
- tenantId: input.tenantId,
- effectRecordId: record.id,
- targets: input.targets,
- });
- }
- }
+  let targets: EffectTarget[] = [];
+  if (input.targets && input.targets.length > 0) {
+    targets = await listEffectTargets(input.tenantId, record.id);
+    if (targets.length === 0) {
+      targets = await createEffectTargets({
+        tenantId: input.tenantId,
+        effectRecordId: record.id,
+        targets: input.targets,
+      });
+    }
+  }
 
- // 同步迁移 ToolCall 到 unknown_effect 状态（通过 updateToolCallState 走状态机校验）
- if (toolCall.callState !== "unknown_effect") {
- await updateToolCallState({
- tenantId: input.tenantId,
- toolCallId: input.toolCallId,
- toState: "unknown_effect",
- });
- }
+  // 同步迁移 ToolCall 到 unknown_effect 状态（通过 updateToolCallState 走状态机校验）
+  if (toolCall.callState !== "unknown_effect") {
+    await updateToolCallState({
+      tenantId: input.tenantId,
+      toolCallId: input.toolCallId,
+      toState: "unknown_effect",
+    });
+  }
 
- return { effectRecord: record, effectTargets: targets };
+  return { effectRecord: record, effectTargets: targets };
 }

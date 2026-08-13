@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/security-incidents/{security_incident_id}/timeline — 事故时间线汇总（S12-W09）。
  *
@@ -22,13 +29,6 @@ import {
   buildIncidentTimeline,
   getSecurityIncidentById,
 } from "@/lib/identity/security-incident-queries";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

@@ -11,10 +11,10 @@ import type { JobCommandState, JobState } from "@/lib/persistence/schema/job";
 
 /** Job 不存在或跨租户不可见。映射 404 RESOURCE_NOT_FOUND（不泄露存在）。 */
 export class JobNotFoundError extends Error {
- constructor(public readonly jobId: string) {
- super(`Job 不存在或不可见：${jobId}`);
- this.name = "JobNotFoundError";
- }
+  constructor(public readonly jobId: string) {
+    super(`Job 不存在或不可见：${jobId}`);
+    this.name = "JobNotFoundError";
+  }
 }
 
 /**
@@ -24,14 +24,14 @@ export class JobNotFoundError extends Error {
  * 映射 409 JOB_STATE_CONFLICT。
  */
 export class JobStateConflictError extends Error {
- constructor(
- public readonly jobId: string,
- public readonly currentState: JobState,
- public readonly attemptedAction: string,
- ) {
- super(`Job ${jobId} 状态为 ${currentState}，不允许 ${attemptedAction}`);
- this.name = "JobStateConflictError";
- }
+  constructor(
+    public readonly jobId: string,
+    public readonly currentState: JobState,
+    public readonly attemptedAction: string,
+  ) {
+    super(`Job ${jobId} 状态为 ${currentState}，不允许 ${attemptedAction}`);
+    this.name = "JobStateConflictError";
+  }
 }
 
 /**
@@ -39,13 +39,13 @@ export class JobStateConflictError extends Error {
  * 映射 409 JOB_ALREADY_TERMINAL。
  */
 export class JobAlreadyTerminalError extends Error {
- constructor(
- public readonly jobId: string,
- public readonly currentState: JobState,
- ) {
- super(`Job ${jobId} 已终态（${currentState}），不能取消或重跑`);
- this.name = "JobAlreadyTerminalError";
- }
+  constructor(
+    public readonly jobId: string,
+    public readonly currentState: JobState,
+  ) {
+    super(`Job ${jobId} 已终态（${currentState}），不能取消或重跑`);
+    this.name = "JobAlreadyTerminalError";
+  }
 }
 
 /**
@@ -54,13 +54,13 @@ export class JobAlreadyTerminalError extends Error {
  * 映射 409 JOB_NOT_TERMINAL。
  */
 export class JobNotTerminalError extends Error {
- constructor(
- public readonly jobId: string,
- public readonly currentState: JobState,
- ) {
- super(`Job ${jobId} 状态为 ${currentState}，未进入终态，不能重跑`);
- this.name = "JobNotTerminalError";
- }
+  constructor(
+    public readonly jobId: string,
+    public readonly currentState: JobState,
+  ) {
+    super(`Job ${jobId} 状态为 ${currentState}，未进入终态，不能重跑`);
+    this.name = "JobNotTerminalError";
+  }
 }
 
 /**
@@ -69,13 +69,13 @@ export class JobNotTerminalError extends Error {
  * 映射 409 JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT。
  */
 export class JobRetryBlockedByUnknownEffectError extends Error {
- constructor(
- public readonly jobId: string,
- public readonly reason: string,
- ) {
- super(`Job ${jobId} 重跑被 unknown_effect 阻断：${reason}`);
- this.name = "JobRetryBlockedByUnknownEffectError";
- }
+  constructor(
+    public readonly jobId: string,
+    public readonly reason: string,
+  ) {
+    super(`Job ${jobId} 重跑被 unknown_effect 阻断：${reason}`);
+    this.name = "JobRetryBlockedByUnknownEffectError";
+  }
 }
 
 /**
@@ -84,14 +84,14 @@ export class JobRetryBlockedByUnknownEffectError extends Error {
  * 映射 409 JOB_OVERRIDE_NOT_ALLOWED。
  */
 export class JobOverrideNotAllowedError extends Error {
- constructor(
- public readonly jobId: string,
- public readonly overrideField: string,
- public readonly reason: string,
- ) {
- super(`Job ${jobId} 不允许 override 字段 ${overrideField}：${reason}`);
- this.name = "JobOverrideNotAllowedError";
- }
+  constructor(
+    public readonly jobId: string,
+    public readonly overrideField: string,
+    public readonly reason: string,
+  ) {
+    super(`Job ${jobId} 不允许 override 字段 ${overrideField}：${reason}`);
+    this.name = "JobOverrideNotAllowedError";
+  }
 }
 
 /**
@@ -100,13 +100,13 @@ export class JobOverrideNotAllowedError extends Error {
  * 映射 409 JOB_INPUT_NO_LONGER_AVAILABLE。
  */
 export class JobInputNoLongerAvailableError extends Error {
- constructor(
- public readonly jobId: string,
- public readonly inputRef: string,
- ) {
- super(`Job ${jobId} 输入引用 ${inputRef} 已不可访问`);
- this.name = "JobInputNoLongerAvailableError";
- }
+  constructor(
+    public readonly jobId: string,
+    public readonly inputRef: string,
+  ) {
+    super(`Job ${jobId} 输入引用 ${inputRef} 已不可访问`);
+    this.name = "JobInputNoLongerAvailableError";
+  }
 }
 
 /**
@@ -114,10 +114,10 @@ export class JobInputNoLongerAvailableError extends Error {
  * 映射 404 RESOURCE_NOT_FOUND。
  */
 export class JobCommandNotFoundError extends Error {
- constructor(public readonly commandId: string) {
- super(`JobCommand 不存在或不可见：${commandId}`);
- this.name = "JobCommandNotFoundError";
- }
+  constructor(public readonly commandId: string) {
+    super(`JobCommand 不存在或不可见：${commandId}`);
+    this.name = "JobCommandNotFoundError";
+  }
 }
 
 /**
@@ -126,13 +126,13 @@ export class JobCommandNotFoundError extends Error {
  * 映射 409 JOB_COMMAND_ALREADY_TERMINAL。
  */
 export class JobCommandAlreadyTerminalError extends Error {
- constructor(
- public readonly commandId: string,
- public readonly currentState: JobCommandState,
- ) {
- super(`JobCommand ${commandId} 状态为 ${currentState}，已终态`);
- this.name = "JobCommandAlreadyTerminalError";
- }
+  constructor(
+    public readonly commandId: string,
+    public readonly currentState: JobCommandState,
+  ) {
+    super(`JobCommand ${commandId} 状态为 ${currentState}，已终态`);
+    this.name = "JobCommandAlreadyTerminalError";
+  }
 }
 
 /**
@@ -140,14 +140,14 @@ export class JobCommandAlreadyTerminalError extends Error {
  * 映射 412 ETAG_MISMATCH。
  */
 export class JobVersionConflictError extends Error {
- constructor(
- public readonly jobId: string,
- public readonly expected: number,
- public readonly actual: number,
- ) {
- super(`Job ${jobId} 版本冲突：期望 ${expected}，实际 ${actual}`);
- this.name = "JobVersionConflictError";
- }
+  constructor(
+    public readonly jobId: string,
+    public readonly expected: number,
+    public readonly actual: number,
+  ) {
+    super(`Job ${jobId} 版本冲突：期望 ${expected}，实际 ${actual}`);
+    this.name = "JobVersionConflictError";
+  }
 }
 
 /**
@@ -156,11 +156,11 @@ export class JobVersionConflictError extends Error {
  * 映射 409 JOB_RESULT_PROJECTION_CONFLICT。
  */
 export class JobResultProjectionConflictError extends Error {
- constructor(
- public readonly itemId: string,
- public readonly existingProjectionId: string,
- ) {
- super(`JobResultProjection 已存在：itemId=${itemId} projectionId=${existingProjectionId}`);
- this.name = "JobResultProjectionConflictError";
- }
+  constructor(
+    public readonly itemId: string,
+    public readonly existingProjectionId: string,
+  ) {
+    super(`JobResultProjection 已存在：itemId=${itemId} projectionId=${existingProjectionId}`);
+    this.name = "JobResultProjectionConflictError";
+  }
 }

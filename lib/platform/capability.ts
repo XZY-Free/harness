@@ -18,24 +18,24 @@ export type PlatformCapability = "web-preview" | "desktop-browser";
  * 使用 globalThis 而非 window，使其在 SSR / Node 环境也能安全调用。
  */
 export function getPlatformCapability(): PlatformCapability {
- const platform = (globalThis as unknown as { __SNOW_PLATFORM__?: PlatformCapability })
- .__SNOW_PLATFORM__;
- if (platform) {
- return platform;
- }
- return "web-preview";
+  const platform = (globalThis as unknown as { __SNOW_PLATFORM__?: PlatformCapability })
+    .__SNOW_PLATFORM__;
+  if (platform) {
+    return platform;
+  }
+  return "web-preview";
 }
 
 /**
  * 是否为 Web 预览平台（iframe Preview Surface）。
  */
 export function isWebPreview(): boolean {
- return getPlatformCapability() === "web-preview";
+  return getPlatformCapability() === "web-preview";
 }
 
 /**
  * 是否为 Desktop 浏览器平台（WebContentsView Browser Surface）。
  */
 export function isDesktopBrowser(): boolean {
- return getPlatformCapability() === "desktop-browser";
+  return getPlatformCapability() === "desktop-browser";
 }

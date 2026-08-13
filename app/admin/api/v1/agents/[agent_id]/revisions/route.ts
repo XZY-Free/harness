@@ -1,3 +1,11 @@
+import {
+  AGENT_REVISION_ETAG_PREFIX,
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision（S03-C05）。
  *
@@ -53,14 +61,6 @@ import {
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
 import type { AgentRevision } from "@/lib/persistence/schema/agent";
-import {
-  AGENT_REVISION_ETAG_PREFIX,
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -90,10 +90,25 @@ function validateBody(body: unknown): body is CreateRevisionBody {
   if (typeof source.source_revision !== "string" || !source.source_revision.trim()) return false;
   if (typeof b.artifact_ref !== "string" || !b.artifact_ref.trim()) return false;
   if (typeof b.instruction_hash !== "string" || b.instruction_hash.length === 0) return false;
-  if (!b.model_policy || typeof b.model_policy !== "object" || Array.isArray(b.model_policy)) return false;
-  if (!b.permission_requirements || typeof b.permission_requirements !== "object" || Array.isArray(b.permission_requirements)) return false;
-  if (!b.delegation_policy || typeof b.delegation_policy !== "object" || Array.isArray(b.delegation_policy)) return false;
-  if (!b.agent_interface_requirements || typeof b.agent_interface_requirements !== "object" || Array.isArray(b.agent_interface_requirements))
+  if (!b.model_policy || typeof b.model_policy !== "object" || Array.isArray(b.model_policy))
+    return false;
+  if (
+    !b.permission_requirements ||
+    typeof b.permission_requirements !== "object" ||
+    Array.isArray(b.permission_requirements)
+  )
+    return false;
+  if (
+    !b.delegation_policy ||
+    typeof b.delegation_policy !== "object" ||
+    Array.isArray(b.delegation_policy)
+  )
+    return false;
+  if (
+    !b.agent_interface_requirements ||
+    typeof b.agent_interface_requirements !== "object" ||
+    Array.isArray(b.agent_interface_requirements)
+  )
     return false;
   return true;
 }

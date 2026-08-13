@@ -7,8 +7,8 @@
 
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
-import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
+import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
 import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
 
 const buildRouteEligibility = createBuildRouteEligibility({

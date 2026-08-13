@@ -97,9 +97,7 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
         },
         body: JSON.stringify({
           input: { type: "message", text: pending.submission.text },
-          ...(pending.submission.modelRef
-            ? { selected_model: pending.submission.modelRef }
-            : {}),
+          ...(pending.submission.modelRef ? { selected_model: pending.submission.modelRef } : {}),
         }),
       });
       await requireJson(turnResponse, "消息发送失败，请稍后重试。");

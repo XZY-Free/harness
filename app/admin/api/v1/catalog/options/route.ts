@@ -1,5 +1,3 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
-import type { CatalogResourceType } from "@/lib/persistence/schema/catalog";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
@@ -11,6 +9,8 @@ import {
   type CatalogSearchItem,
   listCatalogOptions,
 } from "@/lib/catalog/catalog-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import type { CatalogResourceType } from "@/lib/persistence/schema/catalog";
 /**
  * GET /admin/api/v1/catalog/options — Admin Catalog 列表（S11-W03）。
  *

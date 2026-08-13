@@ -21,116 +21,116 @@ const id = z.string().min(1).max(128);
 // ─── Agent 事件 Payload ──────────────────────────────────────
 
 export const AgentRevisionPublishedPayload = z.object({
- agent_id: id,
- revision_id: id,
- revision_no: z.number().int().positive(),
- publication_record_id: id,
- audit_event_id: id,
+  agent_id: id,
+  revision_id: id,
+  revision_no: z.number().int().positive(),
+  publication_record_id: id,
+  audit_event_id: id,
 });
 
 export const AgentRevisionWithdrawnPayload = z.object({
- agent_id: id,
- revision_id: id,
- publication_record_id: id,
- withdrawal_record_id: id,
- current_revision_id: z.string().nullable(),
- audit_event_id: id,
+  agent_id: id,
+  revision_id: id,
+  publication_record_id: id,
+  withdrawal_record_id: id,
+  current_revision_id: z.string().nullable(),
+  audit_event_id: id,
 });
 
 export const AgentLifecycleChangedPayload = z.object({
- agent_id: id,
- previous_state: z.string(),
- new_state: z.string(),
+  agent_id: id,
+  previous_state: z.string(),
+  new_state: z.string(),
 });
 
 // ─── Runtime 事件 Payload ────────────────────────────────────
 
 export const RuntimeRevisionPublishedPayload = z.object({
- runtime_id: id,
- revision_id: id,
- revision_no: z.number().int().positive(),
- attestation_id: id,
- audit_event_id: id,
- publication_record_id: id,
- conformance_run_id: id,
+  runtime_id: id,
+  revision_id: id,
+  revision_no: z.number().int().positive(),
+  attestation_id: id,
+  audit_event_id: id,
+  publication_record_id: id,
+  conformance_run_id: id,
 });
 
 export const RuntimeRevisionWithdrawnPayload = z.object({
- runtime_id: id,
- revision_id: id,
- publication_record_id: id,
- withdrawal_record_id: id,
- current_revision_id: z.string().nullable(),
- audit_event_id: id,
+  runtime_id: id,
+  revision_id: id,
+  publication_record_id: id,
+  withdrawal_record_id: id,
+  current_revision_id: z.string().nullable(),
+  audit_event_id: id,
 });
 
 export const RuntimeLifecycleChangedPayload = z.object({
- runtime_id: id,
- previous_state: z.string(),
- new_state: z.string(),
+  runtime_id: id,
+  previous_state: z.string(),
+  new_state: z.string(),
 });
 
 export const RuntimeConformanceRecordedPayload = z.object({
- run_id: id,
- runtime_revision_id: id,
- overall_result: z.enum(["passed", "failed"]),
+  run_id: id,
+  runtime_revision_id: id,
+  overall_result: z.enum(["passed", "failed"]),
 });
 
 // ─── Artifact 事件 Payload ───────────────────────────────────
 
 export const ArtifactAttestationRecordedPayload = z.object({
- attestation_id: id,
- artifact_id: id,
- verification_state: z.string(),
+  attestation_id: id,
+  artifact_id: id,
+  verification_state: z.string(),
 });
 
 export const ArtifactAttestationRevokedPayload = z.object({
- attestation_id: id,
- artifact_id: id,
- revoked_at: z.string(), // ISO 8601
- reason: z.string(),
+  attestation_id: id,
+  artifact_id: id,
+  revoked_at: z.string(), // ISO 8601
+  reason: z.string(),
 });
 
 // ─── Route 事件 Payload ──────────────────────────────────────
 
 export const RouteActivatedPayload = z.object({
- route_id: id,
- route_revision_id: id,
- tenant_id: id,
+  route_id: id,
+  route_revision_id: id,
+  tenant_id: id,
 });
 
 export const RouteDisabledPayload = z.object({
- route_id: id,
- route_revision_id: id,
- reason: z.string(),
+  route_id: id,
+  route_revision_id: id,
+  reason: z.string(),
 });
 
 export const RouteRevisionValidatedPayload = z.object({
- route_revision_id: id,
- revision_no: z.number().int().positive(),
- content_digest: z.string(),
+  route_revision_id: id,
+  revision_no: z.number().int().positive(),
+  content_digest: z.string(),
 });
 
 export const RouteSetActivatedPayload = z.object({
- route_set_id: id,
- route_set_version_no: z.number().int().positive(),
- tenant_id: id,
- route_ids: z.array(id),
- activation_ids: z.array(id),
+  route_set_id: id,
+  route_set_version_no: z.number().int().positive(),
+  tenant_id: id,
+  route_ids: z.array(id),
+  activation_ids: z.array(id),
 });
 
 // ─── Policy 事件 Payload ─────────────────────────────────────
 
 export const PolicyRevisionPublishedPayload = z.object({
- policy_revision_id: id,
- policy_id: id,
- revision_no: z.number().int().positive(),
+  policy_revision_id: id,
+  policy_id: id,
+  revision_no: z.number().int().positive(),
 });
 
 export const PolicyRevisionWithdrawnPayload = z.object({
- policy_revision_id: id,
- policy_id: id,
- reason: z.string(),
+  policy_revision_id: id,
+  policy_id: id,
+  reason: z.string(),
 });
 
 // ─── 事件类型 → Payload Schema 映射 ─────────────────────────
@@ -142,21 +142,21 @@ export const PolicyRevisionWithdrawnPayload = z.object({
  * 用于 Fail-loud：未知/无效 → 不标记成功。
  */
 export const EVENT_PAYLOAD_SCHEMAS: Record<ControlPlaneEventType, z.ZodType> = {
- "agent.revision.published": AgentRevisionPublishedPayload,
- "agent.revision.withdrawn": AgentRevisionWithdrawnPayload,
- "agent.lifecycle.changed": AgentLifecycleChangedPayload,
- "runtime.revision.published": RuntimeRevisionPublishedPayload,
- "runtime.revision.withdrawn": RuntimeRevisionWithdrawnPayload,
- "runtime.lifecycle.changed": RuntimeLifecycleChangedPayload,
- "runtime.conformance.recorded": RuntimeConformanceRecordedPayload,
- "artifact.attestation.recorded": ArtifactAttestationRecordedPayload,
- "artifact.attestation.revoked": ArtifactAttestationRevokedPayload,
- "route.activated": RouteActivatedPayload,
- "route.disabled": RouteDisabledPayload,
- "route.revision.validated": RouteRevisionValidatedPayload,
- "route_set.activated": RouteSetActivatedPayload,
- "policy.revision.published": PolicyRevisionPublishedPayload,
- "policy.revision.withdrawn": PolicyRevisionWithdrawnPayload,
+  "agent.revision.published": AgentRevisionPublishedPayload,
+  "agent.revision.withdrawn": AgentRevisionWithdrawnPayload,
+  "agent.lifecycle.changed": AgentLifecycleChangedPayload,
+  "runtime.revision.published": RuntimeRevisionPublishedPayload,
+  "runtime.revision.withdrawn": RuntimeRevisionWithdrawnPayload,
+  "runtime.lifecycle.changed": RuntimeLifecycleChangedPayload,
+  "runtime.conformance.recorded": RuntimeConformanceRecordedPayload,
+  "artifact.attestation.recorded": ArtifactAttestationRecordedPayload,
+  "artifact.attestation.revoked": ArtifactAttestationRevokedPayload,
+  "route.activated": RouteActivatedPayload,
+  "route.disabled": RouteDisabledPayload,
+  "route.revision.validated": RouteRevisionValidatedPayload,
+  "route_set.activated": RouteSetActivatedPayload,
+  "policy.revision.published": PolicyRevisionPublishedPayload,
+  "policy.revision.withdrawn": PolicyRevisionWithdrawnPayload,
 };
 
 // ─── 事件类型 → 聚合根类型 映射 ──────────────────────────────
@@ -166,21 +166,21 @@ export const EVENT_PAYLOAD_SCHEMAS: Record<ControlPlaneEventType, z.ZodType> = {
  * Producer 不得手写 aggregateType，必须通过此映射查找。
  */
 export const EVENT_AGGREGATE_TYPES: Record<ControlPlaneEventType, string> = {
- "agent.revision.published": "agent_revision",
- "agent.revision.withdrawn": "agent_revision",
- "agent.lifecycle.changed": "agent",
- "runtime.revision.published": "runtime_revision",
- "runtime.revision.withdrawn": "runtime_revision",
- "runtime.lifecycle.changed": "runtime",
- "runtime.conformance.recorded": "runtime_conformance_run",
- "artifact.attestation.recorded": "artifact_attestation",
- "artifact.attestation.revoked": "artifact_attestation",
- "route.activated": "deployment_route",
- "route.disabled": "deployment_route",
- "route.revision.validated": "deployment_route",
- "route_set.activated": "route_set",
- "policy.revision.published": "policy_revision",
- "policy.revision.withdrawn": "policy_revision",
+  "agent.revision.published": "agent_revision",
+  "agent.revision.withdrawn": "agent_revision",
+  "agent.lifecycle.changed": "agent",
+  "runtime.revision.published": "runtime_revision",
+  "runtime.revision.withdrawn": "runtime_revision",
+  "runtime.lifecycle.changed": "runtime",
+  "runtime.conformance.recorded": "runtime_conformance_run",
+  "artifact.attestation.recorded": "artifact_attestation",
+  "artifact.attestation.revoked": "artifact_attestation",
+  "route.activated": "deployment_route",
+  "route.disabled": "deployment_route",
+  "route.revision.validated": "deployment_route",
+  "route_set.activated": "route_set",
+  "policy.revision.published": "policy_revision",
+  "policy.revision.withdrawn": "policy_revision",
 };
 
 // ─── Payload 验证 ─────────────────────────────────────────────
@@ -190,19 +190,19 @@ export const EVENT_AGGREGATE_TYPES: Record<ControlPlaneEventType, string> = {
  * 返回 { valid: true } 或 { valid: false, errors }。
  */
 export function validateEventPayload(
- eventType: string,
- payload: unknown,
+  eventType: string,
+  payload: unknown,
 ): { valid: true; data: unknown } | { valid: false; errors: string[] } {
- const schema = EVENT_PAYLOAD_SCHEMAS[eventType as ControlPlaneEventType];
- if (!schema) {
- return { valid: false, errors: [`未知事件类型: ${eventType}`] };
- }
- const result = schema.safeParse(payload);
- if (result.success) {
- return { valid: true, data: result.data };
- }
- return {
- valid: false,
- errors: result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
- };
+  const schema = EVENT_PAYLOAD_SCHEMAS[eventType as ControlPlaneEventType];
+  if (!schema) {
+    return { valid: false, errors: [`未知事件类型: ${eventType}`] };
+  }
+  const result = schema.safeParse(payload);
+  if (result.success) {
+    return { valid: true, data: result.data };
+  }
+  return {
+    valid: false,
+    errors: result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
+  };
 }

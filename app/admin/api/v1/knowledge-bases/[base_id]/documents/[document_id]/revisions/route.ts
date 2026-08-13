@@ -1,3 +1,17 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
+import {
+  KnowledgeValidationError,
+  createKnowledgeDocumentRevision,
+  getKnowledgeBaseById,
+  getKnowledgeDocumentById,
+  listKnowledgeDocumentRevisions,
+} from "@/lib/context/knowledge-queries";
 /**
  * GET / POST /admin/api/v1/knowledge-bases/{base_id}/documents/{document_id}/revisions
  *   — KnowledgeDocumentRevision 集合（阶段 7 S07-C05）。
@@ -37,20 +51,6 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
-import {
-  KnowledgeValidationError,
-  createKnowledgeDocumentRevision,
-  getKnowledgeBaseById,
-  getKnowledgeDocumentById,
-  listKnowledgeDocumentRevisions,
-} from "@/lib/context/knowledge-queries";
 
 export const dynamic = "force-dynamic";
 

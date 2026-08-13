@@ -13,11 +13,11 @@ import { hasPermission } from "@/lib/rbac";
  * @returns null=放行;Response=拒绝(403)
  */
 export async function assertSkillWriteAccess(
- sk: { id: string; ownerUserId: string | null },
- actorUserId: string,
+  sk: { id: string; ownerUserId: string | null },
+  actorUserId: string,
 ): Promise<Response | null> {
- const isSkillAdmin = await hasPermission(actorUserId, "skill.write.all");
- if (isSkillAdmin) return null;
- if (sk.ownerUserId === actorUserId) return null;
- return jsonError(403, "not_owner", "非 skill 所有者,无权修改");
+  const isSkillAdmin = await hasPermission(actorUserId, "skill.write.all");
+  if (isSkillAdmin) return null;
+  if (sk.ownerUserId === actorUserId) return null;
+  return jsonError(403, "not_owner", "非 skill 所有者,无权修改");
 }

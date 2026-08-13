@@ -12,8 +12,8 @@
  */
 "use client";
 
-import { cn } from "@/lib/utils";
 import type { ClientItem } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 
 interface ChildThreadItemProps {
   readonly item: ClientItem;

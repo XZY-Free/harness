@@ -11,9 +11,9 @@ import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
 import { eq } from "drizzle-orm";
 
 export interface SeedAttestationResult {
- artifactId: string;
- attestationId: string;
- artifactDigest: string;
+  artifactId: string;
+  attestationId: string;
+  artifactDigest: string;
 }
 
 /**
@@ -22,44 +22,44 @@ export interface SeedAttestationResult {
  * 返回 attestationId，可直接传给 PublishRuntimeRevisionCommand。
  */
 export async function seedVerifiedRuntimeAttestation(
- tenantId: string,
- revisionId: string,
+  tenantId: string,
+  revisionId: string,
 ): Promise<SeedAttestationResult> {
- const artifactId = randomUUID();
- const artifactDigest = `sha256:${randomUUID().replaceAll("-", "").padEnd(64, "0").slice(0, 64)}`;
- const attestationId = randomUUID();
+  const artifactId = randomUUID();
+  const artifactDigest = `sha256:${randomUUID().replaceAll("-", "").padEnd(64, "0").slice(0, 64)}`;
+  const attestationId = randomUUID();
 
- await db.insert(artifact).values({
- id: artifactId,
- tenantId,
- kind: "runtime_revision",
- digest: artifactDigest,
- mediaType: "application/vnd.snowharness.runtime+json",
- contentRef: `oci://registry/runtime@${artifactDigest}`,
- sourceRevision: "test-pipeline@1",
- buildMetadata: { builder: "test" },
- });
+  await db.insert(artifact).values({
+    id: artifactId,
+    tenantId,
+    kind: "runtime_revision",
+    digest: artifactDigest,
+    mediaType: "application/vnd.snowharness.runtime+json",
+    contentRef: `oci://registry/runtime@${artifactDigest}`,
+    sourceRevision: "test-pipeline@1",
+    buildMetadata: { builder: "test" },
+  });
 
- await db.insert(artifactAttestation).values({
- id: attestationId,
- tenantId,
- artifactId,
- artifactType: "runtime_revision",
- artifactRevisionId: revisionId,
- artifactDigest,
- dsseEnvelopeRef: `attestation:dsse:${artifactDigest.slice(7, 19)}`,
- sbomRef: `attestation:sbom:${artifactDigest.slice(7, 19)}`,
- provenanceRef: `attestation:provenance:${artifactDigest.slice(7, 19)}`,
- builderIdentity: "builder:company-agent-runtime",
- verificationState: "verified",
- verifiedAt: new Date(),
- });
+  await db.insert(artifactAttestation).values({
+    id: attestationId,
+    tenantId,
+    artifactId,
+    artifactType: "runtime_revision",
+    artifactRevisionId: revisionId,
+    artifactDigest,
+    dsseEnvelopeRef: `attestation:dsse:${artifactDigest.slice(7, 19)}`,
+    sbomRef: `attestation:sbom:${artifactDigest.slice(7, 19)}`,
+    provenanceRef: `attestation:provenance:${artifactDigest.slice(7, 19)}`,
+    builderIdentity: "builder:company-agent-runtime",
+    verificationState: "verified",
+    verifiedAt: new Date(),
+  });
 
- // 更新 RuntimeRevision 的 artifactId 和 artifactDigest 以保持绑定一致
- await db
- .update(runtimeRevisionTable)
- .set({ artifactId, artifactDigest })
- .where(eq(runtimeRevisionTable.id, revisionId));
+  // 更新 RuntimeRevision 的 artifactId 和 artifactDigest 以保持绑定一致
+  await db
+    .update(runtimeRevisionTable)
+    .set({ artifactId, artifactDigest })
+    .where(eq(runtimeRevisionTable.id, revisionId));
 
- return { artifactId, attestationId, artifactDigest };
+  return { artifactId, attestationId, artifactDigest };
 }

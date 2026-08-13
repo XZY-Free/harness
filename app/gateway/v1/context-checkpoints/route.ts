@@ -1,3 +1,15 @@
+import {
+  computeSourceRangesHash,
+  createContextCheckpoint,
+  findContextCheckpointByUniqueKey,
+  isValidSummaryHash,
+} from "@/lib/context/checkpoint-queries";
+import {
+  type GatewayPrincipal,
+  gatewayAuthErrorResponse,
+  gatewaySchemaInvalidTable,
+  resolveGatewayPrincipal,
+} from "@/lib/gateway/route-helpers";
 /**
  * POST /gateway/v1/context-checkpoints — 提交 Context Checkpoint（阶段 7 S07-C02）。
  *
@@ -50,20 +62,9 @@ import type { WorkloadPrincipal } from "@/lib/identity/resolver";
 import {
   CHECKPOINT_TYPES,
   type CheckpointType,
+  type ContextCheckpoint,
   type SourceRange,
 } from "@/lib/persistence/schema/context-checkpoint";
-import {
-  computeSourceRangesHash,
-  createContextCheckpoint,
-  findContextCheckpointByUniqueKey,
-  isValidSummaryHash,
-} from "@/lib/context/checkpoint-queries";
-import {
-  type GatewayPrincipal,
-  gatewayAuthErrorResponse,
-  gatewaySchemaInvalidTable,
-  resolveGatewayPrincipal,
-} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -334,7 +335,7 @@ export async function contextCheckpointPOST(request: Request): Promise<Response>
       sourceRanges,
     });
 
-    let checkpoint;
+    let checkpoint: ContextCheckpoint;
     if (existing) {
       // 已存在相同 Checkpoint，直接返回（幂等去重）
       checkpoint = existing;

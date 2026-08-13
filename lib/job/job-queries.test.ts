@@ -30,7 +30,6 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { jobTable } from "@/lib/persistence/schema/job";
 import {
   JobAlreadyTerminalError,
   JobCommandAlreadyTerminalError,
@@ -65,6 +64,7 @@ import {
   recordJobResult,
   updateJobState,
 } from "@/lib/job/job-queries";
+import { jobTable } from "@/lib/persistence/schema/job";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

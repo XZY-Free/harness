@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
- appendThreadEvent,
- createCheckpointRow,
- getCheckpoint,
- listCheckpointsByThread,
- markCheckpointRestored,
+  appendThreadEvent,
+  createCheckpointRow,
+  getCheckpoint,
+  listCheckpointsByThread,
+  markCheckpointRestored,
 } from "@/lib/db/queries";
 import type { GitCheckpoint } from "@/lib/db/schema";
 import { gitDiff, gitResetHard, gitStatus, gitTag } from "@/lib/git/ops";
@@ -21,7 +21,7 @@ import { gitDiff, gitResetHard, gitStatus, gitTag } from "@/lib/git/ops";
 
 /** 生成 `snow-checkpoint-{12 字符 shortId}`。12 字符降碰撞概率，碰撞时重试。 */
 function checkpointTag(): string {
- return `snow-checkpoint-${randomUUID().slice(0, 12)}`;
+  return `snow-checkpoint-${randomUUID().slice(0, 12)}`;
 }
 
 /**
@@ -30,50 +30,50 @@ function checkpointTag(): string {
  * tag 碰撞时重试（最多 3 次）。
  */
 export async function createCheckpoint(
- threadId: string,
- params: { reason: string; toolRunId?: string | null },
+  threadId: string,
+  params: { reason: string; toolRunId?: string | null },
 ): Promise<GitCheckpoint> {
- let tag = checkpointTag();
- let commitSha = "";
- // tag 碰撞重试
- for (let attempt = 0; attempt < 3; attempt++) {
- try {
- const r = await gitTag(threadId, tag);
- commitSha = r.commitSha;
- break;
- } catch (err) {
- const msg = err instanceof Error ? err.message : String(err);
- if (/already exists|tag exists/i.test(msg) && attempt < 2) {
- tag = checkpointTag(); // 重试新 tag
- continue;
- }
- throw err;
- }
- }
- // 取 diff 摘要（变更文件列表，供回滚前快速判断 checkpoint 内容）
- const diffResult = await gitDiff(threadId).catch(() => ({ diff: "", truncated: false }));
- const filesChanged = diffResult.diff.slice(0, 2000) || null;
+  let tag = checkpointTag();
+  let commitSha = "";
+  // tag 碰撞重试
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await gitTag(threadId, tag);
+      commitSha = r.commitSha;
+      break;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/already exists|tag exists/i.test(msg) && attempt < 2) {
+        tag = checkpointTag(); // 重试新 tag
+        continue;
+      }
+      throw err;
+    }
+  }
+  // 取 diff 摘要（变更文件列表，供回滚前快速判断 checkpoint 内容）
+  const diffResult = await gitDiff(threadId).catch(() => ({ diff: "", truncated: false }));
+  const filesChanged = diffResult.diff.slice(0, 2000) || null;
 
- const row = await createCheckpointRow({
- threadId,
- tag,
- commitSha,
- reason: params.reason,
- createdByToolRunId: params.toolRunId ?? null,
- filesChanged,
- });
- await appendThreadEvent(threadId, "git.checkpoint_created", {
- checkpointId: row.id,
- tag,
- commitSha,
- reason: params.reason,
- });
- return row;
+  const row = await createCheckpointRow({
+    threadId,
+    tag,
+    commitSha,
+    reason: params.reason,
+    createdByToolRunId: params.toolRunId ?? null,
+    filesChanged,
+  });
+  await appendThreadEvent(threadId, "git.checkpoint_created", {
+    checkpointId: row.id,
+    tag,
+    commitSha,
+    reason: params.reason,
+  });
+  return row;
 }
 
 /** 列 thread 的全部 checkpoint（最近在前，含 restoredAt）。 */
 export async function listCheckpoints(threadId: string): Promise<GitCheckpoint[]> {
- return listCheckpointsByThread(threadId);
+  return listCheckpointsByThread(threadId);
 }
 
 /**
@@ -84,30 +84,30 @@ export async function listCheckpoints(threadId: string): Promise<GitCheckpoint[]
  * 调用方（gitRestoreCheckpoint 工具）应提示用户先 commit/stash 或自动创建 checkpoint。
  */
 export async function restoreCheckpoint(
- threadId: string,
- checkpointId: string,
+  threadId: string,
+  checkpointId: string,
 ): Promise<GitCheckpoint> {
- const cp = await getCheckpoint(checkpointId);
- if (!cp) throw new Error("checkpoint 不存在");
- if (cp.threadId !== threadId) throw new Error("checkpoint 不属于当前 thread");
+  const cp = await getCheckpoint(checkpointId);
+  if (!cp) throw new Error("checkpoint 不存在");
+  if (cp.threadId !== threadId) throw new Error("checkpoint 不属于当前 thread");
 
- // 脏检查——有未提交改动时拒绝 restore（防数据丢失）
- const status = await gitStatus(threadId);
- if (
- status.isRepo &&
- (status.modified.length > 0 || status.staged.length > 0 || status.untracked.length > 0)
- ) {
- throw new Error(
- `工作区有未提交改动（${status.modified.length + status.staged.length} 改 + ${status.untracked.length} 新），restore 会丢失。请先 commit/stash 或创建新 checkpoint。`,
- );
- }
+  // 脏检查——有未提交改动时拒绝 restore（防数据丢失）
+  const status = await gitStatus(threadId);
+  if (
+    status.isRepo &&
+    (status.modified.length > 0 || status.staged.length > 0 || status.untracked.length > 0)
+  ) {
+    throw new Error(
+      `工作区有未提交改动（${status.modified.length + status.staged.length} 改 + ${status.untracked.length} 新），restore 会丢失。请先 commit/stash 或创建新 checkpoint。`,
+    );
+  }
 
- await gitResetHard(threadId, cp.tag);
- const updated = await markCheckpointRestored(checkpointId);
- await appendThreadEvent(threadId, "git.checkpoint_restored", {
- checkpointId: cp.id,
- tag: cp.tag,
- restoredTo: cp.commitSha,
- });
- return updated ?? cp;
+  await gitResetHard(threadId, cp.tag);
+  const updated = await markCheckpointRestored(checkpointId);
+  await appendThreadEvent(threadId, "git.checkpoint_restored", {
+    checkpointId: cp.id,
+    tag: cp.tag,
+    restoredTo: cp.commitSha,
+  });
+  return updated ?? cp;
 }

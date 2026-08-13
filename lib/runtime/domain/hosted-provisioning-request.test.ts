@@ -52,7 +52,12 @@ describe("isValidProvisioningTransition", () => {
     // 这些状态已从 PROVISIONING_STATES 中移除
     // TypeScript 已阻止直接使用，此处验证运行? 确保它们不会被意外加回
     const states: readonly string[] = [
-      "pending", "running", "ready", "retryable_failed", "permanent_failed", "cancelled",
+      "pending",
+      "running",
+      "ready",
+      "retryable_failed",
+      "permanent_failed",
+      "cancelled",
     ];
     expect(states).not.toContain("waiting_external_evidence");
     expect(states).not.toContain("waiting_conformance");

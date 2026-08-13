@@ -1,4 +1,9 @@
 import {
+  archiveMemoryEntry,
+  getMemoryEntryById,
+  updateMemoryEntry,
+} from "@/lib/context/memory-queries";
+import {
   type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
@@ -27,11 +32,6 @@ import {
  * - DELETE 不物理删除，归档后不再参与检索。
  */
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import {
-  archiveMemoryEntry,
-  getMemoryEntryById,
-  updateMemoryEntry,
-} from "@/lib/context/memory-queries";
 
 export const dynamic = "force-dynamic";
 

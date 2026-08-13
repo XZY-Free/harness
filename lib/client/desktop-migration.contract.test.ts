@@ -8,9 +8,9 @@ describe("desktop formal thread client contract", () => {
   it("uses permanent page file names", () => {
     expect(existsSync(join(process.cwd(), "components/thread/thread-page.tsx"))).toBe(true);
     expect(existsSync(join(process.cwd(), "components/thread/new-thread-page.tsx"))).toBe(true);
-    expect(existsSync(join(process.cwd(), `components/thread/${retiredName}-thread-page.tsx`))).toBe(
-      false,
-    );
+    expect(
+      existsSync(join(process.cwd(), `components/thread/${retiredName}-thread-page.tsx`)),
+    ).toBe(false);
     expect(
       existsSync(join(process.cwd(), `components/thread/${retiredName}-new-thread-page.tsx`)),
     ).toBe(false);

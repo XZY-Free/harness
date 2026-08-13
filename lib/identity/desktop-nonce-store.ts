@@ -19,10 +19,10 @@ import { DESKTOP_SIGNATURE_WINDOW_MS } from "@/lib/identity/device-signature";
 
 /** Nonce 存储条目。 */
 interface NonceEntry {
- /** nonce 值（由客户端生成，建议 16+ 字符随机串）。 */
- nonce: string;
- /** 过期时间戳（ms）。 */
- expiresAt: number;
+  /** nonce 值（由客户端生成，建议 16+ 字符随机串）。 */
+  nonce: string;
+  /** 过期时间戳（ms）。 */
+  expiresAt: number;
 }
 
 /** 进程内 nonce 存储：按 deviceKey 分桶，每桶维护 nonce 集合。 */
@@ -43,78 +43,78 @@ const GC_INTERVAL_MS = 5 * 60 * 1000;
  * @throws DesktopNonceError nonce 已被使用（重放攻击）或为空
  */
 export function assertNonceNotReplayed(deviceKey: string, nonce: string, timestamp: number): void {
- if (!nonce) {
- throw new DesktopNonceError("missing_nonce", "缺少 X-Desktop-Nonce");
- }
- if (nonce.length < 8) {
- throw new DesktopNonceError("nonce_too_short", "nonce 长度不足 8 字符");
- }
+  if (!nonce) {
+    throw new DesktopNonceError("missing_nonce", "缺少 X-Desktop-Nonce");
+  }
+  if (nonce.length < 8) {
+    throw new DesktopNonceError("nonce_too_short", "nonce 长度不足 8 字符");
+  }
 
- // 触发 GC（节流）
- const now = Date.now();
- if (now - lastGcAt > GC_INTERVAL_MS) {
- gc(now);
- lastGcAt = now;
- }
+  // 触发 GC（节流）
+  const now = Date.now();
+  if (now - lastGcAt > GC_INTERVAL_MS) {
+    gc(now);
+    lastGcAt = now;
+  }
 
- let bucket = store.get(deviceKey);
- if (!bucket) {
- bucket = new Map();
- store.set(deviceKey, bucket);
- }
+  let bucket = store.get(deviceKey);
+  if (!bucket) {
+    bucket = new Map();
+    store.set(deviceKey, bucket);
+  }
 
- const existing = bucket.get(nonce);
- if (existing && existing.expiresAt > now) {
- throw new DesktopNonceError(
- "nonce_replayed",
- `nonce ${nonce.slice(0, 4)}*** 已被使用（重放攻击）`,
- );
- }
+  const existing = bucket.get(nonce);
+  if (existing && existing.expiresAt > now) {
+    throw new DesktopNonceError(
+      "nonce_replayed",
+      `nonce ${nonce.slice(0, 4)}*** 已被使用（重放攻击）`,
+    );
+  }
 
- // 写入存储，TTL = 时间戳 + 签名窗口（即允许的最老签名时间 + 一个窗口）
- const expiresAt = timestamp + DESKTOP_SIGNATURE_WINDOW_MS * 2;
- bucket.set(nonce, { nonce, expiresAt });
+  // 写入存储，TTL = 时间戳 + 签名窗口（即允许的最老签名时间 + 一个窗口）
+  const expiresAt = timestamp + DESKTOP_SIGNATURE_WINDOW_MS * 2;
+  bucket.set(nonce, { nonce, expiresAt });
 }
 
 /** 查询 nonce 是否已使用（仅测试用）。 */
 export function isNonceUsed(deviceKey: string, nonce: string): boolean {
- const bucket = store.get(deviceKey);
- if (!bucket) return false;
- const entry = bucket.get(nonce);
- if (!entry) return false;
- return entry.expiresAt > Date.now();
+  const bucket = store.get(deviceKey);
+  if (!bucket) return false;
+  const entry = bucket.get(nonce);
+  if (!entry) return false;
+  return entry.expiresAt > Date.now();
 }
 
 /** 清理过期 nonce（按设备桶清理）。 */
 export function gc(now: number = Date.now()): number {
- let removed = 0;
- for (const [deviceKey, bucket] of store) {
- for (const [nonce, entry] of bucket) {
- if (entry.expiresAt <= now) {
- bucket.delete(nonce);
- removed++;
- }
- }
- if (bucket.size === 0) {
- store.delete(deviceKey);
- }
- }
- return removed;
+  let removed = 0;
+  for (const [deviceKey, bucket] of store) {
+    for (const [nonce, entry] of bucket) {
+      if (entry.expiresAt <= now) {
+        bucket.delete(nonce);
+        removed++;
+      }
+    }
+    if (bucket.size === 0) {
+      store.delete(deviceKey);
+    }
+  }
+  return removed;
 }
 
 /** 清空所有 nonce（仅测试用）。 */
 export function clearDesktopNonceStore(): void {
- store.clear();
- lastGcAt = 0;
+  store.clear();
+  lastGcAt = 0;
 }
 
 /** Nonce 重放保护错误（route 层应映射为 401 AUTHENTICATION_REQUIRED）。 */
 export class DesktopNonceError extends Error {
- constructor(
- public readonly code: "missing_nonce" | "nonce_too_short" | "nonce_replayed",
- message: string,
- ) {
- super(message);
- this.name = "DesktopNonceError";
- }
+  constructor(
+    public readonly code: "missing_nonce" | "nonce_too_short" | "nonce_replayed",
+    message: string,
+  ) {
+    super(message);
+    this.name = "DesktopNonceError";
+  }
 }

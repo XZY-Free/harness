@@ -33,27 +33,27 @@ export const DEFAULT_AGENT_KEY = "default";
  * 空库时保证内部 identity 骨架就绪。返回 tenantId 与 userIdentityId。
  */
 export async function seedDefaultIdentity(): Promise<{
- tenantId: string;
- userIdentityId: string;
+  tenantId: string;
+  userIdentityId: string;
 }> {
- const tenant = await ensureDefaultTenant();
+  const tenant = await ensureDefaultTenant();
 
- const identity = await upsertUserIdentity({
- tenantId: tenant.id,
- externalSubject: DEFAULT_USER_ID,
- email: DEFAULT_USER_EMAIL,
- displayName: DEFAULT_USER_NAME,
- });
+  const identity = await upsertUserIdentity({
+    tenantId: tenant.id,
+    externalSubject: DEFAULT_USER_ID,
+    email: DEFAULT_USER_EMAIL,
+    displayName: DEFAULT_USER_NAME,
+  });
 
- await upsertPrincipalBinding({
- tenantId: tenant.id,
- subjectType: "user",
- externalId: DEFAULT_USER_ID,
- displayName: DEFAULT_USER_NAME,
- userIdentityId: identity.id,
- });
+  await upsertPrincipalBinding({
+    tenantId: tenant.id,
+    subjectType: "user",
+    externalId: DEFAULT_USER_ID,
+    displayName: DEFAULT_USER_NAME,
+    userIdentityId: identity.id,
+  });
 
- return { tenantId: tenant.id, userIdentityId: identity.id };
+  return { tenantId: tenant.id, userIdentityId: identity.id };
 }
 
 /**
@@ -63,45 +63,47 @@ export async function seedDefaultIdentity(): Promise<{
  * 控制面 API 建立，seed 只保证空库有可用的默认 Agent 身份。
  */
 export async function seedDefaultAgent(): Promise<{ created: boolean }> {
- const { tenantId, userIdentityId } = await seedDefaultIdentity();
+  const { tenantId, userIdentityId } = await seedDefaultIdentity();
 
- const existing = await getAgentByKey(tenantId, DEFAULT_AGENT_KEY);
- if (existing) return { created: false };
+  const existing = await getAgentByKey(tenantId, DEFAULT_AGENT_KEY);
+  if (existing) return { created: false };
 
- await createAgent({
- tenantId,
- agentKey: DEFAULT_AGENT_KEY,
- displayName: "默认 Agent",
- description: "正式 schema seed 引导的默认 agent（draft 身份）",
- ownerUserId: userIdentityId,
- lifecycleState: "draft",
- });
+  await createAgent({
+    tenantId,
+    agentKey: DEFAULT_AGENT_KEY,
+    displayName: "默认 Agent",
+    description: "正式 schema seed 引导的默认 agent（draft 身份）",
+    ownerUserId: userIdentityId,
+    lifecycleState: "draft",
+  });
 
- return { created: true };
+  return { created: true };
 }
 
 // ─── CLI runner（pnpm db:seed → tsx lib/db/seed.ts）─────────
 
 async function main() {
- console.log("[seed] 开始正式 schema seed...");
+  console.log("[seed] 开始正式 schema seed...");
 
- const identity = await seedDefaultIdentity();
- console.log(
- `[seed] 默认租户 + 用户身份就绪：tenant=${identity.tenantId} userIdentity=${identity.userIdentityId}`,
- );
+  const identity = await seedDefaultIdentity();
+  console.log(
+    `[seed] 默认租户 + 用户身份就绪：tenant=${identity.tenantId} userIdentity=${identity.userIdentityId}`,
+  );
 
- const agent = await seedDefaultAgent();
- console.log(`[seed] 默认 agent "${DEFAULT_AGENT_KEY}" ${agent.created ? "已写入" : "已存在（幂等跳过）"}`);
+  const agent = await seedDefaultAgent();
+  console.log(
+    `[seed] 默认 agent "${DEFAULT_AGENT_KEY}" ${agent.created ? "已写入" : "已存在（幂等跳过）"}`,
+  );
 
- console.log("[seed] 正式 schema seed 完成");
- process.exit(0);
+  console.log("[seed] 正式 schema seed 完成");
+  process.exit(0);
 }
 
 // 直接运行时执行；被 import（单测）时不自动跑。
 // 用 typeof require 守卫，CJS / ESM 加载器下都安全。
 if (typeof require !== "undefined" && require.main === module) {
- main().catch((error) => {
- console.error("[seed] 失败：", error);
- process.exit(1);
- });
+  main().catch((error) => {
+    console.error("[seed] 失败：", error);
+    process.exit(1);
+  });
 }

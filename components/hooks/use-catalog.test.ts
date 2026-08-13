@@ -146,9 +146,7 @@ describe("useCatalog", () => {
   });
 
   it("autoFetch=false 时不主动拉取", () => {
-    const { result } = renderHook(() =>
-      useCatalog({ resourceTypes: ["agent"], autoFetch: false }),
-    );
+    const { result } = renderHook(() => useCatalog({ resourceTypes: ["agent"], autoFetch: false }));
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.current.loading).toBe(false);

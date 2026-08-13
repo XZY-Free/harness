@@ -1,22 +1,22 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db/client";
 import { ArtifactNotVerifiedError } from "@/lib/artifacts/domain/artifact-attestation";
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import type { ArtifactAttestation } from "@/lib/artifacts/persistence/artifact-record";
+import { db } from "@/lib/db/client";
 import type { AuditActor } from "@/lib/identity/audit";
+import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
+import type { RuntimeRevisionRow } from "@/lib/persistence/schema/control-plane";
 import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
-import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtime/provisioning/publish-runtime-revision-service";
 import {
   RuntimeArtifactAttestationInvalidError,
   RuntimeConformanceRunRequiredError,
 } from "@/lib/runtime/domain/runtime-revision-publication-policy";
-import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
-import type { RuntimeRevisionRow } from "@/lib/persistence/schema/control-plane";
 import {
-  runtimeConformanceRun,
   runtimeConformanceCaseResult,
+  runtimeConformanceRun,
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtime/provisioning/publish-runtime-revision-service";
+import { eq } from "drizzle-orm";
 
 export interface PublishRuntimeRevisionWithAttestationResult {
   revision: RuntimeRevisionRow;

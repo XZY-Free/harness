@@ -12,6 +12,16 @@
  * 场景11（Hosted Worker 完整 Saga）使用真实 MySQL Gateway 执行 Saga 步骤。
  */
 import { createHash, randomUUID } from "node:crypto";
+import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
+import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
+import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
+import {
+  createDraftRevision,
+  getRevisionById,
+} from "@/lib/agents/persistence/agent-revision-queries";
+import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
+import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
+import { withdrawRevision } from "@/lib/agents/test-support/withdraw-agent-revision";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
 import { createRevokeArtifactAttestation } from "@/lib/artifacts/application/revoke-artifact-attestation";
 import {
@@ -21,108 +31,98 @@ import {
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
-  buildDsseArtifactAttestationEnvelope,
-  type PredicateSupplyChain,
-  generateTestBuilderKey,
-  type TestBuilderKey,
-} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
-import {
   resetArtifactStoreOverrides,
   setArtifactStoreOverride,
   setBuilderKeyRegistryOverride,
 } from "@/lib/artifacts/infrastructure/artifact-store-provider";
-import { mysqlAttestationRevocationStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import {
   getAttestationById,
   listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
-import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
+import { mysqlAttestationRevocationStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import {
-  createDraftRevision,
-  getRevisionById,
-} from "@/lib/agents/persistence/agent-revision-queries";
-import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
-import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
-import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
-import { withdrawRevision } from "@/lib/agents/test-support/withdraw-agent-revision";
+  type PredicateSupplyChain,
+  type TestBuilderKey,
+  buildDsseArtifactAttestationEnvelope,
+  generateTestBuilderKey,
+} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { controlPlaneEventDelivery } from "@/lib/control-plane/events/control-plane-event-delivery";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
-import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
-import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
+import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { agentRevisionTable } from "@/lib/persistence/schema/agents";
-import { invocationTable } from "@/lib/persistence/schema/runtime";
 import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
+import { invocationTable } from "@/lib/persistence/schema/runtime";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
-import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import {
   publicationRecord,
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
-import {
-  createRouteSet,
-  getRouteSetById,
-} from "@/lib/routes/application/deployment-route-service";
-import { activateSingleRouteForTest as activateRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
+import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
+import { createRouteSet, getRouteSetById } from "@/lib/routes/application/deployment-route-service";
 import { createDisableRoute } from "@/lib/routes/application/disable-route";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
-import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
+import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
+import { mysqlRouteEligibilitySourceReader } from "@/lib/routes/projection/mysql-route-eligibility-source-reader";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
+import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
-import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
-import { createDraftRuntimeRevision, getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
-import {
-  runtimeConformanceCaseResult,
-  runtimeConformanceRun,
-} from "@/lib/runtime/persistence/runtime-conformance-run-record";
-import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
-import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
+import { activateSingleRouteForTest as activateRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
+import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
+import type { ConformanceEligibilitySnapshot } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 import {
   ALL_CONFORMANCE_CASES,
   type RuntimeConformanceReport,
 } from "@/lib/runtime/domain/runtime-conformance-run";
-import type { ConformanceEligibilitySnapshot } from "@/lib/runtime/domain/runtime-conformance-eligibility";
-import {
-  buildDsseConformanceEnvelope,
-  generateTestRunnerKey,
-} from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
-import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
-import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
-import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
-import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
-import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
-import { createHostedProvisioningSaga } from "@/lib/runtime/provisioning/hosted-provisioning-saga";
-import { createHostedProvisioningWorker } from "@/lib/runtime/provisioning/hosted-provisioning-worker";
-import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
-import { validateAgentRevisionForProvisioning } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
 import { createMysqlHostedGateways } from "@/lib/runtime/infrastructure/mysql-hosted-gateways";
+import { hostedProvisioningRequestTable } from "@/lib/runtime/persistence/hosted-provisioning-request-record";
 import {
   HostedProvisioningLeaseLostError,
   mysqlHostedProvisioningRequestStore,
 } from "@/lib/runtime/persistence/mysql-hosted-provisioning-request-store";
-import { hostedProvisioningRequestTable } from "@/lib/runtime/persistence/hosted-provisioning-request-record";
-import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
+import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
+import {
+  runtimeConformanceCaseResult,
+  runtimeConformanceRun,
+} from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
+import {
+  createDraftRuntimeRevision,
+  getRuntimeRevisionById,
+} from "@/lib/runtime/persistence/runtime-revision-queries";
+import { createHostedProvisioningSaga } from "@/lib/runtime/provisioning/hosted-provisioning-saga";
+import { createHostedProvisioningWorker } from "@/lib/runtime/provisioning/hosted-provisioning-worker";
+import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
+import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
+import { validateAgentRevisionForProvisioning } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
+import {
+  buildDsseConformanceEnvelope,
+  generateTestRunnerKey,
+} from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
+import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import {
   installTrustedHostedControlPlaneEvidenceForTest,
   trustedHostedRunnerSigningIdentityForTest,
 } from "@/lib/test-support/trusted-hosted-control-plane-evidence";
-import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -191,7 +191,12 @@ function buildCleanSbom(): unknown {
       tools: [{ name: "e2e-test", version: "1.0.0" }],
     },
     components: [
-      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
+      {
+        type: "library",
+        name: "lodash",
+        version: "4.17.21",
+        licenses: [{ license: { id: "MIT" } }],
+      },
     ],
     dependencies: [{ ref: "pkg:npm/lodash@4.17.21" }],
   };
@@ -268,9 +273,17 @@ async function createVerifiedAttestationDirect(
   const provRef = `attestation:provenance:${digest.slice(7, 15)}`;
   const sbomDoc = buildCleanSbom();
   const provDoc = buildValidProvenance();
-  const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
+  const supplyChain: PredicateSupplyChain = {
+    sbomRef,
+    sbomContent: sbomDoc,
+    provenanceRef: provRef,
+    provenanceContent: provDoc,
+  };
   const store = new InMemoryManagedArtifactStore();
-  store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+  store.writeDsseEnvelope(
+    sigRef,
+    buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain),
+  );
   store.writeSbom(sbomRef, sbomDoc);
   store.writeProvenance(provRef, provDoc);
   const attestation = await verifyAndPersistAttestation(
@@ -458,7 +471,13 @@ async function seedEndToEndFixture(suffix: string) {
 
 // ─── 辅助：构造可信 Conformance DSSE Envelope ───────────────
 
-function buildSignedConformanceReport(revisionId: string, runtimeArtifactDigest: string, runtimeConfigDigest: string, protocolContractRevision: string, overrides: Record<string, unknown> = {}) {
+function buildSignedConformanceReport(
+  revisionId: string,
+  runtimeArtifactDigest: string,
+  runtimeConfigDigest: string,
+  protocolContractRevision: string,
+  overrides: Record<string, unknown> = {},
+) {
   const startedAt = new Date("2026-08-02T01:00:00.000Z");
   const report = {
     runId: randomUUID(),
@@ -482,10 +501,7 @@ function buildSignedConformanceReport(revisionId: string, runtimeArtifactDigest:
     })),
     ...overrides,
   };
-  return buildDsseConformanceEnvelope(
-    report as RuntimeConformanceReport,
-    RUNNER_KEY,
-  );
+  return buildDsseConformanceEnvelope(report as RuntimeConformanceReport, RUNNER_KEY);
 }
 
 // ─── 辅助：插入测试用 Invocation 行 ──────────────────────
@@ -540,7 +556,11 @@ async function createBindingFromResolved(params: {
   resolution: RouteResolution;
 }): Promise<ExecutionBinding> {
   const projectionVersionNo = params.resolution.projectionVersionNo;
-  if (!Number.isInteger(projectionVersionNo) || projectionVersionNo === undefined || projectionVersionNo < 0) {
+  if (
+    !Number.isInteger(projectionVersionNo) ||
+    projectionVersionNo === undefined ||
+    projectionVersionNo < 0
+  ) {
     throw new Error("Route Resolution 缺少有效 projectionVersionNo");
   }
 
@@ -618,9 +638,17 @@ describe("场景1：真实签名 Artifact Attestation 通过", () => {
     const provRef = `attestation:provenance:${digest.slice(7, 15)}`;
     const sbomDoc = buildCleanSbom();
     const provDoc = buildValidProvenance();
-    const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
+    const supplyChain: PredicateSupplyChain = {
+      sbomRef,
+      sbomContent: sbomDoc,
+      provenanceRef: provRef,
+      provenanceContent: provDoc,
+    };
     const store = new InMemoryManagedArtifactStore();
-    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+    store.writeDsseEnvelope(
+      sigRef,
+      buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain),
+    );
     store.writeSbom(sbomRef, sbomDoc);
     store.writeProvenance(provRef, provDoc);
     setArtifactStoreOverride(store);
@@ -904,12 +932,13 @@ describe("场景6：Outbox Event 与 Delivery 同事务创建", () => {
     expect(outboxEvents).toHaveLength(1);
     const outboxEvent = outboxEvents[0];
     expect(outboxEvent?.eventType).toBe("agent.revision.published");
+    if (!outboxEvent) throw new Error("AgentRevision 发布后缺少 Outbox 事件");
 
     // 对应的 Delivery 行（route_projection 消费者）在同事务创建
     const deliveries = await db
       .select()
       .from(controlPlaneEventDelivery)
-      .where(eq(controlPlaneEventDelivery.eventId, outboxEvent!.id));
+      .where(eq(controlPlaneEventDelivery.eventId, outboxEvent.id));
     expect(deliveries).toHaveLength(1);
     expect(deliveries[0]?.consumerName).toBe("route_projection");
     expect(deliveries[0]?.state).toBe("pending");
@@ -968,7 +997,8 @@ describe("场景7：Projection Consumer 构建完整 eligible Projection", () =>
       fixture.agentRevision.id,
     );
     expect(sourceRefs).toContainEqual({ routeId: fixture.route.id, tenantId: fixture.tenantId });
-    const fullRebuildRefs = await mysqlRouteEligibilitySourceReader.listAllCurrentlyActivatedRouteIds();
+    const fullRebuildRefs =
+      await mysqlRouteEligibilitySourceReader.listAllCurrentlyActivatedRouteIds();
     expect(fullRebuildRefs).toContainEqual({
       routeId: fixture.route.id,
       tenantId: fixture.tenantId,
@@ -1307,7 +1337,8 @@ describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活",
         businessKey: { threadId: `hosted-e2e-${requestId}` },
       });
       expect(resolved.status).toBe("resolved");
-      if (resolved.status !== "resolved") throw new Error(`Hosted Route 未解析: ${resolved.reason}`);
+      if (resolved.status !== "resolved")
+        throw new Error(`Hosted Route 未解析: ${resolved.reason}`);
       expect(resolved.resolution.agentRevisionId).toBe(agentRevision.id);
       expect(resolved.resolution.runtimeRevisionId).toBe(persisted?.stepRuntimeRevisionId);
       expect(resolved.resolution.routeRevisionId).toBe(persisted?.stepRouteRevisionId);
@@ -1440,10 +1471,7 @@ describe("场景14：Attestation 撤销后拒绝新 Binding", () => {
 describe("场景15：Runtime Conformance 失效后拒绝新 Binding", () => {
   it("Resolver 冻结 Conformance 后权威 Run/Case 变为不合格，旧 Resolution 创建 Binding 必须失败", async () => {
     const fixture = await seedEndToEndFixture("conformance-invalid");
-    const resolution = await resolveFrozenRouteForBinding(
-      fixture,
-      "thread-conformance-fail",
-    );
+    const resolution = await resolveFrozenRouteForBinding(fixture, "thread-conformance-fail");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
@@ -1496,10 +1524,7 @@ describe("场景15：Runtime Conformance 失效后拒绝新 Binding", () => {
 describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", () => {
   it("Resolver 冻结 Route 后出现新 Revision/Activation，旧 Resolution 创建 Binding 必须失败", async () => {
     const fixture = await seedEndToEndFixture("stale-route-activation");
-    const resolution = await resolveFrozenRouteForBinding(
-      fixture,
-      "thread-stale-route-activation",
-    );
+    const resolution = await resolveFrozenRouteForBinding(fixture, "thread-stale-route-activation");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
@@ -1869,10 +1894,7 @@ describe("场景20：跨租户访问全部 Fail-closed", () => {
     expect(ownTenantAgent).not.toBeNull();
 
     // 跨租户读 → null（隐藏式拒绝）
-    const crossTenantAgent = await getAgentById(
-      "99999999-9999-4999-8999-999999999999",
-      agent.id,
-    );
+    const crossTenantAgent = await getAgentById("99999999-9999-4999-8999-999999999999", agent.id);
     expect(crossTenantAgent).toBeNull();
   });
 

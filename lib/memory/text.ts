@@ -10,10 +10,10 @@ import { createHash } from "node:crypto";
 
 /** 规范化 text：trim + 折叠连续空白（去重稳定性）。 */
 export function normalizeMemoryText(text: string): string {
- return text.trim().replace(/\s+/g, " ");
+  return text.trim().replace(/\s+/g, " ");
 }
 
 /** 计算 textHash：规范化 text 的 sha256（前 64 hex）。 */
 export function hashMemoryText(text: string): string {
- return createHash("sha256").update(normalizeMemoryText(text)).digest("hex").slice(0, 64);
+  return createHash("sha256").update(normalizeMemoryText(text)).digest("hex").slice(0, 64);
 }

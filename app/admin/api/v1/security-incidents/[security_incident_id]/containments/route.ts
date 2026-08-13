@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/security-incidents/{security_incident_id}/containments — 事故隔离动作列表（S12-W09）。
  *
@@ -21,13 +28,6 @@ import {
   listIncidentContainments,
 } from "@/lib/identity/security-incident-queries";
 import type { IncidentContainment } from "@/lib/persistence/schema/security-incident";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

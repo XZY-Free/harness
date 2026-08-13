@@ -1,3 +1,17 @@
+import {
+  TOOL_SCHEMA_REVISION_ETAG_PREFIX,
+  parseToolSchemaRevisionEtag,
+} from "@/lib/admin/route-helpers";
+import { recordCapabilityUse } from "@/lib/capability/capability-use-queries";
+import { getCurrentToolSchemaRevision, getToolById } from "@/lib/capability/tool-queries";
+import {
+  type GatewayPrincipal,
+  gatewayAuthErrorResponse,
+  gatewayCapabilityContentBlockedTable,
+  gatewayCapabilityNotAllowedTable,
+  gatewayCatalogRevisionInvalidTable,
+  resolveGatewayPrincipal,
+} from "@/lib/gateway/route-helpers";
 /**
  * GET /gateway/v1/tools/{tool_id}/schema — Runtime 读取 Tool Schema（阶段 6 S06-C04）。
  *
@@ -23,20 +37,6 @@
  * - ToolSchemaRevision 不存在（currentSchemaRevisionId 悬空）→ 422 CAPABILITY_CONTENT_BLOCKED
  */
 import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
-import {
-  TOOL_SCHEMA_REVISION_ETAG_PREFIX,
-  parseToolSchemaRevisionEtag,
-} from "@/lib/admin/route-helpers";
-import { recordCapabilityUse } from "@/lib/capability/capability-use-queries";
-import { getCurrentToolSchemaRevision, getToolById } from "@/lib/capability/tool-queries";
-import {
-  type GatewayPrincipal,
-  gatewayAuthErrorResponse,
-  gatewayCapabilityContentBlockedTable,
-  gatewayCapabilityNotAllowedTable,
-  gatewayCatalogRevisionInvalidTable,
-  resolveGatewayPrincipal,
-} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

@@ -1,17 +1,17 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
-import {
-  USAGE_DIMENSIONS,
-  USAGE_SCOPE_TYPES,
-  type UsageDimension,
-  type UsageScopeType,
-} from "@/lib/persistence/schema/usage";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import { listUsageRecordsByTenant } from "@/lib/operations/usage-queries";
+import {
+  USAGE_DIMENSIONS,
+  USAGE_SCOPE_TYPES,
+  type UsageDimension,
+  type UsageScopeType,
+} from "@/lib/persistence/schema/usage";
 /**
  * GET /admin/api/v1/usage-records — 列出租户内所有 UsageRecord（S11-W07）。
  *

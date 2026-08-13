@@ -19,24 +19,24 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 function loadEnvFile(filename: string, overwrite: boolean): void {
- const filePath = join(/*turbopackIgnore: true*/ process.cwd(), filename);
- if (!existsSync(/*turbopackIgnore: true*/ filePath)) return;
+  const filePath = join(/*turbopackIgnore: true*/ process.cwd(), filename);
+  if (!existsSync(/*turbopackIgnore: true*/ filePath)) return;
 
- for (const rawLine of readFileSync(/*turbopackIgnore: true*/ filePath, "utf8").split(/\r?\n/)) {
- const line = rawLine.trim();
- if (!line || line.startsWith("#")) continue;
+  for (const rawLine of readFileSync(/*turbopackIgnore: true*/ filePath, "utf8").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
 
- const eqIdx = line.indexOf("=");
- if (eqIdx <= 0) continue;
+    const eqIdx = line.indexOf("=");
+    if (eqIdx <= 0) continue;
 
- const key = line.slice(0, eqIdx).trim();
- const value = line.slice(eqIdx + 1).trim();
+    const key = line.slice(0, eqIdx).trim();
+    const value = line.slice(eqIdx + 1).trim();
 
- if (!value) continue; // 跳过空值行
- if (!overwrite && process.env[key]) continue; // 非覆盖模式：已有值不覆盖
+    if (!value) continue; // 跳过空值行
+    if (!overwrite && process.env[key]) continue; // 非覆盖模式：已有值不覆盖
 
- process.env[key] = value;
- }
+    process.env[key] = value;
+  }
 }
 
 /**
@@ -48,9 +48,9 @@ function loadEnvFile(filename: string, overwrite: boolean): void {
  * dev/test 保留 overwrite=true,供开发者个人密钥覆盖。
  */
 export function loadAppEnvFiles(appEnv: string): void {
- const allowLocalOverwrite = appEnv !== "production";
- if (allowLocalOverwrite) {
- loadEnvFile(`.env.${appEnv}.local`, /* overwrite */ true);
- }
- loadEnvFile(`.env.${appEnv}`, /* overwrite */ false);
+  const allowLocalOverwrite = appEnv !== "production";
+  if (allowLocalOverwrite) {
+    loadEnvFile(`.env.${appEnv}.local`, /* overwrite */ true);
+  }
+  loadEnvFile(`.env.${appEnv}`, /* overwrite */ false);
 }

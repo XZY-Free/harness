@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * POST /admin/api/v1/deletion-requests — 管理员删除请求（S12-W07）。
  *
@@ -61,13 +68,6 @@ import {
   type DeletionRequestPrincipalKind,
   type DeletionSubjectType,
 } from "@/lib/persistence/schema/deletion-request";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

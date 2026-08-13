@@ -22,12 +22,6 @@ import {
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
-  buildDsseArtifactAttestationEnvelope,
-  generateTestBuilderKey,
-  type PredicateSupplyChain,
-  type TestBuilderKey,
-} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
-import {
   AttestationAlreadyRevokedError,
   AttestationNotFoundError,
   assertAttestationGate,
@@ -41,6 +35,12 @@ import {
   listAttestations,
   listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import {
+  type PredicateSupplyChain,
+  type TestBuilderKey,
+  buildDsseArtifactAttestationEnvelope,
+  generateTestBuilderKey,
+} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -108,8 +108,18 @@ function buildCleanSbom(): unknown {
     version: 1,
     metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
     components: [
-      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
-      { type: "library", name: "express", version: "4.18.2", licenses: [{ license: { id: "MIT" } }] },
+      {
+        type: "library",
+        name: "lodash",
+        version: "4.17.21",
+        licenses: [{ license: { id: "MIT" } }],
+      },
+      {
+        type: "library",
+        name: "express",
+        version: "4.18.2",
+        licenses: [{ license: { id: "MIT" } }],
+      },
     ],
   };
 }
@@ -165,10 +175,18 @@ async function createVerifiedAttestation(
 
   const sbomContent = buildCleanSbom();
   const provenanceContent = buildValidProvenance();
-  const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent, provenanceRef, provenanceContent };
+  const supplyChain: PredicateSupplyChain = {
+    sbomRef,
+    sbomContent,
+    provenanceRef,
+    provenanceContent,
+  };
 
   const store = new InMemoryManagedArtifactStore();
-  store.writeDsseEnvelope(dsseEnvelopeRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+  store.writeDsseEnvelope(
+    dsseEnvelopeRef,
+    buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain),
+  );
   store.writeSbom(sbomRef, sbomContent);
   store.writeProvenance(provenanceRef, provenanceContent);
 
@@ -254,7 +272,12 @@ describe("S12-W04 provenance 摘要持久化", () => {
     const failProvRef = "attestation:provenance:fail";
     const failSbomContent = buildCleanSbom();
     const failProvContent = buildValidProvenance();
-    const failSupplyChain: PredicateSupplyChain = { sbomRef: failSbomRef, sbomContent: failSbomContent, provenanceRef: failProvRef, provenanceContent: failProvContent };
+    const failSupplyChain: PredicateSupplyChain = {
+      sbomRef: failSbomRef,
+      sbomContent: failSbomContent,
+      provenanceRef: failProvRef,
+      provenanceContent: failProvContent,
+    };
     const store = new InMemoryManagedArtifactStore();
     // 故意用错误 subject digest → 验签失败
     store.writeDsseEnvelope(
@@ -302,7 +325,12 @@ describe("S12-W04 provenance 摘要持久化", () => {
     const pureProvRef = "attestation:provenance:pure";
     const pureSbomContent = buildCleanSbom();
     const pureProvContent = buildValidProvenance();
-    const pureSupplyChain: PredicateSupplyChain = { sbomRef: pureSbomRef, sbomContent: pureSbomContent, provenanceRef: pureProvRef, provenanceContent: pureProvContent };
+    const pureSupplyChain: PredicateSupplyChain = {
+      sbomRef: pureSbomRef,
+      sbomContent: pureSbomContent,
+      provenanceRef: pureProvRef,
+      provenanceContent: pureProvContent,
+    };
     const store = new InMemoryManagedArtifactStore();
     store.writeDsseEnvelope(
       "attestation:signature:pure",

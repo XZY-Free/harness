@@ -15,10 +15,10 @@
 
 /** 可信密钥注册表。 */
 export interface TrustedKeyRegistry {
- /** keyid → base64 编码的 Ed25519 公钥（32 字节 raw）。 */
- readonly keys: Record<string, string>;
- /** 查找公钥；不存在返回 undefined。 */
- getPublicKey(keyid: string): string | undefined;
+  /** keyid → base64 编码的 Ed25519 公钥（32 字节 raw）。 */
+  readonly keys: Record<string, string>;
+  /** 查找公钥；不存在返回 undefined。 */
+  getPublicKey(keyid: string): string | undefined;
 }
 
 /**
@@ -27,10 +27,10 @@ export interface TrustedKeyRegistry {
  * @param keys keyid → base64 公钥 映射（空对象 → 全部拒绝，fail-closed）
  */
 export function createTrustedKeyRegistry(keys: Record<string, string>): TrustedKeyRegistry {
- return {
- keys,
- getPublicKey(keyid: string): string | undefined {
- return keys[keyid];
- },
- };
+  return {
+    keys,
+    getPublicKey(keyid: string): string | undefined {
+      return keys[keyid];
+    },
+  };
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { cn } from "@/lib/utils";
 import type { ClientItem } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface MessageLocatorProps {
@@ -46,7 +46,8 @@ export function MessageLocator({ items, scrollContainerRef }: MessageLocatorProp
 
       const newTicks: Tick[] = [];
       for (let i = 0; i < currentItems.length; i++) {
-        const item = currentItems[i]!;
+        const item = currentItems[i];
+        if (!item) continue;
         const el = scrollContainer.querySelector(
           `[data-item-id="${item.id}"]`,
         ) as HTMLElement | null;
@@ -125,7 +126,7 @@ export function MessageLocator({ items, scrollContainerRef }: MessageLocatorProp
     if (distance < RADIUS) {
       const factor = 1 - distance / RADIUS;
       width = tick.isUserMessage ? 14 + factor * 11 : 9 + factor * 13;
-      const colorFactor = Math.pow(factor, 3);
+      const colorFactor = factor ** 3;
       opacity = 0.3 + colorFactor * 0.7;
     }
 
@@ -171,12 +172,14 @@ function PreviewCard({
   tick,
   items,
 }: { readonly tick: Tick; readonly items: readonly ClientItem[] }) {
-  const userItem = items[tick.index]!;
+  const userItem = items[tick.index];
+  if (!userItem) return null;
   const userText = extractItemText(userItem);
 
   let agentText = "";
   for (let i = tick.index + 1; i < items.length; i++) {
-    const item = items[i]!;
+    const item = items[i];
+    if (!item) continue;
     if (item.item_type === "agent_message") {
       agentText = extractItemText(item);
       break;

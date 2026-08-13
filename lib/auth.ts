@@ -23,12 +23,12 @@ import { eq } from "drizzle-orm";
 
 /** 认证失败错误。route 层应把 missing_identity / missing_email 映射为 401。 */
 export class AuthError extends Error {
- constructor(
- public readonly code: "missing_identity" | "missing_email",
- message: string,
- ) {
- super(message);
- }
+  constructor(
+    public readonly code: "missing_identity" | "missing_email",
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 /**
@@ -36,24 +36,24 @@ export class AuthError extends Error {
  * route 入口在 catch getCurrentUserFromRequest 时调用，避免认证失败被当 500。
  */
 export function authErrorResponse(error: unknown): Response | null {
- if (error instanceof AuthError) {
- return jsonError(401, error.code, error.message);
- }
- return null;
+  if (error instanceof AuthError) {
+    return jsonError(401, error.code, error.message);
+  }
+  return null;
 }
 
 /** 只需要能读 headers 的请求形态（兼容 Request / NextRequest）。 */
 export type RequestLike = { headers: Headers };
 
 type Identity = {
- externalId: string;
- email: string;
- name: string | null;
+  externalId: string;
+  email: string;
+  name: string | null;
 };
 
 function headerValue(headers: Headers, name: string): string | null {
- const value = headers.get(name);
- return value?.trim() ? value.trim() : null;
+  const value = headers.get(name);
+  return value?.trim() ? value.trim() : null;
 }
 
 /**
@@ -62,24 +62,24 @@ function headerValue(headers: Headers, name: string): string | null {
  * - trusted-headers：读配置的 header；缺 externalId / email 抛 AuthError。
  */
 export function resolveIdentityFromHeaders(headers: Headers): Identity {
- if (authConfig.mode === "dev") {
- return {
- externalId: DEFAULT_USER_ID,
- email: DEFAULT_USER_EMAIL,
- name: DEFAULT_USER_NAME,
- };
- }
+  if (authConfig.mode === "dev") {
+    return {
+      externalId: DEFAULT_USER_ID,
+      email: DEFAULT_USER_EMAIL,
+      name: DEFAULT_USER_NAME,
+    };
+  }
 
- const externalId = headerValue(headers, authConfig.externalIdHeader);
- const email = headerValue(headers, authConfig.emailHeader);
- const name = headerValue(headers, authConfig.nameHeader);
- if (!externalId) {
- throw new AuthError("missing_identity", "缺少 SSO 用户标识");
- }
- if (!email) {
- throw new AuthError("missing_email", "缺少 SSO 用户邮箱");
- }
- return { externalId, email, name };
+  const externalId = headerValue(headers, authConfig.externalIdHeader);
+  const email = headerValue(headers, authConfig.emailHeader);
+  const name = headerValue(headers, authConfig.nameHeader);
+  if (!externalId) {
+    throw new AuthError("missing_identity", "缺少 SSO 用户标识");
+  }
+  if (!email) {
+    throw new AuthError("missing_email", "缺少 SSO 用户邮箱");
+  }
+  return { externalId, email, name };
 }
 
 /**
@@ -90,45 +90,45 @@ export function resolveIdentityFromHeaders(headers: Headers): Identity {
  * MySQL 无 PG 的 INSERT ... RETURNING：IGNORE 写入 + 回查，并发下也只建一行。
  */
 export async function upsertUserByIdentity(identity: Identity): Promise<User> {
- const [existing] = await db
- .select()
- .from(user)
- .where(eq(user.externalId, identity.externalId))
- .limit(1);
+  const [existing] = await db
+    .select()
+    .from(user)
+    .where(eq(user.externalId, identity.externalId))
+    .limit(1);
 
- if (existing) {
- if (existing.email !== identity.email || existing.name !== identity.name) {
- await db
- .update(user)
- .set({ email: identity.email, name: identity.name })
- .where(eq(user.id, existing.id));
- return { ...existing, email: identity.email, name: identity.name };
- }
- return existing;
- }
+  if (existing) {
+    if (existing.email !== identity.email || existing.name !== identity.name) {
+      await db
+        .update(user)
+        .set({ email: identity.email, name: identity.name })
+        .where(eq(user.id, existing.id));
+      return { ...existing, email: identity.email, name: identity.name };
+    }
+    return existing;
+  }
 
- const row: User = {
- id: identity.externalId === DEFAULT_USER_ID ? DEFAULT_USER_ID : randomUUID(),
- externalId: identity.externalId,
- email: identity.email,
- name: identity.name,
- createdAt: new Date(),
- };
- await db.insert(user).ignore().values(row);
- const [created] = await db
- .select()
- .from(user)
- .where(eq(user.externalId, identity.externalId))
- .limit(1);
- if (!created) {
- throw new Error("无法创建或读取当前用户");
- }
- return created;
+  const row: User = {
+    id: identity.externalId === DEFAULT_USER_ID ? DEFAULT_USER_ID : randomUUID(),
+    externalId: identity.externalId,
+    email: identity.email,
+    name: identity.name,
+    createdAt: new Date(),
+  };
+  await db.insert(user).ignore().values(row);
+  const [created] = await db
+    .select()
+    .from(user)
+    .where(eq(user.externalId, identity.externalId))
+    .limit(1);
+  if (!created) {
+    throw new Error("无法创建或读取当前用户");
+  }
+  return created;
 }
 
 /** 从请求解析当前用户并 upsert（HTTP route 入口用）。 */
 export async function getCurrentUserFromRequest(request: RequestLike): Promise<User> {
- return upsertUserByIdentity(resolveIdentityFromHeaders(request.headers));
+  return upsertUserByIdentity(resolveIdentityFromHeaders(request.headers));
 }
 
 /**
@@ -136,5 +136,5 @@ export async function getCurrentUserFromRequest(request: RequestLike): Promise<U
  * 因无 header 会抛 AuthError，server component 应改用 getCurrentUserFromRequest）。
  */
 export async function getCurrentUser(): Promise<User> {
- return upsertUserByIdentity(resolveIdentityFromHeaders(new Headers()));
+  return upsertUserByIdentity(resolveIdentityFromHeaders(new Headers()));
 }

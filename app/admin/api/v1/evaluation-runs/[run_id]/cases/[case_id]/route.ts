@@ -1,13 +1,10 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
-import {
-  getEvaluationCaseById,
-  getEvaluationRunById,
-} from "@/lib/evaluation/evaluation-queries";
+import { getEvaluationCaseById, getEvaluationRunById } from "@/lib/evaluation/evaluation-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 /**
  * GET /admin/api/v1/evaluation-runs/{run_id}/cases/{case_id} — Case 单资源详情（S11-W06）。
  *

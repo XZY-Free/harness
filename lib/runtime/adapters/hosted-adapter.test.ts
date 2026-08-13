@@ -21,11 +21,11 @@ import {
   type VerifyAttestationInput,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import {
   buildDsseArtifactAttestationEnvelope,
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
-import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { listItemsByThread } from "@/lib/conversations/thread-item-queries";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
@@ -607,7 +607,12 @@ function buildCleanSbom(): unknown {
     version: 1,
     metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
     components: [
-      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
+      {
+        type: "library",
+        name: "lodash",
+        version: "4.17.21",
+        licenses: [{ license: { id: "MIT" } }],
+      },
     ],
   };
 }
@@ -665,7 +670,12 @@ async function createVerifiedAttestation(
   const store = new InMemoryManagedArtifactStore();
   store.writeDsseEnvelope(
     dsseEnvelopeRef,
-    buildDsseArtifactAttestationEnvelope(keyPair, digest, { sbomRef, sbomContent: buildCleanSbom(), provenanceRef: provRef, provenanceContent: buildValidProvenance() }),
+    buildDsseArtifactAttestationEnvelope(keyPair, digest, {
+      sbomRef,
+      sbomContent: buildCleanSbom(),
+      provenanceRef: provRef,
+      provenanceContent: buildValidProvenance(),
+    }),
   );
   store.writeSbom(sbomRef, buildCleanSbom());
   store.writeProvenance(provRef, buildValidProvenance());

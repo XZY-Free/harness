@@ -1,3 +1,16 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
+import {
+  type KnowledgeBaseLifecycleState,
+  KnowledgeValidationError,
+  createKnowledgeBase,
+  listKnowledgeBases,
+} from "@/lib/context/knowledge-queries";
 /**
  * GET / POST /admin/api/v1/knowledge-bases — KnowledgeBase 集合（阶段 7 S07-C05）。
  *
@@ -34,19 +47,6 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
-import {
-  type KnowledgeBaseLifecycleState,
-  KnowledgeValidationError,
-  createKnowledgeBase,
-  listKnowledgeBases,
-} from "@/lib/context/knowledge-queries";
 
 export const dynamic = "force-dynamic";
 

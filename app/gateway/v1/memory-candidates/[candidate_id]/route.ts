@@ -1,3 +1,9 @@
+import { getMemoryCandidateByIdAndInvocation } from "@/lib/context/memory-queries";
+import {
+  type GatewayPrincipal,
+  gatewayAuthErrorResponse,
+  resolveGatewayPrincipal,
+} from "@/lib/gateway/route-helpers";
 /**
  * GET /gateway/v1/memory-candidates/{candidate_id} — 查询 Memory Candidate（阶段 7 S07-C03）。
  *
@@ -17,12 +23,6 @@
  * - Gateway Token 的 invocationId 必须与 candidate 的 invocationId 一致。
  */
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import { getMemoryCandidateByIdAndInvocation } from "@/lib/context/memory-queries";
-import {
-  type GatewayPrincipal,
-  gatewayAuthErrorResponse,
-  resolveGatewayPrincipal,
-} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

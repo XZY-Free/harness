@@ -1,9 +1,9 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import { getTraceById } from "@/lib/observability/trace-queries";
 /**
  * GET /admin/api/v1/traces/{trace_id} — Trace 单资源详情（S11-W05）。

@@ -1,25 +1,4 @@
 import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  apiError,
-  apiSuccess,
-  etagHeader,
-  getRequestId,
-  parseIfMatch,
-  resourceNotFound,
-} from "@/lib/http";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
-import {
   type AdminPrincipal,
   CONNECTION_ETAG_PREFIX,
   adminAuthErrorResponse,
@@ -63,6 +42,27 @@ import {
   getConnectionById,
   updateConnection,
 } from "@/lib/capability/tool-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
+  etagHeader,
+  getRequestId,
+  parseIfMatch,
+  resourceNotFound,
+} from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 

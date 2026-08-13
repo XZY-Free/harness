@@ -1,4 +1,11 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import { listCostAggregatesByTenant } from "@/lib/operations/usage-queries";
 import {
   COST_GRANULARITIES,
   type CostGranularity,
@@ -7,13 +14,6 @@ import {
   type UsageDimension,
   type UsageScopeType,
 } from "@/lib/persistence/schema/usage";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
-import { listCostAggregatesByTenant } from "@/lib/operations/usage-queries";
 /**
  * GET /admin/api/v1/cost-aggregates — 列出租户内所有 CostAggregate（S11-W07）。
  *

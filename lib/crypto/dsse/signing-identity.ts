@@ -10,10 +10,10 @@
 
 /** 签名身份策略。 */
 export interface SigningIdentityPolicy {
- /** 允许的签名身份列表。 */
- readonly allowedIdentities: readonly string[];
- /** 检查身份是否被允许。 */
- isAllowed(identity: string): boolean;
+  /** 允许的签名身份列表。 */
+  readonly allowedIdentities: readonly string[];
+  /** 检查身份是否被允许。 */
+  isAllowed(identity: string): boolean;
 }
 
 /**
@@ -22,13 +22,13 @@ export interface SigningIdentityPolicy {
  * @param allowedIdentities 允许的签名身份列表（空列表 → 全部拒绝，fail-closed）
  */
 export function createSigningIdentityPolicy(
- allowedIdentities: readonly string[],
+  allowedIdentities: readonly string[],
 ): SigningIdentityPolicy {
- const set = new Set(allowedIdentities);
- return {
- allowedIdentities,
- isAllowed(identity: string): boolean {
- return set.has(identity);
- },
- };
+  const set = new Set(allowedIdentities);
+  return {
+    allowedIdentities,
+    isAllowed(identity: string): boolean {
+      return set.has(identity);
+    },
+  };
 }

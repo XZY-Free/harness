@@ -1,19 +1,16 @@
 import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+} from "@/lib/admin/route-helpers";
+import { getKnowledgeBaseById, getKnowledgeDocumentById } from "@/lib/context/knowledge-queries";
+import {
   REQUEST_ID_HEADER,
   apiSuccess,
   etagHeader,
   getRequestId,
   resourceNotFound,
 } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-} from "@/lib/admin/route-helpers";
-import {
-  getKnowledgeBaseById,
-  getKnowledgeDocumentById,
-} from "@/lib/context/knowledge-queries";
 /**
  * GET /admin/api/v1/knowledge-bases/{base_id}/documents/{document_id}
  *   — KnowledgeDocument 单资源详情（S11-W03）。

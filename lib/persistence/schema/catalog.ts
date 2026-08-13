@@ -24,15 +24,15 @@ import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
- bigint,
- datetime,
- index,
- json,
- mysqlEnum,
- mysqlTable,
- text,
- uniqueIndex,
- varchar,
+  bigint,
+  datetime,
+  index,
+  json,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  uniqueIndex,
+  varchar,
 } from "drizzle-orm/mysql-core";
 
 // ─── Catalog Resource Type ────────────────────────────────
@@ -48,13 +48,13 @@ import {
  * - connection：Connection 资产（后续阶段接入）。
  */
 export const CATALOG_RESOURCE_TYPES = [
- "agent",
- "skill",
- "tool",
- "knowledge",
- "runtime",
- "model",
- "connection",
+  "agent",
+  "skill",
+  "tool",
+  "knowledge",
+  "runtime",
+  "model",
+  "connection",
 ] as const;
 export type CatalogResourceType = (typeof CATALOG_RESOURCE_TYPES)[number];
 
@@ -71,56 +71,56 @@ export type CatalogAudience = (typeof CATALOG_AUDIENCES)[number];
 // ─── CatalogEntry ─────────────────────────────────────────
 
 export const catalogEntryTable = mysqlTable(
- "CatalogEntry",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 资源类型（agent/skill/tool/knowledge/runtime/model/connection）。 */
- resourceType: varchar("resourceType", { length: 32 }).notNull(),
- /** 资源 id（对应事实源表的主键）。 */
- resourceId: varchar("resourceId", { length: 36 }).notNull(),
- /** 显示名（人类可读）。 */
- displayName: varchar("displayName", { length: 256 }).notNull(),
- /** 描述（来自事实源；可为空）。 */
- description: text("description"),
- /** 负责人 userIdentityId（逻辑外键 → UserIdentity.id）；可为空。 */
- ownerUserId: varchar("ownerUserId", { length: 36 }),
- /** 标签数组（JSON string[]），用于 searchCatalog 过滤；可为空。 */
- tagsJson: json("tagsJson"),
- /** 事实源 lifecycle 状态镜像（如 draft/enabled/disabled/retired）。 */
- lifecycleState: varchar("lifecycleState", { length: 32 }).notNull(),
- /** 可见性摘要（如 tenant/internal/owner）；用于客户端展示。 */
- visibilitySummary: varchar("visibilitySummary", { length: 64 }).notNull(),
- /** 事实源最近 updatedAt（投影时镜像，便于增量判断）。 */
- sourceUpdatedAt: datetime("sourceUpdatedAt", { mode: "date", fsp: 3 }).notNull(),
- /** 本次投影写入时间。 */
- projectedAt: datetime("projectedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- /** 当前所属租户目录的修订号（与 CatalogRevision.currentRevision 对齐）。 */
- catalogRevision: bigint("catalogRevision", { mode: "number" }).notNull(),
- },
- (t) => ({
- tenantResourceUq: uniqueIndex("CatalogEntry_tenant_resourceType_resourceId_uq").on(
- t.tenantId,
- t.resourceType,
- t.resourceId,
- ),
- tenantTypeLifecycleIdx: index("CatalogEntry_tenant_resourceType_lifecycle_idx").on(
- t.tenantId,
- t.resourceType,
- t.lifecycleState,
- ),
- tenantRevisionIdx: index("CatalogEntry_tenant_catalogRevision_idx").on(
- t.tenantId,
- t.catalogRevision,
- ),
- }),
+  "CatalogEntry",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 资源类型（agent/skill/tool/knowledge/runtime/model/connection）。 */
+    resourceType: varchar("resourceType", { length: 32 }).notNull(),
+    /** 资源 id（对应事实源表的主键）。 */
+    resourceId: varchar("resourceId", { length: 36 }).notNull(),
+    /** 显示名（人类可读）。 */
+    displayName: varchar("displayName", { length: 256 }).notNull(),
+    /** 描述（来自事实源；可为空）。 */
+    description: text("description"),
+    /** 负责人 userIdentityId（逻辑外键 → UserIdentity.id）；可为空。 */
+    ownerUserId: varchar("ownerUserId", { length: 36 }),
+    /** 标签数组（JSON string[]），用于 searchCatalog 过滤；可为空。 */
+    tagsJson: json("tagsJson"),
+    /** 事实源 lifecycle 状态镜像（如 draft/enabled/disabled/retired）。 */
+    lifecycleState: varchar("lifecycleState", { length: 32 }).notNull(),
+    /** 可见性摘要（如 tenant/internal/owner）；用于客户端展示。 */
+    visibilitySummary: varchar("visibilitySummary", { length: 64 }).notNull(),
+    /** 事实源最近 updatedAt（投影时镜像，便于增量判断）。 */
+    sourceUpdatedAt: datetime("sourceUpdatedAt", { mode: "date", fsp: 3 }).notNull(),
+    /** 本次投影写入时间。 */
+    projectedAt: datetime("projectedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    /** 当前所属租户目录的修订号（与 CatalogRevision.currentRevision 对齐）。 */
+    catalogRevision: bigint("catalogRevision", { mode: "number" }).notNull(),
+  },
+  (t) => ({
+    tenantResourceUq: uniqueIndex("CatalogEntry_tenant_resourceType_resourceId_uq").on(
+      t.tenantId,
+      t.resourceType,
+      t.resourceId,
+    ),
+    tenantTypeLifecycleIdx: index("CatalogEntry_tenant_resourceType_lifecycle_idx").on(
+      t.tenantId,
+      t.resourceType,
+      t.lifecycleState,
+    ),
+    tenantRevisionIdx: index("CatalogEntry_tenant_catalogRevision_idx").on(
+      t.tenantId,
+      t.catalogRevision,
+    ),
+  }),
 );
 
 export type CatalogEntry = InferSelectModel<typeof catalogEntryTable>;
@@ -129,26 +129,26 @@ export type NewCatalogEntry = InferInsertModel<typeof catalogEntryTable>;
 // ─── CatalogRevision ──────────────────────────────────────
 
 export const catalogRevisionTable = mysqlTable(
- "CatalogRevision",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 受众（employee/runtime）。 */
- audience: mysqlEnum("audience", CATALOG_AUDIENCES).notNull(),
- /** 当前修订号（任意资源投影刷新后单调递增）。 */
- currentRevision: bigint("currentRevision", { mode: "number" }).notNull().default(0),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- tenantAudienceUq: uniqueIndex("CatalogRevision_tenant_audience_uq").on(t.tenantId, t.audience),
- }),
+  "CatalogRevision",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 受众（employee/runtime）。 */
+    audience: mysqlEnum("audience", CATALOG_AUDIENCES).notNull(),
+    /** 当前修订号（任意资源投影刷新后单调递增）。 */
+    currentRevision: bigint("currentRevision", { mode: "number" }).notNull().default(0),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    tenantAudienceUq: uniqueIndex("CatalogRevision_tenant_audience_uq").on(t.tenantId, t.audience),
+  }),
 );
 
 export type CatalogRevision = InferSelectModel<typeof catalogRevisionTable>;

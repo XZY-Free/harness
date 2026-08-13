@@ -1,3 +1,21 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  etagMismatchTable,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
+import {
+  KnowledgeRevisionAlreadyPublishedError,
+  KnowledgeRevisionIndexNotReadyError,
+  KnowledgeValidationError,
+  KnowledgeVersionConflictError,
+  getKnowledgeBaseById,
+  getKnowledgeDocumentById,
+  getKnowledgeDocumentRevisionById,
+  publishKnowledgeDocumentRevision,
+} from "@/lib/context/knowledge-queries";
 /**
  * POST /admin/api/v1/knowledge-bases/{base_id}/documents/{document_id}/revisions/{revision_id}:publish
  *   — 发布 KnowledgeDocumentRevision（阶段 7 S07-C05）。
@@ -48,24 +66,6 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  etagMismatchTable,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
-import {
-  KnowledgeRevisionAlreadyPublishedError,
-  KnowledgeRevisionIndexNotReadyError,
-  KnowledgeValidationError,
-  KnowledgeVersionConflictError,
-  getKnowledgeBaseById,
-  getKnowledgeDocumentById,
-  getKnowledgeDocumentRevisionById,
-  publishKnowledgeDocumentRevision,
-} from "@/lib/context/knowledge-queries";
 
 export const dynamic = "force-dynamic";
 

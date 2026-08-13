@@ -4,10 +4,7 @@ import { DesktopSidebar } from "@/components/thread/sidebar/desktop-sidebar";
 import { SidebarProvider } from "@/components/thread/sidebar/sidebar-context";
 import { ThreadPage } from "@/components/thread/thread-page";
 import { createNewThreadSession, loadThreadShell } from "@/lib/client/new-thread-session";
-import type {
-  ClientNewThreadSubmission,
-  ClientThreadShellResponse,
-} from "@/lib/client/types";
+import type { ClientNewThreadSubmission, ClientThreadShellResponse } from "@/lib/client/types";
 import { getDesktopCapabilities } from "@/lib/desktop/capabilities";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { parseDesktopRoute } from "../desktop-route";
@@ -62,10 +59,7 @@ function DesktopShell() {
         current
           ? {
               ...current,
-              threads: [
-                thread,
-                ...current.threads.filter((item) => item.id !== thread.id),
-              ],
+              threads: [thread, ...current.threads.filter((item) => item.id !== thread.id)],
             }
           : current,
       );

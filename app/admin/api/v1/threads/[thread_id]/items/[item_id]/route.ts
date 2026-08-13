@@ -1,10 +1,10 @@
-import { getItemById } from "@/lib/conversations/thread-item-queries";
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
+import { getItemById } from "@/lib/conversations/thread-item-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 /**
  * GET /admin/api/v1/threads/{thread_id}/items/{item_id} — ThreadItem 单资源详情（S11-W04）。
  *

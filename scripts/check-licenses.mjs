@@ -240,7 +240,7 @@ function main() {
       ),
     );
   } else {
-    console.log(`\n📋 许可证扫描报告`);
+    console.log("\n📋 许可证扫描报告");
     console.log(`   扫描路径:   ${nodeModulesPath}`);
     console.log(`   白名单文件: ${whitelistPath}`);
     console.log(`   总包数:     ${results.length}`);
@@ -249,7 +249,7 @@ function main() {
     console.log(`   未知许可证: ${unknown.length}`);
 
     if (whitelistedHits.length > 0) {
-      console.log(`\n✅ 白名单覆盖（已审查）:`);
+      console.log("\n✅ 白名单覆盖（已审查）:");
       for (const pkg of whitelistedHits) {
         const w = whitelist.find((x) => x.name === pkg.name);
         console.log(`   ${pkg.name}@${pkg.version} → ${pkg.license}`);
@@ -258,14 +258,14 @@ function main() {
     }
 
     if (forbidden.length > 0) {
-      console.log(`\n❌ 发现禁用许可证:`);
+      console.log("\n❌ 发现禁用许可证:");
       for (const pkg of forbidden) {
         console.log(`   ${pkg.name}@${pkg.version} → ${pkg.license}`);
       }
     }
 
     if (unknown.length > 0 && !jsonOutput) {
-      console.log(`\n⚠️  未知许可证（需人工审查）:`);
+      console.log("\n⚠️  未知许可证（需人工审查）:");
       for (const pkg of unknown.slice(0, 20)) {
         console.log(`   ${pkg.name}@${pkg.version}`);
       }
@@ -275,7 +275,7 @@ function main() {
     }
 
     if (forbidden.length === 0) {
-      console.log(`\n✅ 无禁用许可证（白名单已过滤已审查包）`);
+      console.log("\n✅ 无禁用许可证（白名单已过滤已审查包）");
     }
   }
 

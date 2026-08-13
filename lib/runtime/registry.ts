@@ -11,34 +11,34 @@ import type { NetworkPolicy, PreviewRuntime, ResourceQuota, RuntimeHandle } from
 import { ContainerWorkspaceStore, HostWorkspaceStore } from "./workspace-store";
 
 function lazyPreviewRuntime(
- kind: "static" | "dev-server",
- defaults?: {
- quota?: ResourceQuota;
- networkPolicy?: NetworkPolicy;
- secretResolver?: () => Promise<SecretEnvMap>;
- },
+  kind: "static" | "dev-server",
+  defaults?: {
+    quota?: ResourceQuota;
+    networkPolicy?: NetworkPolicy;
+    secretResolver?: () => Promise<SecretEnvMap>;
+  },
 ): PreviewRuntime {
- let loaded: PreviewRuntime | null = null;
- const load = async (): Promise<PreviewRuntime> => {
- if (loaded) return loaded;
- const mod = await import("./preview-runtime");
- loaded =
- kind === "static" ? mod.staticPreviewRuntime : new mod.DevServerPreviewRuntime(defaults);
- return loaded;
- };
+  let loaded: PreviewRuntime | null = null;
+  const load = async (): Promise<PreviewRuntime> => {
+    if (loaded) return loaded;
+    const mod = await import("./preview-runtime");
+    loaded =
+      kind === "static" ? mod.staticPreviewRuntime : new mod.DevServerPreviewRuntime(defaults);
+    return loaded;
+  };
 
- return {
- async start(threadId) {
- return (await load()).start(threadId);
- },
- async stop(threadId) {
- if (!loaded) return;
- await loaded.stop(threadId);
- },
- status(threadId) {
- return loaded?.status(threadId) ?? null;
- },
- };
+  return {
+    async start(threadId) {
+      return (await load()).start(threadId);
+    },
+    async stop(threadId) {
+      if (!loaded) return;
+      await loaded.stop(threadId);
+    },
+    status(threadId) {
+      return loaded?.status(threadId) ?? null;
+    },
+  };
 }
 
 const lazyStaticPreviewRuntime = lazyPreviewRuntime("static");
@@ -61,64 +61,64 @@ const lazyStaticPreviewRuntime = lazyPreviewRuntime("static");
 export { resolveRuntimeTypeForThread } from "./resolver";
 
 export function resolveRuntimes(
- threadId: string,
- type?: RuntimeType,
- opts?: {
- quotaOverride?: Partial<ResourceQuota>;
- networkPolicyOverride?: Partial<NetworkPolicy>;
- },
+  threadId: string,
+  type?: RuntimeType,
+  opts?: {
+    quotaOverride?: Partial<ResourceQuota>;
+    networkPolicyOverride?: Partial<NetworkPolicy>;
+  },
 ): RuntimeHandle {
- const resolved = type ?? runtimeConfig.defaultType;
- // 解析 per-thread 配额（全局默认 + thread 覆盖，只能收紧）。
- const quota = resolveQuota({ threadOverride: opts?.quotaOverride });
- // 解析 per-thread 网络策略（host 恒 open；container 按 config + override）。
- const networkPolicy = resolveNetworkPolicy({
- threadOverride: opts?.networkPolicyOverride,
- runtimeType: resolved,
- });
+  const resolved = type ?? runtimeConfig.defaultType;
+  // 解析 per-thread 配额（全局默认 + thread 覆盖，只能收紧）。
+  const quota = resolveQuota({ threadOverride: opts?.quotaOverride });
+  // 解析 per-thread 网络策略（host 恒 open；container 按 config + override）。
+  const networkPolicy = resolveNetworkPolicy({
+    threadOverride: opts?.networkPolicyOverride,
+    runtimeType: resolved,
+  });
 
- // secret 解析器（懒加载，首次 exec 时调；master key 缺失时由 resolveSecrets 抛错）
- const secretResolver = isSecretMountAvailable()
- ? () => resolveSecrets(threadId, "thread", threadId)
- : undefined;
- const secretMountAvailable = isSecretMountAvailable();
+  // secret 解析器（懒加载，首次 exec 时调；master key 缺失时由 resolveSecrets 抛错）
+  const secretResolver = isSecretMountAvailable()
+    ? () => resolveSecrets(threadId, "thread", threadId)
+    : undefined;
+  const secretMountAvailable = isSecretMountAvailable();
 
- if (resolved === "container" && getDockerAvailable()) {
- return {
- workspace: new ContainerWorkspaceStore(threadId),
- execution: new ContainerExecutionRuntime(threadId, quota, networkPolicy, secretResolver),
- preview: lazyPreviewRuntime("dev-server", { quota, networkPolicy, secretResolver }),
- capability: buildCapability({
- runtimeType: "container",
- imageVersion: runtimeConfig.runtimeImage,
- quota,
- networkPolicy,
- secretMount: secretMountAvailable,
- }),
- };
- }
+  if (resolved === "container" && getDockerAvailable()) {
+    return {
+      workspace: new ContainerWorkspaceStore(threadId),
+      execution: new ContainerExecutionRuntime(threadId, quota, networkPolicy, secretResolver),
+      preview: lazyPreviewRuntime("dev-server", { quota, networkPolicy, secretResolver }),
+      capability: buildCapability({
+        runtimeType: "container",
+        imageVersion: runtimeConfig.runtimeImage,
+        quota,
+        networkPolicy,
+        secretMount: secretMountAvailable,
+      }),
+    };
+  }
 
- if (resolved === "container") {
- const msg = `[runtime] thread ${threadId}: runtimeType=container 但 docker 不可用`;
- if (!runtimeConfig.degradeOnDockerUnavailable) {
- throw new Error(`${msg}，拒绝降级 host`);
- }
- console.warn(`${msg}，按配置降级 host`);
- }
+  if (resolved === "container") {
+    const msg = `[runtime] thread ${threadId}: runtimeType=container 但 docker 不可用`;
+    if (!runtimeConfig.degradeOnDockerUnavailable) {
+      throw new Error(`${msg}，拒绝降级 host`);
+    }
+    console.warn(`${msg}，按配置降级 host`);
+  }
 
- // host 模式（默认或降级）：networkPolicy=open / quotaEnforced=false 诚实标注。
- const isDegraded = resolved === "container" && !getDockerAvailable();
- return {
- workspace: new HostWorkspaceStore(threadId),
- execution: new HostExecutionRuntime(threadId, quota, secretResolver),
- preview: lazyStaticPreviewRuntime,
- capability: buildCapability({
- runtimeType: "host",
- quota,
- available: true,
- secretMount: secretMountAvailable,
- degradedFrom: isDegraded ? "container" : undefined,
- degradedReason: isDegraded ? "docker_unavailable" : undefined,
- }),
- };
+  // host 模式（默认或降级）：networkPolicy=open / quotaEnforced=false 诚实标注。
+  const isDegraded = resolved === "container" && !getDockerAvailable();
+  return {
+    workspace: new HostWorkspaceStore(threadId),
+    execution: new HostExecutionRuntime(threadId, quota, secretResolver),
+    preview: lazyStaticPreviewRuntime,
+    capability: buildCapability({
+      runtimeType: "host",
+      quota,
+      available: true,
+      secretMount: secretMountAvailable,
+      degradedFrom: isDegraded ? "container" : undefined,
+      degradedReason: isDegraded ? "docker_unavailable" : undefined,
+    }),
+  };
 }

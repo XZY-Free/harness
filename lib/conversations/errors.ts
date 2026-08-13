@@ -7,100 +7,100 @@
  * Route 层根据 error 实例映射 HTTP 状态码和稳定 error_code。
  */
 import type {
- PendingInputState,
- ThreadLifecycleState,
- ThreadRelationType,
- TurnState,
+  PendingInputState,
+  ThreadLifecycleState,
+  ThreadRelationType,
+  TurnState,
 } from "@/lib/persistence/schema/conversation";
 
 /** Thread 不存在或跨租户不可见（映射 404 RESOURCE_NOT_FOUND，不泄露存在）。 */
 export class ThreadNotFoundError extends Error {
- constructor(public readonly threadId: string) {
- super(`Thread 不存在或不可见：${threadId}`);
- this.name = "ThreadNotFoundError";
- }
+  constructor(public readonly threadId: string) {
+    super(`Thread 不存在或不可见：${threadId}`);
+    this.name = "ThreadNotFoundError";
+  }
 }
 
 /** Thread lifecycle 不允许新 Turn（archived/deleted）。映射 409 THREAD_NOT_ACCEPTING_TURNS。 */
 export class ThreadNotAcceptingTurnsError extends Error {
- constructor(
- public readonly threadId: string,
- public readonly lifecycleState: ThreadLifecycleState,
- ) {
- super(`Thread ${threadId} 状态为 ${lifecycleState}，不允许新 Turn`);
- this.name = "ThreadNotAcceptingTurnsError";
- }
+  constructor(
+    public readonly threadId: string,
+    public readonly lifecycleState: ThreadLifecycleState,
+  ) {
+    super(`Thread ${threadId} 状态为 ${lifecycleState}，不允许新 Turn`);
+    this.name = "ThreadNotAcceptingTurnsError";
+  }
 }
 
 /** Thread 乐观锁冲突。映射 412 ETAG_MISMATCH。 */
 export class ThreadVersionConflictError extends Error {
- constructor(
- public readonly threadId: string,
- public readonly expected: number,
- public readonly actual: number,
- ) {
- super(`Thread ${threadId} 版本冲突：期望 ${expected}，实际 ${actual}`);
- this.name = "ThreadVersionConflictError";
- }
+  constructor(
+    public readonly threadId: string,
+    public readonly expected: number,
+    public readonly actual: number,
+  ) {
+    super(`Thread ${threadId} 版本冲突：期望 ${expected}，实际 ${actual}`);
+    this.name = "ThreadVersionConflictError";
+  }
 }
 
 /** Turn 不存在或跨租户不可见。映射 404 RESOURCE_NOT_FOUND。 */
 export class TurnNotFoundError extends Error {
- constructor(public readonly turnId: string) {
- super(`Turn 不存在或不可见：${turnId}`);
- this.name = "TurnNotFoundError";
- }
+  constructor(public readonly turnId: string) {
+    super(`Turn 不存在或不可见：${turnId}`);
+    this.name = "TurnNotFoundError";
+  }
 }
 
 /** Turn 状态转换非法。映射 409 TURN_STATE_CONFLICT。 */
 export class TurnStateConflictError extends Error {
- constructor(
- public readonly turnId: string,
- public readonly currentState: TurnState,
- public readonly attemptedAction: string,
- ) {
- super(`Turn ${turnId} 状态为 ${currentState}，不允许 ${attemptedAction}`);
- this.name = "TurnStateConflictError";
- }
+  constructor(
+    public readonly turnId: string,
+    public readonly currentState: TurnState,
+    public readonly attemptedAction: string,
+  ) {
+    super(`Turn ${turnId} 状态为 ${currentState}，不允许 ${attemptedAction}`);
+    this.name = "TurnStateConflictError";
+  }
 }
 
 /** ThreadItem 不存在或跨租户不可见。映射 404 RESOURCE_NOT_FOUND。 */
 export class ThreadItemNotFoundError extends Error {
- constructor(public readonly itemId: string) {
- super(`ThreadItem 不存在或不可见：${itemId}`);
- this.name = "ThreadItemNotFoundError";
- }
+  constructor(public readonly itemId: string) {
+    super(`ThreadItem 不存在或不可见：${itemId}`);
+    this.name = "ThreadItemNotFoundError";
+  }
 }
 
 /** supersede 链将形成环。映射 409 ITEM_SUPERSEDE_CYCLE。 */
 export class ItemSupersedeCycleError extends Error {
- constructor(
- public readonly itemId: string,
- public readonly supersededByItemId: string,
- ) {
- super(`Item ${itemId} 的 supersede 链将形成环（指向 ${supersededByItemId}）`);
- this.name = "ItemSupersedeCycleError";
- }
+  constructor(
+    public readonly itemId: string,
+    public readonly supersededByItemId: string,
+  ) {
+    super(`Item ${itemId} 的 supersede 链将形成环（指向 ${supersededByItemId}）`);
+    this.name = "ItemSupersedeCycleError";
+  }
 }
 
 /** Goal 已有 active 状态，不能新建。映射 409 GOAL_ALREADY_ACTIVE。 */
 export class GoalAlreadyActiveError extends Error {
- constructor(public readonly threadId: string) {
- super(`Thread ${threadId} 已有 active Goal`);
- this.name = "GoalAlreadyActiveError";
- }
+  constructor(public readonly threadId: string) {
+    super(`Thread ${threadId} 已有 active Goal`);
+    this.name = "GoalAlreadyActiveError";
+  }
 }
 
 /** ThreadRelation 已存在（同 parent/child/type）。映射 409 RELATION_CONFLICT。 */
 export class ThreadRelationConflictError extends Error {
- constructor(
- public readonly parentThreadId: string,
- public readonly childThreadId: string,
- public readonly relationType: ThreadRelationType,
- ) {
- super(`ThreadRelation 已存在：${parentThreadId} → ${childThreadId} (${relationType})`);
- this.name = "ThreadRelationConflictError";
- }
+  constructor(
+    public readonly parentThreadId: string,
+    public readonly childThreadId: string,
+    public readonly relationType: ThreadRelationType,
+  ) {
+    super(`ThreadRelation 已存在：${parentThreadId} → ${childThreadId} (${relationType})`);
+    this.name = "ThreadRelationConflictError";
+  }
 }
 
 /**
@@ -110,16 +110,16 @@ export class ThreadRelationConflictError extends Error {
  * 映射 409 EVENT_CURSOR_EXPIRED，携带最早可用 sequence，客户端重新读取 Item 快照后续订。
  */
 export class EventCursorExpiredError extends Error {
- constructor(
- public readonly streamId: string,
- public readonly requestedSequence: number,
- public readonly earliestAvailableSequence: number,
- ) {
- super(
- `Event 游标过期：stream ${streamId} 请求 sequence ${requestedSequence} 早于最早可用 ${earliestAvailableSequence}`,
- );
- this.name = "EventCursorExpiredError";
- }
+  constructor(
+    public readonly streamId: string,
+    public readonly requestedSequence: number,
+    public readonly earliestAvailableSequence: number,
+  ) {
+    super(
+      `Event 游标过期：stream ${streamId} 请求 sequence ${requestedSequence} 早于最早可用 ${earliestAvailableSequence}`,
+    );
+    this.name = "EventCursorExpiredError";
+  }
 }
 
 /**
@@ -129,16 +129,16 @@ export class EventCursorExpiredError extends Error {
  * 映射 409 EVENT_SEQUENCE_GAP，停止该流并等待，不猜测丢失事件。
  */
 export class EventSequenceGapError extends Error {
- constructor(
- public readonly streamId: string,
- public readonly expectedSequence: number,
- public readonly actualSequence: number,
- ) {
- super(
- `Event sequence 空洞：stream ${streamId} 期望 ${expectedSequence}，实际 ${actualSequence}`,
- );
- this.name = "EventSequenceGapError";
- }
+  constructor(
+    public readonly streamId: string,
+    public readonly expectedSequence: number,
+    public readonly actualSequence: number,
+  ) {
+    super(
+      `Event sequence 空洞：stream ${streamId} 期望 ${expectedSequence}，实际 ${actualSequence}`,
+    );
+    this.name = "EventSequenceGapError";
+  }
 }
 
 /**
@@ -148,17 +148,17 @@ export class EventSequenceGapError extends Error {
  * 写入 event_delivery_failure 表，按指数退避重试，超限进入 quarantined。
  */
 export class ProjectionFailureError extends Error {
- constructor(
- public readonly consumerName: string,
- public readonly eventId: string,
- public readonly failureClass: string,
- public readonly cause?: unknown,
- ) {
- super(
- `投影失败：consumer=${consumerName} event=${eventId} class=${failureClass}${cause instanceof Error ? ` cause=${cause.message}` : ""}`,
- );
- this.name = "ProjectionFailureError";
- }
+  constructor(
+    public readonly consumerName: string,
+    public readonly eventId: string,
+    public readonly failureClass: string,
+    public readonly cause?: unknown,
+  ) {
+    super(
+      `投影失败：consumer=${consumerName} event=${eventId} class=${failureClass}${cause instanceof Error ? ` cause=${cause.message}` : ""}`,
+    );
+    this.name = "ProjectionFailureError";
+  }
 }
 
 /**
@@ -169,10 +169,10 @@ export class ProjectionFailureError extends Error {
  * 映射 404 RESOURCE_NOT_FOUND（隐藏式，不泄露存在）。
  */
 export class PendingInputNotFoundError extends Error {
- constructor(public readonly pendingInputId: string) {
- super(`PendingInput 不存在或不可见：${pendingInputId}`);
- this.name = "PendingInputNotFoundError";
- }
+  constructor(public readonly pendingInputId: string) {
+    super(`PendingInput 不存在或不可见：${pendingInputId}`);
+    this.name = "PendingInputNotFoundError";
+  }
 }
 
 /**
@@ -182,14 +182,14 @@ export class PendingInputNotFoundError extends Error {
  * 映射 409 BUSINESS_CONSTRAINT_VIOLATION。
  */
 export class PendingInputNotPendingError extends Error {
- constructor(
- public readonly pendingInputId: string,
- public readonly currentState: PendingInputState,
- public readonly attemptedAction: string,
- ) {
- super(`PendingInput ${pendingInputId} 状态为 ${currentState}，不允许 ${attemptedAction}`);
- this.name = "PendingInputNotPendingError";
- }
+  constructor(
+    public readonly pendingInputId: string,
+    public readonly currentState: PendingInputState,
+    public readonly attemptedAction: string,
+  ) {
+    super(`PendingInput ${pendingInputId} 状态为 ${currentState}，不允许 ${attemptedAction}`);
+    this.name = "PendingInputNotPendingError";
+  }
 }
 
 /**
@@ -200,17 +200,17 @@ export class PendingInputNotPendingError extends Error {
  * 映射 409 BUSINESS_CONSTRAINT_VIOLATION。
  */
 export class PendingInputReorderConflictError extends Error {
- constructor(
- public readonly threadId: string,
- public readonly reason: "incomplete" | "extra",
- public readonly expectedIds: string[],
- public readonly actualIds: string[],
- ) {
- super(
- `Thread ${threadId} 重排冲突：${reason}（期望 ${expectedIds.length} 个，实际 ${actualIds.length} 个）`,
- );
- this.name = "PendingInputReorderConflictError";
- }
+  constructor(
+    public readonly threadId: string,
+    public readonly reason: "incomplete" | "extra",
+    public readonly expectedIds: string[],
+    public readonly actualIds: string[],
+  ) {
+    super(
+      `Thread ${threadId} 重排冲突：${reason}（期望 ${expectedIds.length} 个，实际 ${actualIds.length} 个）`,
+    );
+    this.name = "PendingInputReorderConflictError";
+  }
 }
 
 /**
@@ -220,14 +220,14 @@ export class PendingInputReorderConflictError extends Error {
  * 映射 412 ETAG_MISMATCH。
  */
 export class PendingInputVersionConflictError extends Error {
- constructor(
- public readonly pendingInputId: string,
- public readonly expected: number,
- public readonly actual: number,
- ) {
- super(`PendingInput ${pendingInputId} 版本冲突：期望 ${expected}，实际 ${actual}`);
- this.name = "PendingInputVersionConflictError";
- }
+  constructor(
+    public readonly pendingInputId: string,
+    public readonly expected: number,
+    public readonly actual: number,
+  ) {
+    super(`PendingInput ${pendingInputId} 版本冲突：期望 ${expected}，实际 ${actual}`);
+    this.name = "PendingInputVersionConflictError";
+  }
 }
 
 /**
@@ -238,13 +238,13 @@ export class PendingInputVersionConflictError extends Error {
  * 映射 409 TURN_REQUIRES_USER_ACTION。
  */
 export class TurnRequiresUserActionError extends Error {
- constructor(
- public readonly turnId: string,
- public readonly currentState: TurnState,
- ) {
- super(`Turn ${turnId} 状态为 ${currentState}，需解析对应 UserActionRequest，不能用 Steer 绕过`);
- this.name = "TurnRequiresUserActionError";
- }
+  constructor(
+    public readonly turnId: string,
+    public readonly currentState: TurnState,
+  ) {
+    super(`Turn ${turnId} 状态为 ${currentState}，需解析对应 UserActionRequest，不能用 Steer 绕过`);
+    this.name = "TurnRequiresUserActionError";
+  }
 }
 
 /**
@@ -254,13 +254,13 @@ export class TurnRequiresUserActionError extends Error {
  * 映射 409 BUSINESS_CONSTRAINT_VIOLATION。
  */
 export class ForkSourceTurnMismatchError extends Error {
- constructor(
- public readonly parentThreadId: string,
- public readonly sourceTurnId: string,
- ) {
- super(`Turn ${sourceTurnId} 不属于源 Thread ${parentThreadId}`);
- this.name = "ForkSourceTurnMismatchError";
- }
+  constructor(
+    public readonly parentThreadId: string,
+    public readonly sourceTurnId: string,
+  ) {
+    super(`Turn ${sourceTurnId} 不属于源 Thread ${parentThreadId}`);
+    this.name = "ForkSourceTurnMismatchError";
+  }
 }
 
 // ─── S09-C01 Child Thread / Delegate 错误 ──────────────────
@@ -273,15 +273,15 @@ export class ForkSourceTurnMismatchError extends Error {
  * 映射 409 INVOCATION_STATE_CONFLICT。
  */
 export class ParentInvocationNotActiveError extends Error {
- constructor(
- public readonly parentInvocationId: string,
- public readonly currentState: string,
- ) {
- super(
- `父 Invocation ${parentInvocationId} 状态为 ${currentState}，不允许 delegate（仅 running 可委派）`,
- );
- this.name = "ParentInvocationNotActiveError";
- }
+  constructor(
+    public readonly parentInvocationId: string,
+    public readonly currentState: string,
+  ) {
+    super(
+      `父 Invocation ${parentInvocationId} 状态为 ${currentState}，不允许 delegate（仅 running 可委派）`,
+    );
+    this.name = "ParentInvocationNotActiveError";
+  }
 }
 
 /**
@@ -292,13 +292,13 @@ export class ParentInvocationNotActiveError extends Error {
  * 映射 403 DELEGATION_NOT_ALLOWED。
  */
 export class DelegationNotAllowedError extends Error {
- constructor(
- public readonly parentAgentId: string,
- public readonly targetAgentId: string,
- ) {
- super(`Agent ${parentAgentId} 的 delegationPolicy 不允许向 Agent ${targetAgentId} 委派`);
- this.name = "DelegationNotAllowedError";
- }
+  constructor(
+    public readonly parentAgentId: string,
+    public readonly targetAgentId: string,
+  ) {
+    super(`Agent ${parentAgentId} 的 delegationPolicy 不允许向 Agent ${targetAgentId} 委派`);
+    this.name = "DelegationNotAllowedError";
+  }
 }
 
 /**
@@ -309,14 +309,14 @@ export class DelegationNotAllowedError extends Error {
  * 映射 409 DELEGATION_DEPTH_EXCEEDED。
  */
 export class DelegationDepthExceededError extends Error {
- constructor(
- public readonly parentThreadId: string,
- public readonly currentDepth: number,
- public readonly maxDepth: number,
- ) {
- super(`委派深度超限：parent=${parentThreadId} 当前深度=${currentDepth}，最大允许=${maxDepth}`);
- this.name = "DelegationDepthExceededError";
- }
+  constructor(
+    public readonly parentThreadId: string,
+    public readonly currentDepth: number,
+    public readonly maxDepth: number,
+  ) {
+    super(`委派深度超限：parent=${parentThreadId} 当前深度=${currentDepth}，最大允许=${maxDepth}`);
+    this.name = "DelegationDepthExceededError";
+  }
 }
 
 /**
@@ -327,16 +327,16 @@ export class DelegationDepthExceededError extends Error {
  * 映射 409 CHILD_BUDGET_EXCEEDED。
  */
 export class ChildBudgetExceededError extends Error {
- constructor(
- public readonly parentThreadId: string,
- public readonly budgetPolicy: Record<string, unknown>,
- public readonly reason: string,
- ) {
- super(
- `Child Thread 预算策略校验失败：parent=${parentThreadId} reason=${reason} budget=${JSON.stringify(budgetPolicy)}`,
- );
- this.name = "ChildBudgetExceededError";
- }
+  constructor(
+    public readonly parentThreadId: string,
+    public readonly budgetPolicy: Record<string, unknown>,
+    public readonly reason: string,
+  ) {
+    super(
+      `Child Thread 预算策略校验失败：parent=${parentThreadId} reason=${reason} budget=${JSON.stringify(budgetPolicy)}`,
+    );
+    this.name = "ChildBudgetExceededError";
+  }
 }
 
 /**
@@ -348,16 +348,16 @@ export class ChildBudgetExceededError extends Error {
  * 映射 409 CHILD_CONTEXT_NOT_ALLOWED。
  */
 export class ChildContextNotAllowedError extends Error {
- constructor(
- public readonly parentThreadId: string,
- public readonly deniedItemIds: string[],
- public readonly reason: string,
- ) {
- super(
- `Child Thread 上下文转移策略拒绝：parent=${parentThreadId} reason=${reason} itemIds=${deniedItemIds.join(",")}`,
- );
- this.name = "ChildContextNotAllowedError";
- }
+  constructor(
+    public readonly parentThreadId: string,
+    public readonly deniedItemIds: string[],
+    public readonly reason: string,
+  ) {
+    super(
+      `Child Thread 上下文转移策略拒绝：parent=${parentThreadId} reason=${reason} itemIds=${deniedItemIds.join(",")}`,
+    );
+    this.name = "ChildContextNotAllowedError";
+  }
 }
 
 /**
@@ -368,16 +368,16 @@ export class ChildContextNotAllowedError extends Error {
  * 映射 409 CHILD_THREAD_ALREADY_TERMINAL。
  */
 export class ChildThreadAlreadyTerminalError extends Error {
- constructor(
- public readonly relationId: string,
- public readonly childThreadId: string,
- public readonly relationState: string,
- ) {
- super(
- `Child Thread 关系 ${relationId}（child=${childThreadId}）已处于终态 ${relationState}，不能取消`,
- );
- this.name = "ChildThreadAlreadyTerminalError";
- }
+  constructor(
+    public readonly relationId: string,
+    public readonly childThreadId: string,
+    public readonly relationState: string,
+  ) {
+    super(
+      `Child Thread 关系 ${relationId}（child=${childThreadId}）已处于终态 ${relationState}，不能取消`,
+    );
+    this.name = "ChildThreadAlreadyTerminalError";
+  }
 }
 
 // ─── S09-C02 Child Thread 结果投影、取消终态与预算 ──────────
@@ -394,13 +394,13 @@ export class ChildThreadAlreadyTerminalError extends Error {
  * 映射 409 CHILD_THREAD_RESULT_PROJECTION_FAILED。
  */
 export class ChildThreadResultProjectionError extends Error {
- constructor(
- public readonly relationId: string,
- public readonly reason: string,
- ) {
- super(`Child Thread 结果投影失败：relation=${relationId} reason=${reason}`);
- this.name = "ChildThreadResultProjectionError";
- }
+  constructor(
+    public readonly relationId: string,
+    public readonly reason: string,
+  ) {
+    super(`Child Thread 结果投影失败：relation=${relationId} reason=${reason}`);
+    this.name = "ChildThreadResultProjectionError";
+  }
 }
 
 /**
@@ -413,13 +413,13 @@ export class ChildThreadResultProjectionError extends Error {
  * 映射 409 CHILD_THREAD_CANCELLATION_FINALIZE_FAILED。
  */
 export class ChildThreadCancellationFinalizeError extends Error {
- constructor(
- public readonly relationId: string,
- public readonly reason: string,
- ) {
- super(`Child Thread 取消终态落库失败：relation=${relationId} reason=${reason}`);
- this.name = "ChildThreadCancellationFinalizeError";
- }
+  constructor(
+    public readonly relationId: string,
+    public readonly reason: string,
+  ) {
+    super(`Child Thread 取消终态落库失败：relation=${relationId} reason=${reason}`);
+    this.name = "ChildThreadCancellationFinalizeError";
+  }
 }
 
 /**
@@ -435,24 +435,24 @@ export class ChildThreadCancellationFinalizeError extends Error {
  * 映射 409 CHILD_BUDGET_EXHAUSTED。
  */
 export class ChildThreadBudgetExhaustedError extends Error {
- constructor(
- public readonly relationId: string,
- public readonly budgetPolicy: Record<string, unknown>,
- public readonly budgetUsed: Record<string, unknown>,
- public readonly exceededField:
- | "tokens"
- | "cost"
- | "tool_calls"
- | "wall_clock_ms"
- | "child_count"
- | "sandbox_seconds"
- | "artifact_bytes",
- ) {
- super(
- `Child Thread 预算耗尽：relation=${relationId} field=${exceededField} policy=${JSON.stringify(budgetPolicy)} used=${JSON.stringify(budgetUsed)}`,
- );
- this.name = "ChildThreadBudgetExhaustedError";
- }
+  constructor(
+    public readonly relationId: string,
+    public readonly budgetPolicy: Record<string, unknown>,
+    public readonly budgetUsed: Record<string, unknown>,
+    public readonly exceededField:
+      | "tokens"
+      | "cost"
+      | "tool_calls"
+      | "wall_clock_ms"
+      | "child_count"
+      | "sandbox_seconds"
+      | "artifact_bytes",
+  ) {
+    super(
+      `Child Thread 预算耗尽：relation=${relationId} field=${exceededField} policy=${JSON.stringify(budgetPolicy)} used=${JSON.stringify(budgetUsed)}`,
+    );
+    this.name = "ChildThreadBudgetExhaustedError";
+  }
 }
 
 /**
@@ -463,15 +463,15 @@ export class ChildThreadBudgetExhaustedError extends Error {
  * 映射 409 INVOCATION_STATE_CONFLICT。
  */
 export class ChildInvocationNotTerminalError extends Error {
- constructor(
- public readonly invocationId: string,
- public readonly currentState: string,
- ) {
- super(
- `子 Invocation ${invocationId} 状态为 ${currentState}，未进入终态，不能投影结果或落库取消`,
- );
- this.name = "ChildInvocationNotTerminalError";
- }
+  constructor(
+    public readonly invocationId: string,
+    public readonly currentState: string,
+  ) {
+    super(
+      `子 Invocation ${invocationId} 状态为 ${currentState}，未进入终态，不能投影结果或落库取消`,
+    );
+    this.name = "ChildInvocationNotTerminalError";
+  }
 }
 
 // ─── S09-C03 Handoff 错误 ──────────────────────────────────
@@ -489,19 +489,19 @@ export class ChildInvocationNotTerminalError extends Error {
  * 映射 409 HANDOFF_VALIDATION_FAILED。
  */
 export class HandoffValidationError extends Error {
- constructor(
- public readonly reason: string,
- public readonly code?:
- | "SAME_AGENT"
- | "AGENT_NOT_AVAILABLE"
- | "THREAD_NOT_ACTIVE"
- | "INVOCATION_NOT_RUNNING"
- | "PURPOSE_MISMATCH"
- | "RESOLUTION_NOT_ALLOWED",
- ) {
- super(`Handoff 校验失败：${reason}`);
- this.name = "HandoffValidationError";
- }
+  constructor(
+    public readonly reason: string,
+    public readonly code?:
+      | "SAME_AGENT"
+      | "AGENT_NOT_AVAILABLE"
+      | "THREAD_NOT_ACTIVE"
+      | "INVOCATION_NOT_RUNNING"
+      | "PURPOSE_MISMATCH"
+      | "RESOLUTION_NOT_ALLOWED",
+  ) {
+    super(`Handoff 校验失败：${reason}`);
+    this.name = "HandoffValidationError";
+  }
 }
 
 /**
@@ -511,15 +511,15 @@ export class HandoffValidationError extends Error {
  * 映射 409 USER_ACTION_ALREADY_RESOLVED。
  */
 export class HandoffAlreadyResolvedError extends Error {
- public readonly currentState: string;
- public readonly requestId: string;
+  public readonly currentState: string;
+  public readonly requestId: string;
 
- constructor(requestId: string, currentState: string) {
- super(`Handoff 请求 ${requestId} 已解析或过期（currentState=${currentState}）`);
- this.name = "HandoffAlreadyResolvedError";
- this.currentState = currentState;
- this.requestId = requestId;
- }
+  constructor(requestId: string, currentState: string) {
+    super(`Handoff 请求 ${requestId} 已解析或过期（currentState=${currentState}）`);
+    this.name = "HandoffAlreadyResolvedError";
+    this.currentState = currentState;
+    this.requestId = requestId;
+  }
 }
 
 /**
@@ -530,14 +530,14 @@ export class HandoffAlreadyResolvedError extends Error {
  * 映射 412 ETAG_MISMATCH。
  */
 export class HandoffVersionConflictError extends Error {
- constructor(
- public readonly threadId: string,
- public readonly expected: number,
- public readonly actual: number,
- ) {
- super(`Handoff ${threadId} 版本冲突：期望 ${expected}，实际 ${actual}`);
- this.name = "HandoffVersionConflictError";
- }
+  constructor(
+    public readonly threadId: string,
+    public readonly expected: number,
+    public readonly actual: number,
+  ) {
+    super(`Handoff ${threadId} 版本冲突：期望 ${expected}，实际 ${actual}`);
+    this.name = "HandoffVersionConflictError";
+  }
 }
 
 // ─── S09-C07 并发 Workspace 与共享预算错误 ──────────────────
@@ -553,16 +553,16 @@ export class HandoffVersionConflictError extends Error {
  * 映射 409 WORKSPACE_WRITE_LOCK_CONFLICT。
  */
 export class WorkspaceWriteLockConflictError extends Error {
- constructor(
- public readonly workspaceBindingId: string,
- public readonly pathFingerprint: string,
- public readonly holderInvocationId: string,
- ) {
- super(
- `Workspace 写锁冲突：binding=${workspaceBindingId} path=${pathFingerprint} 已被 Invocation ${holderInvocationId} 持有`,
- );
- this.name = "WorkspaceWriteLockConflictError";
- }
+  constructor(
+    public readonly workspaceBindingId: string,
+    public readonly pathFingerprint: string,
+    public readonly holderInvocationId: string,
+  ) {
+    super(
+      `Workspace 写锁冲突：binding=${workspaceBindingId} path=${pathFingerprint} 已被 Invocation ${holderInvocationId} 持有`,
+    );
+    this.name = "WorkspaceWriteLockConflictError";
+  }
 }
 
 /**
@@ -571,10 +571,10 @@ export class WorkspaceWriteLockConflictError extends Error {
  * 映射 404 RESOURCE_NOT_FOUND（不泄露存在）。
  */
 export class WorkspaceWriteLockNotFoundError extends Error {
- constructor(public readonly lockId: string) {
- super(`Workspace 写锁不存在或不可见：${lockId}`);
- this.name = "WorkspaceWriteLockNotFoundError";
- }
+  constructor(public readonly lockId: string) {
+    super(`Workspace 写锁不存在或不可见：${lockId}`);
+    this.name = "WorkspaceWriteLockNotFoundError";
+  }
 }
 
 /**
@@ -583,14 +583,14 @@ export class WorkspaceWriteLockNotFoundError extends Error {
  * 映射 409 WORKSPACE_WRITE_LOCK_STATE_CONFLICT。
  */
 export class WorkspaceWriteLockStateError extends Error {
- constructor(
- public readonly lockId: string,
- public readonly currentState: string,
- public readonly expectedState: string,
- ) {
- super(`Workspace 写锁 ${lockId} 状态为 ${currentState}，期望 ${expectedState}，不允许当前操作`);
- this.name = "WorkspaceWriteLockStateError";
- }
+  constructor(
+    public readonly lockId: string,
+    public readonly currentState: string,
+    public readonly expectedState: string,
+  ) {
+    super(`Workspace 写锁 ${lockId} 状态为 ${currentState}，期望 ${expectedState}，不允许当前操作`);
+    this.name = "WorkspaceWriteLockStateError";
+  }
 }
 
 /**
@@ -604,15 +604,15 @@ export class WorkspaceWriteLockStateError extends Error {
  * 映射 409 WORKSPACE_OVERLAY_MERGE_CONFLICT。
  */
 export class WorkspaceOverlayMergeConflictError extends Error {
- constructor(
- public readonly overlayId: string,
- public readonly conflictIds: string[],
- ) {
- super(
- `Workspace Overlay ${overlayId} 合并冲突：conflicts=${conflictIds.join(",")} 已报告，等待父 Agent 决策`,
- );
- this.name = "WorkspaceOverlayMergeConflictError";
- }
+  constructor(
+    public readonly overlayId: string,
+    public readonly conflictIds: string[],
+  ) {
+    super(
+      `Workspace Overlay ${overlayId} 合并冲突：conflicts=${conflictIds.join(",")} 已报告，等待父 Agent 决策`,
+    );
+    this.name = "WorkspaceOverlayMergeConflictError";
+  }
 }
 
 /**
@@ -621,10 +621,10 @@ export class WorkspaceOverlayMergeConflictError extends Error {
  * 映射 404 RESOURCE_NOT_FOUND（不泄露存在）。
  */
 export class WorkspaceOverlayNotFoundError extends Error {
- constructor(public readonly overlayId: string) {
- super(`Workspace Overlay 不存在或不可见：${overlayId}`);
- this.name = "WorkspaceOverlayNotFoundError";
- }
+  constructor(public readonly overlayId: string) {
+    super(`Workspace Overlay 不存在或不可见：${overlayId}`);
+    this.name = "WorkspaceOverlayNotFoundError";
+  }
 }
 
 /**
@@ -633,16 +633,16 @@ export class WorkspaceOverlayNotFoundError extends Error {
  * 映射 409 WORKSPACE_OVERLAY_STATE_CONFLICT。
  */
 export class WorkspaceOverlayStateError extends Error {
- constructor(
- public readonly overlayId: string,
- public readonly currentState: string,
- public readonly expectedState: string,
- ) {
- super(
- `Workspace Overlay ${overlayId} 状态为 ${currentState}，期望 ${expectedState}，不允许当前操作`,
- );
- this.name = "WorkspaceOverlayStateError";
- }
+  constructor(
+    public readonly overlayId: string,
+    public readonly currentState: string,
+    public readonly expectedState: string,
+  ) {
+    super(
+      `Workspace Overlay ${overlayId} 状态为 ${currentState}，期望 ${expectedState}，不允许当前操作`,
+    );
+    this.name = "WorkspaceOverlayStateError";
+  }
 }
 
 /**
@@ -657,23 +657,23 @@ export class WorkspaceOverlayStateError extends Error {
  * 映射 422 SHARED_BUDGET_EXHAUSTED。
  */
 export class SharedBudgetExhaustedError extends Error {
- constructor(
- public readonly parentThreadId: string,
- public readonly exceededField:
- | "tokens"
- | "cost"
- | "tool_calls"
- | "wall_clock_ms"
- | "child_count"
- | "sandbox_seconds"
- | "artifact_bytes",
- public readonly totalUsed: number,
- public readonly maxLimit: number,
- public readonly contributingRelations: string[],
- ) {
- super(
- `共享父任务总预算耗尽：parent=${parentThreadId} field=${exceededField} used=${totalUsed} > max=${maxLimit} contributors=${contributingRelations.join(",")}`,
- );
- this.name = "SharedBudgetExhaustedError";
- }
+  constructor(
+    public readonly parentThreadId: string,
+    public readonly exceededField:
+      | "tokens"
+      | "cost"
+      | "tool_calls"
+      | "wall_clock_ms"
+      | "child_count"
+      | "sandbox_seconds"
+      | "artifact_bytes",
+    public readonly totalUsed: number,
+    public readonly maxLimit: number,
+    public readonly contributingRelations: string[],
+  ) {
+    super(
+      `共享父任务总预算耗尽：parent=${parentThreadId} field=${exceededField} used=${totalUsed} > max=${maxLimit} contributors=${contributingRelations.join(",")}`,
+    );
+    this.name = "SharedBudgetExhaustedError";
+  }
 }

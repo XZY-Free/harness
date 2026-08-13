@@ -33,86 +33,86 @@ import { listActiveActionBindingsForUser } from "@/lib/identity/role-action-quer
 
 /** 8 个一级菜单 ID（与 nav.tsx ITEMS 顺序一致）。 */
 export const STUDIO_NAV_IDS = [
- "agents",
- "capabilities",
- "conversations",
- "runtime",
- "observability",
- "security",
- "operations",
- "settings",
+  "agents",
+  "capabilities",
+  "conversations",
+  "runtime",
+  "observability",
+  "security",
+  "operations",
+  "settings",
 ] as const;
 
 export type StudioNavId = (typeof STUDIO_NAV_IDS)[number];
 
 /** 8 个一级菜单 → 关联的 ActionCode（任意匹配即可见）。 */
 export const NAV_ACTION_MAPPING: Record<StudioNavId, readonly ActionCode[]> = {
- // 智能体：Agent / Revision / Route / 发布
- agents: ["agent.revision.create", "agent.publish", "route.update"],
- // 能力与知识：Skill / Tool / Knowledge / Connection / 风险变化
- capabilities: [
- "skill.create",
- "tool.create",
- "tool.schema.publish",
- "tool.provider.create",
- "connection.create",
- "knowledge.base.create",
- "knowledge.document.create",
- "capability.review",
- ],
- // 会话与协作：Thread / Turn / Job 排障（取消 / 重试 / 隔离）
- conversations: ["job.cancel", "job.retry", "memory.review", "event.quarantine.resolve"],
- // Runtime 与环境：RuntimeRevision / Environment / Desktop
- runtime: ["runtime.publish"],
- // 观测与评测：Trace / Evaluation / ArtifactAttestation
- observability: ["artifact.attestation.verify", "event.quarantine.resolve"],
- // 安全与审计：Policy / Credential / Legal Hold / Deletion / Audit 导出
- security: [
- "policy.publish",
- "credential.bind",
- "credential.revoke",
- "legal_hold.manage",
- "deletion.request",
- "audit.export",
- ],
- // 运营：成本 / 容量 / 配额（暂未定义专门 action code，归并到 audit.export）
- operations: ["audit.export"],
- // 平台设置：组织 / 模型供应方 / 保留策略（暂未定义专门 action code，归并到 policy.publish）
- settings: ["policy.publish"],
+  // 智能体：Agent / Revision / Route / 发布
+  agents: ["agent.revision.create", "agent.publish", "route.update"],
+  // 能力与知识：Skill / Tool / Knowledge / Connection / 风险变化
+  capabilities: [
+    "skill.create",
+    "tool.create",
+    "tool.schema.publish",
+    "tool.provider.create",
+    "connection.create",
+    "knowledge.base.create",
+    "knowledge.document.create",
+    "capability.review",
+  ],
+  // 会话与协作：Thread / Turn / Job 排障（取消 / 重试 / 隔离）
+  conversations: ["job.cancel", "job.retry", "memory.review", "event.quarantine.resolve"],
+  // Runtime 与环境：RuntimeRevision / Environment / Desktop
+  runtime: ["runtime.publish"],
+  // 观测与评测：Trace / Evaluation / ArtifactAttestation
+  observability: ["artifact.attestation.verify", "event.quarantine.resolve"],
+  // 安全与审计：Policy / Credential / Legal Hold / Deletion / Audit 导出
+  security: [
+    "policy.publish",
+    "credential.bind",
+    "credential.revoke",
+    "legal_hold.manage",
+    "deletion.request",
+    "audit.export",
+  ],
+  // 运营：成本 / 容量 / 配额（暂未定义专门 action code，归并到 audit.export）
+  operations: ["audit.export"],
+  // 平台设置：组织 / 模型供应方 / 保留策略（暂未定义专门 action code，归并到 policy.publish）
+  settings: ["policy.publish"],
 };
 
 /** 菜单可见性结果：8 个 bool。 */
 export interface StudioNavVisibility {
- readonly agents: boolean;
- readonly capabilities: boolean;
- readonly conversations: boolean;
- readonly runtime: boolean;
- readonly observability: boolean;
- readonly security: boolean;
- readonly operations: boolean;
- readonly settings: boolean;
+  readonly agents: boolean;
+  readonly capabilities: boolean;
+  readonly conversations: boolean;
+  readonly runtime: boolean;
+  readonly observability: boolean;
+  readonly security: boolean;
+  readonly operations: boolean;
+  readonly settings: boolean;
 }
 
 const ALL_VISIBLE: StudioNavVisibility = {
- agents: true,
- capabilities: true,
- conversations: true,
- runtime: true,
- observability: true,
- security: true,
- operations: true,
- settings: true,
+  agents: true,
+  capabilities: true,
+  conversations: true,
+  runtime: true,
+  observability: true,
+  security: true,
+  operations: true,
+  settings: true,
 };
 
 const ALL_HIDDEN: StudioNavVisibility = {
- agents: false,
- capabilities: false,
- conversations: false,
- runtime: false,
- observability: false,
- security: false,
- operations: false,
- settings: false,
+  agents: false,
+  capabilities: false,
+  conversations: false,
+  runtime: false,
+  observability: false,
+  security: false,
+  operations: false,
+  settings: false,
 };
 
 /**
@@ -125,44 +125,44 @@ const ALL_HIDDEN: StudioNavVisibility = {
  * 4. 任何异常 → 全部隐藏（fail-closed）。
  */
 export async function computeStudioNavVisibility(
- principal: Principal,
+  principal: Principal,
 ): Promise<StudioNavVisibility> {
- // dev 模式 + 默认用户 → 全部可见（与 lib/rbac devOpen 行为一致）
- if (authConfig.mode === "dev" && principal.externalSubject === DEFAULT_USER_ID) {
- return ALL_VISIBLE;
- }
+  // dev 模式 + 默认用户 → 全部可见（与 lib/rbac devOpen 行为一致）
+  if (authConfig.mode === "dev" && principal.externalSubject === DEFAULT_USER_ID) {
+    return ALL_VISIBLE;
+  }
 
- try {
- const bindings = await listActiveActionBindingsForUser(
- principal.tenantId,
- principal.userIdentityId,
- );
- const allowedActions: ReadonlySet<string> = new Set(bindings.map((b) => b.actionCode));
+  try {
+    const bindings = await listActiveActionBindingsForUser(
+      principal.tenantId,
+      principal.userIdentityId,
+    );
+    const allowedActions: ReadonlySet<string> = new Set(bindings.map((b) => b.actionCode));
 
- // 没有任何 action 绑定 → 全部隐藏（fail-closed）
- if (allowedActions.size === 0) {
- return ALL_HIDDEN;
- }
+    // 没有任何 action 绑定 → 全部隐藏（fail-closed）
+    if (allowedActions.size === 0) {
+      return ALL_HIDDEN;
+    }
 
- const result: Record<StudioNavId, boolean> = {
- agents: false,
- capabilities: false,
- conversations: false,
- runtime: false,
- observability: false,
- security: false,
- operations: false,
- settings: false,
- };
- for (const id of STUDIO_NAV_IDS) {
- const requiredActions = NAV_ACTION_MAPPING[id];
- result[id] = requiredActions.some((action) => allowedActions.has(action));
- }
- return result;
- } catch {
- // 查询失败 fail-closed，所有菜单隐藏
- return ALL_HIDDEN;
- }
+    const result: Record<StudioNavId, boolean> = {
+      agents: false,
+      capabilities: false,
+      conversations: false,
+      runtime: false,
+      observability: false,
+      security: false,
+      operations: false,
+      settings: false,
+    };
+    for (const id of STUDIO_NAV_IDS) {
+      const requiredActions = NAV_ACTION_MAPPING[id];
+      result[id] = requiredActions.some((action) => allowedActions.has(action));
+    }
+    return result;
+  } catch {
+    // 查询失败 fail-closed，所有菜单隐藏
+    return ALL_HIDDEN;
+  }
 }
 
 /**
@@ -172,11 +172,11 @@ export async function computeStudioNavVisibility(
  * 写操作仍需调用 requireActionScope。
  */
 export async function isNavVisible(principal: Principal, navId: StudioNavId): Promise<boolean> {
- const visibility = await computeStudioNavVisibility(principal);
- return visibility[navId];
+  const visibility = await computeStudioNavVisibility(principal);
+  return visibility[navId];
 }
 
 /** 调试用：返回所有合法 ActionCode（仅供测试与文档）。 */
 export function getAllKnownActionCodes(): readonly ActionCode[] {
- return ACTION_CODES;
+  return ACTION_CODES;
 }

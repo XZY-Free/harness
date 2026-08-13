@@ -2,11 +2,11 @@
 
 import { DesktopBrowserSurface } from "@/components/desktop/desktop-browser-surface";
 import { Button } from "@/components/ui/button";
-import { deriveTaskStatus } from "@/lib/client/derive-task-status";
 import { FileEditor } from "@/components/workspace-panel/file-editor";
 import { FileTree } from "@/components/workspace-panel/file-tree";
-import { cn } from "@/lib/utils";
+import { deriveTaskStatus } from "@/lib/client/derive-task-status";
 import type { ClientGoal, ClientItem, ClientTurn } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 import {
   CheckCircle2,
   ChevronLeft,

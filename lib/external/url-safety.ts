@@ -16,25 +16,25 @@ import { isIP } from "node:net";
 
 /** 内网 / 元数据地址 SSRF 防护:命中即拒绝。 */
 export function isInternalHost(host: string): boolean {
- const h = host.toLowerCase();
- if (h === "localhost" || h === "::1") return true;
- // P2-9: IPv4-mapped IPv6 (::ffff:1.2.3.4) → 提取 IPv4 部分校验,防绕过
- const mapped = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
- if (mapped && isInternalHost(mapped[1] as string)) return true;
- // P2-9: 十六进制 IP(0x7f000001 = 127.0.0.1)→ 潜在内网,拒
- if (/^0x[0-9a-f]+$/.test(h)) return true;
- if (
- h.startsWith("127.") ||
- h.startsWith("10.") ||
- h.startsWith("192.168.") ||
- h.startsWith("169.254.") ||
- h.startsWith("0.")
- ) {
- return true;
- }
- if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
- if (h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) return true;
- return false;
+  const h = host.toLowerCase();
+  if (h === "localhost" || h === "::1") return true;
+  // P2-9: IPv4-mapped IPv6 (::ffff:1.2.3.4) → 提取 IPv4 部分校验,防绕过
+  const mapped = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped && isInternalHost(mapped[1] as string)) return true;
+  // P2-9: 十六进制 IP(0x7f000001 = 127.0.0.1)→ 潜在内网,拒
+  if (/^0x[0-9a-f]+$/.test(h)) return true;
+  if (
+    h.startsWith("127.") ||
+    h.startsWith("10.") ||
+    h.startsWith("192.168.") ||
+    h.startsWith("169.254.") ||
+    h.startsWith("0.")
+  ) {
+    return true;
+  }
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) return true;
+  return false;
 }
 
 /**
@@ -42,26 +42,26 @@ export function isInternalHost(host: string): boolean {
  * 非法 URL(无法解析)→ false。
  */
 export function isSafeExternalUrl(url: string): boolean {
- let u: URL;
- try {
- u = new URL(url);
- } catch {
- return false;
- }
- if (u.protocol !== "http:" && u.protocol !== "https:") return false;
- const host = u.hostname;
- if (!host) return false;
- if (isInternalHost(host)) return false;
- return true;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname;
+  if (!host) return false;
+  if (isInternalHost(host)) return false;
+  return true;
 }
 
 /**
  * 断言外部 URL 安全,不安全抛 Error。供 rawFetch / MCP client / CI/CD fetch 入口调用。
  */
 export function assertSafeExternalUrl(url: string, label = "url"): void {
- if (!isSafeExternalUrl(url)) {
- throw new Error(`${label} 不安全(协议非 http/https 或命中内网/元数据):${url}`);
- }
+  if (!isSafeExternalUrl(url)) {
+    throw new Error(`${label} 不安全(协议非 http/https 或命中内网/元数据):${url}`);
+  }
 }
 
 /**
@@ -79,18 +79,18 @@ export function assertSafeExternalUrl(url: string, label = "url"): void {
  * 当前 fetch/MCP SDK 不易注入直连 IP;本轮先收口主要风险。
  */
 export async function assertSafeExternalUrlResolved(url: string, label = "url"): Promise<void> {
- assertSafeExternalUrl(url, label);
- const host = new URL(url).hostname;
- if (isIP(host) !== 0) return; // IP 字面量已由 isSafeExternalUrl 校验
- const [ipv4, ipv6] = await Promise.all([
- resolve4(host).catch(() => [] as string[]),
- resolve6(host).catch(() => [] as string[]),
- ]);
- for (const ip of [...ipv4, ...ipv6]) {
- if (isInternalHost(ip)) {
- throw new Error(`${label} 域名 ${host} 解析到内网/元数据 IP ${ip}(DNS rebinding):${url}`);
- }
- }
+  assertSafeExternalUrl(url, label);
+  const host = new URL(url).hostname;
+  if (isIP(host) !== 0) return; // IP 字面量已由 isSafeExternalUrl 校验
+  const [ipv4, ipv6] = await Promise.all([
+    resolve4(host).catch(() => [] as string[]),
+    resolve6(host).catch(() => [] as string[]),
+  ]);
+  for (const ip of [...ipv4, ...ipv6]) {
+    if (isInternalHost(ip)) {
+      throw new Error(`${label} 域名 ${host} 解析到内网/元数据 IP ${ip}(DNS rebinding):${url}`);
+    }
+  }
 }
 
 /**
@@ -103,25 +103,25 @@ export async function assertSafeExternalUrlResolved(url: string, label = "url"):
  * - file:// 与其它协议 → 直接拒绝。
  */
 export function isSafeGitRemoteUrl(url: string): boolean {
- if (!url) return false;
- // SCP 语法:git@host:path(无协议头,首段含 @ 与结尾 :)
- const scp = url.match(/^[^@:]+@([^:/]+):/);
- if (scp) {
- const host = scp[1];
- return !!host && !isInternalHost(host);
- }
- // ssh:// 形式
- if (url.startsWith("ssh://")) {
- try {
- const u = new URL(url);
- const host = u.hostname;
- return !!host && !isInternalHost(host);
- } catch {
- return false;
- }
- }
- // http/https(含 userinfo 形式由 new URL 统一解析)
- return isSafeExternalUrl(url);
+  if (!url) return false;
+  // SCP 语法:git@host:path(无协议头,首段含 @ 与结尾 :)
+  const scp = url.match(/^[^@:]+@([^:/]+):/);
+  if (scp) {
+    const host = scp[1];
+    return !!host && !isInternalHost(host);
+  }
+  // ssh:// 形式
+  if (url.startsWith("ssh://")) {
+    try {
+      const u = new URL(url);
+      const host = u.hostname;
+      return !!host && !isInternalHost(host);
+    } catch {
+      return false;
+    }
+  }
+  // http/https(含 userinfo 形式由 new URL 统一解析)
+  return isSafeExternalUrl(url);
 }
 
 /**
@@ -129,7 +129,7 @@ export function isSafeGitRemoteUrl(url: string): boolean {
  * 防 owner 把工作区推到 file:/// 或内网/元数据端点(SSRF + 宿主文件系统写入)。
  */
 export function assertSafeGitRemoteUrl(url: string, label = "git remote url"): void {
- if (!isSafeGitRemoteUrl(url)) {
- throw new Error(`${label} 不安全(协议非法或命中 file:///内网/元数据):${url}`);
- }
+  if (!isSafeGitRemoteUrl(url)) {
+    throw new Error(`${label} 不安全(协议非法或命中 file:///内网/元数据):${url}`);
+  }
 }

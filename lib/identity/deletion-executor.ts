@@ -28,37 +28,37 @@
  */
 import type { AuditActor } from "@/lib/identity/audit";
 import {
- type DeletionRequestSummary,
- completeDeletionStep,
- computeRequestSummary,
- deriveTerminalStateFromSteps,
- failDeletionStep,
- getDeletionRequestById,
- listDeletionSteps,
- listRunnableSteps,
- markStepRetained,
- markStepRunning,
- updateDeletionRequestState,
+  type DeletionRequestSummary,
+  completeDeletionStep,
+  computeRequestSummary,
+  deriveTerminalStateFromSteps,
+  failDeletionStep,
+  getDeletionRequestById,
+  listDeletionSteps,
+  listRunnableSteps,
+  markStepRetained,
+  markStepRunning,
+  updateDeletionRequestState,
 } from "@/lib/identity/deletion-request-queries";
 import { DeletionStoreError } from "@/lib/identity/deletion-store-adapter";
 import { getDeletionStoreAdapter } from "@/lib/identity/deletion-store-config";
 import type {
- DeletionRequest,
- DeletionRequestState,
- DeletionStep,
+  DeletionRequest,
+  DeletionRequestState,
+  DeletionStep,
 } from "@/lib/persistence/schema/deletion-request";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
 /** 删除执行器错误。 */
 export class DeletionExecutorError extends Error {
- constructor(
- public readonly code: "request_not_found" | "illegal_state_for_execution" | "no_steps_planned",
- message: string,
- ) {
- super(message);
- this.name = "DeletionExecutorError";
- }
+  constructor(
+    public readonly code: "request_not_found" | "illegal_state_for_execution" | "no_steps_planned",
+    message: string,
+  ) {
+    super(message);
+    this.name = "DeletionExecutorError";
+  }
 }
 
 // ─── 可执行状态集合 ────────────────────────────────────────
@@ -73,30 +73,30 @@ export class DeletionExecutorError extends Error {
  * 终态（completed/failed/cancelled）不可执行，抛 illegal_state_for_execution。
  */
 const EXECUTABLE_REQUEST_STATES: ReadonlySet<DeletionRequestState> = new Set([
- "planning",
- "blocked_by_hold",
- "partial",
- "deleting",
+  "planning",
+  "blocked_by_hold",
+  "partial",
+  "deleting",
 ]);
 
 // ─── 执行结果 ──────────────────────────────────────────────
 
 /** executor 执行结果（供 route 构建响应 + 测试断言）。 */
 export interface DeletionExecutionResult {
- /** 最终请求行（含状态机推进后的 state）。 */
- request: DeletionRequest;
- /** 全部 steps（按 storeType, subjectRef 排序）。 */
- steps: DeletionStep[];
- /** 请求汇总（从 steps 派生）。 */
- summary: DeletionRequestSummary;
- /** 本次执行的 step 数（不含幂等跳过的 completed/retained/skipped/blocked）。 */
- executedSteps: number;
- /** 本次失败的 step 数（含可重试与不可重试）。 */
- failedSteps: number;
- /** 是否含不可重试失败（影响终态：保留 partial 不转 completed）。 */
- hasNonRetryableFailure: boolean;
- /** 派生的终态（null 表示未派生，保持 deleting）。 */
- derivedTerminalState: DeletionRequestState | null;
+  /** 最终请求行（含状态机推进后的 state）。 */
+  request: DeletionRequest;
+  /** 全部 steps（按 storeType, subjectRef 排序）。 */
+  steps: DeletionStep[];
+  /** 请求汇总（从 steps 派生）。 */
+  summary: DeletionRequestSummary;
+  /** 本次执行的 step 数（不含幂等跳过的 completed/retained/skipped/blocked）。 */
+  executedSteps: number;
+  /** 本次失败的 step 数（含可重试与不可重试）。 */
+  failedSteps: number;
+  /** 是否含不可重试失败（影响终态：保留 partial 不转 completed）。 */
+  hasNonRetryableFailure: boolean;
+  /** 派生的终态（null 表示未派生，保持 deleting）。 */
+  derivedTerminalState: DeletionRequestState | null;
 }
 
 // ─── 执行入口 ──────────────────────────────────────────────
@@ -125,144 +125,144 @@ export interface DeletionExecutionResult {
  * @throws DeletionRequestError 状态机非法转移（由 updateDeletionRequestState 抛出）
  */
 export async function executeDeletionRequest(params: {
- tenantId: string;
- /** 删除请求 id（DeletionRequest.id）。 */
- deletionRequestId: string;
- actor: AuditActor;
- /** HTTP X-Request-ID，用于审计关联（可选）。 */
- requestId?: string;
+  tenantId: string;
+  /** 删除请求 id（DeletionRequest.id）。 */
+  deletionRequestId: string;
+  actor: AuditActor;
+  /** HTTP X-Request-ID，用于审计关联（可选）。 */
+  requestId?: string;
 }): Promise<DeletionExecutionResult> {
- const { tenantId, deletionRequestId, actor, requestId } = params;
+  const { tenantId, deletionRequestId, actor, requestId } = params;
 
- // 1. 查询请求
- let request = await getDeletionRequestById(tenantId, deletionRequestId);
- if (!request) {
- throw new DeletionExecutorError(
- "request_not_found",
- `删除请求不存在（id=${deletionRequestId}）`,
- );
- }
+  // 1. 查询请求
+  let request = await getDeletionRequestById(tenantId, deletionRequestId);
+  if (!request) {
+    throw new DeletionExecutorError(
+      "request_not_found",
+      `删除请求不存在（id=${deletionRequestId}）`,
+    );
+  }
 
- // 2. 校验状态可执行
- if (!EXECUTABLE_REQUEST_STATES.has(request.requestState)) {
- throw new DeletionExecutorError(
- "illegal_state_for_execution",
- `删除请求状态不可执行（state=${request.requestState}，id=${deletionRequestId}）`,
- );
- }
+  // 2. 校验状态可执行
+  if (!EXECUTABLE_REQUEST_STATES.has(request.requestState)) {
+    throw new DeletionExecutorError(
+      "illegal_state_for_execution",
+      `删除请求状态不可执行（state=${request.requestState}，id=${deletionRequestId}）`,
+    );
+  }
 
- // 3. 非 deleting 状态先转移到 deleting（写审计 before/after）
- if (request.requestState !== "deleting") {
- request = await updateDeletionRequestState({
- tenantId,
- id: deletionRequestId,
- nextState: "deleting",
- actor,
- reason: `执行器启动：${request.requestState} → deleting`,
- requestId,
- });
- }
+  // 3. 非 deleting 状态先转移到 deleting（写审计 before/after）
+  if (request.requestState !== "deleting") {
+    request = await updateDeletionRequestState({
+      tenantId,
+      id: deletionRequestId,
+      nextState: "deleting",
+      actor,
+      reason: `执行器启动：${request.requestState} → deleting`,
+      requestId,
+    });
+  }
 
- // 4. 查询 runnable steps（pending + failed 可重试）
- const runnableSteps = await listRunnableSteps(tenantId, deletionRequestId);
+  // 4. 查询 runnable steps（pending + failed 可重试）
+  const runnableSteps = await listRunnableSteps(tenantId, deletionRequestId);
 
- // 5. 逐个执行（顺序执行，避免并发冲突；存储 Adapter 内部可并行优化但不在此层）
- let executedCount = 0;
- let failedCount = 0;
- let hasNonRetryable = false;
+  // 5. 逐个执行（顺序执行，避免并发冲突；存储 Adapter 内部可并行优化但不在此层）
+  let executedCount = 0;
+  let failedCount = 0;
+  let hasNonRetryable = false;
 
- for (const step of runnableSteps) {
- // markStepRunning 幂等：pending/failed → running + attemptCount+1；
- // 其他状态（completed/retained/skipped/blocked/running）原样返回，跳过执行。
- const runningStep = await markStepRunning({
- tenantId,
- stepId: step.id,
- });
+  for (const step of runnableSteps) {
+    // markStepRunning 幂等：pending/failed → running + attemptCount+1；
+    // 其他状态（completed/retained/skipped/blocked/running）原样返回，跳过执行。
+    const runningStep = await markStepRunning({
+      tenantId,
+      stepId: step.id,
+    });
 
- if (runningStep.stepState !== "running") {
- // 已完成/保留/跳过/阻塞的 step 不重复执行（幂等）
- continue;
- }
+    if (runningStep.stepState !== "running") {
+      // 已完成/保留/跳过/阻塞的 step 不重复执行（幂等）
+      continue;
+    }
 
- executedCount += 1;
+    executedCount += 1;
 
- // 调用存储 Adapter（fail-closed：未注入的 Adapter 抛 DeletionStoreError retryable=true）
- const adapter = getDeletionStoreAdapter(step.storeType);
- try {
- const result = await adapter.delete({
- tenantId,
- subjectType: request.subjectType,
- subjectRef: step.subjectRef,
- requestId,
- });
+    // 调用存储 Adapter（fail-closed：未注入的 Adapter 抛 DeletionStoreError retryable=true）
+    const adapter = getDeletionStoreAdapter(step.storeType);
+    try {
+      const result = await adapter.delete({
+        tenantId,
+        subjectType: request.subjectType,
+        subjectRef: step.subjectRef,
+        requestId,
+      });
 
- if (result.retained) {
- // 共享资源保留（不删除，记录原因）
- await markStepRetained({
- tenantId,
- stepId: step.id,
- reason: result.retainReason ?? "共享资源保留",
- });
- } else {
- // 完成步骤（completeDeletionStep 强制非空 evidenceRef）
- await completeDeletionStep({
- tenantId,
- stepId: step.id,
- evidenceRef: result.evidenceRef,
- });
- }
- } catch (err) {
- failedCount += 1;
- const isRetryable = err instanceof DeletionStoreError ? err.retryable : true;
- if (!isRetryable) {
- hasNonRetryable = true;
- }
- const failureReason = err instanceof Error ? err.message : String(err);
- await failDeletionStep({
- tenantId,
- stepId: step.id,
- failureReason,
- });
- }
- }
+      if (result.retained) {
+        // 共享资源保留（不删除，记录原因）
+        await markStepRetained({
+          tenantId,
+          stepId: step.id,
+          reason: result.retainReason ?? "共享资源保留",
+        });
+      } else {
+        // 完成步骤（completeDeletionStep 强制非空 evidenceRef）
+        await completeDeletionStep({
+          tenantId,
+          stepId: step.id,
+          evidenceRef: result.evidenceRef,
+        });
+      }
+    } catch (err) {
+      failedCount += 1;
+      const isRetryable = err instanceof DeletionStoreError ? err.retryable : true;
+      if (!isRetryable) {
+        hasNonRetryable = true;
+      }
+      const failureReason = err instanceof Error ? err.message : String(err);
+      await failDeletionStep({
+        tenantId,
+        stepId: step.id,
+        failureReason,
+      });
+    }
+  }
 
- // 6. 查询全部 steps，派生终态
- const allSteps = await listDeletionSteps(tenantId, deletionRequestId);
- if (allSteps.length === 0) {
- // 防御性检查：executor 被调用时 planner 应已生成 steps。
- // 空 steps 通常意味着 route 在 blocked 时错误地调用了 executor。
- throw new DeletionExecutorError(
- "no_steps_planned",
- `删除请求无规划步骤（id=${deletionRequestId}）：executor 应在 planner 生成 steps 后调用`,
- );
- }
- const summary = computeRequestSummary(allSteps);
- const derivedTerminalState = deriveTerminalStateFromSteps(allSteps);
+  // 6. 查询全部 steps，派生终态
+  const allSteps = await listDeletionSteps(tenantId, deletionRequestId);
+  if (allSteps.length === 0) {
+    // 防御性检查：executor 被调用时 planner 应已生成 steps。
+    // 空 steps 通常意味着 route 在 blocked 时错误地调用了 executor。
+    throw new DeletionExecutorError(
+      "no_steps_planned",
+      `删除请求无规划步骤（id=${deletionRequestId}）：executor 应在 planner 生成 steps 后调用`,
+    );
+  }
+  const summary = computeRequestSummary(allSteps);
+  const derivedTerminalState = deriveTerminalStateFromSteps(allSteps);
 
- // 7. 派生到终态时转移状态机（deleting → completed/partial）
- // - 全 completed/retained/skipped → completed
- // - 含 failed 且无 blocked/pending/running → partial（可重试）
- // - 含 blocked/pending/running → 保持 deleting（不自动终态）
- if (derivedTerminalState !== null) {
- request = await updateDeletionRequestState({
- tenantId,
- id: deletionRequestId,
- nextState: derivedTerminalState,
- actor,
- reason: `执行器完成：deleting → ${derivedTerminalState}`,
- requestId,
- });
- }
+  // 7. 派生到终态时转移状态机（deleting → completed/partial）
+  // - 全 completed/retained/skipped → completed
+  // - 含 failed 且无 blocked/pending/running → partial（可重试）
+  // - 含 blocked/pending/running → 保持 deleting（不自动终态）
+  if (derivedTerminalState !== null) {
+    request = await updateDeletionRequestState({
+      tenantId,
+      id: deletionRequestId,
+      nextState: derivedTerminalState,
+      actor,
+      reason: `执行器完成：deleting → ${derivedTerminalState}`,
+      requestId,
+    });
+  }
 
- return {
- request,
- steps: allSteps,
- summary,
- executedSteps: executedCount,
- failedSteps: failedCount,
- hasNonRetryableFailure: hasNonRetryable,
- derivedTerminalState,
- };
+  return {
+    request,
+    steps: allSteps,
+    summary,
+    executedSteps: executedCount,
+    failedSteps: failedCount,
+    hasNonRetryableFailure: hasNonRetryable,
+    derivedTerminalState,
+  };
 }
 
 // ─── 重试入口（便捷封装） ──────────────────────────────────
@@ -276,26 +276,26 @@ export async function executeDeletionRequest(params: {
  * @throws DeletionExecutorError 请求不存在或非 partial/deleting 状态
  */
 export async function retryDeletionRequest(params: {
- tenantId: string;
- /** 删除请求 id（DeletionRequest.id）。 */
- deletionRequestId: string;
- actor: AuditActor;
- /** HTTP X-Request-ID，用于审计关联（可选）。 */
- requestId?: string;
+  tenantId: string;
+  /** 删除请求 id（DeletionRequest.id）。 */
+  deletionRequestId: string;
+  actor: AuditActor;
+  /** HTTP X-Request-ID，用于审计关联（可选）。 */
+  requestId?: string;
 }): Promise<DeletionExecutionResult> {
- const { tenantId, deletionRequestId } = params;
- const request = await getDeletionRequestById(tenantId, deletionRequestId);
- if (!request) {
- throw new DeletionExecutorError(
- "request_not_found",
- `删除请求不存在（id=${deletionRequestId}）`,
- );
- }
- if (request.requestState !== "partial" && request.requestState !== "deleting") {
- throw new DeletionExecutorError(
- "illegal_state_for_execution",
- `重试仅允许 partial/deleting 状态（当前 state=${request.requestState}，id=${deletionRequestId}）`,
- );
- }
- return executeDeletionRequest(params);
+  const { tenantId, deletionRequestId } = params;
+  const request = await getDeletionRequestById(tenantId, deletionRequestId);
+  if (!request) {
+    throw new DeletionExecutorError(
+      "request_not_found",
+      `删除请求不存在（id=${deletionRequestId}）`,
+    );
+  }
+  if (request.requestState !== "partial" && request.requestState !== "deleting") {
+    throw new DeletionExecutorError(
+      "illegal_state_for_execution",
+      `重试仅允许 partial/deleting 状态（当前 state=${request.requestState}，id=${deletionRequestId}）`,
+    );
+  }
+  return executeDeletionRequest(params);
 }

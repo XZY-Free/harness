@@ -26,10 +26,10 @@ import { getLatestEventCursor, getLatestEventSequence } from "@/lib/conversation
 import { db } from "@/lib/db/client";
 import type { ThreadItem } from "@/lib/persistence/schema/conversation";
 import {
- type ThreadListProjection,
- type TurnTimelineProjection,
- threadListProjectionTable,
- turnTimelineProjectionTable,
+  type ThreadListProjection,
+  type TurnTimelineProjection,
+  threadListProjectionTable,
+  turnTimelineProjectionTable,
 } from "@/lib/persistence/schema/projection";
 import { and, asc, desc, eq, gt, lt } from "drizzle-orm";
 
@@ -49,51 +49,51 @@ const THREAD_EVENT_STREAM = "thread_event" as const;
  * - afterCreatedAt：游标分页（按 lastActivityAt < afterCreatedAt 取下一页）。
  */
 export async function listThreadProjectionsForUser(
- tenantId: string,
- ownerUserId: string,
- options?: {
- lifecycleState?: "active" | "archived" | "deleted";
- limit?: number;
- afterCreatedAt?: Date;
- },
+  tenantId: string,
+  ownerUserId: string,
+  options?: {
+    lifecycleState?: "active" | "archived" | "deleted";
+    limit?: number;
+    afterCreatedAt?: Date;
+  },
 ): Promise<ThreadListProjection[]> {
- const limit = Math.min(options?.limit ?? 50, 200);
- const conditions = [
- eq(threadListProjectionTable.tenantId, tenantId),
- eq(threadListProjectionTable.ownerUserId, ownerUserId),
- ];
- if (options?.lifecycleState) {
- conditions.push(eq(threadListProjectionTable.lifecycleState, options.lifecycleState));
- }
- if (options?.afterCreatedAt) {
- // 按 lastActivityAt 降序取下一页：游标为上一页最后一条的 lastActivityAt
- conditions.push(lt(threadListProjectionTable.lastActivityAt, options.afterCreatedAt));
- }
+  const limit = Math.min(options?.limit ?? 50, 200);
+  const conditions = [
+    eq(threadListProjectionTable.tenantId, tenantId),
+    eq(threadListProjectionTable.ownerUserId, ownerUserId),
+  ];
+  if (options?.lifecycleState) {
+    conditions.push(eq(threadListProjectionTable.lifecycleState, options.lifecycleState));
+  }
+  if (options?.afterCreatedAt) {
+    // 按 lastActivityAt 降序取下一页：游标为上一页最后一条的 lastActivityAt
+    conditions.push(lt(threadListProjectionTable.lastActivityAt, options.afterCreatedAt));
+  }
 
- return db
- .select()
- .from(threadListProjectionTable)
- .where(and(...conditions))
- .orderBy(desc(threadListProjectionTable.lastActivityAt))
- .limit(limit);
+  return db
+    .select()
+    .from(threadListProjectionTable)
+    .where(and(...conditions))
+    .orderBy(desc(threadListProjectionTable.lastActivityAt))
+    .limit(limit);
 }
 
 /** 单个 Thread 列表投影。不存在返回 null。 */
 export async function getThreadProjection(
- tenantId: string,
- threadId: string,
+  tenantId: string,
+  threadId: string,
 ): Promise<ThreadListProjection | null> {
- const [row] = await db
- .select()
- .from(threadListProjectionTable)
- .where(
- and(
- eq(threadListProjectionTable.tenantId, tenantId),
- eq(threadListProjectionTable.threadId, threadId),
- ),
- )
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(threadListProjectionTable)
+    .where(
+      and(
+        eq(threadListProjectionTable.tenantId, tenantId),
+        eq(threadListProjectionTable.threadId, threadId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -104,43 +104,43 @@ export async function getThreadProjection(
  * - afterTurnSequence：游标分页（turnSequence > afterTurnSequence）。
  */
 export async function listTurnTimelineProjections(
- tenantId: string,
- threadId: string,
- options?: { limit?: number; afterTurnSequence?: number },
+  tenantId: string,
+  threadId: string,
+  options?: { limit?: number; afterTurnSequence?: number },
 ): Promise<TurnTimelineProjection[]> {
- const limit = Math.min(options?.limit ?? 50, 200);
- const conditions = [
- eq(turnTimelineProjectionTable.tenantId, tenantId),
- eq(turnTimelineProjectionTable.threadId, threadId),
- ];
- if (options?.afterTurnSequence !== undefined) {
- conditions.push(gt(turnTimelineProjectionTable.turnSequence, options.afterTurnSequence));
- }
+  const limit = Math.min(options?.limit ?? 50, 200);
+  const conditions = [
+    eq(turnTimelineProjectionTable.tenantId, tenantId),
+    eq(turnTimelineProjectionTable.threadId, threadId),
+  ];
+  if (options?.afterTurnSequence !== undefined) {
+    conditions.push(gt(turnTimelineProjectionTable.turnSequence, options.afterTurnSequence));
+  }
 
- return db
- .select()
- .from(turnTimelineProjectionTable)
- .where(and(...conditions))
- .orderBy(asc(turnTimelineProjectionTable.turnSequence))
- .limit(limit);
+  return db
+    .select()
+    .from(turnTimelineProjectionTable)
+    .where(and(...conditions))
+    .orderBy(asc(turnTimelineProjectionTable.turnSequence))
+    .limit(limit);
 }
 
 /** 单个 Turn 时间线投影。不存在返回 null。 */
 export async function getTurnTimelineProjection(
- tenantId: string,
- turnId: string,
+  tenantId: string,
+  turnId: string,
 ): Promise<TurnTimelineProjection | null> {
- const [row] = await db
- .select()
- .from(turnTimelineProjectionTable)
- .where(
- and(
- eq(turnTimelineProjectionTable.tenantId, tenantId),
- eq(turnTimelineProjectionTable.turnId, turnId),
- ),
- )
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(turnTimelineProjectionTable)
+    .where(
+      and(
+        eq(turnTimelineProjectionTable.tenantId, tenantId),
+        eq(turnTimelineProjectionTable.turnId, turnId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -157,24 +157,24 @@ export async function getTurnTimelineProjection(
  * - limit：默认 50，最大 200。
  */
 export async function getItemSnapshotWithCursor(
- tenantId: string,
- threadId: string,
- options?: { turnId?: string; includeSuperseded?: boolean; limit?: number },
+  tenantId: string,
+  threadId: string,
+  options?: { turnId?: string; includeSuperseded?: boolean; limit?: number },
 ): Promise<{
- items: ThreadItem[];
- latestEventCursor: { sequence: number; eventId: string | null } | null;
+  items: ThreadItem[];
+  latestEventCursor: { sequence: number; eventId: string | null } | null;
 }> {
- // 两个查询均从权威表读取，并行执行后返回同一逻辑读点的一致性快照
- const [items, latestEventCursor] = await Promise.all([
- listItemsByThread(tenantId, threadId, {
- turnId: options?.turnId,
- includeSuperseded: options?.includeSuperseded,
- limit: options?.limit,
- }),
- getLatestEventCursor(tenantId, threadId),
- ]);
+  // 两个查询均从权威表读取，并行执行后返回同一逻辑读点的一致性快照
+  const [items, latestEventCursor] = await Promise.all([
+    listItemsByThread(tenantId, threadId, {
+      turnId: options?.turnId,
+      includeSuperseded: options?.includeSuperseded,
+      limit: options?.limit,
+    }),
+    getLatestEventCursor(tenantId, threadId),
+  ]);
 
- return { items, latestEventCursor };
+  return { items, latestEventCursor };
 }
 
 /**
@@ -188,35 +188,35 @@ export async function getItemSnapshotWithCursor(
  * - lag = latest - checkpoint（>= 0，避免 checkpoint 超前于权威表的异常情况产生负数）。
  */
 export async function getProjectionHealth(
- tenantId: string,
- threadId: string,
+  tenantId: string,
+  threadId: string,
 ): Promise<{
- threadListCheckpoint: number;
- turnTimelineCheckpoint: number;
- latestEventSequence: number;
- threadListLag: number;
- turnTimelineLag: number;
+  threadListCheckpoint: number;
+  turnTimelineCheckpoint: number;
+  latestEventSequence: number;
+  threadListLag: number;
+  turnTimelineLag: number;
 } | null> {
- // 权威 lastEventSequence（Thread 不存在则返回 null）
- const latestEventSequence = await getLatestEventSequence(tenantId, threadId);
- if (latestEventSequence === null) return null;
+  // 权威 lastEventSequence（Thread 不存在则返回 null）
+  const latestEventSequence = await getLatestEventSequence(tenantId, threadId);
+  if (latestEventSequence === null) return null;
 
- // 两个投影的 checkpoint（不存在视为 0）
- const [threadListCheckpointRow, turnTimelineCheckpointRow] = await Promise.all([
- getProjectionCheckpoint(THREAD_LIST_CONSUMER, THREAD_EVENT_STREAM, threadId),
- getProjectionCheckpoint(TURN_TIMELINE_CONSUMER, THREAD_EVENT_STREAM, threadId),
- ]);
+  // 两个投影的 checkpoint（不存在视为 0）
+  const [threadListCheckpointRow, turnTimelineCheckpointRow] = await Promise.all([
+    getProjectionCheckpoint(THREAD_LIST_CONSUMER, THREAD_EVENT_STREAM, threadId),
+    getProjectionCheckpoint(TURN_TIMELINE_CONSUMER, THREAD_EVENT_STREAM, threadId),
+  ]);
 
- const threadListCheckpoint = threadListCheckpointRow?.lastSequence ?? 0;
- const turnTimelineCheckpoint = turnTimelineCheckpointRow?.lastSequence ?? 0;
+  const threadListCheckpoint = threadListCheckpointRow?.lastSequence ?? 0;
+  const turnTimelineCheckpoint = turnTimelineCheckpointRow?.lastSequence ?? 0;
 
- return {
- threadListCheckpoint,
- turnTimelineCheckpoint,
- latestEventSequence,
- threadListLag: Math.max(0, latestEventSequence - threadListCheckpoint),
- turnTimelineLag: Math.max(0, latestEventSequence - turnTimelineCheckpoint),
- };
+  return {
+    threadListCheckpoint,
+    turnTimelineCheckpoint,
+    latestEventSequence,
+    threadListLag: Math.max(0, latestEventSequence - threadListCheckpoint),
+    turnTimelineLag: Math.max(0, latestEventSequence - turnTimelineCheckpoint),
+  };
 }
 
 /**
@@ -230,27 +230,27 @@ export async function getProjectionHealth(
  * - afterCreatedAt：游标分页（按 lastActivityAt < afterCreatedAt 取下一页）。
  */
 export async function listThreadProjectionsByTenant(
- tenantId: string,
- options?: {
- lifecycleState?: "active" | "archived" | "deleted";
- limit?: number;
- afterCreatedAt?: Date;
- },
+  tenantId: string,
+  options?: {
+    lifecycleState?: "active" | "archived" | "deleted";
+    limit?: number;
+    afterCreatedAt?: Date;
+  },
 ): Promise<ThreadListProjection[]> {
- const limit = Math.min(options?.limit ?? 50, 200);
- const conditions = [eq(threadListProjectionTable.tenantId, tenantId)];
- if (options?.lifecycleState) {
- conditions.push(eq(threadListProjectionTable.lifecycleState, options.lifecycleState));
- }
- if (options?.afterCreatedAt) {
- // 按 lastActivityAt 降序取下一页：游标为上一页最后一条的 lastActivityAt
- conditions.push(lt(threadListProjectionTable.lastActivityAt, options.afterCreatedAt));
- }
+  const limit = Math.min(options?.limit ?? 50, 200);
+  const conditions = [eq(threadListProjectionTable.tenantId, tenantId)];
+  if (options?.lifecycleState) {
+    conditions.push(eq(threadListProjectionTable.lifecycleState, options.lifecycleState));
+  }
+  if (options?.afterCreatedAt) {
+    // 按 lastActivityAt 降序取下一页：游标为上一页最后一条的 lastActivityAt
+    conditions.push(lt(threadListProjectionTable.lastActivityAt, options.afterCreatedAt));
+  }
 
- return db
- .select()
- .from(threadListProjectionTable)
- .where(and(...conditions))
- .orderBy(desc(threadListProjectionTable.lastActivityAt))
- .limit(limit);
+  return db
+    .select()
+    .from(threadListProjectionTable)
+    .where(and(...conditions))
+    .orderBy(desc(threadListProjectionTable.lastActivityAt))
+    .limit(limit);
 }

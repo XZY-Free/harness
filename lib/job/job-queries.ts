@@ -25,20 +25,16 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
-import {
- type Job,
- type JobEvent,
- type JobEventActorType,
- type JobState,
- type JobType,
- jobTable,
-} from "@/lib/persistence/schema/job";
-import {
- JobNotFoundError,
- JobStateConflictError,
- JobVersionConflictError,
-} from "@/lib/job/errors";
+import { JobNotFoundError, JobStateConflictError, JobVersionConflictError } from "@/lib/job/errors";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/job/job-event-queries";
+import {
+  type Job,
+  type JobEvent,
+  type JobEventActorType,
+  type JobState,
+  type JobType,
+  jobTable,
+} from "@/lib/persistence/schema/job";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -49,45 +45,45 @@ const TERMINAL_STATES: readonly JobState[] = ["completed", "failed", "cancelled"
 
 /** Job 状态机合法转换映射。 */
 const STATE_TRANSITIONS: Record<JobState, readonly JobState[]> = {
- queued: ["running", "cancelled"], // queued 可直接 cancel（未启动）
- running: ["waiting_external", "completed", "failed", "cancelled"],
- waiting_external: ["running", "completed", "failed", "cancelled"],
- completed: [], // 终态
- failed: [], // 终态
- cancelled: [], // 终态
+  queued: ["running", "cancelled"], // queued 可直接 cancel（未启动）
+  running: ["waiting_external", "completed", "failed", "cancelled"],
+  waiting_external: ["running", "completed", "failed", "cancelled"],
+  completed: [], // 终态
+  failed: [], // 终态
+  cancelled: [], // 终态
 };
 
 // ─── createJob ──────────────────────────────────────────────
 
 /** createJob 入参。 */
 export interface CreateJobParams {
- tenantId: string;
- agentId: string;
- jobType: JobType;
- /** 领域触发引用（如 schedule_id、batch_id、deployment_id）。 */
- triggerRef: string;
- /** 完成策略：all_success / fail_fast / threshold / 自定义。 */
- completionPolicyJson: Record<string, unknown>;
- /** 结果需要进入员工会话时预先关联的 Thread（可选）。 */
- threadId?: string;
- /** retry 时指向原 Job；原 Job 状态/事件不被覆盖。 */
- replacesJobId?: string;
- /** Job 输入引用（领域服务保证输入仍可访问）。 */
- inputRef?: string;
- inputHash?: string;
- createdBy?: string;
- /** Event actor（默认 system，因领域服务触发）。 */
- actorType?: JobEventActorType;
- actorId?: string;
- correlationId?: string;
- idempotencyKey?: string;
+  tenantId: string;
+  agentId: string;
+  jobType: JobType;
+  /** 领域触发引用（如 schedule_id、batch_id、deployment_id）。 */
+  triggerRef: string;
+  /** 完成策略：all_success / fail_fast / threshold / 自定义。 */
+  completionPolicyJson: Record<string, unknown>;
+  /** 结果需要进入员工会话时预先关联的 Thread（可选）。 */
+  threadId?: string;
+  /** retry 时指向原 Job；原 Job 状态/事件不被覆盖。 */
+  replacesJobId?: string;
+  /** Job 输入引用（领域服务保证输入仍可访问）。 */
+  inputRef?: string;
+  inputHash?: string;
+  createdBy?: string;
+  /** Event actor（默认 system，因领域服务触发）。 */
+  actorType?: JobEventActorType;
+  actorId?: string;
+  correlationId?: string;
+  idempotencyKey?: string;
 }
 
 /** createJob 返回结果。 */
 export interface CreateJobResult {
- job: Job;
- /** 写入的 job.queued Event（sequence=1）。 */
- queuedEvent: JobEvent;
+  job: Job;
+  /** 写入的 job.queued Event（sequence=1）。 */
+  queuedEvent: JobEvent;
 }
 
 /**
@@ -105,149 +101,149 @@ export interface CreateJobResult {
  * - 不修改 Thread（threadId 仅记录关联）。
  */
 export async function createJob(params: CreateJobParams): Promise<CreateJobResult> {
- if (!params.tenantId) {
- throw new Error("createJob: tenantId 不能为空");
- }
- if (!params.agentId) {
- throw new Error("createJob: agentId 不能为空");
- }
- if (!params.triggerRef) {
- throw new Error("createJob: triggerRef 不能为空");
- }
- if (!params.completionPolicyJson) {
- throw new Error("createJob: completionPolicyJson 不能为空");
- }
+  if (!params.tenantId) {
+    throw new Error("createJob: tenantId 不能为空");
+  }
+  if (!params.agentId) {
+    throw new Error("createJob: agentId 不能为空");
+  }
+  if (!params.triggerRef) {
+    throw new Error("createJob: triggerRef 不能为空");
+  }
+  if (!params.completionPolicyJson) {
+    throw new Error("createJob: completionPolicyJson 不能为空");
+  }
 
- const actorType: JobEventActorType = params.actorType ?? "system";
- const now = new Date();
- const jobId = randomUUID();
+  const actorType: JobEventActorType = params.actorType ?? "system";
+  const now = new Date();
+  const jobId = randomUUID();
 
- const result = await db.transaction(async (tx) => {
- // 1. INSERT Job
- await tx.insert(jobTable).values({
- id: jobId,
- tenantId: params.tenantId,
- agentId: params.agentId,
- jobType: params.jobType,
- triggerRef: params.triggerRef,
- jobState: "queued",
- replacesJobId: params.replacesJobId ?? null,
- threadId: params.threadId ?? null,
- completionPolicyJson: params.completionPolicyJson,
- inputRef: params.inputRef ?? null,
- inputHash: params.inputHash ?? null,
- lastEventSequence: 0,
- resultRef: null,
- resultHash: null,
- errorCode: null,
- errorSummary: null,
- createdBy: params.createdBy ?? null,
- createdAt: now,
- startedAt: null,
- finishedAt: null,
- updatedAt: now,
- versionNo: 1,
- });
+  const result = await db.transaction(async (tx) => {
+    // 1. INSERT Job
+    await tx.insert(jobTable).values({
+      id: jobId,
+      tenantId: params.tenantId,
+      agentId: params.agentId,
+      jobType: params.jobType,
+      triggerRef: params.triggerRef,
+      jobState: "queued",
+      replacesJobId: params.replacesJobId ?? null,
+      threadId: params.threadId ?? null,
+      completionPolicyJson: params.completionPolicyJson,
+      inputRef: params.inputRef ?? null,
+      inputHash: params.inputHash ?? null,
+      lastEventSequence: 0,
+      resultRef: null,
+      resultHash: null,
+      errorCode: null,
+      errorSummary: null,
+      createdBy: params.createdBy ?? null,
+      createdAt: now,
+      startedAt: null,
+      finishedAt: null,
+      updatedAt: now,
+      versionNo: 1,
+    });
 
- // 2. allocateJobEventSequences(1) → sequence=1
- const startSeq = await allocateJobEventSequences(tx, jobId, 1);
+    // 2. allocateJobEventSequences(1) → sequence=1
+    const startSeq = await allocateJobEventSequences(tx, jobId, 1);
 
- // 3. insertJobEvent(job.queued)
- const queuedEvent = await insertJobEvent(tx, params.tenantId, jobId, startSeq, {
- eventType: "job.queued",
- actorType,
- actorId: params.actorId,
- payload: {
- job_id: jobId,
- tenant_id: params.tenantId,
- agent_id: params.agentId,
- job_type: params.jobType,
- trigger_ref: params.triggerRef,
- thread_id: params.threadId ?? null,
- replaces_job_id: params.replacesJobId ?? null,
- completion_policy: params.completionPolicyJson,
- input_ref: params.inputRef ?? null,
- input_hash: params.inputHash ?? null,
- created_by: params.createdBy ?? null,
- },
- correlationId: params.correlationId,
- idempotencyKey: params.idempotencyKey ? `${params.idempotencyKey}:job-queued` : undefined,
- });
+    // 3. insertJobEvent(job.queued)
+    const queuedEvent = await insertJobEvent(tx, params.tenantId, jobId, startSeq, {
+      eventType: "job.queued",
+      actorType,
+      actorId: params.actorId,
+      payload: {
+        job_id: jobId,
+        tenant_id: params.tenantId,
+        agent_id: params.agentId,
+        job_type: params.jobType,
+        trigger_ref: params.triggerRef,
+        thread_id: params.threadId ?? null,
+        replaces_job_id: params.replacesJobId ?? null,
+        completion_policy: params.completionPolicyJson,
+        input_ref: params.inputRef ?? null,
+        input_hash: params.inputHash ?? null,
+        created_by: params.createdBy ?? null,
+      },
+      correlationId: params.correlationId,
+      idempotencyKey: params.idempotencyKey ? `${params.idempotencyKey}:job-queued` : undefined,
+    });
 
- // 4. 回读 Job
- const [job] = await tx.select().from(jobTable).where(eq(jobTable.id, jobId)).limit(1);
- if (!job) {
- throw new Error(`createJob: Job 行未找到（id=${jobId}）`);
- }
+    // 4. 回读 Job
+    const [job] = await tx.select().from(jobTable).where(eq(jobTable.id, jobId)).limit(1);
+    if (!job) {
+      throw new Error(`createJob: Job 行未找到（id=${jobId}）`);
+    }
 
- return { job, queuedEvent };
- });
+    return { job, queuedEvent };
+  });
 
- return result;
+  return result;
 }
 
 // ─── 查询 ────────────────────────────────────────────────────
 
 /** 按 id 获取 Job。不存在返回 null。 */
 export async function getJobById(tenantId: string, jobId: string): Promise<Job | null> {
- const [row] = await db
- .select()
- .from(jobTable)
- .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 按 agent 列出 Job（按 createdAt 降序）。 */
 export async function listJobsByAgent(
- tenantId: string,
- agentId: string,
- options?: { limit?: number; jobState?: JobState },
+  tenantId: string,
+  agentId: string,
+  options?: { limit?: number; jobState?: JobState },
 ): Promise<Job[]> {
- const conditions = [eq(jobTable.tenantId, tenantId), eq(jobTable.agentId, agentId)];
- if (options?.jobState) {
- conditions.push(eq(jobTable.jobState, options.jobState));
- }
- return db
- .select()
- .from(jobTable)
- .where(and(...conditions))
- .orderBy(desc(jobTable.createdAt))
- .limit(options?.limit ?? 100);
+  const conditions = [eq(jobTable.tenantId, tenantId), eq(jobTable.agentId, agentId)];
+  if (options?.jobState) {
+    conditions.push(eq(jobTable.jobState, options.jobState));
+  }
+  return db
+    .select()
+    .from(jobTable)
+    .where(and(...conditions))
+    .orderBy(desc(jobTable.createdAt))
+    .limit(options?.limit ?? 100);
 }
 
 /** 按状态列出 Job（按 createdAt 降序）。 */
 export async function listJobsByState(
- tenantId: string,
- jobState: JobState,
- options?: { limit?: number },
+  tenantId: string,
+  jobState: JobState,
+  options?: { limit?: number },
 ): Promise<Job[]> {
- return db
- .select()
- .from(jobTable)
- .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.jobState, jobState)))
- .orderBy(desc(jobTable.createdAt))
- .limit(options?.limit ?? 100);
+  return db
+    .select()
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.jobState, jobState)))
+    .orderBy(desc(jobTable.createdAt))
+    .limit(options?.limit ?? 100);
 }
 
 /** 列出 Job 终态集合内的 Job（用于 retry 候选查询）。 */
 export async function listTerminalJobsByAgent(
- tenantId: string,
- agentId: string,
- options?: { limit?: number },
+  tenantId: string,
+  agentId: string,
+  options?: { limit?: number },
 ): Promise<Job[]> {
- return db
- .select()
- .from(jobTable)
- .where(
- and(
- eq(jobTable.tenantId, tenantId),
- eq(jobTable.agentId, agentId),
- inArray(jobTable.jobState, [...TERMINAL_STATES]),
- ),
- )
- .orderBy(desc(jobTable.createdAt))
- .limit(options?.limit ?? 100);
+  return db
+    .select()
+    .from(jobTable)
+    .where(
+      and(
+        eq(jobTable.tenantId, tenantId),
+        eq(jobTable.agentId, agentId),
+        inArray(jobTable.jobState, [...TERMINAL_STATES]),
+      ),
+    )
+    .orderBy(desc(jobTable.createdAt))
+    .limit(options?.limit ?? 100);
 }
 
 // ─── 状态机 ──────────────────────────────────────────────────
@@ -264,58 +260,58 @@ export async function listTerminalJobsByAgent(
  * @returns 更新后的 Job；versionNo 冲突返回 null
  */
 export async function updateJobState(
- tx: Tx,
- tenantId: string,
- jobId: string,
- nextState: JobState,
- expectedVersionNo: number,
+  tx: Tx,
+  tenantId: string,
+  jobId: string,
+  nextState: JobState,
+  expectedVersionNo: number,
 ): Promise<Job> {
- const [current] = await tx
- .select()
- .from(jobTable)
- .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
- .for("update")
- .limit(1);
- if (!current) {
- throw new JobNotFoundError(jobId);
- }
+  const [current] = await tx
+    .select()
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
+    .for("update")
+    .limit(1);
+  if (!current) {
+    throw new JobNotFoundError(jobId);
+  }
 
- if (current.versionNo !== expectedVersionNo) {
- throw new JobVersionConflictError(jobId, expectedVersionNo, current.versionNo);
- }
+  if (current.versionNo !== expectedVersionNo) {
+    throw new JobVersionConflictError(jobId, expectedVersionNo, current.versionNo);
+  }
 
- // 终态不可恢复
- if (TERMINAL_STATES.includes(current.jobState)) {
- throw new JobStateConflictError(jobId, current.jobState, `转换到 ${nextState}`);
- }
+  // 终态不可恢复
+  if (TERMINAL_STATES.includes(current.jobState)) {
+    throw new JobStateConflictError(jobId, current.jobState, `转换到 ${nextState}`);
+  }
 
- // 状态转换合法性校验
- const allowed = STATE_TRANSITIONS[current.jobState];
- if (!allowed.includes(nextState)) {
- throw new JobStateConflictError(jobId, current.jobState, `转换到 ${nextState}`);
- }
+  // 状态转换合法性校验
+  const allowed = STATE_TRANSITIONS[current.jobState];
+  if (!allowed.includes(nextState)) {
+    throw new JobStateConflictError(jobId, current.jobState, `转换到 ${nextState}`);
+  }
 
- // 计算 startedAt / finishedAt
- const now = new Date();
- const updates: Partial<Job> = {
- jobState: nextState,
- versionNo: current.versionNo + 1,
- updatedAt: now,
- };
- if (nextState === "running" && !current.startedAt) {
- updates.startedAt = now;
- }
- if (TERMINAL_STATES.includes(nextState)) {
- updates.finishedAt = now;
- }
+  // 计算 startedAt / finishedAt
+  const now = new Date();
+  const updates: Partial<Job> = {
+    jobState: nextState,
+    versionNo: current.versionNo + 1,
+    updatedAt: now,
+  };
+  if (nextState === "running" && !current.startedAt) {
+    updates.startedAt = now;
+  }
+  if (TERMINAL_STATES.includes(nextState)) {
+    updates.finishedAt = now;
+  }
 
- await tx.update(jobTable).set(updates).where(eq(jobTable.id, jobId));
+  await tx.update(jobTable).set(updates).where(eq(jobTable.id, jobId));
 
- const [updated] = await tx.select().from(jobTable).where(eq(jobTable.id, jobId)).limit(1);
- if (!updated) {
- throw new Error(`updateJobState: Job 行未找到（id=${jobId}）`);
- }
- return updated;
+  const [updated] = await tx.select().from(jobTable).where(eq(jobTable.id, jobId)).limit(1);
+  if (!updated) {
+    throw new Error(`updateJobState: Job 行未找到（id=${jobId}）`);
+  }
+  return updated;
 }
 
 /**
@@ -326,75 +322,75 @@ export async function updateJobState(
  * - 调用方应在 Job 进入终态前调用本函数。
  */
 export async function recordJobResult(
- tx: Tx,
- tenantId: string,
- jobId: string,
- result: {
- resultRef: string;
- resultHash: string;
- resultSummaryJson?: Record<string, unknown> | null;
- },
- options?: {
- actorType?: JobEventActorType;
- actorId?: string;
- correlationId?: string;
- idempotencyKey?: string;
- },
+  tx: Tx,
+  tenantId: string,
+  jobId: string,
+  result: {
+    resultRef: string;
+    resultHash: string;
+    resultSummaryJson?: Record<string, unknown> | null;
+  },
+  options?: {
+    actorType?: JobEventActorType;
+    actorId?: string;
+    correlationId?: string;
+    idempotencyKey?: string;
+  },
 ): Promise<{ job: Job; resultRecordedEvent: JobEvent }> {
- const [current] = await tx
- .select()
- .from(jobTable)
- .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
- .for("update")
- .limit(1);
- if (!current) {
- throw new JobNotFoundError(jobId);
- }
+  const [current] = await tx
+    .select()
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
+    .for("update")
+    .limit(1);
+  if (!current) {
+    throw new JobNotFoundError(jobId);
+  }
 
- // 写 resultRef/resultHash
- await tx
- .update(jobTable)
- .set({
- resultRef: result.resultRef,
- resultHash: result.resultHash,
- updatedAt: new Date(),
- })
- .where(eq(jobTable.id, jobId));
+  // 写 resultRef/resultHash
+  await tx
+    .update(jobTable)
+    .set({
+      resultRef: result.resultRef,
+      resultHash: result.resultHash,
+      updatedAt: new Date(),
+    })
+    .where(eq(jobTable.id, jobId));
 
- // 写 job.result_recorded Event
- const startSeq = await allocateJobEventSequences(tx, jobId, 1);
- const resultRecordedEvent = await insertJobEvent(tx, tenantId, jobId, startSeq, {
- eventType: "job.result_recorded",
- actorType: options?.actorType ?? "system",
- actorId: options?.actorId,
- payload: {
- job_id: jobId,
- result_ref: result.resultRef,
- result_hash: result.resultHash,
- result_summary: result.resultSummaryJson ?? null,
- },
- correlationId: options?.correlationId,
- idempotencyKey: options?.idempotencyKey
- ? `${options.idempotencyKey}:job-result-recorded`
- : undefined,
- });
+  // 写 job.result_recorded Event
+  const startSeq = await allocateJobEventSequences(tx, jobId, 1);
+  const resultRecordedEvent = await insertJobEvent(tx, tenantId, jobId, startSeq, {
+    eventType: "job.result_recorded",
+    actorType: options?.actorType ?? "system",
+    actorId: options?.actorId,
+    payload: {
+      job_id: jobId,
+      result_ref: result.resultRef,
+      result_hash: result.resultHash,
+      result_summary: result.resultSummaryJson ?? null,
+    },
+    correlationId: options?.correlationId,
+    idempotencyKey: options?.idempotencyKey
+      ? `${options.idempotencyKey}:job-result-recorded`
+      : undefined,
+  });
 
- const [updated] = await tx.select().from(jobTable).where(eq(jobTable.id, jobId)).limit(1);
- if (!updated) {
- throw new Error(`recordJobResult: Job 行未找到（id=${jobId}）`);
- }
+  const [updated] = await tx.select().from(jobTable).where(eq(jobTable.id, jobId)).limit(1);
+  if (!updated) {
+    throw new Error(`recordJobResult: Job 行未找到（id=${jobId}）`);
+  }
 
- return { job: updated, resultRecordedEvent };
+  return { job: updated, resultRecordedEvent };
 }
 
 // ─── re-export 供外部统一从本模块引入类型 ───────────────────
 
 export type {
- Job,
- JobEvent,
- JobState,
- JobType,
- JobEventActorType,
+  Job,
+  JobEvent,
+  JobState,
+  JobType,
+  JobEventActorType,
 } from "@/lib/persistence/schema/job";
 
 // ─── S11-W04 管理面排障：跨 agent 列出租户所有 Job ─────────
@@ -412,43 +408,43 @@ export type {
  * @returns `{ items, nextCursor }`，nextCursor 为不透明 cursor（base64url(JSON)），无更多数据时为 null。
  */
 export async function listJobsByTenant(
- tenantId: string,
- options?: {
- jobState?: JobState;
- limit?: number;
- afterCreatedAt?: Date;
- },
+  tenantId: string,
+  options?: {
+    jobState?: JobState;
+    limit?: number;
+    afterCreatedAt?: Date;
+  },
 ): Promise<{ items: Job[]; nextCursor: string | null }> {
- const limit = Math.min(options?.limit ?? 50, 200);
- const conditions = [eq(jobTable.tenantId, tenantId)];
- if (options?.jobState) {
- conditions.push(eq(jobTable.jobState, options.jobState));
- }
- if (options?.afterCreatedAt) {
- // 按 createdAt 降序取下一页：游标为上一页最后一条的 createdAt
- conditions.push(sql`${jobTable.createdAt} < ${options.afterCreatedAt}`);
- }
+  const limit = Math.min(options?.limit ?? 50, 200);
+  const conditions = [eq(jobTable.tenantId, tenantId)];
+  if (options?.jobState) {
+    conditions.push(eq(jobTable.jobState, options.jobState));
+  }
+  if (options?.afterCreatedAt) {
+    // 按 createdAt 降序取下一页：游标为上一页最后一条的 createdAt
+    conditions.push(sql`${jobTable.createdAt} < ${options.afterCreatedAt}`);
+  }
 
- // 取 limit+1 行：第 limit+1 行存在说明有下一页，其 createdAt 即下一个 cursor
- const rows = await db
- .select()
- .from(jobTable)
- .where(and(...conditions))
- .orderBy(desc(jobTable.createdAt))
- .limit(limit + 1);
+  // 取 limit+1 行：第 limit+1 行存在说明有下一页，其 createdAt 即下一个 cursor
+  const rows = await db
+    .select()
+    .from(jobTable)
+    .where(and(...conditions))
+    .orderBy(desc(jobTable.createdAt))
+    .limit(limit + 1);
 
- let nextCursor: string | null = null;
- let items = rows;
- if (rows.length > limit) {
- items = rows.slice(0, limit);
- const lastKept = items[items.length - 1];
- if (lastKept) {
- nextCursor = encodeCursor({
- created_at: lastKept.createdAt.toISOString(),
- id: lastKept.id,
- });
- }
- }
+  let nextCursor: string | null = null;
+  let items = rows;
+  if (rows.length > limit) {
+    items = rows.slice(0, limit);
+    const lastKept = items[items.length - 1];
+    if (lastKept) {
+      nextCursor = encodeCursor({
+        created_at: lastKept.createdAt.toISOString(),
+        id: lastKept.id,
+      });
+    }
+  }
 
- return { items, nextCursor };
+  return { items, nextCursor };
 }

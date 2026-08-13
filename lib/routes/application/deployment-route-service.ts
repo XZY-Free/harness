@@ -7,117 +7,117 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
- type DeploymentRouteRow,
- type DeploymentRouteSetRow,
- type RouteState,
- deploymentRouteSetTable,
- deploymentRouteTable,
+  type DeploymentRouteRow,
+  type DeploymentRouteSetRow,
+  type RouteState,
+  deploymentRouteSetTable,
+  deploymentRouteTable,
 } from "@/lib/persistence/schema/routes";
 import {
- AgentCapabilityUnsupportedError,
- ArtifactNotVerifiedForRouteError,
- MAX_ROUTE_TRAFFIC_WEIGHT,
- RevisionNotPublishedError,
- RouteNotFoundError,
- RouteSetNotFoundError,
- RouteSetVersionConflictError,
- RouteWeightInvalidError,
+  AgentCapabilityUnsupportedError,
+  ArtifactNotVerifiedForRouteError,
+  MAX_ROUTE_TRAFFIC_WEIGHT,
+  RevisionNotPublishedError,
+  RouteNotFoundError,
+  RouteSetNotFoundError,
+  RouteSetVersionConflictError,
+  RouteWeightInvalidError,
 } from "@/lib/routes/domain/route-revision";
 import { and, desc, eq } from "drizzle-orm";
 
 export const MAX_TRAFFIC_WEIGHT = MAX_ROUTE_TRAFFIC_WEIGHT;
 export {
- AgentCapabilityUnsupportedError,
- ArtifactNotVerifiedForRouteError,
- RevisionNotPublishedError,
- RouteNotFoundError,
- RouteSetNotFoundError,
- RouteSetVersionConflictError,
- RouteWeightInvalidError,
+  AgentCapabilityUnsupportedError,
+  ArtifactNotVerifiedForRouteError,
+  RevisionNotPublishedError,
+  RouteNotFoundError,
+  RouteSetNotFoundError,
+  RouteSetVersionConflictError,
+  RouteWeightInvalidError,
 };
 
 export async function createRouteSet(params: {
- tenantId: string;
- agentId: string;
- routeScopeKey: string;
- routeScopeJson: Record<string, unknown>;
+  tenantId: string;
+  agentId: string;
+  routeScopeKey: string;
+  routeScopeJson: Record<string, unknown>;
 }): Promise<DeploymentRouteSetRow> {
- const id = randomUUID();
- await db.insert(deploymentRouteSetTable).values({ ...params, id, versionNo: 1 });
- const [row] = await db
- .select()
- .from(deploymentRouteSetTable)
- .where(eq(deploymentRouteSetTable.id, id))
- .limit(1);
- if (!row) throw new Error(`createRouteSet: 行未找到（id=${id}）`);
- return row;
+  const id = randomUUID();
+  await db.insert(deploymentRouteSetTable).values({ ...params, id, versionNo: 1 });
+  const [row] = await db
+    .select()
+    .from(deploymentRouteSetTable)
+    .where(eq(deploymentRouteSetTable.id, id))
+    .limit(1);
+  if (!row) throw new Error(`createRouteSet: 行未找到（id=${id}）`);
+  return row;
 }
 
 export async function getRouteSetById(
- tenantId: string,
- routeSetId: string,
+  tenantId: string,
+  routeSetId: string,
 ): Promise<DeploymentRouteSetRow | null> {
- const [row] = await db
- .select()
- .from(deploymentRouteSetTable)
- .where(
- and(
- eq(deploymentRouteSetTable.id, routeSetId),
- eq(deploymentRouteSetTable.tenantId, tenantId),
- ),
- )
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(deploymentRouteSetTable)
+    .where(
+      and(
+        eq(deploymentRouteSetTable.id, routeSetId),
+        eq(deploymentRouteSetTable.tenantId, tenantId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 export async function getRouteSetByAgentScope(
- tenantId: string,
- agentId: string,
- routeScopeKey: string,
+  tenantId: string,
+  agentId: string,
+  routeScopeKey: string,
 ): Promise<DeploymentRouteSetRow | null> {
- const [row] = await db
- .select()
- .from(deploymentRouteSetTable)
- .where(
- and(
- eq(deploymentRouteSetTable.tenantId, tenantId),
- eq(deploymentRouteSetTable.agentId, agentId),
- eq(deploymentRouteSetTable.routeScopeKey, routeScopeKey),
- ),
- )
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(deploymentRouteSetTable)
+    .where(
+      and(
+        eq(deploymentRouteSetTable.tenantId, tenantId),
+        eq(deploymentRouteSetTable.agentId, agentId),
+        eq(deploymentRouteSetTable.routeScopeKey, routeScopeKey),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 export async function getRouteById(
- tenantId: string,
- routeId: string,
+  tenantId: string,
+  routeId: string,
 ): Promise<DeploymentRouteRow | null> {
- const [row] = await db
- .select({ route: deploymentRouteTable })
- .from(deploymentRouteTable)
- .innerJoin(
- deploymentRouteSetTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(
- and(eq(deploymentRouteTable.id, routeId), eq(deploymentRouteSetTable.tenantId, tenantId)),
- )
- .limit(1);
- return row?.route ?? null;
+  const [row] = await db
+    .select({ route: deploymentRouteTable })
+    .from(deploymentRouteTable)
+    .innerJoin(
+      deploymentRouteSetTable,
+      eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+    )
+    .where(
+      and(eq(deploymentRouteTable.id, routeId), eq(deploymentRouteSetTable.tenantId, tenantId)),
+    )
+    .limit(1);
+  return row?.route ?? null;
 }
 
 export async function listRoutesBySet(
- routeSetId: string,
- options?: { routeState?: RouteState },
+  routeSetId: string,
+  options?: { routeState?: RouteState },
 ): Promise<DeploymentRouteRow[]> {
- const conditions = [eq(deploymentRouteTable.routeSetId, routeSetId)];
- if (options?.routeState) conditions.push(eq(deploymentRouteTable.routeState, options.routeState));
- return db
- .select()
- .from(deploymentRouteTable)
- .where(and(...conditions))
- .orderBy(desc(deploymentRouteTable.createdAt));
+  const conditions = [eq(deploymentRouteTable.routeSetId, routeSetId)];
+  if (options?.routeState) conditions.push(eq(deploymentRouteTable.routeState, options.routeState));
+  return db
+    .select()
+    .from(deploymentRouteTable)
+    .where(and(...conditions))
+    .orderBy(desc(deploymentRouteTable.createdAt));
 }
 
 /**
@@ -127,36 +127,36 @@ export async function listRoutesBySet(
  * 执行链必须通过 RouteEligibilityResolutionStore.loadCandidates() 走投影匹配路径。
  */
 export async function listEnabledRouteProjections(
- tenantId: string,
- agentId: string,
- routeScopeKey: string,
+  tenantId: string,
+  agentId: string,
+  routeScopeKey: string,
 ): Promise<DeploymentRouteRow[]> {
- const routeSet = await getRouteSetByAgentScope(tenantId, agentId, routeScopeKey);
- if (!routeSet) return [];
- return listRoutesBySet(routeSet.id, { routeState: "enabled" });
+  const routeSet = await getRouteSetByAgentScope(tenantId, agentId, routeScopeKey);
+  if (!routeSet) return [];
+  return listRoutesBySet(routeSet.id, { routeState: "enabled" });
 }
 
 export interface RouteSetSnapshot {
- routeSetId: string;
- versionNo: number;
- enabledRoutes: DeploymentRouteRow[];
+  routeSetId: string;
+  versionNo: number;
+  enabledRoutes: DeploymentRouteRow[];
 }
 
 export async function getRouteSetSnapshot(
- tenantId: string,
- routeSetId: string,
+  tenantId: string,
+  routeSetId: string,
 ): Promise<RouteSetSnapshot> {
- const routeSet = await getRouteSetById(tenantId, routeSetId);
- if (!routeSet) throw new RouteSetNotFoundError(routeSetId);
- return {
- routeSetId,
- versionNo: routeSet.versionNo,
- enabledRoutes: await listRoutesBySet(routeSetId, { routeState: "enabled" }),
- };
+  const routeSet = await getRouteSetById(tenantId, routeSetId);
+  if (!routeSet) throw new RouteSetNotFoundError(routeSetId);
+  return {
+    routeSetId,
+    versionNo: routeSet.versionNo,
+    enabledRoutes: await listRoutesBySet(routeSetId, { routeState: "enabled" }),
+  };
 }
 
 export type {
- RouteState,
- DeploymentRouteRow,
- DeploymentRouteSetRow,
+  RouteState,
+  DeploymentRouteRow,
+  DeploymentRouteSetRow,
 } from "@/lib/persistence/schema/routes";

@@ -5,10 +5,7 @@ import { describe, expect, it } from "vitest";
 import { API_ERROR_CODES, errorDefinition } from "@/lib/error-codes";
 
 // 契约 normative 事实源。tsconfig exclude docs，但测试（vitest）可读文件。
-const CONTRACT_PATH = resolve(
-  process.cwd(),
-  "docs/contracts/error-codes.json",
-);
+const CONTRACT_PATH = resolve(process.cwd(), "docs/contracts/error-codes.json");
 const CONTRACT = JSON.parse(readFileSync(CONTRACT_PATH, "utf-8")) as {
   contract_version: string;
   errors: Record<string, { http: number; retryable: boolean }>;

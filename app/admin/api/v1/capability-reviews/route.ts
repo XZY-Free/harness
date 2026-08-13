@@ -1,20 +1,3 @@
-import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
-import {
-  CAPABILITY_REVIEW_RESOURCE_TYPES,
-  type CapabilityReviewResourceType,
-  type CapabilityReviewState,
-} from "@/lib/persistence/schema/tool-call";
 /**
  * GET / POST /admin/api/v1/capability-reviews — CapabilityReview 集合（阶段 6 S06-C05）。
  *
@@ -49,6 +32,23 @@ import {
   createCapabilityReview,
   listPendingReviews,
 } from "@/lib/capability/risk-review-queries";
+import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
+import {
+  CAPABILITY_REVIEW_RESOURCE_TYPES,
+  type CapabilityReviewResourceType,
+  type CapabilityReviewState,
+} from "@/lib/persistence/schema/tool-call";
 
 export const dynamic = "force-dynamic";
 

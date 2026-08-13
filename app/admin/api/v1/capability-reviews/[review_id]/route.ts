@@ -1,22 +1,3 @@
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  apiError,
-  apiSuccess,
-  getRequestId,
-  resourceNotFound,
-} from "@/lib/http";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
 /**
  * GET / POST /admin/api/v1/capability-reviews/{review_id} — CapabilityReview 单资源（阶段 6 S06-C05）。
  *
@@ -49,6 +30,25 @@ import {
   getCapabilityReviewById,
   resolveCapabilityReview,
 } from "@/lib/capability/risk-review-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 

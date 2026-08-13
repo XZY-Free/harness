@@ -25,12 +25,12 @@ export const SSE_BUFFER_SIZE = 100;
 
 /** SSE 消息结构。id 可选——transient 事件不传 id。 */
 export interface SSEMessage {
- /** SSE id 字段；持久 Event 为十进制 event_sequence，transient 不传。 */
- id?: number;
- /** SSE event 字段（事件类型）。 */
- event: string;
- /** SSE data 字段；对象自动 JSON.stringify。 */
- data: unknown;
+  /** SSE id 字段；持久 Event 为十进制 event_sequence，transient 不传。 */
+  id?: number;
+  /** SSE event 字段（事件类型）。 */
+  event: string;
+  /** SSE data 字段；对象自动 JSON.stringify。 */
+  data: unknown;
 }
 
 /**
@@ -49,45 +49,45 @@ export interface SSEMessage {
  * 其他类型 JSON.stringify 后输出。
  */
 export function formatSSEMessage(message: SSEMessage): string {
- const lines: string[] = [];
- if (message.id !== undefined) {
- lines.push(`id: ${message.id}`);
- }
- lines.push(`event: ${message.event}`);
- const dataStr = typeof message.data === "string" ? message.data : JSON.stringify(message.data);
- for (const line of dataStr.split("\n")) {
- lines.push(`data: ${line}`);
- }
- return `${lines.join("\n")}\n\n`;
+  const lines: string[] = [];
+  if (message.id !== undefined) {
+    lines.push(`id: ${message.id}`);
+  }
+  lines.push(`event: ${message.event}`);
+  const dataStr = typeof message.data === "string" ? message.data : JSON.stringify(message.data);
+  for (const line of dataStr.split("\n")) {
+    lines.push(`data: ${line}`);
+  }
+  return `${lines.join("\n")}\n\n`;
 }
 
 /** createSSEStream 回调选项。 */
 export interface SSEStreamOptions {
- /** 缓冲满（desiredSize < 0）时回调；调用方应发送 stream.backpressure 并关闭。 */
- onBackpressure?: () => void;
- /** 流内部错误回调（enqueue 异常等）。 */
- onError?: (error: unknown) => void;
- /** 消费者取消流（客户端断开）回调。 */
- onAbort?: () => void;
+  /** 缓冲满（desiredSize < 0）时回调；调用方应发送 stream.backpressure 并关闭。 */
+  onBackpressure?: () => void;
+  /** 流内部错误回调（enqueue 异常等）。 */
+  onError?: (error: unknown) => void;
+  /** 消费者取消流（客户端断开）回调。 */
+  onAbort?: () => void;
 }
 
 /** createSSEStream 返回的流句柄。 */
 export interface SSEStreamHandle {
- /** ReadableStream，作为 Response body。 */
- readable: ReadableStream<Uint8Array>;
- /** 底层 controller（背压回调中直接 enqueue 最终消息用）。 */
- controller: ReadableStreamDefaultController<Uint8Array> | null;
- /**
- * 发送一条 SSE 消息。
- *
- * @param event SSE event 字段
- * @param data SSE data 字段（对象自动 JSON.stringify）
- * @param id SSE id 字段（可选；持久 Event 传 event_sequence，transient 不传）
- * @returns true 表示成功入队；false 表示流已关闭或触发背压（消息未入队）
- */
- enqueue: (event: string, data: unknown, id?: number) => boolean;
- /** 关闭流。 */
- close: () => void;
+  /** ReadableStream，作为 Response body。 */
+  readable: ReadableStream<Uint8Array>;
+  /** 底层 controller（背压回调中直接 enqueue 最终消息用）。 */
+  controller: ReadableStreamDefaultController<Uint8Array> | null;
+  /**
+   * 发送一条 SSE 消息。
+   *
+   * @param event SSE event 字段
+   * @param data SSE data 字段（对象自动 JSON.stringify）
+   * @param id SSE id 字段（可选；持久 Event 传 event_sequence，transient 不传）
+   * @returns true 表示成功入队；false 表示流已关闭或触发背压（消息未入队）
+   */
+  enqueue: (event: string, data: unknown, id?: number) => boolean;
+  /** 关闭流。 */
+  close: () => void;
 }
 
 /**
@@ -101,52 +101,52 @@ export interface SSEStreamHandle {
  * 消费者取消流（reader.cancel 或 Response 取消）时触发 cancel → onAbort。
  */
 export function createSSEStream(options?: SSEStreamOptions): SSEStreamHandle {
- const encoder = new TextEncoder();
- let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
- let closed = false;
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let closed = false;
 
- const stream = new ReadableStream<Uint8Array>(
- {
- start(c) {
- controller = c;
- },
- cancel() {
- closed = true;
- options?.onAbort?.();
- },
- },
- new CountQueuingStrategy({ highWaterMark: SSE_BUFFER_SIZE }),
- );
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      start(c) {
+        controller = c;
+      },
+      cancel() {
+        closed = true;
+        options?.onAbort?.();
+      },
+    },
+    new CountQueuingStrategy({ highWaterMark: SSE_BUFFER_SIZE }),
+  );
 
- const enqueue = (event: string, data: unknown, id?: number): boolean => {
- if (closed || !controller) return false;
- // 背压检测：desiredSize < 0 表示缓冲已满
- if (controller.desiredSize !== null && controller.desiredSize < 0) {
- options?.onBackpressure?.();
- return false;
- }
- const message = formatSSEMessage({ id, event, data });
- try {
- controller.enqueue(encoder.encode(message));
- return true;
- } catch (err) {
- closed = true;
- options?.onError?.(err);
- return false;
- }
- };
+  const enqueue = (event: string, data: unknown, id?: number): boolean => {
+    if (closed || !controller) return false;
+    // 背压检测：desiredSize < 0 表示缓冲已满
+    if (controller.desiredSize !== null && controller.desiredSize < 0) {
+      options?.onBackpressure?.();
+      return false;
+    }
+    const message = formatSSEMessage({ id, event, data });
+    try {
+      controller.enqueue(encoder.encode(message));
+      return true;
+    } catch (err) {
+      closed = true;
+      options?.onError?.(err);
+      return false;
+    }
+  };
 
- const close = (): void => {
- if (closed) return;
- closed = true;
- if (controller) {
- try {
- controller.close();
- } catch {
- // 流已关闭，忽略
- }
- }
- };
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    if (controller) {
+      try {
+        controller.close();
+      } catch {
+        // 流已关闭，忽略
+      }
+    }
+  };
 
- return { readable: stream, controller, enqueue, close };
+  return { readable: stream, controller, enqueue, close };
 }

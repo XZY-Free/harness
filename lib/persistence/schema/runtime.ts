@@ -26,18 +26,18 @@ import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
- bigint,
- boolean,
- check,
- datetime,
- index,
- int,
- json,
- mysqlEnum,
- mysqlTable,
- text,
- uniqueIndex,
- varchar,
+  bigint,
+  boolean,
+  check,
+  datetime,
+  index,
+  int,
+  json,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  uniqueIndex,
+  varchar,
 } from "drizzle-orm/mysql-core";
 
 // ─── Runtime Lifecycle ─────────────────────────────────────
@@ -91,45 +91,45 @@ export type RuntimeNetworkZone = (typeof RUNTIME_NETWORK_ZONES)[number];
 // ─── Runtime ───────────────────────────────────────────────
 
 export const runtimeTable = mysqlTable(
- "Runtime",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 租户内稳定唯一 key（slug），例如 "doubao-hosted"。 */
- runtimeKey: varchar("runtimeKey", { length: 128 }).notNull(),
- displayName: varchar("displayName", { length: 256 }).notNull(),
- /** hosted 或 external。 */
- runtimeKind: mysqlEnum("runtimeKind", RUNTIME_KINDS).notNull(),
- /** 负责人 userIdentityId（逻辑外键 → UserIdentity.id）。 */
- ownerUserId: varchar("ownerUserId", { length: 36 }).notNull(),
- lifecycleState: mysqlEnum("lifecycleState", RUNTIME_LIFECYCLE_STATES)
- .notNull()
- .default("draft"),
- /** 当前发布修订 id（逻辑外键 → RuntimeRevision.id）；null 表示未发布。 */
- currentRevisionId: varchar("currentRevisionId", { length: 36 }),
- /** 乐观并发版本号。 */
- versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- deletedAt: datetime("deletedAt", { mode: "date" }),
- },
- (t) => ({
- tenantKeyUq: uniqueIndex("Runtime_tenant_runtimeKey_uq").on(t.tenantId, t.runtimeKey),
- tenantLifecycleUpdatedIdx: index("Runtime_tenant_lifecycle_updated_idx").on(
- t.tenantId,
- t.lifecycleState,
- t.updatedAt,
- ),
- }),
+  "Runtime",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 租户内稳定唯一 key（slug），例如 "doubao-hosted"。 */
+    runtimeKey: varchar("runtimeKey", { length: 128 }).notNull(),
+    displayName: varchar("displayName", { length: 256 }).notNull(),
+    /** hosted 或 external。 */
+    runtimeKind: mysqlEnum("runtimeKind", RUNTIME_KINDS).notNull(),
+    /** 负责人 userIdentityId（逻辑外键 → UserIdentity.id）。 */
+    ownerUserId: varchar("ownerUserId", { length: 36 }).notNull(),
+    lifecycleState: mysqlEnum("lifecycleState", RUNTIME_LIFECYCLE_STATES)
+      .notNull()
+      .default("draft"),
+    /** 当前发布修订 id（逻辑外键 → RuntimeRevision.id）；null 表示未发布。 */
+    currentRevisionId: varchar("currentRevisionId", { length: 36 }),
+    /** 乐观并发版本号。 */
+    versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    deletedAt: datetime("deletedAt", { mode: "date" }),
+  },
+  (t) => ({
+    tenantKeyUq: uniqueIndex("Runtime_tenant_runtimeKey_uq").on(t.tenantId, t.runtimeKey),
+    tenantLifecycleUpdatedIdx: index("Runtime_tenant_lifecycle_updated_idx").on(
+      t.tenantId,
+      t.lifecycleState,
+      t.updatedAt,
+    ),
+  }),
 );
 
 export type Runtime = InferSelectModel<typeof runtimeTable>;
@@ -138,55 +138,55 @@ export type NewRuntime = InferInsertModel<typeof runtimeTable>;
 // ─── RuntimeRevision ───────────────────────────────────────
 
 export const runtimeRevisionTable = mysqlTable(
- "RuntimeRevision",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- runtimeId: varchar("runtimeId", { length: 36 })
- .notNull()
- .references(() => runtimeTable.id),
- /** Runtime 内单调递增修订号。 */
- revisionNo: bigint("revisionNo", { mode: "number" }).notNull(),
- /** 协议类型（agent_runtime_protocol/a2a/...）；varchar 以便扩展。 */
- protocolType: varchar("protocolType", { length: 32 }).notNull(),
- /** Conformance 与发布共同冻结的协议契约版本。 */
- protocolContractRevision: varchar("protocolContractRevision", { length: 128 })
- .notNull()
- .default("agent-runtime-protocol@1"),
- /** 受管连接引用，不保存带 Secret 的 URL。 */
- endpointRef: varchar("endpointRef", { length: 512 }).notNull(),
- /** Runtime 主机/Adapter 制品引用。 */
- runtimeArtifactRef: varchar("runtimeArtifactRef", { length: 512 }).notNull(),
- /** 权威控制面 Artifact；旧 Revision 可为空。 */
- artifactId: varchar("artifactId", { length: 36 }),
- /** 与 artifactId 同时冻结的内容摘要。 */
- artifactDigest: varchar("artifactDigest", { length: 71 }),
- /** 实际能力（来自探测和一致性测试，非手工勾选）。 */
- runtimeCapabilitiesJson: json("runtimeCapabilitiesJson").notNull(),
- /** 身份模式（workload_token/api_key/none/...）；varchar 以便扩展。 */
- identityMode: varchar("identityMode", { length: 32 }).notNull(),
- /** 网络区域（internal/external/dmz/...）；varchar 以便扩展。 */
- networkZone: varchar("networkZone", { length: 32 }).notNull(),
- /** 配置 hash（带算法前缀，如 sha256:...）。 */
- configHash: varchar("configHash", { length: 128 }).notNull(),
- revisionState: mysqlEnum("revisionState", RUNTIME_REVISION_STATES).notNull().default("draft"),
- /** 创建者 userIdentityId 或 serviceId。 */
- createdBy: varchar("createdBy", { length: 128 }).notNull(),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- publishedAt: datetime("publishedAt", { mode: "date", fsp: 3 }),
- },
- (t) => ({
- runtimeRevisionNoUq: uniqueIndex("RuntimeRevision_runtime_revisionNo_uq").on(
- t.runtimeId,
- t.revisionNo,
- ),
- runtimeStateIdx: index("RuntimeRevision_runtime_state_idx").on(t.runtimeId, t.revisionState),
- artifactIdx: index("RuntimeRevision_artifact_idx").on(t.artifactId),
- }),
+  "RuntimeRevision",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    runtimeId: varchar("runtimeId", { length: 36 })
+      .notNull()
+      .references(() => runtimeTable.id),
+    /** Runtime 内单调递增修订号。 */
+    revisionNo: bigint("revisionNo", { mode: "number" }).notNull(),
+    /** 协议类型（agent_runtime_protocol/a2a/...）；varchar 以便扩展。 */
+    protocolType: varchar("protocolType", { length: 32 }).notNull(),
+    /** Conformance 与发布共同冻结的协议契约版本。 */
+    protocolContractRevision: varchar("protocolContractRevision", { length: 128 })
+      .notNull()
+      .default("agent-runtime-protocol@1"),
+    /** 受管连接引用，不保存带 Secret 的 URL。 */
+    endpointRef: varchar("endpointRef", { length: 512 }).notNull(),
+    /** Runtime 主机/Adapter 制品引用。 */
+    runtimeArtifactRef: varchar("runtimeArtifactRef", { length: 512 }).notNull(),
+    /** 权威控制面 Artifact；旧 Revision 可为空。 */
+    artifactId: varchar("artifactId", { length: 36 }),
+    /** 与 artifactId 同时冻结的内容摘要。 */
+    artifactDigest: varchar("artifactDigest", { length: 71 }),
+    /** 实际能力（来自探测和一致性测试，非手工勾选）。 */
+    runtimeCapabilitiesJson: json("runtimeCapabilitiesJson").notNull(),
+    /** 身份模式（workload_token/api_key/none/...）；varchar 以便扩展。 */
+    identityMode: varchar("identityMode", { length: 32 }).notNull(),
+    /** 网络区域（internal/external/dmz/...）；varchar 以便扩展。 */
+    networkZone: varchar("networkZone", { length: 32 }).notNull(),
+    /** 配置 hash（带算法前缀，如 sha256:...）。 */
+    configHash: varchar("configHash", { length: 128 }).notNull(),
+    revisionState: mysqlEnum("revisionState", RUNTIME_REVISION_STATES).notNull().default("draft"),
+    /** 创建者 userIdentityId 或 serviceId。 */
+    createdBy: varchar("createdBy", { length: 128 }).notNull(),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    publishedAt: datetime("publishedAt", { mode: "date", fsp: 3 }),
+  },
+  (t) => ({
+    runtimeRevisionNoUq: uniqueIndex("RuntimeRevision_runtime_revisionNo_uq").on(
+      t.runtimeId,
+      t.revisionNo,
+    ),
+    runtimeStateIdx: index("RuntimeRevision_runtime_state_idx").on(t.runtimeId, t.revisionState),
+    artifactIdx: index("RuntimeRevision_artifact_idx").on(t.artifactId),
+  }),
 );
 
 export type RuntimeRevision = InferSelectModel<typeof runtimeRevisionTable>;
@@ -216,22 +216,22 @@ export type InvocationKind = (typeof INVOCATION_KINDS)[number];
  * - lost：心跳超时，被标记为丢失（终态）。
  */
 export const INVOCATION_EXECUTION_STATES = [
- "queued",
- "running",
- "waiting_user",
- "completed",
- "failed",
- "cancelled",
- "lost",
+  "queued",
+  "running",
+  "waiting_user",
+  "completed",
+  "failed",
+  "cancelled",
+  "lost",
 ] as const;
 export type InvocationExecutionState = (typeof INVOCATION_EXECUTION_STATES)[number];
 
 /** Invocation 终态集合（不可恢复）。 */
 export const INVOCATION_TERMINAL_STATES: readonly InvocationExecutionState[] = [
- "completed",
- "failed",
- "cancelled",
- "lost",
+  "completed",
+  "failed",
+  "cancelled",
+  "lost",
 ];
 
 // ─── Invocation ────────────────────────────────────────────
@@ -247,60 +247,60 @@ export const INVOCATION_TERMINAL_STATES: readonly InvocationExecutionState[] = [
  * - executionState 状态机：queued → running → waiting_user → running → completed/failed/cancelled/lost。
  */
 export const invocationTable = mysqlTable(
- "Invocation",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 会话执行时存在；后台 Job 执行时为空。 */
- threadId: varchar("threadId", { length: 36 }),
- /** 会话执行时存在；后台 Job 执行时为空。 */
- turnId: varchar("turnId", { length: 36 }),
- /** 后台执行时存在；会话执行时为空。 */
- jobId: varchar("jobId", { length: 36 }),
- /** Turn 或 Job 内递增序号。 */
- invocationSequence: bigint("invocationSequence", { mode: "number" }).notNull(),
- invocationKind: mysqlEnum("invocationKind", INVOCATION_KINDS).notNull(),
- executionState: mysqlEnum("executionState", INVOCATION_EXECUTION_STATES)
- .notNull()
- .default("queued"),
- /** 输入 Item（通常是 user_message）。 */
- triggerItemId: varchar("triggerItemId", { length: 36 }),
- /** Regenerate 替代的原 Invocation id。 */
- replacesInvocationId: varchar("replacesInvocationId", { length: 36 }),
- /** 会话 Invocation 当前输出 Item。 */
- outputItemId: varchar("outputItemId", { length: 36 }),
- /** Job 结果引用。 */
- resultRef: varchar("resultRef", { length: 512 }),
- /** 外键 runtime_session_binding（本阶段不实现，先 NULL）。 */
- runtimeSessionBindingId: varchar("runtimeSessionBindingId", { length: 36 }),
- runtimeExecutionRef: varchar("runtimeExecutionRef", { length: 256 }),
- startedAt: datetime("startedAt", { mode: "date", fsp: 3 }),
- finishedAt: datetime("finishedAt", { mode: "date", fsp: 3 }),
- lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
- errorCode: varchar("errorCode", { length: 128 }),
- errorSummary: text("errorSummary"),
- versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- threadSequenceUq: uniqueIndex("Invocation_thread_sequence_uq").on(
- t.threadId,
- t.invocationSequence,
- ),
- jobSequenceUq: uniqueIndex("Invocation_job_sequence_uq").on(t.jobId, t.invocationSequence),
- tenantStateIdx: index("Invocation_tenant_state_idx").on(t.tenantId, t.executionState),
- turnIdx: index("Invocation_turn_idx").on(t.turnId),
- }),
+  "Invocation",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 会话执行时存在；后台 Job 执行时为空。 */
+    threadId: varchar("threadId", { length: 36 }),
+    /** 会话执行时存在；后台 Job 执行时为空。 */
+    turnId: varchar("turnId", { length: 36 }),
+    /** 后台执行时存在；会话执行时为空。 */
+    jobId: varchar("jobId", { length: 36 }),
+    /** Turn 或 Job 内递增序号。 */
+    invocationSequence: bigint("invocationSequence", { mode: "number" }).notNull(),
+    invocationKind: mysqlEnum("invocationKind", INVOCATION_KINDS).notNull(),
+    executionState: mysqlEnum("executionState", INVOCATION_EXECUTION_STATES)
+      .notNull()
+      .default("queued"),
+    /** 输入 Item（通常是 user_message）。 */
+    triggerItemId: varchar("triggerItemId", { length: 36 }),
+    /** Regenerate 替代的原 Invocation id。 */
+    replacesInvocationId: varchar("replacesInvocationId", { length: 36 }),
+    /** 会话 Invocation 当前输出 Item。 */
+    outputItemId: varchar("outputItemId", { length: 36 }),
+    /** Job 结果引用。 */
+    resultRef: varchar("resultRef", { length: 512 }),
+    /** 外键 runtime_session_binding（本阶段不实现，先 NULL）。 */
+    runtimeSessionBindingId: varchar("runtimeSessionBindingId", { length: 36 }),
+    runtimeExecutionRef: varchar("runtimeExecutionRef", { length: 256 }),
+    startedAt: datetime("startedAt", { mode: "date", fsp: 3 }),
+    finishedAt: datetime("finishedAt", { mode: "date", fsp: 3 }),
+    lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
+    errorCode: varchar("errorCode", { length: 128 }),
+    errorSummary: text("errorSummary"),
+    versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    threadSequenceUq: uniqueIndex("Invocation_thread_sequence_uq").on(
+      t.threadId,
+      t.invocationSequence,
+    ),
+    jobSequenceUq: uniqueIndex("Invocation_job_sequence_uq").on(t.jobId, t.invocationSequence),
+    tenantStateIdx: index("Invocation_tenant_state_idx").on(t.tenantId, t.executionState),
+    turnIdx: index("Invocation_turn_idx").on(t.turnId),
+  }),
 );
 
 export type Invocation = InferSelectModel<typeof invocationTable>;
@@ -318,66 +318,66 @@ export type NewInvocation = InferInsertModel<typeof invocationTable>;
  * - configHash 由 computeBindingConfigHash 规范化字段后 SHA-256 计算。
  */
 export const executionBindingTable = mysqlTable(
- "ExecutionBinding",
- {
- /** 主键 = invocationId（1:1）。 */
- invocationId: varchar("invocationId", { length: 36 })
- .primaryKey()
- .notNull()
- .references(() => invocationTable.id),
- tenantId: varchar("tenantId", { length: 36 }).notNull(),
- agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
- runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
- deploymentRouteId: varchar("deploymentRouteId", { length: 36 }).notNull(),
- modelProvider: varchar("modelProvider", { length: 128 }).notNull(),
- modelId: varchar("modelId", { length: 256 }).notNull(),
- modelRevisionRef: varchar("modelRevisionRef", { length: 256 }),
- /** 本阶段不实现 EnvironmentLease，先 NULL。 */
- initialEnvironmentLeaseId: varchar("initialEnvironmentLeaseId", { length: 36 }),
- workspaceBindingId: varchar("workspaceBindingId", { length: 36 }),
- policyRevisionId: varchar("policyRevisionId", { length: 36 }),
- contextCheckpointId: varchar("contextCheckpointId", { length: 36 }),
- routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
- routeActivationId: varchar("routeActivationId", { length: 36 }).notNull(),
- routeContentDigest: varchar("routeContentDigest", { length: 71 }).notNull(),
- agentArtifactId: varchar("agentArtifactId", { length: 36 }).notNull(),
- runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }).notNull(),
- agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }).notNull(),
- runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }).notNull(),
- runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
- capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
- agentAttestationIds: json("agentAttestationIds").$type<string[]>().notNull(),
- runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>().notNull(),
- agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }).notNull(),
- runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }).notNull(),
- conformanceRunId: varchar("conformanceRunId", { length: 36 }).notNull(),
- /** §07: Resolver 输入摘要 — 冻结解析时刻的请求参数 Digest。 */
- resolutionInputDigest: varchar("resolutionInputDigest", { length: 71 }).notNull(),
- /** §07: Projection 版本号 — Binding 用此检测 Projection 滞后。 */
- projectionVersionNo: int("projectionVersionNo").notNull(),
- environmentDefinitionRevisionId: varchar("environmentDefinitionRevisionId", { length: 36 }),
- configHash: varchar("configHash", { length: 128 }).notNull(),
- boundAt: datetime("boundAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- tenantIdx: index("ExecutionBinding_tenant_idx").on(t.tenantId),
- agentRevisionIdx: index("ExecutionBinding_agentRevision_idx").on(t.agentRevisionId),
- runtimeRevisionIdx: index("ExecutionBinding_runtimeRevision_idx").on(t.runtimeRevisionId),
- routeRevisionIdx: index("ExecutionBinding_routeRevision_idx").on(t.routeRevisionId),
- agentArtifactIdx: index("ExecutionBinding_agentArtifact_idx").on(t.agentArtifactId),
- runtimeArtifactIdx: index("ExecutionBinding_runtimeArtifact_idx").on(t.runtimeArtifactId),
- conformanceRunIdx: index("ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
- agentAttestationIdsNonEmpty: check(
- "ExecutionBinding_agentAttestationIds_non_empty",
- sql`JSON_TYPE(${t.agentAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.agentAttestationIds}) >= 1`,
- ),
- runtimeAttestationIdsNonEmpty: check(
- "ExecutionBinding_runtimeAttestationIds_non_empty",
- sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.runtimeAttestationIds}) >= 1`,
- ),
- }),
+  "ExecutionBinding",
+  {
+    /** 主键 = invocationId（1:1）。 */
+    invocationId: varchar("invocationId", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .references(() => invocationTable.id),
+    tenantId: varchar("tenantId", { length: 36 }).notNull(),
+    agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
+    runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
+    deploymentRouteId: varchar("deploymentRouteId", { length: 36 }).notNull(),
+    modelProvider: varchar("modelProvider", { length: 128 }).notNull(),
+    modelId: varchar("modelId", { length: 256 }).notNull(),
+    modelRevisionRef: varchar("modelRevisionRef", { length: 256 }),
+    /** 本阶段不实现 EnvironmentLease，先 NULL。 */
+    initialEnvironmentLeaseId: varchar("initialEnvironmentLeaseId", { length: 36 }),
+    workspaceBindingId: varchar("workspaceBindingId", { length: 36 }),
+    policyRevisionId: varchar("policyRevisionId", { length: 36 }),
+    contextCheckpointId: varchar("contextCheckpointId", { length: 36 }),
+    routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
+    routeActivationId: varchar("routeActivationId", { length: 36 }).notNull(),
+    routeContentDigest: varchar("routeContentDigest", { length: 71 }).notNull(),
+    agentArtifactId: varchar("agentArtifactId", { length: 36 }).notNull(),
+    runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }).notNull(),
+    agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }).notNull(),
+    runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }).notNull(),
+    runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
+    capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
+    agentAttestationIds: json("agentAttestationIds").$type<string[]>().notNull(),
+    runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>().notNull(),
+    agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }).notNull(),
+    runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }).notNull(),
+    conformanceRunId: varchar("conformanceRunId", { length: 36 }).notNull(),
+    /** §07: Resolver 输入摘要 — 冻结解析时刻的请求参数 Digest。 */
+    resolutionInputDigest: varchar("resolutionInputDigest", { length: 71 }).notNull(),
+    /** §07: Projection 版本号 — Binding 用此检测 Projection 滞后。 */
+    projectionVersionNo: int("projectionVersionNo").notNull(),
+    environmentDefinitionRevisionId: varchar("environmentDefinitionRevisionId", { length: 36 }),
+    configHash: varchar("configHash", { length: 128 }).notNull(),
+    boundAt: datetime("boundAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    tenantIdx: index("ExecutionBinding_tenant_idx").on(t.tenantId),
+    agentRevisionIdx: index("ExecutionBinding_agentRevision_idx").on(t.agentRevisionId),
+    runtimeRevisionIdx: index("ExecutionBinding_runtimeRevision_idx").on(t.runtimeRevisionId),
+    routeRevisionIdx: index("ExecutionBinding_routeRevision_idx").on(t.routeRevisionId),
+    agentArtifactIdx: index("ExecutionBinding_agentArtifact_idx").on(t.agentArtifactId),
+    runtimeArtifactIdx: index("ExecutionBinding_runtimeArtifact_idx").on(t.runtimeArtifactId),
+    conformanceRunIdx: index("ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
+    agentAttestationIdsNonEmpty: check(
+      "ExecutionBinding_agentAttestationIds_non_empty",
+      sql`JSON_TYPE(${t.agentAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.agentAttestationIds}) >= 1`,
+    ),
+    runtimeAttestationIdsNonEmpty: check(
+      "ExecutionBinding_runtimeAttestationIds_non_empty",
+      sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.runtimeAttestationIds}) >= 1`,
+    ),
+  }),
 );
 
 export type ExecutionBinding = InferSelectModel<typeof executionBindingTable>;
@@ -395,12 +395,12 @@ export type NewExecutionBinding = InferInsertModel<typeof executionBindingTable>
  * - lost：心跳超时，被标记为丢失。
  */
 export const INVOCATION_ATTEMPT_STATES = [
- "queued",
- "running",
- "completed",
- "failed",
- "cancelled",
- "lost",
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "lost",
 ] as const;
 export type InvocationAttemptState = (typeof INVOCATION_ATTEMPT_STATES)[number];
 
@@ -416,45 +416,45 @@ export type InvocationAttemptState = (typeof INVOCATION_ATTEMPT_STATES)[number];
  * - 一次 Invocation 可以有多个 Attempt（基础设施重试）。
  */
 export const invocationAttemptTable = mysqlTable(
- "InvocationAttempt",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- invocationId: varchar("invocationId", { length: 36 })
- .notNull()
- .references(() => invocationTable.id),
- /** 1 表示第一次基础设施重试。 */
- attemptNo: int("attemptNo").notNull(),
- attemptState: mysqlEnum("attemptState", INVOCATION_ATTEMPT_STATES).notNull().default("queued"),
- environmentLeaseId: varchar("environmentLeaseId", { length: 36 }),
- workerRef: varchar("workerRef", { length: 256 }),
- runtimeExecutionRef: varchar("runtimeExecutionRef", { length: 256 }),
- checkpointRef: varchar("checkpointRef", { length: 512 }),
- retryReasonCode: varchar("retryReasonCode", { length: 64 }),
- startedAt: datetime("startedAt", { mode: "date", fsp: 3 }),
- finishedAt: datetime("finishedAt", { mode: "date", fsp: 3 }),
- lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
- errorCode: varchar("errorCode", { length: 128 }),
- errorSummary: text("errorSummary"),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- invocationAttemptUq: uniqueIndex("InvocationAttempt_invocation_attempt_uq").on(
- t.invocationId,
- t.attemptNo,
- ),
- invocationStateIdx: index("InvocationAttempt_invocation_state_idx").on(
- t.invocationId,
- t.attemptState,
- ),
- }),
+  "InvocationAttempt",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    invocationId: varchar("invocationId", { length: 36 })
+      .notNull()
+      .references(() => invocationTable.id),
+    /** 1 表示第一次基础设施重试。 */
+    attemptNo: int("attemptNo").notNull(),
+    attemptState: mysqlEnum("attemptState", INVOCATION_ATTEMPT_STATES).notNull().default("queued"),
+    environmentLeaseId: varchar("environmentLeaseId", { length: 36 }),
+    workerRef: varchar("workerRef", { length: 256 }),
+    runtimeExecutionRef: varchar("runtimeExecutionRef", { length: 256 }),
+    checkpointRef: varchar("checkpointRef", { length: 512 }),
+    retryReasonCode: varchar("retryReasonCode", { length: 64 }),
+    startedAt: datetime("startedAt", { mode: "date", fsp: 3 }),
+    finishedAt: datetime("finishedAt", { mode: "date", fsp: 3 }),
+    lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
+    errorCode: varchar("errorCode", { length: 128 }),
+    errorSummary: text("errorSummary"),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    invocationAttemptUq: uniqueIndex("InvocationAttempt_invocation_attempt_uq").on(
+      t.invocationId,
+      t.attemptNo,
+    ),
+    invocationStateIdx: index("InvocationAttempt_invocation_state_idx").on(
+      t.invocationId,
+      t.attemptState,
+    ),
+  }),
 );
 
 export type InvocationAttempt = InferSelectModel<typeof invocationAttemptTable>;
@@ -482,35 +482,35 @@ export type ExecutionOwnershipState = (typeof EXECUTION_OWNERSHIP_STATES)[number
  * - 同一时刻只有一个 active ownership。
  */
 export const executionOwnershipTable = mysqlTable(
- "ExecutionOwnership",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- invocationId: varchar("invocationId", { length: 36 }).notNull(),
- deviceId: varchar("deviceId", { length: 36 }),
- environmentLeaseId: varchar("environmentLeaseId", { length: 36 }),
- ownershipState: mysqlEnum("ownershipState", EXECUTION_OWNERSHIP_STATES)
- .notNull()
- .default("active"),
- leaseEpoch: bigint("leaseEpoch", { mode: "number" }).notNull(),
- acquiredAt: datetime("acquiredAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
- releasedAt: datetime("releasedAt", { mode: "date", fsp: 3 }),
- },
- (t) => ({
- invocationEpochUq: uniqueIndex("ExecutionOwnership_invocation_epoch_uq").on(
- t.invocationId,
- t.leaseEpoch,
- ),
- invocationStateIdx: index("ExecutionOwnership_invocation_state_idx").on(
- t.invocationId,
- t.ownershipState,
- ),
- }),
+  "ExecutionOwnership",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    invocationId: varchar("invocationId", { length: 36 }).notNull(),
+    deviceId: varchar("deviceId", { length: 36 }),
+    environmentLeaseId: varchar("environmentLeaseId", { length: 36 }),
+    ownershipState: mysqlEnum("ownershipState", EXECUTION_OWNERSHIP_STATES)
+      .notNull()
+      .default("active"),
+    leaseEpoch: bigint("leaseEpoch", { mode: "number" }).notNull(),
+    acquiredAt: datetime("acquiredAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
+    releasedAt: datetime("releasedAt", { mode: "date", fsp: 3 }),
+  },
+  (t) => ({
+    invocationEpochUq: uniqueIndex("ExecutionOwnership_invocation_epoch_uq").on(
+      t.invocationId,
+      t.leaseEpoch,
+    ),
+    invocationStateIdx: index("ExecutionOwnership_invocation_state_idx").on(
+      t.invocationId,
+      t.ownershipState,
+    ),
+  }),
 );
 
 export type ExecutionOwnership = InferSelectModel<typeof executionOwnershipTable>;
@@ -540,41 +540,41 @@ export type RuntimeSessionBindingState = (typeof RUNTIME_SESSION_BINDING_STATES)
  * - bindingState=active 表示 Runtime 会话活跃；Turn 终态后由平台请求 Runtime 关闭。
  */
 export const runtimeSessionBindingTable = mysqlTable(
- "RuntimeSessionBinding",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
- /** 会话执行时存在；后台 Job 执行时为空。 */
- threadId: varchar("threadId", { length: 36 }),
- /** 后台执行时存在；会话执行时为空。 */
- jobId: varchar("jobId", { length: 36 }),
- /** Runtime 维护的会话引用；平台仅持久化，不解析其内容。 */
- externalSessionRef: varchar("externalSessionRef", { length: 256 }).notNull(),
- bindingState: mysqlEnum("bindingState", RUNTIME_SESSION_BINDING_STATES)
- .notNull()
- .default("active"),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- lastUsedAt: datetime("lastUsedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- closedAt: datetime("closedAt", { mode: "date", fsp: 3 }),
- },
- (t) => ({
- runtimeExternalRefUq: uniqueIndex("RuntimeSessionBinding_runtime_external_ref_uq").on(
- t.runtimeRevisionId,
- t.externalSessionRef,
- ),
- threadIdx: index("RuntimeSessionBinding_thread_idx").on(t.threadId),
- jobIdx: index("RuntimeSessionBinding_job_idx").on(t.jobId),
- }),
+  "RuntimeSessionBinding",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
+    /** 会话执行时存在；后台 Job 执行时为空。 */
+    threadId: varchar("threadId", { length: 36 }),
+    /** 后台执行时存在；会话执行时为空。 */
+    jobId: varchar("jobId", { length: 36 }),
+    /** Runtime 维护的会话引用；平台仅持久化，不解析其内容。 */
+    externalSessionRef: varchar("externalSessionRef", { length: 256 }).notNull(),
+    bindingState: mysqlEnum("bindingState", RUNTIME_SESSION_BINDING_STATES)
+      .notNull()
+      .default("active"),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    lastUsedAt: datetime("lastUsedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    closedAt: datetime("closedAt", { mode: "date", fsp: 3 }),
+  },
+  (t) => ({
+    runtimeExternalRefUq: uniqueIndex("RuntimeSessionBinding_runtime_external_ref_uq").on(
+      t.runtimeRevisionId,
+      t.externalSessionRef,
+    ),
+    threadIdx: index("RuntimeSessionBinding_thread_idx").on(t.threadId),
+    jobIdx: index("RuntimeSessionBinding_job_idx").on(t.jobId),
+  }),
 );
 
 export type RuntimeSessionBinding = InferSelectModel<typeof runtimeSessionBindingTable>;
@@ -607,12 +607,12 @@ export type RuntimeEventIngressState = (typeof RUNTIME_EVENT_INGRESS_STATES)[num
  * transient 通道（response.delta/heartbeat/stdout/stderr）不进入持久账本。
  */
 export const RUNTIME_CANDIDATE_EVENT_TYPES = [
- "progress.snapshot",
- "response.completed",
- "user_action.requested",
- "execution.completed",
- "execution.failed",
- "execution.cancelled",
+  "progress.snapshot",
+  "response.completed",
+  "user_action.requested",
+  "execution.completed",
+  "execution.failed",
+  "execution.cancelled",
 ] as const;
 export type RuntimeCandidateEventType = (typeof RUNTIME_CANDIDATE_EVENT_TYPES)[number];
 
@@ -631,58 +631,58 @@ export type RuntimeCandidateEventType = (typeof RUNTIME_CANDIDATE_EVENT_TYPES)[n
  * - Runtime 不能指定 Thread/Job event sequence、Item id 或直接更新 Item（平台分配）。
  */
 export const runtimeEventIngressTable = mysqlTable(
- "RuntimeEventIngress",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- invocationId: varchar("invocationId", { length: 36 })
- .notNull()
- .references(() => invocationTable.id),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** Runtime 稳定事件 id（幂等键 1）。 */
- producerEventId: varchar("producerEventId", { length: 128 }).notNull(),
- /** Runtime 连续序号（幂等键 2，整个 Invocation 内连续）。 */
- producerSequence: bigint("producerSequence", { mode: "number" }).notNull(),
- /** Runtime Protocol 候选事件类型。 */
- candidateType: varchar("candidateType", { length: 64 }).notNull(),
- schemaVersion: int("schemaVersion").notNull().default(1),
- /** 候选负载 SHA-256 hash（递归排序 key 后 sha256）。 */
- payloadHash: varchar("payloadHash", { length: 128 }).notNull(),
- /** 短期保存原候选负载，或对象引用；可为 null 用于诊断采样。 */
- payloadJson: json("payloadJson"),
- ingressState: mysqlEnum("ingressState", RUNTIME_EVENT_INGRESS_STATES)
- .notNull()
- .default("accepted"),
- /** 映射到 ThreadItem（mapped 时填）。 */
- mappedItemId: varchar("mappedItemId", { length: 36 }),
- /** 映射到 ThreadEvent（mapped 时填）。 */
- mappedThreadEventId: varchar("mappedThreadEventId", { length: 36 }),
- /** 映射到 JobEvent（本阶段不用）。 */
- mappedJobEventId: varchar("mappedJobEventId", { length: 36 }),
- receivedAt: datetime("receivedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- mappedAt: datetime("mappedAt", { mode: "date", fsp: 3 }),
- rejectedReason: varchar("rejectedReason", { length: 256 }),
- },
- (t) => ({
- invocationProducerEventUq: uniqueIndex("RuntimeEventIngress_invocation_producer_event_uq").on(
- t.invocationId,
- t.producerEventId,
- ),
- invocationProducerSeqUq: uniqueIndex("RuntimeEventIngress_invocation_producer_seq_uq").on(
- t.invocationId,
- t.producerSequence,
- ),
- invocationStateIdx: index("RuntimeEventIngress_invocation_state_idx").on(
- t.invocationId,
- t.ingressState,
- ),
- }),
+  "RuntimeEventIngress",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    invocationId: varchar("invocationId", { length: 36 })
+      .notNull()
+      .references(() => invocationTable.id),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** Runtime 稳定事件 id（幂等键 1）。 */
+    producerEventId: varchar("producerEventId", { length: 128 }).notNull(),
+    /** Runtime 连续序号（幂等键 2，整个 Invocation 内连续）。 */
+    producerSequence: bigint("producerSequence", { mode: "number" }).notNull(),
+    /** Runtime Protocol 候选事件类型。 */
+    candidateType: varchar("candidateType", { length: 64 }).notNull(),
+    schemaVersion: int("schemaVersion").notNull().default(1),
+    /** 候选负载 SHA-256 hash（递归排序 key 后 sha256）。 */
+    payloadHash: varchar("payloadHash", { length: 128 }).notNull(),
+    /** 短期保存原候选负载，或对象引用；可为 null 用于诊断采样。 */
+    payloadJson: json("payloadJson"),
+    ingressState: mysqlEnum("ingressState", RUNTIME_EVENT_INGRESS_STATES)
+      .notNull()
+      .default("accepted"),
+    /** 映射到 ThreadItem（mapped 时填）。 */
+    mappedItemId: varchar("mappedItemId", { length: 36 }),
+    /** 映射到 ThreadEvent（mapped 时填）。 */
+    mappedThreadEventId: varchar("mappedThreadEventId", { length: 36 }),
+    /** 映射到 JobEvent（本阶段不用）。 */
+    mappedJobEventId: varchar("mappedJobEventId", { length: 36 }),
+    receivedAt: datetime("receivedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    mappedAt: datetime("mappedAt", { mode: "date", fsp: 3 }),
+    rejectedReason: varchar("rejectedReason", { length: 256 }),
+  },
+  (t) => ({
+    invocationProducerEventUq: uniqueIndex("RuntimeEventIngress_invocation_producer_event_uq").on(
+      t.invocationId,
+      t.producerEventId,
+    ),
+    invocationProducerSeqUq: uniqueIndex("RuntimeEventIngress_invocation_producer_seq_uq").on(
+      t.invocationId,
+      t.producerSequence,
+    ),
+    invocationStateIdx: index("RuntimeEventIngress_invocation_state_idx").on(
+      t.invocationId,
+      t.ingressState,
+    ),
+  }),
 );
 
 export type RuntimeEventIngress = InferSelectModel<typeof runtimeEventIngressTable>;

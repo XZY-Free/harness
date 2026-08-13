@@ -1,3 +1,17 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
+import {
+  MemoryCandidateAlreadyResolvedError,
+  getMemoryCandidateById,
+  isReviewableScopeType,
+  isScopeNarrowingValid,
+  resolveMemoryCandidate,
+} from "@/lib/context/memory-queries";
 /**
  * POST /admin/api/v1/memory-candidates/{candidate_id}:resolve — 管理员复核 Memory Candidate（阶段 7 S07-C03）。
  *
@@ -55,20 +69,6 @@ import {
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
 import { MEMORY_SCOPE_TYPES, type MemoryScopeType } from "@/lib/persistence/schema/memory";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
-import {
-  MemoryCandidateAlreadyResolvedError,
-  getMemoryCandidateById,
-  isReviewableScopeType,
-  isScopeNarrowingValid,
-  resolveMemoryCandidate,
-} from "@/lib/context/memory-queries";
 
 export const dynamic = "force-dynamic";
 

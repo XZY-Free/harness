@@ -20,13 +20,13 @@ let ensuring: Promise<void> | null = null;
 
 /** 确保镜像存在（并发安全：首次调用 build，后续并发复用同一 promise）。 */
 export function ensureRuntimeImage(): Promise<void> {
- if (ensuring) return ensuring;
- ensuring = (async () => {
- const image = runtimeConfig.runtimeImage;
- if (await imageExists(image)) return;
- await buildImage(image, DOCKERFILE_DIR);
- })().finally(() => {
- ensuring = null;
- });
- return ensuring;
+  if (ensuring) return ensuring;
+  ensuring = (async () => {
+    const image = runtimeConfig.runtimeImage;
+    if (await imageExists(image)) return;
+    await buildImage(image, DOCKERFILE_DIR);
+  })().finally(() => {
+    ensuring = null;
+  });
+  return ensuring;
 }

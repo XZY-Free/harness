@@ -15,63 +15,63 @@
  */
 
 import {
- cleanupExpiredMemories,
- cleanupOldSnapshots,
- cleanupOldSubagentRuns,
- cleanupSupersededSummaries,
+  cleanupExpiredMemories,
+  cleanupOldSnapshots,
+  cleanupOldSubagentRuns,
+  cleanupSupersededSummaries,
 } from "@/lib/db/queries";
 import { purgeExpiredThreadDetails } from "@/lib/db/retention";
 import { logger } from "@/lib/logger";
 
 async function main() {
- const result = await purgeExpiredThreadDetails();
- if (result.skipped) {
- logger.info("[purge-retention] 跳过清理", { reason: result.reason });
- console.log("跳过清理:", result.reason);
- } else {
- logger.info("[purge-retention] 清理完成", result);
- console.log("清理完成:", JSON.stringify(result, null, 2));
- }
- // supersede 链 GC —— 物理删除 7 天前已 supersede 的旧 summary（全 thread）
- const supersededPurged = await cleanupSupersededSummaries().catch((err) => {
- logger.warn("[purge-retention] supersede GC 失败", { error: String(err) });
- return 0;
- });
- if (supersededPurged > 0) {
- logger.info("[purge-retention] supersede 链 GC 完成", { supersededPurged });
- console.log("supersede 链 GC 完成:", supersededPurged);
- }
- // SubagentRun TTL —— 物理删除 14 天前终态 run
- const subagentPurged = await cleanupOldSubagentRuns().catch((err) => {
- logger.warn("[purge-retention] SubagentRun GC 失败", { error: String(err) });
- return 0;
- });
- if (subagentPurged > 0) {
- logger.info("[purge-retention] SubagentRun GC 完成", { subagentPurged });
- console.log("SubagentRun GC 完成:", subagentPurged);
- }
- // 清理过期记忆（expiresAt < now）
- const memoryPurged = await cleanupExpiredMemories().catch((err) => {
- logger.warn("[purge-retention] 过期记忆清理失败", { error: String(err) });
- return 0;
- });
- if (memoryPurged > 0) {
- logger.info("[purge-retention] 过期记忆清理完成", { memoryPurged });
- console.log("过期记忆清理完成:", memoryPurged);
- }
- // 清理超期 ContextSnapshot（全 thread，不限终态）
- const snapshotPurged = await cleanupOldSnapshots().catch((err) => {
- logger.warn("[purge-retention] 旧 snapshot 清理失败", { error: String(err) });
- return 0;
- });
- if (snapshotPurged > 0) {
- logger.info("[purge-retention] 旧 snapshot 清理完成", { snapshotPurged });
- console.log("旧 snapshot 清理完成:", snapshotPurged);
- }
+  const result = await purgeExpiredThreadDetails();
+  if (result.skipped) {
+    logger.info("[purge-retention] 跳过清理", { reason: result.reason });
+    console.log("跳过清理:", result.reason);
+  } else {
+    logger.info("[purge-retention] 清理完成", result);
+    console.log("清理完成:", JSON.stringify(result, null, 2));
+  }
+  // supersede 链 GC —— 物理删除 7 天前已 supersede 的旧 summary（全 thread）
+  const supersededPurged = await cleanupSupersededSummaries().catch((err) => {
+    logger.warn("[purge-retention] supersede GC 失败", { error: String(err) });
+    return 0;
+  });
+  if (supersededPurged > 0) {
+    logger.info("[purge-retention] supersede 链 GC 完成", { supersededPurged });
+    console.log("supersede 链 GC 完成:", supersededPurged);
+  }
+  // SubagentRun TTL —— 物理删除 14 天前终态 run
+  const subagentPurged = await cleanupOldSubagentRuns().catch((err) => {
+    logger.warn("[purge-retention] SubagentRun GC 失败", { error: String(err) });
+    return 0;
+  });
+  if (subagentPurged > 0) {
+    logger.info("[purge-retention] SubagentRun GC 完成", { subagentPurged });
+    console.log("SubagentRun GC 完成:", subagentPurged);
+  }
+  // 清理过期记忆（expiresAt < now）
+  const memoryPurged = await cleanupExpiredMemories().catch((err) => {
+    logger.warn("[purge-retention] 过期记忆清理失败", { error: String(err) });
+    return 0;
+  });
+  if (memoryPurged > 0) {
+    logger.info("[purge-retention] 过期记忆清理完成", { memoryPurged });
+    console.log("过期记忆清理完成:", memoryPurged);
+  }
+  // 清理超期 ContextSnapshot（全 thread，不限终态）
+  const snapshotPurged = await cleanupOldSnapshots().catch((err) => {
+    logger.warn("[purge-retention] 旧 snapshot 清理失败", { error: String(err) });
+    return 0;
+  });
+  if (snapshotPurged > 0) {
+    logger.info("[purge-retention] 旧 snapshot 清理完成", { snapshotPurged });
+    console.log("旧 snapshot 清理完成:", snapshotPurged);
+  }
 }
 
 main().catch((err) => {
- logger.error("[purge-retention] 清理失败", { error: String(err) });
- console.error("清理失败:", err);
- process.exit(1);
+  logger.error("[purge-retention] 清理失败", { error: String(err) });
+  console.error("清理失败:", err);
+  process.exit(1);
 });

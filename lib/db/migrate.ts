@@ -12,27 +12,27 @@ import { db } from "./client";
  * 超时仍失败 → throw(fail-closed,启动失败优于表结构不一致)。
  */
 export async function runMigrations(): Promise<void> {
- const maxWaitMs = 120_000;
- const deadline = Date.now() + maxWaitMs;
- let got = 0;
- while (Date.now() < deadline && got !== 1) {
- const lockResult = await db
- .execute(sql`SELECT GET_LOCK('snow_migrate', 10) AS got`)
- .catch(() => null);
- const rows = lockResult?.[0] as unknown as Array<{ got?: number }> | undefined;
- got = rows?.[0]?.got ?? 0;
- if (got !== 1) {
- logger.warn("[migrate] 未获迁移锁,等待其他实例完成迁移", { got });
- await new Promise((r) => setTimeout(r, 5_000));
- }
- }
- if (got !== 1) {
- throw new Error("[migrate] 获迁移锁超时(120s),表结构可能未就绪——fail-closed");
- }
- try {
- await migrate(db, { migrationsFolder: "./drizzle" });
- logger.info("db migrations applied");
- } finally {
- await db.execute(sql`SELECT RELEASE_LOCK('snow_migrate')`).catch(() => {});
- }
+  const maxWaitMs = 120_000;
+  const deadline = Date.now() + maxWaitMs;
+  let got = 0;
+  while (Date.now() < deadline && got !== 1) {
+    const lockResult = await db
+      .execute(sql`SELECT GET_LOCK('snow_migrate', 10) AS got`)
+      .catch(() => null);
+    const rows = lockResult?.[0] as unknown as Array<{ got?: number }> | undefined;
+    got = rows?.[0]?.got ?? 0;
+    if (got !== 1) {
+      logger.warn("[migrate] 未获迁移锁,等待其他实例完成迁移", { got });
+      await new Promise((r) => setTimeout(r, 5_000));
+    }
+  }
+  if (got !== 1) {
+    throw new Error("[migrate] 获迁移锁超时(120s),表结构可能未就绪——fail-closed");
+  }
+  try {
+    await migrate(db, { migrationsFolder: "./drizzle" });
+    logger.info("db migrations applied");
+  } finally {
+    await db.execute(sql`SELECT RELEASE_LOCK('snow_migrate')`).catch(() => {});
+  }
 }

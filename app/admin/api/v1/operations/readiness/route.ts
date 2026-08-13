@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/operations/readiness — 查询系统就绪状态（S12-W03）。
  *
@@ -18,13 +25,6 @@
  * - scope 非法 → 400 REQUEST_SCHEMA_INVALID
  */
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 import {
   type ReadinessScope,
   checkReadiness,

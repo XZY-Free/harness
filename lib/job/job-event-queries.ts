@@ -19,14 +19,14 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import {
- type JobEvent,
- type JobEventActorType,
- type JobEventType,
- jobEventTable,
- jobTable,
-} from "@/lib/persistence/schema/job";
 import { JobNotFoundError } from "@/lib/job/errors";
+import {
+  type JobEvent,
+  type JobEventActorType,
+  type JobEventType,
+  jobEventTable,
+  jobTable,
+} from "@/lib/persistence/schema/job";
 import { and, asc, eq, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -34,14 +34,14 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** insertJobEvent 写入参数。 */
 export interface JobEventInput {
- eventType: JobEventType;
- invocationId?: string;
- actorType: JobEventActorType;
- actorId?: string;
- payload: Record<string, unknown>;
- correlationId?: string;
- causationId?: string;
- idempotencyKey?: string;
+  eventType: JobEventType;
+  invocationId?: string;
+  actorType: JobEventActorType;
+  actorId?: string;
+  payload: Record<string, unknown>;
+  correlationId?: string;
+  causationId?: string;
+  idempotencyKey?: string;
 }
 
 /**
@@ -57,24 +57,24 @@ export interface JobEventInput {
  * @returns 分配的起始 sequence（连续）
  */
 export async function allocateJobEventSequences(tx: Tx, jobId: string, count = 1): Promise<number> {
- // SELECT ... FOR UPDATE 锁定 Job 行
- const [row] = await tx
- .select({ lastEventSequence: jobTable.lastEventSequence })
- .from(jobTable)
- .where(eq(jobTable.id, jobId))
- .for("update")
- .limit(1);
+  // SELECT ... FOR UPDATE 锁定 Job 行
+  const [row] = await tx
+    .select({ lastEventSequence: jobTable.lastEventSequence })
+    .from(jobTable)
+    .where(eq(jobTable.id, jobId))
+    .for("update")
+    .limit(1);
 
- if (!row) {
- throw new JobNotFoundError(jobId);
- }
+  if (!row) {
+    throw new JobNotFoundError(jobId);
+  }
 
- const startSequence = row.lastEventSequence + 1;
- const newLast = row.lastEventSequence + count;
+  const startSequence = row.lastEventSequence + 1;
+  const newLast = row.lastEventSequence + count;
 
- await tx.update(jobTable).set({ lastEventSequence: newLast }).where(eq(jobTable.id, jobId));
+  await tx.update(jobTable).set({ lastEventSequence: newLast }).where(eq(jobTable.id, jobId));
 
- return startSequence;
+  return startSequence;
 }
 
 /**
@@ -86,37 +86,37 @@ export async function allocateJobEventSequences(tx: Tx, jobId: string, count = 1
  * 调用方应为不同 eventType 加后缀（如 `${base}:${eventType}`）。
  */
 export async function insertJobEvent(
- tx: Tx,
- tenantId: string,
- jobId: string,
- sequence: number,
- input: JobEventInput,
+  tx: Tx,
+  tenantId: string,
+  jobId: string,
+  sequence: number,
+  input: JobEventInput,
 ): Promise<JobEvent> {
- const id = randomUUID();
- const now = new Date();
- await tx.insert(jobEventTable).values({
- id,
- tenantId,
- jobId,
- eventSequence: sequence,
- eventType: input.eventType,
- schemaVersion: 1,
- invocationId: input.invocationId ?? null,
- actorType: input.actorType,
- actorId: input.actorId ?? null,
- payloadJson: input.payload,
- correlationId: input.correlationId ?? null,
- causationId: input.causationId ?? null,
- idempotencyKey: input.idempotencyKey ?? null,
- occurredAt: now,
- ingestedAt: now,
- });
+  const id = randomUUID();
+  const now = new Date();
+  await tx.insert(jobEventTable).values({
+    id,
+    tenantId,
+    jobId,
+    eventSequence: sequence,
+    eventType: input.eventType,
+    schemaVersion: 1,
+    invocationId: input.invocationId ?? null,
+    actorType: input.actorType,
+    actorId: input.actorId ?? null,
+    payloadJson: input.payload,
+    correlationId: input.correlationId ?? null,
+    causationId: input.causationId ?? null,
+    idempotencyKey: input.idempotencyKey ?? null,
+    occurredAt: now,
+    ingestedAt: now,
+  });
 
- const [row] = await tx.select().from(jobEventTable).where(eq(jobEventTable.id, id)).limit(1);
- if (!row) {
- throw new Error(`insertJobEvent: 行未找到（id=${id}）`);
- }
- return row;
+  const [row] = await tx.select().from(jobEventTable).where(eq(jobEventTable.id, id)).limit(1);
+  if (!row) {
+    throw new Error(`insertJobEvent: 行未找到（id=${id}）`);
+  }
+  return row;
 }
 
 /**
@@ -126,17 +126,17 @@ export async function insertJobEvent(
  * @param limit 默认 100
  */
 export async function getJobEvents(
- tenantId: string,
- jobId: string,
- options?: { limit?: number },
+  tenantId: string,
+  jobId: string,
+  options?: { limit?: number },
 ): Promise<JobEvent[]> {
- const limit = options?.limit ?? 100;
- return db
- .select()
- .from(jobEventTable)
- .where(and(eq(jobEventTable.tenantId, tenantId), eq(jobEventTable.jobId, jobId)))
- .orderBy(asc(jobEventTable.eventSequence))
- .limit(limit);
+  const limit = options?.limit ?? 100;
+  return db
+    .select()
+    .from(jobEventTable)
+    .where(and(eq(jobEventTable.tenantId, tenantId), eq(jobEventTable.jobId, jobId)))
+    .orderBy(asc(jobEventTable.eventSequence))
+    .limit(limit);
 }
 
 /**
@@ -146,44 +146,44 @@ export async function getJobEvents(
  * 跨租户隔离：先校验 Job 属于该 tenantId。
  */
 export async function getJobEventsSince(
- tenantId: string,
- jobId: string,
- afterSequence: number,
- options?: { limit?: number },
+  tenantId: string,
+  jobId: string,
+  afterSequence: number,
+  options?: { limit?: number },
 ): Promise<JobEvent[]> {
- const limit = options?.limit ?? 100;
- // 先校验 Job 跨租户可见
- const [job] = await db
- .select({ id: jobTable.id })
- .from(jobTable)
- .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
- .limit(1);
- if (!job) return [];
+  const limit = options?.limit ?? 100;
+  // 先校验 Job 跨租户可见
+  const [job] = await db
+    .select({ id: jobTable.id })
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
+    .limit(1);
+  if (!job) return [];
 
- return db
- .select()
- .from(jobEventTable)
- .where(
- and(
- eq(jobEventTable.tenantId, tenantId),
- eq(jobEventTable.jobId, jobId),
- sql`${jobEventTable.eventSequence} > ${afterSequence}`,
- ),
- )
- .orderBy(asc(jobEventTable.eventSequence))
- .limit(limit);
+  return db
+    .select()
+    .from(jobEventTable)
+    .where(
+      and(
+        eq(jobEventTable.tenantId, tenantId),
+        eq(jobEventTable.jobId, jobId),
+        sql`${jobEventTable.eventSequence} > ${afterSequence}`,
+      ),
+    )
+    .orderBy(asc(jobEventTable.eventSequence))
+    .limit(limit);
 }
 
 /** 获取 Job 最新 event sequence（用于 projection checkpoint）。 */
 export async function getLatestJobEventSequence(
- tenantId: string,
- jobId: string,
+  tenantId: string,
+  jobId: string,
 ): Promise<number | null> {
- const [job] = await db
- .select({ lastEventSequence: jobTable.lastEventSequence })
- .from(jobTable)
- .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
- .limit(1);
- if (!job) return null;
- return job.lastEventSequence;
+  const [job] = await db
+    .select({ lastEventSequence: jobTable.lastEventSequence })
+    .from(jobTable)
+    .where(and(eq(jobTable.tenantId, tenantId), eq(jobTable.id, jobId)))
+    .limit(1);
+  if (!job) return null;
+  return job.lastEventSequence;
 }

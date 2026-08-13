@@ -12,8 +12,8 @@ import {
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
-import { createPublishRuntimeRevision } from "@/lib/runtime/provisioning/publish-runtime-revision";
-import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
+import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { MANDATORY_GATE_CASES } from "@/lib/runtime/domain/runtime-conformance";
 import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
@@ -27,13 +27,13 @@ import {
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
 } from "@/lib/runtime/persistence/runtime-revision-queries";
-import { seedVerifiedRuntimeAttestation } from "@/lib/runtime/test-support/seed-verified-runtime-attestation";
+import { createPublishRuntimeRevision } from "@/lib/runtime/provisioning/publish-runtime-revision";
+import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import {
   buildDsseConformanceEnvelope,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
-import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
-import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
+import { seedVerifiedRuntimeAttestation } from "@/lib/runtime/test-support/seed-verified-runtime-attestation";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 

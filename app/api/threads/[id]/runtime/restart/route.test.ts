@@ -33,7 +33,7 @@ import { getThreadByIdForUser, requireThreadForUser } from "@/lib/db/queries";
 const mockUser = { id: "u1", email: "test@example.com" };
 
 function makeRequest(method: "POST" | "GET" = "POST"): Request {
-  return new Request(`http://localhost/api/threads/t1/runtime/restart`, { method });
+  return new Request("http://localhost/api/threads/t1/runtime/restart", { method });
 }
 
 describe("POST /api/threads/[id]/runtime/restart", () => {

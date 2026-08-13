@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/deletion-requests/{deletion_request_id} — 查询管理员删除进度（S12-W07）。
  *
@@ -24,13 +31,6 @@ import {
   listDeletionSteps,
 } from "@/lib/identity/deletion-request-queries";
 import type { DeletionStep } from "@/lib/persistence/schema/deletion-request";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

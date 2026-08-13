@@ -1,3 +1,19 @@
+import {
+  computeCandidateKey,
+  createMemoryCandidateWithEntry,
+  deriveSourceFromCandidate,
+  evaluateMemoryPolicy,
+  findMemoryCandidateByCandidateKey,
+  insertMemoryCandidate,
+  isValidMemoryContentHash,
+  verifyMemoryContentHash,
+} from "@/lib/context/memory-queries";
+import {
+  type GatewayPrincipal,
+  gatewayAuthErrorResponse,
+  gatewaySchemaInvalidTable,
+  resolveGatewayPrincipal,
+} from "@/lib/gateway/route-helpers";
 /**
  * POST /gateway/v1/memory-candidates — 提交 Memory Candidate（阶段 7 S07-C03）。
  *
@@ -58,22 +74,6 @@ import {
   SENSITIVITY_CLASSES,
   type SensitivityClass,
 } from "@/lib/persistence/schema/memory";
-import {
-  computeCandidateKey,
-  createMemoryCandidateWithEntry,
-  deriveSourceFromCandidate,
-  evaluateMemoryPolicy,
-  findMemoryCandidateByCandidateKey,
-  insertMemoryCandidate,
-  isValidMemoryContentHash,
-  verifyMemoryContentHash,
-} from "@/lib/context/memory-queries";
-import {
-  type GatewayPrincipal,
-  gatewayAuthErrorResponse,
-  gatewaySchemaInvalidTable,
-  resolveGatewayPrincipal,
-} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

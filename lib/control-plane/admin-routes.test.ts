@@ -13,18 +13,17 @@
 import { createHash } from "node:crypto";
 import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]:publish/route";
 import { POST as withdrawAgentRevisionPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]:withdraw/route";
-import { GET as getAgentRevisionGET } from "@/app/admin/api/v1/agent-revisions/[revision_id]/route";
 import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations:verify/route";
+import { POST as disableRoutePOST } from "@/app/admin/api/v1/deployment-routes/[route_id]:disable/route";
+import { GET as getAgentRevisionGET } from "@/app/admin/api/v1/agent-revisions/[revision_id]/route";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { GET as getAgentGET } from "@/app/admin/api/v1/agents/[agent_id]/route";
-import { POST as disableRoutePOST } from "@/app/admin/api/v1/deployment-routes/[route_id]:disable/route";
 import { PUT as activateRouteSetPUT } from "@/app/admin/api/v1/deployment-route-sets/[route_set_id]/activation/route";
 import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
-import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -32,46 +31,41 @@ import {
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
-  buildDsseArtifactAttestationEnvelope,
-  generateTestBuilderKey,
-  type PredicateSupplyChain,
-  type TestBuilderKey,
-} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
-import {
   resetArtifactStoreOverrides,
   setArtifactStoreOverride,
   setBuilderKeyRegistryOverride,
 } from "@/lib/artifacts/infrastructure/artifact-store-provider";
 import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { listAttestationsByRevision } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import {
+  type PredicateSupplyChain,
+  type TestBuilderKey,
+  buildDsseArtifactAttestationEnvelope,
+  generateTestBuilderKey,
+} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import type { ActivateRouteSetResponse } from "@/lib/control-plane-client/contracts/route";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { auditEvent, idempotencyRecord } from "@/lib/persistence/schema/control-plane";
-import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { findIdempotencyRecord } from "@/lib/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { auditEvent, idempotencyRecord } from "@/lib/persistence/schema/control-plane";
+import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
-import {
-  createRouteSet,
-  getRouteSetById,
-} from "@/lib/routes/application/deployment-route-service";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
+import { createRouteSet, getRouteSetById } from "@/lib/routes/application/deployment-route-service";
 import { RouteIdempotencyCompletionError } from "@/lib/routes/domain/route-revision";
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
+import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
-import {
-  routeActivation,
-  routeRevision,
-} from "@/lib/routes/persistence/route-revision-record";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -132,7 +126,12 @@ function buildCleanSbom(): unknown {
     version: 1,
     metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
     components: [
-      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
+      {
+        type: "library",
+        name: "lodash",
+        version: "4.17.21",
+        licenses: [{ license: { id: "MIT" } }],
+      },
     ],
   };
 }
@@ -215,8 +214,16 @@ async function createVerifiedAttestationDirect(
   const store = new InMemoryManagedArtifactStore();
   const sbomContent = buildCleanSbom();
   const provenanceContent = buildValidProvenance();
-  const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent, provenanceRef: provRef, provenanceContent };
-  store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+  const supplyChain: PredicateSupplyChain = {
+    sbomRef,
+    sbomContent,
+    provenanceRef: provRef,
+    provenanceContent,
+  };
+  store.writeDsseEnvelope(
+    sigRef,
+    buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain),
+  );
   store.writeSbom(sbomRef, sbomContent);
   store.writeProvenance(provRef, provenanceContent);
   const attestation = await verifyAndPersistAttestation(
@@ -564,9 +571,17 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const provRef = `attestation:provenance:${digest.slice(7, 15)}`;
     const sbomDoc = buildCleanSbom();
     const provDoc = buildValidProvenance();
-    const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
+    const supplyChain: PredicateSupplyChain = {
+      sbomRef,
+      sbomContent: sbomDoc,
+      provenanceRef: provRef,
+      provenanceContent: provDoc,
+    };
     const store = new InMemoryManagedArtifactStore();
-    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+    store.writeDsseEnvelope(
+      sigRef,
+      buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain),
+    );
     store.writeSbom(sbomRef, sbomDoc);
     store.writeProvenance(provRef, provDoc);
     setArtifactStoreOverride(store);
@@ -635,10 +650,18 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const provRef = "attestation:provenance:bad";
     const sbomDoc = buildCleanSbom();
     const provDoc = buildValidProvenance();
-    const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
+    const supplyChain: PredicateSupplyChain = {
+      sbomRef,
+      sbomContent: sbomDoc,
+      provenanceRef: provRef,
+      provenanceContent: provDoc,
+    };
     const store = new InMemoryManagedArtifactStore();
     // 用 badKeyPair 签名（公钥与白名单不一致）
-    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(badKeyPair, digest, supplyChain));
+    store.writeDsseEnvelope(
+      sigRef,
+      buildDsseArtifactAttestationEnvelope(badKeyPair, digest, supplyChain),
+    );
     store.writeSbom(sbomRef, sbomDoc);
     store.writeProvenance(provRef, provDoc);
     setArtifactStoreOverride(store);
@@ -696,9 +719,17 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const provRef = "attestation:provenance:replay";
     const sbomDoc = buildCleanSbom();
     const provDoc = buildValidProvenance();
-    const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
+    const supplyChain: PredicateSupplyChain = {
+      sbomRef,
+      sbomContent: sbomDoc,
+      provenanceRef: provRef,
+      provenanceContent: provDoc,
+    };
     const store = new InMemoryManagedArtifactStore();
-    store.writeDsseEnvelope(sigRef, buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain));
+    store.writeDsseEnvelope(
+      sigRef,
+      buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain),
+    );
     store.writeSbom(sbomRef, sbomDoc);
     store.writeProvenance(provRef, provDoc);
     setArtifactStoreOverride(store);

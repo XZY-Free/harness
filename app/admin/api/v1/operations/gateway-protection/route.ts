@@ -1,3 +1,12 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+} from "@/lib/admin/route-helpers";
+import { getOverloadProtector } from "@/lib/gateway/overload-protection";
+import { getRateLimiter } from "@/lib/gateway/rate-limiter";
+import { getSSEConnectionQuota } from "@/lib/gateway/sse-connection-quota";
 /**
  * GET /admin/api/v1/operations/gateway-protection — 查看网关保护状态（S12-W02）。
  *
@@ -16,15 +25,6 @@
  * - 缺少 action scope → 403 ACTION_SCOPE_DENIED
  */
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-} from "@/lib/admin/route-helpers";
-import { getOverloadProtector } from "@/lib/gateway/overload-protection";
-import { getRateLimiter } from "@/lib/gateway/rate-limiter";
-import { getSSEConnectionQuota } from "@/lib/gateway/sse-connection-quota";
 
 export const dynamic = "force-dynamic";
 

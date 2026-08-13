@@ -16,26 +16,26 @@ import { type QaStorageState, openQaPage, viewportOf } from "@/lib/qa/browser";
  */
 
 export interface A11yResult {
- ok: boolean;
- kind: "a11y";
- failures: QaFailure[];
- viewports: number[];
- durationMs: number;
- artifactPath?: string | null;
- runner?: QaRunner;
+  ok: boolean;
+  kind: "a11y";
+  failures: QaFailure[];
+  viewports: number[];
+  durationMs: number;
+  artifactPath?: string | null;
+  runner?: QaRunner;
 }
 
 function errMsg(error: unknown): string {
- return error instanceof Error ? error.message : String(error);
+  return error instanceof Error ? error.message : String(error);
 }
 
 interface A11yProbe {
- imagesWithoutAlt: number;
- controlsWithoutLabel: string[];
- lowContrast: number;
- invisibleText: number;
- badTabindex: number;
- hasLandmark: boolean;
+  imagesWithoutAlt: number;
+  controlsWithoutLabel: string[];
+  lowContrast: number;
+  invisibleText: number;
+  badTabindex: number;
+  hasLandmark: boolean;
 }
 
 // WCAG 相对亮度 + 对比度公式。
@@ -122,99 +122,99 @@ const A11Y_SCRIPT = `(() => {
 })()`;
 
 export async function runAccessibilitySmokeUrl(opts: {
- url: string;
- previewToken?: string;
- threadId: string;
- checkId: string;
- viewport?: number;
- /** V9 阶段 9：从 UserBrowserProfile 派生的登录态，用于测试需登录的页面。 */
- storageState?: QaStorageState;
+  url: string;
+  previewToken?: string;
+  threadId: string;
+  checkId: string;
+  viewport?: number;
+  /** V9 阶段 9：从 UserBrowserProfile 派生的登录态，用于测试需登录的页面。 */
+  storageState?: QaStorageState;
 }): Promise<A11yResult> {
- const width = opts.viewport ?? qaConfig.viewports[qaConfig.viewports.length - 1] ?? 1280;
- const start = Date.now();
- const failures: QaFailure[] = [];
+  const width = opts.viewport ?? qaConfig.viewports[qaConfig.viewports.length - 1] ?? 1280;
+  const start = Date.now();
+  const failures: QaFailure[] = [];
 
- let page: Awaited<ReturnType<typeof openQaPage>> | null = null;
- try {
- page = await openQaPage(viewportOf(width), {
- ...(opts.previewToken ? { headers: { "x-preview-token": opts.previewToken } } : {}),
- ...(opts.storageState ? { storageState: opts.storageState } : {}),
- });
- await page.goto(opts.url, qaConfig.timeoutMs);
- let probe: A11yProbe = {
- imagesWithoutAlt: 0,
- controlsWithoutLabel: [],
- lowContrast: 0,
- invisibleText: 0,
- badTabindex: 0,
- hasLandmark: true,
- };
- try {
- probe = await page.evaluate<A11yProbe>(A11Y_SCRIPT);
- } catch (error) {
- failures.push({ type: "evaluate_failed", viewport: width, detail: errMsg(error) });
- }
+  let page: Awaited<ReturnType<typeof openQaPage>> | null = null;
+  try {
+    page = await openQaPage(viewportOf(width), {
+      ...(opts.previewToken ? { headers: { "x-preview-token": opts.previewToken } } : {}),
+      ...(opts.storageState ? { storageState: opts.storageState } : {}),
+    });
+    await page.goto(opts.url, qaConfig.timeoutMs);
+    let probe: A11yProbe = {
+      imagesWithoutAlt: 0,
+      controlsWithoutLabel: [],
+      lowContrast: 0,
+      invisibleText: 0,
+      badTabindex: 0,
+      hasLandmark: true,
+    };
+    try {
+      probe = await page.evaluate<A11yProbe>(A11Y_SCRIPT);
+    } catch (error) {
+      failures.push({ type: "evaluate_failed", viewport: width, detail: errMsg(error) });
+    }
 
- const buf = await page.screenshotFullPage().catch(() => null);
- if (buf) await saveScreenshot(opts.threadId, opts.checkId, buf, width);
+    const buf = await page.screenshotFullPage().catch(() => null);
+    if (buf) await saveScreenshot(opts.threadId, opts.checkId, buf, width);
 
- if (probe.imagesWithoutAlt > 0) {
- failures.push({
- type: "a11y_img_alt",
- viewport: width,
- detail: `${probe.imagesWithoutAlt} 个 <img> 缺少 alt`,
- });
- }
- for (const sel of probe.controlsWithoutLabel) {
- failures.push({
- type: "a11y_label",
- viewport: width,
- detail: `表单控件 ${sel} 无关联 label / aria-label`,
- });
- }
- if (probe.invisibleText > 0) {
- failures.push({
- type: "a11y_contrast",
- viewport: width,
- detail: `${probe.invisibleText} 个文本元素 color===backgroundColor（不可见）`,
- });
- }
- if (probe.lowContrast > 0) {
- failures.push({
- type: "a11y_contrast",
- viewport: width,
- detail: `${probe.lowContrast} 个文本元素对比度 < 4.5:1（WCAG AA 不达标）`,
- });
- }
- if (probe.badTabindex > 0) {
- failures.push({
- type: "a11y_tabindex",
- viewport: width,
- detail: `${probe.badTabindex} 个元素 tabindex>0（破坏文档顺序导航）`,
- });
- }
- if (!probe.hasLandmark) {
- failures.push({
- type: "a11y_landmark",
- viewport: width,
- detail: "页面无 landmark（main/header/nav/footer）",
- });
- }
- } catch (error) {
- failures.push({ type: "navigation_failed", viewport: width, detail: errMsg(error) });
- } finally {
- await page?.close().catch(() => {});
- }
+    if (probe.imagesWithoutAlt > 0) {
+      failures.push({
+        type: "a11y_img_alt",
+        viewport: width,
+        detail: `${probe.imagesWithoutAlt} 个 <img> 缺少 alt`,
+      });
+    }
+    for (const sel of probe.controlsWithoutLabel) {
+      failures.push({
+        type: "a11y_label",
+        viewport: width,
+        detail: `表单控件 ${sel} 无关联 label / aria-label`,
+      });
+    }
+    if (probe.invisibleText > 0) {
+      failures.push({
+        type: "a11y_contrast",
+        viewport: width,
+        detail: `${probe.invisibleText} 个文本元素 color===backgroundColor（不可见）`,
+      });
+    }
+    if (probe.lowContrast > 0) {
+      failures.push({
+        type: "a11y_contrast",
+        viewport: width,
+        detail: `${probe.lowContrast} 个文本元素对比度 < 4.5:1（WCAG AA 不达标）`,
+      });
+    }
+    if (probe.badTabindex > 0) {
+      failures.push({
+        type: "a11y_tabindex",
+        viewport: width,
+        detail: `${probe.badTabindex} 个元素 tabindex>0（破坏文档顺序导航）`,
+      });
+    }
+    if (!probe.hasLandmark) {
+      failures.push({
+        type: "a11y_landmark",
+        viewport: width,
+        detail: "页面无 landmark（main/header/nav/footer）",
+      });
+    }
+  } catch (error) {
+    failures.push({ type: "navigation_failed", viewport: width, detail: errMsg(error) });
+  } finally {
+    await page?.close().catch(() => {});
+  }
 
- const report = { checkId: opts.checkId, url: opts.url, viewport: width, failures };
- const artifactPath = await saveQaReport(opts.threadId, opts.checkId, report);
- return {
- ok: failures.length === 0,
- kind: "a11y",
- failures,
- viewports: [width],
- durationMs: Date.now() - start,
- artifactPath,
- runner: "web-playwright",
- };
+  const report = { checkId: opts.checkId, url: opts.url, viewport: width, failures };
+  const artifactPath = await saveQaReport(opts.threadId, opts.checkId, report);
+  return {
+    ok: failures.length === 0,
+    kind: "a11y",
+    failures,
+    viewports: [width],
+    durationMs: Date.now() - start,
+    artifactPath,
+    runner: "web-playwright",
+  };
 }

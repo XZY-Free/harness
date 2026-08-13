@@ -237,7 +237,7 @@ describe("grep", () => {
   it("caseInsensitive 大小写不敏感", async () => {
     const tools = buildTools(TID);
     await callExecute(tools.writeFile, {
-      path: "c.txt",
+      path: "case-insensitive.md",
       content: "Hello\nHELLO\nhello\n",
     });
     const r = (await callExecute(tools.grep, {
@@ -262,7 +262,7 @@ describe("grep", () => {
   it("maxResults 截断并标记 truncated", async () => {
     const tools = buildTools(TID);
     await callExecute(tools.writeFile, {
-      path: "many.txt",
+      path: "many-matches.md",
       content: Array.from({ length: 20 }, () => "foo").join("\n"),
     });
     const r = (await callExecute(tools.grep, {

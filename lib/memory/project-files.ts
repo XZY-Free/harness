@@ -22,22 +22,22 @@ const MAX_FILE_BYTES = 16_000;
  * 无任何文件 → 空串。
  */
 export async function loadProjectMemoryFiles(threadId: string): Promise<string> {
- const sections: string[] = [];
- for (const name of PROJECT_MEMORY_FILES) {
- try {
- const content = await readWorkspaceFile(threadId, name);
- if (content && content.trim().length > 0) {
- const capped =
- content.length > MAX_FILE_BYTES
- ? `${content.slice(0, MAX_FILE_BYTES)}\n[...已截断...]`
- : content;
- sections.push(`# 项目记忆（${name}）\n${capped}`);
- }
- } catch {
- // 文件不存在 / 读失败 → 跳过（零回归）
- }
- }
- return sections.join("\n\n");
+  const sections: string[] = [];
+  for (const name of PROJECT_MEMORY_FILES) {
+    try {
+      const content = await readWorkspaceFile(threadId, name);
+      if (content && content.trim().length > 0) {
+        const capped =
+          content.length > MAX_FILE_BYTES
+            ? `${content.slice(0, MAX_FILE_BYTES)}\n[...已截断...]`
+            : content;
+        sections.push(`# 项目记忆（${name}）\n${capped}`);
+      }
+    } catch {
+      // 文件不存在 / 读失败 → 跳过（零回归）
+    }
+  }
+  return sections.join("\n\n");
 }
 
 /** 仅供测试：暴露约定文件名。 */

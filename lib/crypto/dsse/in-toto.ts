@@ -25,20 +25,20 @@ export const DSSE_PAYLOAD_TYPE = "application/vnd.in-toto+json";
  * 返回解析后的 Statement 对象，或失败原因字符串。
  */
 export function parseIntotoStatement(
- payloadBytes: Buffer,
+  payloadBytes: Buffer,
 ): { ok: true; statement: Record<string, unknown> } | { ok: false; reason: string } {
- let statement: Record<string, unknown>;
- try {
- statement = JSON.parse(payloadBytes.toString("utf-8")) as Record<string, unknown>;
- } catch {
- return { ok: false, reason: "in_toto_statement_parse_failed" };
- }
+  let statement: Record<string, unknown>;
+  try {
+    statement = JSON.parse(payloadBytes.toString("utf-8")) as Record<string, unknown>;
+  } catch {
+    return { ok: false, reason: "in_toto_statement_parse_failed" };
+  }
 
- if (statement._type !== IN_TOTO_STATEMENT_TYPE_V1) {
- return { ok: false, reason: "in_toto_statement_type_invalid" };
- }
+  if (statement._type !== IN_TOTO_STATEMENT_TYPE_V1) {
+    return { ok: false, reason: "in_toto_statement_type_invalid" };
+  }
 
- return { ok: true, statement };
+  return { ok: true, statement };
 }
 
 /**
@@ -47,28 +47,30 @@ export function parseIntotoStatement(
  * 返回 subject[0].digest.sha256（raw hex，无 sha256: 前缀），或失败原因。
  */
 export function validateStatementSubject(
- statement: Record<string, unknown>,
+  statement: Record<string, unknown>,
 ): { ok: true; subjectDigestHex: string } | { ok: false; reason: string } {
- const subjects = statement.subject;
- if (!Array.isArray(subjects) || subjects.length === 0) {
- return { ok: false, reason: "in_toto_subject_missing" };
- }
+  const subjects = statement.subject;
+  if (!Array.isArray(subjects) || subjects.length === 0) {
+    return { ok: false, reason: "in_toto_subject_missing" };
+  }
 
- const subject0 = subjects[0] as Record<string, unknown> | undefined;
- const subjectDigest = (subject0?.digest as Record<string, unknown> | undefined)?.sha256;
- if (typeof subjectDigest !== "string") {
- return { ok: false, reason: "in_toto_subject_digest_missing" };
- }
+  const subject0 = subjects[0] as Record<string, unknown> | undefined;
+  const subjectDigest = (subject0?.digest as Record<string, unknown> | undefined)?.sha256;
+  if (typeof subjectDigest !== "string") {
+    return { ok: false, reason: "in_toto_subject_digest_missing" };
+  }
 
- return { ok: true, subjectDigestHex: subjectDigest };
+  return { ok: true, subjectDigestHex: subjectDigest };
 }
 
 /**
  * 校验 DSSE Envelope 的 payloadType 是否为 in-toto JSON。
  */
-export function validatePayloadType(payloadType: string): { ok: true } | { ok: false; reason: string } {
- if (payloadType !== DSSE_PAYLOAD_TYPE) {
- return { ok: false, reason: `dsse_payload_type_mismatch: ${payloadType}` };
- }
- return { ok: true };
+export function validatePayloadType(
+  payloadType: string,
+): { ok: true } | { ok: false; reason: string } {
+  if (payloadType !== DSSE_PAYLOAD_TYPE) {
+    return { ok: false, reason: `dsse_payload_type_mismatch: ${payloadType}` };
+  }
+  return { ok: true };
 }

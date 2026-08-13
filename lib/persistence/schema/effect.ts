@@ -28,15 +28,15 @@ import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
- bigint,
- datetime,
- index,
- json,
- mysqlEnum,
- mysqlTable,
- text,
- uniqueIndex,
- varchar,
+  bigint,
+  datetime,
+  index,
+  json,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  uniqueIndex,
+  varchar,
 } from "drizzle-orm/mysql-core";
 
 // ─── EffectType ──────────────────────────────────────────
@@ -75,19 +75,19 @@ export type EffectType = (typeof EFFECT_TYPES)[number];
  * 文档未定义 reverted 终态；补偿通过 causation 关联原操作，不修改原事实。
  */
 export const EFFECT_STATES = [
- "not_started",
- "confirmed_success",
- "confirmed_partial",
- "confirmed_failure",
- "unknown_effect",
+  "not_started",
+  "confirmed_success",
+  "confirmed_partial",
+  "confirmed_failure",
+  "unknown_effect",
 ] as const;
 export type EffectState = (typeof EFFECT_STATES)[number];
 
 /** EffectRecord 终态集合（不可恢复；unknown_effect 可通过 reconcile 迁出）。 */
 export const EFFECT_TERMINAL_STATES: readonly EffectState[] = [
- "confirmed_success",
- "confirmed_partial",
- "confirmed_failure",
+  "confirmed_success",
+  "confirmed_partial",
+  "confirmed_failure",
 ];
 
 // ─── EffectTargetState ───────────────────────────────────
@@ -112,9 +112,9 @@ export type EffectTargetState = (typeof EFFECT_TARGET_STATES)[number];
  * Gateway 路径仅接受 provider_query；Admin 路径接受三种。
  */
 export const VERIFICATION_METHODS = [
- "provider_query",
- "callback_evidence",
- "manual_evidence",
+  "provider_query",
+  "callback_evidence",
+  "manual_evidence",
 ] as const;
 export type VerificationMethod = (typeof VERIFICATION_METHODS)[number];
 
@@ -123,9 +123,9 @@ export const GATEWAY_VERIFICATION_METHODS: readonly VerificationMethod[] = ["pro
 
 /** Admin 路径允许的核对方式（三种全部）。 */
 export const ADMIN_VERIFICATION_METHODS: readonly VerificationMethod[] = [
- "provider_query",
- "callback_evidence",
- "manual_evidence",
+  "provider_query",
+  "callback_evidence",
+  "manual_evidence",
 ];
 
 // ─── EffectRecord 表 ─────────────────────────────────────
@@ -143,47 +143,47 @@ export const ADMIN_VERIFICATION_METHODS: readonly VerificationMethod[] = [
  * - 不含 Secret / 未脱敏参数；evidence_json 必须脱敏。
  */
 export const effectRecordTable = mysqlTable(
- "EffectRecord",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 所属 ToolCall id（逻辑外键 → ToolCall.id；一对一）。 */
- toolCallId: varchar("toolCallId", { length: 36 }).notNull(),
- /** 副作用类型。 */
- effectType: mysqlEnum("effectType", EFFECT_TYPES).notNull(),
- /** 目标数量和脱敏摘要（JSON：{ total, description, ... }）。 */
- targetSummaryJson: json("targetSummaryJson").notNull(),
- /** 总状态（not_started / confirmed_* / unknown_effect）。 */
- effectState: mysqlEnum("effectState", EFFECT_STATES).notNull().default("not_started"),
- /** 目标系统幂等键（如外部 API 的 Idempotency-Key）。 */
- externalIdempotencyKey: varchar("externalIdempotencyKey", { length: 128 }),
- /** 外部结果引用（如外部任务 id / 资源 URI）。 */
- externalResultRef: varchar("externalResultRef", { length: 512 }),
- /** 核对方式（首次核对后回填）。 */
- verificationMethod: mysqlEnum("verificationMethod", VERIFICATION_METHODS),
- /** 核对时间；未核对时为 null。 */
- verifiedAt: datetime("verifiedAt", { mode: "date", fsp: 3 }),
- /** 不含 Secret 的证据摘要（JSON：{ source, ref, summary, ... }）。 */
- evidenceJson: json("evidenceJson"),
- /** 乐观并发版本号。 */
- versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- toolCallUq: uniqueIndex("EffectRecord_toolCall_uq").on(t.toolCallId),
- tenantToolCallIdx: index("EffectRecord_tenant_toolCall_idx").on(t.tenantId, t.toolCallId),
- tenantStateIdx: index("EffectRecord_tenant_state_idx").on(t.tenantId, t.effectState),
- }),
+  "EffectRecord",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 所属 ToolCall id（逻辑外键 → ToolCall.id；一对一）。 */
+    toolCallId: varchar("toolCallId", { length: 36 }).notNull(),
+    /** 副作用类型。 */
+    effectType: mysqlEnum("effectType", EFFECT_TYPES).notNull(),
+    /** 目标数量和脱敏摘要（JSON：{ total, description, ... }）。 */
+    targetSummaryJson: json("targetSummaryJson").notNull(),
+    /** 总状态（not_started / confirmed_* / unknown_effect）。 */
+    effectState: mysqlEnum("effectState", EFFECT_STATES).notNull().default("not_started"),
+    /** 目标系统幂等键（如外部 API 的 Idempotency-Key）。 */
+    externalIdempotencyKey: varchar("externalIdempotencyKey", { length: 128 }),
+    /** 外部结果引用（如外部任务 id / 资源 URI）。 */
+    externalResultRef: varchar("externalResultRef", { length: 512 }),
+    /** 核对方式（首次核对后回填）。 */
+    verificationMethod: mysqlEnum("verificationMethod", VERIFICATION_METHODS),
+    /** 核对时间；未核对时为 null。 */
+    verifiedAt: datetime("verifiedAt", { mode: "date", fsp: 3 }),
+    /** 不含 Secret 的证据摘要（JSON：{ source, ref, summary, ... }）。 */
+    evidenceJson: json("evidenceJson"),
+    /** 乐观并发版本号。 */
+    versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    toolCallUq: uniqueIndex("EffectRecord_toolCall_uq").on(t.toolCallId),
+    tenantToolCallIdx: index("EffectRecord_tenant_toolCall_idx").on(t.tenantId, t.toolCallId),
+    tenantStateIdx: index("EffectRecord_tenant_state_idx").on(t.tenantId, t.effectState),
+  }),
 );
 
 export type EffectRecord = InferSelectModel<typeof effectRecordTable>;
@@ -202,48 +202,48 @@ export type NewEffectRecord = InferInsertModel<typeof effectRecordTable>;
  * - external_result_ref / verified_at / evidence_json 可在 reconcile 中回填。
  */
 export const effectTargetTable = mysqlTable(
- "EffectTarget",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 所属 EffectRecord id（外键 → EffectRecord.id ON DELETE CASCADE）。 */
- effectRecordId: varchar("effectRecordId", { length: 36 })
- .notNull()
- .references(() => effectRecordTable.id),
- /** 目标引用（如 user:email:foo@example.com / file:/tmp/foo.txt）。 */
- targetRef: varchar("targetRef", { length: 512 }).notNull(),
- /** 目标摘要 hash（sha256: 前缀 + 64 hex；由 computeTargetHash 计算）。 */
- targetHash: varchar("targetHash", { length: 128 }).notNull(),
- /** 该目标的核对状态。 */
- targetState: mysqlEnum("targetState", EFFECT_TARGET_STATES).notNull().default("unknown"),
- /** 该目标的外部结果引用；未核实时为 null。 */
- externalResultRef: varchar("externalResultRef", { length: 512 }),
- /** 该目标的核对时间；未核实时为 null。 */
- verifiedAt: datetime("verifiedAt", { mode: "date", fsp: 3 }),
- /** 该目标的证据摘要（JSON）；不含 Secret。 */
- evidenceJson: json("evidenceJson"),
- /** 备注（人工核对时填写）。 */
- notes: text("notes"),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- recordTargetHashUq: uniqueIndex("EffectTarget_record_targetHash_uq").on(
- t.effectRecordId,
- t.targetHash,
- ),
- tenantRecordIdx: index("EffectTarget_tenant_record_idx").on(t.tenantId, t.effectRecordId),
- tenantStateIdx: index("EffectTarget_tenant_state_idx").on(t.tenantId, t.targetState),
- }),
+  "EffectTarget",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 所属 EffectRecord id（外键 → EffectRecord.id ON DELETE CASCADE）。 */
+    effectRecordId: varchar("effectRecordId", { length: 36 })
+      .notNull()
+      .references(() => effectRecordTable.id),
+    /** 目标引用（如 user:email:foo@example.com / file:/tmp/foo.txt）。 */
+    targetRef: varchar("targetRef", { length: 512 }).notNull(),
+    /** 目标摘要 hash（sha256: 前缀 + 64 hex；由 computeTargetHash 计算）。 */
+    targetHash: varchar("targetHash", { length: 128 }).notNull(),
+    /** 该目标的核对状态。 */
+    targetState: mysqlEnum("targetState", EFFECT_TARGET_STATES).notNull().default("unknown"),
+    /** 该目标的外部结果引用；未核实时为 null。 */
+    externalResultRef: varchar("externalResultRef", { length: 512 }),
+    /** 该目标的核对时间；未核实时为 null。 */
+    verifiedAt: datetime("verifiedAt", { mode: "date", fsp: 3 }),
+    /** 该目标的证据摘要（JSON）；不含 Secret。 */
+    evidenceJson: json("evidenceJson"),
+    /** 备注（人工核对时填写）。 */
+    notes: text("notes"),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    recordTargetHashUq: uniqueIndex("EffectTarget_record_targetHash_uq").on(
+      t.effectRecordId,
+      t.targetHash,
+    ),
+    tenantRecordIdx: index("EffectTarget_tenant_record_idx").on(t.tenantId, t.effectRecordId),
+    tenantStateIdx: index("EffectTarget_tenant_state_idx").on(t.tenantId, t.targetState),
+  }),
 );
 
 export type EffectTarget = InferSelectModel<typeof effectTargetTable>;

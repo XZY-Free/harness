@@ -1,3 +1,9 @@
+import type { ClientEnvironmentAvailability } from "@/lib/client/types";
+import {
+  getActiveExecutionOwnership,
+  getEnvironmentDefinitionById,
+  listEnvironmentLeasesByInvocation,
+} from "@/lib/environment/environment-queries";
 /**
  * Environment 状态聚合查询（S10-W06 / S10-W07）。
  *
@@ -29,41 +35,35 @@
  */
 import { getDeviceById } from "@/lib/identity/device-queries";
 import {
- ENVIRONMENT_LEASE_TERMINAL_STATES,
- type EnvironmentDefinition,
- type EnvironmentLease,
+  ENVIRONMENT_LEASE_TERMINAL_STATES,
+  type EnvironmentDefinition,
+  type EnvironmentLease,
 } from "@/lib/persistence/schema/environment";
-import type { ClientEnvironmentAvailability } from "@/lib/client/types";
 import {
- getActiveExecutionOwnership,
- getEnvironmentDefinitionById,
- listEnvironmentLeasesByInvocation,
-} from "@/lib/environment/environment-queries";
-import {
- DEVICE_HEARTBEAT_TIMEOUT_MS,
- isDeviceHeartbeatStale,
+  DEVICE_HEARTBEAT_TIMEOUT_MS,
+  isDeviceHeartbeatStale,
 } from "./environment-takeover-queries";
 
 export { DEVICE_HEARTBEAT_TIMEOUT_MS };
 
 /** 查询入参。 */
 export interface GetEnvironmentStatusInput {
- readonly tenantId: string;
- readonly threadId: string;
- /** Thread.defaultEnvironmentDefinitionId（调用方从 Thread 取得）。 */
- readonly environmentDefinitionId: string | null;
- /** 当前 active Invocation id（来自 latest Turn.activeInvocationId；null 表示无活跃 Invocation）。 */
- readonly activeInvocationId: string | null;
+  readonly tenantId: string;
+  readonly threadId: string;
+  /** Thread.defaultEnvironmentDefinitionId（调用方从 Thread 取得）。 */
+  readonly environmentDefinitionId: string | null;
+  /** 当前 active Invocation id（来自 latest Turn.activeInvocationId；null 表示无活跃 Invocation）。 */
+  readonly activeInvocationId: string | null;
 }
 
 /** 查询结果（聚合视图）。 */
 export interface EnvironmentStatusAggregate {
- readonly environmentDefinition: EnvironmentDefinition | null;
- readonly activeLease: EnvironmentLease | null;
- readonly activeOwnership: Awaited<ReturnType<typeof getActiveExecutionOwnership>>;
- readonly availability: ClientEnvironmentAvailability;
- /** 设备在线状态（仅 Desktop 类型有意义）；基于 deviceState + lastActiveAt 心跳推导。 */
- readonly deviceOnline: boolean | null;
+  readonly environmentDefinition: EnvironmentDefinition | null;
+  readonly activeLease: EnvironmentLease | null;
+  readonly activeOwnership: Awaited<ReturnType<typeof getActiveExecutionOwnership>>;
+  readonly availability: ClientEnvironmentAvailability;
+  /** 设备在线状态（仅 Desktop 类型有意义）；基于 deviceState + lastActiveAt 心跳推导。 */
+  readonly deviceOnline: boolean | null;
 }
 
 /**
@@ -79,27 +79,27 @@ export interface EnvironmentStatusAggregate {
  * - Lease active + device 离线 → pending_device
  */
 export function deriveAvailability(params: {
- readonly environmentDefinition: EnvironmentDefinition | null;
- readonly activeLease: EnvironmentLease | null;
- readonly deviceOnline: boolean | null;
+  readonly environmentDefinition: EnvironmentDefinition | null;
+  readonly activeLease: EnvironmentLease | null;
+  readonly deviceOnline: boolean | null;
 }): ClientEnvironmentAvailability {
- const { environmentDefinition, activeLease, deviceOnline } = params;
+  const { environmentDefinition, activeLease, deviceOnline } = params;
 
- if (!environmentDefinition) return "no_environment";
- if (environmentDefinition.environmentType !== "desktop") return "cloud";
+  if (!environmentDefinition) return "no_environment";
+  if (environmentDefinition.environmentType !== "desktop") return "cloud";
 
- // Desktop 类型
- if (!activeLease) return "offline_desktop";
- if (ENVIRONMENT_LEASE_TERMINAL_STATES.includes(activeLease.leaseState)) {
- return "offline_desktop";
- }
- if (activeLease.leaseState !== "active") {
- // allocated / releasing
- return "pending_device";
- }
- // Lease active
- if (deviceOnline === true) return "online_desktop";
- return "pending_device";
+  // Desktop 类型
+  if (!activeLease) return "offline_desktop";
+  if (ENVIRONMENT_LEASE_TERMINAL_STATES.includes(activeLease.leaseState)) {
+    return "offline_desktop";
+  }
+  if (activeLease.leaseState !== "active") {
+    // allocated / releasing
+    return "pending_device";
+  }
+  // Lease active
+  if (deviceOnline === true) return "online_desktop";
+  return "pending_device";
 }
 
 /**
@@ -112,46 +112,46 @@ export function deriveAvailability(params: {
  * 4. 推导 availability。
  */
 export async function getEnvironmentStatus(
- input: GetEnvironmentStatusInput,
+  input: GetEnvironmentStatusInput,
 ): Promise<EnvironmentStatusAggregate> {
- const { environmentDefinitionId, activeInvocationId } = input;
+  const { environmentDefinitionId, activeInvocationId } = input;
 
- // 1. EnvironmentDefinition
- const environmentDefinition = environmentDefinitionId
- ? await getEnvironmentDefinitionById(input.tenantId, environmentDefinitionId)
- : null;
+  // 1. EnvironmentDefinition
+  const environmentDefinition = environmentDefinitionId
+    ? await getEnvironmentDefinitionById(input.tenantId, environmentDefinitionId)
+    : null;
 
- // 2. Lease + Ownership（按 activeInvocationId）
- let activeLease: EnvironmentLease | null = null;
- let activeOwnership: EnvironmentStatusAggregate["activeOwnership"] = null;
- if (activeInvocationId) {
- const leases = await listEnvironmentLeasesByInvocation(input.tenantId, activeInvocationId);
- // 取最新一条（按 createdAt desc 排序，第一条最新）
- activeLease = leases.length > 0 ? (leases[0] ?? null) : null;
- activeOwnership = await getActiveExecutionOwnership(activeInvocationId);
- }
+  // 2. Lease + Ownership（按 activeInvocationId）
+  let activeLease: EnvironmentLease | null = null;
+  let activeOwnership: EnvironmentStatusAggregate["activeOwnership"] = null;
+  if (activeInvocationId) {
+    const leases = await listEnvironmentLeasesByInvocation(input.tenantId, activeInvocationId);
+    // 取最新一条（按 createdAt desc 排序，第一条最新）
+    activeLease = leases.length > 0 ? (leases[0] ?? null) : null;
+    activeOwnership = await getActiveExecutionOwnership(activeInvocationId);
+  }
 
- // 3. 设备在线状态（仅 Desktop 类型 + Lease 有 deviceId 时查询）
- // S10-W07：基于 deviceState=active + lastActiveAt 心跳未陈旧推导。
- let deviceOnline: boolean | null = null;
- if (environmentDefinition?.environmentType === "desktop" && activeLease?.deviceId) {
- const device = await getDeviceById(activeLease.deviceId);
- if (!device || device.deviceState !== "active") {
- deviceOnline = false;
- } else {
- // deviceState=active 但 lastActiveAt 超过阈值视为离线
- deviceOnline = !isDeviceHeartbeatStale(device);
- }
- }
+  // 3. 设备在线状态（仅 Desktop 类型 + Lease 有 deviceId 时查询）
+  // S10-W07：基于 deviceState=active + lastActiveAt 心跳未陈旧推导。
+  let deviceOnline: boolean | null = null;
+  if (environmentDefinition?.environmentType === "desktop" && activeLease?.deviceId) {
+    const device = await getDeviceById(activeLease.deviceId);
+    if (!device || device.deviceState !== "active") {
+      deviceOnline = false;
+    } else {
+      // deviceState=active 但 lastActiveAt 超过阈值视为离线
+      deviceOnline = !isDeviceHeartbeatStale(device);
+    }
+  }
 
- // 4. 推导 availability
- const availability = deriveAvailability({ environmentDefinition, activeLease, deviceOnline });
+  // 4. 推导 availability
+  const availability = deriveAvailability({ environmentDefinition, activeLease, deviceOnline });
 
- return {
- environmentDefinition,
- activeLease,
- activeOwnership,
- availability,
- deviceOnline,
- };
+  return {
+    environmentDefinition,
+    activeLease,
+    activeOwnership,
+    availability,
+    deviceOnline,
+  };
 }

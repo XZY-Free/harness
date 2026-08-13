@@ -8,10 +8,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  EligibilitySnapshotStaleError,
-  exactEvidenceIdsEqual,
   type BindingEligibilityInput,
   type BindingEligibilityResult,
+  EligibilitySnapshotStaleError,
+  exactEvidenceIdsEqual,
 } from "./validate-binding-eligibility";
 
 describe("EligibilitySnapshotStaleError", () => {

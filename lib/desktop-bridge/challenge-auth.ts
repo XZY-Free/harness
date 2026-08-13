@@ -18,7 +18,7 @@ import { generateDeviceKeyPair, verifySignature } from "../desktop/signing";
  * @returns base64 编码的 32 字节随机数
  */
 export function generateChallenge(): string {
- return randomBytes(32).toString("base64");
+  return randomBytes(32).toString("base64");
 }
 
 /**
@@ -34,28 +34,28 @@ export function generateChallenge(): string {
  * @returns 验证通过返回 true，失败返回 false
  */
 export function verifyAuthResponse(params: {
- challenge: string;
- signature: string;
- deviceId: string;
- devicePublicKeyBase64: string;
+  challenge: string;
+  signature: string;
+  deviceId: string;
+  devicePublicKeyBase64: string;
 }): boolean {
- const { challenge, signature, devicePublicKeyBase64 } = params;
- // 参数基础校验：challenge 和 signature 必须为非空字符串
- if (typeof challenge !== "string" || challenge.length === 0) {
- return false;
- }
- if (typeof signature !== "string" || signature.length === 0) {
- return false;
- }
- if (typeof devicePublicKeyBase64 !== "string" || devicePublicKeyBase64.length === 0) {
- return false;
- }
- try {
- return verifySignature(challenge, signature, devicePublicKeyBase64);
- } catch {
- // 签名验证抛错（公钥或签名格式无效）视为验证失败
- return false;
- }
+  const { challenge, signature, devicePublicKeyBase64 } = params;
+  // 参数基础校验：challenge 和 signature 必须为非空字符串
+  if (typeof challenge !== "string" || challenge.length === 0) {
+    return false;
+  }
+  if (typeof signature !== "string" || signature.length === 0) {
+    return false;
+  }
+  if (typeof devicePublicKeyBase64 !== "string" || devicePublicKeyBase64.length === 0) {
+    return false;
+  }
+  try {
+    return verifySignature(challenge, signature, devicePublicKeyBase64);
+  } catch {
+    // 签名验证抛错（公钥或签名格式无效）视为验证失败
+    return false;
+  }
 }
 
 /**
@@ -67,8 +67,8 @@ export function verifyAuthResponse(params: {
  * @returns ed25519 密钥对（base64 编码）
  */
 export function generateServerKeyPair(): {
- publicKeyBase64: string;
- privateKeyBase64: string;
+  publicKeyBase64: string;
+  privateKeyBase64: string;
 } {
- return generateDeviceKeyPair();
+  return generateDeviceKeyPair();
 }

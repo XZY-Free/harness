@@ -24,14 +24,14 @@ import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
- datetime,
- index,
- int,
- mysqlEnum,
- mysqlTable,
- text,
- uniqueIndex,
- varchar,
+  datetime,
+  index,
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  uniqueIndex,
+  varchar,
 } from "drizzle-orm/mysql-core";
 
 // ─── 删除请求 subject 类型 ──────────────────────────────────
@@ -43,12 +43,12 @@ import {
  * 管理端 subject 额外含：user / retention_scope。
  */
 export const DELETION_SUBJECT_TYPES = [
- "thread",
- "memory_entry",
- "artifact",
- "user",
- "retention_scope",
- "user_data_export_scope",
+  "thread",
+  "memory_entry",
+  "artifact",
+  "user",
+  "retention_scope",
+  "user_data_export_scope",
 ] as const;
 
 export type DeletionSubjectType = (typeof DELETION_SUBJECT_TYPES)[number];
@@ -74,10 +74,10 @@ export type DeletionDeleteMode = (typeof DELETION_DELETE_MODES)[number];
  * - PRIVACY_REQUEST_VERIFIED：已验证的隐私请求。
  */
 export const DELETION_REASON_CODES = [
- "USER_REQUESTED",
- "RETENTION_EXPIRED",
- "ADMIN_POLICY",
- "PRIVACY_REQUEST_VERIFIED",
+  "USER_REQUESTED",
+  "RETENTION_EXPIRED",
+  "ADMIN_POLICY",
+  "PRIVACY_REQUEST_VERIFIED",
 ] as const;
 
 export type DeletionReasonCode = (typeof DELETION_REASON_CODES)[number];
@@ -93,11 +93,11 @@ export type DeletionReasonCode = (typeof DELETION_REASON_CODES)[number];
  * - cache：缓存失效（不持久存储，仅失效证据）。
  */
 export const DELETION_STORE_TYPES = [
- "mysql",
- "object_storage",
- "vector_search",
- "trace_log",
- "cache",
+  "mysql",
+  "object_storage",
+  "vector_search",
+  "trace_log",
+  "cache",
 ] as const;
 
 export type DeletionStoreType = (typeof DELETION_STORE_TYPES)[number];
@@ -115,22 +115,22 @@ export type DeletionStoreType = (typeof DELETION_STORE_TYPES)[number];
  * - cancelled：管理员取消。
  */
 export const DELETION_REQUEST_STATES = [
- "planning",
- "blocked_by_hold",
- "deleting",
- "completed",
- "partial",
- "failed",
- "cancelled",
+  "planning",
+  "blocked_by_hold",
+  "deleting",
+  "completed",
+  "partial",
+  "failed",
+  "cancelled",
 ] as const;
 
 export type DeletionRequestState = (typeof DELETION_REQUEST_STATES)[number];
 
 /** 请求终态（不再推进）。 */
 export const TERMINAL_REQUEST_STATES: ReadonlySet<DeletionRequestState> = new Set([
- "completed",
- "failed",
- "cancelled",
+  "completed",
+  "failed",
+  "cancelled",
 ]);
 
 // ─── 步骤状态 ──────────────────────────────────────────────
@@ -146,13 +146,13 @@ export const TERMINAL_REQUEST_STATES: ReadonlySet<DeletionRequestState> = new Se
  * - skipped：规划阶段决定跳过（如该存储无相关数据）。
  */
 export const DELETION_STEP_STATES = [
- "pending",
- "running",
- "completed",
- "failed",
- "blocked",
- "retained",
- "skipped",
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "blocked",
+  "retained",
+  "skipped",
 ] as const;
 
 export type DeletionStepState = (typeof DELETION_STEP_STATES)[number];
@@ -166,59 +166,59 @@ export type DeletionRequestPrincipalKind = (typeof DELETION_REQUEST_PRINCIPAL_KI
 // ─── DeletionRequest 表 ─────────────────────────────────
 
 export const deletionRequestTable = mysqlTable(
- "DeletionRequest",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 删除目标类型。 */
- subjectType: mysqlEnum("subjectType", DELETION_SUBJECT_TYPES).notNull(),
- /** 删除目标 id（subjectType=retention_scope 时为范围标识，如 trace-before-2026-01-01）。 */
- subjectId: varchar("subjectId", { length: 128 }).notNull(),
- /** 删除模式。 */
- deleteMode: mysqlEnum("deleteMode", DELETION_DELETE_MODES).notNull(),
- /** 删除原因码（varchar 便于未来扩展，写入前校验在 DELETION_REASON_CODES 内）。 */
- reasonCode: varchar("reasonCode", { length: 64 }).notNull(),
- /** 本次请求依据的不可变 Policy revision（管理端必填，员工端可空）。 */
- policyRevisionId: varchar("policyRevisionId", { length: 64 }),
- /** 请求发起者 id（userIdentityId / serviceId）。 */
- requestedBy: varchar("requestedBy", { length: 128 }).notNull(),
- /** 请求发起者类型。 */
- requestPrincipalKind: mysqlEnum("requestPrincipalKind", DELETION_REQUEST_PRINCIPAL_KINDS)
- .notNull()
- .default("user"),
- /** 请求状态机。 */
- requestState: mysqlEnum("requestState", DELETION_REQUEST_STATES).notNull().default("planning"),
- /** 阻塞原因码（JSON 数组，如 ["ACTIVE_LEGAL_HOLD"]；非阻塞时为 null）。 */
- blockedReasonCodes: text("blockedReasonCodes"),
- /** 关联审计事件 id（管理端写 deletion.request 审计时回填）。 */
- auditEventId: varchar("auditEventId", { length: 36 }),
- /** 受理时间。 */
- acceptedAt: datetime("acceptedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- /** 完成时间（终态时设置）。 */
- completedAt: datetime("completedAt", { mode: "date", fsp: 3 }),
- },
- (t) => ({
- tenantSubjectIdx: index("DeletionRequest_tenant_subject_idx").on(
- t.tenantId,
- t.subjectType,
- t.subjectId,
- ),
- tenantStateIdx: index("DeletionRequest_tenant_state_idx").on(t.tenantId, t.requestState),
- tenantRequestedByIdx: index("DeletionRequest_tenant_requested_by_idx").on(
- t.tenantId,
- t.requestedBy,
- ),
- }),
+  "DeletionRequest",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 删除目标类型。 */
+    subjectType: mysqlEnum("subjectType", DELETION_SUBJECT_TYPES).notNull(),
+    /** 删除目标 id（subjectType=retention_scope 时为范围标识，如 trace-before-2026-01-01）。 */
+    subjectId: varchar("subjectId", { length: 128 }).notNull(),
+    /** 删除模式。 */
+    deleteMode: mysqlEnum("deleteMode", DELETION_DELETE_MODES).notNull(),
+    /** 删除原因码（varchar 便于未来扩展，写入前校验在 DELETION_REASON_CODES 内）。 */
+    reasonCode: varchar("reasonCode", { length: 64 }).notNull(),
+    /** 本次请求依据的不可变 Policy revision（管理端必填，员工端可空）。 */
+    policyRevisionId: varchar("policyRevisionId", { length: 64 }),
+    /** 请求发起者 id（userIdentityId / serviceId）。 */
+    requestedBy: varchar("requestedBy", { length: 128 }).notNull(),
+    /** 请求发起者类型。 */
+    requestPrincipalKind: mysqlEnum("requestPrincipalKind", DELETION_REQUEST_PRINCIPAL_KINDS)
+      .notNull()
+      .default("user"),
+    /** 请求状态机。 */
+    requestState: mysqlEnum("requestState", DELETION_REQUEST_STATES).notNull().default("planning"),
+    /** 阻塞原因码（JSON 数组，如 ["ACTIVE_LEGAL_HOLD"]；非阻塞时为 null）。 */
+    blockedReasonCodes: text("blockedReasonCodes"),
+    /** 关联审计事件 id（管理端写 deletion.request 审计时回填）。 */
+    auditEventId: varchar("auditEventId", { length: 36 }),
+    /** 受理时间。 */
+    acceptedAt: datetime("acceptedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    /** 完成时间（终态时设置）。 */
+    completedAt: datetime("completedAt", { mode: "date", fsp: 3 }),
+  },
+  (t) => ({
+    tenantSubjectIdx: index("DeletionRequest_tenant_subject_idx").on(
+      t.tenantId,
+      t.subjectType,
+      t.subjectId,
+    ),
+    tenantStateIdx: index("DeletionRequest_tenant_state_idx").on(t.tenantId, t.requestState),
+    tenantRequestedByIdx: index("DeletionRequest_tenant_requested_by_idx").on(
+      t.tenantId,
+      t.requestedBy,
+    ),
+  }),
 );
 
 export type DeletionRequest = InferSelectModel<typeof deletionRequestTable>;
@@ -227,49 +227,49 @@ export type NewDeletionRequest = InferInsertModel<typeof deletionRequestTable>;
 // ─── DeletionStep 表 ────────────────────────────────────
 
 export const deletionStepTable = mysqlTable(
- "DeletionStep",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 所属删除请求 id。 */
- requestId: varchar("requestId", { length: 36 })
- .notNull()
- .references(() => deletionRequestTable.id),
- /** 存储类型（5 类 Adapter 之一）。 */
- storeType: mysqlEnum("storeType", DELETION_STORE_TYPES).notNull(),
- /** 该存储内资源标识（如 "thread:thr_001"、"artifact:art_001"、"trace:trc_001"）。 */
- subjectRef: varchar("subjectRef", { length: 256 }).notNull(),
- /** 步骤状态。 */
- stepState: mysqlEnum("stepState", DELETION_STEP_STATES).notNull().default("pending"),
- /** 存储端删除证据引用（completed 时必填）。 */
- evidenceRef: varchar("evidenceRef", { length: 256 }),
- /** retained/blocked 原因或 failed 错误摘要（不含被删正文）。 */
- failureReason: text("failureReason"),
- /** 执行尝试次数（含首次；failed 可重试时递增）。 */
- attemptCount: int("attemptCount").notNull().default(0),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- /** 完成时间（completed/retained/skipped 时设置）。 */
- completedAt: datetime("completedAt", { mode: "date", fsp: 3 }),
- },
- (t) => ({
- requestStoreSubjectUq: uniqueIndex("DeletionStep_request_store_subject_uq").on(
- t.requestId,
- t.storeType,
- t.subjectRef,
- ),
- tenantRequestIdx: index("DeletionStep_tenant_request_idx").on(t.tenantId, t.requestId),
- requestStateIdx: index("DeletionStep_request_state_idx").on(t.requestId, t.stepState),
- }),
+  "DeletionStep",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 所属删除请求 id。 */
+    requestId: varchar("requestId", { length: 36 })
+      .notNull()
+      .references(() => deletionRequestTable.id),
+    /** 存储类型（5 类 Adapter 之一）。 */
+    storeType: mysqlEnum("storeType", DELETION_STORE_TYPES).notNull(),
+    /** 该存储内资源标识（如 "thread:thr_001"、"artifact:art_001"、"trace:trc_001"）。 */
+    subjectRef: varchar("subjectRef", { length: 256 }).notNull(),
+    /** 步骤状态。 */
+    stepState: mysqlEnum("stepState", DELETION_STEP_STATES).notNull().default("pending"),
+    /** 存储端删除证据引用（completed 时必填）。 */
+    evidenceRef: varchar("evidenceRef", { length: 256 }),
+    /** retained/blocked 原因或 failed 错误摘要（不含被删正文）。 */
+    failureReason: text("failureReason"),
+    /** 执行尝试次数（含首次；failed 可重试时递增）。 */
+    attemptCount: int("attemptCount").notNull().default(0),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    /** 完成时间（completed/retained/skipped 时设置）。 */
+    completedAt: datetime("completedAt", { mode: "date", fsp: 3 }),
+  },
+  (t) => ({
+    requestStoreSubjectUq: uniqueIndex("DeletionStep_request_store_subject_uq").on(
+      t.requestId,
+      t.storeType,
+      t.subjectRef,
+    ),
+    tenantRequestIdx: index("DeletionStep_tenant_request_idx").on(t.tenantId, t.requestId),
+    requestStateIdx: index("DeletionStep_request_state_idx").on(t.requestId, t.stepState),
+  }),
 );
 
 export type DeletionStep = InferSelectModel<typeof deletionStepTable>;

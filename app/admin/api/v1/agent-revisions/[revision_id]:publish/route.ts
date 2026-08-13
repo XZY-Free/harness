@@ -1,3 +1,13 @@
+import {
+  AGENT_REVISION_ETAG_PREFIX,
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  etagMismatchTable,
+  parseAgentRevisionEtag,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import {
   AgentPublicationPrerequisiteError,
@@ -65,16 +75,6 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import {
-  AGENT_REVISION_ETAG_PREFIX,
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  etagMismatchTable,
-  parseAgentRevisionEtag,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

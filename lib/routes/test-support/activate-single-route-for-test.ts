@@ -8,9 +8,9 @@ import type {
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import { getRouteById, getRouteSetById } from "@/lib/routes/application/deployment-route-service";
 import { createDisableRoute } from "@/lib/routes/application/disable-route";
+import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
-import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
 
 // : Resolver 只读 RouteEligibilityProjection（投影是运行时唯一解析数据源）。
 // 测试夹具在权威事实变更（激活/禁用）后须同步构建投影，解析器才能命中正确候选。

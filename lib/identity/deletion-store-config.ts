@@ -31,28 +31,28 @@ const defaultAdapters = new Map<DeletionStoreType, DeletionStoreAdapter>();
  * 未注入的存储返回 FailClosedDeletionStoreAdapter（删除一律失败，不冒充成功）。
  */
 export function getDeletionStoreAdapter(storeType: DeletionStoreType): DeletionStoreAdapter {
- if (adaptersOverride) {
- const override = adaptersOverride.get(storeType);
- if (override) return override;
- }
- let adapter = defaultAdapters.get(storeType);
- if (!adapter) {
- adapter = new FailClosedDeletionStoreAdapter(storeType);
- defaultAdapters.set(storeType, adapter);
- }
- return adapter;
+  if (adaptersOverride) {
+    const override = adaptersOverride.get(storeType);
+    if (override) return override;
+  }
+  let adapter = defaultAdapters.get(storeType);
+  if (!adapter) {
+    adapter = new FailClosedDeletionStoreAdapter(storeType);
+    defaultAdapters.set(storeType, adapter);
+  }
+  return adapter;
 }
 
 /** 获取全部 5 类存储 Adapter 的映射。 */
 export function getAllDeletionStoreAdapters(): ReadonlyMap<
- DeletionStoreType,
- DeletionStoreAdapter
+  DeletionStoreType,
+  DeletionStoreAdapter
 > {
- const result = new Map<DeletionStoreType, DeletionStoreAdapter>();
- for (const storeType of DELETION_STORE_TYPES) {
- result.set(storeType, getDeletionStoreAdapter(storeType));
- }
- return result;
+  const result = new Map<DeletionStoreType, DeletionStoreAdapter>();
+  for (const storeType of DELETION_STORE_TYPES) {
+    result.set(storeType, getDeletionStoreAdapter(storeType));
+  }
+  return result;
 }
 
 // ─── 测试 override API（仅供测试使用）─────────────────────
@@ -62,12 +62,12 @@ export function getAllDeletionStoreAdapters(): ReadonlyMap<
  * 调用 resetDeletionStoreOverrides 在测试结束后清理。
  */
 export function setDeletionStoreAdaptersOverride(
- adapters: Map<DeletionStoreType, DeletionStoreAdapter> | null,
+  adapters: Map<DeletionStoreType, DeletionStoreAdapter> | null,
 ): void {
- adaptersOverride = adapters;
+  adaptersOverride = adapters;
 }
 
 /** 清理所有 test override（在 afterEach 中调用）。 */
 export function resetDeletionStoreOverrides(): void {
- adaptersOverride = null;
+  adaptersOverride = null;
 }

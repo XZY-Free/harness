@@ -18,32 +18,32 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import {
- type WorkloadCallerType,
- type WorkloadTokenClaims,
- assertAudienceMatch,
- decodeWorkloadToken,
- extractBearerToken,
+  type WorkloadCallerType,
+  type WorkloadTokenClaims,
+  assertAudienceMatch,
+  decodeWorkloadToken,
+  extractBearerToken,
 } from "@/lib/identity/workload-token";
 
 /** 可信主体：四类 API 共用的身份信息。 */
 export interface Principal {
- tenantId: string;
- tenantKey: string;
- userIdentityId: string;
- externalSubject: string;
- email: string;
- displayName: string | null;
- audience: ApiAudience;
+  tenantId: string;
+  tenantKey: string;
+  userIdentityId: string;
+  externalSubject: string;
+  email: string;
+  displayName: string | null;
+  audience: ApiAudience;
 }
 
 /** 认证失败错误（route 层应映射为 401 AUTHENTICATION_REQUIRED）。 */
 export class AuthenticationError extends Error {
- constructor(
- public readonly code: "missing_identity" | "missing_email" | "tenant_suspended",
- message: string,
- ) {
- super(message);
- }
+  constructor(
+    public readonly code: "missing_identity" | "missing_email" | "tenant_suspended",
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 /**
@@ -51,46 +51,46 @@ export class AuthenticationError extends Error {
  * `requestId` 来自路由入口的 getRequestId(request)，保证可跟踪。
  */
 export function authErrorResponse(
- error: unknown,
- requestId: string = generateRequestId(),
+  error: unknown,
+  requestId: string = generateRequestId(),
 ): Response | null {
- if (error instanceof AuthenticationError) {
- return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
- }
- return null;
+  if (error instanceof AuthenticationError) {
+    return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
+  }
+  return null;
 }
 
 function headerValue(headers: Headers, name: string): string | null {
- const value = headers.get(name);
- return value?.trim() ? value.trim() : null;
+  const value = headers.get(name);
+  return value?.trim() ? value.trim() : null;
 }
 
 /** 从 header 解析原始身份（dev 或 trusted-headers）。 */
 function resolveRawIdentity(headers: Headers): {
- externalSubject: string;
- email: string;
- displayName: string | null;
+  externalSubject: string;
+  email: string;
+  displayName: string | null;
 } {
- if (authConfig.mode === "dev") {
- return {
- externalSubject: DEFAULT_USER_ID,
- email: DEFAULT_USER_EMAIL,
- displayName: DEFAULT_USER_NAME,
- };
- }
+  if (authConfig.mode === "dev") {
+    return {
+      externalSubject: DEFAULT_USER_ID,
+      email: DEFAULT_USER_EMAIL,
+      displayName: DEFAULT_USER_NAME,
+    };
+  }
 
- const externalSubject = headerValue(headers, authConfig.externalIdHeader);
- const email = headerValue(headers, authConfig.emailHeader);
- const displayName = headerValue(headers, authConfig.nameHeader);
+  const externalSubject = headerValue(headers, authConfig.externalIdHeader);
+  const email = headerValue(headers, authConfig.emailHeader);
+  const displayName = headerValue(headers, authConfig.nameHeader);
 
- if (!externalSubject) {
- throw new AuthenticationError("missing_identity", "缺少 SSO 用户标识");
- }
- if (!email) {
- throw new AuthenticationError("missing_email", "缺少 SSO 用户邮箱");
- }
+  if (!externalSubject) {
+    throw new AuthenticationError("missing_identity", "缺少 SSO 用户标识");
+  }
+  if (!email) {
+    throw new AuthenticationError("missing_email", "缺少 SSO 用户邮箱");
+  }
 
- return { externalSubject, email, displayName };
+  return { externalSubject, email, displayName };
 }
 
 /**
@@ -100,41 +100,41 @@ function resolveRawIdentity(headers: Headers): {
  * 返回的 Principal 包含 tenantId 和 userIdentityId，供后续授权和业务使用。
  */
 export async function resolvePrincipal(
- headers: Headers,
- audience: ApiAudience = "employee",
+  headers: Headers,
+  audience: ApiAudience = "employee",
 ): Promise<Principal> {
- const tenant = await ensureDefaultTenant();
- if (tenant.status !== "active") {
- throw new AuthenticationError("tenant_suspended", "租户已被暂停");
- }
+  const tenant = await ensureDefaultTenant();
+  if (tenant.status !== "active") {
+    throw new AuthenticationError("tenant_suspended", "租户已被暂停");
+  }
 
- const { externalSubject, email, displayName } = resolveRawIdentity(headers);
+  const { externalSubject, email, displayName } = resolveRawIdentity(headers);
 
- const identity = await upsertUserIdentity({
- tenantId: tenant.id,
- externalSubject,
- email,
- displayName,
- });
+  const identity = await upsertUserIdentity({
+    tenantId: tenant.id,
+    externalSubject,
+    email,
+    displayName,
+  });
 
- // 同步 principal_binding（subjectType=user），保证外部 subject 到内部 identity 的映射可查。
- await upsertPrincipalBinding({
- tenantId: tenant.id,
- subjectType: "user",
- externalId: externalSubject,
- displayName,
- userIdentityId: identity.id,
- });
+  // 同步 principal_binding（subjectType=user），保证外部 subject 到内部 identity 的映射可查。
+  await upsertPrincipalBinding({
+    tenantId: tenant.id,
+    subjectType: "user",
+    externalId: externalSubject,
+    displayName,
+    userIdentityId: identity.id,
+  });
 
- return {
- tenantId: tenant.id,
- tenantKey: tenant.key,
- userIdentityId: identity.id,
- externalSubject,
- email,
- displayName,
- audience,
- };
+  return {
+    tenantId: tenant.id,
+    tenantKey: tenant.key,
+    userIdentityId: identity.id,
+    externalSubject,
+    email,
+    displayName,
+    audience,
+  };
 }
 
 /**
@@ -142,7 +142,7 @@ export async function resolvePrincipal(
  * trusted-headers 模式下因无 header 会抛 AuthenticationError。
  */
 export async function getCurrentPrincipal(audience: ApiAudience = "employee"): Promise<Principal> {
- return resolvePrincipal(new Headers(), audience);
+  return resolvePrincipal(new Headers(), audience);
 }
 
 // ─── Workload / Service Identity（S02-C02）─────────────────────
@@ -156,17 +156,17 @@ export async function getCurrentPrincipal(audience: ApiAudience = "employee"): P
  * - callerType 标识身份类型，写入 idempotency_record.caller_type。
  */
 export interface WorkloadPrincipal {
- tenantId: string;
- audience: ApiAudience;
- callerType: WorkloadCallerType;
- /** Workload Token claims（含 invocationId/runtimeRevisionId/serviceId/expiresAt）。 */
- claims: WorkloadTokenClaims;
- /** Service Identity 标识（仅 callerType=service）；其他类型为 null。 */
- serviceId: string | null;
- /** 绑定 Invocation id（runtime/gateway Token 必填）；service 为 null。 */
- invocationId: string | null;
- /** Runtime 修订（仅 runtime Token）；gateway/service 为 null。 */
- runtimeRevisionId: string | null;
+  tenantId: string;
+  audience: ApiAudience;
+  callerType: WorkloadCallerType;
+  /** Workload Token claims（含 invocationId/runtimeRevisionId/serviceId/expiresAt）。 */
+  claims: WorkloadTokenClaims;
+  /** Service Identity 标识（仅 callerType=service）；其他类型为 null。 */
+  serviceId: string | null;
+  /** 绑定 Invocation id（runtime/gateway Token 必填）；service 为 null。 */
+  invocationId: string | null;
+  /** Runtime 修订（仅 runtime Token）；gateway/service 为 null。 */
+  runtimeRevisionId: string | null;
 }
 
 /**
@@ -186,26 +186,26 @@ export interface WorkloadPrincipal {
  * @throws WorkloadTokenError Token 解析/过期/audience 不匹配
  */
 export function resolveWorkloadPrincipal(
- headers: Headers,
- expectedAudience: "runtime" | "gateway" | "admin",
+  headers: Headers,
+  expectedAudience: "runtime" | "gateway" | "admin",
 ): WorkloadPrincipal {
- const token = extractBearerToken(headers);
- if (!token) {
- throw new AuthenticationError("missing_identity", `缺少 ${expectedAudience} Workload Token`);
- }
+  const token = extractBearerToken(headers);
+  if (!token) {
+    throw new AuthenticationError("missing_identity", `缺少 ${expectedAudience} Workload Token`);
+  }
 
- const claims = decodeWorkloadToken(token);
- assertAudienceMatch(claims, expectedAudience);
+  const claims = decodeWorkloadToken(token);
+  assertAudienceMatch(claims, expectedAudience);
 
- const callerType: WorkloadCallerType = claims.type === "service" ? "service" : "workload";
+  const callerType: WorkloadCallerType = claims.type === "service" ? "service" : "workload";
 
- return {
- tenantId: claims.tenantId,
- audience: claims.audience,
- callerType,
- claims,
- serviceId: claims.serviceId ?? null,
- invocationId: claims.invocationId ?? null,
- runtimeRevisionId: claims.runtimeRevisionId ?? null,
- };
+  return {
+    tenantId: claims.tenantId,
+    audience: claims.audience,
+    callerType,
+    claims,
+    serviceId: claims.serviceId ?? null,
+    invocationId: claims.invocationId ?? null,
+    runtimeRevisionId: claims.runtimeRevisionId ?? null,
+  };
 }

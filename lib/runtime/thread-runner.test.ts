@@ -292,7 +292,6 @@ describe("thread-runner 生命周期", () => {
   it("B-3: onFinish 已 upsert 落库(saveStarted)后 cancelRun 不双写", async () => {
     // 模拟 AI SDK v6 行为：abort 时 createUIMessageStream 仍经 flush 调 onFinish，
     // 带上已累积的 partial 消息并 upsert 落库。cancelRun await completion 后据 saveStarted 跳过兜底 flush。
-    // biome-ignore lint/suspicious/noExplicitAny: mock 实现类型与真实 createUIMessageStream 不必严格匹配
     vi.mocked(mockedCreateUIMessageStream).mockImplementationOnce(({ execute, onFinish }: any) => {
       const writer = { merge() {}, write() {} };
       void execute({ writer });
@@ -375,7 +374,6 @@ describe("thread-runner 生命周期", () => {
       return { toUIMessageStream: () => new ReadableStream({ start() {} }) };
     });
     // createUIMessageStream 返回 pending 流（不 close）保持 run running；abort 时 close 让 driveRun 退出
-    // biome-ignore lint/suspicious/noExplicitAny: mock 实现类型与真实 createUIMessageStream 不必严格匹配
     vi.mocked(mockedCreateUIMessageStream).mockImplementation(({ execute }: any) => {
       const writer = { merge() {}, write() {} };
       void execute({ writer });
@@ -431,7 +429,6 @@ describe("thread-runner 生命周期", () => {
   it("B-3: onStepFinish 每个 step 边界 upsert parts，中断时已产出 part 已落库", async () => {
     // 模拟多步 run：step1 产出 partial text，step2 追加 tool part，最后 onFinish 收尾。
     vi.mocked(mockedCreateUIMessageStream).mockImplementationOnce(
-      // biome-ignore lint/suspicious/noExplicitAny: mock 实现类型与真实 createUIMessageStream 不必严格匹配
       ({ execute, onStepFinish, onFinish }: any) => {
         const writer = { merge() {}, write() {} };
         void execute({ writer });
@@ -559,7 +556,6 @@ describe("V7 S1-4: ThreadRun 终态写回", () => {
         };
       },
     );
-    // biome-ignore lint/suspicious/noExplicitAny: mock 类型不必严格匹配
     vi.mocked(mockedCreateUIMessageStream).mockImplementationOnce(({ execute }: any) => {
       const writer = { merge() {}, write() {} };
       void execute({ writer });
@@ -606,7 +602,6 @@ describe("V7 S1-4: ThreadRun 终态写回", () => {
         };
       },
     );
-    // biome-ignore lint/suspicious/noExplicitAny: mock 类型不必严格匹配
     vi.mocked(mockedCreateUIMessageStream).mockImplementationOnce(({ execute }: any) => {
       const writer = { merge() {}, write() {} };
       void execute({ writer });
@@ -636,18 +631,15 @@ describe("V7 S1-4: ThreadRun 终态写回", () => {
 
   it("流异常 → markFailed → failThreadRun 写回 failed + error", async () => {
     // createUIMessageStream 返回一个立即 error 的流，driveRun reader.read() 抛错 → markFailed
-    vi.mocked(mockedCreateUIMessageStream).mockImplementationOnce(
-      // biome-ignore lint/suspicious/noExplicitAny: mock 类型不必严格匹配
-      ({ execute }: any) => {
-        const writer = { merge() {}, write() {} };
-        void execute({ writer });
-        return new ReadableStream({
-          start(controller) {
-            controller.error(new Error("provider crash"));
-          },
-        });
-      },
-    );
+    vi.mocked(mockedCreateUIMessageStream).mockImplementationOnce(({ execute }: any) => {
+      const writer = { merge() {}, write() {} };
+      void execute({ writer });
+      return new ReadableStream({
+        start(controller) {
+          controller.error(new Error("provider crash"));
+        },
+      });
+    });
     const runId = enqueue({
       threadId: "t-s14-fail",
       modelMessages: [],
@@ -665,7 +657,6 @@ describe("V7 S1-4: ThreadRun 终态写回", () => {
 describe("V7 S5-2: RunTranscriptChunk 持久化", () => {
   it("running run 周期性刷新 ThreadRun 心跳", async () => {
     vi.useFakeTimers();
-    // biome-ignore lint/suspicious/noExplicitAny: mock 类型不必严格匹配
     vi.mocked(mockedCreateUIMessageStream).mockImplementationOnce(({ execute }: any) => {
       const writer = {
         merge() {},
@@ -698,7 +689,6 @@ describe("V7 S5-2: RunTranscriptChunk 持久化", () => {
 
   it("publish 产出的 UIMessageChunk 被 appendRunTranscriptChunk 落库", async () => {
     const textChunk = { type: "text-delta" as const, delta: "hello", id: "chunk-1" };
-    // biome-ignore lint/suspicious/noExplicitAny: mock 类型不必严格匹配
     vi.mocked(mockedCreateUIMessageStream).mockImplementationOnce(({ execute }: any) => {
       const writer = {
         merge() {},
@@ -735,7 +725,6 @@ describe("V7 S5-2: RunTranscriptChunk 持久化", () => {
   it("appendRunTranscriptChunk 失败不阻断 run 正常完成", async () => {
     mocks.appendRunTranscriptChunk.mockRejectedValueOnce(new Error("DB timeout"));
     const textChunk = { type: "text-delta" as const, delta: "world", id: "chunk-2" };
-    // biome-ignore lint/suspicious/noExplicitAny: mock 类型不必严格匹配
     vi.mocked(mockedCreateUIMessageStream).mockImplementationOnce(({ execute }: any) => {
       const writer = {
         merge() {},

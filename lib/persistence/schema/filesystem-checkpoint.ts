@@ -53,46 +53,46 @@ export type FilesystemCheckpointType = (typeof FILESYSTEM_CHECKPOINT_TYPES)[numb
  * - 写入后不可变。
  */
 export const filesystemCheckpointTable = mysqlTable(
- "FilesystemCheckpoint",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 路径解释所必需的 Binding（DB 级 FK → WorkspaceBinding.id ON DELETE CASCADE）。 */
- workspaceBindingId: varchar("workspaceBindingId", { length: 36 })
- .notNull()
- .references(() => workspaceBinding.id),
- /** 所属 Invocation id（逻辑外键 → Invocation.id；必填）。 */
- invocationId: varchar("invocationId", { length: 36 }).notNull(),
- /** Checkpoint 类型（git / snapshot / tarball / zip）。 */
- checkpointType: varchar("checkpointType", { length: 32 }).notNull(),
- /** Checkpoint 内容存储引用（受管对象引用，不接受公网 URL）。 */
- checkpointRef: varchar("checkpointRef", { length: 512 }).notNull(),
- /** 基线版本引用（如 git commit hash；可为 null）。 */
- baseRevisionRef: varchar("baseRevisionRef", { length: 512 }),
- /** Checkpoint 内容 hash（sha256: 前缀 + 64 hex）。 */
- contentHash: varchar("contentHash", { length: 128 }).notNull(),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- /** 过期时间（用于清理；null 表示不过期）。 */
- expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }),
- },
- (t) => ({
- tenantBindingIdx: index("FilesystemCheckpoint_tenant_binding_idx").on(
- t.tenantId,
- t.workspaceBindingId,
- ),
- tenantInvocationIdx: index("FilesystemCheckpoint_tenant_invocation_idx").on(
- t.tenantId,
- t.invocationId,
- ),
- tenantExpiresIdx: index("FilesystemCheckpoint_tenant_expires_idx").on(t.tenantId, t.expiresAt),
- }),
+  "FilesystemCheckpoint",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 路径解释所必需的 Binding（DB 级 FK → WorkspaceBinding.id ON DELETE CASCADE）。 */
+    workspaceBindingId: varchar("workspaceBindingId", { length: 36 })
+      .notNull()
+      .references(() => workspaceBinding.id),
+    /** 所属 Invocation id（逻辑外键 → Invocation.id；必填）。 */
+    invocationId: varchar("invocationId", { length: 36 }).notNull(),
+    /** Checkpoint 类型（git / snapshot / tarball / zip）。 */
+    checkpointType: varchar("checkpointType", { length: 32 }).notNull(),
+    /** Checkpoint 内容存储引用（受管对象引用，不接受公网 URL）。 */
+    checkpointRef: varchar("checkpointRef", { length: 512 }).notNull(),
+    /** 基线版本引用（如 git commit hash；可为 null）。 */
+    baseRevisionRef: varchar("baseRevisionRef", { length: 512 }),
+    /** Checkpoint 内容 hash（sha256: 前缀 + 64 hex）。 */
+    contentHash: varchar("contentHash", { length: 128 }).notNull(),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    /** 过期时间（用于清理；null 表示不过期）。 */
+    expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }),
+  },
+  (t) => ({
+    tenantBindingIdx: index("FilesystemCheckpoint_tenant_binding_idx").on(
+      t.tenantId,
+      t.workspaceBindingId,
+    ),
+    tenantInvocationIdx: index("FilesystemCheckpoint_tenant_invocation_idx").on(
+      t.tenantId,
+      t.invocationId,
+    ),
+    tenantExpiresIdx: index("FilesystemCheckpoint_tenant_expires_idx").on(t.tenantId, t.expiresAt),
+  }),
 );
 
 export type FilesystemCheckpoint = InferSelectModel<typeof filesystemCheckpointTable>;

@@ -2,16 +2,16 @@ import { dbConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
 import { deleteThreadRecursive } from "@/lib/db/queries";
 import {
- type ThreadStatus,
- contextSnapshot,
- contextSummary,
- message,
- runTranscriptChunk,
- thread,
- threadEvent,
- threadRun,
- threadRunSkill,
- toolRun,
+  type ThreadStatus,
+  contextSnapshot,
+  contextSummary,
+  message,
+  runTranscriptChunk,
+  thread,
+  threadEvent,
+  threadRun,
+  threadRunSkill,
+  toolRun,
 } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { and, inArray, isNotNull, lt } from "drizzle-orm";
@@ -28,14 +28,14 @@ import { and, inArray, isNotNull, lt } from "drizzle-orm";
  * runTranscriptChunk 引用 threadRun,先于 threadRun 删。
  */
 const RETENTION_DETAIL_TABLES = [
- threadRunSkill,
- runTranscriptChunk,
- threadRun,
- message,
- threadEvent,
- toolRun,
- contextSnapshot,
- contextSummary,
+  threadRunSkill,
+  runTranscriptChunk,
+  threadRun,
+  message,
+  threadEvent,
+  toolRun,
+  contextSnapshot,
+  contextSummary,
 ] as const;
 
 /**
@@ -58,27 +58,27 @@ const RETENTION_DETAIL_TABLES = [
 
 /** 已结束的 thread 状态(可安全清理明细)。活跃态绝不在此列。 */
 const TERMINAL_STATUSES: ThreadStatus[] = [
- "idle",
- "ready_for_review",
- "failed",
- "cancelled",
- "completed",
+  "idle",
+  "ready_for_review",
+  "failed",
+  "cancelled",
+  "completed",
 ];
 
 export type PurgeResult = {
- purgedThreads: number;
- threadRunSkills: number;
- runTranscriptChunks: number;
- threadRuns: number;
- messages: number;
- threadEvents: number;
- toolRuns: number;
- contextSnapshots: number;
- contextSummaries: number;
- /** :物理删除主记录条数(软删超 hardDeleteRetentionDays 的 thread)。 */
- hardDeletedThreads: number;
- skipped: boolean;
- reason?: string;
+  purgedThreads: number;
+  threadRunSkills: number;
+  runTranscriptChunks: number;
+  threadRuns: number;
+  messages: number;
+  threadEvents: number;
+  toolRuns: number;
+  contextSnapshots: number;
+  contextSummaries: number;
+  /** :物理删除主记录条数(软删超 hardDeleteRetentionDays 的 thread)。 */
+  hardDeletedThreads: number;
+  skipped: boolean;
+  reason?: string;
 };
 
 /**
@@ -88,127 +88,127 @@ export type PurgeResult = {
  * @returns 各表删除条数;retentionDays=0 时 skipped=true 不执行
  */
 export async function purgeExpiredThreadDetails(
- retentionDaysOverride?: number,
+  retentionDaysOverride?: number,
 ): Promise<PurgeResult> {
- const retentionDays = retentionDaysOverride ?? dbConfig.retentionDays;
- if (retentionDays <= 0) {
- return {
- purgedThreads: 0,
- threadRunSkills: 0,
- runTranscriptChunks: 0,
- threadRuns: 0,
- messages: 0,
- threadEvents: 0,
- toolRuns: 0,
- contextSnapshots: 0,
- contextSummaries: 0,
- hardDeletedThreads: 0,
- skipped: true,
- reason: `retentionDays=${retentionDays}(禁用清理)`,
- };
- }
+  const retentionDays = retentionDaysOverride ?? dbConfig.retentionDays;
+  if (retentionDays <= 0) {
+    return {
+      purgedThreads: 0,
+      threadRunSkills: 0,
+      runTranscriptChunks: 0,
+      threadRuns: 0,
+      messages: 0,
+      threadEvents: 0,
+      toolRuns: 0,
+      contextSnapshots: 0,
+      contextSummaries: 0,
+      hardDeletedThreads: 0,
+      skipped: true,
+      reason: `retentionDays=${retentionDays}(禁用清理)`,
+    };
+  }
 
- const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
 
- // 找出已结束 + updatedAt 超期的 thread(明细清理目标)
- const expired = await db
- .select({ id: thread.id })
- .from(thread)
- .where(and(inArray(thread.status, TERMINAL_STATUSES), lt(thread.updatedAt, cutoff)));
+  // 找出已结束 + updatedAt 超期的 thread(明细清理目标)
+  const expired = await db
+    .select({ id: thread.id })
+    .from(thread)
+    .where(and(inArray(thread.status, TERMINAL_STATUSES), lt(thread.updatedAt, cutoff)));
 
- if (expired.length === 0) {
- return {
- purgedThreads: 0,
- threadRunSkills: 0,
- runTranscriptChunks: 0,
- threadRuns: 0,
- messages: 0,
- threadEvents: 0,
- toolRuns: 0,
- contextSnapshots: 0,
- contextSummaries: 0,
- hardDeletedThreads: 0,
- skipped: false,
- };
- }
+  if (expired.length === 0) {
+    return {
+      purgedThreads: 0,
+      threadRunSkills: 0,
+      runTranscriptChunks: 0,
+      threadRuns: 0,
+      messages: 0,
+      threadEvents: 0,
+      toolRuns: 0,
+      contextSnapshots: 0,
+      contextSummaries: 0,
+      hardDeletedThreads: 0,
+      skipped: false,
+    };
+  }
 
- const threadIds = expired.map((t) => t.id);
+  const threadIds = expired.map((t) => t.id);
 
- // :明细按表删除,复用 RETENTION_DETAIL_TABLES 与 deleteThreadRecursive 对齐,防漏表。
- // 不删 thread 主记录(保留历史列表);不删 toolApprovalRequest/backgroundTask/gitCheckpoint(交付/审批历史)。
- // 修复：用事务包裹并行删除，防止部分表删除成功/部分失败导致数据不一致。
- // drizzle MySQL delete 返回 MySqlRawQueryResult(类型上无 rowsAffected),
- // 运行时为 mysql2 ResultSetHeader,真实字段是 affectedRows。用类型断言取,取不到回退 0。
- const affectedRows = (r: unknown): number => {
- const header = r as { affectedRows?: unknown } | unknown[];
- if (Array.isArray(header) && header[0] && typeof header[0] === "object") {
- const n = (header[0] as { affectedRows?: unknown }).affectedRows;
- return typeof n === "number" ? n : 0;
- }
- if (header && typeof header === "object" && "affectedRows" in header) {
- const n = header.affectedRows;
- return typeof n === "number" ? n : 0;
- }
- return 0;
- };
- // : 串行删除(按 FK 依赖顺序),防 threadRunSkill/runTranscriptChunk 引用 threadRun 时并行删触发 FK 违反
- const deleted: unknown[] = [];
- await db.transaction(async (tx) => {
- for (const t of RETENTION_DETAIL_TABLES) {
- deleted.push(await tx.delete(t).where(inArray(t.threadId, threadIds)));
- }
- });
- // 清理终态 thread 的 QA 证据文件（截图/报告 JSON）
- const { cleanupQaArtifacts } = await import("@/lib/qa/artifact");
- await Promise.all(threadIds.map((tid) => cleanupQaArtifacts(tid).catch(() => {})));
+  // :明细按表删除,复用 RETENTION_DETAIL_TABLES 与 deleteThreadRecursive 对齐,防漏表。
+  // 不删 thread 主记录(保留历史列表);不删 toolApprovalRequest/backgroundTask/gitCheckpoint(交付/审批历史)。
+  // 修复：用事务包裹并行删除，防止部分表删除成功/部分失败导致数据不一致。
+  // drizzle MySQL delete 返回 MySqlRawQueryResult(类型上无 rowsAffected),
+  // 运行时为 mysql2 ResultSetHeader,真实字段是 affectedRows。用类型断言取,取不到回退 0。
+  const affectedRows = (r: unknown): number => {
+    const header = r as { affectedRows?: unknown } | unknown[];
+    if (Array.isArray(header) && header[0] && typeof header[0] === "object") {
+      const n = (header[0] as { affectedRows?: unknown }).affectedRows;
+      return typeof n === "number" ? n : 0;
+    }
+    if (header && typeof header === "object" && "affectedRows" in header) {
+      const n = header.affectedRows;
+      return typeof n === "number" ? n : 0;
+    }
+    return 0;
+  };
+  // : 串行删除(按 FK 依赖顺序),防 threadRunSkill/runTranscriptChunk 引用 threadRun 时并行删触发 FK 违反
+  const deleted: unknown[] = [];
+  await db.transaction(async (tx) => {
+    for (const t of RETENTION_DETAIL_TABLES) {
+      deleted.push(await tx.delete(t).where(inArray(t.threadId, threadIds)));
+    }
+  });
+  // 清理终态 thread 的 QA 证据文件（截图/报告 JSON）
+  const { cleanupQaArtifacts } = await import("@/lib/qa/artifact");
+  await Promise.all(threadIds.map((tid) => cleanupQaArtifacts(tid).catch(() => {})));
 
- // :物理删软删超期主记录(可配,默认关)。
- // 形成软删→(hardDeleteRetentionDays)→物理删闭环;默认 0 禁用,主记录永久保留。
- const hardDeleteDays = dbConfig.hardDeleteRetentionDays;
- let hardDeletedThreads = 0;
- if (hardDeleteDays > 0) {
- const hardCutoff = new Date(Date.now() - hardDeleteDays * 24 * 60 * 60 * 1000);
- const softDeleted = await db
- .select({ id: thread.id })
- .from(thread)
- .where(and(isNotNull(thread.deletedAt), lt(thread.deletedAt, hardCutoff)));
- // 逐条事务删除(deleteThreadRecursive 内部按依赖序删子表+主记录)。
- // 不并发——物理删除是重操作,串行更可控,且避免事务嵌套/锁竞争。
- for (const t of softDeleted) {
- try {
- await deleteThreadRecursive(t.id);
- hardDeletedThreads += 1;
- } catch (err) {
- logger.warn("[retention] 物理删除 thread 失败,跳过", {
- threadId: t.id,
- error: err instanceof Error ? err.message : String(err),
- });
- }
- }
- }
+  // :物理删软删超期主记录(可配,默认关)。
+  // 形成软删→(hardDeleteRetentionDays)→物理删闭环;默认 0 禁用,主记录永久保留。
+  const hardDeleteDays = dbConfig.hardDeleteRetentionDays;
+  let hardDeletedThreads = 0;
+  if (hardDeleteDays > 0) {
+    const hardCutoff = new Date(Date.now() - hardDeleteDays * 24 * 60 * 60 * 1000);
+    const softDeleted = await db
+      .select({ id: thread.id })
+      .from(thread)
+      .where(and(isNotNull(thread.deletedAt), lt(thread.deletedAt, hardCutoff)));
+    // 逐条事务删除(deleteThreadRecursive 内部按依赖序删子表+主记录)。
+    // 不并发——物理删除是重操作,串行更可控,且避免事务嵌套/锁竞争。
+    for (const t of softDeleted) {
+      try {
+        await deleteThreadRecursive(t.id);
+        hardDeletedThreads += 1;
+      } catch (err) {
+        logger.warn("[retention] 物理删除 thread 失败,跳过", {
+          threadId: t.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
 
- const [runSkillsDel, chunksDel, runsDel, messagesDel, eventsDel, toolsDel, snapsDel, sumsDel] =
- deleted;
- const result: PurgeResult = {
- purgedThreads: threadIds.length,
- threadRunSkills: affectedRows(runSkillsDel),
- runTranscriptChunks: affectedRows(chunksDel),
- threadRuns: affectedRows(runsDel),
- messages: affectedRows(messagesDel),
- threadEvents: affectedRows(eventsDel),
- toolRuns: affectedRows(toolsDel),
- contextSnapshots: affectedRows(snapsDel),
- contextSummaries: affectedRows(sumsDel),
- hardDeletedThreads,
- skipped: false,
- };
+  const [runSkillsDel, chunksDel, runsDel, messagesDel, eventsDel, toolsDel, snapsDel, sumsDel] =
+    deleted;
+  const result: PurgeResult = {
+    purgedThreads: threadIds.length,
+    threadRunSkills: affectedRows(runSkillsDel),
+    runTranscriptChunks: affectedRows(chunksDel),
+    threadRuns: affectedRows(runsDel),
+    messages: affectedRows(messagesDel),
+    threadEvents: affectedRows(eventsDel),
+    toolRuns: affectedRows(toolsDel),
+    contextSnapshots: affectedRows(snapsDel),
+    contextSummaries: affectedRows(sumsDel),
+    hardDeletedThreads,
+    skipped: false,
+  };
 
- logger.info("[retention] 清理已结束超期 thread 明细", {
- retentionDays,
- cutoff: cutoff.toISOString(),
- hardDeleteDays,
- ...result,
- });
+  logger.info("[retention] 清理已结束超期 thread 明细", {
+    retentionDays,
+    cutoff: cutoff.toISOString(),
+    hardDeleteDays,
+    ...result,
+  });
 
- return result;
+  return result;
 }

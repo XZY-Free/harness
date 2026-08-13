@@ -11,30 +11,30 @@
 import { workspaceRoot } from "@/lib/workspace";
 
 export type ExecResult = {
- exitCode: number;
- stdout: string;
- stderr: string;
- timedOut: boolean;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
 };
 
 export async function runWorkspaceCommand(
- threadId: string,
- command: string,
- opts?: { timeoutMs?: number; maxBuffer?: number },
+  threadId: string,
+  command: string,
+  opts?: { timeoutMs?: number; maxBuffer?: number },
 ): Promise<ExecResult> {
- const { execa } = await import("execa");
- const result = await execa(command, {
- cwd: workspaceRoot(threadId),
- shell: true,
- timeout: opts?.timeoutMs ?? 30_000,
- reject: false,
- maxBuffer: opts?.maxBuffer ?? 1024 * 1024,
- });
- return {
- // exitCode 可能为 null（信号终止等），归一为 -1 便于判空
- exitCode: result.exitCode ?? -1,
- stdout: result.stdout,
- stderr: result.stderr,
- timedOut: Boolean(result.timedOut),
- };
+  const { execa } = await import("execa");
+  const result = await execa(command, {
+    cwd: workspaceRoot(threadId),
+    shell: true,
+    timeout: opts?.timeoutMs ?? 30_000,
+    reject: false,
+    maxBuffer: opts?.maxBuffer ?? 1024 * 1024,
+  });
+  return {
+    // exitCode 可能为 null（信号终止等），归一为 -1 便于判空
+    exitCode: result.exitCode ?? -1,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    timedOut: Boolean(result.timedOut),
+  };
 }

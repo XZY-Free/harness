@@ -24,37 +24,37 @@ import { computeDssePae } from "./pae";
  * @returns 验签是否通过
  */
 export function verifyEd25519Signature(
- publicKeyBase64: string,
- data: Buffer,
- signatureBase64: string,
+  publicKeyBase64: string,
+  data: Buffer,
+  signatureBase64: string,
 ): boolean {
- const publicKeyBytes = Buffer.from(publicKeyBase64, "base64");
- if (publicKeyBytes.length !== 32) return false;
- let publicKey: ReturnType<typeof createPublicKey>;
- try {
- publicKey = createPublicKey({
- key: {
- kty: "OKP",
- crv: "Ed25519",
- x: publicKeyBytes.toString("base64url"),
- },
- format: "jwk",
- });
- } catch {
- return false;
- }
- const signature = Buffer.from(signatureBase64, "base64");
- return cryptoVerify(null, data, publicKey, signature);
+  const publicKeyBytes = Buffer.from(publicKeyBase64, "base64");
+  if (publicKeyBytes.length !== 32) return false;
+  let publicKey: ReturnType<typeof createPublicKey>;
+  try {
+    publicKey = createPublicKey({
+      key: {
+        kty: "OKP",
+        crv: "Ed25519",
+        x: publicKeyBytes.toString("base64url"),
+      },
+      format: "jwk",
+    });
+  } catch {
+    return false;
+  }
+  const signature = Buffer.from(signatureBase64, "base64");
+  return cryptoVerify(null, data, publicKey, signature);
 }
 
 /** DSSE Envelope 验签结果。 */
 export interface DSSEVerificationResult {
- /** 是否验签通过。 */
- verified: boolean;
- /** 通过验签的 keyid（verified=true 时非空）。 */
- verifiedKeyId: string | null;
- /** 失败原因（verified=false 时非空）。 */
- failureReason?: string;
+  /** 是否验签通过。 */
+  verified: boolean;
+  /** 通过验签的 keyid（verified=true 时非空）。 */
+  verifiedKeyId: string | null;
+  /** 失败原因（verified=false 时非空）。 */
+  failureReason?: string;
 }
 
 /**
@@ -69,31 +69,31 @@ export interface DSSEVerificationResult {
  * @param trustedKeys keyid → base64 公钥 的可信密钥注册表
  */
 export function verifyDSSEEnvelopeSignatures(
- envelope: DSSEEnvelope,
- payloadBytes: Buffer,
- trustedKeys: Record<string, string>,
+  envelope: DSSEEnvelope,
+  payloadBytes: Buffer,
+  trustedKeys: Record<string, string>,
 ): DSSEVerificationResult {
- const pae = computeDssePae(envelope.payloadType, payloadBytes);
+  const pae = computeDssePae(envelope.payloadType, payloadBytes);
 
- let verifiedKeyId: string | null = null;
- let anyKnownKeyid = false;
- for (const sig of envelope.signatures) {
- const publicKeyBase64 = trustedKeys[sig.keyid];
- if (!publicKeyBase64) {
- continue; // unknown_keyid — 尝试下一个签名
- }
- anyKnownKeyid = true;
- if (verifyEd25519Signature(publicKeyBase64, pae, sig.sig)) {
- verifiedKeyId = sig.keyid;
- break;
- }
- }
- if (verifiedKeyId !== null) {
- return { verified: true, verifiedKeyId };
- }
- return {
- verified: false,
- verifiedKeyId: null,
- failureReason: anyKnownKeyid ? "signature_invalid" : "unknown_keyid",
- };
+  let verifiedKeyId: string | null = null;
+  let anyKnownKeyid = false;
+  for (const sig of envelope.signatures) {
+    const publicKeyBase64 = trustedKeys[sig.keyid];
+    if (!publicKeyBase64) {
+      continue; // unknown_keyid — 尝试下一个签名
+    }
+    anyKnownKeyid = true;
+    if (verifyEd25519Signature(publicKeyBase64, pae, sig.sig)) {
+      verifiedKeyId = sig.keyid;
+      break;
+    }
+  }
+  if (verifiedKeyId !== null) {
+    return { verified: true, verifiedKeyId };
+  }
+  return {
+    verified: false,
+    verifiedKeyId: null,
+    failureReason: anyKnownKeyid ? "signature_invalid" : "unknown_keyid",
+  };
 }

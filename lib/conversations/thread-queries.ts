@@ -20,33 +20,33 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import {
- ThreadNotAcceptingTurnsError,
- ThreadNotFoundError,
- ThreadVersionConflictError,
+  ThreadNotAcceptingTurnsError,
+  ThreadNotFoundError,
+  ThreadVersionConflictError,
 } from "@/lib/conversations/errors";
 import { db } from "@/lib/db/client";
 import {
- type Thread,
- type ThreadEvent,
- type ThreadEventActorType,
- type ThreadLifecycleState,
- threadEventTable,
- threadTable,
+  type Thread,
+  type ThreadEvent,
+  type ThreadEventActorType,
+  type ThreadLifecycleState,
+  threadEventTable,
+  threadTable,
 } from "@/lib/persistence/schema/conversation";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 /** 创建 Thread 时的 Event 写入参数。 */
 interface ThreadEventInput {
- eventType: string;
- turnId?: string;
- itemId?: string;
- invocationId?: string;
- actorType: ThreadEventActorType;
- actorId?: string;
- payload: Record<string, unknown>;
- correlationId?: string;
- causationId?: string;
- idempotencyKey?: string;
+  eventType: string;
+  turnId?: string;
+  itemId?: string;
+  invocationId?: string;
+  actorType: ThreadEventActorType;
+  actorId?: string;
+  payload: Record<string, unknown>;
+  correlationId?: string;
+  causationId?: string;
+  idempotencyKey?: string;
 }
 
 /**
@@ -56,117 +56,117 @@ interface ThreadEventInput {
  * thread.created 事件 sequence = 1（首次分配）。
  */
 export async function createThread(params: {
- tenantId: string;
- ownerUserId: string;
- primaryAgentId: string;
- title?: string | null;
- defaultWorkspaceId?: string | null;
- defaultModelRef?: string | null;
- defaultEnvironmentDefinitionId?: string | null;
- actorId: string;
- idempotencyKey?: string;
+  tenantId: string;
+  ownerUserId: string;
+  primaryAgentId: string;
+  title?: string | null;
+  defaultWorkspaceId?: string | null;
+  defaultModelRef?: string | null;
+  defaultEnvironmentDefinitionId?: string | null;
+  actorId: string;
+  idempotencyKey?: string;
 }): Promise<{ thread: Thread; event: ThreadEvent }> {
- const threadId = randomUUID();
- const eventId = randomUUID();
- const now = new Date();
+  const threadId = randomUUID();
+  const eventId = randomUUID();
+  const now = new Date();
 
- // 同事务：INSERT Thread (lastEventSequence=1) + INSERT ThreadEvent (sequence=1)
- await db.transaction(async (tx) => {
- await tx.insert(threadTable).values({
- id: threadId,
- tenantId: params.tenantId,
- ownerUserId: params.ownerUserId,
- primaryAgentId: params.primaryAgentId,
- title: params.title ?? null,
- defaultWorkspaceId: params.defaultWorkspaceId ?? null,
- defaultModelRef: params.defaultModelRef ?? null,
- defaultEnvironmentDefinitionId: params.defaultEnvironmentDefinitionId ?? null,
- lifecycleState: "active",
- lastActivityAt: now,
- lastTurnSequence: 0,
- lastItemSequence: 0,
- lastEventSequence: 1, // thread.created 占 sequence 1
- pendingQueueVersionNo: 1,
- versionNo: 1,
- createdAt: now,
- updatedAt: now,
- });
+  // 同事务：INSERT Thread (lastEventSequence=1) + INSERT ThreadEvent (sequence=1)
+  await db.transaction(async (tx) => {
+    await tx.insert(threadTable).values({
+      id: threadId,
+      tenantId: params.tenantId,
+      ownerUserId: params.ownerUserId,
+      primaryAgentId: params.primaryAgentId,
+      title: params.title ?? null,
+      defaultWorkspaceId: params.defaultWorkspaceId ?? null,
+      defaultModelRef: params.defaultModelRef ?? null,
+      defaultEnvironmentDefinitionId: params.defaultEnvironmentDefinitionId ?? null,
+      lifecycleState: "active",
+      lastActivityAt: now,
+      lastTurnSequence: 0,
+      lastItemSequence: 0,
+      lastEventSequence: 1, // thread.created 占 sequence 1
+      pendingQueueVersionNo: 1,
+      versionNo: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
 
- await tx.insert(threadEventTable).values({
- id: eventId,
- threadId,
- eventSequence: 1,
- eventType: "thread.created",
- schemaVersion: 1,
- actorType: "user",
- actorId: params.actorId,
- payloadJson: {
- // 投影上下文（thread_list_projection 需要 tenant_id/owner_user_id 创建行）
- tenant_id: params.tenantId,
- owner_user_id: params.ownerUserId,
- primary_agent_id: params.primaryAgentId,
- title: params.title ?? null,
- default_workspace_id: params.defaultWorkspaceId ?? null,
- default_model_ref: params.defaultModelRef ?? null,
- },
- idempotencyKey: params.idempotencyKey ?? null,
- occurredAt: now,
- ingestedAt: now,
- });
- });
+    await tx.insert(threadEventTable).values({
+      id: eventId,
+      threadId,
+      eventSequence: 1,
+      eventType: "thread.created",
+      schemaVersion: 1,
+      actorType: "user",
+      actorId: params.actorId,
+      payloadJson: {
+        // 投影上下文（thread_list_projection 需要 tenant_id/owner_user_id 创建行）
+        tenant_id: params.tenantId,
+        owner_user_id: params.ownerUserId,
+        primary_agent_id: params.primaryAgentId,
+        title: params.title ?? null,
+        default_workspace_id: params.defaultWorkspaceId ?? null,
+        default_model_ref: params.defaultModelRef ?? null,
+      },
+      idempotencyKey: params.idempotencyKey ?? null,
+      occurredAt: now,
+      ingestedAt: now,
+    });
+  });
 
- const [thread] = await db.select().from(threadTable).where(eq(threadTable.id, threadId)).limit(1);
- if (!thread) {
- throw new Error(`createThread: Thread 行未找到（id=${threadId}）`);
- }
+  const [thread] = await db.select().from(threadTable).where(eq(threadTable.id, threadId)).limit(1);
+  if (!thread) {
+    throw new Error(`createThread: Thread 行未找到（id=${threadId}）`);
+  }
 
- const [event] = await db
- .select()
- .from(threadEventTable)
- .where(eq(threadEventTable.id, eventId))
- .limit(1);
- if (!event) {
- throw new Error(`createThread: ThreadEvent 行未找到（id=${eventId}）`);
- }
+  const [event] = await db
+    .select()
+    .from(threadEventTable)
+    .where(eq(threadEventTable.id, eventId))
+    .limit(1);
+  if (!event) {
+    throw new Error(`createThread: ThreadEvent 行未找到（id=${eventId}）`);
+  }
 
- return { thread, event };
+  return { thread, event };
 }
 
 /** 按 id 获取 Thread（跨租户隔离）。不存在返回 null。 */
 export async function getThreadById(tenantId: string, threadId: string): Promise<Thread | null> {
- const [row] = await db
- .select()
- .from(threadTable)
- .where(and(eq(threadTable.tenantId, tenantId), eq(threadTable.id, threadId)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(threadTable)
+    .where(and(eq(threadTable.tenantId, tenantId), eq(threadTable.id, threadId)))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 按 id 获取 Thread，不存在抛 ThreadNotFoundError。 */
 export async function requireThread(tenantId: string, threadId: string): Promise<Thread> {
- const thread = await getThreadById(tenantId, threadId);
- if (!thread) throw new ThreadNotFoundError(threadId);
- return thread;
+  const thread = await getThreadById(tenantId, threadId);
+  if (!thread) throw new ThreadNotFoundError(threadId);
+  return thread;
 }
 
 /** 列出用户所有 Thread（跨租户隔离，默认不含 deleted）。 */
 export async function listThreadsForUser(
- tenantId: string,
- ownerUserId: string,
- options?: { lifecycleState?: ThreadLifecycleState; includeDeleted?: boolean },
+  tenantId: string,
+  ownerUserId: string,
+  options?: { lifecycleState?: ThreadLifecycleState; includeDeleted?: boolean },
 ): Promise<Thread[]> {
- const conditions = [eq(threadTable.tenantId, tenantId), eq(threadTable.ownerUserId, ownerUserId)];
- if (options?.lifecycleState) {
- conditions.push(eq(threadTable.lifecycleState, options.lifecycleState));
- }
- if (!options?.includeDeleted) {
- conditions.push(isNull(threadTable.deletedAt));
- }
- return db
- .select()
- .from(threadTable)
- .where(and(...conditions))
- .orderBy(desc(threadTable.lastActivityAt));
+  const conditions = [eq(threadTable.tenantId, tenantId), eq(threadTable.ownerUserId, ownerUserId)];
+  if (options?.lifecycleState) {
+    conditions.push(eq(threadTable.lifecycleState, options.lifecycleState));
+  }
+  if (!options?.includeDeleted) {
+    conditions.push(isNull(threadTable.deletedAt));
+  }
+  return db
+    .select()
+    .from(threadTable)
+    .where(and(...conditions))
+    .orderBy(desc(threadTable.lastActivityAt));
 }
 
 /**
@@ -179,45 +179,45 @@ export async function listThreadsForUser(
  * - 乐观锁：versionNo 不匹配返回 null。
  */
 export async function updateThreadLifecycle(
- tenantId: string,
- threadId: string,
- nextState: ThreadLifecycleState,
- expectedVersionNo: number,
+  tenantId: string,
+  threadId: string,
+  nextState: ThreadLifecycleState,
+  expectedVersionNo: number,
 ): Promise<Thread | null> {
- const current = await getThreadById(tenantId, threadId);
- if (!current) return null;
- if (current.versionNo !== expectedVersionNo) {
- throw new ThreadVersionConflictError(threadId, expectedVersionNo, current.versionNo);
- }
+  const current = await getThreadById(tenantId, threadId);
+  if (!current) return null;
+  if (current.versionNo !== expectedVersionNo) {
+    throw new ThreadVersionConflictError(threadId, expectedVersionNo, current.versionNo);
+  }
 
- // 状态机校验：active → archived → deleted
- const transitions: Record<ThreadLifecycleState, ThreadLifecycleState[]> = {
- active: ["archived", "deleted"],
- archived: ["deleted"],
- deleted: [],
- };
- if (!transitions[current.lifecycleState].includes(nextState)) {
- throw new ThreadNotAcceptingTurnsError(threadId, current.lifecycleState);
- }
+  // 状态机校验：active → archived → deleted
+  const transitions: Record<ThreadLifecycleState, ThreadLifecycleState[]> = {
+    active: ["archived", "deleted"],
+    archived: ["deleted"],
+    deleted: [],
+  };
+  if (!transitions[current.lifecycleState].includes(nextState)) {
+    throw new ThreadNotAcceptingTurnsError(threadId, current.lifecycleState);
+  }
 
- const result = await db
- .update(threadTable)
- .set({
- lifecycleState: nextState,
- deletedAt: nextState === "deleted" ? new Date() : null,
- versionNo: expectedVersionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(threadTable.tenantId, tenantId),
- eq(threadTable.id, threadId),
- eq(threadTable.versionNo, expectedVersionNo),
- ),
- );
+  const result = await db
+    .update(threadTable)
+    .set({
+      lifecycleState: nextState,
+      deletedAt: nextState === "deleted" ? new Date() : null,
+      versionNo: expectedVersionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(threadTable.tenantId, tenantId),
+        eq(threadTable.id, threadId),
+        eq(threadTable.versionNo, expectedVersionNo),
+      ),
+    );
 
- if (result[0].affectedRows === 0) return null;
- return getThreadById(tenantId, threadId);
+  if (result[0].affectedRows === 0) return null;
+  return getThreadById(tenantId, threadId);
 }
 
 /**
@@ -230,36 +230,36 @@ export async function updateThreadLifecycle(
  * 完整的事件同事务写入在 S04-C02 的 allocateAndWriteEvents 中实现。
  */
 export async function updateThreadSettings(
- tenantId: string,
- threadId: string,
- updates: {
- defaultModelRef?: string | null;
- defaultWorkspaceId?: string | null;
- defaultEnvironmentDefinitionId?: string | null;
- },
- expectedVersionNo: number,
+  tenantId: string,
+  threadId: string,
+  updates: {
+    defaultModelRef?: string | null;
+    defaultWorkspaceId?: string | null;
+    defaultEnvironmentDefinitionId?: string | null;
+  },
+  expectedVersionNo: number,
 ): Promise<Thread | null> {
- const result = await db
- .update(threadTable)
- .set({
- ...updates,
- versionNo: expectedVersionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(threadTable.tenantId, tenantId),
- eq(threadTable.id, threadId),
- eq(threadTable.versionNo, expectedVersionNo),
- ),
- );
+  const result = await db
+    .update(threadTable)
+    .set({
+      ...updates,
+      versionNo: expectedVersionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(threadTable.tenantId, tenantId),
+        eq(threadTable.id, threadId),
+        eq(threadTable.versionNo, expectedVersionNo),
+      ),
+    );
 
- if (result[0].affectedRows === 0) {
- const current = await getThreadById(tenantId, threadId);
- if (!current) return null;
- throw new ThreadVersionConflictError(threadId, expectedVersionNo, current.versionNo);
- }
- return getThreadById(tenantId, threadId);
+  if (result[0].affectedRows === 0) {
+    const current = await getThreadById(tenantId, threadId);
+    if (!current) return null;
+    throw new ThreadVersionConflictError(threadId, expectedVersionNo, current.versionNo);
+  }
+  return getThreadById(tenantId, threadId);
 }
 
 /**
@@ -272,58 +272,58 @@ export async function updateThreadSettings(
  * 注意：本函数不写 thread.primary_agent_changed Event；调用方负责。
  */
 export async function changePrimaryAgent(
- tenantId: string,
- threadId: string,
- nextAgentId: string,
- expectedVersionNo: number,
+  tenantId: string,
+  threadId: string,
+  nextAgentId: string,
+  expectedVersionNo: number,
 ): Promise<Thread | null> {
- const result = await db
- .update(threadTable)
- .set({
- primaryAgentId: nextAgentId,
- versionNo: expectedVersionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(threadTable.tenantId, tenantId),
- eq(threadTable.id, threadId),
- eq(threadTable.versionNo, expectedVersionNo),
- ),
- );
+  const result = await db
+    .update(threadTable)
+    .set({
+      primaryAgentId: nextAgentId,
+      versionNo: expectedVersionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(threadTable.tenantId, tenantId),
+        eq(threadTable.id, threadId),
+        eq(threadTable.versionNo, expectedVersionNo),
+      ),
+    );
 
- if (result[0].affectedRows === 0) {
- const current = await getThreadById(tenantId, threadId);
- if (!current) return null;
- throw new ThreadVersionConflictError(threadId, expectedVersionNo, current.versionNo);
- }
- return getThreadById(tenantId, threadId);
+  if (result[0].affectedRows === 0) {
+    const current = await getThreadById(tenantId, threadId);
+    if (!current) return null;
+    throw new ThreadVersionConflictError(threadId, expectedVersionNo, current.versionNo);
+  }
+  return getThreadById(tenantId, threadId);
 }
 
 /** 更新 Thread.activeGoalId（乐观锁）。 */
 export async function setActiveGoal(
- tenantId: string,
- threadId: string,
- goalId: string | null,
- expectedVersionNo: number,
+  tenantId: string,
+  threadId: string,
+  goalId: string | null,
+  expectedVersionNo: number,
 ): Promise<Thread | null> {
- const result = await db
- .update(threadTable)
- .set({
- activeGoalId: goalId,
- versionNo: expectedVersionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(threadTable.tenantId, tenantId),
- eq(threadTable.id, threadId),
- eq(threadTable.versionNo, expectedVersionNo),
- ),
- );
+  const result = await db
+    .update(threadTable)
+    .set({
+      activeGoalId: goalId,
+      versionNo: expectedVersionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(threadTable.tenantId, tenantId),
+        eq(threadTable.id, threadId),
+        eq(threadTable.versionNo, expectedVersionNo),
+      ),
+    );
 
- if (result[0].affectedRows === 0) return null;
- return getThreadById(tenantId, threadId);
+  if (result[0].affectedRows === 0) return null;
+  return getThreadById(tenantId, threadId);
 }
 
 // ─── Sequence 分配（SELECT FOR UPDATE）─────────────────────
@@ -341,31 +341,31 @@ export async function setActiveGoal(
  * @returns 分配的起始 sequence（连续）
  */
 export async function allocateEventSequences(
- tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
- threadId: string,
- count = 1,
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  threadId: string,
+  count = 1,
 ): Promise<number> {
- // SELECT ... FOR UPDATE 锁定 Thread 行
- const [row] = await tx
- .select({ lastEventSequence: threadTable.lastEventSequence })
- .from(threadTable)
- .where(eq(threadTable.id, threadId))
- .for("update")
- .limit(1);
+  // SELECT ... FOR UPDATE 锁定 Thread 行
+  const [row] = await tx
+    .select({ lastEventSequence: threadTable.lastEventSequence })
+    .from(threadTable)
+    .where(eq(threadTable.id, threadId))
+    .for("update")
+    .limit(1);
 
- if (!row) {
- throw new ThreadNotFoundError(threadId);
- }
+  if (!row) {
+    throw new ThreadNotFoundError(threadId);
+  }
 
- const startSequence = row.lastEventSequence + 1;
- const newLast = row.lastEventSequence + count;
+  const startSequence = row.lastEventSequence + 1;
+  const newLast = row.lastEventSequence + count;
 
- await tx
- .update(threadTable)
- .set({ lastEventSequence: newLast })
- .where(eq(threadTable.id, threadId));
+  await tx
+    .update(threadTable)
+    .set({ lastEventSequence: newLast })
+    .where(eq(threadTable.id, threadId));
 
- return startSequence;
+  return startSequence;
 }
 
 /**
@@ -374,30 +374,30 @@ export async function allocateEventSequences(
  * 必须在 db.transaction 内调用。
  */
 export async function allocateTurnSequence(
- tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
- threadId: string,
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  threadId: string,
 ): Promise<number> {
- const [row] = await tx
- .select({ lastTurnSequence: threadTable.lastTurnSequence })
- .from(threadTable)
- .where(eq(threadTable.id, threadId))
- .for("update")
- .limit(1);
+  const [row] = await tx
+    .select({ lastTurnSequence: threadTable.lastTurnSequence })
+    .from(threadTable)
+    .where(eq(threadTable.id, threadId))
+    .for("update")
+    .limit(1);
 
- if (!row) {
- throw new ThreadNotFoundError(threadId);
- }
+  if (!row) {
+    throw new ThreadNotFoundError(threadId);
+  }
 
- const nextSequence = row.lastTurnSequence + 1;
- await tx
- .update(threadTable)
- .set({
- lastTurnSequence: nextSequence,
- lastActivityAt: new Date(),
- })
- .where(eq(threadTable.id, threadId));
+  const nextSequence = row.lastTurnSequence + 1;
+  await tx
+    .update(threadTable)
+    .set({
+      lastTurnSequence: nextSequence,
+      lastActivityAt: new Date(),
+    })
+    .where(eq(threadTable.id, threadId));
 
- return nextSequence;
+  return nextSequence;
 }
 
 /**
@@ -406,27 +406,27 @@ export async function allocateTurnSequence(
  * 必须在 db.transaction 内调用。
  */
 export async function allocateItemSequence(
- tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
- threadId: string,
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  threadId: string,
 ): Promise<number> {
- const [row] = await tx
- .select({ lastItemSequence: threadTable.lastItemSequence })
- .from(threadTable)
- .where(eq(threadTable.id, threadId))
- .for("update")
- .limit(1);
+  const [row] = await tx
+    .select({ lastItemSequence: threadTable.lastItemSequence })
+    .from(threadTable)
+    .where(eq(threadTable.id, threadId))
+    .for("update")
+    .limit(1);
 
- if (!row) {
- throw new ThreadNotFoundError(threadId);
- }
+  if (!row) {
+    throw new ThreadNotFoundError(threadId);
+  }
 
- const nextSequence = row.lastItemSequence + 1;
- await tx
- .update(threadTable)
- .set({ lastItemSequence: nextSequence })
- .where(eq(threadTable.id, threadId));
+  const nextSequence = row.lastItemSequence + 1;
+  await tx
+    .update(threadTable)
+    .set({ lastItemSequence: nextSequence })
+    .where(eq(threadTable.id, threadId));
 
- return nextSequence;
+  return nextSequence;
 }
 
 // ─── Event 写入 ────────────────────────────────────────────
@@ -437,82 +437,82 @@ export async function allocateItemSequence(
  * 调用方必须先通过 allocateEventSequences 获取 sequence。
  */
 export async function insertThreadEvent(
- tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
- threadId: string,
- sequence: number,
- input: ThreadEventInput,
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  threadId: string,
+  sequence: number,
+  input: ThreadEventInput,
 ): Promise<ThreadEvent> {
- const id = randomUUID();
- const now = new Date();
- await tx.insert(threadEventTable).values({
- id,
- threadId,
- eventSequence: sequence,
- eventType: input.eventType,
- schemaVersion: 1,
- turnId: input.turnId ?? null,
- itemId: input.itemId ?? null,
- invocationId: input.invocationId ?? null,
- actorType: input.actorType,
- actorId: input.actorId ?? null,
- payloadJson: input.payload,
- correlationId: input.correlationId ?? null,
- causationId: input.causationId ?? null,
- idempotencyKey: input.idempotencyKey ?? null,
- occurredAt: now,
- ingestedAt: now,
- });
+  const id = randomUUID();
+  const now = new Date();
+  await tx.insert(threadEventTable).values({
+    id,
+    threadId,
+    eventSequence: sequence,
+    eventType: input.eventType,
+    schemaVersion: 1,
+    turnId: input.turnId ?? null,
+    itemId: input.itemId ?? null,
+    invocationId: input.invocationId ?? null,
+    actorType: input.actorType,
+    actorId: input.actorId ?? null,
+    payloadJson: input.payload,
+    correlationId: input.correlationId ?? null,
+    causationId: input.causationId ?? null,
+    idempotencyKey: input.idempotencyKey ?? null,
+    occurredAt: now,
+    ingestedAt: now,
+  });
 
- const [row] = await tx
- .select()
- .from(threadEventTable)
- .where(eq(threadEventTable.id, id))
- .limit(1);
- if (!row) {
- throw new Error(`insertThreadEvent: 行未找到（id=${id}）`);
- }
- return row;
+  const [row] = await tx
+    .select()
+    .from(threadEventTable)
+    .where(eq(threadEventTable.id, id))
+    .limit(1);
+  if (!row) {
+    throw new Error(`insertThreadEvent: 行未找到（id=${id}）`);
+  }
+  return row;
 }
 
 /** 查询 Thread Event（按 sequence 升序，从 afterSequence+1 开始）。 */
 export async function listThreadEvents(
- tenantId: string,
- threadId: string,
- options?: { afterSequence?: number; limit?: number },
+  tenantId: string,
+  threadId: string,
+  options?: { afterSequence?: number; limit?: number },
 ): Promise<ThreadEvent[]> {
- const limit = options?.limit ?? 100;
- const afterSeq = options?.afterSequence ?? 0;
- const [thread] = await db
- .select({ id: threadTable.id })
- .from(threadTable)
- .where(and(eq(threadTable.tenantId, tenantId), eq(threadTable.id, threadId)))
- .limit(1);
- if (!thread) return [];
+  const limit = options?.limit ?? 100;
+  const afterSeq = options?.afterSequence ?? 0;
+  const [thread] = await db
+    .select({ id: threadTable.id })
+    .from(threadTable)
+    .where(and(eq(threadTable.tenantId, tenantId), eq(threadTable.id, threadId)))
+    .limit(1);
+  if (!thread) return [];
 
- return db
- .select()
- .from(threadEventTable)
- .where(
- and(
- eq(threadEventTable.threadId, threadId),
- sql`${threadEventTable.eventSequence} > ${afterSeq}`,
- ),
- )
- .orderBy(threadEventTable.eventSequence)
- .limit(limit);
+  return db
+    .select()
+    .from(threadEventTable)
+    .where(
+      and(
+        eq(threadEventTable.threadId, threadId),
+        sql`${threadEventTable.eventSequence} > ${afterSeq}`,
+      ),
+    )
+    .orderBy(threadEventTable.eventSequence)
+    .limit(limit);
 }
 
 /** 获取 Thread 最新 event sequence（用于 latest_event_cursor）。 */
 export async function getLatestEventSequence(
- tenantId: string,
- threadId: string,
+  tenantId: string,
+  threadId: string,
 ): Promise<number | null> {
- const [row] = await db
- .select({ lastEventSequence: threadTable.lastEventSequence })
- .from(threadTable)
- .where(and(eq(threadTable.tenantId, tenantId), eq(threadTable.id, threadId)))
- .limit(1);
- return row?.lastEventSequence ?? null;
+  const [row] = await db
+    .select({ lastEventSequence: threadTable.lastEventSequence })
+    .from(threadTable)
+    .where(and(eq(threadTable.tenantId, tenantId), eq(threadTable.id, threadId)))
+    .limit(1);
+  return row?.lastEventSequence ?? null;
 }
 
 // ─── 批量事件写入与 hash 工具 ─────────────────────────────
@@ -524,19 +524,19 @@ export async function getLatestEventSequence(
  * 递归排序 JSON key 后 sha256，保证相同 payload 产生相同 hash。
  */
 export function computeEventPayloadHash(payload: Record<string, unknown>): string {
- const sorted = JSON.stringify(sortKeys(payload));
- return `sha256:${createHash("sha256").update(sorted, "utf8").digest("hex")}`;
+  const sorted = JSON.stringify(sortKeys(payload));
+  return `sha256:${createHash("sha256").update(sorted, "utf8").digest("hex")}`;
 }
 
 /** 递归排序对象 key，保证 hash 稳定。 */
 function sortKeys(value: unknown): unknown {
- if (value === null || typeof value !== "object") return value;
- if (Array.isArray(value)) return value.map(sortKeys);
- const sorted: Record<string, unknown> = {};
- for (const key of Object.keys(value as Record<string, unknown>).sort()) {
- sorted[key] = sortKeys((value as Record<string, unknown>)[key]);
- }
- return sorted;
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(sortKeys);
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    sorted[key] = sortKeys((value as Record<string, unknown>)[key]);
+  }
+  return sorted;
 }
 
 /**
@@ -551,20 +551,20 @@ function sortKeys(value: unknown): unknown {
  * @returns 写入的 ThreadEvent 数组（按 sequence 升序）
  */
 export async function allocateAndWriteEvents(
- tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
- threadId: string,
- inputs: ThreadEventInput[],
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  threadId: string,
+  inputs: ThreadEventInput[],
 ): Promise<ThreadEvent[]> {
- if (inputs.length === 0) return [];
- const startSequence = await allocateEventSequences(tx, threadId, inputs.length);
- const events: ThreadEvent[] = [];
- for (let i = 0; i < inputs.length; i++) {
- const input = inputs[i];
- if (!input) continue;
- const event = await insertThreadEvent(tx, threadId, startSequence + i, input);
- events.push(event);
- }
- return events;
+  if (inputs.length === 0) return [];
+  const startSequence = await allocateEventSequences(tx, threadId, inputs.length);
+  const events: ThreadEvent[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const input = inputs[i];
+    if (!input) continue;
+    const event = await insertThreadEvent(tx, threadId, startSequence + i, input);
+    events.push(event);
+  }
+  return events;
 }
 
 /**
@@ -574,29 +574,29 @@ export async function allocateAndWriteEvents(
  * Item 列表与 latest_event_cursor 在同一一致性读点生成。
  */
 export async function getLatestEventCursor(
- tenantId: string,
- threadId: string,
+  tenantId: string,
+  threadId: string,
 ): Promise<{ sequence: number; eventId: string | null } | null> {
- const [row] = await db
- .select({
- lastEventSequence: threadTable.lastEventSequence,
- })
- .from(threadTable)
- .where(and(eq(threadTable.tenantId, tenantId), eq(threadTable.id, threadId)))
- .limit(1);
- if (!row) return null;
+  const [row] = await db
+    .select({
+      lastEventSequence: threadTable.lastEventSequence,
+    })
+    .from(threadTable)
+    .where(and(eq(threadTable.tenantId, tenantId), eq(threadTable.id, threadId)))
+    .limit(1);
+  if (!row) return null;
 
- // 查询该 sequence 对应的 event id
- const [event] = await db
- .select({ id: threadEventTable.id })
- .from(threadEventTable)
- .where(
- and(
- eq(threadEventTable.threadId, threadId),
- eq(threadEventTable.eventSequence, row.lastEventSequence),
- ),
- )
- .limit(1);
+  // 查询该 sequence 对应的 event id
+  const [event] = await db
+    .select({ id: threadEventTable.id })
+    .from(threadEventTable)
+    .where(
+      and(
+        eq(threadEventTable.threadId, threadId),
+        eq(threadEventTable.eventSequence, row.lastEventSequence),
+      ),
+    )
+    .limit(1);
 
- return { sequence: row.lastEventSequence, eventId: event?.id ?? null };
+  return { sequence: row.lastEventSequence, eventId: event?.id ?? null };
 }

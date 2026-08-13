@@ -29,13 +29,13 @@ import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
- datetime,
- index,
- mysqlEnum,
- mysqlTable,
- text,
- uniqueIndex,
- varchar,
+  datetime,
+  index,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  uniqueIndex,
+  varchar,
 } from "drizzle-orm/mysql-core";
 
 // ─── 隔离目标类型 ──────────────────────────────────────────
@@ -55,15 +55,15 @@ import {
  * - other：其他安全事件（如 SSRF、路径穿越等，不直接关联可撤销实体）。
  */
 export const INCIDENT_TARGET_TYPES = [
- "agent",
- "agent_revision",
- "tool_provider",
- "tool",
- "credential",
- "runtime",
- "environment",
- "workload_token",
- "other",
+  "agent",
+  "agent_revision",
+  "tool_provider",
+  "tool",
+  "credential",
+  "runtime",
+  "environment",
+  "workload_token",
+  "other",
 ] as const;
 export type IncidentTargetType = (typeof INCIDENT_TARGET_TYPES)[number];
 
@@ -78,11 +78,11 @@ export type IncidentTargetType = (typeof INCIDENT_TARGET_TYPES)[number];
  * - escalated：已升级（超出平台自动处置能力，需人工介入）。
  */
 export const INCIDENT_STATES = [
- "open",
- "investigating",
- "contained",
- "resolved",
- "escalated",
+  "open",
+  "investigating",
+  "contained",
+  "resolved",
+  "escalated",
 ] as const;
 export type IncidentState = (typeof INCIDENT_STATES)[number];
 
@@ -114,15 +114,15 @@ export type IncidentSeverity = (typeof INCIDENT_SEVERITIES)[number];
  * - quarantine_event：隔离事件（event ingress quarantine，阻止消费）。
  */
 export const CONTAINMENT_ACTION_TYPES = [
- "revoke_credential",
- "disable_tool_provider",
- "disable_tool",
- "disable_route",
- "withdraw_agent_revision",
- "withdraw_runtime_revision",
- "revoke_workload_token",
- "isolate_environment",
- "quarantine_event",
+  "revoke_credential",
+  "disable_tool_provider",
+  "disable_tool",
+  "disable_route",
+  "withdraw_agent_revision",
+  "withdraw_runtime_revision",
+  "revoke_workload_token",
+  "isolate_environment",
+  "quarantine_event",
 ] as const;
 export type ContainmentActionType = (typeof CONTAINMENT_ACTION_TYPES)[number];
 
@@ -155,84 +155,84 @@ export type ContainmentState = (typeof CONTAINMENT_STATES)[number];
  * - other：无预填动作（人工评估后手动添加 containment）。
  */
 export const CONTAINMENT_ACTION_MATRIX: Record<
- IncidentTargetType,
- readonly ContainmentActionType[]
+  IncidentTargetType,
+  readonly ContainmentActionType[]
 > = {
- agent: ["withdraw_agent_revision", "disable_route"],
- agent_revision: ["withdraw_agent_revision"],
- tool_provider: ["disable_tool_provider"],
- tool: ["disable_tool"],
- credential: ["revoke_credential"],
- runtime: ["withdraw_runtime_revision", "disable_route"],
- environment: ["isolate_environment"],
- workload_token: ["revoke_workload_token"],
- other: [],
+  agent: ["withdraw_agent_revision", "disable_route"],
+  agent_revision: ["withdraw_agent_revision"],
+  tool_provider: ["disable_tool_provider"],
+  tool: ["disable_tool"],
+  credential: ["revoke_credential"],
+  runtime: ["withdraw_runtime_revision", "disable_route"],
+  environment: ["isolate_environment"],
+  workload_token: ["revoke_workload_token"],
+  other: [],
 };
 
 // ─── SecurityIncident 表 ───────────────────────────────
 
 export const securityIncidentTable = mysqlTable(
- "SecurityIncident",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 业务唯一键（便于幂等去重与外部系统关联）。 */
- incidentKey: varchar("incidentKey", { length: 128 }).notNull(),
- /** 严重程度。 */
- severity: mysqlEnum("severity", INCIDENT_SEVERITIES).notNull(),
- /** 事故状态（状态机）。 */
- incidentState: mysqlEnum("incidentState", INCIDENT_STATES).notNull().default("open"),
- /** 隔离目标类型。 */
- targetType: mysqlEnum("targetType", INCIDENT_TARGET_TYPES).notNull(),
- /** 被隔离的目标 id（如 agentId / revisionId / credentialId / runtimeId / environmentId）。 */
- targetId: varchar("targetId", { length: 128 }).notNull(),
- /** 事故概要（人工填写或系统生成）。 */
- summary: text("summary"),
- /** 检测来源（audit/manual/alert/drill/system）。 */
- detectedBy: varchar("detectedBy", { length: 64 }).notNull(),
- /** 检测时间（事故首次识别时间）。 */
- detectedAt: datetime("detectedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- /** 调查开始时间。 */
- investigatingAt: datetime("investigatingAt", { mode: "date", fsp: 3 }),
- /** 隔离完成时间。 */
- containedAt: datetime("containedAt", { mode: "date", fsp: 3 }),
- /** 解决时间。 */
- resolvedAt: datetime("resolvedAt", { mode: "date", fsp: 3 }),
- /** 关闭人（userId / serviceId）。 */
- closedBy: varchar("closedBy", { length: 128 }),
- /** 关闭原因（resolved/escalated 时填写）。 */
- closureReason: text("closureReason"),
- /** 隔离动作汇总 JSON（containmentCount/appliedCount/failedCount/revertedCount）。 */
- containmentSummaryJson: text("containmentSummaryJson"),
- /** 审计事件 id（security.incident 审计）。 */
- auditEventId: varchar("auditEventId", { length: 36 }),
- /** 关联请求 id（X-Request-ID），保证可跟踪。 */
- requestId: varchar("requestId", { length: 64 }),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- tenantKeyUq: uniqueIndex("SecurityIncident_tenant_key_uq").on(t.tenantId, t.incidentKey),
- tenantStateIdx: index("SecurityIncident_tenant_state_idx").on(t.tenantId, t.incidentState),
- tenantTargetIdx: index("SecurityIncident_tenant_target_idx").on(
- t.tenantId,
- t.targetType,
- t.targetId,
- ),
- tenantSeverityIdx: index("SecurityIncident_tenant_severity_idx").on(t.tenantId, t.severity),
- tenantDetectedIdx: index("SecurityIncident_tenant_detected_idx").on(t.tenantId, t.detectedAt),
- }),
+  "SecurityIncident",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 业务唯一键（便于幂等去重与外部系统关联）。 */
+    incidentKey: varchar("incidentKey", { length: 128 }).notNull(),
+    /** 严重程度。 */
+    severity: mysqlEnum("severity", INCIDENT_SEVERITIES).notNull(),
+    /** 事故状态（状态机）。 */
+    incidentState: mysqlEnum("incidentState", INCIDENT_STATES).notNull().default("open"),
+    /** 隔离目标类型。 */
+    targetType: mysqlEnum("targetType", INCIDENT_TARGET_TYPES).notNull(),
+    /** 被隔离的目标 id（如 agentId / revisionId / credentialId / runtimeId / environmentId）。 */
+    targetId: varchar("targetId", { length: 128 }).notNull(),
+    /** 事故概要（人工填写或系统生成）。 */
+    summary: text("summary"),
+    /** 检测来源（audit/manual/alert/drill/system）。 */
+    detectedBy: varchar("detectedBy", { length: 64 }).notNull(),
+    /** 检测时间（事故首次识别时间）。 */
+    detectedAt: datetime("detectedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    /** 调查开始时间。 */
+    investigatingAt: datetime("investigatingAt", { mode: "date", fsp: 3 }),
+    /** 隔离完成时间。 */
+    containedAt: datetime("containedAt", { mode: "date", fsp: 3 }),
+    /** 解决时间。 */
+    resolvedAt: datetime("resolvedAt", { mode: "date", fsp: 3 }),
+    /** 关闭人（userId / serviceId）。 */
+    closedBy: varchar("closedBy", { length: 128 }),
+    /** 关闭原因（resolved/escalated 时填写）。 */
+    closureReason: text("closureReason"),
+    /** 隔离动作汇总 JSON（containmentCount/appliedCount/failedCount/revertedCount）。 */
+    containmentSummaryJson: text("containmentSummaryJson"),
+    /** 审计事件 id（security.incident 审计）。 */
+    auditEventId: varchar("auditEventId", { length: 36 }),
+    /** 关联请求 id（X-Request-ID），保证可跟踪。 */
+    requestId: varchar("requestId", { length: 64 }),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    tenantKeyUq: uniqueIndex("SecurityIncident_tenant_key_uq").on(t.tenantId, t.incidentKey),
+    tenantStateIdx: index("SecurityIncident_tenant_state_idx").on(t.tenantId, t.incidentState),
+    tenantTargetIdx: index("SecurityIncident_tenant_target_idx").on(
+      t.tenantId,
+      t.targetType,
+      t.targetId,
+    ),
+    tenantSeverityIdx: index("SecurityIncident_tenant_severity_idx").on(t.tenantId, t.severity),
+    tenantDetectedIdx: index("SecurityIncident_tenant_detected_idx").on(t.tenantId, t.detectedAt),
+  }),
 );
 
 export type SecurityIncident = InferSelectModel<typeof securityIncidentTable>;
@@ -241,60 +241,60 @@ export type NewSecurityIncident = InferInsertModel<typeof securityIncidentTable>
 // ─── IncidentContainment 表 ────────────────────────────
 
 export const incidentContainmentTable = mysqlTable(
- "IncidentContainment",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 所属事故 id。 */
- incidentId: varchar("incidentId", { length: 36 })
- .notNull()
- .references(() => securityIncidentTable.id),
- /** 隔离动作类型（9 类）。 */
- actionType: mysqlEnum("actionType", CONTAINMENT_ACTION_TYPES).notNull(),
- /** 隔离动作状态（状态机）。 */
- actionState: mysqlEnum("actionState", CONTAINMENT_STATES).notNull().default("pending"),
- /**
- * 存储端证据引用（applied 必填）。
- * 指向实际撤销/禁用证据（如 CredentialRevocation.id、RouteState 变更审计 id）。
- * 不能用日志文本冒充隔离成功。
- */
- evidenceRef: varchar("evidenceRef", { length: 256 }),
- /** 隔离目标引用（如 "credential:cred-001" / "route:route-001"）。 */
- targetRef: varchar("targetRef", { length: 256 }),
- /** 核对详情 JSON（actionType 特定的隔离结果，如 affectedInvocations / revokedAt）。 */
- detailsJson: text("detailsJson"),
- /** 失败原因（actionState=failed 时填写）。 */
- failureReason: text("failureReason"),
- /** 应用时间（applied 时回填）。 */
- appliedAt: datetime("appliedAt", { mode: "date", fsp: 3 }),
- /** 回滚时间（reverted 时回填）。 */
- revertedAt: datetime("revertedAt", { mode: "date", fsp: 3 }),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- incidentActionUq: uniqueIndex("IncidentContainment_incident_action_uq").on(
- t.incidentId,
- t.actionType,
- ),
- tenantIncidentIdx: index("IncidentContainment_tenant_incident_idx").on(
- t.tenantId,
- t.incidentId,
- ),
- incidentStateIdx: index("IncidentContainment_incident_state_idx").on(
- t.incidentId,
- t.actionState,
- ),
- }),
+  "IncidentContainment",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 所属事故 id。 */
+    incidentId: varchar("incidentId", { length: 36 })
+      .notNull()
+      .references(() => securityIncidentTable.id),
+    /** 隔离动作类型（9 类）。 */
+    actionType: mysqlEnum("actionType", CONTAINMENT_ACTION_TYPES).notNull(),
+    /** 隔离动作状态（状态机）。 */
+    actionState: mysqlEnum("actionState", CONTAINMENT_STATES).notNull().default("pending"),
+    /**
+     * 存储端证据引用（applied 必填）。
+     * 指向实际撤销/禁用证据（如 CredentialRevocation.id、RouteState 变更审计 id）。
+     * 不能用日志文本冒充隔离成功。
+     */
+    evidenceRef: varchar("evidenceRef", { length: 256 }),
+    /** 隔离目标引用（如 "credential:cred-001" / "route:route-001"）。 */
+    targetRef: varchar("targetRef", { length: 256 }),
+    /** 核对详情 JSON（actionType 特定的隔离结果，如 affectedInvocations / revokedAt）。 */
+    detailsJson: text("detailsJson"),
+    /** 失败原因（actionState=failed 时填写）。 */
+    failureReason: text("failureReason"),
+    /** 应用时间（applied 时回填）。 */
+    appliedAt: datetime("appliedAt", { mode: "date", fsp: 3 }),
+    /** 回滚时间（reverted 时回填）。 */
+    revertedAt: datetime("revertedAt", { mode: "date", fsp: 3 }),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    incidentActionUq: uniqueIndex("IncidentContainment_incident_action_uq").on(
+      t.incidentId,
+      t.actionType,
+    ),
+    tenantIncidentIdx: index("IncidentContainment_tenant_incident_idx").on(
+      t.tenantId,
+      t.incidentId,
+    ),
+    incidentStateIdx: index("IncidentContainment_incident_state_idx").on(
+      t.incidentId,
+      t.actionState,
+    ),
+  }),
 );
 
 export type IncidentContainment = InferSelectModel<typeof incidentContainmentTable>;

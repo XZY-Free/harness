@@ -20,11 +20,11 @@ import { apiError } from "@/lib/http";
 import type { ActionCode, ResourceScopeType } from "@/lib/identity/action-codes";
 import { requireActionScope } from "@/lib/identity/authorization";
 import {
- AuthenticationError,
- type Principal,
- type WorkloadPrincipal,
- resolvePrincipal,
- resolveWorkloadPrincipal,
+  AuthenticationError,
+  type Principal,
+  type WorkloadPrincipal,
+  resolvePrincipal,
+  resolveWorkloadPrincipal,
 } from "@/lib/identity/resolver";
 import { WorkloadTokenError } from "@/lib/identity/workload-token";
 
@@ -47,11 +47,11 @@ export type AdminPrincipal = Principal | WorkloadPrincipal;
  * @throws WorkloadTokenError Bearer Token 解析/过期/audience 不匹配
  */
 export async function resolveAdminPrincipalAsync(headers: Headers): Promise<AdminPrincipal> {
- const authHeader = headers.get("authorization");
- if (authHeader?.trim().toLowerCase().startsWith("bearer ")) {
- return resolveWorkloadPrincipal(headers, "admin");
- }
- return resolvePrincipal(headers, "admin");
+  const authHeader = headers.get("authorization");
+  if (authHeader?.trim().toLowerCase().startsWith("bearer ")) {
+    return resolveWorkloadPrincipal(headers, "admin");
+  }
+  return resolvePrincipal(headers, "admin");
 }
 
 /**
@@ -59,15 +59,15 @@ export async function resolveAdminPrincipalAsync(headers: Headers): Promise<Admi
  * 非身份错误返回 null（调用方应向上抛）。
  */
 export function adminAuthErrorResponse(error: unknown, requestId: string): Response | null {
- if (error instanceof AuthenticationError) {
- return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
- }
- if (error instanceof WorkloadTokenError) {
- return apiError("AUTHENTICATION_REQUIRED", `Workload Token 无效: ${error.message}`, {
- requestId,
- });
- }
- return null;
+  if (error instanceof AuthenticationError) {
+    return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
+  }
+  if (error instanceof WorkloadTokenError) {
+    return apiError("AUTHENTICATION_REQUIRED", `Workload Token 无效: ${error.message}`, {
+      requestId,
+    });
+  }
+  return null;
 }
 
 // ─── action scope 校验 ────────────────────────────────────
@@ -81,16 +81,16 @@ export function adminAuthErrorResponse(error: unknown, requestId: string): Respo
  * - WorkloadPrincipal callerType=workload → 拒绝（workload_not_action_scoped）
  */
 export async function requireAdminActionScope(
- principal: AdminPrincipal,
- actionCode: ActionCode,
- resource: { type: ResourceScopeType; id: string },
- requestId: string,
+  principal: AdminPrincipal,
+  actionCode: ActionCode,
+  resource: { type: ResourceScopeType; id: string },
+  requestId: string,
 ): Promise<{ ok: true; principal: AdminPrincipal } | { ok: false; response: Response }> {
- const result = await requireActionScope(principal, { actionCode, resource }, requestId);
- if (result.ok) {
- return { ok: true, principal };
- }
- return { ok: false, response: result.response };
+  const result = await requireActionScope(principal, { actionCode, resource }, requestId);
+  if (result.ok) {
+    return { ok: true, principal };
+  }
+  return { ok: false, response: result.response };
 }
 
 // ─── ETag 解析 ────────────────────────────────────────────
@@ -136,15 +136,15 @@ export const CATALOG_REVISION_ETAG_PREFIX = "catalog-";
  * @throws Error ETag 格式非法
  */
 export function parseRouteSetEtag(etag: string): number {
- if (!etag.startsWith(ROUTE_SET_ETAG_PREFIX)) {
- throw new Error(`非法 RouteSet ETag: ${etag}（期望前缀 ${ROUTE_SET_ETAG_PREFIX}）`);
- }
- const versionStr = etag.slice(ROUTE_SET_ETAG_PREFIX.length);
- const versionNo = Number.parseInt(versionStr, 10);
- if (!Number.isFinite(versionNo) || versionNo <= 0) {
- throw new Error(`非法 RouteSet ETag 版本号: ${etag}`);
- }
- return versionNo;
+  if (!etag.startsWith(ROUTE_SET_ETAG_PREFIX)) {
+    throw new Error(`非法 RouteSet ETag: ${etag}（期望前缀 ${ROUTE_SET_ETAG_PREFIX}）`);
+  }
+  const versionStr = etag.slice(ROUTE_SET_ETAG_PREFIX.length);
+  const versionNo = Number.parseInt(versionStr, 10);
+  if (!Number.isFinite(versionNo) || versionNo <= 0) {
+    throw new Error(`非法 RouteSet ETag 版本号: ${etag}`);
+  }
+  return versionNo;
 }
 
 /**
@@ -156,15 +156,15 @@ export function parseRouteSetEtag(etag: string): number {
  * @throws Error ETag 格式非法
  */
 export function parseAgentRevisionEtag(etag: string): number {
- if (!etag.startsWith(AGENT_REVISION_ETAG_PREFIX)) {
- throw new Error(`非法 AgentRevision ETag: ${etag}（期望前缀 ${AGENT_REVISION_ETAG_PREFIX}）`);
- }
- const revisionStr = etag.slice(AGENT_REVISION_ETAG_PREFIX.length);
- const revisionNo = Number.parseInt(revisionStr, 10);
- if (!Number.isFinite(revisionNo) || revisionNo <= 0) {
- throw new Error(`非法 AgentRevision ETag 版本号: ${etag}`);
- }
- return revisionNo;
+  if (!etag.startsWith(AGENT_REVISION_ETAG_PREFIX)) {
+    throw new Error(`非法 AgentRevision ETag: ${etag}（期望前缀 ${AGENT_REVISION_ETAG_PREFIX}）`);
+  }
+  const revisionStr = etag.slice(AGENT_REVISION_ETAG_PREFIX.length);
+  const revisionNo = Number.parseInt(revisionStr, 10);
+  if (!Number.isFinite(revisionNo) || revisionNo <= 0) {
+    throw new Error(`非法 AgentRevision ETag 版本号: ${etag}`);
+  }
+  return revisionNo;
 }
 
 /**
@@ -176,17 +176,17 @@ export function parseAgentRevisionEtag(etag: string): number {
  * @throws Error ETag 格式非法
  */
 export function parseRuntimeRevisionEtag(etag: string): number {
- if (!etag.startsWith(RUNTIME_REVISION_ETAG_PREFIX)) {
- throw new Error(
- `非法 RuntimeRevision ETag: ${etag}（期望前缀 ${RUNTIME_REVISION_ETAG_PREFIX}）`,
- );
- }
- const revisionStr = etag.slice(RUNTIME_REVISION_ETAG_PREFIX.length);
- const revisionNo = Number.parseInt(revisionStr, 10);
- if (!Number.isFinite(revisionNo) || revisionNo <= 0) {
- throw new Error(`非法 RuntimeRevision ETag 版本号: ${etag}`);
- }
- return revisionNo;
+  if (!etag.startsWith(RUNTIME_REVISION_ETAG_PREFIX)) {
+    throw new Error(
+      `非法 RuntimeRevision ETag: ${etag}（期望前缀 ${RUNTIME_REVISION_ETAG_PREFIX}）`,
+    );
+  }
+  const revisionStr = etag.slice(RUNTIME_REVISION_ETAG_PREFIX.length);
+  const revisionNo = Number.parseInt(revisionStr, 10);
+  if (!Number.isFinite(revisionNo) || revisionNo <= 0) {
+    throw new Error(`非法 RuntimeRevision ETag 版本号: ${etag}`);
+  }
+  return revisionNo;
 }
 
 /**
@@ -198,15 +198,15 @@ export function parseRuntimeRevisionEtag(etag: string): number {
  * @throws Error ETag 格式非法
  */
 export function parseSkillEtag(etag: string): number {
- if (!etag.startsWith(SKILL_ETAG_PREFIX)) {
- throw new Error(`非法 Skill ETag: ${etag}（期望前缀 ${SKILL_ETAG_PREFIX}）`);
- }
- const versionStr = etag.slice(SKILL_ETAG_PREFIX.length);
- const versionNo = Number.parseInt(versionStr, 10);
- if (!Number.isFinite(versionNo) || versionNo <= 0) {
- throw new Error(`非法 Skill ETag 版本号: ${etag}`);
- }
- return versionNo;
+  if (!etag.startsWith(SKILL_ETAG_PREFIX)) {
+    throw new Error(`非法 Skill ETag: ${etag}（期望前缀 ${SKILL_ETAG_PREFIX}）`);
+  }
+  const versionStr = etag.slice(SKILL_ETAG_PREFIX.length);
+  const versionNo = Number.parseInt(versionStr, 10);
+  if (!Number.isFinite(versionNo) || versionNo <= 0) {
+    throw new Error(`非法 Skill ETag 版本号: ${etag}`);
+  }
+  return versionNo;
 }
 
 /**
@@ -218,15 +218,15 @@ export function parseSkillEtag(etag: string): number {
  * @throws Error ETag 格式非法
  */
 export function parseToolEtag(etag: string): number {
- if (!etag.startsWith(TOOL_ETAG_PREFIX)) {
- throw new Error(`非法 Tool ETag: ${etag}（期望前缀 ${TOOL_ETAG_PREFIX}）`);
- }
- const versionStr = etag.slice(TOOL_ETAG_PREFIX.length);
- const versionNo = Number.parseInt(versionStr, 10);
- if (!Number.isFinite(versionNo) || versionNo <= 0) {
- throw new Error(`非法 Tool ETag 版本号: ${etag}`);
- }
- return versionNo;
+  if (!etag.startsWith(TOOL_ETAG_PREFIX)) {
+    throw new Error(`非法 Tool ETag: ${etag}（期望前缀 ${TOOL_ETAG_PREFIX}）`);
+  }
+  const versionStr = etag.slice(TOOL_ETAG_PREFIX.length);
+  const versionNo = Number.parseInt(versionStr, 10);
+  if (!Number.isFinite(versionNo) || versionNo <= 0) {
+    throw new Error(`非法 Tool ETag 版本号: ${etag}`);
+  }
+  return versionNo;
 }
 
 /**
@@ -238,17 +238,17 @@ export function parseToolEtag(etag: string): number {
  * @throws Error ETag 格式非法
  */
 export function parseToolSchemaRevisionEtag(etag: string): number {
- if (!etag.startsWith(TOOL_SCHEMA_REVISION_ETAG_PREFIX)) {
- throw new Error(
- `非法 ToolSchemaRevision ETag: ${etag}（期望前缀 ${TOOL_SCHEMA_REVISION_ETAG_PREFIX}）`,
- );
- }
- const revisionStr = etag.slice(TOOL_SCHEMA_REVISION_ETAG_PREFIX.length);
- const revisionNo = Number.parseInt(revisionStr, 10);
- if (!Number.isFinite(revisionNo) || revisionNo <= 0) {
- throw new Error(`非法 ToolSchemaRevision ETag 版本号: ${etag}`);
- }
- return revisionNo;
+  if (!etag.startsWith(TOOL_SCHEMA_REVISION_ETAG_PREFIX)) {
+    throw new Error(
+      `非法 ToolSchemaRevision ETag: ${etag}（期望前缀 ${TOOL_SCHEMA_REVISION_ETAG_PREFIX}）`,
+    );
+  }
+  const revisionStr = etag.slice(TOOL_SCHEMA_REVISION_ETAG_PREFIX.length);
+  const revisionNo = Number.parseInt(revisionStr, 10);
+  if (!Number.isFinite(revisionNo) || revisionNo <= 0) {
+    throw new Error(`非法 ToolSchemaRevision ETag 版本号: ${etag}`);
+  }
+  return revisionNo;
 }
 
 /**
@@ -260,15 +260,15 @@ export function parseToolSchemaRevisionEtag(etag: string): number {
  * @throws Error ETag 格式非法
  */
 export function parseToolProviderEtag(etag: string): number {
- if (!etag.startsWith(TOOL_PROVIDER_ETAG_PREFIX)) {
- throw new Error(`非法 ToolProvider ETag: ${etag}（期望前缀 ${TOOL_PROVIDER_ETAG_PREFIX}）`);
- }
- const versionStr = etag.slice(TOOL_PROVIDER_ETAG_PREFIX.length);
- const versionNo = Number.parseInt(versionStr, 10);
- if (!Number.isFinite(versionNo) || versionNo <= 0) {
- throw new Error(`非法 ToolProvider ETag 版本号: ${etag}`);
- }
- return versionNo;
+  if (!etag.startsWith(TOOL_PROVIDER_ETAG_PREFIX)) {
+    throw new Error(`非法 ToolProvider ETag: ${etag}（期望前缀 ${TOOL_PROVIDER_ETAG_PREFIX}）`);
+  }
+  const versionStr = etag.slice(TOOL_PROVIDER_ETAG_PREFIX.length);
+  const versionNo = Number.parseInt(versionStr, 10);
+  if (!Number.isFinite(versionNo) || versionNo <= 0) {
+    throw new Error(`非法 ToolProvider ETag 版本号: ${etag}`);
+  }
+  return versionNo;
 }
 
 /**
@@ -280,15 +280,15 @@ export function parseToolProviderEtag(etag: string): number {
  * @throws Error ETag 格式非法
  */
 export function parseConnectionEtag(etag: string): number {
- if (!etag.startsWith(CONNECTION_ETAG_PREFIX)) {
- throw new Error(`非法 Connection ETag: ${etag}（期望前缀 ${CONNECTION_ETAG_PREFIX}）`);
- }
- const versionStr = etag.slice(CONNECTION_ETAG_PREFIX.length);
- const versionNo = Number.parseInt(versionStr, 10);
- if (!Number.isFinite(versionNo) || versionNo <= 0) {
- throw new Error(`非法 Connection ETag 版本号: ${etag}`);
- }
- return versionNo;
+  if (!etag.startsWith(CONNECTION_ETAG_PREFIX)) {
+    throw new Error(`非法 Connection ETag: ${etag}（期望前缀 ${CONNECTION_ETAG_PREFIX}）`);
+  }
+  const versionStr = etag.slice(CONNECTION_ETAG_PREFIX.length);
+  const versionNo = Number.parseInt(versionStr, 10);
+  if (!Number.isFinite(versionNo) || versionNo <= 0) {
+    throw new Error(`非法 Connection ETag 版本号: ${etag}`);
+  }
+  return versionNo;
 }
 
 /**
@@ -299,11 +299,11 @@ export function parseConnectionEtag(etag: string): number {
  * 客户端用此值作 If-None-Match 短路径 304。
  */
 export function buildCatalogRevisionEtag(
- tenantId: string,
- audience: "employee" | "runtime",
- revisionNo: number,
+  tenantId: string,
+  audience: "employee" | "runtime",
+  revisionNo: number,
 ): string {
- return `${CATALOG_REVISION_ETAG_PREFIX}${tenantId}-${audience}-${revisionNo}`;
+  return `${CATALOG_REVISION_ETAG_PREFIX}${tenantId}-${audience}-${revisionNo}`;
 }
 
 /**
@@ -315,24 +315,24 @@ export function buildCatalogRevisionEtag(
  * @throws Error ETag 格式非法
  */
 export function parseCatalogRevisionEtag(etag: string): number {
- if (!etag.startsWith(CATALOG_REVISION_ETAG_PREFIX)) {
- throw new Error(
- `非法 Catalog Revision ETag: ${etag}（期望前缀 ${CATALOG_REVISION_ETAG_PREFIX}）`,
- );
- }
- // 形如 catalog-{tenantId}-{audience}-{revisionNo}：tenantId 含 4 个 '-'，audience 无 '-'，revisionNo 无 '-'。
- // 直接取最后一个 '-' 后的部分作为 revisionNo。
- const body = etag.slice(CATALOG_REVISION_ETAG_PREFIX.length);
- const lastDashIdx = body.lastIndexOf("-");
- if (lastDashIdx <= 0) {
- throw new Error(`非法 Catalog Revision ETag: ${etag}`);
- }
- const revisionStr = body.slice(lastDashIdx + 1);
- const revisionNo = Number.parseInt(revisionStr, 10);
- if (!Number.isFinite(revisionNo) || revisionNo < 0) {
- throw new Error(`非法 Catalog Revision ETag 版本号: ${etag}`);
- }
- return revisionNo;
+  if (!etag.startsWith(CATALOG_REVISION_ETAG_PREFIX)) {
+    throw new Error(
+      `非法 Catalog Revision ETag: ${etag}（期望前缀 ${CATALOG_REVISION_ETAG_PREFIX}）`,
+    );
+  }
+  // 形如 catalog-{tenantId}-{audience}-{revisionNo}：tenantId 含 4 个 '-'，audience 无 '-'，revisionNo 无 '-'。
+  // 直接取最后一个 '-' 后的部分作为 revisionNo。
+  const body = etag.slice(CATALOG_REVISION_ETAG_PREFIX.length);
+  const lastDashIdx = body.lastIndexOf("-");
+  if (lastDashIdx <= 0) {
+    throw new Error(`非法 Catalog Revision ETag: ${etag}`);
+  }
+  const revisionStr = body.slice(lastDashIdx + 1);
+  const revisionNo = Number.parseInt(revisionStr, 10);
+  if (!Number.isFinite(revisionNo) || revisionNo < 0) {
+    throw new Error(`非法 Catalog Revision ETag 版本号: ${etag}`);
+  }
+  return revisionNo;
 }
 
 // ─── 错误响应工具 ──────────────────────────────────────────
@@ -341,19 +341,19 @@ export function parseCatalogRevisionEtag(etag: string): number {
  * 构造 400 REQUEST_SCHEMA_INVALID 响应（请求体校验失败）。
  */
 export function schemaInvalidTable(requestId: string, message: string): Response {
- return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
+  return apiError("REQUEST_SCHEMA_INVALID", message, { requestId });
 }
 
 /**
  * 构造 412 ETAG_MISMATCH 响应（乐观锁冲突）。
  */
 export function etagMismatchTable(requestId: string, message: string): Response {
- return apiError("ETAG_MISMATCH", message, { requestId });
+  return apiError("ETAG_MISMATCH", message, { requestId });
 }
 
 /**
  * 判断错误码是否 retryable（用于决定是否 failRecord 幂等记录）。
  */
 export function isRetryableErrorCode(code: ApiErrorCode): boolean {
- return errorDefinition(code).retryable;
+  return errorDefinition(code).retryable;
 }

@@ -1,4 +1,14 @@
 import {
+  type AdminPrincipal,
+  RUNTIME_REVISION_ETAG_PREFIX,
+  adminAuthErrorResponse,
+  etagMismatchTable,
+  parseRuntimeRevisionEtag,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
+import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   apiError,
@@ -23,13 +33,6 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtime/provisioning/publish-runtime-revision-service";
-import {
-  listRuntimeConformanceCaseResults,
-  listRuntimeConformanceRuns,
-  recordRuntimeConformanceRun,
-} from "@/lib/runtime/provisioning/runtime-conformance-runs";
-import { RuntimeConformanceIdempotencyConflictError } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import { RuntimeConformanceCaseFailedError } from "@/lib/runtime/domain/runtime-conformance";
 /**
  * GET/POST /admin/api/v1/runtime-revisions/{revision_id}/conformance — RuntimeRevision conformance 结果（S05-C06）。
@@ -77,16 +80,13 @@ import {
   RuntimeRevisionNotFoundError,
   getRuntimeRevisionById,
 } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtime/provisioning/publish-runtime-revision-service";
+import { RuntimeConformanceIdempotencyConflictError } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import {
-  type AdminPrincipal,
-  RUNTIME_REVISION_ETAG_PREFIX,
-  adminAuthErrorResponse,
-  etagMismatchTable,
-  parseRuntimeRevisionEtag,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
+  listRuntimeConformanceCaseResults,
+  listRuntimeConformanceRuns,
+  recordRuntimeConformanceRun,
+} from "@/lib/runtime/provisioning/runtime-conformance-runs";
 
 export const dynamic = "force-dynamic";
 
@@ -389,12 +389,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     let publishedResult = null;
     if (shouldPublish && expectedVersionNo !== null) {
+      const attestationId = body.artifact_attestation_id;
+      if (!attestationId) {
+        throw new Error("发布 RuntimeRevision 时 artifact_attestation_id 不可为空");
+      }
       publishedResult = await publishRuntimeRevisionThroughControlPlane({
         tenantId: principal.tenantId,
         revisionId,
         runtimeExpectedVersionNo: expectedVersionNo,
         conformanceRunId: recorded.run.id,
-        attestationId: body.artifact_attestation_id!,
+        attestationId,
         actor: actorFromAdminPrincipal(principal),
         requestId,
         idempotencyKey,

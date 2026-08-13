@@ -29,33 +29,33 @@ const secretStore = new Map<string, Set<string>>();
 
 /** 注册已知 Secret 明文值（按 scope）。 */
 export function registerSecretValues(scope: string, values: readonly string[]): void {
- let set = secretStore.get(scope);
- if (!set) {
- set = new Set();
- secretStore.set(scope, set);
- }
- for (const v of values) {
- if (v && v.length >= 4) set.add(v);
- }
+  let set = secretStore.get(scope);
+  if (!set) {
+    set = new Set();
+    secretStore.set(scope, set);
+  }
+  for (const v of values) {
+    if (v && v.length >= 4) set.add(v);
+  }
 }
 
 /** 获取 scope 注册的明文值集合。 */
 export function getSecretValues(scope: string): string[] {
- return Array.from(secretStore.get(scope) ?? []);
+  return Array.from(secretStore.get(scope) ?? []);
 }
 
 /** 清除 scope 的注册值。 */
 export function clearSecretValues(scope: string): void {
- secretStore.delete(scope);
+  secretStore.delete(scope);
 }
 
 /** 获取所有 scope 的明文值合集（用于无 scope 扫描）。 */
 export function getAllSecretValues(): string[] {
- const all: string[] = [];
- for (const set of secretStore.values()) {
- for (const v of set) all.push(v);
- }
- return all;
+  const all: string[] = [];
+  for (const set of secretStore.values()) {
+    for (const v of set) all.push(v);
+  }
+  return all;
 }
 
 // ─── 统一脱敏入口 ──────────────────────────────────────────
@@ -70,114 +70,114 @@ export function getAllSecretValues(): string[] {
  * @returns 脱敏结果
  */
 export function redactSensitiveData(
- value: unknown,
- mode: "metadata" | "redacted" | "diagnostic",
- options?: {
- scope?: string;
- additionalKnownValues?: readonly string[];
- },
+  value: unknown,
+  mode: "metadata" | "redacted" | "diagnostic",
+  options?: {
+    scope?: string;
+    additionalKnownValues?: readonly string[];
+  },
 ): RedactResult {
- // metadata 模式：返回 null（仅元数据）
- if (mode === "metadata") {
- return { content: null, containsSecret: false, redactionSummary: "metadata-only" };
- }
+  // metadata 模式：返回 null（仅元数据）
+  if (mode === "metadata") {
+    return { content: null, containsSecret: false, redactionSummary: "metadata-only" };
+  }
 
- // 收集已知明文值
- const knownValues: string[] = [];
- if (options?.scope) {
- knownValues.push(...getSecretValues(options.scope));
- } else {
- knownValues.push(...getAllSecretValues());
- }
- if (options?.additionalKnownValues) {
- knownValues.push(...options.additionalKnownValues);
- }
+  // 收集已知明文值
+  const knownValues: string[] = [];
+  if (options?.scope) {
+    knownValues.push(...getSecretValues(options.scope));
+  } else {
+    knownValues.push(...getAllSecretValues());
+  }
+  if (options?.additionalKnownValues) {
+    knownValues.push(...options.additionalKnownValues);
+  }
 
- // 第一层：禁采字段名扫描（content-policy.ts）
- let intermediate = value;
- let redactionCount = 0;
+  // 第一层：禁采字段名扫描（content-policy.ts）
+  let intermediate = value;
+  let redactionCount = 0;
 
- if (containsForbiddenFieldCheck(value)) {
- intermediate = redactForbiddenFieldsDeep(intermediate);
- redactionCount++;
- }
+  if (containsForbiddenFieldCheck(value)) {
+    intermediate = redactForbiddenFieldsDeep(intermediate);
+    redactionCount++;
+  }
 
- // 第二层：Secret 模式 + 已知明文值扫描（递归处理字符串）
- const { redacted: finalValue, scanCount } = redactSecretsDeep(intermediate, knownValues);
- redactionCount += scanCount;
+  // 第二层：Secret 模式 + 已知明文值扫描（递归处理字符串）
+  const { redacted: finalValue, scanCount } = redactSecretsDeep(intermediate, knownValues);
+  redactionCount += scanCount;
 
- if (redactionCount > 0) {
- return {
- content: finalValue,
- containsSecret: false,
- redactionSummary: `redacted ${redactionCount} secret(s) (mode=${mode})`,
- };
- }
+  if (redactionCount > 0) {
+    return {
+      content: finalValue,
+      containsSecret: false,
+      redactionSummary: `redacted ${redactionCount} secret(s) (mode=${mode})`,
+    };
+  }
 
- return { content: value, containsSecret: false, redactionSummary: null };
+  return { content: value, containsSecret: false, redactionSummary: null };
 }
 
 // ─── 内部辅助 ──────────────────────────────────────────────
 
 function containsForbiddenFieldCheck(value: unknown): boolean {
- if (value === null || value === undefined) return false;
- if (typeof value !== "object") return false;
- if (Array.isArray(value)) {
- return value.some((v) => containsForbiddenFieldCheck(v));
- }
- const obj = value as Record<string, unknown>;
- for (const key of Object.keys(obj)) {
- if (isForbiddenField(key)) return true;
- if (containsForbiddenFieldCheck(obj[key])) return true;
- }
- return false;
+  if (value === null || value === undefined) return false;
+  if (typeof value !== "object") return false;
+  if (Array.isArray(value)) {
+    return value.some((v) => containsForbiddenFieldCheck(v));
+  }
+  const obj = value as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    if (isForbiddenField(key)) return true;
+    if (containsForbiddenFieldCheck(obj[key])) return true;
+  }
+  return false;
 }
 
 function redactForbiddenFieldsDeep(value: unknown): unknown {
- if (value === null || value === undefined) return value;
- if (typeof value !== "object") return value;
- if (Array.isArray(value)) return value.map((v) => redactForbiddenFieldsDeep(v));
- const obj = value as Record<string, unknown>;
- const result: Record<string, unknown> = {};
- for (const key of Object.keys(obj)) {
- if (isForbiddenField(key)) {
- result[key] = "[REDACTED]";
- } else {
- result[key] = redactForbiddenFieldsDeep(obj[key]);
- }
- }
- return result;
+  if (value === null || value === undefined) return value;
+  if (typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((v) => redactForbiddenFieldsDeep(v));
+  const obj = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(obj)) {
+    if (isForbiddenField(key)) {
+      result[key] = "[REDACTED]";
+    } else {
+      result[key] = redactForbiddenFieldsDeep(obj[key]);
+    }
+  }
+  return result;
 }
 
 function redactSecretsDeep(
- value: unknown,
- knownValues: readonly string[],
+  value: unknown,
+  knownValues: readonly string[],
 ): { redacted: unknown; scanCount: number } {
- let scanCount = 0;
+  let scanCount = 0;
 
- const visit = (v: unknown): unknown => {
- if (typeof v === "string") {
- let result = v;
- const before = result;
- result = redactStringSecrets(result);
- if (knownValues.length > 0) {
- result = redactKnownPlaintext(result, knownValues);
- }
- if (result !== before) scanCount++;
- return result;
- }
- if (v === null || v === undefined) return v;
- if (Array.isArray(v)) return v.map((item) => visit(item));
- if (typeof v === "object") {
- const obj = v as Record<string, unknown>;
- const result: Record<string, unknown> = {};
- for (const key of Object.keys(obj)) {
- result[key] = visit(obj[key]);
- }
- return result;
- }
- return v;
- };
+  const visit = (v: unknown): unknown => {
+    if (typeof v === "string") {
+      let result = v;
+      const before = result;
+      result = redactStringSecrets(result);
+      if (knownValues.length > 0) {
+        result = redactKnownPlaintext(result, knownValues);
+      }
+      if (result !== before) scanCount++;
+      return result;
+    }
+    if (v === null || v === undefined) return v;
+    if (Array.isArray(v)) return v.map((item) => visit(item));
+    if (typeof v === "object") {
+      const obj = v as Record<string, unknown>;
+      const result: Record<string, unknown> = {};
+      for (const key of Object.keys(obj)) {
+        result[key] = visit(obj[key]);
+      }
+      return result;
+    }
+    return v;
+  };
 
- return { redacted: visit(value), scanCount };
+  return { redacted: visit(value), scanCount };
 }

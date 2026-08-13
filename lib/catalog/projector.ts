@@ -22,12 +22,12 @@
 import { db } from "@/lib/db/client";
 import { agentTable } from "@/lib/persistence/schema/agent";
 import {
- type CatalogAudience,
- type CatalogEntry,
- type CatalogResourceType,
- type CatalogRevision,
- catalogEntryTable,
- catalogRevisionTable,
+  type CatalogAudience,
+  type CatalogEntry,
+  type CatalogResourceType,
+  type CatalogRevision,
+  catalogEntryTable,
+  catalogRevisionTable,
 } from "@/lib/persistence/schema/catalog";
 import { skillTable } from "@/lib/persistence/schema/skill";
 import { toolProviderTable, toolTable } from "@/lib/persistence/schema/tool";
@@ -37,13 +37,13 @@ import { and, eq, isNull } from "drizzle-orm";
 
 /** Catalog 投影错误（资源类型不支持 / 参数非法）。 */
 export class CatalogProjectionError extends Error {
- constructor(
- public readonly code: string,
- message: string,
- ) {
- super(message);
- this.name = "CatalogProjectionError";
- }
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CatalogProjectionError";
+  }
 }
 
 // ─── CatalogRevision 管理 ─────────────────────────────────
@@ -56,22 +56,22 @@ export class CatalogProjectionError extends Error {
  * - 投影刷新后单调递增。
  */
 export async function getCurrentCatalogRevision(params: {
- tenantId: string;
- audience: CatalogAudience;
+  tenantId: string;
+  audience: CatalogAudience;
 }): Promise<number> {
- const [row] = await db
- .select({
- currentRevision: catalogRevisionTable.currentRevision,
- })
- .from(catalogRevisionTable)
- .where(
- and(
- eq(catalogRevisionTable.tenantId, params.tenantId),
- eq(catalogRevisionTable.audience, params.audience),
- ),
- )
- .limit(1);
- return row?.currentRevision ?? 0;
+  const [row] = await db
+    .select({
+      currentRevision: catalogRevisionTable.currentRevision,
+    })
+    .from(catalogRevisionTable)
+    .where(
+      and(
+        eq(catalogRevisionTable.tenantId, params.tenantId),
+        eq(catalogRevisionTable.audience, params.audience),
+      ),
+    )
+    .limit(1);
+  return row?.currentRevision ?? 0;
 }
 
 /**
@@ -84,71 +84,71 @@ export async function getCurrentCatalogRevision(params: {
  * 事务内调用时复用传入的 tx；顶层调用时使用 db。
  */
 export async function advanceCatalogRevision(params: {
- tenantId: string;
- audience: CatalogAudience;
+  tenantId: string;
+  audience: CatalogAudience;
 }): Promise<number> {
- const existing = await getCurrentCatalogRevision(params);
- const newRevision = existing + 1;
- const now = new Date();
+  const existing = await getCurrentCatalogRevision(params);
+  const newRevision = existing + 1;
+  const now = new Date();
 
- if (existing === 0) {
- await db.insert(catalogRevisionTable).values({
- tenantId: params.tenantId,
- audience: params.audience,
- currentRevision: newRevision,
- updatedAt: now,
- });
- } else {
- const result = await db
- .update(catalogRevisionTable)
- .set({ currentRevision: newRevision, updatedAt: now })
- .where(
- and(
- eq(catalogRevisionTable.tenantId, params.tenantId),
- eq(catalogRevisionTable.audience, params.audience),
- eq(catalogRevisionTable.currentRevision, existing),
- ),
- );
- if (result[0].affectedRows === 0) {
- // 并发冲突：CAS 失败。重试一次以最新值推进。
- const retryExisting = await getCurrentCatalogRevision(params);
- const retryNew = retryExisting + 1;
- const retryResult = await db
- .update(catalogRevisionTable)
- .set({ currentRevision: retryNew, updatedAt: new Date() })
- .where(
- and(
- eq(catalogRevisionTable.tenantId, params.tenantId),
- eq(catalogRevisionTable.audience, params.audience),
- eq(catalogRevisionTable.currentRevision, retryExisting),
- ),
- );
- if (retryResult[0].affectedRows === 0) {
- throw new CatalogProjectionError(
- "revision_advance_conflict",
- `CatalogRevision 推进并发冲突：tenant=${params.tenantId}, audience=${params.audience}`,
- );
- }
- return retryNew;
- }
- }
- return newRevision;
+  if (existing === 0) {
+    await db.insert(catalogRevisionTable).values({
+      tenantId: params.tenantId,
+      audience: params.audience,
+      currentRevision: newRevision,
+      updatedAt: now,
+    });
+  } else {
+    const result = await db
+      .update(catalogRevisionTable)
+      .set({ currentRevision: newRevision, updatedAt: now })
+      .where(
+        and(
+          eq(catalogRevisionTable.tenantId, params.tenantId),
+          eq(catalogRevisionTable.audience, params.audience),
+          eq(catalogRevisionTable.currentRevision, existing),
+        ),
+      );
+    if (result[0].affectedRows === 0) {
+      // 并发冲突：CAS 失败。重试一次以最新值推进。
+      const retryExisting = await getCurrentCatalogRevision(params);
+      const retryNew = retryExisting + 1;
+      const retryResult = await db
+        .update(catalogRevisionTable)
+        .set({ currentRevision: retryNew, updatedAt: new Date() })
+        .where(
+          and(
+            eq(catalogRevisionTable.tenantId, params.tenantId),
+            eq(catalogRevisionTable.audience, params.audience),
+            eq(catalogRevisionTable.currentRevision, retryExisting),
+          ),
+        );
+      if (retryResult[0].affectedRows === 0) {
+        throw new CatalogProjectionError(
+          "revision_advance_conflict",
+          `CatalogRevision 推进并发冲突：tenant=${params.tenantId}, audience=${params.audience}`,
+        );
+      }
+      return retryNew;
+    }
+  }
+  return newRevision;
 }
 
 // ─── CatalogEntry 投影 ────────────────────────────────────
 
 /** 投影输入：从事实源派生的字段集。 */
 export interface CatalogEntryInput {
- tenantId: string;
- resourceType: CatalogResourceType;
- resourceId: string;
- displayName: string;
- description: string | null;
- ownerUserId: string | null;
- tagsJson: string[] | null;
- lifecycleState: string;
- visibilitySummary: string;
- sourceUpdatedAt: Date;
+  tenantId: string;
+  resourceType: CatalogResourceType;
+  resourceId: string;
+  displayName: string;
+  description: string | null;
+  ownerUserId: string | null;
+  tagsJson: string[] | null;
+  lifecycleState: string;
+  visibilitySummary: string;
+  sourceUpdatedAt: Date;
 }
 
 /**
@@ -165,79 +165,79 @@ export interface CatalogEntryInput {
  * 因为 revisionNo 只增不减，客户端会再次拉取最新目录）。
  */
 export async function refreshCatalogEntry(input: CatalogEntryInput): Promise<CatalogEntry> {
- if (!isValidResourceType(input.resourceType)) {
- throw new CatalogProjectionError(
- "unsupported_resource_type",
- `不支持的 Catalog 资源类型: ${input.resourceType}`,
- );
- }
- if (!input.displayName || input.displayName.length === 0) {
- throw new CatalogProjectionError("invalid_display_name", "displayName 不能为空");
- }
- if (!input.lifecycleState || input.lifecycleState.length === 0) {
- throw new CatalogProjectionError("invalid_lifecycle_state", "lifecycleState 不能为空");
- }
- if (!input.visibilitySummary || input.visibilitySummary.length === 0) {
- throw new CatalogProjectionError("invalid_visibility_summary", "visibilitySummary 不能为空");
- }
+  if (!isValidResourceType(input.resourceType)) {
+    throw new CatalogProjectionError(
+      "unsupported_resource_type",
+      `不支持的 Catalog 资源类型: ${input.resourceType}`,
+    );
+  }
+  if (!input.displayName || input.displayName.length === 0) {
+    throw new CatalogProjectionError("invalid_display_name", "displayName 不能为空");
+  }
+  if (!input.lifecycleState || input.lifecycleState.length === 0) {
+    throw new CatalogProjectionError("invalid_lifecycle_state", "lifecycleState 不能为空");
+  }
+  if (!input.visibilitySummary || input.visibilitySummary.length === 0) {
+    throw new CatalogProjectionError("invalid_visibility_summary", "visibilitySummary 不能为空");
+  }
 
- // 推进 revision（employee audience，员工目录）
- const newRevision = await advanceCatalogRevision({
- tenantId: input.tenantId,
- audience: "employee",
- });
+  // 推进 revision（employee audience，员工目录）
+  const newRevision = await advanceCatalogRevision({
+    tenantId: input.tenantId,
+    audience: "employee",
+  });
 
- const now = new Date();
- // upsert：UNIQUE(tenantId, resourceType, resourceId) 命中则更新。
- // 使用 onDuplicateKeyUpdate 触发 MySQL 的 INSERT ... ON DUPLICATE KEY UPDATE。
- await db
- .insert(catalogEntryTable)
- .values({
- tenantId: input.tenantId,
- resourceType: input.resourceType,
- resourceId: input.resourceId,
- displayName: input.displayName,
- description: input.description,
- ownerUserId: input.ownerUserId,
- tagsJson: input.tagsJson,
- lifecycleState: input.lifecycleState,
- visibilitySummary: input.visibilitySummary,
- sourceUpdatedAt: input.sourceUpdatedAt,
- projectedAt: now,
- catalogRevision: newRevision,
- })
- .onDuplicateKeyUpdate({
- set: {
- displayName: input.displayName,
- description: input.description,
- ownerUserId: input.ownerUserId,
- tagsJson: input.tagsJson,
- lifecycleState: input.lifecycleState,
- visibilitySummary: input.visibilitySummary,
- sourceUpdatedAt: input.sourceUpdatedAt,
- projectedAt: now,
- catalogRevision: newRevision,
- },
- });
+  const now = new Date();
+  // upsert：UNIQUE(tenantId, resourceType, resourceId) 命中则更新。
+  // 使用 onDuplicateKeyUpdate 触发 MySQL 的 INSERT ... ON DUPLICATE KEY UPDATE。
+  await db
+    .insert(catalogEntryTable)
+    .values({
+      tenantId: input.tenantId,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      displayName: input.displayName,
+      description: input.description,
+      ownerUserId: input.ownerUserId,
+      tagsJson: input.tagsJson,
+      lifecycleState: input.lifecycleState,
+      visibilitySummary: input.visibilitySummary,
+      sourceUpdatedAt: input.sourceUpdatedAt,
+      projectedAt: now,
+      catalogRevision: newRevision,
+    })
+    .onDuplicateKeyUpdate({
+      set: {
+        displayName: input.displayName,
+        description: input.description,
+        ownerUserId: input.ownerUserId,
+        tagsJson: input.tagsJson,
+        lifecycleState: input.lifecycleState,
+        visibilitySummary: input.visibilitySummary,
+        sourceUpdatedAt: input.sourceUpdatedAt,
+        projectedAt: now,
+        catalogRevision: newRevision,
+      },
+    });
 
- const [row] = await db
- .select()
- .from(catalogEntryTable)
- .where(
- and(
- eq(catalogEntryTable.tenantId, input.tenantId),
- eq(catalogEntryTable.resourceType, input.resourceType),
- eq(catalogEntryTable.resourceId, input.resourceId),
- ),
- )
- .limit(1);
- if (!row) {
- throw new CatalogProjectionError(
- "upsert_failed",
- `CatalogEntry upsert 后未找到行: tenant=${input.tenantId}, type=${input.resourceType}, id=${input.resourceId}`,
- );
- }
- return row;
+  const [row] = await db
+    .select()
+    .from(catalogEntryTable)
+    .where(
+      and(
+        eq(catalogEntryTable.tenantId, input.tenantId),
+        eq(catalogEntryTable.resourceType, input.resourceType),
+        eq(catalogEntryTable.resourceId, input.resourceId),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    throw new CatalogProjectionError(
+      "upsert_failed",
+      `CatalogEntry upsert 后未找到行: tenant=${input.tenantId}, type=${input.resourceType}, id=${input.resourceId}`,
+    );
+  }
+  return row;
 }
 
 /**
@@ -252,23 +252,23 @@ export async function refreshCatalogEntry(input: CatalogEntryInput): Promise<Cat
  * 大批量重建时 revisionNo 会跳跃式增长，这是预期行为（修订号单调递增即可）。
  */
 export async function refreshCatalogByType(params: {
- tenantId: string;
- resourceType: CatalogResourceType;
+  tenantId: string;
+  resourceType: CatalogResourceType;
 }): Promise<number> {
- if (!isValidResourceType(params.resourceType)) {
- throw new CatalogProjectionError(
- "unsupported_resource_type",
- `不支持的 Catalog 资源类型: ${params.resourceType}`,
- );
- }
+  if (!isValidResourceType(params.resourceType)) {
+    throw new CatalogProjectionError(
+      "unsupported_resource_type",
+      `不支持的 Catalog 资源类型: ${params.resourceType}`,
+    );
+  }
 
- const inputs = await loadSourceRows(params.tenantId, params.resourceType);
- let count = 0;
- for (const input of inputs) {
- await refreshCatalogEntry(input);
- count += 1;
- }
- return count;
+  const inputs = await loadSourceRows(params.tenantId, params.resourceType);
+  let count = 0;
+  for (const input of inputs) {
+    await refreshCatalogEntry(input);
+    count += 1;
+  }
+  return count;
 }
 
 /**
@@ -279,20 +279,20 @@ export async function refreshCatalogByType(params: {
  * 真正的删除用于资源被物理删除的场景（如 cascade 删除租户）。
  */
 export async function removeCatalogEntry(params: {
- tenantId: string;
- resourceType: CatalogResourceType;
- resourceId: string;
+  tenantId: string;
+  resourceType: CatalogResourceType;
+  resourceId: string;
 }): Promise<boolean> {
- const result = await db
- .delete(catalogEntryTable)
- .where(
- and(
- eq(catalogEntryTable.tenantId, params.tenantId),
- eq(catalogEntryTable.resourceType, params.resourceType),
- eq(catalogEntryTable.resourceId, params.resourceId),
- ),
- );
- return result[0].affectedRows > 0;
+  const result = await db
+    .delete(catalogEntryTable)
+    .where(
+      and(
+        eq(catalogEntryTable.tenantId, params.tenantId),
+        eq(catalogEntryTable.resourceType, params.resourceType),
+        eq(catalogEntryTable.resourceId, params.resourceId),
+      ),
+    );
+  return result[0].affectedRows > 0;
 }
 
 // ─── 事实源加载 ────────────────────────────────────────────
@@ -308,80 +308,80 @@ export async function removeCatalogEntry(params: {
  * 其他类型（knowledge/runtime/model/connection）当前阶段未接入事实源，返回空数组。
  */
 async function loadSourceRows(
- tenantId: string,
- resourceType: CatalogResourceType,
+  tenantId: string,
+  resourceType: CatalogResourceType,
 ): Promise<CatalogEntryInput[]> {
- switch (resourceType) {
- case "agent":
- return loadAgents(tenantId);
- case "skill":
- return loadSkills(tenantId);
- case "tool":
- return loadTools(tenantId);
- case "knowledge":
- case "runtime":
- case "model":
- case "connection":
- // 后续阶段接入，当前返回空数组
- return [];
- default:
- return [];
- }
+  switch (resourceType) {
+    case "agent":
+      return loadAgents(tenantId);
+    case "skill":
+      return loadSkills(tenantId);
+    case "tool":
+      return loadTools(tenantId);
+    case "knowledge":
+    case "runtime":
+    case "model":
+    case "connection":
+      // 后续阶段接入，当前返回空数组
+      return [];
+    default:
+      return [];
+  }
 }
 
 /** 从 Agent 加载并转换为 CatalogEntryInput。 */
 async function loadAgents(tenantId: string): Promise<CatalogEntryInput[]> {
- const rows = await db
- .select({
- id: agentTable.id,
- displayName: agentTable.displayName,
- description: agentTable.description,
- ownerUserId: agentTable.ownerUserId,
- lifecycleState: agentTable.lifecycleState,
- updatedAt: agentTable.updatedAt,
- })
- .from(agentTable)
- .where(and(eq(agentTable.tenantId, tenantId), isNull(agentTable.deletedAt)));
- return rows.map((row) => ({
- tenantId,
- resourceType: "agent" as const,
- resourceId: row.id,
- displayName: row.displayName,
- description: row.description,
- ownerUserId: row.ownerUserId,
- tagsJson: null,
- lifecycleState: row.lifecycleState,
- visibilitySummary: "tenant",
- sourceUpdatedAt: row.updatedAt,
- }));
+  const rows = await db
+    .select({
+      id: agentTable.id,
+      displayName: agentTable.displayName,
+      description: agentTable.description,
+      ownerUserId: agentTable.ownerUserId,
+      lifecycleState: agentTable.lifecycleState,
+      updatedAt: agentTable.updatedAt,
+    })
+    .from(agentTable)
+    .where(and(eq(agentTable.tenantId, tenantId), isNull(agentTable.deletedAt)));
+  return rows.map((row) => ({
+    tenantId,
+    resourceType: "agent" as const,
+    resourceId: row.id,
+    displayName: row.displayName,
+    description: row.description,
+    ownerUserId: row.ownerUserId,
+    tagsJson: null,
+    lifecycleState: row.lifecycleState,
+    visibilitySummary: "tenant",
+    sourceUpdatedAt: row.updatedAt,
+  }));
 }
 
 /** 从 Skill 加载并转换为 CatalogEntryInput。 */
 async function loadSkills(tenantId: string): Promise<CatalogEntryInput[]> {
- const rows = await db
- .select({
- id: skillTable.id,
- displayName: skillTable.displayName,
- description: skillTable.description,
- ownerUserId: skillTable.ownerUserId,
- lifecycleState: skillTable.lifecycleState,
- visibilityScope: skillTable.visibilityScope,
- updatedAt: skillTable.updatedAt,
- })
- .from(skillTable)
- .where(and(eq(skillTable.tenantId, tenantId), isNull(skillTable.deletedAt)));
- return rows.map((row) => ({
- tenantId,
- resourceType: "skill" as const,
- resourceId: row.id,
- displayName: row.displayName,
- description: row.description,
- ownerUserId: row.ownerUserId,
- tagsJson: null,
- lifecycleState: row.lifecycleState,
- visibilitySummary: row.visibilityScope,
- sourceUpdatedAt: row.updatedAt,
- }));
+  const rows = await db
+    .select({
+      id: skillTable.id,
+      displayName: skillTable.displayName,
+      description: skillTable.description,
+      ownerUserId: skillTable.ownerUserId,
+      lifecycleState: skillTable.lifecycleState,
+      visibilityScope: skillTable.visibilityScope,
+      updatedAt: skillTable.updatedAt,
+    })
+    .from(skillTable)
+    .where(and(eq(skillTable.tenantId, tenantId), isNull(skillTable.deletedAt)));
+  return rows.map((row) => ({
+    tenantId,
+    resourceType: "skill" as const,
+    resourceId: row.id,
+    displayName: row.displayName,
+    description: row.description,
+    ownerUserId: row.ownerUserId,
+    tagsJson: null,
+    lifecycleState: row.lifecycleState,
+    visibilitySummary: row.visibilityScope,
+    sourceUpdatedAt: row.updatedAt,
+  }));
 }
 
 /**
@@ -391,52 +391,52 @@ async function loadSkills(tenantId: string): Promise<CatalogEntryInput[]> {
  * ToolProvider 取其 ownerUserId 作为 CatalogEntry 的 owner。
  */
 async function loadTools(tenantId: string): Promise<CatalogEntryInput[]> {
- const rows = await db
- .select({
- id: toolTable.id,
- displayName: toolTable.displayName,
- description: toolTable.description,
- ownerUserId: toolProviderTable.ownerUserId,
- lifecycleState: toolTable.lifecycleState,
- updatedAt: toolTable.updatedAt,
- })
- .from(toolTable)
- .innerJoin(toolProviderTable, eq(toolTable.providerId, toolProviderTable.id))
- .where(and(eq(toolTable.tenantId, tenantId), isNull(toolTable.deletedAt)));
- return rows.map((row) => ({
- tenantId,
- resourceType: "tool" as const,
- resourceId: row.id,
- displayName: row.displayName,
- description: row.description,
- ownerUserId: row.ownerUserId,
- tagsJson: null,
- lifecycleState: row.lifecycleState,
- visibilitySummary: "tenant",
- sourceUpdatedAt: row.updatedAt,
- }));
+  const rows = await db
+    .select({
+      id: toolTable.id,
+      displayName: toolTable.displayName,
+      description: toolTable.description,
+      ownerUserId: toolProviderTable.ownerUserId,
+      lifecycleState: toolTable.lifecycleState,
+      updatedAt: toolTable.updatedAt,
+    })
+    .from(toolTable)
+    .innerJoin(toolProviderTable, eq(toolTable.providerId, toolProviderTable.id))
+    .where(and(eq(toolTable.tenantId, tenantId), isNull(toolTable.deletedAt)));
+  return rows.map((row) => ({
+    tenantId,
+    resourceType: "tool" as const,
+    resourceId: row.id,
+    displayName: row.displayName,
+    description: row.description,
+    ownerUserId: row.ownerUserId,
+    tagsJson: null,
+    lifecycleState: row.lifecycleState,
+    visibilitySummary: "tenant",
+    sourceUpdatedAt: row.updatedAt,
+  }));
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────
 
 /** 校验 resourceType 是否在已知枚举内。 */
 function isValidResourceType(type: string): type is CatalogResourceType {
- return (
- type === "agent" ||
- type === "skill" ||
- type === "tool" ||
- type === "knowledge" ||
- type === "runtime" ||
- type === "model" ||
- type === "connection"
- );
+  return (
+    type === "agent" ||
+    type === "skill" ||
+    type === "tool" ||
+    type === "knowledge" ||
+    type === "runtime" ||
+    type === "model" ||
+    type === "connection"
+  );
 }
 
 // ─── Re-exports ────────────────────────────────────────────
 
 export type {
- CatalogAudience,
- CatalogResourceType,
- CatalogEntry,
- CatalogRevision,
+  CatalogAudience,
+  CatalogResourceType,
+  CatalogEntry,
+  CatalogRevision,
 } from "@/lib/persistence/schema/catalog";

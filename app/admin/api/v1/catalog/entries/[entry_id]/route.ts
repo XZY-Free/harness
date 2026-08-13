@@ -1,4 +1,10 @@
 import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+} from "@/lib/admin/route-helpers";
+import { getCatalogEntryById } from "@/lib/catalog/catalog-queries";
+import {
   REQUEST_ID_HEADER,
   apiSuccess,
   etagHeader,
@@ -6,12 +12,6 @@ import {
   resourceNotFound,
 } from "@/lib/http";
 import type { CatalogEntry } from "@/lib/persistence/schema/catalog";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-} from "@/lib/admin/route-helpers";
-import { getCatalogEntryById } from "@/lib/catalog/catalog-queries";
 /**
  * GET /admin/api/v1/catalog/entries/{entry_id} — Admin Catalog 单条详情（S11-W03）。
  *

@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * POST/GET /admin/api/v1/legal-holds — Legal Hold 管理（S12-W06）。
  *
@@ -28,13 +35,6 @@ import {
   LEGAL_HOLD_TARGET_TYPES,
   type LegalHoldTargetType,
 } from "@/lib/persistence/schema/retention-policy";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

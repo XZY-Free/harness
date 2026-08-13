@@ -24,11 +24,11 @@ import type { ResourceQuota, RuntimeHandle } from "@/lib/runtime/types";
  */
 
 export type BuildSubagentToolsArgs = {
- parentThreadId: string;
- definition: SubagentDefinition;
- /** 本次实际写范围（spawn 参数合并后的）；null/空=只读。 */
- writeScope?: string[] | null;
- runtimeType?: RuntimeType;
+  parentThreadId: string;
+  definition: SubagentDefinition;
+  /** 本次实际写范围（spawn 参数合并后的）；null/空=只读。 */
+  writeScope?: string[] | null;
+  runtimeType?: RuntimeType;
 };
 
 /**
@@ -37,41 +37,41 @@ export type BuildSubagentToolsArgs = {
  * 返回的工具经 executeToolRun 收口（的 executeSubagent 会传 subagentScope 审计标记）。
  */
 export function buildSubagentTools(args: BuildSubagentToolsArgs) {
- // 子代理传收紧的 quotaOverride，构造专属 execution runtime 实例
- // （resolveRuntimes 每次 new 独立实例，不复用父 runtime）。host 模式下子代理 exec 命令
- // 经 wrapWithHostRlimits(command, 子代理 quota) 施加独立 prlimit，与父进程隔离。
- // container 模式子代理复用父 container（cgroup 限额已定），受父限额 + HEAVY_COMMAND_TOOLS 互斥约束。
- const subagentQuotaOverride: Partial<ResourceQuota> = {
- pidsLimit: subagentQuotaConfig.pidsLimit,
- openFilesLimit: subagentQuotaConfig.openFilesLimit,
- timeoutMs: subagentQuotaConfig.timeoutMs,
- logCapBytes: subagentQuotaConfig.logCapBytes,
- };
- const rt = resolveRuntimes(args.parentThreadId, args.runtimeType, {
- quotaOverride: subagentQuotaOverride,
- });
- const scopedWorkspace = new ScopedWorkspaceStore(rt.workspace, args.writeScope ?? null);
- // 继承父 thread 的 capability（子代理与父共享 runtime）。
- const injected: RuntimeHandle = { ...rt, workspace: scopedWorkspace };
+  // 子代理传收紧的 quotaOverride，构造专属 execution runtime 实例
+  // （resolveRuntimes 每次 new 独立实例，不复用父 runtime）。host 模式下子代理 exec 命令
+  // 经 wrapWithHostRlimits(command, 子代理 quota) 施加独立 prlimit，与父进程隔离。
+  // container 模式子代理复用父 container（cgroup 限额已定），受父限额 + HEAVY_COMMAND_TOOLS 互斥约束。
+  const subagentQuotaOverride: Partial<ResourceQuota> = {
+    pidsLimit: subagentQuotaConfig.pidsLimit,
+    openFilesLimit: subagentQuotaConfig.openFilesLimit,
+    timeoutMs: subagentQuotaConfig.timeoutMs,
+    logCapBytes: subagentQuotaConfig.logCapBytes,
+  };
+  const rt = resolveRuntimes(args.parentThreadId, args.runtimeType, {
+    quotaOverride: subagentQuotaOverride,
+  });
+  const scopedWorkspace = new ScopedWorkspaceStore(rt.workspace, args.writeScope ?? null);
+  // 继承父 thread 的 capability（子代理与父共享 runtime）。
+  const injected: RuntimeHandle = { ...rt, workspace: scopedWorkspace };
 
- const allowedTools = (args.definition.allowedTools as string[] | null) ?? [];
- return buildTools(
- args.parentThreadId,
- allowedTools,
- args.runtimeType,
- undefined, // 子代理不挂 readSkillFile（无 skillContext）
- [],
- injected,
- );
+  const allowedTools = (args.definition.allowedTools as string[] | null) ?? [];
+  return buildTools(
+    args.parentThreadId,
+    allowedTools,
+    args.runtimeType,
+    undefined, // 子代理不挂 readSkillFile（无 skillContext）
+    [],
+    injected,
+  );
 }
 
 /** 写工具名集合：用于判定 definition 是否暴露写能力（默认只读校验用）。 */
 export const WRITE_TOOL_NAMES = new Set([
- "writeFile",
- "editFile",
- "multiEditFile",
- "applyPatch",
- "deleteFile",
+  "writeFile",
+  "editFile",
+  "multiEditFile",
+  "applyPatch",
+  "deleteFile",
 ]);
 
 /**
@@ -79,6 +79,6 @@ export const WRITE_TOOL_NAMES = new Set([
  * 默认只读 lane 的 allowedTools 不含写工具 → false。
  */
 export function definitionExposesWriteTools(definition: SubagentDefinition): boolean {
- const allowed = (definition.allowedTools as string[] | null) ?? [];
- return allowed.some((t) => WRITE_TOOL_NAMES.has(t));
+  const allowed = (definition.allowedTools as string[] | null) ?? [];
+  return allowed.some((t) => WRITE_TOOL_NAMES.has(t));
 }

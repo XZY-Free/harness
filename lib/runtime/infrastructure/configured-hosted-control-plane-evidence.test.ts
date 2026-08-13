@@ -33,7 +33,9 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
         });
       }
       if (body.document_type === "sbom") {
-        return jsonResponse({ document: { bomFormat: "CycloneDX", specVersion: "1.6", version: 1, components: [] } });
+        return jsonResponse({
+          document: { bomFormat: "CycloneDX", specVersion: "1.6", version: 1, components: [] },
+        });
       }
       return jsonResponse({
         document: {
@@ -58,7 +60,10 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
       evidence.managedStore.readDsseEnvelope(evidence.dsseEnvelopeRef),
     ).resolves.toBeInstanceOf(Buffer);
     await expect(evidence.managedStore.readSbom(evidence.sbomRef)).resolves.toEqual({
-      bomFormat: "CycloneDX", specVersion: "1.6", version: 1, components: [],
+      bomFormat: "CycloneDX",
+      specVersion: "1.6",
+      version: 1,
+      components: [],
     });
     await expect(
       evidence.managedStore.readProvenance(evidence.provenanceRef),

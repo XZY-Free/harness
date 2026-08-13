@@ -142,7 +142,7 @@ describe("runSync", () => {
     const result = await runSync();
 
     expect(result.imported).toHaveLength(1);
-    expect(result.imported[0]!.remoteAssetId).toBe("asset-1");
+    expect(result.imported[0]?.remoteAssetId).toBe("asset-1");
     expect(dbMocks.createSkill).toHaveBeenCalledWith(
       expect.objectContaining({ name: "deploy-review", source: "capability-market" }),
       expect.anything(),
@@ -237,9 +237,9 @@ describe("runSync", () => {
     const result = await runSync();
 
     expect(result.updated).toHaveLength(1);
-    expect(result.updated[0]!.oldHash).toBe("hash-old");
-    expect(result.updated[0]!.newHash).toBe("hash-new");
-    expect(result.updated[0]!.localVersion).toBe(2);
+    expect(result.updated[0]?.oldHash).toBe("hash-old");
+    expect(result.updated[0]?.newHash).toBe("hash-new");
+    expect(result.updated[0]?.localVersion).toBe(2);
     expect(dbMocks.createSkillVersion).toHaveBeenCalledWith(
       expect.objectContaining({ skillId: "skill-1", version: 2 }),
       expect.anything(),
@@ -293,7 +293,7 @@ describe("runSync", () => {
 
     const result = await runSync();
 
-    expect(result.updated[0]!.localVersion).toBe(6);
+    expect(result.updated[0]?.localVersion).toBe(6);
     expect(dbMocks.createSkillVersion).toHaveBeenCalledWith(
       expect.objectContaining({ skillId: "skill-1", version: 6 }),
       expect.anything(),
@@ -311,8 +311,8 @@ describe("runSync", () => {
     const result = await runSync();
 
     expect(result.conflict).toHaveLength(1);
-    expect(result.conflict[0]!.remoteName).toBe("deploy-review");
-    expect(result.conflict[0]!.reason).toContain("冲突");
+    expect(result.conflict[0]?.remoteName).toBe("deploy-review");
+    expect(result.conflict[0]?.reason).toContain("冲突");
     expect(clientMocks.syncManifests).not.toHaveBeenCalled();
     expect(clientMocks.downloadArtifact).not.toHaveBeenCalled();
     expect(dbMocks.createSkill).not.toHaveBeenCalled();
@@ -333,9 +333,9 @@ describe("runSync", () => {
     const result = await runSync();
 
     expect(result.imported).toHaveLength(1);
-    expect(result.imported[0]!.remoteAssetId).toBe("asset-1");
+    expect(result.imported[0]?.remoteAssetId).toBe("asset-1");
     expect(result.conflict).toHaveLength(1);
-    expect(result.conflict[0]!.remoteAssetId).toBe("asset-2");
+    expect(result.conflict[0]?.remoteAssetId).toBe("asset-2");
     expect(clientMocks.syncManifests).toHaveBeenCalledWith(["asset-1"]);
     expect(dbMocks.createSkill).toHaveBeenCalledTimes(1);
   });
@@ -356,7 +356,7 @@ describe("runSync", () => {
     const result = await runSync();
 
     expect(result.missing).toHaveLength(1);
-    expect(result.missing[0]!.remoteAssetId).toBe("asset-gone");
+    expect(result.missing[0]?.remoteAssetId).toBe("asset-gone");
     expect(dbMocks.updateSyncMapping).toHaveBeenCalledWith(
       "m1",
       expect.objectContaining({ syncState: "not_found" }),
@@ -392,7 +392,7 @@ describe("runSync", () => {
     const result = await runSync();
 
     expect(result.blocked).toHaveLength(1);
-    expect(result.blocked[0]!.reason).toBe("block_sync");
+    expect(result.blocked[0]?.reason).toBe("block_sync");
     expect(dbMocks.updateSyncMapping).toHaveBeenCalledWith(
       "m1",
       expect.objectContaining({ syncState: "blocked" }),
@@ -467,8 +467,8 @@ describe("runSync", () => {
     const result = await runSync();
 
     expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]!.remoteAssetId).toBe("asset-1");
-    expect(result.failed[0]!.reason).toContain("sync manifests 失败");
+    expect(result.failed[0]?.remoteAssetId).toBe("asset-1");
+    expect(result.failed[0]?.reason).toContain("sync manifests 失败");
     expect(dbMocks.updateSyncMapping).toHaveBeenCalledWith(
       "m1",
       expect.objectContaining({ syncState: "error" }),

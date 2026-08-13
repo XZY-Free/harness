@@ -98,7 +98,7 @@ describe("FileEditor 可编辑编辑器 (V9 阶段 4)", () => {
       () => {
         const putCall = fn.mock.calls.find((c) => c[1]?.method === "PUT");
         expect(putCall).toBeTruthy();
-        const body = JSON.parse(putCall![1].body as string);
+        const body = JSON.parse(putCall?.[1].body as string);
         expect(body.content).toBe("new content");
         expect(body.revision).toBe("rev1");
       },

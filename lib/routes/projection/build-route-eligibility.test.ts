@@ -123,20 +123,52 @@ describe("Projection authority", () => {
       [revision],
       [routeSet],
       [{ id: "agent-1", lifecycleState: "enabled", deletedAt: null }],
-      [{ id: "agent-revision-1", revisionState: "published", artifactDigest: "sha256:agent", agentInterfaceRequirementsJson: {} }],
-      [{ id: "runtime-revision-1", runtimeId: "runtime-1", revisionState: "published", artifactDigest: "sha256:runtime", configHash: "sha256:config", protocolContractRevision: "agent-runtime-protocol@1", runtimeCapabilitiesJson: {} }],
+      [
+        {
+          id: "agent-revision-1",
+          revisionState: "published",
+          artifactDigest: "sha256:agent",
+          agentInterfaceRequirementsJson: {},
+        },
+      ],
+      [
+        {
+          id: "runtime-revision-1",
+          runtimeId: "runtime-1",
+          revisionState: "published",
+          artifactDigest: "sha256:runtime",
+          configHash: "sha256:config",
+          protocolContractRevision: "agent-runtime-protocol@1",
+          runtimeCapabilitiesJson: {},
+        },
+      ],
       [{ id: "runtime-1", lifecycleState: "enabled", deletedAt: null }],
     );
     builderMocks.loadCurrentEvidence.mockResolvedValue({
       tenantId: "tenant-1",
       agentRevisionId: "agent-revision-1",
-      agentArtifactEvidence: { artifactId: "agent-artifact-1", verificationState: "verified", revokedAt: null },
-      agentPublication: { publicationRecordId: "agent-publication-1", attestationIds: ["agent-attestation-1"] },
+      agentArtifactEvidence: {
+        artifactId: "agent-artifact-1",
+        verificationState: "verified",
+        revokedAt: null,
+      },
+      agentPublication: {
+        publicationRecordId: "agent-publication-1",
+        attestationIds: ["agent-attestation-1"],
+      },
       agentLifecycleState: "active",
       agentRevisionState: "published",
       runtimeRevisionId: "runtime-revision-1",
-      runtimeArtifactEvidence: { artifactId: "runtime-artifact-1", verificationState: "verified", revokedAt: null },
-      runtimePublication: { publicationRecordId: "runtime-publication-1", attestationIds: ["runtime-attestation-1"], conformanceRunId: "conformance-1" },
+      runtimeArtifactEvidence: {
+        artifactId: "runtime-artifact-1",
+        verificationState: "verified",
+        revokedAt: null,
+      },
+      runtimePublication: {
+        publicationRecordId: "runtime-publication-1",
+        attestationIds: ["runtime-attestation-1"],
+        conformanceRunId: "conformance-1",
+      },
       runtimeConformance: {
         runId: "conformance-1",
         tenantId: "tenant-1",
@@ -167,10 +199,7 @@ describe("Projection authority", () => {
 
   it("latest activation 缺失时删除既有投影且不写 placeholder", async () => {
     const store = createStoreMock();
-    builderMocks.queryResults.push(
-      [{ ...route, activeRouteRevisionId: "drifted-revision" }],
-      [],
-    );
+    builderMocks.queryResults.push([{ ...route, activeRouteRevisionId: "drifted-revision" }], []);
 
     await createBuildRouteEligibility({ store })({ tenantId: "tenant-1", routeId: "route-1" });
 
@@ -424,9 +453,7 @@ describe("§05.5 computeProjectionContentDigest", () => {
     });
 
     expect(d2).not.toBe(d1);
-    expect(
-      computeNextVersion({ projectionVersionNo: 4, projectionContentDigest: d1 }, d2),
-    ).toBe(5);
+    expect(computeNextVersion({ projectionVersionNo: 4, projectionContentDigest: d1 }, d2)).toBe(5);
   });
 });
 
@@ -447,13 +474,25 @@ describe("§05.5 computeNextVersion", () => {
 
   it("连续变化 → 递增", () => {
     let existing: { projectionVersionNo: number; projectionContentDigest: string } | null = null;
-    existing = { projectionVersionNo: computeNextVersion(existing, "sha256:v1"), projectionContentDigest: "sha256:v1" };
+    existing = {
+      projectionVersionNo: computeNextVersion(existing, "sha256:v1"),
+      projectionContentDigest: "sha256:v1",
+    };
     expect(existing.projectionVersionNo).toBe(1);
-    existing = { projectionVersionNo: computeNextVersion(existing, "sha256:v2"), projectionContentDigest: "sha256:v2" };
+    existing = {
+      projectionVersionNo: computeNextVersion(existing, "sha256:v2"),
+      projectionContentDigest: "sha256:v2",
+    };
     expect(existing.projectionVersionNo).toBe(2);
-    existing = { projectionVersionNo: computeNextVersion(existing, "sha256:v2"), projectionContentDigest: "sha256:v2" };
+    existing = {
+      projectionVersionNo: computeNextVersion(existing, "sha256:v2"),
+      projectionContentDigest: "sha256:v2",
+    };
     expect(existing.projectionVersionNo).toBe(2); // same digest → no increase
-    existing = { projectionVersionNo: computeNextVersion(existing, "sha256:v3"), projectionContentDigest: "sha256:v3" };
+    existing = {
+      projectionVersionNo: computeNextVersion(existing, "sha256:v3"),
+      projectionContentDigest: "sha256:v3",
+    };
     expect(existing.projectionVersionNo).toBe(3);
   });
 });

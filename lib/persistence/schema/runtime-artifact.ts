@@ -43,12 +43,12 @@ import { bigint, datetime, index, mysqlTable, uniqueIndex, varchar } from "drizz
  * 文档允许其他类型；新类型需通过 schema 修订引入并同步应用层校验。
  */
 export const RUNTIME_ARTIFACT_TYPES = [
- "file",
- "image",
- "archive",
- "report",
- "dataset",
- "log",
+  "file",
+  "image",
+  "archive",
+  "report",
+  "dataset",
+  "log",
 ] as const;
 export type RuntimeArtifactType = (typeof RUNTIME_ARTIFACT_TYPES)[number];
 
@@ -77,52 +77,55 @@ export type VisibilityScope = (typeof VISIBILITY_SCOPES)[number];
  * - expiresAt 可在清理任务中用作筛选条件，但不更新状态字段。
  */
 export const artifactTable = mysqlTable(
- "RuntimeArtifact",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 所属 Invocation id（逻辑外键 → Invocation.id；必填）。 */
- invocationId: varchar("invocationId", { length: 36 }).notNull(),
- /** 所属 Thread id（会话产物时填；Job 产物为 null）。 */
- threadId: varchar("threadId", { length: 36 }),
- /** 所属 Turn id（会话产物时填；Job 产物为 null）。 */
- turnId: varchar("turnId", { length: 36 }),
- /** 所属 Job id（Job 产物时填；会话产物为 null）。 */
- jobId: varchar("jobId", { length: 36 }),
- /** 员工可见 Artifact Item id（逻辑外键 → ThreadItem.id；非空时唯一）。 */
- itemId: varchar("itemId", { length: 36 }),
- /** 产物类型（应用层枚举）。 */
- artifactType: varchar("artifactType", { length: 32 }).notNull(),
- /** 员工可见文件名。 */
- displayName: varchar("displayName", { length: 256 }).notNull(),
- /** 受管对象存储引用（s3:// / oci:// / gs:// / file://internal/...；不接受公网 URL）。 */
- contentRef: varchar("contentRef", { length: 512 }).notNull(),
- /** MIME type。 */
- mediaType: varchar("mediaType", { length: 128 }).notNull(),
- /** 内容字节大小。 */
- byteSize: bigint("byteSize", { mode: "number" }).notNull(),
- /** 内容摘要（sha256: 前缀 + 64 hex；不接受可变 tag）。 */
- contentHash: varchar("contentHash", { length: 128 }).notNull(),
- /** 访问范围（thread / workspace / owner / organization）。 */
- visibilityScope: varchar("visibilityScope", { length: 32 }).notNull(),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- /** 过期时间（用于临时产物清理；null 表示不过期）。 */
- expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }),
- },
- (t) => ({
- itemIdUq: uniqueIndex("RuntimeArtifact_itemId_uq").on(t.itemId),
- tenantInvocationIdx: index("RuntimeArtifact_tenant_invocation_idx").on(t.tenantId, t.invocationId),
- tenantThreadIdx: index("RuntimeArtifact_tenant_thread_idx").on(t.tenantId, t.threadId),
- tenantJobIdx: index("RuntimeArtifact_tenant_job_idx").on(t.tenantId, t.jobId),
- tenantExpiresIdx: index("RuntimeArtifact_tenant_expires_idx").on(t.tenantId, t.expiresAt),
- }),
+  "RuntimeArtifact",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 所属 Invocation id（逻辑外键 → Invocation.id；必填）。 */
+    invocationId: varchar("invocationId", { length: 36 }).notNull(),
+    /** 所属 Thread id（会话产物时填；Job 产物为 null）。 */
+    threadId: varchar("threadId", { length: 36 }),
+    /** 所属 Turn id（会话产物时填；Job 产物为 null）。 */
+    turnId: varchar("turnId", { length: 36 }),
+    /** 所属 Job id（Job 产物时填；会话产物为 null）。 */
+    jobId: varchar("jobId", { length: 36 }),
+    /** 员工可见 Artifact Item id（逻辑外键 → ThreadItem.id；非空时唯一）。 */
+    itemId: varchar("itemId", { length: 36 }),
+    /** 产物类型（应用层枚举）。 */
+    artifactType: varchar("artifactType", { length: 32 }).notNull(),
+    /** 员工可见文件名。 */
+    displayName: varchar("displayName", { length: 256 }).notNull(),
+    /** 受管对象存储引用（s3:// / oci:// / gs:// / file://internal/...；不接受公网 URL）。 */
+    contentRef: varchar("contentRef", { length: 512 }).notNull(),
+    /** MIME type。 */
+    mediaType: varchar("mediaType", { length: 128 }).notNull(),
+    /** 内容字节大小。 */
+    byteSize: bigint("byteSize", { mode: "number" }).notNull(),
+    /** 内容摘要（sha256: 前缀 + 64 hex；不接受可变 tag）。 */
+    contentHash: varchar("contentHash", { length: 128 }).notNull(),
+    /** 访问范围（thread / workspace / owner / organization）。 */
+    visibilityScope: varchar("visibilityScope", { length: 32 }).notNull(),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    /** 过期时间（用于临时产物清理；null 表示不过期）。 */
+    expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }),
+  },
+  (t) => ({
+    itemIdUq: uniqueIndex("RuntimeArtifact_itemId_uq").on(t.itemId),
+    tenantInvocationIdx: index("RuntimeArtifact_tenant_invocation_idx").on(
+      t.tenantId,
+      t.invocationId,
+    ),
+    tenantThreadIdx: index("RuntimeArtifact_tenant_thread_idx").on(t.tenantId, t.threadId),
+    tenantJobIdx: index("RuntimeArtifact_tenant_job_idx").on(t.tenantId, t.jobId),
+    tenantExpiresIdx: index("RuntimeArtifact_tenant_expires_idx").on(t.tenantId, t.expiresAt),
+  }),
 );
 
 export type Artifact = InferSelectModel<typeof artifactTable>;

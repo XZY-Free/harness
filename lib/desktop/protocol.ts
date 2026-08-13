@@ -30,8 +30,8 @@ export type ProtocolVersion = typeof PROTOCOL_VERSION;
  * @returns 兼容返回 true，不兼容返回 false
  */
 export function isCompatibleVersion(version: number): boolean {
- if (!Number.isInteger(version)) {
- return false;
- }
- return version === PROTOCOL_VERSION;
+  if (!Number.isInteger(version)) {
+    return false;
+  }
+  return version === PROTOCOL_VERSION;
 }

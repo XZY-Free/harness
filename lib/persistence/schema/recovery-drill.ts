@@ -31,14 +31,14 @@ import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
- datetime,
- index,
- int,
- mysqlEnum,
- mysqlTable,
- text,
- uniqueIndex,
- varchar,
+  datetime,
+  index,
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  uniqueIndex,
+  varchar,
 } from "drizzle-orm/mysql-core";
 
 // ─── 演练类型 ──────────────────────────────────────────────
@@ -61,11 +61,11 @@ import {
  * - UserAction 等待状态保持 waiting_user（不超时静默失败）。
  */
 export const RECOVERY_DRILL_TYPES = [
- "db_restore",
- "object_version",
- "secret_restore",
- "runtime_failover",
- "queue_failover",
+  "db_restore",
+  "object_version",
+  "secret_restore",
+  "runtime_failover",
+  "queue_failover",
 ] as const;
 export type RecoveryDrillType = (typeof RECOVERY_DRILL_TYPES)[number];
 
@@ -80,11 +80,11 @@ export type RecoveryDrillType = (typeof RECOVERY_DRILL_TYPES)[number];
  * - cancelled：演练取消（隔离环境异常或人工中止）。
  */
 export const RECOVERY_DRILL_STATES = [
- "scheduled",
- "running",
- "completed",
- "failed",
- "cancelled",
+  "scheduled",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
 ] as const;
 export type RecoveryDrillState = (typeof RECOVERY_DRILL_STATES)[number];
 
@@ -104,15 +104,15 @@ export type RecoveryDrillState = (typeof RECOVERY_DRILL_STATES)[number];
  * - user_action_wait：UserAction 等待状态保持 waiting_user（不超时静默失败）。
  */
 export const RECOVERY_CHECK_TYPES = [
- "event_sequence",
- "projection_checkpoint",
- "artifact_ref",
- "legal_hold",
- "deletion_evidence",
- "tool_call_pending",
- "unknown_effect",
- "job_recovery",
- "user_action_wait",
+  "event_sequence",
+  "projection_checkpoint",
+  "artifact_ref",
+  "legal_hold",
+  "deletion_evidence",
+  "tool_call_pending",
+  "unknown_effect",
+  "job_recovery",
+  "user_action_wait",
 ] as const;
 export type RecoveryCheckType = (typeof RECOVERY_CHECK_TYPES)[number];
 
@@ -142,83 +142,83 @@ export type RecoveryCheckState = (typeof RECOVERY_CHECK_STATES)[number];
  * - queue_failover 验证 Job 恢复 + UserAction 等待（队列恢复不丢失待处理任务）。
  */
 export const DRILL_CHECK_MATRIX: Record<RecoveryDrillType, readonly RecoveryCheckType[]> = {
- db_restore: [
- "event_sequence",
- "projection_checkpoint",
- "artifact_ref",
- "legal_hold",
- "deletion_evidence",
- ],
- object_version: ["artifact_ref", "deletion_evidence"],
- secret_restore: ["legal_hold", "deletion_evidence"],
- runtime_failover: ["tool_call_pending", "unknown_effect", "job_recovery", "user_action_wait"],
- queue_failover: ["job_recovery", "user_action_wait"],
+  db_restore: [
+    "event_sequence",
+    "projection_checkpoint",
+    "artifact_ref",
+    "legal_hold",
+    "deletion_evidence",
+  ],
+  object_version: ["artifact_ref", "deletion_evidence"],
+  secret_restore: ["legal_hold", "deletion_evidence"],
+  runtime_failover: ["tool_call_pending", "unknown_effect", "job_recovery", "user_action_wait"],
+  queue_failover: ["job_recovery", "user_action_wait"],
 };
 
 // ─── RecoveryDrill 表 ───────────────────────────────────
 
 export const recoveryDrillTable = mysqlTable(
- "RecoveryDrill",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 演练类型（5 类恢复场景）。 */
- drillType: mysqlEnum("drillType", RECOVERY_DRILL_TYPES).notNull(),
- /** 演练状态（状态机）。 */
- drillState: mysqlEnum("drillState", RECOVERY_DRILL_STATES).notNull().default("scheduled"),
- /**
- * RPO 目标（秒）：可容忍的数据丢失窗口。
- * 由方案 §8 定义责任边界；drillType 决定默认值（db_restore=300, object_version=3600, 等）。
- */
- rpoTargetSeconds: int("rpoTargetSeconds").notNull(),
- /**
- * RTO 目标（秒）：可容忍的恢复时间。
- * 由方案 §8 定义责任边界；drillType 决定默认值。
- */
- rtoTargetSeconds: int("rtoTargetSeconds").notNull(),
- /** 实际 RPO（秒）：演练测得的实际数据丢失窗口。 */
- rpoActualSeconds: int("rpoActualSeconds"),
- /** 实际 RTO（秒）：演练测得的实际恢复时间。 */
- rtoActualSeconds: int("rtoActualSeconds"),
- /**
- * 隔离环境标识（如 isolated-staging-001）。
- * 演练必须在隔离环境执行，不连接生产数据库。
- */
- environmentTag: varchar("environmentTag", { length: 128 }).notNull(),
- /** 演练原因（人工填写或系统生成）。 */
- reason: text("reason"),
- /** 执行人 id（userIdentityId / serviceId）。 */
- executedBy: varchar("executedBy", { length: 128 }).notNull(),
- /** 执行人类型（user / service）。 */
- executedByKind: mysqlEnum("executedByKind", ["user", "service"]).notNull().default("user"),
- /** 一致性汇总 JSON（checkCount/passedCount/failedCount/skippedCount）。 */
- consistencySummaryJson: text("consistencySummaryJson"),
- /** 审计事件 id（recovery.drill 审计）。 */
- auditEventId: varchar("auditEventId", { length: 36 }),
- /** 失败原因（drillState=failed 时填写）。 */
- failureReason: text("failureReason"),
- /** 关联请求 id（X-Request-ID），保证可跟踪。 */
- requestId: varchar("requestId", { length: 64 }),
- scheduledAt: datetime("scheduledAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- startedAt: datetime("startedAt", { mode: "date", fsp: 3 }),
- completedAt: datetime("completedAt", { mode: "date", fsp: 3 }),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- tenantScheduledIdx: index("RecoveryDrill_tenant_scheduled_idx").on(t.tenantId, t.scheduledAt),
- tenantStateIdx: index("RecoveryDrill_tenant_state_idx").on(t.tenantId, t.drillState),
- tenantTypeIdx: index("RecoveryDrill_tenant_type_idx").on(t.tenantId, t.drillType),
- tenantExecutedByIdx: index("RecoveryDrill_tenant_executed_by_idx").on(t.tenantId, t.executedBy),
- }),
+  "RecoveryDrill",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 演练类型（5 类恢复场景）。 */
+    drillType: mysqlEnum("drillType", RECOVERY_DRILL_TYPES).notNull(),
+    /** 演练状态（状态机）。 */
+    drillState: mysqlEnum("drillState", RECOVERY_DRILL_STATES).notNull().default("scheduled"),
+    /**
+     * RPO 目标（秒）：可容忍的数据丢失窗口。
+     * 由方案 §8 定义责任边界；drillType 决定默认值（db_restore=300, object_version=3600, 等）。
+     */
+    rpoTargetSeconds: int("rpoTargetSeconds").notNull(),
+    /**
+     * RTO 目标（秒）：可容忍的恢复时间。
+     * 由方案 §8 定义责任边界；drillType 决定默认值。
+     */
+    rtoTargetSeconds: int("rtoTargetSeconds").notNull(),
+    /** 实际 RPO（秒）：演练测得的实际数据丢失窗口。 */
+    rpoActualSeconds: int("rpoActualSeconds"),
+    /** 实际 RTO（秒）：演练测得的实际恢复时间。 */
+    rtoActualSeconds: int("rtoActualSeconds"),
+    /**
+     * 隔离环境标识（如 isolated-staging-001）。
+     * 演练必须在隔离环境执行，不连接生产数据库。
+     */
+    environmentTag: varchar("environmentTag", { length: 128 }).notNull(),
+    /** 演练原因（人工填写或系统生成）。 */
+    reason: text("reason"),
+    /** 执行人 id（userIdentityId / serviceId）。 */
+    executedBy: varchar("executedBy", { length: 128 }).notNull(),
+    /** 执行人类型（user / service）。 */
+    executedByKind: mysqlEnum("executedByKind", ["user", "service"]).notNull().default("user"),
+    /** 一致性汇总 JSON（checkCount/passedCount/failedCount/skippedCount）。 */
+    consistencySummaryJson: text("consistencySummaryJson"),
+    /** 审计事件 id（recovery.drill 审计）。 */
+    auditEventId: varchar("auditEventId", { length: 36 }),
+    /** 失败原因（drillState=failed 时填写）。 */
+    failureReason: text("failureReason"),
+    /** 关联请求 id（X-Request-ID），保证可跟踪。 */
+    requestId: varchar("requestId", { length: 64 }),
+    scheduledAt: datetime("scheduledAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    startedAt: datetime("startedAt", { mode: "date", fsp: 3 }),
+    completedAt: datetime("completedAt", { mode: "date", fsp: 3 }),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    tenantScheduledIdx: index("RecoveryDrill_tenant_scheduled_idx").on(t.tenantId, t.scheduledAt),
+    tenantStateIdx: index("RecoveryDrill_tenant_state_idx").on(t.tenantId, t.drillState),
+    tenantTypeIdx: index("RecoveryDrill_tenant_type_idx").on(t.tenantId, t.drillType),
+    tenantExecutedByIdx: index("RecoveryDrill_tenant_executed_by_idx").on(t.tenantId, t.executedBy),
+  }),
 );
 
 export type RecoveryDrill = InferSelectModel<typeof recoveryDrillTable>;
@@ -227,48 +227,48 @@ export type NewRecoveryDrill = InferInsertModel<typeof recoveryDrillTable>;
 // ─── RecoveryDrillCheck 表 ──────────────────────────────
 
 export const recoveryDrillCheckTable = mysqlTable(
- "RecoveryDrillCheck",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 所属演练 id。 */
- drillId: varchar("drillId", { length: 36 })
- .notNull()
- .references(() => recoveryDrillTable.id),
- /** 检查类型（9 类一致性维度）。 */
- checkType: mysqlEnum("checkType", RECOVERY_CHECK_TYPES).notNull(),
- /** 检查状态（状态机）。 */
- checkState: mysqlEnum("checkState", RECOVERY_CHECK_STATES).notNull().default("pending"),
- /**
- * 存储端证据引用（passed/failed 必填）。
- * 指向实际核对证据（如 Event sequence 报告、Artifact 引用清单、ToolCall 状态快照）。
- * 不能用日志文本冒充可恢复性。
- */
- evidenceRef: varchar("evidenceRef", { length: 256 }),
- /** 核对详情 JSON（checkType 特定的核对结果，如 gapCount / missingRefs / pendingCount）。 */
- detailsJson: text("detailsJson"),
- /** 失败原因（checkState=failed 时填写）。 */
- failureReason: text("failureReason"),
- /** 核对耗时（毫秒）。 */
- durationMs: int("durationMs"),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- completedAt: datetime("completedAt", { mode: "date", fsp: 3 }),
- },
- (t) => ({
- drillCheckUq: uniqueIndex("RecoveryDrillCheck_drill_check_uq").on(t.drillId, t.checkType),
- tenantDrillIdx: index("RecoveryDrillCheck_tenant_drill_idx").on(t.tenantId, t.drillId),
- drillStateIdx: index("RecoveryDrillCheck_drill_state_idx").on(t.drillId, t.checkState),
- }),
+  "RecoveryDrillCheck",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 所属演练 id。 */
+    drillId: varchar("drillId", { length: 36 })
+      .notNull()
+      .references(() => recoveryDrillTable.id),
+    /** 检查类型（9 类一致性维度）。 */
+    checkType: mysqlEnum("checkType", RECOVERY_CHECK_TYPES).notNull(),
+    /** 检查状态（状态机）。 */
+    checkState: mysqlEnum("checkState", RECOVERY_CHECK_STATES).notNull().default("pending"),
+    /**
+     * 存储端证据引用（passed/failed 必填）。
+     * 指向实际核对证据（如 Event sequence 报告、Artifact 引用清单、ToolCall 状态快照）。
+     * 不能用日志文本冒充可恢复性。
+     */
+    evidenceRef: varchar("evidenceRef", { length: 256 }),
+    /** 核对详情 JSON（checkType 特定的核对结果，如 gapCount / missingRefs / pendingCount）。 */
+    detailsJson: text("detailsJson"),
+    /** 失败原因（checkState=failed 时填写）。 */
+    failureReason: text("failureReason"),
+    /** 核对耗时（毫秒）。 */
+    durationMs: int("durationMs"),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    completedAt: datetime("completedAt", { mode: "date", fsp: 3 }),
+  },
+  (t) => ({
+    drillCheckUq: uniqueIndex("RecoveryDrillCheck_drill_check_uq").on(t.drillId, t.checkType),
+    tenantDrillIdx: index("RecoveryDrillCheck_tenant_drill_idx").on(t.tenantId, t.drillId),
+    drillStateIdx: index("RecoveryDrillCheck_drill_state_idx").on(t.drillId, t.checkState),
+  }),
 );
 
 export type RecoveryDrillCheck = InferSelectModel<typeof recoveryDrillCheckTable>;

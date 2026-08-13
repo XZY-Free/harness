@@ -14,34 +14,34 @@ import type { ThreadProjectionAction, ThreadProjectionState } from "./types";
 export type ThreadStoreListener = (state: ThreadProjectionState) => void;
 
 export interface ThreadStore {
- /** 当前状态快照。 */
- getState(): ThreadProjectionState;
- /** 分发 action。 */
- dispatch(action: ThreadProjectionAction): void;
- /** 订阅状态变化。 */
- subscribe(listener: ThreadStoreListener): () => void;
+  /** 当前状态快照。 */
+  getState(): ThreadProjectionState;
+  /** 分发 action。 */
+  dispatch(action: ThreadProjectionAction): void;
+  /** 订阅状态变化。 */
+  subscribe(listener: ThreadStoreListener): () => void;
 }
 
 /** 创建 Thread Store。 */
 export function createThreadStore(initialState: ThreadProjectionState): ThreadStore {
- let state = initialState;
- const listeners = new Set<ThreadStoreListener>();
+  let state = initialState;
+  const listeners = new Set<ThreadStoreListener>();
 
- return {
- getState: () => state,
- dispatch: (action) => {
- const next = threadProjectionReducer(state, action);
- if (next === state) return;
- state = next;
- for (const listener of listeners) {
- listener(state);
- }
- },
- subscribe: (listener) => {
- listeners.add(listener);
- return () => {
- listeners.delete(listener);
- };
- },
- };
+  return {
+    getState: () => state,
+    dispatch: (action) => {
+      const next = threadProjectionReducer(state, action);
+      if (next === state) return;
+      state = next;
+      for (const listener of listeners) {
+        listener(state);
+      }
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
 }

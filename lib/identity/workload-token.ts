@@ -30,41 +30,41 @@ export type WorkloadCallerType = "user" | "device" | "workload" | "service";
 
 /** Runtime / Gateway Token 的 claims（11-api-and-event-boundaries.md ）。 */
 export interface WorkloadTokenClaims {
- /** Token 类型：runtime（Runtime Protocol）/ gateway（Gateway API）/ service（CI/CD Service Identity）。 */
- type: "runtime" | "gateway" | "service";
- /** 绑定租户 id（从身份解析，不信任模型 JSON 参数）。 */
- tenantId: string;
- /** Token 唯一 id（S12-W05）：用于撤销与重放保护；颁发时生成 randomUUID。 */
- jti: string;
- /** 绑定 Invocation id；Runtime/Gateway Token 必须等于当前 path 的 invocation_id。 */
- invocationId?: string;
- /** Runtime 修订（仅 Runtime Protocol Token）。 */
- runtimeRevisionId?: string;
- /** 允许的 audience（与 idempotency_record.audience 对齐）。 */
- audience: ApiAudience;
- /** Service Identity 标识（仅 type=service，如 "cicd"）。 */
- serviceId?: string;
- /** 颁发时间（Unix ms）。 */
- issuedAt: number;
- /** 过期时间（Unix ms）；短有效期。 */
- expiresAt: number;
+  /** Token 类型：runtime（Runtime Protocol）/ gateway（Gateway API）/ service（CI/CD Service Identity）。 */
+  type: "runtime" | "gateway" | "service";
+  /** 绑定租户 id（从身份解析，不信任模型 JSON 参数）。 */
+  tenantId: string;
+  /** Token 唯一 id（S12-W05）：用于撤销与重放保护；颁发时生成 randomUUID。 */
+  jti: string;
+  /** 绑定 Invocation id；Runtime/Gateway Token 必须等于当前 path 的 invocation_id。 */
+  invocationId?: string;
+  /** Runtime 修订（仅 Runtime Protocol Token）。 */
+  runtimeRevisionId?: string;
+  /** 允许的 audience（与 idempotency_record.audience 对齐）。 */
+  audience: ApiAudience;
+  /** Service Identity 标识（仅 type=service，如 "cicd"）。 */
+  serviceId?: string;
+  /** 颁发时间（Unix ms）。 */
+  issuedAt: number;
+  /** 过期时间（Unix ms）；短有效期。 */
+  expiresAt: number;
 }
 
 /** Workload Token 解析错误（route 层应映射为 401 AUTHENTICATION_REQUIRED）。 */
 export class WorkloadTokenError extends Error {
- constructor(
- public readonly code:
- | "missing_token"
- | "malformed_token"
- | "expired_token"
- | "audience_mismatch"
- | "invocation_mismatch"
- | "token_revoked"
- | "missing_jti",
- message: string,
- ) {
- super(message);
- }
+  constructor(
+    public readonly code:
+      | "missing_token"
+      | "malformed_token"
+      | "expired_token"
+      | "audience_mismatch"
+      | "invocation_mismatch"
+      | "token_revoked"
+      | "missing_jti",
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 /**
@@ -76,59 +76,59 @@ export class WorkloadTokenError extends Error {
  * 颁发接口在阶段 5 Invocation Dispatcher 实现；本函数供 route handler 解析 Authorization header。
  */
 export function decodeWorkloadToken(token: string): WorkloadTokenClaims {
- let payload: unknown;
- try {
- const json = Buffer.from(token, "base64url").toString("utf-8");
- payload = JSON.parse(json);
- } catch {
- throw new WorkloadTokenError("malformed_token", "Workload Token 格式非法");
- }
+  let payload: unknown;
+  try {
+    const json = Buffer.from(token, "base64url").toString("utf-8");
+    payload = JSON.parse(json);
+  } catch {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 格式非法");
+  }
 
- if (!payload || typeof payload !== "object") {
- throw new WorkloadTokenError("malformed_token", "Workload Token 内容非对象");
- }
+  if (!payload || typeof payload !== "object") {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 内容非对象");
+  }
 
- const claims = payload as Partial<WorkloadTokenClaims>;
- if (claims.type !== "runtime" && claims.type !== "gateway" && claims.type !== "service") {
- throw new WorkloadTokenError("malformed_token", "Workload Token type 缺失或非法");
- }
- if (!claims.tenantId) {
- throw new WorkloadTokenError("malformed_token", "Workload Token 缺失 tenantId");
- }
- if (!claims.audience) {
- throw new WorkloadTokenError("malformed_token", "Workload Token 缺失 audience");
- }
- if (typeof claims.issuedAt !== "number" || typeof claims.expiresAt !== "number") {
- throw new WorkloadTokenError("malformed_token", "Workload Token 缺失 issuedAt/expiresAt");
- }
+  const claims = payload as Partial<WorkloadTokenClaims>;
+  if (claims.type !== "runtime" && claims.type !== "gateway" && claims.type !== "service") {
+    throw new WorkloadTokenError("malformed_token", "Workload Token type 缺失或非法");
+  }
+  if (!claims.tenantId) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 缺失 tenantId");
+  }
+  if (!claims.audience) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 缺失 audience");
+  }
+  if (typeof claims.issuedAt !== "number" || typeof claims.expiresAt !== "number") {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 缺失 issuedAt/expiresAt");
+  }
 
- // S12-W05：jti 必填（用于撤销与重放保护）
- if (!claims.jti || typeof claims.jti !== "string") {
- throw new WorkloadTokenError("missing_jti", "Workload Token 缺失 jti");
- }
+  // S12-W05：jti 必填（用于撤销与重放保护）
+  if (!claims.jti || typeof claims.jti !== "string") {
+    throw new WorkloadTokenError("missing_jti", "Workload Token 缺失 jti");
+  }
 
- // 过期校验
- const now = Date.now();
- if (now >= claims.expiresAt) {
- throw new WorkloadTokenError("expired_token", "Workload Token 已过期");
- }
+  // 过期校验
+  const now = Date.now();
+  if (now >= claims.expiresAt) {
+    throw new WorkloadTokenError("expired_token", "Workload Token 已过期");
+  }
 
- // type=service 必须有 serviceId
- if (claims.type === "service" && !claims.serviceId) {
- throw new WorkloadTokenError("malformed_token", "Service Identity Token 缺失 serviceId");
- }
+  // type=service 必须有 serviceId
+  if (claims.type === "service" && !claims.serviceId) {
+    throw new WorkloadTokenError("malformed_token", "Service Identity Token 缺失 serviceId");
+  }
 
- // type=runtime/gateway 必须有 invocationId
- if ((claims.type === "runtime" || claims.type === "gateway") && !claims.invocationId) {
- throw new WorkloadTokenError("malformed_token", `${claims.type} Token 缺失 invocationId`);
- }
+  // type=runtime/gateway 必须有 invocationId
+  if ((claims.type === "runtime" || claims.type === "gateway") && !claims.invocationId) {
+    throw new WorkloadTokenError("malformed_token", `${claims.type} Token 缺失 invocationId`);
+  }
 
- // type=runtime 必须有 runtimeRevisionId
- if (claims.type === "runtime" && !claims.runtimeRevisionId) {
- throw new WorkloadTokenError("malformed_token", "Runtime Token 缺失 runtimeRevisionId");
- }
+  // type=runtime 必须有 runtimeRevisionId
+  if (claims.type === "runtime" && !claims.runtimeRevisionId) {
+    throw new WorkloadTokenError("malformed_token", "Runtime Token 缺失 runtimeRevisionId");
+  }
 
- return claims as WorkloadTokenClaims;
+  return claims as WorkloadTokenClaims;
 }
 
 /**
@@ -136,10 +136,10 @@ export function decodeWorkloadToken(token: string): WorkloadTokenClaims {
  * 非 Bearer 或空返回 null（调用方据此判断是否走 Workload 认证）。
  */
 export function extractBearerToken(headers: Headers): string | null {
- const auth = headers.get("authorization");
- if (!auth) return null;
- const match = auth.match(/^Bearer\s+(.+)$/i);
- return match?.[1]?.trim() ?? null;
+  const auth = headers.get("authorization");
+  if (!auth) return null;
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() ?? null;
 }
 
 /**
@@ -147,12 +147,12 @@ export function extractBearerToken(headers: Headers): string | null {
  * Token audience 必须等于期望 audience（runtime Token 不能用于 gateway API）。
  */
 export function assertAudienceMatch(claims: WorkloadTokenClaims, expected: ApiAudience): void {
- if (claims.audience !== expected) {
- throw new WorkloadTokenError(
- "audience_mismatch",
- `Token audience=${claims.audience} 与请求期望 audience=${expected} 不匹配`,
- );
- }
+  if (claims.audience !== expected) {
+    throw new WorkloadTokenError(
+      "audience_mismatch",
+      `Token audience=${claims.audience} 与请求期望 audience=${expected} 不匹配`,
+    );
+  }
 }
 
 /**
@@ -160,15 +160,15 @@ export function assertAudienceMatch(claims: WorkloadTokenClaims, expected: ApiAu
  * Runtime Token 不能用于其他 Invocation 的 API（11-api-and-event-boundaries.md ）。
  */
 export function assertInvocationMatch(
- claims: WorkloadTokenClaims,
- expectedInvocationId: string,
+  claims: WorkloadTokenClaims,
+  expectedInvocationId: string,
 ): void {
- if (claims.invocationId !== expectedInvocationId) {
- throw new WorkloadTokenError(
- "invocation_mismatch",
- `Token invocationId=${claims.invocationId} 与请求期望=${expectedInvocationId} 不匹配`,
- );
- }
+  if (claims.invocationId !== expectedInvocationId) {
+    throw new WorkloadTokenError(
+      "invocation_mismatch",
+      `Token invocationId=${claims.invocationId} 与请求期望=${expectedInvocationId} 不匹配`,
+    );
+  }
 }
 
 /**
@@ -176,13 +176,13 @@ export function assertInvocationMatch(
  * `requestId` 来自路由入口的 getRequestId(request)，保证可跟踪。
  */
 export function workloadTokenErrorResponse(
- error: unknown,
- requestId: string = generateRequestId(),
+  error: unknown,
+  requestId: string = generateRequestId(),
 ): Response | null {
- if (error instanceof WorkloadTokenError) {
- return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
- }
- return null;
+  if (error instanceof WorkloadTokenError) {
+    return apiError("AUTHENTICATION_REQUIRED", error.message, { requestId });
+  }
+  return null;
 }
 
 /**
@@ -197,23 +197,23 @@ export function workloadTokenErrorResponse(
  * 不做签名——应用层假设 Token 来自可信颁发者（网络隔离保证）。
  */
 export function issueWorkloadToken(
- claims: Omit<WorkloadTokenClaims, "issuedAt" | "jti"> & { jti?: string },
+  claims: Omit<WorkloadTokenClaims, "issuedAt" | "jti"> & { jti?: string },
 ): string {
- const now = Date.now();
- const full: WorkloadTokenClaims = {
- ...claims,
- jti: claims.jti ?? randomUUID(),
- issuedAt: now,
- };
- const json = JSON.stringify(full);
- return Buffer.from(json, "utf-8").toString("base64url");
+  const now = Date.now();
+  const full: WorkloadTokenClaims = {
+    ...claims,
+    jti: claims.jti ?? randomUUID(),
+    issuedAt: now,
+  };
+  const json = JSON.stringify(full);
+  return Buffer.from(json, "utf-8").toString("base64url");
 }
 
 /** 默认 Token TTL（ms）：Runtime/Gateway 5min，Service 10min。 */
 export const WORKLOAD_TOKEN_DEFAULT_TTL_MS = {
- runtime: 5 * 60 * 1000,
- gateway: 5 * 60 * 1000,
- service: 10 * 60 * 1000,
+  runtime: 5 * 60 * 1000,
+  gateway: 5 * 60 * 1000,
+  service: 10 * 60 * 1000,
 } as const;
 
 /**
@@ -224,18 +224,18 @@ export const WORKLOAD_TOKEN_DEFAULT_TTL_MS = {
  * - agent.revision.create（不是 agent.revision.draft）— 与方案 稳定管理动作列表一致。
  */
 export const CICD_SERVICE_ALLOWED_ACTIONS = [
- "artifact.attestation.verify",
- "agent.revision.create",
- "deletion.request",
+  "artifact.attestation.verify",
+  "agent.revision.create",
+  "deletion.request",
 ] as const;
 
 /** 校验 Service Identity 是否允许执行指定 action code。 */
 export function isServiceActionAllowed(serviceId: string, actionCode: string): boolean {
- // 当前阶段只有 cicd service；后续扩展其他 service 时在此分支。
- if (serviceId !== "cicd") {
- return false;
- }
- return (CICD_SERVICE_ALLOWED_ACTIONS as readonly string[]).includes(actionCode);
+  // 当前阶段只有 cicd service；后续扩展其他 service 时在此分支。
+  if (serviceId !== "cicd") {
+    return false;
+  }
+  return (CICD_SERVICE_ALLOWED_ACTIONS as readonly string[]).includes(actionCode);
 }
 
 /** API_STATUS 重新导出，供 route handler 便捷引用。 */

@@ -14,38 +14,38 @@ import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import { datetime, index, mysqlTable, text, varchar } from "drizzle-orm/mysql-core";
 
 export const roleActionBinding = mysqlTable(
- "RoleActionBinding",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- principalBindingId: varchar("principalBindingId", { length: 36 })
- .notNull()
- .references(() => principalBinding.id),
- /** 稳定 action code（见 ACTION_CODES 目录）。 */
- actionCode: varchar("actionCode", { length: 64 }).notNull(),
- /** 类型化 resource scope JSON（见 ResourceScope）。 */
- resourceScopeJson: text("resourceScopeJson").notNull(),
- validFrom: datetime("validFrom", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- /** null 表示长期有效；撤销回填 validUntil = now。 */
- validUntil: datetime("validUntil", { mode: "date", fsp: 3 }),
- createdAt: datetime("createdAt", { mode: "date" })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- tenantPrincipalIdx: index("RoleActionBinding_tenant_principal_idx").on(
- t.tenantId,
- t.principalBindingId,
- ),
- tenantActionIdx: index("RoleActionBinding_tenant_action_idx").on(t.tenantId, t.actionCode),
- }),
+  "RoleActionBinding",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    principalBindingId: varchar("principalBindingId", { length: 36 })
+      .notNull()
+      .references(() => principalBinding.id),
+    /** 稳定 action code（见 ACTION_CODES 目录）。 */
+    actionCode: varchar("actionCode", { length: 64 }).notNull(),
+    /** 类型化 resource scope JSON（见 ResourceScope）。 */
+    resourceScopeJson: text("resourceScopeJson").notNull(),
+    validFrom: datetime("validFrom", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    /** null 表示长期有效；撤销回填 validUntil = now。 */
+    validUntil: datetime("validUntil", { mode: "date", fsp: 3 }),
+    createdAt: datetime("createdAt", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    tenantPrincipalIdx: index("RoleActionBinding_tenant_principal_idx").on(
+      t.tenantId,
+      t.principalBindingId,
+    ),
+    tenantActionIdx: index("RoleActionBinding_tenant_action_idx").on(t.tenantId, t.actionCode),
+  }),
 );
 
 export type RoleActionBinding = InferSelectModel<typeof roleActionBinding>;

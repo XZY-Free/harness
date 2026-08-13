@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getPlatformCapability, isDesktopBrowser, isWebPreview } from "./capability";
 
 afterEach(() => {
-  delete (globalThis as unknown as { __SNOW_PLATFORM__?: string }).__SNOW_PLATFORM__;
+  (globalThis as unknown as { __SNOW_PLATFORM__?: string }).__SNOW_PLATFORM__ = undefined;
 });
 
 describe("platform capability (V10 Phase 1)", () => {

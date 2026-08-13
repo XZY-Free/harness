@@ -23,13 +23,13 @@ import {
   type VerifyAttestationInput,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import {
+  type PredicateSupplyChain,
   buildDsseArtifactAttestationEnvelope,
   computeTestDigest,
-  type PredicateSupplyChain,
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
-import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
@@ -39,9 +39,9 @@ import { ExecutionBindingAlreadyExistsError as StableExecutionBindingAlreadyExis
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import {
+  TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
   computeBindingConfigHash,
   createExecutionBinding,
-  TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
@@ -55,13 +55,13 @@ import {
   createRouteSet,
   listEnabledRouteProjections,
 } from "@/lib/routes/application/deployment-route-service";
-import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import {
   type ResolveRouteCommand,
   type RouteResolver,
   createResolveRoute,
 } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { DEFAULT_ROUTE_SCOPE_KEY, dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import {
   DispatchTurnStateError,
@@ -146,7 +146,12 @@ function buildCleanSbom(): unknown {
     version: 1,
     metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
     components: [
-      { type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] },
+      {
+        type: "library",
+        name: "lodash",
+        version: "4.17.21",
+        licenses: [{ license: { id: "MIT" } }],
+      },
     ],
   };
 }
@@ -204,7 +209,12 @@ async function createVerifiedAttestation(
   const store = new InMemoryManagedArtifactStore();
   store.writeDsseEnvelope(
     dsseEnvelopeRef,
-    buildDsseArtifactAttestationEnvelope(keyPair, digest, { sbomRef, sbomContent: buildCleanSbom(), provenanceRef: provRef, provenanceContent: buildValidProvenance() }),
+    buildDsseArtifactAttestationEnvelope(keyPair, digest, {
+      sbomRef,
+      sbomContent: buildCleanSbom(),
+      provenanceRef: provRef,
+      provenanceContent: buildValidProvenance(),
+    }),
   );
   store.writeSbom(sbomRef, buildCleanSbom());
   store.writeProvenance(provRef, buildValidProvenance());

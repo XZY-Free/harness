@@ -28,8 +28,8 @@
 "use client";
 
 import { useCatalog } from "@/components/hooks/use-catalog";
-import { cn } from "@/lib/utils";
 import type { ClientCatalogResourceType } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 import { useId } from "react";
 
 interface CatalogSelectProps {

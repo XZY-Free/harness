@@ -19,52 +19,52 @@
  */
 import { createHash } from "node:crypto";
 import type {
- DeletionStoreType,
- DeletionSubjectType,
+  DeletionStoreType,
+  DeletionSubjectType,
 } from "@/lib/persistence/schema/deletion-request";
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
 /** 存储删除错误；executor 据 retryable 决定是否重试。 */
 export class DeletionStoreError extends Error {
- constructor(
- message: string,
- public readonly retryable: boolean = true,
- ) {
- super(message);
- this.name = "DeletionStoreError";
- }
+  constructor(
+    message: string,
+    public readonly retryable: boolean = true,
+  ) {
+    super(message);
+    this.name = "DeletionStoreError";
+  }
 }
 
 // ─── Adapter 接口 ──────────────────────────────────────────
 
 /** 存储删除入参。 */
 export interface DeletionStoreDeleteParams {
- tenantId: string;
- subjectType: DeletionSubjectType;
- /** 该存储内资源标识（planner 生成，如 "thread:thr_001"）。 */
- subjectRef: string;
- requestId?: string;
+  tenantId: string;
+  subjectType: DeletionSubjectType;
+  /** 该存储内资源标识（planner 生成，如 "thread:thr_001"）。 */
+  subjectRef: string;
+  requestId?: string;
 }
 
 /** 存储删除结果。 */
 export interface DeletionStoreDeleteResult {
- /** 存储端删除证据引用（completed 必填，如 "deletion-evidence:mysql:701"）。 */
- evidenceRef: string;
- /** true 表示共享资源保留（不删除），step 标记 retained。 */
- retained?: boolean;
- /** retained=true 时的保留原因。 */
- retainReason?: string;
+  /** 存储端删除证据引用（completed 必填，如 "deletion-evidence:mysql:701"）。 */
+  evidenceRef: string;
+  /** true 表示共享资源保留（不删除），step 标记 retained。 */
+  retained?: boolean;
+  /** retained=true 时的保留原因。 */
+  retainReason?: string;
 }
 
 /** 跨存储删除 Adapter 接口。 */
 export interface DeletionStoreAdapter {
- readonly storeType: DeletionStoreType;
- /**
- * 删除 subject 并返回证据，或标记保留。
- * @throws DeletionStoreError 删除失败（executor 标记 failed，可重试）
- */
- delete(params: DeletionStoreDeleteParams): Promise<DeletionStoreDeleteResult>;
+  readonly storeType: DeletionStoreType;
+  /**
+   * 删除 subject 并返回证据，或标记保留。
+   * @throws DeletionStoreError 删除失败（executor 标记 failed，可重试）
+   */
+  delete(params: DeletionStoreDeleteParams): Promise<DeletionStoreDeleteResult>;
 }
 
 // ─── Fail-closed 默认实现 ──────────────────────────────────
@@ -75,46 +75,46 @@ export interface DeletionStoreAdapter {
  * 生产环境必须替换为真实 Adapter；否则删除请求所有 step 失败（不冒充成功）。
  */
 export class FailClosedDeletionStoreAdapter implements DeletionStoreAdapter {
- constructor(readonly storeType: DeletionStoreType) {}
+  constructor(readonly storeType: DeletionStoreType) {}
 
- async delete(params: DeletionStoreDeleteParams): Promise<DeletionStoreDeleteResult> {
- throw new DeletionStoreError(
- `${this.storeType} 存储未配置删除 Adapter（fail-closed）：${params.subjectType}:${params.subjectRef}`,
- true,
- );
- }
+  async delete(params: DeletionStoreDeleteParams): Promise<DeletionStoreDeleteResult> {
+    throw new DeletionStoreError(
+      `${this.storeType} 存储未配置删除 Adapter（fail-closed）：${params.subjectType}:${params.subjectRef}`,
+      true,
+    );
+  }
 }
 
 // ─── 测试用 Recording Adapter ──────────────────────────────
 
 /** 单个 subjectRef 的预期行为。 */
 export interface RecordingStepBehavior {
- /** "success"：返回 evidence；"fail"：抛 DeletionStoreError；"retain"：返回 retained。 */
- kind: "success" | "fail" | "retain";
- /** fail 时的错误消息。 */
- failMessage?: string;
- /** fail 时是否可重试（默认 true）。 */
- retryable?: boolean;
- /** retain 时的保留原因。 */
- retainReason?: string;
+  /** "success"：返回 evidence；"fail"：抛 DeletionStoreError；"retain"：返回 retained。 */
+  kind: "success" | "fail" | "retain";
+  /** fail 时的错误消息。 */
+  failMessage?: string;
+  /** fail 时是否可重试（默认 true）。 */
+  retryable?: boolean;
+  /** retain 时的保留原因。 */
+  retainReason?: string;
 }
 
 /** Recording Adapter 的配置：按 subjectRef（精确或前缀）匹配行为。 */
 export interface RecordingAdapterConfig {
- /** 默认行为（未匹配到 subjectRef 时）；默认 "success"。 */
- defaultBehavior?: RecordingStepBehavior["kind"];
- /** defaultBehavior 为 "fail" 时的默认错误消息。 */
- defaultFailMessage?: string;
- /** defaultBehavior 为 "fail" 时的默认可重试性（默认 true）。 */
- defaultRetryable?: boolean;
- /** defaultBehavior 为 "retain" 时的默认保留原因。 */
- defaultRetainReason?: string;
- /** 按 subjectRef 精确匹配的行为。 */
- exact?: Record<string, RecordingStepBehavior>;
- /** 按前缀匹配的行为（如 "artifact:" 全部保留）。 */
- prefixes?: Array<{ prefix: string; behavior: RecordingStepBehavior }>;
- /** 调用计数到指定次数后才失败（用于验证重试：第 N 次成功）。 */
- succeedOnAttempt?: Record<string, number>;
+  /** 默认行为（未匹配到 subjectRef 时）；默认 "success"。 */
+  defaultBehavior?: RecordingStepBehavior["kind"];
+  /** defaultBehavior 为 "fail" 时的默认错误消息。 */
+  defaultFailMessage?: string;
+  /** defaultBehavior 为 "fail" 时的默认可重试性（默认 true）。 */
+  defaultRetryable?: boolean;
+  /** defaultBehavior 为 "retain" 时的默认保留原因。 */
+  defaultRetainReason?: string;
+  /** 按 subjectRef 精确匹配的行为。 */
+  exact?: Record<string, RecordingStepBehavior>;
+  /** 按前缀匹配的行为（如 "artifact:" 全部保留）。 */
+  prefixes?: Array<{ prefix: string; behavior: RecordingStepBehavior }>;
+  /** 调用计数到指定次数后才失败（用于验证重试：第 N 次成功）。 */
+  succeedOnAttempt?: Record<string, number>;
 }
 
 /**
@@ -124,88 +124,88 @@ export interface RecordingAdapterConfig {
  * - succeedOnAttempt：某 subjectRef 第 N 次调用才成功（前几次失败），用于验证重试。
  */
 export class RecordingDeletionStoreAdapter implements DeletionStoreAdapter {
- readonly storeType: DeletionStoreType;
- private readonly config: RecordingAdapterConfig;
- private readonly callCounts = new Map<string, number>();
+  readonly storeType: DeletionStoreType;
+  private readonly config: RecordingAdapterConfig;
+  private readonly callCounts = new Map<string, number>();
 
- constructor(storeType: DeletionStoreType, config: RecordingAdapterConfig = {}) {
- this.storeType = storeType;
- this.config = config;
- }
+  constructor(storeType: DeletionStoreType, config: RecordingAdapterConfig = {}) {
+    this.storeType = storeType;
+    this.config = config;
+  }
 
- /** 查询某 subjectRef 的调用次数（验证重试与幂等）。 */
- getCallCount(subjectRef: string): number {
- return this.callCounts.get(subjectRef) ?? 0;
- }
+  /** 查询某 subjectRef 的调用次数（验证重试与幂等）。 */
+  getCallCount(subjectRef: string): number {
+    return this.callCounts.get(subjectRef) ?? 0;
+  }
 
- /** 总调用次数。 */
- getTotalCallCount(): number {
- let total = 0;
- for (const count of this.callCounts.values()) total += count;
- return total;
- }
+  /** 总调用次数。 */
+  getTotalCallCount(): number {
+    let total = 0;
+    for (const count of this.callCounts.values()) total += count;
+    return total;
+  }
 
- async delete(params: DeletionStoreDeleteParams): Promise<DeletionStoreDeleteResult> {
- const count = (this.callCounts.get(params.subjectRef) ?? 0) + 1;
- this.callCounts.set(params.subjectRef, count);
+  async delete(params: DeletionStoreDeleteParams): Promise<DeletionStoreDeleteResult> {
+    const count = (this.callCounts.get(params.subjectRef) ?? 0) + 1;
+    this.callCounts.set(params.subjectRef, count);
 
- // succeedOnAttempt：达到指定次数才成功
- const targetAttempt = this.config.succeedOnAttempt?.[params.subjectRef];
- if (targetAttempt !== undefined && count < targetAttempt) {
- throw new DeletionStoreError(
- `${this.storeType} 模拟失败（第 ${count}/${targetAttempt} 次）：${params.subjectRef}`,
- true,
- );
- }
+    // succeedOnAttempt：达到指定次数才成功
+    const targetAttempt = this.config.succeedOnAttempt?.[params.subjectRef];
+    if (targetAttempt !== undefined && count < targetAttempt) {
+      throw new DeletionStoreError(
+        `${this.storeType} 模拟失败（第 ${count}/${targetAttempt} 次）：${params.subjectRef}`,
+        true,
+      );
+    }
 
- const behavior = this.resolveBehavior(params.subjectRef);
- if (behavior.kind === "fail") {
- throw new DeletionStoreError(
- behavior.failMessage ?? `${this.storeType} 模拟失败：${params.subjectRef}`,
- behavior.retryable ?? true,
- );
- }
- if (behavior.kind === "retain") {
- return {
- evidenceRef: `deletion-evidence:${this.storeType}:retained:${shortHash(params.subjectRef)}`,
- retained: true,
- retainReason: behavior.retainReason ?? "共享资源保留",
- };
- }
- return {
- evidenceRef: `deletion-evidence:${this.storeType}:${shortHash(params.subjectRef)}:${count}`,
- };
- }
+    const behavior = this.resolveBehavior(params.subjectRef);
+    if (behavior.kind === "fail") {
+      throw new DeletionStoreError(
+        behavior.failMessage ?? `${this.storeType} 模拟失败：${params.subjectRef}`,
+        behavior.retryable ?? true,
+      );
+    }
+    if (behavior.kind === "retain") {
+      return {
+        evidenceRef: `deletion-evidence:${this.storeType}:retained:${shortHash(params.subjectRef)}`,
+        retained: true,
+        retainReason: behavior.retainReason ?? "共享资源保留",
+      };
+    }
+    return {
+      evidenceRef: `deletion-evidence:${this.storeType}:${shortHash(params.subjectRef)}:${count}`,
+    };
+  }
 
- private resolveBehavior(subjectRef: string): RecordingStepBehavior {
- const exact = this.config.exact?.[subjectRef];
- if (exact) return exact;
- if (this.config.prefixes) {
- for (const p of this.config.prefixes) {
- if (subjectRef.startsWith(p.prefix)) return p.behavior;
- }
- }
- const kind = this.config.defaultBehavior ?? "success";
- if (kind === "fail") {
- return {
- kind,
- failMessage: this.config.defaultFailMessage,
- retryable: this.config.defaultRetryable,
- };
- }
- if (kind === "retain") {
- return {
- kind,
- retainReason: this.config.defaultRetainReason,
- };
- }
- return { kind };
- }
+  private resolveBehavior(subjectRef: string): RecordingStepBehavior {
+    const exact = this.config.exact?.[subjectRef];
+    if (exact) return exact;
+    if (this.config.prefixes) {
+      for (const p of this.config.prefixes) {
+        if (subjectRef.startsWith(p.prefix)) return p.behavior;
+      }
+    }
+    const kind = this.config.defaultBehavior ?? "success";
+    if (kind === "fail") {
+      return {
+        kind,
+        failMessage: this.config.defaultFailMessage,
+        retryable: this.config.defaultRetryable,
+      };
+    }
+    if (kind === "retain") {
+      return {
+        kind,
+        retainReason: this.config.defaultRetainReason,
+      };
+    }
+    return { kind };
+  }
 }
 
 // ─── 工具 ──────────────────────────────────────────────────
 
 /** 计算短 hash（用于 evidenceRef，避免泄露完整 subjectRef）。 */
 function shortHash(input: string): string {
- return createHash("sha256").update(input, "utf-8").digest("hex").slice(0, 12);
+  return createHash("sha256").update(input, "utf-8").digest("hex").slice(0, 12);
 }

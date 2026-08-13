@@ -17,13 +17,13 @@ import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/r
  */
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 identity.test.ts 一致）。

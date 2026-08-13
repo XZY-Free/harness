@@ -25,50 +25,50 @@ export type SkillSelectionSource = "resolver" | "resume" | "system_policy";
 
 /** 本轮实际选中的 SkillVersion（方案 §五.3）。 */
 export interface SelectedSkillVersion {
- skillId: string;
- skillVersionId: string;
- role: SkillRole;
- source: SkillSelectionSource;
- /** 简短解释，供审计和 Studio 展示。 */
- reason: string;
- /** 版本内容 hash，便于版本可追溯。 */
- contentHash: string | null;
+  skillId: string;
+  skillVersionId: string;
+  role: SkillRole;
+  source: SkillSelectionSource;
+  /** 简短解释，供审计和 Studio 展示。 */
+  reason: string;
+  /** 版本内容 hash，便于版本可追溯。 */
+  contentHash: string | null;
 }
 
 /** Resolver 输出（方案 §五.3）。 */
 export interface SkillResolverOutput {
- /** 本轮实际使用的 SkillVersion，允许空数组（基础 agent）。 */
- selectedSkillVersions: SelectedSkillVersion[];
- /** 本轮决策的整体理由。 */
- decisionReason: string;
- /** 用户选了但本轮未采用的 skillId（如已下线、权限外）。 */
- ignoredUiSelectedSkillIds: string[];
+  /** 本轮实际使用的 SkillVersion，允许空数组（基础 agent）。 */
+  selectedSkillVersions: SelectedSkillVersion[];
+  /** 本轮决策的整体理由。 */
+  decisionReason: string;
+  /** 用户选了但本轮未采用的 skillId（如已下线、权限外）。 */
+  ignoredUiSelectedSkillIds: string[];
 }
 
 /** 本轮用户消息摘要（文本 + 附件文件名）。 */
 export interface UserMessageInput {
- text: string;
- attachmentFilenames?: string[];
+  text: string;
+  attachmentFilenames?: string[];
 }
 
 /** Resolver 输入（方案 §五.2）。 */
 export interface SkillResolverInput {
- threadId: string;
- runId: string;
- /** 本轮用户消息文本和附件摘要。 */
- userMessage: UserMessageInput;
- /** UI 当前选择，允许空数组、单选、多选。 */
- uiSelectedSkillIds: string[];
- /** 企业 Skill 平台 / 本地 Provider 返回的可用 Skill 摘要（唯一候选集合）。 */
- availableSkills: SkillSummary[];
- /** 恢复未完成 run 时传入，用于沿用原 SkillVersion。 */
- resumeFromRunId?: string;
- /**
- * 调用方从原 run 加载的 `ThreadRunSkill` 选择（resume 路径）。
- * Resolver 保持纯函数：不在内部读 DB，由 chat route 在阶段 3 加载后传入。
- * 仅当 `resumeFromRunId` 存在时生效。
- */
- resumedSkillVersions?: SelectedSkillVersion[];
+  threadId: string;
+  runId: string;
+  /** 本轮用户消息文本和附件摘要。 */
+  userMessage: UserMessageInput;
+  /** UI 当前选择，允许空数组、单选、多选。 */
+  uiSelectedSkillIds: string[];
+  /** 企业 Skill 平台 / 本地 Provider 返回的可用 Skill 摘要（唯一候选集合）。 */
+  availableSkills: SkillSummary[];
+  /** 恢复未完成 run 时传入，用于沿用原 SkillVersion。 */
+  resumeFromRunId?: string;
+  /**
+   * 调用方从原 run 加载的 `ThreadRunSkill` 选择（resume 路径）。
+   * Resolver 保持纯函数：不在内部读 DB，由 chat route 在阶段 3 加载后传入。
+   * 仅当 `resumeFromRunId` 存在时生效。
+   */
+  resumedSkillVersions?: SelectedSkillVersion[];
 }
 
 /**
@@ -82,92 +82,92 @@ export interface SkillResolverInput {
  * 4. **无匹配**：返回空数组 → 基础 agent（不回退默认 skill）。
  */
 export function resolveSkillForRun(input: SkillResolverInput): SkillResolverOutput {
- // 1. resume：沿用原 run 的 SkillVersion
- if (input.resumeFromRunId) {
- const resumed = input.resumedSkillVersions ?? [];
- if (resumed.length > 0) {
- return {
- selectedSkillVersions: resumed.map((v) => ({ ...v, source: "resume" })),
- decisionReason: `resume_from_run:${input.resumeFromRunId}（沿用原 SkillVersion）`,
- // resume 时忽略本轮 UI 选择：恢复必须沿用原版本，不重新决策
- ignoredUiSelectedSkillIds: input.uiSelectedSkillIds,
- };
- }
- return {
- selectedSkillVersions: [],
- decisionReason: `resume_from_run:${input.resumeFromRunId}（原 run 无 Skill，基础 agent）`,
- ignoredUiSelectedSkillIds: input.uiSelectedSkillIds,
- };
- }
+  // 1. resume：沿用原 run 的 SkillVersion
+  if (input.resumeFromRunId) {
+    const resumed = input.resumedSkillVersions ?? [];
+    if (resumed.length > 0) {
+      return {
+        selectedSkillVersions: resumed.map((v) => ({ ...v, source: "resume" })),
+        decisionReason: `resume_from_run:${input.resumeFromRunId}（沿用原 SkillVersion）`,
+        // resume 时忽略本轮 UI 选择：恢复必须沿用原版本，不重新决策
+        ignoredUiSelectedSkillIds: input.uiSelectedSkillIds,
+      };
+    }
+    return {
+      selectedSkillVersions: [],
+      decisionReason: `resume_from_run:${input.resumeFromRunId}（原 run 无 Skill，基础 agent）`,
+      ignoredUiSelectedSkillIds: input.uiSelectedSkillIds,
+    };
+  }
 
- const ignoredFromUi: string[] = [];
+  const ignoredFromUi: string[] = [];
 
- // 2. UI 选择：本轮用户显式选择，作为强信号
- if (input.uiSelectedSkillIds.length > 0) {
- const selected: SelectedSkillVersion[] = [];
- for (const id of input.uiSelectedSkillIds) {
- const sum = input.availableSkills.find((s) => s.skillId === id);
- if (!sum) {
- // 已下线 / 权限外 / 不在候选集 → 忽略
- ignoredFromUi.push(id);
- continue;
- }
- selected.push({
- skillId: sum.skillId,
- skillVersionId: sum.skillVersionId,
- role: "primary",
- source: "resolver",
- reason: "ui_selected",
- contentHash: sum.contentHash,
- });
- }
- if (selected.length > 0) {
- return {
- selectedSkillVersions: selected,
- decisionReason: `ui_selected（采纳 ${selected.length}，忽略 ${ignoredFromUi.length}）`,
- ignoredUiSelectedSkillIds: ignoredFromUi,
- };
- }
- // UI 选择全部失效 → 降级到自动匹配（ignoredFromUi 已记录，继续向下）
- }
+  // 2. UI 选择：本轮用户显式选择，作为强信号
+  if (input.uiSelectedSkillIds.length > 0) {
+    const selected: SelectedSkillVersion[] = [];
+    for (const id of input.uiSelectedSkillIds) {
+      const sum = input.availableSkills.find((s) => s.skillId === id);
+      if (!sum) {
+        // 已下线 / 权限外 / 不在候选集 → 忽略
+        ignoredFromUi.push(id);
+        continue;
+      }
+      selected.push({
+        skillId: sum.skillId,
+        skillVersionId: sum.skillVersionId,
+        role: "primary",
+        source: "resolver",
+        reason: "ui_selected",
+        contentHash: sum.contentHash,
+      });
+    }
+    if (selected.length > 0) {
+      return {
+        selectedSkillVersions: selected,
+        decisionReason: `ui_selected（采纳 ${selected.length}，忽略 ${ignoredFromUi.length}）`,
+        ignoredUiSelectedSkillIds: ignoredFromUi,
+      };
+    }
+    // UI 选择全部失效 → 降级到自动匹配（ignoredFromUi 已记录，继续向下）
+  }
 
- // 3. 自动匹配：对 modelInvocable=true 的 skill 做关键词匹配
- const matchableSummaries = input.availableSkills.filter((s) => s.modelInvocable);
- const candidates: MatchableSkill[] = matchableSummaries.map((s) => ({
- id: s.skillId,
- name: s.name,
- // whenToUse 是“使用条件”，更适合匹配；缺失时回退 description
- keywordSource: s.whenToUse || s.description,
- }));
- const matchText = buildMatchText({
- text: input.userMessage.text,
- attachmentFilenames: input.userMessage.attachmentFilenames,
- });
- const matched = pickBestSkill(matchText, candidates);
- if (matched) {
- const sum = matchableSummaries.find((s) => s.skillId === matched.id);
- if (sum) {
- return {
- selectedSkillVersions: [
- {
- skillId: sum.skillId,
- skillVersionId: sum.skillVersionId,
- role: "primary",
- source: "resolver",
- reason: "keyword_matched",
- contentHash: sum.contentHash,
- },
- ],
- decisionReason: `keyword_matched:${sum.name}`,
- ignoredUiSelectedSkillIds: ignoredFromUi,
- };
- }
- }
+  // 3. 自动匹配：对 modelInvocable=true 的 skill 做关键词匹配
+  const matchableSummaries = input.availableSkills.filter((s) => s.modelInvocable);
+  const candidates: MatchableSkill[] = matchableSummaries.map((s) => ({
+    id: s.skillId,
+    name: s.name,
+    // whenToUse 是“使用条件”，更适合匹配；缺失时回退 description
+    keywordSource: s.whenToUse || s.description,
+  }));
+  const matchText = buildMatchText({
+    text: input.userMessage.text,
+    attachmentFilenames: input.userMessage.attachmentFilenames,
+  });
+  const matched = pickBestSkill(matchText, candidates);
+  if (matched) {
+    const sum = matchableSummaries.find((s) => s.skillId === matched.id);
+    if (sum) {
+      return {
+        selectedSkillVersions: [
+          {
+            skillId: sum.skillId,
+            skillVersionId: sum.skillVersionId,
+            role: "primary",
+            source: "resolver",
+            reason: "keyword_matched",
+            contentHash: sum.contentHash,
+          },
+        ],
+        decisionReason: `keyword_matched:${sum.name}`,
+        ignoredUiSelectedSkillIds: ignoredFromUi,
+      };
+    }
+  }
 
- // 4. 无匹配：基础 agent（不回退默认 skill）
- return {
- selectedSkillVersions: [],
- decisionReason: "no_skill_matched（基础 agent）",
- ignoredUiSelectedSkillIds: ignoredFromUi,
- };
+  // 4. 无匹配：基础 agent（不回退默认 skill）
+  return {
+    selectedSkillVersions: [],
+    decisionReason: "no_skill_matched（基础 agent）",
+    ignoredUiSelectedSkillIds: ignoredFromUi,
+  };
 }

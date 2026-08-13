@@ -23,8 +23,8 @@ import { useThreadDraft } from "@/components/hooks/use-thread-draft";
 import { useThreadInput } from "@/components/hooks/use-thread-input";
 import { useTurnControls } from "@/components/hooks/use-turn-controls";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import type { ClientPendingInput, ClientThread, ClientTurn } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 import { Loader2, Send, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {

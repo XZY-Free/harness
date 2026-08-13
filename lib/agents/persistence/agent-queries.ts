@@ -21,76 +21,76 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
- type AgentLifecycleState,
- type AgentRow,
- agentTable,
+  type AgentLifecycleState,
+  type AgentRow,
+  agentTable,
 } from "@/lib/persistence/schema/agents";
 import { and, eq, isNull } from "drizzle-orm";
 
 /** 创建稳定 Agent 身份。 */
 export async function createAgent(params: {
- tenantId: string;
- agentKey: string;
- displayName: string;
- description?: string | null;
- ownerUserId: string;
- visibilityPolicyId?: string | null;
- lifecycleState?: AgentLifecycleState;
+  tenantId: string;
+  agentKey: string;
+  displayName: string;
+  description?: string | null;
+  ownerUserId: string;
+  visibilityPolicyId?: string | null;
+  lifecycleState?: AgentLifecycleState;
 }): Promise<AgentRow> {
- const id = randomUUID();
- await db.insert(agentTable).values({
- id,
- tenantId: params.tenantId,
- agentKey: params.agentKey,
- displayName: params.displayName,
- description: params.description ?? null,
- ownerUserId: params.ownerUserId,
- visibilityPolicyId: params.visibilityPolicyId ?? null,
- lifecycleState: params.lifecycleState ?? "draft",
- });
- const [row] = await db.select().from(agentTable).where(eq(agentTable.id, id)).limit(1);
- if (!row) {
- throw new Error(`createAgent: 行未找到（id=${id}）`);
- }
- return row;
+  const id = randomUUID();
+  await db.insert(agentTable).values({
+    id,
+    tenantId: params.tenantId,
+    agentKey: params.agentKey,
+    displayName: params.displayName,
+    description: params.description ?? null,
+    ownerUserId: params.ownerUserId,
+    visibilityPolicyId: params.visibilityPolicyId ?? null,
+    lifecycleState: params.lifecycleState ?? "draft",
+  });
+  const [row] = await db.select().from(agentTable).where(eq(agentTable.id, id)).limit(1);
+  if (!row) {
+    throw new Error(`createAgent: 行未找到（id=${id}）`);
+  }
+  return row;
 }
 
 /** 按 id 获取 Agent。不存在返回 null。 */
 export async function getAgentById(tenantId: string, agentId: string): Promise<AgentRow | null> {
- const [row] = await db
- .select()
- .from(agentTable)
- .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(agentTable)
+    .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 按 agentKey 获取 Agent。不存在返回 null。 */
 export async function getAgentByKey(tenantId: string, agentKey: string): Promise<AgentRow | null> {
- const [row] = await db
- .select()
- .from(agentTable)
- .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.agentKey, agentKey)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(agentTable)
+    .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.agentKey, agentKey)))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 列出租户内 Agent（含 lifecycle 过滤；不含软删）。 */
 export async function listAgents(
- tenantId: string,
- options?: { lifecycleState?: AgentLifecycleState; includeDeleted?: boolean },
+  tenantId: string,
+  options?: { lifecycleState?: AgentLifecycleState; includeDeleted?: boolean },
 ): Promise<AgentRow[]> {
- const conditions = [eq(agentTable.tenantId, tenantId)];
- if (options?.lifecycleState) {
- conditions.push(eq(agentTable.lifecycleState, options.lifecycleState));
- }
- if (!options?.includeDeleted) {
- conditions.push(isNull(agentTable.deletedAt));
- }
- return db
- .select()
- .from(agentTable)
- .where(and(...conditions));
+  const conditions = [eq(agentTable.tenantId, tenantId)];
+  if (options?.lifecycleState) {
+    conditions.push(eq(agentTable.lifecycleState, options.lifecycleState));
+  }
+  if (!options?.includeDeleted) {
+    conditions.push(isNull(agentTable.deletedAt));
+  }
+  return db
+    .select()
+    .from(agentTable)
+    .where(and(...conditions));
 }
 
 /**
@@ -102,42 +102,42 @@ export async function listAgents(
  * - 状态变更通过乐观锁：versionNo 不匹配返回 false。
  */
 export async function updateAgentLifecycle(
- tenantId: string,
- agentId: string,
- nextState: AgentLifecycleState,
- expectedVersionNo: number,
+  tenantId: string,
+  agentId: string,
+  nextState: AgentLifecycleState,
+  expectedVersionNo: number,
 ): Promise<AgentRow | null> {
- const current = await getAgentById(tenantId, agentId);
- if (!current) return null;
- if (current.lifecycleState === "retired") {
- throw new AgentLifecycleError(
- agentId,
- current.lifecycleState,
- nextState,
- "retired 是终态，不可再变更",
- );
- }
- if (current.versionNo !== expectedVersionNo) {
- return null; // 乐观锁冲突，调用方应返回 412
- }
+  const current = await getAgentById(tenantId, agentId);
+  if (!current) return null;
+  if (current.lifecycleState === "retired") {
+    throw new AgentLifecycleError(
+      agentId,
+      current.lifecycleState,
+      nextState,
+      "retired 是终态，不可再变更",
+    );
+  }
+  if (current.versionNo !== expectedVersionNo) {
+    return null; // 乐观锁冲突，调用方应返回 412
+  }
 
- const result = await db
- .update(agentTable)
- .set({
- lifecycleState: nextState,
- versionNo: current.versionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(agentTable.tenantId, tenantId),
- eq(agentTable.id, agentId),
- eq(agentTable.versionNo, expectedVersionNo),
- ),
- );
+  const result = await db
+    .update(agentTable)
+    .set({
+      lifecycleState: nextState,
+      versionNo: current.versionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentTable.tenantId, tenantId),
+        eq(agentTable.id, agentId),
+        eq(agentTable.versionNo, expectedVersionNo),
+      ),
+    );
 
- if (result[0].affectedRows === 0) return null;
- return getAgentById(tenantId, agentId);
+  if (result[0].affectedRows === 0) return null;
+  return getAgentById(tenantId, agentId);
 }
 
 /**
@@ -147,78 +147,78 @@ export async function updateAgentLifecycle(
  * 必须先校验 Revision 状态后调用本函数。
  */
 export async function setCurrentRevision(
- tenantId: string,
- agentId: string,
- revisionId: string | null,
- expectedVersionNo: number,
+  tenantId: string,
+  agentId: string,
+  revisionId: string | null,
+  expectedVersionNo: number,
 ): Promise<AgentRow | null> {
- const result = await db
- .update(agentTable)
- .set({
- currentRevisionId: revisionId,
- versionNo: expectedVersionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(agentTable.tenantId, tenantId),
- eq(agentTable.id, agentId),
- eq(agentTable.versionNo, expectedVersionNo),
- ),
- );
+  const result = await db
+    .update(agentTable)
+    .set({
+      currentRevisionId: revisionId,
+      versionNo: expectedVersionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentTable.tenantId, tenantId),
+        eq(agentTable.id, agentId),
+        eq(agentTable.versionNo, expectedVersionNo),
+      ),
+    );
 
- if (result[0].affectedRows === 0) return null;
- return getAgentById(tenantId, agentId);
+  if (result[0].affectedRows === 0) return null;
+  return getAgentById(tenantId, agentId);
 }
 
 /** 软删除 Agent（仅 draft/disabled 允许；enabled/retired 拒绝）。 */
 export async function softDeleteAgent(
- tenantId: string,
- agentId: string,
- expectedVersionNo: number,
+  tenantId: string,
+  agentId: string,
+  expectedVersionNo: number,
 ): Promise<boolean> {
- const current = await getAgentById(tenantId, agentId);
- if (!current) return false;
- if (current.lifecycleState === "enabled" || current.lifecycleState === "retired") {
- throw new AgentLifecycleError(
- agentId,
- current.lifecycleState,
- current.lifecycleState,
- `${current.lifecycleState} 状态不允许软删除，请先 disable`,
- );
- }
- if (current.versionNo !== expectedVersionNo) return false;
+  const current = await getAgentById(tenantId, agentId);
+  if (!current) return false;
+  if (current.lifecycleState === "enabled" || current.lifecycleState === "retired") {
+    throw new AgentLifecycleError(
+      agentId,
+      current.lifecycleState,
+      current.lifecycleState,
+      `${current.lifecycleState} 状态不允许软删除，请先 disable`,
+    );
+  }
+  if (current.versionNo !== expectedVersionNo) return false;
 
- const result = await db
- .update(agentTable)
- .set({
- deletedAt: new Date(),
- versionNo: expectedVersionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(agentTable.tenantId, tenantId),
- eq(agentTable.id, agentId),
- eq(agentTable.versionNo, expectedVersionNo),
- isNull(agentTable.deletedAt),
- ),
- );
+  const result = await db
+    .update(agentTable)
+    .set({
+      deletedAt: new Date(),
+      versionNo: expectedVersionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentTable.tenantId, tenantId),
+        eq(agentTable.id, agentId),
+        eq(agentTable.versionNo, expectedVersionNo),
+        isNull(agentTable.deletedAt),
+      ),
+    );
 
- return result[0].affectedRows > 0;
+  return result[0].affectedRows > 0;
 }
 
 /** Agent 生命周期错误。 */
 export class AgentLifecycleError extends Error {
- constructor(
- public readonly agentId: string,
- public readonly fromState: AgentLifecycleState,
- public readonly toState: AgentLifecycleState,
- message: string,
- ) {
- super(message);
- this.name = "AgentLifecycleError";
- }
+  constructor(
+    public readonly agentId: string,
+    public readonly fromState: AgentLifecycleState,
+    public readonly toState: AgentLifecycleState,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AgentLifecycleError";
+  }
 }
 
 /** Re-export 供外部统一从本模块引入类型。 */

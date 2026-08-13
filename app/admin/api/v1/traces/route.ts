@@ -1,4 +1,11 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
+import { listTracesByTenant } from "@/lib/observability/trace-queries";
 import {
   TRACE_CONTENT_MODES,
   TRACE_ROOT_TYPES,
@@ -7,13 +14,6 @@ import {
   type TraceRootType,
   type TraceState,
 } from "@/lib/persistence/schema/trace";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
-import { listTracesByTenant } from "@/lib/observability/trace-queries";
 /**
  * GET /admin/api/v1/traces — 列出租户内所有 Trace（S11-W05）。
  *

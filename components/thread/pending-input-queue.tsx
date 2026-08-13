@@ -40,8 +40,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
 import type { ClientPendingInput } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 import { ArrowDown, ArrowUp, CornerDownRight, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
@@ -64,8 +64,7 @@ function extractText(input: ClientPendingInput["input"]): string {
 }
 
 export function PendingInputQueue({ threadId, onSteer, parentBusy }: PendingInputQueueProps) {
-  const { pendingInputs, edit, remove, reorder, busy, error, refresh } =
-    usePendingInputs(threadId);
+  const { pendingInputs, edit, remove, reorder, busy, error, refresh } = usePendingInputs(threadId);
 
   // 编辑状态：pendingInputId → 编辑文本
   const [editingId, setEditingId] = useState<string | null>(null);

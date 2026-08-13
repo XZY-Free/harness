@@ -30,20 +30,20 @@ import type { EnvironmentLease } from "@/lib/persistence/schema/environment";
 
 /** Runtime 身份链验证错误（route 层应映射为 401 AUTHENTICATION_REQUIRED）。 */
 export class RuntimeIdentityChainError extends Error {
- constructor(
- public readonly code:
- | "lease_not_active"
- | "lease_expired"
- | "lease_tenant_mismatch"
- | "lease_invocation_mismatch"
- | "lease_runtime_revision_mismatch"
- | "lease_capabilities_missing"
- | "lease_heartbeat_stale",
- message: string,
- ) {
- super(message);
- this.name = "RuntimeIdentityChainError";
- }
+  constructor(
+    public readonly code:
+      | "lease_not_active"
+      | "lease_expired"
+      | "lease_tenant_mismatch"
+      | "lease_invocation_mismatch"
+      | "lease_runtime_revision_mismatch"
+      | "lease_capabilities_missing"
+      | "lease_heartbeat_stale",
+    message: string,
+  ) {
+    super(message);
+    this.name = "RuntimeIdentityChainError";
+  }
 }
 
 // ─── 类型定义 ──────────────────────────────────────────────
@@ -62,31 +62,31 @@ const ACTIVE_LEASE_STATE = "active";
  * @throws RuntimeIdentityChainError lease_not_active / lease_expired / lease_heartbeat_stale
  */
 export function assertRuntimeLeaseActive(lease: EnvironmentLease, now: Date = new Date()): void {
- if (lease.leaseState !== ACTIVE_LEASE_STATE) {
- throw new RuntimeIdentityChainError(
- "lease_not_active",
- `Lease 状态非 active（当前=${lease.leaseState}）`,
- );
- }
+  if (lease.leaseState !== ACTIVE_LEASE_STATE) {
+    throw new RuntimeIdentityChainError(
+      "lease_not_active",
+      `Lease 状态非 active（当前=${lease.leaseState}）`,
+    );
+  }
 
- // 过期校验：expiresAt 已设置且已过
- if (lease.expiresAt && lease.expiresAt.getTime() < now.getTime()) {
- throw new RuntimeIdentityChainError(
- "lease_expired",
- `Lease 已过期（expiresAt=${lease.expiresAt.toISOString()}）`,
- );
- }
+  // 过期校验：expiresAt 已设置且已过
+  if (lease.expiresAt && lease.expiresAt.getTime() < now.getTime()) {
+    throw new RuntimeIdentityChainError(
+      "lease_expired",
+      `Lease 已过期（expiresAt=${lease.expiresAt.toISOString()}）`,
+    );
+  }
 
- // 心跳校验：lastHeartbeatAt 已设置且超时
- if (lease.lastHeartbeatAt) {
- const age = now.getTime() - lease.lastHeartbeatAt.getTime();
- if (age > LEASE_HEARTBEAT_TIMEOUT_MS) {
- throw new RuntimeIdentityChainError(
- "lease_heartbeat_stale",
- `Lease 心跳超时（age=${age}ms, timeout=${LEASE_HEARTBEAT_TIMEOUT_MS}ms）`,
- );
- }
- }
+  // 心跳校验：lastHeartbeatAt 已设置且超时
+  if (lease.lastHeartbeatAt) {
+    const age = now.getTime() - lease.lastHeartbeatAt.getTime();
+    if (age > LEASE_HEARTBEAT_TIMEOUT_MS) {
+      throw new RuntimeIdentityChainError(
+        "lease_heartbeat_stale",
+        `Lease 心跳超时（age=${age}ms, timeout=${LEASE_HEARTBEAT_TIMEOUT_MS}ms）`,
+      );
+    }
+  }
 }
 
 /**
@@ -95,15 +95,15 @@ export function assertRuntimeLeaseActive(lease: EnvironmentLease, now: Date = ne
  * @throws RuntimeIdentityChainError lease_invocation_mismatch
  */
 export function assertRuntimeLeaseBoundToInvocation(
- lease: EnvironmentLease,
- invocationId: string,
+  lease: EnvironmentLease,
+  invocationId: string,
 ): void {
- if (lease.invocationId !== invocationId) {
- throw new RuntimeIdentityChainError(
- "lease_invocation_mismatch",
- `Lease invocationId=${lease.invocationId} 与请求=${invocationId} 不匹配`,
- );
- }
+  if (lease.invocationId !== invocationId) {
+    throw new RuntimeIdentityChainError(
+      "lease_invocation_mismatch",
+      `Lease invocationId=${lease.invocationId} 与请求=${invocationId} 不匹配`,
+    );
+  }
 }
 
 /**
@@ -112,12 +112,12 @@ export function assertRuntimeLeaseBoundToInvocation(
  * @throws RuntimeIdentityChainError lease_tenant_mismatch
  */
 export function assertRuntimeLeaseBoundToTenant(lease: EnvironmentLease, tenantId: string): void {
- if (lease.tenantId !== tenantId) {
- throw new RuntimeIdentityChainError(
- "lease_tenant_mismatch",
- "Lease tenantId 与 Token tenantId 不匹配（跨租户拒绝）",
- );
- }
+  if (lease.tenantId !== tenantId) {
+    throw new RuntimeIdentityChainError(
+      "lease_tenant_mismatch",
+      "Lease tenantId 与 Token tenantId 不匹配（跨租户拒绝）",
+    );
+  }
 }
 
 /**
@@ -129,31 +129,31 @@ export function assertRuntimeLeaseBoundToTenant(lease: EnvironmentLease, tenantI
  * @throws RuntimeIdentityChainError lease_capabilities_missing / lease_runtime_revision_mismatch
  */
 export function assertRuntimeLeaseBoundToRuntimeRevision(
- lease: EnvironmentLease,
- runtimeRevisionId: string,
+  lease: EnvironmentLease,
+  runtimeRevisionId: string,
 ): void {
- if (!lease.capabilitiesJson) {
- throw new RuntimeIdentityChainError(
- "lease_capabilities_missing",
- "Lease capabilitiesJson 缺失（Runtime 未探测能力）",
- );
- }
+  if (!lease.capabilitiesJson) {
+    throw new RuntimeIdentityChainError(
+      "lease_capabilities_missing",
+      "Lease capabilitiesJson 缺失（Runtime 未探测能力）",
+    );
+  }
 
- const caps = lease.capabilitiesJson as Record<string, unknown>;
- const leaseRuntimeRevision = caps.runtime_revision_id;
- if (typeof leaseRuntimeRevision !== "string") {
- throw new RuntimeIdentityChainError(
- "lease_capabilities_missing",
- "Lease capabilitiesJson 缺失 runtime_revision_id 字段",
- );
- }
+  const caps = lease.capabilitiesJson as Record<string, unknown>;
+  const leaseRuntimeRevision = caps.runtime_revision_id;
+  if (typeof leaseRuntimeRevision !== "string") {
+    throw new RuntimeIdentityChainError(
+      "lease_capabilities_missing",
+      "Lease capabilitiesJson 缺失 runtime_revision_id 字段",
+    );
+  }
 
- if (leaseRuntimeRevision !== runtimeRevisionId) {
- throw new RuntimeIdentityChainError(
- "lease_runtime_revision_mismatch",
- `Lease runtime_revision_id=${leaseRuntimeRevision} 与 Token=${runtimeRevisionId} 不匹配`,
- );
- }
+  if (leaseRuntimeRevision !== runtimeRevisionId) {
+    throw new RuntimeIdentityChainError(
+      "lease_runtime_revision_mismatch",
+      `Lease runtime_revision_id=${leaseRuntimeRevision} 与 Token=${runtimeRevisionId} 不匹配`,
+    );
+  }
 }
 
 /**
@@ -168,22 +168,22 @@ export function assertRuntimeLeaseBoundToRuntimeRevision(
  * @throws RuntimeIdentityChainError 任一校验失败
  */
 export function verifyRuntimeIdentityChain(params: {
- claims: WorkloadTokenClaims;
- lease: EnvironmentLease;
- now?: Date;
+  claims: WorkloadTokenClaims;
+  lease: EnvironmentLease;
+  now?: Date;
 }): void {
- const { claims, lease } = params;
- const now = params.now ?? new Date();
+  const { claims, lease } = params;
+  const now = params.now ?? new Date();
 
- assertRuntimeLeaseBoundToTenant(lease, claims.tenantId);
- assertRuntimeLeaseBoundToInvocation(lease, claims.invocationId ?? "");
+  assertRuntimeLeaseBoundToTenant(lease, claims.tenantId);
+  assertRuntimeLeaseBoundToInvocation(lease, claims.invocationId ?? "");
 
- // runtime Token 必须校验 runtimeRevisionId
- if (claims.type === "runtime" && claims.runtimeRevisionId) {
- assertRuntimeLeaseBoundToRuntimeRevision(lease, claims.runtimeRevisionId);
- }
+  // runtime Token 必须校验 runtimeRevisionId
+  if (claims.type === "runtime" && claims.runtimeRevisionId) {
+    assertRuntimeLeaseBoundToRuntimeRevision(lease, claims.runtimeRevisionId);
+  }
 
- assertRuntimeLeaseActive(lease, now);
+  assertRuntimeLeaseActive(lease, now);
 }
 
 /**
@@ -193,5 +193,5 @@ export function verifyRuntimeIdentityChain(params: {
  * - service Token：跳过（CI/CD Service Identity 不绑定 Invocation）。
  */
 export function requiresIdentityChainVerification(claims: WorkloadTokenClaims): boolean {
- return claims.type === "runtime" || claims.type === "gateway";
+  return claims.type === "runtime" || claims.type === "gateway";
 }

@@ -13,22 +13,22 @@
  * - 搜索/查询本身不写 CapabilityUse（与阶段 6 搜索语义一致；实际能力加载在 Tool Schema/Skill 内容读取时记账）。
  */
 import {
- type BudgetSelectionResult,
- type ContextBudgetConfig,
- DEFAULT_BUDGET_CONFIG,
- selectFragmentsByBudget,
+  type BudgetSelectionResult,
+  type ContextBudgetConfig,
+  DEFAULT_BUDGET_CONFIG,
+  selectFragmentsByBudget,
 } from "@/lib/context/budget";
 import type { ContextFragment, ExcludedFragment } from "@/lib/context/fragment";
 import {
- type ContextQueryContext,
- KnowledgeResolver,
- MemoryResolver,
- RecentItemsResolver,
- SkillResolver,
- type SourceQueryResult,
- type SourceResolver,
- type SourceResultStatus,
- WorkspaceMapResolver,
+  type ContextQueryContext,
+  KnowledgeResolver,
+  MemoryResolver,
+  RecentItemsResolver,
+  SkillResolver,
+  type SourceQueryResult,
+  type SourceResolver,
+  type SourceResultStatus,
+  WorkspaceMapResolver,
 } from "@/lib/context/source-resolvers";
 
 // ─── ContextView ───────────────────────────────────────────
@@ -43,15 +43,15 @@ import {
  * - failureReason：关键内容无法容纳时的失败原因（非空应显式失败或切换模型）。
  */
 export interface ContextView {
- fragments: ContextFragment[];
- excluded: ExcludedFragment[];
- sourceStatus: Record<string, SourceResultStatus>;
- tokenAccounting: {
- inputTokens: number;
- availableInputBudget: number;
- modelOutputReserve: number;
- };
- failureReason: string | null;
+  fragments: ContextFragment[];
+  excluded: ExcludedFragment[];
+  sourceStatus: Record<string, SourceResultStatus>;
+  tokenAccounting: {
+    inputTokens: number;
+    availableInputBudget: number;
+    modelOutputReserve: number;
+  };
+  failureReason: string | null;
 }
 
 // ─── 查询请求 ───────────────────────────────────────────────
@@ -64,9 +64,9 @@ export interface ContextView {
  * - budget：预算配置（默认 DEFAULT_BUDGET_CONFIG）。
  */
 export interface ContextQueryRequest {
- ctx: ContextQueryContext;
- resolvers: SourceResolver[];
- budget?: ContextBudgetConfig;
+  ctx: ContextQueryContext;
+  resolvers: SourceResolver[];
+  budget?: ContextBudgetConfig;
 }
 
 // ─── 编排器 ─────────────────────────────────────────────────
@@ -85,58 +85,58 @@ export interface ContextQueryRequest {
  * - failureReason 非空时调用方应显式失败或切换长上下文模型。
  */
 export async function assembleContextView(request: ContextQueryRequest): Promise<ContextView> {
- const { ctx, resolvers, budget = DEFAULT_BUDGET_CONFIG } = request;
+  const { ctx, resolvers, budget = DEFAULT_BUDGET_CONFIG } = request;
 
- // 1. 并发运行所有源解析器
- const results = await Promise.all(
- resolvers.map((r) =>
- r.resolve(ctx).catch((err): SourceQueryResult => {
- // 解析器抛错视为 unavailable（不伪装为 empty）
- return {
- sourceType: r.sourceType,
- status: "unavailable",
- fragments: [],
- reasonCode: "resolver_error",
- detail: err instanceof Error ? err.message : String(err),
- };
- }),
- ),
- );
+  // 1. 并发运行所有源解析器
+  const results = await Promise.all(
+    resolvers.map((r) =>
+      r.resolve(ctx).catch((err): SourceQueryResult => {
+        // 解析器抛错视为 unavailable（不伪装为 empty）
+        return {
+          sourceType: r.sourceType,
+          status: "unavailable",
+          fragments: [],
+          reasonCode: "resolver_error",
+          detail: err instanceof Error ? err.message : String(err),
+        };
+      }),
+    ),
+  );
 
- // 2. 汇总各源状态 + 收集 Fragment
- const sourceStatus: Record<string, SourceResultStatus> = {};
- const allFragments: ContextFragment[] = [];
- const statusPriority: Record<SourceResultStatus, number> = {
- empty: 0,
- ok: 1,
- unavailable: 2,
- denied: 3,
- };
- for (const result of results) {
- const previous = sourceStatus[result.sourceType];
- if (!previous || statusPriority[result.status] > statusPriority[previous]) {
- sourceStatus[result.sourceType] = result.status;
- }
- if (result.status === "ok" && result.fragments.length > 0) {
- allFragments.push(...result.fragments);
- }
- }
+  // 2. 汇总各源状态 + 收集 Fragment
+  const sourceStatus: Record<string, SourceResultStatus> = {};
+  const allFragments: ContextFragment[] = [];
+  const statusPriority: Record<SourceResultStatus, number> = {
+    empty: 0,
+    ok: 1,
+    unavailable: 2,
+    denied: 3,
+  };
+  for (const result of results) {
+    const previous = sourceStatus[result.sourceType];
+    if (!previous || statusPriority[result.status] > statusPriority[previous]) {
+      sourceStatus[result.sourceType] = result.status;
+    }
+    if (result.status === "ok" && result.fragments.length > 0) {
+      allFragments.push(...result.fragments);
+    }
+  }
 
- // 3. 应用预算策略
- const selection: BudgetSelectionResult = selectFragmentsByBudget(allFragments, budget);
+  // 3. 应用预算策略
+  const selection: BudgetSelectionResult = selectFragmentsByBudget(allFragments, budget);
 
- // 4. 构造 ContextView
- return {
- fragments: selection.selected,
- excluded: selection.excluded,
- sourceStatus,
- tokenAccounting: {
- inputTokens: selection.totalInputTokens,
- availableInputBudget: selection.availableInputBudget,
- modelOutputReserve: budget.modelOutputReserve,
- },
- failureReason: selection.failureReason,
- };
+  // 4. 构造 ContextView
+  return {
+    fragments: selection.selected,
+    excluded: selection.excluded,
+    sourceStatus,
+    tokenAccounting: {
+      inputTokens: selection.totalInputTokens,
+      availableInputBudget: selection.availableInputBudget,
+      modelOutputReserve: budget.modelOutputReserve,
+    },
+    failureReason: selection.failureReason,
+  };
 }
 
 // ─── 默认解析器集合 ─────────────────────────────────────────
@@ -147,13 +147,13 @@ export async function assembleContextView(request: ContextQueryRequest): Promise
  * 调用方按 requested_sources 过滤；未请求的源不运行。
  */
 export function buildDefaultResolvers(options: {
- skillId?: string;
+  skillId?: string;
 }): SourceResolver[] {
- return [
- new RecentItemsResolver(),
- new SkillResolver(options.skillId ?? ""),
- new WorkspaceMapResolver(),
- new MemoryResolver(),
- new KnowledgeResolver(),
- ];
+  return [
+    new RecentItemsResolver(),
+    new SkillResolver(options.skillId ?? ""),
+    new WorkspaceMapResolver(),
+    new MemoryResolver(),
+    new KnowledgeResolver(),
+  ];
 }

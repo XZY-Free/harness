@@ -15,18 +15,18 @@ import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries
 import type { AgentRevision } from "@/lib/persistence/schema/agent";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type {
- RouteResolution,
- RouteResolutionAttribute,
- RouteResolutionOutcome,
+  RouteResolution,
+  RouteResolutionAttribute,
+  RouteResolutionOutcome,
 } from "@/lib/routes/domain/route-resolution-policy";
 
 // ─── 模型信息 ─────────────────────────────────────────────
 
 /** 从 AgentRevision.modelPolicyJson 提取的模型信息。 */
 export interface ModelInfo {
- modelProvider: string;
- modelId: string;
- modelRevisionRef: string | null;
+  modelProvider: string;
+  modelId: string;
+  modelRevisionRef: string | null;
 }
 
 const DEFAULT_MODEL_PROVIDER = "default";
@@ -38,56 +38,56 @@ const DEFAULT_MODEL_PROVIDER = "default";
  * 优先级：modelPolicyJson > threadDefaultModelRef > "default" 占位。
  */
 export function extractModelInfo(
- modelPolicyJson: unknown,
- threadDefaultModelRef: string | null,
+  modelPolicyJson: unknown,
+  threadDefaultModelRef: string | null,
 ): ModelInfo {
- const policy = (modelPolicyJson ?? {}) as Record<string, unknown>;
- const modelId =
- (typeof policy.default === "string" && policy.default) ||
- (typeof policy.modelId === "string" && policy.modelId) ||
- threadDefaultModelRef ||
- "default";
- const modelProvider =
- (typeof policy.provider === "string" && policy.provider) || DEFAULT_MODEL_PROVIDER;
- const modelRevisionRef =
- typeof policy.revision === "string"
- ? policy.revision
- : typeof policy.modelRevisionRef === "string"
- ? policy.modelRevisionRef
- : null;
- return { modelProvider, modelId, modelRevisionRef };
+  const policy = (modelPolicyJson ?? {}) as Record<string, unknown>;
+  const modelId =
+    (typeof policy.default === "string" && policy.default) ||
+    (typeof policy.modelId === "string" && policy.modelId) ||
+    threadDefaultModelRef ||
+    "default";
+  const modelProvider =
+    (typeof policy.provider === "string" && policy.provider) || DEFAULT_MODEL_PROVIDER;
+  const modelRevisionRef =
+    typeof policy.revision === "string"
+      ? policy.revision
+      : typeof policy.modelRevisionRef === "string"
+        ? policy.modelRevisionRef
+        : null;
+  return { modelProvider, modelId, modelRevisionRef };
 }
 
 // ─── ResolveExecutionPlan ──────────────────────────────────
 
 /** 解析成功的结果。 */
 export interface ResolvedExecutionPlan {
- resolved: true;
- /** 路由解析完整结果。 */
- routeResolution: RouteResolution;
- /** 路由解析原始 Outcome（含 candidateCount）。 */
- routeOutcome: RouteResolutionOutcome;
- /** 冻结的 AgentRevision。 */
- agentRevisionId: string;
- /** 冻结的 AgentRevision 完整对象（供 Runtime dispatch 使用）。 */
- agentRevision: AgentRevision;
- /** 冻结的 RuntimeRevisionId。 */
- runtimeRevisionId: string;
- /** 提取的模型信息。 */
- modelInfo: ModelInfo;
- /** : Projection 版本号。 */
- projectionVersionNo: number | undefined;
+  resolved: true;
+  /** 路由解析完整结果。 */
+  routeResolution: RouteResolution;
+  /** 路由解析原始 Outcome（含 candidateCount）。 */
+  routeOutcome: RouteResolutionOutcome;
+  /** 冻结的 AgentRevision。 */
+  agentRevisionId: string;
+  /** 冻结的 AgentRevision 完整对象（供 Runtime dispatch 使用）。 */
+  agentRevision: AgentRevision;
+  /** 冻结的 RuntimeRevisionId。 */
+  runtimeRevisionId: string;
+  /** 提取的模型信息。 */
+  modelInfo: ModelInfo;
+  /** : Projection 版本号。 */
+  projectionVersionNo: number | undefined;
 }
 
 /** 解析未成功的结果。 */
 export interface UnresolvedExecutionPlan {
- resolved: false;
- /** 未解析原因。 */
- reason:
- | "no_effective_route"
- | "ambiguous_route_configuration"
- | "invalid_traffic_weight_total"
- | "agent_revision_not_found";
+  resolved: false;
+  /** 未解析原因。 */
+  reason:
+    | "no_effective_route"
+    | "ambiguous_route_configuration"
+    | "invalid_traffic_weight_total"
+    | "agent_revision_not_found";
 }
 
 export type ExecutionPlan = ResolvedExecutionPlan | UnresolvedExecutionPlan;
@@ -95,15 +95,15 @@ export type ExecutionPlan = ResolvedExecutionPlan | UnresolvedExecutionPlan;
 // ─── 输入 ──────────────────────────────────────────────────
 
 export interface ResolveExecutionPlanInput {
- tenantId: string;
- agentId: string;
- routeScopeKey: string;
- businessKey: { threadId?: string; jobId?: string };
- attributes?: Record<string, RouteResolutionAttribute>;
- /** Thread 的 defaultModelRef（模型信息提取用）。 */
- threadDefaultModelRef?: string | null;
- /** 路由解析器（默认使用 统一入口）。 */
- routeResolver?: RouteResolver;
+  tenantId: string;
+  agentId: string;
+  routeScopeKey: string;
+  businessKey: { threadId?: string; jobId?: string };
+  attributes?: Record<string, RouteResolutionAttribute>;
+  /** Thread 的 defaultModelRef（模型信息提取用）。 */
+  threadDefaultModelRef?: string | null;
+  /** 路由解析器（默认使用 统一入口）。 */
+  routeResolver?: RouteResolver;
 }
 
 /**
@@ -113,50 +113,50 @@ export interface ResolveExecutionPlanInput {
  * Dispatcher 后续步骤直接使用返回结果，不再重复查询控制面。
  */
 export async function resolveExecutionPlan(
- input: ResolveExecutionPlanInput,
- defaultResolver: RouteResolver,
+  input: ResolveExecutionPlanInput,
+  defaultResolver: RouteResolver,
 ): Promise<ExecutionPlan> {
- // 1. 路由解析
- const routeOutcome = await (input.routeResolver ?? defaultResolver)({
- tenantId: input.tenantId,
- agentId: input.agentId,
- routeScopeKey: input.routeScopeKey,
- businessKey: input.businessKey,
- attributes: input.attributes ?? {},
- threadDefaultModelRef: input.threadDefaultModelRef,
- });
+  // 1. 路由解析
+  const routeOutcome = await (input.routeResolver ?? defaultResolver)({
+    tenantId: input.tenantId,
+    agentId: input.agentId,
+    routeScopeKey: input.routeScopeKey,
+    businessKey: input.businessKey,
+    attributes: input.attributes ?? {},
+    threadDefaultModelRef: input.threadDefaultModelRef,
+  });
 
- if (routeOutcome.status === "unresolved") {
- const reason =
- routeOutcome.reason === "ambiguous_route_configuration"
- ? "ambiguous_route_configuration"
- : routeOutcome.reason === "invalid_traffic_weight_total"
- ? "invalid_traffic_weight_total"
- : "no_effective_route";
- return { resolved: false, reason };
- }
+  if (routeOutcome.status === "unresolved") {
+    const reason =
+      routeOutcome.reason === "ambiguous_route_configuration"
+        ? "ambiguous_route_configuration"
+        : routeOutcome.reason === "invalid_traffic_weight_total"
+          ? "invalid_traffic_weight_total"
+          : "no_effective_route";
+    return { resolved: false, reason };
+  }
 
- const routeResolution = routeOutcome.resolution;
+  const routeResolution = routeOutcome.resolution;
 
- // 2. 读取 AgentRevision（提取模型信息）
- const agentRevision = await getRevisionById(routeResolution.agentRevisionId);
- if (!agentRevision) {
- return { resolved: false, reason: "agent_revision_not_found" };
- }
+  // 2. 读取 AgentRevision（提取模型信息）
+  const agentRevision = await getRevisionById(routeResolution.agentRevisionId);
+  if (!agentRevision) {
+    return { resolved: false, reason: "agent_revision_not_found" };
+  }
 
- const modelInfo = extractModelInfo(
- agentRevision.modelPolicyJson,
- input.threadDefaultModelRef ?? null,
- );
+  const modelInfo = extractModelInfo(
+    agentRevision.modelPolicyJson,
+    input.threadDefaultModelRef ?? null,
+  );
 
- return {
- resolved: true,
- routeResolution,
- routeOutcome,
- agentRevisionId: routeResolution.agentRevisionId,
- agentRevision,
- runtimeRevisionId: routeResolution.runtimeRevisionId,
- modelInfo,
- projectionVersionNo: routeResolution.projectionVersionNo,
- };
+  return {
+    resolved: true,
+    routeResolution,
+    routeOutcome,
+    agentRevisionId: routeResolution.agentRevisionId,
+    agentRevision,
+    runtimeRevisionId: routeResolution.runtimeRevisionId,
+    modelInfo,
+    projectionVersionNo: routeResolution.projectionVersionNo,
+  };
 }

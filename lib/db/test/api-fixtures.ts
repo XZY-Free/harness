@@ -1,10 +1,10 @@
 import type { db } from "@/lib/db/client";
 import {
- AUDIENCE_PREFIX,
- IDEMPOTENCY_KEY_HEADER,
- IF_MATCH_HEADER,
- REQUEST_ID_HEADER,
- generateRequestId,
+  AUDIENCE_PREFIX,
+  IDEMPOTENCY_KEY_HEADER,
+  IF_MATCH_HEADER,
+  REQUEST_ID_HEADER,
+  generateRequestId,
 } from "@/lib/http";
 import type { ApiAudience } from "@/lib/http";
 /**
@@ -30,22 +30,22 @@ export type { ApiAudience } from "@/lib/http";
 export { AUDIENCE_PREFIX } from "@/lib/http";
 
 export interface BuildApiRequestOptions {
- audience: ApiAudience;
- method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
- /** 路径，不含 audience 前缀，如 `/threads` 或 `/threads/{id}` 字面值。 */
- path: string;
- /** Bearer token；测试夹具用占位 token，真实身份由阶段 2 接入。 */
- token?: string;
- /** 显式 X-Request-ID；不传则平台生成。 */
- requestId?: string;
- /** 创建/命令 POST 的幂等键；POST 时建议必填。 */
- idempotencyKey?: string;
- /** 可编辑资源 PUT/PATCH 的 ETag 值（裸值，夹具自动加引号）。 */
- ifMatch?: string;
- /** 请求体；对象自动 JSON.stringify。 */
- body?: unknown;
- /** 额外头。 */
- headers?: Record<string, string>;
+  audience: ApiAudience;
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** 路径，不含 audience 前缀，如 `/threads` 或 `/threads/{id}` 字面值。 */
+  path: string;
+  /** Bearer token；测试夹具用占位 token，真实身份由阶段 2 接入。 */
+  token?: string;
+  /** 显式 X-Request-ID；不传则平台生成。 */
+  requestId?: string;
+  /** 创建/命令 POST 的幂等键；POST 时建议必填。 */
+  idempotencyKey?: string;
+  /** 可编辑资源 PUT/PATCH 的 ETag 值（裸值，夹具自动加引号）。 */
+  ifMatch?: string;
+  /** 请求体；对象自动 JSON.stringify。 */
+  body?: unknown;
+  /** 额外头。 */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -53,21 +53,21 @@ export interface BuildApiRequestOptions {
  * 不发起网络请求，仅构造对象，路由以 `handler(req)` 方式调用。
  */
 export function buildApiRequest(options: BuildApiRequestOptions): Request {
- const requestId = options.requestId ?? generateRequestId();
- const url = `https://snow.test${AUDIENCE_PREFIX[options.audience]}${options.path}`;
- const headers: Record<string, string> = {
- [REQUEST_ID_HEADER]: requestId,
- "content-type": "application/json",
- ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
- ...(options.idempotencyKey ? { [IDEMPOTENCY_KEY_HEADER]: options.idempotencyKey } : {}),
- ...(options.ifMatch ? { [IF_MATCH_HEADER]: `"${options.ifMatch}"` } : {}),
- ...(options.headers ?? {}),
- };
- const init: RequestInit = { method: options.method, headers };
- if (options.body !== undefined && options.method !== "GET" && options.method !== "DELETE") {
- init.body = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
- }
- return new Request(url, init);
+  const requestId = options.requestId ?? generateRequestId();
+  const url = `https://snow.test${AUDIENCE_PREFIX[options.audience]}${options.path}`;
+  const headers: Record<string, string> = {
+    [REQUEST_ID_HEADER]: requestId,
+    "content-type": "application/json",
+    ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+    ...(options.idempotencyKey ? { [IDEMPOTENCY_KEY_HEADER]: options.idempotencyKey } : {}),
+    ...(options.ifMatch ? { [IF_MATCH_HEADER]: `"${options.ifMatch}"` } : {}),
+    ...(options.headers ?? {}),
+  };
+  const init: RequestInit = { method: options.method, headers };
+  if (options.body !== undefined && options.method !== "GET" && options.method !== "DELETE") {
+    init.body = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
+  }
+  return new Request(url, init);
 }
 
 /**
@@ -75,26 +75,26 @@ export function buildApiRequest(options: BuildApiRequestOptions): Request {
  * 用 sentinel 强制回滚；fn 抛出的真实错误原样向上抛。
  */
 export async function withRollback<T>(db: DbClient, fn: (tx: TxClient) => Promise<T>): Promise<T> {
- const sentinel = Symbol("rollback");
- let result: T | undefined;
- let hasResult = false;
- try {
- await db.transaction(async (tx) => {
- result = await fn(tx);
- hasResult = true;
- throw sentinel;
- });
- } catch (err) {
- if (err === sentinel) {
- if (!hasResult) {
- throw new Error("withRollback: fn completed without result");
- }
- return result as T;
- }
- throw err;
- }
- // 不应到达：transaction 总是因 sentinel 回滚。
- throw new Error("withRollback: transaction unexpectedly committed");
+  const sentinel = Symbol("rollback");
+  let result: T | undefined;
+  let hasResult = false;
+  try {
+    await db.transaction(async (tx) => {
+      result = await fn(tx);
+      hasResult = true;
+      throw sentinel;
+    });
+  } catch (err) {
+    if (err === sentinel) {
+      if (!hasResult) {
+        throw new Error("withRollback: fn completed without result");
+      }
+      return result as T;
+    }
+    throw err;
+  }
+  // 不应到达：transaction 总是因 sentinel 回滚。
+  throw new Error("withRollback: transaction unexpectedly committed");
 }
 
 /**
@@ -102,13 +102,13 @@ export async function withRollback<T>(db: DbClient, fn: (tx: TxClient) => Promis
  * 阶段 2 引入 idempotency_record 后，路由实际执行该语义。
  */
 export async function assertIdempotencyConflict(
- response: Response,
- requestId: string,
+  response: Response,
+  requestId: string,
 ): Promise<void> {
- expect(response.status, "idempotency replay should be 409").toBe(409);
- const body = (await response.json()) as { error: { code: string; request_id: string } };
- expect(body.error.code).toBe("IDEMPOTENCY_CONFLICT");
- expect(body.error.request_id).toBe(requestId);
+  expect(response.status, "idempotency replay should be 409").toBe(409);
+  const body = (await response.json()) as { error: { code: string; request_id: string } };
+  expect(body.error.code).toBe("IDEMPOTENCY_CONFLICT");
+  expect(body.error.request_id).toBe(requestId);
 }
 
 /**
@@ -116,11 +116,11 @@ export async function assertIdempotencyConflict(
  * 阶段 2 引入 tenant 隔离后，路由实际执行该语义。
  */
 export async function assertCrossTenantHidden(
- response: Response,
- requestId: string,
+  response: Response,
+  requestId: string,
 ): Promise<void> {
- expect(response.status, "cross-tenant access should be hidden as 404").toBe(404);
- const body = (await response.json()) as { error: { code: string; request_id: string } };
- expect(body.error.code).toBe("RESOURCE_NOT_FOUND");
- expect(body.error.request_id).toBe(requestId);
+  expect(response.status, "cross-tenant access should be hidden as 404").toBe(404);
+  const body = (await response.json()) as { error: { code: string; request_id: string } };
+  expect(body.error.code).toBe("RESOURCE_NOT_FOUND");
+  expect(body.error.request_id).toBe(requestId);
 }

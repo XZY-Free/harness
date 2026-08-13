@@ -1,3 +1,13 @@
+import { buildCatalogRevisionEtag, parseCatalogRevisionEtag } from "@/lib/admin/route-helpers";
+import {
+  CatalogQueryError,
+  type CatalogSearchItem,
+  type ListCatalogOptionsResult,
+  type SearchCatalogResult,
+  listCatalogOptions,
+  searchCatalog,
+} from "@/lib/catalog/catalog-queries";
+import { getCurrentCatalogRevision } from "@/lib/catalog/projector";
 /**
  * GET /api/v1/catalog/options — Employee Catalog API（阶段 6 S06-C03）。
  *
@@ -26,16 +36,6 @@ import {
 import { API_ERROR_CODES } from "@/lib/error-codes";
 import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
 import type { CatalogResourceType } from "@/lib/persistence/schema/catalog";
-import { buildCatalogRevisionEtag, parseCatalogRevisionEtag } from "@/lib/admin/route-helpers";
-import {
-  CatalogQueryError,
-  type CatalogSearchItem,
-  type ListCatalogOptionsResult,
-  type SearchCatalogResult,
-  listCatalogOptions,
-  searchCatalog,
-} from "@/lib/catalog/catalog-queries";
-import { getCurrentCatalogRevision } from "@/lib/catalog/projector";
 
 export const dynamic = "force-dynamic";
 

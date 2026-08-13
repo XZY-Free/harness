@@ -1,5 +1,6 @@
 "use client";
 
+import { CmdkPanel } from "@/components/thread/command/cmdk-panel";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,7 +8,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CmdkPanel } from "@/components/thread/command/cmdk-panel";
 import type { Agent } from "@/lib/persistence/schema/agent";
 import type { Thread } from "@/lib/persistence/schema/conversation";
 import { cn } from "@/lib/utils";

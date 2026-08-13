@@ -1,3 +1,4 @@
+import { listMemoryEntriesByScope } from "@/lib/context/memory-queries";
 import {
   type Principal,
   employeeAuthErrorResponse,
@@ -31,7 +32,6 @@ import {
   type MemoryEntry,
   type MemoryScopeType,
 } from "@/lib/persistence/schema/memory";
-import { listMemoryEntriesByScope } from "@/lib/context/memory-queries";
 
 export const dynamic = "force-dynamic";
 

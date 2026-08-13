@@ -25,7 +25,6 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { threadItemTable } from "@/lib/persistence/schema/conversation";
 import { JobResultProjectionConflictError } from "@/lib/job/errors";
 import { completeJob } from "@/lib/job/job-control-queries";
 import { createJob, updateJobState } from "@/lib/job/job-queries";
@@ -34,6 +33,7 @@ import {
   getJobResultProjectionByJob,
   projectJobResultToThread,
 } from "@/lib/job/job-result-projection-queries";
+import { threadItemTable } from "@/lib/persistence/schema/conversation";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 

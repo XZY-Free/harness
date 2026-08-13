@@ -1,13 +1,13 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import { OBSERVATION_KINDS, type ObservationKind } from "@/lib/persistence/schema/trace";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import { listObservationsByTrace } from "@/lib/observability/observation-queries";
 import { getTraceById } from "@/lib/observability/trace-queries";
+import { OBSERVATION_KINDS, type ObservationKind } from "@/lib/persistence/schema/trace";
 /**
  * GET /admin/api/v1/traces/{trace_id}/observations — 列出 Trace 下所有 Observation（S11-W05）。
  *

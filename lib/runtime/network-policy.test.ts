@@ -70,7 +70,7 @@ describe("S1 方案 B：allowlist 模式已删除", () => {
   });
 
   it("P2-9: threadOverride.mode 非法值 → fail-closed 降级 disabled", () => {
-    delete process.env.RUNTIME_NETWORK_POLICY;
+    process.env.RUNTIME_NETWORK_POLICY = undefined;
     const p = resolveNetworkPolicy({
       runtimeType: "container",
       threadOverride: { mode: "allowlist" as unknown as "disabled" },

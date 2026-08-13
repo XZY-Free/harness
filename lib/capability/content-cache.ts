@@ -23,8 +23,8 @@ export const SHA256_HEX_LENGTH = 64;
  * @returns 形如 `sha256:<64-hex>` 的 hash 字符串
  */
 export function computeContentHash(content: string): string {
- const hex = createHash("sha256").update(content, "utf-8").digest("hex");
- return `${CONTENT_HASH_PREFIX}${hex}`;
+  const hex = createHash("sha256").update(content, "utf-8").digest("hex");
+  return `${CONTENT_HASH_PREFIX}${hex}`;
 }
 
 /**
@@ -37,9 +37,9 @@ export function computeContentHash(content: string): string {
  * @param expectedHash 期望的 hash（sha256: 前缀 + 64 hex）
  */
 export function verifyContentHash(content: string, expectedHash: string): boolean {
- if (!isValidContentHash(expectedHash)) return false;
- const actual = computeContentHash(content);
- return actual === expectedHash;
+  if (!isValidContentHash(expectedHash)) return false;
+  const actual = computeContentHash(content);
+  return actual === expectedHash;
 }
 
 /**
@@ -49,8 +49,8 @@ export function verifyContentHash(content: string, expectedHash: string): boolea
  * @returns 格式合法返回 true，否则 false
  */
 export function isValidContentHash(hash: string): boolean {
- if (!hash.startsWith(CONTENT_HASH_PREFIX)) return false;
- const hex = hash.slice(CONTENT_HASH_PREFIX.length);
- if (hex.length !== SHA256_HEX_LENGTH) return false;
- return /^[0-9a-f]{64}$/.test(hex);
+  if (!hash.startsWith(CONTENT_HASH_PREFIX)) return false;
+  const hex = hash.slice(CONTENT_HASH_PREFIX.length);
+  if (hex.length !== SHA256_HEX_LENGTH) return false;
+  return /^[0-9a-f]{64}$/.test(hex);
 }

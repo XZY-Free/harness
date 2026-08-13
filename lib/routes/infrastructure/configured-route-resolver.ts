@@ -9,43 +9,43 @@
  */
 
 import type {
- ResolveRouteCandidatesInput,
- RouteResolutionAttribute,
- RouteResolutionOutcome,
+  ResolveRouteCandidatesInput,
+  RouteResolutionAttribute,
+  RouteResolutionOutcome,
 } from "@/lib/routes/domain/route-resolution-policy";
-import type { RouteEligibilityResolutionStore } from "@/lib/routes/persistence/route-eligibility-resolution-store";
 import { resolveRouteCandidates } from "@/lib/routes/domain/route-resolution-policy";
+import type { RouteEligibilityResolutionStore } from "@/lib/routes/persistence/route-eligibility-resolution-store";
 
 // ─── 输入/输出 ──────────────────────────────────────────────
 
 export interface ConfiguredResolveRouteCommand {
- tenantId: string;
- agentId: string;
- routeScopeKey: string;
- businessKey: { threadId?: string; jobId?: string };
- attributes?: Record<string, RouteResolutionAttribute>;
- threadDefaultModelRef?: string | null;
- now?: Date;
+  tenantId: string;
+  agentId: string;
+  routeScopeKey: string;
+  businessKey: { threadId?: string; jobId?: string };
+  attributes?: Record<string, RouteResolutionAttribute>;
+  threadDefaultModelRef?: string | null;
+  now?: Date;
 }
 
 export interface ConfiguredResolveRouteResult {
- /** 解析结果。 */
- outcome: RouteResolutionOutcome;
- /** 解析耗时（ms）。 */
- resolveMs: number;
+  /** 解析结果。 */
+  outcome: RouteResolutionOutcome;
+  /** 解析耗时（ms）。 */
+  resolveMs: number;
 }
 
 // ─── 依赖 ────────────────────────────────────────────────
 
 export interface ConfiguredResolverDependencies {
- /** Projection Store — 运行时解析的唯一数据源。 */
- projectionStore: RouteEligibilityResolutionStore;
+  /** Projection Store — 运行时解析的唯一数据源。 */
+  projectionStore: RouteEligibilityResolutionStore;
 }
 
 // ─── Resolver 类型 ──────────────────────────────────────────
 
 export type ConfiguredRouteResolver = (
- command: ConfiguredResolveRouteCommand,
+  command: ConfiguredResolveRouteCommand,
 ) => Promise<ConfiguredResolveRouteResult>;
 
 // ─── 工厂 ────────────────────────────────────────────────
@@ -57,39 +57,39 @@ export type ConfiguredRouteResolver = (
  * Employee Turn 和 Dispatcher 必须调用此函数获取 Resolver。
  */
 export function createConfiguredRouteResolver(
- deps: ConfiguredResolverDependencies,
+  deps: ConfiguredResolverDependencies,
 ): ConfiguredRouteResolver {
- return async function configuredResolveRoute(
- command: ConfiguredResolveRouteCommand,
- ): Promise<ConfiguredResolveRouteResult> {
- const start = Date.now();
+  return async function configuredResolveRoute(
+    command: ConfiguredResolveRouteCommand,
+  ): Promise<ConfiguredResolveRouteResult> {
+    const start = Date.now();
 
- // : Projection 是唯一数据源 — 单次 SQL 查询 eligible 候选
- const candidates = await deps.projectionStore.loadCandidates({
- tenantId: command.tenantId,
- agentId: command.agentId,
- routeScopeKey: command.routeScopeKey,
- });
+    // : Projection 是唯一数据源 — 单次 SQL 查询 eligible 候选
+    const candidates = await deps.projectionStore.loadCandidates({
+      tenantId: command.tenantId,
+      agentId: command.agentId,
+      routeScopeKey: command.routeScopeKey,
+    });
 
- // 纯内存选择算法
- const outcome = resolveRouteCandidates({
- tenantId: command.tenantId,
- agentId: command.agentId,
- routeScopeKey: command.routeScopeKey,
- businessKey: command.businessKey,
- attributes: command.attributes ?? {},
- threadDefaultModelRef: command.threadDefaultModelRef,
- candidates,
- now: command.now ?? new Date(),
- });
+    // 纯内存选择算法
+    const outcome = resolveRouteCandidates({
+      tenantId: command.tenantId,
+      agentId: command.agentId,
+      routeScopeKey: command.routeScopeKey,
+      businessKey: command.businessKey,
+      attributes: command.attributes ?? {},
+      threadDefaultModelRef: command.threadDefaultModelRef,
+      candidates,
+      now: command.now ?? new Date(),
+    });
 
- const resolveMs = Date.now() - start;
+    const resolveMs = Date.now() - start;
 
- return {
- outcome,
- resolveMs,
- };
- };
+    return {
+      outcome,
+      resolveMs,
+    };
+  };
 }
 
 // ─── 保持 ResolveRouteCandidatesInput 类型导出 ─────────────────────────

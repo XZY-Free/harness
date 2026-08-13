@@ -8,8 +8,8 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
-import { createPublishRuntimeRevision } from "@/lib/runtime/provisioning/publish-runtime-revision";
-import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
+import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import {
   ALL_CONFORMANCE_CASES,
   CONFORMANCE_SUITE_REVISION,
@@ -22,14 +22,14 @@ import {
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { createPublishRuntimeRevision } from "@/lib/runtime/provisioning/publish-runtime-revision";
+import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import {
+  type TestRunnerKey,
   buildDsseConformanceEnvelope,
   buildTestConformanceReport,
   generateTestRunnerKey,
-  type TestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
-import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
-import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 

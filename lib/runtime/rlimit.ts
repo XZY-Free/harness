@@ -14,7 +14,7 @@ import type { ResourceQuota } from "./types";
 
 /** 最小 shell 单引号转义（供 sh -c 传参，防注入）。 */
 function shQuote(s: string): string {
- return `'${s.replace(/'/g, "'\\''")}'`;
+  return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 /**
@@ -26,15 +26,15 @@ function shQuote(s: string): string {
  * 非 Linux 平台或 quota 无限额 → 原样返回（不伪装有限额）。
  */
 export function wrapWithHostRlimits(command: string, quota?: ResourceQuota): string {
- if (process.platform !== "linux") return command;
- const nofile = quota?.openFilesLimit ?? 0;
- const nproc = quota?.pidsLimit ?? 0;
- if ((nofile ?? 0) <= 0 && (nproc ?? 0) <= 0) return command;
- const args: string[] = [];
- if (nofile > 0) args.push(`--nofile=${nofile}`);
- if (nproc > 0) args.push(`--nproc=${nproc}`);
- // prlimit 设自身限额后 exec `sh -c '<command>'`；原命令可能含管道/&&，必须经 sh 解析。
- return `prlimit ${args.join(" ")} -- sh -c ${shQuote(command)}`;
+  if (process.platform !== "linux") return command;
+  const nofile = quota?.openFilesLimit ?? 0;
+  const nproc = quota?.pidsLimit ?? 0;
+  if ((nofile ?? 0) <= 0 && (nproc ?? 0) <= 0) return command;
+  const args: string[] = [];
+  if (nofile > 0) args.push(`--nofile=${nofile}`);
+  if (nproc > 0) args.push(`--nproc=${nproc}`);
+  // prlimit 设自身限额后 exec `sh -c '<command>'`；原命令可能含管道/&&，必须经 sh 解析。
+  return `prlimit ${args.join(" ")} -- sh -c ${shQuote(command)}`;
 }
 
 /**
@@ -44,15 +44,15 @@ export function wrapWithHostRlimits(command: string, quota?: ResourceQuota): str
  * 无限额返回空数组。
  */
 export function dockerResourceArgs(quota?: ResourceQuota): string[] {
- const args: string[] = [];
- const pids = quota?.pidsLimit ?? 0;
- const nofile = quota?.openFilesLimit ?? 0;
- if (pids > 0) {
- args.push("--pids-limit", String(pids));
- }
- if (nofile > 0) {
- // nofile=soft:hard；docker ulimit 语法
- args.push("--ulimit", `nofile=${nofile}:${nofile}`);
- }
- return args;
+  const args: string[] = [];
+  const pids = quota?.pidsLimit ?? 0;
+  const nofile = quota?.openFilesLimit ?? 0;
+  if (pids > 0) {
+    args.push("--pids-limit", String(pids));
+  }
+  if (nofile > 0) {
+    // nofile=soft:hard；docker ulimit 语法
+    args.push("--ulimit", `nofile=${nofile}:${nofile}`);
+  }
+  return args;
 }

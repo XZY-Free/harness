@@ -26,7 +26,7 @@ describe("normalizeEligibility", () => {
   it("等值合取规范化并按键排序", () => {
     const result = normalizeEligibility({ all: { region: "cn", environment: "prod" } });
     expect(result).not.toBeNull();
-    expect(Object.keys(result!.all)).toEqual(["environment", "region"]);
+    expect(Object.keys(result?.all ?? {})).toEqual(["environment", "region"]);
   });
 
   it("非 all 结构返回 null", () => {
@@ -68,13 +68,13 @@ describe("normalizeEligibility", () => {
   it("有限 number 值正常通过", () => {
     const result = normalizeEligibility({ all: { env: "prod", version: 42 } });
     expect(result).not.toBeNull();
-    expect(result!.all.version).toBe(42);
+    expect(result?.all.version).toBe(42);
   });
 
   it("boolean 值正常通过", () => {
     const result = normalizeEligibility({ all: { env: "prod", active: true } });
     expect(result).not.toBeNull();
-    expect(result!.all.active).toBe(true);
+    expect(result?.all.active).toBe(true);
   });
 });
 

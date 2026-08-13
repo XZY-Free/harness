@@ -1,11 +1,11 @@
-import { getDelegateRelationsByParentThread } from "@/lib/conversations/child-thread-queries";
-import { getThreadById } from "@/lib/conversations/thread-queries";
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
+import { getDelegateRelationsByParentThread } from "@/lib/conversations/child-thread-queries";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 /**
  * GET /admin/api/v1/threads/{thread_id}/child-threads — 列出父 Thread 的 delegate 子 Thread 关系（S11-W04）。
  *

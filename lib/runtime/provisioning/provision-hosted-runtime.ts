@@ -7,24 +7,24 @@
  */
 
 export interface HostedRuntimeRoute {
- routeId: string;
- routeRevisionId: string;
- routeActivationId: string;
- agentRevisionId: string;
- runtimeRevisionId: string;
- /** : Projection 版本号，用于精确 ID 验证。 */
- projectionVersionNo?: number | null;
+  routeId: string;
+  routeRevisionId: string;
+  routeActivationId: string;
+  agentRevisionId: string;
+  runtimeRevisionId: string;
+  /** : Projection 版本号，用于精确 ID 验证。 */
+  projectionVersionNo?: number | null;
 }
 
 export interface PublishedHostedAgentRevision {
- revisionId: string;
- publicationRecordId: string;
- attestationId: string;
+  revisionId: string;
+  publicationRecordId: string;
+  attestationId: string;
 }
 
 export interface PublishedHostedRuntimeRevision {
- revisionId: string;
- publicationRecordId: string;
- attestationId: string;
- conformanceRunId: string;
+  revisionId: string;
+  publicationRecordId: string;
+  attestationId: string;
+  conformanceRunId: string;
 }

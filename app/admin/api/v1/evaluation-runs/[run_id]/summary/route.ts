@@ -1,10 +1,10 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
 import { getEvaluationRunById } from "@/lib/evaluation/evaluation-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 /**
  * GET /admin/api/v1/evaluation-runs/{run_id}/summary — Run Summary 投影（S11-W06）。
  *

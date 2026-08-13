@@ -27,16 +27,16 @@ import { randomUUID } from "node:crypto";
 
 /** 凭证条目。 */
 interface UploadTokenEntry {
- threadId: string;
- workspacePath: string;
- expiresAt: number;
- used: boolean;
+  threadId: string;
+  workspacePath: string;
+  expiresAt: number;
+  used: boolean;
 }
 
 /** 消费凭证后返回的信息。 */
 export interface ConsumedToken {
- threadId: string;
- workspacePath: string;
+  threadId: string;
+  workspacePath: string;
 }
 
 /**
@@ -46,69 +46,69 @@ export interface ConsumedToken {
  * 凭证 TTL 仅 60s，Desktop 凭证失败可让 Server 重新签发，无需持久化。
  */
 export class UploadTokenStore {
- private tokens = new Map<string, UploadTokenEntry>();
- private ttlMs: number;
+  private tokens = new Map<string, UploadTokenEntry>();
+  private ttlMs: number;
 
- constructor(ttlMs = 60_000) {
- this.ttlMs = ttlMs;
- }
+  constructor(ttlMs = 60_000) {
+    this.ttlMs = ttlMs;
+  }
 
- /** 签发一次性下载凭证，返回 token（UUID）。 */
- issue(threadId: string, workspacePath: string): string {
- const token = randomUUID();
- this.tokens.set(token, {
- threadId,
- workspacePath,
- expiresAt: Date.now() + this.ttlMs,
- used: false,
- });
- return token;
- }
+  /** 签发一次性下载凭证，返回 token（UUID）。 */
+  issue(threadId: string, workspacePath: string): string {
+    const token = randomUUID();
+    this.tokens.set(token, {
+      threadId,
+      workspacePath,
+      expiresAt: Date.now() + this.ttlMs,
+      used: false,
+    });
+    return token;
+  }
 
- /**
- * 消费凭证（一次性使用）。
- *
- * 校验：
- * - token 存在
- * - 未被使用（used=false）
- * - 未过期
- *
- * 任意校验失败返回 null。校验通过后立即删除（一次性使用）。
- */
- consume(token: string): ConsumedToken | null {
- const entry = this.tokens.get(token);
- if (!entry) return null;
- if (entry.used) return null;
- if (Date.now() > entry.expiresAt) {
- this.tokens.delete(token);
- return null;
- }
- // 一次性使用后立即删除
- this.tokens.delete(token);
- return { threadId: entry.threadId, workspacePath: entry.workspacePath };
- }
+  /**
+   * 消费凭证（一次性使用）。
+   *
+   * 校验：
+   * - token 存在
+   * - 未被使用（used=false）
+   * - 未过期
+   *
+   * 任意校验失败返回 null。校验通过后立即删除（一次性使用）。
+   */
+  consume(token: string): ConsumedToken | null {
+    const entry = this.tokens.get(token);
+    if (!entry) return null;
+    if (entry.used) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.tokens.delete(token);
+      return null;
+    }
+    // 一次性使用后立即删除
+    this.tokens.delete(token);
+    return { threadId: entry.threadId, workspacePath: entry.workspacePath };
+  }
 
- /**
- * 清理过期凭证。
- *
- * @param now 当前时间戳（参数化便于测试）
- * @returns 清理的凭证数量
- */
- cleanup(now: number): number {
- let count = 0;
- for (const [token, entry] of this.tokens) {
- if (now > entry.expiresAt) {
- this.tokens.delete(token);
- count++;
- }
- }
- return count;
- }
+  /**
+   * 清理过期凭证。
+   *
+   * @param now 当前时间戳（参数化便于测试）
+   * @returns 清理的凭证数量
+   */
+  cleanup(now: number): number {
+    let count = 0;
+    for (const [token, entry] of this.tokens) {
+      if (now > entry.expiresAt) {
+        this.tokens.delete(token);
+        count++;
+      }
+    }
+    return count;
+  }
 
- /** 获取当前凭证数量（测试用）。 */
- size(): number {
- return this.tokens.size;
- }
+  /** 获取当前凭证数量（测试用）。 */
+  size(): number {
+    return this.tokens.size;
+  }
 }
 
 /** 全局单例（Server 进程内共享）。 */
@@ -116,10 +116,10 @@ const globalStore = new UploadTokenStore();
 
 /** 签发一次性下载凭证（使用全局单例）。 */
 export function issueUploadToken(threadId: string, workspacePath: string): string {
- return globalStore.issue(threadId, workspacePath);
+  return globalStore.issue(threadId, workspacePath);
 }
 
 /** 消费一次性下载凭证（使用全局单例）。 */
 export function consumeUploadToken(token: string): ConsumedToken | null {
- return globalStore.consume(token);
+  return globalStore.consume(token);
 }

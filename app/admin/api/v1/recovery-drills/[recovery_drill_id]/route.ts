@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * POST/GET /admin/api/v1/recovery-drills/{recovery_drill_id} — 恢复演练详情与执行（S12-W08）。
  *
@@ -40,13 +47,6 @@ import {
   startRecoveryDrill,
 } from "@/lib/identity/recovery-drill-queries";
 import type { RecoveryDrill, RecoveryDrillCheck } from "@/lib/persistence/schema/recovery-drill";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

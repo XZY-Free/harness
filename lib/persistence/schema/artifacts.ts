@@ -6,16 +6,16 @@
  */
 
 export {
- artifact,
- artifactAttestation,
- attestationRevocationRecord,
+  artifact,
+  artifactAttestation,
+  attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
 
 export type {
- Artifact,
- NewArtifact,
- ArtifactAttestation,
- NewArtifactAttestation,
- AttestationRevocationRecord,
- NewAttestationRevocationRecord,
+  Artifact,
+  NewArtifact,
+  ArtifactAttestation,
+  NewArtifactAttestation,
+  AttestationRevocationRecord,
+  NewAttestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";

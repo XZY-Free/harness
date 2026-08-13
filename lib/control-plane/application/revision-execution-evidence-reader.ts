@@ -14,17 +14,17 @@ import type { RevisionExecutionEvidenceSnapshot } from "../domain/revision-execu
 
 /** 加载执行资格证据的输入参数。 */
 export interface LoadEvidenceInput {
- tenantId: string;
- agentRevisionId: string;
- runtimeRevisionId: string;
- /** Route 引用的 PolicyRevisionId（null = Route 未引用 Policy）。 */
- policyRevisionId: string | null;
+  tenantId: string;
+  agentRevisionId: string;
+  runtimeRevisionId: string;
+  /** Route 引用的 PolicyRevisionId（null = Route 未引用 Policy）。 */
+  policyRevisionId: string | null;
 }
 
 /** loadExactEvidence 额外参数 — Resolver 冻结的精确证据引用。 */
 export interface LoadExactEvidenceInput extends LoadEvidenceInput {
- /** Resolver 冻结的 ConformanceRun ID。 */
- conformanceRunId: string | null;
+  /** Resolver 冻结的 ConformanceRun ID。 */
+  conformanceRunId: string | null;
 }
 
 /**
@@ -36,18 +36,18 @@ export interface LoadExactEvidenceInput extends LoadEvidenceInput {
  * - Policy 为 null 仅当 Route 未引用 Policy（）
  */
 export interface RevisionExecutionEvidenceReader {
- /**
- * 读取当前最新执行资格证据快照。
- *
- * 用于 RouteSet 激活和 Projection 构建 — 读取此刻最新的证据状态。
- */
- loadCurrentEvidence(input: LoadEvidenceInput): Promise<RevisionExecutionEvidenceSnapshot>;
+  /**
+   * 读取当前最新执行资格证据快照。
+   *
+   * 用于 RouteSet 激活和 Projection 构建 — 读取此刻最新的证据状态。
+   */
+  loadCurrentEvidence(input: LoadEvidenceInput): Promise<RevisionExecutionEvidenceSnapshot>;
 
- /**
- * 读取指定时刻的精确执行资格证据快照。
- *
- * 用于 ExecutionBinding 验证 — 读取 Resolver 冻结时的精确证据，
- * 特别是使用冻结的 conformanceRunId 而非最新值。
- */
- loadExactEvidence(input: LoadExactEvidenceInput): Promise<RevisionExecutionEvidenceSnapshot>;
+  /**
+   * 读取指定时刻的精确执行资格证据快照。
+   *
+   * 用于 ExecutionBinding 验证 — 读取 Resolver 冻结时的精确证据，
+   * 特别是使用冻结的 conformanceRunId 而非最新值。
+   */
+  loadExactEvidence(input: LoadExactEvidenceInput): Promise<RevisionExecutionEvidenceSnapshot>;
 }

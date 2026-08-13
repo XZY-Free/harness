@@ -20,7 +20,7 @@ export const SELECTOR_ALGORITHM_VERSION = "route-selector/v1";
  * 键按规范化后的字母序排列，确保同语义条件产生相同 Digest。
  */
 export interface NormalizedEligibility {
- readonly all: Readonly<Record<string, string | number | boolean>>;
+  readonly all: Readonly<Record<string, string | number | boolean>>;
 }
 
 /**
@@ -37,30 +37,30 @@ export interface NormalizedEligibility {
  * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
 export function normalizeEligibility(conditions: unknown): NormalizedEligibility | null {
- if (conditions === null || conditions === undefined) {
- return { all: {} };
- }
- if (!isPlainObject(conditions)) return null;
- const keys = Object.keys(conditions);
- if (keys.length === 0) {
- return { all: {} };
- }
- if (keys.length !== 1 || keys[0] !== "all") return null;
- const all = (conditions as Record<string, unknown>).all;
- if (!isPlainObject(all)) return null;
+  if (conditions === null || conditions === undefined) {
+    return { all: {} };
+  }
+  if (!isPlainObject(conditions)) return null;
+  const keys = Object.keys(conditions);
+  if (keys.length === 0) {
+    return { all: {} };
+  }
+  if (keys.length !== 1 || keys[0] !== "all") return null;
+  const all = (conditions as Record<string, unknown>).all;
+  if (!isPlainObject(all)) return null;
 
- const rawEntries = Object.entries(all as Record<string, unknown>);
- // Fail-closed: 任何非标量或非有限数值 → 整体失败
- for (const [key, value] of rawEntries) {
- if (!isScalar(value)) return null;
- if (typeof value === "number" && !Number.isFinite(value)) return null;
- }
+  const rawEntries = Object.entries(all as Record<string, unknown>);
+  // Fail-closed: 任何非标量或非有限数值 → 整体失败
+  for (const [key, value] of rawEntries) {
+    if (!isScalar(value)) return null;
+    if (typeof value === "number" && !Number.isFinite(value)) return null;
+  }
 
- const entries = rawEntries.sort(([a], [b]) => a.localeCompare(b));
- if (entries.length === 0) {
- return { all: {} };
- }
- return { all: Object.fromEntries(entries) as Record<string, string | number | boolean> };
+  const entries = rawEntries.sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) {
+    return { all: {} };
+  }
+  return { all: Object.fromEntries(entries) as Record<string, string | number | boolean> };
 }
 
 /**
@@ -70,7 +70,7 @@ export function normalizeEligibility(conditions: unknown): NormalizedEligibility
  * 空条件的 Specificity = 0（最宽匹配）。
  */
 export function computeSpecificity(normalized: NormalizedEligibility): number {
- return Object.keys(normalized.all).length;
+  return Object.keys(normalized.all).length;
 }
 
 /**
@@ -80,11 +80,11 @@ export function computeSpecificity(normalized: NormalizedEligibility): number {
  * 确保同语义条件产生相同 Digest，不同语义产生不同 Digest。
  */
 export function computeSelectorDigest(normalized: NormalizedEligibility): string {
- const payload = JSON.stringify([
- SELECTOR_ALGORITHM_VERSION,
- Object.entries(normalized.all).sort(([a], [b]) => a.localeCompare(b)),
- ]);
- return `sha256:${createHash("sha256").update(payload).digest("hex")}`;
+  const payload = JSON.stringify([
+    SELECTOR_ALGORITHM_VERSION,
+    Object.entries(normalized.all).sort(([a], [b]) => a.localeCompare(b)),
+  ]);
+  return `sha256:${createHash("sha256").update(payload).digest("hex")}`;
 }
 
 /**
@@ -95,14 +95,14 @@ export function computeSelectorDigest(normalized: NormalizedEligibility): string
  * - 否则 → 重叠（至少一组输入可同时满足）
  */
 export function isOverlapping(left: NormalizedEligibility, right: NormalizedEligibility): boolean {
- const leftEntries = Object.entries(left.all);
- for (const [key, leftValue] of leftEntries) {
- const rightValue = right.all[key];
- if (rightValue !== undefined && leftValue !== rightValue) {
- return false;
- }
- }
- return true;
+  const leftEntries = Object.entries(left.all);
+  for (const [key, leftValue] of leftEntries) {
+    const rightValue = right.all[key];
+    if (rightValue !== undefined && leftValue !== rightValue) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -111,25 +111,25 @@ export function isOverlapping(left: NormalizedEligibility, right: NormalizedElig
  * null 表示无边界约束。
  */
 export function isTimeWindowOverlapping(
- leftFrom: Date | null,
- leftUntil: Date | null,
- rightFrom: Date | null,
- rightUntil: Date | null,
+  leftFrom: Date | null,
+  leftUntil: Date | null,
+  rightFrom: Date | null,
+  rightUntil: Date | null,
 ): boolean {
- const effectiveLeftFrom = leftFrom?.getTime() ?? Number.NEGATIVE_INFINITY;
- const effectiveLeftUntil = leftUntil?.getTime() ?? Number.POSITIVE_INFINITY;
- const effectiveRightFrom = rightFrom?.getTime() ?? Number.NEGATIVE_INFINITY;
- const effectiveRightUntil = rightUntil?.getTime() ?? Number.POSITIVE_INFINITY;
+  const effectiveLeftFrom = leftFrom?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const effectiveLeftUntil = leftUntil?.getTime() ?? Number.POSITIVE_INFINITY;
+  const effectiveRightFrom = rightFrom?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const effectiveRightUntil = rightUntil?.getTime() ?? Number.POSITIVE_INFINITY;
 
- return effectiveLeftFrom < effectiveRightUntil && effectiveRightFrom < effectiveLeftUntil;
+  return effectiveLeftFrom < effectiveRightUntil && effectiveRightFrom < effectiveLeftUntil;
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
- return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function isScalar(value: unknown): value is string | number | boolean {
- return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }

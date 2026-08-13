@@ -31,13 +31,13 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-fetch";
-import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { toVisibleError } from "@/lib/client/error-messages";
 import type {
   ClientErrorBody,
   ClientUserActionResolveResponse,
   ClientVisibleError,
 } from "@/lib/client/types";
+import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { useCallback, useRef, useState } from "react";
 
 /** Hook 入参。 */

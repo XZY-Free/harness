@@ -1,11 +1,11 @@
-import { listThreadProjectionsByTenant } from "@/lib/conversations/read-model-queries";
-import { REQUEST_ID_HEADER, apiSuccess, decodeCursor, getRequestId } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
+import { listThreadProjectionsByTenant } from "@/lib/conversations/read-model-queries";
+import { REQUEST_ID_HEADER, apiSuccess, decodeCursor, getRequestId } from "@/lib/http";
 /**
  * GET /admin/api/v1/threads — 跨 owner 列出租户所有 Thread（S11-W04）。
  *

@@ -26,9 +26,9 @@
 
 import { useHandoff } from "@/components/hooks/use-handoff";
 import { useUserAction } from "@/components/hooks/use-user-action";
+import type { ClientItem } from "@/lib/client/types";
 import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { cn } from "@/lib/utils";
-import type { ClientItem } from "@/lib/client/types";
 import { Check, CircleAlert, FilePenLine } from "lucide-react";
 import { useMemo, useState } from "react";
 

@@ -21,86 +21,86 @@ export const DEFAULT_TENANT_ID = "00000000-0000-4000-8000-000000000000";
  * - 不存在：插入。
  */
 export async function ensureDefaultTenant(): Promise<{
- id: string;
- key: string;
- name: string;
- status: string;
+  id: string;
+  key: string;
+  name: string;
+  status: string;
 }> {
- const [existing] = await db
- .select({
- id: tenant.id,
- key: tenant.key,
- name: tenant.name,
- status: tenant.status,
- })
- .from(tenant)
- .where(eq(tenant.key, DEFAULT_TENANT_KEY))
- .limit(1);
+  const [existing] = await db
+    .select({
+      id: tenant.id,
+      key: tenant.key,
+      name: tenant.name,
+      status: tenant.status,
+    })
+    .from(tenant)
+    .where(eq(tenant.key, DEFAULT_TENANT_KEY))
+    .limit(1);
 
- if (existing) {
- return existing;
- }
+  if (existing) {
+    return existing;
+  }
 
- await db.insert(tenant).values({
- id: DEFAULT_TENANT_ID,
- key: DEFAULT_TENANT_KEY,
- name: DEFAULT_TENANT_NAME,
- status: "active",
- });
+  await db.insert(tenant).values({
+    id: DEFAULT_TENANT_ID,
+    key: DEFAULT_TENANT_KEY,
+    name: DEFAULT_TENANT_NAME,
+    status: "active",
+  });
 
- const [created] = await db
- .select({
- id: tenant.id,
- key: tenant.key,
- name: tenant.name,
- status: tenant.status,
- })
- .from(tenant)
- .where(eq(tenant.key, DEFAULT_TENANT_KEY))
- .limit(1);
+  const [created] = await db
+    .select({
+      id: tenant.id,
+      key: tenant.key,
+      name: tenant.name,
+      status: tenant.status,
+    })
+    .from(tenant)
+    .where(eq(tenant.key, DEFAULT_TENANT_KEY))
+    .limit(1);
 
- if (!created) {
- throw new Error("无法创建默认租户");
- }
- return created;
+  if (!created) {
+    throw new Error("无法创建默认租户");
+  }
+  return created;
 }
 
 /** 按 key 查找租户（active 或任意状态）。 */
 export async function getTenantByKey(key: string): Promise<{
- id: string;
- key: string;
- name: string;
- status: string;
+  id: string;
+  key: string;
+  name: string;
+  status: string;
 } | null> {
- const [row] = await db
- .select({
- id: tenant.id,
- key: tenant.key,
- name: tenant.name,
- status: tenant.status,
- })
- .from(tenant)
- .where(and(eq(tenant.key, key), eq(tenant.status, "active")))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select({
+      id: tenant.id,
+      key: tenant.key,
+      name: tenant.name,
+      status: tenant.status,
+    })
+    .from(tenant)
+    .where(and(eq(tenant.key, key), eq(tenant.status, "active")))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 按 id 查找租户。 */
 export async function getTenantById(id: string): Promise<{
- id: string;
- key: string;
- name: string;
- status: string;
+  id: string;
+  key: string;
+  name: string;
+  status: string;
 } | null> {
- const [row] = await db
- .select({
- id: tenant.id,
- key: tenant.key,
- name: tenant.name,
- status: tenant.status,
- })
- .from(tenant)
- .where(eq(tenant.id, id))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select({
+      id: tenant.id,
+      key: tenant.key,
+      name: tenant.name,
+      status: tenant.status,
+    })
+    .from(tenant)
+    .where(eq(tenant.id, id))
+    .limit(1);
+  return row ?? null;
 }

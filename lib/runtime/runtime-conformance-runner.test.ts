@@ -42,13 +42,6 @@ import {
   createHostedAdapter,
   hostedAdapterCapabilities,
 } from "@/lib/runtime/adapters/hosted-adapter";
-import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
-import type { RuntimeCapabilitiesResponse } from "@/lib/runtime/runtime-client";
-import {
-  ConformanceRunnerError,
-  type RunConformanceSuiteParams,
-  runConformanceSuite,
-} from "@/lib/runtime/runtime-conformance-runner";
 import {
   ALL_CONFORMANCE_CASES,
   type ConformanceCaseId,
@@ -56,10 +49,8 @@ import {
   MANDATORY_GATE_CASES,
   validateConformanceGate,
 } from "@/lib/runtime/domain/runtime-conformance";
-import {
-  buildDsseConformanceEnvelope,
-  generateTestRunnerKey,
-} from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
+import { RuntimeConformanceRunInvalidError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
+import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import {
   createRuntime,
   getRuntimeById,
@@ -71,9 +62,18 @@ import {
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
 } from "@/lib/runtime/persistence/runtime-revision-queries";
+import type { RuntimeCapabilitiesResponse } from "@/lib/runtime/runtime-client";
+import {
+  ConformanceRunnerError,
+  type RunConformanceSuiteParams,
+  runConformanceSuite,
+} from "@/lib/runtime/runtime-conformance-runner";
 import { publishRuntimeRevision } from "@/lib/runtime/test-support/attempt-runtime-publication-without-trusted-run";
+import {
+  buildDsseConformanceEnvelope,
+  generateTestRunnerKey,
+} from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
 import { withdrawRuntimeRevision } from "@/lib/runtime/test-support/withdraw-runtime-revision";
-import { RuntimeConformanceRunInvalidError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-api.test.ts 一致）。

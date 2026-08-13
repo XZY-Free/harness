@@ -10,16 +10,16 @@ import { createHash } from "node:crypto";
  */
 
 export type ExternalSource = {
- sourceUrl: string;
- fetchedAt: string;
- expiresAt: string | null;
- contentHash: string;
- artifactPath?: string;
+  sourceUrl: string;
+  fetchedAt: string;
+  expiresAt: string | null;
+  contentHash: string;
+  artifactPath?: string;
 };
 
 /** sha256 内容指纹（全 hex，稳定）。 */
 export function computeContentHash(content: string): string {
- return createHash("sha256").update(content).digest("hex");
+  return createHash("sha256").update(content).digest("hex");
 }
 
 /**
@@ -27,10 +27,10 @@ export function computeContentHash(content: string): string {
  * （即 d 的子域）。条目小写、去空白后比较。
  */
 export function matchDomain(host: string, entry: string): boolean {
- const h = host.toLowerCase();
- const d = entry.toLowerCase().replace(/^\./, "");
- if (!d) return false;
- return h === d || h.endsWith(`.${d}`);
+  const h = host.toLowerCase();
+  const d = entry.toLowerCase().replace(/^\./, "");
+  if (!d) return false;
+  return h === d || h.endsWith(`.${d}`);
 }
 
 /**
@@ -38,20 +38,20 @@ export function matchDomain(host: string, entry: string): boolean {
  * artifactPath 可选——原文落 artifact 时填，供审计回溯。
  */
 export function buildExternalSource(params: {
- sourceUrl: string;
- content: string;
- fetchedAt?: Date;
- dynamic?: boolean;
- artifactPath?: string;
+  sourceUrl: string;
+  content: string;
+  fetchedAt?: Date;
+  dynamic?: boolean;
+  artifactPath?: string;
 }): ExternalSource {
- const fetchedAt = params.fetchedAt ?? new Date();
- const ttlMs = params.dynamic ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
- const expiresAt = new Date(fetchedAt.getTime() + ttlMs);
- return {
- sourceUrl: params.sourceUrl,
- fetchedAt: fetchedAt.toISOString(),
- expiresAt: expiresAt.toISOString(),
- contentHash: computeContentHash(params.content),
- artifactPath: params.artifactPath,
- };
+  const fetchedAt = params.fetchedAt ?? new Date();
+  const ttlMs = params.dynamic ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const expiresAt = new Date(fetchedAt.getTime() + ttlMs);
+  return {
+    sourceUrl: params.sourceUrl,
+    fetchedAt: fetchedAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    contentHash: computeContentHash(params.content),
+    artifactPath: params.artifactPath,
+  };
 }

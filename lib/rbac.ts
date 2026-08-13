@@ -18,24 +18,24 @@ import { jsonError } from "@/lib/http";
  */
 
 export const PERMISSIONS = [
- "studio.access",
- "skill.read",
- "skill.write",
- "skill.write.all",
- "skill.publish",
- "analytics.read.self",
- "analytics.read.global",
- "thread.read.all",
- "thread.write.self",
- "thread.write.all",
- "policy.read",
- "policy.write",
- "user.manage",
- "agent.read",
- "provider.read",
- "workspace.read",
- "workspace.write",
- "audit.read",
+  "studio.access",
+  "skill.read",
+  "skill.write",
+  "skill.write.all",
+  "skill.publish",
+  "analytics.read.self",
+  "analytics.read.global",
+  "thread.read.all",
+  "thread.write.self",
+  "thread.write.all",
+  "policy.read",
+  "policy.write",
+  "user.manage",
+  "agent.read",
+  "provider.read",
+  "workspace.read",
+  "workspace.write",
+  "audit.read",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -44,14 +44,14 @@ const PERMISSION_SET: ReadonlySet<string> = new Set(PERMISSIONS);
 
 /** member 角色权限集合（seed 用，见 lib/db/seed.ts）。 */
 export const MEMBER_PERMISSIONS: Permission[] = [
- "studio.access",
- "skill.read",
- "analytics.read.self",
- "policy.read",
- "agent.read",
- "provider.read",
- "workspace.read",
- "thread.write.self",
+  "studio.access",
+  "skill.read",
+  "analytics.read.self",
+  "policy.read",
+  "agent.read",
+  "provider.read",
+  "workspace.read",
+  "thread.write.self",
 ];
 
 /** admin 角色权限集合（seed 用）——全部权限。 */
@@ -63,20 +63,20 @@ export const ADMIN_PERMISSIONS: Permission[] = [...PERMISSIONS];
  * - 否则查 UserRole → RolePermission 并集；过滤掉不在固定集合内的脏数据。
  */
 export async function getPermissionsForUser(userId: string): Promise<Set<Permission>> {
- if (studioConfig.devOpen && userId === DEFAULT_USER_ID) {
- return new Set(PERMISSIONS);
- }
- const raw = await getPermissionsForUserRaw(userId);
- const perms = new Set<Permission>();
- for (const p of raw) {
- if (PERMISSION_SET.has(p)) perms.add(p as Permission);
- }
- return perms;
+  if (studioConfig.devOpen && userId === DEFAULT_USER_ID) {
+    return new Set(PERMISSIONS);
+  }
+  const raw = await getPermissionsForUserRaw(userId);
+  const perms = new Set<Permission>();
+  for (const p of raw) {
+    if (PERMISSION_SET.has(p)) perms.add(p as Permission);
+  }
+  return perms;
 }
 
 export async function hasPermission(userId: string, perm: Permission): Promise<boolean> {
- const perms = await getPermissionsForUser(userId);
- return perms.has(perm);
+  const perms = await getPermissionsForUser(userId);
+  return perms.has(perm);
 }
 
 export type RequirePermissionResult = { ok: true; user: User } | { ok: false; response: Response };
@@ -88,20 +88,20 @@ export type RequirePermissionResult = { ok: true; user: User } | { ok: false; re
  * 用法：`const r = await requirePermission(req, "skill.read"); if (!r.ok) return r.response;`
  */
 export async function requirePermission(
- request: RequestLike,
- perm: Permission,
+  request: RequestLike,
+  perm: Permission,
 ): Promise<RequirePermissionResult> {
- let user: User;
- try {
- user = await getCurrentUserFromRequest(request);
- } catch (error) {
- const authResp = authErrorResponse(error);
- return { ok: false, response: authResp ?? jsonError(500, "auth_error", "认证异常") };
- }
+  let user: User;
+  try {
+    user = await getCurrentUserFromRequest(request);
+  } catch (error) {
+    const authResp = authErrorResponse(error);
+    return { ok: false, response: authResp ?? jsonError(500, "auth_error", "认证异常") };
+  }
 
- const allowed = await hasPermission(user.id, perm);
- if (!allowed) {
- return { ok: false, response: jsonError(403, "forbidden", "无权限") };
- }
- return { ok: true, user };
+  const allowed = await hasPermission(user.id, perm);
+  if (!allowed) {
+    return { ok: false, response: jsonError(403, "forbidden", "无权限") };
+  }
+  return { ok: true, user };
 }

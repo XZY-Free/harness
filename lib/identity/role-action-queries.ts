@@ -14,16 +14,16 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
- type ActionCode,
- type ResourceScopeType,
- assertActionResourceTypeMatch,
+  type ActionCode,
+  type ResourceScopeType,
+  assertActionResourceTypeMatch,
 } from "@/lib/identity/action-codes";
 import {
- type ResourceScope,
- ResourceScopeError,
- parseResourceScope,
- serializeResourceScope,
- validateResourceScope,
+  type ResourceScope,
+  ResourceScopeError,
+  parseResourceScope,
+  serializeResourceScope,
+  validateResourceScope,
 } from "@/lib/identity/resource-scope";
 import { roleActionBinding } from "@/lib/persistence/schema/authorization";
 import type { RoleActionBinding } from "@/lib/persistence/schema/authorization";
@@ -40,49 +40,49 @@ import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
  * @throws ResourceScopeError scope type 不匹配 / 空 allowlist
  */
 export async function grantActionBinding(params: {
- tenantId: string;
- principalBindingId: string;
- actionCode: ActionCode;
- resourceScope: ResourceScope;
- validFrom?: Date;
- /** null（默认）= 长期有效。 */
- validUntil?: Date | null;
+  tenantId: string;
+  principalBindingId: string;
+  actionCode: ActionCode;
+  resourceScope: ResourceScope;
+  validFrom?: Date;
+  /** null（默认）= 长期有效。 */
+  validUntil?: Date | null;
 }): Promise<RoleActionBinding> {
- const {
- tenantId,
- principalBindingId,
- actionCode,
- resourceScope,
- validFrom = new Date(),
- validUntil = null,
- } = params;
+  const {
+    tenantId,
+    principalBindingId,
+    actionCode,
+    resourceScope,
+    validFrom = new Date(),
+    validUntil = null,
+  } = params;
 
- // 校验 action_code + resource_scope_type 匹配方案目录。
- assertActionResourceTypeMatch(actionCode, resourceScope.type);
- // 校验 scope 非空 allowlist（wildcard 或非空 ids）。
- validateResourceScope(resourceScope);
+  // 校验 action_code + resource_scope_type 匹配方案目录。
+  assertActionResourceTypeMatch(actionCode, resourceScope.type);
+  // 校验 scope 非空 allowlist（wildcard 或非空 ids）。
+  validateResourceScope(resourceScope);
 
- const id = randomUUID();
- const scopeJson = serializeResourceScope(resourceScope);
- await db.insert(roleActionBinding).values({
- id,
- tenantId,
- principalBindingId,
- actionCode,
- resourceScopeJson: scopeJson,
- validFrom,
- validUntil,
- });
+  const id = randomUUID();
+  const scopeJson = serializeResourceScope(resourceScope);
+  await db.insert(roleActionBinding).values({
+    id,
+    tenantId,
+    principalBindingId,
+    actionCode,
+    resourceScopeJson: scopeJson,
+    validFrom,
+    validUntil,
+  });
 
- const [row] = await db
- .select()
- .from(roleActionBinding)
- .where(eq(roleActionBinding.id, id))
- .limit(1);
- if (!row) {
- throw new Error(`grantActionBinding: 行未找到（id=${id}）`);
- }
- return row;
+  const [row] = await db
+    .select()
+    .from(roleActionBinding)
+    .where(eq(roleActionBinding.id, id))
+    .limit(1);
+  if (!row) {
+    throw new Error(`grantActionBinding: 行未找到（id=${id}）`);
+  }
+  return row;
 }
 
 /**
@@ -90,35 +90,35 @@ export async function grantActionBinding(params: {
  * 已撤销（validUntil <= now）返回 false；不存在返回 false。
  */
 export async function revokeActionBinding(tenantId: string, bindingId: string): Promise<boolean> {
- const now = new Date();
- const result = await db
- .update(roleActionBinding)
- .set({ validUntil: now })
- .where(
- and(
- eq(roleActionBinding.tenantId, tenantId),
- eq(roleActionBinding.id, bindingId),
- // 仅撤销当前有效的绑定（validUntil IS NULL 或 validUntil > now）
- or(isNull(roleActionBinding.validUntil), gt(roleActionBinding.validUntil, now)),
- ),
- );
- return result[0].affectedRows > 0;
+  const now = new Date();
+  const result = await db
+    .update(roleActionBinding)
+    .set({ validUntil: now })
+    .where(
+      and(
+        eq(roleActionBinding.tenantId, tenantId),
+        eq(roleActionBinding.id, bindingId),
+        // 仅撤销当前有效的绑定（validUntil IS NULL 或 validUntil > now）
+        or(isNull(roleActionBinding.validUntil), gt(roleActionBinding.validUntil, now)),
+      ),
+    );
+  return result[0].affectedRows > 0;
 }
 
 /** 按 principal_binding 列出所有绑定（含已撤销）。 */
 export async function listActionBindingsByPrincipal(
- tenantId: string,
- principalBindingId: string,
+  tenantId: string,
+  principalBindingId: string,
 ): Promise<RoleActionBinding[]> {
- return db
- .select()
- .from(roleActionBinding)
- .where(
- and(
- eq(roleActionBinding.tenantId, tenantId),
- eq(roleActionBinding.principalBindingId, principalBindingId),
- ),
- );
+  return db
+    .select()
+    .from(roleActionBinding)
+    .where(
+      and(
+        eq(roleActionBinding.tenantId, tenantId),
+        eq(roleActionBinding.principalBindingId, principalBindingId),
+      ),
+    );
 }
 
 /**
@@ -128,21 +128,21 @@ export async function listActionBindingsByPrincipal(
  * group/role/department 成员展开依赖组织系统 Adapter，预留扩展钩子。
  */
 export async function listActionBindingsByUser(
- tenantId: string,
- userIdentityId: string,
+  tenantId: string,
+  userIdentityId: string,
 ): Promise<RoleActionBinding[]> {
- const principalBindingIds = await expandPrincipalBindingIdsForUser(tenantId, userIdentityId);
- if (principalBindingIds.length === 0) return [];
+  const principalBindingIds = await expandPrincipalBindingIdsForUser(tenantId, userIdentityId);
+  if (principalBindingIds.length === 0) return [];
 
- return db
- .select()
- .from(roleActionBinding)
- .where(
- and(
- eq(roleActionBinding.tenantId, tenantId),
- inArray(roleActionBinding.principalBindingId, principalBindingIds),
- ),
- );
+  return db
+    .select()
+    .from(roleActionBinding)
+    .where(
+      and(
+        eq(roleActionBinding.tenantId, tenantId),
+        inArray(roleActionBinding.principalBindingId, principalBindingIds),
+      ),
+    );
 }
 
 /**
@@ -150,25 +150,25 @@ export async function listActionBindingsByUser(
  * 供授权守卫遍历检查。
  */
 export async function listActiveActionBindingsForUser(
- tenantId: string,
- userIdentityId: string,
+  tenantId: string,
+  userIdentityId: string,
 ): Promise<RoleActionBinding[]> {
- const all = await listActionBindingsByUser(tenantId, userIdentityId);
- const now = new Date();
- return all.filter((b) => b.validUntil === null || b.validUntil > now);
+  const all = await listActionBindingsByUser(tenantId, userIdentityId);
+  const now = new Date();
+  return all.filter((b) => b.validUntil === null || b.validUntil > now);
 }
 
 /** 按 id 获取绑定。不存在返回 null。 */
 export async function getActionBindingById(
- tenantId: string,
- bindingId: string,
+  tenantId: string,
+  bindingId: string,
 ): Promise<RoleActionBinding | null> {
- const [row] = await db
- .select()
- .from(roleActionBinding)
- .where(and(eq(roleActionBinding.tenantId, tenantId), eq(roleActionBinding.id, bindingId)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(roleActionBinding)
+    .where(and(eq(roleActionBinding.tenantId, tenantId), eq(roleActionBinding.id, bindingId)))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -178,19 +178,19 @@ export async function getActionBindingById(
  * 后续组织系统 Adapter 接入后，此处扩展 group/role/department 成员解析。
  */
 async function expandPrincipalBindingIdsForUser(
- tenantId: string,
- userIdentityId: string,
+  tenantId: string,
+  userIdentityId: string,
 ): Promise<string[]> {
- const bindings = await db
- .select({ id: principalBinding.id })
- .from(principalBinding)
- .where(
- and(
- eq(principalBinding.tenantId, tenantId),
- eq(principalBinding.userIdentityId, userIdentityId),
- ),
- );
- return bindings.map((b) => b.id);
+  const bindings = await db
+    .select({ id: principalBinding.id })
+    .from(principalBinding)
+    .where(
+      and(
+        eq(principalBinding.tenantId, tenantId),
+        eq(principalBinding.userIdentityId, userIdentityId),
+      ),
+    );
+  return bindings.map((b) => b.id);
 }
 
 /**
@@ -198,11 +198,11 @@ async function expandPrincipalBindingIdsForUser(
  * 容错：若 DB 中存了非法 scope（不应发生），返回 null 表示拒绝。
  */
 export function parseBindingScope(binding: RoleActionBinding): ResourceScope | null {
- try {
- return parseResourceScope(binding.resourceScopeJson);
- } catch {
- return null;
- }
+  try {
+    return parseResourceScope(binding.resourceScopeJson);
+  } catch {
+    return null;
+  }
 }
 
 // Re-export 供外部统一从本模块引入类型。

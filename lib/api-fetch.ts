@@ -22,10 +22,10 @@ const BASE_PATH = process.env.NEXT_PUBLIC_SNOW_BASE_PATH ?? "";
  * - 已带前缀的路径原样返回，避免双重拼接。
  */
 export function apiPath(path: string): string {
- if (!BASE_PATH) return path;
- if (!path.startsWith("/")) return path;
- if (path === BASE_PATH || path.startsWith(`${BASE_PATH}/`)) return path;
- return `${BASE_PATH}${path}`;
+  if (!BASE_PATH) return path;
+  if (!path.startsWith("/")) return path;
+  if (path === BASE_PATH || path.startsWith(`${BASE_PATH}/`)) return path;
+  return `${BASE_PATH}${path}`;
 }
 
 /**
@@ -33,5 +33,5 @@ export function apiPath(path: string): string {
  * 返回值与签名和全局 fetch 保持一致，可直接替换裸 fetch 调用。
  */
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
- return fetch(apiPath(path), init);
+  return fetch(apiPath(path), init);
 }

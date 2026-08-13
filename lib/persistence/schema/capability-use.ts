@@ -35,12 +35,12 @@ import { datetime, index, mysqlTable, uniqueIndex, varchar } from "drizzle-orm/m
  * - model：模型资产。
  */
 export const CAPABILITY_USE_TYPES = [
- "skill",
- "tool",
- "knowledge_document",
- "memory",
- "agent",
- "model",
+  "skill",
+  "tool",
+  "knowledge_document",
+  "memory",
+  "agent",
+  "model",
 ] as const;
 export type CapabilityUseType = (typeof CAPABILITY_USE_TYPES)[number];
 
@@ -54,68 +54,68 @@ export type CapabilityUseType = (typeof CAPABILITY_USE_TYPES)[number];
  * - policy：策略强制注入。
  */
 export const CAPABILITY_USE_SOURCE_TYPES = [
- "default",
- "dynamic_discovery",
- "user_selected",
- "policy",
+  "default",
+  "dynamic_discovery",
+  "user_selected",
+  "policy",
 ] as const;
 export type CapabilityUseSourceType = (typeof CAPABILITY_USE_SOURCE_TYPES)[number];
 
 // ─── CapabilityUse ────────────────────────────────────────
 
 export const capabilityUseTable = mysqlTable(
- "CapabilityUse",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 所属执行 Invocation id（逻辑外键 → Invocation；不加 DB 级 FK，避免跨阶段耦合）。 */
- invocationId: varchar("invocationId", { length: 36 }).notNull(),
- /** 能力类型（skill/tool/knowledge_document/memory/agent/model）。 */
- capabilityType: varchar("capabilityType", { length: 32 }).notNull(),
- /** 稳定资源 id（如 Tool.id / Skill.id）。 */
- capabilityId: varchar("capabilityId", { length: 36 }).notNull(),
- /** 实际修订 id（如 ToolSchemaRevision.id / SkillVersion.id）；可空。 */
- revisionId: varchar("revisionId", { length: 36 }),
- /** 实际内容 hash（sha256: 前缀，Skill 内容）；可空。 */
- contentHash: varchar("contentHash", { length: 128 }),
- /** 实际 Schema hash（sha256: 前缀，Tool Schema）；可空。 */
- schemaHash: varchar("schemaHash", { length: 128 }),
- /** 来源类型（default/dynamic_discovery/user_selected/policy）。 */
- sourceType: varchar("sourceType", { length: 32 }).notNull().default("dynamic_discovery"),
- /** 来源引用（如搜索 query / 用户选择路径）；可空。 */
- sourceRef: varchar("sourceRef", { length: 256 }),
- /** 选择理由代码（如 query_match / explicit_select / policy_required）。 */
- selectionReasonCode: varchar("selectionReasonCode", { length: 64 }),
- /**
- * 幂等键：sha256(type|id|revision-or-empty|content-hash-or-empty|schema-hash-or-empty)。
- * UNIQUE(invocationId, capabilityUseKey) 防止同 Invocation 同修订重复写。
- */
- capabilityUseKey: varchar("capabilityUseKey", { length: 128 }).notNull(),
- /** 首次记录时间（幂等：同 key 重放保留 firstUsedAt，不更新）。 */
- firstUsedAt: datetime("firstUsedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- invocationKeyUq: uniqueIndex("CapabilityUse_invocation_capabilityUseKey_uq").on(
- t.invocationId,
- t.capabilityUseKey,
- ),
- tenantInvocationIdx: index("CapabilityUse_tenant_invocation_idx").on(
- t.tenantId,
- t.invocationId,
- ),
- tenantTypeCapabilityIdx: index("CapabilityUse_tenant_type_capability_idx").on(
- t.tenantId,
- t.capabilityType,
- t.capabilityId,
- ),
- }),
+  "CapabilityUse",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 所属执行 Invocation id（逻辑外键 → Invocation；不加 DB 级 FK，避免跨阶段耦合）。 */
+    invocationId: varchar("invocationId", { length: 36 }).notNull(),
+    /** 能力类型（skill/tool/knowledge_document/memory/agent/model）。 */
+    capabilityType: varchar("capabilityType", { length: 32 }).notNull(),
+    /** 稳定资源 id（如 Tool.id / Skill.id）。 */
+    capabilityId: varchar("capabilityId", { length: 36 }).notNull(),
+    /** 实际修订 id（如 ToolSchemaRevision.id / SkillVersion.id）；可空。 */
+    revisionId: varchar("revisionId", { length: 36 }),
+    /** 实际内容 hash（sha256: 前缀，Skill 内容）；可空。 */
+    contentHash: varchar("contentHash", { length: 128 }),
+    /** 实际 Schema hash（sha256: 前缀，Tool Schema）；可空。 */
+    schemaHash: varchar("schemaHash", { length: 128 }),
+    /** 来源类型（default/dynamic_discovery/user_selected/policy）。 */
+    sourceType: varchar("sourceType", { length: 32 }).notNull().default("dynamic_discovery"),
+    /** 来源引用（如搜索 query / 用户选择路径）；可空。 */
+    sourceRef: varchar("sourceRef", { length: 256 }),
+    /** 选择理由代码（如 query_match / explicit_select / policy_required）。 */
+    selectionReasonCode: varchar("selectionReasonCode", { length: 64 }),
+    /**
+     * 幂等键：sha256(type|id|revision-or-empty|content-hash-or-empty|schema-hash-or-empty)。
+     * UNIQUE(invocationId, capabilityUseKey) 防止同 Invocation 同修订重复写。
+     */
+    capabilityUseKey: varchar("capabilityUseKey", { length: 128 }).notNull(),
+    /** 首次记录时间（幂等：同 key 重放保留 firstUsedAt，不更新）。 */
+    firstUsedAt: datetime("firstUsedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    invocationKeyUq: uniqueIndex("CapabilityUse_invocation_capabilityUseKey_uq").on(
+      t.invocationId,
+      t.capabilityUseKey,
+    ),
+    tenantInvocationIdx: index("CapabilityUse_tenant_invocation_idx").on(
+      t.tenantId,
+      t.invocationId,
+    ),
+    tenantTypeCapabilityIdx: index("CapabilityUse_tenant_type_capability_idx").on(
+      t.tenantId,
+      t.capabilityType,
+      t.capabilityId,
+    ),
+  }),
 );
 
 export type CapabilityUse = InferSelectModel<typeof capabilityUseTable>;

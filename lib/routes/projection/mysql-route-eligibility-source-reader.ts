@@ -12,14 +12,14 @@ import { publicationRecord } from "@/lib/publications/persistence/publication-re
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type {
- RouteEligibilitySourceReader,
- RouteSourceRef,
+  RouteEligibilitySourceReader,
+  RouteSourceRef,
 } from "./route-eligibility-source-reader";
 
 /** 公共 SELECT：routeId + tenantId（通过 JOIN RouteSet 获取 tenantId）。 */
 const routeSourceRefSelect = {
- routeId: deploymentRouteTable.id,
- tenantId: deploymentRouteSetTable.tenantId,
+  routeId: deploymentRouteTable.id,
+  tenantId: deploymentRouteSetTable.tenantId,
 } as const;
 
 /** 只接受每条 Route activationSequence 最大的权威激活记录。 */
@@ -31,210 +31,187 @@ const latestActivationCondition = sql`${routeActivation.activationSequence} = (
  AND latest_activation.routeSetId = ${deploymentRouteSetTable.id}
 )`;
 
-export function createMySqlRouteEligibilitySourceReader(
- _deps: { db: typeof db },
-): RouteEligibilitySourceReader {
- return {
- async listRouteIdsByRouteSet(routeSetId: string): Promise<RouteSourceRef[]> {
- // 权威：DeploymentRoute where routeSetId, JOIN RouteSet for tenantId
- return db
- .select(routeSourceRefSelect)
- .from(deploymentRouteTable)
- .innerJoin(
- deploymentRouteSetTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(eq(deploymentRouteTable.routeSetId, routeSetId));
- },
+export function createMySqlRouteEligibilitySourceReader(_deps: {
+  db: typeof db;
+}): RouteEligibilitySourceReader {
+  return {
+    async listRouteIdsByRouteSet(routeSetId: string): Promise<RouteSourceRef[]> {
+      // 权威：DeploymentRoute where routeSetId, JOIN RouteSet for tenantId
+      return db
+        .select(routeSourceRefSelect)
+        .from(deploymentRouteTable)
+        .innerJoin(
+          deploymentRouteSetTable,
+          eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+        )
+        .where(eq(deploymentRouteTable.routeSetId, routeSetId));
+    },
 
- async listRouteIdsByAgentRevision(agentRevisionId: string): Promise<RouteSourceRef[]> {
- // 权威：latest RouteActivation → RouteRevision.agentRevisionId → DeploymentRoute → RouteSet
- return db
- .select(routeSourceRefSelect)
- .from(routeActivation)
- .innerJoin(
- deploymentRouteTable,
- eq(routeActivation.routeId, deploymentRouteTable.id),
- )
- .innerJoin(
- routeRevision,
- eq(routeActivation.routeRevisionId, routeRevision.id),
- )
- .innerJoin(
- deploymentRouteSetTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(and(latestActivationCondition, eq(routeRevision.agentRevisionId, agentRevisionId)));
- },
+    async listRouteIdsByAgentRevision(agentRevisionId: string): Promise<RouteSourceRef[]> {
+      // 权威：latest RouteActivation → RouteRevision.agentRevisionId → DeploymentRoute → RouteSet
+      return db
+        .select(routeSourceRefSelect)
+        .from(routeActivation)
+        .innerJoin(deploymentRouteTable, eq(routeActivation.routeId, deploymentRouteTable.id))
+        .innerJoin(routeRevision, eq(routeActivation.routeRevisionId, routeRevision.id))
+        .innerJoin(
+          deploymentRouteSetTable,
+          eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+        )
+        .where(and(latestActivationCondition, eq(routeRevision.agentRevisionId, agentRevisionId)));
+    },
 
- async listRouteIdsByRuntimeRevision(runtimeRevisionId: string): Promise<RouteSourceRef[]> {
- // 权威：RouteRevision.runtimeRevisionId → DeploymentRoute → RouteSet
- return db
- .select(routeSourceRefSelect)
- .from(routeActivation)
- .innerJoin(
- deploymentRouteTable,
- eq(routeActivation.routeId, deploymentRouteTable.id),
- )
- .innerJoin(
- routeRevision,
- eq(routeActivation.routeRevisionId, routeRevision.id),
- )
- .innerJoin(
- deploymentRouteSetTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(and(latestActivationCondition, eq(routeRevision.runtimeRevisionId, runtimeRevisionId)));
- },
+    async listRouteIdsByRuntimeRevision(runtimeRevisionId: string): Promise<RouteSourceRef[]> {
+      // 权威：RouteRevision.runtimeRevisionId → DeploymentRoute → RouteSet
+      return db
+        .select(routeSourceRefSelect)
+        .from(routeActivation)
+        .innerJoin(deploymentRouteTable, eq(routeActivation.routeId, deploymentRouteTable.id))
+        .innerJoin(routeRevision, eq(routeActivation.routeRevisionId, routeRevision.id))
+        .innerJoin(
+          deploymentRouteSetTable,
+          eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+        )
+        .where(
+          and(latestActivationCondition, eq(routeRevision.runtimeRevisionId, runtimeRevisionId)),
+        );
+    },
 
- async listRouteIdsByAgent(agentId: string): Promise<RouteSourceRef[]> {
- // 权威：DeploymentRouteSet.agentId → DeploymentRoute
- return db
- .select(routeSourceRefSelect)
- .from(deploymentRouteSetTable)
- .innerJoin(
- deploymentRouteTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(eq(deploymentRouteSetTable.agentId, agentId));
- },
+    async listRouteIdsByAgent(agentId: string): Promise<RouteSourceRef[]> {
+      // 权威：DeploymentRouteSet.agentId → DeploymentRoute
+      return db
+        .select(routeSourceRefSelect)
+        .from(deploymentRouteSetTable)
+        .innerJoin(
+          deploymentRouteTable,
+          eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+        )
+        .where(eq(deploymentRouteSetTable.agentId, agentId));
+    },
 
- async listRouteIdsByRuntime(runtimeId: string): Promise<RouteSourceRef[]> {
- // 权威：RuntimeRevision.runtimeId → RouteRevision.runtimeRevisionId → DeploymentRoute → RouteSet
- const revisions = await db
- .select({ id: runtimeRevisionTable.id })
- .from(runtimeRevisionTable)
- .where(eq(runtimeRevisionTable.runtimeId, runtimeId));
- if (revisions.length === 0) return [];
- const revisionIds = revisions.map((r) => r.id);
- return db
- .select(routeSourceRefSelect)
- .from(routeActivation)
- .innerJoin(
- deploymentRouteTable,
- eq(routeActivation.routeId, deploymentRouteTable.id),
- )
- .innerJoin(
- routeRevision,
- eq(routeActivation.routeRevisionId, routeRevision.id),
- )
- .innerJoin(
- deploymentRouteSetTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(and(latestActivationCondition, inArray(routeRevision.runtimeRevisionId, revisionIds)));
- },
+    async listRouteIdsByRuntime(runtimeId: string): Promise<RouteSourceRef[]> {
+      // 权威：RuntimeRevision.runtimeId → RouteRevision.runtimeRevisionId → DeploymentRoute → RouteSet
+      const revisions = await db
+        .select({ id: runtimeRevisionTable.id })
+        .from(runtimeRevisionTable)
+        .where(eq(runtimeRevisionTable.runtimeId, runtimeId));
+      if (revisions.length === 0) return [];
+      const revisionIds = revisions.map((r) => r.id);
+      return db
+        .select(routeSourceRefSelect)
+        .from(routeActivation)
+        .innerJoin(deploymentRouteTable, eq(routeActivation.routeId, deploymentRouteTable.id))
+        .innerJoin(routeRevision, eq(routeActivation.routeRevisionId, routeRevision.id))
+        .innerJoin(
+          deploymentRouteSetTable,
+          eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+        )
+        .where(
+          and(latestActivationCondition, inArray(routeRevision.runtimeRevisionId, revisionIds)),
+        );
+    },
 
- async listRouteIdsByPolicyRevision(policyRevisionId: string): Promise<RouteSourceRef[]> {
- // 权威：RouteRevision.policyRevisionId → DeploymentRoute → RouteSet
- return db
- .select(routeSourceRefSelect)
- .from(routeActivation)
- .innerJoin(
- deploymentRouteTable,
- eq(routeActivation.routeId, deploymentRouteTable.id),
- )
- .innerJoin(
- routeRevision,
- eq(routeActivation.routeRevisionId, routeRevision.id),
- )
- .innerJoin(
- deploymentRouteSetTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(and(latestActivationCondition, eq(routeRevision.policyRevisionId, policyRevisionId)));
- },
+    async listRouteIdsByPolicyRevision(policyRevisionId: string): Promise<RouteSourceRef[]> {
+      // 权威：RouteRevision.policyRevisionId → DeploymentRoute → RouteSet
+      return db
+        .select(routeSourceRefSelect)
+        .from(routeActivation)
+        .innerJoin(deploymentRouteTable, eq(routeActivation.routeId, deploymentRouteTable.id))
+        .innerJoin(routeRevision, eq(routeActivation.routeRevisionId, routeRevision.id))
+        .innerJoin(
+          deploymentRouteSetTable,
+          eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+        )
+        .where(
+          and(latestActivationCondition, eq(routeRevision.policyRevisionId, policyRevisionId)),
+        );
+    },
 
- async listRouteIdsByAttestation(attestationId: string): Promise<RouteSourceRef[]> {
- // 权威路径：
- // attestationId → PublicationRecord where JSON_CONTAINS(attestationIds, attestationId)
- // → subjectRevisionId (agentRevisionId or runtimeRevisionId)
- // → RouteRevision → DeploymentRoute → RouteSet
- const pubs = await db
- .select({
- subjectRevisionId: publicationRecord.subjectRevisionId,
- subjectType: publicationRecord.subjectType,
- })
- .from(publicationRecord)
- .where(
- sql`JSON_CONTAINS(${publicationRecord.attestationIds}, ${JSON.stringify(attestationId)})`,
- );
- if (pubs.length === 0) return [];
+    async listRouteIdsByAttestation(attestationId: string): Promise<RouteSourceRef[]> {
+      // 权威路径：
+      // attestationId → PublicationRecord where JSON_CONTAINS(attestationIds, attestationId)
+      // → subjectRevisionId (agentRevisionId or runtimeRevisionId)
+      // → RouteRevision → DeploymentRoute → RouteSet
+      const pubs = await db
+        .select({
+          subjectRevisionId: publicationRecord.subjectRevisionId,
+          subjectType: publicationRecord.subjectType,
+        })
+        .from(publicationRecord)
+        .where(
+          sql`JSON_CONTAINS(${publicationRecord.attestationIds}, ${JSON.stringify(attestationId)})`,
+        );
+      if (pubs.length === 0) return [];
 
- const agentRevisionIds = pubs
- .filter((p) => p.subjectType === "agent_revision")
- .map((p) => p.subjectRevisionId);
- const runtimeRevisionIds = pubs
- .filter((p) => p.subjectType === "runtime_revision")
- .map((p) => p.subjectRevisionId);
+      const agentRevisionIds = pubs
+        .filter((p) => p.subjectType === "agent_revision")
+        .map((p) => p.subjectRevisionId);
+      const runtimeRevisionIds = pubs
+        .filter((p) => p.subjectType === "runtime_revision")
+        .map((p) => p.subjectRevisionId);
 
- const results: RouteSourceRef[] = [];
+      const results: RouteSourceRef[] = [];
 
- if (agentRevisionIds.length > 0) {
- const agentRows = await db
- .select(routeSourceRefSelect)
- .from(routeActivation)
- .innerJoin(
- deploymentRouteTable,
- eq(routeActivation.routeId, deploymentRouteTable.id),
- )
- .innerJoin(
- routeRevision,
- eq(routeActivation.routeRevisionId, routeRevision.id),
- )
- .innerJoin(
- deploymentRouteSetTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(and(latestActivationCondition, inArray(routeRevision.agentRevisionId, agentRevisionIds)));
- results.push(...agentRows);
- }
+      if (agentRevisionIds.length > 0) {
+        const agentRows = await db
+          .select(routeSourceRefSelect)
+          .from(routeActivation)
+          .innerJoin(deploymentRouteTable, eq(routeActivation.routeId, deploymentRouteTable.id))
+          .innerJoin(routeRevision, eq(routeActivation.routeRevisionId, routeRevision.id))
+          .innerJoin(
+            deploymentRouteSetTable,
+            eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+          )
+          .where(
+            and(
+              latestActivationCondition,
+              inArray(routeRevision.agentRevisionId, agentRevisionIds),
+            ),
+          );
+        results.push(...agentRows);
+      }
 
- if (runtimeRevisionIds.length > 0) {
- const runtimeRows = await db
- .select(routeSourceRefSelect)
- .from(routeActivation)
- .innerJoin(
- deploymentRouteTable,
- eq(routeActivation.routeId, deploymentRouteTable.id),
- )
- .innerJoin(
- routeRevision,
- eq(routeActivation.routeRevisionId, routeRevision.id),
- )
- .innerJoin(
- deploymentRouteSetTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(and(latestActivationCondition, inArray(routeRevision.runtimeRevisionId, runtimeRevisionIds)));
- results.push(...runtimeRows);
- }
+      if (runtimeRevisionIds.length > 0) {
+        const runtimeRows = await db
+          .select(routeSourceRefSelect)
+          .from(routeActivation)
+          .innerJoin(deploymentRouteTable, eq(routeActivation.routeId, deploymentRouteTable.id))
+          .innerJoin(routeRevision, eq(routeActivation.routeRevisionId, routeRevision.id))
+          .innerJoin(
+            deploymentRouteSetTable,
+            eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+          )
+          .where(
+            and(
+              latestActivationCondition,
+              inArray(routeRevision.runtimeRevisionId, runtimeRevisionIds),
+            ),
+          );
+        results.push(...runtimeRows);
+      }
 
- // 去重（同一 routeId 可能通过 agent 和 runtime 两条路径命中）
- const seen = new Set<string>();
- return results.filter((r) => {
- if (seen.has(r.routeId)) return false;
- seen.add(r.routeId);
- return true;
- });
- },
+      // 去重（同一 routeId 可能通过 agent 和 runtime 两条路径命中）
+      const seen = new Set<string>();
+      return results.filter((r) => {
+        if (seen.has(r.routeId)) return false;
+        seen.add(r.routeId);
+        return true;
+      });
+    },
 
- async listAllCurrentlyActivatedRouteIds(): Promise<RouteSourceRef[]> {
- // 权威：存在 latest RouteActivation 的全部 Route；disabled 也必须重建为真实 ineligible 投影。
- return db
- .select(routeSourceRefSelect)
- .from(routeActivation)
- .innerJoin(
- deploymentRouteTable,
- eq(routeActivation.routeId, deploymentRouteTable.id),
- )
- .innerJoin(
- deploymentRouteSetTable,
- eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
- )
- .where(latestActivationCondition);
- },
- };
+    async listAllCurrentlyActivatedRouteIds(): Promise<RouteSourceRef[]> {
+      // 权威：存在 latest RouteActivation 的全部 Route；disabled 也必须重建为真实 ineligible 投影。
+      return db
+        .select(routeSourceRefSelect)
+        .from(routeActivation)
+        .innerJoin(deploymentRouteTable, eq(routeActivation.routeId, deploymentRouteTable.id))
+        .innerJoin(
+          deploymentRouteSetTable,
+          eq(deploymentRouteTable.routeSetId, deploymentRouteSetTable.id),
+        )
+        .where(latestActivationCondition);
+    },
+  };
 }
 
 /** 单例 — 默认使用全局 db。 */

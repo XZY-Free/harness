@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  etagMismatchTable,
+  parseRouteSetEtag,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
+import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
   apiError,
@@ -45,14 +53,6 @@ import {
   RouteSetVersionConflictError,
 } from "@/lib/routes/domain/route-revision";
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  etagMismatchTable,
-  parseRouteSetEtag,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 
@@ -308,15 +308,13 @@ export async function PUT(
 
     // 8. 返回 200 + ETag
     const etag = `route-set-${result.routeSetVersionNo}`;
-    return apiSuccess(buildActivationResponse(result),
-      {
-        status: 200,
-        headers: {
-          [REQUEST_ID_HEADER]: requestId,
-          ...etagHeader(etag),
-        },
+    return apiSuccess(buildActivationResponse(result), {
+      status: 200,
+      headers: {
+        [REQUEST_ID_HEADER]: requestId,
+        ...etagHeader(etag),
       },
-    );
+    });
   } catch (err) {
     await failRecord(recordId);
     if (err instanceof RouteSetNotFoundError) {

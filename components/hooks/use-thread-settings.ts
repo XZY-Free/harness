@@ -87,9 +87,7 @@ interface UseThreadSettingsParams {
 }
 
 /** Thread 设置 Hook。 */
-export function useThreadSettings({
-  threadId,
-}: UseThreadSettingsParams): UseThreadSettingsResult {
+export function useThreadSettings({ threadId }: UseThreadSettingsParams): UseThreadSettingsResult {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ClientVisibleError | null>(null);
 

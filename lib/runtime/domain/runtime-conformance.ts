@@ -16,13 +16,13 @@
  */
 
 export {
- ALL_CONFORMANCE_CASES,
- MANDATORY_GATE_CASES,
- RuntimeConformanceCaseFailedError,
- type ConformanceCaseId,
- type ConformanceCaseResult,
- type ConformanceGateResult,
- validateConformanceGate,
+  ALL_CONFORMANCE_CASES,
+  MANDATORY_GATE_CASES,
+  RuntimeConformanceCaseFailedError,
+  type ConformanceCaseId,
+  type ConformanceCaseResult,
+  type ConformanceGateResult,
+  validateConformanceGate,
 } from "@/lib/runtime/domain/runtime-revision-publication-policy";
 
 /**
@@ -36,13 +36,13 @@ export {
  * @returns missing=空数组表示子集满足；非空表示缺失的 required capabilities。
  */
 export function isCapabilitySubset(
- agentRequiredCapabilities: string[],
- runtimeCapabilities: string[],
+  agentRequiredCapabilities: string[],
+  runtimeCapabilities: string[],
 ): { satisfied: boolean; missing: string[] } {
- const runtimeSet = new Set(runtimeCapabilities);
- const missing = agentRequiredCapabilities.filter((cap) => !runtimeSet.has(cap));
- return {
- satisfied: missing.length === 0,
- missing,
- };
+  const runtimeSet = new Set(runtimeCapabilities);
+  const missing = agentRequiredCapabilities.filter((cap) => !runtimeSet.has(cap));
+  return {
+    satisfied: missing.length === 0,
+    missing,
+  };
 }

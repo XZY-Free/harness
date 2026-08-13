@@ -4,20 +4,20 @@
  * 使用真实 Ed25519 密钥对生成签名 Envelope，验证成功和各种失败场景。
  */
 
-import { describe, expect, it } from "vitest";
-import {
-  RUNTIME_CONFORMANCE_PREDICATE_TYPE,
-  createDSSEConformanceVerifier,
-} from "./runtime-conformance-verifier";
+import { createPrivateKey, sign as cryptoSign } from "node:crypto";
+import { computeDssePae } from "@/lib/crypto/dsse";
+import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
+import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   buildDsseConformanceEnvelope,
   buildTestConformanceReport,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
-import { createPrivateKey, sign as cryptoSign } from "node:crypto";
-import { computeDssePae } from "@/lib/crypto/dsse";
-import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
-import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
+import { describe, expect, it } from "vitest";
+import {
+  RUNTIME_CONFORMANCE_PREDICATE_TYPE,
+  createDSSEConformanceVerifier,
+} from "./runtime-conformance-verifier";
 
 const RUNNER_IDENTITY = "ci/runtime-conformance";
 
@@ -144,7 +144,12 @@ describe("createDSSEConformanceVerifier", () => {
     const report = buildTestConformanceReport("rev-1");
     const statement = {
       _type: "https://in-toto.io/Statement/v0",
-      subject: [{ name: "runtime-artifact", digest: { sha256: report.runtimeArtifactDigest.replace("sha256:", "") } }],
+      subject: [
+        {
+          name: "runtime-artifact",
+          digest: { sha256: report.runtimeArtifactDigest.replace("sha256:", "") },
+        },
+      ],
       predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
       predicate: report,
     };
@@ -161,7 +166,12 @@ describe("createDSSEConformanceVerifier", () => {
     const report = buildTestConformanceReport("rev-1");
     const statement = {
       _type: "https://in-toto.io/Statement/v1",
-      subject: [{ name: "runtime-artifact", digest: { sha256: report.runtimeArtifactDigest.replace("sha256:", "") } }],
+      subject: [
+        {
+          name: "runtime-artifact",
+          digest: { sha256: report.runtimeArtifactDigest.replace("sha256:", "") },
+        },
+      ],
       predicateType: "https://example.com/wrong-predicate",
       predicate: report,
     };

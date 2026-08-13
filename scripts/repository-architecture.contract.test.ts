@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -16,7 +16,13 @@ const SCAN_ROOTS = [
 ];
 const retiredVersion = `v${11}`;
 const forbidden = new RegExp(
-  [`/${retiredVersion}/`, `/${retiredVersion.toUpperCase()}/`, `${retiredVersion}-`, `use${retiredVersion.toUpperCase()}`, `build${retiredVersion.toUpperCase()}`].join("|"),
+  [
+    `/${retiredVersion}/`,
+    `/${retiredVersion.toUpperCase()}/`,
+    `${retiredVersion}-`,
+    `use${retiredVersion.toUpperCase()}`,
+    `build${retiredVersion.toUpperCase()}`,
+  ].join("|"),
 );
 
 function sourceFiles(path: string): string[] {

@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * GET /admin/api/v1/workload-tokens:revoked — 查询已撤销的 Workload Token 列表（S12-W05）。
  *
@@ -15,13 +22,6 @@
 import { db } from "@/lib/db/client";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import { workloadTokenRevocationTable } from "@/lib/persistence/schema/workload-token-revocation";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 import { and, desc, eq, lt } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";

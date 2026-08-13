@@ -1,3 +1,5 @@
+import type { RevisionExecutionEvidenceReader } from "@/lib/control-plane/application/revision-execution-evidence-reader";
+import type { RevisionExecutionEvidenceSnapshot } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import {
   type ActivateRouteSetCommand,
   type ActivateRouteSetResult,
@@ -24,8 +26,6 @@ import type {
   RouteSetRow,
   RuntimeRevisionSummary,
 } from "@/lib/routes/persistence/route-set-activation-store";
-import type { RevisionExecutionEvidenceReader } from "@/lib/control-plane/application/revision-execution-evidence-reader";
-import type { RevisionExecutionEvidenceSnapshot } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import { describe, expect, it, vi } from "vitest";
 
 // ─── 测试 Fixtures ──────────────────────────────────────────
@@ -65,33 +65,57 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
   tenantId: TENANT_ID,
   agentRevisionId: BASE_AGENT_REVISION.id,
   agentArtifactEvidence: {
-    tenantId: TENANT_ID, artifactType: "agent_revision", artifactRevisionId: BASE_AGENT_REVISION.id,
-    artifactId: "art-1", artifactDigest: "sha256:a", attestationId: "att-1",
-    verificationState: "verified" as const, attestationFormat: "in_toto_dsse" as const,
-    verifiedAt: new Date(), revokedAt: null, revocationRecordId: null,
-    verificationPolicyRevisionId: null, envelopeDigest: null,
+    tenantId: TENANT_ID,
+    artifactType: "agent_revision",
+    artifactRevisionId: BASE_AGENT_REVISION.id,
+    artifactId: "art-1",
+    artifactDigest: "sha256:a",
+    attestationId: "att-1",
+    verificationState: "verified" as const,
+    attestationFormat: "in_toto_dsse" as const,
+    verifiedAt: new Date(),
+    revokedAt: null,
+    revocationRecordId: null,
+    verificationPolicyRevisionId: null,
+    envelopeDigest: null,
   },
   agentPublication: {
-    publicationRecordId: "pub-1", subjectType: "agent_revision" as const,
-    subjectRevisionId: BASE_AGENT_REVISION.id, evidenceSetDigest: "sha256:e",
-    attestationIds: ["att-1"], conformanceRunId: null,
-    withdrawalRecordId: null, publishedAt: new Date(),
+    publicationRecordId: "pub-1",
+    subjectType: "agent_revision" as const,
+    subjectRevisionId: BASE_AGENT_REVISION.id,
+    evidenceSetDigest: "sha256:e",
+    attestationIds: ["att-1"],
+    conformanceRunId: null,
+    withdrawalRecordId: null,
+    publishedAt: new Date(),
   },
   agentLifecycleState: "active" as const,
   agentRevisionState: "published" as const,
   runtimeRevisionId: BASE_RUNTIME_REVISION.id,
   runtimeArtifactEvidence: {
-    tenantId: TENANT_ID, artifactType: "runtime_revision", artifactRevisionId: BASE_RUNTIME_REVISION.id,
-    artifactId: "art-2", artifactDigest: "sha256:b", attestationId: "att-2",
-    verificationState: "verified" as const, attestationFormat: "in_toto_dsse" as const,
-    verifiedAt: new Date(), revokedAt: null, revocationRecordId: null,
-    verificationPolicyRevisionId: null, envelopeDigest: null,
+    tenantId: TENANT_ID,
+    artifactType: "runtime_revision",
+    artifactRevisionId: BASE_RUNTIME_REVISION.id,
+    artifactId: "art-2",
+    artifactDigest: "sha256:b",
+    attestationId: "att-2",
+    verificationState: "verified" as const,
+    attestationFormat: "in_toto_dsse" as const,
+    verifiedAt: new Date(),
+    revokedAt: null,
+    revocationRecordId: null,
+    verificationPolicyRevisionId: null,
+    envelopeDigest: null,
   },
   runtimePublication: {
-    publicationRecordId: "pub-2", subjectType: "runtime_revision" as const,
-    subjectRevisionId: BASE_RUNTIME_REVISION.id, evidenceSetDigest: "sha256:f",
-    attestationIds: ["att-2"], conformanceRunId: "conf-1",
-    withdrawalRecordId: null, publishedAt: new Date(),
+    publicationRecordId: "pub-2",
+    subjectType: "runtime_revision" as const,
+    subjectRevisionId: BASE_RUNTIME_REVISION.id,
+    evidenceSetDigest: "sha256:f",
+    attestationIds: ["att-2"],
+    conformanceRunId: "conf-1",
+    withdrawalRecordId: null,
+    publishedAt: new Date(),
   },
   runtimeConformance: { overallResult: "passed" as const, conformanceRunId: "conf-1" } as any,
   runtimeLifecycleState: "active" as const,
@@ -195,7 +219,13 @@ function createMockStore(overrides: {
       operation: (session: RouteSetActivationSession) => Promise<T>,
     ): Promise<T> => {
       const mockDbOrTx = {
-        select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve([{ agentInterfaceRequirementsJson: null }]) }) }) }),
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              limit: () => Promise.resolve([{ agentInterfaceRequirementsJson: null }]),
+            }),
+          }),
+        }),
       } as any;
       const session: RouteSetActivationSession = {
         getDbOrTx: vi.fn(() => mockDbOrTx),
@@ -204,9 +234,7 @@ function createMockStore(overrides: {
         findLatestActivation: vi.fn(
           async (routeId: string) => overrides.latestActivations?.get(routeId) ?? null,
         ),
-        findRevisionById: vi.fn(
-          async (id: string) => overrides.revisionsById?.get(id) ?? null,
-        ),
+        findRevisionById: vi.fn(async (id: string) => overrides.revisionsById?.get(id) ?? null),
         findAgentRevision: vi.fn(async (id: string) => agentRevisions.get(id) ?? null),
         findRuntimeRevision: vi.fn(async (id: string) => runtimeRevisions.get(id) ?? null),
         resolveOrCreateRouteIdentity: vi.fn(
@@ -471,7 +499,11 @@ describe("activateRouteSet", () => {
 
   it("单条 10000 权重激活 — 成功", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({ store, evidenceReaderForTest: mockEvidenceReader, now: () => NOW });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
 
     const result = await activateRouteSet(makeCommand());
     expect(result.routeSetId).toBe(ROUTE_SET_ID);
@@ -483,7 +515,11 @@ describe("activateRouteSet", () => {
 
   it("两条 5000/5000 同 Group 原子激活 — 成功", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({ store, evidenceReaderForTest: mockEvidenceReader, now: () => NOW });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
 
     const result = await activateRouteSet(
       makeCommand({
@@ -517,7 +553,11 @@ describe("activateRouteSet", () => {
 
   it("权重合计不为 10000 → RouteSetRequiresAtomicUpdateError", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({ store, evidenceReaderForTest: mockEvidenceReader, now: () => NOW });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
 
     await expect(
       activateRouteSet(
@@ -551,7 +591,11 @@ describe("activateRouteSet", () => {
 
   it("不同 Group 相同 Selector 和 Priority → RouteSetRequiresAtomicUpdateError", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({ store, evidenceReaderForTest: mockEvidenceReader, now: () => NOW });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
 
     await expect(
       activateRouteSet(
@@ -585,7 +629,11 @@ describe("activateRouteSet", () => {
 
   it("RouteSet 版本冲突 → RouteSetVersionConflictError", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({ store, evidenceReaderForTest: mockEvidenceReader, now: () => NOW });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
 
     await expect(activateRouteSet(makeCommand({ expectedVersionNo: 999 }))).rejects.toThrow(
       RouteSetVersionConflictError,
@@ -606,7 +654,11 @@ describe("activateRouteSet", () => {
       loadCurrentEvidence: vi.fn(async () => draftSnapshot),
       loadExactEvidence: vi.fn(async () => draftSnapshot),
     };
-    const activateRouteSet = createActivateRouteSet({ store, evidenceReaderForTest: draftReader, now: () => NOW });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: draftReader,
+      now: () => NOW,
+    });
 
     await expect(
       activateRouteSet(
@@ -640,14 +692,22 @@ describe("activateRouteSet", () => {
       loadCurrentEvidence: vi.fn(async () => noAttestationSnapshot),
       loadExactEvidence: vi.fn(async () => noAttestationSnapshot),
     };
-    const activateRouteSet = createActivateRouteSet({ store, evidenceReaderForTest: noAttestationReader, now: () => NOW });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: noAttestationReader,
+      now: () => NOW,
+    });
 
     await expect(activateRouteSet(makeCommand())).rejects.toThrow("执行资格不足");
   });
 
   it("actor tenantId 与 command tenantId 不一致 → Error", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({ store, evidenceReaderForTest: mockEvidenceReader, now: () => NOW });
+    const activateRouteSet = createActivateRouteSet({
+      store,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
 
     await expect(
       activateRouteSet(
@@ -671,20 +731,36 @@ describe("activateRouteSet", () => {
     const origStore = store;
     const storeWithCapDb = {
       ...origStore,
-      transaction: async <T>(operation: (session: RouteSetActivationSession) => Promise<T>): Promise<T> => {
+      transaction: async <T>(
+        operation: (session: RouteSetActivationSession) => Promise<T>,
+      ): Promise<T> => {
         return origStore.transaction(async (session) => {
           const origGetDbOrTx = session.getDbOrTx.bind(session);
           return operation({
             ...session,
-            getDbOrTx: () => ({
-              ...origGetDbOrTx(),
-              select: () => ({ from: () => ({ where: () => ({ limit: () => Promise.resolve([{ agentInterfaceRequirementsJson: { required: ["gpu"] } }]) }) }) }),
-            }) as any,
+            getDbOrTx: () =>
+              ({
+                ...origGetDbOrTx(),
+                select: () => ({
+                  from: () => ({
+                    where: () => ({
+                      limit: () =>
+                        Promise.resolve([
+                          { agentInterfaceRequirementsJson: { required: ["gpu"] } },
+                        ]),
+                    }),
+                  }),
+                }),
+              }) as any,
           });
         });
       },
     };
-    const activateRouteSet = createActivateRouteSet({ store: storeWithCapDb, evidenceReaderForTest: mockEvidenceReader, now: () => NOW });
+    const activateRouteSet = createActivateRouteSet({
+      store: storeWithCapDb,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
 
     await expect(activateRouteSet(makeCommand())).rejects.toThrow("执行资格不足");
   });
@@ -713,10 +789,7 @@ describe("activateRouteSet", () => {
   it("历史 Activation 不属于当前 tenant/Route/RouteSet 时 fail-closed", async () => {
     const store = createMockStore({
       latestActivations: new Map([
-        [
-          "route-1",
-          makeActivationRecord({ tenantId: "other-tenant", routeId: "route-1" }),
-        ],
+        ["route-1", makeActivationRecord({ tenantId: "other-tenant", routeId: "route-1" })],
       ]),
     });
     const activateRouteSet = createActivateRouteSet({

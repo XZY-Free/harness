@@ -54,7 +54,9 @@ export function WebNewThreadPage() {
   return (
     <NewThreadPage
       agents={agents}
-      defaultAgentId={agents.find((agent) => agent.agentKey === "default")?.id ?? agents[0]?.id ?? ""}
+      defaultAgentId={
+        agents.find((agent) => agent.agentKey === "default")?.id ?? agents[0]?.id ?? ""
+      }
       error={error}
       onSubmit={async (submission) => {
         setError(null);
@@ -64,9 +66,7 @@ export function WebNewThreadPage() {
           router.replace(`/chat/${thread.id}`);
           return true;
         } catch (submitError) {
-          setError(
-            submitError instanceof Error ? submitError.message : "发送失败，请稍后重试。",
-          );
+          setError(submitError instanceof Error ? submitError.message : "发送失败，请稍后重试。");
           return false;
         }
       }}

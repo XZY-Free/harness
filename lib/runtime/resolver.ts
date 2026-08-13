@@ -10,12 +10,12 @@ import { type RuntimeType, runtimeConfig } from "@/lib/config";
  * 避免 Next.js 构建 trace 把 preview-runtime 及其依赖 trace 进 server bundle。
  */
 export function resolveRuntimeTypeForThread(
- thread: { runtimeType?: string | null } | null | undefined,
- skillVersion: { runtimeType?: string | null } | null | undefined,
+  thread: { runtimeType?: string | null } | null | undefined,
+  skillVersion: { runtimeType?: string | null } | null | undefined,
 ): RuntimeType {
- const candidates = [thread?.runtimeType, skillVersion?.runtimeType, runtimeConfig.defaultType];
- for (const c of candidates) {
- if (c === "host" || c === "container") return c;
- }
- return "host";
+  const candidates = [thread?.runtimeType, skillVersion?.runtimeType, runtimeConfig.defaultType];
+  for (const c of candidates) {
+    if (c === "host" || c === "container") return c;
+  }
+  return "host";
 }

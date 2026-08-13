@@ -20,51 +20,51 @@ import { PROTOCOL_VERSION } from "./protocol";
 
 /** 认证挑战 */
 export const challengeMessageSchema = z.object({
- type: z.literal("challenge"),
- /** 随机挑战值（base64，32 字节） */
- challenge: z.string().min(1),
- /** Server ed25519 公钥（base64），Desktop 用于验证后续 RPC 签名 */
- serverPublicKey: z.string().min(1),
- /** Server 支持的协议版本 */
- protocolVersion: z.literal(PROTOCOL_VERSION),
+  type: z.literal("challenge"),
+  /** 随机挑战值（base64，32 字节） */
+  challenge: z.string().min(1),
+  /** Server ed25519 公钥（base64），Desktop 用于验证后续 RPC 签名 */
+  serverPublicKey: z.string().min(1),
+  /** Server 支持的协议版本 */
+  protocolVersion: z.literal(PROTOCOL_VERSION),
 });
 
 /** 认证成功 */
 export const authOkMessageSchema = z.object({
- type: z.literal("auth_ok"),
- protocolVersion: z.literal(PROTOCOL_VERSION),
- /** 设备在 Server 的内部 ID */
- deviceRecordId: z.string().min(1),
- /** 当前 Server 时间（epoch ms） */
- serverTime: z.number().int().positive(),
+  type: z.literal("auth_ok"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  /** 设备在 Server 的内部 ID */
+  deviceRecordId: z.string().min(1),
+  /** 当前 Server 时间（epoch ms） */
+  serverTime: z.number().int().positive(),
 });
 
 /** 认证失败 */
 export const authFailedMessageSchema = z.object({
- type: z.literal("auth_failed"),
- error: z.object({
- code: z.string(),
- message: z.string(),
- }),
+  type: z.literal("auth_failed"),
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+  }),
 });
 
 /** RPC 请求（Server → Desktop） */
 export const rpcRequestMessageSchema = z.object({
- type: z.literal("rpc"),
- envelope: z.unknown(), // RpcRequestEnvelope，在 rpc-envelope.ts 中定义
+  type: z.literal("rpc"),
+  envelope: z.unknown(), // RpcRequestEnvelope，在 rpc-envelope.ts 中定义
 });
 
 /** 心跳 ping */
 export const heartbeatMessageSchema = z.object({
- type: z.literal("heartbeat"),
- timestamp: z.number().int().positive(),
+  type: z.literal("heartbeat"),
+  timestamp: z.number().int().positive(),
 });
 
 /** Lease 撤销通知 */
 export const leaseRevokedMessageSchema = z.object({
- type: z.literal("lease_revoked"),
- threadId: z.string().min(1),
- reason: z.string(),
+  type: z.literal("lease_revoked"),
+  threadId: z.string().min(1),
+  reason: z.string(),
 });
 
 /**
@@ -77,16 +77,16 @@ export const leaseRevokedMessageSchema = z.object({
  * ：实现双重强制 — Server lease + Desktop 本地锁。
  */
 export const leaseLockedMessageSchema = z.object({
- type: z.literal("lease_locked"),
- threadId: z.string().min(1),
- /** 持有锁的设备 ID */
- deviceId: z.string().min(1),
- /** 持有锁的用户 ID */
- userId: z.string().min(1),
- /** 绑定的 ThreadRun ID（AI 锁标识） */
- runId: z.string().min(1),
- /** 锁过期时间（epoch ms） */
- expiresAt: z.number().int().positive(),
+  type: z.literal("lease_locked"),
+  threadId: z.string().min(1),
+  /** 持有锁的设备 ID */
+  deviceId: z.string().min(1),
+  /** 持有锁的用户 ID */
+  userId: z.string().min(1),
+  /** 绑定的 ThreadRun ID（AI 锁标识） */
+  runId: z.string().min(1),
+  /** 锁过期时间（epoch ms） */
+  expiresAt: z.number().int().positive(),
 });
 
 /**
@@ -102,10 +102,10 @@ export const leaseLockedMessageSchema = z.object({
  * 注意：cancel 场景使用 command_cancelled 消息而非 lease_released。
  */
 export const leaseReleasedMessageSchema = z.object({
- type: z.literal("lease_released"),
- threadId: z.string().min(1),
- /** 要释放的 ThreadRun ID */
- runId: z.string().min(1),
+  type: z.literal("lease_released"),
+  threadId: z.string().min(1),
+  /** 要释放的 ThreadRun ID */
+  runId: z.string().min(1),
 });
 
 /**
@@ -119,21 +119,21 @@ export const leaseReleasedMessageSchema = z.object({
  * 迟到的取消通知（命令已完成）Desktop 应忽略。
  */
 export const commandCancelledMessageSchema = z.object({
- type: z.literal("command_cancelled"),
- threadId: z.string().min(1),
- /** 被取消的 runId */
- runId: z.string().min(1),
- /** 取消原因（user_takeover / server_shutdown / timeout） */
- reason: z.string(),
+  type: z.literal("command_cancelled"),
+  threadId: z.string().min(1),
+  /** 被取消的 runId */
+  runId: z.string().min(1),
+  /** 取消原因（user_takeover / server_shutdown / timeout） */
+  reason: z.string(),
 });
 
 /** 通用错误消息 */
 export const serverErrorMessageSchema = z.object({
- type: z.literal("error"),
- error: z.object({
- code: z.string(),
- message: z.string(),
- }),
+  type: z.literal("error"),
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+  }),
 });
 
 // ──────────────────────────────────────────────
@@ -142,41 +142,41 @@ export const serverErrorMessageSchema = z.object({
 
 /** 认证响应（签名挑战） */
 export const authMessageSchema = z.object({
- type: z.literal("auth"),
- /** 设备标识（Desktop 本地生成） */
- deviceId: z.string().min(1),
- /** 对 challenge 的 ed25519 签名（base64） */
- signature: z.string().min(1),
- /** Desktop 应用版本 */
- version: z.string().min(1),
- /** 设备名称 */
- name: z.string().min(1),
- /** Desktop 支持的协议版本 */
- protocolVersion: z.literal(PROTOCOL_VERSION),
+  type: z.literal("auth"),
+  /** 设备标识（Desktop 本地生成） */
+  deviceId: z.string().min(1),
+  /** 对 challenge 的 ed25519 签名（base64） */
+  signature: z.string().min(1),
+  /** Desktop 应用版本 */
+  version: z.string().min(1),
+  /** 设备名称 */
+  name: z.string().min(1),
+  /** Desktop 支持的协议版本 */
+  protocolVersion: z.literal(PROTOCOL_VERSION),
 });
 
 /** RPC 结果（Desktop → Server） */
 export const rpcResultMessageSchema = z.object({
- type: z.literal("rpc_result"),
- envelope: z.unknown(), // RpcResultEnvelope
+  type: z.literal("rpc_result"),
+  envelope: z.unknown(), // RpcResultEnvelope
 });
 
 /** 心跳 pong */
 export const heartbeatAckMessageSchema = z.object({
- type: z.literal("heartbeat_ack"),
- timestamp: z.number().int().positive(),
+  type: z.literal("heartbeat_ack"),
+  timestamp: z.number().int().positive(),
 });
 
 /** 请求获取 Thread 的 lease */
 export const leaseRequestMessageSchema = z.object({
- type: z.literal("lease_request"),
- threadId: z.string().min(1),
+  type: z.literal("lease_request"),
+  threadId: z.string().min(1),
 });
 
 /** 释放 Thread 的 lease */
 export const leaseReleaseMessageSchema = z.object({
- type: z.literal("lease_release"),
- threadId: z.string().min(1),
+  type: z.literal("lease_release"),
+  threadId: z.string().min(1),
 });
 
 /**
@@ -192,12 +192,12 @@ export const leaseReleaseMessageSchema = z.object({
  * Server 释放 lease 在后（保证 RPC 不会被路由到该设备）。
  */
 export const cancelCommandMessageSchema = z.object({
- type: z.literal("cancel_command"),
- threadId: z.string().min(1),
- /** 要取消的 runId */
- runId: z.string().min(1),
- /** 取消原因 */
- reason: z.string(),
+  type: z.literal("cancel_command"),
+  threadId: z.string().min(1),
+  /** 要取消的 runId */
+  runId: z.string().min(1),
+  /** 取消原因 */
+  reason: z.string(),
 });
 
 // ──────────────────────────────────────────────
@@ -206,26 +206,26 @@ export const cancelCommandMessageSchema = z.object({
 
 /** Server → Desktop 消息 schema 联合 */
 export const serverMessageSchema = z.discriminatedUnion("type", [
- challengeMessageSchema,
- authOkMessageSchema,
- authFailedMessageSchema,
- rpcRequestMessageSchema,
- heartbeatMessageSchema,
- leaseRevokedMessageSchema,
- leaseLockedMessageSchema,
- leaseReleasedMessageSchema,
- commandCancelledMessageSchema,
- serverErrorMessageSchema,
+  challengeMessageSchema,
+  authOkMessageSchema,
+  authFailedMessageSchema,
+  rpcRequestMessageSchema,
+  heartbeatMessageSchema,
+  leaseRevokedMessageSchema,
+  leaseLockedMessageSchema,
+  leaseReleasedMessageSchema,
+  commandCancelledMessageSchema,
+  serverErrorMessageSchema,
 ]);
 
 /** Desktop → Server 消息 schema 联合 */
 export const clientMessageSchema = z.discriminatedUnion("type", [
- authMessageSchema,
- rpcResultMessageSchema,
- heartbeatAckMessageSchema,
- leaseRequestMessageSchema,
- leaseReleaseMessageSchema,
- cancelCommandMessageSchema,
+  authMessageSchema,
+  rpcResultMessageSchema,
+  heartbeatAckMessageSchema,
+  leaseRequestMessageSchema,
+  leaseReleaseMessageSchema,
+  cancelCommandMessageSchema,
 ]);
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
@@ -253,31 +253,31 @@ export type CancelCommandMessage = z.infer<typeof cancelCommandMessageSchema>;
  * 序列化消息为 JSON 字符串。
  */
 export function serializeMessage(message: ServerMessage | ClientMessage): string {
- return JSON.stringify(message);
+  return JSON.stringify(message);
 }
 
 /**
  * 解析 Server → Desktop 消息。
  */
 export function parseServerMessage(
- raw: unknown,
+  raw: unknown,
 ): { ok: true; message: ServerMessage } | { ok: false; error: string } {
- const result = serverMessageSchema.safeParse(raw);
- if (result.success) {
- return { ok: true, message: result.data };
- }
- return { ok: false, error: result.error.message };
+  const result = serverMessageSchema.safeParse(raw);
+  if (result.success) {
+    return { ok: true, message: result.data };
+  }
+  return { ok: false, error: result.error.message };
 }
 
 /**
  * 解析 Desktop → Server 消息。
  */
 export function parseClientMessage(
- raw: unknown,
+  raw: unknown,
 ): { ok: true; message: ClientMessage } | { ok: false; error: string } {
- const result = clientMessageSchema.safeParse(raw);
- if (result.success) {
- return { ok: true, message: result.data };
- }
- return { ok: false, error: result.error.message };
+  const result = clientMessageSchema.safeParse(raw);
+  if (result.success) {
+    return { ok: true, message: result.data };
+  }
+  return { ok: false, error: result.error.message };
 }

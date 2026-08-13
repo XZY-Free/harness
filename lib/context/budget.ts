@@ -21,12 +21,12 @@
  * 不能静默丢掉约束。
  */
 import {
- type ContextFragment,
- type ExcludedFragment,
- type ExclusionReasonCode,
- FRAGMENT_PRIORITY_TIERS,
- type FragmentPriorityTier,
- assertContextFragment,
+  type ContextFragment,
+  type ExcludedFragment,
+  type ExclusionReasonCode,
+  FRAGMENT_PRIORITY_TIERS,
+  type FragmentPriorityTier,
+  assertContextFragment,
 } from "@/lib/context/fragment";
 
 // ─── 预算配置 ───────────────────────────────────────────────
@@ -42,16 +42,16 @@ import {
  * ToolResult 保留空间从可用输入预算中划出，保证最近 ToolResult 优先容纳。
  */
 export interface ContextBudgetConfig {
- totalBudget: number;
- modelOutputReserve: number;
- toolResultReserve: number;
+  totalBudget: number;
+  modelOutputReserve: number;
+  toolResultReserve: number;
 }
 
 /** 默认预算配置（可由调用方覆盖）。 */
 export const DEFAULT_BUDGET_CONFIG: ContextBudgetConfig = {
- totalBudget: 128_000,
- modelOutputReserve: 8_000,
- toolResultReserve: 16_000,
+  totalBudget: 128_000,
+  modelOutputReserve: 8_000,
+  toolResultReserve: 16_000,
 };
 
 // ─── 预算选择结果 ───────────────────────────────────────────
@@ -65,13 +65,13 @@ export const DEFAULT_BUDGET_CONFIG: ContextBudgetConfig = {
  * - failureReason：关键内容无法容纳时的失败原因（非空表示应显式失败或切换模型）。
  */
 export interface BudgetSelectionResult {
- selected: ContextFragment[];
- excluded: ExcludedFragment[];
- totalInputTokens: number;
- /** 可用输入预算（totalBudget - modelOutputReserve）。 */
- availableInputBudget: number;
- /** 关键内容无法容纳时的失败原因；非空调用方应显式失败。 */
- failureReason: string | null;
+  selected: ContextFragment[];
+  excluded: ExcludedFragment[];
+  totalInputTokens: number;
+  /** 可用输入预算（totalBudget - modelOutputReserve）。 */
+  availableInputBudget: number;
+  /** 关键内容无法容纳时的失败原因；非空调用方应显式失败。 */
+  failureReason: string | null;
 }
 
 // ─── 内部：去重 key ─────────────────────────────────────────
@@ -81,7 +81,7 @@ export interface BudgetSelectionResult {
  * 不同来源但相同正文视为重复，保留首个。
  */
 function dedupKey(fragment: ContextFragment): string {
- return fragment.contentHash;
+  return fragment.contentHash;
 }
 
 // ─── 预算选择 ───────────────────────────────────────────────
@@ -107,145 +107,145 @@ function dedupKey(fragment: ContextFragment): string {
  * @param config 预算配置；默认 DEFAULT_BUDGET_CONFIG。
  */
 export function selectFragmentsByBudget(
- candidates: readonly ContextFragment[],
- config: ContextBudgetConfig = DEFAULT_BUDGET_CONFIG,
+  candidates: readonly ContextFragment[],
+  config: ContextBudgetConfig = DEFAULT_BUDGET_CONFIG,
 ): BudgetSelectionResult {
- const availableInputBudget = Math.max(0, config.totalBudget - config.modelOutputReserve);
- const reservedForToolResults = Math.min(
- Math.max(0, config.toolResultReserve),
- availableInputBudget,
- );
- const regularInputBudget = availableInputBudget - reservedForToolResults;
- const selected: ContextFragment[] = [];
- const excluded: ExcludedFragment[] = [];
- const seenHashes = new Set<string>();
- let totalInputTokens = 0;
- let regularTokens = 0;
- let toolReserveTokens = 0;
- let failureReason: string | null = null;
+  const availableInputBudget = Math.max(0, config.totalBudget - config.modelOutputReserve);
+  const reservedForToolResults = Math.min(
+    Math.max(0, config.toolResultReserve),
+    availableInputBudget,
+  );
+  const regularInputBudget = availableInputBudget - reservedForToolResults;
+  const selected: ContextFragment[] = [];
+  const excluded: ExcludedFragment[] = [];
+  const seenHashes = new Set<string>();
+  let totalInputTokens = 0;
+  let regularTokens = 0;
+  let toolReserveTokens = 0;
+  let failureReason: string | null = null;
 
- for (const fragment of candidates) assertContextFragment(fragment);
+  for (const fragment of candidates) assertContextFragment(fragment);
 
- type SelectionUnit = {
- fragments: ContextFragment[];
- priorityTier: FragmentPriorityTier;
- operationId?: string;
- };
- const toolGroups = new Map<string, ContextFragment[]>();
- const units: SelectionUnit[] = [];
- for (const fragment of candidates) {
- if (
- fragment.kind === "tool" &&
- (fragment.sourceRef.type === "tool_call" || fragment.sourceRef.type === "tool_result")
- ) {
- const group = toolGroups.get(fragment.sourceRef.id) ?? [];
- group.push(fragment);
- toolGroups.set(fragment.sourceRef.id, group);
- } else {
- units.push({ fragments: [fragment], priorityTier: fragment.priorityTier });
- }
- }
- for (const [operationId, fragments] of toolGroups) {
- const hasCall = fragments.some((fragment) => fragment.sourceRef.type === "tool_call");
- const hasResult = fragments.some((fragment) => fragment.sourceRef.type === "tool_result");
- if (!hasCall || !hasResult) {
- for (const fragment of fragments) {
- excluded.push(
- toExcluded(
- fragment,
- "tool_pair_incomplete",
- `Tool operation ${operationId} 缺少 ${hasCall ? "tool_result" : "tool_call"}`,
- ),
- );
- }
- continue;
- }
- units.push({
- fragments,
- priorityTier: Math.min(
- ...fragments.map((fragment) => fragment.priorityTier),
- ) as FragmentPriorityTier,
- operationId,
- });
- }
- units.sort((a, b) => a.priorityTier - b.priorityTier);
+  type SelectionUnit = {
+    fragments: ContextFragment[];
+    priorityTier: FragmentPriorityTier;
+    operationId?: string;
+  };
+  const toolGroups = new Map<string, ContextFragment[]>();
+  const units: SelectionUnit[] = [];
+  for (const fragment of candidates) {
+    if (
+      fragment.kind === "tool" &&
+      (fragment.sourceRef.type === "tool_call" || fragment.sourceRef.type === "tool_result")
+    ) {
+      const group = toolGroups.get(fragment.sourceRef.id) ?? [];
+      group.push(fragment);
+      toolGroups.set(fragment.sourceRef.id, group);
+    } else {
+      units.push({ fragments: [fragment], priorityTier: fragment.priorityTier });
+    }
+  }
+  for (const [operationId, fragments] of toolGroups) {
+    const hasCall = fragments.some((fragment) => fragment.sourceRef.type === "tool_call");
+    const hasResult = fragments.some((fragment) => fragment.sourceRef.type === "tool_result");
+    if (!hasCall || !hasResult) {
+      for (const fragment of fragments) {
+        excluded.push(
+          toExcluded(
+            fragment,
+            "tool_pair_incomplete",
+            `Tool operation ${operationId} 缺少 ${hasCall ? "tool_result" : "tool_call"}`,
+          ),
+        );
+      }
+      continue;
+    }
+    units.push({
+      fragments,
+      priorityTier: Math.min(
+        ...fragments.map((fragment) => fragment.priorityTier),
+      ) as FragmentPriorityTier,
+      operationId,
+    });
+  }
+  units.sort((a, b) => a.priorityTier - b.priorityTier);
 
- for (const unit of units) {
- const duplicate = unit.fragments.find((fragment) => seenHashes.has(dedupKey(fragment)));
- if (duplicate) {
- for (const fragment of unit.fragments) {
- excluded.push(toExcluded(fragment, "duplicate", "与已选入 Fragment 内容重复"));
- }
- continue;
- }
+  for (const unit of units) {
+    const duplicate = unit.fragments.find((fragment) => seenHashes.has(dedupKey(fragment)));
+    if (duplicate) {
+      for (const fragment of unit.fragments) {
+        excluded.push(toExcluded(fragment, "duplicate", "与已选入 Fragment 内容重复"));
+      }
+      continue;
+    }
 
- const resultTokens = unit.fragments
- .filter((fragment) => fragment.sourceRef.type === "tool_result")
- .reduce((sum, fragment) => sum + fragment.tokenEstimate, 0);
- const nonResultTokens =
- unit.fragments.reduce((sum, fragment) => sum + fragment.tokenEstimate, 0) - resultTokens;
- const resultReserveAvailable = reservedForToolResults - toolReserveTokens;
- const reserveUse = Math.min(resultTokens, resultReserveAvailable);
- const requiredRegular = nonResultTokens + resultTokens - reserveUse;
- const regularAvailable = regularInputBudget - regularTokens;
- const mandatory = unit.priorityTier === FRAGMENT_PRIORITY_TIERS.TIER_MANDATORY;
+    const resultTokens = unit.fragments
+      .filter((fragment) => fragment.sourceRef.type === "tool_result")
+      .reduce((sum, fragment) => sum + fragment.tokenEstimate, 0);
+    const nonResultTokens =
+      unit.fragments.reduce((sum, fragment) => sum + fragment.tokenEstimate, 0) - resultTokens;
+    const resultReserveAvailable = reservedForToolResults - toolReserveTokens;
+    const reserveUse = Math.min(resultTokens, resultReserveAvailable);
+    const requiredRegular = nonResultTokens + resultTokens - reserveUse;
+    const regularAvailable = regularInputBudget - regularTokens;
+    const mandatory = unit.priorityTier === FRAGMENT_PRIORITY_TIERS.TIER_MANDATORY;
 
- if (requiredRegular > regularAvailable) {
- const reasonCode: ExclusionReasonCode = mandatory
- ? "mandatory_overflow"
- : unit.priorityTier >= FRAGMENT_PRIORITY_TIERS.TIER_SUMMARY
- ? "low_priority"
- : unit.priorityTier === FRAGMENT_PRIORITY_TIERS.TIER_RELATED
- ? "requeryable"
- : "budget_exhausted";
- const pairDetail = unit.operationId
- ? `Tool operation ${unit.operationId} 必须成组选择，预算不足`
- : mandatory
- ? "关键内容超出普通输入预算"
- : "输入预算耗尽";
- for (const fragment of unit.fragments) {
- excluded.push(toExcluded(fragment, reasonCode, pairDetail));
- }
- if (mandatory) {
- failureReason = `关键内容 Token 超出普通输入预算 ${regularInputBudget}，不能静默丢弃约束`;
- }
- continue;
- }
+    if (requiredRegular > regularAvailable) {
+      const reasonCode: ExclusionReasonCode = mandatory
+        ? "mandatory_overflow"
+        : unit.priorityTier >= FRAGMENT_PRIORITY_TIERS.TIER_SUMMARY
+          ? "low_priority"
+          : unit.priorityTier === FRAGMENT_PRIORITY_TIERS.TIER_RELATED
+            ? "requeryable"
+            : "budget_exhausted";
+      const pairDetail = unit.operationId
+        ? `Tool operation ${unit.operationId} 必须成组选择，预算不足`
+        : mandatory
+          ? "关键内容超出普通输入预算"
+          : "输入预算耗尽";
+      for (const fragment of unit.fragments) {
+        excluded.push(toExcluded(fragment, reasonCode, pairDetail));
+      }
+      if (mandatory) {
+        failureReason = `关键内容 Token 超出普通输入预算 ${regularInputBudget}，不能静默丢弃约束`;
+      }
+      continue;
+    }
 
- for (const fragment of unit.fragments) {
- selected.push(fragment);
- seenHashes.add(dedupKey(fragment));
- totalInputTokens += fragment.tokenEstimate;
- }
- regularTokens += requiredRegular;
- toolReserveTokens += reserveUse;
- }
+    for (const fragment of unit.fragments) {
+      selected.push(fragment);
+      seenHashes.add(dedupKey(fragment));
+      totalInputTokens += fragment.tokenEstimate;
+    }
+    regularTokens += requiredRegular;
+    toolReserveTokens += reserveUse;
+  }
 
- return {
- selected,
- excluded,
- totalInputTokens,
- availableInputBudget,
- failureReason,
- };
+  return {
+    selected,
+    excluded,
+    totalInputTokens,
+    availableInputBudget,
+    failureReason,
+  };
 }
 
 // ─── 内部工具 ───────────────────────────────────────────────
 
 function toExcluded(
- frag: ContextFragment,
- reasonCode: ExclusionReasonCode,
- detail?: string,
+  frag: ContextFragment,
+  reasonCode: ExclusionReasonCode,
+  detail?: string,
 ): ExcludedFragment {
- return {
- id: frag.id,
- kind: frag.kind,
- contentHash: frag.contentHash,
- tokenEstimate: frag.tokenEstimate,
- priorityTier: frag.priorityTier,
- reasonCode,
- detail,
- };
+  return {
+    id: frag.id,
+    kind: frag.kind,
+    contentHash: frag.contentHash,
+    tokenEstimate: frag.tokenEstimate,
+    priorityTier: frag.priorityTier,
+    reasonCode,
+    detail,
+  };
 }
 
 // ─── ToolCall/ToolResult 配对校验 ───────────────────────────
@@ -261,39 +261,39 @@ function toExcluded(
  * @returns unpairedToolCallIds：选入了 ToolCall 但缺少配对 ToolResult 的来源 id。
  */
 export function detectUnpairedToolResults(
- selected: readonly ContextFragment[],
- excluded: readonly ExcludedFragment[],
+  selected: readonly ContextFragment[],
+  excluded: readonly ExcludedFragment[],
 ): {
- unpairedToolCallSourceIds: string[];
- recoverableToolResultFragmentIds: string[];
+  unpairedToolCallSourceIds: string[];
+  recoverableToolResultFragmentIds: string[];
 } {
- const toolCalls = selected.filter((f) => f.kind === "tool" && f.sourceRef.type === "tool_call");
- const toolResults = selected.filter(
- (f) => f.kind === "tool" && f.sourceRef.type === "tool_result",
- );
- const pairedResultIds = new Set(toolResults.map((r) => r.sourceRef.id));
+  const toolCalls = selected.filter((f) => f.kind === "tool" && f.sourceRef.type === "tool_call");
+  const toolResults = selected.filter(
+    (f) => f.kind === "tool" && f.sourceRef.type === "tool_result",
+  );
+  const pairedResultIds = new Set(toolResults.map((r) => r.sourceRef.id));
 
- const unpairedToolCallSourceIds: string[] = [];
- for (const call of toolCalls) {
- // 约定：tool_call 的 sourceRef.id 与对应 tool_result 的 sourceRef.id 相同（operationId）。
- if (!pairedResultIds.has(call.sourceRef.id)) {
- unpairedToolCallSourceIds.push(call.sourceRef.id);
- }
- }
+  const unpairedToolCallSourceIds: string[] = [];
+  for (const call of toolCalls) {
+    // 约定：tool_call 的 sourceRef.id 与对应 tool_result 的 sourceRef.id 相同（operationId）。
+    if (!pairedResultIds.has(call.sourceRef.id)) {
+      unpairedToolCallSourceIds.push(call.sourceRef.id);
+    }
+  }
 
- // 从 excluded 中找出可补回的 ToolResult（对应未配对的 tool_call）
- const recoverableToolResultFragmentIds: string[] = [];
- if (unpairedToolCallSourceIds.length > 0) {
- const unpairedSet = new Set(unpairedToolCallSourceIds);
- for (const ex of excluded) {
- // excluded 是 ExcludedFragment，不含 sourceRef；通过 id 关联回原 fragment 由调用方处理。
- // 此处仅返回 excluded 中 kind=tool 的 fragment id，调用方按需匹配。
- if (ex.kind === "tool") {
- recoverableToolResultFragmentIds.push(ex.id);
- }
- }
- void unpairedSet;
- }
+  // 从 excluded 中找出可补回的 ToolResult（对应未配对的 tool_call）
+  const recoverableToolResultFragmentIds: string[] = [];
+  if (unpairedToolCallSourceIds.length > 0) {
+    const unpairedSet = new Set(unpairedToolCallSourceIds);
+    for (const ex of excluded) {
+      // excluded 是 ExcludedFragment，不含 sourceRef；通过 id 关联回原 fragment 由调用方处理。
+      // 此处仅返回 excluded 中 kind=tool 的 fragment id，调用方按需匹配。
+      if (ex.kind === "tool") {
+        recoverableToolResultFragmentIds.push(ex.id);
+      }
+    }
+    void unpairedSet;
+  }
 
- return { unpairedToolCallSourceIds, recoverableToolResultFragmentIds };
+  return { unpairedToolCallSourceIds, recoverableToolResultFragmentIds };
 }

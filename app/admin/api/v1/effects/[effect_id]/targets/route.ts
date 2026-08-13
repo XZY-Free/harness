@@ -1,10 +1,10 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
 import { getEffectRecordById, listEffectTargets } from "@/lib/capability/effect-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 /**
  * GET /admin/api/v1/effects/{effect_id}/targets — 列出 EffectRecord 的所有 EffectTarget（S11-W04）。
  *

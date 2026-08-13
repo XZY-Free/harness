@@ -15,89 +15,89 @@ import type { RouteResolutionCandidate } from "@/lib/routes/domain/route-resolut
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { and, eq } from "drizzle-orm";
 import type {
- LoadProjectionCandidatesInput,
- RouteEligibilityResolutionStore,
+  LoadProjectionCandidatesInput,
+  RouteEligibilityResolutionStore,
 } from "./route-eligibility-resolution-store";
 
 export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionStore = {
- loadCandidates: async (
- input: LoadProjectionCandidatesInput,
- ): Promise<RouteResolutionCandidate[]> => {
- const projections = await db
- .select()
- .from(routeEligibilityProjection)
- .where(
- and(
- eq(routeEligibilityProjection.tenantId, input.tenantId),
- eq(routeEligibilityProjection.agentId, input.agentId),
- eq(routeEligibilityProjection.routeScopeKey, input.routeScopeKey),
- eq(routeEligibilityProjection.eligibilityState, "eligible"),
- ),
- );
+  loadCandidates: async (
+    input: LoadProjectionCandidatesInput,
+  ): Promise<RouteResolutionCandidate[]> => {
+    const projections = await db
+      .select()
+      .from(routeEligibilityProjection)
+      .where(
+        and(
+          eq(routeEligibilityProjection.tenantId, input.tenantId),
+          eq(routeEligibilityProjection.agentId, input.agentId),
+          eq(routeEligibilityProjection.routeScopeKey, input.routeScopeKey),
+          eq(routeEligibilityProjection.eligibilityState, "eligible"),
+        ),
+      );
 
- // 将 Projection 记录转换为 RouteResolutionCandidate
- // Projection 只包含 eligible 条目，Resolver 纯内存选择
- return projections.map((p): RouteResolutionCandidate => {
- const controlPlaneEvidence =
- p.agentArtifactDigest &&
- p.runtimeArtifactDigest &&
- p.agentArtifactId &&
- p.runtimeArtifactId &&
- p.runtimeConfigDigest &&
- p.agentPublicationRecordId &&
- p.runtimePublicationRecordId &&
- p.conformanceRunId &&
- Array.isArray(p.agentAttestationIds) &&
- Array.isArray(p.runtimeAttestationIds)
- ? {
- agentArtifactId: p.agentArtifactId,
- runtimeArtifactId: p.runtimeArtifactId,
- agentArtifactDigest: p.agentArtifactDigest,
- runtimeArtifactDigest: p.runtimeArtifactDigest,
- runtimeConfigDigest: p.runtimeConfigDigest,
- capabilityManifestDigest: p.capabilityCompatibilityDigest,
- // : 完整证据 ID 直接从 Projection 读取（不再 stub）
- agentAttestationIds: [...p.agentAttestationIds],
- runtimeAttestationIds: [...p.runtimeAttestationIds],
- agentPublicationRecordId: p.agentPublicationRecordId,
- runtimePublicationRecordId: p.runtimePublicationRecordId,
- conformanceRunId: p.conformanceRunId,
- }
- : null;
+    // 将 Projection 记录转换为 RouteResolutionCandidate
+    // Projection 只包含 eligible 条目，Resolver 纯内存选择
+    return projections.map((p): RouteResolutionCandidate => {
+      const controlPlaneEvidence =
+        p.agentArtifactDigest &&
+        p.runtimeArtifactDigest &&
+        p.agentArtifactId &&
+        p.runtimeArtifactId &&
+        p.runtimeConfigDigest &&
+        p.agentPublicationRecordId &&
+        p.runtimePublicationRecordId &&
+        p.conformanceRunId &&
+        Array.isArray(p.agentAttestationIds) &&
+        Array.isArray(p.runtimeAttestationIds)
+          ? {
+              agentArtifactId: p.agentArtifactId,
+              runtimeArtifactId: p.runtimeArtifactId,
+              agentArtifactDigest: p.agentArtifactDigest,
+              runtimeArtifactDigest: p.runtimeArtifactDigest,
+              runtimeConfigDigest: p.runtimeConfigDigest,
+              capabilityManifestDigest: p.capabilityCompatibilityDigest,
+              // : 完整证据 ID 直接从 Projection 读取（不再 stub）
+              agentAttestationIds: [...p.agentAttestationIds],
+              runtimeAttestationIds: [...p.runtimeAttestationIds],
+              agentPublicationRecordId: p.agentPublicationRecordId,
+              runtimePublicationRecordId: p.runtimePublicationRecordId,
+              conformanceRunId: p.conformanceRunId,
+            }
+          : null;
 
- return {
- deploymentRouteId: p.routeId,
- routeSetId: p.routeSetId,
- routeSetVersionNo: p.routeSetVersionNo,
- routeRevisionId: p.routeRevisionId,
- routeRevisionNo: p.routeRevisionNo,
- routeActivationId: p.routeActivationId,
- routeActivationSequence: p.routeActivationSequence,
- agentRevisionId: p.agentRevisionId,
- runtimeRevisionId: p.runtimeRevisionId,
- policyRevisionId: p.policyRevisionId,
- contentDigest: p.routeContentDigest,
- trafficWeight: p.trafficWeight,
- routeGroupId: p.routeGroupId,
- priorityNo: p.priorityNo,
- effectiveFrom: p.effectiveFrom,
- effectiveUntil: p.effectiveUntil,
- eligibilityConditions: p.eligibilityConditionsJson,
- activationState: p.activationState,
- agentLifecycleState: p.agentLifecycleState,
- agentRevisionState: p.agentRevisionState,
- agentPublicationActive: p.agentPublicationActive === 1,
- agentEvidenceValid: p.agentEvidenceValid === 1,
- runtimeLifecycleState: p.runtimeLifecycleState,
- runtimeRevisionState: p.runtimeRevisionState,
- runtimePublicationActive: p.runtimePublicationActive === 1,
- runtimeEvidenceValid: p.runtimeEvidenceValid === 1,
- runtimeConformanceValid: p.runtimeConformanceValid === 1,
- policyRevisionState: p.policyRevisionState,
- controlPlaneEvidence,
- /** : Projection 版本号 — 来自 RouteEligibilityProjection。 */
- projectionVersionNo: p.projectionVersionNo,
- };
- });
- },
+      return {
+        deploymentRouteId: p.routeId,
+        routeSetId: p.routeSetId,
+        routeSetVersionNo: p.routeSetVersionNo,
+        routeRevisionId: p.routeRevisionId,
+        routeRevisionNo: p.routeRevisionNo,
+        routeActivationId: p.routeActivationId,
+        routeActivationSequence: p.routeActivationSequence,
+        agentRevisionId: p.agentRevisionId,
+        runtimeRevisionId: p.runtimeRevisionId,
+        policyRevisionId: p.policyRevisionId,
+        contentDigest: p.routeContentDigest,
+        trafficWeight: p.trafficWeight,
+        routeGroupId: p.routeGroupId,
+        priorityNo: p.priorityNo,
+        effectiveFrom: p.effectiveFrom,
+        effectiveUntil: p.effectiveUntil,
+        eligibilityConditions: p.eligibilityConditionsJson,
+        activationState: p.activationState,
+        agentLifecycleState: p.agentLifecycleState,
+        agentRevisionState: p.agentRevisionState,
+        agentPublicationActive: p.agentPublicationActive === 1,
+        agentEvidenceValid: p.agentEvidenceValid === 1,
+        runtimeLifecycleState: p.runtimeLifecycleState,
+        runtimeRevisionState: p.runtimeRevisionState,
+        runtimePublicationActive: p.runtimePublicationActive === 1,
+        runtimeEvidenceValid: p.runtimeEvidenceValid === 1,
+        runtimeConformanceValid: p.runtimeConformanceValid === 1,
+        policyRevisionState: p.policyRevisionState,
+        controlPlaneEvidence,
+        /** : Projection 版本号 — 来自 RouteEligibilityProjection。 */
+        projectionVersionNo: p.projectionVersionNo,
+      };
+    });
+  },
 };

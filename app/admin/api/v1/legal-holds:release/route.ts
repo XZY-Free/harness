@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * POST /admin/api/v1/legal-holds:release — 解除 Legal Hold（S12-W06）。
  *
@@ -25,13 +32,6 @@ import {
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
 import { LegalHoldError, releaseLegalHold } from "@/lib/identity/legal-hold-queries";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

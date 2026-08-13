@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * POST /admin/api/v1/workload-tokens:revoke — 撤销 Workload Token（S12-W05）。
  *
@@ -26,13 +33,6 @@ import {
   actorFromWorkloadPrincipal,
 } from "@/lib/identity/audit";
 import { revokeWorkloadToken } from "@/lib/identity/workload-token-revocation-queries";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

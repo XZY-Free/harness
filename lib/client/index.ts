@@ -30,23 +30,23 @@ export { threadProjectionReducer, createInitialState } from "./thread-reducer";
 
 export { createSSEClient } from "./sse-client";
 export type {
- SSEClientCallbacks,
- SSEClientConfig,
- SSEClientHandle,
+  SSEClientCallbacks,
+  SSEClientConfig,
+  SSEClientHandle,
 } from "./sse-client";
 
 export { toVisibleError, makeLocalVisibleError } from "./error-messages";
 
 export type {
- ClientErrorBody,
- ClientEvent,
- ClientEventPayload,
- ClientItem,
- ClientItemsResponse,
- ClientItemState,
- ClientItemType,
- ClientStreamStatus,
- ClientVisibleError,
- ThreadProjectionAction,
- ThreadProjectionState,
+  ClientErrorBody,
+  ClientEvent,
+  ClientEventPayload,
+  ClientItem,
+  ClientItemsResponse,
+  ClientItemState,
+  ClientItemType,
+  ClientStreamStatus,
+  ClientVisibleError,
+  ThreadProjectionAction,
+  ThreadProjectionState,
 } from "./types";

@@ -1,9 +1,9 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import { getUserActionRequestById } from "@/lib/permission/user-action-queries";
 /**
  * GET /admin/api/v1/user-actions/{request_id} — UserActionRequest 单资源详情（S11-W04）。

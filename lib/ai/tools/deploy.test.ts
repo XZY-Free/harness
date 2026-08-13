@@ -392,7 +392,7 @@ describe("rollback 异步确认（M1-4）", () => {
     );
     const lastCall = updateCalls[updateCalls.length - 1];
     expect(lastCall).toBeDefined();
-    expect(lastCall![1]).toMatchObject({ status: "deploying" });
-    expect(lastCall![1]).not.toHaveProperty("deployedAt");
+    expect(lastCall?.[1]).toMatchObject({ status: "deploying" });
+    expect(lastCall?.[1]).not.toHaveProperty("deployedAt");
   });
 });

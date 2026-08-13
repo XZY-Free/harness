@@ -387,7 +387,7 @@ function LineNumbers({ content }: { content: string }) {
       aria-hidden="true"
     >
       {lines.map((_, i) => (
-        <div key={i}>{i + 1}</div>
+        <div key={`line-${i + 1}`}>{i + 1}</div>
       ))}
     </div>
   );
@@ -460,9 +460,10 @@ function DiffView({
   return (
     <div>
       {rows.map((row, i) => {
+        const rowKey = `${row.kind}:${i}:${row.remote ?? ""}:${row.local ?? ""}`;
         if (row.kind === "same") {
           return (
-            <div key={i} className="text-[var(--fg-subtle)]">
+            <div key={rowKey} className="text-[var(--fg-subtle)]">
               <span className="mr-2 select-none"> </span>
               {row.remote}
             </div>
@@ -470,7 +471,10 @@ function DiffView({
         }
         if (row.kind === "remote") {
           return (
-            <div key={i} className="bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300">
+            <div
+              key={rowKey}
+              className="bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300"
+            >
               <span className="mr-2 select-none">-</span>
               {row.remote}
             </div>
@@ -478,7 +482,7 @@ function DiffView({
         }
         return (
           <div
-            key={i}
+            key={rowKey}
             className="bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300"
           >
             <span className="mr-2 select-none">+</span>

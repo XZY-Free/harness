@@ -1,3 +1,10 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  requireAdminActionScope,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 /**
  * POST/GET /admin/api/v1/retention-policies — 保留策略管理（S12-W06）。
  *
@@ -30,13 +37,6 @@ import {
   RETENTION_OBJECT_TYPES,
   type RetentionObjectType,
 } from "@/lib/persistence/schema/retention-policy";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  requireAdminActionScope,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

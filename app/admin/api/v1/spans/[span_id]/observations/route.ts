@@ -1,13 +1,13 @@
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
-import { OBSERVATION_KINDS, type ObservationKind } from "@/lib/persistence/schema/trace";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import { listObservationsBySpan } from "@/lib/observability/observation-queries";
 import { getSpanById } from "@/lib/observability/trace-queries";
+import { OBSERVATION_KINDS, type ObservationKind } from "@/lib/persistence/schema/trace";
 /**
  * GET /admin/api/v1/spans/{span_id}/observations — 列出 Span 下所有 Observation（S11-W05）。
  *

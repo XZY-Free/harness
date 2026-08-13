@@ -1,3 +1,13 @@
+import { recordCapabilityUse } from "@/lib/capability/capability-use-queries";
+import { getCurrentSkillVersion, getSkillById } from "@/lib/capability/skill-queries";
+import {
+  type GatewayPrincipal,
+  gatewayAuthErrorResponse,
+  gatewayCapabilityContentBlockedTable,
+  gatewayCapabilityNotAllowedTable,
+  gatewayCatalogRevisionInvalidTable,
+  resolveGatewayPrincipal,
+} from "@/lib/gateway/route-helpers";
 /**
  * GET /gateway/v1/skills/{skill_id}/content — Runtime 读取 Skill 内容（阶段 6 S06-C04）。
  *
@@ -26,16 +36,6 @@
  * - If-None-Match 格式非法 → 400 CATALOG_REVISION_INVALID
  */
 import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
-import { recordCapabilityUse } from "@/lib/capability/capability-use-queries";
-import { getCurrentSkillVersion, getSkillById } from "@/lib/capability/skill-queries";
-import {
-  type GatewayPrincipal,
-  gatewayAuthErrorResponse,
-  gatewayCapabilityContentBlockedTable,
-  gatewayCapabilityNotAllowedTable,
-  gatewayCatalogRevisionInvalidTable,
-  resolveGatewayPrincipal,
-} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

@@ -1,3 +1,16 @@
+import {
+  CatalogQueryError,
+  type SearchCatalogResult,
+  searchCatalog,
+} from "@/lib/catalog/catalog-queries";
+import { getCurrentCatalogRevision } from "@/lib/catalog/projector";
+import {
+  type GatewayPrincipal,
+  gatewayAuthErrorResponse,
+  gatewayCatalogRevisionInvalidTable,
+  gatewaySchemaInvalidTable,
+  resolveGatewayPrincipal,
+} from "@/lib/gateway/route-helpers";
 /**
  * POST /gateway/v1/capabilities:search — Runtime 搜索可用能力（阶段 6 S06-C04）。
  *
@@ -22,19 +35,6 @@
  */
 import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
 import { CATALOG_RESOURCE_TYPES, type CatalogResourceType } from "@/lib/persistence/schema/catalog";
-import {
-  CatalogQueryError,
-  type SearchCatalogResult,
-  searchCatalog,
-} from "@/lib/catalog/catalog-queries";
-import { getCurrentCatalogRevision } from "@/lib/catalog/projector";
-import {
-  type GatewayPrincipal,
-  gatewayAuthErrorResponse,
-  gatewayCatalogRevisionInvalidTable,
-  gatewaySchemaInvalidTable,
-  resolveGatewayPrincipal,
-} from "@/lib/gateway/route-helpers";
 
 export const dynamic = "force-dynamic";
 

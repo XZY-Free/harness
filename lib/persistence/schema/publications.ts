@@ -3,6 +3,6 @@
  */
 
 export {
- publicationRecord,
- withdrawalRecord,
+  publicationRecord,
+  withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";

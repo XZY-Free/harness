@@ -21,36 +21,36 @@ import type { SkillSource } from "@/lib/db/schema";
  * （metadata budget）,由 `readSkillFile` 懒加载并记录证据。
  */
 export interface SkillSummary {
- /** 本地 Skill UUID（运行时事实源主键,不使用远端 asset_id）。 */
- skillId: string;
- /** 当前可用版本 ID（本地 SkillVersion UUID）。 */
- skillVersionId: string;
- /** 来源命名空间（local / capability-market）。 */
- namespace: string;
- /** 唯一短名,用于展示和日志。 */
- name: string;
- /** 中文展示名。 */
- displayName: string;
- /** 简短描述。 */
- description: string;
- /** 使用条件（Resolver 关键词匹配的主要来源）。 */
- whenToUse: string;
- /** 搜索和辅助匹配标签。 */
- tags: string[];
- /** 来源：local（本地自建）/ capability-market（同步镜像）。运行时两者读取路径一致。 */
- source: SkillSource;
- /** 可见性描述。 */
- visibility: string;
- /** 是否允许模型自动选择（false 时只接受 UI 显式选择）。 */
- modelInvocable: boolean;
- /** 是否展示给用户选择。 */
- uiVisible: boolean;
- /** 能力声明（不是工具白名单;工具权限归 Tools / Policy 专题）。 */
- requiredCapabilities: string[];
- /** 版本内容 hash（目录形态下即 skills/ git repo 的 commit sha）。 */
- contentHash: string | null;
- /** 当前可用版本号（本地 SkillVersion.version 是 int,转字符串保留可比较性）。 */
- version: string;
+  /** 本地 Skill UUID（运行时事实源主键,不使用远端 asset_id）。 */
+  skillId: string;
+  /** 当前可用版本 ID（本地 SkillVersion UUID）。 */
+  skillVersionId: string;
+  /** 来源命名空间（local / capability-market）。 */
+  namespace: string;
+  /** 唯一短名,用于展示和日志。 */
+  name: string;
+  /** 中文展示名。 */
+  displayName: string;
+  /** 简短描述。 */
+  description: string;
+  /** 使用条件（Resolver 关键词匹配的主要来源）。 */
+  whenToUse: string;
+  /** 搜索和辅助匹配标签。 */
+  tags: string[];
+  /** 来源：local（本地自建）/ capability-market（同步镜像）。运行时两者读取路径一致。 */
+  source: SkillSource;
+  /** 可见性描述。 */
+  visibility: string;
+  /** 是否允许模型自动选择（false 时只接受 UI 显式选择）。 */
+  modelInvocable: boolean;
+  /** 是否展示给用户选择。 */
+  uiVisible: boolean;
+  /** 能力声明（不是工具白名单;工具权限归 Tools / Policy 专题）。 */
+  requiredCapabilities: string[];
+  /** 版本内容 hash（目录形态下即 skills/ git repo 的 commit sha）。 */
+  contentHash: string | null;
+  /** 当前可用版本号（本地 SkillVersion.version 是 int,转字符串保留可比较性）。 */
+  version: string;
 }
 
 /**
@@ -59,8 +59,8 @@ export interface SkillSummary {
  * 不再有运行时远程 Provider。
  */
 export interface SkillProvider {
- /** 列出本轮可见、可用的 Skill 摘要（本地 DB active Skill,同步 Skill 需映射 active）。 */
- listAvailableSkills(): Promise<SkillSummary[]>;
+  /** 列出本轮可见、可用的 Skill 摘要（本地 DB active Skill,同步 Skill 需映射 active）。 */
+  listAvailableSkills(): Promise<SkillSummary[]>;
 }
 
 /**
@@ -79,32 +79,32 @@ export interface SkillProvider {
  * - 没有 currentVersion 的 skill 跳过（无可用版本,无法被 Resolver 选用）。
  */
 export class LocalDbSkillProvider implements SkillProvider {
- async listAvailableSkills(): Promise<SkillSummary[]> {
- const dbSkills = await listActiveSkillsForMatching();
- const out: SkillSummary[] = [];
- for (const sk of dbSkills) {
- const version = await getCurrentSkillVersion(sk.id);
- if (!version) continue;
- out.push({
- skillId: sk.id,
- skillVersionId: version.id,
- namespace: sk.source,
- name: sk.name,
- displayName: sk.name,
- description: sk.description ?? "",
- whenToUse: sk.description ?? "",
- tags: sk.category ? [sk.category] : [],
- source: sk.source,
- visibility: sk.visibility,
- modelInvocable: true,
- uiVisible: true,
- requiredCapabilities: [],
- contentHash: version.commitSha ?? null,
- version: String(version.version),
- });
- }
- return out;
- }
+  async listAvailableSkills(): Promise<SkillSummary[]> {
+    const dbSkills = await listActiveSkillsForMatching();
+    const out: SkillSummary[] = [];
+    for (const sk of dbSkills) {
+      const version = await getCurrentSkillVersion(sk.id);
+      if (!version) continue;
+      out.push({
+        skillId: sk.id,
+        skillVersionId: version.id,
+        namespace: sk.source,
+        name: sk.name,
+        displayName: sk.name,
+        description: sk.description ?? "",
+        whenToUse: sk.description ?? "",
+        tags: sk.category ? [sk.category] : [],
+        source: sk.source,
+        visibility: sk.visibility,
+        modelInvocable: true,
+        uiVisible: true,
+        requiredCapabilities: [],
+        contentHash: version.commitSha ?? null,
+        version: String(version.version),
+      });
+    }
+    return out;
+  }
 }
 
 /**
@@ -114,13 +114,13 @@ export class LocalDbSkillProvider implements SkillProvider {
 let defaultProvider: SkillProvider | null = null;
 
 export function getSkillProvider(): SkillProvider {
- if (!defaultProvider) {
- defaultProvider = new LocalDbSkillProvider();
- }
- return defaultProvider;
+  if (!defaultProvider) {
+    defaultProvider = new LocalDbSkillProvider();
+  }
+  return defaultProvider;
 }
 
 /** 测试用：注入自定义 Provider。 */
 export function __setSkillProviderForTest(provider: SkillProvider | null): void {
- defaultProvider = provider;
+  defaultProvider = provider;
 }

@@ -16,20 +16,20 @@ import { z } from "zod";
  * RPC 请求信封 schema（Server → Desktop）。
  */
 export const rpcRequestEnvelopeSchema = z.object({
- protocolVersion: z.number().int().positive(),
- requestId: z.string().min(1),
- deviceId: z.string().min(1),
- userId: z.string().min(1),
- threadId: z.string().min(1),
- tabId: z.string().nullable(),
- runId: z.string().nullable(),
- approvalId: z.string().nullable(),
- command: z.string().min(1),
- payload: z.unknown(),
- issuedAt: z.number().int().positive(),
- expiresAt: z.number().int().positive(),
- nonce: z.string().min(1),
- signature: z.string().min(1),
+  protocolVersion: z.number().int().positive(),
+  requestId: z.string().min(1),
+  deviceId: z.string().min(1),
+  userId: z.string().min(1),
+  threadId: z.string().min(1),
+  tabId: z.string().nullable(),
+  runId: z.string().nullable(),
+  approvalId: z.string().nullable(),
+  command: z.string().min(1),
+  payload: z.unknown(),
+  issuedAt: z.number().int().positive(),
+  expiresAt: z.number().int().positive(),
+  nonce: z.string().min(1),
+  signature: z.string().min(1),
 });
 
 export type RpcRequestEnvelope = z.infer<typeof rpcRequestEnvelopeSchema>;
@@ -38,19 +38,19 @@ export type RpcRequestEnvelope = z.infer<typeof rpcRequestEnvelopeSchema>;
  * RPC 结果信封 schema（Desktop → Server）。
  */
 export const rpcResultEnvelopeSchema = z.object({
- requestId: z.string().min(1),
- deviceId: z.string().min(1),
- ok: z.boolean(),
- result: z.unknown().nullable(),
- error: z
- .object({
- code: z.string(),
- message: z.string(),
- detail: z.unknown().nullable(),
- })
- .nullable(),
- timestamp: z.number().int().positive(),
- signature: z.string().min(1),
+  requestId: z.string().min(1),
+  deviceId: z.string().min(1),
+  ok: z.boolean(),
+  result: z.unknown().nullable(),
+  error: z
+    .object({
+      code: z.string(),
+      message: z.string(),
+      detail: z.unknown().nullable(),
+    })
+    .nullable(),
+  timestamp: z.number().int().positive(),
+  signature: z.string().min(1),
 });
 
 export type RpcResultEnvelope = z.infer<typeof rpcResultEnvelopeSchema>;
@@ -65,31 +65,31 @@ export type RpcResultEnvelope = z.infer<typeof rpcResultEnvelopeSchema>;
  * @returns 规范 JSON 字符串
  */
 export function canonicalSerialize(data: Record<string, unknown>): string {
- return JSON.stringify(canonicalize(data));
+  return JSON.stringify(canonicalize(data));
 }
 
 /**
  * 递归将对象字段按字母序排列，返回可直接 JSON.stringify 的结构。
  */
 function canonicalize(value: unknown): unknown {
- if (value === null) {
- return null;
- }
- if (Array.isArray(value)) {
- // 数组保持顺序，但元素递归处理
- return value.map((v) => canonicalize(v));
- }
- if (typeof value === "object") {
- const obj = value as Record<string, unknown>;
- const keys = Object.keys(obj).sort();
- const sorted: Record<string, unknown> = {};
- for (const key of keys) {
- sorted[key] = canonicalize(obj[key]);
- }
- return sorted;
- }
- // 基本类型直接返回
- return value;
+  if (value === null) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    // 数组保持顺序，但元素递归处理
+    return value.map((v) => canonicalize(v));
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).sort();
+    const sorted: Record<string, unknown> = {};
+    for (const key of keys) {
+      sorted[key] = canonicalize(obj[key]);
+    }
+    return sorted;
+  }
+  // 基本类型直接返回
+  return value;
 }
 
 /**
@@ -99,9 +99,9 @@ function canonicalize(value: unknown): unknown {
  * @returns 规范序列化后的字符串
  */
 export function getEnvelopeSignPayload(envelope: Omit<RpcRequestEnvelope, "signature">): string {
- const { signature: _, ...rest } = envelope as RpcRequestEnvelope;
- void _;
- return canonicalSerialize(rest);
+  const { signature: _, ...rest } = envelope as RpcRequestEnvelope;
+  void _;
+  return canonicalSerialize(rest);
 }
 
 /**
@@ -111,7 +111,7 @@ export function getEnvelopeSignPayload(envelope: Omit<RpcRequestEnvelope, "signa
  * @returns 规范序列化后的字符串
  */
 export function getResultSignPayload(envelope: Omit<RpcResultEnvelope, "signature">): string {
- const { signature: _, ...rest } = envelope as RpcResultEnvelope;
- void _;
- return canonicalSerialize(rest);
+  const { signature: _, ...rest } = envelope as RpcResultEnvelope;
+  void _;
+  return canonicalSerialize(rest);
 }

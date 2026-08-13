@@ -1,3 +1,9 @@
+import {
+  type AdminPrincipal,
+  adminAuthErrorResponse,
+  resolveAdminPrincipalAsync,
+  schemaInvalidTable,
+} from "@/lib/admin/route-helpers";
 import { listDeliveryFailures } from "@/lib/conversations/projection-operations";
 /**
  * GET /admin/api/v1/event-delivery — 列出租户事件交付失败记录（S12-W01）。
@@ -21,12 +27,6 @@ import {
   STREAM_TYPES,
   type StreamType,
 } from "@/lib/persistence/schema/projection";
-import {
-  type AdminPrincipal,
-  adminAuthErrorResponse,
-  resolveAdminPrincipalAsync,
-  schemaInvalidTable,
-} from "@/lib/admin/route-helpers";
 
 export const dynamic = "force-dynamic";
 

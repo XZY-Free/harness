@@ -1,22 +1,22 @@
 import { runtimeConformanceConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
-import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
-import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
-import {
- runtimeConformanceCaseResult,
- runtimeConformanceRun,
-} from "@/lib/runtime/persistence/runtime-conformance-run-record";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
+import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
+import {
+  runtimeConformanceCaseResult,
+  runtimeConformanceRun,
+} from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import { and, desc, eq } from "drizzle-orm";
 
 /** 从唯一的正式配置构建 RunnerSigningIdentityRegistry。 */
 function buildRegistry(): RunnerSigningIdentityRegistry {
- return new RunnerSigningIdentityRegistry(runtimeConformanceConfig.runnerSigningIdentities);
+  return new RunnerSigningIdentityRegistry(runtimeConformanceConfig.runnerSigningIdentities);
 }
 
 type RecordRuntimeConformanceRunCommand = Parameters<
- ReturnType<typeof createRecordRuntimeConformanceRun>
+  ReturnType<typeof createRecordRuntimeConformanceRun>
 >[0];
 
 /**
@@ -24,37 +24,37 @@ type RecordRuntimeConformanceRunCommand = Parameters<
  * instrumentation 会先加载环境文件再接收请求；缺失或非法配置仍构建空注册表并拒绝验签。
  */
 export function recordRuntimeConformanceRun(command: RecordRuntimeConformanceRunCommand) {
- return createRecordRuntimeConformanceRun({
-  store: mysqlRuntimeConformanceRunStore,
-  verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: buildRegistry() }),
- })(command);
+  return createRecordRuntimeConformanceRun({
+    store: mysqlRuntimeConformanceRunStore,
+    verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: buildRegistry() }),
+  })(command);
 }
 
 export async function listRuntimeConformanceRuns(tenantId: string, runtimeRevisionId: string) {
- return db
- .select()
- .from(runtimeConformanceRun)
- .where(
- and(
- eq(runtimeConformanceRun.tenantId, tenantId),
- eq(runtimeConformanceRun.runtimeRevisionId, runtimeRevisionId),
- ),
- )
- .orderBy(desc(runtimeConformanceRun.completedAt));
+  return db
+    .select()
+    .from(runtimeConformanceRun)
+    .where(
+      and(
+        eq(runtimeConformanceRun.tenantId, tenantId),
+        eq(runtimeConformanceRun.runtimeRevisionId, runtimeRevisionId),
+      ),
+    )
+    .orderBy(desc(runtimeConformanceRun.completedAt));
 }
 
 export async function getRuntimeConformanceRunById(tenantId: string, runId: string) {
- const [run] = await db
- .select()
- .from(runtimeConformanceRun)
- .where(and(eq(runtimeConformanceRun.tenantId, tenantId), eq(runtimeConformanceRun.id, runId)))
- .limit(1);
- return run ?? null;
+  const [run] = await db
+    .select()
+    .from(runtimeConformanceRun)
+    .where(and(eq(runtimeConformanceRun.tenantId, tenantId), eq(runtimeConformanceRun.id, runId)))
+    .limit(1);
+  return run ?? null;
 }
 
 export async function listRuntimeConformanceCaseResults(runId: string) {
- return db
- .select()
- .from(runtimeConformanceCaseResult)
- .where(eq(runtimeConformanceCaseResult.runId, runId));
+  return db
+    .select()
+    .from(runtimeConformanceCaseResult)
+    .where(eq(runtimeConformanceCaseResult.runId, runId));
 }

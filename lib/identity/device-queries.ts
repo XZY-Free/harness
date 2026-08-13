@@ -24,71 +24,71 @@ import { and, desc, eq, sql } from "drizzle-orm";
  * Desktop 多次绑定同一 deviceKey（如重装后重新绑定）不会创建重复行。
  */
 export async function registerDevice(params: {
- tenantId: string;
- userId: string;
- deviceKey: string;
- publicKey: string;
- deviceName: string;
- appVersion: string;
+  tenantId: string;
+  userId: string;
+  deviceKey: string;
+  publicKey: string;
+  deviceName: string;
+  appVersion: string;
 }): Promise<Device> {
- // 先查是否已有 active 设备——有则返回现有，不覆盖
- const [existing] = await db
- .select()
- .from(device)
- .where(
- and(
- eq(device.tenantId, params.tenantId),
- eq(device.deviceKey, params.deviceKey),
- eq(device.deviceState, "active"),
- ),
- )
- .limit(1);
- if (existing) {
- return existing;
- }
+  // 先查是否已有 active 设备——有则返回现有，不覆盖
+  const [existing] = await db
+    .select()
+    .from(device)
+    .where(
+      and(
+        eq(device.tenantId, params.tenantId),
+        eq(device.deviceKey, params.deviceKey),
+        eq(device.deviceState, "active"),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    return existing;
+  }
 
- // 无 active 记录 → INSERT IGNORE（唯一索引兜底并发竞态）
- const now = new Date();
- await db.insert(device).ignore().values({
- tenantId: params.tenantId,
- userId: params.userId,
- deviceKey: params.deviceKey,
- publicKey: params.publicKey,
- deviceName: params.deviceName,
- appVersion: params.appVersion,
- deviceState: "active",
- lastActiveAt: now,
- revokedAt: null,
- createdAt: now,
- });
+  // 无 active 记录 → INSERT IGNORE（唯一索引兜底并发竞态）
+  const now = new Date();
+  await db.insert(device).ignore().values({
+    tenantId: params.tenantId,
+    userId: params.userId,
+    deviceKey: params.deviceKey,
+    publicKey: params.publicKey,
+    deviceName: params.deviceName,
+    appVersion: params.appVersion,
+    deviceState: "active",
+    lastActiveAt: now,
+    revokedAt: null,
+    createdAt: now,
+  });
 
- const [row] = await db
- .select()
- .from(device)
- .where(and(eq(device.tenantId, params.tenantId), eq(device.deviceKey, params.deviceKey)))
- .limit(1);
- if (!row) {
- throw new Error(
- `registerDevice: 行未找到（tenantId=${params.tenantId}, deviceKey=${params.deviceKey}）`,
- );
- }
- return row;
+  const [row] = await db
+    .select()
+    .from(device)
+    .where(and(eq(device.tenantId, params.tenantId), eq(device.deviceKey, params.deviceKey)))
+    .limit(1);
+  if (!row) {
+    throw new Error(
+      `registerDevice: 行未找到（tenantId=${params.tenantId}, deviceKey=${params.deviceKey}）`,
+    );
+  }
+  return row;
 }
 
 /** 按 (tenantId, deviceKey) 获取设备（任意状态）。不存在返回 null。 */
 export async function getDeviceByKey(tenantId: string, deviceKey: string): Promise<Device | null> {
- const [row] = await db
- .select()
- .from(device)
- .where(and(eq(device.tenantId, tenantId), eq(device.deviceKey, deviceKey)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(device)
+    .where(and(eq(device.tenantId, tenantId), eq(device.deviceKey, deviceKey)))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 按 id 获取设备。不存在返回 null。 */
 export async function getDeviceById(id: string): Promise<Device | null> {
- const [row] = await db.select().from(device).where(eq(device.id, id)).limit(1);
- return row ?? null;
+  const [row] = await db.select().from(device).where(eq(device.id, id)).limit(1);
+  return row ?? null;
 }
 
 /**
@@ -96,17 +96,17 @@ export async function getDeviceById(id: string): Promise<Device | null> {
  * 不返回已撤销的设备。
  */
 export async function listActiveDevicesByUser(tenantId: string, userId: string): Promise<Device[]> {
- return db
- .select()
- .from(device)
- .where(
- and(
- eq(device.tenantId, tenantId),
- eq(device.userId, userId),
- eq(device.deviceState, "active"),
- ),
- )
- .orderBy(desc(device.lastActiveAt));
+  return db
+    .select()
+    .from(device)
+    .where(
+      and(
+        eq(device.tenantId, tenantId),
+        eq(device.userId, userId),
+        eq(device.deviceState, "active"),
+      ),
+    )
+    .orderBy(desc(device.lastActiveAt));
 }
 
 /**
@@ -114,10 +114,10 @@ export async function listActiveDevicesByUser(tenantId: string, userId: string):
  * 用 NOW(3) 取 DB 当前时间，避免应用进程时钟漂移并保留毫秒精度。
  */
 export async function touchDevice(tenantId: string, deviceKey: string): Promise<void> {
- await db
- .update(device)
- .set({ lastActiveAt: sql`NOW(3)` })
- .where(and(eq(device.tenantId, tenantId), eq(device.deviceKey, deviceKey)));
+  await db
+    .update(device)
+    .set({ lastActiveAt: sql`NOW(3)` })
+    .where(and(eq(device.tenantId, tenantId), eq(device.deviceKey, deviceKey)));
 }
 
 /**
@@ -130,29 +130,29 @@ export async function touchDevice(tenantId: string, deviceKey: string): Promise<
  * 撤销后立即阻止后续注入：新 Lease、Workspace handle 和迟到签名请求全部拒绝。
  */
 export async function revokeDevice(tenantId: string, deviceKey: string): Promise<Device | null> {
- const result = await db
- .update(device)
- .set({
- deviceState: "revoked",
- revokedAt: sql`NOW()`,
- })
- .where(
- and(
- eq(device.tenantId, tenantId),
- eq(device.deviceKey, deviceKey),
- eq(device.deviceState, "active"),
- ),
- );
- // affectedRows = 0 表示无 active 设备被撤销（已 revoked 或不存在）
- if (result[0].affectedRows === 0) {
- return null;
- }
- const [row] = await db
- .select()
- .from(device)
- .where(and(eq(device.tenantId, tenantId), eq(device.deviceKey, deviceKey)))
- .limit(1);
- return row ?? null;
+  const result = await db
+    .update(device)
+    .set({
+      deviceState: "revoked",
+      revokedAt: sql`NOW()`,
+    })
+    .where(
+      and(
+        eq(device.tenantId, tenantId),
+        eq(device.deviceKey, deviceKey),
+        eq(device.deviceState, "active"),
+      ),
+    );
+  // affectedRows = 0 表示无 active 设备被撤销（已 revoked 或不存在）
+  if (result[0].affectedRows === 0) {
+    return null;
+  }
+  const [row] = await db
+    .select()
+    .from(device)
+    .where(and(eq(device.tenantId, tenantId), eq(device.deviceKey, deviceKey)))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -162,22 +162,22 @@ export async function revokeDevice(tenantId: string, deviceKey: string): Promise
  * 不属于该 userId 返回 null（HTTP 入口据此返回 404 隐藏存在性）。
  */
 export async function getDeviceForUser(
- tenantId: string,
- deviceKey: string,
- userId: string,
+  tenantId: string,
+  deviceKey: string,
+  userId: string,
 ): Promise<Device | null> {
- const [row] = await db
- .select()
- .from(device)
- .where(
- and(
- eq(device.tenantId, tenantId),
- eq(device.deviceKey, deviceKey),
- eq(device.userId, userId),
- ),
- )
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(device)
+    .where(
+      and(
+        eq(device.tenantId, tenantId),
+        eq(device.deviceKey, deviceKey),
+        eq(device.userId, userId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -185,10 +185,10 @@ export async function getDeviceForUser(
  * 不存在的设备返回 false（保守默认：未知设备不视为活跃）。
  */
 export async function isDeviceActive(tenantId: string, deviceKey: string): Promise<boolean> {
- const [row] = await db
- .select({ deviceState: device.deviceState })
- .from(device)
- .where(and(eq(device.tenantId, tenantId), eq(device.deviceKey, deviceKey)))
- .limit(1);
- return row?.deviceState === "active";
+  const [row] = await db
+    .select({ deviceState: device.deviceState })
+    .from(device)
+    .where(and(eq(device.tenantId, tenantId), eq(device.deviceKey, deviceKey)))
+    .limit(1);
+  return row?.deviceState === "active";
 }

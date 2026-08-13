@@ -87,7 +87,7 @@ describe("capability-market-client", () => {
 
       const items = await listSyncableSkills();
       expect(items).toHaveLength(1);
-      expect(items[0]!.asset_id).toBe("a1");
+      expect(items[0]?.asset_id).toBe("a1");
       expect(calledUrl).toContain("asset_type=skill");
       expect(calledUrl).toContain("scope=syncable");
       expect(calledUrl).toContain("limit=100");
@@ -165,7 +165,7 @@ describe("capability-market-client", () => {
 
       const result = await checkUpdates([{ asset_id: "a1", version: "1.0.0", content_hash: "h1" }]);
       expect(result).toHaveLength(1);
-      expect(result[0]!.status).toBe("unchanged");
+      expect(result[0]?.status).toBe("unchanged");
       expect(body).toEqual({ items: [{ asset_id: "a1", version: "1.0.0", content_hash: "h1" }] });
     });
 
@@ -210,7 +210,7 @@ describe("capability-market-client", () => {
 
       const result = await syncManifests(["a1"]);
       expect(result).toHaveLength(1);
-      expect(result[0]!.artifact_download_path).toContain(
+      expect(result[0]?.artifact_download_path).toContain(
         "/capabilities/a1/versions/1.0.0/artifact",
       );
     });
@@ -228,9 +228,9 @@ describe("capability-market-client", () => {
 
       const r = await downloadArtifact("a1", "1.0.0");
       expect(r).not.toBeNull();
-      expect(r!.buffer).toEqual(Buffer.from([1, 2, 3, 4]));
-      expect(r!.contentHash).toBe("sha256:abc");
-      expect(r!.etag).toBe("etag-1");
+      expect(r?.buffer).toEqual(Buffer.from([1, 2, 3, 4]));
+      expect(r?.contentHash).toBe("sha256:abc");
+      expect(r?.etag).toBe("etag-1");
     });
 
     it("404 → 返回 null", async () => {

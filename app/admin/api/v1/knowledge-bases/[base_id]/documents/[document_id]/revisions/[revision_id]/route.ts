@@ -1,11 +1,4 @@
 import {
-  REQUEST_ID_HEADER,
-  apiSuccess,
-  etagHeader,
-  getRequestId,
-  resourceNotFound,
-} from "@/lib/http";
-import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
@@ -15,6 +8,13 @@ import {
   getKnowledgeDocumentById,
   getKnowledgeDocumentRevisionById,
 } from "@/lib/context/knowledge-queries";
+import {
+  REQUEST_ID_HEADER,
+  apiSuccess,
+  etagHeader,
+  getRequestId,
+  resourceNotFound,
+} from "@/lib/http";
 /**
  * GET /admin/api/v1/knowledge-bases/{base_id}/documents/{document_id}/revisions/{revision_id}
  *   — KnowledgeDocumentRevision 单资源详情（S11-W03）。

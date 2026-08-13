@@ -61,7 +61,7 @@ export function SkillSyncButton() {
             .filter(([, n]) => n > 0)
             .map(([k, n]) => `${k} ${n}`)
             .join(" · ") || "无变化"}
-          {(result["名称冲突"] ?? 0) > 0 && (
+          {(result.名称冲突 ?? 0) > 0 && (
             <span className="ml-2 text-[var(--danger)]">（有名称冲突,请在详情页处理）</span>
           )}
         </span>

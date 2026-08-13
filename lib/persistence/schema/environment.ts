@@ -25,15 +25,15 @@ import { tenant } from "@/lib/persistence/schema/identity";
 import { invocationTable } from "@/lib/persistence/schema/runtime";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
- bigint,
- datetime,
- index,
- json,
- mysqlEnum,
- mysqlTable,
- text,
- uniqueIndex,
- varchar,
+  bigint,
+  datetime,
+  index,
+  json,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  uniqueIndex,
+  varchar,
 } from "drizzle-orm/mysql-core";
 
 // ─── Environment Type ─────────────────────────────────────
@@ -58,7 +58,7 @@ export type EnvironmentType = (typeof ENVIRONMENT_TYPES)[number];
  */
 export const ENVIRONMENT_DEFINITION_LIFECYCLE_STATES = ["active", "archived", "deleted"] as const;
 export type EnvironmentDefinitionLifecycleState =
- (typeof ENVIRONMENT_DEFINITION_LIFECYCLE_STATES)[number];
+  (typeof ENVIRONMENT_DEFINITION_LIFECYCLE_STATES)[number];
 
 // ─── Environment Lease State ──────────────────────────────
 
@@ -72,20 +72,20 @@ export type EnvironmentDefinitionLifecycleState =
  * - lost：Runtime 主动报告丢失或心跳超时被标记（终态）。
  */
 export const ENVIRONMENT_LEASE_STATES = [
- "allocated",
- "active",
- "releasing",
- "released",
- "expired",
- "lost",
+  "allocated",
+  "active",
+  "releasing",
+  "released",
+  "expired",
+  "lost",
 ] as const;
 export type EnvironmentLeaseState = (typeof ENVIRONMENT_LEASE_STATES)[number];
 
 /** Lease 终态集合（不可恢复）。 */
 export const ENVIRONMENT_LEASE_TERMINAL_STATES: readonly EnvironmentLeaseState[] = [
- "released",
- "expired",
- "lost",
+  "released",
+  "expired",
+  "lost",
 ];
 
 // ─── Environment Change Request State ─────────────────────
@@ -99,17 +99,17 @@ export const ENVIRONMENT_LEASE_TERMINAL_STATES: readonly EnvironmentLeaseState[]
  * - expired：未在窗口内 ack 或下一 Invocation 接纳（终态）。
  */
 export const ENVIRONMENT_CHANGE_REQUEST_STATES = [
- "pending",
- "accepted_for_next_invocation",
- "runtime_acknowledged",
- "rejected",
- "expired",
+  "pending",
+  "accepted_for_next_invocation",
+  "runtime_acknowledged",
+  "rejected",
+  "expired",
 ] as const;
 export type EnvironmentChangeRequestState = (typeof ENVIRONMENT_CHANGE_REQUEST_STATES)[number];
 
 /** EnvironmentChangeRequest 终态集合。 */
 export const ENVIRONMENT_CHANGE_REQUEST_TERMINAL_STATES: readonly EnvironmentChangeRequestState[] =
- ["rejected", "expired"];
+  ["rejected", "expired"];
 
 // ─── EnvironmentDefinition ────────────────────────────────
 
@@ -124,54 +124,54 @@ export const ENVIRONMENT_CHANGE_REQUEST_TERMINAL_STATES: readonly EnvironmentCha
  * - filesystem/network/resource/secret policy JSON 由平台固定 Schema，本表只持久化。
  */
 export const environmentDefinitionTable = mysqlTable(
- "EnvironmentDefinition",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- /** 租户内稳定唯一 key（slug），如 "desktop-default"。 */
- environmentKey: varchar("environmentKey", { length: 128 }).notNull(),
- displayName: varchar("displayName", { length: 256 }).notNull(),
- description: text("description"),
- /** 环境类型（desktop/cloud/remote/sandbox）。 */
- environmentType: mysqlEnum("environmentType", ENVIRONMENT_TYPES).notNull(),
- /** 文件系统策略（路径白名单/黑名单、读写权限）。 */
- filesystemPolicyJson: json("filesystemPolicyJson").notNull(),
- /** 网络策略（出站域名/IP 白名单）。 */
- networkPolicyJson: json("networkPolicyJson").notNull(),
- /** 资源限制（CPU、内存、时长、并发）。 */
- resourceLimitsJson: json("resourceLimitsJson").notNull(),
- /** Secret 注入策略（哪些 CredentialRef 可注入、注入方式）。 */
- secretPolicyJson: json("secretPolicyJson").notNull(),
- lifecycleState: mysqlEnum("lifecycleState", ENVIRONMENT_DEFINITION_LIFECYCLE_STATES)
- .notNull()
- .default("active"),
- /** 乐观并发版本号（单调递增）。 */
- versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- deletedAt: datetime("deletedAt", { mode: "date" }),
- },
- (t) => ({
- tenantKeyUq: uniqueIndex("EnvironmentDefinition_tenant_key_uq").on(
- t.tenantId,
- t.environmentKey,
- ),
- tenantLifecycleUpdatedIdx: index("EnvironmentDefinition_tenant_lifecycle_updated_idx").on(
- t.tenantId,
- t.lifecycleState,
- t.updatedAt,
- ),
- tenantTypeIdx: index("EnvironmentDefinition_tenant_type_idx").on(t.tenantId, t.environmentType),
- }),
+  "EnvironmentDefinition",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    /** 租户内稳定唯一 key（slug），如 "desktop-default"。 */
+    environmentKey: varchar("environmentKey", { length: 128 }).notNull(),
+    displayName: varchar("displayName", { length: 256 }).notNull(),
+    description: text("description"),
+    /** 环境类型（desktop/cloud/remote/sandbox）。 */
+    environmentType: mysqlEnum("environmentType", ENVIRONMENT_TYPES).notNull(),
+    /** 文件系统策略（路径白名单/黑名单、读写权限）。 */
+    filesystemPolicyJson: json("filesystemPolicyJson").notNull(),
+    /** 网络策略（出站域名/IP 白名单）。 */
+    networkPolicyJson: json("networkPolicyJson").notNull(),
+    /** 资源限制（CPU、内存、时长、并发）。 */
+    resourceLimitsJson: json("resourceLimitsJson").notNull(),
+    /** Secret 注入策略（哪些 CredentialRef 可注入、注入方式）。 */
+    secretPolicyJson: json("secretPolicyJson").notNull(),
+    lifecycleState: mysqlEnum("lifecycleState", ENVIRONMENT_DEFINITION_LIFECYCLE_STATES)
+      .notNull()
+      .default("active"),
+    /** 乐观并发版本号（单调递增）。 */
+    versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    deletedAt: datetime("deletedAt", { mode: "date" }),
+  },
+  (t) => ({
+    tenantKeyUq: uniqueIndex("EnvironmentDefinition_tenant_key_uq").on(
+      t.tenantId,
+      t.environmentKey,
+    ),
+    tenantLifecycleUpdatedIdx: index("EnvironmentDefinition_tenant_lifecycle_updated_idx").on(
+      t.tenantId,
+      t.lifecycleState,
+      t.updatedAt,
+    ),
+    tenantTypeIdx: index("EnvironmentDefinition_tenant_type_idx").on(t.tenantId, t.environmentType),
+  }),
 );
 
 export type EnvironmentDefinition = InferSelectModel<typeof environmentDefinitionTable>;
@@ -192,54 +192,54 @@ export type EnvironmentDefinitionInsert = InferInsertModel<typeof environmentDef
  * - capabilitiesJson 由 Runtime 探测填入，包括热迁移能力。
  */
 export const environmentLeaseTable = mysqlTable(
- "EnvironmentLease",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- environmentDefinitionId: varchar("environmentDefinitionId", { length: 36 })
- .notNull()
- .references(() => environmentDefinitionTable.id),
- /** 引用 Invocation.id（FK CASCADE）。 */
- invocationId: varchar("invocationId", { length: 36 })
- .notNull()
- .references(() => invocationTable.id),
- /** 引用 InvocationAttempt.id（逻辑外键，应用层校验）。 */
- attemptId: varchar("attemptId", { length: 36 }).notNull(),
- /** Desktop Lease 必填；Cloud/Remote/Sandbox 可空。 */
- deviceId: varchar("deviceId", { length: 36 }),
- /** Runtime 内部 worker 引用。 */
- workerRef: varchar("workerRef", { length: 256 }),
- leaseState: mysqlEnum("leaseState", ENVIRONMENT_LEASE_STATES).notNull().default("allocated"),
- /** Runtime 探测的真实能力（包括热迁移支持）。 */
- capabilitiesJson: json("capabilitiesJson"),
- allocatedAt: datetime("allocatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
- releasedAt: datetime("releasedAt", { mode: "date", fsp: 3 }),
- /** Lease 过期时间；超过且无心跳 → expired。 */
- expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- invocationAttemptUq: uniqueIndex("EnvironmentLease_invocation_attempt_uq").on(
- t.invocationId,
- t.attemptId,
- ),
- tenantStateIdx: index("EnvironmentLease_tenant_state_idx").on(t.tenantId, t.leaseState),
- definitionIdx: index("EnvironmentLease_definition_idx").on(t.environmentDefinitionId),
- deviceIdx: index("EnvironmentLease_device_idx").on(t.deviceId),
- }),
+  "EnvironmentLease",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    environmentDefinitionId: varchar("environmentDefinitionId", { length: 36 })
+      .notNull()
+      .references(() => environmentDefinitionTable.id),
+    /** 引用 Invocation.id（FK CASCADE）。 */
+    invocationId: varchar("invocationId", { length: 36 })
+      .notNull()
+      .references(() => invocationTable.id),
+    /** 引用 InvocationAttempt.id（逻辑外键，应用层校验）。 */
+    attemptId: varchar("attemptId", { length: 36 }).notNull(),
+    /** Desktop Lease 必填；Cloud/Remote/Sandbox 可空。 */
+    deviceId: varchar("deviceId", { length: 36 }),
+    /** Runtime 内部 worker 引用。 */
+    workerRef: varchar("workerRef", { length: 256 }),
+    leaseState: mysqlEnum("leaseState", ENVIRONMENT_LEASE_STATES).notNull().default("allocated"),
+    /** Runtime 探测的真实能力（包括热迁移支持）。 */
+    capabilitiesJson: json("capabilitiesJson"),
+    allocatedAt: datetime("allocatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
+    releasedAt: datetime("releasedAt", { mode: "date", fsp: 3 }),
+    /** Lease 过期时间；超过且无心跳 → expired。 */
+    expiresAt: datetime("expiresAt", { mode: "date", fsp: 3 }),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    invocationAttemptUq: uniqueIndex("EnvironmentLease_invocation_attempt_uq").on(
+      t.invocationId,
+      t.attemptId,
+    ),
+    tenantStateIdx: index("EnvironmentLease_tenant_state_idx").on(t.tenantId, t.leaseState),
+    definitionIdx: index("EnvironmentLease_definition_idx").on(t.environmentDefinitionId),
+    deviceIdx: index("EnvironmentLease_device_idx").on(t.deviceId),
+  }),
 );
 
 export type EnvironmentLease = InferSelectModel<typeof environmentLeaseTable>;
@@ -260,58 +260,58 @@ export type EnvironmentLeaseInsert = InferInsertModel<typeof environmentLeaseTab
  * - 终态后不可恢复。
  */
 export const environmentChangeRequestTable = mysqlTable(
- "EnvironmentChangeRequest",
- {
- id: varchar("id", { length: 36 })
- .primaryKey()
- .notNull()
- .$defaultFn(() => randomUUID()),
- tenantId: varchar("tenantId", { length: 36 })
- .notNull()
- .references(() => tenant.id),
- threadId: varchar("threadId", { length: 36 }).notNull(),
- /** 当前 Invocation id；可空表示下一 Invocation 生效。 */
- invocationId: varchar("invocationId", { length: 36 }),
- fromEnvironmentDefinitionId: varchar("fromEnvironmentDefinitionId", { length: 36 })
- .notNull()
- .references(() => environmentDefinitionTable.id),
- requestedEnvironmentDefinitionId: varchar("requestedEnvironmentDefinitionId", { length: 36 })
- .notNull()
- .references(() => environmentDefinitionTable.id),
- /** 切换到指定设备（仅 Desktop 必填）。 */
- requestedDeviceId: varchar("requestedDeviceId", { length: 36 }),
- requestState: mysqlEnum("requestState", ENVIRONMENT_CHANGE_REQUEST_STATES)
- .notNull()
- .default("pending"),
- /** 员工请求原因 / Runtime 拒绝原因。 */
- reasonCode: varchar("reasonCode", { length: 128 }),
- /** 请求发起者 userIdentityId 或 serviceId。 */
- requestedBy: varchar("requestedBy", { length: 128 }).notNull(),
- createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- resolvedAt: datetime("resolvedAt", { mode: "date", fsp: 3 }),
- updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
- .notNull()
- .$defaultFn(() => new Date()),
- },
- (t) => ({
- tenantThreadStateIdx: index("EnvironmentChangeRequest_tenant_thread_state_idx").on(
- t.tenantId,
- t.threadId,
- t.requestState,
- ),
- tenantInvocationIdx: index("EnvironmentChangeRequest_tenant_invocation_idx").on(
- t.tenantId,
- t.invocationId,
- ),
- fromDefinitionIdx: index("EnvironmentChangeRequest_from_definition_idx").on(
- t.fromEnvironmentDefinitionId,
- ),
- requestedDefinitionIdx: index("EnvironmentChangeRequest_requested_definition_idx").on(
- t.requestedEnvironmentDefinitionId,
- ),
- }),
+  "EnvironmentChangeRequest",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    threadId: varchar("threadId", { length: 36 }).notNull(),
+    /** 当前 Invocation id；可空表示下一 Invocation 生效。 */
+    invocationId: varchar("invocationId", { length: 36 }),
+    fromEnvironmentDefinitionId: varchar("fromEnvironmentDefinitionId", { length: 36 })
+      .notNull()
+      .references(() => environmentDefinitionTable.id),
+    requestedEnvironmentDefinitionId: varchar("requestedEnvironmentDefinitionId", { length: 36 })
+      .notNull()
+      .references(() => environmentDefinitionTable.id),
+    /** 切换到指定设备（仅 Desktop 必填）。 */
+    requestedDeviceId: varchar("requestedDeviceId", { length: 36 }),
+    requestState: mysqlEnum("requestState", ENVIRONMENT_CHANGE_REQUEST_STATES)
+      .notNull()
+      .default("pending"),
+    /** 员工请求原因 / Runtime 拒绝原因。 */
+    reasonCode: varchar("reasonCode", { length: 128 }),
+    /** 请求发起者 userIdentityId 或 serviceId。 */
+    requestedBy: varchar("requestedBy", { length: 128 }).notNull(),
+    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    resolvedAt: datetime("resolvedAt", { mode: "date", fsp: 3 }),
+    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    tenantThreadStateIdx: index("EnvironmentChangeRequest_tenant_thread_state_idx").on(
+      t.tenantId,
+      t.threadId,
+      t.requestState,
+    ),
+    tenantInvocationIdx: index("EnvironmentChangeRequest_tenant_invocation_idx").on(
+      t.tenantId,
+      t.invocationId,
+    ),
+    fromDefinitionIdx: index("EnvironmentChangeRequest_from_definition_idx").on(
+      t.fromEnvironmentDefinitionId,
+    ),
+    requestedDefinitionIdx: index("EnvironmentChangeRequest_requested_definition_idx").on(
+      t.requestedEnvironmentDefinitionId,
+    ),
+  }),
 );
 
 export type EnvironmentChangeRequest = InferSelectModel<typeof environmentChangeRequestTable>;

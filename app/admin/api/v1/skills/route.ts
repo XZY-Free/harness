@@ -1,23 +1,4 @@
 import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  apiError,
-  apiSuccess,
-  etagHeader,
-  getRequestId,
-} from "@/lib/http";
-import {
-  buildIdempotencyErrorResponse,
-  buildReplayResponse,
-  callerFromPrincipal,
-  callerFromWorkloadPrincipal,
-  completeRecord,
-  computeRequestHash,
-  enforceIdempotency,
-  failRecord,
-  prepareRetryForFailedRecord,
-} from "@/lib/identity/idempotency";
-import {
   type AdminPrincipal,
   SKILL_ETAG_PREFIX,
   adminAuthErrorResponse,
@@ -49,6 +30,25 @@ import {
   createSkill,
   listSkills,
 } from "@/lib/capability/skill-queries";
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  REQUEST_ID_HEADER,
+  apiError,
+  apiSuccess,
+  etagHeader,
+  getRequestId,
+} from "@/lib/http";
+import {
+  buildIdempotencyErrorResponse,
+  buildReplayResponse,
+  callerFromPrincipal,
+  callerFromWorkloadPrincipal,
+  completeRecord,
+  computeRequestHash,
+  enforceIdempotency,
+  failRecord,
+  prepareRetryForFailedRecord,
+} from "@/lib/identity/idempotency";
 
 export const dynamic = "force-dynamic";
 

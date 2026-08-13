@@ -29,28 +29,28 @@ export type WorkspaceAccessResult = { ok: true; user: User } | { ok: false; resp
  * @returns ok=true 时 user 已就绪；ok=false 时直接 return response 给客户端。
  */
 export async function requireThreadWorkspaceRead(
- request: RequestLike,
- threadId: string,
+  request: RequestLike,
+  threadId: string,
 ): Promise<WorkspaceAccessResult> {
- let user: User;
- try {
- user = await getCurrentUserFromRequest(request);
- } catch (error) {
- const authResp = authErrorResponse(error);
- return { ok: false, response: authResp ?? jsonError(500, "auth_error", "认证异常") };
- }
+  let user: User;
+  try {
+    user = await getCurrentUserFromRequest(request);
+  } catch (error) {
+    const authResp = authErrorResponse(error);
+    return { ok: false, response: authResp ?? jsonError(500, "auth_error", "认证异常") };
+  }
 
- const thread = await requireThreadForUser(threadId, user.id);
- if (!thread) {
- // foreign / 不存在 → 404，不区分，防枚举（先于 workspace 权限判定）。
- return { ok: false, response: jsonError(404, "THREAD_NOT_FOUND", "thread 不存在或无权访问") };
- }
+  const thread = await requireThreadForUser(threadId, user.id);
+  if (!thread) {
+    // foreign / 不存在 → 404，不区分，防枚举（先于 workspace 权限判定）。
+    return { ok: false, response: jsonError(404, "THREAD_NOT_FOUND", "thread 不存在或无权访问") };
+  }
 
- if (!(await hasPermission(user.id, "workspace.read"))) {
- return { ok: false, response: jsonError(403, "forbidden", "无 workspace.read 权限") };
- }
+  if (!(await hasPermission(user.id, "workspace.read"))) {
+    return { ok: false, response: jsonError(403, "forbidden", "无 workspace.read 权限") };
+  }
 
- return { ok: true, user };
+  return { ok: true, user };
 }
 
 /**
@@ -62,25 +62,25 @@ export async function requireThreadWorkspaceRead(
  * @returns ok=true 时 user 已就绪；ok=false 时直接 return response 给客户端。
  */
 export async function requireThreadWorkspaceWrite(
- request: RequestLike,
- threadId: string,
+  request: RequestLike,
+  threadId: string,
 ): Promise<WorkspaceAccessResult> {
- let user: User;
- try {
- user = await getCurrentUserFromRequest(request);
- } catch (error) {
- const authResp = authErrorResponse(error);
- return { ok: false, response: authResp ?? jsonError(500, "auth_error", "认证异常") };
- }
+  let user: User;
+  try {
+    user = await getCurrentUserFromRequest(request);
+  } catch (error) {
+    const authResp = authErrorResponse(error);
+    return { ok: false, response: authResp ?? jsonError(500, "auth_error", "认证异常") };
+  }
 
- const thread = await requireThreadForUser(threadId, user.id);
- if (!thread) {
- return { ok: false, response: jsonError(404, "THREAD_NOT_FOUND", "thread 不存在或无权访问") };
- }
+  const thread = await requireThreadForUser(threadId, user.id);
+  if (!thread) {
+    return { ok: false, response: jsonError(404, "THREAD_NOT_FOUND", "thread 不存在或无权访问") };
+  }
 
- if (!(await hasPermission(user.id, "workspace.write"))) {
- return { ok: false, response: jsonError(403, "forbidden", "无 workspace.write 权限") };
- }
+  if (!(await hasPermission(user.id, "workspace.write"))) {
+    return { ok: false, response: jsonError(403, "forbidden", "无 workspace.write 权限") };
+  }
 
- return { ok: true, user };
+  return { ok: true, user };
 }

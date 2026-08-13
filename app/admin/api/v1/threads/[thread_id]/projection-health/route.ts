@@ -1,10 +1,10 @@
-import { getProjectionHealth } from "@/lib/conversations/read-model-queries";
-import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import {
   type AdminPrincipal,
   adminAuthErrorResponse,
   resolveAdminPrincipalAsync,
 } from "@/lib/admin/route-helpers";
+import { getProjectionHealth } from "@/lib/conversations/read-model-queries";
+import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 /**
  * GET /admin/api/v1/threads/{thread_id}/projection-health — 投影健康检查（S11-W04）。
  *

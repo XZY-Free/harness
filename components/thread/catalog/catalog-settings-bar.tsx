@@ -33,8 +33,8 @@
 "use client";
 
 import { CatalogSelect } from "@/components/thread/catalog/catalog-select";
-import { cn } from "@/lib/utils";
 import type { ClientThread } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 import { useState } from "react";
 
 interface CatalogSettingsBarProps {

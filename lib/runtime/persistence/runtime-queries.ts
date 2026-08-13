@@ -20,81 +20,81 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import {
- type RuntimeKind,
- type RuntimeLifecycleState,
- type RuntimeRow,
- runtimeTable,
+  type RuntimeKind,
+  type RuntimeLifecycleState,
+  type RuntimeRow,
+  runtimeTable,
 } from "@/lib/persistence/schema/runtimes";
 import { and, eq, isNull } from "drizzle-orm";
 
 /** 创建稳定 Runtime 身份。 */
 export async function createRuntime(params: {
- tenantId: string;
- runtimeKey: string;
- displayName: string;
- runtimeKind: RuntimeKind;
- ownerUserId: string;
- lifecycleState?: RuntimeLifecycleState;
+  tenantId: string;
+  runtimeKey: string;
+  displayName: string;
+  runtimeKind: RuntimeKind;
+  ownerUserId: string;
+  lifecycleState?: RuntimeLifecycleState;
 }): Promise<RuntimeRow> {
- const id = randomUUID();
- await db.insert(runtimeTable).values({
- id,
- tenantId: params.tenantId,
- runtimeKey: params.runtimeKey,
- displayName: params.displayName,
- runtimeKind: params.runtimeKind,
- ownerUserId: params.ownerUserId,
- lifecycleState: params.lifecycleState ?? "draft",
- });
- const [row] = await db.select().from(runtimeTable).where(eq(runtimeTable.id, id)).limit(1);
- if (!row) {
- throw new Error(`createRuntime: 行未找到（id=${id}）`);
- }
- return row;
+  const id = randomUUID();
+  await db.insert(runtimeTable).values({
+    id,
+    tenantId: params.tenantId,
+    runtimeKey: params.runtimeKey,
+    displayName: params.displayName,
+    runtimeKind: params.runtimeKind,
+    ownerUserId: params.ownerUserId,
+    lifecycleState: params.lifecycleState ?? "draft",
+  });
+  const [row] = await db.select().from(runtimeTable).where(eq(runtimeTable.id, id)).limit(1);
+  if (!row) {
+    throw new Error(`createRuntime: 行未找到（id=${id}）`);
+  }
+  return row;
 }
 
 /** 按 id 获取 Runtime。不存在返回 null。 */
 export async function getRuntimeById(
- tenantId: string,
- runtimeId: string,
+  tenantId: string,
+  runtimeId: string,
 ): Promise<RuntimeRow | null> {
- const [row] = await db
- .select()
- .from(runtimeTable)
- .where(and(eq(runtimeTable.tenantId, tenantId), eq(runtimeTable.id, runtimeId)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(runtimeTable)
+    .where(and(eq(runtimeTable.tenantId, tenantId), eq(runtimeTable.id, runtimeId)))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 按 runtimeKey 获取 Runtime。不存在返回 null。 */
 export async function getRuntimeByKey(
- tenantId: string,
- runtimeKey: string,
+  tenantId: string,
+  runtimeKey: string,
 ): Promise<RuntimeRow | null> {
- const [row] = await db
- .select()
- .from(runtimeTable)
- .where(and(eq(runtimeTable.tenantId, tenantId), eq(runtimeTable.runtimeKey, runtimeKey)))
- .limit(1);
- return row ?? null;
+  const [row] = await db
+    .select()
+    .from(runtimeTable)
+    .where(and(eq(runtimeTable.tenantId, tenantId), eq(runtimeTable.runtimeKey, runtimeKey)))
+    .limit(1);
+  return row ?? null;
 }
 
 /** 列出租户内 Runtime（含 lifecycle 过滤；不含软删）。 */
 export async function listRuntimes(
- tenantId: string,
- options?: { lifecycleState?: RuntimeLifecycleState; includeDeleted?: boolean },
+  tenantId: string,
+  options?: { lifecycleState?: RuntimeLifecycleState; includeDeleted?: boolean },
 ): Promise<RuntimeRow[]> {
- const conditions = [eq(runtimeTable.tenantId, tenantId)];
- if (options?.lifecycleState) {
- conditions.push(eq(runtimeTable.lifecycleState, options.lifecycleState));
- }
- if (!options?.includeDeleted) {
- conditions.push(isNull(runtimeTable.deletedAt));
- }
- return db
- .select()
- .from(runtimeTable)
- .where(and(...conditions));
+  const conditions = [eq(runtimeTable.tenantId, tenantId)];
+  if (options?.lifecycleState) {
+    conditions.push(eq(runtimeTable.lifecycleState, options.lifecycleState));
+  }
+  if (!options?.includeDeleted) {
+    conditions.push(isNull(runtimeTable.deletedAt));
+  }
+  return db
+    .select()
+    .from(runtimeTable)
+    .where(and(...conditions));
 }
 
 /**
@@ -106,42 +106,42 @@ export async function listRuntimes(
  * - 状态变更通过乐观锁：versionNo 不匹配返回 null。
  */
 export async function updateRuntimeLifecycle(
- tenantId: string,
- runtimeId: string,
- nextState: RuntimeLifecycleState,
- expectedVersionNo: number,
+  tenantId: string,
+  runtimeId: string,
+  nextState: RuntimeLifecycleState,
+  expectedVersionNo: number,
 ): Promise<RuntimeRow | null> {
- const current = await getRuntimeById(tenantId, runtimeId);
- if (!current) return null;
- if (current.lifecycleState === "retired") {
- throw new RuntimeLifecycleError(
- runtimeId,
- current.lifecycleState,
- nextState,
- "retired 是终态，不可再变更",
- );
- }
- if (current.versionNo !== expectedVersionNo) {
- return null; // 乐观锁冲突，调用方应返回 412
- }
+  const current = await getRuntimeById(tenantId, runtimeId);
+  if (!current) return null;
+  if (current.lifecycleState === "retired") {
+    throw new RuntimeLifecycleError(
+      runtimeId,
+      current.lifecycleState,
+      nextState,
+      "retired 是终态，不可再变更",
+    );
+  }
+  if (current.versionNo !== expectedVersionNo) {
+    return null; // 乐观锁冲突，调用方应返回 412
+  }
 
- const result = await db
- .update(runtimeTable)
- .set({
- lifecycleState: nextState,
- versionNo: current.versionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(runtimeTable.tenantId, tenantId),
- eq(runtimeTable.id, runtimeId),
- eq(runtimeTable.versionNo, expectedVersionNo),
- ),
- );
+  const result = await db
+    .update(runtimeTable)
+    .set({
+      lifecycleState: nextState,
+      versionNo: current.versionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(runtimeTable.tenantId, tenantId),
+        eq(runtimeTable.id, runtimeId),
+        eq(runtimeTable.versionNo, expectedVersionNo),
+      ),
+    );
 
- if (result[0].affectedRows === 0) return null;
- return getRuntimeById(tenantId, runtimeId);
+  if (result[0].affectedRows === 0) return null;
+  return getRuntimeById(tenantId, runtimeId);
 }
 
 /**
@@ -151,84 +151,84 @@ export async function updateRuntimeLifecycle(
  * 必须先校验 Revision 状态后调用本函数。
  */
 export async function setCurrentRuntimeRevision(
- tenantId: string,
- runtimeId: string,
- revisionId: string | null,
- expectedVersionNo: number,
+  tenantId: string,
+  runtimeId: string,
+  revisionId: string | null,
+  expectedVersionNo: number,
 ): Promise<RuntimeRow | null> {
- const result = await db
- .update(runtimeTable)
- .set({
- currentRevisionId: revisionId,
- versionNo: expectedVersionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(runtimeTable.tenantId, tenantId),
- eq(runtimeTable.id, runtimeId),
- eq(runtimeTable.versionNo, expectedVersionNo),
- ),
- );
+  const result = await db
+    .update(runtimeTable)
+    .set({
+      currentRevisionId: revisionId,
+      versionNo: expectedVersionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(runtimeTable.tenantId, tenantId),
+        eq(runtimeTable.id, runtimeId),
+        eq(runtimeTable.versionNo, expectedVersionNo),
+      ),
+    );
 
- if (result[0].affectedRows === 0) return null;
- return getRuntimeById(tenantId, runtimeId);
+  if (result[0].affectedRows === 0) return null;
+  return getRuntimeById(tenantId, runtimeId);
 }
 
 /** 软删除 Runtime（仅 draft/disabled 允许；enabled/retired 拒绝）。 */
 export async function softDeleteRuntime(
- tenantId: string,
- runtimeId: string,
- expectedVersionNo: number,
+  tenantId: string,
+  runtimeId: string,
+  expectedVersionNo: number,
 ): Promise<boolean> {
- const current = await getRuntimeById(tenantId, runtimeId);
- if (!current) return false;
- if (current.lifecycleState === "enabled" || current.lifecycleState === "retired") {
- throw new RuntimeLifecycleError(
- runtimeId,
- current.lifecycleState,
- current.lifecycleState,
- `${current.lifecycleState} 状态不允许软删除，请先 disable`,
- );
- }
- if (current.versionNo !== expectedVersionNo) return false;
+  const current = await getRuntimeById(tenantId, runtimeId);
+  if (!current) return false;
+  if (current.lifecycleState === "enabled" || current.lifecycleState === "retired") {
+    throw new RuntimeLifecycleError(
+      runtimeId,
+      current.lifecycleState,
+      current.lifecycleState,
+      `${current.lifecycleState} 状态不允许软删除，请先 disable`,
+    );
+  }
+  if (current.versionNo !== expectedVersionNo) return false;
 
- const result = await db
- .update(runtimeTable)
- .set({
- deletedAt: new Date(),
- versionNo: expectedVersionNo + 1,
- updatedAt: new Date(),
- })
- .where(
- and(
- eq(runtimeTable.tenantId, tenantId),
- eq(runtimeTable.id, runtimeId),
- eq(runtimeTable.versionNo, expectedVersionNo),
- isNull(runtimeTable.deletedAt),
- ),
- );
+  const result = await db
+    .update(runtimeTable)
+    .set({
+      deletedAt: new Date(),
+      versionNo: expectedVersionNo + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(runtimeTable.tenantId, tenantId),
+        eq(runtimeTable.id, runtimeId),
+        eq(runtimeTable.versionNo, expectedVersionNo),
+        isNull(runtimeTable.deletedAt),
+      ),
+    );
 
- return result[0].affectedRows > 0;
+  return result[0].affectedRows > 0;
 }
 
 /** Runtime 生命周期错误。 */
 export class RuntimeLifecycleError extends Error {
- constructor(
- public readonly runtimeId: string,
- public readonly fromState: RuntimeLifecycleState,
- public readonly toState: RuntimeLifecycleState,
- message: string,
- ) {
- super(message);
- this.name = "RuntimeLifecycleError";
- }
+  constructor(
+    public readonly runtimeId: string,
+    public readonly fromState: RuntimeLifecycleState,
+    public readonly toState: RuntimeLifecycleState,
+    message: string,
+  ) {
+    super(message);
+    this.name = "RuntimeLifecycleError";
+  }
 }
 
 /** Re-export 供外部统一从本模块引入类型。 */
 export type {
- RuntimeKind,
- RuntimeLifecycleState,
- RuntimeRow,
+  RuntimeKind,
+  RuntimeLifecycleState,
+  RuntimeRow,
 } from "@/lib/persistence/schema/runtimes";
 export { RUNTIME_KINDS, RUNTIME_LIFECYCLE_STATES } from "@/lib/persistence/schema/runtimes";

@@ -33,18 +33,18 @@ import {
   type VerifyAttestationInput,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import {
-  buildDsseArtifactAttestationEnvelope,
   type PredicateSupplyChain,
+  buildDsseArtifactAttestationEnvelope,
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
-import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
-  createExecutionBinding,
   TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
+  createExecutionBinding,
 } from "@/lib/executions/test-support/create-unverified-execution-binding";
 import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
@@ -75,6 +75,8 @@ import {
   getInvocationById,
   updateInvocationState,
 } from "@/lib/runtime/invocation-queries";
+import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
+import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
   type RedispatchInvocationParams,
   type RedispatchResult,
@@ -87,8 +89,6 @@ import {
   createMockRuntimeClient,
 } from "@/lib/runtime/runtime-client";
 import { createSessionBinding, getSessionBindingById } from "@/lib/runtime/session-binding-queries";
-import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
-import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -192,14 +192,32 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
   const sbomRef = "attestation:sbom:redispatch-v1";
   const provRef = "attestation:provenance:redispatch-v1";
 
-  const sbomDoc = { bomFormat: "CycloneDX", specVersion: "1.6", version: 1, metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } }, components: [{ type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] }] };
+  const sbomDoc = {
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
+    components: [
+      {
+        type: "library",
+        name: "lodash",
+        version: "4.17.21",
+        licenses: [{ license: { id: "MIT" } }],
+      },
+    ],
+  };
   const provDoc = {
     sourceRevision: "git:abc123",
     buildPipeline: "ci-1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
   };
-  const supplyChain: PredicateSupplyChain = { sbomRef, sbomContent: sbomDoc, provenanceRef: provRef, provenanceContent: provDoc };
+  const supplyChain: PredicateSupplyChain = {
+    sbomRef,
+    sbomContent: sbomDoc,
+    provenanceRef: provRef,
+    provenanceContent: provDoc,
+  };
   const store = new InMemoryManagedArtifactStore();
   store.writeDsseEnvelope(
     dsseEnvelopeRef,
@@ -252,14 +270,32 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
   const rtDsseEnvelopeRef = "attestation:signature:rt-redispatch-v1";
   const rtSbomRef = "attestation:sbom:rt-redispatch-v1";
   const rtProvRef = "attestation:provenance:rt-redispatch-v1";
-  const rtSbomDoc = { bomFormat: "CycloneDX", specVersion: "1.6", version: 1, metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } }, components: [{ type: "library", name: "lodash", version: "4.17.21", licenses: [{ license: { id: "MIT" } }] }] };
+  const rtSbomDoc = {
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
+    components: [
+      {
+        type: "library",
+        name: "lodash",
+        version: "4.17.21",
+        licenses: [{ license: { id: "MIT" } }],
+      },
+    ],
+  };
   const rtProvDoc = {
     sourceRevision: "git:abc123",
     buildPipeline: "ci-1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
   };
-  const rtSupplyChain: PredicateSupplyChain = { sbomRef: rtSbomRef, sbomContent: rtSbomDoc, provenanceRef: rtProvRef, provenanceContent: rtProvDoc };
+  const rtSupplyChain: PredicateSupplyChain = {
+    sbomRef: rtSbomRef,
+    sbomContent: rtSbomDoc,
+    provenanceRef: rtProvRef,
+    provenanceContent: rtProvDoc,
+  };
   store.writeDsseEnvelope(
     rtDsseEnvelopeRef,
     buildDsseArtifactAttestationEnvelope(builderKey, rtDigest, rtSupplyChain),

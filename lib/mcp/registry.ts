@@ -1,8 +1,8 @@
 import {
- deleteMcpServerConfig,
- getMcpServerConfigByName,
- listEnabledMcpServerConfigs,
- listMcpServerConfigs,
+  deleteMcpServerConfig,
+  getMcpServerConfigByName,
+  listEnabledMcpServerConfigs,
+  listMcpServerConfigs,
 } from "@/lib/db/queries";
 import type { McpServerConfig } from "@/lib/db/schema";
 import { type McpClient, type McpClientDeps, connectServer } from "./client";
@@ -19,44 +19,44 @@ import { type McpClient, type McpClientDeps, connectServer } from "./client";
 
 /** Studio/API 返回时对 env 做脱敏（secret 值替换为 ***），不落明文。扩展关键词。 */
 export function redactEnv(env: Record<string, string> | null): Record<string, string> | null {
- if (!env) return null;
- const out: Record<string, string> = {};
- for (const [k, v] of Object.entries(env)) {
- const lk = k.toLowerCase();
- out[k] =
- lk.includes("token") ||
- lk.includes("secret") ||
- lk.includes("key") ||
- lk.includes("password") ||
- lk.includes("pat") ||
- lk.includes("cred") ||
- lk.includes("api") ||
- lk.includes("auth")
- ? "***"
- : v;
- }
- return out;
+  if (!env) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    const lk = k.toLowerCase();
+    out[k] =
+      lk.includes("token") ||
+      lk.includes("secret") ||
+      lk.includes("key") ||
+      lk.includes("password") ||
+      lk.includes("pat") ||
+      lk.includes("cred") ||
+      lk.includes("api") ||
+      lk.includes("auth")
+        ? "***"
+        : v;
+  }
+  return out;
 }
 
 /** 列全部 MCP server 配置（含禁用）。 */
 export async function listServers(): Promise<McpServerConfig[]> {
- return listMcpServerConfigs();
+  return listMcpServerConfigs();
 }
 
 /** 列启用的 MCP server 配置。 */
 export async function listEnabledServers(): Promise<McpServerConfig[]> {
- return listEnabledMcpServerConfigs();
+  return listEnabledMcpServerConfigs();
 }
 
 /** 按 name 取 server 配置。 */
 export async function getServer(name: string): Promise<McpServerConfig | null> {
- return getMcpServerConfigByName(name);
+  return getMcpServerConfigByName(name);
 }
 
 /** 删除 server 配置（同时关闭其连接池 client）。 */
 export async function removeServer(id: string, name?: string): Promise<void> {
- if (name) await closeClient(name);
- await deleteMcpServerConfig(id);
+  if (name) await closeClient(name);
+  await deleteMcpServerConfig(id);
 }
 
 // ─── 连接池 ────────────────────────────────────────────────
@@ -76,89 +76,89 @@ const RATE_LIMIT_PER_MIN = Number.parseInt(process.env.SNOW_MCP_RATE_LIMIT ?? "1
 const RATE_WINDOW_MS = 60_000;
 
 function checkRateLimit(serverName: string): void {
- const now = Date.now();
- const entry = callCounts.get(serverName);
- if (!entry || now - entry.windowStart > RATE_WINDOW_MS) {
- callCounts.set(serverName, { count: 1, windowStart: now });
- return;
- }
- entry.count++;
- if (entry.count > RATE_LIMIT_PER_MIN) {
- throw new Error(`MCP server ${serverName} 调用限流（${RATE_LIMIT_PER_MIN}/min）`);
- }
+  const now = Date.now();
+  const entry = callCounts.get(serverName);
+  if (!entry || now - entry.windowStart > RATE_WINDOW_MS) {
+    callCounts.set(serverName, { count: 1, windowStart: now });
+    return;
+  }
+  entry.count++;
+  if (entry.count > RATE_LIMIT_PER_MIN) {
+    throw new Error(`MCP server ${serverName} 调用限流（${RATE_LIMIT_PER_MIN}/min）`);
+  }
 }
 
 /** 取或创建某 server 的 client（复用）。TTL 心跳 + onclose 主动清理。 */
 export async function getOrConnect(name: string, deps?: McpClientDeps): Promise<McpClient> {
- const existing = pool.get(name);
- if (existing) {
- // TTL 心跳——60s 内跳过重复 ping
- const lastPing = pingTimestamps.get(name) ?? 0;
- if (Date.now() - lastPing >= PING_TTL_MS) {
- try {
- await existing.client.listTools();
- pingTimestamps.set(name, Date.now());
- } catch {
- pool.delete(name);
- pingTimestamps.delete(name);
- await existing.client.close().catch(() => {});
- // fallthrough to reconnect
- }
- }
- if (pool.has(name)) return existing.client;
- }
- const config = await getServer(name);
- if (!config) throw new Error(`MCP server 不存在: ${name}`);
- if (!config.enabled) throw new Error(`MCP server 已禁用: ${name}`);
- const client = await connectServer(config, deps);
- pool.set(name, { client, deps });
- pingTimestamps.set(name, Date.now()); // 刚连接视为已 ping
+  const existing = pool.get(name);
+  if (existing) {
+    // TTL 心跳——60s 内跳过重复 ping
+    const lastPing = pingTimestamps.get(name) ?? 0;
+    if (Date.now() - lastPing >= PING_TTL_MS) {
+      try {
+        await existing.client.listTools();
+        pingTimestamps.set(name, Date.now());
+      } catch {
+        pool.delete(name);
+        pingTimestamps.delete(name);
+        await existing.client.close().catch(() => {});
+        // fallthrough to reconnect
+      }
+    }
+    if (pool.has(name)) return existing.client;
+  }
+  const config = await getServer(name);
+  if (!config) throw new Error(`MCP server 不存在: ${name}`);
+  if (!config.enabled) throw new Error(`MCP server 已禁用: ${name}`);
+  const client = await connectServer(config, deps);
+  pool.set(name, { client, deps });
+  pingTimestamps.set(name, Date.now()); // 刚连接视为已 ping
 
- // onclose 回调——server 进程退出时主动清理池条目
- // 审计修复：原条件 `"onclose" in sdkClient || typeof sdkClient.onclose === "undefined"`
- // 逻辑上永真，且 wrapper 对象上的 onclose setter 未被 SDK Client 感知。
- // 现 connectServer 返回的 McpClient 增加 onclose setter（转发到 SDK Client），
- // 直接设置，依赖 wrapper 的 setter 透传。
- try {
- const handle = client as unknown as { onclose?: () => void };
- handle.onclose = () => {
- pool.delete(name);
- pingTimestamps.delete(name);
- callCounts.delete(name); // 审计修复：同步清理 callCounts 防止内存泄漏
- };
- } catch {
- // onclose 不可用（旧版 SDK）—— 忽略，依赖下次 ping 检测
- }
+  // onclose 回调——server 进程退出时主动清理池条目
+  // 审计修复：原条件 `"onclose" in sdkClient || typeof sdkClient.onclose === "undefined"`
+  // 逻辑上永真，且 wrapper 对象上的 onclose setter 未被 SDK Client 感知。
+  // 现 connectServer 返回的 McpClient 增加 onclose setter（转发到 SDK Client），
+  // 直接设置，依赖 wrapper 的 setter 透传。
+  try {
+    const handle = client as unknown as { onclose?: () => void };
+    handle.onclose = () => {
+      pool.delete(name);
+      pingTimestamps.delete(name);
+      callCounts.delete(name); // 审计修复：同步清理 callCounts 防止内存泄漏
+    };
+  } catch {
+    // onclose 不可用（旧版 SDK）—— 忽略，依赖下次 ping 检测
+  }
 
- return client;
+  return client;
 }
 
 /** 调用前检查限流。供 callMcpTool 使用。 */
 export function rateLimitCheck(serverName: string): void {
- checkRateLimit(serverName);
+  checkRateLimit(serverName);
 }
 
 /** 关闭并移除某 server 的 client（禁用/删除/出错时回收）。 */
 export async function closeClient(name: string): Promise<void> {
- const entry = pool.get(name);
- if (!entry) return;
- pool.delete(name);
- pingTimestamps.delete(name);
- try {
- await entry.client.close();
- } catch {
- // 关闭失败忽略（已回收池条目）
- }
+  const entry = pool.get(name);
+  if (!entry) return;
+  pool.delete(name);
+  pingTimestamps.delete(name);
+  try {
+    await entry.client.close();
+  } catch {
+    // 关闭失败忽略（已回收池条目）
+  }
 }
 
 /** 关闭全部 client（进程退出清理，对齐 closeAllBackgroundTasks 模式）。 */
 export async function closeAllClients(): Promise<void> {
- const names = [...pool.keys()];
- await Promise.all(names.map((n) => closeClient(n)));
+  const names = [...pool.keys()];
+  await Promise.all(names.map((n) => closeClient(n)));
 }
 
 /** 测试用：清空连接池（不 close）。 */
 export function _clearPoolForTest(): void {
- pool.clear();
- pingTimestamps.clear();
+  pool.clear();
+  pingTimestamps.clear();
 }

@@ -3,11 +3,11 @@ import { type SecretEnvMap, cleanupSecretEnvFile, writeSecretEnvFile } from "../
 import type { NetworkPolicy, ResourceQuota } from "../types";
 
 type ContainerStartOptions = {
- quota?: ResourceQuota;
- networkPolicy?: NetworkPolicy;
- secretEnvFile?: string;
- /** 额外 docker run 参数（如 --add-host）。 */
- extraArgs?: string[];
+  quota?: ResourceQuota;
+  networkPolicy?: NetworkPolicy;
+  secretEnvFile?: string;
+  /** 额外 docker run 参数（如 --add-host）。 */
+  extraArgs?: string[];
 };
 
 /**
@@ -23,66 +23,66 @@ type ContainerStartOptions = {
 const secretFileCache = new Map<string, { path: string; hash: string }>();
 
 function hashSecrets(secrets: SecretEnvMap): string {
- // secrets 是小对象，JSON.stringify 作 hash 足够（键稳定排序）
- const keys = Object.keys(secrets).sort();
- return keys.map((k) => `${k}=${secrets[k] ?? ""}`).join("\n");
+  // secrets 是小对象，JSON.stringify 作 hash 足够（键稳定排序）
+  const keys = Object.keys(secrets).sort();
+  return keys.map((k) => `${k}=${secrets[k] ?? ""}`).join("\n");
 }
 
 async function fileExists(path: string): Promise<boolean> {
- try {
- await access(path);
- return true;
- } catch {
- return false;
- }
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function prepareContainerStartOptions(args: {
- threadId: string;
- quota?: ResourceQuota;
- networkPolicy?: NetworkPolicy;
- secretResolver?: () => Promise<SecretEnvMap>;
- existingSecrets?: SecretEnvMap;
- /** 额外 docker run 参数透传。 */
- extraArgs?: string[];
+  threadId: string;
+  quota?: ResourceQuota;
+  networkPolicy?: NetworkPolicy;
+  secretResolver?: () => Promise<SecretEnvMap>;
+  existingSecrets?: SecretEnvMap;
+  /** 额外 docker run 参数透传。 */
+  extraArgs?: string[];
 }): Promise<{
- startOptions: ContainerStartOptions;
- secretsCache?: SecretEnvMap;
- cleanup: () => Promise<void>;
+  startOptions: ContainerStartOptions;
+  secretsCache?: SecretEnvMap;
+  cleanup: () => Promise<void>;
 }> {
- let secretsCache = args.existingSecrets;
- if (args.secretResolver && !secretsCache) {
- secretsCache = await args.secretResolver();
- }
+  let secretsCache = args.existingSecrets;
+  if (args.secretResolver && !secretsCache) {
+    secretsCache = await args.secretResolver();
+  }
 
- let secretEnvFile: string | undefined;
- if (secretsCache && Object.keys(secretsCache).length > 0) {
- const hash = hashSecrets(secretsCache);
- const cached = secretFileCache.get(args.threadId);
- if (cached && cached.hash === hash && (await fileExists(cached.path))) {
- // 缓存命中：secrets 未变 + 文件存在 → 复用，跳过重写
- secretEnvFile = cached.path;
- } else {
- // 缓存未命中：写新文件（覆盖旧缓存路径）+ 更新缓存
- if (cached) {
- await cleanupSecretEnvFile(cached.path).catch(() => {});
- }
- secretEnvFile = await writeSecretEnvFile(secretsCache, process.cwd(), args.threadId);
- secretFileCache.set(args.threadId, { path: secretEnvFile, hash });
- }
- }
+  let secretEnvFile: string | undefined;
+  if (secretsCache && Object.keys(secretsCache).length > 0) {
+    const hash = hashSecrets(secretsCache);
+    const cached = secretFileCache.get(args.threadId);
+    if (cached && cached.hash === hash && (await fileExists(cached.path))) {
+      // 缓存命中：secrets 未变 + 文件存在 → 复用，跳过重写
+      secretEnvFile = cached.path;
+    } else {
+      // 缓存未命中：写新文件（覆盖旧缓存路径）+ 更新缓存
+      if (cached) {
+        await cleanupSecretEnvFile(cached.path).catch(() => {});
+      }
+      secretEnvFile = await writeSecretEnvFile(secretsCache, process.cwd(), args.threadId);
+      secretFileCache.set(args.threadId, { path: secretEnvFile, hash });
+    }
+  }
 
- return {
- startOptions: {
- quota: args.quota,
- networkPolicy: args.networkPolicy,
- secretEnvFile,
- extraArgs: args.extraArgs,
- },
- secretsCache,
- // cleanup 改 no-op——文件跨 exec 复用，由 cleanupSecretFileCache 在容器停止时清理
- cleanup: async () => {},
- };
+  return {
+    startOptions: {
+      quota: args.quota,
+      networkPolicy: args.networkPolicy,
+      secretEnvFile,
+      extraArgs: args.extraArgs,
+    },
+    secretsCache,
+    // cleanup 改 no-op——文件跨 exec 复用，由 cleanupSecretFileCache 在容器停止时清理
+    cleanup: async () => {},
+  };
 }
 
 /**
@@ -90,14 +90,14 @@ export async function prepareContainerStartOptions(args: {
  * 删除文件 + 清缓存。下次 start 会重新写入。
  */
 export async function cleanupSecretFileCache(threadId: string): Promise<void> {
- const cached = secretFileCache.get(threadId);
- if (cached) {
- await cleanupSecretEnvFile(cached.path).catch(() => {});
- secretFileCache.delete(threadId);
- }
+  const cached = secretFileCache.get(threadId);
+  if (cached) {
+    await cleanupSecretEnvFile(cached.path).catch(() => {});
+    secretFileCache.delete(threadId);
+  }
 }
 
 /** 仅供测试：清空 secret 文件缓存。 */
 export function __clearSecretFileCacheForTest(): void {
- secretFileCache.clear();
+  secretFileCache.clear();
 }

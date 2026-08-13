@@ -3,7 +3,6 @@ import { POST as forkPOST } from "@/app/api/v1/threads/[thread_id]/forks/route";
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { POST as interruptPOST } from "@/app/api/v1/turns/[turn_id]/interrupt/route";
 import { POST as steerPOST } from "@/app/api/v1/turns/[turn_id]/steer/route";
-import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 /**
  * S04-C06：Fork / Regenerate / Interrupt / Steer API route handlers 集成测试（真实 MySQL 8 Testcontainers）。
  *
@@ -28,6 +27,7 @@ import {
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
+import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -80,11 +80,7 @@ async function createThread(agentId: string, idempotencyKey: string): Promise<st
  * （§27 只要求"调度测试"证明生产链，命令面测试无需真正执行）。
  */
 async function createTurn(threadId: string, idempotencyKey: string): Promise<string> {
-  const [thread] = await db
-    .select()
-    .from(threadTable)
-    .where(eq(threadTable.id, threadId))
-    .limit(1);
+  const [thread] = await db.select().from(threadTable).where(eq(threadTable.id, threadId)).limit(1);
   if (!thread) throw new Error(`Thread 不存在: ${threadId}`);
 
   const { turn } = await acceptUserMessageTurn({

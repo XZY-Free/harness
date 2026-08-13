@@ -21,33 +21,33 @@ export type VisualLayout = "good" | "broken" | "unknown";
 export type VisualMisalignment = "none" | "detected" | "unknown";
 
 export interface VisualVerdict {
- layout: VisualLayout;
- blank: boolean;
- misalignment: VisualMisalignment;
- summary: string;
- /** 是否实际调用了 LLM（false=确定性退化）。 */
- usedLlm: boolean;
+  layout: VisualLayout;
+  blank: boolean;
+  misalignment: VisualMisalignment;
+  summary: string;
+  /** 是否实际调用了 LLM（false=确定性退化）。 */
+  usedLlm: boolean;
 }
 
 export type VisualJudge = (imageBase64: string, prompt: string) => Promise<Partial<VisualVerdict>>;
 
 function errMsg(error: unknown): string {
- return error instanceof Error ? error.message : String(error);
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** 确定性退化判断：仅依据截图 buffer 大小推断白屏。 */
 function deterministicVerdict(buf: Buffer): VisualVerdict {
- // 全页 PNG < 2KB 通常为空白页（真实页面远大于此）。启发式，非精确。
- const blank = buf.length < 2048;
- return {
- layout: "unknown",
- blank,
- misalignment: "unknown",
- summary: blank
- ? "确定性判断：截图体积极小，疑似白屏（无 LLM 配置，未做布局评审）"
- : "确定性判断：截图体积正常（无 LLM 配置，layout/misalignment 未评审）",
- usedLlm: false,
- };
+  // 全页 PNG < 2KB 通常为空白页（真实页面远大于此）。启发式，非精确。
+  const blank = buf.length < 2048;
+  return {
+    layout: "unknown",
+    blank,
+    misalignment: "unknown",
+    summary: blank
+      ? "确定性判断：截图体积极小，疑似白屏（无 LLM 配置，未做布局评审）"
+      : "确定性判断：截图体积正常（无 LLM 配置，layout/misalignment 未评审）",
+    usedLlm: false,
+  };
 }
 
 /**
@@ -59,86 +59,86 @@ function deterministicVerdict(buf: Buffer): VisualVerdict {
  * 失败（无 apiKey / 模型不支持视觉/generateObject / 网络错）→ 抛错，由调用方退化为确定性判断。
  */
 const VISUAL_VERDICT_SCHEMA = z.object({
- layout: z.enum(["good", "broken", "unknown"]),
- blank: z.boolean(),
- misalignment: z.enum(["none", "detected", "unknown"]),
- summary: z.string().max(500),
+  layout: z.enum(["good", "broken", "unknown"]),
+  blank: z.boolean(),
+  misalignment: z.enum(["none", "detected", "unknown"]),
+  summary: z.string().max(500),
 });
 
 async function defaultJudge(imageBase64: string, prompt: string): Promise<Partial<VisualVerdict>> {
- if (!aiConfig.apiKey) {
- throw new Error("LLM_API_KEY 未配置");
- }
- const { getChatModel } = await import("@/lib/ai/provider");
- const { generateObject } = await import("ai");
- const modelId = process.env.QA_VISUAL_MODEL ?? aiConfig.chatModel;
- const model = getChatModel(modelId);
- const { object } = await generateObject({
- model,
- schema: VISUAL_VERDICT_SCHEMA,
- messages: [
- {
- role: "user",
- content: [
- { type: "image", image: imageBase64 },
- { type: "text", text: prompt },
- ],
- },
- ],
- });
- return {
- layout: object.layout,
- blank: object.blank,
- misalignment: object.misalignment,
- summary: object.summary,
- };
+  if (!aiConfig.apiKey) {
+    throw new Error("LLM_API_KEY 未配置");
+  }
+  const { getChatModel } = await import("@/lib/ai/provider");
+  const { generateObject } = await import("ai");
+  const modelId = process.env.QA_VISUAL_MODEL ?? aiConfig.chatModel;
+  const model = getChatModel(modelId);
+  const { object } = await generateObject({
+    model,
+    schema: VISUAL_VERDICT_SCHEMA,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", image: imageBase64 },
+          { type: "text", text: prompt },
+        ],
+      },
+    ],
+  });
+  return {
+    layout: object.layout,
+    blank: object.blank,
+    misalignment: object.misalignment,
+    summary: object.summary,
+  };
 }
 
 export async function visualVerdict(opts: {
- threadId: string;
- screenshotPath: string;
- prompt?: string;
- /** 注入 judge（测试用）；缺省用 defaultJudge（现有 provider）。 */
- judge?: VisualJudge;
+  threadId: string;
+  screenshotPath: string;
+  prompt?: string;
+  /** 注入 judge（测试用）；缺省用 defaultJudge（现有 provider）。 */
+  judge?: VisualJudge;
 }): Promise<VisualVerdict & { ok: boolean; error?: string }> {
- const prompt =
- opts.prompt ??
- "评审这张网页截图：是否有明显布局破坏/白屏/元素错位？输出 layout(good/broken)、blank、misalignment(none/detected) 与简短 summary。";
+  const prompt =
+    opts.prompt ??
+    "评审这张网页截图：是否有明显布局破坏/白屏/元素错位？输出 layout(good/broken)、blank、misalignment(none/detected) 与简短 summary。";
 
- // 解析截图绝对路径（相对 hostLogDir，边界校验防越界）
- const base = resolve(backgroundTaskConfig.hostLogDir);
- const abs = resolve(base, opts.screenshotPath);
- if (abs !== base && !abs.startsWith(`${base}/`)) {
- return { ...deterministicVerdict(Buffer.alloc(0)), ok: false, error: "非法截图路径" };
- }
- let buf: Buffer;
- try {
- buf = await readFile(abs);
- } catch (error) {
- return {
- ...deterministicVerdict(Buffer.alloc(0)),
- ok: false,
- error: `截图读取失败：${errMsg(error)}`,
- };
- }
+  // 解析截图绝对路径（相对 hostLogDir，边界校验防越界）
+  const base = resolve(backgroundTaskConfig.hostLogDir);
+  const abs = resolve(base, opts.screenshotPath);
+  if (abs !== base && !abs.startsWith(`${base}/`)) {
+    return { ...deterministicVerdict(Buffer.alloc(0)), ok: false, error: "非法截图路径" };
+  }
+  let buf: Buffer;
+  try {
+    buf = await readFile(abs);
+  } catch (error) {
+    return {
+      ...deterministicVerdict(Buffer.alloc(0)),
+      ok: false,
+      error: `截图读取失败：${errMsg(error)}`,
+    };
+  }
 
- const judge = opts.judge ?? defaultJudge;
- try {
- const imageBase64 = buf.toString("base64");
- const llmResult = await judge(imageBase64, prompt);
- const det = deterministicVerdict(buf);
- return {
- layout: llmResult.layout ?? det.layout,
- blank: llmResult.blank ?? det.blank,
- misalignment: llmResult.misalignment ?? det.misalignment,
- summary: llmResult.summary ?? det.summary,
- usedLlm: true,
- ok: true,
- };
- } catch (error) {
- logger.warn("[qa] visualVerdict LLM 不可用，退化为确定性判断", {
- error: error instanceof Error ? error.message : String(error),
- });
- return { ...deterministicVerdict(buf), ok: true };
- }
+  const judge = opts.judge ?? defaultJudge;
+  try {
+    const imageBase64 = buf.toString("base64");
+    const llmResult = await judge(imageBase64, prompt);
+    const det = deterministicVerdict(buf);
+    return {
+      layout: llmResult.layout ?? det.layout,
+      blank: llmResult.blank ?? det.blank,
+      misalignment: llmResult.misalignment ?? det.misalignment,
+      summary: llmResult.summary ?? det.summary,
+      usedLlm: true,
+      ok: true,
+    };
+  } catch (error) {
+    logger.warn("[qa] visualVerdict LLM 不可用，退化为确定性判断", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { ...deterministicVerdict(buf), ok: true };
+  }
 }

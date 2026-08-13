@@ -337,10 +337,10 @@ describe("readSkillFile 按 source 分发 (V8 补充方案阶段 4)", () => {
     );
     // local 源 evidence 用本地 sha256 截断 16 位
     expect(evidence).toHaveLength(1);
-    expect(evidence[0]!.path).toBe("SKILL.md");
-    expect(evidence[0]!.skillVersionId).toBe("v1");
-    expect(evidence[0]!.contentHash).toHaveLength(16);
-    expect(evidence[0]!.truncated).toBe(false);
+    expect(evidence[0]?.path).toBe("SKILL.md");
+    expect(evidence[0]?.skillVersionId).toBe("v1");
+    expect(evidence[0]?.contentHash).toHaveLength(16);
+    expect(evidence[0]?.truncated).toBe(false);
   });
 
   it("local source：文件不存在 → ok:false", async () => {

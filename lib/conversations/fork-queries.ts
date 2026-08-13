@@ -21,16 +21,16 @@ import { ForkSourceTurnMismatchError, ThreadNotFoundError } from "@/lib/conversa
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import type {
- Thread,
- ThreadEvent,
- ThreadEventActorType,
- ThreadRelation,
+  Thread,
+  ThreadEvent,
+  ThreadEventActorType,
+  ThreadRelation,
 } from "@/lib/persistence/schema/conversation";
 import {
- threadEventTable,
- threadRelationTable,
- threadTable,
- turnTable,
+  threadEventTable,
+  threadRelationTable,
+  threadTable,
+  turnTable,
 } from "@/lib/persistence/schema/conversation";
 import { and, eq } from "drizzle-orm";
 
@@ -42,21 +42,21 @@ export type ForkWorkspaceMode = "none" | "checkpoint_copy";
 
 /** forkThread 返回结果。 */
 export interface ForkThreadResult {
- /** 新建的子 Thread。 */
- thread: Thread;
- /** Fork 关系记录（relation_type=fork, state=active）。 */
- relation: ThreadRelation;
- /** 复制截止 Turn id（子 Thread 不复制历史 Item，仅记录 fork 起源）。 */
- copiedThroughTurnId: string;
- /**
- * 文件系统检查点 id（仅 workspace_mode=checkpoint_copy 时返回）。
- * 本阶段 Environment 未接入，固定返回 null（行 461）。
- */
- filesystemCheckpointId: string | null;
- /** 子 Thread 的 thread.created Event。 */
- childCreatedEvent: ThreadEvent;
- /** 父 Thread 流中的 child_thread.created Event。 */
- parentChildThreadCreatedEvent: ThreadEvent;
+  /** 新建的子 Thread。 */
+  thread: Thread;
+  /** Fork 关系记录（relation_type=fork, state=active）。 */
+  relation: ThreadRelation;
+  /** 复制截止 Turn id（子 Thread 不复制历史 Item，仅记录 fork 起源）。 */
+  copiedThroughTurnId: string;
+  /**
+   * 文件系统检查点 id（仅 workspace_mode=checkpoint_copy 时返回）。
+   * 本阶段 Environment 未接入，固定返回 null（行 461）。
+   */
+  filesystemCheckpointId: string | null;
+  /** 子 Thread 的 thread.created Event。 */
+  childCreatedEvent: ThreadEvent;
+  /** 父 Thread 流中的 child_thread.created Event。 */
+  parentChildThreadCreatedEvent: ThreadEvent;
 }
 
 /**
@@ -76,205 +76,205 @@ export interface ForkThreadResult {
  * Fork 源 Turn 不属于源 Thread → ForkSourceTurnMismatchError（409 BUSINESS_CONSTRAINT_VIOLATION）。
  */
 export async function forkThread(params: {
- tenantId: string;
- ownerUserId: string;
- parentThreadId: string;
- fromTurnId: string;
- title?: string | null;
- workspaceMode: ForkWorkspaceMode;
- idempotencyKey?: string;
- correlationId?: string;
+  tenantId: string;
+  ownerUserId: string;
+  parentThreadId: string;
+  fromTurnId: string;
+  title?: string | null;
+  workspaceMode: ForkWorkspaceMode;
+  idempotencyKey?: string;
+  correlationId?: string;
 }): Promise<ForkThreadResult> {
- const childThreadId = randomUUID();
- const childCreatedEventId = randomUUID();
- const relationId = randomUUID();
- const now = new Date();
+  const childThreadId = randomUUID();
+  const childCreatedEventId = randomUUID();
+  const relationId = randomUUID();
+  const now = new Date();
 
- const parentChildThreadCreatedEvent = await db.transaction(async (tx) => {
- // 1. SELECT FOR UPDATE 源 Thread（校验 active + owner）
- const [parentThread] = await tx
- .select()
- .from(threadTable)
- .where(
- and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, params.parentThreadId)),
- )
- .for("update")
- .limit(1);
+  const parentChildThreadCreatedEvent = await db.transaction(async (tx) => {
+    // 1. SELECT FOR UPDATE 源 Thread（校验 active + owner）
+    const [parentThread] = await tx
+      .select()
+      .from(threadTable)
+      .where(
+        and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, params.parentThreadId)),
+      )
+      .for("update")
+      .limit(1);
 
- if (!parentThread) {
- throw new ThreadNotFoundError(params.parentThreadId);
- }
- // 隐藏式 404：非 owner 一律 NotFound
- if (parentThread.ownerUserId !== params.ownerUserId) {
- throw new ThreadNotFoundError(params.parentThreadId);
- }
- if (parentThread.lifecycleState !== "active") {
- throw new ThreadNotFoundError(params.parentThreadId);
- }
+    if (!parentThread) {
+      throw new ThreadNotFoundError(params.parentThreadId);
+    }
+    // 隐藏式 404：非 owner 一律 NotFound
+    if (parentThread.ownerUserId !== params.ownerUserId) {
+      throw new ThreadNotFoundError(params.parentThreadId);
+    }
+    if (parentThread.lifecycleState !== "active") {
+      throw new ThreadNotFoundError(params.parentThreadId);
+    }
 
- // 2. 校验 fromTurnId 属于源 Thread
- const [sourceTurn] = await tx
- .select({ id: turnTable.id, threadId: turnTable.threadId })
- .from(turnTable)
- .where(eq(turnTable.id, params.fromTurnId))
- .limit(1);
+    // 2. 校验 fromTurnId 属于源 Thread
+    const [sourceTurn] = await tx
+      .select({ id: turnTable.id, threadId: turnTable.threadId })
+      .from(turnTable)
+      .where(eq(turnTable.id, params.fromTurnId))
+      .limit(1);
 
- if (!sourceTurn || sourceTurn.threadId !== params.parentThreadId) {
- throw new ForkSourceTurnMismatchError(params.parentThreadId, params.fromTurnId);
- }
+    if (!sourceTurn || sourceTurn.threadId !== params.parentThreadId) {
+      throw new ForkSourceTurnMismatchError(params.parentThreadId, params.fromTurnId);
+    }
 
- // 3. 创建子 Thread（新 id，ownerUserId 相同，primaryAgentId 相同，title 或继承）
- // child Thread 的 lastEventSequence 从 1 开始（thread.created 占 sequence=1）
- const childTitle = params.title ?? parentThread.title ?? null;
- await tx.insert(threadTable).values({
- id: childThreadId,
- tenantId: params.tenantId,
- ownerUserId: parentThread.ownerUserId,
- primaryAgentId: parentThread.primaryAgentId,
- title: childTitle,
- defaultWorkspaceId: null, // child 获得独立 Workspace（§4 行 60-66），本阶段不复制
- defaultModelRef: parentThread.defaultModelRef,
- defaultEnvironmentDefinitionId: parentThread.defaultEnvironmentDefinitionId,
- lifecycleState: "active",
- lastActivityAt: now,
- lastTurnSequence: 0,
- lastItemSequence: 0,
- lastEventSequence: 1, // thread.created 占 sequence=1
- pendingQueueVersionNo: 1,
- versionNo: 1,
- createdAt: now,
- updatedAt: now,
- });
+    // 3. 创建子 Thread（新 id，ownerUserId 相同，primaryAgentId 相同，title 或继承）
+    // child Thread 的 lastEventSequence 从 1 开始（thread.created 占 sequence=1）
+    const childTitle = params.title ?? parentThread.title ?? null;
+    await tx.insert(threadTable).values({
+      id: childThreadId,
+      tenantId: params.tenantId,
+      ownerUserId: parentThread.ownerUserId,
+      primaryAgentId: parentThread.primaryAgentId,
+      title: childTitle,
+      defaultWorkspaceId: null, // child 获得独立 Workspace（§4 行 60-66），本阶段不复制
+      defaultModelRef: parentThread.defaultModelRef,
+      defaultEnvironmentDefinitionId: parentThread.defaultEnvironmentDefinitionId,
+      lifecycleState: "active",
+      lastActivityAt: now,
+      lastTurnSequence: 0,
+      lastItemSequence: 0,
+      lastEventSequence: 1, // thread.created 占 sequence=1
+      pendingQueueVersionNo: 1,
+      versionNo: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
 
- // 4. 写子 Thread 的 thread.created Event（payload 标记 fork_child=true）
- await tx.insert(threadEventTable).values({
- id: childCreatedEventId,
- threadId: childThreadId,
- eventSequence: 1,
- eventType: "thread.created",
- schemaVersion: 1,
- turnId: null,
- itemId: null,
- invocationId: null,
- actorType: "user" as ThreadEventActorType,
- actorId: params.ownerUserId,
- payloadJson: {
- // 投影上下文（thread_list_projection 需要 tenant_id/owner_user_id 创建行）
- tenant_id: params.tenantId,
- owner_user_id: parentThread.ownerUserId,
- primary_agent_id: parentThread.primaryAgentId,
- title: childTitle,
- default_workspace_id: null,
- default_model_ref: parentThread.defaultModelRef,
- // Fork 标记：本 Thread 是 fork 子 Thread，由 parent_thread_id 标识源
- fork_child: true,
- parent_thread_id: params.parentThreadId,
- source_turn_id: params.fromTurnId,
- },
- idempotencyKey: params.idempotencyKey ?? null,
- occurredAt: now,
- ingestedAt: now,
- });
+    // 4. 写子 Thread 的 thread.created Event（payload 标记 fork_child=true）
+    await tx.insert(threadEventTable).values({
+      id: childCreatedEventId,
+      threadId: childThreadId,
+      eventSequence: 1,
+      eventType: "thread.created",
+      schemaVersion: 1,
+      turnId: null,
+      itemId: null,
+      invocationId: null,
+      actorType: "user" as ThreadEventActorType,
+      actorId: params.ownerUserId,
+      payloadJson: {
+        // 投影上下文（thread_list_projection 需要 tenant_id/owner_user_id 创建行）
+        tenant_id: params.tenantId,
+        owner_user_id: parentThread.ownerUserId,
+        primary_agent_id: parentThread.primaryAgentId,
+        title: childTitle,
+        default_workspace_id: null,
+        default_model_ref: parentThread.defaultModelRef,
+        // Fork 标记：本 Thread 是 fork 子 Thread，由 parent_thread_id 标识源
+        fork_child: true,
+        parent_thread_id: params.parentThreadId,
+        source_turn_id: params.fromTurnId,
+      },
+      idempotencyKey: params.idempotencyKey ?? null,
+      occurredAt: now,
+      ingestedAt: now,
+    });
 
- // 5. 在父 Thread 的事件流中写 child_thread.created Event
- // 先锁定父 Thread 行原子分配 sequence（allocateEventSequences 内部已 SELECT FOR UPDATE）
- const parentEventSeq = await allocateEventSequences(tx, params.parentThreadId, 1);
- const parentEvent = await insertThreadEvent(tx, params.parentThreadId, parentEventSeq, {
- eventType: "child_thread.created",
- actorType: "user" as ThreadEventActorType,
- actorId: params.ownerUserId,
- payload: {
- // required_refs（§契约）：turn_id/item_id/invocation_id 本阶段为 null（Fork 不复制历史 Item）
- turn_id: null,
- item_id: null,
- invocation_id: null,
- child_thread_id: childThreadId,
- parent_thread_id: params.parentThreadId,
- source_turn_id: params.fromTurnId,
- workspace_mode: params.workspaceMode,
- },
- idempotencyKey: params.idempotencyKey,
- correlationId: params.correlationId,
- });
+    // 5. 在父 Thread 的事件流中写 child_thread.created Event
+    // 先锁定父 Thread 行原子分配 sequence（allocateEventSequences 内部已 SELECT FOR UPDATE）
+    const parentEventSeq = await allocateEventSequences(tx, params.parentThreadId, 1);
+    const parentEvent = await insertThreadEvent(tx, params.parentThreadId, parentEventSeq, {
+      eventType: "child_thread.created",
+      actorType: "user" as ThreadEventActorType,
+      actorId: params.ownerUserId,
+      payload: {
+        // required_refs（§契约）：turn_id/item_id/invocation_id 本阶段为 null（Fork 不复制历史 Item）
+        turn_id: null,
+        item_id: null,
+        invocation_id: null,
+        child_thread_id: childThreadId,
+        parent_thread_id: params.parentThreadId,
+        source_turn_id: params.fromTurnId,
+        workspace_mode: params.workspaceMode,
+      },
+      idempotencyKey: params.idempotencyKey,
+      correlationId: params.correlationId,
+    });
 
- // 6. 更新父 Thread 的 lastActivityAt（lastEventSequence 已在 allocateEventSequences 内更新）
- await tx
- .update(threadTable)
- .set({
- lastActivityAt: now,
- updatedAt: now,
- })
- .where(eq(threadTable.id, params.parentThreadId));
+    // 6. 更新父 Thread 的 lastActivityAt（lastEventSequence 已在 allocateEventSequences 内更新）
+    await tx
+      .update(threadTable)
+      .set({
+        lastActivityAt: now,
+        updatedAt: now,
+      })
+      .where(eq(threadTable.id, params.parentThreadId));
 
- // 7. 创建 ThreadRelation（relation_type=fork, parent=源, child=新, source_turn_id=fromTurnId, state=active）
- // 直接在事务内 INSERT，跳过 createThreadRelation helper（该 helper 用 db 而非 tx，无法纳入本事务）
- // parent 与 child 不能相同（已由 childThreadId=randomUUID 保证）
- await tx.insert(threadRelationTable).values({
- id: relationId,
- parentThreadId: params.parentThreadId,
- childThreadId: childThreadId,
- relationType: "fork",
- sourceTurnId: params.fromTurnId,
- sourceItemId: null,
- sourceInvocationId: null,
- targetAgentId: null, // fork 继承主 Agent，target_agent_id 为空
- taskPayloadRef: null,
- taskPayloadHash: null,
- contextTransferPolicyJson: null,
- budgetPolicyJson: null,
- relationState: "active", // Fork 事务完成即 active
- itemId: null,
- resultItemId: null,
- resultRef: null,
- resultHash: null,
- createdAt: now,
- completedAt: null,
- });
+    // 7. 创建 ThreadRelation（relation_type=fork, parent=源, child=新, source_turn_id=fromTurnId, state=active）
+    // 直接在事务内 INSERT，跳过 createThreadRelation helper（该 helper 用 db 而非 tx，无法纳入本事务）
+    // parent 与 child 不能相同（已由 childThreadId=randomUUID 保证）
+    await tx.insert(threadRelationTable).values({
+      id: relationId,
+      parentThreadId: params.parentThreadId,
+      childThreadId: childThreadId,
+      relationType: "fork",
+      sourceTurnId: params.fromTurnId,
+      sourceItemId: null,
+      sourceInvocationId: null,
+      targetAgentId: null, // fork 继承主 Agent，target_agent_id 为空
+      taskPayloadRef: null,
+      taskPayloadHash: null,
+      contextTransferPolicyJson: null,
+      budgetPolicyJson: null,
+      relationState: "active", // Fork 事务完成即 active
+      itemId: null,
+      resultItemId: null,
+      resultRef: null,
+      resultHash: null,
+      createdAt: now,
+      completedAt: null,
+    });
 
- return parentEvent;
- });
+    return parentEvent;
+  });
 
- // 事务外回读
- const [childThread] = await db
- .select()
- .from(threadTable)
- .where(eq(threadTable.id, childThreadId))
- .limit(1);
- if (!childThread) {
- throw new Error(`forkThread: 子 Thread 行未找到（id=${childThreadId}）`);
- }
+  // 事务外回读
+  const [childThread] = await db
+    .select()
+    .from(threadTable)
+    .where(eq(threadTable.id, childThreadId))
+    .limit(1);
+  if (!childThread) {
+    throw new Error(`forkThread: 子 Thread 行未找到（id=${childThreadId}）`);
+  }
 
- const [relation] = await db
- .select()
- .from(threadRelationTable)
- .where(eq(threadRelationTable.id, relationId))
- .limit(1);
- if (!relation) {
- throw new Error(`forkThread: ThreadRelation 行未找到（id=${relationId}）`);
- }
+  const [relation] = await db
+    .select()
+    .from(threadRelationTable)
+    .where(eq(threadRelationTable.id, relationId))
+    .limit(1);
+  if (!relation) {
+    throw new Error(`forkThread: ThreadRelation 行未找到（id=${relationId}）`);
+  }
 
- const [childCreatedEvent] = await db
- .select()
- .from(threadEventTable)
- .where(eq(threadEventTable.id, childCreatedEventId))
- .limit(1);
- if (!childCreatedEvent) {
- throw new Error(`forkThread: 子 thread.created Event 行未找到（id=${childCreatedEventId}）`);
- }
+  const [childCreatedEvent] = await db
+    .select()
+    .from(threadEventTable)
+    .where(eq(threadEventTable.id, childCreatedEventId))
+    .limit(1);
+  if (!childCreatedEvent) {
+    throw new Error(`forkThread: 子 thread.created Event 行未找到（id=${childCreatedEventId}）`);
+  }
 
- // parentChildThreadCreatedEvent 由事务返回值直接提供（insertThreadEvent 内部生成 id）
+  // parentChildThreadCreatedEvent 由事务返回值直接提供（insertThreadEvent 内部生成 id）
 
- // filesystem_checkpoint_id：仅 workspace_mode=checkpoint_copy 时返回；本阶段 Environment 未接入，固定 null
- const filesystemCheckpointId = null;
+  // filesystem_checkpoint_id：仅 workspace_mode=checkpoint_copy 时返回；本阶段 Environment 未接入，固定 null
+  const filesystemCheckpointId = null;
 
- return {
- thread: childThread,
- relation,
- copiedThroughTurnId: params.fromTurnId,
- filesystemCheckpointId,
- childCreatedEvent,
- parentChildThreadCreatedEvent,
- };
+  return {
+    thread: childThread,
+    relation,
+    copiedThroughTurnId: params.fromTurnId,
+    filesystemCheckpointId,
+    childCreatedEvent,
+    parentChildThreadCreatedEvent,
+  };
 }
 
 // 导出事务句柄类型供外部组合事务使用

@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { resolve, relative } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { relative, resolve } from "node:path";
 
 const ROOT = process.cwd();
 const SOURCE_ROOTS = ["app", "components", "desktop", "lib", "scripts", "docs"];
@@ -57,7 +57,8 @@ function checkMigrationJournal(): void {
       tag: string;
     }>;
     const invalid = entries.filter(
-      (entry, index) => entry.idx !== index || !existsSync(resolve(ROOT, `drizzle/${entry.tag}.sql`)),
+      (entry, index) =>
+        entry.idx !== index || !existsSync(resolve(ROOT, `drizzle/${entry.tag}.sql`)),
     );
     if (invalid.length > 0) {
       fail(`migration journal 不连续或 SQL 缺失：${invalid.map((entry) => entry.tag).join(", ")}`);
@@ -73,7 +74,9 @@ function checkRetiredNaming(): void {
   const violations = sourceFiles().flatMap((file) => {
     const repositoryPath = relative(ROOT, file);
     const source = readFileSync(file, "utf8");
-    return RETIRED_PATTERNS.some((pattern) => pattern.test(`/${repositoryPath}`) || pattern.test(source))
+    return RETIRED_PATTERNS.some(
+      (pattern) => pattern.test(`/${repositoryPath}`) || pattern.test(source),
+    )
       ? [repositoryPath]
       : [];
   });
@@ -97,8 +100,8 @@ function checkControlPlaneClient(): void {
   const consumers = ["app", "components", "desktop"]
     .flatMap((root) => filesUnder(resolve(ROOT, root)))
     .filter((file) => {
-    if (!file.endsWith(".ts") && !file.endsWith(".tsx")) return false;
-    return readFileSync(file, "utf8").includes("@/lib/control-plane-client");
+      if (!file.endsWith(".ts") && !file.endsWith(".tsx")) return false;
+      return readFileSync(file, "utf8").includes("@/lib/control-plane-client");
     });
   if (consumers.length === 0) {
     fail("没有 Web 或 Admin 入口实际使用 control-plane client");
@@ -111,7 +114,11 @@ function checkDeprecatedArchitecture(): void {
   const deprecated = /@deprecated|\blegacy\b|\bcutover\b|\bshadow\b|fallback legacy/i;
   const violations = sourceFiles().flatMap((file) => {
     const path = relative(ROOT, file);
-    if (!/^(lib\/(agents|artifacts|executions|publications|routes|runtime)\/|app\/admin\/api\/v1\/)/.test(path)) {
+    if (
+      !/^(lib\/(agents|artifacts|executions|publications|routes|runtime)\/|app\/admin\/api\/v1\/)/.test(
+        path,
+      )
+    ) {
       return [];
     }
     // 测试代码与测试夹具不属于正式源码，与 .test.ts 同类排除。
@@ -155,7 +162,7 @@ function main(): void {
     "单 Route 兼容写入口",
   );
   checkControlPlaneClient();
-  const placeholder = "sha256:" + "0".repeat(64);
+  const placeholder = `sha256:${"0".repeat(64)}`;
   const placeholderUses = sourceFiles().filter((file) => {
     const path = relative(ROOT, file);
     return (
@@ -171,7 +178,10 @@ function main(): void {
   });
   if (placeholderUses.length > 0) fail(`正式源码存在占位摘要：${placeholderUses.join(", ")}`);
   else pass("正式源码不存在占位摘要");
-  if (existsSync(resolve(ROOT, "docs/contracts/openapi.json")) && existsSync(resolve(ROOT, "scripts/contracts.mjs"))) {
+  if (
+    existsSync(resolve(ROOT, "docs/contracts/openapi.json")) &&
+    existsSync(resolve(ROOT, "scripts/contracts.mjs"))
+  ) {
     pass("正式机器合同与校验入口存在");
   } else {
     fail("机器合同或校验入口缺失");

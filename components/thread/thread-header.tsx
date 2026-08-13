@@ -28,8 +28,8 @@
 "use client";
 
 import { CatalogDisplayName } from "@/components/thread/catalog/catalog-display-name";
-import { cn } from "@/lib/utils";
 import type { ClientGoal, ClientThread, ClientTurn } from "@/lib/client/types";
+import { cn } from "@/lib/utils";
 
 interface ThreadHeaderProps {
   readonly thread: ClientThread;
