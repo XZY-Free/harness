@@ -1,7 +1,7 @@
 /**
  * 数据保留策略仓储与解析引擎（S12-W06）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §6
+ * 事实源：docs/architecture/security.md §6
  * （为 Thread/Event/Trace/Audit/Artifact/Memory/Knowledge/Job/安全记录定义独立保留策略；
  * 保留策略使用组织/数据分类/对象类型和法定要求解析，不把一个天数硬编码到所有存储）。
  *

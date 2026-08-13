@@ -1,7 +1,7 @@
 /**
  * Desktop 签名 Nonce 重放保护存储（S12-W05）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §5
+ * 事实源：docs/architecture/security.md §5
  * （Desktop 重放保护：签名 payload 含 nonce，TTL 内不可重复使用）。
  *
  * 职责：

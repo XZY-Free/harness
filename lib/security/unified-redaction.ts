@@ -1,30 +1,26 @@
 /**
- * V11 统一脱敏入口（S12-W05）。
+ * 统一脱敏入口（S12-W05）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §5
+ * 事实源：docs/architecture/security.md §5
  * （日志、Event、Trace、Artifact 元数据和错误响应执行 Secret 扫描与脱敏）。
  *
  * 职责：
  * - 统一组合三类脱敏：① 禁采字段名扫描（content-policy.ts）；② Secret 正则模式扫描；
  * ③ 已知明文值扫描。
- * - 提供 redactForV11 统一入口，供 Event/Trace/Artifact/错误响应/日志调用。
+ * - 提供 redactSensitiveData 统一入口，供 Event/Trace/Artifact/错误响应/日志调用。
  *
  * 与 content-policy.ts 的关系：
  * - content-policy.ts 的 redactContent 按 contentMode（metadata/redacted/diagnostic）三级处理。
- * - 本模块的 redactForV11 在 redacted/diagnostic 模式下额外执行 Secret 模式扫描。
+ * - 本模块的 redactSensitiveData 在 redacted/diagnostic 模式下额外执行 Secret 模式扫描。
  * - metadata 模式仍返回 null（仅元数据）。
  *
  * 已知明文值注册：
- * - registerV11SecretValues(scope, values) 按 scope（invocationId/threadId）注册。
- * - getV11SecretValues(scope) 返回注册的明文值集合。
- * - clearV11SecretValues(scope) 清除 scope 的注册值。
+ * - registerSecretValues(scope, values) 按 scope（invocationId/threadId）注册。
+ * - getSecretValues(scope) 返回注册的明文值集合。
+ * - clearSecretValues(scope) 清除 scope 的注册值。
  * - 进程内 Map，不持久化；生命周期与 Invocation 绑定。
  */
-import {
- type RedactResult,
- isForbiddenField,
- redactContent,
-} from "@/lib/observability/content-policy";
+import { type RedactResult, isForbiddenField } from "@/lib/observability/content-policy";
 import { redactKnownPlaintext, redactStringSecrets } from "@/lib/security/secret-scanner";
 
 // ─── 已知明文值注册（进程内 Map） ─────────────────────────
@@ -32,7 +28,7 @@ import { redactKnownPlaintext, redactStringSecrets } from "@/lib/security/secret
 const secretStore = new Map<string, Set<string>>();
 
 /** 注册已知 Secret 明文值（按 scope）。 */
-export function registerV11SecretValues(scope: string, values: readonly string[]): void {
+export function registerSecretValues(scope: string, values: readonly string[]): void {
  let set = secretStore.get(scope);
  if (!set) {
  set = new Set();
@@ -44,17 +40,17 @@ export function registerV11SecretValues(scope: string, values: readonly string[]
 }
 
 /** 获取 scope 注册的明文值集合。 */
-export function getV11SecretValues(scope: string): string[] {
+export function getSecretValues(scope: string): string[] {
  return Array.from(secretStore.get(scope) ?? []);
 }
 
 /** 清除 scope 的注册值。 */
-export function clearV11SecretValues(scope: string): void {
+export function clearSecretValues(scope: string): void {
  secretStore.delete(scope);
 }
 
 /** 获取所有 scope 的明文值合集（用于无 scope 扫描）。 */
-export function getAllV11SecretValues(): string[] {
+export function getAllSecretValues(): string[] {
  const all: string[] = [];
  for (const set of secretStore.values()) {
  for (const v of set) all.push(v);
@@ -73,7 +69,7 @@ export function getAllV11SecretValues(): string[] {
  * @param options.additionalKnownValues 额外已知明文值（本次调用临时补充）
  * @returns 脱敏结果
  */
-export function redactForV11(
+export function redactSensitiveData(
  value: unknown,
  mode: "metadata" | "redacted" | "diagnostic",
  options?: {
@@ -89,9 +85,9 @@ export function redactForV11(
  // 收集已知明文值
  const knownValues: string[] = [];
  if (options?.scope) {
- knownValues.push(...getV11SecretValues(options.scope));
+ knownValues.push(...getSecretValues(options.scope));
  } else {
- knownValues.push(...getAllV11SecretValues());
+ knownValues.push(...getAllSecretValues());
  }
  if (options?.additionalKnownValues) {
  knownValues.push(...options.additionalKnownValues);
@@ -119,14 +115,6 @@ export function redactForV11(
  }
 
  return { content: value, containsSecret: false, redactionSummary: null };
-}
-
-/** content-policy.ts 的 redactContent 入口。 */
-export function redactForV11Legacy(
- value: unknown,
- mode: "metadata" | "redacted" | "diagnostic",
-): RedactResult {
- return redactContent(value, mode);
 }
 
 // ─── 内部辅助 ──────────────────────────────────────────────

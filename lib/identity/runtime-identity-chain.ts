@@ -1,7 +1,7 @@
 /**
  * Cloud/Remote Runtime 身份链验证（S12-W05）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §5
+ * 事实源：docs/architecture/security.md §5
  * （Desktop、Cloud 和外部 Runtime 的身份链、租户绑定和重放保护分别验证）。
  *
  * 职责：

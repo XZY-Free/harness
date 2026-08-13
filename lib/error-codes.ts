@@ -1,7 +1,7 @@
 /**
  * 稳定错误码投影。
  *
- * 事实源是 `docs/solutions/v11-agentkit-platform/contracts/error-codes.json`（normative）。
+ * 事实源是 `docs/contracts/error-codes.json`（normative）。
  * 本模块是运行时投影，避免把 docs 目录耦合进运行时 bundle（tsconfig 已 exclude docs）。
  * `error-codes.test.ts` 校验本投影与契约 JSON 完全一致；契约变更时测试失败，强制同步。
  *

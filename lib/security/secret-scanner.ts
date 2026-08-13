@@ -1,7 +1,7 @@
 /**
- * V11 Secret 扫描器（S12-W05）。
+ * Secret 扫描器（S12-W05）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §5
+ * 事实源：docs/architecture/security.md §5
  * （日志、Event、Trace、Artifact 元数据和错误响应执行 Secret 扫描与脱敏）。
  *
  * 职责：

@@ -3,7 +3,7 @@ import { FailClosedDeletionStoreAdapter } from "@/lib/identity/deletion-store-ad
 /**
  * 跨存储删除 Adapter 的运行时配置入口（S12-W07）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §7
+ * 事实源：docs/architecture/security.md §7
  * （覆盖 MySQL、对象存储、向量/检索、Trace/Log 和缓存；任何外部依赖失败 fail-closed）。
  *
  * 职责：

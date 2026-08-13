@@ -2,8 +2,8 @@
  * 动作资源授权守卫。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md §5
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §9
+ * - docs/architecture/security.md §5
+ * - docs/architecture/api-and-events.md §9
  *
  * 服务端只依赖 action_code + resource_scope 判断；UI 菜单权限不能代替服务端 action_code。
  * - 空 allowlist、未知 action、无法解析 scope 全部拒绝（fail-closed）。

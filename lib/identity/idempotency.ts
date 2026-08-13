@@ -1,9 +1,9 @@
 /**
  * 命令幂等守卫。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md 、
- * ../v11-agentkit-platform-development-plan/02-identity-authorization-and-common-ledgers.md 。
+ * 事实源：docs/architecture/persistence.md 、
+ * docs/architecture/api-and-events.md 、
+ * docs/architecture/security.md 。
  *
  * 行为：
  * - 创建和命令 POST 在执行业务前登记 caller/audience/scope/key/request_hash。

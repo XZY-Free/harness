@@ -1,7 +1,7 @@
 /**
  * 可验证删除跨存储 Adapter 接口与实现（S12-W07）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §7
+ * 事实源：docs/architecture/security.md §7
  * （覆盖 MySQL、对象存储、向量/检索、Trace/Log 和缓存；
  * 每个 Adapter 返回删除或不可删除证据；部分失败保持 failed/partial 并可安全重试）。
  *

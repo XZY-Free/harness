@@ -15,9 +15,9 @@
  * - POST /api/v1/threads/{thread_id}/turns（创建 Turn）
  * - POST /api/v1/threads/{thread_id}/workspace-attachments（附加本地资源）
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md 、
- * ../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform/14-production-operations-security-and-retention.md §5。
+ * 事实源：docs/architecture/api-and-events.md 、
+ * docs/architecture/persistence.md 、
+ * docs/architecture/security.md §5。
  */
 import { createHash, createPublicKey, verify } from "node:crypto";
 import type { Device } from "@/lib/persistence/schema/device";

@@ -1,8 +1,8 @@
 /**
  * audit_event 仓储。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md §8、
- * ../v11-agentkit-platform-development-plan/02-identity-authorization-and-common-ledgers.md 。
+ * 事实源：docs/architecture/persistence.md §8、
+ * docs/architecture/security.md 。
  *
  * 职责：
  * - appendAuditEvent：只追加写入（不提供 update/delete，保证不可修改）。

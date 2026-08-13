@@ -1,7 +1,7 @@
 /**
  * 可验证删除执行器（S12-W07）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §7
+ * 事实源：docs/architecture/security.md §7
  * （删除执行器按计划调用各存储 Adapter；部分失败保持 failed/partial 并可安全重试；
  * completed 要求所有 in-scope step 有存储端 evidenceRef；
  * 不以"主表已删"宣称全部完成，不写 ThreadEvent 冒充已删除）。

@@ -1,7 +1,7 @@
 /**
  * 可验证删除请求与步骤仓储（S12-W07）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §7
+ * 事实源：docs/architecture/security.md §7
  * （删除请求生成独立生命周期；部分失败保持 failed/partial 并可安全重试；
  * completed 要求所有 in-scope step 有存储端 evidenceRef）。
  *

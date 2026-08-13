@@ -9,8 +9,8 @@
  * - userId 引用 UserIdentity 而非旧 User 表。
  * - deviceState 替代 status（公共字段规则）。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md §9。
+ * 事实源：docs/architecture/persistence.md 、
+ * docs/architecture/api-and-events.md §9。
  */
 import { db } from "@/lib/db/client";
 import { device } from "@/lib/persistence/schema/device";

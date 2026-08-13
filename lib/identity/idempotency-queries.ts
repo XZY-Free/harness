@@ -1,8 +1,8 @@
 /**
  * idempotency_record 仓储。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md 。
+ * 事实源：docs/architecture/persistence.md 、
+ * docs/architecture/api-and-events.md 。
  *
  * 职责：
  * - 登记新 processing 记录（enforceIdempotency 调用，处理唯一约束并发）。

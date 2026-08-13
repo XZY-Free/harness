@@ -2,7 +2,7 @@ import type { PlannedStep } from "@/lib/identity/deletion-request-queries";
 /**
  * 删除规划器（S12-W07）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §7
+ * 事实源：docs/architecture/security.md §7
  * （删除请求先解析对象关系与 Legal Hold，再进入各存储 Adapter；
  * Legal Hold 不扩大到无关对象：仅匹配的 target 被阻止删除；
  * 共享 Knowledge、跨 Thread Memory、用户原始本地文件不因单个 Thread 删除而清除）。

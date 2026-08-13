@@ -1,7 +1,7 @@
 /**
  * Legal Hold 仓储（S12-W06）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §6
+ * 事实源：docs/architecture/security.md §6
  * （Legal Hold 明确对象范围、原因、创建人、批准人、有效期和解除审计；
  * Hold 生效时阻止相关删除但不扩大到无关对象；解除后恢复原保留策略计算）。
  *

@@ -18,8 +18,8 @@
  * - CI/CD Service Identity 只得到制品验证和发布所需动作，不获得员工会话权限。
  * - 撤销设备后拒绝新 Lease、Workspace handle 和迟到签名请求。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md 、§9、
- * ../v11-agentkit-platform/14-production-operations-security-and-retention.md §5。
+ * 事实源：docs/architecture/api-and-events.md 、§9、
+ * docs/architecture/security.md §5。
  */
 import { randomUUID } from "node:crypto";
 import { API_STATUS, apiError, generateRequestId } from "@/lib/http";

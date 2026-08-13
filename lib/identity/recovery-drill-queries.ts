@@ -1,7 +1,7 @@
 /**
  * 备份恢复演练仓储（S12-W08）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md §8
+ * 事实源：docs/architecture/security.md §8
  * （数据库备份、对象版本/复制、配置和密钥恢复分别定义 RPO/RTO 与责任边界；
  * 恢复演练验证 Event sequence、投影 checkpoint、Artifact 引用、Legal Hold 和删除证据的一致性；
  * Runtime/Worker/队列故障演练覆盖未完成 ToolCall、unknown Effect、Job 恢复和 UserAction 等待；

@@ -1,7 +1,7 @@
 /**
  * role_action_binding 仓储。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 。
+ * 事实源：docs/architecture/persistence.md 。
  *
  * 把 principal_binding 绑定到稳定 action_code + 类型化 resource_scope。
  * - 授权（grant）：写入新绑定，validUntil=null 表示长期有效。
@@ -28,7 +28,7 @@ import {
 import { roleActionBinding } from "@/lib/persistence/schema/authorization";
 import type { RoleActionBinding } from "@/lib/persistence/schema/authorization";
 import { principalBinding } from "@/lib/persistence/schema/identity";
-import { and, eq, gte, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 
 /**
  * 授权：为 principal_binding 绑定 action_code + resource_scope。
@@ -99,7 +99,7 @@ export async function revokeActionBinding(tenantId: string, bindingId: string): 
  eq(roleActionBinding.tenantId, tenantId),
  eq(roleActionBinding.id, bindingId),
  // 仅撤销当前有效的绑定（validUntil IS NULL 或 validUntil > now）
- or(isNull(roleActionBinding.validUntil), gte(roleActionBinding.validUntil, now)),
+ or(isNull(roleActionBinding.validUntil), gt(roleActionBinding.validUntil, now)),
  ),
  );
  return result[0].affectedRows > 0;

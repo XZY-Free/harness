@@ -1,7 +1,7 @@
 /**
  * 类型化 Resource Scope。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md 。
+ * 事实源：docs/architecture/security.md 。
  *
  * resource_scope_json 存储类型化选择器，服务端按 action_code + resource_scope 判断。
  * - 空 allowlist（既无 wildcard 也无 ids）= 全 deny（最小权限）。

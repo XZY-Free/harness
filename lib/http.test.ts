@@ -46,7 +46,7 @@ describe("http legacy helpers", () => {
   });
 });
 
-describe("V11 request id", () => {
+describe("request id", () => {
   it("getRequestId 透传 X-Request-ID", () => {
     const req = new Request("https://x.test/api", {
       headers: { [REQUEST_ID_HEADER]: "req_abc" },
@@ -72,7 +72,7 @@ describe("V11 request id", () => {
   });
 });
 
-describe("V11 error envelope", () => {
+describe("error envelope", () => {
   it("apiError 用错误码目录的 http 与 retryable", async () => {
     const res = apiError("TURN_ALREADY_TERMINAL", "本轮已结束", {
       requestId: "req_1",
@@ -118,7 +118,7 @@ describe("V11 error envelope", () => {
   });
 });
 
-describe("V11 success response", () => {
+describe("success response", () => {
   it("apiSuccess 直接返回资源，无 ok 包裹", async () => {
     const res = apiSuccess({ id: "thr_1", status: "idle" });
     expect(res.status).toBe(200);
@@ -130,7 +130,7 @@ describe("V11 success response", () => {
   });
 });
 
-describe("V11 ETag / If-Match", () => {
+describe("ETag / If-Match", () => {
   it("parseIfMatch 去引号与 W/ 前缀", () => {
     const req = new Request("https://x.test/api", {
       headers: { "if-match": 'W/"abc123"' },
@@ -146,7 +146,7 @@ describe("V11 ETag / If-Match", () => {
   });
 });
 
-describe("V11 opaque cursor", () => {
+describe("opaque cursor", () => {
   it("encodeCursor 输出不透明 base64url，可 round-trip", () => {
     const cursor = encodeCursor({ id: "evt_42", seq: 42 });
     expect(cursor).not.toContain("{");
@@ -157,7 +157,7 @@ describe("V11 opaque cursor", () => {
   });
 });
 
-describe("V11 status boundaries", () => {
+describe("status boundaries", () => {
   it("覆盖 400/401/403/404/409/412/413/422/429/503", () => {
     expect(API_STATUS).toEqual({
       BAD_REQUEST: 400,

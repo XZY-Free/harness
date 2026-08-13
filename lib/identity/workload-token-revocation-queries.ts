@@ -1,8 +1,8 @@
 /**
  * Workload Token 撤销仓储（S12-W05）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §5、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md 。
+ * 事实源：docs/architecture/security.md §5、
+ * docs/architecture/api-and-events.md 。
  *
  * 职责：
  * - revokeWorkloadToken：撤销 Token（写撤销表 + 审计）；幂等保护。

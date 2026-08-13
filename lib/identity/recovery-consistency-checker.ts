@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 /**
  * 恢复演练一致性核对器（S12-W08）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md §8
+ * 事实源：docs/architecture/security.md §8
  * （恢复演练验证 Event sequence、投影 checkpoint、Artifact 引用、Legal Hold 和删除证据的一致性；
  * Runtime/Worker/队列故障演练覆盖未完成 ToolCall、unknown Effect、Job 恢复和 UserAction 等待）。
  *
