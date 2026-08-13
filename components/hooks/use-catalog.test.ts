@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * S10-W04：useV11Catalog Hook 测试。
+ * S10-W04：useCatalog Hook 测试。
  *
  * 覆盖：
  * - 首次挂载触发 GET /api/v1/catalog/options。
@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import { useV11Catalog } from "./use-catalog";
+import { useCatalog } from "./use-catalog";
 
 afterEach(() => {
   fetchMock.mockReset();
@@ -34,7 +34,7 @@ function buildOkResponse(items: unknown[], revision = 1, etag = "catalog-tenant-
   });
 }
 
-describe("useV11Catalog", () => {
+describe("useCatalog", () => {
   it("挂载时拉取 catalog options", async () => {
     fetchMock.mockResolvedValueOnce(
       buildOkResponse([
@@ -52,7 +52,7 @@ describe("useV11Catalog", () => {
       ]),
     );
 
-    const { result } = renderHook(() => useV11Catalog({ resourceTypes: ["agent"] }));
+    const { result } = renderHook(() => useCatalog({ resourceTypes: ["agent"] }));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -86,7 +86,7 @@ describe("useV11Catalog", () => {
     // 第二次 304
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 304 }));
 
-    const { result } = renderHook(() => useV11Catalog({ resourceTypes: ["agent"] }));
+    const { result } = renderHook(() => useCatalog({ resourceTypes: ["agent"] }));
 
     await waitFor(() => {
       expect(result.current.items.length).toBe(1);
@@ -123,7 +123,7 @@ describe("useV11Catalog", () => {
       ),
     );
 
-    const { result } = renderHook(() => useV11Catalog({ resourceTypes: ["agent"] }));
+    const { result } = renderHook(() => useCatalog({ resourceTypes: ["agent"] }));
 
     await waitFor(() => {
       expect(result.current.error).not.toBeNull();
@@ -136,7 +136,7 @@ describe("useV11Catalog", () => {
   it("网络异常转化为 NETWORK_ERROR", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
-    const { result } = renderHook(() => useV11Catalog({ resourceTypes: ["agent"] }));
+    const { result } = renderHook(() => useCatalog({ resourceTypes: ["agent"] }));
 
     await waitFor(() => {
       expect(result.current.error).not.toBeNull();
@@ -147,7 +147,7 @@ describe("useV11Catalog", () => {
 
   it("autoFetch=false 时不主动拉取", () => {
     const { result } = renderHook(() =>
-      useV11Catalog({ resourceTypes: ["agent"], autoFetch: false }),
+      useCatalog({ resourceTypes: ["agent"], autoFetch: false }),
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -158,7 +158,7 @@ describe("useV11Catalog", () => {
     fetchMock.mockResolvedValueOnce(buildOkResponse([]));
 
     const { result } = renderHook(() =>
-      useV11Catalog({
+      useCatalog({
         resourceTypes: ["agent", "skill"],
         lifecycleStates: ["enabled", "disabled"],
       }),
@@ -177,7 +177,7 @@ describe("useV11Catalog", () => {
   it("clearError 清空错误状态", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
-    const { result } = renderHook(() => useV11Catalog({ resourceTypes: ["agent"] }));
+    const { result } = renderHook(() => useCatalog({ resourceTypes: ["agent"] }));
 
     await waitFor(() => {
       expect(result.current.error).not.toBeNull();

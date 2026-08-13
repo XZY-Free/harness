@@ -1,5 +1,5 @@
 /**
- * V11 Artifact Item（artifact）。
+ * Artifact Item（artifact）。
  *
  * W05 增强范围：
  * - 展示来源 Turn / Invocation / ToolCall、内容类型、保存位置、内容 hash 和可执行操作。

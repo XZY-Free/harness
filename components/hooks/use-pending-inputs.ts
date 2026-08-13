@@ -1,8 +1,8 @@
 /**
- * V11 员工端 PendingInput 队列 Hook（S10-W03）。
+ * 员工端 PendingInput 队列 Hook（S10-W03）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W03：「PendingInput 可编辑、删除和排序，尚未正式发送的内容不出现在消息历史」
  *
  * 职责：
@@ -24,7 +24,7 @@
  * ```tsx
  * function PendingInputQueue({ threadId }: { threadId: string }) {
  *   const { pendingInputs, queueEtag, create, edit, remove, reorder, refresh, loading, error } =
- *     useV11PendingInputs(threadId);
+ *     usePendingInputs(threadId);
  *   // ...
  * }
  * ```
@@ -52,7 +52,7 @@ export interface PendingInputContentInput {
 }
 
 /** Hook 返回值。 */
-export interface UseV11PendingInputsResult {
+export interface UsePendingInputsResult {
   /** 队列快照（按 queue_position 升序）。 */
   readonly pendingInputs: readonly ClientPendingInput[];
   /** 队列 ETag（reorder 时用作 If-Match）。 */
@@ -107,8 +107,8 @@ async function parseError(response: Response): Promise<ClientVisibleError> {
   };
 }
 
-/** V11 PendingInput 队列 Hook。 */
-export function useV11PendingInputs(threadId: string): UseV11PendingInputsResult {
+/** PendingInput 队列 Hook。 */
+export function usePendingInputs(threadId: string): UsePendingInputsResult {
   const [pendingInputs, setPendingInputs] = useState<readonly ClientPendingInput[]>([]);
   const [queueEtag, setQueueEtag] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

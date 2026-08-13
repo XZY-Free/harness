@@ -1,8 +1,8 @@
 /**
- * V11 Catalog 单选下拉组件（S10-W04）。
+ * Catalog 单选下拉组件（S10-W04）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W04：「员工选择 Agent / Skill / Model / Environment」
  *
  * 职责：
@@ -27,7 +27,7 @@
  */
 "use client";
 
-import { useV11Catalog } from "@/components/hooks/use-catalog";
+import { useCatalog } from "@/components/hooks/use-catalog";
 import { cn } from "@/lib/utils";
 import type { ClientCatalogResourceType } from "@/lib/client/types";
 import { useId } from "react";
@@ -58,7 +58,7 @@ export function CatalogSelect({
   allowClear = false,
   excludeIds = [],
 }: CatalogSelectProps) {
-  const { items, loading, error } = useV11Catalog({
+  const { items, loading, error } = useCatalog({
     resourceTypes: [resourceType],
   });
   const selectId = useId();

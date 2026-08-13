@@ -1,7 +1,7 @@
 "use client";
 
 import { useAvailableModels } from "@/components/hooks/use-available-models";
-import { useV11Catalog } from "@/components/hooks/use-catalog";
+import { useCatalog } from "@/components/hooks/use-catalog";
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
@@ -212,7 +212,7 @@ export function AgentSelectorPopover({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const hasAgentOptions = agentOptions !== undefined;
-  const catalog = useV11Catalog({
+  const catalog = useCatalog({
     resourceTypes: ["agent"],
     autoFetch: !hasAgentOptions,
   });

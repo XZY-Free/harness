@@ -2,7 +2,7 @@
  * 员工端 Thread 详情 Hook。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W02：「Thread 顶部固定展示主 Agent、可选 Goal、当前任务状态和默认执行位置」
  *
  * 职责：

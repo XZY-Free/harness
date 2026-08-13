@@ -1,9 +1,9 @@
 /**
- * V11 用户操作 Item（user_action）— S10-W05 统一四类 UserAction 体验。
+ * 用户操作 Item（user_action）— S10-W05 统一四类 UserAction 体验。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform/11-api-and-event-boundaries.md §3.18（解析 UserActionRequest）
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md S10-W05
+ * - docs/architecture/api-and-events.md §3.18（解析 UserActionRequest）
+ * - docs/architecture/product-surfaces-and-admin.md S10-W05
  *
  * content 结构（按 request_type）：
  * - 通用字段：{ request_type, purpose?, reason?, impact?, state?, expires_at?, title?, summary? }
@@ -15,7 +15,7 @@
  * 渲染规则（S10-W05）：
  * - confirmation/auth/input 三类使用统一卡片，展示请求方、原因、范围、有效期和影响。
  * - 高影响操作展示目标对象与预计副作用；超时或拒绝后不伪装成执行成功。
- * - handoff（confirmation+purpose=handoff）走 useV11Handoff；其他类型走 useV11UserAction。
+ * - handoff（confirmation+purpose=handoff）走 useHandoff；其他类型走 useUserAction。
  * - auth 类型 :resolve 接口仅接受 cancel；approve 由可信 callback 写入，UI 显示「去授权」链接。
  * - input 类型 submit 时收集用户输入并作为 responseRedactedJson 提交。
  * - 超时（state=expired 或 expires_at 已过）不显示操作按钮，显示「已超时」。
@@ -24,8 +24,8 @@
  */
 "use client";
 
-import { useV11Handoff } from "@/components/hooks/use-handoff";
-import { useV11UserAction } from "@/components/hooks/use-user-action";
+import { useHandoff } from "@/components/hooks/use-handoff";
+import { useUserAction } from "@/components/hooks/use-user-action";
 import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { cn } from "@/lib/utils";
 import type { ClientItem } from "@/lib/client/types";
@@ -158,8 +158,8 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
 
   // 两个 hook 都必须无条件调用（React hooks 规则）
   // handoff hook 仅在 purpose=handoff 时实际使用；userAction hook 用于其他类型。
-  const handoffHook = useV11Handoff({ threadId });
-  const userActionHook = useV11UserAction({ threadId });
+  const handoffHook = useHandoff({ threadId });
+  const userActionHook = useUserAction({ threadId });
 
   const isHandoff = content.purpose === "handoff" && content.request_type === "confirmation";
 

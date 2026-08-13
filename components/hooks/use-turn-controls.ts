@@ -1,8 +1,8 @@
 /**
- * V11 员工端 Turn 控制 Hook（S10-W03）。
+ * 员工端 Turn 控制 Hook（S10-W03）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W03：「Steer 显示 requested/acknowledged/applied/rejected，不在 Runtime ack 前宣称已经引导」
  *   「Stop 暂停后续队列；页面明确区分『已请求停止』『Runtime 已确认』和『副作用仍需核对』」
  *
@@ -27,7 +27,7 @@
  * 使用：
  * ```tsx
  * function TurnControls({ turnId }: { turnId: string }) {
- *   const { steer, interrupt, busy, error, lastSteer, lastInterrupt } = useV11TurnControls(turnId);
+ *   const { steer, interrupt, busy, error, lastSteer, lastInterrupt } = useTurnControls(turnId);
  *   // ...
  * }
  * ```
@@ -45,7 +45,7 @@ import type {
 import { useCallback, useState } from "react";
 
 /** Hook 返回值。 */
-export interface UseV11TurnControlsResult {
+export interface UseTurnControlsResult {
   /** 是否有操作进行中。 */
   readonly busy: boolean;
   /** 错误。 */
@@ -90,8 +90,8 @@ async function parseError(response: Response): Promise<ClientVisibleError> {
   };
 }
 
-/** V11 Turn 控制 Hook。 */
-export function useV11TurnControls(turnId: string): UseV11TurnControlsResult {
+/** Turn 控制 Hook。 */
+export function useTurnControls(turnId: string): UseTurnControlsResult {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ClientVisibleError | null>(null);
   const [lastSteer, setLastSteer] = useState<ClientSteerResponse | null>(null);

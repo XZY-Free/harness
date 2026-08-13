@@ -1,11 +1,11 @@
 /**
- * V11 员工端 Handoff Hook（S10-W04）。
+ * 员工端 Handoff Hook（S10-W04）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform/11-api-and-event-boundaries.md §3.18（解析 UserActionRequest）、
+ * - docs/architecture/api-and-events.md §3.18（解析 UserActionRequest）、
  *   §7.2（handoff.completed Event）
- * - docs/solutions/v11-agentkit-platform/12-capability-and-collaboration-api.md §5（Handoff 统一规则）
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/capability-and-collaboration-api.md §5（Handoff 统一规则）
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W04：「员工 :resolve 接口解析 handoff（approve/deny）」
  *
  * 职责：
@@ -21,7 +21,7 @@
  * 使用：
  * ```tsx
  * function HandoffCard({ threadId, handoffId }: { threadId: string; handoffId: string }) {
- *   const { resolve, busy, error, lastResolve } = useV11Handoff({ threadId });
+ *   const { resolve, busy, error, lastResolve } = useHandoff({ threadId });
  *   // ...
  * }
  * ```
@@ -38,12 +38,12 @@ import type {
 import { useCallback, useState } from "react";
 
 /** Hook 入参。 */
-interface UseV11HandoffParams {
+interface UseHandoffParams {
   readonly threadId: string;
 }
 
 /** Hook 返回值。 */
-export interface UseV11HandoffResult {
+export interface UseHandoffResult {
   /** 是否有操作进行中。 */
   readonly busy: boolean;
   /** 错误。 */
@@ -84,8 +84,8 @@ async function parseError(response: Response): Promise<ClientVisibleError> {
   };
 }
 
-/** V11 Handoff Hook。 */
-export function useV11Handoff({ threadId }: UseV11HandoffParams): UseV11HandoffResult {
+/** Handoff Hook。 */
+export function useHandoff({ threadId }: UseHandoffParams): UseHandoffResult {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ClientVisibleError | null>(null);
   const [lastResolve, setLastResolve] = useState<ClientHandoffResolveResponse | null>(null);

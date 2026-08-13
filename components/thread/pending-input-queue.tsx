@@ -1,8 +1,8 @@
 /**
- * V11 PendingInput 队列 UI（S10-W03 / W4-1 重构）。
+ * PendingInput 队列 UI（S10-W03 / W4-1 重构）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W03：「PendingInput 可编辑、删除和排序，尚未正式发送的内容不出现在消息历史」
  * - W4-1：从时间线上方移入输入框正上方，紧凑单行条，宽度与输入框对齐。
  *
@@ -18,10 +18,10 @@
  * - 空队列不渲染（避免占位）。
  *
  * 不变量：
- * - 显示的是队列快照（useV11PendingInputs 维护），不重复出现在时间线中。
+ * - 显示的是队列快照（usePendingInputs 维护），不重复出现在时间线中。
  * - 编辑/删除/重排/引导时禁用其他操作（busy=true）。
  * - 编辑需要资源 ETag，重排需要队列 ETag。
- * - 不在组件内自宣「已引导」——引导结果由父组件的 useV11TurnControls.lastSteer 投射。
+ * - 不在组件内自宣「已引导」——引导结果由父组件的 useTurnControls.lastSteer 投射。
  *
  * 使用：
  * ```tsx
@@ -33,7 +33,7 @@
  */
 "use client";
 
-import { useV11PendingInputs } from "@/components/hooks/use-pending-inputs";
+import { usePendingInputs } from "@/components/hooks/use-pending-inputs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,7 +65,7 @@ function extractText(input: ClientPendingInput["input"]): string {
 
 export function PendingInputQueue({ threadId, onSteer, parentBusy }: PendingInputQueueProps) {
   const { pendingInputs, edit, remove, reorder, busy, error, refresh } =
-    useV11PendingInputs(threadId);
+    usePendingInputs(threadId);
 
   // 编辑状态：pendingInputId → 编辑文本
   const [editingId, setEditingId] = useState<string | null>(null);

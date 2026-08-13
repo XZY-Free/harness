@@ -1,9 +1,9 @@
 /**
- * V11 员工端通用 UserAction Hook（S10-W05）。
+ * 员工端通用 UserAction Hook（S10-W05）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform/11-api-and-event-boundaries.md §3.18（解析 UserActionRequest）
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/api-and-events.md §3.18（解析 UserActionRequest）
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W05：「UserAction 查询、确认、拒绝、授权完成与超时」
  *
  * 职责：
@@ -11,7 +11,7 @@
  *   （POST /api/v1/threads/{thread_id}/user-actions/{request_id}:resolve）。
  * - 支持 4 种 resolution：approve / deny / submit / cancel。
  * - input 类型 submit 时通过 responseRedactedJson 传入脱敏响应。
- * - 不处理 handoff（handoff 由 useV11Handoff 处理）；后端会拒绝 purpose=handoff 的请求。
+ * - 不处理 handoff（handoff 由 useHandoff 处理）；后端会拒绝 purpose=handoff 的请求。
  * - 错误转化为 ClientVisibleError。
  *
  * 关键不变量：
@@ -23,7 +23,7 @@
  * 使用：
  * ```tsx
  * function InputCard({ threadId, requestId }: { threadId: string; requestId: string }) {
- *   const { resolve, busy, error, lastResolve } = useV11UserAction({ threadId });
+ *   const { resolve, busy, error, lastResolve } = useUserAction({ threadId });
  *   // ...
  * }
  * ```
@@ -41,7 +41,7 @@ import type {
 import { useCallback, useRef, useState } from "react";
 
 /** Hook 入参。 */
-interface UseV11UserActionParams {
+interface UseUserActionParams {
   readonly threadId: string;
 }
 
@@ -52,7 +52,7 @@ export interface ResolveUserActionOptions {
 }
 
 /** Hook 返回值。 */
-export interface UseV11UserActionResult {
+export interface UseUserActionResult {
   /** 是否有操作进行中。 */
   readonly busy: boolean;
   /** 错误。 */
@@ -97,8 +97,8 @@ async function parseError(response: Response): Promise<ClientVisibleError> {
   };
 }
 
-/** V11 通用 UserAction Hook。 */
-export function useV11UserAction({ threadId }: UseV11UserActionParams): UseV11UserActionResult {
+/** 通用 UserAction Hook。 */
+export function useUserAction({ threadId }: UseUserActionParams): UseUserActionResult {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ClientVisibleError | null>(null);
   const [lastResolve, setLastResolve] = useState<ClientUserActionResolveResponse | null>(null);

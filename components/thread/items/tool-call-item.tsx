@@ -1,5 +1,5 @@
 /**
- * V11 Tool 调用 Item（tool_call）——W3-3 轻量行内条目形态（方案 §4.2）。
+ * Tool 调用 Item（tool_call）——W3-3 轻量行内条目形态（方案 §4.2）。
  *
  * content 结构：{ tool_name, tool_display_name?, status, input?, output?, error? }
  *

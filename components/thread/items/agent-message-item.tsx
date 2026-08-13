@@ -1,5 +1,5 @@
 /**
- * V11 Agent 消息 Item（agent_message）——W3-3 全宽正文形态（方案 §4.1）。
+ * Agent 消息 Item（agent_message）——W3-3 全宽正文形态（方案 §4.1）。
  *
  * content 结构：{ text }
  *

@@ -1,8 +1,8 @@
 /**
- * V11 员工端发消息 Hook（S10-W03）。
+ * 员工端发消息 Hook（S10-W03）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W03：「空闲时发送创建正式 UserMessage/Turn；运行中默认创建 PendingInput」
  *
  * 职责：
@@ -19,7 +19,7 @@
  * 使用：
  * ```tsx
  * function ThreadInput({ threadId, latestTurn }: { threadId: string; latestTurn: ClientTurn | null }) {
- *   const { send, busy, error, lastRoute } = useV11ThreadInput({ threadId, latestTurn });
+ *   const { send, busy, error, lastRoute } = useThreadInput({ threadId, latestTurn });
  *   // ...
  * }
  * ```
@@ -38,7 +38,7 @@ const RUNNING_STATES = new Set(["accepted", "queued", "running", "waiting_user",
 export type SendRoute = "turn" | "pending_input" | "none";
 
 /** Hook 返回值。 */
-export interface UseV11ThreadInputResult {
+export interface UseThreadInputResult {
   /** 是否正在发送。 */
   readonly busy: boolean;
   /** 错误。 */
@@ -88,16 +88,16 @@ export function deriveSendRoute(latestTurn: ClientTurn | null): SendRoute {
   return "turn"; // completed / interrupted / failed / cancelled → 空闲
 }
 
-interface UseV11ThreadInputParams {
+interface UseThreadInputParams {
   readonly threadId: string;
   readonly latestTurn: ClientTurn | null;
 }
 
-/** V11 发消息 Hook。 */
-export function useV11ThreadInput({
+/** 发消息 Hook。 */
+export function useThreadInput({
   threadId,
   latestTurn,
-}: UseV11ThreadInputParams): UseV11ThreadInputResult {
+}: UseThreadInputParams): UseThreadInputResult {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ClientVisibleError | null>(null);
   const [lastRoute, setLastRoute] = useState<SendRoute>("none");

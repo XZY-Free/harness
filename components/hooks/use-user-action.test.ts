@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * S10-W05：useV11UserAction Hook 测试。
+ * S10-W05：useUserAction Hook 测试。
  *
  * 覆盖：
  * - resolve(approve/deny/submit/cancel) 4 种 resolution 成功路径。
@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import { useV11UserAction } from "./use-user-action";
+import { useUserAction } from "./use-user-action";
 
 afterEach(() => {
   fetchMock.mockReset();
@@ -56,11 +56,11 @@ function buildResolveResponse(
   );
 }
 
-describe("useV11UserAction", () => {
+describe("useUserAction", () => {
   it("resolve(approve) 成功路径（confirmation 类型）", async () => {
     fetchMock.mockResolvedValueOnce(buildResolveResponse("approve"));
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     expect(result.current.busy).toBe(false);
 
@@ -85,7 +85,7 @@ describe("useV11UserAction", () => {
   it("resolve(deny) 成功路径", async () => {
     fetchMock.mockResolvedValueOnce(buildResolveResponse("deny"));
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     await act(async () => {
       const ok = await result.current.resolve("ua_001", "deny");
@@ -100,7 +100,7 @@ describe("useV11UserAction", () => {
       buildResolveResponse("submit", { request_type: "input", purpose: "input" }),
     );
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     await act(async () => {
       const ok = await result.current.resolve("ua_001", "submit", {
@@ -120,7 +120,7 @@ describe("useV11UserAction", () => {
   it("resolve(cancel) 成功路径", async () => {
     fetchMock.mockResolvedValueOnce(buildResolveResponse("cancel"));
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     await act(async () => {
       const ok = await result.current.resolve("ua_001", "cancel");
@@ -139,7 +139,7 @@ describe("useV11UserAction", () => {
       }),
     );
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     await act(async () => {
       const ok = await result.current.resolve("ua_001", "approve");
@@ -166,7 +166,7 @@ describe("useV11UserAction", () => {
       ),
     );
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     let ok = true;
     await act(async () => {
@@ -194,7 +194,7 @@ describe("useV11UserAction", () => {
       ),
     );
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     let ok = true;
     await act(async () => {
@@ -208,7 +208,7 @@ describe("useV11UserAction", () => {
   it("网络异常转化为 NETWORK_ERROR", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     let ok = true;
     await act(async () => {
@@ -220,7 +220,7 @@ describe("useV11UserAction", () => {
   });
 
   it("空 requestId 触发参数错误（不发请求）", async () => {
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     let ok = true;
     await act(async () => {
@@ -240,7 +240,7 @@ describe("useV11UserAction", () => {
       }),
     );
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     act(() => {
       void result.current.resolve("ua_001", "approve");
@@ -265,7 +265,7 @@ describe("useV11UserAction", () => {
       }),
     );
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     act(() => {
       void result.current.resolve("ua_001", "approve");
@@ -294,7 +294,7 @@ describe("useV11UserAction", () => {
   it("clearError 清空错误", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
-    const { result } = renderHook(() => useV11UserAction({ threadId: "t1" }));
+    const { result } = renderHook(() => useUserAction({ threadId: "t1" }));
 
     await act(async () => {
       await result.current.resolve("ua_001", "approve");

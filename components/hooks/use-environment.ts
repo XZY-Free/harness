@@ -1,8 +1,8 @@
 /**
- * V11 员工端 Environment 状态 Hook（S10-W06）。
+ * 员工端 Environment 状态 Hook（S10-W06）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W06：「Desktop 复用共同时间线，在右侧增加文件、页面和内部系统任务操作面板」
  *   「本地 Shell、Git、测试、构建、浏览器和应用操作显示实际执行设备、目录、权限和结果」
  *
@@ -16,7 +16,7 @@
  * 使用：
  * ```tsx
  * function EnvironmentStatus({ threadId }: { threadId: string }) {
- *   const { status, loading, error, refresh } = useV11Environment(threadId);
+ *   const { status, loading, error, refresh } = useEnvironment(threadId);
  *   if (loading) return <Spinner />;
  *   if (error) return <ErrorCard error={error} onRetry={refresh} />;
  *   return <Console status={status} />;
@@ -35,7 +35,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Hook 返回值。 */
-export interface UseV11EnvironmentResult {
+export interface UseEnvironmentResult {
   /** Environment 状态；null 表示尚未加载或加载失败。 */
   readonly status: ClientEnvironmentStatusResponse | null;
   /** 加载状态。 */
@@ -46,8 +46,8 @@ export interface UseV11EnvironmentResult {
   readonly refresh: () => Promise<void>;
 }
 
-/** V11 Environment 状态 Hook。 */
-export function useV11Environment(threadId: string): UseV11EnvironmentResult {
+/** Environment 状态 Hook。 */
+export function useEnvironment(threadId: string): UseEnvironmentResult {
   const [status, setStatus] = useState<ClientEnvironmentStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ClientVisibleError | null>(null);

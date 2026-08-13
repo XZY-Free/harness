@@ -9,7 +9,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 /**
- * V11 统一管理后台一级导航（S11-W01 重组）。
+ * 统一管理后台一级导航（S11-W01 重组）。
  *
  * 8 个一级菜单（按方案 §后台信息架构）：
  * 1. 智能体（/studio/agents）— Agent / Revision / Route / 发布

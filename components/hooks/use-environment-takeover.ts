@@ -1,8 +1,8 @@
 /**
- * V11 员工端 Environment 接管 Hook（S10-W07）。
+ * 员工端 Environment 接管 Hook（S10-W07）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W07：
  *   「页面显示当前 Environment owner、在线状态、租约和接管条件」
  *   「接管前核对未完成 ToolCall/Effect；重复连接不能并发执行同一需要写锁的本地操作」
@@ -17,7 +17,7 @@
  * 使用：
  * ```tsx
  * function TakeoverButton({ threadId, onTaken }: { threadId: string; onTaken: () => void }) {
- *   const { requestTakeover, busy, error, lastTakeover, clearError } = useV11EnvironmentTakeover();
+ *   const { requestTakeover, busy, error, lastTakeover, clearError } = useEnvironmentTakeover();
  *   return (
  *     <button
  *       disabled={busy}
@@ -48,7 +48,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Hook 返回值。 */
-export interface UseV11EnvironmentTakeoverResult {
+export interface UseEnvironmentTakeoverResult {
   /** 是否正在请求接管。 */
   readonly busy: boolean;
   /** 错误（ClientVisibleError + 可选 blocking_reasons）。 */
@@ -64,8 +64,8 @@ export interface UseV11EnvironmentTakeoverResult {
   readonly clearError: () => void;
 }
 
-/** V11 Environment 接管 Hook。 */
-export function useV11EnvironmentTakeover(): UseV11EnvironmentTakeoverResult {
+/** Environment 接管 Hook。 */
+export function useEnvironmentTakeover(): UseEnvironmentTakeoverResult {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<
     (ClientVisibleError & { readonly blocking_reasons?: readonly string[] }) | null

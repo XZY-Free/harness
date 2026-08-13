@@ -1,5 +1,5 @@
 /**
- * V11 子 Thread Item（child_thread）。
+ * 子 Thread Item（child_thread）。
  *
  * content 结构：{ relation_id, child_thread_id, target_agent_id, task_payload_ref, state, summary?, artifact_ids?, budget_used?, completed_at?, error_code?, error_summary? }
  *

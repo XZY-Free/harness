@@ -1,8 +1,8 @@
 /**
- * V11 Catalog 显示名组件（S10-W04）。
+ * Catalog 显示名组件（S10-W04）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W04：「Thread 顶部展示 Agent 显示名 / Environment 显示名」
  *
  * 职责：
@@ -17,7 +17,7 @@
  */
 "use client";
 
-import { useV11Catalog } from "@/components/hooks/use-catalog";
+import { useCatalog } from "@/components/hooks/use-catalog";
 import type { ClientCatalogResourceType } from "@/lib/client/types";
 
 interface CatalogDisplayNameProps {
@@ -32,7 +32,7 @@ export function CatalogDisplayName({
   resourceType,
   fallback,
 }: CatalogDisplayNameProps) {
-  const { items, loading } = useV11Catalog({
+  const { items, loading } = useCatalog({
     resourceTypes: [resourceType],
   });
 

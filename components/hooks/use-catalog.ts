@@ -1,9 +1,9 @@
 /**
- * V11 员工端 Catalog Hook（S10-W04）。
+ * 员工端 Catalog Hook（S10-W04）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform/12-capability-and-collaboration-api.md §2（Employee Catalog API）
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/capability-and-collaboration-api.md §2（Employee Catalog API）
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W04：「Agent、模型、Skill 与位置选择」
  *
  * 职责：
@@ -20,7 +20,7 @@
  *
  * 使用：
  * ```tsx
- * const { items, loading, error, refresh } = useV11Catalog({ resourceTypes: ["agent"] });
+ * const { items, loading, error, refresh } = useCatalog({ resourceTypes: ["agent"] });
  * ```
  */
 "use client";
@@ -37,7 +37,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Hook 入参。 */
-interface UseV11CatalogParams {
+interface UseCatalogParams {
   /** 资源类型过滤；不传则返回全部类型。 */
   readonly resourceTypes?: readonly ClientCatalogResourceType[];
   /** lifecycle 状态过滤；默认 ["enabled"]。 */
@@ -47,7 +47,7 @@ interface UseV11CatalogParams {
 }
 
 /** Hook 返回值。 */
-export interface UseV11CatalogResult {
+export interface UseCatalogResult {
   /** 目录条目（按 resource_type / display_name 排序稳定）。 */
   readonly items: readonly ClientCatalogItem[];
   /** 是否正在拉取（首次或 refresh）。 */
@@ -93,12 +93,12 @@ async function parseError(response: Response): Promise<ClientVisibleError> {
   };
 }
 
-/** V11 Catalog Hook。 */
-export function useV11Catalog({
+/** Catalog Hook。 */
+export function useCatalog({
   resourceTypes,
   lifecycleStates,
   autoFetch = true,
-}: UseV11CatalogParams = {}): UseV11CatalogResult {
+}: UseCatalogParams = {}): UseCatalogResult {
   const [items, setItems] = useState<readonly ClientCatalogItem[]>([]);
   const [loading, setLoading] = useState<boolean>(autoFetch);
   const [error, setError] = useState<ClientVisibleError | null>(null);

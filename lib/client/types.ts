@@ -2,8 +2,8 @@
  * Thread Client Types（线程客户端类型）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform/11-api-and-event-boundaries.md /（Item 响应、SSE 投影）
- * - docs/solutions/v11-agentkit-platform/15-machine-contracts-and-conformance.md（错误 Envelope）
+ * - docs/architecture/api-and-events.md /（Item 响应、SSE 投影）
+ * - docs/architecture/contracts-and-conformance.md（错误 Envelope）
  * - lib/persistence/schema/conversation.ts（Thread/ThreadItem/ThreadEvent 服务端 schema）
  *
  * 与 HTTP wire 对齐：

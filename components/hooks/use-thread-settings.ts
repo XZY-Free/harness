@@ -2,7 +2,7 @@
  * 员工端 Thread 默认设置 Hook。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W04：「员工在发送消息前选择 Agent / Model / Skill / Environment」
  *
  * 职责：

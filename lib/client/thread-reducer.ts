@@ -1,10 +1,10 @@
 import { makeLocalVisibleError } from "./error-messages";
 /**
- * V11 员工端 Thread 投影 Reducer。
+ * 员工端 Thread 投影 Reducer。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform/11-api-and-event-boundaries.md （恢复规则）
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md S10-W01
+ * - docs/architecture/api-and-events.md （恢复规则）
+ * - docs/architecture/product-surfaces-and-admin.md S10-W01
  *
  * 核心职责（S10-W01）：
  * - 以 Thread snapshot 为基线、ThreadEvent sequence 为增量维护客户端状态。
@@ -24,7 +24,7 @@ import { makeLocalVisibleError } from "./error-messages";
  * response.delta 通过独立 stream.delta action 投影为 pending Agent Item，不推进持久 sequence；
  * 其余 Runtime 私有 transient 事件不进入会话投影。
  */
-import { V11_SSE_DEFAULT_MAX_RETRIES } from "./sse-client";
+import { SSE_DEFAULT_MAX_RETRIES } from "./sse-client";
 import type {
  ClientEvent,
  ClientItem,
@@ -44,7 +44,7 @@ export function createInitialState(threadId: string): ThreadProjectionState {
  hasAppliedEventSinceSnapshot: false,
  streamStatus: "idle",
  reconnectAttempt: 0,
- reconnectMax: V11_SSE_DEFAULT_MAX_RETRIES,
+ reconnectMax: SSE_DEFAULT_MAX_RETRIES,
  visibleError: null,
  snapshotStatus: "idle",
  };

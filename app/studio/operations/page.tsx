@@ -2,13 +2,13 @@ import { StudioGatePage } from "@/components/studio/gate-page";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
- * V11 统一管理后台 — 运营页（S11-W01 占位）。
+ * 统一管理后台 — 运营页（S11-W01 占位）。
  *
  * 一级导航「运营」展示使用量、成本、队列、配额、失败与服务水平。
  * S11-W07 将填充 cost/capacity 投影表 + 聚合 + 告警内容。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md
+ * - docs/architecture/runtime-control-plane.md
  *   「运营」：使用量、成本、队列、配额、失败与服务水平
  */
 export const dynamic = "force-dynamic";

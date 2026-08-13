@@ -1,7 +1,7 @@
 import type { ClientTakeoverResponse } from "@/lib/client/types";
 // @vitest-environment happy-dom
 /**
- * S10-W07：useV11EnvironmentTakeover Hook 测试。
+ * S10-W07：useEnvironmentTakeover Hook 测试。
  *
  * 覆盖：
  * - 成功接管返回 lastTakeover。
@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import { useV11EnvironmentTakeover } from "./use-environment-takeover";
+import { useEnvironmentTakeover } from "./use-environment-takeover";
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -74,9 +74,9 @@ function buildErrorResponse(
   );
 }
 
-describe("useV11EnvironmentTakeover", () => {
+describe("useEnvironmentTakeover", () => {
   it("初始状态：busy=false, error=null, lastTakeover=null", () => {
-    const { result } = renderHook(() => useV11EnvironmentTakeover());
+    const { result } = renderHook(() => useEnvironmentTakeover());
     expect(result.current.busy).toBe(false);
     expect(result.current.error).toBeNull();
     expect(result.current.lastTakeover).toBeNull();
@@ -85,7 +85,7 @@ describe("useV11EnvironmentTakeover", () => {
   it("成功接管返回 lastTakeover", async () => {
     fetchMock.mockResolvedValueOnce(buildTakeoverResponse({ previous_lease_epoch: 5 }));
 
-    const { result } = renderHook(() => useV11EnvironmentTakeover());
+    const { result } = renderHook(() => useEnvironmentTakeover());
 
     let takeoverResult: ClientTakeoverResponse | null = null;
     await act(async () => {
@@ -115,7 +115,7 @@ describe("useV11EnvironmentTakeover", () => {
       }),
     );
 
-    const { result } = renderHook(() => useV11EnvironmentTakeover());
+    const { result } = renderHook(() => useEnvironmentTakeover());
 
     let takeoverResult: unknown = "non-null";
     await act(async () => {
@@ -136,7 +136,7 @@ describe("useV11EnvironmentTakeover", () => {
   it("409 IDEMPOTENCY_CONFLICT 错误转化", async () => {
     fetchMock.mockResolvedValueOnce(buildErrorResponse(409, "IDEMPOTENCY_CONFLICT"));
 
-    const { result } = renderHook(() => useV11EnvironmentTakeover());
+    const { result } = renderHook(() => useEnvironmentTakeover());
 
     await act(async () => {
       await result.current.requestTakeover("t1");
@@ -149,7 +149,7 @@ describe("useV11EnvironmentTakeover", () => {
   it("网络异常转化为 NETWORK_ERROR", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
-    const { result } = renderHook(() => useV11EnvironmentTakeover());
+    const { result } = renderHook(() => useEnvironmentTakeover());
 
     await act(async () => {
       await result.current.requestTakeover("t1");
@@ -169,7 +169,7 @@ describe("useV11EnvironmentTakeover", () => {
         }),
     );
 
-    const { result } = renderHook(() => useV11EnvironmentTakeover());
+    const { result } = renderHook(() => useEnvironmentTakeover());
 
     let firstResult: unknown = "initial";
     let secondResult: unknown = "initial";
@@ -195,7 +195,7 @@ describe("useV11EnvironmentTakeover", () => {
   it("clearError 清除错误", async () => {
     fetchMock.mockResolvedValueOnce(buildErrorResponse(422, "BUSINESS_CONSTRAINT_VIOLATION"));
 
-    const { result } = renderHook(() => useV11EnvironmentTakeover());
+    const { result } = renderHook(() => useEnvironmentTakeover());
 
     await act(async () => {
       await result.current.requestTakeover("t1");
@@ -215,7 +215,7 @@ describe("useV11EnvironmentTakeover", () => {
       buildTakeoverResponse({ reason_code: "device_heartbeat_timeout" }),
     );
 
-    const { result } = renderHook(() => useV11EnvironmentTakeover());
+    const { result } = renderHook(() => useEnvironmentTakeover());
 
     await act(async () => {
       await result.current.requestTakeover("t1", "device_heartbeat_timeout");
@@ -234,7 +234,7 @@ describe("useV11EnvironmentTakeover", () => {
         }),
     );
 
-    const { result, unmount } = renderHook(() => useV11EnvironmentTakeover());
+    const { result, unmount } = renderHook(() => useEnvironmentTakeover());
 
     let takeoverResult: unknown = "initial";
     await act(async () => {

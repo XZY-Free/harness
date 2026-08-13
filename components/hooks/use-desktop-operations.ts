@@ -2,7 +2,7 @@
  * Desktop 本地任务操作 Hook（S10-W06）。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W06：「Desktop 复用共同时间线，在右侧增加文件、页面和内部系统任务操作面板」
  *   「本地 Shell、Git、测试、构建、浏览器和应用操作显示实际执行设备、目录、权限和结果」
  *   「原生系统授权、登录和人工确认进入 UserAction；Desktop Shell 不自行决定业务权限」

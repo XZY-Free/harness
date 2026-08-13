@@ -2,7 +2,7 @@
  * 员工端 Thread Hook。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W01：「以 Thread snapshot 为基线、ThreadEvent sequence 为增量，建立 Web/Desktop 共用的客户端状态投影」
  *
  * 职责：

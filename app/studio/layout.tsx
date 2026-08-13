@@ -9,7 +9,7 @@ import type { StudioNavVisibility } from "@/lib/studio/nav-visibility";
 import { headers } from "next/headers";
 
 /**
- * V11 统一管理后台 layout（S11-W01 重组）。
+ * 统一管理后台 layout（S11-W01 重组）。
  *
  * server component，在渲染子页前：
  * 1. 校验 SSO 身份（AuthError → 401 页）。
@@ -18,10 +18,10 @@ import { headers } from "next/headers";
  * 4. 通过 → 左侧 <StudioNav visibleItems={...} /> + 右侧子页。
  *
  * 安全边界：
- * - studio.access 仍是入口校验（PERMISSIONS 体系），V11 Action Scope 校验由各 API 路由负责。
+ * - studio.access 仍是入口校验（PERMISSIONS 体系），Action Scope 校验由各 API 路由负责。
  * - 菜单可见性仅是 UX 层，隐藏菜单不能代替授权校验（方案 S11-W01）。
  * - dev 模式下 DEFAULT_USER_ID 全部可见（与 devOpen 行为一致）。
- * - V11 Principal 解析失败 fail-open（旧 studio.access 通过即放行），菜单全部隐藏。
+ * - Principal 解析失败 fail-open（旧 studio.access 通过即放行），菜单全部隐藏。
  *
  * /studio/api/* 路由不经过本 layout（API 不走渲染），各自 requirePermission / requireActionScope 守卫。
  */

@@ -2,7 +2,7 @@
  * Thread 页面。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/architecture/product-surfaces-and-admin.md
  *   S10-W02：「Thread 顶部固定展示主 Agent、可选 Goal、当前任务状态和默认执行位置」
  *   「时间线覆盖用户与 Agent Item、公开进度、ToolCall、Artifact、UserAction、Child Thread 与 Job 结果投影」
  *   S10-W03：「空闲时发送创建正式 UserMessage/Turn；运行中默认创建 PendingInput」

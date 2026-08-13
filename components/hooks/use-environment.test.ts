@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * S10-W06：useV11Environment Hook 测试。
+ * S10-W06：useEnvironment Hook 测试。
  *
  * 覆盖：
  * - 成功加载 Environment 状态。
@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import { useV11Environment } from "./use-environment";
+import { useEnvironment } from "./use-environment";
 
 afterEach(() => {
   fetchMock.mockReset();
@@ -57,11 +57,11 @@ function buildStatusResponse(
   );
 }
 
-describe("useV11Environment", () => {
+describe("useEnvironment", () => {
   it("成功加载 Environment 状态", async () => {
     fetchMock.mockResolvedValueOnce(buildStatusResponse({ availability: "online_desktop" }));
 
-    const { result } = renderHook(() => useV11Environment("t1"));
+    const { result } = renderHook(() => useEnvironment("t1"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -92,7 +92,7 @@ describe("useV11Environment", () => {
       ),
     );
 
-    const { result } = renderHook(() => useV11Environment("t-missing"));
+    const { result } = renderHook(() => useEnvironment("t-missing"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -106,7 +106,7 @@ describe("useV11Environment", () => {
   it("网络异常转化为 NETWORK_ERROR", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
-    const { result } = renderHook(() => useV11Environment("t1"));
+    const { result } = renderHook(() => useEnvironment("t1"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -120,7 +120,7 @@ describe("useV11Environment", () => {
   it("refresh 触发重新加载", async () => {
     fetchMock.mockResolvedValueOnce(buildStatusResponse({ availability: "offline_desktop" }));
 
-    const { result } = renderHook(() => useV11Environment("t1"));
+    const { result } = renderHook(() => useEnvironment("t1"));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -150,7 +150,7 @@ describe("useV11Environment", () => {
       Promise.resolve(buildStatusResponse({ availability: "online_desktop" })),
     );
 
-    const { result } = renderHook(() => useV11Environment("t1"));
+    const { result } = renderHook(() => useEnvironment("t1"));
 
     // 等待初始加载完成
     await waitFor(() => {
@@ -182,7 +182,7 @@ describe("useV11Environment", () => {
         }),
     );
 
-    const { result, unmount } = renderHook(() => useV11Environment("t1"));
+    const { result, unmount } = renderHook(() => useEnvironment("t1"));
 
     // 立即卸载，请求仍在 pending
     unmount();

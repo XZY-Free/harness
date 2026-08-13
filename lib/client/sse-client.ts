@@ -1,10 +1,10 @@
 /**
- * V11 员工端 SSE 客户端。
+ * 员工端 SSE 客户端。
  *
  * 事实源：
  * - app/api/v1/threads/[thread_id]/events/route.ts（SSE 响应格式）
- * - docs/solutions/v11-agentkit-platform/11-api-and-event-boundaries.md 
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md S10-W07
+ * - docs/architecture/api-and-events.md
+ * - docs/architecture/product-surfaces-and-admin.md S10-W07
  *
  * 关键约束：
  * - 浏览器原生 EventSource 不支持自定义 header，不能用 Last-Event-ID；
@@ -70,7 +70,7 @@ export interface SSEClientHandle {
 }
 
 /** SSE 断线重连次数上限（UI 展示"正在重新连接 N/M"时的 M）。 */
-export const V11_SSE_DEFAULT_MAX_RETRIES = 5;
+export const SSE_DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_BASE_BACKOFF_MS = 500;
 
 /** 解析 SSE 数据块，返回完整事件列表和剩余缓冲。 */
@@ -111,7 +111,7 @@ export function createSSEClient(
  callbacks: SSEClientCallbacks,
 ): SSEClientHandle {
  const fetchImpl = config.fetchImpl ?? fetch;
- const maxRetries = config.maxRetries ?? V11_SSE_DEFAULT_MAX_RETRIES;
+ const maxRetries = config.maxRetries ?? SSE_DEFAULT_MAX_RETRIES;
  const baseBackoffMs = config.baseBackoffMs ?? DEFAULT_BASE_BACKOFF_MS;
 
  let closed = false;

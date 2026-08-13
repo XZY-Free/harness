@@ -295,7 +295,7 @@ function ThreadGroupList({
 }) {
   const agentMap = new Map(agents.map((a) => [a.id, a]));
   // 系统兜底 agent（agentKey === "default"）≠ 用户主动选择：
-  // V11 要求 Thread 必须绑主 Agent，新会话自动绑 default 兜底；
+  // 要求 Thread 必须绑主 Agent，新会话自动绑 default 兜底；
   // 设计语义上这类会话属"未选助手"，平铺顶部、不建分组。
   const isUserChosenAgent = (agentId: string) => {
     const a = agentMap.get(agentId);

@@ -3,14 +3,14 @@ import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 import Link from "next/link";
 
 /**
- * V11 统一管理后台 — 能力与知识页（S11-W01 占位）。
+ * 统一管理后台 — 能力与知识页（S11-W01 占位）。
  *
  * 一级导航「能力与知识」整合原 /studio/resources + /studio/skills + /studio/providers + /studio/artifacts。
  * 本页为 S11-W01 重组后的着陆页，提供到现有子页面的入口；
  * S11-W03 将在此页直接渲染 Skill / Tool / Knowledge / Connection 一体化管理。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md
+ * - docs/architecture/runtime-control-plane.md
  *   「能力与知识」：Skill、Tool、Knowledge、模型、连接、来源和风险变化
  */
 export const dynamic = "force-dynamic";

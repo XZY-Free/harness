@@ -1,5 +1,5 @@
 /**
- * V11 员工端 Thread 投影 Store。
+ * 员工端 Thread 投影 Store。
  *
  * 外部 store 模式（与 React useSyncExternalStore 兼容）：
  * - getState() 返回当前 immutable 状态快照。

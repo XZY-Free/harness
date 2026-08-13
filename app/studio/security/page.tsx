@@ -3,14 +3,14 @@ import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 import Link from "next/link";
 
 /**
- * V11 统一管理后台 — 安全与审计页（S11-W01 整合）。
+ * 统一管理后台 — 安全与审计页（S11-W01 整合）。
  *
  * 一级导航「安全与审计」整合原 /studio/audit + /studio/policies + 权限规则 +
  * Credential 引用 + Legal Hold + 删除请求。本页提供入口聚合，
  * S11-W08 将扩展并发控制、导出审计与端到端验证。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md
+ * - docs/architecture/runtime-control-plane.md
  *   「安全与审计」：Policy、Permission、Credential 引用、Effect、Audit 和事件处置
  */
 export const dynamic = "force-dynamic";

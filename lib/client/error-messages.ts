@@ -1,10 +1,10 @@
 /**
- * V11 错误码 → 员工可理解语义映射。
+ * 错误码 → 员工可理解语义映射。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform/contracts/error-codes.json（normative）
- * - lib/v11/error-codes.ts（运行时投影，仅含 {http, retryable}）
- * - docs/solutions/v11-agentkit-platform-development-plan/10-employee-web-and-desktop-experience.md
+ * - docs/contracts/error-codes.json（normative）
+ * - lib/error-codes.ts（运行时投影，仅含 {http, retryable}）
+ * - docs/architecture/product-surfaces-and-admin.md
  * S10-W01：「错误展示使用错误目录中的中文语义和可恢复动作，不把内部堆栈直接暴露给员工」
  *
  * 职责：

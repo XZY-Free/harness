@@ -2,13 +2,13 @@ import { StudioGatePage } from "@/components/studio/gate-page";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
- * V11 统一管理后台 — Runtime 与环境页（S11-W01 占位）。
+ * 统一管理后台 — Runtime 与环境页（S11-W01 占位）。
  *
  * 一级导航「Runtime 与环境」展示 RuntimeRevision、实例、Environment、Desktop、Workspace、
  * 健康和容量。S11-W02/W04 将填充 Runtime 发布治理与 Environment 排障内容。
  *
  * 事实源：
- * - docs/solutions/v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md
+ * - docs/architecture/runtime-control-plane.md
  *   「Runtime 与环境」：RuntimeRevision、实例、Environment、Desktop、Workspace、健康和容量
  */
 export const dynamic = "force-dynamic";

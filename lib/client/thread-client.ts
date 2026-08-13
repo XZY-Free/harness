@@ -21,7 +21,7 @@
  */
 import { apiPath } from "@/lib/api-fetch";
 import { toVisibleError } from "./error-messages";
-import { type SSEClientHandle, V11_SSE_DEFAULT_MAX_RETRIES, createSSEClient } from "./sse-client";
+import { type SSEClientHandle, SSE_DEFAULT_MAX_RETRIES, createSSEClient } from "./sse-client";
 import { createInitialState } from "./thread-reducer";
 import { type ThreadStore, createThreadStore } from "./thread-store";
 import type { ClientErrorBody, ClientEvent, ClientItemsResponse } from "./types";
@@ -146,7 +146,7 @@ export function createThreadClient(config: ThreadClientConfig): ThreadClient {
  type: "stream.status",
  status: "reconnecting",
  reconnectAttempt: attempt,
- reconnectMax: config.sseMaxRetries ?? V11_SSE_DEFAULT_MAX_RETRIES,
+ reconnectMax: config.sseMaxRetries ?? SSE_DEFAULT_MAX_RETRIES,
  });
  },
  onEvent: (event) => {

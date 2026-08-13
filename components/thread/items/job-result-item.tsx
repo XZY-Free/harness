@@ -1,5 +1,5 @@
 /**
- * V11 Job 结果 Item（job_result）。
+ * Job 结果 Item（job_result）。
  *
  * content 结构：{ job_id, job_type, status, result?, error?, progress? }
  * （W06 接入 Job 表后替换为完整结构）

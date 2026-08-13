@@ -2,12 +2,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+const retiredName = `v${11}`;
+
 describe("desktop formal thread client contract", () => {
   it("uses permanent page file names", () => {
     expect(existsSync(join(process.cwd(), "components/thread/thread-page.tsx"))).toBe(true);
     expect(existsSync(join(process.cwd(), "components/thread/new-thread-page.tsx"))).toBe(true);
-    expect(existsSync(join(process.cwd(), "components/thread/v11-thread-page.tsx"))).toBe(false);
-    expect(existsSync(join(process.cwd(), "components/thread/v11-new-thread-page.tsx"))).toBe(false);
+    expect(existsSync(join(process.cwd(), `components/thread/${retiredName}-thread-page.tsx`))).toBe(
+      false,
+    );
+    expect(
+      existsSync(join(process.cwd(), `components/thread/${retiredName}-new-thread-page.tsx`)),
+    ).toBe(false);
   });
 
   it("exports permanent Thread hook symbols", () => {
@@ -24,7 +30,9 @@ describe("desktop formal thread client contract", () => {
     expect(thread).toContain("export interface UseThreadResult");
     expect(detail).toContain("export function useThreadDetail(");
     expect(settings).toContain("export function useThreadSettings(");
-    expect(`${thread}\n${detail}\n${settings}`).not.toMatch(/useV11|UseV11/);
+    expect(`${thread}\n${detail}\n${settings}`).not.toMatch(
+      new RegExp(`use${retiredName.toUpperCase()}|Use${retiredName.toUpperCase()}`),
+    );
   });
 
   it("uses shared client contracts and one sidebar implementation", () => {

@@ -1,5 +1,5 @@
 /**
- * V11 Thread 输入框（W3-4 / W4-1 重构）。
+ * Thread 输入框（W3-4 / W4-1 重构）。
  *
  * 结构：
  * - 大圆角（20px）容器，focus-within 边框加深 + 阴影浮起。
@@ -14,14 +14,14 @@
  * - 空闲 → Send 箭头（创建正式 Turn）。
  * - 已请求停止（lastInterrupt !== null）→ 圆钮禁用 + title 显示"已请求停止，等待 Runtime 确认"。
  *
- * W4-1 引导：PendingInputQueue 的 ↳ 引导 按钮调用本组件的 useV11TurnControls.steer，
+ * W4-1 引导：PendingInputQueue 的 ↳ 引导 按钮调用本组件的 useTurnControls.steer，
  * 把排队消息升级为对当前 Turn 的即时引导；成功后 PendingInputQueue 自行从队列移除。
  */
 "use client";
 
 import { useThreadDraft } from "@/components/hooks/use-thread-draft";
-import { useV11ThreadInput } from "@/components/hooks/use-thread-input";
-import { useV11TurnControls } from "@/components/hooks/use-turn-controls";
+import { useThreadInput } from "@/components/hooks/use-thread-input";
+import { useTurnControls } from "@/components/hooks/use-turn-controls";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ClientPendingInput, ClientThread, ClientTurn } from "@/lib/client/types";
@@ -76,7 +76,7 @@ export function ThreadInput({
     error,
     route,
     clearError,
-  } = useV11ThreadInput({
+  } = useThreadInput({
     threadId,
     latestTurn,
   });
@@ -90,7 +90,7 @@ export function ThreadInput({
     error: turnError,
     lastInterrupt,
     clearError: clearTurnError,
-  } = useV11TurnControls(turnId);
+  } = useTurnControls(turnId);
 
   const { text, setText, clear: clearDraft } = useThreadDraft(draftKey ?? threadId);
   const [customBusy, setCustomBusy] = useState(false);

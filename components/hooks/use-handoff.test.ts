@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * S10-W04：useV11Handoff Hook 测试。
+ * S10-W04：useHandoff Hook 测试。
  *
  * 覆盖：
  * - resolve(approve) 成功路径：fetch 调用 + lastResolve 更新。
@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import { useV11Handoff } from "./use-handoff";
+import { useHandoff } from "./use-handoff";
 
 afterEach(() => {
   fetchMock.mockReset();
@@ -46,11 +46,11 @@ function buildResolveResponse(resolution: "approve" | "deny") {
   );
 }
 
-describe("useV11Handoff", () => {
+describe("useHandoff", () => {
   it("resolve(approve) 成功路径", async () => {
     fetchMock.mockResolvedValueOnce(buildResolveResponse("approve"));
 
-    const { result } = renderHook(() => useV11Handoff({ threadId: "t1" }));
+    const { result } = renderHook(() => useHandoff({ threadId: "t1" }));
 
     expect(result.current.busy).toBe(false);
 
@@ -74,7 +74,7 @@ describe("useV11Handoff", () => {
   it("resolve(deny) 成功路径", async () => {
     fetchMock.mockResolvedValueOnce(buildResolveResponse("deny"));
 
-    const { result } = renderHook(() => useV11Handoff({ threadId: "t1" }));
+    const { result } = renderHook(() => useHandoff({ threadId: "t1" }));
 
     await act(async () => {
       const ok = await result.current.resolve("h1", "deny");
@@ -101,7 +101,7 @@ describe("useV11Handoff", () => {
       ),
     );
 
-    const { result } = renderHook(() => useV11Handoff({ threadId: "t1" }));
+    const { result } = renderHook(() => useHandoff({ threadId: "t1" }));
 
     let ok = true;
     await act(async () => {
@@ -116,7 +116,7 @@ describe("useV11Handoff", () => {
   it("网络异常转化为 NETWORK_ERROR", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
-    const { result } = renderHook(() => useV11Handoff({ threadId: "t1" }));
+    const { result } = renderHook(() => useHandoff({ threadId: "t1" }));
 
     let ok = true;
     await act(async () => {
@@ -128,7 +128,7 @@ describe("useV11Handoff", () => {
   });
 
   it("空 handoffId 触发参数错误（不发请求）", async () => {
-    const { result } = renderHook(() => useV11Handoff({ threadId: "t1" }));
+    const { result } = renderHook(() => useHandoff({ threadId: "t1" }));
 
     let ok = true;
     await act(async () => {
@@ -148,7 +148,7 @@ describe("useV11Handoff", () => {
       }),
     );
 
-    const { result } = renderHook(() => useV11Handoff({ threadId: "t1" }));
+    const { result } = renderHook(() => useHandoff({ threadId: "t1" }));
 
     act(() => {
       void result.current.resolve("h1", "approve");
@@ -168,7 +168,7 @@ describe("useV11Handoff", () => {
   it("clearError 清空错误", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
-    const { result } = renderHook(() => useV11Handoff({ threadId: "t1" }));
+    const { result } = renderHook(() => useHandoff({ threadId: "t1" }));
 
     await act(async () => {
       await result.current.resolve("h1", "approve");

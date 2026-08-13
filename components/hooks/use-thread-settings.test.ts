@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * S10-W04：useV11ThreadSettings Hook 测试。
+ * S10-W04：useThreadSettings Hook 测试。
  *
  * 覆盖：
  * - 成功 PATCH（200）返回 true 且不设置 error。

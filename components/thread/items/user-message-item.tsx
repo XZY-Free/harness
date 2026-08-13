@@ -1,5 +1,5 @@
 /**
- * V11 用户消息 Item（user_message / user_guidance）。
+ * 用户消息 Item（user_message / user_guidance）。
  *
  * content 结构（user_message）：{ text, attachments?, client_message_id }
  * content 结构（user_guidance）：同 user_message，itemState=pending（不进入上下文）
