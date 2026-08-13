@@ -3,9 +3,9 @@
  *   — KnowledgeChunk 集合（阶段 7 S07-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §13（Knowledge 加载；Chunk 是检索单元）。
- * - ../v11-agentkit-platform/10-core-data-model.md §7.5（knowledge_chunk 索引表）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md S07-W06。
+ * - docs/architecture/context-memory-and-knowledge.md §13（Knowledge 加载；Chunk 是检索单元）。
+ * - docs/architecture/persistence.md §7.5（knowledge_chunk 索引表）。
+ * - docs/architecture/context-memory-and-knowledge.md S07-W06。
  *
  * 行为：
  * - GET：列出 Revision 的全部 Chunk（按 chunkNo 升序）。

@@ -1,7 +1,7 @@
 /**
  * GET / POST /admin/api/v1/exports — AdminExport 集合（S11-W08）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W08。
+ * 事实源：docs/architecture/runtime-control-plane.md S11-W08。
  *
  * 行为：
  * - GET：列出当前租户的导出任务（支持 status/export_kind/requested_by/limit/cursor 过滤）。

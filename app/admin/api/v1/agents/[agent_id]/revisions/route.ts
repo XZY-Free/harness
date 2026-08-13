@@ -1,9 +1,9 @@
 /**
  * POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision（S03-C05）。
  *
- * 事实源：../v11-agentkit-platform/contracts/v11.openapi.json（post_admin_api_v1_agents_by_agent_id_revisions）、
- *         ../v11-agentkit-platform/11-api-and-event-boundaries.md §6、
- *         ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md S03-W05。
+ * 事实源：docs/contracts/openapi.json（post_admin_api_v1_agents_by_agent_id_revisions）、
+ *         docs/architecture/api-and-events.md §6、
+ *         docs/architecture/agent-control-plane.md S03-W05。
  *
  * 行为：
  * - 解析 admin 主体（SSO 管理员或 CI/CD Service Identity）。

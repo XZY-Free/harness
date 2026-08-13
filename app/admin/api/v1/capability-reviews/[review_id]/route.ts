@@ -20,7 +20,7 @@ import {
 /**
  * GET / POST /admin/api/v1/capability-reviews/{review_id} — CapabilityReview 单资源（阶段 6 S06-C05）。
  *
- * 事实源：../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §5（能力变化与审核）。
+ * 事实源：docs/architecture/capabilities-and-security.md §5（能力变化与审核）。
  *
  * 行为：
  * - GET：获取单个审核记录。

@@ -3,9 +3,9 @@
  *   — 推进 KnowledgeDocumentRevision.indexState 到 ready（阶段 7 S07-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §12（Knowledge Base；索引完成后才能发布）。
- * - ../v11-agentkit-platform/10-core-data-model.md §7.5（knowledge_index 索引表）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md S07-W06。
+ * - docs/architecture/context-memory-and-knowledge.md §12（Knowledge Base；索引完成后才能发布）。
+ * - docs/architecture/persistence.md §7.5（knowledge_index 索引表）。
+ * - docs/architecture/context-memory-and-knowledge.md S07-W06。
  *
  * 行为：
  * - 校验 Idempotency-Key（必填）。

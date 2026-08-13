@@ -10,8 +10,8 @@ import { listAttestations } from "@/lib/artifacts/persistence/artifact-attestati
 /**
  * GET /admin/api/v1/artifact-attestations — 列出租户内制品证明（S12-W04）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §4.1-4.2、
- *         ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W04。
+ * 事实源：docs/architecture/security.md §4.1-4.2、
+ *         docs/architecture/security.md S12-W04。
  *
  * 行为：
  * - 解析 admin 主体。

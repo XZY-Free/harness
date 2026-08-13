@@ -1,7 +1,7 @@
 /**
  * POST/GET /admin/api/v1/recovery-drills/{recovery_drill_id} — 恢复演练详情与执行（S12-W08）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md §8
+ * 事实源：docs/architecture/security.md §8
  *         （恢复演练验证一致性；演练在隔离环境使用真实组件，不以备份任务成功日志代替可恢复性）。
  *
  * 行为：

@@ -1,7 +1,7 @@
 /**
  * POST /admin/api/v1/legal-holds:release — 解除 Legal Hold（S12-W06）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §6
+ * 事实源：docs/architecture/security.md §6
  *         （Legal Hold 解除：写审计，恢复原保留策略计算）。
  *
  * 行为：

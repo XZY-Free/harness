@@ -1,7 +1,7 @@
 /**
  * POST /admin/api/v1/security-incidents/{security_incident_id}/containments/{containment_id} — 隔离动作状态推进（S12-W09）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md §9
+ * 事实源：docs/architecture/security.md §9
  *         （撤销 Credential、禁用能力或隔离 Route 后，新操作立即拒绝；进行中副作用进入核对而非静默重试；
  *           不以日志文本冒充隔离成功：applied 要求 evidenceRef 指向实际撤销/禁用证据）。
  *

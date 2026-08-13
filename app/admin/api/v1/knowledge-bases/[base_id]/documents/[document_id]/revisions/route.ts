@@ -3,9 +3,9 @@
  *   — KnowledgeDocumentRevision 集合（阶段 7 S07-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §12（Knowledge Base）。
- * - ../v11-agentkit-platform/10-core-data-model.md §4.4（knowledge_document_revision 字段）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md S07-W06。
+ * - docs/architecture/context-memory-and-knowledge.md §12（Knowledge Base）。
+ * - docs/architecture/persistence.md §4.4（knowledge_document_revision 字段）。
+ * - docs/architecture/context-memory-and-knowledge.md S07-W06。
  *
  * 行为：
  * - GET：列出 Document 的全部 Revision（按 revisionNo 降序）。

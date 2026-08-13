@@ -35,9 +35,9 @@ import { RuntimeConformanceCaseFailedError } from "@/lib/runtime/domain/runtime-
  * GET/POST /admin/api/v1/runtime-revisions/{revision_id}/conformance — RuntimeRevision conformance 结果（S05-C06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/contracts/runtime-conformance.json（16 个 required_cases）
- * - ../v11-agentkit-platform/15-machine-contracts.md §5 L94-110（conformance 门禁协议）
- * - ../v11-agentkit-platform-development-plan/05-runtime-protocol-dispatch-and-agent-loop.md S05-C06
+ * - docs/contracts/runtime-conformance.json（16 个 required_cases）
+ * - docs/architecture/contracts-and-conformance.md §5 L94-110（conformance 门禁协议）
+ * - docs/architecture/runtime-control-plane.md S05-C06
  *
  * 行为：
  * - GET：列出 Revision 的全部 conformance 结果（按 caseId 升序）。

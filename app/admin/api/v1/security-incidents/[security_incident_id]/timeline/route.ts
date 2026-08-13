@@ -1,7 +1,7 @@
 /**
  * GET /admin/api/v1/security-incidents/{security_incident_id}/timeline — 事故时间线汇总（S12-W09）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md §9
+ * 事实源：docs/architecture/security.md §9
  *         （事故时间线从 Audit/Event/Trace 汇总，诊断内容访问仍受时限、脱敏和审计约束）。
  *
  * 行为：

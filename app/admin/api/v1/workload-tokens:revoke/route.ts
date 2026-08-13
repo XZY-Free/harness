@@ -1,7 +1,7 @@
 /**
  * POST /admin/api/v1/workload-tokens:revoke — 撤销 Workload Token（S12-W05）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §5
+ * 事实源：docs/architecture/security.md §5
  *         （Workload Token 撤销机制：jti + WorkloadTokenRevocation 表）。
  *
  * 行为：

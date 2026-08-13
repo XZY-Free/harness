@@ -15,7 +15,7 @@ import { listServiceLevelIndicatorsByTenant } from "@/lib/operations/usage-queri
 /**
  * GET /admin/api/v1/service-level-indicators — 列出租户内所有 ServiceLevelIndicator（S11-W07）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W07。
+ * 事实源：docs/architecture/runtime-control-plane.md S11-W07。
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。

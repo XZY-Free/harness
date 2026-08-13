@@ -1,7 +1,7 @@
 /**
  * GET /admin/api/v1/deletion-requests/{deletion_request_id} — 查询管理员删除进度（S12-W07）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §7
+ * 事实源：docs/architecture/security.md §7
  *         （管理员可查询删除请求进度，含逐存储 step 状态与 evidence_ref；
  *           steps 不含 Secret，仅 store_type / step_state / evidence_ref）。
  *

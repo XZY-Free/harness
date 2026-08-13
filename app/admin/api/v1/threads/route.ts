@@ -9,7 +9,7 @@ import {
 /**
  * GET /admin/api/v1/threads — 跨 owner 列出租户所有 Thread（S11-W04）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md
+ * 事实源：docs/architecture/runtime-control-plane.md
  *   S11-W04：「会话、协作与 Job 排障」
  *
  * 行为：

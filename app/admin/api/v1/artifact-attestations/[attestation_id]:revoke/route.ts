@@ -15,7 +15,7 @@ import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attesta
 /**
  * POST /admin/api/v1/artifact-attestations/{attestation_id}:revoke — 撤销制品证明（S12-W04）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §4.1
+ * 事实源：docs/architecture/security.md §4.1
  *         （撤销签名后阻止新 Invocation；已开始 Invocation 保留原绑定并由安全策略决定 cancel 或继续）。
  *
  * 行为：
@@ -83,7 +83,7 @@ export async function POST(
   const scopeResult = await requireAdminActionScope(
     principal,
     "artifact.attestation.revoke",
-    { type: "artifact_type", id: existing.artifactType },
+    { type: "artifact_type", id: existing.attestation.artifactType },
     requestId,
   );
   if (!scopeResult.ok) return scopeResult.response;

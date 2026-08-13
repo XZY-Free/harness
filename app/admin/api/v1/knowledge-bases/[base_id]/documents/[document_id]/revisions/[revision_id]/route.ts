@@ -20,8 +20,8 @@ import {
  *   — KnowledgeDocumentRevision 单资源详情（S11-W03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §12（Knowledge Base）。
- * - ../v11-agentkit-platform/10-core-data-model.md §4.4（knowledge_document_revision 字段）。
+ * - docs/architecture/context-memory-and-knowledge.md §12（Knowledge Base）。
+ * - docs/architecture/persistence.md §4.4（knowledge_document_revision 字段）。
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。

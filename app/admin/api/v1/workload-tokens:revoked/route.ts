@@ -1,7 +1,7 @@
 /**
  * GET /admin/api/v1/workload-tokens:revoked — 查询已撤销的 Workload Token 列表（S12-W05）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §5。
+ * 事实源：docs/architecture/security.md §5。
  *
  * 行为：
  * - 解析 admin 主体（安全管理员）。

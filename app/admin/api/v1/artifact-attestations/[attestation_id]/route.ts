@@ -9,8 +9,8 @@ import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attesta
 /**
  * GET /admin/api/v1/artifact-attestations/{attestation_id} — 按 id 查询制品证明（S12-W04）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §4.1-4.2、
- *         ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W04。
+ * 事实源：docs/architecture/security.md §4.1-4.2、
+ *         docs/architecture/security.md S12-W04。
  *
  * 行为：
  * - 解析 admin 主体。
@@ -43,8 +43,8 @@ export async function GET(
 
   const { attestation_id: attestationId } = await params;
 
-  const attestation = await getAttestationById(principal.tenantId, attestationId);
-  if (!attestation) {
+  const found = await getAttestationById(principal.tenantId, attestationId);
+  if (!found) {
     return resourceNotFound(requestId, `attestation 不存在或跨租户: ${attestationId}`);
   }
 
@@ -52,12 +52,12 @@ export async function GET(
   const scopeResult = await requireAdminActionScope(
     principal,
     "artifact.attestation.verify",
-    { type: "artifact_type", id: attestation.artifactType },
+    { type: "artifact_type", id: found.attestation.artifactType },
     requestId,
   );
   if (!scopeResult.ok) return scopeResult.response;
 
-  const projected = projectArtifactAttestation(attestation);
+  const projected = projectArtifactAttestation(found);
 
   return apiSuccess(projected, {
     headers: { [REQUEST_ID_HEADER]: requestId },

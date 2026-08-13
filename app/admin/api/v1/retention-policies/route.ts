@@ -1,7 +1,7 @@
 /**
  * POST/GET /admin/api/v1/retention-policies — 保留策略管理（S12-W06）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §6
+ * 事实源：docs/architecture/security.md §6
  *         （为 Thread/Event/Trace/Audit/Artifact/Memory/Knowledge/Job/安全记录定义独立保留策略）。
  *
  * 行为：

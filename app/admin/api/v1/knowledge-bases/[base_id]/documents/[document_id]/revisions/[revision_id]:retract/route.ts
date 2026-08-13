@@ -3,9 +3,9 @@
  *   — 撤回 KnowledgeDocumentRevision（阶段 7 S07-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §13（Knowledge 加载；紧急下线场景）。
- * - ../v11-agentkit-platform/10-core-data-model.md §4.4（knowledge_document_revision 字段）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md S07-W06。
+ * - docs/architecture/context-memory-and-knowledge.md §13（Knowledge 加载；紧急下线场景）。
+ * - docs/architecture/persistence.md §4.4（knowledge_document_revision 字段）。
+ * - docs/architecture/context-memory-and-knowledge.md S07-W06。
  *
  * 行为：
  * - 校验 Idempotency-Key（必填）+ 请求体 reason_code（必填）。

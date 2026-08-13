@@ -18,7 +18,7 @@ import {
 /**
  * GET / POST /admin/api/v1/capability-reviews — CapabilityReview 集合（阶段 6 S06-C05）。
  *
- * 事实源：../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §5（能力变化与审核）。
+ * 事实源：docs/architecture/capabilities-and-security.md §5（能力变化与审核）。
  *
  * 行为：
  * - GET：列出审核记录（默认 pending；支持 resource_type / resource_id / review_state 过滤 + cursor 分页）。

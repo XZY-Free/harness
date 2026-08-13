@@ -8,9 +8,9 @@ import {
 /**
  * POST /admin/api/v1/agent-revisions/{revision_id}:publish — 发布 AgentRevision（S03-C05）。
  *
- * 事实源：../v11-agentkit-platform/contracts/v11.openapi.json（post_admin_api_v1_agent_revisions_by_revision_id_publish）、
- *         ../v11-agentkit-platform/11-api-and-event-boundaries.md §6、
- *         ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md S03-W05。
+ * 事实源：docs/contracts/openapi.json（post_admin_api_v1_agent_revisions_by_revision_id_publish）、
+ *         docs/architecture/api-and-events.md §6、
+ *         docs/architecture/agent-control-plane.md S03-W05。
  *
  * 行为：
  * - 解析 admin 主体（SSO 管理员；CI/CD Service Identity 不允许发布）。

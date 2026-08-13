@@ -13,7 +13,7 @@ import { listEvaluationRunsByTenant } from "@/lib/evaluation/evaluation-queries"
 /**
  * GET /admin/api/v1/evaluation-runs — 列出租户内所有 EvaluationRun（S11-W06）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W06。
+ * 事实源：docs/architecture/runtime-control-plane.md S11-W06。
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。

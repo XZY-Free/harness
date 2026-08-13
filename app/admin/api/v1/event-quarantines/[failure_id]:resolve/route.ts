@@ -7,9 +7,9 @@ import {
  * POST /admin/api/v1/event-quarantines/{failure_id}:resolve — 管理员处置 quarantined 事件交付失败（S12-W01）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md §2.1（投影消费协议七条规则）
- * - ../v11-agentkit-platform/10-core-data-model.md §8.1（event_delivery_failure）
- * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W01
+ * - docs/architecture/security.md §2.1（投影消费协议七条规则）
+ * - docs/architecture/persistence.md §8.1（event_delivery_failure）
+ * - docs/architecture/security.md S12-W01
  *
  * 行为：
  * - 解析 admin 主体。

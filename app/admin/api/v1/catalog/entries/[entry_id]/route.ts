@@ -16,8 +16,8 @@ import { getCatalogEntryById } from "@/lib/catalog/catalog-queries";
  * GET /admin/api/v1/catalog/entries/{entry_id} — Admin Catalog 单条详情（S11-W03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §2（Employee Catalog API）、§3.1（CatalogSearchItem）。
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §2（统一目录）。
+ * - docs/architecture/capability-and-collaboration-api.md §2（Employee Catalog API）、§3.1（CatalogSearchItem）。
+ * - docs/architecture/capabilities-and-security.md §2（统一目录）。
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。

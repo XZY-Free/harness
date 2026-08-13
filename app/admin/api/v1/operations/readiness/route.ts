@@ -2,8 +2,8 @@
  * GET /admin/api/v1/operations/readiness — 查询系统就绪状态（S12-W03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md §7.1
- * - ../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md S12-W03
+ * - docs/architecture/security.md §7.1
+ * - docs/architecture/security.md S12-W03
  *
  * 行为：
  * - 解析 admin 主体。

@@ -1,7 +1,7 @@
 /**
  * POST/GET /admin/api/v1/recovery-drills — 备份恢复演练管理（S12-W08）。
  *
- * 事实源：../v11-agentkit-platform-development-plan/12-production-operations-security-and-data-lifecycle.md §8
+ * 事实源：docs/architecture/security.md §8
  *         （数据库备份、对象版本/复制、配置和密钥恢复分别定义 RPO/RTO 与责任边界；
  *           恢复演练验证 Event sequence、投影 checkpoint、Artifact 引用、Legal Hold 和删除证据的一致性；
  *           演练在隔离环境使用真实组件，不连接生产数据库，不以备份任务成功日志代替可恢复性）。

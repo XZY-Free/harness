@@ -1,7 +1,7 @@
 /**
  * POST /admin/api/v1/deletion-requests — 管理员删除请求（S12-W07）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §7
+ * 事实源：docs/architecture/security.md §7
  *         （管理员可发起 thread/memory_entry/artifact/user/retention_scope 删除；
  *           删除请求先解析对象关系与 Legal Hold，再进入各存储 Adapter）。
  *
