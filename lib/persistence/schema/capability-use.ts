@@ -2,9 +2,9 @@
  * 控制面 schema：CapabilityUse 能力使用账本（阶段 6 S06-C04）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （capability_use）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §3（Runtime Capability API）
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md 、
+ * - docs/architecture/persistence.md （capability_use）
+ * - docs/architecture/capability-and-collaboration-api.md §3（Runtime Capability API）
+ * - docs/architecture/capabilities-and-security.md 、
  *
  * CapabilityUse 记录一次 Invocation 实际使用的能力（Tool / Skill / Knowledge / Memory / Agent / Model）：
  * - 成功读取 Tool Schema / Skill Content 后幂等写入。

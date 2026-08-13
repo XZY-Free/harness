@@ -2,8 +2,8 @@
  * Evaluation schema：EvaluationRun / EvaluationCase / EvaluationResult（S11-W06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md（Evaluation 域），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W06。
+ * - docs/architecture/persistence.md（Evaluation 域），
+ * - docs/architecture/runtime-control-plane.md S11-W06。
  *
  * 关键约束：
  * - EvaluationRun 是评测运行根：明确绑定 AgentRevision、RuntimeRevision、Route、模型、数据集和评测策略。

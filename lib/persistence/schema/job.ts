@@ -2,13 +2,13 @@
  * Job 域 schema：Job、JobEvent、JobCommand、JobResultProjection。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Job 表）、文末（JobEvent）、（JobCommand）、（job_result Item 关联 job_result_projection）、§9（事务边界）
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §4（Job Control API）
- * - ../v11-agentkit-platform/09-unified-domain-model.md 、（域模型：Job 与会话分离）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §4、§5（能力与协作 API）
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §16（取消流程）
- * - ../v11-agentkit-platform/contracts/event-catalog.json（18 个 job.* 事件）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C04
+ * - docs/architecture/persistence.md （Job 表）、文末（JobEvent）、（JobCommand）、（job_result Item 关联 job_result_projection）、§9（事务边界）
+ * - docs/architecture/memory-and-job-api.md §4（Job Control API）
+ * - docs/architecture/domain-model.md 、（域模型：Job 与会话分离）
+ * - docs/architecture/capability-and-collaboration-api.md §4、§5（能力与协作 API）
+ * - docs/architecture/conversations.md §16（取消流程）
+ * - docs/contracts/event-catalog.json（18 个 job.* 事件）
+ * - docs/architecture/conversations.md 、S09-C04
  *
  * 关键约束（、）：
  * - Job 不复活：终态 Job 不能改回 queued；retry 必须创建新 replacement Job 并通过 replaces_job_id 引用。

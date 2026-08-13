@@ -2,11 +2,11 @@
  * 运行产物 schema：Artifact（阶段 8 S08-C06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （artifact）、（Item 多态 artifact）、
+ * - docs/architecture/persistence.md （artifact）、（Item 多态 artifact）、
  * （tool_call.result_artifact_id 反向引用）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （Artifact 上传 API）。
- * - ../v11-agentkit-platform/09-unified-domain-model.md §7（运行产物边界）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/api-and-events.md （Artifact 上传 API）。
+ * - docs/architecture/domain-model.md §7（运行产物边界）。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 与 lib/persistence/schema/artifact.ts（ArtifactAttestation 控制面供应链证明）是不同概念：
  * - ArtifactAttestation：对 AgentRevision/RuntimeRevision/Skill/Tool/Policy 等制品做签名/SBOM 验证。

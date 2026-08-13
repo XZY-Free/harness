@@ -1,8 +1,8 @@
 /**
  * 公共账本 schema：幂等账本 idempotency_record。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md 。
+ * 事实源：docs/architecture/persistence.md 、
+ * docs/architecture/api-and-events.md 。
  *
  * 所有创建和命令 POST 共用平台幂等账本，不能只依赖 ThreadEvent：
  * - caller/audience/command_scope/idempotency_key/request_hash 与首个业务写入同事务落库。

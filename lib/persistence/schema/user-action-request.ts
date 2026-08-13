@@ -2,11 +2,11 @@
  * 用户操作请求 schema：UserActionRequest（阶段 8 S08-C04）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （user_action_request 与 grant）、。
- * - ../v11-agentkit-platform/09-unified-domain-model.md （PermissionDecision 与 UserActionRequest 关系）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （resolve 接口约束）、
+ * - docs/architecture/persistence.md （user_action_request 与 grant）、。
+ * - docs/architecture/domain-model.md （PermissionDecision 与 UserActionRequest 关系）。
+ * - docs/architecture/api-and-events.md （resolve 接口约束）、
  * （auth callback）、§10（block 不可被绕过）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 关键不变量：
  * - 四种 request_type 共用一张表：confirmation / auth / grant / input。

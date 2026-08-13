@@ -1,7 +1,7 @@
 /**
  * 授权 schema：role_action_binding。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 。
+ * 事实源：docs/architecture/persistence.md 。
  *
  * role_action_binding 把 principal_binding 绑定到稳定 action_code + 类型化 resource_scope。
  * - action_code 使用固定目录（lib/identity/action-codes.ts）。

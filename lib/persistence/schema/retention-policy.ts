@@ -1,7 +1,7 @@
 /**
  * schema：数据保留策略与 Legal Hold（S12-W06）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §6
+ * 事实源：docs/architecture/security.md §6
  * （为 Thread/Event/Trace/Audit/Artifact/Memory/Knowledge/Job/安全记录定义独立保留策略；
  * Legal Hold 明确对象范围、原因、创建人、批准人、有效期和解除审计）。
  *

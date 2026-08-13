@@ -3,9 +3,9 @@
  * workspace_attachment / workspace_attachment_use 表。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （workspace/binding/attachment）。
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §9—16（执行位置语义）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/persistence.md （workspace/binding/attachment）。
+ * - docs/architecture/capabilities-and-security.md §9—16（执行位置语义）。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 关键不变量（）：
  * - Workspace 只保存逻辑身份和默认位置，不保存可被所有环境解释的绝对路径。

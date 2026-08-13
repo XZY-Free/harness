@@ -3,10 +3,10 @@
  * workspace_merge_conflict 表（S09-C07）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §13（并发 Workspace）、
+ * - docs/architecture/conversations.md §13（并发 Workspace）、
  * §17（调度与资源可靠性——Workspace 写锁）、§18（预算硬上限时副作用先核对）
- * - ../v11-agentkit-platform/10-core-data-model.md （WorkspaceBinding 不可变）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C07
+ * - docs/architecture/persistence.md （WorkspaceBinding 不可变）
+ * - docs/architecture/conversations.md 、S09-C07
  *
  * 关键不变量（§13、§17）：
  * - Desktop 同路径同时只有一个活跃写锁（UNIQUE(workspace_binding_id, path_fingerprint) WHERE lock_state=acquired）。

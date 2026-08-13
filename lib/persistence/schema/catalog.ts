@@ -2,9 +2,9 @@
  * 控制面 schema：CatalogEntry 与 CatalogRevision（阶段 6 S06-C03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （catalog_entry 读模型）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §2（Employee Catalog API）、（CatalogSearchItem）
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §2（统一目录）
+ * - docs/architecture/persistence.md （catalog_entry 读模型）
+ * - docs/architecture/capability-and-collaboration-api.md §2（Employee Catalog API）、（CatalogSearchItem）
+ * - docs/architecture/capabilities-and-security.md §2（统一目录）
  *
  * CatalogEntry 是只读投影读模型，由投影器从 Agent / Skill / Tool / Connection 等事实源派生；
  * 没有 Admin API 可直接写 CatalogEntry，所有变更通过 refreshCatalogEntry / refreshCatalogByType 触发。

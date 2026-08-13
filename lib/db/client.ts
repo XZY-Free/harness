@@ -30,7 +30,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import * as schema from "./schema";
 
-/** 合并旧 schema 与 V11 schema，使 db.query.* 关系查询覆盖 V11 表。 */
+/** 合并旧 schema 与 schema，使 db.query.* 关系查询覆盖 表。 */
 const fullSchema = {
  ...schema,
  ...controlPlaneOutboxSchema,

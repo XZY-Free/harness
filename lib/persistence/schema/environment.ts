@@ -3,10 +3,10 @@
  * EnvironmentChangeRequest。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （execution_ownership 与
+ * - docs/architecture/persistence.md （execution_ownership 与
  * environment_change_request）、（environment_definition 与 environment_lease）。
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §11（Execution Environment）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/agent-control-plane.md §11（Execution Environment）。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 关键不变量：
  * - EnvironmentDefinition.tenantId + environmentKey UNIQUE；environmentType 四态

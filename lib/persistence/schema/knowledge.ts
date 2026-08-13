@@ -3,12 +3,12 @@
  * knowledge_document_revision / knowledge_chunk / knowledge_index 表。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （knowledge_base/document/revision 字段）、
+ * - docs/architecture/persistence.md （knowledge_base/document/revision 字段）、
  * （knowledge_chunk / knowledge_index 索引表）。
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §12（Knowledge Base）、
+ * - docs/architecture/context-memory-and-knowledge.md §12（Knowledge Base）、
  * §13（Knowledge 加载：先目录后证据 / 数据保持最新 / 检索失败区分）、§14（与 Skill/Tool 边界）。
- * - ../v11-agentkit-platform/09-unified-domain-model.md §6（域模型边界）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md 。
+ * - docs/architecture/domain-model.md §6（域模型边界）。
+ * - docs/architecture/context-memory-and-knowledge.md 。
  *
  * 关键不变量（§12、§13、）：
  * - Knowledge 文档采用稳定对象 + 不可变修订；索引完成后才切换 current_revision_id。

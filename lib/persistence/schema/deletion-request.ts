@@ -1,7 +1,7 @@
 /**
  * schema：可验证删除请求与步骤（S12-W07）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-data-lifecycle.md §7
+ * 事实源：docs/architecture/security.md §7
  * （删除请求生成独立生命周期，先解析对象关系与 Legal Hold，再进入各存储 Adapter；
  * 覆盖 MySQL、对象存储、向量/检索、Trace/Log 和缓存；
  * 部分失败保持 failed/partial 并可安全重试，不以"主表已删"宣称全部完成）。

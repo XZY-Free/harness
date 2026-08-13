@@ -2,13 +2,13 @@
  * 副作用核对账本 schema：EffectRecord + EffectTarget（阶段 8 S08-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （effect_record 与 effect_target）、
+ * - docs/architecture/persistence.md （effect_record 与 effect_target）、
  * （tool_call.call_state 与 effect_state 同步）、（ToolCall、Effect 与 Credential）。
- * - ../v11-agentkit-platform/09-unified-domain-model.md 、§10 第 9 条
+ * - docs/architecture/domain-model.md 、§10 第 9 条
  * （unknown_effect 不自动重放）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （Gateway 即时核对）、
+ * - docs/architecture/api-and-events.md （Gateway 即时核对）、
  * （Admin 长期核对 + 同事务更新 tool_call.call_state + AuditEvent）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 关键不变量：
  * - 一条有副作用 ToolCall 恰有一条 EffectRecord（UNIQUE(toolCallId) 一对一）。

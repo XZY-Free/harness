@@ -2,10 +2,10 @@
  * 会话域 schema：Thread、Turn、ThreadItem、Goal、ThreadRelation、ThreadEvent。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md §5（thread/turn/thread_item/thread_event/pending_input/goal/thread_relation）、§9（事务边界）
- * - ../v11-agentkit-platform/09-unified-domain-model.md §4（域模型）、§10（不变量）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §5—8（Thread 容器、Turn 接纳、Item 投影、Event 主链）
- * - ../v11-agentkit-platform-development-plan/04-thread-turn-item-and-event-core.md /W02/W03/W04
+ * - docs/architecture/persistence.md §5（thread/turn/thread_item/thread_event/pending_input/goal/thread_relation）、§9（事务边界）
+ * - docs/architecture/domain-model.md §4（域模型）、§10（不变量）
+ * - docs/architecture/agent-control-plane.md §5—8（Thread 容器、Turn 接纳、Item 投影、Event 主链）
+ * - docs/architecture/conversations.md /W02/W03/W04
  *
  * 关键约束：
  * - Thread 是连续容器，绑定租户、所有者和主 Agent；lifecycle_state active→archived→deleted。
@@ -545,9 +545,9 @@ export type PendingInputState = (typeof PENDING_INPUT_STATES)[number];
  * PendingInput 表：Thread 内待接纳输入队列。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （PendingInput 表，行 324-339）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md （创建 PendingInput 不生成 user_message Item）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md （删除 PendingInput 不生成 user_message Item）
+ * - docs/architecture/persistence.md （PendingInput 表，行 324-339）
+ * - docs/architecture/agent-control-plane.md （创建 PendingInput 不生成 user_message Item）
+ * - docs/architecture/agent-control-plane.md （删除 PendingInput 不生成 user_message Item）
  *
  * 关键约束：
  * - UNIQUE(thread_id, client_message_id) 防止客户端重发同 ID 创建重复行。
@@ -646,8 +646,8 @@ export type InvocationCommandType = (typeof INVOCATION_COMMAND_TYPES)[number];
  * InvocationCommand 表：员工命令入队（Steer/Interrupt/Regenerate）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md 行 504（InvocationCommand 表）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md （Steer）、（Stop/Interrupt）、（Regenerate）
+ * - docs/architecture/persistence.md 行 504（InvocationCommand 表）
+ * - docs/architecture/agent-control-plane.md （Steer）、（Stop/Interrupt）、（Regenerate）
  *
  * 关键约束：
  * - command_state=queued 时 invocation_id 可空（Runtime 拉取后才绑定）。

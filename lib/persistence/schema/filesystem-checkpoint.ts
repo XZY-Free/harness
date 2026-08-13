@@ -2,11 +2,11 @@
  * 文件系统 Checkpoint schema：FilesystemCheckpoint（阶段 8 S08-C06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （filesystem_checkpoint）、
+ * - docs/architecture/persistence.md （filesystem_checkpoint）、
  * （invocation_attempt.checkpoint_ref 引用本表）、§10 迁移映射第 676 行
  * （GitCheckpoint 转 FilesystemCheckpoint，不再代表会话恢复）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （attempt.checkpoint_ref）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/api-and-events.md （attempt.checkpoint_ref）。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 与 lib/persistence/schema/context-checkpoint.ts（ContextCheckpoint 上下文组装/压缩点）是不同表：
  * - FilesystemCheckpoint：文件系统状态恢复点（用于 Invocation 失联恢复）。

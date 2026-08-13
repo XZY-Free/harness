@@ -3,9 +3,9 @@
  * （阶段 6 S06-C02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （能力和治理表）
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §4（Tool）、§8（MCP）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md （读取 Tool Schema）
+ * - docs/architecture/persistence.md （能力和治理表）
+ * - docs/architecture/capabilities-and-security.md §4（Tool）、§8（MCP）
+ * - docs/architecture/capability-and-collaboration-api.md （读取 Tool Schema）
  *
  * 模型边界：
  * - ToolProvider 对内置、HTTP/OpenAPI、MCP 和外部 Adapter 使用协议中立模型。

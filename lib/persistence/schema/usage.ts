@@ -2,8 +2,8 @@
  * Usage / Capacity / SLI schema：UsageRecord / CostAggregate / CapacitySnapshot / ServiceLevelIndicator（S11-W07）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md §11（Observability），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W07。
+ * - docs/architecture/persistence.md §11（Observability），
+ * - docs/architecture/runtime-control-plane.md S11-W07。
  *
  * 关键约束：
  * - UsageRecord 是用量原子记录：dimension（token_input/token_output/model_call/tool_call/runtime_seconds/queue_wait_seconds/env_seconds/artifact_bytes）

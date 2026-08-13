@@ -1,9 +1,9 @@
 /**
  * 控制面 schema：Agent 与 AgentRevision。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md -4.2、
- * ../v11-agentkit-platform/09-unified-domain-model.md 、
- * ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md 。
+ * 事实源：docs/architecture/persistence.md -4.2、
+ * docs/architecture/domain-model.md 、
+ * docs/architecture/agent-control-plane.md 。
  *
  * Agent 是员工目录中唯一可运行资产，保存稳定身份、负责人、可见范围和当前发布摘要。
  * AgentRevision 保存 Agent 自身不可变的代码、指令、模型策略、权限要求、委派范围和制品摘要。

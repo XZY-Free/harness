@@ -1,8 +1,8 @@
 /**
  * schema：Workload Token 撤销表（S12-W05）。
  *
- * 事实源：../v11-agentkit-platform/14-production-operations-security-and-retention.md §5、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md 。
+ * 事实源：docs/architecture/security.md §5、
+ * docs/architecture/api-and-events.md 。
  *
  * 用途：记录已撤销的 Workload Token jti。route handler 在身份解析时查询此表，
  * 命中则拒绝（401 AUTHENTICATION_REQUIRED）。

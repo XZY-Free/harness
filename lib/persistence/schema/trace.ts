@@ -2,8 +2,8 @@
  * Observability schema：Trace / Span / Observation（S11-W05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md §11（Observability），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W05。
+ * - docs/architecture/persistence.md §11（Observability），
+ * - docs/architecture/runtime-control-plane.md S11-W05。
  *
  * 关键约束：
  * - Trace 是排障与观测的根资源，关联 invocation/job/thread 任一根类型。

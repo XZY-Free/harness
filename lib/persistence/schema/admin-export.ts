@@ -2,8 +2,8 @@
  * Admin Export schema：AdminExport（S11-W08）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md（管理导出任务），
- * - ../v11-agentkit-platform-development-plan/11-admin-observability-evaluation-and-capacity.md S11-W08。
+ * - docs/architecture/persistence.md（管理导出任务），
+ * - docs/architecture/runtime-control-plane.md S11-W08。
  *
  * 关键约束：
  * - 管理导出任务覆盖：audit_events/usage_records/cost_aggregates/capacity_snapshots/traces/evaluation_runs。

@@ -2,12 +2,12 @@
  * Memory schema：memory_candidate / memory_entry / memory_source / memory_index 表。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Memory 与知识索引表）、§2（命名与公共字段）。
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §8（Memory 作用域）、§9（挂载与检索）、
+ * - docs/architecture/persistence.md （Memory 与知识索引表）、§2（命名与公共字段）。
+ * - docs/architecture/context-memory-and-knowledge.md §8（Memory 作用域）、§9（挂载与检索）、
  * §10（写入路径）、§11（禁止内容与用户控制）。
- * - ../v11-agentkit-platform/09-unified-domain-model.md （Memory 域模型边界）。
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §2（Memory Candidate API）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md 。
+ * - docs/architecture/domain-model.md （Memory 域模型边界）。
+ * - docs/architecture/memory-and-job-api.md §2（Memory Candidate API）。
+ * - docs/architecture/context-memory-and-knowledge.md 。
  *
  * 关键不变量（、§8、§10、§11）：
  * - candidate_key = sha256(invocation_id|source_type|source_id|content_hash|scope_type|scope_ref-or-empty)，

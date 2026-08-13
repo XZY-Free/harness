@@ -2,9 +2,9 @@
  * 投影与交付 schema。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （projection_checkpoint/event_delivery_failure/event_stream_floor）、（Outbox + checkpoint 协议）、§11（查询读模型）
- * - ../v11-agentkit-platform/14-production-operations-security-and-retention.md （投影消费协议七条规则）、（SSE 背压与 cursor_expired）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （顺序与去重）、（恢复规则）
+ * - docs/architecture/persistence.md （projection_checkpoint/event_delivery_failure/event_stream_floor）、（Outbox + checkpoint 协议）、§11（查询读模型）
+ * - docs/architecture/security.md （投影消费协议七条规则）、（SSE 背压与 cursor_expired）
+ * - docs/architecture/api-and-events.md （顺序与去重）、（恢复规则）
  *
  * 关键约束：
  * - projection_checkpoint：PRIMARY KEY(consumer_name, stream_type, shard_key)；只在投影写入成功的同一事务后前移。

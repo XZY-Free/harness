@@ -1,9 +1,9 @@
 /**
  * 控制面 schema：DeploymentRouteSet 与 DeploymentRoute（S03-C04）。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md 、
- * ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md 。
+ * 事实源：docs/architecture/persistence.md 、、
+ * docs/architecture/api-and-events.md 、
+ * docs/architecture/agent-control-plane.md 。
  *
  * RouteSet 聚合同一 Agent + Scope 下的所有 DeploymentRoute，使用 ETag（versionNo）做乐观并发。
  * DeploymentRoute 固定一个 AgentRevision + 一个 RuntimeRevision 组合，承载灰度权重。

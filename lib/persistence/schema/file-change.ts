@@ -2,10 +2,10 @@
  * 文件变更 schema：FileChange（阶段 8 S08-C06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （file_change）、§9 不变量第 11 条
+ * - docs/architecture/persistence.md （file_change）、§9 不变量第 11 条
  * （本地路径必须与 Desktop device/binding 一起解释）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （FileChange 通过 WorkspaceBinding + before/after hash 引用）。
- * - ../v11-agentkit-platform-development-plan/08-workspace-desktop-tool-execution-and-effects.md 。
+ * - docs/architecture/api-and-events.md （FileChange 通过 WorkspaceBinding + before/after hash 引用）。
+ * - docs/architecture/capabilities-and-security.md 。
  *
  * 关键不变量：
  * - Desktop 原地修改不强制上传；使用 FileChange + WorkspaceBinding + before/after hash 记录。

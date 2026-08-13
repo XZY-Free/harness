@@ -1,8 +1,8 @@
 /**
  * 公共账本 schema：审计账本 audit_event。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md §8、
- * ../v11-agentkit-platform-development-plan/02-identity-authorization-and-common-ledgers.md 。
+ * 事实源：docs/architecture/persistence.md §8、
+ * docs/architecture/security.md 。
  *
  * 管理、安全、授权和敏感查看的不可修改审计事实：
  * - 发布、路由、策略、授权、Credential、删除、Legal Hold、隔离事件处理、诊断内容查看和导出均写审计。

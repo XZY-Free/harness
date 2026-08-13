@@ -2,10 +2,10 @@
  * Context Checkpoint schema：context_checkpoint 表。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Memory 与知识索引表）、§2（命名与公共字段）。
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §6（压缩）、§7（Trace 记录）、§15（失败与恢复）。
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §3（Context Checkpoint API）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md 。
+ * - docs/architecture/persistence.md （Memory 与知识索引表）、§2（命名与公共字段）。
+ * - docs/architecture/context-memory-and-knowledge.md §6（压缩）、§7（Trace 记录）、§15（失败与恢复）。
+ * - docs/architecture/memory-and-job-api.md §3（Context Checkpoint API）。
+ * - docs/architecture/context-memory-and-knowledge.md 。
  *
  * 关键不变量（、§6、§15）：
  * - Checkpoint 只保存可恢复的组装/压缩位置，不删除原始 Item/Event。

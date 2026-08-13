@@ -11,7 +11,7 @@
  * - userId 引用 UserIdentity 而非旧 User 表（不再直接引用旧 User 表）。
  *
  * 私钥只在 Desktop Keychain，不写 DB（与 V10 一致）。
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 。
+ * 事实源：docs/architecture/persistence.md 。
  */
 import { randomUUID } from "node:crypto";
 import { tenant, userIdentity } from "@/lib/persistence/schema/identity";

@@ -2,9 +2,9 @@
  * 控制面 schema：ToolCall + CapabilityReview（阶段 6 S06-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （tool_call）
- * - ../v11-agentkit-platform/04-skills-tools-mcp-and-security.md §5（能力变化与审核）、（Tool 稳定边界）
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md （TOOL_SCHEMA_CHANGED）
+ * - docs/architecture/persistence.md （tool_call）
+ * - docs/architecture/capabilities-and-security.md §5（能力变化与审核）、（Tool 稳定边界）
+ * - docs/architecture/capability-and-collaboration-api.md （TOOL_SCHEMA_CHANGED）
  *
  * ToolCall 记录一次 Invocation 内单次 Tool 调用的事实：
  * - 调用前解析当前 SchemaRevision，调用开始时固定 schemaHash。

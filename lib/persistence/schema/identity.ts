@@ -6,7 +6,7 @@
  * - userIdentity：租户内稳定用户 id，externalSubject 作 SSO 映射键，email/displayName 允许漂移。
  * - principalBinding：外部主体（user/group/role/department）到内部 userIdentity 的映射，不复制组织树。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 第 2、8 节。
+ * 事实源：docs/architecture/persistence.md 第 2、8 节。
  * 旧 `User` 表保持只读兼容，最终删除安排在阶段 13。
  */
 import { randomUUID } from "node:crypto";
