@@ -16,7 +16,7 @@ import {
 import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import { createThread } from "@/lib/conversations/thread-queries";
 /**
- * S09-C06：V11 Worker 重启恢复仓储集成测试（真实 MySQL 8）。
+ * S09-C06：Worker 重启恢复仓储集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - findStaleInvocations（5 例）：找到心跳超时的 running/waiting_user/queued Invocation /
@@ -208,6 +208,7 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     displayName: "Recovery Runtime",
     runtimeKind: "hosted",
     ownerUserId: ownerId,
+    lifecycleState: "enabled",
   });
 
   const runtimeRevision = await createDraftRuntimeRevision({

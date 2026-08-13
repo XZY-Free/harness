@@ -1,8 +1,7 @@
 /**
  * Runtime Conformance 验证器接口和实现。
  *
- * /: Conformance 录入改用 Verifier Port。
- * 移除 Legacy HMAC 成功分支 — DSSE 是唯一的验签路径。
+ * Conformance 录入通过 Verifier Port 完成，DSSE 是唯一的验签路径。
  *
  * DSSE Conformance Verifier — 真实验证流程：
  * 1. 解析 DSSE Envelope JSON（共享底座 lib/crypto/dsse）

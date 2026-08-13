@@ -4,7 +4,7 @@
  * 所有模块（RouteSet 激活、Projection、Binding、Hosted Readiness）
  * 必须通过此 Reader 读取 Conformance 证据，不得自行构造 SQL 查询。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案 
+ * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
 
 import { db, type DbOrTx } from "@/lib/db/client";

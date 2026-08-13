@@ -1,5 +1,5 @@
 /**
- * S05-C04：V11 命令调度器（cancel/resume/steer）集成测试（真实 MySQL 8）。
+ * S05-C04：命令调度器（cancel/resume/steer）集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - dispatchSteerCommand（6 例）：成功 ack + turn.steered / 网络不可达保持 dispatched /
@@ -89,6 +89,11 @@ import {
   type SteerInvocationResponse,
   createMockRuntimeClient,
 } from "@/lib/runtime/runtime-client";
+import {
+  createHostedAdapter,
+  setRouteHostedAdapter,
+  type EventBatchSink,
+} from "@/lib/runtime/adapters/hosted-adapter";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
@@ -1397,6 +1402,21 @@ describe("S05-C04 Runtime 路由 cancel/resume/steer", () => {
   beforeEach(async () => {
     ctx = await seedFullCommandContext();
     running = await seedRunningInvocationWithRunningTurn(ctx);
+    // : HTTP 路由 handler 通过 getRouteHostedAdapter() 获取 Adapter 单例；
+    // 未注入 mock 时返回 null → 503 RUNTIME_UNAVAILABLE。这里注入带 mock sink 的
+    // Hosted 参考 Adapter，使 cancel/resume/steer 返回 ack（不调用真实平台）。
+    const sink: EventBatchSink = async () => {};
+    setRouteHostedAdapter(
+      createHostedAdapter({
+        platformEndpoint: "https://platform.internal",
+        platformAuthToken: "test-token",
+        eventBatchSink: sink,
+      }),
+    );
+  });
+
+  afterEach(() => {
+    setRouteHostedAdapter(null);
   });
 
   it("POST :cancel 成功：返回 200 + cancelled=true", async () => {

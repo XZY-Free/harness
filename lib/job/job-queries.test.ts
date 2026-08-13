@@ -1,5 +1,5 @@
 /**
- * S09-C04：V11 Job 仓储集成测试（真实 MySQL 8 Testcontainers）。
+ * S09-C04：Job 仓储集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖：
  * - createJob：成功 + queued Event + lastEventSequence=1；参数校验

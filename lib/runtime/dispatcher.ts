@@ -1,11 +1,11 @@
 /**
- * V11 调度服务（S05-C01 + S05-C02 扩展）。
+ * 调度服务（S05-C01 + S05-C02 扩展）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md -、、（事务边界）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）、§7（Turn 接纳周期）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （路由解析）、§4（Runtime Protocol）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C01/S05-C02
+ * - docs/architecture/persistence.md -、、（事务边界）
+ * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）、§7（Turn 接纳周期）
+ * - docs/architecture/api-and-events.md （路由解析）、§4（Runtime Protocol）
+ * - docs/architecture/runtime-control-plane.md S05-C01/S05-C02
  *
  * 职责：
  * - dispatchInvocationForTurn：为 accepted Turn 创建调度三元组 + 调用 Runtime HTTP 启动 Invocation。

@@ -2,9 +2,9 @@
  * 测试专用的无控制面证据 ExecutionBinding 写入夹具。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （ExecutionBinding L405-423）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C01
+ * - docs/architecture/persistence.md （ExecutionBinding L405-423）
+ * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
+ * - docs/architecture/runtime-control-plane.md S05-C01
  *
  * 仅供旧集成测试构造历史数据；生产调度必须通过正式 Application Service
  * 校验 Route、Publication、Attestation 和 Conformance 证据。

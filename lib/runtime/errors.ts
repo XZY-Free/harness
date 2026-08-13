@@ -1,8 +1,8 @@
 /**
- * V11 Runtime 域共享错误类（S05-C01）。
+ * Runtime 域共享错误类（S05-C01）。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md -、、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md 。
+ * 事实源：docs/architecture/persistence.md -、、
+ * docs/architecture/api-and-events.md 。
  *
  * Route 层根据 error 实例映射 HTTP 状态码和稳定 error_code。
  */
@@ -83,7 +83,7 @@ export class ExecutionOwnershipStateConflictError extends Error {
 /**
  * 调度失败：Turn 不在 accepted 状态（无法调度）。
  *
- * 事实源：../v11-agentkit-platform/02-agent-thread-and-runtime.md §7（Turn 接纳周期）。
+ * 事实源：docs/architecture/agent-control-plane.md §7（Turn 接纳周期）。
  * 映射 409 TURN_STATE_CONFLICT。
  */
 export class DispatchTurnStateError extends Error {
@@ -170,7 +170,7 @@ export class RuntimeHttpClientError extends Error {
 /**
  * 候选事件 payload hash 冲突：相同 producerEventId/producerSequence 但 payloadHash 不同。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、§14 规则 4。
+ * 事实源：docs/architecture/persistence.md 、§14 规则 4。
  * 不可修复错误，原子终止 Invocation；映射 409 IDEMPOTENCY_CONFLICT。
  */
 export class EventPayloadHashConflictError extends Error {
@@ -191,7 +191,7 @@ export class EventPayloadHashConflictError extends Error {
 /**
  * Ingress 目标 Invocation 不存在或跨租户不可见。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 。
+ * 事实源：docs/architecture/persistence.md 。
  * 映射 404 RESOURCE_NOT_FOUND（隐藏式，不泄露存在）。
  */
 export class IngressInvocationNotFoundError extends Error {
@@ -204,7 +204,7 @@ export class IngressInvocationNotFoundError extends Error {
 /**
  * Ingress 目标 Invocation 已终态，不接受新事件。
  *
- * 事实源：../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）、
+ * 事实源：docs/architecture/agent-control-plane.md §6（Invocation 生命周期）、
  * L486-500（终态后不接受新候选事件）。
  * 映射 409 INVOCATION_STATE_CONFLICT。
  */
@@ -223,8 +223,8 @@ export class IngressInvocationTerminalError extends Error {
 /**
  * InvocationCommand 不存在或跨租户不可见。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md （InvocationCommand 表）、
- * ../v11-agentkit-platform/02-agent-thread-and-runtime.md -3.10。
+ * 事实源：docs/architecture/persistence.md （InvocationCommand 表）、
+ * docs/architecture/agent-control-plane.md -3.10。
  * 映射 404 RESOURCE_NOT_FOUND（隐藏式，不泄露存在）。
  */
 export class CommandNotFoundError extends Error {
@@ -267,7 +267,7 @@ export class CommandInvocationNotFoundError extends Error {
 /**
  * Resume 命令调度的 Invocation 不在 waiting_user 状态。
  *
- * 事实源：../v11-agentkit-platform/02-agent-thread-and-runtime.md （Resume）、§6（生命周期）。
+ * 事实源：docs/architecture/agent-control-plane.md （Resume）、§6（生命周期）。
  * Resume 只能作用于 waiting_user Invocation；其他状态 → 状态冲突。
  * 映射 409 INVOCATION_STATE_CONFLICT。
  */
@@ -286,7 +286,7 @@ export class ResumeInvocationNotWaitingError extends Error {
 /**
  * Invocation 已终态，不能标记 lost 或重调度。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md （终态不可恢复）、§13（Worker 失联恢复）。
+ * 事实源：docs/architecture/persistence.md （终态不可恢复）、§13（Worker 失联恢复）。
  * 已 completed/failed/cancelled/lost 的 Invocation 不能再标记 lost 或创建新 Attempt。
  * 映射 409 INVOCATION_STATE_CONFLICT。
  */
@@ -304,7 +304,7 @@ export class InvocationAlreadyTerminalError extends Error {
 /**
  * 重调度不允许：Invocation 状态不在允许重调度的集合内。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md §13（Worker 失联恢复：仅 running/waiting_user/queued
+ * 事实源：docs/architecture/persistence.md §13（Worker 失联恢复：仅 running/waiting_user/queued
  * 的非终态 Invocation 可重调度）；（lost 为终态不可恢复）。
  *
  * 允许重调度的状态：queued / running / waiting_user（心跳超时但未标记 lost）。

@@ -112,7 +112,7 @@ export async function dispatchEmployeeTurn(params: {
 
  if (!agentRevisionId) {
  // : Agent 无当前 Revision — 无法创建供应请求，返回明确失败
- logger.warn("[v11] Agent 无当前 AgentRevision，无法请求 Hosted 供应", {
+ logger.warn("[runtime] Agent 无当前 AgentRevision，无法请求 Hosted 供应", {
  tenantId: params.tenantId,
  agentId: thread.primaryAgentId,
  });
@@ -131,7 +131,7 @@ export async function dispatchEmployeeTurn(params: {
 
  // : Revision 验证失败 — 返回明确失败而非创建无效请求
  if (!("requestId" in provisioningResult)) {
- logger.warn("[v11] AgentRevision 验证失败，无法请求 Hosted 供应", {
+ logger.warn("[runtime] AgentRevision 验证失败，无法请求 Hosted 供应", {
  tenantId: params.tenantId,
  agentId: thread.primaryAgentId,
  validationCode: provisioningResult.code,
@@ -143,7 +143,7 @@ export async function dispatchEmployeeTurn(params: {
  };
  }
 
- logger.info("[v11] Hosted Route 未就绪，已请求异步供应", {
+ logger.info("[runtime] Hosted Route 未就绪，已请求异步供应", {
  tenantId: params.tenantId,
  agentId: thread.primaryAgentId,
  provisioningRequestId: provisioningResult.requestId,
@@ -211,7 +211,7 @@ export async function dispatchEmployeeTurn(params: {
 
  const completion = client.launchAcceptedInvocation(result.invocation.id);
  void completion.catch((error) => {
- logger.error("[v11] Hosted Runtime 执行失败", {
+ logger.error("[runtime] Hosted Runtime 执行失败", {
  turnId: params.turnId,
  invocationId: result.invocation?.id,
  error: String(error),

@@ -53,6 +53,27 @@ const bindingRow: BindingRow = {
  boundAt: new Date("2026-08-11T00:00:00.000Z"),
 };
 
+/**
+ * 返回 <table> 在源码中第一个 FOR UPDATE 锁（.for("update") 归属的 .from(<table>)）的位置；
+ * 无则返回 -1。锁序只约束加锁顺序，非加锁的 key 探测读不计入。
+ */
+function firstForUpdateLockIndex(source: string, table: string): number {
+	let searchFrom = 0;
+	for (;;) {
+		const forUpdate = source.indexOf('.for("update")', searchFrom);
+		if (forUpdate === -1) return -1;
+		const from = source.lastIndexOf(`.from(${table})`, forUpdate);
+		if (
+			from !== -1 &&
+			// 该 .from(<table>) 必须是此锁最近的 .from(...)，中间不得再有其它 .from(
+			source.slice(from + `.from(${table})`.length, forUpdate).indexOf(".from(") === -1
+		) {
+			return from;
+		}
+		searchFrom = forUpdate + 1;
+	}
+}
+
 describe("toExecutionBinding", () => {
  it("projectionVersionNo=0 是合法的冻结版本", () => {
  expect(toExecutionBinding(bindingRow).projectionVersionNo).toBe(0);
@@ -218,7 +239,6 @@ describe("ExecutionBinding authority final validation", () => {
  { ...base.attestation, artifactRevisionId: "other-revision" },
  { ...base.attestation, artifactDigest: `sha256:${"b".repeat(64)}` },
  { ...base.attestation, verificationState: "failed" as const },
- { ...base.attestation, revokedAt: new Date("2026-08-11T00:00:00.000Z") },
  ]) {
  expect(() => validateFrozenAttestationAuthority({ ...base, attestation })).toThrow(
  /Attestation/,
@@ -269,8 +289,10 @@ describe("ExecutionBinding authority final validation", () => {
  const source = readFileSync(new URL("./mysql-execution-binding-store.ts", import.meta.url), "utf8");
  expect(source).toContain('"AgentArtifact"');
  expect(source).toContain('"RuntimeArtifact"');
- expect(source.indexOf(".from(artifact)")).toBeLessThan(
- source.indexOf(".from(artifactAttestation)"),
+ // 锁序契约：AgentArtifact 必须先于 AgentArtifactAttestation 加 FOR UPDATE 锁。
+ // 仅比较文本出现的先后会误判（代码在加锁前会先做一次非加锁的 Attestation key 探测）。
+ expect(firstForUpdateLockIndex(source, "artifact")).toBeLessThan(
+ firstForUpdateLockIndex(source, "artifactAttestation"),
  );
  expect(source).toContain("artifactId: evidence.agentArtifactId");
  expect(source).toContain("artifactId: evidence.runtimeArtifactId");

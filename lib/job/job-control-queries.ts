@@ -1,11 +1,11 @@
 /**
- * V11 Job 控制调度器编排（S09-C05）。
+ * Job 控制调度器编排（S09-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md 、、（事务边界）
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §4（Job Control API：cancel / retry）
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §16（取消流程）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C05
+ * - docs/architecture/persistence.md 、、（事务边界）
+ * - docs/architecture/memory-and-job-api.md §4（Job Control API：cancel / retry）
+ * - docs/architecture/conversations.md §16（取消流程）
+ * - docs/architecture/conversations.md 、S09-C05
  *
  * 职责：
  * - processCancelCommand：调度器核对 Invocation/Effect 后才 cancelled（写 job.cancelled Event）

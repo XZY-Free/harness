@@ -1,8 +1,8 @@
 /**
  * Runtime 仓储。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、
- * ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md 。
+ * 事实源：docs/architecture/persistence.md 、
+ * docs/architecture/agent-control-plane.md 。
  *
  * 职责：
  * - createRuntime：创建稳定 Runtime 身份（租户内 runtimeKey 唯一，区分 hosted/external）。

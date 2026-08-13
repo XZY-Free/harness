@@ -1,13 +1,13 @@
 import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
- * V11 命令调度器（S05-C04）。
+ * 命令调度器（S05-C04）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （InvocationCommand 表）、-（Invocation/Binding/Attempt）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md （Steer）、（Stop/Interrupt）、（Regenerate）、（Resume）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §4（Runtime Protocol API：cancel/resume/steer）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C04
+ * - docs/architecture/persistence.md （InvocationCommand 表）、-（Invocation/Binding/Attempt）
+ * - docs/architecture/agent-control-plane.md （Steer）、（Stop/Interrupt）、（Regenerate）、（Resume）
+ * - docs/architecture/api-and-events.md §4（Runtime Protocol API：cancel/resume/steer）
+ * - docs/architecture/runtime-control-plane.md S05-C04
  *
  * 职责：
  * - dispatchSteerCommand：将 queued Steer 命令调度到 Runtime（POST /invocations/{id}:steer），ack 后标记 acknowledged + 写 turn.steered。
@@ -707,8 +707,8 @@ export async function dispatchResumeCommand(params: {
 /**
  * S09-C06：处理 Runtime 返回 requires_redispatch=true 的 Resume 响应。
  *
- * 事实源：../v11-agentkit-platform/11-api-and-event-boundaries.md L924-928、
- * ../v11-agentkit-platform/10-core-data-model.md §13（Worker 失联恢复）。
+ * 事实源：docs/architecture/api-and-events.md L924-928、
+ * docs/architecture/persistence.md §13（Worker 失联恢复）。
  *
  * 流程：
  * 1. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running +

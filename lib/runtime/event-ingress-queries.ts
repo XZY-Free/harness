@@ -1,11 +1,11 @@
 /**
- * V11 RuntimeEventIngress 仓储（S05-C03）。
+ * RuntimeEventIngress 仓储（S05-C03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （RuntimeEventIngress L486-500）、（事务边界）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）、§8（Item 投影）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §4（Runtime Protocol API）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C03
+ * - docs/architecture/persistence.md （RuntimeEventIngress L486-500）、（事务边界）
+ * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）、§8（Item 投影）
+ * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
+ * - docs/architecture/runtime-control-plane.md S05-C03
  *
  * 职责：
  * - ingressEventBatch：接收 Runtime 回传候选事件批次，去重 + 序列校验 + 映射到平台状态。
@@ -53,7 +53,7 @@ import {
  IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
-import { redactForV11 } from "@/lib/security/unified-redaction";
+import { redactSensitiveData } from "@/lib/security/unified-redaction";
 import { and, asc, eq, gt } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -225,10 +225,10 @@ async function processIngressBatch(
  const correlationId = params.correlationId ?? null;
 
  // S12-W05：写入前对所有事件 payload 脱敏（防 Secret 落库）
- // redactForV11 组合：禁采字段名 + Secret 正则模式 + 已知明文值（按 invocationId scope）
+ // redactSensitiveData 组合：禁采字段名 + Secret 正则模式 + 已知明文值（按 invocationId scope）
  const safeEvents: RuntimeCandidateEvent[] = params.events.map((event) => ({
  ...event,
- payload: redactForV11(event.payload, "redacted", {
+ payload: redactSensitiveData(event.payload, "redacted", {
  scope: params.invocationId,
  }).content as Record<string, unknown>,
  }));

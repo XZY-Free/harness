@@ -7,12 +7,12 @@ import type {
 } from "@/lib/runtime/adapters/hosted-adapter";
 import type { RuntimeCapabilitiesResponse } from "@/lib/runtime/runtime-client";
 /**
- * V11 Runtime Conformance 测试 runner（S05-C06）。
+ * Runtime Conformance 测试 runner（S05-C06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/contracts/runtime-conformance.json（16 个 required_cases）
- * - ../v11-agentkit-platform/15-machine-contracts.md §5 L94-110（conformance 门禁协议）
- * - ../v11-agentkit-platform-development-plan/05-runtime-protocol-dispatch-and-agent-loop.md S05-C06
+ * - docs/contracts/runtime-conformance.json（16 个 required_cases）
+ * - docs/architecture/contracts-and-conformance.md §5 L94-110（conformance 门禁协议）
+ * - docs/architecture/runtime-control-plane.md S05-C06
  *
  * 职责：
  * - runConformanceSuite：对 RuntimeAdapter 运行 16 个 conformance case 的基础场景，

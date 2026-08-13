@@ -1,16 +1,16 @@
 import { getItemById } from "@/lib/conversations/thread-item-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
- * V11 重调度编排（S09-C06）。
+ * 重调度编排（S09-C06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Invocation 状态机）、（ExecutionBinding 不可变）、
+ * - docs/architecture/persistence.md （Invocation 状态机）、（ExecutionBinding 不可变）、
  * （InvocationAttempt 状态机）、（producer_sequence 在整个 Invocation 内连续）、
  * （RuntimeSessionBinding lost）、（事务边界）、§13（Worker 失联恢复）
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §3（Resume 与恢复）、
+ * - docs/architecture/conversations.md §3（Resume 与恢复）、
  * §14（Durable Workflow 边界：Workflow Provider 不成为业务状态源）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （startInvocation）、（resume + requires_redispatch）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C06
+ * - docs/architecture/api-and-events.md （startInvocation）、（resume + requires_redispatch）
+ * - docs/architecture/conversations.md 、S09-C06
  *
  * 职责：
  * - redispatchInvocation：为同一 Invocation 创建新 Attempt + 调用 Runtime startInvocation（attempt_no > 1）

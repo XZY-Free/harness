@@ -18,7 +18,7 @@
  * 所有模块（RouteSet 激活、Projection、Binding）
  * 必须通过此模型判断 Conformance 资格，不得各自实现。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案 
+ * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
 
 import {

@@ -1,8 +1,8 @@
 /**
  * Runtime Conformance 门禁。
  *
- * 事实源：../v11-agentkit-platform/contracts/runtime-conformance.json（16 个 required_cases）、
- * ../v11-agentkit-platform-development-plan/03-agent-runtime-and-release-control-plane.md 。
+ * 事实源：docs/contracts/runtime-conformance.json（16 个 required_cases）、
+ * docs/architecture/agent-control-plane.md 。
  *
  * 职责：
  * - MANDATORY_GATE_CASES：发布 RuntimeRevision 前必须通过的 4 个基础用例

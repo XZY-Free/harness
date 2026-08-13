@@ -1,10 +1,10 @@
 /**
- * V11 Invocation 仓储（S05-C01）。
+ * Invocation 仓储（S05-C01）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Invocation L366-387）、（事务边界）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C01
+ * - docs/architecture/persistence.md （Invocation L366-387）、（事务边界）
+ * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
+ * - docs/architecture/runtime-control-plane.md S05-C01
  *
  * 职责：
  * - createInvocation：事务内分配 invocationSequence + INSERT Invocation + 写 invocation.queued Event。

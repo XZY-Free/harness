@@ -1,8 +1,8 @@
 import type {
+ ArtifactEvidenceSnapshot,
  ConformanceCaseResult,
  RuntimeRevisionPublicationState,
 } from "@/lib/runtime/domain/runtime-revision-publication-policy";
-import type { RuntimePublicationEvidenceSnapshot } from "@/lib/runtime/domain/runtime-revision-publication-policy";
 
 export type RuntimePublicationActorType = "user" | "service" | "workload" | "system";
 
@@ -31,7 +31,7 @@ export interface RuntimePublicationRuntime {
  * 替代旧 RuntimePublicationAttestation（仅含 id + artifactDigest），
  * 使应用服务无需复制 Attestation 判断逻辑。
  */
-export type RuntimePublicationAttestation = RuntimePublicationEvidenceSnapshot;
+export type RuntimePublicationAttestation = ArtifactEvidenceSnapshot;
 
 export interface StoredRuntimeConformanceResult {
  caseId: ConformanceCaseResult["caseId"];
@@ -61,14 +61,14 @@ export interface RuntimePublicationSession {
  /**
  * FOR UPDATE 读取 Attestation 证据快照。
  *
- * 返回完整 RuntimePublicationEvidenceSnapshot（含 artifactType、artifactRevisionId、
+ * 返回完整 ArtifactEvidenceSnapshot（含 artifactType、artifactRevisionId、
  * verificationState、revokedAt、revocationRecordId），由 ArtifactEvidencePolicy 统一验证。
  */
  findVerifiedAttestation(params: {
  tenantId: string;
  revisionId: string;
  attestationId: string;
- }): Promise<RuntimePublicationEvidenceSnapshot | null>;
+ }): Promise<ArtifactEvidenceSnapshot | null>;
  /**
  * FOR UPDATE 读取 Passed ConformanceRun 完整结果。
  *

@@ -815,7 +815,6 @@ async function lockAndVerifyAttestations(
  artifactRevisionId: artifactAttestation.artifactRevisionId,
  artifactDigest: artifactAttestation.artifactDigest,
  verificationState: artifactAttestation.verificationState,
- revokedAt: artifactAttestation.revokedAt,
  })
  .from(artifactAttestation)
  .where(eq(artifactAttestation.id, attestationId))
@@ -877,7 +876,6 @@ async function lockAndVerifyAttestations(
  artifactRevisionId: artifactAttestation.artifactRevisionId,
  artifactDigest: artifactAttestation.artifactDigest,
  verificationState: artifactAttestation.verificationState,
- revokedAt: artifactAttestation.revokedAt,
  })
  .from(artifactAttestation)
  .where(eq(artifactAttestation.id, attestationId))
@@ -944,7 +942,6 @@ type FrozenAttestationRow = {
  artifactRevisionId: string;
  artifactDigest: string;
  verificationState: "pending" | "verified" | "failed";
- revokedAt: Date | null;
 };
 
 type FrozenAttestationExpectation = {
@@ -968,8 +965,7 @@ export function validateFrozenAttestationAuthority(input: {
  attestation.artifactType !== expected.artifactType ||
  attestation.artifactRevisionId !== expected.artifactRevisionId ||
  attestation.artifactDigest !== expected.artifactDigest ||
- attestation.verificationState !== "verified" ||
- attestation.revokedAt !== null
+ attestation.verificationState !== "verified"
  ) {
  throw evidenceError("冻结 Attestation 与当前制品权威或验证状态不一致");
  }

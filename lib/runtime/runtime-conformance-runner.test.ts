@@ -17,7 +17,7 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
  * 真实 MySQL 8 Testcontainers，不使用 DB mock。
  */
 import { db } from "@/lib/db/client";
-import { assertCrossTenantHidden, buildV11Request } from "@/lib/db/test/api-fixtures";
+import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { getIdempotencyRecordById } from "@/lib/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
@@ -736,7 +736,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
   });
 
   it("GET /conformance 返回空结果列表（Revision 未测试）", async () => {
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "GET",
       path: `/runtime-revisions/${revisionId}/conformance`,
@@ -754,7 +754,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
   });
 
   it("POST /conformance publish=false 验签并记录不可变 Run（不发布）", async () => {
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: `/runtime-revisions/${revisionId}/conformance`,
@@ -807,7 +807,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
       expected_version_no: 1,
       artifact_attestation_id: attestation.id,
     };
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: `/runtime-revisions/${revisionId}/conformance`,
@@ -841,7 +841,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     expect(idempotency?.responseRedactedJson).toBe(JSON.stringify(body));
 
     const replayResponse = await conformancePOST(
-      buildV11Request({
+      buildApiRequest({
         audience: "admin",
         method: "POST",
         path: `/runtime-revisions/${revisionId}/conformance`,
@@ -879,7 +879,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
       actor: { tenantId, actorType: "service", actorId: "test-builder" },
       requestId: `attestation-fail-${revisionId}`,
     });
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: `/runtime-revisions/${revisionId}/conformance`,
@@ -925,7 +925,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
       actor: { tenantId, actorType: "service", actorId: "test-builder" },
       requestId: `attestation-no-ifmatch-${revisionId}`,
     });
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: `/runtime-revisions/${revisionId}/conformance`,
@@ -947,7 +947,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
   });
 
   it("POST /conformance 缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: `/runtime-revisions/${revisionId}/conformance`,
@@ -968,7 +968,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
   });
 
   it("POST /conformance 非法 case_id → 400 REQUEST_SCHEMA_INVALID", async () => {
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: `/runtime-revisions/${revisionId}/conformance`,
@@ -997,7 +997,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     const otherTenant = await ensureDefaultTenant(); // 同一默认租户，需用其他方式测试跨租户
     void otherTenant; // 当前测试框架使用单一默认租户，跨租户测试由其他测试覆盖
     // 这里通过访问不存在的 revisionId 验证 404
-    const request = buildV11Request({
+    const request = buildApiRequest({
       audience: "admin",
       method: "GET",
       path: "/runtime-revisions/nonexistent-revision-id/conformance",

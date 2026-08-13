@@ -1,10 +1,10 @@
 /**
- * V11 InvocationAttempt 仓储（S05-C01）。
+ * InvocationAttempt 仓储（S05-C01）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （InvocationAttempt L389-403）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Attempt 基础设施重调度）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C01
+ * - docs/architecture/persistence.md （InvocationAttempt L389-403）
+ * - docs/architecture/agent-control-plane.md §6（Attempt 基础设施重调度）
+ * - docs/architecture/runtime-control-plane.md S05-C01
  *
  * 职责：
  * - createAttempt：分配 attemptNo（max+1）+ INSERT Attempt。
@@ -100,7 +100,7 @@ export async function createAttempt(params: CreateAttemptParams): Promise<Invoca
 /**
  * 事务内创建 Attempt（与 createAttempt 行为一致，但接受外部事务句柄）。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md （事务边界）。
+ * 事实源：docs/architecture/persistence.md （事务边界）。
  * 用于 redispatchInvocation 等需要在同事务内创建 Attempt + 调度 Runtime + 更新 Invocation 的场景。
  *
  * 必须在 db.transaction 内调用。attemptNo 唯一性由 DB UNIQUE 约束保证；

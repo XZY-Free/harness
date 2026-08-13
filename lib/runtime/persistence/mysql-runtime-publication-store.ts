@@ -83,7 +83,6 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
  eq(artifactAttestation.artifactType, "runtime_revision"),
  eq(artifactAttestation.artifactRevisionId, params.revisionId),
  eq(artifactAttestation.verificationState, "verified"),
- isNull(artifactAttestation.revokedAt),
  isNull(attestationRevocationRecord.id),
  ),
  )
@@ -104,7 +103,7 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
  attestationFormat: (row.attestation.attestationFormat ?? "in_toto_dsse") as
  | "in_toto_dsse",
  verifiedAt: row.attestation.verifiedAt,
- revokedAt: row.attestation.revokedAt,
+ revokedAt: row.revocation?.revokedAt ?? null,
  revocationRecordId: row.revocation?.id ?? null,
  verificationPolicyRevisionId: row.attestation.policyRevisionId ?? null,
  envelopeDigest: row.attestation.bundleDigest ?? null,

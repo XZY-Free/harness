@@ -1,10 +1,10 @@
 /**
- * V11 Runtime HTTP 客户端（S05-C02）。
+ * Runtime HTTP 客户端（S05-C02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §4（Runtime Protocol API）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C02
+ * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
+ * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
+ * - docs/architecture/runtime-control-plane.md S05-C02
  *
  * 职责：
  * - 提供调用 Runtime HTTP API 的接口（Runtime 协议 = HTTP+JSON）。

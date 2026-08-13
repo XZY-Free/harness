@@ -7,7 +7,7 @@
  * ⚠️ Attestation 证据策略已迁移至统一模型：
  * lib/artifacts/domain/artifact-evidence-policy.ts
  * 本文件保留 Runtime 发布专有错误类型，不再定义 ArtifactEvidencePolicy。
- * 参见：SnowHarness专题01全局统一与最终收敛方案 
+ * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
 import {
  ALL_CONFORMANCE_CASES,
@@ -44,9 +44,6 @@ export type {
  ArtifactType as ArtifactEvidenceArtifactType,
  AttestationFormat as ArtifactEvidenceAttestationFormat,
 } from "@/lib/artifacts/domain/artifact-evidence";
-
-/** @deprecated 使用 ArtifactEvidenceSnapshot */
-export type RuntimePublicationEvidenceSnapshot = import("@/lib/artifacts/domain/artifact-evidence").ArtifactEvidenceSnapshot;
 
 export type RuntimeRevisionPublicationState = "draft" | "published" | "withdrawn";
 

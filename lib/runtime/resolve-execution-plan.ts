@@ -8,7 +8,7 @@
  * 后续步骤（Invocation + Binding + Attempt + Turn 状态转换）直接使用返回结果，
  * 不再重复查询控制面。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案 
+ * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
 
 import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";

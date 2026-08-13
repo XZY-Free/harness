@@ -1,13 +1,13 @@
 /**
- * V11 Job 仓储（S09-C04）。
+ * Job 仓储（S09-C04）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Job 表）、（事务边界）
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §4（Job Control API）
- * - ../v11-agentkit-platform/09-unified-domain-model.md 、
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §4、§5
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §16（取消流程）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C04
+ * - docs/architecture/persistence.md （Job 表）、（事务边界）
+ * - docs/architecture/memory-and-job-api.md §4（Job Control API）
+ * - docs/architecture/domain-model.md 、
+ * - docs/architecture/capability-and-collaboration-api.md §4、§5
+ * - docs/architecture/conversations.md §16（取消流程）
+ * - docs/architecture/conversations.md 、S09-C04
  *
  * 职责：
  * - createJob：领域服务调用，创建 Job + 写 job.queued Event（不提供通用 POST /jobs）。

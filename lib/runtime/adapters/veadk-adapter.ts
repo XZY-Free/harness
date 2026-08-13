@@ -1,10 +1,10 @@
 /**
- * V11 VeADK Runtime Adapter（S05-C05 参考实现）。
+ * VeADK Runtime Adapter（S05-C05 参考实现）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §4（Runtime Protocol API）
- * - ../v11-agentkit-platform-development-plan/05-runtime-protocol-dispatch-and-agent-loop.md S05-C05
+ * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
+ * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
+ * - docs/architecture/runtime-control-plane.md S05-C05
  *
  * 职责：
  * - VeADK Adapter 是 HostedAdapter 的薄包装，证明 VeADK app/user/session/Event 映射可行性。

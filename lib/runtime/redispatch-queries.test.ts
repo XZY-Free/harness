@@ -1,5 +1,5 @@
 /**
- * S09-C06：V11 重调度编排集成测试（真实 MySQL 8）。
+ * S09-C06：重调度编排集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - redispatchInvocation 成功流程（4 例）：
@@ -230,6 +230,7 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     displayName: "Redispatch Runtime",
     runtimeKind: "hosted",
     ownerUserId: ownerId,
+    lifecycleState: "enabled",
   });
 
   const runtimeRevision = await createDraftRuntimeRevision({

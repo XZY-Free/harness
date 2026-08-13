@@ -1,11 +1,11 @@
 /**
- * V11 JobCommand 仓储（S09-C04）。
+ * JobCommand 仓储（S09-C04）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （JobCommand 表）、§9（事务边界）
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §4（Job Control API：cancel / retry）
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §16（取消流程）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C04
+ * - docs/architecture/persistence.md （JobCommand 表）、§9（事务边界）
+ * - docs/architecture/memory-and-job-api.md §4（Job Control API：cancel / retry）
+ * - docs/architecture/conversations.md §16（取消流程）
+ * - docs/architecture/conversations.md 、S09-C04
  *
  * 职责：
  * - createCancelCommand：创建 cancel JobCommand（job.cancel_requested Event + Job 状态未变）。

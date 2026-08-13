@@ -1,5 +1,5 @@
 /**
- * S05-C03：V11 RuntimeEventIngress 集成测试（真实 MySQL 8）。
+ * S05-C03：RuntimeEventIngress 集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - 8 核心入库场景：response.completed / execution.completed/failed/cancelled /
@@ -448,7 +448,7 @@ function makeWorkloadToken(
 // 1. 核心入库场景
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 RuntimeEventIngress 核心入库", () => {
+describe("RuntimeEventIngress 核心入库", () => {
   let ctx: FullIngressContext;
 
   beforeEach(async () => {
@@ -630,7 +630,7 @@ describe("V11 RuntimeEventIngress 核心入库", () => {
 // 2. 幂等/去重场景
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 RuntimeEventIngress 幂等去重", () => {
+describe("RuntimeEventIngress 幂等去重", () => {
   let ctx: FullIngressContext;
 
   beforeEach(async () => {
@@ -766,7 +766,7 @@ describe("V11 RuntimeEventIngress 幂等去重", () => {
 // 3. 序列校验场景
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 RuntimeEventIngress 序列校验", () => {
+describe("RuntimeEventIngress 序列校验", () => {
   let ctx: FullIngressContext;
 
   beforeEach(async () => {
@@ -820,7 +820,7 @@ describe("V11 RuntimeEventIngress 序列校验", () => {
 // 4. 错误场景
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 RuntimeEventIngress 错误场景", () => {
+describe("RuntimeEventIngress 错误场景", () => {
   let ctx: FullIngressContext;
 
   beforeEach(async () => {
@@ -891,7 +891,7 @@ describe("V11 RuntimeEventIngress 错误场景", () => {
 // 5. Transient 事件场景
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 Transient 事件处理", () => {
+describe("Transient 事件处理", () => {
   let ctx: FullIngressContext;
 
   beforeEach(async () => {
@@ -988,7 +988,7 @@ describe("V11 Transient 事件处理", () => {
 // 6. Route 级场景
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 Runtime Route 级测试", () => {
+describe("Runtime Route 级测试", () => {
   let ctx: FullIngressContext;
 
   beforeEach(async () => {

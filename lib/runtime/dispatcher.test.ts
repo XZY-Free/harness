@@ -1,5 +1,5 @@
 /**
- * S05-C01：V11 调度服务与 Invocation/Binding/Attempt 集成测试（真实 MySQL 8）。
+ * S05-C01：调度服务与 Invocation/Binding/Attempt 集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - Invocation 仓储：createInvocation / getInvocationById / getInvocationsByTurn / updateInvocationState / heartbeat
@@ -430,7 +430,7 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
 // 1. Invocation 仓储
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 Invocation 仓储", () => {
+describe("Invocation 仓储", () => {
   let ctx: FullDispatchContext;
 
   beforeEach(async () => {
@@ -621,7 +621,7 @@ describe("V11 Invocation 仓储", () => {
 // 2. ExecutionBinding 仓储
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 ExecutionBinding 仓储", () => {
+describe("ExecutionBinding 仓储", () => {
   let ctx: FullDispatchContext;
   let invocationId: string;
 
@@ -757,7 +757,7 @@ describe("V11 ExecutionBinding 仓储", () => {
 // 3. InvocationAttempt 仓储
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 InvocationAttempt 仓储", () => {
+describe("InvocationAttempt 仓储", () => {
   let ctx: FullDispatchContext;
   let invocationId: string;
 
@@ -877,7 +877,7 @@ describe("V11 InvocationAttempt 仓储", () => {
 // 4. Dispatcher 调度
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 Dispatcher 调度", () => {
+describe("Dispatcher 调度", () => {
   it("dispatchInvocationForTurn 只消费正式 RouteResolver 的解析结果", async () => {
     const ctx = await seedFullDispatchContext();
     const commands: ResolveRouteCommand[] = [];
@@ -1259,7 +1259,7 @@ describe("V11 Dispatcher 调度", () => {
 // 5. 路由解析与有效路由查询
 // ═══════════════════════════════════════════════════════════
 
-describe("V11 路由解析与有效路由查询", () => {
+describe("路由解析与有效路由查询", () => {
   it("listEnabledRouteProjections 返回 enabled 路由", async () => {
     const ctx = await seedFullDispatchContext();
 

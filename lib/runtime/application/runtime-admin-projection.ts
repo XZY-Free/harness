@@ -141,8 +141,11 @@ export async function loadRuntimeRevisionAdminProjection(
     listAttestationsByRevision(tenantId, "runtime_revision", revisionId),
   ]);
   const verifiedActiveAttestationIds = attestations
-    .filter((item) => item.verificationState === "verified" && item.revokedAt === null)
-    .map((item) => item.id)
+    .filter(
+      ({ attestation, revocation }) =>
+        attestation.verificationState === "verified" && revocation === null,
+    )
+    .map(({ attestation }) => attestation.id)
     .sort();
   const publicationAttestationIds = [...(publication?.attestationIds ?? [])].sort();
   const run = publication?.conformanceRunId

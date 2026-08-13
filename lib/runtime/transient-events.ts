@@ -4,12 +4,12 @@ import {
  IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
 /**
- * V11 Transient 事件处理（S05-C03）。
+ * Transient 事件处理（S05-C03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （RuntimeEventIngress L486-500）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §4（Runtime Protocol API：transient 通道）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C03
+ * - docs/architecture/persistence.md （RuntimeEventIngress L486-500）
+ * - docs/architecture/api-and-events.md §4（Runtime Protocol API：transient 通道）
+ * - docs/architecture/runtime-control-plane.md S05-C03
  *
  * 职责：
  * - ingressTransientBatch：接收 Runtime transient 事件批次（response.delta/heartbeat/stdout/stderr）。

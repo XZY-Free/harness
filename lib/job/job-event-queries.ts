@@ -1,11 +1,11 @@
 /**
- * V11 JobEvent 仓储（S09-C04）。
+ * JobEvent 仓储（S09-C04）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md 文末（JobEvent 表）、（事务边界）
- * - ../v11-agentkit-platform/09-unified-domain-model.md （JobEvent 与 ThreadEvent 平行）
- * - ../v11-agentkit-platform/contracts/event-catalog.json（18 个 job.* 事件）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 
+ * - docs/architecture/persistence.md 文末（JobEvent 表）、（事务边界）
+ * - docs/architecture/domain-model.md （JobEvent 与 ThreadEvent 平行）
+ * - docs/contracts/event-catalog.json（18 个 job.* 事件）
+ * - docs/architecture/conversations.md
  *
  * 职责：
  * - allocateJobEventSequences：锁定 Job.lastEventSequence 原子递增（与 Thread 模式一致）。

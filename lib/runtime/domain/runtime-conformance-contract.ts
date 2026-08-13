@@ -4,7 +4,7 @@
  * 所有消费者（PublicationPolicy、ConformanceRun、MySQL Store、Runner、测试）
  * 必须引用此合同，不得硬编码 Case ID、Case 数量或 Suite Revision。
  *
- * 事实源：../v11-agentkit-platform/contracts/runtime-conformance.json
+ * 事实源：docs/contracts/runtime-conformance.json
  */
 
 export const CONFORMANCE_SUITE_REVISION = "runtime-conformance@1";

@@ -1,9 +1,9 @@
 /**
- * V11 Job 域共享错误类（S09-C04）。
+ * Job 域共享错误类（S09-C04）。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md 、、§9、
- * ../v11-agentkit-platform/13-memory-and-job-api.md §4、
- * ../v11-agentkit-platform/11-api-and-event-boundaries.md 。
+ * 事实源：docs/architecture/persistence.md 、、§9、
+ * docs/architecture/memory-and-job-api.md §4、
+ * docs/architecture/api-and-events.md 。
  *
  * Route 层根据 error 实例映射 HTTP 状态码和稳定 error_code。
  */

@@ -1,11 +1,11 @@
 /**
- * V11 JobResultProjection 仓储（S09-C05）。
+ * JobResultProjection 仓储（S09-C05）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （job_result Item 关联）、（job_result_projection Turn）、（事务边界）
- * - ../v11-agentkit-platform/13-memory-and-job-api.md （Job 结果显式投影到 Thread）
- * - ../v11-agentkit-platform/contracts/event-catalog.json（item.created 行 30、job_result.published 行 67）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C05
+ * - docs/architecture/persistence.md （job_result Item 关联）、（job_result_projection Turn）、（事务边界）
+ * - docs/architecture/memory-and-job-api.md （Job 结果显式投影到 Thread）
+ * - docs/contracts/event-catalog.json（item.created 行 30、job_result.published 行 67）
+ * - docs/architecture/conversations.md 、S09-C05
  *
  * 职责：
  * - projectJobResultToThread：Job 终态时创建 job_result ThreadItem + JobResultProjection 行 +

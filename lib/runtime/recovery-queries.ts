@@ -1,16 +1,16 @@
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
- * V11 Worker 重启恢复仓储（S09-C06）。
+ * Worker 重启恢复仓储（S09-C06）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （Invocation 状态机含 lost 终态）、
+ * - docs/architecture/persistence.md （Invocation 状态机含 lost 终态）、
  * （producerSequence 在整个 Invocation 内连续）、（RuntimeSessionBinding lost）、
  * （事务边界）、§13（Worker 失联恢复：不伪造完成）
- * - ../v11-agentkit-platform/05-continuity-collaboration-and-reliability.md §3（Resume 与恢复）、
+ * - docs/architecture/conversations.md §3（Resume 与恢复）、
  * §14（Durable Workflow 边界：Workflow Provider 不成为业务状态源）
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md （Resume 与 requires_redispatch）、
+ * - docs/architecture/api-and-events.md （Resume 与 requires_redispatch）、
  * （JobEvent 不进员工 Thread SSE）
- * - ../v11-agentkit-platform-development-plan/09-collaboration-jobs-and-recovery.md 、S09-C06
+ * - docs/architecture/conversations.md 、S09-C06
  *
  * 职责：
  * - findStaleInvocations：扫描心跳超时的非终态 Invocation（Worker 重启恢复入口）。

@@ -1,5 +1,5 @@
 /**
- * S09-C05：V11 Job 控制调度器编排集成测试（真实 MySQL 8 Testcontainers）。
+ * S09-C05：Job 控制调度器编排集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖：
  * - processCancelCommand：成功 + waiting_invocations + rejected_unknown_effect + rejected_job_terminal

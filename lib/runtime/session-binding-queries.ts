@@ -1,10 +1,10 @@
 /**
- * V11 RuntimeSessionBinding 仓储（S05-C02）。
+ * RuntimeSessionBinding 仓储（S05-C02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/10-core-data-model.md （RuntimeSessionBinding L506-508）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C02
+ * - docs/architecture/persistence.md （RuntimeSessionBinding L506-508）
+ * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
+ * - docs/architecture/runtime-control-plane.md S05-C02
  *
  * 职责：
  * - createSessionBinding：INSERT RuntimeSessionBinding（externalSessionRef 来自 Runtime 响应）。
@@ -228,7 +228,7 @@ export async function closeSessionBinding(bindingId: string): Promise<RuntimeSes
 /**
  * 标记 RuntimeSessionBinding 为 lost（bindingState active → lost）。
  *
- * 事实源：../v11-agentkit-platform/10-core-data-model.md （bindingState 含 lost 终态）、
+ * 事实源：docs/architecture/persistence.md （bindingState 含 lost 终态）、
  * §13（Worker 失联恢复：原 Runtime 会话失联，平台标记 lost 并创建新 Attempt + 新 SessionBinding）。
  *
  * 仅 active 状态可标记 lost；closed/lost 静默返回当前行（幂等）。

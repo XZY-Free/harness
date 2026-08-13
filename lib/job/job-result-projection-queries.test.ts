@@ -1,5 +1,5 @@
 /**
- * S09-C05：V11 JobResultProjection 仓储集成测试（真实 MySQL 8 Testcontainers）。
+ * S09-C05：JobResultProjection 仓储集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖：
  * - projectJobResultToThread system_triggered_turn：成功 + job_result Item + JobResultProjection + 4 条 Event
