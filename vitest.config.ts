@@ -3,6 +3,19 @@ import { defineConfig } from "vitest/config";
 
 const alias = { "@": resolve(__dirname, ".") };
 
+// 遗留 B1 层测试：测的是 §17 刻意丢弃的旧表（User/Message/ThreadRun/ToolRun/Role/
+// policyConfig/ProviderProfile/DesktopDevice/GitCheckpoint）。正式链零依赖；按用户
+// 决策「未覆盖就不管」排除，代码原样保留。unit project 现有 exclude 已跳过，仅 db project 需要。
+const LEGACY_B1_DB_TESTS = [
+  "lib/db/queries.test.ts",
+  "lib/db/studio-queries.test.ts",
+  "lib/db/desktop-device-queries.test.ts",
+  "lib/db/retention.test.ts",
+  "lib/analytics/queries.test.ts",
+  "lib/auth.test.ts",
+  "lib/policy/config.test.ts",
+];
+
 export default defineConfig({
   resolve: { alias },
   test: {
@@ -33,18 +46,9 @@ export default defineConfig({
             "lib/runtimes/runtime-lifecycle.test.ts",
             "lib/conversations/**/*.test.ts",
             "lib/runtime/**/*.test.ts",
-            "lib/v11/capability/**/*.test.ts",
-            "lib/v11/catalog/**/*.test.ts",
-            "lib/v11/gateway/**/*.test.ts",
-            "lib/v11/context/**/*.test.ts",
-            "lib/v11/workspace/**/*.test.ts",
-            "lib/v11/environment/**/*.test.ts",
-            "lib/v11/permission/**/*.test.ts",
-            "lib/v11/job/**/*.test.ts",
-            "lib/v11/evaluation/**/*.test.ts",
-            "lib/v11/operations/**/*.test.ts",
-            "lib/v11/admin/**/*.test.ts",
+            "lib/job/**/*.test.ts",
           ],
+          exclude: LEGACY_B1_DB_TESTS,
           environment: "node",
           pool: "forks",
           poolOptions: { forks: { singleFork: true } },
@@ -76,17 +80,7 @@ export default defineConfig({
             "lib/runtimes/runtime-lifecycle.test.ts",
             "lib/conversations/**",
             "lib/runtime/**",
-            "lib/v11/capability/**",
-            "lib/v11/catalog/**",
-            "lib/v11/gateway/**",
-            "lib/v11/context/**",
-            "lib/v11/workspace/**",
-            "lib/v11/environment/**",
-            "lib/v11/permission/**",
-            "lib/v11/job/**",
-            "lib/v11/evaluation/**",
-            "lib/v11/operations/**",
-            "lib/v11/admin/**",
+            "lib/job/**",
             "node_modules",
             ".next",
           ],

@@ -211,7 +211,7 @@ RouteActivation 新增 nullable 列：
 - `RouteRevision(routeSetId, selectorDigest, priorityNo)`
 - `RouteActivation(routeSetId, routeSetVersionNo)`
 
-保留 `trafficAllocationJson`、V11 投影字段。
+保留 `trafficAllocationJson`、投影字段。
 
 RouteActivation.routeSetId 始终 = 对应 RouteRevision.routeSetId（派生冗余列，写入服务负责派生和断言）。
 

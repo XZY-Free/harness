@@ -26,6 +26,7 @@
       "desktop/dist/**",
       "desktop/release/**",
       "desktop/bundle/**",
+      "desktop/renderer-dist/**",
       "desktop/package-app/**",
       "/release/**"
     ]
