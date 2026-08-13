@@ -2,9 +2,9 @@
  * POST /runtime/v1/invocations — Hosted Runtime 启动 Invocation（S05-C02 + S05-C05 参考实现）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §4（Runtime Protocol API）
- * - ../v11-agentkit-platform/02-agent-thread-and-runtime.md §6（Invocation 生命周期）
- * - ../v11-agentkit-platform-development-plan/05-runtime-protocol-dispatch-and-agent-loop.md S05-C02/S05-C05
+ * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
+ * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
+ * - docs/architecture/runtime-control-plane.md S05-C02/S05-C05
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=runtime）。

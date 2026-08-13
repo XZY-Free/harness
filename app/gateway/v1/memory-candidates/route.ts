@@ -2,10 +2,10 @@
  * POST /gateway/v1/memory-candidates — 提交 Memory Candidate（阶段 7 S07-C03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §10（写入路径）、§11（禁止内容与用户控制）。
- * - ../v11-agentkit-platform/10-core-data-model.md §7.5（memory_candidate / memory_entry / memory_source）。
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §2（Memory Candidate API）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md S07-W04。
+ * - docs/architecture/context-memory-and-knowledge.md §10（写入路径）、§11（禁止内容与用户控制）。
+ * - docs/architecture/persistence.md §7.5（memory_candidate / memory_entry / memory_source）。
+ * - docs/architecture/memory-and-job-api.md §2（Memory Candidate API）。
+ * - docs/architecture/context-memory-and-knowledge.md S07-W04。
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=gateway，绑定 invocation）。

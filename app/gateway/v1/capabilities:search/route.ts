@@ -2,8 +2,8 @@
  * POST /gateway/v1/capabilities:search — Runtime 搜索可用能力（阶段 6 S06-C04）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §3（Gateway API）、§2.5（成功与错误格式）。
- * - ../v11-agentkit-platform/12-capability-and-collaboration-api.md §3.1（CatalogSearchItem）。
+ * - docs/architecture/api-and-events.md §3（Gateway API）、§2.5（成功与错误格式）。
+ * - docs/architecture/capability-and-collaboration-api.md §3.1（CatalogSearchItem）。
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=gateway）。

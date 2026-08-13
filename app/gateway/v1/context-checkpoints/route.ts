@@ -2,10 +2,10 @@
  * POST /gateway/v1/context-checkpoints — 提交 Context Checkpoint（阶段 7 S07-C02）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/03-context-memory-and-knowledge.md §6（压缩）、§7（Trace）、§15（失败与恢复）。
- * - ../v11-agentkit-platform/10-core-data-model.md §7.5（context_checkpoint 表）。
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §3（Context Checkpoint API）。
- * - ../v11-agentkit-platform-development-plan/07-context-memory-and-knowledge.md S07-W03。
+ * - docs/architecture/context-memory-and-knowledge.md §6（压缩）、§7（Trace）、§15（失败与恢复）。
+ * - docs/architecture/persistence.md §7.5（context_checkpoint 表）。
+ * - docs/architecture/memory-and-job-api.md §3（Context Checkpoint API）。
+ * - docs/architecture/context-memory-and-knowledge.md S07-W03。
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=gateway，绑定 invocation）。

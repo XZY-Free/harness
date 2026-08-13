@@ -2,9 +2,9 @@
  * POST /runtime/v1/invocations/{invocation_id}/events:batch — Runtime 回传候选事件批次（S05-C03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §4（Runtime Protocol API）
- * - ../v11-agentkit-platform/10-core-data-model.md §6.9（RuntimeEventIngress L486-500）
- * - ../v11-agentkit-platform-development-plan/05-runtime-dispatch-and-attempt.md S05-C03
+ * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
+ * - docs/architecture/persistence.md §6.9（RuntimeEventIngress L486-500）
+ * - docs/architecture/runtime-control-plane.md S05-C03
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=runtime + invocation 绑定校验）。

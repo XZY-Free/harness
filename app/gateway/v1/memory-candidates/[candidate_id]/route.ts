@@ -2,8 +2,8 @@
  * GET /gateway/v1/memory-candidates/{candidate_id} — 查询 Memory Candidate（阶段 7 S07-C03）。
  *
  * 事实源：
- * - ../v11-agentkit-platform/13-memory-and-job-api.md §2（Memory Candidate API）。
- * - ../v11-agentkit-platform/11-api-and-event-boundaries.md §3（Gateway API）。
+ * - docs/architecture/memory-and-job-api.md §2（Memory Candidate API）。
+ * - docs/architecture/api-and-events.md §3（Gateway API）。
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=gateway，绑定 invocation）。
