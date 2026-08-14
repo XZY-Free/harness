@@ -57,6 +57,14 @@ export interface SSEClientConfig {
   maxRetries?: number;
   /** 基础退避毫秒数。 */
   baseBackoffMs?: number;
+  /**
+   * 连接保持健康的稳定阈值（毫秒）。
+   *
+   * 只有连接在超过该时长内未中断，连续失败预算（retryCount）才被清零。
+   * 默认适合长连接的 30s；仅测试需要覆盖。修复真实问题：200 headers 一到就清零预算，
+   * 会让"连续立即结束的 200 SSE 流"每次重连都把预算清零，导致 maxRetries 永不生效。
+   */
+  healthyResetMs?: number;
 }
 
 /** SSE 客户端句柄。 */
@@ -72,6 +80,8 @@ export interface SSEClientHandle {
 /** SSE 断线重连次数上限（UI 展示"正在重新连接 N/M"时的 M）。 */
 export const SSE_DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_BASE_BACKOFF_MS = 500;
+/** 连接保持健康的默认稳定阈值（毫秒）。适合长连接。 */
+const SSE_DEFAULT_HEALTHY_RESET_MS = 30_000;
 
 /** 解析 SSE 数据块，返回完整事件列表和剩余缓冲。 */
 function parseSSEChunk(buffer: string): {
@@ -113,11 +123,21 @@ export function createSSEClient(
   const fetchImpl = config.fetchImpl ?? fetch;
   const maxRetries = config.maxRetries ?? SSE_DEFAULT_MAX_RETRIES;
   const baseBackoffMs = config.baseBackoffMs ?? DEFAULT_BASE_BACKOFF_MS;
+  const healthyResetMs = config.healthyResetMs ?? SSE_DEFAULT_HEALTHY_RESET_MS;
 
   let closed = false;
   let abortController: AbortController | null = null;
   let retryCount = 0;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 连接保持健康的计时器；触发后清零连续失败预算。 */
+  let healthyResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearHealthyResetTimer(): void {
+    if (healthyResetTimer !== null) {
+      clearTimeout(healthyResetTimer);
+      healthyResetTimer = null;
+    }
+  }
 
   async function connect(): Promise<void> {
     if (closed) return;
@@ -160,6 +180,7 @@ export function createSSEClient(
       }
 
       if (response.status === 409 && errorBody?.error?.code === "EVENT_CURSOR_EXPIRED") {
+        clearHealthyResetTimer();
         callbacks.onCursorExpired(toVisibleError(errorBody));
         return;
       }
@@ -176,18 +197,27 @@ export function createSSEClient(
             code: "RESOURCE_NOT_FOUND",
             retryable: false,
           });
+      clearHealthyResetTimer();
       callbacks.onFailed(visible);
       return;
     }
 
     if (!response.body) {
+      clearHealthyResetTimer();
       callbacks.onFailed(makeLocalVisibleError({ code: "STREAM_BACKPRESSURE", retryable: true }));
       return;
     }
 
-    // 成功打开
-    retryCount = 0;
+    // 成功打开：只让 UI 进入 open，但立即清零连续失败预算是根因。
+    // 200 headers 本身不证明连接健康——若 SSE 流很快自然结束（真实长回复场景），
+    // 每次重连都清零预算会让 maxRetries 永不生效，形成无限重连。
+    // 改为：启动健康计时器，只有连接保持健康超过 healthyResetMs 才清零预算。
     callbacks.onOpen();
+    clearHealthyResetTimer();
+    healthyResetTimer = setTimeout(() => {
+      retryCount = 0;
+      healthyResetTimer = null;
+    }, healthyResetMs);
 
     // 读取流
     const reader = response.body.getReader();
@@ -281,6 +311,8 @@ export function createSSEClient(
 
   function scheduleRetry(): void {
     if (closed) return;
+    // 连接结束 / 进入重试：健康计时器不再有意义，必须清理，避免泄漏。
+    clearHealthyResetTimer();
     if (retryCount >= maxRetries) {
       callbacks.onFailed(makeLocalVisibleError({ code: "STREAM_BACKPRESSURE", retryable: true }));
       return;
@@ -289,6 +321,8 @@ export function createSSEClient(
     callbacks.onReconnecting(retryCount);
     const backoff = Math.min(baseBackoffMs * 2 ** (retryCount - 1), 8000);
     retryTimer = setTimeout(() => {
+      // 触发后清空句柄，避免 close 时 clearTimeout 悬空句柄。
+      retryTimer = null;
       void connect();
     }, backoff);
   }
@@ -299,6 +333,7 @@ export function createSSEClient(
     },
     close: () => {
       closed = true;
+      clearHealthyResetTimer();
       if (retryTimer) {
         clearTimeout(retryTimer);
         retryTimer = null;
