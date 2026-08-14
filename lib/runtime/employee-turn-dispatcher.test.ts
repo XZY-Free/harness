@@ -17,6 +17,7 @@ import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { executionBindingTable } from "@/lib/persistence/schema/executions";
 import type { AuditActor } from "@/lib/identity/audit";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -34,6 +35,7 @@ import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bu
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 
 beforeEach(async () => {
   await resetDatabase(db);
@@ -328,9 +330,15 @@ describe("dispatchEmployeeTurn", () => {
 
     const updatedTurn = await getTurnById(tenantId, turn.id);
     const items = await listItemsByThread(tenantId, thread.id);
+    const [binding] = await db
+      .select({ modelId: executionBindingTable.modelId })
+      .from(executionBindingTable)
+      .where(eq(executionBindingTable.invocationId, updatedTurn?.latestInvocationId ?? ""))
+      .limit(1);
     expect(dispatched.dispatched).toBe(true);
     expect(deltas).toEqual(["真实执行器", "回复：请确认已经接通"]);
     expect(updatedTurn?.turnState).toBe("completed");
+    expect(binding?.modelId).toBe("test-model");
     expect(items.find((item) => item.itemType === "agent_message")?.contentJson).toMatchObject({
       text: "真实执行器回复：请确认已经接通",
       model_ref: "test-model",

@@ -85,6 +85,11 @@ export type ModelInfo = { id: string };
 let cache: { at: number; models: ModelInfo[] } | null = null;
 const TTL_MS = 10 * 60 * 1000;
 
+/** 仅测试用：清空模块级模型缓存，隔离用例间的缓存状态。 */
+export function resetModelsCache(): void {
+  cache = null;
+}
+
 /** 拉 /models → 过滤 → 去重 → 排序；失败降级到默认模型。带 10 分钟内存缓存。 */
 export async function fetchAvailableModels(): Promise<ModelInfo[]> {
   if (cache && Date.now() - cache.at < TTL_MS) {
@@ -105,10 +110,14 @@ export async function fetchAvailableModels(): Promise<ModelInfo[]> {
     cache = { at: Date.now(), models };
     return models;
   } catch (error) {
+    // 失败降级写入与成功相同的 cache：TTL 内不反复请求 /models（真实环境 404 时
+    // 避免每次会话导航都重新请求并重复 warn）。保持 10 分钟 TTL。
+    const fallback: ModelInfo[] = [{ id: aiConfig.chatModel }];
+    cache = { at: Date.now(), models: fallback };
     logger.warn("fetchAvailableModels 失败，降级到默认模型", {
       error: (error as Error).message,
     });
-    return [{ id: aiConfig.chatModel }];
+    return fallback;
   }
 }
 

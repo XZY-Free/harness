@@ -326,6 +326,8 @@ export interface HostedAgentLoopResult {
 }
 
 export interface HostedModelContext {
+  /** 当前 Invocation 的 ExecutionBinding 冻结模型。 */
+  modelRef: string;
   contextHandle?: string;
   workspace?: StartInvocationRequestBody["workspace"];
   executionLimits?: StartInvocationRequestBody["execution_limits"];
@@ -397,6 +399,7 @@ export class HostedAgentLoop {
         throw new Error("Hosted Runtime 未配置模型执行器");
       }
       const responseText = await this.params.modelFn(userMessage, {
+        modelRef: this.params.modelRef ?? "unknown",
         contextHandle: this.params.contextHandle,
         workspace: this.params.workspace,
         executionLimits: this.params.executionLimits,

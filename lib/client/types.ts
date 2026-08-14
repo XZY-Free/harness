@@ -34,6 +34,14 @@ export interface ClientThreadShellResponse {
   readonly viewer_id: string;
   readonly threads: readonly ClientThreadSummary[];
   readonly agents: readonly ClientAgentSummary[];
+  /**
+   * 平台默认模型（服务端配置事实源 aiConfig.chatModel 的投影，snake_case）。
+   *
+   * Web/Desktop 新会话或无显式模型选择时，用它立即展示默认模型，无需等待
+   * /api/models 的异步发现。仅用于显示；发送时未显式选择仍以 modelRef=null
+   * 交由后端冻结平台默认，不改业务模型选择语义。
+   */
+  readonly default_model_ref: string;
 }
 
 export interface ClientNewThreadSubmission {

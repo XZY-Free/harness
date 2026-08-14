@@ -212,11 +212,11 @@ export const aiConfig = {
   },
   /** OpenAI 兼容端点 base URL。 */
   get baseUrl(): string {
-    return optionalEnv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+    return optionalEnv("LLM_BASE_URL", "https://tokenhub.tencentmaas.com/plan/v3");
   },
   /** 主聊天 / 代码生成默认模型。 */
   get chatModel(): string {
-    return optionalEnv("SNOW_CHAT_MODEL", "glm-5.2");
+    return optionalEnv("SNOW_CHAT_MODEL", "deepseek-v4-flash");
   },
   /**
    * OpenAI-compatible reasoning effort。空值表示按模型选择安全默认：

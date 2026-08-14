@@ -33,13 +33,12 @@ export interface InProcessHostedRuntimeClient extends RuntimeHttpClient {
    * 在平台已把 Invocation 持久化为 running 后启动 Agent Loop，避免终态事件抢在
    * invocation.started 之前落库。
    */
-  launchAcceptedInvocation(invocationId: string): Promise<void>;
+  launchAcceptedInvocation(invocationId: string, modelRef: string): Promise<void>;
   /** 最近一次启动任务，供集成测试等待异步 Agent Loop 完成。 */
   getLastLaunchPromise(): Promise<void> | null;
 }
 
 export function createInProcessHostedRuntimeClient(params: {
-  modelRef: string;
   modelFn: ModelFn;
   ingressEventBatch: (params: {
     invocationId: string;
@@ -73,7 +72,7 @@ export function createInProcessHostedRuntimeClient(params: {
       return response;
     },
 
-    launchAcceptedInvocation(invocationId: string): Promise<void> {
+    launchAcceptedInvocation(invocationId: string, modelRef: string): Promise<void> {
       lastLaunchPromise = (async () => {
         const invocation = pending.get(invocationId);
         if (!invocation) return;
@@ -82,7 +81,7 @@ export function createInProcessHostedRuntimeClient(params: {
         const adapter: RuntimeAdapter = createHostedAdapter({
           platformEndpoint: "in-process://platform",
           platformAuthToken: invocation.request.authToken,
-          modelRef: params.modelRef,
+          modelRef,
           modelFn: params.modelFn,
           eventBatchSink: params.ingressEventBatch,
           transientEventBatchSink: params.ingressTransientEventBatch,

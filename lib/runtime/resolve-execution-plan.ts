@@ -29,13 +29,22 @@ export interface ModelInfo {
   modelRevisionRef: string | null;
 }
 
+/** 本次显式选择优先，其次会话默认，最后使用平台默认模型。 */
+export function resolveInvocationModelPreference(
+  selectedModelRef: string | undefined,
+  threadDefaultModelRef: string | null,
+  platformDefaultModelRef: string,
+): string {
+  return selectedModelRef || threadDefaultModelRef || platformDefaultModelRef;
+}
+
 const DEFAULT_MODEL_PROVIDER = "default";
 
 /**
  * 从 AgentRevision.modelPolicyJson 和 Thread.defaultModelRef 提取模型信息。
  *
  * modelPolicyJson 形如 { default: "doubao-pro", provider?: "doubao", revision?: "v1" }。
- * 优先级：modelPolicyJson > threadDefaultModelRef > "default" 占位。
+ * 优先级：员工为新 Invocation 选择的模型 > AgentRevision 默认模型 > "default" 占位。
  */
 export function extractModelInfo(
   modelPolicyJson: unknown,
@@ -43,9 +52,9 @@ export function extractModelInfo(
 ): ModelInfo {
   const policy = (modelPolicyJson ?? {}) as Record<string, unknown>;
   const modelId =
+    threadDefaultModelRef ||
     (typeof policy.default === "string" && policy.default) ||
     (typeof policy.modelId === "string" && policy.modelId) ||
-    threadDefaultModelRef ||
     "default";
   const modelProvider =
     (typeof policy.provider === "string" && policy.provider) || DEFAULT_MODEL_PROVIDER;

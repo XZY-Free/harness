@@ -26,6 +26,7 @@ import {
   resolveEmployeePrincipal,
   schemaInvalidTable,
 } from "@/lib/conversations/route-helpers";
+import { aiConfig } from "@/lib/config";
 import { createThread, listThreadsForUser } from "@/lib/conversations/thread-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,
@@ -81,6 +82,7 @@ export async function GET(request: Request): Promise<Response> {
         agent_key: agent.agentKey,
         display_name: agent.displayName,
       })),
+      default_model_ref: aiConfig.chatModel,
     },
     { headers: { [REQUEST_ID_HEADER]: requestId } },
   );

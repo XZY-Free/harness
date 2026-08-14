@@ -12,6 +12,7 @@ import type { HostedModelContext } from "@/lib/runtime/adapters/hosted-adapter";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
+import { collectModelText } from "@/lib/runtime/model-text-stream";
 import { mysqlHostedProvisioningRequestStore } from "@/lib/runtime/persistence/mysql-hosted-provisioning-request-store";
 import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
 import { createRevisionValidator } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
@@ -62,16 +63,11 @@ function configuredModelFn(): ModelFn {
       throw new Error("LLM_API_KEY 未配置");
     }
     const result = streamText({
-      model: getChatModel(aiConfig.chatModel),
+      model: getChatModel(context.modelRef),
       prompt: message,
       maxOutputTokens: aiConfig.maxOutputTokens || undefined,
     });
-    let text = "";
-    for await (const delta of result.textStream) {
-      text += delta;
-      await context.emitTextDelta?.(delta);
-    }
-    return text;
+    return collectModelText(result.fullStream, context.emitTextDelta);
   };
 }
 
@@ -160,9 +156,7 @@ export async function dispatchEmployeeTurn(params: {
   }
 
   // ─── 有 Ready Route → 继续调度（不变） ──────────────────────
-  const modelRef = params.modelRef ?? aiConfig.chatModel;
   const client = createInProcessHostedRuntimeClient({
-    modelRef,
     modelFn: params.modelFn ?? configuredModelFn(),
     ingressEventBatch: async ({ invocationId, events, producerSequenceStart }) => {
       await ingressEventBatch({
@@ -185,6 +179,7 @@ export async function dispatchEmployeeTurn(params: {
   const result = await dispatchInvocationForTurn({
     tenantId: params.tenantId,
     turnId: params.turnId,
+    selectedModelRef: params.modelRef,
     runtimeClient: client,
     runtimeEndpointResolver: async (binding) => ({
       runtimeEndpoint: "in-process://hosted",
@@ -209,7 +204,10 @@ export async function dispatchEmployeeTurn(params: {
     return { dispatched: result.dispatched, completion: Promise.resolve() };
   }
 
-  const completion = client.launchAcceptedInvocation(result.invocation.id);
+  if (!result.binding) {
+    throw new Error(`Turn 调度缺少 ExecutionBinding（turnId=${params.turnId}）`);
+  }
+  const completion = client.launchAcceptedInvocation(result.invocation.id, result.binding.modelId);
   void completion.catch((error) => {
     logger.error("[runtime] Hosted Runtime 执行失败", {
       turnId: params.turnId,

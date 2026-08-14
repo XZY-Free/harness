@@ -207,6 +207,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       tenantId: principal.tenantId,
       threadId,
       turnId: result.turn.id,
+      modelRef: body.selected_model,
     });
     if (!dispatch.dispatched) {
       throw new Error(`Turn 调度未启动（turnId=${result.turn.id}）`);

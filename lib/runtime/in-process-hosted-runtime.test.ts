@@ -10,9 +10,9 @@ describe("InProcessHostedRuntimeClient", () => {
     const events: RuntimeCandidateEvent[] = [];
     let modelCalls = 0;
     const client = createInProcessHostedRuntimeClient({
-      modelRef: "configured-model",
-      modelFn: async (message) => {
+      modelFn: async (message, context) => {
         modelCalls += 1;
+        expect(context.modelRef).toBe("configured-model");
         return `模型回复：${message}`;
       },
       ingressEventBatch: async ({ events: batch }) => {
@@ -53,7 +53,10 @@ describe("InProcessHostedRuntimeClient", () => {
     expect(modelCalls).toBe(0);
     expect(events).toEqual([]);
 
-    await (client as InProcessHostedRuntimeClient).launchAcceptedInvocation("invocation-1");
+    await (client as InProcessHostedRuntimeClient).launchAcceptedInvocation(
+      "invocation-1",
+      "configured-model",
+    );
 
     expect(modelCalls).toBe(1);
     expect(events.map((event) => event.type)).toEqual([
@@ -68,7 +71,6 @@ describe("InProcessHostedRuntimeClient", () => {
 
   it("尚未启动时不暴露 Agent Loop Promise", () => {
     const client = createInProcessHostedRuntimeClient({
-      modelRef: "configured-model",
       modelFn: async () => "已完成",
       ingressEventBatch: async () => {},
     });

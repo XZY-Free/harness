@@ -6,8 +6,9 @@ describe("web formal thread route contract", () => {
   it("renders the shared Thread page without reading the legacy chat store", () => {
     const source = readFileSync(join(process.cwd(), "app/chat/[threadId]/page.tsx"), "utf8");
 
-    expect(source).toContain("ThreadPage");
-    expect(source).toContain("WebNewThreadPage");
+    expect(source).toContain("WebThreadShell");
+    expect(source).not.toContain("@/components/thread/thread-page");
+    expect(source).not.toContain("@/components/thread/web-new-thread-page");
     expect(source).not.toMatch(/Workspace|getMessagesByThreadId|ThreadStatus|lib\/db\/schema/);
   });
 

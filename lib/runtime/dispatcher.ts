@@ -36,6 +36,7 @@
  * - 重试 Attempt 时使用新的 runtime_execution_ref，不覆盖初始 ref。
  */
 import { randomUUID } from "node:crypto";
+import { aiConfig } from "@/lib/config";
 import { issueContextHandle } from "@/lib/context/context-handle";
 import { getItemById } from "@/lib/conversations/thread-item-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
@@ -86,6 +87,7 @@ import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revisi
 import {
   type ExecutionPlan,
   extractModelInfo,
+  resolveInvocationModelPreference,
   resolveExecutionPlan,
 } from "@/lib/runtime/resolve-execution-plan";
 import type {
@@ -205,6 +207,8 @@ export async function dispatchInvocationForTurn(params: {
   routeScopeKey?: string;
   /** 参与 RouteRevision eligibility 匹配的标量属性。 */
   routeAttributes?: Record<string, RouteResolutionAttribute>;
+  /** 员工为本次新 Invocation 选择的模型；同时进入解析摘要和 ExecutionBinding。 */
+  selectedModelRef?: string;
   /** 正式路由解析器；默认使用 MySQL 权威事实源。 */
   routeResolver?: RouteResolver;
   actorType?: ThreadEventActorType;
@@ -252,7 +256,11 @@ export async function dispatchInvocationForTurn(params: {
       routeScopeKey,
       businessKey: { threadId: thread.id },
       attributes: params.routeAttributes ?? {},
-      threadDefaultModelRef: thread.defaultModelRef,
+      threadDefaultModelRef: resolveInvocationModelPreference(
+        params.selectedModelRef,
+        thread.defaultModelRef,
+        aiConfig.chatModel,
+      ),
       routeResolver: params.routeResolver,
     },
     defaultRouteResolver,
