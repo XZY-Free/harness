@@ -24,7 +24,7 @@
 import type { ClientItem, ClientStreamStatus } from "@/lib/client/types";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { AgentMessageItem } from "./items/agent-message-item";
 import { ArtifactItem } from "./items/artifact-item";
 import { ChildThreadItem } from "./items/child-thread-item";
@@ -158,6 +158,11 @@ export function ThreadTimeline({
   locateItem = null,
 }: ThreadTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const pinnedToBottomRef = useRef(true);
+  const hasPositionedInitialContentRef = useRef(false);
+  const pendingUserScrollRef = useRef(false);
+  const continuousUserScrollRef = useRef(false);
 
   // 过滤 superseded、运行时进度误投影和空正文 → 聚合为渲染段
   const visibleItems = useMemo(() => {
@@ -175,34 +180,79 @@ export function ThreadTimeline({
     overscan: 8,
   });
 
-  // 新内容到达时自动滚动到底部。
-  // W4-1：仅当段数量增加（新消息到达）时才滚动，避免 resnapshot 导致 items 引用变化
-  // → segments 重建 → 误触发滚动 → 视觉上「从上翻到下重新加载一遍」。
-  // 用户主动上滚查看历史时不强制拉回底部。
-  // 用 requestAnimationFrame 确保 DOM 已更新后再滚动，避免布局抖动。
-  // 用 scrollTo({ behavior: "auto" }) 覆盖 CSS scroll-behavior: smooth，
-  // 让自动滚动瞬间完成，不产生「从上到下」的平滑滚动动画。
-  const prevSegmentCountRef = useRef(segments.length);
+  const scrollToBottom = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    element.scrollTo({ top: element.scrollHeight, behavior: "auto" });
+    pinnedToBottomRef.current = true;
+  }, []);
+
+  const markUserScrollIntent = useCallback(() => {
+    pendingUserScrollRef.current = true;
+  }, []);
+
+  const updatePinnedState = useCallback(() => {
+    // scroll 事件本身不携带来源。程序定位、Markdown 重排和浏览器锚定都可能触发它，
+    // 只有紧邻真实滚轮/键盘/触控手势，或正在拖动滚动条时，才允许改变跟随状态。
+    if (!pendingUserScrollRef.current && !continuousUserScrollRef.current) return;
+    pendingUserScrollRef.current = false;
+    const element = scrollRef.current;
+    if (!element) return;
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    pinnedToBottomRef.current = distanceFromBottom <= 100;
+  }, []);
+
+  const markKeyboardScrollIntent = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.key === "ArrowUp" ||
+      event.key === "ArrowDown" ||
+      event.key === "PageUp" ||
+      event.key === "PageDown" ||
+      event.key === "Home" ||
+      event.key === "End" ||
+      event.key === " "
+    ) {
+      markUserScrollIntent();
+    }
+  }, [markUserScrollIntent]);
+
+  // 初次打开已有会话直接定位最新消息；之后只在用户仍停留底部时跟随内容。
+  // 依赖 visibleItems 而非 segments.length：流式 delta 更新同一个 Agent Item 时段数不变，
+  // 但正文高度会持续增长，仍需保持底部锚定。同步定位避免先显示顶部再滚过历史，下一帧
+  // 再校正 Markdown 布局后的高度。resnapshot 若保持 items 引用不变则不会额外触发。
+  useLayoutEffect(() => {
+    if (segments.length === 0) {
+      hasPositionedInitialContentRef.current = false;
+      return;
+    }
+    if (hasPositionedInitialContentRef.current && !pinnedToBottomRef.current) return;
+
+    hasPositionedInitialContentRef.current = true;
+    scrollToBottom();
+    const frame = window.requestAnimationFrame(scrollToBottom);
+    return () => window.cancelAnimationFrame(frame);
+  }, [segments.length, scrollToBottom, visibleItems]);
+
+  // 窗口缩放、字体/Markdown 重排会在 Item 引用不变时改变正文高度。仅当用户原本位于
+  // 底部才随 ResizeObserver 校正；用户主动上翻后不抢回阅读位置。
   useEffect(() => {
-    const prevCount = prevSegmentCountRef.current;
-    prevSegmentCountRef.current = segments.length;
-    // 段数未增加（resnapshot / item.updated）不触发滚动
-    if (segments.length <= prevCount) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    // 仅在用户已接近底部（100px 内）时自动滚动，避免打断用户阅读历史
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom > 100) return;
-    // 用 rAF 确保浏览器完成布局后再滚动，避免在布局过程中设置 scrollTop 导致跳动
-    const frame = window.requestAnimationFrame(() => {
-      if (!scrollRef.current) return;
-      scrollRef.current.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: "auto",
+    const content = contentRef.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (!pinnedToBottomRef.current) return;
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        scrollToBottom();
       });
     });
-    return () => window.cancelAnimationFrame(frame);
-  }, [segments.length]);
+    observer.observe(content);
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [scrollToBottom]);
 
   // 工作台仅负责提供任务上下文；实际确认和产物详情仍回到共同时间线处理。
   useEffect(() => {
@@ -231,14 +281,38 @@ export function ThreadTimeline({
   return (
     <div
       ref={scrollRef}
-      className="relative flex-1 overflow-y-auto py-[18px]"
+      onWheel={markUserScrollIntent}
+      onKeyDownCapture={markKeyboardScrollIntent}
+      onTouchStart={() => {
+        continuousUserScrollRef.current = true;
+        markUserScrollIntent();
+      }}
+      onTouchEnd={() => {
+        continuousUserScrollRef.current = false;
+      }}
+      onTouchCancel={() => {
+        continuousUserScrollRef.current = false;
+      }}
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        continuousUserScrollRef.current = true;
+        markUserScrollIntent();
+      }}
+      onPointerUp={() => {
+        continuousUserScrollRef.current = false;
+      }}
+      onPointerCancel={() => {
+        continuousUserScrollRef.current = false;
+      }}
+      onScroll={updatePinnedState}
+      className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-0 py-5"
       role="log"
       aria-label="对话时间线"
       aria-live="polite"
       aria-atomic="false"
     >
       {showMessageLocator && <MessageLocator items={visibleItems} scrollContainerRef={scrollRef} />}
-      <div className="conversation-column flex flex-col gap-1">
+      <div ref={contentRef} className="message-track flex min-w-0 flex-col">
         {shouldVirtualize ? (
           <div
             style={{

@@ -48,6 +48,7 @@ import { useOptionalSidebar } from "./sidebar/sidebar-context";
 import { ThreadHeader, deriveTaskStatus } from "./thread-header";
 import { ThreadInput } from "./thread-input";
 import { ThreadTimeline } from "./thread-timeline";
+import { TurnFailureNotice } from "./turn-failure-notice";
 
 interface ThreadPageProps {
   readonly threadId: string;
@@ -57,6 +58,8 @@ interface ThreadPageProps {
   readonly viewerId?: string;
   /** Desktop Shell 已加载的真实助手列表。 */
   readonly availableAgents?: readonly AgentOption[];
+  /** 平台默认模型（shell.default_model_ref）；用于既有 Thread 未配模型时的即时展示。 */
+  readonly defaultModelRef?: string;
 }
 
 export function ThreadPage({
@@ -64,6 +67,7 @@ export function ThreadPage({
   variant = "web",
   viewerId,
   availableAgents,
+  defaultModelRef,
 }: ThreadPageProps) {
   const sidebar = useOptionalSidebar();
   const {
@@ -144,8 +148,16 @@ export function ThreadPage({
   // - 侧栏收起后从 160px 开始拖拽，为搜索与展开按钮保留真实鼠标命中区。
   // - 无条件渲染：thread 未加载时标题显示"新会话"占位、状态点隐藏。
   const taskStatus = deriveTaskStatus(latestTurn);
+  const primaryAgentIsSystemDefault = availableAgents?.some(
+    (agent) => agent.id === thread?.primary_agent_id && agent.agentKey === "default",
+  );
+  const primaryAgentOption = availableAgents?.find((agent) => agent.id === thread?.primary_agent_id);
+  const primaryAgentName = primaryAgentIsSystemDefault
+    ? "助手"
+    : primaryAgentOption?.displayName;
   const desktopTitlebar = variant === "desktop" && (
     <div
+      data-testid="desktop-thread-titlebar"
       className={cn(
         "relative flex h-11 shrink-0 items-center gap-3 border-b border-border bg-background transition-[padding] duration-200 ease-out",
         sidebar?.collapsed ? "pl-48 pr-4" : "px-4",
@@ -229,59 +241,106 @@ export function ThreadPage({
     return errorCard;
   }
 
-  // 加载状态。
-  // W4-1：仅「首次加载」（无任何已渲染内容）才显示全屏 spinner；
+  // 加载状态（W4-1）。
+  // 仅「首次加载」（无任何已渲染内容）进入稳定骨架：与正常页面同高的顶部标题区、
+  // 消息区局部加载反馈、底部 ThreadInput（"助手"与平台默认模型仍可见）。
+  // 骨架只复用 ThreadInput 与现有设计 tokens，不复制第二套业务状态机、
+  // 不构造假 Thread/Turn/Item、不改 API；数据就绪后原位切换，不出现整页 spinner。
   // 已有 items 或 thread 时的 resnapshot（如 item.created/item.updated 触发的后台刷新）
-  // 必须保留已渲染内容，避免每次发送消息/AI 回复结束都把会话替换成 loading。
-  // resnapshot 期间 snapshotStatus 会变 "loading"，但 items 保留在 store 中，
-  // 所以只要 items.length > 0 或 thread 已加载，就不显示全屏 spinner。
+  // 必须保留已渲染内容，不走骨架。
   const hasRenderedContent = items.length > 0 || thread !== null;
   const isFirstLoad = !hasRenderedContent && (snapshotStatus === "loading" || loading);
-  if (isFirstLoad) {
-    const loadingBody = (
-      <output aria-label="会话加载中" className="flex h-full items-center justify-center">
-        <div className="flex flex-col items-center gap-2">
-          <div
-            aria-hidden="true"
-            className="size-8 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent"
-          />
-          <p className="text-sm text-muted-foreground">加载会话中…</p>
-        </div>
-      </output>
-    );
-    if (variant === "desktop") {
-      return (
-        <div className="flex h-full flex-col">
-          {desktopTitlebar}
-          <div className="min-h-0 flex-1">{loadingBody}</div>
-        </div>
-      );
-    }
-    return loadingBody;
-  }
 
-  // 正常状态
-  const mainContent = (
-    <div className="flex h-full flex-col">
-      {thread && <ThreadHeader thread={thread} activeGoal={activeGoal} latestTurn={latestTurn} />}
-      <ThreadTimeline
-        items={items}
-        streamStatus={streamStatus}
-        reconnectAttempt={reconnectAttempt}
-        reconnectMax={reconnectMax}
-        threadId={threadId}
-      />
-      {thread && (
-        <ThreadInput
-          threadId={threadId}
-          latestTurn={latestTurn}
-          thread={thread}
-          availableAgents={availableAgents}
-          onAgentChange={handleAgentChange}
-          onModelChange={handleModelChange}
-          settingsBusy={settingsBusy}
+  // 首次加载时消息区的局部加载反馈（仅占消息区，不替换整页）。
+  const messageAreaLoading = (
+    <div
+      data-testid="message-area-loading"
+      role="status"
+      className="flex min-h-0 flex-1 items-center justify-center px-4 py-10"
+    >
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div
+          aria-hidden="true"
+          className="size-4 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent"
         />
+        <span>加载会话中…</span>
+      </div>
+    </div>
+  );
+
+  // Web 顶部标题区：已加载用真实 ThreadHeader；首次加载用同高稳定占位（不构造假 Thread）。
+  const webHeader = thread ? (
+    <ThreadHeader
+      thread={thread}
+      activeGoal={activeGoal}
+      latestTurn={latestTurn}
+      primaryAgentName={primaryAgentName}
+    />
+  ) : (
+    <header
+      data-testid="web-thread-header-placeholder"
+      aria-hidden="true"
+      className={cn(
+        "flex items-center justify-between border-b border-border bg-card py-3.5 pr-4 lg:pr-6",
+        sidebar?.collapsed ? "pl-32" : "pl-4 lg:pl-6",
       )}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <h1 className="min-w-0 flex-1 truncate font-semibold text-base text-foreground">新会话</h1>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className="text-foreground-subtle">Agent</span>
+            <span className="text-xs text-foreground">助手</span>
+          </span>
+        </div>
+      </div>
+    </header>
+  );
+
+  // 输入区：首次加载用 disabled fieldset 使其不可交互（不做假提交），数据就绪后原位启用。
+  // fieldset 的 disabled 语义在 DOM 层作用于全部后代控件，不依赖渲染/布局。
+  const inputArea = (isFirstLoad || thread) && (
+    <fieldset disabled={isFirstLoad} data-testid="thread-input-frame" className="contents">
+      <ThreadInput
+        threadId={threadId}
+        latestTurn={latestTurn}
+        thread={thread}
+        availableAgents={availableAgents}
+        currentAgentId={primaryAgentIsSystemDefault ? null : undefined}
+        defaultModelRef={defaultModelRef}
+        onAgentChange={handleAgentChange}
+        onModelChange={handleModelChange}
+        settingsBusy={settingsBusy}
+      />
+    </fieldset>
+  );
+
+  // 正常状态 / 首次加载骨架（Web）
+  const mainContent = (
+    <div
+      data-testid="thread-page-frame"
+      aria-busy={isFirstLoad}
+      className="flex h-full min-h-0 flex-col overflow-hidden"
+    >
+      {webHeader}
+      {isFirstLoad ? (
+        messageAreaLoading
+      ) : (
+        <>
+          <ThreadTimeline
+            items={items}
+            streamStatus={streamStatus}
+            reconnectAttempt={reconnectAttempt}
+            reconnectMax={reconnectMax}
+            threadId={threadId}
+          />
+          <TurnFailureNotice
+            turnState={latestTurn?.turn_state}
+            errorCode={latestTurn?.error_code}
+          />
+        </>
+      )}
+      {inputArea}
     </div>
   );
 
@@ -291,31 +350,35 @@ export function ThreadPage({
   // - 工作台可由员工调整宽度或收起，默认展示固定的任务页签。
   if (variant === "desktop") {
     return (
-      <div className="flex h-full flex-col">
+      <div
+        data-testid="thread-page-frame"
+        aria-busy={isFirstLoad}
+        className="flex h-full min-h-0 flex-col overflow-hidden"
+      >
         {desktopTitlebar}
         <div className="flex min-h-0 flex-1">
           {/* 左侧：时间线 + 输入区（输入区内嵌运行控制与待办队列） */}
-          <div className="min-w-0 flex-1 flex flex-col">
-            <ThreadTimeline
-              items={items}
-              streamStatus={streamStatus}
-              reconnectAttempt={reconnectAttempt}
-              reconnectMax={reconnectMax}
-              threadId={threadId}
-              showMessageLocator
-              locateItem={locateItem}
-            />
-            {thread && (
-              <ThreadInput
-                threadId={threadId}
-                latestTurn={latestTurn}
-                thread={thread}
-                availableAgents={availableAgents}
-                onAgentChange={handleAgentChange}
-                onModelChange={handleModelChange}
-                settingsBusy={settingsBusy}
-              />
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {isFirstLoad ? (
+              messageAreaLoading
+            ) : (
+              <>
+                <ThreadTimeline
+                  items={items}
+                  streamStatus={streamStatus}
+                  reconnectAttempt={reconnectAttempt}
+                  reconnectMax={reconnectMax}
+                  threadId={threadId}
+                  showMessageLocator
+                  locateItem={locateItem}
+                />
+                <TurnFailureNotice
+                  turnState={latestTurn?.turn_state}
+                  errorCode={latestTurn?.error_code}
+                />
+              </>
             )}
+            {inputArea}
           </div>
           <DesktopWorkbench
             threadId={threadId}

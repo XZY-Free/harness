@@ -181,7 +181,7 @@ function TriggerPill({
     <span
       data-variant={marker}
       className={cn(
-        "inline-flex h-[30px] cursor-pointer items-center gap-1.5 rounded-full border border-foreground/[0.055] bg-foreground/[0.018] px-2.5 text-[13px] text-muted-foreground shadow-none outline-none transition-[background-color,border-color,transform,color] duration-150 ease-out",
+        "inline-flex h-[30px] min-w-0 cursor-pointer items-center gap-1.5 rounded-full border border-foreground/[0.055] bg-foreground/[0.018] px-2.5 text-[13px] text-muted-foreground shadow-none outline-none transition-[background-color,border-color,transform,color] duration-150 ease-out",
         "group-focus-visible:ring-2 group-focus-visible:ring-foreground/10 group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-background",
         "group-data-[popup-open]:border-foreground/[0.08] group-data-[popup-open]:bg-foreground/[0.035] group-data-[popup-open]:text-foreground/82",
         "hover:border-foreground/[0.08] hover:bg-foreground/[0.03] hover:text-foreground/82 active:scale-[0.985]",
@@ -197,6 +197,7 @@ function TriggerPill({
 export interface AgentOption {
   readonly id: string;
   readonly displayName: string;
+  readonly agentKey?: string;
 }
 
 export function AgentSelectorPopover({
@@ -253,7 +254,7 @@ export function AgentSelectorPopover({
           />
           <span
             data-slot="agent-label"
-            className="max-w-[104px] truncate font-medium leading-none tracking-[-0.005em]"
+            className="max-w-[72px] truncate font-medium leading-none tracking-[-0.005em] sm:max-w-[104px]"
           >
             {currentAgent?.displayName ?? "助手"}
           </span>
@@ -322,15 +323,24 @@ export function AgentSelectorPopover({
 
 export function ModelSelectorPopover({
   currentModelRef,
+  platformDefaultModelRef,
   onChange,
 }: {
   readonly currentModelRef: string | null;
+  /**
+   * 平台即时默认模型（shell.default_model_ref）。
+   *
+   * 显示优先级：用户/Thread 显式 currentModelRef > 平台默认 > /api/models 的
+   * defaultModel > 泛化占位。平台默认来自服务端配置事实源，无需等待 /api/models
+   * 异步发现，首帧即可展示 deepseek-v4-flash。
+   */
+  readonly platformDefaultModelRef?: string;
   readonly onChange?: (modelRef: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const { models, defaultModel, loading, error } = useAvailableModels();
-  const selectedModelRef = currentModelRef ?? defaultModel;
+  const selectedModelRef = currentModelRef ?? platformDefaultModelRef ?? defaultModel;
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredModels = normalizedQuery
     ? models.filter((model) => model.id.toLocaleLowerCase().includes(normalizedQuery))
@@ -354,7 +364,7 @@ export function ModelSelectorPopover({
             className="size-[15px] shrink-0 stroke-[1.65]"
             aria-hidden="true"
           />
-          <span className="max-w-[120px] truncate font-medium leading-none tracking-[-0.01em]">
+          <span className="max-w-[84px] truncate font-medium leading-none tracking-[-0.01em] sm:max-w-[120px]">
             {selectedModelRef ?? "模型"}
           </span>
           <ChevronDown

@@ -675,25 +675,91 @@ body {
   color: var(--foreground);
 }
 
-/* Desktop 对话排版（W3 已落地的实际样式）。 */
-.conversation-column {
+/* 消息轨道与输入/操作轨道分离。
+ * - 消息轨道（Timeline）：宽屏利用主内容区全宽，不再以固定 1440px 限制，
+ *   不被输入框宽度限制。
+ * - 输入轨道（composer / 错误提示 / 待办队列 / 新会话错误）：保持适合操作的 1120px。
+ * 两者均按 16/24/32px 响应式安全内边距居中。
+ *
+ * 消息宽度体系（Web/Desktop 共用同一组件与 CSS）：
+ * 用户消息与助手回复共用同一 .message-track 可用轨道，消息内容宽度一律由页面比例
+ * （相对百分比）决定，不用固定 px/ch 写死。比例用 CSS 自定义属性统一管理，
+ * 组件层不再重复写死宽度。每个响应式档位都必须满足 assistant > user，
+ * 保证助手正文可用宽度始终比用户气泡更长。
+ *   - 移动端：user 88% / assistant 100%
+ *   - 中等宽度（≥640px）：user 82% / assistant 96%
+ *   - 宽屏（≥1024px）：user 78% / assistant 92% */
+:root {
+  --conversation-user-max: 88%;
+  --conversation-assistant-max: 100%;
+}
+
+.message-track {
   width: 100%;
-  max-width: 720px;
   margin-inline: auto;
-  padding-inline: 32px;
+  padding-inline: 16px;
+}
+
+/* 共享消息行结构：用户行与助手行都占满同一 .message-track 可用宽度 */
+.message-row {
+  width: 100%;
+}
+
+.composer-track {
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
+  padding-inline: 16px;
+}
+
+@media (min-width: 640px) {
+  .message-track,
+  .composer-track {
+    padding-inline: 24px;
+  }
+
+  :root {
+    --conversation-user-max: 82%;
+    --conversation-assistant-max: 96%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .message-track,
+  .composer-track {
+    padding-inline: 32px;
+  }
+
+  :root {
+    --conversation-user-max: 78%;
+    --conversation-assistant-max: 92%;
+  }
 }
 
 .conversation-user-bubble {
+  max-width: var(--conversation-user-max);
+  margin-left: auto; /* 右对齐并随内容收缩 */
   border-radius: 15px;
   padding: 11px 18px;
   font-size: 14.5px;
   line-height: 1.7;
   white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 .conversation-copy {
   font-size: 14.5px;
   line-height: 1.85;
+  max-width: var(--conversation-assistant-max);
+  overflow-wrap: break-word;
+}
+
+/* 减少动画偏好：收起侧栏的宽度/位移过渡不再播放 */
+@media (prefers-reduced-motion: reduce) {
+  aside[aria-label="会话侧栏"],
+  aside[aria-label="会话侧栏"] > div {
+    transition: none;
+  }
 }
 
 /* E-4: 移动端响应式断点 —— Tailwind lg: class 覆盖大部分场景，

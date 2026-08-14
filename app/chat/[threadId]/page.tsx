@@ -1,5 +1,4 @@
-import { ThreadPage } from "@/components/thread/thread-page";
-import { WebNewThreadPage } from "@/components/thread/web-new-thread-page";
+import { WebThreadShell } from "@/components/thread/web-thread-shell";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -10,9 +9,9 @@ export default async function ChatThreadPage({
   params: Promise<{ threadId: string }>;
 }) {
   const { threadId } = await params;
-  if (threadId === "new") return <WebNewThreadPage />;
+  if (threadId === "new") return <WebThreadShell threadId={null} />;
   if (!isValidUUID(threadId)) notFound();
-  return <ThreadPage threadId={threadId} />;
+  return <WebThreadShell threadId={threadId} />;
 }
 
 function isValidUUID(id: string): boolean {

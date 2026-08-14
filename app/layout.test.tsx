@@ -49,15 +49,17 @@ function runThemeInit(
 }
 
 describe("themeInitScript", () => {
-  it("Desktop 没有保存主题时默认使用浅色，不跟随系统暗色", () => {
+  it("员工 Web 与 Desktop 没有保存主题时都默认使用浅色", () => {
     expect(runThemeInit("/desktop/chat/thread-1", null, true)).toEqual(["light"]);
+    expect(runThemeInit("/chat/new", null, true)).toEqual(["light"]);
   });
 
-  it("Desktop 尊重用户明确保存的暗色选择", () => {
-    expect(runThemeInit("/desktop/chat/thread-1", "dark", false)).toEqual(["dark"]);
+  it("Studio 保存的暗色选择不污染员工 Web 与 Desktop", () => {
+    expect(runThemeInit("/desktop/chat/thread-1", "dark", false)).toEqual(["light"]);
+    expect(runThemeInit("/chat/new", "dark", false)).toEqual(["light"]);
   });
 
-  it("非 Desktop 页面没有保存主题时继续跟随系统主题", () => {
+  it("Studio 没有保存主题时继续跟随系统主题", () => {
     expect(runThemeInit("/studio", null, true)).toEqual(["dark"]);
   });
 });

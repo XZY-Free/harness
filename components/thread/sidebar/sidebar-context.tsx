@@ -12,6 +12,8 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 
 interface SidebarContextValue {
   readonly collapsed: boolean;
+  /** 是否处于 <1180px 断点（侧栏此时为 overlay drawer）。 */
+  readonly isNarrow: boolean;
   readonly toggle: () => void;
   readonly setCollapsed: (v: boolean) => void;
 }
@@ -26,6 +28,7 @@ export function SidebarProvider({
   readonly defaultCollapsed?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const [isNarrow, setIsNarrow] = useState(false);
 
   const toggle = useCallback(() => setCollapsed((v) => !v), []);
 
@@ -41,11 +44,12 @@ export function SidebarProvider({
     return () => window.removeEventListener("keydown", handler);
   }, [toggle]);
 
-  // 响应式：窗口 <1180px 自动收起，≥1180px 恢复
+  // 响应式：窗口 <1180px 自动收起（overlay drawer），≥1180px 恢复为固定侧栏
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 1179px)");
     const onChange = (e: MediaQueryListEvent | MediaQueryList) => {
       setCollapsed(e.matches);
+      setIsNarrow(e.matches);
     };
     onChange(mq);
     mq.addEventListener("change", onChange);
@@ -53,7 +57,7 @@ export function SidebarProvider({
   }, []);
 
   return (
-    <SidebarContext.Provider value={{ collapsed, toggle, setCollapsed }}>
+    <SidebarContext.Provider value={{ collapsed, isNarrow, toggle, setCollapsed }}>
       {children}
     </SidebarContext.Provider>
   );

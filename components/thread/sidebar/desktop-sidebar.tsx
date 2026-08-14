@@ -8,8 +8,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Agent } from "@/lib/persistence/schema/agent";
-import type { Thread } from "@/lib/persistence/schema/conversation";
 import { cn } from "@/lib/utils";
 import { LogOut, PanelLeft, Plus, Search, Settings, User } from "lucide-react";
 /**
@@ -30,12 +28,25 @@ import { usePathname } from "next/navigation";
 import { type CSSProperties, useEffect, useState } from "react";
 import { useSidebar } from "./sidebar-context";
 
+interface SidebarThread {
+  readonly id: string;
+  readonly title: string | null;
+  readonly primaryAgentId: string;
+}
+
+interface SidebarAgent {
+  readonly id: string;
+  readonly agentKey: string;
+  readonly displayName: string;
+}
+
 interface DesktopSidebarProps {
-  readonly threads: readonly Thread[];
-  readonly agents: readonly Agent[];
+  readonly threads: readonly SidebarThread[];
+  readonly agents: readonly SidebarAgent[];
   readonly currentThreadId?: string;
   readonly userName?: string;
   readonly hasNativeTitlebar?: boolean;
+  readonly surface?: "web" | "desktop";
 }
 
 interface DesktopWindowControls {
@@ -51,8 +62,9 @@ export function DesktopSidebar({
   currentThreadId: currentThreadIdProp,
   userName,
   hasNativeTitlebar = false,
+  surface = "desktop",
 }: DesktopSidebarProps) {
-  const { collapsed, toggle } = useSidebar();
+  const { collapsed, isNarrow, toggle } = useSidebar();
   const pathname = usePathname();
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [nativeTitlebar, setNativeTitlebar] = useState(hasNativeTitlebar);
@@ -104,7 +116,13 @@ export function DesktopSidebar({
   const isFullScreen = nativeTitlebar && nativeIsFullScreen === true;
   // 无论普通窗口还是原生全屏，顶部都要为窗口控制保留一行，避免与品牌行重叠。
   const titlebarSpacerClass = nativeTitlebar ? "h-8" : "h-0";
-  const titlebarControlsClass = nativeTitlebar && !isFullScreen ? "top-2 left-20" : "top-2 left-3";
+  const titlebarControlsClass = nativeTitlebar
+    ? !isFullScreen
+      ? "top-2 left-20"
+      : "top-2 left-3"
+    : collapsed
+      ? "top-2 left-3"
+      : "top-2 left-[132px]";
   const titlebarIconClass =
     "flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40";
   const panelButton = (
@@ -131,7 +149,7 @@ export function DesktopSidebar({
   );
   const newThreadButton = (
     <Link
-      href="/desktop/new"
+      href={surface === "desktop" ? "/desktop/new" : "/chat/new"}
       aria-label="新建会话"
       style={nativeNoDragStyle}
       className={titlebarIconClass}
@@ -142,11 +160,17 @@ export function DesktopSidebar({
 
   return (
     <>
-      <CmdkPanel threads={threads} agents={agents} open={cmdkOpen} onOpenChange={setCmdkOpen} />
+      <CmdkPanel
+        threads={threads}
+        agents={agents}
+        open={cmdkOpen}
+        onOpenChange={setCmdkOpen}
+        surface={surface}
+      />
       <div
         data-testid="desktop-titlebar-controls"
         className={cn(
-          "fixed z-20 flex items-center gap-1 [-webkit-app-region:no-drag]",
+          "fixed z-40 flex items-center gap-1 [-webkit-app-region:no-drag]",
           titlebarControlsClass,
         )}
       >
@@ -177,10 +201,19 @@ export function DesktopSidebar({
           </>
         )}
       </div>
+      {surface === "web" && isNarrow && !collapsed && (
+        <button
+          type="button"
+          aria-label="关闭会话侧栏"
+          onClick={toggle}
+          className="fixed inset-0 z-20 bg-black/15"
+        />
+      )}
       <aside
         aria-label="会话侧栏"
         className={cn(
-          "relative h-full shrink-0 overflow-visible transition-[width] duration-200 ease-out",
+          // <1180px 一律 overlay drawer（不参与主布局）；≥1180px 为固定侧栏（参与布局）。
+          "relative h-full shrink-0 overflow-visible transition-[width] duration-200 ease-out max-[1179px]:fixed max-[1179px]:inset-y-0 max-[1179px]:left-0 max-[1179px]:z-30",
           collapsed ? "w-0" : "w-[236px]",
         )}
       >
@@ -217,7 +250,7 @@ export function DesktopSidebar({
           {/* 新建会话 */}
           <div className="px-3 py-1 [-webkit-app-region:no-drag]">
             <Link
-              href="/desktop/new"
+              href={surface === "desktop" ? "/desktop/new" : "/chat/new"}
               className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
             >
               <Plus className="size-4 text-muted-foreground" />
@@ -231,7 +264,12 @@ export function DesktopSidebar({
           </div>
 
           {/* 会话列表 */}
-          <ThreadGroupList threads={threads} agents={agents} currentThreadId={currentThreadId} />
+          <ThreadGroupList
+            threads={threads}
+            agents={agents}
+            currentThreadId={currentThreadId}
+            surface={surface}
+          />
 
           {/* 底部账号行 */}
           <div className="mt-auto [-webkit-app-region:no-drag]">
@@ -288,10 +326,12 @@ function ThreadGroupList({
   threads,
   agents,
   currentThreadId,
+  surface,
 }: {
-  readonly threads: readonly Thread[];
-  readonly agents: readonly Agent[];
+  readonly threads: readonly SidebarThread[];
+  readonly agents: readonly SidebarAgent[];
   readonly currentThreadId?: string;
+  readonly surface: "web" | "desktop";
 }) {
   const agentMap = new Map(agents.map((a) => [a.id, a]));
   // 系统兜底 agent（agentKey === "default"）≠ 用户主动选择：
@@ -308,7 +348,7 @@ function ThreadGroupList({
   const grouped = threads.filter((t) => isUserChosenAgent(t.primaryAgentId));
 
   // 按 Agent 分组
-  const groupMap = new Map<string, Thread[]>();
+  const groupMap = new Map<string, SidebarThread[]>();
   for (const t of grouped) {
     const list = groupMap.get(t.primaryAgentId) ?? [];
     list.push(t);
@@ -319,7 +359,12 @@ function ThreadGroupList({
     <nav className="flex-1 overflow-y-auto px-3 [-webkit-app-region:no-drag]" aria-label="会话列表">
       {/* 未分组会话 */}
       {ungrouped.map((t) => (
-        <ThreadListItem key={t.id} thread={t} isActive={t.id === currentThreadId} />
+        <ThreadListItem
+          key={t.id}
+          thread={t}
+          isActive={t.id === currentThreadId}
+          surface={surface}
+        />
       ))}
 
       {/* 按 Agent 分组 */}
@@ -334,7 +379,12 @@ function ThreadGroupList({
               </span>
             </div>
             {list.map((t) => (
-              <ThreadListItem key={t.id} thread={t} isActive={t.id === currentThreadId} />
+              <ThreadListItem
+                key={t.id}
+                thread={t}
+                isActive={t.id === currentThreadId}
+                surface={surface}
+              />
             ))}
           </div>
         );
@@ -346,13 +396,20 @@ function ThreadGroupList({
 function ThreadListItem({
   thread,
   isActive,
+  surface,
 }: {
-  readonly thread: Thread;
+  readonly thread: SidebarThread;
   readonly isActive: boolean;
+  readonly surface: "web" | "desktop";
 }) {
+  // 窄屏（overlay drawer）中选择会话后自动关闭抽屉；宽屏固定侧栏保持展开。
+  const { isNarrow, setCollapsed } = useSidebar();
   return (
     <Link
-      href={`/desktop/chat/${thread.id}`}
+      href={surface === "desktop" ? `/desktop/chat/${thread.id}` : `/chat/${thread.id}`}
+      onClick={() => {
+        if (isNarrow) setCollapsed(true);
+      }}
       className={cn(
         "block truncate rounded-md px-3 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
         isActive

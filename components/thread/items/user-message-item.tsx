@@ -23,10 +23,10 @@ export function UserMessageItem({ item }: UserMessageItemProps) {
   if (!displayText) return null;
 
   return (
-    <div className="mb-6 mt-1.5 flex justify-end">
+    <div className="message-row mb-3 flex justify-end">
       <div
         className={cn(
-          "conversation-user-bubble max-w-[80%]",
+          "conversation-user-bubble",
           isGuidance ? "border border-warning/30 bg-warning/10" : "bg-muted",
           isPending && "opacity-60",
         )}

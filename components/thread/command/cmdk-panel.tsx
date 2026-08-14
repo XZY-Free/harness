@@ -1,21 +1,34 @@
 "use client";
 
 import { Dialog, DialogContent, DialogOverlay } from "@/components/ui/dialog";
-import type { Agent } from "@/lib/persistence/schema/agent";
-import type { Thread } from "@/lib/persistence/schema/conversation";
 import { Command } from "cmdk";
 import { FileSearch, FolderOpen, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 interface CmdkPanelProps {
-  readonly threads: readonly Thread[];
-  readonly agents: readonly Agent[];
+  readonly threads: readonly {
+    id: string;
+    title: string | null;
+    primaryAgentId: string;
+  }[];
+  readonly agents: readonly {
+    id: string;
+    agentKey: string;
+    displayName: string;
+  }[];
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  readonly surface?: "web" | "desktop";
 }
 
-export function CmdkPanel({ threads, agents, open, onOpenChange }: CmdkPanelProps) {
+export function CmdkPanel({
+  threads,
+  agents,
+  open,
+  onOpenChange,
+  surface = "desktop",
+}: CmdkPanelProps) {
   const [query, setQuery] = useState("");
   const router = useRouter();
 
@@ -32,15 +45,15 @@ export function CmdkPanel({ threads, agents, open, onOpenChange }: CmdkPanelProp
   const handleSelectThread = useCallback(
     (threadId: string) => {
       onOpenChange(false);
-      router.push(`/desktop/chat/${threadId}`);
+      router.push(surface === "desktop" ? `/desktop/chat/${threadId}` : `/chat/${threadId}`);
     },
-    [onOpenChange, router],
+    [onOpenChange, router, surface],
   );
 
   const handleNewThread = useCallback(() => {
     onOpenChange(false);
-    router.push("/desktop");
-  }, [onOpenChange, router]);
+    router.push(surface === "desktop" ? "/desktop/new" : "/chat/new");
+  }, [onOpenChange, router, surface]);
 
   // ⌘1~9 快捷键打开对应会话
   useEffect(() => {
@@ -84,24 +97,28 @@ export function CmdkPanel({ threads, agents, open, onOpenChange }: CmdkPanelProp
                   <span>新建会话</span>
                   <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘N</span>
                 </Command.Item>
-                <Command.Item
-                  value="files"
-                  onSelect={() => onOpenChange(false)}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-muted data-[selected=true]:bg-muted"
-                >
-                  <FolderOpen className="size-4 text-muted-foreground" />
-                  <span>文件和文件夹</span>
-                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘O</span>
-                </Command.Item>
-                <Command.Item
-                  value="search-files"
-                  onSelect={() => onOpenChange(false)}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-muted data-[selected=true]:bg-muted"
-                >
-                  <FileSearch className="size-4 text-muted-foreground" />
-                  <span>搜索文件</span>
-                  <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘P</span>
-                </Command.Item>
+                {surface === "desktop" && (
+                  <>
+                    <Command.Item
+                      value="files"
+                      onSelect={() => onOpenChange(false)}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-muted data-[selected=true]:bg-muted"
+                    >
+                      <FolderOpen className="size-4 text-muted-foreground" />
+                      <span>文件和文件夹</span>
+                      <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘O</span>
+                    </Command.Item>
+                    <Command.Item
+                      value="search-files"
+                      onSelect={() => onOpenChange(false)}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-muted data-[selected=true]:bg-muted"
+                    >
+                      <FileSearch className="size-4 text-muted-foreground" />
+                      <span>搜索文件</span>
+                      <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘P</span>
+                    </Command.Item>
+                  </>
+                )}
               </Command.Group>
             )}
             <Command.Group heading="会话">

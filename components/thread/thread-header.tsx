@@ -30,6 +30,7 @@
 import { CatalogDisplayName } from "@/components/thread/catalog/catalog-display-name";
 import type { ClientGoal, ClientThread, ClientTurn } from "@/lib/client/types";
 import { cn } from "@/lib/utils";
+import { useOptionalSidebar } from "./sidebar/sidebar-context";
 
 interface ThreadHeaderProps {
   readonly thread: ClientThread;
@@ -37,6 +38,7 @@ interface ThreadHeaderProps {
   readonly latestTurn: ClientTurn | null;
   /** 渲染变体：web（默认）= 完整 header；desktop = 仅次级信息行（Agent / Goal / 位置）。 */
   readonly variant?: "web" | "desktop";
+  readonly primaryAgentName?: string;
 }
 
 /** 从 Turn 状态推导当前任务状态（中文）。
@@ -89,8 +91,10 @@ export function ThreadHeader({
   activeGoal,
   latestTurn,
   variant = "web",
+  primaryAgentName,
 }: ThreadHeaderProps) {
   const taskStatus = deriveTaskStatus(latestTurn);
+  const sidebar = useOptionalSidebar();
 
   // Desktop 形态：标题信息上移至 ThreadPage 的 38px 标题栏（W2-2），
   // 此处仅保留次级信息行（Agent / Goal / 位置）。
@@ -100,7 +104,9 @@ export function ThreadHeader({
         {/* 主 Agent（W04 接入 Agent 目录显示名） */}
         <span className="flex items-center gap-1">
           <span className="text-foreground-subtle">Agent</span>
-          <CatalogDisplayName resourceId={thread.primary_agent_id} resourceType="agent" />
+          {primaryAgentName ?? (
+            <CatalogDisplayName resourceId={thread.primary_agent_id} resourceType="agent" />
+          )}
         </span>
 
         {/* Goal */}
@@ -140,15 +146,22 @@ export function ThreadHeader({
   }
 
   // Web 形态：完整 header（border-b + bg-surface + px-4 py-3.5）。
+  // 侧栏收起时左上角有固定的搜索/展开/新建控件，标题区需要预留安全左内边距避免重叠。
   return (
-    <header className="flex items-center justify-between border-border border-b bg-card px-4 py-3.5 lg:px-6">
+    <header
+      data-testid="web-thread-header"
+      className={cn(
+        "flex items-center justify-between border-b border-border bg-card py-3.5 pr-4 lg:pr-6",
+        sidebar?.collapsed ? "pl-32" : "pl-4 lg:pl-6",
+      )}
+    >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         {/* 第一行：Thread title + 任务状态 */}
         <div className="flex items-center gap-3">
-          <h1 className="truncate font-semibold text-base text-foreground">
+          <h1 className="min-w-0 flex-1 truncate font-semibold text-base text-foreground">
             {thread.title ?? "新会话"}
           </h1>
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
             <span
               className={cn(
                 "size-1.5 rounded-full",
@@ -164,12 +177,14 @@ export function ThreadHeader({
           </div>
         </div>
 
-        {/* 第二行：主 Agent + Goal + 执行位置 */}
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        {/* 第二行：主 Agent + Goal + 执行位置（窄屏可换行，不得水平溢出） */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {/* 主 Agent（W04 接入 Agent 目录显示名） */}
           <span className="flex items-center gap-1">
             <span className="text-foreground-subtle">Agent</span>
-            <CatalogDisplayName resourceId={thread.primary_agent_id} resourceType="agent" />
+            {primaryAgentName ?? (
+              <CatalogDisplayName resourceId={thread.primary_agent_id} resourceType="agent" />
+            )}
           </span>
 
           {/* Goal */}

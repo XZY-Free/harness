@@ -109,6 +109,7 @@ function DesktopShell() {
               defaultAgentId={
                 agents.find((agent) => agent.agentKey === "default")?.id ?? agents[0]?.id ?? ""
               }
+              defaultModelRef={shell.default_model_ref}
               error={newThreadError}
               onSubmit={submitNewThread}
             />
@@ -119,6 +120,7 @@ function DesktopShell() {
               variant="desktop"
               viewerId={shell.viewer_id}
               availableAgents={agents}
+              defaultModelRef={shell.default_model_ref}
             />
           )}
         </main>

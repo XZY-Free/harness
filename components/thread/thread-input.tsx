@@ -50,6 +50,8 @@ interface ThreadInputProps {
   readonly onSubmitText?: (text: string) => Promise<boolean>;
   readonly currentAgentId?: string | null;
   readonly currentModelRef?: string | null;
+  /** 平台默认模型（shell.default_model_ref）；未显式选择时的即时展示。 */
+  readonly defaultModelRef?: string;
 }
 
 /** 从 PendingInput.input 提取可读文本，作为引导请求体。 */
@@ -69,6 +71,7 @@ export function ThreadInput({
   onSubmitText,
   currentAgentId,
   currentModelRef,
+  defaultModelRef,
 }: ThreadInputProps) {
   const {
     send,
@@ -168,8 +171,8 @@ export function ThreadInput({
   };
 
   return (
-    <div className="shrink-0 bg-background px-8 pb-[18px] pt-1.5">
-      <div className="mx-auto max-w-[720px]">
+    <div className="sticky bottom-0 z-20 shrink-0 bg-background/95 pt-2 pb-[calc(16px+env(safe-area-inset-bottom))] backdrop-blur-sm">
+      <div className="composer-track">
         {/* W4-1：待办队列移入输入框上方，宽度与输入框对齐。 */}
         {isRunning && !onSubmitText && (
           <PendingInputQueue threadId={threadId} onSteer={handleSteer} parentBusy={turnBusy} />
@@ -217,12 +220,14 @@ export function ThreadInput({
             disabled={busy}
           />
 
-          {/* 底部工具行 */}
-          <div className="mt-2 flex items-center gap-1">
+          {/* 底部工具行：窄屏标签收缩/截断，关键按钮不被挤出 */}
+          <div className="mt-2 flex min-w-0 items-center gap-1">
             <PlusMenuPopover threadId={threadId} />
 
             <AgentSelectorPopover
-              currentAgentId={currentAgentId ?? thread?.primary_agent_id ?? null}
+              currentAgentId={
+                currentAgentId !== undefined ? currentAgentId : (thread?.primary_agent_id ?? null)
+              }
               onChange={onAgentChange}
               agentOptions={availableAgents}
             />
@@ -231,6 +236,7 @@ export function ThreadInput({
 
             <ModelSelectorPopover
               currentModelRef={currentModelRef ?? thread?.default_model_ref ?? null}
+              platformDefaultModelRef={defaultModelRef}
               onChange={onModelChange}
             />
 

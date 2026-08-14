@@ -24,7 +24,7 @@ export function AgentMessageItem({ item }: AgentMessageItemProps) {
   if (!displayText && !isPending && !isFailed) return null;
 
   return (
-    <div className="my-1 mb-4">
+    <div className="message-row mb-5">
       <div className="conversation-copy prose-markdown text-foreground">
         {displayText}
         {isPending && (

@@ -7,20 +7,34 @@ const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock("@/lib/api-fetch", () => ({ apiFetch }));
 vi.mock("@/lib/desktop/capabilities", () => ({ getDesktopCapabilities: () => true }));
 vi.mock("@/components/thread/thread-page", () => ({
-  ThreadPage: ({ threadId }: { readonly threadId: string }) => <div>会话 {threadId}</div>,
+  ThreadPage: ({
+    threadId,
+    defaultModelRef,
+  }: {
+    readonly threadId: string;
+    readonly defaultModelRef?: string;
+  }) => (
+    <div data-testid="desktop-thread-page" data-default-model-ref={defaultModelRef ?? ""}>
+      会话 {threadId}
+    </div>
+  ),
 }));
 vi.mock("@/components/thread/new-thread-page", () => ({
   NewThreadPage: ({
     onSubmit,
+    defaultModelRef,
   }: {
     readonly onSubmit: (input: {
       readonly text: string;
       readonly agentId: string;
       readonly modelRef: string | null;
     }) => Promise<boolean>;
+    readonly defaultModelRef?: string;
   }) => (
     <button
       type="button"
+      data-testid="desktop-new-thread-page"
+      data-default-model-ref={defaultModelRef ?? ""}
       onClick={() =>
         void onSubmit({ text: "请帮我分析销售数据", agentId: "agent-1", modelRef: "glm-5.2" })
       }
@@ -100,5 +114,32 @@ describe("DesktopRendererApp", () => {
         }),
       }),
     );
+  });
+
+  it("把 shell.default_model_ref 透传给新会话与已有会话页面", async () => {
+    apiFetch.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            viewer_id: "viewer-1",
+            threads: [{ id: "thread-1", title: "已有会话", primary_agent_id: "agent-1" }],
+            agents: [{ id: "agent-1", agent_key: "default", display_name: "助手" }],
+            default_model_ref: "deepseek-v4-flash",
+          }),
+        ),
+      ),
+    );
+
+    window.history.replaceState(null, "", "/desktop/new");
+    render(<DesktopRendererApp />);
+    const newPage = await screen.findByTestId("desktop-new-thread-page");
+    expect(newPage.dataset.defaultModelRef).toBe("deepseek-v4-flash");
+
+    cleanup();
+    const existingThreadId = "6c34a4f3-1b47-4acb-9b2e-7bdbff3e04cf";
+    window.history.replaceState(null, "", `/desktop/chat/${existingThreadId}`);
+    render(<DesktopRendererApp />);
+    const threadPage = await screen.findByTestId("desktop-thread-page");
+    expect(threadPage.dataset.defaultModelRef).toBe("deepseek-v4-flash");
   });
 });
