@@ -88,7 +88,6 @@ import {
   type ExecutionPlan,
   extractModelInfo,
   resolveExecutionPlan,
-  resolveInvocationModelPreference,
 } from "@/lib/runtime/resolve-execution-plan";
 import type {
   RuntimeHttpClient,
@@ -256,11 +255,8 @@ export async function dispatchInvocationForTurn(params: {
       routeScopeKey,
       businessKey: { threadId: thread.id },
       attributes: params.routeAttributes ?? {},
-      threadDefaultModelRef: resolveInvocationModelPreference(
-        params.selectedModelRef,
-        thread.defaultModelRef,
-        aiConfig.chatModel,
-      ),
+      threadDefaultModelRef: params.selectedModelRef ?? thread.defaultModelRef,
+      platformDefaultModelRef: aiConfig.chatModel,
       routeResolver: params.routeResolver,
     },
     defaultRouteResolver,

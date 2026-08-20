@@ -1117,6 +1117,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
     await adapter.getLastLoopPromise?.();
     expect(modelArgs[0]).toBe("真实当前输入");
     expect(modelArgs[1]).toEqual({
+      modelRef: "test-model",
       contextHandle: "ctx_actual",
       workspace: { workspace_binding_id: "wbind-1", workspace_type: "managed" },
       executionLimits: { max_invocation_seconds: 321, max_event_bytes: 654 },

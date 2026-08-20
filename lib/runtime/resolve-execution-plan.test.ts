@@ -1,7 +1,4 @@
-import {
-  extractModelInfo,
-  resolveInvocationModelPreference,
-} from "@/lib/runtime/resolve-execution-plan";
+import { extractModelInfo } from "@/lib/runtime/resolve-execution-plan";
 import { describe, expect, it } from "vitest";
 
 describe("extractModelInfo", () => {
@@ -25,18 +22,30 @@ describe("extractModelInfo", () => {
       modelRevisionRef: null,
     });
   });
-});
 
-describe("resolveInvocationModelPreference", () => {
-  it("按本次选择、会话默认、平台默认的顺序确定模型", () => {
-    expect(resolveInvocationModelPreference("auto", "model-thread", "deepseek-v4-flash")).toBe(
-      "auto",
-    );
-    expect(resolveInvocationModelPreference(undefined, "model-thread", "deepseek-v4-flash")).toBe(
-      "model-thread",
-    );
-    expect(resolveInvocationModelPreference(undefined, null, "deepseek-v4-flash")).toBe(
-      "deepseek-v4-flash",
-    );
+  it("AgentRevision 已声明模型策略时平台默认模型不参与解析", () => {
+    expect(
+      extractModelInfo({ default: "doubao-pro", provider: "doubao" }, null, "deepseek-v4-flash"),
+    ).toEqual({
+      modelProvider: "doubao",
+      modelId: "doubao-pro",
+      modelRevisionRef: null,
+    });
+  });
+
+  it("会话与 AgentRevision 都未声明模型时回落平台默认模型", () => {
+    expect(extractModelInfo({ provider: "doubao" }, null, "deepseek-v4-flash")).toEqual({
+      modelProvider: "doubao",
+      modelId: "deepseek-v4-flash",
+      modelRevisionRef: null,
+    });
+  });
+
+  it("平台默认模型缺省时回落占位值", () => {
+    expect(extractModelInfo({}, null)).toEqual({
+      modelProvider: "default",
+      modelId: "default",
+      modelRevisionRef: null,
+    });
   });
 });

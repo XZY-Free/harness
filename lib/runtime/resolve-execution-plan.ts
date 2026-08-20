@@ -29,32 +29,30 @@ export interface ModelInfo {
   modelRevisionRef: string | null;
 }
 
-/** 本次显式选择优先，其次会话默认，最后使用平台默认模型。 */
-export function resolveInvocationModelPreference(
-  selectedModelRef: string | undefined,
-  threadDefaultModelRef: string | null,
-  platformDefaultModelRef: string,
-): string {
-  return selectedModelRef || threadDefaultModelRef || platformDefaultModelRef;
-}
-
 const DEFAULT_MODEL_PROVIDER = "default";
 
 /**
  * 从 AgentRevision.modelPolicyJson 和 Thread.defaultModelRef 提取模型信息。
  *
  * modelPolicyJson 形如 { default: "doubao-pro", provider?: "doubao", revision?: "v1" }。
- * 优先级：员工为新 Invocation 选择的模型 > AgentRevision 默认模型 > "default" 占位。
+ * 优先级：员工为本次 Invocation 选择的模型 / 会话默认模型 > AgentRevision 默认模型
+ * > 平台默认模型 > "default" 占位。
+ *
+ * `threadDefaultModelRef` 只接受真实会话事实（员工本次选择或会话默认），调用方不得
+ * 提前用平台默认填充：一旦填充，AgentRevision 的模型策略将永远不被采纳。平台默认
+ * 由 `platformDefaultModelRef` 在 Agent 策略之后兜底。
  */
 export function extractModelInfo(
   modelPolicyJson: unknown,
   threadDefaultModelRef: string | null,
+  platformDefaultModelRef?: string,
 ): ModelInfo {
   const policy = (modelPolicyJson ?? {}) as Record<string, unknown>;
   const modelId =
     threadDefaultModelRef ||
     (typeof policy.default === "string" && policy.default) ||
     (typeof policy.modelId === "string" && policy.modelId) ||
+    platformDefaultModelRef ||
     "default";
   const modelProvider =
     (typeof policy.provider === "string" && policy.provider) || DEFAULT_MODEL_PROVIDER;
@@ -109,8 +107,13 @@ export interface ResolveExecutionPlanInput {
   routeScopeKey: string;
   businessKey: { threadId?: string; jobId?: string };
   attributes?: Record<string, RouteResolutionAttribute>;
-  /** Thread 的 defaultModelRef（模型信息提取用）。 */
+  /**
+   * Thread 的真实模型事实：员工本次选择，其次会话默认；两者都没有时为 null。
+   * 同时作为路由解析输入进入解析摘要，不得用平台默认预先填充。
+   */
   threadDefaultModelRef?: string | null;
+  /** 平台默认模型，在 AgentRevision 模型策略之后兜底。 */
+  platformDefaultModelRef?: string;
   /** 路由解析器（默认使用 统一入口）。 */
   routeResolver?: RouteResolver;
 }
@@ -156,6 +159,7 @@ export async function resolveExecutionPlan(
   const modelInfo = extractModelInfo(
     agentRevision.modelPolicyJson,
     input.threadDefaultModelRef ?? null,
+    input.platformDefaultModelRef,
   );
 
   return {
