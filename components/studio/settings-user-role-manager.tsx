@@ -32,7 +32,6 @@ const PERMISSION_LABEL: Record<string, string> = {
   "policy.write": "策略写入",
   "user.manage": "用户管理",
   "agent.read": "智能体读取",
-  "provider.read": "模型提供方读取",
   "workspace.read": "工作区读取",
   "workspace.write": "工作区写入",
   "audit.read": "审计读取",

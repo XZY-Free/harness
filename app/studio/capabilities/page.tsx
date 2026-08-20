@@ -5,7 +5,7 @@ import Link from "next/link";
 /**
  * 统一管理后台 — 能力与知识页（S11-W01 占位）。
  *
- * 一级导航「能力与知识」整合原 /studio/resources + /studio/skills + /studio/providers + /studio/artifacts。
+ * 一级导航「能力与知识」整合原 /studio/resources + /studio/skills + /studio/artifacts。
  * 本页为 S11-W01 重组后的着陆页，提供到现有子页面的入口；
  * S11-W03 将在此页直接渲染 Skill / Tool / Knowledge / Connection 一体化管理。
  *
@@ -26,11 +26,6 @@ const SECTIONS: readonly SectionLink[] = [
     href: "/studio/skills",
     title: "技能 Skill",
     description: "技能定义、版本、发布与回滚。",
-  },
-  {
-    href: "/studio/resources?tab=providers",
-    title: "模型提供方 Provider",
-    description: "模型供应方连接配置。",
   },
   {
     href: "/studio/resources?tab=agents",

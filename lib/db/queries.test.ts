@@ -11,7 +11,6 @@ import {
   createMcpServerConfig,
   createMemoryRow,
   createPermissionRule,
-  createProvider,
   createSkill,
   createSkillVersion,
   createSubagentDefinition,
@@ -38,7 +37,6 @@ import {
   getMessagesByThreadIdForUser,
   getPendingApprovalsByThread,
   getPermissionsForRoleIds,
-  getProviderByName,
   getRecentFailedToolRun,
   getSkillById,
   getSkillByName,
@@ -62,7 +60,6 @@ import {
   listExternalFetchedEvents,
   listMcpServerConfigs,
   listMemoryRows,
-  listProviders,
   listRolesWithPermissions,
   listSubagentDefinitions,
   listSubagentRunsByThread,
@@ -126,7 +123,6 @@ import {
   memoryEntry,
   message,
   policyConfig,
-  providerProfile,
   role,
   rolePermission,
   runTranscriptChunk,
@@ -1261,59 +1257,6 @@ describe("owner-scoped thread queries (Phase 4-3)", () => {
     expect(msgs).toHaveLength(2);
     // 按 (createdAt, id) asc
     expect(msgs?.map((m) => m.id).sort()).toEqual(["m1", "m2"]);
-  });
-});
-
-// ─── Provider 档案查询（真实 MySQL） ────────────────────────
-
-describe("provider 档案查询", () => {
-  it("listProviders 按 createdAt asc 返回", async () => {
-    await db.insert(providerProfile).values({
-      id: "p2",
-      name: "default",
-      baseUrl: "https://x/v1",
-      apiKeyRef: "LLM_API_KEY",
-      isDefault: true,
-      createdAt: new Date("2026-02-01"),
-      updatedAt: new Date(),
-    });
-
-    const rows = await listProviders();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.apiKeyRef).toBe("LLM_API_KEY");
-  });
-
-  it("listProviders 空表 → []", async () => {
-    await expect(listProviders()).resolves.toEqual([]);
-  });
-
-  it("getProviderByName 命中 / 未命中", async () => {
-    await db.insert(providerProfile).values({
-      id: "p1",
-      name: "default",
-      baseUrl: "https://x/v1",
-      apiKeyRef: "LLM_API_KEY",
-      isDefault: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    expect(await getProviderByName("default")).toMatchObject({ id: "p1" });
-    expect(await getProviderByName("nope")).toBeNull();
-  });
-
-  it("createProvider 存 apiKeyRef 引用名,不落明文", async () => {
-    const p = await createProvider({
-      name: "default",
-      baseUrl: "https://x/v1",
-      apiKeyRef: "LLM_API_KEY",
-      isDefault: true,
-    });
-    expect(p.apiKeyRef).toBe("LLM_API_KEY");
-    expect(p.isDefault).toBe(true);
-    // 断言插入字段不含明文 key 值(仅引用名)
-    const [row] = await db.select().from(providerProfile).where(eq(providerProfile.id, p.id));
-    expect(JSON.stringify(row)).not.toMatch(/sk-[A-Za-z0-9]+/);
   });
 });
 

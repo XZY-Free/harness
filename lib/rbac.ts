@@ -32,7 +32,6 @@ export const PERMISSIONS = [
   "policy.write",
   "user.manage",
   "agent.read",
-  "provider.read",
   "workspace.read",
   "workspace.write",
   "audit.read",
@@ -49,7 +48,6 @@ export const MEMBER_PERMISSIONS: Permission[] = [
   "analytics.read.self",
   "policy.read",
   "agent.read",
-  "provider.read",
   "workspace.read",
   "thread.write.self",
 ];

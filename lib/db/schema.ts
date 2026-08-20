@@ -681,13 +681,6 @@ export const policyConfigHistory = mysqlTable("PolicyConfigHistory", {
 });
 export type PolicyConfigHistoryRow = InferSelectModel<typeof policyConfigHistory>;
 
-/**
- * LLM 提供方档案（蓝图 §12 provider_profiles）。
- *
- * **不接 runtime**：runtime 仍走 env aiConfig；本表只镜像当前 env 配置供后台只读展示，
- * 不做运行时切换（/ 非目标）。apiKeyRef 存 env 引用名（如 "LLM_API_KEY"），
- * **不落明文 secret**（约束 6）。
- */
 // ─── Admin Audit Log (切片 C: 后台敏感写操作审计) ────
 
 /**
@@ -777,27 +770,6 @@ export const adminAuditLog = mysqlTable(
   }),
 );
 export type AdminAuditLog = InferSelectModel<typeof adminAuditLog>;
-
-// ─── Agent / Provider Profiles (: 只读档案,不接 runtime) ─
-
-export const providerProfile = mysqlTable("ProviderProfile", {
-  id: varchar("id", { length: 36 })
-    .primaryKey()
-    .notNull()
-    .$defaultFn(() => randomUUID()),
-  name: varchar("name", { length: 64 }).notNull(),
-  baseUrl: varchar("baseUrl", { length: 255 }).notNull(),
-  // env var 引用名（如 LLM_API_KEY），不存明文
-  apiKeyRef: varchar("apiKeyRef", { length: 128 }).notNull(),
-  isDefault: boolean("isDefault").notNull().default(false),
-  createdAt: datetime("createdAt", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: datetime("updatedAt", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
-export type ProviderProfile = InferSelectModel<typeof providerProfile>;
 
 // ─── Agent Kernel: Context Snapshot / Plan / Todo ─────────
 //

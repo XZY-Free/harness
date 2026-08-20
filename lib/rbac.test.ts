@@ -65,20 +65,17 @@ afterEach(() => {
 });
 
 describe("PERMISSIONS 常量 (切片 B1)", () => {
-  it("含 agent.read / provider.read", () => {
+  it("含 agent.read", () => {
     expect(PERMISSIONS).toContain("agent.read");
-    expect(PERMISSIONS).toContain("provider.read");
   });
 
-  it("MEMBER_PERMISSIONS 含 2 项新只读权限", () => {
+  it("MEMBER_PERMISSIONS 含 agent.read", () => {
     expect(MEMBER_PERMISSIONS).toContain("agent.read");
-    expect(MEMBER_PERMISSIONS).toContain("provider.read");
   });
 
-  it("ADMIN_PERMISSIONS = 全集（含 2 项新权限）", () => {
+  it("ADMIN_PERMISSIONS = 全集（含 agent.read）", () => {
     expect(ADMIN_PERMISSIONS).toEqual([...PERMISSIONS]);
     expect(ADMIN_PERMISSIONS).toContain("agent.read");
-    expect(ADMIN_PERMISSIONS).toContain("provider.read");
   });
 });
 

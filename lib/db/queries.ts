@@ -60,7 +60,6 @@ import {
   type MemoryStatus,
   type PermissionDecision,
   type PermissionScope,
-  type ProviderProfile,
   type Role,
   type RunTranscriptChunk,
   type RunTranscriptChunkKind,
@@ -110,7 +109,6 @@ import {
   messageTypeForRole,
   policyConfig,
   policyConfigHistory,
-  providerProfile,
   role,
   rolePermission,
   runTranscriptChunk,
@@ -1662,43 +1660,6 @@ export async function insertPolicyConfigHistory(params: {
     changedKeys: params.changedKeys,
     changedAt: new Date(),
   });
-}
-
-// ─── Provider Profile Queries ──────────────────────────────
-
-/** 列全部 provider 档案，按 createdAt asc。 */
-export async function listProviders(): Promise<ProviderProfile[]> {
-  return db.select().from(providerProfile).orderBy(asc(providerProfile.createdAt));
-}
-
-/** 按 name 取 provider（seed 幂等键）。 */
-export async function getProviderByName(name: string): Promise<ProviderProfile | null> {
-  const [row] = await db
-    .select()
-    .from(providerProfile)
-    .where(eq(providerProfile.name, name))
-    .limit(1);
-  return row ?? null;
-}
-
-/** 创建 provider 档案。apiKeyRef 存 env 引用名，不落明文 secret。 */
-export async function createProvider(params: {
-  name: string;
-  baseUrl: string;
-  apiKeyRef: string;
-  isDefault?: boolean;
-}): Promise<ProviderProfile> {
-  const row: ProviderProfile = {
-    id: randomUUID(),
-    name: params.name,
-    baseUrl: params.baseUrl,
-    apiKeyRef: params.apiKeyRef,
-    isDefault: params.isDefault ?? false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-  await db.insert(providerProfile).values(row);
-  return row;
 }
 
 // ─── Admin Audit Queries (切片 C: append-only 审计) ──

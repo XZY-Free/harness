@@ -11,7 +11,6 @@ import {
   toolFailureBreakdown,
 } from "@/lib/analytics/queries";
 import { getCurrentUserFromRequest } from "@/lib/auth";
-import { listProviders } from "@/lib/db/queries";
 import {
   getPolicyConfigRows,
   listAllThreads,
@@ -70,7 +69,6 @@ export default async function StudioOverviewPage({
     skills,
     threads,
     agents,
-    providers,
     policyRows,
     recentArtifacts,
     threadSuccess,
@@ -83,7 +81,6 @@ export default async function StudioOverviewPage({
     listSkills(),
     canAllThreads ? listAllThreads() : listThreadsForUser(user.id),
     listAgents(principal.tenantId),
-    listProviders(),
     getPolicyConfigRows(),
     listRecentArtifactsForUser(user.id, canAllThreads, 5),
     canAnalytics ? threadSuccessRate(analyticsScope) : null,
@@ -134,7 +131,7 @@ export default async function StudioOverviewPage({
         <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wider text-[var(--fg-subtle)]">
           {t("studio.overview.section.resources")}
         </h2>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
           <MetricCard
             label={t("studio.overview.metric.active_skills")}
             value={activeSkills}
@@ -144,11 +141,6 @@ export default async function StudioOverviewPage({
             label={t("studio.overview.metric.agents")}
             value={agents.length}
             sub={t("studio.overview.metric.agents_sub")}
-          />
-          <MetricCard
-            label={t("studio.overview.metric.providers")}
-            value={providers.length}
-            sub={t("studio.overview.metric.providers_sub")}
           />
           <MetricCard
             label={t("studio.overview.metric.threads")}
