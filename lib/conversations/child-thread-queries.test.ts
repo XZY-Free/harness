@@ -33,6 +33,7 @@ import {
   assertChildThreadBudgetNotExhausted,
   computeDelegationDepth,
   delegateChildThread,
+  executeChildThreadTask,
   finalizeChildThreadCancellation,
   getChildThreadBudgetUsage,
   getChildThreadRelation,
@@ -64,9 +65,18 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { threadItemTable, threadRelationTable } from "@/lib/persistence/schema/conversation";
-import { createInvocation, updateInvocationState } from "@/lib/runtime/invocation-queries";
-import { eq } from "drizzle-orm";
+import {
+  threadEventTable,
+  threadItemTable,
+  threadRelationTable,
+} from "@/lib/persistence/schema/conversation";
+import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
+import {
+  createInvocation,
+  getInvocationById,
+  updateInvocationState,
+} from "@/lib/runtime/invocation-queries";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -1841,5 +1851,177 @@ describe("Child Thread 预算用量", () => {
         delta: { tokens: 100 },
       }),
     ).rejects.toThrow(ThreadNotFoundError);
+  });
+});
+
+// ─── executeChildThreadTask 正式子任务执行端口 ─────────────────
+
+describe("executeChildThreadTask（S09-C02 子任务正式执行端口）", () => {
+  let tenantId: string;
+  let ownerId: string;
+  let parentAgentId: string;
+  let targetAgentId: string;
+  let parentThreadId: string;
+  let parentInvocationId: string;
+
+  beforeEach(async () => {
+    const ctx = await seedTenantAndOwner();
+    tenantId = ctx.tenantId;
+    ownerId = ctx.ownerId;
+    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent-exec");
+    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent-exec", {
+      allowedTargets: [targetAgentId],
+      maxDepth: 2,
+    });
+    parentAgentId = parent.agentId;
+    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
+    parentThreadId = seed.threadId;
+    parentInvocationId = seed.invocationId;
+  });
+
+  it("正式接纳 child task 为子 Turn + child Invocation（作用域为子 Thread/子 Turn）", async () => {
+    const result = await executeChildThreadTask({
+      tenantId,
+      parentThreadId,
+      parentInvocationId,
+      targetAgentId,
+      ownerUserId: ownerId,
+      content: { text: "整理季度报告并输出摘要" },
+      budgetPolicyJson: { maxTokens: 1000, maxWallClockMs: 60000 },
+      actorId: ownerId,
+    });
+
+    // 子 Thread：primaryAgentId=targetAgentId，且有 child Turn（lastTurnSequence=1）。
+    expect(result.childThread.id).not.toBe(parentThreadId);
+    expect(result.childThread.primaryAgentId).toBe(targetAgentId);
+    expect(result.childThread.lastTurnSequence).toBe(1);
+    expect(result.childThread.lastItemSequence).toBe(1);
+
+    // delegate relation：active + 子 Thread + 预算策略。
+    expect(result.relation.childThreadId).toBe(result.childThread.id);
+    expect(result.relation.relationType).toBe("delegate");
+    expect(result.relation.relationState).toBe("active");
+    expect(result.relation.targetAgentId).toBe(targetAgentId);
+    expect(result.relation.budgetPolicyJson).toEqual({ maxTokens: 1000, maxWallClockMs: 60000 });
+
+    // child Turn：triggerType=system；trigger Item：itemType=user_message、authorType=system。
+    expect(result.childTurn.threadId).toBe(result.childThread.id);
+    expect(result.childTurn.triggerType).toBe("system");
+    expect(result.childTurn.turnState).toBe("accepted");
+    expect(result.triggerItem.threadId).toBe(result.childThread.id);
+    expect(result.triggerItem.turnId).toBe(result.childTurn.id);
+    expect(result.triggerItem.itemType).toBe("user_message");
+    expect(result.triggerItem.authorType).toBe("system");
+
+    // child Invocation：作用域为子 Thread/子 Turn，queued；权威表回读一致。
+    expect(result.childInvocation.threadId).toBe(result.childThread.id);
+    expect(result.childInvocation.turnId).toBe(result.childTurn.id);
+    expect(result.childInvocation.executionState).toBe("queued");
+    const authoritative = await getInvocationById(tenantId, result.childInvocation.id);
+    expect(authoritative?.threadId).toBe(result.childThread.id);
+    expect(authoritative?.turnId).toBe(result.childTurn.id);
+    expect(authoritative?.executionState).toBe("queued");
+  });
+});
+
+// ─── 子取消 ack 集成：requestChildThreadCancellation + 正式 event ingress ───
+
+describe("子取消 ack 集成（requestChildThreadCancellation + ingress execution.cancelled）", () => {
+  let tenantId: string;
+  let ownerId: string;
+  let parentAgentId: string;
+  let targetAgentId: string;
+  let parentThreadId: string;
+  let parentInvocationId: string;
+
+  beforeEach(async () => {
+    const ctx = await seedTenantAndOwner();
+    tenantId = ctx.tenantId;
+    ownerId = ctx.ownerId;
+    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent-cancel");
+    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent-cancel", {
+      allowedTargets: [targetAgentId],
+      maxDepth: 2,
+    });
+    parentAgentId = parent.agentId;
+    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
+    parentThreadId = seed.threadId;
+    parentInvocationId = seed.invocationId;
+  });
+
+  it("Runtime ack 前 relation=cancel_requested；ack 后（ingress）relation=cancelled", async () => {
+    const { relation, childThread, childInvocation } = await executeChildThreadTask({
+      tenantId,
+      parentThreadId,
+      parentInvocationId,
+      targetAgentId,
+      ownerUserId: ownerId,
+      content: { text: "子任务待取消" },
+      actorId: ownerId,
+    });
+
+    // child Invocation 转入 running（正式状态机）。
+    await db.transaction(async (tx) => {
+      await updateInvocationState(tx, tenantId, childInvocation.id, "running");
+    });
+
+    // 父请求取消 → relation active→cancel_requested + 入队 cancel command。
+    await requestChildThreadCancellation({
+      tenantId,
+      parentThreadId,
+      relationId: relation.id,
+      reason: "集成取消 ack",
+      reasonCode: "PARENT_NO_LONGER_NEEDS_RESULT",
+    });
+    const preAckRelation = await getChildThreadRelation(relation.id);
+    expect(preAckRelation?.relationState).toBe("cancel_requested");
+    const preAckInvocation = await getInvocationById(tenantId, childInvocation.id);
+    expect(preAckInvocation?.executionState).not.toBe("cancelled");
+
+    // 子 Runtime 经正式 ingress 回传 execution.cancelled → post-commit
+    // handleChildThreadTerminal(cancelled) → finalizeChildThreadCancellation。
+    await ingressEventBatch({
+      tenantId,
+      invocationId: childInvocation.id,
+      producerSequenceStart: 1,
+      events: [
+        {
+          producer_event_id: `evt-cancel-${randomUUID()}`,
+          producer_sequence: 1,
+          type: "execution.cancelled",
+          payload: { cancelled_by: "parent" },
+        },
+      ],
+    });
+
+    const postAckInvocation = await getInvocationById(tenantId, childInvocation.id);
+    expect(postAckInvocation?.executionState).toBe("cancelled");
+    const postAckRelation = await getChildThreadRelation(relation.id);
+    expect(postAckRelation?.relationState).toBe("cancelled");
+
+    // 事件顺序稳定：cancel_requested 早于 cancelled。
+    const cancelRequested = await db
+      .select()
+      .from(threadEventTable)
+      .where(
+        and(
+          eq(threadEventTable.threadId, parentThreadId),
+          eq(threadEventTable.eventType, "child_thread.cancel_requested"),
+        ),
+      );
+    const cancelled = await db
+      .select()
+      .from(threadEventTable)
+      .where(
+        and(
+          eq(threadEventTable.threadId, parentThreadId),
+          eq(threadEventTable.eventType, "child_thread.cancelled"),
+        ),
+      );
+    expect(cancelRequested.length).toBe(1);
+    expect(cancelled.length).toBe(1);
+    expect(cancelRequested[0]?.eventSequence).toBeLessThan(
+      cancelled[0]?.eventSequence ?? Number.POSITIVE_INFINITY,
+    );
   });
 });

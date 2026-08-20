@@ -202,24 +202,28 @@ export function ThreadTimeline({
     pinnedToBottomRef.current = distanceFromBottom <= 100;
   }, []);
 
-  const markKeyboardScrollIntent = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (
-      event.key === "ArrowUp" ||
-      event.key === "ArrowDown" ||
-      event.key === "PageUp" ||
-      event.key === "PageDown" ||
-      event.key === "Home" ||
-      event.key === "End" ||
-      event.key === " "
-    ) {
-      markUserScrollIntent();
-    }
-  }, [markUserScrollIntent]);
+  const markKeyboardScrollIntent = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (
+        event.key === "ArrowUp" ||
+        event.key === "ArrowDown" ||
+        event.key === "PageUp" ||
+        event.key === "PageDown" ||
+        event.key === "Home" ||
+        event.key === "End" ||
+        event.key === " "
+      ) {
+        markUserScrollIntent();
+      }
+    },
+    [markUserScrollIntent],
+  );
 
   // 初次打开已有会话直接定位最新消息；之后只在用户仍停留底部时跟随内容。
   // 依赖 visibleItems 而非 segments.length：流式 delta 更新同一个 Agent Item 时段数不变，
   // 但正文高度会持续增长，仍需保持底部锚定。同步定位避免先显示顶部再滚过历史，下一帧
   // 再校正 Markdown 布局后的高度。resnapshot 若保持 items 引用不变则不会额外触发。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: visibleItems 是刻意依赖，见上方注释
   useLayoutEffect(() => {
     if (segments.length === 0) {
       hasPositionedInitialContentRef.current = false;

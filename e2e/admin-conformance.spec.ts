@@ -32,6 +32,25 @@ const IF_MATCH_HEADER = "if-match";
 /** 不存在的 UUID（全零）。用于 404 测试。 */
 const NON_EXISTENT_UUID = "00000000-0000-4000-8000-000000000000";
 
+/**
+ * 合法的 RouteSet 激活请求体（正式写入口 §13.1 ActivateRouteSet）。
+ *
+ * 头守卫在请求体解析之前生效，故这里只需形状合法即可触发对应 400。
+ */
+const ACTIVATION_BODY = {
+  expected_version_no: 1,
+  reason: "e2e 头守卫一致性校验",
+  routes: [
+    {
+      route_group_id: "primary",
+      agent_revision_id: NON_EXISTENT_UUID,
+      runtime_revision_id: NON_EXISTENT_UUID,
+      traffic_weight: 10000,
+      priority_no: 1,
+    },
+  ],
+};
+
 /** API 错误响应体类型。 */
 interface ApiErrorResponse {
   error: {
@@ -147,24 +166,24 @@ test.describe("S11-W08 管理操作一致性", () => {
   });
 
   // ─── 5. If-Match 一致性 — 缺少 If-Match ──────────────────
+  //
+  // §13 已物理删除单 Route 兼容写入口（PUT /deployment-routes/{id} 只剩 GET）。
+  // 正式写入口是 RouteSet 整体激活，守卫顺序：认证 → If-Match → ETag 格式 →
+  // Idempotency-Key → 请求体。以下三例针对正式入口验证头守卫。
 
-  test("If-Match 守卫：PUT deployment-routes 缺少 If-Match → REQUEST_SCHEMA_INVALID", async ({
+  test("If-Match 守卫：PUT route-set activation 缺少 If-Match → REQUEST_SCHEMA_INVALID", async ({
     request,
   }) => {
-    const response = await request.put(`${ADMIN_BASE}/deployment-routes/${NON_EXISTENT_UUID}`, {
-      headers: {
-        "content-type": "application/json",
-        [IDEMPOTENCY_KEY_HEADER]: "idem-e2e-missing-ifmatch",
+    const response = await request.put(
+      `${ADMIN_BASE}/deployment-route-sets/${NON_EXISTENT_UUID}/activation`,
+      {
+        headers: {
+          "content-type": "application/json",
+          [IDEMPOTENCY_KEY_HEADER]: "idem-e2e-missing-ifmatch",
+        },
+        data: ACTIVATION_BODY,
       },
-      data: {
-        route_set_id: NON_EXISTENT_UUID,
-        agent_revision_id: NON_EXISTENT_UUID,
-        runtime_revision_id: NON_EXISTENT_UUID,
-        traffic_weight: 10000,
-        priority_no: 1,
-        route_state: "enabled",
-      },
-    });
+    );
 
     expect(response.status()).toBe(400);
     const body = await parseErrorBody(response);
@@ -176,21 +195,17 @@ test.describe("S11-W08 管理操作一致性", () => {
   // ─── 6. If-Match 格式校验 — 畸形 ETag ────────────────────
 
   test("If-Match 格式校验：畸形 ETag → REQUEST_SCHEMA_INVALID", async ({ request }) => {
-    const response = await request.put(`${ADMIN_BASE}/deployment-routes/${NON_EXISTENT_UUID}`, {
-      headers: {
-        "content-type": "application/json",
-        [IDEMPOTENCY_KEY_HEADER]: "idem-e2e-malformed-ifmatch",
-        [IF_MATCH_HEADER]: '"invalid-etag-format"',
+    const response = await request.put(
+      `${ADMIN_BASE}/deployment-route-sets/${NON_EXISTENT_UUID}/activation`,
+      {
+        headers: {
+          "content-type": "application/json",
+          [IDEMPOTENCY_KEY_HEADER]: "idem-e2e-malformed-ifmatch",
+          [IF_MATCH_HEADER]: '"invalid-etag-format"',
+        },
+        data: ACTIVATION_BODY,
       },
-      data: {
-        route_set_id: NON_EXISTENT_UUID,
-        agent_revision_id: NON_EXISTENT_UUID,
-        runtime_revision_id: NON_EXISTENT_UUID,
-        traffic_weight: 10000,
-        priority_no: 1,
-        route_state: "enabled",
-      },
-    });
+    );
 
     expect(response.status()).toBe(400);
     const body = await parseErrorBody(response);
@@ -201,23 +216,19 @@ test.describe("S11-W08 管理操作一致性", () => {
 
   // ─── 7. 幂等键一致性 — 缺少 Idempotency-Key ──────────────
 
-  test("幂等键守卫：PUT deployment-routes 缺少 Idempotency-Key → REQUEST_SCHEMA_INVALID", async ({
+  test("幂等键守卫：PUT route-set activation 缺少 Idempotency-Key → REQUEST_SCHEMA_INVALID", async ({
     request,
   }) => {
-    const response = await request.put(`${ADMIN_BASE}/deployment-routes/${NON_EXISTENT_UUID}`, {
-      headers: {
-        "content-type": "application/json",
-        [IF_MATCH_HEADER]: '"route-set-1"',
+    const response = await request.put(
+      `${ADMIN_BASE}/deployment-route-sets/${NON_EXISTENT_UUID}/activation`,
+      {
+        headers: {
+          "content-type": "application/json",
+          [IF_MATCH_HEADER]: '"route-set-1"',
+        },
+        data: ACTIVATION_BODY,
       },
-      data: {
-        route_set_id: NON_EXISTENT_UUID,
-        agent_revision_id: NON_EXISTENT_UUID,
-        runtime_revision_id: NON_EXISTENT_UUID,
-        traffic_weight: 10000,
-        priority_no: 1,
-        route_state: "enabled",
-      },
-    });
+    );
 
     expect(response.status()).toBe(400);
     const body = await parseErrorBody(response);

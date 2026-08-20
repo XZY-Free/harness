@@ -17,11 +17,11 @@ import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn, getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { executionBindingTable } from "@/lib/persistence/schema/executions";
 import type { AuditActor } from "@/lib/identity/audit";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import { executionBindingTable } from "@/lib/persistence/schema/executions";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtime";
 import {
   MAX_TRAFFIC_WEIGHT,
@@ -34,8 +34,8 @@ import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-re
 import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
   await resetDatabase(db);

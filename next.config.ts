@@ -14,6 +14,10 @@ if (basePath && (!basePath.startsWith("/") || basePath.endsWith("/"))) {
 
 const nextConfig: NextConfig = {
   basePath: basePath || undefined,
+  // 构建产物目录。默认 .next；e2e 用 SNOW_DIST_DIR=.next-e2e 隔离，
+  // 使 e2e 的 build/start 与开发者常驻的 `pnpm dev` 互不干扰
+  // （Next 16 对同一项目目录的 dev server 有独占锁，且共用 .next 会互相覆盖）。
+  distDir: process.env.SNOW_DIST_DIR || ".next",
   env: {
     NEXT_PUBLIC_SNOW_BASE_PATH: basePath,
   },

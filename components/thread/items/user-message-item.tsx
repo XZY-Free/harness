@@ -23,7 +23,7 @@ export function UserMessageItem({ item }: UserMessageItemProps) {
   if (!displayText) return null;
 
   return (
-    <div className="message-row mb-3 flex justify-end">
+    <div className="message-row mb-3 flex justify-end" data-testid="user-message">
       <div
         className={cn(
           "conversation-user-bubble",

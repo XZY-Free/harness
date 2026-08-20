@@ -106,7 +106,9 @@ export function CmdkPanel({
                     >
                       <FolderOpen className="size-4 text-muted-foreground" />
                       <span>文件和文件夹</span>
-                      <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘O</span>
+                      <span className="ml-auto text-xs tracking-widest text-muted-foreground">
+                        ⌘O
+                      </span>
                     </Command.Item>
                     <Command.Item
                       value="search-files"
@@ -115,7 +117,9 @@ export function CmdkPanel({
                     >
                       <FileSearch className="size-4 text-muted-foreground" />
                       <span>搜索文件</span>
-                      <span className="ml-auto text-xs tracking-widest text-muted-foreground">⌘P</span>
+                      <span className="ml-auto text-xs tracking-widest text-muted-foreground">
+                        ⌘P
+                      </span>
                     </Command.Item>
                   </>
                 )}

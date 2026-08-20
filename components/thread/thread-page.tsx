@@ -151,10 +151,10 @@ export function ThreadPage({
   const primaryAgentIsSystemDefault = availableAgents?.some(
     (agent) => agent.id === thread?.primary_agent_id && agent.agentKey === "default",
   );
-  const primaryAgentOption = availableAgents?.find((agent) => agent.id === thread?.primary_agent_id);
-  const primaryAgentName = primaryAgentIsSystemDefault
-    ? "助手"
-    : primaryAgentOption?.displayName;
+  const primaryAgentOption = availableAgents?.find(
+    (agent) => agent.id === thread?.primary_agent_id,
+  );
+  const primaryAgentName = primaryAgentIsSystemDefault ? "助手" : primaryAgentOption?.displayName;
   const desktopTitlebar = variant === "desktop" && (
     <div
       data-testid="desktop-thread-titlebar"
@@ -253,9 +253,8 @@ export function ThreadPage({
 
   // 首次加载时消息区的局部加载反馈（仅占消息区，不替换整页）。
   const messageAreaLoading = (
-    <div
+    <output
       data-testid="message-area-loading"
-      role="status"
       className="flex min-h-0 flex-1 items-center justify-center px-4 py-10"
     >
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -265,7 +264,7 @@ export function ThreadPage({
         />
         <span>加载会话中…</span>
       </div>
-    </div>
+    </output>
   );
 
   // Web 顶部标题区：已加载用真实 ThreadHeader；首次加载用同高稳定占位（不构造假 Thread）。
@@ -279,7 +278,6 @@ export function ThreadPage({
   ) : (
     <header
       data-testid="web-thread-header-placeholder"
-      aria-hidden="true"
       className={cn(
         "flex items-center justify-between border-b border-border bg-card py-3.5 pr-4 lg:pr-6",
         sidebar?.collapsed ? "pl-32" : "pl-4 lg:pl-6",

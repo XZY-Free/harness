@@ -22,6 +22,7 @@
  * - Invocation 终态必须形成公开 Event。
  */
 import { randomUUID } from "node:crypto";
+import { handleChildThreadTerminal } from "@/lib/conversations/child-thread-queries";
 import { EventSequenceGapError } from "@/lib/conversations/errors";
 import {
   allocateEventSequences,
@@ -163,8 +164,54 @@ export async function ingressEventBatch(
     );
   }
 
-  return await db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     return await processIngressBatch(tx, params, invocation);
+  });
+
+  // ─── Post-commit：子线程终态协调 ────────────────────────────
+  // Runtime 终态事件经正式 ingress 落库后（事务已提交），若该 Invocation 属于某个
+  // delegate 子 Thread 且已进入终态，自动调用 handleChildThreadTerminal：
+  // - completed/failed → projectChildThreadResult（父线程结构化结果投影）
+  // - cancelled → finalizeChildThreadCancellation（取消 ack 落库）
+  // 这使 child-thread-isolation / child-cancel-requires-ack 的"终态自动接线"真正成立。
+  await coordinateChildThreadTerminal(params.tenantId, params.invocationId);
+
+  return result;
+}
+
+/**
+ * 子线程终态协调（post-commit）。
+ *
+ * ingress 事务把子 Invocation 推向终态后调用；`handleChildThreadTerminal` 内部按
+ * childThreadId 查 delegate ThreadRelation——非 delegate 线程返回 skipped（无副作用），
+ * delegate 线程按其终态投影结果/终结取消。子线程终态事件顺序稳定，由 ingress 事务
+ * 与 handleChildThreadTerminal 各自独立事务（父/子线程行锁不重叠）保证。
+ */
+async function coordinateChildThreadTerminal(
+  tenantId: string,
+  invocationId: string,
+): Promise<void> {
+  const invocation = await getInvocationById(tenantId, invocationId);
+  if (!invocation) return;
+  if (!INVOCATION_TERMINAL_STATES.includes(invocation.executionState)) return;
+  if (!invocation.threadId) return;
+
+  let terminalState: "completed" | "failed" | "cancelled";
+  if (invocation.executionState === "completed") {
+    terminalState = "completed";
+  } else if (invocation.executionState === "failed") {
+    terminalState = "failed";
+  } else if (invocation.executionState === "cancelled") {
+    terminalState = "cancelled";
+  } else {
+    // lost 等其他终态不触发 child 投影/取消终结（保持 fail-closed）。
+    return;
+  }
+
+  await handleChildThreadTerminal({
+    tenantId,
+    childThreadId: invocation.threadId,
+    terminalState,
   });
 }
 

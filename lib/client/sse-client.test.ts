@@ -189,9 +189,7 @@ describe("createSSEClient retry budget", () => {
     vi.useFakeTimers();
     try {
       const long = controllableBody();
-      const fetchImpl = vi
-        .fn()
-        .mockResolvedValue(new Response(long.body, { status: 200 }));
+      const fetchImpl = vi.fn().mockResolvedValue(new Response(long.body, { status: 200 }));
       const callbacks = makeCallbacks();
       const handle = createSSEClient(
         {

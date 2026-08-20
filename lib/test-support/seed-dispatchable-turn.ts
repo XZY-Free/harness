@@ -19,22 +19,9 @@ import {
   createDraftRevision,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
-import {
-  type BuilderKeyRegistry,
-  type ManagedArtifactStore,
-  type ProvenanceDocument,
-  type VerifyAttestationInput,
-  computeArtifactDigest,
-} from "@/lib/artifacts/domain/artifact-attestation";
-import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
-import {
-  buildDsseArtifactAttestationEnvelope,
-  generateTestBuilderKey,
-} from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
-import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
@@ -45,126 +32,14 @@ import {
   createRouteSet,
 } from "@/lib/routes/application/deployment-route-service";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
-import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import {
-  createDraftRuntimeRevision,
-  getRuntimeRevisionById,
-} from "@/lib/runtime/persistence/runtime-revision-queries";
+  buildActor,
+  createVerifiedAttestation,
+} from "@/lib/test-support/create-verified-attestation";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
+import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
 
 export const DEFAULT_ROUTE_SCOPE_KEY = "default";
-
-// ─── InMemoryManagedArtifactStore ────────────────────────────
-
-class InMemoryManagedArtifactStore implements ManagedArtifactStore {
-  private envelopes = new Map<string, Buffer>();
-  private sboms = new Map<string, unknown>();
-  private provenances = new Map<string, ProvenanceDocument>();
-
-  writeDsseEnvelope(ref: string, envelope: Buffer): void {
-    this.envelopes.set(ref, envelope);
-  }
-  writeSbom(ref: string, doc: unknown): void {
-    this.sboms.set(ref, doc);
-  }
-  writeProvenance(ref: string, doc: ProvenanceDocument): void {
-    this.provenances.set(ref, doc);
-  }
-
-  async readDsseEnvelope(ref: string): Promise<Buffer> {
-    const envelope = this.envelopes.get(ref);
-    if (!envelope) throw new Error(`DSSE envelope not found: ${ref}`);
-    return envelope;
-  }
-  async readSbom(ref: string): Promise<unknown> {
-    const doc = this.sboms.get(ref);
-    if (!doc) throw new Error(`sbom not found: ${ref}`);
-    return doc;
-  }
-  async readProvenance(ref: string): Promise<ProvenanceDocument> {
-    const doc = this.provenances.get(ref);
-    if (!doc) throw new Error(`provenance not found: ${ref}`);
-    return doc;
-  }
-}
-
-// ─── 辅助构造 ────────────────────────────────────────────────
-
-function buildCleanSbom(): unknown {
-  return {
-    bomFormat: "CycloneDX",
-    specVersion: "1.6",
-    version: 1,
-    metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
-    components: [
-      {
-        type: "library",
-        name: "lodash",
-        version: "4.17.21",
-        licenses: [{ license: { id: "MIT" } }],
-      },
-    ],
-  };
-}
-
-function buildValidProvenance(): ProvenanceDocument {
-  return {
-    sourceRevision: "git:abc123def456",
-    buildPipeline: "ci-cd-pipeline-1",
-    dependencyLockFile: "package-lock.json:sha256:lockhash",
-    buildTime: "2026-07-15T01:00:00.000Z",
-  };
-}
-
-function buildActor(tenantId: string, actorId: string): AuditActor {
-  return { tenantId, actorType: "service", actorId };
-}
-
-async function createVerifiedAttestation(
-  tenantId: string,
-  artifactType: string,
-  artifactRevisionId: string,
-  artifactContent: string,
-) {
-  const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
-  const builderKeys: BuilderKeyRegistry = {
-    "builder:company-agent-runtime": keyPair.publicKeyBase64,
-  };
-  const digest = computeArtifactDigest(artifactContent);
-  const dsseEnvelopeRef = `attestation:signature:${digest.slice(7, 15)}`;
-  const sbomRef = `attestation:sbom:${digest.slice(7, 15)}`;
-  const provRef = `attestation:provenance:${digest.slice(7, 15)}`;
-
-  const store = new InMemoryManagedArtifactStore();
-  store.writeDsseEnvelope(
-    dsseEnvelopeRef,
-    buildDsseArtifactAttestationEnvelope(keyPair, digest, {
-      sbomRef,
-      sbomContent: buildCleanSbom(),
-      provenanceRef: provRef,
-      provenanceContent: buildValidProvenance(),
-    }),
-  );
-  store.writeSbom(sbomRef, buildCleanSbom());
-  store.writeProvenance(provRef, buildValidProvenance());
-
-  const input: VerifyAttestationInput = {
-    tenantId,
-    artifactType,
-    artifactRevisionId,
-    artifactDigest: digest,
-    dsseEnvelopeRef,
-    builderIdentity: "builder:company-agent-runtime",
-  };
-
-  return verifyAndPersistAttestation(
-    input,
-    store,
-    builderKeys,
-    buildActor(tenantId, "ci-service-001"),
-  );
-}
 
 // ─── seed 租户 + 默认用户 ────────────────────────────────────
 
@@ -235,58 +110,6 @@ async function seedPublishedAgentRevision(
   const publishedRevision = await getRevisionById(revision.id);
   if (!publishedRevision) throw new Error("测试 AgentRevision 发布后无法回读");
   return { agent, revision: publishedRevision, attestation };
-}
-
-// ─── seed Runtime + published RuntimeRevision ────────────────
-
-async function seedPublishedRuntimeRevision(
-  tenantId: string,
-  ownerId: string,
-  runtimeKey: string,
-  capabilities: string[],
-  contentSuffix: string,
-) {
-  const runtime = await createRuntime({
-    tenantId,
-    runtimeKey,
-    displayName: `Runtime ${runtimeKey}`,
-    runtimeKind: "hosted",
-    ownerUserId: ownerId,
-    lifecycleState: "enabled",
-  });
-
-  const artifactContent = `runtime-content-${contentSuffix}`;
-  const artifactDigest = computeArtifactDigest(artifactContent);
-
-  const revision = await createDraftRuntimeRevision({
-    tenantId,
-    runtimeId: runtime.id,
-    protocolType: "a2a",
-    endpointRef: `https://runtime-${contentSuffix}.internal`,
-    runtimeArtifactRef: `oci://registry/runtime@${artifactDigest}`,
-    runtimeCapabilitiesJson: capabilities,
-    identityMode: "managed",
-    networkZone: "internal",
-    configHash: `sha256:config_${contentSuffix}`,
-    createdBy: ownerId,
-  });
-
-  const attestation = await createVerifiedAttestation(
-    tenantId,
-    "runtime_revision",
-    revision.id,
-    artifactContent,
-  );
-  await publishTrustedRuntimeRevisionForTest({
-    tenantId,
-    revisionId: revision.id,
-    runtimeExpectedVersionNo: 1,
-    attestationId: attestation.id,
-  });
-
-  const publishedRevision = await getRuntimeRevisionById(revision.id);
-  if (!publishedRevision) throw new Error("测试 RuntimeRevision 发布后无法回读");
-  return { runtime, revision: publishedRevision, attestation };
 }
 
 // ─── seed 完整调度上下文 ─────────────────────────────────────

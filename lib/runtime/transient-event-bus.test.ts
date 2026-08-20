@@ -1,12 +1,16 @@
+import { SSE_BUFFER_SIZE } from "@/lib/conversations/sse-transport";
 import { describe, expect, it, vi } from "vitest";
 import {
   MAX_BUFFERED_EVENTS_PER_THREAD,
   publishThreadTransientEvent,
   subscribeThreadTransientEvents,
 } from "./transient-event-bus";
-import { SSE_BUFFER_SIZE } from "@/lib/conversations/sse-transport";
 
-function makeEvent(threadId: string, transientId: string, delta: string): {
+function makeEvent(
+  threadId: string,
+  transientId: string,
+  delta: string,
+): {
   threadId: string;
   transientId: string;
   turnId: string;

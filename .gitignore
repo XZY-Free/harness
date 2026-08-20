@@ -1,5 +1,7 @@
 node_modules
 .next/
+# e2e 隔离构建产物（见 next.config.ts 的 SNOW_DIST_DIR）
+.next-e2e/
 out/
 build
 .DS_Store

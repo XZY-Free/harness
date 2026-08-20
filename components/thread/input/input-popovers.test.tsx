@@ -46,7 +46,10 @@ describe("ModelSelectorPopover", () => {
 
   it("current=null 且 /api/models 未返回时，立即显示传入的平台默认模型", async () => {
     // /api/models 挂起（永不 resolve），确保不依赖异步发现即可显示平台默认。
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(() => undefined)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => new Promise(() => undefined)),
+    );
 
     render(
       <ModelSelectorPopover
@@ -61,7 +64,10 @@ describe("ModelSelectorPopover", () => {
   });
 
   it("current 非空时优先显示显式选择，覆盖平台默认", () => {
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => new Promise(() => undefined)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => new Promise(() => undefined)),
+    );
 
     render(
       <ModelSelectorPopover
@@ -80,7 +86,10 @@ describe("ModelSelectorPopover", () => {
       "fetch",
       vi.fn().mockResolvedValue(
         new Response(
-          JSON.stringify({ ok: true, data: { models: [{ id: "deepseek-v4-flash" }], defaultModel: "deepseek-v4-flash" } }),
+          JSON.stringify({
+            ok: true,
+            data: { models: [{ id: "deepseek-v4-flash" }], defaultModel: "deepseek-v4-flash" },
+          }),
           { status: 200, headers: { "content-type": "application/json" } },
         ),
       ),

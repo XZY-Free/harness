@@ -58,6 +58,7 @@ import {
   computeEventPayloadHash,
   insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
+import { type ChildTaskContent, acceptChildTaskTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import type {
   InvocationCommand,
@@ -66,6 +67,7 @@ import type {
   ThreadEventActorType,
   ThreadItem,
   ThreadRelation,
+  Turn,
 } from "@/lib/persistence/schema/conversation";
 import {
   invocationCommandTable,
@@ -76,9 +78,11 @@ import {
 } from "@/lib/persistence/schema/conversation";
 import {
   INVOCATION_TERMINAL_STATES,
+  type Invocation,
   type InvocationExecutionState,
   invocationTable,
 } from "@/lib/persistence/schema/runtime";
+import { createInvocation } from "@/lib/runtime/invocation-queries";
 import { and, asc, desc, eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -724,6 +728,125 @@ export async function delegateChildThread(
     parentChildThreadCreatedEvent,
     childThreadItem,
     itemCreatedEvent,
+  };
+}
+
+// ─── S09-C02 子任务正式执行端口 ───────────────────────────
+
+/**
+ * 正式接纳并执行一个 child task（S09-C02 子任务执行端口的可达部分）。
+ *
+ * delegateChildThread 只创建子 Thread + delegate relation + 父 child_thread Item；
+ * 子 Thread 此时无 Turn（lastTurnSequence=0）。本端口把 child task 正式接纳为子 Thread
+ * 的 child Turn + trigger Item（acceptChildTaskTurn），再以子 Thread 为作用域创建 child
+ * Invocation（createInvocation），使其可被生产 Dispatcher 调度 / 被 Runtime 事件推进终态。
+ *
+ * 语义（对齐 S09-C02 契约）：
+ * - child Turn：triggerType="system"、authorType="system"（平台委派，非用户消息）。
+ * - child Invocation：以子 Thread/子 Turn 为作用域（threadId=childThread.id，
+ *   turnId=childTurn.id），executionState=queued；经正式 event ingress
+ *   （ingressEventBatch）由 runtime 事件推进终态，并自动触发
+ *   handleChildThreadTerminal → projectChildThreadResult / finalizeChildThreadCancellation。
+ * - 权限/授权作用域即 child Agent 自身上下文（child Thread.primaryAgentId=targetAgentId、
+ *   child Invocation 属该子线程）：子 Invocation 与父 Invocation 各自独立。
+ *
+ * 已知缺口（本切片 fail-closed，绝不伪造）：不可变 ExecutionBinding 需要已发布的
+ * Agent + Runtime + Route（assertExecutionBindingEvidence 强校验 publication 记录 +
+ * conformanceRunId + 有效 digest）。Runtime 发布门禁要求全部 16 个 Conformance case 通过，
+ * 而 credential/ownership 两 case 在本切片永久 fail-closed → 无已发布 Runtime 可用，因此
+ * 本端口不创建 ExecutionBinding、也不走 Hosted Adapter route 分发；route 分发/绑定留待
+ * Runtime 发布链解冻后由 executeChildThreadTask 上层补足。child-thread-isolation case
+ * 的 immutable ExecutionBinding 证据相应保持 fail-closed。
+ *
+ * @throws 见 delegateChildThread（父 Invocation 非 running、target 不在 allowedTargets、
+ *         depth 超限、budget/context policy 非法等）
+ */
+export interface ExecuteChildThreadTaskParams {
+  tenantId: string;
+  parentThreadId: string;
+  /** 父 Invocation（必须 running，delegateChildThread 校验）。 */
+  parentInvocationId: string;
+  /** child primary Agent id（必须 enabled + 在父 Agent delegationPolicy.allowedTargets）。 */
+  targetAgentId: string;
+  ownerUserId: string;
+  content: ChildTaskContent;
+  budgetPolicyJson?: DelegationBudgetPolicy;
+  contextTransferPolicyJson?: ContextTransferPolicy;
+  taskPayloadRef?: string | null;
+  taskPayloadHash?: string | null;
+  actorId?: string;
+  actorType?: ThreadEventActorType;
+  correlationId?: string;
+}
+
+export interface ExecuteChildThreadTaskResult {
+  childThread: Thread;
+  relation: ThreadRelation;
+  childTurn: Turn;
+  triggerItem: ThreadItem;
+  childInvocation: Invocation;
+}
+
+export async function executeChildThreadTask(
+  params: ExecuteChildThreadTaskParams,
+): Promise<ExecuteChildThreadTaskResult> {
+  // 1. delegateChildThread：校验 + 建子 Thread + relation + 父 child_thread Item + 事件。
+  const { thread: childThread, relation } = await delegateChildThread({
+    tenantId: params.tenantId,
+    parentThreadId: params.parentThreadId,
+    parentInvocationId: params.parentInvocationId,
+    targetAgentId: params.targetAgentId,
+    ownerUserId: params.ownerUserId,
+    title: null,
+    budgetPolicyJson: params.budgetPolicyJson ?? null,
+    contextTransferPolicyJson: params.contextTransferPolicyJson ?? null,
+    taskPayloadRef: params.taskPayloadRef ?? null,
+    taskPayloadHash: params.taskPayloadHash ?? null,
+    actorId: params.actorId,
+    actorType: params.actorType,
+    correlationId: params.correlationId,
+  });
+
+  // 2. 正式接纳 child task 为子 Thread 的 child Turn + trigger Item。
+  const childTask = await acceptChildTaskTurn({
+    tenantId: params.tenantId,
+    threadId: childThread.id,
+    ownerUserId: params.ownerUserId,
+    content: {
+      ...params.content,
+      relationId: params.content.relationId ?? relation.id,
+      parentInvocationId: params.content.parentInvocationId ?? params.parentInvocationId,
+    },
+    actorId: params.actorId ?? params.ownerUserId,
+    correlationId: params.correlationId,
+  });
+
+  // 3. 以子 Thread/子 Turn 为作用域创建 child Invocation（queued，无 binding 即可创建）。
+  const { invocation: childInvocation } = await createInvocation({
+    tenantId: params.tenantId,
+    threadId: childThread.id,
+    turnId: childTask.turn.id,
+    invocationKind: "initial",
+    triggerItemId: childTask.item.id,
+    actorType: "system",
+    actorId: params.actorId ?? params.ownerUserId,
+    correlationId: params.correlationId,
+  });
+
+  // acceptChildTaskTurn 已推进子 Thread 的 turn/item/event 基线；重读权威子 Thread 状态，
+  // 使返回的 childThread 反映 turn 创建后的真实基线（lastTurnSequence/lastItemSequence）。
+  const [freshChildThread] = await db
+    .select()
+    .from(threadTable)
+    .where(eq(threadTable.id, childThread.id))
+    .limit(1);
+
+  return {
+    childThread: freshChildThread ?? childThread,
+    relation,
+    childTurn: childTask.turn,
+    triggerItem: childTask.item,
+    childInvocation,
   };
 }
 

@@ -1,6 +1,6 @@
+import type { ClientThread } from "@/lib/client/types";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ClientThread } from "@/lib/client/types";
 import { SidebarProvider } from "./sidebar/sidebar-context";
 import { ThreadHeader } from "./thread-header";
 
@@ -14,8 +14,7 @@ function createMatchMedia(initialMatches: boolean) {
   const mql = {
     matches: initialMatches,
     media: "(max-width: 1179px)",
-    addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.add(cb),
+    addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
     removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) =>
       listeners.delete(cb),
     dispatch: (matches: boolean) => {
@@ -44,15 +43,13 @@ const thread: ClientThread = {
 
 function renderHeader(matches: boolean) {
   const mql = createMatchMedia(matches);
-  vi.stubGlobal("matchMedia", vi.fn(() => mql));
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => mql),
+  );
   render(
     <SidebarProvider>
-      <ThreadHeader
-        thread={thread}
-        activeGoal={null}
-        latestTurn={null}
-        primaryAgentName="助手"
-      />
+      <ThreadHeader thread={thread} activeGoal={null} latestTurn={null} primaryAgentName="助手" />
     </SidebarProvider>,
   );
   return mql;

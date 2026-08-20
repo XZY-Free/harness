@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { ClientItem } from "@/lib/client/types";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ClientItem } from "@/lib/client/types";
 import { AgentMessageItem } from "./items/agent-message-item";
 import { UserMessageItem } from "./items/user-message-item";
 import { NewThreadPage } from "./new-thread-page";
@@ -80,9 +80,9 @@ describe("消息轨道与输入轨道拆分", () => {
 
   it("消息轨道与 composer 轨道是两类不同规则（Timeline 与 ThreadInput 各自轨道互不相同）", () => {
     stubModelsFetch();
-    const timelineEls = render(<ThreadTimeline items={[]} streamStatus="idle" />).container.querySelectorAll(
-      ".message-track",
-    );
+    const timelineEls = render(
+      <ThreadTimeline items={[]} streamStatus="idle" />,
+    ).container.querySelectorAll(".message-track");
     const composerEls = render(
       <ThreadInput threadId="t-1" latestTurn={null} availableAgents={[]} />,
     ).container.querySelectorAll(".composer-track");
@@ -115,7 +115,9 @@ describe("消息轨道与输入轨道拆分", () => {
 describe("用户/助手消息共享 message-track 宽度体系", () => {
   it("用户消息行与助手消息行都使用共享 .message-row 结构，各占同一轨道全宽", () => {
     const user = render(<UserMessageItem item={makeItem("user_message", "你好")} />).container;
-    const agent = render(<AgentMessageItem item={makeItem("agent_message", "回复正文")} />).container;
+    const agent = render(
+      <AgentMessageItem item={makeItem("agent_message", "回复正文")} />,
+    ).container;
 
     // 共享行结构：两种消息都在 .message-row 内
     expect(user.querySelector(".message-row")).not.toBeNull();
@@ -124,7 +126,9 @@ describe("用户/助手消息共享 message-track 宽度体系", () => {
 
   it("用户/助手各自保留语义 class（conversation-user-bubble / conversation-copy）", () => {
     const user = render(<UserMessageItem item={makeItem("user_message", "你好")} />).container;
-    const agent = render(<AgentMessageItem item={makeItem("agent_message", "回复正文")} />).container;
+    const agent = render(
+      <AgentMessageItem item={makeItem("agent_message", "回复正文")} />,
+    ).container;
 
     expect(user.querySelector(".conversation-user-bubble")).not.toBeNull();
     expect(agent.querySelector(".conversation-copy")).not.toBeNull();
@@ -155,8 +159,8 @@ describe("globals.css 消息宽度合同（读取真实样式文件）", () => {
     function extractMediaBlocks(css: string): string[] {
       const blocks: string[] = [];
       const re = /@media\s*\([^{]*\)\s*\{/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(css)) !== null) {
+      let m: RegExpExecArray | null = re.exec(css);
+      while (m !== null) {
         let depth = 1;
         let i = m.index + m[0].length;
         while (i < css.length && depth > 0) {
@@ -165,6 +169,7 @@ describe("globals.css 消息宽度合同（读取真实样式文件）", () => {
           i++;
         }
         blocks.push(css.slice(m.index, i));
+        m = re.exec(css);
       }
       return blocks;
     }

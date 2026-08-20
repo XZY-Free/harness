@@ -15,6 +15,9 @@
     "ignore": [
       "drizzle/**",
       ".next/**",
+      ".next-e2e/**",
+      ".playwright-cli/**",
+      "test-results/**",
       "node_modules/**",
       "workspaces/**",
       "docs/**",

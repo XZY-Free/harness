@@ -362,6 +362,183 @@ export async function acceptJobResultTurn(params: {
   return { turn, events };
 }
 
+/** child task Turn 的 trigger Item 内容（与 UserMessageContent 同构，但由平台注入）。 */
+export interface ChildTaskContent {
+  /** 委派任务描述文本（非空）。 */
+  text: string;
+  /** 关联 delegate ThreadRelation id（供 child task 溯源）。 */
+  relationId?: string;
+  /** 父 Invocation id（委派源）。 */
+  parentInvocationId?: string;
+}
+
+/**
+ * 原子接纳 child task Turn（S09-C02 子任务正式接纳端口）。
+ *
+ * 子 Thread 由 `delegateChildThread` 建出后无 Turn（lastTurnSequence=0）。本端口在子
+ * Thread 内正式接纳一个系统触发的 child task Turn + trigger Item，使子 Thread 具备可被
+ * 生产 Dispatcher 调度（dispatchInvocationForTurn / dispatchEmployeeTurn）的 accepted Turn。
+ *
+ * 语义：
+ * - triggerType="system"（子任务由平台委派，非用户消息）。
+ * - trigger Item 为 itemType="user_message"、authorType="system"（携带任务文本，作为
+ *   子 Thread 的触发输入）。child task 与用户消息同构（都是进入子 Agent 上下文的输入），
+ *   只是作者为平台而非员工。
+ * - 事务内写 trigger Item + Turn(accepted) + turn.accepted + item.created Event，并更新
+ *   Thread 的 turn/item/event sequence 基线。
+ *
+ * @throws ThreadNotFoundError 子 Thread 不存在
+ * @throws ThreadNotAcceptingTurnsError 子 Thread 非 active
+ */
+export async function acceptChildTaskTurn(params: {
+  tenantId: string;
+  threadId: string;
+  ownerUserId: string;
+  content: ChildTaskContent;
+  actorId?: string;
+  correlationId?: string;
+  idempotencyKey?: string;
+}): Promise<{
+  thread: Thread;
+  turn: Turn;
+  item: ThreadItem;
+  events: ThreadEvent[];
+}> {
+  const turnId = randomUUID();
+  const itemId = randomUUID();
+  const itemCreatedEventId = randomUUID();
+  const turnAcceptedEventId = randomUUID();
+  const now = new Date();
+  const contentHash = computeUserMessageHash(params.content);
+  const actorId = params.actorId ?? params.ownerUserId;
+
+  const result = await db.transaction(async (tx) => {
+    const [thread] = await tx
+      .select()
+      .from(threadTable)
+      .where(and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, params.threadId)))
+      .for("update")
+      .limit(1);
+
+    if (!thread) {
+      throw new ThreadNotFoundError(params.threadId);
+    }
+    if (thread.lifecycleState !== "active") {
+      throw new ThreadNotAcceptingTurnsError(params.threadId, thread.lifecycleState);
+    }
+
+    const turnSequence = thread.lastTurnSequence + 1;
+    const itemSequence = thread.lastItemSequence + 1;
+    const turnAcceptedSeq = thread.lastEventSequence + 1;
+    const itemCreatedSeq = thread.lastEventSequence + 2;
+
+    // trigger Item：child task 文本（系统作者，itemType=user_message）。
+    await tx.insert(threadItemTable).values({
+      id: itemId,
+      threadId: params.threadId,
+      turnId: turnId,
+      itemSequence,
+      itemType: "user_message",
+      itemState: "completed",
+      authorType: "system",
+      authorId: actorId,
+      contentJson: params.content as unknown as Record<string, unknown>,
+      contentHash,
+      contextPolicy: "include",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await tx.insert(turnTable).values({
+      id: turnId,
+      threadId: params.threadId,
+      turnSequence,
+      triggerType: "system",
+      triggerRef: null,
+      triggerItemId: itemId,
+      turnState: "accepted",
+      acceptedAt: now,
+      versionNo: 1,
+    });
+
+    await tx.insert(threadEventTable).values({
+      id: turnAcceptedEventId,
+      threadId: params.threadId,
+      eventSequence: turnAcceptedSeq,
+      eventType: "turn.accepted",
+      schemaVersion: 1,
+      turnId,
+      itemId,
+      actorType: "system",
+      actorId,
+      payloadJson: {
+        tenant_id: params.tenantId,
+        turn_sequence: turnSequence,
+        trigger_type: "system",
+        trigger_item_id: itemId,
+      },
+      correlationId: params.correlationId ?? null,
+      occurredAt: now,
+      ingestedAt: now,
+    });
+
+    await tx.insert(threadEventTable).values({
+      id: itemCreatedEventId,
+      threadId: params.threadId,
+      eventSequence: itemCreatedSeq,
+      eventType: "item.created",
+      schemaVersion: 1,
+      turnId,
+      itemId,
+      actorType: "system",
+      actorId,
+      payloadJson: {
+        item_type: "user_message",
+        content_hash: contentHash,
+      },
+      correlationId: params.correlationId ?? null,
+      idempotencyKey: params.idempotencyKey ?? null,
+      occurredAt: now,
+      ingestedAt: now,
+    });
+
+    await tx
+      .update(threadTable)
+      .set({
+        lastTurnSequence: turnSequence,
+        lastItemSequence: itemSequence,
+        lastEventSequence: itemCreatedSeq,
+        lastActivityAt: now,
+        updatedAt: now,
+      })
+      .where(eq(threadTable.id, params.threadId));
+
+    return { thread, turnSequence, itemSequence, itemCreatedSeq, turnAcceptedSeq };
+  });
+
+  const [updatedThread] = await db
+    .select()
+    .from(threadTable)
+    .where(eq(threadTable.id, params.threadId))
+    .limit(1);
+  const [turn] = await db.select().from(turnTable).where(eq(turnTable.id, turnId)).limit(1);
+  if (!turn) throw new Error(`acceptChildTaskTurn: Turn 行未找到（id=${turnId}）`);
+  const [item] = await db
+    .select()
+    .from(threadItemTable)
+    .where(eq(threadItemTable.id, itemId))
+    .limit(1);
+  if (!item) throw new Error(`acceptChildTaskTurn: ThreadItem 行未找到（id=${itemId}）`);
+  const events = await db
+    .select()
+    .from(threadEventTable)
+    .where(eq(threadEventTable.turnId, turnId))
+    .orderBy(asc(threadEventTable.eventSequence));
+  if (!updatedThread) throw new Error("acceptChildTaskTurn: Thread 行未找到（事务后）");
+
+  return { thread: updatedThread, turn, item, events };
+}
+
 /** 按 id 获取 Turn（跨租户隔离）。不存在返回 null。 */
 export async function getTurnById(tenantId: string, turnId: string): Promise<Turn | null> {
   const [row] = await db

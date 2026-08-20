@@ -127,10 +127,10 @@ describe("fetchAvailableModels 失败降级缓存", () => {
 
   it("发现成功时也进入同一缓存，TTL 内不重复请求", async () => {
     fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({ data: [{ id: "deepseek-v4-flash" }, { id: "glm-5.2" }] }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
+      new Response(JSON.stringify({ data: [{ id: "deepseek-v4-flash" }, { id: "glm-5.2" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
     );
 
     const first = await fetchAvailableModels();

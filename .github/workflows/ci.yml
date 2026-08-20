@@ -74,14 +74,30 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Web Playwright E2E
-        run: pnpm test:e2e
+      # Electron E2E 需要 X server（Desktop / Cross-client 用例真启动 Electron）。
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
 
+      # Desktop E2E 依赖打包产物与为 Electron ABI 重建的 better-sqlite3。
       - name: Desktop build
         run: pnpm build:desktop
 
-      - name: Desktop smoke
-        run: pnpm vitest run --project unit desktop/main/local-renderer-server.test.ts desktop/renderer/desktop-route.test.ts desktop/renderer/src/desktop-renderer-app.test.tsx
+      - name: Desktop native rebuild
+        run: pnpm rebuild:desktop-native
+
+      # §20.4：Web 正式执行链（Thread → Turn → Invocation → Binding → Event → 回复）。
+      - name: Web Playwright E2E
+        run: >-
+          xvfb-run -a pnpm exec playwright test
+          e2e/smoke.spec.ts e2e/admin-conformance.spec.ts e2e/web-execution-chain.spec.ts
+
+      # §20.5：真启动 Electron，验证 Desktop 走同一 Conversation API 与正式 Binding。
+      - name: Desktop E2E
+        run: xvfb-run -a pnpm exec playwright test e2e/desktop-execution-chain.spec.ts
+
+      # §20.6：Web 与 Desktop 共用同一 Thread 与同一套控制面事实。
+      - name: Cross-client E2E
+        run: xvfb-run -a pnpm exec playwright test e2e/cross-client.spec.ts
 
       - name: Production Web build
         run: pnpm build:prod

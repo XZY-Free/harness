@@ -1,6 +1,6 @@
+import type { ClientThread } from "@/lib/client/types";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ClientThread } from "@/lib/client/types";
 
 const mocks = vi.hoisted(() => ({
   useThread: vi.fn(),
@@ -92,9 +92,7 @@ describe("ThreadPage 把平台默认模型传给 ThreadInput（Web 与 Desktop �
   });
 
   it("Desktop 分支把 defaultModelRef 传给 ThreadInput", () => {
-    render(
-      <ThreadPage threadId="t-1" variant="desktop" defaultModelRef="deepseek-v4-flash" />,
-    );
+    render(<ThreadPage threadId="t-1" variant="desktop" defaultModelRef="deepseek-v4-flash" />);
     expect(screen.getByTestId("thread-input").dataset.defaultModelRef).toBe("deepseek-v4-flash");
   });
 

@@ -13,8 +13,7 @@ function createMatchMedia(initialMatches: boolean) {
   const mql = {
     matches: initialMatches,
     media: "(max-width: 1179px)",
-    addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.add(cb),
+    addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
     removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) =>
       listeners.delete(cb),
     dispatch: (matches: boolean) => {
@@ -41,7 +40,10 @@ function Harness() {
 describe("SidebarProvider 响应式状态机", () => {
   it("低于 1180px 断点自动收起；跨断点缩放时状态跟随 matchMedia", () => {
     const mql = createMatchMedia(true);
-    vi.stubGlobal("matchMedia", vi.fn(() => mql));
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => mql),
+    );
     const { unmount } = render(
       <SidebarProvider>
         <Harness />
@@ -65,7 +67,10 @@ describe("SidebarProvider 响应式状态机", () => {
 
   it("手动 toggle 翻转收起状态，且不会越权改动断点来源", () => {
     const mql = createMatchMedia(true);
-    vi.stubGlobal("matchMedia", vi.fn(() => mql));
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => mql),
+    );
     render(
       <SidebarProvider>
         <Harness />

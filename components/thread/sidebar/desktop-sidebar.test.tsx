@@ -41,8 +41,7 @@ function createMatchMedia(initialMatches: boolean) {
   const mql = {
     matches: initialMatches,
     media: "(max-width: 1179px)",
-    addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.add(cb),
+    addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
     removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) =>
       listeners.delete(cb),
     dispatch: (matches: boolean) => {
@@ -61,7 +60,10 @@ const agents = [{ id: "a-default", agentKey: "default", displayName: "助手" }]
 
 function renderSidebar(matches: boolean) {
   const mql = createMatchMedia(matches);
-  vi.stubGlobal("matchMedia", vi.fn(() => mql));
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => mql),
+  );
   const utils = render(
     <SidebarProvider>
       <DesktopSidebar threads={threads} agents={agents} currentThreadId="" surface="web" />

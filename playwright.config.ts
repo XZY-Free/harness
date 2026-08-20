@@ -23,6 +23,15 @@
  */
 import { defineConfig, devices } from "@playwright/test";
 
+/**
+ * e2e 专用端口。
+ *
+ * 刻意不用 3000：开发者本机常驻 `pnpm dev` 占用 3000，若与之冲突，
+ * e2e 会误连开发库并跳过正式链引导。独立端口保证本地与 CI 行为一致。
+ */
+export const E2E_PORT = Number(process.env.SNOW_E2E_PORT ?? 3100);
+export const E2E_ORIGIN = `http://localhost:${E2E_PORT}`;
+
 export default defineConfig({
   testDir: "./e2e",
   // DB 共享单容器 → 串行执行避免 TRUNCATE 竞态（e2e 不 TRUNCATE，但保持简单）
@@ -31,8 +40,12 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   reporter: "list",
+  // 正式执行链用例要等真实 Agent Loop 产出回复（模型流式 + Event 落库 + SSE 收敛），
+  // 默认 30s 不够；Electron 启动本身也要十几秒。
+  timeout: 180_000,
+  expect: { timeout: 30_000 },
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: E2E_ORIGIN,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -44,8 +57,16 @@ export default defineConfig({
   ],
   webServer: {
     command: "pnpm exec tsx scripts/e2e-start.mts",
-    url: "http://localhost:3000",
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
+    url: E2E_ORIGIN,
+    // 必须始终新建：e2e 依赖 scripts/e2e-start.mts 引导出的正式执行链
+    // （enabled Agent → published Revision → Route → Projection）。
+    // 复用开发者本机 dev server 会跳过引导，测试将跑在开发库上而非干净容器上，
+    // 结论不可信（曾实际发生）。
+    reuseExistingServer: false,
+    // 引导与确定性模型服务的日志需要可见：CI 与人工都靠它判断回复是否正常。
+    stdout: "pipe",
+    stderr: "pipe",
+    // 容纳 MySQL 容器启动 + migration + 正式链引导 + next build。
+    timeout: 900_000,
   },
 });

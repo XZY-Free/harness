@@ -87,8 +87,8 @@ import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revisi
 import {
   type ExecutionPlan,
   extractModelInfo,
-  resolveInvocationModelPreference,
   resolveExecutionPlan,
+  resolveInvocationModelPreference,
 } from "@/lib/runtime/resolve-execution-plan";
 import type {
   RuntimeHttpClient,

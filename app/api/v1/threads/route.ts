@@ -20,13 +20,13 @@
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
 import { getAgentById, listAgents } from "@/lib/agents/persistence/agent-queries";
+import { aiConfig } from "@/lib/config";
 import {
   type Principal,
   employeeAuthErrorResponse,
   resolveEmployeePrincipal,
   schemaInvalidTable,
 } from "@/lib/conversations/route-helpers";
-import { aiConfig } from "@/lib/config";
 import { createThread, listThreadsForUser } from "@/lib/conversations/thread-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,

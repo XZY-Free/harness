@@ -1,6 +1,6 @@
+import type { ClientItem } from "@/lib/client/types";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ClientItem } from "@/lib/client/types";
 import { ThreadTimeline } from "./thread-timeline";
 
 let timelineScrollHeight = 900;
@@ -82,9 +82,7 @@ describe("ThreadTimeline 底部锚定", () => {
   });
 
   it("位于底部时，同一条流式消息内容增长也继续跟随", () => {
-    const view = render(
-      <ThreadTimeline items={[agentItem("第一段")]} streamStatus="open" />,
-    );
+    const view = render(<ThreadTimeline items={[agentItem("第一段")]} streamStatus="open" />);
     const timeline = screen.getByRole("log");
     expect(timeline.scrollTop).toBe(900);
 
@@ -111,9 +109,7 @@ describe("ThreadTimeline 底部锚定", () => {
   });
 
   it("用户主动上滚后，流式增长和内容 resize 都不抢回底部", () => {
-    const view = render(
-      <ThreadTimeline items={[agentItem("第一段")]} streamStatus="open" />,
-    );
+    const view = render(<ThreadTimeline items={[agentItem("第一段")]} streamStatus="open" />);
     const timeline = screen.getByRole("log");
 
     timeline.scrollTop = 200;
@@ -129,9 +125,7 @@ describe("ThreadTimeline 底部锚定", () => {
   });
 
   it("用户滚回底部后恢复跟随，ResizeObserver 高度变化也保持底部", () => {
-    const view = render(
-      <ThreadTimeline items={[agentItem("第一段")]} streamStatus="open" />,
-    );
+    const view = render(<ThreadTimeline items={[agentItem("第一段")]} streamStatus="open" />);
     const timeline = screen.getByRole("log");
 
     timeline.scrollTop = 200;
