@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 import {
-  type ConformanceCaseId,
-  validateCompleteConformanceResult,
+  type PublicationConformanceCaseId,
+  validateCompletePublicationConformanceResult,
 } from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   ArtifactEvidencePolicy,
@@ -185,10 +185,12 @@ export function createPublishRuntimeRevision(dependencies: {
       }
 
       // 14. 校验 Case 完整性和全部通过
-      const caseValidation = validateCompleteConformanceResult(conformanceRun.results);
+      const caseValidation = validateCompletePublicationConformanceResult(conformanceRun.results);
       if (!caseValidation.valid) {
         throw new RuntimeConformanceCaseFailedError(
-          conformanceRun.results.filter((r) => !r.passed).map((r) => r.caseId as ConformanceCaseId),
+          conformanceRun.results
+            .filter((r) => !r.passed)
+            .map((r) => r.caseId as PublicationConformanceCaseId),
         );
       }
 

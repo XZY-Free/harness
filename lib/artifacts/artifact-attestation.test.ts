@@ -58,6 +58,7 @@ import {
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 
 const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
+import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { type AuditActor, recordAuditEvent } from "@/lib/identity/audit";
@@ -68,8 +69,8 @@ import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { ARTIFACT_TYPES, type ArtifactAttestation } from "@/lib/persistence/schema/artifact";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import {
-  type ConformanceCaseResult,
-  MANDATORY_GATE_CASES,
+  PUBLICATION_CONFORMANCE_CASES,
+  type PublicationConformanceCaseResult,
 } from "@/lib/runtime/domain/runtime-conformance";
 import { RuntimeConformanceRunInvalidError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
 import { RuntimeLifecycleError, createRuntime } from "@/lib/runtime/persistence/runtime-queries";
@@ -248,8 +249,13 @@ function buildActor(tenantId: string, actorId: string): AuditActor {
   return { tenantId, actorType: "service", actorId };
 }
 
-function passingConformanceResults(): ConformanceCaseResult[] {
-  return MANDATORY_GATE_CASES.map((caseId) => ({ caseId, passed: true }));
+function passingConformanceResults(): PublicationConformanceCaseResult[] {
+  return PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({
+    caseId,
+    passed: true,
+    evidence: { caseId, passed: true },
+    evidenceDigest: `sha256:${computeCanonicalDigest({ caseId, passed: true }).replace("sha256:", "")}`,
+  }));
 }
 
 // ─── 辅助：构造完整 verifyAndPersistAttestation 入参 ─────────
@@ -1451,11 +1457,15 @@ describe("publishRuntimeRevisionWithAttestation 双门禁", () => {
     );
 
     // conformance 门禁失败（第一个 mandatory case 失败）
-    const failingResults: ConformanceCaseResult[] = MANDATORY_GATE_CASES.map((caseId, idx) => ({
-      caseId,
-      passed: idx !== 0,
-      reason: idx === 0 ? "模拟失败" : undefined,
-    }));
+    const failingResults: PublicationConformanceCaseResult[] = PUBLICATION_CONFORMANCE_CASES.map(
+      (caseId, idx) => ({
+        caseId,
+        passed: idx !== 0,
+        reason: idx === 0 ? "模拟失败" : undefined,
+        evidence: { caseId, passed: idx !== 0 },
+        evidenceDigest: `sha256:${computeCanonicalDigest({ caseId, passed: idx !== 0 }).replace("sha256:", "")}`,
+      }),
+    );
 
     await expect(
       publishRuntimeRevisionWithAttestation(

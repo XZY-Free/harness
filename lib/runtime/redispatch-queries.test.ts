@@ -89,7 +89,7 @@ import {
   createMockRuntimeClient,
 } from "@/lib/runtime/runtime-client";
 import { createSessionBinding, getSessionBindingById } from "@/lib/runtime/session-binding-queries";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
+import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -260,7 +260,7 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     runtimeCapabilitiesJson: ["event_stream"],
     identityMode: "managed",
     networkZone: "internal",
-    configHash: "sha256:config_redispatch_v1",
+    configHash: computeArtifactDigest("runtime-config-redispatch-v1"),
     createdBy: ownerId,
   });
 
@@ -317,7 +317,7 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     builderKeys,
     buildActor(tenantId, "ci-001"),
   );
-  await publishTrustedRuntimeRevisionForTest({
+  await publishRuntimeRevisionForTest({
     tenantId,
     revisionId: runtimeRevision.id,
     runtimeExpectedVersionNo: 1,

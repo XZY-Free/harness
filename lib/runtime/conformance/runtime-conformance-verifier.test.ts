@@ -7,7 +7,8 @@
 import { createPrivateKey, sign as cryptoSign } from "node:crypto";
 import { computeDssePae } from "@/lib/crypto/dsse";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
-import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { PUBLICATION_CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
+import type { RuntimeConformanceReport } from "@/lib/runtime/domain/runtime-conformance-run";
 import {
   buildDsseConformanceEnvelope,
   buildTestConformanceReport,
@@ -286,7 +287,7 @@ describe("createDSSEConformanceVerifier", () => {
     const key = generateTestRunnerKey("runner-key-1");
     const verifier = createVerifierWithKey(key);
     const report = buildTestConformanceReport("rev-1");
-    const incompleteReport = { ...report, caseResults: report.caseResults.slice(0, 15) };
+    const incompleteReport = { ...report, caseResults: report.caseResults.slice(0, 5) };
     const envelope = buildDsseConformanceEnvelope(incompleteReport, key);
     const result = await verifier.verify(createBaseInput(envelope, incompleteReport));
     expect(result.verified).toBe(false);
@@ -316,6 +317,49 @@ describe("createDSSEConformanceVerifier", () => {
     expect(result.verified).toBe(false);
     if (!result.verified) expect(result.failureReason).toBe("overall_result_inconsistent");
   });
+
+  it("签名有效但篡改 case evidence.caseId → verified=false（证据自洽校验）", async () => {
+    const key = generateTestRunnerKey("runner-key-1");
+    const verifier = createVerifierWithKey(key);
+    const report = buildTestConformanceReport("rev-1");
+    const tampered: RuntimeConformanceReport = {
+      ...report,
+      caseResults: report.caseResults.map((r, index) =>
+        index === 0 ? { ...r, evidence: { ...r.evidence, caseId: "tampered-case" } } : r,
+      ),
+    };
+    const envelope = buildDsseConformanceEnvelope(tampered, key);
+    const result = await verifier.verify(createBaseInput(envelope, tampered));
+    expect(result.verified).toBe(false);
+  });
+
+  it("签名有效但篡改 case evidenceDigest → verified=false（证据自洽校验）", async () => {
+    const key = generateTestRunnerKey("runner-key-1");
+    const verifier = createVerifierWithKey(key);
+    const report = buildTestConformanceReport("rev-1");
+    const tampered: RuntimeConformanceReport = {
+      ...report,
+      caseResults: report.caseResults.map((r, index) =>
+        index === 0 ? { ...r, evidenceDigest: `sha256:${"f".repeat(64)}` } : r,
+      ),
+    };
+    const envelope = buildDsseConformanceEnvelope(tampered, key);
+    const result = await verifier.verify(createBaseInput(envelope, tampered));
+    expect(result.verified).toBe(false);
+  });
+
+  it("签名有效但篡改 evidenceManifestDigest → verified=false（证据自洽校验）", async () => {
+    const key = generateTestRunnerKey("runner-key-1");
+    const verifier = createVerifierWithKey(key);
+    const report = buildTestConformanceReport("rev-1");
+    const tampered: RuntimeConformanceReport = {
+      ...report,
+      evidenceManifestDigest: `sha256:${"f".repeat(64)}`,
+    };
+    const envelope = buildDsseConformanceEnvelope(tampered, key);
+    const result = await verifier.verify(createBaseInput(envelope, tampered));
+    expect(result.verified).toBe(false);
+  });
 });
 
 describe("RUNTIME_CONFORMANCE_PREDICATE_TYPE", () => {
@@ -326,9 +370,9 @@ describe("RUNTIME_CONFORMANCE_PREDICATE_TYPE", () => {
   });
 });
 
-describe("CONFORMANCE_SUITE_REVISION", () => {
+describe("PUBLICATION_CONFORMANCE_SUITE_REVISION", () => {
   it("与测试 report 默认值一致", () => {
-    expect(CONFORMANCE_SUITE_REVISION).toBe("runtime-conformance@1");
+    expect(PUBLICATION_CONFORMANCE_SUITE_REVISION).toBe("runtime-conformance@1");
   });
 });
 

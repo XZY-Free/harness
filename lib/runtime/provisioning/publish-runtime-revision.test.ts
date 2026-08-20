@@ -14,8 +14,11 @@ import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
-import { MANDATORY_GATE_CASES } from "@/lib/runtime/domain/runtime-conformance";
-import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-run";
+import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  computeCaseEvidenceDigest,
+  computeEvidenceManifestDigest,
+} from "@/lib/runtime/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtime/persistence/mysql-runtime-publication-store";
 import type {
@@ -80,6 +83,16 @@ async function seedRuntimePublicationFixture(suffix = "") {
     idempotencyKey: "publish-runtime-revision-success",
     requestHash: "b".repeat(64),
   });
+  const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
+    const evidence = { caseId, passed: true };
+    return {
+      caseId,
+      passed: true,
+      reason: null,
+      evidenceDigest: computeCaseEvidenceDigest(evidence),
+      evidence,
+    };
+  });
   const report = {
     runId: randomUUID(),
     runtimeRevisionId: revision.id,
@@ -93,13 +106,21 @@ async function seedRuntimePublicationFixture(suffix = "") {
     startedAt: "2026-08-02T01:00:00.000Z",
     completedAt: "2026-08-02T01:00:01.000Z",
     overallResult: "passed" as const,
-    evidenceManifestDigest: `sha256:${randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
-    caseResults: ALL_CONFORMANCE_CASES.map((caseId, index) => ({
-      caseId,
-      passed: true,
-      reason: null,
-      evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
-    })),
+    evidenceManifestDigest: computeEvidenceManifestDigest({
+      suiteRevision: "runtime-conformance@1",
+      testEnvironmentRevision: "isolated-mysql8@1",
+      runtimeRevisionId: revision.id,
+      runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
+      runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
+      protocolContractRevision: revision.protocolContractRevision,
+      runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
+      cases: caseResults.map((result) => ({
+        caseId: result.caseId,
+        passed: result.passed,
+        evidenceDigest: result.evidenceDigest,
+      })),
+    }),
+    caseResults,
   };
   const dsseEnvelope = buildDsseConformanceEnvelope(report, RUNNER_KEY);
   await createRecordRuntimeConformanceRun({
@@ -160,7 +181,7 @@ async function seedRuntimePublicationFixture(suffix = "") {
 }
 
 const passingConformanceResults = () =>
-  MANDATORY_GATE_CASES.map((caseId) => ({ caseId, passed: true }));
+  PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true }));
 
 type PublicationStep =
   | "appendPublication"

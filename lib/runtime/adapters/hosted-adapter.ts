@@ -229,6 +229,8 @@ export interface ResumeParams {
   gatewayEndpoints?: GatewayEndpoints;
   /** 平台颁发的 Workload Token（HTTP sink 用）。 */
   authToken?: string;
+  /** 重调度检查点引用（filesystem_checkpoint 恢复时携带，必须避开已确认副作用）。 */
+  checkpointRef?: string;
 }
 
 /** handleResume 返回结果。 */

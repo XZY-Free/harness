@@ -12,8 +12,8 @@ import {
 } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
 import {
-  ALL_CONFORMANCE_CASES,
-  CONFORMANCE_SUITE_REVISION,
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
 } from "@/lib/runtime/domain/runtime-conformance-contract";
 import { describe, expect, it } from "vitest";
 
@@ -351,7 +351,7 @@ describe("ExecutionBinding authority final validation", () => {
   });
 
   it("冻结 ConformanceRun 必须完成且满足正式合同 Case 精确全集", () => {
-    const caseResults = ALL_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true }));
+    const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true }));
     const base = {
       run: {
         id: "conformance-run-1",
@@ -360,7 +360,7 @@ describe("ExecutionBinding authority final validation", () => {
         runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
         runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
         protocolContractRevision: "agent-runtime-protocol@1",
-        suiteRevision: CONFORMANCE_SUITE_REVISION,
+        suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
         overallResult: "passed" as const,
         conformanceFormat: "standard_dsse" as const,
         startedAt: new Date("2026-08-11T00:00:00.000Z"),

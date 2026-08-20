@@ -13,7 +13,7 @@ import {
   createBuildRouteEligibility,
 } from "@/lib/routes/projection/build-route-eligibility";
 import type { RouteEligibilityStore } from "@/lib/routes/projection/route-eligibility-store";
-import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const builderMocks = vi.hoisted(() => {
@@ -179,7 +179,7 @@ describe("Projection authority", () => {
         protocolContractRevision: "agent-runtime-protocol@1",
         suiteRevision: "runtime-conformance@1",
         conformanceFormat: "standard_dsse",
-        caseResults: ALL_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true })),
+        caseResults: PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true })),
       },
       runtimeLifecycleState: "active",
       runtimeRevisionState: "published",

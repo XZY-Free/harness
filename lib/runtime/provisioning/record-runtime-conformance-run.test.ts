@@ -11,9 +11,13 @@ import { publicationRecord } from "@/lib/publications/persistence/publication-re
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import {
-  ALL_CONFORMANCE_CASES,
-  CONFORMANCE_SUITE_REVISION,
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
 } from "@/lib/runtime/domain/runtime-conformance-contract";
+import {
+  computeCaseEvidenceDigest,
+  computeEvidenceManifestDigest,
+} from "@/lib/runtime/domain/runtime-conformance-run";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtime/persistence/mysql-runtime-publication-store";
 import {
@@ -92,37 +96,66 @@ async function seedRevision() {
   return { tenantId: tenant.id, ownerId: owner.id, runtime, revision };
 }
 
-function buildDsseEnvelope(revisionId: string, overrides: Record<string, unknown> = {}) {
+function buildDsseEnvelope(
+  revisionId: string,
+  overrides: Record<string, unknown> = {},
+  evidenceVariant?: string,
+) {
   const startedAt = new Date("2026-08-02T01:00:00.000Z");
-  const report = {
+  const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
+    // 真实结构化证据：可通过 evidenceVariant 注入区分字段（如 probe_ref），
+    // 使不同 Run 的 evidence / evidenceDigest / evidenceManifestDigest 真实不同。
+    const evidence = evidenceVariant
+      ? { caseId, passed: true, probe_ref: evidenceVariant }
+      : { caseId, passed: true };
+    return {
+      caseId,
+      passed: true,
+      reason: null,
+      evidenceDigest: computeCaseEvidenceDigest(evidence),
+      evidence,
+    };
+  });
+  const baseReport = {
     runId: randomUUID(),
     runtimeRevisionId: revisionId,
     runtimeArtifactDigest: DIGEST_A,
     runtimeConfigDigest: DIGEST_B,
     protocolContractRevision: "agent-runtime-protocol@1",
-    suiteRevision: CONFORMANCE_SUITE_REVISION,
+    suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: DIGEST_C,
     runnerIdentity: RUNNER_IDENTITY,
     testEnvironmentRevision: "isolated-mysql8@1",
     startedAt: startedAt.toISOString(),
     completedAt: new Date(startedAt.getTime() + 1000).toISOString(),
     overallResult: "passed" as const,
-    evidenceManifestDigest: `sha256:${"d".repeat(64)}`,
-    caseResults: ALL_CONFORMANCE_CASES.map((caseId, index) => ({
-      caseId,
-      passed: true,
-      reason: null,
-      evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
-    })),
+    caseResults,
     ...overrides,
   };
-  return buildDsseConformanceEnvelope(report, RUNNER_KEY);
+  // 除非显式覆盖 evidenceManifestDigest，否则从最终报告内容 recompute，保证自洽。
+  const evidenceManifestDigest =
+    (overrides.evidenceManifestDigest as string | undefined) ??
+    computeEvidenceManifestDigest({
+      suiteRevision: baseReport.suiteRevision,
+      testEnvironmentRevision: baseReport.testEnvironmentRevision,
+      runtimeRevisionId: baseReport.runtimeRevisionId,
+      runtimeArtifactDigest: baseReport.runtimeArtifactDigest,
+      runtimeConfigDigest: baseReport.runtimeConfigDigest,
+      protocolContractRevision: baseReport.protocolContractRevision,
+      runnerArtifactDigest: baseReport.runnerArtifactDigest,
+      cases: baseReport.caseResults.map((result) => ({
+        caseId: result.caseId,
+        passed: result.passed,
+        evidenceDigest: result.evidenceDigest,
+      })),
+    });
+  return buildDsseConformanceEnvelope({ ...baseReport, evidenceManifestDigest }, RUNNER_KEY);
 }
 
 describe("RuntimeConformanceRun 权威记录", () => {
   beforeEach(async () => resetDatabase(db));
 
-  it("验签后原子写入不可变 Run、16 个 CaseResult、Audit 与 Outbox", async () => {
+  it("验签后原子写入不可变 Run、全部 Publication CaseResult、Audit 与 Outbox", async () => {
     const { tenantId, ownerId, revision } = await seedRevision();
     const dsseEnvelope = buildDsseEnvelope(revision.id);
     const record = createRecordRuntimeConformanceRun({
@@ -139,10 +172,12 @@ describe("RuntimeConformanceRun 权威记录", () => {
     });
 
     expect(result.run.overallResult).toBe("passed");
-    expect(result.caseResults).toHaveLength(16);
+    expect(result.caseResults).toHaveLength(PUBLICATION_CONFORMANCE_CASES.length);
     expect(result.replayed).toBe(false);
     expect(await db.select().from(runtimeConformanceRun)).toHaveLength(1);
-    expect(await db.select().from(runtimeConformanceCaseResult)).toHaveLength(16);
+    expect(await db.select().from(runtimeConformanceCaseResult)).toHaveLength(
+      PUBLICATION_CONFORMANCE_CASES.length,
+    );
   });
 
   it("相同 Idempotency-Key 重试返回同一 Run，不重复写入", async () => {
@@ -384,7 +419,7 @@ describe("RuntimeConformanceRun 权威记录", () => {
       dsseEnvelope: dsseEnvelope1,
     });
     const dsseEnvelope2 = buildDsseEnvelope(revision.id, {
-      evidenceManifestDigest: `sha256:${"9".repeat(64)}`,
+      runId: "conflict-envelope-2",
     });
     await expect(
       record({
@@ -411,9 +446,10 @@ describe("RuntimeConformanceRun 权威记录", () => {
         idempotencyKey: key,
         requestId: `request-${key}`,
         actor: { actorType: "user", actorId: ownerId },
-        dsseEnvelope: buildDsseEnvelope(revision.id, {
-          evidenceManifestDigest: `sha256:${String(index + 1).repeat(64)}`,
-        }),
+        // 第二次复测携带真实不同的结构化 case evidence（probe_ref 不同），
+        // evidenceDigest / evidenceManifestDigest 经权威函数重算后真实不同，
+        // 从而满足 evidence_uq：不允许把同一份证据伪装成两次 Run。
+        dsseEnvelope: buildDsseEnvelope(revision.id, {}, `retest-${index}`),
       });
     }
     const rows = await db

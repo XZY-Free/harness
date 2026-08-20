@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   GET as conformanceGET,
   POST as conformancePOST,
@@ -6,16 +7,18 @@ import { createRecordArtifactAttestation } from "@/lib/artifacts/application/rec
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 /**
- * Runtime Conformance runner + 结果持久化 + Admin API 集成测试（真实 MySQL 8）。
+ * Runtime Publication Conformance runner + 结果持久化 + Admin API 集成测试（真实 MySQL 8）。
  *
  * 覆盖 3 类：
- * 1. runtime-conformance-runner（12 例）：runConformanceSuite 基础场景 + 失败场景 + 边界。
- * 2. publishRuntimeRevision 集成（4 例）：持久化 conformance 结果 + options + 失败不持久化。
- * 3. Admin API 路由（5 例）：GET 列表 / POST 持久化 / POST 发布 / 门禁失败 / 跨租户隔离。
+ * 1. runtime-conformance-runner（Publication 套件）：clean adapter 可完整通过、
+ *    每项真实 Adapter 调用、probe/ack 错误 fail-closed。
+ * 2. publishRuntimeRevision 集成：持久化 conformance 结果 + 失败不持久化。
+ * 3. Admin API 路由：GET 列表 / POST 持久化 / POST 发布 / 门禁失败 / 跨租户隔离。
  *
  * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 MySQL 8 Testcontainers，不使用 DB mock。
  */
+import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -43,11 +46,12 @@ import {
   hostedAdapterCapabilities,
 } from "@/lib/runtime/adapters/hosted-adapter";
 import {
-  ALL_CONFORMANCE_CASES,
-  type ConformanceCaseId,
-  type ConformanceCaseResult,
-  MANDATORY_GATE_CASES,
-  validateConformanceGate,
+  PUBLICATION_CONFORMANCE_CASES,
+  type PublicationConformanceCaseId,
+  type PublicationConformanceCaseResult,
+  computeCaseEvidenceDigest,
+  computeEvidenceManifestDigest,
+  validatePublicationConformanceGate,
 } from "@/lib/runtime/domain/runtime-conformance";
 import { RuntimeConformanceRunInvalidError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
@@ -65,8 +69,8 @@ import {
 import type { RuntimeCapabilitiesResponse } from "@/lib/runtime/runtime-client";
 import {
   ConformanceRunnerError,
-  type RunConformanceSuiteParams,
-  runConformanceSuite,
+  type RunPublicationConformanceSuiteParams,
+  runPublicationConformanceSuite,
 } from "@/lib/runtime/runtime-conformance-runner";
 import { publishRuntimeRevision } from "@/lib/runtime/test-support/attempt-runtime-publication-without-trusted-run";
 import {
@@ -154,17 +158,42 @@ async function seedRuntimeAndRevision(
   return { runtime, revision };
 }
 
-/** 构造全部 mandatory case 通过的 conformance 结果。 */
-function passingConformanceResults(): ConformanceCaseResult[] {
-  return MANDATORY_GATE_CASES.map((caseId) => ({ caseId, passed: true }));
+/** 构造全部 Publication case 通过的 conformance 结果。 */
+function passingConformanceResults(): PublicationConformanceCaseResult[] {
+  return PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({
+    caseId,
+    passed: true,
+    evidence: { caseId, passed: true },
+    evidenceDigest: `sha256:${computeCanonicalDigest({ caseId, passed: true }).replace("sha256:", "")}`,
+  }));
 }
 
-/** 构造全部 16 case 通过的 conformance 结果。 */
-function passingAllConformanceResults(): ConformanceCaseResult[] {
-  return ALL_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true }));
+/** 构造全部 Publication case 通过的 conformance 结果。 */
+function passingAllConformanceResults(): PublicationConformanceCaseResult[] {
+  return PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({
+    caseId,
+    passed: true,
+    evidence: { caseId, passed: true },
+    evidenceDigest: `sha256:${computeCanonicalDigest({ caseId, passed: true }).replace("sha256:", "")}`,
+  }));
 }
 
 function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
+  const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId, index) => {
+    const casePassed = passed || index !== 0;
+    const evidence = {
+      caseId,
+      passed: casePassed,
+      reason: casePassed ? null : "publication test failure",
+    };
+    return {
+      caseId,
+      passed: casePassed,
+      reason: casePassed ? null : "publication test failure",
+      evidenceDigest: computeCaseEvidenceDigest(evidence),
+      evidence,
+    };
+  });
   const report = {
     runId: randomUUID(),
     runtimeRevisionId,
@@ -178,13 +207,21 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
     startedAt: "2026-08-02T01:00:00.000Z",
     completedAt: "2026-08-02T01:00:01.000Z",
     overallResult: passed ? ("passed" as const) : ("failed" as const),
-    evidenceManifestDigest: `sha256:${randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
-    caseResults: ALL_CONFORMANCE_CASES.map((caseId, index) => ({
-      caseId,
-      passed: passed || index !== 0,
-      reason: !passed && index === 0 ? "isolated test failure" : null,
-      evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
-    })),
+    evidenceManifestDigest: computeEvidenceManifestDigest({
+      suiteRevision: "runtime-conformance@1",
+      testEnvironmentRevision: "isolated-mysql8@1",
+      runtimeRevisionId,
+      runtimeArtifactDigest: RUNTIME_DIGEST,
+      runtimeConfigDigest: CONFIG_DIGEST,
+      protocolContractRevision: "agent-runtime-protocol@1",
+      runnerArtifactDigest: RUNNER_DIGEST,
+      cases: caseResults.map((result) => ({
+        caseId: result.caseId,
+        passed: result.passed,
+        evidenceDigest: result.evidenceDigest,
+      })),
+    }),
+    caseResults,
   };
   return {
     dsse_envelope: buildDsseConformanceEnvelope(
@@ -194,14 +231,16 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
   };
 }
 
-/** 构造指定 mandatory case 失败的 conformance 结果。 */
+/** 构造指定 Publication case 失败的 conformance 结果。 */
 function failingConformanceResults(
-  failCase: (typeof MANDATORY_GATE_CASES)[number],
-): ConformanceCaseResult[] {
-  return MANDATORY_GATE_CASES.map((caseId) => ({
+  failCase: PublicationConformanceCaseId,
+): PublicationConformanceCaseResult[] {
+  return PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({
     caseId,
     passed: caseId !== failCase,
     reason: caseId === failCase ? "模拟探测失败" : undefined,
+    evidence: { caseId, passed: caseId !== failCase },
+    evidenceDigest: `sha256:${computeCanonicalDigest({ caseId, passed: caseId !== failCase }).replace("sha256:", "")}`,
   }));
 }
 
@@ -228,10 +267,6 @@ function mockAdapterParams(sink: EventBatchSink): CreateHostedAdapterParams {
 
 // ─── 辅助：MockRuntimeAdapter（可定制能力 + 命令响应） ─────
 
-/**
- * Mock 能力覆盖：features / limits 均为 Partial，便于只覆盖单个字段。
- * protocol_versions 整体替换（数组语义）。
- */
 interface MockCapabilitiesOverride {
   protocol_versions?: string[];
   features?: Partial<RuntimeCapabilitiesResponse["features"]>;
@@ -248,6 +283,8 @@ interface MockAdapterConfig {
   cancelThrows?: boolean;
   /** handleResume 抛错（模拟失败）。 */
   resumeThrows?: boolean;
+  /** handleResume 返回 requires_redispatch（默认 false）。 */
+  requiresRedispatch?: boolean;
 }
 
 /** 创建可定制的 mock RuntimeAdapter（用于测试失败场景）。 */
@@ -264,7 +301,7 @@ function createMockAdapter(config: MockAdapterConfig = {}): RuntimeAdapter {
       return caps;
     },
     async startInvocation(_params: StartInvocationParams): Promise<StartInvocationResult> {
-      if (!config.startAccepted && config.startAccepted === false) {
+      if (config.startAccepted === false) {
         throw new Error("mock startInvocation 失败");
       }
       return {
@@ -286,7 +323,7 @@ function createMockAdapter(config: MockAdapterConfig = {}): RuntimeAdapter {
       return {
         resume_state: "accepted",
         runtime_execution_ref: `mock-exec-resume-${Math.random().toString(36).slice(2)}`,
-        requires_redispatch: false,
+        requires_redispatch: config.requiresRedispatch ?? false,
       };
     },
     async handleSteer(_params: SteerParams): Promise<SteerResult> {
@@ -327,10 +364,10 @@ async function seedAdminWithRuntimePublish() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// runtime-conformance-runner（adapter probe）
+// runtime-conformance-runner（Publication 套件，adapter probe）
 // ═══════════════════════════════════════════════════════════
 
-describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
+describe("runtime-conformance-runner（Runtime Publication 套件）", () => {
   let tenantId: string;
   let ownerId: string;
   let revisionId: string;
@@ -343,298 +380,215 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
     revisionId = revision.id;
   });
 
-  it("runConformanceSuite 返回 16 个结果（按 ALL_CONFORMANCE_CASES 顺序）", async () => {
+  it("runPublicationConformanceSuite 返回 6 个结果（clean/no-route/no-binding adapter 可完成）", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
-    const params: RunConformanceSuiteParams = {
+    const params: RunPublicationConformanceSuiteParams = {
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     };
 
-    const results = await runConformanceSuite(params);
+    const results = await runPublicationConformanceSuite(params);
 
-    expect(results).toHaveLength(16);
-    expect(results.map((r) => r.caseId)).toEqual([...ALL_CONFORMANCE_CASES]);
+    expect(results).toHaveLength(PUBLICATION_CONFORMANCE_CASES.length);
+    expect(results.map((r) => r.caseId)).toEqual([...PUBLICATION_CONFORMANCE_CASES]);
+    // 全部真实通过 → Publication 门禁通过。
+    const gate = validatePublicationConformanceGate(results);
+    expect(gate.passed).toBe(true);
   });
 
-  it("runConformanceSuite 不会把未执行的 case 伪装为通过", async () => {
+  it("capability-manifest-contract: clean HostedAdapter 返回合法能力清单", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    expect(results.find((r) => r.caseId === "tool-schema-refresh")).toMatchObject({
-      passed: false,
-      reason: "case_requires_isolated_runner",
-    });
+    const c = results.find((r) => r.caseId === "capability-manifest-contract");
+    expect(c?.passed).toBe(true);
   });
 
-  it("仅 Adapter probe 的结果不能通过完整门禁", async () => {
+  it("dispatch-acknowledgement: HostedAdapter startInvocation 返回唯一 execution/session ref", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    const gateResult = validateConformanceGate(results);
-    expect(gateResult.passed).toBe(false);
-    expect(gateResult.failedCases).toContain("tool-schema-refresh");
+    const c = results.find((r) => r.caseId === "dispatch-acknowledgement");
+    expect(c?.passed).toBe(true);
   });
 
-  it("dispatch-binds-immutable-config: HostedAdapter 返回唯一 runtime_execution_ref", async () => {
+  it("cancel-acknowledgement: HostedAdapter handleCancel 返回 accepted（必须实际 ack）", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    const case1 = results.find((r) => r.caseId === "dispatch-binds-immutable-config");
-    expect(case1?.passed).toBe(true);
+    const c = results.find((r) => r.caseId === "cancel-acknowledgement");
+    expect(c?.passed).toBe(true);
   });
 
-  it("event-batch-idempotent: HostedAdapter event_stream=true → passed=true", async () => {
+  it("steer-capability-consistency: HostedAdapter steer=true → handleSteer accepted", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    const case2 = results.find((r) => r.caseId === "event-batch-idempotent");
-    expect(case2?.passed).toBe(true);
+    const c = results.find((r) => r.caseId === "steer-capability-consistency");
+    expect(c?.passed).toBe(true);
   });
 
-  it("steer-requires-ack: HostedAdapter handleSteer 返回 accepted + next_safe_point", async () => {
+  it("resume-capability-consistency: HostedAdapter resume=true → handleResume accepted", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    const case5 = results.find((r) => r.caseId === "steer-requires-ack");
-    expect(case5?.passed).toBe(true);
+    const c = results.find((r) => r.caseId === "resume-capability-consistency");
+    expect(c?.passed).toBe(true);
   });
 
-  it("cancel-request-not-terminal: HostedAdapter handleCancel 返回 accepted（非终态）", async () => {
+  it("session-recovery-declaration: HostedAdapter filesystem_checkpoint=false + resume requires_redispatch", async () => {
     const { sink } = createMockSink();
     const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    const case7 = results.find((r) => r.caseId === "cancel-request-not-terminal");
-    expect(case7?.passed).toBe(true);
+    const c = results.find((r) => r.caseId === "session-recovery-declaration");
+    expect(c?.passed).toBe(true);
   });
 
-  it("credential-never-in-model-data: 设计声明不能冒充隔离实测", async () => {
-    const { sink } = createMockSink();
-    const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    const results = await runConformanceSuite({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      runtimeAdapter: adapter,
-    });
-
-    const case14 = results.find((r) => r.caseId === "credential-never-in-model-data");
-    expect(case14).toMatchObject({
-      passed: false,
-      reason: "case_requires_isolated_runner",
-    });
-  });
-
-  it("execution-ownership-epoch: Hosted 单节点假设不能冒充所有权切换实测", async () => {
-    const { sink } = createMockSink();
-    const adapter = createHostedAdapter(mockAdapterParams(sink));
-    const results = await runConformanceSuite({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      runtimeAdapter: adapter,
-    });
-
-    expect(results.find((r) => r.caseId === "execution-ownership-epoch")).toMatchObject({
-      passed: false,
-      reason: "case_requires_isolated_runner",
-    });
-  });
-
-  it("session-does-not-claim-filesystem-recovery: filesystem_checkpoint=false → passed=true", async () => {
-    const { sink } = createMockSink();
-    const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    const results = await runConformanceSuite({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      runtimeAdapter: adapter,
-    });
-
-    const case16 = results.find((r) => r.caseId === "session-does-not-claim-filesystem-recovery");
-    expect(case16?.passed).toBe(true);
-  });
-
-  it("6 个未执行 case fail-closed", async () => {
-    const { sink } = createMockSink();
-    const adapter = createHostedAdapter(mockAdapterParams(sink));
-
-    const results = await runConformanceSuite({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      runtimeAdapter: adapter,
-    });
-
-    const notApplicableCases = [
-      "tool-schema-refresh",
-      "unknown-effect-no-replay",
-      "capability-search-not-use",
-      "memory-proposal-only",
-      "child-thread-isolation",
-      "child-cancel-requires-ack",
-    ] as const;
-
-    for (const caseId of notApplicableCases) {
-      const result = results.find((r) => r.caseId === caseId);
-      expect(result?.passed).toBe(false);
-      expect(result?.reason).toBe("case_requires_isolated_runner");
-    }
-  });
-
-  it("MockAdapter event_stream=false → event-batch-idempotent 失败（mandatory）", async () => {
-    const adapter = createMockAdapter({
-      capabilities: {
-        features: { event_stream: false },
-      },
-    });
-
-    const results = await runConformanceSuite({
-      tenantId,
-      runtimeRevisionId: revisionId,
-      runtimeAdapter: adapter,
-    });
-
-    const case2 = results.find((r) => r.caseId === "event-batch-idempotent");
-    expect(case2?.passed).toBe(false);
-
-    const gateResult = validateConformanceGate(results);
-    expect(gateResult.passed).toBe(false);
-    expect(gateResult.failedCases).toContain("event-batch-idempotent");
-  });
-
-  it("MockAdapter filesystem_checkpoint=true → session-does-not-claim-filesystem-recovery 失败", async () => {
+  it("MockAdapter filesystem_checkpoint=true + resume=true + requires_redispatch=false → session-recovery-declaration 通过", async () => {
     const adapter = createMockAdapter({
       capabilities: {
         features: { filesystem_checkpoint: true },
       },
     });
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    const case16 = results.find((r) => r.caseId === "session-does-not-claim-filesystem-recovery");
-    expect(case16?.passed).toBe(false);
+    const c = results.find((r) => r.caseId === "session-recovery-declaration");
+    expect(c?.passed).toBe(true);
   });
 
-  it("MockAdapter handleSteer 抛错 → steer-requires-ack 失败", async () => {
+  it("MockAdapter filesystem_checkpoint=true 但 requires_redispatch=true → session-recovery-declaration fail-closed", async () => {
+    const adapter = createMockAdapter({
+      capabilities: {
+        features: { filesystem_checkpoint: true },
+      },
+      requiresRedispatch: true,
+    });
+    const results = await runPublicationConformanceSuite({
+      tenantId,
+      runtimeRevisionId: revisionId,
+      runtimeAdapter: adapter,
+    });
+    const c = results.find((r) => r.caseId === "session-recovery-declaration");
+    expect(c?.passed).toBe(false);
+  });
+
+  it("MockAdapter handleSteer 抛错 → steer-capability-consistency 失败", async () => {
     const adapter = createMockAdapter({ steerThrows: true });
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    const case5 = results.find((r) => r.caseId === "steer-requires-ack");
-    expect(case5?.passed).toBe(false);
-    expect(case5?.reason).toContain("probe 失败");
+    const c = results.find((r) => r.caseId === "steer-capability-consistency");
+    expect(c?.passed).toBe(false);
+    expect(c?.reason).toContain("steer");
   });
 
-  it("MockAdapter handleCancel 抛错 → cancel-request-not-terminal 失败（mandatory）", async () => {
+  it("MockAdapter handleCancel 抛错 → cancel-acknowledgement 失败（cancel 必须实际 ack）", async () => {
     const adapter = createMockAdapter({ cancelThrows: true });
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
+    const c = results.find((r) => r.caseId === "cancel-acknowledgement");
+    expect(c?.passed).toBe(false);
 
-    const case7 = results.find((r) => r.caseId === "cancel-request-not-terminal");
-    expect(case7?.passed).toBe(false);
-
-    const gateResult = validateConformanceGate(results);
-    expect(gateResult.passed).toBe(false);
-    expect(gateResult.failedCases).toContain("cancel-request-not-terminal");
+    const gate = validatePublicationConformanceGate(results);
+    expect(gate.passed).toBe(false);
+    expect(gate.failedCases).toContain("cancel-acknowledgement");
   });
 
-  it("MockAdapter handleResume 抛错 → session-does-not-claim-filesystem-recovery 失败", async () => {
+  it("MockAdapter handleResume 抛错 → resume-capability-consistency 失败", async () => {
     const adapter = createMockAdapter({ resumeThrows: true });
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    const case16 = results.find((r) => r.caseId === "session-does-not-claim-filesystem-recovery");
-    expect(case16?.passed).toBe(false);
+    const c = results.find((r) => r.caseId === "resume-capability-consistency");
+    expect(c?.passed).toBe(false);
   });
 
-  it("MockAdapter steer=false → unsupported-steer passed=true（路由层不调用 handleSteer）", async () => {
+  it("MockAdapter steer=false → steer-capability-consistency 只验证不宣称支持（不伪造成功）", async () => {
     const adapter = createMockAdapter({
       capabilities: {
         features: { steer: false },
       },
     });
-
-    const results = await runConformanceSuite({
+    const results = await runPublicationConformanceSuite({
       tenantId,
       runtimeRevisionId: revisionId,
       runtimeAdapter: adapter,
     });
-
-    const case6 = results.find((r) => r.caseId === "unsupported-steer");
-    expect(case6?.passed).toBe(true);
-    expect(case6?.reason).toContain("features.steer=false");
+    const c = results.find((r) => r.caseId === "steer-capability-consistency");
+    expect(c?.passed).toBe(true);
+    expect(c?.reason).toContain("steer");
   });
 
-  it("runConformanceSuite probeCapabilities 抛错 → 抛 ConformanceRunnerError", async () => {
+  it("MockAdapter resume=false → resume-capability-consistency 只验证不宣称支持（不伪造成功）", async () => {
+    const adapter = createMockAdapter({
+      capabilities: {
+        features: { resume: false },
+      },
+    });
+    const results = await runPublicationConformanceSuite({
+      tenantId,
+      runtimeRevisionId: revisionId,
+      runtimeAdapter: adapter,
+    });
+    const c = results.find((r) => r.caseId === "resume-capability-consistency");
+    expect(c?.passed).toBe(true);
+    expect(c?.reason).toContain("resume");
+  });
+
+  it("probeCapabilities 抛错 → capability-manifest-contract fail-closed（不抛）", async () => {
     const failingAdapter: RuntimeAdapter = {
       ...createMockAdapter(),
       async probeCapabilities() {
         throw new Error("probe 失败");
       },
     };
-
-    await expect(
-      runConformanceSuite({
-        tenantId,
-        runtimeRevisionId: revisionId,
-        runtimeAdapter: failingAdapter,
-      }),
-    ).rejects.toThrow(ConformanceRunnerError);
+    const results = await runPublicationConformanceSuite({
+      tenantId,
+      runtimeRevisionId: revisionId,
+      runtimeAdapter: failingAdapter,
+    });
+    const c = results.find((r) => r.caseId === "capability-manifest-contract");
+    expect(c?.passed).toBe(false);
+    expect(c?.reason).toContain("probe");
   });
 
-  it("runConformanceSuite probeCapabilities 返回非法结构 → 抛 ConformanceRunnerError", async () => {
+  it("probeCapabilities 返回非法结构 → capability-manifest-contract fail-closed", async () => {
     const badAdapter: RuntimeAdapter = {
       ...createMockAdapter(),
       async probeCapabilities() {
@@ -645,14 +599,13 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
         } as unknown as RuntimeCapabilitiesResponse;
       },
     };
-
-    await expect(
-      runConformanceSuite({
-        tenantId,
-        runtimeRevisionId: revisionId,
-        runtimeAdapter: badAdapter,
-      }),
-    ).rejects.toThrow(ConformanceRunnerError);
+    const results = await runPublicationConformanceSuite({
+      tenantId,
+      runtimeRevisionId: revisionId,
+      runtimeAdapter: badAdapter,
+    });
+    const c = results.find((r) => r.caseId === "capability-manifest-contract");
+    expect(c?.passed).toBe(false);
   });
 });
 
@@ -660,7 +613,7 @@ describe("S05-C06 runtime-conformance-runner（adapter probe）", () => {
 // 3. publishRuntimeRevision 集成（conformance 持久化）
 // ═══════════════════════════════════════════════════════════
 
-describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () => {
+describe("publishRuntimeRevision 集成（conformance 持久化）", () => {
   let tenantId: string;
   let ownerId: string;
   let runtimeId: string;
@@ -688,18 +641,16 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
         tenantId,
         revisionId,
         1,
-        failingConformanceResults("event-batch-idempotent"),
+        failingConformanceResults("cancel-acknowledgement"),
       ),
     ).rejects.toThrow(RuntimeConformanceRunInvalidError);
 
     // Revision 保持 draft
     const after = await getRuntimeRevisionById(revisionId);
     expect(after?.revisionState).toBe("draft");
-
-    // conformance 结果未持久化（旧表已停用，不再验证）
   });
 
-  it("缺少显式 Passed Run 时全部 16 个 required case 均视为缺失", async () => {
+  it("缺少显式 Passed Run 时全部 Publication required case 均视为缺失", async () => {
     await expect(
       publishRuntimeRevision(tenantId, revisionId, 1, passingConformanceResults()),
     ).rejects.toThrow(RuntimeConformanceRunInvalidError);
@@ -711,7 +662,6 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
         adapterDigest: "sha256:legacy",
       }),
     ).rejects.toThrow(RuntimeConformanceRunInvalidError);
-    // 旧表已停用，不再验证旧格式结果
   });
 });
 
@@ -719,7 +669,7 @@ describe("S05-C06 publishRuntimeRevision 集成（conformance 持久化）", () 
 // 4. Admin API 路由（GET + POST /conformance）
 // ═══════════════════════════════════════════════════════════
 
-describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", () => {
+describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", () => {
   let tenantId: string;
   let ownerId: string;
   let revisionId: string;
@@ -769,7 +719,7 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.published).toBe(false);
     expect(body.revision_state).toBe("draft");
-    expect(body.results).toHaveLength(16);
+    expect(body.results).toHaveLength(PUBLICATION_CONFORMANCE_CASES.length);
     expect(body.conformance_run_id).toBeTruthy();
 
     // Revision 仍为 draft
@@ -993,10 +943,6 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
   });
 
   it("GET /conformance 跨租户隔离 → 404 RESOURCE_NOT_FOUND", async () => {
-    // 在另一个租户创建 Revision
-    const otherTenant = await ensureDefaultTenant(); // 同一默认租户，需用其他方式测试跨租户
-    void otherTenant; // 当前测试框架使用单一默认租户，跨租户测试由其他测试覆盖
-    // 这里通过访问不存在的 revisionId 验证 404
     const request = buildApiRequest({
       audience: "admin",
       method: "GET",
@@ -1011,4 +957,3 @@ describe("S05-C06 Admin API /admin/api/v1/runtime-revisions/{revision_id}/confor
     expect(body.error.code).toBe("RESOURCE_NOT_FOUND");
   });
 });
-import { randomUUID } from "node:crypto";

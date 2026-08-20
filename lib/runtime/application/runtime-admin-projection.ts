@@ -9,7 +9,7 @@ import {
   getPublicationRecordBySubject,
   getWithdrawalRecordBySubject,
 } from "@/lib/publications/persistence/publication-record-queries";
-import { validateCompleteConformanceResult } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { validateCompletePublicationConformanceResult } from "@/lib/runtime/domain/runtime-conformance-contract";
 import type {
   RuntimeConformanceCaseResultRecord,
   RuntimeConformanceRunRecord,
@@ -159,8 +159,8 @@ export async function loadRuntimeRevisionAdminProjection(
       run.runtimeArtifactDigest === revision.artifactDigest &&
       run.runtimeConfigDigest === revision.configHash &&
       run.protocolContractRevision === revision.protocolContractRevision &&
-      validateCompleteConformanceResult(
-        caseResults as Parameters<typeof validateCompleteConformanceResult>[0],
+      validateCompletePublicationConformanceResult(
+        caseResults as Parameters<typeof validateCompletePublicationConformanceResult>[0],
       ).valid,
   );
   const eligibility = computeRuntimeRevisionEligibility({

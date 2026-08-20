@@ -1,0 +1,96 @@
+{
+  "contract_version": "1.0.0",
+  "contract_kind": "platform-integration-conformance",
+  "required_cases": [
+    {
+      "id": "dispatch-binds-immutable-config",
+      "given": "a new Invocation and a selected DeploymentRoute",
+      "when": "the Adapter accepts dispatch",
+      "expect": ["one immutable ExecutionBinding exists", "later Route changes do not alter it"]
+    },
+    {
+      "id": "event-batch-idempotent",
+      "given": "an accepted producer_event_id and producer_sequence",
+      "when": "the same batch is replayed",
+      "expect": ["the original mapping is returned", "no duplicate Item or Event is created"]
+    },
+    {
+      "id": "event-payload-hash-conflict",
+      "given": "an existing producer_event_id or sequence",
+      "when": "the Adapter submits a different payload hash",
+      "expect": ["the batch is rejected", "the Invocation records a terminal protocol error"]
+    },
+    {
+      "id": "attempt-sequence-continuity",
+      "given": "an Invocation is redispatched as a new Attempt",
+      "when": "the new Runtime starts emitting events",
+      "expect": ["it starts at platform producer_sequence_start", "it does not restart at one"]
+    },
+    {
+      "id": "steer-requires-ack",
+      "given": "a running Invocation that advertises steer support",
+      "when": "a steer command is queued",
+      "expect": ["turn.steer_queued is durable", "turn.steered appears only after Runtime safe-point ack"]
+    },
+    {
+      "id": "unsupported-steer",
+      "given": "a RuntimeRevision with steer=false",
+      "when": "the employee requests steer",
+      "expect": ["no Runtime command is fabricated", "the Employee API returns a stable unsupported error"]
+    },
+    {
+      "id": "cancel-request-not-terminal",
+      "given": "a running Invocation",
+      "when": "cancel is requested",
+      "expect": ["the command is durable", "cancelled is emitted only after Runtime terminal ack"]
+    },
+    {
+      "id": "tool-schema-refresh",
+      "given": "a Tool Schema changes after discovery",
+      "when": "the Runtime starts a new ToolCall with the old hash",
+      "expect": ["TOOL_SCHEMA_CHANGED is returned", "the Runtime rereads Schema before retrying parameters"]
+    },
+    {
+      "id": "unknown-effect-no-replay",
+      "given": "a side-effecting ToolCall has unknown_effect",
+      "when": "the Invocation or Job is retried",
+      "expect": ["the same operation is not blindly replayed", "effect reconciliation is required"]
+    },
+    {
+      "id": "capability-search-not-use",
+      "given": "a Runtime searches and receives candidate capabilities",
+      "when": "it does not load or call a candidate",
+      "expect": ["no CapabilityUse is written for that candidate"]
+    },
+    {
+      "id": "memory-proposal-only",
+      "given": "an Invocation proposes a reusable fact",
+      "when": "the Runtime submits it",
+      "expect": ["a MemoryCandidate is created", "the Runtime cannot directly create MemoryEntry"]
+    },
+    {
+      "id": "child-thread-isolation",
+      "given": "a parent Invocation delegates to another Agent",
+      "when": "the Child Thread runs and completes",
+      "expect": ["it has its own Turn, Invocation, Event, permissions and budget", "the parent receives only a structured result projection"]
+    },
+    {
+      "id": "child-cancel-requires-ack",
+      "given": "an active Child Thread",
+      "when": "the parent requests cancellation",
+      "expect": ["relation_state becomes cancel_requested", "cancelled appears only after child Runtime ack"]
+    },
+    {
+      "id": "credential-never-in-model-data",
+      "given": "a Tool requires a Credential",
+      "when": "the Gateway executes it",
+      "expect": ["the model sees only business parameters", "Credential plaintext is absent from Event, Item, Trace and Memory"]
+    },
+    {
+      "id": "execution-ownership-epoch",
+      "given": "ownership moves to a newer lease epoch",
+      "when": "the old device submits a late event",
+      "expect": ["EXECUTION_OWNERSHIP_CHANGED is returned", "the late event is not mapped"]
+    }
+  ]
+}

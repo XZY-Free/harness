@@ -9,26 +9,7 @@
  * 本文件保留 Runtime 发布专有错误类型，不再定义 ArtifactEvidencePolicy。
  * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
-import {
-  ALL_CONFORMANCE_CASES,
-  CONFORMANCE_SUITE_REVISION,
-  type ConformanceCaseId,
-  type ConformanceCaseResult,
-  type ConformanceGateResult,
-  MANDATORY_GATE_CASES,
-  validateConformanceGate,
-} from "@/lib/runtime/domain/runtime-conformance-contract";
-
-// Re-export for backward compatibility
-export {
-  ALL_CONFORMANCE_CASES,
-  CONFORMANCE_SUITE_REVISION,
-  MANDATORY_GATE_CASES,
-  type ConformanceCaseId,
-  type ConformanceCaseResult,
-  type ConformanceGateResult,
-  validateConformanceGate,
-};
+import type { PublicationConformanceCaseId } from "@/lib/runtime/domain/runtime-conformance-contract";
 
 // Re-export 统一 Artifact Evidence Policy（替代本文件原 Runtime 专属实现）
 export {
@@ -50,7 +31,7 @@ export type RuntimeRevisionPublicationState = "draft" | "published" | "withdrawn
 // ─── 发布资格错误 ────────────────────────────────────────
 
 export class RuntimeConformanceCaseFailedError extends Error {
-  constructor(public readonly failedCases: ConformanceCaseId[]) {
+  constructor(public readonly failedCases: PublicationConformanceCaseId[]) {
     super(`Conformance 门禁失败，缺失/失败的 mandatory case：${failedCases.join(", ")}`);
     this.name = "RuntimeConformanceCaseFailedError";
   }

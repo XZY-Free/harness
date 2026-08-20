@@ -168,18 +168,68 @@ def validate_errors() -> int:
     return len(catalog)
 
 
-def validate_conformance() -> int:
-    suite = load_json(CONTRACTS / "runtime-conformance.json")
-    cases = suite.get("required_cases", [])
+def _validate_case_list(cases: list, kind: str) -> None:
     ids = [case.get("id") for case in cases]
-    if len(cases) < 15:
-        fail("runtime conformance suite is too small")
+    if not ids:
+        fail(f"{kind} conformance suite is empty")
     if len(ids) != len(set(ids)) or any(not item for item in ids):
-        fail("runtime conformance case ids must be unique and non-empty")
+        fail(f"{kind} conformance case ids must be unique and non-empty")
     for case in cases:
         if not case.get("given") or not case.get("when") or len(case.get("expect", [])) < 1:
-            fail(f"incomplete runtime conformance case: {case.get('id')}")
-    return len(cases)
+            fail(f"incomplete {kind} conformance case: {case.get('id')}")
+
+
+def validate_conformance() -> int:
+    """校验 Runtime Publication Conformance 与 Platform Integration Conformance 两份合同。
+
+    - runtime-conformance.json：RuntimeRevision Publication Gate 的正式套件（6 个协议/Adapter case）。
+    - platform-integration-conformance.json：平台级不变量套件（CI / 集成测试，不阻断 Publication）。
+    """
+    publication = load_json(CONTRACTS / "runtime-conformance.json")
+    integration = load_json(CONTRACTS / "platform-integration-conformance.json")
+
+    publication_cases = publication.get("required_cases", [])
+    integration_cases = integration.get("required_cases", [])
+
+    _validate_case_list(publication_cases, "runtime publication")
+    _validate_case_list(integration_cases, "platform integration")
+
+    # Publication 套件不得把平台级不变量（Route/Binding/Event Ingress/Tool/Memory/
+    # Child Thread/Credential/Ownership）当作 Adapter 协议 case。
+    platform_only = {
+        "dispatch-binds-immutable-config",
+        "event-batch-idempotent",
+        "event-payload-hash-conflict",
+        "attempt-sequence-continuity",
+        "tool-schema-refresh",
+        "unknown-effect-no-replay",
+        "capability-search-not-use",
+        "memory-proposal-only",
+        "child-thread-isolation",
+        "child-cancel-requires-ack",
+        "credential-never-in-model-data",
+        "execution-ownership-epoch",
+        "steer-requires-ack",
+        "unsupported-steer",
+        "cancel-request-not-terminal",
+    }
+    pub_ids = {case.get("id") for case in publication_cases}
+    overlap = sorted(platform_only & pub_ids)
+    if overlap:
+        fail(
+            "runtime publication conformance must not contain platform-only cases: "
+            + ", ".join(overlap)
+        )
+
+    # Platform 套件必须覆盖全部平台级不变量。
+    missing_platform = sorted(platform_only - {case.get("id") for case in integration_cases})
+    if missing_platform:
+        fail(
+            "platform integration conformance missing platform cases: "
+            + ", ".join(missing_platform)
+        )
+
+    return len(publication_cases) + len(integration_cases)
 
 
 def validate_cross_document_rules() -> None:

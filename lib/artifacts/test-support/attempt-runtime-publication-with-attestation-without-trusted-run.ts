@@ -6,7 +6,7 @@ import { db } from "@/lib/db/client";
 import type { AuditActor } from "@/lib/identity/audit";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/control-plane";
 import type { RuntimeRevisionRow } from "@/lib/persistence/schema/control-plane";
-import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { PUBLICATION_CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   RuntimeArtifactAttestationInvalidError,
   RuntimeConformanceRunRequiredError,
@@ -49,7 +49,7 @@ async function insertConformanceRunInDb(params: {
     runtimeArtifactDigest: params.runtimeArtifactDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
     protocolContractRevision: params.protocolContractRevision,
-    suiteRevision: CONFORMANCE_SUITE_REVISION,
+    suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: params.runtimeArtifactDigest,
     runnerIdentity: "test-runner",
     testEnvironmentRevision: "test-env@1",

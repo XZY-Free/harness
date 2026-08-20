@@ -15,10 +15,14 @@ import {
 import { computeDssePae } from "@/lib/crypto/dsse";
 import { RUNTIME_CONFORMANCE_PREDICATE_TYPE } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import {
-  ALL_CONFORMANCE_CASES,
-  CONFORMANCE_SUITE_REVISION,
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
 } from "@/lib/runtime/domain/runtime-conformance-contract";
-import type { RuntimeConformanceReport } from "@/lib/runtime/domain/runtime-conformance-run";
+import {
+  type RuntimeConformanceReport,
+  computeCaseEvidenceDigest,
+  computeEvidenceManifestDigest,
+} from "@/lib/runtime/domain/runtime-conformance-run";
 
 export interface TestRunnerKey {
   keyid: string;
@@ -96,26 +100,47 @@ export function buildTestConformanceReport(
   overrides: Partial<RuntimeConformanceReport> = {},
 ): RuntimeConformanceReport {
   const startedAt = new Date("2026-08-02T01:00:00.000Z");
-  return {
+  const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
+    const evidence = { caseId, passed: true };
+    return {
+      caseId,
+      passed: true,
+      reason: null,
+      evidenceDigest: computeCaseEvidenceDigest(evidence),
+      evidence,
+    };
+  });
+  const base = {
     runId: randomUUID(),
     runtimeRevisionId: revisionId,
     runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
     runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
     protocolContractRevision: "agent-runtime-protocol@1",
-    suiteRevision: CONFORMANCE_SUITE_REVISION,
+    suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
     runnerIdentity: "ci/runtime-conformance",
     testEnvironmentRevision: "isolated-mysql8@1",
     startedAt: startedAt.toISOString(),
     completedAt: new Date(startedAt.getTime() + 1000).toISOString(),
-    overallResult: "passed",
-    evidenceManifestDigest: `sha256:${"d".repeat(64)}`,
-    caseResults: ALL_CONFORMANCE_CASES.map((caseId, index) => ({
-      caseId,
-      passed: true,
-      reason: null,
-      evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
-    })),
+    overallResult: "passed" as const,
+    caseResults,
+  };
+  return {
+    ...base,
+    evidenceManifestDigest: computeEvidenceManifestDigest({
+      suiteRevision: base.suiteRevision,
+      testEnvironmentRevision: base.testEnvironmentRevision,
+      runtimeRevisionId: base.runtimeRevisionId,
+      runtimeArtifactDigest: base.runtimeArtifactDigest,
+      runtimeConfigDigest: base.runtimeConfigDigest,
+      protocolContractRevision: base.protocolContractRevision,
+      runnerArtifactDigest: base.runnerArtifactDigest,
+      cases: base.caseResults.map((result) => ({
+        caseId: result.caseId,
+        passed: result.passed,
+        evidenceDigest: result.evidenceDigest,
+      })),
+    }),
     ...overrides,
   };
 }

@@ -246,7 +246,11 @@ export function createRecordArtifactAttestation(dependencies: {
 function shouldBindRevision(binding: RevisionArtifactBinding | null, authority: Artifact): boolean {
   if (!binding || binding.revisionState !== "draft") return false;
   if (binding.artifactId || binding.artifactDigest) {
-    return binding.artifactId === authority.id && binding.artifactDigest === authority.digest;
+    // 已完成绑定则要求与权威 Artifact 精确一致；部分绑定（仅 digest、缺 artifactId）
+    // 且 digest 一致时允许补齐 artifactId。
+    const idOk = !binding.artifactId || binding.artifactId === authority.id;
+    const digestOk = !binding.artifactDigest || binding.artifactDigest === authority.digest;
+    return idOk && digestOk;
   }
   const declaredDigest = extractArtifactDigest(binding.artifactRef);
   return declaredDigest === null || declaredDigest === authority.digest;

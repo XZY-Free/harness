@@ -1,29 +1,37 @@
 /**
- * Runtime Conformance 门禁。
+ * Runtime Revision Publication Conformance 门禁。
  *
- * 事实源：docs/contracts/runtime-conformance.json（16 个 required_cases）、
- * docs/architecture/agent-control-plane.md 。
+ * 事实源：docs/contracts/runtime-conformance.json（Runtime Publication 套件）。
  *
  * 职责：
- * - MANDATORY_GATE_CASES：发布 RuntimeRevision 前必须通过的 4 个基础用例
- * （基础身份/调度、事件幂等、取消、Credential 隔离）。
- * - validateConformanceGate：校验门禁结果，任一 mandatory case 失败则 Revision 不可路由。
+ * - PUBLICATION_CONFORMANCE_CASES：候选 RuntimeRevision 自身发布前必须通过的
+ *   Adapter/Protocol 行为用例（能力清单合同、dispatch/cancel/steer/resume ack、
+ *   session 恢复声明），全部真实调用 RuntimeAdapter 得到。
+ * - validatePublicationConformanceGate：校验门禁结果，任一 case 失败则 Revision 不可发布。
  * - isCapabilitySubset：路由发布时校验 Agent required capabilities ⊆ Runtime capabilities。
  *
  * 约束：
  * - capabilities 必须来自探测和一致性测试，管理员不能手工勾选未支持能力。
- * - 基础身份、事件幂等、取消和 Credential 隔离用例失败时，Revision 不得可路由。
+ * - 可选能力（steer/resume）为 false 时只验证「不宣称支持」，不伪造成功。
+ * - cancel 是发布基础能力，必须实际 ack。
  */
 
 export {
-  ALL_CONFORMANCE_CASES,
-  MANDATORY_GATE_CASES,
-  RuntimeConformanceCaseFailedError,
-  type ConformanceCaseId,
-  type ConformanceCaseResult,
-  type ConformanceGateResult,
-  validateConformanceGate,
-} from "@/lib/runtime/domain/runtime-revision-publication-policy";
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
+  type PublicationConformanceCaseId,
+  type PublicationConformanceCaseResult,
+  type PublicationConformanceGateResult,
+  validateCompletePublicationConformanceResult,
+  validatePublicationConformanceGate,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
+
+export { RuntimeConformanceCaseFailedError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
+
+export {
+  computeCaseEvidenceDigest,
+  computeEvidenceManifestDigest,
+} from "@/lib/runtime/domain/runtime-conformance-run";
 
 /**
  * 校验 Agent required capabilities 是否为 Runtime capabilities 的子集。

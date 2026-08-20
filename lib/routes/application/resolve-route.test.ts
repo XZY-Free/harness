@@ -23,7 +23,7 @@ import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/m
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
-import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
@@ -240,11 +240,11 @@ async function addRuntimeRoute(
     requestId: `resolver:${runtimeRevisionId}`,
     recordedAt: NOW,
   });
-  // : 权威 ConformanceEligibilityPolicy 要求 16 个 Case 全部通过（见
-  // runtime-conformance-contract 的 ALL_CONFORMANCE_CASES）。播种 ConformanceRun
+  // 权威 ConformanceEligibilityPolicy 要求全部 Publication Case 通过（见
+  // runtime-conformance-contract 的 PUBLICATION_CONFORMANCE_CASES）。播种 ConformanceRun
   // 后须同步播种完整 Case 结果，投影的 Conformance 资格才会放行。
   await db.insert(runtimeConformanceCaseResult).values(
-    ALL_CONFORMANCE_CASES.map((caseId) => ({
+    PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({
       id: randomUUID(),
       runId: conformanceRunId,
       caseId,

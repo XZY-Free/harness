@@ -9,21 +9,27 @@ import {
   buildDsseArtifactAttestationEnvelope,
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
+import { createHostedAdapter } from "@/lib/runtime/adapters/hosted-adapter";
 import {
   type HostedControlPlaneEvidenceProvider,
   resetHostedControlPlaneEvidenceProvider,
   setHostedControlPlaneEvidenceProvider,
 } from "@/lib/runtime/domain/hosted-control-plane-evidence";
 import type { RunnerSigningIdentity } from "@/lib/runtime/domain/runner-signing-identity";
-import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
-import { CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { PUBLICATION_CONFORMANCE_SUITE_REVISION } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { computeEvidenceManifestDigest } from "@/lib/runtime/domain/runtime-conformance-run";
+import { runPublicationConformanceSuite } from "@/lib/runtime/runtime-conformance-runner";
 import {
   buildDsseConformanceEnvelope,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
+import { createCapturingEventBatchSink } from "@/lib/runtime/test-support/capturing-event-batch-sink";
+import { computeRunnerArtifactDigest } from "@/lib/test-support/publish-runtime-revision-for-test";
 
 const TRUSTED_RUNNER_KEY = generateTestRunnerKey("hosted-control-plane-runner");
 const RUNNER_IDENTITY = "ci/hosted-runtime-conformance";
+/** 实际执行环境：in-process Hosted Adapter（真实 suite 运行环境）。 */
+const TEST_ENVIRONMENT_REVISION = "in-process-hosted-adapter@1";
 const BUILDER_IDENTITY = "builder:snow-harness-hosted-release";
 
 export function trustedHostedRunnerSigningIdentityForTest(tenantId: string): RunnerSigningIdentity {
@@ -85,6 +91,8 @@ function createEvidenceProvider(options?: {
   };
   let remainingConformanceFailures = options?.failRuntimeConformanceAttempts ?? 0;
   let agentEvidenceCalls = 0;
+  /** 幂等缓存：idempotencyKey → 已执行并签名的 DSSE Envelope。 */
+  const conformanceCache = new Map<string, string>();
 
   return {
     async loadArtifactEvidence({ artifactType }) {
@@ -169,10 +177,35 @@ function createEvidenceProvider(options?: {
       };
     },
     async runRuntimeConformance(input) {
+      // 幂等：同一 idempotencyKey 重试返回同一个已执行并签名的 DSSE，不重复跑 suite。
+      const cached = conformanceCache.get(input.idempotencyKey);
+      if (cached) {
+        return { dsseEnvelope: cached };
+      }
       if (remainingConformanceFailures > 0) {
         remainingConformanceFailures -= 1;
         throw new Error("可信 Hosted Conformance Runner 暂时不可用");
       }
+
+      // 真实执行：创建真实 Hosted Adapter，跑正式 Publication runner，证据全部来自真实调用。
+      // 注入进程内捕获型 EventBatchSink：接收并保留真实候选事件，不黑洞、不伪造 ack。
+      const startedAt = new Date();
+      const capturing = createCapturingEventBatchSink();
+      const adapter = createHostedAdapter({
+        platformEndpoint: "in-process://hosted-conformance-test",
+        platformAuthToken: "conformance-test-token",
+        eventBatchSink: capturing.sink,
+        modelFn: async (message) => `conformance probe reply: ${message}`,
+        modelRef: "conformance-test-model",
+      });
+      const caseResults = await runPublicationConformanceSuite({
+        tenantId: input.tenantId,
+        runtimeRevisionId: input.runtimeRevisionId,
+        runtimeAdapter: adapter,
+      });
+
+      const runnerArtifactDigest = await computeRunnerArtifactDigest();
+      const allPassed = caseResults.every((result) => result.passed);
       const runId = deterministicUuid(input.idempotencyKey);
       const report = {
         runId,
@@ -180,22 +213,37 @@ function createEvidenceProvider(options?: {
         runtimeArtifactDigest: input.runtimeArtifactDigest,
         runtimeConfigDigest: input.runtimeConfigDigest,
         protocolContractRevision: input.protocolContractRevision,
-        suiteRevision: CONFORMANCE_SUITE_REVISION,
-        runnerArtifactDigest: digest("snow-harness:isolated-hosted-runner:release-1"),
+        suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
+        runnerArtifactDigest,
         runnerIdentity: RUNNER_IDENTITY,
-        testEnvironmentRevision: "isolated-mysql8@1",
-        startedAt: "2026-08-03T00:01:00.000Z",
-        completedAt: "2026-08-03T00:01:01.000Z",
-        overallResult: "passed" as const,
-        evidenceManifestDigest: digest(`hosted-evidence:${input.runtimeRevisionId}`),
-        caseResults: ALL_CONFORMANCE_CASES.map((caseId) => ({
-          caseId,
-          passed: true,
-          reason: null,
-          evidenceDigest: digest(`${input.runtimeRevisionId}:${caseId}`),
+        testEnvironmentRevision: TEST_ENVIRONMENT_REVISION,
+        startedAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
+        overallResult: allPassed ? ("passed" as const) : ("failed" as const),
+        evidenceManifestDigest: computeEvidenceManifestDigest({
+          suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
+          testEnvironmentRevision: TEST_ENVIRONMENT_REVISION,
+          runtimeRevisionId: input.runtimeRevisionId,
+          runtimeArtifactDigest: input.runtimeArtifactDigest,
+          runtimeConfigDigest: input.runtimeConfigDigest,
+          protocolContractRevision: input.protocolContractRevision,
+          runnerArtifactDigest,
+          cases: caseResults.map((result) => ({
+            caseId: result.caseId,
+            passed: result.passed,
+            evidenceDigest: result.evidenceDigest,
+          })),
+        }),
+        caseResults: caseResults.map((result) => ({
+          caseId: result.caseId,
+          passed: result.passed,
+          reason: result.passed ? null : (result.reason ?? null),
+          evidenceDigest: result.evidenceDigest,
+          evidence: result.evidence,
         })),
       };
       const dsseEnvelope = buildDsseConformanceEnvelope(report, TRUSTED_RUNNER_KEY);
+      conformanceCache.set(input.idempotencyKey, dsseEnvelope);
       return { dsseEnvelope };
     },
   };

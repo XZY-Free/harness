@@ -1,8 +1,6 @@
-import type {
-  ArtifactEvidenceSnapshot,
-  ConformanceCaseResult,
-  RuntimeRevisionPublicationState,
-} from "@/lib/runtime/domain/runtime-revision-publication-policy";
+import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
+import type { PublicationConformanceCaseResult } from "@/lib/runtime/domain/runtime-conformance-contract";
+import type { RuntimeRevisionPublicationState } from "@/lib/runtime/domain/runtime-revision-publication-policy";
 
 export type RuntimePublicationActorType = "user" | "service" | "workload" | "system";
 
@@ -34,7 +32,7 @@ export interface RuntimePublicationRuntime {
 export type RuntimePublicationAttestation = ArtifactEvidenceSnapshot;
 
 export interface StoredRuntimeConformanceResult {
-  caseId: ConformanceCaseResult["caseId"];
+  caseId: PublicationConformanceCaseResult["caseId"];
   passed: boolean;
   reason: string | null;
   adapterDigest: string | null;

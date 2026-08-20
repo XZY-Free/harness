@@ -69,8 +69,8 @@ import {
   getSessionBindingsByThread,
   updateLastUsedAt,
 } from "@/lib/runtime/session-binding-queries";
+import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -291,7 +291,7 @@ async function seedPublishedRuntimeRevision(
     runtimeCapabilitiesJson: capabilities,
     identityMode: "managed",
     networkZone: "internal",
-    configHash: `sha256:config_${contentSuffix}`,
+    configHash: computeArtifactDigest(`runtime-config-${contentSuffix}`),
     createdBy: ownerId,
   });
 
@@ -301,7 +301,7 @@ async function seedPublishedRuntimeRevision(
     revision.id,
     `runtime-content-${contentSuffix}`,
   );
-  await publishTrustedRuntimeRevisionForTest({
+  await publishRuntimeRevisionForTest({
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,

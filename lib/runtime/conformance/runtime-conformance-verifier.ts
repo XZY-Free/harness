@@ -26,10 +26,13 @@ import {
 } from "@/lib/crypto/dsse";
 import type { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import {
-  ALL_CONFORMANCE_CASES,
-  CONFORMANCE_SUITE_REVISION,
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
 } from "@/lib/runtime/domain/runtime-conformance-contract";
-import type { RuntimeConformanceReport } from "@/lib/runtime/domain/runtime-conformance-run";
+import {
+  type RuntimeConformanceReport,
+  validateRuntimeConformanceReport,
+} from "@/lib/runtime/domain/runtime-conformance-run";
 
 // ─── 标准 Predicate Type ──────────────────────────────────
 
@@ -195,7 +198,7 @@ export function createDSSEConformanceVerifier(
       }
 
       // 步骤 12: 校验 suiteRevision
-      if (report.suiteRevision !== CONFORMANCE_SUITE_REVISION) {
+      if (report.suiteRevision !== PUBLICATION_CONFORMANCE_SUITE_REVISION) {
         return fail("suite_revision_mismatch");
       }
 
@@ -211,12 +214,12 @@ export function createDSSEConformanceVerifier(
         return fail(identityResult.failureReason);
       }
 
-      // 步骤 14: 校验 Case 集合完整（使用 ALL_CONFORMANCE_CASES）
+      // 步骤 14: 校验 Publication Case 集合完整、唯一、无多余
       if (!Array.isArray(report.caseResults)) {
         return fail("case_results_incomplete");
       }
       const caseIds = report.caseResults.map((r) => r.caseId);
-      const allPresent = ALL_CONFORMANCE_CASES.every((id) => caseIds.includes(id));
+      const allPresent = PUBLICATION_CONFORMANCE_CASES.every((id) => caseIds.includes(id));
       if (!allPresent) {
         return fail("case_results_incomplete");
       }
@@ -227,7 +230,7 @@ export function createDSSEConformanceVerifier(
       }
 
       // 步骤 14c: 校验 Case 数量精确匹配（无多余 case）
-      if (caseIds.length !== ALL_CONFORMANCE_CASES.length) {
+      if (caseIds.length !== PUBLICATION_CONFORMANCE_CASES.length) {
         return fail("case_results_incomplete");
       }
 
@@ -235,6 +238,16 @@ export function createDSSEConformanceVerifier(
       const allPassed = report.caseResults.every((r) => r.passed);
       if ((report.overallResult === "passed") !== allPassed) {
         return fail("overall_result_inconsistent");
+      }
+
+      // 步骤 15b: 调用 domain 唯一 validator，逐 case 校验证据自洽
+      // （evidence 非空对象 / evidence.caseId / evidence.passed / recomputed
+      // evidenceDigest / recomputed evidenceManifestDigest）。签名有效但篡改
+      // case evidence / evidenceDigest / manifest 必须在此拦下，fail-closed。
+      try {
+        validateRuntimeConformanceReport(report);
+      } catch (err) {
+        return fail("report_evidence_inconsistent");
       }
 
       // 步骤 16: 计算 envelopeDigest / payloadDigest（共享底座）

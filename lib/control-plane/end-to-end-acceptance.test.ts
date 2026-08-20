@@ -2,7 +2,7 @@
  * §十九 端到端验收测试 — 20 个场景。
  *
  * 覆盖专题01最终架构收敛文档（§十九）要求的 20 个场景。
- * 真实 MySQL 8 Testcontainers + 真实 ed25519/HMAC 签名，不使用 mock。
+ * 真实 MySQL 8 Testcontainers + 真实 ed25519 DSSE 签名，不使用 mock。
  *
  * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
@@ -90,8 +90,10 @@ import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import type { ConformanceEligibilitySnapshot } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 import {
-  ALL_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_CASES,
   type RuntimeConformanceReport,
+  computeCaseEvidenceDigest,
+  computeEvidenceManifestDigest,
 } from "@/lib/runtime/domain/runtime-conformance-run";
 import { createMysqlHostedGateways } from "@/lib/runtime/infrastructure/mysql-hosted-gateways";
 import { hostedProvisioningRequestTable } from "@/lib/runtime/persistence/hosted-provisioning-request-record";
@@ -118,7 +120,7 @@ import {
   buildDsseConformanceEnvelope,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
+import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import {
   installTrustedHostedControlPlaneEvidenceForTest,
   trustedHostedRunnerSigningIdentityForTest,
@@ -407,14 +409,14 @@ async function seedPublishedRuntimeRevision(
     revision.id,
     `runtime-content-${contentSuffix}`,
   );
-  await publishTrustedRuntimeRevisionForTest({
+  await publishRuntimeRevisionForTest({
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,
     attestationId,
   });
 
-  // 重新读取已发布的 revision（publishTrustedRuntimeRevisionForTest 已将状态更新为 published）
+  // 重新读取已发布的 revision（publishRuntimeRevisionForTest 已将状态更新为 published）
   const publishedRevision = await getRuntimeRevisionById(revision.id);
   return { runtime, revision: publishedRevision ?? revision };
 }
@@ -479,7 +481,17 @@ function buildSignedConformanceReport(
   overrides: Record<string, unknown> = {},
 ) {
   const startedAt = new Date("2026-08-02T01:00:00.000Z");
-  const report = {
+  const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
+    const evidence = { caseId, passed: true };
+    return {
+      caseId,
+      passed: true,
+      reason: null,
+      evidenceDigest: computeCaseEvidenceDigest(evidence),
+      evidence,
+    };
+  });
+  const baseReport = {
     runId: randomUUID(),
     runtimeRevisionId: revisionId,
     runtimeArtifactDigest,
@@ -492,16 +504,29 @@ function buildSignedConformanceReport(
     startedAt: startedAt.toISOString(),
     completedAt: new Date(startedAt.getTime() + 1000).toISOString(),
     overallResult: "passed" as const,
-    evidenceManifestDigest: `sha256:${"d".repeat(64)}`,
-    caseResults: ALL_CONFORMANCE_CASES.map((caseId, index) => ({
-      caseId,
-      passed: true,
-      reason: null,
-      evidenceDigest: `sha256:${index.toString(16).padStart(64, "0")}`,
-    })),
+    caseResults,
     ...overrides,
   };
-  return buildDsseConformanceEnvelope(report as RuntimeConformanceReport, RUNNER_KEY);
+  const evidenceManifestDigest =
+    (overrides.evidenceManifestDigest as string | undefined) ??
+    computeEvidenceManifestDigest({
+      suiteRevision: "runtime-conformance@1",
+      testEnvironmentRevision: "isolated-mysql8@1",
+      runtimeRevisionId: revisionId,
+      runtimeArtifactDigest,
+      runtimeConfigDigest,
+      protocolContractRevision,
+      runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
+      cases: baseReport.caseResults.map((result) => ({
+        caseId: result.caseId,
+        passed: result.passed,
+        evidenceDigest: result.evidenceDigest,
+      })),
+    });
+  return buildDsseConformanceEnvelope(
+    { ...baseReport, evidenceManifestDigest } as RuntimeConformanceReport,
+    RUNNER_KEY,
+  );
 }
 
 // ─── 辅助：插入测试用 Invocation 行 ──────────────────────
@@ -678,7 +703,7 @@ describe("场景1：真实签名 Artifact Attestation 通过", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("场景2：真实签名 Runtime Conformance 通过", () => {
-  it("HMAC 签名 Conformance 报告 → 16 个 CaseResult + Run 不可变", async () => {
+  it("ed25519 DSSE Conformance 报告 → 完整 Publication CaseResult + Run 不可变", async () => {
     const tenant = await ensureDefaultTenant();
     const owner = await upsertUserIdentity({
       tenantId: tenant.id,
@@ -740,10 +765,12 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
     });
 
     expect(result.run.overallResult).toBe("passed");
-    expect(result.caseResults).toHaveLength(16);
+    expect(result.caseResults).toHaveLength(PUBLICATION_CONFORMANCE_CASES.length);
     expect(result.replayed).toBe(false);
     expect(await db.select().from(runtimeConformanceRun)).toHaveLength(1);
-    expect(await db.select().from(runtimeConformanceCaseResult)).toHaveLength(16);
+    expect(await db.select().from(runtimeConformanceCaseResult)).toHaveLength(
+      PUBLICATION_CONFORMANCE_CASES.length,
+    );
   });
 });
 
@@ -1478,7 +1505,7 @@ describe("场景15：Runtime Conformance 失效后拒绝新 Binding", () => {
     // Conformance 事实是不可变记录，没有“撤销 Run”应用 API；这里直接改变真实 MySQL
     // 权威行来模拟 resolve 与 bind 之间的并发失效，不用 mock 或内存替代。
     const conformanceRunId = resolution.controlPlaneEvidence.conformanceRunId;
-    const caseId = ALL_CONFORMANCE_CASES[0];
+    const caseId = PUBLICATION_CONFORMANCE_CASES[0];
     if (!caseId) throw new Error("Conformance 合同未定义 Case");
     await db
       .update(runtimeConformanceRun)

@@ -36,7 +36,7 @@ import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-rou
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { getHostedControlPlaneEvidenceProvider } from "@/lib/runtime/domain/hosted-control-plane-evidence";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
-import { ALL_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
 import { protocolContractRevision } from "@/lib/runtime/domain/runtime-conformance-run";
 import type {
   HostedAgentPublicationGateway,
@@ -507,7 +507,7 @@ async function loadPublishedRuntimeRevision(
     .select()
     .from(runtimeConformanceCaseResult)
     .where(eq(runtimeConformanceCaseResult.runId, run.id));
-  if (cases.length !== ALL_CONFORMANCE_CASES.length || cases.some((item) => !item.passed))
+  if (cases.length !== PUBLICATION_CONFORMANCE_CASES.length || cases.some((item) => !item.passed))
     return null;
   return { revisionId: revision.id, ...fact, conformanceRunId: fact.conformanceRunId };
 }

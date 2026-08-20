@@ -42,7 +42,7 @@ import {
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
-import { validateCompleteConformanceResult } from "@/lib/runtime/domain/runtime-conformance-contract";
+import { validateCompletePublicationConformanceResult } from "@/lib/runtime/domain/runtime-conformance-contract";
 import { ConformanceEligibilityPolicy } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 import {
   runtimeConformanceCaseResult,
@@ -767,7 +767,7 @@ export function validateFrozenConformanceAuthority(input: {
     throw evidenceError("冻结 ConformanceRun 未完成或未验证");
   }
 
-  const completeResult = validateCompleteConformanceResult(caseResults);
+  const completeResult = validateCompletePublicationConformanceResult(caseResults);
   if (!completeResult.valid) {
     throw evidenceError(completeResult.reason);
   }

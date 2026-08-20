@@ -65,8 +65,8 @@ import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-r
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -328,7 +328,7 @@ async function seedPublishedRuntimeRevision(
     revision.id,
     `runtime-content-${contentSuffix}`,
   );
-  await publishTrustedRuntimeRevisionForTest({
+  await publishRuntimeRevisionForTest({
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,

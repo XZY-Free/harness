@@ -13,8 +13,8 @@ import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import {
-  ALL_CONFORMANCE_CASES,
-  type ConformanceCaseId,
+  PUBLICATION_CONFORMANCE_CASES,
+  type PublicationConformanceCaseId,
 } from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   runtimeConformanceCaseResult,
@@ -143,7 +143,7 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
             protocolContractRevision: run.protocolContractRevision,
             evidenceManifestDigest: run.evidenceManifestDigest,
             results: rows.map((row) => ({
-              caseId: row.caseId as ConformanceCaseId,
+              caseId: row.caseId as PublicationConformanceCaseId,
               passed: row.passed,
               reason: row.reason,
               adapterDigest: run.runnerArtifactDigest,

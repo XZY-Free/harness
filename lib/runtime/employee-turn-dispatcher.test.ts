@@ -32,8 +32,8 @@ import { dispatchEmployeeTurn } from "@/lib/runtime/employee-turn-dispatcher";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
+import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -232,7 +232,7 @@ async function seedPublishedRuntimeRevision(
     runtimeCapabilitiesJson: ["event_stream"],
     identityMode: "managed",
     networkZone: "internal",
-    configHash: `sha256:config_${contentSuffix}`,
+    configHash: computeArtifactDigest(`runtime-config-${contentSuffix}`),
     createdBy: ownerId,
   });
 
@@ -242,7 +242,7 @@ async function seedPublishedRuntimeRevision(
     revision.id,
     `runtime-content-${contentSuffix}`,
   );
-  await publishTrustedRuntimeRevisionForTest({
+  await publishRuntimeRevisionForTest({
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,

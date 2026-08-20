@@ -10,7 +10,7 @@
  * - Config Digest 一致
  * - Protocol Contract 一致
  * - Suite Revision 一致
- * - 16 个 Case 完整
+ * - Publication Case 集合完整
  * - Case 唯一
  * - 全部 Passed
  * - 验证格式符合当前 Policy
@@ -22,9 +22,8 @@
  */
 
 import {
-  ALL_CONFORMANCE_CASES,
-  CONFORMANCE_SUITE_REVISION,
-  type ConformanceCaseId,
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
 } from "@/lib/runtime/domain/runtime-conformance-contract";
 
 /**
@@ -166,18 +165,18 @@ export const ConformanceEligibilityPolicy = {
     }
 
     // Suite Revision 一致
-    if (snapshot.suiteRevision !== CONFORMANCE_SUITE_REVISION) {
+    if (snapshot.suiteRevision !== PUBLICATION_CONFORMANCE_SUITE_REVISION) {
       errors.push({
         code: "conformance_suite_revision_mismatch",
-        message: `Suite Revision 不一致（Run: ${snapshot.suiteRevision}, 期望: ${CONFORMANCE_SUITE_REVISION}）`,
+        message: `Suite Revision 不一致（Run: ${snapshot.suiteRevision}, 期望: ${PUBLICATION_CONFORMANCE_SUITE_REVISION}）`,
       });
     }
 
-    // 16 个 Case 完整
-    if (snapshot.caseResults.length !== ALL_CONFORMANCE_CASES.length) {
+    // Publication Case 集合完整
+    if (snapshot.caseResults.length !== PUBLICATION_CONFORMANCE_CASES.length) {
       errors.push({
         code: "conformance_cases_incomplete",
-        message: `Conformance 结果不完整（期望 ${ALL_CONFORMANCE_CASES.length} 个 Case，实际 ${snapshot.caseResults.length} 个）`,
+        message: `Conformance 结果不完整（期望 ${PUBLICATION_CONFORMANCE_CASES.length} 个 Case，实际 ${snapshot.caseResults.length} 个）`,
       });
     }
 

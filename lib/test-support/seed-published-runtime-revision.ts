@@ -7,6 +7,7 @@
  * 发布链全部走正式服务：真实 DSSE Artifact Attestation → 正式验签落库 →
  * 正式 DSSE Conformance 验签 → `createPublishRuntimeRevision`。
  */
+import { createHash } from "node:crypto";
 import { computeArtifactDigest } from "@/lib/artifacts/domain/artifact-attestation";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import {
@@ -14,7 +15,7 @@ import {
   getRuntimeRevisionById,
 } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { createVerifiedAttestation } from "@/lib/test-support/create-verified-attestation";
-import { publishTrustedRuntimeRevisionForTest } from "@/lib/test-support/publish-trusted-runtime-revision";
+import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 
 /**
  * 建出 enabled hosted Runtime 与其 published RuntimeRevision。
@@ -50,7 +51,7 @@ export async function seedPublishedRuntimeRevision(
     runtimeCapabilitiesJson: capabilities,
     identityMode: "managed",
     networkZone: "internal",
-    configHash: `sha256:config_${contentSuffix}`,
+    configHash: `sha256:${createHash("sha256").update(`runtime-config-${contentSuffix}`).digest("hex")}`,
     createdBy: ownerId,
   });
 
@@ -60,7 +61,7 @@ export async function seedPublishedRuntimeRevision(
     revision.id,
     artifactContent,
   );
-  await publishTrustedRuntimeRevisionForTest({
+  await publishRuntimeRevisionForTest({
     tenantId,
     revisionId: revision.id,
     runtimeExpectedVersionNo: 1,

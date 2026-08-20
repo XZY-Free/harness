@@ -1,556 +1,578 @@
-import type {
-  CancelParams,
-  ResumeParams,
-  RuntimeAdapter,
-  StartInvocationParams,
-  SteerParams,
-} from "@/lib/runtime/adapters/hosted-adapter";
 /**
- * Runtime Conformance 测试 runner（S05-C06）。
+ * Runtime Revision Publication Conformance Runner。
  *
- * 事实源：
- * - docs/contracts/runtime-conformance.json（16 个 required_cases）
- * - docs/architecture/contracts-and-conformance.md §5 L94-110（conformance 门禁协议）
- * - docs/architecture/runtime-control-plane.md S05-C06
+ * 事实源：docs/contracts/runtime-conformance.json（Runtime Publication 套件，1.0.0）。
  *
  * 职责：
- * - runConformanceSuite：对 RuntimeAdapter 运行 16 个 conformance case 的基础场景，
- * 返回 ConformanceCaseResult[]。
- * - 基础场景：仅通过 RuntimeAdapter 接口可验证的 case（不需要完整平台基础设施）。
- * - 无法在本地 Adapter probe 中实测的场景一律 fail-closed；本 runner 不产生权威 Passed Run。
+ * - runPublicationConformanceSuite：对候选 RuntimeAdapter 真实执行 Publication
+ *   套件的 6 个 case，返回 PublicationConformanceCaseResult[]。
+ * - 只验证未发布候选 Runtime 自身的 Adapter / Protocol 行为，不需要 Route、
+ *   Projection、ExecutionBinding、Invocation、Tool、Memory、Child Thread、
+ *   ExecutionOwnership 等平台对象。
+ * - 整个 suite 只 probeCapabilities 一次，并把同一能力快照传给各 case，
+ *   避免一次 Run 中能力事实漂移。
+ * - 每项都通过真实 RuntimeAdapter 方法调用或严格返回结构校验得到；不得用
+ *   passed=true、capability 声明替代实际可调用行为、固定原因视为通过。
+ * - 可选能力为 false 时只能验证「不宣称支持」，不能调用后伪造成功。
+ * - cancel 是发布基础能力，必须实际 ack。
+ * - probe / ack 调用抛错或响应结构非法 → fail-closed（passed=false），不产生
+ *   权威 Passed Run。
+ * - 每个 case 的证据对象（evidence）至少绑定 caseId、passed 与真实调用返回的
+ *   关键字段/失败错误；evidenceDigest 用 computeCanonicalDigest（RFC8785）。
  *
- * 16 个 case 分类：
- * - 9 个基础场景（adapter probe 可验证）：
- * 1. dispatch-binds-immutable-config：startInvocation 返回唯一 runtime_execution_ref
- * 2. event-batch-idempotent：probeCapabilities 声明 event_stream=true
- * 3. event-payload-hash-conflict：probeCapabilities 声明 event_stream=true（hash 冲突由平台 ingress 强制）
- * 4. attempt-sequence-continuity：startInvocation 每次返回新 runtime_execution_ref
- * 5. steer-requires-ack：handleSteer 返回 accepted + applies_at=next_safe_point
- * 6. unsupported-steer：probeCapabilities features.steer 反映 steer 能力
- * 7. cancel-request-not-terminal：handleCancel 返回 cancel_state=accepted（非终态）
- * 15. execution-ownership-epoch：adapter 设计保证（hosted 单 epoch）
- * 16. session-does-not-claim-filesystem-recovery：probeCapabilities filesystem_checkpoint=false + handleResume requires_redispatch 字段
- * - 6 个 not_applicable_this_stage：
- * 8. tool-schema-refresh / 9. unknown-effect-no-replay / 10. capability-search-not-use
- * 11. memory-proposal-only / 12. child-thread-isolation / 13. child-cancel-requires-ack
- * - 1 个简化（mandatory）：
- * 14. credential-never-in-model-data：adapter 设计保证（passed=true + reason=adapter_design_guarantee）
- *
- * 关键约束：
- * - mandatory case 失败 → publishRuntimeRevision 抛 RuntimeConformanceCaseFailedError，Revision 不可路由。
- * - 本 runner 不直接调用 publishRuntimeRevision，仅返回结果供调用方决策。
- * - 测试不修改任何平台状态（纯 probe，不创建 Invocation/Item/Event）。
+ * 本 runner 不直接调用 publishRuntimeRevision，仅返回结果供调用方决策；
+ * 不修改任何平台状态（纯 probe，不创建 Invocation/Item/Event）。
  */
+import { rfc8785Canonicalize } from "@/lib/crypto/rfc-8785-canonicalize";
+import type {
+  CancelParams,
+  CancelResult,
+  ResumeParams,
+  ResumeResult,
+  RuntimeAdapter,
+  StartInvocationParams,
+  StartInvocationResult,
+  SteerParams,
+  SteerResult,
+} from "@/lib/runtime/adapters/hosted-adapter";
 import {
-  ALL_CONFORMANCE_CASES,
-  type ConformanceCaseId,
-  type ConformanceCaseResult,
+  PUBLICATION_CONFORMANCE_CASES,
+  type PublicationConformanceCaseId,
+  type PublicationConformanceCaseResult,
+  computeCaseEvidenceDigest,
 } from "@/lib/runtime/domain/runtime-conformance";
 import type { RuntimeCapabilitiesResponse } from "@/lib/runtime/runtime-client";
 
 // ─── 类型定义 ──────────────────────────────────────────────
 
-/** Conformance 测试 setup（可选，用于未来扩展完整基础设施场景）。 */
-export interface ConformanceTestSetup {
-  /** 测试环境标识（如 "testcontainers-mysql-8"）。 */
-  testEnvironment?: string;
-  /** Adapter 制品 digest（关联制品证明）。 */
-  adapterDigest?: string;
-  /** 证据引用（日志/trace 链接）。 */
-  evidenceRef?: string;
-  /** 可选：预创建 Invocation id（高级场景用，本阶段不使用）。 */
-  invocationId?: string;
-  /** 可选：预创建 Turn id（高级场景用，本阶段不使用）。 */
-  turnId?: string;
-}
-
-/** runConformanceSuite 入参。 */
-export interface RunConformanceSuiteParams {
+/** runPublicationConformanceSuite 入参。 */
+export interface RunPublicationConformanceSuiteParams {
   tenantId: string;
   runtimeRevisionId: string;
   /** 被测 RuntimeAdapter 实例。 */
   runtimeAdapter: RuntimeAdapter;
-  /** 测试 setup（可选）。 */
-  testSetup?: ConformanceTestSetup;
 }
 
-// ─── not_applicable_this_stage case 集合 ──────────────────
+/** 单个 case 的判定上下文（携带唯一 probe 快照）。 */
+interface CaseContext {
+  tenantId: string;
+  runtimeRevisionId: string;
+  runtimeAdapter: RuntimeAdapter;
+  /** 整个 suite 唯一的 probe 能力快照。 */
+  capabilities: RuntimeCapabilitiesResponse;
+}
 
-/** 6 个本阶段标记为 not_applicable_this_stage 的 case。 */
-const NOT_APPLICABLE_CASES: readonly ConformanceCaseId[] = [
-  "tool-schema-refresh",
-  "unknown-effect-no-replay",
-  "capability-search-not-use",
-  "memory-proposal-only",
-  "child-thread-isolation",
-  "child-cancel-requires-ack",
-];
-
-// ─── 主入口：runConformanceSuite ──────────────────────────
+// ─── 主入口：runPublicationConformanceSuite ──────────────
 
 /**
- * 运行 conformance 测试套件（16 个 case）。
+ * 运行 Runtime Publication Conformance 套件（6 个 case）。
  *
  * 流程：
- * 1. probeCapabilities：探测 adapter 能力声明。
- * 2. 对每个 case 运行基础场景验证：
- * - 基础场景：实际 probe adapter 接口，返回真实 passed 值。
- * - not_applicable_this_stage：返回 passed=true + reason。
- * - adapter_design_guarantee：返回 passed=true + reason。
- * 3. 返回 ConformanceCaseResult[]（按 ALL_CONFORMANCE_CASES 顺序）。
+ * 1. probeCapabilities：真实探测 adapter 能力清单（唯一一次）。
+ * 2. 同一能力快照传给每个 case，运行真实 Adapter 调用校验。
+ * 3. 返回 PublicationConformanceCaseResult[]（按 PUBLICATION_CONFORMANCE_CASES 顺序）。
  *
- * @throws ConformanceRunnerError probe 失败或 adapter 响应非法
+ * probe 失败或响应结构非法 → 全部 case fail-closed（passed=false），
+ * 绝不冒充 Passed，也不让后续 case 伪造成通过。
  */
-export async function runConformanceSuite(
-  params: RunConformanceSuiteParams,
-): Promise<ConformanceCaseResult[]> {
-  // probe 失败统一包装为 ConformanceRunnerError（区分 adapter 抛错与响应结构非法）
+export async function runPublicationConformanceSuite(
+  params: RunPublicationConformanceSuiteParams,
+): Promise<PublicationConformanceCaseResult[]> {
   let capabilities: RuntimeCapabilitiesResponse;
   try {
     capabilities = await params.runtimeAdapter.probeCapabilities();
+    validateCapabilitiesResponse(capabilities);
   } catch (err) {
-    throw new ConformanceRunnerError(
-      `probeCapabilities 调用失败：${err instanceof Error ? err.message : String(err)}`,
-    );
+    const reason = `capability probe 失败：${err instanceof Error ? err.message : String(err)}`;
+    return PUBLICATION_CONFORMANCE_CASES.map((caseId) => failClosed(caseId, reason));
   }
-  validateCapabilitiesResponse(capabilities);
 
-  const results: ConformanceCaseResult[] = [];
-  for (const caseId of ALL_CONFORMANCE_CASES) {
-    const result = await runSingleCase(params, caseId, capabilities);
-    results.push(result);
+  const ctx: CaseContext = {
+    tenantId: params.tenantId,
+    runtimeRevisionId: params.runtimeRevisionId,
+    runtimeAdapter: params.runtimeAdapter,
+    capabilities,
+  };
+
+  const results: PublicationConformanceCaseResult[] = [];
+  for (const caseId of PUBLICATION_CONFORMANCE_CASES) {
+    results.push(await runSingleCase(ctx, caseId));
   }
   return results;
 }
 
 // ─── 单个 case 调度 ────────────────────────────────────────
 
-/** 按 caseId 调度到具体测试函数。 */
 async function runSingleCase(
-  params: RunConformanceSuiteParams,
-  caseId: ConformanceCaseId,
-  capabilities: RuntimeCapabilitiesResponse,
-): Promise<ConformanceCaseResult> {
+  ctx: CaseContext,
+  caseId: PublicationConformanceCaseId,
+): Promise<PublicationConformanceCaseResult> {
   switch (caseId) {
-    case "dispatch-binds-immutable-config":
-      return testDispatchBindsImmutableConfig(params);
-    case "event-batch-idempotent":
-      return testEventBatchIdempotent(capabilities);
-    case "event-payload-hash-conflict":
-      return testEventPayloadHashConflict(capabilities);
-    case "attempt-sequence-continuity":
-      return testAttemptSequenceContinuity(params);
-    case "steer-requires-ack":
-      return testSteerRequiresAck(params);
-    case "unsupported-steer":
-      return testUnsupportedSteer(params, capabilities);
-    case "cancel-request-not-terminal":
-      return testCancelRequestNotTerminal(params);
-    case "credential-never-in-model-data":
-      return testCredentialNeverInModelData(capabilities);
-    case "execution-ownership-epoch":
-      return testExecutionOwnershipEpoch(capabilities);
-    case "session-does-not-claim-filesystem-recovery":
-      return testSessionDoesNotClaimFilesystemRecovery(params, capabilities);
+    case "capability-manifest-contract":
+      return testCapabilityManifestContract(ctx);
+    case "dispatch-acknowledgement":
+      return testDispatchAcknowledgement(ctx);
+    case "cancel-acknowledgement":
+      return testCancelAcknowledgement(ctx);
+    case "steer-capability-consistency":
+      return testSteerCapabilityConsistency(ctx);
+    case "resume-capability-consistency":
+      return testResumeCapabilityConsistency(ctx);
+    case "session-recovery-declaration":
+      return testSessionRecoveryDeclaration(ctx);
     default:
-      if (NOT_APPLICABLE_CASES.includes(caseId)) {
-        return { caseId, passed: false, reason: "case_requires_isolated_runner" };
-      }
-      // 未识别的 case：fail-closed
-      return {
-        caseId,
-        passed: false,
-        reason: `unknown_case_id: ${caseId}`,
-      };
+      return failClosed(caseId, `unknown_publication_case_id: ${caseId}`);
   }
 }
 
-// ─── 9 个基础场景实现 ──────────────────────────────────────
-
-/**
- * Case 1: dispatch-binds-immutable-config（mandatory）
- *
- * 验证：startInvocation 每次返回唯一的 runtime_execution_ref。
- * 每个 Invocation 恰有一条不可变 ExecutionBinding（1:1），runtime_execution_ref 是绑定标识。
- *
- * 实现调用 adapter.startInvocation 两次（mock sink，无副作用），验证：
- * - 两次返回的 runtime_execution_ref 不同
- * - 两次返回的 runtime_session_ref 不同
- * - accepted=true
- */
-async function testDispatchBindsImmutableConfig(
-  params: RunConformanceSuiteParams,
-): Promise<ConformanceCaseResult> {
-  try {
-    const startParams = buildStartInvocationParams(params.tenantId, params.runtimeRevisionId);
-    const result1 = await params.runtimeAdapter.startInvocation(startParams);
-    const result2 = await params.runtimeAdapter.startInvocation(startParams);
-
-    if (!result1.accepted || !result2.accepted) {
-      return {
-        caseId: "dispatch-binds-immutable-config",
-        passed: false,
-        reason: `startInvocation 未被接受：r1.accepted=${result1.accepted}, r2.accepted=${result2.accepted}`,
-      };
-    }
-
-    if (result1.runtime_execution_ref === result2.runtime_execution_ref) {
-      return {
-        caseId: "dispatch-binds-immutable-config",
-        passed: false,
-        reason: `两次 startInvocation 返回相同 runtime_execution_ref=${result1.runtime_execution_ref}，违反不可变 1:1 绑定`,
-      };
-    }
-
-    if (result1.runtime_session_ref === result2.runtime_session_ref) {
-      return {
-        caseId: "dispatch-binds-immutable-config",
-        passed: false,
-        reason: `两次 startInvocation 返回相同 runtime_session_ref=${result1.runtime_session_ref}，违反唯一性`,
-      };
-    }
-
-    return {
-      caseId: "dispatch-binds-immutable-config",
-      passed: true,
-      reason:
-        "startInvocation 每次返回唯一 runtime_execution_ref/runtime_session_ref，符合不可变 1:1 绑定",
-    };
-  } catch (err) {
-    return {
-      caseId: "dispatch-binds-immutable-config",
-      passed: false,
-      reason: `probe 失败：${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
+/** 构造一个 fail-closed 的 case 结果（evidence 绑定错误）。 */
+function failClosed(
+  caseId: PublicationConformanceCaseId,
+  reason: string,
+): PublicationConformanceCaseResult {
+  const evidence = { caseId, passed: false, error: reason };
+  return { caseId, passed: false, reason, evidence, evidenceDigest: digestOf(evidence) };
 }
 
+/** 计算证据的权威 RFC8785 canonical digest（复用 domain 唯一事实源）。 */
+function digestOf(evidence: Record<string, unknown>): string {
+  return computeCaseEvidenceDigest(evidence);
+}
+
+// ─── 6 个 Publication case 实现 ───────────────────────────
+
 /**
- * Case 2: event-batch-idempotent（mandatory）
+ * case: capability-manifest-contract
  *
- * 验证：adapter 声明 event_stream=true 能力。
- * 事件幂等由平台 ingress 强制（UNIQUE(invocationId, producerEventId) + UNIQUE(invocationId, producerSequence)），
- * adapter 只需声明支持 event_stream。
+ * 校验 probeCapabilities 返回的能力清单结构合法。probe 已在 suite 入口完成；
+ * 此处仅校验结构，并把真实能力清单作为证据。
  */
-function testEventBatchIdempotent(
-  capabilities: RuntimeCapabilitiesResponse,
-): ConformanceCaseResult {
-  if (!capabilities.features.event_stream) {
-    return {
-      caseId: "event-batch-idempotent",
-      passed: false,
-      reason: "adapter 声明 features.event_stream=false，不支持事件流",
-    };
-  }
-  return {
-    caseId: "event-batch-idempotent",
+function testCapabilityManifestContract(ctx: CaseContext): PublicationConformanceCaseResult {
+  const evidence = {
+    caseId: "capability-manifest-contract",
     passed: true,
-    reason: "adapter 声明 event_stream=true；幂等由平台 ingress UNIQUE 约束强制",
+    protocol_versions: ctx.capabilities.protocol_versions,
+    features: ctx.capabilities.features,
+    limits: ctx.capabilities.limits,
   };
-}
-
-/**
- * Case 3: event-payload-hash-conflict
- *
- * 验证：adapter 声明 event_stream=true 能力。
- * hash 冲突检测由平台 ingress 强制（payloadHash 不匹配 → EventPayloadHashConflictError），
- * adapter 只需声明支持 event_stream。
- */
-function testEventPayloadHashConflict(
-  capabilities: RuntimeCapabilitiesResponse,
-): ConformanceCaseResult {
-  if (!capabilities.features.event_stream) {
-    return {
-      caseId: "event-payload-hash-conflict",
-      passed: false,
-      reason: "adapter 声明 features.event_stream=false，不支持事件流",
-    };
-  }
   return {
-    caseId: "event-payload-hash-conflict",
+    caseId: "capability-manifest-contract",
     passed: true,
-    reason: "adapter 声明 event_stream=true；hash 冲突由平台 ingress payloadHash 校验强制",
+    reason: `probeCapabilities 返回合法能力清单（协议 ${ctx.capabilities.protocol_versions.join(",")}）`,
+    evidence,
+    evidenceDigest: digestOf(evidence),
   };
 }
 
 /**
- * Case 4: attempt-sequence-continuity
+ * case: dispatch-acknowledgement
  *
- * 验证：startInvocation 每次返回新 runtime_execution_ref。
- * Attempt 重调度使用新 runtime_execution_ref，不覆盖初始 ref（）。
- * 与 Case 1 类似，但聚焦于 attempt 序列连续性：每个 attempt 应有唯一 execution_ref。
+ * 只做一次真实 dispatch。验证 accepted=true、refs 非空，且返回的 capabilities
+ * 与本次唯一 probe 快照一致。不制造多余的第二个调用。
  */
-async function testAttemptSequenceContinuity(
-  params: RunConformanceSuiteParams,
-): Promise<ConformanceCaseResult> {
+async function testDispatchAcknowledgement(
+  ctx: CaseContext,
+): Promise<PublicationConformanceCaseResult> {
+  const startParams = buildStartInvocationParams(ctx.tenantId, ctx.runtimeRevisionId);
+  let result: StartInvocationResult;
   try {
-    const startParams = buildStartInvocationParams(params.tenantId, params.runtimeRevisionId);
-    const r1 = await params.runtimeAdapter.startInvocation(startParams);
-    const r2 = await params.runtimeAdapter.startInvocation(startParams);
-
-    if (r1.runtime_execution_ref === r2.runtime_execution_ref) {
-      return {
-        caseId: "attempt-sequence-continuity",
-        passed: false,
-        reason: "两次 startInvocation 返回相同 runtime_execution_ref，违反 Attempt 序列唯一性",
-      };
-    }
-
-    return {
-      caseId: "attempt-sequence-continuity",
-      passed: true,
-      reason: "每次 startInvocation 返回新 runtime_execution_ref，符合 Attempt 序列连续性",
-    };
+    result = await ctx.runtimeAdapter.startInvocation(startParams);
   } catch (err) {
-    return {
-      caseId: "attempt-sequence-continuity",
+    return failClosed(
+      "dispatch-acknowledgement",
+      `startInvocation 调用失败：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (!result.accepted) {
+    const evidence = {
+      caseId: "dispatch-acknowledgement",
       passed: false,
-      reason: `probe 失败：${err instanceof Error ? err.message : String(err)}`,
+      accepted: result.accepted,
+      runtime_execution_ref: result.runtime_execution_ref,
+      runtime_session_ref: result.runtime_session_ref,
+    };
+    return {
+      ...failClosed(
+        "dispatch-acknowledgement",
+        `startInvocation 未被接受：accepted=${result.accepted}`,
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
     };
   }
-}
-
-/**
- * Case 5: steer-requires-ack
- *
- * 验证：handleSteer 返回 steer_state="accepted" + applies_at="next_safe_point"。
- * Steer 请求需要 Runtime ack（不立即生效），在下一个安全点应用。
- * generation_interrupted 字段必须存在（boolean）。
- */
-async function testSteerRequiresAck(
-  params: RunConformanceSuiteParams,
-): Promise<ConformanceCaseResult> {
-  try {
-    const steerParams = buildSteerParams();
-    const result = await params.runtimeAdapter.handleSteer(steerParams);
-
-    if (result.steer_state !== "accepted") {
-      return {
-        caseId: "steer-requires-ack",
-        passed: false,
-        reason: `handleSteer 返回 steer_state=${result.steer_state}，期望 "accepted"`,
-      };
-    }
-
-    if (result.applies_at !== "next_safe_point") {
-      return {
-        caseId: "steer-requires-ack",
-        passed: false,
-        reason: `handleSteer 返回 applies_at=${result.applies_at}，期望 "next_safe_point"`,
-      };
-    }
-
-    // generation_interrupted 字段必须为 boolean
-    if (typeof result.generation_interrupted !== "boolean") {
-      return {
-        caseId: "steer-requires-ack",
-        passed: false,
-        reason: `handleSteer generation_interrupted 类型非法：${typeof result.generation_interrupted}`,
-      };
-    }
-
-    return {
-      caseId: "steer-requires-ack",
-      passed: true,
-      reason: `handleSteer 返回 accepted + next_safe_point + generation_interrupted=${result.generation_interrupted}`,
-    };
-  } catch (err) {
-    return {
-      caseId: "steer-requires-ack",
+  if (!result.runtime_execution_ref || !result.runtime_session_ref) {
+    const evidence = {
+      caseId: "dispatch-acknowledgement",
       passed: false,
-      reason: `probe 失败：${err instanceof Error ? err.message : String(err)}`,
+      accepted: result.accepted,
+      runtime_execution_ref: result.runtime_execution_ref,
+      runtime_session_ref: result.runtime_session_ref,
     };
-  }
-}
-
-/**
- * Case 6: unsupported-steer
- *
- * 验证：probeCapabilities features.steer 反映 steer 能力。
- * 当 adapter 声明 steer=false 时，handleSteer 应不可用（路由层不调用）。
- * 当 adapter 声明 steer=true 时，handleSteer 应正常返回 accepted。
- *
- * 本测试验证：features.steer=true 时 handleSteer 正常工作（与 Case 5 互补）。
- */
-async function testUnsupportedSteer(
-  params: RunConformanceSuiteParams,
-  capabilities: RuntimeCapabilitiesResponse,
-): Promise<ConformanceCaseResult> {
-  // 能力声明为 false：adapter 不应被调用 handleSteer（路由层责任）
-  if (!capabilities.features.steer) {
     return {
-      caseId: "unsupported-steer",
-      passed: true,
-      reason: "adapter 声明 features.steer=false；路由层不调用 handleSteer，符合 unsupported 语义",
+      ...failClosed(
+        "dispatch-acknowledgement",
+        "startInvocation 返回空 runtime_execution_ref/runtime_session_ref",
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
     };
   }
 
-  // 能力声明为 true：handleSteer 应正常返回 accepted
-  try {
-    const steerParams = buildSteerParams();
-    const result = await params.runtimeAdapter.handleSteer(steerParams);
-    if (result.steer_state !== "accepted") {
-      return {
-        caseId: "unsupported-steer",
-        passed: false,
-        reason: `adapter 声明 steer=true 但 handleSteer 返回 steer_state=${result.steer_state}，期望 "accepted"`,
-      };
-    }
-    return {
-      caseId: "unsupported-steer",
-      passed: true,
-      reason: "adapter 声明 steer=true 且 handleSteer 返回 accepted，符合支持 steer 语义",
-    };
-  } catch (err) {
-    return {
-      caseId: "unsupported-steer",
-      passed: false,
-      reason: `adapter 声明 steer=true 但 handleSteer 抛错：${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
-}
+  // RFC8785 canonical 比较：键序无关，避免 JSON.stringify 顺序敏感误判。
+  const capabilitiesMatch =
+    rfc8785Canonicalize(result.capabilities) === rfc8785Canonicalize(ctx.capabilities);
+  const evidence = {
+    caseId: "dispatch-acknowledgement",
+    passed: true,
+    accepted: result.accepted,
+    runtime_execution_ref: result.runtime_execution_ref,
+    runtime_session_ref: result.runtime_session_ref,
+    capabilities_match_probe_snapshot: capabilitiesMatch,
+  };
 
-/**
- * Case 7: cancel-request-not-terminal（mandatory）
- *
- * 验证：handleCancel 返回 cancel_state="accepted"（非终态）。
- * cancel 请求只是 ack（Runtime 确认收到），不是终态——Invocation 仍 running，
- * 直到 Runtime 回传 execution.cancelled 候选事件，平台 ingress 映射后才转入 cancelled 终态。
- *
- * already_completed_effects_preserved 字段必须为 boolean（已完成的副作用保留）。
- */
-async function testCancelRequestNotTerminal(
-  params: RunConformanceSuiteParams,
-): Promise<ConformanceCaseResult> {
-  try {
-    const cancelParams = buildCancelParams();
-    const result = await params.runtimeAdapter.handleCancel(cancelParams);
-
-    if (result.cancel_state !== "accepted") {
-      return {
-        caseId: "cancel-request-not-terminal",
-        passed: false,
-        reason: `handleCancel 返回 cancel_state=${result.cancel_state}，期望 "accepted"（非终态）`,
-      };
-    }
-
-    if (typeof result.already_completed_effects_preserved !== "boolean") {
-      return {
-        caseId: "cancel-request-not-terminal",
-        passed: false,
-        reason: `handleCancel already_completed_effects_preserved 类型非法：${typeof result.already_completed_effects_preserved}`,
-      };
-    }
-
+  if (!capabilitiesMatch) {
     return {
-      caseId: "cancel-request-not-terminal",
-      passed: true,
-      reason: `handleCancel 返回 accepted（非终态）+ already_completed_effects_preserved=${result.already_completed_effects_preserved}`,
-    };
-  } catch (err) {
-    return {
-      caseId: "cancel-request-not-terminal",
-      passed: false,
-      reason: `probe 失败：${err instanceof Error ? err.message : String(err)}`,
+      ...failClosed(
+        "dispatch-acknowledgement",
+        "startInvocation 返回 capabilities 与本次唯一 probe 快照不一致",
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
     };
   }
-}
 
-/**
- * Case 14: credential-never-in-model-data（mandatory，简化）
- *
- * 简化验证：adapter 设计保证——RuntimeAdapter 接口不暴露 model data 字段，
- * model data 只通过 startInvocation.input_items 传入，adapter 不应在 response 中回传 credential。
- *
- * 真实验证需要检查 input_items/response 字段是否包含 credential 字段，
- * 本阶段标记为 adapter_design_guarantee（passed=true），后续阶段补完整 schema 校验。
- */
-function testCredentialNeverInModelData(
-  capabilities: RuntimeCapabilitiesResponse,
-): ConformanceCaseResult {
-  // 基础验证：capabilities 不应包含 credential 字段（schema 由 RuntimeCapabilitiesResponse 类型强制）
-  // 真实验证需要扫描 input_items/response.completed payload，本阶段简化为 adapter 设计保证。
-  void capabilities; // capabilities schema 已由类型系统保证无 credential 字段
   return {
-    caseId: "credential-never-in-model-data",
-    passed: false,
-    reason: "case_requires_isolated_runner",
+    caseId: "dispatch-acknowledgement",
+    passed: true,
+    reason:
+      "startInvocation 返回 accepted + 非空 execution/session ref + capabilities 与 probe 快照一致",
+    evidence,
+    evidenceDigest: digestOf(evidence),
   };
 }
 
 /**
- * Case 15: execution-ownership-epoch
+ * case: cancel-acknowledgement
  *
- * 简化验证：adapter 设计保证——Hosted Runtime 使用单 leaseEpoch（平台托管，无多设备竞争）。
- * External Runtime 需在后续阶段补完整 ExecutionOwnership 切换测试。
- *
- * 本阶段标记为 adapter_design_guarantee（passed=true）。
+ * cancel 是发布基础能力，必须实际 ack。真实调用 handleCancel，要求
+ * cancel_state=accepted（非终态）+ already_completed_effects_preserved 为 boolean。
+ * adapter 抛错 → fail-closed。
  */
-function testExecutionOwnershipEpoch(
-  capabilities: RuntimeCapabilitiesResponse,
-): ConformanceCaseResult {
-  void capabilities;
-  return {
-    caseId: "execution-ownership-epoch",
-    passed: false,
-    reason: "case_requires_isolated_runner",
-  };
-}
-
-/**
- * Case 16: session-does-not-claim-filesystem-recovery
- *
- * 验证：
- * 1. probeCapabilities features.filesystem_checkpoint=false（不声明 filesystem 恢复能力）
- * 2. handleResume 返回 requires_redispatch 字段（boolean，不声明 filesystem 恢复）
- */
-async function testSessionDoesNotClaimFilesystemRecovery(
-  params: RunConformanceSuiteParams,
-  capabilities: RuntimeCapabilitiesResponse,
-): Promise<ConformanceCaseResult> {
-  // 1. filesystem_checkpoint 应为 false（不声明 filesystem 恢复）
-  if (capabilities.features.filesystem_checkpoint) {
-    return {
-      caseId: "session-does-not-claim-filesystem-recovery",
-      passed: false,
-      reason:
-        "adapter 声明 features.filesystem_checkpoint=true，违反 session 不声明 filesystem 恢复约束",
-    };
-  }
-
-  // 2. handleResume 返回 requires_redispatch 字段
+async function testCancelAcknowledgement(
+  ctx: CaseContext,
+): Promise<PublicationConformanceCaseResult> {
+  const cancelParams = buildCancelParams();
+  let result: CancelResult;
   try {
-    const resumeParams = buildResumeParams();
-    const result = await params.runtimeAdapter.handleResume(resumeParams);
-
-    if (typeof result.requires_redispatch !== "boolean") {
-      return {
-        caseId: "session-does-not-claim-filesystem-recovery",
-        passed: false,
-        reason: `handleResume requires_redispatch 类型非法：${typeof result.requires_redispatch}`,
-      };
-    }
-
-    if (result.resume_state !== "accepted") {
-      return {
-        caseId: "session-does-not-claim-filesystem-recovery",
-        passed: false,
-        reason: `handleResume resume_state=${result.resume_state}，期望 "accepted"`,
-      };
-    }
-
-    return {
-      caseId: "session-does-not-claim-filesystem-recovery",
-      passed: true,
-      reason: `filesystem_checkpoint=false + handleResume accepted + requires_redispatch=${result.requires_redispatch}`,
-    };
+    result = await ctx.runtimeAdapter.handleCancel(cancelParams);
   } catch (err) {
+    return failClosed(
+      "cancel-acknowledgement",
+      `handleCancel 调用失败：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const evidence = {
+    caseId: "cancel-acknowledgement",
+    passed: false,
+    cancel_state: result.cancel_state,
+    already_completed_effects_preserved: result.already_completed_effects_preserved,
+  };
+  if (result.cancel_state !== "accepted") {
     return {
-      caseId: "session-does-not-claim-filesystem-recovery",
-      passed: false,
-      reason: `probe 失败：${err instanceof Error ? err.message : String(err)}`,
+      ...failClosed(
+        "cancel-acknowledgement",
+        `handleCancel 返回 cancel_state=${result.cancel_state}，期望 "accepted"`,
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
     };
   }
+  if (typeof result.already_completed_effects_preserved !== "boolean") {
+    return {
+      ...failClosed(
+        "cancel-acknowledgement",
+        `handleCancel already_completed_effects_preserved 类型非法：${typeof result.already_completed_effects_preserved}`,
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+
+  evidence.passed = true;
+  return {
+    caseId: "cancel-acknowledgement",
+    passed: true,
+    reason: `handleCancel 返回 accepted + already_completed_effects_preserved=${result.already_completed_effects_preserved}`,
+    evidence,
+    evidenceDigest: digestOf(evidence),
+  };
+}
+
+/**
+ * case: steer-capability-consistency
+ *
+ * 使用唯一 probe 快照。若 features.steer=true 则调用 handleSteer 并验证
+ * accepted + next_safe_point + generation_interrupted boolean；若 features.steer=false
+ * 只验证「不宣称支持」，不调用 handleSteer、不伪造成功。
+ */
+async function testSteerCapabilityConsistency(
+  ctx: CaseContext,
+): Promise<PublicationConformanceCaseResult> {
+  const steerDeclared = ctx.capabilities.features.steer === true;
+
+  if (!steerDeclared) {
+    const evidence = {
+      caseId: "steer-capability-consistency",
+      passed: true,
+      steer_declared: false,
+      note: "adapter 未宣称 steer 能力，符合 unsupported 语义（不调用 handleSteer）",
+    };
+    return {
+      caseId: "steer-capability-consistency",
+      passed: true,
+      reason: "adapter 未宣称 steer 能力，符合 unsupported 语义（不调用 handleSteer）",
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+
+  const steerParams = buildSteerParams();
+  let result: SteerResult;
+  try {
+    result = await ctx.runtimeAdapter.handleSteer(steerParams);
+  } catch (err) {
+    return failClosed(
+      "steer-capability-consistency",
+      `adapter 宣称 steer=true 但 handleSteer 抛错：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const evidence = {
+    caseId: "steer-capability-consistency",
+    passed: false,
+    steer_declared: true,
+    steer_state: result.steer_state,
+    applies_at: result.applies_at,
+    generation_interrupted: result.generation_interrupted,
+  };
+  if (result.steer_state !== "accepted") {
+    return {
+      ...failClosed(
+        "steer-capability-consistency",
+        `adapter 宣称 steer=true 但 handleSteer 返回 steer_state=${result.steer_state}`,
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+  if (result.applies_at !== "next_safe_point") {
+    return {
+      ...failClosed(
+        "steer-capability-consistency",
+        `handleSteer applies_at=${result.applies_at}，期望 "next_safe_point"`,
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+  if (typeof result.generation_interrupted !== "boolean") {
+    return {
+      ...failClosed(
+        "steer-capability-consistency",
+        `handleSteer generation_interrupted 类型非法：${typeof result.generation_interrupted}`,
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+
+  evidence.passed = true;
+  return {
+    caseId: "steer-capability-consistency",
+    passed: true,
+    reason: `adapter 宣称 steer=true 且 handleSteer 返回 accepted + next_safe_point + generation_interrupted=${result.generation_interrupted}`,
+    evidence,
+    evidenceDigest: digestOf(evidence),
+  };
+}
+
+/**
+ * case: resume-capability-consistency
+ *
+ * 使用唯一 probe 快照。若 features.resume=true 则调用 handleResume 并验证
+ * accepted + runtime_execution_ref 非空；若 features.resume=false 只验证
+ * 「不宣称支持」，不调用 handleResume、不伪造成功。
+ */
+async function testResumeCapabilityConsistency(
+  ctx: CaseContext,
+): Promise<PublicationConformanceCaseResult> {
+  const resumeDeclared = ctx.capabilities.features.resume === true;
+
+  if (!resumeDeclared) {
+    const evidence = {
+      caseId: "resume-capability-consistency",
+      passed: true,
+      resume_declared: false,
+      note: "adapter 未宣称 resume 能力，符合 unsupported 语义（不调用 handleResume）",
+    };
+    return {
+      caseId: "resume-capability-consistency",
+      passed: true,
+      reason: "adapter 未宣称 resume 能力，符合 unsupported 语义（不调用 handleResume）",
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+
+  const resumeParams = buildResumeParams();
+  let result: ResumeResult;
+  try {
+    result = await ctx.runtimeAdapter.handleResume(resumeParams);
+  } catch (err) {
+    return failClosed(
+      "resume-capability-consistency",
+      `adapter 宣称 resume=true 但 handleResume 抛错：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const evidence = {
+    caseId: "resume-capability-consistency",
+    passed: false,
+    resume_declared: true,
+    resume_state: result.resume_state,
+    runtime_execution_ref: result.runtime_execution_ref,
+  };
+  if (result.resume_state !== "accepted") {
+    return {
+      ...failClosed(
+        "resume-capability-consistency",
+        `adapter 宣称 resume=true 但 handleResume 返回 resume_state=${result.resume_state}`,
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+  if (!result.runtime_execution_ref) {
+    return {
+      ...failClosed("resume-capability-consistency", "handleResume 返回空 runtime_execution_ref"),
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+
+  evidence.passed = true;
+  return {
+    caseId: "resume-capability-consistency",
+    passed: true,
+    reason: `adapter 宣称 resume=true 且 handleResume 返回 accepted + runtime_execution_ref=${result.runtime_execution_ref}`,
+    evidence,
+    evidenceDigest: digestOf(evidence),
+  };
+}
+
+/**
+ * case: session-recovery-declaration
+ *
+ * 一致语义：
+ * - filesystem_checkpoint=false → 证明未宣称该能力（通过）。
+ * - filesystem_checkpoint=true → 必须同时 resume=true，并携带 checkpointRef 做真实
+ *   resume probe，且 requires_redispatch=false，否则 fail-closed。
+ */
+async function testSessionRecoveryDeclaration(
+  ctx: CaseContext,
+): Promise<PublicationConformanceCaseResult> {
+  const filesystemCheckpoint = ctx.capabilities.features.filesystem_checkpoint === true;
+
+  if (!filesystemCheckpoint) {
+    const evidence = {
+      caseId: "session-recovery-declaration",
+      passed: true,
+      filesystem_checkpoint: false,
+      note: "adapter 未宣称 filesystem 级恢复能力",
+    };
+    return {
+      caseId: "session-recovery-declaration",
+      passed: true,
+      reason: "filesystem_checkpoint=false，未宣称 filesystem 级恢复能力",
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+
+  if (ctx.capabilities.features.resume !== true) {
+    const evidence = {
+      caseId: "session-recovery-declaration",
+      passed: false,
+      filesystem_checkpoint: true,
+      resume_declared: false,
+      error: "filesystem_checkpoint=true 但未宣称 resume 能力，无法证明 checkpoint 恢复",
+    };
+    return {
+      ...failClosed(
+        "session-recovery-declaration",
+        "filesystem_checkpoint=true 但未宣称 resume 能力，无法证明 checkpoint 恢复",
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+
+  const resumeParams: ResumeParams = {
+    invocationId: "conformance-test-checkpoint-resume-invocation",
+    resumePayload: { type: "conformance-test-checkpoint-resume", from_checkpoint: true },
+    checkpointRef: "conformance-test-checkpoint",
+  };
+  let result: ResumeResult;
+  try {
+    result = await ctx.runtimeAdapter.handleResume(resumeParams);
+  } catch (err) {
+    return failClosed(
+      "session-recovery-declaration",
+      `filesystem_checkpoint=true 时 checkpoint resume probe 抛错：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const evidence = {
+    caseId: "session-recovery-declaration",
+    passed: false,
+    filesystem_checkpoint: true,
+    resume_declared: true,
+    checkpointRef: resumeParams.checkpointRef,
+    resume_state: result.resume_state,
+    requires_redispatch: result.requires_redispatch,
+  };
+  if (result.resume_state !== "accepted") {
+    return {
+      ...failClosed(
+        "session-recovery-declaration",
+        `checkpoint resume 返回 resume_state=${result.resume_state}`,
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+  if (result.requires_redispatch !== false) {
+    return {
+      ...failClosed(
+        "session-recovery-declaration",
+        `filesystem_checkpoint=true 要求 requires_redispatch=false，实际=${result.requires_redispatch}`,
+      ),
+      evidence,
+      evidenceDigest: digestOf(evidence),
+    };
+  }
+
+  evidence.passed = true;
+  return {
+    caseId: "session-recovery-declaration",
+    passed: true,
+    reason:
+      "filesystem_checkpoint=true + resume=true + checkpoint resume requires_redispatch=false",
+    evidence,
+    evidenceDigest: digestOf(evidence),
+  };
 }
 
 // ─── 辅助：构造测试参数 ────────────────────────────────────
@@ -591,7 +613,7 @@ function buildCancelParams(): CancelParams {
   };
 }
 
-/** 构造 handleResume 测试参数。 */
+/** 构造 handleResume 测试参数（非 checkpoint 恢复）。 */
 function buildResumeParams(): ResumeParams {
   return {
     invocationId: "conformance-test-resume-invocation",
@@ -610,11 +632,11 @@ function buildSteerParams(): SteerParams {
 // ─── 辅助：capabilities 响应校验 ──────────────────────────
 
 /**
- * 校验 probeCapabilities 响应结构。
+ * 校验 probeCapabilities 响应结构（capability-manifest-contract）。
  *
  * @throws ConformanceRunnerError 响应结构非法
  */
-function validateCapabilitiesResponse(capabilities: RuntimeCapabilitiesResponse): void {
+export function validateCapabilitiesResponse(capabilities: RuntimeCapabilitiesResponse): void {
   if (!Array.isArray(capabilities.protocol_versions)) {
     throw new ConformanceRunnerError("probeCapabilities 响应 protocol_versions 必须是数组");
   }
@@ -653,7 +675,7 @@ function validateCapabilitiesResponse(capabilities: RuntimeCapabilitiesResponse)
 
 // ─── 错误类型 ──────────────────────────────────────────────
 
-/** Conformance runner 错误（probe 失败或响应非法）。 */
+/** Publication Conformance runner 错误（probe 失败或响应非法）。 */
 export class ConformanceRunnerError extends Error {
   constructor(message: string) {
     super(message);
