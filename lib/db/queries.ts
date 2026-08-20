@@ -37,7 +37,6 @@ import {
   type AdminAuditAction,
   type AdminAuditLog,
   type AdminAuditOutcome,
-  type Agent,
   type ApprovalRequestStatus,
   type ApprovalScope,
   type BackgroundTask,
@@ -97,7 +96,6 @@ import {
   type ToolRunStatus,
   type User,
   adminAuditLog,
-  agent,
   auditFailureLog,
   backgroundTask,
   contextSnapshot,
@@ -1666,56 +1664,11 @@ export async function insertPolicyConfigHistory(params: {
   });
 }
 
-// ─── Agent / Provider Profile Queries (: 只读档案) ────
-//
-// 仅档案存储 + 只读展示，**不接入 lib/ai/ runtime**（/ 非目标）。
-// 列表查询无 owner 范围——档案是全局只读，非租户隔离数据。
-
-/**
- * 列全部 agent 档案，按 createdAt asc。
- *
- * 默认过滤 deletedAt isNull(软删不展示);includeDeleted=true 看全部(含已软删)。
- */
-export async function listAgents(opts?: { includeDeleted?: boolean }): Promise<Agent[]> {
-  const conds = opts?.includeDeleted ? undefined : isNull(agent.deletedAt);
-  return db.select().from(agent).where(conds).orderBy(asc(agent.createdAt));
-}
+// ─── Provider Profile Queries ──────────────────────────────
 
 /** 列全部 provider 档案，按 createdAt asc。 */
 export async function listProviders(): Promise<ProviderProfile[]> {
   return db.select().from(providerProfile).orderBy(asc(providerProfile.createdAt));
-}
-
-/**
- * 按 name 取 agent（seed 幂等键）。
- *
- * 默认过滤 deletedAt isNull;includeDeleted=true 含已软删(seed 幂等判定用,
- * 避免软删后重复建同名 agent)。
- */
-export async function getAgentByName(
-  name: string,
-  opts?: { includeDeleted?: boolean },
-): Promise<Agent | null> {
-  const conds = opts?.includeDeleted
-    ? [eq(agent.name, name)]
-    : [eq(agent.name, name), isNull(agent.deletedAt)];
-  const [row] = await db
-    .select()
-    .from(agent)
-    .where(and(...conds))
-    .limit(1);
-  return row ?? null;
-}
-
-/**
- * 软删 agent(设 deletedAt)。身份层保留,可恢复;listAgents 默认不展示。
- * agent 无 status 字段(非 skill 的 active/archived 生命周期),deletedAt 是唯一软删字段。
- */
-export async function archiveAgent(agentId: string): Promise<void> {
-  await db
-    .update(agent)
-    .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(eq(agent.id, agentId));
 }
 
 /** 按 name 取 provider（seed 幂等键）。 */
@@ -1726,29 +1679,6 @@ export async function getProviderByName(name: string): Promise<ProviderProfile |
     .where(eq(providerProfile.name, name))
     .limit(1);
   return row ?? null;
-}
-
-/** 创建 agent 档案。config 由调用方显式传入（应用层写 {}，不依赖 DB default）。 */
-export async function createAgent(params: {
-  name: string;
-  description?: string | null;
-  model: string;
-  skillId?: string | null;
-  config: Record<string, unknown>;
-}): Promise<Agent> {
-  const row: Agent = {
-    id: randomUUID(),
-    name: params.name,
-    description: params.description ?? null,
-    model: params.model,
-    skillId: params.skillId ?? null,
-    config: params.config,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    deletedAt: null,
-  };
-  await db.insert(agent).values(row);
-  return row;
 }
 
 /** 创建 provider 档案。apiKeyRef 存 env 引用名，不落明文 secret。 */

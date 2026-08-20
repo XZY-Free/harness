@@ -681,41 +681,6 @@ export const policyConfigHistory = mysqlTable("PolicyConfigHistory", {
 });
 export type PolicyConfigHistoryRow = InferSelectModel<typeof policyConfigHistory>;
 
-// ─── Agent / Provider Profiles (: 只读档案,不接 runtime) ─
-
-/**
- * agent 档案（蓝图 ）。
- *
- * B1 只做档案存储 + 只读展示，**不接入 lib/ai/ runtime 执行链**：
- * - model = chatModel id（来自 aiConfig.chatModel / fetchAvailableModels），仅记录，运行时仍走 env。
- * - skillId 逻辑外键 → skill.id（FK 约束；可空，表示未绑定 skill）。
- * - config 占位：subagent 模板 / 并行执行策略，**本切片不解析**，由应用插入时显式写 {}，
- * 不依赖 MySQL JSON default（/ 约束 6）。
- */
-export const agent = mysqlTable("Agent", {
-  id: varchar("id", { length: 36 })
-    .primaryKey()
-    .notNull()
-    .$defaultFn(() => randomUUID()),
-  name: varchar("name", { length: 64 }).notNull(),
-  description: text("description"),
-  // chatModel id（仅档案，不驱动 runtime）
-  model: varchar("model", { length: 128 }).notNull(),
-  // 绑定的 skill（可空）
-  skillId: varchar("skillId", { length: 36 }).references(() => skill.id),
-  // 占位 JSON：subagent 模板 / 并行策略；应用插入时显式写 {}
-  config: json("config").notNull(),
-  createdAt: datetime("createdAt", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: datetime("updatedAt", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  // 软删除
-  deletedAt: datetime("deletedAt", { mode: "date" }),
-});
-export type Agent = InferSelectModel<typeof agent>;
-
 /**
  * LLM 提供方档案（蓝图 §12 provider_profiles）。
  *

@@ -1,5 +1,6 @@
 import { MetricCard, pct } from "@/components/studio/metric-card";
 import { ScopePersistence } from "@/components/studio/scope-persistence";
+import { listAgents } from "@/lib/agents/persistence/agent-queries";
 import {
   type AnalyticsScope,
   avgCompletionMs,
@@ -10,7 +11,7 @@ import {
   toolFailureBreakdown,
 } from "@/lib/analytics/queries";
 import { getCurrentUserFromRequest } from "@/lib/auth";
-import { listAgents, listProviders } from "@/lib/db/queries";
+import { listProviders } from "@/lib/db/queries";
 import {
   getPolicyConfigRows,
   listAllThreads,
@@ -18,6 +19,7 @@ import {
   listSkills,
   listThreadsForUser,
 } from "@/lib/db/studio-queries";
+import { resolvePrincipal } from "@/lib/identity/resolver";
 import { hasPermission } from "@/lib/rbac";
 import { headers } from "next/headers";
 import Link from "next/link";
@@ -53,7 +55,11 @@ export default async function StudioOverviewPage({
   searchParams: Promise<{ scope?: string }>;
 }) {
   const sp = await searchParams;
-  const user = await getCurrentUserFromRequest({ headers: await headers() });
+  const requestHeaders = await headers();
+  const [user, principal] = await Promise.all([
+    getCurrentUserFromRequest({ headers: requestHeaders }),
+    resolvePrincipal(requestHeaders, "admin"),
+  ]);
   const canAllThreads = await hasPermission(user.id, "thread.read.all");
   const canAnalytics = await hasPermission(user.id, "analytics.read.self");
   const canGlobal = await hasPermission(user.id, "analytics.read.global");
@@ -76,7 +82,7 @@ export default async function StudioOverviewPage({
   ] = await Promise.all([
     listSkills(),
     canAllThreads ? listAllThreads() : listThreadsForUser(user.id),
-    listAgents(),
+    listAgents(principal.tenantId),
     listProviders(),
     getPolicyConfigRows(),
     listRecentArtifactsForUser(user.id, canAllThreads, 5),

@@ -3,7 +3,6 @@ import {
   abandonThreadPlan,
   appendThreadEvent,
   consumeOnceApproval,
-  createAgent,
   createApprovalRequest,
   createBackgroundTask,
   createCheckpointRow,
@@ -28,7 +27,6 @@ import {
   getActiveEmbeddingRow,
   getActiveSummaryByChecksum,
   getActiveThreadPlan,
-  getAgentByName,
   getApprovalRequest,
   getBackgroundTask,
   getCheckpoint,
@@ -54,7 +52,6 @@ import {
   listActiveBackgroundTasksByThread,
   listActiveSubagentRunsByThread,
   listAdminAuditLogs,
-  listAgents,
   listBackgroundTasksByThread,
   listCheckpointsByThread,
   listContextSnapshotsForThread,
@@ -119,7 +116,6 @@ import {
 } from "@/lib/db/schema";
 import {
   adminAuditLog,
-  agent,
   backgroundTask,
   contextSnapshot,
   contextSummary,
@@ -1268,84 +1264,9 @@ describe("owner-scoped thread queries (Phase 4-3)", () => {
   });
 });
 
-// ─── Phase 4-4 切片 B1:Agent / Provider 档案查询(真实 MySQL) ──
+// ─── Provider 档案查询（真实 MySQL） ────────────────────────
 
-describe("agent / provider 档案查询 (切片 B1)", () => {
-  it("listAgents 按 createdAt asc 返回", async () => {
-    await db.insert(agent).values({
-      id: "a2",
-      name: "agent-2",
-      model: "kimi",
-      config: {},
-      createdAt: new Date("2026-02-01"),
-      updatedAt: new Date(),
-    });
-    await db.insert(agent).values({
-      id: "a1",
-      name: "agent-1",
-      model: "kimi",
-      config: {},
-      createdAt: new Date("2026-01-01"),
-      updatedAt: new Date(),
-    });
-
-    const rows = await listAgents();
-    expect(rows).toHaveLength(2);
-    expect(rows[0]?.id).toBe("a1");
-    expect(rows[1]?.id).toBe("a2");
-  });
-
-  it("listAgents 默认过滤 deletedAt isNull(软删不展示)", async () => {
-    await db.insert(agent).values({
-      id: "a1",
-      name: "live",
-      model: "kimi",
-      config: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    await db.insert(agent).values({
-      id: "a2",
-      name: "deleted",
-      model: "kimi",
-      config: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      deletedAt: new Date(),
-    });
-
-    const rows = await listAgents();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.id).toBe("a1");
-  });
-
-  it("listAgents includeDeleted=true → 含已软删(seed 幂等用)", async () => {
-    await db.insert(agent).values({
-      id: "a1",
-      name: "live",
-      model: "kimi",
-      config: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    await db.insert(agent).values({
-      id: "a2",
-      name: "deleted",
-      model: "kimi",
-      config: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      deletedAt: new Date(),
-    });
-
-    const rows = await listAgents({ includeDeleted: true });
-    expect(rows).toHaveLength(2);
-  });
-
-  it("listAgents 空表 → []", async () => {
-    await expect(listAgents()).resolves.toEqual([]);
-  });
-
+describe("provider 档案查询", () => {
   it("listProviders 按 createdAt asc 返回", async () => {
     await db.insert(providerProfile).values({
       id: "p2",
@@ -1366,20 +1287,6 @@ describe("agent / provider 档案查询 (切片 B1)", () => {
     await expect(listProviders()).resolves.toEqual([]);
   });
 
-  it("getAgentByName 命中 / 未命中", async () => {
-    await db.insert(agent).values({
-      id: "a1",
-      name: "default",
-      model: "kimi",
-      config: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    expect(await getAgentByName("default")).toMatchObject({ id: "a1" });
-    expect(await getAgentByName("nope")).toBeNull();
-  });
-
   it("getProviderByName 命中 / 未命中", async () => {
     await db.insert(providerProfile).values({
       id: "p1",
@@ -1393,39 +1300,6 @@ describe("agent / provider 档案查询 (切片 B1)", () => {
 
     expect(await getProviderByName("default")).toMatchObject({ id: "p1" });
     expect(await getProviderByName("nope")).toBeNull();
-  });
-
-  it("createAgent 显式写 config(不依赖 DB default)", async () => {
-    const a = await createAgent({
-      name: "default",
-      model: "kimi-k2.7-code",
-      skillId: null,
-      config: {},
-    });
-    expect(a.name).toBe("default");
-    expect(a.model).toBe("kimi-k2.7-code");
-    expect(a.config).toEqual({});
-    expect(a.id).toBeTruthy();
-    expect(a.createdAt).toBeInstanceOf(Date);
-    // 真实 DB 落库
-    const [row] = await db.select().from(agent).where(eq(agent.id, a.id));
-    expect(row?.config).toEqual({});
-  });
-
-  it("archiveAgent → set deletedAt + updatedAt(软删,身份保留可恢复)", async () => {
-    await db.insert(agent).values({
-      id: "a1",
-      name: "default",
-      model: "kimi",
-      config: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    await import("@/lib/db/queries").then((m) => m.archiveAgent("a1"));
-    const [row] = await db.select().from(agent).where(eq(agent.id, "a1"));
-    expect(row?.deletedAt).toBeInstanceOf(Date);
-    expect(row?.updatedAt).toBeInstanceOf(Date);
   });
 
   it("createProvider 存 apiKeyRef 引用名,不落明文", async () => {
