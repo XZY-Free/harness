@@ -1,13 +1,30 @@
 /**
- * V10 Phase 5：challenge-auth 测试。
+ * challenge-auth 测试。
  */
 import {
   generateChallenge,
   generateServerKeyPair,
   verifyAuthResponse,
 } from "@/lib/desktop-bridge/challenge-auth";
-import { generateDeviceKeyPair, signData } from "@/lib/desktop/signing";
+import { generateDeviceKeyPair, getAuthSignPayload, signData } from "@/lib/desktop/signing";
 import { describe, expect, it } from "vitest";
+
+/** 构造一次合法认证响应（签名绑定 tenantId + deviceKey + challenge）。 */
+function signAuth(params: {
+  tenantId: string;
+  deviceId: string;
+  challenge: string;
+  privateKeyBase64: string;
+}): string {
+  return signData(
+    getAuthSignPayload({
+      tenantId: params.tenantId,
+      deviceKey: params.deviceId,
+      challenge: params.challenge,
+    }),
+    params.privateKeyBase64,
+  );
+}
 
 describe("generateChallenge()", () => {
   it("返回非空 base64 字符串", () => {
@@ -60,13 +77,21 @@ describe("generateServerKeyPair()", () => {
 });
 
 describe("verifyAuthResponse()", () => {
+  const TENANT = "tenant-001";
+
   it("正确签名返回 true", () => {
     const deviceKey = generateDeviceKeyPair();
     const challenge = generateChallenge();
-    const signature = signData(challenge, deviceKey.privateKeyBase64);
+    const signature = signAuth({
+      tenantId: TENANT,
+      deviceId: "dev-001",
+      challenge,
+      privateKeyBase64: deviceKey.privateKeyBase64,
+    });
     const result = verifyAuthResponse({
       challenge,
       signature,
+      tenantId: TENANT,
       deviceId: "dev-001",
       devicePublicKeyBase64: deviceKey.publicKeyBase64,
     });
@@ -76,10 +101,16 @@ describe("verifyAuthResponse()", () => {
   it("篡改 challenge 返回 false", () => {
     const deviceKey = generateDeviceKeyPair();
     const challenge = generateChallenge();
-    const signature = signData(challenge, deviceKey.privateKeyBase64);
+    const signature = signAuth({
+      tenantId: TENANT,
+      deviceId: "dev-001",
+      challenge,
+      privateKeyBase64: deviceKey.privateKeyBase64,
+    });
     const result = verifyAuthResponse({
       challenge: generateChallenge(),
       signature,
+      tenantId: TENANT,
       deviceId: "dev-001",
       devicePublicKeyBase64: deviceKey.publicKeyBase64,
     });
@@ -89,12 +120,18 @@ describe("verifyAuthResponse()", () => {
   it("篡改签名返回 false", () => {
     const deviceKey = generateDeviceKeyPair();
     const challenge = generateChallenge();
-    const signature = signData(challenge, deviceKey.privateKeyBase64);
+    const signature = signAuth({
+      tenantId: TENANT,
+      deviceId: "dev-001",
+      challenge,
+      privateKeyBase64: deviceKey.privateKeyBase64,
+    });
     const tamperedSig =
       signature.charAt(0) === "A" ? `B${signature.slice(1)}` : `A${signature.slice(1)}`;
     const result = verifyAuthResponse({
       challenge,
       signature: tamperedSig,
+      tenantId: TENANT,
       deviceId: "dev-001",
       devicePublicKeyBase64: deviceKey.publicKeyBase64,
     });
@@ -105,22 +142,93 @@ describe("verifyAuthResponse()", () => {
     const deviceKey1 = generateDeviceKeyPair();
     const deviceKey2 = generateDeviceKeyPair();
     const challenge = generateChallenge();
-    const signature = signData(challenge, deviceKey1.privateKeyBase64);
+    const signature = signAuth({
+      tenantId: TENANT,
+      deviceId: "dev-001",
+      challenge,
+      privateKeyBase64: deviceKey1.privateKeyBase64,
+    });
     const result = verifyAuthResponse({
       challenge,
       signature,
+      tenantId: TENANT,
       deviceId: "dev-001",
       devicePublicKeyBase64: deviceKey2.publicKeyBase64,
     });
     expect(result).toBe(false);
   });
 
+  it("换租户验签返回 false（签名绑定 tenantId）", () => {
+    const deviceKey = generateDeviceKeyPair();
+    const challenge = generateChallenge();
+    const signature = signAuth({
+      tenantId: "tenant-A",
+      deviceId: "dev-001",
+      challenge,
+      privateKeyBase64: deviceKey.privateKeyBase64,
+    });
+    // 同一设备、同一 challenge，但 tenantId 换成 tenant-B → 验签失败（防跨租户重放）
+    const result = verifyAuthResponse({
+      challenge,
+      signature,
+      tenantId: "tenant-B",
+      deviceId: "dev-001",
+      devicePublicKeyBase64: deviceKey.publicKeyBase64,
+    });
+    expect(result).toBe(false);
+  });
+
+  it("换 deviceId 验签返回 false（签名绑定 deviceKey）", () => {
+    const deviceKey = generateDeviceKeyPair();
+    const challenge = generateChallenge();
+    const signature = signAuth({
+      tenantId: TENANT,
+      deviceId: "dev-001",
+      challenge,
+      privateKeyBase64: deviceKey.privateKeyBase64,
+    });
+    const result = verifyAuthResponse({
+      challenge,
+      signature,
+      tenantId: TENANT,
+      deviceId: "dev-999",
+      devicePublicKeyBase64: deviceKey.publicKeyBase64,
+    });
+    expect(result).toBe(false);
+  });
+
   it("空 challenge 返回 false", () => {
     const deviceKey = generateDeviceKeyPair();
-    const signature = signData("some-challenge", deviceKey.privateKeyBase64);
+    const challenge = generateChallenge();
+    const signature = signAuth({
+      tenantId: TENANT,
+      deviceId: "dev-001",
+      challenge,
+      privateKeyBase64: deviceKey.privateKeyBase64,
+    });
     const result = verifyAuthResponse({
       challenge: "",
       signature,
+      tenantId: TENANT,
+      deviceId: "dev-001",
+      devicePublicKeyBase64: deviceKey.publicKeyBase64,
+    });
+    expect(result).toBe(false);
+  });
+
+  it("空 tenantId 返回 false", () => {
+    const deviceKey = generateDeviceKeyPair();
+    const challenge = generateChallenge();
+    const signature = signAuth({
+      tenantId: TENANT,
+      deviceId: "dev-001",
+      challenge,
+      privateKeyBase64: deviceKey.privateKeyBase64,
+    });
+    const result = verifyAuthResponse({
+      challenge,
+      signature,
+      tenantId: "",
       deviceId: "dev-001",
       devicePublicKeyBase64: deviceKey.publicKeyBase64,
     });
@@ -133,6 +241,7 @@ describe("verifyAuthResponse()", () => {
     const result = verifyAuthResponse({
       challenge,
       signature: "",
+      tenantId: TENANT,
       deviceId: "dev-001",
       devicePublicKeyBase64: deviceKey.publicKeyBase64,
     });

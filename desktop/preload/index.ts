@@ -1,5 +1,5 @@
 /**
- * V10 Phase 3：Electron preload 脚本。
+ * Electron preload 脚本。
  *
  * 职责：
  * - 同步注入 globalThis.__SNOW_DESKTOP__（capability 对象），renderer 通过
@@ -16,7 +16,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   DesktopBrowserStateUpdate,
   DesktopCapabilities,
-  DesktopDeviceRegistration,
+  DesktopDeviceRegisterResult,
+  DesktopDeviceRegistrationPayload,
   DesktopWindowFrameState,
 } from "../../lib/desktop/capabilities";
 import {
@@ -35,7 +36,7 @@ const DEFAULT_APP_VERSION = "0.0.0";
  * 同步构造 capability 对象（供 preload 注入）。
  *
  * - serverOrigin / appVersion 由主进程通过 env 注入（SNOW_SERVER_ORIGIN / SNOW_APP_VERSION）。
- * - deviceId 在 Phase 5 设备绑定后填充，Phase 3 为 null。
+ * - deviceId 在设备身份创建后即填充。
  */
 function buildCapabilities(): DesktopCapabilities {
   const serverOrigin = process.env.SNOW_SERVER_ORIGIN ?? DEFAULT_SERVER_ORIGIN;
@@ -82,11 +83,14 @@ contextBridge.exposeInMainWorld("snowDesktop", {
 
   /** 设备绑定只暴露公钥和展示信息，私钥始终留在主进程 Keychain。 */
   device: {
-    getRegistration: (): Promise<DesktopDeviceRegistration> =>
+    getRegistration: (): Promise<DesktopDeviceRegistrationPayload> =>
       ipcRenderer.invoke("desktop:device:getRegistration"),
+    /** 发起设备注册（幂等；主进程用本机 Session fetch 同源注册端点）。 */
+    register: (): Promise<DesktopDeviceRegisterResult> =>
+      ipcRenderer.invoke("desktop:device:register"),
   },
 
-  // Phase 4：Browser tab 操作
+  // Browser tab 操作
   /** 创建新 browser tab。 */
   browser: {
     /** 创建新 tab */
@@ -143,7 +147,7 @@ contextBridge.exposeInMainWorld("snowDesktop", {
     },
   },
 
-  // Phase 5：Agent Bridge 操作
+  // Agent Bridge 操作
   /** Agent Bridge 连接管理 */
   bridge: {
     /** 获取当前连接状态 */
@@ -162,14 +166,14 @@ contextBridge.exposeInMainWorld("snowDesktop", {
     },
   },
 
-  // Phase 8：退出登录
+  // 退出登录
   /** 退出登录：清除本地身份 + Browser Profile + 断开 Bridge */
   auth: {
     /** 退出登录，返回成功状态 */
     logout: (): Promise<{ ok: boolean }> => ipcRenderer.invoke("desktop:auth:logout"),
   },
 
-  // Phase 8：自动更新
+  // 自动更新
   updater: {
     /** 检查更新 */
     checkForUpdates: () => ipcRenderer.invoke("desktop:updater:checkForUpdates"),

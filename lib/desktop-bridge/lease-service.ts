@@ -5,7 +5,7 @@ import {
   isLeaseValid,
 } from "../desktop/lease";
 /**
- * ：Lease 服务。
+ * Lease 服务。
  *
  * 包装 LeaseManager，集成 DeviceRegistry 查询：在 acquireLease 前校验设备是否在线
  * 且已认证，确保 lease 不会发给离线/未认证设备。
@@ -37,14 +37,14 @@ export class LeaseService {
    * 请求获取 lease（检查设备是否在线且已认证）。
    *
    * 流程：
-   * 1. 通过 deviceId 在 registry 查询设备
+   * 1. 通过 deviceRecordId（Device.id）在 registry 查询设备
    * 2. 设备不存在或未认证 → 返回相应错误码
    * 3. 设备 userId 必须与请求 userId 匹配
    * 4. 调用 LeaseManager.acquireLease 获取 lease
    *
    * @param params.threadId thread ID
    * @param params.userId 用户 ID
-   * @param params.deviceId 设备 ID
+   * @param params.deviceRecordId 设备内部 ID（Device.id）
    * @param params.now 当前时间（epoch ms）
    * @param params.ttlMs TTL（毫秒），默认 5 分钟
    * @returns 获取成功返回 lease，失败返回错误码
@@ -52,13 +52,13 @@ export class LeaseService {
   acquireLease(params: {
     threadId: string;
     userId: string;
-    deviceId: string;
+    deviceRecordId: string;
     now: number;
     ttlMs?: number;
   }): LeaseAcquireResult {
-    const { threadId, userId, deviceId, now, ttlMs = DEFAULT_LEASE_TTL_MS } = params;
-    // 1. 检查设备是否在线
-    const dev = this.registry.getByDeviceId(deviceId);
+    const { threadId, userId, deviceRecordId, now, ttlMs = DEFAULT_LEASE_TTL_MS } = params;
+    // 1. 检查设备是否在线（按 Device.id 定位，无歧义）
+    const dev = this.registry.getByDeviceRecordId(deviceRecordId);
     if (!dev) {
       return { ok: false, code: "desktop_unavailable" };
     }
@@ -71,7 +71,7 @@ export class LeaseService {
       return { ok: false, code: "desktop_unauthorized" };
     }
     // 4. 调用 LeaseManager 获取 lease
-    const result = this.leaseManager.acquireLease(threadId, userId, deviceId, ttlMs, now);
+    const result = this.leaseManager.acquireLease(threadId, userId, deviceRecordId, ttlMs, now);
     if (!result.ok) {
       return { ok: false, code: result.code };
     }
@@ -82,23 +82,23 @@ export class LeaseService {
    * 释放 lease（检查设备身份）。
    *
    * @param threadId thread ID
-   * @param deviceId 设备 ID
+   * @param deviceRecordId 设备内部 ID（Device.id）
    * @param now 当前时间（epoch ms）
    * @returns 释放成功返回 true，非持有设备或不存在的 lease 返回 false
    */
-  releaseLease(threadId: string, deviceId: string, now: number): boolean {
-    return this.leaseManager.releaseLease(threadId, deviceId, now);
+  releaseLease(threadId: string, deviceRecordId: string, now: number): boolean {
+    return this.leaseManager.releaseLease(threadId, deviceRecordId, now);
   }
 
   /**
    * 检查设备是否持有有效 lease。
    *
    * @param threadId thread ID
-   * @param deviceId 设备 ID
+   * @param deviceRecordId 设备内部 ID（Device.id）
    * @param now 当前时间（epoch ms）
    * @returns 持有未过期 lease 返回 true
    */
-  holdsLease(threadId: string, deviceId: string, now: number): boolean {
+  holdsLease(threadId: string, deviceRecordId: string, now: number): boolean {
     const lease = this.leaseManager.getLease(threadId);
     if (!lease) {
       return false;
@@ -106,7 +106,7 @@ export class LeaseService {
     if (!isLeaseValid(lease, now)) {
       return false;
     }
-    return lease.deviceId === deviceId;
+    return lease.deviceRecordId === deviceRecordId;
   }
 
   /**

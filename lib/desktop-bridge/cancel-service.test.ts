@@ -3,7 +3,7 @@ import type { BrowserLease } from "../desktop/lease";
 import { CancelService } from "./cancel-service";
 
 /**
- * V10 Phase 6-5：CancelService 单元测试。
+ * CancelService 单元测试。
  *
  * 验证"停止并接管"流程的 Server 端逻辑：
  * - requestCancel：Desktop 发起取消 → Server 释放 lease + 通知 Desktop
@@ -16,7 +16,7 @@ import { CancelService } from "./cancel-service";
 
 const TID = "thread-1";
 const UID = "user-1";
-const DID = "device-1";
+const DID = "rec-1";
 const RUN1 = "run-1";
 const RUN2 = "run-2";
 
@@ -24,7 +24,7 @@ function leaseFixture(overrides: Partial<BrowserLease> = {}): BrowserLease {
   return {
     threadId: TID,
     userId: UID,
-    deviceId: DID,
+    deviceRecordId: DID,
     acquiredAt: 1000,
     expiresAt: 99999,
     ...overrides,
@@ -62,7 +62,7 @@ describe("CancelService", () => {
         threadId: TID,
         runId: RUN1,
         reason: "user_takeover",
-        deviceId: DID,
+        deviceRecordId: DID,
         now: 2000,
       });
       expect(result.cancelled).toBe(true);
@@ -77,7 +77,7 @@ describe("CancelService", () => {
         threadId: TID,
         runId: RUN1,
         reason: "user_takeover",
-        deviceId: DID,
+        deviceRecordId: DID,
         now: 2000,
       });
       expect(result.cancelled).toBe(false);
@@ -85,12 +85,12 @@ describe("CancelService", () => {
     });
 
     it("lease 由其他设备持有时拒绝 cancel（不能跨设备取消）", async () => {
-      lease.getLeaseHolder.mockReturnValue(leaseFixture({ deviceId: "device-other" }));
+      lease.getLeaseHolder.mockReturnValue(leaseFixture({ deviceRecordId: "rec-other" }));
       const result = await service.requestCancel({
         threadId: TID,
         runId: RUN1,
         reason: "user_takeover",
-        deviceId: DID,
+        deviceRecordId: DID,
         now: 2000,
       });
       expect(result.cancelled).toBe(false);
@@ -103,7 +103,7 @@ describe("CancelService", () => {
         threadId: TID,
         runId: RUN1,
         reason: "user_takeover",
-        deviceId: DID,
+        deviceRecordId: DID,
         now: 2000,
       });
       // 第二次 cancel（lease 已释放）
@@ -112,7 +112,7 @@ describe("CancelService", () => {
         threadId: TID,
         runId: RUN1,
         reason: "user_takeover",
-        deviceId: DID,
+        deviceRecordId: DID,
         now: 3000,
       });
       expect(result.cancelled).toBe(false);

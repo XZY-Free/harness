@@ -1,15 +1,24 @@
 /**
- * ：已连接设备注册表。
+ * 已连接设备注册表。
  *
- * 维护 WebSocket 连接 ↔ 设备 的双向映射，支持按 ws / deviceId / userId 快速查找。
- * 全部状态在内存中（进程级），不持久化：进程重启后所有连接必须重新认证。
+ * 维护 WebSocket 连接 ↔ 设备 的双向映射，支持按 ws / deviceRecordId / (tenantId, deviceKey)
+ * 快速查找。全部状态在内存中（进程级），不持久化：进程重启后所有连接必须重新认证。
  *
  * 线程安全：所有方法同步执行，无 async 操作。
  * 并发安全：Node.js 单线程事件循环，无需锁。
  *
+ * 索引设计（无歧义，杜绝按 deviceKey 全局索引）：
+ * - byWs：ws → 设备（连接主索引）
+ * - byDeviceRecordId：Device.id（正式内部唯一身份）→ 设备
+ * - byKey：复合键 (tenantId, deviceKey) → 设备（外部认证/撤销定位键）
+ *
+ * 同一 deviceKey 可存在于不同租户。注册时以复合键 (tenantId, deviceKey) 定位，因此
+ * 重连同一台设备只替换自身，绝不驱逐另一租户的相同 deviceKey。
+ *
  * 安全约束：
  * - 同一 ws 重新注册会覆盖原设备信息（断开重连场景）
  * - 设备认证状态默认 false，必须显式 markAuthenticated
+ * - 内部路由一律用 deviceRecordId（Device.id），wire 协议才用 deviceKey
  */
 /**
  * 已连接的 Desktop 设备。
@@ -17,11 +26,13 @@
 export interface ConnectedDevice {
   /** WebSocket 实例（unknown 避免依赖 ws 类型） */
   ws: unknown;
-  /** 设备标识（Desktop 本地生成） */
-  deviceId: string;
-  /** DB 中 DesktopDevice.id */
+  /** 外部设备标识（Desktop 本地生成，即正式模型的 deviceKey） */
+  deviceKey: string;
+  /** 设备所属租户（正式 Device 唯一键 (tenantId, deviceKey) 的一部分） */
+  tenantId: string;
+  /** DB 中 Device.id（内部唯一身份，路由/lease/cancel 一律用此） */
   deviceRecordId: string;
-  /** 所属用户 ID */
+  /** 所属用户 ID（UserIdentity id） */
   userId: string;
   /** 是否已通过认证 */
   authenticated: boolean;
@@ -34,13 +45,21 @@ export interface ConnectedDevice {
 }
 
 /**
+ * 复合键 (tenantId, deviceKey) 的编码，避免与设备内部 id 混淆。
+ */
+function compositeKey(tenantId: string, deviceKey: string): string {
+  return JSON.stringify([tenantId, deviceKey]);
+}
+
+/**
  * 已连接设备注册表。
  *
- * 维护 ws → ConnectedDevice 和 deviceId → ConnectedDevice 的索引。
+ * 维护 ws / deviceRecordId / (tenantId, deviceKey) 三个索引。
  */
 export class DeviceRegistry {
   private byWs = new Map<unknown, ConnectedDevice>();
-  private byDeviceId = new Map<string, ConnectedDevice>();
+  private byDeviceRecordId = new Map<string, ConnectedDevice>();
+  private byKey = new Map<string, ConnectedDevice>();
 
   /**
    * 按 WebSocket 实例查找设备。
@@ -53,13 +72,16 @@ export class DeviceRegistry {
   }
 
   /**
-   * 按 deviceId 查找设备。
+   * 按 Device.id（deviceRecordId）查找设备。
    *
-   * @param deviceId 设备 ID
+   * 内部路由（lease / RPC / cancel）一律用此定位，设备内部唯一身份是 Device.id，
+   * 不按 deviceKey 全局索引（同一 deviceKey 可跨租户，无法唯一定位）。
+   *
+   * @param deviceRecordId Device.id
    * @returns 设备信息或 null
    */
-  getByDeviceId(deviceId: string): ConnectedDevice | null {
-    return this.byDeviceId.get(deviceId) ?? null;
+  getByDeviceRecordId(deviceRecordId: string): ConnectedDevice | null {
+    return this.byDeviceRecordId.get(deviceRecordId) ?? null;
   }
 
   /**
@@ -81,38 +103,42 @@ export class DeviceRegistry {
   /**
    * 注册设备（WebSocket 连接后调用）。
    *
-   * 同一 ws 重新注册会覆盖原设备信息，并清理原 deviceId 索引。
+   * 以复合键 (tenantId, deviceKey) 定位：同一复合键（同一台设备）重连只替换自身，
+   * 绝不驱逐另一租户的相同 deviceKey。同一 ws 重新注册会覆盖原设备信息。
    *
    * @param ws WebSocket 实例
-   * @param deviceId 设备 ID
-   * @param deviceRecordId DB 中的设备记录 ID
+   * @param tenantId 设备所属租户
+   * @param deviceKey 设备标识（正式模型的 deviceKey）
+   * @param deviceRecordId DB 中的设备记录 ID（Device.id）
    * @param userId 用户 ID
    * @param serverPublicKeyBase64 Server 公钥（base64）
    * @returns 新建的 ConnectedDevice
    */
   register(
     ws: unknown,
-    deviceId: string,
+    tenantId: string,
+    deviceKey: string,
     deviceRecordId: string,
     userId: string,
     serverPublicKeyBase64: string,
   ): ConnectedDevice {
+    const key = compositeKey(tenantId, deviceKey);
     // 清理同一 ws 的旧注册（断开重连）
     const existingByWs = this.byWs.get(ws);
     if (existingByWs) {
-      this.byDeviceId.delete(existingByWs.deviceId);
-      this.byWs.delete(ws);
+      this.removeEntry(existingByWs);
     }
-    // 清理同一 deviceId 的旧注册（设备重新连接，可能用新 ws）
-    const existingByDeviceId = this.byDeviceId.get(deviceId);
-    if (existingByDeviceId) {
-      this.byWs.delete(existingByDeviceId.ws);
-      this.byDeviceId.delete(deviceId);
+    // 清理同一复合键 (tenantId, deviceKey) 的旧注册（同一台设备重连，可能用新 ws）。
+    // 只替换自身：不同租户的相同 deviceKey 复合键不同，不会被驱逐。
+    const existingByKey = this.byKey.get(key);
+    if (existingByKey && existingByKey.ws !== ws) {
+      this.removeEntry(existingByKey);
     }
     const now = Date.now();
     const dev: ConnectedDevice = {
       ws,
-      deviceId,
+      tenantId,
+      deviceKey,
       deviceRecordId,
       userId,
       authenticated: false,
@@ -121,8 +147,21 @@ export class DeviceRegistry {
       serverPublicKeyBase64,
     };
     this.byWs.set(ws, dev);
-    this.byDeviceId.set(deviceId, dev);
+    this.byDeviceRecordId.set(deviceRecordId, dev);
+    this.byKey.set(key, dev);
     return dev;
+  }
+
+  /**
+   * 按 (tenantId, deviceKey) 复合键查找设备。
+   *
+   * 外部认证 / 撤销定位键。同一 deviceKey 可存在于不同租户，复合键保证租户隔离，
+   * 避免跨租户误踢 / 误路由。
+   *
+   * @returns 设备信息或 null
+   */
+  getByKey(tenantId: string, deviceKey: string): ConnectedDevice | null {
+    return this.byKey.get(compositeKey(tenantId, deviceKey)) ?? null;
   }
 
   /**
@@ -167,13 +206,26 @@ export class DeviceRegistry {
     if (!dev) {
       return null;
     }
-    this.byWs.delete(ws);
-    // 注意：deviceId 索引可能已被新 ws 覆盖，仅当仍指向同一 dev 时才删除
-    const cur = this.byDeviceId.get(dev.deviceId);
-    if (cur === dev) {
-      this.byDeviceId.delete(dev.deviceId);
-    }
+    this.removeEntry(dev);
     return dev;
+  }
+
+  /**
+   * 从全部索引中移除一个设备条目（幂等）。
+   */
+  private removeEntry(dev: ConnectedDevice): void {
+    const byWs = this.byWs.get(dev.ws);
+    if (byWs === dev) {
+      this.byWs.delete(dev.ws);
+    }
+    const byRecord = this.byDeviceRecordId.get(dev.deviceRecordId);
+    if (byRecord === dev) {
+      this.byDeviceRecordId.delete(dev.deviceRecordId);
+    }
+    const byKey = this.byKey.get(compositeKey(dev.tenantId, dev.deviceKey));
+    if (byKey === dev) {
+      this.byKey.delete(compositeKey(dev.tenantId, dev.deviceKey));
+    }
   }
 
   /**
@@ -213,11 +265,8 @@ export class DeviceRegistry {
     for (const [ws, dev] of this.byWs) {
       if (dev.lastHeartbeat < cutoff) {
         stale.push(dev);
-        this.byWs.delete(ws);
-        const cur = this.byDeviceId.get(dev.deviceId);
-        if (cur === dev) {
-          this.byDeviceId.delete(dev.deviceId);
-        }
+        this.removeEntry(dev);
+        void ws;
       }
     }
     return stale;

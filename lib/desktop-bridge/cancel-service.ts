@@ -1,5 +1,5 @@
 /**
- * ：Server 端取消服务。
+ * Server 端取消服务。
  *
  * 实现 03-agent-bridge-security.md "停止并接管" 流程的 Server 端逻辑：
  *
@@ -96,23 +96,23 @@ export class CancelService {
     threadId: string;
     runId: string;
     reason: string;
-    /** 发起 cancel 的设备 ID */
-    deviceId: string;
+    /** 发起 cancel 的设备内部 ID（Device.id） */
+    deviceRecordId: string;
     now: number;
   }): Promise<CancelResult> {
-    const { threadId, runId, deviceId, now } = params;
+    const { threadId, runId, deviceRecordId, now } = params;
     const lease = this.leaseService.getLeaseHolder(threadId);
     if (!lease) {
       // 无 lease：命令可能已完成，仍标记 cancelled 防迟到 RPC
       this.markCancelled(threadId, runId, now);
       return { cancelled: false, runId: null };
     }
-    // 校验请求设备是 lease holder
-    if (lease.deviceId !== deviceId) {
+    // 校验请求设备是 lease holder（内部路由用 Device.id）
+    if (lease.deviceRecordId !== deviceRecordId) {
       return { cancelled: false, runId: null, code: "not_lease_holder" };
     }
     // 释放 lease
-    this.leaseService.releaseLease(threadId, deviceId, now);
+    this.leaseService.releaseLease(threadId, deviceRecordId, now);
     // 标记 cancelled
     this.markCancelled(threadId, runId, now);
     return { cancelled: true, runId };

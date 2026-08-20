@@ -5,7 +5,7 @@ import { SidebarProvider } from "@/components/thread/sidebar/sidebar-context";
 import { ThreadPage } from "@/components/thread/thread-page";
 import { createNewThreadSession, loadThreadShell } from "@/lib/client/new-thread-session";
 import type { ClientNewThreadSubmission, ClientThreadShellResponse } from "@/lib/client/types";
-import { getDesktopCapabilities } from "@/lib/desktop/capabilities";
+import { getDesktopBridge, getDesktopCapabilities } from "@/lib/desktop/capabilities";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { parseDesktopRoute } from "../desktop-route";
 import { navigateDesktop, usePathname } from "../next-navigation";
@@ -45,6 +45,26 @@ function DesktopShell() {
     const latest = shell.threads[0];
     navigateDesktop(latest ? `/desktop/chat/${latest.id}` : "/desktop/new", true);
   }, [route, shell]);
+
+  // 设备注册闭环：shell 真实加载成功后发起注册（幂等，无视觉噪音）。
+  // main 用本机 Session fetch 同源注册端点；已注册则复用现有租户并确保 Bridge 连接。
+  // 注册失败静默保持 disconnected，不打扰用户，后续可重试。
+  useEffect(() => {
+    if (!shell) return;
+    const bridge = getDesktopBridge();
+    if (!bridge) return;
+    let active = true;
+    void (async () => {
+      const result = await bridge.device.register();
+      if (!active) return;
+      if (result.ok) {
+        void bridge.bridge.connect();
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [shell]);
 
   const submitNewThread = async ({
     text,

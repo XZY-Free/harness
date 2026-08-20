@@ -1,24 +1,24 @@
 /**
- * V10 Phase 8：Desktop 设备撤销 API route 测试。
+ * Desktop 设备撤销 API route 测试。
  *
  * 覆盖维度：
  * - 鉴权失败 → 401
  * - 非 owner → 404
  * - 设备不存在 → 404
  * - 设备已 revoked → 409（幂等拒绝）
- * - 成功撤销 → 200 + 返回设备信息
- * - 成功撤销后调用 BridgeServer.kickDevice 主动断开 WS
+ * - 成功撤销 → 200 + 返回设备信息（tenantId + deviceKey 二元键）
+ * - 成功撤销后调用 BridgeServer.kickDevice(tenantId, deviceKey) 主动断开 WS
  * - GET 方法 → 405
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "./route";
 
 // Mock 依赖
-vi.mock("@/lib/auth", () => ({
-  getCurrentUserFromRequest: vi.fn(),
+vi.mock("@/lib/identity/resolver", () => ({
+  resolvePrincipal: vi.fn(),
   authErrorResponse: vi.fn(() => null),
 }));
-vi.mock("@/lib/db/desktop-device-queries", () => ({
+vi.mock("@/lib/identity/device-queries", () => ({
   getDeviceForUser: vi.fn(),
   revokeDevice: vi.fn(),
 }));
@@ -31,24 +31,32 @@ vi.mock("@/lib/http", () => ({
   ),
 }));
 
-import { authErrorResponse, getCurrentUserFromRequest } from "@/lib/auth";
-import { getDeviceForUser, revokeDevice } from "@/lib/db/desktop-device-queries";
 import { getBridgeServer } from "@/lib/desktop-bridge/bridge-server";
+import { getDeviceForUser, revokeDevice } from "@/lib/identity/device-queries";
+import { authErrorResponse, resolvePrincipal } from "@/lib/identity/resolver";
 
-const mockUser = { id: "u1", email: "test@example.com" };
+const PRINCIPAL = {
+  tenantId: "tenant-1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "ext-1",
+  email: "test@example.com",
+  displayName: null,
+  audience: "employee",
+};
 
 const mockDevice = {
   id: "rec-1",
-  userId: "u1",
-  deviceId: "desktop-aaa",
+  tenantId: PRINCIPAL.tenantId,
+  userId: PRINCIPAL.userIdentityId,
+  deviceKey: "desktop-aaa",
   publicKey: "pk",
-  name: "MBP",
-  version: "1.0.0",
-  status: "active" as const,
+  deviceName: "MBP",
+  appVersion: "1.0.0",
+  deviceState: "active" as const,
   lastActiveAt: new Date("2026-07-13T10:00:00Z"),
   revokedAt: null,
   createdAt: new Date("2026-07-13T09:00:00Z"),
-  updatedAt: new Date("2026-07-13T10:00:00Z"),
 };
 
 function makeRequest(method: "POST" | "GET" = "POST"): Request {
@@ -58,18 +66,18 @@ function makeRequest(method: "POST" | "GET" = "POST"): Request {
 describe("POST /api/desktop/devices/[deviceId]/revoke", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getCurrentUserFromRequest).mockResolvedValue(mockUser as never);
+    vi.mocked(resolvePrincipal).mockResolvedValue(PRINCIPAL as never);
     vi.mocked(getDeviceForUser).mockResolvedValue(mockDevice as never);
     vi.mocked(revokeDevice).mockResolvedValue({
       ...mockDevice,
-      status: "revoked",
+      deviceState: "revoked",
       revokedAt: new Date(),
     } as never);
     vi.mocked(getBridgeServer).mockReturnValue(null);
   });
 
   it("鉴权失败返回 401", async () => {
-    vi.mocked(getCurrentUserFromRequest).mockRejectedValue(new Error("unauthorized"));
+    vi.mocked(resolvePrincipal).mockRejectedValue(new Error("unauthorized"));
     vi.mocked(authErrorResponse).mockReturnValue(new Response(null, { status: 401 }));
 
     const resp = await POST(makeRequest(), {
@@ -89,6 +97,15 @@ describe("POST /api/desktop/devices/[deviceId]/revoke", () => {
     expect(json.error.code).toBe("device_not_found");
   });
 
+  it("owner guard 以 tenantId + deviceKey + userId 三重定位", async () => {
+    await POST(makeRequest(), { params: Promise.resolve({ deviceId: "desktop-aaa" }) });
+    expect(getDeviceForUser).toHaveBeenCalledWith(
+      PRINCIPAL.tenantId,
+      "desktop-aaa",
+      PRINCIPAL.userIdentityId,
+    );
+  });
+
   it("设备不存在返回 404", async () => {
     vi.mocked(getDeviceForUser).mockResolvedValue(null);
 
@@ -102,9 +119,8 @@ describe("POST /api/desktop/devices/[deviceId]/revoke", () => {
     const revokedAt = new Date("2026-07-13T11:00:00Z");
     vi.mocked(revokeDevice).mockResolvedValue({
       ...mockDevice,
-      status: "revoked",
+      deviceState: "revoked",
       revokedAt,
-      updatedAt: revokedAt,
     } as never);
 
     const resp = await POST(makeRequest(), {
@@ -119,10 +135,10 @@ describe("POST /api/desktop/devices/[deviceId]/revoke", () => {
   });
 
   it("设备已 revoked 返回 409（幂等拒绝）", async () => {
-    // getDeviceForUser 返回 status=revoked 的设备
+    // getDeviceForUser 返回 deviceState=revoked 的设备
     vi.mocked(getDeviceForUser).mockResolvedValue({
       ...mockDevice,
-      status: "revoked",
+      deviceState: "revoked",
       revokedAt: new Date("2026-07-13T10:30:00Z"),
     } as never);
 
@@ -134,13 +150,13 @@ describe("POST /api/desktop/devices/[deviceId]/revoke", () => {
     expect(json.error.code).toBe("device_already_revoked");
   });
 
-  it("成功撤销后调用 BridgeServer.kickDevice 主动断开 WS", async () => {
+  it("成功撤销后调用 BridgeServer.kickDevice(tenantId, deviceKey) 主动断开 WS", async () => {
     const mockKickDevice = vi.fn(() => true);
     vi.mocked(getBridgeServer).mockReturnValue({ kickDevice: mockKickDevice } as never);
 
     await POST(makeRequest(), { params: Promise.resolve({ deviceId: "desktop-aaa" }) });
 
-    expect(mockKickDevice).toHaveBeenCalledWith("desktop-aaa");
+    expect(mockKickDevice).toHaveBeenCalledWith(PRINCIPAL.tenantId, "desktop-aaa");
   });
 
   it("BridgeServer 未运行时不抛错", async () => {

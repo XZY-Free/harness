@@ -1,5 +1,5 @@
 /**
- * ：Agent Bridge WebSocket 消息协议。
+ * Agent Bridge WebSocket 消息协议。
  *
  * 定义 Server 和 Desktop 之间 WebSocket 通信的所有消息类型。每条消息是 JSON
  * 对象，包含 `type` 字段标识消息类型。所有消息通过 zod schema 校验。
@@ -74,7 +74,7 @@ export const leaseRevokedMessageSchema = z.object({
  * 1. 在本地 AiLockManager 中 acquire 同等锁（绑定 runId）
  * 2. 显示 WebContents overlay 阻止用户输入
  *
- * ：实现双重强制 — Server lease + Desktop 本地锁。
+ * 实现双重强制 — Server lease + Desktop 本地锁。
  */
 export const leaseLockedMessageSchema = z.object({
   type: z.literal("lease_locked"),
@@ -140,17 +140,44 @@ export const serverErrorMessageSchema = z.object({
 // Desktop → Server 消息
 // ──────────────────────────────────────────────
 
+/**
+ * 拒绝含控制字符/换行的字段。
+ *
+ * 认证字段（tenantId / deviceId / challenge）参与无歧义 canonical 签名 payload；
+ * 控制字符与换行会破坏字段边界，必须在 schema 层拒绝，从根源避免 payload 碰撞。
+ */
+export const noControlChars = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => {
+      for (let i = 0; i < value.length; i++) {
+        const code = value.charCodeAt(i);
+        if (code < 0x20 || code === 0x7f) return false;
+      }
+      return true;
+    },
+    {
+      message: "字段不得包含控制字符或换行",
+    },
+  );
+
 /** 认证响应（签名挑战） */
 export const authMessageSchema = z.object({
   type: z.literal("auth"),
-  /** 设备标识（Desktop 本地生成） */
-  deviceId: z.string().min(1),
-  /** 对 challenge 的 ed25519 签名（base64） */
-  signature: z.string().min(1),
+  /** 设备标识（Desktop 本地生成，即正式模型的 deviceKey）。 */
+  deviceId: noControlChars,
+  /** 对 challenge 的 ed25519 签名（base64）。签名覆盖 tenantId + deviceKey + challenge。 */
+  signature: noControlChars,
   /** Desktop 应用版本 */
-  version: z.string().min(1),
+  version: noControlChars,
   /** 设备名称 */
-  name: z.string().min(1),
+  name: noControlChars,
+  /**
+   * 设备所属租户。正式 Device 唯一键是 (tenantId, deviceKey)，缺少 tenantId 无法
+   * 定位设备，且签名必须绑定 tenantId 才能阻止跨租户重放。必填，不接受缺省。
+   */
+  tenantId: noControlChars,
   /** Desktop 支持的协议版本 */
   protocolVersion: z.literal(PROTOCOL_VERSION),
 });

@@ -1,5 +1,5 @@
 /**
- * ：ed25519 签名工具。
+ * ed25519 签名工具。
  *
  * Server 和 Desktop 共享的签名/验证逻辑。使用 node:crypto 内置 ed25519 算法，
  * 不引入外部加密库。Server 用私钥签名 RPC 信封，Desktop 用公钥验签。
@@ -46,6 +46,39 @@ export function generateDeviceKeyPair(): DeviceKeyPair {
   const publicKeyBase64 = rawPublicKey.toString("base64");
   const privateKeyBase64 = privateKey.export({ type: "pkcs8", format: "der" }).toString("base64");
   return { publicKeyBase64, privateKeyBase64 };
+}
+
+/**
+ * 设备认证（challenge-response）规范签名的 domain separator 前缀。
+ *
+ * 用于把设备认证签名与项目内其他签名（如 RPC 信封）区分开，防止跨用途重放。
+ * 变更签名方案时递增，旧签名不再被接受。
+ */
+export const AUTH_SIGN_DOMAIN = "snowharness-device-auth-v1" as const;
+
+/**
+ * 构造设备认证（challenge-response）的规范签名 payload。
+ *
+ * 覆盖 tenantId + deviceKey + challenge，三者在 Server 与 Desktop 两端用同一构造，
+ * 使签名绑定到具体租户、设备与挑战值：
+ * - 同一签名不能跨租户重放（不同租户的 tenantId 产生不同 payload，验签失败）。
+ * - 同一租户下同一 deviceKey 的签名也绑定本次 challenge，无法重放旧挑战签名。
+ *
+ * 编码采用带 domain separator 的无歧义 canonical 结构：JSON.stringify 把
+ * `["snowharness-device-auth-v1", tenantId, deviceKey, challenge]` 序列化为定长数组。
+ * JSON 数组编码天然对分隔符/换行免疫——任何字段内包含 `"`、`\n`、`,` 都不会与
+ * 其他字段拼接碰撞，也不会误验签。调用方 schema 已拒绝控制字符，字段要求非空。
+ */
+export function getAuthSignPayload(params: {
+  tenantId: string;
+  deviceKey: string;
+  challenge: string;
+}): string {
+  const { tenantId, deviceKey, challenge } = params;
+  if (tenantId.length === 0 || deviceKey.length === 0 || challenge.length === 0) {
+    throw new Error("getAuthSignPayload: tenantId/deviceKey/challenge 必须为非空");
+  }
+  return JSON.stringify([AUTH_SIGN_DOMAIN, tenantId, deviceKey, challenge]);
 }
 
 /**

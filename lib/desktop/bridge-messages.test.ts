@@ -1,5 +1,5 @@
 /**
- * V10 Phase 5：Agent Bridge WebSocket 消息协议测试。
+ * Agent Bridge WebSocket 消息协议测试。
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -143,9 +143,54 @@ describe("bridge-messages", () => {
         signature: "sig-base64",
         version: "1.0.0",
         name: "MacBook Pro",
+        tenantId: "tenant-001",
         protocolVersion: PROTOCOL_VERSION,
       };
       expect(authMessageSchema.parse(msg)).toEqual(msg);
+    });
+
+    it("auth 消息缺少 tenantId 时拒绝（不接受缺省）", () => {
+      const msg = {
+        type: "auth",
+        deviceId: "device-1",
+        signature: "sig-base64",
+        version: "1.0.0",
+        name: "MacBook Pro",
+        protocolVersion: PROTOCOL_VERSION,
+      };
+      const result = authMessageSchema.safeParse(msg);
+      expect(result.success).toBe(false);
+    });
+
+    it("auth 消息 tenantId 含换行/控制字符时拒绝", () => {
+      const base = {
+        type: "auth",
+        deviceId: "device-1",
+        signature: "sig-base64",
+        version: "1.0.0",
+        name: "MacBook Pro",
+        protocolVersion: PROTOCOL_VERSION,
+      };
+      expect(authMessageSchema.safeParse({ ...base, tenantId: "tenant-1\n" }).success).toBe(false);
+      expect(
+        authMessageSchema.safeParse({ ...base, tenantId: `tenant-1${String.fromCharCode(0)}` })
+          .success,
+      ).toBe(false);
+    });
+
+    it("auth 消息 deviceId 含控制字符时拒绝", () => {
+      const base = {
+        type: "auth",
+        signature: "sig-base64",
+        version: "1.0.0",
+        name: "MacBook Pro",
+        tenantId: "tenant-001",
+        protocolVersion: PROTOCOL_VERSION,
+      };
+      expect(
+        authMessageSchema.safeParse({ ...base, deviceId: `dev${String.fromCharCode(0x1f)}` })
+          .success,
+      ).toBe(false);
     });
 
     it("rpc_result 消息校验", () => {
@@ -245,10 +290,24 @@ describe("bridge-messages", () => {
         signature: "sig",
         version: "1.0",
         name: "Mac",
+        tenantId: "tenant-001",
         protocolVersion: PROTOCOL_VERSION,
       };
       const result = parseClientMessage(raw);
       expect(result.ok).toBe(true);
+    });
+
+    it("parseClientMessage 拒绝缺少 tenantId 的 auth", () => {
+      const raw = {
+        type: "auth",
+        deviceId: "dev",
+        signature: "sig",
+        version: "1.0",
+        name: "Mac",
+        protocolVersion: PROTOCOL_VERSION,
+      };
+      const result = parseClientMessage(raw);
+      expect(result.ok).toBe(false);
     });
 
     it("parseClientMessage 解析有效 cancel_command", () => {
@@ -292,6 +351,7 @@ describe("bridge-messages", () => {
         signature: "sig",
         version: "1.0",
         name: "Mac",
+        tenantId: "tenant-001",
         protocolVersion: 999,
       };
       expect(() => authMessageSchema.parse(msg)).toThrow();

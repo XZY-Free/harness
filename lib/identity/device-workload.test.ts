@@ -1,4 +1,4 @@
-import { sign as cryptoSign, generateKeyPairSync, randomBytes } from "node:crypto";
+import { sign as cryptoSign, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 /**
  * S02-C02：设备与 Workload 身份集成测试（真实 MySQL 8）。
  *
@@ -48,6 +48,7 @@ import {
   issueWorkloadToken,
   workloadTokenErrorResponse,
 } from "@/lib/identity/workload-token";
+import { tenant } from "@/lib/persistence/schema/identity";
 import { beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -195,6 +196,109 @@ describe("device-queries", () => {
     const found = await getDeviceByKey(tenant.id, device.deviceKey);
     expect(found).not.toBeNull();
     expect(found?.deviceState).toBe("revoked");
+  });
+
+  // ─── 跨租户隔离：同一 deviceKey 可在不同租户独立注册 ──────────────
+  describe("跨租户隔离（同一 deviceKey 不同租户）", () => {
+    /** 插入一个非默认租户（直接写 tenant 表），返回其 id。 */
+    async function seedSecondTenant(): Promise<string> {
+      const id = randomUUID();
+      await db.insert(tenant).values({
+        id,
+        key: `tenant-${id.slice(0, 8)}`,
+        name: "Second Tenant",
+        status: "active",
+      });
+      return id;
+    }
+
+    /** 在指定租户内注册同一 deviceKey，返回 (租户 id, 用户 id, 设备)。 */
+    async function registerSharedDevice(
+      tenantId: string,
+      externalSubject: string,
+      email: string,
+    ): Promise<{ tenantId: string; userId: string; deviceKey: string }> {
+      const identity = await upsertUserIdentity({
+        tenantId,
+        externalSubject,
+        email,
+        displayName: null,
+      });
+      const deviceKey = "shared-device-001";
+      await registerDevice({
+        tenantId,
+        userId: identity.id,
+        deviceKey,
+        publicKey: "dGVzdC1wdWJsaWMta2V5",
+        deviceName: "Shared Device",
+        appVersion: "1.0.0",
+      });
+      return { tenantId, userId: identity.id, deviceKey };
+    }
+
+    it("同一 deviceKey 在不同租户各自独立注册（不共享记录）", async () => {
+      const defTenant = await ensureDefaultTenant();
+      const secondTenantId = await seedSecondTenant();
+      const a = await registerSharedDevice(defTenant.id, "x-sub-1", "x1@example.com");
+      const b = await registerSharedDevice(secondTenantId, "x-sub-2", "x2@example.com");
+      expect(a.deviceKey).toBe(b.deviceKey);
+
+      const devA = await getDeviceByKey(a.tenantId, a.deviceKey);
+      const devB = await getDeviceByKey(b.tenantId, b.deviceKey);
+      expect(devA).not.toBeNull();
+      expect(devB).not.toBeNull();
+      // 两条独立记录（不同内部 id），互不覆盖
+      expect(devA?.id).not.toBe(devB?.id);
+      expect(devA?.userId).toBe(a.userId);
+      expect(devB?.userId).toBe(b.userId);
+    });
+
+    it("touchDevice 只影响本租户设备，另一租户同 deviceKey 不受影响", async () => {
+      const defTenant = await ensureDefaultTenant();
+      const secondTenantId = await seedSecondTenant();
+      const a = await registerSharedDevice(defTenant.id, "y-sub-1", "y1@example.com");
+      const b = await registerSharedDevice(secondTenantId, "y-sub-2", "y2@example.com");
+      const beforeA = (await getDeviceByKey(a.tenantId, a.deviceKey))?.lastActiveAt.getTime() ?? 0;
+      const beforeB = (await getDeviceByKey(b.tenantId, b.deviceKey))?.lastActiveAt.getTime() ?? 0;
+      await new Promise((r) => setTimeout(r, 50));
+
+      // 仅 touch 租户 A 的设备
+      await touchDevice(a.tenantId, a.deviceKey);
+      const afterA = (await getDeviceByKey(a.tenantId, a.deviceKey))?.lastActiveAt.getTime() ?? 0;
+      const afterB = (await getDeviceByKey(b.tenantId, b.deviceKey))?.lastActiveAt.getTime() ?? 0;
+      expect(afterA).toBeGreaterThan(beforeA);
+      // 租户 B 的 lastActiveAt 未被 touch（值应保持 beforeB 附近的旧值）
+      expect(afterB).toBe(beforeB);
+    });
+
+    it("revokeDevice 只撤销本租户设备，另一租户同 deviceKey 仍 active", async () => {
+      const defTenant = await ensureDefaultTenant();
+      const secondTenantId = await seedSecondTenant();
+      const a = await registerSharedDevice(defTenant.id, "z-sub-1", "z1@example.com");
+      const b = await registerSharedDevice(secondTenantId, "z-sub-2", "z2@example.com");
+
+      const revokedA = await revokeDevice(a.tenantId, a.deviceKey);
+      expect(revokedA).not.toBeNull();
+      expect(revokedA?.deviceState).toBe("revoked");
+      // 租户 B 的同 deviceKey 设备仍是 active（不被连带撤销）
+      expect(await isDeviceActive(b.tenantId, b.deviceKey)).toBe(true);
+      // 租户 A 已撤销
+      expect(await isDeviceActive(a.tenantId, a.deviceKey)).toBe(false);
+    });
+
+    it("getDeviceForUser 按租户 + userId 隔离，同 deviceKey 跨租户查不到", async () => {
+      const defTenant = await ensureDefaultTenant();
+      const secondTenantId = await seedSecondTenant();
+      const a = await registerSharedDevice(defTenant.id, "w-sub-1", "w1@example.com");
+      const b = await registerSharedDevice(secondTenantId, "w-sub-2", "w2@example.com");
+
+      // 租户 A 的 owner 能查到自己的设备
+      const forA = await getDeviceForUser(a.tenantId, a.deviceKey, a.userId);
+      expect(forA).not.toBeNull();
+      // 用租户 B 的 tenantId + 同一 deviceKey 查 A 的用户 → null（跨租户隔离）
+      const crossTenant = await getDeviceForUser(b.tenantId, a.deviceKey, a.userId);
+      expect(crossTenant).toBeNull();
+    });
   });
 });
 

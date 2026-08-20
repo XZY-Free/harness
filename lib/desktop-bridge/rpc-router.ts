@@ -1,6 +1,6 @@
 import { isLeaseValid } from "../desktop/lease";
 /**
- * ：RPC 路由逻辑。
+ * RPC 路由逻辑。
  *
  * 将 RPC 请求路由到正确的 Desktop 设备。路由基于 lease：
  * 只有持有 threadId lease 且在线、已认证的设备才能接收该 thread 的 RPC。
@@ -10,8 +10,11 @@ import { isLeaseValid } from "../desktop/lease";
  * 2. 如果没有 lease，返回 desktop_unavailable（没有设备持有执行权）
  * 3. 如果有 lease，检查 lease 是否有效（未过期）
  * 4. 检查 lease 的 userId 是否匹配
- * 5. 检查 lease 的 deviceId 对应的设备是否在线且已认证
- * 6. 返回目标设备的 WebSocket
+ * 5. 检查 lease 的 deviceRecordId（Device.id）对应的设备是否在线且已认证
+ * 6. 返回目标设备的内部 deviceRecordId 与外部 deviceKey、WebSocket
+ *
+ * 内部路由一律用 deviceRecordId（Device.id）；返回中同时给出外部 deviceKey，
+ * 供 wire 协议 / RPC envelope 使用（信封 deviceId 字段仍是 deviceKey）。
  */
 import type { DeviceRegistry } from "./device-registry";
 import type { LeaseService } from "./lease-service";
@@ -19,10 +22,11 @@ import type { LeaseService } from "./lease-service";
 /**
  * RPC 路由结果。
  *
- * 鉴别联合：ok=true 时持有 deviceId/ws，ok=false 时持有 code/message。
+ * 鉴别联合：ok=true 时持有内部 deviceRecordId / 外部 deviceKey / ws，
+ * ok=false 时持有 code/message。清楚区分内部路由 id 与外部 wire 标识。
  */
 export type RpcRouteResult =
-  | { ok: true; deviceId: string; ws: unknown }
+  | { ok: true; deviceRecordId: string; deviceKey: string; ws: unknown }
   | { ok: false; code: string; message?: string };
 
 /**
@@ -68,13 +72,13 @@ export function routeRpc(params: {
       message: `userId 不匹配：lease=${lease.userId}，request=${userId}`,
     };
   }
-  // 4. 检查 lease 的 deviceId 对应的设备是否在线
-  const dev = registry.getByDeviceId(lease.deviceId);
+  // 4. 检查 lease 的 deviceRecordId 对应的设备是否在线（内部路由用 Device.id）
+  const dev = registry.getByDeviceRecordId(lease.deviceRecordId);
   if (!dev) {
     return {
       ok: false,
       code: "desktop_disconnected",
-      message: `设备 ${lease.deviceId} 已离线`,
+      message: `设备 ${lease.deviceRecordId} 已离线`,
     };
   }
   // 5. 检查设备是否已认证
@@ -82,13 +86,14 @@ export function routeRpc(params: {
     return {
       ok: false,
       code: "desktop_unauthorized",
-      message: `设备 ${lease.deviceId} 未认证`,
+      message: `设备 ${lease.deviceRecordId} 未认证`,
     };
   }
-  // 6. 返回目标设备的 WebSocket
+  // 6. 返回目标设备的内部 deviceRecordId 与外部 deviceKey、WebSocket
   return {
     ok: true,
-    deviceId: dev.deviceId,
+    deviceRecordId: dev.deviceRecordId,
+    deviceKey: dev.deviceKey,
     ws: dev.ws,
   };
 }

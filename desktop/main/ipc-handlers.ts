@@ -1,23 +1,31 @@
 /**
- * V10 Phase 3+4+5+8：IPC handler 注册。
+ * IPC handler 注册。
  *
  * 只注册 DESKTOP_IPC_CHANNELS 白名单中的 channel，最小暴露面。
  * preload 通过 contextBridge 仅暴露这些 channel 的 invoke 包装，不暴露通用 ipcRenderer。
  *
- * Phase 3：getCapabilities / getInfo / openExternal / isFocused
- * Phase 4：browser:createTab / closeTab / switchTab / navigate / setBounds / getTabs / getActiveTab / hideViews / subscribe
- * Phase 5：bridge:getState / bridge:connect / bridge:disconnect / bridge:onStateChange
- * Phase 8：auth:logout / updater:checkForUpdates / downloadUpdate / quitAndInstall / getState / onStateChange
+ * - 设备：getCapabilities / getInfo / openExternal / isFocused / window:getFrameState
+ * - 设备绑定：device:getRegistration / device:register
+ * - Browser：createTab / closeTab / switchTab / navigate / setBounds / getTabs / getActiveTab / hideViews / subscribe
+ * - Bridge：bridge:getState / bridge:connect / bridge:disconnect / bridge:onStateChange（无条件注册，动态读取 lifecycle）
+ * - 取消 AI：browser:cancelAi（动态读取 lifecycle）
+ * - 退出：auth:logout（动态读取 lifecycle）
+ * - 更新：updater:checkForUpdates / downloadUpdate / quitAndInstall / getState / onStateChange
+ *
+ * 白名单中的 channel 运行时必须都有 handler：Bridge 相关 channel 无条件注册，
+ * 不再因未注册而缺 handler。
  */
 import type { IpcMain } from "electron";
 import { BrowserWindow, shell } from "electron";
 import type {
   DesktopCapabilities,
-  DesktopDeviceRegistration,
+  DesktopDeviceRegisterResult,
+  DesktopDeviceRegistrationPayload,
 } from "../../lib/desktop/capabilities";
 import type { BrowserProfileCleaner } from "../auth/logout-orchestrator";
 import { performLogout } from "../auth/logout-orchestrator";
-import type { BridgeClient } from "../bridge/bridge-client";
+import { type DesktopBridgeLifecycle, isValidTenantId } from "../bridge/bridge-lifecycle";
+import { type DeviceIdentity, saveDeviceIdentity } from "../bridge/device-identity";
 import type { AiLockManager } from "../browser/ai-lock";
 import type { BrowserController } from "../browser/browser-controller";
 import type { KeychainAdapter } from "../storage/keychain";
@@ -28,22 +36,24 @@ import { RendererSubscriptions } from "./renderer-subscriptions";
  * 注册 Desktop IPC handler。
  *
  * @param ipcMain Electron ipcMain 实例
- * @param capabilities Desktop capability 对象（由主进程构造，含版本 / origin / appVersion）
- * @param browserController Browser Controller 实例（Phase 4 起传入）
- * @param bridgeClient Agent Bridge 客户端实例（Phase 5 起传入，可选）
- * @param profileCleaner Browser Profile 清理器（Phase 8 起传入，用于 logout）
- * @param keychain Keychain 适配器（Phase 8 起传入，用于 logout）
- * @param updateManager 自动更新管理器（Phase 8 起传入，用于 autoUpdater）
+ * @param capabilities Desktop capability 对象（含 serverOrigin / appVersion）
+ * @param deviceRegistration 本机设备注册请求体（由主进程构造，不含 tenantId 信任）
+ * @param bridgeLifecycle Agent Bridge 生命周期控制器（动态持有 BridgeClient）
+ * @param keychain Keychain 适配器（注册回填 / logout 清理）
+ * @param aiLockManager AI 输入锁管理器（可选）
+ * @param browserController Browser Controller 实例（可选）
+ * @param profileCleaner Browser Profile 清理器（logout 用）
+ * @param updateManager 自动更新管理器（可选）
  */
 export function registerIpcHandlers(
   ipcMain: IpcMain,
   capabilities: DesktopCapabilities,
-  deviceRegistration?: DesktopDeviceRegistration,
+  deviceRegistration: DesktopDeviceRegistrationPayload,
+  bridgeLifecycle: DesktopBridgeLifecycle,
+  keychain: KeychainAdapter,
   aiLockManager?: AiLockManager,
   browserController?: BrowserController,
-  bridgeClient?: BridgeClient,
   profileCleaner?: BrowserProfileCleaner,
-  keychain?: KeychainAdapter,
   updateManager?: UpdateManager,
 ): void {
   const rendererSubscriptions = new RendererSubscriptions();
@@ -91,11 +101,75 @@ export function registerIpcHandlers(
     return { isFullScreen: window?.isFullScreen() ?? false };
   });
 
-  if (deviceRegistration) {
-    ipcMain.handle("desktop:device:getRegistration", () => deviceRegistration);
-  }
+  // 设备绑定（白名单 channel 无条件注册 handler）
+  ipcMain.handle("desktop:device:getRegistration", () => deviceRegistration);
 
-  // Phase 4：Browser tab 操作
+  // 设备注册闭环：renderer 挂载后调用。
+  // - main 用发起 renderer 的 Electron Session fetch 同源注册端点（不信任 renderer 传 tenantId）
+  // - 请求体由主进程的 registration payload 构造，tenantId 由 Server 从认证主体解析
+  // - 校验 HTTP/JSON、响应 deviceId 等于本机 identity.deviceId、tenantId 为合法非空 UUID
+  // - 成功：回填 Keychain 并立即创建/连接 Bridge（无需重启）；失败保持 disconnected，可重试，无默认租户
+  ipcMain.handle("desktop:device:register", async (event): Promise<DesktopDeviceRegisterResult> => {
+    // 幂等：已注册则确保 Bridge 连接，不重复注册
+    if (bridgeLifecycle.isRegistered()) {
+      bridgeLifecycle.ensureConnected();
+      return { ok: true, tenantId: bridgeLifecycle.getIdentity().tenantId ?? undefined };
+    }
+    const identity = bridgeLifecycle.getIdentity();
+    const serverOrigin = capabilities.serverOrigin;
+    const url = `${serverOrigin}/api/desktop/devices/register`;
+    let res: Response;
+    try {
+      res = await event.sender.session.fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          deviceId: deviceRegistration.deviceId,
+          publicKey: deviceRegistration.publicKey,
+          name: deviceRegistration.name,
+          version: deviceRegistration.version,
+        }),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, code: "network_error", message: `注册请求失败：${message}` };
+    }
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      return { ok: false, code: "invalid_response", message: "注册响应不是合法 JSON" };
+    }
+    if (!res.ok || typeof json !== "object" || json === null) {
+      return { ok: false, code: "http_error", message: `注册端点返回 HTTP ${res.status}` };
+    }
+    const data = (json as { data?: unknown }).data;
+    if (typeof data !== "object" || data === null) {
+      return { ok: false, code: "invalid_response", message: "注册响应缺少 data" };
+    }
+    const { deviceId: respDeviceId, tenantId } = data as { deviceId?: unknown; tenantId?: unknown };
+    if (typeof respDeviceId !== "string" || respDeviceId !== identity.deviceId) {
+      return { ok: false, code: "device_mismatch", message: "注册响应的 deviceId 与本机身份不符" };
+    }
+    if (typeof tenantId !== "string" || !isValidTenantId(tenantId)) {
+      return { ok: false, code: "invalid_tenant", message: "注册响应的 tenantId 非法" };
+    }
+    // 校验通过：先构造不可变候选身份并持久化到 Keychain，成功后才提交内存态并连接。
+    // 保存失败时原 identity.tenantId 仍为 null、lifecycle 不创建 client，可重试。
+    const candidate: DeviceIdentity = { ...identity, tenantId };
+    try {
+      await saveDeviceIdentity(keychain, candidate);
+    } catch {
+      return { ok: false, code: "persist_error", message: "设备身份持久化失败" };
+    }
+    if (!bridgeLifecycle.applyTenantId(tenantId)) {
+      return { ok: false, code: "invalid_tenant", message: "回填租户失败" };
+    }
+    bridgeLifecycle.connect();
+    return { ok: true, tenantId };
+  });
+
+  // Browser tab 操作
   if (browserController) {
     // desktop:browser:createTab → 创建新 browser tab
     ipcMain.handle(
@@ -178,13 +252,14 @@ export function registerIpcHandlers(
       return true;
     });
 
+    // desktop:browser:cancelAi → 请求 Server 停止当前 AI 命令（动态读取 lifecycle 当前 client）
+    ipcMain.handle("desktop:browser:cancelAi", (_event, threadId: string) =>
+      bridgeLifecycle.cancelAndTakeOver(threadId),
+    );
+
     if (aiLockManager) {
       ipcMain.handle("desktop:browser:getLockState", (_event, threadId: string) =>
         aiLockManager.isLocked(threadId),
-      );
-      ipcMain.handle(
-        "desktop:browser:cancelAi",
-        (_event, threadId: string) => bridgeClient?.cancelAndTakeOver(threadId) ?? false,
       );
       ipcMain.handle("desktop:browser:subscribeLockState", (event) => {
         rendererSubscriptions.ensure(event.sender, "browser-lock", () => {
@@ -210,52 +285,47 @@ export function registerIpcHandlers(
     }
   }
 
-  // Phase 5：Agent Bridge 操作
-  if (bridgeClient) {
-    // desktop:bridge:getState → 获取连接状态
-    ipcMain.handle("desktop:bridge:getState", () => {
-      return bridgeClient.getState();
-    });
+  // Agent Bridge 操作（白名单 channel 无条件注册，动态读取 lifecycle 当前 client）
+  // desktop:bridge:getState → 获取连接状态
+  ipcMain.handle("desktop:bridge:getState", () => {
+    return bridgeLifecycle.getState();
+  });
 
-    // desktop:bridge:connect → 连接到 Server
-    ipcMain.handle("desktop:bridge:connect", () => {
-      bridgeClient.connect();
-      return true;
-    });
+  // desktop:bridge:connect → 连接到 Server
+  ipcMain.handle("desktop:bridge:connect", () => {
+    bridgeLifecycle.connect();
+    return true;
+  });
 
-    // desktop:bridge:disconnect → 断开连接
-    ipcMain.handle("desktop:bridge:disconnect", () => {
-      bridgeClient.disconnect();
-      return true;
-    });
+  // desktop:bridge:disconnect → 断开连接
+  ipcMain.handle("desktop:bridge:disconnect", () => {
+    bridgeLifecycle.disconnect();
+    return true;
+  });
 
-    // desktop:bridge:onStateChange → 订阅状态变化（通过 webContents.send 推送）
-    ipcMain.handle("desktop:bridge:onStateChange", (event) => {
-      rendererSubscriptions.ensure(event.sender, "bridge-state", () =>
-        bridgeClient.onStateChange((state) => {
-          event.sender.send("desktop:bridge:stateUpdate", state);
-        }),
-      );
-      return true;
-    });
-  }
+  // desktop:bridge:onStateChange → 订阅状态变化（通过 webContents.send 推送）
+  ipcMain.handle("desktop:bridge:onStateChange", (event) => {
+    rendererSubscriptions.ensure(event.sender, "bridge-state", () =>
+      bridgeLifecycle.onStateChange((state) => {
+        event.sender.send("desktop:bridge:stateUpdate", state);
+      }),
+    );
+    return true;
+  });
 
-  // Phase 8：退出登录
-  // 清理本地身份 + Browser Profile + 断开 Bridge
-  if (browserController && profileCleaner && keychain) {
+  // 退出登录：清理本地身份 + Browser Profile + 断开 Bridge（动态读取 lifecycle）
+  if (browserController && profileCleaner) {
     ipcMain.handle("desktop:auth:logout", async () => {
       const sessionManager = browserController.getSessionManager();
-      const result = await performLogout(
-        bridgeClient ?? null,
-        sessionManager,
-        profileCleaner,
-        keychain,
-      );
+      bridgeLifecycle.disconnect();
+      const result = await performLogout(null, sessionManager, profileCleaner, keychain);
+      // 清空内存态租户，使下次注册重新走完整流程
+      bridgeLifecycle.clearTenant();
       return { ok: result.ok };
     });
   }
 
-  // Phase 8：自动更新
+  // 自动更新
   if (updateManager) {
     // desktop:updater:checkForUpdates → 检查更新
     ipcMain.handle("desktop:updater:checkForUpdates", async () => {

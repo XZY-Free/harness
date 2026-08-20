@@ -1,9 +1,9 @@
 /**
- * V10 Phase 3：Electron 主进程入口。
+ * Electron 主进程入口。
  *
  * 职责：
  * - 单实例锁（防止多开，第二实例聚焦已有窗口）。
- * - macOS 深链接处理（snowharness:// 协议；Phase 3 仅聚焦窗口，路由由 renderer 处理）。
+ * - macOS 深链接处理（snowharness:// 协议；仅聚焦窗口，路由由 renderer 处理）。
  * - 创建主窗口并加载 Server URL（${origin}/desktop）。
  * - 注册系统菜单（最小集：appMenu / editMenu / viewMenu）。
  * - 生产环境启动崩溃报告（crashReporter），开发环境不启动。
@@ -16,11 +16,11 @@ import { BrowserWindow, Menu, app, crashReporter, ipcMain } from "electron";
 import { autoUpdater } from "electron-updater";
 import type {
   DesktopCapabilities,
-  DesktopDeviceRegistration,
+  DesktopDeviceRegistrationPayload,
 } from "../../lib/desktop/capabilities";
 import { DESKTOP_CAPABILITY_VERSION, DESKTOP_IPC_CHANNELS } from "../../lib/desktop/capabilities";
 import { ElectronProfileCleaner } from "../auth/electron-profile-cleaner";
-import { BridgeClient } from "../bridge/bridge-client";
+import { DesktopBridgeLifecycle } from "../bridge/bridge-lifecycle";
 import type { BrowserActionTarget, BrowserCommandTarget } from "../bridge/command-executor";
 import {
   createDeviceIdentity,
@@ -167,7 +167,7 @@ async function main(): Promise<void> {
   });
 
   // macOS 深链接：snowharness://open/...
-  // Phase 3 仅聚焦窗口，深链接路由由 renderer 处理（Phase 4+）
+  // 仅聚焦窗口，深链接路由由 renderer 处理
   app.on("open-url", (_event, _url) => {
     focusExistingWindow();
   });
@@ -195,11 +195,13 @@ async function main(): Promise<void> {
     identity = createDeviceIdentity();
     await saveDeviceIdentity(keychain, identity);
   }
-  const deviceRegistration: DesktopDeviceRegistration = {
+  const deviceRegistration: DesktopDeviceRegistrationPayload = {
     deviceId: identity.deviceId,
     publicKey: identity.keyPair.publicKeyBase64,
     name: hostname() || "SnowHarness Desktop",
     version: app.getVersion(),
+    // tenantId 来自 Server 注册响应（identity.tenantId），未注册为 null
+    tenantId: identity.tenantId,
   };
 
   // preload 在隔离上下文中同步读取，必须在创建 BrowserWindow 前注入。
@@ -219,7 +221,7 @@ async function main(): Promise<void> {
       : join(process.cwd(), "desktop/storage/migrations"),
   );
 
-  // 初始化 Browser Controller（Phase 4）
+  // 初始化 Browser Controller
   const origins = loadAllowedOrigins();
   const windowConstraints: WindowConstraints = {
     windowWidth: 1400,
@@ -238,108 +240,98 @@ async function main(): Promise<void> {
     void browserController.setUserInputBlocked(release.threadId, false);
   });
 
-  // Phase 7-1：注入 DownloadManager 并配置上传参数
+  // 注入 DownloadManager 并配置上传参数
   const downloadManager = new DownloadManager();
   browserController.setDownloadManager(downloadManager);
   browserController.setDownloadUploadConfig({ serverOrigin });
 
-  // Phase 7-4：初始化隐藏 QA WebContents 控制器
+  // 初始化隐藏 QA WebContents 控制器
   // 使用独立的 PageInsightsStore（与用户 tab 缓冲隔离）
   const qaPageInsightsStore = new PageInsightsStore();
   const qaController = new QaController(qaPageInsightsStore, new QaElectronFactory());
-  // Phase 8：注入到 BrowserController，使 closeThread 联动清理 QA 资源
+  // 注入到 BrowserController，使 closeThread 联动清理 QA 资源
   browserController.setQaController(qaController);
 
-  // Phase 5：初始化 Agent Bridge（异步连接，不阻塞主进程启动）
-  let bridgeClient: BridgeClient | undefined;
-  try {
-    // 创建 BrowserCommandTarget 适配器（包装 BrowserController）
-    // 包含读取类能力：getTabs / getActiveTab / getDebuggerSession / captureScreenshot / listDownloads
-    // Phase 7-3：新增 getSnapshot / getAccessibilityTree / getConsoleEntries / getNetworkEntries
-    const commandTarget: BrowserCommandTarget = {
-      getTabs: (threadId: string) => browserController.getTabs(threadId),
-      getActiveTab: (threadId: string) => browserController.getActiveTab(threadId),
-      getDebuggerSession: (threadId: string, tabId: string) =>
-        browserController.getDebuggerSession(threadId, tabId),
-      captureScreenshot: (threadId: string, tabId: string, format: string) =>
-        browserController.captureScreenshot(threadId, tabId, format),
-      listDownloads: (threadId: string) => browserController.listDownloads(threadId),
-      getSnapshot: (threadId: string, tabId: string, maxTextLength?: number) =>
-        browserController.getSnapshot(threadId, tabId, maxTextLength),
-      getAccessibilityTree: (threadId: string, tabId: string) =>
-        browserController.getAccessibilityTree(threadId, tabId),
-      getConsoleEntries: (
-        threadId: string,
-        tabId: string,
-        level?: "error" | "warning+",
-        limit?: number,
-      ) => browserController.getConsoleEntries(threadId, tabId, level, limit),
-      getNetworkEntries: (
-        threadId: string,
-        tabId: string,
-        filter?: "failed" | "slow",
-        limit?: number,
-      ) => browserController.getNetworkEntries(threadId, tabId, filter, limit),
-    };
+  // 创建 BrowserCommandTarget 适配器（包装 BrowserController）
+  // 包含读取类能力：getTabs / getActiveTab / getDebuggerSession / captureScreenshot / listDownloads
+  // 新增 getSnapshot / getAccessibilityTree / getConsoleEntries / getNetworkEntries
+  const commandTarget: BrowserCommandTarget = {
+    getTabs: (threadId: string) => browserController.getTabs(threadId),
+    getActiveTab: (threadId: string) => browserController.getActiveTab(threadId),
+    getDebuggerSession: (threadId: string, tabId: string) =>
+      browserController.getDebuggerSession(threadId, tabId),
+    captureScreenshot: (threadId: string, tabId: string, format: string) =>
+      browserController.captureScreenshot(threadId, tabId, format),
+    listDownloads: (threadId: string) => browserController.listDownloads(threadId),
+    getSnapshot: (threadId: string, tabId: string, maxTextLength?: number) =>
+      browserController.getSnapshot(threadId, tabId, maxTextLength),
+    getAccessibilityTree: (threadId: string, tabId: string) =>
+      browserController.getAccessibilityTree(threadId, tabId),
+    getConsoleEntries: (
+      threadId: string,
+      tabId: string,
+      level?: "error" | "warning+",
+      limit?: number,
+    ) => browserController.getConsoleEntries(threadId, tabId, level, limit),
+    getNetworkEntries: (
+      threadId: string,
+      tabId: string,
+      filter?: "failed" | "slow",
+      limit?: number,
+    ) => browserController.getNetworkEntries(threadId, tabId, filter, limit),
+  };
 
-    // 创建 BrowserActionTarget 适配器（包装 BrowserController 的操作类能力）
-    // 14 个 action 命令的执行目标
-    const actionTarget: BrowserActionTarget = {
-      navigate: (threadId: string, tabId: string, url: string) =>
-        browserController.navigate(threadId, tabId, { type: "navigate", threadId, tabId, url }),
-      closeTab: (threadId: string, tabId: string) =>
-        browserController.closeTab(threadId, tabId) !== null,
-      switchTab: (threadId: string, tabId: string) => browserController.switchTab(threadId, tabId),
-      createTab: (
-        threadId: string,
-        url: string,
-        opts?: { incognito?: boolean; tabId?: string; activate?: boolean },
-      ) => browserController.createTab(threadId, url, undefined, opts),
-      reload: (threadId: string, tabId: string) => browserController.reload(threadId, tabId),
-      goBack: (threadId: string, tabId: string) => browserController.goBack(threadId, tabId),
-      goForward: (threadId: string, tabId: string) => browserController.goForward(threadId, tabId),
-      click: (threadId: string, tabId: string, x: number, y: number, button?: string) =>
-        browserController.click(threadId, tabId, x, y, button),
-      doubleClick: (threadId: string, tabId: string, x: number, y: number) =>
-        browserController.doubleClick(threadId, tabId, x, y),
-      type: (threadId: string, tabId: string, text: string, selector?: string) =>
-        browserController.type(threadId, tabId, text, selector),
-      press: (threadId: string, tabId: string, key: string) =>
-        browserController.press(threadId, tabId, key),
-      select: (threadId: string, tabId: string, selector: string, value?: string, label?: string) =>
-        browserController.select(threadId, tabId, selector, value, label),
-      scroll: (threadId: string, tabId: string, deltaX: number, deltaY: number) =>
-        browserController.scroll(threadId, tabId, deltaX, deltaY),
-      uploadWorkspaceFile: (
-        threadId: string,
-        tabId: string,
-        selector: string,
-        downloadUrl: string,
-      ) => browserController.uploadWorkspaceFile(threadId, tabId, selector, downloadUrl),
-    };
+  // 创建 BrowserActionTarget 适配器（包装 BrowserController 的操作类能力）
+  // 14 个 action 命令的执行目标
+  const actionTarget: BrowserActionTarget = {
+    navigate: (threadId: string, tabId: string, url: string) =>
+      browserController.navigate(threadId, tabId, { type: "navigate", threadId, tabId, url }),
+    closeTab: (threadId: string, tabId: string) =>
+      browserController.closeTab(threadId, tabId) !== null,
+    switchTab: (threadId: string, tabId: string) => browserController.switchTab(threadId, tabId),
+    createTab: (
+      threadId: string,
+      url: string,
+      opts?: { incognito?: boolean; tabId?: string; activate?: boolean },
+    ) => browserController.createTab(threadId, url, undefined, opts),
+    reload: (threadId: string, tabId: string) => browserController.reload(threadId, tabId),
+    goBack: (threadId: string, tabId: string) => browserController.goBack(threadId, tabId),
+    goForward: (threadId: string, tabId: string) => browserController.goForward(threadId, tabId),
+    click: (threadId: string, tabId: string, x: number, y: number, button?: string) =>
+      browserController.click(threadId, tabId, x, y, button),
+    doubleClick: (threadId: string, tabId: string, x: number, y: number) =>
+      browserController.doubleClick(threadId, tabId, x, y),
+    type: (threadId: string, tabId: string, text: string, selector?: string) =>
+      browserController.type(threadId, tabId, text, selector),
+    press: (threadId: string, tabId: string, key: string) =>
+      browserController.press(threadId, tabId, key),
+    select: (threadId: string, tabId: string, selector: string, value?: string, label?: string) =>
+      browserController.select(threadId, tabId, selector, value, label),
+    scroll: (threadId: string, tabId: string, deltaX: number, deltaY: number) =>
+      browserController.scroll(threadId, tabId, deltaX, deltaY),
+    uploadWorkspaceFile: (threadId: string, tabId: string, selector: string, downloadUrl: string) =>
+      browserController.uploadWorkspaceFile(threadId, tabId, selector, downloadUrl),
+  };
 
-    // 创建 BridgeClient 并连接（从环境变量读取 Server URL）
-    const bridgeUrl = process.env.SNOW_BRIDGE_URL ?? "ws://localhost:3002";
-    bridgeClient = new BridgeClient({
-      serverUrl: bridgeUrl,
-      deviceIdentity: identity,
-      deviceName: "SnowHarness Desktop",
-      deviceVersion: app.getVersion(),
-      commandTarget,
-      actionTarget,
-      aiLockManager,
-    });
-  } catch (err) {
-    // 设备身份加载失败时记录错误但继续启动（Bridge 功能不可用）
-    console.error("[snowharness:desktop] Agent Bridge 初始化失败:", err);
-  }
+  // 创建 DesktopBridgeLifecycle（从环境变量读取 Server URL）。
+  // 认证签名必须绑定 tenantId；tenantId 由 Server 注册响应回填，未注册时 lifecycle
+  // 保持 disconnected（不伪造默认租户），注册成功（device:register）后动态创建并连接。
+  const bridgeUrl = process.env.SNOW_BRIDGE_URL ?? "ws://localhost:3002";
+  const bridgeLifecycle = new DesktopBridgeLifecycle(identity, {
+    serverUrl: bridgeUrl,
+    deviceName: "SnowHarness Desktop",
+    deviceVersion: app.getVersion(),
+    commandTarget,
+    actionTarget,
+    aiLockManager,
+  });
 
   // 注册 IPC handler（白名单 channel）
-  // Phase 8：注入 ElectronProfileCleaner 和 keychain 用于 logout 流程
+  // 注入 ElectronProfileCleaner 和 keychain 用于 logout 流程
   const profileCleaner = new ElectronProfileCleaner();
 
-  // Phase 8：初始化自动更新管理器
-  // autoUpdater 类型为 AppUpdater，断言为 AutoUpdaterLike 接口（方法签名兼容）
+  // 初始化自动更新管理器
+  // autoUpdater 类型为 AppUpdater，断言为 AutoUpdaterLike 接口（方法签名一致）
   const updatesEnabled =
     !app.isPackaged || existsSync(join(process.resourcesPath, "app-update.yml"));
   const updateManager = new UpdateManager(
@@ -353,11 +345,11 @@ async function main(): Promise<void> {
     ipcMain,
     capabilities,
     deviceRegistration,
+    bridgeLifecycle,
+    keychain,
     aiLockManager,
     browserController,
-    bridgeClient,
     profileCleaner,
-    keychain,
     updateManager,
   );
 
@@ -392,7 +384,7 @@ async function main(): Promise<void> {
     }
   });
 
-  // Phase 7-6：进程退出前清理所有未上传 / 未跟踪的本地临时文件
+  // 进程退出前清理所有未上传 / 未跟踪的本地临时文件
   // （screenshot / download / artifact），避免孤儿文件堆积。
   // before-quit 允许异步操作完成后再退出——使用 preventDefault 暂停退出，
   // 清理完成后移除自身监听并调用 app.quit() 触发实际退出。

@@ -2,15 +2,12 @@
  * 设备仓储。
  *
  * 设备生命周期：register（绑定）→ touch（心跳）→ revoke（撤销，不可恢复）。
- * 撤销后拒绝新 Lease、Workspace handle 和迟到签名请求（）。
+ * 撤销后拒绝新 Lease、Workspace handle 和迟到签名请求。
  *
- * 与 V10 desktop-device-queries 的差异：
- * - 所有查询按 (tenantId, deviceKey) 而非全局 deviceKey。
- * - userId 引用 UserIdentity 而非旧 User 表。
- * - deviceState 替代 status（公共字段规则）。
+ * 所有查询按 (tenantId, deviceKey) 二元键定位，同一 deviceKey 可在不同租户独立注册；
+ * userId 引用 UserIdentity；deviceState 替代裸 status 列（公共字段规则）。
  *
- * 事实源：docs/architecture/persistence.md 、
- * docs/architecture/api-and-events.md §9。
+ * 事实源：docs/architecture/persistence.md、docs/architecture/api-and-events.md §9。
  */
 import { db } from "@/lib/db/client";
 import { device } from "@/lib/persistence/schema/device";
@@ -125,7 +122,7 @@ export async function touchDevice(tenantId: string, deviceKey: string): Promise<
  *
  * 严格条件：仅当 (tenantId, deviceKey) 存在且 deviceState=active 时撤销。
  * 重复撤销（已 revoked）返回 null——避免覆盖 revokedAt 时间戳，保留首次撤销时间。
- * 撤销后不可恢复（与 V10 一致，10-core-data-model.md:46）。
+ * 撤销后不可恢复。
  *
  * 撤销后立即阻止后续注入：新 Lease、Workspace handle 和迟到签名请求全部拒绝。
  */

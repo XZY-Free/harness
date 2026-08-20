@@ -1,5 +1,5 @@
 /**
- * ：Browser Executor lease 逻辑。
+ * Browser Executor lease 逻辑。
  *
  * 当 Server 向 Desktop 发送浏览器操作命令时，Server 端先获取该 thread 的 lease，
  * 确保同一时间只有一个设备能操作某个 thread 的浏览器。lease 有 TTL，过期后
@@ -16,14 +16,17 @@
 
 /**
  * Browser lease 结构。
+ *
+ * 持有者用 deviceRecordId（Device.id，内部唯一身份）标识，不按 deviceKey 全局索引——
+ * 同一 deviceKey 可跨租户，内部路由必须用无歧义的 Device.id。
  */
 export interface BrowserLease {
   /** 绑定的 thread ID */
   threadId: string;
   /** 持有 lease 的用户 ID */
   userId: string;
-  /** 持有 lease 的设备 ID */
-  deviceId: string;
+  /** 持有 lease 的设备内部 ID（Device.id） */
+  deviceRecordId: string;
   /** 获取时间（epoch ms） */
   acquiredAt: number;
   /** 过期时间（epoch ms） */
@@ -47,14 +50,14 @@ export function isLeaseValid(lease: BrowserLease, now: number): boolean {
 }
 
 /**
- * 检查 lease 是否属于指定设备。
+ * 检查 lease 是否属于指定设备（按 Device.id，即 deviceRecordId）。
  *
  * @param lease 待检查的 lease
- * @param deviceId 设备 ID
+ * @param deviceRecordId 设备内部 ID（Device.id）
  * @returns 匹配返回 true
  */
-export function isLeaseHeldBy(lease: BrowserLease, deviceId: string): boolean {
-  return lease.deviceId === deviceId;
+export function isLeaseHeldBy(lease: BrowserLease, deviceRecordId: string): boolean {
+  return lease.deviceRecordId === deviceRecordId;
 }
 
 /**
@@ -117,7 +120,7 @@ export class LeaseManager {
    *
    * @param threadId thread ID
    * @param userId 用户 ID
-   * @param deviceId 设备 ID
+   * @param deviceRecordId 设备内部 ID（Device.id）
    * @param ttlMs TTL（毫秒）
    * @param now 当前时间（epoch ms）
    * @returns 获取成功返回 lease，失败返回错误码
@@ -125,7 +128,7 @@ export class LeaseManager {
   acquireLease(
     threadId: string,
     userId: string,
-    deviceId: string,
+    deviceRecordId: string,
     ttlMs: number,
     now: number,
   ): AcquireLeaseResult {
@@ -134,12 +137,12 @@ export class LeaseManager {
       // 已有 lease
       if (isLeaseValid(existing, now)) {
         // lease 仍然有效
-        if (existing.deviceId === deviceId) {
+        if (existing.deviceRecordId === deviceRecordId) {
           // 同一设备，允许续期
           const lease: BrowserLease = {
             threadId,
             userId,
-            deviceId,
+            deviceRecordId,
             acquiredAt: now,
             expiresAt: now + ttlMs,
           };
@@ -155,7 +158,7 @@ export class LeaseManager {
     const lease: BrowserLease = {
       threadId,
       userId,
-      deviceId,
+      deviceRecordId,
       acquiredAt: now,
       expiresAt: now + ttlMs,
     };
@@ -167,16 +170,16 @@ export class LeaseManager {
    * 释放 lease（只有持有设备可以释放）。
    *
    * @param threadId thread ID
-   * @param deviceId 设备 ID
+   * @param deviceRecordId 设备内部 ID（Device.id）
    * @param now 当前时间（epoch ms）
    * @returns 释放成功返回 true，非持有设备或不存在的 lease 返回 false
    */
-  releaseLease(threadId: string, deviceId: string, _now: number): boolean {
+  releaseLease(threadId: string, deviceRecordId: string, _now: number): boolean {
     const existing = this.leases.get(threadId);
     if (!existing) {
       return false;
     }
-    if (existing.deviceId !== deviceId) {
+    if (existing.deviceRecordId !== deviceRecordId) {
       return false;
     }
     this.leases.delete(threadId);

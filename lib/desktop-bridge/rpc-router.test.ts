@@ -1,5 +1,5 @@
 /**
- * V10 Phase 5：rpc-router 测试。
+ * rpc-router 测试。
  */
 import { DeviceRegistry } from "@/lib/desktop-bridge/device-registry";
 import { LeaseService } from "@/lib/desktop-bridge/lease-service";
@@ -7,12 +7,13 @@ import { routeRpc } from "@/lib/desktop-bridge/rpc-router";
 import { describe, expect, it } from "vitest";
 
 const NOW = 1700000000000;
+const TENANT = "tenant-001";
 
 function setup(): { registry: DeviceRegistry; lease: LeaseService; ws: object } {
   const registry = new DeviceRegistry();
   const lease = new LeaseService(registry);
   const ws = {};
-  registry.register(ws, "dev-001", "rec-001", "user-001", "server-pk");
+  registry.register(ws, TENANT, "dev-001", "rec-001", "user-001", "server-pk");
   registry.markAuthenticated(ws);
   return { registry, lease, ws };
 }
@@ -38,7 +39,7 @@ describe("routeRpc()", () => {
     lease.acquireLease({
       threadId: "thread-001",
       userId: "user-001",
-      deviceId: "dev-001",
+      deviceRecordId: "rec-001",
       now: NOW,
       ttlMs: 1000,
     });
@@ -61,7 +62,7 @@ describe("routeRpc()", () => {
     lease.acquireLease({
       threadId: "thread-001",
       userId: "user-001",
-      deviceId: "dev-001",
+      deviceRecordId: "rec-001",
       now: NOW,
     });
     const result = routeRpc({
@@ -82,7 +83,7 @@ describe("routeRpc()", () => {
     lease.acquireLease({
       threadId: "thread-001",
       userId: "user-001",
-      deviceId: "dev-001",
+      deviceRecordId: "rec-001",
       now: NOW,
     });
     // 移除设备模拟离线
@@ -107,16 +108,16 @@ describe("routeRpc()", () => {
     const registry = new DeviceRegistry();
     const lease = new LeaseService(registry);
     const ws = {};
-    registry.register(ws, "dev-001", "rec-001", "user-001", "pk");
+    registry.register(ws, TENANT, "dev-001", "rec-001", "user-001", "pk");
     registry.markAuthenticated(ws);
     lease.acquireLease({
       threadId: "thread-001",
       userId: "user-001",
-      deviceId: "dev-001",
+      deviceRecordId: "rec-001",
       now: NOW,
     });
     // 重新注册使 authenticated=false
-    registry.register(ws, "dev-001", "rec-001", "user-001", "pk");
+    registry.register(ws, TENANT, "dev-001", "rec-001", "user-001", "pk");
     const result = routeRpc({
       registry,
       leaseService: lease,
@@ -130,12 +131,12 @@ describe("routeRpc()", () => {
     }
   });
 
-  it("一切正常时返回 deviceId 和 ws", () => {
+  it("一切正常时返回内部 deviceRecordId / 外部 deviceKey / ws", () => {
     const { registry, lease, ws } = setup();
     lease.acquireLease({
       threadId: "thread-001",
       userId: "user-001",
-      deviceId: "dev-001",
+      deviceRecordId: "rec-001",
       now: NOW,
     });
     const result = routeRpc({
@@ -147,7 +148,8 @@ describe("routeRpc()", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.deviceId).toBe("dev-001");
+      expect(result.deviceRecordId).toBe("rec-001");
+      expect(result.deviceKey).toBe("dev-001");
       expect(result.ws).toBe(ws);
     }
   });
@@ -159,7 +161,7 @@ describe("routeRpc()", () => {
     lease.acquireLease({
       threadId: "thread-001",
       userId: "user-001",
-      deviceId: "dev-001",
+      deviceRecordId: "rec-001",
       now: NOW,
     });
     const result = routeRpc({
@@ -173,5 +175,60 @@ describe("routeRpc()", () => {
     if (!result.ok) {
       expect(result.code).toBe("desktop_unauthorized");
     }
+  });
+
+  it("跨租户相同 deviceKey 同时在线并分别持有不同 thread lease，各自路由互不串扰", () => {
+    const registry = new DeviceRegistry();
+    const lease = new LeaseService(registry);
+    const wsA = {};
+    const wsB = {};
+    // 租户 A 与租户 B 使用相同的 deviceKey "shared-dev"，各自在线（内部 deviceRecordId 不同）
+    registry.register(wsA, "tenant-A", "shared-dev", "rec-A", "user-A", "pk");
+    registry.markAuthenticated(wsA);
+    registry.register(wsB, "tenant-B", "shared-dev", "rec-B", "user-B", "pk");
+    registry.markAuthenticated(wsB);
+    // 各自持有不同 thread 的 lease
+    lease.acquireLease({
+      threadId: "thread-A",
+      userId: "user-A",
+      deviceRecordId: "rec-A",
+      now: NOW,
+    });
+    lease.acquireLease({
+      threadId: "thread-B",
+      userId: "user-B",
+      deviceRecordId: "rec-B",
+      now: NOW,
+    });
+    // A 的路由命中 rec-A（内部 Device.id），外部 deviceKey 仍是 "shared-dev"
+    const resultA = routeRpc({
+      registry,
+      leaseService: lease,
+      userId: "user-A",
+      threadId: "thread-A",
+      now: NOW,
+    });
+    expect(resultA.ok).toBe(true);
+    if (resultA.ok) {
+      expect(resultA.deviceRecordId).toBe("rec-A");
+      expect(resultA.deviceKey).toBe("shared-dev");
+      expect(resultA.ws).toBe(wsA);
+    }
+    // B 的路由命中 rec-B
+    const resultB = routeRpc({
+      registry,
+      leaseService: lease,
+      userId: "user-B",
+      threadId: "thread-B",
+      now: NOW,
+    });
+    expect(resultB.ok).toBe(true);
+    if (resultB.ok) {
+      expect(resultB.deviceRecordId).toBe("rec-B");
+      expect(resultB.deviceKey).toBe("shared-dev");
+      expect(resultB.ws).toBe(wsB);
+    }
+    // 反查验证：同一复合键在两个租户各自在线，size=2
+    expect(registry.size()).toBe(2);
   });
 });

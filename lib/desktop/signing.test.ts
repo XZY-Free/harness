@@ -1,12 +1,58 @@
 import {
+  AUTH_SIGN_DOMAIN,
   type DeviceKeyPair,
   generateDeviceKeyPair,
   generateNonce,
   generateRequestId,
+  getAuthSignPayload,
   signData,
   verifySignature,
 } from "@/lib/desktop/signing";
 import { describe, expect, it } from "vitest";
+
+describe("getAuthSignPayload()", () => {
+  it("使用 domain separator 的 canonical JSON 数组编码", () => {
+    const payload = getAuthSignPayload({
+      tenantId: "tenant-1",
+      deviceKey: "device-abc",
+      challenge: "challenge-xyz",
+    });
+    expect(payload).toBe(
+      JSON.stringify(["snowharness-device-auth-v1", "tenant-1", "device-abc", "challenge-xyz"]),
+    );
+    expect(payload).toContain(AUTH_SIGN_DOMAIN);
+  });
+
+  it("字段重排产生不同 payload（顺序敏感，无歧义）", () => {
+    const a = getAuthSignPayload({ tenantId: "t1", deviceKey: "d1", challenge: "c1" });
+    const b = getAuthSignPayload({ tenantId: "d1", deviceKey: "t1", challenge: "c1" });
+    expect(a).not.toBe(b);
+  });
+
+  it("字段拼接不会碰撞（换行/逗号/引号免疫）", () => {
+    // tenantId="a\nb" 与 deviceKey="a" 若用裸拼接会产生歧义；JSON 数组编码消除之
+    const a = getAuthSignPayload({ tenantId: "a\nb", deviceKey: "c", challenge: "x" });
+    const b = getAuthSignPayload({ tenantId: "a", deviceKey: "b\nc", challenge: "x" });
+    expect(a).not.toBe(b);
+  });
+
+  it("delimiter 换行不会导致误验签（不同字段边界）", () => {
+    // challenge 含换行 vs 普通 challenge——payload 必须不同
+    const a = getAuthSignPayload({ tenantId: "t", deviceKey: "d", challenge: "c\nz" });
+    const b = getAuthSignPayload({ tenantId: "t", deviceKey: "d", challenge: "c" });
+    expect(a).not.toBe(b);
+    const pair = generateDeviceKeyPair();
+    const sig = signData(a, pair.privateKeyBase64);
+    expect(verifySignature(b, sig, pair.publicKeyBase64)).toBe(false);
+    expect(verifySignature(a, sig, pair.publicKeyBase64)).toBe(true);
+  });
+
+  it("任一字段为空抛出错误", () => {
+    expect(() => getAuthSignPayload({ tenantId: "", deviceKey: "d", challenge: "c" })).toThrow();
+    expect(() => getAuthSignPayload({ tenantId: "t", deviceKey: "", challenge: "c" })).toThrow();
+    expect(() => getAuthSignPayload({ tenantId: "t", deviceKey: "d", challenge: "" })).toThrow();
+  });
+});
 
 describe("generateDeviceKeyPair()", () => {
   it("返回非空公钥和私钥（base64）", () => {

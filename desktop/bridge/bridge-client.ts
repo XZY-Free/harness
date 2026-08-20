@@ -1,5 +1,5 @@
 /**
- * V10 Phase 5：Agent Bridge WebSocket 客户端。
+ * Agent Bridge WebSocket 客户端。
  *
  * Desktop 端通过 WebSocket 连接到 Server，完成设备认证后接收 RPC 请求并执行。
  * 连接经过严格的状态机管理，仅 authenticated 状态可收发 RPC。
@@ -35,7 +35,7 @@ import {
   getResultSignPayload,
 } from "../../lib/desktop/rpc-envelope";
 import { NonceDeduplicator, validateRpcEnvelope } from "../../lib/desktop/rpc-security";
-import { signData } from "../../lib/desktop/signing";
+import { getAuthSignPayload, signData } from "../../lib/desktop/signing";
 import type { AiLockManager } from "../browser/ai-lock";
 import { executeActionCommand, executeReadCommand } from "./command-executor";
 import type { BrowserActionTarget, BrowserCommandTarget } from "./command-executor";
@@ -49,6 +49,11 @@ export interface BridgeClientConfig {
   serverUrl: string;
   /** 设备身份（含 deviceId 和 ed25519 密钥对） */
   deviceIdentity: DeviceIdentity;
+  /**
+   * 设备所属租户。来自 Server 注册响应，必须参与认证签名绑定。
+   * 无租户无法认证，构造前调用方应保证 identity.tenantId 非空。
+   */
+  tenantId: string;
   /** 设备名称（展示用） */
   deviceName: string;
   /** Desktop 应用版本 */
@@ -324,17 +329,25 @@ export class BridgeClient {
   }
 
   /**
-   * 处理 challenge：用设备私钥签名 challenge，发送 auth 消息。
+   * 处理 challenge：用设备私钥签名规范 payload（tenantId + deviceKey + challenge），发送 auth 消息。
+   *
+   * 签名必须绑定 tenantId，阻止跨租户重放；tenantId 取自 Server 注册响应（config.tenantId）。
    */
   private handleChallenge(challenge: string, serverPublicKey: string): void {
     this.serverPublicKeyBase64 = serverPublicKey;
-    const signature = signData(challenge, this.config.deviceIdentity.keyPair.privateKeyBase64);
+    const signPayload = getAuthSignPayload({
+      tenantId: this.config.tenantId,
+      deviceKey: this.config.deviceIdentity.deviceId,
+      challenge,
+    });
+    const signature = signData(signPayload, this.config.deviceIdentity.keyPair.privateKeyBase64);
     const authMessage: ClientMessage = {
       type: "auth",
       deviceId: this.config.deviceIdentity.deviceId,
       signature,
       version: this.config.deviceVersion,
       name: this.config.deviceName,
+      tenantId: this.config.tenantId,
       protocolVersion: PROTOCOL_VERSION,
     };
     this.send(authMessage);
@@ -476,7 +489,7 @@ export class BridgeClient {
   }
 
   /**
-   * 处理 lease 撤销：记录日志（Phase 5 不主动操作）。
+   * 处理 lease 撤销：记录日志（不主动操作）。
    */
   private handleLeaseRevoked(threadId: string, reason: string): void {
     this.config.aiLockManager?.revoke(threadId);

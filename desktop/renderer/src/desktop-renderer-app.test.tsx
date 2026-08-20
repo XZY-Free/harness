@@ -2,10 +2,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
+const { apiFetch, getDesktopBridge } = vi.hoisted(() => ({
+  apiFetch: vi.fn(),
+  getDesktopBridge: vi.fn(),
+}));
 
 vi.mock("@/lib/api-fetch", () => ({ apiFetch }));
-vi.mock("@/lib/desktop/capabilities", () => ({ getDesktopCapabilities: () => true }));
+vi.mock("@/lib/desktop/capabilities", () => ({
+  getDesktopCapabilities: () => true,
+  getDesktopBridge,
+}));
 vi.mock("@/components/thread/thread-page", () => ({
   ThreadPage: ({
     threadId,
@@ -141,5 +147,55 @@ describe("DesktopRendererApp", () => {
     render(<DesktopRendererApp />);
     const threadPage = await screen.findByTestId("desktop-thread-page");
     expect(threadPage.dataset.defaultModelRef).toBe("deepseek-v4-flash");
+  });
+
+  it("shell 加载成功后发起设备注册，成功后连接 Bridge（幂等、无视觉噪音）", async () => {
+    const register = vi
+      .fn()
+      .mockResolvedValue({ ok: true, tenantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" });
+    const connect = vi.fn();
+    getDesktopBridge.mockReturnValue({
+      device: { register },
+      bridge: { connect },
+    });
+    apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          viewer_id: "viewer-1",
+          threads: [{ id: "thread-1", title: "已有会话", primary_agent_id: "agent-1" }],
+          agents: [{ id: "agent-1", agent_key: "default", display_name: "助手" }],
+        }),
+      ),
+    );
+
+    window.history.replaceState(null, "", "/desktop/chat/6c34a4f3-1b47-4acb-9b2e-7bdbff3e04cf");
+    render(<DesktopRendererApp />);
+    await screen.findByTestId("desktop-thread-page");
+    await waitFor(() => expect(register).toHaveBeenCalledTimes(1));
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("设备注册失败时保持 disconnected，不连接 Bridge 也不打断页面", async () => {
+    const register = vi.fn().mockResolvedValue({ ok: false, code: "network_error" });
+    const connect = vi.fn();
+    getDesktopBridge.mockReturnValue({
+      device: { register },
+      bridge: { connect },
+    });
+    apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          viewer_id: "viewer-1",
+          threads: [{ id: "thread-1", title: "已有会话", primary_agent_id: "agent-1" }],
+          agents: [{ id: "agent-1", agent_key: "default", display_name: "助手" }],
+        }),
+      ),
+    );
+
+    window.history.replaceState(null, "", "/desktop/chat/6c34a4f3-1b47-4acb-9b2e-7bdbff3e04cf");
+    render(<DesktopRendererApp />);
+    await screen.findByTestId("desktop-thread-page");
+    await waitFor(() => expect(register).toHaveBeenCalledTimes(1));
+    expect(connect).not.toHaveBeenCalled();
   });
 });

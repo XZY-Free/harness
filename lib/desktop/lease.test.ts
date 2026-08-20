@@ -16,7 +16,7 @@ function makeLease(overrides: Partial<BrowserLease> = {}): BrowserLease {
   return {
     threadId: "thread-001",
     userId: "user-001",
-    deviceId: "dev-001",
+    deviceRecordId: "rec-001",
     acquiredAt: NOW,
     expiresAt: NOW + TTL,
     ...overrides,
@@ -52,14 +52,14 @@ describe("isLeaseValid()", () => {
 });
 
 describe("isLeaseHeldBy()", () => {
-  it("匹配 deviceId 返回 true", () => {
-    const lease = makeLease({ deviceId: "dev-001" });
-    expect(isLeaseHeldBy(lease, "dev-001")).toBe(true);
+  it("匹配 deviceRecordId 返回 true", () => {
+    const lease = makeLease({ deviceRecordId: "rec-001" });
+    expect(isLeaseHeldBy(lease, "rec-001")).toBe(true);
   });
 
-  it("不匹配 deviceId 返回 false", () => {
-    const lease = makeLease({ deviceId: "dev-001" });
-    expect(isLeaseHeldBy(lease, "dev-002")).toBe(false);
+  it("不匹配 deviceRecordId 返回 false", () => {
+    const lease = makeLease({ deviceRecordId: "rec-001" });
+    expect(isLeaseHeldBy(lease, "rec-002")).toBe(false);
   });
 });
 
@@ -117,7 +117,7 @@ describe("LeaseManager", () => {
 
     it("获取已存在的 lease", () => {
       const lm = new LeaseManager();
-      const result = lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
+      const result = lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(lm.getLease("thread-001")).toEqual(result.lease);
@@ -128,12 +128,12 @@ describe("LeaseManager", () => {
   describe("acquireLease()", () => {
     it("无 lease 时获取成功", () => {
       const lm = new LeaseManager();
-      const result = lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
+      const result = lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.lease.threadId).toBe("thread-001");
         expect(result.lease.userId).toBe("user-001");
-        expect(result.lease.deviceId).toBe("dev-001");
+        expect(result.lease.deviceRecordId).toBe("rec-001");
         expect(result.lease.acquiredAt).toBe(NOW);
         expect(result.lease.expiresAt).toBe(NOW + TTL);
       }
@@ -141,8 +141,8 @@ describe("LeaseManager", () => {
 
     it("同一设备重新获取自己的 lease 成功", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
-      const result = lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW + 1000);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
+      const result = lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW + 1000);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.lease.acquiredAt).toBe(NOW + 1000);
@@ -151,8 +151,8 @@ describe("LeaseManager", () => {
 
     it("已有有效 lease 时其他设备获取失败", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
-      const result = lm.acquireLease("thread-001", "user-002", "dev-002", TTL, NOW + 1000);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
+      const result = lm.acquireLease("thread-001", "user-002", "rec-002", TTL, NOW + 1000);
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.code).toBe("lease_held_by_other");
@@ -161,19 +161,19 @@ describe("LeaseManager", () => {
 
     it("过期 lease 自动清理后可获取", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
       // lease 已过期
-      const result = lm.acquireLease("thread-001", "user-002", "dev-002", TTL, NOW + TTL + 1000);
+      const result = lm.acquireLease("thread-001", "user-002", "rec-002", TTL, NOW + TTL + 1000);
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.lease.deviceId).toBe("dev-002");
+        expect(result.lease.deviceRecordId).toBe("rec-002");
       }
     });
 
     it("自定义 TTL 生效", () => {
       const lm = new LeaseManager();
       const customTtl = 10000;
-      const result = lm.acquireLease("thread-001", "user-001", "dev-001", customTtl, NOW);
+      const result = lm.acquireLease("thread-001", "user-001", "rec-001", customTtl, NOW);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.lease.expiresAt).toBe(NOW + customTtl);
@@ -184,28 +184,28 @@ describe("LeaseManager", () => {
   describe("releaseLease()", () => {
     it("持有设备可以释放", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
-      expect(lm.releaseLease("thread-001", "dev-001", NOW)).toBe(true);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
+      expect(lm.releaseLease("thread-001", "rec-001", NOW)).toBe(true);
       expect(lm.getLease("thread-001")).toBeNull();
     });
 
     it("非持有设备释放失败", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
-      expect(lm.releaseLease("thread-001", "dev-002", NOW)).toBe(false);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
+      expect(lm.releaseLease("thread-001", "rec-002", NOW)).toBe(false);
       expect(lm.getLease("thread-001")).not.toBeNull();
     });
 
     it("释放不存在的 lease 返回 false", () => {
       const lm = new LeaseManager();
-      expect(lm.releaseLease("thread-001", "dev-001", NOW)).toBe(false);
+      expect(lm.releaseLease("thread-001", "rec-001", NOW)).toBe(false);
     });
   });
 
   describe("revokeLease()", () => {
     it("强制撤销成功", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
       expect(lm.revokeLease("thread-001")).toBe(true);
       expect(lm.getLease("thread-001")).toBeNull();
     });
@@ -217,9 +217,9 @@ describe("LeaseManager", () => {
 
     it("撤销后其他设备可获取", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
       lm.revokeLease("thread-001");
-      const result = lm.acquireLease("thread-001", "user-002", "dev-002", TTL, NOW);
+      const result = lm.acquireLease("thread-001", "user-002", "rec-002", TTL, NOW);
       expect(result.ok).toBe(true);
     });
   });
@@ -228,9 +228,9 @@ describe("LeaseManager", () => {
     it("清理过期 lease", () => {
       const lm = new LeaseManager();
       // thread-001 使用短 TTL
-      lm.acquireLease("thread-001", "user-001", "dev-001", 1000, NOW);
+      lm.acquireLease("thread-001", "user-001", "rec-001", 1000, NOW);
       // thread-002 使用默认 TTL
-      lm.acquireLease("thread-002", "user-002", "dev-002", TTL, NOW);
+      lm.acquireLease("thread-002", "user-002", "rec-002", TTL, NOW);
       // NOW + 2000 时，thread-001 已过期，thread-002 未过期
       expect(lm.cleanupExpired(NOW + 2000)).toBe(1);
       expect(lm.getLease("thread-001")).toBeNull();
@@ -239,15 +239,15 @@ describe("LeaseManager", () => {
 
     it("无过期时返回 0", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
       expect(lm.cleanupExpired(NOW + 1000)).toBe(0);
     });
 
     it("清理所有过期 lease", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
-      lm.acquireLease("thread-002", "user-002", "dev-002", TTL, NOW);
-      lm.acquireLease("thread-003", "user-003", "dev-003", TTL, NOW);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
+      lm.acquireLease("thread-002", "user-002", "rec-002", TTL, NOW);
+      lm.acquireLease("thread-003", "user-003", "rec-003", TTL, NOW);
       expect(lm.cleanupExpired(NOW + TTL + 1000)).toBe(3);
     });
   });
@@ -255,16 +255,16 @@ describe("LeaseManager", () => {
   describe("getActiveLeases()", () => {
     it("返回所有未过期 lease", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
-      lm.acquireLease("thread-002", "user-002", "dev-002", TTL, NOW);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
+      lm.acquireLease("thread-002", "user-002", "rec-002", TTL, NOW);
       const active = lm.getActiveLeases();
       expect(active.length).toBe(2);
     });
 
     it("不返回过期 lease", () => {
       const lm = new LeaseManager();
-      lm.acquireLease("thread-001", "user-001", "dev-001", TTL, NOW);
-      lm.acquireLease("thread-002", "user-002", "dev-002", TTL, NOW);
+      lm.acquireLease("thread-001", "user-001", "rec-001", TTL, NOW);
+      lm.acquireLease("thread-002", "user-002", "rec-002", TTL, NOW);
       // 一个过期
       lm.cleanupExpired(NOW + TTL + 1000);
       const active = lm.getActiveLeases();

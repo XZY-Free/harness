@@ -1,6 +1,6 @@
-import { getDeviceByDeviceId, touchDevice } from "@/lib/db/desktop-device-queries";
+import { getDeviceByKey, touchDevice } from "@/lib/identity/device-queries";
 /**
- * ：Agent Bridge WebSocket 服务器。
+ * Agent Bridge WebSocket 服务器。
  *
  * 整合认证、设备注册表、lease 服务、RPC 分发等模块，提供完整的 WebSocket
  * 服务器实现。Server 启动时调用 start()，Desktop 通过 WebSocket 连接并完成
@@ -37,7 +37,7 @@ import { type DispatchParams, prepareDispatch } from "./rpc-dispatcher";
 import { routeRpc } from "./rpc-router";
 
 /**
- * ：BridgeServer 单例。
+ * BridgeServer 单例。
  *
  * instrumentation.ts 启动时 setBridgeServer(server)，工具层 getBridgeServer() 获取实例。
  * 开发/测试环境不启动 BridgeServer → getBridgeServer() 返回 null → 浏览器工具返回 desktop_unavailable。
@@ -178,12 +178,16 @@ export class BridgeServer {
    * 向指定设备发送 RPC 请求。
    *
    * 流程：
-   * 1. 查找设备（必须在线且已认证）
+   * 1. 查找设备（必须在线且已认证，按 Device.id 定位）
    * 2. 准备签名信封
    * 3. 发送给目标设备
    * 4. 等待对应 requestId 的响应
    *
-   * @param deviceId 目标设备 ID
+   * 内部路由用 deviceRecordId（Device.id）；信封 deviceId 字段仍是外部 deviceKey
+   * （Desktop 据此校验目标设备），由 deviceKey 参数传入。
+   *
+   * @param deviceRecordId 目标设备内部 ID（Device.id）
+   * @param deviceKey 目标设备外部 deviceKey（用于 RPC 信封 deviceId 字段）
    * @param command 命令字符串
    * @param payload 命令 payload
    * @param params.userId 用户 ID
@@ -194,7 +198,8 @@ export class BridgeServer {
    * @returns RPC 结果
    */
   async sendRpc(
-    deviceId: string,
+    deviceRecordId: string,
+    deviceKey: string,
     command: string,
     payload: unknown,
     params: {
@@ -208,7 +213,7 @@ export class BridgeServer {
     if (!this.running) {
       return { ok: false, code: "desktop_unavailable", message: "Bridge 未运行" };
     }
-    const dev = this.registry.getByDeviceId(deviceId);
+    const dev = this.registry.getByDeviceRecordId(deviceRecordId);
     if (!dev) {
       return { ok: false, code: "desktop_unavailable", message: "设备离线" };
     }
@@ -217,7 +222,7 @@ export class BridgeServer {
     }
     const now = Date.now();
     const dispatchParams: DispatchParams = {
-      deviceId,
+      deviceId: deviceKey,
       userId: params.userId,
       threadId: params.threadId,
       command,
@@ -270,7 +275,7 @@ export class BridgeServer {
   /**
    * 向 threadId 的 lease 持有设备发送 RPC 请求。
    *
-   * Phase 6：浏览器工具层调用此方法，无需手动查找 lease holder。
+   * 浏览器工具层调用此方法，无需手动查找 lease holder。
    * 内部复用 routeRpc 路由逻辑：lease 存在 + 有效 + userId 匹配 + 设备在线已认证。
    *
    * 双重强制：
@@ -312,26 +317,33 @@ export class BridgeServer {
     if (!route.ok) {
       return { ok: false, code: route.code, message: route.message };
     }
-    // ：发送 lease_locked 通知 Desktop acquire 本地锁（双重强制）
+    // 发送 lease_locked 通知 Desktop acquire 本地锁（双重强制）
     if (params.runId) {
       this.sendLeaseLocked({
-        deviceId: route.deviceId,
+        deviceRecordId: route.deviceRecordId,
+        deviceKey: route.deviceKey,
         threadId: params.threadId,
         userId: params.userId,
         runId: params.runId,
         now,
       });
     }
-    const result = await this.sendRpc(route.deviceId, params.command, params.payload, {
-      userId: params.userId,
-      threadId: params.threadId,
-      runId: params.runId ?? null,
-      approvalId: params.approvalId ?? null,
-    });
-    // ：RPC 完成后释放 Desktop 本地锁
+    const result = await this.sendRpc(
+      route.deviceRecordId,
+      route.deviceKey,
+      params.command,
+      params.payload,
+      {
+        userId: params.userId,
+        threadId: params.threadId,
+        runId: params.runId ?? null,
+        approvalId: params.approvalId ?? null,
+      },
+    );
+    // RPC 完成后释放 Desktop 本地锁
     if (params.runId) {
       this.sendLeaseReleased({
-        deviceId: route.deviceId,
+        deviceRecordId: route.deviceRecordId,
         threadId: params.threadId,
         runId: params.runId,
       });
@@ -341,22 +353,26 @@ export class BridgeServer {
 
   /**
    * 向 Desktop 发送 lease_locked 消息（通知 acquire 本地 AI 锁）。
+   *
+   * 内部按 deviceRecordId 定位设备；wire 消息 deviceId 字段为外部 deviceKey
+   * （Desktop 据此校验目标设备）。
    */
   private sendLeaseLocked(params: {
-    deviceId: string;
+    deviceRecordId: string;
+    deviceKey: string;
     threadId: string;
     userId: string;
     runId: string;
     now: number;
   }): void {
-    const dev = this.registry.getByDeviceId(params.deviceId);
+    const dev = this.registry.getByDeviceRecordId(params.deviceRecordId);
     if (!dev || !dev.authenticated) return;
     const ws = dev.ws as WebSocket;
     if (ws.readyState !== WebSocket.OPEN) return;
     const message: ServerMessage = {
       type: "lease_locked",
       threadId: params.threadId,
-      deviceId: params.deviceId,
+      deviceId: params.deviceKey,
       userId: params.userId,
       runId: params.runId,
       expiresAt: params.now + DEFAULT_RPC_TIMEOUT_MS,
@@ -378,11 +394,11 @@ export class BridgeServer {
    * 本地锁会通过 TTL 自然过期（默认 5 分钟），不会永久阻塞。
    */
   private sendLeaseReleased(params: {
-    deviceId: string;
+    deviceRecordId: string;
     threadId: string;
     runId: string;
   }): void {
-    const dev = this.registry.getByDeviceId(params.deviceId);
+    const dev = this.registry.getByDeviceRecordId(params.deviceRecordId);
     if (!dev || !dev.authenticated) return;
     const ws = dev.ws as WebSocket;
     if (ws.readyState !== WebSocket.OPEN) return;
@@ -419,7 +435,7 @@ export class BridgeServer {
       threadId: params.threadId,
       runId: params.runId,
       reason: params.reason,
-      deviceId: dev.deviceId,
+      deviceRecordId: dev.deviceRecordId,
       now,
     });
     if (result.cancelled) {
@@ -480,16 +496,18 @@ export class BridgeServer {
   }
 
   /**
-   * Phase 8：按 deviceId 主动断开已连接设备的 WebSocket。
+   * 按 (tenantId, deviceKey) 主动断开已连接设备的 WebSocket。
    *
    * 用于设备撤销场景——HTTP revoke route 更新 DB 后立即调用此方法，
    * 断开已建立的 WS 连接，避免 revoked 设备在重连前继续接收 RPC。
    * handleDisconnect 会自动清理 registry 和 pendingChallenges。
    *
+   * 必须按 (tenantId, deviceKey) 二元键定位，避免跨租户误踢同一 deviceKey 的其他设备。
+   *
    * @returns 设备在线并已断开返回 true，设备不在线返回 false
    */
-  kickDevice(deviceId: string): boolean {
-    const dev = this.registry.getByDeviceId(deviceId);
+  kickDevice(tenantId: string, deviceKey: string): boolean {
+    const dev = this.registry.getByKey(tenantId, deviceKey);
     if (!dev) return false;
     const ws = dev.ws as WebSocket;
     try {
@@ -537,22 +555,23 @@ export class BridgeServer {
       ws.close();
       return;
     }
-    // 查询 DB 中的设备记录
-    const device = await getDeviceByDeviceId(message.deviceId);
+    // 按 (tenantId, deviceKey) 二元键查询 DB 中的设备记录
+    const device = await getDeviceByKey(message.tenantId, message.deviceId);
     if (!device) {
       this.sendAuthFailed(ws, "desktop_unauthorized", "设备未注册");
       ws.close();
       return;
     }
-    if (device.status !== "active") {
+    if (device.deviceState !== "active") {
       this.sendAuthFailed(ws, "desktop_revoked", "设备已撤销");
       ws.close();
       return;
     }
-    // 验证签名
+    // 验证签名：绑定 tenantId + deviceKey + challenge，阻止跨租户/跨挑战重放
     const ok = verifyAuthResponse({
       challenge,
       signature: message.signature,
+      tenantId: message.tenantId,
       deviceId: message.deviceId,
       devicePublicKeyBase64: device.publicKey,
     });
@@ -561,11 +580,12 @@ export class BridgeServer {
       ws.close();
       return;
     }
-    // 刷新设备活动时间
-    await touchDevice(message.deviceId);
-    // 注册到 DeviceRegistry
+    // 刷新设备活动时间（按 tenantId + deviceKey）
+    await touchDevice(message.tenantId, message.deviceId);
+    // 注册到 DeviceRegistry（携带 tenantId，参与后续 kick/路由的二元键定位）
     this.registry.register(
       ws,
+      message.tenantId,
       message.deviceId,
       device.id,
       device.userId,
@@ -629,7 +649,7 @@ export class BridgeServer {
         };
         const pending = this.pendingRpcs.get(envelope.requestId);
         if (!pending) break;
-        // ：cancel 后到达的迟到 RPC 结果不进入 Agent 上下文
+        // cancel 后到达的迟到 RPC 结果不进入 Agent 上下文
         if (
           pending.runId &&
           this.cancelService.shouldDropRpcResult(pending.threadId, pending.runId)
@@ -658,22 +678,24 @@ export class BridgeServer {
           return;
         }
         const threadId = (message as { threadId: string }).threadId;
+        // 来自已认证 ws 的 lease 请求用 getByWs(ws) 的 Device.id（deviceRecordId），
+        // 不信任消息中的设备标识选择别人的设备。
         this.leaseService.acquireLease({
           threadId,
           userId: dev.userId,
-          deviceId: dev.deviceId,
+          deviceRecordId: dev.deviceRecordId,
           now: Date.now(),
         });
         break;
       }
       case "lease_release": {
-        // Desktop 释放 lease
+        // Desktop 释放 lease（按 Device.id 定位）
         const dev = this.registry.getByWs(ws);
         if (!dev || !dev.authenticated) {
           return;
         }
         const threadId = (message as { threadId: string }).threadId;
-        this.leaseService.releaseLease(threadId, dev.deviceId, Date.now());
+        this.leaseService.releaseLease(threadId, dev.deviceRecordId, Date.now());
         break;
       }
       case "cancel_command": {

@@ -1,5 +1,5 @@
 /**
- * V10 Phase 6：BridgeClient.handleRpc 命令分发测试。
+ * BridgeClient.handleRpc 命令分发测试。
  *
  * 验证 handleRpc 根据 isActionCommand 正确分发：
  * - 读取类命令（browser.getTabs 等）→ executeReadCommand → commandTarget
@@ -168,6 +168,7 @@ function createTestClient(
   const config = {
     serverUrl: "ws://localhost:0",
     deviceIdentity: identity,
+    tenantId: "tenant-test",
     deviceName: "test-device",
     deviceVersion: "0.0.0-test",
     commandTarget,

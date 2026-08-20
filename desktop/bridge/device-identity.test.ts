@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { KeychainAdapter } from "../storage/keychain";
 import {
+  DEVICE_ID_KEY,
   clearDeviceIdentity,
   createDeviceIdentity,
   deserializeIdentity,
@@ -10,7 +11,7 @@ import {
 } from "./device-identity";
 
 /**
- * V10 Phase 5：设备身份管理单元测试。
+ * 设备身份管理单元测试。
  *
  * 验证纯逻辑行为（使用真实 ed25519 密钥生成，禁止 mock crypto）：
  * - createDeviceIdentity 返回 UUID 格式 deviceId 和合法密钥对
@@ -29,8 +30,19 @@ const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 class MemoryKeychain implements KeychainAdapter {
   private store = new Map<string, string>();
   available = true;
+  /** 故障注入：该 key 的下一次 set 调用在写入前抛错 */
+  private failBeforeSetKey: string | null = null;
+
+  /** 配置下一次对指定 key 的 set 在写入前失败（模拟持久化中途失败） */
+  failBeforeSet(key: string): void {
+    this.failBeforeSetKey = key;
+  }
 
   async set(key: string, value: string): Promise<void> {
+    if (this.failBeforeSetKey === key) {
+      this.failBeforeSetKey = null;
+      throw new Error(`injected keychain set failure for key: ${key}`);
+    }
     this.store.set(key, value);
   }
 
@@ -47,7 +59,7 @@ class MemoryKeychain implements KeychainAdapter {
   }
 }
 
-describe("device-identity (V10 Phase 5)", () => {
+describe("device-identity", () => {
   describe("createDeviceIdentity", () => {
     it("返回 UUID 格式的 deviceId", () => {
       const identity = createDeviceIdentity();
@@ -91,6 +103,47 @@ describe("device-identity (V10 Phase 5)", () => {
       expect(restored?.deviceId).toBe(identity.deviceId);
       expect(restored?.keyPair.publicKeyBase64).toBe(identity.keyPair.publicKeyBase64);
       expect(restored?.keyPair.privateKeyBase64).toBe(identity.keyPair.privateKeyBase64);
+      expect(restored?.tenantId).toBe(identity.tenantId);
+    });
+
+    it("tenantId 序列化往返保留（注册后回填）", () => {
+      const identity = createDeviceIdentity();
+      identity.tenantId = "tenant-abc";
+      const restored = deserializeIdentity(serializeIdentity(identity));
+      expect(restored?.tenantId).toBe("tenant-abc");
+    });
+
+    it("缺 tenantId（undefined）拒绝加载，返回 null", () => {
+      const identity = createDeviceIdentity();
+      const obj = JSON.parse(serializeIdentity(identity));
+      // 置为 undefined 模拟缺失 tenantId（JSON.stringify 会丢弃 undefined 键）
+      obj.tenantId = undefined;
+      const restored = deserializeIdentity(JSON.stringify(obj));
+      // 身份没有显式 tenantId，不允许当作 null——调用方据此生成新身份重新注册
+      expect(restored).toBeNull();
+    });
+
+    it("tenantId 为 null 时合法（未注册身份）", () => {
+      const identity = createDeviceIdentity();
+      const obj = JSON.parse(serializeIdentity(identity));
+      obj.tenantId = null;
+      const restored = deserializeIdentity(JSON.stringify(obj));
+      expect(restored).not.toBeNull();
+      expect(restored?.tenantId).toBeNull();
+    });
+
+    it("tenantId 空字符串返回 null（非空合法值）", () => {
+      const identity = createDeviceIdentity();
+      const obj = JSON.parse(serializeIdentity(identity));
+      obj.tenantId = "";
+      expect(deserializeIdentity(JSON.stringify(obj))).toBeNull();
+    });
+
+    it("tenantId 非字符串类型返回 null（严格校验）", () => {
+      const identity = createDeviceIdentity();
+      const obj = JSON.parse(serializeIdentity(identity));
+      obj.tenantId = 12345;
+      expect(deserializeIdentity(JSON.stringify(obj))).toBeNull();
     });
 
     it("serializeIdentity 返回合法 JSON 字符串", () => {
@@ -208,7 +261,7 @@ describe("device-identity (V10 Phase 5)", () => {
     });
   });
 
-  describe("clearDeviceIdentity (Phase 8)", () => {
+  describe("clearDeviceIdentity()", () => {
     it("清除后 loadDeviceIdentity 返回 null", async () => {
       const kc = new MemoryKeychain();
       const identity = createDeviceIdentity();
@@ -237,6 +290,28 @@ describe("device-identity (V10 Phase 5)", () => {
       const loaded = await loadDeviceIdentity(kc);
       expect(loaded?.deviceId).toBe(second.deviceId);
       expect(loaded?.deviceId).not.toBe(first.deviceId);
+    });
+
+    it("第二次 set 失败后 loadDeviceIdentity 不应观察到新 tenantId", async () => {
+      const kc = new MemoryKeychain();
+      // 首次真实保存 tenantId=null 的初始身份
+      const identity = createDeviceIdentity();
+      expect(identity.tenantId).toBeNull();
+      await saveDeviceIdentity(kc, identity);
+
+      // 模拟注册：回填 tenantId
+      identity.tenantId = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+
+      // 故障注入：下一次 saveDeviceIdentity 的第二个 set（写入 device-id）在写入前失败
+      kc.failBeforeSet(DEVICE_ID_KEY);
+
+      // 保存必须抛错
+      await expect(saveDeviceIdentity(kc, identity)).rejects.toThrow();
+
+      // 真实 loadDeviceIdentity 必须仍是旧 tenantId=null，而非新租户
+      const loaded = await loadDeviceIdentity(kc);
+      expect(loaded?.deviceId).toBe(identity.deviceId);
+      expect(loaded?.tenantId).toBeNull();
     });
   });
 });

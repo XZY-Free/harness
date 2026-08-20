@@ -1,30 +1,38 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/auth", () => ({
-  getCurrentUserFromRequest: vi.fn(),
+vi.mock("@/lib/identity/resolver", () => ({
+  resolvePrincipal: vi.fn(),
   authErrorResponse: vi.fn(() => null),
 }));
-vi.mock("@/lib/db/desktop-device-queries", () => ({
+vi.mock("@/lib/identity/device-queries", () => ({
   registerDevice: vi.fn(),
 }));
 
-import { authErrorResponse, getCurrentUserFromRequest } from "@/lib/auth";
-import { registerDevice } from "@/lib/db/desktop-device-queries";
+import { registerDevice } from "@/lib/identity/device-queries";
+import { authErrorResponse, resolvePrincipal } from "@/lib/identity/resolver";
 import { POST } from "./route";
 
-const USER = { id: "user-1", email: "user@example.com" };
+const PRINCIPAL = {
+  tenantId: "tenant-1",
+  tenantKey: "t1",
+  userIdentityId: "user-1",
+  externalSubject: "ext-1",
+  email: "user@example.com",
+  displayName: null,
+  audience: "employee",
+};
 const DEVICE = {
   id: "record-1",
-  userId: USER.id,
-  deviceId: "device-123",
+  tenantId: PRINCIPAL.tenantId,
+  userId: PRINCIPAL.userIdentityId,
+  deviceKey: "device-123",
   publicKey: "cHVibGljLWtleQ==",
-  name: "MacBook Pro",
-  version: "0.1.0",
-  status: "active" as const,
+  deviceName: "MacBook Pro",
+  appVersion: "0.1.0",
+  deviceState: "active" as const,
   lastActiveAt: new Date(),
   revokedAt: null,
   createdAt: new Date(),
-  updatedAt: new Date(),
 };
 
 function request(body: unknown): Request {
@@ -35,41 +43,57 @@ function request(body: unknown): Request {
   });
 }
 
+/** 符合 registrationSchema 的请求体（deviceId/name/version 映射自正式字段）。 */
+const BODY = {
+  deviceId: DEVICE.deviceKey,
+  publicKey: DEVICE.publicKey,
+  name: DEVICE.deviceName,
+  version: DEVICE.appVersion,
+};
+
 describe("POST /api/desktop/devices/register", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getCurrentUserFromRequest).mockResolvedValue(USER as never);
+    vi.mocked(resolvePrincipal).mockResolvedValue(PRINCIPAL as never);
     vi.mocked(registerDevice).mockResolvedValue(DEVICE as never);
   });
 
-  it("使用当前登录用户绑定 Desktop 公钥", async () => {
+  it("使用当前主体（tenantId + userIdentityId）注册 Desktop 公钥", async () => {
     const response = await POST(
       request({
-        deviceId: DEVICE.deviceId,
+        deviceId: DEVICE.deviceKey,
         publicKey: DEVICE.publicKey,
-        name: DEVICE.name,
-        version: DEVICE.version,
+        name: DEVICE.deviceName,
+        version: DEVICE.appVersion,
       }),
     );
 
     expect(response.status).toBe(200);
+    // 正式字段映射：deviceId→deviceKey、name→deviceName、version→appVersion
     expect(registerDevice).toHaveBeenCalledWith({
-      userId: USER.id,
-      deviceId: DEVICE.deviceId,
+      tenantId: PRINCIPAL.tenantId,
+      userId: PRINCIPAL.userIdentityId,
+      deviceKey: DEVICE.deviceKey,
       publicKey: DEVICE.publicKey,
-      name: DEVICE.name,
-      version: DEVICE.version,
+      deviceName: DEVICE.deviceName,
+      appVersion: DEVICE.appVersion,
     });
     const json = await response.json();
-    expect(json.data).toEqual({ deviceId: DEVICE.deviceId, status: "active" });
+    expect(json.data).toEqual({
+      deviceId: DEVICE.deviceKey,
+      status: "active",
+      tenantId: PRINCIPAL.tenantId,
+    });
+    // 不暴露 publicKey 及内部 id
     expect(JSON.stringify(json)).not.toContain(DEVICE.publicKey);
+    expect(JSON.stringify(json)).not.toContain(DEVICE.id);
   });
 
   it("鉴权失败返回认证响应", async () => {
-    vi.mocked(getCurrentUserFromRequest).mockRejectedValue(new Error("unauthorized"));
+    vi.mocked(resolvePrincipal).mockRejectedValue(new Error("unauthorized"));
     vi.mocked(authErrorResponse).mockReturnValue(new Response(null, { status: 401 }));
 
-    const response = await POST(request(DEVICE));
+    const response = await POST(request(BODY));
 
     expect(response.status).toBe(401);
     expect(registerDevice).not.toHaveBeenCalled();
@@ -84,21 +108,33 @@ describe("POST /api/desktop/devices/register", () => {
     expect(registerDevice).not.toHaveBeenCalled();
   });
 
-  it("拒绝 deviceId 已绑定到其他用户", async () => {
+  it("拒绝 deviceKey 已绑定到其他用户", async () => {
     vi.mocked(registerDevice).mockResolvedValue({ ...DEVICE, userId: "other-user" } as never);
 
-    const response = await POST(request(DEVICE));
+    const response = await POST(request(BODY));
 
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe("device_binding_conflict");
   });
 
-  it("拒绝同一 deviceId 的公钥发生变化", async () => {
+  it("拒绝同一 deviceKey 的公钥发生变化", async () => {
     vi.mocked(registerDevice).mockResolvedValue({ ...DEVICE, publicKey: "other-key" } as never);
 
-    const response = await POST(request(DEVICE));
+    const response = await POST(request(BODY));
 
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe("device_binding_conflict");
+  });
+
+  it("拒绝已撤销设备重新激活", async () => {
+    vi.mocked(registerDevice).mockResolvedValue({
+      ...DEVICE,
+      deviceState: "revoked" as const,
+    } as never);
+
+    const response = await POST(request(BODY));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("device_revoked");
   });
 });

@@ -1,5 +1,5 @@
 /**
- * ：Desktop preload capability schema 和 IPC channel 定义。
+ * Desktop preload capability schema 和 IPC channel 定义。
  *
  * Desktop Electron 的 preload 脚本注入 `globalThis.__SNOW_DESKTOP__` 包含 capability
  * 信息。renderer 通过 `getDesktopCapabilities()` 读取后验证来源，才挂载 DesktopBrowserSurface。
@@ -21,9 +21,8 @@ export const DESKTOP_CAPABILITY_VERSION = 1 as const;
 /**
  * IPC channel 白名单。preload 只暴露这些 channel。
  *
- * Phase 3：应用生命周期和窗口控制。
- * Phase 4：Browser tab 操作（create/close/switch/navigate/setBounds/getTabs）。
- * Agent Bridge channel 在 追加。
+ * 应用生命周期和窗口控制、Browser tab 操作（create/close/switch/navigate/setBounds/getTabs）、
+ * Agent Bridge、本地任务操作等 channel 全部在此登记。
  */
 export const DESKTOP_IPC_CHANNELS = [
   /** renderer → main：获取 capability handshake */
@@ -38,6 +37,8 @@ export const DESKTOP_IPC_CHANNELS = [
   "desktop:window:getFrameState",
   /** renderer → main：获取设备绑定所需的本机公钥信息 */
   "desktop:device:getRegistration",
+  /** renderer → main：发起设备注册（main 用 Electron Session fetch 同源注册端点） */
+  "desktop:device:register",
   /** renderer → main：创建 browser tab */
   "desktop:browser:createTab",
   /** renderer → main：关闭 browser tab */
@@ -72,7 +73,7 @@ export const DESKTOP_IPC_CHANNELS = [
   "desktop:bridge:disconnect",
   /** renderer → main：订阅 Agent Bridge 状态变化 */
   "desktop:bridge:onStateChange",
-  /** renderer → main：退出登录（Phase 8：清除本地身份 + Browser Profile + 断开 Bridge） */
+  /** renderer → main：退出登录（清除本地身份 + Browser Profile + 断开 Bridge） */
   "desktop:auth:logout",
   /** renderer → main：检查更新 */
   "desktop:updater:checkForUpdates",
@@ -84,7 +85,7 @@ export const DESKTOP_IPC_CHANNELS = [
   "desktop:updater:getState",
   /** renderer → main：订阅更新状态变化 */
   "desktop:updater:onStateChange",
-  // ─── S10-W06：本地任务操作 channel ──────────────────────
+  // ─── 本地任务操作 channel ──────────────────────
   /** renderer → main：执行 Shell 命令（白名单 + 工作目录限制） */
   "desktop:shell:exec",
   /** renderer → main：读取文件（路径白名单内） */
@@ -155,14 +156,33 @@ export interface DesktopBrowserStateUpdate {
   activeTab: DesktopTabMetadata | null;
 }
 
-export interface DesktopDeviceRegistration {
+/**
+ * 设备注册请求体（由主进程用本机身份构造，POST 到 Server 注册端点）。
+ *
+ * 请求体不携带 tenantId——Server 从认证主体解析租户；响应的 tenantId 由主进程
+ * 校验后回填本地身份。local 额外保留 tenantId 供 renderer 读取注册状态。
+ */
+export interface DesktopDeviceRegistrationPayload {
   deviceId: string;
   publicKey: string;
   name: string;
   version: string;
+  /**
+   * 设备所属租户。来自 Server 注册响应（非本地默认）。
+   * 未注册为 null，此时无法建立认证连接。
+   */
+  tenantId: string | null;
 }
 
-// ─── S10-W06：本地任务操作类型 ──────────────────────────────
+/** 设备注册结果（renderer 可见）。 */
+export interface DesktopDeviceRegisterResult {
+  ok: boolean;
+  tenantId?: string;
+  code?: string;
+  message?: string;
+}
+
+// ─── 本地任务操作类型 ──────────────────────────────
 
 /** Desktop 操作类别（与 DesktopOperationCategory 一致）。 */
 export type DesktopOperationCategory =
@@ -289,7 +309,7 @@ export interface DesktopTestRunParams {
 }
 
 /**
- * S10-W06 本地任务操作桥（可选命名空间）。
+ * 本地任务操作桥（可选命名空间）。
  *
  * 旧 preload 若未注入这些命名空间，对应字段为 undefined；
  * use-desktop-operations Hook 在调用前需检查存在性，并降级为"当前 Desktop 不支持此操作"。
@@ -329,7 +349,8 @@ export interface DesktopRendererBridge {
     onFrameStateChange(callback: (state: DesktopWindowFrameState) => void): () => void;
   };
   device: {
-    getRegistration(): Promise<DesktopDeviceRegistration>;
+    getRegistration(): Promise<DesktopDeviceRegistrationPayload>;
+    register(): Promise<DesktopDeviceRegisterResult>;
   };
   bridge: {
     getState(): Promise<string>;
@@ -365,7 +386,7 @@ export interface DesktopRendererBridge {
     onTabUpdate(callback: (data: DesktopBrowserStateUpdate) => void): () => void;
   };
   /**
-   * S10-W06 本地任务操作命名空间。
+   * 本地任务操作命名空间。
    *
    * 可选：旧 preload 未注入时为 undefined。调用方需先检查存在性。
    */

@@ -1,5 +1,5 @@
 /**
- * ：Desktop 认证挑战逻辑。
+ * Desktop 认证挑战逻辑。
  *
  * Desktop 通过 WebSocket 连接到 Server 后，Server 发送随机 challenge，
  * Desktop 用本地长期 ed25519 私钥签名 challenge，Server 验证签名以确认设备身份。
@@ -10,7 +10,7 @@
  * - Server 启动时生成自己的签名密钥对，用于后续 RPC 信封签名
  */
 import { randomBytes } from "node:crypto";
-import { generateDeviceKeyPair, verifySignature } from "../desktop/signing";
+import { generateDeviceKeyPair, getAuthSignPayload, verifySignature } from "../desktop/signing";
 
 /**
  * 生成认证挑战（base64，32 字节随机）。
@@ -24,34 +24,45 @@ export function generateChallenge(): string {
 /**
  * 验证 Desktop 的认证响应。
  *
- * Desktop 用长期 ed25519 私钥签名 challenge，Server 用 DB 中存储的设备公钥验签。
+ * Desktop 用长期 ed25519 私钥签名 `getAuthSignPayload(tenantId, deviceKey, challenge)`
+ * （规范 payload），Server 用 DB 中按 (tenantId, deviceKey) 查到的设备公钥验签。
+ * 签名绑定 tenantId + deviceKey + challenge，阻止跨租户/跨挑战重放。
  * 签名验证失败或参数无效均返回 false（保守默认：拒绝）。
  *
  * @param params.challenge Server 发送的 challenge
  * @param params.signature Desktop 返回的签名
- * @param params.deviceId 设备 ID（仅用于上下文，不参与签名验证）
+ * @param params.tenantId 设备所属租户（必须与设备记录一致，且参与验签）
+ * @param params.deviceId 设备标识（即正式模型的 deviceKey，参与验签）
  * @param params.devicePublicKeyBase64 从 DB 查询的设备公钥
  * @returns 验证通过返回 true，失败返回 false
  */
 export function verifyAuthResponse(params: {
   challenge: string;
   signature: string;
+  tenantId: string;
   deviceId: string;
   devicePublicKeyBase64: string;
 }): boolean {
-  const { challenge, signature, devicePublicKeyBase64 } = params;
-  // 参数基础校验：challenge 和 signature 必须为非空字符串
+  const { challenge, signature, tenantId, deviceId, devicePublicKeyBase64 } = params;
+  // 参数基础校验：challenge / tenantId / deviceId / signature 必须为非空字符串
   if (typeof challenge !== "string" || challenge.length === 0) {
     return false;
   }
   if (typeof signature !== "string" || signature.length === 0) {
     return false;
   }
+  if (typeof tenantId !== "string" || tenantId.length === 0) {
+    return false;
+  }
+  if (typeof deviceId !== "string" || deviceId.length === 0) {
+    return false;
+  }
   if (typeof devicePublicKeyBase64 !== "string" || devicePublicKeyBase64.length === 0) {
     return false;
   }
+  const payload = getAuthSignPayload({ tenantId, deviceKey: deviceId, challenge });
   try {
-    return verifySignature(challenge, signature, devicePublicKeyBase64);
+    return verifySignature(payload, signature, devicePublicKeyBase64);
   } catch {
     // 签名验证抛错（公钥或签名格式无效）视为验证失败
     return false;

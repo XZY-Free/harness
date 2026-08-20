@@ -1,7 +1,7 @@
 /**
- * V10 Phase 6-5：BridgeServer 安全集成测试。
+ * BridgeServer 安全集成测试。
  *
- * 验证 Phase 6-5 关键安全行为：
+ * 验证关键安全行为：
  * - sendRpcToThread 对已 cancel 的 runId 返回 interrupted（阻止迟到 RPC 进入 Agent 上下文）
  * - sendRpcToThread 无 lease 时返回 desktop_unavailable
  * - cancel 后到达的迟到 RPC 结果被丢弃（不 resolve 给调用方）
@@ -42,7 +42,7 @@ const UID = "user-1";
 const RUN1 = "run-1";
 const RUN2 = "run-2";
 
-describe("BridgeServer Phase 6-5 安全集成", () => {
+describe("BridgeServer 安全集成", () => {
   let server: BridgeServer;
   let port: number;
 
@@ -232,11 +232,11 @@ describe("BridgeServer Phase 6-5 安全集成", () => {
     });
   });
 
-  // ─── Phase 8：kickDevice 主动断开 ─────────────────────────
+  // ─── kickDevice 主动断开 ─────────────────────────
 
-  describe("kickDevice", () => {
+  describe("kickDevice(tenantId, deviceKey)", () => {
     it("设备不在线时返回 false", () => {
-      expect(server.kickDevice("non-existent-device")).toBe(false);
+      expect(server.kickDevice("tenant-001", "non-existent-device")).toBe(false);
     });
 
     it("设备在线时调用 ws.close 并返回 true", async () => {
@@ -249,19 +249,19 @@ describe("BridgeServer Phase 6-5 安全集成", () => {
         registry: {
           register: (
             ws: unknown,
+            tenantId: string,
             deviceId: string,
             recordId: string,
             userId: string,
             key: string,
           ) => unknown;
           markAuthenticated: (ws: unknown) => boolean;
-          getByDeviceId: (deviceId: string) => { ws: unknown; deviceId: string } | null;
         };
       };
-      serverInternals.registry.register(fakeWs, "dev-kick-1", "rec-1", UID, "pk");
+      serverInternals.registry.register(fakeWs, "tenant-001", "dev-kick-1", "rec-1", UID, "pk");
       serverInternals.registry.markAuthenticated(fakeWs);
 
-      const result = server.kickDevice("dev-kick-1");
+      const result = server.kickDevice("tenant-001", "dev-kick-1");
       expect(result).toBe(true);
       expect(fakeWs.close).toHaveBeenCalledTimes(1);
       // 验证 close 调用参数：close(code, reason)
@@ -279,6 +279,7 @@ describe("BridgeServer Phase 6-5 安全集成", () => {
         registry: {
           register: (
             ws: unknown,
+            tenantId: string,
             deviceId: string,
             recordId: string,
             userId: string,
@@ -287,12 +288,41 @@ describe("BridgeServer Phase 6-5 安全集成", () => {
           markAuthenticated: (ws: unknown) => boolean;
         };
       };
-      serverInternals.registry.register(fakeWs, "dev-kick-2", "rec-2", UID, "pk");
+      serverInternals.registry.register(fakeWs, "tenant-001", "dev-kick-2", "rec-2", UID, "pk");
       serverInternals.registry.markAuthenticated(fakeWs);
 
       // 不抛错，返回 true（ws 异常不阻断 kick 流程）
-      expect(() => server.kickDevice("dev-kick-2")).not.toThrow();
-      expect(server.kickDevice("dev-kick-2")).toBe(true);
+      expect(() => server.kickDevice("tenant-001", "dev-kick-2")).not.toThrow();
+      expect(server.kickDevice("tenant-001", "dev-kick-2")).toBe(true);
+    });
+
+    it("踢错租户的设备返回 false（跨租户隔离，不误踢）", async () => {
+      const fakeWsA = { close: vi.fn(), readyState: 1 };
+      const serverInternals = server as unknown as {
+        registry: {
+          register: (
+            ws: unknown,
+            tenantId: string,
+            deviceId: string,
+            recordId: string,
+            userId: string,
+            key: string,
+          ) => unknown;
+          markAuthenticated: (ws: unknown) => boolean;
+        };
+      };
+      // 租户 A 在线一台 deviceKey="shared-dev" 的设备
+      serverInternals.registry.register(fakeWsA, "tenant-A", "shared-dev", "rec-A", UID, "pk");
+      serverInternals.registry.markAuthenticated(fakeWsA);
+
+      // 用错误的租户（tenant-B）踢 → getByKey 返回 null → false，A 的 ws 不被关闭
+      const wrongTenant = server.kickDevice("tenant-B", "shared-dev");
+      expect(wrongTenant).toBe(false);
+      expect(fakeWsA.close).not.toHaveBeenCalled();
+      // 用正确的租户踢 → true，关闭 A 的 ws
+      const rightTenant = server.kickDevice("tenant-A", "shared-dev");
+      expect(rightTenant).toBe(true);
+      expect(fakeWsA.close).toHaveBeenCalledTimes(1);
     });
   });
 });

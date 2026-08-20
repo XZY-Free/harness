@@ -1,5 +1,5 @@
 /**
- * V10 Phase 5：LeaseService 测试。
+ * LeaseService 测试。
  */
 import { DeviceRegistry } from "@/lib/desktop-bridge/device-registry";
 import { type LeaseAcquireResult, LeaseService } from "@/lib/desktop-bridge/lease-service";
@@ -8,12 +8,13 @@ import { describe, expect, it } from "vitest";
 
 const NOW = 1700000000000;
 const TTL = DEFAULT_LEASE_TTL_MS;
+const TENANT = "tenant-001";
 
 function setup(): { registry: DeviceRegistry; lease: LeaseService; ws: object } {
   const registry = new DeviceRegistry();
   const lease = new LeaseService(registry);
   const ws = {};
-  registry.register(ws, "dev-001", "rec-001", "user-001", "server-pk");
+  registry.register(ws, TENANT, "dev-001", "rec-001", "user-001", "server-pk");
   registry.markAuthenticated(ws);
   return { registry, lease, ws };
 }
@@ -25,14 +26,14 @@ describe("LeaseService", () => {
       const result = lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.lease.threadId).toBe("thread-001");
         expect(result.lease.userId).toBe("user-001");
-        expect(result.lease.deviceId).toBe("dev-001");
+        expect(result.lease.deviceRecordId).toBe("rec-001");
         expect(result.lease.acquiredAt).toBe(NOW);
         expect(result.lease.expiresAt).toBe(NOW + TTL);
       }
@@ -44,7 +45,7 @@ describe("LeaseService", () => {
       const result = lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-002",
+        deviceRecordId: "rec-002",
         now: NOW,
       });
       expect(result.ok).toBe(false);
@@ -59,12 +60,12 @@ describe("LeaseService", () => {
       const registry = new DeviceRegistry();
       const lease = new LeaseService(registry);
       const ws = {};
-      registry.register(ws, "dev-001", "rec-001", "user-001", "pk");
+      registry.register(ws, TENANT, "dev-001", "rec-001", "user-001", "pk");
       // 不调用 markAuthenticated
       const result = lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       expect(result.ok).toBe(false);
@@ -77,20 +78,20 @@ describe("LeaseService", () => {
       const { registry, lease } = setup();
       // 注册第二个设备
       const ws2 = {};
-      registry.register(ws2, "dev-002", "rec-002", "user-001", "pk");
+      registry.register(ws2, TENANT, "dev-002", "rec-002", "user-001", "pk");
       registry.markAuthenticated(ws2);
       // dev-001 先获取
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       // dev-002 尝试获取同一 thread
       const result = lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-002",
+        deviceRecordId: "rec-002",
         now: NOW + 1000,
       });
       expect(result.ok).toBe(false);
@@ -104,13 +105,13 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       const result = lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW + 1000,
       });
       expect(result.ok).toBe(true);
@@ -124,7 +125,7 @@ describe("LeaseService", () => {
       const result = lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
         ttlMs: 10000,
       });
@@ -139,7 +140,7 @@ describe("LeaseService", () => {
       const result = lease.acquireLease({
         threadId: "thread-001",
         userId: "user-002",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       expect(result.ok).toBe(false);
@@ -153,25 +154,25 @@ describe("LeaseService", () => {
     it("只有持有设备可以释放", () => {
       const { registry, lease } = setup();
       const ws2 = {};
-      registry.register(ws2, "dev-002", "rec-002", "user-001", "pk");
+      registry.register(ws2, TENANT, "dev-002", "rec-002", "user-001", "pk");
       registry.markAuthenticated(ws2);
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       // 非持有设备释放失败
-      expect(lease.releaseLease("thread-001", "dev-002", NOW)).toBe(false);
+      expect(lease.releaseLease("thread-001", "rec-002", NOW)).toBe(false);
       // 持有设备释放成功
-      expect(lease.releaseLease("thread-001", "dev-001", NOW)).toBe(true);
+      expect(lease.releaseLease("thread-001", "rec-001", NOW)).toBe(true);
       // lease 已释放
       expect(lease.getLeaseHolder("thread-001")).toBeNull();
     });
 
     it("不存在的 lease 释放返回 false", () => {
       const { lease } = setup();
-      expect(lease.releaseLease("thread-001", "dev-001", NOW)).toBe(false);
+      expect(lease.releaseLease("thread-001", "rec-001", NOW)).toBe(false);
     });
   });
 
@@ -181,10 +182,10 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
-      expect(lease.holdsLease("thread-001", "dev-001", NOW)).toBe(true);
+      expect(lease.holdsLease("thread-001", "rec-001", NOW)).toBe(true);
     });
 
     it("非持有设备返回 false", () => {
@@ -192,10 +193,10 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
-      expect(lease.holdsLease("thread-001", "dev-002", NOW)).toBe(false);
+      expect(lease.holdsLease("thread-001", "rec-002", NOW)).toBe(false);
     });
 
     it("过期 lease 返回 false", () => {
@@ -203,17 +204,17 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
         ttlMs: 1000,
       });
       // NOW + 2000 时 lease 已过期
-      expect(lease.holdsLease("thread-001", "dev-001", NOW + 2000)).toBe(false);
+      expect(lease.holdsLease("thread-001", "rec-001", NOW + 2000)).toBe(false);
     });
 
     it("无 lease 返回 false", () => {
       const { lease } = setup();
-      expect(lease.holdsLease("thread-001", "dev-001", NOW)).toBe(false);
+      expect(lease.holdsLease("thread-001", "rec-001", NOW)).toBe(false);
     });
   });
 
@@ -223,12 +224,12 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       const holder = lease.getLeaseHolder("thread-001");
       expect(holder).not.toBeNull();
-      expect(holder?.deviceId).toBe("dev-001");
+      expect(holder?.deviceRecordId).toBe("rec-001");
     });
 
     it("无 lease 返回 null", () => {
@@ -243,7 +244,7 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       expect(lease.revokeLease("thread-001")).toBe(true);
@@ -262,14 +263,14 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
         ttlMs: 1000,
       });
       lease.acquireLease({
         threadId: "thread-002",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
         ttlMs: 100000,
       });
@@ -283,7 +284,7 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       expect(lease.cleanupExpired(NOW + 1000)).toBe(0);
@@ -296,7 +297,7 @@ describe("LeaseService", () => {
       const result: LeaseAcquireResult = lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       expect(result.ok).toBe(true);
@@ -311,7 +312,7 @@ describe("LeaseService", () => {
       const result: LeaseAcquireResult = lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-002",
+        deviceRecordId: "rec-002",
         now: NOW,
       });
       expect(result.ok).toBe(false);
@@ -333,14 +334,14 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       expect(lease.getActiveLeaseCount()).toBe(1);
       lease.acquireLease({
         threadId: "thread-002",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       expect(lease.getActiveLeaseCount()).toBe(2);
@@ -351,11 +352,11 @@ describe("LeaseService", () => {
       lease.acquireLease({
         threadId: "thread-001",
         userId: "user-001",
-        deviceId: "dev-001",
+        deviceRecordId: "rec-001",
         now: NOW,
       });
       expect(lease.getActiveLeaseCount()).toBe(1);
-      lease.releaseLease("thread-001", "dev-001", NOW);
+      lease.releaseLease("thread-001", "rec-001", NOW);
       expect(lease.getActiveLeaseCount()).toBe(0);
     });
   });

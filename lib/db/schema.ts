@@ -1983,62 +1983,6 @@ export type ThreadRunSkill = InferSelectModel<typeof threadRunSkill>;
 // Desktop 浏览器的 Profile / Session / Download 由 Desktop 本地 SQLite
 // 管理（Phase 3+），不经 Server MySQL。
 
-// ─── Desktop 设备绑定 ───────────────────────────
-//
-// Desktop 应用首次启动绑定设备时向 Server 注册一行：deviceId（Desktop 本地生成）、
-// ed25519 公钥（base64）、name（设备名）、version（应用版本）。
-// 长期设备私钥只存 Desktop Keychain（Secure Enclave），**不写 DB**（约束 6）。
-// Server 仅记录公钥用于验签 + 状态机：active / revoked（撤销）。
-// Desktop 每次 launch 调 touchDevice 刷新 lastActiveAt；调 revokeDevice 撤销。
-
-/**
- * ：Desktop 设备绑定。
- *
- * 记录已绑定的 Desktop 设备公钥、userId、版本和撤销状态。
- * 长期设备私钥只存 Desktop Keychain，不写 DB。
- */
-export const DESKTOP_DEVICE_STATUSES = ["active", "revoked"] as const;
-export type DesktopDeviceStatus = (typeof DESKTOP_DEVICE_STATUSES)[number];
-
-export const desktopDevice = mysqlTable(
-  "DesktopDevice",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    userId: varchar("userId", { length: 36 })
-      .notNull()
-      .references(() => user.id),
-    // Desktop 本地生成的设备标识（uuid 或稳定硬件指纹）
-    deviceId: varchar("deviceId", { length: 128 }).notNull(),
-    // ed25519 公钥 base64
-    publicKey: text("publicKey").notNull(),
-    // 设备名称（如 "MacBook Pro"）
-    name: varchar("name", { length: 256 }).notNull(),
-    // Desktop 应用版本
-    version: varchar("version", { length: 32 }).notNull(),
-    status: mysqlEnum("status", DESKTOP_DEVICE_STATUSES).notNull().default("active"),
-    lastActiveAt: datetime("lastActiveAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    // 撤销时间，null = 未撤销
-    revokedAt: datetime("revokedAt", { mode: "date" }),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    userIdIdx: index("DesktopDevice_userId_idx").on(t.userId),
-    deviceIdUq: uniqueIndex("DesktopDevice_deviceId_uq").on(t.deviceId),
-    statusIdx: index("DesktopDevice_status_idx").on(t.status),
-  }),
-);
-export type DesktopDevice = InferSelectModel<typeof desktopDevice>;
-
 // ─── Schema（阶段 2 起拆入身份、授权、幂等、审计表组）─────────
 export * from "@/lib/persistence/schema/identity";
 export * from "@/lib/runtime/persistence/runtime-conformance-run-record";

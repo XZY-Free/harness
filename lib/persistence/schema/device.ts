@@ -1,17 +1,18 @@
 /**
- * 设备 schema：从 DesktopDevice 迁移的多端可信设备身份。
+ * 设备 schema：多端可信设备身份。
  *
- * 阶段 2（）：建立 Desktop 请求的设备签名校验与租户/员工绑定。
+ * 建立设备签名校验与租户/员工绑定。设备唯一键为 (tenantId, deviceKey)，
+ * 同一 deviceKey 可在不同租户独立注册，互不影响。
  *
- * 与 DesktopDevice 的差异（10-core-data-model.md 、§10 迁移映射）：
- * - 新增 tenantId（缺失，必填）。
- * - deviceId → deviceKey，并改为 UNIQUE(tenantId, deviceKey)（V10 是全局 UNIQUE(deviceId)）。
- * - name → deviceName、version → appVersion。
- * - status → deviceState（公共字段规则禁止裸 status 列，10-core-data-model.md:28）。
- * - userId 引用 UserIdentity 而非旧 User 表（不再直接引用旧 User 表）。
+ * 字段规则：
+ * - tenantId：必填，参与唯一键。
+ * - deviceKey：租户内稳定唯一键（原 deviceId），UNIQUE(tenantId, deviceKey)。
+ * - deviceName / appVersion：展示与版本信息（原 name / version）。
+ * - deviceState：active（可签名）/ revoked（撤销后不可恢复），禁止裸 status 列。
+ * - userId：引用 UserIdentity 稳定 id。
  *
- * 私钥只在 Desktop Keychain，不写 DB（与 V10 一致）。
- * 事实源：docs/architecture/persistence.md 。
+ * 私钥只在 Desktop Keychain，不写 DB。
+ * 事实源：docs/architecture/persistence.md。
  */
 import { randomUUID } from "node:crypto";
 import { tenant, userIdentity } from "@/lib/persistence/schema/identity";
@@ -54,7 +55,7 @@ export const device = mysqlTable(
     lastActiveAt: datetime("lastActiveAt", { mode: "date", fsp: 3 })
       .notNull()
       .$defaultFn(() => new Date()),
-    /** 撤销时间；null = 未撤销。撤销后不可恢复（10-core-data-model.md:46）。 */
+    /** 撤销时间；null = 未撤销。撤销后不可恢复。 */
     revokedAt: datetime("revokedAt", { mode: "date" }),
     createdAt: datetime("createdAt", { mode: "date" })
       .notNull()
