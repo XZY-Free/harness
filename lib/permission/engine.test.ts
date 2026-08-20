@@ -476,15 +476,10 @@ describe("buildDefaultRules", () => {
     const denyBuild = rules.filter(
       (r) => r.toolPattern === "tool.runBuild" && r.decision === "deny",
     );
-    // 审计修复：commandDenyList 镜像到 tool.startBackgroundTask deny
-    const denyBg = rules.filter(
-      (r) => r.toolPattern === "tool.startBackgroundTask" && r.decision === "deny",
-    );
     const asks = rules.filter((r) => r.decision === "ask");
     expect(denyWrite.length).toBe(defaultPolicyConfig.protectedPaths.length);
     expect(denyCmd.length).toBe(defaultPolicyConfig.commandDenyList.length);
     expect(denyBuild.length).toBe(defaultPolicyConfig.commandDenyList.length);
-    expect(denyBg.length).toBe(defaultPolicyConfig.commandDenyList.length);
     expect(asks.map((r) => r.toolPattern).sort()).toEqual([
       "tool.applyPatch",
       "tool.createPullRequest",
@@ -498,8 +493,6 @@ describe("buildDefaultRules", () => {
       "tool.installDependencies",
       "tool.multiEditFile",
       "tool.rollback",
-      "tool.spawnSubagent",
-      "tool.startBackgroundTask",
     ]);
   });
 });

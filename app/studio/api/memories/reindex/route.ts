@@ -12,7 +12,7 @@ import type { NextRequest } from "next/server";
  *
  * 权限：policy.write（admin 级操作,member 无权触发全量 reindex）。
  * 同步小批量执行（reindexMemories 内部逐个 indexMemory）,大记忆库会慢但可靠。
- * 后续可改后台任务异步执行（对齐 background-task-registry 模式）。
+ * 后续可改后台任务异步执行。
  */
 export async function POST(req: NextRequest) {
   const r = await requirePermission(req, "policy.write");

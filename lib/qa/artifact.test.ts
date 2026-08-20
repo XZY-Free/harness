@@ -6,20 +6,20 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
  * V3.6 Stage A：QA 证据落盘 / 路径 / 事件 payload 单测。
- * 路径解析复用 backgroundTaskConfig.hostLogDir（设临时目录隔离）。
+ * 路径解析复用 runtimeEvidenceConfig.hostDir（设临时目录隔离）。
  */
 
 const TEST_LOG_DIR = resolve(".test-qa-artifacts");
-const origLogDir = process.env.SNOW_BG_TASK_HOST_LOG_DIR;
+const origEvidenceDir = process.env.SNOW_RUNTIME_EVIDENCE_DIR;
 const TID = "qa-artifact-thread";
 
 beforeEach(async () => {
-  process.env.SNOW_BG_TASK_HOST_LOG_DIR = TEST_LOG_DIR;
+  process.env.SNOW_RUNTIME_EVIDENCE_DIR = TEST_LOG_DIR;
   await rm(TEST_LOG_DIR, { recursive: true, force: true });
 });
 
 afterEach(async () => {
-  process.env.SNOW_BG_TASK_HOST_LOG_DIR = origLogDir;
+  process.env.SNOW_RUNTIME_EVIDENCE_DIR = origEvidenceDir;
   await rm(TEST_LOG_DIR, { recursive: true, force: true });
 });
 
@@ -36,13 +36,13 @@ import {
 } from "@/lib/qa/artifact";
 
 describe("路径解析", () => {
-  it("resolveQaDir = hostLogDir/{threadId}/qa", () => {
+  it("resolveQaDir = hostDir/{threadId}/qa", () => {
     expect(resolveQaDir(TID)).toBe(resolve(TEST_LOG_DIR, TID, "qa"));
   });
   it("resolveQaPath 追加文件名", () => {
     expect(resolveQaPath(TID, "chk1.json")).toBe(resolve(TEST_LOG_DIR, TID, "qa", "chk1.json"));
   });
-  it("relQaPath 不暴露绝对路径，相对 hostLogDir", () => {
+  it("relQaPath 不暴露绝对路径，相对 hostDir", () => {
     expect(relQaPath(TID, "chk1.png")).toBe(`${TID}/qa/chk1.png`);
   });
 });

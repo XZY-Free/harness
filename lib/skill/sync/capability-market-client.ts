@@ -2,7 +2,7 @@
  * capability-market 同步源 HTTP 客户端（02 文档 §二、§三）。
  *
  * 只调用 `/api/capabilities` 族接口,不调用旧 `/api/skills`、`/files`、`skill-access-events`。
- * 仅服务后台手动同步（lib/skill/sync/sync-service）,运行时（chat/resolver/tools/thread-runner）
+ * 仅服务后台手动同步（lib/skill/sync/sync-service）,运行时（chat/resolver/tools）
  * 永远不引用本模块。
  *
  * 失败语义（fail-closed）：endpoint 未配置 / 非 2xx / 超时 / 响应非法 → 抛错,

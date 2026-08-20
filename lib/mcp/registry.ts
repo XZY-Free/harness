@@ -151,7 +151,7 @@ export async function closeClient(name: string): Promise<void> {
   }
 }
 
-/** 关闭全部 client（进程退出清理，对齐 closeAllBackgroundTasks 模式）。 */
+/** 关闭全部 client（进程退出清理）。 */
 export async function closeAllClients(): Promise<void> {
   const names = [...pool.keys()];
   await Promise.all(names.map((n) => closeClient(n)));

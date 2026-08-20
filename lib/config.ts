@@ -275,22 +275,6 @@ export const modelFilterConfig = {
 } as const;
 
 /**
- * 工具超时统一配置。
- *
- * - `defaultMs`：execute 类工具未在元数据声明 defaultTimeoutMs 时的全局默认（30s）。
- * - `maxMs`：所有工具超时硬上限（5min），resolveToolTimeoutMs 取 min(caller, default, max)，
- * 防单个工具超时配置过大拖垮 thread-runner reaper（5min）。
- */
-export const toolTimeoutConfig = {
-  get defaultMs(): number {
-    return Number.parseInt(optionalEnv("SNOW_TOOL_TIMEOUT_DEFAULT_MS", "30000"), 10);
-  },
-  get maxMs(): number {
-    return Number.parseInt(optionalEnv("SNOW_TOOL_TIMEOUT_MAX_MS", "300000"), 10);
-  },
-} as const;
-
-/**
  * host exec 沙箱配置（Linux bubblewrap）。
  *
  * - `mode`：off（默认，开发信任环境）/ on（强制开启，bwrap 不可用则 fail-open 原样执行）/ auto（bwrap 可用则开启）。
@@ -327,8 +311,8 @@ export const skillsConfig = {
 /**
  * capability-market 同步源配置（02 文档 §八）。
  *
- * capability-market 仅作为后台手动同步的上游来源,运行时（chat / resolver / tools /
- * thread-runner）不访问。配置缺失时同步 API 明确失败,运行时不受影响。
+ * capability-market 仅作为后台手动同步的上游来源,运行时（chat / resolver / tools）
+ * 不访问。配置缺失时同步 API 明确失败,运行时不受影响。
  *
  * endpoint 语义：`SNOW_CAPABILITY_MARKET_ENDPOINT` 是 **API base**（如
  * `http://localhost:3000/api`），同步客户端在此后追加 `/capabilities` 等子路径。
@@ -520,38 +504,6 @@ export const quotaConfig = {
 } as const;
 
 /**
- * 子代理专属资源配额覆盖（只能比父 thread 收紧）。
- *
- * 现状（修复前）：buildSubagentTools 直接复用父 thread 的 runtime/quota，子代理 runCommand/runTests
- * 用父 quota，无独立资源约束，单子代理可耗尽父进程资源。
- *
- * 修复：buildSubagentTools 传本配置作为 resolveRuntimes 的 quotaOverride，构造子代理专属
- * execution runtime 实例（独立 quota）。host 模式下 exec 命令经 wrapWithHostRlimits(command, 子代理 quota)
- * 施加独立 prlimit（pids/nofile 硬限），与父进程隔离；container 模式子代理复用父 container
- * （cgroup 限额在容器启动时已定，子代理在其内受父 container 限额约束 + HEAVY_COMMAND_TOOLS 互斥）。
- *
- * 默认值比 quotaConfig 收紧一档（pids 128/nofile 512/timeout 30s/log 512KB），经 resolveQuota
- * 的 tightenQuota 合并，无法放宽父配额。
- */
-export const subagentQuotaConfig = {
-  get pidsLimit(): number {
-    return Number.parseInt(optionalEnv("SNOW_SUBAGENT_QUOTA_PIDS_LIMIT", "128"), 10);
-  },
-  get openFilesLimit(): number {
-    return Number.parseInt(optionalEnv("SNOW_SUBAGENT_QUOTA_OPEN_FILES_LIMIT", "512"), 10);
-  },
-  get timeoutMs(): number {
-    return Number.parseInt(optionalEnv("SNOW_SUBAGENT_QUOTA_TIMEOUT_MS", "30000"), 10);
-  },
-  get logCapBytes(): number {
-    return Number.parseInt(
-      optionalEnv("SNOW_SUBAGENT_QUOTA_LOG_CAP_BYTES", String(512 * 1024)),
-      10,
-    );
-  },
-} as const;
-
-/**
  * 网络策略配置（per-thread 可覆盖）。
  *
  * S1 修复（02-P0-2，方案 B）：删除 `allowlist` 模式，只留 `disabled | open`。
@@ -624,32 +576,15 @@ export const deployConfig = {
 } as const;
 
 /**
- * 后台任务配置（命令治理）。
+ * 运行时证据配置（QA 证据 / external fetch artifact 写入目录）。
  *
- * - `idleTtlMs`：后台任务空闲回收 TTL（默认对齐容器 10min）。日志最后写入时间超 TTL → stop(reason=idle)。
- * - `maxLogReadBytes`：readTaskLogs 单次读取上限（默认 64KB），避免把全量日志塞进模型上下文。
- * - `hostLogDir`：host 模式日志平台目录（非用户 workspace）；container 模式日志落 workspace bind mount，
- * 不受此项影响。默认 `.snow/runtime`（相对 cwd，已加入 .gitignore）。
+ * - `hostDir`：host 平台目录（非用户 workspace），QA 证据与 external fetch artifact 落此。
+ *   container 模式证据落 workspace bind mount，不受此项影响。默认 `.snow/runtime`
+ *   （相对 cwd，已加入 .gitignore）。
  */
-export const backgroundTaskConfig = {
-  get idleTtlMs(): number {
-    return Number.parseInt(
-      optionalEnv("SNOW_BG_TASK_IDLE_TTL_MS", String(runtimeConfig.idleTtlMs)),
-      10,
-    );
-  },
-  get maxLogReadBytes(): number {
-    return Number.parseInt(optionalEnv("SNOW_BG_TASK_MAX_LOG_BYTES", String(64 * 1024)), 10);
-  },
-  get hostLogDir(): string {
-    return optionalEnv("SNOW_BG_TASK_HOST_LOG_DIR", ".snow/runtime");
-  },
-  /** 单日志文件大小上限（bytes），超限轮转（保留尾部一半）。0=不轮转。默认 10MB。 */
-  get maxLogFileSize(): number {
-    return Number.parseInt(
-      optionalEnv("SNOW_BG_TASK_MAX_LOG_FILE_SIZE", String(10 * 1024 * 1024)),
-      10,
-    );
+export const runtimeEvidenceConfig = {
+  get hostDir(): string {
+    return optionalEnv("SNOW_RUNTIME_EVIDENCE_DIR", ".snow/runtime");
   },
 } as const;
 

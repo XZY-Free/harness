@@ -107,22 +107,6 @@ export function buildDefaultRules(config: PolicyConfig = getPolicyConfig()): Per
     });
   }
 
-  // 审计修复：commandDenyList 镜像到 tool.startBackgroundTask deny。
-  // 原实现仅覆盖 runCommand/runBuild，startBackgroundTask 可执行任意后台命令
-  // （包括 deny-list 中的被禁命令），完全绕过 deny-list 防线。
-  for (const re of config.commandDenyList) {
-    rules.push({
-      id: `default:startBackgroundTask:deny:${re.source}`,
-      scope: "global",
-      scopeRef: null,
-      toolPattern: "tool.startBackgroundTask",
-      argMatcher: { commandRegex: re.source },
-      decision: "deny",
-      reason: `高风险命令（后台任务）：${re.source}`,
-      priority: DENY_PRIORITY,
-    });
-  }
-
   // 新增高风险写/删/patch 工具默认 ask（/ §1）
   for (const name of ["deleteFile", "applyPatch", "multiEditFile"]) {
     rules.push({
@@ -149,20 +133,6 @@ export function buildDefaultRules(config: PolicyConfig = getPolicyConfig()): Per
     priority: ASK_PRIORITY,
   });
 
-  // 审计修复：startBackgroundTask 默认 ask（后台任务可执行任意命令且长期运行，高风险）。
-  // 原实现中 startBackgroundTask 在 HIGH_RISK_TOOLS 集合中但无 ask 规则，
-  // 引擎对无规则匹配的工具默认返回 allow，导致绕过审批。
-  rules.push({
-    id: "default:startBackgroundTask:ask",
-    scope: "global",
-    scopeRef: null,
-    toolPattern: "tool.startBackgroundTask",
-    argMatcher: null,
-    decision: "ask",
-    reason: "startBackgroundTask 默认需审批（后台执行任意命令）",
-    priority: ASK_PRIORITY,
-  });
-
   // git 写操作默认 ask（蓝图 「Git 操作默认高风险」）。
   // gitStatus/gitDiff 只读不在此列（默认 allow）；createPullRequest 在 追加。
   // gitRestoreCheckpoint 含 git reset --hard（不可逆），gitPush/gitCommit 同高风险。
@@ -185,19 +155,6 @@ export function buildDefaultRules(config: PolicyConfig = getPolicyConfig()): Per
       priority: ASK_PRIORITY,
     });
   }
-
-  // spawnSubagent 默认 ask（派生子代理是高资源动作：独立 streamText + 工具执行）。
-  // joinSubagent 默认 allow（读结果，无规则→allow）。DB 规则可覆盖（permissionKey=tool.spawnSubagent）。
-  rules.push({
-    id: "default:spawnSubagent:ask",
-    scope: "global",
-    scopeRef: null,
-    toolPattern: "tool.spawnSubagent",
-    argMatcher: null,
-    decision: "ask",
-    reason: "spawnSubagent 默认需审批（高资源动作）",
-    priority: ASK_PRIORITY,
-  });
 
   // 审计修复：deployToEnvironment / rollback 默认 ask（部署/回滚是不可逆高影响操作，
   // 触发 CI/CD webhook、部署到 staging/prod、回滚生产环境）。

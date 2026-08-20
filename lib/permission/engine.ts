@@ -40,7 +40,7 @@ export interface EvaluatePermissionArgs {
   projectId?: string | null;
   /**
    * 当前 thread 绑定的 skillId(供 skill-scope 权限规则匹配)。
-   * tool-runtime 从 thread.activeSkill 解析后注入;无绑定 skill 时 null。
+   * 由调用方从 thread 绑定 skill 解析后注入;无绑定 skill 时 null。
    * skill-scope 规则(scope=skill, scopeRef=skillId)仅对绑定该 skill 的 thread 生效。
    */
   skillId?: string | null;

@@ -53,24 +53,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
     return jsonError(404, "version_not_found", "版本不存在或不属于该 skill");
   }
-  // S1（11-P2-5）：回滚前兼容性检查——旧版本的 allowedTools 是否仍存在于当前工具集
-  const compatibilityWarnings: string[] = [];
-  try {
-    const oldTools = (ver.allowedTools as string[] | null) ?? [];
-    if (oldTools.length > 0) {
-      const { getToolMetadata } = await import("@/lib/ai/tool-registry");
-      const knownTools = new Set<string>();
-      // getToolMetadata 需要工具名；检查旧版本引用的工具是否仍在 registry
-      for (const t of oldTools) {
-        if (!getToolMetadata(t)) {
-          compatibilityWarnings.push(`工具 ${t} 已不存在（回滚后该工具不可用）`);
-        }
-      }
-    }
-  } catch {
-    // 兼容性检查失败不阻断回滚（best-effort）
-  }
-
   // P1-14: CAS——仅当 currentVersionId 仍是读取时的值才回滚,防并发 publish/rollback 互覆盖
   const swapped = await setCurrentVersion(id, versionId, sk.currentVersionId);
   if (!swapped) {
@@ -83,7 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       targetType: "skill",
       targetId: id,
       outcome: "succeeded",
-      metadata: { versionId, compatibilityWarnings },
+      metadata: { versionId },
     });
   } catch (error) {
     logger.error("admin audit write failed (skill rollback success path)", {
@@ -92,5 +74,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
     return jsonError(500, "audit_failed", "审计写入失败");
   }
-  return jsonOk({ skillId: id, currentVersionId: versionId, compatibilityWarnings });
+  return jsonOk({ skillId: id, currentVersionId: versionId });
 }

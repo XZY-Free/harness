@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { backgroundTaskConfig, webConfig } from "@/lib/config";
+import { runtimeEvidenceConfig, webConfig } from "@/lib/config";
 import type { ToolApprovalRequest } from "@/lib/db/schema";
 import { isApprovalApplicable, isApprovalExpired } from "@/lib/permission/approval";
 import type { PermissionVerdict } from "@/lib/permission/engine";
@@ -257,7 +257,7 @@ export async function rawFetch(params: {
 
     const fetchId = randomUUID();
     const artifactPath = join(
-      backgroundTaskConfig.hostLogDir,
+      runtimeEvidenceConfig.hostDir,
       threadId,
       "external",
       `${fetchId}.txt`,

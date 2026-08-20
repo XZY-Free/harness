@@ -1,18 +1,18 @@
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { backgroundTaskConfig } from "@/lib/config";
+import { runtimeEvidenceConfig } from "@/lib/config";
 import { logger } from "@/lib/logger";
 
 /**
  * Stage A：QA 证据落盘 + 事件 payload 构造（plan / §5）。
  *
- * 证据**不落 DB blob**，落文件（对齐 后台任务日志的 artifact 模式）：
+ * 证据**不落 DB blob**，落文件（对齐运行时证据 artifact 模式）：
  * - 截图：`.snow/runtime/{threadId}/qa/{checkId}.png`
  * - console/network/a11y/verdict JSON：`.snow/runtime/{threadId}/qa/{checkId}.json`
  *
  * 路径解析：浏览器/gate **在 host 侧**跑（container 模式也打映射端口，不在容器内装浏览器），
- * 故 QA 证据恒落 host 平台目录 `backgroundTaskConfig.hostLogDir`（`.snow/runtime`，已 gitignore、
- * 不被静态 preview server 服务）。这与 的 container→workspace 限制不同——那样是因为
+ * 故 QA 证据恒落 host 平台目录 `runtimeEvidenceConfig.hostDir`（`.snow/runtime`，已 gitignore、
+ * 不被静态 preview server 服务）。这与 container→workspace 限制不同——那样是因为
  * 容器进程只能写 bind mount；QA 写者是 host 进程，无此约束，统一 host 目录更简单且不污染用户工作区。
  */
 
@@ -38,9 +38,9 @@ export type {
   QaRunner,
 } from "@/lib/desktop/qa-schema";
 
-/** 构造 QA 证据目录绝对路径：`{hostLogDir}/{threadId}/qa/`。 */
+/** 构造 QA 证据目录绝对路径：`{hostDir}/{threadId}/qa/`。 */
 export function resolveQaDir(threadId: string): string {
-  return resolve(backgroundTaskConfig.hostLogDir, threadId, "qa");
+  return resolve(runtimeEvidenceConfig.hostDir, threadId, "qa");
 }
 
 /** 构造单个 QA 证据文件绝对路径。 */
@@ -59,7 +59,7 @@ export function reportFileName(checkId: QaCheckId): string {
 }
 
 /**
- * 保存截图 buffer 到 artifact，返回**相对 hostLogDir 的相对路径**（供事件 payload /
+ * 保存截图 buffer 到 artifact，返回**相对 hostDir 的相对路径**（供事件 payload /
  * Studio 引用，不暴露绝对文件系统路径）。写入失败 best-effort 返回 null（不阻断 gate）。
  */
 export async function saveScreenshot(
@@ -108,7 +108,7 @@ export async function saveQaReport(
   }
 }
 
-/** 相对 hostLogDir 的 QA 路径（事件 payload artifactPath 用，不暴露绝对路径）。 */
+/** 相对 hostDir 的 QA 路径（事件 payload artifactPath 用，不暴露绝对路径）。 */
 export function relQaPath(threadId: string, fileName: string): string {
   return `${threadId}/qa/${fileName}`;
 }
@@ -117,7 +117,7 @@ export function relQaPath(threadId: string, fileName: string): string {
 export async function readQaArtifact(threadId: string, fileName: string): Promise<Buffer | null> {
   try {
     // fileName 可能是相对路径（threadId/qa/x.png）或裸文件名；统一解析到 QA 目录内，
-    // 并做词法边界校验，防 `..` 越界读 hostLogDir 外文件。
+    // 并做词法边界校验，防 `..` 越界读 hostDir 外文件。
     const dir = resolveQaDir(threadId);
     const safe = resolve(dir, fileName);
     if (safe !== dir && !safe.startsWith(`${dir}/`)) return null;

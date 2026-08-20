@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { aiConfig, backgroundTaskConfig } from "@/lib/config";
+import { aiConfig, runtimeEvidenceConfig } from "@/lib/config";
 import { logger } from "@/lib/logger";
 import { z } from "zod";
 
@@ -105,8 +105,8 @@ export async function visualVerdict(opts: {
     opts.prompt ??
     "评审这张网页截图：是否有明显布局破坏/白屏/元素错位？输出 layout(good/broken)、blank、misalignment(none/detected) 与简短 summary。";
 
-  // 解析截图绝对路径（相对 hostLogDir，边界校验防越界）
-  const base = resolve(backgroundTaskConfig.hostLogDir);
+  // 解析截图绝对路径（相对 hostDir，边界校验防越界）
+  const base = resolve(runtimeEvidenceConfig.hostDir);
   const abs = resolve(base, opts.screenshotPath);
   if (abs !== base && !abs.startsWith(`${base}/`)) {
     return { ...deterministicVerdict(Buffer.alloc(0)), ok: false, error: "非法截图路径" };
