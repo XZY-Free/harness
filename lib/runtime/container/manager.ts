@@ -1,10 +1,5 @@
 import { runtimeConfig } from "@/lib/config";
 import { workspaceRoot } from "@/lib/workspace";
-import {
-  closeAllBackgroundTasks,
-  stopAllByThread,
-  sweepIdleBackgroundTasks,
-} from "../background-task-registry";
 import { dockerNetworkMode } from "../network-policy";
 import type { NetworkPolicy, ResourceQuota } from "../types";
 import { listContainersByLabel, removeContainer, runContainer, stopContainer } from "./docker-cli";
@@ -126,18 +121,11 @@ export function touchActivity(threadId: string): void {
 /**
  * 停删单个容器 + 释放端口 + 关闭 egress proxy。
  *
- * 先停该 thread 的所有后台任务（防止容器停止后 task 进程变孤儿、
- * stop handle 失效）。closeAllContainers 路径已先调 closeAllBackgroundTasks，此处再调是
- * 幂等兜底（已 markStopped 的任务 listActive 不返回）。
+ * 只管理真实容器资源；旧后台任务能力已移除，无需回收 task 进程。
  */
 export async function stopContainerById(threadId: string): Promise<void> {
   const entry = containers.get(threadId);
   if (!entry) return;
-  try {
-    await stopAllByThread(threadId, "thread_end");
-  } catch {
-    // best-effort：后台任务清理失败不阻塞容器停删
-  }
   await stopContainer(entry.containerName);
   await removeContainer(entry.containerName);
   releasePort(threadId);
@@ -146,15 +134,8 @@ export async function stopContainerById(threadId: string): Promise<void> {
   containers.delete(threadId);
 }
 
-/** 进程退出时关闭所有容器。先回收所有后台任务（tree-kill/pkill），再停删容器。 */
+/** 进程退出时关闭所有容器。 */
 export async function closeAllContainers(): Promise<void> {
-  // 先停所有后台任务（进程树回收），避免容器停止时留下孤儿进程记录。
-  // 防御：测试用部分 mock 时 closeAllBackgroundTasks 可能为 undefined，optional call 避免 teardown 抛错。
-  try {
-    await closeAllBackgroundTasks?.().catch(() => {});
-  } catch {
-    // best-effort：退出清理不阻塞
-  }
   const ids = [...containers.keys()];
   await Promise.all(ids.map((id) => stopContainerById(id).catch(() => {})));
 }
@@ -178,8 +159,6 @@ export function startIdleSweep(intervalMs = 60_000): void {
         void stopContainerById(tid).catch(() => {});
       }
     }
-    // 同步扫后台任务 idle（lastActivityAt 超 TTL → stop(reason=idle)），复用同一定时器
-    void sweepIdleBackgroundTasks().catch(() => {});
     // 轮询 deploying 状态的 deployment（防永远停在 deploying）
     void import("@/lib/deploy/cicd-target").then((m) => m.sweepDeployingStatuses()).catch(() => {});
     // V6-M1-4：扫描 delivering 状态超时的 thread，回退为 failed（防状态机悬空）

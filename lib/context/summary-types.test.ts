@@ -6,7 +6,6 @@ import {
   extractDebugSummary,
   extractDecisionLog,
   extractDiffSummary,
-  extractSubagentSummary,
   extractToolRunSummary,
   extractTurnSummary,
   isDiffToolRun,
@@ -289,55 +288,6 @@ describe("extractDecisionLog", () => {
       statusChanges: [{ reason: "need_approve", to: "awaiting_approval" }],
     });
     expect(s.constraints.some((c) => c.startsWith("需审批"))).toBe(true);
-  });
-});
-
-describe("extractSubagentSummary", () => {
-  it("run 为 null → 空摘要（pending 语义：无可汇总）", () => {
-    const s = extractSubagentSummary(null, "explore");
-    expect(s.type).toBe("subagent");
-    expect(s.role).toBe("explore");
-    expect(s.text).toBe("");
-  });
-
-  it("completed run → 含 role/goal/status/resultSummary + 交接，不含 transcript 正文", () => {
-    const s = extractSubagentSummary(
-      {
-        goal: "找到路由",
-        status: "completed",
-        resultSummary: "找到 3 个路由文件",
-        errorMessage: null,
-        transcriptPath: ".snow/runtime/tid/subagents/r1/transcript.json",
-        outputArtifactId: "art-1",
-      },
-      "explore",
-    );
-    expect(s.role).toBe("explore");
-    expect(s.goal).toBe("找到路由");
-    expect(s.status).toBe("completed");
-    expect(s.resultSummary).toBe("找到 3 个路由文件");
-    // 证据引用 transcriptPath/outputArtifactId（路径引用，非 transcript 内容）
-    expect(s.evidenceRefs).toContain(".snow/runtime/tid/subagents/r1/transcript.json");
-    expect(s.evidenceRefs).toContain("art-1");
-    expect(s.text).toContain("找到 3 个路由文件");
-    // transcript 正文不在 run 上（只有 transcriptPath），summary 结构上无法泄露 transcript 内容
-    expect(s.handoff).toContain("结果可用");
-  });
-
-  it("failed run → 交接提示重试或换路径", () => {
-    const s = extractSubagentSummary(
-      {
-        goal: "g",
-        status: "failed",
-        resultSummary: null,
-        errorMessage: "timeout",
-        transcriptPath: null,
-        outputArtifactId: null,
-      },
-      "verifier",
-    );
-    expect(s.handoff).toContain("重试");
-    expect(s.text).toContain("timeout");
   });
 });
 

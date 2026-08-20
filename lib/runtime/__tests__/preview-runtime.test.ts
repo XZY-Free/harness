@@ -29,9 +29,6 @@ vi.mock("@/lib/runtime/container/start-options", () => ({
   prepareContainerStartOptions: vi.fn(),
 }));
 vi.mock("@/lib/runtime/preview-probe", () => ({ probePreviewUrl: vi.fn() }));
-vi.mock("@/lib/runtime/background-task-registry", () => ({
-  stopAllByThread: vi.fn().mockResolvedValue(undefined),
-}));
 
 import { get } from "node:http";
 import { closeAllPreviews, staticPreviewRuntime } from "@/lib/runtime/preview-runtime";

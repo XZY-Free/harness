@@ -3,7 +3,6 @@ import { type Server, createServer } from "node:http";
 import { extname, resolve as resolvePath } from "node:path";
 import { runtimeConfig } from "@/lib/config";
 import { readWorkspaceFile, safeJoin, workspaceRoot } from "@/lib/workspace";
-import { stopAllByThread } from "./background-task-registry";
 import { execDetached } from "./container/docker-cli";
 import { startContainer, stopContainerById } from "./container/manager";
 import { prepareContainerStartOptions } from "./container/start-options";
@@ -338,13 +337,7 @@ export class DevServerPreviewRuntime implements PreviewRuntime {
       // 可能委托了 static
       return staticPreviewRuntime.stop(threadId);
     }
-    // 先回收该 thread 的后台任务（dev server 是后台任务之一），再停删容器，
-    // 防止容器停止后 task 进程变孤儿。stopContainerById 内部也会调（幂等兜底）。
-    try {
-      await stopAllByThread(threadId, "thread_end");
-    } catch {
-      // best-effort
-    }
+    // 只停真实 preview server 与其 container 资源；旧后台任务能力已移除。
     await stopContainerById(threadId);
     devServers.delete(threadId);
   }
