@@ -1,14 +1,5 @@
 import { db } from "@/lib/db/client";
-import {
-  skill,
-  skillVersion,
-  thread,
-  threadEvent,
-  threadRun,
-  threadRunSkill,
-  toolRun,
-  user,
-} from "@/lib/db/schema";
+import { skill, skillVersion, thread, threadEvent, toolRun, user } from "@/lib/db/schema";
 import {
   listArtifactsForThread,
   listEventsForThread,
@@ -94,37 +85,6 @@ async function insertThread(
     createdAt: opts.createdAt ?? now,
     updatedAt: opts.updatedAt ?? now,
   });
-}
-
-/**
- * V8 阶段 7：为 thread 灌入 ThreadRun + ThreadRunSkill（primary role）。
- * studio-queries 的 skillName/lastRunSkillId 改用 ThreadRunSkill，不再读 thread.activeSkillId。
- */
-async function insertRunWithSkill(
-  threadId: string,
-  skillId: string,
-  skillVersionId: string,
-  opts: { createdAt?: Date } = {},
-) {
-  const createdAt = opts.createdAt ?? new Date();
-  const runId = `run-${threadId}-${Math.random().toString(36).slice(2, 8)}`;
-  await db.insert(threadRun).values({
-    id: runId,
-    threadId,
-    status: "completed",
-    triggerType: "chat.user_message",
-    model: "test-model",
-    createdAt,
-  });
-  await db.insert(threadRunSkill).values({
-    runId,
-    threadId,
-    skillId,
-    skillVersionId,
-    role: "primary",
-    source: "resolver",
-  });
-  return runId;
 }
 
 async function insertToolRunRow(
@@ -282,31 +242,23 @@ describe("thread 只读查询 (真实 MySQL)", () => {
     await resetDatabase(db);
   });
 
-  it("listThreadsForUser 仅返回该 user 的 thread，按 updatedAt desc，含 skillName/ownerName join（V8 改用 ThreadRunSkill）", async () => {
+  it("listThreadsForUser 仅返回该 user 的 thread，按 updatedAt desc，含 ownerName join", async () => {
     await insertUser("u1", "Alice", "alice@x");
     await insertUser("u2", "Bob", "bob@x");
-    await insertSkill("sk1", "build-from-idea");
     const early = new Date("2026-01-01");
     const late = new Date("2026-02-01");
     await insertThread("t-old", "u1", { title: "old", updatedAt: early });
     await insertThread("t-new", "u1", { title: "new", updatedAt: late });
     await insertThread("t-other", "u2", { title: "other" });
-    // V8：skillName 来自 ThreadRunSkill（primary role），不再读 thread.activeSkillId
-    await insertRunWithSkill("t-old", "sk1", "sv1");
 
     const rows = await listThreadsForUser("u1");
     expect(rows).toHaveLength(2);
     // updatedAt desc：new 在前
     expect(rows[0]?.id).toBe("t-new");
     expect(rows[1]?.id).toBe("t-old");
-    // join 字段：t-old 最近 run 用 sk1 → skillName + lastRunSkillId；owner 来自 u1
-    expect(rows[1]?.skillName).toBe("build-from-idea");
-    expect(rows[1]?.lastRunSkillId).toBe("sk1");
+    // join 字段：owner 来自 u1
     expect(rows[1]?.ownerName).toBe("Alice");
     expect(rows[1]?.ownerEmail).toBe("alice@x");
-    // t-new 无 run → skillName null + lastRunSkillId null
-    expect(rows[0]?.skillName).toBeNull();
-    expect(rows[0]?.lastRunSkillId).toBeNull();
   });
 
   it("listThreadsForUser 隔离他人 thread（owner 隔离）", async () => {

@@ -6,8 +6,6 @@ import {
   type SkillVersion,
   type Thread,
   type ThreadEvent,
-  type ThreadRun,
-  type ThreadRunSkill,
   type ToolRun,
   policyConfig,
   skill,
@@ -15,8 +13,6 @@ import {
   skillVersion,
   thread,
   threadEvent,
-  threadRun,
-  threadRunSkill,
   toolRun,
   user,
 } from "@/lib/db/schema";
@@ -175,82 +171,50 @@ export async function getSkillSyncInfo(skillId: string): Promise<{
 
 /**
  * thread 列表行：Thread 全字段 + 可读名（供后台表格显示，避免裸 ID）。
- * - `skillName`：V8 改为最近一次 run 的 primary skill → skill.name；无 Skill run / skill 已删档 → null。
- * - `lastRunSkillId`：V8 新增——最近 run 的 primary skillId（替代旧 activeSkillId 展示口径）。
  * - `ownerName`/`ownerEmail`：thread.userId → user.{name,email}。
  */
 export type ThreadListRow = Thread & {
-  skillName: string | null;
-  /** V8：最近一次 run 的 primary skillId（替代旧 thread.activeSkillId 展示口径）。 */
-  lastRunSkillId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
 };
 
 /**
- * thread leftJoin 最近 run primary skill + user 的公共 select / from 构造。
- * V8 阶段 7：不再从 thread.activeSkillId 读，改用 ThreadRunSkill（primary role）。
- * skill.name 与 user.name 同名——drizzle 按列引用生成 SQL（表名限定 + AS 重命名），
- * select 键名（skillName / ownerName）即结果集字段名，无冲突。
+ * thread leftJoin user 的公共 select / from 构造。
+ * user.name 与 skill.name 同名——drizzle 按列引用生成 SQL（表名限定 + AS 重命名），
+ * select 键名（ownerName）即结果集字段名，无冲突。
  */
 function threadListQuery() {
-  return (
-    db
-      .select({
-        id: thread.id,
-        createdAt: thread.createdAt,
-        updatedAt: thread.updatedAt,
-        title: thread.title,
-        userId: thread.userId,
-        status: thread.status,
-        model: thread.model,
-        previewUrl: thread.previewUrl,
-        // V8：旧字段保留（Thread 类型要求），但展示口径改用 lastRunSkillId
-        activeSkillId: thread.activeSkillId,
-        activeSkillVersionId: thread.activeSkillVersionId,
-        reviewState: thread.reviewState,
-        runtimeType: thread.runtimeType,
-        projectId: thread.projectId,
-        pinnedAt: thread.pinnedAt,
-        pinnedFacts: thread.pinnedFacts,
-        deletedAt: thread.deletedAt,
-        lastMessagePreview: thread.lastMessagePreview,
-        lastMessageId: thread.lastMessageId,
-        // S1：补齐 token 字段（ThreadListRow = Thread & {...} 要求，V4 加列后 select 漏选）
-        promptTokens: thread.promptTokens,
-        completionTokens: thread.completionTokens,
-        totalTokens: thread.totalTokens,
-        // per-thread CI/CD token（同上，select 漏选补齐）
-        cicdApiToken: thread.cicdApiToken,
-        // V8：最近 run 的 primary skill（子查询取最近 ThreadRun → ThreadRunSkill primary）
-        lastRunSkillId: threadRunSkill.skillId,
-        skillName: skill.name,
-        ownerName: user.name,
-        ownerEmail: user.email,
-      })
-      .from(thread)
-      // 最近一次 ThreadRun
-      .leftJoin(
-        threadRun,
-        eq(
-          threadRun.id,
-          db
-            .select({ id: threadRun.id })
-            .from(threadRun)
-            .where(eq(threadRun.threadId, thread.id))
-            .orderBy(desc(threadRun.createdAt))
-            .limit(1),
-        ),
-      )
-      // 该 run 的 primary skill
-      .leftJoin(
-        threadRunSkill,
-        and(eq(threadRunSkill.runId, threadRun.id), eq(threadRunSkill.role, "primary")),
-      )
-      // skill 可读名（可能已删档 → null）
-      .leftJoin(skill, eq(threadRunSkill.skillId, skill.id))
-      .leftJoin(user, eq(thread.userId, user.id))
-  );
+  return db
+    .select({
+      id: thread.id,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      title: thread.title,
+      userId: thread.userId,
+      status: thread.status,
+      model: thread.model,
+      previewUrl: thread.previewUrl,
+      activeSkillId: thread.activeSkillId,
+      activeSkillVersionId: thread.activeSkillVersionId,
+      reviewState: thread.reviewState,
+      runtimeType: thread.runtimeType,
+      projectId: thread.projectId,
+      pinnedAt: thread.pinnedAt,
+      pinnedFacts: thread.pinnedFacts,
+      deletedAt: thread.deletedAt,
+      lastMessagePreview: thread.lastMessagePreview,
+      lastMessageId: thread.lastMessageId,
+      // S1：补齐 token 字段（ThreadListRow = Thread & {...} 要求，V4 加列后 select 漏选）
+      promptTokens: thread.promptTokens,
+      completionTokens: thread.completionTokens,
+      totalTokens: thread.totalTokens,
+      // per-thread CI/CD token（同上，select 漏选补齐）
+      cicdApiToken: thread.cicdApiToken,
+      ownerName: user.name,
+      ownerEmail: user.email,
+    })
+    .from(thread)
+    .leftJoin(user, eq(thread.userId, user.id));
 }
 
 /** 列某用户的 thread（member 视角），B-8: 按 updatedAt desc。P2-1: 过滤已软删。 */
@@ -265,28 +229,6 @@ export async function listAllThreads(): Promise<ThreadListRow[]> {
   return threadListQuery()
     .where(isNull(thread.deletedAt))
     .orderBy(desc(thread.updatedAt), desc(thread.id));
-}
-
-/** 列某 thread 的全部 ThreadRun，按 createdAt desc（run 列表用）。 */
-export async function listThreadRuns(threadId: string): Promise<ThreadRun[]> {
-  return db
-    .select()
-    .from(threadRun)
-    .where(eq(threadRun.threadId, threadId))
-    .orderBy(desc(threadRun.createdAt), desc(threadRun.id));
-}
-
-/**
- * V8 阶段 7：列某 thread 下历史 Skill 使用记录（按 createdAt 升序）。
- * 用途：Studio 详情页展示 run 级 Skill 使用时间线。委托 queries.ts 的 listThreadRunSkillsByThread。
- */
-export async function listThreadRunSkillsForThread(
-  threadId: string,
-  opts: { limit?: number } = {},
-): Promise<ThreadRunSkill[]> {
-  // 直接复用 queries.ts 的实现，避免重复 SQL
-  const { listThreadRunSkillsByThread } = await import("@/lib/db/queries");
-  return listThreadRunSkillsByThread(threadId, opts);
 }
 
 /** 列某 thread 的 tool run，按 startedAt asc（tool trace 用）。 */

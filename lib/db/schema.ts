@@ -117,8 +117,8 @@ export const THREAD_EVENT_TYPES = [
   "mcp.listed",
   "mcp.called",
   // 子代理生命周期（只追加，不改旧事件含义）
-  // subagent.spawned：spawnSubagent 创建一个 SubagentRun（payload 含 runId/role/goal 摘要/writeScope?）
-  // subagent.joined：joinSubagent 收集到结构化结果（payload 含 runId/status/resultSummary 摘要/outputArtifactId?）
+  // subagent.spawned：子代理发起（payload 含 runId/role/goal 摘要/writeScope?）
+  // subagent.joined：子代理加入并收集结构化结果（payload 含 runId/status/resultSummary 摘要/outputArtifactId?）
   // subagent.failed：子代理失败/超时（payload 含 runId/errorMessage 摘要）
   "subagent.spawned",
   "subagent.joined",
@@ -254,10 +254,10 @@ export const thread = mysqlTable(
     model: varchar("model", { length: 64 }),
     // 预览 URL（后端自检后填入，前端按需展示）
     previewUrl: text("previewUrl"),
-    // @deprecated V8 Skill Run Resolver：不再从 thread 解析 Skill。运行时改用 ThreadRunSkill（run 级）。
+    // @deprecated V8 Skill Run Resolver：不再从 thread 解析 Skill。运行时改用 run 级 Skill 使用事实。
     // 列保留兼容旧数据，不在运行时读取；展示口径改用最近 run 的 primary skill（lastRunSkillId）。
     activeSkillId: varchar("activeSkillId", { length: 64 }),
-    // @deprecated V8 Skill Run Resolver：同上。版本固化改由 ThreadRunSkill.skillVersionId 记录。
+    // @deprecated V8 Skill Run Resolver：同上。Skill 版本固化改由 run 级事实记录。
     activeSkillVersionId: varchar("activeSkillVersionId", { length: 36 }),
     // Phase 4: 人工审核状态
     reviewState: varchar("reviewState", { length: 32 }),
@@ -317,7 +317,7 @@ export const message = mysqlTable(
     type: varchar("type", { length: 32 }),
     // AI SDK 的 UIMessage.parts，整体以 json 存储
     parts: json("parts").notNull(),
-    // B-3: 标记该消息属于哪次 run（thread-runner runId）。user 消息无 run（route 层写入）故可空。
+    // B-3: 标记该消息属于哪次 run（runId）。user 消息无 run（route 层写入）故可空。
     // 用于重试时按 runId 隔离清理旧 partial（per-step upsert 同 id 覆盖解决中断丢失，
     // 但换 runId 重试时旧 partial 残留需按 run 隔离）。
     runId: varchar("runId", { length: 36 }),
@@ -527,7 +527,7 @@ export type SkillVersion = InferSelectModel<typeof skillVersion>;
  * 下次同步时按 remoteAssetId 找到本地 localName 复用（不视为 name 冲突）。
  *
  * 不用远端 asset_id 替代本地主键（02 文档 ）：本地主键已被 Studio / Resolver /
- * ThreadRunSkill / 历史快照读取共同使用。
+ * run 级 Skill 使用事实 / 历史快照读取共同使用。
  */
 export const skillSyncMapping = mysqlTable(
   "SkillSyncMapping",
@@ -1093,87 +1093,12 @@ export const toolApprovalRequest = mysqlTable(
 );
 export type ToolApprovalRequest = InferSelectModel<typeof toolApprovalRequest>;
 
-// ─── : Background Task ──────────────────────────────────
-//
-// 命令治理：可恢复、可审计的后台长跑任务（蓝图 §12 ）。
-// - DB 行作可审计/可列表/进程重启标记孤儿的真实来源；进程内 Map（lib/runtime/background-task-registry）
-// 只缓存 pid/stop handle 供 stop 用，不持久化。
-// - 日志不落 DB blob，落文件（logPath 相对路径）；按 runtimeType 分目录解析（host 平台目录 / container bind mount）。
-// - 进程重启时 markOrphansOnStartup 把 starting/running 行诚实标 orphaned，不假装 reattach 死 pid。
-
-/** 后台任务种类。 */
-export const BACKGROUND_TASK_KINDS = [
-  "dev-server",
-  "build",
-  "watcher",
-  "worker",
-  "custom",
-] as const;
-export type BackgroundTaskKind = (typeof BACKGROUND_TASK_KINDS)[number];
-
-/** 后台任务状态。orphaned = 进程重启后旧 running 行的诚实标记。 */
-export const BACKGROUND_TASK_STATUSES = [
-  "starting",
-  "running",
-  "stopped",
-  "failed",
-  "cancelled",
-  "orphaned",
-] as const;
-export type BackgroundTaskStatus = (typeof BACKGROUND_TASK_STATUSES)[number];
-
-export const backgroundTask = mysqlTable(
-  "BackgroundTask",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
-    // 启动它的 ToolRun（经 executeToolRun 包裹）；可空
-    toolRunId: varchar("toolRunId", { length: 36 }),
-    kind: varchar("kind", { length: 32 }).notNull(),
-    // 启动命令（argSummary，不存完整 env）
-    command: varchar("command", { length: 1024 }).notNull(),
-    // host / container
-    runtimeType: varchar("runtimeType", { length: 32 }).notNull(),
-    status: mysqlEnum("status", BACKGROUND_TASK_STATUSES).notNull().default("starting"),
-    // host 模式的进程 pid；container 模式为 null（docker exec -d 不返回容器内 pid）
-    pid: int("pid"),
-    containerName: varchar("containerName", { length: 128 }),
-    // 占用端口（若有，便于诊断）
-    port: int("port"),
-    // 日志文件相对路径 .snow/runtime/{threadId}/tasks/{taskId}.log
-    logPath: varchar("logPath", { length: 512 }).notNull(),
-    exitCode: int("exitCode"),
-    startedAt: datetime("startedAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    finishedAt: datetime("finishedAt", { mode: "date" }),
-    // 日志最后写入时间，供 idle sweep
-    lastActivityAt: datetime("lastActivityAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    threadStatusIdx: index("BackgroundTask_threadId_status_idx").on(t.threadId, t.status),
-    statusIdx: index("BackgroundTask_status_idx").on(t.status),
-    threadLastActivityIdx: index("BackgroundTask_threadId_lastActivityAt_idx").on(
-      t.threadId,
-      t.lastActivityAt,
-    ),
-  }),
-);
-export type BackgroundTask = InferSelectModel<typeof backgroundTask>;
-
 // ─── : Git Checkpoint ───────────────────────────────────
 //
 // 一次风险前快照，关联 git tag 与 thread，供 rollback 与审计。
 // tag 名 `snow-checkpoint-{shortId}`（轻量 tag），commitSha 为快照指向的 HEAD。
 // restoredAt 在被 restore 时回填（一个 checkpoint 可被多次 restore，仅记最后一次）。
-// 不加 DB 级 FK 到 ToolRun（createdByToolRunId 可空，且与 BackgroundTask 一致保持逻辑外键）。
+// 不加 DB 级 FK 到 ToolRun（createdByToolRunId 可空，保持逻辑外键）。
 
 export const gitCheckpoint = mysqlTable(
   "GitCheckpoint",
@@ -1415,124 +1340,6 @@ export const customTool = mysqlTable(
 );
 export type CustomTool = InferSelectModel<typeof customTool>;
 
-// ─── : Subagent Definition / Run ─────────────────────────
-//
-// 子代理与并行工作流（蓝图 / §12 ）。
-// - SubagentDefinition：一个可派生的子代理模板（角色/工具白名单/上下文策略/输出契约/默认写范围）。
-// 可由 Agent/Profile config 占位（L478-492）消费，也可独立存在。
-// - SubagentRun：一次子代理执行的审计/状态记录。不复用 Thread 行（避免污染用户 thread 列表）；
-// transcript 落 artifact 文件（transcriptPath），不进主 Message 表。
-// 子代理默认只读（无 writeScope → 不暴露写工具）；写须声明 writeScope 且同父 thread 并发互斥（§14）。
-
-/** 子代理角色。explore/researcher/reviewer/verifier 为四默认 lane；executor 可写。 */
-export const SUBAGENT_ROLES = [
-  "explore",
-  "researcher",
-  "reviewer",
-  "verifier",
-  "executor",
-] as const;
-export type SubagentRole = (typeof SUBAGENT_ROLES)[number];
-
-/** SubagentRun 状态机：queued→running→completed/failed/cancelled/timed_out。 */
-export const SUBAGENT_RUN_STATUSES = [
-  "queued",
-  "running",
-  "completed",
-  "failed",
-  "cancelled",
-  "timed_out",
-] as const;
-export type SubagentRunStatus = (typeof SUBAGENT_RUN_STATUSES)[number];
-
-/**
- * 子代理定义（模板）。
- *
- * allowedTools：工具名白名单（string[]），其余工具对子代理不可见。
- * contextPolicy：{ includeHistory?, includePlan?, includeToolEvidence?, maxSnippets? }，裁剪父上下文。
- * outputSchema：JSON Schema，子代理结束输出的结构化契约；null=不校验。
- * defaultWriteScope：默认写范围（路径 glob 数组）；null=只读。
- */
-export const subagentDefinition = mysqlTable(
-  "SubagentDefinition",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    name: varchar("name", { length: 64 }).notNull(),
-    role: mysqlEnum("role", SUBAGENT_ROLES).notNull(),
-    // 子代理用的模型 profile id；null=继承父
-    modelProfileId: varchar("modelProfileId", { length: 36 }),
-    // 工具名白名单（string[]）
-    allowedTools: json("allowedTools").notNull(),
-    // { includeHistory?, includePlan?, includeToolEvidence?, maxSnippets? }
-    contextPolicy: json("contextPolicy").notNull(),
-    // JSON Schema 输出契约；null=不校验
-    outputSchema: json("outputSchema"),
-    // 默认写范围（路径 glob 数组）；null=只读
-    defaultWriteScope: json("defaultWriteScope"),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    nameIdx: index("SubagentDefinition_name_idx").on(t.name),
-    roleIdx: index("SubagentDefinition_role_idx").on(t.role),
-  }),
-);
-export type SubagentDefinition = InferSelectModel<typeof subagentDefinition>;
-
-/**
- * 一次子代理执行的审计/状态记录。
- *
- * transcriptPath 指向 `.snow/runtime/{parentThreadId}/subagents/{runId}/transcript.json`，
- * 完整 transcript 落文件，不进主 Message 表。joinSubagent 只回 resultSummary + outputArtifactId。
- */
-export const subagentRun = mysqlTable(
-  "SubagentRun",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    parentThreadId: varchar("parentThreadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
-    definitionId: varchar("definitionId", { length: 36 })
-      .notNull()
-      .references(() => subagentDefinition.id),
-    // 父给子代理的目标
-    goal: text("goal").notNull(),
-    // 父传给子代理的上下文提示（路径/约束/已知信息）
-    contextHints: json("contextHints"),
-    status: mysqlEnum("status", SUBAGENT_RUN_STATUSES).notNull().default("queued"),
-    // 本次实际写范围（definition.defaultWriteScope + spawn 参数合并）；null=只读
-    writeScope: json("writeScope"),
-    // 结构化结果摘要（join 回传给父）
-    resultSummary: text("resultSummary"),
-    // 完整结果 artifact ref
-    outputArtifactId: varchar("outputArtifactId", { length: 36 }),
-    // transcript 文件相对路径
-    transcriptPath: varchar("transcriptPath", { length: 512 }),
-    // 失败原因（不含 secret）
-    errorMessage: text("errorMessage"),
-    startedAt: datetime("startedAt", { mode: "date" }),
-    finishedAt: datetime("finishedAt", { mode: "date" }),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    parentStatusIdx: index("SubagentRun_parentThreadId_status_idx").on(t.parentThreadId, t.status),
-    definitionIdx: index("SubagentRun_definitionId_idx").on(t.definitionId),
-  }),
-);
-export type SubagentRun = InferSelectModel<typeof subagentRun>;
-
 // ─── : Secret Mount（加密存储的 secret 挂载）──────────────
 //
 // 生产级 secret at rest 保护（plan §1/）：
@@ -1668,216 +1475,6 @@ export const auditFailureLog = mysqlTable(
   }),
 );
 export type AuditFailureLog = InferSelectModel<typeof auditFailureLog>;
-
-// ─── V7: ThreadRun（执行事实源）────────────────────────────────
-//
-// 一次后台执行的事实源记录。runId 由 DB 生成（不再由内存 runner 独自生成），
-// 记录执行的开始、结束、状态、触发来源、模型、skill、token、错误和取消原因。
-// LiveRun 是运行句柄（进程内执行/取消/SSE 广播），ThreadRun 是长期事实。
-
-/** ThreadRun 执行状态。stale = 进程重启后失联的 running run。 */
-export const THREAD_RUN_STATUSES = [
-  "queued",
-  "running",
-  "awaiting_approval",
-  "completed",
-  "failed",
-  "cancelled",
-  "stale",
-] as const;
-
-export type ThreadRunStatus = (typeof THREAD_RUN_STATUSES)[number];
-
-/** ThreadRun 触发来源。 */
-export const THREAD_RUN_TRIGGER_TYPES = [
-  "user_message",
-  "approval_resume",
-  "retry",
-  "system",
-  "scheduled",
-] as const;
-
-export type ThreadRunTriggerType = (typeof THREAD_RUN_TRIGGER_TYPES)[number];
-
-export const threadRun = mysqlTable(
-  "ThreadRun",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
-    status: mysqlEnum("status", THREAD_RUN_STATUSES).notNull().default("queued"),
-    // 触发来源
-    triggerType: varchar("triggerType", { length: 32 }).notNull().default("user_message"),
-    // 触发本轮 run 的 user message（可空，如 approval_resume 时）
-    triggerMessageId: varchar("triggerMessageId", { length: 36 }),
-    // 本轮模型
-    model: varchar("model", { length: 128 }).notNull(),
-    // 本轮 skill（可空）
-    skillId: varchar("skillId", { length: 36 }),
-    skillVersionId: varchar("skillVersionId", { length: 36 }),
-    // host / container
-    runtimeType: varchar("runtimeType", { length: 32 }),
-    // 真正开始执行时间
-    startedAt: datetime("startedAt", { mode: "date" }),
-    // 终态时间
-    finishedAt: datetime("finishedAt", { mode: "date" }),
-    // runner 心跳时间
-    lastSeenAt: datetime("lastSeenAt", { mode: "date" }),
-    // 取消原因
-    cancelReason: text("cancelReason"),
-    // 失败原因
-    error: text("error"),
-    // token 用量
-    promptTokens: int("promptTokens").notNull().default(0),
-    completionTokens: int("completionTokens").notNull().default(0),
-    totalTokens: int("totalTokens").notNull().default(0),
-    // provider、endpoint、artifact 摘要等扩展信息
-    metadata: json("metadata"),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    // 查询 thread 最近 runs
-    threadCreatedIdx: index("ThreadRun_threadId_createdAt_idx").on(t.threadId, t.createdAt),
-    // 查询 active run
-    threadStatusUpdatedIdx: index("ThreadRun_threadId_status_updatedAt_idx").on(
-      t.threadId,
-      t.status,
-      t.updatedAt,
-    ),
-    // 扫描失联 running run
-    statusLastSeenIdx: index("ThreadRun_status_lastSeenAt_idx").on(t.status, t.lastSeenAt),
-    // 从用户消息追溯 run
-    triggerMessageIdx: index("ThreadRun_triggerMessageId_idx").on(t.triggerMessageId),
-  }),
-);
-export type ThreadRun = InferSelectModel<typeof threadRun>;
-
-// ─── V7: RunTranscriptChunk（流式恢复）────────────────────────
-//
-// 持久化 SSE UIMessageChunk，支持刷新后从 sequence 恢复。
-// 每个 chunk 分配 run 内递增 sequence，前端可从 afterSeq 后续订。
-
-/** RunTranscriptChunk 种类。 */
-export const RUN_TRANSCRIPT_CHUNK_KINDS = [
-  "ui_message_chunk",
-  "artifact",
-  "error",
-  "done",
-] as const;
-
-export type RunTranscriptChunkKind = (typeof RUN_TRANSCRIPT_CHUNK_KINDS)[number];
-
-export const runTranscriptChunk = mysqlTable(
-  "RunTranscriptChunk",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
-    runId: varchar("runId", { length: 36 })
-      .notNull()
-      .references(() => threadRun.id),
-    // run 内递增序号
-    sequence: int("sequence").notNull(),
-    // ui_message_chunk / artifact / error / done
-    kind: varchar("kind", { length: 32 }).notNull(),
-    // 原始 chunk JSON
-    payload: json("payload").notNull(),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    // 按 run 查询 chunk
-    runSequenceIdx: index("RunTranscriptChunk_runId_sequence_idx").on(t.runId, t.sequence),
-    // (runId, sequence) 唯一
-    runSequenceUq: uniqueIndex("RunTranscriptChunk_runId_sequence_uq").on(t.runId, t.sequence),
-  }),
-);
-export type RunTranscriptChunk = InferSelectModel<typeof runTranscriptChunk>;
-
-// ─── V8: ThreadRunSkill（Run 级 Skill 使用事实表）──────────────
-//
-// 一个 ThreadRun 实际使用的 0..N 个 SkillVersion（方案 §五.4）。
-// - 取代旧 `Thread.activeSkillId/activeSkillVersionId` 的 thread 绑定语义：
-// 每个 run 独立解析并记录，thread 不保存“当前执行 Skill”。
-// - 允许 0 个（基础 agent，无 ThreadRunSkill 行）；允许多个（primary + supporting）。
-// - 恢复未完成 run 时直接读取原 run 的 ThreadRunSkill，沿用原版本（方案约束 6）。
-// - `ThreadRun.skillId/skillVersionId` 旧单字段短期保留作兼容展示，新逻辑不依赖。
-
-/** ThreadRunSkill 角色（第一轮只实现 primary）。 */
-export const THREAD_RUN_SKILL_ROLES = ["primary", "supporting"] as const;
-export type ThreadRunSkillRole = (typeof THREAD_RUN_SKILL_ROLES)[number];
-
-/** 选择的来源：resolver（本轮决策）/ resume（沿用原 run）/ system_policy（平台策略）。 */
-export const THREAD_RUN_SKILL_SOURCES = ["resolver", "resume", "system_policy"] as const;
-export type ThreadRunSkillSource = (typeof THREAD_RUN_SKILL_SOURCES)[number];
-
-export const threadRunSkill = mysqlTable(
-  "ThreadRunSkill",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    // 所属 ThreadRun
-    runId: varchar("runId", { length: 36 })
-      .notNull()
-      .references(() => threadRun.id),
-    // 冗余查询字段（查 thread 下历史 Skill 使用）
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
-    // 实际使用的 Skill（逻辑外键 → skill.id；不加 DB 级 FK，避免与 skill 软删除冲突）
-    // V8 补充方案阶段 2：放宽到 128，支持企业平台 ID（sk_* / skv_*）。
-    skillId: varchar("skillId", { length: 128 }).notNull(),
-    // 实际使用的 SkillVersion（逻辑外键 → skill_versions.id）
-    // V8 补充方案阶段 2：放宽到 128，支持企业平台版本 ID（skv_*）。
-    skillVersionId: varchar("skillVersionId", { length: 128 }).notNull(),
-    // primary / supporting
-    role: varchar("role", { length: 16 }).notNull().default("primary"),
-    // resolver / resume / system_policy
-    source: varchar("source", { length: 24 }).notNull().default("resolver"),
-    // 选择理由，供审计和 Studio 展示
-    reason: text("reason"),
-    // 版本内容 hash，便于版本可追溯。
-    // V8 补充方案阶段 2：放宽到 128，支持企业平台 sha256:<64hex> 格式（总长 71）。
-    contentHash: varchar("contentHash", { length: 128 }),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    // 查询某次 run 的 Skill
-    runIdx: index("ThreadRunSkill_runId_idx").on(t.runId),
-    // 查询 thread 下历史 Skill 使用
-    threadCreatedIdx: index("ThreadRunSkill_threadId_createdAt_idx").on(t.threadId, t.createdAt),
-    // 统计 Skill 版本表现
-    skillVersionIdx: index("ThreadRunSkill_skillId_skillVersionId_idx").on(
-      t.skillId,
-      t.skillVersionId,
-    ),
-    // P2-5: (runId, skillId, role) 唯一约束,防 saveThreadRunSkills 重试插重复行
-    runSkillRoleUq: uniqueIndex("ThreadRunSkill_runId_skillId_role_uq").on(
-      t.runId,
-      t.skillId,
-      t.role,
-    ),
-  }),
-);
-export type ThreadRunSkill = InferSelectModel<typeof threadRunSkill>;
 
 // ：V9 内置浏览器表（UserBrowserProfile / BrowserSession /
 // BrowserDownload）已移除。原表由破坏性 migration 0059 删除。

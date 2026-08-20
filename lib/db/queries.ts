@@ -4,7 +4,7 @@ import { approvalConfig, dbConfig } from "@/lib/config";
 import { logger } from "@/lib/logger";
 import { encryptCicdToken } from "@/lib/runtime/secret-crypto";
 // 12-事件总线广播——appendThreadEvent 成功后广播到进程内 hub，供 SSE 端点即时推送。
-// 放 queries.ts 而非 thread-runner，因 appendThreadEvent 在此文件；thread-events-bus 无其他依赖，不引入循环。
+// 放 queries.ts，因 appendThreadEvent 在此文件；thread-events-bus 无其他依赖，不引入循环。
 import { broadcastThreadEvent } from "@/lib/runtime/thread-events-bus";
 import { escapeLikeWildcards } from "@/lib/utils";
 import {
@@ -39,9 +39,6 @@ import {
   type AdminAuditOutcome,
   type ApprovalRequestStatus,
   type ApprovalScope,
-  type BackgroundTask,
-  type BackgroundTaskKind,
-  type BackgroundTaskStatus,
   type ContextSnapshot,
   type ContextSummary,
   type ContextSummaryType,
@@ -61,8 +58,6 @@ import {
   type PermissionDecision,
   type PermissionScope,
   type Role,
-  type RunTranscriptChunk,
-  type RunTranscriptChunkKind,
   type SecretMount,
   type SecretMountScope,
   type SecretMountStatus,
@@ -73,21 +68,11 @@ import {
   type SkillSyncState,
   type SkillVersion,
   type SkillVersionStatus,
-  type SubagentDefinition,
-  type SubagentRole,
-  type SubagentRun,
-  type SubagentRunStatus,
   type ThreadEvent,
   type ThreadEventType,
   type ThreadPlan,
   type ThreadPlanItem,
   type ThreadPlanItemStatus,
-  type ThreadRun,
-  type ThreadRunSkill,
-  type ThreadRunSkillRole,
-  type ThreadRunSkillSource,
-  type ThreadRunStatus,
-  type ThreadRunTriggerType,
   type ThreadStatus,
   type ToolApprovalRequest,
   type ToolPermissionRule,
@@ -96,7 +81,6 @@ import {
   type User,
   adminAuditLog,
   auditFailureLog,
-  backgroundTask,
   contextSnapshot,
   contextSummary,
   customTool,
@@ -111,19 +95,14 @@ import {
   policyConfigHistory,
   role,
   rolePermission,
-  runTranscriptChunk,
   secretMount,
   skill,
   skillSyncMapping,
   skillVersion,
-  subagentDefinition,
-  subagentRun,
   thread,
   threadEvent,
   threadPlan,
   threadPlanItem,
-  threadRun,
-  threadRunSkill,
   toolApprovalRequest,
   toolPermissionRule,
   toolRun,
@@ -345,20 +324,13 @@ export async function softDeleteThread(threadId: string) {
  * thread 物理删除时需清理的全部子表,按外键依赖顺序(先删引用方,最后删 thread 主记录)。
  *
  * retention 明细清理与彻底物理删除共用此清单,避免两套删表逻辑漏表。
- * 大部分子表用 threadId 关联;subagentRun 用 parentThreadId,故以 {table, column} 显式标注列名。
+ * 子表均用 threadId 关联,故以 {table, column} 显式标注列名。
  */
 const THREAD_CHILD_TABLES: ReadonlyArray<{
   table: MySqlTable;
   column: AnyColumn;
 }> = [
-  // : V7/V8 新增三表对 threadId 建了 DB FK(noAction),必须先删,否则 delete thread 触发 FK 违反。
-  // 依赖顺序:ThreadRunSkill + RunTranscriptChunk 引用 ThreadRun → 先于 ThreadRun 删。
-  { table: threadRunSkill, column: threadRunSkill.threadId },
-  { table: runTranscriptChunk, column: runTranscriptChunk.threadId },
-  { table: threadRun, column: threadRun.threadId },
   { table: toolApprovalRequest, column: toolApprovalRequest.threadId },
-  { table: backgroundTask, column: backgroundTask.threadId },
-  { table: subagentRun, column: subagentRun.parentThreadId },
   { table: gitCheckpoint, column: gitCheckpoint.threadId },
   { table: contextSnapshot, column: contextSnapshot.threadId },
   { table: contextSummary, column: contextSummary.threadId },
@@ -440,68 +412,6 @@ export async function incrementThreadTokens(
       totalTokens: sql`${thread.totalTokens} + ${usage.totalTokens}`,
     })
     .where(eq(thread.id, threadId));
-}
-
-/** 活跃态 thread status（reaper 可回收的「卡死」候选）。终态 idle/ready_for_review/failed 等不动。 */
-export const ACTIVE_THREAD_STATUSES: ThreadStatus[] = [
-  "executing",
-  "planning",
-  "awaiting_input",
-  "awaiting_approval",
-  "verifying",
-  "delivering",
-];
-
-/**
- * B-2：回收「活跃态但 updatedAt 超期」的僵尸 thread（进程崩溃/重启后残留的 executing 等）。
- *
- * 进程内 runner 的 reaper 只能管本进程的 run；进程崩溃后 DB 仍卡 executing，需启动时扫库回收。
- * 由 instrumentation.register() 启动时调一次。 updatedAt < now - maxAgeMs 的活跃态 → 标 failed
- * + 落 agent.status_changed 审计事件（reason=reaper_timeout），保证链路完整。
- *
- * @returns 被回收的 threadId 列表（供日志/审计）
- */
-export async function reapStaleThreads(maxAgeMs = 10 * 60_000): Promise<string[]> {
-  const cutoff = new Date(Date.now() - maxAgeMs);
-  const stale = await db
-    .select({ id: thread.id, status: thread.status })
-    .from(thread)
-    .where(and(inArray(thread.status, ACTIVE_THREAD_STATUSES), lt(thread.updatedAt, cutoff)));
-  if (stale.length === 0) return [];
-  // : 多实例部署下,排除有"新鲜活跃 run"(他实例正在跑)的 thread,防误杀。
-  // 新鲜活跃 run = status=running 且 lastSeenAt > cutoff(心跳近期刷新)。
-  // 单实例下不构成影响(本进程 run 心跳刷新 lastSeenAt,不会被本 reaper 误判)。
-  const freshRuns = await db
-    .select({ threadId: threadRun.threadId })
-    .from(threadRun)
-    .where(
-      and(
-        inArray(
-          threadRun.threadId,
-          stale.map((r) => r.id),
-        ),
-        eq(threadRun.status, "running"),
-        gt(threadRun.lastSeenAt, cutoff),
-      ),
-    );
-  const freshThreadIds = new Set(freshRuns.map((r) => r.threadId));
-  const ids = stale.filter((r) => !freshThreadIds.has(r.id)).map((r) => r.id);
-  if (ids.length === 0) return [];
-  await db
-    .update(thread)
-    .set({ status: "failed", updatedAt: new Date() })
-    .where(and(inArray(thread.id, ids), lt(thread.updatedAt, cutoff)));
-  // 落审计事件（fail-open，不阻塞回收）
-  await Promise.all(
-    ids.map((id) =>
-      appendThreadEvent(id, "agent.status_changed", {
-        from: stale.find((r) => r.id === id)?.status ?? "executing",
-        to: "failed",
-        reason: "reaper_timeout",
-      }).catch(() => {}),
-    ),
-  );
-  return ids;
 }
 
 export async function updateThreadModel(threadId: string, model: string) {
@@ -787,7 +697,7 @@ export async function appendThreadEvent(
   threadId: string,
   type: ThreadEventType,
   payload: Record<string, unknown>,
-  /** 归属 ThreadRun（nullable（历史事件和纯 thread 管理事件可空））。 */
+  /** 归属历史 run（nullable（历史事件和纯 thread 管理事件可空））。 */
   runId?: string | null,
 ): Promise<ThreadEvent> {
   // P2-11: 事务内 FOR UPDATE thread 行串行化同 thread 事件写入,原子取 seq + insert,
@@ -907,7 +817,7 @@ export async function createToolRun(params: {
   toolName: string;
   input: Record<string, unknown>;
   status?: ToolRunStatus;
-  /** 归属 ThreadRun（nullable（历史记录可空））。 */
+  /** 归属历史 run（nullable（历史记录可空））。 */
   runId?: string | null;
 }): Promise<ToolRun> {
   // json 列 zod 校验（fail-closed，脏数据抛错不落库）
@@ -1103,7 +1013,7 @@ export async function getCurrentSkillVersion(skillId: string): Promise<SkillVers
 
 // V8 阶段 8：getActiveSkillForThread 已删除。
 // 旧语义：从 thread.activeSkillId/activeSkillVersionId 解析 skill + version（含默认 skill 兜底）。
-// V8 替代：chat 路径用 SkillProvider + Resolver（阶段 1-3），每轮 run 独立解析并记录 ThreadRunSkill。
+// V8 替代：chat 路径用 SkillProvider + Resolver（阶段 1-3），每轮 run 独立解析并记录 Skill 使用事实。
 // 旧 thread.activeSkillId/activeSkillVersionId 字段保留兼容旧数据，但运行时不再读取。
 
 /**
@@ -1365,7 +1275,7 @@ export async function updateSyncMapping(
 
 // V8 阶段 8：setThreadSkill 已删除。
 // 旧语义：设置 thread.activeSkillId/activeSkillVersionId（版本固化）。
-// V8 替代：chat 路径用 ThreadRunSkill 记录每轮 run 的 Skill 使用事实（阶段 2）。
+// V8 替代：chat 路径用 run 级 Skill 使用事实记录（阶段 2）。
 // 旧字段保留兼容旧数据，但不再写入。
 
 // ─── Role / RBAC Queries () ─────────────────────────
@@ -1826,7 +1736,7 @@ export async function saveContextSnapshot(params: {
   skillResolverOutput?: unknown;
   /** V8：readSkillFile 加载证据（运行结束 flush 写入；创建时省略）。 */
   skillLoadEvidence?: unknown;
-  /** 归属 ThreadRun（nullable（历史快照可空））。 */
+  /** 归属历史 run（nullable（历史快照可空））。 */
   runId?: string | null;
 }): Promise<ContextSnapshot> {
   // json 列 zod 校验（fail-closed，脏数据抛错不落库）
@@ -2031,39 +1941,6 @@ export async function cleanupSupersededSummaries(retainDays = 7): Promise<number
   // drizzle mysql delete 返回affected rows在result[0].affectedRows
   const affected = (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
   return affected;
-}
-
-/**
- * S1 修复（04-G14）：SubagentRun TTL。物理删除终态且 finishedAt 超 retainDays 的 run 行。
- * 由 retention 定时任务调用。@returns 删除条数
- */
-export async function cleanupOldSubagentRuns(retainDays = 14): Promise<number> {
-  const cutoff = new Date(Date.now() - retainDays * 24 * 60 * 60 * 1000);
-  const terminal: SubagentRunStatus[] = ["completed", "failed", "cancelled", "timed_out"];
-  // : 先 select 待删 run 的 transcriptPath,删行前 unlink 文件,防孤儿 transcript 累积
-  const rows = await db
-    .select({ id: subagentRun.id, transcriptPath: subagentRun.transcriptPath })
-    .from(subagentRun)
-    .where(and(inArray(subagentRun.status, terminal), lt(subagentRun.finishedAt, cutoff)));
-  if (rows.length === 0) return 0;
-  await Promise.all(
-    rows.map(async (r) => {
-      if (r.transcriptPath) {
-        try {
-          await unlink(r.transcriptPath);
-        } catch {
-          // best-effort:文件可能已不存在或路径不可达
-        }
-      }
-    }),
-  );
-  const result = await db.delete(subagentRun).where(
-    inArray(
-      subagentRun.id,
-      rows.map((r) => r.id),
-    ),
-  );
-  return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
 }
 
 // ─── Thread Plan / Todo Queries (Stage D) ──────────────
@@ -2430,7 +2307,7 @@ export async function requestApprovalAtomic(params: {
   argFingerprint: string;
   argSummary: string;
   projectId?: string | null;
-  /** 归属 ThreadRun（nullable（历史记录可空））。 */
+  /** 归属历史 run（nullable（历史记录可空））。 */
   runId?: string | null;
 }): Promise<{ run: ToolRun; approval: ToolApprovalRequest }> {
   // 与 createToolRun 同构：json 列 zod 校验（fail-closed，脏数据抛错不落库）。
@@ -2644,141 +2521,6 @@ export async function getLatestResolvedApprovalByThread(
     .orderBy(desc(toolApprovalRequest.resolvedAt))
     .limit(1);
   return row ?? null;
-}
-
-// ─── Background Task Queries () ─────────────────────────
-//
-// 命令治理：可恢复后台任务的数据层。DB 行作可审计/可列表/进程重启标记孤儿的真实来源；
-// 进程内 pid/stop handle 缓存在 lib/runtime/background-task-registry 的 Map，不持久化。
-// task.* 事件由 registry 在状态切换时追加（createBackgroundTask 仅落 starting 行）。
-
-/** 创建一条后台任务记录（status=starting）。MySQL 无 RETURNING，自行生成主键并构造返回对象。 */
-export async function createBackgroundTask(params: {
-  threadId: string;
-  toolRunId?: string | null;
-  kind: BackgroundTaskKind;
-  command: string;
-  runtimeType: string;
-  logPath: string;
-  port?: number | null;
-}): Promise<BackgroundTask> {
-  const now = new Date();
-  const row: BackgroundTask = {
-    id: randomUUID(),
-    threadId: params.threadId,
-    toolRunId: params.toolRunId ?? null,
-    kind: params.kind,
-    command: params.command,
-    runtimeType: params.runtimeType,
-    status: "starting",
-    pid: null,
-    containerName: null,
-    port: params.port ?? null,
-    logPath: params.logPath,
-    exitCode: null,
-    startedAt: now,
-    finishedAt: null,
-    lastActivityAt: now,
-  };
-  await db.insert(backgroundTask).values(row);
-  return row;
-}
-
-/** 按 id 取后台任务。 */
-export async function getBackgroundTask(id: string): Promise<BackgroundTask | null> {
-  const [row] = await db.select().from(backgroundTask).where(eq(backgroundTask.id, id)).limit(1);
-  return row ?? null;
-}
-
-/** 列 thread 的全部后台任务（按 startedAt desc）。 */
-export async function listBackgroundTasksByThread(threadId: string): Promise<BackgroundTask[]> {
-  return db
-    .select()
-    .from(backgroundTask)
-    .where(eq(backgroundTask.threadId, threadId))
-    .orderBy(desc(backgroundTask.startedAt));
-}
-
-/**
- * 更新后台任务状态与终态字段。仅写传入字段；lastActivityAt 总刷新（日志写入/状态变更时调）。
- * 返回更新后的行（按入参 + existing 合并；MySQL 无 RETURNING）。
- */
-export async function updateBackgroundTask(
-  id: string,
-  patch: {
-    status?: BackgroundTaskStatus;
-    pid?: number | null;
-    containerName?: string | null;
-    port?: number | null;
-    logPath?: string;
-    exitCode?: number | null;
-    finishedAt?: Date | null;
-    lastActivityAt?: Date;
-  },
-): Promise<BackgroundTask | null> {
-  const [existing] = await db
-    .select()
-    .from(backgroundTask)
-    .where(eq(backgroundTask.id, id))
-    .limit(1);
-  if (!existing) return null;
-  const sets: Record<string, unknown> = { lastActivityAt: patch.lastActivityAt ?? new Date() };
-  if (patch.status !== undefined) sets.status = patch.status;
-  if (patch.pid !== undefined) sets.pid = patch.pid;
-  if (patch.containerName !== undefined) sets.containerName = patch.containerName;
-  if (patch.port !== undefined) sets.port = patch.port;
-  if (patch.logPath !== undefined) sets.logPath = patch.logPath;
-  if (patch.exitCode !== undefined) sets.exitCode = patch.exitCode;
-  if (patch.finishedAt !== undefined) sets.finishedAt = patch.finishedAt;
-  await db.update(backgroundTask).set(sets).where(eq(backgroundTask.id, id));
-  return { ...existing, ...sets } as BackgroundTask;
-}
-
-/**
- * 列 thread 中仍处于 active 态（starting/running）的后台任务。
- * 供 stopAllByThread / idle sweep 逐个回收。
- */
-export async function listActiveBackgroundTasksByThread(
-  threadId: string,
-): Promise<BackgroundTask[]> {
-  return db
-    .select()
-    .from(backgroundTask)
-    .where(
-      and(
-        eq(backgroundTask.threadId, threadId),
-        inArray(backgroundTask.status, ["starting", "running"]),
-      ),
-    )
-    .orderBy(asc(backgroundTask.startedAt));
-}
-
-/**
- * 列全部仍处于 active 态（starting/running）的后台任务（跨 thread）。
- * 供进程退出 closeAllBackgroundTasks / idle sweep 全量扫描。
- */
-export async function listActiveBackgroundTasks(): Promise<BackgroundTask[]> {
-  return db
-    .select()
-    .from(backgroundTask)
-    .where(inArray(backgroundTask.status, ["starting", "running"]))
-    .orderBy(asc(backgroundTask.startedAt));
-}
-
-/**
- * 进程启动时把所有 starting/running 行诚实标记为 orphaned。
- * pid 失效无法 reattach；不假装存活（§1 决策摘要 / §12 风险表）。
- * 返回被标记的任务列表（registry 可据此追加事件或仅作日志）。
- */
-export async function markOrphanBackgroundTasksOnStartup(): Promise<BackgroundTask[]> {
-  const orphans = await listActiveBackgroundTasks();
-  if (orphans.length === 0) return [];
-  const now = new Date();
-  await db
-    .update(backgroundTask)
-    .set({ status: "orphaned", finishedAt: now, lastActivityAt: now })
-    .where(inArray(backgroundTask.status, ["starting", "running"]));
-  return orphans.map((o) => ({ ...o, status: "orphaned", finishedAt: now }));
 }
 
 // ─── Git Checkpoint Queries () ──────────────────────────
@@ -3371,211 +3113,6 @@ export async function listExternalFetchedEvents(
   }));
 }
 
-// ─── Subagent Definition / Run Queries () ───────────────
-//
-// 子代理数据层。Definition = 可派生模板；Run = 一次执行的审计/状态行。
-// 生命周期编排（writeScope 互斥 / 并发上限 / 状态机 / 事件追加）在 lib/subagent/registry.ts，
-// 本层只做纯 DB CRUD，与 background-task 一致（registry 管生命周期，queries 管 CRUD）。
-
-/** 创建一个子代理定义（模板）。MySQL 无 RETURNING，自行生成主键并构造返回对象。 */
-export async function createSubagentDefinition(params: {
-  name: string;
-  role: SubagentRole;
-  modelProfileId?: string | null;
-  allowedTools: string[];
-  contextPolicy: Record<string, unknown>;
-  outputSchema?: Record<string, unknown> | null;
-  defaultWriteScope?: string[] | null;
-}): Promise<SubagentDefinition> {
-  const now = new Date();
-  const row: SubagentDefinition = {
-    id: randomUUID(),
-    name: params.name,
-    role: params.role,
-    modelProfileId: params.modelProfileId ?? null,
-    allowedTools: params.allowedTools,
-    contextPolicy: params.contextPolicy,
-    outputSchema: params.outputSchema ?? null,
-    defaultWriteScope: params.defaultWriteScope ?? null,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await db.insert(subagentDefinition).values(row);
-  return row;
-}
-
-/** 按 id 取子代理定义。 */
-export async function getSubagentDefinition(id: string): Promise<SubagentDefinition | null> {
-  const [row] = await db
-    .select()
-    .from(subagentDefinition)
-    .where(eq(subagentDefinition.id, id))
-    .limit(1);
-  return row ?? null;
-}
-
-/** 列全部子代理定义（按 createdAt asc）。 */
-export async function listSubagentDefinitions(): Promise<SubagentDefinition[]> {
-  return db.select().from(subagentDefinition).orderBy(asc(subagentDefinition.createdAt));
-}
-
-/** 创建一条 SubagentRun（status=queued）。writeScope/event 由 registry 编排，本层只落行。 */
-export async function createSubagentRun(params: {
-  parentThreadId: string;
-  definitionId: string;
-  goal: string;
-  contextHints?: string[] | null;
-  writeScope?: string[] | null;
-  transcriptPath?: string | null;
-}): Promise<SubagentRun> {
-  const row: SubagentRun = {
-    id: randomUUID(),
-    parentThreadId: params.parentThreadId,
-    definitionId: params.definitionId,
-    goal: params.goal,
-    contextHints: params.contextHints ?? null,
-    status: "queued",
-    writeScope: params.writeScope ?? null,
-    resultSummary: null,
-    outputArtifactId: null,
-    transcriptPath: params.transcriptPath ?? null,
-    errorMessage: null,
-    startedAt: null,
-    finishedAt: null,
-    createdAt: new Date(),
-  };
-  await db.insert(subagentRun).values(row);
-  return row;
-}
-
-/** 按 id 取 SubagentRun。 */
-export async function getSubagentRun(id: string): Promise<SubagentRun | null> {
-  const [row] = await db.select().from(subagentRun).where(eq(subagentRun.id, id)).limit(1);
-  return row ?? null;
-}
-
-/** 列 thread 的全部 SubagentRun（按 createdAt desc，最近在前）。 */
-export async function listSubagentRunsByThread(parentThreadId: string): Promise<SubagentRun[]> {
-  return db
-    .select()
-    .from(subagentRun)
-    .where(eq(subagentRun.parentThreadId, parentThreadId))
-    .orderBy(desc(subagentRun.createdAt), desc(subagentRun.id));
-}
-
-/**
- * 列 thread 中仍处于活跃态（queued/running）的 SubagentRun。
- * 供 writeScope 互斥校验与并发上限判定（queued 也占写范围名额，fail-closed）。
- */
-export async function listActiveSubagentRunsByThread(
-  parentThreadId: string,
-): Promise<SubagentRun[]> {
-  return db
-    .select()
-    .from(subagentRun)
-    .where(
-      and(
-        eq(subagentRun.parentThreadId, parentThreadId),
-        inArray(subagentRun.status, ["queued", "running"]),
-      ),
-    )
-    .orderBy(asc(subagentRun.createdAt));
-}
-
-/**
- * P0 修复（G3 orphan 清理）：列出全平台所有 running 状态的 subagent run。
- *
- * 进程重启时,本应在本进程的 running run 实际已死（进程内 activeRuns Map 已清空）。
- * `markOrphanSubagentRunsOnStartup` 调此拿全量 running → 标 cancelled。
- * 不含 queued（queued 未启动,可恢复执行,不算 orphan）。
- */
-export async function listAllRunningSubagentRuns(): Promise<SubagentRun[]> {
-  return db
-    .select()
-    .from(subagentRun)
-    .where(eq(subagentRun.status, "running"))
-    .orderBy(asc(subagentRun.createdAt));
-}
-
-/**
- * P0 修复（G3 orphan 清理）：进程启动时把所有 running 状态的 subagent run 标 cancelled。
- *
- * 语义对齐 `markOrphanBackgroundTasksOnStartup`（background-task-registry 模式）：
- * - 进程内 activeRuns Map 重启即清空,running run 的执行 promise 已丢失
- * - 不假装存活（Studio 不再显示"执行中"误导用户）
- * - 状态机守护：cancelled 不会被后续 updateRunStatus(completed/failed) 覆盖（registry 已实现）
- * - 返回被标记的 run 列表（供日志/事件追加,当前仅日志）
- *
- * 注意：只标 running（queued 可恢复执行）。多实例部署下,其他实例的 running run 会被误标,
- * 但这是 serverless/无心跳场景的诚实降级——比永久卡 running 更安全。未来若引入心跳/lease
- * 可精确判断归属（见 04-subagent.md G3 建议）。
- */
-export async function markOrphanSubagentRunsOnStartup(): Promise<SubagentRun[]> {
-  const orphans = await listAllRunningSubagentRuns();
-  if (orphans.length === 0) return [];
-  const now = new Date();
-  await db
-    .update(subagentRun)
-    .set({
-      status: "cancelled",
-      finishedAt: now,
-      errorMessage: "进程重启：活跃子代理执行丢失（orphan 清理）",
-    })
-    .where(eq(subagentRun.status, "running"));
-  return orphans.map((o) => ({
-    ...o,
-    status: "cancelled" as const,
-    finishedAt: now,
-    errorMessage: "进程重启：活跃子代理执行丢失（orphan 清理）",
-  }));
-}
-
-/**
- * 更新 SubagentRun 状态与终态字段。仅写传入字段；running 写 startedAt，终态写 finishedAt。
- * 返回更新后的行（按入参 + existing 合并；MySQL 无 RETURNING）。状态机校验由 registry 负责。
- */
-export async function updateSubagentRun(
-  id: string,
-  patch: {
-    status?: SubagentRunStatus;
-    contextHints?: string[] | null;
-    resultSummary?: string | null;
-    outputArtifactId?: string | null;
-    errorMessage?: string | null;
-    transcriptPath?: string | null;
-    startedAt?: Date | null;
-    finishedAt?: Date | null;
-    /** : CAS——仅当当前 status 匹配时才更新,防并发状态机覆盖。 */
-    expectedStatus?: SubagentRunStatus;
-  },
-): Promise<SubagentRun | null> {
-  const [existing] = await db.select().from(subagentRun).where(eq(subagentRun.id, id)).limit(1);
-  if (!existing) return null;
-  // : CAS 校验——若调用方传了 expectedStatus 且与当前不符,视为并发冲突返回 null。
-  if (patch.expectedStatus !== undefined && existing.status !== patch.expectedStatus) {
-    return null;
-  }
-  const sets: Record<string, unknown> = {};
-  if (patch.status !== undefined) sets.status = patch.status;
-  if (patch.contextHints !== undefined) sets.contextHints = patch.contextHints;
-  if (patch.resultSummary !== undefined) sets.resultSummary = patch.resultSummary;
-  if (patch.outputArtifactId !== undefined) sets.outputArtifactId = patch.outputArtifactId;
-  if (patch.errorMessage !== undefined) sets.errorMessage = patch.errorMessage;
-  if (patch.transcriptPath !== undefined) sets.transcriptPath = patch.transcriptPath;
-  if (patch.startedAt !== undefined) sets.startedAt = patch.startedAt;
-  if (patch.finishedAt !== undefined) sets.finishedAt = patch.finishedAt;
-  if (Object.keys(sets).length === 0) return existing;
-  // : UPDATE 也带 status 守卫,防 select 与 update 之间的 TOCTOU。
-  const conds = [eq(subagentRun.id, id)];
-  if (patch.expectedStatus !== undefined) conds.push(eq(subagentRun.status, patch.expectedStatus));
-  const result = await db
-    .update(subagentRun)
-    .set(sets)
-    .where(and(...conds));
-  if ((result as unknown as { affectedRows?: number }).affectedRows === 0) return null;
-  return { ...existing, ...sets } as SubagentRun;
-}
-
 // ─── : SecretMount Queries ──────────────────────────────
 
 /** 创建 secret mount（加密存储）。 */
@@ -3817,454 +3354,4 @@ export async function updateDeployment(
   if (Object.keys(sets).length === 0) return existing;
   await db.update(deployment).set(sets).where(eq(deployment.id, id));
   return { ...existing, ...sets } as Deployment;
-}
-
-// ─── V7: ThreadRun 查询与状态迁移 ─────────────────────────────
-
-/**
- * 创建一条 ThreadRun 记录（status 默认 queued）。
- * runId 由 DB 事实源生成，不再由内存 runner 独自生成。
- *
- * V8：可选 `id` 参数供 chat route 预生成 runId，使 Skill Resolver 能在 ThreadRun
- * 落库前就拿到 runId 做审计（Resolver 是纯函数，runId 只用于 decisionReason）。
- */
-export async function createThreadRun(params: {
-  id?: string;
-  threadId: string;
-  model: string;
-  triggerType?: ThreadRunTriggerType;
-  triggerMessageId?: string;
-  skillId?: string;
-  skillVersionId?: string;
-  runtimeType?: string;
-  status?: ThreadRunStatus;
-}): Promise<ThreadRun> {
-  const now = new Date();
-  const row: ThreadRun = {
-    id: params.id ?? randomUUID(),
-    threadId: params.threadId,
-    status: params.status ?? "queued",
-    triggerType: params.triggerType ?? "user_message",
-    triggerMessageId: params.triggerMessageId ?? null,
-    model: params.model,
-    skillId: params.skillId ?? null,
-    skillVersionId: params.skillVersionId ?? null,
-    runtimeType: params.runtimeType ?? null,
-    startedAt: params.status === "running" ? now : null,
-    finishedAt: null,
-    lastSeenAt: params.status === "running" ? now : null,
-    cancelReason: null,
-    error: null,
-    promptTokens: 0,
-    completionTokens: 0,
-    totalTokens: 0,
-    metadata: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await db.insert(threadRun).values(row);
-  return row;
-}
-
-/** 将 ThreadRun 设为 running，记录 startedAt 和 lastSeenAt。 */
-export async function markThreadRunRunning(runId: string): Promise<void> {
-  const now = new Date();
-  await db
-    .update(threadRun)
-    .set({ status: "running", startedAt: now, lastSeenAt: now, updatedAt: now })
-    .where(eq(threadRun.id, runId));
-}
-
-/** 更新 ThreadRun 心跳时间。 */
-export async function heartbeatThreadRun(runId: string): Promise<void> {
-  await db
-    .update(threadRun)
-    .set({ lastSeenAt: new Date(), updatedAt: new Date() })
-    .where(eq(threadRun.id, runId));
-}
-
-/** ThreadRun 活跃态:仅这些状态可迁移到终态(completed/failed/cancelled)。 */
-const THREAD_RUN_ACTIVE_STATUSES = ["queued", "running", "awaiting_approval"] as const;
-
-/** 标记 ThreadRun 正常完成，写入 token 用量和 finishedAt。 */
-export async function completeThreadRun(
-  runId: string,
-  tokens: { promptTokens: number; completionTokens: number; totalTokens: number },
-): Promise<void> {
-  const now = new Date();
-  // :CAS 守卫——仅活跃态可迁 completed,防 cancel/markFailed/stale reaper 并发覆盖终态。
-  await db
-    .update(threadRun)
-    .set({
-      status: "completed",
-      finishedAt: now,
-      updatedAt: now,
-      promptTokens: tokens.promptTokens,
-      completionTokens: tokens.completionTokens,
-      totalTokens: tokens.totalTokens,
-    })
-    .where(
-      and(eq(threadRun.id, runId), inArray(threadRun.status, [...THREAD_RUN_ACTIVE_STATUSES])),
-    );
-}
-
-/** 标记 ThreadRun 失败，写入错误信息和 finishedAt。 */
-export async function failThreadRun(runId: string, error: string): Promise<void> {
-  const now = new Date();
-  // :CAS 守卫——仅活跃态可迁 failed,防已终态 run 被覆盖。
-  await db
-    .update(threadRun)
-    .set({ status: "failed", error, finishedAt: now, updatedAt: now })
-    .where(
-      and(eq(threadRun.id, runId), inArray(threadRun.status, [...THREAD_RUN_ACTIVE_STATUSES])),
-    );
-}
-
-/** 标记 ThreadRun 取消，写入取消原因和 finishedAt。 */
-export async function cancelThreadRun(runId: string, cancelReason: string): Promise<void> {
-  const now = new Date();
-  // :CAS 守卫——仅活跃态可迁 cancelled,防已终态 run 被覆盖。
-  await db
-    .update(threadRun)
-    .set({ status: "cancelled", cancelReason, finishedAt: now, updatedAt: now })
-    .where(
-      and(eq(threadRun.id, runId), inArray(threadRun.status, [...THREAD_RUN_ACTIVE_STATUSES])),
-    );
-}
-
-/**
- * 将失联的 running run 标记为 stale。
- * 条件：status=running 且 lastSeenAt 早于 cutoff（或 lastSeenAt 为 null 且 startedAt 早于 cutoff）。
- * 同时更新对应 Thread.status（executing → failed）+ 写 ThreadEvent 审计事件。
- * 返回被标记 stale 的 run 数量。
- */
-export async function markStaleThreadRuns(cutoff: Date): Promise<number> {
-  const now = new Date();
-  // 查找符合条件的 run（含 threadId 用于后续更新 Thread 和写事件）
-  const staleRuns = await db
-    .select({ id: threadRun.id, threadId: threadRun.threadId })
-    .from(threadRun)
-    .where(
-      and(
-        eq(threadRun.status, "running"),
-        or(
-          lt(threadRun.lastSeenAt, cutoff),
-          and(isNull(threadRun.lastSeenAt), lt(threadRun.startedAt, cutoff)),
-        ),
-      ),
-    );
-  if (staleRuns.length === 0) return 0;
-  const ids = staleRuns.map((r) => r.id);
-  // : CAS——UPDATE 加 status='running' 守卫,防 select 后 run 被 cancelRun 标 cancelled
-  // 仍被这里覆盖为 stale(审计时序混乱);并发 reaper 第二个 affectedRows=0 自然空跑。
-  await db
-    .update(threadRun)
-    .set({ status: "stale", updatedAt: now })
-    .where(and(inArray(threadRun.id, ids), eq(threadRun.status, "running")));
-  // 逐 run 写 ThreadEvent 审计事件 + 更新 Thread.status
-  for (const run of staleRuns) {
-    try {
-      await appendThreadEvent(
-        run.threadId,
-        "agent.status_changed",
-        {
-          from: "executing",
-          to: "failed",
-          reason: "run_stale",
-          runId: run.id,
-        },
-        run.id,
-      );
-    } catch {
-      // fail-open：事件写入失败不影响 stale 标记
-    }
-  }
-  // 去重 threadId，批量把 executing 的 Thread 标 failed
-  const staleThreadIds = [...new Set(staleRuns.map((r) => r.threadId))];
-  await db
-    .update(thread)
-    .set({ status: "failed", updatedAt: now })
-    .where(
-      and(
-        inArray(thread.id, staleThreadIds),
-        eq(thread.status, "executing"),
-        lt(thread.updatedAt, cutoff),
-      ),
-    );
-  return ids.length;
-}
-
-/** 查询 thread 最新一条 ThreadRun（按 createdAt desc）。 */
-export async function getLatestThreadRun(threadId: string): Promise<ThreadRun | null> {
-  const [row] = await db
-    .select()
-    .from(threadRun)
-    .where(eq(threadRun.threadId, threadId))
-    .orderBy(desc(threadRun.createdAt))
-    .limit(1);
-  return row ?? null;
-}
-
-/** 查询 thread 当前活跃的 ThreadRun（queued / running / awaiting_approval）。 */
-export async function getActiveThreadRun(threadId: string): Promise<ThreadRun | null> {
-  const [row] = await db
-    .select()
-    .from(threadRun)
-    .where(
-      and(
-        eq(threadRun.threadId, threadId),
-        inArray(threadRun.status, ["queued", "running", "awaiting_approval"]),
-      ),
-    )
-    .orderBy(desc(threadRun.createdAt))
-    .limit(1);
-  return row ?? null;
-}
-
-/**
- * 带 owner guard 的 ThreadRun 查询：先验证 thread 属于 userId，再查 run。
- * 非 owner 返回 null（与 getThreadByIdForUser 一致的 404 语义）。
- */
-export async function getThreadRunByIdForUser(
-  runId: string,
-  userId: string,
-): Promise<ThreadRun | null> {
-  const [row] = await db
-    .select({ run: threadRun })
-    .from(threadRun)
-    .innerJoin(thread, eq(threadRun.threadId, thread.id))
-    .where(and(eq(threadRun.id, runId), eq(thread.userId, userId), isNull(thread.deletedAt)))
-    .limit(1);
-  return row?.run ?? null;
-}
-
-/**
- * 获取单次 run 的完整证据链（run + messages + events + toolRuns + contextSnapshots）。
- * owner guard：thread.userId = userId 且 run.threadId = threadId 且 run.id = runId。
- * 返回 null 表示 run 不存在或无权访问。
- */
-export async function getRunDetail(threadId: string, runId: string, userId: string) {
-  // 1. 验证归属：run 属于 thread，thread 属于 user
-  const [row] = await db
-    .select({ run: threadRun })
-    .from(threadRun)
-    .innerJoin(thread, eq(threadRun.threadId, thread.id))
-    .where(
-      and(
-        eq(threadRun.id, runId),
-        eq(threadRun.threadId, threadId),
-        eq(thread.userId, userId),
-        isNull(thread.deletedAt),
-      ),
-    )
-    .limit(1);
-  if (!row) return null;
-
-  // 2. 并行查 5 张表的 runId 归属数据（V8 新增 ThreadRunSkill）
-  const [messages, events, toolRuns, snapshots, runSkills] = await Promise.all([
-    db
-      .select()
-      .from(message)
-      .where(and(eq(message.threadId, threadId), eq(message.runId, runId)))
-      .orderBy(asc(message.createdAt)),
-    db
-      .select()
-      .from(threadEvent)
-      .where(and(eq(threadEvent.threadId, threadId), eq(threadEvent.runId, runId)))
-      .orderBy(asc(threadEvent.sequence)),
-    db
-      .select()
-      .from(toolRun)
-      .where(and(eq(toolRun.threadId, threadId), eq(toolRun.runId, runId)))
-      .orderBy(asc(toolRun.startedAt)),
-    db
-      .select()
-      .from(contextSnapshot)
-      .where(and(eq(contextSnapshot.threadId, threadId), eq(contextSnapshot.runId, runId))),
-    // V8 阶段 7：run 级 Skill 使用记录（供 ThreadRunPanel 展示 selected SkillVersions）
-    db
-      .select()
-      .from(threadRunSkill)
-      .where(eq(threadRunSkill.runId, runId))
-      .orderBy(asc(threadRunSkill.createdAt)),
-  ]);
-
-  return { run: row.run, messages, events, toolRuns, contextSnapshots: snapshots, runSkills };
-}
-
-// ─── : RunTranscriptChunk Queries ────────────────────
-
-/**
- * 追加一个 RunTranscriptChunk。
- *
- * 未传入 sequence 时自动分配 run 内递增 sequence（先查当前 max，再 +1）。
- * 由 broadcaster 前置分配 sequence，保证内存流与 DB 的 sequence 一致，
- * 避免并发写入导致顺序错乱。
- */
-export async function appendRunTranscriptChunk(params: {
-  threadId: string;
-  runId: string;
-  kind: RunTranscriptChunkKind;
-  payload: unknown;
-  /** 可选：由调用方预分配 sequence；未传时由 DB 自动分配。 */
-  sequence?: number;
-}): Promise<RunTranscriptChunk> {
-  // P2-5:套用 appendThreadEvent 的重试模式——未预分配 sequence 时,SELECT MAX+1 在并发下
-  // 可能撞 unique(runId, sequence),INSERT 失败重新取 max+1 重试(最多 5 次)。
-  // 预分配 sequence(broadcaster 单线程)冲突 → 不重试(覆盖会破坏内存流顺序),抛错。
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    // 1. 计算 sequence：调用方预分配优先,否则查当前 max + 1(每次重试重新查)
-    let nextSequence = params.sequence;
-    if (nextSequence === undefined) {
-      const [maxRow] = await db
-        .select({ maxSeq: max(runTranscriptChunk.sequence) })
-        .from(runTranscriptChunk)
-        .where(eq(runTranscriptChunk.runId, params.runId))
-        .limit(1);
-      nextSequence = (maxRow?.maxSeq ?? 0) + 1;
-    }
-
-    try {
-      // 2. 插入新 chunk
-      const [inserted] = await db
-        .insert(runTranscriptChunk)
-        .values({
-          threadId: params.threadId,
-          runId: params.runId,
-          sequence: nextSequence,
-          kind: params.kind,
-          payload: params.payload,
-        })
-        .$returningId();
-
-      if (!inserted) {
-        throw new Error("Failed to insert RunTranscriptChunk");
-      }
-
-      // 3. 查询完整行返回
-      const [row] = await db
-        .select()
-        .from(runTranscriptChunk)
-        .where(eq(runTranscriptChunk.id, inserted.id))
-        .limit(1);
-
-      if (!row) {
-        throw new Error("Failed to retrieve inserted RunTranscriptChunk");
-      }
-
-      return row;
-    } catch (error) {
-      lastError = error;
-      const msg = error instanceof Error ? error.message : String(error);
-      // unique 冲突(ER_DUP_ENTRY 1062)→ 重试;预分配 sequence 冲突不重试(破坏顺序)
-      if (!/1062|duplicate|ER_DUP/i.test(msg)) throw error;
-      if (params.sequence !== undefined) throw error;
-    }
-  }
-  throw lastError ?? new Error("appendRunTranscriptChunk 重试耗尽");
-}
-
-/**
- * 列出某 run 的 transcript chunks，按 sequence 升序。
- *
- * @param afterSeq 可选，只返回 sequence > afterSeq 的 chunk（用于续传）
- * @param limit 可选，默认 1000，最大 10000
- */
-export async function listRunTranscriptChunks(
-  runId: string,
-  opts: { afterSeq?: number; limit?: number } = {},
-): Promise<RunTranscriptChunk[]> {
-  const limit = Math.min(10000, Math.max(1, Math.floor(opts.limit ?? 1000)));
-
-  const conds = [eq(runTranscriptChunk.runId, runId)];
-  if (opts.afterSeq !== undefined) {
-    conds.push(gt(runTranscriptChunk.sequence, opts.afterSeq));
-  }
-
-  return db
-    .select()
-    .from(runTranscriptChunk)
-    .where(and(...conds))
-    .orderBy(asc(runTranscriptChunk.sequence))
-    .limit(limit);
-}
-
-// ─── V8: ThreadRunSkill 查询（Run 级 Skill 使用事实）─────────
-//
-// 一个 ThreadRun 实际使用的 0..N 个 SkillVersion（方案 v8 §五.4）。
-// - 取代旧 Thread.activeSkillId/activeSkillVersionId 的 thread 绑定语义。
-// - 允许 0 个（基础 agent，不落行）；允许多个（primary + supporting）。
-// - 恢复未完成 run 时由 chat route 读取原 run 的 ThreadRunSkill，沿用原版本（约束 6）。
-
-/**
- * 保存一次 ThreadRun 实际使用的 SkillVersion 列表。
- *
- * - 空 skills 数组表示基础 agent，不落任何 ThreadRunSkill 行，直接返回 []。
- * - 由 chat route 在 Resolver 决策后、Runner 执行前调用，确保执行失败也能看到本轮决策。
- * - 同一 runId 多次调用会累积行（不做 upsert）；恢复场景由调用方先读原 run 再写新 run。
- */
-export async function saveThreadRunSkills(params: {
-  runId: string;
-  threadId: string;
-  skills: Array<{
-    skillId: string;
-    skillVersionId: string;
-    role?: ThreadRunSkillRole;
-    source?: ThreadRunSkillSource;
-    reason?: string | null;
-    contentHash?: string | null;
-  }>;
-}): Promise<ThreadRunSkill[]> {
-  if (params.skills.length === 0) {
-    return [];
-  }
-  const rows = params.skills.map((s) => ({
-    runId: params.runId,
-    threadId: params.threadId,
-    skillId: s.skillId,
-    skillVersionId: s.skillVersionId,
-    role: (s.role ?? "primary") as ThreadRunSkillRole,
-    source: (s.source ?? "resolver") as ThreadRunSkillSource,
-    reason: s.reason ?? null,
-    contentHash: s.contentHash ?? null,
-  }));
-  // P2-5: 幂等——重试/并发调用先删本 run 旧记录再插,防重复行(对比 saveMessages 用 .ignore)。
-  await db.transaction(async (tx) => {
-    await tx.delete(threadRunSkill).where(eq(threadRunSkill.runId, params.runId));
-    await tx.insert(threadRunSkill).values(rows);
-  });
-  return listThreadRunSkillsByRun(params.runId);
-}
-
-/**
- * 列出某次 run 实际使用的 SkillVersion（按 createdAt 升序）。
- *
- * 用途：恢复未完成 run 时读取原版本；run 详情展示本轮 Skill 决策。
- * 基础 agent（无 Skill）返回空数组。
- */
-export async function listThreadRunSkillsByRun(runId: string): Promise<ThreadRunSkill[]> {
-  return db
-    .select()
-    .from(threadRunSkill)
-    .where(eq(threadRunSkill.runId, runId))
-    .orderBy(asc(threadRunSkill.createdAt));
-}
-
-/**
- * 列出某 thread 下历史 Skill 使用记录（按 createdAt 升序）。
- *
- * 用途：Studio 展示 thread 的 Skill 使用时间线。不作为运行时解析依据（每轮独立 Resolver）。
- */
-export async function listThreadRunSkillsByThread(
-  threadId: string,
-  opts: { limit?: number } = {},
-): Promise<ThreadRunSkill[]> {
-  const limit = Math.min(1000, Math.max(1, Math.floor(opts.limit ?? 200)));
-  return db
-    .select()
-    .from(threadRunSkill)
-    .where(eq(threadRunSkill.threadId, threadId))
-    .orderBy(asc(threadRunSkill.createdAt))
-    .limit(limit);
 }

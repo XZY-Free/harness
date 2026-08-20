@@ -7,10 +7,8 @@ const alias = { "@": resolve(__dirname, ".") };
 // policyConfig/GitCheckpoint）。正式链零依赖；按用户
 // 决策「未覆盖就不管」排除，代码原样保留。unit project 现有 exclude 已跳过，仅 db project 需要。
 const LEGACY_B1_DB_TESTS = [
-  "lib/db/queries.test.ts",
   "lib/db/studio-queries.test.ts",
   "lib/db/retention.test.ts",
-  "lib/analytics/queries.test.ts",
   "lib/auth.test.ts",
   "lib/policy/config.test.ts",
 ];

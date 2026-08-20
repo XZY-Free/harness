@@ -17,7 +17,6 @@
 import {
   cleanupExpiredMemories,
   cleanupOldSnapshots,
-  cleanupOldSubagentRuns,
   cleanupSupersededSummaries,
 } from "@/lib/db/queries";
 import { purgeExpiredThreadDetails } from "@/lib/db/retention";
@@ -40,15 +39,6 @@ async function main() {
   if (supersededPurged > 0) {
     logger.info("[purge-retention] supersede 链 GC 完成", { supersededPurged });
     console.log("supersede 链 GC 完成:", supersededPurged);
-  }
-  // SubagentRun TTL —— 物理删除 14 天前终态 run
-  const subagentPurged = await cleanupOldSubagentRuns().catch((err) => {
-    logger.warn("[purge-retention] SubagentRun GC 失败", { error: String(err) });
-    return 0;
-  });
-  if (subagentPurged > 0) {
-    logger.info("[purge-retention] SubagentRun GC 完成", { subagentPurged });
-    console.log("SubagentRun GC 完成:", subagentPurged);
   }
   // 清理过期记忆（expiresAt < now）
   const memoryPurged = await cleanupExpiredMemories().catch((err) => {

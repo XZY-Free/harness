@@ -6,11 +6,8 @@ import {
   contextSnapshot,
   contextSummary,
   message,
-  runTranscriptChunk,
   thread,
   threadEvent,
-  threadRun,
-  threadRunSkill,
   toolRun,
 } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
@@ -20,17 +17,11 @@ import { and, inArray, isNotNull, lt } from "drizzle-orm";
  * retention 明细清理子集。
  *
  * 与 deleteThreadRecursive 的 THREAD_CHILD_TABLES 对齐,但 retention 默认只清明细、
- * 保留 thread 主记录与审批/交付历史(threadApprovalRequest/backgroundTask/gitCheckpoint/
- * subagentRun/deployment 等)。
- * : 扩展到全部执行过程明细——原 5 张(threadEvent/toolRun/contextSnapshot/
- * contextSummary/runTranscriptChunk)+ threadRun/threadRunSkill/message。清理执行过程
- * 只影响回放,不影响历史列表与交付审计。按 FK 依赖顺序排列(串行删):threadRunSkill +
- * runTranscriptChunk 引用 threadRun,先于 threadRun 删。
+ * 保留 thread 主记录与审批/交付历史(threadApprovalRequest/gitCheckpoint/deployment 等)。
+ * 清理执行过程明细(threadEvent/toolRun/contextSnapshot/contextSummary/message)。
+ * 清理执行过程只影响回放,不影响历史列表与交付审计。
  */
 const RETENTION_DETAIL_TABLES = [
-  threadRunSkill,
-  runTranscriptChunk,
-  threadRun,
   message,
   threadEvent,
   toolRun,
@@ -67,9 +58,6 @@ const TERMINAL_STATUSES: ThreadStatus[] = [
 
 export type PurgeResult = {
   purgedThreads: number;
-  threadRunSkills: number;
-  runTranscriptChunks: number;
-  threadRuns: number;
   messages: number;
   threadEvents: number;
   toolRuns: number;
@@ -94,9 +82,6 @@ export async function purgeExpiredThreadDetails(
   if (retentionDays <= 0) {
     return {
       purgedThreads: 0,
-      threadRunSkills: 0,
-      runTranscriptChunks: 0,
-      threadRuns: 0,
       messages: 0,
       threadEvents: 0,
       toolRuns: 0,
@@ -119,9 +104,6 @@ export async function purgeExpiredThreadDetails(
   if (expired.length === 0) {
     return {
       purgedThreads: 0,
-      threadRunSkills: 0,
-      runTranscriptChunks: 0,
-      threadRuns: 0,
       messages: 0,
       threadEvents: 0,
       toolRuns: 0,
@@ -135,7 +117,7 @@ export async function purgeExpiredThreadDetails(
   const threadIds = expired.map((t) => t.id);
 
   // :明细按表删除,复用 RETENTION_DETAIL_TABLES 与 deleteThreadRecursive 对齐,防漏表。
-  // 不删 thread 主记录(保留历史列表);不删 toolApprovalRequest/backgroundTask/gitCheckpoint(交付/审批历史)。
+  // 不删 thread 主记录(保留历史列表);不删 toolApprovalRequest/gitCheckpoint(交付/审批历史)。
   // 修复：用事务包裹并行删除，防止部分表删除成功/部分失败导致数据不一致。
   // drizzle MySQL delete 返回 MySqlRawQueryResult(类型上无 rowsAffected),
   // 运行时为 mysql2 ResultSetHeader,真实字段是 affectedRows。用类型断言取,取不到回退 0。
@@ -151,7 +133,6 @@ export async function purgeExpiredThreadDetails(
     }
     return 0;
   };
-  // : 串行删除(按 FK 依赖顺序),防 threadRunSkill/runTranscriptChunk 引用 threadRun 时并行删触发 FK 违反
   const deleted: unknown[] = [];
   await db.transaction(async (tx) => {
     for (const t of RETENTION_DETAIL_TABLES) {
@@ -187,13 +168,9 @@ export async function purgeExpiredThreadDetails(
     }
   }
 
-  const [runSkillsDel, chunksDel, runsDel, messagesDel, eventsDel, toolsDel, snapsDel, sumsDel] =
-    deleted;
+  const [messagesDel, eventsDel, toolsDel, snapsDel, sumsDel] = deleted;
   const result: PurgeResult = {
     purgedThreads: threadIds.length,
-    threadRunSkills: affectedRows(runSkillsDel),
-    runTranscriptChunks: affectedRows(chunksDel),
-    threadRuns: affectedRows(runsDel),
     messages: affectedRows(messagesDel),
     threadEvents: affectedRows(eventsDel),
     toolRuns: affectedRows(toolsDel),
