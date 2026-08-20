@@ -720,10 +720,6 @@ export const ADMIN_AUDIT_ACTIONS = [
   "thread.purged",
   // :审批决议独立 action(原复用 tool.high_risk.executed/policies.updated 语义错乱)
   "approval.resolved",
-  // 12-P2-3：chat 示例文案管理审计
-  "chat_examples.created",
-  "chat_examples.updated",
-  "chat_examples.deleted",
 ] as const;
 
 export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[number];
@@ -1639,38 +1635,6 @@ export const deployment = mysqlTable(
   }),
 );
 export type Deployment = InferSelectModel<typeof deployment>;
-
-// ─── ChatExample（12-P2-3：首页示例文案 DB 化）──────────────
-
-/**
- * 聊天首页示例文案（蓝图 §chat-examples）。
- *
- * 替代原 env SNOW_CHAT_EXAMPLES 配置——示例文案改由 DB 管理，Studio 后台 API 可增删改。
- * 默认 3 条中文示例由 seed 灌入。enabled=false 的不展示给用户。
- * sortOrder 控制展示顺序（小→大）。
- */
-export const chatExample = mysqlTable(
-  "ChatExample",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    content: text("content").notNull(),
-    sortOrder: int("sortOrder").notNull().default(0),
-    enabled: boolean("enabled").notNull().default(true),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    enabledOrderIdx: index("ChatExample_enabled_sortOrder_idx").on(t.enabled, t.sortOrder),
-  }),
-);
-export type ChatExample = InferSelectModel<typeof chatExample>;
 
 // ─── V6-M1-3: Audit Failure Log（审计失败重试队列）──────────────
 
