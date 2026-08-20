@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * V4 Phase B-6 + 12-P1-3：全局会话状态 SSE 端点双通道 + 单 thread 全事件模式测试。
  *
- * 全局模式（无 threadId）：通道1 onThreadStatusChange + 通道2 listThreadStatusChanges。
- * threadId 模式：通道1 onThreadStatusChange + onThreadEvent + 通道2 listThreadEventsSince。
+ * 全局模式（无 threadId）：DB 轮询 listThreadStatusChanges 提供 status。
+ * threadId 模式：进程内 onThreadEvent + 通道2 listThreadEventsSince。
  * 去重：同 threadId 同 status / 同 sequence 不重复推。
  */
 
@@ -15,10 +15,6 @@ const queries = vi.hoisted(() => ({
   listThreadStatusChanges: vi.fn(),
   listThreadEventsSince: vi.fn(),
   getThreadByIdForUser: vi.fn(),
-}));
-const runner = vi.hoisted(() => ({
-  onThreadStatusChange: vi.fn(),
-  listener: null as ((e: { threadId: string; status: string; runId: string }) => void) | null,
 }));
 const bus = vi.hoisted(() => ({
   onThreadEvent: vi.fn(),
@@ -53,12 +49,6 @@ vi.mock("@/lib/db/client", () => ({
 }));
 vi.mock("@/lib/db/schema", () => ({
   thread: { id: "id", userId: "userId", deletedAt: "deletedAt" },
-}));
-vi.mock("@/lib/runtime/thread-runner", () => ({
-  onThreadStatusChange: (cb: (e: { threadId: string; status: string; runId: string }) => void) => {
-    runner.listener = cb;
-    return () => {};
-  },
 }));
 vi.mock("@/lib/runtime/thread-events-bus", () => ({
   onThreadEvent: (
@@ -97,7 +87,6 @@ beforeEach(() => {
   queries.listThreadEventsSince.mockResolvedValue([]);
   // 审计修复：threadMode 所有权校验默认返回有效 thread（通过权限检查）
   queries.getThreadByIdForUser.mockResolvedValue({ id: "mock-thread", userId: "u1" });
-  runner.listener = null;
   bus.eventListener = null;
 });
 
@@ -113,19 +102,10 @@ describe("threads/stream SSE B-6 全局模式（无 threadId）", () => {
     expect(res.status).toBe(401);
   });
 
-  it("通道1：进程内 onThreadStatusChange 事件即时推送（信封 kind=status）", async () => {
+  it("全局模式不订阅进程内 thread-events-bus（仅 DB 轮询提供 status）", async () => {
     const { req, ac } = makeRequest();
     const res = await GET(req);
     const reader = getReader(res);
-    expect(runner.listener).not.toBeNull();
-    const listener = runner.listener;
-    if (!listener) throw new Error("listener not captured");
-    listener({ threadId: "t1", status: "running", runId: "r1" });
-    const { value } = await reader.read();
-    const text = decode(value);
-    expect(text).toContain('"kind":"status"');
-    expect(text).toContain('"threadId":"t1"');
-    expect(text).toContain('"status":"running"');
     // 全局模式不订阅 onThreadEvent
     expect(bus.eventListener).toBeNull();
     ac.abort();
@@ -153,11 +133,11 @@ describe("threads/stream SSE B-6 全局模式（无 threadId）", () => {
     const { req, ac } = makeRequest();
     const res = await GET(req);
     const reader = getReader(res);
-    const listener = runner.listener;
-    if (!listener) throw new Error("listener not captured");
-    listener({ threadId: "t3", status: "running", runId: "r3" });
+    // 第一轮轮询推送 t3
+    await vi.advanceTimersByTimeAsync(3000);
     const first = await reader.read();
     expect(decode(first.value)).toContain('"threadId":"t3"');
+    // 第二轮同样 status（同 updatedAt）→ 去重不推；新 status t4 推送
     queries.listThreadStatusChanges.mockResolvedValueOnce([
       { threadId: "t3", status: "running", updatedAt: new Date("2026-06-26T00:06:00Z") },
       { threadId: "t4", status: "done", updatedAt: new Date("2026-06-26T00:07:00Z") },

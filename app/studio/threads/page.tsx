@@ -55,7 +55,7 @@ export default async function ThreadsPage() {
                 <div className="mt-1 flex items-center gap-2 text-[12px] text-[var(--fg-muted)]">
                   <span>{STATUS_LABEL[t.status] ?? t.status}</span>
                   <span>·</span>
-                  <span className="truncate">{t.skillName ?? t.lastRunSkillId ?? "—"}</span>
+                  <span className="truncate">—</span>
                 </div>
                 <div className="mt-0.5 text-[11px] text-[var(--fg-subtle)]">
                   {new Date(t.createdAt).toLocaleString()}
@@ -113,9 +113,7 @@ export default async function ThreadsPage() {
                     <td className="px-3 py-2 text-[var(--fg-muted)]">
                       {STATUS_LABEL[t.status] ?? t.status}
                     </td>
-                    <td className="px-3 py-2 text-[var(--fg-muted)]">
-                      {t.skillName ?? t.lastRunSkillId ?? "—"}
-                    </td>
+                    <td className="px-3 py-2 text-[var(--fg-muted)]">—</td>
                     <td className="px-3 py-2 text-[var(--fg-muted)]">
                       {new Date(t.createdAt).toLocaleString()}
                     </td>

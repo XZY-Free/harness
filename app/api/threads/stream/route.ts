@@ -8,7 +8,6 @@ import {
 import { thread } from "@/lib/db/schema";
 import { redactObjectGlobal } from "@/lib/runtime/secret-redaction";
 import { onThreadEvent } from "@/lib/runtime/thread-events-bus";
-import { onThreadStatusChange } from "@/lib/runtime/thread-runner";
 import { and, eq, isNull } from "drizzle-orm";
 
 /**
@@ -26,10 +25,8 @@ import { and, eq, isNull } from "drizzle-orm";
  *   subagent.spawned/joined/failed、tool.approval_requested/resolved、
  *   task.started/stopped/failed、qa.check_passed/failed、agent.status_changed 等。
  *
- * 双通道（完整实现，覆盖多实例）：
- * 1. 进程内订阅——本实例事件即时推（零延迟）。
- *    - onThreadStatusChange（status）
- *    - onThreadEvent（其他事件类型，仅 threadId 模式订阅）
+ * 数据源（覆盖多实例）：
+ * 1. 进程内订阅 thread-events-bus——本实例 ThreadEvent 即时推（仅 threadId 模式，零延迟）。
  * 2. DB 增量轮询——补推他实例的变更（DB 是跨实例真相源）。
  *    - 全局模式：listThreadStatusChanges（每 3s）
  *    - threadId 模式：listThreadEventsSince（每 3s）
@@ -154,17 +151,8 @@ export async function GET(request: Request) {
         }
       }, 25_000);
 
-      // 通道 1：进程内状态变更 → 即时推（本实例 run）
-      // 审计修复：全局模式下过滤 userThreadIds，防止把其他用户的 thread 状态推给当前用户
-      const unsubscribeStatus = onThreadStatusChange((event) => {
-        // threadId 模式仅推该 thread 的 status；全局模式按 userId 过滤
-        if (threadMode && event.threadId !== threadId) return;
-        if (!threadMode && userThreadIds && !userThreadIds.has(event.threadId)) return;
-        pushStatus(event.threadId, event.status);
-      });
-
-      // 通道 1b：进程内 ThreadEvent 广播 → 即时推（仅 threadId 模式）
-      // 全局模式不推 event（侧栏只关心 status）
+      // 通道 1：进程内 ThreadEvent 广播 → 即时推（仅 threadId 模式）
+      // 全局模式不推 event（侧栏只关心 status，status 由 DB 轮询提供）
       const unsubscribeEvent = threadMode
         ? onThreadEvent((event) => {
             if (event.threadId !== threadId) return;
@@ -216,7 +204,6 @@ export async function GET(request: Request) {
       request.signal.addEventListener("abort", () => {
         clearInterval(heartbeat);
         clearInterval(poll);
-        unsubscribeStatus();
         unsubscribeEvent();
         try {
           controller.close();

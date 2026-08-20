@@ -9,7 +9,6 @@ import {
 import { jsonError } from "@/lib/http";
 import { logger } from "@/lib/logger";
 import { hasPermission, requirePermission } from "@/lib/rbac";
-import { cancelRun, getActiveRunForThread } from "@/lib/runtime/thread-runner";
 import { NextResponse } from "next/server";
 
 /**
@@ -84,14 +83,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!thread) {
       return NextResponse.json({ error: "会话不存在或无权访问" }, { status: 404 });
     }
-    // 审计修复：软删除前取消该 thread 的进行中 run，防止已删除 thread 的 agent
-    // 继续执行、消耗资源并向已软删 thread 写入消息/事件。
-    const activeRun = getActiveRunForThread(threadId);
-    if (activeRun) {
-      await cancelRun(activeRun.runId, "thread_deleted").catch(() => {});
-    }
+    // 旧本地执行体系已移除，无进程内 run 可取消；正式执行走 Invocation/Binding 路径。
     // V10 Phase 2：V9 browserGateway.closeSession 调用已移除（服务端浏览器链路删除）。
-    // Desktop 浏览器的清理由 Desktop 本地管理（Phase 3+）。
     await softDeleteThread(threadId);
     return NextResponse.json({ ok: true, data: { id: threadId, deleted: true } });
   } catch (err) {

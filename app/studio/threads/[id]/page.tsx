@@ -1,5 +1,4 @@
 import { ApprovalPanel } from "@/components/studio/approval-panel";
-import { BackgroundTaskPanel } from "@/components/studio/background-task-panel";
 import { ContextManifestPanel } from "@/components/studio/context-manifest-panel";
 import { DeliveryPanel } from "@/components/studio/delivery-panel";
 import { DeploymentPanel } from "@/components/studio/deployment-panel";
@@ -7,17 +6,14 @@ import { ExternalToolsPanel } from "@/components/studio/external-tools-panel";
 import { MemoryPanel } from "@/components/studio/memory-panel";
 import { QaPanel } from "@/components/studio/qa-panel";
 import { RuntimeCapabilityPanel } from "@/components/studio/runtime-capability-panel";
-import { SubagentPanel } from "@/components/studio/subagent-panel";
 import { ThreadAutoRefresh } from "@/components/studio/thread-auto-refresh";
 import { ThreadPlanPanel } from "@/components/studio/thread-plan-panel";
-import { ThreadRunPanel } from "@/components/studio/thread-run-panel";
 import { ThreadTimeline } from "@/components/studio/thread-timeline";
 import { ToolTrace } from "@/components/studio/tool-trace";
 import { WorkspaceExplorer } from "@/components/studio/workspace-explorer";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import {
   getActiveThreadPlan,
-  getRunDetail,
   getThreadById,
   listCheckpointsByThread,
   listContextSnapshotsForThread,
@@ -32,8 +28,6 @@ import {
 import {
   listArtifactsForThread,
   listEventsForThread,
-  listThreadRunSkillsForThread,
-  listThreadRuns,
   listToolRunsForThread,
 } from "@/lib/db/studio-queries";
 import { hasPermission } from "@/lib/rbac";
@@ -60,14 +54,11 @@ const STATUS_LABEL = STATUS_LABEL_DICT.zh;
 
 type TabKey =
   | "overview"
-  | "runs"
   | "timeline"
   | "tools"
   | "artifacts"
   | "files"
   | "context"
-  | "tasks"
-  | "subagents"
   | "delivery"
   | "deployments"
   | "external"
@@ -75,14 +66,11 @@ type TabKey =
 
 const TAB_LABEL: Record<TabKey, string> = {
   overview: "概览",
-  runs: "执行记录",
   timeline: "时间线",
   tools: "工具调用",
   artifacts: "产物",
   files: "文件",
   context: "上下文",
-  tasks: "后台任务",
-  subagents: "子代理",
   delivery: "交付",
   deployments: "部署",
   external: "外部",
@@ -94,7 +82,7 @@ export default async function ThreadDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; runId?: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -110,14 +98,11 @@ export default async function ThreadDetailPage({
   const tabs: TabKey[] = canReadWorkspace
     ? [
         "overview",
-        "runs",
         "timeline",
         "tools",
         "artifacts",
         "files",
         "context",
-        "tasks",
-        "subagents",
         "delivery",
         "deployments",
         "external",
@@ -125,13 +110,10 @@ export default async function ThreadDetailPage({
       ]
     : [
         "overview",
-        "runs",
         "timeline",
         "tools",
         "artifacts",
         "context",
-        "tasks",
-        "subagents",
         "delivery",
         "deployments",
         "external",
@@ -143,21 +125,12 @@ export default async function ThreadDetailPage({
   if (requested === "files" && !canReadWorkspace) redirect(`/studio/threads/${id}`);
 
   // 按当前 tab 取数（文件 tab 才读工作区,避免无谓 IO）
-  const [events, toolRuns, artifacts, runs, runSkillsHistory] = await Promise.all([
+  const [events, toolRuns, artifacts] = await Promise.all([
     listEventsForThread(id),
     listToolRunsForThread(id),
     listArtifactsForThread(id),
-    listThreadRuns(id),
-    // V8 阶段 7：thread 级 Skill 使用时间线（供标题展示"最近 Skill"）
-    listThreadRunSkillsForThread(id, { limit: 50 }),
   ]);
-  // V8：取最近一次 primary skill 作为标题展示（无则 null = 基础 agent）
-  const lastRunSkillId = runSkillsHistory.find((s) => s.role === "primary")?.skillId ?? null;
   const files = tab === "files" ? await listWorkspaceFiles(id) : [];
-  // V7 S4-2：执行记录 tab 才读 run 详情
-  const selectedRunId = sp.runId;
-  const selectedRun =
-    tab === "runs" && selectedRunId ? await getRunDetail(id, selectedRunId, user.id) : null;
   // V3.0 Stage E：上下文 tab 才读 context snapshot / plan，避免无谓 IO
   const snapshots = tab === "context" ? await listContextSnapshotsForThread(id, 5) : [];
   const activePlan = tab === "context" ? await getActiveThreadPlan(id) : null;
@@ -196,7 +169,7 @@ export default async function ThreadDetailPage({
         状态 {STATUS_LABEL[thread.status] ?? thread.status}
         <ThreadAutoRefresh status={thread.status} threadId={thread.id} />
         {" · "}
-        最近 Skill {lastRunSkillId ?? "—"} · 创建 {new Date(thread.createdAt).toLocaleString()}
+        创建 {new Date(thread.createdAt).toLocaleString()}
       </p>
 
       {/* tab 导航 */}
@@ -230,131 +203,13 @@ export default async function ThreadDetailPage({
             )}
             <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 text-[13px] text-[var(--fg-muted)]">
               <div>状态:{STATUS_LABEL[thread.status] ?? thread.status}</div>
-              <div className="mt-1">最近 Skill:{lastRunSkillId ?? "—"}</div>
               <div className="mt-1">创建时间:{new Date(thread.createdAt).toLocaleString()}</div>
               <div className="mt-1">预览:{thread.previewUrl ?? "—"}</div>
             </div>
           </div>
         )}
-        {tab === "runs" && (
-          <div className="flex flex-col gap-4">
-            {runs.length === 0 ? (
-              <div className="text-[13px] text-[var(--fg-muted)]">无执行记录。</div>
-            ) : (
-              <>
-                <div className="flex flex-col gap-2">
-                  <h2 className="text-[14px] font-medium text-[var(--fg)]">执行列表</h2>
-                  <div className="flex flex-col gap-2">
-                    {runs.map((r) => (
-                      <Link
-                        key={r.id}
-                        href={`/studio/threads/${id}?tab=runs&runId=${r.id}`}
-                        className={`rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] p-3 text-[13px] hover:bg-[var(--surface-alt)] ${
-                          selectedRunId === r.id ? "ring-2 ring-[var(--primary)]" : ""
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-[12px] text-[var(--fg-subtle)]">
-                            {r.id.slice(0, 8)}
-                          </span>
-                          <span
-                            className={`text-[12px] font-medium ${
-                              r.status === "completed"
-                                ? "text-[var(--ok)]"
-                                : r.status === "failed" || r.status === "cancelled"
-                                  ? "text-[var(--danger)]"
-                                  : r.status === "running"
-                                    ? "text-[var(--primary)]"
-                                    : "text-[var(--fg-muted)]"
-                            }`}
-                          >
-                            {r.status}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-[12px] text-[var(--fg-muted)]">
-                          {r.model} · {r.triggerType} · {new Date(r.createdAt).toLocaleString()}
-                        </div>
-                        {r.totalTokens > 0 && (
-                          <div className="mt-1 text-[12px] text-[var(--fg-subtle)]">
-                            {r.totalTokens} tokens
-                          </div>
-                        )}
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-                {selectedRun && (
-                  <div className="flex flex-col gap-4">
-                    <ThreadRunPanel run={selectedRun.run} runSkills={selectedRun.runSkills} />
-                    {selectedRun.messages.length > 0 && (
-                      <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-                        <h2 className="mb-2 text-[14px] font-medium text-[var(--fg)]">
-                          消息 ({selectedRun.messages.length})
-                        </h2>
-                        <div className="flex flex-col gap-2 text-[13px]">
-                          {selectedRun.messages.map((m) => (
-                            <div
-                              key={m.id}
-                              className="rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-alt)] p-2"
-                            >
-                              <div className="text-[12px] font-medium text-[var(--fg-subtle)]">
-                                {m.role} · {new Date(m.createdAt).toLocaleString()}
-                              </div>
-                              <div className="mt-1 text-[var(--fg-muted)]">
-                                {typeof m.parts === "string"
-                                  ? m.parts.slice(0, 200)
-                                  : JSON.stringify(m.parts).slice(0, 200)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {selectedRun.events.length > 0 && (
-                      <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-                        <h2 className="mb-2 text-[14px] font-medium text-[var(--fg)]">
-                          事件 ({selectedRun.events.length})
-                        </h2>
-                        <ThreadTimeline events={selectedRun.events} />
-                      </div>
-                    )}
-                    {selectedRun.toolRuns.length > 0 && (
-                      <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-                        <h2 className="mb-2 text-[14px] font-medium text-[var(--fg)]">
-                          工具调用 ({selectedRun.toolRuns.length})
-                        </h2>
-                        <ToolTrace toolRuns={selectedRun.toolRuns} />
-                      </div>
-                    )}
-                    {selectedRun.contextSnapshots.length > 0 && (
-                      <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-                        <h2 className="mb-2 text-[14px] font-medium text-[var(--fg)]">
-                          上下文快照 ({selectedRun.contextSnapshots.length})
-                        </h2>
-                        <ContextManifestPanel
-                          snapshots={selectedRun.contextSnapshots}
-                          summaries={[]}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
         {tab === "timeline" && <ThreadTimeline events={events} />}
         {tab === "tools" && <ToolTrace toolRuns={toolRuns} />}
-        {tab === "tasks" && (
-          <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-            <BackgroundTaskPanel threadId={id} />
-          </div>
-        )}
-        {tab === "subagents" && (
-          <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-            <SubagentPanel threadId={id} />
-          </div>
-        )}
         {tab === "artifacts" && (
           <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
             {artifacts.length === 0 ? (
