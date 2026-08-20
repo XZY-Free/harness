@@ -9,7 +9,10 @@
 
 import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
 import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
-import type { ConformanceEligibilitySnapshot } from "@/lib/runtime/domain/runtime-conformance-eligibility";
+import {
+  type RuntimeConformanceEvidence,
+  validateRuntimePublicationConformanceEvidence,
+} from "@/lib/runtime/domain/runtime-conformance-eligibility";
 
 // ─── Policy Revision Snapshot ────────────────────────────
 
@@ -100,8 +103,8 @@ export interface RevisionExecutionEvidenceSnapshot {
   runtimeArtifactEvidence: ArtifactEvidenceSnapshot | null;
   /** Runtime Active Publication（null = 未发布或已撤回）。 */
   runtimePublication: ActivePublicationSnapshot | null;
-  /** Runtime Conformance（null = 无有效 ConformanceRun）。 */
-  runtimeConformance: ConformanceEligibilitySnapshot | null;
+  /** Runtime Conformance（规范化 Evidence；null = 无有效 ConformanceRun）。 */
+  runtimeConformance: RuntimeConformanceEvidence | null;
   /** Runtime 生命周期状态。 */
   runtimeLifecycleState: "active" | "quarantined" | "retired";
   /** Runtime Revision 发布状态。 */
@@ -244,18 +247,15 @@ export const RevisionExecutionEligibilityPolicy = {
       });
     }
 
-    // 6. Runtime Conformance
-    if (!snapshot.runtimeConformance) {
+    // 6. Runtime Conformance — 调用统一纯验证器，每个错误映射为 runtime_conformance dimension
+    const conformanceResult = validateRuntimePublicationConformanceEvidence(
+      snapshot.runtimeConformance,
+    );
+    for (const conformanceError of conformanceResult.errors) {
       errors.push({
         dimension: "runtime_conformance",
-        code: "no_conformance_run",
-        message: `RuntimeRevision ${snapshot.runtimeRevisionId} 无有效 ConformanceRun`,
-      });
-    } else if (snapshot.runtimeConformance.overallResult !== "passed") {
-      errors.push({
-        dimension: "runtime_conformance",
-        code: "conformance_not_passed",
-        message: `RuntimeRevision ${snapshot.runtimeRevisionId} Conformance 未通过`,
+        code: conformanceError.code,
+        message: conformanceError.message,
       });
     }
 

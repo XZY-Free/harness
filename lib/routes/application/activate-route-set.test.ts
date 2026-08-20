@@ -26,6 +26,10 @@ import type {
   RouteSetRow,
   RuntimeRevisionSummary,
 } from "@/lib/routes/persistence/route-set-activation-store";
+import {
+  PUBLICATION_CONFORMANCE_CASES,
+  PUBLICATION_CONFORMANCE_SUITE_REVISION,
+} from "@/lib/runtime/domain/runtime-conformance-contract";
 import { describe, expect, it, vi } from "vitest";
 
 // ─── 测试 Fixtures ──────────────────────────────────────────
@@ -117,7 +121,28 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
     withdrawalRecordId: null,
     publishedAt: new Date(),
   },
-  runtimeConformance: { overallResult: "passed" as const, conformanceRunId: "conf-1" } as any,
+  runtimeConformance: {
+    run: {
+      runId: "conf-1",
+      tenantId: TENANT_ID,
+      runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+      overallResult: "passed" as const,
+      runtimeArtifactDigest: "sha256:b",
+      runtimeConfigDigest: "sha256:config",
+      protocolContractRevision: "agent-runtime-protocol@1",
+      suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
+      conformanceFormat: "standard_dsse" as const,
+    },
+    caseResults: PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true })),
+    expected: {
+      tenantId: TENANT_ID,
+      runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+      runtimeArtifactDigest: "sha256:b",
+      runtimeConfigDigest: "sha256:config",
+      protocolContractRevision: "agent-runtime-protocol@1",
+      allowedFormats: ["standard_dsse"],
+    },
+  },
   runtimeLifecycleState: "active" as const,
   runtimeRevisionState: "published" as const,
   runtimeCapabilities: [],

@@ -1,22 +1,25 @@
 /**
- * Runtime Conformance 统一资格模型。
+ * Runtime Publication Conformance 统一资格验证 — 单一纯函数。
  *
- * 统一检查：
+ * 校验以下内容：
  * - Run 存在
- * - Run 属于 Tenant
+ * - Run 属于 Tenant（期望值来自当前 RuntimeRevision）
  * - Run 属于 RuntimeRevision
  * - Overall Passed
  * - Artifact Digest 一致
  * - Config Digest 一致
  * - Protocol Contract 一致
  * - Suite Revision 一致
- * - Publication Case 集合完整
+ * - Publication Case 集合精确等于 PUBLICATION_CONFORMANCE_CASES
+ *   （缺失、重复、未知 Case ID 一律失败，即使数量正确且全部 passed）
  * - Case 唯一
  * - 全部 Passed
- * - 验证格式符合当前 Policy
+ * - 验证格式允许
  *
- * 所有模块（RouteSet 激活、Projection、Binding）
- * 必须通过此模型判断 Conformance 资格，不得各自实现。
+ * 缺失值显式 null 并 fail-closed，禁止用空字符串兜底。
+ *
+ * RouteSet 激活、Projection、Binding 必须通过
+ * RevisionExecutionEligibilityPolicy 间接调用此验证器，不得各自实现第二套。
  *
  * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
@@ -27,9 +30,9 @@ import {
 } from "@/lib/runtime/domain/runtime-conformance-contract";
 
 /**
- * Conformance 资格快照 — Store 读取的完整 Conformance 事实。
+ * 原始 Conformance Run 事实（DB 读取，缺失字段显式 null）。
  */
-export interface ConformanceEligibilitySnapshot {
+export interface RuntimeConformanceRunFact {
   /** Run ID。 */
   runId: string;
   /** 租户 ID。 */
@@ -38,36 +41,68 @@ export interface ConformanceEligibilitySnapshot {
   runtimeRevisionId: string;
   /** 整体结果。 */
   overallResult: "passed" | "failed" | "error" | "cancelled";
-  /** Runtime Artifact Digest。 */
-  runtimeArtifactDigest: string;
-  /** Runtime Config Digest。 */
-  runtimeConfigDigest: string;
-  /** Protocol Contract Revision。 */
-  protocolContractRevision: string;
-  /** Suite Revision。 */
-  suiteRevision: string;
-  /** Conformance 格式。 */
-  conformanceFormat: "standard_dsse";
-  /** Case 结果列表。 */
+  /** Runtime Artifact Digest（缺失 = null）。 */
+  runtimeArtifactDigest: string | null;
+  /** Runtime Config Digest（缺失 = null）。 */
+  runtimeConfigDigest: string | null;
+  /** Protocol Contract Revision（缺失 = null）。 */
+  protocolContractRevision: string | null;
+  /** Suite Revision（缺失 = null）。 */
+  suiteRevision: string | null;
+  /** Conformance 格式（缺失 = null）。 */
+  conformanceFormat: "standard_dsse" | null;
+}
+
+/**
+ * 从当前 RuntimeRevision 真实读取的期望值（缺失显式 null）。
+ */
+export interface RuntimeConformanceExpectedValues {
+  tenantId: string;
+  runtimeRevisionId: string;
+  runtimeArtifactDigest: string | null;
+  runtimeConfigDigest: string | null;
+  protocolContractRevision: string | null;
+  /** 允许的 Conformance 格式。 */
+  allowedFormats: "standard_dsse"[];
+}
+
+/**
+ * 原始 Run/Case 事实（不含期望值）— 由低层 Reader 产出。
+ */
+export interface RuntimeConformanceFacts {
+  run: RuntimeConformanceRunFact | null;
   caseResults: Array<{ caseId: string; passed: boolean }>;
 }
 
 /**
- * Conformance 资格校验结果。
+ * 规范化 Runtime Publication Conformance Evidence —
+ * 原始 Run/Case 事实 + 从当前 RuntimeRevision 读取的期望值。
  */
-export interface ConformanceEligibilityResult {
-  eligible: boolean;
-  errors: ConformanceEligibilityError[];
+export interface RuntimeConformanceEvidence {
+  /** 原始 Run 事实（null = 无有效 ConformanceRun）。 */
+  run: RuntimeConformanceRunFact | null;
+  /** 原始 Case 结果。 */
+  caseResults: Array<{ caseId: string; passed: boolean }>;
+  /** 期望值。 */
+  expected: RuntimeConformanceExpectedValues;
 }
 
-/** Conformance 资格错误。 */
-export interface ConformanceEligibilityError {
-  code: ConformanceEligibilityErrorCode;
+/**
+ * Conformance 校验结果。
+ */
+export interface RuntimeConformanceResult {
+  valid: boolean;
+  errors: RuntimeConformanceError[];
+}
+
+/** Conformance 校验错误。 */
+export interface RuntimeConformanceError {
+  code: RuntimeConformanceErrorCode;
   message: string;
 }
 
-/** Conformance 资格错误码。 */
-export type ConformanceEligibilityErrorCode =
+/** Conformance 校验错误码。 */
+export type RuntimeConformanceErrorCode =
   | "conformance_run_not_found"
   | "conformance_tenant_mismatch"
   | "conformance_revision_mismatch"
@@ -82,131 +117,143 @@ export type ConformanceEligibilityErrorCode =
   | "conformance_format_not_allowed";
 
 /**
- * Conformance 资格校验期望值。
+ * 单一纯函数 — 校验规范化 Runtime Publication Conformance Evidence。
+ *
+ * 缺失值（null）一律 fail-closed，不得用空字符串兜底。
+ * 未知 Case ID 即使全部 passed 也必须失败。
  */
-export interface ConformanceEligibilityExpectation {
-  expectedTenantId: string;
-  expectedRuntimeRevisionId: string;
-  expectedRuntimeArtifactDigest: string;
-  expectedRuntimeConfigDigest: string;
-  expectedProtocolContractRevision: string;
-  /** 允许的 Conformance 格式。 */
-  allowedFormats: "standard_dsse"[];
-}
+export function validateRuntimePublicationConformanceEvidence(
+  evidence: RuntimeConformanceEvidence | null,
+): RuntimeConformanceResult {
+  if (!evidence || !evidence.run) {
+    return {
+      valid: false,
+      errors: [{ code: "conformance_run_not_found", message: "ConformanceRun 不存在" }],
+    };
+  }
 
-const DEFAULT_ALLOWED_FORMATS: "standard_dsse"[] = ["standard_dsse"];
+  const { run, caseResults, expected } = evidence;
+  const errors: RuntimeConformanceError[] = [];
 
-/**
- * Conformance 资格策略 — 纯函数，无副作用。
- */
-export const ConformanceEligibilityPolicy = {
-  /**
-   * 判断 Conformance Run 是否满足执行资格。
-   */
-  isEligible(
-    snapshot: ConformanceEligibilitySnapshot | null,
-    expectation: ConformanceEligibilityExpectation,
-  ): ConformanceEligibilityResult {
-    const errors: ConformanceEligibilityError[] = [];
+  // Tenant 一致
+  if (run.tenantId !== expected.tenantId) {
+    errors.push({
+      code: "conformance_tenant_mismatch",
+      message: `ConformanceRun 租户不一致（Run: ${run.tenantId}, 期望: ${expected.tenantId}）`,
+    });
+  }
 
-    if (!snapshot) {
-      return {
-        eligible: false,
-        errors: [{ code: "conformance_run_not_found", message: "ConformanceRun 不存在" }],
-      };
-    }
+  // Revision 绑定一致
+  if (run.runtimeRevisionId !== expected.runtimeRevisionId) {
+    errors.push({
+      code: "conformance_revision_mismatch",
+      message: `ConformanceRun 绑定其他 Revision（${run.runtimeRevisionId}）`,
+    });
+  }
 
-    // Tenant 一致
-    if (snapshot.tenantId !== expectation.expectedTenantId) {
-      errors.push({
-        code: "conformance_tenant_mismatch",
-        message: `ConformanceRun 租户不一致（Run: ${snapshot.tenantId}, 期望: ${expectation.expectedTenantId}）`,
-      });
-    }
+  // Overall Passed
+  if (run.overallResult !== "passed") {
+    errors.push({
+      code: "conformance_not_passed",
+      message: `ConformanceRun 未通过（overallResult: ${run.overallResult}）`,
+    });
+  }
 
-    // Revision 绑定一致
-    if (snapshot.runtimeRevisionId !== expectation.expectedRuntimeRevisionId) {
-      errors.push({
-        code: "conformance_revision_mismatch",
-        message: `ConformanceRun 绑定其他 Revision（${snapshot.runtimeRevisionId}）`,
-      });
-    }
+  // Artifact Digest 一致（期望缺失 → fail-closed）
+  if (
+    expected.runtimeArtifactDigest === null ||
+    run.runtimeArtifactDigest !== expected.runtimeArtifactDigest
+  ) {
+    errors.push({
+      code: "conformance_artifact_digest_mismatch",
+      message: `Artifact Digest 不一致（Run: ${run.runtimeArtifactDigest}, 期望: ${expected.runtimeArtifactDigest}）`,
+    });
+  }
 
-    // Overall Passed
-    if (snapshot.overallResult !== "passed") {
-      errors.push({
-        code: "conformance_not_passed",
-        message: `ConformanceRun 未通过（overallResult: ${snapshot.overallResult}）`,
-      });
-    }
+  // Config Digest 一致（期望缺失 → fail-closed）
+  if (
+    expected.runtimeConfigDigest === null ||
+    run.runtimeConfigDigest !== expected.runtimeConfigDigest
+  ) {
+    errors.push({
+      code: "conformance_config_digest_mismatch",
+      message: `Config Digest 不一致（Run: ${run.runtimeConfigDigest}, 期望: ${expected.runtimeConfigDigest}）`,
+    });
+  }
 
-    // Artifact Digest 一致
-    if (snapshot.runtimeArtifactDigest !== expectation.expectedRuntimeArtifactDigest) {
-      errors.push({
-        code: "conformance_artifact_digest_mismatch",
-        message: `Artifact Digest 不一致（Run: ${snapshot.runtimeArtifactDigest}, 期望: ${expectation.expectedRuntimeArtifactDigest}）`,
-      });
-    }
+  // Protocol Contract 一致（期望缺失 → fail-closed）
+  if (
+    expected.protocolContractRevision === null ||
+    run.protocolContractRevision !== expected.protocolContractRevision
+  ) {
+    errors.push({
+      code: "conformance_protocol_mismatch",
+      message: `Protocol Contract 不一致（Run: ${run.protocolContractRevision}, 期望: ${expected.protocolContractRevision}）`,
+    });
+  }
 
-    // Config Digest 一致
-    if (snapshot.runtimeConfigDigest !== expectation.expectedRuntimeConfigDigest) {
-      errors.push({
-        code: "conformance_config_digest_mismatch",
-        message: `Config Digest 不一致（Run: ${snapshot.runtimeConfigDigest}, 期望: ${expectation.expectedRuntimeConfigDigest}）`,
-      });
-    }
+  // Suite Revision 一致
+  if (run.suiteRevision !== PUBLICATION_CONFORMANCE_SUITE_REVISION) {
+    errors.push({
+      code: "conformance_suite_revision_mismatch",
+      message: `Suite Revision 不一致（Run: ${run.suiteRevision}, 期望: ${PUBLICATION_CONFORMANCE_SUITE_REVISION}）`,
+    });
+  }
 
-    // Protocol Contract 一致
-    if (snapshot.protocolContractRevision !== expectation.expectedProtocolContractRevision) {
-      errors.push({
-        code: "conformance_protocol_mismatch",
-        message: `Protocol Contract 不一致（Run: ${snapshot.protocolContractRevision}, 期望: ${expectation.expectedProtocolContractRevision}）`,
-      });
-    }
+  // 格式允许（缺失 → fail-closed）
+  const allowedFormats = expected.allowedFormats ?? [];
+  if (run.conformanceFormat === null || !allowedFormats.includes(run.conformanceFormat)) {
+    errors.push({
+      code: "conformance_format_not_allowed",
+      message: `Conformance 格式 ${run.conformanceFormat} 在当前阶段不允许`,
+    });
+  }
 
-    // Suite Revision 一致
-    if (snapshot.suiteRevision !== PUBLICATION_CONFORMANCE_SUITE_REVISION) {
-      errors.push({
-        code: "conformance_suite_revision_mismatch",
-        message: `Suite Revision 不一致（Run: ${snapshot.suiteRevision}, 期望: ${PUBLICATION_CONFORMANCE_SUITE_REVISION}）`,
-      });
-    }
+  // Publication Case 集合精确
+  if (caseResults.length !== PUBLICATION_CONFORMANCE_CASES.length) {
+    errors.push({
+      code: "conformance_cases_incomplete",
+      message: `Conformance 结果不完整（期望 ${PUBLICATION_CONFORMANCE_CASES.length} 个 Case，实际 ${caseResults.length} 个）`,
+    });
+  }
 
-    // Publication Case 集合完整
-    if (snapshot.caseResults.length !== PUBLICATION_CONFORMANCE_CASES.length) {
+  // Case 唯一
+  const caseIdSet = new Set(caseResults.map((c) => c.caseId));
+  if (caseIdSet.size !== caseResults.length) {
+    errors.push({
+      code: "conformance_cases_not_unique",
+      message: "Conformance Case ID 存在重复",
+    });
+  }
+
+  // 未知 Case ID — 即使全部 passed 也必须失败
+  const knownCaseSet = new Set<string>(PUBLICATION_CONFORMANCE_CASES);
+  const unknownCase = caseResults.find((c) => !knownCaseSet.has(c.caseId));
+  if (unknownCase) {
+    errors.push({
+      code: "conformance_cases_incomplete",
+      message: `Conformance 结果包含未知 Case: ${unknownCase.caseId}`,
+    });
+  }
+
+  // 全部已知 Case 必须存在
+  for (const caseId of PUBLICATION_CONFORMANCE_CASES) {
+    if (!caseIdSet.has(caseId)) {
       errors.push({
         code: "conformance_cases_incomplete",
-        message: `Conformance 结果不完整（期望 ${PUBLICATION_CONFORMANCE_CASES.length} 个 Case，实际 ${snapshot.caseResults.length} 个）`,
+        message: `Conformance 结果缺少必要 Case: ${caseId}`,
       });
     }
+  }
 
-    // Case 唯一
-    const caseIdSet = new Set(snapshot.caseResults.map((c) => c.caseId));
-    if (caseIdSet.size !== snapshot.caseResults.length) {
-      errors.push({
-        code: "conformance_cases_not_unique",
-        message: "Conformance Case ID 存在重复",
-      });
-    }
+  // 全部 Passed
+  const failedCases = caseResults.filter((c) => !c.passed);
+  if (failedCases.length > 0) {
+    errors.push({
+      code: "conformance_case_failed",
+      message: `Conformance Case 失败: ${failedCases.map((c) => c.caseId).join(", ")}`,
+    });
+  }
 
-    // 全部 Passed
-    const failedCases = snapshot.caseResults.filter((c) => !c.passed);
-    if (failedCases.length > 0) {
-      errors.push({
-        code: "conformance_case_failed",
-        message: `Conformance Case 失败: ${failedCases.map((c) => c.caseId).join(", ")}`,
-      });
-    }
-
-    // 格式允许
-    const allowedFormats = expectation.allowedFormats ?? DEFAULT_ALLOWED_FORMATS;
-    if (!allowedFormats.includes(snapshot.conformanceFormat)) {
-      errors.push({
-        code: "conformance_format_not_allowed",
-        message: `Conformance 格式 ${snapshot.conformanceFormat} 在当前阶段不允许`,
-      });
-    }
-
-    return { eligible: errors.length === 0, errors };
-  },
-} as const;
+  return { valid: errors.length === 0, errors };
+}

@@ -88,7 +88,6 @@ import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligib
 import { activateSingleRouteForTest as activateRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
-import type { ConformanceEligibilitySnapshot } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 import {
   PUBLICATION_CONFORMANCE_CASES,
   type RuntimeConformanceReport,
@@ -1078,14 +1077,22 @@ describe("场景7：Projection Consumer 构建完整 eligible Projection", () =>
 
   it("disabled route 保留真实 authority IDs 的 ineligible 投影且 Resolver 不选择", async () => {
     const fixture = await seedEndToEndFixture("projection-authority-disabled");
-    await db
-      .update(deploymentRouteTable)
-      .set({ routeState: "disabled" })
-      .where(eq(deploymentRouteTable.id, fixture.route.id));
-    await db
-      .update(routeActivation)
-      .set({ activationState: "disabled" })
-      .where(eq(routeActivation.id, fixture.routeActivationId));
+    const routeSet = await getRouteSetById(fixture.tenantId, fixture.routeSet.id);
+    if (!routeSet) throw new Error("测试 RouteSet 不存在");
+
+    // 复用正式 DisableRoute 服务追加 disabled Activation（append-only，禁止 UPDATE 既有行）。
+    const disabled = await disableRouteForTest({
+      tenantId: fixture.tenantId,
+      routeSetId: fixture.routeSet.id,
+      routeId: fixture.route.id,
+      expectedVersionNo: routeSet.versionNo,
+      actor: { tenantId: fixture.tenantId, actorType: "service", actorId: "test-disabler" },
+      reason: "验收测试禁用 Route",
+      requestId: randomUUID(),
+      idempotencyKey: `disabled-route:${randomUUID()}`,
+    });
+    expect(disabled.routeRevisionId).toBe(fixture.routeRevisionId);
+    expect(disabled.routeActivationId).not.toBe(fixture.routeActivationId);
 
     const result = await createBuildRouteEligibility({ store: mysqlRouteEligibilityStore })({
       tenantId: fixture.tenantId,
@@ -1099,7 +1106,7 @@ describe("场景7：Projection Consumer 构建完整 eligible Projection", () =>
     expect(result.eligibilityState).toBe("ineligible");
     expect(projection).toMatchObject({
       routeRevisionId: fixture.routeRevisionId,
-      routeActivationId: fixture.routeActivationId,
+      routeActivationId: disabled.routeActivationId,
       activationState: "disabled",
       eligibilityState: "ineligible",
     });

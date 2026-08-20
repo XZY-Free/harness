@@ -240,7 +240,7 @@ async function addRuntimeRoute(
     requestId: `resolver:${runtimeRevisionId}`,
     recordedAt: NOW,
   });
-  // 权威 ConformanceEligibilityPolicy 要求全部 Publication Case 通过（见
+  // 统一 Runtime Conformance 验证要求全部 Publication Case 通过（见
   // runtime-conformance-contract 的 PUBLICATION_CONFORMANCE_CASES）。播种 ConformanceRun
   // 后须同步播种完整 Case 结果，投影的 Conformance 资格才会放行。
   await db.insert(runtimeConformanceCaseResult).values(

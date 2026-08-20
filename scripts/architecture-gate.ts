@@ -14,7 +14,6 @@ const RETIRED_PATTERNS = [
 ];
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mjs", ".cjs", ".json", ".md", ".py"]);
 const TOPIC_DEPRECATION_ALLOWLIST = new Set([
-  "lib/routes/application/backfill-route-group-fields.ts",
   "lib/external/docs.ts",
   // CycloneDX 1.6 官方规范原文，外部标准不可改写。
   "lib/artifacts/verification/schemas/cyclonedx-1.6.schema.json",

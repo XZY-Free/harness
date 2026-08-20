@@ -42,8 +42,7 @@ import {
 import { computeCapabilityManifestDigest } from "@/lib/routes/domain/route-resolution-policy";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
-import { validateCompletePublicationConformanceResult } from "@/lib/runtime/domain/runtime-conformance-contract";
-import { ConformanceEligibilityPolicy } from "@/lib/runtime/domain/runtime-conformance-eligibility";
+import { validateRuntimePublicationConformanceEvidence } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
@@ -767,13 +766,9 @@ export function validateFrozenConformanceAuthority(input: {
     throw evidenceError("冻结 ConformanceRun 未完成或未验证");
   }
 
-  const completeResult = validateCompletePublicationConformanceResult(caseResults);
-  if (!completeResult.valid) {
-    throw evidenceError(completeResult.reason);
-  }
-
-  const eligibility = ConformanceEligibilityPolicy.isEligible(
-    {
+  // 复用同一纯验证函数对锁后事实复验（非第二套 Policy）。
+  const result = validateRuntimePublicationConformanceEvidence({
+    run: {
       runId: run.id,
       tenantId: run.tenantId,
       runtimeRevisionId: run.runtimeRevisionId,
@@ -783,20 +778,20 @@ export function validateFrozenConformanceAuthority(input: {
       protocolContractRevision: run.protocolContractRevision,
       suiteRevision: run.suiteRevision,
       conformanceFormat: run.conformanceFormat,
-      caseResults,
     },
-    {
-      expectedTenantId: expected.tenantId,
-      expectedRuntimeRevisionId: expected.runtimeRevisionId,
-      expectedRuntimeArtifactDigest: expected.runtimeArtifactDigest,
-      expectedRuntimeConfigDigest: expected.runtimeConfigDigest,
-      expectedProtocolContractRevision: expected.protocolContractRevision,
+    caseResults,
+    expected: {
+      tenantId: expected.tenantId,
+      runtimeRevisionId: expected.runtimeRevisionId,
+      runtimeArtifactDigest: expected.runtimeArtifactDigest,
+      runtimeConfigDigest: expected.runtimeConfigDigest,
+      protocolContractRevision: expected.protocolContractRevision,
       allowedFormats: ["standard_dsse"],
     },
-  );
-  if (!eligibility.eligible) {
+  });
+  if (!result.valid) {
     throw evidenceError(
-      `冻结 ConformanceRun 不满足执行资格: ${eligibility.errors.map((error) => error.code).join(",")}`,
+      `冻结 ConformanceRun 不满足执行资格: ${result.errors.map((error) => error.message).join("; ")}`,
     );
   }
 }

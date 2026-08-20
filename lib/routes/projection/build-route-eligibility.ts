@@ -31,7 +31,6 @@ import {
   extractRequiredCapabilities,
 } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import { createMySqlRevisionExecutionEvidenceReader } from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
-import { ConformanceEligibilityPolicy } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 
 export interface BuildProjectionDependencies {
   store: RouteEligibilityStore;
@@ -116,6 +115,14 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
     }
 
+    // 3b. routeGroupId 只消费 revision.routeGroupId；null/空/纯空白视为非法权威，
+    // fail-closed，禁止从 trafficAllocationJson 或 routeSet.id 猜测，删除既有投影。
+    const routeGroupId = revision.routeGroupId;
+    if (typeof routeGroupId !== "string" || routeGroupId.trim().length === 0) {
+      await deps.store.deleteProjection(input.routeId);
+      return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
+    }
+
     // 4. RouteSet 必须与 Route、Activation、Revision 的真实外键一致。
     const [routeSet] = await db
       .select()
@@ -189,27 +196,12 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       normalized !== null;
 
     // §03: 9. 使用统一 Policy 判断证据资格
+    // RevisionExecutionEligibilityPolicy 内部已调用统一 Runtime Conformance 纯验证器，
+    // 投影据此派生 runtimeConformanceValid，不重复调用第二套 Policy。
     const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
       evidenceSnapshot,
       requiredCapabilities,
     );
-
-    // §: Conformance 资格必须用统一 ConformanceEligibilityPolicy 判断（不得各自实现）。
-    // RevisionExecutionEligibilityPolicy 仅做轻量 overallResult 检查；Artifact/Config
-    // digest、Protocol、Suite、Case 完整性须由 ConformanceEligibilityPolicy 权威判定，
-    // 与 Binding（mysql-execution-binding-store）保持一致，投影据此 fail-closed。
-    const conformanceEligibility = ConformanceEligibilityPolicy.isEligible(
-      evidenceSnapshot.runtimeConformance,
-      {
-        expectedTenantId: input.tenantId,
-        expectedRuntimeRevisionId: revision.runtimeRevisionId,
-        expectedRuntimeArtifactDigest: runtimeRevision?.artifactDigest ?? "",
-        expectedRuntimeConfigDigest: runtimeRevision?.configHash ?? "",
-        expectedProtocolContractRevision: runtimeRevision?.protocolContractRevision ?? "",
-        allowedFormats: ["standard_dsse"],
-      },
-    );
-    const conformanceValid = conformanceEligibility.eligible;
 
     const entityLifecycleEligible =
       agent?.lifecycleState === "enabled" &&
@@ -217,10 +209,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       runtime?.lifecycleState === "enabled" &&
       runtimeRevision?.revisionState === "published";
     const isEligible =
-      routeAuthorityEligible &&
-      entityLifecycleEligible &&
-      eligibilityResult.eligible &&
-      conformanceValid;
+      routeAuthorityEligible && entityLifecycleEligible && eligibilityResult.eligible;
 
     // Policy revision state for projection
     const policyRevisionState =
@@ -255,12 +244,8 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     if (runtimeRevision && runtimeRevision.revisionState !== "published") {
       ineligibilityReasons.push("runtime_revision_not_published");
     }
-    // 从统一 Policy 错误中提取原因
+    // 从统一 Policy 错误中提取原因（含 runtime_conformance dimension 的 Conformance 失败）
     for (const err of eligibilityResult.errors) {
-      ineligibilityReasons.push(err.code);
-    }
-    // 权威 ConformanceEligibilityPolicy 的失败原因
-    for (const err of conformanceEligibility.errors) {
       ineligibilityReasons.push(err.code);
     }
 
@@ -287,8 +272,13 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       evidenceSnapshot.runtimeArtifactEvidence.revokedAt === null
         ? 1
         : 0;
-    // Conformance: 用权威 ConformanceEligibilityPolicy 判定
-    const runtimeConformanceValid = conformanceValid ? 1 : 0;
+    // Conformance: 由同一次 RevisionExecutionEligibilityPolicy 结果派生
+    // （runtime_conformance dimension 无错误 → 有效）。
+    const runtimeConformanceValid = eligibilityResult.errors.some(
+      (err) => err.dimension === "runtime_conformance",
+    )
+      ? 0
+      : 1;
 
     // : 11. 计算 projectionContentDigest 并确定版本号
     const projectionFields = {
@@ -303,11 +293,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       routeActivationId: activation.id,
       routeActivationSequence: activation.activationSequence,
       activationState: activation.activationState,
-      routeGroupId: readRouteGroupId(
-        revision.routeGroupId,
-        revision.trafficAllocationJson,
-        routeSet.id,
-      ),
+      routeGroupId,
       selectorDigest: revision.selectorDigest,
       eligibilityConditionsJson: revision.eligibilityConditionsJson,
       specificity,
@@ -396,16 +382,3 @@ export function computeNextVersion(
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────
-
-function readRouteGroupId(
-  columnValue: string | null,
-  jsonValue: unknown,
-  fallback: string,
-): string {
-  if (columnValue) return columnValue;
-  if (jsonValue && typeof jsonValue === "object" && !Array.isArray(jsonValue)) {
-    const groupId = (jsonValue as { groupId?: unknown }).groupId;
-    if (typeof groupId === "string" && groupId.trim()) return groupId;
-  }
-  return fallback;
-}

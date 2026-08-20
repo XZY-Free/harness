@@ -10,6 +10,12 @@
  * 参见：SnowHarness专题01最终差距整改与正式链路收口实施方案
  */
 
+import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
+import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
+import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
+import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
+import type { RuntimeConformanceEvidence } from "@/lib/runtime/domain/runtime-conformance-eligibility";
+import { loadRuntimeConformanceFacts } from "@/lib/runtime/persistence/runtime-conformance-evidence-reader";
 import type {
   LoadEvidenceInput,
   LoadExactEvidenceInput,
@@ -24,12 +30,6 @@ import {
   EligibilityError,
   extractRuntimeCapabilities,
 } from "../domain/revision-execution-eligibility";
-
-import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
-import { loadArtifactEvidenceSnapshot } from "@/lib/artifacts/persistence/artifact-evidence-reader";
-import type { ActivePublicationSnapshot } from "@/lib/publications/domain/publication-eligibility";
-import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/publication-evidence-reader";
-import { loadConformanceEligibilitySnapshot } from "@/lib/runtime/persistence/runtime-conformance-evidence-reader";
 
 import type { DbOrTx, db as DbType } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
@@ -157,13 +157,29 @@ async function loadEvidence(
   ]);
 
   // Phase 3: 加载 Conformance 证据
+  // 规范化为包含原始 Run/Case 事实 + 从当前 RuntimeRevision 真实读取的期望值。
+  // 期望值缺失显式 null 并 fail-closed，禁止空字符串兜底。
   const conformanceRunId = exactConformanceRunId ?? runtimePublication?.conformanceRunId ?? null;
-  const runtimeConformance = await loadConformanceEligibilitySnapshot({
+  const conformanceFacts = await loadRuntimeConformanceFacts({
     tenantId: input.tenantId,
     runtimeRevisionId: input.runtimeRevisionId,
     conformanceRunId,
     dbOrTx: dbOrTx,
   });
+  const runtimeConformance: RuntimeConformanceEvidence | null = conformanceFacts
+    ? {
+        run: conformanceFacts.run,
+        caseResults: conformanceFacts.caseResults,
+        expected: {
+          tenantId: input.tenantId,
+          runtimeRevisionId: input.runtimeRevisionId,
+          runtimeArtifactDigest: runtimeRevisionRow?.artifactDigest ?? null,
+          runtimeConfigDigest: runtimeRevisionRow?.configHash ?? null,
+          protocolContractRevision: runtimeRevisionRow?.protocolContractRevision ?? null,
+          allowedFormats: ["standard_dsse"],
+        },
+      }
+    : null;
 
   // Phase 4: : 加载 Policy Requirement（Fail-closed，含租户校验）
   const policyResult = await loadPolicyRequirement(dbOrTx, input.policyRevisionId, input.tenantId);
