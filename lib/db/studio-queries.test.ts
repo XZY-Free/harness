@@ -1,37 +1,43 @@
+import { listSkillVersions, listSkills } from "@/lib/capability/skill-studio-queries";
 import { db } from "@/lib/db/client";
-import { skill, skillVersion } from "@/lib/db/schema";
-import { listSkillVersions, listSkills } from "@/lib/db/studio-queries";
+import { skillTable, skillVersionTable } from "@/lib/persistence/schema/skill";
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetDatabase } from "./test/mysql-harness";
 
 /**
- * Phase 4-4 studio-queries 只读查询单测（S1 08 同构：真实 MySQL）。
+ * 02-4：studio skill 只读查询单测（真实 MySQL）。
+ *
+ * 查询已从 legacy `lib/db/studio-queries.ts` 迁到正式 `lib/capability/skill-studio-queries.ts`
+ * （tenant-scoped，基于正式 skillTable / skillVersionTable）。
  *
  * 生产是 MySQL（mysql2 + drizzle），测试用 testcontainers 起真实 MySQL 8 容器，
- * beforeEach resetDatabase 清空所有表，用 db.insert 真实插数据满足外键后调真实查询函数，
- * 断言真实结果（含 where/orderBy/limit/join 语义，不再用 fake-db 透传）。
+ * beforeEach resetDatabase 清空所有表，用 db.insert 真实插数据满足外键后调真实查询函数。
  *
- * 外键链：User ← Thread ← (ThreadEvent / ToolRun)；Skill ← SkillVersion；
- * Skill.ownerUserId 逻辑外键（无 DB 级 FK）；Thread.activeSkillId 逻辑外键。
+ * 外键链：tenant ← Skill ← SkillVersion；Skill.ownerUserId 逻辑外键（无 DB 级 FK）。
  */
+
+const TENANT = "tenant-1";
 
 // ─── 测试数据工厂 ─────────────────────────────────────────────
 
 async function insertSkill(
   id: string,
-  name: string,
+  skillKey: string,
   opts: {
-    status?: "active" | "archived";
-    ownerUserId?: string | null;
+    tenantId?: string;
+    lifecycleState?: "draft" | "enabled" | "disabled" | "retired";
+    ownerUserId?: string;
     currentVersionId?: string | null;
     createdAt?: Date;
   } = {},
 ) {
-  await db.insert(skill).values({
+  await db.insert(skillTable).values({
     id,
-    name,
-    status: opts.status ?? "active",
-    ownerUserId: opts.ownerUserId ?? null,
+    tenantId: opts.tenantId ?? TENANT,
+    skillKey,
+    displayName: skillKey,
+    ownerUserId: opts.ownerUserId ?? "u1",
+    lifecycleState: opts.lifecycleState ?? "enabled",
     currentVersionId: opts.currentVersionId ?? null,
     createdAt: opts.createdAt ?? new Date(),
   });
@@ -40,14 +46,16 @@ async function insertSkill(
 async function insertSkillVersionRow(
   id: string,
   skillId: string,
-  version: number,
-  opts: { promptTemplate?: string; createdAt?: Date } = {},
+  versionNo: number,
+  opts: { createdAt?: Date } = {},
 ) {
-  await db.insert(skillVersion).values({
+  await db.insert(skillVersionTable).values({
     id,
     skillId,
-    version,
-    promptTemplate: opts.promptTemplate ?? null,
+    versionNo,
+    contentRef: `sha-${id}`,
+    contentHash: `sha256:${id}`,
+    createdBy: "u1",
     createdAt: opts.createdAt ?? new Date(),
   });
 }
@@ -65,7 +73,7 @@ describe("listSkills (真实 MySQL)", () => {
     await insertSkill("s-old", "old", { createdAt: t0 });
     await insertSkill("s-new", "new", { createdAt: t1, currentVersionId: "v1" });
 
-    const rows = await listSkills();
+    const rows = await listSkills(TENANT);
     expect(rows).toHaveLength(2);
     // createdAt desc：new 在前
     expect(rows[0]?.id).toBe("s-new");
@@ -75,54 +83,63 @@ describe("listSkills (真实 MySQL)", () => {
   });
 
   it("空集 → []", async () => {
-    await expect(listSkills()).resolves.toEqual([]);
+    await expect(listSkills(TENANT)).resolves.toEqual([]);
   });
 
-  it("activeOnly=true 仅返回 status=active，过滤 archived 软删", async () => {
-    await insertSkill("s1", "active-skill", { status: "active" });
-    await insertSkill("s2", "archived-skill", { status: "archived" });
+  it("tenant 隔离：只返回本租户 skill", async () => {
+    await insertSkill("s-a", "a", { tenantId: TENANT });
+    await insertSkill("s-other", "other", { tenantId: "tenant-2" });
 
-    const rows = await listSkills(undefined, { activeOnly: true });
+    const rows = await listSkills(TENANT);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe("s-a");
+  });
+
+  it("activeOnly=true 仅返回 lifecycleState=enabled，过滤 disabled 软删", async () => {
+    await insertSkill("s1", "active-skill", { lifecycleState: "enabled" });
+    await insertSkill("s2", "disabled-skill", { lifecycleState: "disabled" });
+
+    const rows = await listSkills(TENANT, undefined, { activeOnly: true });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe("s1");
-    expect(rows[0]?.status).toBe("active");
+    expect(rows[0]?.lifecycleState).toBe("enabled");
   });
 
-  it("activeOnly=false（默认）含 archived", async () => {
-    await insertSkill("s1", "a", { status: "active" });
-    await insertSkill("s2", "b", { status: "archived" });
+  it("activeOnly=false（默认）含 disabled", async () => {
+    await insertSkill("s1", "a", { lifecycleState: "enabled" });
+    await insertSkill("s2", "b", { lifecycleState: "disabled" });
 
-    const rows = await listSkills();
+    const rows = await listSkills(TENANT);
     expect(rows).toHaveLength(2);
   });
 
-  it("owner filter（includePublic=false）仅返回 ownerUserId 匹配的 skill", async () => {
+  it("owner filter 仅返回 ownerUserId 匹配的 skill", async () => {
     await insertSkill("s-mine", "mine", { ownerUserId: "u1" });
     await insertSkill("s-other", "other", { ownerUserId: "u2" });
-    await insertSkill("s-public", "public", { ownerUserId: null });
 
-    const rows = await listSkills({ ownerUserId: "u1", includePublic: false });
+    const rows = await listSkills(TENANT, { ownerUserId: "u1", includePublic: false });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe("s-mine");
   });
 
   it("owner filter + includePublic=true 含公共 skill（ownerUserId null）", async () => {
+    // 正式 skillTable.ownerUserId notNull，公共（null owner）skill 仅作兼容分支；
+    // 实际返回 = owner 匹配 + 公共（此处公共集为空，故只返回 owner 匹配）。
     await insertSkill("s-mine", "mine", { ownerUserId: "u1" });
     await insertSkill("s-other", "other", { ownerUserId: "u2" });
-    await insertSkill("s-public", "public", { ownerUserId: null });
 
-    const rows = await listSkills({ ownerUserId: "u1", includePublic: true });
+    const rows = await listSkills(TENANT, { ownerUserId: "u1", includePublic: true });
     const ids = rows.map((r) => r.id).sort();
-    expect(ids).toEqual(["s-mine", "s-public"]);
+    expect(ids).toEqual(["s-mine"]);
   });
 
   it("activeOnly + owner filter 组合（两条件并存）", async () => {
-    await insertSkill("s-mine-active", "ma", { ownerUserId: "u1", status: "active" });
-    await insertSkill("s-mine-archived", "mr", { ownerUserId: "u1", status: "archived" });
-    await insertSkill("s-other-active", "oa", { ownerUserId: "u2", status: "active" });
-    await insertSkill("s-public-active", "pa", { ownerUserId: null, status: "active" });
+    await insertSkill("s-mine-active", "ma", { ownerUserId: "u1", lifecycleState: "enabled" });
+    await insertSkill("s-mine-disabled", "mr", { ownerUserId: "u1", lifecycleState: "disabled" });
+    await insertSkill("s-other-active", "oa", { ownerUserId: "u2", lifecycleState: "enabled" });
 
     const rows = await listSkills(
+      TENANT,
       { ownerUserId: "u1", includePublic: false },
       { activeOnly: true },
     );
@@ -138,17 +155,15 @@ describe("listSkillVersions (真实 MySQL)", () => {
     await resetDatabase(db);
   });
 
-  it("返回某 skill 的版本列表，按 version asc", async () => {
+  it("返回某 skill 的版本列表，按 versionNo desc", async () => {
     await insertSkill("s1", "build-from-idea");
-    await insertSkillVersionRow("v2", "s1", 2, { promptTemplate: "p2" });
-    await insertSkillVersionRow("v1", "s1", 1, { promptTemplate: "p1" });
+    await insertSkillVersionRow("v2", "s1", 2);
+    await insertSkillVersionRow("v1", "s1", 1);
 
-    const rows = await listSkillVersions("s1");
+    const rows = await listSkillVersions(TENANT, "s1");
     expect(rows).toHaveLength(2);
-    expect(rows[0]?.version).toBe(1);
-    expect(rows[0]?.promptTemplate).toBe("p1");
-    expect(rows[1]?.version).toBe(2);
-    expect(rows[1]?.promptTemplate).toBe("p2");
+    expect(rows[0]?.versionNo).toBe(2);
+    expect(rows[1]?.versionNo).toBe(1);
   });
 
   it("仅返回该 skill 的版本（不串到其他 skill）", async () => {
@@ -157,13 +172,13 @@ describe("listSkillVersions (真实 MySQL)", () => {
     await insertSkillVersionRow("v1", "s1", 1);
     await insertSkillVersionRow("v2", "s2", 1);
 
-    const rows = await listSkillVersions("s1");
+    const rows = await listSkillVersions(TENANT, "s1");
     expect(rows).toHaveLength(1);
     expect(rows[0]?.skillId).toBe("s1");
   });
 
   it("无版本 → []", async () => {
     await insertSkill("s1", "a");
-    await expect(listSkillVersions("s1")).resolves.toEqual([]);
+    await expect(listSkillVersions(TENANT, "s1")).resolves.toEqual([]);
   });
 });

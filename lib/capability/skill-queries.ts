@@ -19,8 +19,9 @@
  * - contentHash 必须以 `sha256:` 开头。
  * - 跨租户隔离：所有查询按 tenantId 过滤。
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isValidContentHash } from "@/lib/capability/content-cache";
+import { listActiveSyncLocalSkillIds } from "@/lib/capability/skill-sync-queries";
 import { db } from "@/lib/db/client";
 import {
   type Skill,
@@ -612,6 +613,148 @@ export async function publishSkillVersion(params: {
     throw new SkillNotFoundError(skill.id);
   }
   return { skill: updatedSkill, version: updatedVersion };
+}
+
+// ─── 02-4：Studio / sync / provider 补充查询 ────────────────
+
+/**
+ * 由 git commit sha 派生正式 contentHash（关口02 02-4 映射约定）。
+ *
+ * 正式 SkillVersion.contentHash 要求 `sha256:` + 64 hex；Studio / sync 流程以
+ * skills/ git repo 的 commit sha 作为内容身份。git sha 本身是 40 hex，不能直接使用，
+ * 故取其 sha256（64 hex）作为确定性内容身份 hash：新 commit → 新 hash → 变化可检测；
+ * 同一 commit 恒等；格式满足正式不变量。运行时（gateway content）只回传 contentHash，
+ * 不做内容重哈希校验，故该映射不破坏运行路径。
+ */
+export function contentHashFromGitSha(commitSha: string): string {
+  const digest = createHash("sha256").update(commitSha).digest("hex");
+  return `sha256:${digest}`;
+}
+
+/**
+ * 将 Skill.currentVersionId 指向既有版本并发布（Studio create / versions / publish / rollback 共用）。
+ *
+ * - CAS（P1-14）：expectedCurrentVersionId 提供时，仅当 skill.currentVersionId 与之匹配才切换；
+ *   不匹配返回 false（调用方回 409），防并发 publish/rollback 互覆盖。
+ * - 若目标版本为 draft，一并置为 published（与 publishSkillVersion 语义一致；Studio 流程
+ *   createSkillVersion 默认 draft，经此发布）。
+ * - 目标版本必须属于该 skill（跨租户隔离）。
+ *
+ * @returns true=已切换；false=currentVersionId CAS 冲突（未切换）。
+ */
+export async function setCurrentSkillVersion(params: {
+  tenantId: string;
+  skillId: string;
+  skillVersionId: string;
+  expectedCurrentVersionId?: string | null;
+}): Promise<boolean> {
+  const skill = await getSkillById({
+    tenantId: params.tenantId,
+    skillId: params.skillId,
+  });
+  if (!skill) {
+    throw new SkillNotFoundError(params.skillId);
+  }
+  // CAS：currentVersionId 不匹配 → 冲突，不切换
+  if (
+    params.expectedCurrentVersionId !== undefined &&
+    skill.currentVersionId !== params.expectedCurrentVersionId
+  ) {
+    return false;
+  }
+  // 校验目标版本存在且属于该 skill（跨租户隔离）
+  const target = await getSkillVersionById({
+    tenantId: params.tenantId,
+    skillVersionId: params.skillVersionId,
+  });
+  if (!target || target.skillId !== params.skillId) {
+    throw new SkillVersionNotFoundError(params.skillVersionId);
+  }
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    // CAS 落库：WHERE currentVersionId = expectedCurrentVersionId（未提供 CAS 时用 IS NULL 兜底）
+    const casClause =
+      params.expectedCurrentVersionId === undefined
+        ? undefined
+        : params.expectedCurrentVersionId === null
+          ? isNull(skillTable.currentVersionId)
+          : eq(skillTable.currentVersionId, params.expectedCurrentVersionId);
+    const result = await tx
+      .update(skillTable)
+      .set({ currentVersionId: params.skillVersionId, updatedAt: now })
+      .where(
+        and(
+          eq(skillTable.tenantId, params.tenantId),
+          eq(skillTable.id, params.skillId),
+          ...(casClause ? [casClause] : []),
+        ),
+      );
+    if (result[0].affectedRows === 0) {
+      throw new SkillVersionConflictError(
+        `setCurrentSkillVersion: currentVersionId CAS 冲突（skillId=${params.skillId}）`,
+      );
+    }
+    // draft → published
+    if (target.revisionState === "draft") {
+      await tx
+        .update(skillVersionTable)
+        .set({ revisionState: "published", publishedAt: now })
+        .where(eq(skillVersionTable.id, params.skillVersionId));
+    }
+  });
+  return true;
+}
+
+/** 按 contentRef（git commit sha）取 SkillVersion（sync 去重用）。 */
+export async function getSkillVersionByContentRef(params: {
+  tenantId: string;
+  skillId: string;
+  contentRef: string;
+}): Promise<SkillVersion | null> {
+  const skill = await getSkillById({
+    tenantId: params.tenantId,
+    skillId: params.skillId,
+  });
+  if (!skill) {
+    throw new SkillNotFoundError(params.skillId);
+  }
+  const [row] = await db
+    .select()
+    .from(skillVersionTable)
+    .where(
+      and(
+        eq(skillVersionTable.skillId, params.skillId),
+        eq(skillVersionTable.contentRef, params.contentRef),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * 运行时匹配候选（LocalDbSkillProvider 事实源）。
+ *
+ * 对应 legacy listActiveSkillsForMatching 的正式等价：
+ * - lifecycleState=enabled（legacy status=active）
+ * - visibilityScope ∈ {tenant, internal}（legacy visibility=public）
+ * - sourceType=local，或存在 syncState=active 的 SkillSyncBinding（同步镜像仅 active 时进入候选）
+ * - 有当前生效版本（currentVersionId 非空，无版本无法被 Resolver 选用）
+ */
+export async function listSkillsForMatching(tenantId: string): Promise<Skill[]> {
+  const activeSyncedIds = new Set(await listActiveSyncLocalSkillIds(tenantId));
+  const rows = await db
+    .select()
+    .from(skillTable)
+    .where(
+      and(
+        eq(skillTable.tenantId, tenantId),
+        eq(skillTable.lifecycleState, "enabled"),
+        inArray(skillTable.visibilityScope, ["tenant", "internal"]),
+        or(eq(skillTable.sourceType, "local"), inArray(skillTable.id, [...activeSyncedIds])),
+      ),
+    )
+    .orderBy(asc(skillTable.createdAt));
+  return rows.filter((s) => s.currentVersionId !== null);
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────

@@ -4,10 +4,10 @@ const studio = vi.hoisted(() => ({
   requireStudioAction: vi.fn(),
   hasStudioAction: vi.fn(),
 }));
-const queries = vi.hoisted(() => ({
+const skillQryMocks = vi.hoisted(() => ({
   getSkillById: vi.fn(),
-  getSkillVersion: vi.fn(),
-  setCurrentVersion: vi.fn(),
+  getSkillVersionById: vi.fn(),
+  setCurrentSkillVersion: vi.fn(),
 }));
 const audit = vi.hoisted(() => ({ recordAdminAudit: vi.fn() }));
 
@@ -15,10 +15,10 @@ vi.mock("@/lib/identity/studio-access", () => ({
   requireStudioAction: studio.requireStudioAction,
   hasStudioAction: studio.hasStudioAction,
 }));
-vi.mock("@/lib/db/queries", () => ({
-  getSkillById: queries.getSkillById,
-  getSkillVersion: queries.getSkillVersion,
-  setCurrentVersion: queries.setCurrentVersion,
+vi.mock("@/lib/capability/skill-queries", () => ({
+  getSkillById: skillQryMocks.getSkillById,
+  getSkillVersionById: skillQryMocks.getSkillVersionById,
+  setCurrentSkillVersion: skillQryMocks.setCurrentSkillVersion,
 }));
 vi.mock("@/lib/studio/admin-audit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/studio/admin-audit")>();
@@ -45,18 +45,23 @@ beforeEach(() => {
   vi.clearAllMocks();
   studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
   studio.hasStudioAction.mockResolvedValue(true);
-  queries.setCurrentVersion.mockResolvedValue(true);
+  skillQryMocks.setCurrentSkillVersion.mockResolvedValue(true);
   audit.recordAdminAudit.mockResolvedValue(true);
 });
 
 describe("POST /studio/api/skills/[id]/publish (切片 C)", () => {
   it("skill.write 通过 → 切换 currentVersionId + succeeded 审计", async () => {
-    queries.getSkillById.mockResolvedValue({ id: "s1", currentVersionId: "v1" });
-    queries.getSkillVersion.mockResolvedValue({ id: "v2", skillId: "s1", version: 2 });
+    skillQryMocks.getSkillById.mockResolvedValue({ id: "s1", currentVersionId: "v1" });
+    skillQryMocks.getSkillVersionById.mockResolvedValue({ id: "v2", skillId: "s1", versionNo: 2 });
     const res = await POST(postReq({ versionId: "v2" }), { params: Promise.resolve({ id: "s1" }) });
     expect(res.status).toBe(200);
-    expect(queries.setCurrentVersion).toHaveBeenCalledTimes(1);
-    expect(queries.setCurrentVersion).toHaveBeenCalledWith("s1", "v2", "v1");
+    expect(skillQryMocks.setCurrentSkillVersion).toHaveBeenCalledTimes(1);
+    expect(skillQryMocks.setCurrentSkillVersion).toHaveBeenCalledWith({
+      tenantId: "t1",
+      skillId: "s1",
+      skillVersionId: "v2",
+      expectedCurrentVersionId: "v1",
+    });
     expect(audit.recordAdminAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "skills.published",
@@ -69,11 +74,15 @@ describe("POST /studio/api/skills/[id]/publish (切片 C)", () => {
   });
 
   it("foreign versionId（不属于该 skill）→ 404，不切换，写 failed 审计", async () => {
-    queries.getSkillById.mockResolvedValue({ id: "s1", currentVersionId: "v1" });
-    queries.getSkillVersion.mockResolvedValue({ id: "v2", skillId: "other", version: 2 });
+    skillQryMocks.getSkillById.mockResolvedValue({ id: "s1", currentVersionId: "v1" });
+    skillQryMocks.getSkillVersionById.mockResolvedValue({
+      id: "v2",
+      skillId: "other",
+      versionNo: 2,
+    });
     const res = await POST(postReq({ versionId: "v2" }), { params: Promise.resolve({ id: "s1" }) });
     expect(res.status).toBe(404);
-    expect(queries.setCurrentVersion).not.toHaveBeenCalled();
+    expect(skillQryMocks.setCurrentSkillVersion).not.toHaveBeenCalled();
     expect(audit.recordAdminAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "skills.published",
@@ -84,7 +93,7 @@ describe("POST /studio/api/skills/[id]/publish (切片 C)", () => {
   });
 
   it("skill 不存在 → 404，不审计（无 skill id 锚点）", async () => {
-    queries.getSkillById.mockResolvedValue(null);
+    skillQryMocks.getSkillById.mockResolvedValue(null);
     const res = await POST(postReq({ versionId: "v2" }), { params: Promise.resolve({ id: "s1" }) });
     expect(res.status).toBe(404);
     expect(audit.recordAdminAudit).not.toHaveBeenCalled();
@@ -93,7 +102,7 @@ describe("POST /studio/api/skills/[id]/publish (切片 C)", () => {
   it("缺 versionId → 400，不审计", async () => {
     const res = await POST(postReq({}), { params: Promise.resolve({ id: "s1" }) });
     expect(res.status).toBe(400);
-    expect(queries.setCurrentVersion).not.toHaveBeenCalled();
+    expect(skillQryMocks.setCurrentSkillVersion).not.toHaveBeenCalled();
     expect(audit.recordAdminAudit).not.toHaveBeenCalled();
   });
 
@@ -104,13 +113,13 @@ describe("POST /studio/api/skills/[id]/publish (切片 C)", () => {
     });
     const res = await POST(postReq({ versionId: "v2" }), { params: Promise.resolve({ id: "s1" }) });
     expect(res.status).toBe(403);
-    expect(queries.setCurrentVersion).not.toHaveBeenCalled();
+    expect(skillQryMocks.setCurrentSkillVersion).not.toHaveBeenCalled();
     expect(audit.recordAdminAudit).not.toHaveBeenCalled();
   });
 
   it("审计写入失败 → 500 audit_failed", async () => {
-    queries.getSkillById.mockResolvedValue({ id: "s1", currentVersionId: "v1" });
-    queries.getSkillVersion.mockResolvedValue({ id: "v2", skillId: "s1", version: 2 });
+    skillQryMocks.getSkillById.mockResolvedValue({ id: "s1", currentVersionId: "v1" });
+    skillQryMocks.getSkillVersionById.mockResolvedValue({ id: "v2", skillId: "s1", versionNo: 2 });
     audit.recordAdminAudit.mockRejectedValue(new Error("audit write failed"));
     const res = await POST(postReq({ versionId: "v2" }), { params: Promise.resolve({ id: "s1" }) });
     expect(res.status).toBe(500);
@@ -119,16 +128,16 @@ describe("POST /studio/api/skills/[id]/publish (切片 C)", () => {
 
   it("P1-5: 非 admin 且非 owner → 403,不切换版本", async () => {
     studio.hasStudioAction.mockResolvedValue(false);
-    queries.getSkillById.mockResolvedValue({ id: "s1", ownerUserId: "other-user" });
+    skillQryMocks.getSkillById.mockResolvedValue({ id: "s1", ownerUserId: "other-user" });
     const res = await POST(postReq({ versionId: "v2" }), { params: Promise.resolve({ id: "s1" }) });
     expect(res.status).toBe(403);
-    expect(queries.setCurrentVersion).not.toHaveBeenCalled();
+    expect(skillQryMocks.setCurrentSkillVersion).not.toHaveBeenCalled();
   });
 
   it("P1-14: CAS 冲突(currentVersionId 已被并发改)→ 409", async () => {
-    queries.getSkillById.mockResolvedValue({ id: "s1", currentVersionId: "v1" });
-    queries.getSkillVersion.mockResolvedValue({ id: "v2", skillId: "s1", version: 2 });
-    queries.setCurrentVersion.mockResolvedValueOnce(false);
+    skillQryMocks.getSkillById.mockResolvedValue({ id: "s1", currentVersionId: "v1" });
+    skillQryMocks.getSkillVersionById.mockResolvedValue({ id: "v2", skillId: "s1", versionNo: 2 });
+    skillQryMocks.setCurrentSkillVersion.mockResolvedValueOnce(false);
     const res = await POST(postReq({ versionId: "v2" }), { params: Promise.resolve({ id: "s1" }) });
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("version_conflict");

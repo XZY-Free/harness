@@ -54,6 +54,7 @@ export type {
 export * from "@/lib/persistence/schema/runtime";
 export * from "@/lib/persistence/schema/security-incident";
 export * from "@/lib/persistence/schema/skill";
+export * from "@/lib/persistence/schema/skill-sync";
 export * from "@/lib/persistence/schema/tool-call";
 export * from "@/lib/persistence/schema/tool";
 export * from "@/lib/persistence/schema/trace";

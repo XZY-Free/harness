@@ -1,18 +1,22 @@
 /**
- * SkillProvider：Skill 候选来源的统一接口（02 文档 §六.1）。
+ * SkillProvider：Skill 候选来源的统一接口（02 文档 §六.1，关口02 02-4 Tenant 化）。
  *
  * 设计目标：
  * - 把"有哪些 Skill 可用"从 `/api/chat` 中抽出,由 Provider 统一回答。
  * - Resolver 只接收 `SkillSummary`（摘要）,**不读取完整 `SKILL.md`**（懒加载由
  * `readSkillFile` 在选中后完成,只读本地 git 快照）。
- * - `availableSkills` 是 Resolver 的**唯一候选集合**;只来自本地 DB 中 active 的 Skill。
+ * - `availableSkills` 是 Resolver 的**唯一候选集合**;只来自本地 DB 中 enabled 的 Skill。
  * - 运行时不访问 capability-market:capability-market 只在后台同步模块出现,同步后的 Skill
- * 是本地镜像（source=capability-market）,与本地自建 Skill 一样从本地 DB + 本地 commitSha 读取。
+ * 是本地镜像（source=capability_market）,与本地自建 Skill 一样从本地 DB + 本地 contentRef 读取。
  * - 没有默认 Skill:`build-from-idea` 只是一个普通 skill,不作为兜底运行策略。
+ *
+ * Tenant 化（02-4 契约）：Provider 事实源是正式 skill 仓储（tenant-scoped）。
+ * `listAvailableSkills(tenantId)` 由调用方（/api/skills 等已解析 Principal 的入口）传入 tenantId,
+ * 经 listSkillsForMatching 按 tenantId 隔离；禁止全局扫描。
  */
 
-import { getCurrentSkillVersion, listActiveSkillsForMatching } from "@/lib/db/queries";
-import type { SkillSource } from "@/lib/db/schema";
+import { getCurrentSkillVersion, listSkillsForMatching } from "@/lib/capability/skill-queries";
+import type { SkillSourceType } from "@/lib/persistence/schema/skill";
 
 /**
  * Skill 摘要：Resolver 候选集合的元素。
@@ -25,9 +29,9 @@ export interface SkillSummary {
   skillId: string;
   /** 当前可用版本 ID（本地 SkillVersion UUID）。 */
   skillVersionId: string;
-  /** 来源命名空间（local / capability-market）。 */
+  /** 来源命名空间（local / capability_market）。 */
   namespace: string;
-  /** 唯一短名,用于展示和日志。 */
+  /** 唯一短名（skillKey）,用于展示和日志。 */
   name: string;
   /** 中文展示名。 */
   displayName: string;
@@ -37,8 +41,8 @@ export interface SkillSummary {
   whenToUse: string;
   /** 搜索和辅助匹配标签。 */
   tags: string[];
-  /** 来源：local（本地自建）/ capability-market（同步镜像）。运行时两者读取路径一致。 */
-  source: SkillSource;
+  /** 来源：local（本地自建）/ capability_market（同步镜像）。运行时两者读取路径一致。 */
+  source: SkillSourceType;
   /** 可见性描述。 */
   visibility: string;
   /** 是否允许模型自动选择（false 时只接受 UI 显式选择）。 */
@@ -47,60 +51,60 @@ export interface SkillSummary {
   uiVisible: boolean;
   /** 能力声明（不是工具白名单;工具权限归 Tools / Policy 专题）。 */
   requiredCapabilities: string[];
-  /** 版本内容 hash（目录形态下即 skills/ git repo 的 commit sha）。 */
+  /** 版本内容 hash（目录形态下即 skills/ git repo 的 commit 派生 hash）。 */
   contentHash: string | null;
-  /** 当前可用版本号（本地 SkillVersion.version 是 int,转字符串保留可比较性）。 */
+  /** 当前可用版本号（正式 versionNo 是 int,转字符串保留可比较性）。 */
   version: string;
 }
 
 /**
  * Skill 候选来源接口。
  * 02 文档 §六.1：运行时候选列表只来自本地 active Skill（LocalDbSkillProvider）,
- * 不再有运行时远程 Provider。
+ * 不再有运行时远程 Provider。tenantId 由调用方传入。
  */
 export interface SkillProvider {
-  /** 列出本轮可见、可用的 Skill 摘要（本地 DB active Skill,同步 Skill 需映射 active）。 */
-  listAvailableSkills(): Promise<SkillSummary[]>;
+  /** 列出指定租户内可见、可用的 Skill 摘要（本地 enabled Skill,同步 Skill 需绑定 active）。 */
+  listAvailableSkills(tenantId: string): Promise<SkillSummary[]>;
 }
 
 /**
  * 本地 DB Skill 适配器：唯一的运行时 Provider（02 文档 §六.1）。
  *
- * 把当前 DB registry（`skills` + `skill_versions.currentVersionId`）映射为 `SkillSummary`。
- * `listActiveSkillsForMatching` 已按来源过滤：同步 Skill 仅在映射 syncState=active 时返回。
+ * 把当前 DB registry（正式 Skill + SkillVersion.currentVersionId）映射为 `SkillSummary`。
+ * `listSkillsForMatching` 已按来源过滤：同步 Skill 仅在绑定 syncState=active 时返回。
  *
  * 映射规则：
- * - `namespace` / `source` = `sk.source`（local 或 capability-market）。
- * - `whenToUse` 复用 `skill.description`（DB 未单独建模 whenToUse）。
- * - `tags` 由 `skill.category` 单元素派生。
- * - `contentHash` = 版本 `commitSha`（目录形态版本快照引用）。
+ * - `namespace` / `source` = `sk.sourceType`（local 或 capability_market）。
+ * - `whenToUse` 复用 `skill.description`（正式 Skill 未单独建模 whenToUse）。
+ * - `tags` 暂为空（正式模型未建模 category）。
+ * - `contentHash` = 版本 `contentHash`。
  * - `modelInvocable` / `uiVisible` 默认 true（DB 未建模开关）。
  * - `requiredCapabilities` 暂为空数组（不在本专题实现工具权限边界）。
  * - 没有 currentVersion 的 skill 跳过（无可用版本,无法被 Resolver 选用）。
  */
 export class LocalDbSkillProvider implements SkillProvider {
-  async listAvailableSkills(): Promise<SkillSummary[]> {
-    const dbSkills = await listActiveSkillsForMatching();
+  async listAvailableSkills(tenantId: string): Promise<SkillSummary[]> {
+    const dbSkills = await listSkillsForMatching(tenantId);
     const out: SkillSummary[] = [];
     for (const sk of dbSkills) {
-      const version = await getCurrentSkillVersion(sk.id);
+      const version = await getCurrentSkillVersion({ tenantId, skillId: sk.id });
       if (!version) continue;
       out.push({
         skillId: sk.id,
         skillVersionId: version.id,
-        namespace: sk.source,
-        name: sk.name,
-        displayName: sk.name,
+        namespace: sk.sourceType,
+        name: sk.skillKey,
+        displayName: sk.displayName,
         description: sk.description ?? "",
         whenToUse: sk.description ?? "",
-        tags: sk.category ? [sk.category] : [],
-        source: sk.source,
-        visibility: sk.visibility,
+        tags: [],
+        source: sk.sourceType as SkillSourceType,
+        visibility: sk.visibilityScope,
         modelInvocable: true,
         uiVisible: true,
         requiredCapabilities: [],
-        contentHash: version.commitSha ?? null,
-        version: String(version.version),
+        contentHash: version.contentHash,
+        version: String(version.versionNo),
       });
     }
     return out;

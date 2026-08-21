@@ -1,9 +1,5 @@
-import {
-  archiveSkill,
-  getSkillById,
-  getSyncMappingByLocalSkill,
-  updateSyncMapping,
-} from "@/lib/db/queries";
+import { getSkillById, updateSkill } from "@/lib/capability/skill-queries";
+import { getSyncBindingByLocalSkill, updateSyncBinding } from "@/lib/capability/skill-sync-queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
@@ -19,19 +15,25 @@ import type { NextRequest } from "next/server";
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.principal.userIdentityId;
+  const { tenantId, userIdentityId: actorUserId } = r.principal;
   const { id } = await params;
 
-  const sk = await getSkillById(id);
+  const sk = await getSkillById({ tenantId, skillId: id });
   if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
-  if (sk.source !== "capability-market") {
+  if (sk.sourceType !== "capability_market") {
     return jsonError(403, "not_synced_skill", "仅同步 Skill 可取消同步,本地自建 Skill 请使用归档");
   }
 
-  const mapping = await getSyncMappingByLocalSkill(id);
-  await archiveSkill(id);
+  const mapping = await getSyncBindingByLocalSkill({ tenantId, localSkillId: id });
+  // 软停用（lifecycleState=disabled），不物理删。
+  await updateSkill({
+    tenantId,
+    skillId: id,
+    lifecycleState: "disabled",
+    expectedVersionNo: sk.versionNo,
+  });
   if (mapping) {
-    await updateSyncMapping(mapping.id, {
+    await updateSyncBinding(tenantId, mapping.id, {
       syncState: "not_found",
       lastCheckedAt: new Date(),
       lastError: "用户取消同步",
@@ -45,7 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       targetType: "skill",
       targetId: id,
       outcome: "succeeded",
-      metadata: { name: sk.name, remoteAssetId: mapping?.remoteAssetId ?? null },
+      metadata: { name: sk.skillKey, remoteAssetId: mapping?.remoteAssetId ?? null },
     });
   } catch {
     /* 审计非关键 */

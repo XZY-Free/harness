@@ -1,6 +1,7 @@
 import { MetricCard } from "@/components/studio/metric-card";
 import { listAgents } from "@/lib/agents/persistence/agent-queries";
-import { getPolicyConfigRows, listSkills } from "@/lib/db/studio-queries";
+import { listSkills } from "@/lib/capability/skill-studio-queries";
+import { getPolicyConfigRows } from "@/lib/db/studio-queries";
 import { resolvePrincipal } from "@/lib/identity/resolver";
 import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { headers } from "next/headers";
@@ -27,12 +28,13 @@ export default async function StudioOverviewPage() {
   const adminPrincipal = await resolvePrincipal(requestHeaders, "admin");
 
   const [skills, agents, policyRows] = await Promise.all([
-    listSkills(),
+    listSkills(adminPrincipal.tenantId, undefined, { activeOnly: true }),
     listAgents(adminPrincipal.tenantId),
     getPolicyConfigRows(),
   ]);
 
-  const activeSkills = skills.filter((s) => s.status === "active").length;
+  // listSkills(activeOnly=true) 已只返回 lifecycleState=enabled 的 skill
+  const activeSkills = skills.length;
   const policyKeys = new Set(policyRows.map((r) => r.key));
   const POLICY_LABELS: Record<string, string> = {
     protectedPaths: "受保护路径",

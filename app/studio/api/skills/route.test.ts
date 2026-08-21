@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Skills list API 守卫与取数 + POST 建 skill 编排。
- * mock studio-access + studio-queries + db/queries + skill/repo + admin-audit；
+ * Skills list API 守卫与取数 + POST 建 skill 编排（02-4 正式链）。
+ * mock studio-access + skill-studio-queries + skill-queries + skill/repo + admin-audit；
  * frontmatter 用真（纯函数），assertValidSkillName 用真（Agent Skills 标准校验）。
+ * contentHashFromGitSha 保留真实实现（skill-queries importActual）。
  */
 
 const studio = vi.hoisted(() => ({
@@ -11,12 +12,12 @@ const studio = vi.hoisted(() => ({
   hasStudioAction: vi.fn(),
 }));
 const studioQueries = vi.hoisted(() => ({ listSkills: vi.fn() }));
-const queries = vi.hoisted(() => ({
+const skillQryMocks = vi.hoisted(() => ({
   createSkill: vi.fn(),
   createSkillVersion: vi.fn(),
-  getSkillByName: vi.fn(),
-  setCurrentVersion: vi.fn(),
-  deleteSkillWithVersions: vi.fn(),
+  getSkillByKey: vi.fn(),
+  setCurrentSkillVersion: vi.fn(),
+  updateSkill: vi.fn(),
 }));
 const repoMocks = vi.hoisted(() => ({
   writeSkillFile: vi.fn(),
@@ -28,14 +29,20 @@ vi.mock("@/lib/identity/studio-access", () => ({
   requireStudioAction: studio.requireStudioAction,
   hasStudioAction: studio.hasStudioAction,
 }));
-vi.mock("@/lib/db/studio-queries", () => ({ listSkills: studioQueries.listSkills }));
-vi.mock("@/lib/db/queries", () => ({
-  createSkill: queries.createSkill,
-  createSkillVersion: queries.createSkillVersion,
-  getSkillByName: queries.getSkillByName,
-  setCurrentVersion: queries.setCurrentVersion,
-  deleteSkillWithVersions: queries.deleteSkillWithVersions,
+vi.mock("@/lib/capability/skill-studio-queries", () => ({
+  listSkills: studioQueries.listSkills,
 }));
+vi.mock("@/lib/capability/skill-queries", async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    createSkill: skillQryMocks.createSkill,
+    createSkillVersion: skillQryMocks.createSkillVersion,
+    getSkillByKey: skillQryMocks.getSkillByKey,
+    setCurrentSkillVersion: skillQryMocks.setCurrentSkillVersion,
+    updateSkill: skillQryMocks.updateSkill,
+  };
+});
 vi.mock("@/lib/skill/repo", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/skill/repo")>();
   return {
@@ -60,11 +67,11 @@ beforeEach(() => {
 
 describe("GET /studio/api/skills (Stage B)", () => {
   it("skill.read 通过 → 200 + list", async () => {
-    studioQueries.listSkills.mockResolvedValue([{ id: "s1", name: "build-from-idea" }]);
+    studioQueries.listSkills.mockResolvedValue([{ id: "s1", skillKey: "build-from-idea" }]);
     const res = await GET(new NextRequest("http://localhost/studio/api/skills"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data).toEqual([{ id: "s1", name: "build-from-idea" }]);
+    expect(body.data).toEqual([{ id: "s1", skillKey: "build-from-idea" }]);
     expect(studio.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "skill.read");
   });
 
@@ -80,12 +87,12 @@ describe("GET /studio/api/skills (Stage B)", () => {
 });
 
 describe("POST /studio/api/skills（建 skill）", () => {
-  it("skill.write 通过 → 200 + 编排 createSkill/writeSkillFile/commitSkillVersion/createSkillVersion/setCurrentVersion", async () => {
-    queries.getSkillByName.mockResolvedValue(null);
-    queries.createSkill.mockResolvedValue({ id: "sk-1", name: "my-skill" });
+  it("skill.write 通过 → 200 + 编排 createSkill/writeSkillFile/commitSkillVersion/createSkillVersion/setCurrentSkillVersion", async () => {
+    skillQryMocks.getSkillByKey.mockResolvedValue(null);
+    skillQryMocks.createSkill.mockResolvedValue({ id: "sk-1", versionNo: 1 });
     repoMocks.writeSkillFile.mockResolvedValue("SKILL.md");
     repoMocks.commitSkillVersion.mockResolvedValue("sha-abc");
-    queries.createSkillVersion.mockResolvedValue({ id: "ver-1" });
+    skillQryMocks.createSkillVersion.mockResolvedValue({ id: "ver-1", versionNo: 1 });
 
     const req = new NextRequest("http://localhost/studio/api/skills", {
       method: "POST",
@@ -101,8 +108,8 @@ describe("POST /studio/api/skills（建 skill）", () => {
     const body = await res.json();
     expect(body.data).toMatchObject({ skillId: "sk-1", versionId: "ver-1", commitSha: "sha-abc" });
     expect(studio.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "skill.write");
-    expect(queries.createSkill).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "my-skill", description: "测试 skill" }),
+    expect(skillQryMocks.createSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ skillKey: "my-skill", description: "测试 skill" }),
     );
     expect(repoMocks.writeSkillFile).toHaveBeenCalledWith(
       "my-skill",
@@ -110,26 +117,30 @@ describe("POST /studio/api/skills（建 skill）", () => {
       expect.any(String),
     );
     expect(repoMocks.commitSkillVersion).toHaveBeenCalledWith("my-skill", expect.any(String));
-    expect(queries.createSkillVersion).toHaveBeenCalledWith(
+    expect(skillQryMocks.createSkillVersion).toHaveBeenCalledWith(
       expect.objectContaining({
         skillId: "sk-1",
-        version: 1,
-        commitSha: "sha-abc",
-        allowedTools: ["readFile", "writeFile"],
+        contentRef: "sha-abc",
+        contentHash: expect.stringMatching(/^sha256:/),
       }),
     );
-    expect(queries.setCurrentVersion).toHaveBeenCalledWith("sk-1", "ver-1");
+    expect(skillQryMocks.setCurrentSkillVersion).toHaveBeenCalledWith({
+      tenantId: "t1",
+      skillId: "sk-1",
+      skillVersionId: "ver-1",
+      expectedCurrentVersionId: null,
+    });
   });
 
   it("重名 → 409", async () => {
-    queries.getSkillByName.mockResolvedValue({ id: "existing", name: "my-skill" });
+    skillQryMocks.getSkillByKey.mockResolvedValue({ id: "existing", skillKey: "my-skill" });
     const req = new NextRequest("http://localhost/studio/api/skills", {
       method: "POST",
       body: JSON.stringify({ name: "my-skill" }),
     });
     const res = await POST(req);
     expect(res.status).toBe(409);
-    expect(queries.createSkill).not.toHaveBeenCalled();
+    expect(skillQryMocks.createSkill).not.toHaveBeenCalled();
   });
 
   it("非法 name → 400", async () => {
@@ -158,8 +169,8 @@ describe("POST /studio/api/skills（建 skill）", () => {
 // S1（11-P1-5）：发布校验阻断
 describe("POST /studio/api/skills - 校验阻断", () => {
   it("commitSkillVersion 抛 SkillValidationError → 400 + 错误信息", async () => {
-    queries.getSkillByName.mockResolvedValue(null);
-    queries.createSkill.mockResolvedValue({ id: "sk-1", name: "bad-skill" });
+    skillQryMocks.getSkillByKey.mockResolvedValue(null);
+    skillQryMocks.createSkill.mockResolvedValue({ id: "sk-1", versionNo: 1 });
     repoMocks.writeSkillFile.mockResolvedValue("SKILL.md");
     // 模拟校验失败
     const { SkillValidationError } = await import("@/lib/skill/repo");
@@ -177,17 +188,17 @@ describe("POST /studio/api/skills - 校验阻断", () => {
     expect(body.error.code).toBe("skill_validation_failed");
     expect(body.error.message).toContain("description");
     // 不应创建版本
-    expect(queries.createSkillVersion).not.toHaveBeenCalled();
+    expect(skillQryMocks.createSkillVersion).not.toHaveBeenCalled();
   });
 
   it("commitSkillVersion 抛普通 SkillRepoError(无改动)→ 走 headSha 回退逻辑", async () => {
-    queries.getSkillByName.mockResolvedValue(null);
-    queries.createSkill.mockResolvedValue({ id: "sk-2", name: "dup-skill" });
+    skillQryMocks.getSkillByKey.mockResolvedValue(null);
+    skillQryMocks.createSkill.mockResolvedValue({ id: "sk-2", versionNo: 1 });
     repoMocks.writeSkillFile.mockResolvedValue("SKILL.md");
     const { SkillRepoError } = await import("@/lib/skill/repo");
     repoMocks.commitSkillVersion.mockRejectedValue(new SkillRepoError("无改动"));
     // getSkillHeadSha 返回 null(实际 mock 用 actual,这里走真实逻辑返回 null)
-    queries.createSkillVersion.mockResolvedValue({ id: "ver-2" });
+    skillQryMocks.createSkillVersion.mockResolvedValue({ id: "ver-2", versionNo: 1 });
 
     const req = new NextRequest("http://localhost/studio/api/skills", {
       method: "POST",

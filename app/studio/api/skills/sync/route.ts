@@ -16,7 +16,7 @@ import type { NextRequest } from "next/server";
 export async function POST(req: NextRequest) {
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.principal.userIdentityId;
+  const { tenantId, userIdentityId: actorUserId } = r.principal;
 
   if (!capabilityMarketConfig.endpoint) {
     return jsonError(
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   let result: SyncResult;
   try {
-    result = await runSync();
+    result = await runSync({ tenantId, actorUserId });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     logger.warn("[/studio/api/skills/sync] 同步失败", { error: msg });

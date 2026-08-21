@@ -1,37 +1,46 @@
 /**
- * capability-market 同步编排服务（02 文档 §五）。
+ * capability-market 同步编排服务（02 文档 §五，关口02 02-4 Tenant 化）。
  *
  * 流程（02 文档 ）：
  * 1. 分页拉取 syncable Skill（listSyncableSkills）。
- * 2. 读本地全部 SkillSyncMapping,按 remoteAssetId 索引。
+ * 2. 读本地全部 SkillSyncBinding,按 remoteAssetId 索引。
  * 3. 对每个远端 asset：
- * - 已有映射 → checkUpdates 比较 hash：
+ * - 已有绑定 → checkUpdates 比较 hash：
  * · unchanged → 更新 lastCheckedAt,记 uptodate
- * · changed → sync + download + importArtifactZip(原 localName) → 新 SkillVersion + 切 current → 映射 active
- * · blocked/not_found → 更新映射 syncState（blocked/hidden/not_found）,记 blocked/not_found
- * - 无映射 → 检查 name 冲突：
- * · 远端 name 与本地 skill.name(任意 source) 或另一映射 localName 冲突 → 记 name_conflict,不导入
- * · 不冲突 → sync + download + importArtifactZip → 建 skill(source=capability-market) + SkillVersion v1 + 切 current + 建映射 active
- * 4. 远端不再出现的旧映射 → 标 not_found（不删本地,不进候选）。
+ * · changed → sync + download + importArtifactZip(原 localName) → 新 SkillVersion + 切 current → 绑定 active
+ * · blocked/not_found → 更新绑定 syncState（blocked/hidden/not_found）,记 blocked/not_found
+ * - 无绑定 → 检查 name 冲突：
+ * · 远端 name 与本地 skill.skillKey(任意 source) 或另一绑定 localName 冲突 → 记 name_conflict,不导入
+ * · 不冲突 → sync + download + importArtifactZip → 建 skill(source=capability_market) + SkillVersion v1 + 切 current + 建绑定 active
+ * 4. 远端不再出现的旧绑定 → 标 not_found（不删本地,不进候选）。
  * 5. hash 不变不创建新版本（checkUpdates unchanged 短路）。
  * 6. 单 asset 失败 → 记 failed + lastError,不中断整体。
  *
  * 并发：模块级 mutex,同一时刻只跑一个 runSync。
  *
+ * Tenant 化：本服务只接受 tenantContext（tenantId + actorUserId），所有 DB 读写
+ * 经正式 skill / skill-sync 仓储按 tenantId 隔离；禁止全局扫描（02-4 契约 §8.4）。
+ *
+ * 原子性说明：legacy 版用单事务包裹多步 DB 写入；正式 skill-queries 走全局 db、
+ * 不暴露事务注入，故改为逐语句写入。git 已 commit 而 DB 未落时，下次同步经
+ * getSkillVersionByContentRef 去重，避免同一 commit 重复建版本。
+ *
  * 不做：定时任务、双向同步、自动改名、物理删除历史。
  */
 
-import { db } from "@/lib/db/client";
+import { contentHashFromGitSha } from "@/lib/capability/skill-queries";
 import {
   createSkill,
   createSkillVersion,
-  createSyncMapping,
-  getMaxSkillVersionNumber,
-  getSkillByName,
-  listAllSyncMappings,
-  setCurrentVersion,
-  updateSyncMapping,
-} from "@/lib/db/queries";
+  getSkillByKey,
+  getSkillVersionByContentRef,
+  publishSkillVersion,
+} from "@/lib/capability/skill-queries";
+import {
+  createSyncBinding,
+  listSyncBindings,
+  updateSyncBinding,
+} from "@/lib/capability/skill-sync-queries";
 import { logger } from "@/lib/logger";
 import { ArtifactImportError, importArtifactZip } from "@/lib/skill/sync/artifact-import";
 import {
@@ -44,6 +53,13 @@ import {
   listSyncableSkills,
   syncManifests,
 } from "@/lib/skill/sync/capability-market-client";
+
+/** 同步执行上下文（tenant-scoped）。 */
+export interface SyncTenantContext {
+  tenantId: string;
+  /** 触发同步的 actor（userIdentityId 或 serviceId），写入 createSkill.ownerUserId / createSkillVersion.createdBy。 */
+  actorUserId: string;
+}
 
 /** 同步结果项（用于 Studio 分组展示）。 */
 export interface SyncResultItem {
@@ -86,21 +102,23 @@ let syncInProgress = false;
 
 /**
  * 执行一次手动同步。并发时直接返回错误,不排队。
+ * @param tenant 同步执行上下文（tenantId + actorUserId）
  * @throws endpoint 未配置或列表接口失败时整体失败
  */
-export async function runSync(): Promise<SyncResult> {
+export async function runSync(tenant: SyncTenantContext): Promise<SyncResult> {
   if (syncInProgress) {
     throw new Error("同步正在进行中,请稍后再试");
   }
   syncInProgress = true;
   try {
-    return await runSyncInternal();
+    return await runSyncInternal(tenant);
   } finally {
     syncInProgress = false;
   }
 }
 
-async function runSyncInternal(): Promise<SyncResult> {
+async function runSyncInternal(tenant: SyncTenantContext): Promise<SyncResult> {
+  const { tenantId, actorUserId } = tenant;
   // 每次同步新建数组,避免浅拷贝共享引用导致跨调用累积
   const result: SyncResult = {
     imported: [],
@@ -114,15 +132,12 @@ async function runSyncInternal(): Promise<SyncResult> {
 
   // 1. 拉取远端可同步列表（整体失败则抛错）
   const remoteAssets = await listSyncableSkills();
-  // 2. 读本地全部映射
-  const mappings = await listAllSyncMappings();
+  // 2. 读本地全部绑定（tenant-scoped）
+  const mappings = await listSyncBindings(tenantId);
   const mappingByAsset = new Map(mappings.map((m) => [m.remoteAssetId, m]));
   const existingLocalNames = new Set(mappings.map((m) => m.localName).filter(Boolean) as string[]);
 
-  // 用于 name 冲突检查：本地所有 skill name（含 local 与已同步）
-  // 一次性查询会 N 次,这里按需在冲突检查时 getSkillByName
-
-  // 3. 批量 check-updates：仅对已有映射的资产
+  // 3. 批量 check-updates：仅对已有绑定的资产
   const mappedAssets = remoteAssets.filter((a) => mappingByAsset.has(a.asset_id));
   const checkItems = mappedAssets
     .map((a) => {
@@ -147,12 +162,12 @@ async function runSyncInternal(): Promise<SyncResult> {
 
   const conflictAssetIds = new Set<string>();
 
-  // 4. 需要拉 manifest 的资产：无映射且无 name 冲突的 + 已映射但 checkUpdates=changed/未知 的
+  // 4. 需要拉 manifest 的资产：无绑定且无 name 冲突的 + 已绑定但 checkUpdates=changed/未知 的
   const toSync: string[] = [];
   for (const asset of remoteAssets) {
     const m = mappingByAsset.get(asset.asset_id);
     if (!m) {
-      const conflictReason = await checkNameConflict(asset.name, existingLocalNames);
+      const conflictReason = await checkNameConflict(tenantId, asset.name, existingLocalNames);
       if (conflictReason) {
         conflictAssetIds.add(asset.asset_id);
         result.conflict.push({
@@ -181,7 +196,7 @@ async function runSyncInternal(): Promise<SyncResult> {
     }
     if (check.status === "unchanged") {
       // hash 不变,不导入
-      await updateSyncMapping(m.id, {
+      await updateSyncBinding(tenantId, m.id, {
         lastCheckedAt: new Date(),
         syncState: "active",
         lastError: null,
@@ -201,7 +216,7 @@ async function runSyncInternal(): Promise<SyncResult> {
     }
     if (check.status === "blocked") {
       // block_sync：标 blocked,不删本地
-      await updateSyncMapping(m.id, {
+      await updateSyncBinding(tenantId, m.id, {
         syncState: "blocked",
         lastCheckedAt: new Date(),
         lastError: check.error_code ?? "blocked",
@@ -221,7 +236,7 @@ async function runSyncInternal(): Promise<SyncResult> {
     }
     if (check.status === "not_found") {
       // hide 或下线 → not_found
-      await updateSyncMapping(m.id, {
+      await updateSyncBinding(tenantId, m.id, {
         syncState: "not_found",
         lastCheckedAt: new Date(),
         lastError: check.error_code ?? "not_found",
@@ -255,7 +270,7 @@ async function runSyncInternal(): Promise<SyncResult> {
         const asset = remoteAssets.find((a) => a.asset_id === assetId);
         if (!asset) continue;
         const m = mappingByAsset.get(assetId);
-        await markMappingError(m, new Error(message));
+        await markMappingError(tenantId, m, new Error(message));
         result.failed.push({
           remoteAssetId: asset.asset_id,
           remoteName: asset.name,
@@ -280,7 +295,7 @@ async function runSyncInternal(): Promise<SyncResult> {
       // sync 单项失败
       const m = mappingByAsset.get(asset.asset_id);
       if (m) {
-        await updateSyncMapping(m.id, {
+        await updateSyncBinding(tenantId, m.id, {
           syncState: "error",
           lastError: syncItem.error_message ?? syncItem.error_code,
         });
@@ -306,13 +321,13 @@ async function runSyncInternal(): Promise<SyncResult> {
     try {
       artifact = await downloadArtifact(asset.asset_id, syncItem.resolved_version);
     } catch (e) {
-      await markMappingError(existingMapping, e);
+      await markMappingError(tenantId, existingMapping, e);
       result.failed.push(toFailedItem(asset, syncItem, existingMapping, e, "下载失败"));
       continue;
     }
     if (artifact === null) {
       // 404：资产/版本不存在或被 hide
-      await updateMappingNotFound(existingMapping);
+      await updateMappingNotFound(tenantId, existingMapping);
       result.blocked.push(
         toFailedItem(
           asset,
@@ -332,55 +347,48 @@ async function runSyncInternal(): Promise<SyncResult> {
       commitSha = await importArtifactZip(artifact.buffer, localName);
     } catch (e) {
       if (e instanceof ArtifactImportError) {
-        await markMappingError(existingMapping, e);
+        await markMappingError(tenantId, existingMapping, e);
         result.failed.push(toFailedItem(asset, syncItem, existingMapping, e, "导入失败"));
         continue;
       }
       throw e;
     }
 
-    // 6c. 建/更新本地 Skill + SkillVersion + 映射
+    // 6c. 建/更新本地 Skill + SkillVersion + 绑定
     if (existingMapping) {
-      // 更新：创建新 SkillVersion + 切 current + 更新映射
+      // 更新：创建新 SkillVersion + 切 current + 更新绑定
       const localSkillId = existingMapping.localSkillId;
-      if (!localSkillId) {
-        await markMappingError(existingMapping, new Error("同步映射缺少 localSkillId"));
+      const version = await createSyncVersion({
+        tenantId,
+        skillId: localSkillId,
+        commitSha,
+        actorUserId,
+        localName,
+      });
+      if (!version) {
+        await markMappingError(tenantId, existingMapping, new Error("同步绑定缺少 localSkillId"));
         result.failed.push(
           toFailedItem(
             asset,
             syncItem,
             existingMapping,
-            new Error("同步映射缺少 localSkillId"),
-            "本地映射损坏",
+            new Error("同步绑定缺少 localSkillId"),
+            "本地绑定损坏",
           ),
         );
         continue;
       }
-      const versionNum = await nextLocalVersionNumber(localSkillId);
-      // 三步 DB 写入包进单事务,防中途失败致 git 已 commit 但 DB 无版本/映射仍指旧版
-      const version = await db.transaction(async (tx) => {
-        const v = await createSkillVersion(
-          { skillId: localSkillId, version: versionNum, commitSha, status: "active" },
-          tx,
-        );
-        await setCurrentVersion(localSkillId, v.id, undefined, tx);
-        await updateSyncMapping(
-          existingMapping.id,
-          {
-            remoteName: asset.name,
-            remoteDisplayName: asset.display_name,
-            remoteVersion: syncItem.resolved_version,
-            remoteVersionId: syncItem.version_id,
-            remoteContentHash: syncItem.content_hash,
-            localSkillVersionId: v.id,
-            syncState: "active",
-            lastSyncedAt: new Date(),
-            lastCheckedAt: new Date(),
-            lastError: null,
-          },
-          tx,
-        );
-        return v;
+      await updateSyncBinding(tenantId, existingMapping.id, {
+        remoteName: asset.name,
+        remoteDisplayName: asset.display_name,
+        remoteVersion: syncItem.resolved_version,
+        remoteVersionId: syncItem.version_id,
+        remoteContentHash: syncItem.content_hash,
+        localSkillVersionId: version.id,
+        syncState: "active",
+        lastSyncedAt: new Date(),
+        lastCheckedAt: new Date(),
+        lastError: null,
       });
       result.updated.push({
         remoteAssetId: asset.asset_id,
@@ -390,66 +398,69 @@ async function runSyncInternal(): Promise<SyncResult> {
         remoteVersion: syncItem.resolved_version,
         oldHash: existingMapping.remoteContentHash,
         newHash: syncItem.content_hash,
-        localVersion: versionNum,
+        localVersion: version.versionNo,
         reason: null,
       });
     } else {
-      // 首次导入：建 Skill + SkillVersion v1 + 切 current + 建映射
-      // 四步 DB 写入包进单事务
-      const { sk, version } = await db.transaction(async (tx) => {
-        const s = await createSkill(
-          {
-            name: asset.name,
-            description: asset.description,
-            category: asset.category,
-            visibility: "public",
-            source: "capability-market",
-          },
-          tx,
-        );
-        const v = await createSkillVersion(
-          { skillId: s.id, version: 1, commitSha, status: "active" },
-          tx,
-        );
-        await setCurrentVersion(s.id, v.id, undefined, tx);
-        await createSyncMapping(
-          {
-            remoteAssetId: asset.asset_id,
-            remoteName: asset.name,
-            remoteDisplayName: asset.display_name,
-            remoteVersion: syncItem.resolved_version,
-            remoteVersionId: syncItem.version_id,
-            remoteContentHash: syncItem.content_hash,
-            localSkillId: s.id,
-            localSkillVersionId: v.id,
-            localName: asset.name,
-            syncState: "active",
-          },
-          tx,
-        );
-        return { sk: s, version: v };
+      // 首次导入：建 Skill + SkillVersion v1 + 切 current + 建绑定
+      const skill = await createSkill({
+        tenantId,
+        skillKey: asset.name,
+        displayName: asset.display_name || asset.name,
+        description: asset.description,
+        ownerUserId: actorUserId,
+        visibilityScope: "tenant",
+        sourceType: "capability_market",
+        createdBy: actorUserId,
+      });
+      const version = await createSkillVersion({
+        tenantId,
+        skillId: skill.id,
+        contentRef: commitSha,
+        contentHash: contentHashFromGitSha(commitSha),
+        sourceType: "capability_market",
+        sourceRef: asset.asset_id,
+        createdBy: actorUserId,
+      });
+      await publishSkillVersion({
+        tenantId,
+        skillVersionId: version.id,
+        publishedBy: actorUserId,
+      });
+      await createSyncBinding(tenantId, {
+        remoteAssetId: asset.asset_id,
+        remoteName: asset.name,
+        remoteDisplayName: asset.display_name,
+        remoteVersion: syncItem.resolved_version,
+        remoteVersionId: syncItem.version_id,
+        remoteContentHash: syncItem.content_hash,
+        localSkillId: skill.id,
+        localSkillVersionId: version.id,
+        localName: asset.name,
+        syncState: "active",
+        lastSyncedAt: new Date(),
       });
       existingLocalNames.add(asset.name);
       result.imported.push({
         remoteAssetId: asset.asset_id,
         remoteName: asset.name,
-        localSkillId: sk.id,
+        localSkillId: skill.id,
         localName: asset.name,
         remoteVersion: syncItem.resolved_version,
         oldHash: null,
         newHash: syncItem.content_hash,
-        localVersion: 1,
+        localVersion: version.versionNo,
         reason: null,
       });
     }
   }
 
-  // 7. 远端不再出现的旧映射 → 标 not_found
+  // 7. 远端不再出现的旧绑定 → 标 not_found
   const remoteAssetIds = new Set(remoteAssets.map((a) => a.asset_id));
   for (const m of mappings) {
     if (remoteAssetIds.has(m.remoteAssetId)) continue;
     if (m.syncState === "not_found") continue; // 已是 not_found,跳过
-    await updateSyncMapping(m.id, {
+    await updateSyncBinding(tenantId, m.id, {
       syncState: "not_found",
       lastCheckedAt: new Date(),
       lastError: "asset 不在远端 syncable 列表",
@@ -471,43 +482,82 @@ async function runSyncInternal(): Promise<SyncResult> {
 }
 
 /**
+ * 为本地 Skill 创建新版本并切为当前生效（sync 更新路径）。
+ * 返回 null 表示 localSkillId 缺失。contentRef 去重：同一 commit 已存在则不重复建版本。
+ */
+async function createSyncVersion(params: {
+  tenantId: string;
+  skillId: string;
+  commitSha: string;
+  actorUserId: string;
+  localName: string;
+}): Promise<{ id: string; versionNo: number } | null> {
+  if (!params.skillId) return null;
+  const existing = await getSkillVersionByContentRef({
+    tenantId: params.tenantId,
+    skillId: params.skillId,
+    contentRef: params.commitSha,
+  });
+  if (existing) {
+    return { id: existing.id, versionNo: existing.versionNo };
+  }
+  const version = await createSkillVersion({
+    tenantId: params.tenantId,
+    skillId: params.skillId,
+    contentRef: params.commitSha,
+    contentHash: contentHashFromGitSha(params.commitSha),
+    sourceType: "capability_market",
+    createdBy: params.actorUserId,
+  });
+  await publishSkillVersion({
+    tenantId: params.tenantId,
+    skillVersionId: version.id,
+    publishedBy: params.actorUserId,
+  });
+  return { id: version.id, versionNo: version.versionNo };
+}
+
+/**
  * name 冲突检查（02 文档 ）：
  * - 远端 name 与本地自建 skill 冲突 → 冲突
- * - 远端 name 与另一映射 localName 冲突 → 冲突
+ * - 远端 name 与另一绑定 localName 冲突 → 冲突
  * 返回冲突原因字符串,无冲突返回 null。
  */
 async function checkNameConflict(
+  tenantId: string,
   remoteName: string,
   existingLocalNames: Set<string>,
 ): Promise<string | null> {
   if (existingLocalNames.has(remoteName)) {
     return `与本地已存在的 Skill「${remoteName}」冲突`;
   }
-  const localSkill = await getSkillByName(remoteName);
+  const localSkill = await getSkillByKey({ tenantId, skillKey: remoteName });
   if (localSkill) {
     return `与本地自建 Skill「${remoteName}」冲突,需改映射名或取消同步`;
   }
   return null;
 }
 
-/** 取本地 skill 下一个版本号（当前最大 +1）。 */
-async function nextLocalVersionNumber(skillId: string): Promise<number> {
-  return (await getMaxSkillVersionNumber(skillId)) + 1;
-}
-
-async function markMappingError(mapping: { id: string } | undefined, err: unknown): Promise<void> {
+async function markMappingError(
+  tenantId: string,
+  mapping: { id: string } | undefined,
+  err: unknown,
+): Promise<void> {
   if (!mapping) return;
   const msg = err instanceof Error ? err.message : String(err);
-  await updateSyncMapping(mapping.id, {
+  await updateSyncBinding(tenantId, mapping.id, {
     syncState: "error",
     lastCheckedAt: new Date(),
     lastError: msg,
   }).catch(() => {});
 }
 
-async function updateMappingNotFound(mapping: { id: string } | undefined): Promise<void> {
+async function updateMappingNotFound(
+  tenantId: string,
+  mapping: { id: string } | undefined,
+): Promise<void> {
   if (!mapping) return;
-  await updateSyncMapping(mapping.id, {
+  await updateSyncBinding(tenantId, mapping.id, {
     syncState: "not_found",
     lastCheckedAt: new Date(),
     lastError: "artifact 不存在或被隐藏",

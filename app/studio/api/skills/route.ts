@@ -1,11 +1,12 @@
 import {
+  contentHashFromGitSha,
   createSkill,
   createSkillVersion,
-  deleteSkillWithVersions,
-  getSkillByName,
-  setCurrentVersion,
-} from "@/lib/db/queries";
-import { listSkills } from "@/lib/db/studio-queries";
+  getSkillByKey,
+  setCurrentSkillVersion,
+  updateSkill,
+} from "@/lib/capability/skill-queries";
+import { listSkills } from "@/lib/capability/skill-studio-queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { buildSkillMd } from "@/lib/skill/frontmatter";
@@ -30,10 +31,11 @@ import type { NextRequest } from "next/server";
 export async function GET(req: NextRequest) {
   const r = await requireStudioAction(req, "skill.read");
   if (!r.ok) return r.response;
+  const { tenantId, userIdentityId } = r.principal;
   const isSkillAdmin = await hasStudioAction(r.principal, "skill.write");
   const skills = isSkillAdmin
-    ? await listSkills()
-    : await listSkills({ ownerUserId: r.principal.userIdentityId, includePublic: true });
+    ? await listSkills(tenantId)
+    : await listSkills(tenantId, { ownerUserId: userIdentityId, includePublic: true });
   return jsonOk(skills);
 }
 
@@ -44,7 +46,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.principal.userIdentityId;
+  const { tenantId, userIdentityId: actorUserId } = r.principal;
 
   const body = (await req.json().catch(() => ({}))) as {
     name?: string;
@@ -64,18 +66,21 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return jsonError(400, "invalid_name", (e as Error).message);
   }
-  const existing = await getSkillByName(name);
+  const existing = await getSkillByKey({ tenantId, skillKey: name });
   if (existing) return jsonError(409, "name_conflict", `skill「${name}」已存在`);
 
   const description = body.description?.trim() ?? "";
   const tools = body.tools ?? [];
   // S1（11-P2-6）：createSkill 设 ownerUserId = 当前用户(创建者)
   const sk = await createSkill({
-    name,
+    tenantId,
+    skillKey: name,
+    displayName: name,
     description: description || null,
-    category: body.category ?? null,
-    visibility: body.visibility ?? "public",
     ownerUserId: actorUserId,
+    visibilityScope: body.visibility === "internal" ? "internal" : "tenant",
+    sourceType: "local",
+    createdBy: actorUserId,
   });
 
   // 写 SKILL.md + 初始 commit（版本内容由目录承载，promptTemplate 不再写入）
@@ -114,17 +119,27 @@ export async function POST(req: NextRequest) {
   let version: Awaited<ReturnType<typeof createSkillVersion>>;
   try {
     version = await createSkillVersion({
+      tenantId,
       skillId: sk.id,
-      version: 1,
-      commitSha,
-      allowedTools: tools.length ? tools : null,
-      defaultModelProfile: body.model ?? null,
-      runtimeType: body.runtime ?? null,
-      status: "active",
+      contentRef: commitSha,
+      contentHash: contentHashFromGitSha(commitSha),
+      sourceType: "local",
+      createdBy: actorUserId,
     });
-    await setCurrentVersion(sk.id, version.id);
+    await setCurrentSkillVersion({
+      tenantId,
+      skillId: sk.id,
+      skillVersionId: version.id,
+      expectedCurrentVersionId: null,
+    });
   } catch (e) {
-    await deleteSkillWithVersions(sk.id).catch(() => {});
+    // 正式无物理删（deleteSkillWithVersions）：改为软停用，不物理删。
+    await updateSkill({
+      tenantId,
+      skillId: sk.id,
+      lifecycleState: "disabled",
+      expectedVersionNo: sk.versionNo,
+    }).catch(() => {});
     return jsonError(500, "skill_create_failed", (e as Error).message);
   }
 

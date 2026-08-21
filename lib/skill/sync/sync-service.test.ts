@@ -1,34 +1,49 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * sync-service 测试（02 文档 §5）。
- * mock capability-market-client + db queries + artifact-import,验证编排逻辑：
- * - 首次导入：建 skill(source=capability-market) + v1 + 映射 active
+ * sync-service 测试（02 文档 §5，关口02 02-4 Tenant 化）。
+ *
+ * mock 正式 skill-queries + skill-sync-queries + capability-market-client + artifact-import，
+ * 验证编排逻辑（tenant-scoped，runSync({tenantId, actorUserId})）：
+ * - 首次导入：建 skill(sourceType=capability_market) + v1 + publish + 绑定 active
  * - hash 不变：uptodate,不创建版本
- * - 远端更新：建新 SkillVersion + 切 current + 映射 active
+ * - 远端更新：建新 SkillVersion + publish + 绑定 active
+ * - contentRef 去重：同 commit 已存在则不重复建版本
  * - name 冲突：跳过,记 conflict
- * - 远端下线（不在 syncable 列表）：旧映射标 not_found
- * - checkUpdates=blocked：映射标 blocked
+ * - 远端下线（不在 syncable 列表）：旧绑定标 not_found
+ * - checkUpdates=blocked：绑定标 blocked
  */
 
-// ─── mock db queries ────────────────────────────────────────
-const dbMocks = vi.hoisted(() => ({
-  listAllSyncMappings: vi.fn(),
-  getSyncMappingByRemoteAsset: vi.fn(),
-  getSkillByName: vi.fn(),
-  getCurrentSkillVersion: vi.fn(),
-  getMaxSkillVersionNumber: vi.fn(),
+const TENANT = "tenant-1";
+const ACTOR = "user-1";
+
+// ─── mock 正式 skill-queries（保留 contentHashFromGitSha 真实实现）────────
+const skillQryMocks = vi.hoisted(() => ({
   createSkill: vi.fn(),
   createSkillVersion: vi.fn(),
-  createSyncMapping: vi.fn(),
-  updateSyncMapping: vi.fn(),
-  setCurrentVersion: vi.fn(),
+  getSkillByKey: vi.fn(),
+  getSkillVersionByContentRef: vi.fn(),
+  publishSkillVersion: vi.fn(),
 }));
-vi.mock("@/lib/db/queries", () => dbMocks);
-// P1-7: sync-service 现用 db.transaction 包三步写入;mock client 提供空 tx
-vi.mock("@/lib/db/client", () => ({
-  db: { transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({}) },
+vi.mock("@/lib/capability/skill-queries", async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    createSkill: skillQryMocks.createSkill,
+    createSkillVersion: skillQryMocks.createSkillVersion,
+    getSkillByKey: skillQryMocks.getSkillByKey,
+    getSkillVersionByContentRef: skillQryMocks.getSkillVersionByContentRef,
+    publishSkillVersion: skillQryMocks.publishSkillVersion,
+  };
+});
+
+// ─── mock 正式 skill-sync-queries ───────────────────────────
+const skillSyncMocks = vi.hoisted(() => ({
+  createSyncBinding: vi.fn(),
+  listSyncBindings: vi.fn(),
+  updateSyncBinding: vi.fn(),
 }));
+vi.mock("@/lib/capability/skill-sync-queries", () => skillSyncMocks);
 
 vi.mock("@/lib/logger", () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
@@ -103,35 +118,39 @@ function makeSyncItem(assetId: string, hash: string, version = "1.0.0") {
   };
 }
 
+function makeBinding(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "m1",
+    remoteAssetId: "asset-1",
+    remoteName: "deploy-review",
+    localSkillId: "skill-1",
+    localName: "deploy-review",
+    remoteVersion: "1.0.0",
+    remoteContentHash: "hash-1",
+    syncState: "active",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
-  dbMocks.listAllSyncMappings.mockResolvedValue([]);
-  dbMocks.getSkillByName.mockResolvedValue(null);
-  dbMocks.getCurrentSkillVersion.mockResolvedValue(null);
-  dbMocks.getMaxSkillVersionNumber.mockResolvedValue(0);
-  dbMocks.createSkill.mockImplementation(async (p: { name: string; source?: string }) => ({
-    id: `skill-${p.name}`,
-    name: p.name,
-    source: p.source ?? "local",
+  skillQryMocks.createSkill.mockImplementation(async (p: { skillKey: string }) => ({
+    id: `skill-${p.skillKey}`,
   }));
-  dbMocks.createSkillVersion.mockImplementation(
-    async (p: { skillId: string; version: number; commitSha: string }) => ({
-      id: `ver-${p.skillId}-${p.version}`,
-      skillId: p.skillId,
-      version: p.version,
-      commitSha: p.commitSha,
-    }),
-  );
-  dbMocks.updateSyncMapping.mockResolvedValue(undefined);
-  dbMocks.createSyncMapping.mockResolvedValue(undefined);
-  dbMocks.setCurrentVersion.mockResolvedValue(undefined);
+  skillQryMocks.createSkillVersion.mockResolvedValue({ id: "ver-1", versionNo: 1 });
+  skillQryMocks.getSkillByKey.mockResolvedValue(null);
+  skillQryMocks.getSkillVersionByContentRef.mockResolvedValue(null);
+  skillQryMocks.publishSkillVersion.mockResolvedValue(undefined);
+  skillSyncMocks.listSyncBindings.mockResolvedValue([]);
+  skillSyncMocks.createSyncBinding.mockResolvedValue(undefined);
+  skillSyncMocks.updateSyncBinding.mockResolvedValue(undefined);
   importMock.importArtifactZip.mockResolvedValue("commit-sha");
 });
 
 describe("runSync", () => {
-  it("首次导入：建 skill(source=capability-market) + v1 + 映射 active", async () => {
+  it("首次导入：建 skill(sourceType=capability_market) + v1 + publish + 绑定 active", async () => {
     clientMocks.listSyncableSkills.mockResolvedValue([makeRemoteAsset()]);
-    // 无映射 → 不调 checkUpdates；调 syncManifests
+    // 无绑定 → 不调 checkUpdates；调 syncManifests
     clientMocks.syncManifests.mockResolvedValue([makeSyncItem("asset-1", "hash-1")]);
     clientMocks.downloadArtifact.mockResolvedValue({
       buffer: Buffer.from([]),
@@ -139,41 +158,34 @@ describe("runSync", () => {
       etag: "e",
     });
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
     expect(result.imported).toHaveLength(1);
     expect(result.imported[0]?.remoteAssetId).toBe("asset-1");
-    expect(dbMocks.createSkill).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "deploy-review", source: "capability-market" }),
-      expect.anything(),
+    expect(skillQryMocks.createSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: TENANT,
+        skillKey: "deploy-review",
+        sourceType: "capability_market",
+        ownerUserId: ACTOR,
+      }),
     );
-    expect(dbMocks.createSkillVersion).toHaveBeenCalledWith(
-      expect.objectContaining({ version: 1, commitSha: "commit-sha" }),
-      expect.anything(),
+    expect(skillQryMocks.createSkillVersion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillId: "skill-deploy-review",
+        contentRef: "commit-sha",
+        contentHash: expect.stringMatching(/^sha256:/),
+      }),
     );
-    expect(dbMocks.setCurrentVersion).toHaveBeenCalledWith(
-      "skill-deploy-review",
-      "ver-skill-deploy-review-1",
-      undefined,
-      expect.anything(),
-    );
-    expect(dbMocks.createSyncMapping).toHaveBeenCalledWith(
+    expect(skillQryMocks.publishSkillVersion).toHaveBeenCalled();
+    expect(skillSyncMocks.createSyncBinding).toHaveBeenCalledWith(
+      TENANT,
       expect.objectContaining({ remoteAssetId: "asset-1", syncState: "active" }),
-      expect.anything(),
     );
   });
 
   it("hash 不变（checkUpdates=unchanged）→ uptodate,不下载不导入", async () => {
-    const mapping = {
-      id: "m1",
-      remoteAssetId: "asset-1",
-      localSkillId: "skill-1",
-      localName: "deploy-review",
-      remoteVersion: "1.0.0",
-      remoteContentHash: "hash-1",
-      syncState: "active",
-    };
-    dbMocks.listAllSyncMappings.mockResolvedValue([mapping]);
+    skillSyncMocks.listSyncBindings.mockResolvedValue([makeBinding()]);
     clientMocks.listSyncableSkills.mockResolvedValue([makeRemoteAsset()]);
     clientMocks.checkUpdates.mockResolvedValue([
       {
@@ -189,30 +201,24 @@ describe("runSync", () => {
       },
     ]);
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
     expect(result.uptodate).toHaveLength(1);
     expect(clientMocks.syncManifests).not.toHaveBeenCalled();
     expect(clientMocks.downloadArtifact).not.toHaveBeenCalled();
-    expect(dbMocks.createSkillVersion).not.toHaveBeenCalled();
-    expect(dbMocks.updateSyncMapping).toHaveBeenCalledWith(
+    expect(skillQryMocks.createSkillVersion).not.toHaveBeenCalled();
+    expect(skillSyncMocks.updateSyncBinding).toHaveBeenCalledWith(
+      TENANT,
       "m1",
       expect.objectContaining({ syncState: "active" }),
     );
   });
 
-  it("远端更新（checkUpdates=changed）→ 建新 SkillVersion + 切 current", async () => {
-    const mapping = {
-      id: "m1",
-      remoteAssetId: "asset-1",
-      localSkillId: "skill-1",
-      localName: "deploy-review",
-      remoteVersion: "1.0.0",
-      remoteContentHash: "hash-old",
-      syncState: "active",
-    };
-    dbMocks.listAllSyncMappings.mockResolvedValue([mapping]);
-    dbMocks.getMaxSkillVersionNumber.mockResolvedValue(1);
+  it("远端更新（checkUpdates=changed）→ 建新 SkillVersion + publish + 绑定 active", async () => {
+    skillSyncMocks.listSyncBindings.mockResolvedValue([
+      makeBinding({ remoteContentHash: "hash-old" }),
+    ]);
+    skillQryMocks.createSkillVersion.mockResolvedValue({ id: "ver-2", versionNo: 2 });
     clientMocks.listSyncableSkills.mockResolvedValue([makeRemoteAsset()]);
     clientMocks.checkUpdates.mockResolvedValue([
       {
@@ -234,42 +240,31 @@ describe("runSync", () => {
       etag: "e",
     });
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
     expect(result.updated).toHaveLength(1);
     expect(result.updated[0]?.oldHash).toBe("hash-old");
     expect(result.updated[0]?.newHash).toBe("hash-new");
     expect(result.updated[0]?.localVersion).toBe(2);
-    expect(dbMocks.createSkillVersion).toHaveBeenCalledWith(
-      expect.objectContaining({ skillId: "skill-1", version: 2 }),
-      expect.anything(),
+    expect(skillQryMocks.createSkillVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ skillId: "skill-1" }),
     );
-    expect(dbMocks.setCurrentVersion).toHaveBeenCalledWith(
-      "skill-1",
-      "ver-skill-1-2",
-      undefined,
-      expect.anything(),
-    );
-    expect(dbMocks.updateSyncMapping).toHaveBeenCalledWith(
+    expect(skillQryMocks.publishSkillVersion).toHaveBeenCalled();
+    expect(skillSyncMocks.updateSyncBinding).toHaveBeenCalledWith(
+      TENANT,
       "m1",
       expect.objectContaining({ syncState: "active", remoteContentHash: "hash-new" }),
-      expect.anything(),
     );
   });
 
-  it("远端更新按历史最大版本号递增,不依赖 currentVersionId", async () => {
-    const mapping = {
-      id: "m1",
-      remoteAssetId: "asset-1",
-      localSkillId: "skill-1",
-      localName: "deploy-review",
-      remoteVersion: "1.0.0",
-      remoteContentHash: "hash-old",
-      syncState: "active",
-    };
-    dbMocks.listAllSyncMappings.mockResolvedValue([mapping]);
-    dbMocks.getCurrentSkillVersion.mockResolvedValue({ id: "ver-old", version: 1 });
-    dbMocks.getMaxSkillVersionNumber.mockResolvedValue(5);
+  it("contentRef 去重：同 commit 已存在版本则复用,不重复建版本", async () => {
+    skillSyncMocks.listSyncBindings.mockResolvedValue([
+      makeBinding({ remoteContentHash: "hash-old" }),
+    ]);
+    skillQryMocks.getSkillVersionByContentRef.mockResolvedValue({
+      id: "ver-existing",
+      versionNo: 3,
+    } as never);
     clientMocks.listSyncableSkills.mockResolvedValue([makeRemoteAsset()]);
     clientMocks.checkUpdates.mockResolvedValue([
       {
@@ -291,31 +286,26 @@ describe("runSync", () => {
       etag: "e",
     });
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
-    expect(result.updated[0]?.localVersion).toBe(6);
-    expect(dbMocks.createSkillVersion).toHaveBeenCalledWith(
-      expect.objectContaining({ skillId: "skill-1", version: 6 }),
-      expect.anything(),
-    );
+    expect(result.updated).toHaveLength(1);
+    expect(result.updated[0]?.localVersion).toBe(3);
+    expect(skillQryMocks.createSkillVersion).not.toHaveBeenCalled();
+    expect(skillQryMocks.publishSkillVersion).not.toHaveBeenCalled();
   });
 
   it("name 冲突（远端 name 与本地自建 skill 冲突）→ 跳过,记 conflict,不请求 manifest", async () => {
     clientMocks.listSyncableSkills.mockResolvedValue([makeRemoteAsset({ name: "deploy-review" })]);
-    dbMocks.getSkillByName.mockResolvedValue({
-      id: "local-deploy",
-      name: "deploy-review",
-      source: "local",
-    });
+    skillQryMocks.getSkillByKey.mockResolvedValue({ id: "local-deploy" } as never);
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
     expect(result.conflict).toHaveLength(1);
     expect(result.conflict[0]?.remoteName).toBe("deploy-review");
     expect(result.conflict[0]?.reason).toContain("冲突");
     expect(clientMocks.syncManifests).not.toHaveBeenCalled();
     expect(clientMocks.downloadArtifact).not.toHaveBeenCalled();
-    expect(dbMocks.createSkill).not.toHaveBeenCalled();
+    expect(skillQryMocks.createSkill).not.toHaveBeenCalled();
   });
 
   it("同一批远端新 asset 的 name 冲突 → 只导入第一项,第二项单独记 conflict", async () => {
@@ -330,50 +320,35 @@ describe("runSync", () => {
       etag: "e",
     });
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
     expect(result.imported).toHaveLength(1);
     expect(result.imported[0]?.remoteAssetId).toBe("asset-1");
     expect(result.conflict).toHaveLength(1);
     expect(result.conflict[0]?.remoteAssetId).toBe("asset-2");
     expect(clientMocks.syncManifests).toHaveBeenCalledWith(["asset-1"]);
-    expect(dbMocks.createSkill).toHaveBeenCalledTimes(1);
+    expect(skillQryMocks.createSkill).toHaveBeenCalledTimes(1);
   });
 
-  it("远端下线（旧映射对应 asset 不在 syncable 列表）→ 映射标 not_found", async () => {
-    const mapping = {
-      id: "m1",
-      remoteAssetId: "asset-gone",
-      localSkillId: "skill-gone",
-      localName: "gone",
-      remoteVersion: "1.0.0",
-      remoteContentHash: "h",
-      syncState: "active",
-    };
-    dbMocks.listAllSyncMappings.mockResolvedValue([mapping]);
+  it("远端下线（旧绑定对应 asset 不在 syncable 列表）→ 绑定标 not_found", async () => {
+    skillSyncMocks.listSyncBindings.mockResolvedValue([
+      makeBinding({ remoteAssetId: "asset-gone", localSkillId: "skill-gone", localName: "gone" }),
+    ]);
     clientMocks.listSyncableSkills.mockResolvedValue([]);
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
     expect(result.missing).toHaveLength(1);
     expect(result.missing[0]?.remoteAssetId).toBe("asset-gone");
-    expect(dbMocks.updateSyncMapping).toHaveBeenCalledWith(
+    expect(skillSyncMocks.updateSyncBinding).toHaveBeenCalledWith(
+      TENANT,
       "m1",
       expect.objectContaining({ syncState: "not_found" }),
     );
   });
 
-  it("checkUpdates=blocked → 映射标 blocked,不下载", async () => {
-    const mapping = {
-      id: "m1",
-      remoteAssetId: "asset-1",
-      localSkillId: "skill-1",
-      localName: "deploy-review",
-      remoteVersion: "1.0.0",
-      remoteContentHash: "hash-1",
-      syncState: "active",
-    };
-    dbMocks.listAllSyncMappings.mockResolvedValue([mapping]);
+  it("checkUpdates=blocked → 绑定标 blocked,不下载", async () => {
+    skillSyncMocks.listSyncBindings.mockResolvedValue([makeBinding()]);
     clientMocks.listSyncableSkills.mockResolvedValue([makeRemoteAsset()]);
     clientMocks.checkUpdates.mockResolvedValue([
       {
@@ -389,28 +364,22 @@ describe("runSync", () => {
       },
     ]);
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
     expect(result.blocked).toHaveLength(1);
     expect(result.blocked[0]?.reason).toBe("block_sync");
-    expect(dbMocks.updateSyncMapping).toHaveBeenCalledWith(
+    expect(skillSyncMocks.updateSyncBinding).toHaveBeenCalledWith(
+      TENANT,
       "m1",
       expect.objectContaining({ syncState: "blocked" }),
     );
     expect(clientMocks.downloadArtifact).not.toHaveBeenCalled();
   });
 
-  it("artifact 下载 404 → 映射标 not_found,记 blocked", async () => {
-    const mapping = {
-      id: "m1",
-      remoteAssetId: "asset-1",
-      localSkillId: "skill-1",
-      localName: "deploy-review",
-      remoteVersion: "1.0.0",
-      remoteContentHash: "hash-old",
-      syncState: "active",
-    };
-    dbMocks.listAllSyncMappings.mockResolvedValue([mapping]);
+  it("artifact 下载 404 → 绑定标 not_found,记 blocked", async () => {
+    skillSyncMocks.listSyncBindings.mockResolvedValue([
+      makeBinding({ remoteContentHash: "hash-old" }),
+    ]);
     clientMocks.listSyncableSkills.mockResolvedValue([makeRemoteAsset()]);
     clientMocks.checkUpdates.mockResolvedValue([
       {
@@ -428,26 +397,20 @@ describe("runSync", () => {
     clientMocks.syncManifests.mockResolvedValue([makeSyncItem("asset-1", "hash-new", "2.0.0")]);
     clientMocks.downloadArtifact.mockResolvedValue(null);
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
     expect(result.blocked).toHaveLength(1);
-    expect(dbMocks.updateSyncMapping).toHaveBeenCalledWith(
+    expect(skillSyncMocks.updateSyncBinding).toHaveBeenCalledWith(
+      TENANT,
       "m1",
       expect.objectContaining({ syncState: "not_found" }),
     );
   });
 
   it("sync manifests 批量失败 → 逐项记 failed,不中断整次同步", async () => {
-    const mapping = {
-      id: "m1",
-      remoteAssetId: "asset-1",
-      localSkillId: "skill-1",
-      localName: "deploy-review",
-      remoteVersion: "1.0.0",
-      remoteContentHash: "hash-old",
-      syncState: "active",
-    };
-    dbMocks.listAllSyncMappings.mockResolvedValue([mapping]);
+    skillSyncMocks.listSyncBindings.mockResolvedValue([
+      makeBinding({ remoteContentHash: "hash-old" }),
+    ]);
     clientMocks.listSyncableSkills.mockResolvedValue([makeRemoteAsset()]);
     clientMocks.checkUpdates.mockResolvedValue([
       {
@@ -464,12 +427,13 @@ describe("runSync", () => {
     ]);
     clientMocks.syncManifests.mockRejectedValue(new Error("market down"));
 
-    const result = await runSync();
+    const result = await runSync({ tenantId: TENANT, actorUserId: ACTOR });
 
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]?.remoteAssetId).toBe("asset-1");
     expect(result.failed[0]?.reason).toContain("sync manifests 失败");
-    expect(dbMocks.updateSyncMapping).toHaveBeenCalledWith(
+    expect(skillSyncMocks.updateSyncBinding).toHaveBeenCalledWith(
+      TENANT,
       "m1",
       expect.objectContaining({ syncState: "error" }),
     );

@@ -5,16 +5,19 @@ const studio = vi.hoisted(() => ({
   hasStudioAction: vi.fn(),
   resolveStudioPrincipal: vi.fn(),
 }));
-const queries = vi.hoisted(() => ({ getSkillById: vi.fn(), getSkillVersion: vi.fn() }));
+const queries = vi.hoisted(() => ({
+  getSkillById: vi.fn(),
+  getSkillVersionById: vi.fn(),
+}));
 
 vi.mock("@/lib/identity/studio-access", () => ({
   requireStudioAction: studio.requireStudioAction,
   hasStudioAction: studio.hasStudioAction,
   resolveStudioPrincipal: studio.resolveStudioPrincipal,
 }));
-vi.mock("@/lib/db/queries", () => ({
+vi.mock("@/lib/capability/skill-queries", () => ({
   getSkillById: queries.getSkillById,
-  getSkillVersion: queries.getSkillVersion,
+  getSkillVersionById: queries.getSkillVersionById,
 }));
 
 import { GET } from "@/app/studio/api/skills/[id]/route";
@@ -30,8 +33,8 @@ beforeEach(() => {
 
 describe("GET /studio/api/skills/[id] (Stage B)", () => {
   it("通过 → 200 + skill + currentVersion", async () => {
-    queries.getSkillById.mockResolvedValue({ id: "s1", name: "sk", currentVersionId: "v2" });
-    queries.getSkillVersion.mockResolvedValue({ id: "v2", version: 2 });
+    queries.getSkillById.mockResolvedValue({ id: "s1", skillKey: "sk", currentVersionId: "v2" });
+    queries.getSkillVersionById.mockResolvedValue({ id: "v2", versionNo: 2 });
     const res = await GET(req(), { params: Promise.resolve({ id: "s1" }) });
     expect(res.status).toBe(200);
     const body = await res.json();

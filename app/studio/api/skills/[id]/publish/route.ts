@@ -1,4 +1,8 @@
-import { getSkillById, getSkillVersion, setCurrentVersion } from "@/lib/db/queries";
+import {
+  getSkillById,
+  getSkillVersionById,
+  setCurrentSkillVersion,
+} from "@/lib/capability/skill-queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
@@ -18,14 +22,14 @@ import type { NextRequest } from "next/server";
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.principal.userIdentityId;
+  const { tenantId, userIdentityId: actorUserId } = r.principal;
   const { id } = await params;
 
   const body = (await req.json().catch(() => ({}))) as { versionId?: string };
   const { versionId } = body;
   if (!versionId) return jsonError(400, "missing_version", "缺少 versionId");
 
-  const sk = await getSkillById(id);
+  const sk = await getSkillById({ tenantId, skillId: id });
   if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
   // P1-5: owner 隔离——非 admin 仅能发布自己 ownerUserId 的 skill
   const denied = await assertSkillWriteAccess(sk, r.principal);
@@ -33,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // 02 文档 §7.2：同步 Skill 只读,拒绝发布版本
   const synced = rejectSyncedSkillWrite(sk);
   if (synced) return synced;
-  const ver = await getSkillVersion(versionId);
+  const ver = await getSkillVersionById({ tenantId, skillVersionId: versionId });
   if (!ver || ver.skillId !== id) {
     try {
       await recordAdminAudit({
@@ -53,7 +57,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return jsonError(404, "version_not_found", "版本不存在或不属于该 skill");
   }
   // P1-14: CAS——仅当 currentVersionId 仍是读取时的值才切换,防并发 publish/rollback 互覆盖
-  const swapped = await setCurrentVersion(id, versionId, sk.currentVersionId);
+  const swapped = await setCurrentSkillVersion({
+    tenantId,
+    skillId: id,
+    skillVersionId: versionId,
+    expectedCurrentVersionId: sk.currentVersionId,
+  });
   if (!swapped) {
     return jsonError(409, "version_conflict", "skill 当前版本已被并发修改,请刷新后重试");
   }

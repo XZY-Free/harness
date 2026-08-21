@@ -1,4 +1,4 @@
-import { archiveSkill, getSkillById, getSkillVersion, updateSkill } from "@/lib/db/queries";
+import { getSkillById, getSkillVersionById, updateSkill } from "@/lib/capability/skill-queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import {
   hasStudioAction,
@@ -33,10 +33,13 @@ async function assertSkillWriteAccess(
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const r = await requireStudioAction(req, "skill.read");
   if (!r.ok) return r.response;
+  const { tenantId } = r.principal;
   const { id } = await params;
-  const sk = await getSkillById(id);
+  const sk = await getSkillById({ tenantId, skillId: id });
   if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
-  const currentVersion = sk.currentVersionId ? await getSkillVersion(sk.currentVersionId) : null;
+  const currentVersion = sk.currentVersionId
+    ? await getSkillVersionById({ tenantId, skillVersionId: sk.currentVersionId })
+    : null;
   return jsonOk({ skill: sk, currentVersion });
 }
 
@@ -47,9 +50,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.principal.userIdentityId;
+  const { tenantId, userIdentityId: actorUserId } = r.principal;
   const { id } = await params;
-  const sk = await getSkillById(id);
+  const sk = await getSkillById({ tenantId, skillId: id });
   if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
 
   // S1（11-P2-6）：owner 权限检查(admin 可改所有,非 admin 只能改自己的)
@@ -66,27 +69,38 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     category?: string | null;
     visibility?: string;
   };
-  if (body.name !== undefined && body.name !== sk.name) {
+  if (body.name !== undefined && body.name !== sk.skillKey) {
     return jsonError(400, "name_immutable", "skill name 不可改（目录名锁定）");
   }
 
-  const patch: { description?: string | null; category?: string | null; visibility?: string } = {};
-  if (body.description !== undefined) patch.description = body.description.trim() || null;
-  if (body.category !== undefined) patch.category = body.category;
-  if (body.visibility !== undefined) patch.visibility = body.visibility;
-  await updateSkill(id, patch);
+  // category 丢弃；visibility 仅当 body.visibility 提供才传（否则保留原值）
+  const updates: { description?: string | null; visibilityScope?: "internal" | "tenant" } = {};
+  if (body.description !== undefined) updates.description = body.description.trim() || null;
+  if (body.visibility !== undefined) {
+    updates.visibilityScope = body.visibility === "internal" ? "internal" : "tenant";
+  }
+  await updateSkill({
+    tenantId,
+    skillId: id,
+    description: updates.description,
+    visibilityScope: updates.visibilityScope,
+    expectedVersionNo: sk.versionNo,
+  });
 
   // 同步 SKILL.md frontmatter（description 改了 → 重写 frontmatter，正文保留，不自动发布版本）
   if (body.description !== undefined) {
-    const md = await readSkillFile(sk.name, "SKILL.md");
+    const md = await readSkillFile(sk.skillKey, "SKILL.md");
     if (md) {
       try {
         const fm = parseSkillMd(md);
         const bodyText = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
         await writeSkillFile(
-          sk.name,
+          sk.skillKey,
           "SKILL.md",
-          buildSkillMd({ ...fm, description: body.description.trim() || sk.name }, bodyText.trim()),
+          buildSkillMd(
+            { ...fm, description: body.description.trim() || sk.skillKey },
+            bodyText.trim(),
+          ),
         );
       } catch {
         /* frontmatter 解析失败不阻断身份更新 */
@@ -101,7 +115,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       targetType: "skill",
       targetId: id,
       outcome: "succeeded",
-      metadata: patch,
+      metadata: updates,
     });
   } catch {
     /* 审计非关键路径，不阻断 */
@@ -116,9 +130,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.principal.userIdentityId;
+  const { tenantId, userIdentityId: actorUserId } = r.principal;
   const { id } = await params;
-  const sk = await getSkillById(id);
+  const sk = await getSkillById({ tenantId, skillId: id });
   if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
 
   // S1（11-P2-6）：owner 权限检查(admin 可删所有,非 admin 只能删自己的)
@@ -129,7 +143,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const synced = rejectSyncedSkillWrite(sk);
   if (synced) return synced;
 
-  await archiveSkill(id);
+  // 软停用（lifecycleState=disabled），不物理删。
+  await updateSkill({
+    tenantId,
+    skillId: id,
+    lifecycleState: "disabled",
+    expectedVersionNo: sk.versionNo,
+  });
   try {
     await recordAdminAudit({
       actorUserId,
@@ -137,7 +157,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       targetType: "skill",
       targetId: id,
       outcome: "succeeded",
-      metadata: { name: sk.name },
+      metadata: { name: sk.skillKey },
     });
   } catch {
     /* 审计非关键路径，不阻断 */

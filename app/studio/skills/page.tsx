@@ -1,7 +1,7 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { SkillCreator } from "@/components/studio/skill-creator";
 import { SkillSyncButton } from "@/components/studio/skill-sync-button";
-import { listSkillsWithSync } from "@/lib/db/studio-queries";
+import { listSkillsWithSync } from "@/lib/capability/skill-studio-queries";
 import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 import Link from "next/link";
@@ -32,9 +32,13 @@ export default async function SkillsPage() {
 
   // S1（11-P2-6）：admin 看全部;member 只看自己的 + 公共
   const isSkillAdmin = await hasStudioAction(gate.principal, "skill.write");
+  const tenantId = gate.principal.tenantId;
   const skills = isSkillAdmin
-    ? await listSkillsWithSync()
-    : await listSkillsWithSync({ ownerUserId: gate.principal.userIdentityId, includePublic: true });
+    ? await listSkillsWithSync(tenantId)
+    : await listSkillsWithSync(tenantId, {
+        ownerUserId: gate.principal.userIdentityId,
+        includePublic: true,
+      });
   const canWrite = await hasStudioAction(gate.principal, "skill.write");
   const canSync = await hasStudioAction(gate.principal, "skill.write");
   return (
@@ -74,14 +78,14 @@ export default async function SkillsPage() {
                     href={`/studio/skills/${s.id}`}
                     className="text-[var(--primary)] hover:underline"
                   >
-                    {s.name}
+                    {s.skillKey}
                   </Link>
                 </td>
                 <td className="px-3 py-2 text-[var(--fg-muted)]">
-                  {SOURCE_LABEL[s.source] ?? s.source}
+                  {SOURCE_LABEL[s.sourceType] ?? s.sourceType}
                 </td>
-                <td className="px-3 py-2 text-[var(--fg-muted)]">{s.category ?? "—"}</td>
-                <td className="px-3 py-2 text-[var(--fg-muted)]">{s.status}</td>
+                <td className="px-3 py-2 text-[var(--fg-muted)]">—</td>
+                <td className="px-3 py-2 text-[var(--fg-muted)]">{s.lifecycleState}</td>
                 <td className="px-3 py-2 text-[var(--fg-muted)]">
                   {s.syncState ? (SYNC_STATE_LABEL[s.syncState] ?? s.syncState) : "—"}
                 </td>

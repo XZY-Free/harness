@@ -161,7 +161,7 @@ export function startIdleSweep(intervalMs = 60_000): void {
     }
     // 轮询 deploying 状态的 deployment（防永远停在 deploying）
     void import("@/lib/deploy/cicd-target").then((m) => m.sweepDeployingStatuses()).catch(() => {});
-    // 02-3：移除 legacy thread delivering→failed 超时扫描（正式 Thread 无 delivering/failed
+    // 02-3：移除旧 thread delivering→failed 超时扫描（正式 Thread 无 delivering/failed
     // 状态机；"交付超时扫描"能力后续在正式 Deployment/Execution/Delivery Authority 上重新实现）。
   }, intervalMs);
   sweepTimer.unref?.();

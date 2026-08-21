@@ -14,7 +14,6 @@
  */
 
 import { skillStopwordsConfig } from "@/lib/config";
-import type { Skill } from "@/lib/db/schema";
 
 /**
  * 通用匹配候选：与 DB 模型解耦。
@@ -381,60 +380,4 @@ export function pickBestSkill(
   if (bestDensity >= densityThreshold && bestScore >= 1) return best;
 
   return null;
-}
-
-/**
- * 旧 chat 路径的兼容包装：在 `Skill[]` 上做关键词匹配。
- *
- * - 过滤 `build-from-idea`（旧“示例 skill 不参与匹配”约定的兼容保留）。
- * - 阶段 3 chat 路径改走 Resolver + `pickBestSkill` 后，本函数仅剩历史调用；
- * 阶段 8 清理旧路径时一并移除。
- *
- * @returns 匹配到的 skill，或 null（调用方旧逻辑回退默认；新模型下应走基础 agent）。
- */
-export function matchSkill(userText: string, skills: Skill[]): Skill | null {
-  if (skills.length === 0) return null;
-  const candidates: MatchableSkill[] = skills
-    .filter((s) => s.name !== "build-from-idea")
-    .map((s) => ({ id: s.id, name: s.name, keywordSource: s.description }));
-  const best = pickBestSkill(userText, candidates);
-  if (!best) return null;
-  return skills.find((s) => s.id === best.id) ?? null;
-}
-
-/**
- * LLM 兜底 skill 匹配（可选）。
- *
- * 关键词匹配失败时，若 skillMatcherConfig.llmFallback=on，调 generateText 让 LLM 从
- * skill 列表中选最匹配的。返回 skill id 或 null。
- *
- * 注意：本函数不自动调用——由 chat route 在 matchSkill 返回 null 后显式调用。
- * 默认 off，启用需设 SNOW_SKILL_LLM_FALLBACK=on + 配置 LLM。
- */
-export async function matchSkillWithLlm(userText: string, skills: Skill[]): Promise<Skill | null> {
-  const { skillMatcherConfig } = await import("@/lib/config");
-  if (!skillMatcherConfig.llmFallback) return null;
-  if (skills.length === 0) return null;
-
-  try {
-    const { getChatModel } = await import("@/lib/ai/provider");
-    const { generateText } = await import("ai");
-    const { aiConfig } = await import("@/lib/config");
-    const model = getChatModel(aiConfig.chatModel);
-    const skillList = skills
-      .filter((s) => s.name !== "build-from-idea")
-      .map((s) => `- ${s.name}: ${s.description ?? ""}`)
-      .join("\n");
-    const { text } = await generateText({
-      model,
-      system:
-        "从以下 skill 列表中选最匹配用户意图的一个。只输出 skill name（不含描述），若无匹配输出 NONE。",
-      prompt: `用户意图: ${userText}\n\nSkill 列表:\n${skillList}`,
-    });
-    const matchedName = text.trim();
-    if (matchedName === "NONE" || !matchedName) return null;
-    return skills.find((s) => s.name === matchedName) ?? null;
-  } catch {
-    return null;
-  }
 }

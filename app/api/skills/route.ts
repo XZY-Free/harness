@@ -20,13 +20,14 @@ import type { NextRequest } from "next/server";
  * `name` 优先取 `displayName`，`category` 取 `tags[0]`。
  */
 export async function GET(request: NextRequest) {
+  let tenantId: string;
   try {
-    await resolveStudioPrincipal(request.headers);
+    tenantId = (await resolveStudioPrincipal(request.headers)).tenantId;
   } catch {
     return jsonError(401, "unauthorized", "未授权");
   }
   try {
-    const summaries = await getSkillProvider().listAvailableSkills();
+    const summaries = await getSkillProvider().listAvailableSkills(tenantId);
     const visible = summaries.filter((s) => s.uiVisible);
     return jsonOk(
       visible.map((s) => ({
