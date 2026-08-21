@@ -16,7 +16,6 @@ const ops = vi.hoisted(() => ({
 
 const q = vi.hoisted(() => ({
   createCheckpointRow: vi.fn(),
-  appendThreadEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/git/ops", () => ({
@@ -28,7 +27,6 @@ vi.mock("@/lib/workspace", () => ({ workspaceRoot: () => "/tmp/ws" }));
 
 vi.mock("@/lib/db/queries", () => ({
   createCheckpointRow: q.createCheckpointRow,
-  appendThreadEvent: q.appendThreadEvent,
 }));
 
 import { createCheckpoint } from "@/lib/git/checkpoint";

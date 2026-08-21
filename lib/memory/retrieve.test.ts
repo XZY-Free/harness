@@ -19,7 +19,6 @@ const queries = vi.hoisted(() => ({
   findDuplicateMemory: vi.fn(),
   getMemoryRow: vi.fn(),
   updateMemoryRow: vi.fn(),
-  appendThreadEvent: vi.fn(),
 }));
 
 vi.mock("@/lib/db/queries", () => ({ ...queries }));

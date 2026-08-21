@@ -1,10 +1,9 @@
-import type { ThreadEvent, ThreadPlanItem, ToolRun } from "@/lib/db/schema";
+import type { ThreadPlanItem, ToolRun } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { describe, expect, it } from "vitest";
 import {
   SUMMARY_TYPES,
   extractDebugSummary,
-  extractDecisionLog,
   extractDiffSummary,
   extractToolRunSummary,
   extractTurnSummary,
@@ -248,46 +247,6 @@ describe("extractTurnSummary", () => {
     const s = extractTurnSummary({ messages });
     // 不为空：回溯到第一条含 text 的 user 消息
     expect(s.userGoal).toBe("请修复登录页样式");
-  });
-});
-
-describe("extractDecisionLog", () => {
-  function ev(type: ThreadEvent["type"], payload: Record<string, unknown>): ThreadEvent {
-    return {
-      id: "e1",
-      threadId: "tid",
-      sequence: 1,
-      type,
-      payload,
-      createdAt: new Date(),
-    } as ThreadEvent;
-  }
-
-  it("plan.created → 选择；item failed → 拒绝", () => {
-    const s = extractDecisionLog({
-      planEvents: [
-        ev("plan.created", { planId: "p1", title: "TDD 方案" }),
-        ev("plan.item_updated", { itemId: "i1", status: "failed", title: "直接改" }),
-      ],
-    });
-    expect(s.choices).toContain("采纳计划: TDD 方案");
-    expect(s.rejected).toContain("失败条目: 直接改");
-    expect(s.confidence).toBe("medium");
-  });
-
-  it("只有选择无拒绝 → high", () => {
-    const s = extractDecisionLog({
-      planEvents: [ev("plan.created", { planId: "p1", title: "方案A" })],
-    });
-    expect(s.confidence).toBe("high");
-  });
-
-  it("awaiting_approval → 约束", () => {
-    const s = extractDecisionLog({
-      planEvents: [],
-      statusChanges: [{ reason: "need_approve", to: "awaiting_approval" }],
-    });
-    expect(s.constraints.some((c) => c.startsWith("需审批"))).toBe(true);
   });
 });
 

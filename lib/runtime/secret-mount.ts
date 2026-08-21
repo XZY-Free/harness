@@ -1,7 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
-  appendThreadEvent,
   createSecretMount,
   getSecretMount,
   listActiveSecretsByScope,
@@ -81,12 +80,7 @@ export async function rotateSecret(
   const updated = await rotateSecretMount(secretMountId, encrypted.ciphertext, encrypted.keyId);
   if (!updated) throw new Error(`[secret-mount] secret ${secretMountId} 轮换失败`);
 
-  await appendThreadEvent(threadId, "secret.rotated", {
-    secretMountId,
-    name: existing.name,
-    scope: existing.scope,
-  });
-
+  // 02-3：secret.rotated 事件（Audit/Security 域事实）由 02-7 正式 SecretMount Authority 承接。
   return updated;
 }
 
@@ -102,12 +96,7 @@ export async function revokeSecret(threadId: string, secretMountId: string): Pro
   const updated = await revokeSecretMount(secretMountId);
   if (!updated) throw new Error(`[secret-mount] secret ${secretMountId} 撤销失败`);
 
-  await appendThreadEvent(threadId, "secret.revoked", {
-    secretMountId,
-    name: existing.name,
-    scope: existing.scope,
-  });
-
+  // 02-3：secret.revoked 事件由 02-7 正式 SecretMount Authority 承接。
   return updated;
 }
 

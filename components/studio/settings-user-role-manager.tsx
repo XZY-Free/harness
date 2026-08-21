@@ -112,9 +112,7 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
         const savedRoleIds = Array.isArray(body?.data?.roleIds) ? body.data.roleIds : roleIds;
         setDraft((prev) => ({ ...prev, [selected.id]: new Set(savedRoleIds) }));
         setVisibleUsers((prev) =>
-          prev.map((u) =>
-            u.id === selected.id ? { ...u, templateKeys: savedRoleIds } : u,
-          ),
+          prev.map((u) => (u.id === selected.id ? { ...u, templateKeys: savedRoleIds } : u)),
         );
         setMessage({ kind: "ok", text: "已保存" });
       } else {

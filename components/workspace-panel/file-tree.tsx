@@ -9,7 +9,7 @@ export const FILE_TREE_REFRESH_MS = 1500;
 /**
  * V5-B2：工作区文件树。
  *
- * 调用前台 list API（`/api/threads/[id]/workspace`）拿扁平路径列表，前端构造树形结构。
+ * 调用前台 list API（`/api/v1/threads/{thread_id}/workspace`）拿扁平路径列表，前端构造树形结构。
  * 内部目录已在后端默认隐藏（listWorkspaceFiles skipInternal=true）。
  *
  * 文件节点点击 → onSelectPath(relPath)，由父级（WorkspacePanel file kind 分支）
@@ -161,7 +161,7 @@ export function FileTree({
       if (cancelled || inFlight) return;
       inFlight = true;
       try {
-        const response = await apiFetch(`/api/threads/${threadId}/workspace`, {
+        const response = await apiFetch(`/api/v1/threads/${threadId}/workspace`, {
           cache: "no-store",
         });
         const json = (await response.json()) as {

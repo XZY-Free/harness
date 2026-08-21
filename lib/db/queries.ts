@@ -3,9 +3,7 @@ import { unlink } from "node:fs/promises";
 import { approvalConfig, dbConfig } from "@/lib/config";
 import { logger } from "@/lib/logger";
 import { encryptCicdToken } from "@/lib/runtime/secret-crypto";
-// 12-事件总线广播——appendThreadEvent 成功后广播到进程内 hub，供 SSE 端点即时推送。
-// 放 queries.ts，因 appendThreadEvent 在此文件；thread-events-bus 无其他依赖，不引入循环。
-import { broadcastThreadEvent } from "@/lib/runtime/thread-events-bus";
+// P2-closeout: thread-events-bus 已删（SSE 端点 app/api/threads/** 随本地执行体系移除）。
 import { escapeLikeWildcards } from "@/lib/utils";
 import {
   type AnyColumn,
@@ -43,7 +41,6 @@ import {
   type ContextSummary,
   type ContextSummaryType,
   type CustomTool,
-  type DBMessage,
   type Deployment,
   type DeploymentStatus,
   type GitCheckpoint,
@@ -67,12 +64,9 @@ import {
   type SkillSyncState,
   type SkillVersion,
   type SkillVersionStatus,
-  type ThreadEvent,
-  type ThreadEventType,
   type ThreadPlan,
   type ThreadPlanItem,
   type ThreadPlanItemStatus,
-  type ThreadStatus,
   type ToolApprovalRequest,
   type ToolPermissionRule,
   type ToolRun,
@@ -87,16 +81,12 @@ import {
   mcpServerConfig,
   memoryEmbedding,
   memoryEntry,
-  message,
-  messageTypeForRole,
   policyConfig,
   policyConfigHistory,
   secretMount,
   skill,
   skillSyncMapping,
   skillVersion,
-  thread,
-  threadEvent,
   threadPlan,
   threadPlanItem,
   toolApprovalRequest,
@@ -118,685 +108,6 @@ import {
   toolRunOutputSchema,
   validateJsonColumn,
 } from "./schemas/json-columns";
-
-// ─── Thread Queries ──────────────────────────────────────────
-
-/** 取 thread（含软删）。仅供 purge/存在性判断等需看软删的场景；HTTP 入口与内部调用应用 getThreadById。 */
-export async function getThreadByIdIncludingDeleted(id: string) {
-  const [row] = await db.select().from(thread).where(eq(thread.id, id)).limit(1);
-  return row ?? null;
-}
-
-/** 取未软删 thread。HTTP 入口与内部调用默认口径：软删 thread 不可见（与 getThreadByIdForUser/listThreadsForUser 一致）。 */
-export async function getThreadById(id: string) {
-  const [row] = await db
-    .select()
-    .from(thread)
-    .where(and(eq(thread.id, id), isNull(thread.deletedAt)))
-    .limit(1);
-  return row ?? null;
-}
-
-// ─── Owner-scoped Thread Queries () ────────────────
-// HTTP 入口在读写 thread 前必须用这些带 userId 归属的 helper，避免裸 threadId
-// 越权。内部 tool runtime 仍只传 threadId（只经已授权 chat route 启动）。
-
-/** 取属于指定用户且未软删的 thread；不属于或已软删则返回 null（HTTP 入口据此返回 404）。
- * C-3：与 listThreadsForUser / getLatestThreadForUser 口径一致，软删 thread 内容不可访问。 */
-export async function getThreadByIdForUser(id: string, userId: string) {
-  const [row] = await db
-    .select()
-    .from(thread)
-    .where(and(eq(thread.id, id), eq(thread.userId, userId), isNull(thread.deletedAt)))
-    .limit(1);
-  return row ?? null;
-}
-
-/** requireThreadForUser：语义同 getThreadByIdForUser，命名表达「入口校验」意图。 */
-export async function requireThreadForUser(id: string, userId: string) {
-  return getThreadByIdForUser(id, userId);
-}
-
-/** 取用户最近一个 thread（首页按用户恢复会话用）；无则 null。B-8: 按 updatedAt desc。
- * C-3: 过滤掉软删（deletedAt 非 null）的会话——与 listThreadsForUser 口径一致，
- * 避免软删会话在首页恢复入口复活。 */
-export async function getLatestThreadForUser(userId: string) {
-  const [row] = await db
-    .select()
-    .from(thread)
-    .where(and(eq(thread.userId, userId), isNull(thread.deletedAt)))
-    .orderBy(desc(thread.updatedAt))
-    .limit(1);
-  return row ?? null;
-}
-
-/**
- * 列出用户会话（C-3 过滤软删 + C-8 最近消息预览冗余列 + C-9 游标分页 + E-2 后端搜索 + E-6 lastMessageId）。
- *
- * - C-3: deletedAt IS NULL 过滤软删会话（替代原 status=cancelled 降级）。
- * - C-8: lastMessagePreview 冗余列（saveMessages 时更新，免 join）。
- * - C-9: 复合游标 (updatedAt, id) 分页 —— id tie-breaker 防同秒 updatedAt 漏/重（与 getMessagesByThreadId 同款）。
- * - E-2: search 非空时按 title / lastMessagePreview 模糊匹配（LIKE），覆盖 >50 条未加载的旧会话。
- * - E-5: pinnedAt 非 null 置顶组永远在最前；置顶操作 togglePinThread 会刷 updatedAt，故置顶内部按 updatedAt desc 即兼顾「置顶瞬间排前 + 置顶后按活动」。
- * - E-6: lastMessageId 冗余列（消息级未读判定用）。
- */
-export async function listThreadsForUser(
-  userId: string,
-  opts: { limit?: number; before?: { updatedAt: Date; id: string }; search?: string } = {},
-) {
-  const limit = Math.min(200, Math.max(1, Math.floor(opts.limit ?? 50)));
-  const conds = [eq(thread.userId, userId), isNull(thread.deletedAt)];
-  if (opts.before) {
-    // C-9: 复合游标 (updatedAt, id) —— updatedAt 相同时按 id desc 续传，防同秒并列漏/重。
-    const beforeCond = or(
-      lt(thread.updatedAt, opts.before.updatedAt),
-      and(eq(thread.updatedAt, opts.before.updatedAt), lt(thread.id, opts.before.id)),
-    );
-    if (beforeCond) conds.push(beforeCond);
-  }
-  // E-2: 后端模糊搜索（title 或 lastMessagePreview 包含关键词）
-  // 审计修复 M3：转义 SQL LIKE 通配符（原代码未转义 % 和 _，用户搜索 "%" 会匹配全部行，
-  // 可探测数据形状并在大表上触发全表扫描）。
-  if (opts.search?.trim()) {
-    const escaped = escapeLikeWildcards(opts.search.trim());
-    const kw = `%${escaped}%`;
-    const searchCond = or(like(thread.title, kw), like(thread.lastMessagePreview, kw));
-    if (searchCond) conds.push(searchCond);
-  }
-  return db
-    .select({
-      id: thread.id,
-      title: thread.title,
-      status: thread.status,
-      model: thread.model,
-      createdAt: thread.createdAt,
-      updatedAt: thread.updatedAt,
-      pinnedAt: thread.pinnedAt,
-      previewUrl: thread.previewUrl,
-      lastMessagePreview: thread.lastMessagePreview,
-      lastMessageId: thread.lastMessageId,
-    })
-    .from(thread)
-    .where(and(...conds))
-    .orderBy(desc(thread.pinnedAt), desc(thread.updatedAt), desc(thread.id))
-    .limit(limit);
-}
-
-/**
- * B-6: 跨实例状态通道——DB 增量轮询。
- * 返回 updatedAt > since 的该用户 thread 状态变更（updateThreadStatus 每次变更同步刷 updatedAt，
- * 故跨实例的他实例 run 状态变化也能被各实例 SSE 端点轮询感知）。用于 SSE 端点补推他实例变更。
- */
-export async function listThreadStatusChanges(userId: string, sinceUpdatedAt: Date) {
-  return db
-    .select({
-      threadId: thread.id,
-      status: thread.status,
-      updatedAt: thread.updatedAt,
-    })
-    .from(thread)
-    .where(
-      and(
-        eq(thread.userId, userId),
-        isNull(thread.deletedAt),
-        gt(thread.updatedAt, sinceUpdatedAt),
-      ),
-    )
-    .orderBy(asc(thread.updatedAt))
-    .limit(200);
-}
-
-/**
- * 取 thread 消息，但先校验 thread 归属当前用户。
- * foreign thread → null（调用方据此 404，不泄露消息）。
- */
-export async function getMessagesByThreadIdForUser(
-  threadId: string,
-  userId: string,
-): Promise<DBMessage[] | null> {
-  const owned = await getThreadByIdForUser(threadId, userId);
-  if (!owned) return null;
-  return getMessagesByThreadId(threadId);
-}
-
-export async function saveThread({
-  id,
-  userId,
-  title,
-  model,
-}: {
-  id: string;
-  userId: string;
-  title: string;
-  model?: string | null;
-}) {
-  // B-8: updatedAt 与 createdAt 同步初始化
-  const now = new Date();
-  // MySQL 无 onConflictDoNothing：用 INSERT IGNORE（drizzle .ignore()）做幂等写入
-  await db
-    .insert(thread)
-    .ignore()
-    .values({ id, userId, title, model: model ?? null, createdAt: now, updatedAt: now });
-}
-
-/** B-8: 刷新 thread 最后活动时间（发消息 / 状态变更 / 模型变更等场景调用）。 */
-export async function touchThread(threadId: string) {
-  await db.update(thread).set({ updatedAt: new Date() }).where(eq(thread.id, threadId));
-}
-
-/** C-2: 重命名会话标题。 */
-export async function updateThreadTitle(threadId: string, title: string) {
-  await db.update(thread).set({ title, updatedAt: new Date() }).where(eq(thread.id, threadId));
-}
-
-/** C-1: LLM 生成标题后更新 title（+ updatedAt）。C-1 重构后删 titleUpdatedAt 防抖守门，
- * 自动生成（chat route 首条并行）与手动「重新生成标题」均走此函数，语义同 updateThreadTitle。 */
-export async function updateGeneratedTitle(threadId: string, title: string) {
-  await db.update(thread).set({ title, updatedAt: new Date() }).where(eq(thread.id, threadId));
-}
-
-/** E-5: 切换置顶（有 pinnedAt 则清除，无则设 NOW()）。返回是否已置顶。 */
-export async function togglePinThread(threadId: string) {
-  const [row] = await db
-    .select({ pinnedAt: thread.pinnedAt })
-    .from(thread)
-    .where(eq(thread.id, threadId))
-    .limit(1);
-  const pinnedAt = row?.pinnedAt ? null : new Date();
-  await db.update(thread).set({ pinnedAt, updatedAt: new Date() }).where(eq(thread.id, threadId));
-  return pinnedAt !== null;
-}
-
-/** C-3: 软删除会话（标记 deletedAt，列表查询过滤 deletedAt IS NULL）。 */
-export async function softDeleteThread(threadId: string) {
-  await db
-    .update(thread)
-    .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(eq(thread.id, threadId));
-}
-
-/**
- * thread 物理删除时需清理的全部子表,按外键依赖顺序(先删引用方,最后删 thread 主记录)。
- *
- * retention 明细清理与彻底物理删除共用此清单,避免两套删表逻辑漏表。
- * 子表均用 threadId 关联,故以 {table, column} 显式标注列名。
- */
-const THREAD_CHILD_TABLES: ReadonlyArray<{
-  table: MySqlTable;
-  column: AnyColumn;
-}> = [
-  { table: toolApprovalRequest, column: toolApprovalRequest.threadId },
-  { table: gitCheckpoint, column: gitCheckpoint.threadId },
-  { table: contextSnapshot, column: contextSnapshot.threadId },
-  { table: contextSummary, column: contextSummary.threadId },
-  { table: toolRun, column: toolRun.threadId },
-  { table: threadEvent, column: threadEvent.threadId },
-  { table: threadPlanItem, column: threadPlanItem.threadId },
-  { table: threadPlan, column: threadPlan.threadId },
-  { table: message, column: message.threadId },
-  // P0-1: deployment.threadId 是 DB 级 FK(NO ACTION),漏删会触发 FK 违约导致整个物理删除事务回滚。
-  { table: deployment, column: deployment.threadId },
-  // P0-1: auditFailureLog.threadId 无 DB FK(逻辑外键),漏删会留孤儿行,一并清理。
-  { table: auditFailureLog, column: auditFailureLog.threadId },
-  // ：V9 浏览器表（browserSession/browserDownload/userBrowserProfile）
-  // 已由 migration 0059 删除，物理删除级联清单不再包含它们。
-];
-
-/**
- * 物理删除 thread + 全部子表数据。
- *
- * 不依赖 FK onDelete cascade——schema 子表 threadId 为逻辑外键(未建 DB 外键约束),
- * 无 RESTRICT 阻塞,应用层级联删即可;ALTER 现有表加 FK 有锁风险且与软删策略冲突,故不走 DB cascade。
- *
- * 可靠性保证(修复原实现的死代码 + 吞错 + 非原子三问题):
- * - 事务包裹:全部删除原子完成,中途任一语句失败则整体回滚,不留删一半的孤儿数据
- * - 不吞错误:删除失败让异常冒泡(原 .catch(()=>{}) 会静默吞错,导致部分子表残留)
- * - 按依赖顺序:先删全部子表,最后删 thread 主记录
- *
- * 软删除(deletedAt)保留主记录;本函数彻底物理删除,仅用于:
- * ① admin 显式彻底删除入口;② retention 软删超期后的主记录物理清理(可配,默认关)。
- */
-export async function deleteThreadRecursive(threadId: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    for (const { table, column } of THREAD_CHILD_TABLES) {
-      await tx.delete(table).where(eq(column, threadId));
-    }
-    await tx.delete(thread).where(eq(thread.id, threadId));
-  });
-}
-
-/**
- * 更新 thread status。
- *
- * : 可选 `expectedFrom` 做 CAS——SQL 加 `WHERE status = expectedFrom`,
- * 仅当当前 status 匹配预期时才更新。用于 finalize(idle)/cancel(cancelled)/markFailed(failed)
- * 等终态写入,防并发互相覆盖(原无条件 UPDATE 是 last-write-wins)。
- * 未传 expectedFrom 时退化为无条件更新(兼容非竞态路径)。
- * @returns 是否实际更新了行(expectedFrom 不匹配时返回 false)
- */
-export async function updateThreadStatus(
-  threadId: string,
-  status: ThreadStatus,
-  expectedFrom?: ThreadStatus | ThreadStatus[],
-): Promise<boolean> {
-  const conds = [eq(thread.id, threadId)];
-  if (expectedFrom) {
-    const froms = Array.isArray(expectedFrom) ? expectedFrom : [expectedFrom];
-    conds.push(inArray(thread.status, froms));
-  }
-  const result = await db
-    .update(thread)
-    .set({ status, updatedAt: new Date() })
-    .where(and(...conds));
-  return (result as unknown as { affectedRows?: number }).affectedRows !== 0;
-}
-
-/**
- * E-7: 累加 thread token 用量（run 级 onFinish 调用，跨 run 持续累计）。
- * 原子累加，fail-open（调用方 catch）。冗余列用于 header 免 SUM 事件流展示。
- */
-export async function incrementThreadTokens(
-  threadId: string,
-  usage: { inputTokens: number; outputTokens: number; totalTokens: number },
-) {
-  await db
-    .update(thread)
-    .set({
-      promptTokens: sql`${thread.promptTokens} + ${usage.inputTokens}`,
-      completionTokens: sql`${thread.completionTokens} + ${usage.outputTokens}`,
-      totalTokens: sql`${thread.totalTokens} + ${usage.totalTokens}`,
-    })
-    .where(eq(thread.id, threadId));
-}
-
-export async function updateThreadModel(threadId: string, model: string) {
-  // B-8: 模型变更同步刷新 updatedAt
-  await db.update(thread).set({ model, updatedAt: new Date() }).where(eq(thread.id, threadId));
-}
-
-export async function updateThreadPreviewUrl(threadId: string, previewUrl: string | null) {
-  // B-8: 预览变更同步刷新 updatedAt
-  await db.update(thread).set({ previewUrl, updatedAt: new Date() }).where(eq(thread.id, threadId));
-}
-
-/**
- * P0 修复（03 Context pinned facts 持久化）：更新 thread 的 pinnedFacts。
- *
- * pinnedFacts 是用户明确要求保留的事实（protected 集合数据源），原进程内 Map 重启即失。
- * 落 DB json 列持久化。null=清空。同步刷新 updatedAt。
- */
-export async function updateThreadPinnedFacts(threadId: string, pinnedFacts: string[] | null) {
-  await db
-    .update(thread)
-    .set({ pinnedFacts, updatedAt: new Date() })
-    .where(eq(thread.id, threadId));
-}
-
-/**
- * pinned facts 原子化读-改-写。
- *
- * 原实现 addPinnedFact/removePinnedFact 先 getPinnedFacts（读）再 updateThreadPinnedFacts（写），
- * 两次独立查询非原子，并发 add 会丢失写入。本函数在单事务内 `SELECT ... FOR UPDATE` 锁行 +
- * 调用 mutator 计算新值 + UPDATE，保证并发安全。mutator 接收当前数组返回新数组（null=清空）。
- */
-export async function mutateThreadPinnedFacts(
-  threadId: string,
-  mutator: (current: string[]) => string[] | null,
-): Promise<string[]> {
-  return db.transaction(async (tx) => {
-    const [row] = await tx
-      .select({ pinnedFacts: thread.pinnedFacts })
-      .from(thread)
-      .where(eq(thread.id, threadId))
-      .for("update");
-    const current = Array.isArray(row?.pinnedFacts) ? (row.pinnedFacts as string[]) : [];
-    const next = mutator(current);
-    // json 列 zod 校验（fail-closed，mutator 返回非法结构抛错不落库）
-    validateJsonColumn(next, threadPinnedFactsSchema, "pinnedFacts");
-    await tx
-      .update(thread)
-      .set({ pinnedFacts: next, updatedAt: new Date() })
-      .where(eq(thread.id, threadId));
-    return next ?? [];
-  });
-}
-
-/**
- * 更新 thread 的 reviewState。
- *
- * QA gate 连续失败超上限时,转人工审核(reviewState="needs_human_review"),
- * 停止 agent 自动重试,防烧 token。同步刷新 updatedAt。
- */
-export async function updateThreadReviewState(threadId: string, reviewState: string | null) {
-  await db
-    .update(thread)
-    .set({ reviewState, updatedAt: new Date() })
-    .where(eq(thread.id, threadId));
-}
-
-/**
- * 更新 thread 的 per-thread CI/CD API token。
- * 加密存储（AES-256-GCM）；master key 未配置时 fail-closed 拒绝明文写入。
- * null 表示清除（回退到全局 cicdApiToken）。
- */
-export async function updateThreadCicdToken(threadId: string, cicdApiToken: string | null) {
-  let stored: string | null = null;
-  if (cicdApiToken !== null) {
-    stored = encryptCicdToken(cicdApiToken);
-  }
-  await db
-    .update(thread)
-    .set({ cicdApiToken: stored, updatedAt: new Date() })
-    .where(eq(thread.id, threadId));
-}
-
-// ─── Message Queries ─────────────────────────────────────────
-
-/**
- * 取 thread 的消息(按 createdAt, id 升序)。
- *
- * : 加 limit + before 游标,防长会话全量加载 OOM。默认 500 条(覆盖绝大多数会话),
- * 上限 5000;export 等需全量的场景显式传大 limit。before 游标用于向前翻页(取游标之前的消息)。
- *
- * P0 修复（08 DB ）：orderBy 加 id 作 tie-breaker,防同毫秒消息乱序。
- */
-export async function getMessagesByThreadId(
-  threadId: string,
-  opts?: { limit?: number; before?: { createdAt: Date; id: string } },
-): Promise<DBMessage[]> {
-  const limit = Math.min(Math.max(opts?.limit ?? 500, 1), 5000);
-  const conds = [eq(message.threadId, threadId)];
-  if (opts?.before) {
-    const cursorCondition = or(
-      lt(message.createdAt, opts.before.createdAt),
-      and(eq(message.createdAt, opts.before.createdAt), lt(message.id, opts.before.id)),
-    );
-    if (cursorCondition) conds.push(cursorCondition);
-  }
-  return db
-    .select()
-    .from(message)
-    .where(and(...conds))
-    .orderBy(asc(message.createdAt), asc(message.id))
-    .limit(limit);
-}
-
-export async function saveMessages(
-  rows: Array<{
-    id: string;
-    threadId: string;
-    role: string;
-    parts: unknown;
-    type?: string | null;
-    runId?: string | null;
-  }>,
-) {
-  if (rows.length === 0) {
-    return;
-  }
-  // json 列轻量校验。parts 须为数组且每项有 type 字符串（防脏数据写入）。
-  // 校验失败 fail-open：过滤非法 part 后继续写入（不阻断 chat）。
-  const validatedRows = rows.map((r) => {
-    if (!Array.isArray(r.parts)) return r;
-    const validParts = r.parts.filter(
-      (p) => p && typeof p === "object" && typeof (p as { type?: unknown }).type === "string",
-    );
-    return { ...r, parts: validParts.length > 0 ? validParts : r.parts };
-  });
-  // IGNORE 批量写入，重复消息 id 自动跳过；type 缺省按 role 推导，保证分层非空
-  await db
-    .insert(message)
-    .ignore()
-    .values(
-      validatedRows.map((r) => ({
-        id: r.id,
-        threadId: r.threadId,
-        role: r.role,
-        parts: r.parts,
-        type: r.type ?? messageTypeForRole(r.role),
-        runId: r.runId ?? null,
-        createdAt: new Date(),
-      })),
-    );
-  // C-8 + E-6: 冗余更新 thread.lastMessagePreview（截断 60 字）+ lastMessageId（消息级未读判定）
-  const last = rows[rows.length - 1];
-  if (last) {
-    const preview = extractTextFromParts(last.parts).slice(0, 60) || null;
-    await db
-      .update(thread)
-      .set({ lastMessagePreview: preview, lastMessageId: last.id, updatedAt: new Date() })
-      .where(eq(thread.id, last.threadId));
-  }
-}
-
-/**
- * B-3: part 级增量落库——按主键 id upsert message.parts。
- * onStepFinish 每个 step 边界调用（已组装的 responseMessage.parts 覆盖写回），
- * onFinish 收尾调用（补中断瞬间的 partial part）。ON DUPLICATE KEY UPDATE parts，
- * 多次写同 id 最后一次赢，天然幂等。替代 saveMessages 的 INSERT IGNORE（IGNORE 遇同 id
- * 不更新，无法捕获最终 partial）。user 消息仍用 saveMessages（route 层一次性写入）。
- */
-export async function upsertMessageParts(
-  rows: Array<{
-    id: string;
-    threadId: string;
-    role: string;
-    parts: unknown;
-    type?: string | null;
-    runId?: string | null;
-  }>,
-) {
-  if (rows.length === 0) return;
-  await db
-    .insert(message)
-    .values(
-      rows.map((r) => ({
-        id: r.id,
-        threadId: r.threadId,
-        role: r.role,
-        parts: r.parts,
-        type: r.type ?? messageTypeForRole(r.role),
-        runId: r.runId ?? null,
-        createdAt: new Date(),
-      })),
-    )
-    .onDuplicateKeyUpdate({
-      // runId 纳入覆盖：重试换 runId 时，同 message id 的旧 runId 要被新 runId 覆盖，
-      // 保证 runId 始终指向最后一次产出该消息的 run（B-3 隔离语义）。
-      set: { parts: sql`VALUES(parts)`, type: sql`VALUES(type)`, runId: sql`VALUES(runId)` },
-    });
-  // C-8 + E-6: 同步冗余更新 thread.lastMessagePreview + lastMessageId
-  const last = rows[rows.length - 1];
-  if (last) {
-    const preview = extractTextFromParts(last.parts).slice(0, 60) || null;
-    await db
-      .update(thread)
-      .set({ lastMessagePreview: preview, lastMessageId: last.id, updatedAt: new Date() })
-      .where(eq(thread.id, last.threadId));
-  }
-}
-
-/** 从 message parts（json 数组）提取预览文本：优先 text part 拼接；
- * 无 text part（纯工具调用 / 纯附件收尾）时取首个工具或附件 part 的语义占位，
- * 避免列表预览为空导致用户无法区分会话（C-8）。 */
-function extractTextFromParts(parts: unknown): string {
-  if (!Array.isArray(parts)) return "";
-  const arr = parts as Array<{ type?: string; text?: string }>;
-  const text = arr
-    .filter((p) => p?.type === "text")
-    .map((p) => p.text ?? "")
-    .join("");
-  if (text.trim()) return text;
-  // 无 text：取首个工具 / 附件 part 的占位（reasoning 是内部推理，不作为预览）
-  const placeholder = arr.find((p) => {
-    const t = p?.type ?? "";
-    return t !== "text" && t !== "reasoning" && (t.includes("tool") || t.includes("attachment"));
-  });
-  if (placeholder?.type?.includes("attachment")) return "附件";
-  if (placeholder) return "工具调用";
-  return "";
-}
-
-/**
- * 删除指定消息及其之后的所有消息（按 createdAt >= 目标消息的 createdAt）。
- * 用于「编辑最后一条 user 消息重新生成」场景：截断 DB 与前端 setMessages(truncated) 对齐，
- * 避免旧消息残留导致刷新后出现重复消息。
- *
- * 通过先查出目标消息的 createdAt，再删除同 thread 内 createdAt >= 该时间的所有消息实现。
- * @returns 被删除的行数
- */
-export async function deleteMessagesFromId(threadId: string, messageId: string): Promise<number> {
-  const [target] = await db
-    .select({ createdAt: message.createdAt, id: message.id })
-    .from(message)
-    .where(and(eq(message.id, messageId), eq(message.threadId, threadId)));
-  if (!target) return 0;
-  // (createdAt, id) 复合比较，避免同毫秒消息误删（原 createdAt >= 删同秒 id 更大的）。
-  const result = await db
-    .delete(message)
-    .where(
-      and(
-        eq(message.threadId, threadId),
-        or(
-          gt(message.createdAt, target.createdAt),
-          and(eq(message.createdAt, target.createdAt), gte(message.id, target.id)),
-        ),
-      ),
-    );
-  return result[0].affectedRows ?? 0;
-}
-
-// ─── Thread Event Queries (append-only 事件流) ───────
-
-/**
- * 分配下一个 sequence 值（）。
- * 取当前 thread 最大 sequence + 1；无历史记录时从 1 开始。
- * 原子性由 appendThreadEvent 的 unique 冲突重试保证（非此函数）。
- */
-async function nextSequence(threadId: string): Promise<number> {
-  const [row] = await db
-    .select({ value: max(threadEvent.sequence) })
-    .from(threadEvent)
-    .where(eq(threadEvent.threadId, threadId));
-  return (row?.value ?? 0) + 1;
-}
-
-/**
- * 追加一条 thread 事件。
- *
- * @param threadId - 所属 thread
- * @param type - 事件类型（必须来自 THREAD_EVENT_TYPES 权威表）
- * @param payload - 事件负载（JSON 可序列化对象）
- */
-export async function appendThreadEvent(
-  threadId: string,
-  type: ThreadEventType,
-  payload: Record<string, unknown>,
-  /** 归属历史 run（nullable（历史事件和纯 thread 管理事件可空））。 */
-  runId?: string | null,
-): Promise<ThreadEvent> {
-  // P2-11: 事务内 FOR UPDATE thread 行串行化同 thread 事件写入,原子取 seq + insert,
-  // 防 nextSequence MAX+1 在多实例并发下撞 unique(threadId, sequence) 耗尽 5 次重试。
-  return db.transaction(async (tx) => {
-    await tx.select({ id: thread.id }).from(thread).where(eq(thread.id, threadId)).for("update");
-    const [row] = await tx
-      .select({ value: max(threadEvent.sequence) })
-      .from(threadEvent)
-      .where(eq(threadEvent.threadId, threadId));
-    const seq = (row?.value ?? 0) + 1;
-    const event: ThreadEvent = {
-      id: randomUUID(),
-      threadId,
-      sequence: seq,
-      type,
-      payload,
-      runId: runId ?? null,
-      createdAt: new Date(),
-    };
-    await tx.insert(threadEvent).values(event);
-    // 12-成功落库后广播到进程内事件总线，供 SSE 端点即时推送各面板。
-    // 跨实例变更由 SSE 端点 DB 轮询补推（ThreadEvent 表是跨实例真相源）。
-    broadcastThreadEvent({
-      threadId,
-      type,
-      payload,
-      sequence: seq,
-      createdAt: event.createdAt,
-    });
-    return event;
-  });
-}
-
-/**
- * 查询某 thread 的全部事件（按 sequence 升序）。
- */
-export async function listThreadEvents(threadId: string): Promise<ThreadEvent[]> {
-  return db
-    .select()
-    .from(threadEvent)
-    .where(eq(threadEvent.threadId, threadId))
-    .orderBy(asc(threadEvent.sequence))
-    .limit(500);
-}
-
-/**
- * 12-跨实例事件通道——DB 增量轮询。
- * 返回某 thread 自 since 的新事件（按 sequence 升序），供 SSE 端点补推他实例产生的事件。
- * 与 listThreadStatusChanges 互补：本查询面向单 thread 全事件类型，供详情页各面板订阅。
- */
-export async function listThreadEventsSince(threadId: string, since: Date): Promise<ThreadEvent[]> {
-  return db
-    .select()
-    .from(threadEvent)
-    .where(and(eq(threadEvent.threadId, threadId), gt(threadEvent.createdAt, since)))
-    .orderBy(asc(threadEvent.sequence))
-    .limit(500);
-}
-
-/**
- * 查询某 thread 的 QA 检查事件（qa.check_passed / qa.check_failed），按 sequence 降序
- * （最近在前，供 Studio QA 面板展示）。不改既有查询语义，只追加新查询。
- */
-export async function listQaEventsByThread(threadId: string): Promise<ThreadEvent[]> {
-  return db
-    .select()
-    .from(threadEvent)
-    .where(
-      and(
-        eq(threadEvent.threadId, threadId),
-        inArray(threadEvent.type, ["qa.check_passed", "qa.check_failed"]),
-      ),
-    )
-    .orderBy(desc(threadEvent.sequence));
-}
-
-/**
- * 统计 thread 最近连续 QA gate 失败次数。
- *
- * 从最近事件倒序扫描,遇到 qa.check_failed 计数,遇到 qa.check_passed 停止。
- * 用于 gate 重试上限判定:连续 N 次失败 → 转人工审核(防 agent 无限重试烧 token)。
- *
- * @returns 连续失败次数(0 表示最近一次通过或无 QA 事件)
- */
-export async function countConsecutiveQaGateFailures(threadId: string): Promise<number> {
-  const events = await db
-    .select({ type: threadEvent.type })
-    .from(threadEvent)
-    .where(
-      and(
-        eq(threadEvent.threadId, threadId),
-        inArray(threadEvent.type, ["qa.check_passed", "qa.check_failed"]),
-      ),
-    )
-    .orderBy(desc(threadEvent.sequence))
-    .limit(50); // 扫最近 50 条足够,避免长历史全量扫
-  let count = 0;
-  for (const e of events) {
-    if (e.type === "qa.check_failed") count++;
-    else break; // 遇到 passed 停止
-  }
-  return count;
-}
 
 // ─── Tool Run Queries (结构化工具执行记录) ───────────
 
@@ -1273,7 +584,6 @@ export async function updateSyncMapping(
 // V8 替代：chat 路径用 run 级 Skill 使用事实记录（阶段 2）。
 // 旧字段保留兼容旧数据，但不再写入。
 
-
 // ─── Policy Config 写入 () ──────────────────
 
 /**
@@ -1407,7 +717,6 @@ export async function listAdminAuditLogs(params?: {
   const query = conds.length > 0 ? base.where(and(...conds)) : base;
   return query.orderBy(desc(adminAuditLog.createdAt), desc(adminAuditLog.id)).limit(limit);
 }
-
 
 // ─── Context Snapshot Queries (Stage C) ────────────────
 //
@@ -1667,11 +976,6 @@ export async function createThreadPlan(params: {
     updatedAt: now,
   };
   await db.insert(threadPlan).values(row);
-  await appendThreadEvent(params.threadId, "plan.created", {
-    planId: row.id,
-    title: row.title,
-    source: row.source,
-  });
   return row;
 }
 
@@ -1774,11 +1078,6 @@ export async function updateThreadPlanItemStatus(params: {
     .update(threadPlanItem)
     .set({ status: params.status, updatedAt: now })
     .where(eq(threadPlanItem.id, params.id));
-  await appendThreadEvent(existing.threadId, "plan.item_updated", {
-    itemId: existing.id,
-    planId: existing.planId,
-    status: params.status,
-  });
   return { ...existing, status: params.status, updatedAt: now };
 }
 
@@ -1789,18 +1088,6 @@ export async function abandonThreadPlan(planId: string): Promise<void> {
     .update(threadPlan)
     .set({ status: "abandoned", updatedAt: now })
     .where(eq(threadPlan.id, planId));
-  // 取 planId 的 threadId 用于事件归属
-  const [row] = await db
-    .select({ threadId: threadPlan.threadId })
-    .from(threadPlan)
-    .where(eq(threadPlan.id, planId))
-    .limit(1);
-  if (row) {
-    await appendThreadEvent(row.threadId, "plan.updated", {
-      planId,
-      status: "abandoned",
-    });
-  }
 }
 
 // ─── Tool Permission Rule / Approval Request Queries () ──
@@ -2047,11 +1334,6 @@ export async function requestApprovalAtomic(params: {
       expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
     };
     await tx.insert(toolApprovalRequest).values(approval);
-
-    await tx
-      .update(thread)
-      .set({ status: "awaiting_approval", updatedAt: now })
-      .where(eq(thread.id, params.threadId));
 
     return { run, approval };
   });
@@ -2775,45 +2057,6 @@ export async function deleteCustomTool(id: string): Promise<void> {
   await db.delete(customTool).where(eq(customTool.id, id));
 }
 
-// ─── External Source 审计查询 () ────────────────────────
-//
-// external.fetched 事件复用 ThreadEvent payload（不单独建表，决策）。
-// 列某 thread 最近的外部资料访问记录，供 Studio external 审计面板用。
-
-export type ExternalFetchedEvent = {
-  id: string;
-  threadId: string;
-  createdAt: Date;
-  payload: {
-    sourceUrl?: string;
-    fetchedAt?: string;
-    expiresAt?: string | null;
-    contentHash?: string;
-    artifactPath?: string;
-    contentType?: string;
-    bytes?: number;
-    truncated?: boolean;
-  };
-};
-
-export async function listExternalFetchedEvents(
-  threadId: string,
-  limit = 50,
-): Promise<ExternalFetchedEvent[]> {
-  const rows = await db
-    .select()
-    .from(threadEvent)
-    .where(and(eq(threadEvent.threadId, threadId), eq(threadEvent.type, "external.fetched")))
-    .orderBy(desc(threadEvent.createdAt))
-    .limit(limit);
-  return rows.map((r) => ({
-    id: r.id,
-    threadId: r.threadId,
-    createdAt: r.createdAt,
-    payload: r.payload as ExternalFetchedEvent["payload"],
-  }));
-}
-
 // ─── : SecretMount Queries ──────────────────────────────
 
 /** 创建 secret mount（加密存储）。 */
@@ -2943,57 +2186,6 @@ export async function createDeployment(params: {
   };
   await db.insert(deployment).values(row);
   return row;
-}
-
-/**
- * : 原子占用 deploying 槽位。事务内 SELECT ... FOR UPDATE 锁 thread 行,
- * 再查同 thread 是否已有 deploying,无则 createDeployment。防 read-then-write 竞态:
- * 原列表查 deploying + createDeployment 分两步,并发双方都查到 0 个 → 各建一条 → 两次 CI/CD。
- * @returns { deployment } 占用成功;{ busy: true } 已有 deploying。
- */
-export async function claimDeployingSlot(params: {
-  threadId: string;
-  environment: string;
-  commitSha?: string | null;
-  imageTag?: string | null;
-  artifactRef?: string | null;
-  previousDeploymentId?: string | null;
-}): Promise<{ deployment: Deployment } | { busy: true }> {
-  return db.transaction(async (tx) => {
-    // 锁 thread 行,串行化同 thread 的并发 claim
-    await tx
-      .select({ id: thread.id })
-      .from(thread)
-      .where(eq(thread.id, params.threadId))
-      .for("update");
-    const existing = await tx
-      .select({ id: deployment.id })
-      .from(deployment)
-      .where(and(eq(deployment.threadId, params.threadId), eq(deployment.status, "deploying")))
-      .limit(1);
-    if (existing.length > 0) return { busy: true as const };
-    // P0-1: 直接 insert deploying(非 pending),使并发 claim 的 busy 检查命中。
-    // FOR UPDATE 已锁 thread 行串行化,第二个 claim 进事务后查到 deploying→busy,
-    // 杜绝并发部署触发两次 CI/CD(原 claim 插 pending 导致两个 claim 都过 busy 检查)。
-    const row: Deployment = {
-      id: randomUUID(),
-      threadId: params.threadId,
-      environment: params.environment,
-      commitSha: params.commitSha ?? null,
-      imageTag: params.imageTag ?? null,
-      artifactRef: params.artifactRef ?? null,
-      cicdJobId: null,
-      cicdJobUrl: null,
-      status: "deploying",
-      previousDeploymentId: params.previousDeploymentId ?? null,
-      deployedAt: null,
-      rolledBackAt: null,
-      errorMessage: null,
-      createdAt: new Date(),
-    };
-    await tx.insert(deployment).values(row);
-    return { deployment: row };
-  });
 }
 
 /** 按 id 取部署记录。 */

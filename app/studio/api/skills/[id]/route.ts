@@ -1,9 +1,9 @@
 import { archiveSkill, getSkillById, getSkillVersion, updateSkill } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import {
-  requireStudioAction,
-  resolveStudioPrincipal,
   hasStudioAction,
+  requireStudioAction,
+  type resolveStudioPrincipal,
 } from "@/lib/identity/studio-access";
 import { buildSkillMd, parseSkillMd } from "@/lib/skill/frontmatter";
 import { rejectSyncedSkillWrite } from "@/lib/skill/read-only-guard";

@@ -89,7 +89,7 @@ type SaveState =
 
 function fetchUrl(threadId: string, path: string): string {
   return apiPath(
-    `/api/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}`,
+    `/api/v1/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}`,
   );
 }
 

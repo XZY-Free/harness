@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { NextResponse } from "next/server";
 
+import {
+  type Principal,
+  employeeAuthErrorResponse,
+  resolveEmployeePrincipal,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { getRequestId, resourceNotFound } from "@/lib/http";
 import { logger } from "@/lib/logger";
 import { writeWorkspaceFileBytes } from "@/lib/workspace";
-import { requireThreadWorkspaceRead } from "@/lib/workspace-access";
 
 // ─── 图片类型（存文件返回 URL）─────────────────────────
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -70,11 +75,27 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
   const threadId = (formData.get("threadId") as string | null) ?? "";
+  const requestId = getRequestId(request);
 
-  // 归属校验:upload 必须绑定 thread,且当前用户对该 thread 有 workspace.read。
-  // 防匿名/跨用户写 public/uploads 静态目录(P1-3)。
-  const access = await requireThreadWorkspaceRead(request, threadId);
-  if (!access.ok) return access.response;
+  // 归属校验:upload 必须绑定 thread,且当前员工是该 thread 的 owner。
+  // 防匿名/跨用户写 public/uploads 静态目录(P1-3)。正式 Employee API 不走 action scope。
+  let principal: Principal;
+  try {
+    principal = await resolveEmployeePrincipal(request.headers);
+  } catch (err) {
+    const authResp = employeeAuthErrorResponse(err, requestId);
+    if (authResp) return authResp;
+    throw err;
+  }
+
+  const thread = await getThreadById(principal.tenantId, threadId);
+  if (
+    !thread ||
+    thread.ownerUserId !== principal.userIdentityId ||
+    thread.lifecycleState === "deleted"
+  ) {
+    return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
+  }
 
   if (!file || !file.size) {
     return Response.json({ error: "未选择文件" }, { status: 400 });
@@ -134,7 +155,7 @@ async function handleImageUpload(threadId: string, file: File) {
     await writeWorkspaceFileBytes(threadId, relPath, buffer);
     return Response.json({
       kind: "image" as const,
-      url: `/api/threads/${threadId}/workspace/${relPath}?raw=1`,
+      url: `/api/v1/threads/${threadId}/workspace/${relPath}?raw=1`,
       filename: file.name,
       size: file.size,
       type: file.type,

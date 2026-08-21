@@ -568,6 +568,39 @@ export async function allocateAndWriteEvents(
 }
 
 /**
+ * 唯一正式事件写入口：在事务内校验 Thread 属于 tenant、原子分配 sequence 并写入多个 ThreadEvent。
+ *
+ * 事实源：§14 规则（tenant-scoped event writer；禁止 threadId 反推 tenant）、
+ * 行 633（锁定 Thread.last_event_sequence 原子递增，不用 max(sequence)+1）。
+ *
+ * 与低层 `allocateAndWriteEvents`/`insertThreadEvent`（要求调用方自带 tx）不同，
+ * 本入口自包 `db.transaction`，且先按 `tenantId + threadId` 锁定 Thread 行校验归属
+ * （跨租户/不存在 → ThreadNotFoundError），避免把 tenant 从 threadId 反推。
+ *
+ * @returns 写入的 ThreadEvent 数组（按 sequence 升序）
+ */
+export async function writeThreadEvents(
+  tenantId: string,
+  threadId: string,
+  inputs: ThreadEventInput[],
+): Promise<ThreadEvent[]> {
+  if (inputs.length === 0) return [];
+  return db.transaction(async (tx) => {
+    // 先按 tenant + thread 锁定 Thread 行，校验归属（隐藏式 404）。
+    const [thread] = await tx
+      .select({ id: threadTable.id })
+      .from(threadTable)
+      .where(and(eq(threadTable.tenantId, tenantId), eq(threadTable.id, threadId)))
+      .for("update")
+      .limit(1);
+    if (!thread) {
+      throw new ThreadNotFoundError(threadId);
+    }
+    return allocateAndWriteEvents(tx, threadId, inputs);
+  });
+}
+
+/**
  * 获取 Thread 的最新 event cursor（一致性读点）。
  *
  * 事实源：§11 行 297-301（latest_event_cursor = {sequence, event_id}）。

@@ -232,142 +232,6 @@ export const user = mysqlTable(
 );
 export type User = InferSelectModel<typeof user>;
 
-export const thread = mysqlTable(
-  "Thread",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    createdAt: datetime("createdAt", { mode: "date" }).notNull(),
-    // B-8: 最后活动时间 —— 用于会话列表按"最近活动"排序（替代 createdAt），
-    // 每次 status/model/title 变更或发消息时刷新。默认取 createdAt（回填语义）。
-    // :fsp=3 毫秒精度,SSE since 游标 gt(updatedAt) 不再丢同秒事件。
-    updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 }).notNull(),
-    title: text("title").notNull(),
-    userId: varchar("userId", { length: 36 })
-      .notNull()
-      .references(() => user.id),
-    // Agent 执行生命周期状态
-    status: mysqlEnum("status", THREAD_STATUSES).notNull().default("idle"),
-    // 当前使用的模型 ID（可选，默认见 config.aiConfig.chatModel）
-    model: varchar("model", { length: 64 }),
-    // 预览 URL（后端自检后填入，前端按需展示）
-    previewUrl: text("previewUrl"),
-    // @deprecated V8 Skill Run Resolver：不再从 thread 解析 Skill。运行时改用 run 级 Skill 使用事实。
-    // 列保留兼容旧数据，不在运行时读取；展示口径改用最近 run 的 primary skill（lastRunSkillId）。
-    activeSkillId: varchar("activeSkillId", { length: 64 }),
-    // @deprecated V8 Skill Run Resolver：同上。Skill 版本固化改由 run 级事实记录。
-    activeSkillVersionId: varchar("activeSkillVersionId", { length: 36 }),
-    // Phase 4: 人工审核状态
-    reviewState: varchar("reviewState", { length: 32 }),
-    // Phase 5: 运行时类型(host / container),null → 解析优先级回退(skill → 全局默认)
-    runtimeType: varchar("runtimeType", { length: 16 }),
-    // E-5: 置顶时间戳。非 null = 已置顶，列表排序时置顶组在最前。
-    pinnedAt: datetime("pinnedAt", { mode: "date" }),
-    // P0 修复（memory/permission project scope）：thread 所属 project。
-    // null 表示未关联 project（默认）。关联后：
-    // - chat route retrieveMemories 增加 project scope 检索（project 级记忆生效）
-    // - permission engine project scope 规则按 projectId 匹配（跨 thread 复用审批）
-    // - Studio memories 列表展示 project 维度
-    projectId: varchar("projectId", { length: 36 }),
-    // P0 修复（03 Context pinned facts 持久化）：用户明确要求保留的事实（protected 集合数据源）。
-    // 原进程内 Map 重启即失。落 DB json 列持久化。null=无 pinned facts（默认）。
-    // agent/用户经 addPinnedFact/removePinnedFact 修改,chat route 加载注入 protected。
-    pinnedFacts: json("pinnedFacts"),
-    // C-3: 软删除时间戳。非 null = 已软删，列表/查询过滤。替代原 status=cancelled 降级方案。
-    deletedAt: datetime("deletedAt", { mode: "date" }),
-    // C-8: 最近一条消息的预览文本（截断 60 字）。saveMessages 时冗余更新，列表免 join。
-    lastMessagePreview: text("lastMessagePreview"),
-    // E-6: 最近一条消息的 id。saveMessages 时冗余更新，用于消息级未读判定
-    //（seen 记录最后已读 messageId，与之比较，替代粗糙时间戳比对）。
-    lastMessageId: varchar("lastMessageId", { length: 36 }),
-    // E-7: token 用量累加（run 级 onFinish 累加，跨 run 持续累计）。
-    // onFinish 用 totalUsage（跨 step 累加，非最后一步 usage）。
-    promptTokens: int("promptTokens").notNull().default(0),
-    completionTokens: int("completionTokens").notNull().default(0),
-    totalTokens: int("totalTokens").notNull().default(0),
-    // per-thread CI/CD API token，AES-256-GCM 加密存储（JSON: keyId + ciphertext）。
-    // 链路：deployToEnvironment 工具读取 → decryptCicdToken → triggerDeploy(threadCicdToken) → CI/CD webhook。
-    cicdApiToken: text("cicdApiToken"),
-  },
-  (t) => ({
-    userCreatedIdx: index("Thread_userId_createdAt_idx").on(t.userId, t.createdAt),
-    // B-8: 列表按 updatedAt desc 排序的索引
-    userUpdatedIdx: index("Thread_userId_updatedAt_idx").on(t.userId, t.updatedAt),
-    // P0: project 维度查询索引（同 project 下的 thread 列表 / project scope 记忆检索）
-    projectIdx: index("Thread_projectId_idx").on(t.projectId),
-  }),
-);
-export type Thread = InferSelectModel<typeof thread>;
-
-export const message = mysqlTable(
-  "Message",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    // 指向所属 Thread
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
-    role: varchar("role", { length: 32 }).notNull(),
-    // 消息分层 type（写入时按 role 填充，见 messageTypeForRole）
-    type: varchar("type", { length: 32 }),
-    // AI SDK 的 UIMessage.parts，整体以 json 存储
-    parts: json("parts").notNull(),
-    // B-3: 标记该消息属于哪次 run（runId）。user 消息无 run（route 层写入）故可空。
-    // 用于重试时按 runId 隔离清理旧 partial（per-step upsert 同 id 覆盖解决中断丢失，
-    // 但换 runId 重试时旧 partial 残留需按 run 隔离）。
-    runId: varchar("runId", { length: 36 }),
-    createdAt: datetime("createdAt", { mode: "date" }).notNull(),
-  },
-  (t) => ({
-    // P0 修复（08 DB ）：message 表加 threadId+createdAt 复合索引。
-    // P2-6: 补 id 列,覆盖游标分页 (createdAt, id) tie-breaker,避免深度翻页回表。
-    threadCreatedIdx: index("Message_threadId_createdAt_id_idx").on(t.threadId, t.createdAt, t.id),
-  }),
-);
-export type DBMessage = InferSelectModel<typeof message>;
-
-// ─── Thread Event (append-only 事实流) ──────────────────────
-
-export const threadEvent = mysqlTable(
-  "ThreadEvent",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    // 所属 thread
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
-    // thread 内单调递增序号（单 thread/低并发语境下用简单递增）
-    sequence: int("sequence").notNull(),
-    // 事件类型（.1 权威表取值）
-    type: varchar("type", { length: 64 }).notNull(),
-    // 事件负载（JSON，具体 shape 由 type 决定）
-    payload: json("payload").notNull(),
-    // 归属 ThreadRun（nullable（历史事件和纯 thread 管理事件可空））。
-    runId: varchar("runId", { length: 36 }),
-    // :fsp=3 毫秒精度,SSE since 游标 gt(createdAt) 不再丢同秒事件。
-    createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    // (threadId, sequence) 唯一：thread 内序号不重复（应用层简单递增 + DB 兜底，真并发冲突 fail-loud 而非静默错乱）
-    threadSeqUq: uniqueIndex("ThreadEvent_threadId_sequence_uq").on(t.threadId, t.sequence),
-    // 时间线查询
-    threadCreatedIdx: index("ThreadEvent_threadId_createdAt_idx").on(t.threadId, t.createdAt),
-    // P2-4: getRunDetail 按 runId 查事件,无索引则全表扫
-    runIdIdx: index("ThreadEvent_runId_idx").on(t.runId),
-  }),
-);
-export type ThreadEvent = InferSelectModel<typeof threadEvent>;
-
 // ─── Tool Run (结构化工具执行记录) ──────────────────────────
 
 export const toolRun = mysqlTable(
@@ -378,9 +242,7 @@ export const toolRun = mysqlTable(
       .notNull()
       .$defaultFn(() => randomUUID()),
     // 所属 thread
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
+    threadId: varchar("threadId", { length: 36 }).notNull(),
     // 工具名（如 writeFile / runCommand / reportReady）
     toolName: varchar("toolName", { length: 64 }).notNull(),
     // 执行状态
@@ -748,9 +610,7 @@ export const contextSnapshot = mysqlTable(
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
+    threadId: varchar("threadId", { length: 36 }).notNull(),
     // 触发场景，如 chat.user_message
     trigger: varchar("trigger", { length: 64 }).notNull(),
     // 本轮模型 id
@@ -824,9 +684,7 @@ export const contextSummary = mysqlTable(
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
+    threadId: varchar("threadId", { length: 36 }).notNull(),
     // turn/toolRun/diff/debug/decision/subagent
     type: varchar("type", { length: 32 }).notNull(),
     // 被摘要的范围：{ messageIds?: string[], toolRunIds?: string[], range?: { from, to } }
@@ -868,9 +726,7 @@ export const threadPlan = mysqlTable(
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
+    threadId: varchar("threadId", { length: 36 }).notNull(),
     title: varchar("title", { length: 256 }).notNull(),
     status: mysqlEnum("status", THREAD_PLAN_STATUSES).notNull().default("active"),
     source: varchar("source", { length: 32 }).notNull().default("system"),
@@ -902,9 +758,7 @@ export const threadPlanItem = mysqlTable(
       .notNull()
       .references(() => threadPlan.id),
     // 冗余 threadId，便于 owner scope 查询
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
+    threadId: varchar("threadId", { length: 36 }).notNull(),
     parentId: varchar("parentId", { length: 36 }),
     position: int("position").notNull().default(0),
     title: varchar("title", { length: 512 }).notNull(),
@@ -1001,9 +855,7 @@ export const toolApprovalRequest = mysqlTable(
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
+    threadId: varchar("threadId", { length: 36 }).notNull(),
     toolRunId: varchar("toolRunId", { length: 36 })
       .notNull()
       .references(() => toolRun.id),
@@ -1049,9 +901,7 @@ export const gitCheckpoint = mysqlTable(
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
+    threadId: varchar("threadId", { length: 36 }).notNull(),
     // snow-checkpoint-{shortId}，git tag 名
     tag: varchar("tag", { length: 128 }).notNull(),
     // 快照指向的 commit sha
@@ -1351,9 +1201,7 @@ export const deployment = mysqlTable(
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 })
-      .notNull()
-      .references(() => thread.id),
+    threadId: varchar("threadId", { length: 36 }).notNull(),
     // 目标环境（如 staging/prod）
     environment: varchar("environment", { length: 64 }).notNull(),
     // 来源 commit（finalizeThreadRun）

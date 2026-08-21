@@ -6,7 +6,6 @@ const queries = vi.hoisted(() => ({
   upsertEmbeddingRow: vi.fn(),
   listEmbeddingRowsByMemory: vi.fn(),
   listMemoryRows: vi.fn(),
-  appendThreadEvent: vi.fn(),
 }));
 
 vi.mock("@/lib/db/queries", () => ({ ...queries }));
@@ -41,7 +40,7 @@ beforeEach(() => {
 });
 
 describe("indexMemory 写入触发（embedding 必须在写入时生成，不能只建表不填数据）", () => {
-  it("active memory + provider ready → upsert status=active + memory.reindexed(ready, dimension)", async () => {
+  it("active memory + provider ready → upsert status=active", async () => {
     queries.getMemoryRow.mockResolvedValue(mem({ id: "m1" }));
     const provider = new DeterministicFakeEmbeddingProvider();
     const r = await indexMemory("m1", { provider });
@@ -56,24 +55,13 @@ describe("indexMemory 写入触发（embedding 必须在写入时生成，不能
     expect(upserted.dim).toBe(16);
     // MemoryEmbedding 行存在且非空（核心硬约束）
     expect(upserted.vector.length).toBeGreaterThan(0);
-    expect(queries.appendThreadEvent).toHaveBeenCalledWith(
-      "t1",
-      "memory.reindexed",
-      expect.objectContaining({
-        memoryId: "m1",
-        provider: provider.name,
-        status: "ready",
-        dimension: 16,
-      }),
-    );
   });
 
-  it("revoked memory → skipped，不索引、不写行、不发事件", async () => {
+  it("revoked memory → skipped，不索引、不写行", async () => {
     queries.getMemoryRow.mockResolvedValue(mem({ id: "m1", status: "revoked" }));
     const r = await indexMemory("m1", { provider: new DeterministicFakeEmbeddingProvider() });
     expect(r.status).toBe("skipped");
     expect(queries.upsertEmbeddingRow).not.toHaveBeenCalled();
-    expect(queries.appendThreadEvent).not.toHaveBeenCalled();
   });
 
   it("不存在 memory → skipped", async () => {
@@ -84,15 +72,14 @@ describe("indexMemory 写入触发（embedding 必须在写入时生成，不能
 });
 
 describe("indexMemory provider 降级（不静默伪装成功）", () => {
-  it("disabled provider → status=disabled，不写 embedding 行、不发事件（memory 仍可创建）", async () => {
+  it("disabled provider → status=disabled，不写 embedding 行（memory 仍可创建）", async () => {
     queries.getMemoryRow.mockResolvedValue(mem({ id: "m1" }));
     const r = await indexMemory("m1", { provider: new DisabledEmbeddingProvider() });
     expect(r.status).toBe("disabled");
     expect(queries.upsertEmbeddingRow).not.toHaveBeenCalled();
-    expect(queries.appendThreadEvent).not.toHaveBeenCalled();
   });
 
-  it("error provider → upsert status=error + memory.reindexed(error, errorCode)，不抛", async () => {
+  it("error provider → upsert status=error + errorCode，不抛", async () => {
     queries.getMemoryRow.mockResolvedValue(mem({ id: "m1" }));
     const r = await indexMemory("m1", { provider: new ErrorEmbeddingProvider() });
     expect(r.status).toBe("error");
@@ -102,11 +89,6 @@ describe("indexMemory provider 降级（不静默伪装成功）", () => {
     expect(upserted.errorMessage).toBeTruthy();
     // errorMessage 不含 secret（ErrorEmbeddingProvider 的 error 文本无 key）
     expect(upserted.errorMessage).not.toMatch(/Bearer|sk-|key/i);
-    expect(queries.appendThreadEvent).toHaveBeenCalledWith(
-      "t1",
-      "memory.reindexed",
-      expect.objectContaining({ memoryId: "m1", status: "error", errorCode: expect.any(String) }),
-    );
   });
 });
 

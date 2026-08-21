@@ -1,4 +1,5 @@
-import { getThreadById, listQaEventsByThread, listToolRunsByThread } from "@/lib/db/queries";
+import { listThreadEvents } from "@/lib/conversations/thread-queries";
+import { listToolRunsByThread } from "@/lib/db/queries";
 import type { ToolRun } from "@/lib/db/schema";
 import { gitRemoteUrl, gitStatus } from "@/lib/git/ops";
 
@@ -89,11 +90,11 @@ function latestSucceeded(rows: ToolRun[], toolName: string): ToolRun | null {
  * @param opts.prUrl - 调用方可注入 PR URL（若 createPullRequest 在同轮已执行，避免重复读 ToolRun）
  */
 export async function buildDeliverySummary(
+  tenantId: string,
   threadId: string,
   opts?: { prUrl?: string | null },
 ): Promise<DeliverySummary> {
-  const [thread, toolRuns, status, remoteUrl] = await Promise.all([
-    getThreadById(threadId),
+  const [toolRuns, status, remoteUrl] = await Promise.all([
     listToolRunsByThread(threadId, 500),
     gitStatus(threadId),
     gitRemoteUrl(threadId),
@@ -142,17 +143,19 @@ export async function buildDeliverySummary(
 
   const testResults = parseTestResults(((latestTests?.output ?? {}) as { stdout?: string }).stdout);
 
-  // P2 修复(09 Git P2-1): screenshots 从 qa 事件取最近通过/失败的截图路径。
-  // 原恒空数组,交付摘要无截图证据,审计不完整。
+  // 02-3：screenshots 从正式 threadEventTable 的 qa 事件（payloadJson.artifactPath）取最近通过/失败截图。
+  // 原读 legacy threadEvent；现经正式 listThreadEvents 按 qa.check_* 事件过滤。
   let screenshots: string[] = [];
   try {
-    const qaEvents = await listQaEventsByThread(threadId);
-    // 取最近 5 条 qa 事件的 artifactPath(截图路径),过滤 null
+    const events = await listThreadEvents(tenantId, threadId);
+    const qaEvents = events.filter(
+      (e) => e.eventType === "qa.check_passed" || e.eventType === "qa.check_failed",
+    );
     screenshots = qaEvents
       .slice(0, 5)
       .map((e) => {
-        const p = e.payload as { artifactPath?: string | null } | null;
-        return p?.artifactPath ?? null;
+        const payload = (e.payloadJson ?? null) as { artifactPath?: string | null } | null;
+        return payload?.artifactPath ?? null;
       })
       .filter((s): s is string => s !== null && s.length > 0);
   } catch {
@@ -167,7 +170,8 @@ export async function buildDeliverySummary(
     prUrl: opts?.prUrl ?? prOutput.prUrl ?? null,
     filesChanged,
     testResults,
-    previewUrl: thread?.previewUrl ?? null,
+    // 02-3：正式 Thread 无 previewUrl 字段；预览 URL 归属 Delivery/Environment 域，02-9 承接。
+    previewUrl: null,
     screenshots,
     deliveryLink: prOutput.deliveryLink ?? prOutput.prUrl ?? null,
     tested: commitInput.tested ?? null,

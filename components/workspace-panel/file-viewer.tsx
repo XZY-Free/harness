@@ -17,7 +17,7 @@ import { useEffect, useState } from "react";
  *
  * 安全：
  * - 文件视图不执行 HTML，避免把“查看源码”和“运行预览”混为一谈。
- * - 图片 / PDF 走同源 raw=1 端点，受 requireThreadWorkspaceRead 保护（owner + workspace.read）。
+ * - 图片 / PDF 走同源 raw=1 端点，由正式 v1 workspace 路由 owner 鉴权保护。
  */
 type FileKind = "markdown" | "html" | "image" | "pdf" | "font" | "text";
 
@@ -53,7 +53,7 @@ function kindForPath(path: string): FileKind {
 /** 二进制资源（图片 / PDF）走 raw=1 端点，按 threadId + path 拼装。 */
 export function rawUrl(threadId: string, path: string): string {
   return apiPath(
-    `/api/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}?raw=1`,
+    `/api/v1/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}?raw=1`,
   );
 }
 
@@ -234,6 +234,6 @@ export function FileViewer({ threadId, path }: { threadId: string; path: string 
 /** JSON 信封端点 URL（非 raw=1）。encodeURIComponent 已对 path 各段做处理。 */
 function rawFetchUrl(threadId: string, path: string): string {
   return apiPath(
-    `/api/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}`,
+    `/api/v1/threads/${threadId}/workspace/${path.split("/").map(encodeURIComponent).join("/")}`,
   );
 }

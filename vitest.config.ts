@@ -6,11 +6,8 @@ const alias = { "@": resolve(__dirname, ".") };
 // 遗留 B1 层测试：测的是 §17 刻意丢弃的旧表（User/Message/ThreadRun/ToolRun/Role/
 // policyConfig/GitCheckpoint）。正式链零依赖；按用户
 // 决策「未覆盖就不管」排除，代码原样保留。unit project 现有 exclude 已跳过，仅 db project 需要。
-const LEGACY_B1_DB_TESTS = [
-  "lib/db/studio-queries.test.ts",
-  "lib/db/retention.test.ts",
-  "lib/policy/config.test.ts",
-];
+// 02-3：retention.test.ts 随 legacy thread 表删除（retention 依赖旧表，02-8 正式重实现）。
+const LEGACY_B1_DB_TESTS = ["lib/db/studio-queries.test.ts", "lib/policy/config.test.ts"];
 
 export default defineConfig({
   resolve: { alias },

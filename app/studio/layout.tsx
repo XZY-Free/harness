@@ -1,7 +1,7 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { StudioNav } from "@/components/studio/nav";
 import { StudioToastProvider } from "@/components/studio/toast-provider";
-import { AuthenticationError, resolvePrincipal, type Principal } from "@/lib/identity/resolver";
+import { AuthenticationError, type Principal, resolvePrincipal } from "@/lib/identity/resolver";
 import { hasStudioAction, resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { computeStudioNavVisibility } from "@/lib/studio/nav-visibility";
 import type { StudioNavVisibility } from "@/lib/studio/nav-visibility";
@@ -41,7 +41,11 @@ export default async function StudioLayout({
     throw error;
   }
 
-  const allowed = await hasStudioAction(principal!, "studio.access");
+  // resolveStudioPrincipal 抛错已在 try/catch 内处理（401/重抛），此处 undefined 逻辑不可达。
+  if (!principal) {
+    throw new Error("studio layout: resolveStudioPrincipal 返回了空 principal");
+  }
+  const allowed = await hasStudioAction(principal, "studio.access");
   if (!allowed) {
     return <StudioGatePage status={403} message="无 studio.access 权限" />;
   }

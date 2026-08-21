@@ -83,19 +83,15 @@ export async function register() {
     }, AUDIT_REPLAY_INTERVAL_MS);
     auditReplayTimer.unref();
 
-    // V6-M1-4：状态机兜底 sweep（delivering/deploying/awaiting_approval）。
-    // delivering 状态超时 30 分钟 → failed；deploying 状态定时轮询 CI/CD 确认。
-    // 防止 gitPush 成功后 deliverySummary 未调用导致永久悬空。
+    // 状态机兜底 sweep：deploying 状态定时轮询 CI/CD 确认（防 gitPush 成功后
+    // deliverySummary 未调用导致永久悬空）。02-3：移除 legacy thread delivering→failed
+    // 超时扫描（正式 Thread 无 delivering/failed 状态机；"交付超时扫描"后续在正式
+    // Deployment/Execution/Delivery Authority 上重新实现）。
     const SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
     const sweepTimer = setInterval(async () => {
       try {
-        const { sweepStaleDeliveringThreads } = await import("./lib/delivery/sweep");
         const { sweepDeployingStatuses } = await import("./lib/deploy/cicd-target");
-        const deliveringSwept = await sweepStaleDeliveringThreads();
         await sweepDeployingStatuses();
-        if (deliveringSwept > 0) {
-          console.info(`[instrumentation] delivering sweep: ${deliveringSwept} stale threads`);
-        }
       } catch (e) {
         console.warn("[instrumentation] state machine sweep failed:", e);
       }

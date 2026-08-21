@@ -1,4 +1,4 @@
-import type { ContextSummaryType, ThreadEvent, ThreadPlanItem, ToolRun } from "@/lib/db/schema";
+import type { ContextSummaryType, ThreadPlanItem, ToolRun } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 
 /**
@@ -385,83 +385,6 @@ function extractImperativeVerb(sentence: string): string | null {
     if (sentence.includes(v) || lower.includes(v)) return v;
   }
   return null;
-}
-
-// ─── 5. decision 摘要 ────────────────────────────────────────
-
-export type DecisionSummary = {
-  type: "decision";
-  /** 已选项。 */
-  choices: string[];
-  /** 约束。 */
-  constraints: string[];
-  /** 拒绝方案。 */
-  rejected: string[];
-  /** 信心（高/中/低，规则推断）。 */
-  confidence: "high" | "medium" | "low";
-  text: string;
-};
-
-/**
- * 提取决策日志摘要：选择 / 约束 / 拒绝方案 / 信心。
- * 从 plan 事件 + 状态切换事件用规则提取（不调 LLM）。
- */
-export function extractDecisionLog(args: {
-  planEvents: ThreadEvent[];
-  statusChanges?: Array<{ reason?: string; to?: string }>;
-}): DecisionSummary {
-  const choices: string[] = [];
-  const rejected: string[] = [];
-
-  for (const ev of args.planEvents) {
-    const payload = ev.payload as Record<string, unknown>;
-    if (ev.type === "plan.created" && typeof payload.title === "string") {
-      choices.push(`采纳计划: ${payload.title}`);
-    }
-    if (
-      ev.type === "plan.updated" &&
-      payload.status === "abandoned" &&
-      typeof payload.title === "string"
-    ) {
-      rejected.push(`放弃计划: ${payload.title}`);
-    }
-    if (
-      ev.type === "plan.item_updated" &&
-      payload.status === "failed" &&
-      typeof payload.title === "string"
-    ) {
-      rejected.push(`失败条目: ${payload.title}`);
-    }
-  }
-
-  const constraints = (args.statusChanges ?? [])
-    .filter((s) => s.to === "awaiting_approval" || s.to === "awaiting_input")
-    .map((s) => `需${s.to === "awaiting_approval" ? "审批" : "用户输入"}: ${s.reason ?? ""}`)
-    .filter((s) => s.length > 0);
-
-  // 信心改为加权打分（替代原三档粗糙推断）。
-  // choices × +1，rejected(失败/放弃) × -1，awaiting 约束 × -1；映射 high(>=1) / medium(0) / low(<0)。
-  const awaitingCount = (args.statusChanges ?? []).filter(
-    (s) => s.to === "awaiting_approval" || s.to === "awaiting_input",
-  ).length;
-  const score = choices.length * 1 + rejected.length * -1 + awaitingCount * -1;
-  const confidence: "high" | "medium" | "low" =
-    choices.length === 0 && rejected.length === 0 && awaitingCount === 0
-      ? "low"
-      : score >= 1
-        ? "high"
-        : score === 0
-          ? "medium"
-          : "low";
-
-  const lines = [
-    choices.length > 0 ? `选择:\n${choices.map((c) => ` - ${c}`).join("\n")}` : null,
-    constraints.length > 0 ? `约束:\n${constraints.map((c) => ` - ${c}`).join("\n")}` : null,
-    rejected.length > 0 ? `拒绝:\n${rejected.map((r) => ` - ${r}`).join("\n")}` : null,
-    `信心: ${confidence}`,
-  ].filter((l): l is string => Boolean(l));
-
-  return { type: "decision", choices, constraints, rejected, confidence, text: lines.join("\n") };
 }
 
 // ─── 汇总：类型 → 提取器元数据 ──────────────────────────────

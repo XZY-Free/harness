@@ -1,51 +1,38 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Phase 5 Stage D：预览反向代理 /preview/[threadId]/* 测试。
- * mock auth / queries / registry / global fetch，覆盖 owner guard 404、未 ready 503、ready 转发 200 + path 透传。
+ * Phase 5 Stage D：预览反向代理 /preview/[threadId]/* 测试（正式 v1 鉴权）。
+ * mock 员工身份 / thread-queries / registry / global fetch，覆盖 owner guard 404、
+ * 未 ready 503、ready 转发 200 + path 透传。
  *
- * 02-2b：授权契约迁到正式 Principal 解析（resolveStudioPrincipal + authErrorResponse）。
+ * 02-2b / 02-3：授权契约迁到正式 Employee Principal（resolveEmployeePrincipal + owner 校验），
+ * 不再依赖已删的 requireThreadForUser / workspace-access。
  */
 
-const studio = vi.hoisted(() => ({ resolveStudioPrincipal: vi.fn() }));
-const resolver = vi.hoisted(() => ({ authErrorResponse: vi.fn() }));
-const queries = vi.hoisted(() => ({
-  requireThreadForUser: vi.fn(),
-}));
+const auth = vi.hoisted(() => ({ resolveEmployeePrincipal: vi.fn() }));
+const threadQueries = vi.hoisted(() => ({ getThreadById: vi.fn() }));
 const preview = vi.hoisted(() => ({ status: vi.fn() }));
 const registry = vi.hoisted(() => ({
   resolveRuntimes: vi.fn(),
 }));
 
-vi.mock("@/lib/identity/studio-access", () => ({
-  resolveStudioPrincipal: studio.resolveStudioPrincipal,
-}));
-vi.mock("@/lib/identity/resolver", () => ({
-  authErrorResponse: resolver.authErrorResponse,
-}));
-vi.mock("@/lib/db/queries", () => ({
-  requireThreadForUser: queries.requireThreadForUser,
+vi.mock("@/lib/conversations/route-helpers", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/conversations/route-helpers")>();
+  return { ...original, resolveEmployeePrincipal: auth.resolveEmployeePrincipal };
+});
+vi.mock("@/lib/conversations/thread-queries", () => ({
+  getThreadById: threadQueries.getThreadById,
 }));
 vi.mock("@/lib/runtime/registry", () => ({
-  resolveRuntimeTypeForThread: (
-    thread: { runtimeType?: string | null },
-    version: { runtimeType?: string | null } | null,
-  ) => thread.runtimeType ?? version?.runtimeType ?? "host",
+  resolveRuntimeTypeForThread: () => "host",
   resolveRuntimes: registry.resolveRuntimes,
 }));
 
 import { GET } from "@/app/preview/[threadId]/[[...path]]/route";
+import { AuthenticationError } from "@/lib/identity/resolver";
 
-/** resolveStudioPrincipal 返回的 Principal：路由读取 userIdentityId 作 owner guard。 */
-const PRINCIPAL = {
-  id: "u1",
-  email: "a@x",
-  name: "A",
-  externalId: "u1",
-  createdAt: new Date(),
-  userIdentityId: "u1",
-  tenantId: "t1",
-};
+const PRINCIPAL = { tenantId: "t1", userIdentityId: "u1" };
+const OWNED = { id: "t1", tenantId: "t1", ownerUserId: "u1", lifecycleState: "active" };
 
 function req(threadId: string, path?: string[]): Request {
   const urlPath = `/preview/${threadId}/${path ? path.join("/") : ""}`;
@@ -54,23 +41,23 @@ function req(threadId: string, path?: string[]): Request {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL);
-  resolver.authErrorResponse.mockReturnValue(null);
-  queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
+  auth.resolveEmployeePrincipal.mockResolvedValue(PRINCIPAL);
+  threadQueries.getThreadById.mockResolvedValue(OWNED);
   registry.resolveRuntimes.mockReturnValue({ preview });
 });
 
-describe("GET /preview/[threadId]/* 反向代理 (Phase 5 Stage D)", () => {
+describe("GET /preview/[threadId]/* 反向代理 (Phase 5 Stage D, 正式 v1)", () => {
   it("foreign thread → 404", async () => {
-    queries.requireThreadForUser.mockResolvedValue(null);
+    threadQueries.getThreadById.mockResolvedValue(null);
     const res = await GET(req("t1"), { params: Promise.resolve({ threadId: "t1" }) });
     expect(res.status).toBe(404);
     expect(preview.status).not.toHaveBeenCalled();
   });
 
-  it("缺 SSO 身份 → 401", async () => {
-    studio.resolveStudioPrincipal.mockRejectedValue(new Error("缺少 SSO 用户标识"));
-    resolver.authErrorResponse.mockReturnValue(new Response(null, { status: 401 }));
+  it("缺身份 → 401", async () => {
+    auth.resolveEmployeePrincipal.mockRejectedValue(
+      new AuthenticationError("missing_identity", "缺少身份"),
+    );
     const res = await GET(req("t1"), { params: Promise.resolve({ threadId: "t1" }) });
     expect(res.status).toBe(401);
   });
@@ -81,17 +68,13 @@ describe("GET /preview/[threadId]/* 反向代理 (Phase 5 Stage D)", () => {
     expect(res.status).toBe(503);
   });
 
-  it("thread runtimeType=container → 用 container preview status registry", async () => {
-    queries.requireThreadForUser.mockResolvedValue({
-      id: "t1",
-      userId: "u1",
-      runtimeType: "container",
-    });
+  it("用全局默认 runtime 类型（host）查 status registry", async () => {
     preview.status.mockReturnValue({ state: "starting", port: 41000, kind: "dev-server" });
     const res = await GET(req("t1"), { params: Promise.resolve({ threadId: "t1" }) });
 
     expect(res.status).toBe(503);
-    expect(registry.resolveRuntimes).toHaveBeenCalledWith("t1", "container");
+    // 正式 Thread 无 runtimeType 列，落全局默认 host。
+    expect(registry.resolveRuntimes).toHaveBeenCalledWith("t1", "host");
     expect(preview.status).toHaveBeenCalledWith("t1");
   });
 

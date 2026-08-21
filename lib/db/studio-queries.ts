@@ -4,19 +4,12 @@ import {
   type Skill,
   type SkillSyncState,
   type SkillVersion,
-  type Thread,
-  type ThreadEvent,
-  type ToolRun,
   policyConfig,
   skill,
   skillSyncMapping,
   skillVersion,
-  thread,
-  threadEvent,
-  toolRun,
-  user,
 } from "@/lib/db/schema";
-import { type SQL, and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { type SQL, and, asc, desc, eq, isNull, or } from "drizzle-orm";
 
 /**
  * ：Agent Studio 后台只读 / 聚合查询。
@@ -165,170 +158,6 @@ export async function getSkillSyncInfo(skillId: string): Promise<{
     .where(eq(skillSyncMapping.localSkillId, skillId))
     .limit(1);
   return row ?? null;
-}
-
-// ─── Threads（Stage D） ──────────────────────────────────────
-
-/**
- * thread 列表行：Thread 全字段 + 可读名（供后台表格显示，避免裸 ID）。
- * - `ownerName`/`ownerEmail`：thread.userId → user.{name,email}。
- */
-export type ThreadListRow = Thread & {
-  ownerName: string | null;
-  ownerEmail: string | null;
-};
-
-/**
- * thread leftJoin user 的公共 select / from 构造。
- * user.name 与 skill.name 同名——drizzle 按列引用生成 SQL（表名限定 + AS 重命名），
- * select 键名（ownerName）即结果集字段名，无冲突。
- */
-function threadListQuery() {
-  return db
-    .select({
-      id: thread.id,
-      createdAt: thread.createdAt,
-      updatedAt: thread.updatedAt,
-      title: thread.title,
-      userId: thread.userId,
-      status: thread.status,
-      model: thread.model,
-      previewUrl: thread.previewUrl,
-      activeSkillId: thread.activeSkillId,
-      activeSkillVersionId: thread.activeSkillVersionId,
-      reviewState: thread.reviewState,
-      runtimeType: thread.runtimeType,
-      projectId: thread.projectId,
-      pinnedAt: thread.pinnedAt,
-      pinnedFacts: thread.pinnedFacts,
-      deletedAt: thread.deletedAt,
-      lastMessagePreview: thread.lastMessagePreview,
-      lastMessageId: thread.lastMessageId,
-      // S1：补齐 token 字段（ThreadListRow = Thread & {...} 要求，V4 加列后 select 漏选）
-      promptTokens: thread.promptTokens,
-      completionTokens: thread.completionTokens,
-      totalTokens: thread.totalTokens,
-      // per-thread CI/CD token（同上，select 漏选补齐）
-      cicdApiToken: thread.cicdApiToken,
-      ownerName: user.name,
-      ownerEmail: user.email,
-    })
-    .from(thread)
-    .leftJoin(user, eq(thread.userId, user.id));
-}
-
-/** 列某用户的 thread（member 视角），B-8: 按 updatedAt desc。P2-1: 过滤已软删。 */
-export async function listThreadsForUser(userId: string): Promise<ThreadListRow[]> {
-  return threadListQuery()
-    .where(and(eq(thread.userId, userId), isNull(thread.deletedAt)))
-    .orderBy(desc(thread.updatedAt), desc(thread.id));
-}
-
-/** 列全部 thread（admin 视角，thread.read.all），B-8: 按 updatedAt desc。P2-1: 过滤已软删。 */
-export async function listAllThreads(): Promise<ThreadListRow[]> {
-  return threadListQuery()
-    .where(isNull(thread.deletedAt))
-    .orderBy(desc(thread.updatedAt), desc(thread.id));
-}
-
-/** 列某 thread 的 tool run，按 startedAt asc（tool trace 用）。 */
-export async function listToolRunsForThread(threadId: string): Promise<ToolRun[]> {
-  return db
-    .select()
-    .from(toolRun)
-    .where(eq(toolRun.threadId, threadId))
-    .orderBy(asc(toolRun.startedAt));
-}
-
-/** 列某 thread 的全部事件（时间线用），按 sequence asc。 */
-export async function listEventsForThread(threadId: string): Promise<ThreadEvent[]> {
-  return db
-    .select()
-    .from(threadEvent)
-    .where(eq(threadEvent.threadId, threadId))
-    .orderBy(asc(threadEvent.sequence))
-    .limit(500);
-}
-
-/**
- * 列某 thread 的 artifact 事件投影：`artifact.created` / `artifact.updated`，
- * 按 sequence asc。同时按 threadId 限定（不泄露其他 thread 的 artifact）。
- */
-export async function listArtifactsForThread(threadId: string): Promise<ThreadEvent[]> {
-  return db
-    .select()
-    .from(threadEvent)
-    .where(
-      and(
-        eq(threadEvent.threadId, threadId),
-        inArray(threadEvent.type, ["artifact.created", "artifact.updated"]),
-      ),
-    )
-    .orderBy(asc(threadEvent.sequence));
-}
-
-/** artifact 事件类型集合（跨 thread 聚合用）。 */
-const ARTIFACT_EVENT_TYPES = ["artifact.created", "artifact.updated"] as const;
-
-/**
- * artifact 列表行：ThreadEvent 全字段 + 所属 thread 的 title（供 UI 显示，避免裸 threadId）。
- * thread 已删档 → threadTitle=null（leftJoin，admin 全表路径下 thread 可能不存在）。
- */
-export type ArtifactListRow = ThreadEvent & { threadTitle: string | null };
-
-/**
- * 跨 thread 聚合某用户可见的最近 artifact 事件（，owner-scoped）。
- *
- * - `canAll=true`（admin，thread.read.all）：全表 threadEvent where type in artifact.*，
- * 按 createdAt desc 取 limit。
- * - `canAll=false`（member）：**DB join/filter** 按 `thread.userId` 限定——
- * threadEvent innerJoin thread on threadId=thread.id，where thread.userId=userId and type in artifact.*。
- * 不预取 listThreadsForUser 再 inArray(threadIds)（避免大量 threadIds 下应用层搬运与 SQL 参数膨胀）。
- *
- * 两条路径都带出 `thread.title`（UI 显示会话名）。无匹配 → []。
- */
-export async function listRecentArtifactsForUser(
-  userId: string,
-  canAll: boolean,
-  limit: number,
-): Promise<ArtifactListRow[]> {
-  const types = [...ARTIFACT_EVENT_TYPES];
-  if (canAll) {
-    const rows = await db
-      .select({
-        id: threadEvent.id,
-        threadId: threadEvent.threadId,
-        sequence: threadEvent.sequence,
-        type: threadEvent.type,
-        runId: threadEvent.runId,
-        payload: threadEvent.payload,
-        createdAt: threadEvent.createdAt,
-        threadTitle: thread.title,
-      })
-      .from(threadEvent)
-      .leftJoin(thread, eq(threadEvent.threadId, thread.id))
-      .where(inArray(threadEvent.type, types))
-      .orderBy(desc(threadEvent.createdAt))
-      .limit(limit);
-    return rows;
-  }
-  const rows = await db
-    .select({
-      id: threadEvent.id,
-      threadId: threadEvent.threadId,
-      sequence: threadEvent.sequence,
-      type: threadEvent.type,
-      runId: threadEvent.runId,
-      payload: threadEvent.payload,
-      createdAt: threadEvent.createdAt,
-      threadTitle: thread.title,
-    })
-    .from(threadEvent)
-    .innerJoin(thread, eq(threadEvent.threadId, thread.id))
-    .where(and(eq(thread.userId, userId), inArray(threadEvent.type, types)))
-    .orderBy(desc(threadEvent.createdAt))
-    .limit(limit);
-  return rows;
 }
 
 // ─── Policy（Stage E，只读展示） ─────────────────────────────

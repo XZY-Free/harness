@@ -1,4 +1,4 @@
-import { type ActionCode } from "@/lib/identity/action-codes";
+import type { ActionCode } from "@/lib/identity/action-codes";
 import { AuthenticationError, type Principal } from "@/lib/identity/resolver";
 import { hasStudioAction, resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { headers } from "next/headers";

@@ -1,6 +1,6 @@
 import { jsonError, jsonOk } from "@/lib/http";
-import { resolveEmbeddingProvider } from "@/lib/memory/embedding";
 import { requireStudioAction } from "@/lib/identity/studio-access";
+import { resolveEmbeddingProvider } from "@/lib/memory/embedding";
 import { reindexMemories } from "@/lib/memory/index";
 import type { NextRequest } from "next/server";
 

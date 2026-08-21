@@ -7,20 +7,17 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
+import { type AppendAdminAuditLogInput, appendAdminAuditLog } from "@/lib/db/queries";
+import { parseResourceScope } from "@/lib/identity/resource-scope";
 import {
-  appendAdminAuditLog,
-  type AppendAdminAuditLogInput,
-} from "@/lib/db/queries";
-import {
-  ROLE_TEMPLATES,
   type ActionCode,
+  ROLE_TEMPLATES,
   type ResourceScope,
   grantSignature,
   templateActions,
 } from "@/lib/identity/role-templates";
-import { parseResourceScope } from "@/lib/identity/resource-scope";
-import { principalBinding, userIdentity } from "@/lib/persistence/schema/identity";
 import { roleActionBinding } from "@/lib/persistence/schema/authorization";
+import { principalBinding, userIdentity } from "@/lib/persistence/schema/identity";
 import { and, asc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 
 /** Settings 用户 + 有效 grant 摘要。 */
@@ -203,7 +200,11 @@ export async function replaceUserGrantsWithAudit(
 
     // 3. 按所选模板授予（去重后；挂第一个 user 绑定，与 resolver 对齐）。
     if (grants.length > 0 && bindingIds.length > 0) {
-      const principalBindingId = bindingIds[0]!;
+      // 上方已校验 bindingIds.length > 0，这里 undefined 在逻辑上不可达（避免 non-null 断言）。
+      const principalBindingId = bindingIds[0];
+      if (principalBindingId === undefined) {
+        throw new Error("settings: bindingIds 非空但首元素缺失（逻辑错误）");
+      }
       const now = new Date();
       await tx.insert(roleActionBinding).values(
         grants.map((g) => ({

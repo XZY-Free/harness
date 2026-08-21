@@ -20,14 +20,10 @@
  */
 import { studioConfig } from "@/lib/config";
 import { DEFAULT_USER_ID } from "@/lib/constants";
-import { type ActionCode, type ResourceScopeType } from "@/lib/identity/action-codes";
-import { checkActionScope, requireActionScope } from "@/lib/identity/authorization";
-import {
-  authErrorResponse,
-  resolvePrincipal,
-  type Principal,
-} from "@/lib/identity/resolver";
 import { generateRequestId } from "@/lib/http";
+import type { ActionCode, ResourceScopeType } from "@/lib/identity/action-codes";
+import { checkActionScope, requireActionScope } from "@/lib/identity/authorization";
+import { type Principal, authErrorResponse, resolvePrincipal } from "@/lib/identity/resolver";
 
 /** 只解析当前主体，不校验动作。认证失败抛 AuthenticationError（路由 catch 转 401/500）。 */
 export async function resolveStudioPrincipal(headers: Headers): Promise<Principal> {

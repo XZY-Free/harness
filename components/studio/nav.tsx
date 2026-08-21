@@ -11,15 +11,17 @@ import { useEffect, useState } from "react";
 /**
  * 统一管理后台一级导航（S11-W01 重组）。
  *
- * 8 个一级菜单（按方案 §后台信息架构）：
+ * 7 个一级菜单（按方案 §后台信息架构）：
  * 1. 智能体（/studio/agents）— Agent / Revision / Route / 发布
  * 2. 能力与知识（/studio/capabilities）— Skill / Tool / Knowledge / Connection / 风险变化
- * 3. 会话与协作（/studio/threads）— Thread / Turn / Item / Job 排障
- * 4. Runtime 与环境（/studio/runtime）— RuntimeRevision / Environment / Desktop
- * 5. 观测与评测（/studio/observability）— Trace / Observation / Evaluation / 实验和告警
- * 6. 安全与审计（/studio/security）— Policy / Permission / Credential / Audit / Legal Hold
- * 7. 运营（/studio/operations）— 使用量 / 成本 / 容量 / 配额 / 失败与服务水平
- * 8. 平台设置（/studio/settings）— 组织 / 身份 / 模型供应方 / 保留策略 / 平台参数
+ * 3. Runtime 与环境（/studio/runtime）— RuntimeRevision / Environment / Desktop
+ * 4. 观测与评测（/studio/observability）— Trace / Observation / Evaluation / 实验和告警
+ * 5. 安全与审计（/studio/security）— Policy / Permission / Credential / Audit / Legal Hold
+ * 6. 运营（/studio/operations）— 使用量 / 成本 / 容量 / 配额 / 失败与服务水平
+ * 7. 平台设置（/studio/settings）— 组织 / 身份 / 模型供应方 / 保留策略 / 平台参数
+ *
+ * 原「会话与协作（/studio/threads）」菜单已随 legacy Studio threads 页移除（P2-closeout）。
+ * 员工侧会话 UI 由 /chat 提供（正式 Employee Thread API）。
  *
  * 菜单可见性由 server 端 `computeStudioNavVisibility` 计算，通过 `visibleItems` prop 传入。
  * 隐藏菜单不渲染，但服务端 Action Scope 校验仍然独立执行（菜单可见性不能代替授权）。
@@ -47,12 +49,6 @@ const ITEMS: NavItem[] = [
     labelKey: "studio.nav.capabilities",
     icon: <Icon.write size={16} />,
     navId: "capabilities",
-  },
-  {
-    href: "/studio/threads",
-    labelKey: "studio.nav.conversations",
-    icon: <Icon.list size={16} />,
-    navId: "conversations",
   },
   {
     href: "/studio/runtime",
@@ -87,13 +83,13 @@ const ITEMS: NavItem[] = [
 ];
 
 function isActive(pathname: string, href: string): boolean {
-  // /studio 首页 = 总览（不属于 8 大菜单，是默认着陆页）
+  // /studio 首页 = 总览（不属于 7 大菜单，是默认着陆页）
   if (href === "/studio") return pathname === "/studio";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 interface StudioNavProps {
-  /** 8 大菜单可见性（server 端计算，client 接收）。 */
+  /** 7 大菜单可见性（server 端计算，client 接收）。 */
   readonly visibleItems: StudioNavVisibility;
 }
 
@@ -109,7 +105,7 @@ export function StudioNav({ visibleItems }: StudioNavProps) {
   }, [pathname]);
 
   // 总览（/studio）始终可见（任何通过 studio.access 的管理员都能看），
-  // 其余 8 项按 visibleItems 过滤。
+  // 其余 7 项按 visibleItems 过滤。
   const visibleMainItems = ITEMS.filter((item) => visibleItems[item.navId]);
 
   return (
@@ -157,7 +153,7 @@ export function StudioNav({ visibleItems }: StudioNavProps) {
           </span>
           {t("studio.nav.overview")}
         </Link>
-        {/* 8 大菜单（按 visibleItems 过滤） */}
+        {/* 7 大菜单（按 visibleItems 过滤） */}
         {visibleMainItems.map((item) => {
           const active = isActive(pathname, item.href);
           return (

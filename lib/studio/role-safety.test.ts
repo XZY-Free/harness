@@ -64,7 +64,9 @@ describe("assertRoleUpdateSafe — invalid_roles", () => {
   });
 
   it("重复模板 key → invalid_roles", async () => {
-    await expect(assertRoleUpdateSafe(TENANT, "u1", "u2", ["admin", "admin"])).rejects.toMatchObject({
+    await expect(
+      assertRoleUpdateSafe(TENANT, "u1", "u2", ["admin", "admin"]),
+    ).rejects.toMatchObject({
       code: "invalid_roles",
     });
   });

@@ -7,7 +7,7 @@ import {
 } from "@/lib/db/queries";
 import { listSkills } from "@/lib/db/studio-queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { requireStudioAction, hasStudioAction } from "@/lib/identity/studio-access";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { buildSkillMd } from "@/lib/skill/frontmatter";
 import {
   SkillRepoError,

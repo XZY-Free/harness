@@ -1,13 +1,13 @@
 import { jsonError, jsonOk } from "@/lib/http";
-import { logger } from "@/lib/logger";
-import { requireStudioAction } from "@/lib/identity/studio-access";
-import { getUserIdentityForTenant } from "@/lib/identity/user-identity-queries";
 import { grantsForTemplates } from "@/lib/identity/role-templates";
 import {
   deriveTemplateKeys,
   listUsersWithActionBindings,
   replaceUserGrantsWithAudit,
 } from "@/lib/identity/settings-queries";
+import { requireStudioAction } from "@/lib/identity/studio-access";
+import { getUserIdentityForTenant } from "@/lib/identity/user-identity-queries";
+import { logger } from "@/lib/logger";
 import { recordAdminAudit, summarizeRoleChange } from "@/lib/studio/admin-audit";
 import { RoleSafetyError, assertRoleUpdateSafe } from "@/lib/studio/role-safety";
 import type { NextRequest } from "next/server";

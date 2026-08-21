@@ -81,7 +81,7 @@ describe("PreviewSurface (V10 Phase 1)", () => {
   });
 
   describe("重启 AppRuntime", () => {
-    it("点击重启按钮调用 POST /api/threads/{id}/runtime/restart", async () => {
+    it("点击重启按钮调用 POST /api/v1/threads/{thread_id}/runtime/restart", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ ok: true }),
@@ -92,7 +92,7 @@ describe("PreviewSurface (V10 Phase 1)", () => {
 
       await vi.waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith(
-          "/api/threads/t1/runtime/restart",
+          "/api/v1/threads/t1/runtime/restart",
           expect.objectContaining({ method: "POST" }),
         );
       });

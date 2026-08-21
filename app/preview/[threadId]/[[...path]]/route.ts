@@ -1,7 +1,11 @@
 import { apiPath } from "@/lib/api-fetch";
-import { requireThreadForUser } from "@/lib/db/queries";
-import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
-import { authErrorResponse, type Principal } from "@/lib/identity/resolver";
+import {
+  type Principal,
+  employeeAuthErrorResponse,
+  resolveEmployeePrincipal,
+} from "@/lib/conversations/route-helpers";
+import { getThreadById } from "@/lib/conversations/thread-queries";
+import { getRequestId } from "@/lib/http";
 import { resolveRuntimeTypeForThread, resolveRuntimes } from "@/lib/runtime/registry";
 
 /**
@@ -11,7 +15,8 @@ import { resolveRuntimeTypeForThread, resolveRuntimes } from "@/lib/runtime/regi
  * 反向代理：按 threadId 查 PreviewRuntime.status，ready 则转发到 `127.0.0.1:{port}`（host 模式
  * 静态 server / container 模式 docker port mapping），未 ready 返回 503。
  *
- * 鉴权：复用 requireThreadForUser（owner guard），非 owner → 404（与 app/api/preview 一致）。
+ * 鉴权：员工身份（Employee API 不走 action scope），经 Thread.ownerUserId 鉴权；
+ * 不存在 / 非 owner / 已删除 → 404（与 app/api/preview 一致）。
  *
  * 实现取舍：用 fetch 手动转发而非 http-proxy——Next.js route handler 无原生 req/res，http-proxy
  * 需 custom server；本轮 HTTP 转发优先，WebSocket（dev server HMR）留后续（plan D3，HMR 走 polling）。
@@ -21,35 +26,31 @@ export async function GET(
   { params }: { params: Promise<{ threadId: string; path?: string[] }> },
 ) {
   const { threadId, path } = await params;
+  const requestId = getRequestId(request);
 
-  let currentPrincipal: Principal;
+  let principal: Principal;
   try {
-    currentPrincipal = await resolveStudioPrincipal(request.headers);
-  } catch (error) {
-    const authErr = authErrorResponse(error);
-    if (authErr) return authErr;
-    throw error;
+    principal = await resolveEmployeePrincipal(request.headers);
+  } catch (err) {
+    const authResp = employeeAuthErrorResponse(err, requestId);
+    if (authResp) return authResp;
+    throw err;
   }
 
-  const thread = await requireThreadForUser(threadId, currentPrincipal.userIdentityId);
-  if (!thread) {
+  const thread = await getThreadById(principal.tenantId, threadId);
+  if (
+    !thread ||
+    thread.ownerUserId !== principal.userIdentityId ||
+    thread.lifecycleState === "deleted"
+  ) {
     return new Response(null, { status: 404 });
   }
 
-  // V8 阶段 8：preview 不再依赖 Skill 的 runtimeType，回退到 thread.runtimeType ?? "host"
-  const runtimeType = resolveRuntimeTypeForThread(thread, null);
+  // V8 阶段 8：preview 不依赖 Skill 的 runtimeType；正式 Thread 无 runtimeType 列，落全局默认。
+  // S1 previewUrl 自动恢复已移除（正式 Thread 无 previewUrl 列，该能力由 02-9 承接）。
+  const runtimeType = resolveRuntimeTypeForThread(null, null);
   const preview = resolveRuntimes(threadId, runtimeType).preview;
-  let status = preview.status(threadId);
-  // S1：dev server / 静态 preview server 仅存内存，重启后丢失。若 thread 已记录 previewUrl，
-  // 访问反向代理时自动恢复 preview runtime，避免用户每次重启后都要手动让 agent 重新提交。
-  if ((!status || status.state !== "ready" || status.port == null) && thread.previewUrl) {
-    try {
-      await preview.start(threadId);
-      status = preview.status(threadId);
-    } catch {
-      // 恢复失败仍走下方 503
-    }
-  }
+  const status = preview.status(threadId);
   if (!status || status.state !== "ready" || status.port == null) {
     return new Response("预览未就绪，请等待 agent 完成自检后重试", {
       status: 503,

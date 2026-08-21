@@ -2,17 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * V3.7 Stage C：buildDeliverySummary 聚合测试。
- * mock DB（getThreadById / listToolRunsByThread）+ ops（gitStatus / gitRemoteUrl），
+ * mock 正式链（listThreadEvents）+ DB（listToolRunsByThread）+ ops（gitStatus / gitRemoteUrl），
  * 断言聚合字段完整、空字段不报错、blindCommit 标记逻辑。
+ * 02-3：正式 Thread 无 previewUrl，previewUrl 恒为 null（Delivery 域 02-9 承接）。
  */
 
 const db = vi.hoisted(() => ({
-  getThreadById: vi.fn(),
   listToolRunsByThread: vi.fn(),
 }));
 vi.mock("@/lib/db/queries", () => ({
-  getThreadById: db.getThreadById,
   listToolRunsByThread: db.listToolRunsByThread,
+}));
+
+const threadQueries = vi.hoisted(() => ({
+  listThreadEvents: vi.fn(),
+}));
+vi.mock("@/lib/conversations/thread-queries", () => ({
+  listThreadEvents: threadQueries.listThreadEvents,
 }));
 
 const ops = vi.hoisted(() => ({
@@ -26,12 +32,13 @@ vi.mock("@/lib/git/ops", () => ({
 
 import { buildDeliverySummary } from "@/lib/delivery/summary";
 
+const TENANT = "acme";
 const TID = "sum-thread";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  db.getThreadById.mockResolvedValue({ id: TID, previewUrl: "/preview/tid/" });
   db.listToolRunsByThread.mockResolvedValue([]);
+  threadQueries.listThreadEvents.mockResolvedValue([]);
   ops.gitStatus.mockResolvedValue({
     isRepo: true,
     current: "main",
@@ -70,12 +77,12 @@ function toolRun(p: {
 
 describe("buildDeliverySummary 空状态", () => {
   it("无任何交付 ToolRun → commitSha/branch=null，pushed=false，blindCommit=false", async () => {
-    const s = await buildDeliverySummary(TID);
+    const s = await buildDeliverySummary(TENANT, TID);
     expect(s.commitSha).toBeNull();
     expect(s.pushed).toBe(false);
     expect(s.prUrl).toBeNull();
     expect(s.blindCommit).toBe(false);
-    expect(s.previewUrl).toBe("/preview/tid/");
+    expect(s.previewUrl).toBeNull();
     expect(s.filesChanged).toEqual([]);
     expect(s.testResults).toEqual({ passed: 0, failed: 0, summary: "" });
     expect(s.screenshots).toEqual([]);
@@ -128,7 +135,7 @@ describe("buildDeliverySummary 聚合", () => {
       behind: 0,
     });
 
-    const s = await buildDeliverySummary(TID);
+    const s = await buildDeliverySummary(TENANT, TID);
     expect(s.commitSha).toBe("abc123");
     expect(s.branch).toBe("main");
     expect(s.pushed).toBe(true);
@@ -159,17 +166,17 @@ describe("buildDeliverySummary 聚合", () => {
         output: { commitSha: "sha1" },
       }),
     ]);
-    const s = await buildDeliverySummary(TID);
+    const s = await buildDeliverySummary(TENANT, TID);
     expect(s.blindCommit).toBe(true);
   });
 
   it("prUrl 注入优先（opts.prUrl）", async () => {
-    const s = await buildDeliverySummary(TID, { prUrl: "https://injected/pr/9" });
+    const s = await buildDeliverySummary(TENANT, TID, { prUrl: "https://injected/pr/9" });
     expect(s.prUrl).toBe("https://injected/pr/9");
   });
 
   it("无测试 ToolRun → testResults 全 0，不报错", async () => {
-    const s = await buildDeliverySummary(TID);
+    const s = await buildDeliverySummary(TENANT, TID);
     expect(s.testResults).toEqual({ passed: 0, failed: 0, summary: "" });
   });
 });

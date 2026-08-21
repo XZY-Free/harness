@@ -1,5 +1,4 @@
 import {
-  appendThreadEvent,
   getMemoryRow,
   listEmbeddingRowsByMemory,
   listMemoryRows,
@@ -38,14 +37,6 @@ export type IndexMemoryResult = {
   errorCode?: string;
 };
 
-/** 从 memory 取 threadId（发射事件用）：provenance 首条 threadId，否则 thread scope 的 scopeRef。 */
-function threadIdOf(memory: MemoryEntry): string | null {
-  const prov = (memory.provenance as MemoryProvenanceEntry[]) ?? [];
-  return (
-    prov.find((p) => p.threadId)?.threadId ?? (memory.scope === "thread" ? memory.scopeRef : null)
-  );
-}
-
 /**
  * 为一条 memory 生成/更新 embedding。
  * - revoked/不存在 → skipped，不索引。
@@ -75,10 +66,8 @@ export async function indexMemory(
   const contentHash = hashMemoryText(normalized);
   const er = await embedMemoryTextWith(provider, normalized);
 
-  const threadId = threadIdOf(memory);
-
   if (er.status !== "ready" || er.vector.length === 0) {
-    // provider 调用失败 → 写 error 行（保留诊断，不含 secret）+ 发事件。不抛。
+    // provider 调用失败 → 写 error 行（保留诊断，不含 secret）。不抛。
     await upsertEmbeddingRow({
       memoryId,
       provider: provider.name,
@@ -88,15 +77,6 @@ export async function indexMemory(
       status: "error",
       errorMessage: er.error ?? "unknown embedding error",
     });
-    if (threadId) {
-      await appendThreadEvent(threadId, "memory.reindexed", {
-        memoryId,
-        provider: provider.name,
-        model: provider.model,
-        status: "error",
-        errorCode: er.error ?? "unknown",
-      });
-    }
     return {
       status: "error",
       provider: provider.name,
@@ -114,15 +94,6 @@ export async function indexMemory(
     status: "active",
     errorMessage: null,
   });
-  if (threadId) {
-    await appendThreadEvent(threadId, "memory.reindexed", {
-      memoryId,
-      provider: provider.name,
-      model: provider.model,
-      status: "ready",
-      dimension: er.dim,
-    });
-  }
   return {
     status: "ready",
     provider: provider.name,

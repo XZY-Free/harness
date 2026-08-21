@@ -9,7 +9,7 @@
  * 1. AI 调用 browserUploadFile 工具，传入 workspacePath（workspace 内相对路径）
  * 2. Server 的 browser-rpc-client.ts 在 buildRpcPayload 中：
  * a. 调用 issueUploadToken(threadId, workspacePath) 签发一次性凭证
- * b. 构造 downloadUrl（${origin}/api/threads/{threadId}/workspace/download?token=xxx）
+ * b. 构造 downloadUrl（${origin}/api/v1/threads/{threadId}/workspace/download?token=xxx）
  * c. 将 downloadUrl 放入 RPC payload（替代原来的 filePath）
  * 3. Desktop 收到 RPC 后：
  * a. 使用 downloadUrl 通过 HTTP GET 下载文件到临时目录

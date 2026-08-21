@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * V3.7 Stage A：checkpoint 编排测试。
- * mock DB queries（createCheckpointRow/getCheckpoint/markCheckpointRestored/appendThreadEvent/listCheckpointsByThread），
+ * mock DB queries（createCheckpointRow/getCheckpoint/markCheckpointRestored/listCheckpointsByThread），
  * 真实 git tag/reset（只 mock workspaceRoot 路径解析器）。
  */
 
@@ -19,14 +19,12 @@ const q = vi.hoisted(() => ({
   createCheckpointRow: vi.fn(),
   getCheckpoint: vi.fn(),
   markCheckpointRestored: vi.fn(),
-  appendThreadEvent: vi.fn(),
   listCheckpointsByThread: vi.fn(),
 }));
 vi.mock("@/lib/db/queries", () => ({
   createCheckpointRow: q.createCheckpointRow,
   getCheckpoint: q.getCheckpoint,
   markCheckpointRestored: q.markCheckpointRestored,
-  appendThreadEvent: q.appendThreadEvent,
   listCheckpointsByThread: q.listCheckpointsByThread,
 }));
 
@@ -45,7 +43,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   tmp.root = mkdtempSync(join(tmpdir(), "snow-git-cp-"));
   mkdirSync(ws(), { recursive: true });
-  q.appendThreadEvent.mockResolvedValue({});
   q.markCheckpointRestored.mockImplementation(async (id: string) => ({
     id,
     restoredAt: new Date(),
@@ -64,7 +61,7 @@ async function seedRepo(): Promise<void> {
 }
 
 describe("createCheckpoint", () => {
-  it("tag HEAD → 写 DB 行 → 追加 git.checkpoint_created 事件", async () => {
+  it("tag HEAD → 写 DB 行", async () => {
     await seedRepo();
     q.createCheckpointRow.mockImplementation(async (p: { tag: string; commitSha: string }) => ({
       id: "cp-1",
@@ -86,12 +83,6 @@ describe("createCheckpoint", () => {
     // DB 行写入
     expect(q.createCheckpointRow).toHaveBeenCalledWith(
       expect.objectContaining({ threadId: TID, reason: "before push", commitSha: cp.commitSha }),
-    );
-    // 事件
-    expect(q.appendThreadEvent).toHaveBeenCalledWith(
-      TID,
-      "git.checkpoint_created",
-      expect.objectContaining({ checkpointId: "cp-1", tag: cp.tag, reason: "before push" }),
     );
   });
 
@@ -115,7 +106,7 @@ describe("listCheckpoints", () => {
 });
 
 describe("restoreCheckpoint", () => {
-  it("git reset --hard <tag> → 回填 restoredAt → git.checkpoint_restored 事件", async () => {
+  it("git reset --hard <tag> → 回填 restoredAt", async () => {
     await seedRepo();
     // 建 checkpoint
     q.createCheckpointRow.mockImplementation(async (p: { tag: string; commitSha: string }) => ({
@@ -143,11 +134,6 @@ describe("restoreCheckpoint", () => {
     // 回到 first
     expect(gitCli(["log", "-1", "--format=%s"])).toBe("first");
     expect(q.markCheckpointRestored).toHaveBeenCalledWith(cp.id);
-    expect(q.appendThreadEvent).toHaveBeenCalledWith(
-      TID,
-      "git.checkpoint_restored",
-      expect.objectContaining({ checkpointId: cp.id, tag: cp.tag, restoredTo: cp.commitSha }),
-    );
   });
 
   it("checkpoint 不存在 → 抛错", async () => {
@@ -183,11 +169,6 @@ describe("restoreCheckpoint", () => {
     await expect(restoreCheckpoint(TID, cp.id)).rejects.toThrow(/未提交改动/);
     // 未执行 reset
     expect(q.markCheckpointRestored).not.toHaveBeenCalled();
-    expect(q.appendThreadEvent).not.toHaveBeenCalledWith(
-      TID,
-      "git.checkpoint_restored",
-      expect.anything(),
-    );
   });
 
   it("工作区干净 → restore 通过（已有用例补充断言：脏检查不误拒）", async () => {

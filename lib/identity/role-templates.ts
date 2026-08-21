@@ -15,11 +15,8 @@
  *   不覆盖 self 请求资源——scopeCovers 要求 type 相同）。
  * - MEMBER 仅基础动作，thread.read/thread.write 仅 self 态（member 只能操作自己的 thread）。
  */
-import { type ActionCode } from "@/lib/identity/action-codes";
-import {
-  type ResourceScope,
-  serializeResourceScope,
-} from "@/lib/identity/resource-scope";
+import type { ActionCode } from "@/lib/identity/action-codes";
+import { type ResourceScope, serializeResourceScope } from "@/lib/identity/resource-scope";
 
 export type RoleTemplateKey = "admin" | "member";
 

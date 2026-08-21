@@ -3,7 +3,7 @@
 /**
  * 运行日志面板（V10 Phase 1，AppRuntime 精简版）。
  *
- * 日志源：AppRuntime dev server 日志——从 /api/threads/{threadId}/runtime/logs 轮询，
+ * 日志源：AppRuntime dev server 日志——从 /api/v1/threads/{thread_id}/runtime/logs 轮询，
  * 展示运行时 stdout/stderr 尾部。旧 ThreadRun /api/threads/[id]/messages 事件流
  * 已随本地执行体系移除，本面板只消费 AppRuntime 日志。
  */
@@ -30,7 +30,7 @@ export function RunLogPanel({ threadId }: { threadId: string }) {
 
   const loadLogs = useCallback(async () => {
     try {
-      const res = await apiFetch(`/api/threads/${threadId}/runtime/logs`, { cache: "no-store" });
+      const res = await apiFetch(`/api/v1/threads/${threadId}/runtime/logs`, { cache: "no-store" });
       const json = (await res.json()) as RuntimeLogResponse;
       if (json.ok) {
         setRuntimeLines(json.lines ?? []);

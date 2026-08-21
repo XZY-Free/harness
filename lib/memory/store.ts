@@ -1,5 +1,4 @@
 import {
-  appendThreadEvent,
   createMemoryRow,
   findDuplicateMemory,
   getMemoryRow,
@@ -117,21 +116,7 @@ export async function createMemory(args: CreateMemoryArgs): Promise<CreateMemory
       expiresAt: args.expiresAt ?? null,
       createdByToolRunId: args.createdByToolRunId ?? null,
     });
-    // memory.created 事件：threadId 取 provenance 首条的 threadId（若有），否则 scopeRef（thread scope）。
-    const threadId =
-      provenance.find((p) => p.threadId)?.threadId ??
-      (args.scope === "thread" && scopeRef ? scopeRef : null);
-    if (threadId) {
-      await appendThreadEvent(threadId, "memory.created", {
-        memoryId: memory.id,
-        scope: args.scope,
-        kind: args.kind,
-        textHash,
-        confidence,
-        provenanceSummary: summarizeProvenance(provenance),
-        toolRunId: args.createdByToolRunId ?? null,
-      });
-    }
+    // 02-3：memory.created 事件（Memory 域事实）由 02-5 正式 Memory Authority 承接，本批移除 legacy 副作用。
     deduplicated = false;
   }
 
@@ -167,7 +152,7 @@ export async function listMemories(filter: ListMemoriesFilter): Promise<MemoryEn
   });
 }
 
-/** 撤销记忆（soft delete：status=revoked，保留审计行）+ memory.revoked 事件。 */
+/** 撤销记忆（soft delete：status=revoked，保留审计行）。02-3：memory.revoked 事件由 02-5 正式 Memory Authority 承接。 */
 export async function revokeMemory(
   id: string,
   opts: { reason?: string; revokedBy?: string } = {},
@@ -175,16 +160,6 @@ export async function revokeMemory(
   const existing = await getMemoryRow(id);
   if (!existing) return null;
   const updated = await updateMemoryRow(id, { status: "revoked" });
-  const threadId =
-    ((existing.provenance as MemoryProvenanceEntry[]) ?? []).find((p) => p.threadId)?.threadId ??
-    (existing.scope === "thread" ? existing.scopeRef : null);
-  if (threadId) {
-    await appendThreadEvent(threadId, "memory.revoked", {
-      memoryId: id,
-      reason: opts.reason ?? null,
-      revokedBy: opts.revokedBy ?? null,
-    });
-  }
   return updated ?? existing;
 }
 

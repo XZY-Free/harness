@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const queries = vi.hoisted(() => ({
-  appendThreadEvent: vi.fn(),
   createDeployment: vi.fn(),
   getDeployment: vi.fn(),
   getLatestDeployedByThread: vi.fn(),
@@ -28,7 +27,6 @@ const TEST_DIR = resolve(".test-deploy-artifact");
 
 beforeEach(() => {
   vi.clearAllMocks();
-  queries.appendThreadEvent.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {

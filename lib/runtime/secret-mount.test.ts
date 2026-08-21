@@ -14,7 +14,6 @@ const queries = vi.hoisted(() => ({
   listActiveSecretsByScope: vi.fn(),
   rotateSecretMount: vi.fn(),
   revokeSecretMount: vi.fn(),
-  appendThreadEvent: vi.fn(),
 }));
 
 vi.mock("@/lib/db/queries", () => queries);
@@ -41,7 +40,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.SECRET_MASTER_KEY = TEST_KEY;
   process.env.SECRET_MASTER_KEY_ID = "test-v1";
-  queries.appendThreadEvent.mockResolvedValue(undefined);
   queries.createSecretMount.mockImplementation(async (params) => ({
     id: "sm-1",
     name: params.name,
@@ -100,7 +98,7 @@ describe("createSecret", () => {
 });
 
 describe("rotateSecret", () => {
-  it("新密文覆盖 + rotatedAt 更新 + 事件", async () => {
+  it("新密文覆盖 + rotatedAt 更新", async () => {
     const oldEncrypted = encrypt("old-value");
     queries.getSecretMount.mockResolvedValue({
       id: "sm-1",
@@ -131,15 +129,6 @@ describe("rotateSecret", () => {
 
     expect(updated.rotatedAt).not.toBeNull();
     expect(queries.rotateSecretMount).toHaveBeenCalledWith("sm-1", expect.any(String), "test-v1");
-    expect(queries.appendThreadEvent).toHaveBeenCalledWith(
-      TID,
-      "secret.rotated",
-      expect.objectContaining({
-        secretMountId: "sm-1",
-        name: "API_KEY",
-        scope: "thread",
-      }),
-    );
   });
 
   it("已撤销的 secret 无法轮换", async () => {
@@ -161,7 +150,7 @@ describe("rotateSecret", () => {
 });
 
 describe("revokeSecret", () => {
-  it("status=revoked + 事件", async () => {
+  it("status=revoked", async () => {
     queries.getSecretMount.mockResolvedValue({
       id: "sm-1",
       name: "API_KEY",
@@ -190,14 +179,6 @@ describe("revokeSecret", () => {
     const updated = await revokeSecret(TID, "sm-1");
 
     expect(updated.status).toBe("revoked");
-    expect(queries.appendThreadEvent).toHaveBeenCalledWith(
-      TID,
-      "secret.revoked",
-      expect.objectContaining({
-        secretMountId: "sm-1",
-        name: "API_KEY",
-      }),
-    );
   });
 });
 

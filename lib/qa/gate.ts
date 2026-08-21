@@ -1,11 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { qaConfig } from "@/lib/config";
 import type { RuntimeType } from "@/lib/config";
-import {
-  appendThreadEvent,
-  countConsecutiveQaGateFailures,
-  updateThreadReviewState,
-} from "@/lib/db/queries";
+import { writeThreadEvents } from "@/lib/conversations/thread-queries";
 import type { QaGateResult, QaRunner } from "@/lib/desktop/qa-schema";
 import { logger } from "@/lib/logger";
 import { runAccessibilitySmokeUrl } from "@/lib/qa/a11y";
@@ -15,8 +11,7 @@ import { runBrowserCheckUrl } from "@/lib/qa/browser-check";
 import { runResponsiveCheckUrl } from "@/lib/qa/responsive";
 
 /**
- * Stage D：QA gate——reportThreadReady 在 probe 通过后、ready_for_review 前跑的
- * 确定性浏览器质量门（plan §8 / §1 决策）。
+ * Stage D：QA gate——确定性浏览器质量门（plan §8 / §1 决策）。
  *
  * 命门：
  * - **默认启用**（`qaConfig.enabled=true`，S1 修复 05-注释与 config 默认值对齐）。
@@ -25,10 +20,17 @@ import { runResponsiveCheckUrl } from "@/lib/qa/responsive";
  * → 返回明确错误阻断交付，绝不静默跳过。
  * - **不调 LLM**：gate 全走确定性规则（browser-check 的 console/pageerror/404/白屏 +
  * S1 修复 05-按 qaConfig.gateRules 可选追加 responsive/a11y），不依赖 `visualVerdict`。
- * - gate 失败与 `runVerifyBeforeDelivery` / `probePreviewUrl` 失败同语义：
- * `previewUrl=null`、`status=executing`、回灌 agent。
+ *
+ * 事件写入（正式链）：`qa.check_passed` / `qa.check_failed` 是员工会话时间线事实，
+ * 经唯一正式事件写入口 `writeThreadEvents(tenantId, threadId, ...)` 写正式 threadEventTable
+ * （actor=service）。本模块不再写 legacy threadEvent，也不做旧 Thread 状态升级：
+ * - `needs_human_review`（旧 thread.reviewState）与 `agent.status_changed` 是旧 Thread
+ *   `executing→failed` 状态机副作用；正式 Thread 无此状态机，runQaGate 当前亦无生产调用者
+ *   （其 Stage D 集成点 reportThreadReady 不存在）。"连续失败转人工复核"能力后续在正式
+ *   Review / Evaluation Authority 上承接，本批不保留 legacy 副作用。
  */
 export async function runQaGate(opts: {
+  tenantId: string;
   threadId: string;
   previewUrl: string;
   previewToken?: string;
@@ -38,7 +40,7 @@ export async function runQaGate(opts: {
   // ：Web Playwright runner（Desktop 端另有等价 QA 实现）
   const runner: QaRunner = "web-playwright";
 
-  // 命门 1：默认禁用 → 零回归（reportThreadReady 不受影响）
+  // 命门 1：默认禁用 → 零回归
   if (!qaConfig.enabled) {
     return { ok: true, skipped: true, kind: "gate", durationMs: 0, runner };
   }
@@ -53,18 +55,21 @@ export async function runQaGate(opts: {
         threadId: opts.threadId,
       });
       const checkId = `gate-${randomUUID().slice(0, 8)}`;
-      await appendThreadEvent(
-        opts.threadId,
-        "qa.check_failed",
-        buildQaFailedPayload({
-          checkId,
-          kind: "gate",
-          viewports: [],
-          durationMs: Date.now() - start,
-          failures: [{ type: "browser_unavailable", detail: error }],
-          runner,
-        }),
-      );
+      await writeThreadEvents(opts.tenantId, opts.threadId, [
+        {
+          eventType: "qa.check_failed",
+          actorType: "service",
+          actorId: runner,
+          payload: buildQaFailedPayload({
+            checkId,
+            kind: "gate",
+            viewports: [],
+            durationMs: Date.now() - start,
+            failures: [{ type: "browser_unavailable", detail: error }],
+            runner,
+          }),
+        },
+      ]);
       return {
         ok: false,
         skipped: false,
@@ -93,7 +98,6 @@ export async function runQaGate(opts: {
   });
 
   // 按 qaConfig.gateRules 追加 responsive / a11y 检查
-  // （原 gate 只跑 browser-check 子集，移动端溢出/表单缺 label 仍能交付）
   const gateRules = qaConfig.gateRules;
   const extraFailures: QaFailure[] = [];
   const allViewports = new Set(result.viewports);
@@ -140,18 +144,21 @@ export async function runQaGate(opts: {
   const totalDuration = Date.now() - start;
 
   if (allOk) {
-    await appendThreadEvent(
-      opts.threadId,
-      "qa.check_passed",
-      buildQaPassedPayload({
-        checkId,
-        kind: "gate",
-        viewports: viewportsArr,
-        durationMs: totalDuration,
-        artifactPath: result.artifactPath,
-        runner,
-      }),
-    );
+    await writeThreadEvents(opts.tenantId, opts.threadId, [
+      {
+        eventType: "qa.check_passed",
+        actorType: "service",
+        actorId: runner,
+        payload: buildQaPassedPayload({
+          checkId,
+          kind: "gate",
+          viewports: viewportsArr,
+          durationMs: totalDuration,
+          artifactPath: result.artifactPath,
+          runner,
+        }),
+      },
+    ]);
     return {
       ok: true,
       skipped: false,
@@ -163,47 +170,22 @@ export async function runQaGate(opts: {
   }
 
   // gate 失败 → 写 qa.check_failed 事件 + 返回明确错误
-  await appendThreadEvent(
-    opts.threadId,
-    "qa.check_failed",
-    buildQaFailedPayload({
-      checkId,
-      kind: "gate",
-      viewports: viewportsArr,
-      durationMs: totalDuration,
-      failures: allFailures,
-      artifactPath: result.artifactPath,
-      runner,
-    }),
-  );
-
-  // gate 连续失败重试上限。
-  // 统计连续失败次数,超 maxConsecutiveFailures → 转人工审核,停止 agent 自动重试。
-  // 防 agent 改一点 → gate 再失败 → 再改的无限循环烧 token。
-  try {
-    const consecutiveFailures = await countConsecutiveQaGateFailures(opts.threadId);
-    if (consecutiveFailures >= qaConfig.maxConsecutiveFailures) {
-      await updateThreadReviewState(opts.threadId, "needs_human_review");
-      logger.warn("[qa] gate 连续失败超上限,转人工审核", {
-        threadId: opts.threadId,
-        consecutiveFailures,
-        maxConsecutiveFailures: qaConfig.maxConsecutiveFailures,
-      });
-      // 事件标记转人工,供前端展示与 agent 提示
-      await appendThreadEvent(opts.threadId, "agent.status_changed", {
-        from: "executing",
-        to: "failed",
-        reason: "qa_gate_consecutive_failures",
-        consecutiveFailures,
-      });
-    }
-  } catch (error) {
-    // 重试上限判定失败不阻断 gate 失败本身(fail-open,审计逻辑非关键路径)
-    logger.warn("[qa] gate 连续失败统计失败（fail-open）", {
-      threadId: opts.threadId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  await writeThreadEvents(opts.tenantId, opts.threadId, [
+    {
+      eventType: "qa.check_failed",
+      actorType: "service",
+      actorId: runner,
+      payload: buildQaFailedPayload({
+        checkId,
+        kind: "gate",
+        viewports: viewportsArr,
+        durationMs: totalDuration,
+        failures: allFailures,
+        artifactPath: result.artifactPath,
+        runner,
+      }),
+    },
+  ]);
 
   const error = `QA gate 未过：${allFailures
     .map((f) => `${f.type}${f.viewport ? `@${f.viewport}` : ""}`)

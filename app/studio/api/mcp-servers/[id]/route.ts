@@ -1,8 +1,8 @@
 import { deleteMcpServerConfig, getMcpServerConfig, updateMcpServerConfig } from "@/lib/db/queries";
 import { assertSafeExternalUrl } from "@/lib/external/url-safety";
 import { jsonError, jsonOk } from "@/lib/http";
-import { assertMcpCommand } from "@/lib/mcp/client";
 import { requireStudioAction } from "@/lib/identity/studio-access";
+import { assertMcpCommand } from "@/lib/mcp/client";
 import { redactEnv, removeServer } from "@/lib/mcp/registry";
 import type { NextRequest } from "next/server";
 

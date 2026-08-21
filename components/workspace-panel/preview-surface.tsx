@@ -9,7 +9,7 @@
  * 工具栏（规范 04-web-preview-and-cleanup.md §1.1）：
  * - 后退 / 前进：同源 /preview 路由可用 iframe.contentWindow.history.back/forward
  * - 刷新：重新挂载 iframe（递增 localReloadKey）
- * - 重启 AppRuntime：POST /api/threads/{id}/runtime/restart
+ * - 重启 AppRuntime：POST /api/v1/threads/{thread_id}/runtime/restart
  * - 项目 URL（只读）
  * - 设备尺寸：响应式 / 桌面(1280) / 平板(768) / 手机(375)
  * - 新窗口打开
@@ -80,7 +80,7 @@ export function PreviewSurface({
     setState("restarting");
     setErrorMsg(null);
     try {
-      const resp = await apiFetch(`/api/threads/${threadId}/runtime/restart`, {
+      const resp = await apiFetch(`/api/v1/threads/${threadId}/runtime/restart`, {
         method: "POST",
         headers: { "content-type": "application/json" },
       });

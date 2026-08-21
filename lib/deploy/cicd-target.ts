@@ -254,18 +254,14 @@ export async function triggerRollback(params: {
  * 由 idle sweep 定时调用（防 deployment 永远停在 deploying）。
  */
 export async function sweepDeployingStatuses(): Promise<void> {
-  const { getThreadById, listDeployingDeployments, updateDeployment } = await import(
-    "@/lib/db/queries"
-  );
-  const { decryptCicdToken } = await import("@/lib/runtime/secret-crypto");
+  const { listDeployingDeployments, updateDeployment } = await import("@/lib/db/queries");
   const deploying = await listDeployingDeployments();
   for (const d of deploying) {
     if (!d.cicdJobId) continue;
     try {
-      // : 获取并解密 per-thread token 用于 queryStatus 鉴权
-      const thread = d.threadId ? await getThreadById(d.threadId) : null;
-      const threadToken = decryptCicdToken(thread?.cicdApiToken) ?? undefined;
-      const status = await queryStatus(d.cicdJobId, threadToken);
+      // 02-3：legacy thread 无 cicdApiToken（正式 Thread 无此列）；per-thread token 由 02-9 正式化。
+      // 此处用全局 deployConfig.cicdApiToken 兜底（queryStatus 内部回退）。
+      const status = await queryStatus(d.cicdJobId);
       if (status.status === "succeeded") {
         await updateDeployment(d.id, { status: "deployed", deployedAt: new Date() });
       } else if (status.status === "failed") {

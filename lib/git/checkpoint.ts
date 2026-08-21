@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  appendThreadEvent,
   createCheckpointRow,
   getCheckpoint,
   listCheckpointsByThread,
@@ -62,12 +61,7 @@ export async function createCheckpoint(
     createdByToolRunId: params.toolRunId ?? null,
     filesChanged,
   });
-  await appendThreadEvent(threadId, "git.checkpoint_created", {
-    checkpointId: row.id,
-    tag,
-    commitSha,
-    reason: params.reason,
-  });
+  // 02-3：git.checkpoint_created 事件（Filesystem 域事实）由 02-9 正式 GitCheckpoint Authority 承接。
   return row;
 }
 
@@ -104,10 +98,6 @@ export async function restoreCheckpoint(
 
   await gitResetHard(threadId, cp.tag);
   const updated = await markCheckpointRestored(checkpointId);
-  await appendThreadEvent(threadId, "git.checkpoint_restored", {
-    checkpointId: cp.id,
-    tag: cp.tag,
-    restoredTo: cp.commitSha,
-  });
+  // 02-3：git.checkpoint_restored 事件由 02-9 正式 GitCheckpoint Authority 承接。
   return updated ?? cp;
 }
