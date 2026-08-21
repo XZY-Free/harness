@@ -5,7 +5,7 @@ import {
   updateSyncMapping,
 } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { requirePermission } from "@/lib/rbac";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
 import type { NextRequest } from "next/server";
 
@@ -17,9 +17,9 @@ import type { NextRequest } from "next/server";
  * 仅 admin（skill.write.all）可操作。本地自建 skill 调此接口 → 403。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "skill.write.all");
+  const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
   const { id } = await params;
 
   const sk = await getSkillById(id);

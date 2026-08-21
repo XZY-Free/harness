@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * V3.1 Stage E：审批决议 API 守卫与状态机。覆盖 200 / 400 / 401 / 403 / 404 / 409 / admin。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studioAccess = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   getThreadById: vi.fn(),
   requireThreadForUser: vi.fn(),
@@ -14,9 +17,9 @@ const queries = vi.hoisted(() => ({
   updateThreadStatus: vi.fn(),
 }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studioAccess.requireStudioAction,
+  hasStudioAction: studioAccess.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getThreadById: queries.getThreadById,
@@ -30,7 +33,15 @@ vi.mock("@/lib/db/queries", () => ({
 import { POST } from "@/app/studio/api/threads/[id]/approvals/[approvalId]/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+};
 
 function req(url: string, body: unknown) {
   return new NextRequest(url, {
@@ -58,8 +69,8 @@ const PENDING_APPROVAL = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  rbac.hasPermission.mockResolvedValue(false);
+  studioAccess.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studioAccess.hasStudioAction.mockResolvedValue(false);
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
   queries.getThreadById.mockResolvedValue(null);
   queries.getApprovalRequest.mockResolvedValue(PENDING_APPROVAL);
@@ -227,7 +238,7 @@ describe("POST .../approvals/[approvalId] (Stage E)", () => {
   });
 
   it("无 studio.access → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studioAccess.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -242,7 +253,7 @@ describe("POST .../approvals/[approvalId] (Stage E)", () => {
   });
 
   it("admin(thread.read.all) → 可决议他人 thread 的审批", async () => {
-    rbac.hasPermission.mockResolvedValue(true);
+    studioAccess.hasStudioAction.mockResolvedValue(true);
     queries.getThreadById.mockResolvedValue({ id: "tOther", userId: "u2" });
     queries.getApprovalRequest.mockResolvedValue({ ...PENDING_APPROVAL, threadId: "tOther" });
     queries.resolveApprovalRequest.mockResolvedValue({

@@ -1,5 +1,5 @@
-import { getCurrentUserFromRequest } from "@/lib/auth";
 import { db } from "@/lib/db/client";
+import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import {
   getThreadByIdForUser,
   listThreadEventsSince,
@@ -45,8 +45,8 @@ const POLL_INTERVAL_MS = 3000; // 跨实例 DB 轮询周期
 export async function GET(request: Request) {
   let userId: string;
   try {
-    const user = await getCurrentUserFromRequest(request);
-    userId = user.id;
+    const principal = await resolveStudioPrincipal(request.headers);
+    userId = principal.userIdentityId;
   } catch {
     return new Response(JSON.stringify({ error: "未授权" }), {
       status: 401,

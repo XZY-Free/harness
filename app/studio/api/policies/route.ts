@@ -2,8 +2,8 @@ import { insertPolicyConfigHistory, replacePolicyConfigRows } from "@/lib/db/que
 import { getPolicyConfigRows } from "@/lib/db/studio-queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { logger } from "@/lib/logger";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import { refreshPolicyConfigFromDB } from "@/lib/policy/config";
-import { requirePermission } from "@/lib/rbac";
 import { recordAdminAudit, summarizePolicyChange } from "@/lib/studio/admin-audit";
 import {
   type NormalizedPolicyRow,
@@ -17,7 +17,7 @@ import type { NextRequest } from "next/server";
  * 返回行数组（key + value 原始 JSON + updatedAt），前端只读展示。RegExp 已是 source string。
  */
 export async function GET(req: NextRequest) {
-  const r = await requirePermission(req, "policy.read");
+  const r = await requireStudioAction(req, "policy.read");
   if (!r.ok) return r.response;
   const rows = await getPolicyConfigRows();
   return jsonOk({ rows });
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
 /**
  * PUT /studio/api/policies → 整配置覆盖 policy（受 policy.write 守卫）。
  *
- * 流程：requirePermission(policy.write) → 解析 body → 读 before rows → validatePolicyRows
+ * 流程：requireStudioAction(policy.write) → 解析 body → 读 before rows → validatePolicyRows
  * （白名单/shape/regex/timeout 服务端校验）→ replacePolicyConfigRows 事务覆盖 →
  * refreshPolicyConfigFromDB 立即刷新 → succeeded 审计。
  *
@@ -36,9 +36,9 @@ export async function GET(req: NextRequest) {
  * （Known gap：policy 可能已 refresh，§4.3 / §12）。
  */
 export async function PUT(req: NextRequest) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
 
   let body: { rows?: unknown };
   try {

@@ -1,5 +1,5 @@
-import { getCurrentUserFromRequest } from "@/lib/auth";
 import { getMessagesByThreadId, getThreadByIdForUser } from "@/lib/db/queries";
+import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
 import { NextResponse } from "next/server";
 
@@ -82,8 +82,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   let userId: string;
   try {
-    const user = await getCurrentUserFromRequest(request);
-    userId = user.id;
+    const principal = await resolveStudioPrincipal(request.headers);
+    userId = principal.userIdentityId;
   } catch {
     return NextResponse.json({ error: "未授权" }, { status: 401 });
   }

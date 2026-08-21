@@ -1,7 +1,7 @@
 import { parseDeclaration } from "@/lib/custom-tools/registry";
 import { createCustomTool, listCustomTools } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { requirePermission } from "@/lib/rbac";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -13,7 +13,7 @@ import type { NextRequest } from "next/server";
 
 /** GET /studio/api/custom-tools → 列全部自定义工具。 */
 export async function GET(req: NextRequest) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const rows = await listCustomTools();
   return jsonOk({ rows });
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
 /** POST /studio/api/custom-tools → 新建自定义工具（admin-only，声明校验）。 */
 export async function POST(req: NextRequest) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
   let body: unknown;
   try {

@@ -1,7 +1,7 @@
 import { capabilityMarketConfig } from "@/lib/config";
 import { jsonError, jsonOk } from "@/lib/http";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
-import { requirePermission } from "@/lib/rbac";
 import { type SyncResult, runSync } from "@/lib/skill/sync/sync-service";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
 import type { NextRequest } from "next/server";
@@ -14,9 +14,9 @@ import type { NextRequest } from "next/server";
  * conflict 项单独分组,提示用户改映射名或取消同步。
  */
 export async function POST(req: NextRequest) {
-  const r = await requirePermission(req, "skill.write.all");
+  const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
 
   if (!capabilityMarketConfig.endpoint) {
     return jsonError(

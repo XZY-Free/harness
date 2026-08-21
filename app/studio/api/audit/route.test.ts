@@ -9,10 +9,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - 未知 action → 400 invalid_action。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+  resolveStudioPrincipal: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({ listAdminAuditLogs: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({ requirePermission: rbac.requirePermission }));
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+}));
 vi.mock("@/lib/db/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/db/queries")>();
   return { ...actual, listAdminAuditLogs: queries.listAdminAuditLogs };
@@ -21,7 +29,15 @@ vi.mock("@/lib/db/queries", async (importOriginal) => {
 import { GET } from "@/app/studio/api/audit/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+} as const;
 
 function req(url: string) {
   return new NextRequest(url);
@@ -29,7 +45,7 @@ function req(url: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
   queries.listAdminAuditLogs.mockResolvedValue([
     {
       id: "a1",
@@ -51,7 +67,7 @@ describe("GET /studio/api/audit (切片 C)", () => {
     const body = await res.json();
     expect(body.data.logs).toHaveLength(1);
     expect(body.data.logs[0].action).toBe("policies.updated");
-    expect(rbac.requirePermission).toHaveBeenCalledWith(expect.anything(), "audit.read");
+    expect(studio.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "audit.read");
     expect(queries.listAdminAuditLogs).toHaveBeenCalledTimes(1);
   });
 
@@ -86,7 +102,7 @@ describe("GET /studio/api/audit (切片 C)", () => {
   });
 
   it("无 audit.read → 403，不查 DB", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });

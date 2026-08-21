@@ -1,6 +1,10 @@
 import { archiveSkill, getSkillById, getSkillVersion, updateSkill } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import {
+  requireStudioAction,
+  resolveStudioPrincipal,
+  hasStudioAction,
+} from "@/lib/identity/studio-access";
 import { buildSkillMd, parseSkillMd } from "@/lib/skill/frontmatter";
 import { rejectSyncedSkillWrite } from "@/lib/skill/read-only-guard";
 import { readSkillFile, writeSkillFile } from "@/lib/skill/repo";
@@ -17,17 +21,17 @@ import type { NextRequest } from "next/server";
  */
 async function assertSkillWriteAccess(
   sk: { id: string; ownerUserId: string | null },
-  actorUserId: string,
+  principal: Awaited<ReturnType<typeof resolveStudioPrincipal>>,
 ): Promise<Response | null> {
-  const isSkillAdmin = await hasPermission(actorUserId, "skill.write.all");
+  const isSkillAdmin = await hasStudioAction(principal, "skill.write");
   if (isSkillAdmin) return null;
-  if (sk.ownerUserId === actorUserId) return null;
+  if (sk.ownerUserId === principal.userIdentityId) return null;
   return jsonError(403, "not_owner", "非 skill 所有者,无权修改");
 }
 
 /** GET /studio/api/skills/[id] → skill + 当前版本（受 skill.read 守卫）。 */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "skill.read");
+  const r = await requireStudioAction(req, "skill.read");
   if (!r.ok) return r.response;
   const { id } = await params;
   const sk = await getSkillById(id);
@@ -41,15 +45,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
  * name 不可改（目录名即身份锁定）。受 skill.write 守卫 + S1（11-P2-6）owner 隔离。
  */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "skill.write");
+  const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
   const { id } = await params;
   const sk = await getSkillById(id);
   if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
 
   // S1（11-P2-6）：owner 权限检查(admin 可改所有,非 admin 只能改自己的)
-  const accessDenied = await assertSkillWriteAccess(sk, actorUserId);
+  const accessDenied = await assertSkillWriteAccess(sk, r.principal);
   if (accessDenied) return accessDenied;
 
   // 02 文档 §7.2：同步 Skill 只读,拒绝编辑
@@ -110,15 +114,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
  * 受 skill.write 守卫 + S1（11-P2-6）owner 隔离。
  */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "skill.write");
+  const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
   const { id } = await params;
   const sk = await getSkillById(id);
   if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
 
   // S1（11-P2-6）：owner 权限检查(admin 可删所有,非 admin 只能删自己的)
-  const accessDenied = await assertSkillWriteAccess(sk, actorUserId);
+  const accessDenied = await assertSkillWriteAccess(sk, r.principal);
   if (accessDenied) return accessDenied;
 
   // 02 文档 §7.2：同步 Skill 不走普通归档,需走取消同步（/unsync）

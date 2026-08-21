@@ -2,7 +2,7 @@ import { StudioGatePage } from "@/components/studio/gate-page";
 import { SkillCreator } from "@/components/studio/skill-creator";
 import { SkillSyncButton } from "@/components/studio/skill-sync-button";
 import { listSkillsWithSync } from "@/lib/db/studio-queries";
-import { hasPermission } from "@/lib/rbac";
+import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 import Link from "next/link";
 
@@ -31,12 +31,12 @@ export default async function SkillsPage() {
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
   // S1（11-P2-6）：admin 看全部;member 只看自己的 + 公共
-  const isSkillAdmin = await hasPermission(gate.user.id, "skill.write.all");
+  const isSkillAdmin = await hasStudioAction(gate.principal, "skill.write");
   const skills = isSkillAdmin
     ? await listSkillsWithSync()
-    : await listSkillsWithSync({ ownerUserId: gate.user.id, includePublic: true });
-  const canWrite = await hasPermission(gate.user.id, "skill.write");
-  const canSync = await hasPermission(gate.user.id, "skill.write.all");
+    : await listSkillsWithSync({ ownerUserId: gate.principal.userIdentityId, includePublic: true });
+  const canWrite = await hasStudioAction(gate.principal, "skill.write");
+  const canSync = await hasStudioAction(gate.principal, "skill.write");
   return (
     <div>
       <div className="flex items-center justify-between">

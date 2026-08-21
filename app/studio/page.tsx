@@ -1,6 +1,5 @@
 import { MetricCard } from "@/components/studio/metric-card";
 import { listAgents } from "@/lib/agents/persistence/agent-queries";
-import { getCurrentUserFromRequest } from "@/lib/auth";
 import {
   getPolicyConfigRows,
   listAllThreads,
@@ -9,7 +8,7 @@ import {
   listThreadsForUser,
 } from "@/lib/db/studio-queries";
 import { resolvePrincipal } from "@/lib/identity/resolver";
-import { hasPermission } from "@/lib/rbac";
+import { hasStudioAction, resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { headers } from "next/headers";
 import Link from "next/link";
 
@@ -32,18 +31,18 @@ const STATUS_LABEL = STATUS_LABEL_DICT.zh;
 
 export default async function StudioOverviewPage() {
   const requestHeaders = await headers();
-  const [user, principal] = await Promise.all([
-    getCurrentUserFromRequest({ headers: requestHeaders }),
+  const [principal, adminPrincipal] = await Promise.all([
+    resolveStudioPrincipal(requestHeaders),
     resolvePrincipal(requestHeaders, "admin"),
   ]);
-  const canAllThreads = await hasPermission(user.id, "thread.read.all");
+  const canAllThreads = await hasStudioAction(principal, "thread.read");
 
   const [skills, threads, agents, policyRows, recentArtifacts] = await Promise.all([
     listSkills(),
-    canAllThreads ? listAllThreads() : listThreadsForUser(user.id),
-    listAgents(principal.tenantId),
+    canAllThreads ? listAllThreads() : listThreadsForUser(principal.userIdentityId),
+    listAgents(adminPrincipal.tenantId),
     getPolicyConfigRows(),
-    listRecentArtifactsForUser(user.id, canAllThreads, 5),
+    listRecentArtifactsForUser(principal.userIdentityId, canAllThreads, 5),
   ]);
 
   const activeSkills = skills.filter((s) => s.status === "active").length;

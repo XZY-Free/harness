@@ -1,6 +1,6 @@
 import { AgentsViewer } from "@/components/studio/agents-viewer";
 import { StudioGatePage } from "@/components/studio/gate-page";
-import { hasPermission } from "@/lib/rbac";
+import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
@@ -12,7 +12,7 @@ export default async function ResourcesPage() {
   const gate = await requireStudioPagePermission("studio.access");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
-  const canReadAgents = await hasPermission(gate.user.id, "agent.read");
+  const canReadAgents = await hasStudioAction(gate.principal, "agent.read");
 
   return (
     <div>

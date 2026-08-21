@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   getSkillById: vi.fn(),
   getSkillVersion: vi.fn(),
@@ -8,9 +11,9 @@ const queries = vi.hoisted(() => ({
 }));
 const audit = vi.hoisted(() => ({ recordAdminAudit: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getSkillById: queries.getSkillById,
@@ -28,7 +31,7 @@ vi.mock("@/lib/logger", () => ({
 import { POST } from "@/app/studio/api/skills/[id]/rollback/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = { userIdentityId: "u1", tenantId: "t1" };
 
 function postReq(body: unknown) {
   return new NextRequest("http://localhost/studio/api/skills/s1/rollback", {
@@ -40,8 +43,8 @@ function postReq(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  rbac.hasPermission.mockResolvedValue(true);
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studio.hasStudioAction.mockResolvedValue(true);
   queries.setCurrentVersion.mockResolvedValue(true);
   audit.recordAdminAudit.mockResolvedValue(true);
 });
@@ -76,7 +79,7 @@ describe("POST /studio/api/skills/[id]/rollback (切片 C)", () => {
   });
 
   it("无 skill.write → 403，不审计", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });

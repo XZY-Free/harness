@@ -8,13 +8,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - 无 thread.write.self → 403
  * - 未登录 → 401
  * GET（列表）不在本测试范围（未启用 RBAC，走原 owner scope）。
+ * 02-2b：授权契约迁到正式 Action Scope（requireStudioAction），mock 相应调整。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  resolveStudioPrincipal: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({ saveThread: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
 }));
 vi.mock("@/lib/db/queries", () => ({
   saveThread: queries.saveThread,
@@ -24,6 +29,8 @@ vi.mock("@/lib/db/queries", () => ({
 import { POST } from "@/app/api/threads/route";
 
 const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+/** requireStudioAction 返回的 principal：路由读取 userIdentityId/tenantId。 */
+const PRINCIPAL = { ...USER, userIdentityId: "u1", tenantId: "t1" };
 
 function req(body: unknown) {
   return new Request("http://localhost/api/threads", {
@@ -35,7 +42,8 @@ function req(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL);
   queries.saveThread.mockResolvedValue(undefined);
 });
 
@@ -52,7 +60,7 @@ describe("POST /api/threads (07-P1-4 RBAC)", () => {
   });
 
   it("无 thread.write.self → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -62,7 +70,7 @@ describe("POST /api/threads (07-P1-4 RBAC)", () => {
   });
 
   it("未登录 → 401", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 401 }),
     });

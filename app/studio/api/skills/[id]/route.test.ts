@@ -1,9 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+  resolveStudioPrincipal: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({ getSkillById: vi.fn(), getSkillVersion: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({ requirePermission: rbac.requirePermission }));
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+}));
 vi.mock("@/lib/db/queries", () => ({
   getSkillById: queries.getSkillById,
   getSkillVersion: queries.getSkillVersion,
@@ -12,12 +20,12 @@ vi.mock("@/lib/db/queries", () => ({
 import { GET } from "@/app/studio/api/skills/[id]/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = { userIdentityId: "u1", tenantId: "t1" };
 const req = () => new NextRequest("http://localhost/studio/api/skills/s1");
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
 });
 
 describe("GET /studio/api/skills/[id] (Stage B)", () => {
@@ -37,7 +45,7 @@ describe("GET /studio/api/skills/[id] (Stage B)", () => {
   });
 
   it("无 skill.read → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });

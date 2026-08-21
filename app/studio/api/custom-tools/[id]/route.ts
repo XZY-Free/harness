@@ -1,6 +1,6 @@
 import { deleteCustomTool, getCustomTool, updateCustomTool } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { requirePermission } from "@/lib/rbac";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -8,7 +8,7 @@ import type { NextRequest } from "next/server";
  * PUT → 更新（含启停）；DELETE → 删除。
  */
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
   const { id } = await ctx.params;
   let body: Record<string, unknown>;
@@ -34,7 +34,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 }
 
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
   const { id } = await ctx.params;
   const existing = await getCustomTool(id);

@@ -1,7 +1,7 @@
 import { getThreadById, requireThreadForUser } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { getMemory, revokeMemory, updateConfidence, updateMemoryText } from "@/lib/memory/store";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -17,12 +17,12 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; memoryId: string }> },
 ) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id, memoryId } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.read.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.read");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -41,7 +41,7 @@ export async function POST(
   // 与 list 路由可见范围严格对齐,防止用 thread A 归属操作 thread B / 他人 user 记忆。
   const allowed =
     (mem.scope === "thread" && mem.scopeRef === id) ||
-    (mem.scope === "user" && mem.scopeRef === r.user.id) ||
+    (mem.scope === "user" && mem.scopeRef === r.principal.userIdentityId) ||
     (mem.scope === "project" && thread.projectId != null && mem.scopeRef === thread.projectId);
   if (!allowed) {
     return jsonError(404, "memory_not_found", "记忆不存在或无权操作");
@@ -51,7 +51,7 @@ export async function POST(
     if (mem.status === "revoked") {
       return jsonError(409, "already_revoked", "记忆已撤销");
     }
-    const updated = await revokeMemory(memoryId, { reason: body.reason, revokedBy: r.user.id });
+    const updated = await revokeMemory(memoryId, { reason: body.reason, revokedBy: r.principal.userIdentityId });
     return jsonOk({ memory: updated });
   }
 

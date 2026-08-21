@@ -1,23 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Stage B1：Settings API 守卫与覆盖语义测试。
- * mock rbac(requirePermission) + queries + role-safety，断言：
+ * Stage B1：Settings API 守卫与覆盖语义测试（grant 化，关口02 02-2c）。
+ * mock 正式授权层(requireStudioAction) + settings-queries + role-templates + role-safety，
+ * 断言：
  * - 无 user.manage → 403。
- * - GET 成功返回 users/roles。
- * - PUT 成功覆盖角色。
- * - PUT 自锁/最后管理员 → 409 且不调用 replaceUserRoles。
+ * - GET 成功返回 users/roles（新 SettingsUserRolesView 形状）。
+ * - PUT 成功覆盖 grant（roleIds 模板 key）+ succeeded 审计含 before/after roleIds。
+ * - PUT 自锁/最后管理员 → 409 且不调用 replaceUserGrantsWithAudit。
  * - PUT 非法 roleIds / 非法 body → 400。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn() }));
-const queries = vi.hoisted(() => ({
-  getUserById: vi.fn(),
-  getUserRoleIds: vi.fn(),
-  listUsersWithRoles: vi.fn(),
-  listRolesWithPermissions: vi.fn(),
-  replaceUserRolesWithAudit: vi.fn(),
+const access = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+  resolveStudioPrincipal: vi.fn(),
 }));
+const settings = vi.hoisted(() => ({
+  listSettingsUserRolesView: vi.fn(),
+  listUsersWithActionBindings: vi.fn(),
+  replaceUserGrantsWithAudit: vi.fn(),
+  deriveTemplateKeys: vi.fn(),
+}));
+const identity = vi.hoisted(() => ({ getUserIdentityForTenant: vi.fn() }));
+const templates = vi.hoisted(() => ({ grantsForTemplates: vi.fn() }));
 const safety = vi.hoisted(() => {
   class FakeRoleSafetyError extends Error {
     code: string;
@@ -28,24 +34,36 @@ const safety = vi.hoisted(() => {
   }
   return { RoleSafetyError: FakeRoleSafetyError, assertRoleUpdateSafe: vi.fn() };
 });
-const audit = vi.hoisted(() => ({ recordAdminAudit: vi.fn() }));
+const audit = vi.hoisted(() => ({
+  recordAdminAudit: vi.fn(),
+  summarizeRoleChange: vi.fn(),
+}));
 
-vi.mock("@/lib/rbac", () => ({ requirePermission: rbac.requirePermission }));
-vi.mock("@/lib/db/queries", () => ({
-  getUserById: queries.getUserById,
-  getUserRoleIds: queries.getUserRoleIds,
-  listUsersWithRoles: queries.listUsersWithRoles,
-  listRolesWithPermissions: queries.listRolesWithPermissions,
-  replaceUserRolesWithAudit: queries.replaceUserRolesWithAudit,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: access.requireStudioAction,
+  hasStudioAction: access.hasStudioAction,
+  resolveStudioPrincipal: access.resolveStudioPrincipal,
+}));
+vi.mock("@/lib/identity/settings-queries", () => ({
+  listSettingsUserRolesView: settings.listSettingsUserRolesView,
+  listUsersWithActionBindings: settings.listUsersWithActionBindings,
+  replaceUserGrantsWithAudit: settings.replaceUserGrantsWithAudit,
+  deriveTemplateKeys: settings.deriveTemplateKeys,
+}));
+vi.mock("@/lib/identity/user-identity-queries", () => ({
+  getUserIdentityForTenant: identity.getUserIdentityForTenant,
+}));
+vi.mock("@/lib/identity/role-templates", () => ({
+  grantsForTemplates: templates.grantsForTemplates,
 }));
 vi.mock("@/lib/studio/role-safety", () => ({
   RoleSafetyError: safety.RoleSafetyError,
   assertRoleUpdateSafe: safety.assertRoleUpdateSafe,
 }));
-vi.mock("@/lib/studio/admin-audit", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/studio/admin-audit")>();
-  return { ...actual, recordAdminAudit: audit.recordAdminAudit };
-});
+vi.mock("@/lib/studio/admin-audit", () => ({
+  recordAdminAudit: audit.recordAdminAudit,
+  summarizeRoleChange: audit.summarizeRoleChange,
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -54,7 +72,18 @@ import { PUT } from "@/app/studio/api/settings/users/[id]/roles/route";
 import { GET } from "@/app/studio/api/settings/users/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+} as const;
+
+/** 目标用户（u2）：路由只读 email 与存在性。 */
+const TARGET_USER = { id: "u2", email: "u2@x" };
 
 type NextInit = NonNullable<ConstructorParameters<typeof NextRequest>[1]>;
 
@@ -64,38 +93,52 @@ function req(url: string, init?: NextInit) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  queries.getUserById.mockResolvedValue({ ...USER, id: "u2", email: "u2@x" });
-  queries.getUserRoleIds.mockResolvedValue(["r-member"]);
+  access.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  identity.getUserIdentityForTenant.mockResolvedValue(TARGET_USER);
+  settings.listUsersWithActionBindings.mockResolvedValue([
+    { id: "u2", email: "u2@x", displayName: null, externalSubject: "u2", grantSignatures: [] },
+  ]);
+  settings.deriveTemplateKeys.mockReturnValue(["r-member"]);
+  templates.grantsForTemplates.mockReturnValue([]);
   safety.assertRoleUpdateSafe.mockResolvedValue(undefined);
-  queries.replaceUserRolesWithAudit.mockResolvedValue(undefined);
+  settings.replaceUserGrantsWithAudit.mockResolvedValue(undefined);
   audit.recordAdminAudit.mockResolvedValue(undefined);
+  audit.summarizeRoleChange.mockImplementation((before, after) => ({
+    roleIdsBefore: before,
+    roleIdsAfter: after,
+  }));
 });
 
 describe("GET /studio/api/settings/users (切片 B3)", () => {
-  it("user.manage 通过 → 200 + users/roles", async () => {
-    queries.listUsersWithRoles.mockResolvedValue([
-      { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date(), roles: [] },
-    ]);
-    queries.listRolesWithPermissions.mockResolvedValue([
-      { id: "r-admin", key: "admin", name: "Admin", isSystem: true, permissions: ["user.manage"] },
-    ]);
+  it("user.manage 通过 → 200 + users/roles（新 view 形状）", async () => {
+    settings.listSettingsUserRolesView.mockResolvedValue({
+      users: [
+        {
+          id: "u1",
+          email: "a@x",
+          displayName: "A",
+          externalSubject: "u1",
+          templateKeys: ["admin"],
+        },
+      ],
+      roles: [{ key: "admin", name: "Admin", isSystem: true, actions: ["user.manage"] }],
+    });
     const res = await GET(req("http://localhost/studio/api/settings/users"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.users).toHaveLength(1);
     expect(body.data.roles[0].key).toBe("admin");
-    expect(rbac.requirePermission).toHaveBeenCalledWith(expect.anything(), "user.manage");
+    expect(access.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "user.manage");
   });
 
   it("无 user.manage → 403，不查 DB", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    access.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
     const res = await GET(req("http://localhost/studio/api/settings/users"));
     expect(res.status).toBe(403);
-    expect(queries.listUsersWithRoles).not.toHaveBeenCalled();
+    expect(settings.listSettingsUserRolesView).not.toHaveBeenCalled();
   });
 });
 
@@ -108,19 +151,19 @@ describe("PUT /studio/api/settings/users/[id]/roles (切片 B3)", () => {
     });
   }
 
-  it("通过 → 200 + 覆盖写入 + succeeded 审计含 before/after roleIds", async () => {
+  it("通过 → 200 + 覆盖 grant + succeeded 审计含 before/after roleIds", async () => {
     const res = await PUT(put("u2", { roleIds: ["r-admin"] }), {
       params: Promise.resolve({ id: "u2" }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toEqual({ userId: "u2", roleIds: ["r-admin"] });
-    expect(safety.assertRoleUpdateSafe).toHaveBeenCalledWith("u1", "u2", ["r-admin"]);
-    expect(queries.replaceUserRolesWithAudit).toHaveBeenCalledTimes(1);
-    const call = queries.replaceUserRolesWithAudit.mock.calls[0];
-    expect(call?.[0]).toBe("u2");
-    expect(call?.[1]).toEqual(["r-admin"]);
-    const auditArg = call?.[2] as { actorUserId: string; metadata: Record<string, unknown> };
+    expect(safety.assertRoleUpdateSafe).toHaveBeenCalledWith("t1", "u1", "u2", ["r-admin"]);
+    expect(settings.replaceUserGrantsWithAudit).toHaveBeenCalledTimes(1);
+    const call = settings.replaceUserGrantsWithAudit.mock.calls[0];
+    expect(call?.[0]).toBe("t1");
+    expect(call?.[1]).toBe("u2");
+    const auditArg = call?.[3] as { actorUserId: string; metadata: Record<string, unknown> };
     expect(auditArg.actorUserId).toBe("u1");
     expect(auditArg.metadata).toMatchObject({
       roleIdsBefore: ["r-member"],
@@ -130,7 +173,7 @@ describe("PUT /studio/api/settings/users/[id]/roles (切片 B3)", () => {
   });
 
   it("无 user.manage → 403，不校验不写入不审计", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    access.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -139,7 +182,7 @@ describe("PUT /studio/api/settings/users/[id]/roles (切片 B3)", () => {
     });
     expect(res.status).toBe(403);
     expect(safety.assertRoleUpdateSafe).not.toHaveBeenCalled();
-    expect(queries.replaceUserRolesWithAudit).not.toHaveBeenCalled();
+    expect(settings.replaceUserGrantsWithAudit).not.toHaveBeenCalled();
     expect(audit.recordAdminAudit).not.toHaveBeenCalled();
   });
 
@@ -168,9 +211,9 @@ describe("PUT /studio/api/settings/users/[id]/roles (切片 B3)", () => {
     });
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("invalid_body");
-    expect(queries.getUserById).not.toHaveBeenCalled();
+    expect(identity.getUserIdentityForTenant).not.toHaveBeenCalled();
     expect(safety.assertRoleUpdateSafe).not.toHaveBeenCalled();
-    expect(queries.replaceUserRolesWithAudit).not.toHaveBeenCalled();
+    expect(settings.replaceUserGrantsWithAudit).not.toHaveBeenCalled();
     expect(audit.recordAdminAudit).not.toHaveBeenCalled();
   });
 
@@ -183,14 +226,14 @@ describe("PUT /studio/api/settings/users/[id]/roles (切片 B3)", () => {
   });
 
   it("目标用户不存在 → 404 user_not_found，不校验不写入不审计", async () => {
-    queries.getUserById.mockResolvedValue(null);
+    identity.getUserIdentityForTenant.mockResolvedValue(null);
     const res = await PUT(put("missing-user", { roleIds: [] }), {
       params: Promise.resolve({ id: "missing-user" }),
     });
     expect(res.status).toBe(404);
     expect((await res.json()).error.code).toBe("user_not_found");
     expect(safety.assertRoleUpdateSafe).not.toHaveBeenCalled();
-    expect(queries.replaceUserRolesWithAudit).not.toHaveBeenCalled();
+    expect(settings.replaceUserGrantsWithAudit).not.toHaveBeenCalled();
     expect(audit.recordAdminAudit).not.toHaveBeenCalled();
   });
 
@@ -203,7 +246,7 @@ describe("PUT /studio/api/settings/users/[id]/roles (切片 B3)", () => {
     });
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("invalid_roles");
-    expect(queries.replaceUserRolesWithAudit).not.toHaveBeenCalled();
+    expect(settings.replaceUserGrantsWithAudit).not.toHaveBeenCalled();
     expect(audit.recordAdminAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "settings.user_roles.updated",
@@ -223,7 +266,7 @@ describe("PUT /studio/api/settings/users/[id]/roles (切片 B3)", () => {
     });
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("self_lockout");
-    expect(queries.replaceUserRolesWithAudit).not.toHaveBeenCalled();
+    expect(settings.replaceUserGrantsWithAudit).not.toHaveBeenCalled();
     expect(audit.recordAdminAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "failed",
@@ -241,7 +284,7 @@ describe("PUT /studio/api/settings/users/[id]/roles (切片 B3)", () => {
     });
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("last_manager");
-    expect(queries.replaceUserRolesWithAudit).not.toHaveBeenCalled();
+    expect(settings.replaceUserGrantsWithAudit).not.toHaveBeenCalled();
     expect(audit.recordAdminAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({ reasonCode: "last_manager" }),
@@ -250,7 +293,7 @@ describe("PUT /studio/api/settings/users/[id]/roles (切片 B3)", () => {
   });
 
   it("审计写入失败（事务回滚）→ 500 audit_failed", async () => {
-    queries.replaceUserRolesWithAudit.mockRejectedValue(new Error("audit write failed"));
+    settings.replaceUserGrantsWithAudit.mockRejectedValue(new Error("audit write failed"));
     const res = await PUT(put("u2", { roleIds: ["r-admin"] }), {
       params: Promise.resolve({ id: "u2" }),
     });

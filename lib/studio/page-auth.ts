@@ -1,28 +1,28 @@
-import { AuthError, getCurrentUserFromRequest } from "@/lib/auth";
-import type { User } from "@/lib/db/schema";
-import { type Permission, hasPermission } from "@/lib/rbac";
+import { type ActionCode } from "@/lib/identity/action-codes";
+import { AuthenticationError, type Principal } from "@/lib/identity/resolver";
+import { hasStudioAction, resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { headers } from "next/headers";
 
 export type StudioPagePermissionResult =
-  | { ok: true; user: User }
+  | { ok: true; principal: Principal }
   | { ok: false; status: 401 | 403; message: string };
 
 export async function requireStudioPagePermission(
-  perm: Permission,
+  perm: ActionCode,
 ): Promise<StudioPagePermissionResult> {
-  let user: User;
+  let principal: Principal;
   try {
-    user = await getCurrentUserFromRequest({ headers: await headers() });
+    principal = await resolveStudioPrincipal(await headers());
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthenticationError) {
       return { ok: false, status: 401, message: "未认证：缺少 SSO 身份" };
     }
     throw error;
   }
 
-  const allowed = await hasPermission(user.id, perm);
+  const allowed = await hasStudioAction(principal, perm);
   if (!allowed) {
     return { ok: false, status: 403, message: `无 ${perm} 权限` };
   }
-  return { ok: true, user };
+  return { ok: true, principal };
 }

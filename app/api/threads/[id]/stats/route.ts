@@ -1,7 +1,7 @@
-import { getCurrentUserFromRequest } from "@/lib/auth";
 import { getThreadByIdForUser } from "@/lib/db/queries";
 import { jsonError } from "@/lib/http";
 import { logger } from "@/lib/logger";
+import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { NextResponse } from "next/server";
 
 /**
@@ -11,9 +11,9 @@ import { NextResponse } from "next/server";
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getCurrentUserFromRequest(request);
+    const principal = await resolveStudioPrincipal(request.headers);
     const { id: threadId } = await params;
-    const thread = await getThreadByIdForUser(threadId, user.id);
+    const thread = await getThreadByIdForUser(threadId, principal.userIdentityId);
     if (!thread) {
       return NextResponse.json({ error: "会话不存在或无权访问" }, { status: 404 });
     }

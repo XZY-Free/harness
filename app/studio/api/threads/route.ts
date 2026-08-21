@@ -1,6 +1,6 @@
 import { listAllThreads, listThreadsForUser } from "@/lib/db/studio-queries";
 import { jsonOk, omitThreadSecrets } from "@/lib/http";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -9,10 +9,10 @@ import type { NextRequest } from "next/server";
  * - admin（thread.read.all）：列全部（listAllThreads）。
  */
 export async function GET(req: NextRequest) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
-  const canAll = await hasPermission(r.user.id, "thread.read.all");
-  const threads = canAll ? await listAllThreads() : await listThreadsForUser(r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.read");
+  const threads = canAll ? await listAllThreads() : await listThreadsForUser(r.principal.userIdentityId);
   // P1-5:剥离 cicdApiToken 密文,防泄露给 Studio 前端。
   const safeThreads = threads.map(omitThreadSecrets);
   return jsonOk({ threads: safeThreads, canViewAll: canAll });

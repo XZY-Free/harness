@@ -1,8 +1,8 @@
 import { apiPath } from "@/lib/api-fetch";
-import { authErrorResponse, getCurrentUserFromRequest } from "@/lib/auth";
 import { requireThreadForUser } from "@/lib/db/queries";
-import type { User } from "@/lib/db/schema";
 import { jsonError, jsonOk } from "@/lib/http";
+import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
+import { authErrorResponse, type Principal } from "@/lib/identity/resolver";
 import { resolveRuntimeTypeForThread, resolveRuntimes } from "@/lib/runtime/registry";
 
 /**
@@ -24,16 +24,16 @@ export async function POST(request: Request) {
     return jsonError(400, "missing_thread_id", "缺少 threadId");
   }
 
-  let currentUser: User;
+  let currentPrincipal: Principal;
   try {
-    currentUser = await getCurrentUserFromRequest(request);
+    currentPrincipal = await resolveStudioPrincipal(request.headers);
   } catch (error) {
     const authErr = authErrorResponse(error);
     if (authErr) return authErr;
     return jsonError(500, "internal_error", "服务器内部错误");
   }
 
-  const thread = await requireThreadForUser(threadId, currentUser.id);
+  const thread = await requireThreadForUser(threadId, currentPrincipal.userIdentityId);
   if (!thread) {
     return jsonError(404, "thread_not_found", "会话不存在");
   }

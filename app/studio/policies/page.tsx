@@ -3,7 +3,7 @@ import { PermissionRuleManager } from "@/components/studio/permission-rule-manag
 import { PolicyEditor } from "@/components/studio/policy-editor";
 import { PolicyViewer } from "@/components/studio/policy-viewer";
 import { getPolicyConfigRows } from "@/lib/db/studio-queries";
-import { hasPermission } from "@/lib/rbac";
+import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
@@ -20,7 +20,7 @@ export default async function PoliciesPage() {
   const gate = await requireStudioPagePermission("policy.read");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
-  const canWrite = await hasPermission(gate.user.id, "policy.write");
+  const canWrite = await hasStudioAction(gate.principal, "policy.write");
   const rows = await getPolicyConfigRows();
 
   return (

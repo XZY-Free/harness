@@ -5,16 +5,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * 权限路径覆盖 200 / 401 / 403 / 404，与既有 workspace route 测试风格一致。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studioAccess = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   getThreadById: vi.fn(),
   requireThreadForUser: vi.fn(),
   listContextSnapshotsForThread: vi.fn(),
 }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studioAccess.requireStudioAction,
+  hasStudioAction: studioAccess.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getThreadById: queries.getThreadById,
@@ -25,7 +28,15 @@ vi.mock("@/lib/db/queries", () => ({
 import { GET } from "@/app/studio/api/threads/[id]/context/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+};
 
 function req(url: string) {
   return new NextRequest(url);
@@ -33,9 +44,9 @@ function req(url: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studioAccess.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
   // 默认 member：无 thread.read.all
-  rbac.hasPermission.mockResolvedValue(false);
+  studioAccess.hasStudioAction.mockResolvedValue(false);
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
   queries.getThreadById.mockResolvedValue(null);
   queries.listContextSnapshotsForThread.mockResolvedValue([]);
@@ -73,8 +84,8 @@ describe("GET /studio/api/threads/[id]/context (Stage E)", () => {
     expect(queries.listContextSnapshotsForThread).not.toHaveBeenCalled();
   });
 
-  it("无 studio.access → 403（requirePermission 守卫）", async () => {
-    rbac.requirePermission.mockResolvedValue({
+  it("无 studio.access → 403（requireStudioAction 守卫）", async () => {
+    studioAccess.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -85,8 +96,8 @@ describe("GET /studio/api/threads/[id]/context (Stage E)", () => {
     expect(queries.requireThreadForUser).not.toHaveBeenCalled();
   });
 
-  it("未登录 → 401（requirePermission 认证失败）", async () => {
-    rbac.requirePermission.mockResolvedValue({
+  it("未登录 → 401（requireStudioAction 认证失败）", async () => {
+    studioAccess.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 401 }),
     });
@@ -97,7 +108,7 @@ describe("GET /studio/api/threads/[id]/context (Stage E)", () => {
   });
 
   it("admin(thread.read.all) → getThreadById 可访问任意 thread", async () => {
-    rbac.hasPermission.mockResolvedValue(true);
+    studioAccess.hasStudioAction.mockResolvedValue(true);
     queries.getThreadById.mockResolvedValue({ id: "tOther", userId: "u2" });
     queries.listContextSnapshotsForThread.mockResolvedValue([]);
     const res = await GET(req("http://localhost/studio/api/threads/tOther/context"), {
@@ -109,7 +120,7 @@ describe("GET /studio/api/threads/[id]/context (Stage E)", () => {
   });
 
   it("admin 但 thread 不存在 → 404", async () => {
-    rbac.hasPermission.mockResolvedValue(true);
+    studioAccess.hasStudioAction.mockResolvedValue(true);
     queries.getThreadById.mockResolvedValue(null);
     const res = await GET(req("http://localhost/studio/api/threads/ghost/context"), {
       params: Promise.resolve({ id: "ghost" }),

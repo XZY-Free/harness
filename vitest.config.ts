@@ -9,7 +9,6 @@ const alias = { "@": resolve(__dirname, ".") };
 const LEGACY_B1_DB_TESTS = [
   "lib/db/studio-queries.test.ts",
   "lib/db/retention.test.ts",
-  "lib/auth.test.ts",
   "lib/policy/config.test.ts",
 ];
 
@@ -29,7 +28,6 @@ export default defineConfig({
             "lib/db/**/*.test.ts",
             "lib/browser/**/*.test.ts",
             "lib/analytics/**/*.test.ts",
-            "lib/auth.test.ts",
             "lib/policy/config.test.ts",
             "lib/identity/**/*.test.ts",
             "lib/agents/agent-lifecycle.test.ts",
@@ -63,7 +61,6 @@ export default defineConfig({
             "lib/db/**",
             "lib/browser/**",
             "lib/analytics/**",
-            "lib/auth.test.ts",
             "lib/policy/config.test.ts",
             "lib/identity/**",
             "lib/agents/agent-lifecycle.test.ts",

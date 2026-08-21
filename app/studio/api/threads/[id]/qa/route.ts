@@ -1,7 +1,7 @@
 import { getThreadById, listQaEventsByThread, requireThreadForUser } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { computeQaStats, readQaArtifact } from "@/lib/qa/artifact";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -17,12 +17,12 @@ import type { NextRequest } from "next/server";
  * 截图经 API 代理访问（plan §9 / §1 决策），不直接暴露文件系统路径。
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.read.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.read");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   // 证据文件代理：?artifact={fileName}

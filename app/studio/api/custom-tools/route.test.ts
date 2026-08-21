@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * 200/401/403 + 非白名单 scriptId / 非法 inputSchema 拒绝。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+  resolveStudioPrincipal: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   listCustomTools: vi.fn(),
   createCustomTool: vi.fn(),
@@ -14,7 +18,11 @@ const queries = vi.hoisted(() => ({
   updateCustomTool: vi.fn(),
 }));
 
-vi.mock("@/lib/rbac", () => ({ requirePermission: rbac.requirePermission }));
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+}));
 vi.mock("@/lib/db/queries", () => ({
   listCustomTools: queries.listCustomTools,
   createCustomTool: queries.createCustomTool,
@@ -27,7 +35,15 @@ import { DELETE, PUT } from "@/app/studio/api/custom-tools/[id]/route";
 import { GET, POST } from "@/app/studio/api/custom-tools/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+} as const;
 const unauthResp = (status: number) => ({
   ok: false as const,
   response: new Response("{}", { status }),
@@ -35,7 +51,7 @@ const unauthResp = (status: number) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
 });
 
 describe("GET /studio/api/custom-tools", () => {
@@ -48,7 +64,7 @@ describe("GET /studio/api/custom-tools", () => {
   });
 
   it("未登录 → 401", async () => {
-    rbac.requirePermission.mockResolvedValue(unauthResp(401));
+    studio.requireStudioAction.mockResolvedValue(unauthResp(401));
     const res = await GET(new NextRequest("http://localhost/studio/api/custom-tools"));
     expect(res.status).toBe(401);
   });
@@ -104,7 +120,7 @@ describe("POST /studio/api/custom-tools (admin-only + 声明校验)", () => {
   });
 
   it("member → 403", async () => {
-    rbac.requirePermission.mockResolvedValue(unauthResp(403));
+    studio.requireStudioAction.mockResolvedValue(unauthResp(403));
     const req = new NextRequest("http://localhost/studio/api/custom-tools", {
       method: "POST",
       body: JSON.stringify({
@@ -142,7 +158,7 @@ describe("DELETE /studio/api/custom-tools/[id] (admin-only)", () => {
   });
 
   it("member → 403", async () => {
-    rbac.requirePermission.mockResolvedValue(unauthResp(403));
+    studio.requireStudioAction.mockResolvedValue(unauthResp(403));
     const req = new NextRequest("http://localhost/studio/api/custom-tools/c1", {
       method: "DELETE",
     });

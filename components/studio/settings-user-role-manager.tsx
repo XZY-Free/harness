@@ -1,43 +1,60 @@
 "use client";
 
-import type { RoleWithPermissions, UserWithRoles } from "@/lib/db/queries";
 import { useMemo, useState } from "react";
 
 /**
- * Phase 4-4 切片 B3：Settings 用户/角色管理 client UI。
+ * Settings 用户/角色管理 client UI（关口02 02-2c grant 化适配）。
  *
  * - 左侧用户列表（当前用户标记）。
- * - 右侧选中用户的角色 checkbox（来自系统角色集合）+ 角色权限只读展示。
- * - 保存调用 PUT /studio/api/settings/users/[id]/roles（覆盖语义）。
+ * - 右侧选中用户的角色模板 checkbox（来自系统角色模板集合）+ 各模板 action 只读展示。
+ * - 保存调用 PUT /studio/api/settings/users/[id]/roles（覆盖语义，roleIds = 模板 key）。
  * - 自锁/最后管理员由服务端守卫；UI 展示返回的 error.message。
  *
- * 不做用户创建/删除，不做角色创建/删除，不编辑 RolePermission。
+ * 数据源与持久化走 grant：用户携带的 templateKeys 由服务端从 roleActionBinding 推导，
+ * 保存时服务端把所选模板的 grant 并集物化为绑定。
+ *
+ * 不做用户创建/删除，不做角色模板创建/删除，不编辑权限。
  */
+
+type SettingsUser = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  externalSubject: string;
+  templateKeys: string[];
+};
+
+type RoleTemplateView = {
+  key: string;
+  name: string;
+  isSystem: boolean;
+  actions: string[];
+};
 
 type Props = {
   currentUserId: string;
-  users: UserWithRoles[];
-  roles: RoleWithPermissions[];
+  users: SettingsUser[];
+  roles: RoleTemplateView[];
 };
 
-/** 权限 key → 中文标签（技术 key 作 title 悬浮提示保留）。 */
+/** Action Code → 中文标签（技术 key 作 title 悬浮提示保留）。 */
 const PERMISSION_LABEL: Record<string, string> = {
   "studio.access": "后台访问",
   "skill.read": "技能读取",
   "skill.write": "技能写入",
-  "analytics.read.self": "自己数据分析",
-  "analytics.read.global": "全局数据分析",
-  "thread.read.all": "全部会话读取",
+  "thread.read": "会话读取",
+  "thread.write": "会话写入",
   "policy.read": "策略读取",
   "policy.write": "策略写入",
   "user.manage": "用户管理",
   "agent.read": "智能体读取",
   "workspace.read": "工作区读取",
   "workspace.write": "工作区写入",
+  "analytics.read": "数据分析",
   "audit.read": "审计读取",
 };
 
-/** 权限 key 列表 → 中文标签列表（未知 key 原样回退）。 */
+/** Action Code 列表 → 中文标签列表（未知 key 原样回退）。 */
 function permissionLabels(keys: string[]): string[] {
   return keys.map((k) => PERMISSION_LABEL[k] ?? k);
 }
@@ -45,19 +62,19 @@ function permissionLabels(keys: string[]): string[] {
 export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) {
   const [visibleUsers, setVisibleUsers] = useState(users);
   const [selectedId, setSelectedId] = useState<string>(users[0]?.id ?? "");
-  // 编辑态：userId → 选中的 roleId 集合
+  // 编辑态：userId → 选中的角色模板 key 集合
   const [draft, setDraft] = useState<Record<string, Set<string>>>(() => {
     const init: Record<string, Set<string>> = {};
-    for (const u of users) init[u.id] = new Set(u.roles.map((r) => r.id));
+    for (const u of users) init[u.id] = new Set(u.templateKeys);
     return init;
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
-  // 服务端权限索引：roleId → permissions
-  const permsByRole = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const r of roles) m.set(r.id, r.permissions);
+  // 模板 key → 模板（名称 + action 只读展示）
+  const roleByKey = useMemo(() => {
+    const m = new Map<string, RoleTemplateView>();
+    for (const r of roles) m.set(r.key, r);
     return m;
   }, [roles]);
 
@@ -68,13 +85,13 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
     setMessage(null);
   }
 
-  function toggleRole(roleId: string) {
+  function toggleRole(key: string) {
     if (!selected) return;
     setMessage(null);
     setDraft((prev) => {
       const next = new Set(prev[selected.id]);
-      if (next.has(roleId)) next.delete(roleId);
-      else next.add(roleId);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return { ...prev, [selected.id]: next };
     });
   }
@@ -96,19 +113,7 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
         setDraft((prev) => ({ ...prev, [selected.id]: new Set(savedRoleIds) }));
         setVisibleUsers((prev) =>
           prev.map((u) =>
-            u.id === selected.id
-              ? {
-                  ...u,
-                  roles: roles
-                    .filter((r) => savedRoleIds.includes(r.id))
-                    .map((r) => ({
-                      id: r.id,
-                      key: r.key,
-                      name: r.name,
-                      isSystem: r.isSystem,
-                    })),
-                }
-              : u,
+            u.id === selected.id ? { ...u, templateKeys: savedRoleIds } : u,
           ),
         );
         setMessage({ kind: "ok", text: "已保存" });
@@ -156,7 +161,7 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
                   }`}
                 >
                   <span className="font-medium">
-                    {u.name ?? u.email}
+                    {u.displayName ?? u.email}
                     {isSelf && (
                       <span className="ml-2 rounded-[var(--radius-sm)] bg-[var(--surface-2)] px-1.5 py-0.5 text-[11px] text-[var(--fg-subtle)]">
                         当前用户
@@ -165,7 +170,7 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
                   </span>
                   <span className="font-mono text-[11px] text-[var(--fg-subtle)]">{u.email}</span>
                   <span className="text-[11px] text-[var(--fg-subtle)]">
-                    {u.roles.map((r) => r.name).join(", ") || "无角色"}
+                    {u.templateKeys.map((k) => roleByKey.get(k)?.name ?? k).join(", ") || "无角色"}
                   </span>
                 </button>
               </li>
@@ -174,14 +179,14 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
         </ul>
       </div>
 
-      {/* 角色编辑 */}
+      {/* 角色模板编辑 */}
       <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
         {selected ? (
           <>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-[15px] font-medium text-[var(--fg)]">
-                  {selected.name ?? selected.email}
+                  {selected.displayName ?? selected.email}
                   {selected.id === currentUserId && (
                     <span className="ml-2 text-[12px] text-[var(--fg-subtle)]">当前用户</span>
                   )}
@@ -213,19 +218,19 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
             )}
 
             <div className="mt-4">
-              <h3 className="mb-2 text-[13px] font-medium text-[var(--fg)]">系统角色</h3>
+              <h3 className="mb-2 text-[13px] font-medium text-[var(--fg)]">角色模板</h3>
               <div className="flex flex-col gap-2">
                 {roles.map((r) => {
-                  const checked = draft[selected.id]?.has(r.id) ?? false;
+                  const checked = draft[selected.id]?.has(r.key) ?? false;
                   return (
                     <label
-                      key={r.id}
+                      key={r.key}
                       className="flex cursor-pointer items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-[13px] hover:bg-[var(--surface-2)]"
                     >
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => toggleRole(r.id)}
+                        onChange={() => toggleRole(r.key)}
                         className="mt-0.5"
                       />
                       <span className="flex-1">
@@ -236,9 +241,9 @@ export function SettingsUserRoleManager({ currentUserId, users, roles }: Props) 
                         </span>
                         <span
                           className="mt-1 block text-[11px] text-[var(--fg-subtle)]"
-                          title={permsByRole.get(r.id)?.join(", ") ?? ""}
+                          title={r.actions.join(", ")}
                         >
-                          {permissionLabels(permsByRole.get(r.id) ?? []).join("、") || "无权限"}
+                          {permissionLabels(r.actions).join("、") || "无权限"}
                         </span>
                       </span>
                     </label>

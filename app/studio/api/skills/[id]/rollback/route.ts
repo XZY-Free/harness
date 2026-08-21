@@ -1,7 +1,7 @@
 import { getSkillById, getSkillVersion, setCurrentVersion } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
-import { requirePermission } from "@/lib/rbac";
 import { rejectSyncedSkillWrite } from "@/lib/skill/read-only-guard";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
 import { assertSkillWriteAccess } from "@/lib/studio/skill-access";
@@ -17,9 +17,9 @@ import type { NextRequest } from "next/server";
  * 审计写失败 → 500 audit_failed（Known gap：version 可能已切换）。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "skill.write");
+  const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
   const { id } = await params;
 
   const body = (await req.json().catch(() => ({}))) as { versionId?: string };
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const sk = await getSkillById(id);
   if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
   // P1-5: owner 隔离——非 admin 仅能回滚自己 ownerUserId 的 skill
-  const denied = await assertSkillWriteAccess(sk, actorUserId);
+  const denied = await assertSkillWriteAccess(sk, r.principal);
   if (denied) return denied;
   // 02 文档 §7.2：同步 Skill 只读,拒绝回滚版本
   const synced = rejectSyncedSkillWrite(sk);

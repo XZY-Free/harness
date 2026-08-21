@@ -1,5 +1,5 @@
-import { getCurrentUserFromRequest } from "@/lib/auth";
 import { jsonError, jsonOk } from "@/lib/http";
+import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { logger } from "@/lib/logger";
 import { getSkillProvider } from "@/lib/skill/provider";
 import type { NextRequest } from "next/server";
@@ -21,7 +21,7 @@ import type { NextRequest } from "next/server";
  */
 export async function GET(request: NextRequest) {
   try {
-    await getCurrentUserFromRequest(request);
+    await resolveStudioPrincipal(request.headers);
   } catch {
     return jsonError(401, "unauthorized", "未授权");
   }

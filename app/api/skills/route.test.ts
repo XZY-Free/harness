@@ -11,10 +11,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * - Provider 抛错 → 路由 catch 返回空列表（不 500）。
  * - displayName 为空 → name 兜底。
  * - source=local / capability-market 都能透传。
+ *
+ * 02-2b：授权契约迁到正式 Principal 解析（resolveStudioPrincipal）。
  */
+
+const studio = vi.hoisted(() => ({
+  resolveStudioPrincipal: vi.fn(),
+}));
 
 const providerMocks = vi.hoisted(() => ({
   listAvailableSkills: vi.fn(),
+}));
+
+vi.mock("@/lib/identity/studio-access", () => ({
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
 }));
 
 vi.mock("@/lib/skill/provider", () => ({
@@ -27,17 +37,18 @@ vi.mock("@/lib/logger", () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-vi.mock("@/lib/auth", () => ({
-  getCurrentUserFromRequest: vi.fn().mockResolvedValue({
-    id: "u1",
-    externalId: "u1",
-    email: "a@b",
-    name: "U",
-  }),
-}));
-
 import { GET } from "@/app/api/skills/route";
 import type { SkillSummary } from "@/lib/skill/provider";
+
+/** resolveStudioPrincipal 返回的 Principal（路由只校验解析成功）。 */
+const PRINCIPAL = {
+  id: "u1",
+  externalId: "u1",
+  email: "a@b",
+  name: "U",
+  userIdentityId: "u1",
+  tenantId: "t1",
+};
 
 function makeSummary(overrides: Partial<SkillSummary> = {}): SkillSummary {
   return {
@@ -67,6 +78,7 @@ function req(): NextRequest {
 describe("GET /api/skills (02 文档本地 Provider)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL);
   });
 
   afterEach(() => {
@@ -74,8 +86,8 @@ describe("GET /api/skills (02 文档本地 Provider)", () => {
   });
 
   it("未登录 → 401", async () => {
-    const { getCurrentUserFromRequest } = await import("@/lib/auth");
-    (getCurrentUserFromRequest as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+    const { resolveStudioPrincipal } = await import("@/lib/identity/studio-access");
+    (resolveStudioPrincipal as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("no auth"),
     );
     const res = await GET(req());

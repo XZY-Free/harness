@@ -5,16 +5,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * 覆盖 GET（hasToken 不返回明文）/ PUT（设置/清除）/ 权限守卫 / 长度校验。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studioAccess = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   getThreadById: vi.fn(),
   requireThreadForUser: vi.fn(),
   updateThreadCicdToken: vi.fn(),
 }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studioAccess.requireStudioAction,
+  hasStudioAction: studioAccess.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getThreadById: queries.getThreadById,
@@ -25,7 +28,15 @@ vi.mock("@/lib/db/queries", () => ({
 import { GET, PUT } from "@/app/studio/api/threads/[id]/cicd-token/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+};
 
 function req(url: string): NextRequest {
   return new NextRequest(url);
@@ -41,8 +52,8 @@ function putReq(url: string, body: unknown): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  rbac.hasPermission.mockResolvedValue(false);
+  studioAccess.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studioAccess.hasStudioAction.mockResolvedValue(false);
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1", cicdApiToken: null });
   queries.getThreadById.mockResolvedValue(null);
   queries.updateThreadCicdToken.mockResolvedValue(undefined);
@@ -88,7 +99,7 @@ describe("GET /studio/api/threads/[id]/cicd-token", () => {
 describe("PUT /studio/api/threads/[id]/cicd-token", () => {
   beforeEach(() => {
     // P2-8: PUT 需 admin;happy path 默认 admin
-    rbac.hasPermission.mockResolvedValue(true);
+    studioAccess.hasStudioAction.mockResolvedValue(true);
     queries.getThreadById.mockResolvedValue({ id: "t1", userId: "u1", cicdApiToken: null });
   });
 
@@ -145,7 +156,7 @@ describe("PUT /studio/api/threads/[id]/cicd-token", () => {
   });
 
   it("P2-8: member owner 不可设置 → 403", async () => {
-    rbac.hasPermission.mockResolvedValue(false);
+    studioAccess.hasStudioAction.mockResolvedValue(false);
     const res = await PUT(
       putReq("http://localhost/studio/api/threads/t1/cicd-token", { cicdApiToken: "x" }),
       { params: Promise.resolve({ id: "t1" }) },

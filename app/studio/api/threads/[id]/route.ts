@@ -5,7 +5,7 @@ import {
   listToolRunsForThread,
 } from "@/lib/db/studio-queries";
 import { jsonError, jsonOk, omitThreadSecrets } from "@/lib/http";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -15,12 +15,12 @@ import type { NextRequest } from "next/server";
  * 返回 thread + events + toolRuns + artifacts（均只读）。
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.read.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.read");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   const [events, toolRuns, artifacts] = await Promise.all([
@@ -40,12 +40,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
  * - 当前仅支持 reviewState 字段(白名单,防越权改其他字段)。
  */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.write.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.write");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   let body: { reviewState?: string | null };

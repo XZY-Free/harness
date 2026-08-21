@@ -1,8 +1,8 @@
-import { authErrorResponse, getCurrentUserFromRequest } from "@/lib/auth";
 import { getThreadById, listPermissionRules, requireThreadForUser } from "@/lib/db/queries";
-import type { User } from "@/lib/db/schema";
 import { deliverToGit } from "@/lib/git/deliver";
 import { jsonError, jsonOk } from "@/lib/http";
+import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
+import { authErrorResponse, type Principal } from "@/lib/identity/resolver";
 import { evaluatePermission } from "@/lib/permission/engine";
 import { toPermissionRule } from "@/lib/permission/rules";
 
@@ -35,9 +35,9 @@ export async function POST(request: Request) {
     return jsonError(400, "missing_params", "缺少 threadId 或 remoteUrl");
   }
 
-  let currentUser: User;
+  let currentPrincipal: Principal;
   try {
-    currentUser = await getCurrentUserFromRequest(request);
+    currentPrincipal = await resolveStudioPrincipal(request.headers);
   } catch (error) {
     const authErr = authErrorResponse(error);
     if (authErr) return authErr;
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   }
 
   // 第一层：owner guard——owner 直接放行
-  const ownedThread = await requireThreadForUser(threadId, currentUser.id);
+  const ownedThread = await requireThreadForUser(threadId, currentPrincipal.userIdentityId);
   if (ownedThread) {
     const result = await deliverToGit(threadId, remoteUrl, { commitMessage, branch });
     return jsonOk(result);

@@ -2,8 +2,8 @@ import { deleteMcpServerConfig, getMcpServerConfig, updateMcpServerConfig } from
 import { assertSafeExternalUrl } from "@/lib/external/url-safety";
 import { jsonError, jsonOk } from "@/lib/http";
 import { assertMcpCommand } from "@/lib/mcp/client";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import { redactEnv, removeServer } from "@/lib/mcp/registry";
-import { requirePermission } from "@/lib/rbac";
 import type { NextRequest } from "next/server";
 
 /**
@@ -19,7 +19,7 @@ function redact(row: Awaited<ReturnType<typeof getMcpServerConfig>>) {
 }
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
   const { id } = await ctx.params;
   let body: Record<string, unknown>;
@@ -65,7 +65,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 }
 
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
   const { id } = await ctx.params;
   const existing = await getMcpServerConfig(id);

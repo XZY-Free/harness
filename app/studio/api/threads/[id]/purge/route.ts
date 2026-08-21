@@ -1,7 +1,7 @@
 import { deleteThreadRecursive, getThreadByIdIncludingDeleted } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { logger } from "@/lib/logger";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
 import type { NextRequest } from "next/server";
 
@@ -19,12 +19,12 @@ import type { NextRequest } from "next/server";
  */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const r = await requirePermission(req, "thread.write.self");
+    const r = await requireStudioAction(req, "thread.write", { type: "self" });
     if (!r.ok) return r.response;
-    const actorUserId = r.user.id;
+    const actorUserId = r.principal.userIdentityId;
 
     // 仅 admin(thread.write.all)可彻底删除——物理删除不可恢复,不向普通 member 开放
-    const canAll = await hasPermission(actorUserId, "thread.write.all");
+    const canAll = await hasStudioAction(r.principal, "thread.write");
     if (!canAll) return jsonError(403, "forbidden", "彻底删除需要管理员权限");
 
     const { id: threadId } = await params;

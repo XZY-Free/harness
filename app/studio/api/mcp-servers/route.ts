@@ -2,8 +2,8 @@ import { createMcpServerConfig, listMcpServerConfigs } from "@/lib/db/queries";
 import { assertSafeExternalUrl } from "@/lib/external/url-safety";
 import { jsonError, jsonOk } from "@/lib/http";
 import { assertMcpCommand } from "@/lib/mcp/client";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import { redactEnv } from "@/lib/mcp/registry";
-import { requirePermission } from "@/lib/rbac";
 import type { NextRequest } from "next/server";
 
 /**
@@ -21,7 +21,7 @@ function redact(row: Awaited<ReturnType<typeof listMcpServerConfigs>>[number]) {
 
 /** GET /studio/api/mcp-servers → 列全部 MCP server 配置（env 脱敏）。 */
 export async function GET(req: NextRequest) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const rows = await listMcpServerConfigs();
   return jsonOk({ rows: rows.map(redact) });
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 
 /** POST /studio/api/mcp-servers → 新建 MCP server 配置（admin-only）。 */
 export async function POST(req: NextRequest) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
   let body: {
     name?: unknown;

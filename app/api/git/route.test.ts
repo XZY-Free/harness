@@ -6,10 +6,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - 非 owner + thread 不存在 → 404
  * - 非 owner + thread 存在 + 无 allow rule → 403
  * - 非 owner + thread 存在 + 有显式 allow rule → 放行
+ *
+ * 02-2b：授权契约迁到正式 Principal 解析（resolveStudioPrincipal + authErrorResponse）。
  */
 
-const auth = vi.hoisted(() => ({
-  getCurrentUserFromRequest: vi.fn(),
+const studio = vi.hoisted(() => ({
+  resolveStudioPrincipal: vi.fn(),
+}));
+const resolver = vi.hoisted(() => ({
+  authErrorResponse: vi.fn(),
 }));
 const queries = vi.hoisted(() => ({
   requireThreadForUser: vi.fn(),
@@ -20,12 +25,11 @@ const deliver = vi.hoisted(() => ({
   deliverToGit: vi.fn(),
 }));
 
-vi.mock("@/lib/auth", () => ({
-  getCurrentUserFromRequest: auth.getCurrentUserFromRequest,
-  authErrorResponse: (error: unknown) =>
-    error instanceof Error && error.message.includes("SSO")
-      ? new Response(null, { status: 401 })
-      : null,
+vi.mock("@/lib/identity/studio-access", () => ({
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+}));
+vi.mock("@/lib/identity/resolver", () => ({
+  authErrorResponse: resolver.authErrorResponse,
 }));
 vi.mock("@/lib/db/queries", () => ({
   requireThreadForUser: queries.requireThreadForUser,
@@ -36,6 +40,16 @@ vi.mock("@/lib/git/deliver", () => ({ deliverToGit: deliver.deliverToGit }));
 
 import { POST } from "@/app/api/git/route";
 
+/** resolveStudioPrincipal 返回的 Principal：路由读取 userIdentityId 作 owner guard。 */
+const PRINCIPAL = {
+  id: "u1",
+  email: "a@x",
+  name: "A",
+  externalId: "u1",
+  createdAt: new Date(),
+  userIdentityId: "u1",
+  tenantId: "t1",
+};
 const OWNED = { id: "t1", userId: "u1", projectId: null };
 const OTHER_THREAD = { id: "t2", userId: "u-other", projectId: null };
 
@@ -49,7 +63,8 @@ function req(body: unknown): Request {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  auth.getCurrentUserFromRequest.mockResolvedValue({ id: "u1" });
+  studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL);
+  resolver.authErrorResponse.mockReturnValue(null);
   queries.listPermissionRules.mockResolvedValue([]);
 });
 
@@ -86,12 +101,13 @@ describe("POST /api/git owner guard (Phase 4-3)", () => {
   it("缺 remoteUrl → 400，不触发 auth / delivery", async () => {
     const res = await POST(req({ threadId: "t1" }));
     expect(res.status).toBe(400);
-    expect(auth.getCurrentUserFromRequest).not.toHaveBeenCalled();
+    expect(studio.resolveStudioPrincipal).not.toHaveBeenCalled();
     expect(deliver.deliverToGit).not.toHaveBeenCalled();
   });
 
   it("缺 SSO 身份 → 401，不查 thread / 不 deliver", async () => {
-    auth.getCurrentUserFromRequest.mockRejectedValue(new Error("缺少 SSO 用户邮箱"));
+    studio.resolveStudioPrincipal.mockRejectedValue(new Error("缺少 SSO 用户邮箱"));
+    resolver.authErrorResponse.mockReturnValue(new Response(null, { status: 401 }));
     const res = await POST(req({ threadId: "t1", remoteUrl: "https://example.com/repo.git" }));
     expect(res.status).toBe(401);
     expect(queries.requireThreadForUser).not.toHaveBeenCalled();

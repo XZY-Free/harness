@@ -7,7 +7,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * unsync 单独测。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+  resolveStudioPrincipal: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   getSkillById: vi.fn(),
   getSkillVersion: vi.fn(),
@@ -22,9 +26,10 @@ const queries = vi.hoisted(() => ({
   updateSyncMapping: vi.fn(),
 }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
 }));
 vi.mock("@/lib/db/queries", () => queries);
 vi.mock("@/lib/studio/admin-audit", () => ({ recordAdminAudit: vi.fn() }));
@@ -51,7 +56,7 @@ import { POST as UnsyncPost } from "@/app/studio/api/skills/[id]/unsync/route";
 import { POST as VersionsPost } from "@/app/studio/api/skills/[id]/versions/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = { userIdentityId: "u1", tenantId: "t1" };
 const syncedSkill = {
   id: "s1",
   name: "deploy-review",
@@ -82,8 +87,8 @@ function req(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  rbac.hasPermission.mockResolvedValue(true); // admin
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studio.hasStudioAction.mockResolvedValue(true); // admin
 });
 
 describe("同步 Skill 只读拦截（02 文档 §7.2）", () => {
@@ -168,7 +173,7 @@ describe("POST /studio/api/skills/[id]/unsync（02 文档 §7.2 取消同步）"
   });
 
   it("非 admin → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });

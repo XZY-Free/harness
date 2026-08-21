@@ -1,27 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
-const studio = vi.hoisted(() => ({ listSkillVersions: vi.fn() }));
-
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
 }));
-vi.mock("@/lib/db/studio-queries", () => ({ listSkillVersions: studio.listSkillVersions }));
+const studioQueries = vi.hoisted(() => ({ listSkillVersions: vi.fn() }));
+
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
+}));
+vi.mock("@/lib/db/studio-queries", () => ({ listSkillVersions: studioQueries.listSkillVersions }));
 
 import { GET } from "@/app/studio/api/skills/[id]/versions/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = { userIdentityId: "u1", tenantId: "t1" };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
 });
 
 describe("GET /studio/api/skills/[id]/versions (Stage B)", () => {
   it("通过 → 200 + 版本列表（按 version asc）", async () => {
-    studio.listSkillVersions.mockResolvedValue([
+    studioQueries.listSkillVersions.mockResolvedValue([
       { id: "v1", version: 1 },
       { id: "v2", version: 2 },
     ]);
@@ -31,11 +34,11 @@ describe("GET /studio/api/skills/[id]/versions (Stage B)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toHaveLength(2);
-    expect(studio.listSkillVersions).toHaveBeenCalledWith("s1");
+    expect(studioQueries.listSkillVersions).toHaveBeenCalledWith("s1");
   });
 
   it("无 skill.read → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -43,6 +46,6 @@ describe("GET /studio/api/skills/[id]/versions (Stage B)", () => {
       params: Promise.resolve({ id: "s1" }),
     });
     expect(res.status).toBe(403);
-    expect(studio.listSkillVersions).not.toHaveBeenCalled();
+    expect(studioQueries.listSkillVersions).not.toHaveBeenCalled();
   });
 });

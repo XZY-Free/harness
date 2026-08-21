@@ -1,7 +1,7 @@
 import { getThreadById, requireThreadForUser } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { listMemories } from "@/lib/memory/store";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -16,17 +16,17 @@ import type { NextRequest } from "next/server";
  * P0 修复：thread.projectId 非空时增加 project scope 记忆检索。
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.read.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.read");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   // P0：thread.projectId 非空时并行拉取 project scope 记忆
   const listTasks: Array<Promise<Awaited<ReturnType<typeof listMemories>>>> = [
-    listMemories({ scope: "user", scopeRef: r.user.id }),
+    listMemories({ scope: "user", scopeRef: r.principal.userIdentityId }),
     listMemories({ scope: "thread", scopeRef: id }),
   ];
   if (thread.projectId) {

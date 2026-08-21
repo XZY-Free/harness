@@ -6,7 +6,7 @@ import { SkillSyncMeta } from "@/components/studio/skill-sync-meta";
 import { SkillVersionTimeline } from "@/components/studio/skill-version-timeline";
 import { getSkillById } from "@/lib/db/queries";
 import { getSkillSyncInfo, listSkillVersions } from "@/lib/db/studio-queries";
-import { hasPermission } from "@/lib/rbac";
+import { hasStudioAction } from "@/lib/identity/studio-access";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 import { notFound } from "next/navigation";
 
@@ -29,7 +29,7 @@ export default async function SkillDetailPage({
   const sk = await getSkillById(id);
   if (!sk) notFound();
   const versions = await listSkillVersions(id);
-  const canWrite = await hasPermission(gate.user.id, "skill.write");
+  const canWrite = await hasStudioAction(gate.principal, "skill.write");
   const isSynced = sk.source === "capability-market";
   // 同步 Skill 只读：写按钮一律隐藏（服务端已硬拦截,前端隐藏仅为体验）
   const effectiveCanWrite = canWrite && !isSynced;

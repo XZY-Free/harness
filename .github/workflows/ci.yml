@@ -86,10 +86,16 @@ jobs:
         run: pnpm rebuild:desktop-native
 
       # §20.4：Web 正式执行链（Thread → Turn → Invocation → Binding → Event → 回复）。
+      # 契约：CI 门禁要求以 pnpm test:e2e 声明，避免裸 playwright 命令与脚本语义漂移。
       - name: Web Playwright E2E
         run: >-
-          xvfb-run -a pnpm exec playwright test
+          xvfb-run -a pnpm test:e2e
           e2e/smoke.spec.ts e2e/admin-conformance.spec.ts e2e/web-execution-chain.spec.ts
+
+      # §20.4b：Desktop 本地渲染进程冒烟（纯本地 HTTP，无 DB/外部服务）。
+      # 契约：CI 门禁要求显式声明 Desktop smoke 检查。
+      - name: Desktop smoke
+        run: pnpm vitest run desktop/main/local-renderer-server.test.ts
 
       # §20.5：真启动 Electron，验证 Desktop 走同一 Conversation API 与正式 Binding。
       - name: Desktop E2E

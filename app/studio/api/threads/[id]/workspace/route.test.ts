@@ -2,14 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Phase 4-4 切片 B2 Stage B：Workspaces list/write API 守卫与隔离。
- * mock rbac(requirePermission + hasPermission) + queries + workspace，断言：
+ * mock studio-access(requireStudioAction + hasStudioAction) + queries + workspace，断言：
  * - owner GET 列文件 → 200；POST 写 → 200。
  * - 非 owner（requireThreadForUser → null）→ 404，不泄露（先于 workspace 权限判定）。
  * - 无 workspace.read GET → 403；无 workspace.write POST → 403。
  * - safeJoin / symlink 越界 → 400。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studioAccess = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({ getThreadById: vi.fn(), requireThreadForUser: vi.fn() }));
 const ws = vi.hoisted(() => {
   class FakeWorkspacePathError extends Error {}
@@ -21,9 +24,9 @@ const ws = vi.hoisted(() => {
 });
 const audit = vi.hoisted(() => ({ recordAdminAudit: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studioAccess.requireStudioAction,
+  hasStudioAction: studioAccess.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getThreadById: queries.getThreadById,
@@ -45,7 +48,16 @@ vi.mock("@/lib/logger", () => ({
 import { GET, POST } from "@/app/studio/api/threads/[id]/workspace/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+/** requireStudioAction 返回的 Principal：路由读取 userIdentityId 作 owner guard。 */
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+};
 
 type NextInit = NonNullable<ConstructorParameters<typeof NextRequest>[1]>;
 
@@ -55,10 +67,10 @@ function req(url: string, init?: NextInit) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studioAccess.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
   // 默认 member：无 thread.read.all、无 workspace.write，但有 workspace.read
-  rbac.hasPermission.mockImplementation(
-    async (_uid: string, perm: string) => perm === "workspace.read",
+  studioAccess.hasStudioAction.mockImplementation(
+    async (_principal: unknown, perm: string) => perm === "workspace.read",
   );
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
   queries.getThreadById.mockResolvedValue(null);
@@ -88,7 +100,7 @@ describe("GET /studio/api/threads/[id]/workspace (切片 B2)", () => {
   });
 
   it("无 workspace.read → 403", async () => {
-    rbac.hasPermission.mockResolvedValue(false);
+    studioAccess.hasStudioAction.mockResolvedValue(false);
     const res = await GET(req("http://localhost/studio/api/threads/t1/workspace"), {
       params: Promise.resolve({ id: "t1" }),
     });
@@ -97,8 +109,8 @@ describe("GET /studio/api/threads/[id]/workspace (切片 B2)", () => {
   });
 
   it("admin(thread.read.all) → getThreadById 可访问任意 thread", async () => {
-    rbac.hasPermission.mockImplementation(
-      async (_uid: string, perm: string) => perm === "thread.read.all" || perm === "workspace.read",
+    studioAccess.hasStudioAction.mockImplementation(
+      async (_principal: unknown, perm: string) => perm === "thread.read" || perm === "workspace.read",
     );
     queries.getThreadById.mockResolvedValue({ id: "tOther", userId: "u2" });
     ws.listWorkspaceFiles.mockResolvedValue([]);
@@ -109,8 +121,8 @@ describe("GET /studio/api/threads/[id]/workspace (切片 B2)", () => {
     expect(queries.getThreadById).toHaveBeenCalledWith("tOther");
   });
 
-  it("无 studio.access → 403（requirePermission 守卫）", async () => {
-    rbac.requirePermission.mockResolvedValue({
+  it("无 studio.access → 403（requireStudioAction 守卫）", async () => {
+    studioAccess.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -143,7 +155,7 @@ describe("POST /studio/api/threads/[id]/workspace (切片 B2)", () => {
   }
 
   it("owner + workspace.write → 200 + { path } + succeeded 审计含 path/bytes", async () => {
-    rbac.hasPermission.mockImplementation(
+    studioAccess.hasStudioAction.mockImplementation(
       async (_uid: string, perm: string) => perm === "workspace.read" || perm === "workspace.write",
     );
     ws.writeWorkspaceFile.mockResolvedValue("src/app.js");
@@ -185,7 +197,7 @@ describe("POST /studio/api/threads/[id]/workspace (切片 B2)", () => {
   });
 
   it("path/content 缺失或类型错 → 400 invalid_body，不审计", async () => {
-    rbac.hasPermission.mockImplementation(
+    studioAccess.hasStudioAction.mockImplementation(
       async (_uid: string, perm: string) => perm === "workspace.read" || perm === "workspace.write",
     );
     const res = await POST(post({ path: "", content: "x" }), {
@@ -198,7 +210,7 @@ describe("POST /studio/api/threads/[id]/workspace (切片 B2)", () => {
   });
 
   it("越界 path → 400 invalid_path（writeWorkspaceFile throw）+ failed 审计", async () => {
-    rbac.hasPermission.mockImplementation(
+    studioAccess.hasStudioAction.mockImplementation(
       async (_uid: string, perm: string) => perm === "workspace.read" || perm === "workspace.write",
     );
     ws.writeWorkspaceFile.mockRejectedValue(new ws.WorkspacePathError("非法路径（越界工作区）"));
@@ -218,7 +230,7 @@ describe("POST /studio/api/threads/[id]/workspace (切片 B2)", () => {
   });
 
   it("普通 workspace 异常不应伪装成 invalid_path", async () => {
-    rbac.hasPermission.mockImplementation(
+    studioAccess.hasStudioAction.mockImplementation(
       async (_uid: string, perm: string) => perm === "workspace.read" || perm === "workspace.write",
     );
     ws.writeWorkspaceFile.mockRejectedValue(new Error("disk full"));

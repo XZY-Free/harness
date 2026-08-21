@@ -8,7 +8,7 @@ import {
 } from "@/lib/db/queries";
 import { listSkillVersions } from "@/lib/db/studio-queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { requirePermission } from "@/lib/rbac";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import { parseSkillMd } from "@/lib/skill/frontmatter";
 import { rejectSyncedSkillWrite } from "@/lib/skill/read-only-guard";
 import {
@@ -23,7 +23,7 @@ import type { NextRequest } from "next/server";
 
 /** GET /studio/api/skills/[id]/versions → 版本列表（受 skill.read 守卫）。 */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "skill.read");
+  const r = await requireStudioAction(req, "skill.read");
   if (!r.ok) return r.response;
   const { id } = await params;
   return jsonOk(await listSkillVersions(id));
@@ -34,16 +34,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
  * 受 skill.write 守卫。无改动 → 400。frontmatter 解析失败不阻断（用 null 快照）。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "skill.write");
+  const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
   const { id } = await params;
 
   const sk = await getSkillById(id);
   if (!sk) return jsonError(404, "skill_not_found", "skill 不存在");
 
   // P1-5: owner 隔离——非 admin 仅能发布自己 ownerUserId 的 skill
-  const denied = await assertSkillWriteAccess(sk, actorUserId);
+  const denied = await assertSkillWriteAccess(sk, r.principal);
   if (denied) return denied;
 
   // 02 文档 §7.2：同步 Skill 只读,拒绝发布新版本

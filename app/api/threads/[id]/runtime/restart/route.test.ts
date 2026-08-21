@@ -2,9 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "./route";
 
 // Mock 依赖
-vi.mock("@/lib/auth", () => ({
-  getCurrentUserFromRequest: vi.fn(),
-  authErrorResponse: vi.fn(() => null),
+const studio = vi.hoisted(() => ({ resolveStudioPrincipal: vi.fn() }));
+const resolver = vi.hoisted(() => ({ authErrorResponse: vi.fn() }));
+vi.mock("@/lib/identity/studio-access", () => ({
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+}));
+vi.mock("@/lib/identity/resolver", () => ({
+  authErrorResponse: resolver.authErrorResponse,
 }));
 vi.mock("@/lib/db/queries", () => ({
   requireThreadForUser: vi.fn(),
@@ -27,10 +31,15 @@ vi.mock("@/lib/http", () => ({
   ),
 }));
 
-import { getCurrentUserFromRequest } from "@/lib/auth";
 import { getThreadByIdForUser, requireThreadForUser } from "@/lib/db/queries";
 
-const mockUser = { id: "u1", email: "test@example.com" };
+/** resolveStudioPrincipal 返回的 Principal：路由读取 userIdentityId 作 owner guard。 */
+const PRINCIPAL = {
+  id: "u1",
+  email: "test@example.com",
+  userIdentityId: "u1",
+  tenantId: "t1",
+};
 
 function makeRequest(method: "POST" | "GET" = "POST"): Request {
   return new Request("http://localhost/api/threads/t1/runtime/restart", { method });
@@ -39,7 +48,8 @@ function makeRequest(method: "POST" | "GET" = "POST"): Request {
 describe("POST /api/threads/[id]/runtime/restart", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getCurrentUserFromRequest).mockResolvedValue(mockUser as any);
+    studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL as any);
+    resolver.authErrorResponse.mockReturnValue(null);
     vi.mocked(requireThreadForUser).mockResolvedValue({
       id: "t1",
       userId: "u1",
@@ -55,9 +65,8 @@ describe("POST /api/threads/[id]/runtime/restart", () => {
   });
 
   it("鉴权失败返回 401", async () => {
-    vi.mocked(getCurrentUserFromRequest).mockRejectedValue(new Error("unauthorized"));
-    const { authErrorResponse } = await import("@/lib/auth");
-    vi.mocked(authErrorResponse).mockReturnValue(new Response(null, { status: 401 }));
+    studio.resolveStudioPrincipal.mockRejectedValue(new Error("unauthorized"));
+    resolver.authErrorResponse.mockReturnValue(new Response(null, { status: 401 }));
 
     const resp = await POST(makeRequest("POST"), { params: Promise.resolve({ id: "t1" }) });
     expect(resp.status).toBe(401);

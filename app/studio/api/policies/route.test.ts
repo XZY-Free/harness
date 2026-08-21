@@ -1,12 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn() }));
+const access = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+  resolveStudioPrincipal: vi.fn(),
+}));
 const studio = vi.hoisted(() => ({ getPolicyConfigRows: vi.fn() }));
 const queries = vi.hoisted(() => ({ replacePolicyConfigRows: vi.fn() }));
 const config = vi.hoisted(() => ({ refreshPolicyConfigFromDB: vi.fn() }));
 const audit = vi.hoisted(() => ({ recordAdminAudit: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({ requirePermission: rbac.requirePermission }));
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: access.requireStudioAction,
+  hasStudioAction: access.hasStudioAction,
+  resolveStudioPrincipal: access.resolveStudioPrincipal,
+}));
 vi.mock("@/lib/db/studio-queries", () => ({ getPolicyConfigRows: studio.getPolicyConfigRows }));
 vi.mock("@/lib/db/queries", () => ({
   replacePolicyConfigRows: queries.replacePolicyConfigRows,
@@ -27,7 +35,15 @@ import { GET, PUT } from "@/app/studio/api/policies/route";
 import { defaultPolicyRows } from "@/lib/policy/config";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+} as const;
 
 type NextInit = NonNullable<ConstructorParameters<typeof NextRequest>[1]>;
 
@@ -44,7 +60,7 @@ function findRow(rows: { key: string; value: unknown }[], key: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  access.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
   queries.replacePolicyConfigRows.mockResolvedValue(undefined);
   config.refreshPolicyConfigFromDB.mockResolvedValue(undefined);
   audit.recordAdminAudit.mockResolvedValue(undefined);
@@ -65,11 +81,11 @@ describe("GET /studio/api/policies (Stage E)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.rows).toHaveLength(2);
-    expect(rbac.requirePermission).toHaveBeenCalledWith(expect.anything(), "policy.read");
+    expect(access.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "policy.read");
   });
 
   it("无 policy.read → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    access.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -89,7 +105,7 @@ describe("PUT /studio/api/policies (切片 B3)", () => {
   }
 
   it("无 policy.write → 403，不校验不写入不审计", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    access.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -105,7 +121,7 @@ describe("PUT /studio/api/policies (切片 B3)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.rows).toHaveLength(4);
-    expect(rbac.requirePermission).toHaveBeenCalledWith(expect.anything(), "policy.write");
+    expect(access.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "policy.write");
     expect(queries.replacePolicyConfigRows).toHaveBeenCalledTimes(1);
     const firstCall = queries.replacePolicyConfigRows.mock.calls[0];
     const written = (firstCall ?? [])[0] as Array<{ key: string }>;

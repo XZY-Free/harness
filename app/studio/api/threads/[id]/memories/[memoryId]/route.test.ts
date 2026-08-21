@@ -1,7 +1,10 @@
 import type { MemoryEntry } from "@/lib/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studioAccess = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({ getThreadById: vi.fn(), requireThreadForUser: vi.fn() }));
 const store = vi.hoisted(() => ({
   getMemory: vi.fn(),
@@ -9,9 +12,9 @@ const store = vi.hoisted(() => ({
   updateConfidence: vi.fn(),
 }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studioAccess.requireStudioAction,
+  hasStudioAction: studioAccess.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getThreadById: queries.getThreadById,
@@ -26,7 +29,15 @@ vi.mock("@/lib/memory/store", () => ({
 import { POST } from "@/app/studio/api/threads/[id]/memories/[memoryId]/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+};
 
 function mem(over: Partial<MemoryEntry>): MemoryEntry {
   return {
@@ -56,8 +67,8 @@ function req(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  rbac.hasPermission.mockResolvedValue(false);
+  studioAccess.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studioAccess.hasStudioAction.mockResolvedValue(false);
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
   queries.getThreadById.mockResolvedValue(null);
 });
@@ -109,7 +120,7 @@ describe("POST .../memories/[memoryId]/resolve (Stage E)", () => {
   });
 
   it("无 studio 权限 → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studioAccess.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("403", { status: 403 }),
     });

@@ -2,12 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Skills list API 守卫与取数 + POST 建 skill 编排。
- * mock rbac + studio-queries + db/queries + skill/repo + admin-audit；
+ * mock studio-access + studio-queries + db/queries + skill/repo + admin-audit；
  * frontmatter 用真（纯函数），assertValidSkillName 用真（Agent Skills 标准校验）。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
-const studio = vi.hoisted(() => ({ listSkills: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
+const studioQueries = vi.hoisted(() => ({ listSkills: vi.fn() }));
 const queries = vi.hoisted(() => ({
   createSkill: vi.fn(),
   createSkillVersion: vi.fn(),
@@ -21,11 +24,11 @@ const repoMocks = vi.hoisted(() => ({
 }));
 const audit = vi.hoisted(() => ({ recordAdminAudit: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
 }));
-vi.mock("@/lib/db/studio-queries", () => ({ listSkills: studio.listSkills }));
+vi.mock("@/lib/db/studio-queries", () => ({ listSkills: studioQueries.listSkills }));
 vi.mock("@/lib/db/queries", () => ({
   createSkill: queries.createSkill,
   createSkillVersion: queries.createSkillVersion,
@@ -46,32 +49,33 @@ vi.mock("@/lib/studio/admin-audit", () => ({ recordAdminAudit: audit.recordAdmin
 import { GET, POST } from "@/app/studio/api/skills/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = { userIdentityId: "u1", tenantId: "t1" };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studio.hasStudioAction.mockResolvedValue(true);
   audit.recordAdminAudit.mockResolvedValue(undefined);
 });
 
 describe("GET /studio/api/skills (Stage B)", () => {
   it("skill.read 通过 → 200 + list", async () => {
-    studio.listSkills.mockResolvedValue([{ id: "s1", name: "build-from-idea" }]);
+    studioQueries.listSkills.mockResolvedValue([{ id: "s1", name: "build-from-idea" }]);
     const res = await GET(new NextRequest("http://localhost/studio/api/skills"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toEqual([{ id: "s1", name: "build-from-idea" }]);
-    expect(rbac.requirePermission).toHaveBeenCalledWith(expect.anything(), "skill.read");
+    expect(studio.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "skill.read");
   });
 
   it("无 skill.read → 403，不查 list", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
     const res = await GET(new NextRequest("http://localhost/studio/api/skills"));
     expect(res.status).toBe(403);
-    expect(studio.listSkills).not.toHaveBeenCalled();
+    expect(studioQueries.listSkills).not.toHaveBeenCalled();
   });
 });
 
@@ -96,7 +100,7 @@ describe("POST /studio/api/skills（建 skill）", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toMatchObject({ skillId: "sk-1", versionId: "ver-1", commitSha: "sha-abc" });
-    expect(rbac.requirePermission).toHaveBeenCalledWith(expect.anything(), "skill.write");
+    expect(studio.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "skill.write");
     expect(queries.createSkill).toHaveBeenCalledWith(
       expect.objectContaining({ name: "my-skill", description: "测试 skill" }),
     );
@@ -138,7 +142,7 @@ describe("POST /studio/api/skills（建 skill）", () => {
   });
 
   it("无 skill.write → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });

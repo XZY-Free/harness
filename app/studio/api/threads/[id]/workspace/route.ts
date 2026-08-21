@@ -1,7 +1,7 @@
 import { getThreadById, requireThreadForUser } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
 import { logger } from "@/lib/logger";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
 import { WorkspacePathError, listWorkspaceFiles, writeWorkspaceFile } from "@/lib/workspace";
 import type { NextRequest } from "next/server";
@@ -24,15 +24,15 @@ import type { NextRequest } from "next/server";
  */
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.read.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.read");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "THREAD_NOT_FOUND", "thread 不存在或无权访问");
 
-  if (!(await hasPermission(r.user.id, "workspace.read"))) {
+  if (!(await hasStudioAction(r.principal, "workspace.read"))) {
     return jsonError(403, "forbidden", "无 workspace.read 权限");
   }
   try {
@@ -47,16 +47,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
   const { id } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.read.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.write");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "THREAD_NOT_FOUND", "thread 不存在或无权访问");
 
-  if (!(await hasPermission(r.user.id, "workspace.write"))) {
+  if (!(await hasStudioAction(r.principal, "workspace.write"))) {
     return jsonError(403, "forbidden", "无 workspace.write 权限");
   }
 

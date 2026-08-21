@@ -5,14 +5,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * 200（admin / studio.access 读）/ 401（未登录）/ 403（member 写）+ env 脱敏。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+  resolveStudioPrincipal: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   listMcpServerConfigs: vi.fn(),
   createMcpServerConfig: vi.fn(),
 }));
 const registry = vi.hoisted(() => ({ removeServer: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({ requirePermission: rbac.requirePermission }));
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+}));
 vi.mock("@/lib/db/queries", () => ({
   listMcpServerConfigs: queries.listMcpServerConfigs,
   createMcpServerConfig: queries.createMcpServerConfig,
@@ -29,7 +37,15 @@ import { DELETE, PUT } from "@/app/studio/api/mcp-servers/[id]/route";
 import { GET, POST } from "@/app/studio/api/mcp-servers/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+} as const;
 const unauthResp = (status: number) => ({
   ok: false as const,
   response: new Response("{}", { status }),
@@ -37,7 +53,7 @@ const unauthResp = (status: number) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
 });
 
 describe("GET /studio/api/mcp-servers", () => {
@@ -59,7 +75,7 @@ describe("GET /studio/api/mcp-servers", () => {
     ]);
     const res = await GET(new NextRequest("http://localhost/studio/api/mcp-servers"));
     expect(res.status).toBe(200);
-    expect(rbac.requirePermission).toHaveBeenCalledWith(expect.anything(), "studio.access");
+    expect(studio.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "studio.access");
     const body = await res.json();
     const row = body.data.rows[0];
     expect(row.env).toEqual({ GITHUB_TOKEN: "***", NORMAL: "v" });
@@ -67,14 +83,14 @@ describe("GET /studio/api/mcp-servers", () => {
   });
 
   it("未登录 → 401，不查 list", async () => {
-    rbac.requirePermission.mockResolvedValue(unauthResp(401));
+    studio.requireStudioAction.mockResolvedValue(unauthResp(401));
     const res = await GET(new NextRequest("http://localhost/studio/api/mcp-servers"));
     expect(res.status).toBe(401);
     expect(queries.listMcpServerConfigs).not.toHaveBeenCalled();
   });
 
   it("无 studio 权限 → 403", async () => {
-    rbac.requirePermission.mockResolvedValue(unauthResp(403));
+    studio.requireStudioAction.mockResolvedValue(unauthResp(403));
     const res = await GET(new NextRequest("http://localhost/studio/api/mcp-servers"));
     expect(res.status).toBe(403);
   });
@@ -106,14 +122,14 @@ describe("POST /studio/api/mcp-servers (admin-only)", () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(200);
-    expect(rbac.requirePermission).toHaveBeenCalledWith(expect.anything(), "policy.write");
+    expect(studio.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "policy.write");
     expect(queries.createMcpServerConfig).toHaveBeenCalledWith(
       expect.objectContaining({ name: "github" }),
     );
   });
 
   it("member（无 policy.write）→ 403", async () => {
-    rbac.requirePermission.mockResolvedValue(unauthResp(403));
+    studio.requireStudioAction.mockResolvedValue(unauthResp(403));
     const req = new NextRequest("http://localhost/studio/api/mcp-servers", {
       method: "POST",
       body: JSON.stringify({ name: "github", transport: "stdio", command: "npx" }),
@@ -133,7 +149,7 @@ describe("POST /studio/api/mcp-servers (admin-only)", () => {
   });
 
   it("未登录 → 401", async () => {
-    rbac.requirePermission.mockResolvedValue(unauthResp(401));
+    studio.requireStudioAction.mockResolvedValue(unauthResp(401));
     const req = new NextRequest("http://localhost/studio/api/mcp-servers", {
       method: "POST",
       body: JSON.stringify({ name: "x", transport: "stdio", command: "x" }),
@@ -173,7 +189,7 @@ describe("DELETE /studio/api/mcp-servers/[id] (admin-only)", () => {
   });
 
   it("member → 403", async () => {
-    rbac.requirePermission.mockResolvedValue(unauthResp(403));
+    studio.requireStudioAction.mockResolvedValue(unauthResp(403));
     const req = new NextRequest("http://localhost/studio/api/mcp-servers/m1", { method: "DELETE" });
     const res = await DELETE(req, { params: Promise.resolve({ id: "m1" }) });
     expect(res.status).toBe(403);

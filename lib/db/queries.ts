@@ -57,7 +57,6 @@ import {
   type MemoryStatus,
   type PermissionDecision,
   type PermissionScope,
-  type Role,
   type SecretMount,
   type SecretMountScope,
   type SecretMountStatus,
@@ -78,7 +77,6 @@ import {
   type ToolPermissionRule,
   type ToolRun,
   type ToolRunStatus,
-  type User,
   adminAuditLog,
   auditFailureLog,
   contextSnapshot,
@@ -93,8 +91,6 @@ import {
   messageTypeForRole,
   policyConfig,
   policyConfigHistory,
-  role,
-  rolePermission,
   secretMount,
   skill,
   skillSyncMapping,
@@ -107,7 +103,6 @@ import {
   toolPermissionRule,
   toolRun,
   user,
-  userRole,
 } from "./schema";
 import {
   contextSnapshotChecksumsSchema,
@@ -1278,255 +1273,6 @@ export async function updateSyncMapping(
 // V8 替代：chat 路径用 run 级 Skill 使用事实记录（阶段 2）。
 // 旧字段保留兼容旧数据，但不再写入。
 
-// ─── Role / RBAC Queries () ─────────────────────────
-
-/**
- * 按 key 取角色（seed 幂等键）。admin / member 为系统内置角色。
- */
-export async function getRoleByKey(key: string): Promise<Role | null> {
-  const [row] = await db.select().from(role).where(eq(role.key, key)).limit(1);
-  return row ?? null;
-}
-
-/** 取角色的全部权限名。 */
-export async function getRolePermissions(roleId: string): Promise<string[]> {
-  const rows = await db
-    .select({ permission: rolePermission.permission })
-    .from(rolePermission)
-    .where(eq(rolePermission.roleId, roleId));
-  return rows.map((r) => r.permission);
-}
-
-/**
- * 取用户全部权限（经 userRole → rolePermission 取并集）。
- * 不做 devOpen 注入——那是 lib/rbac.ts 的策略层职责；本函数只做纯数据查询。
- */
-export async function getPermissionsForUserRaw(userId: string): Promise<string[]> {
-  const rows = await db
-    .select({ permission: rolePermission.permission })
-    .from(userRole)
-    .innerJoin(rolePermission, eq(userRole.roleId, rolePermission.roleId))
-    .where(eq(userRole.userId, userId));
-  return rows.map((r) => r.permission);
-}
-
-/** 创建角色（身份层）。 */
-export async function createRole(params: {
-  key: string;
-  name: string;
-  isSystem?: boolean;
-}): Promise<Role> {
-  const row: Role = {
-    id: randomUUID(),
-    key: params.key,
-    name: params.name,
-    isSystem: params.isSystem ?? false,
-    createdAt: new Date(),
-  };
-  await db.insert(role).values(row);
-  return row;
-}
-
-/**
- * 覆盖角色的权限集合（删旧 + 插新）。幂等：重复 seed 同一角色得到同一权限集。
- */
-export async function setRolePermissions(roleId: string, permissions: string[]): Promise<void> {
-  await db.delete(rolePermission).where(eq(rolePermission.roleId, roleId));
-  if (permissions.length === 0) return;
-  await db.insert(rolePermission).values(permissions.map((p) => ({ roleId, permission: p })));
-}
-
-/**
- * 重命名角色（seed 升级用：把旧英文 name 修正为中文）。仅在 name 不同时写，幂等。
- */
-export async function renameRole(roleId: string, name: string): Promise<void> {
-  await db.update(role).set({ name }).where(eq(role.id, roleId));
-}
-
-/**
- * 给用户绑角色（幂等：INSERT IGNORE，重复绑定不报错）。
- */
-export async function assignRoleToUser(userId: string, roleId: string): Promise<void> {
-  await db.insert(userRole).ignore().values({ userId, roleId, createdAt: new Date() });
-}
-
-/** 判断用户是否已绑定某角色（seed 幂等检查用）。 */
-export async function userHasRole(userId: string, roleId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ userId: userRole.userId })
-    .from(userRole)
-    .where(and(eq(userRole.userId, userId), eq(userRole.roleId, roleId)))
-    .limit(1);
-  return Boolean(row);
-}
-
-// ─── Settings 用户/角色管理 Queries () ──────
-//
-// Settings 只管理已有用户的 role 绑定，不做用户/角色创建删除，不编辑 RolePermission。
-// 用户+角色列表用 leftJoin 一次性取，无角色用户仍出现在列表（roles=[]）。
-
-/** Settings 用户列表项：用户基础信息 + 绑定的角色摘要。 */
-export type UserWithRoles = {
-  id: string;
-  email: string;
-  name: string | null;
-  externalId: string;
-  createdAt: Date;
-  roles: Array<{ id: string; key: string; name: string; isSystem: boolean }>;
-};
-
-/** Settings 角色列表项：角色身份 + 权限名数组（只读展示，不在此编辑）。 */
-export type RoleWithPermissions = {
-  id: string;
-  key: string;
-  name: string;
-  isSystem: boolean;
-  permissions: string[];
-};
-
-/** 按 id 取用户；Settings PUT 用于区分目标用户不存在和角色校验失败。 */
-export async function getUserById(id: string): Promise<User | null> {
-  const [row] = await db.select().from(user).where(eq(user.id, id)).limit(1);
-  return row ?? null;
-}
-
-/**
- * 列全部用户及其角色绑定（按 createdAt asc）。
- * leftJoin：无角色用户也返回，roles=[]。角色按 key asc 稳定排序。
- */
-export async function listUsersWithRoles(): Promise<UserWithRoles[]> {
-  const rows = await db
-    .select({
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      externalId: user.externalId,
-      createdAt: user.createdAt,
-      roleId: userRole.roleId,
-      roleKey: role.key,
-      roleName: role.name,
-      roleIsSystem: role.isSystem,
-    })
-    .from(user)
-    .leftJoin(userRole, eq(user.id, userRole.userId))
-    .leftJoin(role, eq(userRole.roleId, role.id))
-    .orderBy(asc(user.createdAt), asc(role.key));
-  const byUser = new Map<string, UserWithRoles>();
-  for (const r of rows) {
-    let u = byUser.get(r.id);
-    if (!u) {
-      u = {
-        id: r.id,
-        email: r.email,
-        name: r.name,
-        externalId: r.externalId,
-        createdAt: r.createdAt,
-        roles: [],
-      };
-      byUser.set(r.id, u);
-    }
-    if (r.roleId && r.roleKey) {
-      u.roles.push({
-        id: r.roleId,
-        key: r.roleKey,
-        name: r.roleName ?? "",
-        isSystem: r.roleIsSystem ?? false,
-      });
-    }
-  }
-  return [...byUser.values()];
-}
-
-/** 列全部角色及其权限名（按 key asc），只读展示。 */
-export async function listRolesWithPermissions(): Promise<RoleWithPermissions[]> {
-  const rows = await db
-    .select({
-      id: role.id,
-      key: role.key,
-      name: role.name,
-      isSystem: role.isSystem,
-      permission: rolePermission.permission,
-    })
-    .from(role)
-    .leftJoin(rolePermission, eq(role.id, rolePermission.roleId))
-    .orderBy(asc(role.key), asc(rolePermission.permission));
-  const byRole = new Map<string, RoleWithPermissions>();
-  for (const r of rows) {
-    let rl = byRole.get(r.id);
-    if (!rl) {
-      rl = { id: r.id, key: r.key, name: r.name, isSystem: r.isSystem, permissions: [] };
-      byRole.set(r.id, rl);
-    }
-    if (r.permission) rl.permissions.push(r.permission);
-  }
-  return [...byRole.values()];
-}
-
-/**
- * 取一组角色 ID 的权限并集（RolePermission 聚合，去重）。
- * 不做 PERMISSIONS 常量过滤——那是 lib/rbac / role-safety 的策略层职责。
- * 空 roleIds → []（不发起查询）。
- */
-export async function getPermissionsForRoleIds(roleIds: string[]): Promise<string[]> {
-  if (roleIds.length === 0) return [];
-  const rows = await db
-    .select({ permission: rolePermission.permission })
-    .from(rolePermission)
-    .where(inArray(rolePermission.roleId, roleIds));
-  return [...new Set(rows.map((r) => r.permission))];
-}
-
-/**
- * 覆盖用户的角色集合（删旧 + 插新）。幂等：相同 roleIds 多次调用结果一致。
- * 空 roleIds → 用户无角色（Settings 允许，由 role-safety 守卫不锁死系统）。
- */
-export async function replaceUserRoles(userId: string, roleIds: string[]): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.delete(userRole).where(eq(userRole.userId, userId));
-    if (roleIds.length === 0) return;
-    const now = new Date();
-    await tx.insert(userRole).values(roleIds.map((roleId) => ({ userId, roleId, createdAt: now })));
-  });
-}
-
-/**
- * 统计拥有某权限的用户数。
- *
- * `replacement` 用于在「不实际写入」的前提下预演替换目标用户角色后的计数：
- * - 现有拥有该权限的用户中，排除 `replacement.userId`；
- * - 若 `replacement.roleIds` 对应角色授予该权限，则目标用户仍计 1。
- *
- * 实现：先查哪些 roleId 授予该权限，再查（排除目标用户后）绑定这些角色的去重用户数，
- * 最后按 replacement 补 1。数据量小，两步查询保持清晰。
- */
-export async function countUsersWithPermission(
-  permission: string,
-  replacement?: { userId: string; roleIds: string[] },
-): Promise<number> {
-  const grantingRoles = await db
-    .select({ roleId: rolePermission.roleId })
-    .from(rolePermission)
-    .where(eq(rolePermission.permission, permission));
-  const grantingRoleIds = new Set(grantingRoles.map((r) => r.roleId));
-  if (grantingRoleIds.size === 0) return 0;
-
-  const roleIdList = [...grantingRoleIds];
-  const userRows = replacement
-    ? await db
-        .select({ userId: userRole.userId })
-        .from(userRole)
-        .where(and(inArray(userRole.roleId, roleIdList), ne(userRole.userId, replacement.userId)))
-    : await db
-        .select({ userId: userRole.userId })
-        .from(userRole)
-        .where(inArray(userRole.roleId, roleIdList));
-  const distinct = new Set(userRows.map((u) => u.userId));
-  let count = distinct.size;
-  if (replacement?.roleIds.some((rid) => grantingRoleIds.has(rid))) {
-    count += 1;
-  }
-  return count;
-}
 
 // ─── Policy Config 写入 () ──────────────────
 
@@ -1662,51 +1408,6 @@ export async function listAdminAuditLogs(params?: {
   return query.orderBy(desc(adminAuditLog.createdAt), desc(adminAuditLog.id)).limit(limit);
 }
 
-// ─── Admin Audit + 业务写 事务封装 (切片 C) ─────────
-//
-// 用户角色覆盖属敏感写操作，按 必须「角色替换 + audit」同事务，audit 写失败则
-// 整个事务回滚（fail-closed：业务 mutation 不提交）。metadata 由调用方经
-// lib/studio/admin-audit 脱敏后传入；本层信任调用方输入。
-
-/** 取用户当前绑定的 roleId 列表（角色覆盖审计 roleIdsBefore 用）。 */
-export async function getUserRoleIds(userId: string): Promise<string[]> {
-  const rows = await db
-    .select({ roleId: userRole.roleId })
-    .from(userRole)
-    .where(eq(userRole.userId, userId));
-  return rows.map((r) => r.roleId);
-}
-
-/**
- * 覆盖用户角色 + 写 succeeded 审计，单事务。任一步失败 → 整事务回滚（audit 与角色替换
- * 都不生效），调用方据此返回 500 audit_failed。auditInput.metadata 应已脱敏。
- */
-export async function replaceUserRolesWithAudit(
-  userId: string,
-  roleIds: string[],
-  auditInput: Pick<AppendAdminAuditLogInput, "actorUserId" | "targetId" | "metadata"> & {
-    action: AdminAuditAction;
-  },
-): Promise<void> {
-  const auditRow = buildAdminAuditLogRow({
-    actorUserId: auditInput.actorUserId,
-    action: auditInput.action,
-    targetType: "user",
-    targetId: auditInput.targetId,
-    outcome: "succeeded",
-    metadata: auditInput.metadata,
-  });
-  await db.transaction(async (tx) => {
-    await tx.delete(userRole).where(eq(userRole.userId, userId));
-    if (roleIds.length > 0) {
-      const now = new Date();
-      await tx
-        .insert(userRole)
-        .values(roleIds.map((roleId) => ({ userId, roleId, createdAt: now })));
-    }
-    await tx.insert(adminAuditLog).values(auditRow);
-  });
-}
 
 // ─── Context Snapshot Queries (Stage C) ────────────────
 //

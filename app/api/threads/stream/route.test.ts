@@ -8,8 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * 去重：同 threadId 同 status / 同 sequence 不重复推。
  */
 
-const auth = vi.hoisted(() => ({
-  getCurrentUserFromRequest: vi.fn(),
+const studio = vi.hoisted(() => ({
+  resolveStudioPrincipal: vi.fn(),
 }));
 const queries = vi.hoisted(() => ({
   listThreadStatusChanges: vi.fn(),
@@ -23,8 +23,8 @@ const bus = vi.hoisted(() => ({
     | null,
 }));
 
-vi.mock("@/lib/auth", () => ({
-  getCurrentUserFromRequest: auth.getCurrentUserFromRequest,
+vi.mock("@/lib/identity/studio-access", () => ({
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
 }));
 vi.mock("@/lib/db/queries", () => ({
   listThreadStatusChanges: queries.listThreadStatusChanges,
@@ -61,6 +61,17 @@ vi.mock("@/lib/runtime/thread-events-bus", () => ({
 
 import { GET } from "./route";
 
+/** resolveStudioPrincipal 返回的 Principal：路由读取 userIdentityId 作 userId。 */
+const PRINCIPAL = {
+  id: "u1",
+  email: "a@x",
+  name: "A",
+  externalId: "u1",
+  createdAt: new Date(),
+  userIdentityId: "u1",
+  tenantId: "t1",
+};
+
 function makeRequest(threadId?: string) {
   const ac = new AbortController();
   const url =
@@ -82,7 +93,7 @@ function getReader(res: Response): ReadableStreamDefaultReader<Uint8Array> {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  auth.getCurrentUserFromRequest.mockResolvedValue({ id: "u1" });
+  studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL);
   queries.listThreadStatusChanges.mockResolvedValue([]);
   queries.listThreadEventsSince.mockResolvedValue([]);
   // 审计修复：threadMode 所有权校验默认返回有效 thread（通过权限检查）
@@ -96,7 +107,7 @@ afterEach(() => {
 
 describe("threads/stream SSE B-6 全局模式（无 threadId）", () => {
   it("未授权 → 401", async () => {
-    auth.getCurrentUserFromRequest.mockRejectedValue(new Error("no auth"));
+    studio.resolveStudioPrincipal.mockRejectedValue(new Error("no auth"));
     const { req } = makeRequest();
     const res = await GET(req);
     expect(res.status).toBe(401);

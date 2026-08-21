@@ -8,7 +8,7 @@ import {
 } from "@/lib/db/queries";
 import type { ApprovalScope } from "@/lib/db/schema";
 import { jsonError, jsonOk } from "@/lib/http";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { recordAdminAudit } from "@/lib/studio/admin-audit";
 import type { NextRequest } from "next/server";
 
@@ -24,13 +24,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; approvalId: string }> },
 ) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id, approvalId } = await params;
 
   // 校验 thread 可见性（owner 或 admin）
-  const canAll = await hasPermission(r.user.id, "thread.write.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.write");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   // 解析 body
@@ -76,7 +76,7 @@ export async function POST(
     id: approvalId,
     decision: bodyTyped.decision as "approved" | "denied",
     scope: bodyTyped.scope as ApprovalScope,
-    resolvedBy: r.user.id,
+    resolvedBy: r.principal.userIdentityId,
   });
   if (!updated) {
     // 并发：已被另一请求决议
@@ -88,14 +88,14 @@ export async function POST(
     toolRunId: updated.toolRunId,
     decision: updated.status,
     scope: updated.approvedScope,
-    resolvedBy: r.user.id,
+    resolvedBy: r.principal.userIdentityId,
   });
 
   // 审计修复：审批决议记录到 admin audit log。
   // scope=always/project/session 的审批创建了持久权限放行，必须可追溯（谁、何时、何种 scope）。
   // 原实现仅写 threadEvent，不在 admin audit log 中留痕，安全审计无法追溯审批来源。
   await recordAdminAudit({
-    actorUserId: r.user.id,
+    actorUserId: r.principal.userIdentityId,
     action: "approval.resolved",
     targetType: "approval",
     targetId: `${id}:${approvalId}`,

@@ -1,5 +1,5 @@
 import { getChatModel } from "@/lib/ai/provider";
-import { getCurrentUserFromRequest } from "@/lib/auth";
+import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import {
   appendThreadEvent,
   getMessagesByThreadId,
@@ -29,8 +29,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id: threadId } = await params;
   let userId: string;
   try {
-    const user = await getCurrentUserFromRequest(request);
-    userId = user.id;
+    const principal = await resolveStudioPrincipal(request.headers);
+    userId = principal.userIdentityId;
   } catch {
     return NextResponse.json({ error: "未授权" }, { status: 401 });
   }

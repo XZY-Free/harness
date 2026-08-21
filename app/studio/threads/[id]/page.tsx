@@ -11,7 +11,6 @@ import { ThreadPlanPanel } from "@/components/studio/thread-plan-panel";
 import { ThreadTimeline } from "@/components/studio/thread-timeline";
 import { ToolTrace } from "@/components/studio/tool-trace";
 import { WorkspaceExplorer } from "@/components/studio/workspace-explorer";
-import { getCurrentUserFromRequest } from "@/lib/auth";
 import {
   getActiveThreadPlan,
   getThreadById,
@@ -30,7 +29,7 @@ import {
   listEventsForThread,
   listToolRunsForThread,
 } from "@/lib/db/studio-queries";
-import { hasPermission } from "@/lib/rbac";
+import { hasStudioAction, resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { resolveRuntimes } from "@/lib/runtime/registry";
 import { listWorkspaceFiles } from "@/lib/workspace";
 import { headers } from "next/headers";
@@ -86,12 +85,12 @@ export default async function ThreadDetailPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const user = await getCurrentUserFromRequest({ headers: await headers() });
-  const canAll = await hasPermission(user.id, "thread.read.all");
-  const canReadWorkspace = await hasPermission(user.id, "workspace.read");
-  const canWriteWorkspace = await hasPermission(user.id, "workspace.write");
+  const principal = await resolveStudioPrincipal(await headers());
+  const canAll = await hasStudioAction(principal, "thread.read");
+  const canReadWorkspace = await hasStudioAction(principal, "workspace.read");
+  const canWriteWorkspace = await hasStudioAction(principal, "workspace.write");
 
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, user.id);
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, principal.userIdentityId);
   if (!thread) notFound();
 
   // 可见 tab 集合（「文件」tab 需 workspace.read）

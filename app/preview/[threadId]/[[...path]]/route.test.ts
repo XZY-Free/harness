@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Phase 5 Stage D：预览反向代理 /preview/[threadId]/* 测试。
  * mock auth / queries / registry / global fetch，覆盖 owner guard 404、未 ready 503、ready 转发 200 + path 透传。
+ *
+ * 02-2b：授权契约迁到正式 Principal 解析（resolveStudioPrincipal + authErrorResponse）。
  */
 
-const auth = vi.hoisted(() => ({ getCurrentUserFromRequest: vi.fn() }));
+const studio = vi.hoisted(() => ({ resolveStudioPrincipal: vi.fn() }));
+const resolver = vi.hoisted(() => ({ authErrorResponse: vi.fn() }));
 const queries = vi.hoisted(() => ({
   requireThreadForUser: vi.fn(),
 }));
@@ -14,12 +17,11 @@ const registry = vi.hoisted(() => ({
   resolveRuntimes: vi.fn(),
 }));
 
-vi.mock("@/lib/auth", () => ({
-  getCurrentUserFromRequest: auth.getCurrentUserFromRequest,
-  authErrorResponse: (error: unknown) =>
-    error instanceof Error && error.message.includes("SSO")
-      ? new Response(null, { status: 401 })
-      : null,
+vi.mock("@/lib/identity/studio-access", () => ({
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+}));
+vi.mock("@/lib/identity/resolver", () => ({
+  authErrorResponse: resolver.authErrorResponse,
 }));
 vi.mock("@/lib/db/queries", () => ({
   requireThreadForUser: queries.requireThreadForUser,
@@ -34,6 +36,17 @@ vi.mock("@/lib/runtime/registry", () => ({
 
 import { GET } from "@/app/preview/[threadId]/[[...path]]/route";
 
+/** resolveStudioPrincipal 返回的 Principal：路由读取 userIdentityId 作 owner guard。 */
+const PRINCIPAL = {
+  id: "u1",
+  email: "a@x",
+  name: "A",
+  externalId: "u1",
+  createdAt: new Date(),
+  userIdentityId: "u1",
+  tenantId: "t1",
+};
+
 function req(threadId: string, path?: string[]): Request {
   const urlPath = `/preview/${threadId}/${path ? path.join("/") : ""}`;
   return new Request(`http://localhost${urlPath}`, { method: "GET" });
@@ -41,7 +54,8 @@ function req(threadId: string, path?: string[]): Request {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  auth.getCurrentUserFromRequest.mockResolvedValue({ id: "u1" });
+  studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL);
+  resolver.authErrorResponse.mockReturnValue(null);
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
   registry.resolveRuntimes.mockReturnValue({ preview });
 });
@@ -55,7 +69,8 @@ describe("GET /preview/[threadId]/* 反向代理 (Phase 5 Stage D)", () => {
   });
 
   it("缺 SSO 身份 → 401", async () => {
-    auth.getCurrentUserFromRequest.mockRejectedValue(new Error("缺少 SSO 用户标识"));
+    studio.resolveStudioPrincipal.mockRejectedValue(new Error("缺少 SSO 用户标识"));
+    resolver.authErrorResponse.mockReturnValue(new Response(null, { status: 401 }));
     const res = await GET(req("t1"), { params: Promise.resolve({ threadId: "t1" }) });
     expect(res.status).toBe(401);
   });

@@ -7,7 +7,7 @@ import {
 } from "@/lib/db/queries";
 import { listSkills } from "@/lib/db/studio-queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { requireStudioAction, hasStudioAction } from "@/lib/identity/studio-access";
 import { buildSkillMd } from "@/lib/skill/frontmatter";
 import {
   SkillRepoError,
@@ -28,12 +28,12 @@ import type { NextRequest } from "next/server";
  * - 否则（member）→ 仅自己 ownerUserId 的 + 公共（ownerUserId null）。
  */
 export async function GET(req: NextRequest) {
-  const r = await requirePermission(req, "skill.read");
+  const r = await requireStudioAction(req, "skill.read");
   if (!r.ok) return r.response;
-  const isSkillAdmin = await hasPermission(r.user.id, "skill.write.all");
+  const isSkillAdmin = await hasStudioAction(r.principal, "skill.write");
   const skills = isSkillAdmin
     ? await listSkills()
-    : await listSkills({ ownerUserId: r.user.id, includePublic: true });
+    : await listSkills({ ownerUserId: r.principal.userIdentityId, includePublic: true });
   return jsonOk(skills);
 }
 
@@ -42,9 +42,9 @@ export async function GET(req: NextRequest) {
  * 受 skill.write 守卫。name 撞唯一 → 409；非法 name → 400。
  */
 export async function POST(req: NextRequest) {
-  const r = await requirePermission(req, "skill.write");
+  const r = await requireStudioAction(req, "skill.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
 
   const body = (await req.json().catch(() => ({}))) as {
     name?: string;

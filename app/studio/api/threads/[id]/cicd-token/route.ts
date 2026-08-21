@@ -1,6 +1,6 @@
 import { getThreadById, requireThreadForUser, updateThreadCicdToken } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -15,12 +15,12 @@ import type { NextRequest } from "next/server";
 
 /** GET /studio/api/threads/[id]/cicd-token → 是否已设置（不返回明文） */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.write.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.write");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   return jsonOk({ threadId: id, hasToken: Boolean(thread.cicdApiToken) });
@@ -28,12 +28,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 /** PUT /studio/api/threads/[id]/cicd-token → 设置/清除 per-thread CI/CD token */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.write.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.write");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   // P2-8: per-thread CI/CD token 是部署凭证(与 secrets 同属 admin-only 管理范畴),

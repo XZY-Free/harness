@@ -9,9 +9,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - admin（thread.write.all）可改他人 thread
  * - 无 thread.write.self 权限 → 403
  * - 未登录 → 401
+ *
+ * 02-2b：授权契约迁到正式 Action Scope（requireStudioAction / hasStudioAction），mock 相应调整。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   getThreadByIdForUser: vi.fn(),
   getThreadById: vi.fn(),
@@ -20,9 +25,9 @@ const queries = vi.hoisted(() => ({
   softDeleteThread: vi.fn(),
 }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getThreadByIdForUser: queries.getThreadByIdForUser,
@@ -36,6 +41,8 @@ import { DELETE, PATCH } from "@/app/api/threads/[id]/route";
 
 const OWNER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
 const OTHER = { id: "u2", email: "b@x", name: "B", externalId: "u2", createdAt: new Date() };
+/** requireStudioAction 返回的 principal：路由读取 userIdentityId 作 owner guard。 */
+const PRINCIPAL = { ...OWNER, userIdentityId: "u1", tenantId: "t1" };
 
 function req(url: string, body: unknown, method = "PATCH") {
   return new Request(url, {
@@ -47,8 +54,8 @@ function req(url: string, body: unknown, method = "PATCH") {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: OWNER });
-  rbac.hasPermission.mockResolvedValue(false); // 默认非 admin
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studio.hasStudioAction.mockResolvedValue(false); // 默认非 admin
   queries.getThreadByIdForUser.mockResolvedValue({ id: "t1", userId: "u1" });
   queries.getThreadById.mockResolvedValue(null);
   queries.updateThreadTitle.mockResolvedValue(undefined);
@@ -85,7 +92,7 @@ describe("PATCH /api/threads/[id] (07-P1-4 RBAC)", () => {
   });
 
   it("admin（thread.write.all）可改他人 thread → 200", async () => {
-    rbac.hasPermission.mockResolvedValue(true); // admin
+    studio.hasStudioAction.mockResolvedValue(true); // admin
     queries.getThreadById.mockResolvedValue({ id: "tOther", userId: "u2" }); // 他人 thread
     const res = await PATCH(req("http://localhost/api/threads/tOther", { title: "admin 改" }), {
       params: Promise.resolve({ id: "tOther" }),
@@ -97,7 +104,7 @@ describe("PATCH /api/threads/[id] (07-P1-4 RBAC)", () => {
   });
 
   it("无 thread.write.self 权限 → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -109,7 +116,7 @@ describe("PATCH /api/threads/[id] (07-P1-4 RBAC)", () => {
   });
 
   it("未登录 → 401", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 401 }),
     });
@@ -120,7 +127,7 @@ describe("PATCH /api/threads/[id] (07-P1-4 RBAC)", () => {
   });
 
   it("admin + thread 不存在 → 404", async () => {
-    rbac.hasPermission.mockResolvedValue(true);
+    studio.hasStudioAction.mockResolvedValue(true);
     queries.getThreadById.mockResolvedValue(null);
     const res = await PATCH(req("http://localhost/api/threads/ghost", { title: "x" }), {
       params: Promise.resolve({ id: "ghost" }),
@@ -148,7 +155,7 @@ describe("DELETE /api/threads/[id] (07-P1-4 RBAC)", () => {
   });
 
   it("admin 可软删他人 thread → 200", async () => {
-    rbac.hasPermission.mockResolvedValue(true);
+    studio.hasStudioAction.mockResolvedValue(true);
     queries.getThreadById.mockResolvedValue({ id: "tOther", userId: "u2" });
     const res = await DELETE(req("http://localhost/api/threads/tOther", null, "DELETE"), {
       params: Promise.resolve({ id: "tOther" }),

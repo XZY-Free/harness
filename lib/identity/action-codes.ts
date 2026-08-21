@@ -63,6 +63,24 @@ export const ACTION_CODES = [
   "security.incident.create",
   "security.incident.isolate",
   "security.incident.resolve",
+  // ── Studio 访问动作（关口02 02-2 并入正式授权单一模型）─────────────
+  // 解码旧 RBAC 把 scope 编进权限字符串的语义（thread.write.self / thread.read.all）：
+  // Action Code = 动作，Resource Scope = 资源范围。以下为正式模型缺失的
+  // Studio 长期业务动作；粗粒度租户内访问由 (tenant 资源) 表达，.self 由
+  // (self 资源) 表达，细粒度资源级由既有 owner guard / resource scope 决定。
+  "studio.access",
+  "skill.read",
+  "skill.write",
+  "thread.read",
+  "thread.write",
+  "policy.read",
+  "policy.write",
+  "user.manage",
+  "agent.read",
+  "workspace.read",
+  "workspace.write",
+  "analytics.read",
+  "audit.read",
 ] as const;
 
 export type ActionCode = (typeof ACTION_CODES)[number];
@@ -124,6 +142,21 @@ export const ACTION_RESOURCE_TYPES: Record<ActionCode, readonly ResourceScopeTyp
   "security.incident.create": ["tenant"],
   "security.incident.isolate": ["tenant"],
   "security.incident.resolve": ["tenant"],
+  // Studio 访问动作资源范围：粗粒度租户访问用 (tenant)，.self 用 (self)，
+  // 资源级（skill/workspace/policy/agent）允许带具体资源 scope。
+  "studio.access": ["tenant"],
+  "skill.read": ["tenant", "skill"],
+  "skill.write": ["tenant", "skill"],
+  "thread.read": ["tenant", "self"],
+  "thread.write": ["tenant", "self"],
+  "policy.read": ["tenant", "policy"],
+  "policy.write": ["tenant", "policy"],
+  "user.manage": ["tenant"],
+  "agent.read": ["tenant", "agent"],
+  "workspace.read": ["tenant", "workspace"],
+  "workspace.write": ["tenant", "workspace"],
+  "analytics.read": ["tenant"],
+  "audit.read": ["tenant"],
 };
 
 // Re-export 供外部统一从 action-codes 引入（authorization 等模块）。

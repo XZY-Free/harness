@@ -6,7 +6,7 @@ import {
   requireThreadForUser,
 } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { createSecret, revokeSecret } from "@/lib/runtime/secret-mount";
 import { isSecretMountAvailable } from "@/lib/runtime/secret-redaction";
 import type { NextRequest } from "next/server";
@@ -50,12 +50,12 @@ function sanitizeSecret(s: {
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
-  const canAll = await hasPermission(r.user.id, "thread.write.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.write");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   const secrets = await listSecretsByScope("thread", id);
@@ -69,12 +69,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
   // secret 管理仅 admin
-  const canAll = await hasPermission(r.user.id, "thread.write.all");
+  const canAll = await hasStudioAction(r.principal, "thread.write");
   if (!canAll) return jsonError(403, "forbidden", "secret 管理需要 admin 权限");
 
   const thread = await getThreadById(id);
@@ -118,12 +118,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
   // secret 管理仅 admin
-  const canAll = await hasPermission(r.user.id, "thread.write.all");
+  const canAll = await hasStudioAction(r.principal, "thread.write");
   if (!canAll) return jsonError(403, "forbidden", "secret 管理需要 admin 权限");
 
   const thread = await getThreadById(id);

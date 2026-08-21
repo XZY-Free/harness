@@ -1,11 +1,11 @@
-import { authErrorResponse, getCurrentUserFromRequest } from "@/lib/auth";
 import { listThreadsForUser, saveThread } from "@/lib/db/queries";
-import { requirePermission } from "@/lib/rbac";
+import { requireStudioAction, resolveStudioPrincipal } from "@/lib/identity/studio-access";
+import { authErrorResponse } from "@/lib/identity/resolver";
 import { isValidThreadId } from "@/lib/workspace";
 
 export async function GET(request: Request) {
   try {
-    const user = await getCurrentUserFromRequest(request);
+    const principal = await resolveStudioPrincipal(request.headers);
     // C-9: 游标分页（cursor=JSON {updatedAt,id}，limit+1 探测下一页）；E-2: search 后端模糊搜索
     const url = new URL(request.url);
     const parsedLimit = Number.parseInt(url.searchParams.get("limit") ?? "50", 10);
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
       }
     }
     const search = url.searchParams.get("search") ?? undefined;
-    const rows = await listThreadsForUser(user.id, { limit: pageSize + 1, before, search });
+    const rows = await listThreadsForUser(principal.userIdentityId, { limit: pageSize + 1, before, search });
     // C-9: limit+1 探测——多取 1 条判断有无下一页，避免满页边界多一次空点击
     const hasMore = rows.length > pageSize;
     const data = hasMore ? rows.slice(0, pageSize) : rows;
@@ -50,9 +50,9 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    const r = await requirePermission(request, "thread.write.self");
+    const r = await requireStudioAction(request, "thread.write", { type: "self" });
     if (!r.ok) return Response.json({ error: "无权限" }, { status: r.response.status });
-    const user = r.user;
+    const principal = r.principal;
     const body = (await request.json().catch(() => ({}))) as {
       id?: string;
       title?: string;
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "非法会话 ID" }, { status: 400 });
     }
     const title = body.title?.trim() || "新会话";
-    await saveThread({ id: threadId, userId: user.id, title, model: body.model ?? null });
+    await saveThread({ id: threadId, userId: principal.userIdentityId, title, model: body.model ?? null });
     return Response.json({ ok: true, data: { id: threadId, title, status: "idle" } });
   } catch (error) {
     return Response.json({ error: "服务器内部错误" }, { status: 500 });

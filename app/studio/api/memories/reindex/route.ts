@@ -1,7 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/http";
 import { resolveEmbeddingProvider } from "@/lib/memory/embedding";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import { reindexMemories } from "@/lib/memory/index";
-import { requirePermission } from "@/lib/rbac";
 import type { NextRequest } from "next/server";
 
 /**
@@ -15,7 +15,7 @@ import type { NextRequest } from "next/server";
  * 后续可改后台任务异步执行。
  */
 export async function POST(req: NextRequest) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
 
   let body: { scope?: string; scopeRef?: string; status?: string } = {};

@@ -63,6 +63,8 @@ design-qa.md
 # 截图 / 临时产物 / 临时 SQL
 output/
 tmp/
+# 关口02 本地临时 vitest 配置与编译缓存
+.tmp-writable/
 
 # 任何纯文本文档与 Office 文档（防止方案 / 笔记误传）
 *.txt

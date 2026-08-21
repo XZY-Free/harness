@@ -1,6 +1,6 @@
 import { deletePermissionRule, updatePermissionRule } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { requirePermission } from "@/lib/rbac";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import {
   PermissionRuleValidationError,
   validateUpdateInput,
@@ -16,9 +16,9 @@ import type { NextRequest } from "next/server";
 
 /** PATCH /studio/api/permission-rules/[id] → 更新规则(全字段可选)。 */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
   const { id } = await params;
 
   const body = await req.json().catch(() => null);
@@ -42,9 +42,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 /** DELETE /studio/api/permission-rules/[id] → 删除规则(二次确认 + 审计)。 */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
   const { id } = await params;
 
   // 二次确认:破坏性操作防误触(对齐 07-P2-7 模式)

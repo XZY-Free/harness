@@ -1,4 +1,3 @@
-import { getCurrentUserFromRequest } from "@/lib/auth";
 import {
   getThreadById,
   getThreadByIdForUser,
@@ -8,7 +7,7 @@ import {
 } from "@/lib/db/queries";
 import { jsonError } from "@/lib/http";
 import { logger } from "@/lib/logger";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import { NextResponse } from "next/server";
 
 /**
@@ -26,17 +25,17 @@ import { NextResponse } from "next/server";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const r = await requirePermission(request, "thread.write.self");
+    const r = await requireStudioAction(request, "thread.write", { type: "self" });
     if (!r.ok) return NextResponse.json({ error: "无权限" }, { status: r.response.status });
-    const user = r.user;
+    const principal = r.principal;
     const { id: threadId } = await params;
 
     // admin(thread.write.all) 可改他人 thread → getThreadById 绕过 owner guard；
     // 其余走 owner guard（foreign → 404，不泄露存在性）。
-    const canAll = await hasPermission(user.id, "thread.write.all");
+    const canAll = await hasStudioAction(principal, "thread.write");
     const thread = canAll
       ? await getThreadById(threadId)
-      : await getThreadByIdForUser(threadId, user.id);
+      : await getThreadByIdForUser(threadId, principal.userIdentityId);
     if (!thread) {
       return NextResponse.json({ error: "会话不存在或无权访问" }, { status: 404 });
     }
@@ -71,15 +70,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const r = await requirePermission(request, "thread.write.self");
+    const r = await requireStudioAction(request, "thread.write", { type: "self" });
     if (!r.ok) return NextResponse.json({ error: "无权限" }, { status: r.response.status });
-    const user = r.user;
+    const principal = r.principal;
     const { id: threadId } = await params;
 
-    const canAll = await hasPermission(user.id, "thread.write.all");
+    const canAll = await hasStudioAction(principal, "thread.write");
     const thread = canAll
       ? await getThreadById(threadId)
-      : await getThreadByIdForUser(threadId, user.id);
+      : await getThreadByIdForUser(threadId, principal.userIdentityId);
     if (!thread) {
       return NextResponse.json({ error: "会话不存在或无权访问" }, { status: 404 });
     }

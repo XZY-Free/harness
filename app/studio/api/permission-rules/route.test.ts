@@ -3,12 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * S1(07-P2-5):permission rule 管理 API 守卫 + 校验 + 审计触发。
  *
- * mock rbac + db/queries(四个 CRUD 函数)。校验逻辑(permission-rule-validation)用真——
+ * mock 正式授权层(requireStudioAction) + db/queries(四个 CRUD 函数)。校验逻辑(permission-rule-validation)用真——
  * 它是纯函数,直接覆盖 scope/decision/toolPattern/argMatcher/ReDoS 各分支。
  * 核心断言:写操作传 actorUserId(审计触发)、校验失败 400、守卫 401/403。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+  resolveStudioPrincipal: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   listPermissionRules: vi.fn(),
   createPermissionRule: vi.fn(),
@@ -17,7 +21,11 @@ const queries = vi.hoisted(() => ({
   listAdminAuditLogs: vi.fn(),
 }));
 
-vi.mock("@/lib/rbac", () => ({ requirePermission: rbac.requirePermission }));
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+  hasStudioAction: studio.hasStudioAction,
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+}));
 vi.mock("@/lib/db/queries", () => ({
   listPermissionRules: queries.listPermissionRules,
   createPermissionRule: queries.createPermissionRule,
@@ -31,7 +39,15 @@ import { GET as GET_AUDIT } from "@/app/studio/api/permission-rules/audit/route"
 import { GET, POST } from "@/app/studio/api/permission-rules/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+} as const;
 const RULE = {
   id: "r1",
   scope: "global",
@@ -55,7 +71,7 @@ function req(method: string, path: string, body?: unknown): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
   queries.createPermissionRule.mockResolvedValue(RULE);
   queries.updatePermissionRule.mockResolvedValue(RULE);
   queries.deletePermissionRule.mockResolvedValue(true);
@@ -65,15 +81,15 @@ beforeEach(() => {
 
 describe("GET /studio/api/permission-rules", () => {
   it("policy.read 通过 → 200 + 规则列表", async () => {
-    rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
+    studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
     const res = await GET(req("GET", "/studio/api/permission-rules"));
     expect(res.status).toBe(200);
-    expect(rbac.requirePermission).toHaveBeenCalledWith(expect.anything(), "policy.read");
+    expect(studio.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "policy.read");
     expect(queries.listPermissionRules).toHaveBeenCalled();
   });
 
   it("无 policy.read → 守卫拒绝", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response(null, { status: 403 }),
     });
@@ -137,7 +153,7 @@ describe("POST /studio/api/permission-rules (新建 + 审计触发)", () => {
   });
 
   it("无 policy.write → 守卫拒绝", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response(null, { status: 403 }),
     });
@@ -223,7 +239,7 @@ describe("GET /studio/api/permission-rules/audit (变更历史)", () => {
   });
 
   it("无 audit.read → 守卫拒绝", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response(null, { status: 403 }),
     });

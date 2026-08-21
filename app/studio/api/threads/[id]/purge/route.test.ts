@@ -5,16 +5,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * 覆盖:仅 admin 可调(member 403)、二次确认、thread 不存在 404、成功物理删+审计。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studioAccess = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   getThreadByIdIncludingDeleted: vi.fn(),
   deleteThreadRecursive: vi.fn(),
 }));
 const audit = vi.hoisted(() => ({ recordAdminAudit: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studioAccess.requireStudioAction,
+  hasStudioAction: studioAccess.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getThreadByIdIncludingDeleted: queries.getThreadByIdIncludingDeleted,
@@ -25,7 +28,16 @@ vi.mock("@/lib/studio/admin-audit", () => ({ recordAdminAudit: audit.recordAdmin
 import { DELETE } from "@/app/studio/api/threads/[id]/purge/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+/** requireStudioAction 返回的 Principal：路由读取 userIdentityId 作 actorUserId。 */
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+};
 
 function delReq(url: string, body?: unknown): NextRequest {
   return new NextRequest(url, {
@@ -37,8 +49,8 @@ function delReq(url: string, body?: unknown): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  rbac.hasPermission.mockResolvedValue(true); // 默认 admin
+  studioAccess.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studioAccess.hasStudioAction.mockResolvedValue(true); // 默认 admin
   queries.getThreadByIdIncludingDeleted.mockResolvedValue({
     id: "t1",
     title: "测试会话",
@@ -69,7 +81,7 @@ describe("DELETE /studio/api/threads/[id]/purge (admin 彻底删除)", () => {
   });
 
   it("非 admin(member) → 403,不物理删", async () => {
-    rbac.hasPermission.mockResolvedValue(false);
+    studioAccess.hasStudioAction.mockResolvedValue(false);
     const res = await DELETE(
       delReq("http://localhost/studio/api/threads/t1/purge", { confirm: true }),
       {

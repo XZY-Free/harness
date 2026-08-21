@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * V3.1 Stage E：approvals 列表 API 守卫。覆盖 200 / 401 / 403 / 404 / admin 跨 thread。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studioAccess = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({
   getThreadById: vi.fn(),
   requireThreadForUser: vi.fn(),
@@ -12,9 +15,9 @@ const queries = vi.hoisted(() => ({
   getResolvedApprovalsByThread: vi.fn(),
 }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studioAccess.requireStudioAction,
+  hasStudioAction: studioAccess.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getThreadById: queries.getThreadById,
@@ -26,7 +29,15 @@ vi.mock("@/lib/db/queries", () => ({
 import { GET } from "@/app/studio/api/threads/[id]/approvals/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+};
 
 function req(url: string) {
   return new NextRequest(url);
@@ -34,8 +45,8 @@ function req(url: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  rbac.hasPermission.mockResolvedValue(false);
+  studioAccess.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studioAccess.hasStudioAction.mockResolvedValue(false);
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
   queries.getThreadById.mockResolvedValue(null);
   queries.getPendingApprovalsByThread.mockResolvedValue([]);
@@ -84,7 +95,7 @@ describe("GET /studio/api/threads/[id]/approvals (Stage E)", () => {
   });
 
   it("无 studio.access → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studioAccess.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -95,7 +106,7 @@ describe("GET /studio/api/threads/[id]/approvals (Stage E)", () => {
   });
 
   it("未登录 → 401", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studioAccess.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 401 }),
     });
@@ -106,7 +117,7 @@ describe("GET /studio/api/threads/[id]/approvals (Stage E)", () => {
   });
 
   it("admin(thread.read.all) → 可访问任意 thread", async () => {
-    rbac.hasPermission.mockResolvedValue(true);
+    studioAccess.hasStudioAction.mockResolvedValue(true);
     queries.getThreadById.mockResolvedValue({ id: "tOther", userId: "u2" });
     const res = await GET(req("http://localhost/studio/api/threads/tOther/approvals"), {
       params: Promise.resolve({ id: "tOther" }),

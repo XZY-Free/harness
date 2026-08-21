@@ -1,7 +1,6 @@
-import { getCurrentUserFromRequest } from "@/lib/auth";
 import { listAllThreads, listThreadsForUser } from "@/lib/db/studio-queries";
 import { STATUS_LABEL as STATUS_LABEL_DICT, t } from "@/lib/i18n";
-import { hasPermission } from "@/lib/rbac";
+import { hasStudioAction, resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { headers } from "next/headers";
 import Link from "next/link";
 
@@ -15,9 +14,9 @@ export const dynamic = "force-dynamic";
 const STATUS_LABEL = STATUS_LABEL_DICT.zh;
 
 export default async function ThreadsPage() {
-  const user = await getCurrentUserFromRequest({ headers: await headers() });
-  const canAll = await hasPermission(user.id, "thread.read.all");
-  const threads = canAll ? await listAllThreads() : await listThreadsForUser(user.id);
+  const principal = await resolveStudioPrincipal(await headers());
+  const canAll = await hasStudioAction(principal, "thread.read");
+  const threads = canAll ? await listAllThreads() : await listThreadsForUser(principal.userIdentityId);
 
   return (
     <div>

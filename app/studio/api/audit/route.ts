@@ -1,7 +1,7 @@
 import { listAdminAuditLogs } from "@/lib/db/queries";
 import { ADMIN_AUDIT_ACTIONS, type AdminAuditAction } from "@/lib/db/schema";
 import { jsonError, jsonOk } from "@/lib/http";
-import { requirePermission } from "@/lib/rbac";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -17,7 +17,7 @@ import type { NextRequest } from "next/server";
 const ACTION_SET: ReadonlySet<string> = new Set(ADMIN_AUDIT_ACTIONS);
 
 export async function GET(req: NextRequest) {
-  const r = await requirePermission(req, "audit.read");
+  const r = await requireStudioAction(req, "audit.read");
   if (!r.ok) return r.response;
 
   const sp = req.nextUrl.searchParams;

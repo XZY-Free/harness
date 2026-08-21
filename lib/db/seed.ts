@@ -19,22 +19,42 @@
  */
 import { createAgent, getAgentByKey } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
+import { type ActionCode } from "@/lib/identity/action-codes";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 
 /** 默认 agent key（租户内唯一，幂等键）。 */
 export const DEFAULT_AGENT_KEY = "default";
 
+/** 默认用户授予的 Studio 动作码（admin 等值：全部 Studio 长期业务动作）。 */
+export const DEFAULT_GRANT_ACTION_CODES: ActionCode[] = [
+  "studio.access",
+  "skill.read",
+  "skill.write",
+  "thread.read",
+  "thread.write",
+  "policy.read",
+  "policy.write",
+  "user.manage",
+  "agent.read",
+  "workspace.read",
+  "workspace.write",
+  "analytics.read",
+  "audit.read",
+];
+
 /**
  * 幂等引导默认租户 + 默认用户身份 + 主体绑定。
  *
  * 与 `lib/identity/resolver.ts` 的 `resolvePrincipal` 每请求引导链同源，
- * 空库时保证内部 identity 骨架就绪。返回 tenantId 与 userIdentityId。
+ * 空库时保证内部 identity 骨架就绪。返回 tenantId / userIdentityId / principalBindingId。
  */
 export async function seedDefaultIdentity(): Promise<{
   tenantId: string;
   userIdentityId: string;
+  principalBindingId: string;
 }> {
   const tenant = await ensureDefaultTenant();
 
@@ -45,7 +65,7 @@ export async function seedDefaultIdentity(): Promise<{
     displayName: DEFAULT_USER_NAME,
   });
 
-  await upsertPrincipalBinding({
+  const binding = await upsertPrincipalBinding({
     tenantId: tenant.id,
     subjectType: "user",
     externalId: DEFAULT_USER_ID,
@@ -53,7 +73,42 @@ export async function seedDefaultIdentity(): Promise<{
     userIdentityId: identity.id,
   });
 
-  return { tenantId: tenant.id, userIdentityId: identity.id };
+  return { tenantId: tenant.id, userIdentityId: identity.id, principalBindingId: binding.id };
+}
+
+/**
+ * 为默认用户授予全部 Studio 动作码（tenant-wildcard scope，admin 等值）。
+ *
+ * thread 类动作额外授予 self-wildcard scope：正式授权模型里 ".self" 解码为
+ * (self 资源)，tenant-wildcard grant 不覆盖 self 类型请求资源（scopeCovers 要求
+ * type 相同），故默认用户需同时持有 tenant + self 两态，才能通过
+ * requireStudioAction(…, { type: "self" }) 门禁（创建/管理自己的 thread）。
+ *
+ * 幂等：grantActionBinding 每次写入新绑定，重复执行会产生重复行；
+ * 这里不依赖唯一约束（RoleActionBinding 无 (tenant,principal,action) unique），
+ * 交由调用方（CLI seed / 测试 setup）决定是否重复调用。
+ */
+export async function seedDefaultGrants(
+  tenantId: string,
+  principalBindingId: string,
+): Promise<void> {
+  for (const actionCode of DEFAULT_GRANT_ACTION_CODES) {
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode,
+      resourceScope: { type: "tenant", wildcard: true },
+    });
+  }
+  // thread 类动作：self 范围（旧 thread.write.self 语义），默认用户 admin 等值。
+  for (const actionCode of ["thread.read", "thread.write"] as const) {
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode,
+      resourceScope: { type: "self", wildcard: true },
+    });
+  }
 }
 
 /**
@@ -89,6 +144,9 @@ async function main() {
   console.log(
     `[seed] 默认租户 + 用户身份就绪：tenant=${identity.tenantId} userIdentity=${identity.userIdentityId}`,
   );
+
+  await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
+  console.log(`[seed] 默认用户授予 ${DEFAULT_GRANT_ACTION_CODES.length} 个 Studio 动作码`);
 
   const agent = await seedDefaultAgent();
   console.log(

@@ -1,7 +1,7 @@
 import { apiPath } from "@/lib/api-fetch";
-import { authErrorResponse, getCurrentUserFromRequest } from "@/lib/auth";
 import { requireThreadForUser } from "@/lib/db/queries";
-import type { User } from "@/lib/db/schema";
+import { resolveStudioPrincipal } from "@/lib/identity/studio-access";
+import { authErrorResponse, type Principal } from "@/lib/identity/resolver";
 import { resolveRuntimeTypeForThread, resolveRuntimes } from "@/lib/runtime/registry";
 
 /**
@@ -22,16 +22,16 @@ export async function GET(
 ) {
   const { threadId, path } = await params;
 
-  let currentUser: User;
+  let currentPrincipal: Principal;
   try {
-    currentUser = await getCurrentUserFromRequest(request);
+    currentPrincipal = await resolveStudioPrincipal(request.headers);
   } catch (error) {
     const authErr = authErrorResponse(error);
     if (authErr) return authErr;
     throw error;
   }
 
-  const thread = await requireThreadForUser(threadId, currentUser.id);
+  const thread = await requireThreadForUser(threadId, currentPrincipal.userIdentityId);
   if (!thread) {
     return new Response(null, { status: 404 });
   }

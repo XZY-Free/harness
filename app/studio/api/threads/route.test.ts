@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Phase 4-4 Stage D：Threads 只读 API 守卫与隔离。
- * mock rbac + studio-queries + queries，断言：
+ * mock studio-access + studio-queries + queries，断言：
  * - member → 只列自己；admin(thread.read.all) → 全部。
  * - member foreign thread → 404；admin 不存在 → 404；admin 看任意 → 200。
  * - 无 studio.access → 403。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studioAccess = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const studio = vi.hoisted(() => ({
   listThreadsForUser: vi.fn(),
   listAllThreads: vi.fn(),
@@ -18,9 +21,9 @@ const studio = vi.hoisted(() => ({
 }));
 const queries = vi.hoisted(() => ({ getThreadById: vi.fn(), requireThreadForUser: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studioAccess.requireStudioAction,
+  hasStudioAction: studioAccess.hasStudioAction,
 }));
 vi.mock("@/lib/db/studio-queries", () => ({
   listThreadsForUser: studio.listThreadsForUser,
@@ -38,12 +41,20 @@ import { GET as getDetail } from "@/app/studio/api/threads/[id]/route";
 import { GET as getList } from "@/app/studio/api/threads/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  rbac.hasPermission.mockResolvedValue(false); // 默认 member：无 thread.read.all
+  studioAccess.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studioAccess.hasStudioAction.mockResolvedValue(false); // 默认 member：无 thread.read.all
 });
 
 describe("GET /studio/api/threads (Stage D)", () => {
@@ -59,7 +70,7 @@ describe("GET /studio/api/threads (Stage D)", () => {
   });
 
   it("admin(thread.read.all) → 列全部", async () => {
-    rbac.hasPermission.mockResolvedValue(true);
+    studioAccess.hasStudioAction.mockResolvedValue(true);
     studio.listAllThreads.mockResolvedValue([{ id: "t1" }, { id: "t2" }]);
     const res = await getList(new NextRequest("http://localhost/studio/api/threads"));
     expect(res.status).toBe(200);
@@ -70,7 +81,7 @@ describe("GET /studio/api/threads (Stage D)", () => {
   });
 
   it("无 studio.access → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studioAccess.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
@@ -106,7 +117,7 @@ describe("GET /studio/api/threads/[id] (Stage D)", () => {
   });
 
   it("admin 看任意 thread → 200（getThreadById）", async () => {
-    rbac.hasPermission.mockResolvedValue(true);
+    studioAccess.hasStudioAction.mockResolvedValue(true);
     queries.getThreadById.mockResolvedValue({ id: "tOther", userId: "u2", status: "failed" });
     studio.listEventsForThread.mockResolvedValue([]);
     studio.listToolRunsForThread.mockResolvedValue([]);
@@ -120,7 +131,7 @@ describe("GET /studio/api/threads/[id] (Stage D)", () => {
   });
 
   it("admin 不存在 thread → 404", async () => {
-    rbac.hasPermission.mockResolvedValue(true);
+    studioAccess.hasStudioAction.mockResolvedValue(true);
     queries.getThreadById.mockResolvedValue(null);
     const res = await getDetail(new NextRequest("http://localhost/studio/api/threads/nope"), {
       params: Promise.resolve({ id: "nope" }),
@@ -129,7 +140,7 @@ describe("GET /studio/api/threads/[id] (Stage D)", () => {
   });
 
   it("无 studio.access → 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+    studioAccess.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });

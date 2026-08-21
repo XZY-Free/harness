@@ -1,9 +1,8 @@
 import { StudioGatePage } from "@/components/studio/gate-page";
 import { StudioNav } from "@/components/studio/nav";
 import { StudioToastProvider } from "@/components/studio/toast-provider";
-import { AuthError, getCurrentUserFromRequest } from "@/lib/auth";
-import { resolvePrincipal } from "@/lib/identity/resolver";
-import { hasPermission } from "@/lib/rbac";
+import { AuthenticationError, resolvePrincipal, type Principal } from "@/lib/identity/resolver";
+import { hasStudioAction, resolveStudioPrincipal } from "@/lib/identity/studio-access";
 import { computeStudioNavVisibility } from "@/lib/studio/nav-visibility";
 import type { StudioNavVisibility } from "@/lib/studio/nav-visibility";
 import { headers } from "next/headers";
@@ -32,17 +31,17 @@ export default async function StudioLayout({
 }: {
   children: React.ReactNode;
 }) {
-  let user: { id: string } | undefined;
+  let principal: Principal | undefined;
   try {
-    user = await getCurrentUserFromRequest({ headers: await headers() });
+    principal = await resolveStudioPrincipal(await headers());
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthenticationError) {
       return <StudioGatePage status={401} message="未认证：缺少 SSO 身份" />;
     }
     throw error;
   }
 
-  const allowed = await hasPermission(user.id, "studio.access");
+  const allowed = await hasStudioAction(principal!, "studio.access");
   if (!allowed) {
     return <StudioGatePage status={403} message="无 studio.access 权限" />;
   }

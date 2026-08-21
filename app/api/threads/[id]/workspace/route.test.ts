@@ -10,9 +10,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - safeJoin / symlink → 400
  */
 
-const auth = vi.hoisted(() => ({ getCurrentUserFromRequest: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  resolveStudioPrincipal: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
+const resolver = vi.hoisted(() => ({ authErrorResponse: vi.fn() }));
 const queries = vi.hoisted(() => ({ requireThreadForUser: vi.fn() }));
-const rbac = vi.hoisted(() => ({ hasPermission: vi.fn() }));
 const ws = vi.hoisted(() => {
   class FakeWorkspacePathError extends Error {}
   return {
@@ -24,12 +27,14 @@ const ws = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/auth", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth")>();
-  return { ...actual, getCurrentUserFromRequest: auth.getCurrentUserFromRequest };
-});
+vi.mock("@/lib/identity/studio-access", () => ({
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+  hasStudioAction: studio.hasStudioAction,
+}));
+vi.mock("@/lib/identity/resolver", () => ({
+  authErrorResponse: resolver.authErrorResponse,
+}));
 vi.mock("@/lib/db/queries", () => ({ requireThreadForUser: queries.requireThreadForUser }));
-vi.mock("@/lib/rbac", () => ({ hasPermission: rbac.hasPermission }));
 vi.mock("@/lib/workspace", () => ({
   WorkspacePathError: ws.WorkspacePathError,
   listWorkspaceFiles: ws.listWorkspaceFiles,
@@ -41,7 +46,16 @@ vi.mock("@/lib/workspace", () => ({
 import { GET } from "@/app/api/threads/[id]/workspace/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+/** requireThreadWorkspaceRead 内部 resolveStudioPrincipal 返回的 principal。 */
+const PRINCIPAL = {
+  id: "u1",
+  email: "a@x",
+  name: "A",
+  externalId: "u1",
+  createdAt: new Date(),
+  userIdentityId: "u1",
+  tenantId: "t1",
+};
 
 type NextInit = NonNullable<ConstructorParameters<typeof NextRequest>[1]>;
 
@@ -51,9 +65,10 @@ function req(url: string, init?: NextInit) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  auth.getCurrentUserFromRequest.mockResolvedValue(USER);
+  studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL);
+  resolver.authErrorResponse.mockReturnValue(null);
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
-  rbac.hasPermission.mockResolvedValue(true);
+  studio.hasStudioAction.mockResolvedValue(true);
 });
 
 describe("GET /api/threads/[id]/workspace (V5-B1 前台)", () => {
@@ -76,12 +91,12 @@ describe("GET /api/threads/[id]/workspace (V5-B1 前台)", () => {
       params: Promise.resolve({ id: "tOther" }),
     });
     expect(res.status).toBe(404);
-    expect(rbac.hasPermission).not.toHaveBeenCalled();
+    expect(studio.hasStudioAction).not.toHaveBeenCalled();
     expect(ws.listWorkspaceFiles).not.toHaveBeenCalled();
   });
 
   it("无 workspace.read → 403，不调 list", async () => {
-    rbac.hasPermission.mockResolvedValue(false);
+    studio.hasStudioAction.mockResolvedValue(false);
     const res = await GET(req("http://localhost/api/threads/t1/workspace"), {
       params: Promise.resolve({ id: "t1" }),
     });
@@ -90,10 +105,8 @@ describe("GET /api/threads/[id]/workspace (V5-B1 前台)", () => {
   });
 
   it("认证失败 → 401（authErrorResponse 透传）", async () => {
-    const { AuthError } = await import("@/lib/auth");
-    auth.getCurrentUserFromRequest.mockRejectedValue(
-      new AuthError("missing_identity", "缺少 SSO 用户标识"),
-    );
+    studio.resolveStudioPrincipal.mockRejectedValue(new Error("缺少 SSO 用户标识"));
+    resolver.authErrorResponse.mockReturnValue(new Response(null, { status: 401 }));
     const res = await GET(req("http://localhost/api/threads/t1/workspace"), {
       params: Promise.resolve({ id: "t1" }),
     });

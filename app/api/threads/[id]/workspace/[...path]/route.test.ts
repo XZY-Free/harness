@@ -11,9 +11,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - 越界 / symlink → 400 invalid_path
  */
 
-const auth = vi.hoisted(() => ({ getCurrentUserFromRequest: vi.fn() }));
+const studio = vi.hoisted(() => ({
+  resolveStudioPrincipal: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
+const resolver = vi.hoisted(() => ({ authErrorResponse: vi.fn() }));
 const queries = vi.hoisted(() => ({ requireThreadForUser: vi.fn() }));
-const rbac = vi.hoisted(() => ({ hasPermission: vi.fn() }));
 const ws = vi.hoisted(() => {
   class FakeWorkspacePathError extends Error {}
   class FakeRevisionConflict extends Error {
@@ -36,9 +39,14 @@ const ws = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/auth", () => ({ getCurrentUserFromRequest: auth.getCurrentUserFromRequest }));
+vi.mock("@/lib/identity/studio-access", () => ({
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+  hasStudioAction: studio.hasStudioAction,
+}));
+vi.mock("@/lib/identity/resolver", () => ({
+  authErrorResponse: resolver.authErrorResponse,
+}));
 vi.mock("@/lib/db/queries", () => ({ requireThreadForUser: queries.requireThreadForUser }));
-vi.mock("@/lib/rbac", () => ({ hasPermission: rbac.hasPermission }));
 vi.mock("@/lib/workspace", () => ({
   WorkspacePathError: ws.WorkspacePathError,
   WorkspaceRevisionConflict: ws.WorkspaceRevisionConflict,
@@ -53,7 +61,16 @@ vi.mock("@/lib/workspace", () => ({
 import { GET, PUT } from "@/app/api/threads/[id]/workspace/[...path]/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+/** requireThreadWorkspaceRead/Write 内部 resolveStudioPrincipal 返回的 principal。 */
+const PRINCIPAL = {
+  id: "u1",
+  email: "a@x",
+  name: "A",
+  externalId: "u1",
+  createdAt: new Date(),
+  userIdentityId: "u1",
+  tenantId: "t1",
+};
 
 type NextInit = NonNullable<ConstructorParameters<typeof NextRequest>[1]>;
 
@@ -63,9 +80,10 @@ function req(url: string, init?: NextInit) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  auth.getCurrentUserFromRequest.mockResolvedValue(USER);
+  studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL);
+  resolver.authErrorResponse.mockReturnValue(null);
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
-  rbac.hasPermission.mockResolvedValue(true);
+  studio.hasStudioAction.mockResolvedValue(true);
   // 默认非内部路径；具体用例可覆盖
   ws.isInternalPath.mockReturnValue(false);
   // raw 模式默认返回 image/png；具体用例可覆盖
@@ -140,12 +158,12 @@ describe("GET /api/threads/[id]/workspace/[...path] (V5-B1 前台)", () => {
       params: Promise.resolve({ id: "tOther", path: ["README.md"] }),
     });
     expect(res.status).toBe(404);
-    expect(rbac.hasPermission).not.toHaveBeenCalled();
+    expect(studio.hasStudioAction).not.toHaveBeenCalled();
     expect(ws.readWorkspaceFile).not.toHaveBeenCalled();
   });
 
   it("无 workspace.read → 403", async () => {
-    rbac.hasPermission.mockResolvedValue(false);
+    studio.hasStudioAction.mockResolvedValue(false);
     const res = await GET(req("http://localhost/api/threads/t1/workspace/README.md"), {
       params: Promise.resolve({ id: "t1", path: ["README.md"] }),
     });
@@ -357,7 +375,7 @@ describe("PUT /api/threads/[id]/workspace/[...path] (V9 阶段 4)", () => {
   });
 
   it("无 workspace.write → 403", async () => {
-    rbac.hasPermission.mockResolvedValue(false);
+    studio.hasStudioAction.mockResolvedValue(false);
     const res = await PUT(
       putReq("http://localhost/api/threads/t1/workspace/README.md", { content: "x" }),
       { params: Promise.resolve({ id: "t1", path: ["README.md"] }) },

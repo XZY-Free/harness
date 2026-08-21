@@ -7,7 +7,7 @@ import {
 } from "@/lib/db/queries";
 import type { ApprovalScope } from "@/lib/db/schema";
 import { jsonError, jsonOk } from "@/lib/http";
-import { hasPermission, requirePermission } from "@/lib/rbac";
+import { hasStudioAction, requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -23,13 +23,13 @@ import type { NextRequest } from "next/server";
  * scope=always 需二次确认（与单条一致）。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requirePermission(req, "studio.access");
+  const r = await requireStudioAction(req, "studio.access");
   if (!r.ok) return r.response;
   const { id } = await params;
 
   // 校验 thread 可见性（owner 或 admin）
-  const canAll = await hasPermission(r.user.id, "thread.write.all");
-  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.user.id);
+  const canAll = await hasStudioAction(r.principal, "thread.write");
+  const thread = canAll ? await getThreadById(id) : await requireThreadForUser(id, r.principal.userIdentityId);
   if (!thread) return jsonError(404, "thread_not_found", "会话不存在");
 
   // 解析 body
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       id: approvalId,
       decision: body.decision as "approved" | "denied",
       scope: body.scope as ApprovalScope,
-      resolvedBy: r.user.id,
+      resolvedBy: r.principal.userIdentityId,
     });
     if (!updated) {
       // 并发：已被另一请求决议
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       toolRunId: updated.toolRunId,
       decision: updated.status,
       scope: updated.approvedScope,
-      resolvedBy: r.user.id,
+      resolvedBy: r.principal.userIdentityId,
     });
     resolved.push({
       id: updated.id,

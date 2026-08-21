@@ -16,14 +16,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - workspace 路径越界 → 400 invalid_path
  */
 
-const auth = vi.hoisted(() => ({
-  getCurrentUserFromRequest: vi.fn(),
-  authErrorFactory: null as
-    | null
-    | ((code: "missing_identity" | "missing_email", message: string) => Error),
+const studio = vi.hoisted(() => ({
+  resolveStudioPrincipal: vi.fn(),
+  hasStudioAction: vi.fn(),
 }));
+const resolver = vi.hoisted(() => ({ authErrorResponse: vi.fn() }));
 const queries = vi.hoisted(() => ({ requireThreadForUser: vi.fn() }));
-const rbac = vi.hoisted(() => ({ hasPermission: vi.fn() }));
 const ws = vi.hoisted(() => {
   class FakeWorkspacePathError extends Error {}
   return {
@@ -32,14 +30,14 @@ const ws = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/auth", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth")>();
-  // 暴露真实 AuthError 构造器，供测试构造错误实例（与实际 authErrorResponse 中 instanceof 校验匹配）
-  auth.authErrorFactory = (code, message) => new actual.AuthError(code, message);
-  return { ...actual, getCurrentUserFromRequest: auth.getCurrentUserFromRequest };
-});
+vi.mock("@/lib/identity/studio-access", () => ({
+  resolveStudioPrincipal: studio.resolveStudioPrincipal,
+  hasStudioAction: studio.hasStudioAction,
+}));
+vi.mock("@/lib/identity/resolver", () => ({
+  authErrorResponse: resolver.authErrorResponse,
+}));
 vi.mock("@/lib/db/queries", () => ({ requireThreadForUser: queries.requireThreadForUser }));
-vi.mock("@/lib/rbac", () => ({ hasPermission: rbac.hasPermission }));
 vi.mock("@/lib/workspace", () => ({
   WorkspacePathError: ws.WorkspacePathError,
   writeWorkspaceFileFromStream: ws.writeWorkspaceFileFromStream,
@@ -48,7 +46,16 @@ vi.mock("@/lib/workspace", () => ({
 import { POST } from "@/app/api/threads/[id]/workspace/upload/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+/** requireThreadWorkspaceRead 内部 resolveStudioPrincipal 返回的 principal。 */
+const PRINCIPAL = {
+  id: "u1",
+  email: "a@x",
+  name: "A",
+  externalId: "u1",
+  createdAt: new Date(),
+  userIdentityId: "u1",
+  tenantId: "t1",
+};
 
 type NextInit = NonNullable<ConstructorParameters<typeof NextRequest>[1]>;
 
@@ -84,9 +91,10 @@ function makeBody(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  auth.getCurrentUserFromRequest.mockResolvedValue(USER);
+  studio.resolveStudioPrincipal.mockResolvedValue(PRINCIPAL);
+  resolver.authErrorResponse.mockReturnValue(null);
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
-  rbac.hasPermission.mockResolvedValue(true);
+  studio.hasStudioAction.mockResolvedValue(true);
   ws.writeWorkspaceFileFromStream.mockResolvedValue({ size: 100 });
 });
 
@@ -215,12 +223,8 @@ describe("POST /api/threads/[id]/workspace/upload (V10 Phase 7-1)", () => {
   });
 
   it("未鉴权 → 401", async () => {
-    if (!auth.authErrorFactory) {
-      throw new Error("authErrorFactory 未初始化");
-    }
-    auth.getCurrentUserFromRequest.mockRejectedValue(
-      auth.authErrorFactory("missing_identity", "未授权"),
-    );
+    studio.resolveStudioPrincipal.mockRejectedValue(new Error("未授权"));
+    resolver.authErrorResponse.mockReturnValue(new Response(null, { status: 401 }));
     const body = makeBody([new Uint8Array([1])]);
     const req = makeRequest(body, "report.pdf");
 
@@ -242,7 +246,7 @@ describe("POST /api/threads/[id]/workspace/upload (V10 Phase 7-1)", () => {
   });
 
   it("无 workspace.read 权限 → 403 forbidden", async () => {
-    rbac.hasPermission.mockResolvedValue(false);
+    studio.hasStudioAction.mockResolvedValue(false);
     const body = makeBody([new Uint8Array([1])]);
     const req = makeRequest(body, "report.pdf");
 

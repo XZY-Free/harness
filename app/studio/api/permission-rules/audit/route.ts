@@ -1,6 +1,6 @@
 import { listAdminAuditLogs } from "@/lib/db/queries";
 import { jsonOk } from "@/lib/http";
-import { requirePermission } from "@/lib/rbac";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import type { NextRequest } from "next/server";
 
 /**
@@ -11,7 +11,7 @@ import type { NextRequest } from "next/server";
  * 守卫 audit.read(admin 角色);limit 默认 100,上限 200。
  */
 export async function GET(req: NextRequest) {
-  const r = await requirePermission(req, "audit.read");
+  const r = await requireStudioAction(req, "audit.read");
   if (!r.ok) return r.response;
 
   const url = new URL(req.url);

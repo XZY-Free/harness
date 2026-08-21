@@ -1,6 +1,6 @@
 import { createPermissionRule, listPermissionRules } from "@/lib/db/queries";
 import { jsonError, jsonOk } from "@/lib/http";
-import { requirePermission } from "@/lib/rbac";
+import { requireStudioAction } from "@/lib/identity/studio-access";
 import {
   PermissionRuleValidationError,
   validateCreateInput,
@@ -21,7 +21,7 @@ import type { NextRequest } from "next/server";
 
 /** GET /studio/api/permission-rules → 列全部持久化权限规则(按 priority 降序)。 */
 export async function GET(req: NextRequest) {
-  const r = await requirePermission(req, "policy.read");
+  const r = await requireStudioAction(req, "policy.read");
   if (!r.ok) return r.response;
   const rules = await listPermissionRules();
   return jsonOk({ rules });
@@ -29,9 +29,9 @@ export async function GET(req: NextRequest) {
 
 /** POST /studio/api/permission-rules → 新建规则(policy.write 守卫 + 服务端校验 + 审计)。 */
 export async function POST(req: NextRequest) {
-  const r = await requirePermission(req, "policy.write");
+  const r = await requireStudioAction(req, "policy.write");
   if (!r.ok) return r.response;
-  const actorUserId = r.user.id;
+  const actorUserId = r.principal.userIdentityId;
 
   const body = await req.json().catch(() => null);
   let input: ReturnType<typeof validateCreateInput> | undefined;

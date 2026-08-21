@@ -5,7 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * 断言：读 200 / 删 200 / 非 owner 404 / 无权限 403 / 越界 400 / 不存在 404。
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn(), hasPermission: vi.fn() }));
+const studioAccess = vi.hoisted(() => ({
+  requireStudioAction: vi.fn(),
+  hasStudioAction: vi.fn(),
+}));
 const queries = vi.hoisted(() => ({ getThreadById: vi.fn(), requireThreadForUser: vi.fn() }));
 const ws = vi.hoisted(() => ({
   WorkspacePathError: class FakeWorkspacePathError extends Error {},
@@ -15,9 +18,9 @@ const ws = vi.hoisted(() => ({
 }));
 const audit = vi.hoisted(() => ({ recordAdminAudit: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({
-  requirePermission: rbac.requirePermission,
-  hasPermission: rbac.hasPermission,
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studioAccess.requireStudioAction,
+  hasStudioAction: studioAccess.hasStudioAction,
 }));
 vi.mock("@/lib/db/queries", () => ({
   getThreadById: queries.getThreadById,
@@ -40,7 +43,16 @@ vi.mock("@/lib/logger", () => ({
 import { DELETE, GET } from "@/app/studio/api/threads/[id]/workspace/[...path]/route";
 import { NextRequest } from "next/server";
 
-const USER = { id: "u1", email: "a@x", name: "A", externalId: "u1", createdAt: new Date() };
+/** requireStudioAction 返回的 Principal：路由读取 userIdentityId 作 owner guard。 */
+const PRINCIPAL = {
+  tenantId: "t1",
+  tenantKey: "t1",
+  userIdentityId: "u1",
+  externalSubject: "u1",
+  email: "a@x",
+  displayName: "A",
+  audience: "employee",
+};
 
 type NextInit = NonNullable<ConstructorParameters<typeof NextRequest>[1]>;
 
@@ -50,9 +62,9 @@ function req(url: string, init?: NextInit) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: USER });
-  rbac.hasPermission.mockImplementation(
-    async (_uid: string, perm: string) => perm === "workspace.read",
+  studioAccess.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
+  studioAccess.hasStudioAction.mockImplementation(
+    async (_principal: unknown, perm: string) => perm === "workspace.read",
   );
   queries.requireThreadForUser.mockResolvedValue({ id: "t1", userId: "u1" });
   queries.getThreadById.mockResolvedValue(null);
@@ -100,7 +112,7 @@ describe("GET /studio/api/threads/[id]/workspace/[...path] (切片 B2)", () => {
   });
 
   it("无 workspace.read → 403", async () => {
-    rbac.hasPermission.mockResolvedValue(false);
+    studioAccess.hasStudioAction.mockResolvedValue(false);
     const res = await GET(req("http://localhost/studio/api/threads/t1/workspace/x.txt"), {
       params: Promise.resolve({ id: "t1", path: ["x.txt"] }),
     });
@@ -129,7 +141,7 @@ describe("GET /studio/api/threads/[id]/workspace/[...path] (切片 B2)", () => {
 
 describe("DELETE /studio/api/threads/[id]/workspace/[...path] (切片 B2 + C)", () => {
   it("owner + workspace.write → 200 + { deleted: true } + succeeded 审计", async () => {
-    rbac.hasPermission.mockImplementation(
+    studioAccess.hasStudioAction.mockImplementation(
       async (_uid: string, perm: string) => perm === "workspace.read" || perm === "workspace.write",
     );
     ws.deleteWorkspaceFile.mockResolvedValue(true);
@@ -155,7 +167,7 @@ describe("DELETE /studio/api/threads/[id]/workspace/[...path] (切片 B2 + C)", 
   });
 
   it("删不存在文件 → 200 + { deleted: false } + succeeded 审计 deleted:false", async () => {
-    rbac.hasPermission.mockImplementation(
+    studioAccess.hasStudioAction.mockImplementation(
       async (_uid: string, perm: string) => perm === "workspace.read" || perm === "workspace.write",
     );
     ws.deleteWorkspaceFile.mockResolvedValue(false);
@@ -176,7 +188,7 @@ describe("DELETE /studio/api/threads/[id]/workspace/[...path] (切片 B2 + C)", 
   });
 
   it("删目录 → 400 invalid_path + failed 审计", async () => {
-    rbac.hasPermission.mockImplementation(
+    studioAccess.hasStudioAction.mockImplementation(
       async (_uid: string, perm: string) => perm === "workspace.read" || perm === "workspace.write",
     );
     ws.deleteWorkspaceFile.mockRejectedValue(new ws.WorkspacePathError("非法操作：拒绝删除目录"));
@@ -198,7 +210,7 @@ describe("DELETE /studio/api/threads/[id]/workspace/[...path] (切片 B2 + C)", 
   });
 
   it("普通 delete 异常不应伪装成 invalid_path，也不审计", async () => {
-    rbac.hasPermission.mockImplementation(
+    studioAccess.hasStudioAction.mockImplementation(
       async (_uid: string, perm: string) => perm === "workspace.read" || perm === "workspace.write",
     );
     ws.deleteWorkspaceFile.mockRejectedValue(new Error("unlink failed"));

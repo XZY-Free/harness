@@ -582,64 +582,6 @@ export type SkillSyncMapping = InferSelectModel<typeof skillSyncMapping>;
  * 内置角色 key（seed 灌 admin / member）。isSystem=true 的角色不可删除（保留扩展位）。
  * 权限是**固定常量集合**（见 lib/rbac.ts PERMISSIONS），不建动态权限表——避免过早抽象。
  */
-export const ROLE_KEYS = ["admin", "member"] as const;
-export type RoleKey = (typeof ROLE_KEYS)[number];
-
-export const role = mysqlTable(
-  "Role",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    // 稳定 key（admin / member），作查询与 seed 幂等键
-    key: varchar("key", { length: 32 }).notNull(),
-    name: varchar("name", { length: 64 }).notNull(),
-    // 系统内置角色（seed 灌入，不可删）
-    isSystem: boolean("isSystem").notNull().default(false),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    keyUq: uniqueIndex("Role_key_uq").on(t.key),
-  }),
-);
-export type Role = InferSelectModel<typeof role>;
-
-export const rolePermission = mysqlTable(
-  "RolePermission",
-  {
-    roleId: varchar("roleId", { length: 36 })
-      .notNull()
-      .references(() => role.id),
-    // 权限名（取自 lib/rbac.ts PERMISSIONS 常量集合）
-    permission: varchar("permission", { length: 64 }).notNull(),
-  },
-  (t) => ({
-    rolePermUq: uniqueIndex("RolePermission_roleId_permission_uq").on(t.roleId, t.permission),
-  }),
-);
-export type RolePermission = InferSelectModel<typeof rolePermission>;
-
-export const userRole = mysqlTable(
-  "UserRole",
-  {
-    userId: varchar("userId", { length: 36 })
-      .notNull()
-      .references(() => user.id),
-    roleId: varchar("roleId", { length: 36 })
-      .notNull()
-      .references(() => role.id),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    userRoleUq: uniqueIndex("UserRole_userId_roleId_uq").on(t.userId, t.roleId),
-  }),
-);
-export type UserRole = InferSelectModel<typeof userRole>;
 
 // ─── Policy Config (: policy DB 化) ────────────────
 

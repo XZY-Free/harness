@@ -8,11 +8,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - runSync 抛错 → 500 sync_failed
  */
 
-const rbac = vi.hoisted(() => ({ requirePermission: vi.fn() }));
+const studio = vi.hoisted(() => ({ requireStudioAction: vi.fn() }));
 const configState = vi.hoisted(() => ({ endpoint: "https://cm.test/api" }));
 const syncMocks = vi.hoisted(() => ({ runSync: vi.fn() }));
 
-vi.mock("@/lib/rbac", () => ({ requirePermission: rbac.requirePermission }));
+vi.mock("@/lib/identity/studio-access", () => ({
+  requireStudioAction: studio.requireStudioAction,
+}));
 vi.mock("@/lib/config", () => ({
   capabilityMarketConfig: {
     get endpoint() {
@@ -30,18 +32,18 @@ vi.mock("@/lib/logger", () => ({ logger: { warn: vi.fn(), error: vi.fn() } }));
 import { POST } from "@/app/studio/api/skills/sync/route";
 import { NextRequest } from "next/server";
 
-const ADMIN = { id: "admin", email: "a@x", name: "A", externalId: "admin", createdAt: new Date() };
+const PRINCIPAL = { userIdentityId: "u1", tenantId: "t1" };
 const req = () => new NextRequest("http://localhost/studio/api/skills/sync", { method: "POST" });
 
 beforeEach(() => {
   vi.clearAllMocks();
   configState.endpoint = "https://cm.test/api";
-  rbac.requirePermission.mockResolvedValue({ ok: true, user: ADMIN });
+  studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
 });
 
 describe("POST /studio/api/skills/sync", () => {
-  it("非 admin（无 skill.write.all）→ 403", async () => {
-    rbac.requirePermission.mockResolvedValue({
+  it("非 admin（无 skill.write）→ 403", async () => {
+    studio.requireStudioAction.mockResolvedValue({
       ok: false,
       response: new Response("{}", { status: 403 }),
     });
