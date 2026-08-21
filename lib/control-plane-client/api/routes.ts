@@ -63,7 +63,7 @@ export function createRouteApiClient(config: ApiClientConfig): RouteApiClient {
         },
       ),
     disableRoute: (routeId, body, opts) =>
-      request<DisableRouteResponse>(`/admin/api/v1/deployment-routes/${routeId}:disable`, {
+      request<DisableRouteResponse>(`/admin/api/v1/deployment-routes/${routeId}/disable`, {
         method: "POST",
         body: JSON.stringify(body),
         headers: {

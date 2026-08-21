@@ -30,14 +30,14 @@ const CONTRACTS = [
   ],
   [
     "agents.ts",
-    "/admin/api/v1/agent-revisions/${revisionId}:publish",
-    "app/admin/api/v1/agent-revisions/[revision_id]:publish/route.ts",
+    "/admin/api/v1/agent-revisions/${revisionId}/publish",
+    "app/admin/api/v1/agent-revisions/[revision_id]/publish/route.ts",
     "POST",
   ],
   [
     "agents.ts",
-    "/admin/api/v1/agent-revisions/${revisionId}:withdraw",
-    "app/admin/api/v1/agent-revisions/[revision_id]:withdraw/route.ts",
+    "/admin/api/v1/agent-revisions/${revisionId}/withdraw",
+    "app/admin/api/v1/agent-revisions/[revision_id]/withdraw/route.ts",
     "POST",
   ],
   [
@@ -54,14 +54,14 @@ const CONTRACTS = [
   ],
   [
     "artifacts.ts",
-    "/admin/api/v1/artifact-attestations:verify",
-    "app/admin/api/v1/artifact-attestations:verify/route.ts",
+    "/admin/api/v1/artifact-attestations/verify",
+    "app/admin/api/v1/artifact-attestations/verify/route.ts",
     "POST",
   ],
   [
     "artifacts.ts",
-    "/admin/api/v1/artifact-attestations/${attestationId}:revoke",
-    "app/admin/api/v1/artifact-attestations/[attestation_id]:revoke/route.ts",
+    "/admin/api/v1/artifact-attestations/${attestationId}/revoke",
+    "app/admin/api/v1/artifact-attestations/[attestation_id]/revoke/route.ts",
     "POST",
   ],
   [
@@ -127,8 +127,8 @@ const CONTRACTS = [
   ],
   [
     "routes.ts",
-    "/admin/api/v1/deployment-routes/${routeId}:disable",
-    "app/admin/api/v1/deployment-routes/[route_id]:disable/route.ts",
+    "/admin/api/v1/deployment-routes/${routeId}/disable",
+    "app/admin/api/v1/deployment-routes/[route_id]/disable/route.ts",
     "POST",
   ],
   ["runtimes.ts", "/admin/api/v1/runtimes", "app/admin/api/v1/runtimes/route.ts", "GET"],
@@ -152,14 +152,14 @@ const CONTRACTS = [
   ],
   [
     "runtimes.ts",
-    "/admin/api/v1/runtime-revisions/${revisionId}:publish",
-    "app/admin/api/v1/runtime-revisions/[revision_id]:publish/route.ts",
+    "/admin/api/v1/runtime-revisions/${revisionId}/publish",
+    "app/admin/api/v1/runtime-revisions/[revision_id]/publish/route.ts",
     "POST",
   ],
   [
     "runtimes.ts",
-    "/admin/api/v1/runtime-revisions/${revisionId}:withdraw",
-    "app/admin/api/v1/runtime-revisions/[revision_id]:withdraw/route.ts",
+    "/admin/api/v1/runtime-revisions/${revisionId}/withdraw",
+    "app/admin/api/v1/runtime-revisions/[revision_id]/withdraw/route.ts",
     "POST",
   ],
   [

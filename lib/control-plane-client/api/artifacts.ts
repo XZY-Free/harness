@@ -44,14 +44,14 @@ export function createArtifactApiClient(config: ApiClientConfig): ArtifactApiCli
     get: (attestationId) =>
       request<ArtifactAttestationDTO>(`/admin/api/v1/artifact-attestations/${attestationId}`),
     verify: (body, opts) =>
-      request<VerifyAttestationResultDTO>("/admin/api/v1/artifact-attestations:verify", {
+      request<VerifyAttestationResultDTO>("/admin/api/v1/artifact-attestations/verify", {
         method: "POST",
         body: JSON.stringify(body),
         headers: { "Idempotency-Key": opts.idempotencyKey },
       }),
     revoke: (attestationId, reason) =>
       request<ArtifactAttestationDTO>(
-        `/admin/api/v1/artifact-attestations/${attestationId}:revoke`,
+        `/admin/api/v1/artifact-attestations/${attestationId}/revoke`,
         {
           method: "POST",
           body: JSON.stringify({ reason }),

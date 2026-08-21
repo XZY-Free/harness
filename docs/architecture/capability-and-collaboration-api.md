@@ -71,7 +71,7 @@ curl 'https://snow.example.com/api/v1/catalog/options?agent_id=agt_finance&capab
 
 ### 3.1 搜索可用能力
 
-`POST /gateway/v1/capabilities:search`
+`POST /gateway/v1/capabilities/search`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -84,7 +84,7 @@ curl 'https://snow.example.com/api/v1/catalog/options?agent_id=agt_finance&capab
 | catalog_revision | Body | string | 否 | Runtime 已知目录修订，只用于差异和缓存提示 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/capabilities:search' \
+curl -X POST 'https://snow.example.com/gateway/v1/capabilities/search' \
   -H 'Authorization: Bearer <invocation-workload-token>' \
   -H 'Idempotency-Key: inv-42-capability-search-3' \
   -H 'Content-Type: application/json' \
@@ -264,7 +264,7 @@ curl 'https://snow.example.com/gateway/v1/child-threads/thr_child?parent_invocat
 
 ### 4.3 请求取消 Child Thread
 
-`POST /gateway/v1/child-threads/{child_thread_id}:cancel`
+`POST /gateway/v1/child-threads/{child_thread_id}/cancel`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|

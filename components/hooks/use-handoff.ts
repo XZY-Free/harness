@@ -108,7 +108,7 @@ export function useHandoff({ threadId }: UseHandoffParams): UseHandoffResult {
       try {
         const idempotencyKey = generateIdempotencyKey();
         // 路径含冒号 custom method（:resolve）；Next.js App Router 直接收录此段名。
-        const resp = await apiFetch(`/api/v1/threads/${threadId}/handoffs/${handoffId}:resolve`, {
+        const resp = await apiFetch(`/api/v1/threads/${threadId}/handoffs/${handoffId}/resolve`, {
           method: "POST",
           credentials: "include",
           headers: {

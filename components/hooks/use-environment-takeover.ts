@@ -8,7 +8,7 @@
  *   「接管前核对未完成 ToolCall/Effect；重复连接不能并发执行同一需要写锁的本地操作」
  *
  * 职责：
- * - 调用 POST /api/v1/threads/{thread_id}/environment:takeover 请求接管。
+ * - 调用 POST /api/v1/threads/{thread_id}/environment/takeover 请求接管。
  * - 必填 Idempotency-Key（Hook 内部生成 crypto.randomUUID()）。
  * - busyRef 同步拦截防竞态：busy 期间拒绝重复触发。
  * - 错误转化为 ClientVisibleError，含 blocking_reasons 详情（422 时）。
@@ -97,7 +97,7 @@ export function useEnvironmentTakeover(): UseEnvironmentTakeoverResult {
             ? crypto.randomUUID()
             : `takeover-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-        const resp = await apiFetch(`/api/v1/threads/${threadId}/environment:takeover`, {
+        const resp = await apiFetch(`/api/v1/threads/${threadId}/environment/takeover`, {
           method: "POST",
           credentials: "include",
           cache: "no-store",

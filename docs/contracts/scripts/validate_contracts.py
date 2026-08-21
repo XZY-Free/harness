@@ -62,7 +62,7 @@ def validate_openapi() -> int:
     operation_ids: set[str] = set()
     known_error_codes = set(load_json(CONTRACTS / "error-codes.json")["errors"])
     operation_count = 0
-    post_query_exceptions = {"/gateway/v1/context:query"}
+    post_query_exceptions = {"/gateway/v1/context/query"}
     for path, path_item in contract["paths"].items():
         if not path.startswith("/"):
             fail(f"invalid OpenAPI path: {path}")

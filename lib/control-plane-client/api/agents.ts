@@ -66,7 +66,7 @@ export function createAgentApiClient(config: ApiClientConfig): AgentApiClient {
         headers: { "Idempotency-Key": opts.idempotencyKey },
       }),
     publishRevision: (revisionId, body, opts) =>
-      request<PublishAgentRevisionResponse>(`/admin/api/v1/agent-revisions/${revisionId}:publish`, {
+      request<PublishAgentRevisionResponse>(`/admin/api/v1/agent-revisions/${revisionId}/publish`, {
         method: "POST",
         body: JSON.stringify(body),
         headers: {
@@ -76,7 +76,7 @@ export function createAgentApiClient(config: ApiClientConfig): AgentApiClient {
       }),
     withdrawRevision: (revisionId, body, opts) =>
       request<WithdrawAgentRevisionResponse>(
-        `/admin/api/v1/agent-revisions/${revisionId}:withdraw`,
+        `/admin/api/v1/agent-revisions/${revisionId}/withdraw`,
         {
           method: "POST",
           body: JSON.stringify(body),

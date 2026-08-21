@@ -10,7 +10,7 @@
  * - 创建 PendingInput（POST，运行中发送消息走此路径）。
  * - 编辑 PendingInput 内容（PATCH /api/v1/pending-inputs/{id}，If-Match 资源 ETag）。
  * - 删除 PendingInput（DELETE，If-Match 资源 ETag）。
- * - 重排队列（POST /api/v1/threads/{id}/pending-inputs:reorder，If-Match 队列 ETag）。
+ * - 重排队列（POST /api/v1/threads/{id}/pending-inputs/reorder，If-Match 队列 ETag）。
  * - 维护队列 ETag 与资源 ETag，保证乐观锁正确。
  * - SSE 事件到达时（pending_input.created/updated/removed/reordered）调用 refresh()。
  *
@@ -324,7 +324,7 @@ export function usePendingInputs(threadId: string): UsePendingInputsResult {
       setBusy(true);
       setError(null);
       try {
-        const resp = await apiFetch(`/api/v1/threads/${threadId}/pending-inputs:reorder`, {
+        const resp = await apiFetch(`/api/v1/threads/${threadId}/pending-inputs/reorder`, {
           method: "POST",
           credentials: "include",
           headers: {

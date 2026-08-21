@@ -191,7 +191,7 @@ export function resetOverloadProtector(): void {
 export function inferPriority(method: string, path: string): RequestPriority {
   const upperMethod = method.toUpperCase();
   // 取消/停止/UserAction → critical
-  if (upperMethod === "POST" && (path.includes(":cancel") || path.includes(":stop"))) {
+  if (upperMethod === "POST" && (path.includes("/cancel") || path.includes(":stop"))) {
     return "critical";
   }
   if (upperMethod === "POST" && path.includes(":ack")) {

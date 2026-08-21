@@ -177,7 +177,7 @@ curl -X PATCH 'https://snow.example.com/api/v1/threads/thr_01J.../settings' \
 
 ### 3.3 更换 Thread 主 Agent
 
-`POST /api/v1/threads/{thread_id}:change-primary-agent`
+`POST /api/v1/threads/{thread_id}/change-primary-agent`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -399,7 +399,7 @@ curl -X POST 'https://snow.example.com/api/v1/turns/turn_01J.../interrupt' \
 
 ### 3.9 重新生成
 
-`POST /api/v1/turns/{turn_id}:regenerate`
+`POST /api/v1/turns/{turn_id}/regenerate`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -613,7 +613,7 @@ curl -X PATCH 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
 
 ### 3.16 重排 PendingInput
 
-`POST /api/v1/threads/{thread_id}/pending-inputs:reorder`
+`POST /api/v1/threads/{thread_id}/pending-inputs/reorder`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -623,7 +623,7 @@ curl -X PATCH 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
 | ordered_ids | Body | string[] | 是 | 当前所有 pending id 的完整顺序 |
 
 ```bash
-curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs:reorder' \
+curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../pending-inputs/reorder' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: reorder-pending-4' \
   -H 'If-Match: "pending-queue-8"' \
@@ -673,7 +673,7 @@ curl -X DELETE 'https://snow.example.com/api/v1/pending-inputs/pin_01J...' \
 
 ### 3.18 解析用户操作请求
 
-`POST /api/v1/user-action-requests/{request_id}:resolve`
+`POST /api/v1/user-action-requests/{request_id}/resolve`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -787,7 +787,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations' \
 
 ### 4.2 回传 Runtime Event
 
-`POST /runtime/v1/invocations/{invocation_id}/events:batch`
+`POST /runtime/v1/invocations/{invocation_id}/events/batch`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -840,7 +840,7 @@ Ingress 先以 `(invocation_id, producer_event_id)` 和 `(invocation_id, produce
 
 ### 4.3 回传 Transient Event
 
-`POST /runtime/v1/invocations/{invocation_id}/transient-events:batch`
+`POST /runtime/v1/invocations/{invocation_id}/transient-events/batch`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -869,7 +869,7 @@ curl -X POST 'https://snow.example.com/runtime/v1/invocations/inv_01J.../transie
 
 ### 4.4 取消 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}:cancel`
+`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}/cancel`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -898,7 +898,7 @@ Runtime 应停止新行动并报告最终状态；无法立即停止时返回 ac
 
 ### 4.5 恢复 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}:resume`
+`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}/resume`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -929,7 +929,7 @@ curl -X POST 'https://runtime.example.net/runtime/v1/invocations/inv_01J...:resu
 
 ### 4.6 引导 Invocation
 
-`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}:steer`
+`POST {runtime_endpoint}/runtime/v1/invocations/{invocation_id}/steer`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1029,7 +1029,7 @@ Gateway 重新取得当前 Schema 并核对 hash；不一致返回 409 `TOOL_SCH
 
 ### 5.2 核对 Tool Effect
 
-`POST /gateway/v1/tool-calls/{tool_call_id}:reconcile-effect`
+`POST /gateway/v1/tool-calls/{tool_call_id}/reconcile-effect`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1094,7 +1094,7 @@ Artifact 内容进入对象存储；Turn Invocation 可创建 Artifact Item 并�
 
 ### 5.4 查询上下文
 
-`POST /gateway/v1/context:query`
+`POST /gateway/v1/context/query`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1105,7 +1105,7 @@ Artifact 内容进入对象存储；Turn Invocation 可创建 Artifact Item 并�
 | limits | Body | object | 是 | 每类条数、Token 和敏感级别限制 |
 
 ```bash
-curl -X POST 'https://snow.example.com/gateway/v1/context:query' \
+curl -X POST 'https://snow.example.com/gateway/v1/context/query' \
   -H 'Authorization: Bearer <invocation-token>' \
   -H 'Content-Type: application/json' \
   -d '{"context_handle":"ctxh_short_lived","sources":["knowledge","memory"],"query":"月报口径和员工币种偏好","limits":{"max_items":8,"max_tokens":4000}}'
@@ -1223,7 +1223,7 @@ Skill、Tool 和 Knowledge 不作为 AgentRevision 的固定内容清单提交�
 
 ### 6.2 发布 AgentRevision
 
-`POST /admin/api/v1/agent-revisions/{revision_id}:publish`
+`POST /admin/api/v1/agent-revisions/{revision_id}/publish`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1343,7 +1343,7 @@ curl 'https://snow.example.com/admin/api/v1/invocations/inv_01J.../actual-execut
 
 ### 6.5 管理核对长期未知副作用
 
-`POST /admin/api/v1/tool-calls/{tool_call_id}:reconcile-effect`
+`POST /admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -1400,7 +1400,7 @@ JobEvent 与 ThreadEvent 使用相同 envelope 规则，但根 id 是 job_id、�
 
 ### 6.7 把 Job 结果发布到会话
 
-`POST /admin/api/v1/jobs/{job_id}:publish-to-thread`
+`POST /admin/api/v1/jobs/{job_id}/publish-to-thread`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|

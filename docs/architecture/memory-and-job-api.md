@@ -92,7 +92,7 @@ Runtime 只能查看自己 Invocation 提交的 Candidate，且响应只返回�
 
 ### 2.3 复核 Memory Candidate
 
-`POST /admin/api/v1/memory-candidates/{candidate_id}:resolve`
+`POST /admin/api/v1/memory-candidates/{candidate_id}/resolve`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -198,7 +198,7 @@ curl 'https://snow.example.com/admin/api/v1/jobs/job_01J...?include=invocations&
 
 ### 4.2 请求取消 Job
 
-`POST /admin/api/v1/jobs/{job_id}:cancel`
+`POST /admin/api/v1/jobs/{job_id}/cancel`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -232,7 +232,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/jobs/job_01J...:cancel' \
 
 ### 4.3 重新运行终态 Job
 
-`POST /admin/api/v1/jobs/{job_id}:retry`
+`POST /admin/api/v1/jobs/{job_id}/retry`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -272,7 +272,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/jobs/job_old:retry' \
 JobEvent 订阅和结果投影沿用 [api-and-events.md](./api-and-events.md)：
 
 - `GET /admin/api/v1/jobs/{job_id}/events` 使用 Job 内 sequence 续读。
-- `POST /admin/api/v1/jobs/{job_id}:publish-to-thread` 只允许发布到 Job 创建时预先关联的 Thread。
+- `POST /admin/api/v1/jobs/{job_id}/publish-to-thread` 只允许发布到 Job 创建时预先关联的 Thread。
 - Job cancel/retry 命令事件进入 JobEvent，不进入员工 Thread；只有显式 job_result projection 才进入 ThreadEvent。
 
 ## 5. 稳定错误码

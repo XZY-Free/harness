@@ -62,7 +62,7 @@ describe("useHandoff", () => {
     expect(ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] ?? [];
-    expect(url).toBe("/api/v1/threads/t1/handoffs/h1:resolve");
+    expect(url).toBe("/api/v1/threads/t1/handoffs/h1/resolve");
     expect(init?.method).toBe("POST");
     expect(init?.headers?.["idempotency-key"]).toBeTruthy();
     expect(JSON.parse(init?.body as string)).toEqual({ resolution: "approve" });

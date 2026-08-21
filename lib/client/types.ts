@@ -419,7 +419,7 @@ export interface ClientCatalogListResponse {
 
 // ─── Handoff（S10-W04） ────────────────────────────────────
 
-/** POST /api/v1/threads/{thread_id}:request-handoff 响应体（200）。 */
+/** POST /api/v1/threads/{thread_id}/request-handoff 响应体（200）。 */
 export interface ClientHandoffRequestResponse {
   readonly thread_id: string;
   readonly request_id: string;
@@ -435,7 +435,7 @@ export interface ClientHandoffRequestResponse {
   readonly event_ids: readonly string[];
 }
 
-/** POST /api/v1/threads/{thread_id}/handoffs/{handoff_id}:resolve 响应体（200）。 */
+/** POST /api/v1/threads/{thread_id}/handoffs/{handoff_id}/resolve 响应体（200）。 */
 export interface ClientHandoffResolveResponse {
   readonly thread_id: string;
   readonly request_id: string;
@@ -453,7 +453,7 @@ export interface ClientHandoffResolveResponse {
 
 // ─── UserAction 通用解析（S10-W05） ────────────────────────
 
-/** POST /api/v1/threads/{thread_id}/user-actions/{request_id}:resolve 响应体（200）。 */
+/** POST /api/v1/threads/{thread_id}/user-actions/{request_id}/resolve 响应体（200）。 */
 export interface ClientUserActionResolveResponse {
   readonly thread_id: string;
   readonly request_id: string;
@@ -575,7 +575,7 @@ export interface ClientTakeoverConditions {
   readonly ownership_id: string | null;
 }
 
-/** POST /api/v1/threads/{thread_id}/environment:takeover 响应体（S10-W07）。 */
+/** POST /api/v1/threads/{thread_id}/environment/takeover 响应体（S10-W07）。 */
 export interface ClientTakeoverResponse {
   readonly thread_id: string;
   readonly ownership_id: string;

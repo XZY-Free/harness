@@ -1,4 +1,4 @@
-import { POST as changePrimaryAgentPOST } from "@/app/api/v1/threads/[thread_id]:change-primary-agent/route";
+import { POST as changePrimaryAgentPOST } from "@/app/api/v1/threads/[thread_id]/change-primary-agent/route";
 import { GET as listItemsGET } from "@/app/api/v1/threads/[thread_id]/items/route";
 import { PATCH as updateSettingsPATCH } from "@/app/api/v1/threads/[thread_id]/settings/route";
 import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
@@ -360,7 +360,7 @@ describe("PATCH /api/v1/threads/{thread_id}/settings", () => {
 // 3. POST /api/v1/threads/{thread_id}:change-primary-agent — 更换主 Agent
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
+describe("POST /api/v1/threads/{thread_id}/change-primary-agent", () => {
   it("成功更换主 Agent → 200 + thread.primary_agent_changed Event", async () => {
     const { tenantId, userIdentityId, agent: initialAgent } = await seedContext();
     // 创建第二个 enabled Agent
@@ -381,14 +381,14 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
     const changeReq = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/threads/${threadId}:change-primary-agent`,
+      path: `/threads/${threadId}/change-primary-agent`,
       idempotencyKey: "change-agent-001",
       body: { agent_id: newAgent.id, reason: "后续由风险审核助手负责" },
     });
 
     const response = await changePrimaryAgentPOST(changeReq, {
       params: Promise.resolve({
-        "thread_id:change-primary-agent": `${threadId}:change-primary-agent`,
+        thread_id: `${threadId}`,
       }),
     });
     expect(response.status).toBe(200);
@@ -418,14 +418,14 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
     const changeReq = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/threads/${threadId}:change-primary-agent`,
+      path: `/threads/${threadId}/change-primary-agent`,
       idempotencyKey: "change-agent-nonexistent-2",
       body: { agent_id: "non-existent-agent", reason: "测试" },
     });
 
     const response = await changePrimaryAgentPOST(changeReq, {
       params: Promise.resolve({
-        "thread_id:change-primary-agent": `${threadId}:change-primary-agent`,
+        thread_id: `${threadId}`,
       }),
     });
     expect(response.status).toBe(404);
@@ -446,13 +446,13 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
     const changeReq = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/threads/${threadId}:change-primary-agent`,
+      path: `/threads/${threadId}/change-primary-agent`,
       body: { agent_id: agent.id, reason: "测试" },
     });
 
     const response = await changePrimaryAgentPOST(changeReq, {
       params: Promise.resolve({
-        "thread_id:change-primary-agent": `${threadId}:change-primary-agent`,
+        thread_id: `${threadId}`,
       }),
     });
     expect(response.status).toBe(400);
@@ -463,14 +463,14 @@ describe("POST /api/v1/threads/{thread_id}:change-primary-agent", () => {
     const changeReq = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: "/threads/non-existent:change-primary-agent",
+      path: "/threads/non-existent/change-primary-agent",
       idempotencyKey: "change-agent-no-thread",
       body: { agent_id: agent.id, reason: "测试" },
     });
 
     const response = await changePrimaryAgentPOST(changeReq, {
       params: Promise.resolve({
-        "thread_id:change-primary-agent": "non-existent:change-primary-agent",
+        thread_id: "non-existent",
       }),
     });
     expect(response.status).toBe(404);

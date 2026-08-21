@@ -84,7 +84,7 @@ function projectCandidate(candidate: {
 }
 
 /** GET /gateway/v1/memory-candidates/{candidate_id} handler。 */
-export async function memoryCandidateGET(request: Request): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
 
   // 1. 解析 Gateway 身份

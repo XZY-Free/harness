@@ -86,7 +86,7 @@ curl 'https://snow.example.com/admin/api/v1/operations/event-delivery?state=quar
 
 ### 2.4 解析隔离事件
 
-`POST /admin/api/v1/operations/event-quarantines/{failure_id}:resolve`
+`POST /admin/api/v1/event-quarantines/{failure_id}/resolve`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -133,7 +133,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/operations/event-quarantines
 
 ### 3.2 请求变更执行环境
 
-`POST /api/v1/threads/{thread_id}:request-execution-environment-change`
+`POST /api/v1/threads/{thread_id}/request-execution-environment-change`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -183,7 +183,7 @@ AgentRevision、RuntimeRevision、Skill 可执行包、Tool Provider Adapter 和
 
 ### 4.2 验证制品证明
 
-`POST /admin/api/v1/artifact-attestations:verify`
+`POST /admin/api/v1/artifact-attestations/verify`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
@@ -196,7 +196,7 @@ AgentRevision、RuntimeRevision、Skill 可执行包、Tool Provider Adapter 和
 | provenance_ref | Body | string | 是 | 受管 provenance 引用 |
 
 ```bash
-curl -X POST 'https://snow.example.com/admin/api/v1/artifact-attestations:verify' \
+curl -X POST 'https://snow.example.com/admin/api/v1/artifact-attestations/verify' \
   -H 'Authorization: Bearer <cicd-service-token>' \
   -H 'Idempotency-Key: verify-runtime-rev-7-sha256-ab' \
   -H 'Content-Type: application/json' \
@@ -294,7 +294,7 @@ curl -X POST 'https://snow.example.com/admin/api/v1/legal-holds' \
 
 ### 6.3 释放 Legal Hold
 
-`POST /admin/api/v1/legal-holds/{legal_hold_id}:release`
+`POST /admin/api/v1/legal-holds/release`
 
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|

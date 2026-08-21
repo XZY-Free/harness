@@ -1,4 +1,4 @@
-import { POST as reorderPendingInputsPOST } from "@/app/api/v1/threads/[thread_id]/pending-inputs:reorder/route";
+import { POST as reorderPendingInputsPOST } from "@/app/api/v1/threads/[thread_id]/pending-inputs/reorder/route";
 import {
   PATCH as editPendingInputPATCH,
   DELETE as removePendingInputDELETE,
@@ -337,7 +337,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs", () => {
 // 3. POST /api/v1/threads/{thread_id}/pending-inputs:reorder — 重排
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
+describe("POST /api/v1/threads/{thread_id}/pending-inputs/reorder", () => {
   it("成功重排 → 200 + queue_position 重新分配", async () => {
     const { agent } = await seedContext();
     const threadId = await createThread(agent.id, "pending-reorder-ok");
@@ -350,7 +350,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/threads/${threadId}/pending-inputs:reorder`,
+      path: `/threads/${threadId}/pending-inputs/reorder`,
       ifMatch: c.queue_etag, // 使用最新的队列 ETag
       body: { ordered_ids: [c.pending_input.id, b.pending_input.id, a.pending_input.id] },
     });
@@ -380,7 +380,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/threads/${threadId}/pending-inputs:reorder`,
+      path: `/threads/${threadId}/pending-inputs/reorder`,
       body: { ordered_ids: ["id-1"] },
     });
 
@@ -401,7 +401,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/threads/${threadId}/pending-inputs:reorder`,
+      path: `/threads/${threadId}/pending-inputs/reorder`,
       ifMatch: b.queue_etag,
       body: { ordered_ids: [a.pending_input.id] },
     });
@@ -424,7 +424,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/threads/${threadId}/pending-inputs:reorder`,
+      path: `/threads/${threadId}/pending-inputs/reorder`,
       ifMatch: a.queue_etag,
       body: { ordered_ids: [a.pending_input.id, "non-existent-id"] },
     });
@@ -444,7 +444,7 @@ describe("POST /api/v1/threads/{thread_id}/pending-inputs:reorder", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/threads/${threadId}/pending-inputs:reorder`,
+      path: `/threads/${threadId}/pending-inputs/reorder`,
       ifMatch: "pending-queue-999", // 错误的 versionNo
       body: { ordered_ids: ["any-id"] },
     });
@@ -771,7 +771,7 @@ describe("跨租户隔离", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: "/threads/other-tenant-thread/pending-inputs:reorder",
+      path: "/threads/other-tenant-thread/pending-inputs/reorder",
       ifMatch: "pending-queue-1",
       body: { ordered_ids: ["any-id"] },
     });

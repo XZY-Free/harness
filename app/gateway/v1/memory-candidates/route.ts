@@ -292,7 +292,7 @@ function projectCandidate(candidate: {
 /**
  * POST /gateway/v1/memory-candidates handler。
  */
-export async function memoryCandidatePOST(request: Request): Promise<Response> {
+export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId(request);
 
   // 1. 解析 Gateway 身份

@@ -237,32 +237,32 @@ def success_status(method: str, path: str, section: list[str]) -> str:
     if method == "GET":
         return "200"
     status_overrides = {
-        "/api/v1/threads/{thread_id}:change-primary-agent": "200",
+        "/api/v1/threads/{thread_id}/change-primary-agent": "200",
         "/api/v1/turns/{turn_id}/steer": "202",
         "/api/v1/turns/{turn_id}/interrupt": "202",
-        "/api/v1/turns/{turn_id}:regenerate": "202",
-        "/api/v1/threads/{thread_id}/pending-inputs:reorder": "200",
-        "/api/v1/user-action-requests/{request_id}:resolve": "202",
+        "/api/v1/turns/{turn_id}/regenerate": "202",
+        "/api/v1/threads/{thread_id}/pending-inputs/reorder": "200",
+        "/api/v1/user-action-requests/{request_id}/resolve": "202",
         "/runtime/v1/invocations": "202",
-        "/runtime/v1/invocations/{invocation_id}/events:batch": "202",
-        "/runtime/v1/invocations/{invocation_id}/transient-events:batch": "202",
-        "/runtime/v1/invocations/{invocation_id}:cancel": "202",
-        "/runtime/v1/invocations/{invocation_id}:resume": "202",
-        "/runtime/v1/invocations/{invocation_id}:steer": "202",
-        "/gateway/v1/tool-calls/{tool_call_id}:reconcile-effect": "200",
-        "/gateway/v1/context:query": "200",
-        "/admin/api/v1/agent-revisions/{revision_id}:publish": "200",
-        "/admin/api/v1/tool-calls/{tool_call_id}:reconcile-effect": "200",
-        "/admin/api/v1/jobs/{job_id}:publish-to-thread": "201",
-        "/gateway/v1/capabilities:search": "200",
-        "/gateway/v1/child-threads/{child_thread_id}:cancel": "202",
-        "/admin/api/v1/memory-candidates/{candidate_id}:resolve": "200",
-        "/admin/api/v1/jobs/{job_id}:cancel": "202",
-        "/admin/api/v1/jobs/{job_id}:retry": "201",
-        "/admin/api/v1/operations/event-quarantines/{failure_id}:resolve": "202",
-        "/api/v1/threads/{thread_id}:request-execution-environment-change": "202",
-        "/admin/api/v1/artifact-attestations:verify": "200",
-        "/admin/api/v1/legal-holds/{legal_hold_id}:release": "200",
+        "/runtime/v1/invocations/{invocation_id}/events/batch": "202",
+        "/runtime/v1/invocations/{invocation_id}/transient-events/batch": "202",
+        "/runtime/v1/invocations/{invocation_id}/cancel": "202",
+        "/runtime/v1/invocations/{invocation_id}/resume": "202",
+        "/runtime/v1/invocations/{invocation_id}/steer": "202",
+        "/gateway/v1/tool-calls/{tool_call_id}/reconcile-effect": "200",
+        "/gateway/v1/context/query": "200",
+        "/admin/api/v1/agent-revisions/{revision_id}/publish": "200",
+        "/admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect": "200",
+        "/admin/api/v1/jobs/{job_id}/publish-to-thread": "201",
+        "/gateway/v1/capabilities/search": "200",
+        "/gateway/v1/child-threads/{child_thread_id}/cancel": "202",
+        "/admin/api/v1/memory-candidates/{candidate_id}/resolve": "200",
+        "/admin/api/v1/jobs/{job_id}/cancel": "202",
+        "/admin/api/v1/jobs/{job_id}/retry": "201",
+        "/admin/api/v1/event-quarantines/{failure_id}/resolve": "202",
+        "/api/v1/threads/{thread_id}/request-execution-environment-change": "202",
+        "/admin/api/v1/artifact-attestations/verify": "200",
+        "/admin/api/v1/legal-holds/release": "200",
     }
     if path in status_overrides:
         return status_overrides[path]
@@ -290,7 +290,7 @@ def add_conditional_request_rules(path: str, request_body: dict[str, Any]) -> No
                 "then": {"properties": {"input_schema": {}}, "required": ["input_schema"]},
             }
         ],
-        "/admin/api/v1/tool-calls/{tool_call_id}:reconcile-effect": [
+        "/admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect": [
             {
                 "if": {
                     "properties": {
@@ -301,7 +301,7 @@ def add_conditional_request_rules(path: str, request_body: dict[str, Any]) -> No
                 "then": {"properties": {"evidence_ref": {}}, "required": ["evidence_ref"]},
             }
         ],
-        "/admin/api/v1/jobs/{job_id}:publish-to-thread": [
+        "/admin/api/v1/jobs/{job_id}/publish-to-thread": [
             {
                 "if": {
                     "properties": {"publish_mode": {"const": "existing_source_turn"}},
@@ -410,7 +410,7 @@ def build_contract() -> dict[str, Any]:
             "RESOURCE_NOT_FOUND",
             "RATE_LIMITED",
         }
-        if item["method"] == "POST" and item["path"] != "/gateway/v1/context:query":
+        if item["method"] == "POST" and item["path"] != "/gateway/v1/context/query":
             common_errors.add("IDEMPOTENCY_CONFLICT")
         if item["method"] in {"PUT", "PATCH"}:
             common_errors.add("ETAG_MISMATCH")

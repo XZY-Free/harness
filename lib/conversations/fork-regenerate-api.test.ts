@@ -1,4 +1,4 @@
-import { POST as regeneratePOST } from "@/app/api/v1/turns/[turn_id]:regenerate/route";
+import { POST as regeneratePOST } from "@/app/api/v1/turns/[turn_id]/regenerate/route";
 import { POST as forkPOST } from "@/app/api/v1/threads/[thread_id]/forks/route";
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { POST as interruptPOST } from "@/app/api/v1/turns/[turn_id]/interrupt/route";
@@ -297,7 +297,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
 // 2. POST /api/v1/turns/{turn_id}:regenerate — Regenerate Turn
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
+describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
   it("成功 Regenerate completed Turn → 202 + regenerating 状态 + InvocationCommand", async () => {
     const { tenantId, agent } = await seedContext();
     const threadId = await createThread(agent.id, "regen-thread-001");
@@ -309,13 +309,13 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/turns/${turnId}:regenerate`,
+      path: `/turns/${turnId}/regenerate`,
       idempotencyKey: "regen-001",
       body: { binding_mode: "loose", reason: "重新生成" },
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ "turn_id:regenerate": `${turnId}:regenerate` }),
+      params: Promise.resolve({ turn_id: `${turnId}` }),
     });
     expect(resp.status).toBe(202);
     const body = (await resp.json()) as {
@@ -352,13 +352,13 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: "/turns/non-existent:regenerate",
+      path: "/turns/non-existent/regenerate",
       idempotencyKey: "regen-002",
       body: { binding_mode: "loose" },
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ "turn_id:regenerate": "non-existent:regenerate" }),
+      params: Promise.resolve({ turn_id: "non-existent" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };
@@ -375,12 +375,12 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/turns/${turnId}:regenerate`,
+      path: `/turns/${turnId}/regenerate`,
       body: { binding_mode: "loose" },
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ "turn_id:regenerate": `${turnId}:regenerate` }),
+      params: Promise.resolve({ turn_id: `${turnId}` }),
     });
     expect(resp.status).toBe(400);
     const body = (await resp.json()) as { error: { code: string } };
@@ -396,13 +396,13 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/turns/${turnId}:regenerate`,
+      path: `/turns/${turnId}/regenerate`,
       idempotencyKey: "regen-004",
       body: { binding_mode: "loose" },
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ "turn_id:regenerate": `${turnId}:regenerate` }),
+      params: Promise.resolve({ turn_id: `${turnId}` }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -418,13 +418,13 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/turns/${turnId}:regenerate`,
+      path: `/turns/${turnId}/regenerate`,
       idempotencyKey: "regen-005",
       body: { binding_mode: "loose" },
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ "turn_id:regenerate": `${turnId}:regenerate` }),
+      params: Promise.resolve({ turn_id: `${turnId}` }),
     });
     expect(resp.status).toBe(409);
     const body = (await resp.json()) as { error: { code: string } };
@@ -441,12 +441,12 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const req1 = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/turns/${turnId}:regenerate`,
+      path: `/turns/${turnId}/regenerate`,
       idempotencyKey: "regen-replay-006",
       body: { binding_mode: "loose" },
     });
     const resp1 = await regeneratePOST(req1, {
-      params: Promise.resolve({ "turn_id:regenerate": `${turnId}:regenerate` }),
+      params: Promise.resolve({ turn_id: `${turnId}` }),
     });
     expect(resp1.status).toBe(202);
     const body1 = (await resp1.json()) as { invocation_id: string };
@@ -455,12 +455,12 @@ describe("POST /api/v1/turns/{turn_id}:regenerate", () => {
     const req2 = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: `/turns/${turnId}:regenerate`,
+      path: `/turns/${turnId}/regenerate`,
       idempotencyKey: "regen-replay-006",
       body: { binding_mode: "loose" },
     });
     const resp2 = await regeneratePOST(req2, {
-      params: Promise.resolve({ "turn_id:regenerate": `${turnId}:regenerate` }),
+      params: Promise.resolve({ turn_id: `${turnId}` }),
     });
     expect(resp2.status).toBe(202);
     const body2 = (await resp2.json()) as { invocation_id: string };
@@ -851,13 +851,13 @@ describe("跨租户隔离（隐藏式 404）", () => {
     const req = buildApiRequest({
       audience: "employee",
       method: "POST",
-      path: "/turns/non-existent-tenant:regenerate",
+      path: "/turns/non-existent-tenant/regenerate",
       idempotencyKey: "xtenant-regen",
       body: { binding_mode: "loose" },
     });
 
     const resp = await regeneratePOST(req, {
-      params: Promise.resolve({ "turn_id:regenerate": "non-existent-tenant:regenerate" }),
+      params: Promise.resolve({ turn_id: "non-existent-tenant" }),
     });
     expect(resp.status).toBe(404);
     const body = (await resp.json()) as { error: { code: string } };

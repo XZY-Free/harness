@@ -38,7 +38,7 @@ import type {
  * Runtime 通过这些端点回传事件 / 发送命令。
  */
 export interface GatewayEndpoints {
-  /** 事件回传端点基础 URL（POST {events}/runtime/v1/invocations/{id}/events:batch）。 */
+  /** 事件回传端点基础 URL（POST {events}/runtime/v1/invocations/{id}/events/batch）。 */
   events: string;
   /** cancel 命令端点。 */
   cancel: string;
@@ -54,7 +54,7 @@ export interface GatewayEndpoints {
  * Event Ingress 客户端接口：Runtime 侧调用以回传候选事件批次。
  *
  * 两种实现：
- * - HTTP：调用平台 /runtime/v1/invocations/{id}/events:batch 路由（createHttpEventIngressClient）。
+ * - HTTP：调用平台 /runtime/v1/invocations/{id}/events/batch 路由（createHttpEventIngressClient）。
  * - 包装 EventBatchSink：测试用，绕过 HTTP 直接调用 ingressEventBatch 仓储。
  */
 export interface EventIngressClient {
@@ -75,7 +75,7 @@ export interface EventIngressClient {
 /**
  * 创建 HTTP Event Ingress 客户端。
  *
- * 调用平台 events:batch 路由（POST {gatewayEndpoints.events}/runtime/v1/invocations/{id}/events:batch）。
+ * 调用平台 events/batch 路由（POST {gatewayEndpoints.events}/runtime/v1/invocations/{id}/events/batch）。
  *
  * @param params.gatewayEndpoints 平台 Gateway 端点
  * @param params.authToken 平台颁发的 Workload Token
@@ -86,7 +86,7 @@ export function createHttpEventIngressClient(params: {
 }): EventIngressClient {
   return {
     async postEventBatch(invocationId, events, producerSequenceStart) {
-      const url = `${params.gatewayEndpoints.events}/runtime/v1/invocations/${invocationId}/events:batch`;
+      const url = `${params.gatewayEndpoints.events}/runtime/v1/invocations/${invocationId}/events/batch`;
       const resp = await fetch(url, {
         method: "POST",
         headers: {
@@ -146,7 +146,7 @@ export interface RuntimeAdapter {
  * 事件回传 Sink：把候选事件批次回传平台。
  *
  * 两种实现：
- * - HTTP：调用平台 /runtime/v1/invocations/{id}/events:batch 路由（生产默认）。
+ * - HTTP：调用平台 /runtime/v1/invocations/{id}/events/batch 路由（生产默认）。
  * - 直接调用：调用 ingressEventBatch 仓储函数（测试用，绕过 HTTP）。
  */
 export type EventBatchSink = (params: {

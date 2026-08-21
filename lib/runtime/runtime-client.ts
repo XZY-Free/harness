@@ -304,7 +304,7 @@ export function createHttpRuntimeClient(options?: {
     },
 
     async cancelInvocation(req: CancelInvocationRequest): Promise<CancelInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}:cancel`;
+      const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}/cancel`;
       const resp = await doFetch(url, {
         method: "POST",
         headers: {
@@ -325,7 +325,7 @@ export function createHttpRuntimeClient(options?: {
     },
 
     async resumeInvocation(req: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}:resume`;
+      const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}/resume`;
       const resp = await doFetch(url, {
         method: "POST",
         headers: {
@@ -346,7 +346,7 @@ export function createHttpRuntimeClient(options?: {
     },
 
     async steerInvocation(req: SteerInvocationRequest): Promise<SteerInvocationResponse> {
-      const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}:steer`;
+      const url = `${req.runtimeEndpoint}/runtime/v1/invocations/${req.invocationId}/steer`;
       const resp = await doFetch(url, {
         method: "POST",
         headers: {

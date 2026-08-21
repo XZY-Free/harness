@@ -304,7 +304,7 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}:change-primary-agent": {
+    "/api/v1/threads/{thread_id}/change-primary-agent": {
       "post": {
         "operationId": "post_api_v1_threads_by_thread_id_change_primary_agent",
         "summary": "更换 Thread 主 Agent",
@@ -1226,7 +1226,7 @@
         }
       }
     },
-    "/api/v1/turns/{turn_id}:regenerate": {
+    "/api/v1/turns/{turn_id}/regenerate": {
       "post": {
         "operationId": "post_api_v1_turns_by_turn_id_regenerate",
         "summary": "重新生成",
@@ -2218,7 +2218,7 @@
         ]
       }
     },
-    "/api/v1/threads/{thread_id}/pending-inputs:reorder": {
+    "/api/v1/threads/{thread_id}/pending-inputs/reorder": {
       "post": {
         "operationId": "post_api_v1_threads_by_thread_id_pending_inputs_reorder",
         "summary": "重排 PendingInput",
@@ -2360,7 +2360,7 @@
         }
       }
     },
-    "/api/v1/user-action-requests/{request_id}:resolve": {
+    "/api/v1/user-action-requests/{request_id}/resolve": {
       "post": {
         "operationId": "post_api_v1_user_action_requests_by_request_id_resolve",
         "summary": "解析用户操作请求",
@@ -2825,7 +2825,7 @@
         ]
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/events:batch": {
+    "/runtime/v1/invocations/{invocation_id}/events/batch": {
       "post": {
         "operationId": "post_runtime_v1_invocations_by_invocation_id_events_batch",
         "summary": "回传 Runtime Event",
@@ -2997,7 +2997,7 @@
         }
       }
     },
-    "/runtime/v1/invocations/{invocation_id}/transient-events:batch": {
+    "/runtime/v1/invocations/{invocation_id}/transient-events/batch": {
       "post": {
         "operationId": "post_runtime_v1_invocations_by_invocation_id_transient_events_batch",
         "summary": "回传 Transient Event",
@@ -3104,7 +3104,7 @@
         }
       }
     },
-    "/runtime/v1/invocations/{invocation_id}:cancel": {
+    "/runtime/v1/invocations/{invocation_id}/cancel": {
       "post": {
         "operationId": "post_runtime_v1_invocations_by_invocation_id_cancel",
         "summary": "取消 Invocation",
@@ -3222,7 +3222,7 @@
         ]
       }
     },
-    "/runtime/v1/invocations/{invocation_id}:resume": {
+    "/runtime/v1/invocations/{invocation_id}/resume": {
       "post": {
         "operationId": "post_runtime_v1_invocations_by_invocation_id_resume",
         "summary": "恢复 Invocation",
@@ -3349,7 +3349,7 @@
         ]
       }
     },
-    "/runtime/v1/invocations/{invocation_id}:steer": {
+    "/runtime/v1/invocations/{invocation_id}/steer": {
       "post": {
         "operationId": "post_runtime_v1_invocations_by_invocation_id_steer",
         "summary": "引导 Invocation",
@@ -3792,7 +3792,7 @@
         }
       }
     },
-    "/gateway/v1/tool-calls/{tool_call_id}:reconcile-effect": {
+    "/gateway/v1/tool-calls/{tool_call_id}/reconcile-effect": {
       "post": {
         "operationId": "post_gateway_v1_tool_calls_by_tool_call_id_reconcile_effect",
         "summary": "核对 Tool Effect",
@@ -4079,7 +4079,7 @@
         }
       }
     },
-    "/gateway/v1/context:query": {
+    "/gateway/v1/context/query": {
       "post": {
         "operationId": "post_gateway_v1_context_query",
         "summary": "查询上下文",
@@ -4557,7 +4557,7 @@
         }
       }
     },
-    "/admin/api/v1/agent-revisions/{revision_id}:publish": {
+    "/admin/api/v1/agent-revisions/{revision_id}/publish": {
       "post": {
         "operationId": "post_admin_api_v1_agent_revisions_by_revision_id_publish",
         "summary": "发布 AgentRevision",
@@ -5172,7 +5172,7 @@
         ]
       }
     },
-    "/admin/api/v1/tool-calls/{tool_call_id}:reconcile-effect": {
+    "/admin/api/v1/tool-calls/{tool_call_id}/reconcile-effect": {
       "post": {
         "operationId": "post_admin_api_v1_tool_calls_by_tool_call_id_reconcile_effect",
         "summary": "管理核对长期未知副作用",
@@ -5401,7 +5401,7 @@
         "x-snowharness-event-envelope-schema": "./event-envelope.schema.json"
       }
     },
-    "/admin/api/v1/jobs/{job_id}:publish-to-thread": {
+    "/admin/api/v1/jobs/{job_id}/publish-to-thread": {
       "post": {
         "operationId": "post_admin_api_v1_jobs_by_job_id_publish_to_thread",
         "summary": "把 Job 结果发布到会话",
@@ -5742,7 +5742,7 @@
         ]
       }
     },
-    "/gateway/v1/capabilities:search": {
+    "/gateway/v1/capabilities/search": {
       "post": {
         "operationId": "post_gateway_v1_capabilities_search",
         "summary": "搜索可用能力",
@@ -6643,7 +6643,7 @@
         ]
       }
     },
-    "/gateway/v1/child-threads/{child_thread_id}:cancel": {
+    "/gateway/v1/child-threads/{child_thread_id}/cancel": {
       "post": {
         "operationId": "post_gateway_v1_child_threads_by_child_thread_id_cancel",
         "summary": "请求取消 Child Thread",
@@ -7053,7 +7053,7 @@
         ]
       }
     },
-    "/admin/api/v1/memory-candidates/{candidate_id}:resolve": {
+    "/admin/api/v1/memory-candidates/{candidate_id}/resolve": {
       "post": {
         "operationId": "post_admin_api_v1_memory_candidates_by_candidate_id_resolve",
         "summary": "复核 Memory Candidate",
@@ -7496,7 +7496,7 @@
         ]
       }
     },
-    "/admin/api/v1/jobs/{job_id}:cancel": {
+    "/admin/api/v1/jobs/{job_id}/cancel": {
       "post": {
         "operationId": "post_admin_api_v1_jobs_by_job_id_cancel",
         "summary": "请求取消 Job",
@@ -7626,7 +7626,7 @@
         }
       }
     },
-    "/admin/api/v1/jobs/{job_id}:retry": {
+    "/admin/api/v1/jobs/{job_id}/retry": {
       "post": {
         "operationId": "post_admin_api_v1_jobs_by_job_id_retry",
         "summary": "重新运行终态 Job",
@@ -7937,9 +7937,9 @@
         ]
       }
     },
-    "/admin/api/v1/operations/event-quarantines/{failure_id}:resolve": {
+    "/admin/api/v1/event-quarantines/{failure_id}/resolve": {
       "post": {
-        "operationId": "post_admin_api_v1_operations_event_quarantines_by_failure_id_resolve",
+        "operationId": "post_admin_api_v1_event_quarantines_by_failure_id_resolve",
         "summary": "解析隔离事件",
         "tags": [
           "admin"
@@ -8067,7 +8067,7 @@
         }
       }
     },
-    "/api/v1/threads/{thread_id}:request-execution-environment-change": {
+    "/api/v1/threads/{thread_id}/request-execution-environment-change": {
       "post": {
         "operationId": "post_api_v1_threads_by_thread_id_request_execution_environment_change",
         "summary": "请求变更执行环境",
@@ -8209,7 +8209,7 @@
         }
       }
     },
-    "/admin/api/v1/artifact-attestations:verify": {
+    "/admin/api/v1/artifact-attestations/verify": {
       "post": {
         "operationId": "post_admin_api_v1_artifact_attestations_verify",
         "summary": "验证制品证明",
@@ -8480,9 +8480,9 @@
         }
       }
     },
-    "/admin/api/v1/legal-holds/{legal_hold_id}:release": {
+    "/admin/api/v1/legal-holds/release": {
       "post": {
-        "operationId": "post_admin_api_v1_legal_holds_by_legal_hold_id_release",
+        "operationId": "post_admin_api_v1_legal_holds_release",
         "summary": "释放 Legal Hold",
         "tags": [
           "admin"

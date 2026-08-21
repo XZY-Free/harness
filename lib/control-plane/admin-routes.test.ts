@@ -3,18 +3,18 @@
  *
  * 覆盖 4 个 Admin API 路由：
  * - POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision。
- * - POST /admin/api/v1/agent-revisions/{revision_id}:publish — 发布 AgentRevision（attestation 门禁）。
- * - POST /admin/api/v1/artifact-attestations:verify — 验证制品证明。
- * - POST /admin/api/v1/deployment-routes/{route_id}:disable — 禁用 DeploymentRoute。
+ * - POST /admin/api/v1/agent-revisions/{revision_id}/publish — 发布 AgentRevision（attestation 门禁）。
+ * - POST /admin/api/v1/artifact-attestations/verify — 验证制品证明。
+ * - POST /admin/api/v1/deployment-routes/{route_id}/disable — 禁用 DeploymentRoute。
  *
  * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  */
 import { createHash } from "node:crypto";
-import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]:publish/route";
-import { POST as withdrawAgentRevisionPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]:withdraw/route";
-import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations:verify/route";
-import { POST as disableRoutePOST } from "@/app/admin/api/v1/deployment-routes/[route_id]:disable/route";
+import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]/publish/route";
+import { POST as withdrawAgentRevisionPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]/withdraw/route";
+import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations/verify/route";
+import { POST as disableRoutePOST } from "@/app/admin/api/v1/deployment-routes/[route_id]/disable/route";
 import { GET as getAgentRevisionGET } from "@/app/admin/api/v1/agent-revisions/[revision_id]/route";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { GET as getAgentGET } from "@/app/admin/api/v1/agents/[agent_id]/route";
@@ -525,10 +525,10 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
 });
 
 // ═══════════════════════════════════════════════════════════
-// 1. POST /admin/api/v1/artifact-attestations:verify
+// 1. POST /admin/api/v1/artifact-attestations/verify
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /admin/api/v1/artifact-attestations:verify", () => {
+describe("POST /admin/api/v1/artifact-attestations/verify", () => {
   let tenantId: string;
   let userIdentityId: string;
 
@@ -590,7 +590,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/artifact-attestations:verify",
+      path: "/artifact-attestations/verify",
       idempotencyKey: "idem-verify-001",
       body: {
         artifact_type: "agent_revision",
@@ -619,7 +619,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/artifact-attestations:verify",
+      path: "/artifact-attestations/verify",
       body: {
         artifact_type: "agent_revision",
         artifact_revision_id: "rev-1",
@@ -680,7 +680,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
       buildApiRequest({
         audience: "admin",
         method: "POST",
-        path: "/artifact-attestations:verify",
+        path: "/artifact-attestations/verify",
         idempotencyKey: "idem-verify-fail",
         body: requestBody,
       });
@@ -748,7 +748,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const request1 = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/artifact-attestations:verify",
+      path: "/artifact-attestations/verify",
       idempotencyKey: "idem-replay-001",
       body,
     });
@@ -759,7 +759,7 @@ describe("POST /admin/api/v1/artifact-attestations:verify", () => {
     const request2 = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/artifact-attestations:verify",
+      path: "/artifact-attestations/verify",
       idempotencyKey: "idem-replay-001",
       body,
     });
@@ -925,13 +925,13 @@ describe("Agent control-plane detail and withdrawal", () => {
       buildApiRequest({
         audience: "admin",
         method: "POST",
-        path: `/agent-revisions/${revision.id}:withdraw`,
+        path: `/agent-revisions/${revision.id}/withdraw`,
         idempotencyKey: "idem-agent-withdraw-detail",
         ifMatch: `agent-revision-${revision.revisionNo}`,
         body: requestBody,
       });
     const withdrawn = await withdrawAgentRevisionPOST(buildWithdrawRequest(), {
-      params: Promise.resolve({ "revision_id:withdraw": `${revision.id}:withdraw` }),
+      params: Promise.resolve({ revision_id: `${revision.id}` }),
     });
     expect(withdrawn.status).toBe(200);
     expect(await withdrawn.json()).toMatchObject({
@@ -941,7 +941,7 @@ describe("Agent control-plane detail and withdrawal", () => {
     });
 
     const replay = await withdrawAgentRevisionPOST(buildWithdrawRequest(), {
-      params: Promise.resolve({ "revision_id:withdraw": `${revision.id}:withdraw` }),
+      params: Promise.resolve({ revision_id: `${revision.id}` }),
     });
     expect(replay.status).toBe(200);
 
@@ -954,10 +954,10 @@ describe("Agent control-plane detail and withdrawal", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 4. POST /admin/api/v1/agent-revisions/{revision_id}:publish
+// 4. POST /admin/api/v1/agent-revisions/{revision_id}/publish
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
+describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
   let tenantId: string;
   let userIdentityId: string;
 
@@ -997,7 +997,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/agent-revisions/rev:publish",
+      path: "/agent-revisions/rev/publish",
       idempotencyKey: "idem-publish-001",
       ifMatch: "agent-revision-1",
       body: {
@@ -1007,7 +1007,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     });
 
     const response = await publishPOST(request, {
-      params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+      params: Promise.resolve({ revision_id: draftRevision.id }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
@@ -1050,7 +1050,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     const replayRequest = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/agent-revisions/rev:publish",
+      path: "/agent-revisions/rev/publish",
       idempotencyKey: "idem-publish-001",
       ifMatch: "agent-revision-1",
       body: {
@@ -1059,7 +1059,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
       },
     });
     const replayResponse = await publishPOST(replayRequest, {
-      params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+      params: Promise.resolve({ revision_id: draftRevision.id }),
     });
     expect(replayResponse.status).toBe(200);
     expect(await replayResponse.json()).toEqual(body);
@@ -1101,7 +1101,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
       buildApiRequest({
         audience: "admin",
         method: "POST",
-        path: "/agent-revisions/rev:publish",
+        path: "/agent-revisions/rev/publish",
         idempotencyKey,
         ifMatch: "agent-revision-1",
         body: {
@@ -1112,10 +1112,10 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
 
     const responses = await Promise.all([
       publishPOST(buildRequest("idem-concurrent-publish-1"), {
-        params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+        params: Promise.resolve({ revision_id: draftRevision.id }),
       }),
       publishPOST(buildRequest("idem-concurrent-publish-2"), {
-        params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+        params: Promise.resolve({ revision_id: draftRevision.id }),
       }),
     ]);
 
@@ -1154,7 +1154,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/agent-revisions/rev:publish",
+      path: "/agent-revisions/rev/publish",
       idempotencyKey: "idem-no-ifmatch-001",
       body: {
         release_notes: "Initial release",
@@ -1163,7 +1163,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     });
 
     const response = await publishPOST(request, {
-      params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+      params: Promise.resolve({ revision_id: draftRevision.id }),
     });
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: { code: string } };
@@ -1200,7 +1200,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/agent-revisions/rev:publish",
+      path: "/agent-revisions/rev/publish",
       idempotencyKey: "idem-etag-mismatch-001",
       ifMatch: "agent-revision-999",
       body: {
@@ -1210,7 +1210,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     });
 
     const response = await publishPOST(request, {
-      params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+      params: Promise.resolve({ revision_id: draftRevision.id }),
     });
     expect(response.status).toBe(412);
     const body = (await response.json()) as { error: { code: string } };
@@ -1241,7 +1241,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/agent-revisions/rev:publish",
+      path: "/agent-revisions/rev/publish",
       idempotencyKey: "idem-no-attest-001",
       ifMatch: "agent-revision-1",
       body: {
@@ -1251,7 +1251,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
     });
 
     const response = await publishPOST(request, {
-      params: Promise.resolve({ "revision_id:publish": draftRevision.id }),
+      params: Promise.resolve({ revision_id: draftRevision.id }),
     });
     expect(response.status).toBe(409);
     const body = (await response.json()) as { error: { code: string } };
@@ -1260,10 +1260,10 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}:publish", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 4. POST /admin/api/v1/deployment-routes/{route_id}:disable
+// 4. POST /admin/api/v1/deployment-routes/{route_id}/disable
 // ═══════════════════════════════════════════════════════════
 
-describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
+describe("POST /admin/api/v1/deployment-routes/{route_id}/disable", () => {
   let tenantId: string;
   let userIdentityId: string;
   let agentId: string;
@@ -1329,14 +1329,14 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: `/deployment-routes/${routeId}:disable`,
+      path: `/deployment-routes/${routeId}/disable`,
       idempotencyKey: "idem-disable-route-001",
       ifMatch: `route-set-${currentVersionNo}`,
       body: { reason: "人工停用" },
     });
 
     const response = await disableRoutePOST(request, {
-      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
+      params: Promise.resolve({ route_id: `${routeId}` }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
@@ -1365,14 +1365,14 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
       buildApiRequest({
         audience: "admin",
         method: "POST",
-        path: `/deployment-routes/${routeId}:disable`,
+        path: `/deployment-routes/${routeId}/disable`,
         idempotencyKey: "idem-disable-route-retry-001",
         ifMatch: `route-set-${currentVersionNo}`,
         body: requestBody,
       });
 
     const first = await disableRoutePOST(buildRequest(), {
-      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
+      params: Promise.resolve({ route_id: `${routeId}` }),
     });
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as Record<string, unknown>;
@@ -1380,7 +1380,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
     expect(firstBody.route_activation_id).toBeTruthy();
 
     const replay = await disableRoutePOST(buildRequest(), {
-      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
+      params: Promise.resolve({ route_id: `${routeId}` }),
     });
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
@@ -1406,13 +1406,13 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: `/deployment-routes/${routeId}:disable`,
+      path: `/deployment-routes/${routeId}/disable`,
       idempotencyKey: "idem-disable-no-ifmatch-001",
       body: { reason: "人工停用" },
     });
 
     const response = await disableRoutePOST(request, {
-      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
+      params: Promise.resolve({ route_id: `${routeId}` }),
     });
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: { code: string } };
@@ -1423,14 +1423,14 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: `/deployment-routes/${routeId}:disable`,
+      path: `/deployment-routes/${routeId}/disable`,
       idempotencyKey: "idem-disable-etag-mismatch-001",
       ifMatch: "route-set-999",
       body: { reason: "人工停用" },
     });
 
     const response = await disableRoutePOST(request, {
-      params: Promise.resolve({ "route_id:disable": `${routeId}:disable` }),
+      params: Promise.resolve({ route_id: `${routeId}` }),
     });
     expect(response.status).toBe(412);
     const body = (await response.json()) as { error: { code: string } };
@@ -1442,7 +1442,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
-      path: "/deployment-routes/random-uuid:disable",
+      path: "/deployment-routes/random-uuid/disable",
       requestId: crossTenantRequestId,
       idempotencyKey: "idem-disable-cross-tenant-001",
       ifMatch: `route-set-${currentVersionNo}`,
@@ -1451,7 +1451,7 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}:disable", () => {
 
     const randomRouteId = "99999999-9999-4999-8999-999999999999";
     const response = await disableRoutePOST(request, {
-      params: Promise.resolve({ "route_id:disable": `${randomRouteId}:disable` }),
+      params: Promise.resolve({ route_id: `${randomRouteId}` }),
     });
     await assertCrossTenantHidden(response, crossTenantRequestId);
   });

@@ -109,13 +109,13 @@ export function ThreadPage({
     [thread, patchSettings, refresh],
   );
 
-  // W3-4：主 Agent 变更 → 调用 :request-handoff 触发 Handoff 确认流程。
+  // W3-4：主 Agent 变更 → 调用 /request-handoff 触发 Handoff 确认流程。
   const handleAgentChange = useCallback(
     async (agentId: string) => {
       if (!thread || !latestTurn) return;
       const invocationId = latestTurn.active_invocation_id ?? latestTurn.latest_invocation_id ?? "";
       try {
-        const resp = await apiFetch(`/api/v1/threads/${threadId}:request-handoff`, {
+        const resp = await apiFetch(`/api/v1/threads/${threadId}/request-handoff`, {
           method: "POST",
           credentials: "include",
           headers: { "content-type": "application/json" },

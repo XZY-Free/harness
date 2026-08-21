@@ -101,7 +101,7 @@ describe("useEnvironmentTakeover", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] ?? [];
-    expect(url).toBe("/api/v1/threads/t1/environment:takeover");
+    expect(url).toBe("/api/v1/threads/t1/environment/takeover");
     expect(init?.method).toBe("POST");
     expect(init?.headers?.["Idempotency-Key"]).toBeTruthy();
   });

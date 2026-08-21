@@ -63,7 +63,7 @@ export function createRuntimeApiClient(config: ApiClientConfig): RuntimeApiClien
       request<RuntimeRevisionDTO>(`/admin/api/v1/runtime-revisions/${revisionId}`),
     publishRevision: (revisionId, body, opts) =>
       request<PublishRuntimeRevisionResponse>(
-        `/admin/api/v1/runtime-revisions/${revisionId}:publish`,
+        `/admin/api/v1/runtime-revisions/${revisionId}/publish`,
         {
           method: "POST",
           body: JSON.stringify(body),
@@ -75,7 +75,7 @@ export function createRuntimeApiClient(config: ApiClientConfig): RuntimeApiClien
       ),
     withdrawRevision: (revisionId, body, opts) =>
       request<WithdrawRuntimeRevisionResponse>(
-        `/admin/api/v1/runtime-revisions/${revisionId}:withdraw`,
+        `/admin/api/v1/runtime-revisions/${revisionId}/withdraw`,
         {
           method: "POST",
           body: JSON.stringify(body),
