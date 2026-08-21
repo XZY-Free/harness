@@ -7,7 +7,6 @@ import {
   contextSnapshotSkillResolverOutputSchema,
   customToolExecutorConfigSchema,
   customToolInputSchemaSchema,
-  memoryProvenanceSchema,
   threadPinnedFactsSchema,
   toolRunInputSchema,
   toolRunOutputSchema,
@@ -210,49 +209,5 @@ describe("threadPinnedFactsSchema", () => {
     expect(() =>
       validateJsonColumn({ not: "array" }, threadPinnedFactsSchema, "pinnedFacts"),
     ).toThrow(/json-column:pinnedFacts/);
-  });
-});
-
-describe("memoryProvenanceSchema", () => {
-  it("合法：非空来源数组 → 通过", () => {
-    expect(() =>
-      validateJsonColumn([{ kind: "user", refId: "u1" }], memoryProvenanceSchema, "provenance"),
-    ).not.toThrow();
-  });
-
-  it("合法：带可选字段 → 通过", () => {
-    expect(() =>
-      validateJsonColumn(
-        [{ kind: "tool_run", refId: "tr1", threadId: "t1", summary: "s" }],
-        memoryProvenanceSchema,
-        "provenance",
-      ),
-    ).not.toThrow();
-  });
-
-  it("非法：空数组 → 抛错（防孤儿记忆）", () => {
-    expect(() => validateJsonColumn([], memoryProvenanceSchema, "provenance")).toThrow(
-      /json-column:provenance/,
-    );
-  });
-
-  it("非法：缺 refId → 抛错", () => {
-    expect(() =>
-      validateJsonColumn(
-        [{ kind: "user" }] as unknown as { kind: "user"; refId: string }[],
-        memoryProvenanceSchema,
-        "provenance",
-      ),
-    ).toThrow(/json-column:provenance/);
-  });
-
-  it("非法：非法 kind 值 → 抛错", () => {
-    expect(() =>
-      validateJsonColumn(
-        [{ kind: "bogus", refId: "u1" }] as unknown as { kind: "user"; refId: string }[],
-        memoryProvenanceSchema,
-        "provenance",
-      ),
-    ).toThrow(/json-column:provenance/);
   });
 });

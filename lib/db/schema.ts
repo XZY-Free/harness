@@ -99,12 +99,6 @@ export const THREAD_EVENT_TYPES = [
   "delivery.failed",
   "git.checkpoint_created",
   "git.checkpoint_restored",
-  // 长期记忆生命周期（只追加）
-  "memory.created",
-  "memory.revoked",
-  // embedding 索引重建（payload 含 memoryId/provider/model/status/dimension?/errorCode?）。
-  // 纯应用层 const 追加——事件 type 在 DB 是 varchar（非 enum 约束），故零 migration SQL。
-  "memory.reindexed",
   // 外部资料与 MCP 调用（只追加，不改旧事件含义）
   // external.fetched：webFetch/webSearch/searchDocs 一次外部资料访问（payload 含来源/hash/artifact）
   // external.searched：webSearch 一次搜索（S1 06-，payload 含 query/resultCount）
@@ -712,123 +706,6 @@ export const gitCheckpoint = mysqlTable(
   }),
 );
 
-// ─── b: Long-term Memory ────────────────────────────────
-//
-// MemoryEntry：一条长期记忆。五类 kind（preference/convention/decision/failure/command），
-// 四类 scope（user/project/thread/skill），带 provenance/confidence/expiresAt。
-// soft delete（status=revoked 保留审计行）；去重靠 textHash（规范化 text 的 sha256）。
-// 不自动写入：只能经 rememberFact 工具或 Studio curate 写入，provenance 必填（蓝图 /§14）。
-
-export const MEMORY_SCOPES = ["user", "project", "thread", "skill"] as const;
-export type MemoryScope = (typeof MEMORY_SCOPES)[number];
-
-export const MEMORY_KINDS = ["preference", "convention", "decision", "failure", "command"] as const;
-export type MemoryKind = (typeof MEMORY_KINDS)[number];
-
-export const MEMORY_CONFIDENCE = ["low", "medium", "high"] as const;
-export type MemoryConfidence = (typeof MEMORY_CONFIDENCE)[number];
-
-export const MEMORY_STATUSES = ["active", "revoked"] as const;
-export type MemoryStatus = (typeof MEMORY_STATUSES)[number];
-
-/** provenance 单条来源（必填，可审计、可追溯，防孤儿记忆）。 */
-export type MemoryProvenanceEntry = {
-  kind: "tool_run" | "message" | "user";
-  refId: string;
-  threadId?: string;
-  summary?: string;
-};
-
-export const memoryEntry = mysqlTable(
-  "MemoryEntry",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    // user/project/thread/skill
-    scope: varchar("scope", { length: 32 }).notNull(),
-    // scope 绑定 id（userId/projectId/threadId/skillId）；user scope = userId
-    scopeRef: varchar("scopeRef", { length: 36 }),
-    // preference/convention/decision/failure/command
-    kind: varchar("kind", { length: 32 }).notNull(),
-    text: text("text").notNull(),
-    // 规范化 text 的 sha256，去重用
-    textHash: varchar("textHash", { length: 64 }).notNull(),
-    // 非空 provenance 数组（MemoryProvenanceEntry[]）
-    provenance: json("provenance").notNull(),
-    confidence: varchar("confidence", { length: 16 }).notNull().default("medium"),
-    // active/revoked（soft delete）
-    status: varchar("status", { length: 16 }).notNull().default("active"),
-    // null = 永不过期
-    expiresAt: datetime("expiresAt", { mode: "date" }),
-    // 写入它的 ToolRun（若经 agent 工具；逻辑外键，与 GitCheckpoint 一致不加 FK）
-    createdByToolRunId: varchar("createdByToolRunId", { length: 36 }),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    scopeStatusIdx: index("MemoryEntry_scope_scopeRef_status_idx").on(
-      t.scope,
-      t.scopeRef,
-      t.status,
-    ),
-    kindIdx: index("MemoryEntry_kind_idx").on(t.kind),
-    textHashIdx: index("MemoryEntry_textHash_idx").on(t.textHash),
-    scopeExpiresIdx: index("MemoryEntry_scope_scopeRef_expiresAt_idx").on(
-      t.scope,
-      t.scopeRef,
-      t.expiresAt,
-    ),
-  }),
-);
-export type MemoryEntry = InferSelectModel<typeof memoryEntry>;
-
-// MemoryEmbedding：一条 memory 的向量（混合检索 semantic rerank 用）。
-// 一条 memory 每 provider 一向量（unique memoryId+provider）。vector 存 number[]。
-// status=active/stale/error：provider disabled/stale/error 必须进入 manifest/UI 可观测，
-// 不允许静默伪装成功（蓝图 + 用户指令）。
-export const MEMORY_EMBEDDING_STATUSES = ["active", "stale", "error"] as const;
-export type MemoryEmbeddingStatus = (typeof MEMORY_EMBEDDING_STATUSES)[number];
-
-export const memoryEmbedding = mysqlTable(
-  "MemoryEmbedding",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    memoryId: varchar("memoryId", { length: 36 })
-      .notNull()
-      .references(() => memoryEntry.id),
-    provider: varchar("provider", { length: 64 }).notNull(),
-    model: varchar("model", { length: 128 }).notNull(),
-    // number[]，deterministic fake embedding（测试不请求真实网络）
-    vector: json("vector").notNull(),
-    dim: int("dim").notNull(),
-    status: varchar("status", { length: 16 }).notNull().default("active"),
-    errorMessage: varchar("errorMessage", { length: 512 }),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    memoryIdx: index("MemoryEmbedding_memoryId_idx").on(t.memoryId),
-    providerIdx: index("MemoryEmbedding_provider_idx").on(t.provider),
-    memoryProviderUniq: uniqueIndex("MemoryEmbedding_memoryId_provider_uniq").on(
-      t.memoryId,
-      t.provider,
-    ),
-  }),
-);
-export type MemoryEmbedding = InferSelectModel<typeof memoryEmbedding>;
 export type GitCheckpoint = InferSelectModel<typeof gitCheckpoint>;
 
 // ─── : MCP Server Registry / Custom Tools ───────────────

@@ -44,13 +44,6 @@ import {
   type DeploymentStatus,
   type GitCheckpoint,
   type McpServerConfig,
-  type MemoryConfidence,
-  type MemoryEmbedding,
-  type MemoryEntry,
-  type MemoryKind,
-  type MemoryProvenanceEntry,
-  type MemoryScope,
-  type MemoryStatus,
   type PermissionDecision,
   type PermissionScope,
   type SecretMount,
@@ -71,8 +64,6 @@ import {
   deployment,
   gitCheckpoint,
   mcpServerConfig,
-  memoryEmbedding,
-  memoryEntry,
   policyConfig,
   policyConfigHistory,
   secretMount,
@@ -91,7 +82,6 @@ import {
   contextSnapshotSkillResolverOutputSchema,
   customToolExecutorConfigSchema,
   customToolInputSchemaSchema,
-  memoryProvenanceSchema,
   threadPinnedFactsSchema,
   toolRunInputSchema,
   toolRunOutputSchema,
@@ -250,6 +240,35 @@ export async function insertPolicyConfigHistory(params: {
     changedKeys: params.changedKeys,
     changedAt: new Date(),
   });
+}
+
+/**
+ * seed 版本追踪（幂等标记）。
+ * 用 policyConfig 表 key="seed_version" 存储，避免新表。seed.ts 执行前检查版本，已执行则跳过。
+ */
+export async function getSeedVersion(): Promise<string | null> {
+  const [row] = await db
+    .select()
+    .from(policyConfig)
+    .where(eq(policyConfig.key, "seed_version"))
+    .limit(1);
+  return (row?.value as string) ?? null;
+}
+
+export async function setSeedVersion(version: string): Promise<void> {
+  const [existing] = await db
+    .select()
+    .from(policyConfig)
+    .where(eq(policyConfig.key, "seed_version"))
+    .limit(1);
+  if (existing) {
+    await db
+      .update(policyConfig)
+      .set({ value: version })
+      .where(eq(policyConfig.key, "seed_version"));
+  } else {
+    await db.insert(policyConfig).values({ key: "seed_version", value: version });
+  }
 }
 
 // ─── Admin Audit Queries (切片 C: append-only 审计) ──
@@ -466,6 +485,21 @@ export async function listContextSnapshotsForThread(
     .where(eq(contextSnapshot.threadId, threadId))
     .orderBy(desc(contextSnapshot.createdAt), desc(contextSnapshot.id))
     .limit(clamped);
+}
+
+/**
+ * 清理超期 ContextSnapshot（全 thread，不限终态）。
+ * 原仅 retention 清终态 thread 的 snapshot；活跃 thread 的旧 snapshot 无限累积。
+ * 本函数删 createdAt < cutoff 的 snapshot，由 retention 定时任务调用。
+ *
+ * 默认 retainDays 取自 dbConfig.snapshotRetentionDays（独立短保留期，默认 7 天），
+ * 区别于全局 retentionDays（90 天）。其他表仍用全局保留期。
+ */
+export async function cleanupOldSnapshots(retainDays?: number): Promise<number> {
+  const days = retainDays ?? dbConfig.snapshotRetentionDays;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const result = await db.delete(contextSnapshot).where(lt(contextSnapshot.createdAt, cutoff));
+  return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
 }
 
 // ─── Context Summary Queries (a) ────────────────────────
@@ -1181,308 +1215,6 @@ export async function markCheckpointRestored(id: string): Promise<GitCheckpoint 
   const now = new Date();
   await db.update(gitCheckpoint).set({ restoredAt: now }).where(eq(gitCheckpoint.id, id));
   return { ...existing, restoredAt: now };
-}
-
-// ─── Memory Queries (b) ─────────────────────────────────
-//
-// MemoryEntry CRUD。store.ts 做去重/provenance 校验/soft delete/事件，这里只做纯 DB 操作。
-
-export async function createMemoryRow(params: {
-  scope: MemoryScope;
-  scopeRef: string | null;
-  kind: MemoryKind;
-  text: string;
-  textHash: string;
-  provenance: MemoryProvenanceEntry[];
-  confidence: MemoryConfidence;
-  expiresAt: Date | null;
-  createdByToolRunId: string | null;
-}): Promise<MemoryEntry> {
-  // json 列 zod 校验（fail-closed，provenance 必须非空防孤儿记忆）
-  const provenance = validateJsonColumn(params.provenance, memoryProvenanceSchema, "provenance");
-  const row: MemoryEntry = {
-    id: randomUUID(),
-    scope: params.scope,
-    scopeRef: params.scopeRef,
-    kind: params.kind,
-    text: params.text,
-    textHash: params.textHash,
-    provenance,
-    confidence: params.confidence,
-    status: "active",
-    expiresAt: params.expiresAt,
-    createdByToolRunId: params.createdByToolRunId,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-  await db.insert(memoryEntry).values(row);
-  return row;
-}
-
-export async function getMemoryRow(id: string): Promise<MemoryEntry | null> {
-  const [row] = await db.select().from(memoryEntry).where(eq(memoryEntry.id, id)).limit(1);
-  return row ?? null;
-}
-
-export async function listMemoryRows(filter: {
-  scope: MemoryScope;
-  scopeRef: string | null;
-  kind?: MemoryKind;
-  status?: "active" | "revoked";
-}): Promise<MemoryEntry[]> {
-  const conds = [eq(memoryEntry.scope, filter.scope)];
-  if (filter.scopeRef !== null) conds.push(eq(memoryEntry.scopeRef, filter.scopeRef));
-  else conds.push(isNull(memoryEntry.scopeRef));
-  if (filter.kind) conds.push(eq(memoryEntry.kind, filter.kind));
-  conds.push(eq(memoryEntry.status, filter.status ?? "active"));
-  return db
-    .select()
-    .from(memoryEntry)
-    .where(and(...conds))
-    .orderBy(desc(memoryEntry.updatedAt), desc(memoryEntry.id));
-}
-
-export async function findDuplicateMemory(params: {
-  scope: MemoryScope;
-  scopeRef: string | null;
-  kind: MemoryKind;
-  textHash: string;
-}): Promise<MemoryEntry | null> {
-  const conds = [
-    eq(memoryEntry.scope, params.scope),
-    eq(memoryEntry.kind, params.kind),
-    eq(memoryEntry.textHash, params.textHash),
-    eq(memoryEntry.status, "active"),
-  ];
-  if (params.scopeRef !== null) conds.push(eq(memoryEntry.scopeRef, params.scopeRef));
-  else conds.push(isNull(memoryEntry.scopeRef));
-  const [row] = await db
-    .select()
-    .from(memoryEntry)
-    .where(and(...conds))
-    .limit(1);
-  return row ?? null;
-}
-
-export async function updateMemoryRow(
-  id: string,
-  patch: {
-    status?: "active" | "revoked";
-    confidence?: MemoryConfidence;
-    provenance?: MemoryProvenanceEntry[];
-    expiresAt?: Date | null;
-    /** text 更新（同步 textHash）。 */
-    text?: string;
-    textHash?: string;
-  },
-): Promise<MemoryEntry | null> {
-  const set: Record<string, unknown> = { updatedAt: new Date() };
-  if (patch.status !== undefined) set.status = patch.status;
-  if (patch.confidence !== undefined) set.confidence = patch.confidence;
-  if (patch.provenance !== undefined) set.provenance = patch.provenance;
-  if (patch.expiresAt !== undefined) set.expiresAt = patch.expiresAt;
-  if (patch.text !== undefined) set.text = patch.text;
-  if (patch.textHash !== undefined) set.textHash = patch.textHash;
-  await db.update(memoryEntry).set(set).where(eq(memoryEntry.id, id));
-  const [row] = await db.select().from(memoryEntry).where(eq(memoryEntry.id, id)).limit(1);
-  return row ?? null;
-}
-
-// ─── Memory Embedding Queries () ──────────────
-//
-// 一条 memory 每 provider 一向量（unique memoryId+provider）。upsertEmbeddingRow 查+插/改。
-// getActiveEmbeddingRow 供 retrieveMemories semantic rerank：只取 status=active 的向量。
-
-export async function upsertEmbeddingRow(params: {
-  memoryId: string;
-  provider: string;
-  model: string;
-  vector: number[];
-  dim: number;
-  status: "active" | "stale" | "error";
-  errorMessage?: string | null;
-}): Promise<MemoryEmbedding> {
-  // : 改 INSERT ... ON DUPLICATE KEY UPDATE(依赖 memoryId+provider 唯一索引),
-  // 消除原 SELECT-then-INSERT 竞态:并发双方都 select 空 → 都 INSERT → 一方撞唯一约束失败。
-  const now = new Date();
-  const row = {
-    id: randomUUID(),
-    memoryId: params.memoryId,
-    provider: params.provider,
-    model: params.model,
-    vector: params.vector,
-    dim: params.dim,
-    status: params.status,
-    errorMessage: params.errorMessage ?? null,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await db
-    .insert(memoryEmbedding)
-    .values(row)
-    .onDuplicateKeyUpdate({
-      set: {
-        model: sql`VALUES(model)`,
-        vector: sql`VALUES(vector)`,
-        dim: sql`VALUES(dim)`,
-        status: sql`VALUES(status)`,
-        errorMessage: sql`VALUES(errorMessage)`,
-        updatedAt: sql`VALUES(updatedAt)`,
-      },
-    });
-  return row;
-}
-
-export async function getActiveEmbeddingRow(
-  memoryId: string,
-  provider: string,
-): Promise<MemoryEmbedding | null> {
-  const [row] = await db
-    .select()
-    .from(memoryEmbedding)
-    .where(
-      and(
-        eq(memoryEmbedding.memoryId, memoryId),
-        eq(memoryEmbedding.provider, provider),
-        eq(memoryEmbedding.status, "active"),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
-}
-
-/**
- * 批量取多条 memory 的 active embedding（单查询替代 N+1）。
- * 返回 Map<memoryId, MemoryEmbedding>（仅当前 provider 的 active 行）。
- */
-export async function listActiveEmbeddingRows(
-  memoryIds: string[],
-  provider: string,
-): Promise<Map<string, MemoryEmbedding>> {
-  const out = new Map<string, MemoryEmbedding>();
-  if (memoryIds.length === 0) return out;
-  const rows = await db
-    .select()
-    .from(memoryEmbedding)
-    .where(
-      and(
-        inArray(memoryEmbedding.memoryId, memoryIds),
-        eq(memoryEmbedding.provider, provider),
-        eq(memoryEmbedding.status, "active"),
-      ),
-    );
-  for (const r of rows) out.set(r.memoryId, r);
-  return out;
-}
-
-/**
- * provider 切换后老 embedding fallback。
- * 当前 provider 无 active embedding 时，取任意 provider 的 active embedding（老 provider 的），
- * 供 cosine 粗排（维度可能不匹配 → 调用方需校验 dim）。无则 null。
- */
-export async function getActiveEmbeddingRowAnyProvider(
-  memoryId: string,
-): Promise<MemoryEmbedding | null> {
-  const [row] = await db
-    .select()
-    .from(memoryEmbedding)
-    .where(and(eq(memoryEmbedding.memoryId, memoryId), eq(memoryEmbedding.status, "active")))
-    .limit(1);
-  return row ?? null;
-}
-
-/**
- * 批量取任意 provider 的 active embedding（替代 N+1 循环调用 getActiveEmbeddingRowAnyProvider）。
- * 单查询 IN(...) 取所有 memoryId 的 active embedding 行，每个 memoryId 至多取一条。
- */
-export async function listActiveEmbeddingRowsAnyProvider(
-  memoryIds: string[],
-): Promise<Map<string, MemoryEmbedding>> {
-  const out = new Map<string, MemoryEmbedding>();
-  if (memoryIds.length === 0) return out;
-  const rows = await db
-    .select()
-    .from(memoryEmbedding)
-    .where(and(inArray(memoryEmbedding.memoryId, memoryIds), eq(memoryEmbedding.status, "active")));
-  // 同一 memoryId 可能有多条（不同 provider），取第一条（任意 provider）
-  for (const row of rows) {
-    if (!out.has(row.memoryId)) {
-      out.set(row.memoryId, row);
-    }
-  }
-  return out;
-}
-
-/**
- * 清理过期记忆。物理删除 expiresAt < now 的 active 记忆（含其 embedding 行）。
- * 由 retention 定时任务调用。@returns 删除条数
- */
-export async function cleanupExpiredMemories(): Promise<number> {
-  const now = new Date();
-  const expired = await db
-    .select({ id: memoryEntry.id })
-    .from(memoryEntry)
-    .where(and(lt(memoryEntry.expiresAt, now), eq(memoryEntry.status, "active")));
-  if (expired.length === 0) return 0;
-  const ids = expired.map((r) => r.id);
-  // 事务化删除：embeddings + entries 要么一起成功要么一起回滚，防半删导致语义搜索失效
-  return db.transaction(async (tx) => {
-    await tx.delete(memoryEmbedding).where(inArray(memoryEmbedding.memoryId, ids));
-    const result = await tx.delete(memoryEntry).where(inArray(memoryEntry.id, ids));
-    return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
-  });
-}
-
-/**
- * 清理超期 ContextSnapshot（全 thread，不限终态）。
- * 原仅 retention 清终态 thread 的 snapshot；活跃 thread 的旧 snapshot 无限累积。
- * 本函数删 createdAt < cutoff 的 snapshot，由 retention 定时任务调用。
- *
- * 默认 retainDays 取自 dbConfig.snapshotRetentionDays（独立短保留期，默认 7 天），
- * 区别于全局 retentionDays（90 天）。其他表仍用全局保留期。
- */
-export async function cleanupOldSnapshots(retainDays?: number): Promise<number> {
-  const days = retainDays ?? dbConfig.snapshotRetentionDays;
-  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const result = await db.delete(contextSnapshot).where(lt(contextSnapshot.createdAt, cutoff));
-  return (result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
-}
-
-/**
- * seed 版本追踪（幂等标记）。
- * 用 policyConfig 表 key="seed_version" 存储，避免新表。seed.ts 执行前检查版本，已执行则跳过。
- */
-export async function getSeedVersion(): Promise<string | null> {
-  const [row] = await db
-    .select()
-    .from(policyConfig)
-    .where(eq(policyConfig.key, "seed_version"))
-    .limit(1);
-  return (row?.value as string) ?? null;
-}
-
-export async function setSeedVersion(version: string): Promise<void> {
-  const [existing] = await db
-    .select()
-    .from(policyConfig)
-    .where(eq(policyConfig.key, "seed_version"))
-    .limit(1);
-  if (existing) {
-    await db
-      .update(policyConfig)
-      .set({ value: version })
-      .where(eq(policyConfig.key, "seed_version"));
-  } else {
-    await db.insert(policyConfig).values({ key: "seed_version", value: version });
-  }
-}
-
-/**
- * 列某 memory 的全部 embedding 行（不分 provider/status）。
- * 供 markEmbeddingStale（标 stale 需先读现有行）与 Studio 诊断。
- */
-export async function listEmbeddingRowsByMemory(memoryId: string): Promise<MemoryEmbedding[]> {
-  return db.select().from(memoryEmbedding).where(eq(memoryEmbedding.memoryId, memoryId));
 }
 
 // ─── MCP Server Config Queries () ───────────────────────

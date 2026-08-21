@@ -50,19 +50,17 @@ export async function register() {
       console.info(`[instrumentation] replayed ${replayed} audit failures on startup`);
     }
 
-    // V6-M2-7：定时清理过期记忆 + 旧快照（每小时，unref 不阻塞进程退出）。
-    // cleanupExpiredMemories 删 expiresAt < now 的 active 记忆及其 embedding；
+    // V6-M2-7：定时清理旧快照（每小时，unref 不阻塞进程退出）。
     // cleanupOldSnapshots 删超过 retentionDays 的 contextSnapshot。
+    // 02-5：legacy 过期记忆清理（cleanupExpiredMemories，删 memoryEntry/memoryEmbedding）
+    // 已随 memory 轨删除；正式 Memory Authority 的 memoryState/expiresAt 生命周期由正式链自身管理。
     const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
     const cleanupTimer = setInterval(async () => {
       try {
-        const { cleanupExpiredMemories, cleanupOldSnapshots } = await import("./lib/db/queries");
-        const expired = await cleanupExpiredMemories();
+        const { cleanupOldSnapshots } = await import("./lib/db/queries");
         const snapshots = await cleanupOldSnapshots();
-        if (expired > 0 || snapshots > 0) {
-          console.info(
-            `[instrumentation] cleanup: ${expired} expired memories, ${snapshots} old snapshots`,
-          );
+        if (snapshots > 0) {
+          console.info(`[instrumentation] cleanup: ${snapshots} old snapshots`);
         }
       } catch (e) {
         console.warn("[instrumentation] cleanup sweep failed:", e);

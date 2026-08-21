@@ -69,18 +69,6 @@ export const contextSnapshotSkillLoadEvidenceSchema = z.array(z.record(z.string(
 /** thread.pinnedFacts：用户 pinned facts，字符串数组（或 null=无）。 */
 export const threadPinnedFactsSchema = z.array(z.string()).nullable();
 
-/** memoryEntry.provenance：来源数组，每项 { kind, refId, threadId?, summary? }。 */
-export const memoryProvenanceSchema = z
-  .array(
-    z.object({
-      kind: z.enum(["tool_run", "message", "user"]),
-      refId: z.string(),
-      threadId: z.string().optional(),
-      summary: z.string().optional(),
-    }),
-  )
-  .min(1, "provenance 必须非空（防孤儿记忆）");
-
 /**
  * 校验并通过返回原值（zod 通过即原值，不做转换）。
  * 失败抛 ZodError（调用方应让其向上传播，fail-closed）。
