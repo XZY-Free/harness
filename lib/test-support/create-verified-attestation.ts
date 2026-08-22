@@ -8,7 +8,7 @@
  *
  * 消费者：
  * - `lib/test-support/seed-dispatchable-turn.ts`（vitest 集成测试夹具）
- * - `lib/test-support/seed-executable-default-agent.ts`（e2e 正式链引导）
+ * - `lib/test-support/seed-published-runtime-revision.ts`（e2e 正式链引导，专题01 §15 无默认 Agent）
  */
 import {
   type BuilderKeyRegistry,

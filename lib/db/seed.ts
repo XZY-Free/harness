@@ -12,21 +12,20 @@
  *
  * 正式系统惰性自举：`ensureDefaultTenant` 每请求、`ensureRouteSet` 惰性，
  * seed 不承载关键基建——本 seed 只做幂等引导正式对象：
- *   tenant → UserIdentity → principalBinding → 默认 Agent。
+ *   tenant → UserIdentity → principalBinding → PermissionGrant。
+ *
+ * 专题01 §15：不再创建默认 Agent（Agent 空表是合法平台状态，§6.2/§33.1）；
+ * 基础 Harness Runtime 初始化走正式 Runtime 控制面（§15.3/§11.4），不伪装成 Agent seed。
  *
  * 每个步骤都是 upsert / get-then-create 幂等，重复执行不产生重复行、
  * 不抛 unique 冲突，天然满足"Migration → Seed 成功"。
  */
-import { createAgent, getAgentByKey } from "@/lib/agents/persistence/agent-queries";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import type { ActionCode } from "@/lib/identity/action-codes";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-
-/** 默认 agent key（租户内唯一，幂等键）。 */
-export const DEFAULT_AGENT_KEY = "default";
 
 /** 默认用户授予的 Studio 动作码（admin 等值：全部 Studio 长期业务动作）。 */
 export const DEFAULT_GRANT_ACTION_CODES: ActionCode[] = [
@@ -111,30 +110,6 @@ export async function seedDefaultGrants(
   }
 }
 
-/**
- * 幂等灌默认 Agent（getAgentByKey 先行防重复；已存在则 no-op）。
- *
- * 仅建 draft 身份，不造 revision / route——正式 Route/Agent 生命周期由
- * 控制面 API 建立，seed 只保证空库有可用的默认 Agent 身份。
- */
-export async function seedDefaultAgent(): Promise<{ created: boolean }> {
-  const { tenantId, userIdentityId } = await seedDefaultIdentity();
-
-  const existing = await getAgentByKey(tenantId, DEFAULT_AGENT_KEY);
-  if (existing) return { created: false };
-
-  await createAgent({
-    tenantId,
-    agentKey: DEFAULT_AGENT_KEY,
-    displayName: "默认 Agent",
-    description: "正式 schema seed 引导的默认 agent（draft 身份）",
-    ownerUserId: userIdentityId,
-    lifecycleState: "draft",
-  });
-
-  return { created: true };
-}
-
 // ─── CLI runner（pnpm db:seed → tsx lib/db/seed.ts）─────────
 
 async function main() {
@@ -148,11 +123,7 @@ async function main() {
   await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
   console.log(`[seed] 默认用户授予 ${DEFAULT_GRANT_ACTION_CODES.length} 个 Studio 动作码`);
 
-  const agent = await seedDefaultAgent();
-  console.log(
-    `[seed] 默认 agent "${DEFAULT_AGENT_KEY}" ${agent.created ? "已写入" : "已存在（幂等跳过）"}`,
-  );
-
+  // 专题01 §15：不创建默认 Agent（Agent 空表合法）。基础 Harness Runtime 走正式控制面初始化。
   console.log("[seed] 正式 schema seed 完成");
   process.exit(0);
 }
