@@ -18,7 +18,9 @@ jobs:
           MYSQL_USER: test
           MYSQL_PASSWORD: test
         ports:
-          - 3306:3306
+          # 高位 host 端口避开共享 runner 上默认 3306 可能的占用
+          # （docker create -p 在创建阶段即绑定端口，端口冲突会以 exit 125 使 job 失败）。
+          - 13306:3306
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1"
           --health-interval=10s
@@ -27,7 +29,7 @@ jobs:
           --log-bin-trust-function-creators=1
 
     env:
-      DATABASE_URL: mysql://test:test@127.0.0.1:3306/snow_test
+      DATABASE_URL: mysql://test:test@127.0.0.1:13306/snow_test
 
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +65,7 @@ jobs:
       - name: Empty MySQL migration
         run: pnpm db:migrate
         env:
-          DATABASE_URL: mysql://test:test@127.0.0.1:3306/snow_test
+          DATABASE_URL: mysql://test:test@127.0.0.1:13306/snow_test
 
       - name: Seed
         run: pnpm db:seed
