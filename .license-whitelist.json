@@ -3,5 +3,65 @@
     "name": "@img/sharp-libvips-darwin-arm64",
     "license": "LGPL-3.0-or-later",
     "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-darwin-x64",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-arm",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-arm64",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-ppc64",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-riscv64",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-s390x",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-x64",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-linuxmusl-arm64",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-linuxmusl-x64",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-win32-arm64",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-win32-ia32",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
+  },
+  {
+    "name": "@img/sharp-libvips-win32-x64",
+    "license": "LGPL-3.0-or-later",
+    "reason": "libvips 作为动态链接库使用，LGPL 动态链接例外适用（仅 .node 二进制加载，不静态链接进应用代码）"
   }
 ]
