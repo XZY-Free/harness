@@ -78,8 +78,7 @@ describe("DesktopRendererApp", () => {
         new Response(
           JSON.stringify({
             viewer_id: "viewer-1",
-            threads: [{ id: existingThreadId, title: "已有会话", primary_agent_id: "agent-1" }],
-            agents: [{ id: "agent-1", agent_key: "default", display_name: "助手" }],
+            threads: [{ id: existingThreadId, title: "已有会话" }],
           }),
         ),
       )
@@ -128,8 +127,7 @@ describe("DesktopRendererApp", () => {
         new Response(
           JSON.stringify({
             viewer_id: "viewer-1",
-            threads: [{ id: "thread-1", title: "已有会话", primary_agent_id: "agent-1" }],
-            agents: [{ id: "agent-1", agent_key: "default", display_name: "助手" }],
+            threads: [{ id: "thread-1", title: "已有会话" }],
             default_model_ref: "deepseek-v4-flash",
           }),
         ),
@@ -162,8 +160,7 @@ describe("DesktopRendererApp", () => {
       new Response(
         JSON.stringify({
           viewer_id: "viewer-1",
-          threads: [{ id: "thread-1", title: "已有会话", primary_agent_id: "agent-1" }],
-          agents: [{ id: "agent-1", agent_key: "default", display_name: "助手" }],
+          threads: [{ id: "thread-1", title: "已有会话" }],
         }),
       ),
     );
@@ -186,8 +183,7 @@ describe("DesktopRendererApp", () => {
       new Response(
         JSON.stringify({
           viewer_id: "viewer-1",
-          threads: [{ id: "thread-1", title: "已有会话", primary_agent_id: "agent-1" }],
-          agents: [{ id: "agent-1", agent_key: "default", display_name: "助手" }],
+          threads: [{ id: "thread-1", title: "已有会话" }],
         }),
       ),
     );

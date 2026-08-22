@@ -15,7 +15,8 @@
  * - 加载 Thread 详情（useThreadDetail）+ Item 投影（useThread）。
  * - SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）。
  * - 错误展示（visibleError → ErrorCard）。
- * - W3-4：输入区集成 ＋菜单、助手选择器、模型选择器；CatalogSettingsBar 撤除。
+ * - W3-4：输入区集成 ＋菜单、助手选择器、模型选择器。
+ * - 专题01 §35：不再绑定主 Agent（primary_agent_id 已移除），无 Agent 时输入区照常可用。
  * - W4-1：顶部 Steer/Stop 横条与时间线上方的待办队列移入 ThreadInput 内部，
  *   停止按钮复用 codex 形态（输入框右下圆钮变 ■），待办队列复用紧凑单行条。
  * - Desktop：右侧渲染任务工作台，提供文件、审阅、浏览器和会话上下文入口。
@@ -148,13 +149,8 @@ export function ThreadPage({
   // - 侧栏收起后从 160px 开始拖拽，为搜索与展开按钮保留真实鼠标命中区。
   // - 无条件渲染：thread 未加载时标题显示"新会话"占位、状态点隐藏。
   const taskStatus = deriveTaskStatus(latestTurn);
-  const primaryAgentIsSystemDefault = availableAgents?.some(
-    (agent) => agent.id === thread?.primary_agent_id && agent.agentKey === "default",
-  );
-  const primaryAgentOption = availableAgents?.find(
-    (agent) => agent.id === thread?.primary_agent_id,
-  );
-  const primaryAgentName = primaryAgentIsSystemDefault ? "助手" : primaryAgentOption?.displayName;
+  // : 专题01 §15：Thread 不再绑定主 Agent（primary_agent_id 已移除，§35）。
+  // 移除 default-agent fallback 展示（"助手"兜底）；Agent 目录为空时不再伪装主 Agent。
   const desktopTitlebar = variant === "desktop" && (
     <div
       data-testid="desktop-thread-titlebar"
@@ -269,12 +265,7 @@ export function ThreadPage({
 
   // Web 顶部标题区：已加载用真实 ThreadHeader；首次加载用同高稳定占位（不构造假 Thread）。
   const webHeader = thread ? (
-    <ThreadHeader
-      thread={thread}
-      activeGoal={activeGoal}
-      latestTurn={latestTurn}
-      primaryAgentName={primaryAgentName}
-    />
+    <ThreadHeader thread={thread} activeGoal={activeGoal} latestTurn={latestTurn} />
   ) : (
     <header
       data-testid="web-thread-header-placeholder"
@@ -304,7 +295,6 @@ export function ThreadPage({
         latestTurn={latestTurn}
         thread={thread}
         availableAgents={availableAgents}
-        currentAgentId={primaryAgentIsSystemDefault ? null : undefined}
         defaultModelRef={defaultModelRef}
         onAgentChange={handleAgentChange}
         onModelChange={handleModelChange}

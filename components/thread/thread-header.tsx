@@ -7,10 +7,12 @@
  *
  * 职责：
  * - 展示 Thread title（或 "新会话"）。
- * - 展示主 Agent（primary_agent_id → 显示名，W04 接入 Agent 目录后替换）。
  * - 展示 active Goal（objective + goal_state）。
  * - 展示当前任务状态（从 latest_turn.turn_state 推导）。
  * - 展示默认执行位置（default_environment_definition_id → "Cloud" / "Desktop"，W04 接入 Environment 目录后替换）。
+ *
+ * 专题01 §15/§35：Thread 不再绑定主 Agent（primary_agent_id 已移除），
+ * 头部不再展示「主 Agent」行（Agent 目录为空时不伪装助手）。
  *
  * 当前任务状态推导：
  * - latest_turn.turn_state = accepted/queued → "排队中"
@@ -36,9 +38,8 @@ interface ThreadHeaderProps {
   readonly thread: ClientThread;
   readonly activeGoal: ClientGoal | null;
   readonly latestTurn: ClientTurn | null;
-  /** 渲染变体：web（默认）= 完整 header；desktop = 仅次级信息行（Agent / Goal / 位置）。 */
+  /** 渲染变体：web（默认）= 完整 header；desktop = 仅次级信息行（Goal / 位置）。 */
   readonly variant?: "web" | "desktop";
-  readonly primaryAgentName?: string;
 }
 
 /** 从 Turn 状态推导当前任务状态（中文）。
@@ -91,24 +92,15 @@ export function ThreadHeader({
   activeGoal,
   latestTurn,
   variant = "web",
-  primaryAgentName,
 }: ThreadHeaderProps) {
   const taskStatus = deriveTaskStatus(latestTurn);
   const sidebar = useOptionalSidebar();
 
   // Desktop 形态：标题信息上移至 ThreadPage 的 38px 标题栏（W2-2），
-  // 此处仅保留次级信息行（Agent / Goal / 位置）。
+  // 此处仅保留次级信息行（Goal / 位置）。
   if (variant === "desktop") {
     return (
       <div className="flex items-center gap-3 px-4 py-2 text-xs text-muted-foreground">
-        {/* 主 Agent（W04 接入 Agent 目录显示名） */}
-        <span className="flex items-center gap-1">
-          <span className="text-foreground-subtle">Agent</span>
-          {primaryAgentName ?? (
-            <CatalogDisplayName resourceId={thread.primary_agent_id} resourceType="agent" />
-          )}
-        </span>
-
         {/* Goal */}
         {activeGoal && (
           <span className="flex items-center gap-1">
@@ -177,16 +169,8 @@ export function ThreadHeader({
           </div>
         </div>
 
-        {/* 第二行：主 Agent + Goal + 执行位置（窄屏可换行，不得水平溢出） */}
+        {/* 第二行：Goal + 执行位置（窄屏可换行，不得水平溢出） */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          {/* 主 Agent（W04 接入 Agent 目录显示名） */}
-          <span className="flex items-center gap-1">
-            <span className="text-foreground-subtle">Agent</span>
-            {primaryAgentName ?? (
-              <CatalogDisplayName resourceId={thread.primary_agent_id} resourceType="agent" />
-            )}
-          </span>
-
           {/* Goal */}
           {activeGoal && (
             <span className="flex items-center gap-1">

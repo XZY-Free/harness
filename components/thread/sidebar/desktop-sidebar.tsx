@@ -31,19 +31,10 @@ import { useSidebar } from "./sidebar-context";
 interface SidebarThread {
   readonly id: string;
   readonly title: string | null;
-  /** G 阶段已移除 Agent 绑定，字段保留为可选以兼容旧布局。 */
-  readonly primaryAgentId?: string;
-}
-
-interface SidebarAgent {
-  readonly id: string;
-  readonly agentKey: string;
-  readonly displayName: string;
 }
 
 interface DesktopSidebarProps {
   readonly threads: readonly SidebarThread[];
-  readonly agents: readonly SidebarAgent[];
   readonly currentThreadId?: string;
   readonly userName?: string;
   readonly hasNativeTitlebar?: boolean;
@@ -59,7 +50,6 @@ const nativeNoDragStyle = { WebkitAppRegion: "no-drag" } as unknown as CSSProper
 
 export function DesktopSidebar({
   threads,
-  agents,
   currentThreadId: currentThreadIdProp,
   userName,
   hasNativeTitlebar = false,
@@ -161,13 +151,7 @@ export function DesktopSidebar({
 
   return (
     <>
-      <CmdkPanel
-        threads={threads}
-        agents={agents}
-        open={cmdkOpen}
-        onOpenChange={setCmdkOpen}
-        surface={surface}
-      />
+      <CmdkPanel threads={threads} open={cmdkOpen} onOpenChange={setCmdkOpen} surface={surface} />
       <div
         data-testid="desktop-titlebar-controls"
         className={cn(
@@ -265,12 +249,7 @@ export function DesktopSidebar({
           </div>
 
           {/* 会话列表 */}
-          <ThreadGroupList
-            threads={threads}
-            agents={agents}
-            currentThreadId={currentThreadId}
-            surface={surface}
-          />
+          <ThreadGroupList threads={threads} currentThreadId={currentThreadId} surface={surface} />
 
           {/* 底部账号行 */}
           <div className="mt-auto [-webkit-app-region:no-drag]">
@@ -318,53 +297,23 @@ export function DesktopSidebar({
 }
 
 /**
- * 按主智能体分组的会话列表。
- * - 未选助手的会话平铺在顶部。
- * - 下方按 Agent 分组（◉ + Agent 名）。
+ * 会话列表。
+ * - 全部平铺（专题01 §15/§35：Thread 不再绑主 Agent，primary_agent_id 已移除，
+ *   不再按 Agent 分组；Agent 目录为空时无分组语义）。
  * - 当前会话浅灰底高亮。
  */
 function ThreadGroupList({
   threads,
-  agents,
   currentThreadId,
   surface,
 }: {
   readonly threads: readonly SidebarThread[];
-  readonly agents: readonly SidebarAgent[];
   readonly currentThreadId?: string;
   readonly surface: "web" | "desktop";
 }) {
-  const agentMap = new Map(agents.map((a) => [a.id, a]));
-  // 系统兜底 agent（agentKey === "default"）≠ 用户主动选择：
-  // 要求 Thread 必须绑主 Agent，新会话自动绑 default 兜底；
-  // 设计语义上这类会话属"未选助手"，平铺顶部、不建分组。
-  const isUserChosenAgent = (
-    agentId: string | undefined,
-  ): agentId is string => {
-    if (!agentId) return false;
-    const a = agentMap.get(agentId);
-    return !!a && a.agentKey !== "default";
-  };
-
-  // 未选助手的会话（无匹配 agent，或仅绑了系统兜底 default）
-  const ungrouped = threads.filter((t) => !isUserChosenAgent(t.primaryAgentId));
-  // 用户主动选择助手的会话
-  const grouped = threads.filter((t) => isUserChosenAgent(t.primaryAgentId));
-
-  // 按 Agent 分组
-  const groupMap = new Map<string, SidebarThread[]>();
-  for (const t of grouped) {
-    const agentId = t.primaryAgentId;
-    if (!agentId) continue;
-    const list = groupMap.get(agentId) ?? [];
-    list.push(t);
-    groupMap.set(agentId, list);
-  }
-
   return (
     <nav className="flex-1 overflow-y-auto px-3 [-webkit-app-region:no-drag]" aria-label="会话列表">
-      {/* 未分组会话 */}
-      {ungrouped.map((t) => (
+      {threads.map((t) => (
         <ThreadListItem
           key={t.id}
           thread={t}
@@ -372,29 +321,6 @@ function ThreadGroupList({
           surface={surface}
         />
       ))}
-
-      {/* 按 Agent 分组 */}
-      {Array.from(groupMap.entries()).map(([agentId, list]) => {
-        const agent = agentMap.get(agentId);
-        return (
-          <div key={agentId} className="mt-2">
-            <div className="flex items-center gap-1.5 px-3 py-1">
-              <span className="size-1.5 rounded-full bg-primary" />
-              <span className="text-2xs font-medium text-muted-foreground">
-                {agent?.displayName ?? agent?.agentKey ?? agentId.slice(0, 8)}
-              </span>
-            </div>
-            {list.map((t) => (
-              <ThreadListItem
-                key={t.id}
-                thread={t}
-                isActive={t.id === currentThreadId}
-                surface={surface}
-              />
-            ))}
-          </div>
-        );
-      })}
     </nav>
   );
 }

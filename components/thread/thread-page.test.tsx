@@ -45,7 +45,6 @@ import { ThreadPage } from "./thread-page";
 const thread: ClientThread = {
   id: "t-1",
   title: "测试会话",
-  primary_agent_id: "agent-1",
   active_goal_id: null,
   default_workspace_id: null,
   default_model_ref: null,

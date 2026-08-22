@@ -14,7 +14,7 @@
  * - 错误转化为 ClientVisibleError。
  *
  * 关键不变量：
- * - resolve 是同步命令（200，非 202）：后端事务内完成 Thread.primary_agent_id 变更 + Event 写入。
+ * - resolve 是同步命令（200，非 202）：后端事务内完成 handoff 解析 + Event 写入。
  * - busy=true 时禁止重复触发。
  * - 同一 handoffId 只能解析一次（后端 HandoffAlreadyResolvedError → 409 OPERATION_PAYLOAD_CONFLICT）。
  *

@@ -7,7 +7,7 @@
  *
  * 职责：
  * - 封装 PATCH /api/v1/threads/{id}/settings 调用。
- * - 维护 busy / error 状态，供 CatalogSettingsBar 禁用控件与展示错误。
+ * - 维护 busy / error 状态，供 ThreadInput 禁用控件与展示错误。
  * - 错误转化为 ClientVisibleError。
  * - 乐观锁：调用方传入 expectedVersionNo（来自 thread.version_no），hook 内构造 If-Match。
  *

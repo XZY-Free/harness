@@ -53,10 +53,9 @@ function createMatchMedia(initialMatches: boolean) {
 }
 
 const threads = [
-  { id: "t-1", title: "会话一", primaryAgentId: "a-default" },
-  { id: "t-2", title: "会话二", primaryAgentId: "a-default" },
+  { id: "t-1", title: "会话一" },
+  { id: "t-2", title: "会话二" },
 ];
-const agents = [{ id: "a-default", agentKey: "default", displayName: "助手" }];
 
 function renderSidebar(matches: boolean) {
   const mql = createMatchMedia(matches);
@@ -66,7 +65,7 @@ function renderSidebar(matches: boolean) {
   );
   const utils = render(
     <SidebarProvider>
-      <DesktopSidebar threads={threads} agents={agents} currentThreadId="" surface="web" />
+      <DesktopSidebar threads={threads} currentThreadId="" surface="web" />
     </SidebarProvider>,
   );
   return { mql, ...utils };

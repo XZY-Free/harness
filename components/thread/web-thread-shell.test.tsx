@@ -55,8 +55,7 @@ beforeEach(() => {
   mocks.createNewThreadSession.mockReturnValue({ submit: vi.fn().mockResolvedValue({ id: "t" }) });
   mocks.loadThreadShell.mockResolvedValue({
     viewer_id: "viewer-1",
-    threads: [{ id: "thread-1", title: "已有会话", primary_agent_id: "agent-1" }],
-    agents: [{ id: "agent-1", agent_key: "default", display_name: "助手" }],
+    threads: [{ id: "thread-1", title: "已有会话" }],
     default_model_ref: "deepseek-v4-flash",
   });
 });
@@ -79,7 +78,7 @@ describe("WebThreadShell 透传平台默认模型", () => {
   it("新会话提交成功后同一组件树立即切换到 ThreadPage，不触发 router.replace 也不重载 shell", async () => {
     const router = { replace: vi.fn() };
     mocks.useRouter.mockReturnValue(router);
-    const created = { id: "created-1", title: "新会话", primary_agent_id: "agent-1" };
+    const created = { id: "created-1", title: "新会话" };
     mocks.createNewThreadSession.mockReturnValue({
       submit: vi.fn().mockResolvedValue(created),
     });

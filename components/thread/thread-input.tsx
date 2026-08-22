@@ -225,9 +225,9 @@ export function ThreadInput({
             <PlusMenuPopover threadId={threadId} />
 
             <AgentSelectorPopover
-              currentAgentId={
-                currentAgentId !== undefined ? currentAgentId : (thread?.primary_agent_id ?? null)
-              }
+              // 专题01 §35：Thread 不再绑主 Agent（primary_agent_id 已移除）；
+              // 未显式选择时为 null（不选中），Agent 目录为空时选择器空态不阻断发送。
+              currentAgentId={currentAgentId ?? null}
               onChange={onAgentChange}
               agentOptions={availableAgents}
             />

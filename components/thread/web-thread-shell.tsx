@@ -1,8 +1,8 @@
 "use client";
 
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
-import { NewThreadPage } from "@/components/thread/new-thread-page";
 import type { AgentOption } from "@/components/thread/input/input-popovers";
+import { NewThreadPage } from "@/components/thread/new-thread-page";
 import { DesktopSidebar } from "@/components/thread/sidebar/desktop-sidebar";
 import { SidebarProvider } from "@/components/thread/sidebar/sidebar-context";
 import { ThreadPage } from "@/components/thread/thread-page";
@@ -86,12 +86,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
   return (
     <SidebarProvider>
       <div className="flex h-dvh overflow-hidden bg-background text-foreground">
-        <DesktopSidebar
-          threads={threads}
-          agents={[]}
-          currentThreadId={activeThreadId ?? ""}
-          surface="web"
-        />
+        <DesktopSidebar threads={threads} currentThreadId={activeThreadId ?? ""} surface="web" />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {activeThreadId === null ? (
             <NewThreadPage

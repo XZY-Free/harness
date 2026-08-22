@@ -104,20 +104,15 @@ function DesktopShell() {
   const threads = shell.threads.map((thread) => ({
     id: thread.id,
     title: thread.title,
-    primaryAgentId: thread.primary_agent_id,
   }));
-  const agents = shell.agents.map((agent) => ({
-    id: agent.id,
-    agentKey: agent.agent_key,
-    displayName: agent.display_name,
-  }));
-  if (agents.length === 0) return <DesktopError>当前没有可用助手，无法创建会话。</DesktopError>;
+  // : 专题01 §15：不再绑定默认 Agent。Agent 目录可空是合法状态（§6.2/§33.1），
+  // 无 Agent 时不阻断会话创建（§35 Web/Desktop 无 Agent 阻断），不 fallback 第一个 Agent。
   return (
     <SidebarProvider>
       <div className="flex h-screen overflow-hidden bg-background text-foreground">
         <DesktopSidebar
           threads={threads}
-          agents={agents}
+          agents={[]}
           currentThreadId={route.kind === "chat" ? route.threadId : ""}
           userName={shell.viewer_id.slice(0, 8)}
           hasNativeTitlebar
@@ -125,10 +120,8 @@ function DesktopShell() {
         <main className="flex min-w-0 flex-1 flex-col">
           {route.kind === "new" ? (
             <NewThreadPage
-              agents={agents}
-              defaultAgentId={
-                agents.find((agent) => agent.agentKey === "default")?.id ?? agents[0]?.id ?? ""
-              }
+              agents={[]}
+              defaultAgentId=""
               defaultModelRef={shell.default_model_ref}
               error={newThreadError}
               onSubmit={submitNewThread}
@@ -139,7 +132,6 @@ function DesktopShell() {
               threadId={route.threadId}
               variant="desktop"
               viewerId={shell.viewer_id}
-              availableAgents={agents}
               defaultModelRef={shell.default_model_ref}
             />
           )}

@@ -10,30 +10,15 @@ interface CmdkPanelProps {
   readonly threads: readonly {
     id: string;
     title: string | null;
-    /** G 阶段已移除 Agent 绑定，字段保留为可选以兼容旧布局。 */
-    primaryAgentId?: string;
-  }[];
-  readonly agents: readonly {
-    id: string;
-    agentKey: string;
-    displayName: string;
   }[];
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly surface?: "web" | "desktop";
 }
 
-export function CmdkPanel({
-  threads,
-  agents,
-  open,
-  onOpenChange,
-  surface = "desktop",
-}: CmdkPanelProps) {
+export function CmdkPanel({ threads, open, onOpenChange, surface = "desktop" }: CmdkPanelProps) {
   const [query, setQuery] = useState("");
   const router = useRouter();
-
-  const agentMap = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
   const filteredThreads = useMemo(() => {
     if (!query.trim()) return threads;
@@ -131,8 +116,7 @@ export function CmdkPanel({
                 <div className="py-6 text-center text-sm text-muted-foreground">没有匹配的会话</div>
               ) : (
                 filteredThreads.slice(0, 9).map((thread, index) => {
-                  const agent = agentMap.get(thread.primaryAgentId ?? "");
-                  const agentName = agent?.displayName ?? agent?.agentKey ?? "助手";
+                  // 专题01 §35：Thread 不再绑主 Agent（primaryAgentId 已移除），不显示 Agent 分组标签。
                   return (
                     <Command.Item
                       key={thread.id}
@@ -141,7 +125,6 @@ export function CmdkPanel({
                       className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-muted data-[selected=true]:bg-muted"
                     >
                       <span className="flex-1 truncate">{thread.title ?? "新会话"}</span>
-                      <span className="text-xs text-muted-foreground">{agentName}</span>
                       <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                         ⌘{index + 1}
                       </span>

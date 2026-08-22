@@ -28,7 +28,6 @@ function createMatchMedia(initialMatches: boolean) {
 const thread: ClientThread = {
   id: "t-1",
   title: "一个很长很长的会话标题用来验证截断行为不会产生水平溢出",
-  primary_agent_id: "a-default",
   active_goal_id: null,
   default_workspace_id: null,
   default_model_ref: "deepseek-v4-flash",
@@ -49,7 +48,7 @@ function renderHeader(matches: boolean) {
   );
   render(
     <SidebarProvider>
-      <ThreadHeader thread={thread} activeGoal={null} latestTurn={null} primaryAgentName="助手" />
+      <ThreadHeader thread={thread} activeGoal={null} latestTurn={null} />
     </SidebarProvider>,
   );
   return mql;

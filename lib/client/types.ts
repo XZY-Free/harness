@@ -232,7 +232,6 @@ export interface ClientVisibleError {
 export interface ClientThread {
   readonly id: string;
   readonly title: string | null;
-  readonly primary_agent_id: string;
   readonly active_goal_id: string | null;
   readonly default_workspace_id: string | null;
   readonly default_model_ref: string | null;
