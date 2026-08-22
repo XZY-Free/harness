@@ -46,6 +46,7 @@ import {
   extractBearerToken,
   isServiceActionAllowed,
   issueWorkloadToken,
+  signWorkloadTokenPayload,
   workloadTokenErrorResponse,
 } from "@/lib/identity/workload-token";
 import { tenant } from "@/lib/persistence/schema/identity";
@@ -351,15 +352,16 @@ describe("workload-token", () => {
 
   it("decodeWorkloadToken service 缺 serviceId 抛 malformed_token", () => {
     const now = Date.now();
-    // 手动构造缺 serviceId 的 service token
+    // 已签名但缺 serviceId 的 service token（§26：签名通过后仍做 claim 校验）
     const claims = {
       type: "service",
       tenantId: DEFAULT_TENANT_ID,
+      jti: "jti-1",
       audience: "admin",
       issuedAt: now,
       expiresAt: now + 60000,
     };
-    const token = Buffer.from(JSON.stringify(claims), "utf-8").toString("base64url");
+    const token = signWorkloadTokenPayload(claims);
     expect(() => decodeWorkloadToken(token)).toThrow(WorkloadTokenError);
   });
 
@@ -368,12 +370,13 @@ describe("workload-token", () => {
     const claims = {
       type: "runtime",
       tenantId: DEFAULT_TENANT_ID,
+      jti: "jti-2",
       runtimeRevisionId: "rt-rev-001",
       audience: "runtime",
       issuedAt: now,
       expiresAt: now + 60000,
     };
-    const token = Buffer.from(JSON.stringify(claims), "utf-8").toString("base64url");
+    const token = signWorkloadTokenPayload(claims);
     expect(() => decodeWorkloadToken(token)).toThrow(WorkloadTokenError);
   });
 
@@ -382,13 +385,59 @@ describe("workload-token", () => {
     const claims = {
       type: "runtime",
       tenantId: DEFAULT_TENANT_ID,
+      jti: "jti-3",
       invocationId: "inv-001",
       audience: "runtime",
       issuedAt: now,
       expiresAt: now + 60000,
     };
-    const token = Buffer.from(JSON.stringify(claims), "utf-8").toString("base64url");
+    const token = signWorkloadTokenPayload(claims);
     expect(() => decodeWorkloadToken(token)).toThrow(WorkloadTokenError);
+  });
+
+  it("decodeWorkloadToken 旧未签名 base64url token 一律拒绝（§26 无 unsigned fallback）", () => {
+    const now = Date.now();
+    const claims = {
+      type: "runtime",
+      tenantId: DEFAULT_TENANT_ID,
+      jti: "jti-4",
+      invocationId: "inv-001",
+      runtimeRevisionId: "rt-rev-001",
+      audience: "runtime",
+      issuedAt: now,
+      expiresAt: now + 60000,
+    };
+    // 旧格式：纯 base64url(JSON)，无版本前缀/签名 → malformed_token。
+    const legacy = Buffer.from(JSON.stringify(claims), "utf-8").toString("base64url");
+    expect(() => decodeWorkloadToken(legacy)).toThrow(WorkloadTokenError);
+    // v1.<payload> 缺签名 → malformed_token。
+    expect(() =>
+      decodeWorkloadToken(`v1.${Buffer.from("{}", "utf-8").toString("base64url")}`),
+    ).toThrow(WorkloadTokenError);
+  });
+
+  it("decodeWorkloadToken 篡改 payload 后签名不匹配抛 malformed_token", () => {
+    const token = issueWorkloadToken({
+      type: "runtime",
+      tenantId: DEFAULT_TENANT_ID,
+      invocationId: "inv-001",
+      runtimeRevisionId: "rt-rev-001",
+      audience: "runtime",
+      expiresAt: Date.now() + 60000,
+    });
+    const [, payloadB64, sigB64] = token.split(".");
+    if (!payloadB64 || !sigB64) {
+      throw new Error("test setup: token 格式非法");
+    }
+    // 篡改 payload（改动 tenantId），签名不变 → 签名校验失败。
+    const tamperedClaims = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+    tamperedClaims.tenantId = "evil-tenant";
+    const tamperedPayload = Buffer.from(JSON.stringify(tamperedClaims), "utf-8").toString(
+      "base64url",
+    );
+    expect(() => decodeWorkloadToken(`v1.${tamperedPayload}.${sigB64}`)).toThrow(
+      WorkloadTokenError,
+    );
   });
 
   it("extractBearerToken 提取 Bearer token", () => {

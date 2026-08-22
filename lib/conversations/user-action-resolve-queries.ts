@@ -31,6 +31,7 @@
  * - input 类型 submit 时由本函数写入 responseRedactedJson。
  */
 import { randomUUID } from "node:crypto";
+import { updateToolCallState } from "@/lib/capability/tool-call-queries";
 import { ThreadNotFoundError } from "@/lib/conversations/errors";
 import { HANDOFF_PURPOSE } from "@/lib/conversations/handoff-queries";
 import {
@@ -41,6 +42,7 @@ import {
 import { db } from "@/lib/db/client";
 import { issueGrant } from "@/lib/permission/permission-queries";
 import {
+  TOOL_PERMISSION_CONFIRMATION_PURPOSE,
   UserActionAlreadyResolvedError,
   UserActionNotFoundError,
   UserActionResolutionMismatchError,
@@ -287,20 +289,43 @@ export async function resolveGenericUserAction(
           "grant 类型 promptJson.grant_expires_at 必须是未来时间",
         );
       }
-      const grant = await issueGrant({
-        tenantId: params.tenantId,
-        userId: grantUserId,
-        grantType: "user_consent",
-        scope: [...grantScope],
-        credentialRefId: grantCredentialRefId,
-        issuedBy: params.resolvedBy,
-        expiresAt: grantExpiresAt,
-      });
+      const grant = await issueGrant(
+        {
+          tenantId: params.tenantId,
+          userId: grantUserId,
+          grantType: "user_consent",
+          scope: [...grantScope],
+          credentialRefId: grantCredentialRefId,
+          issuedBy: params.resolvedBy,
+          expiresAt: grantExpiresAt,
+        },
+        { tx }, // §22.1：与 UAR 解析同事务，禁止 issueGrant 回落到全局 db。
+      );
       grantId = grant.id;
       await tx
         .update(userActionRequestTable)
         .set({ grantId, updatedAt: now })
         .where(eq(userActionRequestTable.id, request.id));
+    }
+
+    // §20.3 deny：Policy pause 的 tool_permission_confirmation 被员工 deny →
+    // ToolCall paused → cancelled，errorCode=USER_DENIED。不生成 Grant
+    // （requestType=confirmation 本就不走 grant 分支）。与 UAR 解析同事务。
+    if (request.purpose === TOOL_PERMISSION_CONFIRMATION_PURPOSE && params.resolution === "deny") {
+      if (!request.toolCallId) {
+        throw new UserActionValidationError(
+          "tool_permission_confirmation deny 必须关联 ToolCallId",
+        );
+      }
+      await updateToolCallState(
+        {
+          tenantId: params.tenantId,
+          toolCallId: request.toolCallId,
+          toState: "cancelled",
+          errorCode: "USER_DENIED",
+        },
+        tx,
+      );
     }
 
     // 6. UPDATE Invocation: waiting_user → running

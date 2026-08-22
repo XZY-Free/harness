@@ -50,6 +50,7 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
   const allowedKeys = new Set([
+    "protocol_version",
     "invocation_id",
     "turn_context",
     "job_context",
@@ -57,12 +58,16 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
     "input_items",
     "context_handle",
     "gateway_endpoints",
+    "governance_config",
+    "gateway_access",
     "execution_limits",
     "workspace",
     "trace_context",
     "attempt",
   ]);
   if (Object.keys(b).some((key) => !allowedKeys.has(key))) return false;
+  // §23/§49：agent-runtime-protocol@2，无 @1 fallback。
+  if (b.protocol_version !== "2") return false;
   if (typeof b.invocation_id !== "string" || b.invocation_id.length === 0) return false;
   if (!b.agent || typeof b.agent !== "object") return false;
   const agent = b.agent as Record<string, unknown>;
@@ -77,6 +82,17 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
   const gw = b.gateway_endpoints as Record<string, unknown>;
   if (typeof gw.events !== "string" || typeof gw.cancel !== "string") return false;
   if (typeof gw.resume !== "string" || typeof gw.steer !== "string") return false;
+  if (typeof gw.tools !== "string" || typeof gw.tool_calls !== "string") return false;
+  if (typeof gw.user_action_requests !== "string") return false;
+  // §24：governance_config 必填（revision_id + config_digest + config 快照）。
+  if (!b.governance_config || typeof b.governance_config !== "object") return false;
+  const gov = b.governance_config as Record<string, unknown>;
+  if (typeof gov.revision_id !== "string" || typeof gov.config_digest !== "string") return false;
+  if (!gov.config || typeof gov.config !== "object") return false;
+  // §27：gateway_access 必填（access_token + expires_at）。
+  if (!b.gateway_access || typeof b.gateway_access !== "object") return false;
+  const gwa = b.gateway_access as Record<string, unknown>;
+  if (typeof gwa.access_token !== "string" || typeof gwa.expires_at !== "string") return false;
   if (!b.execution_limits || typeof b.execution_limits !== "object") return false;
   const limits = b.execution_limits as Record<string, unknown>;
   if (typeof limits.max_invocation_seconds !== "number") return false;

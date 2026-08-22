@@ -20,7 +20,17 @@ export interface ExecutionBindingConfigInput {
   modelRevisionRef: string | null;
   initialEnvironmentLeaseId: string | null;
   workspaceBindingId: string | null;
-  policyRevisionId: string | null;
+  /**
+   * 冻结的 Permission Policy Revision id（有效 Binding 永远非空，§10）。
+   * Binding 时由 Route 显式指定；Route 未指定 → Tenant PolicySet("tool-execution").currentRevisionId。
+   */
+  policyRevisionId: string;
+  /** 冻结的 Permission Policy rules digest（sha256: 前缀；必须与该 Revision rulesHash 一致，§9）。 */
+  policyRulesDigest: string;
+  /** 冻结的 Governance Config Revision id（NOT NULL，§11）。 */
+  governanceConfigRevisionId: string;
+  /** 冻结的 Governance Config digest（sha256: 前缀；必须与该 Revision configDigest 一致，§9）。 */
+  governanceConfigDigest: string;
   contextCheckpointId: string | null;
   environmentDefinitionRevisionId: string | null;
   controlPlaneEvidence: ExecutionBindingControlPlaneEvidence;
@@ -53,6 +63,7 @@ export class ExecutionBindingAlreadyExistsError extends Error {
 
 export function computeExecutionBindingConfigHash(input: ExecutionBindingConfigInput): string {
   assertExecutionBindingEvidence(input.controlPlaneEvidence);
+  assertExecutionBindingPolicyGovernance(input);
   if (!Number.isInteger(input.projectionVersionNo) || input.projectionVersionNo < 0) {
     throw new ExecutionBindingEvidenceError("projectionVersionNo 必须为非负整数");
   }
@@ -67,6 +78,24 @@ export function computeExecutionBindingConfigHash(input: ExecutionBindingConfigI
     }),
   );
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
+/** §9：校验冻结的 Policy/Governance 四字段（有效 Binding 必须非空、digest 带 sha256: 前缀）。 */
+export function assertExecutionBindingPolicyGovernance(input: ExecutionBindingConfigInput): void {
+  if (!input.policyRevisionId) {
+    throw new ExecutionBindingEvidenceError("有效 Binding 必须冻结 policyRevisionId（§10，非空）");
+  }
+  if (!input.governanceConfigRevisionId) {
+    throw new ExecutionBindingEvidenceError(
+      "有效 Binding 必须冻结 governanceConfigRevisionId（§11，非空）",
+    );
+  }
+  if (!SHA256.test(input.policyRulesDigest)) {
+    throw new ExecutionBindingEvidenceError("policyRulesDigest 格式非法");
+  }
+  if (!SHA256.test(input.governanceConfigDigest)) {
+    throw new ExecutionBindingEvidenceError("governanceConfigDigest 格式非法");
+  }
 }
 
 export function assertExecutionBindingEvidence(

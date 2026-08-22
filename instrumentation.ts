@@ -13,7 +13,7 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     // P2-1:next build 的 collect-page-data 阶段也会调 register(),跳过运行时副作用
-    // (assertRuntimeConfig/runMigrations/policy refresh/清扫定时器等启动副作用),避免 build 期
+    // (assertRuntimeConfig/runMigrations/清扫定时器等启动副作用),避免 build 期
     // 依赖运行时 secret + 连 DB 跑迁移。原注释「next build 不会调用 register()」有误。
     if (process.env.NEXT_PHASE === "phase-production-build") return;
     const { APP_ENV, appConfig, assertRuntimeConfig } = await import("./lib/config");
@@ -25,11 +25,6 @@ export async function register() {
     // 启动时应用 db 迁移（替代已退役的 ensureSchema 裸 DDL），确保表结构就绪
     const { runMigrations } = await import("./lib/db/migrate");
     await runMigrations();
-
-    // Phase 4-4：迁移就绪后从 DB 刷新 policy 配置缓存（getPolicyConfig 同步读缓存）。
-    // 失败 fail-open 沿用默认（policy 是治理便利，非治理目的）。
-    const { refreshPolicyConfigFromDB } = await import("./lib/policy/config");
-    await refreshPolicyConfigFromDB();
 
     // Phase 5 Stage B：docker 可用性探测预热（best-effort，不阻塞启动）。
     // defaultType=container 但 docker 不可用 → warmup 内降级 warn；host 模式下探测跳过。

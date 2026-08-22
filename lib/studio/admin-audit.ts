@@ -11,7 +11,8 @@
  * - 数组截断到 50 项。
  * - 嵌套对象最大深度 2（root=0；depth>2 折叠为占位）。
  * - 文件操作只记 path + bytes，content 由 key 名规则直接剔除。
- * - policy 摘要只报 changed key 名，不含命令全文。
+ * - legacy summarizePolicyChange（PolicyConfig 审计）已随 02-6 P9 物理删除；正式 Policy Revision
+ *   审计摘要由 /studio/governance 侧按 Policy Revision 维度构造。
  */
 import {
   type AppendAdminAuditLogInput,
@@ -72,34 +73,6 @@ export function sanitizeAuditMetadata(input: Record<string, unknown>): Record<st
   return out && typeof out === "object" && !Array.isArray(out)
     ? (out as Record<string, unknown>)
     : {};
-}
-
-/** 稳定 JSON 序列化（key 排序），用于 policy value 深比较。 */
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  const keys = Object.keys(value as Record<string, unknown>).sort();
-  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`).join(",")}}`;
-}
-
-/**
- * 生成 policy 整配置覆盖摘要：全部 key + 变化的 key 名。
- * 只报 key 名，不含命令全文 / value 明文（）。
- */
-export function summarizePolicyChange(
-  beforeRows: Array<{ key: string; value: unknown }>,
-  afterRows: Array<{ key: string; value: unknown }>,
-): { keys: string[]; changedKeys: string[] } {
-  const keys = afterRows.map((r) => r.key);
-  const beforeMap = new Map(beforeRows.map((r) => [r.key, r.value]));
-  const changedKeys: string[] = [];
-  for (const r of afterRows) {
-    const prev = beforeMap.get(r.key);
-    if (stableStringify(prev) !== stableStringify(r.value)) {
-      changedKeys.push(r.key);
-    }
-  }
-  return { keys, changedKeys };
 }
 
 /** 生成用户角色覆盖摘要：before/after roleIds（不含 email 等个人字段，由 route 按需补）。 */

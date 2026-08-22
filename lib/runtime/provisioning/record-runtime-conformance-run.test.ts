@@ -121,7 +121,7 @@ function buildDsseEnvelope(
     runtimeRevisionId: revisionId,
     runtimeArtifactDigest: DIGEST_A,
     runtimeConfigDigest: DIGEST_B,
-    protocolContractRevision: "agent-runtime-protocol@1",
+    protocolContractRevision: "agent-runtime-protocol@2",
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: DIGEST_C,
     runnerIdentity: RUNNER_IDENTITY,

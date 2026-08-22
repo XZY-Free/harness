@@ -22,14 +22,15 @@ import {
   workloadTokenErrorResponse,
 } from "@/lib/identity/workload-token";
 import {
+  RUNTIME_PROTOCOL_VERSION,
   type RuntimeCapabilitiesResponse,
   defaultRuntimeCapabilities,
 } from "@/lib/runtime/runtime-client";
 
 export const dynamic = "force-dynamic";
 
-/** 支持的协议版本。 */
-const SUPPORTED_PROTOCOL_VERSIONS = ["1"];
+/** 支持的协议版本（§49：agent-runtime-protocol@2，无 @1 fallback）。 */
+const SUPPORTED_PROTOCOL_VERSIONS: string[] = [RUNTIME_PROTOCOL_VERSION];
 
 export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId(request);

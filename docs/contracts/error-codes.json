@@ -185,6 +185,14 @@
       "http": 403,
       "retryable": false
     },
+    "POLICY_INTEGRITY_MISMATCH": {
+      "http": 409,
+      "retryable": false
+    },
+    "POLICY_REQUIRES_PREAUTH": {
+      "http": 403,
+      "retryable": false
+    },
     "RATE_LIMITED": {
       "http": 429,
       "retryable": true

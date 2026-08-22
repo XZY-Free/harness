@@ -20,7 +20,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import {
   type ThreadEvent,
   type ThreadEventActorType,
@@ -235,8 +235,9 @@ export async function allocateInvocationSequence(
 export async function getInvocationById(
   tenantId: string,
   invocationId: string,
+  tx?: DbOrTx,
 ): Promise<Invocation | null> {
-  const [row] = await db
+  const [row] = await (tx ?? db)
     .select()
     .from(invocationTable)
     .where(and(eq(invocationTable.tenantId, tenantId), eq(invocationTable.id, invocationId)))

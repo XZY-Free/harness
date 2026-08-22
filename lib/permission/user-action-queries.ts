@@ -20,7 +20,7 @@
  * - MySQL 不支持 .returning()：update + select 两步。
  */
 import { createHash, randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import { encodeCursor } from "@/lib/http";
 import { issueGrant } from "@/lib/permission/permission-queries";
 import {
@@ -104,6 +104,12 @@ export class UserActionAuthCallbackInvalidError extends Error {
   }
 }
 
+/**
+ * Policy pause 专用 purpose（§19）：ToolCall 权限确认的一次性确认事实。
+ * 仅 Tool Gateway 可创建（External Runtime 不得伪造该 purpose，§21）。
+ */
+export const TOOL_PERMISSION_CONFIRMATION_PURPOSE = "tool_permission_confirmation";
+
 // ─── 校验辅助 ──────────────────────────────────────────────
 
 const VALID_REQUEST_TYPES = new Set<string>(USER_ACTION_REQUEST_TYPES);
@@ -161,6 +167,11 @@ export interface CreateUserActionRequestInput {
   itemId?: string | null;
   requestType: UserActionRequestType;
   purpose?: string | null;
+  /**
+   * 关联的 PermissionDecision id（§19）：仅 `purpose=tool_permission_confirmation` 时必填，
+   * UNIQUE(permissionDecisionId) 保证同一 pause 决策不会重复建 UAR。可空。
+   */
+  permissionDecisionId?: string | null;
   promptJson: unknown;
   inputSchemaJson?: unknown | null;
   /** auth 类型：可选；不传则自动生成。仓储返回原值供调用方构造 OAuth URL。 */
@@ -177,6 +188,14 @@ export interface CreateUserActionRequestResult {
   noncePlaintext?: string;
 }
 
+export interface CreateUserActionRequestOptions {
+  /**
+   * 外部事务句柄（§22：与 PermissionDecision / ToolCall / Invocation 状态变更同事务）。
+   * 缺省使用全局 db 自开事务。
+   */
+  tx?: DbOrTx;
+}
+
 /**
  * 创建 UserActionRequest。
  *
@@ -186,6 +205,7 @@ export interface CreateUserActionRequestResult {
  */
 export async function createUserActionRequest(
   input: CreateUserActionRequestInput,
+  options: CreateUserActionRequestOptions = {},
 ): Promise<CreateUserActionRequestResult> {
   if (!input.tenantId) throw new UserActionValidationError("tenantId 不能为空");
   if (!input.threadId) throw new UserActionValidationError("threadId 不能为空");
@@ -242,6 +262,7 @@ export async function createUserActionRequest(
     itemId: input.itemId ?? null,
     requestType: input.requestType,
     purpose: input.purpose ?? null,
+    permissionDecisionId: input.permissionDecisionId ?? null,
     requestState: "pending",
     promptJson: input.promptJson,
     inputSchemaJson,
@@ -250,8 +271,9 @@ export async function createUserActionRequest(
     expiresAt: input.expiresAt ?? null,
   };
 
-  await db.insert(userActionRequestTable).values(insert);
-  const created = await getUserActionRequestById(input.tenantId, id);
+  const source: DbOrTx = options.tx ?? db;
+  await source.insert(userActionRequestTable).values(insert);
+  const created = await getUserActionRequestById(input.tenantId, id, options.tx);
   if (!created) {
     throw new UserActionNotFoundError("UserActionRequest 创建后回查失败");
   }
@@ -267,12 +289,39 @@ export async function createUserActionRequest(
 export async function getUserActionRequestById(
   tenantId: string,
   requestId: string,
+  tx?: DbOrTx,
 ): Promise<UserActionRequest | null> {
-  const [row] = await db
+  const source: DbOrTx = tx ?? db;
+  const [row] = await source
     .select()
     .from(userActionRequestTable)
     .where(
       and(eq(userActionRequestTable.tenantId, tenantId), eq(userActionRequestTable.id, requestId)),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * 按 PermissionDecision id 查询关联的 UserActionRequest（§19 / §20.1 幂等防重）。
+ *
+ * UNIQUE(permissionDecisionId) 保证同一 pause 决策至多一条确认；用于 Gateway 判定
+ * 该 pause Decision 是否有已 approve 的一次性确认事实。跨租户隔离。
+ */
+export async function getUserActionRequestByPermissionDecisionId(
+  tenantId: string,
+  permissionDecisionId: string,
+  tx?: DbOrTx,
+): Promise<UserActionRequest | null> {
+  const source: DbOrTx = tx ?? db;
+  const [row] = await source
+    .select()
+    .from(userActionRequestTable)
+    .where(
+      and(
+        eq(userActionRequestTable.tenantId, tenantId),
+        eq(userActionRequestTable.permissionDecisionId, permissionDecisionId),
+      ),
     )
     .limit(1);
   return row ?? null;

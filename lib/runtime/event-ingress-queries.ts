@@ -32,6 +32,11 @@ import {
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import {
+  TOOL_PERMISSION_CONFIRMATION_PURPOSE,
+  createUserActionRequest,
+  isUserActionRequestType,
+} from "@/lib/permission/user-action-queries";
+import {
   type ThreadEventActorType,
   type ThreadItem,
   type ThreadItemAuthorType,
@@ -730,7 +735,18 @@ async function mapResponseCompleted(
   };
 }
 
-/** user_action.requested：创建 user_action Item + item.created + user_action.requested + waiting_user。 */
+/**
+ * user_action.requested：创建 UserActionRequest Authority + user_action Item Projection +
+ * item.created + user_action.requested + waiting_user（§21.1）。
+ *
+ * Authority 链（UserActionRequest=Authority，ThreadItem=Projection，不能只写 Item/Event）：
+ * 1. 拒绝 External Runtime 伪造 `purpose=tool_permission_confirmation`（该 purpose 保留给 Tool Gateway，§21）。
+ * 2. 解析 formal request_type（confirmation/auth/grant/input；非法 → 拒绝）。
+ * 3. 创建 user_action Item Projection（pending）。
+ * 4. 同事务创建 UserActionRequest Authority（itemId 指向 Projection）。
+ * 5. 写 item.created + user_action.requested ThreadEvent（后者带 request_id 引用 Authority）。
+ * 6. Invocation/Turn → waiting_user。
+ */
 async function mapUserActionRequested(
   tx: Tx,
   ctx: {
@@ -744,10 +760,24 @@ async function mapUserActionRequested(
   },
 ): Promise<CandidateMappingResult> {
   if (!ctx.turnId) {
+    // 纯 Job 无 Turn 上下文：拒绝（§21 / 文档 §4.2：Job 必须在调度前准备授权）。
     throw new IngressInvocationNotFoundError(ctx.invocation.id);
   }
 
-  // 1. 创建 user_action Item（pending）
+  const payload = ctx.event.payload;
+
+  // §21：External Runtime 不得伪造 tool_permission_confirmation（仅 Tool Gateway 可创建）。
+  if (payload.purpose === TOOL_PERMISSION_CONFIRMATION_PURPOSE) {
+    throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
+  }
+
+  // 解析 formal request_type（默认 confirmation；必须合法，非法 → 拒绝）。
+  const requestTypeRaw = (payload.request_type as string | undefined) ?? "confirmation";
+  if (!isUserActionRequestType(requestTypeRaw)) {
+    throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
+  }
+
+  // 1. 创建 user_action Item Projection（pending）。
   const itemSeq = await allocateItemSequence(tx, ctx.threadId);
   const item = await createThreadItem(tx, {
     threadId: ctx.threadId,
@@ -759,17 +789,39 @@ async function mapUserActionRequested(
     authorId: null,
     content: {
       kind: "user_action.requested",
-      ...ctx.event.payload,
+      ...payload,
     },
     invocationId: ctx.invocation.id,
   });
 
-  // 2. 分配 2 个 event sequence（item.created + user_action.requested）
+  // 2. 创建 UserActionRequest Authority（同事务；UserActionRequest=Authority，Item=Projection，§21.1）。
+  const purpose =
+    typeof payload.purpose === "string" && payload.purpose.length > 0 ? payload.purpose : null;
+  const { request: uar } = await createUserActionRequest(
+    {
+      tenantId: ctx.tenantId,
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: ctx.invocation.id,
+      itemId: item.id,
+      requestType: requestTypeRaw,
+      purpose,
+      promptJson: {
+        kind: "user_action.requested",
+        ...payload,
+      },
+      inputSchemaJson: requestTypeRaw === "input" ? (payload.input_schema ?? null) : null,
+      expiresAt: payload.expires_at ? new Date(payload.expires_at as string) : undefined,
+    },
+    { tx }, // §22：与 Item/Event/Invocation/Turn 状态变更同事务，禁止回落到全局 db。
+  );
+
+  // 3. 分配 2 个 event sequence（item.created + user_action.requested）。
   const startSeq = await allocateEventSequences(tx, ctx.threadId, 2);
   const itemCreatedSeq = startSeq;
   const userActionSeq = startSeq + 1;
 
-  // 3. 写 item.created ThreadEvent
+  // 4. 写 item.created ThreadEvent。
   await insertThreadEvent(tx, ctx.threadId, itemCreatedSeq, {
     eventType: "item.created",
     turnId: ctx.turnId,
@@ -784,21 +836,24 @@ async function mapUserActionRequested(
     correlationId: ctx.correlationId ?? undefined,
   });
 
-  // 4. 写 user_action.requested ThreadEvent
+  // 5. 写 user_action.requested ThreadEvent（payload 带 request_id 引用 Authority）。
   const userActionEvent = await insertThreadEvent(tx, ctx.threadId, userActionSeq, {
     eventType: "user_action.requested",
     turnId: ctx.turnId,
     itemId: item.id,
     invocationId: ctx.invocation.id,
     actorType: ctx.actorType,
-    payload: ctx.event.payload,
+    payload: {
+      ...payload,
+      request_id: uar.id,
+    },
     correlationId: ctx.correlationId ?? undefined,
   });
 
-  // 5. 更新 Invocation：→ waiting_user
+  // 6. 更新 Invocation：→ waiting_user。
   await updateInvocationState(tx, ctx.tenantId, ctx.invocation.id, "waiting_user");
 
-  // 6. CAS 更新 Turn：running → waiting_user
+  // 7. CAS 更新 Turn：running → waiting_user。
   await casUpdateTurn(tx, {
     turnId: ctx.turnId,
     expectedVersionNo: ctx.invocation.versionNo,

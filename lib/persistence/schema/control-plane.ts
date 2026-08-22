@@ -62,6 +62,12 @@ export { tenant as tenantTable } from "@/lib/persistence/schema/identity";
 // ─── Policy ───────────────────────────────────────────────────────
 export { policyRevisionTable, policySetTable } from "@/lib/persistence/schema/permission";
 
+// ─── Governance Config ────────────────────────────────────────────
+export {
+  governanceConfigRevisionTable,
+  governanceConfigSetTable,
+} from "@/lib/persistence/schema/governance-config";
+
 // ─── Runtime + Execution ──────────────────────────────────────────
 export {
   RUNTIME_KINDS,

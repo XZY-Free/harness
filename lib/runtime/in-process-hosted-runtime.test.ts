@@ -3,6 +3,7 @@ import {
   type InProcessHostedRuntimeClient,
   createInProcessHostedRuntimeClient,
 } from "@/lib/runtime/in-process-hosted-runtime";
+import { RUNTIME_PROTOCOL_VERSION } from "@/lib/runtime/runtime-client";
 import { describe, expect, it } from "vitest";
 
 describe("InProcessHostedRuntimeClient", () => {
@@ -25,6 +26,7 @@ describe("InProcessHostedRuntimeClient", () => {
       authToken: "runtime-token",
       idempotencyKey: "invoke-1",
       requestBody: {
+        protocol_version: RUNTIME_PROTOCOL_VERSION,
         invocation_id: "invocation-1",
         turn_context: { thread_id: "thread-1", turn_id: "turn-1" },
         job_context: null,
@@ -43,6 +45,18 @@ describe("InProcessHostedRuntimeClient", () => {
           cancel: "in-process://cancel",
           resume: "in-process://resume",
           steer: "in-process://steer",
+          tools: "in-process://tools",
+          tool_calls: "in-process://tool-calls",
+          user_action_requests: "in-process://user-action-requests",
+        },
+        governance_config: {
+          revision_id: "gov-rev-1",
+          config_digest: "sha256:test",
+          config: {},
+        },
+        gateway_access: {
+          access_token: "gw-token",
+          expires_at: new Date(Date.now() + 60000).toISOString(),
         },
         execution_limits: { max_invocation_seconds: 600, max_event_bytes: 1_048_576 },
         trace_context: { trace_id: "trace-1", span_id: "span-1" },

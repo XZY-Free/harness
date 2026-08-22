@@ -55,6 +55,7 @@ import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
+import { resolveBindingGovernance } from "@/lib/executions/application/resolve-binding-governance";
 import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
@@ -588,6 +589,11 @@ async function createBindingFromResolved(params: {
     throw new Error("Route Resolution 缺少有效 projectionVersionNo");
   }
 
+  const bindingGovernance = await resolveBindingGovernance(
+    db,
+    params.tenantId,
+    params.resolution.policyRevisionId,
+  );
   return createCreateExecutionBinding({ store: mysqlExecutionBindingStore })({
     invocationId: params.invocationId,
     tenantId: params.tenantId,
@@ -599,7 +605,10 @@ async function createBindingFromResolved(params: {
     modelRevisionRef: null,
     initialEnvironmentLeaseId: null,
     workspaceBindingId: null,
-    policyRevisionId: params.resolution.policyRevisionId,
+    policyRevisionId: bindingGovernance.policyRevisionId,
+    policyRulesDigest: bindingGovernance.policyRulesDigest,
+    governanceConfigRevisionId: bindingGovernance.governanceConfigRevisionId,
+    governanceConfigDigest: bindingGovernance.governanceConfigDigest,
     contextCheckpointId: null,
     environmentDefinitionRevisionId: null,
     controlPlaneEvidence: {

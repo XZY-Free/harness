@@ -38,7 +38,9 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import { threadEventTable } from "@/lib/persistence/schema/conversation";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtime";
+import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
@@ -64,6 +66,7 @@ import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-re
 import { TransientSequenceGapError, ingressTransientBatch } from "@/lib/runtime/transient-events";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -571,8 +574,8 @@ describe("RuntimeEventIngress 核心入库", () => {
     expect(invocation?.executionState).toBe("cancelled");
   });
 
-  it("user_action.requested：创建 user_action Item + Invocation→waiting_user", async () => {
-    const { invocationId } = await seedRunningInvocation(ctx);
+  it("user_action.requested：创建 UAR Authority + user_action Item Projection + Invocation→waiting_user（§21.1）", async () => {
+    const { invocationId, threadId } = await seedRunningInvocation(ctx);
 
     const result = await ingressEventBatch({
       tenantId: ctx.tenantId,
@@ -580,7 +583,7 @@ describe("RuntimeEventIngress 核心入库", () => {
       producerSequenceStart: 1,
       events: [
         makeEvent("evt-ua", 1, "user_action.requested", {
-          action_type: "confirmation",
+          request_type: "confirmation",
           prompt: "是否继续？",
         }),
       ],
@@ -592,6 +595,77 @@ describe("RuntimeEventIngress 核心入库", () => {
 
     const invocation = await getInvocationById(ctx.tenantId, invocationId);
     expect(invocation?.executionState).toBe("waiting_user");
+
+    // §21.1：UserActionRequest=Authority，ThreadItem=Projection，不能只写 Item/Event。
+    const uars = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(eq(userActionRequestTable.tenantId, ctx.tenantId));
+    expect(uars).toHaveLength(1);
+    const uar = uars[0]!;
+    expect(uar.threadId).toBe(threadId);
+    expect(uar.itemId).toBe(mapped?.itemId); // Authority 指向 Projection
+    expect(uar.requestType).toBe("confirmation");
+    expect(uar.requestState).toBe("pending");
+    expect(uar.permissionDecisionId).toBeNull(); // 非 Policy pause：不伪造 tool_permission_confirmation 关联
+
+    // user_action.requested ThreadEvent 带 request_id 引用 Authority。
+    const uaEvents = await db
+      .select()
+      .from(threadEventTable)
+      .where(
+        and(
+          eq(threadEventTable.threadId, threadId),
+          eq(threadEventTable.eventType, "user_action.requested"),
+        ),
+      );
+    expect(uaEvents).toHaveLength(1);
+    const payload = uaEvents[0]!.payloadJson as { request_id?: string };
+    expect(payload.request_id).toBe(uar.id);
+  });
+
+  it("user_action.requested 伪造 purpose=tool_permission_confirmation → 拒绝（§21）", async () => {
+    const { invocationId } = await seedRunningInvocation(ctx);
+
+    // External Runtime 不得伪造 Tool Gateway 保留的 purpose（§21），拒绝且事务回滚。
+    await expect(
+      ingressEventBatch({
+        tenantId: ctx.tenantId,
+        invocationId,
+        producerSequenceStart: 1,
+        events: [
+          makeEvent("evt-ua-forge", 1, "user_action.requested", {
+            purpose: "tool_permission_confirmation",
+            prompt: "伪造确认",
+          }),
+        ],
+      }),
+    ).rejects.toThrow(IngressCandidateTypeUnsupportedError);
+
+    // 事务回滚：不残留 UAR / Item。
+    const uars = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(eq(userActionRequestTable.tenantId, ctx.tenantId));
+    expect(uars).toHaveLength(0);
+  });
+
+  it("user_action.requested 非法 request_type → 拒绝（§21.1）", async () => {
+    const { invocationId } = await seedRunningInvocation(ctx);
+
+    await expect(
+      ingressEventBatch({
+        tenantId: ctx.tenantId,
+        invocationId,
+        producerSequenceStart: 1,
+        events: [
+          makeEvent("evt-ua-bad", 1, "user_action.requested", {
+            request_type: "ask", // 全仓唯一决策值仅 allow/pause/block；request_type 无 ask。
+            prompt: "非法类型",
+          }),
+        ],
+      }),
+    ).rejects.toThrow(IngressCandidateTypeUnsupportedError);
   });
 
   it("多事件批次：producerSequence 递增 + acceptedThrough 更新", async () => {

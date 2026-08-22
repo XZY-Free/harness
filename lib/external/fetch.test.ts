@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * 域名治理 fail-closed（命门 #2）：
  * - 空 allowlist → 全 deny
  * - 域内 → allow
- * - 域外 → ask
+ * - 域外 → deny（批准升级由 Gateway 的 pause 集中处理）
  * - 黑名单 → deny
  * mock node:fs/promises 避免触盘；fetchImpl 注入避免真实网络。
  */
@@ -78,11 +78,11 @@ describe("classifyDomain 域名治理 fail-closed", () => {
     expect(classifyDomain("https://docs.example.com/x").decision).toBe("allow");
   });
 
-  it("域外（allowlist 非空但未命中）→ ask", async () => {
+  it("域外（allowlist 非空但未命中）→ deny（批准升级由 Gateway 的 pause 集中处理）", async () => {
     const { classifyDomain } = await import("./fetch");
     setEnv("example.com", "");
     const v = classifyDomain("https://other.com/x");
-    expect(v.decision).toBe("ask");
+    expect(v.decision).toBe("deny");
     expect(v.reason).toContain("域外");
   });
 
@@ -132,15 +132,13 @@ describe("fetchUrl governance 路由", () => {
     }
   });
 
-  it("域外 → ask（不抓取，返回 awaitingApproval）", async () => {
+  it("域外 → deny（不抓取）", async () => {
     setEnv("example.com", "");
     const { fetchUrl } = await import("./fetch");
     const fetchImpl = mockFetch("x");
     const r = await fetchUrl({ url: "https://other.com/x", threadId: "tid", fetchImpl });
     expect(r.ok).toBe(false);
-    if (!r.ok && "awaitingApproval" in r) {
-      expect(r.awaitingApproval).toBe(true);
-    }
+    if (!r.ok && "denied" in r) expect(r.denied).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

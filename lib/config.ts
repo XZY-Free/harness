@@ -364,24 +364,6 @@ export const authConfig = {
   },
 } as const;
 
-/**
- * 审批 scope 配置。
- *
- * session scope（07-）：同 thread 短 TTL 复用，区别于 thread 的 24h。
- * TTL 在决议（resolve）时写入 expiresAt，过期后引擎 isApprovalExpired 自动过滤，
- * findMatchingApprovals 查询的 `expiresAt > now` 条件同步失效。
- */
-export const approvalConfig = {
-  /** session scope 批准后的有效时长（ms），默认 30min。 */
-  get sessionTtlMs(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_APPROVAL_SESSION_TTL_MS", "1800000"), 10);
-    if (!Number.isFinite(n) || n <= 0) {
-      throw new Error("[config] 无效的 SNOW_APPROVAL_SESSION_TTL_MS");
-    }
-    return n;
-  },
-} as const;
-
 export const appConfig = {
   /** 当前部署环境。 */
   env: APP_ENV,

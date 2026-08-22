@@ -28,8 +28,8 @@ describe("error-codes projection", () => {
     expect(CONTRACT.contract_version).toBe("11.0.0");
   });
 
-  it("错误码 75 个", () => {
-    expect(Object.keys(API_ERROR_CODES)).toHaveLength(75);
+  it("错误码 77 个", () => {
+    expect(Object.keys(API_ERROR_CODES)).toHaveLength(77);
   });
 
   it("errorDefinition 对未知码 fail-closed", () => {

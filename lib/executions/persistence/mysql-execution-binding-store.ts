@@ -29,9 +29,20 @@ import type {
   ExecutionBindingStore,
   StoreExecutionBindingInput,
 } from "@/lib/executions/persistence/execution-binding-store";
+import { GOVERNANCE_CONFIG_SET_KEY } from "@/lib/governance/config";
+import { computePolicyRulesHash } from "@/lib/identity/tenant-bootstrap";
+import {
+  listPoliciesByRevision,
+  loadPolicySetAndRevision,
+  toRulesDigestInput,
+} from "@/lib/permission/policy-queries";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
-import { policyRevisionTable, policySetTable } from "@/lib/persistence/schema/control-plane";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
+import {
+  governanceConfigRevisionTable,
+  governanceConfigSetTable,
+} from "@/lib/persistence/schema/governance-config";
+import { policyRevisionTable, policySetTable } from "@/lib/persistence/schema/permission";
 import { deploymentRouteSetTable, deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
@@ -150,6 +161,9 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         initialEnvironmentLeaseId: input.initialEnvironmentLeaseId,
         workspaceBindingId: input.workspaceBindingId,
         policyRevisionId: input.policyRevisionId,
+        policyRulesDigest: input.policyRulesDigest,
+        governanceConfigRevisionId: input.governanceConfigRevisionId,
+        governanceConfigDigest: input.governanceConfigDigest,
         contextCheckpointId: input.contextCheckpointId,
         routeRevisionId: evidence.routeRevisionId,
         routeActivationId: evidence.routeActivationId,
@@ -251,7 +265,9 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
     revision.routeSetId !== routeRow.routeSet.id ||
     revision.agentRevisionId !== input.agentRevisionId ||
     revision.runtimeRevisionId !== input.runtimeRevisionId ||
-    revision.policyRevisionId !== input.policyRevisionId ||
+    // §10：Route 显式指定 PolicyRevision 时，Binding 必须与其一致；
+    // Route 未指定（null）→ Tenant baseline fallback，effective 由 lockAndVerifyPolicy 校验。
+    (revision.policyRevisionId !== null && revision.policyRevisionId !== input.policyRevisionId) ||
     revision.contentDigest !== evidence.routeContentDigest
   ) {
     throw evidenceError("RouteRevision 内容与解析结果不一致");
@@ -338,8 +354,10 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
     additionalEvidence: { evidenceManifestDigest: conformanceRun.evidenceManifestDigest },
   });
 
-  // I. PolicyRevision → Projection（FOR UPDATE）— 最终 authority 锁与精确冻结校验
-  await lockAndVerifyPolicy(tx, input);
+  // I. PolicyRevision → Projection（FOR UPDATE）— 最终 authority 锁与精确冻结校验（§10/§42）
+  await lockAndVerifyPolicy(tx, input, revision.policyRevisionId);
+  // J. GovernanceRevision（FOR UPDATE）— 最终 authority 锁与精确冻结校验（§11/§42）
+  await lockAndVerifyGovernance(tx, input);
   await lockAndVerifyProjection(tx, input);
   return { agentRevision, runtimeRevision };
 }
@@ -347,8 +365,19 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
 async function lockAndVerifyPolicy(
   tx: Transaction,
   input: StoreExecutionBindingInput,
+  routePolicyRevisionId: string | null,
 ): Promise<void> {
-  if (!input.policyRevisionId) return;
+  // §10：有效 Policy = Route 显式指定 ?? Tenant baseline currentRevisionId（effective 永远非空）。
+  let effectivePolicyRevisionId = routePolicyRevisionId;
+  if (!effectivePolicyRevisionId) {
+    const { set: tenantSet } = await loadPolicySetAndRevision(tx, input.tenantId);
+    if (!tenantSet.currentRevisionId) throw staleEvidenceError("PolicySet 无 currentRevisionId");
+    effectivePolicyRevisionId = tenantSet.currentRevisionId;
+  }
+  if (effectivePolicyRevisionId !== input.policyRevisionId) {
+    throw staleEvidenceError("有效 PolicyRevision 与冻结不一致");
+  }
+
   const [policyKey] = await tx
     .select({ policySetId: policyRevisionTable.policySetId })
     .from(policyRevisionTable)
@@ -359,6 +388,7 @@ async function lockAndVerifyPolicy(
     .select({
       id: policySetTable.id,
       tenantId: policySetTable.tenantId,
+      lifecycleState: policySetTable.lifecycleState,
     })
     .from(policySetTable)
     .where(eq(policySetTable.id, policyKey.policySetId))
@@ -368,12 +398,17 @@ async function lockAndVerifyPolicy(
     .select({
       id: policyRevisionTable.id,
       policySetId: policyRevisionTable.policySetId,
+      defaultDecision: policyRevisionTable.defaultDecision,
+      rulesHash: policyRevisionTable.rulesHash,
       revisionState: policyRevisionTable.revisionState,
     })
     .from(policyRevisionTable)
     .where(eq(policyRevisionTable.id, input.policyRevisionId))
     .limit(1)
     .for("update");
+  if (!policySet || policySet.lifecycleState !== "enabled") {
+    throw staleEvidenceError("PolicySet 非 enabled");
+  }
   validateFrozenPolicyAuthority({
     policy:
       policySet && policyRevision
@@ -390,6 +425,77 @@ async function lockAndVerifyPolicy(
       tenantId: input.tenantId,
     },
   });
+
+  // §10：重算 rulesHash 必须与冻结 digest 一致（否则 fail-closed，不 Binding）。
+  // 上一节 validateFrozenPolicyAuthority 已保证 policyRevision 存在（否则已抛出）。
+  if (!policyRevision) {
+    throw staleEvidenceError("Policy Revision 不存在");
+  }
+  const rules = await listPoliciesByRevision(tx, input.policyRevisionId);
+  const recomputedRulesHash = computePolicyRulesHash(
+    policyRevision.defaultDecision,
+    toRulesDigestInput(rules),
+  );
+  if (recomputedRulesHash !== input.policyRulesDigest) {
+    throw staleEvidenceError("Policy rulesHash 与冻结 digest 不一致");
+  }
+  if (recomputedRulesHash !== policyRevision.rulesHash) {
+    throw staleEvidenceError("Policy Revision 存储 rulesHash 与内容不一致");
+  }
+}
+
+/**
+ * §11：Governance 不由 Route 选 — 冻结 Tenant GovernanceConfigSet("runtime-execution") 的
+ * current published Revision，并校验 configDigest 一致（fail-closed）。
+ */
+async function lockAndVerifyGovernance(
+  tx: Transaction,
+  input: StoreExecutionBindingInput,
+): Promise<void> {
+  const [governanceSet] = await tx
+    .select({
+      id: governanceConfigSetTable.id,
+      tenantId: governanceConfigSetTable.tenantId,
+      lifecycleState: governanceConfigSetTable.lifecycleState,
+      currentRevisionId: governanceConfigSetTable.currentRevisionId,
+      configSetKey: governanceConfigSetTable.configSetKey,
+    })
+    .from(governanceConfigSetTable)
+    .where(
+      and(
+        eq(governanceConfigSetTable.tenantId, input.tenantId),
+        eq(governanceConfigSetTable.configSetKey, GOVERNANCE_CONFIG_SET_KEY),
+      ),
+    )
+    .limit(1)
+    .for("update");
+  if (
+    !governanceSet ||
+    governanceSet.lifecycleState !== "enabled" ||
+    !governanceSet.currentRevisionId ||
+    governanceSet.currentRevisionId !== input.governanceConfigRevisionId
+  ) {
+    throw staleEvidenceError("GovernanceConfigSet 非 enabled 或 current Revision 不一致");
+  }
+  const [governanceRevision] = await tx
+    .select({
+      id: governanceConfigRevisionTable.id,
+      configSetId: governanceConfigRevisionTable.configSetId,
+      configDigest: governanceConfigRevisionTable.configDigest,
+      revisionState: governanceConfigRevisionTable.revisionState,
+    })
+    .from(governanceConfigRevisionTable)
+    .where(eq(governanceConfigRevisionTable.id, governanceSet.currentRevisionId))
+    .limit(1)
+    .for("update");
+  if (
+    !governanceRevision ||
+    governanceRevision.configSetId !== governanceSet.id ||
+    governanceRevision.revisionState !== "published" ||
+    governanceRevision.configDigest !== input.governanceConfigDigest
+  ) {
+    throw staleEvidenceError("GovernanceConfigRevision 非 published 或 digest 不一致");
+  }
 }
 
 export function validateFrozenPolicyAuthority(input: {
@@ -456,7 +562,6 @@ async function lockAndVerifyProjection(
       routeActivationId: evidence.routeActivationId,
       agentRevisionId: input.agentRevisionId,
       runtimeRevisionId: input.runtimeRevisionId,
-      policyRevisionId: input.policyRevisionId,
       routeContentDigest: evidence.routeContentDigest,
       agentArtifactDigest: evidence.agentArtifactDigest,
       runtimeArtifactDigest: evidence.runtimeArtifactDigest,
@@ -506,7 +611,6 @@ type FrozenProjectionExpectation = {
   routeActivationId: string;
   agentRevisionId: string;
   runtimeRevisionId: string;
-  policyRevisionId: string | null;
   routeContentDigest: string;
   agentArtifactId: string;
   runtimeArtifactId: string;
@@ -537,7 +641,6 @@ export function validateFrozenProjectionAuthority(input: {
     projection.routeActivationId !== expected.routeActivationId ||
     projection.agentRevisionId !== expected.agentRevisionId ||
     projection.runtimeRevisionId !== expected.runtimeRevisionId ||
-    projection.policyRevisionId !== expected.policyRevisionId ||
     projection.routeContentDigest !== expected.routeContentDigest ||
     projection.agentArtifactId !== expected.agentArtifactId ||
     projection.runtimeArtifactId !== expected.runtimeArtifactId ||
@@ -1096,6 +1199,9 @@ export function toExecutionBinding(
     initialEnvironmentLeaseId: row.initialEnvironmentLeaseId,
     workspaceBindingId: row.workspaceBindingId,
     policyRevisionId: row.policyRevisionId,
+    policyRulesDigest: row.policyRulesDigest,
+    governanceConfigRevisionId: row.governanceConfigRevisionId,
+    governanceConfigDigest: row.governanceConfigDigest,
     contextCheckpointId: row.contextCheckpointId,
     environmentDefinitionRevisionId: row.environmentDefinitionRevisionId,
     routeRevisionId: row.routeRevisionId,

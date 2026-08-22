@@ -62,6 +62,7 @@ import {
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
+import { RUNTIME_PROTOCOL_VERSION } from "@/lib/runtime/runtime-client";
 import type {
   RuntimeHttpClient,
   StartInvocationRequestBody,
@@ -218,7 +219,7 @@ export async function redispatchInvocation(
   });
 
   // 5. 调用 runtimeClient.startInvocation（带 attempt 字段）
-  const { runtimeEndpoint, authToken, gatewayEndpoints } =
+  const { runtimeEndpoint, authToken, gatewayEndpoints, governanceConfig, gatewayAccess } =
     await params.runtimeEndpointResolver(binding);
 
   // 读取 RuntimeRevision 获取 capabilities（用于 execution_limits）
@@ -268,6 +269,7 @@ export async function redispatchInvocation(
   }
 
   const requestBody: StartInvocationRequestBody = {
+    protocol_version: RUNTIME_PROTOCOL_VERSION,
     invocation_id: params.invocationId,
     turn_context: invocation.threadId
       ? {
@@ -299,6 +301,8 @@ export async function redispatchInvocation(
     input_items: inputItems,
     context_handle: contextHandle,
     gateway_endpoints: gatewayEndpoints,
+    governance_config: governanceConfig,
+    gateway_access: gatewayAccess,
     workspace: {
       workspace_binding_id: binding.workspaceBindingId,
       workspace_type: binding.workspaceBindingId ? "managed" : "none",

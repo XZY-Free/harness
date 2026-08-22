@@ -169,8 +169,12 @@ export const observationTable = mysqlTable(
     contentMode: varchar("content_mode", { length: 32 }).notNull().default("metadata"),
     /** 已脱敏的内容（由 content-policy 处理）。 */
     contentJson: json("content_json"),
-    /** 强制 false：写入前已脱敏，永不存储原始 secret。 */
-    containsSecret: json("contains_secret").notNull().default(sql`CAST(false AS JSON)`),
+    /**
+     * 强制 false：写入前已脱敏，永不存储原始 secret。
+     * 无默认值（JSON 列在 MySQL 8 不支持 DEFAULT 表达式）；唯一写入方
+     * createObservation 始终显式传 false（lib/observability/observation-queries.ts）。
+     */
+    containsSecret: json("contains_secret").notNull(),
     redactionSummary: varchar("redaction_summary", { length: 256 }),
     observedAt: datetime("observed_at", { mode: "date", fsp: 3 }).notNull(),
     createdAt: datetime("created_at", { mode: "date", fsp: 3 })

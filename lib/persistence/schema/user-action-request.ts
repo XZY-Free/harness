@@ -152,6 +152,9 @@ export const userActionRequestTable = mysqlTable(
     resolvedAt: datetime("resolvedAt", { mode: "date", fsp: 3 }),
     /** 脱敏后的用户响应（如 input 类型的 submit 内容）；不含敏感原值。 */
     responseRedactedJson: json("responseRedactedJson"),
+    /** 引发 pause 的 PermissionDecision id（逻辑外键 → PermissionDecision.id）。
+     * 仅 purpose=tool_permission_confirmation 时 NOT NULL，精确关联该 pause Decision（§19）。 */
+    permissionDecisionId: varchar("permissionDecisionId", { length: 36 }),
     /** grant 类型 approve 后指向 Grant.id（逻辑外键）。 */
     grantId: varchar("grantId", { length: 36 }),
     /** 乐观并发版本号。 */
@@ -165,6 +168,9 @@ export const userActionRequestTable = mysqlTable(
   },
   (t) => ({
     itemIdUq: uniqueIndex("UserActionRequest_item_id_uq").on(t.itemId),
+    permissionDecisionIdUq: uniqueIndex("UserActionRequest_permissionDecision_id_uq").on(
+      t.permissionDecisionId,
+    ),
     tenantInvocationStateIdx: index("UserActionRequest_tenant_invocation_state_idx").on(
       t.tenantId,
       t.invocationId,

@@ -28,9 +28,14 @@ const SECTIONS: readonly SectionLink[] = [
     description: "查看、导出管理员操作审计记录（导出产生新审计事件）。",
   },
   {
-    href: "/studio/policies",
-    title: "策略 Policy",
-    description: "策略配置与版本（PolicyRevision 发布由 S11-W08 接入）。",
+    href: "/studio/governance",
+    title: "治理配置 Governance",
+    description: "Runtime 执行治理配置（受保护路径/命令黑名单/写前格式化/交付前校验）。",
+  },
+  {
+    href: "/studio/permission-rules",
+    title: "权限规则 Permission",
+    description: "Tool 执行策略（allow / pause / block），发布为不可变的 Policy Revision。",
   },
   {
     href: "/studio/settings",

@@ -46,6 +46,7 @@ import {
   type CreateExecutionBindingCommand,
   createCreateExecutionBinding,
 } from "@/lib/executions/application/create-execution-binding";
+import { resolveBindingGovernance } from "@/lib/executions/application/resolve-binding-governance";
 import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
 import type { AgentRevision } from "@/lib/persistence/schema/agent";
@@ -90,10 +91,14 @@ import {
   resolveExecutionPlan,
 } from "@/lib/runtime/resolve-execution-plan";
 import type {
+  GatewayAccess,
+  GatewayEndpoints,
+  GovernanceConfigRef,
   RuntimeHttpClient,
   StartInvocationRequestBody,
   StartInvocationResponse,
 } from "@/lib/runtime/runtime-client";
+import { RUNTIME_PROTOCOL_VERSION } from "@/lib/runtime/runtime-client";
 import {
   createSessionBinding,
   getSessionBindingByExternalRef,
@@ -176,12 +181,11 @@ export interface RuntimeEndpointResolution {
   /** 短期 Workload Token（绑定 runtime_revision/invocation/租户）。 */
   authToken: string;
   /** 平台 Gateway 回调端点（Runtime 通过这些 URL 上报事件和接收控制指令）。 */
-  gatewayEndpoints: {
-    events: string;
-    cancel: string;
-    resume: string;
-    steer: string;
-  };
+  gatewayEndpoints: GatewayEndpoints;
+  /** §24：下发给 Runtime 的 Governance Config 引用（Binding 冻结 Revision 的 configJson）。 */
+  governanceConfig: GovernanceConfigRef;
+  /** §24/§27：Gateway Access Token（type=gateway，调用 Tool Gateway 用）。 */
+  gatewayAccess: GatewayAccess;
 }
 
 /**
@@ -290,6 +294,12 @@ export async function dispatchInvocationForTurn(params: {
   ) {
     throw new Error("RouteResolution 缺少有效 projectionVersionNo");
   }
+  // §10/§11：解析有效 Policy（Route explicit → Tenant baseline fallback）+ Governance（Tenant current）。
+  const bindingGovernance = await resolveBindingGovernance(
+    db,
+    params.tenantId,
+    routeResolution.policyRevisionId,
+  );
   const bindingParams: CreateExecutionBindingCommand = {
     invocationId: invocation.id,
     tenantId: params.tenantId,
@@ -301,7 +311,10 @@ export async function dispatchInvocationForTurn(params: {
     modelRevisionRef: modelInfo.modelRevisionRef,
     initialEnvironmentLeaseId: null,
     workspaceBindingId: null,
-    policyRevisionId: routeResolution.policyRevisionId,
+    policyRevisionId: bindingGovernance.policyRevisionId,
+    policyRulesDigest: bindingGovernance.policyRulesDigest,
+    governanceConfigRevisionId: bindingGovernance.governanceConfigRevisionId,
+    governanceConfigDigest: bindingGovernance.governanceConfigDigest,
     contextCheckpointId: null,
     environmentDefinitionRevisionId: null,
     /** : Projection 版本号，用于 Binding 版本一致性校验。 */
@@ -505,10 +518,9 @@ async function dispatchToRuntime(params: {
   actorId?: string | null;
   correlationId?: string | null;
 }): Promise<RuntimeDispatchResult> {
-  // 1. 解析 runtimeEndpoint + authToken + gatewayEndpoints
-  const { runtimeEndpoint, authToken, gatewayEndpoints } = await params.runtimeEndpointResolver(
-    params.binding,
-  );
+  // 1. 解析 runtimeEndpoint + authToken + gatewayEndpoints + governanceConfig + gatewayAccess
+  const { runtimeEndpoint, authToken, gatewayEndpoints, governanceConfig, gatewayAccess } =
+    await params.runtimeEndpointResolver(params.binding);
 
   // 2. 读取 RuntimeRevision 获取 capabilities（用于 execution_limits）
   const runtimeRevision = await getRuntimeRevisionById(params.runtimeRevisionId);
@@ -535,6 +547,7 @@ async function dispatchToRuntime(params: {
     invocationId: params.invocation.id,
   });
   const requestBody: StartInvocationRequestBody = {
+    protocol_version: RUNTIME_PROTOCOL_VERSION,
     invocation_id: params.invocation.id,
     turn_context: {
       thread_id: params.threadId,
@@ -578,6 +591,8 @@ async function dispatchToRuntime(params: {
     ],
     context_handle: contextHandle,
     gateway_endpoints: gatewayEndpoints,
+    governance_config: governanceConfig,
+    gateway_access: gatewayAccess,
     workspace: {
       workspace_binding_id: params.binding.workspaceBindingId,
       workspace_type: params.binding.workspaceBindingId ? "managed" : "none",

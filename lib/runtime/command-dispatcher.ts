@@ -53,6 +53,9 @@ import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocati
 import { redispatchInvocation } from "@/lib/runtime/redispatch-queries";
 import type {
   CancelInvocationRequest,
+  GatewayAccess,
+  GatewayEndpoints,
+  GovernanceConfigRef,
   ResumeInvocationRequest,
   ResumeInvocationResponse,
   RuntimeHttpClient,
@@ -75,12 +78,11 @@ export interface CommandRuntimeEndpointResolution {
    *
    * cancel/steer 命令不需要此字段；resume 命令在 requires_redispatch=true 分支需要。
    */
-  gatewayEndpoints?: {
-    events: string;
-    cancel: string;
-    resume: string;
-    steer: string;
-  };
+  gatewayEndpoints?: GatewayEndpoints;
+  /** §24：Binding 冻结 Governance Config 引用（resume 重调度 startInvocation 时需要）。 */
+  governanceConfig?: GovernanceConfigRef;
+  /** §27/§28：Gateway Access Token（resume 必须重签新 token 下发给 Runtime）。 */
+  gatewayAccess?: GatewayAccess;
 }
 
 /** 命令调度结果。 */
@@ -574,6 +576,24 @@ export async function dispatchResumeCommand(params: {
   const { runtimeEndpoint, authToken } = endpointResolution;
 
   // 3. 构造 resume 请求
+  // §27/§28：resume 必须携带重新签发的新 Gateway Access Token（新 jti/expiry，绑定 same
+  // tenant/invocation/冻结 Binding），由 resolver 提供；缺失则拒绝（fail-closed，不能复用旧 token）。
+  const gatewayAccess = endpointResolution.gatewayAccess;
+  if (!gatewayAccess) {
+    await markCommandFailed(
+      loaded.command.id,
+      "RESUME_GATEWAY_ACCESS_MISSING",
+      "Resume 命令缺少重新签发的 Gateway Access Token",
+    );
+    return {
+      commandId: loaded.command.id,
+      commandState: "failed",
+      failedAt: new Date(),
+      errorCode: "RESUME_GATEWAY_ACCESS_MISSING",
+      errorMessage: "Resume 命令缺少重新签发的 Gateway Access Token",
+      events: [],
+    };
+  }
   const commandPayload = loaded.command.commandPayloadJson as Record<string, unknown>;
   const resumePayload = commandPayload.resume_payload ?? commandPayload;
   const runtimeIdempotencyKey = loaded.command.idempotencyKey ?? `resume-${loaded.command.id}`;
@@ -589,6 +609,7 @@ export async function dispatchResumeCommand(params: {
     requestBody: {
       resume_payload: resumePayload,
       trace_context: traceContext,
+      gateway_access: gatewayAccess,
     },
   };
 
@@ -837,11 +858,22 @@ async function handleResumeRequiresRedispatch(
     retryReasonCode: "requires_redispatch",
     checkpointRef: null,
     runtimeClient: params.runtimeClient,
-    runtimeEndpointResolver: async () => ({
-      runtimeEndpoint: endpointResolution.runtimeEndpoint,
-      authToken: endpointResolution.authToken,
-      gatewayEndpoints,
-    }),
+    runtimeEndpointResolver: async () => {
+      const governanceConfig = endpointResolution.governanceConfig;
+      const gatewayAccess = endpointResolution.gatewayAccess;
+      if (!governanceConfig || !gatewayAccess) {
+        throw new Error(
+          "handleResumeRequiresRedispatch: 缺少 governanceConfig/gatewayAccess 无法重调度",
+        );
+      }
+      return {
+        runtimeEndpoint: endpointResolution.runtimeEndpoint,
+        authToken: endpointResolution.authToken,
+        gatewayEndpoints,
+        governanceConfig,
+        gatewayAccess,
+      };
+    },
     runtimeRevisionId: loaded.binding.runtimeRevisionId,
     agentRevision,
     actorType,

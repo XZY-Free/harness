@@ -14,7 +14,8 @@ import { SCRIPT_WHITELIST, runWhitelistedScript } from "./scripts";
  * 绝不执行用户提供的任意代码（命门 #2）。
  *
  * 声明校验（parseDeclaration）：name/description/inputSchema(JSON Schema)/executorType/executorConfig。
- * 权限走 ToolPermissionRule（custom.<name>，默认 ask，由 lib/ai/tools/custom.ts 的 customEvaluate 表达）。
+ * 权限走正式 Policy Revision（custom.<name>，决策 allow/pause/block，由 lib/permission/policy-queries.ts
+ * 的 loadPolicySetAndRules + lib/permission/policy-evaluator.ts 表达）。
  */
 
 export type WebhookExecutorConfig = {

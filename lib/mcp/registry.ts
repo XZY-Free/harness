@@ -11,8 +11,8 @@ import { type McpClient, type McpClientDeps, connectServer } from "./client";
  * MCP server registry（蓝图 ）。
  *
  * DB（McpServerConfig）是配置真实来源；本模块提供列表/启停/CRUD 委托 + client 连接池
- * （per-server-name 复用，避免每次调用重新 spawn/connect）。权限走 ToolPermissionRule
- * （mcp.<name>.<tool>，默认 ask 在 lib/mcp/tools.ts 的 mcpEvaluate 表达）。
+ * （per-server-name 复用，避免每次调用重新 spawn/connect）。权限走正式 Policy Revision
+ * （mcp.<name>.<tool>，决策 allow/pause/block，在 lib/mcp/tools.ts 的 mcpEvaluate 表达）。
  *
  * env 含 secret：调用时注入真实 env（client.ts），本模块不日志化 env。
  */

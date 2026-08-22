@@ -77,8 +77,9 @@ export const permissionDecisionTable = mysqlTable(
     decisionSequence: int("decisionSequence").notNull(),
     /** 决策结果（allow/pause/block）。 */
     decision: mysqlEnum("decision", PERMISSION_DECISION_VALUES).notNull(),
-    /** 当时生效的策略修订 id（逻辑外键 → PolicyRevision.id）。 */
-    policyRevisionId: varchar("policyRevisionId", { length: 36 }),
+    /** 当时生效的策略修订 id（逻辑外键 → PolicyRevision.id）。NOT NULL：
+     * 必须关联 ExecutionBinding 冻结的 policyRevisionId，Runtime 不得自行声明其他 Policy Revision。 */
+    policyRevisionId: varchar("policyRevisionId", { length: 36 }).notNull(),
     /** 触发的策略原因码列表（JSON string[]，如 ["risk_high","destructive_op"]）。 */
     reasonCodesJson: json("reasonCodesJson").notNull(),
     /** 风险摘要（如 { riskClass: "high", affectedResources: [...] }）。 */
@@ -239,7 +240,7 @@ export const policySetTable = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 })
       .notNull()
       .references(() => tenant.id),
-    /** 租户内稳定唯一 key（slug），如 "protectedPaths"。 */
+    /** 租户内稳定唯一 key（slug），正式 = "tool-execution"。 */
     policySetKey: varchar("policySetKey", { length: 128 }).notNull(),
     /** 负责人 userIdentityId（逻辑外键 → UserIdentity.id）；null 表示系统策略。 */
     ownerUserId: varchar("ownerUserId", { length: 36 }),
@@ -275,7 +276,8 @@ export type NewPolicySet = InferInsertModel<typeof policySetTable>;
  * 关键约束：
  * - UNIQUE(policySetId, revisionNo)：PolicySet 内修订号单调递增。
  * - published Revision 业务内容不可修改；只能新建版本。
- * - revisionJson 保存策略规则全量内容（KV value 直接迁入）。
+ * - Policy[] 是唯一规则 Authority（PolicyRevision 只是 revision header）。
+ * - defaultDecision 随 revision 冻结（allow/pause/block）。
  * - rulesHash 必须以 `sha256:` 前缀存储（应用层校验）。
  */
 export const policyRevisionTable = mysqlTable(
@@ -290,8 +292,8 @@ export const policyRevisionTable = mysqlTable(
       .references(() => policySetTable.id),
     /** PolicySet 内单调递增修订号。 */
     revisionNo: bigint("revisionNo", { mode: "number" }).notNull(),
-    /** 策略规则全量 JSON（KV value 直接迁入）。 */
-    revisionJson: json("revisionJson").notNull(),
+    /** 默认决策（无匹配规则时生效），随 revision 冻结（allow/pause/block）。 */
+    defaultDecision: mysqlEnum("defaultDecision", PERMISSION_DECISION_VALUES).notNull(),
     /** 规则内容 hash（sha256: 前缀 + hex）。 */
     rulesHash: varchar("rulesHash", { length: 128 }).notNull(),
     revisionState: mysqlEnum("revisionState", POLICY_REVISION_STATES).notNull().default("draft"),
@@ -315,7 +317,7 @@ export type PolicyRevision = InferSelectModel<typeof policyRevisionTable>;
 export type NewPolicyRevision = InferInsertModel<typeof policyRevisionTable>;
 
 /**
- * Policy 表：单条持久化策略规则（ToolPermissionRule 迁入）。
+ * Policy 表：单条持久化策略规则（原 legacy lib/db/schema.ts ToolPermissionRule 迁入正式链）。
  *
  * 关键约束：
  * - policySetId 引用 PolicySet（逻辑外键，标识所属策略集）。
@@ -335,8 +337,10 @@ export const policyTable = mysqlTable(
       .references(() => tenant.id),
     /** 所属策略集 id（逻辑外键 → PolicySet.id）。 */
     policySetId: varchar("policySetId", { length: 36 }).notNull(),
-    /** 所属修订 id（逻辑外键 → PolicyRevision.id）。 */
-    policyRevisionId: varchar("policyRevisionId", { length: 36 }),
+    /** 所属修订 id（逻辑外键 → PolicyRevision.id）。NOT NULL：Policy 规则必须属于一个已冻结 Revision。 */
+    policyRevisionId: varchar("policyRevisionId", { length: 36 }).notNull(),
+    /** 跨 Revision 稳定规则身份（ruleKey）：未修改规则复制到新 Revision 时 ruleKey 不变。 */
+    ruleKey: varchar("ruleKey", { length: 128 }).notNull(),
     /** 工具匹配模式（如 "tool.writeFile" / "tool.*" / "*"）。 */
     toolPattern: varchar("toolPattern", { length: 128 }).notNull(),
     /** 参数匹配器 JSON（{ pathRegex?, commandRegex?, risk? }）；null 表示无 arg 约束。 */
@@ -357,6 +361,7 @@ export const policyTable = mysqlTable(
       .$defaultFn(() => new Date()),
   },
   (t) => ({
+    revisionRuleKeyUq: uniqueIndex("Policy_revision_ruleKey_uq").on(t.policyRevisionId, t.ruleKey),
     tenantSetIdx: index("Policy_tenant_set_idx").on(t.tenantId, t.policySetId),
     tenantDecisionIdx: index("Policy_tenant_decision_idx").on(t.tenantId, t.decision),
   }),

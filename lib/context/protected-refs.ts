@@ -1,12 +1,12 @@
-import type { ThreadPlan, ToolApprovalRequest, ToolRun } from "@/lib/db/schema";
+import type { ThreadPlan, ToolRun } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { extractMessageText } from "./summary-types";
 
 /**
  * a Stage B：永不压缩集合计算（首版）。
  *
- * 覆盖四类 protected 项：最新用户消息 / active plan / pending approval / 最近失败错误片段。
- * 补全：安全权限部署硬约束 + pinned facts，并把边界（多失败取最近 / 多 pending 全保留）
+ * 覆盖 protected 项：最新用户消息 / active plan / 最近失败错误片段。
+ * 补全：安全权限部署硬约束 + pinned facts，并把边界（多失败取最近）
  * 与硬不变式测试落齐。
  *
  * 「永不压缩」是硬不变式：任意压缩后 protected 内容必须仍出现在装配的 messages 里
@@ -18,13 +18,15 @@ import { extractMessageText } from "./summary-types";
  * 会含孤儿 tool-call 或孤儿 tool-result，模型侧拒绝请求或 hallucinate。
  * `backfillToolPairRefs` 在初步 protected 集合算完后，扫描 history 中所有 tool-call/tool-result
  * 配对，若一侧在 protected、另一侧不在，把缺失侧回填进 protected，迭代直到稳定。
+ *
+ * 注：pending approval（ToolApprovalRequest）已在 02-6 P9 删除；权限确认由 Tool Gateway 的
+ * pause + UserActionRequest 集中表达，不再注入本地待审批文本。
  */
 
 export type ProtectedKind =
   | "latest_user"
   | "recent_messages"
   | "active_plan"
-  | "pending_approval"
   | "recent_failure"
   | "policy_constraint"
   | "pinned_fact"
@@ -45,7 +47,7 @@ export type InjectedProtected = {
 export type ProtectedRefsResult = {
   /** 必须原样保留的 history message id（不进入可压缩旧区段）。 */
   protectedMessageIds: Set<string>;
-  /** 额外注入的 protected 内容（active plan / pending approval / recent failure，非历史消息）。 */
+  /** 额外注入的 protected 内容（active plan / recent failure，非历史消息）。 */
   injected: InjectedProtected[];
   refs: ProtectedRef[];
 };
@@ -136,16 +138,15 @@ function backfillToolPairRefs(
 /**
  * 计算 protected refs（a 永不压缩集合）。
  *
- * 六类 protected（蓝图 ，硬不变式——任意压缩后必须仍出现在装配 messages 里）：
+ * protected 项（蓝图 ，硬不变式——任意压缩后必须仍出现在装配 messages 里）：
  * 1. 最新用户消息（最后一条 role=user 的 message id，逐字保留）。
  * 2. active plan（注入文本）。
- * 3. pending approval（全部注入；多个全保留）。
- * 4. 当前失败原始错误片段（最近一次失败 toolRun，注入）。
- * 5. 安全/权限/部署硬约束（policyConstraints，从 policy config 派生，注入）。
- * 6. 用户 pinned facts（注入）。
+ * 3. 当前失败原始错误片段（最近一次失败 toolRun，注入）。
+ * 4. 安全/权限/部署硬约束（policyConstraints，从 policy config 派生，注入）。
+ * 5. 用户 pinned facts（注入）。
  *
  * 另：最近 `recentKeepCount` 条原始消息逐字保留（确保最新上下文可见）。
- * 边界：多个 pending approval 全保留；多个失败取最近一次。
+ * 边界：多个失败取最近一次。
  *
  * P0-2：在以上 protected 集合算完后，调 `backfillToolPairRefs` 保证 tool-call/tool-result 配对完整，
  * 避免压缩产出孤儿 tool part 违反 AI SDK v6 协议。
@@ -153,7 +154,6 @@ function backfillToolPairRefs(
 export function computeProtectedRefs(args: {
   messages: ChatMessage[];
   activePlan?: ThreadPlan | null;
-  pendingApprovals?: ToolApprovalRequest[];
   recentFailure?: ToolRun | null;
   /** Stage D：安全/权限/部署硬约束（从 policy config 派生）。 */
   policyConstraints?: string[];
@@ -204,20 +204,6 @@ export function computeProtectedRefs(args: {
       text: `当前计划: ${args.activePlan.title} [${args.activePlan.status}]`,
     });
     refs.push({ kind: "active_plan", messageIds: [], reason: "active plan 作为 protected 注入" });
-  }
-
-  // pending approval（注入，全部保留）
-  const pending = args.pendingApprovals ?? [];
-  if (pending.length > 0) {
-    const lines = pending.map(
-      (p) => `- 待审批: ${p.toolName} (${p.permissionKey}) — ${p.argSummary}`,
-    );
-    injected.push({ kind: "pending_approval", text: `待审批项:\n${lines.join("\n")}` });
-    refs.push({
-      kind: "pending_approval",
-      messageIds: [],
-      reason: `${pending.length} 个 pending approval 全部保留`,
-    });
   }
 
   // 最近失败（注入）

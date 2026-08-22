@@ -127,7 +127,7 @@ describe("Runtime Publication Conformance 职责拆分", () => {
   it("adapter probe/ack 错误 fail-closed（不冒充 Passed）", async () => {
     const failingCancelAdapter: RuntimeAdapter = {
       probeCapabilities: async () => ({
-        protocol_versions: ["1"],
+        protocol_versions: ["2"],
         features: {
           event_stream: true,
           cancel: true,
@@ -145,7 +145,7 @@ describe("Runtime Publication Conformance 职责拆分", () => {
         runtime_session_ref: "sess-1",
         runtime_execution_ref: "exec-1",
         capabilities: {
-          protocol_versions: ["1"],
+          protocol_versions: ["2"],
           features: {
             event_stream: true,
             cancel: true,
@@ -213,7 +213,7 @@ describe("Runtime Publication Conformance 职责拆分", () => {
       runtimeRevisionId: "revision-verifier",
       runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
       runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-      protocolContractRevision: "agent-runtime-protocol@1",
+      protocolContractRevision: "agent-runtime-protocol@2",
       suiteRevision: contract.PUBLICATION_CONFORMANCE_SUITE_REVISION,
       runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
       runnerIdentity: "behavior/runner",
@@ -227,7 +227,7 @@ describe("Runtime Publication Conformance 职责拆分", () => {
         runtimeRevisionId: "revision-verifier",
         runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
         runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-        protocolContractRevision: "agent-runtime-protocol@1",
+        protocolContractRevision: "agent-runtime-protocol@2",
         runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
         cases: caseResults.map((result) => ({
           caseId: result.caseId,

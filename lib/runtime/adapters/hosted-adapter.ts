@@ -269,7 +269,7 @@ export interface SteerResult {
  */
 export function hostedAdapterCapabilities(): RuntimeCapabilitiesResponse {
   return {
-    protocol_versions: ["1"],
+    protocol_versions: ["2"],
     features: {
       event_stream: true,
       cancel: true,

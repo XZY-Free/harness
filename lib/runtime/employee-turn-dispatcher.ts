@@ -2,6 +2,7 @@ import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
+import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { logger } from "@/lib/logger";
 import { agentTable } from "@/lib/persistence/schema/agents";
@@ -181,23 +182,48 @@ export async function dispatchEmployeeTurn(params: {
     turnId: params.turnId,
     selectedModelRef: params.modelRef,
     runtimeClient: client,
-    runtimeEndpointResolver: async (binding) => ({
-      runtimeEndpoint: "in-process://hosted",
-      authToken: issueWorkloadToken({
-        type: "runtime",
-        tenantId: params.tenantId,
-        invocationId: binding.invocationId,
-        runtimeRevisionId: binding.runtimeRevisionId,
-        audience: "runtime",
-        expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
-      }),
-      gatewayEndpoints: {
-        events: "in-process://events",
-        cancel: "in-process://cancel",
-        resume: "in-process://resume",
-        steer: "in-process://steer",
-      },
-    }),
+    runtimeEndpointResolver: async (binding) => {
+      // §24：下发 Binding 冻结的 Governance Revision（非 Tenant current），fail-closed。
+      const frozenGovernance = await loadFrozenGovernanceConfig(
+        binding.tenantId,
+        binding.governanceConfigRevisionId,
+      );
+      return {
+        runtimeEndpoint: "in-process://hosted",
+        authToken: issueWorkloadToken({
+          type: "runtime",
+          tenantId: params.tenantId,
+          invocationId: binding.invocationId,
+          runtimeRevisionId: binding.runtimeRevisionId,
+          audience: "runtime",
+          expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+        }),
+        gatewayEndpoints: {
+          events: "in-process://events",
+          cancel: "in-process://cancel",
+          resume: "in-process://resume",
+          steer: "in-process://steer",
+          tools: "in-process://gateway/v1/tools",
+          tool_calls: "in-process://gateway/v1/tool-calls",
+          user_action_requests: "in-process://gateway/v1/user-action-requests",
+        },
+        governanceConfig: {
+          revision_id: binding.governanceConfigRevisionId,
+          config_digest: binding.governanceConfigDigest,
+          config: frozenGovernance.config as unknown as Record<string, unknown>,
+        },
+        gatewayAccess: {
+          access_token: issueWorkloadToken({
+            type: "gateway",
+            tenantId: binding.tenantId,
+            invocationId: binding.invocationId,
+            audience: "gateway",
+            expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
+          }),
+          expires_at: new Date(Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway).toISOString(),
+        },
+      };
+    },
   });
 
   if (!result.dispatched || !result.invocation || result.runtimeDispatch?.skipped) {

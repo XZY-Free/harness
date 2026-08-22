@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - secret-like key（含 secret/token/password/apiKey/content/commandOutput，大小写不敏感）被剔除。
  * - 长 string 截断到 256。
  * - 文件操作只记 path + bytes，content 被剔除。
- * - policy 摘要只报 key 名（keys / changedKeys），不含命令全文。
  * - 嵌套对象深度限制到 2，超深折叠。
  * - metadata 仍可 JSON 序列化。
  * - recordAdminAudit 脱敏后转发给 appendAdminAuditLog。
@@ -20,7 +19,6 @@ import {
   type AppendAdminAuditLogInput,
   recordAdminAudit,
   sanitizeAuditMetadata,
-  summarizePolicyChange,
   summarizeRoleChange,
 } from "@/lib/studio/admin-audit";
 
@@ -101,42 +99,6 @@ describe("sanitizeAuditMetadata (切片 C)", () => {
     const parsed = JSON.parse(JSON.stringify(out));
     expect(parsed.a).toBe(1);
     expect(parsed.fn).toBeUndefined();
-  });
-});
-
-describe("summarizePolicyChange (切片 C)", () => {
-  it("只报 key 名，changedKeys 为值变化的 key", () => {
-    const before = [
-      { key: "protectedPaths", value: ["^\\.git"] },
-      { key: "commandDenyList", value: ["rm -rf"] },
-      { key: "formatOnWrite", value: { enabled: true, command: "prettier --write" } },
-    ];
-    const after = [
-      { key: "protectedPaths", value: ["^\\.git"] },
-      { key: "commandDenyList", value: ["rm -rf", "sudo"] },
-      { key: "formatOnWrite", value: { enabled: true, command: "prettier --write" } },
-    ];
-    const summary = summarizePolicyChange(before, after);
-    expect(summary.keys).toEqual(["protectedPaths", "commandDenyList", "formatOnWrite"]);
-    expect(summary.changedKeys).toEqual(["commandDenyList"]);
-  });
-
-  it("新增 key 计入 changedKeys", () => {
-    const before = [{ key: "protectedPaths", value: ["^\\.git"] }];
-    const after = [
-      { key: "protectedPaths", value: ["^\\.git"] },
-      { key: "formatOnWrite", value: { enabled: true } },
-    ];
-    const summary = summarizePolicyChange(before, after);
-    expect(summary.changedKeys).toEqual(["formatOnWrite"]);
-  });
-
-  it("不包含命令全文 / value 明文", () => {
-    const before = [{ key: "formatOnWrite", value: { command: "old" } }];
-    const after = [{ key: "formatOnWrite", value: { command: "prettier --write --cache" } }];
-    const summary = summarizePolicyChange(before, after);
-    expect(JSON.stringify(summary)).not.toContain("prettier");
-    expect(JSON.stringify(summary)).not.toContain("old");
   });
 });
 

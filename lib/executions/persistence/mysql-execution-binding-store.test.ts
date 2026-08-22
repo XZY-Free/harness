@@ -30,7 +30,10 @@ const bindingRow: BindingRow = {
   modelRevisionRef: null,
   initialEnvironmentLeaseId: null,
   workspaceBindingId: null,
-  policyRevisionId: null,
+  policyRevisionId: "policy-revision-1",
+  policyRulesDigest: `sha256:${"8".repeat(64)}`,
+  governanceConfigRevisionId: "governance-revision-1",
+  governanceConfigDigest: `sha256:${"9".repeat(64)}`,
   contextCheckpointId: null,
   routeRevisionId: "route-revision-1",
   routeActivationId: "route-activation-1",
@@ -495,7 +498,9 @@ describe("ExecutionBinding authority final validation", () => {
       new URL("./mysql-execution-binding-store.ts", import.meta.url),
       "utf8",
     );
-    const policyLock = source.indexOf("await lockAndVerifyPolicy(tx, input)");
+    const policyLock = source.indexOf(
+      "await lockAndVerifyPolicy(tx, input, revision.policyRevisionId)",
+    );
     const projectionLock = source.indexOf("await lockAndVerifyProjection(tx, input)");
     expect(policyLock).toBeGreaterThan(0);
     expect(projectionLock).toBeGreaterThan(policyLock);

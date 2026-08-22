@@ -335,7 +335,14 @@ export const executionBindingTable = mysqlTable(
     /** 本阶段不实现 EnvironmentLease，先 NULL。 */
     initialEnvironmentLeaseId: varchar("initialEnvironmentLeaseId", { length: 36 }),
     workspaceBindingId: varchar("workspaceBindingId", { length: 36 }),
-    policyRevisionId: varchar("policyRevisionId", { length: 36 }),
+    /** 冻结的 Permission Policy Revision id（NOT NULL；有效 Binding 永远非空，§10）。 */
+    policyRevisionId: varchar("policyRevisionId", { length: 36 }).notNull(),
+    /** 冻结的 Permission Policy rules digest（sha256: 前缀；必须与该 Revision rulesHash 一致，§9）。 */
+    policyRulesDigest: varchar("policyRulesDigest", { length: 71 }).notNull(),
+    /** 冻结的 Governance Config Revision id（NOT NULL，§9）。 */
+    governanceConfigRevisionId: varchar("governanceConfigRevisionId", { length: 36 }).notNull(),
+    /** 冻结的 Governance Config digest（sha256: 前缀；必须与该 Revision configDigest 一致，§9）。 */
+    governanceConfigDigest: varchar("governanceConfigDigest", { length: 71 }).notNull(),
     contextCheckpointId: varchar("contextCheckpointId", { length: 36 }),
     routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
     routeActivationId: varchar("routeActivationId", { length: 36 }).notNull(),

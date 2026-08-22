@@ -39,6 +39,7 @@ export const AUDIT_ACTION_TYPES = [
   "runtime.retract",
   "tool.schema.publish",
   "policy.publish",
+  "governance.config.publish",
   "credential.bind",
   "credential.revoke",
   "memory.review",

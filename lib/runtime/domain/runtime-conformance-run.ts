@@ -162,7 +162,7 @@ export function validateRuntimeConformanceReport(report: RuntimeConformanceRepor
 }
 
 export function protocolContractRevision(protocolType: string): string {
-  return protocolType === "a2a" ? "a2a@1" : "agent-runtime-protocol@1";
+  return protocolType === "a2a" ? "a2a@1" : "agent-runtime-protocol@2";
 }
 
 export class RuntimeConformanceTrustError extends Error {

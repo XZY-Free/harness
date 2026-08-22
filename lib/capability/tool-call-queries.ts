@@ -27,7 +27,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { isValidContentHash } from "@/lib/capability/content-cache";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import {
   type ToolCall,
   type ToolCallState,
@@ -198,8 +198,10 @@ export interface CreateToolCallParams {
  * @throws ToolCallValidationError 入参非法
  * @throws ToolCallConflictError (toolId, operationId) 已存在但 argumentsHash 不匹配
  * @throws ToolCallSequenceConflictError callSequence 分配并发冲突
+ *
+ * @param tx 可选外部事务句柄（§16.3：与 Permission 评估同事务）；缺省用全局 db 自开事务。
  */
-export async function createToolCall(params: CreateToolCallParams): Promise<ToolCall> {
+export async function createToolCall(params: CreateToolCallParams, tx?: DbOrTx): Promise<ToolCall> {
   if (!params.tenantId) {
     throw new ToolCallValidationError("invalid_tenant_id", "tenantId 不能为空");
   }
@@ -223,11 +225,14 @@ export async function createToolCall(params: CreateToolCallParams): Promise<Tool
   const argumentsHash = computeArgumentsHash(params.argumentsRedactedJson);
 
   // 幂等回查：同 (toolId, operationId) 已存在时按 argumentsHash 决定幂等或冲突。
-  const existing = await getToolCallByOperation({
-    tenantId: params.tenantId,
-    toolId: params.toolId,
-    operationId: params.operationId,
-  });
+  const existing = await getToolCallByOperation(
+    {
+      tenantId: params.tenantId,
+      toolId: params.toolId,
+      operationId: params.operationId,
+    },
+    tx,
+  );
   if (existing) {
     if (existing.argumentsHash === argumentsHash) {
       // 幂等：同 operation_id 同 arguments_hash 视为同一调用，返回已存在行。
@@ -244,40 +249,49 @@ export async function createToolCall(params: CreateToolCallParams): Promise<Tool
 
   // 事务内分配 callSequence + INSERT。
   const id = randomUUID();
-  try {
-    await db.transaction(async (tx) => {
-      // 分配 callSequence = max(callSequence) + 1（事务内）。
-      const callSequence = await nextCallSequence(tx, params.invocationId);
+  const doInsert = async (source: DbOrTx): Promise<void> => {
+    // 分配 callSequence = max(callSequence) + 1（事务内）。
+    const callSequence = await nextCallSequence(source, params.invocationId);
 
-      await tx.insert(toolCallTable).values({
-        id,
-        tenantId: params.tenantId,
-        invocationId: params.invocationId,
-        threadId: params.threadId ?? null,
-        turnId: params.turnId ?? null,
-        jobId: params.jobId ?? null,
-        callSequence,
-        toolId: params.toolId,
-        toolSchemaRevisionId: params.toolSchemaRevisionId,
-        schemaHash: params.schemaHash,
-        callState: "proposed",
-        operationId: params.operationId,
-        argumentsRedactedJson: params.argumentsRedactedJson,
-        argumentsHash,
-        environmentLeaseId: params.environmentLeaseId ?? null,
-        itemId: params.itemId ?? null,
-        startedAt: params.startedAt ?? null,
-      });
+    await source.insert(toolCallTable).values({
+      id,
+      tenantId: params.tenantId,
+      invocationId: params.invocationId,
+      threadId: params.threadId ?? null,
+      turnId: params.turnId ?? null,
+      jobId: params.jobId ?? null,
+      callSequence,
+      toolId: params.toolId,
+      toolSchemaRevisionId: params.toolSchemaRevisionId,
+      schemaHash: params.schemaHash,
+      callState: "proposed",
+      operationId: params.operationId,
+      argumentsRedactedJson: params.argumentsRedactedJson,
+      argumentsHash,
+      environmentLeaseId: params.environmentLeaseId ?? null,
+      itemId: params.itemId ?? null,
+      startedAt: params.startedAt ?? null,
     });
+  };
+
+  try {
+    if (tx) {
+      await doInsert(tx);
+    } else {
+      await db.transaction((t) => doInsert(t));
+    }
   } catch (err) {
     if (isDuplicateEntryError(err)) {
       // 并发竞态下 (toolId, operationId) 或 (invocationId, callSequence) 冲突。
       // 区分两种情况：先回查 operation；若命中且 hash 匹配 → 幂等，否则冲突。
-      const retried = await getToolCallByOperation({
-        tenantId: params.tenantId,
-        toolId: params.toolId,
-        operationId: params.operationId,
-      });
+      const retried = await getToolCallByOperation(
+        {
+          tenantId: params.tenantId,
+          toolId: params.toolId,
+          operationId: params.operationId,
+        },
+        tx,
+      );
       if (retried) {
         if (retried.argumentsHash === argumentsHash) {
           return retried;
@@ -297,7 +311,11 @@ export async function createToolCall(params: CreateToolCallParams): Promise<Tool
     throw err;
   }
 
-  const [row] = await db.select().from(toolCallTable).where(eq(toolCallTable.id, id)).limit(1);
+  const [row] = await (tx ?? db)
+    .select()
+    .from(toolCallTable)
+    .where(eq(toolCallTable.id, id))
+    .limit(1);
   if (!row) {
     throw new Error(`createToolCall: 行未找到（id=${id}）`);
   }
@@ -307,11 +325,14 @@ export async function createToolCall(params: CreateToolCallParams): Promise<Tool
 // ─── 查询 ─────────────────────────────────────────────────
 
 /** 按 id 查询 ToolCall（跨租户隔离）。不存在返回 null。 */
-export async function getToolCallById(params: {
-  tenantId: string;
-  toolCallId: string;
-}): Promise<ToolCall | null> {
-  const [row] = await db
+export async function getToolCallById(
+  params: {
+    tenantId: string;
+    toolCallId: string;
+  },
+  tx?: DbOrTx,
+): Promise<ToolCall | null> {
+  const [row] = await (tx ?? db)
     .select()
     .from(toolCallTable)
     .where(
@@ -322,12 +343,15 @@ export async function getToolCallById(params: {
 }
 
 /** 按 (toolId, operationId) 查询 ToolCall（幂等回查）。不存在返回 null。 */
-export async function getToolCallByOperation(params: {
-  tenantId: string;
-  toolId: string;
-  operationId: string;
-}): Promise<ToolCall | null> {
-  const [row] = await db
+export async function getToolCallByOperation(
+  params: {
+    tenantId: string;
+    toolId: string;
+    operationId: string;
+  },
+  tx?: DbOrTx,
+): Promise<ToolCall | null> {
+  const [row] = await (tx ?? db)
     .select()
     .from(toolCallTable)
     .where(
@@ -402,14 +426,23 @@ export interface UpdateToolCallStateParams {
  *
  * @throws ToolCallNotFoundError ToolCall 不存在或跨租户
  * @throws ToolCallStateError 状态机非法迁移
+ *
+ * @param tx 可选外部事务句柄（§16.3 与 Permission 评估同事务）；缺省用全局 db。
  */
-export async function updateToolCallState(params: UpdateToolCallStateParams): Promise<ToolCall> {
+export async function updateToolCallState(
+  params: UpdateToolCallStateParams,
+  tx?: DbOrTx,
+): Promise<ToolCall> {
   assertValidToolCallState(params.toState);
 
-  const current = await getToolCallById({
-    tenantId: params.tenantId,
-    toolCallId: params.toolCallId,
-  });
+  const source: DbOrTx = tx ?? db;
+  const current = await getToolCallById(
+    {
+      tenantId: params.tenantId,
+      toolCallId: params.toolCallId,
+    },
+    source,
+  );
   if (!current) {
     throw new ToolCallNotFoundError(params.toolCallId);
   }
@@ -455,17 +488,20 @@ export async function updateToolCallState(params: UpdateToolCallStateParams): Pr
     updates.errorSummary = params.errorSummary;
   }
 
-  await db
+  await source
     .update(toolCallTable)
     .set(updates)
     .where(
       and(eq(toolCallTable.tenantId, params.tenantId), eq(toolCallTable.id, params.toolCallId)),
     );
 
-  const updated = await getToolCallById({
-    tenantId: params.tenantId,
-    toolCallId: params.toolCallId,
-  });
+  const updated = await getToolCallById(
+    {
+      tenantId: params.tenantId,
+      toolCallId: params.toolCallId,
+    },
+    source,
+  );
   if (!updated) {
     throw new ToolCallNotFoundError(params.toolCallId);
   }
@@ -475,10 +511,7 @@ export async function updateToolCallState(params: UpdateToolCallStateParams): Pr
 // ─── 内部工具 ──────────────────────────────────────────────
 
 /** 计算 Invocation 内下一个 callSequence（max +1）。并发冲突由 UNIQUE 约束 fail-loud。 */
-async function nextCallSequence(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  invocationId: string,
-): Promise<number> {
+async function nextCallSequence(tx: DbOrTx, invocationId: string): Promise<number> {
   const [row] = await tx
     .select({ maxSeq: max(toolCallTable.callSequence) })
     .from(toolCallTable)

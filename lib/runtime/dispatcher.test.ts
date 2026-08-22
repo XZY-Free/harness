@@ -35,6 +35,7 @@ import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { createCreateExecutionBinding } from "@/lib/executions/application/create-execution-binding";
+import { resolveBindingGovernance } from "@/lib/executions/application/resolve-binding-governance";
 import { ExecutionBindingAlreadyExistsError as StableExecutionBindingAlreadyExistsError } from "@/lib/executions/domain/execution-binding";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
@@ -1049,6 +1050,11 @@ describe("Dispatcher 调度", () => {
     });
     if (outcome.status !== "resolved") throw new Error("测试路由未解析");
     const resolution = outcome.resolution;
+    const bindingGovernance = await resolveBindingGovernance(
+      db,
+      ctx.tenantId,
+      resolution.policyRevisionId,
+    );
     const command = {
       invocationId: invocation.id,
       tenantId: ctx.tenantId,
@@ -1060,7 +1066,10 @@ describe("Dispatcher 调度", () => {
       modelRevisionRef: null,
       initialEnvironmentLeaseId: null,
       workspaceBindingId: null,
-      policyRevisionId: resolution.policyRevisionId,
+      policyRevisionId: bindingGovernance.policyRevisionId,
+      policyRulesDigest: bindingGovernance.policyRulesDigest,
+      governanceConfigRevisionId: bindingGovernance.governanceConfigRevisionId,
+      governanceConfigDigest: bindingGovernance.governanceConfigDigest,
       contextCheckpointId: null,
       environmentDefinitionRevisionId: null,
       projectionVersionNo: resolution.projectionVersionNo ?? 0,

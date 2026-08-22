@@ -174,7 +174,7 @@ describe("S05-C05 HostedAdapter 基本能力", () => {
 
     const caps = await adapter.probeCapabilities();
 
-    expect(caps.protocol_versions).toEqual(["1"]);
+    expect(caps.protocol_versions).toEqual(["2"]);
     expect(caps.features.event_stream).toBe(true);
     expect(caps.features.cancel).toBe(true);
     expect(caps.features.resume).toBe(true);
@@ -202,7 +202,7 @@ describe("S05-C05 HostedAdapter 基本能力", () => {
     expect(result.accepted).toBe(true);
     expect(result.runtime_session_ref).toBeTruthy();
     expect(result.runtime_execution_ref).toBeTruthy();
-    expect(result.capabilities.protocol_versions).toEqual(["1"]);
+    expect(result.capabilities.protocol_versions).toEqual(["2"]);
   });
 
   it("runtime_session_ref 以 'hosted-' 开头", async () => {

@@ -12,13 +12,13 @@
  */
 import { createHash } from "node:crypto";
 import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]/publish/route";
-import { POST as withdrawAgentRevisionPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]/withdraw/route";
-import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations/verify/route";
-import { POST as disableRoutePOST } from "@/app/admin/api/v1/deployment-routes/[route_id]/disable/route";
 import { GET as getAgentRevisionGET } from "@/app/admin/api/v1/agent-revisions/[revision_id]/route";
+import { POST as withdrawAgentRevisionPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]/withdraw/route";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { GET as getAgentGET } from "@/app/admin/api/v1/agents/[agent_id]/route";
+import { POST as verifyPOST } from "@/app/admin/api/v1/artifact-attestations/verify/route";
 import { PUT as activateRouteSetPUT } from "@/app/admin/api/v1/deployment-route-sets/[route_set_id]/activation/route";
+import { POST as disableRoutePOST } from "@/app/admin/api/v1/deployment-routes/[route_id]/disable/route";
 import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,

@@ -29,6 +29,7 @@ export * from "@/lib/persistence/schema/environment";
 export * from "@/lib/persistence/schema/evaluation";
 export * from "@/lib/persistence/schema/file-change";
 export * from "@/lib/persistence/schema/filesystem-checkpoint";
+export * from "@/lib/persistence/schema/governance-config";
 export * from "@/lib/persistence/schema/idempotency";
 export * from "@/lib/persistence/schema/identity";
 export * from "@/lib/persistence/schema/job";

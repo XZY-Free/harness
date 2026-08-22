@@ -1,9 +1,191 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "ddf0ea81-db25-4f27-9fff-a3be46f599f7",
+  "id": "07330f7c-de1b-4e42-83e7-f97c2c265942",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
+    "RuntimeArtifact": {
+      "name": "RuntimeArtifact",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invocationId": {
+          "name": "invocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "threadId": {
+          "name": "threadId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "turnId": {
+          "name": "turnId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "jobId": {
+          "name": "jobId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "itemId": {
+          "name": "itemId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "artifactType": {
+          "name": "artifactType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "displayName": {
+          "name": "displayName",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contentRef": {
+          "name": "contentRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mediaType": {
+          "name": "mediaType",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "byteSize": {
+          "name": "byteSize",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contentHash": {
+          "name": "contentHash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "visibilityScope": {
+          "name": "visibilityScope",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "RuntimeArtifact_itemId_uq": {
+          "name": "RuntimeArtifact_itemId_uq",
+          "columns": [
+            "itemId"
+          ],
+          "isUnique": true
+        },
+        "RuntimeArtifact_tenant_invocation_idx": {
+          "name": "RuntimeArtifact_tenant_invocation_idx",
+          "columns": [
+            "tenantId",
+            "invocationId"
+          ],
+          "isUnique": false
+        },
+        "RuntimeArtifact_tenant_thread_idx": {
+          "name": "RuntimeArtifact_tenant_thread_idx",
+          "columns": [
+            "tenantId",
+            "threadId"
+          ],
+          "isUnique": false
+        },
+        "RuntimeArtifact_tenant_job_idx": {
+          "name": "RuntimeArtifact_tenant_job_idx",
+          "columns": [
+            "tenantId",
+            "jobId"
+          ],
+          "isUnique": false
+        },
+        "RuntimeArtifact_tenant_expires_idx": {
+          "name": "RuntimeArtifact_tenant_expires_idx",
+          "columns": [
+            "tenantId",
+            "expiresAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "RuntimeArtifact_tenantId_Tenant_id_fk": {
+          "name": "RuntimeArtifact_tenantId_Tenant_id_fk",
+          "tableFrom": "RuntimeArtifact",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "RuntimeArtifact_id": {
+          "name": "RuntimeArtifact_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
     "admin_export": {
       "name": "admin_export",
       "columns": {
@@ -485,476 +667,6 @@
       "compositePrimaryKeys": {
         "Agent_id": {
           "name": "Agent_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "ArtifactAttestation": {
-      "name": "ArtifactAttestation",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "artifactId": {
-          "name": "artifactId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "artifactType": {
-          "name": "artifactType",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "artifactRevisionId": {
-          "name": "artifactRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "artifactDigest": {
-          "name": "artifactDigest",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "dsseEnvelopeRef": {
-          "name": "dsseEnvelopeRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sbomRef": {
-          "name": "sbomRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "provenanceRef": {
-          "name": "provenanceRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "builderIdentity": {
-          "name": "builderIdentity",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "verificationState": {
-          "name": "verificationState",
-          "type": "enum('verified','failed')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "policyRevisionId": {
-          "name": "policyRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sourceRevision": {
-          "name": "sourceRevision",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "buildPipeline": {
-          "name": "buildPipeline",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dependencyLockFileHash": {
-          "name": "dependencyLockFileHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "buildTime": {
-          "name": "buildTime",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "scanSummaryJson": {
-          "name": "scanSummaryJson",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "failureCode": {
-          "name": "failureCode",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "verifiedAt": {
-          "name": "verifiedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "attestationFormat": {
-          "name": "attestationFormat",
-          "type": "enum('in_toto_dsse')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'in_toto_dsse'"
-        },
-        "statementType": {
-          "name": "statementType",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "predicateType": {
-          "name": "predicateType",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "bundleDigest": {
-          "name": "bundleDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "subjectName": {
-          "name": "subjectName",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "subjectDigest": {
-          "name": "subjectDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "verificationEngine": {
-          "name": "verificationEngine",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "verificationEngineVersion": {
-          "name": "verificationEngineVersion",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "ArtifactAttestation_tenant_type_rev_digest_env_uq": {
-          "name": "ArtifactAttestation_tenant_type_rev_digest_env_uq",
-          "columns": [
-            "tenantId",
-            "artifactType",
-            "artifactRevisionId",
-            "artifactDigest",
-            "dsseEnvelopeRef"
-          ],
-          "isUnique": true
-        },
-        "ArtifactAttestation_artifact_idx": {
-          "name": "ArtifactAttestation_artifact_idx",
-          "columns": [
-            "artifactId"
-          ],
-          "isUnique": false
-        },
-        "ArtifactAttestation_tenant_type_rev_state_idx": {
-          "name": "ArtifactAttestation_tenant_type_rev_state_idx",
-          "columns": [
-            "tenantId",
-            "artifactType",
-            "artifactRevisionId",
-            "verificationState"
-          ],
-          "isUnique": false
-        },
-        "ArtifactAttestation_tenant_digest_idx": {
-          "name": "ArtifactAttestation_tenant_digest_idx",
-          "columns": [
-            "tenantId",
-            "artifactDigest"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "ArtifactAttestation_artifactId_Artifact_id_fk": {
-          "name": "ArtifactAttestation_artifactId_Artifact_id_fk",
-          "tableFrom": "ArtifactAttestation",
-          "tableTo": "Artifact",
-          "columnsFrom": [
-            "artifactId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "ArtifactAttestation_id": {
-          "name": "ArtifactAttestation_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "AttestationRevocationRecord": {
-      "name": "AttestationRevocationRecord",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "attestationId": {
-          "name": "attestationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revokedByType": {
-          "name": "revokedByType",
-          "type": "enum('user','service','workload','system')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revokedBy": {
-          "name": "revokedBy",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "requestId": {
-          "name": "requestId",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revokedAt": {
-          "name": "revokedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "AttestationRevocationRecord_attestation_uq": {
-          "name": "AttestationRevocationRecord_attestation_uq",
-          "columns": [
-            "attestationId"
-          ],
-          "isUnique": true
-        },
-        "AttestationRevocationRecord_tenant_revoked_idx": {
-          "name": "AttestationRevocationRecord_tenant_revoked_idx",
-          "columns": [
-            "tenantId",
-            "revokedAt"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "AttestationRevocationRecord_attestationId_ArtifactAttestation_id_fk": {
-          "name": "AttestationRevocationRecord_attestationId_ArtifactAttestation_id_fk",
-          "tableFrom": "AttestationRevocationRecord",
-          "tableTo": "ArtifactAttestation",
-          "columnsFrom": [
-            "attestationId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "AttestationRevocationRecord_id": {
-          "name": "AttestationRevocationRecord_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "Artifact": {
-      "name": "Artifact",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "digest": {
-          "name": "digest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "mediaType": {
-          "name": "mediaType",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "size": {
-          "name": "size",
-          "type": "bigint unsigned",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "contentRef": {
-          "name": "contentRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sourceRevision": {
-          "name": "sourceRevision",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "buildMetadata": {
-          "name": "buildMetadata",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "Artifact_tenant_digest_uq": {
-          "name": "Artifact_tenant_digest_uq",
-          "columns": [
-            "tenantId",
-            "digest"
-          ],
-          "isUnique": true
-        },
-        "Artifact_tenant_kind_created_idx": {
-          "name": "Artifact_tenant_kind_created_idx",
-          "columns": [
-            "tenantId",
-            "kind",
-            "createdAt"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "Artifact_id": {
-          "name": "Artifact_id",
           "columns": [
             "id"
           ]
@@ -1747,1432 +1459,6 @@
       "compositePrimaryKeys": {
         "ContextCheckpoint_id": {
           "name": "ContextCheckpoint_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "DeploymentRouteSet": {
-      "name": "DeploymentRouteSet",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentId": {
-          "name": "agentId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "routeScopeKey": {
-          "name": "routeScopeKey",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "routeScopeJson": {
-          "name": "routeScopeJson",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "versionNo": {
-          "name": "versionNo",
-          "type": "bigint unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "DeploymentRouteSet_tenant_agent_scope_uq": {
-          "name": "DeploymentRouteSet_tenant_agent_scope_uq",
-          "columns": [
-            "tenantId",
-            "agentId",
-            "routeScopeKey"
-          ],
-          "isUnique": true
-        },
-        "DeploymentRouteSet_tenant_agent_scope_idx": {
-          "name": "DeploymentRouteSet_tenant_agent_scope_idx",
-          "columns": [
-            "tenantId",
-            "agentId",
-            "routeScopeKey"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "DeploymentRouteSet_tenantId_Tenant_id_fk": {
-          "name": "DeploymentRouteSet_tenantId_Tenant_id_fk",
-          "tableFrom": "DeploymentRouteSet",
-          "tableTo": "Tenant",
-          "columnsFrom": [
-            "tenantId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "DeploymentRouteSet_id": {
-          "name": "DeploymentRouteSet_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "DeploymentRoute": {
-      "name": "DeploymentRoute",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "routeSetId": {
-          "name": "routeSetId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "routeKey": {
-          "name": "routeKey",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentRevisionId": {
-          "name": "agentRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeRevisionId": {
-          "name": "runtimeRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "trafficWeight": {
-          "name": "trafficWeight",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "priorityNo": {
-          "name": "priorityNo",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "routeState": {
-          "name": "routeState",
-          "type": "enum('enabled','disabled')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'enabled'"
-        },
-        "effectiveFrom": {
-          "name": "effectiveFrom",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "effectiveUntil": {
-          "name": "effectiveUntil",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "activeRouteRevisionId": {
-          "name": "activeRouteRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "DeploymentRoute_set_routeKey_uq": {
-          "name": "DeploymentRoute_set_routeKey_uq",
-          "columns": [
-            "routeSetId",
-            "routeKey"
-          ],
-          "isUnique": true
-        },
-        "DeploymentRoute_set_state_idx": {
-          "name": "DeploymentRoute_set_state_idx",
-          "columns": [
-            "routeSetId",
-            "routeState"
-          ],
-          "isUnique": false
-        },
-        "DeploymentRoute_agentRevision_idx": {
-          "name": "DeploymentRoute_agentRevision_idx",
-          "columns": [
-            "agentRevisionId"
-          ],
-          "isUnique": false
-        },
-        "DeploymentRoute_runtimeRevision_idx": {
-          "name": "DeploymentRoute_runtimeRevision_idx",
-          "columns": [
-            "runtimeRevisionId"
-          ],
-          "isUnique": false
-        },
-        "DeploymentRoute_activeRouteRevision_idx": {
-          "name": "DeploymentRoute_activeRouteRevision_idx",
-          "columns": [
-            "activeRouteRevisionId"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "DeploymentRoute_routeSetId_DeploymentRouteSet_id_fk": {
-          "name": "DeploymentRoute_routeSetId_DeploymentRouteSet_id_fk",
-          "tableFrom": "DeploymentRoute",
-          "tableTo": "DeploymentRouteSet",
-          "columnsFrom": [
-            "routeSetId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "DeploymentRoute_id": {
-          "name": "DeploymentRoute_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "ExecutionBinding": {
-      "name": "ExecutionBinding",
-      "columns": {
-        "invocationId": {
-          "name": "invocationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentRevisionId": {
-          "name": "agentRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeRevisionId": {
-          "name": "runtimeRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "deploymentRouteId": {
-          "name": "deploymentRouteId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "modelProvider": {
-          "name": "modelProvider",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "modelId": {
-          "name": "modelId",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "modelRevisionRef": {
-          "name": "modelRevisionRef",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "initialEnvironmentLeaseId": {
-          "name": "initialEnvironmentLeaseId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "workspaceBindingId": {
-          "name": "workspaceBindingId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "policyRevisionId": {
-          "name": "policyRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "contextCheckpointId": {
-          "name": "contextCheckpointId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "routeRevisionId": {
-          "name": "routeRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "routeActivationId": {
-          "name": "routeActivationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "routeContentDigest": {
-          "name": "routeContentDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentArtifactId": {
-          "name": "agentArtifactId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeArtifactId": {
-          "name": "runtimeArtifactId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentArtifactDigest": {
-          "name": "agentArtifactDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeArtifactDigest": {
-          "name": "runtimeArtifactDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeConfigDigest": {
-          "name": "runtimeConfigDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "capabilityManifestDigest": {
-          "name": "capabilityManifestDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentAttestationIds": {
-          "name": "agentAttestationIds",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeAttestationIds": {
-          "name": "runtimeAttestationIds",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentPublicationRecordId": {
-          "name": "agentPublicationRecordId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimePublicationRecordId": {
-          "name": "runtimePublicationRecordId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "conformanceRunId": {
-          "name": "conformanceRunId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "resolutionInputDigest": {
-          "name": "resolutionInputDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "projectionVersionNo": {
-          "name": "projectionVersionNo",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "environmentDefinitionRevisionId": {
-          "name": "environmentDefinitionRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "configHash": {
-          "name": "configHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "boundAt": {
-          "name": "boundAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "ExecutionBinding_tenant_idx": {
-          "name": "ExecutionBinding_tenant_idx",
-          "columns": [
-            "tenantId"
-          ],
-          "isUnique": false
-        },
-        "ExecutionBinding_agentRevision_idx": {
-          "name": "ExecutionBinding_agentRevision_idx",
-          "columns": [
-            "agentRevisionId"
-          ],
-          "isUnique": false
-        },
-        "ExecutionBinding_runtimeRevision_idx": {
-          "name": "ExecutionBinding_runtimeRevision_idx",
-          "columns": [
-            "runtimeRevisionId"
-          ],
-          "isUnique": false
-        },
-        "ExecutionBinding_routeRevision_idx": {
-          "name": "ExecutionBinding_routeRevision_idx",
-          "columns": [
-            "routeRevisionId"
-          ],
-          "isUnique": false
-        },
-        "ExecutionBinding_agentArtifact_idx": {
-          "name": "ExecutionBinding_agentArtifact_idx",
-          "columns": [
-            "agentArtifactId"
-          ],
-          "isUnique": false
-        },
-        "ExecutionBinding_runtimeArtifact_idx": {
-          "name": "ExecutionBinding_runtimeArtifact_idx",
-          "columns": [
-            "runtimeArtifactId"
-          ],
-          "isUnique": false
-        },
-        "ExecutionBinding_conformanceRun_idx": {
-          "name": "ExecutionBinding_conformanceRun_idx",
-          "columns": [
-            "conformanceRunId"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "ExecutionBinding_invocationId_Invocation_id_fk": {
-          "name": "ExecutionBinding_invocationId_Invocation_id_fk",
-          "tableFrom": "ExecutionBinding",
-          "tableTo": "Invocation",
-          "columnsFrom": [
-            "invocationId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "ExecutionBinding_invocationId": {
-          "name": "ExecutionBinding_invocationId",
-          "columns": [
-            "invocationId"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "IdempotencyRecord": {
-      "name": "IdempotencyRecord",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "audience": {
-          "name": "audience",
-          "type": "enum('employee','runtime','gateway','admin')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "callerType": {
-          "name": "callerType",
-          "type": "enum('user','device','workload','service')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "callerId": {
-          "name": "callerId",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "commandScope": {
-          "name": "commandScope",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "idempotencyKey": {
-          "name": "idempotencyKey",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "requestHash": {
-          "name": "requestHash",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "processingState": {
-          "name": "processingState",
-          "type": "enum('processing','completed','failed')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'processing'"
-        },
-        "httpStatus": {
-          "name": "httpStatus",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "responseRef": {
-          "name": "responseRef",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "responseRedactedJson": {
-          "name": "responseRedactedJson",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "completedAt": {
-          "name": "completedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "IdempotencyRecord_tenant_audience_caller_scope_key_uq": {
-          "name": "IdempotencyRecord_tenant_audience_caller_scope_key_uq",
-          "columns": [
-            "tenantId",
-            "audience",
-            "callerType",
-            "callerId",
-            "commandScope",
-            "idempotencyKey"
-          ],
-          "isUnique": true
-        },
-        "IdempotencyRecord_tenant_expires_idx": {
-          "name": "IdempotencyRecord_tenant_expires_idx",
-          "columns": [
-            "tenantId",
-            "expiresAt"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "IdempotencyRecord_tenantId_Tenant_id_fk": {
-          "name": "IdempotencyRecord_tenantId_Tenant_id_fk",
-          "tableFrom": "IdempotencyRecord",
-          "tableTo": "Tenant",
-          "columnsFrom": [
-            "tenantId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "IdempotencyRecord_id": {
-          "name": "IdempotencyRecord_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "Invocation": {
-      "name": "Invocation",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "threadId": {
-          "name": "threadId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "turnId": {
-          "name": "turnId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "jobId": {
-          "name": "jobId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "invocationSequence": {
-          "name": "invocationSequence",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "invocationKind": {
-          "name": "invocationKind",
-          "type": "enum('initial','regenerate','job')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "executionState": {
-          "name": "executionState",
-          "type": "enum('queued','running','waiting_user','completed','failed','cancelled','lost')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'queued'"
-        },
-        "triggerItemId": {
-          "name": "triggerItemId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "replacesInvocationId": {
-          "name": "replacesInvocationId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "outputItemId": {
-          "name": "outputItemId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "resultRef": {
-          "name": "resultRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "runtimeSessionBindingId": {
-          "name": "runtimeSessionBindingId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "runtimeExecutionRef": {
-          "name": "runtimeExecutionRef",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "startedAt": {
-          "name": "startedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "finishedAt": {
-          "name": "finishedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lastHeartbeatAt": {
-          "name": "lastHeartbeatAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "errorCode": {
-          "name": "errorCode",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "errorSummary": {
-          "name": "errorSummary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "versionNo": {
-          "name": "versionNo",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "Invocation_thread_sequence_uq": {
-          "name": "Invocation_thread_sequence_uq",
-          "columns": [
-            "threadId",
-            "invocationSequence"
-          ],
-          "isUnique": true
-        },
-        "Invocation_job_sequence_uq": {
-          "name": "Invocation_job_sequence_uq",
-          "columns": [
-            "jobId",
-            "invocationSequence"
-          ],
-          "isUnique": true
-        },
-        "Invocation_tenant_state_idx": {
-          "name": "Invocation_tenant_state_idx",
-          "columns": [
-            "tenantId",
-            "executionState"
-          ],
-          "isUnique": false
-        },
-        "Invocation_turn_idx": {
-          "name": "Invocation_turn_idx",
-          "columns": [
-            "turnId"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "Invocation_tenantId_Tenant_id_fk": {
-          "name": "Invocation_tenantId_Tenant_id_fk",
-          "tableFrom": "Invocation",
-          "tableTo": "Tenant",
-          "columnsFrom": [
-            "tenantId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "Invocation_id": {
-          "name": "Invocation_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "PolicyRevision": {
-      "name": "PolicyRevision",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "policySetId": {
-          "name": "policySetId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revisionNo": {
-          "name": "revisionNo",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revisionJson": {
-          "name": "revisionJson",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "rulesHash": {
-          "name": "rulesHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revisionState": {
-          "name": "revisionState",
-          "type": "enum('draft','published','withdrawn')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'draft'"
-        },
-        "createdBy": {
-          "name": "createdBy",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "publishedAt": {
-          "name": "publishedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "PolicyRevision_set_revisionNo_uq": {
-          "name": "PolicyRevision_set_revisionNo_uq",
-          "columns": [
-            "policySetId",
-            "revisionNo"
-          ],
-          "isUnique": true
-        },
-        "PolicyRevision_set_state_idx": {
-          "name": "PolicyRevision_set_state_idx",
-          "columns": [
-            "policySetId",
-            "revisionState"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "PolicyRevision_policySetId_PolicySet_id_fk": {
-          "name": "PolicyRevision_policySetId_PolicySet_id_fk",
-          "tableFrom": "PolicyRevision",
-          "tableTo": "PolicySet",
-          "columnsFrom": [
-            "policySetId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "PolicyRevision_id": {
-          "name": "PolicyRevision_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "RuntimeRevision": {
-      "name": "RuntimeRevision",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeId": {
-          "name": "runtimeId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revisionNo": {
-          "name": "revisionNo",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "protocolType": {
-          "name": "protocolType",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "protocolContractRevision": {
-          "name": "protocolContractRevision",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'agent-runtime-protocol@1'"
-        },
-        "endpointRef": {
-          "name": "endpointRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeArtifactRef": {
-          "name": "runtimeArtifactRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "artifactId": {
-          "name": "artifactId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "artifactDigest": {
-          "name": "artifactDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "runtimeCapabilitiesJson": {
-          "name": "runtimeCapabilitiesJson",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "identityMode": {
-          "name": "identityMode",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "networkZone": {
-          "name": "networkZone",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "configHash": {
-          "name": "configHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revisionState": {
-          "name": "revisionState",
-          "type": "enum('draft','published','withdrawn')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'draft'"
-        },
-        "createdBy": {
-          "name": "createdBy",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "publishedAt": {
-          "name": "publishedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "RuntimeRevision_runtime_revisionNo_uq": {
-          "name": "RuntimeRevision_runtime_revisionNo_uq",
-          "columns": [
-            "runtimeId",
-            "revisionNo"
-          ],
-          "isUnique": true
-        },
-        "RuntimeRevision_runtime_state_idx": {
-          "name": "RuntimeRevision_runtime_state_idx",
-          "columns": [
-            "runtimeId",
-            "revisionState"
-          ],
-          "isUnique": false
-        },
-        "RuntimeRevision_artifact_idx": {
-          "name": "RuntimeRevision_artifact_idx",
-          "columns": [
-            "artifactId"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "RuntimeRevision_runtimeId_Runtime_id_fk": {
-          "name": "RuntimeRevision_runtimeId_Runtime_id_fk",
-          "tableFrom": "RuntimeRevision",
-          "tableTo": "Runtime",
-          "columnsFrom": [
-            "runtimeId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "RuntimeRevision_id": {
-          "name": "RuntimeRevision_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "Runtime": {
-      "name": "Runtime",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeKey": {
-          "name": "runtimeKey",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "displayName": {
-          "name": "displayName",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeKind": {
-          "name": "runtimeKind",
-          "type": "enum('hosted','external')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ownerUserId": {
-          "name": "ownerUserId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lifecycleState": {
-          "name": "lifecycleState",
-          "type": "enum('draft','enabled','disabled','retired')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'draft'"
-        },
-        "currentRevisionId": {
-          "name": "currentRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "versionNo": {
-          "name": "versionNo",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "deletedAt": {
-          "name": "deletedAt",
-          "type": "datetime",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "Runtime_tenant_runtimeKey_uq": {
-          "name": "Runtime_tenant_runtimeKey_uq",
-          "columns": [
-            "tenantId",
-            "runtimeKey"
-          ],
-          "isUnique": true
-        },
-        "Runtime_tenant_lifecycle_updated_idx": {
-          "name": "Runtime_tenant_lifecycle_updated_idx",
-          "columns": [
-            "tenantId",
-            "lifecycleState",
-            "updatedAt"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "Runtime_tenantId_Tenant_id_fk": {
-          "name": "Runtime_tenantId_Tenant_id_fk",
-          "tableFrom": "Runtime",
-          "tableTo": "Tenant",
-          "columnsFrom": [
-            "tenantId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "Runtime_id": {
-          "name": "Runtime_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "Tenant": {
-      "name": "Tenant",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "key": {
-          "name": "key",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "enum('active','suspended')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'active'"
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "Tenant_key_uq": {
-          "name": "Tenant_key_uq",
-          "columns": [
-            "key"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "Tenant_id": {
-          "name": "Tenant_id",
           "columns": [
             "id"
           ]
@@ -4859,6 +3145,273 @@
       },
       "uniqueConstraints": {}
     },
+    "DeploymentRouteSet": {
+      "name": "DeploymentRouteSet",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentId": {
+          "name": "agentId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeScopeKey": {
+          "name": "routeScopeKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeScopeJson": {
+          "name": "routeScopeJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "DeploymentRouteSet_tenant_agent_scope_uq": {
+          "name": "DeploymentRouteSet_tenant_agent_scope_uq",
+          "columns": [
+            "tenantId",
+            "agentId",
+            "routeScopeKey"
+          ],
+          "isUnique": true
+        },
+        "DeploymentRouteSet_tenant_agent_scope_idx": {
+          "name": "DeploymentRouteSet_tenant_agent_scope_idx",
+          "columns": [
+            "tenantId",
+            "agentId",
+            "routeScopeKey"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "DeploymentRouteSet_tenantId_Tenant_id_fk": {
+          "name": "DeploymentRouteSet_tenantId_Tenant_id_fk",
+          "tableFrom": "DeploymentRouteSet",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "DeploymentRouteSet_id": {
+          "name": "DeploymentRouteSet_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "DeploymentRoute": {
+      "name": "DeploymentRoute",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeSetId": {
+          "name": "routeSetId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeKey": {
+          "name": "routeKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentRevisionId": {
+          "name": "agentRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeRevisionId": {
+          "name": "runtimeRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "trafficWeight": {
+          "name": "trafficWeight",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "priorityNo": {
+          "name": "priorityNo",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "routeState": {
+          "name": "routeState",
+          "type": "enum('enabled','disabled')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'enabled'"
+        },
+        "effectiveFrom": {
+          "name": "effectiveFrom",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "effectiveUntil": {
+          "name": "effectiveUntil",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "activeRouteRevisionId": {
+          "name": "activeRouteRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "DeploymentRoute_set_routeKey_uq": {
+          "name": "DeploymentRoute_set_routeKey_uq",
+          "columns": [
+            "routeSetId",
+            "routeKey"
+          ],
+          "isUnique": true
+        },
+        "DeploymentRoute_set_state_idx": {
+          "name": "DeploymentRoute_set_state_idx",
+          "columns": [
+            "routeSetId",
+            "routeState"
+          ],
+          "isUnique": false
+        },
+        "DeploymentRoute_agentRevision_idx": {
+          "name": "DeploymentRoute_agentRevision_idx",
+          "columns": [
+            "agentRevisionId"
+          ],
+          "isUnique": false
+        },
+        "DeploymentRoute_runtimeRevision_idx": {
+          "name": "DeploymentRoute_runtimeRevision_idx",
+          "columns": [
+            "runtimeRevisionId"
+          ],
+          "isUnique": false
+        },
+        "DeploymentRoute_activeRouteRevision_idx": {
+          "name": "DeploymentRoute_activeRouteRevision_idx",
+          "columns": [
+            "activeRouteRevisionId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "DeploymentRoute_routeSetId_DeploymentRouteSet_id_fk": {
+          "name": "DeploymentRoute_routeSetId_DeploymentRouteSet_id_fk",
+          "tableFrom": "DeploymentRoute",
+          "tableTo": "DeploymentRouteSet",
+          "columnsFrom": [
+            "routeSetId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "DeploymentRoute_id": {
+          "name": "DeploymentRoute_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
     "Device": {
       "name": "Device",
       "columns": {
@@ -5455,8 +4008,8 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "EnvironmentChangeRequest_fromEnvironmentDefinitionId_EnvironmentDefinition_id_fk": {
-          "name": "EnvironmentChangeRequest_fromEnvironmentDefinitionId_EnvironmentDefinition_id_fk",
+        "EnvironmentChangeRequest_fromEnvironmentDefinitionId_Environ5abe": {
+          "name": "EnvironmentChangeRequest_fromEnvironmentDefinitionId_Environ5abe",
           "tableFrom": "EnvironmentChangeRequest",
           "tableTo": "EnvironmentDefinition",
           "columnsFrom": [
@@ -5468,8 +4021,8 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "EnvironmentChangeRequest_requestedEnvironmentDefinitionId_EnvironmentDefinition_id_fk": {
-          "name": "EnvironmentChangeRequest_requestedEnvironmentDefinitionId_EnvironmentDefinition_id_fk",
+        "EnvironmentChangeRequest_requestedEnvironmentDefinitionId_Ene6d1": {
+          "name": "EnvironmentChangeRequest_requestedEnvironmentDefinitionId_Ene6d1",
           "tableFrom": "EnvironmentChangeRequest",
           "tableTo": "EnvironmentDefinition",
           "columnsFrom": [
@@ -5811,12 +4364,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "EnvironmentLease_environmentDefinitionId_EnvironmentDefinition_id_fk": {
-          "name": "EnvironmentLease_environmentDefinitionId_EnvironmentDefinition_id_fk",
+        "EnvironmentLease_invocationId_Invocation_id_fk": {
+          "name": "EnvironmentLease_invocationId_Invocation_id_fk",
           "tableFrom": "EnvironmentLease",
-          "tableTo": "EnvironmentDefinition",
+          "tableTo": "Invocation",
           "columnsFrom": [
-            "environmentDefinitionId"
+            "invocationId"
           ],
           "columnsTo": [
             "id"
@@ -5824,12 +4377,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "EnvironmentLease_invocationId_Invocation_id_fk": {
-          "name": "EnvironmentLease_invocationId_Invocation_id_fk",
+        "EnvironmentLease_environmentDefinitionId_EnvironmentDefinitie317": {
+          "name": "EnvironmentLease_environmentDefinitionId_EnvironmentDefinitie317",
           "tableFrom": "EnvironmentLease",
-          "tableTo": "Invocation",
+          "tableTo": "EnvironmentDefinition",
           "columnsFrom": [
-            "invocationId"
+            "environmentDefinitionId"
           ],
           "columnsTo": [
             "id"
@@ -6621,6 +5174,394 @@
       },
       "uniqueConstraints": {}
     },
+    "GovernanceConfigRevision": {
+      "name": "GovernanceConfigRevision",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "configSetId": {
+          "name": "configSetId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revisionNo": {
+          "name": "revisionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "configJson": {
+          "name": "configJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "configDigest": {
+          "name": "configDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revisionState": {
+          "name": "revisionState",
+          "type": "enum('draft','published','withdrawn')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft'"
+        },
+        "createdBy": {
+          "name": "createdBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publishedAt": {
+          "name": "publishedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "GovernanceConfigRevision_set_revisionNo_uq": {
+          "name": "GovernanceConfigRevision_set_revisionNo_uq",
+          "columns": [
+            "configSetId",
+            "revisionNo"
+          ],
+          "isUnique": true
+        },
+        "GovernanceConfigRevision_set_state_idx": {
+          "name": "GovernanceConfigRevision_set_state_idx",
+          "columns": [
+            "configSetId",
+            "revisionState"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "GovernanceConfigRevision_configSetId_GovernanceConfigSet_id_fk": {
+          "name": "GovernanceConfigRevision_configSetId_GovernanceConfigSet_id_fk",
+          "tableFrom": "GovernanceConfigRevision",
+          "tableTo": "GovernanceConfigSet",
+          "columnsFrom": [
+            "configSetId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "GovernanceConfigRevision_id": {
+          "name": "GovernanceConfigRevision_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "GovernanceConfigSet": {
+      "name": "GovernanceConfigSet",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "configSetKey": {
+          "name": "configSetKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ownerUserId": {
+          "name": "ownerUserId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "currentRevisionId": {
+          "name": "currentRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lifecycleState": {
+          "name": "lifecycleState",
+          "type": "enum('draft','enabled','disabled','retired')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft'"
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "GovernanceConfigSet_tenant_configSetKey_uq": {
+          "name": "GovernanceConfigSet_tenant_configSetKey_uq",
+          "columns": [
+            "tenantId",
+            "configSetKey"
+          ],
+          "isUnique": true
+        },
+        "GovernanceConfigSet_tenant_lifecycle_updated_idx": {
+          "name": "GovernanceConfigSet_tenant_lifecycle_updated_idx",
+          "columns": [
+            "tenantId",
+            "lifecycleState",
+            "updatedAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "GovernanceConfigSet_tenantId_Tenant_id_fk": {
+          "name": "GovernanceConfigSet_tenantId_Tenant_id_fk",
+          "tableFrom": "GovernanceConfigSet",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "GovernanceConfigSet_id": {
+          "name": "GovernanceConfigSet_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "IdempotencyRecord": {
+      "name": "IdempotencyRecord",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "audience": {
+          "name": "audience",
+          "type": "enum('employee','runtime','gateway','admin')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "callerType": {
+          "name": "callerType",
+          "type": "enum('user','device','workload','service')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "callerId": {
+          "name": "callerId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "commandScope": {
+          "name": "commandScope",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "idempotencyKey": {
+          "name": "idempotencyKey",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requestHash": {
+          "name": "requestHash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "processingState": {
+          "name": "processingState",
+          "type": "enum('processing','completed','failed')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'processing'"
+        },
+        "httpStatus": {
+          "name": "httpStatus",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "responseRef": {
+          "name": "responseRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "responseRedactedJson": {
+          "name": "responseRedactedJson",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completedAt": {
+          "name": "completedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "IdempotencyRecord_tenant_audience_caller_scope_key_uq": {
+          "name": "IdempotencyRecord_tenant_audience_caller_scope_key_uq",
+          "columns": [
+            "tenantId",
+            "audience",
+            "callerType",
+            "callerId",
+            "commandScope",
+            "idempotencyKey"
+          ],
+          "isUnique": true
+        },
+        "IdempotencyRecord_tenant_expires_idx": {
+          "name": "IdempotencyRecord_tenant_expires_idx",
+          "columns": [
+            "tenantId",
+            "expiresAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "IdempotencyRecord_tenantId_Tenant_id_fk": {
+          "name": "IdempotencyRecord_tenantId_Tenant_id_fk",
+          "tableFrom": "IdempotencyRecord",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "IdempotencyRecord_id": {
+          "name": "IdempotencyRecord_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
     "PrincipalBinding": {
       "name": "PrincipalBinding",
       "columns": {
@@ -6731,6 +5672,73 @@
       "compositePrimaryKeys": {
         "PrincipalBinding_id": {
           "name": "PrincipalBinding_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "Tenant": {
+      "name": "Tenant",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('active','suspended')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "Tenant_key_uq": {
+          "name": "Tenant_key_uq",
+          "columns": [
+            "key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "Tenant_id": {
+          "name": "Tenant_id",
           "columns": [
             "id"
           ]
@@ -7790,8 +6798,8 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "KnowledgeChunk_documentRevisionId_KnowledgeDocumentRevision_id_fk": {
-          "name": "KnowledgeChunk_documentRevisionId_KnowledgeDocumentRevision_id_fk",
+        "KnowledgeChunk_documentRevisionId_KnowledgeDocumentRevision_85e8": {
+          "name": "KnowledgeChunk_documentRevisionId_KnowledgeDocumentRevision_85e8",
           "tableFrom": "KnowledgeChunk",
           "tableTo": "KnowledgeDocumentRevision",
           "columnsFrom": [
@@ -9078,7 +8086,7 @@
           "name": "policyRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "reasonCodesJson": {
@@ -9168,6 +8176,117 @@
       "compositePrimaryKeys": {
         "PermissionDecision_id": {
           "name": "PermissionDecision_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "PolicyRevision": {
+      "name": "PolicyRevision",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policySetId": {
+          "name": "policySetId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revisionNo": {
+          "name": "revisionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "defaultDecision": {
+          "name": "defaultDecision",
+          "type": "enum('allow','pause','block')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rulesHash": {
+          "name": "rulesHash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revisionState": {
+          "name": "revisionState",
+          "type": "enum('draft','published','withdrawn')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft'"
+        },
+        "createdBy": {
+          "name": "createdBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publishedAt": {
+          "name": "publishedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "PolicyRevision_set_revisionNo_uq": {
+          "name": "PolicyRevision_set_revisionNo_uq",
+          "columns": [
+            "policySetId",
+            "revisionNo"
+          ],
+          "isUnique": true
+        },
+        "PolicyRevision_set_state_idx": {
+          "name": "PolicyRevision_set_state_idx",
+          "columns": [
+            "policySetId",
+            "revisionState"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "PolicyRevision_policySetId_PolicySet_id_fk": {
+          "name": "PolicyRevision_policySetId_PolicySet_id_fk",
+          "tableFrom": "PolicyRevision",
+          "tableTo": "PolicySet",
+          "columnsFrom": [
+            "policySetId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "PolicyRevision_id": {
+          "name": "PolicyRevision_id",
           "columns": [
             "id"
           ]
@@ -9323,7 +8442,14 @@
           "name": "policyRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ruleKey": {
+          "name": "ruleKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "toolPattern": {
@@ -9385,6 +8511,14 @@
         }
       },
       "indexes": {
+        "Policy_revision_ruleKey_uq": {
+          "name": "Policy_revision_ruleKey_uq",
+          "columns": [
+            "policyRevisionId",
+            "ruleKey"
+          ],
+          "isUnique": true
+        },
         "Policy_tenant_set_idx": {
           "name": "Policy_tenant_set_idx",
           "columns": [
@@ -10183,275 +9317,6 @@
       },
       "uniqueConstraints": {}
     },
-    "PublicationRecord": {
-      "name": "PublicationRecord",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subjectType": {
-          "name": "subjectType",
-          "type": "enum('agent_revision','runtime_revision')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subjectRevisionId": {
-          "name": "subjectRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "publicationSequence": {
-          "name": "publicationSequence",
-          "type": "bigint unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "evidenceSetDigest": {
-          "name": "evidenceSetDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "attestationIds": {
-          "name": "attestationIds",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "conformanceRunId": {
-          "name": "conformanceRunId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "approvals": {
-          "name": "approvals",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "publishedByType": {
-          "name": "publishedByType",
-          "type": "enum('user','service','workload','system')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "publishedBy": {
-          "name": "publishedBy",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "publishedAt": {
-          "name": "publishedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "idempotencyKey": {
-          "name": "idempotencyKey",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "idempotencyRecordId": {
-          "name": "idempotencyRecordId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "PublicationRecord_subject_uq": {
-          "name": "PublicationRecord_subject_uq",
-          "columns": [
-            "subjectType",
-            "subjectRevisionId"
-          ],
-          "isUnique": true
-        },
-        "PublicationRecord_sequence_uq": {
-          "name": "PublicationRecord_sequence_uq",
-          "columns": [
-            "publicationSequence"
-          ],
-          "isUnique": true
-        },
-        "PublicationRecord_idempotencyRecord_uq": {
-          "name": "PublicationRecord_idempotencyRecord_uq",
-          "columns": [
-            "idempotencyRecordId"
-          ],
-          "isUnique": true
-        },
-        "PublicationRecord_tenant_published_idx": {
-          "name": "PublicationRecord_tenant_published_idx",
-          "columns": [
-            "tenantId",
-            "publishedAt"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "PublicationRecord_id": {
-          "name": "PublicationRecord_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
-    "WithdrawalRecord": {
-      "name": "WithdrawalRecord",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "publicationRecordId": {
-          "name": "publicationRecordId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subjectType": {
-          "name": "subjectType",
-          "type": "enum('agent_revision','runtime_revision')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "subjectRevisionId": {
-          "name": "subjectRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "reasonCode": {
-          "name": "reasonCode",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "withdrawnByType": {
-          "name": "withdrawnByType",
-          "type": "enum('user','service','workload','system')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "withdrawnBy": {
-          "name": "withdrawnBy",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "withdrawnAt": {
-          "name": "withdrawnAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "WithdrawalRecord_subject_uq": {
-          "name": "WithdrawalRecord_subject_uq",
-          "columns": [
-            "subjectType",
-            "subjectRevisionId"
-          ],
-          "isUnique": true
-        },
-        "WithdrawalRecord_publicationRecord_uq": {
-          "name": "WithdrawalRecord_publicationRecord_uq",
-          "columns": [
-            "publicationRecordId"
-          ],
-          "isUnique": true
-        },
-        "WithdrawalRecord_tenant_withdrawn_idx": {
-          "name": "WithdrawalRecord_tenant_withdrawn_idx",
-          "columns": [
-            "tenantId",
-            "withdrawnAt"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "WithdrawalRecord_publicationRecordId_PublicationRecord_id_fk": {
-          "name": "WithdrawalRecord_publicationRecordId_PublicationRecord_id_fk",
-          "tableFrom": "WithdrawalRecord",
-          "tableTo": "PublicationRecord",
-          "columnsFrom": [
-            "publicationRecordId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "WithdrawalRecord_id": {
-          "name": "WithdrawalRecord_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
-    },
     "RecoveryDrillCheck": {
       "name": "RecoveryDrillCheck",
       "columns": {
@@ -11088,11 +9953,11 @@
       },
       "uniqueConstraints": {}
     },
-    "RuntimeArtifact": {
-      "name": "RuntimeArtifact",
+    "ExecutionBinding": {
+      "name": "ExecutionBinding",
       "columns": {
-        "id": {
-          "name": "id",
+        "invocationId": {
+          "name": "invocationId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
@@ -11105,153 +9970,289 @@
           "notNull": true,
           "autoincrement": false
         },
-        "invocationId": {
-          "name": "invocationId",
+        "agentRevisionId": {
+          "name": "agentRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "threadId": {
-          "name": "threadId",
+        "runtimeRevisionId": {
+          "name": "runtimeRevisionId",
           "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "turnId": {
-          "name": "turnId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "jobId": {
-          "name": "jobId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "itemId": {
-          "name": "itemId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "artifactType": {
-          "name": "artifactType",
-          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "displayName": {
-          "name": "displayName",
+        "deploymentRouteId": {
+          "name": "deploymentRouteId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "modelProvider": {
+          "name": "modelProvider",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "modelId": {
+          "name": "modelId",
           "type": "varchar(256)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "contentRef": {
-          "name": "contentRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "mediaType": {
-          "name": "mediaType",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "byteSize": {
-          "name": "byteSize",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "contentHash": {
-          "name": "contentHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "visibilityScope": {
-          "name": "visibilityScope",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "datetime(3)",
+        "modelRevisionRef": {
+          "name": "modelRevisionRef",
+          "type": "varchar(256)",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "initialEnvironmentLeaseId": {
+          "name": "initialEnvironmentLeaseId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "workspaceBindingId": {
+          "name": "workspaceBindingId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "policyRevisionId": {
+          "name": "policyRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policyRulesDigest": {
+          "name": "policyRulesDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "governanceConfigRevisionId": {
+          "name": "governanceConfigRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "governanceConfigDigest": {
+          "name": "governanceConfigDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contextCheckpointId": {
+          "name": "contextCheckpointId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "routeRevisionId": {
+          "name": "routeRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeActivationId": {
+          "name": "routeActivationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeContentDigest": {
+          "name": "routeContentDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentArtifactId": {
+          "name": "agentArtifactId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeArtifactId": {
+          "name": "runtimeArtifactId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentArtifactDigest": {
+          "name": "agentArtifactDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeArtifactDigest": {
+          "name": "runtimeArtifactDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeConfigDigest": {
+          "name": "runtimeConfigDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capabilityManifestDigest": {
+          "name": "capabilityManifestDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentAttestationIds": {
+          "name": "agentAttestationIds",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeAttestationIds": {
+          "name": "runtimeAttestationIds",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentPublicationRecordId": {
+          "name": "agentPublicationRecordId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimePublicationRecordId": {
+          "name": "runtimePublicationRecordId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "conformanceRunId": {
+          "name": "conformanceRunId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolutionInputDigest": {
+          "name": "resolutionInputDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "projectionVersionNo": {
+          "name": "projectionVersionNo",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "environmentDefinitionRevisionId": {
+          "name": "environmentDefinitionRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "configHash": {
+          "name": "configHash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "boundAt": {
+          "name": "boundAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {
-        "RuntimeArtifact_itemId_uq": {
-          "name": "RuntimeArtifact_itemId_uq",
+        "ExecutionBinding_tenant_idx": {
+          "name": "ExecutionBinding_tenant_idx",
           "columns": [
-            "itemId"
-          ],
-          "isUnique": true
-        },
-        "RuntimeArtifact_tenant_invocation_idx": {
-          "name": "RuntimeArtifact_tenant_invocation_idx",
-          "columns": [
-            "tenantId",
-            "invocationId"
+            "tenantId"
           ],
           "isUnique": false
         },
-        "RuntimeArtifact_tenant_thread_idx": {
-          "name": "RuntimeArtifact_tenant_thread_idx",
+        "ExecutionBinding_agentRevision_idx": {
+          "name": "ExecutionBinding_agentRevision_idx",
           "columns": [
-            "tenantId",
-            "threadId"
+            "agentRevisionId"
           ],
           "isUnique": false
         },
-        "RuntimeArtifact_tenant_job_idx": {
-          "name": "RuntimeArtifact_tenant_job_idx",
+        "ExecutionBinding_runtimeRevision_idx": {
+          "name": "ExecutionBinding_runtimeRevision_idx",
           "columns": [
-            "tenantId",
-            "jobId"
+            "runtimeRevisionId"
           ],
           "isUnique": false
         },
-        "RuntimeArtifact_tenant_expires_idx": {
-          "name": "RuntimeArtifact_tenant_expires_idx",
+        "ExecutionBinding_routeRevision_idx": {
+          "name": "ExecutionBinding_routeRevision_idx",
           "columns": [
-            "tenantId",
-            "expiresAt"
+            "routeRevisionId"
+          ],
+          "isUnique": false
+        },
+        "ExecutionBinding_agentArtifact_idx": {
+          "name": "ExecutionBinding_agentArtifact_idx",
+          "columns": [
+            "agentArtifactId"
+          ],
+          "isUnique": false
+        },
+        "ExecutionBinding_runtimeArtifact_idx": {
+          "name": "ExecutionBinding_runtimeArtifact_idx",
+          "columns": [
+            "runtimeArtifactId"
+          ],
+          "isUnique": false
+        },
+        "ExecutionBinding_conformanceRun_idx": {
+          "name": "ExecutionBinding_conformanceRun_idx",
+          "columns": [
+            "conformanceRunId"
           ],
           "isUnique": false
         }
       },
       "foreignKeys": {
-        "RuntimeArtifact_tenantId_Tenant_id_fk": {
-          "name": "RuntimeArtifact_tenantId_Tenant_id_fk",
-          "tableFrom": "RuntimeArtifact",
-          "tableTo": "Tenant",
+        "ExecutionBinding_invocationId_Invocation_id_fk": {
+          "name": "ExecutionBinding_invocationId_Invocation_id_fk",
+          "tableFrom": "ExecutionBinding",
+          "tableTo": "Invocation",
           "columnsFrom": [
-            "tenantId"
+            "invocationId"
           ],
           "columnsTo": [
             "id"
@@ -11261,10 +10262,10 @@
         }
       },
       "compositePrimaryKeys": {
-        "RuntimeArtifact_id": {
-          "name": "RuntimeArtifact_id",
+        "ExecutionBinding_invocationId": {
+          "name": "ExecutionBinding_invocationId",
           "columns": [
-            "id"
+            "invocationId"
           ]
         }
       },
@@ -11527,6 +10528,224 @@
       },
       "uniqueConstraints": {}
     },
+    "Invocation": {
+      "name": "Invocation",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "threadId": {
+          "name": "threadId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "turnId": {
+          "name": "turnId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "jobId": {
+          "name": "jobId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "invocationSequence": {
+          "name": "invocationSequence",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invocationKind": {
+          "name": "invocationKind",
+          "type": "enum('initial','regenerate','job')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "executionState": {
+          "name": "executionState",
+          "type": "enum('queued','running','waiting_user','completed','failed','cancelled','lost')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'queued'"
+        },
+        "triggerItemId": {
+          "name": "triggerItemId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "replacesInvocationId": {
+          "name": "replacesInvocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "outputItemId": {
+          "name": "outputItemId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resultRef": {
+          "name": "resultRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runtimeSessionBindingId": {
+          "name": "runtimeSessionBindingId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runtimeExecutionRef": {
+          "name": "runtimeExecutionRef",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "startedAt": {
+          "name": "startedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "finishedAt": {
+          "name": "finishedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastHeartbeatAt": {
+          "name": "lastHeartbeatAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "errorCode": {
+          "name": "errorCode",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "errorSummary": {
+          "name": "errorSummary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "Invocation_thread_sequence_uq": {
+          "name": "Invocation_thread_sequence_uq",
+          "columns": [
+            "threadId",
+            "invocationSequence"
+          ],
+          "isUnique": true
+        },
+        "Invocation_job_sequence_uq": {
+          "name": "Invocation_job_sequence_uq",
+          "columns": [
+            "jobId",
+            "invocationSequence"
+          ],
+          "isUnique": true
+        },
+        "Invocation_tenant_state_idx": {
+          "name": "Invocation_tenant_state_idx",
+          "columns": [
+            "tenantId",
+            "executionState"
+          ],
+          "isUnique": false
+        },
+        "Invocation_turn_idx": {
+          "name": "Invocation_turn_idx",
+          "columns": [
+            "turnId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "Invocation_tenantId_Tenant_id_fk": {
+          "name": "Invocation_tenantId_Tenant_id_fk",
+          "tableFrom": "Invocation",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "Invocation_id": {
+          "name": "Invocation_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
     "RuntimeEventIngress": {
       "name": "RuntimeEventIngress",
       "columns": {
@@ -11709,6 +10928,181 @@
       },
       "uniqueConstraints": {}
     },
+    "RuntimeRevision": {
+      "name": "RuntimeRevision",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeId": {
+          "name": "runtimeId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revisionNo": {
+          "name": "revisionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocolType": {
+          "name": "protocolType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocolContractRevision": {
+          "name": "protocolContractRevision",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'agent-runtime-protocol@1'"
+        },
+        "endpointRef": {
+          "name": "endpointRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeArtifactRef": {
+          "name": "runtimeArtifactRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "artifactId": {
+          "name": "artifactId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "artifactDigest": {
+          "name": "artifactDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runtimeCapabilitiesJson": {
+          "name": "runtimeCapabilitiesJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "identityMode": {
+          "name": "identityMode",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "networkZone": {
+          "name": "networkZone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "configHash": {
+          "name": "configHash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revisionState": {
+          "name": "revisionState",
+          "type": "enum('draft','published','withdrawn')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft'"
+        },
+        "createdBy": {
+          "name": "createdBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publishedAt": {
+          "name": "publishedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "RuntimeRevision_runtime_revisionNo_uq": {
+          "name": "RuntimeRevision_runtime_revisionNo_uq",
+          "columns": [
+            "runtimeId",
+            "revisionNo"
+          ],
+          "isUnique": true
+        },
+        "RuntimeRevision_runtime_state_idx": {
+          "name": "RuntimeRevision_runtime_state_idx",
+          "columns": [
+            "runtimeId",
+            "revisionState"
+          ],
+          "isUnique": false
+        },
+        "RuntimeRevision_artifact_idx": {
+          "name": "RuntimeRevision_artifact_idx",
+          "columns": [
+            "artifactId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "RuntimeRevision_runtimeId_Runtime_id_fk": {
+          "name": "RuntimeRevision_runtimeId_Runtime_id_fk",
+          "tableFrom": "RuntimeRevision",
+          "tableTo": "Runtime",
+          "columnsFrom": [
+            "runtimeId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "RuntimeRevision_id": {
+          "name": "RuntimeRevision_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
     "RuntimeSessionBinding": {
       "name": "RuntimeSessionBinding",
       "columns": {
@@ -11826,6 +11220,140 @@
       "compositePrimaryKeys": {
         "RuntimeSessionBinding_id": {
           "name": "RuntimeSessionBinding_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "Runtime": {
+      "name": "Runtime",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeKey": {
+          "name": "runtimeKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "displayName": {
+          "name": "displayName",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeKind": {
+          "name": "runtimeKind",
+          "type": "enum('hosted','external')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ownerUserId": {
+          "name": "ownerUserId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lifecycleState": {
+          "name": "lifecycleState",
+          "type": "enum('draft','enabled','disabled','retired')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft'"
+        },
+        "currentRevisionId": {
+          "name": "currentRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "Runtime_tenant_runtimeKey_uq": {
+          "name": "Runtime_tenant_runtimeKey_uq",
+          "columns": [
+            "tenantId",
+            "runtimeKey"
+          ],
+          "isUnique": true
+        },
+        "Runtime_tenant_lifecycle_updated_idx": {
+          "name": "Runtime_tenant_lifecycle_updated_idx",
+          "columns": [
+            "tenantId",
+            "lifecycleState",
+            "updatedAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "Runtime_tenantId_Tenant_id_fk": {
+          "name": "Runtime_tenantId_Tenant_id_fk",
+          "tableFrom": "Runtime",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "Runtime_id": {
+          "name": "Runtime_id",
           "columns": [
             "id"
           ]
@@ -12482,6 +12010,207 @@
       "compositePrimaryKeys": {
         "SkillVersion_id": {
           "name": "SkillVersion_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "SkillSyncBinding": {
+      "name": "SkillSyncBinding",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "remoteAssetId": {
+          "name": "remoteAssetId",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "remoteName": {
+          "name": "remoteName",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "remoteDisplayName": {
+          "name": "remoteDisplayName",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "remoteVersion": {
+          "name": "remoteVersion",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "remoteVersionId": {
+          "name": "remoteVersionId",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "remoteContentHash": {
+          "name": "remoteContentHash",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "localSkillId": {
+          "name": "localSkillId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "localSkillVersionId": {
+          "name": "localSkillVersionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "localName": {
+          "name": "localName",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "syncState": {
+          "name": "syncState",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "lastSyncedAt": {
+          "name": "lastSyncedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastCheckedAt": {
+          "name": "lastCheckedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastError": {
+          "name": "lastError",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "SkillSyncBinding_tenant_remoteAssetId_uq": {
+          "name": "SkillSyncBinding_tenant_remoteAssetId_uq",
+          "columns": [
+            "tenantId",
+            "remoteAssetId"
+          ],
+          "isUnique": true
+        },
+        "SkillSyncBinding_tenant_localSkill_idx": {
+          "name": "SkillSyncBinding_tenant_localSkill_idx",
+          "columns": [
+            "tenantId",
+            "localSkillId"
+          ],
+          "isUnique": false
+        },
+        "SkillSyncBinding_tenant_syncState_idx": {
+          "name": "SkillSyncBinding_tenant_syncState_idx",
+          "columns": [
+            "tenantId",
+            "syncState"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "SkillSyncBinding_tenantId_Tenant_id_fk": {
+          "name": "SkillSyncBinding_tenantId_Tenant_id_fk",
+          "tableFrom": "SkillSyncBinding",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "SkillSyncBinding_localSkillId_Skill_id_fk": {
+          "name": "SkillSyncBinding_localSkillId_Skill_id_fk",
+          "tableFrom": "SkillSyncBinding",
+          "tableTo": "Skill",
+          "columnsFrom": [
+            "localSkillId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "SkillSyncBinding_localSkillVersionId_SkillVersion_id_fk": {
+          "name": "SkillSyncBinding_localSkillVersionId_SkillVersion_id_fk",
+          "tableFrom": "SkillSyncBinding",
+          "tableTo": "SkillVersion",
+          "columnsFrom": [
+            "localSkillVersionId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "SkillSyncBinding_id": {
+          "name": "SkillSyncBinding_id",
           "columns": [
             "id"
           ]
@@ -13673,8 +13402,7 @@
           "type": "json",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "CAST(false AS JSON)"
+          "autoincrement": false
         },
         "redaction_summary": {
           "name": "redaction_summary",
@@ -14852,6 +14580,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "permissionDecisionId": {
+          "name": "permissionDecisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "grantId": {
           "name": "grantId",
           "type": "varchar(36)",
@@ -14887,6 +14622,13 @@
           "name": "UserActionRequest_item_id_uq",
           "columns": [
             "itemId"
+          ],
+          "isUnique": true
+        },
+        "UserActionRequest_permissionDecision_id_uq": {
+          "name": "UserActionRequest_permissionDecision_id_uq",
+          "columns": [
+            "permissionDecisionId"
           ],
           "isUnique": true
         },
@@ -16045,8 +15787,8 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "WorkspaceAttachmentUse_workspaceAttachmentId_WorkspaceAttachment_id_fk": {
-          "name": "WorkspaceAttachmentUse_workspaceAttachmentId_WorkspaceAttachment_id_fk",
+        "WorkspaceAttachmentUse_workspaceAttachmentId_WorkspaceAttach5f4d": {
+          "name": "WorkspaceAttachmentUse_workspaceAttachmentId_WorkspaceAttach5f4d",
           "tableFrom": "WorkspaceAttachmentUse",
           "tableTo": "WorkspaceAttachment",
           "columnsFrom": [
@@ -16475,6 +16217,745 @@
       "compositePrimaryKeys": {
         "ControlPlaneOutboxEvent_id": {
           "name": "ControlPlaneOutboxEvent_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "Artifact": {
+      "name": "Artifact",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "digest": {
+          "name": "digest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mediaType": {
+          "name": "mediaType",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "size": {
+          "name": "size",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "contentRef": {
+          "name": "contentRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sourceRevision": {
+          "name": "sourceRevision",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "buildMetadata": {
+          "name": "buildMetadata",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "Artifact_tenant_digest_uq": {
+          "name": "Artifact_tenant_digest_uq",
+          "columns": [
+            "tenantId",
+            "digest"
+          ],
+          "isUnique": true
+        },
+        "Artifact_tenant_kind_created_idx": {
+          "name": "Artifact_tenant_kind_created_idx",
+          "columns": [
+            "tenantId",
+            "kind",
+            "createdAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "Artifact_id": {
+          "name": "Artifact_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "ArtifactAttestation": {
+      "name": "ArtifactAttestation",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "artifactId": {
+          "name": "artifactId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "artifactType": {
+          "name": "artifactType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "artifactRevisionId": {
+          "name": "artifactRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "artifactDigest": {
+          "name": "artifactDigest",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dsseEnvelopeRef": {
+          "name": "dsseEnvelopeRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sbomRef": {
+          "name": "sbomRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provenanceRef": {
+          "name": "provenanceRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "builderIdentity": {
+          "name": "builderIdentity",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verificationState": {
+          "name": "verificationState",
+          "type": "enum('verified','failed')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policyRevisionId": {
+          "name": "policyRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sourceRevision": {
+          "name": "sourceRevision",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "buildPipeline": {
+          "name": "buildPipeline",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dependencyLockFileHash": {
+          "name": "dependencyLockFileHash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "buildTime": {
+          "name": "buildTime",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "scanSummaryJson": {
+          "name": "scanSummaryJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "failureCode": {
+          "name": "failureCode",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verifiedAt": {
+          "name": "verifiedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attestationFormat": {
+          "name": "attestationFormat",
+          "type": "enum('in_toto_dsse')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'in_toto_dsse'"
+        },
+        "statementType": {
+          "name": "statementType",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "predicateType": {
+          "name": "predicateType",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bundleDigest": {
+          "name": "bundleDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "subjectName": {
+          "name": "subjectName",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "subjectDigest": {
+          "name": "subjectDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verificationEngine": {
+          "name": "verificationEngine",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verificationEngineVersion": {
+          "name": "verificationEngineVersion",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "ArtifactAttestation_tenant_type_rev_digest_env_uq": {
+          "name": "ArtifactAttestation_tenant_type_rev_digest_env_uq",
+          "columns": [
+            "tenantId",
+            "artifactType",
+            "artifactRevisionId",
+            "artifactDigest",
+            "dsseEnvelopeRef"
+          ],
+          "isUnique": true
+        },
+        "ArtifactAttestation_artifact_idx": {
+          "name": "ArtifactAttestation_artifact_idx",
+          "columns": [
+            "artifactId"
+          ],
+          "isUnique": false
+        },
+        "ArtifactAttestation_tenant_type_rev_state_idx": {
+          "name": "ArtifactAttestation_tenant_type_rev_state_idx",
+          "columns": [
+            "tenantId",
+            "artifactType",
+            "artifactRevisionId",
+            "verificationState"
+          ],
+          "isUnique": false
+        },
+        "ArtifactAttestation_tenant_digest_idx": {
+          "name": "ArtifactAttestation_tenant_digest_idx",
+          "columns": [
+            "tenantId",
+            "artifactDigest"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "ArtifactAttestation_artifactId_Artifact_id_fk": {
+          "name": "ArtifactAttestation_artifactId_Artifact_id_fk",
+          "tableFrom": "ArtifactAttestation",
+          "tableTo": "Artifact",
+          "columnsFrom": [
+            "artifactId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "ArtifactAttestation_id": {
+          "name": "ArtifactAttestation_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "AttestationRevocationRecord": {
+      "name": "AttestationRevocationRecord",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attestationId": {
+          "name": "attestationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revokedByType": {
+          "name": "revokedByType",
+          "type": "enum('user','service','workload','system')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revokedBy": {
+          "name": "revokedBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "requestId": {
+          "name": "requestId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revokedAt": {
+          "name": "revokedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "AttestationRevocationRecord_attestation_uq": {
+          "name": "AttestationRevocationRecord_attestation_uq",
+          "columns": [
+            "attestationId"
+          ],
+          "isUnique": true
+        },
+        "AttestationRevocationRecord_tenant_revoked_idx": {
+          "name": "AttestationRevocationRecord_tenant_revoked_idx",
+          "columns": [
+            "tenantId",
+            "revokedAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "AttestationRevocationRecord_attestationId_ArtifactAttestatiob0ec": {
+          "name": "AttestationRevocationRecord_attestationId_ArtifactAttestatiob0ec",
+          "tableFrom": "AttestationRevocationRecord",
+          "tableTo": "ArtifactAttestation",
+          "columnsFrom": [
+            "attestationId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AttestationRevocationRecord_id": {
+          "name": "AttestationRevocationRecord_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "PublicationRecord": {
+      "name": "PublicationRecord",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subjectType": {
+          "name": "subjectType",
+          "type": "enum('agent_revision','runtime_revision')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subjectRevisionId": {
+          "name": "subjectRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publicationSequence": {
+          "name": "publicationSequence",
+          "type": "bigint unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "evidenceSetDigest": {
+          "name": "evidenceSetDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attestationIds": {
+          "name": "attestationIds",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "conformanceRunId": {
+          "name": "conformanceRunId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "approvals": {
+          "name": "approvals",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publishedByType": {
+          "name": "publishedByType",
+          "type": "enum('user','service','workload','system')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publishedBy": {
+          "name": "publishedBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publishedAt": {
+          "name": "publishedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "idempotencyKey": {
+          "name": "idempotencyKey",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "idempotencyRecordId": {
+          "name": "idempotencyRecordId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "PublicationRecord_subject_uq": {
+          "name": "PublicationRecord_subject_uq",
+          "columns": [
+            "subjectType",
+            "subjectRevisionId"
+          ],
+          "isUnique": true
+        },
+        "PublicationRecord_sequence_uq": {
+          "name": "PublicationRecord_sequence_uq",
+          "columns": [
+            "publicationSequence"
+          ],
+          "isUnique": true
+        },
+        "PublicationRecord_idempotencyRecord_uq": {
+          "name": "PublicationRecord_idempotencyRecord_uq",
+          "columns": [
+            "idempotencyRecordId"
+          ],
+          "isUnique": true
+        },
+        "PublicationRecord_tenant_published_idx": {
+          "name": "PublicationRecord_tenant_published_idx",
+          "columns": [
+            "tenantId",
+            "publishedAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "PublicationRecord_id": {
+          "name": "PublicationRecord_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {}
+    },
+    "WithdrawalRecord": {
+      "name": "WithdrawalRecord",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publicationRecordId": {
+          "name": "publicationRecordId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subjectType": {
+          "name": "subjectType",
+          "type": "enum('agent_revision','runtime_revision')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subjectRevisionId": {
+          "name": "subjectRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reasonCode": {
+          "name": "reasonCode",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "withdrawnByType": {
+          "name": "withdrawnByType",
+          "type": "enum('user','service','workload','system')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "withdrawnBy": {
+          "name": "withdrawnBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "withdrawnAt": {
+          "name": "withdrawnAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "WithdrawalRecord_subject_uq": {
+          "name": "WithdrawalRecord_subject_uq",
+          "columns": [
+            "subjectType",
+            "subjectRevisionId"
+          ],
+          "isUnique": true
+        },
+        "WithdrawalRecord_publicationRecord_uq": {
+          "name": "WithdrawalRecord_publicationRecord_uq",
+          "columns": [
+            "publicationRecordId"
+          ],
+          "isUnique": true
+        },
+        "WithdrawalRecord_tenant_withdrawn_idx": {
+          "name": "WithdrawalRecord_tenant_withdrawn_idx",
+          "columns": [
+            "tenantId",
+            "withdrawnAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "WithdrawalRecord_publicationRecordId_PublicationRecord_id_fk": {
+          "name": "WithdrawalRecord_publicationRecordId_PublicationRecord_id_fk",
+          "tableFrom": "WithdrawalRecord",
+          "tableTo": "PublicationRecord",
+          "columnsFrom": [
+            "publicationRecordId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "WithdrawalRecord_id": {
+          "name": "WithdrawalRecord_id",
           "columns": [
             "id"
           ]

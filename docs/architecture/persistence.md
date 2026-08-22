@@ -669,9 +669,9 @@ ThreadEvent sequence 通过锁定 Thread.last_event_sequence 原子递增；JobE
 | ThreadPlan / ThreadPlanItem | plan Item | 转一个类型化 plan Item；更新通过 Event 记录 |
 | Agent | agent + 初始 agent_revision | 现有模型、Skill/config 规范化为初始修订；动态 Skill 不再固化为依赖树 |
 | Skill / SkillVersion / SkillSyncMapping | skill / skill_version / 来源映射 | 保留稳定 id 与版本；同步来源进入 source_ref，不改变运行语义 |
-| PolicyConfig / History | policy_set / policy_revision | 历史配置转不可变修订 |
-| ToolPermissionRule | policy_revision 规则 | 转换为策略规则；无法表达的旧规则阻止启用并进入人工清单 |
-| ToolApprovalRequest | user_action_request + permission_decision | 保留请求、解析人和结果；approval 统一为 confirmation 子类型 |
+| PolicyConfig / History | —（不迁移） | Legacy 不迁数据；正式体系由 GovernanceConfigSet/Revision + PolicySet/PolicyRevision 按新执行链产生 |
+| ToolPermissionRule | —（不迁移） | Legacy 不迁数据；正式规则由 PolicySet/PolicyRevision + PermissionDecision 按新执行链产生 |
+| ToolApprovalRequest | —（不迁移） | Legacy 不迁数据；正式审批由 UserActionRequest + PermissionDecision 按新执行链产生 |
 | BackgroundTask | 内部 job/invocation | 有员工会话归属则关联 Turn；纯后台任务保留 Job，不暴露成普通 Thread 层级 |
 | GitCheckpoint | filesystem_checkpoint | 绑定 WorkspaceBinding，不再代表会话恢复点 |
 | MemoryEntry / MemoryEmbedding | memory_entry / memory_index | 保留 scope/source/hash，重建索引 |

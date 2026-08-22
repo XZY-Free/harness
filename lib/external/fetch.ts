@@ -2,9 +2,6 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { runtimeEvidenceConfig, webConfig } from "@/lib/config";
-import type { ToolApprovalRequest } from "@/lib/db/schema";
-import { isApprovalApplicable, isApprovalExpired } from "@/lib/permission/approval";
-import type { PermissionVerdict } from "@/lib/permission/engine";
 import { type ExternalSource, buildExternalSource, matchDomain } from "./source";
 import { assertSafeExternalUrlResolved } from "./url-safety";
 
@@ -15,10 +12,11 @@ import { assertSafeExternalUrlResolved } from "./url-safety";
  * - 黑名单命中 → deny
  * - allowlist 为空 → 全 deny（配置缺失不变成 allow）
  * - 域内（allowlist 命中）→ allow
- * - 域外（allowlist 非空但未命中）→ ask
+ * - 域外（allowlist 非空但未命中）→ deny
  *
- * 域名治理产出 allow/ask/deny 经 executeToolRun 的 `evaluate` 覆盖注入（domainEvaluate），
- * 复用其 ask 暂停 / deny fail-closed / allow 跑 runner 机器。
+ * 域名治理产出 allow/deny（运行时本地网络策略）。域外访问由 Tool Gateway 的
+ * Policy 以 pause（UserAction confirmation）或 block 集中治理，Runtime 不再做
+ * ask 批准升级（§38：正式 Permission 全链只 allow/pause/block，无 ask）。
  *
  * 抓取：超时 / 体积上限 / Content-Type 白名单。HTML→text 确定性抽取（不调 LLM）。
  * 原文落 artifact 文件（.snow/runtime/{threadId}/external/{fetchId}.txt），不落 DB blob。
@@ -26,7 +24,7 @@ import { assertSafeExternalUrlResolved } from "./url-safety";
  */
 
 export type DomainVerdict = {
-  decision: "allow" | "ask" | "deny";
+  decision: "allow" | "deny";
   reason: string;
 };
 
@@ -45,7 +43,7 @@ export function urlHost(url: string): string | null {
  * - 黑名单命中 → deny
  * - allowlist 为空 → deny（fail-closed）
  * - allowlist 命中 → allow
- * - allowlist 非空但未命中 → ask（域外）
+ * - allowlist 非空但未命中 → deny（域外；批准升级由 Gateway 的 pause 集中处理）
  */
 export function classifyDomain(
   url: string,
@@ -63,39 +61,7 @@ export function classifyDomain(
   if (allowlist.some((d) => matchDomain(host, d))) {
     return { decision: "allow", reason: `域内 ${host}` };
   }
-  return { decision: "ask", reason: `域外访问 ${host}` };
-}
-
-/**
- * executeToolRun 的 `evaluate` 覆盖：把域名治理映射为 allow/ask/deny，
- * ask 时查既有批准升级为 allow（复用 executeToolRun 的 ask 暂停机器）。
- */
-export function domainEvaluate(args: {
-  input: Record<string, unknown>;
-  threadId: string;
-  permissionKey: string;
-  existingApprovals: ToolApprovalRequest[];
-}): PermissionVerdict {
-  const url = String(args.input.url ?? "");
-  const v = classifyDomain(url);
-  if (v.decision === "deny") return { decision: "deny", reason: v.reason };
-  if (v.decision === "allow") return { decision: "allow" };
-  // ask：查既有批准升级
-  const now = new Date();
-  const matched = args.existingApprovals.find(
-    (a) =>
-      a.status === "approved" &&
-      !isApprovalExpired(a, now) &&
-      isApprovalApplicable(a, { threadId: args.threadId }),
-  );
-  if (matched) {
-    return {
-      decision: "allow",
-      existingApprovalId: matched.id,
-      existingApprovalScope: matched.approvedScope,
-    };
-  }
-  return { decision: "ask", reason: v.reason };
+  return { decision: "deny", reason: `域外访问 ${host}` };
 }
 
 /**
@@ -132,7 +98,6 @@ export type FetchOk = {
 export type FetchResult =
   | FetchOk
   | { ok: false; denied: true; reason: string }
-  | { ok: false; awaitingApproval: true; reason: string }
   | { ok: false; error: string };
 
 type RedirectValidationResult = { ok: true } | { ok: false; error: string };
@@ -200,8 +165,8 @@ export async function fetchWithValidatedRedirects(params: {
 /**
  * 纯抓取（无域名治理）：超时 / 体积上限 / Content-Type 白名单 + HTML→text 抽取 + artifact 落盘 + 来源标记。
  *
- * 域名治理由调用方经 executeToolRun(domainEvaluate) 收口——只有 allow（含 ask 既定批准升级）
- * 才会到达本函数。直接调用方应先 classifyDomain 或用 fetchUrl 便捷封装。
+ * 域名治理由调用方收口——只有 classifyDomain allow 才会到达本函数。
+ * 直接调用方应先 classifyDomain 或用 fetchUrl 便捷封装。
  */
 export async function rawFetch(params: {
   url: string;
@@ -210,7 +175,7 @@ export async function rawFetch(params: {
 }): Promise<FetchOk | { ok: false; error: string }> {
   const { url, threadId } = params;
   // : SSRF 入口守卫——协议白名单 + 内网/元数据拒绝 + DNS rebinding 校验。
-  // domainEvaluate 只做域名 allowlist,不挡 file:// / 127.0.0.1.nip.io / 169.254.169.254 /
+  // classifyDomain 只做域名 allowlist,不挡 file:// / 127.0.0.1.nip.io / 169.254.169.254 /
   // 域名解析到内网;此处兜底(含 DNS 解析后二次校验)。
   await assertSafeExternalUrlResolved(url, "webFetch url");
   const maxBytes = webConfig.maxBytes;
@@ -293,9 +258,7 @@ export async function rawFetch(params: {
 /**
  * 抓取一个 URL 并确定性抽取正文（带域名治理的便捷封装，供独立调用/测试）。
  *
- * 域名治理：deny → {ok:false,denied}；ask → {ok:false,awaitingApproval}；allow → rawFetch。
- * 经 executeToolRun 的 webFetch 工具不复用本函数的 governance（用 domainEvaluate 覆盖，
- * 含既定批准升级），其 runner 直接调 rawFetch，避免 governance 与审批升级重复判定。
+ * 域名治理：deny → {ok:false,denied}；allow → rawFetch。
  */
 export async function fetchUrl(params: {
   url: string;
@@ -304,6 +267,5 @@ export async function fetchUrl(params: {
 }): Promise<FetchResult> {
   const v = classifyDomain(params.url);
   if (v.decision === "deny") return { ok: false, denied: true, reason: v.reason };
-  if (v.decision === "ask") return { ok: false, awaitingApproval: true, reason: v.reason };
   return rawFetch(params);
 }

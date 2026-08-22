@@ -20,7 +20,7 @@
  * - MySQL 不支持 .returning()：update + select 两步。
  */
 import { randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import {
   GRANT_STATES,
   GRANT_TERMINAL_STATES,
@@ -36,6 +36,7 @@ import {
   grantTable,
   permissionDecisionTable,
 } from "@/lib/persistence/schema/permission";
+import { toolCallTable } from "@/lib/persistence/schema/tool-call";
 import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────
@@ -186,26 +187,57 @@ export interface RecordPermissionDecisionInput {
   tenantId: string;
   toolCallId: string;
   decision: PermissionDecisionValue;
-  policyRevisionId?: string | null;
+  /** P0：有效 PermissionDecision 必须关联 ExecutionBinding 冻结的 policyRevisionId（NOT NULL）。 */
+  policyRevisionId: string;
   reasonCodes: string[];
   riskSummary?: Record<string, unknown> | null;
   decisionSummary?: string | null;
   decidedBy: string;
 }
 
+export interface RecordPermissionDecisionOptions {
+  /**
+   * 外部事务句柄；提供则在其内执行（§16.3：与 ToolCall 创建同事务）。
+   * 缺省使用全局 db 自开事务。
+   */
+  tx?: DbOrTx;
+}
+
+/** §16.3：以 ToolCall 行锁作为该 ToolCall 的决策序列锁。不存在抛 PermissionNotFoundError。 */
+export async function lockToolCallForUpdate(tx: DbOrTx, toolCallId: string): Promise<void> {
+  const [row] = await tx
+    .select({ id: toolCallTable.id })
+    .from(toolCallTable)
+    .where(eq(toolCallTable.id, toolCallId))
+    .for("update")
+    .limit(1);
+  if (!row) {
+    throw new PermissionNotFoundError(`ToolCall 不存在或不可评估: ${toolCallId}`);
+  }
+}
+
 /**
- * 记录一次 PermissionDecision（新行；decisionSequence 自增）。
+ * 记录一次 PermissionDecision（新行；decisionSequence 在 ToolCall 行锁下分配）。
+ *
+ * §16.3：decisionSequence 不再使用未锁定的 SELECT MAX(...)+1，必须以 ToolCall 行锁作为
+ * 该 ToolCall 的决策序列锁。policyRevisionId NOT NULL（P0）。
  *
  * 关键约束：
- * - UNIQUE(toolCallId, decisionSequence)：事务内 max+1 分配，避免并发冲突。
+ * - UNIQUE(toolCallId, decisionSequence)：事务内行锁 + max+1 分配，避免并发冲突。
  * - 不修改旧决策行，只追加新行（审计事实不可变）。
  * - 调用方收到 block 时不创建可绕过的 UserActionRequest（§10）。
  */
 export async function recordPermissionDecision(
   input: RecordPermissionDecisionInput,
+  options: RecordPermissionDecisionOptions = {},
 ): Promise<PermissionDecision> {
   if (!input.tenantId) throw new PermissionValidationError("tenantId 不能为空");
   if (!input.toolCallId) throw new PermissionValidationError("toolCallId 不能为空");
+  if (!input.policyRevisionId) {
+    throw new PermissionValidationError(
+      "policyRevisionId 不能为空（必须关联 ExecutionBinding 冻结值，§16.3）",
+    );
+  }
   if (!isPermissionDecision(input.decision)) {
     throw new PermissionValidationError(`非法 decision: ${input.decision}`);
   }
@@ -214,11 +246,12 @@ export async function recordPermissionDecision(
   }
   if (!input.decidedBy) throw new PermissionValidationError("decidedBy 不能为空");
 
-  // 事务内分配 decisionSequence（max+1）
-  const id = randomUUID();
-  const now = new Date();
+  const run = async (tx: DbOrTx): Promise<PermissionDecision> => {
+    // §16.3：ToolCall 行锁作为决策序列锁。
+    await lockToolCallForUpdate(tx, input.toolCallId);
 
-  return db.transaction(async (tx) => {
+    const id = randomUUID();
+    const now = new Date();
     const [maxRow] = await tx
       .select({
         maxSeq: sql<number>`COALESCE(MAX(${permissionDecisionTable.decisionSequence}), 0)`,
@@ -233,7 +266,7 @@ export async function recordPermissionDecision(
       toolCallId: input.toolCallId,
       decisionSequence,
       decision: input.decision,
-      policyRevisionId: input.policyRevisionId ?? null,
+      policyRevisionId: input.policyRevisionId,
       reasonCodesJson: input.reasonCodes,
       riskSummaryJson: input.riskSummary ?? null,
       decisionSummary: input.decisionSummary ?? null,
@@ -254,7 +287,10 @@ export async function recordPermissionDecision(
       );
     }
     return row;
-  });
+  };
+
+  if (options.tx) return run(options.tx);
+  return db.transaction(run);
 }
 
 export async function getPermissionDecisionById(
@@ -292,8 +328,10 @@ export async function getPermissionDecisionsByToolCall(
 export async function getLatestPermissionDecision(
   tenantId: string,
   toolCallId: string,
+  tx?: DbOrTx,
 ): Promise<PermissionDecision | null> {
-  const [row] = await db
+  const source: DbOrTx = tx ?? db;
+  const [row] = await source
     .select()
     .from(permissionDecisionTable)
     .where(
@@ -351,6 +389,14 @@ export interface IssueGrantInput {
   expiresAt?: Date | null;
 }
 
+export interface IssueGrantOptions {
+  /**
+   * 外部事务句柄（§22：与 UserActionRequest 解析 / Invocation 状态变更同事务）。
+   * 缺省使用全局 db 自开事务。
+   */
+  tx?: DbOrTx;
+}
+
 /**
  * 创建 Grant（用户授权记录）。
  *
@@ -360,7 +406,10 @@ export interface IssueGrantInput {
  * - admin_override 类型必须由管理员发起（应用层校验，本仓储不强制）。
  * - 创建时 grantState=active；revokedAt=null。
  */
-export async function issueGrant(input: IssueGrantInput): Promise<Grant> {
+export async function issueGrant(
+  input: IssueGrantInput,
+  options: IssueGrantOptions = {},
+): Promise<Grant> {
   if (!input.tenantId) throw new GrantValidationError("tenantId 不能为空");
   if (!input.userId) throw new GrantValidationError("userId 不能为空");
   if (!isGrantType(input.grantType)) {
@@ -394,9 +443,10 @@ export async function issueGrant(input: IssueGrantInput): Promise<Grant> {
     createdAt: now,
     updatedAt: now,
   };
-  await db.insert(grantTable).values(insert);
+  const source: DbOrTx = options.tx ?? db;
+  await source.insert(grantTable).values(insert);
 
-  const [row] = await db.select().from(grantTable).where(eq(grantTable.id, id)).limit(1);
+  const [row] = await source.select().from(grantTable).where(eq(grantTable.id, id)).limit(1);
   if (!row) {
     throw new GrantNotFoundError(`Grant 创建后回查失败（tenantId=${input.tenantId}）`);
   }

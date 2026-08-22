@@ -55,6 +55,7 @@ import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
+  RUNTIME_PROTOCOL_VERSION,
   type RuntimeCapabilitiesResponse,
   type StartInvocationResponse,
   createHttpRuntimeClient,
@@ -410,6 +411,24 @@ function buildRuntimeEndpointResolution(runtimeRevisionId: string): RuntimeEndpo
       cancel: "https://platform.internal/gateway/v1/cancel",
       resume: "https://platform.internal/gateway/v1/resume",
       steer: "https://platform.internal/gateway/v1/steer",
+      tools: "https://platform.internal/gateway/v1/tools",
+      tool_calls: "https://platform.internal/gateway/v1/tool-calls",
+      user_action_requests: "https://platform.internal/gateway/v1/user-action-requests",
+    },
+    governanceConfig: {
+      revision_id: "gov-rev-1",
+      config_digest: "sha256:test-governance-digest",
+      config: {},
+    },
+    gatewayAccess: {
+      access_token: issueWorkloadToken({
+        type: "gateway",
+        tenantId: "test-tenant",
+        invocationId: "test-invocation",
+        audience: "gateway",
+        expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
+      }),
+      expires_at: new Date(Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway).toISOString(),
     },
   };
 }
@@ -439,7 +458,7 @@ describe("S05-C02 probeRuntimeCapabilities", () => {
 
     const caps = await mockClient.probeCapabilities("https://rt.internal", "test-token");
 
-    expect(caps.protocol_versions).toEqual(["1"]);
+    expect(caps.protocol_versions).toEqual(["2"]);
     expect(caps.features.event_stream).toBe(true);
     expect(caps.features.cancel).toBe(true);
     expect(caps.limits.max_invocation_seconds).toBe(600);
@@ -454,7 +473,7 @@ describe("S05-C02 probeRuntimeCapabilities", () => {
     expect(caps.features.resume).toBe(true);
     expect(caps.features.steer).toBe(true);
     expect(caps.features.workspace_types).toContain("local");
-    expect(caps.protocol_versions).toContain("1");
+    expect(caps.protocol_versions).toContain("2");
   });
 
   it("http client probeCapabilities 网络不可达 → RuntimeHttpClientError(kind=network)", async () => {
@@ -499,6 +518,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
       authToken: "test-token",
       idempotencyKey: "invoke-test-1",
       requestBody: {
+        protocol_version: RUNTIME_PROTOCOL_VERSION,
         invocation_id: "inv-test-001",
         turn_context: null,
         job_context: null,
@@ -517,8 +537,16 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
           cancel: "https://gw/cancel",
           resume: "https://gw/resume",
           steer: "https://gw/steer",
+          tools: "https://gw/tools",
+          tool_calls: "https://gw/tool-calls",
+          user_action_requests: "https://gw/user-action-requests",
         },
         workspace: { workspace_binding_id: null, workspace_type: "none" },
+        governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
+        gateway_access: {
+          access_token: "gw-token",
+          expires_at: new Date(Date.now() + 60000).toISOString(),
+        },
         execution_limits: {
           max_invocation_seconds: 600,
           max_event_bytes: 1_048_576,
@@ -542,6 +570,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
         authToken: "token",
         idempotencyKey: "key-1",
         requestBody: {
+          protocol_version: RUNTIME_PROTOCOL_VERSION,
           invocation_id: "inv-1",
           turn_context: null,
           job_context: null,
@@ -560,8 +589,16 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
             cancel: "https://gw/cancel",
             resume: "https://gw/resume",
             steer: "https://gw/steer",
+            tools: "https://gw/tools",
+            tool_calls: "https://gw/tool-calls",
+            user_action_requests: "https://gw/user-action-requests",
           },
           workspace: { workspace_binding_id: null, workspace_type: "none" },
+          governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
+          gateway_access: {
+            access_token: "gw-token",
+            expires_at: new Date(Date.now() + 60000).toISOString(),
+          },
           execution_limits: {
             max_invocation_seconds: 600,
             max_event_bytes: 1_048_576,
@@ -585,6 +622,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
         authToken: "token",
         idempotencyKey: "key-1",
         requestBody: {
+          protocol_version: RUNTIME_PROTOCOL_VERSION,
           invocation_id: "inv-1",
           turn_context: null,
           job_context: null,
@@ -603,8 +641,16 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
             cancel: "https://gw/cancel",
             resume: "https://gw/resume",
             steer: "https://gw/steer",
+            tools: "https://gw/tools",
+            tool_calls: "https://gw/tool-calls",
+            user_action_requests: "https://gw/user-action-requests",
           },
           workspace: { workspace_binding_id: null, workspace_type: "none" },
+          governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
+          gateway_access: {
+            access_token: "gw-token",
+            expires_at: new Date(Date.now() + 60000).toISOString(),
+          },
           execution_limits: {
             max_invocation_seconds: 600,
             max_event_bytes: 1_048_576,
@@ -628,6 +674,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
         authToken: "token",
         idempotencyKey: "key-1",
         requestBody: {
+          protocol_version: RUNTIME_PROTOCOL_VERSION,
           invocation_id: "inv-1",
           turn_context: null,
           job_context: null,
@@ -646,8 +693,16 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
             cancel: "https://gw/cancel",
             resume: "https://gw/resume",
             steer: "https://gw/steer",
+            tools: "https://gw/tools",
+            tool_calls: "https://gw/tool-calls",
+            user_action_requests: "https://gw/user-action-requests",
           },
           workspace: { workspace_binding_id: null, workspace_type: "none" },
+          governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
+          gateway_access: {
+            access_token: "gw-token",
+            expires_at: new Date(Date.now() + 60000).toISOString(),
+          },
           execution_limits: {
             max_invocation_seconds: 600,
             max_event_bytes: 1_048_576,
@@ -916,7 +971,7 @@ describe("S05-C02 GET /runtime/v1/capabilities", () => {
     });
 
     const request = new Request(
-      "https://platform.internal/runtime/v1/capabilities?protocol_version=1",
+      "https://platform.internal/runtime/v1/capabilities?protocol_version=2",
       {
         headers: {
           authorization: `Bearer ${token}`,
@@ -929,7 +984,7 @@ describe("S05-C02 GET /runtime/v1/capabilities", () => {
     expect(response.status).toBe(200);
 
     const body = (await response.json()) as RuntimeCapabilitiesResponse;
-    expect(body.protocol_versions).toEqual(["1"]);
+    expect(body.protocol_versions).toEqual(["2"]);
     expect(body.features.event_stream).toBe(true);
   });
 
@@ -982,6 +1037,14 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
             cancel: "https://gw/cancel",
             resume: "https://gw/resume",
             steer: "https://gw/steer",
+            tools: "https://gw/tools",
+            tool_calls: "https://gw/tool-calls",
+            user_action_requests: "https://gw/user-action-requests",
+          },
+          governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
+          gateway_access: {
+            access_token: "gw-token",
+            expires_at: new Date(Date.now() + 60000).toISOString(),
           },
           execution_limits: {
             max_invocation_seconds: 600,
@@ -1007,6 +1070,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
     });
 
     const body = {
+      protocol_version: RUNTIME_PROTOCOL_VERSION,
       invocation_id: "inv-test-001",
       turn_context: null,
       job_context: null,
@@ -1025,6 +1089,14 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
         cancel: "https://gw/cancel",
         resume: "https://gw/resume",
         steer: "https://gw/steer",
+        tools: "https://gw/tools",
+        tool_calls: "https://gw/tool-calls",
+        user_action_requests: "https://gw/user-action-requests",
+      },
+      governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
+      gateway_access: {
+        access_token: "gw-token",
+        expires_at: new Date(Date.now() + 60000).toISOString(),
       },
       execution_limits: {
         max_invocation_seconds: 600,
@@ -1052,7 +1124,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
     expect(respBody.accepted).toBe(true);
     expect(respBody.runtime_session_ref).toMatch(/^rss_/);
     expect(respBody.runtime_execution_ref).toMatch(/^rex_/);
-    expect(respBody.capabilities.protocol_versions).toEqual(["1"]);
+    expect(respBody.capabilities.protocol_versions).toEqual(["2"]);
   });
 
   it("Runtime route 把当前输入、handle、workspace、limits、trace 传入实际 HostedAgentLoop", async () => {
@@ -1085,6 +1157,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
           "idempotency-key": "actual-adapter-context",
         },
         body: JSON.stringify({
+          protocol_version: RUNTIME_PROTOCOL_VERSION,
           invocation_id: "inv-actual-adapter",
           turn_context: { thread_id: "thread-1", turn_id: "turn-1" },
           job_context: null,
@@ -1103,8 +1176,16 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
             cancel: "https://gw/cancel",
             resume: "https://gw/resume",
             steer: "https://gw/steer",
+            tools: "https://gw/tools",
+            tool_calls: "https://gw/tool-calls",
+            user_action_requests: "https://gw/user-action-requests",
           },
           workspace: { workspace_binding_id: "wbind-1", workspace_type: "managed" },
+          governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
+          gateway_access: {
+            access_token: "gw-token",
+            expires_at: new Date(Date.now() + 60000).toISOString(),
+          },
           execution_limits: {
             max_invocation_seconds: 321,
             max_event_bytes: 654,

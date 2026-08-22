@@ -1,59 +1,168 @@
-import { createPermissionRule, listPermissionRules } from "@/lib/db/queries";
-import { jsonError, jsonOk } from "@/lib/http";
+import { ETAG_HEADER, getRequestId, jsonError, jsonOk, parseIfMatch } from "@/lib/http";
+import { actorFromPrincipal } from "@/lib/identity/audit";
 import { requireStudioAction } from "@/lib/identity/studio-access";
 import {
-  PermissionRuleValidationError,
-  validateCreateInput,
-} from "@/lib/studio/permission-rule-validation";
+  PolicyLoadError,
+  type PolicyRuleInput,
+  PolicySetStateError,
+  PolicyValidationError,
+  PolicyVersionConflictError,
+  createPolicyRevision,
+  loadPolicySetAndRules,
+} from "@/lib/permission/policy-queries";
 import type { NextRequest } from "next/server";
 
-/**
- * S1（07-P2-5）：permission rule 管理 API。
- *
- * 07-P2-5 审计函数(createPermissionRule/updatePermissionRule/deletePermissionRule)早已写好,
- * 但 app/ 全目录 0 调用 → 无入口触发,审计是死代码。本路由接通入口:
- * 写操作调现有函数并传 actorUserId,审计(permission_rule.created/updated/deleted)自动落库。
- *
- * 守卫:policy.read 列表 / policy.write 增改删(与 policies 页面同域,admin 角色拥有)。
- * 引擎(tool-runtime.ts:279)运行时已 listPermissionRules 读 DB 规则合并默认规则——
- * 本路由写入后,规则即刻对后续工具调用生效(无需额外刷新,DB 直读)。
- */
+export const dynamic = "force-dynamic";
 
-/** GET /studio/api/permission-rules → 列全部持久化权限规则(按 priority 降序)。 */
+/**
+ * GET /studio/api/permission-rules — 读取当前生效 Policy Revision 的规则（§30 / §33）。
+ *
+ * - 守卫：policy.read。
+ * - 返回：defaultDecision + rules（含跨 Revision 稳定 ruleKey）+ rulesHash + Revision 元信息 +
+ *   PolicySet.versionNo（ETag，§33）。
+ * - fail-closed：Set 缺失 / 非 published / 跨租户 → 500。
+ */
 export async function GET(req: NextRequest) {
   const r = await requireStudioAction(req, "policy.read");
   if (!r.ok) return r.response;
-  const rules = await listPermissionRules();
-  return jsonOk({ rules });
-}
+  const tenantId = r.principal.tenantId;
 
-/** POST /studio/api/permission-rules → 新建规则(policy.write 守卫 + 服务端校验 + 审计)。 */
-export async function POST(req: NextRequest) {
-  const r = await requireStudioAction(req, "policy.write");
-  if (!r.ok) return r.response;
-  const actorUserId = r.principal.userIdentityId;
-
-  const body = await req.json().catch(() => null);
-  let input: ReturnType<typeof validateCreateInput> | undefined;
+  let loaded: Awaited<ReturnType<typeof loadPolicySetAndRules>>;
   try {
-    input = validateCreateInput(body);
-  } catch (error) {
-    if (error instanceof PermissionRuleValidationError) {
-      return jsonError(400, error.code, error.message);
+    loaded = await loadPolicySetAndRules(tenantId);
+  } catch (err) {
+    if (err instanceof PolicyLoadError) {
+      return jsonError(500, "policy_load_failed", err.message);
     }
-    throw error;
+    throw err;
   }
 
-  // 传 actorUserId → createPermissionRule 同事务落 permission_rule.created 审计
-  const rule = await createPermissionRule({
-    scope: input.scope,
-    scopeRef: input.scopeRef,
-    toolPattern: input.toolPattern,
-    argMatcher: input.argMatcher,
-    decision: input.decision,
-    reason: input.reason,
-    priority: input.priority,
-    actorUserId,
-  });
-  return jsonOk({ rule });
+  return jsonOk(
+    {
+      set: {
+        id: loaded.set.id,
+        policySetKey: loaded.set.policySetKey,
+        lifecycleState: loaded.set.lifecycleState,
+        versionNo: loaded.set.versionNo,
+      },
+      defaultDecision: loaded.defaultDecision,
+      rules: loaded.rules.map((row) => ({
+        id: row.id,
+        ruleKey: row.ruleKey,
+        toolPattern: row.toolPattern,
+        argMatcher: row.argMatcherJson ?? null,
+        decision: row.decision,
+        scope: row.scopeJson,
+        priority: row.priority,
+        reason: row.reason,
+      })),
+      rulesHash: loaded.rulesHash,
+      revision: {
+        id: loaded.revision.id,
+        revisionNo: loaded.revision.revisionNo,
+        publishedAt: loaded.revision.publishedAt?.toISOString() ?? null,
+      },
+    },
+    { headers: { [ETAG_HEADER]: String(loaded.set.versionNo) } },
+  );
+}
+
+/**
+ * PUT /studio/api/permission-rules — 发布新的 Policy Revision（§31 / §33 / §P3）。
+ *
+ * - 守卫：policy.publish。
+ * - 只接受完整目标规则集合（§31：复制旧 rules 保留 ruleKey → 应用增删改）。
+ * - 正式 API 只接受 allow/pause/block（§P3，Legacy allow/ask/deny 转换删除）。
+ * - If-Match 必填（§33）；与 Set.versionNo 不匹配 → 412。
+ * - 非法规则（toolPattern / decision / argMatcher / scope / priority）→ 400，fail-closed。
+ * - 生命周期 disabled/retired → 409。
+ * - 成功：单事务新 published Revision + 切 currentRevisionId + versionNo+1 +
+ *   AuditEvent(policy.publish)（§31 / §35），返回新投影 + 新 ETag。
+ */
+export async function PUT(req: NextRequest) {
+  const requestId = getRequestId(req);
+  const r = await requireStudioAction(req, "policy.publish");
+  if (!r.ok) return r.response;
+  const principal = r.principal;
+
+  const ifMatch = parseIfMatch(req);
+  if (!ifMatch) {
+    return jsonError(400, "if_match_required", "缺少必填头 If-Match");
+  }
+  const expectedVersionNo = Number(ifMatch);
+  if (!Number.isInteger(expectedVersionNo) || expectedVersionNo < 1) {
+    return jsonError(400, "if_match_invalid", "If-Match 不是合法 versionNo");
+  }
+
+  let body: { defaultDecision?: unknown; rules?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return jsonError(400, "invalid_body", "请求体不是合法 JSON");
+  }
+
+  let defaultDecision: "allow" | "pause" | "block";
+  let rules: PolicyRuleInput[];
+  try {
+    defaultDecision = body?.defaultDecision as "allow" | "pause" | "block";
+    rules = (body?.rules ?? []) as PolicyRuleInput[];
+    // 校验由 createPolicyRevision 内的 validateRules/validateDefaultDecision 统一 fail-closed；
+    // 这里仅做形状兜底，具体错误码由服务层 PolicyValidationError 返回。
+  } catch {
+    return jsonError(400, "invalid_body", "请求体形状不合法");
+  }
+
+  try {
+    const result = await createPolicyRevision({
+      tenantId: principal.tenantId,
+      defaultDecision,
+      rules,
+      expectedVersionNo,
+      actor: actorFromPrincipal(principal),
+      requestId,
+    });
+    return jsonOk(
+      {
+        set: {
+          id: result.set.id,
+          policySetKey: result.set.policySetKey,
+          lifecycleState: result.set.lifecycleState,
+          versionNo: result.set.versionNo,
+        },
+        defaultDecision: result.revision.defaultDecision,
+        rules: result.rules.map((row) => ({
+          id: row.id,
+          ruleKey: row.ruleKey,
+          toolPattern: row.toolPattern,
+          argMatcher: row.argMatcherJson ?? null,
+          decision: row.decision,
+          scope: row.scopeJson,
+          priority: row.priority,
+          reason: row.reason,
+        })),
+        rulesHash: result.rulesHash,
+        revision: {
+          id: result.revision.id,
+          revisionNo: result.revision.revisionNo,
+          publishedAt: result.revision.publishedAt?.toISOString() ?? null,
+        },
+        auditEventId: result.auditEventId,
+      },
+      { headers: { [ETAG_HEADER]: String(result.set.versionNo) } },
+    );
+  } catch (err) {
+    if (err instanceof PolicyVersionConflictError) {
+      return jsonError(412, "etag_mismatch", err.message);
+    }
+    if (err instanceof PolicySetStateError) {
+      return jsonError(409, "policy_set_state", err.message);
+    }
+    if (err instanceof PolicyValidationError) {
+      return jsonError(400, "policy_invalid", err.message);
+    }
+    if (err instanceof PolicyLoadError) {
+      return jsonError(500, "policy_load_failed", err.message);
+    }
+    throw err;
+  }
 }

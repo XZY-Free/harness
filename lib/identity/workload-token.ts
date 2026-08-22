@@ -7,21 +7,28 @@
  * - gateway：Invocation-scoped Workload Identity，只能访问 ExecutionBinding 允许的资源。
  * - admin：管理员 SSO + RBAC；CI/CD 使用受限 Service Identity。
  *
- * Token 设计（11-api-and-event-boundaries.md ）：
+ * Token 设计（冻结方案 §25 / §26 / §27）：
  * - Runtime/Gateway Token 绑定 tenant、invocation、runtime_revision、允许的 audience 和短有效期。
- * - Token 编码为平台自有格式（base64url(JSON)），非 JWT——签名由网关 / Invocation Dispatcher
- * 在颁发时完成，应用层只验证 claims，不做签名验证（颁发接口在阶段 5 实现）。
- * - 当前阶段（S02-C02）只建立数据结构与解析；实际颁发由阶段 5 Invocation Dispatcher 实现。
+ * - Token 使用 HMAC-SHA256 密码学签名，格式固定：
+ *
+ *     v1.<base64url(payload)>.<base64url(signature)>
+ *
+ *   签名输入 = `v1.` + base64url(payload)；密钥来自
+ *   `SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET`（生产/测试必须配置独立随机 Secret，
+ *   ≥ 32 字节，不得使用默认 Secret，不得写入 Repo）。
+ * - 旧未签名 base64url(JSON) token 一律拒绝，开发阶段不保留 unsigned fallback。
+ * - 验证顺序：版本 → signature(timingSafeEqual) → issuedAt → expiresAt → audience →
+ *   jti → invocationId → runtimeRevisionId → revocation。全部通过后才构造 WorkloadPrincipal。
+ * - Gateway Token 独立 type=gateway / audience=gateway，与 inbound auth token 不混用。
  *
  * 安全边界：
- * - 模型伪造 userId → 服务端忽略并使用 Workload/Session 身份（阶段 2 验收）。
- * - CI/CD Service Identity 只得到制品验证和发布所需动作，不获得员工会话权限。
+ * - 模型伪造 userId → 服务端忽略并使用 Workload/Session 身份。
  * - 撤销设备后拒绝新 Lease、Workspace handle 和迟到签名请求。
  *
- * 事实源：docs/architecture/api-and-events.md 、§9、
- * docs/architecture/security.md §5。
+ * 事实源：docs/architecture/api-and-events.md 、§9、docs/architecture/security.md §5、
+ * SnowHarness_专题01_关口02_02-6_Policy_Permission_最终冻结实施方案.md §25/§26/§27。
  */
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { API_STATUS, apiError, generateRequestId } from "@/lib/http";
 import type { ApiAudience } from "@/lib/http";
 
@@ -67,21 +74,94 @@ export class WorkloadTokenError extends Error {
   }
 }
 
+/** 签名密钥环境变量名。 */
+export const WORKLOAD_TOKEN_SIGNING_SECRET_ENV = "SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET";
+
+/** Token 版本前缀（§26：v1.<payload>.<signature>）。 */
+export const WORKLOAD_TOKEN_VERSION = "v1";
+
+/** 签名密钥最小字节数（§26：至少 32 字节）。 */
+const MIN_SECRET_BYTES = 32;
+
 /**
- * 解码 Workload Token（base64url(JSON)）。
+ * 读取 Workload Token 签名密钥（§26）。
  *
- * 仅解码与 claims 校验，不做签名验证——签名由网关 / Invocation Dispatcher 在颁发时完成，
- * 应用层假设 Token 来自可信颁发者（网络隔离保证）。
+ * 生产/测试必须配置独立随机 Secret，≥ 32 字节，不得使用默认 Secret。
+ * 未配置或过短 → fail-closed 抛错（不发未签名 Token，不接受未签名 Token）。
+ */
+export function getWorkloadTokenSigningSecret(): Buffer {
+  const secret = process.env[WORKLOAD_TOKEN_SIGNING_SECRET_ENV];
+  if (!secret) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 签名密钥未配置");
+  }
+  const buf = Buffer.from(secret, "utf-8");
+  if (buf.byteLength < MIN_SECRET_BYTES) {
+    throw new WorkloadTokenError(
+      "malformed_token",
+      `Workload Token 签名密钥必须 ≥ ${MIN_SECRET_BYTES} 字节`,
+    );
+  }
+  return buf;
+}
+
+/**
+ * 对任意 JSON 载荷签发 `v1.<payload>.<signature>`（§26）。
  *
- * 颁发接口在阶段 5 Invocation Dispatcher 实现；本函数供 route handler 解析 Authorization header。
+ * 签名输入 = `v1.` + base64url(payload)。本函数只负责签名编码，不做 claim 校验——
+ * 供 `issueWorkloadToken` 与测试（构造缺失字段/错误 claim 的已签名 Token）使用。
+ */
+export function signWorkloadTokenPayload(payload: unknown): string {
+  const json = JSON.stringify(payload);
+  const payloadBase64 = Buffer.from(json, "utf-8").toString("base64url");
+  const secret = getWorkloadTokenSigningSecret();
+  const signature = createHmac("sha256", secret)
+    .update(`${WORKLOAD_TOKEN_VERSION}.${payloadBase64}`)
+    .digest("base64url");
+  return `${WORKLOAD_TOKEN_VERSION}.${payloadBase64}.${signature}`;
+}
+
+/** 校验 token 版本前缀 + 签名（timingSafeEqual，fail-closed）。 */
+function assertVersionAndSignature(token: string): string {
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts[0] !== WORKLOAD_TOKEN_VERSION) {
+    throw new WorkloadTokenError(
+      "malformed_token",
+      `Workload Token 必须为 ${WORKLOAD_TOKEN_VERSION}.<payload>.<signature>`,
+    );
+  }
+  const payloadBase64 = parts[1];
+  const signatureB64 = parts[2];
+  if (payloadBase64 === undefined || signatureB64 === undefined) {
+    throw new WorkloadTokenError(
+      "malformed_token",
+      `Workload Token 必须为 ${WORKLOAD_TOKEN_VERSION}.<payload>.<signature>`,
+    );
+  }
+  const expected = createHmac("sha256", getWorkloadTokenSigningSecret())
+    .update(`${WORKLOAD_TOKEN_VERSION}.${payloadBase64}`)
+    .digest();
+  const actual = Buffer.from(signatureB64, "base64url");
+  if (expected.byteLength !== actual.byteLength || !timingSafeEqual(expected, actual)) {
+    throw new WorkloadTokenError("malformed_token", "Workload Token 签名不匹配");
+  }
+  return payloadBase64;
+}
+
+/**
+ * 解码 Workload Token（v1.<base64url(payload)>.<signature>）。
+ *
+ * 先验版本 + 签名（§26），再做 claim 校验与过期/撤销校验；任一失败即抛错（fail-closed）。
+ * 旧未签名 base64url(JSON) token 全部拒绝，无 unsigned fallback。
  */
 export function decodeWorkloadToken(token: string): WorkloadTokenClaims {
+  const payloadBase64 = assertVersionAndSignature(token);
+
   let payload: unknown;
   try {
-    const json = Buffer.from(token, "base64url").toString("utf-8");
+    const json = Buffer.from(payloadBase64, "base64url").toString("utf-8");
     payload = JSON.parse(json);
   } catch {
-    throw new WorkloadTokenError("malformed_token", "Workload Token 格式非法");
+    throw new WorkloadTokenError("malformed_token", "Workload Token payload 格式非法");
   }
 
   if (!payload || typeof payload !== "object") {
@@ -186,15 +266,12 @@ export function workloadTokenErrorResponse(
 }
 
 /**
- * 颁发 Workload Token（base64url(JSON)）。
+ * 颁发 Workload Token（v1.<payload>.<signature>，HMAC-SHA256，§26）。
  *
- * 仅供阶段 5 Invocation Dispatcher 在创建 Invocation 时内部调用；
- * 当前阶段（S02-C02）导出供测试与后续阶段使用，route handler 不应调用。
+ * 仅供 Invocation Dispatcher / 调度器内部调用；route handler 不应调用。
  *
  * S12-W05：自动生成 jti（randomUUID）用于撤销与重放保护；调用方可覆盖 jti。
- *
- * 生产环境签名由网关 / Invocation Dispatcher 在颁发时完成；本函数只编码 claims，
- * 不做签名——应用层假设 Token 来自可信颁发者（网络隔离保证）。
+ * 签名密钥来自 SNOWHARNESS_WORKLOAD_TOKEN_SIGNING_SECRET（fail-closed，未配置则抛错）。
  */
 export function issueWorkloadToken(
   claims: Omit<WorkloadTokenClaims, "issuedAt" | "jti"> & { jti?: string },
@@ -205,8 +282,7 @@ export function issueWorkloadToken(
     jti: claims.jti ?? randomUUID(),
     issuedAt: now,
   };
-  const json = JSON.stringify(full);
-  return Buffer.from(json, "utf-8").toString("base64url");
+  return signWorkloadTokenPayload(full);
 }
 
 /** 默认 Token TTL（ms）：Runtime/Gateway 5min，Service 10min。 */

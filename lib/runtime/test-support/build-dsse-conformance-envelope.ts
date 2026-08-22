@@ -115,7 +115,7 @@ export function buildTestConformanceReport(
     runtimeRevisionId: revisionId,
     runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
     runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-    protocolContractRevision: "agent-runtime-protocol@1",
+    protocolContractRevision: "agent-runtime-protocol@2",
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
     runnerIdentity: "ci/runtime-conformance",

@@ -1,7 +1,7 @@
-import { POST as regeneratePOST } from "@/app/api/v1/turns/[turn_id]/regenerate/route";
 import { POST as forkPOST } from "@/app/api/v1/threads/[thread_id]/forks/route";
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { POST as interruptPOST } from "@/app/api/v1/turns/[turn_id]/interrupt/route";
+import { POST as regeneratePOST } from "@/app/api/v1/turns/[turn_id]/regenerate/route";
 import { POST as steerPOST } from "@/app/api/v1/turns/[turn_id]/steer/route";
 /**
  * S04-C06：Fork / Regenerate / Interrupt / Steer API route handlers 集成测试（真实 MySQL 8 Testcontainers）。

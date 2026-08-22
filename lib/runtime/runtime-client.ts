@@ -28,9 +28,39 @@ import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 
 // ─── 共享类型 ──────────────────────────────────────────────
 
+/** Runtime Protocol 协商版本（冻结方案 §23：agent-runtime-protocol@2，无 @1 fallback）。 */
+export const RUNTIME_PROTOCOL_VERSION = "2" as const;
+
+/** Gateway Access Token（§25 / §27：type=gateway，与 inbound auth token 不混用）。 */
+export interface GatewayAccess {
+  /** 短期 Gateway Workload Token（HMAC 签名，§26）。 */
+  access_token: string;
+  /** 过期时间（ISO 8601）。 */
+  expires_at: string;
+}
+
+/** 下发 Runtime 的 Governance Config 引用（§24：可下发；不含 permission_policy.rules）。 */
+export interface GovernanceConfigRef {
+  revision_id: string;
+  config_digest: string;
+  /** Governance config 全量快照（Runtime 按 Snapshot 约束本地行为）。 */
+  config: Record<string, unknown>;
+}
+
+/** 平台 Gateway 回调端点集合（Runtime 通过这些 URL 调用 Tool Gateway / 上报事件 / 接收控制指令）。 */
+export interface GatewayEndpoints {
+  events: string;
+  cancel: string;
+  resume: string;
+  steer: string;
+  tools: string;
+  tool_calls: string;
+  user_action_requests: string;
+}
+
 /** Runtime 能力探测响应（GET /runtime/v1/capabilities）。 */
 export interface RuntimeCapabilitiesResponse {
-  /** Runtime 支持的协议版本列表（如 ["1"]）。 */
+  /** Runtime 支持的协议版本列表（@2 必须声明 ["2"]，§49）。 */
   protocol_versions: string[];
   /** 能力声明。 */
   features: {
@@ -52,6 +82,8 @@ export interface RuntimeCapabilitiesResponse {
 
 /** startInvocation 请求体（POST /runtime/v1/invocations）。 */
 export interface StartInvocationRequestBody {
+  /** 协商的 Runtime Protocol 版本（§23：固定 "2"，无 @1 fallback）。 */
+  protocol_version: typeof RUNTIME_PROTOCOL_VERSION;
   invocation_id: string;
   turn_context?: {
     thread_id: string;
@@ -72,12 +104,11 @@ export interface StartInvocationRequestBody {
   };
   input_items: unknown[];
   context_handle: string;
-  gateway_endpoints: {
-    events: string;
-    cancel: string;
-    resume: string;
-    steer: string;
-  };
+  /** §24：下发 Governance Config 引用（Runtime 按 Snapshot 约束本地行为；不含 permission_policy.rules）。 */
+  governance_config: GovernanceConfigRef;
+  /** §24/§27：Gateway Access Token（Runtime 调用 Tool Gateway 用，type=gateway）。 */
+  gateway_access: GatewayAccess;
+  gateway_endpoints: GatewayEndpoints;
   workspace?: {
     workspace_binding_id: string | null;
     workspace_type: string;
@@ -147,6 +178,8 @@ export interface CancelInvocationRequest {
 export interface ResumeInvocationRequestBody {
   resume_payload: unknown;
   trace_context?: { trace_id: string; span_id: string } | null;
+  /** §28：员工 resolve 后 resume 必须重新签发新 Gateway Access Token。 */
+  gateway_access: GatewayAccess;
 }
 
 /** resumeInvocation 响应体。 */
@@ -259,7 +292,7 @@ export function createHttpRuntimeClient(options?: {
 
   return {
     async probeCapabilities(endpoint: string, token: string): Promise<RuntimeCapabilitiesResponse> {
-      const url = `${endpoint}/runtime/v1/capabilities?protocol_version=1`;
+      const url = `${endpoint}/runtime/v1/capabilities?protocol_version=${RUNTIME_PROTOCOL_VERSION}`;
       const resp = await doFetch(url, {
         method: "GET",
         headers: {
@@ -455,7 +488,7 @@ export function createMockRuntimeClient(handlers: MockRuntimeClientHandlers): Ru
  */
 export function defaultRuntimeCapabilities(): RuntimeCapabilitiesResponse {
   return {
-    protocol_versions: ["1"],
+    protocol_versions: ["2"],
     features: {
       event_stream: true,
       cancel: true,

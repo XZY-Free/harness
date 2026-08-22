@@ -1,4 +1,4 @@
-import type { ThreadPlan, ToolApprovalRequest, ToolRun } from "@/lib/db/schema";
+import type { ThreadPlan, ToolRun } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { describe, expect, it } from "vitest";
 import { computeProtectedRefs, renderInjectedProtected } from "./protected-refs";
@@ -13,16 +13,6 @@ function uiMsg(id: string, role: "user" | "assistant", text: string): ChatMessag
 }
 
 const plan = { id: "p1", threadId: "t", title: "TDD 方案", status: "active" } as ThreadPlan;
-const approval = {
-  id: "a1",
-  threadId: "t",
-  toolRunId: "tr",
-  toolName: "deleteFile",
-  permissionKey: "tool.deleteFile",
-  argFingerprint: "x",
-  argSummary: "path=old.ts",
-  status: "pending",
-} as unknown as ToolApprovalRequest;
 const failure = {
   id: "tr1",
   threadId: "t",
@@ -62,16 +52,6 @@ describe("computeProtectedRefs", () => {
     );
   });
 
-  it("pending approval 全部注入", () => {
-    const r = computeProtectedRefs({
-      messages: [uiMsg("m1", "user", "hi")],
-      pendingApprovals: [approval, { ...approval, id: "a2" } as unknown as ToolApprovalRequest],
-    });
-    const ap = r.injected.find((p) => p.kind === "pending_approval");
-    expect(ap).toBeTruthy();
-    expect(ap?.text).toContain("deleteFile");
-  });
-
   it("recent failure 注入原始错误片段", () => {
     const r = computeProtectedRefs({
       messages: [uiMsg("m1", "user", "hi")],
@@ -82,7 +62,7 @@ describe("computeProtectedRefs", () => {
     expect(rf?.text).toContain("timeout");
   });
 
-  it("无 active plan / approval / failure 时 injected 为空", () => {
+  it("无 active plan / failure 时 injected 为空", () => {
     const r = computeProtectedRefs({ messages: [uiMsg("m1", "user", "hi")] });
     expect(r.injected).toEqual([]);
   });
@@ -221,11 +201,10 @@ describe("computeProtectedRefs Stage D（policy / pinned facts）", () => {
     expect(pf?.text).toContain("端口固定 3000");
   });
 
-  it("六类 protected refs 全部识别时 refs 完整", () => {
+  it("各 protected refs 全部识别时 refs 完整", () => {
     const r = computeProtectedRefs({
       messages: [uiMsg("m1", "user", "hi")],
       activePlan: plan,
-      pendingApprovals: [approval],
       recentFailure: failure,
       policyConstraints: ["硬约束A"],
       pinnedFacts: ["pinnedA"],
@@ -233,7 +212,6 @@ describe("computeProtectedRefs Stage D（policy / pinned facts）", () => {
     const kinds = new Set(r.refs.map((x) => x.kind));
     expect(kinds.has("latest_user")).toBe(true);
     expect(kinds.has("active_plan")).toBe(true);
-    expect(kinds.has("pending_approval")).toBe(true);
     expect(kinds.has("recent_failure")).toBe(true);
     expect(kinds.has("policy_constraint")).toBe(true);
     expect(kinds.has("pinned_fact")).toBe(true);

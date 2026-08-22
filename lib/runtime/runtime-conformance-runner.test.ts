@@ -199,7 +199,7 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
     runtimeRevisionId,
     runtimeArtifactDigest: RUNTIME_DIGEST,
     runtimeConfigDigest: CONFIG_DIGEST,
-    protocolContractRevision: "agent-runtime-protocol@1",
+    protocolContractRevision: "agent-runtime-protocol@2",
     suiteRevision: "runtime-conformance@1",
     runnerArtifactDigest: RUNNER_DIGEST,
     runnerIdentity: RUNNER_IDENTITY,
@@ -213,7 +213,7 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
       runtimeRevisionId,
       runtimeArtifactDigest: RUNTIME_DIGEST,
       runtimeConfigDigest: CONFIG_DIGEST,
-      protocolContractRevision: "agent-runtime-protocol@1",
+      protocolContractRevision: "agent-runtime-protocol@2",
       runnerArtifactDigest: RUNNER_DIGEST,
       cases: caseResults.map((result) => ({
         caseId: result.caseId,

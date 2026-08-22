@@ -63,6 +63,10 @@ export const API_ERROR_CODES = {
   MEMORY_SOURCE_NOT_ALLOWED: { http: 403, retryable: false },
   OPERATION_PAYLOAD_CONFLICT: { http: 409, retryable: false },
   PARENT_INVOCATION_NOT_ACTIVE: { http: 409, retryable: false },
+  /** : Job 未预授权，调度前必须准备 Grant/授权/更明确 Policy（§18.4）。 */
+  POLICY_REQUIRES_PREAUTH: { http: 403, retryable: false },
+  /** : ExecutionBinding 冻结的 Policy digest 与实际 frozen Revision 不一致（§16.3 fail-closed）。 */
+  POLICY_INTEGRITY_MISMATCH: { http: 409, retryable: false },
   POLICY_BLOCKED: { http: 403, retryable: false },
   RATE_LIMITED: { http: 429, retryable: true },
   REQUEST_SCHEMA_INVALID: { http: 400, retryable: false },

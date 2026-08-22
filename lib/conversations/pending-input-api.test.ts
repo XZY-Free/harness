@@ -1,8 +1,8 @@
-import { POST as reorderPendingInputsPOST } from "@/app/api/v1/threads/[thread_id]/pending-inputs/reorder/route";
 import {
   PATCH as editPendingInputPATCH,
   DELETE as removePendingInputDELETE,
 } from "@/app/api/v1/pending-inputs/[pending_input_id]/route";
+import { POST as reorderPendingInputsPOST } from "@/app/api/v1/threads/[thread_id]/pending-inputs/reorder/route";
 import {
   POST as createPendingInputPOST,
   GET as listPendingInputsGET,

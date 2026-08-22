@@ -514,6 +514,30 @@ function buildCommandRuntimeEndpointResolution(
       audience: "runtime",
       expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
     }),
+    gatewayEndpoints: {
+      events: "https://gateway.internal/events",
+      cancel: "https://gateway.internal/cancel",
+      resume: "https://gateway.internal/resume",
+      steer: "https://gateway.internal/steer",
+      tools: "https://gateway.internal/tools",
+      tool_calls: "https://gateway.internal/tool-calls",
+      user_action_requests: "https://gateway.internal/user-action-requests",
+    },
+    governanceConfig: {
+      revision_id: "gov-rev-1",
+      config_digest: "sha256:test-governance-digest",
+      config: {},
+    },
+    gatewayAccess: {
+      access_token: issueWorkloadToken({
+        type: "gateway",
+        tenantId: "test-tenant",
+        invocationId: "test-invocation",
+        audience: "gateway",
+        expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
+      }),
+      expires_at: new Date(Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway).toISOString(),
+    },
   };
 }
 
@@ -1263,7 +1287,7 @@ describe("S05-C04 dispatchResumeCommand", () => {
       runtime_session_ref: `runtime-session-${running.invocationId}-2`,
       runtime_execution_ref: `runtime-exec-${running.invocationId}-2`,
       capabilities: {
-        protocol_versions: ["1"],
+        protocol_versions: ["2"],
         features: {
           event_stream: true,
           cancel: true,
@@ -1299,6 +1323,9 @@ describe("S05-C04 dispatchResumeCommand", () => {
           cancel: "https://gateway.internal/cancel",
           resume: "https://gateway.internal/resume",
           steer: "https://gateway.internal/steer",
+          tools: "https://gateway.internal/tools",
+          tool_calls: "https://gateway.internal/tool-calls",
+          user_action_requests: "https://gateway.internal/user-action-requests",
         },
       }),
       correlationId: "resume-redispatch-test-1",
@@ -1377,13 +1404,15 @@ describe("S05-C04 dispatchResumeCommand", () => {
       }),
     });
 
-    // runtimeEndpointResolver 不包含 gatewayEndpoints
+    // runtimeEndpointResolver 不包含 gatewayEndpoints（gatewayAccess 仍提供，以先过 resume 校验）
     const result = await dispatchResumeCommand({
       tenantId: ctx.tenantId,
       commandId: resumeCommandId,
       runtimeClient: mockClient,
-      runtimeEndpointResolver: async () =>
-        buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+      runtimeEndpointResolver: async () => ({
+        ...buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+        gatewayEndpoints: undefined,
+      }),
     });
 
     // 命令 failed

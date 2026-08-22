@@ -528,7 +528,7 @@ function buildStartInvocationResponse(
     runtime_session_ref: `runtime-session-${invocationId}-${attemptNo}`,
     runtime_execution_ref: `runtime-exec-${invocationId}-${attemptNo}`,
     capabilities: {
-      protocol_versions: ["1"],
+      protocol_versions: ["2"],
       features: {
         event_stream: true,
         cancel: true,
@@ -575,6 +575,18 @@ function buildRedispatchParams(
         cancel: "https://gateway.internal/cancel",
         resume: "https://gateway.internal/resume",
         steer: "https://gateway.internal/steer",
+        tools: "https://gateway.internal/tools",
+        tool_calls: "https://gateway.internal/tool-calls",
+        user_action_requests: "https://gateway.internal/user-action-requests",
+      },
+      governanceConfig: {
+        revision_id: "gov-rev-1",
+        config_digest: "sha256:test-governance-digest",
+        config: {},
+      },
+      gatewayAccess: {
+        access_token: "gw-token",
+        expires_at: new Date(Date.now() + 60000).toISOString(),
       },
     }),
     runtimeRevisionId: seeded.runtimeRevisionId,

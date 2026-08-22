@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { InferSelectModel } from "drizzle-orm";
 import {
-  bigint,
   boolean,
   datetime,
   index,
@@ -226,46 +225,6 @@ export type ToolRun = InferSelectModel<typeof toolRun>;
  * 内置角色 key（seed 灌 admin / member）。isSystem=true 的角色不可删除（保留扩展位）。
  * 权限是**固定常量集合**（见 lib/rbac.ts PERMISSIONS），不建动态权限表——避免过早抽象。
  */
-
-// ─── Policy Config (: policy DB 化) ────────────────
-
-/**
- * Policy 配置 KV 表（单行配置，按 key 存 JSON value）。
- *
- * P4-1 policy 原是 `lib/policy/config.ts` 的内存态（含函数成员 detect），无法多实例一致与
- * 后台展示。DB 化为纯数据（正则源 string + testFilePattern string），由 `lib/policy/interpreter.ts`
- * 编译为运行时 PolicyConfig（含 RegExp / detect 闭包）。
- *
- * 键集合：protectedPaths / commandDenyList / formatOnWrite / verifyBeforeDelivery。
- * value 形状见 `defaultPolicyConfig`（lib/policy/config.ts）+ testFilePattern（替代 detect）。
- */
-export const policyConfig = mysqlTable("PolicyConfig", {
-  key: varchar("key", { length: 64 }).primaryKey().notNull(),
-  value: json("value").notNull(),
-  updatedAt: datetime("updatedAt", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
-export type PolicyConfigRow = InferSelectModel<typeof policyConfig>;
-
-/**
- * Policy 配置变更历史表（版本管理 + before/after 快照）。
- *
- * 每次 PUT /studio/api/policies 写入一行：beforeSnapshot（变更前全量 JSON）、
- * afterSnapshot（变更后全量 JSON）、changedKeys（差异 key 列表）、changedBy/changedAt。
- * 供回滚与审计追溯，不替换 AdminAuditLog（审计仍记 metadata）。
- */
-export const policyConfigHistory = mysqlTable("PolicyConfigHistory", {
-  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
-  changedBy: varchar("changed_by", { length: 36 }).notNull(),
-  beforeSnapshot: text("before_snapshot").notNull(),
-  afterSnapshot: text("after_snapshot").notNull(),
-  changedKeys: text("changed_keys"),
-  changedAt: datetime("changed_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
-export type PolicyConfigHistoryRow = InferSelectModel<typeof policyConfigHistory>;
 
 // ─── Admin Audit Log (切片 C: 后台敏感写操作审计) ────
 
@@ -559,115 +518,6 @@ export const threadPlanItem = mysqlTable(
   }),
 );
 export type ThreadPlanItem = InferSelectModel<typeof threadPlanItem>;
-
-// ─── : Tool Permission Rule / Approval Request ───────────
-//
-// 把 deny-only 的 beforeTool 升级为 allow/deny/ask 三态权限引擎（蓝图 / §12 ）。
-// - ToolPermissionRule：持久化规则。默认规则从 PolicyConfig 派生（protectedPaths/commandDenyList
-// → deny；deleteFile/applyPatch/multiEditFile → ask），DB 行作覆盖。不做完整 UI 编辑（留后续）。
-// - ToolApprovalRequest：一次 ask 暂停产生的待审批记录。批准复用语义由
-// status=approved + approvedScope + argFingerprint 表达，不单建 ToolApproval 表（）。
-
-/** 权限规则决策三态。 */
-export const PERMISSION_DECISIONS = ["allow", "deny", "ask"] as const;
-export type PermissionDecision = (typeof PERMISSION_DECISIONS)[number];
-
-/** 权限规则 scope。global 为全局；tenant/project/thread/skill 绑 scopeRef。 */
-export const PERMISSION_SCOPES = ["global", "tenant", "project", "thread", "skill"] as const;
-export type PermissionScope = (typeof PERMISSION_SCOPES)[number];
-
-/**
- * 持久化的工具权限规则。匹配顺序：priority 降序；同优先级 deny > ask > allow。
- * argMatcher 形状：{ pathRegex?, commandRegex?, risk? }，null 表示无 arg 约束。
- */
-export const toolPermissionRule = mysqlTable(
-  "ToolPermissionRule",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    scope: mysqlEnum("scope", PERMISSION_SCOPES).notNull().default("global"),
-    // scope 绑定对象 id（threadId/projectId 等）；global 为 null
-    scopeRef: varchar("scopeRef", { length: 36 }),
-    // toolPattern: "tool.writeFile" / "tool.*" / "*" 等
-    toolPattern: varchar("toolPattern", { length: 128 }).notNull(),
-    // { pathRegex?, commandRegex?, risk? }；null 表示无 arg 约束
-    argMatcher: json("argMatcher"),
-    decision: mysqlEnum("decision", PERMISSION_DECISIONS).notNull(),
-    reason: varchar("reason", { length: 256 }),
-    // 越大越优先；同优先级 deny > ask > allow
-    priority: int("priority").notNull().default(0),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    updatedAt: datetime("updatedAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => ({
-    scopeScopeRefIdx: index("ToolPermissionRule_scope_scopeRef_idx").on(t.scope, t.scopeRef),
-    toolPatternIdx: index("ToolPermissionRule_toolPattern_idx").on(t.toolPattern),
-  }),
-);
-export type ToolPermissionRule = InferSelectModel<typeof toolPermissionRule>;
-
-/** 审批请求状态。pending=待审批；approved/denied=已决议；expired/superseded=失效。 */
-export const APPROVAL_REQUEST_STATUSES = [
-  "pending",
-  "approved",
-  "denied",
-  "expired",
-  "superseded",
-] as const;
-export type ApprovalRequestStatus = (typeof APPROVAL_REQUEST_STATUSES)[number];
-
-/** 批准复用 scope。once=仅本次 toolRun；thread/project/always=按维度复用。 */
-export const APPROVAL_SCOPES = ["once", "thread", "project", "always", "session"] as const;
-export type ApprovalScope = (typeof APPROVAL_SCOPES)[number];
-
-/**
- * 一次 ask 暂停产生的待审批记录。argFingerprint 为稳定 hash（不存原始 input）；
- * argSummary 为人可读摘要（path / command 首 token）。
- */
-export const toolApprovalRequest = mysqlTable(
-  "ToolApprovalRequest",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    threadId: varchar("threadId", { length: 36 }).notNull(),
-    toolRunId: varchar("toolRunId", { length: 36 })
-      .notNull()
-      .references(() => toolRun.id),
-    toolName: varchar("toolName", { length: 64 }).notNull(),
-    permissionKey: varchar("permissionKey", { length: 128 }).notNull(),
-    argFingerprint: varchar("argFingerprint", { length: 128 }).notNull(),
-    argSummary: varchar("argSummary", { length: 512 }).notNull(),
-    status: mysqlEnum("status", APPROVAL_REQUEST_STATUSES).notNull().default("pending"),
-    approvedScope: mysqlEnum("approvedScope", APPROVAL_SCOPES),
-    // project scope 审批跨 thread 复用——记录审批时的 projectId
-    projectId: varchar("projectId", { length: 36 }),
-    resolvedBy: varchar("resolvedBy", { length: 36 }).references(() => user.id),
-    resolvedAt: datetime("resolvedAt", { mode: "date" }),
-    createdAt: datetime("createdAt", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-    // 默认 24h 过期（由应用层写入时设置）
-    expiresAt: datetime("expiresAt", { mode: "date" }),
-  },
-  (t) => ({
-    threadStatusIdx: index("ToolApprovalRequest_threadId_status_idx").on(t.threadId, t.status),
-    statusIdx: index("ToolApprovalRequest_status_idx").on(t.status),
-    // project scope 跨 thread 查询索引
-    scopeProjectIdx: index("ToolApprovalRequest_scope_projectId_idx").on(
-      t.approvedScope,
-      t.projectId,
-    ),
-  }),
-);
-export type ToolApprovalRequest = InferSelectModel<typeof toolApprovalRequest>;
 
 // ─── : Git Checkpoint ───────────────────────────────────
 //

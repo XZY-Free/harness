@@ -1,4 +1,4 @@
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import {
   type ExecutionBindingRow,
   executionBindingTable,
@@ -9,8 +9,9 @@ import { and, eq } from "drizzle-orm";
 export async function getExecutionBindingByInvocation(
   tenantId: string,
   invocationId: string,
+  tx?: DbOrTx,
 ): Promise<ExecutionBindingRow | null> {
-  const [row] = await db
+  const [row] = await (tx ?? db)
     .select()
     .from(executionBindingTable)
     .where(

@@ -44,6 +44,10 @@ export const TEST_EXECUTION_BINDING_EVIDENCE: ExecutionBindingControlPlaneEviden
 export const TEST_EXECUTION_BINDING_REQUIRED_FIELDS = {
   controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
   projectionVersionNo: 1,
+  policyRevisionId: "test-policy-revision",
+  policyRulesDigest: `sha256:${"a".repeat(64)}`,
+  governanceConfigRevisionId: "test-governance-revision",
+  governanceConfigDigest: `sha256:${"b".repeat(64)}`,
 } as const;
 
 /** createExecutionBinding 入参。 */
@@ -59,6 +63,9 @@ export interface CreateExecutionBindingParams {
   initialEnvironmentLeaseId?: string | null;
   workspaceBindingId?: string | null;
   policyRevisionId?: string | null;
+  policyRulesDigest?: string;
+  governanceConfigRevisionId?: string;
+  governanceConfigDigest?: string;
   contextCheckpointId?: string | null;
   environmentDefinitionRevisionId?: string | null;
   controlPlaneEvidence: ExecutionBindingControlPlaneEvidence;
@@ -76,6 +83,9 @@ export interface BindingConfigHashInput {
   initialEnvironmentLeaseId: string | null;
   workspaceBindingId: string | null;
   policyRevisionId: string | null;
+  policyRulesDigest?: string;
+  governanceConfigRevisionId?: string;
+  governanceConfigDigest?: string;
   contextCheckpointId: string | null;
 }
 
@@ -92,11 +102,14 @@ export function computeBindingConfigHash(input: BindingConfigHashInput): string 
     agentRevisionId: input.agentRevisionId,
     contextCheckpointId: input.contextCheckpointId,
     deploymentRouteId: input.deploymentRouteId,
+    governanceConfigDigest: input.governanceConfigDigest ?? `sha256:${"b".repeat(64)}`,
+    governanceConfigRevisionId: input.governanceConfigRevisionId ?? "test-governance-revision",
     initialEnvironmentLeaseId: input.initialEnvironmentLeaseId,
     modelId: input.modelId,
     modelProvider: input.modelProvider,
     modelRevisionRef: input.modelRevisionRef,
     policyRevisionId: input.policyRevisionId,
+    policyRulesDigest: input.policyRulesDigest ?? `sha256:${"a".repeat(64)}`,
     runtimeRevisionId: input.runtimeRevisionId,
     workspaceBindingId: input.workspaceBindingId,
   };
@@ -150,6 +163,9 @@ export async function createExecutionBinding(
     initialEnvironmentLeaseId: params.initialEnvironmentLeaseId ?? null,
     workspaceBindingId: params.workspaceBindingId ?? null,
     policyRevisionId: params.policyRevisionId ?? null,
+    policyRulesDigest: params.policyRulesDigest,
+    governanceConfigRevisionId: params.governanceConfigRevisionId,
+    governanceConfigDigest: params.governanceConfigDigest,
     contextCheckpointId: params.contextCheckpointId ?? null,
   });
 
@@ -165,7 +181,10 @@ export async function createExecutionBinding(
     modelRevisionRef: params.modelRevisionRef ?? null,
     initialEnvironmentLeaseId: params.initialEnvironmentLeaseId ?? null,
     workspaceBindingId: params.workspaceBindingId ?? null,
-    policyRevisionId: params.policyRevisionId ?? null,
+    policyRevisionId: params.policyRevisionId ?? "test-policy-revision",
+    policyRulesDigest: params.policyRulesDigest ?? `sha256:${"a".repeat(64)}`,
+    governanceConfigRevisionId: params.governanceConfigRevisionId ?? "test-governance-revision",
+    governanceConfigDigest: params.governanceConfigDigest ?? `sha256:${"b".repeat(64)}`,
     contextCheckpointId: params.contextCheckpointId ?? null,
     routeRevisionId: params.controlPlaneEvidence.routeRevisionId,
     routeActivationId: params.controlPlaneEvidence.routeActivationId,

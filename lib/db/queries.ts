@@ -1,27 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
-import { approvalConfig, dbConfig } from "@/lib/config";
+import { dbConfig } from "@/lib/config";
 import { logger } from "@/lib/logger";
 import { encryptCicdToken } from "@/lib/runtime/secret-crypto";
 // P2-closeout: thread-events-bus 已删（SSE 端点 app/api/threads/** 随本地执行体系移除）。
 import { escapeLikeWildcards } from "@/lib/utils";
-import {
-  type AnyColumn,
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  gte,
-  inArray,
-  isNotNull,
-  isNull,
-  like,
-  lt,
-  max,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, lt, max } from "drizzle-orm";
 import type { MySqlTable } from "drizzle-orm/mysql-core";
 import { db } from "./client";
 
@@ -34,8 +18,6 @@ import {
   type AdminAuditAction,
   type AdminAuditLog,
   type AdminAuditOutcome,
-  type ApprovalRequestStatus,
-  type ApprovalScope,
   type ContextSnapshot,
   type ContextSummary,
   type ContextSummaryType,
@@ -44,16 +26,12 @@ import {
   type DeploymentStatus,
   type GitCheckpoint,
   type McpServerConfig,
-  type PermissionDecision,
-  type PermissionScope,
   type SecretMount,
   type SecretMountScope,
   type SecretMountStatus,
   type ThreadPlan,
   type ThreadPlanItem,
   type ThreadPlanItemStatus,
-  type ToolApprovalRequest,
-  type ToolPermissionRule,
   type ToolRun,
   type ToolRunStatus,
   adminAuditLog,
@@ -64,13 +42,9 @@ import {
   deployment,
   gitCheckpoint,
   mcpServerConfig,
-  policyConfig,
-  policyConfigHistory,
   secretMount,
   threadPlan,
   threadPlanItem,
-  toolApprovalRequest,
-  toolPermissionRule,
   toolRun,
   user,
 } from "./schema";
@@ -196,79 +170,6 @@ export async function getRecentFailedToolRun(threadId: string): Promise<ToolRun 
     .orderBy(desc(toolRun.startedAt))
     .limit(1);
   return row ?? null;
-}
-
-// ─── Policy Config 写入 () ──────────────────
-
-/**
- * 整配置覆盖 PolicyConfig：事务内删掉给定 key 的旧行，再插入规范化新行。
- *
- * Policy PUT 是「整配置提交」（4 个白名单 key 全量），故用 delete+insert 覆盖语义,
- * 避免单行 upsert 留下未更新的脏行。调用方负责先用 validatePolicyRows 规范化。
- */
-export async function replacePolicyConfigRows(
-  rows: Array<{ key: string; value: unknown }>,
-): Promise<void> {
-  const keys = rows.map((r) => r.key);
-  const now = new Date();
-  await db.transaction(async (tx) => {
-    if (keys.length > 0) {
-      await tx.delete(policyConfig).where(inArray(policyConfig.key, keys));
-    }
-    if (rows.length > 0) {
-      await tx
-        .insert(policyConfig)
-        .values(rows.map((r) => ({ key: r.key, value: r.value, updatedAt: now })));
-    }
-  });
-}
-
-/**
- * 记录 policy 配置变更历史（before/after 快照 + changedKeys）。
- * 由 PUT /studio/api/policies 在 replacePolicyConfigRows 后调用。
- */
-export async function insertPolicyConfigHistory(params: {
-  changedBy: string;
-  beforeSnapshot: string;
-  afterSnapshot: string;
-  changedKeys: string | null;
-}): Promise<void> {
-  await db.insert(policyConfigHistory).values({
-    changedBy: params.changedBy,
-    beforeSnapshot: params.beforeSnapshot,
-    afterSnapshot: params.afterSnapshot,
-    changedKeys: params.changedKeys,
-    changedAt: new Date(),
-  });
-}
-
-/**
- * seed 版本追踪（幂等标记）。
- * 用 policyConfig 表 key="seed_version" 存储，避免新表。seed.ts 执行前检查版本，已执行则跳过。
- */
-export async function getSeedVersion(): Promise<string | null> {
-  const [row] = await db
-    .select()
-    .from(policyConfig)
-    .where(eq(policyConfig.key, "seed_version"))
-    .limit(1);
-  return (row?.value as string) ?? null;
-}
-
-export async function setSeedVersion(version: string): Promise<void> {
-  const [existing] = await db
-    .select()
-    .from(policyConfig)
-    .where(eq(policyConfig.key, "seed_version"))
-    .limit(1);
-  if (existing) {
-    await db
-      .update(policyConfig)
-      .set({ value: version })
-      .where(eq(policyConfig.key, "seed_version"));
-  } else {
-    await db.insert(policyConfig).values({ key: "seed_version", value: version });
-  }
 }
 
 // ─── Admin Audit Queries (切片 C: append-only 审计) ──
@@ -748,422 +649,6 @@ export async function abandonThreadPlan(planId: string): Promise<void> {
     .where(eq(threadPlan.id, planId));
 }
 
-// ─── Tool Permission Rule / Approval Request Queries () ──
-//
-// ask/deny/ask 权限引擎的数据层。规则默认从 PolicyConfig 派生（lib/permission/rules.ts），
-// DB 行作覆盖；approval 记录 ask 暂停产生的待审批请求，批准复用语义由
-// status=approved + approvedScope + argFingerprint 表达（不单建 ToolApproval 表）。
-
-/** 列全部持久化权限规则（默认规则的 DB 覆盖）。按 priority 降序。 */
-export async function listPermissionRules(): Promise<ToolPermissionRule[]> {
-  return db.select().from(toolPermissionRule).orderBy(desc(toolPermissionRule.priority));
-}
-
-/**
- * 创建一条持久化权限规则（DB 覆盖默认规则）。无 UI 编辑入口，供 seed/测试用。
- *
- * actorUserId 非空时同事务落 permission_rule.created 审计行（input 经脱敏）。
- * seed 等无 actor 场景不传 actorUserId，不写审计（seed 行为可由 git 历史/部署日志追溯）。
- */
-export async function createPermissionRule(params: {
-  scope?: PermissionScope;
-  scopeRef?: string | null;
-  toolPattern: string;
-  argMatcher?: Record<string, unknown> | null;
-  decision: PermissionDecision;
-  reason?: string | null;
-  priority?: number;
-  /** 操作者用户 id（非空时落审计）。 */
-  actorUserId?: string | null;
-}): Promise<ToolPermissionRule> {
-  const now = new Date();
-  const row: ToolPermissionRule = {
-    id: randomUUID(),
-    scope: params.scope ?? "global",
-    scopeRef: params.scopeRef ?? null,
-    toolPattern: params.toolPattern,
-    argMatcher: params.argMatcher ?? null,
-    decision: params.decision,
-    reason: params.reason ?? null,
-    priority: params.priority ?? 0,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const auditRow =
-    params.actorUserId != null
-      ? buildAdminAuditLogRow({
-          actorUserId: params.actorUserId,
-          action: "permission_rule.created",
-          targetType: "permission_rule",
-          targetId: row.id,
-          outcome: "succeeded",
-          metadata: {
-            scope: row.scope,
-            scopeRef: row.scopeRef,
-            toolPattern: row.toolPattern,
-            decision: row.decision,
-            priority: row.priority,
-          },
-        })
-      : null;
-  await db.transaction(async (tx) => {
-    await tx.insert(toolPermissionRule).values(row);
-    if (auditRow) await tx.insert(adminAuditLog).values(auditRow);
-  });
-  return row;
-}
-
-/**
- * 更新一条持久化权限规则。
- *
- * 字段全可选，仅更新传入字段。actorUserId 非空时落 permission_rule.updated 审计。
- * 规则不存在 → 返回 null（调用方据此 404）。
- */
-export async function updatePermissionRule(
-  id: string,
-  patch: {
-    scope?: PermissionScope;
-    scopeRef?: string | null;
-    toolPattern?: string;
-    argMatcher?: Record<string, unknown> | null;
-    decision?: PermissionDecision;
-    reason?: string | null;
-    priority?: number;
-  },
-  actorUserId?: string | null,
-): Promise<ToolPermissionRule | null> {
-  const [existing] = await db
-    .select()
-    .from(toolPermissionRule)
-    .where(eq(toolPermissionRule.id, id))
-    .limit(1);
-  if (!existing) return null;
-  const sets: Record<string, unknown> = { updatedAt: new Date() };
-  for (const [k, v] of Object.entries(patch)) {
-    if (v !== undefined) sets[k] = v;
-  }
-  const auditRow =
-    actorUserId != null
-      ? buildAdminAuditLogRow({
-          actorUserId,
-          action: "permission_rule.updated",
-          targetType: "permission_rule",
-          targetId: id,
-          outcome: "succeeded",
-          metadata: {
-            before: {
-              scope: existing.scope,
-              toolPattern: existing.toolPattern,
-              decision: existing.decision,
-              priority: existing.priority,
-            },
-            after: sets,
-          },
-        })
-      : null;
-  await db.transaction(async (tx) => {
-    await tx.update(toolPermissionRule).set(sets).where(eq(toolPermissionRule.id, id));
-    if (auditRow) await tx.insert(adminAuditLog).values(auditRow);
-  });
-  return { ...existing, ...sets } as ToolPermissionRule;
-}
-
-/**
- * 删除一条持久化权限规则。
- * actorUserId 非空时落 permission_rule.deleted 审计。规则不存在 → 返回 false（调用方据此 404）。
- */
-export async function deletePermissionRule(
-  id: string,
-  actorUserId?: string | null,
-): Promise<boolean> {
-  const [existing] = await db
-    .select()
-    .from(toolPermissionRule)
-    .where(eq(toolPermissionRule.id, id))
-    .limit(1);
-  if (!existing) return false;
-  const auditRow =
-    actorUserId != null
-      ? buildAdminAuditLogRow({
-          actorUserId,
-          action: "permission_rule.deleted",
-          targetType: "permission_rule",
-          targetId: id,
-          outcome: "succeeded",
-          metadata: {
-            scope: existing.scope,
-            toolPattern: existing.toolPattern,
-            decision: existing.decision,
-          },
-        })
-      : null;
-  await db.transaction(async (tx) => {
-    await tx.delete(toolPermissionRule).where(eq(toolPermissionRule.id, id));
-    if (auditRow) await tx.insert(adminAuditLog).values(auditRow);
-  });
-  return true;
-}
-
-/**
- * 创建一条审批请求（pending）。ask 暂停时由 executeToolRun 调用。
- * expiresAt 缺省时按 24h 过期设置（）。
- */
-export async function createApprovalRequest(params: {
-  threadId: string;
-  toolRunId: string;
-  toolName: string;
-  permissionKey: string;
-  argFingerprint: string;
-  argSummary: string;
-  expiresAt?: Date | null;
-  projectId?: string | null;
-}): Promise<ToolApprovalRequest> {
-  const now = new Date();
-  const row: ToolApprovalRequest = {
-    id: randomUUID(),
-    threadId: params.threadId,
-    toolRunId: params.toolRunId,
-    toolName: params.toolName,
-    permissionKey: params.permissionKey,
-    argFingerprint: params.argFingerprint,
-    argSummary: params.argSummary,
-    status: "pending",
-    approvedScope: null,
-    projectId: params.projectId ?? null,
-    resolvedBy: null,
-    resolvedAt: null,
-    createdAt: now,
-    expiresAt: params.expiresAt ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
-  };
-  await db.insert(toolApprovalRequest).values(row);
-  return row;
-}
-
-/**
- * 审批多步操作事务化。
- *
- * 原实现 createToolRun + createApprovalRequest + updateThreadStatus 分散调用，部分成功会留 thread
- * 卡在 executing。本函数在单事务内完成三步，保证原子性。事件追加在事务外（append-only best-effort）。
- */
-export async function requestApprovalAtomic(params: {
-  threadId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-  permissionKey: string;
-  argFingerprint: string;
-  argSummary: string;
-  projectId?: string | null;
-  /** 归属历史 run（nullable（历史记录可空））。 */
-  runId?: string | null;
-}): Promise<{ run: ToolRun; approval: ToolApprovalRequest }> {
-  // 与 createToolRun 同构：json 列 zod 校验（fail-closed，脏数据抛错不落库）。
-  const input = validateJsonColumn(params.input, toolRunInputSchema, "input");
-  return db.transaction(async (tx) => {
-    const now = new Date();
-    const run: ToolRun = {
-      id: randomUUID(),
-      threadId: params.threadId,
-      toolName: params.toolName,
-      status: "awaiting_approval",
-      input,
-      output: null,
-      error: null,
-      startedAt: now,
-      finishedAt: null,
-      runId: params.runId ?? null,
-    };
-    await tx.insert(toolRun).values(run);
-
-    const approval: ToolApprovalRequest = {
-      id: randomUUID(),
-      threadId: params.threadId,
-      toolRunId: run.id,
-      toolName: params.toolName,
-      permissionKey: params.permissionKey,
-      argFingerprint: params.argFingerprint,
-      argSummary: params.argSummary,
-      status: "pending",
-      approvedScope: null,
-      // 审批请求记录 projectId，供 project scope 跨 thread 匹配
-      projectId: params.projectId ?? null,
-      resolvedBy: null,
-      resolvedAt: null,
-      createdAt: now,
-      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
-    };
-    await tx.insert(toolApprovalRequest).values(approval);
-
-    return { run, approval };
-  });
-}
-
-/** 按 id 取审批请求。 */
-export async function getApprovalRequest(id: string): Promise<ToolApprovalRequest | null> {
-  const [row] = await db
-    .select()
-    .from(toolApprovalRequest)
-    .where(eq(toolApprovalRequest.id, id))
-    .limit(1);
-  return row ?? null;
-}
-
-/** 列 thread 的 pending 审批请求（按 createdAt asc）。 */
-export async function getPendingApprovalsByThread(
-  threadId: string,
-): Promise<ToolApprovalRequest[]> {
-  return db
-    .select()
-    .from(toolApprovalRequest)
-    .where(
-      and(eq(toolApprovalRequest.threadId, threadId), eq(toolApprovalRequest.status, "pending")),
-    )
-    .orderBy(asc(toolApprovalRequest.createdAt));
-}
-
-/** 列 thread 最近已决议的审批请求（approved/denied，按 createdAt desc，限 50）。 */
-export async function getResolvedApprovalsByThread(
-  threadId: string,
-  limit = 50,
-): Promise<ToolApprovalRequest[]> {
-  const clamped = Math.min(200, Math.max(1, Math.floor(limit)));
-  return db
-    .select()
-    .from(toolApprovalRequest)
-    .where(
-      and(
-        eq(toolApprovalRequest.threadId, threadId),
-        inArray(toolApprovalRequest.status, ["approved", "denied"]),
-      ),
-    )
-    .orderBy(desc(toolApprovalRequest.createdAt), desc(toolApprovalRequest.id))
-    .limit(clamped);
-}
-
-/**
- * 决议一条审批请求：仅 status=pending 可被决议，否则返回 null（调用方据此返回 409）。
- * 写 tool.approval_resolved 事件由调用方（API 层）负责，本函数只更新请求行。
- */
-export async function resolveApprovalRequest(params: {
-  id: string;
-  decision: "approved" | "denied";
-  scope: ApprovalScope;
-  resolvedBy: string;
-}): Promise<ToolApprovalRequest | null> {
-  const existing = await getApprovalRequest(params.id);
-  if (!existing || existing.status !== "pending") return null;
-  const now = new Date();
-  const patch: Partial<ToolApprovalRequest> = {
-    status: params.decision as ApprovalRequestStatus,
-    approvedScope: params.scope,
-    resolvedBy: params.resolvedBy,
-    resolvedAt: now,
-  };
-  // session scope（07-）：决议时把 expiresAt 收紧到短 TTL，
-  // 区别于 thread/always 的 24h。过期后引擎 isApprovalExpired 与 findMatchingApprovals
-  // 同步失效，实现"同 thread 短期复用"语义。denied 不必调整 TTL（已拒绝不再复用）。
-  if (params.decision === "approved" && params.scope === "session") {
-    patch.expiresAt = new Date(now.getTime() + approvalConfig.sessionTtlMs);
-  }
-  // 审计修复(TOCTOU)：WHERE 加 status='pending' 守卫，affectedRows=0 说明已被并发决议
-  const result = await db
-    .update(toolApprovalRequest)
-    .set(patch)
-    .where(and(eq(toolApprovalRequest.id, params.id), eq(toolApprovalRequest.status, "pending")));
-  if (affectedRowsOf(result) === 0) return null;
-  return { ...existing, ...patch };
-}
-
-/**
- * 查找匹配的已批准审批请求（用于 ask→allow 升级）。
- * 匹配维度：permissionKey + argFingerprint + status=approved + 未过期。
- * 若传入 threadId，仅返回 always 或同 thread 候选；最终 scope 仍由引擎纯函数复核。
- * scope 适用性（thread/project/always）由引擎纯函数判断；本查询返回候选集。
- */
-export async function findMatchingApprovals(params: {
-  permissionKey: string;
-  argFingerprint: string;
-  threadId?: string;
-  projectId?: string | null;
-}): Promise<ToolApprovalRequest[]> {
-  // scopeFilter 增加 project scope 跨 thread 匹配
-  const threadFilter = params.threadId
-    ? eq(toolApprovalRequest.threadId, params.threadId)
-    : undefined;
-  const projectFilter = params.projectId
-    ? and(
-        eq(toolApprovalRequest.approvedScope, "project"),
-        eq(toolApprovalRequest.projectId, params.projectId),
-      )
-    : undefined;
-  const scopeFilter =
-    threadFilter || projectFilter
-      ? or(eq(toolApprovalRequest.approvedScope, "always"), threadFilter, projectFilter)
-      : undefined;
-  return db
-    .select()
-    .from(toolApprovalRequest)
-    .where(
-      and(
-        eq(toolApprovalRequest.permissionKey, params.permissionKey),
-        eq(toolApprovalRequest.argFingerprint, params.argFingerprint),
-        eq(toolApprovalRequest.status, "approved"),
-        or(isNull(toolApprovalRequest.expiresAt), gt(toolApprovalRequest.expiresAt, new Date())),
-        scopeFilter,
-      ),
-    )
-    .orderBy(desc(toolApprovalRequest.resolvedAt));
-}
-
-/** 从不同 drizzle/mysql adapter 的 update 结果里提取 affectedRows。 */
-function affectedRowsOf(result: unknown): number {
-  const candidate = Array.isArray(result) ? result[0] : result;
-  if (
-    candidate &&
-    typeof candidate === "object" &&
-    "affectedRows" in candidate &&
-    typeof (candidate as { affectedRows: unknown }).affectedRows === "number"
-  ) {
-    return (candidate as { affectedRows: number }).affectedRows;
-  }
-  return 0;
-}
-
-/** 原子消费一次性 approval，抢到消费权才返回 true。 */
-export async function consumeOnceApproval(id: string): Promise<boolean> {
-  const result = await db
-    .update(toolApprovalRequest)
-    .set({ status: "superseded" })
-    .where(
-      and(
-        eq(toolApprovalRequest.id, id),
-        eq(toolApprovalRequest.status, "approved"),
-        eq(toolApprovalRequest.approvedScope, "once"),
-      ),
-    );
-  return affectedRowsOf(result) === 1;
-}
-
-/**
- * 取 thread 最近一条已决议的审批请求（approved/denied，按 resolvedAt desc）。
- * 供 chat route 恢复路径判断：thread 处于 awaiting_approval 时，最近决议决定恢复语义。
- */
-export async function getLatestResolvedApprovalByThread(
-  threadId: string,
-): Promise<ToolApprovalRequest | null> {
-  const [row] = await db
-    .select()
-    .from(toolApprovalRequest)
-    .where(
-      and(
-        eq(toolApprovalRequest.threadId, threadId),
-        inArray(toolApprovalRequest.status, ["approved", "denied"]),
-      ),
-    )
-    .orderBy(desc(toolApprovalRequest.resolvedAt))
-    .limit(1);
-  return row ?? null;
-}
-
 // ─── Git Checkpoint Queries () ──────────────────────────
 //
 // 风险前快照的数据层。tag 名 + commitSha 由 lib/git/checkpoint.ts 经 ops.gitTag 产出；
@@ -1220,7 +705,7 @@ export async function markCheckpointRestored(id: string): Promise<GitCheckpoint 
 // ─── MCP Server Config Queries () ───────────────────────
 //
 // McpServerConfig CRUD。env 字段含 secret，调用方（Studio API / registry）负责脱敏后返回，
-// 调用时注入真实 env——本层只做纯 DB 操作，不做脱敏。权限走 ToolPermissionRule（mcp.<name>.<tool>）。
+// 调用时注入真实 env——本层只做纯 DB 操作，不做脱敏。权限走正式 Policy Revision（mcp.<name>.<tool>）。
 
 export async function createMcpServerConfig(params: {
   name: string;
@@ -1331,7 +816,7 @@ export async function recordMcpServerHandshake(
 //
 // CustomTool CRUD。executorConfig.webhook 走域名 allowlist（SSRF 防护在 registry 层）；
 // executorConfig.script.scriptId 必须在平台预置白名单（registry 层校验，DB 不校验）。
-// 权限走 ToolPermissionRule（custom.<name>，默认 ask）。
+// 权限走正式 Policy Revision（custom.<name>）。
 
 export async function createCustomTool(params: {
   name: string;
