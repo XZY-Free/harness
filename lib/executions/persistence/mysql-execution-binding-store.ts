@@ -145,8 +145,7 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
       // base route 的 agent 维度为 not_applicable（§18），agentRevisionId/interface 传 null。
       const capabilityManifestDigest = computeCapabilityManifestDigest({
         agentRevisionId: revisions.agentRevision?.id ?? null,
-        agentInterfaceRequirements:
-          revisions.agentRevision?.agentInterfaceRequirementsJson ?? null,
+        agentInterfaceRequirements: revisions.agentRevision?.agentInterfaceRequirementsJson ?? null,
         runtimeRevisionId: revisions.runtimeRevision.id,
         runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
       });
@@ -300,7 +299,10 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
           .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
           .from(agentTable)
           .where(
-            and(eq(agentTable.id, agentRevisionKey.agentId), eq(agentTable.tenantId, input.tenantId)),
+            and(
+              eq(agentTable.id, agentRevisionKey.agentId),
+              eq(agentTable.tenantId, input.tenantId),
+            ),
           )
           .limit(1)
           .for("update");

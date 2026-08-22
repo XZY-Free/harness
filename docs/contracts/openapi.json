@@ -69,9 +69,6 @@
                     "id": {
                       "type": "string"
                     },
-                    "primary_agent_id": {
-                      "type": "string"
-                    },
                     "default_workspace_id": {
                       "type": "string"
                     },
@@ -87,7 +84,6 @@
                   },
                   "required": [
                     "id",
-                    "primary_agent_id",
                     "default_workspace_id",
                     "lifecycle_state",
                     "last_event_sequence",
@@ -97,7 +93,6 @@
                 },
                 "example": {
                   "id": "thr_01J...",
-                  "primary_agent_id": "agt_finance",
                   "default_workspace_id": "ws_sales",
                   "lifecycle_state": "active",
                   "last_event_sequence": 1,
@@ -121,16 +116,12 @@
           "RESOURCE_NOT_FOUND"
         ],
         "requestBody": {
-          "required": true,
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "agent_id": {
-                    "type": "string",
-                    "description": "员工有权使用的主 Agent"
-                  },
                   "title": {
                     "type": "string",
                     "description": "未传时由首个 Turn 生成"
@@ -145,9 +136,7 @@
                     "description": "仅 fork/delegate 的受控入口使用；普通创建不传"
                   }
                 },
-                "required": [
-                  "agent_id"
-                ],
+                "required": [],
                 "additionalProperties": false
               }
             }
@@ -297,122 +286,6 @@
                   }
                 },
                 "required": [],
-                "additionalProperties": false
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/threads/{thread_id}/change-primary-agent": {
-      "post": {
-        "operationId": "post_api_v1_threads_by_thread_id_change_primary_agent",
-        "summary": "更换 Thread 主 Agent",
-        "tags": [
-          "employee"
-        ],
-        "security": [
-          {
-            "employeeAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "thread_id",
-            "in": "path",
-            "required": true,
-            "description": "Thread id",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "description": "命令幂等键",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "成功响应，字段语义以对应规范章节为准。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "thread_id": {
-                      "type": "string"
-                    },
-                    "previous_agent_id": {
-                      "type": "string"
-                    },
-                    "primary_agent_id": {
-                      "type": "string"
-                    },
-                    "event_id": {
-                      "type": "string"
-                    },
-                    "applies_to_new_invocations": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "thread_id",
-                    "previous_agent_id",
-                    "primary_agent_id",
-                    "event_id",
-                    "applies_to_new_invocations"
-                  ],
-                  "additionalProperties": false
-                },
-                "example": {
-                  "thread_id": "thr_01J...",
-                  "previous_agent_id": "agt_finance",
-                  "primary_agent_id": "agt_risk",
-                  "event_id": "evt_primary_agent_changed",
-                  "applies_to_new_invocations": true
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/ErrorResponse"
-          }
-        },
-        "x-snowharness-doc": "api-and-events.md#更换-thread-主-agent",
-        "x-snowharness-boundary": "employee",
-        "x-snowharness-error-codes": [
-          "ACCESS_DENIED",
-          "AUTHENTICATION_REQUIRED",
-          "IDEMPOTENCY_CONFLICT",
-          "RATE_LIMITED",
-          "REQUEST_SCHEMA_INVALID",
-          "RESOURCE_NOT_FOUND"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "agent_id": {
-                    "type": "string",
-                    "description": "员工有权使用的新 Agent"
-                  },
-                  "reason": {
-                    "type": "string",
-                    "description": "员工可见交接原因"
-                  }
-                },
-                "required": [
-                  "agent_id",
-                  "reason"
-                ],
                 "additionalProperties": false
               }
             }
@@ -5588,7 +5461,7 @@
             "name": "thread_id",
             "in": "query",
             "required": false,
-            "description": "已有 Thread 场景；用于 Workspace、主 Agent 和策略上下文",
+            "description": "已有 Thread 场景；用于 Workspace 和策略上下文",
             "schema": {
               "type": "string"
             }
@@ -9349,5 +9222,5 @@
       }
     }
   },
-  "x-snowharness-operation-count": 63
+  "x-snowharness-operation-count": 62
 }

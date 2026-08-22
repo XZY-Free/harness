@@ -295,7 +295,6 @@ describe("Thread 设置更新", () => {
       updateThreadSettings(tenantId, thread.id, { defaultModelRef: "x" }, 999),
     ).rejects.toThrow(ThreadVersionConflictError);
   });
-
 });
 
 // ─── Turn 接纳事务 ───────────────────────────────────────

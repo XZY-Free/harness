@@ -1968,3 +1968,171 @@ describe("场景20：跨租户访问全部 Fail-closed", () => {
     expect(crossPublication).toBeNull();
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 场景 21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链驱动 agent-backed Projection
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 专题01 §33.8 要求「再独立证明 Agent Lifecycle → Create → Publish → Deploy →
+ * Withdraw / disable」。本场景与场景5/7/12 的差异在于：agent-backed 的
+ * RouteEligibilityProjection 必须由**真实 Outbox Delivery Worker 链**驱动
+ * （activateRouteSet → appendOutbox+seedEventDeliveries → pollOnce →
+ * projection event handler → buildRouteEligibility），而不是复用
+ * activateSingleRouteForTest（直连 buildProjection，§07.3 仅限窄范围 Integration Test）。
+ *
+ * 这是 0-Agent（e2e-bootstrap）在 agent-backed 一侧的对称证明，见关口07.4。
+ */
+
+describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链", () => {
+  it("Create → Publish → Deploy → Withdraw/disable 全程真实链 + Agent Evidence 完整 + disable fail-closed", async () => {
+    const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
+
+    // ─── 1. Agent Lifecycle: Create → Publish（正式控制面）──
+    const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
+      tenantId,
+      userIdentityId,
+      "lifecycle-agent",
+      "lifecycle-v1",
+    );
+    expect(agentRevision.revisionState).toBe("published");
+
+    // ─── 2. Deploy: Runtime + agent-backed RouteSet + RouteActivation ─
+    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
+      tenantId,
+      userIdentityId,
+      "lifecycle-runtime",
+      "lifecycle-rt-v1",
+    );
+    const routeSet = await createRouteSet({
+      tenantId,
+      agentId: agent.id,
+      routeScopeKey: "prod",
+      routeScopeJson: { networkZone: "internal" },
+    });
+
+    const activated = await createActivateRouteSet({
+      store: mysqlRouteSetActivationStore,
+    })({
+      tenantId,
+      routeSetId: routeSet.id,
+      expectedVersionNo: routeSet.versionNo,
+      desiredRoutes: [
+        {
+          routeKey: "primary",
+          routeGroupId: "primary",
+          agentRevisionId: agentRevision.id,
+          runtimeRevisionId: runtimeRevision.id,
+          trafficWeight: 10000,
+          priorityNo: 1,
+          eligibilityConditions: {},
+          activationState: "active",
+        },
+      ],
+      actor: { tenantId, actorType: "service", actorId: "lifecycle-deployer" },
+      reason: "J-3 Agent Lifecycle Deploy",
+      requestId: "req-lifecycle-deploy",
+      idempotencyKey: "idem-lifecycle-deploy",
+    });
+    const activation = activated.activations[0];
+    if (!activation) throw new Error("J-3 RouteActivation 缺失");
+    const routeId = activation.routeId;
+
+    // ─── 3. 真实 Outbox Delivery Worker 驱动 agent-backed Projection ─
+    const projectionHandler = createProjectionEventHandler({
+      store: mysqlRouteEligibilityStore,
+      sourceReader: mysqlRouteEligibilitySourceReader,
+      buildRouteEligibility: createBuildRouteEligibility({ store: mysqlRouteEligibilityStore }),
+    });
+    const outboxWorker = createOutboxRelayWorker(projectionHandler, { pollIntervalMs: 0 });
+
+    async function drainUntilRouteState(routeIdToCheck: string, target: string): Promise<void> {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await outboxWorker.pollOnce();
+        const projection = await mysqlRouteEligibilityStore.getProjectionByRoute(routeIdToCheck);
+        if (projection?.eligibilityState === target) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error(
+        `真实 Outbox Worker 未驱动 RouteEligibilityProjection 到达 ${target}（routeId=${routeIdToCheck}）`,
+      );
+    }
+    await drainUntilRouteState(routeId, "eligible");
+
+    const [projection] = await db
+      .select()
+      .from(routeEligibilityProjection)
+      .where(eq(routeEligibilityProjection.routeId, routeId))
+      .limit(1);
+    expect(projection?.eligibilityState).toBe("eligible");
+    // Agent-backed：条件性完整组全部为真（§10.3 agent route 全完整）。
+    expect(projection?.agentPublicationActive).toBe(1);
+    expect(projection?.agentEvidenceValid).toBe(1);
+    expect(projection?.agentPublicationRecordId).toBeTruthy();
+    expect(projection?.agentAttestationIds).toHaveLength(1);
+
+    // ─── 4. 唯一 Resolver 解析到 agent route → ExecutionBinding 冻结完整 Agent Evidence ─
+    const outcome = await createResolveRoute({
+      store: mysqlRouteEligibilityResolutionStore,
+    })({
+      tenantId,
+      agentConstraint: agent.id,
+      routeScopeKey: "prod",
+      businessKey: { threadId: "lifecycle-thread" },
+    });
+    expect(outcome.status).toBe("resolved");
+    if (outcome.status !== "resolved") throw new Error(`J-3 解析失败: ${outcome.reason}`);
+    expect(outcome.resolution.agentRevisionId).toBe(agentRevision.id);
+    expect(outcome.resolution.projectionVersionNo).toBeGreaterThan(0);
+
+    const invocationId = crypto.randomUUID();
+    await seedInvocation(tenantId, invocationId);
+    const binding = await createBindingFromResolved({
+      tenantId,
+      invocationId,
+      resolution: outcome.resolution,
+    });
+    // §8.1/§10.3：Agent-backed 时 Agent Evidence 条件性完整组为全完整（非 null）。
+    expect(binding.agentRevisionId).toBe(agentRevision.id);
+    expect(binding.agentArtifactDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(binding.agentAttestationIds).toHaveLength(1);
+    expect(binding.agentPublicationRecordId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+
+    // ─── 5. Withdraw/disable：禁用 Route → 真实 Worker 再消费 → Projection ineligible → fail-closed ─
+    const currentRouteSet = await getRouteSetById(tenantId, routeSet.id);
+    if (!currentRouteSet) throw new Error("J-3 RouteSet 不存在");
+    await disableRouteForTest({
+      tenantId,
+      routeSetId: routeSet.id,
+      routeId,
+      expectedVersionNo: currentRouteSet.versionNo,
+      actor: { tenantId, actorType: "service", actorId: "lifecycle-disabler" },
+      reason: "J-3 Agent Lifecycle Withdraw/disable",
+      requestId: "req-lifecycle-disable",
+      idempotencyKey: "idem-lifecycle-disable",
+    });
+    await drainUntilRouteState(routeId, "ineligible");
+
+    const postDisableResolution = await createResolveRoute({
+      store: mysqlRouteEligibilityResolutionStore,
+    })({
+      tenantId,
+      agentConstraint: agent.id,
+      routeScopeKey: "prod",
+      businessKey: { threadId: "lifecycle-thread-post-disable" },
+    });
+    expect(postDisableResolution.status).toBe("unresolved");
+
+    // 事件驱动路径：route.disabled → markIneligible（§projection-event-handlers），
+    // 权威断言是 eligibilityState="ineligible"（fail-closed）；activationState 保留
+    // 最后一次 build 的值（"active"），由 Authority rebuild 才会翻转为 "disabled"。
+    const [disabledProjection] = await db
+      .select()
+      .from(routeEligibilityProjection)
+      .where(eq(routeEligibilityProjection.routeId, routeId))
+      .limit(1);
+    expect(disabledProjection?.eligibilityState).toBe("ineligible");
+  });
+});

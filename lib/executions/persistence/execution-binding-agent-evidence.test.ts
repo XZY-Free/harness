@@ -1,3 +1,6 @@
+import { db } from "@/lib/db/client";
+import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { computeBindingConfigHash } from "@/lib/executions/test-support/create-unverified-execution-binding";
 /**
  * D 阶段 §10.3/§10.4 ExecutionBinding Agent Evidence 条件性完整组集成测试（真实 MySQL 8）。
  *
@@ -8,9 +11,6 @@
  */
 import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { db } from "@/lib/db/client";
-import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { computeBindingConfigHash } from "@/lib/executions/test-support/create-unverified-execution-binding";
 
 /** 构造一个 ExecutionBinding 的 raw INSERT 行（满足全部 NOT NULL 列；agent 维度由调用方指定）。 */
 function bindingInsertSql(
@@ -68,16 +68,7 @@ describe("ExecutionBinding Agent Evidence 条件性完整组（§10.3/§10.4）"
 
   it("base route（agent 全 null）通过 DB CHECK —— §10.3 全部为空合法", async () => {
     await expect(
-      insertBinding(
-        bindingInsertSql(
-          "inv-base-1",
-          null,
-          null,
-          null,
-          null,
-          null,
-        ),
-      ),
+      insertBinding(bindingInsertSql("inv-base-1", null, null, null, null, null)),
     ).resolves.toBeUndefined();
   });
 

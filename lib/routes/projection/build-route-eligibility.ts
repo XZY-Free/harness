@@ -142,8 +142,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     // 5. 读取 Agent + AgentRevision + Runtime + RuntimeRevision（权威事实）
     // 无 Agent 约束（routeSet.agentId / revision.agentRevisionId 为 null）→
     // 基础 Harness Route，Agent 维度事实跳过，Agent Evidence 为 not_applicable（§18）。
-    const hasAgentConstraint =
-      routeSet.agentId !== null && revision.agentRevisionId !== null;
+    const hasAgentConstraint = routeSet.agentId !== null && revision.agentRevisionId !== null;
     const [agent, agentRevision, runtimeRevision] = await Promise.all([
       hasAgentConstraint && routeSet.agentId
         ? db
@@ -169,16 +168,15 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
         .then((r) => r[0] ?? null),
     ]);
 
-    const [runtime] =
-      runtimeRevision
-        ? await db
-            .select()
-            .from(runtimeTable)
-            .where(
-              and(eq(runtimeTable.id, runtimeRevision.runtimeId), isNull(runtimeTable.deletedAt)),
-            )
-            .limit(1)
-        : [null];
+    const [runtime] = runtimeRevision
+      ? await db
+          .select()
+          .from(runtimeTable)
+          .where(
+            and(eq(runtimeTable.id, runtimeRevision.runtimeId), isNull(runtimeTable.deletedAt)),
+          )
+          .limit(1)
+      : [null];
 
     // §03: 7. 使用统一 Reader 加载完整证据快照（无 Agent 约束时 Reader 内部跳过 Agent 维度）
     const evidenceReader = createMySqlRevisionExecutionEvidenceReader({ db });
@@ -219,8 +217,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
         agentRevision?.revisionState === "published" &&
         runtime?.lifecycleState === "enabled" &&
         runtimeRevision?.revisionState === "published"
-      : runtime?.lifecycleState === "enabled" &&
-        runtimeRevision?.revisionState === "published";
+      : runtime?.lifecycleState === "enabled" && runtimeRevision?.revisionState === "published";
     const isEligible =
       routeAuthorityEligible && entityLifecycleEligible && eligibilityResult.eligible;
 

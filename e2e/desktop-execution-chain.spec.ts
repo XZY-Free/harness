@@ -15,6 +15,11 @@
  * 未构建时**明确失败**而非跳过（§22 禁止把 skip 当作完成）。
  *
  * 断言策略与 Web 一致：结构性事实全断言，回复文本只记日志不校验。
+ *
+ * 本用例跑在 e2e-bootstrap 的**基础 Harness Route**（§8.3 base route，
+ * agentRevisionId=null）之上，即专题01 的 0-Agent 场景：ExecutionBinding 的
+ * Agent Evidence 为条件性完整组的「全空」终态（canonical null，§10.3/§18）。
+ * Agent-backed 场景由 agent-execution-chain.spec.ts（J-3 集成侧）+ 场景21 覆盖。
  */
 import { type Page, expect, test } from "@playwright/test";
 import { E2E_ORIGIN } from "../playwright.config";
@@ -106,12 +111,16 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     // Desktop 必须使用与 Web 完全相同的正式 Binding 模型（§0.8：不存在 Desktop Runtime V2）。
     expect(binding.route_revision_id).toMatch(UUID_PATTERN);
     expect(binding.route_activation_id).toMatch(UUID_PATTERN);
-    expect(binding.agent_publication_record_id).toMatch(UUID_PATTERN);
     expect(binding.runtime_publication_record_id).toMatch(UUID_PATTERN);
     expect(binding.conformance_run_id).toMatch(UUID_PATTERN);
     expect(binding.resolution_input_digest).toMatch(SHA256_PATTERN);
     expect(binding.resolution_input_digest).not.toBe(PLACEHOLDER_DIGEST);
-    expect((binding.agent_attestation_ids as string[]).length).toBeGreaterThan(0);
+    // §10.3/§18：0-Agent 基础 Harness Route — Agent Evidence 条件性完整组为「全空」（canonical null）。
+    // Desktop 与 Web 走同一正式 Binding 模型；Agent 不是执行前置（§35）。
+    expect(binding.agent_revision_id).toBeNull();
+    expect(binding.agent_artifact_digest).toBeNull();
+    expect(binding.agent_attestation_ids).toBeNull();
+    expect(binding.agent_publication_record_id).toBeNull();
     expect((binding.runtime_attestation_ids as string[]).length).toBeGreaterThan(0);
 
     // ─── 6. Workspace / Environment 正常 ────────────────────

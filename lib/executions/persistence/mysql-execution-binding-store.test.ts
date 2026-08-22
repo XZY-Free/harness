@@ -263,9 +263,7 @@ describe("ExecutionBinding authority final validation", () => {
       new URL("./mysql-execution-binding-store.ts", import.meta.url),
       "utf8",
     );
-    expect(source).toContain(
-      "for (const attestationId of [...agentAttestationIds].sort())",
-    );
+    expect(source).toContain("for (const attestationId of [...agentAttestationIds].sort())");
     expect(source).toContain("const agentAttestationIds = evidence.agentAttestationIds ?? [];");
     expect(source).toContain(
       "for (const attestationId of [...evidence.runtimeAttestationIds].sort())",

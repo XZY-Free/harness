@@ -95,10 +95,7 @@ async function seedTenantAndOwner() {
 }
 
 /** seed 父 Thread（createThread；Thread 已无 primaryAgentId，无需绑定 Agent）。 */
-async function seedParentThread(
-  tenantId: string,
-  ownerId: string,
-): Promise<{ threadId: string }> {
+async function seedParentThread(tenantId: string, ownerId: string): Promise<{ threadId: string }> {
   const { thread } = await createThread({
     tenantId,
     ownerUserId: ownerId,

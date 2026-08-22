@@ -278,8 +278,9 @@ export const environmentChangeRequestTable = mysqlTable(
     /** 当前 Invocation id；可空表示下一 Invocation 生效。 */
     invocationId: varchar("invocationId", { length: 36 }),
     fromEnvironmentDefinitionId: varchar("fromEnvironmentDefinitionId", { length: 36 }).notNull(),
-    requestedEnvironmentDefinitionId: varchar("requestedEnvironmentDefinitionId", { length: 36 })
-      .notNull(),
+    requestedEnvironmentDefinitionId: varchar("requestedEnvironmentDefinitionId", {
+      length: 36,
+    }).notNull(),
     /** 切换到指定设备（仅 Desktop 必填）。 */
     requestedDeviceId: varchar("requestedDeviceId", { length: 36 }),
     requestState: mysqlEnum("requestState", ENVIRONMENT_CHANGE_REQUEST_STATES)

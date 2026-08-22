@@ -46,7 +46,7 @@ test.describe("§20.6 跨端一致性", () => {
   }) => {
     // ─── 1. Web 创建 Thread 并发送首条消息 ────────────────
     const webFirstMessage = "跨端用例：这条来自 Web。";
-    await page.goto("/chat/new");
+    await page.goto("/chat");
     const webInput = page.getByLabel("消息输入框");
     await expect(webInput).toBeEnabled({ timeout: 90_000 });
     await webInput.fill(webFirstMessage);

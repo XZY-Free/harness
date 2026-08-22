@@ -79,7 +79,6 @@ export interface DelegationBudgetPolicy {
   maxArtifactBytes?: number;
 }
 
-
 // ─── S09-C02 类型定义 ───────────────────────────────────────
 
 /**
@@ -265,7 +264,6 @@ export interface RecordChildThreadBudgetUsageResult {
   /** 超限字段（exhausted=true 时非空）。 */
   exceededField?: ChildBudgetExceededField;
 }
-
 
 // ─── 查询函数 ───────────────────────────────────────────────
 

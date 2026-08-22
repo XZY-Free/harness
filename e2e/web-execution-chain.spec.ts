@@ -1,20 +1,27 @@
 /**
- * §20.4 Web 正式执行链 E2E。
+ * §20.4 Web 正式执行链 E2E — 0-Agent 场景。
  *
  * 方案 §20.4 要求至少覆盖：
  *
  *   打开 Web → 创建 Thread → 发送消息 → 创建 Turn → 服务端生成 Invocation
  *   → ExecutionBinding 存在 → 时间线收到 Event → Agent 回复显示
  *
+ * 本用例跑在 e2e-bootstrap 的**基础 Harness Route**（§8.3 base route，
+ * agentRevisionId=null）之上，即专题01 的 **0-Agent True E2E**：Agent 目录为空
+ * （Agent 空表合法，§6.2/§33.1），Thread 创建不要求、不 fallback Agent（§35）。
+ *
  * 断言策略：
  * - 结构性事实全部断言（Thread / Turn / Invocation / ExecutionBinding / Event /
  *   非空 Agent 回复），因为这些是确定的，CI 需要明确的通过/失败信号（§21）。
  * - **不断言回复文本内容**——模型措辞不是被测对象，写死会造成脆弱断言。
  *   回复原文打到测试日志，供人工与 CI 日志核对是否正常。
- * - ExecutionBinding 逐字段核对 §8.1 要求的必填冻结证据，并明确拒绝
- *   §18.6 禁止的全零占位摘要。
+ * - ExecutionBinding 逐字段核对：route + runtime 无条件证据必填（§8.1），
+ *   Agent Evidence 为条件性完整组的「全空」终态（canonical null，§10.3/§18）；
+ *   并明确拒绝 §18.6 禁止的全零占位摘要。
  *
- * 事实源：docs/V12/01/SnowHarness 专题 01 最终收口实施总方案.md §8.1 / §18.6 / §20.4
+ * Agent-backed 场景（Agent 证据全完整）由 agent-execution-chain.spec.ts（J-3）覆盖。
+ *
+ * 事实源：docs/V12/01/SnowHarness 专题 01 最终收口实施总方案.md §8.1 / §10.3 / §18.6 / §20.4
  */
 import { expect, test } from "@playwright/test";
 
@@ -54,19 +61,19 @@ interface ThreadEventItem {
 
 interface ExecutionBindingResponse {
   invocation_id: string;
-  agent_revision_id: string;
+  agent_revision_id: string | null;
   runtime_revision_id: string;
   deployment_route_id: string;
   route_revision_id: string;
   route_activation_id: string;
   route_content_digest: string;
-  agent_artifact_digest: string;
+  agent_artifact_digest: string | null;
   runtime_artifact_digest: string;
   runtime_config_digest: string;
   capability_manifest_digest: string;
-  agent_attestation_ids: readonly string[];
+  agent_attestation_ids: readonly string[] | null;
   runtime_attestation_ids: readonly string[];
-  agent_publication_record_id: string;
+  agent_publication_record_id: string | null;
   runtime_publication_record_id: string;
   conformance_run_id: string;
   resolution_input_digest: string;
@@ -89,7 +96,7 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   request,
 }) => {
   // ─── 1. 打开 Web 新会话页 ────────────────────────────────
-  await page.goto("/chat/new");
+  await page.goto("/chat");
 
   const input = page.getByLabel("消息输入框");
   await expect(input).toBeEnabled({ timeout: 60_000 });
@@ -153,21 +160,25 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   expect(binding.deployment_route_id).toMatch(UUID_PATTERN);
   expect(binding.route_content_digest).toMatch(SHA256_PATTERN);
 
-  // §8.1：Artifact / Config / Capability 摘要必填。
-  expect(binding.agent_artifact_digest).toMatch(SHA256_PATTERN);
+  // §8.1：Runtime Artifact / Config / Capability 摘要必填（Runtime Evidence 无条件完整）。
   expect(binding.runtime_artifact_digest).toMatch(SHA256_PATTERN);
   expect(binding.runtime_config_digest).toMatch(SHA256_PATTERN);
   expect(binding.capability_manifest_digest).toMatch(SHA256_PATTERN);
 
-  // §8.5：Attestation 集合必须非空（不是"子集"，是当时的完整集合）。
-  expect(binding.agent_attestation_ids.length).toBeGreaterThan(0);
+  // §10.3/§18：0-Agent 基础 Harness Route — Agent Evidence 条件性完整组为「全空」（canonical null）。
+  // Agent 不是 Thread 或基础 Harness 执行的前置条件（§35），agent_* 全部为 null 是合法终态。
+  expect(binding.agent_revision_id).toBeNull();
+  expect(binding.agent_artifact_digest).toBeNull();
+  expect(binding.agent_attestation_ids).toBeNull();
+  expect(binding.agent_publication_record_id).toBeNull();
+
+  // §8.5：Runtime Attestation 集合必须非空（不是"子集"，是当时的完整集合）。
   expect(binding.runtime_attestation_ids.length).toBeGreaterThan(0);
 
-  // §8.6：Publication 精确绑定。
-  expect(binding.agent_publication_record_id).toMatch(UUID_PATTERN);
+  // §8.6：Publication 精确绑定 — Runtime 无条件、Agent 条件性（此处为 null）。
   expect(binding.runtime_publication_record_id).toMatch(UUID_PATTERN);
 
-  // §8.4：冻结的是确切的 ConformanceRun。
+  // §8.4：冻结的是确切的 ConformanceRun（Runtime Publication Conformance 无条件严格）。
   expect(binding.conformance_run_id).toMatch(UUID_PATTERN);
 
   // §7：真实 Resolver 输入摘要，且非全零占位（§18.6）。
@@ -175,14 +186,12 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   expect(binding.resolution_input_digest).not.toBe(PLACEHOLDER_DIGEST);
   expect(binding.projection_version_no).toBeGreaterThan(0);
 
-  // Revision 绑定。
-  expect(binding.agent_revision_id).toMatch(UUID_PATTERN);
+  // Revision 绑定：Runtime 必填、Agent 为 null（§10.3）。
   expect(binding.runtime_revision_id).toMatch(UUID_PATTERN);
 
-  // 全部摘要字段都不得是占位值。
+  // 全部「必填」摘要字段都不得是占位值（route + runtime 无条件字段）。
   for (const [field, value] of Object.entries({
     route_content_digest: binding.route_content_digest,
-    agent_artifact_digest: binding.agent_artifact_digest,
     runtime_artifact_digest: binding.runtime_artifact_digest,
     runtime_config_digest: binding.runtime_config_digest,
     capability_manifest_digest: binding.capability_manifest_digest,

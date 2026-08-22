@@ -95,9 +95,7 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
  * Agent 维度字段直接透传（base route 为 null，§18 Agent Evidence not_applicable，
  * 禁止伪装 passed、禁止空串假证据）。
  */
-function buildControlPlaneEvidence(
-  p: RouteEligibilityProjectionRecord,
-): RouteControlPlaneEvidence {
+function buildControlPlaneEvidence(p: RouteEligibilityProjectionRecord): RouteControlPlaneEvidence {
   if (
     !p.runtimeArtifactId ||
     !p.runtimeArtifactDigest ||

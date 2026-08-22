@@ -159,8 +159,7 @@ export async function resolveExecutionPlan(
   // 本次 / Thread 显式模型 → 平台默认模型决定（§9.2）。AgentRevision 模型策略仅在
   // 存在 Agent 约束时进入优先级（§9.2）。
   const agentRevisionId = routeResolution.agentRevisionId;
-  const agentRevision =
-    agentRevisionId !== null ? await getRevisionById(agentRevisionId) : null;
+  const agentRevision = agentRevisionId !== null ? await getRevisionById(agentRevisionId) : null;
   if (agentRevisionId !== null && !agentRevision) {
     return { resolved: false, reason: "agent_revision_not_found" };
   }

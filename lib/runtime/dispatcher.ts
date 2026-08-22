@@ -568,14 +568,10 @@ async function dispatchToRuntime(params: {
           instruction_hash: params.agentRevision.instructionHash,
           artifact_ref: params.agentRevision.agentArtifactRef,
           model_policy: (params.agentRevision.modelPolicyJson ?? {}) as Record<string, unknown>,
-          permission_requirements: (params.agentRevision.permissionRequirementsJson ?? {}) as Record<
-            string,
-            unknown
-          >,
-          interface_requirements: (params.agentRevision.agentInterfaceRequirementsJson ?? {}) as Record<
-            string,
-            unknown
-          >,
+          permission_requirements: (params.agentRevision.permissionRequirementsJson ??
+            {}) as Record<string, unknown>,
+          interface_requirements: (params.agentRevision.agentInterfaceRequirementsJson ??
+            {}) as Record<string, unknown>,
         }
       : null,
     input_items: [

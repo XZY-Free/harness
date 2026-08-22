@@ -162,10 +162,18 @@ export function createActivateRouteSet(dependencies: {
         if (hasAgentConstraint) {
           const agentRevision = await session.findAgentRevision(desired.agentRevisionId as string);
           if (!agentRevision) {
-            throw new RevisionNotPublishedError(desired.agentRevisionId as string, "agent", "not_found");
+            throw new RevisionNotPublishedError(
+              desired.agentRevisionId as string,
+              "agent",
+              "not_found",
+            );
           }
           if (agentRevision.agentId !== routeSet.agentId) {
-            throw new RevisionNotPublishedError(desired.agentRevisionId as string, "agent", "wrong_agent");
+            throw new RevisionNotPublishedError(
+              desired.agentRevisionId as string,
+              "agent",
+              "wrong_agent",
+            );
           }
         }
 

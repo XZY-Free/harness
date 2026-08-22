@@ -19,14 +19,14 @@ import { expect, test } from "@playwright/test";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-test("首页 / 重定向到新会话页 /chat/new", async ({ page }) => {
+test("首页 / 重定向到新会话页 /chat（§33.7，无 /chat/new 假路由）", async ({ page }) => {
   const response = await page.goto("/");
   expect(response?.status()).toBeLessThan(400);
-  await expect(page).toHaveURL(/\/chat\/new$/);
+  await expect(page).toHaveURL(/\/chat$/);
 });
 
-test("/chat/new 渲染新会话页（可输入）", async ({ page }) => {
-  const response = await page.goto("/chat/new");
+test("/chat 渲染新会话页（可输入）", async ({ page }) => {
+  const response = await page.goto("/chat");
   expect(response?.status()).toBeLessThan(400);
   // 助手列表加载完成后输入框可用——证明 GET /api/v1/threads 正常返回。
   await expect(page.getByLabel("消息输入框")).toBeEnabled({ timeout: 60_000 });

@@ -25,12 +25,7 @@ import {
   schemaInvalidTable,
 } from "@/lib/conversations/route-helpers";
 import { createThread, listThreadsForUser } from "@/lib/conversations/thread-queries";
-import {
-  IDEMPOTENCY_KEY_HEADER,
-  REQUEST_ID_HEADER,
-  apiSuccess,
-  getRequestId,
-} from "@/lib/http";
+import { IDEMPOTENCY_KEY_HEADER, REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
