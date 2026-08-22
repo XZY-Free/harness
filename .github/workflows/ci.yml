@@ -74,18 +74,21 @@ jobs:
       - name: Seed
         run: pnpm db:seed
 
-      - name: Unit and MySQL integration tests
-        run: pnpm test
-
-      - name: Control-plane and Hosted E2E
-        run: pnpm vitest run lib/control-plane/end-to-end-acceptance.test.ts
-
+      # lib/qa/probes.browser.test.ts 需要 Playwright Chromium（pnpm test 会跑它），
+      # 因此必须在 pnpm test 之前安装，否则 CI 干净环境报
+      # browserType.launch: Executable doesn't exist。
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 
       # Electron E2E 需要 X server（Desktop / Cross-client 用例真启动 Electron）。
       - name: Install Xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Unit and MySQL integration tests
+        run: pnpm test
+
+      - name: Control-plane and Hosted E2E
+        run: pnpm vitest run lib/control-plane/end-to-end-acceptance.test.ts
 
       # Desktop E2E 依赖打包产物与为 Electron ABI 重建的 better-sqlite3。
       - name: Desktop build
