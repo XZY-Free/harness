@@ -7,4 +7,3 @@ allowBuilds:
   sharp: true
   ssh2: true
   tesseract.js: true
-storeDir: /Users/sunshine/Library/pnpm/store/v11
