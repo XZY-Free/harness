@@ -37,10 +37,6 @@ export interface EmployeeTurnDispatchResult {
   dispatched: boolean;
   /** Agent Loop 的后台执行；HTTP 路由不等待它，测试可等待。 */
   completion: Promise<void>;
-  /** 当 dispatched=false 且 Hosted Route 尚未就绪时的供应状态。 */
-  provisioningRequestId?: string;
-  provisioningState?: string;
-  retryAfterMs?: number;
 }
 
 function configuredModelFn(): ModelFn {
@@ -60,9 +56,10 @@ function configuredModelFn(): ModelFn {
 /**
  * 调度员工发起的会话 Turn。
  *
- * 第二批改造：移除同步 Hosted 供应调用。
- * 热路径只允许：读取 Ready Route → 创建 Invocation/Binding → 调度。
- * 无 Ready Route 时幂等创建 ProvisioningRequest（不执行外部调用）。
+ * 正式热路径（§9.3）：读取 Thread → Resolve 基础 Harness Route（agentConstraint 默认 null，§8.3）
+ * → 创建 Invocation → 创建 ExecutionBinding → Runtime Dispatch。
+ * 无 Ready Route 时返回未调度（不做 Agent-specific Hosted Provisioning，§11.2/§11.5）；
+ * 基础 Harness Route 的供应策略由后续阶段（F）通过正式控制面初始化。
  */
 export async function dispatchEmployeeTurn(params: {
   tenantId: string;
