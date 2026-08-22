@@ -34,7 +34,7 @@ flowchart LR
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
 | agent_id | Query | string | 否 | 已选 Agent；传入后计算本次可追加能力 |
-| thread_id | Query | string | 否 | 已有 Thread 场景；用于 Workspace、主 Agent 和策略上下文 |
+| thread_id | Query | string | 否 | 已有 Thread 场景；用于 Workspace 和策略上下文 |
 | capability_types | Query | string[] | 否 | agent、skill、model、environment；默认返回任务输入区全部类型 |
 | query | Query | string | 否 | 名称、描述和标签搜索，最大 200 字符 |
 | cursor | Query | string | 否 | 不透明分页游标 |
@@ -295,14 +295,7 @@ curl -X POST 'https://snow.example.com/gateway/v1/child-threads/thr_child:cancel
 
 ## 5. Handoff 统一规则
 
-主 Agent 交接不新增 Child Thread 命令，也不新增独立交接请求表：
-
-1. Workflow/Runtime 调用 [发起用户操作请求](./api-and-events.md#55-发起用户操作请求)，提交 `request_type=confirmation`、`purpose=handoff` 和目标 Agent。
-2. 平台创建 user_action_request Item，写 `handoff.requested` 与 `user_action.requested`，当前 Invocation 进入 waiting_user。
-3. 员工通过 [解析用户操作请求](./api-and-events.md#318-解析用户操作请求) 接受或拒绝。
-4. 接受时由 Employee Application Service 原子更新 `thread.primary_agent_id`，写 `thread.primary_agent_changed`、`handoff.completed`；拒绝只写解析结果并恢复原 Invocation。
-
-业务例子：风险审核子任务完成不代表风险 Agent 接管会话；只有员工在明确提示中确认，主 Agent 才从财务 Agent 改为风险 Agent。
+Agent 交接（handoff）属后续 Agent 调用专题：专题 01 已删除 Thread 上的 `primary_agent_id` 与 `thread.primary_agent_changed`，Thread 不保存主 Agent 身份。届时该专题将重新定义交接事实与用户确认语义；专题 01 不伪造 `thread.primary_agent_id` 变更。
 
 ## 6. 稳定错误码
 
@@ -331,4 +324,4 @@ curl -X POST 'https://snow.example.com/gateway/v1/child-threads/thr_child:cancel
 | 重放 Child Thread 创建 | 相同幂等键返回相同 relation/child Thread，不重复执行 |
 | Child Thread 结果 | 父 Turn 只出现一个 child_thread Item 和结构化结果引用 |
 | 取消子任务 | 先 cancel_requested，Runtime ack 后才 cancelled |
-| Workflow 请求交接 | 使用 UserActionRequest；员工拒绝时主 Agent 不变 |
+| Workflow 请求交接 | 使用 UserActionRequest；员工拒绝时主导 Agent 不变（交接语义属后续专题） |

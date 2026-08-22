@@ -110,7 +110,7 @@ erDiagram
 
 ### 4.1 `agent`
 
-稳定 Agent 身份，是员工目录中唯一可运行资产。
+稳定 Agent 身份，是 Harness 可治理、可调用的一类智能体资产；它不是唯一可运行资产，也不是 Thread/Route/Binding 的存在前置（Agent 表为空是合法状态）。
 
 | 字段 | 类型 | 必填 | 约束与说明 |
 |---|---|---:|---|
@@ -205,7 +205,6 @@ Tool Schema 新修订在调用开始前解析；高风险差异进入能力负�
 | id | CHAR(36) | 是 | 主键 |
 | tenant_id | CHAR(36) | 是 | 租户 |
 | owner_user_id | CHAR(36) | 是 | 会话所有者 |
-| primary_agent_id | CHAR(36) | 是 | 当前主 Agent 稳定身份 |
 | default_workspace_id | CHAR(36) | 否 | 默认逻辑 Workspace |
 | active_goal_id | CHAR(36) | 否 | 当前 Goal |
 | title | TEXT | 否 | 首个 Turn 前可为空，生成后更新 |
@@ -220,7 +219,7 @@ Tool Schema 新修订在调用开始前解析；高风险差异进入能力负�
 | version_no | BIGINT | 是 | 并发更新 |
 | created_at / updated_at / deleted_at | DATETIME(3) | 是/是/否 | 生命周期时间 |
 
-索引：`INDEX(tenant_id, owner_user_id, lifecycle_state, last_activity_at DESC)`；`INDEX(tenant_id, primary_agent_id, last_activity_at DESC)`。
+索引：`INDEX(tenant_id, owner_user_id, lifecycle_state, last_activity_at DESC)`。
 
 ### 5.2 `thread_relation`
 
@@ -230,7 +229,7 @@ Tool Schema 新修订在调用开始前解析；高风险差异进入能力负�
 | parent_thread_id / child_thread_id | CHAR(36) | 是 | 父子 Thread |
 | relation_type | VARCHAR(32) | 是 | delegate、fork、workflow_child；handoff 不创建第二个 Thread |
 | source_turn_id / source_item_id / source_invocation_id | CHAR(36) | 否 | 关系产生位置；delegate 必须有 source_invocation_id |
-| target_agent_id | CHAR(36) | 否 | delegate 目标 Agent；fork 可为空并继承主 Agent |
+| target_agent_id | CHAR(36) | 否 | delegate 目标 Agent；Thread 不保存主 Agent，fork 不继承主 Agent |
 | task_payload_ref / task_payload_hash | VARCHAR(512)/VARCHAR(128) | 否 | 结构化任务说明，不复制父 Thread 全文 |
 | context_transfer_policy_json | JSON | 否 | task_only、recent、full 及允许的 Item/Artifact 引用 |
 | budget_policy_json | JSON | 否 | Token、费用、ToolCall、并发和深度上限 |

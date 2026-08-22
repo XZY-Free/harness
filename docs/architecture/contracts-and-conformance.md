@@ -119,7 +119,7 @@ Runtime capabilities 响应必须列出可生产的 candidate event type 和最�
 - 文档错误码是否全部进入机器目录，HTTP 映射是否一致。
 - Runtime 一致性 case 是否完整且 id 唯一。
 - 统一领域/数据模型中是否存在 MemoryCandidate、replacement Job、投影 checkpoint、Legal Hold、执行所有权和制品证明。
-- 主 Agent Handoff 是否统一使用 UserActionRequest，而不是形成第二套交接请求事实。
+- 主导 Agent Handoff 是否统一使用 UserActionRequest，而不是形成第二套交接请求事实（交接语义属后续 Agent 调用专题）。
 
 ```bash
 python3 docs/contracts/scripts/validate_contracts.py

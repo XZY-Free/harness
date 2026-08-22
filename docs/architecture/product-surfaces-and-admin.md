@@ -77,7 +77,7 @@ Web 不能伪装成本地执行。本地文件或本机浏览器任务只有在�
 员工端主界面围绕 Thread，而不是围绕 Run 表单：
 
 ~~~text
-Thread 标题与主 Agent
+Thread 标题
 ├─ 可选 Goal 与任务状态
 ├─ 事件时间线
 │  ├─ 用户与 Agent 消息
@@ -96,7 +96,7 @@ Thread 标题与主 Agent
 
 Desktop 在同一任务界面右侧增加任务操作面板：可以展示文件或页面结果，也可以打开内部系统完成查询、填写、确认和提交。接口可用时不强制打开页面；需要本地登录态或页面交互时，动作路由到 Desktop Environment。
 
-Agent 与 Skill 选择器放在同一输入区域。模型、Skill 和执行位置可以按任务调整；主 Agent 的变化必须显式记录。某个 Agent Revision 不支持模型替换或动态 Skill 时，控件保持可见但禁用，并用中文说明原因。
+Agent 与 Skill 选择器放在同一输入区域。模型、Skill 和执行位置可以按任务调整。Agent 目录为空时选择器显示"还没有智能体"，但不阻止创建 Thread 或发送 Turn。某个 Agent Revision 不支持模型替换或动态 Skill 时，控件保持可见但禁用，并用中文说明原因。
 
 Preview 已属于 Harness 面板能力，不再作为 Agent 独立产品功能。员工侧的项目部署与 Git 交付不属于本方案；管理员对 Agent Runtime 的发布部署仍属于平台能力。
 
@@ -104,7 +104,7 @@ Preview 已属于 Harness 面板能力，不再作为 Agent 独立产品功能�
 
 ### 5.1 创建 Thread
 
-用户选择主 Agent，可以选择默认 Workspace 或直接发送消息。平台创建 Thread，保存主 Agent 身份和默认位置，但不锁死未来的模型、Skill、Tool 内容和执行节点。
+用户可以只输入标题、选择默认 Workspace 或直接发送消息。平台创建 Thread，保存默认位置与连续历史；创建 Thread 不要求、也不保存任何主 Agent 身份（Agent 目录为空仍可创建）。
 
 ### 5.2 切换模型
 
@@ -112,16 +112,9 @@ Preview 已属于 Harness 面板能力，不再作为 Agent 独立产品功能�
 
 业务例子：用户发现当前模型不能识别图片，选择视觉模型继续提问。Thread、文件和已确认约束不变。
 
-### 5.3 更换主 Agent
+### 5.3 更换 Agent 约束（后续专题）
 
-更换主 Agent 是显式交接：
-
-- 界面展示将由哪个 Agent 接管。
-- 平台记录交接原因、原 Agent 和新 Agent。
-- 新 Agent 获得经过作用域和权限筛选的上下文。
-- 原 Thread 历史与 Workspace 可以继续使用。
-
-临时调用辅助 Agent 默认创建 Child Thread，不等同于更换主 Agent。
+专题 01 已移除 Thread 上的主 Agent 身份与 `change-primary-agent`：Thread 不保存主 Agent。用户在某个 Turn/Invocation 偏好某 Agent、Agent 交接（handoff）与调用规划的语义由后续 Agent 调用专题定义；届时在该专题约束下实现显式交接，专题 01 不提前定义。
 
 ### 5.4 运行中发送消息
 
@@ -132,7 +125,7 @@ Preview 已属于 Harness 面板能力，不再作为 Agent 独立产品功能�
 - 引导：默认在下一安全决策点把输入注入当前 Turn；只有员工选择中断生成模式且 Runtime 确认后才停止未完成生成，ack 后显示“已引导本次对话”。
 - 停止：中断当前 Turn，暂停队列，不自动发送下一条。
 
-携带主 Agent、执行环境或高影响能力变化的输入不能隐式注入当前行动；平台应明确结束当前行动后再采用新配置。
+携带 Agent 约束、执行环境或高影响能力变化的输入不能隐式注入当前行动；平台应明确结束当前行动后再采用新配置。
 
 ### 5.5 重试与重新生成
 
@@ -268,7 +261,7 @@ Agent 默认全员可用，也可以限制到：
 | Web 与 Desktop 是否能继续同一任务 | 可以，事件与上下文连续；本地动作仍由 Desktop 执行 |
 | Desktop 是否也能处理云端任务 | 能；它具备 Web 的云端能力，并额外连接本地资源和本机环境 |
 | 员工是否还要在多个系统间手工搬数据 | 目标是不需要；优先通过受控接口完成，必须页面操作时在 Desktop 右侧继续，敏感提交由员工确认 |
-| 切换主 Agent 是否偷偷发生 | 不可以，必须显示并记录交接 |
+| Thread 是否依赖 Agent 存在 | 否；Agent 目录为空也能创建 Thread 并执行，Thread 不保存主 Agent |
 | 运行中输入是否造成重复消息 | 不会，PendingInput 在正式发送前不是 UserMessage |
 | 重试是否产生多个相同用户消息 | 不会，旧回答分支被替代，用户消息唯一 |
 | 管理员是否要维护每次执行版本表 | 不需要，平台从 Binding、CapabilityUse、ToolCall、ThreadEvent/JobEvent 和 Trace 组合实际记录 |

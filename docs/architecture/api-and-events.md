@@ -116,7 +116,6 @@ Idempotency-Key 至少保留到该命令不可能被客户端合理重放；有�
 | 请求参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---:|---|
 | Idempotency-Key | Header | string | 是 | 创建幂等键 |
-| agent_id | Body | string | 是 | 员工有权使用的主 Agent |
 | title | Body | string | 否 | 未传时由首个 Turn 生成 |
 | workspace_id | Body | string | 否 | 默认逻辑 Workspace |
 | parent | Body | object | 否 | 仅 fork/delegate 的受控入口使用；普通创建不传 |
@@ -126,13 +125,12 @@ curl -X POST 'https://snow.example.com/api/v1/threads' \
   -H 'Authorization: Bearer <employee-token>' \
   -H 'Idempotency-Key: 018f-create-report-thread' \
   -H 'Content-Type: application/json' \
-  -d '{"agent_id":"agt_finance","workspace_id":"ws_sales"}'
+  -d '{"workspace_id":"ws_sales"}'
 ```
 
 ```json
 {
   "id": "thr_01J...",
-  "primary_agent_id": "agt_finance",
   "default_workspace_id": "ws_sales",
   "lifecycle_state": "active",
   "last_event_sequence": 1,
@@ -140,7 +138,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads' \
 }
 ```
 
-服务端同时写入 Thread 和 `thread.created` Event。员工无权使用的 Agent 返回 404，不泄露其存在。
+服务端同时写入 Thread 和 `thread.created` Event。创建 Thread 不要求、也不校验任何 Agent；Agent 目录为空时仍可正常创建 Thread。
 
 ### 3.2 更新 Thread 默认设置
 
@@ -175,37 +173,9 @@ curl -X PATCH 'https://snow.example.com/api/v1/threads/thr_01J.../settings' \
 
 实际模型和 Lease 仍以 ExecutionBinding 为准；当前等待恢复的 Invocation 不因默认设置变化换 Binding。
 
-### 3.3 更换 Thread 主 Agent
+### 3.3 Thread 不再支持"更换主 Agent"
 
-`POST /api/v1/threads/{thread_id}/change-primary-agent`
-
-| 请求参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---:|---|
-| thread_id | Path | string | 是 | Thread id |
-| Idempotency-Key | Header | string | 是 | 命令幂等键 |
-| agent_id | Body | string | 是 | 员工有权使用的新 Agent |
-| reason | Body | string | 是 | 员工可见交接原因 |
-
-```bash
-curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J...:change-primary-agent' \
-  -H 'Authorization: Bearer <employee-token>' \
-  -H 'Idempotency-Key: handoff-risk-agent-1' \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_id":"agt_risk","reason":"后续由风险审核助手负责"}'
-```
-
-```json
-{
-  "thread_id": "thr_01J...",
-  "previous_agent_id": "agt_finance",
-  "primary_agent_id": "agt_risk",
-  "event_id": "evt_primary_agent_changed",
-  "applies_to_new_invocations": true
-}
-```
-
-员工主动调用即是显式确认；Workflow 只能先创建 `request_type=confirmation、purpose=handoff` 的 UserActionRequest，不能直接调用该命令。
-
+专题 01 已移除 `POST /api/v1/threads/{thread_id}/change-primary-agent` 及 `primary_agent_id`：Thread 不保存主 Agent 身份，也不存在 `thread.primary_agent_changed` 事件。用户在某个 Turn/Invocation 偏好某 Agent、Agent 交接（handoff）与调用规划的语义由后续 Agent 调用专题定义，届时另行设计相应 API，不在 Thread 上伪造主 Agent 事实。
 ### 3.4 创建 Turn
 
 `POST /api/v1/threads/{thread_id}/turns`
@@ -1464,7 +1434,7 @@ system_turn 在一个事务创建 trigger_type=job_result_projection、无 Invoc
 
 | 分组 | Event | 何时持久化 |
 |---|---|---|
-| Thread | thread.created、thread.archived、thread.primary_agent_changed、thread.model_changed、thread.environment_changed、thread.deleted | 会话根状态和下一次执行默认设置变化 |
+| Thread | thread.created、thread.archived、thread.model_changed、thread.environment_changed、thread.deleted | 会话根状态和下一次执行默认设置变化 |
 | Turn | turn.accepted、turn.queued、turn.started、turn.waiting、turn.resumed、turn.steer_queued、turn.steered、turn.interrupt_requested、turn.regeneration_started、turn.regeneration_failed、turn.interrupted、turn.completed、turn.failed、turn.cancelled | 正式交互状态变化 |
 | Item | item.created、item.updated、item.completed、item.failed、item.superseded、item.cancelled | 可查询内容变化 |
 | Pending input | pending_input.created、pending_input.updated、pending_input.reordered、pending_input.admitted、pending_input.removed | Desktop/Web 队列同步 |

@@ -24,7 +24,7 @@ flowchart TB
 
   Desktop --> Thread
   Web --> Thread
-  Thread["Thread 会话<br/>主 Agent、默认 Workspace、连续历史"]
+  Thread["Thread 会话<br/>默认 Workspace、连续历史"]
   Thread --> Goal["Goal 可选目标"]
   Thread --> Turn["Turn 正式交互"]
   Turn --> Item["Item 内容投影"]
@@ -78,13 +78,13 @@ MCP 在 agentkit 会话中被明确暂缓。只保证 Tool Gateway、动态工�
 
 同一个 Thread 可以在 Web 或 Desktop 处理云端任务，也可以在两个入口之间继续。Desktop 在相同云端能力上增加本地项目、文件、浏览器登录态、本机应用和本地执行；真正依赖本地资源的动作由 Desktop 执行。管理后台从相同事件与 Trace 查看事实。
 
-业务例子：员工在 Web 创建“月度报表”会话，回到办公室后在 Desktop 附加本地 Excel。主 Agent、会话历史和已确认约束不变，读取 Excel 的 ToolCall 路由到 Desktop。
+业务例子：员工在 Web 创建“月度报表”会话，回到办公室后在 Desktop 附加本地 Excel。会话历史和已确认约束不变，读取 Excel 的 ToolCall 路由到 Desktop。
 
 Desktop 的目标不是让员工换一个地方手工操作系统，而是成为任务操作台。Agent 可以在右侧面板打开已登录的内部系统，帮助员工查询、填写和提交；目标系统提供受控接口时，优先直接调用接口，不要求打开页面。涉及发送、提交、付款、删除等高影响操作时，平台必须展示具体影响并等待员工确认，执行结果写回同一 Thread。
 
-### 3.2 Agent 是唯一可运行资产
+### 3.2 Agent 是可治理、可调用的智能体资产
 
-Agent 保存稳定身份、负责人、基础指令、默认能力、运行策略、允许委派范围和当前发布信息。所谓“应用”只可以是员工界面的产品称呼，底层不再创建 Application。
+SnowHarness 始终是 Harness 执行与编排主体，即使 Agent 目录为空也能创建 Thread、接纳 Turn 并执行。Agent 是可治理、可调用的一类智能体资产，不是唯一可运行资产，也不是 Thread 或基础 Harness 执行存在的前置条件。Agent 保存稳定身份、负责人、基础指令、默认能力、运行策略、允许委派范围和当前发布信息。所谓“应用”只可以是员工界面的产品称呼，底层不再创建 Application。
 
 业务例子：“合同审查”在管理员后台、员工目录、部署和观测中始终是同一个 Agent，不再先安装应用实例再映射到 Agent。
 
@@ -130,7 +130,7 @@ LLM 负责：
 |---|---|---|
 | Agent | 可复用的智能体定义和主身份 | 不保存每次实际 Tool Schema 和全部上下文 |
 | Agent Revision | Agent 自身可发布变化的不可变修订 | 不跟随普通 Skill/Tool 更新批量生成 |
-| Thread | 连续会话、主 Agent、默认 Workspace 和历史容器 | 不锁死模型、能力内容或执行节点 |
+| Thread | 连续会话、默认 Workspace 和历史容器 | 不保存主 Agent，不锁死模型、能力内容或执行节点 |
 | Goal | 有明确终点的持续目标，可选 | 普通问答不强制创建 |
 | Turn | 一次进入 Thread 时间线的正式输入或触发周期 | 不保存单一 Revision/模型/环境/费用执行事实 |
 | Item | 消息、计划、Tool、审批、产物和错误的当前内容投影 | 不记录每一次状态变化和高频遥测 |
@@ -147,11 +147,11 @@ LLM 负责：
 | ProjectionCheckpoint | Event 消费者已完成的流内位置 | 不允许在投影失败前移 |
 | DeletionRequest | 受保留策略与 Legal Hold 约束的数据删除命令 | 不等同于立即物理删除 |
 
-### 4.1 Thread 保留主 Agent，但允许显式变化
+### 4.1 Thread 与 Agent 解耦
 
-Thread 创建时确定主 Agent。用户显式更换主 Agent时，平台记录 handoff 或 `thread.primary_agent_changed` Event；Workflow 只能发起 Handoff 请求，员工确认后才改变主 Agent。历史、文件和已确认约束继续保留。调用辅助 Agent 通常创建 Child Thread，不偷偷改变主 Agent。
+Thread 是连续工作容器，不保存主 Agent 身份，也不要求先有 Agent 才能创建（专题 01 已删除 `primaryAgentId`）。Agent 是 Harness 可调用资产，与 Thread 从"存在性强绑定"改为"调用时可组合"。用户在某次 Turn/Invocation 偏好某 Agent、Agent 交接（handoff）与调用规划的语义由后续 Agent 调用专题定义，专题 01 不在 Thread 上伪造主 Agent 事实。调用辅助 Agent 通常创建 Child Thread。
 
-业务例子：用户在财务助手会话中让风险审核 Agent检查一份报表，系统创建 Child Thread；财务助手仍负责最终回答。用户明确选择“接下来由风险审核助手负责”时，才记录主 Agent 交接。
+业务例子：用户在财务助手会话中让风险审核 Agent检查一份报表，系统创建 Child Thread；财务助手仍负责最终回答。用户明确选择“接下来由风险审核助手负责”时的交接语义，由后续 Agent 调用专题定义。
 
 ### 4.2 Item 与 Event 分开
 
@@ -181,7 +181,7 @@ sequenceDiagram
   P-->>C: 持久化 turn.accepted
   P->>P: 解析 Route 并创建 Invocation / ExecutionBinding
   P-->>C: 持久化 turn.started / invocation.started
-  P->>L: 主 Agent + 当前策略 + 会话索引
+  P->>L: 当前 Agent 约束（若有） + 当前策略 + 会话索引
   L->>L: 理解任务并判断缺少什么
   L->>P: 按需读取历史、Memory、知识或 Skill
   L->>T: 获取当前 Tool Schema
@@ -320,14 +320,14 @@ Turn 执行中的普通新消息进入可编辑、删除和排序的 PendingInpu
 
 默认协作单位是 Child Thread：
 
-- Delegate：主 Agent 委派明确子任务。
-- Parallel：多个 Child Thread 并行，主 Agent 汇总。
+- Delegate：对话主导 Agent 委派明确子任务。
+- Parallel：多个 Child Thread 并行，对话主导 Agent 汇总。
 - Handoff：显式把主责交给另一个 Agent。
 - Agent-as-Tool：把受限 Agent 能力当成一个工具调用。
 - Workflow Agent：固定顺序、并行或循环可写入 Agent 的 Harness/Workflow 配置。
 - A2A：外部 Agent 保持独立身份和会话。
 
-Child Thread 拥有独立上下文、事件、权限、预算和 Trace，只把结构化任务说明、必要资料与结果返回父 Thread。它只能由活跃父 Invocation 通过受控命令创建；子 Runtime 不能直接写父 Thread。取消先进入 cancel_requested，子 Runtime 确认后才成为 cancelled。主 Agent 交接统一使用 UserActionRequest 等待员工确认，不另建一套交接事实。
+Child Thread 拥有独立上下文、事件、权限、预算和 Trace，只把结构化任务说明、必要资料与结果返回父 Thread。它只能由活跃父 Invocation 通过受控命令创建；子 Runtime 不能直接写父 Thread。取消先进入 cancel_requested，子 Runtime 确认后才成为 cancelled。主导 Agent 交接统一使用 UserActionRequest 等待员工确认（交接语义属后续 Agent 调用专题），不另建一套交接事实。
 
 ### 9.4 Temporal 的位置
 
@@ -407,7 +407,7 @@ Agent 默认全员可用，也可按部门、用户组、岗位角色或用户�
 | 场景 | 应有表现 |
 |---|---|
 | 切换模型 | 当前 Invocation 不变；下一 Turn 或显式 Regenerate 的新 Invocation 使用新模型，会话历史不丢 |
-| 切换主 Agent | 必须显式记录交接，历史与 Workspace 可继续使用 |
+| 切换 Agent 约束 | Thread 不保存主 Agent；某 Turn 的 Agent 约束由对应 Invocation 冻结，变化必须显式，历史与 Workspace 可继续使用 |
 | Skill 更新 | 新决策按需加载当前内容并记录 hash，不批量生成 Agent Revision |
 | Tool Schema 更新 | 下一次 ToolCall 前刷新；进行中的调用不变 |
 | 本地文件任务 | Desktop 执行，输出默认留在原文件位置 |

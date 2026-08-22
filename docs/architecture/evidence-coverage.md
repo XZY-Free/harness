@@ -62,7 +62,7 @@
 | 托管与外部部署 | SnowHarness 统一入口；也支持标准外部 Runtime | [发布与 Runtime](./runtime-control-plane.md) |
 | 公司 CI/CD | 最后对接公司接口，本方案不提前设计 | [决策台账](./decision-ledger.md) |
 | 会话连续性 | 切换模型或 Agent 不丢历史 | [Agent 与 Runtime](./agent-control-plane.md) |
-| 主 Agent | 后续重审后 Thread 保留主 Agent，变化显式交接 | [Agent 与 Runtime](./agent-control-plane.md) |
+| Thread 与 Agent 关系 | Thread 不保存主 Agent；Agent 是可治理、可调用资产，Agent 目录为空合法 | [Agent 与 Runtime](./agent-control-plane.md) |
 | Workspace 创建 | Thread 可选 Desktop、Cloud 或无 Workspace | [Agent 与 Runtime](./agent-control-plane.md) |
 | Workspace 锁定 | 原会话确认它只是默认位置；后续重审允许显式切换 | [Agent 与 Runtime](./agent-control-plane.md) |
 | 跨目录 | 用户明确要求的普通目录可以操作，不因离开 Workspace 弹窗 | [Agent 与 Runtime](./agent-control-plane.md)、[Skill、Tool 与安全](./capabilities-and-security.md) |

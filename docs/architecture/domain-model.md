@@ -125,7 +125,7 @@ Trace 不反向决定业务状态，Audit 不复制聊天全文，Event 不承�
 
 ### 3.1 Agent
 
-`Agent` 是员工可选择的唯一可运行资产，保存稳定身份、负责人、可见范围和当前发布信息。`AgentRevision` 保存 Agent 自身不可变的代码、指令、默认模型策略、权限要求、委派范围和制品摘要。
+`Agent` 是 Harness 可治理、可调用的一类智能体资产，保存稳定身份、负责人、可见范围和当前发布信息；它不是唯一可运行资产，也不是 Thread 或基础 Harness 执行存在的前置条件（Agent 目录为空是合法状态）。`AgentRevision` 保存 Agent 自身不可变的代码、指令、默认模型策略、权限要求、委派范围和制品摘要。
 
 以下变化生成 AgentRevision：
 
@@ -177,7 +177,7 @@ Skill、Tool、Knowledge Base、Model、Connection 和 Agent 保持各自表和�
 
 Thread 是连续会话和协作容器，负责：
 
-- 所属用户、租户和主 Agent。
+- 所属用户、租户（Thread 不保存主 Agent）。
 - 默认 Workspace、可选 Goal 和父子关系。
 - Turn、Item、Event 和 PendingInput 的归属。
 - 会话级可见状态、标题、置顶、归档和删除。
@@ -251,11 +251,11 @@ Event 是 Thread 内有序、仅追加的变化记录。后台 Job 使用独立�
 
 多智能体协作使用 `ThreadRelation` 表达 parent/child、delegate 或 fork 等确实存在两个 Thread 的关系。创建 delegate Child Thread 必须带父 Invocation、结构化任务、上下文传递策略、目标 Agent 和预算上限；服务端重新计算目标 Agent 权限，不能继承父 Runtime Token。Child Thread 拥有自己的 Turn、Invocation、Item、Event、权限和预算，父 Thread 只接收结构化任务、状态、结果和 Artifact 引用。父级取消是持久命令；只有 Child Thread 确认终态后才记录 `child_thread.cancelled`。
 
-Child Thread 完成时，平台从子 Thread 的最终 Item 和 Artifact 生成不可变结果引用，并在父 Turn 创建或更新唯一的 `child_thread` Item；子 Runtime 不能直接向父 Thread 写消息。Workflow 发起的主 Agent 交接统一使用 `UserActionRequest(request_type=confirmation, purpose=handoff)`；员工确认后才修改同一 `Thread.primary_agent_id` 并写 `handoff.completed`，不另建独立交接请求表，也不伪造 ThreadRelation。
+Child Thread 完成时，平台从子 Thread 的最终 Item 和 Artifact 生成不可变结果引用，并在父 Turn 创建或更新唯一的 `child_thread` Item；子 Runtime 不能直接向父 Thread 写消息。Thread 不保存主 Agent 身份（专题 01 已删除 `primaryAgentId`）；Agent 偏好、交接（handoff）与调用规划的统一语义由后续 Agent 调用专题定义，专题 01 不在 Thread 上伪造主 Agent 事实，也不伪造 ThreadRelation。
 
 固定 Workflow 的步骤执行可以使用内部 Workflow/Invocation 记录，不强制把每一步都伪装成 Child Thread。
 
-业务例子：财务 Agent 委派风险 Agent 审核报表时，平台建立 Child Thread 并限制其只读附件、最多两个 ToolCall。风险 Agent 完成后父会话只收到结论和报告 Artifact；若 Workflow 建议“后续改由风险 Agent 负责”，员工仍需确认主 Agent 交接。
+业务例子：财务 Agent 委派风险 Agent 审核报表时，平台建立 Child Thread 并限制其只读附件、最多两个 ToolCall。风险 Agent 完成后父会话只收到结论和报告 Artifact；若 Workflow 建议“后续改由风险 Agent 负责”，交接语义由后续 Agent 调用专题定义。
 
 ## 5. 执行领域
 
@@ -406,7 +406,7 @@ AuditEvent 记录管理员配置修改、发布、策略决策、用户授权和
 
 ## 10. 不变量
 
-1. Agent 是员工可选择的唯一可运行资产；Runtime 只负责执行。
+1. SnowHarness 始终是 Harness 执行与编排主体，Agent 目录为空是合法状态；Agent 是可治理、可调用资产，不是唯一可运行资产，也不是 Thread/Route/Binding/Invocation 的存在前置。Runtime 是实际执行基础设施，所有真正执行必须通过正式 Runtime/Route/ExecutionBinding/Invocation 链。
 2. Thread、Turn、Item 是员工交互主模型；ThreadEvent 是独立变化记录，后台 Job 使用 JobEvent。
 3. ThreadEvent 在 Thread 内、JobEvent 在 Job 内 sequence 唯一且只追加；实时 delta 不冒充永久事件。
 4. 一个已接纳用户输入只对应一个 user_message Item；Regenerate 不复制它。

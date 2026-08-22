@@ -12,7 +12,11 @@ flowchart TB
   Binding --> Invocation["Invocation / Attempt"]
 ```
 
-ExecutionBinding 是一次 Invocation 的不可变控制面证据。它冻结 Route/Revision/Activation、Agent/Revision、Runtime/Revision、Publication/Withdrawal、Artifact/Attestation/Revocation、Conformance、Policy、Projection 版本、配置摘要和解析输入摘要。正式证据列不可空，数组必须非空且无重复 ID。
+ExecutionBinding 是一次 Invocation 的不可变控制面证据。它冻结 Route/Revision/Activation、Agent/Revision（条件性）、Runtime/Revision、Publication/Withdrawal、Artifact/Attestation/Revocation、Conformance、Policy、Projection 版本、配置摘要和解析输入摘要。
+
+Runtime 证据（RuntimeRevision/Artifact/Attestation/Publication/Conformance/Route）与 Route/Policy/Projection 证据列**始终不可空**，数组必须非空且无重复 ID；任何真正执行都必须完整冻结这些证据，不存在"没 Agent 所以绕过 Runtime 治理"。
+
+Agent Evidence（agentRevisionId/agentArtifactId/agentArtifactDigest/agentAttestationIds/agentPublicationRecordId）为**条件性完整组**：要么全部为空（基础 Harness 执行，不附加 Agent 资产约束），要么全部完整且可验证（Route 绑定 AgentRevision 约束）。不允许半空、空字符串或模糊占位。
 
 创建 Binding 时，MySQL Store 在一个事务内按固定顺序锁定全部权威记录，重新核对冻结值与当前可执行状态，然后才写入 Binding。任一记录缺失、跨租户、已撤回、已撤销、Conformance 失效、Policy 缺失或 Projection 漂移，统一 fail-closed。
 

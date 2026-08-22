@@ -5,7 +5,7 @@
 ~~~mermaid
 flowchart TB
   Agent["Agent<br/>稳定身份与默认策略"] --> Revision["Agent Revision<br/>指令、代码、模型策略、权限、委派策略"]
-  Agent --> Thread["Thread<br/>主 Agent、默认 Workspace、连续历史"]
+  Agent --> Thread["Thread<br/>默认 Workspace、连续历史"]
   Thread --> Goal["Goal 可选"]
   Thread --> Turn["Turn"]
   Turn --> Item["Item 当前内容"]
@@ -30,7 +30,9 @@ flowchart TB
 
 ## 2. Agent
 
-Agent 是公司内部唯一可运行的智能体资产，保存：
+SnowHarness 自身始终是 Harness 执行与编排主体：即使 `Agent` 表为空，它仍能接受任务、创建 Thread、接纳 Turn 并通过正式 Runtime/Route/ExecutionBinding/Invocation 链执行。Agent 不是唯一可运行资产，也不是 Thread 或基础 Harness 执行存在的前置条件；**Agent 目录为空是合法状态**，只影响 Agent 能力选择器，不影响 Harness 本身。
+
+Agent 是 Harness 可治理、可调用的一类智能体资产，保存：
 
 - 名称、介绍、分类、负责人和 enabled。
 - 基础指令与行为边界。
@@ -103,7 +105,6 @@ Adapter 负责：
 
 Thread 是员工可见的连续工作容器，保存：
 
-- 主 Agent 身份。
 - 默认 Workspace 与默认 Environment 偏好；当前可用环境由平台动态计算。
 - Turn 与事件历史。
 - 当前可选 Goal。
@@ -119,16 +120,11 @@ Thread 不固定：
 - Agent Revision 之外的动态能力内容。
 - 物理容器或 Worker。
 
-### 5.1 主 Agent
+### 5.1 Thread 与 Agent 解耦
 
-Thread 创建时选择主 Agent。平台不得根据某次 Tool 结果悄悄把主 Agent 换成另一个。
+Thread 不保存主 Agent 身份，也不要求先有 Agent 才能创建。Thread 与 Agent 从"存在性强绑定"改为"调用时可组合"：Thread 是连续工作容器，Agent 是可治理资产，二者互不构成存在前置。
 
-主 Agent 变化只有两种：
-
-1. 用户显式更换并确认交接。
-2. Agent Workflow 发起 Handoff 请求，员工确认后执行并展示。
-
-临时委派默认创建 Child Thread，父 Thread 的主 Agent 不变。
+用户在某次 Turn / Invocation 主动偏好某个 Agent 的语义（preferred/required）、Agent 自动发现、排序与调用规划，均属于后续对应专题，专题 01 不在 Thread 上冻结主 Agent 身份，也不在 Thread 保存 `primaryAgentId`。
 
 ### 5.2 切换配置
 
@@ -265,7 +261,7 @@ flowchart LR
 
 ### 9.1 理解
 
-读取当前用户输入、主 Agent 指令、已确认约束和最近状态，确定当前问题与完成条件。
+读取当前用户输入、已确认约束和最近状态，确定当前问题与完成条件；若当前 Invocation 带 Agent 约束，则同时读取该 Agent 指令。
 
 ### 9.2 获取上下文
 
@@ -397,8 +393,9 @@ Workspace、Runtime 和 Sandbox 生命周期不同：
 
 | 检查 | 通过条件 |
 |---|---|
-| Thread 是否被版本锁死 | 否；只保存主 Agent 与默认位置，实际执行版本写 ExecutionBinding，动态能力写 CapabilityUse |
-| 主 Agent 是否可偷偷变化 | 否；变化必须显式交接 |
+| Thread 是否被版本锁死 | 否；只保存默认位置与连续历史，实际执行版本写 ExecutionBinding，动态能力写 CapabilityUse |
+| Thread 是否依赖 Agent 存在 | 否；Agent 目录为空也能创建 Thread 并执行，Agent 不是 Thread 存在前置 |
+| Agent 约束是否可偷偷变化 | 否；Invocation 冻结的 Agent 约束不可变，变化必须显式交接 |
 | Goal 是否强制 | 否；只有持续目标使用 |
 | Tool 重试是否成为新 Turn | 否；进入当前 ToolCall/Effect 与 Trace，关键状态再投影为 Event |
 | Item 与 Event 是否混为一表 | 否；Item 是当前内容，Event 是仅追加变化记录 |

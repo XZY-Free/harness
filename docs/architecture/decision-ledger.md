@@ -21,7 +21,7 @@
 | Desktop 与 Web 都能处理云端任务，Desktop 是增强入口 | Desktop 具备 Web 的云端能力，并额外使用本地项目、文件、浏览器登录态和本机应用 |
 | Desktop 目标形态是任务操作台 | 右侧打开内部系统代员工查询和填表；有受控接口时直接调用，敏感提交由员工确认 |
 | 管理后台采用 AgentKit 式治理 | 管理 Agent、部署、Runtime、Skill、Tool、知识、观测、评测、安全、成本 |
-| Agent 是唯一可运行资产 | 不新增 Application、ApplicationInstance 或应用市场 |
+| ~~Agent 是唯一可运行资产~~（专题01已修正） | SnowHarness 始终是 Harness 主体，Agent 是可治理、可调用资产，Agent 目录为空合法；仍不新增 Application、ApplicationInstance 或应用市场 |
 | capability-market 并入 SnowHarness | 员工和管理员不再面对两个产品与两套 Skill |
 | Agent 与 Skill 选择器位于同一任务输入区域 | 员工可选择 Agent 后追加本次 Skill |
 | Preview 属于 Harness 面板 | 不再作为 Agent 独立能力 |
@@ -47,9 +47,9 @@
 | 决策 | 业务例子 |
 |---|---|
 | 员工主轴为 Thread → Turn → Item，Event 独立记录变化 | 员工端不展示 Invocation/Attempt 层级；客户端按 Event sequence 续读 |
-| Thread 保留主 Agent 身份 | 辅助 Agent 默认用 Child Thread，不偷偷更换主 Agent |
-| 更换主 Agent、模型或能力不清空历史 | 变化通过事件记录并在安全决策点生效 |
-| Workflow Handoff 必须由员工确认后才改 Thread 主 Agent | Workflow 可请求交接，不能静默改变权限继承 |
+| Thread 不保留主 Agent 身份（专题01修正） | Thread 是可治理会话容器；Agent 偏好/交接属后续专题，辅助 Agent 默认用 Child Thread |
+| 更换主导 Agent、模型或能力不清空历史 | 变化通过事件记录并在安全决策点生效 |
+| Workflow Handoff 必须由员工确认（后续专题） | Thread 已无主 Agent；交接语义由 Agent 调用专题定义，不能静默改变权限继承 |
 | Goal 可选 | 长期自治任务使用，普通问答不强制 |
 | Item 是当前内容投影，Event 是有序、仅追加变化记录 | Trace 是观测数据，不反向决定业务状态 |
 | 每次实际 Agent 执行有内部 Invocation，Attempt 只在整个 Invocation 被基础设施重新调度时物化 | 单个模型请求重试、ToolCall 和 Agent Loop 步骤不创建 Attempt |
@@ -171,7 +171,7 @@
 |---|---|
 | 员工选择器与 Agent Loop 共用受权限过滤的能力目录 | 搜索结果是候选；加载 Skill 或读取 Tool Schema 后才写 CapabilityUse |
 | Child Thread 只能由活跃父 Invocation 通过受控命令创建 | 子 Runtime 不直写父 Thread；结果通过 ThreadRelation 投影 |
-| Handoff 统一使用 UserActionRequest | 员工确认后才更新主 Agent，不建立第二套交接请求事实 |
+| Handoff 统一使用 UserActionRequest（后续专题） | 员工确认后才更新主导 Agent，不建立第二套交接请求事实 |
 | Runtime 只能提交 MemoryCandidate | Memory Policy 校验来源、Scope 和敏感性后才写 MemoryEntry |
 | 终态 Job retry 创建 replacement Job | 原 Job 的终态、Event 和结果不修改 |
 | Event 消费者必须保存 checkpoint 和隔离失败 | 坏事件不会被后续 sequence 越过，修复后从原位置重放 |

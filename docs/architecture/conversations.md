@@ -43,7 +43,7 @@ event 106  turn.completed
 
 Resume（恢复会话）读取：
 
-- Thread 与当前主 Agent。
+- Thread（连续工作容器，不保存主 Agent 身份）。
 - 最近 Turn 和事件。
 - PendingInput。
 - 当前等待的 UserActionRequest。
@@ -60,7 +60,7 @@ Resume（恢复会话）读取：
 Fork 从指定 Turn 创建新 Thread：
 
 - 复制到该 Turn 为止的用户可见历史与必要事件引用。
-- 新 Thread 获得独立主 Agent、Goal、Workspace 和后续事件。
+- 新 Thread 获得独立 Goal、Workspace 和后续事件（不复制主 Agent 身份；Thread 不保存主 Agent）。
 - 父 Thread 不受分支变化影响。
 - Fork 记录来源 Thread 和 Turn。
 
@@ -95,7 +95,7 @@ Turn 运行中，普通新输入先进入 PendingInput：
 4. Runtime 在安全点 ack 后，Item 才完成并记录 `turn.steered`；拒绝或不支持则把 command/Item 标记 failed。
 5. Agent Loop 在下一个决策点读取新要求，员工端随后显示“已引导本次对话”。
 
-waiting_user 必须解析对应 UserActionRequest，不能用 Steer 绕过确认、登录或授权。主 Agent、Environment 或高风险能力变化需要显式配置事件；不能把带隐式扩权的输入直接注入正在执行的 ToolCall。
+waiting_user 必须解析对应 UserActionRequest，不能用 Steer 绕过确认、登录或授权。Agent 约束、Environment 或高风险能力变化需要显式配置事件；不能把带隐式扩权的输入直接注入正在执行的 ToolCall。
 
 ### 5.3 Stop / 停止
 
@@ -188,7 +188,7 @@ Checkpoint 写入失败时，如果下一步将产生不可重复副作用，必
 
 ~~~mermaid
 flowchart TB
-  Parent["Parent Thread<br/>主 Agent 与用户交互"]
+  Parent["Parent Thread<br/>主导 Agent 与用户交互"]
   Parent --> A["Child Thread A<br/>资料检索"]
   Parent --> B["Child Thread B<br/>数据分析"]
   Parent --> C["Child Thread C<br/>风险审核"]
@@ -233,14 +233,14 @@ expected_output:
 - 未解决问题和错误。
 - 成本、耗时和 Trace 引用。
 
-业务例子：主 Agent 委派图表 Agent，只传清洗后的数据 Artifact、图表要求和品牌规范，不传财务系统 Credential 或整段会话。
+业务例子：对话主导 Agent 委派图表 Agent，只传清洗后的数据 Artifact、图表要求和品牌规范，不传财务系统 Credential 或整段会话。
 
 ## 11. 协作语义
 
 | 语义 | 行为 |
 |---|---|
-| Delegate | 主 Agent 委派明确子任务并等待结果 |
-| Parallel | 多个 Child Thread 并行，主 Agent 汇总 |
+| Delegate | 对话主导 Agent 委派明确子任务并等待结果 |
+| Parallel | 多个 Child Thread 并行，对话主导 Agent 汇总 |
 | Handoff | 显式把主责交给另一个 Agent |
 | Agent-as-Tool | 受限调用一个 Agent 能力，返回单次结果 |
 | Workflow Agent | 固定顺序、并行、循环写入 Agent Harness 配置 |
@@ -252,7 +252,7 @@ expected_output:
 
 Handoff 必须：
 
-- 展示原主 Agent 与新主 Agent。
+- 展示原主导 Agent 与新主导 Agent（交接语义属后续 Agent 调用专题）。
 - 记录原因、上下文范围和权限变化。
 - 明确谁负责下一次用户交互。
 - 保留旧 Agent 的结果与未完成事项。
@@ -270,7 +270,7 @@ Handoff 必须：
 - 只读任务可以共享同一文件修订。
 - 合并冲突显式报告，不能后完成者静默覆盖。
 
-业务例子：两个子 Agent 分别修改前端和后端时使用两个 worktree；汇总前运行合并和测试。若都修改同一配置，主 Agent收到冲突而不是自动覆盖。
+业务例子：两个子 Agent 分别修改前端和后端时使用两个 worktree；汇总前运行合并和测试。若都修改同一配置，对话主导 Agent 收到冲突而不是自动覆盖。
 
 ## 14. Temporal / Durable Workflow
 
