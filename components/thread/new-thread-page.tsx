@@ -10,7 +10,6 @@ import { ThreadTimeline } from "./thread-timeline";
 
 interface NewThreadPageProps {
   readonly agents: readonly AgentOption[];
-  readonly defaultAgentId: string;
   /** 平台默认模型（shell.default_model_ref）；用于未显式选择时的即时展示。 */
   readonly defaultModelRef?: string;
   readonly error?: string | null;
@@ -20,7 +19,6 @@ interface NewThreadPageProps {
 
 export function NewThreadPage({
   agents,
-  defaultAgentId,
   defaultModelRef,
   error,
   onSubmit,

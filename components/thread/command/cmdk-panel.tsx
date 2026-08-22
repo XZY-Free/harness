@@ -38,7 +38,7 @@ export function CmdkPanel({ threads, open, onOpenChange, surface = "desktop" }: 
 
   const handleNewThread = useCallback(() => {
     onOpenChange(false);
-    router.push(surface === "desktop" ? "/desktop/new" : "/chat/new");
+    router.push(surface === "desktop" ? "/desktop" : "/chat");
   }, [onOpenChange, router, surface]);
 
   // ⌘1~9 快捷键打开对应会话

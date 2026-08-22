@@ -95,13 +95,7 @@ describe("消息轨道与输入轨道拆分", () => {
   it("新会话空态按语义选轨道：时间线走 .message-track，错误提示走 .composer-track", () => {
     stubModelsFetch();
     const { container } = render(
-      <NewThreadPage
-        agents={[]}
-        defaultAgentId="a-default"
-        error="发送失败"
-        onSubmit={async () => true}
-        surface="web"
-      />,
+      <NewThreadPage agents={[]} error="发送失败" onSubmit={async () => true} surface="web" />,
     );
     // 空态文案位于消息轨道内
     const messageTrack = firstByClass(container, "message-track");

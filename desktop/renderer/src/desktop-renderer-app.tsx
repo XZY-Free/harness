@@ -40,11 +40,8 @@ function DesktopShell() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!shell || route.kind !== "home") return;
-    const latest = shell.threads[0];
-    navigateDesktop(latest ? `/desktop/chat/${latest.id}` : "/desktop/new", true);
-  }, [route, shell]);
+  // 专题01 §33.7：/desktop 恒为新建空态页，不再自动跳最近会话；
+  // 假 new 路由 /desktop/new 已移除。进入已有会话由 sidebar 导航到 /desktop/chat/{id}。
 
   // 设备注册闭环：shell 真实加载成功后发起注册（幂等，无视觉噪音）。
   // main 用本机 Session fetch 同源注册端点；已注册则复用现有租户并确保 Bridge 连接。
@@ -97,9 +94,7 @@ function DesktopShell() {
   if (error) return <DesktopError>{error}</DesktopError>;
   if (!shell) return <DesktopError>正在连接服务器…</DesktopError>;
   if (route.kind === "not-found") return <DesktopError>页面不存在。</DesktopError>;
-  if (route.kind === "home") {
-    return <DesktopError>正在打开会话…</DesktopError>;
-  }
+  // 专题01 §33.7：/desktop（home）恒为新建空态页，fall through 渲染 NewThreadPage。
 
   const threads = shell.threads.map((thread) => ({
     id: thread.id,
@@ -113,15 +108,14 @@ function DesktopShell() {
         <DesktopSidebar
           threads={threads}
           agents={[]}
-          currentThreadId={route.kind === "chat" ? route.threadId : ""}
+          currentThreadId={route.kind === "thread" ? route.threadId : ""}
           userName={shell.viewer_id.slice(0, 8)}
           hasNativeTitlebar
         />
         <main className="flex min-w-0 flex-1 flex-col">
-          {route.kind === "new" ? (
+          {route.kind === "home" ? (
             <NewThreadPage
               agents={[]}
-              defaultAgentId=""
               defaultModelRef={shell.default_model_ref}
               error={newThreadError}
               onSubmit={submitNewThread}

@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  window.history.replaceState(null, "", "/desktop/new");
+  window.history.replaceState(null, "", "/desktop");
 });
 
 describe("DesktopRendererApp", () => {
@@ -134,7 +134,7 @@ describe("DesktopRendererApp", () => {
       ),
     );
 
-    window.history.replaceState(null, "", "/desktop/new");
+    window.history.replaceState(null, "", "/desktop");
     render(<DesktopRendererApp />);
     const newPage = await screen.findByTestId("desktop-new-thread-page");
     expect(newPage.dataset.defaultModelRef).toBe("deepseek-v4-flash");

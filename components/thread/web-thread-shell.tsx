@@ -91,7 +91,6 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
           {activeThreadId === null ? (
             <NewThreadPage
               agents={agents}
-              defaultAgentId=""
               defaultModelRef={shell.default_model_ref}
               error={error}
               onSubmit={submitNewThread}

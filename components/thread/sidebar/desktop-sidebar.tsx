@@ -140,7 +140,7 @@ export function DesktopSidebar({
   );
   const newThreadButton = (
     <Link
-      href={surface === "desktop" ? "/desktop/new" : "/chat/new"}
+      href={surface === "desktop" ? "/desktop" : "/chat"}
       aria-label="新建会话"
       style={nativeNoDragStyle}
       className={titlebarIconClass}
@@ -235,7 +235,7 @@ export function DesktopSidebar({
           {/* 新建会话 */}
           <div className="px-3 py-1 [-webkit-app-region:no-drag]">
             <Link
-              href={surface === "desktop" ? "/desktop/new" : "/chat/new"}
+              href={surface === "desktop" ? "/desktop" : "/chat"}
               className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
             >
               <Plus className="size-4 text-muted-foreground" />

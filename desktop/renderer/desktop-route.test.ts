@@ -6,8 +6,8 @@ describe("parseDesktopRoute", () => {
     expect(parseDesktopRoute("/desktop")).toEqual({ kind: "home" });
   });
 
-  it("将 /desktop/new 解析为显式创建空会话的入口", () => {
-    expect(parseDesktopRoute("/desktop/new")).toEqual({ kind: "new" });
+  it("假 new 路由 /desktop/new 已移除（专题01 §33.7，返回 not-found）", () => {
+    expect(parseDesktopRoute("/desktop/new")).toEqual({ kind: "not-found" });
   });
 
   it("仅接受 UUID 会话深链", () => {
