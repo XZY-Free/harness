@@ -21,6 +21,7 @@ import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
   datetime,
+  foreignKey,
   index,
   mysqlEnum,
   mysqlTable,
@@ -282,9 +283,7 @@ export const workspaceAttachmentUse = mysqlTable(
     /** 引用 Turn（DB 级 FK → Turn.id）。 */
     turnId: varchar("turnId", { length: 36 }).notNull(),
     /** 引用 Attachment（DB 级 FK → WorkspaceAttachment.id）。 */
-    workspaceAttachmentId: varchar("workspaceAttachmentId", { length: 36 })
-      .notNull()
-      .references(() => workspaceAttachment.id),
+    workspaceAttachmentId: varchar("workspaceAttachmentId", { length: 36 }).notNull(),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -300,6 +299,12 @@ export const workspaceAttachmentUse = mysqlTable(
       t.tenantId,
       t.workspaceAttachmentId,
     ),
+    // 显式命名 FK（0000 基线中 drizzle 截断生成，<64 字符）。
+    attachmentFk: foreignKey({
+      name: "WorkspaceAttachmentUse_workspaceAttachmentId_WorkspaceAttach5f4d",
+      columns: [t.workspaceAttachmentId],
+      foreignColumns: [workspaceAttachment.id],
+    }),
   }),
 );
 

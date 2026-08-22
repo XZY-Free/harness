@@ -46,7 +46,6 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     id: thread.id,
     tenant_id: thread.tenantId,
     owner_user_id: thread.ownerUserId,
-    primary_agent_id: thread.primaryAgentId,
     default_workspace_id: thread.defaultWorkspaceId,
     active_goal_id: thread.activeGoalId,
     title: thread.title,

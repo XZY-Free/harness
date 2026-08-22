@@ -35,7 +35,6 @@ function projectThread(thread: Thread): Record<string, unknown> {
   return {
     id: thread.id,
     title: thread.title,
-    primary_agent_id: thread.primaryAgentId,
     active_goal_id: thread.activeGoalId,
     default_workspace_id: thread.defaultWorkspaceId,
     default_model_ref: thread.defaultModelRef,

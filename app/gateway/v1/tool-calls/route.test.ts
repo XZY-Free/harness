@@ -212,7 +212,6 @@ async function seedThread(id: string): Promise<void> {
     id,
     tenantId: TENANT,
     ownerUserId: "user-1",
-    primaryAgentId: "agent-1",
     defaultWorkspaceId: null,
     activeGoalId: null,
     title: null,

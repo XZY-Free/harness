@@ -16,24 +16,18 @@
  * input 类型 submit 时写入 responseRedactedJson。
  *
  * 关键约束（/ / §5）：
- * - 不处理 purpose=handoff（handoff 由 resolveHandoff 处理；handoff 有额外的 Thread.primary_agent_id 变更）。
  * - 不处理 auth + approve（auth approve 只能由 completeAuthCallback 写入；:resolve 接口仅接受 cancel）。
  * - 同一 UserActionRequest 只能解析一次：原子 UPDATE WHERE requestState='pending'，受影响行数=0 → 抛 UserActionAlreadyResolvedError。
  * - resolution 必须在 ALLOWED_RESOLUTIONS_BY_TYPE 内；否则抛 UserActionResolutionMismatchError。
  * - 当前 Invocation 必须 waiting_user（其他状态抛 UserActionStateError）。
- * - 不修改 Thread.primary_agent_id（仅 handoff approve 时由 resolveHandoff 修改）。
  * - 不创建 ThreadRelation；不创建新 Thread。
- *
- * 与 resolveHandoff 的差异：
- * - 不需要校验/修改 Thread.primary_agent_id（避免 HandoffVersionConflictError 路径）。
- * - 仅 1 个 Event（user_action.resolved）；resolveHandoff approve 路径有 3 个 Event。
- * - grant 类型 approve 时由本函数创建 Grant；resolveHandoff 不创建 Grant。
+ * - 仅 1 个 Event（user_action.resolved）。
+ * - grant 类型 approve 时由本函数创建 Grant。
  * - input 类型 submit 时由本函数写入 responseRedactedJson。
  */
 import { randomUUID } from "node:crypto";
 import { updateToolCallState } from "@/lib/capability/tool-call-queries";
 import { ThreadNotFoundError } from "@/lib/conversations/errors";
-import { HANDOFF_PURPOSE } from "@/lib/conversations/handoff-queries";
 import {
   allocateEventSequences,
   computeEventPayloadHash,
@@ -91,7 +85,7 @@ export interface ResolveGenericUserActionResult {
   readonly request: UserActionRequest;
   /** 写入的 ThreadEvent（按 sequence 升序）：1 条 user_action.resolved。 */
   readonly events: ThreadEvent[];
-  /** 更新后的 Thread（仅 lastActivityAt + versionNo 递增；primary_agent_id 不变）。 */
+  /** 更新后的 Thread（仅 lastActivityAt + versionNo 递增）。 */
   readonly thread: Thread;
   /** 更新后的 Invocation（executionState=running，由 waiting_user 恢复）。 */
   readonly invocation: Invocation;
@@ -155,13 +149,6 @@ export async function resolveGenericUserAction(
     if (!request) {
       throw new UserActionNotFoundError(
         `UserActionRequest 不存在或跨租户不可见: ${params.requestId}`,
-      );
-    }
-
-    // 校验 purpose != handoff（handoff 走专用 resolveHandoff 路径）
-    if (request.purpose === HANDOFF_PURPOSE) {
-      throw new UserActionValidationError(
-        `UserActionRequest ${params.requestId} purpose=handoff，必须通过 /handoffs/:resolve 接口解析`,
       );
     }
 

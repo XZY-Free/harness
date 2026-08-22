@@ -91,7 +91,6 @@ async function seedFullContext() {
   const { thread, event } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agent.id,
     actorId: ownerId,
   });
   // 初始化 event_stream_floor（生产中由 createThread 同事务初始化，这里手动补齐）
@@ -117,7 +116,6 @@ describe("投影基础：thread.created", () => {
     expect(projection?.threadId).toBe(threadId);
     expect(projection?.tenantId).toBe(tenantId);
     expect(projection?.ownerUserId).toBe(ownerId);
-    expect(projection?.primaryAgentId).toBe(agentId);
     expect(projection?.lifecycleState).toBe("active");
     expect(projection?.latestEventSequence).toBe(1);
     expect(projection?.latestEventId).toBe(createdEvent.id);
@@ -556,7 +554,6 @@ describe("读模型查询", () => {
     const { thread: thread2, event: event2 } = await createThread({
       tenantId: ctx.tenantId,
       ownerUserId: ctx.ownerId,
-      primaryAgentId: ctx.agentId,
       actorId: ctx.ownerId,
     });
     await initEventStreamFloor({

@@ -3,6 +3,7 @@ import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
   bigint,
   datetime,
+  foreignKey,
   index,
   json,
   mysqlEnum,
@@ -116,9 +117,7 @@ export const attestationRevocationRecord = mysqlTable(
   {
     id: varchar("id", { length: 36 }).primaryKey().notNull().$defaultFn(randomUUID),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
-    attestationId: varchar("attestationId", { length: 36 })
-      .notNull()
-      .references(() => artifactAttestation.id),
+    attestationId: varchar("attestationId", { length: 36 }).notNull(),
     revokedByType: mysqlEnum("revokedByType", ATTESTATION_REVOCATION_ACTOR_TYPES).notNull(),
     revokedBy: varchar("revokedBy", { length: 128 }).notNull(),
     reason: text("reason").notNull(),
@@ -135,6 +134,12 @@ export const attestationRevocationRecord = mysqlTable(
       table.tenantId,
       table.revokedAt,
     ),
+    // 显式命名 FK（0000 基线中 drizzle 截断生成，<64 字符）。
+    attestationFk: foreignKey({
+      name: "AttestationRevocationRecord_attestationId_ArtifactAttestatiob0ec",
+      columns: [table.attestationId],
+      foreignColumns: [artifactAttestation.id],
+    }),
   }),
 );
 

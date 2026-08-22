@@ -87,7 +87,6 @@ export async function GET(request: Request): Promise<Response> {
     thread_id: p.threadId,
     tenant_id: p.tenantId,
     owner_user_id: p.ownerUserId,
-    primary_agent_id: p.primaryAgentId,
     title: p.title,
     lifecycle_state: p.lifecycleState,
     last_activity_at: p.lastActivityAt.toISOString(),

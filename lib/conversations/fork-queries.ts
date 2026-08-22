@@ -11,7 +11,7 @@
  *
  * 关键约束（行 461-466、§4 行 60-66）：
  * - Fork 不默认复制文件系统（filesystem_checkpoint_id 仅 workspace_mode=checkpoint_copy 时返回，本阶段为 null）。
- * - child Thread 获得独立主 Agent、Goal、Workspace（同 primaryAgentId，独立 activeGoalId/Workspace）。
+ * - child Thread 获得独立 Goal、Workspace（独立 activeGoalId/Workspace）；Thread 不保存 Agent。
  * - parent 与 child 不能相同；UNIQUE(parent_thread_id, child_thread_id, relation_type)。
  * - child_thread.created 的 required_refs 含 turn_id/item_id/invocation_id（本阶段简化：child 不复制历史 Item，全设 null）。
  * - Fork 不复制 user_message Item（行 430 适用于 Regenerate；Fork 阶段简化：只创建空 child Thread）。
@@ -65,7 +65,7 @@ export interface ForkThreadResult {
  * 流程：
  * 1. SELECT FOR UPDATE 源 Thread（校验 active + owner）
  * 2. 校验 fromTurnId 属于源 Thread
- * 3. 创建子 Thread（新 id，ownerUserId 相同，primaryAgentId 相同，title 或继承）
+ * 3. 创建子 Thread（新 id，ownerUserId 相同，title 或继承）
  * 4. 分配子 Thread 的 sequence（thread.created 用 sequence=1）
  * 5. 写子 Thread 的 thread.created Event（payload 标记 fork_child=true）
  * 6. 在父 Thread 的事件流中写 child_thread.created Event
@@ -123,14 +123,13 @@ export async function forkThread(params: {
       throw new ForkSourceTurnMismatchError(params.parentThreadId, params.fromTurnId);
     }
 
-    // 3. 创建子 Thread（新 id，ownerUserId 相同，primaryAgentId 相同，title 或继承）
+    // 3. 创建子 Thread（新 id，ownerUserId 相同，title 或继承）
     // child Thread 的 lastEventSequence 从 1 开始（thread.created 占 sequence=1）
     const childTitle = params.title ?? parentThread.title ?? null;
     await tx.insert(threadTable).values({
       id: childThreadId,
       tenantId: params.tenantId,
       ownerUserId: parentThread.ownerUserId,
-      primaryAgentId: parentThread.primaryAgentId,
       title: childTitle,
       defaultWorkspaceId: null, // child 获得独立 Workspace（§4 行 60-66），本阶段不复制
       defaultModelRef: parentThread.defaultModelRef,
@@ -162,7 +161,6 @@ export async function forkThread(params: {
         // 投影上下文（thread_list_projection 需要 tenant_id/owner_user_id 创建行）
         tenant_id: params.tenantId,
         owner_user_id: parentThread.ownerUserId,
-        primary_agent_id: parentThread.primaryAgentId,
         title: childTitle,
         default_workspace_id: null,
         default_model_ref: parentThread.defaultModelRef,
@@ -217,7 +215,7 @@ export async function forkThread(params: {
       sourceTurnId: params.fromTurnId,
       sourceItemId: null,
       sourceInvocationId: null,
-      targetAgentId: null, // fork 继承主 Agent，target_agent_id 为空
+      targetAgentId: null, // fork 不绑定 Agent，target_agent_id 为空
       taskPayloadRef: null,
       taskPayloadHash: null,
       contextTransferPolicyJson: null,

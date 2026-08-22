@@ -19,7 +19,6 @@ import {
   supersedeItem,
 } from "@/lib/conversations/thread-item-queries";
 import {
-  changePrimaryAgent,
   createThread,
   getThreadById,
   listThreadsForUser,
@@ -43,7 +42,7 @@ import {
  * S04-C01：会话域集成测试（真实 MySQL 8）。
  *
  * 覆盖：
- * - thread-queries：createThread/getThreadById/requireThread/listThreadsForUser/updateThreadLifecycle/updateThreadSettings/changePrimaryAgent。
+ * - thread-queries：createThread/getThreadById/requireThread/listThreadsForUser/updateThreadLifecycle/updateThreadSettings。
  * - turn-queries：acceptUserMessageTurn/acceptJobResultTurn/getTurnById/updateTurnState。
  * - thread-item-queries：getItemById/listItemsByThread/supersedeItem。
  * - goal-queries：createGoal/getActiveGoalByThread/updateGoalState。
@@ -102,7 +101,6 @@ async function seedThread(tenantId: string, ownerId: string, agentId: string) {
   return createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agentId,
     actorId: ownerId,
   });
 }
@@ -127,7 +125,6 @@ describe("Thread CRUD", () => {
 
     expect(thread.tenantId).toBe(tenantId);
     expect(thread.ownerUserId).toBe(ownerId);
-    expect(thread.primaryAgentId).toBe(agentId);
     expect(thread.lifecycleState).toBe("active");
     expect(thread.lastTurnSequence).toBe(0);
     expect(thread.lastItemSequence).toBe(0);
@@ -292,21 +289,6 @@ describe("Thread 设置更新", () => {
     expect(updated?.versionNo).toBe(2);
   });
 
-  it("changePrimaryAgent 更新 primaryAgentId，versionNo 递增", async () => {
-    const { thread } = await seedThread(tenantId, ownerId, agentId);
-    // 创建另一个 Agent
-    const otherAgent = await createAgent({
-      tenantId,
-      agentKey: "chart",
-      displayName: "Chart Agent",
-      ownerUserId: ownerId,
-      lifecycleState: "enabled",
-    });
-    const updated = await changePrimaryAgent(tenantId, thread.id, otherAgent.id, 1);
-    expect(updated?.primaryAgentId).toBe(otherAgent.id);
-    expect(updated?.versionNo).toBe(2);
-  });
-
   it("updateThreadSettings 乐观锁冲突抛 ThreadVersionConflictError", async () => {
     const { thread } = await seedThread(tenantId, ownerId, agentId);
     await expect(
@@ -314,12 +296,6 @@ describe("Thread 设置更新", () => {
     ).rejects.toThrow(ThreadVersionConflictError);
   });
 
-  it("changePrimaryAgent 乐观锁冲突抛 ThreadVersionConflictError", async () => {
-    const { thread } = await seedThread(tenantId, ownerId, agentId);
-    await expect(changePrimaryAgent(tenantId, thread.id, "other-agent", 999)).rejects.toThrow(
-      ThreadVersionConflictError,
-    );
-  });
 });
 
 // ─── Turn 接纳事务 ───────────────────────────────────────

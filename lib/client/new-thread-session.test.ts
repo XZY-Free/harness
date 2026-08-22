@@ -36,11 +36,10 @@ describe("new thread client session", () => {
     });
 
     await expect(
-      session.submit({ text: "请帮我分析销售数据", agentId: "agent-1", modelRef: "glm-5.2" }),
+      session.submit({ text: "请帮我分析销售数据", modelRef: "glm-5.2" }),
     ).resolves.toEqual({
       id: "thread-1",
       title: "分析销售数据",
-      primary_agent_id: "agent-1",
     });
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
@@ -51,7 +50,7 @@ describe("new thread client session", () => {
           "content-type": "application/json",
           "idempotency-key": "thread-key",
         },
-        body: JSON.stringify({ agent_id: "agent-1", title: "分析销售数据" }),
+        body: JSON.stringify({ title: "分析销售数据" }),
       }),
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
@@ -86,7 +85,7 @@ describe("new thread client session", () => {
       fetchImpl,
       idempotencyKeyFactory: () => keys.shift() ?? "unexpected",
     });
-    const submission = { text: "重试任务", agentId: "agent-1", modelRef: null };
+    const submission = { text: "重试任务", modelRef: null };
 
     await expect(session.submit(submission)).rejects.toThrow("消息发送失败");
     await expect(session.submit(submission)).resolves.toMatchObject({ id: "thread-1" });

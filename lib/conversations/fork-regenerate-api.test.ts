@@ -57,13 +57,13 @@ async function seedContext() {
 }
 
 /** 创建 Thread 并返回 threadId。 */
-async function createThread(agentId: string, idempotencyKey: string): Promise<string> {
+async function createThread(idempotencyKey: string): Promise<string> {
   const req = buildApiRequest({
     audience: "employee",
     method: "POST",
     path: "/threads",
     idempotencyKey,
-    body: { agent_id: agentId },
+    body: {},
   });
   const resp = await createThreadPOST(req);
   const body = (await resp.json()) as { id: string };
@@ -138,7 +138,7 @@ async function getTurnItems(turnId: string) {
 describe("POST /api/v1/threads/{thread_id}/forks", () => {
   it("成功 Fork Thread → 201 + 子 Thread + 关系 + 事件", async () => {
     const { agent } = await seedContext();
-    const threadId = await createThread(agent.id, "fork-thread-001");
+    const threadId = await createThread("fork-thread-001");
     const turnId = await createTurn(threadId, "fork-turn-001");
 
     const req = buildApiRequest({
@@ -154,7 +154,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
     });
     expect(resp.status).toBe(201);
     const body = (await resp.json()) as {
-      thread: { id: string; primary_agent_id: string; lifecycle_state: string };
+      thread: { id: string; lifecycle_state: string };
       relation: {
         parent_thread_id: string;
         child_thread_id: string;
@@ -167,7 +167,6 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
       parent_child_thread_created_event_id: string;
     };
     expect(body.thread.id).not.toBe(threadId);
-    expect(body.thread.primary_agent_id).toBe(agent.id);
     expect(body.thread.lifecycle_state).toBe("active");
     expect(body.relation.parent_thread_id).toBe(threadId);
     expect(body.relation.child_thread_id).toBe(body.thread.id);
@@ -181,7 +180,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
 
   it("缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { agent } = await seedContext();
-    const threadId = await createThread(agent.id, "fork-thread-002");
+    const threadId = await createThread("fork-thread-002");
     const turnId = await createTurn(threadId, "fork-turn-002");
 
     const req = buildApiRequest({
@@ -201,7 +200,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
 
   it("请求体非法（缺 from_turn_id）→ 400 REQUEST_SCHEMA_INVALID", async () => {
     const { agent } = await seedContext();
-    const threadId = await createThread(agent.id, "fork-thread-003");
+    const threadId = await createThread("fork-thread-003");
 
     const req = buildApiRequest({
       audience: "employee",
@@ -238,8 +237,8 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
 
   it("Fork 源 Turn 不属于源 Thread → 422 BUSINESS_CONSTRAINT_VIOLATION", async () => {
     const { agent } = await seedContext();
-    const threadId1 = await createThread(agent.id, "fork-thread-005a");
-    const threadId2 = await createThread(agent.id, "fork-thread-005b");
+    const threadId1 = await createThread("fork-thread-005a");
+    const threadId2 = await createThread("fork-thread-005b");
     const turnId2 = await createTurn(threadId2, "fork-turn-005b"); // 属于 thread2
 
     const req = buildApiRequest({
@@ -260,7 +259,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
 
   it("幂等重放 → 201 + 原响应", async () => {
     const { agent } = await seedContext();
-    const threadId = await createThread(agent.id, "fork-thread-006");
+    const threadId = await createThread("fork-thread-006");
     const turnId = await createTurn(threadId, "fork-turn-006");
 
     const req1 = buildApiRequest({
@@ -300,7 +299,7 @@ describe("POST /api/v1/threads/{thread_id}/forks", () => {
 describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
   it("成功 Regenerate completed Turn → 202 + regenerating 状态 + InvocationCommand", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "regen-thread-001");
+    const threadId = await createThread("regen-thread-001");
     const turnId = await createTurn(threadId, "regen-turn-001");
     // 将 Turn 转换到 completed 状态
     await transitionTurn(tenantId, turnId, "running");
@@ -367,7 +366,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
 
   it("缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "regen-thread-003");
+    const threadId = await createThread("regen-thread-003");
     const turnId = await createTurn(threadId, "regen-turn-003");
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
@@ -389,7 +388,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
 
   it("Turn 状态为 accepted（非终态）→ 409 TURN_ALREADY_TERMINAL", async () => {
     const { agent } = await seedContext();
-    const threadId = await createThread(agent.id, "regen-thread-004");
+    const threadId = await createThread("regen-thread-004");
     const turnId = await createTurn(threadId, "regen-turn-004");
     // Turn 保持 accepted 状态（非 completed/interrupted/failed）
 
@@ -411,7 +410,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
 
   it("Turn 状态为 cancelled → 409 TURN_ALREADY_TERMINAL（cancelled 不可恢复）", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "regen-thread-005");
+    const threadId = await createThread("regen-thread-005");
     const turnId = await createTurn(threadId, "regen-turn-005");
     await transitionTurn(tenantId, turnId, "cancelled");
 
@@ -433,7 +432,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
 
   it("幂等重放 → 202 + 原响应", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "regen-thread-006");
+    const threadId = await createThread("regen-thread-006");
     const turnId = await createTurn(threadId, "regen-turn-006");
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
@@ -475,7 +474,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
 describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
   it("成功 Interrupt running Turn → 202 + 命令入队（Turn 状态未变）", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "intr-thread-001");
+    const threadId = await createThread("intr-thread-001");
     const turnId = await createTurn(threadId, "intr-turn-001");
     await transitionTurn(tenantId, turnId, "running");
 
@@ -524,7 +523,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
 
   it("成功 Interrupt waiting_user Turn → 202（waiting_user 允许 Interrupt）", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "intr-thread-002");
+    const threadId = await createThread("intr-thread-002");
     const turnId = await createTurn(threadId, "intr-turn-002");
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "waiting_user");
@@ -564,7 +563,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
 
   it("缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "intr-thread-004");
+    const threadId = await createThread("intr-thread-004");
     const turnId = await createTurn(threadId, "intr-turn-004");
     await transitionTurn(tenantId, turnId, "running");
 
@@ -585,7 +584,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
 
   it("Turn 已终态（completed）→ 409 TURN_ALREADY_TERMINAL", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "intr-thread-005");
+    const threadId = await createThread("intr-thread-005");
     const turnId = await createTurn(threadId, "intr-turn-005");
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
@@ -608,7 +607,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
 
   it("幂等重放 → 202 + 原响应", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "intr-thread-006");
+    const threadId = await createThread("intr-thread-006");
     const turnId = await createTurn(threadId, "intr-turn-006");
     await transitionTurn(tenantId, turnId, "running");
 
@@ -648,7 +647,7 @@ describe("POST /api/v1/turns/{turn_id}/interrupt", () => {
 describe("POST /api/v1/turns/{turn_id}/steer", () => {
   it("成功 Steer running Turn → 202 + user_guidance Item + 命令入队", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "steer-thread-001");
+    const threadId = await createThread("steer-thread-001");
     const turnId = await createTurn(threadId, "steer-turn-001");
     await transitionTurn(tenantId, turnId, "running");
 
@@ -720,7 +719,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
 
   it("缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "steer-thread-003");
+    const threadId = await createThread("steer-thread-003");
     const turnId = await createTurn(threadId, "steer-turn-003");
     await transitionTurn(tenantId, turnId, "running");
 
@@ -741,7 +740,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
 
   it("Turn 状态为 waiting_user → 409 TURN_REQUIRES_USER_ACTION", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "steer-thread-004");
+    const threadId = await createThread("steer-thread-004");
     const turnId = await createTurn(threadId, "steer-turn-004");
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "waiting_user");
@@ -764,7 +763,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
 
   it("Turn 状态为 accepted（非 running）→ 409 TURN_ALREADY_TERMINAL", async () => {
     const { agent } = await seedContext();
-    const threadId = await createThread(agent.id, "steer-thread-005");
+    const threadId = await createThread("steer-thread-005");
     const turnId = await createTurn(threadId, "steer-turn-005");
     // Turn 保持 accepted 状态（非 running）
 
@@ -786,7 +785,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
 
   it("幂等重放 → 202 + 原响应", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "steer-thread-006");
+    const threadId = await createThread("steer-thread-006");
     const turnId = await createTurn(threadId, "steer-turn-006");
     await transitionTurn(tenantId, turnId, "running");
 
@@ -826,7 +825,7 @@ describe("POST /api/v1/turns/{turn_id}/steer", () => {
 describe("跨租户隔离（隐藏式 404）", () => {
   it("跨租户 Fork → 404 RESOURCE_NOT_FOUND（不泄露存在）", async () => {
     const { agent } = await seedContext();
-    const threadId = await createThread(agent.id, "xtenant-fork-thread");
+    const threadId = await createThread("xtenant-fork-thread");
     const turnId = await createTurn(threadId, "xtenant-fork-turn");
 
     // 模拟跨租户：使用不存在的 tenantId（dev 模式下 principal.tenantId 来自 default tenant）
@@ -872,7 +871,7 @@ describe("跨租户隔离（隐藏式 404）", () => {
 describe("Idempotency 冲突（同 key 不同 body）", () => {
   it("Fork 同 Idempotency-Key 不同 body → 409 IDEMPOTENCY_CONFLICT", async () => {
     const { agent } = await seedContext();
-    const threadId = await createThread(agent.id, "idem-fork-thread");
+    const threadId = await createThread("idem-fork-thread");
     const turnId1 = await createTurn(threadId, "idem-fork-turn1");
     const turnId2 = await createTurn(threadId, "idem-fork-turn2");
 
@@ -907,7 +906,7 @@ describe("Idempotency 冲突（同 key 不同 body）", () => {
 
   it("Steer 同 Idempotency-Key 不同 body → 409 IDEMPOTENCY_CONFLICT", async () => {
     const { tenantId, agent } = await seedContext();
-    const threadId = await createThread(agent.id, "idem-steer-thread");
+    const threadId = await createThread("idem-steer-thread");
     const turnId = await createTurn(threadId, "idem-steer-turn");
     await transitionTurn(tenantId, turnId, "running");
 

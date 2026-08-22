@@ -208,8 +208,6 @@ export const threadTable = mysqlTable(
       .references(() => tenant.id),
     /** 会话所有者 userIdentityId（逻辑外键 → UserIdentity.id）。 */
     ownerUserId: varchar("ownerUserId", { length: 36 }).notNull(),
-    /** 当前主 Agent 稳定身份（逻辑外键 → Agent.id）。 */
-    primaryAgentId: varchar("primaryAgentId", { length: 36 }).notNull(),
     /** 默认逻辑 Workspace（后续阶段接入）。 */
     defaultWorkspaceId: varchar("defaultWorkspaceId", { length: 36 }),
     /** 当前 active Goal id（逻辑外键 → Goal.id）。 */
@@ -250,11 +248,6 @@ export const threadTable = mysqlTable(
       t.tenantId,
       t.ownerUserId,
       t.lifecycleState,
-      t.lastActivityAt,
-    ),
-    tenantAgentActivityIdx: index("Thread_tenant_agent_activity_idx").on(
-      t.tenantId,
-      t.primaryAgentId,
       t.lastActivityAt,
     ),
   }),

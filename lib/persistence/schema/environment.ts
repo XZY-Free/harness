@@ -27,6 +27,7 @@ import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
   bigint,
   datetime,
+  foreignKey,
   index,
   json,
   mysqlEnum,
@@ -201,9 +202,7 @@ export const environmentLeaseTable = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 })
       .notNull()
       .references(() => tenant.id),
-    environmentDefinitionId: varchar("environmentDefinitionId", { length: 36 })
-      .notNull()
-      .references(() => environmentDefinitionTable.id),
+    environmentDefinitionId: varchar("environmentDefinitionId", { length: 36 }).notNull(),
     /** 引用 Invocation.id（FK CASCADE）。 */
     invocationId: varchar("invocationId", { length: 36 })
       .notNull()
@@ -239,6 +238,12 @@ export const environmentLeaseTable = mysqlTable(
     tenantStateIdx: index("EnvironmentLease_tenant_state_idx").on(t.tenantId, t.leaseState),
     definitionIdx: index("EnvironmentLease_definition_idx").on(t.environmentDefinitionId),
     deviceIdx: index("EnvironmentLease_device_idx").on(t.deviceId),
+    // 显式命名 FK（0000 基线中 drizzle 截断生成，<64 字符）。
+    definitionFk: foreignKey({
+      name: "EnvironmentLease_environmentDefinitionId_EnvironmentDefinitie317",
+      columns: [t.environmentDefinitionId],
+      foreignColumns: [environmentDefinitionTable.id],
+    }),
   }),
 );
 
@@ -272,12 +277,9 @@ export const environmentChangeRequestTable = mysqlTable(
     threadId: varchar("threadId", { length: 36 }).notNull(),
     /** 当前 Invocation id；可空表示下一 Invocation 生效。 */
     invocationId: varchar("invocationId", { length: 36 }),
-    fromEnvironmentDefinitionId: varchar("fromEnvironmentDefinitionId", { length: 36 })
-      .notNull()
-      .references(() => environmentDefinitionTable.id),
+    fromEnvironmentDefinitionId: varchar("fromEnvironmentDefinitionId", { length: 36 }).notNull(),
     requestedEnvironmentDefinitionId: varchar("requestedEnvironmentDefinitionId", { length: 36 })
-      .notNull()
-      .references(() => environmentDefinitionTable.id),
+      .notNull(),
     /** 切换到指定设备（仅 Desktop 必填）。 */
     requestedDeviceId: varchar("requestedDeviceId", { length: 36 }),
     requestState: mysqlEnum("requestState", ENVIRONMENT_CHANGE_REQUEST_STATES)
@@ -311,6 +313,17 @@ export const environmentChangeRequestTable = mysqlTable(
     requestedDefinitionIdx: index("EnvironmentChangeRequest_requested_definition_idx").on(
       t.requestedEnvironmentDefinitionId,
     ),
+    // 显式命名 FK（0000 基线中 drizzle 截断生成，<64 字符，避免超长逻辑名在后续迁移被反复 rename）。
+    fromDefinitionFk: foreignKey({
+      name: "EnvironmentChangeRequest_fromEnvironmentDefinitionId_Environ5abe",
+      columns: [t.fromEnvironmentDefinitionId],
+      foreignColumns: [environmentDefinitionTable.id],
+    }),
+    requestedDefinitionFk: foreignKey({
+      name: "EnvironmentChangeRequest_requestedEnvironmentDefinitionId_Ene6d1",
+      columns: [t.requestedEnvironmentDefinitionId],
+      foreignColumns: [environmentDefinitionTable.id],
+    }),
   }),
 );
 

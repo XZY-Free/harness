@@ -56,7 +56,6 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: userIdentityId,
-      primaryAgentId: agent.id,
       actorId: userIdentityId,
     });
 
@@ -109,7 +108,6 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: userIdentityId,
-      primaryAgentId: agent.id,
       actorId: userIdentityId,
     });
 
@@ -147,7 +145,6 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: userIdentityId,
-      primaryAgentId: agent.id,
       actorId: userIdentityId,
     });
 
@@ -171,7 +168,6 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: userIdentityId,
-      primaryAgentId: agent.id,
       actorId: userIdentityId,
     });
 
@@ -195,7 +191,6 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: userIdentityId,
-      primaryAgentId: agent.id,
       actorId: userIdentityId,
     });
 
@@ -221,7 +216,6 @@ describe("GET /api/v1/threads/{thread_id}/turns", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: otherOwner,
-      primaryAgentId: agent.id,
       actorId: otherOwner,
     });
 

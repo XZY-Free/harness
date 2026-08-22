@@ -210,7 +210,6 @@ export const threadListProjectionTable = mysqlTable(
       .notNull()
       .references(() => tenant.id),
     ownerUserId: varchar("ownerUserId", { length: 36 }).notNull(),
-    primaryAgentId: varchar("primaryAgentId", { length: 36 }).notNull(),
     title: text("title"),
     lifecycleState: varchar("lifecycleState", { length: 32 }).notNull().default("active"),
     lastActivityAt: datetime("lastActivityAt", { mode: "date", fsp: 3 }).notNull(),
@@ -238,11 +237,6 @@ export const threadListProjectionTable = mysqlTable(
     tenantOwnerActivityIdx: index("ThreadListProjection_tenant_owner_activity_idx").on(
       t.tenantId,
       t.ownerUserId,
-      t.lastActivityAt,
-    ),
-    tenantAgentActivityIdx: index("ThreadListProjection_tenant_agent_activity_idx").on(
-      t.tenantId,
-      t.primaryAgentId,
       t.lastActivityAt,
     ),
     tenantLifecycleIdx: index("ThreadListProjection_tenant_lifecycle_idx").on(

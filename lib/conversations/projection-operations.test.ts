@@ -84,7 +84,6 @@ async function seedFullContext() {
   const { thread, event } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agent.id,
     actorId: ownerId,
   });
   await initEventStreamFloor({

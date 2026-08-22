@@ -72,7 +72,6 @@ async function seedFixture() {
   const { thread } = await createThread({
     tenantId: tenant.id,
     ownerUserId: identity.id,
-    primaryAgentId: agent.id,
     actorId: identity.id,
   });
   return {

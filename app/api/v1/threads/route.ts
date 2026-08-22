@@ -7,8 +7,7 @@
  * 行为：
  * - 解析员工身份（employee audience）。
  * - 校验 Idempotency-Key（必填）+ computeRequestHash → enforceIdempotency。
- * - 校验请求体（agent_id 必填；title/workspace_id 可选）。
- * - 校验 Agent 存在且属于当前租户且 lifecycle=enabled（无权/不存在返回 404，不泄露存在）。
+ * - 校验请求体（title/workspace_id 可选）。
  * - 调用 createThread 同事务写 Thread + thread.created Event。
  * - completeRecord + 返回 201 + Thread 投影。
  *
@@ -16,10 +15,8 @@
  * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
  * - 缺少 Idempotency-Key → 400 REQUEST_SCHEMA_INVALID
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
- * - Agent 不存在/非 enabled/跨租户 → 404 RESOURCE_NOT_FOUND
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
-import { getAgentById, listAgents } from "@/lib/agents/persistence/agent-queries";
 import { aiConfig } from "@/lib/config";
 import {
   type Principal,
@@ -33,7 +30,6 @@ import {
   REQUEST_ID_HEADER,
   apiSuccess,
   getRequestId,
-  resourceNotFound,
 } from "@/lib/http";
 import {
   buildIdempotencyErrorResponse,
@@ -65,22 +61,13 @@ export async function GET(request: Request): Promise<Response> {
     throw err;
   }
 
-  const [threads, agents] = await Promise.all([
-    listThreadsForUser(principal.tenantId, principal.userIdentityId),
-    listAgents(principal.tenantId, { lifecycleState: "enabled" }),
-  ]);
+  const threads = await listThreadsForUser(principal.tenantId, principal.userIdentityId);
   return apiSuccess(
     {
       viewer_id: principal.userIdentityId,
       threads: threads.map((thread) => ({
         id: thread.id,
         title: thread.title,
-        primary_agent_id: thread.primaryAgentId,
-      })),
-      agents: agents.map((agent) => ({
-        id: agent.id,
-        agent_key: agent.agentKey,
-        display_name: agent.displayName,
       })),
       default_model_ref: aiConfig.chatModel,
     },
@@ -90,7 +77,6 @@ export async function GET(request: Request): Promise<Response> {
 
 /** 请求体 schema（与 §3.1 requestBody 对齐）。 */
 interface CreateThreadBody {
-  agent_id: string;
   title?: string;
   workspace_id?: string;
 }
@@ -99,7 +85,6 @@ interface CreateThreadBody {
 function validateBody(body: unknown): body is CreateThreadBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
-  if (typeof b.agent_id !== "string" || b.agent_id.length === 0) return false;
   if (b.title !== undefined && typeof b.title !== "string") return false;
   if (b.workspace_id !== undefined && typeof b.workspace_id !== "string") return false;
   return true;
@@ -109,7 +94,6 @@ function validateBody(body: unknown): body is CreateThreadBody {
 function projectThread(thread: {
   id: string;
   title: string | null;
-  primaryAgentId: string;
   defaultWorkspaceId: string | null;
   lifecycleState: string;
   lastEventSequence: number;
@@ -118,7 +102,6 @@ function projectThread(thread: {
   return {
     id: thread.id,
     title: thread.title,
-    primary_agent_id: thread.primaryAgentId,
     default_workspace_id: thread.defaultWorkspaceId,
     lifecycle_state: thread.lifecycleState,
     last_event_sequence: thread.lastEventSequence,
@@ -148,16 +131,10 @@ export async function POST(request: Request): Promise<Response> {
   // 3. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return schemaInvalidTable(requestId, "请求体非法：缺少 agent_id 或字段类型错误");
+    return schemaInvalidTable(requestId, "请求体非法：字段类型错误");
   }
 
-  // 4. 校验 Agent 存在且 enabled（无权/不存在 → 404 隐藏式，不泄露存在）
-  const agent = await getAgentById(principal.tenantId, body.agent_id);
-  if (!agent || agent.lifecycleState !== "enabled") {
-    return resourceNotFound(requestId, `Agent 不存在或无权使用: ${body.agent_id}`);
-  }
-
-  // 5. 计算请求 hash + 幂等守卫
+  // 4. 计算请求 hash + 幂等守卫
   const path = new URL(request.url).pathname;
   const requestHash = computeRequestHash("POST", path, body);
   const caller = callerFromPrincipal(principal);
@@ -204,7 +181,6 @@ export async function POST(request: Request): Promise<Response> {
     const { thread } = await createThread({
       tenantId: principal.tenantId,
       ownerUserId: principal.userIdentityId,
-      primaryAgentId: body.agent_id,
       title: body.title ?? null,
       defaultWorkspaceId: body.workspace_id ?? null,
       actorId: principal.userIdentityId,

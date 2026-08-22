@@ -21,7 +21,6 @@ import type { DesktopOperationCategory, DesktopOperationResult } from "@/lib/des
 export interface ClientThreadSummary {
   readonly id: string;
   readonly title: string | null;
-  readonly primary_agent_id: string;
 }
 
 export interface ClientAgentSummary {
@@ -33,7 +32,6 @@ export interface ClientAgentSummary {
 export interface ClientThreadShellResponse {
   readonly viewer_id: string;
   readonly threads: readonly ClientThreadSummary[];
-  readonly agents: readonly ClientAgentSummary[];
   /**
    * 平台默认模型（服务端配置事实源 aiConfig.chatModel 的投影，snake_case）。
    *
@@ -46,7 +44,6 @@ export interface ClientThreadShellResponse {
 
 export interface ClientNewThreadSubmission {
   readonly text: string;
-  readonly agentId: string;
   readonly modelRef: string | null;
 }
 

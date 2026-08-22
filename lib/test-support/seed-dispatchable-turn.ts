@@ -177,7 +177,6 @@ export async function seedDispatchableTurn(
   const { thread } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agent.id,
     actorId: ownerId,
   });
 

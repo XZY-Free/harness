@@ -59,7 +59,6 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: userIdentityId,
-      primaryAgentId: agent.id,
       title: "Test Thread",
       actorId: userIdentityId,
     });
@@ -86,7 +85,6 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     const body = await response.json();
     expect(body.thread.id).toBe(thread.id);
     expect(body.thread.title).toBe("Test Thread");
-    expect(body.thread.primary_agent_id).toBe(agent.id);
     expect(body.thread.lifecycle_state).toBe("active");
     expect(body.active_goal).toBeNull();
     expect(body.latest_turn).not.toBeNull();
@@ -100,7 +98,6 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: userIdentityId,
-      primaryAgentId: agent.id,
       title: "Goal Thread",
       actorId: userIdentityId,
     });
@@ -142,7 +139,6 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: userIdentityId,
-      primaryAgentId: agent.id,
       actorId: userIdentityId,
     });
 
@@ -171,7 +167,6 @@ describe("GET /api/v1/threads/{thread_id}", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: otherOwner,
-      primaryAgentId: agent.id,
       actorId: otherOwner,
     });
 
@@ -214,7 +209,6 @@ describe("DELETE /api/v1/threads/{thread_id}", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: userIdentityId,
-      primaryAgentId: agent.id,
       title: "待删除会话",
       actorId: userIdentityId,
     });
@@ -262,7 +256,6 @@ describe("DELETE /api/v1/threads/{thread_id}", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: "other-owner-001",
-      primaryAgentId: agent.id,
       actorId: "other-owner-001",
     });
 

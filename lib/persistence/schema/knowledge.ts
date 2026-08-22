@@ -24,6 +24,7 @@ import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
   datetime,
+  foreignKey,
   index,
   json,
   mysqlEnum,
@@ -263,9 +264,7 @@ export const knowledgeChunk = mysqlTable(
       .notNull()
       .references(() => tenant.id),
     /** 所属文档修订（DB 级 FK → KnowledgeDocumentRevision.id ON DELETE CASCADE）。 */
-    documentRevisionId: varchar("documentRevisionId", { length: 36 })
-      .notNull()
-      .references(() => knowledgeDocumentRevision.id),
+    documentRevisionId: varchar("documentRevisionId", { length: 36 }).notNull(),
     /** Chunk 序号（修订内单调递增；从 1 开始）。 */
     chunkNo: varchar("chunkNo", { length: 32 }).notNull(),
     /** Chunk 内容对象存储引用（不可变；大 Chunk 用引用）。 */
@@ -290,6 +289,12 @@ export const knowledgeChunk = mysqlTable(
       t.tenantId,
       t.documentRevisionId,
     ),
+    // 显式命名 FK（0000 基线中 drizzle 截断生成，<64 字符）。
+    documentRevisionFk: foreignKey({
+      name: "KnowledgeChunk_documentRevisionId_KnowledgeDocumentRevision_85e8",
+      columns: [t.documentRevisionId],
+      foreignColumns: [knowledgeDocumentRevision.id],
+    }),
   }),
 );
 

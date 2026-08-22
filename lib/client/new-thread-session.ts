@@ -46,9 +46,7 @@ function submissionsEqual(
   left: ClientNewThreadSubmission,
   right: ClientNewThreadSubmission,
 ): boolean {
-  return (
-    left.text === right.text && left.agentId === right.agentId && left.modelRef === right.modelRef
-  );
+  return left.text === right.text && left.modelRef === right.modelRef;
 }
 
 export function createNewThreadSession(config: NewThreadSessionConfig = {}): NewThreadSession {
@@ -59,7 +57,7 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
   return {
     async submit(submission) {
       if (pending && !submissionsEqual(pending.submission, submission)) {
-        throw new Error("首条消息发送失败后不能更换助手、模型或消息内容，请先重试原消息。");
+        throw new Error("首条消息发送失败后不能更换模型或消息内容，请先重试原消息。");
       }
 
       if (!pending) {
@@ -71,7 +69,7 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
             "content-type": "application/json",
             "idempotency-key": idempotencyKeyFactory(),
           },
-          body: JSON.stringify({ agent_id: submission.agentId, title }),
+          body: JSON.stringify({ title }),
         });
         const created = await requireJson<{ readonly id: string; readonly title?: string | null }>(
           createResponse,
@@ -81,7 +79,6 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
           thread: {
             id: created.id,
             title: created.title ?? title,
-            primary_agent_id: submission.agentId,
           },
           submission,
           turnIdempotencyKey: idempotencyKeyFactory(),

@@ -1,16 +1,15 @@
 import { ThreadNotFoundError, ThreadVersionConflictError } from "@/lib/conversations/errors";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
- * Thread 设置与主 Agent 变更仓储（事务性，同事务写 Event）。
+ * Thread 设置仓储（事务性，同事务写 Event）。
  *
  * 事实源：
- * - docs/architecture/api-and-events.md （更新 Thread 默认设置）、（更换 Thread 主 Agent）
+ * - docs/architecture/api-and-events.md （更新 Thread 默认设置）
  * - docs/architecture/persistence.md （事务边界：当前状态更新和 Event 追加同事务）
- * - docs/contracts/event-catalog.json（thread.model_changed / thread.environment_changed / thread.primary_agent_changed）
+ * - docs/contracts/event-catalog.json（thread.model_changed / thread.environment_changed）
  *
  * 职责：
  * - updateThreadSettingsWithEvents：事务内锁定 Thread → 乐观锁校验 → 更新默认设置 → 按 field 变化写对应 Event。
- * - changePrimaryAgentWithEvent：事务内锁定 Thread → 乐观锁校验 → 更新 primaryAgentId → 写 thread.primary_agent_changed Event。
  *
  * 关键约束：
  * - 当前状态更新与 Event 追加同事务（）。
@@ -171,88 +170,5 @@ export async function updateThreadSettingsWithEvents(params: {
     }
 
     return { thread: updated, events };
-  });
-}
-
-/** 主 Agent 变更结果。 */
-export interface ChangePrimaryAgentResult {
-  thread: Thread;
-  event: ThreadEvent;
-}
-
-/**
- * 事务内更换 Thread 主 Agent 并写 thread.primary_agent_changed Event。
- *
- * 约束（行 207）：员工主动调用即是显式确认。
- * 乐观锁：expectedVersionNo 不匹配抛 ThreadVersionConflictError。
- */
-export async function changePrimaryAgentWithEvent(params: {
-  tenantId: string;
-  threadId: string;
-  nextAgentId: string;
-  expectedVersionNo: number;
-  reason?: string;
-  actorType: ThreadEventActorType;
-  actorId?: string;
-  idempotencyKey?: string;
-  correlationId?: string;
-}): Promise<ChangePrimaryAgentResult> {
-  return db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE 锁定 Thread 行
-    const [thread] = await tx
-      .select()
-      .from(threadTable)
-      .where(and(eq(threadTable.tenantId, params.tenantId), eq(threadTable.id, params.threadId)))
-      .for("update")
-      .limit(1);
-
-    if (!thread) {
-      throw new ThreadNotFoundError(params.threadId);
-    }
-    if (thread.versionNo !== params.expectedVersionNo) {
-      throw new ThreadVersionConflictError(
-        params.threadId,
-        params.expectedVersionNo,
-        thread.versionNo,
-      );
-    }
-
-    // 2. 分配 sequence 并写 thread.primary_agent_changed Event
-    const startSequence = await allocateEventSequences(tx, params.threadId, 1);
-    const event = await insertThreadEvent(tx, params.threadId, startSequence, {
-      eventType: "thread.primary_agent_changed",
-      actorType: params.actorType,
-      actorId: params.actorId,
-      payload: {
-        // 投影上下文（projector 的 projectToThreadList 需要 primary_agent_id 更新投影行）
-        primary_agent_id: params.nextAgentId,
-        previous_agent_id: thread.primaryAgentId,
-        reason: params.reason ?? null,
-      },
-      idempotencyKey: params.idempotencyKey,
-      correlationId: params.correlationId,
-    });
-
-    // 3. 更新 Thread 行
-    await tx
-      .update(threadTable)
-      .set({
-        primaryAgentId: params.nextAgentId,
-        versionNo: thread.versionNo + 1,
-        updatedAt: new Date(),
-      })
-      .where(eq(threadTable.id, params.threadId));
-
-    // 4. 回读更新后 Thread
-    const [updated] = await tx
-      .select()
-      .from(threadTable)
-      .where(eq(threadTable.id, params.threadId))
-      .limit(1);
-    if (!updated) {
-      throw new Error(`changePrimaryAgentWithEvent: Thread 行未找到（id=${params.threadId}）`);
-    }
-
-    return { thread: updated, event };
   });
 }

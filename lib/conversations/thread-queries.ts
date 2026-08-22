@@ -7,11 +7,10 @@
  * - docs/architecture/conversations.md
  *
  * 职责：
- * - createThread：创建 Thread 绑定租户、所有者和主 Agent；同事务写 thread.created Event。
+ * - createThread：创建 Thread 绑定租户、所有者；同事务写 thread.created Event。
  * - getThreadById：跨租户隔离查询。
  * - updateThreadLifecycle：active → archived → deleted 状态机。
  * - updateThreadSettings：更新默认模型/Workspace/Environment；乐观锁。
- * - changePrimaryAgent：更换主 Agent；乐观锁。
  * - allocateSequences：锁定 Thread 行原子递增 turn/item/event sequence（SELECT FOR UPDATE）。
  *
  * sequence 分配策略（行 633）：
@@ -50,15 +49,14 @@ interface ThreadEventInput {
 }
 
 /**
- * 创建 Thread 绑定租户、所有者和主 Agent。
+ * 创建 Thread 绑定租户、所有者。
  *
  * 同事务写 thread.created Event（行 608：接纳 Thread 创建 = Thread + thread.created）。
- * thread.created 事件 sequence = 1（首次分配）。
+ * thread.created 事件 sequence = 1（首次分配）。Thread 不保存主 Agent。
  */
 export async function createThread(params: {
   tenantId: string;
   ownerUserId: string;
-  primaryAgentId: string;
   title?: string | null;
   defaultWorkspaceId?: string | null;
   defaultModelRef?: string | null;
@@ -76,7 +74,6 @@ export async function createThread(params: {
       id: threadId,
       tenantId: params.tenantId,
       ownerUserId: params.ownerUserId,
-      primaryAgentId: params.primaryAgentId,
       title: params.title ?? null,
       defaultWorkspaceId: params.defaultWorkspaceId ?? null,
       defaultModelRef: params.defaultModelRef ?? null,
@@ -104,7 +101,6 @@ export async function createThread(params: {
         // 投影上下文（thread_list_projection 需要 tenant_id/owner_user_id 创建行）
         tenant_id: params.tenantId,
         owner_user_id: params.ownerUserId,
-        primary_agent_id: params.primaryAgentId,
         title: params.title ?? null,
         default_workspace_id: params.defaultWorkspaceId ?? null,
         default_model_ref: params.defaultModelRef ?? null,
@@ -243,44 +239,6 @@ export async function updateThreadSettings(
     .update(threadTable)
     .set({
       ...updates,
-      versionNo: expectedVersionNo + 1,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(threadTable.tenantId, tenantId),
-        eq(threadTable.id, threadId),
-        eq(threadTable.versionNo, expectedVersionNo),
-      ),
-    );
-
-  if (result[0].affectedRows === 0) {
-    const current = await getThreadById(tenantId, threadId);
-    if (!current) return null;
-    throw new ThreadVersionConflictError(threadId, expectedVersionNo, current.versionNo);
-  }
-  return getThreadById(tenantId, threadId);
-}
-
-/**
- * 更换 Thread 主 Agent。
- *
- * 约束（行 122-131）：
- * - 员工显式调用即是显式确认。
- * - 乐观锁。
- *
- * 注意：本函数不写 thread.primary_agent_changed Event；调用方负责。
- */
-export async function changePrimaryAgent(
-  tenantId: string,
-  threadId: string,
-  nextAgentId: string,
-  expectedVersionNo: number,
-): Promise<Thread | null> {
-  const result = await db
-    .update(threadTable)
-    .set({
-      primaryAgentId: nextAgentId,
       versionNo: expectedVersionNo + 1,
       updatedAt: new Date(),
     })

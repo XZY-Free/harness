@@ -177,15 +177,14 @@ async function projectToThreadList(
       // 创建 thread_list_projection 行
       const tenantId = payload.tenant_id as string | undefined;
       const ownerUserId = payload.owner_user_id as string | undefined;
-      const primaryAgentId = payload.primary_agent_id as string | undefined;
       const title = (payload.title as string | null | undefined) ?? null;
 
-      if (!tenantId || !ownerUserId || !primaryAgentId) {
+      if (!tenantId || !ownerUserId) {
         throw new ProjectionFailureError(
           THREAD_LIST_CONSUMER,
           event.id,
           "schema_unsupported",
-          new Error("thread.created payload 缺少 tenant_id/owner_user_id/primary_agent_id"),
+          new Error("thread.created payload 缺少 tenant_id/owner_user_id"),
         );
       }
 
@@ -195,7 +194,6 @@ async function projectToThreadList(
           threadId: shardKey,
           tenantId,
           ownerUserId,
-          primaryAgentId,
           title,
           lifecycleState: "active",
           lastActivityAt: event.occurredAt,
@@ -205,7 +203,6 @@ async function projectToThreadList(
         })
         .onDuplicateKeyUpdate({
           set: {
-            primaryAgentId,
             title,
             lastActivityAt: event.occurredAt,
             latestEventSequence: event.eventSequence,
@@ -223,28 +220,6 @@ async function projectToThreadList(
         .update(threadListProjectionTable)
         .set({
           lifecycleState,
-          latestEventSequence: event.eventSequence,
-          latestEventId: event.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(threadListProjectionTable.threadId, shardKey));
-      break;
-    }
-
-    case "thread.primary_agent_changed": {
-      const primaryAgentId = payload.primary_agent_id as string | undefined;
-      if (!primaryAgentId) {
-        throw new ProjectionFailureError(
-          THREAD_LIST_CONSUMER,
-          event.id,
-          "schema_unsupported",
-          new Error("thread.primary_agent_changed payload 缺少 primary_agent_id"),
-        );
-      }
-      await tx
-        .update(threadListProjectionTable)
-        .set({
-          primaryAgentId,
           latestEventSequence: event.eventSequence,
           latestEventId: event.id,
           updatedAt: new Date(),

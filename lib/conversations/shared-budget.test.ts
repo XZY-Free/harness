@@ -73,7 +73,6 @@ async function seedThread(tenantId: string, userId: string, agentId: string) {
   const { thread } = await createThread({
     tenantId,
     ownerUserId: userId,
-    primaryAgentId: agentId,
     title: "Budget Test Thread",
     actorId: userId,
   });

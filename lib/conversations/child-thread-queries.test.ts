@@ -2,38 +2,29 @@
  * S09-C01 + S09-C02：Child Thread / Delegate 仓储集成测试（真实 MySQL 8 Testcontainers）。
  *
  * 覆盖：
- * - delegateChildThread：成功 + 子 Thread + delegate 关系 + 两条 Event + policy 校验
- *   （parent Invocation 非 running / target Agent 不在 allowedTargets / 深度超限 /
- *    budget 负值 / contextTransferPolicy 含 sensitive Item）
  * - 查询：getChildThreadRelation / getRelationsByParentInvocation / getDelegateRelationsByParentThread
  * - getChildThreadResult：未完成返回 null resultItem
  * - requestChildThreadCancellation：active → cancel_requested + Event；幂等；终态拒绝
- * - computeDelegationDepth：root=0；一级=1；二级=2
  * - projectChildThreadResult：子 Thread 终态 → 父 child_thread Item 投影 result；幂等；错误路径
  * - finalizeChildThreadCancellation：cancel_requested → cancelled；unknownEffect 路径；幂等
  * - handleChildThreadTerminal：按 completed/failed/cancelled 分派；skipped 路径
  * - recordChildThreadBudgetUsage / getChildThreadBudgetUsage / assertChildThreadBudgetNotExhausted：预算用量
+ * - 子取消 ack 集成：requestChildThreadCancellation + 正式 event ingress → handleChildThreadTerminal
  *
  * 不变量（事实源：05 文档 §9 行 380-417、§16 行 580-595、§18 行 352-362；12 文档 §4）：
- * - 只有 running 状态父 Invocation 可委派
- * - target_agent_id 必须在父 Agent delegationPolicyJson.allowedTargets 中
- * - 委派深度 + 1 <= maxDepth
  * - 取消请求 ≠ 已取消（relation_state active → cancel_requested → cancelled）
  * - 完成投影幂等：子 Runtime 不能直接回写父 Thread；投影由平台根据子 Thread 终态生成
  * - unknown_effect 核对责任：子任务已产生 unknown effect 时不伪造无副作用取消
  * - 跨租户隔离：父 Thread 跨租户不可见
+ *
+ * 说明：委派创建链（delegateChildThread / executeChildThreadTask / computeDelegationDepth /
+ * validateBudgetPolicy / validateContextTransferPolicy）已删除（专题01 冻结 Thread 无主 Agent）。
+ * 本文件通过 seedDelegateChildThread 手写 INSERT 创建子 Thread + delegate ThreadRelation 完成 setup。
  */
 import { randomUUID } from "node:crypto";
-import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
-import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
-import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import {
-  type ContextTransferPolicy,
   type DelegationBudgetPolicy,
   assertChildThreadBudgetNotExhausted,
-  computeDelegationDepth,
-  delegateChildThread,
-  executeChildThreadTask,
   finalizeChildThreadCancellation,
   getChildThreadBudgetUsage,
   getChildThreadRelation,
@@ -46,16 +37,11 @@ import {
   requestChildThreadCancellation,
 } from "@/lib/conversations/child-thread-queries";
 import {
-  ChildBudgetExceededError,
-  ChildContextNotAllowedError,
   ChildInvocationNotTerminalError,
   ChildThreadAlreadyTerminalError,
   ChildThreadBudgetExhaustedError,
   ChildThreadCancellationFinalizeError,
   ChildThreadResultProjectionError,
-  DelegationDepthExceededError,
-  DelegationNotAllowedError,
-  ParentInvocationNotActiveError,
   ThreadNotFoundError,
 } from "@/lib/conversations/errors";
 import { createThread } from "@/lib/conversations/thread-queries";
@@ -69,6 +55,7 @@ import {
   threadEventTable,
   threadItemTable,
   threadRelationTable,
+  threadTable,
 } from "@/lib/persistence/schema/conversation";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import {
@@ -107,568 +94,118 @@ async function seedTenantAndOwner() {
   return { tenantId: tenant.id, ownerId: identity.id };
 }
 
-/** seed Agent 并发布带 delegationPolicyJson 的 Revision。 */
-async function seedAgentWithDelegationPolicy(
+/** seed 父 Thread（createThread；Thread 已无 primaryAgentId，无需绑定 Agent）。 */
+async function seedParentThread(
   tenantId: string,
   ownerId: string,
-  agentKey: string,
-  delegationPolicy: { allowedTargets: string[]; maxDepth?: number },
-): Promise<{ agentId: string; revisionId: string }> {
-  const agent = await createAgent({
-    tenantId,
-    agentKey,
-    displayName: `${agentKey} Agent`,
-    ownerUserId: ownerId,
-    lifecycleState: "enabled",
-  });
-  const draft = await createDraftRevision({
-    tenantId,
-    agentId: agent.id,
-    sourceType: "agent_yaml",
-    sourceRevision: "git_commit_1",
-    instructionHash: "sha256:instruction_1",
-    agentArtifactRef: "oci://registry/agent@sha256:abc",
-    modelPolicyJson: { default: "doubao-pro" },
-    permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
-    delegationPolicyJson: delegationPolicy,
-    agentInterfaceRequirementsJson: { required: ["event_stream"], optional: ["steer"] },
-    createdBy: ownerId,
-  });
-  const published = await publishRevision(tenantId, draft.id, 1);
-  return { agentId: agent.id, revisionId: published.id };
-}
-
-/** seed Agent 但不发布 Revision（用于 target Agent 不需要 delegationPolicy 的场景）。 */
-async function seedEnabledAgent(
-  tenantId: string,
-  ownerId: string,
-  agentKey: string,
-): Promise<string> {
-  const agent = await createAgent({
-    tenantId,
-    agentKey,
-    displayName: `${agentKey} Agent`,
-    ownerUserId: ownerId,
-    lifecycleState: "enabled",
-  });
-  return agent.id;
-}
-
-/** seed Thread + Turn + queued Invocation，并转 running。 */
-async function seedThreadWithRunningInvocation(
-  tenantId: string,
-  ownerId: string,
-  agentId: string,
-): Promise<{
-  threadId: string;
-  turnId: string;
-  invocationId: string;
-}> {
+): Promise<{ threadId: string }> {
   const { thread } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agentId,
     actorId: ownerId,
   });
-  const { turn } = await acceptUserMessageTurn({
-    tenantId,
-    threadId: thread.id,
-    ownerUserId: ownerId,
-    content: { text: "测试委派消息" } as unknown as Parameters<
-      typeof acceptUserMessageTurn
-    >[0]["content"],
-    actorId: ownerId,
-  });
-  const { invocation } = await createInvocation({
-    tenantId,
-    threadId: thread.id,
-    turnId: turn.id,
-    invocationKind: "initial",
-    triggerItemId: turn.triggerItemId,
-    actorType: "system",
-  });
-
-  // 转入 running 状态（updateInvocationState 需在事务内调用）
-  let runningInvocation = invocation;
-  await db.transaction(async (tx) => {
-    runningInvocation = await updateInvocationState(tx, tenantId, invocation.id, "running");
-  });
-
-  return { threadId: thread.id, turnId: turn.id, invocationId: runningInvocation.id };
+  return { threadId: thread.id };
 }
 
-// ─── delegateChildThread 成功路径 ─────────────────────────
+/**
+ * 手写 INSERT 创建 delegate 子 Thread + ThreadRelation（替代已删除的 delegateChildThread）。
+ * 创建：child Thread（active）+ 父 Thread 的 child_thread Item + delegate ThreadRelation
+ * （relationState=active, itemId 回填）。不写任何 Event（保留函数不依赖 Event 前置）。
+ */
+async function seedDelegateChildThread(params: {
+  tenantId: string;
+  ownerId: string;
+  parentThreadId: string;
+  parentInvocationId: string;
+  targetAgentId: string;
+  budgetPolicyJson?: DelegationBudgetPolicy;
+}): Promise<{ childThreadId: string; relationId: string }> {
+  const now = new Date();
+  const childThreadId = randomUUID();
 
-describe("delegateChildThread 成功路径", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
-  let parentThreadId: string;
-  let parentInvocationId: string;
-
-  beforeEach(async () => {
-    const ctx = await seedTenantAndOwner();
-    tenantId = ctx.tenantId;
-    ownerId = ctx.ownerId;
-
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
-
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
+  // 1. child Thread（active，独立 Workspace）
+  await db.insert(threadTable).values({
+    id: childThreadId,
+    tenantId: params.tenantId,
+    ownerUserId: params.ownerId,
+    title: "delegate child",
+    lifecycleState: "active",
+    lastActivityAt: now,
+    lastTurnSequence: 0,
+    lastItemSequence: 0,
+    lastEventSequence: 1,
+    pendingQueueVersionNo: 1,
+    versionNo: 1,
+    createdAt: now,
+    updatedAt: now,
   });
 
-  it("成功创建 delegate Child Thread + 关系 + 两条 Event", async () => {
-    const result = await delegateChildThread({
-      tenantId,
-      parentThreadId,
-      ownerUserId: ownerId,
-      parentInvocationId,
-      targetAgentId,
-      taskPayloadRef: "artifact://task/123",
-      taskPayloadHash: "sha256:task_hash_1",
-      contextTransferPolicyJson: { mode: "minimal" },
-      budgetPolicyJson: { maxTokens: 10000, maxWallClockMs: 60000 },
-      actorId: ownerId,
-    });
-
-    // 子 Thread 校验
-    expect(result.thread.id).not.toBe(parentThreadId);
-    expect(result.thread.tenantId).toBe(tenantId);
-    expect(result.thread.ownerUserId).toBe(ownerId);
-    expect(result.thread.primaryAgentId).toBe(targetAgentId);
-    expect(result.thread.lifecycleState).toBe("active");
-    expect(result.thread.lastEventSequence).toBe(1);
-    expect(result.thread.lastTurnSequence).toBe(0);
-    expect(result.thread.lastItemSequence).toBe(0);
-
-    // ThreadRelation 校验
-    expect(result.relation.parentThreadId).toBe(parentThreadId);
-    expect(result.relation.childThreadId).toBe(result.thread.id);
-    expect(result.relation.relationType).toBe("delegate");
-    expect(result.relation.relationState).toBe("active");
-    expect(result.relation.sourceInvocationId).toBe(parentInvocationId);
-    expect(result.relation.targetAgentId).toBe(targetAgentId);
-    expect(result.relation.taskPayloadRef).toBe("artifact://task/123");
-    expect(result.relation.taskPayloadHash).toBe("sha256:task_hash_1");
-    expect(result.relation.contextTransferPolicyJson).toEqual({ mode: "minimal" });
-    expect(result.relation.budgetPolicyJson).toEqual({
-      maxTokens: 10000,
-      maxWallClockMs: 60000,
-    });
-    expect(result.relation.completedAt).toBeNull();
-
-    // 子 thread.created Event
-    expect(result.childCreatedEvent.threadId).toBe(result.thread.id);
-    expect(result.childCreatedEvent.eventType).toBe("thread.created");
-    expect(result.childCreatedEvent.eventSequence).toBe(1);
-    expect(result.childCreatedEvent.actorType).toBe("user");
-    expect(result.childCreatedEvent.actorId).toBe(ownerId);
-    expect(result.childCreatedEvent.payloadJson).toMatchObject({
-      delegate_child: true,
-      parent_thread_id: parentThreadId,
-      parent_invocation_id: parentInvocationId,
-      primary_agent_id: targetAgentId,
-    });
-
-    // 父 child_thread.created Event
-    expect(result.parentChildThreadCreatedEvent.threadId).toBe(parentThreadId);
-    expect(result.parentChildThreadCreatedEvent.eventType).toBe("child_thread.created");
-    expect(result.parentChildThreadCreatedEvent.eventSequence).toBeGreaterThan(1);
-    expect(result.parentChildThreadCreatedEvent.payloadJson).toMatchObject({
-      relation_type: "delegate",
-      child_thread_id: result.thread.id,
-      parent_thread_id: parentThreadId,
-      target_agent_id: targetAgentId,
-      invocation_id: parentInvocationId,
-    });
+  // 2. 父 Thread 的 child_thread Item（relation.itemId 必须非空，projectChildThreadResult 依赖）
+  const itemId = randomUUID();
+  await db.insert(threadItemTable).values({
+    id: itemId,
+    threadId: params.parentThreadId,
+    turnId: "", // schema notNull；无对应 Turn 时退化为空串占位
+    itemSequence: 1,
+    itemType: "child_thread",
+    itemState: "pending",
+    authorType: "system",
+    authorId: params.ownerId,
+    contentJson: { childThreadId, targetAgentId: params.targetAgentId, state: "active" },
+    contentHash: "sha256:seed-child-thread",
+    contextPolicy: "include",
+    invocationId: params.parentInvocationId,
+    supersededByItemId: null,
+    createdAt: now,
+    updatedAt: now,
   });
 
-  it("contextTransferPolicyJson=null 且 budgetPolicyJson=null 时 relation 字段为 null", async () => {
-    const result = await delegateChildThread({
-      tenantId,
-      parentThreadId,
-      ownerUserId: ownerId,
-      parentInvocationId,
-      targetAgentId,
-      actorId: ownerId,
-    });
-
-    expect(result.relation.contextTransferPolicyJson).toBeNull();
-    expect(result.relation.budgetPolicyJson).toBeNull();
-    expect(result.relation.taskPayloadRef).toBeNull();
-    expect(result.relation.taskPayloadHash).toBeNull();
+  // 3. delegate ThreadRelation（relationState=active，itemId 回填）
+  const relationId = randomUUID();
+  await db.insert(threadRelationTable).values({
+    id: relationId,
+    parentThreadId: params.parentThreadId,
+    childThreadId,
+    relationType: "delegate",
+    sourceInvocationId: params.parentInvocationId,
+    targetAgentId: params.targetAgentId,
+    budgetPolicyJson: params.budgetPolicyJson as unknown as Record<string, unknown> | null,
+    relationState: "active",
+    itemId,
+    createdAt: now,
   });
 
-  it("幂等：同 idempotencyKey 重复调用 → 第二次因 UNIQUE 约束抛错（不静默返回）", async () => {
-    const params = {
-      tenantId,
-      parentThreadId,
-      ownerUserId: ownerId,
-      parentInvocationId,
-      targetAgentId,
-      actorId: ownerId,
-      idempotencyKey: "delegate-001",
-    } as const;
-
-    const first = await delegateChildThread(params);
-    expect(first.thread.id).toBeDefined();
-
-    // 第二次：父 Thread.lastEventSequence 已变化且 child_thread.created Event
-    // 通过 idempotencyKey 关联；本阶段不在仓储层做幂等去重（由 Route 层 idempotency 中间件处理）
-    // 期望抛错（UNIQUE(parent_thread_id, child_thread_id, relation_type) 由具体执行命中）
-    await expect(delegateChildThread(params)).rejects.toThrow();
-  });
-});
-
-// ─── delegateChildThread 错误路径 ─────────────────────────
-
-describe("delegateChildThread 错误路径", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
-  let otherTargetAgentId: string;
-  let parentThreadId: string;
-  let parentInvocationId: string;
-
-  beforeEach(async () => {
-    const ctx = await seedTenantAndOwner();
-    tenantId = ctx.tenantId;
-    ownerId = ctx.ownerId;
-
-    // targetAgentId 也发布允许自循环的 delegationPolicy（maxDepth=2）
-    // 用于「委派深度超限」测试中二级和三级委派的 allowedTargets 校验
-    const target = await seedAgentWithDelegationPolicy(tenantId, ownerId, "child-agent", {
-      allowedTargets: [],
-      maxDepth: 2,
-    });
-    targetAgentId = target.agentId;
-    otherTargetAgentId = await seedEnabledAgent(tenantId, ownerId, "other-child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
-
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-  });
-
-  /** 为指定 Agent 发布新 Revision，更新 delegationPolicyJson。 */
-  async function republishAgentDelegationPolicy(
-    agentId: string,
-    delegationPolicy: { allowedTargets: string[]; maxDepth?: number },
-  ): Promise<void> {
-    const agent = await getAgentById(tenantId, agentId);
-    if (!agent) throw new Error(`Agent 不存在: ${agentId}`);
-    const draft = await createDraftRevision({
-      tenantId,
-      agentId,
-      sourceType: "agent_yaml",
-      sourceRevision: `git_commit_${Date.now()}`,
-      instructionHash: `sha256:instruction_${Date.now()}`,
-      agentArtifactRef: "oci://registry/agent@sha256:abc",
-      modelPolicyJson: { default: "doubao-pro" },
-      permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
-      delegationPolicyJson: delegationPolicy,
-      agentInterfaceRequirementsJson: { required: ["event_stream"], optional: ["steer"] },
-      createdBy: ownerId,
-    });
-    await publishRevision(tenantId, draft.id, agent.versionNo);
-  }
-
-  it("父 Invocation 非 running → ParentInvocationNotActiveError", async () => {
-    // seedThreadWithRunningInvocation 已将 Invocation 从 queued → running；
-    // 此处继续转为 completed（running → completed）
-    await db.transaction(async (tx) => {
-      await updateInvocationState(tx, tenantId, parentInvocationId, "completed");
-    });
-
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId,
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(ParentInvocationNotActiveError);
-  });
-
-  it("target Agent 不在 allowedTargets → DelegationNotAllowedError", async () => {
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId: otherTargetAgentId,
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(DelegationNotAllowedError);
-  });
-
-  it("target Agent 跨租户不可见 → DelegationNotAllowedError", async () => {
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId: randomUUID(), // 不存在的 Agent
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(DelegationNotAllowedError);
-  });
-
-  it("父 Thread 跨租户不可见 → ThreadNotFoundError", async () => {
-    await expect(
-      delegateChildThread({
-        tenantId: "other-tenant-id",
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId,
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(ThreadNotFoundError);
-  });
-
-  it("父 Thread 不存在 → ThreadNotFoundError", async () => {
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId: randomUUID(),
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId,
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(ThreadNotFoundError);
-  });
-
-  it("budgetPolicyJson.maxTokens 为负 → ChildBudgetExceededError", async () => {
-    const negativeBudget: DelegationBudgetPolicy = { maxTokens: -100 };
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId,
-        budgetPolicyJson: negativeBudget,
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(ChildBudgetExceededError);
-  });
-
-  it("budgetPolicyJson.maxWallClockMs 为负 → ChildBudgetExceededError", async () => {
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId,
-        budgetPolicyJson: { maxWallClockMs: -1 },
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(ChildBudgetExceededError);
-  });
-
-  it("budgetPolicyJson.maxCost 为负 → ChildBudgetExceededError", async () => {
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId,
-        budgetPolicyJson: { maxCost: -0.5 },
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(ChildBudgetExceededError);
-  });
-
-  it("contextTransferPolicyJson 含 sensitive Item → ChildContextNotAllowedError", async () => {
-    // 在父 Thread 上插入一个 contextPolicy=sensitive 的 Item
-    // 通过 acceptUserMessageTurn 创建的 user_message 默认 contextPolicy=include
-    // 这里直接 DB 写入一个 sensitive Item
-    const [parentThread] = await db.select().from(threadRelationTable).limit(1);
-
-    // 通过 turn-queries 创建 user_message Item，然后更新为 sensitive
-    const { turn } = await acceptUserMessageTurn({
-      tenantId,
-      threadId: parentThreadId,
-      ownerUserId: ownerId,
-      content: { text: "敏感内容" } as unknown as Parameters<
-        typeof acceptUserMessageTurn
-      >[0]["content"],
-      actorId: ownerId,
-    });
-
-    // 取出 triggerItemId 并改为 sensitive
-    const [item] = await db
-      .select()
-      .from(threadItemTable)
-      .where(eq(threadItemTable.turnId, turn.id))
-      .limit(1);
-    if (!item) throw new Error("测试前置：Item 未创建");
-
-    await db
-      .update(threadItemTable)
-      .set({ contextPolicy: "sensitive" })
-      .where(eq(threadItemTable.id, item.id));
-
-    const badPolicy: ContextTransferPolicy = {
-      mode: "selective",
-      includeItemIds: [item.id],
-    };
-
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId,
-        contextTransferPolicyJson: badPolicy,
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(ChildContextNotAllowedError);
-  });
-
-  it("委派深度超限 → DelegationDepthExceededError", async () => {
-    // 为 targetAgentId 重发布允许自循环的 delegationPolicy（maxDepth=2）
-    // 这样二级委派（depth=1+1=2）和三级委派（depth=2+1=3）的 allowedTargets 校验都能通过，
-    // 三级委派时 maxDepth=2 被超出，抛 DelegationDepthExceededError
-    await republishAgentDelegationPolicy(targetAgentId, {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-
-    // 第一次委派（depth: 0 → 1，maxDepth=2 允许）
-    const firstChild = await delegateChildThread({
-      tenantId,
-      parentThreadId,
-      ownerUserId: ownerId,
-      parentInvocationId,
-      targetAgentId,
-      actorId: ownerId,
-    });
-
-    // 在 child Thread 创建 running Invocation
-    const { turn: childTurn } = await acceptUserMessageTurn({
-      tenantId,
-      threadId: firstChild.thread.id,
-      ownerUserId: ownerId,
-      content: { text: "二级委派" } as unknown as Parameters<
-        typeof acceptUserMessageTurn
-      >[0]["content"],
-      actorId: ownerId,
-    });
-    const { invocation: childInvocation } = await createInvocation({
-      tenantId,
-      threadId: firstChild.thread.id,
-      turnId: childTurn.id,
-      invocationKind: "initial",
-      triggerItemId: childTurn.triggerItemId,
-      actorType: "system",
-    });
-    await db.transaction(async (tx) => {
-      await updateInvocationState(tx, tenantId, childInvocation.id, "running");
-    });
-
-    // 二级委派（child → grandchild）：depth 父=1，子=2，maxDepth=2，允许
-    const secondChild = await delegateChildThread({
-      tenantId,
-      parentThreadId: firstChild.thread.id,
-      ownerUserId: ownerId,
-      parentInvocationId: childInvocation.id,
-      targetAgentId, // 同一 Agent（自循环）
-      actorId: ownerId,
-    });
-
-    // 三级委派（grandchild → great-grandchild）：depth 父=2，子=3，maxDepth=2，超限
-    const { turn: grandTurn } = await acceptUserMessageTurn({
-      tenantId,
-      threadId: secondChild.thread.id,
-      ownerUserId: ownerId,
-      content: { text: "三级委派" } as unknown as Parameters<
-        typeof acceptUserMessageTurn
-      >[0]["content"],
-      actorId: ownerId,
-    });
-    const { invocation: grandInvocation } = await createInvocation({
-      tenantId,
-      threadId: secondChild.thread.id,
-      turnId: grandTurn.id,
-      invocationKind: "initial",
-      triggerItemId: grandTurn.triggerItemId,
-      actorType: "system",
-    });
-    await db.transaction(async (tx) => {
-      await updateInvocationState(tx, tenantId, grandInvocation.id, "running");
-    });
-
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId: secondChild.thread.id,
-        ownerUserId: ownerId,
-        parentInvocationId: grandInvocation.id,
-        targetAgentId,
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(DelegationDepthExceededError);
-  });
-});
+  return { childThreadId, relationId };
+}
 
 // ─── 查询函数 ─────────────────────────────────────────────
 
 describe("Child Thread 查询函数", () => {
   let tenantId: string;
   let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
   let parentThreadId: string;
   let parentInvocationId: string;
+  let targetAgentId: string;
   let relationId: string;
 
   beforeEach(async () => {
     const ctx = await seedTenantAndOwner();
     tenantId = ctx.tenantId;
     ownerId = ctx.ownerId;
+    targetAgentId = randomUUID();
 
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
+    const parent = await seedParentThread(tenantId, ownerId);
+    parentThreadId = parent.threadId;
+    parentInvocationId = randomUUID();
 
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-
-    const result = await delegateChildThread({
+    const seed = await seedDelegateChildThread({
       tenantId,
+      ownerId,
       parentThreadId,
-      ownerUserId: ownerId,
       parentInvocationId,
       targetAgentId,
-      actorId: ownerId,
     });
-    relationId = result.relation.id;
+    relationId = seed.relationId;
   });
 
   it("getChildThreadRelation 按 id 查询存在", async () => {
@@ -718,10 +255,9 @@ describe("Child Thread 查询函数", () => {
 describe("requestChildThreadCancellation 取消请求", () => {
   let tenantId: string;
   let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
   let parentThreadId: string;
   let parentInvocationId: string;
+  let targetAgentId: string;
   let relationId: string;
   let childThreadId: string;
 
@@ -729,28 +265,21 @@ describe("requestChildThreadCancellation 取消请求", () => {
     const ctx = await seedTenantAndOwner();
     tenantId = ctx.tenantId;
     ownerId = ctx.ownerId;
+    targetAgentId = randomUUID();
 
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
+    const parent = await seedParentThread(tenantId, ownerId);
+    parentThreadId = parent.threadId;
+    parentInvocationId = randomUUID();
 
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-
-    const result = await delegateChildThread({
+    const seed = await seedDelegateChildThread({
       tenantId,
+      ownerId,
       parentThreadId,
-      ownerUserId: ownerId,
       parentInvocationId,
       targetAgentId,
-      actorId: ownerId,
     });
-    relationId = result.relation.id;
-    childThreadId = result.thread.id;
+    relationId = seed.relationId;
+    childThreadId = seed.childThreadId;
   });
 
   it("成功请求取消：relation active → cancel_requested + 写父 Thread Event", async () => {
@@ -855,221 +384,6 @@ describe("requestChildThreadCancellation 取消请求", () => {
   });
 });
 
-// ─── computeDelegationDepth ───────────────────────────────
-
-describe("computeDelegationDepth 深度计算", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
-  let parentThreadId: string;
-  let parentInvocationId: string;
-
-  beforeEach(async () => {
-    const ctx = await seedTenantAndOwner();
-    tenantId = ctx.tenantId;
-    ownerId = ctx.ownerId;
-
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 3,
-    });
-    parentAgentId = parent.agentId;
-
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-  });
-
-  it("root Thread depth=0", async () => {
-    const depth = await computeDelegationDepth(parentThreadId);
-    expect(depth).toBe(0);
-  });
-
-  it("一级 delegate 子 Thread depth=1", async () => {
-    const child = await delegateChildThread({
-      tenantId,
-      parentThreadId,
-      ownerUserId: ownerId,
-      parentInvocationId,
-      targetAgentId,
-      actorId: ownerId,
-    });
-    const depth = await computeDelegationDepth(child.thread.id);
-    expect(depth).toBe(1);
-  });
-
-  it("不存在 Thread depth=0", async () => {
-    const depth = await computeDelegationDepth(randomUUID());
-    expect(depth).toBe(0);
-  });
-});
-
-// ─── 集成不变量验证 ───────────────────────────────────────
-
-describe("S09-C01 不变量验证", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
-  let parentThreadId: string;
-  let parentInvocationId: string;
-
-  beforeEach(async () => {
-    const ctx = await seedTenantAndOwner();
-    tenantId = ctx.tenantId;
-    ownerId = ctx.ownerId;
-
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
-
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-  });
-
-  it("子 Thread lifecycleState=active 且独立 Workspace（defaultWorkspaceId=null）", async () => {
-    const result = await delegateChildThread({
-      tenantId,
-      parentThreadId,
-      ownerUserId: ownerId,
-      parentInvocationId,
-      targetAgentId,
-      actorId: ownerId,
-    });
-    expect(result.thread.lifecycleState).toBe("active");
-    expect(result.thread.defaultWorkspaceId).toBeNull();
-  });
-
-  it("子 Thread primaryAgentId=targetAgentId（不继承父 Agent）", async () => {
-    const result = await delegateChildThread({
-      tenantId,
-      parentThreadId,
-      ownerUserId: ownerId,
-      parentInvocationId,
-      targetAgentId,
-      actorId: ownerId,
-    });
-    expect(result.thread.primaryAgentId).toBe(targetAgentId);
-    expect(result.thread.primaryAgentId).not.toBe(parentAgentId);
-  });
-
-  it("UNIQUE(parent_thread_id, child_thread_id, relation_type)：同 parent+child+type 重复抛错", async () => {
-    const result = await delegateChildThread({
-      tenantId,
-      parentThreadId,
-      ownerUserId: ownerId,
-      parentInvocationId,
-      targetAgentId,
-      actorId: ownerId,
-    });
-
-    // 直接 INSERT 同 parent+child+delegate 组合应失败
-    await expect(
-      db.insert(threadRelationTable).values({
-        parentThreadId,
-        childThreadId: result.thread.id,
-        relationType: "delegate",
-        relationState: "active",
-      }),
-    ).rejects.toThrow();
-  });
-
-  it("父 Thread lastEventSequence 在 delegateChildThread 后递增", async () => {
-    const beforeThread = await db.select().from(threadRelationTable).limit(1);
-
-    // 取父 Thread 当前 lastEventSequence
-    const [parentBefore] = await db
-      .select({ lastEventSequence: threadRelationTable.id })
-      .from(threadRelationTable)
-      .limit(1);
-
-    // 直接查询 threadTable 表
-    const { threadTable } = await import("@/lib/persistence/schema/conversation");
-    const [threadRow] = await db
-      .select({ lastEventSequence: threadTable.lastEventSequence })
-      .from(threadTable)
-      .where(eq(threadTable.id, parentThreadId))
-      .limit(1);
-    const before = threadRow?.lastEventSequence ?? 0;
-
-    await delegateChildThread({
-      tenantId,
-      parentThreadId,
-      ownerUserId: ownerId,
-      parentInvocationId,
-      targetAgentId,
-      actorId: ownerId,
-    });
-
-    const [threadAfter] = await db
-      .select({ lastEventSequence: threadTable.lastEventSequence })
-      .from(threadTable)
-      .where(eq(threadTable.id, parentThreadId))
-      .limit(1);
-    // S09-C02：delegateChildThread 同事务写两条父 Thread Event
-    // （child_thread.created + item.created），lastEventSequence 递增 2
-    expect(threadAfter?.lastEventSequence).toBe(before + 2);
-  });
-
-  it("Agent 当前 revision 的 delegationPolicyJson 决定委派能力", async () => {
-    // 验证：通过修改父 Agent 的 published Revision 的 delegationPolicyJson
-    // 注意：published Revision 不可改业务内容，所以这里通过发布新 Revision 实现
-    // 但当前实现读取 Agent.currentRevisionId，新发布的 Revision 会回填到 currentRevisionId
-    // 这里测试：发布新 Revision 把 targetAgentId 移除 allowedTargets 后，委派应失败
-    const newTargetAgentId = await seedEnabledAgent(tenantId, ownerId, "new-child-agent");
-
-    // 创建新 draft Revision，allowedTargets 不含原 targetAgentId
-    const draft = await createDraftRevision({
-      tenantId,
-      agentId: parentAgentId,
-      sourceType: "agent_yaml",
-      sourceRevision: "git_commit_2",
-      instructionHash: "sha256:instruction_2",
-      agentArtifactRef: "oci://registry/agent@sha256:def",
-      modelPolicyJson: { default: "doubao-pro" },
-      permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
-      delegationPolicyJson: { allowedTargets: [newTargetAgentId], maxDepth: 2 },
-      agentInterfaceRequirementsJson: { required: ["event_stream"], optional: ["steer"] },
-      createdBy: ownerId,
-    });
-
-    // 取当前 Agent versionNo（用于乐观锁）
-    const parentAgent = await getAgentById(tenantId, parentAgentId);
-    expect(parentAgent).not.toBeNull();
-    await publishRevision(tenantId, draft.id, parentAgent?.versionNo ?? 1);
-
-    // 现在原 targetAgentId 已不在 allowedTargets，委派应失败
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId,
-        actorId: ownerId,
-      }),
-    ).rejects.toThrow(DelegationNotAllowedError);
-
-    // 新 targetAgentId 应成功
-    await expect(
-      delegateChildThread({
-        tenantId,
-        parentThreadId,
-        ownerUserId: ownerId,
-        parentInvocationId,
-        targetAgentId: newTargetAgentId,
-        actorId: ownerId,
-      }),
-    ).resolves.toBeDefined();
-  });
-});
-
 // ─── S09-C02: projectChildThreadResult ────────────────────
 
 /**
@@ -1115,7 +429,6 @@ async function seedChildThreadCompletedResult(
   const itemId = randomUUID();
 
   // 直接 INSERT 一个 completed agent_message Item
-  const { threadTable } = await import("@/lib/persistence/schema/conversation");
   const [threadRow] = await db
     .select()
     .from(threadTable)
@@ -1156,10 +469,9 @@ async function seedChildThreadCompletedResult(
 describe("projectChildThreadResult 结果投影", () => {
   let tenantId: string;
   let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
   let parentThreadId: string;
   let parentInvocationId: string;
+  let targetAgentId: string;
   let relationId: string;
   let childThreadId: string;
   let childItemId: string;
@@ -1168,28 +480,21 @@ describe("projectChildThreadResult 结果投影", () => {
     const ctx = await seedTenantAndOwner();
     tenantId = ctx.tenantId;
     ownerId = ctx.ownerId;
+    targetAgentId = randomUUID();
 
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
+    const parent = await seedParentThread(tenantId, ownerId);
+    parentThreadId = parent.threadId;
+    parentInvocationId = randomUUID();
 
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-
-    const result = await delegateChildThread({
+    const seed = await seedDelegateChildThread({
       tenantId,
+      ownerId,
       parentThreadId,
-      ownerUserId: ownerId,
       parentInvocationId,
       targetAgentId,
-      actorId: ownerId,
     });
-    relationId = result.relation.id;
-    childThreadId = result.thread.id;
+    relationId = seed.relationId;
+    childThreadId = seed.childThreadId;
 
     // 在子 Thread 上创建 completed agent_message Item
     const seeded = await seedChildThreadCompletedResult(
@@ -1318,10 +623,9 @@ describe("projectChildThreadResult 结果投影", () => {
 describe("finalizeChildThreadCancellation 取消终态落库", () => {
   let tenantId: string;
   let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
   let parentThreadId: string;
   let parentInvocationId: string;
+  let targetAgentId: string;
   let relationId: string;
   let childThreadId: string;
 
@@ -1329,28 +633,21 @@ describe("finalizeChildThreadCancellation 取消终态落库", () => {
     const ctx = await seedTenantAndOwner();
     tenantId = ctx.tenantId;
     ownerId = ctx.ownerId;
+    targetAgentId = randomUUID();
 
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
+    const parent = await seedParentThread(tenantId, ownerId);
+    parentThreadId = parent.threadId;
+    parentInvocationId = randomUUID();
 
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-
-    const result = await delegateChildThread({
+    const seed = await seedDelegateChildThread({
       tenantId,
+      ownerId,
       parentThreadId,
-      ownerUserId: ownerId,
       parentInvocationId,
       targetAgentId,
-      actorId: ownerId,
     });
-    relationId = result.relation.id;
-    childThreadId = result.thread.id;
+    relationId = seed.relationId;
+    childThreadId = seed.childThreadId;
   });
 
   it("成功 finalize：cancel_requested → cancelled + 父子流 Event", async () => {
@@ -1550,10 +847,9 @@ describe("finalizeChildThreadCancellation 取消终态落库", () => {
 describe("handleChildThreadTerminal 终态协调器", () => {
   let tenantId: string;
   let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
   let parentThreadId: string;
   let parentInvocationId: string;
+  let targetAgentId: string;
   let relationId: string;
   let childThreadId: string;
 
@@ -1561,28 +857,21 @@ describe("handleChildThreadTerminal 终态协调器", () => {
     const ctx = await seedTenantAndOwner();
     tenantId = ctx.tenantId;
     ownerId = ctx.ownerId;
+    targetAgentId = randomUUID();
 
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
+    const parent = await seedParentThread(tenantId, ownerId);
+    parentThreadId = parent.threadId;
+    parentInvocationId = randomUUID();
 
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-
-    const result = await delegateChildThread({
+    const seed = await seedDelegateChildThread({
       tenantId,
+      ownerId,
       parentThreadId,
-      ownerUserId: ownerId,
       parentInvocationId,
       targetAgentId,
-      actorId: ownerId,
     });
-    relationId = result.relation.id;
-    childThreadId = result.thread.id;
+    relationId = seed.relationId;
+    childThreadId = seed.childThreadId;
   });
 
   it("completed 分派 → 调用 projectChildThreadResult", async () => {
@@ -1653,7 +942,6 @@ describe("handleChildThreadTerminal 终态协调器", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: ownerId,
-      primaryAgentId: parentAgentId,
       actorId: ownerId,
     });
 
@@ -1691,38 +979,30 @@ describe("handleChildThreadTerminal 终态协调器", () => {
 describe("Child Thread 预算用量", () => {
   let tenantId: string;
   let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
   let parentThreadId: string;
   let parentInvocationId: string;
+  let targetAgentId: string;
   let relationId: string;
 
   beforeEach(async () => {
     const ctx = await seedTenantAndOwner();
     tenantId = ctx.tenantId;
     ownerId = ctx.ownerId;
+    targetAgentId = randomUUID();
 
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
+    const parent = await seedParentThread(tenantId, ownerId);
+    parentThreadId = parent.threadId;
+    parentInvocationId = randomUUID();
 
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-
-    const result = await delegateChildThread({
+    const seed = await seedDelegateChildThread({
       tenantId,
+      ownerId,
       parentThreadId,
-      ownerUserId: ownerId,
       parentInvocationId,
       targetAgentId,
       budgetPolicyJson: { maxTokens: 1000, maxCost: 5, maxWallClockMs: 60000 },
-      actorId: ownerId,
     });
-    relationId = result.relation.id;
+    relationId = seed.relationId;
   });
 
   it("recordChildThreadBudgetUsage 累积用量", async () => {
@@ -1854,113 +1134,57 @@ describe("Child Thread 预算用量", () => {
   });
 });
 
-// ─── executeChildThreadTask 正式子任务执行端口 ─────────────────
-
-describe("executeChildThreadTask（S09-C02 子任务正式执行端口）", () => {
-  let tenantId: string;
-  let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
-  let parentThreadId: string;
-  let parentInvocationId: string;
-
-  beforeEach(async () => {
-    const ctx = await seedTenantAndOwner();
-    tenantId = ctx.tenantId;
-    ownerId = ctx.ownerId;
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent-exec");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent-exec", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-  });
-
-  it("正式接纳 child task 为子 Turn + child Invocation（作用域为子 Thread/子 Turn）", async () => {
-    const result = await executeChildThreadTask({
-      tenantId,
-      parentThreadId,
-      parentInvocationId,
-      targetAgentId,
-      ownerUserId: ownerId,
-      content: { text: "整理季度报告并输出摘要" },
-      budgetPolicyJson: { maxTokens: 1000, maxWallClockMs: 60000 },
-      actorId: ownerId,
-    });
-
-    // 子 Thread：primaryAgentId=targetAgentId，且有 child Turn（lastTurnSequence=1）。
-    expect(result.childThread.id).not.toBe(parentThreadId);
-    expect(result.childThread.primaryAgentId).toBe(targetAgentId);
-    expect(result.childThread.lastTurnSequence).toBe(1);
-    expect(result.childThread.lastItemSequence).toBe(1);
-
-    // delegate relation：active + 子 Thread + 预算策略。
-    expect(result.relation.childThreadId).toBe(result.childThread.id);
-    expect(result.relation.relationType).toBe("delegate");
-    expect(result.relation.relationState).toBe("active");
-    expect(result.relation.targetAgentId).toBe(targetAgentId);
-    expect(result.relation.budgetPolicyJson).toEqual({ maxTokens: 1000, maxWallClockMs: 60000 });
-
-    // child Turn：triggerType=system；trigger Item：itemType=user_message、authorType=system。
-    expect(result.childTurn.threadId).toBe(result.childThread.id);
-    expect(result.childTurn.triggerType).toBe("system");
-    expect(result.childTurn.turnState).toBe("accepted");
-    expect(result.triggerItem.threadId).toBe(result.childThread.id);
-    expect(result.triggerItem.turnId).toBe(result.childTurn.id);
-    expect(result.triggerItem.itemType).toBe("user_message");
-    expect(result.triggerItem.authorType).toBe("system");
-
-    // child Invocation：作用域为子 Thread/子 Turn，queued；权威表回读一致。
-    expect(result.childInvocation.threadId).toBe(result.childThread.id);
-    expect(result.childInvocation.turnId).toBe(result.childTurn.id);
-    expect(result.childInvocation.executionState).toBe("queued");
-    const authoritative = await getInvocationById(tenantId, result.childInvocation.id);
-    expect(authoritative?.threadId).toBe(result.childThread.id);
-    expect(authoritative?.turnId).toBe(result.childTurn.id);
-    expect(authoritative?.executionState).toBe("queued");
-  });
-});
-
 // ─── 子取消 ack 集成：requestChildThreadCancellation + 正式 event ingress ───
 
 describe("子取消 ack 集成（requestChildThreadCancellation + ingress execution.cancelled）", () => {
   let tenantId: string;
   let ownerId: string;
-  let parentAgentId: string;
-  let targetAgentId: string;
   let parentThreadId: string;
   let parentInvocationId: string;
+  let targetAgentId: string;
+  let relationId: string;
+  let childThreadId: string;
 
   beforeEach(async () => {
     const ctx = await seedTenantAndOwner();
     tenantId = ctx.tenantId;
     ownerId = ctx.ownerId;
-    targetAgentId = await seedEnabledAgent(tenantId, ownerId, "child-agent-cancel");
-    const parent = await seedAgentWithDelegationPolicy(tenantId, ownerId, "parent-agent-cancel", {
-      allowedTargets: [targetAgentId],
-      maxDepth: 2,
-    });
-    parentAgentId = parent.agentId;
-    const seed = await seedThreadWithRunningInvocation(tenantId, ownerId, parentAgentId);
-    parentThreadId = seed.threadId;
-    parentInvocationId = seed.invocationId;
-  });
+    targetAgentId = randomUUID();
 
-  it("Runtime ack 前 relation=cancel_requested；ack 后（ingress）relation=cancelled", async () => {
-    const { relation, childThread, childInvocation } = await executeChildThreadTask({
+    const parent = await seedParentThread(tenantId, ownerId);
+    parentThreadId = parent.threadId;
+    parentInvocationId = randomUUID();
+
+    const seed = await seedDelegateChildThread({
       tenantId,
+      ownerId,
       parentThreadId,
       parentInvocationId,
       targetAgentId,
+    });
+    relationId = seed.relationId;
+    childThreadId = seed.childThreadId;
+  });
+
+  it("Runtime ack 前 relation=cancel_requested；ack 后（ingress）relation=cancelled", async () => {
+    // 在子 Thread 上创建 child Turn + queued child Invocation，并转 running（正式状态机）。
+    const { turn } = await acceptUserMessageTurn({
+      tenantId,
+      threadId: childThreadId,
       ownerUserId: ownerId,
-      content: { text: "子任务待取消" },
+      content: { text: "子任务待取消" } as unknown as Parameters<
+        typeof acceptUserMessageTurn
+      >[0]["content"],
       actorId: ownerId,
     });
-
-    // child Invocation 转入 running（正式状态机）。
+    const { invocation: childInvocation } = await createInvocation({
+      tenantId,
+      threadId: childThreadId,
+      turnId: turn.id,
+      invocationKind: "initial",
+      triggerItemId: turn.triggerItemId,
+      actorType: "system",
+    });
     await db.transaction(async (tx) => {
       await updateInvocationState(tx, tenantId, childInvocation.id, "running");
     });
@@ -1969,11 +1193,11 @@ describe("子取消 ack 集成（requestChildThreadCancellation + ingress execut
     await requestChildThreadCancellation({
       tenantId,
       parentThreadId,
-      relationId: relation.id,
+      relationId,
       reason: "集成取消 ack",
       reasonCode: "PARENT_NO_LONGER_NEEDS_RESULT",
     });
-    const preAckRelation = await getChildThreadRelation(relation.id);
+    const preAckRelation = await getChildThreadRelation(relationId);
     expect(preAckRelation?.relationState).toBe("cancel_requested");
     const preAckInvocation = await getInvocationById(tenantId, childInvocation.id);
     expect(preAckInvocation?.executionState).not.toBe("cancelled");
@@ -1996,7 +1220,7 @@ describe("子取消 ack 集成（requestChildThreadCancellation + ingress execut
 
     const postAckInvocation = await getInvocationById(tenantId, childInvocation.id);
     expect(postAckInvocation?.executionState).toBe("cancelled");
-    const postAckRelation = await getChildThreadRelation(relation.id);
+    const postAckRelation = await getChildThreadRelation(relationId);
     expect(postAckRelation?.relationState).toBe("cancelled");
 
     // 事件顺序稳定：cancel_requested 早于 cancelled。

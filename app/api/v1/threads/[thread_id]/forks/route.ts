@@ -162,7 +162,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         id: result.thread.id,
         tenant_id: result.thread.tenantId,
         owner_user_id: result.thread.ownerUserId,
-        primary_agent_id: result.thread.primaryAgentId,
         title: result.thread.title,
         lifecycle_state: result.thread.lifecycleState,
         last_event_sequence: result.thread.lastEventSequence,
