@@ -76,7 +76,6 @@ interface RouteContext {
   params: Promise<Record<string, string | string[]>>;
 }
 
-
 /** 请求体 schema。 */
 interface ResolveBody {
   decision: string;

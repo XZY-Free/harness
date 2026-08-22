@@ -109,8 +109,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const requestId = getRequestId(request);
   const params = await context.params;
   const threadId = typeof params.thread_id === "string" ? params.thread_id : "";
-  const userActionRequestId =
-    typeof params.request_id === "string" ? params.request_id : "";
+  const userActionRequestId = typeof params.request_id === "string" ? params.request_id : "";
 
   // 1. 解析员工身份
   let principal: Principal;

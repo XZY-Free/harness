@@ -83,7 +83,6 @@ function callerFromAdminPrincipal(principal: AdminPrincipal) {
   return callerFromWorkloadPrincipal(principal);
 }
 
-
 export async function POST(request: Request, context: RouteContext): Promise<Response> {
   const requestId = getRequestId(request);
 
