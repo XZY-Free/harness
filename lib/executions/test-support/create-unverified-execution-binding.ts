@@ -74,7 +74,8 @@ export interface CreateExecutionBindingParams {
 
 /** computeBindingConfigHash 入参（与 CreateExecutionBindingParams 字段一致，便于规范化）。 */
 export interface BindingConfigHashInput {
-  agentRevisionId: string;
+  /** null = 基础 Harness Route（agentRevisionId 为 canonical null 进入 hash，§10.4）。 */
+  agentRevisionId: string | null;
   runtimeRevisionId: string;
   deploymentRouteId: string;
   modelProvider: string;

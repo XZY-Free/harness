@@ -385,6 +385,25 @@ export const executionBindingTable = mysqlTable(
       "ExecutionBinding_runtimeAttestationIds_non_empty",
       sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.runtimeAttestationIds}) >= 1`,
     ),
+    // §10.3 Agent Evidence 条件性完整组：全部为空（base route，not_applicable）或 全部完整（agent route）。
+    // 禁止"随便 nullable"半完整组（禁 4 态模糊，§8.4）。
+    agentEvidenceAllOrNothing: check(
+      "ExecutionBinding_agentEvidence_all_or_nothing",
+      sql`(
+        ${t.agentRevisionId} IS NULL
+        AND ${t.agentArtifactId} IS NULL
+        AND ${t.agentArtifactDigest} IS NULL
+        AND ${t.agentAttestationIds} IS NULL
+        AND ${t.agentPublicationRecordId} IS NULL
+      ) OR (
+        ${t.agentRevisionId} IS NOT NULL
+        AND ${t.agentArtifactId} IS NOT NULL
+        AND ${t.agentArtifactDigest} IS NOT NULL
+        AND JSON_TYPE(${t.agentAttestationIds}) = 'ARRAY'
+        AND JSON_LENGTH(${t.agentAttestationIds}) >= 1
+        AND ${t.agentPublicationRecordId} IS NOT NULL
+      )`,
+    ),
   }),
 );
 
