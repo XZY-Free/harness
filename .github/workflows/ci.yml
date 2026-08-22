@@ -12,24 +12,26 @@ jobs:
     services:
       mysql:
         image: mysql:8.0
+        # 传给 mysql 容器的启动命令参数（附加到 entrypoint 后转发给 mysqld）。
+        # 不能用 options（那是 docker create 的 flag，--log-bin-trust-function-creators
+        # 不是 docker 合法 flag，会导致 exit 125 unknown flag）。
+        # log_bin_trust_function_creators=1：drizzle 迁移中的存储函数无需 SUPER 即可创建。
+        command: ["--log-bin-trust-function-creators=1"]
         env:
           MYSQL_ROOT_PASSWORD: test
           MYSQL_DATABASE: snow_test
           MYSQL_USER: test
           MYSQL_PASSWORD: test
         ports:
-          # 高位 host 端口避开共享 runner 上默认 3306 可能的占用
-          # （docker create -p 在创建阶段即绑定端口，端口冲突会以 exit 125 使 job 失败）。
-          - 13306:3306
+          - 3306:3306
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
-          --log-bin-trust-function-creators=1
 
     env:
-      DATABASE_URL: mysql://test:test@127.0.0.1:13306/snow_test
+      DATABASE_URL: mysql://test:test@127.0.0.1:3306/snow_test
 
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +67,7 @@ jobs:
       - name: Empty MySQL migration
         run: pnpm db:migrate
         env:
-          DATABASE_URL: mysql://test:test@127.0.0.1:13306/snow_test
+          DATABASE_URL: mysql://test:test@127.0.0.1:3306/snow_test
 
       - name: Seed
         run: pnpm db:seed
