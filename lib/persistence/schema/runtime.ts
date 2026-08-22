@@ -326,7 +326,8 @@ export const executionBindingTable = mysqlTable(
       .notNull()
       .references(() => invocationTable.id),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
-    agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
+    /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
+    agentRevisionId: varchar("agentRevisionId", { length: 36 }),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
     deploymentRouteId: varchar("deploymentRouteId", { length: 36 }).notNull(),
     modelProvider: varchar("modelProvider", { length: 128 }).notNull(),
@@ -347,15 +348,19 @@ export const executionBindingTable = mysqlTable(
     routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
     routeActivationId: varchar("routeActivationId", { length: 36 }).notNull(),
     routeContentDigest: varchar("routeContentDigest", { length: 71 }).notNull(),
-    agentArtifactId: varchar("agentArtifactId", { length: 36 }).notNull(),
+    /** null = 基础 Harness Route（Agent Evidence not_applicable，§18）。 */
+    agentArtifactId: varchar("agentArtifactId", { length: 36 }),
     runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }).notNull(),
-    agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }).notNull(),
+    /** null = 基础 Harness Route（§18 not_applicable）。 */
+    agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }).notNull(),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
     capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
-    agentAttestationIds: json("agentAttestationIds").$type<string[]>().notNull(),
+    /** null = 基础 Harness Route（§18 not_applicable，禁止伪装空数组）。 */
+    agentAttestationIds: json("agentAttestationIds").$type<string[] | null>(),
     runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>().notNull(),
-    agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }).notNull(),
+    /** null = 基础 Harness Route（§18 not_applicable）。 */
+    agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }),
     runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }).notNull(),
     conformanceRunId: varchar("conformanceRunId", { length: 36 }).notNull(),
     /** §07: Resolver 输入摘要 — 冻结解析时刻的请求参数 Digest。 */
@@ -376,10 +381,6 @@ export const executionBindingTable = mysqlTable(
     agentArtifactIdx: index("ExecutionBinding_agentArtifact_idx").on(t.agentArtifactId),
     runtimeArtifactIdx: index("ExecutionBinding_runtimeArtifact_idx").on(t.runtimeArtifactId),
     conformanceRunIdx: index("ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
-    agentAttestationIdsNonEmpty: check(
-      "ExecutionBinding_agentAttestationIds_non_empty",
-      sql`JSON_TYPE(${t.agentAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.agentAttestationIds}) >= 1`,
-    ),
     runtimeAttestationIdsNonEmpty: check(
       "ExecutionBinding_runtimeAttestationIds_non_empty",
       sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.runtimeAttestationIds}) >= 1`,

@@ -38,7 +38,8 @@ export {
 
 export async function createRouteSet(params: {
   tenantId: string;
-  agentId: string;
+  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
+  agentId: string | null;
   routeScopeKey: string;
   routeScopeJson: Record<string, unknown>;
 }): Promise<DeploymentRouteSetRow> {

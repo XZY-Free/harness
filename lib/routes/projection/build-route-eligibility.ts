@@ -140,19 +140,27 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     }
 
     // 5. 读取 Agent + AgentRevision + Runtime + RuntimeRevision（权威事实）
+    // 无 Agent 约束（routeSet.agentId / revision.agentRevisionId 为 null）→
+    // 基础 Harness Route，Agent 维度事实跳过，Agent Evidence 为 not_applicable（§18）。
+    const hasAgentConstraint =
+      routeSet.agentId !== null && revision.agentRevisionId !== null;
     const [agent, agentRevision, runtimeRevision] = await Promise.all([
-      db
-        .select()
-        .from(agentTable)
-        .where(and(eq(agentTable.id, routeSet.agentId), isNull(agentTable.deletedAt)))
-        .limit(1)
-        .then((r) => r[0] ?? null),
-      db
-        .select()
-        .from(agentRevisionTable)
-        .where(eq(agentRevisionTable.id, revision.agentRevisionId))
-        .limit(1)
-        .then((r) => r[0] ?? null),
+      hasAgentConstraint && routeSet.agentId
+        ? db
+            .select()
+            .from(agentTable)
+            .where(and(eq(agentTable.id, routeSet.agentId), isNull(agentTable.deletedAt)))
+            .limit(1)
+            .then((r) => r[0] ?? null)
+        : Promise.resolve(null),
+      hasAgentConstraint
+        ? db
+            .select()
+            .from(agentRevisionTable)
+            .where(eq(agentRevisionTable.id, revision.agentRevisionId as string))
+            .limit(1)
+            .then((r) => r[0] ?? null)
+        : Promise.resolve(null),
       db
         .select()
         .from(runtimeRevisionTable)
@@ -162,7 +170,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     ]);
 
     const [runtime] =
-      agent && runtimeRevision
+      runtimeRevision
         ? await db
             .select()
             .from(runtimeTable)
@@ -172,7 +180,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
             .limit(1)
         : [null];
 
-    // §03: 7. 使用统一 Reader 加载完整证据快照
+    // §03: 7. 使用统一 Reader 加载完整证据快照（无 Agent 约束时 Reader 内部跳过 Agent 维度）
     const evidenceReader = createMySqlRevisionExecutionEvidenceReader({ db });
     const evidenceSnapshot = await evidenceReader.loadCurrentEvidence({
       tenantId: input.tenantId,
@@ -182,6 +190,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     });
 
     // §03: 8. 从 AgentRevision 提取 requiredCapabilities（fail-closed）
+    // 无 Agent 约束时 agentRevision 为 null → extractRequiredCapabilities 返回 []。
     const requiredCapabilities = extractRequiredCapabilities(
       agentRevision?.agentInterfaceRequirementsJson,
     );
@@ -203,11 +212,15 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       requiredCapabilities,
     );
 
-    const entityLifecycleEligible =
-      agent?.lifecycleState === "enabled" &&
-      agentRevision?.revisionState === "published" &&
-      runtime?.lifecycleState === "enabled" &&
-      runtimeRevision?.revisionState === "published";
+    // 无 Agent 约束（基础 Harness Route）→ Agent 生命周期不参与资格判断（§18 not_applicable）；
+    // Runtime 生命周期始终必填（§12）。
+    const entityLifecycleEligible = hasAgentConstraint
+      ? agent?.lifecycleState === "enabled" &&
+        agentRevision?.revisionState === "published" &&
+        runtime?.lifecycleState === "enabled" &&
+        runtimeRevision?.revisionState === "published"
+      : runtime?.lifecycleState === "enabled" &&
+        runtimeRevision?.revisionState === "published";
     const isEligible =
       routeAuthorityEligible && entityLifecycleEligible && eligibilityResult.eligible;
 
@@ -228,16 +241,19 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       ineligibilityReasons.push("revision_expired");
     }
     if (!normalized) ineligibilityReasons.push("selector_invalid");
-    if (!agent) ineligibilityReasons.push("agent_not_found");
-    if (!agentRevision) ineligibilityReasons.push("agent_revision_not_found");
+    // 无 Agent 约束（基础 Harness Route）→ Agent 维度原因不参与（not_applicable，§18）。
+    if (hasAgentConstraint) {
+      if (!agent) ineligibilityReasons.push("agent_not_found");
+      if (!agentRevision) ineligibilityReasons.push("agent_revision_not_found");
+      if (agent && agent.lifecycleState !== "enabled") {
+        ineligibilityReasons.push("agent_not_enabled");
+      }
+      if (agentRevision && agentRevision.revisionState !== "published") {
+        ineligibilityReasons.push("agent_revision_not_published");
+      }
+    }
     if (!runtime) ineligibilityReasons.push("runtime_not_found");
     if (!runtimeRevision) ineligibilityReasons.push("runtime_revision_not_found");
-    if (agent && agent.lifecycleState !== "enabled") {
-      ineligibilityReasons.push("agent_not_enabled");
-    }
-    if (agentRevision && agentRevision.revisionState !== "published") {
-      ineligibilityReasons.push("agent_revision_not_published");
-    }
     if (runtime && runtime.lifecycleState !== "enabled") {
       ineligibilityReasons.push("runtime_not_enabled");
     }
@@ -302,8 +318,13 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       effectiveFrom: revision.effectiveFrom?.toISOString() ?? null,
       effectiveUntil: revision.effectiveUntil?.toISOString() ?? null,
       agentRevisionId: revision.agentRevisionId,
-      agentRevisionState: agentRevision?.revisionState ?? "missing",
-      agentLifecycleState: agent?.lifecycleState ?? "missing",
+      // 无 Agent 约束（基础 Harness Route）→ Agent Evidence not_applicable，不伪装 passed（§18）。
+      agentRevisionState: hasAgentConstraint
+        ? (agentRevision?.revisionState ?? "missing")
+        : "not_applicable",
+      agentLifecycleState: hasAgentConstraint
+        ? (agent?.lifecycleState ?? "missing")
+        : "not_applicable",
       agentPublicationActive,
       agentEvidenceValid,
       runtimeRevisionId: revision.runtimeRevisionId,

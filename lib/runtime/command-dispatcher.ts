@@ -844,7 +844,11 @@ async function handleResumeRequiresRedispatch(
 
   // 2. 加载 AgentRevision（如未通过 params 提供，从 ExecutionBinding.agentRevisionId 自动加载）
   const agentRevision =
-    params.agentRevision ?? (await getRevisionById(loaded.binding.agentRevisionId));
+    params.agentRevision ??
+    // 无 Agent（基础 Harness Route）redispatch 由后续阶段处理；此处仅保证编译通过（§8.3）。
+    (loaded.binding.agentRevisionId
+      ? await getRevisionById(loaded.binding.agentRevisionId)
+      : null);
   if (!agentRevision) {
     throw new Error(
       `handleResumeRequiresRedispatch: AgentRevision 不存在（id=${loaded.binding.agentRevisionId}）`,

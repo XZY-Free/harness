@@ -11,9 +11,13 @@
  */
 
 import { db } from "@/lib/db/client";
-import type { RouteResolutionCandidate } from "@/lib/routes/domain/route-resolution-policy";
+import type {
+  RouteControlPlaneEvidence,
+  RouteResolutionCandidate,
+} from "@/lib/routes/domain/route-resolution-policy";
+import type { RouteEligibilityProjectionRecord } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type {
   LoadProjectionCandidatesInput,
   RouteEligibilityResolutionStore,
@@ -29,7 +33,11 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
       .where(
         and(
           eq(routeEligibilityProjection.tenantId, input.tenantId),
-          eq(routeEligibilityProjection.agentId, input.agentId),
+          // 无 Agent 约束 → 查询基础 Harness Route（agentId IS NULL）；
+          // 有约束 → 查询该 Agent 的 Route。
+          input.agentConstraint
+            ? eq(routeEligibilityProjection.agentId, input.agentConstraint)
+            : isNull(routeEligibilityProjection.agentId),
           eq(routeEligibilityProjection.routeScopeKey, input.routeScopeKey),
           eq(routeEligibilityProjection.eligibilityState, "eligible"),
         ),
@@ -38,32 +46,10 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
     // 将 Projection 记录转换为 RouteResolutionCandidate
     // Projection 只包含 eligible 条目，Resolver 纯内存选择
     return projections.map((p): RouteResolutionCandidate => {
-      const controlPlaneEvidence =
-        p.agentArtifactDigest &&
-        p.runtimeArtifactDigest &&
-        p.agentArtifactId &&
-        p.runtimeArtifactId &&
-        p.runtimeConfigDigest &&
-        p.agentPublicationRecordId &&
-        p.runtimePublicationRecordId &&
-        p.conformanceRunId &&
-        Array.isArray(p.agentAttestationIds) &&
-        Array.isArray(p.runtimeAttestationIds)
-          ? {
-              agentArtifactId: p.agentArtifactId,
-              runtimeArtifactId: p.runtimeArtifactId,
-              agentArtifactDigest: p.agentArtifactDigest,
-              runtimeArtifactDigest: p.runtimeArtifactDigest,
-              runtimeConfigDigest: p.runtimeConfigDigest,
-              capabilityManifestDigest: p.capabilityCompatibilityDigest,
-              // : 完整证据 ID 直接从 Projection 读取（不再 stub）
-              agentAttestationIds: [...p.agentAttestationIds],
-              runtimeAttestationIds: [...p.runtimeAttestationIds],
-              agentPublicationRecordId: p.agentPublicationRecordId,
-              runtimePublicationRecordId: p.runtimePublicationRecordId,
-              conformanceRunId: p.conformanceRunId,
-            }
-          : null;
+      // : 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）→ agent 字段为
+      // null（Agent Evidence not_applicable，§18）；Runtime 字段始终填充（base route
+      // 也有 runtime revision/attestation）。Agent Route → 完整成组（§7.4）。
+      const controlPlaneEvidence = buildControlPlaneEvidence(p);
 
       return {
         deploymentRouteId: p.routeId,
@@ -101,3 +87,38 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
     });
   },
 };
+
+/**
+ * 从 eligible Projection 构建完整控制面证据。
+ *
+ * Runtime 维度字段必填（§12/§10.2，无 Agent Route 也必须满足）；缺失即非法投影。
+ * Agent 维度字段直接透传（base route 为 null，§18 Agent Evidence not_applicable，
+ * 禁止伪装 passed、禁止空串假证据）。
+ */
+function buildControlPlaneEvidence(
+  p: RouteEligibilityProjectionRecord,
+): RouteControlPlaneEvidence {
+  if (
+    !p.runtimeArtifactId ||
+    !p.runtimeArtifactDigest ||
+    !p.runtimeConfigDigest ||
+    !p.runtimePublicationRecordId ||
+    !p.conformanceRunId ||
+    !Array.isArray(p.runtimeAttestationIds)
+  ) {
+    throw new Error("RouteEligibilityProjection 缺少必需的 Runtime 控制面证据");
+  }
+  return {
+    agentArtifactId: p.agentArtifactId,
+    runtimeArtifactId: p.runtimeArtifactId,
+    agentArtifactDigest: p.agentArtifactDigest,
+    runtimeArtifactDigest: p.runtimeArtifactDigest,
+    runtimeConfigDigest: p.runtimeConfigDigest,
+    capabilityManifestDigest: p.capabilityCompatibilityDigest,
+    agentAttestationIds: p.agentAttestationIds,
+    runtimeAttestationIds: [...p.runtimeAttestationIds],
+    agentPublicationRecordId: p.agentPublicationRecordId,
+    runtimePublicationRecordId: p.runtimePublicationRecordId,
+    conformanceRunId: p.conformanceRunId,
+  };
+}

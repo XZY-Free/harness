@@ -847,7 +847,6 @@ async function seedFullE2EContext(): Promise<FullE2EContext> {
   const { thread } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agent.id,
     actorId: ownerId,
   });
 
@@ -879,6 +878,7 @@ async function seedRunningInvocation(ctx: FullE2EContext): Promise<string> {
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
+    agentConstraint: ctx.agentId,
   });
 
   const invocation = result.invocation;

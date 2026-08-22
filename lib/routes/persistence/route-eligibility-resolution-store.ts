@@ -10,7 +10,12 @@ import type { RouteResolutionCandidate } from "../domain/route-resolution-policy
 
 export interface LoadProjectionCandidatesInput {
   tenantId: string;
-  agentId: string;
+  /**
+   * 调用方显式提供的可选 Agent 控制面约束（§8.3）。
+   * null = 无 Agent 约束，查询基础 Harness Route（projection.agentId IS NULL）；
+   * concrete = 带 Agent 约束，查询该 Agent 的 Route。
+   */
+  agentConstraint?: string | null;
   routeScopeKey: string;
 }
 

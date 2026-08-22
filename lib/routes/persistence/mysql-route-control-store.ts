@@ -63,7 +63,8 @@ export const mysqlRouteControlStore: RouteControlStore = {
               )
             : and(
                 eq(deploymentRouteTable.routeSetId, params.routeSetId),
-                eq(deploymentRouteTable.agentRevisionId, params.content.agentRevisionId),
+                // 无 Agent（基础 Harness Route）时以 null 参与唯一键匹配；运行时路径由后续阶段处理。
+                eq(deploymentRouteTable.agentRevisionId, params.content.agentRevisionId as string),
                 eq(deploymentRouteTable.runtimeRevisionId, params.content.runtimeRevisionId),
               );
           const [existing] = await tx

@@ -15,7 +15,11 @@ import type { RevisionExecutionEvidenceSnapshot } from "../domain/revision-execu
 /** 加载执行资格证据的输入参数。 */
 export interface LoadEvidenceInput {
   tenantId: string;
-  agentRevisionId: string;
+  /**
+   * 绑定的 AgentRevision ID。
+   * null = 基础 Harness Route（无 Agent 资产约束），Agent 维度证据为 not_applicable。
+   */
+  agentRevisionId: string | null;
   runtimeRevisionId: string;
   /** Route 引用的 PolicyRevisionId（null = Route 未引用 Policy）。 */
   policyRevisionId: string | null;

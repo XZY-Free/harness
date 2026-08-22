@@ -39,7 +39,8 @@ export async function activateSingleRouteForTest(params: {
   routeSetId: string;
   routeId?: string;
   routeSetExpectedVersionNo: number;
-  agentRevisionId: string;
+  /** : null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
+  agentRevisionId: string | null;
   runtimeRevisionId: string;
   trafficWeight: number;
   priorityNo?: number;

@@ -18,7 +18,8 @@ export type RouteActorType = "user" | "service" | "workload" | "system";
 export interface RouteSetRow {
   id: string;
   tenantId: string;
-  agentId: string;
+  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
+  agentId: string | null;
   routeScopeKey: string;
   routeScopeJson: unknown;
   versionNo: number;
@@ -31,7 +32,8 @@ export interface RouteRow {
   routeSetId: string;
   /** : Route 稳定身份键。 */
   routeKey: string;
-  agentRevisionId: string;
+  /** 无 Agent 约束（基础 Harness Route）为 null。 */
+  agentRevisionId: string | null;
   runtimeRevisionId: string;
   trafficWeight: number;
   priorityNo: number;
@@ -61,7 +63,11 @@ export interface DesiredRoute {
   /** : Route 稳定身份键 — 调用方必须显式指定。 */
   routeKey: string;
   routeGroupId: string;
-  agentRevisionId: string;
+  /**
+   * 绑定的 AgentRevision ID。
+   * null = 基础 Harness Route（无 Agent 资产约束）；有值 = Agent Route。
+   */
+  agentRevisionId: string | null;
   runtimeRevisionId: string;
   policyRevisionId?: string | null;
   modelPolicyRevisionId?: string | null;

@@ -88,6 +88,8 @@ async function loadEvidence(
   // : 并行加载所有证据 — 真实读取，禁止硬编码
 
   // Phase 1: 并行加载 Evidence + Publication + Revision 行
+  // 无 Agent 约束（agentRevisionId === null）→ 基础 Harness Route，跳过 Agent 维度查询。
+  const hasAgentConstraint = input.agentRevisionId !== null;
   const [
     agentArtifactEvidence,
     runtimeArtifactEvidence,
@@ -96,36 +98,42 @@ async function loadEvidence(
     agentRevisionRow,
     runtimeRevisionRow,
   ] = await Promise.all([
-    loadArtifactEvidenceSnapshot({
-      tenantId: input.tenantId,
-      artifactType: "agent_revision",
-      artifactRevisionId: input.agentRevisionId,
-      dbOrTx: dbOrTx,
-    }),
+    hasAgentConstraint
+      ? loadArtifactEvidenceSnapshot({
+          tenantId: input.tenantId,
+          artifactType: "agent_revision",
+          artifactRevisionId: input.agentRevisionId as string,
+          dbOrTx: dbOrTx,
+        })
+      : Promise.resolve(null),
     loadArtifactEvidenceSnapshot({
       tenantId: input.tenantId,
       artifactType: "runtime_revision",
       artifactRevisionId: input.runtimeRevisionId,
       dbOrTx: dbOrTx,
     }),
-    loadActivePublicationSnapshot({
-      tenantId: input.tenantId,
-      subjectType: "agent_revision",
-      subjectRevisionId: input.agentRevisionId,
-      dbOrTx: dbOrTx,
-    }),
+    hasAgentConstraint
+      ? loadActivePublicationSnapshot({
+          tenantId: input.tenantId,
+          subjectType: "agent_revision",
+          subjectRevisionId: input.agentRevisionId as string,
+          dbOrTx: dbOrTx,
+        })
+      : Promise.resolve(null),
     loadActivePublicationSnapshot({
       tenantId: input.tenantId,
       subjectType: "runtime_revision",
       subjectRevisionId: input.runtimeRevisionId,
       dbOrTx: dbOrTx,
     }),
-    dbOrTx
-      .select()
-      .from(agentRevisionTable)
-      .where(eq(agentRevisionTable.id, input.agentRevisionId))
-      .limit(1)
-      .then((r) => r[0] ?? null),
+    hasAgentConstraint
+      ? dbOrTx
+          .select()
+          .from(agentRevisionTable)
+          .where(eq(agentRevisionTable.id, input.agentRevisionId as string))
+          .limit(1)
+          .then((r) => r[0] ?? null)
+      : Promise.resolve(null),
     dbOrTx
       .select()
       .from(runtimeRevisionTable)

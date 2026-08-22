@@ -10,7 +10,8 @@ import type { RouteEligibilityProjectionRecord } from "./route-eligibility-proje
 export interface UpsertProjectionInput {
   routeId: string;
   tenantId: string;
-  agentId: string;
+  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+  agentId: string | null;
   routeSetId: string;
   routeScopeKey: string;
   routeSetVersionNo: number;
@@ -27,7 +28,8 @@ export interface UpsertProjectionInput {
   trafficWeight: number;
   effectiveFrom: Date | null;
   effectiveUntil: Date | null;
-  agentRevisionId: string;
+  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+  agentRevisionId: string | null;
   agentRevisionState: string;
   agentLifecycleState: string;
   agentPublicationActive: number;

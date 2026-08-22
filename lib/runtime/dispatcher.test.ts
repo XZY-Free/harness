@@ -405,7 +405,6 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
   const { thread } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agent.id,
     actorId: ownerId,
   });
 
@@ -904,6 +903,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
       routeResolver,
     });
 
@@ -911,7 +911,7 @@ describe("Dispatcher 调度", () => {
     expect(commands).toEqual([
       {
         tenantId: ctx.tenantId,
-        agentId: ctx.agentId,
+        agentConstraint: ctx.agentId,
         routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
         businessKey: { threadId: ctx.threadId },
         attributes: {},
@@ -926,6 +926,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
     });
 
     expect(result.dispatched).toBe(true);
@@ -983,6 +984,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
       routeResolver: async (command) => {
         const outcome = await realResolver(command);
         if (outcome.status !== "resolved") return outcome;
@@ -1002,7 +1004,7 @@ describe("Dispatcher 调度", () => {
     const routeResolver = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
     const staleOutcome = await routeResolver({
       tenantId: ctx.tenantId,
-      agentId: ctx.agentId,
+      agentConstraint: ctx.agentId,
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
       businessKey: { threadId: ctx.threadId },
     });
@@ -1044,7 +1046,7 @@ describe("Dispatcher 调度", () => {
     });
     const outcome = await createResolveRoute({ store: mysqlRouteEligibilityResolutionStore })({
       tenantId: ctx.tenantId,
-      agentId: ctx.agentId,
+      agentConstraint: ctx.agentId,
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
       businessKey: { threadId: ctx.threadId },
     });
@@ -1078,6 +1080,7 @@ describe("Dispatcher 调度", () => {
         routeActivationId: resolution.routeActivationId,
         routeContentDigest: resolution.routeContentDigest,
         resolutionInputDigest: resolution.resolutionInputDigest,
+        // : 测试构造 Agent Route 解析，controlPlaneEvidence 恒非空。
         ...resolution.controlPlaneEvidence,
       },
     };
@@ -1100,7 +1103,11 @@ describe("Dispatcher 调度", () => {
 
   it("发布撤回不会改写已创建 Binding 的历史证据", async () => {
     const ctx = await seedFullDispatchContext();
-    const result = await dispatchInvocationForTurn({ tenantId: ctx.tenantId, turnId: ctx.turnId });
+    const result = await dispatchInvocationForTurn({
+      tenantId: ctx.tenantId,
+      turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
+    });
     const invocationId = result.invocation?.id;
     if (!invocationId || !result.binding) throw new Error("测试 Binding 未创建");
     const frozen = {
@@ -1144,7 +1151,6 @@ describe("Dispatcher 调度", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: ownerId,
-      primaryAgentId: agent.id,
       actorId: ownerId,
     });
 
@@ -1175,6 +1181,7 @@ describe("Dispatcher 调度", () => {
     await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
     });
 
     // 再次调度（Turn 已是 queued）
@@ -1182,6 +1189,7 @@ describe("Dispatcher 调度", () => {
       dispatchInvocationForTurn({
         tenantId: ctx.tenantId,
         turnId: ctx.turnId,
+        agentConstraint: ctx.agentId,
       }),
     ).rejects.toThrow(DispatchTurnStateError);
   });
@@ -1249,7 +1257,6 @@ describe("Dispatcher 调度", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: ownerId,
-      primaryAgentId: agent.id,
       actorId: ownerId,
     });
 
@@ -1264,6 +1271,7 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId,
       turnId: turn.id,
+      agentConstraint: agent.id,
     });
 
     expect(result.dispatched).toBe(true);

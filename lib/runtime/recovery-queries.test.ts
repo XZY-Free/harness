@@ -431,7 +431,6 @@ async function createThreadForTest(tenantId: string, ownerId: string, agentId: s
   const { thread } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agentId,
     actorId: ownerId,
   });
   return thread;

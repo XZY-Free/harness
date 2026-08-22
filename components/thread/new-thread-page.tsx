@@ -69,7 +69,7 @@ export function NewThreadPage({
         defaultModelRef={defaultModelRef}
         onAgentChange={setAgentId}
         onModelChange={setModelRef}
-        onSubmitText={(text) => onSubmit({ text, agentId: agentId ?? defaultAgentId, modelRef })}
+        onSubmitText={(text) => onSubmit({ text, modelRef })}
       />
     </div>
   );

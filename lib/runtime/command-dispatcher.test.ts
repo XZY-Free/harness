@@ -393,7 +393,6 @@ async function seedFullCommandContext(): Promise<FullCommandContext> {
   const { thread } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agent.id,
     actorId: ownerId,
   });
 
@@ -451,6 +450,7 @@ async function seedRunningInvocationWithRunningTurn(
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
+    agentConstraint: ctx.agentId,
   });
 
   const invocation = result.invocation;

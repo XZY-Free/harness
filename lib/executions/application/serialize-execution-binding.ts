@@ -3,7 +3,8 @@ import type { ExecutionBindingDTO } from "@/lib/control-plane-client/contracts/e
 export interface SerializableExecutionBinding {
   invocationId: string;
   tenantId: string;
-  agentRevisionId: string;
+  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+  agentRevisionId: string | null;
   runtimeRevisionId: string;
   deploymentRouteId: string;
   modelProvider: string;
@@ -16,15 +17,19 @@ export interface SerializableExecutionBinding {
   routeRevisionId: string;
   routeActivationId: string;
   routeContentDigest: string;
-  agentArtifactId: string;
+  /** null = 基础 Harness Route（Agent Evidence not_applicable，§18）。 */
+  agentArtifactId: string | null;
   runtimeArtifactId: string;
-  agentArtifactDigest: string;
+  /** null = 基础 Harness Route（§18 not_applicable）。 */
+  agentArtifactDigest: string | null;
   runtimeArtifactDigest: string;
   runtimeConfigDigest: string;
   capabilityManifestDigest: string;
-  agentAttestationIds: string[];
+  /** null = 基础 Harness Route（§18 not_applicable）。 */
+  agentAttestationIds: string[] | null;
   runtimeAttestationIds: string[];
-  agentPublicationRecordId: string;
+  /** null = 基础 Harness Route（§18 not_applicable）。 */
+  agentPublicationRecordId: string | null;
   runtimePublicationRecordId: string;
   conformanceRunId: string;
   resolutionInputDigest: string;

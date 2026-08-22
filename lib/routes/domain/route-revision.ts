@@ -3,7 +3,14 @@ import { createHash } from "node:crypto";
 export const MAX_ROUTE_TRAFFIC_WEIGHT = 10_000;
 
 export interface RouteRevisionContent {
-  agentRevisionId: string;
+  /**
+   * 绑定的 AgentRevision ID。
+   *
+   * null = 基础 Harness Runtime Route，不附加 Agent 资产约束（§12）。
+   * 有值 = 带 Agent 控制面约束的 Route，需完整 Agent Evidence 资格判断。
+   * 与 runtimeRevisionId 一起参与 content digest 规范化（§7.5）。
+   */
+  agentRevisionId: string | null;
   runtimeRevisionId: string;
   policyRevisionId: string | null;
   modelPolicyRevisionId: string | null;

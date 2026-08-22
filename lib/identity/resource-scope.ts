@@ -136,9 +136,9 @@ export function serializeResourceScope(scope: ResourceScope): string {
  */
 export function scopeCovers(
   binding: ResourceScope,
-  requested: { type: ResourceScopeType; id: string },
+  requested: { type: ResourceScopeType; id: string | null },
 ): boolean {
   if (binding.type !== requested.type) return false;
   if (binding.wildcard) return true;
-  return Array.isArray(binding.ids) && binding.ids.includes(requested.id);
+  return requested.id !== null && Array.isArray(binding.ids) && binding.ids.includes(requested.id);
 }

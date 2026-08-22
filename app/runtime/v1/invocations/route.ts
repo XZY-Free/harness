@@ -174,7 +174,7 @@ export async function POST(request: Request): Promise<Response> {
       invocationId: body.invocation_id,
       threadId: turnContext.thread_id,
       turnId: turnContext.turn_id,
-      agentRevisionId: body.agent.agent_revision_id,
+      agentRevisionId: body.agent?.agent_revision_id ?? null,
       inputItems: body.input_items,
       contextHandle: body.context_handle,
       gatewayEndpoints: body.gateway_endpoints,

@@ -84,7 +84,8 @@ export interface ContextQueryContext {
   tenantId: string;
   invocationId: string;
   threadId?: string;
-  agentId?: string;
+  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+  agentId?: string | null;
   userId?: string;
   workspaceId?: string | null;
   triggerItemId?: string;

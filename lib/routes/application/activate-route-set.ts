@@ -157,13 +157,16 @@ export function createActivateRouteSet(dependencies: {
       for (const desired of command.desiredRoutes) {
         const activationState = desired.activationState ?? "active";
 
-        // 6. 校验 AgentRevision 基本存在性
-        const agentRevision = await session.findAgentRevision(desired.agentRevisionId);
-        if (!agentRevision) {
-          throw new RevisionNotPublishedError(desired.agentRevisionId, "agent", "not_found");
-        }
-        if (agentRevision.agentId !== routeSet.agentId) {
-          throw new RevisionNotPublishedError(desired.agentRevisionId, "agent", "wrong_agent");
+        // 6. 校验 AgentRevision 基本存在性（无 Agent 约束 → 基础 Harness Route，跳过 Agent 校验）
+        const hasAgentConstraint = desired.agentRevisionId !== null;
+        if (hasAgentConstraint) {
+          const agentRevision = await session.findAgentRevision(desired.agentRevisionId as string);
+          if (!agentRevision) {
+            throw new RevisionNotPublishedError(desired.agentRevisionId as string, "agent", "not_found");
+          }
+          if (agentRevision.agentId !== routeSet.agentId) {
+            throw new RevisionNotPublishedError(desired.agentRevisionId as string, "agent", "wrong_agent");
+          }
         }
 
         // 6. 校验 RuntimeRevision 基本存在性
@@ -174,6 +177,7 @@ export function createActivateRouteSet(dependencies: {
 
         if (activationState === "active") {
           // §03: 使用统一 Reader + Policy 进行完整执行资格检查（删除 hasVerifiedAttestation 旁路）
+          // 无 Agent 约束 → Reader/Policy 内部跳过 Agent 维度（not_applicable，§18）。
           const evidence = await evidenceReader.loadCurrentEvidence({
             tenantId: command.tenantId,
             agentRevisionId: desired.agentRevisionId,
@@ -181,18 +185,21 @@ export function createActivateRouteSet(dependencies: {
             policyRevisionId: desired.policyRevisionId ?? null,
           });
           // §03: 使用统一 RevisionExecutionEligibilityPolicy（fail-closed，无降级路径）
-          // §04: 从同一事务读取 agentInterfaceRequirementsJson
-          const [fullAgentRevision] = await session
-            .getDbOrTx()
-            .select({
-              agentInterfaceRequirementsJson: agentRevisionTable.agentInterfaceRequirementsJson,
-            })
-            .from(agentRevisionTable)
-            .where(eq(agentRevisionTable.id, desired.agentRevisionId))
-            .limit(1);
-          const requiredCapabilities = extractRequiredCapabilities(
-            fullAgentRevision?.agentInterfaceRequirementsJson,
-          );
+          // §04: 从同一事务读取 agentInterfaceRequirementsJson（无 Agent 约束时为 null）
+          let requiredCapabilities: string[] = [];
+          if (hasAgentConstraint) {
+            const [fullAgentRevision] = await session
+              .getDbOrTx()
+              .select({
+                agentInterfaceRequirementsJson: agentRevisionTable.agentInterfaceRequirementsJson,
+              })
+              .from(agentRevisionTable)
+              .where(eq(agentRevisionTable.id, desired.agentRevisionId as string))
+              .limit(1);
+            requiredCapabilities = extractRequiredCapabilities(
+              fullAgentRevision?.agentInterfaceRequirementsJson,
+            );
+          }
           const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
             evidence,
             requiredCapabilities,

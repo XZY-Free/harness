@@ -110,6 +110,8 @@ const routeReader: HostedRouteReader = {
   async resolveEligibleRoute(command) {
     const outcome = await resolveRoute({
       ...command,
+      // : resolveRoute 命令字段已从 agentId 改为 agentConstraint（§8.3）。
+      agentConstraint: command.agentId,
       businessKey: { jobId: `hosted-provision:${command.agentId}` },
     });
     if (outcome.status !== "resolved") return null;

@@ -26,19 +26,19 @@ export interface BindingEligibilityInput {
   routeRevisionId: string;
   /** Resolver 冻结的 RouteActivationId。 */
   routeActivationId: string;
-  /** Resolver 冻结的 AgentRevisionId。 */
-  agentRevisionId: string;
+  /** Resolver 冻结的 AgentRevisionId。null = 基础 Harness Route（无 Agent 资产约束）。 */
+  agentRevisionId: string | null;
   /** Resolver 冻结的 RuntimeRevisionId。 */
   runtimeRevisionId: string;
   /** Resolver 冻结的 PolicyRevisionId（可 null）。 */
   policyRevisionId: string | null;
   /** Projection 版本号 — 用于检测 Projection 滞后。 */
   projectionVersionNo: number;
-  /** : Resolver 冻结的精确证据 ID。 */
+  /** : Resolver 冻结的精确证据 ID。base route 的 agent 维度为 null（§18 not_applicable）。 */
   frozenEvidence: {
-    agentPublicationRecordId: string;
+    agentPublicationRecordId: string | null;
     runtimePublicationRecordId: string;
-    agentAttestationIds: string[];
+    agentAttestationIds: string[] | null;
     runtimeAttestationIds: string[];
     conformanceRunId: string;
   };
@@ -106,12 +106,16 @@ export async function validateBindingEligibility(
   }
 
   // : C. 使用统一 Reader + tx 加载精确证据快照
+  // 基础 Harness Route（agentRevisionId=null）→ 跳过 Agent 维度查询（§18 not_applicable）。
+  const isBaseRoute = input.agentRevisionId === null;
   const evidenceReader = createMySqlRevisionExecutionEvidenceReader({ db: tx });
-  const [agentRevisionRow] = await tx
-    .select()
-    .from(agentRevisionTable)
-    .where(eq(agentRevisionTable.id, input.agentRevisionId))
-    .limit(1);
+  const [agentRevisionRow] = isBaseRoute
+    ? [null]
+    : await tx
+        .select()
+        .from(agentRevisionTable)
+        .where(eq(agentRevisionTable.id, input.agentRevisionId as string))
+        .limit(1);
 
   const requiredCapabilities = extractRequiredCapabilities(
     agentRevisionRow?.agentInterfaceRequirementsJson,
@@ -128,28 +132,16 @@ export async function validateBindingEligibility(
   // : D. 验证精确证据 ID — Projection 冻结的证据 ID 必须与当前权威一致
   {
     const fe = input.frozenEvidence;
-    const currentAgentPubId = snapshot.agentPublication?.publicationRecordId ?? null;
     const currentRuntimePubId = snapshot.runtimePublication?.publicationRecordId ?? null;
     const currentConformanceRunId = snapshot.runtimePublication?.conformanceRunId ?? null;
 
-    if (fe.agentPublicationRecordId !== currentAgentPubId) {
-      return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
-    }
     if (fe.runtimePublicationRecordId !== currentRuntimePubId) {
       return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
     }
     if (fe.conformanceRunId !== currentConformanceRunId) {
       return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
     }
-    // Attestation IDs 必须与 Publication 绑定的完整集合精确相等。
-    if (
-      !exactEvidenceIdsEqual(
-        fe.agentAttestationIds,
-        snapshot.agentPublication?.attestationIds ?? [],
-      )
-    ) {
-      return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
-    }
+    // Runtime Attestation IDs 必须与 Publication 绑定的完整集合精确相等。
     if (
       !exactEvidenceIdsEqual(
         fe.runtimeAttestationIds,
@@ -157,6 +149,21 @@ export async function validateBindingEligibility(
       )
     ) {
       return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
+    }
+    // Agent 维度仅 Agent Route 校验（§7.4）；base route 为 not_applicable（§18），跳过。
+    if (!isBaseRoute) {
+      const currentAgentPubId = snapshot.agentPublication?.publicationRecordId ?? null;
+      if (fe.agentPublicationRecordId !== currentAgentPubId) {
+        return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
+      }
+      if (
+        !exactEvidenceIdsEqual(
+          fe.agentAttestationIds as string[],
+          snapshot.agentPublication?.attestationIds ?? [],
+        )
+      ) {
+        return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
+      }
     }
   }
 

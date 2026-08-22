@@ -555,7 +555,7 @@ async function resolveFrozenRouteForBinding(
     store: mysqlRouteEligibilityResolutionStore,
   })({
     tenantId: fixture.tenantId,
-    agentId: fixture.agent.id,
+    agentConstraint: fixture.agent.id,
     routeScopeKey: "prod",
     businessKey: { threadId },
   });
@@ -612,6 +612,7 @@ async function createBindingFromResolved(params: {
     contextCheckpointId: null,
     environmentDefinitionRevisionId: null,
     controlPlaneEvidence: {
+      // : 测试构造 Agent Route 解析，controlPlaneEvidence 恒非空。
       ...params.resolution.controlPlaneEvidence,
       routeRevisionId: params.resolution.routeRevisionId,
       routeActivationId: params.resolution.routeActivationId,
@@ -1124,7 +1125,7 @@ describe("场景7：Projection Consumer 构建完整 eligible Projection", () =>
       store: mysqlRouteEligibilityResolutionStore,
     })({
       tenantId: fixture.tenantId,
-      agentId: fixture.agent.id,
+      agentConstraint: fixture.agent.id,
       routeScopeKey: "prod",
       businessKey: { threadId: "disabled-projection" },
     });
@@ -1156,7 +1157,7 @@ describe("场景8：Employee Turn 只执行一次 Route Resolution", () => {
 
     const outcome1 = await resolveRoute({
       tenantId: fixture.tenantId,
-      agentId: fixture.agent.id,
+      agentConstraint: fixture.agent.id,
       routeScopeKey: "prod",
       businessKey: { threadId: "thread-e2e-001" },
     });
@@ -1166,7 +1167,7 @@ describe("场景8：Employee Turn 只执行一次 Route Resolution", () => {
     // 同一 Turn 重复调用 → 幂等，返回相同 resolutionKeyDigest
     const outcome2 = await resolveRoute({
       tenantId: fixture.tenantId,
-      agentId: fixture.agent.id,
+      agentConstraint: fixture.agent.id,
       routeScopeKey: "prod",
       businessKey: { threadId: "thread-e2e-001" },
     });
@@ -1375,7 +1376,7 @@ describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活",
         store: mysqlRouteEligibilityResolutionStore,
       })({
         tenantId,
-        agentId: agent.id,
+        agentConstraint: agent.id,
         routeScopeKey: "prod",
         businessKey: { threadId: `hosted-e2e-${requestId}` },
       });
@@ -1463,7 +1464,7 @@ describe("场景13：Publication 撤回后拒绝新 Binding", () => {
       .where(
         eq(
           withdrawalRecord.publicationRecordId,
-          resolution.controlPlaneEvidence.agentPublicationRecordId,
+          resolution.controlPlaneEvidence.agentPublicationRecordId as string,
         ),
       );
     expect(withdrawal).toBeDefined();
@@ -1486,7 +1487,7 @@ describe("场景14：Attestation 撤销后拒绝新 Binding", () => {
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
-    const [attestationId] = resolution.controlPlaneEvidence.agentAttestationIds;
+    const [attestationId] = resolution.controlPlaneEvidence.agentAttestationIds ?? [];
     if (!attestationId) throw new Error("冻结 Resolution 缺少 Agent Attestation");
 
     const revokeArtifactAttestation = createRevokeArtifactAttestation({

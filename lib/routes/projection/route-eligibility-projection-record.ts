@@ -27,7 +27,11 @@ export const routeEligibilityProjection = mysqlTable(
     /** 路由 ID（与 DeploymentRoute.id 对应，业务主键）。 */
     routeId: varchar("routeId", { length: 36 }).primaryKey().notNull(),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
-    agentId: varchar("agentId", { length: 36 }).notNull(),
+    /**
+     * 归属 Agent ID。
+     * null = 基础 Harness Route（无 Agent 资产约束），Resolver 无约束查询命中此列 IS NULL。
+     */
+    agentId: varchar("agentId", { length: 36 }),
     routeSetId: varchar("routeSetId", { length: 36 }).notNull(),
     routeScopeKey: varchar("routeScopeKey", { length: 128 }).notNull(),
 
@@ -53,7 +57,11 @@ export const routeEligibilityProjection = mysqlTable(
     effectiveUntil: datetime("effectiveUntil", { mode: "date", fsp: 3 }),
 
     // ─── Agent 侧资格 ─────────────────────────────
-    agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
+    /**
+     * 绑定的 AgentRevision ID。
+     * null = 基础 Harness Route（无 Agent 资产约束），Agent Evidence 为 not_applicable。
+     */
+    agentRevisionId: varchar("agentRevisionId", { length: 36 }),
     agentRevisionState: varchar("agentRevisionState", { length: 32 }).notNull(),
     agentLifecycleState: varchar("agentLifecycleState", { length: 32 }).notNull(),
     /** 1=Publication活跃, 0=否。 */

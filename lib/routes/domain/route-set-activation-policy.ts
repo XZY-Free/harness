@@ -36,7 +36,8 @@ export interface RouteSetActivationInput {
   routeSetId: string;
   routeScopeKey: string;
   tenantId: string;
-  agentId: string;
+  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
+  agentId: string | null;
   desiredRoutes: DesiredRoute[];
 }
 

@@ -176,7 +176,8 @@ export interface StartInvocationParams {
   threadId?: string | null;
   /** 会话模式 Turn id（Job 模式为 null）。 */
   turnId?: string | null;
-  agentRevisionId: string;
+  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
+  agentRevisionId: string | null;
   /** 输入 Item 列表（来自 startInvocation 请求体 input_items）。 */
   inputItems: unknown[];
   contextHandle?: string;
@@ -294,7 +295,8 @@ export interface HostedAgentLoopParams {
   invocationId: string;
   threadId: string | null;
   turnId: string | null;
-  agentRevisionId: string;
+  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
+  agentRevisionId: string | null;
   inputItems: unknown[];
   contextHandle?: string;
   workspace?: StartInvocationRequestBody["workspace"];

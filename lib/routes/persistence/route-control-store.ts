@@ -6,7 +6,8 @@ export type RouteActorType = "user" | "service" | "workload" | "system";
 export interface RouteSetProjection {
   id: string;
   tenantId: string;
-  agentId: string;
+  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
+  agentId: string | null;
   routeScopeKey: string;
   routeScopeJson: unknown;
   versionNo: number;
@@ -17,7 +18,8 @@ export interface RouteSetProjection {
 export interface RouteProjection {
   id: string;
   routeSetId: string;
-  agentRevisionId: string;
+  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+  agentRevisionId: string | null;
   runtimeRevisionId: string;
   trafficWeight: number;
   priorityNo: number;

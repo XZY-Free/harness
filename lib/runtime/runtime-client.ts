@@ -94,14 +94,18 @@ export interface StartInvocationRequestBody {
     job_id: string;
     trigger_item_id?: string | null;
   } | null;
-  agent: {
-    agent_revision_id: string;
-    instruction_hash: string;
-    artifact_ref: string;
-    model_policy: Record<string, unknown>;
-    permission_requirements: Record<string, unknown>;
-    interface_requirements: Record<string, unknown>;
-  };
+  /**
+   * Agent 控制面资产约束；基础 Harness Route 传 null（无 Agent 资产约束，§8.3）。
+   * 单个字段为 null 表示该维度无约束。
+   */
+  agent?: {
+    agent_revision_id: string | null;
+    instruction_hash: string | null;
+    artifact_ref: string | null;
+    model_policy: Record<string, unknown> | null;
+    permission_requirements: Record<string, unknown> | null;
+    interface_requirements: Record<string, unknown> | null;
+  } | null;
   input_items: unknown[];
   context_handle: string;
   /** §24：下发 Governance Config 引用（Runtime 按 Snapshot 约束本地行为；不含 permission_policy.rules）。 */

@@ -367,7 +367,6 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
   const { thread } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agent.id,
     actorId: ownerId,
   });
 
@@ -739,6 +738,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -782,6 +782,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -805,6 +806,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -819,6 +821,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
     });
 
     expect(result.dispatched).toBe(true);
@@ -835,6 +838,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -859,6 +863,7 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
+      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });

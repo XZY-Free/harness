@@ -83,7 +83,7 @@ export function adminAuthErrorResponse(error: unknown, requestId: string): Respo
 export async function requireAdminActionScope(
   principal: AdminPrincipal,
   actionCode: ActionCode,
-  resource: { type: ResourceScopeType; id: string },
+  resource: { type: ResourceScopeType; id: string | null },
   requestId: string,
 ): Promise<{ ok: true; principal: AdminPrincipal } | { ok: false; response: Response }> {
   const result = await requireActionScope(principal, { actionCode, resource }, requestId);

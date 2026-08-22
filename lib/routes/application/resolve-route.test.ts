@@ -363,7 +363,8 @@ function digest(value: string): string {
 function command(fixture: Awaited<ReturnType<typeof seedAgentAuthority>>, threadId: string) {
   return {
     tenantId: fixture.tenantId,
-    agentId: fixture.agentId,
+    // : ResolveRouteCommand 字段已从 agentId 改为 agentConstraint（§8.3）。
+    agentConstraint: fixture.agentId,
     routeScopeKey: "prod",
     businessKey: { threadId },
     attributes: {},
@@ -509,5 +510,217 @@ describe("RouteResolver MySQL authority", () => {
       status: "resolved",
       resolution: { routeSetVersionNo: 1 },
     });
+  });
+
+  it("无 Agent 约束解析基础 Harness Route（agentRevisionId=null）", async () => {
+    // : §8.3 — RouteSet.agentId=null + RouteRevision.agentRevisionId=null
+    // 是"基础 Harness Route"的唯一合法表级表示（§8.4 禁空串/"default"）。
+    const tenant = await ensureDefaultTenant();
+    const tenantId = tenant.id;
+
+    // Runtime + published Revision + Conformance + Publication（复用与 addRuntimeRoute 相同的权威事实）
+    const runtimeId = randomUUID();
+    const runtimeRevisionId = randomUUID();
+    const runtimeArtifactId = randomUUID();
+    const runtimeAttestationId = randomUUID();
+    const runtimeArtifactDigest = digest("runtime-base");
+    const runtimeConfigDigest = digest("runtime-base-config");
+    await db.insert(runtimeTable).values({
+      id: runtimeId,
+      tenantId,
+      runtimeKey: `runtime-base`,
+      displayName: "Base Runtime",
+      runtimeKind: "external",
+      ownerUserId: randomUUID(),
+      lifecycleState: "enabled",
+      currentRevisionId: runtimeRevisionId,
+      versionNo: 2,
+    });
+    await db.insert(artifact).values({
+      id: runtimeArtifactId,
+      tenantId,
+      kind: "runtime",
+      digest: runtimeArtifactDigest,
+    });
+    await db.insert(runtimeRevisionTable).values({
+      id: runtimeRevisionId,
+      runtimeId,
+      revisionNo: 1,
+      protocolType: "agent_runtime_protocol",
+      protocolContractRevision: "agent-runtime-protocol@1",
+      endpointRef: `connection://${runtimeId}`,
+      runtimeArtifactRef: `oci://runtime-base`,
+      artifactId: runtimeArtifactId,
+      artifactDigest: runtimeArtifactDigest,
+      runtimeCapabilitiesJson: ["event_stream"],
+      identityMode: "workload_token",
+      networkZone: "internal",
+      configHash: runtimeConfigDigest,
+      revisionState: "published",
+      createdBy: "resolver-test",
+      publishedAt: NOW,
+    });
+    await db.insert(artifactAttestation).values({
+      id: runtimeAttestationId,
+      tenantId,
+      artifactId: runtimeArtifactId,
+      artifactType: "runtime_revision",
+      artifactRevisionId: runtimeRevisionId,
+      artifactDigest: runtimeArtifactDigest,
+      dsseEnvelopeRef: `attestation://dsse/${runtimeAttestationId}`,
+      sbomRef: `sbom://${runtimeAttestationId}`,
+      provenanceRef: `provenance://${runtimeAttestationId}`,
+      builderIdentity: "resolver-test-builder",
+      verificationState: "verified",
+      verifiedAt: NOW,
+    });
+    const conformanceRunId = randomUUID();
+    await db.insert(runtimeConformanceRun).values({
+      id: conformanceRunId,
+      tenantId,
+      runtimeRevisionId,
+      runtimeArtifactDigest: runtimeArtifactDigest,
+      runtimeConfigDigest: runtimeConfigDigest,
+      protocolContractRevision: "agent-runtime-protocol@1",
+      suiteRevision: "runtime-conformance@1",
+      runnerArtifactDigest: `sha256:${"f".repeat(64)}`,
+      runnerIdentity: "resolver-test-runner",
+      testEnvironmentRevision: "mysql8-test@1",
+      startedAt: NOW,
+      completedAt: new Date(NOW.getTime() + 1_000),
+      overallResult: "passed",
+      evidenceManifestDigest: digest(`conformance-base`),
+      conformanceFormat: "standard_dsse",
+      envelopeDigest: digest(`envelope-base`),
+      envelopeJson: "{}",
+      payloadDigest: digest(`payload-base`),
+      signingKeyId: "resolver-test-key",
+      verificationEngine: "dsse-ed25519",
+      verificationEngineVersion: "1",
+      predicateType: "https://snowharness.dev/attestation/runtime-conformance/v1",
+      verifiedAt: NOW,
+      idempotencyKey: `conformance:${runtimeRevisionId}`,
+      requestId: `resolver:${runtimeRevisionId}`,
+      recordedAt: NOW,
+    });
+    await db.insert(runtimeConformanceCaseResult).values(
+      PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({
+        id: randomUUID(),
+        runId: conformanceRunId,
+        caseId,
+        passed: true,
+        reason: null,
+        evidenceDigest: digest(`conformance-case:${caseId}`),
+      })),
+    );
+    const runtimePublicationId = randomUUID();
+    await db.insert(publicationRecord).values({
+      id: runtimePublicationId,
+      tenantId,
+      subjectType: "runtime_revision",
+      subjectRevisionId: runtimeRevisionId,
+      evidenceSetDigest: `sha256:${"d".repeat(64)}`,
+      attestationIds: [runtimeAttestationId],
+      conformanceRunId,
+      approvals: [],
+      publishedByType: "system",
+      publishedBy: "resolver-test",
+      publishedAt: NOW,
+      idempotencyKey: `publish-runtime:${runtimeRevisionId}`,
+    });
+
+    // 基础 Harness RouteSet（agentId=null）
+    const baseRouteSetId = randomUUID();
+    await db.insert(deploymentRouteSetTable).values({
+      id: baseRouteSetId,
+      tenantId,
+      agentId: null,
+      routeScopeKey: "prod",
+      routeScopeJson: { environment: "prod" },
+      versionNo: 1,
+    });
+
+    // RouteRevision（agentRevisionId=null）+ Activation + 投影
+    const routeId = randomUUID();
+    const routeRevisionId = randomUUID();
+    await db.insert(deploymentRouteTable).values({
+      id: routeId,
+      routeSetId: baseRouteSetId,
+      routeKey: "base-primary",
+      agentRevisionId: null,
+      runtimeRevisionId,
+      routeState: "enabled",
+      trafficWeight: 10_000,
+      priorityNo: 0,
+      effectiveFrom: null,
+      effectiveUntil: null,
+      activeRouteRevisionId: routeRevisionId,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await db.insert(routeRevision).values({
+      id: routeRevisionId,
+      tenantId,
+      routeId,
+      routeSetId: baseRouteSetId,
+      routeKey: "base-primary",
+      revisionNo: 1,
+      agentRevisionId: null,
+      runtimeRevisionId,
+      policyRevisionId: null,
+      modelPolicyRevisionId: null,
+      toolsetRevisionId: null,
+      trafficAllocationJson: {
+        weightBasisPoints: 10_000,
+        groupId: "primary",
+      },
+      routeGroupId: "primary",
+      selectorDigest: computeSelectorDigest(normalizeEligibility({}) ?? { all: {} }),
+      trafficWeight: 10_000,
+      priorityNo: 0,
+      effectiveFrom: null,
+      effectiveUntil: null,
+      eligibilityConditionsJson: {},
+      contentDigest: digest(`route-revision:${routeId}`),
+      createdByType: "system",
+      createdBy: "resolver-test",
+      validatedAt: NOW,
+      createdAt: NOW,
+    });
+    await db.insert(routeActivation).values({
+      id: randomUUID(),
+      tenantId,
+      routeId,
+      routeRevisionId,
+      routeSetId: baseRouteSetId,
+      activationSequence: 1,
+      activationState: "active",
+      previousRouteRevisionId: null,
+      routeSetVersionNo: 1,
+      activatedByType: "system",
+      activatedBy: "resolver-test",
+      reason: "base harness route fixture",
+      requestId: `resolver:${routeId}`,
+      idempotencyKey: `activate:${routeId}`,
+      activatedAt: NOW,
+    });
+    await createBuildRouteEligibility({ store: mysqlRouteEligibilityStore })({
+      tenantId,
+      routeId,
+    });
+
+    // 无 Agent 约束解析 → 命中基础 Harness Route，agentRevisionId=null
+    const result = await resolveRoute({
+      tenantId,
+      agentConstraint: null,
+      routeScopeKey: "prod",
+      businessKey: { threadId: "base-thread" },
+      attributes: {},
+      now: NOW,
+    });
+    expect(result.status).toBe("resolved");
+    if (result.status !== "resolved") return;
+    expect(result.resolution.agentRevisionId).toBeNull();
+    expect(result.resolution.runtimeRevisionId).toBe(runtimeRevisionId);
   });
 });

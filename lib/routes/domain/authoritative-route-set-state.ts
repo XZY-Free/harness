@@ -27,7 +27,8 @@ export interface AuthoritativeRouteState {
   activeRouteRevisionId: string | null;
   /** 最新 RouteRevision 的内容摘要。 */
   activeRevision: {
-    agentRevisionId: string;
+    /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+    agentRevisionId: string | null;
     runtimeRevisionId: string;
     policyRevisionId: string | null;
     modelPolicyRevisionId: string | null;
@@ -55,8 +56,8 @@ export interface AuthoritativeRouteSetState {
   routeSetId: string;
   /** 租户 ID。 */
   tenantId: string;
-  /** Agent ID。 */
-  agentId: string;
+  /** Agent ID；null = 基础 Harness Route（无 Agent 资产约束）。 */
+  agentId: string | null;
   /** Route Scope Key。 */
   routeScopeKey: string;
   /** RouteSet 版本号（ETag）。 */

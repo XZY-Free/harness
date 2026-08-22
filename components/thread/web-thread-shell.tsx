@@ -2,6 +2,7 @@
 
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
 import { NewThreadPage } from "@/components/thread/new-thread-page";
+import type { AgentOption } from "@/components/thread/input/input-popovers";
 import { DesktopSidebar } from "@/components/thread/sidebar/desktop-sidebar";
 import { SidebarProvider } from "@/components/thread/sidebar/sidebar-context";
 import { ThreadPage } from "@/components/thread/thread-page";
@@ -54,15 +55,9 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
   const threads = shell.threads.map((thread) => ({
     id: thread.id,
     title: thread.title,
-    primaryAgentId: thread.primary_agent_id,
   }));
-  const agents = shell.agents.map((agent) => ({
-    id: agent.id,
-    agentKey: agent.agent_key,
-    displayName: agent.display_name,
-  }));
-  const fallbackAgentId =
-    agents.find((agent) => agent.agentKey === "default")?.id ?? agents[0]?.id ?? "";
+  // : 线程不再绑定 Agent（G 阶段移除），shell 不再返回 agents。
+  const agents: AgentOption[] = [];
 
   const submitNewThread = async (submission: ClientNewThreadSubmission): Promise<boolean> => {
     setError(null);
@@ -93,7 +88,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
       <div className="flex h-dvh overflow-hidden bg-background text-foreground">
         <DesktopSidebar
           threads={threads}
-          agents={agents}
+          agents={[]}
           currentThreadId={activeThreadId ?? ""}
           surface="web"
         />
@@ -101,7 +96,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
           {activeThreadId === null ? (
             <NewThreadPage
               agents={agents}
-              defaultAgentId={fallbackAgentId}
+              defaultAgentId=""
               defaultModelRef={shell.default_model_ref}
               error={error}
               onSubmit={submitNewThread}

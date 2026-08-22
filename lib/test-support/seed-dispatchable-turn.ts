@@ -156,9 +156,12 @@ export async function seedDispatchableTurn(
     suffix,
   );
 
+  // : Employee Turn 热路径解析基础 Harness Route（§9.3，agentConstraint=null），
+  // 故 seed 一个 base RouteSet（agentId=null）+ RouteRevision（agentRevisionId=null）。
+  // Agent 仍创建以维持返回类型（agentId/agentRevision）兼容；路由本身为 base。
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: agent.id,
+    agentId: null,
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
@@ -167,7 +170,7 @@ export async function seedDispatchableTurn(
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: agentRevision.id,
+    agentRevisionId: null,
     runtimeRevisionId: runtimeRevision.id,
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,

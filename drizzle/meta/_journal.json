@@ -15,6 +15,20 @@
       "when": 1787378903017,
       "tag": "0001_ordinary_thor_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787384795148,
+      "tag": "0002_high_nemesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787386105219,
+      "tag": "0003_small_psynapse",
+      "breakpoints": true
     }
   ]
 }

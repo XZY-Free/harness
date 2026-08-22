@@ -264,8 +264,9 @@ describe("ExecutionBinding authority final validation", () => {
       "utf8",
     );
     expect(source).toContain(
-      "for (const attestationId of [...evidence.agentAttestationIds].sort())",
+      "for (const attestationId of [...agentAttestationIds].sort())",
     );
+    expect(source).toContain("const agentAttestationIds = evidence.agentAttestationIds ?? [];");
     expect(source).toContain(
       "for (const attestationId of [...evidence.runtimeAttestationIds].sort())",
     );

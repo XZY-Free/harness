@@ -7,7 +7,11 @@ import type { RouteEligibilityResolutionStore } from "../persistence/route-eligi
 
 export interface ResolveRouteCommand {
   tenantId: string;
-  agentId: string;
+  /**
+   * 调用方显式提供的可选 Agent 控制面约束（§8.3）。
+   * null = 无 Agent 约束，解析基础 Harness Route；concrete = 带 Agent 约束。
+   */
+  agentConstraint?: string | null;
   routeScopeKey: string;
   businessKey: { threadId?: string; jobId?: string };
   attributes?: Record<string, RouteResolutionAttribute>;
@@ -28,12 +32,12 @@ export function createResolveRoute(dependencies: {
   return async (command) => {
     const candidates = await dependencies.store.loadCandidates({
       tenantId: command.tenantId,
-      agentId: command.agentId,
+      agentConstraint: command.agentConstraint ?? null,
       routeScopeKey: command.routeScopeKey,
     });
     return resolveRouteCandidates({
       tenantId: command.tenantId,
-      agentId: command.agentId,
+      agentConstraint: command.agentConstraint ?? null,
       routeScopeKey: command.routeScopeKey,
       businessKey: command.businessKey,
       attributes: command.attributes ?? {},

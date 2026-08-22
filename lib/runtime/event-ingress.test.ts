@@ -361,7 +361,6 @@ async function seedFullIngressContext(): Promise<FullIngressContext> {
   const { thread } = await createThread({
     tenantId,
     ownerUserId: ownerId,
-    primaryAgentId: agent.id,
     actorId: ownerId,
   });
 
@@ -401,6 +400,7 @@ async function seedRunningInvocation(ctx: FullIngressContext): Promise<Dispatche
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
+    agentConstraint: ctx.agentId,
   });
 
   const invocation = result.invocation;

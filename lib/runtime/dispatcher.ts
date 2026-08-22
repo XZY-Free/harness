@@ -119,7 +119,7 @@ const configuredResolver = createConfiguredRouteResolver({
 const defaultRouteResolver: RouteResolver = async (input) => {
   const result = await configuredResolver({
     tenantId: input.tenantId,
-    agentId: input.agentId,
+    agentConstraint: input.agentConstraint ?? null,
     routeScopeKey: input.routeScopeKey,
     businessKey: input.businessKey,
     attributes: input.attributes,
@@ -206,6 +206,8 @@ export interface RuntimeEndpointResolution {
 export async function dispatchInvocationForTurn(params: {
   tenantId: string;
   turnId: string;
+  /** 调用方显式提供的可选 Agent 控制面约束；null = 基础 Harness Route（§8.3）。 */
+  agentConstraint?: string | null;
   /** 路由 scope key（默认 "default"）。 */
   routeScopeKey?: string;
   /** 参与 RouteRevision eligibility 匹配的标量属性。 */
@@ -255,7 +257,7 @@ export async function dispatchInvocationForTurn(params: {
   const plan = await resolveExecutionPlan(
     {
       tenantId: params.tenantId,
-      agentId: thread.primaryAgentId,
+      agentConstraint: params.agentConstraint ?? null,
       routeScopeKey,
       businessKey: { threadId: thread.id },
       attributes: params.routeAttributes ?? {},
@@ -300,6 +302,10 @@ export async function dispatchInvocationForTurn(params: {
     params.tenantId,
     routeResolution.policyRevisionId,
   );
+  // : 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）的证据 agent 字段
+  // 为 null（§18 Agent Evidence not_applicable），会正确展开写入 Binding；Runtime 字段
+  // 照常。Agent Route → 完整成组。
+  const controlPlaneEvidence = routeResolution.controlPlaneEvidence;
   const bindingParams: CreateExecutionBindingCommand = {
     invocationId: invocation.id,
     tenantId: params.tenantId,
@@ -324,7 +330,7 @@ export async function dispatchInvocationForTurn(params: {
       routeActivationId: routeResolution.routeActivationId,
       routeContentDigest: routeResolution.routeContentDigest,
       resolutionInputDigest: routeResolution.resolutionInputDigest,
-      ...routeResolution.controlPlaneEvidence,
+      ...controlPlaneEvidence,
     },
   };
   const binding = await createExecutionBinding(bindingParams);
@@ -508,7 +514,8 @@ async function dispatchToRuntime(params: {
   threadId: string;
   invocation: Invocation;
   binding: ExecutionBinding;
-  agentRevision: AgentRevision;
+  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
+  agentRevision: AgentRevision | null;
   runtimeRevisionId: string;
   turn: Turn;
   runtimeClient: RuntimeHttpClient;
@@ -555,30 +562,36 @@ async function dispatchToRuntime(params: {
       trigger_item_id: params.turn.triggerItemId ?? null,
     },
     job_context: null,
-    agent: {
-      agent_revision_id: params.agentRevision.id,
-      instruction_hash: params.agentRevision.instructionHash,
-      artifact_ref: params.agentRevision.agentArtifactRef,
-      model_policy: (params.agentRevision.modelPolicyJson ?? {}) as Record<string, unknown>,
-      permission_requirements: (params.agentRevision.permissionRequirementsJson ?? {}) as Record<
-        string,
-        unknown
-      >,
-      interface_requirements: (params.agentRevision.agentInterfaceRequirementsJson ?? {}) as Record<
-        string,
-        unknown
-      >,
-    },
+    agent: params.agentRevision
+      ? {
+          agent_revision_id: params.agentRevision.id,
+          instruction_hash: params.agentRevision.instructionHash,
+          artifact_ref: params.agentRevision.agentArtifactRef,
+          model_policy: (params.agentRevision.modelPolicyJson ?? {}) as Record<string, unknown>,
+          permission_requirements: (params.agentRevision.permissionRequirementsJson ?? {}) as Record<
+            string,
+            unknown
+          >,
+          interface_requirements: (params.agentRevision.agentInterfaceRequirementsJson ?? {}) as Record<
+            string,
+            unknown
+          >,
+        }
+      : null,
     input_items: [
       {
         type: "platform_rule",
         content: "仅使用当前 Invocation 授权的 Context Gateway 与 Workspace 资源。",
       },
-      {
-        type: "agent_instruction_ref",
-        agent_revision_id: params.agentRevision.id,
-        instruction_hash: params.agentRevision.instructionHash,
-      },
+      ...(params.agentRevision
+        ? [
+            {
+              type: "agent_instruction_ref",
+              agent_revision_id: params.agentRevision.id,
+              instruction_hash: params.agentRevision.instructionHash,
+            },
+          ]
+        : []),
       {
         type: "user_message",
         item_id: triggerItem.id,

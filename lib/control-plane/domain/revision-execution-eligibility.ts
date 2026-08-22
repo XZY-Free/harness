@@ -86,15 +86,18 @@ export interface RevisionExecutionEvidenceSnapshot {
   /** 租户 ID。 */
   tenantId: string;
 
-  /** Agent Revision ID。 */
-  agentRevisionId: string;
-  /** Agent Artifact Evidence（null = 无有效 Attestation）。 */
+  /**
+   * Agent Revision ID。
+   * null = 基础 Harness Route（无 Agent 资产约束），Agent 维度 Evidence 为 not_applicable。
+   */
+  agentRevisionId: string | null;
+  /** Agent Artifact Evidence（null = 无有效 Attestation / 无 Agent 约束）。 */
   agentArtifactEvidence: ArtifactEvidenceSnapshot | null;
-  /** Agent Active Publication（null = 未发布或已撤回）。 */
+  /** Agent Active Publication（null = 未发布或已撤回 / 无 Agent 约束）。 */
   agentPublication: ActivePublicationSnapshot | null;
-  /** Agent 生命周期状态。 */
+  /** Agent 生命周期状态（无 Agent 约束时为 "active" 占位，不参与判断）。 */
   agentLifecycleState: "active" | "archived";
-  /** Agent Revision 发布状态。 */
+  /** Agent Revision 发布状态（无 Agent 约束时为 "published" 占位，不参与判断）。 */
   agentRevisionState: "draft" | "published" | "withdrawn";
 
   /** Runtime Revision ID。 */
@@ -169,52 +172,59 @@ export const RevisionExecutionEligibilityPolicy = {
   ): RevisionExecutionEligibilityResult {
     const errors: RevisionExecutionEligibilityError[] = [];
 
-    // 1. Agent Publication Active
-    if (!snapshot.agentPublication) {
-      errors.push({
-        dimension: "agent_publication",
-        code: "no_active_publication",
-        message: `AgentRevision ${snapshot.agentRevisionId} 无 Active Publication`,
-      });
-    }
+    // Agent 维度：仅在 Route 绑定 AgentRevision（agentRevisionId != null）时成组必填（§18）。
+    // 基础 Harness Route（agentRevisionId === null）→ Agent Evidence not_applicable，跳过，
+    // 不伪装成 passed，也不制造假证据。
+    const hasAgentConstraint = snapshot.agentRevisionId !== null;
 
-    // 2. Agent Attestation
-    if (!snapshot.agentArtifactEvidence) {
-      errors.push({
-        dimension: "agent_attestation",
-        code: "no_artifact_evidence",
-        message: `AgentRevision ${snapshot.agentRevisionId} 无有效 Artifact Evidence`,
-      });
-    } else if (snapshot.agentArtifactEvidence.verificationState !== "verified") {
-      errors.push({
-        dimension: "agent_attestation",
-        code: "evidence_not_verified",
-        message: `AgentRevision ${snapshot.agentRevisionId} Artifact Evidence 未验证`,
-      });
-    } else if (snapshot.agentArtifactEvidence.revokedAt !== null) {
-      errors.push({
-        dimension: "agent_attestation",
-        code: "evidence_revoked",
-        message: `AgentRevision ${snapshot.agentRevisionId} Artifact Evidence 已撤销`,
-      });
-    }
+    if (hasAgentConstraint) {
+      // 1. Agent Publication Active
+      if (!snapshot.agentPublication) {
+        errors.push({
+          dimension: "agent_publication",
+          code: "no_active_publication",
+          message: `AgentRevision ${snapshot.agentRevisionId} 无 Active Publication`,
+        });
+      }
 
-    // 3. Agent 生命周期
-    if (snapshot.agentLifecycleState !== "active") {
-      errors.push({
-        dimension: "agent_lifecycle",
-        code: "agent_not_active",
-        message: `Agent 生命周期状态为 ${snapshot.agentLifecycleState}，要求 active`,
-      });
-    }
+      // 2. Agent Attestation
+      if (!snapshot.agentArtifactEvidence) {
+        errors.push({
+          dimension: "agent_attestation",
+          code: "no_artifact_evidence",
+          message: `AgentRevision ${snapshot.agentRevisionId} 无有效 Artifact Evidence`,
+        });
+      } else if (snapshot.agentArtifactEvidence.verificationState !== "verified") {
+        errors.push({
+          dimension: "agent_attestation",
+          code: "evidence_not_verified",
+          message: `AgentRevision ${snapshot.agentRevisionId} Artifact Evidence 未验证`,
+        });
+      } else if (snapshot.agentArtifactEvidence.revokedAt !== null) {
+        errors.push({
+          dimension: "agent_attestation",
+          code: "evidence_revoked",
+          message: `AgentRevision ${snapshot.agentRevisionId} Artifact Evidence 已撤销`,
+        });
+      }
 
-    // 3b. Agent Revision 发布状态
-    if (snapshot.agentRevisionState !== "published") {
-      errors.push({
-        dimension: "agent_publication",
-        code: "agent_revision_not_published",
-        message: `AgentRevision ${snapshot.agentRevisionId} 状态为 ${snapshot.agentRevisionState}，要求 published`,
-      });
+      // 3. Agent 生命周期
+      if (snapshot.agentLifecycleState !== "active") {
+        errors.push({
+          dimension: "agent_lifecycle",
+          code: "agent_not_active",
+          message: `Agent 生命周期状态为 ${snapshot.agentLifecycleState}，要求 active`,
+        });
+      }
+
+      // 3b. Agent Revision 发布状态
+      if (snapshot.agentRevisionState !== "published") {
+        errors.push({
+          dimension: "agent_publication",
+          code: "agent_revision_not_published",
+          message: `AgentRevision ${snapshot.agentRevisionId} 状态为 ${snapshot.agentRevisionState}，要求 published`,
+        });
+      }
     }
 
     // 4. Runtime Publication Active

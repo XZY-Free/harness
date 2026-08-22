@@ -299,7 +299,6 @@ describe("dispatchEmployeeTurn", () => {
     const { thread } = await createThread({
       tenantId,
       ownerUserId: ownerId,
-      primaryAgentId: agent.id,
       actorId: ownerId,
     });
     const { turn } = await acceptUserMessageTurn({
@@ -319,6 +318,8 @@ describe("dispatchEmployeeTurn", () => {
       threadId: thread.id,
       turnId: turn.id,
       modelRef: "test-model",
+      // : 线程不再绑定 Agent，测试显式传 agentConstraint 覆盖 seed 的 Agent route（§8.3）。
+      agentConstraint: agent.id,
       modelFn: async (message, context) => {
         await context.emitTextDelta?.("真实执行器");
         await context.emitTextDelta?.(`回复：${message}`);

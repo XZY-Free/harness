@@ -3,7 +3,7 @@ import { computeResolutionInputDigest } from "./resolution-input-digest";
 
 const baseInput = {
   tenantId: "tenant-1",
-  agentId: "agent-1",
+  agentConstraint: "agent-1",
   routeScopeKey: "production",
   businessKey: { threadId: "thread-1" },
   attributes: {
@@ -25,7 +25,7 @@ describe("computeResolutionInputDigest", () => {
       },
       businessKey: { threadId: "thread-1" },
       routeScopeKey: "production",
-      agentId: "agent-1",
+      agentConstraint: "agent-1",
       tenantId: "tenant-1",
     };
 
@@ -52,7 +52,7 @@ describe("computeResolutionInputDigest", () => {
 
   it.each([
     ["tenantId", { tenantId: "tenant-2" }],
-    ["agentId", { agentId: "agent-2" }],
+    ["agentConstraint", { agentConstraint: "agent-2" }],
     ["routeScopeKey", { routeScopeKey: "staging" }],
     ["businessKey", { businessKey: { jobId: "job-1" } }],
     ["attributes", { attributes: { ...baseInput.attributes, region: "eu-west" } }],
@@ -60,6 +60,24 @@ describe("computeResolutionInputDigest", () => {
   ])("%s 变化时摘要变化", (_field, change) => {
     expect(computeResolutionInputDigest({ ...baseInput, ...change })).not.toBe(
       computeResolutionInputDigest(baseInput),
+    );
+  });
+
+  it("agentConstraint null（基础 Harness Route）与 concrete 产生不同摘要（§8.4）", () => {
+    const base = computeResolutionInputDigest(baseInput);
+    // 显式 null（缺失与 null 统一为 null）不得与 concrete 混同。
+    expect(computeResolutionInputDigest({ ...baseInput, agentConstraint: null })).not.toBe(base);
+    // missing 与 null 统一为 null（同一态）。
+    const { agentConstraint: _omitted, ...missing } = baseInput;
+    expect(computeResolutionInputDigest(missing)).toBe(
+      computeResolutionInputDigest({ ...baseInput, agentConstraint: null }),
+    );
+    // 禁 empty / "default" 四态：空串与 "default" 也按 concrete 处理，不得吞并 null。
+    expect(computeResolutionInputDigest({ ...baseInput, agentConstraint: "" })).not.toBe(
+      computeResolutionInputDigest({ ...baseInput, agentConstraint: null }),
+    );
+    expect(computeResolutionInputDigest({ ...baseInput, agentConstraint: "default" })).not.toBe(
+      computeResolutionInputDigest({ ...baseInput, agentConstraint: null }),
     );
   });
 

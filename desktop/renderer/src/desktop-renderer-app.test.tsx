@@ -106,7 +106,7 @@ describe("DesktopRendererApp", () => {
       "/api/v1/threads",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ agent_id: "agent-1", title: "分析销售数据" }),
+        body: JSON.stringify({ title: "分析销售数据" }),
       }),
     );
     expect(apiFetch).toHaveBeenNthCalledWith(

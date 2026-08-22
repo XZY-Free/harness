@@ -18,7 +18,8 @@ export type RouteEligibilityState = "eligible" | "ineligible" | "pending_rebuild
 export interface DeploymentRouteSetDTO {
   id: string;
   tenant_id: string;
-  agent_id: string;
+  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
+  agent_id: string | null;
   route_scope_key: string;
   route_scope: unknown;
   version_no: number;

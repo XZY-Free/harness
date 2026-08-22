@@ -1,11 +1,9 @@
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { db } from "@/lib/db/client";
 import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { logger } from "@/lib/logger";
-import { agentTable } from "@/lib/persistence/schema/agents";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
@@ -14,12 +12,8 @@ import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import { collectModelText } from "@/lib/runtime/model-text-stream";
-import { mysqlHostedProvisioningRequestStore } from "@/lib/runtime/persistence/mysql-hosted-provisioning-request-store";
-import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
-import { createRevisionValidator } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 import { streamText } from "ai";
-import { and, eq } from "drizzle-orm";
 
 type ModelFn = (message: string, context: HostedModelContext) => Promise<string>;
 
@@ -30,7 +24,7 @@ const configuredResolver = createConfiguredRouteResolver({
 const resolveRoute: RouteResolver = async (input) => {
   const result = await configuredResolver({
     tenantId: input.tenantId,
-    agentId: input.agentId,
+    agentConstraint: input.agentConstraint ?? null,
     routeScopeKey: input.routeScopeKey,
     businessKey: input.businessKey,
     attributes: input.attributes,
@@ -38,15 +32,6 @@ const resolveRoute: RouteResolver = async (input) => {
   });
   return result.outcome;
 };
-
-/**
- * : 注入 Revision 验证器的 ProvisioningRequest 工厂。
- * 禁止 agentRevisionId = "unknown"。
- */
-const requestHostedProvisioning = createRequestHostedProvisioning({
-  store: mysqlHostedProvisioningRequestStore,
-  revisionValidator: createRevisionValidator(),
-});
 
 export interface EmployeeTurnDispatchResult {
   dispatched: boolean;
@@ -85,6 +70,12 @@ export async function dispatchEmployeeTurn(params: {
   turnId: string;
   modelRef?: string;
   modelFn?: ModelFn;
+  /**
+   * : 调用方显式提供的可选 Agent 控制面约束（§8.3）。
+   * 默认 null = 解析基础 Harness Route（§9.3 Employee Turn 热路径）。
+   * 测试可显式传 agent.id 以覆盖旧 Agent-specific 路由（E 阶段解绑后移除）。
+   */
+  agentConstraint?: string | null;
 }): Promise<EmployeeTurnDispatchResult> {
   const thread = await getThreadById(params.tenantId, params.threadId);
   if (!thread) {
@@ -94,66 +85,19 @@ export async function dispatchEmployeeTurn(params: {
   // ─── 热路径：查询正式 RouteResolver ──────────────────────────
   const routeOutcome = await resolveRoute({
     tenantId: params.tenantId,
-    agentId: thread.primaryAgentId,
+    // : 线程不再绑定 Agent（§8.3），默认按基础 Harness Route 解析（§9.3）。
+    // 调用方显式传 agentConstraint 时按 Agent 约束解析（测试过渡用，E 阶段移除）。
+    agentConstraint: params.agentConstraint ?? null,
     routeScopeKey: "default",
-    businessKey: { jobId: `hosted-provision:${thread.primaryAgentId}` },
+    businessKey: { jobId: `employee-turn:${thread.id}` },
     threadDefaultModelRef: thread.defaultModelRef,
   });
 
   if (routeOutcome.status !== "resolved") {
-    // : 无 Ready Route → 读取当前 AgentRevision，验证后幂等请求 Hosted Provisioning
-    const agentRevisionId = await loadCurrentAgentRevisionId(
-      params.tenantId,
-      thread.primaryAgentId,
-    );
-
-    if (!agentRevisionId) {
-      // : Agent 无当前 Revision — 无法创建供应请求，返回明确失败
-      logger.warn("[runtime] Agent 无当前 AgentRevision，无法请求 Hosted 供应", {
-        tenantId: params.tenantId,
-        agentId: thread.primaryAgentId,
-      });
-      return {
-        dispatched: false,
-        completion: Promise.resolve(),
-      };
-    }
-
-    const provisioningResult = await requestHostedProvisioning({
-      tenantId: params.tenantId,
-      agentId: thread.primaryAgentId,
-      agentRevisionId,
-      routeScopeKey: "default",
-    });
-
-    // : Revision 验证失败 — 返回明确失败而非创建无效请求
-    if (!("requestId" in provisioningResult)) {
-      logger.warn("[runtime] AgentRevision 验证失败，无法请求 Hosted 供应", {
-        tenantId: params.tenantId,
-        agentId: thread.primaryAgentId,
-        validationCode: provisioningResult.code,
-        validationReason: provisioningResult.reason,
-      });
-      return {
-        dispatched: false,
-        completion: Promise.resolve(),
-      };
-    }
-
-    logger.info("[runtime] Hosted Route 未就绪，已请求异步供应", {
-      tenantId: params.tenantId,
-      agentId: thread.primaryAgentId,
-      provisioningRequestId: provisioningResult.requestId,
-      provisioningState: provisioningResult.state,
-    });
-
-    return {
-      dispatched: false,
-      completion: Promise.resolve(),
-      provisioningRequestId: provisioningResult.requestId,
-      provisioningState: provisioningResult.state,
-      retryAfterMs: provisioningResult.retryAfterMs,
-    };
+    // : 线程不再绑定 Agent（§8.3）；无 Ready Route 时不再为某个 Agent 发起
+    // Hosted Provisioning（旧 thread.primaryAgentId 已移除）。返回未调度，
+    // 基础 Harness Route 的供应策略由后续阶段决定。
+    return { dispatched: false, completion: Promise.resolve() };
   }
 
   // ─── 有 Ready Route → 继续调度（不变） ──────────────────────
@@ -181,6 +125,7 @@ export async function dispatchEmployeeTurn(params: {
     tenantId: params.tenantId,
     turnId: params.turnId,
     selectedModelRef: params.modelRef,
+    agentConstraint: params.agentConstraint ?? null,
     runtimeClient: client,
     runtimeEndpointResolver: async (binding) => {
       // §24：下发 Binding 冻结的 Governance Revision（非 Tenant current），fail-closed。
@@ -242,17 +187,4 @@ export async function dispatchEmployeeTurn(params: {
     });
   });
   return { dispatched: true, completion };
-}
-
-/** 读取 Agent 当前 AgentRevision ID（用于 ProvisioningRequest）。 */
-async function loadCurrentAgentRevisionId(
-  tenantId: string,
-  agentId: string,
-): Promise<string | null> {
-  const [agent] = await db
-    .select({ currentRevisionId: agentTable.currentRevisionId })
-    .from(agentTable)
-    .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
-    .limit(1);
-  return agent?.currentRevisionId ?? null;
 }

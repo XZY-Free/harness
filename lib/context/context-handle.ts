@@ -28,8 +28,10 @@ export interface ContextHandleBinding {
   threadId: string;
   triggerItemId: string;
   userId: string;
-  agentId: string;
-  agentRevisionId: string;
+  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
+  agentId: string | null;
+  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
+  agentRevisionId: string | null;
   workspaceId: string | null;
   workspaceBindingId: string | null;
   policyRevisionId: string | null;
@@ -97,8 +99,8 @@ function decode(handle: string): ContextHandleBinding {
     typeof binding.threadId !== "string" ||
     typeof binding.triggerItemId !== "string" ||
     typeof binding.userId !== "string" ||
-    typeof binding.agentId !== "string" ||
-    typeof binding.agentRevisionId !== "string" ||
+    (binding.agentId !== null && typeof binding.agentId !== "string") ||
+    (binding.agentRevisionId !== null && typeof binding.agentRevisionId !== "string") ||
     typeof binding.nonce !== "string" ||
     typeof binding.issuedAt !== "number" ||
     typeof binding.expiresAt !== "number" ||
@@ -125,7 +127,8 @@ async function loadPersistedBinding(tenantId: string, invocationId: string) {
       threadId: invocationTable.threadId,
       triggerItemId: invocationTable.triggerItemId,
       userId: threadTable.ownerUserId,
-      agentId: threadTable.primaryAgentId,
+      // : 从已创建的执行链（ExecutionBinding → AgentRevision）反查；null = 基础 Harness Route。
+      agentId: agentRevisionTable.agentId,
       workspaceId: threadTable.defaultWorkspaceId,
       agentRevisionId: executionBindingTable.agentRevisionId,
       workspaceBindingId: executionBindingTable.workspaceBindingId,

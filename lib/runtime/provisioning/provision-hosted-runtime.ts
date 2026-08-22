@@ -10,7 +10,8 @@ export interface HostedRuntimeRoute {
   routeId: string;
   routeRevisionId: string;
   routeActivationId: string;
-  agentRevisionId: string;
+  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+  agentRevisionId: string | null;
   runtimeRevisionId: string;
   /** : Projection 版本号，用于精确 ID 验证。 */
   projectionVersionNo?: number | null;

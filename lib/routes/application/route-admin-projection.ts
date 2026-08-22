@@ -21,7 +21,8 @@ export interface AdminRouteProjectionInput {
   revision: {
     id: string;
     routeGroupId: string;
-    agentRevisionId: string;
+    /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+    agentRevisionId: string | null;
     runtimeRevisionId: string;
     policyRevisionId: string | null;
     trafficWeight: number;
@@ -40,7 +41,8 @@ export interface AdminRouteProjectionInput {
 export function projectAdminRouteSet(routeSet: {
   id: string;
   tenantId: string;
-  agentId: string;
+  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
+  agentId: string | null;
   routeScopeKey: string;
   routeScopeJson: unknown;
   versionNo: number;

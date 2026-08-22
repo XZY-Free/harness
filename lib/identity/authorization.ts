@@ -34,8 +34,8 @@ import { isServiceActionAllowed } from "@/lib/identity/workload-token";
 /** 授权检查请求：action_code + 目标资源。 */
 export interface ActionScopeRequest {
   actionCode: ActionCode;
-  /** 目标资源（type + id）。wildcard 绑定覆盖同 type 下所有 id。 */
-  resource: { type: ResourceScopeType; id: string };
+  /** 目标资源（type + id）。wildcard 绑定覆盖同 type 下所有 id；null = 基础 Harness RouteSet（无 Agent）。 */
+  resource: { type: ResourceScopeType; id: string | null };
 }
 
 /** 授权失败原因。 */

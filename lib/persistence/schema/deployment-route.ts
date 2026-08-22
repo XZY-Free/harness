@@ -59,7 +59,12 @@ export const deploymentRouteSetTable = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 })
       .notNull()
       .references(() => tenant.id),
-    agentId: varchar("agentId", { length: 36 }).notNull(),
+    /**
+     * 归属 Agent ID。
+     * null = 基础 Harness RouteSet（无 Agent 资产约束）；有值 = Agent RouteSet。
+     * 与 routeScopeKey 共同参与 UNIQUE(tenantId, agentId, routeScopeKey)。
+     */
+    agentId: varchar("agentId", { length: 36 }),
     routeScopeKey: varchar("routeScopeKey", { length: 128 }).notNull(),
     routeScopeJson: json("routeScopeJson").notNull(),
     versionNo: bigint("versionNo", { mode: "number", unsigned: true }).notNull().default(1),
@@ -108,7 +113,11 @@ export const deploymentRouteTable = mysqlTable(
       .references(() => deploymentRouteSetTable.id),
     /** : Route 稳定身份键 — 调用方显式指定，不再由 agentRevisionId+runtimeRevisionId 隐式推导。 */
     routeKey: varchar("routeKey", { length: 128 }).notNull(),
-    agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
+    /**
+     * 绑定的 AgentRevision ID。
+     * null = 基础 Harness Route（无 Agent 资产约束）；有值 = Agent Route。
+     */
+    agentRevisionId: varchar("agentRevisionId", { length: 36 }),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
     trafficWeight: int("trafficWeight").notNull(),
     priorityNo: int("priorityNo").notNull().default(0),

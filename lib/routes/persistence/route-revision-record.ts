@@ -22,7 +22,11 @@ export const routeRevision = mysqlTable(
     /** : Route 稳定身份键 — 派生冗余列，始终 = 对应 DeploymentRoute.routeKey。 */
     routeKey: varchar("routeKey", { length: 128 }).notNull(),
     revisionNo: bigint("revisionNo", { mode: "number", unsigned: true }).notNull(),
-    agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
+    /**
+     * 绑定的 AgentRevision ID。
+     * null = 基础 Harness Route（无 Agent 资产约束）；有值 = Agent Route。
+     */
+    agentRevisionId: varchar("agentRevisionId", { length: 36 }),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
     policyRevisionId: varchar("policyRevisionId", { length: 36 }),
     modelPolicyRevisionId: varchar("modelPolicyRevisionId", { length: 36 }),

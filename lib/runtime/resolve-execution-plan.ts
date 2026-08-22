@@ -74,10 +74,10 @@ export interface ResolvedExecutionPlan {
   routeResolution: RouteResolution;
   /** 路由解析原始 Outcome（含 candidateCount）。 */
   routeOutcome: RouteResolutionOutcome;
-  /** 冻结的 AgentRevision。 */
-  agentRevisionId: string;
-  /** 冻结的 AgentRevision 完整对象（供 Runtime dispatch 使用）。 */
-  agentRevision: AgentRevision;
+  /** 冻结的 AgentRevision。null = 基础 Harness Route（无 Agent 资产约束）。 */
+  agentRevisionId: string | null;
+  /** 冻结的 AgentRevision 完整对象（供 Runtime dispatch 使用）。null = 无 Agent 约束。 */
+  agentRevision: AgentRevision | null;
   /** 冻结的 RuntimeRevisionId。 */
   runtimeRevisionId: string;
   /** 提取的模型信息。 */
@@ -103,7 +103,11 @@ export type ExecutionPlan = ResolvedExecutionPlan | UnresolvedExecutionPlan;
 
 export interface ResolveExecutionPlanInput {
   tenantId: string;
-  agentId: string;
+  /**
+   * 调用方显式提供的可选 Agent 控制面约束（§8.3）。
+   * null = 无 Agent 约束，解析基础 Harness Route；concrete = 带 Agent 约束。
+   */
+  agentConstraint?: string | null;
   routeScopeKey: string;
   businessKey: { threadId?: string; jobId?: string };
   attributes?: Record<string, RouteResolutionAttribute>;
@@ -131,7 +135,7 @@ export async function resolveExecutionPlan(
   // 1. 路由解析
   const routeOutcome = await (input.routeResolver ?? defaultResolver)({
     tenantId: input.tenantId,
-    agentId: input.agentId,
+    agentConstraint: input.agentConstraint ?? null,
     routeScopeKey: input.routeScopeKey,
     businessKey: input.businessKey,
     attributes: input.attributes ?? {},
@@ -150,14 +154,19 @@ export async function resolveExecutionPlan(
 
   const routeResolution = routeOutcome.resolution;
 
-  // 2. 读取 AgentRevision（提取模型信息）
-  const agentRevision = await getRevisionById(routeResolution.agentRevisionId);
-  if (!agentRevision) {
+  // 2. 读取 AgentRevision（提取模型信息）。
+  // 基础 Harness Route（agentRevisionId === null）→ 不加载 AgentRevision，模型由
+  // 本次 / Thread 显式模型 → 平台默认模型决定（§9.2）。AgentRevision 模型策略仅在
+  // 存在 Agent 约束时进入优先级（§9.2）。
+  const agentRevisionId = routeResolution.agentRevisionId;
+  const agentRevision =
+    agentRevisionId !== null ? await getRevisionById(agentRevisionId) : null;
+  if (agentRevisionId !== null && !agentRevision) {
     return { resolved: false, reason: "agent_revision_not_found" };
   }
 
   const modelInfo = extractModelInfo(
-    agentRevision.modelPolicyJson,
+    agentRevision?.modelPolicyJson ?? null,
     input.threadDefaultModelRef ?? null,
     input.platformDefaultModelRef,
   );
@@ -166,7 +175,7 @@ export async function resolveExecutionPlan(
     resolved: true,
     routeResolution,
     routeOutcome,
-    agentRevisionId: routeResolution.agentRevisionId,
+    agentRevisionId,
     agentRevision,
     runtimeRevisionId: routeResolution.runtimeRevisionId,
     modelInfo,

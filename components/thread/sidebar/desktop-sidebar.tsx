@@ -31,7 +31,8 @@ import { useSidebar } from "./sidebar-context";
 interface SidebarThread {
   readonly id: string;
   readonly title: string | null;
-  readonly primaryAgentId: string;
+  /** G 阶段已移除 Agent 绑定，字段保留为可选以兼容旧布局。 */
+  readonly primaryAgentId?: string;
 }
 
 interface SidebarAgent {
@@ -337,7 +338,10 @@ function ThreadGroupList({
   // 系统兜底 agent（agentKey === "default"）≠ 用户主动选择：
   // 要求 Thread 必须绑主 Agent，新会话自动绑 default 兜底；
   // 设计语义上这类会话属"未选助手"，平铺顶部、不建分组。
-  const isUserChosenAgent = (agentId: string) => {
+  const isUserChosenAgent = (
+    agentId: string | undefined,
+  ): agentId is string => {
+    if (!agentId) return false;
     const a = agentMap.get(agentId);
     return !!a && a.agentKey !== "default";
   };
@@ -350,9 +354,11 @@ function ThreadGroupList({
   // 按 Agent 分组
   const groupMap = new Map<string, SidebarThread[]>();
   for (const t of grouped) {
-    const list = groupMap.get(t.primaryAgentId) ?? [];
+    const agentId = t.primaryAgentId;
+    if (!agentId) continue;
+    const list = groupMap.get(agentId) ?? [];
     list.push(t);
-    groupMap.set(t.primaryAgentId, list);
+    groupMap.set(agentId, list);
   }
 
   return (

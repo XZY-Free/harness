@@ -10,7 +10,8 @@ interface CmdkPanelProps {
   readonly threads: readonly {
     id: string;
     title: string | null;
-    primaryAgentId: string;
+    /** G 阶段已移除 Agent 绑定，字段保留为可选以兼容旧布局。 */
+    primaryAgentId?: string;
   }[];
   readonly agents: readonly {
     id: string;
@@ -130,7 +131,7 @@ export function CmdkPanel({
                 <div className="py-6 text-center text-sm text-muted-foreground">没有匹配的会话</div>
               ) : (
                 filteredThreads.slice(0, 9).map((thread, index) => {
-                  const agent = agentMap.get(thread.primaryAgentId);
+                  const agent = agentMap.get(thread.primaryAgentId ?? "");
                   const agentName = agent?.displayName ?? agent?.agentKey ?? "助手";
                   return (
                     <Command.Item

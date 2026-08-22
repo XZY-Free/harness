@@ -37,26 +37,11 @@ export function WebNewThreadPage() {
     );
   }
 
-  const agents =
-    shell?.agents.map((agent) => ({
-      id: agent.id,
-      agentKey: agent.agent_key,
-      displayName: agent.display_name,
-    })) ?? [];
-  if (agents.length === 0) {
-    return (
-      <main className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-        {error ?? "当前没有可用助手，无法创建会话。"}
-      </main>
-    );
-  }
-
+  // : 线程不再绑定 Agent（G 阶段移除），新会话不再需要可用助手选择。
   return (
     <NewThreadPage
-      agents={agents}
-      defaultAgentId={
-        agents.find((agent) => agent.agentKey === "default")?.id ?? agents[0]?.id ?? ""
-      }
+      agents={[]}
+      defaultAgentId=""
       error={error}
       onSubmit={async (submission) => {
         setError(null);
