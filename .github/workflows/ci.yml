@@ -9,29 +9,9 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        # 传给 mysql 容器的启动命令参数（附加到 entrypoint 后转发给 mysqld）。
-        # 不能用 options（那是 docker create 的 flag，--log-bin-trust-function-creators
-        # 不是 docker 合法 flag，会导致 exit 125 unknown flag）。
-        # log_bin_trust_function_creators=1：drizzle 迁移中的存储函数无需 SUPER 即可创建。
-        command: ["--log-bin-trust-function-creators=1"]
-        env:
-          MYSQL_ROOT_PASSWORD: test
-          MYSQL_DATABASE: snow_test
-          MYSQL_USER: test
-          MYSQL_PASSWORD: test
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
     env:
-      DATABASE_URL: mysql://test:test@127.0.0.1:3306/snow_test
+      # 高位 host 端口，避开共享 runner 上默认 3306 可能的占用。
+      DATABASE_URL: mysql://test:test@127.0.0.1:13306/snow_test
 
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +26,28 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+
+      # MySQL 用 step 内 docker run 启动而非 service：迁移含 CREATE TRIGGER，
+      # 在 binlog 开启时需要 log_bin_trust_function_creators=1（否则
+      # ER_BINLOG_CREATE_ROUTINE_NEED_SUPER, errno 1419）。该参数是 mysqld 参数，
+      # 不是 docker create flag——GitHub service 的 options（docker flag）与
+      # command（service 不支持该字段）都无法传递，因此改为 docker run。
+      - name: Start MySQL container
+        run: |
+          docker run -d --name mysql --rm \
+            -p 13306:3306 \
+            -e MYSQL_ROOT_PASSWORD=test -e MYSQL_DATABASE=snow_test \
+            -e MYSQL_USER=test -e MYSQL_PASSWORD=test \
+            mysql:8.0 --log-bin-trust-function-creators=1
+          for i in $(seq 1 60); do
+            if docker exec mysql mysqladmin ping -h 127.0.0.1 -utest -ptest >/dev/null 2>&1; then
+              echo "MySQL ready (attempt $i)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL 未在超时内就绪" >&2
+          exit 1
 
       - run: pnpm install --frozen-lockfile
 
@@ -67,7 +69,7 @@ jobs:
       - name: Empty MySQL migration
         run: pnpm db:migrate
         env:
-          DATABASE_URL: mysql://test:test@127.0.0.1:3306/snow_test
+          DATABASE_URL: mysql://test:test@127.0.0.1:13306/snow_test
 
       - name: Seed
         run: pnpm db:seed
