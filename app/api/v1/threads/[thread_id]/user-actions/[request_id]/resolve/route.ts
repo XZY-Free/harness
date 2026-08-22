@@ -20,7 +20,7 @@ import { getThreadById } from "@/lib/conversations/thread-queries";
  * - 校验 Idempotency-Key（必填）+ computeRequestHash → enforceIdempotency。
  * - 校验请求体（resolution: approve/deny/submit/cancel；input+submit 时 response_redacted 必填）。
  * - 校验 UserActionRequest 属于该 Thread + state=pending（否则 404 隐藏式）。
- * - 拒绝 purpose=handoff（必须走 /handoffs/{handoff_id}/resolve 专用路径）→ 422 BUSINESS_CONSTRAINT_VIOLATION。
+ * - 通用 resolve 处理 confirmation/auth/grant/input 类型（专题01 废弃 handoff 类型，purpose=handoff 不再有专用路径）。
  * - 调用 resolveGenericUserAction 事务内：
  *   - 原子 UPDATE UserActionRequest: pending → resolved
  *   - grant+approve 时创建 Grant + 回填 grant_id

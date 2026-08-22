@@ -413,40 +413,6 @@ export interface ClientCatalogListResponse {
   readonly catalog_revision: number;
 }
 
-// ─── Handoff（S10-W04） ────────────────────────────────────
-
-/** POST /api/v1/threads/{thread_id}/request-handoff 响应体（200）。 */
-export interface ClientHandoffRequestResponse {
-  readonly thread_id: string;
-  readonly request_id: string;
-  readonly item_id: string;
-  readonly invocation_id: string;
-  readonly previous_agent_id: string;
-  readonly target_agent_id: string;
-  readonly target_agent_display_name: string;
-  readonly purpose: "handoff";
-  readonly request_type: "confirmation";
-  readonly request_state: "pending";
-  readonly turn_id: string;
-  readonly event_ids: readonly string[];
-}
-
-/** POST /api/v1/threads/{thread_id}/handoffs/{handoff_id}/resolve 响应体（200）。 */
-export interface ClientHandoffResolveResponse {
-  readonly thread_id: string;
-  readonly request_id: string;
-  readonly resolution: "approve" | "deny";
-  readonly request_state: "resolved";
-  readonly handed_off: boolean;
-  readonly previous_agent_id: string;
-  readonly primary_agent_id: string;
-  readonly invocation_id: string;
-  readonly invocation_state: string;
-  readonly resume_command_id: string;
-  readonly resume_command_state: string;
-  readonly event_ids: readonly string[];
-}
-
 // ─── UserAction 通用解析（S10-W05） ────────────────────────
 
 /** POST /api/v1/threads/{thread_id}/user-actions/{request_id}/resolve 响应体（200）。 */

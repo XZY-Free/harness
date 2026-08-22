@@ -7,15 +7,16 @@
  *
  * content 结构（按 request_type）：
  * - 通用字段：{ request_type, purpose?, reason?, impact?, state?, expires_at?, title?, summary? }
- * - confirmation（purpose=handoff）：{ target_agent_id?, target_agent_display_name?, previous_agent_id? }
+ * - confirmation：{ target_path?, line_additions?, line_deletions?, diff? }
  * - auth：{ scope?, auth_url? }
  * - grant：{ scope?, target_tool?, credential_ref_id? }
  * - input：{ input_schema? }
  *
  * 渲染规则（S10-W05）：
- * - confirmation/auth/input 三类使用统一卡片，展示请求方、原因、范围、有效期和影响。
+ * - confirmation/auth/grant/input 四类使用统一卡片，展示请求方、原因、范围、有效期和影响。
  * - 高影响操作展示目标对象与预计副作用；超时或拒绝后不伪装成执行成功。
- * - handoff（confirmation+purpose=handoff）走 useHandoff；其他类型走 useUserAction。
+ * - 专题01：废弃 handoff（「把会话交接给主 Agent」语义随 Agent 非前置移除），
+ *   不再有 handoff 专属分支；一律走 useUserAction。
  * - auth 类型 :resolve 接口仅接受 cancel；approve 由可信 callback 写入，UI 显示「去授权」链接。
  * - input 类型 submit 时收集用户输入并作为 responseRedactedJson 提交。
  * - 超时（state=expired 或 expires_at 已过）不显示操作按钮，显示「已超时」。
@@ -24,7 +25,6 @@
  */
 "use client";
 
-import { useHandoff } from "@/components/hooks/use-handoff";
 import { useUserAction } from "@/components/hooks/use-user-action";
 import type { ClientItem } from "@/lib/client/types";
 import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
@@ -43,9 +43,6 @@ interface UserActionItemProps {
 interface UserActionContent {
   request_type?: string;
   purpose?: string;
-  target_agent_id?: string;
-  target_agent_display_name?: string;
-  previous_agent_id?: string;
   reason?: string;
   impact?: string;
   /** 请求状态：pending | resolved | expired（由 user_action.resolved / 平台过期任务写入）。 */
@@ -156,12 +153,9 @@ function extractInputFields(schema: Record<string, unknown> | undefined): InputF
 export function UserActionItem({ threadId, item }: UserActionItemProps) {
   const content = item.content as UserActionContent;
 
-  // 两个 hook 都必须无条件调用（React hooks 规则）
-  // handoff hook 仅在 purpose=handoff 时实际使用；userAction hook 用于其他类型。
-  const handoffHook = useHandoff({ threadId });
+  // userAction hook 处理 confirmation/auth/grant/input 类型。
+  // 专题01 废弃 handoff（「把会话交接给主 Agent」语义随 Agent 非前置移除），不再有 handoff 专属分支。
   const userActionHook = useUserAction({ threadId });
-
-  const isHandoff = content.purpose === "handoff" && content.request_type === "confirmation";
 
   // 请求状态：优先用 content.state，其次用 item.item_state 推断
   // - content.state=pending|resolved|expired（由 user_action.resolved 或平台过期任务写入）
@@ -175,23 +169,18 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
     content.state === "resolved" || (!isRequestPending && !isExpired && !isItemPending);
 
   // 最近一次解析结果（用于 UI 显示 "已同意/已拒绝/已提交/已取消"）
-  // 从对应的 hook 取 lastResolve，按 item.id 匹配
-  const handoffLastResolve =
-    handoffHook.lastResolve?.request_id === item.id ? handoffHook.lastResolve.resolution : null;
-  const userActionLastResolve =
+  // 从 userAction hook 取 lastResolve，按 item.id 匹配
+  const resolvedResolution =
     userActionHook.lastResolve?.request_id === item.id
       ? userActionHook.lastResolve.resolution
       : null;
-  const resolvedResolution = isHandoff ? handoffLastResolve : userActionLastResolve;
 
-  // 当前活跃 hook（用于 busy/error/clearError）
-  const activeHook = isHandoff ? handoffHook : userActionHook;
-  const busy = activeHook.busy;
-  const error = activeHook.error;
-  const clearError = activeHook.clearError;
+  const busy = userActionHook.busy;
+  const error = userActionHook.error;
+  const clearError = userActionHook.clearError;
 
   const requestTypeLabel = getRequestTypeLabel(content.request_type);
-  const displayTitle = content.title ?? (isHandoff ? "主 Agent 交接请求" : requestTypeLabel);
+  const displayTitle = content.title ?? requestTypeLabel;
   const displayReason = content.summary ?? content.reason ?? content.purpose ?? "需要你的操作";
 
   // input 类型的字段
@@ -209,12 +198,6 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
     typeof content.diff === "string" &&
     content.diff.length > 0;
   const isDiffResolved = isDiffConfirmation && isResolved;
-
-  const handleHandoffResolve = (resolution: "approve" | "deny") => {
-    if (busy || !showActions) return;
-    clearError();
-    void handoffHook.resolve(item.id, resolution);
-  };
 
   const handleUserActionResolve = (
     resolution: UserActionResolution,
@@ -281,29 +264,6 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
   // 渲染操作按钮区
   const renderActions = () => {
     if (!showActions) return null;
-
-    if (isHandoff) {
-      return (
-        <div className="mt-3 flex gap-2">
-          <button
-            type="button"
-            onClick={() => handleHandoffResolve("approve")}
-            disabled={busy}
-            className="flex-1 rounded-md bg-primary px-3 py-1.5 text-primary-foreground text-xs transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busy ? "处理中…" : "同意交接"}
-          </button>
-          <button
-            type="button"
-            onClick={() => handleHandoffResolve("deny")}
-            disabled={busy}
-            className="flex-1 rounded-md border border-border px-3 py-1.5 text-muted-foreground text-xs transition hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busy ? "处理中…" : "拒绝"}
-          </button>
-        </div>
-      );
-    }
 
     switch (content.request_type) {
       case "confirmation":
@@ -519,11 +479,6 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
           <div className="min-w-0 flex-1">
             <div className="font-medium text-sm text-foreground">{displayTitle}</div>
             <div className="mt-0.5 text-xs text-muted-foreground">{displayReason}</div>
-            {isHandoff && content.target_agent_display_name && (
-              <div className="mt-1 text-2xs text-foreground">
-                目标 Agent：<span className="font-medium">{content.target_agent_display_name}</span>
-              </div>
-            )}
             {content.target_tool && (
               <div className="mt-1 text-2xs text-foreground">
                 目标工具：<span className="font-medium">{content.target_tool}</span>
@@ -592,11 +547,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
         {/* 解析成功提示 */}
         {resolvedResolution && (
           <div className="mx-[17px] mb-3 rounded-[var(--radius-sm)] bg-success/10 px-2 py-1 text-2xs text-success">
-            {isHandoff
-              ? resolvedResolution === "approve"
-                ? "已同意交接"
-                : "已拒绝交接"
-              : getResolutionLabel(resolvedResolution)}
+            {getResolutionLabel(resolvedResolution)}
           </div>
         )}
 

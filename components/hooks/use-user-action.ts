@@ -11,7 +11,7 @@
  *   （POST /api/v1/threads/{thread_id}/user-actions/{request_id}:resolve）。
  * - 支持 4 种 resolution：approve / deny / submit / cancel。
  * - input 类型 submit 时通过 responseRedactedJson 传入脱敏响应。
- * - 不处理 handoff（handoff 由 useHandoff 处理）；后端会拒绝 purpose=handoff 的请求。
+ * - 专题01 废弃 handoff：不再有 handoff 类型，通用 resolve 只处理 confirmation/auth/grant/input。
  * - 错误转化为 ClientVisibleError。
  *
  * 关键不变量：

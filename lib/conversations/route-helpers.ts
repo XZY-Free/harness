@@ -1,8 +1,5 @@
 import {
   ForkSourceTurnMismatchError,
-  HandoffAlreadyResolvedError,
-  HandoffValidationError,
-  HandoffVersionConflictError,
   ItemSupersedeCycleError,
   PendingInputNotFoundError,
   PendingInputNotPendingError,
@@ -265,24 +262,6 @@ export function conversationErrorToResponse(error: unknown, requestId: string): 
         source_turn_id: error.sourceTurnId,
       },
     });
-  }
-  if (error instanceof HandoffValidationError) {
-    return apiError("BUSINESS_CONSTRAINT_VIOLATION", error.message, {
-      requestId,
-      details: { reason: error.reason, code: error.code ?? "RESOLUTION_NOT_ALLOWED" },
-    });
-  }
-  if (error instanceof HandoffAlreadyResolvedError) {
-    return apiError("OPERATION_PAYLOAD_CONFLICT", error.message, {
-      requestId,
-      details: { request_id: error.requestId, current_state: error.currentState },
-    });
-  }
-  if (error instanceof HandoffVersionConflictError) {
-    return etagMismatchTable(
-      requestId,
-      `Handoff 版本冲突：期望 ${error.expected}，实际 ${error.actual}`,
-    );
   }
   // ─── UserAction 域错误（S10-W05） ──────────────────────
   if (error instanceof UserActionNotFoundError) {

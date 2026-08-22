@@ -15,7 +15,7 @@
  * - 加载 Thread 详情（useThreadDetail）+ Item 投影（useThread）。
  * - SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）。
  * - 错误展示（visibleError → ErrorCard）。
- * - W3-4：输入区集成 ＋菜单、助手选择器、模型选择器。
+ * - W3-4：输入区集成 ＋菜单、模型选择器（专题01：既有 Thread 不再有 Agent 选择器，切换主 Agent 的 handoff 语义已废弃）。
  * - 专题01 §35：不再绑定主 Agent（primary_agent_id 已移除），无 Agent 时输入区照常可用。
  * - W4-1：顶部 Steer/Stop 横条与时间线上方的待办队列移入 ThreadInput 内部，
  *   停止按钮复用 codex 形态（输入框右下圆钮变 ■），待办队列复用紧凑单行条。
@@ -39,12 +39,10 @@
 import { useThread } from "@/components/hooks/use-thread";
 import { useThreadDetail } from "@/components/hooks/use-thread-detail";
 import { useThreadSettings } from "@/components/hooks/use-thread-settings";
-import { apiFetch } from "@/lib/api-fetch";
 import { cn } from "@/lib/utils";
 import { PanelRight } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { DesktopWorkbench } from "../desktop/desktop-workbench";
-import type { AgentOption } from "./input/input-popovers";
 import { useOptionalSidebar } from "./sidebar/sidebar-context";
 import { ThreadHeader, deriveTaskStatus } from "./thread-header";
 import { ThreadInput } from "./thread-input";
@@ -57,8 +55,6 @@ interface ThreadPageProps {
   readonly variant?: "web" | "desktop";
   /** 当前登录员工的内部 id，仅 Desktop Browser 使用。 */
   readonly viewerId?: string;
-  /** Desktop Shell 已加载的真实助手列表。 */
-  readonly availableAgents?: readonly AgentOption[];
   /** 平台默认模型（shell.default_model_ref）；用于既有 Thread 未配模型时的即时展示。 */
   readonly defaultModelRef?: string;
 }
@@ -67,7 +63,6 @@ export function ThreadPage({
   threadId,
   variant = "web",
   viewerId,
-  availableAgents,
   defaultModelRef,
 }: ThreadPageProps) {
   const sidebar = useOptionalSidebar();
@@ -108,36 +103,6 @@ export function ThreadPage({
       });
     },
     [thread, patchSettings, refresh],
-  );
-
-  // W3-4：主 Agent 变更 → 调用 /request-handoff 触发 Handoff 确认流程。
-  const handleAgentChange = useCallback(
-    async (agentId: string) => {
-      if (!thread || !latestTurn) return;
-      const invocationId = latestTurn.active_invocation_id ?? latestTurn.latest_invocation_id ?? "";
-      try {
-        const resp = await apiFetch(`/api/v1/threads/${threadId}/request-handoff`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            invocation_id: invocationId,
-            turn_id: latestTurn.id,
-            target_agent_id: agentId,
-            reason: "员工切换助手",
-          }),
-        });
-        if (!resp.ok) {
-          // 错误静默处理，由 thread 刷新后展示 user-action
-          console.error("Handoff request failed", await resp.text());
-          return;
-        }
-        void refresh();
-      } catch (err) {
-        console.error("Handoff request error", err);
-      }
-    },
-    [threadId, thread, latestTurn, refresh],
   );
 
   const handleLocateItem = useCallback((itemId: string) => {
@@ -276,12 +241,6 @@ export function ThreadPage({
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <h1 className="min-w-0 flex-1 truncate font-semibold text-base text-foreground">新会话</h1>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <span className="text-foreground-subtle">Agent</span>
-            <span className="text-xs text-foreground">助手</span>
-          </span>
-        </div>
       </div>
     </header>
   );
@@ -294,9 +253,7 @@ export function ThreadPage({
         threadId={threadId}
         latestTurn={latestTurn}
         thread={thread}
-        availableAgents={availableAgents}
         defaultModelRef={defaultModelRef}
-        onAgentChange={handleAgentChange}
         onModelChange={handleModelChange}
         settingsBusy={settingsBusy}
       />

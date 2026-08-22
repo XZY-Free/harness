@@ -101,7 +101,6 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
             <ThreadPage
               key={activeThreadId}
               threadId={activeThreadId}
-              availableAgents={agents}
               defaultModelRef={shell.default_model_ref}
             />
           )}

@@ -224,13 +224,15 @@ export function ThreadInput({
           <div className="mt-2 flex min-w-0 items-center gap-1">
             <PlusMenuPopover threadId={threadId} />
 
-            <AgentSelectorPopover
-              // 专题01 §35：Thread 不再绑主 Agent（primary_agent_id 已移除）；
-              // 未显式选择时为 null（不选中），Agent 目录为空时选择器空态不阻断发送。
-              currentAgentId={currentAgentId ?? null}
-              onChange={onAgentChange}
-              agentOptions={availableAgents}
-            />
+            {/* 专题01：Agent 选择器仅在建会话（new-thread 提供 onAgentChange）渲染；
+                既有 Thread 不再绑主 Agent（primary_agent_id 已移除），选择无 handoff 动作，故不渲染。 */}
+            {onAgentChange && (
+              <AgentSelectorPopover
+                currentAgentId={currentAgentId ?? null}
+                onChange={onAgentChange}
+                agentOptions={availableAgents}
+              />
+            )}
 
             <div className="flex-1" />
 

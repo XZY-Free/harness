@@ -15,18 +15,8 @@ vi.mock("@/components/hooks/use-thread-settings", () => ({
 }));
 // 断言落在 ThreadPage → ThreadInput 边界：用受控 mock 捕获传入 props。
 vi.mock("@/components/thread/thread-input", () => ({
-  ThreadInput: ({
-    defaultModelRef,
-    availableAgents,
-  }: {
-    readonly defaultModelRef?: string;
-    readonly availableAgents?: readonly { id: string }[];
-  }) => (
-    <div
-      data-testid="thread-input"
-      data-default-model-ref={defaultModelRef ?? ""}
-      data-available-agents={availableAgents?.map((agent) => agent.id).join(",") ?? ""}
-    />
+  ThreadInput: ({ defaultModelRef }: { readonly defaultModelRef?: string }) => (
+    <div data-testid="thread-input" data-default-model-ref={defaultModelRef ?? ""} />
   ),
 }));
 // 其余非目标子组件与数据 hooks 隔离，仅保证两个渲染分支能到达 ThreadInput。
@@ -124,15 +114,11 @@ describe("ThreadPage 首次加载稳定骨架（不整页替换）", () => {
     });
   };
 
-  it("Web 首次加载仍渲染 ThreadInput，defaultModelRef/availableAgents 透传", () => {
+  it("Web 首次加载仍渲染 ThreadInput 并把 defaultModelRef 透传", () => {
     setFirstLoad();
-    const agents = [{ id: "a1", agentKey: "default", displayName: "助手" }];
-    render(
-      <ThreadPage threadId="t-1" defaultModelRef="deepseek-v4-flash" availableAgents={agents} />,
-    );
+    render(<ThreadPage threadId="t-1" defaultModelRef="deepseek-v4-flash" />);
     const input = screen.getByTestId("thread-input");
     expect(input.dataset.defaultModelRef).toBe("deepseek-v4-flash");
-    expect(input.dataset.availableAgents).toBe("a1");
   });
 
   it("Web 首次加载 loading 只在消息区，无旧整页 spinner 替换", () => {
