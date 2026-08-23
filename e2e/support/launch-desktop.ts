@@ -57,6 +57,21 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
     },
   });
 
+  // ── E2E 诊断：转发主进程 stdout/stderr，监听窗口关闭，便于 CI 定位
+  // firstWindow "Target page, context or browser has been closed" 的真实原因
+  // （Electron 主进程 stderr / 渲染进程崩溃不转发时，CI 日志只有关闭，无线索）。
+  const mainProc = app.process();
+  mainProc.stdout?.on("data", (d: Buffer) => process.stdout.write(`[e2e][desktop][main:out] ${d}`));
+  mainProc.stderr?.on("data", (d: Buffer) => process.stderr.write(`[e2e][desktop][main:err] ${d}`));
+  app.on("window", (win) => {
+    win.on("close", () => console.log("[e2e][desktop] window close 事件触发"));
+  });
+  app.on("console", (msg) => {
+    if (msg.type() === "error" || msg.type() === "warning") {
+      console.log(`[e2e][desktop][main:console] ${msg.type()}: ${msg.text()}`);
+    }
+  });
+
   return {
     app,
     async dispose() {
