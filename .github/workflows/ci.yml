@@ -89,8 +89,13 @@ jobs:
         run: node node_modules/electron/install.js
 
       # Electron E2E 需要 X server（Desktop / Cross-client 用例真启动 Electron）。
-      - name: Install Xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+      # gnome-keyring + dbus-x11 提供 DBus secret service：CI Linux 无桌面 secret
+      # service 时，Electron safeStorage.isEncryptionAvailable() 为 false，
+      # 主进程 saveDeviceIdentity 的 keychain.set 抛 KEYCHAIN_ERROR 拒绝启动
+      # （Desktop E2E firstWindow closed）。--password-store=basic 不影响 Electron
+      # safeStorage（libsecret 后端），故 CI 显式装 gnome-keyring。
+      - name: Install Xvfb and gnome-keyring
+        run: sudo apt-get update && sudo apt-get install -y xvfb gnome-keyring dbus-x11
 
       - name: Unit and MySQL integration tests
         run: pnpm test
@@ -129,21 +134,37 @@ jobs:
       # Electron 主进程冒烟：直接启动打包主进程 bundle，捕获主进程 stderr，定位
       # Desktop E2E firstWindow closed 的真实根因（主进程在窗口创建前崩溃）。候选：
       # safeStorage/keychain 在 Linux 无 secret service 时 set 抛 KEYCHAIN_ERROR。
+      # Electron 主进程冒烟：在 gnome-keyring secret service 下直接启动打包主进程，
+      # 确认 safeStorage 可用、主进程不再因 keychain_error 拒绝启动（用于根因回归确认）。
       - name: Electron main-process smoke
-        run: |
-          set +e
-          timeout 25 xvfb-run -a node_modules/electron/dist/electron desktop/package-app \
-            --no-sandbox --password-store=basic \
-            --user-data-dir="$(mktemp -d)" 2>&1 | head -60
-          echo "MAIN_EXIT=${PIPESTATUS[0]}"
+        run: >-
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock --replace --components=secrets >/dev/null 2>&1 &
+            sleep 2
+            set +e
+            timeout 25 xvfb-run -a node_modules/electron/dist/electron desktop/package-app
+              --no-sandbox --password-store=basic --user-data-dir="$(mktemp -d)" 2>&1 | head -40
+            echo "MAIN_EXIT=${PIPESTATUS[0]}"
+          '
 
       # §20.5：真启动 Electron，验证 Desktop 走同一 Conversation API 与正式 Binding。
+      # 在 gnome-keyring secret service 下运行，使 Electron safeStorage 可用。
       - name: Desktop E2E
-        run: xvfb-run -a pnpm exec playwright test e2e/desktop-execution-chain.spec.ts
+        run: >-
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock --replace --components=secrets >/dev/null 2>&1 &
+            sleep 2
+            xvfb-run -a pnpm exec playwright test e2e/desktop-execution-chain.spec.ts
+          '
 
       # §20.6：Web 与 Desktop 共用同一 Thread 与同一套控制面事实。
       - name: Cross-client E2E
-        run: xvfb-run -a pnpm exec playwright test e2e/cross-client.spec.ts
+        run: >-
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock --replace --components=secrets >/dev/null 2>&1 &
+            sleep 2
+            xvfb-run -a pnpm exec playwright test e2e/cross-client.spec.ts
+          '
 
       - name: Production Web build
         run: pnpm build:prod
