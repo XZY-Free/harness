@@ -80,6 +80,14 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 
+      # Electron 二进制下载：pnpm 10.32 在真 workspace 下对 electron 的 build script
+      # 判定失效——allowlist(onlyBuiltDependencies)/pnpm rebuild/dangerouslyAllowAllBuilds
+      # 均不生效（esbuild 因 pnpm 内置放行仍运行），导致 electron 的 dist/electron 未下载，
+      # ipc-handlers.test.ts 报 "Electron failed to install correctly"。直接运行 electron 的
+      # install.js（@electron/get）显式下载二进制，绕开 pnpm 判定。
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
+
       # Electron E2E 需要 X server（Desktop / Cross-client 用例真启动 Electron）。
       - name: Install Xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
