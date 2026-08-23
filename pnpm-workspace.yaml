@@ -1,9 +1,13 @@
-allowBuilds:
-  '@biomejs/biome': true
-  cpu-features: true
-  electron: true
-  esbuild: true
-  protobufjs: true
-  sharp: true
-  ssh2: true
-  tesseract.js: true
+# pnpm 10 标准字段：允许这些依赖运行 postinstall（构建）脚本。
+# 此前误用 allowBuilds，pnpm 不识别 → CI fresh install 忽略 electron 等
+# postinstall，导致 electron 二进制（dist/electron）未下载，desktop 测试
+# 报 "Electron failed to install correctly"。
+onlyBuiltDependencies:
+  - '@biomejs/biome'
+  - cpu-features
+  - electron
+  - esbuild
+  - protobufjs
+  - sharp
+  - ssh2
+  - tesseract.js
