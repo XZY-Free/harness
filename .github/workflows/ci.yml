@@ -126,6 +126,17 @@ jobs:
           ldd node_modules/electron/dist/electron | grep "not found" || echo "LDD-OK: Electron 共享库已满足"
           timeout 15 xvfb-run -a node_modules/electron/dist/electron --no-sandbox --version
 
+      # Electron 主进程冒烟：直接启动打包主进程 bundle，捕获主进程 stderr，定位
+      # Desktop E2E firstWindow closed 的真实根因（主进程在窗口创建前崩溃）。候选：
+      # safeStorage/keychain 在 Linux 无 secret service 时 set 抛 KEYCHAIN_ERROR。
+      - name: Electron main-process smoke
+        run: |
+          set +e
+          timeout 25 xvfb-run -a node_modules/electron/dist/electron desktop/package-app \
+            --no-sandbox --password-store=basic \
+            --user-data-dir="$(mktemp -d)" 2>&1 | head -60
+          echo "MAIN_EXIT=${PIPESTATUS[0]}"
+
       # §20.5：真启动 Electron，验证 Desktop 走同一 Conversation API 与正式 Binding。
       - name: Desktop E2E
         run: xvfb-run -a pnpm exec playwright test e2e/desktop-execution-chain.spec.ts
