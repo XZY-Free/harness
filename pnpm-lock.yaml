@@ -3,6 +3,15 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+  onlyBuiltDependencies:
+    - '@biomejs/biome'
+    - cpu-features
+    - electron
+    - esbuild
+    - protobufjs
+    - sharp
+    - ssh2
+    - tesseract.js
 
 importers:
 
