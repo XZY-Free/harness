@@ -63,7 +63,13 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
   const mainProc = app.process();
   mainProc.stdout?.on("data", (d: Buffer) => process.stdout.write(`[e2e][desktop][main:out] ${d}`));
   mainProc.stderr?.on("data", (d: Buffer) => process.stderr.write(`[e2e][desktop][main:err] ${d}`));
+  // launch() 返回时的即时快照：窗口是否已创建 / 主进程是否已退出。firstWindow
+  // 报 "browser has been closed" 时，windows()=0 或 exitCode 非 null 即为主进程退出。
+  console.log(
+    `[e2e][desktop] launch 返回：windows=${app.windows().length} processExit=${mainProc.exitCode ?? "running"}`,
+  );
   app.on("window", (win) => {
+    console.log(`[e2e][desktop] window 事件触发，pages=${app.windows().length}`);
     win.on("close", () => console.log("[e2e][desktop] window close 事件触发"));
   });
   app.on("console", (msg) => {
@@ -71,6 +77,7 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
       console.log(`[e2e][desktop][main:console] ${msg.type()}: ${msg.text()}`);
     }
   });
+  app.on("close", () => console.log("[e2e][desktop] electron application 关闭"));
 
   return {
     app,
