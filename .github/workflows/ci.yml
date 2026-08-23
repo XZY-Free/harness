@@ -117,17 +117,14 @@ jobs:
       - name: Desktop smoke
         run: pnpm vitest run desktop/main/local-renderer-server.test.ts
 
-      # Electron 二进制依赖：`playwright install --with-deps chromium` 只装 Chromium 的
-      # 系统图形库，未覆盖 Electron 所需全部共享库，CI Linux 上 Electron 启动会失败
-      # （本地 mac 同 spec 通过，故为 CI 环境缺库）。ubuntu-latest 现为 Ubuntu 24.04，
-      # libasound2 等 t64 迁移包名已改名，手写 apt 清单不可靠；改用 Playwright 的
-      # `install --with-deps electron`，由 Playwright 维护跨 Ubuntu 版本的依赖映射自动装齐。
-      - name: Install Electron system dependencies
-        run: pnpm exec playwright install --with-deps electron
-      - name: Diagnose Electron shared libraries
+      # Electron 二进制诊断：playwright 的 install target 不含 electron
+      # （`playwright install electron` 非法，报 Invalid installation targets），Electron
+      # 二进制由 npm 包 install.js 下载、系统图形库由前面 `--with-deps chromium` 提供。
+      # 用 ldd 确认共享库完整，--version 冒烟确认二进制可执行，定位 Desktop E2E 启动失败。
+      - name: Diagnose Electron binary
         run: |
-          ldd node_modules/electron/dist/electron | grep -i "not found" \
-            || echo "OK: Electron 全部共享库已满足"
+          ldd node_modules/electron/dist/electron | grep "not found" || echo "LDD-OK: Electron 共享库已满足"
+          timeout 15 xvfb-run -a node_modules/electron/dist/electron --no-sandbox --version
 
       # §20.5：真启动 Electron，验证 Desktop 走同一 Conversation API 与正式 Binding。
       - name: Desktop E2E
