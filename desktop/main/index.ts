@@ -9,7 +9,7 @@
  * - 生产环境启动崩溃报告（crashReporter），开发环境不启动。
  * - 注册 IPC handler（白名单 channel）。
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { BrowserWindow, Menu, app, crashReporter, ipcMain } from "electron";
@@ -143,6 +143,21 @@ function focusExistingWindow(): void {
 }
 
 /**
+ * E2E 诊断：主进程关键启动日志写入 SNOW_E2E_LOG_FILE 指向的文件。
+ * 仅当 env 设置时写入（E2E 场景），供 launch-desktop.ts 在 launch 返回后
+ * 读取，定位 CI 下主进程静默退出 / 窗口未创建的真实原因。生产不设置不受影响。
+ */
+function logToE2EFile(msg: string): void {
+  const target = process.env.SNOW_E2E_LOG_FILE;
+  if (!target) return;
+  try {
+    writeFileSync(target, `${new Date().toISOString()} ${msg}\n`, { flag: "a" });
+  } catch {
+    // 日志写入失败不阻断主进程。
+  }
+}
+
+/**
  * 应用主入口。
  */
 async function main(): Promise<void> {
@@ -159,6 +174,7 @@ async function main(): Promise<void> {
   const gotLock =
     process.env.SNOW_E2E_DISABLE_SINGLE_INSTANCE === "1" || app.requestSingleInstanceLock();
   if (!gotLock) {
+    logToE2EFile("single-instance lock held by another instance -> quit");
     app.quit();
     return;
   }
@@ -415,6 +431,7 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   // 主进程启动失败时记录并退出（不暴露敏感栈到 renderer）
+  logToE2EFile(`main() failed: ${String(err)}`);
   console.error("[snowharness:desktop] 主进程启动失败:", err);
   app.quit();
 });

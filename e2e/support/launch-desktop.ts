@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 /**
  * Desktop E2E 共享启动器。
  *
@@ -58,8 +58,19 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
       // 否则多次 launch 共享锁时后续实例静默 app.quit()，firstWindow 报
       // "Target page, context or browser has been closed"。
       SNOW_E2E_DISABLE_SINGLE_INSTANCE: "1",
+      // 主进程把关键启动日志（单实例锁结果 / main() 失败）写入该文件，
+      // launch 返回后读取，定位 CI 下窗口未创建的真实原因。
+      SNOW_E2E_LOG_FILE: join(userDataDir, "e2e-main.log"),
     },
   });
+
+  // launch 返回后读取主进程写入的启动日志（单实例锁 / main() 失败原因）。
+  try {
+    const mainLog = readFileSync(join(userDataDir, "e2e-main.log"), "utf8").trim();
+    if (mainLog) console.log(`[e2e][desktop] 主进程日志:\n${mainLog}`);
+  } catch {
+    // 无日志文件则跳过。
+  }
 
   // ── E2E 诊断：转发主进程 stdout/stderr，监听窗口关闭，便于 CI 定位
   // firstWindow "Target page, context or browser has been closed" 的真实原因
