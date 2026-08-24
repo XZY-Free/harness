@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "SnowHarness API",
-    "version": "11.0.0",
+    "version": "1.0.0",
     "description": "由 规范文档生成。文档参数表和示例是生成输入，生成文件禁止手改。"
   },
   "servers": [

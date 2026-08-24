@@ -16,6 +16,7 @@ DOCS_ROOT = REPO_ROOT / "docs" / "architecture"
 CONTRACTS_ROOT = REPO_ROOT / "docs" / "contracts"
 CONTRACT_PATH = CONTRACTS_ROOT / "openapi.json"
 ERROR_CATALOG_PATH = CONTRACTS_ROOT / "error-codes.json"
+MANIFEST_PATH = CONTRACTS_ROOT / "contract-manifest.json"
 DOC_GLOBS = (
     "api-and-events.md",
     "capability-and-collaboration-api.md",
@@ -24,6 +25,28 @@ DOC_GLOBS = (
 )
 HTTP_LINE = re.compile(r"^`(GET|POST|PUT|PATCH|DELETE) ([^`]+)`$")
 HEADING = re.compile(r"^###\s+(.+)$")
+SEMVER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+
+
+def load_api_version() -> str:
+    """读取 OpenAPI API 版本的唯一来源：contract-manifest.json 顶层 api_version。
+
+    缺失、非字符串或非法 SemVer（x.y.z）时 fail-closed，绝不回退到任何
+    硬编码版本，避免生成产物与唯一来源脱钩。
+    """
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    version = manifest.get("api_version")
+    if not isinstance(version, str) or not version.strip():
+        raise SystemExit(
+            "contract-manifest.json 缺少顶层 api_version；"
+            "OpenAPI info.version 必须来自该单一来源"
+        )
+    version = version.strip()
+    if not SEMVER_RE.match(version):
+        raise SystemExit(
+            f"contract-manifest.json api_version 必须是 x.y.z SemVer，得到：{version!r}"
+        )
+    return version
 
 
 def slug(text: str) -> str:
@@ -438,7 +461,7 @@ def build_contract() -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {
             "title": "SnowHarness API",
-            "version": "11.0.0",
+            "version": load_api_version(),
             "description": "由 规范文档生成。文档参数表和示例是生成输入，生成文件禁止手改。",
         },
         "servers": [
