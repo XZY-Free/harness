@@ -21,8 +21,8 @@
  * UNIQUE(invocationId, leaseEpoch)）。
  */
 import { randomUUID } from "node:crypto";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import { tenant } from "@/lib/persistence/schema/identity";
-import { invocationTable } from "@/lib/persistence/schema/runtime";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
   bigint,

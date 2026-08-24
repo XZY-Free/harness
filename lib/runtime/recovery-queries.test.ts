@@ -40,9 +40,9 @@ import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
-import type { RuntimeSessionBinding } from "@/lib/persistence/schema/runtime";
-import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/schema/runtime";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
+import type { RuntimeSessionBinding } from "@/lib/persistence/schema/executions";
+import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/schema/executions";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,

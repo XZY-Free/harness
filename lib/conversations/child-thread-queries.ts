@@ -55,7 +55,7 @@ import {
   threadRelationTable,
   threadTable,
 } from "@/lib/persistence/schema/conversation";
-import { INVOCATION_TERMINAL_STATES, invocationTable } from "@/lib/persistence/schema/runtime";
+import { INVOCATION_TERMINAL_STATES, invocationTable } from "@/lib/persistence/schema/executions";
 import { and, asc, desc, eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */

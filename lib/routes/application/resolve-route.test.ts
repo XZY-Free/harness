@@ -7,12 +7,12 @@ import {
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agent";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import {
   deploymentRouteSetTable,
   deploymentRouteTable,
 } from "@/lib/persistence/schema/deployment-route";
-import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtime";
+import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import {
   publicationRecord,
   withdrawalRecord,

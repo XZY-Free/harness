@@ -37,7 +37,7 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  */
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
 import { threadTable } from "@/lib/persistence/schema/conversation";
 import type {
@@ -46,8 +46,8 @@ import type {
   InvocationAttempt,
   InvocationExecutionState,
   RuntimeSessionBinding,
-} from "@/lib/persistence/schema/runtime";
-import { invocationTable } from "@/lib/persistence/schema/runtime";
+} from "@/lib/persistence/schema/executions";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import type { RuntimeEndpointResolution } from "@/lib/runtime/dispatcher";
 import {
   InvocationNotFoundError,

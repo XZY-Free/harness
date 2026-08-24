@@ -20,9 +20,9 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import { executionBindingTable } from "@/lib/persistence/schema/executions";
-import type { RuntimeRevision } from "@/lib/persistence/schema/runtime";
+import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,

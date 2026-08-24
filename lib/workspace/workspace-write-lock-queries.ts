@@ -30,7 +30,7 @@ import {
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import type { ThreadEventActorType } from "@/lib/persistence/schema/conversation";
-import { invocationTable } from "@/lib/persistence/schema/runtime";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import type { WorkspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { and, asc, eq, isNotNull, lt } from "drizzle-orm";

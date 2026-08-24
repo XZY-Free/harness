@@ -34,14 +34,14 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  */
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
 import {
   invocationCommandTable,
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
-import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/runtime";
+import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/executions";
 import {
   CommandAlreadyDispatchedError,
   CommandInvocationNotFoundError,

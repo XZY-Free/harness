@@ -51,7 +51,7 @@ import {
   invocationCommandTable,
   threadTable,
 } from "@/lib/persistence/schema/conversation";
-import { type Invocation, invocationTable } from "@/lib/persistence/schema/runtime";
+import { type Invocation, invocationTable } from "@/lib/persistence/schema/executions";
 import {
   ALLOWED_RESOLUTIONS_BY_TYPE,
   type UserActionRequest,

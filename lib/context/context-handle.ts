@@ -1,8 +1,8 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { agentRevisionTable } from "@/lib/persistence/schema/agent";
+import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { threadTable } from "@/lib/persistence/schema/conversation";
-import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/runtime";
+import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { and, eq } from "drizzle-orm";
 
 export const CONTEXT_SOURCE_TYPES = [

@@ -19,8 +19,11 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import type { InvocationAttempt, InvocationAttemptState } from "@/lib/persistence/schema/runtime";
-import { invocationAttemptTable } from "@/lib/persistence/schema/runtime";
+import type {
+  InvocationAttempt,
+  InvocationAttemptState,
+} from "@/lib/persistence/schema/executions";
+import { invocationAttemptTable } from "@/lib/persistence/schema/executions";
 import {
   InvocationAttemptNotFoundError,
   InvocationAttemptStateConflictError,

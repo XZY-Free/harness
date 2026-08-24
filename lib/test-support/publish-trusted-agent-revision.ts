@@ -2,7 +2,7 @@ import { createPublishAgentRevision } from "@/lib/agents/application/publish-age
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { db } from "@/lib/db/client";
-import { agentRevisionTable } from "@/lib/persistence/schema/agent";
+import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { eq } from "drizzle-orm";
 
 /** 真实 MySQL 测试装配：绑定权威 Artifact 后通过正式应用服务发布 AgentRevision。 */

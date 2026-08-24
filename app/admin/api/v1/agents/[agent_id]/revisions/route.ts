@@ -60,7 +60,7 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
 
 export const dynamic = "force-dynamic";
 

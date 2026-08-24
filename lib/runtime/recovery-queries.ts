@@ -28,12 +28,12 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
 import { db } from "@/lib/db/client";
 import type { ThreadEventActorType } from "@/lib/persistence/schema/conversation";
 import { threadTable } from "@/lib/persistence/schema/conversation";
-import type { InvocationExecutionState } from "@/lib/persistence/schema/runtime";
+import type { InvocationExecutionState } from "@/lib/persistence/schema/executions";
 import {
   INVOCATION_TERMINAL_STATES,
   invocationTable,
   runtimeEventIngressTable,
-} from "@/lib/persistence/schema/runtime";
+} from "@/lib/persistence/schema/executions";
 import { InvocationAlreadyTerminalError, InvocationNotFoundError } from "@/lib/runtime/errors";
 import { updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { markSessionBindingLost } from "@/lib/runtime/session-binding-queries";

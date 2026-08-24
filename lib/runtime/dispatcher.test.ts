@@ -48,8 +48,8 @@ import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
-import type { RuntimeRevision } from "@/lib/persistence/schema/runtime";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
+import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import { withdrawalRecord } from "@/lib/publications/persistence/publication-record";
 import {
   MAX_TRAFFIC_WEIGHT,

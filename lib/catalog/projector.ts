@@ -20,7 +20,7 @@
  * - 资源已删除/不可见时不投影（调用方应在源行不可见时调 removeCatalogEntry）。
  */
 import { db } from "@/lib/db/client";
-import { agentTable } from "@/lib/persistence/schema/agent";
+import { agentTable } from "@/lib/persistence/schema/agents";
 import {
   type CatalogAudience,
   type CatalogEntry,

@@ -52,7 +52,7 @@ import {
   type RuntimeCandidateEventType,
   type RuntimeEventIngress,
   runtimeEventIngressTable,
-} from "@/lib/persistence/schema/runtime";
+} from "@/lib/persistence/schema/executions";
 import {
   EventPayloadHashConflictError,
   IngressInvocationNotFoundError,

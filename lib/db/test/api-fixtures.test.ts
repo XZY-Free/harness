@@ -1,6 +1,6 @@
 import { db } from "@/lib/db/client";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { agentTable } from "@/lib/persistence/schema/agent";
+import { agentTable } from "@/lib/persistence/schema/agents";
 import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import {

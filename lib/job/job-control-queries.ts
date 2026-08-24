@@ -24,6 +24,7 @@ import { JobAlreadyTerminalError, JobNotFoundError, JobNotTerminalError } from "
 import { acknowledgeCommand, rejectCommand } from "@/lib/job/job-command-queries";
 import { allocateJobEventSequences, insertJobEvent } from "@/lib/job/job-event-queries";
 import { createJob, recordJobResult, updateJobState } from "@/lib/job/job-queries";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
   type Job,
   type JobCommand,
@@ -32,7 +33,6 @@ import {
   jobCommandTable,
   jobTable,
 } from "@/lib/persistence/schema/job";
-import { invocationTable } from "@/lib/persistence/schema/runtime";
 import { and, eq, inArray } from "drizzle-orm";
 
 /** 事务句柄类型。 */

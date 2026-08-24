@@ -2,7 +2,7 @@ import * as artifactRecordSchema from "@/lib/artifacts/persistence/artifact-reco
 import { dbConfig } from "@/lib/config";
 import * as controlPlaneOutboxSchema from "@/lib/control-plane/events/control-plane-outbox";
 import * as adminExportSchemaTable from "@/lib/persistence/schema/admin-export";
-import * as agentSchemaTable from "@/lib/persistence/schema/agent";
+import * as agentSchemaTable from "@/lib/persistence/schema/agents";
 import * as auditSchemaTable from "@/lib/persistence/schema/audit";
 import * as authorizationSchemaTable from "@/lib/persistence/schema/authorization";
 import * as deploymentRouteSchemaTable from "@/lib/persistence/schema/deployment-route";
@@ -10,14 +10,15 @@ import * as deviceSchemaTable from "@/lib/persistence/schema/device";
 import * as effectSchemaTable from "@/lib/persistence/schema/effect";
 import * as environmentSchemaTable from "@/lib/persistence/schema/environment";
 import * as evaluationSchemaTable from "@/lib/persistence/schema/evaluation";
+import * as executionsSchemaTable from "@/lib/persistence/schema/executions";
 import * as fileChangeSchemaTable from "@/lib/persistence/schema/file-change";
 import * as filesystemCheckpointSchemaTable from "@/lib/persistence/schema/filesystem-checkpoint";
 import * as idempotencySchemaTable from "@/lib/persistence/schema/idempotency";
 import * as identitySchemaTable from "@/lib/persistence/schema/identity";
 import * as permissionSchemaTable from "@/lib/persistence/schema/permission";
 import * as recoveryDrillSchemaTable from "@/lib/persistence/schema/recovery-drill";
-import * as runtimeSchemaTable from "@/lib/persistence/schema/runtime";
 import * as runtimeArtifactSchemaTable from "@/lib/persistence/schema/runtime-artifact";
+import * as runtimeSchemaTable from "@/lib/persistence/schema/runtimes";
 import * as securityIncidentSchemaTable from "@/lib/persistence/schema/security-incident";
 import * as traceSchemaTable from "@/lib/persistence/schema/trace";
 import * as usageSchemaTable from "@/lib/persistence/schema/usage";
@@ -46,6 +47,7 @@ const fullSchema = {
   ...adminExportSchemaTable,
   ...agentSchemaTable,
   ...runtimeSchemaTable,
+  ...executionsSchemaTable,
   ...deploymentRouteSchemaTable,
   ...workspaceSchemaTable,
   ...environmentSchemaTable,

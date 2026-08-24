@@ -45,7 +45,7 @@ import {
 import {
   type ExecutionOwnershipState,
   executionOwnershipTable,
-} from "@/lib/persistence/schema/runtime";
+} from "@/lib/persistence/schema/executions";
 import { and, desc, eq, isNotNull, lt, ne } from "drizzle-orm";
 
 // ─── 错误类型 ──────────────────────────────────────────────

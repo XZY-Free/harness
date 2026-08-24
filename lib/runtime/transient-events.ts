@@ -1,4 +1,4 @@
-import { INVOCATION_TERMINAL_STATES } from "@/lib/persistence/schema/runtime";
+import { INVOCATION_TERMINAL_STATES } from "@/lib/persistence/schema/executions";
 import {
   IngressInvocationNotFoundError,
   IngressInvocationTerminalError,

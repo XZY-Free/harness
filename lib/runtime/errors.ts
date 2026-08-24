@@ -10,7 +10,7 @@ import type {
   ExecutionOwnershipState,
   InvocationAttemptState,
   InvocationExecutionState,
-} from "@/lib/persistence/schema/runtime";
+} from "@/lib/persistence/schema/executions";
 
 /** Invocation 不存在或跨租户不可见。映射 404 RESOURCE_NOT_FOUND（隐藏式，不泄露存在）。 */
 export class InvocationNotFoundError extends Error {

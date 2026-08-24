@@ -49,7 +49,7 @@ import {
 import { resolveBindingGovernance } from "@/lib/executions/application/resolve-binding-governance";
 import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type {
   ThreadEvent,
   ThreadEventActorType,
@@ -60,8 +60,8 @@ import type {
   Invocation,
   InvocationAttempt,
   RuntimeSessionBinding,
-} from "@/lib/persistence/schema/runtime";
-import { invocationTable } from "@/lib/persistence/schema/runtime";
+} from "@/lib/persistence/schema/executions";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
 import type {
   RouteResolution,

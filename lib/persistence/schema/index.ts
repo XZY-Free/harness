@@ -14,7 +14,7 @@
 
 // ─── lib/persistence/schema 内 Canonical（37）──────────────────────
 export * from "@/lib/persistence/schema/admin-export";
-export * from "@/lib/persistence/schema/agent";
+export * from "@/lib/persistence/schema/agents";
 export * from "@/lib/persistence/schema/audit";
 export * from "@/lib/persistence/schema/authorization";
 export * from "@/lib/persistence/schema/capability-use";
@@ -52,7 +52,8 @@ export type {
   Artifact as RuntimeArtifact,
   NewArtifact as NewRuntimeArtifact,
 } from "@/lib/persistence/schema/runtime-artifact";
-export * from "@/lib/persistence/schema/runtime";
+export * from "@/lib/persistence/schema/runtimes";
+export * from "@/lib/persistence/schema/executions";
 export * from "@/lib/persistence/schema/security-incident";
 export * from "@/lib/persistence/schema/skill";
 export * from "@/lib/persistence/schema/skill-sync";

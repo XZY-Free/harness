@@ -37,9 +37,9 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import { threadEventTable } from "@/lib/persistence/schema/conversation";
-import type { RuntimeRevision } from "@/lib/persistence/schema/runtime";
+import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import {
   MAX_TRAFFIC_WEIGHT,

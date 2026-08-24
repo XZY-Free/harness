@@ -19,8 +19,8 @@
  * - 外部 Session 不取代 Thread，仅作为 Runtime 侧执行上下文锚点。
  */
 import { db } from "@/lib/db/client";
-import type { RuntimeSessionBinding } from "@/lib/persistence/schema/runtime";
-import { runtimeSessionBindingTable } from "@/lib/persistence/schema/runtime";
+import type { RuntimeSessionBinding } from "@/lib/persistence/schema/executions";
+import { runtimeSessionBindingTable } from "@/lib/persistence/schema/executions";
 import {
   RuntimeSessionBindingConflictError,
   RuntimeSessionBindingNotFoundError,

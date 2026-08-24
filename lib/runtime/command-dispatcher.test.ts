@@ -48,7 +48,7 @@ import {
   type WorkloadTokenClaims,
   issueWorkloadToken,
 } from "@/lib/identity/workload-token";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type {
   InvocationCommand,
   ThreadEvent,
@@ -59,8 +59,8 @@ import {
   threadEventTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
-import type { RuntimeRevision } from "@/lib/persistence/schema/runtime";
-import { invocationAttemptTable } from "@/lib/persistence/schema/runtime";
+import { invocationAttemptTable } from "@/lib/persistence/schema/executions";
+import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,

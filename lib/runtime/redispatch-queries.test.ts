@@ -50,14 +50,14 @@ import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import { threadEventTable, threadItemTable } from "@/lib/persistence/schema/conversation";
-import type { ExecutionBinding, RuntimeSessionBinding } from "@/lib/persistence/schema/runtime";
+import type { ExecutionBinding, RuntimeSessionBinding } from "@/lib/persistence/schema/executions";
 import {
   invocationAttemptTable,
   invocationTable,
   runtimeEventIngressTable,
-} from "@/lib/persistence/schema/runtime";
+} from "@/lib/persistence/schema/executions";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,

@@ -17,8 +17,8 @@
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
 import type { ExecutionBindingControlPlaneEvidence } from "@/lib/executions/domain/execution-binding";
-import type { ExecutionBinding } from "@/lib/persistence/schema/runtime";
-import { executionBindingTable } from "@/lib/persistence/schema/runtime";
+import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
+import { executionBindingTable } from "@/lib/persistence/schema/executions";
 import { ExecutionBindingAlreadyExistsError } from "@/lib/runtime/errors";
 import { eq } from "drizzle-orm";
 

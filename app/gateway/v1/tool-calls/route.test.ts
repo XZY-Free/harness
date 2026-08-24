@@ -19,8 +19,8 @@ import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bo
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { type PolicyRuleInput, createPolicyRevision } from "@/lib/permission/policy-queries";
 import { threadTable } from "@/lib/persistence/schema/conversation";
+import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { permissionDecisionTable } from "@/lib/persistence/schema/permission";
-import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/runtime";
 import {
   type ToolProvider,
   toolProviderTable,

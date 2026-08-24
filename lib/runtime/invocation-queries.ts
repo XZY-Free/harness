@@ -32,7 +32,7 @@ import {
   type InvocationExecutionState,
   type InvocationKind,
   invocationTable,
-} from "@/lib/persistence/schema/runtime";
+} from "@/lib/persistence/schema/executions";
 import { InvocationNotFoundError, InvocationStateConflictError } from "@/lib/runtime/errors";
 import { and, asc, eq, sql } from "drizzle-orm";
 

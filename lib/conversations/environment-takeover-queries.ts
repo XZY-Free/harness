@@ -38,8 +38,8 @@ import {
   type ExecutionOwnership,
   type ExecutionOwnershipState,
   executionOwnershipTable,
-} from "@/lib/persistence/schema/runtime";
-import { invocationTable } from "@/lib/persistence/schema/runtime";
+} from "@/lib/persistence/schema/executions";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import type { ToolCallState } from "@/lib/persistence/schema/tool-call";
 import { workspaceWriteLock } from "@/lib/persistence/schema/workspace-lock";
 import { getActiveLocksByInvocation } from "@/lib/workspace/workspace-write-lock-queries";

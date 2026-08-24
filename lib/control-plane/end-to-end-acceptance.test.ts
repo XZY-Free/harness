@@ -64,8 +64,8 @@ import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { agentRevisionTable } from "@/lib/persistence/schema/agents";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
-import { invocationTable } from "@/lib/persistence/schema/runtime";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import {
   publicationRecord,

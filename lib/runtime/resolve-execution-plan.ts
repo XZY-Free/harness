@@ -12,7 +12,7 @@
  */
 
 import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type {
   RouteResolution,

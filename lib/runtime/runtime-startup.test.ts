@@ -37,8 +37,8 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
-import type { AgentRevision } from "@/lib/persistence/schema/agent";
-import type { RuntimeRevision } from "@/lib/persistence/schema/runtime";
+import type { AgentRevision } from "@/lib/persistence/schema/agents";
+import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
