@@ -100,8 +100,12 @@ export interface RedispatchInvocationParams {
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
   /** RuntimeRevision id（用于创建新 SessionBinding）。 */
   runtimeRevisionId: string;
-  /** AgentRevision（用于构造 StartInvocationRequestBody）。 */
-  agentRevision: AgentRevision;
+  /**
+   * AgentRevision（用于构造 StartInvocationRequestBody）。Agent 可选（§8.3）：
+   * 基础 Harness Route 为 null（无 Agent 资产约束），仅生成完整 Agent 字段与
+   * agent_instruction_ref item 当且仅当存在 AgentRevision。
+   */
+  agentRevision: AgentRevision | null;
   /** 触发事件的 actor 类型（默认 system）。 */
   actorType?: ThreadEventActorType;
   actorId?: string | null;
@@ -247,11 +251,17 @@ export async function redispatchInvocation(
       type: "platform_rule",
       content: "仅使用当前 Invocation 授权的 Context Gateway 与 Workspace 资源。",
     },
-    {
-      type: "agent_instruction_ref",
-      agent_revision_id: params.agentRevision.id,
-      instruction_hash: params.agentRevision.instructionHash,
-    },
+    // Agent 可选（§8.3）：仅有 AgentRevision 时加入 agent_instruction_ref；
+    // 基础 Harness Route（无 Agent）不生成该 item。
+    ...(params.agentRevision
+      ? [
+          {
+            type: "agent_instruction_ref",
+            agent_revision_id: params.agentRevision.id,
+            instruction_hash: params.agentRevision.instructionHash,
+          },
+        ]
+      : []),
     {
       type: "resource_index",
       sources: ["recent_items", "skill", "workspace_map", "memory", "knowledge"],
@@ -284,20 +294,18 @@ export async function redispatchInvocation(
           trigger_item_id: invocation.triggerItemId ?? null,
         }
       : null,
-    agent: {
-      agent_revision_id: params.agentRevision.id,
-      instruction_hash: params.agentRevision.instructionHash,
-      artifact_ref: params.agentRevision.agentArtifactRef,
-      model_policy: (params.agentRevision.modelPolicyJson ?? {}) as Record<string, unknown>,
-      permission_requirements: (params.agentRevision.permissionRequirementsJson ?? {}) as Record<
-        string,
-        unknown
-      >,
-      interface_requirements: (params.agentRevision.agentInterfaceRequirementsJson ?? {}) as Record<
-        string,
-        unknown
-      >,
-    },
+    agent: params.agentRevision
+      ? {
+          agent_revision_id: params.agentRevision.id,
+          instruction_hash: params.agentRevision.instructionHash,
+          artifact_ref: params.agentRevision.agentArtifactRef,
+          model_policy: (params.agentRevision.modelPolicyJson ?? {}) as Record<string, unknown>,
+          permission_requirements: (params.agentRevision.permissionRequirementsJson ??
+            {}) as Record<string, unknown>,
+          interface_requirements: (params.agentRevision.agentInterfaceRequirementsJson ??
+            {}) as Record<string, unknown>,
+        }
+      : null,
     input_items: inputItems,
     context_handle: contextHandle,
     gateway_endpoints: gatewayEndpoints,

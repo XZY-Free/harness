@@ -540,10 +540,11 @@ export async function dispatchResumeCommand(params: {
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
   /**
-   * S09-C06：requires_redispatch=true 时使用的 AgentRevision（用于构造 redispatch 的 StartInvocationRequestBody）。
-   * 不传则从 ExecutionBinding.agentRevisionId 自动加载。
+   * requires_redispatch=true 时使用的已加载 AgentRevision（用于构造 redispatch 的
+   * StartInvocationRequestBody）。仅作可选已加载对象；以 ExecutionBinding.agentRevisionId 为权威：
+   * 传 null 或不传时均按 binding 决定。Agent Revision 可选（§8.3）：基础 Harness Route 无 Agent。
    */
-  agentRevision?: AgentRevision;
+  agentRevision?: AgentRevision | null;
   actorType?: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
@@ -732,10 +733,13 @@ export async function dispatchResumeCommand(params: {
  * docs/architecture/persistence.md §13（Worker 失联恢复）。
  *
  * 流程：
- * 1. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running +
+ * 1. 解析并校验 AgentRevision（在任何 Command/Invocation/Turn/Event/Attempt 写入之前）：
+ * - binding.agentRevisionId=null → agentRevision=null（基础 Harness 零 Agent）。
+ * - 调用方已提供 params.agentRevision → 其 id 必须与 binding.agentRevisionId 严格一致，否则抛不一致错误。
+ * - 未提供 → 按 binding id 查询，缺失即抛不存在错误（fail-closed）。
+ * 2. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running +
  * 写 turn.resumed Event（带 redispatched=true 标记）。不写 invocation.resumed Event
  * （因为不是简单恢复，而是重新调度）。
- * 2. 加载 AgentRevision（如未通过 params 提供，从 ExecutionBinding.agentRevisionId 自动加载）。
  * 3. 调用 redispatchInvocation：
  * - 创建新 Attempt（attemptNo = max+1, queued）
  * - 调用 Runtime startInvocation（带 attempt_no > 1, retry_reason=requires_redispatch）
@@ -749,7 +753,7 @@ async function handleResumeRequiresRedispatch(
   params: {
     tenantId: string;
     runtimeClient: RuntimeHttpClient;
-    agentRevision?: AgentRevision;
+    agentRevision?: AgentRevision | null;
     actorType?: ThreadEventActorType;
     actorId?: string | null;
     correlationId?: string | null;
@@ -780,7 +784,31 @@ async function handleResumeRequiresRedispatch(
   }
   const gatewayEndpoints = endpointResolution.gatewayEndpoints;
 
-  // 1. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running + 写 turn.resumed Event
+  // 1. 解析并校验 AgentRevision：以 ExecutionBinding.agentRevisionId 为权威（§8.3 长期 Agent 可选语义）。
+  // 必须在任何 Command/Invocation/Turn/Event/Attempt 写入之前完成，避免校验失败时留下半完成状态。
+  // 基础 Harness Route（binding.agentRevisionId=null）→ agentRevision=null，不查询/不要求 Agent。
+  // Agent Route → 若调用方已加载（params.agentRevision）必须与 binding 冻结 id 精确一致；否则按
+  // binding id 加载，缺失即 fail-closed（binding 冻结的 AgentRevision 必须存在）。
+  let agentRevision: AgentRevision | null;
+  if (loaded.binding.agentRevisionId === null) {
+    agentRevision = null;
+  } else if (params.agentRevision) {
+    if (params.agentRevision.id !== loaded.binding.agentRevisionId) {
+      throw new Error(
+        `handleResumeRequiresRedispatch: 提供的 AgentRevision(id=${params.agentRevision.id}) 与 binding.agentRevisionId(${loaded.binding.agentRevisionId}) 不一致`,
+      );
+    }
+    agentRevision = params.agentRevision;
+  } else {
+    agentRevision = await getRevisionById(loaded.binding.agentRevisionId);
+    if (!agentRevision) {
+      throw new Error(
+        `handleResumeRequiresRedispatch: AgentRevision 不存在（id=${loaded.binding.agentRevisionId}）`,
+      );
+    }
+  }
+
+  // 2. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running + 写 turn.resumed Event
   const turnResumedEvent = await db.transaction(async (tx) => {
     if (!threadId) {
       throw new CommandInvocationNotFoundError(loaded.invocation.id);
@@ -841,17 +869,6 @@ async function handleResumeRequiresRedispatch(
       idempotencyKey: `resume-ack-turn-redispatch-${loaded.command.id}`,
     });
   });
-
-  // 2. 加载 AgentRevision（如未通过 params 提供，从 ExecutionBinding.agentRevisionId 自动加载）
-  const agentRevision =
-    params.agentRevision ??
-    // 无 Agent（基础 Harness Route）redispatch 由后续阶段处理；此处仅保证编译通过（§8.3）。
-    (loaded.binding.agentRevisionId ? await getRevisionById(loaded.binding.agentRevisionId) : null);
-  if (!agentRevision) {
-    throw new Error(
-      `handleResumeRequiresRedispatch: AgentRevision 不存在（id=${loaded.binding.agentRevisionId}）`,
-    );
-  }
 
   // 3. 调用 redispatchInvocation（创建新 Attempt + 调用 Runtime startInvocation + 写 invocation.started Event）
   const redispatchResult = await redispatchInvocation({

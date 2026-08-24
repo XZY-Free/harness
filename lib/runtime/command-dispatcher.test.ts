@@ -39,6 +39,7 @@ import { createThread } from "@/lib/conversations/thread-queries";
 import { updateTurnState } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
@@ -48,7 +49,7 @@ import {
   type WorkloadTokenClaims,
   issueWorkloadToken,
 } from "@/lib/identity/workload-token";
-import type { AgentRevision } from "@/lib/persistence/schema/agents";
+import { type AgentRevision, agentTable } from "@/lib/persistence/schema/agents";
 import type {
   InvocationCommand,
   ThreadEvent,
@@ -59,7 +60,7 @@ import {
   threadEventTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
-import { invocationAttemptTable } from "@/lib/persistence/schema/executions";
+import { type ExecutionBinding, invocationAttemptTable } from "@/lib/persistence/schema/executions";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
   MAX_TRAFFIC_WEIGHT,
@@ -98,7 +99,7 @@ import {
 } from "@/lib/runtime/runtime-client";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -1428,6 +1429,104 @@ describe("S05-C04 dispatchResumeCommand", () => {
     const invocation = await getInvocationById(ctx.tenantId, running.invocationId);
     expect(invocation?.executionState).toBe("waiting_user");
   });
+
+  it("requires_redispatch=true 但 AgentRevision.id 与 binding.agentRevisionId 不一致：reject，且不留半完成状态", async () => {
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await transitionToWaitingUser(ctx, running);
+
+    const resumeCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { action: "confirm" },
+      idempotencyKey: "resume-key-redispatch-agent-mismatch",
+    });
+
+    // Runtime resume 返回 requires_redispatch=true；startInvocation 记录调用但预期不被调用。
+    const mockClient = createMockRuntimeClient({
+      resumeInvocation: async (req) => ({
+        invocation_id: req.invocationId,
+        resumed: false,
+        attempt_no: 1,
+        requires_redispatch: true,
+      }),
+      startInvocation: async () => {
+        throw new Error("startInvocation 不应被调用（AgentRevision 不匹配应先失败）");
+      },
+    });
+
+    // 基于真实 ctx.agentRevision 复制，仅改 id 使其与 ExecutionBinding.agentRevisionId 不一致。
+    // 这是验证已加载对象边界，不制造数据库结论。
+    const mismatchedAgentRevision = {
+      ...ctx.agentRevision,
+      id: "22222222-2222-4222-8222-222222222222",
+    };
+
+    // AgentRevision 一致性校验必须先于任何状态推进和事件写入。
+    await expect(
+      dispatchResumeCommand({
+        tenantId: ctx.tenantId,
+        commandId: resumeCommandId,
+        runtimeClient: mockClient,
+        runtimeEndpointResolver: async () => ({
+          ...buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+          gatewayEndpoints: {
+            events: "https://gateway.internal/events",
+            cancel: "https://gateway.internal/cancel",
+            resume: "https://gateway.internal/resume",
+            steer: "https://gateway.internal/steer",
+            tools: "https://gateway.internal/tools",
+            tool_calls: "https://gateway.internal/tool-calls",
+            user_action_requests: "https://gateway.internal/user-action-requests",
+          },
+        }),
+        agentRevision: mismatchedAgentRevision,
+        correlationId: "resume-redispatch-agent-mismatch",
+      }),
+    ).rejects.toThrow(/不一致/);
+
+    // 失败后必须不留半完成状态：
+
+    // 1) 命令仍为 dispatched，acknowledgedAt=null（不得已 acknowledged）
+    const cmdRow = await getCommandRow(resumeCommandId);
+    expect(cmdRow?.commandState).toBe("dispatched");
+    expect(cmdRow?.acknowledgedAt).toBeNull();
+
+    // 2) Invocation 仍 waiting_user
+    const invocation = await getInvocationById(ctx.tenantId, running.invocationId);
+    expect(invocation?.executionState).toBe("waiting_user");
+
+    // 3) Turn 仍 waiting_user
+    const [turnRow] = await db
+      .select()
+      .from(turnTable)
+      .where(eq(turnTable.id, ctx.turnId))
+      .limit(1);
+    expect(turnRow?.turnState).toBe("waiting_user");
+
+    // 4) 没有新增 attemptNo=2
+    const attempts = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.invocationId, running.invocationId));
+    const attempt2 = attempts.find((a) => a.attemptNo === 2);
+    expect(attempt2).toBeUndefined();
+
+    // 5) 没有写 turn.resumed Event
+    const resumedEvents = await db
+      .select()
+      .from(threadEventTable)
+      .where(
+        and(
+          eq(threadEventTable.threadId, ctx.threadId),
+          eq(threadEventTable.eventType, "turn.resumed"),
+        ),
+      );
+    expect(resumedEvents).toHaveLength(0);
+
+    // 6) startInvocation 0 次
+    expect(mockClient.calls.startInvocation).toHaveLength(0);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -1808,5 +1907,252 @@ describe("S05-C04 端到端 + 投影器", () => {
     expect(turnProj).toBeTruthy();
     expect(turnProj?.turnState).toBe("running");
     expect(turnProj?.startedAt).toBeTruthy();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 6. 基础 Harness Route redispatch 不依赖 Agent（§8.3）
+// ═══════════════════════════════════════════════════════════
+//
+// 冻结边界：Agent 表 0 行合法；基础 Harness Route/Binding 的 agentRevisionId=null；
+// 任何实际执行仍完整绑定 Runtime/Route；resume redispatch 不能额外要求 Agent。
+// 零 Agent 是基础 Harness 的长期合法形态，重调度不得额外引入 Agent 前置条件。
+
+interface BaseHarnessContext {
+  tenantId: string;
+  ownerId: string;
+  runtimeRevision: RuntimeRevision;
+  routeId: string;
+  routeSetId: string;
+  threadId: string;
+  turnId: string;
+  triggerItemId: string | null;
+}
+
+interface BaseHarnessRunningContext {
+  invocationId: string;
+  tenantId: string;
+  threadId: string;
+  turnId: string;
+  turnVersionNo: number;
+  binding: ExecutionBinding;
+}
+
+async function seedBaseHarnessContext(): Promise<BaseHarnessContext> {
+  const { tenantId, ownerId } = await seedTenantAndOwner();
+
+  // 只发布可信 RuntimeRevision；不创建 Agent/AgentRevision。
+  const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
+    tenantId,
+    ownerId,
+    "base-cmd-runtime",
+    ["event_stream"],
+    "v1",
+  );
+
+  // 创建 agentId=null 的 RouteSet（基础 Harness）。
+  const routeSet = await createRouteSet({
+    tenantId,
+    agentId: null,
+    routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
+    routeScopeJson: { networkZone: "internal" },
+  });
+
+  // 激活 agentRevisionId=null 的基础 Route。
+  const routeResult = await activateSingleRouteForTest({
+    tenantId,
+    routeSetId: routeSet.id,
+    routeSetExpectedVersionNo: 1,
+    agentRevisionId: null,
+    runtimeRevisionId: runtimeRevision.id,
+    trafficWeight: MAX_TRAFFIC_WEIGHT,
+    priorityNo: 1,
+    actor: buildActor(tenantId, "deploy-bot-001"),
+  });
+
+  const { thread } = await createThread({
+    tenantId,
+    ownerUserId: ownerId,
+    actorId: ownerId,
+  });
+
+  const { turn } = await acceptUserMessageTurnForCmd({
+    tenantId,
+    threadId: thread.id,
+    ownerUserId: ownerId,
+  });
+
+  return {
+    tenantId,
+    ownerId,
+    runtimeRevision,
+    routeId: routeResult.route.id,
+    routeSetId: routeSet.id,
+    threadId: thread.id,
+    turnId: turn.id,
+    triggerItemId: turn.triggerItemId ?? null,
+  };
+}
+
+async function seedBaseHarnessRunningInvocation(
+  ctx: BaseHarnessContext,
+): Promise<BaseHarnessRunningContext> {
+  // 基础 Harness：agentConstraint=null，得到真实 ExecutionBinding 且 agentRevisionId=null。
+  const result = await dispatchInvocationForTurn({
+    tenantId: ctx.tenantId,
+    turnId: ctx.turnId,
+    agentConstraint: null,
+  });
+  if (!result.dispatched) {
+    throw new Error(`基础 Harness 调度失败：reason=${result.reason ?? "unknown"}`);
+  }
+  const invocation = result.invocation;
+  const binding = result.binding;
+  if (!invocation || !binding) {
+    throw new Error("基础 Harness 调度失败：未创建 Invocation/ExecutionBinding");
+  }
+  expect(binding.agentRevisionId).toBeNull();
+
+  // Invocation queued → running
+  await db.transaction(async (tx) => {
+    await updateInvocationState(tx, ctx.tenantId, invocation.id, "running");
+  });
+
+  // Turn queued → running
+  const [turnRow] = await db.select().from(turnTable).where(eq(turnTable.id, ctx.turnId)).limit(1);
+  if (!turnRow) throw new Error(`Turn 不存在: ${ctx.turnId}`);
+  await updateTurnState(ctx.tenantId, ctx.turnId, "running", turnRow.versionNo);
+
+  const [updatedTurn] = await db
+    .select()
+    .from(turnTable)
+    .where(eq(turnTable.id, ctx.turnId))
+    .limit(1);
+
+  return {
+    invocationId: invocation.id,
+    tenantId: ctx.tenantId,
+    threadId: ctx.threadId,
+    turnId: ctx.turnId,
+    turnVersionNo: updatedTurn?.versionNo ?? 1,
+    binding,
+  };
+}
+
+describe("S05-C04 基础 Harness Route redispatch 不依赖 Agent（§8.3）", () => {
+  let ctx: BaseHarnessContext;
+
+  beforeEach(async () => {
+    ctx = await seedBaseHarnessContext();
+  });
+
+  it("requires_redispatch=true 不额外要求 Agent：ack + redispatched + startInvocation.agent=null + 无 agent_instruction_ref + Agent 表 0 行", async () => {
+    // 前置：Agent 表 0 行（不创建 Agent/AgentRevision）。
+    const agentRowsBefore = await db.select().from(agentTable);
+    expect(agentRowsBefore).toHaveLength(0);
+
+    const running = await seedBaseHarnessRunningInvocation(ctx);
+
+    // Invocation/Turn 推进到 waiting_user。
+    await updateTurnState(ctx.tenantId, ctx.turnId, "waiting_user", running.turnVersionNo);
+    await db.transaction(async (tx) => {
+      await updateInvocationState(tx, ctx.tenantId, running.invocationId, "waiting_user");
+    });
+
+    // 创建 Resume Command。
+    const resumeCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { action: "confirm", value: "yes" },
+      idempotencyKey: "resume-key-base-harness-redispatch",
+    });
+
+    // mock Runtime 仅作协议对端：resume → requires_redispatch=true；start → accepted。
+    const mockClient = createMockRuntimeClient({
+      resumeInvocation: async (req) => ({
+        invocation_id: req.invocationId,
+        resumed: false,
+        attempt_no: 1,
+        requires_redispatch: true,
+      }),
+      startInvocation: async () => ({
+        invocation_id: running.invocationId,
+        accepted: true,
+        attempt_no: 2,
+        runtime_session_ref: `runtime-session-${running.invocationId}-2`,
+        runtime_execution_ref: `runtime-exec-${running.invocationId}-2`,
+        capabilities: {
+          protocol_versions: ["2"],
+          features: {
+            event_stream: true,
+            cancel: true,
+            resume: true,
+            steer: true,
+            dynamic_tools: true,
+            user_action: true,
+            workspace_types: ["none"],
+            filesystem_checkpoint: true,
+          },
+          limits: { max_invocation_seconds: 600, max_event_bytes: 1_048_576 },
+        },
+      }),
+    });
+
+    // 不传 AgentRevision，验证绑定中的 null 身份直接贯穿到 Runtime 请求。
+    const result = await dispatchResumeCommand({
+      tenantId: ctx.tenantId,
+      commandId: resumeCommandId,
+      runtimeClient: mockClient,
+      runtimeEndpointResolver: async () => ({
+        ...buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+        gatewayEndpoints: {
+          events: "https://gateway.internal/events",
+          cancel: "https://gateway.internal/cancel",
+          resume: "https://gateway.internal/resume",
+          steer: "https://gateway.internal/steer",
+          tools: "https://gateway.internal/tools",
+          tool_calls: "https://gateway.internal/tool-calls",
+          user_action_requests: "https://gateway.internal/user-action-requests",
+        },
+      }),
+      correlationId: "resume-base-harness-redispatch",
+    });
+
+    // 目标断言（GREEN）：ack + redispatched。
+    expect(result.commandState).toBe("acknowledged");
+    expect(result.redispatched).toBe(true);
+
+    // 同一 Invocation 创建 attemptNo=2 且 running。
+    const attempts = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.invocationId, running.invocationId));
+    const newAttempt = attempts.find((a) => a.attemptNo === 2);
+    expect(newAttempt?.attemptState).toBe("running");
+    expect(newAttempt?.retryReasonCode).toBe("requires_redispatch");
+
+    // 必须捕获真实 startInvocation request。
+    expect(mockClient.calls.startInvocation).toHaveLength(1);
+    const startReq = mockClient.calls.startInvocation[0];
+    expect(startReq?.requestBody.agent).toBeNull();
+
+    // input_items 中不存在 type="agent_instruction_ref"。
+    const inputItems = startReq?.requestBody.input_items ?? [];
+    const hasAgentInstructionRef = inputItems.some(
+      (item) => (item as { type?: string }).type === "agent_instruction_ref",
+    );
+    expect(hasAgentInstructionRef).toBe(false);
+
+    // Agent 表仍 0 行。
+    const agentRowsAfter = await db.select().from(agentTable);
+    expect(agentRowsAfter).toHaveLength(0);
+
+    // Runtime/Route/Binding 冻结值保持不变。
+    const bindingAfter = await getExecutionBindingByInvocation(ctx.tenantId, running.invocationId);
+    expect(bindingAfter?.runtimeRevisionId).toBe(running.binding.runtimeRevisionId);
+    expect(bindingAfter?.deploymentRouteId).toBe(running.binding.deploymentRouteId);
+    expect(bindingAfter?.agentRevisionId).toBeNull();
+    expect(bindingAfter?.runtimeRevisionId).toBe(ctx.runtimeRevision.id);
   });
 });
