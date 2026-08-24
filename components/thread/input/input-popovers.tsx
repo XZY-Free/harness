@@ -275,7 +275,7 @@ export function AgentSelectorPopover({
           {loading && <SelectorMessage>加载中…</SelectorMessage>}
           {error && <SelectorMessage destructive>{error.description}</SelectorMessage>}
           {!loading && !error && agents.length === 0 && (
-            <SelectorMessage>暂无可用助手</SelectorMessage>
+            <SelectorMessage>还没有智能体</SelectorMessage>
           )}
           {!loading && !error && agents.length > 0 && filteredAgents.length === 0 && (
             <SelectorMessage>无匹配助手</SelectorMessage>

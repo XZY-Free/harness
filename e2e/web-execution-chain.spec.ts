@@ -101,6 +101,30 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   const input = page.getByLabel("消息输入框");
   await expect(input).toBeEnabled({ timeout: 60_000 });
 
+  // ─── 1b. 首屏发送前的 Agent 目录与选择器空态（§24.1/§25）──
+  // 初始 URL 必须是干净的真实会话入口：pathname 精确为 /chat，绝不含假 new 路由。
+  const initialPath = new URL(page.url()).pathname;
+  expect(initialPath).toBe("/chat");
+  expect(initialPath).not.toContain("/new");
+
+  // Fresh DB：真实 Agent 目录必须为空数组（§24.1 count=0），不能 fallback 出任何 Agent。
+  const agentsResponse = await request.get("/api/v1/agents");
+  expect(agentsResponse.status()).toBe(200);
+  const agentsBody = (await agentsResponse.json()) as { agents: readonly unknown[] };
+  expect(agentsBody.agents).toEqual([]);
+
+  // Agent selector 空态：触发按钮可点（aria-label 稳定为"助手"），打开 popover
+  // 后必须显示权威要求的空态文案「还没有智能体」（§24.1/§25：不阻止输入，不伪造 Agent）。
+  const agentTrigger = page.getByRole("button", { name: "助手" });
+  await expect(agentTrigger).toBeVisible({ timeout: 30_000 });
+  await agentTrigger.click();
+  await expect(page.getByText("还没有智能体")).toBeVisible({ timeout: 15_000 });
+
+  // popover 打开与关闭后，消息输入框都保持 enabled（空态不阻止输入）。
+  await expect(input).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await expect(input).toBeEnabled();
+
   // ─── 2. 发送首条消息（同时创建 Thread + 首个 Turn）──────
   await input.fill("请用一句话介绍 SnowHarness。");
   await input.press("Enter");

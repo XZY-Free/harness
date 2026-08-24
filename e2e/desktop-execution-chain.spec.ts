@@ -59,14 +59,36 @@ test.describe("§20.5 Desktop 正式执行链", () => {
   test("Desktop 启动 → 发送消息 → 正式 ExecutionBinding → Timeline 恢复", async ({ request }) => {
     // ─── 1. Desktop 启动，renderer 连上同一 Conversation API ──
     await waitForShell(window);
+    const input = window.getByLabel("消息输入框");
 
-    // 本地 renderer server 承载 UI（非服务端页面）。
+    // ─── 1b. 首屏发送前的 Agent 目录与选择器空态（§24.1/§25）──
+    // renderer 初始路由必须精确为 /desktop（允许尾斜杠时做规范化），绝不含假 new 路由。
     const rendererUrl = window.url();
-    expect(rendererUrl).toContain("/desktop");
+    const rendererPath = new URL(rendererUrl).pathname.replace(/\/+$/, "");
+    expect(rendererPath).toBe("/desktop");
+    expect(rendererUrl).not.toContain("/new");
     console.log(`[e2e][desktop] renderer=${rendererUrl} server=${E2E_ORIGIN}`);
 
+    // Fresh DB：真实 Agent 目录必须为空数组；Desktop 的 Agent API 请求必须指向 E2E_ORIGIN
+    //（Desktop 只把服务端当 API 提供方，UI 来自本机打包 renderer，§0.8）。
+    const agentsResponse = await request.get(`${E2E_ORIGIN}/api/v1/agents`);
+    expect(agentsResponse.status()).toBe(200);
+    const agentsBody = (await agentsResponse.json()) as { agents: readonly unknown[] };
+    expect(agentsBody.agents).toEqual([]);
+
+    // Agent selector 空态：触发按钮可点（aria-label 稳定为"助手"），打开 popover
+    // 后必须显示权威要求的空态文案「还没有智能体」（§24.1/§25：不阻止输入，不伪造 Agent）。
+    const agentTrigger = window.getByRole("button", { name: "助手" });
+    await expect(agentTrigger).toBeVisible({ timeout: 30_000 });
+    await agentTrigger.click();
+    await expect(window.getByText("还没有智能体")).toBeVisible({ timeout: 15_000 });
+
+    // popover 打开与关闭后，消息输入框都保持 enabled（空态不阻止输入）。
+    await expect(input).toBeEnabled();
+    await window.keyboard.press("Escape");
+    await expect(input).toBeEnabled();
+
     // ─── 2. 发送消息（创建 Thread + 首个 Turn）───────────────
-    const input = window.getByLabel("消息输入框");
     await input.fill("Desktop 端发送的第一条消息。");
     await input.press("Enter");
 

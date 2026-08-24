@@ -27,6 +27,23 @@ interface InvocationItem {
   invocation_sequence: number;
 }
 
+/**
+ * ExecutionBinding 的诚实类型：0-Agent 基础 Harness Route 下 Agent Evidence 的
+ * 条件性完整组为「全空」终态，故 agent_* 字段真实值为 null（§10.3/§18），
+ * 不能用 Record<string, string> 把 null 伪装成字符串。
+ */
+interface ExecutionBinding {
+  agent_revision_id: string | null;
+  runtime_revision_id: string;
+  deployment_route_id: string;
+  route_revision_id: string;
+  agent_artifact_digest: string | null;
+  agent_attestation_ids: readonly string[] | null;
+  agent_publication_record_id: string | null;
+  runtime_publication_record_id: string;
+  conformance_run_id: string;
+}
+
 test.describe("§20.6 跨端一致性", () => {
   let desktop: LaunchedDesktop;
   let desktopWindow: Page;
@@ -114,7 +131,7 @@ test.describe("§20.6 跨端一致性", () => {
           `${ADMIN_BASE}/invocations/${invocation.id}/execution-binding`,
         );
         expect(response.status()).toBe(200);
-        return (await response.json()) as Record<string, string>;
+        return (await response.json()) as ExecutionBinding;
       }),
     );
 
@@ -136,6 +153,32 @@ test.describe("§20.6 跨端一致性", () => {
       desktopBinding?.runtime_publication_record_id,
     );
     expect(webBinding?.conformance_run_id).toBe(desktopBinding?.conformance_run_id);
+
+    // §10.3/§18：0-Agent 基础 Harness Route — 两端 Agent Evidence 条件性完整组都是
+    // 「全空」终态。逐一显式断言四个 agent_* 字段为 null（诚实表达，不 stringify
+    // 成空字符串，也不改占位值），同时仍核对 Route/Runtime/Publication/Conformance
+    // 相同且非空。
+    for (const [label, binding] of [
+      ["Web", webBinding],
+      ["Desktop", desktopBinding],
+    ] as const) {
+      expect(binding, `${label} Binding 应存在`).toBeTruthy();
+      // Agent Evidence 全空：fresh DB 没有 Agent（§24.1 count=0）。
+      expect(binding?.agent_revision_id, `${label} agent_revision_id 应为 null`).toBeNull();
+      expect(binding?.agent_artifact_digest, `${label} agent_artifact_digest 应为 null`).toBeNull();
+      expect(binding?.agent_attestation_ids, `${label} agent_attestation_ids 应为 null`).toBeNull();
+      expect(
+        binding?.agent_publication_record_id,
+        `${label} agent_publication_record_id 应为 null`,
+      ).toBeNull();
+      // Route / Runtime / Publication / Conformance 仍必须相同且非空。
+      expect(binding?.deployment_route_id, `${label} route 非空`).toMatch(UUID_PATTERN);
+      expect(binding?.runtime_revision_id, `${label} runtimeRevision 非空`).toMatch(UUID_PATTERN);
+      expect(binding?.runtime_publication_record_id, `${label} runtimePublication 非空`).toMatch(
+        UUID_PATTERN,
+      );
+      expect(binding?.conformance_run_id, `${label} conformanceRun 非空`).toMatch(UUID_PATTERN);
+    }
 
     console.log(
       `[e2e][cross] 两端共用控制面事实：route=${webBinding?.deployment_route_id} ` +
