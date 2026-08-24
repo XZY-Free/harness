@@ -54,6 +54,10 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
       ...process.env,
       // Desktop 只把服务端当作 API/SSE 提供方，UI 来自本机打包 renderer。
       SNOW_SERVER_ORIGIN: E2E_ORIGIN,
+      // E2E 每次启动独立 user-data-dir 的实例，放行主进程单实例锁，
+      // 否则多次 launch 共享锁时后续实例静默 app.quit()，firstWindow 报
+      // "Target page, context or browser has been closed"。
+      SNOW_E2E_DISABLE_SINGLE_INSTANCE: "1",
     },
   });
 

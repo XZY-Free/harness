@@ -154,8 +154,10 @@ async function main(): Promise<void> {
   // 注册深链接协议（macOS：snowharness://...）
   app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL);
 
-  // 单实例锁：防止多开
-  const gotLock = app.requestSingleInstanceLock();
+  // 单实例锁：防止多开。E2E 测试需要并行启动多个独立实例（每个独立
+  // user-data-dir），通过显式 env 放行，生产环境不设置不受影响。
+  const gotLock =
+    process.env.SNOW_E2E_DISABLE_SINGLE_INSTANCE === "1" || app.requestSingleInstanceLock();
   if (!gotLock) {
     app.quit();
     return;
