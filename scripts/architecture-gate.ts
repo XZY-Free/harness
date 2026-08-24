@@ -1,6 +1,10 @@
 #!/usr/bin/env npx tsx
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
+import {
+  type SourceDocument,
+  collectDeprecatedArchitectureViolations,
+} from "./architecture-gate-rules";
 
 const ROOT = process.cwd();
 const SOURCE_ROOTS = ["app", "components", "desktop", "lib", "scripts", "docs"];
@@ -110,27 +114,14 @@ function checkControlPlaneClient(): void {
 }
 
 function checkDeprecatedArchitecture(): void {
-  const deprecated = /@deprecated|\blegacy\b|\bcutover\b|\bshadow\b|fallback legacy/i;
-  const violations = sourceFiles().flatMap((file) => {
+  const documents: SourceDocument[] = sourceFiles().flatMap((file) => {
     const path = relative(ROOT, file);
-    if (
-      !/^(lib\/(agents|artifacts|executions|publications|routes|runtime)\/|app\/admin\/api\/v1\/)/.test(
-        path,
-      )
-    ) {
-      return [];
-    }
-    // 测试代码与测试夹具不属于正式源码，与 .test.ts 同类排除。
-    if (
-      path.endsWith(".test.ts") ||
-      path.endsWith(".test.tsx") ||
-      path.includes("/test-support/") ||
-      TOPIC_DEPRECATION_ALLOWLIST.has(path)
-    ) {
-      return [];
-    }
-    return deprecated.test(readFileSync(file, "utf8")) ? [path] : [];
+    return [{ path, source: readFileSync(file, "utf8") }];
   });
+  const violations = collectDeprecatedArchitectureViolations(
+    documents,
+    TOPIC_DEPRECATION_ALLOWLIST,
+  );
   if (violations.length > 0) {
     fail(`发现未登记的已废弃架构表述：${violations.join(", ")}`);
     return;

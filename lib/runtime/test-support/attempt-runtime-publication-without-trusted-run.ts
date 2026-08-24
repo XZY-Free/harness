@@ -6,9 +6,9 @@ import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revisi
 import { publishRuntimeRevisionThroughControlPlane } from "@/lib/runtime/provisioning/publish-runtime-revision-service";
 
 /**
- * 测试受信 Conformance Run 缺失时的 fail-closed 行为。
+ * 专用于缺少可信 Conformance Run 的 fail-closed 负路径测试辅助。
  *
- * @deprecated 新发布合同要求 attestationId + conformanceRunId 必填。
+ * 当前发布合同要求 attestationId + conformanceRunId 必填。
  * 此入口仅用于验证缺少必填证明时抛出正确错误类型。
  *
  * 为抵达 ConformanceRun 校验环节，会先创建一份有效的 ArtifactAttestation，
