@@ -63,8 +63,11 @@ export const mysqlRouteControlStore: RouteControlStore = {
               )
             : and(
                 eq(deploymentRouteTable.routeSetId, params.routeSetId),
-                // 无 Agent（基础 Harness Route）时以 null 参与唯一键匹配；运行时路径由后续阶段处理。
-                eq(deploymentRouteTable.agentRevisionId, params.content.agentRevisionId as string),
+                // 基础 Harness Route（agentRevisionId=null）以 SQL IS NULL 匹配稳定身份，
+                // 避免 = NULL 恒不命中导致同一组合重复创建 Route。
+                params.content.agentRevisionId === null
+                  ? isNull(deploymentRouteTable.agentRevisionId)
+                  : eq(deploymentRouteTable.agentRevisionId, params.content.agentRevisionId),
                 eq(deploymentRouteTable.runtimeRevisionId, params.content.runtimeRevisionId),
               );
           const [existing] = await tx
