@@ -9,7 +9,6 @@
   "events": {
     "thread.created": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id"], "skippable_for_projection": false},
     "thread.archived": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id"], "skippable_for_projection": false},
-    "thread.primary_agent_changed": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id"], "skippable_for_projection": false},
     "thread.model_changed": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id"], "skippable_for_projection": false},
     "thread.environment_changed": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id"], "skippable_for_projection": false},
     "thread.deleted": {"streams": ["thread"], "version": 1, "required_refs": ["thread_id"], "skippable_for_projection": false},

@@ -4,7 +4,7 @@
  * 职责：
  * - 启动真实 MySQL 8 容器（testcontainers）+ 跑 drizzle migration。
  * - 启动 e2e 确定性模型服务（OpenAI 兼容端点），使 Agent Loop 能真正产出回复。
- * - 引导正式执行链（enabled Agent → published Revision → Route → Projection），
+ * - 引导正式执行链（published RuntimeRevision → 无 Agent 约束的基础 Route → Projection），
  *   使客户端首条消息能走通 Route Resolver → ExecutionBinding → Runtime。
  * - 用注入的 DATABASE_URL / LLM_* 构建并启动 Next server（APP_ENV=test，认证回退默认用户）。
  * - 转发 SIGTERM / SIGINT 到子进程，关闭容器后退出。
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
   const port = process.env.SNOW_E2E_PORT ?? "3100";
   const env = childEnv(connectionString, modelServer.baseUrl, port);
 
-  // 引导正式执行链（Agent/Runtime/Publication/Route/Projection 全走正式服务）。
+  // 引导正式执行链（Runtime/Publication/Route/Projection 全走正式服务，Agent 表保持 0 行）。
   console.log("[e2e] 正在引导正式执行链...");
   await runToCompletion("e2e 引导脚本", "pnpm", ["exec", "tsx", "scripts/e2e-bootstrap.ts"], env);
   console.log("[e2e] 正式执行链引导完成。");

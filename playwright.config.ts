@@ -59,7 +59,7 @@ export default defineConfig({
     command: "pnpm exec tsx scripts/e2e-start.mts",
     url: E2E_ORIGIN,
     // 必须始终新建：e2e 依赖 scripts/e2e-start.mts 引导出的正式执行链
-    // （enabled Agent → published Revision → Route → Projection）。
+    // （published RuntimeRevision → 无 Agent 约束的基础 Route → Projection）。
     // 复用开发者本机 dev server 会跳过引导，测试将跑在开发库上而非干净容器上，
     // 结论不可信（曾实际发生）。
     reuseExistingServer: false,
