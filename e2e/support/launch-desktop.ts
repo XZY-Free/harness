@@ -40,6 +40,20 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
   }
 
   const userDataDir = await mkdtemp(join(tmpdir(), "snow-e2e-desktop-"));
+
+  // 读取主进程通过 SNOW_E2E_LOG_FILE 写入的阶段化启动日志。
+  // 用户指令：不能在 electron.launch() 返回后立即读取（此时 main() 可能尚未
+  // 推进到关键阶段/错误尚未写完），而应在「窗口创建」或「进程退出」之后读取。
+  // 因此本函数只在本文件的两个时机被触发：app.on("window")（窗口创建）与
+  // app.on("close")（进程退出），并由 firstWindow 调用方做兜底。
+  const readMainLog = (): void => {
+    try {
+      const mainLog = readFileSync(join(userDataDir, "e2e-main.log"), "utf8").trim();
+      if (mainLog) console.log(`[e2e][desktop] 主进程日志:\n${mainLog}`);
+    } catch {
+      // 无日志文件则跳过（主进程未启动或未写入）。
+    }
+  };
   const app = await electron.launch({
     args: [
       PACKAGE_APP_DIR,
@@ -64,14 +78,6 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
     },
   });
 
-  // launch 返回后读取主进程写入的启动日志（单实例锁 / main() 失败原因）。
-  try {
-    const mainLog = readFileSync(join(userDataDir, "e2e-main.log"), "utf8").trim();
-    if (mainLog) console.log(`[e2e][desktop] 主进程日志:\n${mainLog}`);
-  } catch {
-    // 无日志文件则跳过。
-  }
-
   // ── E2E 诊断：转发主进程 stdout/stderr，监听窗口关闭，便于 CI 定位
   // firstWindow "Target page, context or browser has been closed" 的真实原因
   // （Electron 主进程 stderr / 渲染进程崩溃不转发时，CI 日志只有关闭，无线索）。
@@ -84,15 +90,25 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
     `[e2e][desktop] launch 返回：windows=${app.windows().length} processExit=${mainProc.exitCode ?? "running"}`,
   );
   app.on("window", (win) => {
+    // 窗口已创建：此时 main() 至少推进到 createMainWindow 之后，读取阶段日志定位
+    // 各阶段 checkpoint 走到了哪一步（用户指令：窗口创建后再读，而非 launch 后立即读）。
     console.log(`[e2e][desktop] window 事件触发，pages=${app.windows().length}`);
-    win.on("close", () => console.log("[e2e][desktop] window close 事件触发"));
+    readMainLog();
+    win.on("close", () => {
+      console.log("[e2e][desktop] window close 事件触发");
+      readMainLog();
+    });
   });
   app.on("console", (msg) => {
     if (msg.type() === "error" || msg.type() === "warning") {
       console.log(`[e2e][desktop][main:console] ${msg.type()}: ${msg.text()}`);
     }
   });
-  app.on("close", () => console.log("[e2e][desktop] electron application 关闭"));
+  app.on("close", () => {
+    // 进程退出：main() 若中途失败已写入日志，此时读取最完整（用户指令：进程退出后再读）。
+    console.log("[e2e][desktop] electron application 关闭");
+    readMainLog();
+  });
 
   return {
     app,

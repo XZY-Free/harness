@@ -191,6 +191,7 @@ async function main(): Promise<void> {
   });
 
   await app.whenReady();
+  logToE2EFile("stage: app.whenReady done");
 
   const runtimeConfigPath = app.isPackaged
     ? join(process.resourcesPath, "runtime-config.json")
@@ -208,11 +209,13 @@ async function main(): Promise<void> {
     rendererDir: join(app.getAppPath(), "renderer"),
     serverOrigin,
   });
+  logToE2EFile("stage: localRenderer started");
   let identity = await loadDeviceIdentity(keychain);
   if (identity === null) {
     identity = createDeviceIdentity();
     await saveDeviceIdentity(keychain, identity);
   }
+  logToE2EFile("stage: device identity ready");
   const deviceRegistration: DesktopDeviceRegistrationPayload = {
     deviceId: identity.deviceId,
     publicKey: identity.keyPair.publicKeyBase64,
@@ -238,6 +241,7 @@ async function main(): Promise<void> {
       ? join(process.resourcesPath, "desktop-migrations")
       : join(process.cwd(), "desktop/storage/migrations"),
   );
+  logToE2EFile("stage: desktopDatabase ready");
 
   // 初始化 Browser Controller
   const origins = loadAllowedOrigins();
@@ -385,7 +389,9 @@ async function main(): Promise<void> {
       });
     });
   };
+  logToE2EFile("stage: before createMainWindow");
   attachWindow(createMainWindow(localRenderer.origin));
+  logToE2EFile("stage: createMainWindow done");
 
   // macOS：点击 dock 图标无窗口时重建
   app.on("activate", () => {
