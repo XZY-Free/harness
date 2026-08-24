@@ -1,5 +1,5 @@
 /**
- * ArtifactAttestation 仓储与发布门禁。
+ * ArtifactAttestation 持久化写入入口（规范写入模块）。
  *
  * 事实源：docs/architecture/security.md -4.2、
  * docs/architecture/api-and-events.md §6（artifact-attestations:verify）、
@@ -14,9 +14,10 @@
  * - 无论成功失败都写 AuditEvent（action_type=artifact.attestation.verify）。
  * - 失败抛 ArtifactAttestationFailedError（含 failureCode），RouteSet 不变化。
  * - assertAttestationGate：发布门禁，校验 attestation 已 verified 且引用正确 revision。
- * - revokeAttestation：撤销 attestation（S12-W04）。
+ * - revokeAttestation：撤销 attestation。
  *
- * 只读查询已拆至 artifact-attestation-reader.ts；本模块 re-export 以保持向后兼容。
+ * 只读查询在 artifact-attestation-reader.ts；本模块只导出写入/验证/门禁/撤销四个操作，
+ * 不复导出只读函数/类型或任何错误类型（错误由调用方从真实所有者导入）。
  *
  * 审计语义：
  * - 验证动作（无论成功失败）写 AuditEvent，action_type=artifact.attestation.verify。
@@ -25,11 +26,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
-import {
-  AttestationAlreadyRevokedError,
-  AttestationNotFoundError,
-  createRevokeArtifactAttestation,
-} from "@/lib/artifacts/application/revoke-artifact-attestation";
+import { createRevokeArtifactAttestation } from "@/lib/artifacts/application/revoke-artifact-attestation";
 import { type VerificationState, isSha256Digest } from "@/lib/artifacts/domain/artifact";
 import {
   ArtifactAttestationFailedError,
@@ -40,22 +37,12 @@ import {
   type VerifyAttestationInput,
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
-import {
-  getAttestationById,
-  getVerifiedAttestationForRevision,
-  listAttestations,
-  listAttestationsByDigest,
-  listAttestationsByRevision,
-} from "@/lib/artifacts/persistence/artifact-attestation-reader";
-import type {
-  ArtifactAttestationWithRevocation,
-  ListAttestationsOptions,
-} from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import type { ArtifactAttestationWithRevocation } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import {
   type ArtifactAttestation,
   artifact,
   artifactAttestation,
-  type attestationRevocationRecord,
 } from "@/lib/artifacts/persistence/artifact-record";
 import {
   mysqlArtifactAttestationPersistenceStore,
@@ -63,7 +50,7 @@ import {
 } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { db } from "@/lib/db/client";
 import type { AuditActor } from "@/lib/identity/audit";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 const recordArtifactAttestation = createRecordArtifactAttestation({
   store: mysqlArtifactAttestationPersistenceStore,
@@ -302,7 +289,7 @@ export async function assertAttestationGate(
 // ─── 撤销：revokeAttestation ───────────────────────────────
 
 /**
- * 撤销 attestation（S12-W04）。
+ * 撤销 attestation。
  *
  * 行为：
  * 1. 校验 attestation 存在且属于当前租户。
@@ -334,34 +321,3 @@ export async function revokeAttestation(
   });
   return { attestation: result.attestation, revocation: result.revocation };
 }
-
-// ─── Re-exports ────────────────────────────────────────────
-
-export {
-  getAttestationById,
-  listAttestationsByRevision,
-  listAttestationsByDigest,
-  listAttestations,
-  getVerifiedAttestationForRevision,
-} from "@/lib/artifacts/persistence/artifact-attestation-reader";
-export type {
-  ArtifactAttestationWithRevocation,
-  ListAttestationsOptions,
-} from "@/lib/artifacts/persistence/artifact-attestation-reader";
-
-export type { ArtifactAttestation } from "@/lib/artifacts/persistence/artifact-record";
-export { AttestationAlreadyRevokedError, AttestationNotFoundError };
-export type { VerificationState } from "@/lib/artifacts/domain/artifact";
-export type { AttestationFailureCode } from "@/lib/artifacts/domain/artifact-attestation";
-export {
-  ArtifactAttestationFailedError,
-  ArtifactNotVerifiedError,
-  type BuilderKeyRegistry,
-  type ManagedArtifactStore,
-  type VerifyAttestationInput,
-  type VerifyAttestationResult,
-  computeArtifactDigest,
-  isManagedRef,
-  isValidArtifactDigest,
-  verifyArtifactAttestation,
-} from "@/lib/artifacts/domain/artifact-attestation";

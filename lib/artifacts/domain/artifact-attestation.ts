@@ -16,7 +16,7 @@
  * - 引用必须是受管对象（attestation: / oci:// / managed:// 前缀），不接受任意公网 URL。
  * - 验证失败也持久化记录（安全摘要 + AuditEvent），响应不泄露内部漏洞细节给无权调用者。
  *
- * 本模块是纯逻辑（不访问 DB）；持久化与审计在 artifact-attestation-queries.ts。
+ * 本模块是纯逻辑（不访问 DB）；持久化与审计在 artifact-attestation-writer.ts。
  */
 import { createHash } from "node:crypto";
 import { validateCycloneDX } from "@/lib/artifacts/verification/cyclonedx-validator";

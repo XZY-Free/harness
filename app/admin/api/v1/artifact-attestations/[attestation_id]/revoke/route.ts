@@ -9,9 +9,9 @@ import { projectArtifactAttestation } from "@/lib/artifacts/application/artifact
 import {
   AttestationAlreadyRevokedError,
   AttestationNotFoundError,
-  revokeAttestation,
-} from "@/lib/artifacts/persistence/artifact-attestation-queries";
+} from "@/lib/artifacts/application/revoke-artifact-attestation";
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import { revokeAttestation } from "@/lib/artifacts/persistence/artifact-attestation-writer";
 /**
  * POST /admin/api/v1/artifact-attestations/{attestation_id}/revoke — 撤销制品证明（S12-W04）。
  *

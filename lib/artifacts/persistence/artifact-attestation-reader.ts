@@ -1,8 +1,8 @@
 import type { VerificationState } from "@/lib/artifacts/domain/artifact";
 /**
- * ArtifactAttestation 只读查询。
+ * ArtifactAttestation 只读查询（持久只读职责）。
  *
- * 从 artifact-attestation-queries.ts 拆出，职责：
+ * 职责：
  * - getAttestationById / listAttestationsByRevision / listAttestationsByDigest /
  * listAttestations / getVerifiedAttestationForRevision：纯读，不写事务。
  *

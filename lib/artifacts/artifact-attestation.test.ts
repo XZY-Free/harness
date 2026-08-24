@@ -5,7 +5,7 @@
  * - artifact-attestation 纯逻辑：computeArtifactDigest / isValidArtifactDigest / isManagedRef / verifyArtifactAttestation。
  * - 验证服务校验链：artifactType/digest/受管引用/builder/签名/SBOM/provenance 全部场景。
  * - artifact-attestation-reader：getAttestationById/listAttestationsByRevision/listAttestationsByDigest/getVerifiedAttestationForRevision。
- * - artifact-attestation-queries：insertAttestation/verifyAndPersistAttestation/assertAttestationGate。
+ * - artifact-attestation-writer：insertAttestation/verifyAndPersistAttestation/assertAttestationGate。
  * - verifyAndPersistAttestation：成功/失败持久化 + 审计 + 抛错。
  * - assertAttestationGate：发布门禁全部场景。
  * - publishRuntimeRevisionWithAttestation：attestation + conformance 双门禁 + Runtime 发布 + 审计。
@@ -37,16 +37,16 @@ import {
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
-  assertAttestationGate,
-  insertAttestation,
-  verifyAndPersistAttestation,
-} from "@/lib/artifacts/persistence/artifact-attestation-queries";
-import {
   getAttestationById,
   getVerifiedAttestationForRevision,
   listAttestationsByDigest,
   listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import {
+  assertAttestationGate,
+  insertAttestation,
+  verifyAndPersistAttestation,
+} from "@/lib/artifacts/persistence/artifact-attestation-writer";
 import { publishRuntimeRevisionWithAttestation } from "@/lib/artifacts/test-support/attempt-runtime-publication-with-attestation-without-trusted-run";
 import {
   type PredicateSupplyChain,
@@ -797,10 +797,10 @@ describe("verifyArtifactAttestation 校验链", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 3. DB 集成：artifact-attestation-queries 仓储
+// 3. DB 集成：artifact-attestation-writer 仓储
 // ═══════════════════════════════════════════════════════════
 
-describe("artifact-attestation-queries 仓储（真实 MySQL）", () => {
+describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
   let tenantId: string;
   let otherTenantId: string;
 

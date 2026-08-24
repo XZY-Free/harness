@@ -35,11 +35,11 @@ import {
   setArtifactStoreOverride,
   setBuilderKeyRegistryOverride,
 } from "@/lib/artifacts/infrastructure/artifact-store-provider";
-import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
 import {
   getAttestationById,
   listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-writer";
 import { mysqlAttestationRevocationStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import {
   type PredicateSupplyChain,

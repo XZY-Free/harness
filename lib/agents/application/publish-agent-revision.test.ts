@@ -11,7 +11,7 @@ import {
   getRevisionsByAgent,
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
-import { insertAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { insertAttestation } from "@/lib/artifacts/persistence/artifact-attestation-writer";
 import { artifact } from "@/lib/artifacts/persistence/artifact-record";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";

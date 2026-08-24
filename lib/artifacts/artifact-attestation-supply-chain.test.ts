@@ -14,6 +14,10 @@
  */
 import { randomUUID } from "node:crypto";
 import {
+  AttestationAlreadyRevokedError,
+  AttestationNotFoundError,
+} from "@/lib/artifacts/application/revoke-artifact-attestation";
+import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
   type ProvenanceDocument,
@@ -22,19 +26,18 @@ import {
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import {
-  AttestationAlreadyRevokedError,
-  AttestationNotFoundError,
-  assertAttestationGate,
-  insertAttestation,
-  revokeAttestation,
-  verifyAndPersistAttestation,
-} from "@/lib/artifacts/persistence/artifact-attestation-queries";
-import {
   getAttestationById,
   getVerifiedAttestationForRevision,
   listAttestations,
   listAttestationsByRevision,
 } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import {
+  assertAttestationGate,
+  insertAttestation,
+  revokeAttestation,
+  verifyAndPersistAttestation,
+} from "@/lib/artifacts/persistence/artifact-attestation-writer";
+
 import {
   type PredicateSupplyChain,
   type TestBuilderKey,

@@ -7,7 +7,7 @@ import {
   type VerifyAttestationInput,
   computeArtifactDigest,
 } from "@/lib/artifacts/domain/artifact-attestation";
-import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-writer";
 import {
   buildDsseArtifactAttestationEnvelope,
   generateTestBuilderKey,

@@ -5,6 +5,7 @@ import {
   resolveAdminPrincipalAsync,
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
+import { ArtifactAttestationFailedError } from "@/lib/artifacts/domain/artifact-attestation";
 import {
   getBuilderKeyRegistry,
   getManagedArtifactStore,
@@ -36,10 +37,7 @@ import {
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  * - 验证失败 → 422 ARTIFACT_ATTESTATION_FAILED（失败记录已持久化 + 审计已写）
  */
-import {
-  ArtifactAttestationFailedError,
-  verifyAndPersistAttestation,
-} from "@/lib/artifacts/persistence/artifact-attestation-queries";
+import { verifyAndPersistAttestation } from "@/lib/artifacts/persistence/artifact-attestation-writer";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
