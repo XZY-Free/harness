@@ -36,7 +36,8 @@ import {
 import { PendingInputQueue } from "./pending-input-queue";
 
 interface ThreadInputProps {
-  readonly threadId: string;
+  /** 真实 Thread id；null 表示新建页（首条消息经 onSubmitText 创建 Thread+Turn）。 */
+  readonly threadId: string | null;
   readonly latestTurn: ClientTurn | null;
   readonly thread?: ClientThread | null;
   /** Desktop 已加载的真实助手列表。 */
@@ -95,7 +96,8 @@ export function ThreadInput({
     clearError: clearTurnError,
   } = useTurnControls(turnId);
 
-  const { text, setText, clear: clearDraft } = useThreadDraft(draftKey ?? threadId);
+  // threadId 为 null 时仅新建页（必带 draftKey）会命中；调用方漏传时兜底到新建草稿键。
+  const { text, setText, clear: clearDraft } = useThreadDraft(draftKey ?? threadId ?? "new-thread");
   const [customBusy, setCustomBusy] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const busy = threadBusy || customBusy || turnBusy;
@@ -173,8 +175,8 @@ export function ThreadInput({
   return (
     <div className="sticky bottom-0 z-20 shrink-0 bg-background/95 pt-2 pb-[calc(16px+env(safe-area-inset-bottom))] backdrop-blur-sm">
       <div className="composer-track">
-        {/* W4-1：待办队列移入输入框上方，宽度与输入框对齐。 */}
-        {isRunning && !onSubmitText && (
+        {/* W4-1：待办队列移入输入框上方，宽度与输入框对齐；仅在真实 Thread 下渲染。 */}
+        {threadId !== null && isRunning && !onSubmitText && (
           <PendingInputQueue threadId={threadId} onSteer={handleSteer} parentBusy={turnBusy} />
         )}
 
@@ -222,7 +224,7 @@ export function ThreadInput({
 
           {/* 底部工具行：窄屏标签收缩/截断，关键按钮不被挤出 */}
           <div className="mt-2 flex min-w-0 items-center gap-1">
-            <PlusMenuPopover threadId={threadId} />
+            <PlusMenuPopover />
 
             {/* 专题01：Agent 选择器仅在建会话（new-thread 提供 onAgentChange）渲染；
                 既有 Thread 不再绑主 Agent（primary_agent_id 已移除），选择无 handoff 动作，故不渲染。 */}

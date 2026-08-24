@@ -71,7 +71,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
             }
           : current,
       );
-      clearStoredThreadDraft("new");
+      clearStoredThreadDraft("new-thread");
       // 用原生 history.replaceState 更新地址，不触发会卸载 shell 的 App Router 导航；
       // activeThreadId 原地切换到新 Thread，同一组件树直接渲染 ThreadPage。
       window.history.replaceState(null, "", `/chat/${created.id}`);

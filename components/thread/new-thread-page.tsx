@@ -58,8 +58,8 @@ export function NewThreadPage({
       )}
       <ThreadTimeline items={[]} streamStatus="idle" />
       <ThreadInput
-        threadId="new"
-        draftKey="new"
+        threadId={null}
+        draftKey="new-thread"
         latestTurn={null}
         availableAgents={agents}
         currentAgentId={agentId}

@@ -4,6 +4,7 @@ import { relative, resolve } from "node:path";
 import {
   type SourceDocument,
   collectDeprecatedArchitectureViolations,
+  collectTopic01BoundaryViolations,
 } from "./architecture-gate-rules";
 
 const ROOT = process.cwd();
@@ -129,70 +130,22 @@ function checkDeprecatedArchitecture(): void {
   pass("未发现未登记的已废弃架构表述");
 }
 
-/** 剥离行/块注释，仅剩可执行代码，用于边界规则文本扫描。 */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((line) => line.replace(/\/\/.*$/, ""))
-    .join("\n");
-}
-
 /**
  * 专题01 §23.2 / §32 最终 Architecture Gate 边界规则。
  *
- * 覆盖：
- * - Thread.primaryAgentId 作为身份字段（Thread 不绑主 Agent）
- * - DEFAULT_AGENT_KEY / seedDefaultAgent（无默认 Agent fallback）
- * - defaultAgentId（新建不默认选中 Agent）
- * - agentKey === "default" fallback
- * - /chat/new、/desktop/new 假 new 路由（§33.7 产品入口）
- * - 客户端 agents.length===0 执行阻断（§35 无 Agent 阻断移除）
- * - 正式 Route union 出现 chat/thread kind 漂移（§23.2）
- *
- * §23.1：test-support 不因路径 blanket 豁免——本函数对全部 sourceFiles
- * 扫描（含 /test-support/），仅排除 .test.* 断言文件（测试可构造旧场景）。
- * 当前 test-support 无边界词；未来若真实 fixture 必须出现某规则词，在此按
- * 文件加窄白名单，而不是整体跳过目录。
+ * 纯规则实现位于 architecture-gate-rules.collectTopic01BoundaryViolations，
+ * 本处仅构造 SourceDocument 并调用，失败信息列出违规路径。
+ * 作用域与精确排除（含 .test.* 与规则定义文件 scripts/architecture-gate.ts、
+ * scripts/architecture-gate-rules.ts）由纯规则模块负责，此处不重复正则。
  */
 function checkTopic01Boundaries(): void {
-  // 边界规则只扫生产源码根；docs 是方案说明文档（含被禁词是为了描述检测项），不扫。
-  // gate 自身源码含这些标识符（作为检测正则），豁免 scripts/architecture-gate.ts。
   const PRODUCTION_ROOTS = ["app", "components", "desktop", "lib", "scripts"];
-  const boundaryPatterns: Array<{ pattern: RegExp; title: string }> = [
-    { pattern: /\.primaryAgentId\b|\bprimaryAgentId\s*:/, title: "Thread.primaryAgentId 身份字段" },
-    { pattern: /\bDEFAULT_AGENT_KEY\b/, title: "DEFAULT_AGENT_KEY" },
-    { pattern: /\bseedDefaultAgent\b/, title: "seedDefaultAgent" },
-    { pattern: /\bdefaultAgentId\b/, title: "defaultAgentId" },
-    { pattern: /agentKey\s*===?\s*["']default["']/i, title: "agentKey=default fallback" },
-    { pattern: /["']\/chat\/new["']/, title: "/chat/new 假 new 路由" },
-    { pattern: /["']\/desktop\/new["']/, title: "/desktop/new 假 new 路由" },
-    {
-      // §35：仅禁止「agents.length===0 执行阻断」（return/throw 阻止创建）。
-      // 「暂无可用助手」空态展示（agents.length === 0 && <SelectorMessage>）合法，不匹配。
-      pattern: /agents\.length\s*===?\s*0\s*\)\s*(?:return|throw)/,
-      title: "客户端 agents.length===0 执行阻断",
-    },
-  ];
-  const violations: string[] = [];
-  const files = PRODUCTION_ROOTS.flatMap((root) => filesUnder(resolve(ROOT, root)));
-  for (const file of files) {
-    const extension = file.slice(file.lastIndexOf("."));
-    if (!SOURCE_EXTENSIONS.has(extension)) continue;
-    const repoPath = relative(ROOT, file);
-    if (repoPath === "scripts/architecture-gate.ts") continue;
-    if (repoPath.endsWith(".test.ts") || repoPath.endsWith(".test.tsx")) continue;
-    const source = stripComments(readFileSync(file, "utf8"));
-    for (const rule of boundaryPatterns) {
-      if (rule.pattern.test(source)) {
-        violations.push(`${repoPath} → ${rule.title}`);
-      }
-    }
-    // 正式 Route 系统（lib/routes）不得出现 chat/thread kind 漂移（§23.2/§32）。
-    if (repoPath.startsWith("lib/routes/") && /kind\s*[:=]\s*["']chat["']/.test(source)) {
-      violations.push(`${repoPath} → 正式 route.kind 与 chat/thread union 漂移`);
-    }
-  }
+  const documents: SourceDocument[] = PRODUCTION_ROOTS.flatMap((root) =>
+    filesUnder(resolve(ROOT, root)),
+  )
+    .filter((file) => SOURCE_EXTENSIONS.has(file.slice(file.lastIndexOf("."))))
+    .map((file) => ({ path: relative(ROOT, file), source: readFileSync(file, "utf8") }));
+  const violations = collectTopic01BoundaryViolations(documents);
   if (violations.length > 0) {
     fail(`专题01 Harness/Agent 边界规则违规：\n  ${violations.join("\n  ")}`);
     return;

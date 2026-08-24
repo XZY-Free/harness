@@ -89,7 +89,8 @@ export function deriveSendRoute(latestTurn: ClientTurn | null): SendRoute {
 }
 
 interface UseThreadInputParams {
-  readonly threadId: string;
+  /** 真实 Thread id；null 表示尚未创建正式 Thread（新建页首条消息走 onSubmitText）。 */
+  readonly threadId: string | null;
   readonly latestTurn: ClientTurn | null;
 }
 
@@ -102,7 +103,8 @@ export function useThreadInput({
   const [error, setError] = useState<ClientVisibleError | null>(null);
   const [lastRoute, setLastRoute] = useState<SendRoute>("none");
 
-  const route = deriveSendRoute(latestTurn);
+  // 无真实 Thread id（新建页）时不得走任何 turns/pending-inputs 路由。
+  const route = threadId === null ? "none" : deriveSendRoute(latestTurn);
 
   const send = useCallback(
     async (text: string): Promise<boolean> => {
@@ -115,6 +117,19 @@ export function useThreadInput({
           recoveryAction: "none",
           requestId: null,
         });
+        return false;
+      }
+      // fail-closed：threadId 为空时绝不拼接 API URL，直接返回失败并设置明确错误。
+      if (threadId === null) {
+        setError({
+          code: "REQUEST_SCHEMA_INVALID",
+          title: "无法发送",
+          description: "尚未创建正式 Thread，无法直接发送消息。",
+          retryable: false,
+          recoveryAction: "none",
+          requestId: null,
+        });
+        setLastRoute("none");
         return false;
       }
       setBusy(true);

@@ -21,7 +21,7 @@ import { useState } from "react";
 
 /* ─── ＋ 菜单 ─── */
 
-export function PlusMenuPopover({ threadId }: { readonly threadId: string }) {
+export function PlusMenuPopover() {
   const [open, setOpen] = useState(false);
 
   return (

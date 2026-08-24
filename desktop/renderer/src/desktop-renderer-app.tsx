@@ -80,7 +80,7 @@ function DesktopShell() {
             }
           : current,
       );
-      clearStoredThreadDraft("new");
+      clearStoredThreadDraft("new-thread");
       navigateDesktop(`/desktop/chat/${thread.id}`, true);
       return true;
     } catch (submitError) {
