@@ -88,27 +88,17 @@ jobs:
       - name: Install Electron binary
         run: node node_modules/electron/install.js
 
-      # Electron E2E 需要 X server（Desktop / Cross-client 用例真启动 Electron）。
-      # gnome-keyring + dbus-x11 提供 DBus secret service：CI Linux 无桌面 secret
-      # service 时，Electron safeStorage.isEncryptionAvailable() 为 false，
-      # 主进程 saveDeviceIdentity 的 keychain.set 抛 KEYCHAIN_ERROR 拒绝启动
-      # （Desktop E2E firstWindow closed）。--password-store=basic 不影响 Electron
-      # safeStorage（libsecret 后端），故 CI 显式装 gnome-keyring。
-      - name: Install Xvfb and gnome-keyring
-        run: sudo apt-get update && sudo apt-get install -y xvfb gnome-keyring dbus-x11
+      # Web Playwright E2E 需要 X server（xvfb-run 包装 test:e2e）。
+      # gnome-keyring + dbus-x11 随真启动 Electron 的用例迁至独立 desktop-e2e job——
+      # 只有那类用例需要 DBus secret service（Electron safeStorage）。
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Unit and MySQL integration tests
         run: pnpm test
 
       - name: Control-plane and Hosted E2E
         run: pnpm vitest run lib/control-plane/end-to-end-acceptance.test.ts
-
-      # Desktop E2E 依赖打包产物与为 Electron ABI 重建的 better-sqlite3。
-      - name: Desktop build
-        run: pnpm build:desktop
-
-      - name: Desktop native rebuild
-        run: pnpm rebuild:desktop-native
 
       # §20.4：Web 正式执行链（Thread → Turn → Invocation → Binding → Event → 回复）。
       # 契约：CI 门禁要求以 pnpm test:e2e 声明，避免裸 playwright 命令与脚本语义漂移。
@@ -122,30 +112,73 @@ jobs:
       - name: Desktop smoke
         run: pnpm vitest run desktop/main/local-renderer-server.test.ts
 
-      # Electron 二进制诊断：playwright 的 install target 不含 electron
-      # （`playwright install electron` 非法，报 Invalid installation targets），Electron
-      # 二进制由 npm 包 install.js 下载、系统图形库由前面 `--with-deps chromium` 提供。
-      # 用 ldd 确认共享库完整，--version 冒烟确认二进制可执行，定位 Desktop E2E 启动失败。
+      # §20.5 Desktop E2E / §20.6 Cross-client E2E 已从巨型串行 verify 拆出，
+      # 迁至独立 desktop-e2e job——真启动 Electron 的用例（含其 Xvfb/gnome-keyring/
+      # Electron 二进制诊断与 safeStorage 冒烟）只等那个 job 快速反馈。
+
+      - name: Production Web build
+        run: pnpm build:prod
+
+  # §20.5/§20.6 Desktop E2E 独立 job：真启动 Electron 验证 Desktop 走同一 Conversation
+  # API 与正式 Binding，以及 Web 与 Desktop 共用同一 Thread。从巨型串行 verify 中拆出，
+  # 使 Desktop 相关改动只等本 job 快速反馈，不必重跑 verify 的整套契约/单测/Web 门禁。
+  # 仍是完整 CI 的一部分——verify + desktop-e2e + security 全绿才通过门禁，不降低验收。
+  desktop-e2e:
+    runs-on: ubuntu-latest
+    env:
+      # E2E 的 webServer（scripts/e2e-start.mts）自用 testcontainers 起 MySQL，
+      # 不依赖 verify job 的 13306 容器。此 env 与 verify 保持一致，行为无漂移。
+      DATABASE_URL: mysql://test:test@127.0.0.1:13306/snow_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_manager: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Electron 二进制：pnpm 10.32 真 workspace 下判定失效，install.js 兜底下载。
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
+
+      # Playwright Chromium：cross-client 的 Web 侧用真实浏览器；保守安装保证可用。
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Electron E2E 需要 X server 与 DBus secret service（safeStorage）。
+      - name: Install Xvfb and gnome-keyring
+        run: sudo apt-get update && sudo apt-get install -y xvfb gnome-keyring dbus-x11
+
+      # Electron 二进制可执行性冒烟（正式 E2E 前的快速失败信号）。
       - name: Diagnose Electron binary
         run: |
           ldd node_modules/electron/dist/electron | grep "not found" || echo "LDD-OK: Electron 共享库已满足"
           timeout 15 xvfb-run -a node_modules/electron/dist/electron --no-sandbox --version
 
-      # Electron 主进程冒烟：直接启动打包主进程 bundle，捕获主进程 stderr，定位
-      # Desktop E2E firstWindow closed 的真实根因（主进程在窗口创建前崩溃）。候选：
-      # safeStorage/keychain 在 Linux 无 secret service 时 set 抛 KEYCHAIN_ERROR。
-      # Electron 主进程冒烟：在 gnome-keyring secret service 下直接启动打包主进程，
-      # 确认 safeStorage 可用、主进程不再因 keychain_error 拒绝启动（用于根因回归确认）。
-      - name: Electron main-process smoke
+      # 真实 safeStorage 冒烟：断言 isEncryptionAvailable()，非零退出即失败。
+      # 这是 Desktop E2E 历史上 firstWindow closed 的根因闸门——替换被弃用的
+      # set +e main-process smoke（那不能作为启动成功证据）。修复方向：不传
+      # --password-store=basic，让 gnome-keyring 提供 secret service（gnome_libsecret）。
+      - name: Electron safeStorage smoke
         run: >-
           dbus-run-session -- bash -c '
             echo "" | gnome-keyring-daemon --unlock --replace --components=secrets >/dev/null 2>&1 &
             sleep 2
-            set +e
-            timeout 25 xvfb-run -a node_modules/electron/dist/electron desktop/package-app
-              --no-sandbox --password-store=basic --user-data-dir="$(mktemp -d)" 2>&1 | head -40
-            echo "MAIN_EXIT=${PIPESTATUS[0]}"
+            xvfb-run -a node_modules/electron/dist/electron e2e/support/electron-safe-storage-smoke.js
           '
+
+      # Desktop E2E 依赖打包产物与为 Electron ABI 重建的 better-sqlite3。
+      - name: Desktop build
+        run: pnpm build:desktop
+
+      - name: Desktop native rebuild
+        run: pnpm rebuild:desktop-native
 
       # §20.5：真启动 Electron，验证 Desktop 走同一 Conversation API 与正式 Binding。
       # 在 gnome-keyring secret service 下运行，使 Electron safeStorage 可用。
@@ -165,9 +198,6 @@ jobs:
             sleep 2
             xvfb-run -a pnpm exec playwright test e2e/cross-client.spec.ts
           '
-
-      - name: Production Web build
-        run: pnpm build:prod
 
   security:
     runs-on: ubuntu-latest
