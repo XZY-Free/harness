@@ -60,11 +60,13 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
       `--user-data-dir=${userDataDir}`,
       // CI 容器内 Chromium 沙箱不可用。
       "--no-sandbox",
-      // 注意：不要传 --password-store=basic。Electron 在 Linux 检测到 basic
-      // backend 时 safeStorage.isEncryptionAvailable() 恒为 false（basic 无真实
+      // 必须显式指定 gnome-libsecret backend。CI 容器无 XDG_CURRENT_DESKTOP 等
+      // 桌面环境标识，Chromium 识别不了桌面环境会默认 fallback 到 basic_text，
+      // 而 basic_text 下 safeStorage.isEncryptionAvailable() 恒为 false（无真实
       // secret key），导致设备身份 keychain.set 抛 KEYCHAIN_ERROR 拒绝启动。
-      // CI 用 dbus-run-session + gnome-keyring 提供 org.freedesktop.secrets 服务，
-      // 让 Electron 走 gnome_libsecret backend，safeStorage 才可用。
+      // 显式选 gnome_libsecret，配合 CI 的 dbus-run-session + gnome-keyring 提供
+      // org.freedesktop.secrets 服务，safeStorage 才可用。macOS 忽略该 flag。
+      "--password-store=gnome-libsecret",
     ],
     env: {
       ...process.env,

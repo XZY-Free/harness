@@ -16,7 +16,9 @@ const { app, safeStorage } = require("electron");
 app.whenReady().then(() => {
   let backend;
   try {
-    backend = safeStorage.getSelectedStorageBackend ? safeStorage.getSelectedStorageBackend() : "n/a";
+    backend = safeStorage.getSelectedStorageBackend
+      ? safeStorage.getSelectedStorageBackend()
+      : "n/a";
   } catch {
     backend = "error";
   }

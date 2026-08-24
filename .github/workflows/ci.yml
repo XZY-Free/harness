@@ -163,16 +163,17 @@ jobs:
 
       # 真实 safeStorage 冒烟：断言 isEncryptionAvailable()，非零退出即失败。
       # 这是 Desktop E2E 历史上 firstWindow closed 的根因闸门——替换被弃用的
-      # set +e main-process smoke（那不能作为启动成功证据）。修复方向：不传
-      # --password-store=basic，让 gnome-keyring 提供 secret service（gnome_libsecret）。
-      # 必须加 --no-sandbox：CI 容器内 Chromium 沙箱不可用，否则 Electron 在
-      # app.whenReady 前崩溃（exit 133），跑不到 safeStorage 检查。
+      # set +e main-process smoke（那不能作为启动成功证据）。
+      # 修复方向：显式 --password-store=gnome-libsecret，让 Electron 走 gnome_libsecret
+      # backend 并经 gnome-keyring 提供的 DBus secret service 取得加密 key。CI 容器
+      # 无桌面环境标识，若不显式指定会 fallback 到 basic_text → isEncryptionAvailable
+      # 恒 false。必须加 --no-sandbox（容器内沙箱不可用，否则 whenReady 前崩）。
       - name: Electron safeStorage smoke
         run: >-
           dbus-run-session -- bash -c '
             echo "" | gnome-keyring-daemon --unlock --replace --components=secrets >/dev/null 2>&1 &
             sleep 2
-            xvfb-run -a node_modules/electron/dist/electron --no-sandbox e2e/support/electron-safe-storage-smoke.js
+            xvfb-run -a node_modules/electron/dist/electron --no-sandbox --password-store=gnome-libsecret e2e/support/electron-safe-storage-smoke.js
           '
 
       # Desktop E2E 依赖打包产物与为 Electron ABI 重建的 better-sqlite3。
