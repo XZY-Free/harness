@@ -2,25 +2,21 @@ import { issueContextHandle } from "@/lib/context/context-handle";
 import { getItemById } from "@/lib/conversations/thread-item-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
- * 重调度编排（S09-C06）。
+ * 重调度编排。
  *
  * 事实源：
- * - docs/architecture/persistence.md （Invocation 状态机）、（ExecutionBinding 不可变）、
- * （InvocationAttempt 状态机）、（producer_sequence 在整个 Invocation 内连续）、
- * （RuntimeSessionBinding lost）、（事务边界）、§13（Worker 失联恢复）
- * - docs/architecture/conversations.md §3（Resume 与恢复）、
- * §14（Durable Workflow 边界：Workflow Provider 不成为业务状态源）
- * - docs/architecture/api-and-events.md （startInvocation）、（resume + requires_redispatch）
- * - docs/architecture/conversations.md 、S09-C06
+ * - docs/architecture/persistence.md
+ * - docs/architecture/conversations.md
+ * - docs/architecture/api-and-events.md
  *
  * 职责：
  * - redispatchInvocation：为同一 Invocation 创建新 Attempt + 调用 Runtime startInvocation（attempt_no > 1）
  * + 标记旧 RuntimeSessionBinding 为 lost + 创建新 RuntimeSessionBinding + 更新 Invocation 状态 + 写 invocation.started Event。
  *
- * 关键约束（§13 不变量）：
+ * 关键约束：
  * - 不新建 continuation Invocation（同一 invocationId 重调度）。
  * - 不更换 ExecutionBinding（binding 不可变，1:1）。
- * - producer_sequence 在整个 Invocation 内连续，不按 Attempt 从 1 重启（）。
+ * - producer_sequence 在整个 Invocation 内连续，不按 Attempt 从 1 重启。
  * - 终态 Invocation 不可重调度（completed/failed/cancelled/lost）。
  * - 旧 RuntimeSessionBinding 必须标记为 lost（Runtime 内存状态已丢失，原 session 不可用）。
  * - 不伪造完成：Runtime 未接受时不能将 Invocation 转为 completed（§13）。
@@ -140,8 +136,7 @@ export interface RedispatchResult {
 /**
  * 为同一 Invocation 创建新 Attempt 并调用 Runtime startInvocation 重调度。
  *
- * 事实源：（Invocation 状态机）、（Attempt 状态机）、（producer_sequence 连续性）、
- * （RuntimeSessionBinding lost）、（事务边界）、§13（不伪造完成）。
+ * 事实源：docs/architecture/persistence.md 与 docs/architecture/conversations.md。
  *
  * 流程：
  * 1. 加载 Invocation（跨租户隔离）+ 校验状态 ∈ (queued, running, waiting_user)。

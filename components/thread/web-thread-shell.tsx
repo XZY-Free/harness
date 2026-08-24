@@ -56,7 +56,7 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
     id: thread.id,
     title: thread.title,
   }));
-  // : 线程不再绑定 Agent（G 阶段移除），shell 不再返回 agents。
+  // 线程不再绑定 Agent，shell 不再返回 agents。
   const agents: AgentOption[] = [];
 
   const submitNewThread = async (submission: ClientNewThreadSubmission): Promise<boolean> => {

@@ -1,5 +1,5 @@
 /**
- * : Configured Route Resolver — 唯一解析入口。
+ * Configured Route Resolver — 唯一解析入口。
  *
  * 所有执行路径（Employee Turn、Dispatcher、Binding）必须共用此入口，
  * 不得在各自模块内单独组装 Resolver。
@@ -52,7 +52,7 @@ export type ConfiguredRouteResolver = (
 // ─── 工厂 ────────────────────────────────────────────────
 
 /**
- * : 创建唯一 Route Resolver 入口。
+ * 创建唯一 Route Resolver 入口。
  *
  * 此函数是唯一的 Resolver 组装点。
  * Employee Turn 和 Dispatcher 必须调用此函数获取 Resolver。
@@ -65,7 +65,7 @@ export function createConfiguredRouteResolver(
   ): Promise<ConfiguredResolveRouteResult> {
     const start = Date.now();
 
-    // : Projection 是唯一数据源 — 单次 SQL 查询 eligible 候选
+    // Projection 是唯一数据源 — 单次 SQL 查询 eligible 候选
     const candidates = await deps.projectionStore.loadCandidates({
       tenantId: command.tenantId,
       agentConstraint: command.agentConstraint ?? null,

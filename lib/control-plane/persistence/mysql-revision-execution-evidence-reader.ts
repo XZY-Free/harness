@@ -1,5 +1,5 @@
 /**
- * : Revision 执行资格唯一 MySQL 实现。
+ * Revision 执行资格的唯一 MySQL 实现。
  *
  * 组合低层 Reader（ArtifactEvidence、PublicationEvidence、ConformanceEvidence）
  * + Agent/Runtime 主体读取 + Policy 读取，产出唯一权威 Snapshot。
@@ -7,7 +7,7 @@
  * 所有低层 Reader 接受调用方传入的 DB Session 或 Transaction，
  * 本模块禁止内部使用全局 db（规则）。
  *
- * 参见：SnowHarness专题01最终差距整改与正式链路收口实施方案
+ * 事实源：docs/architecture/agent-control-plane.md 与 docs/architecture/persistence.md。
  */
 
 import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
@@ -40,7 +40,7 @@ import { and, eq, isNull } from "drizzle-orm";
 /**
  * MySQL 实现的依赖注入。
  *
- * /: 所有 DB 访问必须通过 dbOrTx 参数，禁止内部使用全局 db。
+ * 所有 DB 访问必须通过 dbOrTx 参数，禁止内部使用全局 db。
  */
 export interface MySqlRevisionExecutionEvidenceReaderDeps {
   db: DbOrTx;
@@ -76,7 +76,7 @@ type DbLike = DbOrTx;
 /**
  * 核心证据加载逻辑 — loadCurrentEvidence 和 loadExactEvidence 共用。
  *
- * @param dbOrTx DB 实例或事务（: 由调用方传入）
+ * @param dbOrTx 由调用方传入的 DB 实例或事务
  * @param input 加载参数
  * @param exactConformanceRunId 非null时使用精确冻结的 conformanceRunId
  */
@@ -85,9 +85,9 @@ async function loadEvidence(
   input: LoadEvidenceInput,
   exactConformanceRunId: string | null,
 ): Promise<RevisionExecutionEvidenceSnapshot> {
-  // : 并行加载所有证据 — 真实读取，禁止硬编码
+  // 并行加载所有证据 — 真实读取，禁止硬编码
 
-  // Phase 1: 并行加载 Evidence + Publication + Revision 行
+  // 1. 并行加载 Evidence + Publication + Revision 行
   // 无 Agent 约束（agentRevisionId === null）→ 基础 Harness Route，跳过 Agent 维度查询。
   const hasAgentConstraint = input.agentRevisionId !== null;
   const [
@@ -142,7 +142,7 @@ async function loadEvidence(
       .then((r) => r[0] ?? null),
   ]);
 
-  // Phase 2: 用 Revision 行的 agentId/runtimeId 加载 Agent/Runtime 主体
+  // 2. 用 Revision 行的 agentId/runtimeId 加载 Agent/Runtime 主体
   const [agentRow, runtimeRow] = await Promise.all([
     agentRevisionRow
       ? dbOrTx
@@ -164,7 +164,7 @@ async function loadEvidence(
       : Promise.resolve(null),
   ]);
 
-  // Phase 3: 加载 Conformance 证据
+  // 3. 加载 Conformance 证据
   // 规范化为包含原始 Run/Case 事实 + 从当前 RuntimeRevision 真实读取的期望值。
   // 期望值缺失显式 null 并 fail-closed，禁止空字符串兜底。
   const conformanceRunId = exactConformanceRunId ?? runtimePublication?.conformanceRunId ?? null;
@@ -189,14 +189,14 @@ async function loadEvidence(
       }
     : null;
 
-  // Phase 4: : 加载 Policy Requirement（Fail-closed，含租户校验）
+  // 4. 加载 Policy Requirement（Fail-closed，含租户校验）
   const policyResult = await loadPolicyRequirement(dbOrTx, input.policyRevisionId, input.tenantId);
   if (!policyResult.ok) {
     throw new EligibilityError(policyResult.failureCode, policyResult.failureReason);
   }
   const policyRequirement = policyResult.requirement;
 
-  // : Fail-closed Capability 解析
+  // Fail-closed Capability 解析
   const runtimeCapabilities = extractRuntimeCapabilities(
     runtimeRevisionRow?.runtimeCapabilitiesJson,
   );
@@ -206,7 +206,7 @@ async function loadEvidence(
     agentRevisionId: input.agentRevisionId,
     agentArtifactEvidence,
     agentPublication,
-    // : 真实读取生命周期状态，禁止硬编码 active
+    // 真实读取生命周期状态，禁止硬编码 active
     agentLifecycleState: agentRow?.lifecycleState === "enabled" ? "active" : "archived",
     agentRevisionState:
       agentRevisionRow?.revisionState === "published"
@@ -231,7 +231,7 @@ async function loadEvidence(
 }
 
 /**
- * : 加载 Policy Requirement — Fail-closed。
+ * 加载 Policy Requirement；缺失或跨租户时 fail-closed。
  *
  * policyRevisionId 为 null → Route 未引用 Policy → { kind: "none" }
  * policyRevisionId 非 null → 必须读取完整状态，校验租户范围，返回 PolicyRequirementResult。

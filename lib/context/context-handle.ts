@@ -127,7 +127,7 @@ async function loadPersistedBinding(tenantId: string, invocationId: string) {
       threadId: invocationTable.threadId,
       triggerItemId: invocationTable.triggerItemId,
       userId: threadTable.ownerUserId,
-      // : 从已创建的执行链（ExecutionBinding → AgentRevision）反查；null = 基础 Harness Route。
+      // 从已创建的执行链（ExecutionBinding → AgentRevision）反查；null = 基础 Harness Route。
       agentId: agentRevisionTable.agentId,
       workspaceId: threadTable.defaultWorkspaceId,
       agentRevisionId: executionBindingTable.agentRevisionId,

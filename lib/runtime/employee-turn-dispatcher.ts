@@ -17,7 +17,7 @@ import { streamText } from "ai";
 
 type ModelFn = (message: string, context: HostedModelContext) => Promise<string>;
 
-/** : 使用统一解析入口 — Projection 是唯一数据源。 */
+/** 使用统一解析入口 — Projection 是唯一数据源。 */
 const configuredResolver = createConfiguredRouteResolver({
   projectionStore: mysqlRouteEligibilityResolutionStore,
 });
@@ -58,8 +58,8 @@ function configuredModelFn(): ModelFn {
  *
  * 正式热路径（§9.3）：读取 Thread → Resolve 基础 Harness Route（agentConstraint 默认 null，§8.3）
  * → 创建 Invocation → 创建 ExecutionBinding → Runtime Dispatch。
- * 无 Ready Route 时返回未调度（不做 Agent-specific Hosted Provisioning，§11.2/§11.5）；
- * 基础 Harness Route 的供应策略由后续阶段（F）通过正式控制面初始化。
+ * 无 Ready Route 时保持 accepted 并返回未调度（热路径不做 Agent-specific Hosted Provisioning，§11.2/§11.5）；
+ * 基础 Harness Route 的供应策略由正式控制面初始化。
  */
 export async function dispatchEmployeeTurn(params: {
   tenantId: string;
@@ -68,9 +68,9 @@ export async function dispatchEmployeeTurn(params: {
   modelRef?: string;
   modelFn?: ModelFn;
   /**
-   * : 调用方显式提供的可选 Agent 控制面约束（§8.3）。
+   * 调用方显式提供的可选 Agent 控制面约束（§8.3）。
    * 默认 null = 解析基础 Harness Route（§9.3 Employee Turn 热路径）。
-   * 测试可显式传 agent.id 以覆盖旧 Agent-specific 路由（E 阶段解绑后移除）。
+   * 调用方可显式传 agent.id 以约束 Agent Route，这是长期正式能力。
    */
   agentConstraint?: string | null;
 }): Promise<EmployeeTurnDispatchResult> {
@@ -82,8 +82,8 @@ export async function dispatchEmployeeTurn(params: {
   // ─── 热路径：查询正式 RouteResolver ──────────────────────────
   const routeOutcome = await resolveRoute({
     tenantId: params.tenantId,
-    // : 线程不再绑定 Agent（§8.3），默认按基础 Harness Route 解析（§9.3）。
-    // 调用方显式传 agentConstraint 时按 Agent 约束解析（测试过渡用，E 阶段移除）。
+    // 线程不再绑定 Agent，默认按基础 Harness Route 解析。
+    // 调用方显式传 agentConstraint 时按 Agent 约束解析，这是长期正式能力。
     agentConstraint: params.agentConstraint ?? null,
     routeScopeKey: "default",
     businessKey: { jobId: `employee-turn:${thread.id}` },
@@ -91,9 +91,9 @@ export async function dispatchEmployeeTurn(params: {
   });
 
   if (routeOutcome.status !== "resolved") {
-    // : 线程不再绑定 Agent（§8.3）；无 Ready Route 时不再为某个 Agent 发起
-    // Hosted Provisioning（旧 thread.primaryAgentId 已移除）。返回未调度，
-    // 基础 Harness Route 的供应策略由后续阶段决定。
+    // Thread 不绑定 Agent；无 Ready Route 时热路径不发起 Agent-specific Hosted Provisioning。
+    // Turn 保持 accepted 并返回未调度，
+    // 基础 Harness Route 由正式控制面初始化供应策略。
     return { dispatched: false, completion: Promise.resolve() };
   }
 

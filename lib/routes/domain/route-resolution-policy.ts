@@ -65,7 +65,7 @@ export interface RouteResolutionCandidate {
   policyRevisionState: string | null;
   /** 控制面证据（恒非空；base route 的 agent 字段为 null，§18）。 */
   controlPlaneEvidence: RouteControlPlaneEvidence;
-  /** : Projection 版本号（仅 Projection 候选有值，Authority 候选为 undefined）。 */
+  /** Projection 版本号（仅 Projection 候选有值，Authority 候选为 undefined）。 */
   projectionVersionNo?: number;
 }
 
@@ -99,7 +99,7 @@ export interface RouteResolution {
    * not_applicable，§18），Runtime 字段始终填充；Agent Route → 完整成组（§7.4）。
    */
   controlPlaneEvidence: RouteControlPlaneEvidence;
-  /** : Projection 版本号（来自 RouteEligibilityProjection），用于 Binding 版本一致性校验。 */
+  /** Projection 版本号（来自 RouteEligibilityProjection），用于 Binding 版本一致性校验。 */
   projectionVersionNo?: number;
 }
 
@@ -270,13 +270,13 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
         threadDefaultModelRef: input.threadDefaultModelRef,
       }),
       resolvedAt: input.now,
-      // : 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）的 agent 字段
+      // 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）的 agent 字段
       // 由 loader 填 null（§18 Agent Evidence not_applicable）；Runtime 字段始终填充。
       // Agent Route → 完整控制面证据。
       controlPlaneEvidence: cloneControlPlaneEvidence(
         requireControlPlaneEvidence(selected.candidate),
       ),
-      /** : 从候选透传 Projection 版本号。 */
+      /** 从候选透传 Projection 版本号。 */
       projectionVersionNo: selected.candidate.projectionVersionNo,
     },
     eligibleCandidateCount: group.length,
@@ -362,7 +362,7 @@ function isControlPlaneEligible(candidate: RouteResolutionCandidate, now: Date):
 
 /**
  * 使用 RouteSelector.normalizeEligibility 的结果检查属性匹配。
- * 替代旧 eligibilitySpecificity 中内联的属性匹配逻辑。
+ * 集中封装属性匹配逻辑，供 eligibilitySpecificity 与路由裁决复用。
  */
 function eligibilityMatches(
   normalized: NormalizedEligibility,

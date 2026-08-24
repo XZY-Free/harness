@@ -1,13 +1,13 @@
 import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
- * 命令调度器（S05-C04）。
+ * 命令调度器。
  *
  * 事实源：
  * - docs/architecture/persistence.md （InvocationCommand 表）、-（Invocation/Binding/Attempt）
  * - docs/architecture/agent-control-plane.md （Steer）、（Stop/Interrupt）、（Regenerate）、（Resume）
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API：cancel/resume/steer）
- * - docs/architecture/runtime-control-plane.md S05-C04
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - dispatchSteerCommand：将 queued Steer 命令调度到 Runtime（POST /invocations/{id}:steer），ack 后标记 acknowledged + 写 turn.steered。
@@ -73,7 +73,7 @@ export interface CommandRuntimeEndpointResolution {
   /** 短期 Workload Token（绑定 runtime_revision/invocation/租户）。 */
   authToken: string;
   /**
-   * 平台 Gateway 回调端点（S09-C06：requires_redispatch=true 时必需，供 redispatchInvocation
+   * 平台 Gateway 回调端点（requires_redispatch=true 时必需，供 redispatchInvocation
    * 构造 StartInvocationRequestBody 使用）。
    *
    * cancel/steer 命令不需要此字段；resume 命令在 requires_redispatch=true 分支需要。
@@ -108,7 +108,7 @@ export interface CommandDispatchResult {
   /** 调度产生的事件（ack 后写入的 turn.steered/turn.resumed/invocation.resumed 等）。 */
   events: ThreadEvent[];
   /**
-   * S09-C06：Resume 命令是否触发了重调度（Runtime 返回 requires_redispatch=true）。
+   * Resume 命令是否触发了重调度（Runtime 返回 requires_redispatch=true）。
    * true 时表示平台为同一 Invocation 创建了新 Attempt 并重新调用 Runtime startInvocation。
    */
   redispatched?: boolean;
@@ -514,7 +514,7 @@ export async function dispatchCancelCommand(params: {
  * - requires_redispatch=false/undefined：事务内 CAS dispatched → acknowledged +
  * Invocation waiting_user → running + CAS Turn waiting_user → running +
  * 写 turn.resumed + invocation.resumed Event。
- * - requires_redispatch=true（S09-C06）：事务内 CAS dispatched → acknowledged +
+ * - requires_redispatch=true：事务内 CAS dispatched → acknowledged +
  * CAS Turn waiting_user → running + 写 turn.resumed Event（带 redispatched=true 标记），
  * 随后调用 redispatchInvocation 创建新 Attempt + 调用 Runtime startInvocation +
  * 写 invocation.started Event（attempt_no > 1）。不写 invocation.resumed Event
@@ -622,7 +622,7 @@ export async function dispatchResumeCommand(params: {
     return handleRuntimeError(err, loaded.command.id);
   }
 
-  // 5. 检查 requires_redispatch 分支（S09-C06）
+  // 5. 检查 requires_redispatch 分支
   if (response.requires_redispatch === true) {
     return await handleResumeRequiresRedispatch(params, loaded, endpointResolution, actorType);
   }
@@ -727,7 +727,7 @@ export async function dispatchResumeCommand(params: {
 }
 
 /**
- * S09-C06：处理 Runtime 返回 requires_redispatch=true 的 Resume 响应。
+ * 处理 Runtime 返回 requires_redispatch=true 的 Resume 响应。
  *
  * 事实源：docs/architecture/api-and-events.md L924-928、
  * docs/architecture/persistence.md §13（Worker 失联恢复）。

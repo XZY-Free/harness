@@ -1,14 +1,14 @@
 /**
- * : ResolveExecutionPlan — 单次解析执行计划。
+ * ResolveExecutionPlan — 单次解析执行计划。
  *
  * Dispatcher 和 Employee-turn-dispatcher 必须调用此函数一次性完成：
  * 1. Route 解析（使用统一 ConfiguredRouteResolver）
  * 2. AgentRevision 读取 + 模型信息提取
  *
- * 后续步骤（Invocation + Binding + Attempt + Turn 状态转换）直接使用返回结果，
+ * Invocation、Binding、Attempt 与 Turn 状态转换直接使用返回结果，
  * 不再重复查询控制面。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 事实源：docs/architecture/agent-control-plane.md 与 docs/architecture/runtime-control-plane.md。
  */
 
 import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
@@ -82,7 +82,7 @@ export interface ResolvedExecutionPlan {
   runtimeRevisionId: string;
   /** 提取的模型信息。 */
   modelInfo: ModelInfo;
-  /** : Projection 版本号。 */
+  /** Projection 版本号。 */
   projectionVersionNo: number | undefined;
 }
 
@@ -123,7 +123,7 @@ export interface ResolveExecutionPlanInput {
 }
 
 /**
- * : 单次解析执行计划。
+ * 单次解析执行计划。
  *
  * 一次性完成 Route 解析 + AgentRevision 读取 + 模型信息提取。
  * Dispatcher 后续步骤直接使用返回结果，不再重复查询控制面。

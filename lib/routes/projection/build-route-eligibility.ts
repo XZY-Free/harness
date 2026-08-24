@@ -1,10 +1,10 @@
 /**
  * Route Eligibility Projection 构建器。
  *
- * /: 使用统一 RevisionExecutionEligibilityPolicy + Reader，
+ * 使用统一 RevisionExecutionEligibilityPolicy + Reader，
  * 构建器只做：读取 Snapshot → 调用 Policy → 组装 Projection → 计算 Digest → 幂等 UPSERT。
  *
- * : 投影版本规则：
+ * 投影版本规则：
  * - 现有行不存在 → projectionVersionNo = 1
  * - Digest 相同 → 不增加版本
  * - Digest 变化 → projectionVersionNo + 1
@@ -25,7 +25,7 @@ import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-r
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { RouteEligibilityStore, UpsertProjectionInput } from "./route-eligibility-store";
 
-// §03: 统一 Policy + Reader（从 control-plane/domain）
+// 统一 Policy + Reader（从 control-plane/domain）
 import {
   RevisionExecutionEligibilityPolicy,
   extractRequiredCapabilities,
@@ -39,7 +39,7 @@ export interface BuildProjectionDependencies {
 export interface BuildRouteEligibilityInput {
   tenantId: string;
   routeId: string;
-  /** : 来源事件信息，用于权威版本计算。 */
+  /** 来源事件信息，用于权威版本计算。 */
   sourceEventId?: string | null;
   sourceAggregateVersion?: number | null;
 }
@@ -53,7 +53,7 @@ export interface BuildRouteEligibilityResult {
 /**
  * 创建 Projection 构建器。
  *
- * /: 构建器使用统一 Reader 加载证据 + 统一 Policy 判断资格，
+ * 构建器使用统一 Reader 加载证据 + 统一 Policy 判断资格，
  * 计算 projectionContentDigest 实现幂等版本。
  */
 export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
@@ -178,7 +178,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
           .limit(1)
       : [null];
 
-    // §03: 7. 使用统一 Reader 加载完整证据快照（无 Agent 约束时 Reader 内部跳过 Agent 维度）
+    // 7. 使用统一 Reader 加载完整证据快照（无 Agent 约束时 Reader 内部跳过 Agent 维度）
     const evidenceReader = createMySqlRevisionExecutionEvidenceReader({ db });
     const evidenceSnapshot = await evidenceReader.loadCurrentEvidence({
       tenantId: input.tenantId,
@@ -187,7 +187,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       policyRevisionId: revision.policyRevisionId,
     });
 
-    // §03: 8. 从 AgentRevision 提取 requiredCapabilities（fail-closed）
+    // 8. 从 AgentRevision 提取 requiredCapabilities（fail-closed）
     // 无 Agent 约束时 agentRevision 为 null → extractRequiredCapabilities 返回 []。
     const requiredCapabilities = extractRequiredCapabilities(
       agentRevision?.agentInterfaceRequirementsJson,
@@ -202,7 +202,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       (!revision.effectiveUntil || revision.effectiveUntil > now) &&
       normalized !== null;
 
-    // §03: 9. 使用统一 Policy 判断证据资格
+    // 9. 使用统一 Policy 判断证据资格
     // RevisionExecutionEligibilityPolicy 内部已调用统一 Runtime Conformance 纯验证器，
     // 投影据此派生 runtimeConformanceValid，不重复调用第二套 Policy。
     const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
@@ -272,7 +272,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       runtimeCapabilities: runtimeRevision?.runtimeCapabilitiesJson ?? null,
     });
 
-    // §03: 从统一 Snapshot 提取布尔字段
+    // 从统一 Snapshot 提取布尔字段
     const agentPublicationActive = evidenceSnapshot.agentPublication ? 1 : 0;
     const agentEvidenceValid =
       evidenceSnapshot.agentArtifactEvidence?.verificationState === "verified" &&
@@ -293,7 +293,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       ? 0
       : 1;
 
-    // : 11. 计算 projectionContentDigest 并确定版本号
+    // 11. 计算 projectionContentDigest 并确定版本号
     const projectionFields = {
       routeId: route.id,
       tenantId: input.tenantId,
@@ -359,7 +359,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       projectionContentDigest,
       projectionVersionNo,
       lastRebuiltAt: now,
-      // §06: 事件元数据存入 DB 但不参与 Digest 计算
+      // 事件元数据存入 DB，但不参与内容 Digest，避免传输元数据改变投影版本。
       sourceEventId: input.sourceEventId ?? null,
       sourceAggregateVersion: input.sourceAggregateVersion ?? null,
     };
@@ -384,7 +384,7 @@ export function computeProjectionContentDigest(fields: Record<string, unknown>):
 }
 
 /**
- * : Digest-based 版本规则。
+ * 基于 Digest 的版本规则。
  *
  * - 现有行不存在 → projectionVersionNo = 1
  * - Digest 相同 → 不增加版本（返回现有版本）

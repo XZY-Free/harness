@@ -1,7 +1,7 @@
 /**
  * MySQL Projection-based Route Resolution Store。
  *
- * : Projection 是运行时唯一的 Route Resolver 数据源。
+ * Projection 是运行时唯一的 Route Resolver 数据源。
  * 一次查询 RouteEligibilityProjection 表获取所有 eligible 候选 + 完整执行证据 ID。
  * 不随 Route 数量增加 SQL 往返。
  *
@@ -46,7 +46,7 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
     // 将 Projection 记录转换为 RouteResolutionCandidate
     // Projection 只包含 eligible 条目，Resolver 纯内存选择
     return projections.map((p): RouteResolutionCandidate => {
-      // : 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）→ agent 字段为
+      // 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）→ agent 字段为
       // null（Agent Evidence not_applicable，§18）；Runtime 字段始终填充（base route
       // 也有 runtime revision/attestation）。Agent Route → 完整成组（§7.4）。
       const controlPlaneEvidence = buildControlPlaneEvidence(p);
@@ -81,7 +81,7 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
         runtimeConformanceValid: p.runtimeConformanceValid === 1,
         policyRevisionState: p.policyRevisionState,
         controlPlaneEvidence,
-        /** : Projection 版本号 — 来自 RouteEligibilityProjection。 */
+        /** Projection 版本号 — 来自 RouteEligibilityProjection。 */
         projectionVersionNo: p.projectionVersionNo,
       };
     });

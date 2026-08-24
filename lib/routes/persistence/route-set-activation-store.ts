@@ -30,7 +30,7 @@ export interface RouteSetRow {
 export interface RouteRow {
   id: string;
   routeSetId: string;
-  /** : Route 稳定身份键。 */
+  /** Route 稳定身份键。 */
   routeKey: string;
   /** 无 Agent 约束（基础 Harness Route）为 null。 */
   agentRevisionId: string | null;
@@ -60,7 +60,7 @@ export interface RuntimeRevisionSummary {
 
 export interface DesiredRoute {
   routeId?: string;
-  /** : Route 稳定身份键 — 调用方必须显式指定。 */
+  /** Route 稳定身份键 — 调用方必须显式指定。 */
   routeKey: string;
   routeGroupId: string;
   /**
@@ -84,26 +84,26 @@ export interface DesiredRoute {
 
 export interface RouteSetActivationSession {
   // ─── 事务连接 ──────────────────────────────────────────
-  /** §04: 暴露事务级 DB 连接，确保所有资格读取在同一事务内。 */
+  /** 暴露事务级 DB 连接，确保所有资格读取在同一事务内。 */
   getDbOrTx(): DbOrTx;
 
   // ─── 读取 ──────────────────────────────────────────────
-  /** : 按 tenantId + routeSetId 锁定 RouteSet（跨租户隔离）。 */
+  /** 按 tenantId + routeSetId 锁定 RouteSet（跨租户隔离）。 */
   lockRouteSet(params: { tenantId: string; routeSetId: string }): Promise<RouteSetRow | null>;
   listRoutesBySet(routeSetId: string): Promise<RouteRow[]>;
-  /** : 已删除 findActiveRevision — 使用 findLatestActivation + routeRevision 关联。 */
+  /** 按 ID 读取 RouteRevision；当前激活事实由 Activation 关联确定。 */
   findRevisionById(id: string): Promise<RouteRevisionRecord | null>;
-  /** : 查找 Route 最新的 Activation（用于填充 previous 字段）。 */
+  /** 查找 Route 最新的 Activation（用于填充 previous 字段）。 */
   findLatestActivation(routeId: string): Promise<RouteActivationRecord | null>;
   findAgentRevision(id: string): Promise<AgentRevisionSummary | null>;
   findRuntimeRevision(id: string): Promise<RuntimeRevisionSummary | null>;
-  /** §03: 已删除 hasVerifiedAttestation 和 loadRevisionExecutionEvidence — 使用统一 Reader。 */
+  /** 执行资格通过 getDbOrTx 创建的统一 Evidence Reader 判断。 */
 
   // ─── 写入 ──────────────────────────────────────────────
   resolveOrCreateRouteIdentity(params: {
     routeSetId: string;
     routeId?: string;
-    /** : Route 稳定身份键 — 用于查找已有 Route，不再用 agentRevisionId+runtimeRevisionId。 */
+    /** Route 稳定身份键 — 用于查找已有 Route。 */
     routeKey: string;
     content: RouteRevisionContent;
     now: Date;
@@ -118,7 +118,7 @@ export interface RouteSetActivationSession {
     tenantId: string;
     routeId: string;
     routeSetId: string;
-    /** : Route 稳定身份键 — 派生冗余列。 */
+    /** Route 稳定身份键 — 派生冗余列。 */
     routeKey: string;
     revisionNo: number;
     content: RouteRevisionContent;
@@ -138,7 +138,7 @@ export interface RouteSetActivationSession {
     activationSequence: number;
     activationState: "active" | "disabled";
     previousRouteRevisionId: string | null;
-    /** : 前一个 RouteActivation ID — 完整历史链路。 */
+    /** 前一个 RouteActivation ID — 完整历史链路。 */
     previousRouteActivationId: string | null;
     routeSetVersionNo: number;
     actorType: RouteActorType;
@@ -175,10 +175,10 @@ export interface RouteSetActivationSession {
     id: string;
     tenantId: string;
     eventKey: string;
-    /** : 事件类型 — 必须来自合同，aggregateType 由合同推导。 */
+    /** 事件类型 — 必须来自合同，aggregateType 由合同推导。 */
     eventType: "route_set.activated" | "route.disabled";
     aggregateId: string;
-    /** : 聚合版本号。 */
+    /** 聚合版本号。 */
     aggregateVersion: number;
     payload: Record<string, unknown>;
     occurredAt: Date;

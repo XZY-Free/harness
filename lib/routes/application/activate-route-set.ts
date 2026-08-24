@@ -73,7 +73,7 @@ export interface ActivateRouteSetResult {
   }>;
   auditEventId: string;
   affectsNewInvocationsOnly: true;
-  /** : 幂等重放标记。 */
+  /** 幂等重放标记。 */
   idempotent?: true;
 }
 
@@ -105,7 +105,7 @@ export interface ActivateRouteSetCommand {
 export function createActivateRouteSet(dependencies: {
   store: RouteSetActivationStore;
   /**
-   * §04: 可选证据 Reader 注入（仅用于测试 mock）。
+   * 可选 Evidence Reader 注入；生产路径默认使用同一事务内的 Reader。
    * 生产路径始终从事务内创建 MySQL Evidence Reader。
    */
   evidenceReaderForTest?: RevisionExecutionEvidenceReader;
@@ -124,7 +124,7 @@ export function createActivateRouteSet(dependencies: {
     }
 
     return dependencies.store.transaction(async (session) => {
-      // §04: 事务级 Evidence Reader — 生产路径从事务内创建，测试可注入 mock
+      // 生产路径从当前事务创建 Evidence Reader；调用方也可显式注入。
       const evidenceReader: RevisionExecutionEvidenceReader =
         dependencies.evidenceReaderForTest ??
         createMySqlRevisionExecutionEvidenceReader({ db: session.getDbOrTx() });
@@ -184,7 +184,7 @@ export function createActivateRouteSet(dependencies: {
         }
 
         if (activationState === "active") {
-          // §03: 使用统一 Reader + Policy 进行完整执行资格检查（删除 hasVerifiedAttestation 旁路）
+          // 使用统一 Reader + Policy 进行完整执行资格检查，不允许布尔旁路。
           // 无 Agent 约束 → Reader/Policy 内部跳过 Agent 维度（not_applicable，§18）。
           const evidence = await evidenceReader.loadCurrentEvidence({
             tenantId: command.tenantId,
@@ -192,8 +192,8 @@ export function createActivateRouteSet(dependencies: {
             runtimeRevisionId: desired.runtimeRevisionId,
             policyRevisionId: desired.policyRevisionId ?? null,
           });
-          // §03: 使用统一 RevisionExecutionEligibilityPolicy（fail-closed，无降级路径）
-          // §04: 从同一事务读取 agentInterfaceRequirementsJson（无 Agent 约束时为 null）
+          // 使用统一 RevisionExecutionEligibilityPolicy（fail-closed，无降级路径）
+          // 从同一事务读取 agentInterfaceRequirementsJson；无 Agent 约束时为 null。
           let requiredCapabilities: string[] = [];
           if (hasAgentConstraint) {
             const [fullAgentRevision] = await session
@@ -308,7 +308,7 @@ export function createActivateRouteSet(dependencies: {
         }
 
         const activationState = desired.activationState ?? "active";
-        // : 查找当前最新 Activation，填充 previous 历史字段
+        // 查找当前最新 Activation，填充 previous 历史字段
         const currentActivation = await session.findLatestActivation(routeId);
         if (
           currentActivation &&
@@ -360,7 +360,7 @@ export function createActivateRouteSet(dependencies: {
       const desiredRouteIds = new Set(desiredContents.map((d) => d.routeId));
       for (const currentRoute of currentRoutes) {
         if (!desiredRouteIds.has(currentRoute.id) && currentRoute.routeState === "enabled") {
-          // : 使用 findLatestActivation 获取最新 Activation + Revision
+          // 使用 findLatestActivation 获取最新 Activation + Revision
           const lastActivation = await session.findLatestActivation(currentRoute.id);
           if (!lastActivation) {
             throw new Error(`隐式禁用 Route ${currentRoute.id} 时找不到历史 Activation`);
@@ -372,7 +372,7 @@ export function createActivateRouteSet(dependencies: {
           ) {
             throw new Error(`历史 Activation 与当前 Route authority 不一致: ${lastActivation.id}`);
           }
-          // : 从 activation 的 routeRevisionId 查询完整 Revision
+          // 从 activation 的 routeRevisionId 查询完整 Revision
           const lastRevision = await session.findRevisionById(lastActivation.routeRevisionId);
           if (!lastRevision) {
             throw new Error(

@@ -1,10 +1,9 @@
 /**
  * Revision 执行资格组合模型 — 唯一权威领域定义。
  *
- * §03: 从 publications/application 移至 control-plane/domain，
  * 统一 RouteSet 激活、Projection 构建、ExecutionBinding 验证三处资格判断。
  *
- * 参见：SnowHarness专题01最终差距整改与正式链路收口实施方案 §03
+ * ExecutionBinding 的 Runtime 证据始终完整；Agent 证据只能全 null 或全完整。
  */
 
 import type { ArtifactEvidenceSnapshot } from "@/lib/artifacts/domain/artifact-evidence";
@@ -17,7 +16,7 @@ import {
 // ─── Policy Revision Snapshot ────────────────────────────
 
 /**
- * Policy Revision 快照（: 替代原 policyRevisionId: string | null）。
+ * Policy Revision 快照；Route 未引用 Policy 时为 null。
  *
  * Route 未引用 Policy → null（允许）
  * Route 引用 Policy → 必须存在且 published（revisionState = "published" 且非 "withdrawn"）
@@ -28,7 +27,7 @@ export interface PolicyRevisionSnapshot {
   publishedAt: Date | null;
 }
 
-// ─── Policy Requirement (: Fail-closed) ───────────────
+// ─── Policy Requirement（Fail-closed）─────────────────
 
 /**
  * Policy 引用需求 — 明确区分"没有引用"和"引用了但读取失败"。
@@ -79,8 +78,8 @@ export type PolicyRequirementResult =
  * 这是唯一权威的执行资格数据结构，
  * 任何模块不得自行定义第二套。
  *
- * : policyRevisionId 升级为 policyRevision 对象。
- * : 所有字段必须真实读取，禁止硬编码。
+ * policyRevision 使用结构化快照表达。
+ * 所有字段必须来自事实源，禁止硬编码。
  */
 export interface RevisionExecutionEvidenceSnapshot {
   /** 租户 ID。 */
@@ -112,10 +111,10 @@ export interface RevisionExecutionEvidenceSnapshot {
   runtimeLifecycleState: "active" | "quarantined" | "retired";
   /** Runtime Revision 发布状态。 */
   runtimeRevisionState: "draft" | "published" | "withdrawn";
-  /** Runtime Capabilities（: 必须经过 fail-closed 解析）。 */
+  /** Runtime Capabilities，必须经过 fail-closed 解析。 */
   runtimeCapabilities: string[];
 
-  /** : Policy 引用需求。kind="none" = Route 未引用 Policy；kind="referenced" = 引用了 Policy。 */
+  /** Policy 引用需求。kind="none" = Route 未引用 Policy；kind="referenced" = 引用了 Policy。 */
   policyRequirement: PolicyRequirement;
 }
 
@@ -149,7 +148,7 @@ export interface RevisionExecutionEligibilityError {
  * Revision 执行资格策略 — 纯函数，无副作用。
  *
  * 这是 RouteSet 激活、Projection、Binding 共用的唯一资格判断。
- * : Policy 状态正式阻断（不再"当前不阻塞"）。
+ * Policy 状态参与执行资格判断，非 published 状态必须阻断。
  */
 export const RevisionExecutionEligibilityPolicy = {
   /**
@@ -164,7 +163,7 @@ export const RevisionExecutionEligibilityPolicy = {
    * 6. Runtime Conformance Passed & 完整
    * 7. Runtime 生命周期 Active
    * 8. Capability 兼容
-   * 9. Policy 状态（: 正式阻断）
+   * 9. Policy 状态
    */
   isEligible(
     snapshot: RevisionExecutionEvidenceSnapshot,
@@ -322,10 +321,10 @@ export const RevisionExecutionEligibilityPolicy = {
   },
 } as const;
 
-// ─── Capability Parsing (: Fail-closed) ─────────────
+// ─── Capability Parsing（Fail-closed）────────────────
 
 /**
- * : 从 AgentRevision.agentInterfaceRequirementsJson 提取必要 Capability 列表。
+ * 从 AgentRevision.agentInterfaceRequirementsJson 提取必要 Capability 列表。
  *
  * Fail-closed 语义：
  * - 字段缺失且合同允许缺失 → []（无要求）
@@ -370,7 +369,7 @@ export function extractRequiredCapabilities(jsonValue: unknown): string[] {
 }
 
 /**
- * : 从 RuntimeRevision.runtimeCapabilitiesJson 提取 Capability 列表。
+ * 从 RuntimeRevision.runtimeCapabilitiesJson 提取 Capability 列表。
  *
  * Fail-closed 语义：
  * - 字段缺失 → []（Runtime 无能力声明）
@@ -406,7 +405,7 @@ export function extractRuntimeCapabilities(jsonValue: unknown): string[] {
 
 // ─── Errors ───────────────────────────────────────────────
 
-/** 执行资格错误（: Capability 解析 fail-closed 时抛出）。 */
+/** Capability 解析无法满足 fail-closed 要求时抛出的执行资格错误。 */
 export class EligibilityError extends Error {
   constructor(
     public readonly code: string,

@@ -40,7 +40,7 @@ function DesktopShell() {
     };
   }, []);
 
-  // 专题01 §33.7：/desktop 恒为新建空态页，不再自动跳最近会话；
+  // /desktop 恒为新建空态页，不自动跳转最近会话；
   // 假 new 路由 /desktop/new 已移除。进入已有会话由 sidebar 导航到 /desktop/chat/{id}。
 
   // 设备注册闭环：shell 真实加载成功后发起注册（幂等，无视觉噪音）。
@@ -94,14 +94,13 @@ function DesktopShell() {
   if (error) return <DesktopError>{error}</DesktopError>;
   if (!shell) return <DesktopError>正在连接服务器…</DesktopError>;
   if (route.kind === "not-found") return <DesktopError>页面不存在。</DesktopError>;
-  // 专题01 §33.7：/desktop（home）恒为新建空态页，fall through 渲染 NewThreadPage。
+  // /desktop（home）恒为新建空态页，fall through 渲染 NewThreadPage。
 
   const threads = shell.threads.map((thread) => ({
     id: thread.id,
     title: thread.title,
   }));
-  // : 专题01 §15：不再绑定默认 Agent。Agent 目录可空是合法状态（§6.2/§33.1），
-  // 无 Agent 时不阻断会话创建（§35 Web/Desktop 无 Agent 阻断），不 fallback 第一个 Agent。
+  // Agent 目录为空是合法状态；无 Agent 时不阻断会话创建，也不 fallback 第一个 Agent。
   return (
     <SidebarProvider>
       <div className="flex h-screen overflow-hidden bg-background text-foreground">

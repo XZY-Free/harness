@@ -1,9 +1,9 @@
 /**
- * ExecutionBinding 最终校验 — §07: 单事务内 Fail-closed 校验。
+ * ExecutionBinding 最终校验 — 单事务内 Fail-closed 校验。
  *
- * : tx 必须传入，不允许可选。该函数不从其他 Application 或 API 直接调用。
- * : 禁止全局 db — 所有读取使用 Binding Store 创建的同一事务。
- * : 验证精确证据 — Projection 冻结的证据 ID 必须与当前权威一致。
+ * tx 必须传入，不允许可选。该函数不从其他 Application 或 API 直接调用。
+ * 禁止全局 db；所有读取使用 Binding Store 创建的同一事务。
+ * Projection 冻结的证据 ID 必须与当前权威一致。
  */
 
 import { type DbOrTx, db } from "@/lib/db/client";
@@ -11,7 +11,7 @@ import { routeActivation } from "@/lib/routes/persistence/route-revision-record"
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { desc, eq } from "drizzle-orm";
 
-// §03: 统一 Policy + Reader
+// 统一 Policy + Reader
 import { RevisionExecutionEligibilityPolicy } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import { createMySqlRevisionExecutionEvidenceReader } from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
 
@@ -34,7 +34,7 @@ export interface BindingEligibilityInput {
   policyRevisionId: string | null;
   /** Projection 版本号 — 用于检测 Projection 滞后。 */
   projectionVersionNo: number;
-  /** : Resolver 冻结的精确证据 ID。base route 的 agent 维度为 null（§18 not_applicable）。 */
+  /** Resolver 冻结的精确证据 ID。base route 的 agent 维度为 null（§18 not_applicable）。 */
   frozenEvidence: {
     agentPublicationRecordId: string | null;
     runtimePublicationRecordId: string;
@@ -52,10 +52,10 @@ export interface BindingEligibilityResult {
   projectionVersionMatch: boolean;
 }
 
-/** : 事务类型 — 使用共享 DbOrTx（支持 db + tx）。 */
+/** 事务类型 — 使用共享 DbOrTx（支持 db + tx）。 */
 
 /**
- * /: ExecutionBinding 最终 Fail-closed 校验。
+ * ExecutionBinding 最终 Fail-closed 校验。
  *
  * tx 必须传入 — 不允许独立调用模式。
  * 所有 DB 读取使用 tx，不使用全局 db。
@@ -75,7 +75,7 @@ export async function validateBindingEligibility(
     ? projection.projectionVersionNo === input.projectionVersionNo
     : false;
 
-  // : Projection 版本过时 → ELIGIBILITY_SNAPSHOT_STALE
+  // Projection 版本过时 → ELIGIBILITY_SNAPSHOT_STALE
   if (input.projectionVersionNo !== undefined && !projectionVersionMatch) {
     return {
       valid: false,
@@ -105,7 +105,7 @@ export async function validateBindingEligibility(
     return { valid: false, reason: "route_activation_not_active", projectionVersionMatch };
   }
 
-  // : C. 使用统一 Reader + tx 加载精确证据快照
+  // C. 使用统一 Reader + tx 加载精确证据快照
   // 基础 Harness Route（agentRevisionId=null）→ 跳过 Agent 维度查询（§18 not_applicable）。
   const isBaseRoute = input.agentRevisionId === null;
   const evidenceReader = createMySqlRevisionExecutionEvidenceReader({ db: tx });
@@ -129,7 +129,7 @@ export async function validateBindingEligibility(
     conformanceRunId: input.frozenEvidence.conformanceRunId,
   });
 
-  // : D. 验证精确证据 ID — Projection 冻结的证据 ID 必须与当前权威一致
+  // D. 验证精确证据 ID — Projection 冻结的证据 ID 必须与当前权威一致
   {
     const fe = input.frozenEvidence;
     const currentRuntimePubId = snapshot.runtimePublication?.publicationRecordId ?? null;
@@ -167,7 +167,7 @@ export async function validateBindingEligibility(
     }
   }
 
-  // §03: E. 调用统一 Policy 校验
+  // E. 调用统一 Policy 校验
   const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
     snapshot,
     requiredCapabilities,
@@ -194,7 +194,7 @@ function validEvidenceIds(ids: string[]): boolean {
 }
 
 /**
- * : ELIGIBILITY_SNAPSHOT_STALE 错误 — Dispatcher 可对此执行一次重新解析 + 重试。
+ * ELIGIBILITY_SNAPSHOT_STALE 错误；Dispatcher 可对此执行一次重新解析与重试。
  */
 export class EligibilitySnapshotStaleError extends Error {
   constructor(

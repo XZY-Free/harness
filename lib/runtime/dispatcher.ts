@@ -1,11 +1,11 @@
 /**
- * 调度服务（S05-C01 + S05-C02 扩展）。
+ * 调度服务。
  *
  * 事实源：
- * - docs/architecture/persistence.md -、、（事务边界）
+ * - docs/architecture/persistence.md（事务边界）
  * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）、§7（Turn 接纳周期）
  * - docs/architecture/api-and-events.md （路由解析）、§4（Runtime Protocol）
- * - docs/architecture/runtime-control-plane.md S05-C01/S05-C02
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - dispatchInvocationForTurn：为 accepted Turn 创建调度三元组 + 调用 Runtime HTTP 启动 Invocation。
@@ -20,7 +20,7 @@
  * 6. createExecutionBinding（不可变 1:1，configHash = SHA-256 规范化字段）。
  * 7. createAttempt（attemptNo=1）。
  * 8. 事务内：锁 Thread、分配 event sequence、CAS 更新 Turn accepted → queued、写 turn.queued Event。
- * 9. S05-C02 扩展：调用 runtimeClient.startInvocation 持久化 runtime_session_ref + runtime_execution_ref。
+ * 9. 调用 runtimeClient.startInvocation 持久化 runtime_session_ref + runtime_execution_ref。
  * - Runtime accepted → Invocation executionState queued → running + 写 invocation.started Event。
  * - Runtime 网络不可达 → Turn 保持 queued，不报错（后续重试）。
  * - Runtime 409 IDEMPOTENCY_CONFLICT → 复用现有 SessionBinding。
@@ -107,15 +107,15 @@ import {
 } from "@/lib/runtime/session-binding-queries";
 import { and, eq } from "drizzle-orm";
 
-/** 本阶段使用的默认路由 scope key（后续阶段从 Thread/Agent 配置解析）。 */
+/** 默认路由 scope key — 正式默认值，调用方可显式覆盖。 */
 export const DEFAULT_ROUTE_SCOPE_KEY = "default";
 
-/** : 统一解析入口 — Projection 是唯一数据源。 */
+/** 统一解析入口 — Projection 是唯一数据源。 */
 const configuredResolver = createConfiguredRouteResolver({
   projectionStore: mysqlRouteEligibilityResolutionStore,
 });
 
-/** : 将 ConfiguredRouteResolver 适配为 RouteResolver 接口，使 Dispatcher 透明使用统一入口。 */
+/** 将 ConfiguredRouteResolver 适配为 RouteResolver 接口，使 Dispatcher 透明使用统一入口。 */
 const defaultRouteResolver: RouteResolver = async (input) => {
   const result = await configuredResolver({
     tenantId: input.tenantId,
@@ -190,16 +190,16 @@ export interface RuntimeEndpointResolution {
 
 /**
  * 为单个 accepted Turn 创建调度三元组（Invocation + ExecutionBinding + Attempt），
- * 并调用 Runtime HTTP 启动 Invocation（S05-C02 扩展）。
+ * 并调用 Runtime HTTP 启动 Invocation。
  *
  * 流程见模块头注释。无有效路由时不报错，Turn 保持 accepted。
  *
- * S05-C02 扩展：
+ * Runtime 启动行为：
  * - 传入 runtimeClient 时调用 runtimeClient.startInvocation 持久化 runtime_session_ref/runtime_execution_ref。
  * - Runtime accepted → Invocation queued → running + 写 invocation.started Event。
  * - Runtime 网络不可达 / 503 → Turn 保持 queued，不报错（runtimeDispatch.skipped=true）。
  * - Runtime 409 IDEMPOTENCY_CONFLICT → 复用现有 SessionBinding。
- * - 不传 runtimeClient → 沿用 S05-C01 行为（只创建调度状态，不调用 Runtime）。
+ * - 不传 runtimeClient → 只创建调度状态，不调用 Runtime。
  *
  * @throws DispatchTurnStateError Turn 不在 accepted 状态
  */
@@ -219,14 +219,14 @@ export async function dispatchInvocationForTurn(params: {
   actorType?: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
-  /** S05-C02：Runtime HTTP 客户端（不传则不调用 Runtime）。 */
+  /** Runtime HTTP 客户端（不传则不调用 Runtime）。 */
   runtimeClient?: RuntimeHttpClient;
   /**
-   * S05-C02：从 ExecutionBinding 解析 runtimeEndpoint/authToken/gatewayEndpoints 的解析器。
+   * 从 ExecutionBinding 解析 runtimeEndpoint/authToken/gatewayEndpoints 的解析器。
    * 不传则不调用 Runtime（即使 runtimeClient 已传）。
    */
   runtimeEndpointResolver?: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
-  /** S05-C02：Idempotency-Key（不传则自动生成）。 */
+  /** Idempotency-Key（不传则自动生成）。 */
   runtimeIdempotencyKey?: string;
 }): Promise<DispatchResult> {
   const routeScopeKey = params.routeScopeKey ?? DEFAULT_ROUTE_SCOPE_KEY;
@@ -302,7 +302,7 @@ export async function dispatchInvocationForTurn(params: {
     params.tenantId,
     routeResolution.policyRevisionId,
   );
-  // : 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）的证据 agent 字段
+  // 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）的证据 agent 字段
   // 为 null（§18 Agent Evidence not_applicable），会正确展开写入 Binding；Runtime 字段
   // 照常。Agent Route → 完整成组。
   const controlPlaneEvidence = routeResolution.controlPlaneEvidence;
@@ -323,7 +323,7 @@ export async function dispatchInvocationForTurn(params: {
     governanceConfigDigest: bindingGovernance.governanceConfigDigest,
     contextCheckpointId: null,
     environmentDefinitionRevisionId: null,
-    /** : Projection 版本号，用于 Binding 版本一致性校验。 */
+    /** Projection 版本号，用于 Binding 版本一致性校验。 */
     projectionVersionNo,
     controlPlaneEvidence: {
       routeRevisionId: routeResolution.routeRevisionId,
@@ -348,7 +348,7 @@ export async function dispatchInvocationForTurn(params: {
     correlationId: params.correlationId ?? null,
   });
 
-  // 10. S05-C02 扩展：调用 Runtime HTTP 启动 Invocation
+  // 10. 调用 Runtime HTTP 启动 Invocation
   let runtimeDispatch: RuntimeDispatchResult | undefined;
   if (params.runtimeClient && params.runtimeEndpointResolver) {
     runtimeDispatch = await dispatchToRuntime({
@@ -495,7 +495,7 @@ async function transitionTurnToQueued(params: {
 }
 
 /**
- * S05-C02 扩展：调用 Runtime HTTP 启动 Invocation（dispatchInvocationForTurn 内部 helper）。
+ * 调用 Runtime HTTP 启动 Invocation（dispatchInvocationForTurn 内部 helper）。
  *
  * 流程：
  * 1. 通过 runtimeEndpointResolver 解析 runtimeEndpoint + authToken + gatewayEndpoints。

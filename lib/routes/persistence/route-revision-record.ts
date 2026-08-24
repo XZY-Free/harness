@@ -19,7 +19,7 @@ export const routeRevision = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
     routeId: varchar("routeId", { length: 36 }).notNull(),
     routeSetId: varchar("routeSetId", { length: 36 }).notNull(),
-    /** : Route 稳定身份键 — 派生冗余列，始终 = 对应 DeploymentRoute.routeKey。 */
+    /** Route 稳定身份键 — 派生冗余列，始终 = 对应 DeploymentRoute.routeKey。 */
     routeKey: varchar("routeKey", { length: 128 }).notNull(),
     revisionNo: bigint("revisionNo", { mode: "number", unsigned: true }).notNull(),
     /**
@@ -80,7 +80,7 @@ export const routeActivation = mysqlTable(
     activationSequence: bigint("activationSequence", { mode: "number", unsigned: true }).notNull(),
     activationState: mysqlEnum("activationState", ["active", "disabled"]).notNull(),
     previousRouteRevisionId: varchar("previousRouteRevisionId", { length: 36 }),
-    /** : 前一个 RouteActivation ID — 完整 Activation 历史链路。 */
+    /** 前一个 RouteActivation ID — 完整 Activation 历史链路。 */
     previousRouteActivationId: varchar("previousRouteActivationId", { length: 36 }),
     routeSetVersionNo: bigint("routeSetVersionNo", { mode: "number", unsigned: true }).notNull(),
     activatedByType: mysqlEnum("activatedByType", [
@@ -100,7 +100,7 @@ export const routeActivation = mysqlTable(
       table.routeId,
       table.activationSequence,
     ),
-    // : 幂等按 routeSetId+idempotencyKey，不再按 routeId+idempotencyKey
+    // RouteSet 聚合更新按 routeSetId + idempotencyKey 保证幂等。
     routeSetIdempotencyUq: uniqueIndex("RouteActivation_routeSet_idempotency_uq").on(
       table.routeSetId,
       table.idempotencyKey,

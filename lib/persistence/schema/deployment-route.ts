@@ -1,16 +1,17 @@
 /**
- * 控制面 schema：DeploymentRouteSet 与 DeploymentRoute（S03-C04）。
+ * 控制面 schema：DeploymentRouteSet 与 DeploymentRoute。
  *
- * 事实源：docs/architecture/persistence.md 、、
- * docs/architecture/api-and-events.md 、
- * docs/architecture/agent-control-plane.md 。
+ * 事实源：
+ * - docs/architecture/persistence.md
+ * - docs/architecture/api-and-events.md
+ * - docs/architecture/agent-control-plane.md
  *
- * RouteSet 聚合同一 Agent + Scope 下的所有 DeploymentRoute，使用 ETag（versionNo）做乐观并发。
- * DeploymentRoute 固定一个 AgentRevision + 一个 RuntimeRevision 组合，承载灰度权重。
+ * RouteSet 按“可选 Agent 约束 + scope”聚合所有 DeploymentRoute，使用 ETag（versionNo）做乐观并发。
+ * DeploymentRoute 固定一个 RuntimeRevision，并可选 AgentRevision，承载灰度权重。
  *
  * 关键约束：
  * - UNIQUE(tenantId, agentId, routeScopeKey)：一组路由共用 ETag 和聚合锁。
- * - UNIQUE(routeSetId, agentRevisionId, runtimeRevisionId)：同一 RouteSet 内组合唯一。
+ * - UNIQUE(routeSetId, routeKey)：routeKey 在同一 RouteSet 内唯一，作为 Route 稳定身份。
  * - route_state 仅 enabled/disabled；不物理删除路由行（回滚依赖历史行）。
  * - traffic_weight 为 0–10000 基点（1% = 100 基点）。
  * - 路由更新只影响新 Invocation，不改写已存在的 ExecutionBinding。
@@ -44,7 +45,7 @@ export type RouteState = (typeof ROUTE_STATES)[number];
 // ─── DeploymentRouteSet ─────────────────────────────────
 
 /**
- * 路由集合：同一 Agent + Scope 下所有路由的聚合更新单元。
+ * 路由集合：同一“可选 Agent 约束 + scope”下所有路由的聚合更新单元。
  *
  * - versionNo 是 ETag 来源，每次聚合更新递增（含回滚）。
  * - routeScopeKey 如 "prod"、"canary"；routeScopeJson 携带结构化范围描述。
@@ -95,7 +96,7 @@ export type DeploymentRouteSetInsert = InferInsertModel<typeof deploymentRouteSe
 // ─── DeploymentRoute ────────────────────────────────────
 
 /**
- * 部署路由：固定一个 AgentRevision + 一个 RuntimeRevision 组合，承载灰度权重。
+ * 部署路由：固定一个 RuntimeRevision（可选 AgentRevision），承载灰度权重。
  *
  * - 引用的 Revision 必须为 published 状态（withdrawn 只阻止新路由，不删除历史引用）。
  * - traffic_weight 为 0–10000 基点。
@@ -111,7 +112,7 @@ export const deploymentRouteTable = mysqlTable(
     routeSetId: varchar("routeSetId", { length: 36 })
       .notNull()
       .references(() => deploymentRouteSetTable.id),
-    /** : Route 稳定身份键 — 调用方显式指定，不再由 agentRevisionId+runtimeRevisionId 隐式推导。 */
+    /** Route 稳定身份键 — 调用方显式指定，在同一 RouteSet 内唯一。 */
     routeKey: varchar("routeKey", { length: 128 }).notNull(),
     /**
      * 绑定的 AgentRevision ID。
@@ -134,7 +135,7 @@ export const deploymentRouteTable = mysqlTable(
       .$defaultFn(() => new Date()),
   },
   (t) => ({
-    // : Route 稳定身份 — 同一 RouteSet 内 routeKey 唯一
+    // Route 稳定身份 — 同一 RouteSet 内 routeKey 唯一
     setRouteKeyUq: uniqueIndex("DeploymentRoute_set_routeKey_uq").on(t.routeSetId, t.routeKey),
     setStateIdx: index("DeploymentRoute_set_state_idx").on(t.routeSetId, t.routeState),
     agentRevisionIdx: index("DeploymentRoute_agentRevision_idx").on(t.agentRevisionId),

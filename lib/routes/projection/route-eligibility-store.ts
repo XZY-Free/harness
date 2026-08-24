@@ -1,7 +1,7 @@
 /**
  * RouteEligibilityProjection Store 接口。
  *
- * : 只做 Projection 的 CRUD，不做权威事实读取。
+ * 只做 Projection 的 CRUD，不读取权威事实。
  * 权威事实读取由 RouteEligibilitySourceReader 完成。
  */
 
@@ -59,7 +59,7 @@ export interface UpsertProjectionInput {
   sourceAggregateVersion: number | null;
   invalidReason: string | null;
   eligibilityState: "eligible" | "ineligible" | "pending_rebuild";
-  /** : 投影内容摘要 — 用于幂等版本判断。 */
+  /** 投影内容摘要 — 用于幂等版本判断。 */
   projectionContentDigest: string;
   projectionVersionNo: number;
   lastRebuiltAt: Date;
@@ -85,15 +85,15 @@ export interface RouteEligibilityStore {
   /** 标记单个 Route 为 pending_rebuild。 */
   markPendingRebuild(routeId: string): Promise<void>;
 
-  /** : 删除 Projection 行（Route/RouteSet 删除时清理孤立投影）。 */
+  /** 删除 Projection 行（Route/RouteSet 删除时清理孤立投影）。 */
   deleteProjection(routeId: string): Promise<void>;
 
-  /** : 删除 RouteSet 下所有 Projection。 */
+  /** 删除 RouteSet 下所有 Projection。 */
   deleteProjectionsByRouteSet(routeSetId: string): Promise<void>;
 
-  /** : 列出所有投影 routeId（全量重建用）。 */
+  /** 列出所有投影 routeId（全量重建用）。 */
   listAllProjectionRouteIds(): Promise<Array<{ routeId: string }>>;
 
-  /** : 按 routeSetId 列出投影 routeId（全量重建用）。 */
+  /** 按 routeSetId 列出投影 routeId（全量重建用）。 */
   listProjectionRouteIdsByRouteSet(routeSetId: string): Promise<Array<{ routeId: string }>>;
 }

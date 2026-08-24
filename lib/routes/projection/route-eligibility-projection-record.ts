@@ -114,7 +114,7 @@ export const routeEligibilityProjection = mysqlTable(
       "pending_rebuild",
     ]).notNull(),
 
-    /** : 投影内容摘要 — 用于幂等版本判断。 */
+    /** 投影内容摘要 — 用于幂等版本判断。 */
     projectionContentDigest: varchar("projectionContentDigest", {
       length: 71,
     }).notNull(),

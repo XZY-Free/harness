@@ -8,14 +8,12 @@
  * - docs/architecture/conversations.md /W02/W03/W04
  *
  * 关键约束：
- * - Thread 是连续容器，绑定租户、所有者和主 Agent；lifecycle_state active→archived→deleted。
+ * - Thread 是租户/所有者下的连续会话容器，不绑定主 Agent；lifecycle_state active→archived→deleted。
  * - Turn 是正式接纳周期，turn_sequence 在 Thread 内单调递增；只有 job_result_projection Turn 允许无 Invocation 从 accepted 直接 completed。
  * - ThreadItem 是当前内容投影，item_sequence 在 Thread 内稳定展示顺序；superseded_by_item_id 不得成环。
  * - ThreadEvent 只追加，event_sequence 在 Thread 内单调递增；SSE id 直接使用十进制 event_sequence。
  * - Goal 一个 Thread 最多一个 active（生成列 UNIQUE 约束）。
  * - ThreadRelation 记录 fork/delegate/workflow_child 关系；handoff 不创建第二个 Thread。
- *
- * 旧 `Thread`/`Message`/`ThreadEvent`/`ThreadRun` 表保持只读兼容，最终迁移安排在阶段 13。
  */
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";

@@ -58,7 +58,7 @@ export interface RouteControlSession {
   ): Promise<{ revision: RouteRevisionRecord; activation: RouteActivationRecord } | null>;
   findAgentRevision(id: string): Promise<PublishedAgentRevision | null>;
   findRuntimeRevision(id: string): Promise<PublishedRuntimeRevision | null>;
-  /** §03: 已删除 hasVerifiedAttestation — 使用统一 Reader。 */
+  /** 按内容摘要读取 RouteRevision；执行资格统一由 Evidence Reader 判断。 */
   findRevisionByContent(
     routeId: string,
     contentDigest: string,
@@ -124,10 +124,10 @@ export interface RouteControlSession {
     id: string;
     tenantId: string;
     eventKey: string;
-    /** : 事件类型 — 必须来自合同，aggregateType 由合同推导。 */
+    /** 事件类型 — 必须来自合同，aggregateType 由合同推导。 */
     eventType: "route.revision.validated" | "route.activated" | "route.disabled";
     aggregateId: string;
-    /** : 聚合版本号。 */
+    /** 聚合版本号。 */
     aggregateVersion: number;
     payload: Record<string, unknown>;
     occurredAt: Date;

@@ -7,7 +7,7 @@ export interface ExecutionBindingControlPlaneEvidence extends RouteControlPlaneE
   routeRevisionId: string;
   routeActivationId: string;
   routeContentDigest: string;
-  /** §07: Resolver 输入摘要 — 冻结解析时刻的请求参数 Digest。 */
+  /** Resolver 输入摘要 — 冻结解析时刻的请求参数 Digest。 */
   resolutionInputDigest: string;
 }
 

@@ -1,11 +1,11 @@
 /**
- * : MySQL Hosted Gateways 实现 — 纯适配器层。
+ * MySQL Hosted Gateways 实现 — 纯适配器层。
  *
  * 将 mysql-hosted-runtime-control-plane.ts 单体拆分为 6 个职责清晰的 Gateway，
  * 每个 Gateway 只做 DB 访问 + 对应领域调用。
  * Saga 负责步骤编排；此文件只提供基础设施适配。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 事实源：docs/architecture/agent-control-plane.md 与 docs/architecture/persistence.md。
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -110,7 +110,7 @@ const routeReader: HostedRouteReader = {
   async resolveEligibleRoute(command) {
     const outcome = await resolveRoute({
       ...command,
-      // : resolveRoute 命令字段已从 agentId 改为 agentConstraint（§8.3）。
+      // agentConstraint 表达可选 Agent 资产约束；null 表示基础 Harness Route。
       agentConstraint: command.agentId,
       businessKey: { jobId: `hosted-provision:${command.agentId}` },
     });
@@ -200,9 +200,9 @@ const agentPublication: HostedAgentPublicationGateway = {
   },
 };
 
-// ─── 3. Runtime Step Gateways（: 拆开过粗 Gateway）───
+// ─── 3. Runtime Step Gateways ─────────────────────────
 
-/** : prepareRuntimeRevision */
+/** prepareRuntimeRevision */
 const runtimePrepare: HostedRuntimePrepareGateway = {
   async prepareRuntimeRevision(command) {
     const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
@@ -222,7 +222,7 @@ const runtimePrepare: HostedRuntimePrepareGateway = {
   },
 };
 
-/** : verifyRuntimeArtifact */
+/** verifyRuntimeArtifact */
 const runtimeArtifactVerify: HostedRuntimeArtifactVerifyGateway = {
   async verifyRuntimeArtifact(command) {
     const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
@@ -242,7 +242,7 @@ const runtimeArtifactVerify: HostedRuntimeArtifactVerifyGateway = {
   },
 };
 
-/** : recordRuntimeConformance */
+/** recordRuntimeConformance */
 function createRuntimeConformanceGateway(
   recordRuntimeConformanceRun: ReturnType<typeof createRecordRuntimeConformanceRun>,
 ): HostedRuntimeConformanceGateway {
@@ -283,7 +283,7 @@ function createRuntimeConformanceGateway(
   };
 }
 
-/** : publishRuntimeRevision */
+/** publishRuntimeRevision */
 const runtimePublish: HostedRuntimePublishGateway = {
   async publishRuntimeRevision(command) {
     const [runtime] = await db
@@ -314,7 +314,7 @@ const runtimePublish: HostedRuntimePublishGateway = {
 
 // ─── 4. HostedRouteActivationGateway ────────────────────────
 //
-// : 使用 ActivateRouteSet 原子激活替代旧 activateRouteRevision。
+// 使用 ActivateRouteSet 原子激活整个 RouteSet。
 // 将单 Route 激活转换为 RouteSet 原子激活：先 ensureRouteSet，
 // 再 activateRouteSet with desiredRoutes 含一条 active 路由。
 
@@ -352,7 +352,7 @@ const routeActivation: HostedRouteActivationGateway = {
       ].join(":"),
     });
 
-    // : 返回路由详情
+    // 返回路由详情
     return {
       routeSetId: activated.routeSetId,
       routeSetVersionNo: activated.routeSetVersionNo,
@@ -372,7 +372,7 @@ const routeActivation: HostedRouteActivationGateway = {
 // ─── 工厂函数 ──────────────────────────────────────────────
 
 /**
- * : 创建 MySQL Hosted Gateways 实例。
+ * 创建 MySQL Hosted Gateways 实例。
  * 返回 7 个 Gateway 的组合对象，供 Saga 编排使用。
  */
 export interface MysqlHostedGatewaysDependencies {

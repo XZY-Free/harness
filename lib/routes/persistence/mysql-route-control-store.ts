@@ -170,7 +170,7 @@ export const mysqlRouteControlStore: RouteControlStore = {
           return (row?.value ?? 0) + 1;
         },
         async appendRevision(params) {
-          // : Fail-closed — 应用层已校验，此处为防御性断言
+          // Fail-closed — 应用层已校验，此处为防御性断言
           const normalized = normalizeEligibility(params.content.eligibilityConditions);
           if (!normalized) {
             throw new Error(
