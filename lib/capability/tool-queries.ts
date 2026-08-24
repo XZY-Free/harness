@@ -29,6 +29,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isValidContentHash } from "@/lib/capability/content-cache";
 import { db } from "@/lib/db/client";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
   CONNECTION_AUTH_METHODS,
   CONNECTION_TYPES,
@@ -224,13 +225,6 @@ export function computeSchemaHash(params: {
   return `sha256:${hex}`;
 }
 
-/** 判断 MySQL 错误是否为唯一约束冲突（ER_DUP_ENTRY, code 1062）。 */
-function isDuplicateEntryError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { code?: string; errno?: number };
-  return e.code === "ER_DUP_ENTRY" || e.errno === 1062;
-}
-
 // ═══════════════════════════════════════════════════════════
 // Connection 仓储
 // ═══════════════════════════════════════════════════════════
@@ -285,7 +279,7 @@ export async function createConnection(params: {
       lifecycleState: "draft",
     });
   } catch (err) {
-    if (isDuplicateEntryError(err)) {
+    if (isMysqlDuplicateEntryError(err)) {
       throw new ToolValidationError(
         "connection_key_exists",
         `connectionKey 已存在: ${params.connectionKey}`,
@@ -657,7 +651,7 @@ export async function createToolProvider(params: {
       lifecycleState: "draft",
     });
   } catch (err) {
-    if (isDuplicateEntryError(err)) {
+    if (isMysqlDuplicateEntryError(err)) {
       throw new ToolValidationError(
         "provider_key_exists",
         `providerKey 已存在: ${params.providerKey}`,
@@ -920,7 +914,7 @@ export async function createTool(params: {
       lifecycleState: "draft",
     });
   } catch (err) {
-    if (isDuplicateEntryError(err)) {
+    if (isMysqlDuplicateEntryError(err)) {
       throw new ToolValidationError("tool_key_exists", `toolKey 已存在: ${params.toolKey}`);
     }
     throw err;
@@ -1165,7 +1159,7 @@ export async function createToolSchemaRevision(params: {
       createdBy: params.createdBy,
     });
   } catch (err) {
-    if (isDuplicateEntryError(err)) {
+    if (isMysqlDuplicateEntryError(err)) {
       throw new ToolVersionConflictError(
         `ToolSchemaRevision 并发冲突：revisionNo=${revisionNo} 已被占用 (toolId=${params.toolId})`,
       );

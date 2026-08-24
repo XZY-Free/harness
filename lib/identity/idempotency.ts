@@ -18,6 +18,7 @@
  * Tool 的 operation_id 由 ToolCall 单独负责，不是同一字段。
  */
 import { createHash } from "node:crypto";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import type { ApiErrorCode } from "@/lib/error-codes";
 import { apiError, generateRequestId } from "@/lib/http";
 import type { ApiAudience } from "@/lib/http";
@@ -104,7 +105,7 @@ export async function enforceIdempotency(params: {
       });
       return { kind: "new", record };
     } catch (err) {
-      if (isDuplicateEntryError(err)) {
+      if (isMysqlDuplicateEntryError(err)) {
         const retried = await findIdempotencyRecord(key);
         if (retried) {
           return classifyExisting(retried, requestHash);
@@ -335,11 +336,4 @@ export function buildIdempotencyErrorResponse(params: {
     details.state = params.record.processingState;
   }
   return apiError(code, message, { requestId: rid, details });
-}
-
-/** 判断 MySQL 错误是否为唯一约束冲突（ER_DUP_ENTRY, code 1062）。 */
-function isDuplicateEntryError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { code?: string; errno?: number };
-  return e.code === "ER_DUP_ENTRY" || e.errno === 1062;
 }

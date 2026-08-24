@@ -11,6 +11,31 @@ beforeEach(async () => {
   await resetDatabase(db);
 });
 
+function errorChainContains(error: unknown, pattern: RegExp): boolean {
+  const seen = new Set<object>();
+  let current = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { message?: unknown; cause?: unknown };
+    if (typeof candidate.message === "string" && pattern.test(candidate.message)) return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
+async function expectAppendOnlyRejection(
+  operation: Promise<unknown>,
+  table: "RouteRevision" | "RouteActivation",
+): Promise<void> {
+  let caught: unknown;
+  try {
+    await operation;
+  } catch (error) {
+    caught = error;
+  }
+  expect(errorChainContains(caught, new RegExp(`${table} is append-only`))).toBe(true);
+}
+
 async function seedRouteHistory() {
   const tenantId = randomUUID();
   const routeId = randomUUID();
@@ -63,22 +88,24 @@ describe("Route 历史表 append-only 数据库约束", () => {
   it("数据库拒绝 UPDATE RouteRevision 历史", async () => {
     const fixture = await seedRouteHistory();
 
-    await expect(
+    await expectAppendOnlyRejection(
       db
         .update(routeRevision)
         .set({ trafficWeight: 99 })
         .where(eq(routeRevision.id, fixture.routeRevisionId)),
-    ).rejects.toThrow(/RouteRevision is append-only/);
+      "RouteRevision",
+    );
   });
 
   it("数据库拒绝 UPDATE RouteActivation 历史", async () => {
     const fixture = await seedRouteHistory();
 
-    await expect(
+    await expectAppendOnlyRejection(
       db
         .update(routeActivation)
         .set({ reason: "mutated" })
         .where(eq(routeActivation.id, fixture.routeActivationId)),
-    ).rejects.toThrow(/RouteActivation is append-only/);
+      "RouteActivation",
+    );
   });
 });

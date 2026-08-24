@@ -19,6 +19,7 @@
 import { createHash } from "node:crypto";
 import { isValidContentHash } from "@/lib/capability/content-cache";
 import { db } from "@/lib/db/client";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
   FILE_CHANGE_TYPES,
   type FileChange,
@@ -319,7 +320,7 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
   try {
     await db.insert(artifactTable).values(row);
   } catch (err) {
-    if (isDuplicateEntryError(err) && input.itemId) {
+    if (isMysqlDuplicateEntryError(err) && input.itemId) {
       throw new ArtifactItemConflictError(input.itemId);
     }
     throw err;
@@ -761,13 +762,4 @@ export async function listExpiredFilesystemCheckpoints(
         lt(filesystemCheckpointTable.expiresAt, now),
       ),
     );
-}
-
-// ─── 辅助：DuplicateEntry 检测 ───────────────────────────
-
-/** MySQL ER_DUP_ENTRY 错误检测（用于 UNIQUE 冲突区分）。 */
-function isDuplicateEntryError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { code?: string; errno?: number };
-  return e.code === "ER_DUP_ENTRY" || e.errno === 1062;
 }

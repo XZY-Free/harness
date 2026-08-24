@@ -18,6 +18,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
   type CapabilityUse,
   type CapabilityUseSourceType,
@@ -191,7 +192,7 @@ export async function recordCapabilityUse(
       capabilityUseKey,
     });
   } catch (err) {
-    if (isDuplicateEntryError(err)) {
+    if (isMysqlDuplicateEntryError(err)) {
       // 并发竞态：UNIQUE(invocationId, capabilityUseKey) 冲突 → 回查返回已存在行。
       const retried = await getCapabilityUseByKey({
         tenantId: params.tenantId,
@@ -254,13 +255,6 @@ export async function listCapabilityUseByInvocation(params: {
 }
 
 // ─── 内部工具 ──────────────────────────────────────────────
-
-/** 判断 MySQL 错误是否为唯一约束冲突（ER_DUP_ENTRY, code 1062）。 */
-function isDuplicateEntryError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { code?: string; errno?: number };
-  return e.code === "ER_DUP_ENTRY" || e.errno === 1062;
-}
 
 // ─── Re-exports ────────────────────────────────────────────
 

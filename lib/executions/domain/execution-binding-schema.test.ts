@@ -6,7 +6,7 @@ const projectFile = (path: string) => readFileSync(resolve(process.cwd(), path),
 
 describe("ExecutionBinding Attestation JSON 基线约束", () => {
   it("Runtime Attestation JSON 限定非空数组；Agent Attestation 可空（§18 基础 Route）", () => {
-    const schema = projectFile("lib/persistence/schema/runtime.ts");
+    const schema = projectFile("lib/persistence/schema/executions.ts");
     const baseline = projectFile("drizzle/0000_initial_schema.sql");
 
     // Runtime 维度（Agent Route 必填）仍为非空 JSON Array。
@@ -27,7 +27,7 @@ describe("ExecutionBinding Attestation JSON 基线约束", () => {
   });
 
   it("Agent Artifact ID 可空（§18），Runtime Artifact ID 必填；均带索引", () => {
-    const schema = projectFile("lib/persistence/schema/runtime.ts");
+    const schema = projectFile("lib/persistence/schema/executions.ts");
     const baseline = projectFile("drizzle/0000_initial_schema.sql");
     const snapshot = projectFile("drizzle/meta/0000_snapshot.json");
 

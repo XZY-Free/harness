@@ -1,4 +1,5 @@
 import { db } from "@/lib/db/client";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import {
@@ -11,6 +12,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 beforeEach(async () => {
   await resetDatabase(db);
 });
+
+async function expectDuplicateEntry(operation: Promise<unknown>): Promise<void> {
+  let caught: unknown;
+  try {
+    await operation;
+  } catch (error) {
+    caught = error;
+  }
+  expect(isMysqlDuplicateEntryError(caught)).toBe(true);
+}
 
 describe("PublicationRecord 与 WithdrawalRecord", () => {
   it("为 Revision 保存不可变发布事实并分配单调 publicationSequence", async () => {
@@ -86,9 +97,9 @@ describe("PublicationRecord 与 WithdrawalRecord", () => {
     };
     await db.insert(publicationRecord).values({ id: "publication-unique-1", ...values });
 
-    await expect(
+    await expectDuplicateEntry(
       db.insert(publicationRecord).values({ id: "publication-unique-2", ...values }),
-    ).rejects.toMatchObject({ code: "ER_DUP_ENTRY" });
+    );
   });
 
   it("数据库唯一约束拒绝重复命令事实和同一 Revision 的第二个撤回事实", async () => {
@@ -109,7 +120,7 @@ describe("PublicationRecord 与 WithdrawalRecord", () => {
       idempotencyRecordId: "idempotency-publication-withdrawal",
     });
 
-    await expect(
+    await expectDuplicateEntry(
       db.insert(publicationRecord).values({
         id: "publication-command-conflict",
         tenantId: tenant.id,
@@ -125,7 +136,7 @@ describe("PublicationRecord 与 WithdrawalRecord", () => {
         idempotencyKey: "different-key",
         idempotencyRecordId: "idempotency-publication-withdrawal",
       }),
-    ).rejects.toMatchObject({ code: "ER_DUP_ENTRY" });
+    );
 
     const withdrawalValues = {
       tenantId: tenant.id,
@@ -139,9 +150,9 @@ describe("PublicationRecord 与 WithdrawalRecord", () => {
       withdrawnAt: new Date("2026-08-02T01:00:00.000Z"),
     };
     await db.insert(withdrawalRecord).values({ id: "withdrawal-record-1", ...withdrawalValues });
-    await expect(
+    await expectDuplicateEntry(
       db.insert(withdrawalRecord).values({ id: "withdrawal-record-2", ...withdrawalValues }),
-    ).rejects.toMatchObject({ code: "ER_DUP_ENTRY" });
+    );
 
     expect(
       await publicationQueries.getWithdrawalRecordBySubject({

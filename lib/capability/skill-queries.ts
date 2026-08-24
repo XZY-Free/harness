@@ -23,6 +23,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isValidContentHash } from "@/lib/capability/content-cache";
 import { listActiveSyncLocalSkillIds } from "@/lib/capability/skill-sync-queries";
 import { db } from "@/lib/db/client";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
   type Skill,
   type SkillLifecycleState,
@@ -187,7 +188,7 @@ export async function createSkill(params: {
     });
   } catch (err) {
     // 并发竞态下 UNIQUE(tenantId, skillKey) 冲突 → 友好错误。
-    if (isDuplicateEntryError(err)) {
+    if (isMysqlDuplicateEntryError(err)) {
       throw new SkillValidationError("skill_key_exists", `skillKey 已存在: ${params.skillKey}`);
     }
     throw err;
@@ -420,7 +421,7 @@ export async function createSkillVersion(params: {
       createdBy: params.createdBy,
     });
   } catch (err) {
-    if (isDuplicateEntryError(err)) {
+    if (isMysqlDuplicateEntryError(err)) {
       throw new SkillVersionConflictError(
         `SkillVersion 并发冲突：versionNo=${versionNo} 已被占用 (skillId=${params.skillId})`,
       );
@@ -768,13 +769,6 @@ async function nextVersionNo(skillId: string): Promise<number> {
   const currentMax = row?.maxNo;
   if (currentMax === null || currentMax === undefined) return 1;
   return currentMax + 1;
-}
-
-/** 判断 MySQL 错误是否为唯一约束冲突（ER_DUP_ENTRY, code 1062）。 */
-function isDuplicateEntryError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { code?: string; errno?: number };
-  return e.code === "ER_DUP_ENTRY" || e.errno === 1062;
 }
 
 /** 编码不透明 cursor（base64url(JSON)）。 */

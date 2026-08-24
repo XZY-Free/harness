@@ -17,6 +17,7 @@
 import { randomUUID } from "node:crypto";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { type DbOrTx, db } from "@/lib/db/client";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import { GOVERNANCE_CONFIG_SET_KEY, INITIAL_GOVERNANCE_CONFIG } from "@/lib/governance/config";
 import {
   type GovernanceConfig,
@@ -200,11 +201,7 @@ export async function ensureDefaultTenant(): Promise<{
     // 并发竞争：另一事务已先创建租户。落败事务的 insert 遇到 DEFAULT_TENANT_ID
     // 主键/唯一键重复，事务已整体 rollback（bootstrap 未落库）。仅吞掉 duplicate
     // key，其余错误继续抛出。
-    const code = (err as { code?: string; errno?: number; driverError?: { errno?: number } })?.code;
-    const errno =
-      (err as { errno?: number })?.errno ??
-      (err as { driverError?: { errno?: number } })?.driverError?.errno;
-    const isDuplicate = code === "ER_DUP_ENTRY" || errno === 1062;
+    const isDuplicate = isMysqlDuplicateEntryError(err);
     if (!isDuplicate) {
       throw err;
     }

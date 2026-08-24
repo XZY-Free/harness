@@ -9,6 +9,8 @@ await Promise.all([
   rm(bundleDir, { recursive: true, force: true }),
   rm(`${packageDir}/bundle`, { recursive: true, force: true }),
   rm(`${packageDir}/renderer`, { recursive: true, force: true }),
+  // node_modules 每次整体重建：清掉升级前遗留的历史死依赖，而不写死旧包名。
+  rm(`${packageDir}/node_modules`, { recursive: true, force: true }),
 ]);
 
 await build({
@@ -46,29 +48,12 @@ await Promise.all([
   writeFile(`${packageDir}/package.json`, `${JSON.stringify(packageJson, null, 2)}\n`),
 ]);
 
-for (const dependency of ["better-sqlite3", "bindings", "file-uri-to-path"]) {
-  const source = await realpath(
-    dependency === "better-sqlite3"
-      ? `node_modules/${dependency}`
-      : `node_modules/.pnpm/node_modules/${dependency}`,
-  );
-  const target = `${packageDir}/node_modules/${dependency}`;
-  const sourcePackage = JSON.parse(await readFile(`${source}/package.json`, "utf8"));
-  let targetVersion = "";
-  try {
-    targetVersion = JSON.parse(await readFile(`${target}/package.json`, "utf8")).version;
-  } catch {
-    // 首次构建没有目标依赖。
-  }
-  if (targetVersion !== sourcePackage.version) {
-    await rm(target, { recursive: true, force: true });
-    await cp(source, target, { dereference: true, recursive: true });
-  }
-}
-
-// electron-builder only needs the runtime dependency graph. better-sqlite3's
-// prebuild installer is not used when electron-builder rebuilds the native addon.
-const sqlitePackagePath = `${packageDir}/node_modules/better-sqlite3/package.json`;
-const sqlitePackage = JSON.parse(await readFile(sqlitePackagePath, "utf8"));
-sqlitePackage.dependencies = { bindings: sqlitePackage.dependencies.bindings };
-await writeFile(sqlitePackagePath, `${JSON.stringify(sqlitePackage, null, 2)}\n`);
+// better-sqlite3@13 的运行时通过 lib/binding.js 直接 require prebuilds/darwin-*.node，
+// 依赖树中已无 bindings/file-uri-to-path（旧版本定位 .node 文件的机制已移除），
+// node-addon-api 仅用于 native 编译期，非 JS 运行时加载依赖。node_modules 已在开头
+// 整体重建，故直接复制整包，无需版本比较或增量缓存。
+const sqliteSource = await realpath("node_modules/better-sqlite3");
+await cp(sqliteSource, `${packageDir}/node_modules/better-sqlite3`, {
+  dereference: true,
+  recursive: true,
+});

@@ -15,6 +15,7 @@ import {
 } from "@/lib/control-plane/events/outbox-append";
 import { seedEventDeliveries } from "@/lib/control-plane/events/seed-event-deliveries";
 import { db } from "@/lib/db/client";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
@@ -39,7 +40,7 @@ export const mysqlArtifactAttestationPersistenceStore: ArtifactAttestationPersis
               ...params,
             });
           } catch (error) {
-            if (!isDuplicateEntryError(error)) throw error;
+            if (!isMysqlDuplicateEntryError(error)) throw error;
           }
           const [row] = await tx
             .select()
@@ -277,14 +278,5 @@ export const mysqlAttestationRevocationStore: AttestationRevocationStore = {
       }),
     ),
 };
-
-function isDuplicateEntryError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ER_DUP_ENTRY"
-  );
-}
 
 export type { RevisionArtifactBinding };

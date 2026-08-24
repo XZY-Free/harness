@@ -28,6 +28,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isValidContentHash } from "@/lib/capability/content-cache";
 import { type DbOrTx, db } from "@/lib/db/client";
+import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
   type ToolCall,
   type ToolCallState,
@@ -281,7 +282,7 @@ export async function createToolCall(params: CreateToolCallParams, tx?: DbOrTx):
       await db.transaction((t) => doInsert(t));
     }
   } catch (err) {
-    if (isDuplicateEntryError(err)) {
+    if (isMysqlDuplicateEntryError(err)) {
       // 并发竞态下 (toolId, operationId) 或 (invocationId, callSequence) 冲突。
       // 区分两种情况：先回查 operation；若命中且 hash 匹配 → 幂等，否则冲突。
       const retried = await getToolCallByOperation(
@@ -519,13 +520,6 @@ async function nextCallSequence(tx: DbOrTx, invocationId: string): Promise<numbe
   const currentMax = row?.maxSeq;
   if (currentMax === null || currentMax === undefined) return 1;
   return currentMax + 1;
-}
-
-/** 判断 MySQL 错误是否为唯一约束冲突（ER_DUP_ENTRY, code 1062）。 */
-function isDuplicateEntryError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as { code?: string; errno?: number };
-  return e.code === "ER_DUP_ENTRY" || e.errno === 1062;
 }
 
 // ─── Re-exports ────────────────────────────────────────────

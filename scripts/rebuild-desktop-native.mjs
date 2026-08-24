@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 const require = createRequire(import.meta.url);
 const electronExecutable = require("electron");
 const electronVersion = require("electron/package.json").version;
-const rebuildCli = require.resolve("@electron/rebuild/lib/cli.js");
+const rebuildCli = resolve(dirname(require.resolve("@electron/rebuild")), "cli.js");
 const packageDir = resolve("desktop/package-app");
 
 function verifyElectronAbi() {
