@@ -14,12 +14,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
+import { createWithdrawAgentRevision } from "@/lib/agents/application/withdraw-agent-revision";
 import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
+import { mysqlAgentWithdrawalStore } from "@/lib/agents/persistence/mysql-agent-withdrawal-store";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import { withdrawRevision } from "@/lib/agents/test-support/withdraw-agent-revision";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
@@ -63,7 +65,6 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { deploymentRouteTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
@@ -342,16 +343,25 @@ async function seedPublishedAgentRevision(
     `agent-content-${contentSuffix}`,
   );
 
-  // 链接 Artifact 到 AgentRevision（createPublishAgentRevision 要求 artifactId/artifactDigest 一致）
+  // 不直接写 DB 绑定 Artifact——正式 record-artifact-attestation command（verifyAndPersistAttestation）
+  // 已在 verified 时通过 mysql store 原子 bindRevisionArtifact。此处仅用正式查询复核并 fail-closed，
+  // 禁止用 db.update 直接写正式数据库结论。
   const found = await getAttestationById(tenantId, attestationId);
   const attestation = found?.attestation;
   if (!attestation?.artifactId || !attestation.artifactDigest) {
     throw new Error(`测试 AgentRevision 缺少权威 Attestation: ${revision.id}`);
   }
-  await db
-    .update(agentRevisionTable)
-    .set({ artifactId: attestation.artifactId, artifactDigest: attestation.artifactDigest })
-    .where(eq(agentRevisionTable.id, revision.id));
+  const boundRevision = await getRevisionById(revision.id);
+  if (
+    !boundRevision ||
+    boundRevision.artifactId !== attestation.artifactId ||
+    boundRevision.artifactDigest !== attestation.artifactDigest
+  ) {
+    throw new Error(
+      `正式 Attestation 命令未原子绑定 Artifact 到 AgentRevision（${revision.id}）：` +
+        `期望 artifactId=${attestation.artifactId} artifactDigest=${attestation.artifactDigest}`,
+    );
+  }
 
   // 使用带 attestation 的正式发布服务，确保 PublicationRecord.attestationIds 非空
   const publishAgentRevision = createPublishAgentRevision({
@@ -1985,7 +1995,7 @@ describe("场景20：跨租户访问全部 Fail-closed", () => {
  */
 
 describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链", () => {
-  it("Create → Publish → Deploy → Withdraw/disable 全程真实链 + Agent Evidence 完整 + disable fail-closed", async () => {
+  it("Create → Publish → Deploy → Withdraw 全程真实链 + Agent Evidence 完整 + fail-closed", async () => {
     const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
 
     // ─── 1. Agent Lifecycle: Create → Publish（正式控制面）──
@@ -2100,39 +2110,61 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
 
-    // ─── 5. Withdraw/disable：禁用 Route → 真实 Worker 再消费 → Projection ineligible → fail-closed ─
-    const currentRouteSet = await getRouteSetById(tenantId, routeSet.id);
-    if (!currentRouteSet) throw new Error("J-3 RouteSet 不存在");
-    await disableRouteForTest({
-      tenantId,
-      routeSetId: routeSet.id,
-      routeId,
-      expectedVersionNo: currentRouteSet.versionNo,
-      actor: { tenantId, actorType: "service", actorId: "lifecycle-disabler" },
-      reason: "J-3 Agent Lifecycle Withdraw/disable",
-      requestId: "req-lifecycle-disable",
-      idempotencyKey: "idem-lifecycle-disable",
+    // ─── 5. Withdraw：正式撤回命令 → 真实 Worker 消费 agent.revision.withdrawn → Projection ineligible → fail-closed ─
+    // 正式撤回应用服务在真实 MySQL 同事务写 WithdrawalRecord/Audit/Outbox agent.revision.withdrawn，
+    // 并把 Agent.currentRevisionId 置 null（唯一 published Revision 被撤回）。不使用 route disable
+    // 作为失效原因——Withdrawal 事件本身即驱动 Projection ineligible。
+    const withdrawAgentRevision = createWithdrawAgentRevision({
+      store: mysqlAgentWithdrawalStore,
     });
+    const currentAgent = await getAgentById(tenantId, agent.id);
+    if (!currentAgent) throw new Error("J-3 Agent 不存在");
+    const withdrawal = await withdrawAgentRevision({
+      tenantId,
+      revisionId: agentRevision.id,
+      agentExpectedVersionNo: currentAgent.versionNo,
+      actor: { tenantId, actorType: "service", actorId: "lifecycle-withdrawer" },
+      reasonCode: "agent_lifecycle_withdraw",
+      reason: "J-3 Agent Lifecycle Withdraw",
+      requestId: "req-lifecycle-withdraw",
+    });
+    expect(withdrawal.currentRevisionId).toBeNull();
+
+    // 同一个真实 Outbox Worker 消费 agent.revision.withdrawn → projection handler markIneligible。
     await drainUntilRouteState(routeId, "ineligible");
 
-    const postDisableResolution = await createResolveRoute({
+    const withdrawnRevision = await getRevisionById(agentRevision.id);
+    expect(withdrawnRevision?.revisionState).toBe("withdrawn");
+
+    const [withdrawalRow] = await db
+      .select()
+      .from(withdrawalRecord)
+      .where(eq(withdrawalRecord.subjectRevisionId, agentRevision.id))
+      .limit(1);
+    expect(withdrawalRow).toBeDefined();
+    expect(withdrawalRow?.withdrawnByType).toBe("service");
+
+    const agentAfter = await getAgentById(tenantId, agent.id);
+    expect(agentAfter?.currentRevisionId).toBeNull();
+
+    // fail-closed：Withdrawal（非 route disable）让唯一 Resolver 不再解析。
+    const postWithdrawalResolution = await createResolveRoute({
       store: mysqlRouteEligibilityResolutionStore,
     })({
       tenantId,
       agentConstraint: agent.id,
       routeScopeKey: "prod",
-      businessKey: { threadId: "lifecycle-thread-post-disable" },
+      businessKey: { threadId: "lifecycle-thread-post-withdrawal" },
     });
-    expect(postDisableResolution.status).toBe("unresolved");
+    expect(postWithdrawalResolution.status).toBe("unresolved");
 
-    // 事件驱动路径：route.disabled → markIneligible（§projection-event-handlers），
-    // 权威断言是 eligibilityState="ineligible"（fail-closed）；activationState 保留
-    // 最后一次 build 的值（"active"），由 Authority rebuild 才会翻转为 "disabled"。
-    const [disabledProjection] = await db
+    // 事件驱动路径：agent.revision.withdrawn → markIneligible（§projection-event-handlers），
+    // 权威断言是 eligibilityState="ineligible"（fail-closed）。
+    const [withdrawnProjection] = await db
       .select()
       .from(routeEligibilityProjection)
       .where(eq(routeEligibilityProjection.routeId, routeId))
       .limit(1);
-    expect(disabledProjection?.eligibilityState).toBe("ineligible");
+    expect(withdrawnProjection?.eligibilityState).toBe("ineligible");
   });
 });
