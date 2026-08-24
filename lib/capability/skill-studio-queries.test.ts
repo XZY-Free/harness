@@ -1,14 +1,15 @@
 import { listSkillVersions, listSkills } from "@/lib/capability/skill-studio-queries";
 import { db } from "@/lib/db/client";
+import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { tenant as tenantTable } from "@/lib/persistence/schema/identity";
 import { skillTable, skillVersionTable } from "@/lib/persistence/schema/skill";
 import { beforeEach, describe, expect, it } from "vitest";
-import { resetDatabase } from "./test/mysql-harness";
 
 /**
  * 02-4：studio skill 只读查询单测（真实 MySQL）。
  *
- * 查询已从 legacy `lib/db/studio-queries.ts` 迁到正式 `lib/capability/skill-studio-queries.ts`
- * （tenant-scoped，基于正式 skillTable / skillVersionTable）。
+ * 长期职责：这是 studio skill 只读查询的正式测试（真实 MySQL），
+ * 由 db project singleFork 串行运行；unit project 明确 exclude，防重复 resetDatabase。
  *
  * 生产是 MySQL（mysql2 + drizzle），测试用 testcontainers 起真实 MySQL 8 容器，
  * beforeEach resetDatabase 清空所有表，用 db.insert 真实插数据满足外键后调真实查询函数。
@@ -65,6 +66,10 @@ async function insertSkillVersionRow(
 describe("listSkills (真实 MySQL)", () => {
   beforeEach(async () => {
     await resetDatabase(db);
+    // resetDatabase TRUNCATE 全部表（含 Tenant），故须先补租户行满足 Skill_tenantId_Tenant_id_fk
+    // 外键，再插 Skill/SkillVersion。本测试用到的租户：TENANT 与 tenant-2（隔离用例）。
+    await db.insert(tenantTable).values({ id: TENANT, key: TENANT, name: TENANT });
+    await db.insert(tenantTable).values({ id: "tenant-2", key: "tenant-2", name: "tenant-2" });
   });
 
   it("全量返回（admin 视角，含 currentVersionId），按 createdAt desc", async () => {
@@ -153,6 +158,10 @@ describe("listSkills (真实 MySQL)", () => {
 describe("listSkillVersions (真实 MySQL)", () => {
   beforeEach(async () => {
     await resetDatabase(db);
+    // resetDatabase TRUNCATE 全部表（含 Tenant），故须先补租户行满足 Skill_tenantId_Tenant_id_fk
+    // 外键，再插 Skill/SkillVersion。本测试用到的租户：TENANT 与 tenant-2（隔离用例）。
+    await db.insert(tenantTable).values({ id: TENANT, key: TENANT, name: TENANT });
+    await db.insert(tenantTable).values({ id: "tenant-2", key: "tenant-2", name: "tenant-2" });
   });
 
   it("返回某 skill 的版本列表，按 versionNo desc", async () => {
