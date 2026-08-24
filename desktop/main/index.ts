@@ -431,7 +431,9 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   // 主进程启动失败时记录并退出（不暴露敏感栈到 renderer）
-  logToE2EFile(`main() failed: ${String(err)}`);
+  // JSON.stringify 而非 String()：keychain 等抛的是 desktopError 对象
+  // （{ok, code, message}），String() 只会得到 "[object Object]"。
+  logToE2EFile(`main() failed: ${JSON.stringify(err)}`);
   console.error("[snowharness:desktop] 主进程启动失败:", err);
   app.quit();
 });
