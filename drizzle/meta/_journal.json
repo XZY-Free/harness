@@ -43,6 +43,13 @@
       "when": 1787622451132,
       "tag": "0005_panoramic_robin_chapel",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787626383545,
+      "tag": "0006_black_pestilence",
+      "breakpoints": true
     }
   ]
 }

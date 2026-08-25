@@ -29,6 +29,16 @@ export const publicationRecord = mysqlTable(
     attestationIds: json("attestationIds").$type<string[]>().notNull(),
     conformanceRunId: varchar("conformanceRunId", { length: 36 }),
     approvals: json("approvals").$type<unknown[]>().notNull(),
+    /**
+     * Agent Descriptor 证据（Batch 2：Agent Publication 权威是外部合同快照，不是 source Artifact）。
+     * 仅 agent_revision 发布填充；runtime_revision 发布为 null。
+     */
+    agentDescriptorSnapshotId: varchar("agentDescriptorSnapshotId", { length: 36 }),
+    agentProviderDescriptorDigest: varchar("agentProviderDescriptorDigest", { length: 71 }),
+    agentCapabilityManifestDigest: varchar("agentCapabilityManifestDigest", { length: 71 }),
+    agentInvocationContextContractDigest: varchar("agentInvocationContextContractDigest", {
+      length: 71,
+    }),
     publishedByType: mysqlEnum("publishedByType", PUBLICATION_ACTOR_TYPES).notNull(),
     publishedBy: varchar("publishedBy", { length: 128 }).notNull(),
     publishedAt: datetime("publishedAt", { mode: "date", fsp: 3 }).notNull(),
