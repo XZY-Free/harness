@@ -28,13 +28,16 @@ export interface PublishRuntimeRevisionResult {
     runtimeId: string;
     revisionNo: number;
     revisionState: string;
-    runtimeArtifactRef: string;
+    runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
+    runtimeTargetDigest: string;
+    runtimeArtifactRef: string | null;
     artifactDigest: string | null;
     configHash: string;
     protocolContractRevision: string;
     publishedAt: Date | null;
   };
-  attestation: RuntimePublicationAttestation;
+  /** 可选 Attestation；hosted_artifact 必填，external_endpoint 必须为 null（03 §3/§4）。 */
+  attestation: RuntimePublicationAttestation | null;
   conformanceResults: Array<{
     caseId: string;
     passed: boolean;
@@ -55,8 +58,11 @@ export interface PublishRuntimeRevisionCommand {
   runtimeExpectedVersionNo: number;
   /** 必填：已完成且与 Revision 绑定一致的 ConformanceRun。 */
   conformanceRunId: string;
-  /** 必填：验证通过且与 Revision/Artifact 绑定一致的 ArtifactAttestation。 */
-  attestationId: string;
+  /**
+   * hosted_artifact 必填：验证通过且与 Revision/Artifact 绑定一致的 ArtifactAttestation。
+   * external_endpoint 必须为空（外部运行时不伪造 Runtime Artifact — 03 §4）。
+   */
+  attestationId?: string | null;
   actor: {
     tenantId: string;
     actorType: RuntimePublicationActorType;
@@ -92,9 +98,6 @@ export function createPublishRuntimeRevision(dependencies: {
     if (!command.conformanceRunId) {
       throw new RuntimeConformanceRunRequiredError(command.revisionId);
     }
-    if (!command.attestationId) {
-      throw new RuntimeArtifactAttestationRequiredError(command.revisionId);
-    }
 
     return dependencies.store.transaction(async (session) => {
       // 4. FOR UPDATE 读取 Revision
@@ -120,30 +123,52 @@ export function createPublishRuntimeRevision(dependencies: {
         );
       }
 
-      // 8-9. FOR UPDATE 读取 Attestation 证据快照，统一 Policy 验证
-      const attestation = await session.findVerifiedAttestation({
-        tenantId: command.tenantId,
-        revisionId: revision.id,
-        attestationId: command.attestationId,
-      });
-      if (!attestation) {
+      // 7. 按 runtimeEvidenceKind 分派证据门禁（03 §3/§4：Hosted 不降级，External 不伪造）
+      let attestation: RuntimePublicationAttestation | null = null;
+      let attestationIds: string[] = [];
+      if (revision.runtimeEvidenceKind === "hosted_artifact") {
+        if (!command.attestationId) {
+          throw new RuntimeArtifactAttestationRequiredError(command.revisionId);
+        }
+        if (!revision.artifactId || !revision.artifactDigest || !revision.runtimeArtifactRef) {
+          throw new RuntimeArtifactAttestationInvalidError(
+            revision.id,
+            command.attestationId,
+            "hosted_artifact 证据不完整：Revision 缺少 artifact 绑定",
+          );
+        }
+        const found = await session.findVerifiedAttestation({
+          tenantId: command.tenantId,
+          revisionId: revision.id,
+          attestationId: command.attestationId,
+        });
+        if (!found) {
+          throw new RuntimeArtifactAttestationInvalidError(
+            revision.id,
+            command.attestationId,
+            "Attestation 不存在、不可用或已撤销",
+          );
+        }
+        const evidenceResult = ArtifactEvidencePolicy.validateForPublication(found, {
+          expectedTenantId: revision.tenantId,
+          expectedArtifactType: "runtime_revision",
+          expectedRevisionId: revision.id,
+          expectedDigest: revision.artifactDigest,
+        });
+        if (!evidenceResult.valid) {
+          throw new RuntimeArtifactAttestationInvalidError(
+            revision.id,
+            found.attestationId,
+            evidenceResult.errors.map((e) => e.message).join("; "),
+          );
+        }
+        attestation = found;
+        attestationIds = [found.attestationId];
+      } else if (command.attestationId) {
         throw new RuntimeArtifactAttestationInvalidError(
           revision.id,
           command.attestationId,
-          "Attestation 不存在、不可用或已撤销",
-        );
-      }
-      const evidenceResult = ArtifactEvidencePolicy.validateForPublication(attestation, {
-        expectedTenantId: revision.tenantId,
-        expectedArtifactType: "runtime_revision",
-        expectedRevisionId: revision.id,
-        expectedDigest: revision.artifactDigest,
-      });
-      if (!evidenceResult.valid) {
-        throw new RuntimeArtifactAttestationInvalidError(
-          revision.id,
-          attestation.attestationId,
-          evidenceResult.errors.map((e) => e.message).join("; "),
+          "external_endpoint 证据不允许携带 Artifact Attestation（不得伪造 Runtime Artifact）",
         );
       }
 
@@ -161,12 +186,12 @@ export function createPublishRuntimeRevision(dependencies: {
         );
       }
 
-      // 11-13. 校验 Run 与 Revision 的绑定一致
-      if (conformanceRun.runtimeArtifactDigest !== (revision.artifactDigest ?? "")) {
+      // 11-13. 校验 Run 与 Revision 的绑定一致（被测对象统一为 runtimeTargetDigest — 03 §6）
+      if (conformanceRun.runtimeTargetDigest !== revision.runtimeTargetDigest) {
         throw new RuntimeConformanceRunInvalidError(
           revision.id,
           conformanceRun.id,
-          `Artifact Digest 不一致（Run: ${conformanceRun.runtimeArtifactDigest}, Revision: ${revision.artifactDigest}）`,
+          `Runtime Target Digest 不一致（Run: ${conformanceRun.runtimeTargetDigest}, Revision: ${revision.runtimeTargetDigest}）`,
         );
       }
       if (conformanceRun.runtimeConfigDigest !== revision.configHash) {
@@ -197,9 +222,8 @@ export function createPublishRuntimeRevision(dependencies: {
       const publishedAt = now();
       const conformanceResults = conformanceRun.results;
 
-      // 15. 创建 PublicationRecord — attestationIds 必须非空
+      // 15. 创建 PublicationRecord（hosted: attestationIds 非空；external: 空数组 + target digest 附加证据）
       const publicationRecordId = newId();
-      const attestationIds = [attestation.attestationId];
       await session.appendPublication({
         id: publicationRecordId,
         tenantId: command.tenantId,
@@ -208,7 +232,11 @@ export function createPublishRuntimeRevision(dependencies: {
           attestationIds,
           conformanceRunId: conformanceRun.id,
           approvals: [],
-          additionalEvidence: { evidenceManifestDigest: conformanceRun.evidenceManifestDigest },
+          additionalEvidence: {
+            evidenceManifestDigest: conformanceRun.evidenceManifestDigest,
+            runtime_target_digest: revision.runtimeTargetDigest,
+            runtime_evidence_kind: revision.runtimeEvidenceKind,
+          },
         }),
         attestationIds,
         publishedByType: command.actor.actorType,
@@ -257,8 +285,10 @@ export function createPublishRuntimeRevision(dependencies: {
           runtime_id: revision.runtimeId,
           revision_no: revision.revisionNo,
           revision_state: "published",
-          attestation_id: attestation.attestationId,
-          artifact_digest: attestation.artifactDigest,
+          runtime_evidence_kind: revision.runtimeEvidenceKind,
+          runtime_target_digest: revision.runtimeTargetDigest,
+          attestation_id: attestation?.attestationId ?? null,
+          artifact_digest: attestation?.artifactDigest ?? null,
           publication_record_id: publicationRecordId,
           conformance_run_id: conformanceRun.id,
         },
@@ -280,7 +310,8 @@ export function createPublishRuntimeRevision(dependencies: {
           runtime_id: revision.runtimeId,
           revision_id: revision.id,
           revision_no: revision.revisionNo,
-          attestation_id: attestation.attestationId,
+          runtime_evidence_kind: revision.runtimeEvidenceKind,
+          attestation_id: attestation?.attestationId ?? null,
           audit_event_id: auditEventId,
           publication_record_id: publicationRecordId,
           conformance_run_id: conformanceRun.id,

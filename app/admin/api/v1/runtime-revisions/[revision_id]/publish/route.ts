@@ -49,7 +49,8 @@ export const dynamic = "force-dynamic";
 
 interface Body {
   expected_version_no: number;
-  attestation_id: string;
+  /** hosted_artifact 必填；external_endpoint 不得携带（03 §3/§4）。 */
+  attestation_id: string | null;
   conformance_run_id: string;
 }
 
@@ -59,8 +60,8 @@ function validateBody(value: unknown): value is Body {
   return (
     typeof body.expected_version_no === "number" &&
     Number.isInteger(body.expected_version_no) &&
-    typeof body.attestation_id === "string" &&
-    body.attestation_id.length > 0 &&
+    (body.attestation_id === null ||
+      (typeof body.attestation_id === "string" && body.attestation_id.length > 0)) &&
     typeof body.conformance_run_id === "string" &&
     body.conformance_run_id.length > 0
   );

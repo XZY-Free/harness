@@ -176,7 +176,7 @@ function conformanceRequest(input: HostedRuntimeConformanceInput): Record<string
   return {
     tenant_id: input.tenantId,
     runtime_revision_id: input.runtimeRevisionId,
-    runtime_artifact_digest: input.runtimeArtifactDigest,
+    runtime_target_digest: input.runtimeTargetDigest,
     runtime_config_digest: input.runtimeConfigDigest,
     protocol_contract_revision: input.protocolContractRevision,
   };

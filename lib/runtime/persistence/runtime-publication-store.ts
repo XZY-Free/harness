@@ -10,7 +10,12 @@ export interface RuntimePublicationRevision {
   runtimeId: string;
   revisionNo: number;
   revisionState: RuntimeRevisionPublicationState;
-  runtimeArtifactRef: string;
+  /** 证据种类（03 §2 语义字段，不允许 nullable 组合猜测）。 */
+  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
+  /** 被测对象统一 digest（03 §6）。 */
+  runtimeTargetDigest: string;
+  runtimeArtifactRef: string | null;
+  artifactId: string | null;
   artifactDigest: string | null;
   configHash: string;
   protocolContractRevision: string;
@@ -46,7 +51,7 @@ export interface StoredRuntimeConformanceResult {
  */
 export interface RuntimePublicationConformanceRun {
   id: string;
-  runtimeArtifactDigest: string;
+  runtimeTargetDigest: string;
   runtimeConfigDigest: string;
   protocolContractRevision: string;
   evidenceManifestDigest: string;
@@ -70,7 +75,7 @@ export interface RuntimePublicationSession {
   /**
    * FOR UPDATE 读取 Passed ConformanceRun 完整结果。
    *
-   * 返回包含绑定校验字段（artifactDigest、configDigest、protocolContractRevision）
+   * 返回包含绑定校验字段（runtimeTargetDigest、configDigest、protocolContractRevision）
    * 的完整 Run 数据，由应用服务校验与 Revision 绑定一致。
    */
   findPassedConformanceRun(params: {

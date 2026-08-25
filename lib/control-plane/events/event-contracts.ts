@@ -49,7 +49,8 @@ export const RuntimeRevisionPublishedPayload = z.object({
   runtime_id: id,
   revision_id: id,
   revision_no: z.number().int().positive(),
-  attestation_id: id,
+  /** null = external_endpoint 发布（无 Runtime Artifact Attestation，03 §4）。 */
+  attestation_id: id.nullable(),
   audit_event_id: id,
   publication_record_id: id,
   conformance_run_id: id,

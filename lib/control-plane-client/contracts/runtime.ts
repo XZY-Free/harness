@@ -47,10 +47,15 @@ export interface RuntimeRevisionDTO {
   revision_state: RuntimeRevisionState;
   protocol_type: string;
   protocol_contract_revision: string;
+  /** 证据种类（hosted_artifact | external_endpoint，03 §2）。 */
+  runtime_evidence_kind: "hosted_artifact" | "external_endpoint";
+  /** 被测对象统一 digest（03 §6）。 */
+  runtime_target_digest: string;
   endpoint_ref: string;
   artifact_id: string | null;
   artifact_digest: string | null;
-  artifact_ref: string;
+  /** 仅 hosted_artifact 非空；external_endpoint 为 null（03 §4，不伪造 Artifact）。 */
+  artifact_ref: string | null;
   config_hash: string;
   runtime_capabilities: unknown;
   identity_mode: string;
@@ -89,7 +94,7 @@ export interface RuntimeConformanceRunDTO {
   id: string;
   tenant_id: string;
   runtime_revision_id: string;
-  runtime_artifact_digest: string;
+  runtime_target_digest: string;
   runtime_config_digest: string;
   protocol_contract_revision: string;
   overall_result: RuntimeConformanceOverallResult;
@@ -115,7 +120,8 @@ export interface RuntimeConformanceRunDTO {
 /** 发布 RuntimeRevision 请求 — 必须显式传入精确证据。 */
 export interface PublishRuntimeRevisionRequest {
   expected_version_no: number;
-  attestation_id: string;
+  /** hosted_artifact 必填；external_endpoint 不得携带（03 §4，不伪造 Artifact）。 */
+  attestation_id: string | null;
   conformance_run_id: string;
 }
 

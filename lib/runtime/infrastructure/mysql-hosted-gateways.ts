@@ -37,7 +37,7 @@ import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime
 import { getHostedControlPlaneEvidenceProvider } from "@/lib/runtime/domain/hosted-control-plane-evidence";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
 import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
-import { protocolContractRevision } from "@/lib/runtime/domain/runtime-conformance-run";
+import { computeRuntimeTargetDigest } from "@/lib/runtime/domain/runtime-target-digest";
 import type {
   HostedAgentPublicationGateway,
   HostedGateways,
@@ -84,6 +84,10 @@ const HOSTED_RUNTIME_ENDPOINT = "in-process://hosted";
 // hosted runtime 声明 event_stream 能力；执行限额（600s / 1MB）由
 // dispatcher/redispatch 的默认值承载，二者数值一致，故不在此对象承载。
 const HOSTED_RUNTIME_CAPABILITIES = ["event_stream"];
+/**
+ * Hosted in-process 协议契约版本 — 显式冻结，不再从 protocolType 自动推导（03 §5）。
+ */
+const HOSTED_PROTOCOL_CONTRACT_REVISION = "agent-runtime-protocol@2";
 const HOSTED_RUNTIME_CONFIG_DIGEST = digest({
   protocolType: "in_process",
   endpointRef: HOSTED_RUNTIME_ENDPOINT,
@@ -221,6 +225,7 @@ const runtimePrepare: HostedRuntimePrepareGateway = {
         command.agentRevisionId,
       ),
       artifactRef: evidence.artifactRef,
+      artifactDigest: evidence.artifactDigest,
     });
     return { runtimeId: runtime.id, runtimeRevisionId: revision.id };
   },
@@ -256,7 +261,7 @@ function createRuntimeConformanceGateway(
         .select({
           configHash: runtimeRevisionTable.configHash,
           protocolContractRevision: runtimeRevisionTable.protocolContractRevision,
-          artifactDigest: runtimeRevisionTable.artifactDigest,
+          runtimeTargetDigest: runtimeRevisionTable.runtimeTargetDigest,
         })
         .from(runtimeRevisionTable)
         .where(eq(runtimeRevisionTable.id, command.runtimeRevisionId))
@@ -267,7 +272,7 @@ function createRuntimeConformanceGateway(
         tenantId: command.tenantId,
         runtimeRevisionId: command.runtimeRevisionId,
         idempotencyKey: `hosted-runtime-conformance:${command.runtimeRevisionId}`,
-        runtimeArtifactDigest: revision.artifactDigest ?? "",
+        runtimeTargetDigest: revision.runtimeTargetDigest,
         runtimeConfigDigest: revision.configHash,
         protocolContractRevision: revision.protocolContractRevision,
       });
@@ -502,7 +507,7 @@ async function loadPublishedRuntimeRevision(
         eq(runtimeConformanceRun.tenantId, tenantId),
         eq(runtimeConformanceRun.runtimeRevisionId, revision.id),
         eq(runtimeConformanceRun.overallResult, "passed"),
-        eq(runtimeConformanceRun.runtimeArtifactDigest, revision.artifactDigest as string),
+        eq(runtimeConformanceRun.runtimeTargetDigest, revision.runtimeTargetDigest),
         eq(runtimeConformanceRun.runtimeConfigDigest, revision.configHash),
         eq(runtimeConformanceRun.protocolContractRevision, revision.protocolContractRevision),
       ),
@@ -611,6 +616,8 @@ async function ensureRuntimeDraft(params: {
   tenantId: string;
   ownerUserId: string;
   artifactRef: string;
+  /** 与 artifactRef 同时冻结的受管 Artifact digest（hosted_artifact 证据必填，03 §3）。 */
+  artifactDigest: string;
 }) {
   return db.transaction(async (tx) => {
     const [tenantRow] = await tx
@@ -683,7 +690,14 @@ async function ensureRuntimeDraft(params: {
       runtimeId: runtime.id,
       revisionNo: (sequence?.value ?? 0) + 1,
       protocolType: "in_process",
-      protocolContractRevision: protocolContractRevision("in_process"),
+      protocolContractRevision: HOSTED_PROTOCOL_CONTRACT_REVISION,
+      runtimeEvidenceKind: "hosted_artifact",
+      runtimeTargetDigest: computeRuntimeTargetDigest({
+        runtimeEvidenceKind: "hosted_artifact",
+        runtimeArtifactDigest: params.artifactDigest,
+        runtimeConfigDigest: HOSTED_RUNTIME_CONFIG_DIGEST,
+        protocolContractRevision: HOSTED_PROTOCOL_CONTRACT_REVISION,
+      }),
       endpointRef: HOSTED_RUNTIME_ENDPOINT,
       runtimeArtifactRef: params.artifactRef,
       runtimeCapabilitiesJson: HOSTED_RUNTIME_CAPABILITIES,

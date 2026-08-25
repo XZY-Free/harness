@@ -9,7 +9,8 @@ import type {
 
 export interface RevisionArtifactBinding {
   revisionState: string;
-  artifactRef: string;
+  /** external_endpoint RuntimeRevision 无 Artifact 证据（03 §4），允许 null。 */
+  artifactRef: string | null;
   artifactId: string | null;
   artifactDigest: string | null;
 }
@@ -252,7 +253,7 @@ function shouldBindRevision(binding: RevisionArtifactBinding | null, authority: 
     const digestOk = !binding.artifactDigest || binding.artifactDigest === authority.digest;
     return idOk && digestOk;
   }
-  const declaredDigest = extractArtifactDigest(binding.artifactRef);
+  const declaredDigest = binding.artifactRef ? extractArtifactDigest(binding.artifactRef) : null;
   return declaredDigest === null || declaredDigest === authority.digest;
 }
 

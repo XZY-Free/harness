@@ -277,9 +277,15 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   let ifMatchEtag: string | null = null;
 
   if (shouldPublish) {
-    // 必填 artifact_attestation_id
-    if (!body.artifact_attestation_id) {
+    // hosted_artifact 必填 artifact_attestation_id；external_endpoint 不得携带（03 §3/§4）
+    if (revision.runtimeEvidenceKind === "hosted_artifact" && !body.artifact_attestation_id) {
       return schemaInvalidTable(requestId, "publish=true 时必填 artifact_attestation_id");
+    }
+    if (revision.runtimeEvidenceKind === "external_endpoint" && body.artifact_attestation_id) {
+      return schemaInvalidTable(
+        requestId,
+        "external_endpoint 证据不允许携带 artifact_attestation_id（不得伪造 Runtime Artifact）",
+      );
     }
     // 必填 expected_version_no
     if (typeof body.expected_version_no !== "number") {
@@ -389,8 +395,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     let publishedResult = null;
     if (shouldPublish && expectedVersionNo !== null) {
-      const attestationId = body.artifact_attestation_id;
-      if (!attestationId) {
+      // hosted_artifact 必填（step 7 已校验）；external_endpoint 传 null（03 §4）。
+      const attestationId = body.artifact_attestation_id ?? null;
+      if (revision.runtimeEvidenceKind === "hosted_artifact" && !attestationId) {
         throw new Error("发布 RuntimeRevision 时 artifact_attestation_id 不可为空");
       }
       publishedResult = await publishRuntimeRevisionThroughControlPlane({
