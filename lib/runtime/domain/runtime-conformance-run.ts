@@ -12,7 +12,7 @@ export type RuntimeConformanceOverallResult = "passed" | "failed" | "error" | "c
 export interface RuntimeConformanceReport {
   runId: string;
   runtimeRevisionId: string;
-  runtimeArtifactDigest: string;
+  runtimeTargetDigest: string;
   runtimeConfigDigest: string;
   protocolContractRevision: string;
   suiteRevision: string;
@@ -49,7 +49,7 @@ export function computeCaseEvidenceDigest(evidence: Record<string, unknown>): st
  * 计算 evidenceManifestDigest 的权威函数。
  *
  * Manifest canonical 绑定 suiteRevision、testEnvironmentRevision、runtimeRevisionId、
- * runtimeArtifactDigest、runtimeConfigDigest、protocolContractRevision、
+ * runtimeTargetDigest、runtimeConfigDigest、protocolContractRevision、
  * runnerArtifactDigest 与按 caseId 升序的 (caseId, passed, evidenceDigest)。
  * runner / helper / validator 全部复用本函数。
  */
@@ -57,7 +57,7 @@ export function computeEvidenceManifestDigest(params: {
   suiteRevision: string;
   testEnvironmentRevision: string;
   runtimeRevisionId: string;
-  runtimeArtifactDigest: string;
+  runtimeTargetDigest: string;
   runtimeConfigDigest: string;
   protocolContractRevision: string;
   runnerArtifactDigest: string;
@@ -67,7 +67,7 @@ export function computeEvidenceManifestDigest(params: {
     suiteRevision: params.suiteRevision,
     testEnvironmentRevision: params.testEnvironmentRevision,
     runtimeRevisionId: params.runtimeRevisionId,
-    runtimeArtifactDigest: params.runtimeArtifactDigest,
+    runtimeTargetDigest: params.runtimeTargetDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
     protocolContractRevision: params.protocolContractRevision,
     runnerArtifactDigest: params.runnerArtifactDigest,
@@ -85,7 +85,7 @@ export function canonicalizeRuntimeConformanceReport(report: RuntimeConformanceR
 
 export function validateRuntimeConformanceReport(report: RuntimeConformanceReport): void {
   const digests = [
-    report.runtimeArtifactDigest,
+    report.runtimeTargetDigest,
     report.runtimeConfigDigest,
     report.runnerArtifactDigest,
     report.evidenceManifestDigest,
@@ -144,7 +144,7 @@ export function validateRuntimeConformanceReport(report: RuntimeConformanceRepor
       suiteRevision: report.suiteRevision,
       testEnvironmentRevision: report.testEnvironmentRevision,
       runtimeRevisionId: report.runtimeRevisionId,
-      runtimeArtifactDigest: report.runtimeArtifactDigest,
+      runtimeTargetDigest: report.runtimeTargetDigest,
       runtimeConfigDigest: report.runtimeConfigDigest,
       protocolContractRevision: report.protocolContractRevision,
       runnerArtifactDigest: report.runnerArtifactDigest,
@@ -159,10 +159,6 @@ export function validateRuntimeConformanceReport(report: RuntimeConformanceRepor
       "evidenceManifestDigest 与报告内容 canonical digest 不一致",
     );
   }
-}
-
-export function protocolContractRevision(protocolType: string): string {
-  return protocolType === "a2a" ? "a2a@1" : "agent-runtime-protocol@2";
 }
 
 export class RuntimeConformanceTrustError extends Error {

@@ -181,7 +181,7 @@ async function loadEvidence(
         expected: {
           tenantId: input.tenantId,
           runtimeRevisionId: input.runtimeRevisionId,
-          runtimeArtifactDigest: runtimeRevisionRow?.artifactDigest ?? null,
+          runtimeTargetDigest: runtimeRevisionRow?.runtimeTargetDigest ?? null,
           runtimeConfigDigest: runtimeRevisionRow?.configHash ?? null,
           protocolContractRevision: runtimeRevisionRow?.protocolContractRevision ?? null,
           allowedFormats: ["standard_dsse"],

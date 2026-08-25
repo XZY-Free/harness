@@ -53,7 +53,7 @@ export interface VerifyConformanceInput {
   /** 预期 RuntimeRevision ID（绑定校验，必填）。 */
   expectedRuntimeRevisionId: string;
   /** 预期 Runtime Artifact Digest（可选，由调用方做绑定校验时传入）。 */
-  expectedRuntimeArtifactDigest?: string;
+  expectedRuntimeTargetDigest?: string;
   /** 预期 Runtime Config Digest（可选，由调用方做绑定校验时传入）。 */
   expectedRuntimeConfigDigest?: string;
   /** 预期 Protocol Contract Revision（可选，由调用方做绑定校验时传入）。 */
@@ -162,9 +162,9 @@ export function createDSSEConformanceVerifier(
       }
       const report = predicate as unknown as RuntimeConformanceReport;
 
-      // 步骤 7: 校验 Subject Artifact Digest 与 Report 自洽
-      const reportArtifactDigestRaw = report.runtimeArtifactDigest.replace("sha256:", "");
-      if (subResult.subjectDigestHex !== reportArtifactDigestRaw) {
+      // 步骤 7: 校验 Subject Digest 与 Report 自洽（被测对象统一为 runtimeTargetDigest）
+      const reportTargetDigestRaw = report.runtimeTargetDigest.replace("sha256:", "");
+      if (subResult.subjectDigestHex !== reportTargetDigestRaw) {
         return fail("subject_digest_mismatch");
       }
 
@@ -173,12 +173,12 @@ export function createDSSEConformanceVerifier(
         return fail("runtime_revision_mismatch");
       }
 
-      // 步骤 9: 校验 runtimeArtifactDigest（可选绑定校验）
+      // 步骤 9: 校验 runtimeTargetDigest（可选绑定校验）
       if (
-        input.expectedRuntimeArtifactDigest &&
-        report.runtimeArtifactDigest !== input.expectedRuntimeArtifactDigest
+        input.expectedRuntimeTargetDigest &&
+        report.runtimeTargetDigest !== input.expectedRuntimeTargetDigest
       ) {
-        return fail("artifact_digest_mismatch");
+        return fail("target_digest_mismatch");
       }
 
       // 步骤 10: 校验 runtimeConfigDigest（可选绑定校验）

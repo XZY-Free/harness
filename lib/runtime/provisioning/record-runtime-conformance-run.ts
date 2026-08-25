@@ -99,7 +99,7 @@ export function createRecordRuntimeConformanceRun(dependencies: {
         }
         // 步骤 10: 校验 Verified Claims 与 Revision 一致
         if (
-          revision.artifactDigest !== report.runtimeArtifactDigest ||
+          revision.runtimeTargetDigest !== report.runtimeTargetDigest ||
           revision.configHash !== report.runtimeConfigDigest ||
           revision.protocolContractRevision !== report.protocolContractRevision
         ) {

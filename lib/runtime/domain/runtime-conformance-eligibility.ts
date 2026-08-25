@@ -6,7 +6,7 @@
  * - Run 属于 Tenant（期望值来自当前 RuntimeRevision）
  * - Run 属于 RuntimeRevision
  * - Overall Passed
- * - Artifact Digest 一致
+ * - Target Digest 一致
  * - Config Digest 一致
  * - Protocol Contract 一致
  * - Suite Revision 一致
@@ -41,8 +41,8 @@ export interface RuntimeConformanceRunFact {
   runtimeRevisionId: string;
   /** 整体结果。 */
   overallResult: "passed" | "failed" | "error" | "cancelled";
-  /** Runtime Artifact Digest（缺失 = null）。 */
-  runtimeArtifactDigest: string | null;
+  /** Runtime Target Digest（缺失 = null；03 §6 被测对象统一绑定）。 */
+  runtimeTargetDigest: string | null;
   /** Runtime Config Digest（缺失 = null）。 */
   runtimeConfigDigest: string | null;
   /** Protocol Contract Revision（缺失 = null）。 */
@@ -59,7 +59,7 @@ export interface RuntimeConformanceRunFact {
 export interface RuntimeConformanceExpectedValues {
   tenantId: string;
   runtimeRevisionId: string;
-  runtimeArtifactDigest: string | null;
+  runtimeTargetDigest: string | null;
   runtimeConfigDigest: string | null;
   protocolContractRevision: string | null;
   /** 允许的 Conformance 格式。 */
@@ -107,7 +107,7 @@ export type RuntimeConformanceErrorCode =
   | "conformance_tenant_mismatch"
   | "conformance_revision_mismatch"
   | "conformance_not_passed"
-  | "conformance_artifact_digest_mismatch"
+  | "conformance_target_digest_mismatch"
   | "conformance_config_digest_mismatch"
   | "conformance_protocol_mismatch"
   | "conformance_suite_revision_mismatch"
@@ -159,14 +159,14 @@ export function validateRuntimePublicationConformanceEvidence(
     });
   }
 
-  // Artifact Digest 一致（期望缺失 → fail-closed）
+  // Target Digest 一致（期望缺失 → fail-closed）
   if (
-    expected.runtimeArtifactDigest === null ||
-    run.runtimeArtifactDigest !== expected.runtimeArtifactDigest
+    expected.runtimeTargetDigest === null ||
+    run.runtimeTargetDigest !== expected.runtimeTargetDigest
   ) {
     errors.push({
-      code: "conformance_artifact_digest_mismatch",
-      message: `Artifact Digest 不一致（Run: ${run.runtimeArtifactDigest}, 期望: ${expected.runtimeArtifactDigest}）`,
+      code: "conformance_target_digest_mismatch",
+      message: `Runtime Target Digest 不一致（Run: ${run.runtimeTargetDigest}, 期望: ${expected.runtimeTargetDigest}）`,
     });
   }
 

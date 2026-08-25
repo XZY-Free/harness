@@ -69,7 +69,7 @@ export const mysqlRuntimeConformanceRunStore: RuntimeConformanceRunStore = {
             id: report.runId,
             tenantId: params.tenantId,
             runtimeRevisionId: report.runtimeRevisionId,
-            runtimeArtifactDigest: report.runtimeArtifactDigest,
+            runtimeTargetDigest: report.runtimeTargetDigest,
             runtimeConfigDigest: report.runtimeConfigDigest,
             protocolContractRevision: report.protocolContractRevision,
             suiteRevision: report.suiteRevision,

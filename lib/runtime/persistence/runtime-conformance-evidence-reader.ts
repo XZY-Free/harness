@@ -68,7 +68,7 @@ export async function loadRuntimeConformanceFacts(params: {
       tenantId: run.tenantId,
       runtimeRevisionId: run.runtimeRevisionId,
       overallResult: run.overallResult,
-      runtimeArtifactDigest: run.runtimeArtifactDigest,
+      runtimeTargetDigest: run.runtimeTargetDigest,
       runtimeConfigDigest: run.runtimeConfigDigest,
       protocolContractRevision: run.protocolContractRevision,
       suiteRevision: run.suiteRevision,

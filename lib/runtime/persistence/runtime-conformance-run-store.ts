@@ -7,6 +7,8 @@ import type {
 export interface RuntimeConformanceRevisionBinding {
   id: string;
   revisionState: "draft" | "published" | "withdrawn";
+  /** Conformance 被测对象统一 digest（03 §6）。 */
+  runtimeTargetDigest: string;
   artifactDigest: string | null;
   configHash: string;
   protocolContractRevision: string;

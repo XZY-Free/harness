@@ -16,7 +16,7 @@ export const runtimeConformanceRun = mysqlTable(
     id: varchar("id", { length: 36 }).primaryKey().notNull(),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
-    runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }).notNull(),
+    runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
     protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
     suiteRevision: varchar("suiteRevision", { length: 128 }).notNull(),

@@ -20,7 +20,8 @@ export interface HostedRuntimeConformanceInput {
   runtimeRevisionId: string;
   /** Runner 必须按此键返回同一个不可变 runId 和报告，供并发/断线重试收敛。 */
   idempotencyKey: string;
-  runtimeArtifactDigest: string;
+  /** Conformance 被测对象统一 digest（03 §6），不再无条件绑定 Artifact digest。 */
+  runtimeTargetDigest: string;
   runtimeConfigDigest: string;
   protocolContractRevision: string;
 }
