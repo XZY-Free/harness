@@ -59,8 +59,10 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import { logger } from "@/lib/logger";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
+import { dispatchResumeCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -212,6 +214,20 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       ...(body.response_redacted !== undefined && body.response_redacted !== null
         ? { responseRedactedJson: body.response_redacted }
         : {}),
+    });
+
+    // 08 §5：A2A 协议下真实调用远端 resume（继续原 Invocation/taskId/contextId）；
+    // hosted 协议由既有状态机吸收。网关幂等：非远端协议跳过，不影响本响应。
+    await dispatchResumeCommandToRuntime({
+      tenantId: principal.tenantId,
+      commandId: result.resumeCommand.id,
+      actorId: principal.userIdentityId,
+      correlationId: requestId,
+    }).catch((err) => {
+      logger.warn("Resume 命令远端调度失败（保持命令状态机重试）", {
+        commandId: result.resumeCommand.id,
+        error: String(err),
+      });
     });
 
     const responseBody = {

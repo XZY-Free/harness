@@ -60,8 +60,12 @@ import {
   threadEventTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
-import { type ExecutionBinding, invocationAttemptTable } from "@/lib/persistence/schema/executions";
-import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
+import {
+  type ExecutionBinding,
+  invocationAttemptTable,
+  invocationTable,
+} from "@/lib/persistence/schema/executions";
+import { type RuntimeRevision, runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
@@ -72,6 +76,10 @@ import {
   createHostedAdapter,
   setRouteHostedAdapter,
 } from "@/lib/runtime/adapters/hosted-adapter";
+import {
+  dispatchInterruptCommandToRuntime,
+  dispatchResumeCommandToRuntime,
+} from "@/lib/runtime/command-dispatch-gateway";
 import {
   type CommandDispatchResult,
   type CommandRuntimeEndpointResolution,
@@ -97,6 +105,8 @@ import {
   type SteerInvocationResponse,
   createMockRuntimeClient,
 } from "@/lib/runtime/runtime-client";
+import { createSessionBinding } from "@/lib/runtime/session-binding-queries";
+import { startA2ATestProvider } from "@/lib/runtime/test-support/a2a-test-provider";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { and, eq } from "drizzle-orm";
@@ -300,6 +310,7 @@ async function seedPublishedRuntimeRevision(
   runtimeKey: string,
   capabilities: string[],
   contentSuffix: string,
+  protocolType: "a2a" | "agent_runtime_protocol" = "a2a",
 ) {
   const runtime = await createRuntime({
     tenantId,
@@ -313,8 +324,8 @@ async function seedPublishedRuntimeRevision(
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolType,
+    protocolContractRevision: protocolType === "a2a" ? "a2a@1" : "agent-runtime-protocol@2",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
@@ -356,7 +367,9 @@ interface FullCommandContext {
   triggerItemId: string | null;
 }
 
-async function seedFullCommandContext(): Promise<FullCommandContext> {
+async function seedFullCommandContext(
+  protocolType: "a2a" | "agent_runtime_protocol" = "a2a",
+): Promise<FullCommandContext> {
   const { tenantId, ownerId } = await seedTenantAndOwner();
 
   const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
@@ -373,6 +386,7 @@ async function seedFullCommandContext(): Promise<FullCommandContext> {
     "cmd-runtime",
     ["event_stream"],
     "v1",
+    protocolType,
   );
 
   const routeSet = await createRouteSet({
@@ -2156,5 +2170,156 @@ describe("S05-C04 基础 Harness Route redispatch 不依赖 Agent（§8.3）", (
     expect(bindingAfter?.deploymentRouteId).toBe(running.binding.deploymentRouteId);
     expect(bindingAfter?.agentRevisionId).toBeNull();
     expect(bindingAfter?.runtimeRevisionId).toBe(ctx.runtimeRevision.id);
+  });
+});
+
+// ─── 辅助：为远端调用装配 runtimeExecutionRef + SessionBinding（Batch 10） ─
+
+async function attachRemoteRefsToInvocation(
+  ctx: FullCommandContext,
+  invocationId: string,
+  externalSessionRef: string,
+): Promise<string> {
+  // 模拟远端 startInvocation 已返回 taskId/contextId 并落 Binding。
+  const binding = await createSessionBinding({
+    tenantId: ctx.tenantId,
+    runtimeRevisionId: ctx.runtimeRevision.id,
+    threadId: ctx.threadId,
+    externalSessionRef,
+    agentRevisionId: ctx.agentRevision.id,
+  });
+  const taskId = `task-${binding.id.slice(0, 8)}`;
+  await db
+    .update(invocationTable)
+    .set({ runtimeExecutionRef: taskId, runtimeSessionBindingId: binding.id })
+    .where(and(eq(invocationTable.tenantId, ctx.tenantId), eq(invocationTable.id, invocationId)));
+  return taskId;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Batch 10：命令调度生产网关（command-dispatch-gateway，08 §5/§6）
+// ═══════════════════════════════════════════════════════════
+
+describe("Batch 10 命令调度生产网关", () => {
+  it("命令不存在：dispatched=false + command_not_found", async () => {
+    const ctx = await seedFullCommandContext();
+    const result = await dispatchInterruptCommandToRuntime({
+      tenantId: ctx.tenantId,
+      commandId: "00000000-0000-4000-8000-000000000000",
+    });
+    expect(result).toEqual({ dispatched: false, reason: "command_not_found" });
+  });
+
+  it("非 a2a 协议：protocol_not_remote，命令保持 queued 由既有状态机吸收", async () => {
+    const ctx = await seedFullCommandContext("agent_runtime_protocol");
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+
+    const interruptResult = await requestInterrupt({
+      tenantId: ctx.tenantId,
+      ownerUserId: ctx.ownerId,
+      turnId: ctx.turnId,
+      reasonCode: "user_cancel",
+      idempotencyKey: "gw-protocol-1",
+    });
+    await bindInvocationIdToCommand(interruptResult.command.id, running.invocationId);
+
+    const result = await dispatchInterruptCommandToRuntime({
+      tenantId: ctx.tenantId,
+      commandId: interruptResult.command.id,
+    });
+    expect(result).toEqual({ dispatched: false, reason: "protocol_not_remote" });
+    // hosted in-process 协议无远端端点可调，命令保持 queued 等待状态机处理（04 §10）。
+    expect((await getCommandRow(interruptResult.command.id))?.commandState).toBe("queued");
+  });
+
+  it("a2a 协议 Interrupt：真实 tasks/cancel 远端调度 + acknowledged（08 §6）", async () => {
+    const provider = await startA2ATestProvider("long_running");
+    try {
+      const ctx = await seedFullCommandContext("a2a");
+      // endpoint 指向真实 Provider（黑盒 wire，不注入 fetchImpl）。
+      await db
+        .update(runtimeRevisionTable)
+        .set({ endpointRef: provider.endpoint })
+        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
+      const running = await seedRunningInvocationWithRunningTurn(ctx);
+      await attachRemoteRefsToInvocation(ctx, running.invocationId, "ctx-gw-cancel-1");
+
+      const interruptResult = await requestInterrupt({
+        tenantId: ctx.tenantId,
+        ownerUserId: ctx.ownerId,
+        turnId: ctx.turnId,
+        reasonCode: "user_cancel",
+        idempotencyKey: "gw-remote-1",
+      });
+      await bindInvocationIdToCommand(interruptResult.command.id, running.invocationId);
+
+      const result = await dispatchInterruptCommandToRuntime({
+        tenantId: ctx.tenantId,
+        commandId: interruptResult.command.id,
+        actorId: ctx.ownerId,
+        correlationId: "gw-remote-correlation",
+      });
+      expect(result.dispatched).toBe(true);
+      // 真实 tasks/cancel wire ack → 命令 acknowledged（远端终态推进）。
+      expect((await getCommandRow(interruptResult.command.id))?.commandState).toBe("acknowledged");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("a2a 协议 Resume：真实 message/send 远端调度 + acknowledged（08 §5）", async () => {
+    const provider = await startA2ATestProvider("completed");
+    try {
+      const ctx = await seedFullCommandContext("a2a");
+      await db
+        .update(runtimeRevisionTable)
+        .set({ endpointRef: provider.endpoint })
+        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
+      const running = await seedRunningInvocationWithRunningTurn(ctx);
+      await attachRemoteRefsToInvocation(ctx, running.invocationId, "ctx-gw-resume-1");
+
+      // waiting_user（Resume 的前置状态）
+      await db.transaction(async (tx) => {
+        await updateInvocationState(tx, ctx.tenantId, running.invocationId, "waiting_user");
+      });
+
+      const commandId = await createResumeCommand({
+        threadId: ctx.threadId,
+        turnId: ctx.turnId,
+        invocationId: running.invocationId,
+        resumePayload: { text: "补充信息" },
+        idempotencyKey: "gw-resume-1",
+      });
+
+      const result = await dispatchResumeCommandToRuntime({
+        tenantId: ctx.tenantId,
+        commandId,
+        actorId: ctx.ownerId,
+      });
+      expect(result.dispatched).toBe(true);
+      expect((await getCommandRow(commandId))?.commandState).toBe("acknowledged");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("跨租户隐藏：他租户调用返回 command_not_found", async () => {
+    const ctx = await seedFullCommandContext("a2a");
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    const interruptResult = await requestInterrupt({
+      tenantId: ctx.tenantId,
+      ownerUserId: ctx.ownerId,
+      turnId: ctx.turnId,
+      reasonCode: "user_cancel",
+      idempotencyKey: "gw-tenant-1",
+    });
+    await bindInvocationIdToCommand(interruptResult.command.id, running.invocationId);
+
+    // 命令表无租户列，隔离由 Invocation 查询保证（loadCommandContext）。
+    const result = await dispatchInterruptCommandToRuntime({
+      tenantId: "tenant-not-exist",
+      commandId: interruptResult.command.id,
+    });
+    expect(result).toEqual({ dispatched: false, reason: "command_not_found" });
   });
 });

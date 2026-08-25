@@ -45,6 +45,8 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
+import { logger } from "@/lib/logger";
+import { dispatchInterruptCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -156,6 +158,20 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       preservePendingInputs: body.preserve_pending_inputs ?? true,
       idempotencyKey,
       correlationId: requestId,
+    });
+
+    // 08 §6：A2A 协议下真实调用远端 tasks/cancel（hosted 协议由既有状态机吸收）。
+    // 网关幂等：命令已终态/非远端协议时跳过，不影响本响应。
+    await dispatchInterruptCommandToRuntime({
+      tenantId: principal.tenantId,
+      commandId: result.command.id,
+      actorId: principal.userIdentityId,
+      correlationId: requestId,
+    }).catch((err) => {
+      logger.warn("Interrupt 命令远端调度失败（保持命令状态机重试）", {
+        commandId: result.command.id,
+        error: String(err),
+      });
     });
 
     const responseBody = {
