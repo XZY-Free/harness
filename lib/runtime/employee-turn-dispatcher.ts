@@ -11,8 +11,17 @@ import type { HostedModelContext } from "@/lib/runtime/adapters/hosted-adapter";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
+import type { InProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
+import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { collectModelText } from "@/lib/runtime/model-text-stream";
+import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
+import {
+  getSessionBindingById,
+  getSessionBindingsByThread,
+} from "@/lib/runtime/session-binding-queries";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
+import { createA2ATransport } from "@/lib/runtime/transport/a2a-transport";
+import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
 import { streamText } from "ai";
 
 type ModelFn = (message: string, context: HostedModelContext) => Promise<string>;
@@ -97,25 +106,82 @@ export async function dispatchEmployeeTurn(params: {
     return { dispatched: false, completion: Promise.resolve() };
   }
 
-  // ─── 有 Ready Route → 继续调度（不变） ──────────────────────
-  const client = createInProcessHostedRuntimeClient({
-    modelFn: params.modelFn ?? configuredModelFn(),
-    ingressEventBatch: async ({ invocationId, events, producerSequenceStart }) => {
-      await ingressEventBatch({
-        tenantId: params.tenantId,
-        invocationId,
-        events,
-        producerSequenceStart,
-      });
+  // ─── 有 Ready Route → 按 protocolType 解析 Transport（04 §3/§10）──────────
+  // Dispatcher 不再固定创建 in-process Hosted client；protocolType 真正决定 Transport。
+  const runtimeRevisionId = routeOutcome.resolution.runtimeRevisionId;
+  const runtimeRevision = await getRuntimeRevisionById(runtimeRevisionId);
+  if (!runtimeRevision) {
+    throw new Error(`Turn 调度失败：RuntimeRevision 不存在（${runtimeRevisionId}）`);
+  }
+  const isExternalEndpoint = runtimeRevision.runtimeEvidenceKind === "external_endpoint";
+  // managed endpoint/identity configuration（04 §3）：
+  // external_endpoint → endpointRef 即外部 endpoint；hosted → in-process 引用。
+  const managedEndpoint = isExternalEndpoint ? runtimeRevision.endpointRef : "in-process://hosted";
+
+  const resolveTransport = createRuntimeTransportResolver({
+    factories: {
+      agent_runtime_protocol: () =>
+        createInProcessHostedRuntimeClient({
+          modelFn: params.modelFn ?? configuredModelFn(),
+          ingressEventBatch: async ({ invocationId, events, producerSequenceStart }) => {
+            await ingressEventBatch({
+              tenantId: params.tenantId,
+              invocationId,
+              events,
+              producerSequenceStart,
+            });
+          },
+          ingressTransientEventBatch: async ({ invocationId, events, transientSequenceStart }) => {
+            await ingressTransientBatch({
+              tenantId: params.tenantId,
+              invocationId,
+              events,
+              transientSequenceStart,
+            });
+          },
+        }),
+      a2a: () =>
+        createA2ATransport({
+          eventBatchSink: async ({ invocationId, events, producerSequenceStart }) => {
+            await ingressEventBatch({
+              tenantId: params.tenantId,
+              invocationId,
+              events,
+              producerSequenceStart,
+            });
+          },
+          resolveRuntimeRefs: async (invocationId) => {
+            const invocation = await getInvocationById(params.tenantId, invocationId);
+            if (!invocation) return null;
+            // A2A taskId = Invocation.runtimeExecutionRef；contextId = SessionBinding.externalSessionRef。
+            const binding = invocation.runtimeSessionBindingId
+              ? await getSessionBindingById(params.tenantId, invocation.runtimeSessionBindingId)
+              : null;
+            return {
+              runtimeExecutionRef: invocation.runtimeExecutionRef,
+              runtimeSessionRef: binding?.externalSessionRef ?? null,
+            };
+          },
+          resolveExistingContextId: async (threadId) => {
+            // context reuse（04 §5）：thread 已有 active A2A SessionBinding → 复用 contextId。
+            const bindings = await getSessionBindingsByThread(params.tenantId, threadId);
+            const active = bindings.find((b) => b.bindingState === "active");
+            return active?.externalSessionRef ?? null;
+          },
+        }),
     },
-    ingressTransientEventBatch: async ({ invocationId, events, transientSequenceStart }) => {
-      await ingressTransientBatch({
-        tenantId: params.tenantId,
-        invocationId,
-        events,
-        transientSequenceStart,
-      });
-    },
+  });
+  const transport = await resolveTransport({
+    protocolType: runtimeRevision.protocolType,
+    endpoint: managedEndpoint,
+    authToken: issueWorkloadToken({
+      type: "runtime",
+      tenantId: params.tenantId,
+      invocationId: "transport-resolution",
+      runtimeRevisionId: runtimeRevision.id,
+      audience: "runtime",
+      expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+    }),
   });
 
   const result = await dispatchInvocationForTurn({
@@ -123,7 +189,7 @@ export async function dispatchEmployeeTurn(params: {
     turnId: params.turnId,
     selectedModelRef: params.modelRef,
     agentConstraint: params.agentConstraint ?? null,
-    runtimeClient: client,
+    runtimeClient: transport,
     runtimeEndpointResolver: async (binding) => {
       // §24：下发 Binding 冻结的 Governance Revision（非 Tenant current），fail-closed。
       const frozenGovernance = await loadFrozenGovernanceConfig(
@@ -131,7 +197,9 @@ export async function dispatchEmployeeTurn(params: {
         binding.governanceConfigRevisionId,
       );
       return {
-        runtimeEndpoint: "in-process://hosted",
+        // protocolType 决定 Transport：external endpoint（a2a）用 managedEndpoint；
+        // Hosted 保持 in-process 引用（04 §10：Hosted 路径无行为回退）。
+        runtimeEndpoint: managedEndpoint,
         authToken: issueWorkloadToken({
           type: "runtime",
           tenantId: params.tenantId,
@@ -175,7 +243,16 @@ export async function dispatchEmployeeTurn(params: {
   if (!result.binding) {
     throw new Error(`Turn 调度缺少 ExecutionBinding（turnId=${params.turnId}）`);
   }
-  const completion = client.launchAcceptedInvocation(result.invocation.id, result.binding.modelId);
+  // Hosted Transport 需要显式启动 Agent Loop；A2A Transport 的事件流由
+  // Transport 内部消费并经归一化 ingress 进入（04 §10）。
+  const hostedClient = transport as Partial<InProcessHostedRuntimeClient>;
+  if (typeof hostedClient.launchAcceptedInvocation !== "function") {
+    return { dispatched: true, completion: Promise.resolve() };
+  }
+  const completion = hostedClient.launchAcceptedInvocation(
+    result.invocation.id,
+    result.binding.modelId,
+  );
   void completion.catch((error) => {
     logger.error("[runtime] Hosted Runtime 执行失败", {
       turnId: params.turnId,
