@@ -7,6 +7,8 @@ export interface AgentPublicationRevision {
   revisionState: AgentRevisionPublicationState;
   instructionHash: string;
   agentArtifactRef: string;
+  /** 绑定的不可变 AgentDescriptorSnapshot id；null 表示旧 Revision（Batch 2 发布强约束前）。 */
+  agentDescriptorSnapshotId: string | null;
   publishedAt: Date | null;
 }
 
@@ -21,11 +23,33 @@ export interface AgentPublicationAttestation {
   artifactDigest: string;
 }
 
+/** 发布冻结的 Agent Descriptor 证据（Batch 2 权威外部合同来源，替代 source Artifact/Attestation）。 */
+export interface AgentPublicationDescriptorSnapshot {
+  id: string;
+  agentId: string;
+  providerDescriptorDigest: string;
+  capabilityManifestDigest: string;
+  invocationContextContractDigest: string;
+}
+
 export type AgentPublicationActorType = "user" | "service" | "workload" | "system";
+
+/** Agent Descriptor 证据字段（随 PublicationRecord 冻结）。 */
+export interface AgentPublicationDescriptorEvidence {
+  agentDescriptorSnapshotId: string;
+  agentProviderDescriptorDigest: string;
+  agentCapabilityManifestDigest: string;
+  agentInvocationContextContractDigest: string;
+}
 
 export interface AgentPublicationSession {
   findRevision(tenantId: string, revisionId: string): Promise<AgentPublicationRevision | null>;
   findAgent(tenantId: string, agentId: string): Promise<AgentPublicationAgent | null>;
+  /** 加载绑定 AgentDescriptorSnapshot 的发布证据；不存在返回 null。 */
+  findDescriptorSnapshot(
+    tenantId: string,
+    snapshotId: string,
+  ): Promise<AgentPublicationDescriptorSnapshot | null>;
   findVerifiedAttestation(params: {
     tenantId: string;
     revisionId: string;
@@ -37,6 +61,7 @@ export interface AgentPublicationSession {
     revisionId: string;
     evidenceSetDigest: string;
     attestationIds: string[];
+    descriptorEvidence: AgentPublicationDescriptorEvidence;
     publishedByType: AgentPublicationActorType;
     publishedBy: string;
     publishedAt: Date;

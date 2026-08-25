@@ -9,7 +9,11 @@ import { resolveOutboxAppend } from "@/lib/control-plane/events/outbox-append";
 import { seedEventDeliveries } from "@/lib/control-plane/events/seed-event-deliveries";
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
+import {
+  agentDescriptorSnapshotTable,
+  agentRevisionTable,
+  agentTable,
+} from "@/lib/persistence/schema/agents";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
@@ -39,6 +43,27 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
             .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
             .limit(1);
           return agent ?? null;
+        },
+        async findDescriptorSnapshot(tenantId, snapshotId) {
+          const [row] = await tx
+            .select()
+            .from(agentDescriptorSnapshotTable)
+            .where(
+              and(
+                eq(agentDescriptorSnapshotTable.tenantId, tenantId),
+                eq(agentDescriptorSnapshotTable.id, snapshotId),
+              ),
+            )
+            .limit(1)
+            .for("update");
+          if (!row) return null;
+          return {
+            id: row.id,
+            agentId: row.agentId,
+            providerDescriptorDigest: row.providerDescriptorDigest,
+            capabilityManifestDigest: row.capabilityManifestDigest,
+            invocationContextContractDigest: row.invocationContextContractDigest,
+          };
         },
         async findVerifiedAttestation(params) {
           const [attestation] = await tx
@@ -78,6 +103,11 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
             attestationIds: params.attestationIds,
             conformanceRunId: null,
             approvals: [],
+            agentDescriptorSnapshotId: params.descriptorEvidence.agentDescriptorSnapshotId,
+            agentProviderDescriptorDigest: params.descriptorEvidence.agentProviderDescriptorDigest,
+            agentCapabilityManifestDigest: params.descriptorEvidence.agentCapabilityManifestDigest,
+            agentInvocationContextContractDigest:
+              params.descriptorEvidence.agentInvocationContextContractDigest,
             publishedByType: params.publishedByType,
             publishedBy: params.publishedBy,
             publishedAt: params.publishedAt,
