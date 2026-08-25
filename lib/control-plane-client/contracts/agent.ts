@@ -122,3 +122,94 @@ export interface WithdrawAgentRevisionResponse {
   current_revision_id: string | null;
   audit_event_id: string;
 }
+
+// ─── AgentDescriptorSnapshot ──────────────────────────────
+
+/** context 必要性 — 服务端权威枚举。 */
+export type ContextNecessity = "required" | "preferred" | "accepted";
+
+/** 合同声明来源 — 服务端权威枚举。 */
+export type ProvenanceSource = "provider_declared" | "operator_declared";
+
+/** Provider 公开 Agent Card 中的单项业务能力（task-oriented，禁止函数签名）。 */
+export interface ProviderCapabilityDTO {
+  capability_key: string;
+  name: string;
+  description?: string;
+  tags?: string[];
+  examples?: string[];
+  input_modes?: string[];
+  output_modes?: string[];
+}
+
+/** Provider 公开 Agent Card 中的调用上下文声明。 */
+export interface ProviderInvocationContextDeclarationDTO {
+  context_kind: string;
+  necessity: ContextNecessity;
+  purpose?: string;
+}
+
+/** Provider 正式公开的 Agent Card（wire 输入）。 */
+export interface ProviderAgentCardDTO {
+  protocol: {
+    type: string;
+    contract_revision: string;
+  };
+  identity?: {
+    name?: string;
+    description?: string;
+    provider_revision_ref?: string;
+  };
+  capabilities: ProviderCapabilityDTO[];
+  invocation_context?: ProviderInvocationContextDeclarationDTO[];
+}
+
+/** 管理员基于第三方正式接入合同登记的 supplemental context（operator_declared）。 */
+export interface OperatorContextSupplementDTO {
+  contexts: Array<{
+    context_kind: string;
+    necessity: ContextNecessity;
+    purpose?: string;
+  }>;
+}
+
+/** 登记 Agent Descriptor 请求。 */
+export interface CreateAgentDescriptorSnapshotRequest {
+  descriptor_kind: string;
+  card: ProviderAgentCardDTO;
+  operator_context_supplement?: OperatorContextSupplementDTO;
+  provider_declared_revision_ref?: string;
+}
+
+/** AgentDescriptorSnapshot 登记响应。 */
+export interface CreateAgentDescriptorSnapshotResponse {
+  snapshot_id: string;
+  provider_descriptor_digest: string;
+  capability_manifest_digest: string;
+  invocation_context_contract_digest: string;
+  descriptor_kind: string;
+  protocol_type: string;
+  protocol_contract_revision: string;
+  captured_at: string;
+}
+
+/** AgentDescriptorSnapshot 列表项。 */
+export interface AgentDescriptorSnapshotDTO {
+  id: string;
+  agent_id: string;
+  descriptor_kind: string;
+  protocol_type: string;
+  protocol_contract_revision: string;
+  provider_descriptor_digest: string;
+  capability_manifest_digest: string;
+  invocation_context_contract_digest: string;
+  provider_declared_revision_ref: string | null;
+  captured_at: string;
+  created_by: string;
+}
+
+/** AgentDescriptorSnapshot 列表响应。 */
+export interface AgentDescriptorSnapshotListResponse {
+  items: AgentDescriptorSnapshotDTO[];
+  total: number;
+}

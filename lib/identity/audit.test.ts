@@ -169,8 +169,8 @@ describe("computeContentHash", () => {
 // ─── isKnownAuditActionType / assertAuditActionTypeKnown（纯逻辑）───
 
 describe("isKnownAuditActionType", () => {
-  it("目录中所有动作类型均已知（Policy/Governance 接入后共 30 种）", () => {
-    expect(AUDIT_ACTION_TYPES.length).toBe(30);
+  it("目录中所有动作类型均已知（Policy/Governance 接入后共 31 种）", () => {
+    expect(AUDIT_ACTION_TYPES.length).toBe(31);
     for (const actionType of AUDIT_ACTION_TYPES) {
       expect(isKnownAuditActionType(actionType)).toBe(true);
     }
