@@ -68,7 +68,7 @@ import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-re
 import { ensureAgentDescriptorSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-descriptor-snapshot";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 identity.test.ts 一致）。
@@ -1463,5 +1463,521 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}/disable", () => {
       params: Promise.resolve({ route_id: `${randomRouteId}` }),
     });
     await assertCrossTenantHidden(response, crossTenantRequestId);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 7. POST /admin/api/v1/agent-registrations + GET /agents/{id}/contracts
+// （Public Agent Contract 登记流；目标路由尚未实现 → 本组用例为先行冻结，预期 RED）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 目标路由模块（尚未存在）。用动态 import 加载，使"路由缺失"的 RED 只落在
+ * 本组用例上，不影响本文件既有绿色用例。
+ */
+async function loadAgentRegistrationRoute() {
+  return await import("@/app/admin/api/v1/agent-registrations/route");
+}
+async function loadAgentContractsRoute() {
+  return await import("@/app/admin/api/v1/agents/[agent_id]/contracts/route");
+}
+
+/** HR 合同 fixture（真实首个集成的登记事实）。 */
+async function loadHrAgentContract() {
+  const { hrAgentContract } = await import("@/lib/agents/test-support/hr-agent-contract");
+  return JSON.parse(JSON.stringify(hrAgentContract)) as Record<string, unknown>;
+}
+
+/** 冻结的新语义 action：agent.contract.register（非 legacy agent.descriptor.create）。 */
+const AGENT_CONTRACT_REGISTER_ACTION = "agent.contract.register" as never;
+
+/** seed 管理员并授予 agent.contract.register（依赖生产 action 目录后续补该 code）。 */
+async function seedContractRegistrationAdmin() {
+  const tenant = await ensureDefaultTenant();
+  const identity = await upsertUserIdentity({
+    tenantId: tenant.id,
+    externalSubject: DEFAULT_USER_ID,
+    email: DEFAULT_USER_EMAIL,
+    displayName: DEFAULT_USER_NAME,
+  });
+  const binding = await upsertPrincipalBinding({
+    tenantId: tenant.id,
+    subjectType: "user",
+    externalId: DEFAULT_USER_ID,
+    displayName: DEFAULT_USER_NAME,
+    userIdentityId: identity.id,
+  });
+  await grantActionBinding({
+    tenantId: tenant.id,
+    principalBindingId: binding.id,
+    actionCode: AGENT_CONTRACT_REGISTER_ACTION,
+    resourceScope: { type: "agent", wildcard: true },
+  });
+  return { tenantId: tenant.id, userIdentityId: identity.id };
+}
+
+async function countTableRows(table: string): Promise<number> {
+  const [rows] = (await db.execute(
+    sql.raw(`SELECT COUNT(*) AS n FROM \`${table}\``),
+  )) as unknown as [{ n: number }[]];
+  return Number(rows?.[0]?.n ?? -1);
+}
+
+function registrationBody(contract: Record<string, unknown>) {
+  return {
+    protocol: { type: "a2a", contract_revision: "0.3.0" },
+    contract,
+  };
+}
+
+describe("POST /admin/api/v1/agent-registrations（Public Agent Contract 登记）", () => {
+  it("happy path：201 结构化投影（无原始合同回显），创建一个 draft Agent + 一个快照，写 agent.contract.register 审计", async () => {
+    const { POST } = await loadAgentRegistrationRoute();
+    const { tenantId, userIdentityId } = await seedContractRegistrationAdmin();
+    const contract = await loadHrAgentContract();
+
+    const response = await POST(
+      buildApiRequest({
+        audience: "admin",
+        method: "POST",
+        path: "/agent-registrations",
+        idempotencyKey: "idem-agent-registration-001",
+        body: registrationBody(contract),
+      }),
+    );
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      agent: Record<string, unknown>;
+      contract: Record<string, unknown>;
+    };
+
+    // agent 投影：身份由合同 agent.id 决定
+    expect(body.agent).toMatchObject({
+      id: expect.any(String),
+      agent_key: "hr-assistant",
+      display_name: "企业人力智能助手",
+      lifecycle_state: "draft",
+    });
+
+    // contract 投影：仅结构化事实，snake_case wire 字段
+    expect(Object.keys(body.contract).sort()).toEqual(
+      [
+        "capabilities",
+        "captured_at",
+        "contract_digest",
+        "contract_version",
+        "interaction",
+        "invocation_context",
+        "protocol_contract_revision",
+        "protocol_type",
+        "public_agent_version",
+        "result_contract",
+        "snapshot_id",
+      ].sort(),
+    );
+    expect(body.contract.contract_version).toBe("1.0.0");
+    expect(body.contract.public_agent_version).toBe("1.0.0");
+    expect(body.contract.protocol_type).toBe("a2a");
+    expect(body.contract.protocol_contract_revision).toBe("0.3.0");
+    expect(body.contract.contract_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    // interaction：六个布尔事实 + supported_locales（完整结构，非部分匹配）
+    expect(body.contract.interaction).toEqual({
+      streaming_transport: true,
+      incremental_content: false,
+      input_required: true,
+      resume: true,
+      cancel: false,
+      durable_task_recovery: false,
+      supported_locales: ["zh-CN"],
+    });
+
+    // capability：每个持久化事实都投影（key/name/description/tags/examples/input_modes/output_modes），
+    // 代表性中英文描述必须在结构化位置出现 —— 这是 Web/Desktop 要展示的信息，不是原始文件泄漏。
+    const capabilities = body.contract.capabilities as Array<Record<string, unknown>>;
+    expect(capabilities.map((c) => c.key)).toEqual([
+      "leave-and-attendance-service",
+      "employee-self-service",
+      "hr-policy-and-benefits-consultation",
+      "hr-system-and-document-assistance",
+    ]);
+    expect(Object.keys(capabilities[0]!).sort()).toEqual(
+      ["key", "name", "description", "tags", "examples", "input_modes", "output_modes"].sort(),
+    );
+    expect(capabilities[0]!.name).toEqual({
+      "zh-CN": "假勤与请假服务",
+      en: "Leave and Attendance Service",
+    });
+    expect((capabilities[0]!.description as Record<string, string>)["zh-CN"]).toContain(
+      "请假申请、请假修改相关对话",
+    );
+    expect((capabilities[0]!.description as Record<string, string>).en).toContain("Leave requests");
+    // 真实 HR artifact 无 tags/examples/input_modes/output_modes → 空数组，不虚构也不丢弃
+    expect(capabilities[0]!.tags).toEqual([]);
+    expect(capabilities[0]!.examples).toEqual([]);
+    expect(capabilities[0]!.input_modes).toEqual([]);
+    expect(capabilities[0]!.output_modes).toEqual([]);
+
+    // invocation context：key/name/description/necessity/applies_to/trust_requirement/declaration_source
+    const contexts = body.contract.invocation_context as Array<Record<string, unknown>>;
+    expect(contexts.map((c) => c.key)).toEqual([
+      "execution_subject",
+      "timezone",
+      "current_datetime",
+      "locale",
+      "conversation_summary",
+      "attachment_references",
+    ]);
+    expect(Object.keys(contexts[0]!).sort()).toEqual(
+      [
+        "key",
+        "name",
+        "description",
+        "necessity",
+        "applies_to",
+        "trust_requirement",
+        "declaration_source",
+      ].sort(),
+    );
+    // 该 artifact 的 name/description 只有 zh-CN → en 为 null（保留缺失事实，不虚构）
+    expect(contexts[0]!.name).toEqual({ "zh-CN": "执行主体", en: null });
+    expect((contexts[0]!.description as Record<string, string>)["zh-CN"]).toContain(
+      "可信调用者身份",
+    );
+    expect((contexts[0]!.description as Record<string, string | null>).en).toBeNull();
+    expect(contexts[0]!.necessity).toBe("preferred");
+    expect(contexts[0]!.applies_to).toEqual([
+      "leave-and-attendance-service",
+      "employee-self-service",
+    ]);
+    // wire 上无 trust_requirement → null；declaration_source 是登记侧系统 provenance
+    expect(contexts[0]!.trust_requirement).toBeNull();
+    expect(contexts[0]!.declaration_source).toBe("provider_declared");
+    // 无 applies_to 的 context（timezone）→ null 而非省略键
+    expect(contexts[1]!.applies_to).toBeNull();
+
+    // result_contract：fields/error_codes/notes 全部投影，zh-CN notes 原文在结构化位置
+    const resultContract = body.contract.result_contract as Record<string, unknown>;
+    expect(Object.keys(resultContract).sort()).toEqual(["error_codes", "fields", "notes"].sort());
+    expect(resultContract.fields).toEqual([
+      "request_id",
+      "status",
+      "answer",
+      "result_type",
+      "data",
+      "actions",
+      "error_code",
+      "retryable",
+      "agent_name",
+      "agent_version",
+    ]);
+    expect(resultContract.error_codes).toEqual([
+      "identity_required",
+      "identity_unverified",
+      "input_required",
+      "not_found",
+      "rejected",
+      "temporarily_unavailable",
+      "failed",
+      "cancelled",
+      "contract_error",
+    ]);
+    expect(resultContract.notes).toEqual({
+      "zh-CN":
+        "answer为人类可读主回答；result_type为结果类别；data为可选结构化数据；actions为可选宿主可执行动作（第一版无通用动作协议时为空）；error_code为稳定机器错误；retryable表示是否适合重试。",
+      en: null,
+    });
+
+    // 「不回显原始整文件」的判据：精确键集合（上文逐层冻结）+ 无 raw/整文件包装键 +
+    // 无 URL/secret/内部 id，而非删掉结构化描述/notes
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("raw_contract");
+    expect(serialized).not.toContain("contract_json");
+    expect(serialized).not.toContain("source_file");
+    expect(serialized).not.toContain("source_path");
+    expect(serialized).not.toContain("agent_card_url");
+    expect(serialized).not.toContain("runtime_endpoint");
+    expect(serialized).not.toMatch(/https?:\/\//); // 冻结 wire 不接受也不回显任何 URL
+    expect(serialized).not.toContain("authorization");
+    expect(serialized).not.toContain("employee_id");
+    expect(serialized).not.toContain("corp_id");
+
+    // 落库：一个 draft Agent（owner=登记管理员）+ 一个快照 header
+    expect(await countTableRows("Agent")).toBe(1);
+    expect(await countTableRows("AgentContractSnapshot")).toBe(1);
+    expect(await countTableRows("AgentContractCapability")).toBe(4);
+    expect(await countTableRows("AgentContractInvocationContext")).toBe(6);
+
+    // 审计：新语义 action，且不得使用 legacy descriptor 术语
+    const { auditEvent } = await import("@/lib/persistence/schema/audit");
+    const events = await db
+      .select()
+      .from(auditEvent)
+      .where(eq(auditEvent.actionType, "agent.contract.register"));
+    expect(events).toHaveLength(1);
+    expect(events[0]!.actorId).toBe(userIdentityId);
+    expect(events[0]!.tenantId).toBe(tenantId);
+    const legacyEvents = await db
+      .select()
+      .from(auditEvent)
+      .where(eq(auditEvent.actionType, "agent.descriptor.create"));
+    expect(legacyEvents).toHaveLength(0);
+  });
+
+  it("幂等：同 key 同 body 重放相同 201；同 key 不同 body 409；不同 key 重复登记 → 同一 Agent 两个快照", async () => {
+    const { POST } = await loadAgentRegistrationRoute();
+    await seedContractRegistrationAdmin();
+    const contract = await loadHrAgentContract();
+
+    const build = (key: string, body: unknown) =>
+      buildApiRequest({
+        audience: "admin",
+        method: "POST",
+        path: "/agent-registrations",
+        idempotencyKey: key,
+        body,
+      });
+
+    const first = await POST(build("idem-agent-registration-replay", registrationBody(contract)));
+    expect(first.status).toBe(201);
+    const firstBody = await first.json();
+
+    // 同 key + 同 body → 重放相同 201，不新增行
+    const replay = await POST(build("idem-agent-registration-replay", registrationBody(contract)));
+    expect(replay.status).toBe(201);
+    expect(await replay.json()).toEqual(firstBody);
+    expect(await countTableRows("Agent")).toBe(1);
+    expect(await countTableRows("AgentContractSnapshot")).toBe(1);
+
+    // 同 key + 不同 body → 409 IDEMPOTENCY_CONFLICT
+    const conflictBody = registrationBody(contract);
+    (conflictBody.protocol as Record<string, unknown>).contract_revision = "0.4.0";
+    const conflict = await POST(build("idem-agent-registration-replay", conflictBody));
+    expect(conflict.status).toBe(409);
+    expect(await countTableRows("AgentContractSnapshot")).toBe(1);
+
+    // 不同 key + 相同显式登记 → 新快照，但 Agent 仍唯一
+    const second = await POST(build("idem-agent-registration-second", registrationBody(contract)));
+    expect(second.status).toBe(201);
+    const secondBody = (await second.json()) as { contract: { snapshot_id: string } };
+    expect(secondBody.contract.snapshot_id).not.toBe(
+      (firstBody as { contract: { snapshot_id: string } }).contract.snapshot_id,
+    );
+    expect(await countTableRows("Agent")).toBe(1);
+    expect(await countTableRows("AgentContractSnapshot")).toBe(2);
+  });
+
+  it("校验 fail-closed：未知字段/URL/secret/缺失 protocol/缺少 Idempotency-Key → 400 且零行落库", async () => {
+    const { POST } = await loadAgentRegistrationRoute();
+    await seedContractRegistrationAdmin();
+    const contract = await loadHrAgentContract();
+
+    const badBodies: Array<unknown> = [
+      { ...registrationBody(contract), agent_card_url: "https://hr.example.com/card.json" },
+      { ...registrationBody(contract), runtime_endpoint: "https://hr.example.com/a2a" },
+      { ...registrationBody(contract), agent_id: "caller-supplied-id" }, // 身份只来自合同 agent.id
+      { ...registrationBody(contract), agent_key: "caller-supplied-key" },
+      { ...registrationBody(contract), display_name: "caller-supplied-name" },
+      { protocol: { type: "a2a", contract_revision: "0.3.0" } }, // 缺 contract
+      { contract }, // 缺 protocol
+      { protocol: { type: "mcp", contract_revision: "" }, contract }, // 非法 protocol
+      registrationBody({ ...contract, authorization: "Bearer secret" }), // secret
+      registrationBody({ ...contract, employee_id: "E001" }), // 员工身份类字段
+      registrationBody({ ...contract, corp_id: "corp-1" }),
+    ];
+
+    for (const body of badBodies) {
+      const response = await POST(
+        buildApiRequest({
+          audience: "admin",
+          method: "POST",
+          path: "/agent-registrations",
+          idempotencyKey: `idem-agent-registration-invalid-${JSON.stringify(body).length}-${Math.random()}`,
+          body,
+        }),
+      );
+      expect(response.status).toBe(400);
+      const errorBody = (await response.json()) as { error: { code: string } };
+      expect(errorBody.error.code).toBe("REQUEST_SCHEMA_INVALID");
+    }
+
+    // 缺少 Idempotency-Key → 400
+    const noKeyResponse = await POST(
+      buildApiRequest({
+        audience: "admin",
+        method: "POST",
+        path: "/agent-registrations",
+        body: registrationBody(contract),
+      }),
+    );
+    expect(noKeyResponse.status).toBe(400);
+
+    expect(await countTableRows("Agent")).toBe(0);
+    expect(await countTableRows("AgentContractSnapshot")).toBe(0);
+    expect(await countTableRows("AgentContractCapability")).toBe(0);
+    expect(await countTableRows("AgentContractInvocationContext")).toBe(0);
+  });
+
+  it("鉴权：无效 Bearer → 401；缺少 agent.contract.register scope → 403 且零行", async () => {
+    const { POST } = await loadAgentRegistrationRoute();
+    // 只 seed 管理员身份，不授予 agent.contract.register
+    const tenant = await ensureDefaultTenant();
+    await upsertUserIdentity({
+      tenantId: tenant.id,
+      externalSubject: DEFAULT_USER_ID,
+      email: DEFAULT_USER_EMAIL,
+      displayName: DEFAULT_USER_NAME,
+    });
+    const contract = await loadHrAgentContract();
+
+    // 无效 Bearer → 401 AUTHENTICATION_REQUIRED
+    const unauthorized = await POST(
+      buildApiRequest({
+        audience: "admin",
+        method: "POST",
+        path: "/agent-registrations",
+        idempotencyKey: "idem-agent-registration-unauth",
+        token: "not-a-real-workload-token",
+        body: registrationBody(contract),
+      }),
+    );
+    expect(unauthorized.status).toBe(401);
+    const unauthBody = (await unauthorized.json()) as { error: { code: string } };
+    expect(unauthBody.error.code).toBe("AUTHENTICATION_REQUIRED");
+
+    // 无 agent.contract.register 绑定 → 403 ACTION_SCOPE_DENIED
+    const forbidden = await POST(
+      buildApiRequest({
+        audience: "admin",
+        method: "POST",
+        path: "/agent-registrations",
+        idempotencyKey: "idem-agent-registration-forbidden",
+        body: registrationBody(contract),
+      }),
+    );
+    expect(forbidden.status).toBe(403);
+    const forbiddenBody = (await forbidden.json()) as { error: { code: string } };
+    expect(forbiddenBody.error.code).toBe("ACTION_SCOPE_DENIED");
+
+    expect(await countTableRows("Agent")).toBe(0);
+    expect(await countTableRows("AgentContractSnapshot")).toBe(0);
+  });
+
+  it("service-only 主体首次登记被拒绝且零行落库（owner 歧义防护）", async () => {
+    const { POST } = await loadAgentRegistrationRoute();
+    await seedContractRegistrationAdmin();
+    const contract = await loadHrAgentContract();
+
+    const { issueWorkloadToken } = await import("@/lib/identity/workload-token");
+    const token = issueWorkloadToken({
+      type: "service",
+      tenantId: (await ensureDefaultTenant()).id,
+      audience: "admin",
+      serviceId: "cicd",
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const response = await POST(
+      buildApiRequest({
+        audience: "admin",
+        method: "POST",
+        path: "/agent-registrations",
+        idempotencyKey: "idem-agent-registration-service",
+        token,
+        body: registrationBody(contract),
+      }),
+    );
+    // service 主体不得成为首次创建 Agent 的 owner：拒绝（scope 层或 owner 歧义防护层）
+    expect([403, 422]).toContain(response.status);
+    expect(await countTableRows("Agent")).toBe(0);
+    expect(await countTableRows("AgentContractSnapshot")).toBe(0);
+  });
+});
+
+describe("GET /admin/api/v1/agents/{agent_id}/contracts（登记快照列表）", () => {
+  it("列表最新优先，且与 POST 投影结构一致（含 capability/context 顺序）", async () => {
+    const { POST } = await loadAgentRegistrationRoute();
+    const { GET } = await loadAgentContractsRoute();
+    await seedContractRegistrationAdmin();
+    const contract = await loadHrAgentContract();
+
+    const post = async (key: string) => {
+      const response = await POST(
+        buildApiRequest({
+          audience: "admin",
+          method: "POST",
+          path: "/agent-registrations",
+          idempotencyKey: key,
+          body: registrationBody(contract),
+        }),
+      );
+      expect(response.status).toBe(201);
+      return (await response.json()) as {
+        agent: { id: string };
+        contract: Record<string, unknown>;
+      };
+    };
+    const first = await post("idem-agent-contracts-list-001");
+    const second = await post("idem-agent-contracts-list-002");
+
+    const response = await GET(
+      buildApiRequest({
+        audience: "admin",
+        method: "GET",
+        path: `/agents/${first.agent.id}/contracts`,
+      }),
+      { params: Promise.resolve({ agent_id: first.agent.id }) },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      items: Array<Record<string, unknown>>;
+      total: number;
+    };
+    expect(body.total).toBe(2);
+    expect(body.items).toHaveLength(2);
+    // 最新优先：第一项等于第二次 POST 的投影
+    expect(body.items[0]).toEqual(second.contract);
+    expect(body.items[1]).toEqual(first.contract);
+    // capability / invocation_context 顺序与 POST 一致
+    const newest = body.items[0] as {
+      capabilities: Array<Record<string, unknown>>;
+      invocation_context: Array<Record<string, unknown>>;
+      result_contract: { notes: Record<string, string | null> };
+    };
+    expect(newest.capabilities.map((c) => c.key)[0]).toBe("leave-and-attendance-service");
+    expect(newest.invocation_context.map((c) => c.key)[0]).toBe("execution_subject");
+    // 结构化描述/notes 必须出现在 GET 投影中（与 POST 深相等 + 代表性原文抽查）
+    expect((newest.capabilities[0]!.description as Record<string, string>)["zh-CN"]).toContain(
+      "请假申请、请假修改相关对话",
+    );
+    expect(
+      (newest.invocation_context[0]!.description as Record<string, string>)["zh-CN"],
+    ).toContain("可信调用者身份");
+    expect(newest.result_contract.notes["zh-CN"]).toContain("answer为人类可读主回答");
+    // 「不回显原始整文件」判据：无 raw/整文件包装键、无 URL/secret，而非删除结构化事实
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("raw_contract");
+    expect(serialized).not.toContain("contract_json");
+    expect(serialized).not.toContain("source_file");
+    expect(serialized).not.toContain("source_path");
+    expect(serialized).not.toMatch(/https?:\/\//);
+  });
+
+  it("未知/跨租户 Agent → 404 RESOURCE_NOT_FOUND（隐藏式）", async () => {
+    const { GET } = await loadAgentContractsRoute();
+    await seedContractRegistrationAdmin();
+
+    const requestId = "req-agent-contracts-cross-tenant";
+    const randomAgentId = "99999999-9999-4999-8999-999999999999";
+    const response = await GET(
+      buildApiRequest({
+        audience: "admin",
+        method: "GET",
+        path: `/agents/${randomAgentId}/contracts`,
+        requestId,
+      }),
+      { params: Promise.resolve({ agent_id: randomAgentId }) },
+    );
+    await assertCrossTenantHidden(response, requestId);
   });
 });

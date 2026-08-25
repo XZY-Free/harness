@@ -26,7 +26,9 @@ import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   datetime,
+  foreignKey,
   index,
   json,
   mysqlEnum,
@@ -254,3 +256,171 @@ export type AgentRow = Agent;
 export type AgentRevisionRow = AgentRevision;
 export type NewAgentRow = NewAgent;
 export type NewAgentRevisionRow = NewAgentRevision;
+
+// ─── Public Agent Contract（登记的结构化合同快照）──────────
+
+/** invocation context 必要性（与领域合同一致）。 */
+const CONTRACT_CONTEXT_NECESSITIES = ["required", "preferred", "accepted"] as const;
+/** 合同声明来源。 */
+const CONTRACT_PROVENANCE_SOURCES = ["provider_declared", "operator_declared"] as const;
+
+/**
+ * AgentContractSnapshot：管理员登记 Public Agent Contract（agent-contract.json）产生的
+ * 不可变结构化快照 header。
+ *
+ * 关键约束：
+ * - 合同文件是 request-only 输入：每个合同事实持久化为显式列/子记录，绝不持久化整份源文件、
+ *   原始合同对象或整节 JSON（无 rawContract/canonicalProviderDescriptor 类整节 payload 列）。
+ * - supportedLocales / resultFields / errorCodes 是字段级数组（对应字段，非整节 payload）。
+ * - protocolType / protocolContractRevision 来自登记命令的显式 protocol 字段（合同文件不含
+ *   protocol，禁止硬编码默认）。
+ * - 快照不可变：登记后不可 UPDATE；同一合同再次显式登记生成新快照。
+ */
+export const agentContractSnapshotTable = mysqlTable(
+  "AgentContractSnapshot",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    tenantId: varchar("tenantId", { length: 36 })
+      .notNull()
+      .references(() => tenant.id),
+    agentId: varchar("agentId", { length: 36 })
+      .notNull()
+      .references(() => agentTable.id),
+    /** 合同 contract_version。 */
+    contractVersion: varchar("contractVersion", { length: 64 }).notNull(),
+    /** 合同 agent.id（登记时必须等于目标 Agent.agentKey）。 */
+    publicAgentId: varchar("publicAgentId", { length: 128 }).notNull(),
+    /** 合同 agent.version。 */
+    publicAgentVersion: varchar("publicAgentVersion", { length: 64 }).notNull(),
+    agentNameZhCn: varchar("agentNameZhCn", { length: 256 }).notNull(),
+    agentNameEn: varchar("agentNameEn", { length: 256 }),
+    /** 登记命令显式提供的协议事实（不来自合同文件）。 */
+    protocolType: varchar("protocolType", { length: 32 }).notNull(),
+    protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
+    streamingTransport: boolean("streamingTransport").notNull(),
+    incrementalContent: boolean("incrementalContent").notNull(),
+    inputRequired: boolean("inputRequired").notNull(),
+    resume: boolean("resume").notNull(),
+    cancel: boolean("cancel").notNull(),
+    durableTaskRecovery: boolean("durableTaskRecovery").notNull(),
+    /** 字段级数组：interaction.supported_locales。 */
+    supportedLocales: json("supportedLocales").notNull(),
+    /** 字段级数组：result_contract.fields。 */
+    resultFields: json("resultFields").notNull(),
+    /** 字段级数组：result_contract.error_codes。 */
+    errorCodes: json("errorCodes").notNull(),
+    resultNotesZhCn: text("resultNotesZhCn"),
+    resultNotesEn: text("resultNotesEn"),
+    /** 稳定 canonical digest（sha256: 前缀）。 */
+    contractDigest: varchar("contractDigest", { length: 71 }).notNull(),
+    capabilityDigest: varchar("capabilityDigest", { length: 71 }).notNull(),
+    contextDigest: varchar("contextDigest", { length: 71 }).notNull(),
+    /** 登记捕获时间。 */
+    capturedAt: datetime("capturedAt", { mode: "date", fsp: 3 }).notNull(),
+    /** 创建者 userIdentityId 或 serviceId。 */
+    createdBy: varchar("createdBy", { length: 128 }).notNull(),
+  },
+  (t) => ({
+    tenantAgentIdx: index("AgentContractSnapshot_tenant_agent_idx").on(t.tenantId, t.agentId),
+    agentIdx: index("AgentContractSnapshot_agent_idx").on(t.agentId),
+  }),
+);
+
+export type AgentContractSnapshot = InferSelectModel<typeof agentContractSnapshotTable>;
+export type NewAgentContractSnapshot = InferInsertModel<typeof agentContractSnapshotTable>;
+
+/**
+ * AgentContractCapability：合同 capabilities 的有序独立子记录（position 即合同声明顺序）。
+ * tags/examples/inputModes/outputModes 为字段级数组（对应字段，非整节 payload）。
+ */
+export const agentContractCapabilityTable = mysqlTable(
+  "AgentContractCapability",
+  {
+    /** 行 id（登记时由注入的 newId 生成）。 */
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    snapshotId: varchar("snapshotId", { length: 36 }).notNull(),
+    /** 合同声明顺序（0 起）。 */
+    position: bigint("position", { mode: "number" }).notNull(),
+    key: varchar("key", { length: 128 }).notNull(),
+    nameZhCn: varchar("nameZhCn", { length: 256 }).notNull(),
+    nameEn: varchar("nameEn", { length: 256 }),
+    descriptionZhCn: text("descriptionZhCn"),
+    descriptionEn: text("descriptionEn"),
+    tags: json("tags").notNull(),
+    examples: json("examples").notNull(),
+    inputModes: json("inputModes").notNull(),
+    outputModes: json("outputModes").notNull(),
+  },
+  (t) => ({
+    snapshotFk: foreignKey({
+      name: "AgentContractCapability_snapshot_fk",
+      columns: [t.snapshotId],
+      foreignColumns: [agentContractSnapshotTable.id],
+    }).onDelete("cascade"),
+    snapshotPositionUq: uniqueIndex("AgentContractCapability_snapshot_position_uq").on(
+      t.snapshotId,
+      t.position,
+    ),
+    snapshotKeyUq: uniqueIndex("AgentContractCapability_snapshot_key_uq").on(t.snapshotId, t.key),
+  }),
+);
+
+export type AgentContractCapabilityRow = InferSelectModel<typeof agentContractCapabilityTable>;
+export type NewAgentContractCapabilityRow = InferInsertModel<typeof agentContractCapabilityTable>;
+
+/**
+ * AgentContractInvocationContext：合同 invocation_context 的有序独立子记录。
+ * 登记侧系统 provenance（provider_declared）为权威来源列；appliesTo 为字段级数组。
+ */
+export const agentContractInvocationContextTable = mysqlTable(
+  "AgentContractInvocationContext",
+  {
+    /** 行 id（登记时由注入的 newId 生成）。 */
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+    snapshotId: varchar("snapshotId", { length: 36 }).notNull(),
+    position: bigint("position", { mode: "number" }).notNull(),
+    key: varchar("key", { length: 128 }).notNull(),
+    nameZhCn: varchar("nameZhCn", { length: 256 }).notNull(),
+    nameEn: varchar("nameEn", { length: 256 }),
+    descriptionZhCn: text("descriptionZhCn"),
+    descriptionEn: text("descriptionEn"),
+    necessity: mysqlEnum("necessity", CONTRACT_CONTEXT_NECESSITIES).notNull(),
+    /** 字段级数组：applies_to（wire 缺席为 null）。 */
+    appliesTo: json("appliesTo"),
+    /** wire 缺席为 null。 */
+    trustRequirement: varchar("trustRequirement", { length: 64 }),
+    /** 登记侧系统 provenance：合同由 provider 供给，登记即为 provider_declared。 */
+    declarationSource: mysqlEnum("declarationSource", CONTRACT_PROVENANCE_SOURCES).notNull(),
+  },
+  (t) => ({
+    snapshotFk: foreignKey({
+      name: "AgentContractInvocationContext_snapshot_fk",
+      columns: [t.snapshotId],
+      foreignColumns: [agentContractSnapshotTable.id],
+    }).onDelete("cascade"),
+    snapshotPositionUq: uniqueIndex("AgentContractInvocationContext_snapshot_position_uq").on(
+      t.snapshotId,
+      t.position,
+    ),
+    snapshotKeyUq: uniqueIndex("AgentContractInvocationContext_snapshot_key_uq").on(
+      t.snapshotId,
+      t.key,
+    ),
+  }),
+);
+
+export type AgentContractInvocationContextRow = InferSelectModel<
+  typeof agentContractInvocationContextTable
+>;
+export type NewAgentContractInvocationContextRow = InferInsertModel<
+  typeof agentContractInvocationContextTable
+>;

@@ -13,6 +13,8 @@ import { ResourceScopeError, type ResourceScopeType } from "@/lib/identity/resou
 /** 稳定管理动作目录（方案 + 最低动作集）。 */
 export const ACTION_CODES = [
   "agent.descriptor.create",
+  // Public Agent Contract 登记（agent-registrations 端点）：legacy descriptor.create 的新语义替代
+  "agent.contract.register",
   "agent.revision.create",
   "agent.publish",
   "agent.retract",
@@ -97,6 +99,7 @@ export function isKnownActionCode(code: string): code is ActionCode {
 /** 每个 action code 允许的 resource scope types（方案 ）。 */
 export const ACTION_RESOURCE_TYPES: Record<ActionCode, readonly ResourceScopeType[]> = {
   "agent.descriptor.create": ["agent", "team"],
+  "agent.contract.register": ["agent"],
   "agent.revision.create": ["agent", "team"],
   "agent.publish": ["agent", "environment"],
   "agent.retract": ["agent", "environment"],
