@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  AgentPublicationDescriptorSnapshotMissingError,
   AgentPublicationIdempotencyCompletionError,
   AgentPublicationPrerequisiteError,
   AgentPublicationVersionConflictError,
@@ -10,6 +11,7 @@ import {
 import type {
   AgentPublicationActorType,
   AgentPublicationAttestation,
+  AgentPublicationDescriptorSnapshot,
   AgentPublicationRevision,
   AgentPublicationStore,
 } from "@/lib/agents/persistence/agent-publication-store";
@@ -17,7 +19,8 @@ import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/p
 
 export interface PublishAgentRevisionResult {
   revision: AgentPublicationRevision;
-  attestation: AgentPublicationAttestation;
+  /** 可选 source Attestation；Batch 2 起发布权威是 DescriptorSnapshot，无 Attestation 时为 null。 */
+  attestation: AgentPublicationAttestation | null;
   auditEventId: string;
   outboxEventId: string;
   publicationRecordId: string;
@@ -27,7 +30,8 @@ export interface PublishAgentRevisionCommand {
   tenantId: string;
   revisionId: string;
   agentExpectedVersionNo: number;
-  attestationId: string;
+  /** 可选 source Attestation id（Batch 2 不再强制；传了但未验证则拒绝）。 */
+  attestationId?: string | null;
   actor: {
     tenantId: string;
     actorType: AgentPublicationActorType;
@@ -40,6 +44,18 @@ export interface PublishAgentRevisionCommand {
     httpStatus: number;
     responseRef?: string | null;
     serializeResponse: (result: PublishAgentRevisionResult) => string;
+  };
+}
+
+/** 从绑定的 DescriptorSnapshot 构造附加证据（Batch 2 权威外部合同）。 */
+function descriptorAdditionalEvidence(snapshot: AgentPublicationDescriptorSnapshot): unknown {
+  return {
+    agent_descriptor_snapshot: {
+      id: snapshot.id,
+      provider_descriptor_digest: snapshot.providerDescriptorDigest,
+      capability_manifest_digest: snapshot.capabilityManifestDigest,
+      invocation_context_contract_digest: snapshot.invocationContextContractDigest,
+    },
   };
 }
 
@@ -76,18 +92,39 @@ export function createPublishAgentRevision(dependencies: {
         );
       }
 
-      const attestation = await session.findVerifiedAttestation({
-        tenantId: command.tenantId,
-        revisionId: revision.id,
-        attestationId: command.attestationId,
-      });
-      if (!attestation) {
-        throw new AgentPublicationPrerequisiteError(revision.id, command.attestationId);
+      // 发布权威 = 绑定的 AgentDescriptorSnapshot（Batch 2：无源码 Artifact/Attestation 强前置）。
+      // §5 门禁：Snapshot 必须存在且属于相同 tenant/Agent；digest 从不可变 Snapshot 冻结。
+      const snapshot = revision.agentDescriptorSnapshotId
+        ? await session.findDescriptorSnapshot(command.tenantId, revision.agentDescriptorSnapshotId)
+        : null;
+      if (!snapshot || snapshot.agentId !== revision.agentId) {
+        throw new AgentPublicationDescriptorSnapshotMissingError(revision.id);
       }
+
+      // 可选 source Attestation：未提供则仅凭 Descriptor 证据发布；提供了但未验证则拒绝。
+      let attestation: AgentPublicationAttestation | null = null;
+      let attestationIds: string[] = [];
+      if (command.attestationId) {
+        attestation = await session.findVerifiedAttestation({
+          tenantId: command.tenantId,
+          revisionId: revision.id,
+          attestationId: command.attestationId,
+        });
+        if (!attestation) {
+          throw new AgentPublicationPrerequisiteError(revision.id, command.attestationId);
+        }
+        attestationIds = [attestation.id];
+      }
+
+      const descriptorEvidence = {
+        agentDescriptorSnapshotId: snapshot.id,
+        agentProviderDescriptorDigest: snapshot.providerDescriptorDigest,
+        agentCapabilityManifestDigest: snapshot.capabilityManifestDigest,
+        agentInvocationContextContractDigest: snapshot.invocationContextContractDigest,
+      };
 
       const publishedAt = now();
       const publicationRecordId = newId();
-      const attestationIds = [attestation.id];
       await session.appendPublication({
         id: publicationRecordId,
         tenantId: command.tenantId,
@@ -96,8 +133,10 @@ export function createPublishAgentRevision(dependencies: {
           attestationIds,
           conformanceRunId: null,
           approvals: [],
+          additionalEvidence: descriptorAdditionalEvidence(snapshot),
         }),
         attestationIds,
+        descriptorEvidence,
         publishedByType: command.actor.actorType,
         publishedBy: command.actor.actorId,
         publishedAt,
@@ -137,11 +176,14 @@ export function createPublishAgentRevision(dependencies: {
           agent_id: revision.agentId,
           revision_no: revision.revisionNo,
           revision_state: "published",
-          attestation_id: attestation.id,
-          artifact_digest: attestation.artifactDigest,
+          agent_descriptor_snapshot_id: snapshot.id,
+          capability_manifest_digest: snapshot.capabilityManifestDigest,
+          invocation_context_contract_digest: snapshot.invocationContextContractDigest,
+          attestation_id: attestation?.id ?? null,
+          artifact_digest: attestation?.artifactDigest ?? null,
           publication_record_id: publicationRecordId,
         },
-        reason: "AgentRevision 发布（attestation 门禁通过）",
+        reason: "AgentRevision 发布（DescriptorSnapshot 证据冻结）",
         requestId: command.requestId,
         occurredAt: publishedAt,
       });
@@ -158,7 +200,8 @@ export function createPublishAgentRevision(dependencies: {
           agent_id: revision.agentId,
           revision_id: revision.id,
           revision_no: revision.revisionNo,
-          attestation_id: attestation.id,
+          agent_descriptor_snapshot_id: snapshot.id,
+          attestation_id: attestation?.id ?? null,
           audit_event_id: auditEventId,
           publication_record_id: publicationRecordId,
         },

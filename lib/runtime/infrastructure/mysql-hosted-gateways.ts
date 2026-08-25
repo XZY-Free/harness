@@ -183,6 +183,10 @@ const agentPublication: HostedAgentPublicationGateway = {
         requestId: `hosted-agent-publish:${revision.id}`,
         idempotencyKey: `hosted-agent-publish:${revision.id}`,
       });
+      // 本路径总是提供 attestationId 且命令校验通过，故 result.attestation 必非空；仍用运行时守卫防御。
+      if (!result.attestation) {
+        throw new Error("Hosted Agent 发布应返回非空 Attestation");
+      }
       return {
         revisionId: result.revision.id,
         publicationRecordId: result.publicationRecordId,
