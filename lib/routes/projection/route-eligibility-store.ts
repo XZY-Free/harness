@@ -47,6 +47,12 @@ export interface UpsertProjectionInput {
   runtimeArtifactDigest: string | null;
   runtimeConfigDigest: string | null;
   runtimeTargetDigest: string | null;
+  /** Runtime 证据种类（hosted_artifact | external_endpoint — 03 §3）。 */
+  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
+  /** Agent Descriptor 证据（Agent Route 必填，base route 为 null — 05 §5）。 */
+  agentDescriptorSnapshotId: string | null;
+  agentProviderDescriptorDigest: string | null;
+  agentInvocationContextContractDigest: string | null;
   routeContentDigest: string;
   // ─── : 完整执行证据 ID ──────────────────────
   agentPublicationRecordId: string | null;

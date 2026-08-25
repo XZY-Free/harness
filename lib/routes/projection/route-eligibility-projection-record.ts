@@ -79,6 +79,11 @@ export const routeEligibilityProjection = mysqlTable(
     runtimeEvidenceValid: int("runtimeEvidenceValid").notNull(),
     /** 1=Conformance通过, 0=否。 */
     runtimeConformanceValid: int("runtimeConformanceValid").notNull(),
+    /** Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact（03 §3）。 */
+    runtimeEvidenceKind: mysqlEnum("runtimeEvidenceKind", [
+      "hosted_artifact",
+      "external_endpoint",
+    ]).notNull(),
 
     // ─── Policy ───────────────────────────────────
     policyRevisionId: varchar("policyRevisionId", { length: 36 }),
@@ -101,6 +106,12 @@ export const routeEligibilityProjection = mysqlTable(
     capabilityCompatibilityDigest: varchar("capabilityCompatibilityDigest", {
       length: 71,
     }).notNull(),
+    // ─── : Agent Descriptor 证据（Agent Route 必填，base route 为 null — 05 §5）────
+    agentDescriptorSnapshotId: varchar("agentDescriptorSnapshotId", { length: 36 }),
+    agentProviderDescriptorDigest: varchar("agentProviderDescriptorDigest", { length: 71 }),
+    agentInvocationContextContractDigest: varchar("agentInvocationContextContractDigest", {
+      length: 71,
+    }),
     agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }),

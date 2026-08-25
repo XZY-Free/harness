@@ -226,6 +226,7 @@ async function loadEvidence(
           ? "withdrawn"
           : "draft",
     runtimeCapabilities,
+    runtimeEvidenceKind: runtimeRevisionRow?.runtimeEvidenceKind ?? "hosted_artifact",
     policyRequirement,
   };
 }

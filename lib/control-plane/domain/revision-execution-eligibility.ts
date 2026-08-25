@@ -113,6 +113,8 @@ export interface RevisionExecutionEvidenceSnapshot {
   runtimeRevisionState: "draft" | "published" | "withdrawn";
   /** Runtime Capabilities，必须经过 fail-closed 解析。 */
   runtimeCapabilities: string[];
+  /** Runtime 证据种类（hosted 要求 artifact 全集；external 无 artifact — 03 §3）。 */
+  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
 
   /** Policy 引用需求。kind="none" = Route 未引用 Policy；kind="referenced" = 引用了 Policy。 */
   policyRequirement: PolicyRequirement;
@@ -235,8 +237,12 @@ export const RevisionExecutionEligibilityPolicy = {
       });
     }
 
-    // 5. Runtime Attestation
-    if (!snapshot.runtimeArtifactEvidence) {
+    // 5. Runtime Attestation — Runtime evidence all-or-nothing（03 §3）：
+    // external_endpoint 无 Runtime Artifact（不伪造），跳过 Attestation 维度；
+    // hosted_artifact 要求全集 verified 且未撤销。
+    if (snapshot.runtimeEvidenceKind === "external_endpoint") {
+      // external 无 Artifact Attestation，无此维度错误。
+    } else if (!snapshot.runtimeArtifactEvidence) {
       errors.push({
         dimension: "runtime_attestation",
         code: "no_artifact_evidence",

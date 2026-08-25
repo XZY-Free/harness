@@ -180,14 +180,30 @@ export const executionBindingTable = mysqlTable(
     routeContentDigest: varchar("routeContentDigest", { length: 71 }).notNull(),
     /** null = 基础 Harness Route（Agent Evidence not_applicable，§18）。 */
     agentArtifactId: varchar("agentArtifactId", { length: 36 }),
-    runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }).notNull(),
+    /** null = external_endpoint Runtime（无 Runtime Artifact，03 §3）。 */
+    runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }),
     /** null = 基础 Harness Route（§18 not_applicable）。 */
     agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
-    runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }).notNull(),
+    /** null = external_endpoint Runtime（03 §3）。 */
+    runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
+    /** 冻结的 Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact（03 §3）。 */
+    runtimeEvidenceKind: mysqlEnum("runtimeEvidenceKind", [
+      "hosted_artifact",
+      "external_endpoint",
+    ]).notNull(),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
     /** 冻结的 Runtime 目标摘要 — 发布证据权威（03 §6）。 */
     runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
+    // ─── Agent Descriptor 证据（Agent Route 必填，base route 为 null — 05 §5）────
+    /** null = 基础 Harness Route（§18 not_applicable）。 */
+    agentDescriptorSnapshotId: varchar("agentDescriptorSnapshotId", { length: 36 }),
+    /** null = 基础 Harness Route（§18 not_applicable）。 */
+    agentProviderDescriptorDigest: varchar("agentProviderDescriptorDigest", { length: 71 }),
+    /** null = 基础 Harness Route（§18 not_applicable）。 */
+    agentInvocationContextContractDigest: varchar("agentInvocationContextContractDigest", {
+      length: 71,
+    }),
     /** null = 基础 Harness Route（§18 not_applicable，禁止伪装空数组）。 */
     agentAttestationIds: json("agentAttestationIds").$type<string[] | null>(),
     runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>().notNull(),
@@ -215,7 +231,9 @@ export const executionBindingTable = mysqlTable(
     conformanceRunIdx: index("ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
     runtimeAttestationIdsNonEmpty: check(
       "ExecutionBinding_runtimeAttestationIds_non_empty",
-      sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND JSON_LENGTH(${t.runtimeAttestationIds}) >= 1`,
+      // external_endpoint Runtime 无 Artifact Attestation（03 §3，不伪造）→ 空数组合法；
+      // hosted_artifact 仍要求非空全集。
+      sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND (JSON_LENGTH(${t.runtimeAttestationIds}) >= 1 OR ${t.runtimeEvidenceKind} = 'external_endpoint')`,
     ),
     // §10.3 Agent Evidence 条件性完整组：全部为空（base route，not_applicable）或 全部完整（agent route）。
     // 禁止"随便 nullable"半完整组（禁 4 态模糊，§8.4）。

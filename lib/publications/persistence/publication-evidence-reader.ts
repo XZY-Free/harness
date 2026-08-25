@@ -65,6 +65,10 @@ export async function loadActivePublicationSnapshot(params: {
     conformanceRunId: row.pub.conformanceRunId,
     withdrawalRecordId: null, // 已过滤无撤回记录
     publishedAt: row.pub.publishedAt,
+    agentDescriptorSnapshotId: row.pub.agentDescriptorSnapshotId,
+    agentProviderDescriptorDigest: row.pub.agentProviderDescriptorDigest,
+    agentCapabilityManifestDigest: row.pub.agentCapabilityManifestDigest,
+    agentInvocationContextContractDigest: row.pub.agentInvocationContextContractDigest,
   };
 }
 

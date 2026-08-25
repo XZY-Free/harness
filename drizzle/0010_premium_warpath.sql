@@ -1,0 +1,2 @@
+ALTER TABLE `ExecutionBinding` DROP CONSTRAINT `ExecutionBinding_runtimeAttestationIds_non_empty`;--> statement-breakpoint
+ALTER TABLE `ExecutionBinding` ADD CONSTRAINT `ExecutionBinding_runtimeAttestationIds_non_empty` CHECK (JSON_TYPE(`ExecutionBinding`.`runtimeAttestationIds`) = 'ARRAY' AND (JSON_LENGTH(`ExecutionBinding`.`runtimeAttestationIds`) >= 1 OR `ExecutionBinding`.`runtimeEvidenceKind` = 'external_endpoint'));
