@@ -208,6 +208,12 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       threadId,
       turnId: result.turn.id,
       modelRef: body.selected_model,
+      // ExecutionSubject（06 §6）：服务端从认证 Principal 生成，禁止 caller 自报。
+      executionSubject: {
+        tenantId: principal.tenantId,
+        subjectType: "user",
+        subjectId: principal.userIdentityId,
+      },
     });
     if (!dispatch.dispatched) {
       throw new Error(`Turn 调度未启动（turnId=${result.turn.id}）`);

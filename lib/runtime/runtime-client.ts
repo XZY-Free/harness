@@ -25,6 +25,7 @@
 
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/http";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
+import type { ExecutionSubjectWire } from "@/lib/runtime/transport/execution-subject";
 
 // ─── 共享类型 ──────────────────────────────────────────────
 
@@ -125,6 +126,12 @@ export interface StartInvocationRequestBody {
     trace_id: string;
     span_id: string;
   };
+  /**
+   * ExecutionSubject（06 §6-§7）：可信调用主体，由服务端认证 Principal 生成，
+   * 禁止 caller 自报。Agent Runtime Protocol 直接放 dispatch envelope；
+   * A2A Transport 映射为 namespaced metadata（snowharness.execution_subject）。
+   */
+  execution_subject?: ExecutionSubjectWire;
   attempt?: {
     attempt_no: number;
     /** 重调度时平台分配的 Attempt id（关联 InvocationAttempt 行）。 */

@@ -105,6 +105,7 @@ import {
   getSessionBindingsByThread,
   updateLastUsedAt,
 } from "@/lib/runtime/session-binding-queries";
+import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
 
 /** 默认路由 scope key — 正式默认值，调用方可显式覆盖。 */
@@ -228,6 +229,11 @@ export async function dispatchInvocationForTurn(params: {
   runtimeEndpointResolver?: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
   /** Idempotency-Key（不传则自动生成）。 */
   runtimeIdempotencyKey?: string;
+  /**
+   * ExecutionSubject（06 §6）：可信调用主体。必须由服务端认证 Principal 生成，
+   * 禁止从请求体透传 caller 自报 subject。不传则不发送该字段。
+   */
+  executionSubject?: ExecutionSubject;
 }): Promise<DispatchResult> {
   const routeScopeKey = params.routeScopeKey ?? DEFAULT_ROUTE_SCOPE_KEY;
   const actorType: ThreadEventActorType = params.actorType ?? "system";
@@ -365,6 +371,7 @@ export async function dispatchInvocationForTurn(params: {
       actorType,
       actorId: params.actorId ?? null,
       correlationId: params.correlationId ?? null,
+      executionSubject: params.executionSubject,
     });
   }
 
@@ -524,6 +531,8 @@ async function dispatchToRuntime(params: {
   actorType: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
+  /** 服务端 Principal 生成的可信调用主体（06 §6）；可选（内部测试/基础路径）。 */
+  executionSubject?: ExecutionSubject;
 }): Promise<RuntimeDispatchResult> {
   // 1. 解析 runtimeEndpoint + authToken + gatewayEndpoints + governanceConfig + gatewayAccess
   const { runtimeEndpoint, authToken, gatewayEndpoints, governanceConfig, gatewayAccess } =
@@ -615,6 +624,15 @@ async function dispatchToRuntime(params: {
       span_id: params.invocation.id,
     },
     attempt: { attempt_no: 1 },
+    ...(params.executionSubject
+      ? {
+          execution_subject: {
+            tenant_id: params.executionSubject.tenantId,
+            subject_type: params.executionSubject.subjectType,
+            subject_id: params.executionSubject.subjectId,
+          },
+        }
+      : {}),
   };
 
   // 4. 调用 runtimeClient.startInvocation（带错误处理）
@@ -663,6 +681,7 @@ async function dispatchToRuntime(params: {
     sessionBinding = await createSessionBinding({
       tenantId: params.tenantId,
       runtimeRevisionId: params.runtimeRevisionId,
+      agentRevisionId: params.agentRevision?.id ?? null,
       threadId: params.threadId,
       externalSessionRef: response.runtime_session_ref,
     });

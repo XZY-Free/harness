@@ -30,6 +30,10 @@ import type {
   SteerInvocationRequest,
   SteerInvocationResponse,
 } from "@/lib/runtime/runtime-client";
+import {
+  A2A_EXECUTION_SUBJECT_METADATA_KEY,
+  executionSubjectToA2AMetadata,
+} from "@/lib/runtime/transport/execution-subject";
 import { RuntimeTransportError } from "@/lib/runtime/transport/runtime-transport";
 
 /** A2A 事件批次出口（进入归一化 RuntimeEventIngress，04 §6）。 */
@@ -469,6 +473,18 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
             trace_id: body.trace_context?.trace_id ?? body.invocation_id,
             span_id: body.trace_context?.span_id ?? body.invocation_id,
             protocol: "a2a",
+            // ExecutionSubject（06 §7）：服务端 Principal 生成的可信主体，
+            // 冻结 namespaced metadata 下发；SnowHarness 不假设远端如何映射 subjectId。
+            ...(body.execution_subject
+              ? {
+                  [A2A_EXECUTION_SUBJECT_METADATA_KEY]: executionSubjectToA2AMetadata({
+                    tenantId: body.execution_subject.tenant_id,
+                    subjectType:
+                      body.execution_subject.subject_type === "service" ? "service" : "user",
+                    subjectId: body.execution_subject.subject_id,
+                  }),
+                }
+              : {}),
           },
         },
         configuration: { blocking: false },

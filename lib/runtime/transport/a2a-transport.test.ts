@@ -1,3 +1,4 @@
+import type { StartInvocationRequestBody } from "@/lib/runtime/runtime-client";
 /**
  * A2A Transport 测试 — Batch 6 Gate（04 §9）。
  *
@@ -8,7 +9,6 @@
  * no context new session / subject metadata / disconnect。
  */
 import type { A2AEventBatchSink } from "@/lib/runtime/transport/a2a-transport";
-import type { StartInvocationRequestBody } from "@/lib/runtime/runtime-client";
 import { createA2ATransport } from "@/lib/runtime/transport/a2a-transport";
 import { RuntimeTransportError } from "@/lib/runtime/transport/runtime-transport";
 import { describe, expect, it } from "vitest";
@@ -432,6 +432,43 @@ describe("createA2ATransport（04 §4–§9）", () => {
         requestBody: requestBody(),
       }),
     ).rejects.toMatchObject({ kind: "endpoint_auth" });
+  });
+
+  it("execution_subject（06 §7）：execution_subject → snowharness.execution_subject metadata；缺省不发送", async () => {
+    const fixture = createFixture([sseResponse([statusUpdate("working", "task-4", "ctx-4")])]);
+    const transport = makeTransport(fixture);
+    await transport.startInvocation({
+      runtimeEndpoint: "https://agent.example.com",
+      authToken: "token",
+      idempotencyKey: "idem-1",
+      requestBody: requestBody({
+        execution_subject: {
+          tenant_id: "tenant-1",
+          subject_type: "user",
+          subject_id: "user-1",
+        },
+      }),
+    });
+    const rpc = JSON.parse(String(fixture.requests[0]?.init.body)) as {
+      params: { message: { metadata: Record<string, string> } };
+    };
+    expect(rpc.params.message.metadata["snowharness.execution_subject"]).toBe(
+      JSON.stringify({ tenant_id: "tenant-1", subject_type: "user", subject_id: "user-1" }),
+    );
+
+    // 缺省：不发送该 metadata key。
+    const fixture2 = createFixture([sseResponse([statusUpdate("working", "task-5", "ctx-5")])]);
+    const transport2 = makeTransport(fixture2);
+    await transport2.startInvocation({
+      runtimeEndpoint: "https://agent.example.com",
+      authToken: "token",
+      idempotencyKey: "idem-1",
+      requestBody: requestBody(),
+    });
+    const rpc2 = JSON.parse(String(fixture2.requests[0]?.init.body)) as {
+      params: { message: { metadata: Record<string, string> } };
+    };
+    expect("snowharness.execution_subject" in rpc2.params.message.metadata).toBe(false);
   });
 
   it("steer → unsupported_capability（A2A 0.3.0 冻结范围不含 steer）", async () => {

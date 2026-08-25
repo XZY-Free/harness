@@ -396,10 +396,12 @@ export type NewExecutionOwnership = InferInsertModel<typeof executionOwnershipTa
 // ─── RuntimeSessionBinding State ──────────────────────────
 
 /**
- * RuntimeSessionBinding 状态（）。
+ * RuntimeSessionBinding 状态。
  * - active：Runtime 会话活跃。
- * - closed：主动关闭（Turn 终态后由平台请求关闭）。
+ * - closed：显式关闭（Thread 关闭/删除、用户 reset、continuity policy 不允许复用、管理操作）。
  * - lost：Runtime 心跳超时或自报丢失。
+ *
+ * Turn completed 不是关闭条件（06 §3：Session 生命周期跨 Turn）。
  */
 export const RUNTIME_SESSION_BINDING_STATES = ["active", "closed", "lost"] as const;
 export type RuntimeSessionBindingState = (typeof RUNTIME_SESSION_BINDING_STATES)[number];
@@ -407,14 +409,19 @@ export type RuntimeSessionBindingState = (typeof RUNTIME_SESSION_BINDING_STATES)
 // ─── RuntimeSessionBinding ────────────────────────────────
 
 /**
- * RuntimeSessionBinding 表：Runtime 维护的会话引用（L506-508）。
+ * RuntimeSessionBinding 表：Runtime 维护的会话引用（06 §2）。
  *
  * 关键约束：
  * - threadId/jobId 恰有一个非空（应用层校验，DB 不加 CHECK）。
- * - externalSessionRef 由 Runtime 颁发，平台仅持久化引用，不解析其内容。
+ * - externalSessionRef 由 Runtime 颁发（A2A = contextId，不透明引用），平台仅持久化，
+ *   不解析其内容；禁止 contextId = threadId 硬编码（06 §2）。
  * - UNIQUE(runtimeRevisionId, externalSessionRef)：同一 RuntimeRevision 下外部会话引用唯一。
- * - 外部 Session 不取代 Thread，仅作为 Runtime 侧执行上下文锚点。
- * - bindingState=active 表示 Runtime 会话活跃；Turn 终态后由平台请求 Runtime 关闭。
+ * - Session 复用匹配维度：Tenant + Thread + AgentRevision + RuntimeRevision（06 §4）；
+ *   agentRevisionId 可空 = 基础 Harness Route。
+ * - 生命周期跨 Turn（06 §3）：关闭条件只有 Thread 关闭/删除、用户显式 reset、
+ *   continuity policy 不允许复用、Runtime 报 lost、管理操作；Turn completed 不关闭。
+ * - taskId（A2A Task）不进入 RuntimeSessionBinding（06 §5）：contextId 跨 Turn 连续，
+ *   taskId 属于单个 Invocation（Invocation.runtimeExecutionRef）。
  */
 export const runtimeSessionBindingTable = mysqlTable(
   "RuntimeSessionBinding",
@@ -427,6 +434,8 @@ export const runtimeSessionBindingTable = mysqlTable(
       .notNull()
       .references(() => tenant.id),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
+    /** Agent 维度（06 §4）：null = 基础 Harness Route（无 Agent 资产约束）。 */
+    agentRevisionId: varchar("agentRevisionId", { length: 36 }),
     /** 会话执行时存在；后台 Job 执行时为空。 */
     threadId: varchar("threadId", { length: 36 }),
     /** 后台执行时存在；会话执行时为空。 */

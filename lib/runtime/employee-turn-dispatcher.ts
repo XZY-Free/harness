@@ -16,11 +16,12 @@ import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { collectModelText } from "@/lib/runtime/model-text-stream";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import {
+  findReusableSessionBinding,
   getSessionBindingById,
-  getSessionBindingsByThread,
 } from "@/lib/runtime/session-binding-queries";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
 import { createA2ATransport } from "@/lib/runtime/transport/a2a-transport";
+import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
 import { streamText } from "ai";
 
@@ -82,6 +83,11 @@ export async function dispatchEmployeeTurn(params: {
    * 调用方可显式传 agent.id 以约束 Agent Route，这是长期正式能力。
    */
   agentConstraint?: string | null;
+  /**
+   * ExecutionSubject（06 §6）：由调用方（服务端 route 层）从认证 Principal 生成。
+   * 禁止从 Turn JSON / 请求体接受 caller 自报 subject；本层不做校验兜底。
+   */
+  executionSubject?: ExecutionSubject;
 }): Promise<EmployeeTurnDispatchResult> {
   const thread = await getThreadById(params.tenantId, params.threadId);
   if (!thread) {
@@ -163,10 +169,15 @@ export async function dispatchEmployeeTurn(params: {
             };
           },
           resolveExistingContextId: async (threadId) => {
-            // context reuse（04 §5）：thread 已有 active A2A SessionBinding → 复用 contextId。
-            const bindings = await getSessionBindingsByThread(params.tenantId, threadId);
-            const active = bindings.find((b) => b.bindingState === "active");
-            return active?.externalSessionRef ?? null;
+            // context reuse（04 §5 / 06 §4）：按 Tenant+Thread+AgentRevision+RuntimeRevision
+            // 精确匹配 active SessionBinding → 复用 contextId；Turn completed 不关闭。
+            const reusable = await findReusableSessionBinding({
+              tenantId: params.tenantId,
+              threadId,
+              agentRevisionId: routeOutcome.resolution.agentRevisionId,
+              runtimeRevisionId,
+            });
+            return reusable?.externalSessionRef ?? null;
           },
         }),
     },
@@ -189,6 +200,7 @@ export async function dispatchEmployeeTurn(params: {
     turnId: params.turnId,
     selectedModelRef: params.modelRef,
     agentConstraint: params.agentConstraint ?? null,
+    executionSubject: params.executionSubject,
     runtimeClient: transport,
     runtimeEndpointResolver: async (binding) => {
       // §24：下发 Binding 冻结的 Governance Revision（非 Tenant current），fail-closed。

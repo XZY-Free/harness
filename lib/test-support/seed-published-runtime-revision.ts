@@ -45,8 +45,8 @@ export async function seedPublishedRuntimeRevision(
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolType: "agent_runtime_protocol",
+    protocolContractRevision: "agent-runtime-protocol@2",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${artifactDigest}`,
