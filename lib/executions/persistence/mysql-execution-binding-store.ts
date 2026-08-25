@@ -724,6 +724,11 @@ async function lockAndVerifyPublications(
             conformanceRunId: publicationRecord.conformanceRunId,
             evidenceSetDigest: publicationRecord.evidenceSetDigest,
             approvals: publicationRecord.approvals,
+            agentDescriptorSnapshotId: publicationRecord.agentDescriptorSnapshotId,
+            agentProviderDescriptorDigest: publicationRecord.agentProviderDescriptorDigest,
+            agentCapabilityManifestDigest: publicationRecord.agentCapabilityManifestDigest,
+            agentInvocationContextContractDigest:
+              publicationRecord.agentInvocationContextContractDigest,
           })
           .from(publicationRecord)
           .where(eq(publicationRecord.id, evidence.agentPublicationRecordId as string))
@@ -750,7 +755,19 @@ async function lockAndVerifyPublications(
           },
         });
         if (!agentPub) throw evidenceError("冻结 Agent Publication 不存在");
-        validateFrozenPublicationEvidenceDigest({ publication: agentPub });
+        // Batch 2：Agent Publication 的 evidenceSetDigest 冻结了 DescriptorSnapshot 附加证据。
+        // 重算时须从 Publication 的 descriptor 列重建该 additionalEvidence，否则与锁后 digest 不一致。
+        validateFrozenPublicationEvidenceDigest({
+          publication: agentPub,
+          additionalEvidence: {
+            agent_descriptor_snapshot: {
+              id: agentPub.agentDescriptorSnapshotId,
+              provider_descriptor_digest: agentPub.agentProviderDescriptorDigest,
+              capability_manifest_digest: agentPub.agentCapabilityManifestDigest,
+              invocation_context_contract_digest: agentPub.agentInvocationContextContractDigest,
+            },
+          },
+        });
         return agentPub;
       })();
 
@@ -764,6 +781,10 @@ async function lockAndVerifyPublications(
       conformanceRunId: publicationRecord.conformanceRunId,
       evidenceSetDigest: publicationRecord.evidenceSetDigest,
       approvals: publicationRecord.approvals,
+      agentDescriptorSnapshotId: publicationRecord.agentDescriptorSnapshotId,
+      agentProviderDescriptorDigest: publicationRecord.agentProviderDescriptorDigest,
+      agentCapabilityManifestDigest: publicationRecord.agentCapabilityManifestDigest,
+      agentInvocationContextContractDigest: publicationRecord.agentInvocationContextContractDigest,
     })
     .from(publicationRecord)
     .where(eq(publicationRecord.id, evidence.runtimePublicationRecordId))
@@ -799,6 +820,11 @@ type LockedPublicationEvidence = {
   attestationIds: string[];
   conformanceRunId: string | null;
   approvals: unknown[];
+  // Batch 2：Agent Publication 冻结的 DescriptorSnapshot 证据（runtime 为 null）。
+  agentDescriptorSnapshotId: string | null;
+  agentProviderDescriptorDigest: string | null;
+  agentCapabilityManifestDigest: string | null;
+  agentInvocationContextContractDigest: string | null;
 };
 
 export function validateFrozenPublicationEvidenceDigest(input: {

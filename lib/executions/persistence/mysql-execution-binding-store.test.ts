@@ -324,6 +324,10 @@ describe("ExecutionBinding authority final validation", () => {
       attestationIds: ["attestation-1"],
       conformanceRunId: null,
       approvals: [],
+      agentDescriptorSnapshotId: null,
+      agentProviderDescriptorDigest: null,
+      agentCapabilityManifestDigest: null,
+      agentInvocationContextContractDigest: null,
     };
     expect(() => validateFrozenPublicationEvidenceDigest({ publication: agent })).not.toThrow();
 
@@ -337,6 +341,10 @@ describe("ExecutionBinding authority final validation", () => {
       attestationIds: ["attestation-2"],
       conformanceRunId: "run-1",
       approvals: [],
+      agentDescriptorSnapshotId: null,
+      agentProviderDescriptorDigest: null,
+      agentCapabilityManifestDigest: null,
+      agentInvocationContextContractDigest: null,
     };
     expect(() =>
       validateFrozenPublicationEvidenceDigest({
