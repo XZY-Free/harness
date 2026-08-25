@@ -280,11 +280,16 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
         ? 1
         : 0;
     const runtimePublicationActive = evidenceSnapshot.runtimePublication ? 1 : 0;
+    // Runtime evidence all-or-nothing（03 §3）：hosted 要求 Artifact 全集 verified；
+    // external_endpoint 无 Runtime Artifact（不伪造），证据有效即 1。
+    const runtimeEvidenceKind = runtimeRevision?.runtimeEvidenceKind ?? null;
     const runtimeEvidenceValid =
-      evidenceSnapshot.runtimeArtifactEvidence?.verificationState === "verified" &&
-      evidenceSnapshot.runtimeArtifactEvidence.revokedAt === null
+      runtimeEvidenceKind === "external_endpoint"
         ? 1
-        : 0;
+        : evidenceSnapshot.runtimeArtifactEvidence?.verificationState === "verified" &&
+            evidenceSnapshot.runtimeArtifactEvidence.revokedAt === null
+          ? 1
+          : 0;
     // Conformance: 由同一次 RevisionExecutionEligibilityPolicy 结果派生
     // （runtime_conformance dimension 无错误 → 有效）。
     const runtimeConformanceValid = eligibilityResult.errors.some(
@@ -330,6 +335,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       runtimePublicationActive,
       runtimeEvidenceValid,
       runtimeConformanceValid,
+      runtimeEvidenceKind: runtimeEvidenceKind ?? "hosted_artifact",
       policyRevisionId: revision.policyRevisionId,
       policyRevisionState,
       capabilityCompatibilityDigest,
@@ -338,6 +344,12 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       runtimeConfigDigest: runtimeRevision?.configHash ?? null,
       runtimeTargetDigest: runtimeRevision?.runtimeTargetDigest ?? null,
       routeContentDigest: revision.contentDigest,
+      agentDescriptorSnapshotId:
+        evidenceSnapshot.agentPublication?.agentDescriptorSnapshotId ?? null,
+      agentProviderDescriptorDigest:
+        evidenceSnapshot.agentPublication?.agentProviderDescriptorDigest ?? null,
+      agentInvocationContextContractDigest:
+        evidenceSnapshot.agentPublication?.agentInvocationContextContractDigest ?? null,
       agentPublicationRecordId: evidenceSnapshot.agentPublication?.publicationRecordId ?? null,
       runtimePublicationRecordId: evidenceSnapshot.runtimePublication?.publicationRecordId ?? null,
       agentAttestationIds: evidenceSnapshot.agentPublication?.attestationIds ?? null,

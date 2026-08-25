@@ -92,6 +92,10 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
     conformanceRunId: null,
     withdrawalRecordId: null,
     publishedAt: new Date(),
+    agentDescriptorSnapshotId: "snapshot-1",
+    agentProviderDescriptorDigest: "sha256:p",
+    agentCapabilityManifestDigest: "sha256:m",
+    agentInvocationContextContractDigest: "sha256:c",
   },
   agentLifecycleState: "active" as const,
   agentRevisionState: "published" as const,
@@ -120,6 +124,10 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
     conformanceRunId: "conf-1",
     withdrawalRecordId: null,
     publishedAt: new Date(),
+    agentDescriptorSnapshotId: null,
+    agentProviderDescriptorDigest: null,
+    agentCapabilityManifestDigest: null,
+    agentInvocationContextContractDigest: null,
   },
   runtimeConformance: {
     run: {
@@ -146,6 +154,7 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
   runtimeLifecycleState: "active" as const,
   runtimeRevisionState: "published" as const,
   runtimeCapabilities: [],
+  runtimeEvidenceKind: "hosted_artifact" as const,
   policyRequirement: { kind: "none" as const },
 } satisfies RevisionExecutionEvidenceSnapshot;
 const mockEvidenceReader: RevisionExecutionEvidenceReader = {

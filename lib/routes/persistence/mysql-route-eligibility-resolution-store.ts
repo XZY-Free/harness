@@ -97,8 +97,6 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
  */
 function buildControlPlaneEvidence(p: RouteEligibilityProjectionRecord): RouteControlPlaneEvidence {
   if (
-    !p.runtimeArtifactId ||
-    !p.runtimeArtifactDigest ||
     !p.runtimeConfigDigest ||
     !p.runtimeTargetDigest ||
     !p.runtimePublicationRecordId ||
@@ -107,14 +105,25 @@ function buildControlPlaneEvidence(p: RouteEligibilityProjectionRecord): RouteCo
   ) {
     throw new Error("RouteEligibilityProjection 缺少必需的 Runtime 控制面证据");
   }
+  // Runtime evidence all-or-nothing（03 §3）：hosted 要求 artifact 全集；external 无 artifact。
+  if (
+    p.runtimeEvidenceKind === "hosted_artifact" &&
+    (!p.runtimeArtifactId || !p.runtimeArtifactDigest)
+  ) {
+    throw new Error("hosted_artifact 投影缺少 Runtime Artifact 证据");
+  }
   return {
     agentArtifactId: p.agentArtifactId,
     runtimeArtifactId: p.runtimeArtifactId,
     agentArtifactDigest: p.agentArtifactDigest,
     runtimeArtifactDigest: p.runtimeArtifactDigest,
+    runtimeEvidenceKind: p.runtimeEvidenceKind,
     runtimeConfigDigest: p.runtimeConfigDigest,
     runtimeTargetDigest: p.runtimeTargetDigest,
     capabilityManifestDigest: p.capabilityCompatibilityDigest,
+    agentDescriptorSnapshotId: p.agentDescriptorSnapshotId,
+    agentProviderDescriptorDigest: p.agentProviderDescriptorDigest,
+    agentInvocationContextContractDigest: p.agentInvocationContextContractDigest,
     agentAttestationIds: p.agentAttestationIds,
     runtimeAttestationIds: [...p.runtimeAttestationIds],
     agentPublicationRecordId: p.agentPublicationRecordId,
