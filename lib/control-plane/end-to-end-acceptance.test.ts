@@ -103,6 +103,7 @@ import {
   mysqlHostedProvisioningRequestStore,
 } from "@/lib/runtime/persistence/mysql-hosted-provisioning-request-store";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
+import { mysqlRuntimePublicationStore } from "@/lib/runtime/persistence/mysql-runtime-publication-store";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
@@ -114,6 +115,7 @@ import {
 } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { createHostedProvisioningSaga } from "@/lib/runtime/provisioning/hosted-provisioning-saga";
 import { createHostedProvisioningWorker } from "@/lib/runtime/provisioning/hosted-provisioning-worker";
+import { createPublishRuntimeRevision } from "@/lib/runtime/provisioning/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
 import { validateAgentRevisionForProvisioning } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
@@ -2173,5 +2175,153 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
       .where(eq(routeEligibilityProjection.routeId, routeId))
       .limit(1);
     expect(withdrawnProjection?.eligibilityState).toBe("ineligible");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 场景 22：External Endpoint Runtime 的 Binding 端到端（Batch 4 Gate）
+// ═══════════════════════════════════════════════════════════
+
+describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or-nothing）", () => {
+  async function seedPublishedExternalRuntimeRevision(
+    tenantId: string,
+    ownerId: string,
+    contentSuffix: string,
+  ) {
+    const runtime = await createRuntime({
+      tenantId,
+      runtimeKey: `e2e-external-runtime-${contentSuffix}`,
+      displayName: `External Runtime ${contentSuffix}`,
+      runtimeKind: "external",
+      ownerUserId: ownerId,
+      lifecycleState: "enabled",
+    });
+    const revision = await createDraftRuntimeRevision({
+      tenantId,
+      runtimeId: runtime.id,
+      protocolType: "a2a",
+      protocolContractRevision: "a2a@1",
+      runtimeEvidenceKind: "external_endpoint",
+      endpointRef: `https://external-runtime-${contentSuffix}.example.com`,
+      runtimeArtifactRef: null,
+      runtimeCapabilitiesJson: ["event_stream", "steer", "cancel"],
+      identityMode: "workload_token",
+      networkZone: "external",
+      configHash: `sha256:${createHash("sha256").update(`ext_config_${contentSuffix}`).digest("hex")}`,
+      createdBy: ownerId,
+    });
+
+    const dsseEnvelope = buildSignedConformanceReport(
+      revision.id,
+      revision.runtimeTargetDigest,
+      revision.configHash,
+      revision.protocolContractRevision,
+    );
+    const record = createRecordRuntimeConformanceRun({
+      store: mysqlRuntimeConformanceRunStore,
+      verifier: createDSSEConformanceVerifier({
+        runnerIdentityRegistry: new RunnerSigningIdentityRegistry([
+          {
+            keyId: RUNNER_KEY.keyid,
+            publicKey: RUNNER_KEY.publicKeyBase64,
+            runnerIdentity: RUNNER_IDENTITY,
+            tenantScope: null,
+            validFrom: "2020-01-01T00:00:00.000Z",
+            validUntil: null,
+            revokedAt: null,
+          },
+        ]),
+      }),
+    });
+    const run = await record({
+      tenantId,
+      runtimeRevisionId: revision.id,
+      idempotencyKey: `e2e-external-run-${contentSuffix}`,
+      requestId: `e2e-external-request-${contentSuffix}`,
+      actor: { actorType: "user", actorId: ownerId },
+      dsseEnvelope,
+    });
+
+    // external_endpoint：不携带 attestationId（不得伪造 Runtime Artifact，03 §3）。
+    const publish = createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore });
+    const { revision: published } = await publish({
+      tenantId,
+      revisionId: revision.id,
+      runtimeExpectedVersionNo: runtime.versionNo,
+      conformanceRunId: run.run.id,
+      attestationId: null,
+      actor: { tenantId, actorType: "user", actorId: ownerId },
+      requestId: `e2e-external-publish-${contentSuffix}`,
+      idempotencyKey: `e2e-external-publish-${contentSuffix}`,
+      idempotency: undefined,
+    });
+    return { runtime, revision: published };
+  }
+
+  it("external_endpoint 全链：发布（无 Artifact）→ 解析 → Binding 冻结 external 证据", async () => {
+    const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
+    const agentResult = await seedPublishedAgentRevision(
+      tenantId,
+      userIdentityId,
+      "e2e-external-agent",
+      "e2e-external-agent-v1",
+    );
+    const runtimeResult = await seedPublishedExternalRuntimeRevision(
+      tenantId,
+      userIdentityId,
+      "ext-binding",
+    );
+
+    const routeSet = await createRouteSet({
+      tenantId,
+      agentId: agentResult.agent.id,
+      routeScopeKey: "prod",
+      routeScopeJson: { networkZone: "external" },
+    });
+    const upsertResult = await activateRouteForTest({
+      tenantId,
+      routeSetId: routeSet.id,
+      routeSetExpectedVersionNo: 1,
+      agentRevisionId: agentResult.revision.id,
+      runtimeRevisionId: runtimeResult.revision.id,
+      trafficWeight: 10000,
+      priorityNo: 1,
+      actor: { tenantId, actorType: "service", actorId: "test-deploy-bot" },
+    });
+    const fixture = {
+      tenantId,
+      agent: agentResult.agent,
+      agentRevision: agentResult.revision,
+      runtime: runtimeResult.runtime,
+      runtimeRevision: runtimeResult.revision,
+      route: upsertResult.route,
+    };
+
+    const resolution = await resolveFrozenRouteForBinding(
+      fixture as Parameters<typeof resolveFrozenRouteForBinding>[0],
+      "thread-external-binding-e2e",
+    );
+    // 解析结果冻结 external 证据：无 artifact 引用、kind=external_endpoint。
+    expect(resolution.controlPlaneEvidence.runtimeEvidenceKind).toBe("external_endpoint");
+    expect(resolution.controlPlaneEvidence.runtimeArtifactId).toBeNull();
+    expect(resolution.controlPlaneEvidence.runtimeArtifactDigest).toBeNull();
+    expect(resolution.controlPlaneEvidence.runtimeTargetDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    const invocationId = crypto.randomUUID();
+    await seedInvocation(tenantId, invocationId);
+    const binding = await createBindingFromResolved({ tenantId, invocationId, resolution });
+
+    // Binding 冻结 external 证据（不伪造 Artifact，03 §3）。
+    expect(binding.runtimeRevisionId).toBe(runtimeResult.revision.id);
+    expect(binding.runtimeEvidenceKind).toBe("external_endpoint");
+    expect(binding.runtimeArtifactId).toBeNull();
+    expect(binding.runtimeArtifactDigest).toBeNull();
+    expect(binding.runtimeTargetDigest).toBe(resolution.controlPlaneEvidence.runtimeTargetDigest);
+    expect(binding.runtimeAttestationIds).toEqual([]);
+    expect(binding.conformanceRunId).toBeTruthy();
+    // Agent 维度证据完整（all-or-nothing，05 §5）。
+    expect(binding.agentDescriptorSnapshotId).toBeTruthy();
+    expect(binding.agentProviderDescriptorDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(binding.agentInvocationContextContractDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });
