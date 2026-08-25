@@ -185,6 +185,8 @@ export const executionBindingTable = mysqlTable(
     agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }).notNull(),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
+    /** 冻结的 Runtime 目标摘要 — 发布证据权威（03 §6）。 */
+    runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
     /** null = 基础 Harness Route（§18 not_applicable，禁止伪装空数组）。 */
     agentAttestationIds: json("agentAttestationIds").$type<string[] | null>(),

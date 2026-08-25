@@ -28,8 +28,11 @@ import {
   type RuntimeRevisionState,
   runtimeRevisionTable,
 } from "@/lib/persistence/schema/runtimes";
-import { protocolContractRevision } from "@/lib/runtime/domain/runtime-conformance-run";
 import { RuntimeRevisionNotFoundError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
+import {
+  type RuntimeTargetFacts,
+  computeRuntimeTargetDigest,
+} from "@/lib/runtime/domain/runtime-target-digest";
 import { and, desc, eq, max } from "drizzle-orm";
 
 /** 创建 draft RuntimeRevision 的入参。 */
@@ -37,13 +40,76 @@ export interface CreateDraftRuntimeRevisionParams {
   tenantId: string;
   runtimeId: string;
   protocolType: string;
+  /** 协议契约版本（显式传入；禁止按 protocolType 自动推导 — 03 §5）。 */
+  protocolContractRevision: string;
+  /** 证据种类（hosted_artifact | external_endpoint）。 */
+  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   endpointRef: string;
-  runtimeArtifactRef: string;
+  /**
+   * Runtime 制品引用；仅 hosted_artifact 非空，external_endpoint 必须为 null/undefined
+   * （External 不伪造 Runtime Artifact — 03 §4）。
+   */
+  runtimeArtifactRef?: string | null;
   runtimeCapabilitiesJson: unknown;
   identityMode: string;
   networkZone: string;
   configHash: string;
   createdBy: string;
+}
+
+/** 校验证据完整性并计算 runtimeTargetDigest；不合法抛错（fail-closed）。 */
+function computeTargetDigestOrFail(params: {
+  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
+  runtimeArtifactRef: string | null;
+  artifactDigest: string | null;
+  configHash: string;
+  protocolContractRevision: string;
+  endpointRef: string;
+  protocolType: string;
+  identityMode: string;
+  networkZone: string;
+}): string {
+  let facts: RuntimeTargetFacts;
+  if (params.runtimeEvidenceKind === "hosted_artifact") {
+    if (!params.runtimeArtifactRef || !params.artifactDigest) {
+      throw new RuntimeRevisionEvidenceError(
+        "hosted_artifact 证据不完整：runtimeArtifactRef 与 artifact digest 缺一不可",
+      );
+    }
+    facts = {
+      runtimeEvidenceKind: "hosted_artifact",
+      runtimeArtifactDigest: params.artifactDigest,
+      runtimeConfigDigest: params.configHash,
+      protocolContractRevision: params.protocolContractRevision,
+    };
+  } else {
+    if (params.runtimeArtifactRef) {
+      throw new RuntimeRevisionEvidenceError(
+        "external_endpoint 证据不允许携带 runtimeArtifactRef（不得伪造 Runtime Artifact）",
+      );
+    }
+    if (!params.endpointRef) {
+      throw new RuntimeRevisionEvidenceError("external_endpoint 证据缺少 endpointRef");
+    }
+    facts = {
+      runtimeEvidenceKind: "external_endpoint",
+      endpointRef: params.endpointRef,
+      runtimeConfigDigest: params.configHash,
+      protocolType: params.protocolType,
+      protocolContractRevision: params.protocolContractRevision,
+      identityMode: params.identityMode,
+      networkZone: params.networkZone,
+    };
+  }
+  return computeRuntimeTargetDigest(facts);
+}
+
+/** RuntimeRevision 证据完整性错误（03 §3/§4 fail-closed）。 */
+export class RuntimeRevisionEvidenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RuntimeRevisionEvidenceError";
+  }
 }
 
 /**
@@ -57,15 +123,33 @@ export async function createDraftRuntimeRevision(
 ): Promise<RuntimeRevisionRow> {
   const revisionNo = await nextRevisionNo(params.runtimeId);
   const id = randomUUID();
+  if (!params.protocolContractRevision.trim()) {
+    throw new RuntimeRevisionEvidenceError("protocolContractRevision 必须显式传入（禁止默认值）");
+  }
+  const runtimeArtifactRef = params.runtimeArtifactRef ?? null;
+  const artifactDigest = runtimeArtifactRef ? extractArtifactDigest(runtimeArtifactRef) : null;
+  const runtimeTargetDigest = computeTargetDigestOrFail({
+    runtimeEvidenceKind: params.runtimeEvidenceKind,
+    runtimeArtifactRef,
+    artifactDigest,
+    configHash: params.configHash,
+    protocolContractRevision: params.protocolContractRevision,
+    endpointRef: params.endpointRef,
+    protocolType: params.protocolType,
+    identityMode: params.identityMode,
+    networkZone: params.networkZone,
+  });
   await db.insert(runtimeRevisionTable).values({
     id,
     runtimeId: params.runtimeId,
     revisionNo,
     protocolType: params.protocolType,
-    protocolContractRevision: protocolContractRevision(params.protocolType),
+    protocolContractRevision: params.protocolContractRevision,
+    runtimeEvidenceKind: params.runtimeEvidenceKind,
+    runtimeTargetDigest,
     endpointRef: params.endpointRef,
-    runtimeArtifactRef: params.runtimeArtifactRef,
-    artifactDigest: extractArtifactDigest(params.runtimeArtifactRef),
+    runtimeArtifactRef,
+    artifactDigest,
     runtimeCapabilitiesJson: params.runtimeCapabilitiesJson,
     identityMode: params.identityMode,
     networkZone: params.networkZone,
@@ -90,8 +174,9 @@ export async function updateDraftRuntimeRevisionContent(
   revisionId: string,
   patch: {
     protocolType?: string;
+    protocolContractRevision?: string;
     endpointRef?: string;
-    runtimeArtifactRef?: string;
+    runtimeArtifactRef?: string | null;
     runtimeCapabilitiesJson?: unknown;
     identityMode?: string;
     networkZone?: string;
@@ -107,15 +192,20 @@ export async function updateDraftRuntimeRevisionContent(
   }
 
   const updates: Record<string, unknown> = {};
-  if (patch.protocolType !== undefined) {
-    updates.protocolType = patch.protocolType;
-    updates.protocolContractRevision = protocolContractRevision(patch.protocolType);
+  if (patch.protocolType !== undefined) updates.protocolType = patch.protocolType;
+  if (patch.protocolContractRevision !== undefined) {
+    if (!patch.protocolContractRevision.trim()) {
+      throw new RuntimeRevisionEvidenceError("protocolContractRevision 不可为空");
+    }
+    updates.protocolContractRevision = patch.protocolContractRevision;
   }
   if (patch.endpointRef !== undefined) updates.endpointRef = patch.endpointRef;
   if (patch.runtimeArtifactRef !== undefined) {
     updates.runtimeArtifactRef = patch.runtimeArtifactRef;
     updates.artifactId = null;
-    updates.artifactDigest = null;
+    updates.artifactDigest = patch.runtimeArtifactRef
+      ? extractArtifactDigest(patch.runtimeArtifactRef)
+      : null;
   }
   if (patch.runtimeCapabilitiesJson !== undefined) {
     updates.runtimeCapabilitiesJson = patch.runtimeCapabilitiesJson;
@@ -123,6 +213,47 @@ export async function updateDraftRuntimeRevisionContent(
   if (patch.identityMode !== undefined) updates.identityMode = patch.identityMode;
   if (patch.networkZone !== undefined) updates.networkZone = patch.networkZone;
   if (patch.configHash !== undefined) updates.configHash = patch.configHash;
+
+  // 任一证据事实变化时重算 runtimeTargetDigest（fail-closed 校验证据完整性）。
+  const evidenceTouched =
+    updates.protocolType !== undefined ||
+    updates.protocolContractRevision !== undefined ||
+    updates.endpointRef !== undefined ||
+    updates.runtimeArtifactRef !== undefined ||
+    updates.identityMode !== undefined ||
+    updates.networkZone !== undefined ||
+    updates.configHash !== undefined;
+  if (evidenceTouched) {
+    updates.runtimeTargetDigest = computeTargetDigestOrFail({
+      runtimeEvidenceKind: current.runtimeEvidenceKind,
+      runtimeArtifactRef:
+        updates.runtimeArtifactRef !== undefined
+          ? (updates.runtimeArtifactRef as string | null)
+          : current.runtimeArtifactRef,
+      artifactDigest:
+        updates.artifactDigest !== undefined
+          ? (updates.artifactDigest as string | null)
+          : current.artifactDigest,
+      configHash:
+        updates.configHash !== undefined ? (updates.configHash as string) : current.configHash,
+      protocolContractRevision:
+        updates.protocolContractRevision !== undefined
+          ? (updates.protocolContractRevision as string)
+          : current.protocolContractRevision,
+      endpointRef:
+        updates.endpointRef !== undefined ? (updates.endpointRef as string) : current.endpointRef,
+      protocolType:
+        updates.protocolType !== undefined
+          ? (updates.protocolType as string)
+          : current.protocolType,
+      identityMode:
+        updates.identityMode !== undefined
+          ? (updates.identityMode as string)
+          : current.identityMode,
+      networkZone:
+        updates.networkZone !== undefined ? (updates.networkZone as string) : current.networkZone,
+    });
+  }
 
   if (Object.keys(updates).length === 0) return current;
 

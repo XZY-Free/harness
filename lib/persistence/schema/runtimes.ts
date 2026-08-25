@@ -60,6 +60,18 @@ export type RuntimeLifecycleState = (typeof RUNTIME_LIFECYCLE_STATES)[number];
 export const RUNTIME_KINDS = ["hosted", "external"] as const;
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 
+// ─── Runtime Evidence Kind ────────────────────────────────
+
+/**
+ * RuntimeRevision 证据种类（docs/V12/01/agent补充/03 §2）。
+ * - hosted_artifact：平台托管运行时，必须携带真实 Runtime Artifact 证据。
+ * - external_endpoint：外部运行时，使用 endpoint + config/protocol 证据，不得伪造 Artifact。
+ *
+ * 语义字段，不允许通过 nullable 组合猜测。
+ */
+export const RUNTIME_EVIDENCE_KINDS = ["hosted_artifact", "external_endpoint"] as const;
+export type RuntimeEvidenceKind = (typeof RUNTIME_EVIDENCE_KINDS)[number];
+
 // ─── RuntimeRevision State ─────────────────────────────────
 
 /**
@@ -149,14 +161,22 @@ export const runtimeRevisionTable = mysqlTable(
     revisionNo: bigint("revisionNo", { mode: "number" }).notNull(),
     /** 协议类型（agent_runtime_protocol/a2a/...）；varchar 以便扩展。 */
     protocolType: varchar("protocolType", { length: 32 }).notNull(),
-    /** Conformance 与发布共同冻结的协议契约版本。 */
-    protocolContractRevision: varchar("protocolContractRevision", { length: 128 })
-      .notNull()
-      .default("agent-runtime-protocol@1"),
+    /**
+     * Conformance 与发布共同冻结的协议契约版本（显式传入，禁止默认值污染全部协议 —
+     * docs/V12/01/agent补充/03 §5）。
+     */
+    protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
+    /** 证据种类：hosted_artifact | external_endpoint（03 §2，语义字段）。 */
+    runtimeEvidenceKind: mysqlEnum("runtimeEvidenceKind", RUNTIME_EVIDENCE_KINDS).notNull(),
+    /** 被测对象统一 digest（03 §6，canonical 计算自证据事实）。 */
+    runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     /** 受管连接引用，不保存带 Secret 的 URL。 */
     endpointRef: varchar("endpointRef", { length: 512 }).notNull(),
-    /** Runtime 主机/Adapter 制品引用。 */
-    runtimeArtifactRef: varchar("runtimeArtifactRef", { length: 512 }).notNull(),
+    /**
+     * Runtime 主机/Adapter 制品引用（仅 hosted_artifact 非空；external_endpoint 为 null，
+     * 不作为通用必填字段 — 03 §5）。
+     */
+    runtimeArtifactRef: varchar("runtimeArtifactRef", { length: 512 }),
     /** 权威控制面 Artifact；旧 Revision 可为空。 */
     artifactId: varchar("artifactId", { length: 36 }),
     /** 与 artifactId 同时冻结的内容摘要。 */
