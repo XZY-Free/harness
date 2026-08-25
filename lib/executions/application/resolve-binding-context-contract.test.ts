@@ -11,6 +11,7 @@ import { createCreateAgentDescriptorSnapshot } from "@/lib/agents/application/cr
 import type { ProviderAgentCard } from "@/lib/agents/domain/agent-descriptor";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { mysqlAgentDescriptorStore } from "@/lib/agents/persistence/mysql-agent-descriptor-store";
+import { buildInvocationContextBundle } from "@/lib/context/enrichment/build-invocation-context-bundle";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -172,5 +173,47 @@ describe("resolveBindingContextContract（05 §6）", () => {
         agentInvocationContextContractDigest: null,
       }),
     ).rejects.toThrow(BindingContextContractError);
+  });
+
+  it("全链：Binding 冻结 Snapshot → Context Contract → Context Bundle（Batch 5 Gate）", async () => {
+    const { tenantId, agent } = await seedAgent();
+    // preferred 声明（required 的 fail 行为已由 unit 测试覆盖）。
+    const card: ProviderAgentCard = {
+      ...CARD,
+      invocationContext: [
+        { contextKind: "conversation_history", necessity: "preferred", purpose: "退款上下文" },
+      ],
+    };
+    const snapshot = await seedSnapshot(tenantId, agent.id, card);
+
+    // Binding 冻结的 Contract 经 resolveBindingContextContract 精确解析。
+    const contract = await resolveBindingContextContract({
+      tenantId,
+      agentDescriptorSnapshotId: snapshot.snapshotId,
+      agentInvocationContextContractDigest: snapshot.invocationContextContractDigest,
+    });
+    expect(contract).not.toBeNull();
+
+    // Contract 直接进入 Context Enrichment（required 可用 → supplied）。
+    const bundle = buildInvocationContextBundle({
+      contract: contract as NonNullable<typeof contract>,
+      environment: {
+        tenantId,
+        executionSubject: {
+          userIdentityId: "user-1",
+          externalSubject: "employee-42",
+          email: "employee42@example.com",
+          displayName: "员工42",
+        },
+        now: new Date("2026-08-25T08:00:00.000Z"),
+        timezone: "Asia/Shanghai",
+        locale: "zh-CN",
+        conversationContextRef: null,
+      },
+    });
+    const history = bundle.entries.find((e) => e.contextKind === "conversation_history");
+    // conversation_history 非 01 §8 通用 contextKind → not_available（不伪造）。
+    expect(history?.omissionReason).toBe("not_available");
+    expect(bundle.entries.every((e) => e.supplied === false)).toBe(true);
   });
 });
