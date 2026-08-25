@@ -26,6 +26,10 @@ export type {
   PublishAgentRevisionResponse,
   WithdrawAgentRevisionRequest,
   WithdrawAgentRevisionResponse,
+  AgentCapabilityDTO,
+  AgentContextContractItemDTO,
+  AgentDescriptorSnapshotDTO,
+  AgentDescriptorListResponse,
 } from "./contracts/agent";
 
 export type {

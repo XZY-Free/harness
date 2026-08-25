@@ -114,7 +114,6 @@ function DesktopShell() {
         <main className="flex min-w-0 flex-1 flex-col">
           {route.kind === "home" ? (
             <NewThreadPage
-              agents={[]}
               defaultModelRef={shell.default_model_ref}
               error={newThreadError}
               onSubmit={submitNewThread}

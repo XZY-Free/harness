@@ -1,11 +1,12 @@
 "use client";
 
+import { AgentContractPanel } from "@/components/studio/agent-contract-panel";
 import {
   type AgentDTO,
   ControlPlaneRequestError,
   createControlPlaneClient,
 } from "@/lib/control-plane-client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 
@@ -19,6 +20,11 @@ const LIFECYCLE_LABEL: Record<AgentDTO["lifecycle_state"], string> = {
 export function AgentsViewer() {
   const [agents, setAgents] = useState<AgentDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
+  const loadDescriptors = useCallback(
+    (agentId: string) => client.agents.listDescriptors(agentId),
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -75,24 +81,42 @@ export function AgentsViewer() {
             </tr>
           )}
           {agents?.map((agent) => (
-            <tr key={agent.id} className="border-t border-[var(--border)]">
-              <td className="px-3 py-2 text-[var(--fg)]">
-                <div>{agent.display_name}</div>
-                {agent.description && (
-                  <div className="text-[12px] text-[var(--fg-muted)]">{agent.description}</div>
-                )}
-              </td>
-              <td className="px-3 py-2 font-mono text-[var(--fg-muted)]">{agent.agent_key}</td>
-              <td className="px-3 py-2 text-[var(--fg-muted)]">
-                {LIFECYCLE_LABEL[agent.lifecycle_state]}
-              </td>
-              <td className="px-3 py-2 font-mono text-[var(--fg-muted)]">
-                {agent.current_revision_id ?? "—"}
-              </td>
-              <td className="px-3 py-2 text-[var(--fg-muted)]">
-                {agent.updated_at ? new Date(agent.updated_at).toLocaleString() : "—"}
-              </td>
-            </tr>
+            <>
+              <tr key={agent.id} className="border-t border-[var(--border)]">
+                <td className="px-3 py-2 text-[var(--fg)]">
+                  <button
+                    type="button"
+                    aria-expanded={expandedAgentId === agent.id}
+                    onClick={() =>
+                      setExpandedAgentId((current) => (current === agent.id ? null : agent.id))
+                    }
+                    className="text-left"
+                  >
+                    <div>{agent.display_name}</div>
+                    {agent.description && (
+                      <div className="text-[12px] text-[var(--fg-muted)]">{agent.description}</div>
+                    )}
+                  </button>
+                </td>
+                <td className="px-3 py-2 font-mono text-[var(--fg-muted)]">{agent.agent_key}</td>
+                <td className="px-3 py-2 text-[var(--fg-muted)]">
+                  {LIFECYCLE_LABEL[agent.lifecycle_state]}
+                </td>
+                <td className="px-3 py-2 font-mono text-[var(--fg-muted)]">
+                  {agent.current_revision_id ?? "—"}
+                </td>
+                <td className="px-3 py-2 text-[var(--fg-muted)]">
+                  {agent.updated_at ? new Date(agent.updated_at).toLocaleString() : "—"}
+                </td>
+              </tr>
+              {expandedAgentId === agent.id && (
+                <tr className="border-t border-[var(--border)] bg-[var(--surface-2)]">
+                  <td colSpan={5} className="p-0">
+                    <AgentContractPanel agentId={agent.id} loadDescriptors={loadDescriptors} />
+                  </td>
+                </tr>
+              )}
+            </>
           ))}
         </tbody>
       </table>

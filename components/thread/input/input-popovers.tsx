@@ -198,6 +198,8 @@ export interface AgentOption {
   readonly id: string;
   readonly displayName: string;
   readonly agentKey?: string;
+  /** 能力摘要（09 §4：员工 Selector 展示"可处理什么"，非函数列表）。 */
+  readonly capabilitySummary?: string | null;
 }
 
 export function AgentSelectorPopover({
@@ -217,11 +219,13 @@ export function AgentSelectorPopover({
     resourceTypes: ["agent"],
     autoFetch: !hasAgentOptions,
   });
+  // 09 §12：Web/Desktop 使用同一 Employee Catalog（resource_type=agent）。
   const agents =
     agentOptions ??
-    catalog.items.map(({ resource_id, display_name }) => ({
+    catalog.items.map(({ resource_id, display_name, description }) => ({
       id: resource_id,
       displayName: display_name,
+      capabilitySummary: description,
     }));
   const loading = hasAgentOptions ? false : catalog.loading;
   const error = hasAgentOptions ? null : catalog.error;
@@ -300,10 +304,17 @@ export function AgentSelectorPopover({
                     : "text-foreground hover:bg-foreground/[0.03] hover:shadow-[inset_0_0_0_1px_rgba(15,23,42,0.035)]",
                 )}
               >
-                <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground shadow-[0_1px_2px_rgba(15,23,42,0.12)]">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground shadow-[0_1px_2px_rgba(15,23,42,0.12)]">
                   {agent.displayName.charAt(0)}
                 </span>
-                <span className="flex-1 truncate">{agent.displayName}</span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate">{agent.displayName}</span>
+                  {agent.capabilitySummary && (
+                    <span className="truncate text-[11px] leading-tight text-muted-foreground">
+                      {agent.capabilitySummary}
+                    </span>
+                  )}
+                </span>
                 {active && (
                   <Check
                     className="size-3.5 stroke-[1.8] text-muted-foreground"

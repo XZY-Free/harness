@@ -1,7 +1,6 @@
 "use client";
 
 import { clearStoredThreadDraft } from "@/components/hooks/use-thread-draft";
-import type { AgentOption } from "@/components/thread/input/input-popovers";
 import { NewThreadPage } from "@/components/thread/new-thread-page";
 import { DesktopSidebar } from "@/components/thread/sidebar/desktop-sidebar";
 import { SidebarProvider } from "@/components/thread/sidebar/sidebar-context";
@@ -56,8 +55,6 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
     id: thread.id,
     title: thread.title,
   }));
-  // 线程不再绑定 Agent，shell 不再返回 agents。
-  const agents: AgentOption[] = [];
 
   const submitNewThread = async (submission: ClientNewThreadSubmission): Promise<boolean> => {
     setError(null);
@@ -90,7 +87,6 @@ export function WebThreadShell({ threadId }: { readonly threadId: string | null 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {activeThreadId === null ? (
             <NewThreadPage
-              agents={agents}
               defaultModelRef={shell.default_model_ref}
               error={error}
               onSubmit={submitNewThread}

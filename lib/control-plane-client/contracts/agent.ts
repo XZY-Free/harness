@@ -219,3 +219,49 @@ export interface AgentDescriptorSnapshotListResponse {
   items: AgentDescriptorSnapshotDTO[];
   total: number;
 }
+
+// ─── AgentDescriptorSnapshot（09 External Contract 展示） ───
+
+/** Capability Manifest 项（任务能力描述，非函数列表）。 */
+export interface AgentCapabilityDTO {
+  capability_key: string;
+  display_name?: string | null;
+  description?: string | null;
+  tags?: string[] | null;
+  examples?: string[] | null;
+}
+
+/** Invocation Context Contract 项（context kind + purpose + 来源）。 */
+export interface AgentContextContractItemDTO {
+  context_kind: string;
+  purpose?: string | null;
+  declaration_source?: string | null;
+}
+
+/** AgentDescriptorSnapshot 摘要 + 合同投影（09 §1 External Contract）。 */
+export interface AgentDescriptorSnapshotDTO {
+  id: string;
+  agent_id: string;
+  descriptor_kind: string;
+  protocol_type: string;
+  protocol_contract_revision: string;
+  provider_descriptor_digest: string;
+  capability_manifest_digest: string;
+  invocation_context_contract_digest: string;
+  normalized_capability_manifest: { capabilities?: AgentCapabilityDTO[] } & Record<string, unknown>;
+  invocation_context_contract: {
+    required?: AgentContextContractItemDTO[];
+    preferred?: AgentContextContractItemDTO[];
+    accepted?: AgentContextContractItemDTO[];
+  } & Record<string, unknown>;
+  contract_section_provenance: Record<string, string>;
+  provider_declared_revision_ref: string | null;
+  captured_at: string;
+  created_by: string;
+}
+
+/** Agent Descriptor Snapshot 列表响应。 */
+export interface AgentDescriptorListResponse {
+  items: AgentDescriptorSnapshotDTO[];
+  total: number;
+}

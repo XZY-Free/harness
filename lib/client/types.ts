@@ -45,6 +45,11 @@ export interface ClientThreadShellResponse {
 export interface ClientNewThreadSubmission {
   readonly text: string;
   readonly modelRef: string | null;
+  /**
+   * 员工显式选择的 Agent id（09 §9：用户选择只影响下一 Invocation，不写 Thread 主 Agent）。
+   * null/undefined = 不带 agent_selection，由基础 Harness Route 正常发送。
+   */
+  readonly agentId?: string | null;
 }
 
 // ─── Item ────────────────────────────────────────────────────

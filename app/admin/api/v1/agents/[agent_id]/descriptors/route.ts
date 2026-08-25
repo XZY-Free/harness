@@ -447,6 +447,11 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     provider_descriptor_digest: s.providerDescriptorDigest,
     capability_manifest_digest: s.capabilityManifestDigest,
     invocation_context_contract_digest: s.invocationContextContractDigest,
+    // 09 §4/§5：管理端展示 Capability Manifest 与 Invocation Context Contract 原文投影。
+    normalized_capability_manifest: s.normalizedCapabilityManifest,
+    invocation_context_contract: s.invocationContextContract,
+    // 09 §5：declaration source（operator_declared 必须标"管理员登记"）。
+    contract_section_provenance: s.contractSectionProvenance,
     provider_declared_revision_ref: s.providerDeclaredRevisionRef,
     captured_at: s.capturedAt.toISOString(),
     created_by: s.createdBy,

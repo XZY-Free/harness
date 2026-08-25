@@ -9,7 +9,8 @@ import { ThreadInput } from "./thread-input";
 import { ThreadTimeline } from "./thread-timeline";
 
 interface NewThreadPageProps {
-  readonly agents: readonly AgentOption[];
+  /** Agent 目录；缺省时 Selector 自行拉取同一 Employee Catalog（09 §12）。 */
+  readonly agents?: readonly AgentOption[];
   /** 平台默认模型（shell.default_model_ref）；用于未显式选择时的即时展示。 */
   readonly defaultModelRef?: string;
   readonly error?: string | null;
@@ -29,7 +30,7 @@ export function NewThreadPage({
   const [modelRef, setModelRef] = useState<string | null>(null);
 
   useEffect(() => {
-    if (agentId && !agents.some((agent) => agent.id === agentId)) setAgentId(null);
+    if (agentId && agents && !agents.some((agent) => agent.id === agentId)) setAgentId(null);
   }, [agentId, agents]);
 
   return (
@@ -67,7 +68,7 @@ export function NewThreadPage({
         defaultModelRef={defaultModelRef}
         onAgentChange={setAgentId}
         onModelChange={setModelRef}
-        onSubmitText={(text) => onSubmit({ text, modelRef })}
+        onSubmitText={(text) => onSubmit({ text, modelRef, agentId })}
       />
     </div>
   );
