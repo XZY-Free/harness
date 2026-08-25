@@ -62,6 +62,16 @@ export const TURN_TRIGGER_TYPES = [
 ] as const;
 export type TurnTriggerType = (typeof TURN_TRIGGER_TYPES)[number];
 
+// ─── Agent Selection Mode ───────────────────────────────────
+
+/**
+ * Per-Invocation Agent Selection mode（05 §1）。
+ * 第一阶段只支持 required：员工显式选择 Agent，无 eligible route 必须失败，
+ * 不 fallback 到 base route。不实现 preferred / 自动选择 / default Agent。
+ */
+export const AGENT_SELECTION_MODES = ["required"] as const;
+export type AgentSelectionMode = (typeof AGENT_SELECTION_MODES)[number];
+
 // ─── Turn State ─────────────────────────────────────────────
 
 /**
@@ -298,6 +308,15 @@ export const turnTable = mysqlTable(
     startedAt: datetime("startedAt", { mode: "date", fsp: 3 }),
     waitingAt: datetime("waitingAt", { mode: "date", fsp: 3 }),
     finishedAt: datetime("finishedAt", { mode: "date", fsp: 3 }),
+    /**
+     * Per-Invocation Agent Selection（05 §1/§2）：本 Turn 的请求 Agent 事实。
+     * 第一阶段只支持 mode=required（不实现 preferred ranking / LLM 自动选择 /
+     * Thread default Agent / organization default Agent）。
+     * requestedAgentId 为 null = 无 selection → 基础 Harness Route（05 §11）。
+     */
+    requestedAgentId: varchar("requestedAgentId", { length: 36 }),
+    /** Selection mode（AGENTS_SELECTION_MODES）；null = 无 selection。 */
+    agentSelectionMode: varchar("agentSelectionMode", { length: 32 }),
     /** 状态并发更新版本号。 */
     versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
   },

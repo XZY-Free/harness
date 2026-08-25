@@ -1,6 +1,7 @@
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { getThreadById } from "@/lib/conversations/thread-queries";
+import { getTurnById } from "@/lib/conversations/turn-queries";
 import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { logger } from "@/lib/logger";
@@ -94,12 +95,20 @@ export async function dispatchEmployeeTurn(params: {
     throw new Error(`Turn 调度失败：会话不存在 (${params.threadId})`);
   }
 
+  // Per-Invocation Agent Selection（05 §2/§3）：requestedAgentId 权威来自 Turn 行，
+  // 不是 caller 自报；dispatchEmployeeTurn 调用方无需重复传 agentConstraint。
+  const turn = await getTurnById(params.tenantId, params.turnId);
+  if (!turn) {
+    throw new Error(`Turn 调度失败：Turn 不存在 (${params.turnId})`);
+  }
+  const requestedAgentId = turn.requestedAgentId ?? params.agentConstraint ?? null;
+
   // ─── 热路径：查询正式 RouteResolver ──────────────────────────
   const routeOutcome = await resolveRoute({
     tenantId: params.tenantId,
-    // 线程不再绑定 Agent，默认按基础 Harness Route 解析。
-    // 调用方显式传 agentConstraint 时按 Agent 约束解析，这是长期正式能力。
-    agentConstraint: params.agentConstraint ?? null,
+    // 线程不绑定 Agent：Turn 无 selection → 基础 Harness Route（05 §11）；
+    // Turn 带 required selection → Agent 约束解析（05 §3）。
+    agentConstraint: requestedAgentId,
     routeScopeKey: "default",
     businessKey: { jobId: `employee-turn:${thread.id}` },
     threadDefaultModelRef: thread.defaultModelRef,
@@ -199,7 +208,7 @@ export async function dispatchEmployeeTurn(params: {
     tenantId: params.tenantId,
     turnId: params.turnId,
     selectedModelRef: params.modelRef,
-    agentConstraint: params.agentConstraint ?? null,
+    agentConstraint: requestedAgentId,
     executionSubject: params.executionSubject,
     runtimeClient: transport,
     runtimeEndpointResolver: async (binding) => {

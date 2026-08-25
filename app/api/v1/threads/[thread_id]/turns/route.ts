@@ -30,6 +30,7 @@ import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
   apiSuccess,
   getRequestId,
   resourceNotFound,
@@ -70,6 +71,8 @@ interface CreateTurnBody {
   input: TurnInput;
   selected_model?: string;
   workspace_attachment_ids?: string[];
+  /** Per-Invocation Agent Selection（05 §1）：第一阶段只支持 mode=required。 */
+  agent_selection?: { mode: "required"; agent_id: string };
 }
 
 function validateBody(body: unknown): body is CreateTurnBody {
@@ -85,6 +88,14 @@ function validateBody(body: unknown): body is CreateTurnBody {
     for (const id of b.workspace_attachment_ids) {
       if (typeof id !== "string") return false;
     }
+  }
+  // agent_selection：省略 = 无 selection（基础 Harness Route，05 §11）；
+  // 提供时 mode 必须为 "required" 且 agent_id 非空（第一阶段冻结，05 §1）。
+  if (b.agent_selection !== undefined && b.agent_selection !== null) {
+    if (!b.agent_selection || typeof b.agent_selection !== "object") return false;
+    const selection = b.agent_selection as Record<string, unknown>;
+    if (selection.mode !== "required") return false;
+    if (typeof selection.agent_id !== "string" || selection.agent_id.length === 0) return false;
   }
   return true;
 }
@@ -177,6 +188,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         client_message_id: idempotencyKey,
       },
       actorId: principal.userIdentityId,
+      agentSelection: body.agent_selection
+        ? { mode: "required", agentId: body.agent_selection.agent_id }
+        : null,
       idempotencyKey,
       correlationId: requestId,
     });
@@ -216,6 +230,17 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       },
     });
     if (!dispatch.dispatched) {
+      // required Agent 无 eligible route 必须失败，不 fallback 到 base route（05 §3）。
+      if (body.agent_selection) {
+        return apiError(
+          "BUSINESS_CONSTRAINT_VIOLATION",
+          `agent_selection.required 无 eligible route（agentId=${body.agent_selection.agent_id}）`,
+          {
+            requestId,
+            details: { agent_id: body.agent_selection.agent_id, mode: "required" },
+          },
+        );
+      }
       throw new Error(`Turn 调度未启动（turnId=${result.turn.id}）`);
     }
 

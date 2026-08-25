@@ -103,6 +103,11 @@ export async function acceptUserMessageTurn(params: {
   ownerUserId: string;
   content: UserMessageContent;
   triggerRef?: string;
+  /**
+   * Per-Invocation Agent Selection（05 §1）：mode=required + stable Agent.id。
+   * 省略 = 无 selection → 基础 Harness Route（05 §11）。
+   */
+  agentSelection?: { mode: "required"; agentId: string } | null;
   actorId: string;
   idempotencyKey?: string;
   correlationId?: string;
@@ -168,6 +173,8 @@ export async function acceptUserMessageTurn(params: {
       triggerRef: params.triggerRef ?? null,
       triggerItemId: itemId,
       turnState: "accepted",
+      requestedAgentId: params.agentSelection?.agentId ?? null,
+      agentSelectionMode: params.agentSelection?.mode ?? null,
       acceptedAt: now,
       versionNo: 1,
     });
@@ -189,6 +196,14 @@ export async function acceptUserMessageTurn(params: {
         turn_sequence: turnSequence,
         trigger_type: "user_message",
         trigger_item_id: itemId,
+        ...(params.agentSelection
+          ? {
+              agent_selection: {
+                mode: params.agentSelection.mode,
+                agent_id: params.agentSelection.agentId,
+              },
+            }
+          : {}),
       },
       correlationId: params.correlationId ?? null,
       occurredAt: now,
