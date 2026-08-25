@@ -109,25 +109,32 @@ export function assertExecutionBindingEvidence(
   // 跳过 Agent 维度校验（禁止伪装 passed、禁止空串假证据）；Runtime 维度始终校验。
   const isBaseRoute = evidence.agentArtifactId === null;
 
+  // Runtime evidence all-or-nothing（03 §3）：hosted 要求 artifact 全集；
+  // external_endpoint 无 Runtime Artifact（不伪造），attestation 集合为空。
+  const isExternalRuntime = evidence.runtimeEvidenceKind === "external_endpoint";
   const identifiers = [
     evidence.routeRevisionId,
     evidence.routeActivationId,
-    evidence.runtimeArtifactId,
     evidence.runtimePublicationRecordId,
     evidence.conformanceRunId,
   ];
   if (identifiers.some((value) => !value)) {
     throw new ExecutionBindingEvidenceError("缺少 Route、Runtime Publication 或 Conformance 引用");
   }
+  if (!isExternalRuntime && !evidence.runtimeArtifactId) {
+    throw new ExecutionBindingEvidenceError("hosted_artifact 证据缺少 Runtime Artifact 引用");
+  }
   const digests = [
     evidence.routeContentDigest,
-    evidence.runtimeArtifactDigest,
     evidence.runtimeConfigDigest,
     evidence.capabilityManifestDigest,
     evidence.resolutionInputDigest,
   ];
   if (digests.some((value) => !SHA256.test(value))) {
     throw new ExecutionBindingEvidenceError("Digest 格式非法");
+  }
+  if (!isExternalRuntime && !SHA256.test(evidence.runtimeArtifactDigest as string)) {
+    throw new ExecutionBindingEvidenceError("Runtime Artifact Digest 格式非法");
   }
   if (!isBaseRoute) {
     if (!evidence.agentArtifactId || !evidence.agentPublicationRecordId) {
@@ -139,8 +146,32 @@ export function assertExecutionBindingEvidence(
     if (!validIds(evidence.agentAttestationIds as string[])) {
       throw new ExecutionBindingEvidenceError("Agent Attestation 引用不能为空或重复");
     }
+    // Agent evidence all-or-nothing（05 §5）：Descriptor 证据三元组缺一不可。
+    if (
+      !evidence.agentDescriptorSnapshotId ||
+      !SHA256.test(evidence.agentProviderDescriptorDigest as string) ||
+      !SHA256.test(evidence.agentInvocationContextContractDigest as string)
+    ) {
+      throw new ExecutionBindingEvidenceError(
+        "Agent Descriptor 证据不完整（Snapshot/provider digest/context contract digest 缺一不可）",
+      );
+    }
+  } else if (
+    evidence.agentDescriptorSnapshotId !== null ||
+    evidence.agentProviderDescriptorDigest !== null ||
+    evidence.agentInvocationContextContractDigest !== null
+  ) {
+    throw new ExecutionBindingEvidenceError(
+      "基础 Harness Route 不允许携带 Agent Descriptor 证据（§18 not_applicable，禁止伪装）",
+    );
   }
-  if (!validIds(evidence.runtimeAttestationIds)) {
+  if (isExternalRuntime) {
+    if (evidence.runtimeAttestationIds.length > 0) {
+      throw new ExecutionBindingEvidenceError(
+        "external_endpoint 证据不允许携带 Runtime Artifact Attestation（不得伪造 Runtime Artifact）",
+      );
+    }
+  } else if (!validIds(evidence.runtimeAttestationIds)) {
     throw new ExecutionBindingEvidenceError("Runtime Attestation 引用不能为空或重复");
   }
 }

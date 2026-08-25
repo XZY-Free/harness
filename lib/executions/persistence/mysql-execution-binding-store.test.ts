@@ -44,6 +44,10 @@ const bindingRow: BindingRow = {
   runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
   runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
   runtimeTargetDigest: `sha256:${"t".repeat(64)}`,
+  runtimeEvidenceKind: "hosted_artifact" as const,
+  agentDescriptorSnapshotId: "agent-descriptor-snapshot-1",
+  agentProviderDescriptorDigest: `sha256:${"p".repeat(64)}`,
+  agentInvocationContextContractDigest: `sha256:${"c".repeat(64)}`,
   capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
   agentAttestationIds: ["agent-attestation-1"],
   runtimeAttestationIds: ["runtime-attestation-1"],
@@ -311,7 +315,9 @@ describe("ExecutionBinding authority final validation", () => {
       firstForUpdateLockIndex(source, "artifactAttestation"),
     );
     expect(source).toContain("artifactId: evidence.agentArtifactId");
-    expect(source).toContain("artifactId: evidence.runtimeArtifactId");
+    // Runtime Artifact 锁校验仅 hosted_artifact 进入（external_endpoint 无 Artifact，03 §3）。
+    expect(source).toContain('evidence.runtimeEvidenceKind === "hosted_artifact"');
+    expect(source).toContain("const runtimeArtifactId = evidence.runtimeArtifactId as string;");
     expect(source).not.toContain("artifactId: attestationKey.artifactId");
   });
 
@@ -471,6 +477,10 @@ describe("ExecutionBinding authority final validation", () => {
       runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
       runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
       runtimeTargetDigest: `sha256:${"t".repeat(64)}`,
+      runtimeEvidenceKind: "hosted_artifact" as const,
+      agentDescriptorSnapshotId: "agent-descriptor-snapshot-1",
+      agentProviderDescriptorDigest: `sha256:${"p".repeat(64)}`,
+      agentInvocationContextContractDigest: `sha256:${"c".repeat(64)}`,
       capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
       agentPublicationRecordId: "agent-publication-1",
       runtimePublicationRecordId: "runtime-publication-1",
@@ -495,6 +505,8 @@ describe("ExecutionBinding authority final validation", () => {
       { capabilityCompatibilityDigest: `sha256:${"9".repeat(64)}` },
       { agentAttestationIds: ["agent-attestation-1", "agent-attestation-2"] },
       { runtimeAttestationIds: [] },
+      { agentDescriptorSnapshotId: "drifted-snapshot" },
+      { runtimeEvidenceKind: "external_endpoint" as const },
     ]) {
       expect(() =>
         validateFrozenProjectionAuthority({ projection: { ...projection, ...changed }, expected }),

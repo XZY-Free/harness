@@ -19,10 +19,15 @@ export interface SerializableExecutionBinding {
   routeContentDigest: string;
   /** null = 基础 Harness Route（Agent Evidence not_applicable，§18）。 */
   agentArtifactId: string | null;
-  runtimeArtifactId: string;
+  runtimeArtifactId: string | null;
   /** null = 基础 Harness Route（§18 not_applicable）。 */
   agentArtifactDigest: string | null;
-  runtimeArtifactDigest: string;
+  runtimeArtifactDigest: string | null;
+  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
+  runtimeTargetDigest: string;
+  agentDescriptorSnapshotId: string | null;
+  agentProviderDescriptorDigest: string | null;
+  agentInvocationContextContractDigest: string | null;
   runtimeConfigDigest: string;
   capabilityManifestDigest: string;
   /** null = 基础 Harness Route（§18 not_applicable）。 */
@@ -62,6 +67,11 @@ export function serializeExecutionBinding(
     runtime_artifact_id: binding.runtimeArtifactId,
     agent_artifact_digest: binding.agentArtifactDigest,
     runtime_artifact_digest: binding.runtimeArtifactDigest,
+    runtime_evidence_kind: binding.runtimeEvidenceKind,
+    runtime_target_digest: binding.runtimeTargetDigest,
+    agent_descriptor_snapshot_id: binding.agentDescriptorSnapshotId,
+    agent_provider_descriptor_digest: binding.agentProviderDescriptorDigest,
+    agent_invocation_context_contract_digest: binding.agentInvocationContextContractDigest,
     runtime_config_digest: binding.runtimeConfigDigest,
     capability_manifest_digest: binding.capabilityManifestDigest,
     agent_attestation_ids: binding.agentAttestationIds,

@@ -9,9 +9,9 @@ describe("ExecutionBinding Attestation JSON 基线约束", () => {
     const schema = projectFile("lib/persistence/schema/executions.ts");
     const baseline = projectFile("drizzle/0000_initial_schema.sql");
 
-    // Runtime 维度（Agent Route 必填）仍为非空 JSON Array。
+    // Runtime 维度（hosted 必填非空 JSON Array；external_endpoint 允许空数组，03 §3）。
     expect(schema).toContain(
-      `JSON_TYPE(\${t.runtimeAttestationIds}) = 'ARRAY' AND JSON_LENGTH(\${t.runtimeAttestationIds}) >= 1`,
+      `JSON_TYPE(\${t.runtimeAttestationIds}) = 'ARRAY' AND (JSON_LENGTH(\${t.runtimeAttestationIds}) >= 1 OR \${t.runtimeEvidenceKind} = 'external_endpoint')`,
     );
     expect(baseline).toContain(
       "JSON_TYPE(`runtimeAttestationIds`) = 'ARRAY' AND JSON_LENGTH(`runtimeAttestationIds`) >= 1",
@@ -36,10 +36,14 @@ describe("ExecutionBinding Attestation JSON 基线约束", () => {
     expect(schema).not.toContain(
       `agentArtifactId: varchar("agentArtifactId", { length: 36 }).notNull()`,
     );
-    // Runtime 维度必填。
-    expect(schema).toContain(
+    // Runtime 维度证据种类分派（03 §3）：hosted_artifact 必填 artifact；external_endpoint 无 artifact（可空）。
+    expect(schema).toContain(`runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 })`);
+    expect(schema).not.toContain(
       `runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }).notNull()`,
     );
+    expect(schema).toContain(`runtimeEvidenceKind: mysqlEnum("runtimeEvidenceKind", [`);
+    expect(schema).toContain('"hosted_artifact",');
+    expect(schema).toContain('"external_endpoint",');
 
     // 基线 0000 为历史原始 schema，两列均 NOT NULL（迁移 0003 才放宽 Agent 维度）。
     for (const column of ["agentArtifactId", "runtimeArtifactId"] as const) {

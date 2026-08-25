@@ -30,9 +30,15 @@ export interface ExecutionBindingDTO {
   agent_artifact_digest: string | null;
   agent_attestation_ids: string[] | null;
   agent_publication_record_id: string | null;
-  /** 冻结的 Runtime 证据。 */
-  runtime_artifact_id: string;
-  runtime_artifact_digest: string;
+  /** 冻结的 Agent Descriptor 证据。null = 基础 Harness Route（§18 not_applicable — 05 §5）。 */
+  agent_descriptor_snapshot_id: string | null;
+  agent_provider_descriptor_digest: string | null;
+  agent_invocation_context_contract_digest: string | null;
+  /** 冻结的 Runtime 证据。runtime_artifact_* null = external_endpoint（03 §3）。 */
+  runtime_artifact_id: string | null;
+  runtime_artifact_digest: string | null;
+  runtime_evidence_kind: "hosted_artifact" | "external_endpoint";
+  runtime_target_digest: string;
   runtime_config_digest: string;
   runtime_attestation_ids: string[];
   runtime_publication_record_id: string;

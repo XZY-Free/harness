@@ -142,12 +142,19 @@ export async function validateBindingEligibility(
       return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
     }
     // Runtime Attestation IDs 必须与 Publication 绑定的完整集合精确相等。
-    if (
-      !exactEvidenceIdsEqual(
-        fe.runtimeAttestationIds,
-        snapshot.runtimePublication?.attestationIds ?? [],
-      )
-    ) {
+    // external_endpoint Runtime 无 Artifact Attestation（03 §3，不伪造）→ 空集合合法；
+    // hosted_artifact 仍要求非空全集。
+    const externalRuntime = snapshot.runtimeEvidenceKind === "external_endpoint";
+    const runtimeAttestationsExact = externalRuntime
+      ? exactEvidenceIdsAllowEmpty(
+          fe.runtimeAttestationIds,
+          snapshot.runtimePublication?.attestationIds ?? [],
+        )
+      : exactEvidenceIdsEqual(
+          fe.runtimeAttestationIds,
+          snapshot.runtimePublication?.attestationIds ?? [],
+        );
+    if (!runtimeAttestationsExact) {
       return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
     }
     // Agent 维度仅 Agent Route 校验（§7.4）；base route 为 not_applicable（§18），跳过。
@@ -187,6 +194,16 @@ export function exactEvidenceIdsEqual(frozenIds: string[], currentIds: string[])
   const frozen = [...frozenIds].sort();
   const current = [...currentIds].sort();
   return frozen.every((id, index) => id === current[index]);
+}
+
+/**
+ * external_endpoint 变体：Runtime Attestation 集合允许为空（无 Artifact，03 §3），
+ * 但非空时仍要求元素非空且唯一，并与当前权威精确相等。
+ */
+export function exactEvidenceIdsAllowEmpty(frozenIds: string[], currentIds: string[]): boolean {
+  if (frozenIds.length === 0 && currentIds.length === 0) return true;
+  if (!validEvidenceIds(frozenIds) || !validEvidenceIds(currentIds)) return false;
+  return exactEvidenceIdsEqual(frozenIds, currentIds);
 }
 
 function validEvidenceIds(ids: string[]): boolean {
