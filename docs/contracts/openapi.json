@@ -4412,6 +4412,10 @@
                     "type": "object",
                     "additionalProperties": true,
                     "description": "required 与 optional 分开；不是 Runtime 实际能力"
+                  },
+                  "agent_descriptor_snapshot_id": {
+                    "type": "string",
+                    "description": "绑定的不可变 AgentDescriptorSnapshot id（发布权威外部合同；Batch 2 强约束）"
                   }
                 },
                 "required": [
@@ -4542,12 +4546,11 @@
                   },
                   "artifact_attestation_id": {
                     "type": "string",
-                    "description": "已验证且 digest 与 Revision 一致的供应链证明"
+                    "description": "可选供应链证明；Batch 2 起发布权威是绑定的 AgentDescriptorSnapshot"
                   }
                 },
                 "required": [
-                  "release_notes",
-                  "artifact_attestation_id"
+                  "release_notes"
                 ],
                 "additionalProperties": false
               }

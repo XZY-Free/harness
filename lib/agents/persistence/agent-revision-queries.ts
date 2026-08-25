@@ -37,6 +37,8 @@ export interface CreateDraftRevisionParams {
   sourceRevision: string;
   instructionHash: string;
   agentArtifactRef: string;
+  /** 绑定的不可变 AgentDescriptorSnapshot id（Batch 2 正式发布强约束；可空以兼容旧 Revision）。 */
+  agentDescriptorSnapshotId?: string | null;
   modelPolicyJson: unknown;
   permissionRequirementsJson: unknown;
   delegationPolicyJson: unknown;
@@ -63,6 +65,7 @@ export async function createDraftRevision(
     sourceRevision: params.sourceRevision,
     instructionHash: params.instructionHash,
     agentArtifactRef: params.agentArtifactRef,
+    agentDescriptorSnapshotId: params.agentDescriptorSnapshotId ?? null,
     modelPolicyJson: params.modelPolicyJson,
     permissionRequirementsJson: params.permissionRequirementsJson,
     delegationPolicyJson: params.delegationPolicyJson,

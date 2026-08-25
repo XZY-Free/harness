@@ -35,6 +35,7 @@ import {
   createDraftRevision,
   getRevisionsByAgent,
 } from "@/lib/agents/persistence/agent-revision-queries";
+import { mysqlAgentDescriptorStore } from "@/lib/agents/persistence/mysql-agent-descriptor-store";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -74,6 +75,8 @@ interface CreateRevisionBody {
   source: { source_type: "code" | "agent_yaml" | "veadk"; source_revision: string };
   artifact_ref: string;
   instruction_hash: string;
+  /** 绑定的不可变 AgentDescriptorSnapshot id（Batch 2 正式发布强约束；可空以兼容旧 Revision）。 */
+  agent_descriptor_snapshot_id?: string;
   model_policy: Record<string, unknown>;
   permission_requirements: Record<string, unknown>;
   delegation_policy: Record<string, unknown>;
@@ -90,6 +93,11 @@ function validateBody(body: unknown): body is CreateRevisionBody {
   if (typeof source.source_revision !== "string" || !source.source_revision.trim()) return false;
   if (typeof b.artifact_ref !== "string" || !b.artifact_ref.trim()) return false;
   if (typeof b.instruction_hash !== "string" || b.instruction_hash.length === 0) return false;
+  if (
+    b.agent_descriptor_snapshot_id !== undefined &&
+    (typeof b.agent_descriptor_snapshot_id !== "string" || !b.agent_descriptor_snapshot_id.trim())
+  )
+    return false;
   if (!b.model_policy || typeof b.model_policy !== "object" || Array.isArray(b.model_policy))
     return false;
   if (
@@ -145,6 +153,7 @@ function projectRevision(revision: AgentRevision): Record<string, unknown> {
     revision_no: revision.revisionNo,
     revision_state: revision.revisionState,
     source_revision: revision.sourceRevision,
+    agent_descriptor_snapshot_id: revision.agentDescriptorSnapshotId ?? null,
     etag: `${AGENT_REVISION_ETAG_PREFIX}${revision.revisionNo}`,
   };
 }
@@ -188,6 +197,19 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
     return schemaInvalidTable(requestId, "请求体非法：缺少必填字段或字段类型错误");
+  }
+
+  // 5.5 校验绑定的 AgentDescriptorSnapshot 存在且属于同一 Agent（跨 Agent 引用 → 400）
+  if (body.agent_descriptor_snapshot_id) {
+    const boundSnapshot = await mysqlAgentDescriptorStore.transaction((session) =>
+      session.findSnapshotById(body.agent_descriptor_snapshot_id as string),
+    );
+    if (!boundSnapshot || boundSnapshot.agentId !== agentId) {
+      return schemaInvalidTable(
+        requestId,
+        `AgentDescriptorSnapshot 不存在或不属于该 Agent: ${body.agent_descriptor_snapshot_id}`,
+      );
+    }
   }
 
   // 6. 计算请求 hash + 幂等守卫
@@ -241,6 +263,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       sourceRevision: body.source.source_revision,
       instructionHash: body.instruction_hash,
       agentArtifactRef: body.artifact_ref,
+      agentDescriptorSnapshotId: body.agent_descriptor_snapshot_id ?? null,
       modelPolicyJson: body.model_policy,
       permissionRequirementsJson: body.permission_requirements,
       delegationPolicyJson: body.delegation_policy,
@@ -260,6 +283,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         revision_state: revision.revisionState,
         instruction_hash: revision.instructionHash,
         artifact_ref: revision.agentArtifactRef,
+        agent_descriptor_snapshot_id: revision.agentDescriptorSnapshotId ?? null,
       },
       reason: `创建 AgentRevision (draft, revisionNo=${revision.revisionNo})`,
       requestId,

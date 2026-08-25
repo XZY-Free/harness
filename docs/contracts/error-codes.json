@@ -17,6 +17,10 @@
       "http": 422,
       "retryable": false
     },
+    "AGENT_DESCRIPTOR_SNAPSHOT_MISSING": {
+      "http": 409,
+      "retryable": false
+    },
     "ARTIFACT_ATTESTATION_FAILED": {
       "http": 422,
       "retryable": false

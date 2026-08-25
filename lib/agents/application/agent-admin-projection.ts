@@ -127,6 +127,7 @@ export async function loadAgentRevisionAdminProjection(
     artifact_id: revision.artifactId,
     artifact_digest: revision.artifactDigest,
     artifact_ref: revision.agentArtifactRef,
+    agent_descriptor_snapshot_id: revision.agentDescriptorSnapshotId ?? null,
     attestation_ids: verifiedActiveAttestationIds,
     publication_record_id: publication?.id ?? null,
     withdrawal_record_id: withdrawal?.id ?? null,

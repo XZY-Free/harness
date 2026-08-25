@@ -1161,6 +1161,7 @@ Runtime 收到 pending 后暂停相关行动，不能在本地自造确认结果
 | permission_requirements | Body | object | 是 | 权限要求 |
 | delegation_policy | Body | object | 是 | 委派范围 |
 | agent_interface_requirements | Body | object | 是 | required 与 optional 分开；不是 Runtime 实际能力 |
+| agent_descriptor_snapshot_id | Body | string | 否 | 绑定的不可变 AgentDescriptorSnapshot id（发布权威外部合同；Batch 2 强约束） |
 
 ```bash
 curl -X POST 'https://snow.example.com/admin/api/v1/agents/agt_finance/revisions' \
@@ -1174,7 +1175,8 @@ curl -X POST 'https://snow.example.com/admin/api/v1/agents/agt_finance/revisions
     "model_policy":{"default":"doubao-pro"},
     "permission_requirements":{"tool_risk_max":"high_with_confirmation"},
     "delegation_policy":{"allowed_agent_ids":["agt_chart"]},
-    "agent_interface_requirements":{"required":["event_stream","dynamic_tools"],"optional":["steer"]}
+    "agent_interface_requirements":{"required":["event_stream","dynamic_tools"],"optional":["steer"]},
+    "agent_descriptor_snapshot_id":"ads_7f9c1"
   }'
 ```
 
@@ -1202,7 +1204,7 @@ Skill、Tool 和 Knowledge 不作为 AgentRevision 的固定内容清单提交�
 | If-Match | Header | string | 是 | Revision ETag |
 | release_notes | Body | string | 是 | 发布说明 |
 | evidence_refs | Body | array | 否 | CI、评测和安全审核引用 |
-| artifact_attestation_id | Body | string | 是 | 已验证且 digest 与 Revision 一致的供应链证明 |
+| artifact_attestation_id | Body | string | 否 | 可选供应链证明；Batch 2 起发布权威是绑定的 AgentDescriptorSnapshot |
 
 ```bash
 curl -X POST 'https://snow.example.com/admin/api/v1/agent-revisions/agr_19:publish' \

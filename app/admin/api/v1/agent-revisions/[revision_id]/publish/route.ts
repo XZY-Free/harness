@@ -10,6 +10,7 @@ import {
 } from "@/lib/admin/route-helpers";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import {
+  AgentPublicationDescriptorSnapshotMissingError,
   AgentPublicationPrerequisiteError,
   AgentPublicationVersionConflictError,
   AgentRevisionPublicationNotFoundError,
@@ -90,7 +91,8 @@ interface RouteContext {
 interface PublishBody {
   release_notes: string;
   evidence_refs?: unknown[];
-  artifact_attestation_id: string;
+  /** 可选 source Attestation id（Batch 2 不再强制；发布权威是 AgentDescriptorSnapshot 证据）。 */
+  artifact_attestation_id?: string | null;
 }
 
 /** 校验请求体。 */
@@ -99,7 +101,11 @@ function validateBody(body: unknown): body is PublishBody {
   const b = body as Record<string, unknown>;
   if (typeof b.release_notes !== "string") return false;
   if (b.evidence_refs !== undefined && !Array.isArray(b.evidence_refs)) return false;
-  if (typeof b.artifact_attestation_id !== "string" || b.artifact_attestation_id.length === 0)
+  if (
+    b.artifact_attestation_id !== undefined &&
+    b.artifact_attestation_id !== null &&
+    (typeof b.artifact_attestation_id !== "string" || b.artifact_attestation_id.length === 0)
+  )
     return false;
   return true;
 }
@@ -188,10 +194,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   // 8. 解析请求体
   const body = await request.json().catch(() => null);
   if (!validateBody(body)) {
-    return schemaInvalidTable(
-      requestId,
-      "请求体非法：缺少 release_notes 或 artifact_attestation_id",
-    );
+    return schemaInvalidTable(requestId, "请求体非法：缺少必填字段或字段类型错误");
   }
 
   // 9. 计算请求 hash + 幂等守卫
@@ -245,7 +248,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       tenantId: principal.tenantId,
       revisionId,
       agentExpectedVersionNo: agent.versionNo,
-      attestationId: body.artifact_attestation_id,
+      attestationId: body.artifact_attestation_id ?? null,
       actor: actorFromAdminPrincipal(principal),
       requestId,
       idempotencyKey,
@@ -277,6 +280,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   } catch (err) {
     await failRecord(recordId);
 
+    if (err instanceof AgentPublicationDescriptorSnapshotMissingError) {
+      return apiError("AGENT_DESCRIPTOR_SNAPSHOT_MISSING", err.message, { requestId });
+    }
     if (err instanceof AgentPublicationPrerequisiteError) {
       return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }

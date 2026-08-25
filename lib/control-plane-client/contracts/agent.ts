@@ -50,6 +50,7 @@ export interface AgentRevisionSummaryDTO {
   revision_no: number;
   revision_state: AgentRevisionState;
   source_revision: string;
+  agent_descriptor_snapshot_id: string | null;
   etag: string;
 }
 
@@ -64,6 +65,8 @@ export interface AgentRevisionDTO {
   artifact_id: string | null;
   artifact_digest: string | null;
   artifact_ref: string;
+  /** 绑定的不可变 AgentDescriptorSnapshot id（Batch 2 权威外部合同来源）。 */
+  agent_descriptor_snapshot_id: string | null;
   /** 当前 Attestation 列表 — 不为 null 时表示已验证。 */
   attestation_ids: string[];
   /** 当前 Publication Record — 不为 null 时表示已发布。 */
@@ -92,6 +95,8 @@ export interface CreateAgentRevisionRequest {
   };
   artifact_ref: string;
   instruction_hash: string;
+  /** 绑定的不可变 AgentDescriptorSnapshot id（Batch 2 正式发布强约束；可空以兼容旧 Revision）。 */
+  agent_descriptor_snapshot_id?: string;
   model_policy: Record<string, unknown>;
   permission_requirements: Record<string, unknown>;
   delegation_policy: Record<string, unknown>;
@@ -100,7 +105,8 @@ export interface CreateAgentRevisionRequest {
 
 export interface PublishAgentRevisionRequest {
   release_notes: string;
-  artifact_attestation_id: string;
+  /** 可选 source Attestation id — Batch 2 不再强制；发布权威是 AgentDescriptorSnapshot 证据。 */
+  artifact_attestation_id?: string | null;
 }
 
 export interface PublishAgentRevisionResponse {
