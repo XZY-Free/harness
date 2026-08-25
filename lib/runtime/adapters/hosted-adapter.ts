@@ -119,7 +119,7 @@ export function createHttpEventIngressClient(params: {
 /**
  * Runtime Adapter 接口：Runtime 侧参考实现契约。
  *
- * HostedAdapter 和 VeADKAdapter 都实现此接口；
+ * HostedAdapter 实现此接口；
  * 路由层通过此接口调用 Adapter，不直接依赖具体实现。
  */
 export interface RuntimeAdapter {
@@ -535,8 +535,6 @@ export interface CreateHostedAdapterParams {
   modelFn?: (userMessage: string, context: HostedModelContext) => string | Promise<string>;
   /** 实际执行本轮的模型标识。 */
   modelRef?: string;
-  /** ref 前缀（hosted / veadk-${appId}，默认 "hosted"）。 */
-  refPrefix?: string;
 }
 
 /**
@@ -550,7 +548,7 @@ export interface CreateHostedAdapterParams {
  * @returns RuntimeAdapter 实例
  */
 export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeAdapter {
-  const refPrefix = params.refPrefix ?? "hosted";
+  const refPrefix = "hosted";
   const state: AdapterState = {
     nextSequence: 1,
     lastLoopPromise: null,
@@ -718,7 +716,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
 
     async handleResume(): Promise<ResumeResult> {
       // Hosted 参考实现：Resume 不需要额外事件（Invocation 由平台 command-dispatcher 转回 running）
-      // VeADK 映射时同样只返回 ack
+      // 映射时同样只返回 ack
       return {
         resume_state: "accepted",
         runtime_execution_ref: `${refPrefix}-exec-resume-${randomUUID()}`,
