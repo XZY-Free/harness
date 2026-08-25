@@ -65,6 +65,7 @@ import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-r
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { ensureAgentDescriptorSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-descriptor-snapshot";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { eq } from "drizzle-orm";
@@ -993,6 +994,8 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       draftRevision.id,
       "publish-artifact-content",
     );
+    // Batch 2：发布路由强制 Revision 绑定 AgentDescriptorSnapshot。
+    await ensureAgentDescriptorSnapshotBoundForRevision(draftRevision.id, tenantId);
 
     const request = buildApiRequest({
       audience: "admin",
@@ -1097,6 +1100,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       draftRevision.id,
       "concurrent-publish-content",
     );
+    await ensureAgentDescriptorSnapshotBoundForRevision(draftRevision.id, tenantId);
     const buildRequest = (idempotencyKey: string) =>
       buildApiRequest({
         audience: "admin",
@@ -1237,6 +1241,9 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       agentInterfaceRequirementsJson: { required: [], optional: [] },
       createdBy: userIdentityId,
     });
+    // Batch 2：发布权威 = 绑定 AgentDescriptorSnapshot；未绑定先走 snapshot 门禁（AGENT_DESCRIPTOR_SNAPSHOT_MISSING）。
+    // 本用例目标是校验「提供了未验证 Attestation」→ ARTIFACT_NOT_VERIFIED，故先绑定 Snapshot 越过 snapshot 门禁。
+    await ensureAgentDescriptorSnapshotBoundForRevision(draftRevision.id, tenantId);
 
     const request = buildApiRequest({
       audience: "admin",

@@ -121,6 +121,7 @@ import {
   buildDsseConformanceEnvelope,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
+import { ensureAgentDescriptorSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-descriptor-snapshot";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import {
   installTrustedHostedControlPlaneEvidenceForTest,
@@ -364,6 +365,8 @@ async function seedPublishedAgentRevision(
   }
 
   // 使用带 attestation 的正式发布服务，确保 PublicationRecord.attestationIds 非空
+  // Batch 2：发布权威 = 绑定 AgentDescriptorSnapshot；先幂等绑定（事务外），供正式命令走 snapshot 门禁。
+  await ensureAgentDescriptorSnapshotBoundForRevision(revision.id, tenantId);
   const publishAgentRevision = createPublishAgentRevision({
     store: mysqlAgentPublicationStore,
   });

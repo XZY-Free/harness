@@ -2,6 +2,7 @@ import { createPublishAgentRevision } from "@/lib/agents/application/publish-age
 import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { getAttestationById } from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import { ensureAgentDescriptorSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-descriptor-snapshot";
 
 /** 真实 MySQL 测试装配：复核正式 Attestation 命令已原子绑定 Artifact 后，通过正式应用服务发布 AgentRevision。 */
 export async function publishTrustedAgentRevisionForTest(params: {
@@ -30,6 +31,9 @@ export async function publishTrustedAgentRevisionForTest(params: {
         `期望 artifactId=${attestation.artifactId} artifactDigest=${attestation.artifactDigest}`,
     );
   }
+
+  // Batch 2：正式发布命令强制 Revision 绑定 AgentDescriptorSnapshot（权威外部合同）。
+  await ensureAgentDescriptorSnapshotBoundForRevision(params.revisionId, params.tenantId);
 
   return createPublishAgentRevision({ store: mysqlAgentPublicationStore })({
     tenantId: params.tenantId,
