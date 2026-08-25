@@ -336,6 +336,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       agentArtifactDigest: agentRevision?.artifactDigest ?? null,
       runtimeArtifactDigest: runtimeRevision?.artifactDigest ?? null,
       runtimeConfigDigest: runtimeRevision?.configHash ?? null,
+      runtimeTargetDigest: runtimeRevision?.runtimeTargetDigest ?? null,
       routeContentDigest: revision.contentDigest,
       agentPublicationRecordId: evidenceSnapshot.agentPublication?.publicationRecordId ?? null,
       runtimePublicationRecordId: evidenceSnapshot.runtimePublication?.publicationRecordId ?? null,

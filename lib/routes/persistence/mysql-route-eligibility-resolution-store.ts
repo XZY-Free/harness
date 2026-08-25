@@ -100,6 +100,7 @@ function buildControlPlaneEvidence(p: RouteEligibilityProjectionRecord): RouteCo
     !p.runtimeArtifactId ||
     !p.runtimeArtifactDigest ||
     !p.runtimeConfigDigest ||
+    !p.runtimeTargetDigest ||
     !p.runtimePublicationRecordId ||
     !p.conformanceRunId ||
     !Array.isArray(p.runtimeAttestationIds)
@@ -112,6 +113,7 @@ function buildControlPlaneEvidence(p: RouteEligibilityProjectionRecord): RouteCo
     agentArtifactDigest: p.agentArtifactDigest,
     runtimeArtifactDigest: p.runtimeArtifactDigest,
     runtimeConfigDigest: p.runtimeConfigDigest,
+    runtimeTargetDigest: p.runtimeTargetDigest,
     capabilityManifestDigest: p.capabilityCompatibilityDigest,
     agentAttestationIds: p.agentAttestationIds,
     runtimeAttestationIds: [...p.runtimeAttestationIds],

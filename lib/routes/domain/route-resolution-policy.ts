@@ -20,6 +20,8 @@ export interface RouteControlPlaneEvidence {
   agentArtifactDigest: string | null;
   runtimeArtifactDigest: string;
   runtimeConfigDigest: string;
+  /** Runtime 目标摘要 — hosted/external 统一发布证据权威（03 §6）。 */
+  runtimeTargetDigest: string;
   capabilityManifestDigest: string;
   /** null = 基础 Harness Route（§18 not_applicable；禁止伪装空数组）。 */
   agentAttestationIds: string[] | null;

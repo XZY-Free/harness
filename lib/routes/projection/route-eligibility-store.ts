@@ -46,6 +46,7 @@ export interface UpsertProjectionInput {
   agentArtifactDigest: string | null;
   runtimeArtifactDigest: string | null;
   runtimeConfigDigest: string | null;
+  runtimeTargetDigest: string | null;
   routeContentDigest: string;
   // ─── : 完整执行证据 ID ──────────────────────
   agentPublicationRecordId: string | null;

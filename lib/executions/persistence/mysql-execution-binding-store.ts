@@ -178,6 +178,7 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         agentArtifactDigest: evidence.agentArtifactDigest,
         runtimeArtifactDigest: evidence.runtimeArtifactDigest,
         runtimeConfigDigest: evidence.runtimeConfigDigest,
+        runtimeTargetDigest: evidence.runtimeTargetDigest,
         capabilityManifestDigest: evidence.capabilityManifestDigest,
         // base route 的 agentAttestationIds 为 null（§18 not_applicable），保持 null。
         agentAttestationIds: evidence.agentAttestationIds
@@ -356,7 +357,8 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
     runtimeRevision.runtimeId !== runtime.id ||
     runtimeRevision.revisionState !== "published" ||
     runtimeRevision.artifactDigest !== evidence.runtimeArtifactDigest ||
-    runtimeRevision.configHash !== evidence.runtimeConfigDigest
+    runtimeRevision.configHash !== evidence.runtimeConfigDigest ||
+    runtimeRevision.runtimeTargetDigest !== evidence.runtimeTargetDigest
   ) {
     throw evidenceError("RuntimeRevision 发布状态、Artifact 或 Config Digest 不一致");
   }
@@ -369,9 +371,15 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
 
   // H. 冻结 ConformanceRun → CaseResult（FOR UPDATE）— 精确 Run 与完整合同
   const conformanceRun = await lockAndVerifyConformance(tx, input, runtimeRevision);
+  // Batch 3：Runtime Publication 的 evidenceSetDigest 冻结了 target digest 附加证据，
+  // 重算时须与 publish-runtime-revision 的 additionalEvidence 完全一致（03 §6）。
   validateFrozenPublicationEvidenceDigest({
     publication: publications.runtimePublication,
-    additionalEvidence: { evidenceManifestDigest: conformanceRun.evidenceManifestDigest },
+    additionalEvidence: {
+      evidenceManifestDigest: conformanceRun.evidenceManifestDigest,
+      runtime_target_digest: runtimeRevision.runtimeTargetDigest,
+      runtime_evidence_kind: runtimeRevision.runtimeEvidenceKind,
+    },
   });
 
   // I. PolicyRevision → Projection（FOR UPDATE）— 最终 authority 锁与精确冻结校验（§10/§42）
@@ -556,6 +564,7 @@ async function lockAndVerifyProjection(
       agentArtifactDigest: routeEligibilityProjection.agentArtifactDigest,
       runtimeArtifactDigest: routeEligibilityProjection.runtimeArtifactDigest,
       runtimeConfigDigest: routeEligibilityProjection.runtimeConfigDigest,
+      runtimeTargetDigest: routeEligibilityProjection.runtimeTargetDigest,
       capabilityCompatibilityDigest: routeEligibilityProjection.capabilityCompatibilityDigest,
       agentPublicationRecordId: routeEligibilityProjection.agentPublicationRecordId,
       runtimePublicationRecordId: routeEligibilityProjection.runtimePublicationRecordId,
@@ -586,6 +595,7 @@ async function lockAndVerifyProjection(
       agentArtifactDigest: evidence.agentArtifactDigest,
       runtimeArtifactDigest: evidence.runtimeArtifactDigest,
       runtimeConfigDigest: evidence.runtimeConfigDigest,
+      runtimeTargetDigest: evidence.runtimeTargetDigest,
       capabilityManifestDigest: evidence.capabilityManifestDigest,
       agentPublicationRecordId: evidence.agentPublicationRecordId,
       runtimePublicationRecordId: evidence.runtimePublicationRecordId,
@@ -616,6 +626,7 @@ type FrozenProjectionRow = {
   agentArtifactDigest: string | null;
   runtimeArtifactDigest: string | null;
   runtimeConfigDigest: string | null;
+  runtimeTargetDigest: string | null;
   capabilityCompatibilityDigest: string;
   agentPublicationRecordId: string | null;
   runtimePublicationRecordId: string | null;
@@ -641,6 +652,7 @@ type FrozenProjectionExpectation = {
   agentArtifactDigest: string | null;
   runtimeArtifactDigest: string;
   runtimeConfigDigest: string;
+  runtimeTargetDigest: string;
   capabilityManifestDigest: string;
   /** null = 基础 Harness Route（§18 not_applicable）。 */
   agentPublicationRecordId: string | null;
@@ -684,6 +696,7 @@ export function validateFrozenProjectionAuthority(input: {
     projection.runtimeArtifactId !== expected.runtimeArtifactId ||
     projection.runtimeArtifactDigest !== expected.runtimeArtifactDigest ||
     projection.runtimeConfigDigest !== expected.runtimeConfigDigest ||
+    projection.runtimeTargetDigest !== expected.runtimeTargetDigest ||
     projection.capabilityCompatibilityDigest !== expected.capabilityManifestDigest ||
     projection.runtimePublicationRecordId !== expected.runtimePublicationRecordId ||
     projection.conformanceRunId !== expected.conformanceRunId ||
@@ -855,7 +868,7 @@ async function lockAndVerifyConformance(
       id: runtimeConformanceRun.id,
       tenantId: runtimeConformanceRun.tenantId,
       runtimeRevisionId: runtimeConformanceRun.runtimeRevisionId,
-      runtimeArtifactDigest: runtimeConformanceRun.runtimeArtifactDigest,
+      runtimeTargetDigest: runtimeConformanceRun.runtimeTargetDigest,
       runtimeConfigDigest: runtimeConformanceRun.runtimeConfigDigest,
       protocolContractRevision: runtimeConformanceRun.protocolContractRevision,
       suiteRevision: runtimeConformanceRun.suiteRevision,
@@ -887,7 +900,7 @@ async function lockAndVerifyConformance(
       conformanceRunId: evidence.conformanceRunId,
       tenantId: input.tenantId,
       runtimeRevisionId: input.runtimeRevisionId,
-      runtimeArtifactDigest: evidence.runtimeArtifactDigest,
+      runtimeTargetDigest: runtimeRevision.runtimeTargetDigest,
       runtimeConfigDigest: evidence.runtimeConfigDigest,
       protocolContractRevision: runtimeRevision.protocolContractRevision,
     },
@@ -900,7 +913,7 @@ type FrozenConformanceRun = {
   id: string;
   tenantId: string;
   runtimeRevisionId: string;
-  runtimeArtifactDigest: string;
+  runtimeTargetDigest: string;
   runtimeConfigDigest: string;
   protocolContractRevision: string;
   suiteRevision: string;
@@ -916,7 +929,7 @@ type FrozenConformanceExpectation = {
   conformanceRunId: string;
   tenantId: string;
   runtimeRevisionId: string;
-  runtimeArtifactDigest: string;
+  runtimeTargetDigest: string;
   runtimeConfigDigest: string;
   protocolContractRevision: string;
 };
@@ -947,7 +960,7 @@ export function validateFrozenConformanceAuthority(input: {
       tenantId: run.tenantId,
       runtimeRevisionId: run.runtimeRevisionId,
       overallResult: run.overallResult,
-      runtimeArtifactDigest: run.runtimeArtifactDigest,
+      runtimeTargetDigest: run.runtimeTargetDigest,
       runtimeConfigDigest: run.runtimeConfigDigest,
       protocolContractRevision: run.protocolContractRevision,
       suiteRevision: run.suiteRevision,
@@ -957,7 +970,7 @@ export function validateFrozenConformanceAuthority(input: {
     expected: {
       tenantId: expected.tenantId,
       runtimeRevisionId: expected.runtimeRevisionId,
-      runtimeArtifactDigest: expected.runtimeArtifactDigest,
+      runtimeTargetDigest: expected.runtimeTargetDigest,
       runtimeConfigDigest: expected.runtimeConfigDigest,
       protocolContractRevision: expected.protocolContractRevision,
       allowedFormats: ["standard_dsse"],
@@ -1251,6 +1264,7 @@ export function toExecutionBinding(
     !!row.runtimeArtifactId &&
     !!row.runtimeArtifactDigest &&
     !!row.runtimeConfigDigest &&
+    !!row.runtimeTargetDigest &&
     !!row.capabilityManifestDigest &&
     !!row.runtimeAttestationIds &&
     !!row.runtimePublicationRecordId &&
@@ -1292,6 +1306,7 @@ export function toExecutionBinding(
     agentArtifactDigest: row.agentArtifactDigest,
     runtimeArtifactDigest: row.runtimeArtifactDigest,
     runtimeConfigDigest: row.runtimeConfigDigest,
+    runtimeTargetDigest: row.runtimeTargetDigest,
     capabilityManifestDigest: row.capabilityManifestDigest,
     // base route 的 agentAttestationIds 为 null（§18 not_applicable），保持 null。
     agentAttestationIds: row.agentAttestationIds ? [...row.agentAttestationIds] : null,

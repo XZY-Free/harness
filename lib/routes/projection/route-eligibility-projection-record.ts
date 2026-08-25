@@ -104,6 +104,8 @@ export const routeEligibilityProjection = mysqlTable(
     agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }),
+    /** Runtime 目标摘要 — 发布证据权威（03 §6）。 */
+    runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }),
     /** Route 内容摘要 — 冻结到 Binding。 */
     routeContentDigest: varchar("routeContentDigest", { length: 71 }).notNull(),
 
