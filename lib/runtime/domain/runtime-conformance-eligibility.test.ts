@@ -48,7 +48,7 @@ function makeExpected(
   return {
     tenantId: TENANT_ID,
     runtimeRevisionId: RUNTIME_REVISION_ID,
-    runtimeArtifactDigest: ARTIFACT_DIGEST,
+    runtimeTargetDigest: ARTIFACT_DIGEST,
     runtimeConfigDigest: CONFIG_DIGEST,
     protocolContractRevision: PROTOCOL,
     allowedFormats: ["standard_dsse"],
@@ -73,7 +73,7 @@ function makeEvidence(
       tenantId: TENANT_ID,
       runtimeRevisionId: RUNTIME_REVISION_ID,
       overallResult: "passed",
-      runtimeArtifactDigest: ARTIFACT_DIGEST,
+      runtimeTargetDigest: ARTIFACT_DIGEST,
       runtimeConfigDigest: CONFIG_DIGEST,
       protocolContractRevision: PROTOCOL,
       suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
@@ -132,12 +132,12 @@ describe("validateRuntimePublicationConformanceEvidence", () => {
     expect(codes(result)).toContain("conformance_revision_mismatch");
   });
 
-  it("artifact digest 漂移 → conformance_artifact_digest_mismatch", () => {
+  it("runtime target digest 漂移 → conformance_target_digest_mismatch", () => {
     const result = validateRuntimePublicationConformanceEvidence(
-      makeEvidence({ run: { runtimeArtifactDigest: `sha256:${"c".repeat(64)}` } }),
+      makeEvidence({ run: { runtimeTargetDigest: `sha256:${"c".repeat(64)}` } }),
     );
     expect(result.valid).toBe(false);
-    expect(codes(result)).toContain("conformance_artifact_digest_mismatch");
+    expect(codes(result)).toContain("conformance_target_digest_mismatch");
   });
 
   it("config digest 漂移 → conformance_config_digest_mismatch", () => {
@@ -215,12 +215,12 @@ describe("validateRuntimePublicationConformanceEvidence", () => {
     expect(messages.some((message) => message.includes(missingCase))).toBe(true);
   });
 
-  it("expected artifact digest 为 null → fail closed → conformance_artifact_digest_mismatch", () => {
+  it("expected runtime target digest 为 null → fail closed → conformance_target_digest_mismatch", () => {
     const result = validateRuntimePublicationConformanceEvidence(
-      makeEvidence({ expected: { runtimeArtifactDigest: null } }),
+      makeEvidence({ expected: { runtimeTargetDigest: null } }),
     );
     expect(result.valid).toBe(false);
-    expect(codes(result)).toContain("conformance_artifact_digest_mismatch");
+    expect(codes(result)).toContain("conformance_target_digest_mismatch");
   });
 
   it("expected config digest 为 null → fail closed → conformance_config_digest_mismatch", () => {

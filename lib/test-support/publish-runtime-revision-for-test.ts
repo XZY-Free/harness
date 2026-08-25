@@ -114,7 +114,7 @@ export class PublicationConformanceFailedError extends Error {
 export async function runPublicationConformanceForTest(params: {
   tenantId: string;
   runtimeRevisionId: string;
-  runtimeArtifactDigest: string;
+  runtimeTargetDigest: string;
   runtimeConfigDigest: string;
   protocolContractRevision: string;
 }): Promise<RuntimeConformanceReport> {
@@ -146,7 +146,7 @@ export async function runPublicationConformanceForTest(params: {
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     testEnvironmentRevision: TEST_ENVIRONMENT_REVISION,
     runtimeRevisionId: params.runtimeRevisionId,
-    runtimeArtifactDigest: params.runtimeArtifactDigest,
+    runtimeTargetDigest: params.runtimeTargetDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
     protocolContractRevision: params.protocolContractRevision,
     runnerArtifactDigest,
@@ -160,7 +160,7 @@ export async function runPublicationConformanceForTest(params: {
   return {
     runId: randomUUID(),
     runtimeRevisionId: params.runtimeRevisionId,
-    runtimeArtifactDigest: params.runtimeArtifactDigest,
+    runtimeTargetDigest: params.runtimeTargetDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
     protocolContractRevision: params.protocolContractRevision,
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
@@ -219,7 +219,7 @@ export async function publishRuntimeRevisionForTest(params: {
   const report = await runPublicationConformanceForTest({
     tenantId: params.tenantId,
     runtimeRevisionId: revision.id,
-    runtimeArtifactDigest: revision.artifactDigest,
+    runtimeTargetDigest: revision.runtimeTargetDigest,
     runtimeConfigDigest: revision.configHash,
     protocolContractRevision: revision.protocolContractRevision,
   });

@@ -31,7 +31,7 @@ export interface PublishRuntimeRevisionWithAttestationResult {
 async function insertConformanceRunInDb(params: {
   tenantId: string;
   revisionId: string;
-  runtimeArtifactDigest: string;
+  runtimeTargetDigest: string;
   runtimeConfigDigest: string;
   protocolContractRevision: string;
   overallResult: "passed" | "failed";
@@ -46,11 +46,11 @@ async function insertConformanceRunInDb(params: {
     id: runId,
     tenantId: params.tenantId,
     runtimeRevisionId: params.revisionId,
-    runtimeArtifactDigest: params.runtimeArtifactDigest,
+    runtimeTargetDigest: params.runtimeTargetDigest,
     runtimeConfigDigest: params.runtimeConfigDigest,
     protocolContractRevision: params.protocolContractRevision,
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
-    runnerArtifactDigest: params.runtimeArtifactDigest,
+    runnerArtifactDigest: params.runtimeTargetDigest,
     runnerIdentity: "test-runner",
     testEnvironmentRevision: "test-env@1",
     startedAt: now,
@@ -114,7 +114,7 @@ export async function publishRuntimeRevisionWithAttestation(
   const conformanceRunId = await insertConformanceRunInDb({
     tenantId,
     revisionId,
-    runtimeArtifactDigest: revisionRow.artifactDigest ?? "",
+    runtimeTargetDigest: revisionRow.runtimeTargetDigest,
     runtimeConfigDigest: revisionRow.configHash,
     protocolContractRevision: revisionRow.protocolContractRevision,
     overallResult,

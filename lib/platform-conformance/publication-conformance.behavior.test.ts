@@ -211,7 +211,7 @@ describe("Runtime Publication Conformance 职责拆分", () => {
     const report = {
       runId: "run-verifier",
       runtimeRevisionId: "revision-verifier",
-      runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
+      runtimeTargetDigest: `sha256:${"a".repeat(64)}`,
       runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
       protocolContractRevision: "agent-runtime-protocol@2",
       suiteRevision: contract.PUBLICATION_CONFORMANCE_SUITE_REVISION,
@@ -225,7 +225,7 @@ describe("Runtime Publication Conformance 职责拆分", () => {
         suiteRevision: contract.PUBLICATION_CONFORMANCE_SUITE_REVISION,
         testEnvironmentRevision: "unit@1",
         runtimeRevisionId: "revision-verifier",
-        runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
+        runtimeTargetDigest: `sha256:${"a".repeat(64)}`,
         runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
         protocolContractRevision: "agent-runtime-protocol@2",
         runnerArtifactDigest: `sha256:${"c".repeat(64)}`,

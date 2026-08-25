@@ -18,6 +18,7 @@ import {
   computeCaseEvidenceDigest,
   computeEvidenceManifestDigest,
 } from "@/lib/runtime/domain/runtime-conformance-run";
+import { computeRuntimeTargetDigest } from "@/lib/runtime/domain/runtime-target-digest";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtime/persistence/mysql-runtime-publication-store";
 import {
@@ -41,6 +42,13 @@ const RUNNER_KEY: TestRunnerKey = generateTestRunnerKey("test-runner-key");
 const RUNNER_IDENTITY = "ci/runtime-conformance";
 const DIGEST_A = `sha256:${"a".repeat(64)}`;
 const DIGEST_B = `sha256:${"b".repeat(64)}`;
+const TARGET_DIGEST = computeRuntimeTargetDigest({
+  runtimeEvidenceKind: "hosted_artifact",
+  runtimeArtifactDigest: DIGEST_A,
+  runtimeConfigDigest: DIGEST_B,
+  protocolContractRevision: "agent-runtime-protocol@2",
+});
+
 const DIGEST_C = `sha256:${"c".repeat(64)}`;
 
 function createTestVerifier() {
@@ -85,6 +93,8 @@ async function seedRevision() {
     tenantId: tenant.id,
     runtimeId: runtime.id,
     protocolType: "agent_runtime_protocol",
+    protocolContractRevision: "agent-runtime-protocol@2",
+    runtimeEvidenceKind: "hosted_artifact",
     endpointRef: "connection://trusted-runner-test",
     runtimeArtifactRef: `oci://registry/runtime@${DIGEST_A}`,
     runtimeCapabilitiesJson: { event_stream: true },
@@ -119,7 +129,7 @@ function buildDsseEnvelope(
   const baseReport = {
     runId: randomUUID(),
     runtimeRevisionId: revisionId,
-    runtimeArtifactDigest: DIGEST_A,
+    runtimeTargetDigest: TARGET_DIGEST,
     runtimeConfigDigest: DIGEST_B,
     protocolContractRevision: "agent-runtime-protocol@2",
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
@@ -139,7 +149,7 @@ function buildDsseEnvelope(
       suiteRevision: baseReport.suiteRevision,
       testEnvironmentRevision: baseReport.testEnvironmentRevision,
       runtimeRevisionId: baseReport.runtimeRevisionId,
-      runtimeArtifactDigest: baseReport.runtimeArtifactDigest,
+      runtimeTargetDigest: baseReport.runtimeTargetDigest,
       runtimeConfigDigest: baseReport.runtimeConfigDigest,
       protocolContractRevision: baseReport.protocolContractRevision,
       runnerArtifactDigest: baseReport.runnerArtifactDigest,

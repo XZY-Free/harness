@@ -58,8 +58,8 @@ export function buildDsseConformanceEnvelope(
     _type: "https://in-toto.io/Statement/v1",
     subject: [
       {
-        name: "runtime-artifact",
-        digest: { sha256: report.runtimeArtifactDigest.replace("sha256:", "") },
+        name: "runtime-target",
+        digest: { sha256: report.runtimeTargetDigest.replace("sha256:", "") },
       },
     ],
     predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
@@ -113,7 +113,7 @@ export function buildTestConformanceReport(
   const base = {
     runId: randomUUID(),
     runtimeRevisionId: revisionId,
-    runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
+    runtimeTargetDigest: `sha256:${"a".repeat(64)}`,
     runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
     protocolContractRevision: "agent-runtime-protocol@2",
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
@@ -131,7 +131,7 @@ export function buildTestConformanceReport(
       suiteRevision: base.suiteRevision,
       testEnvironmentRevision: base.testEnvironmentRevision,
       runtimeRevisionId: base.runtimeRevisionId,
-      runtimeArtifactDigest: base.runtimeArtifactDigest,
+      runtimeTargetDigest: base.runtimeTargetDigest,
       runtimeConfigDigest: base.runtimeConfigDigest,
       protocolContractRevision: base.protocolContractRevision,
       runnerArtifactDigest: base.runnerArtifactDigest,

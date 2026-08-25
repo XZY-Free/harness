@@ -30,6 +30,7 @@ describe("runtime admin projection", () => {
     const base = {
       runtimeLifecycleState: "enabled",
       revisionState: "published",
+      runtimeEvidenceKind: "hosted_artifact" as const,
       artifactId: "artifact-1",
       artifactDigest: `sha256:${"a".repeat(64)}`,
       publicationAttestationIds: ["attestation-1"],

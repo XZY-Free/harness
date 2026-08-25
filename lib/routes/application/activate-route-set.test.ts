@@ -127,7 +127,7 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
       tenantId: TENANT_ID,
       runtimeRevisionId: BASE_RUNTIME_REVISION.id,
       overallResult: "passed" as const,
-      runtimeArtifactDigest: "sha256:b",
+      runtimeTargetDigest: "sha256:b",
       runtimeConfigDigest: "sha256:config",
       protocolContractRevision: "agent-runtime-protocol@1",
       suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
@@ -137,7 +137,7 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
     expected: {
       tenantId: TENANT_ID,
       runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-      runtimeArtifactDigest: "sha256:b",
+      runtimeTargetDigest: "sha256:b",
       runtimeConfigDigest: "sha256:config",
       protocolContractRevision: "agent-runtime-protocol@1",
       allowedFormats: ["standard_dsse"],

@@ -19,6 +19,7 @@ import {
   computeCaseEvidenceDigest,
   computeEvidenceManifestDigest,
 } from "@/lib/runtime/domain/runtime-conformance-run";
+import { RuntimeArtifactAttestationRequiredError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtime/persistence/mysql-runtime-publication-store";
 import type {
@@ -47,7 +48,11 @@ beforeEach(async () => {
 const RUNNER_KEY = generateTestRunnerKey("publication-test-runner");
 const RUNNER_IDENTITY = "ci/runtime-conformance";
 
-async function seedRuntimePublicationFixture(suffix = "") {
+async function seedRuntimePublicationFixture(
+  suffix = "",
+  options?: { evidenceKind?: "hosted_artifact" | "external_endpoint" },
+) {
+  const evidenceKind = options?.evidenceKind ?? "hosted_artifact";
   const tenant = await ensureDefaultTenant();
   const owner = await upsertUserIdentity({
     tenantId: tenant.id,
@@ -66,8 +71,11 @@ async function seedRuntimePublicationFixture(suffix = "") {
     tenantId: tenant.id,
     runtimeId: runtime.id,
     protocolType: "agent_runtime_protocol",
+    protocolContractRevision: "agent-runtime-protocol@2",
+    runtimeEvidenceKind: evidenceKind,
     endpointRef: "managed://runtime/publication",
-    runtimeArtifactRef: `oci://registry/runtime@sha256:${"a".repeat(64)}`,
+    runtimeArtifactRef:
+      evidenceKind === "hosted_artifact" ? `oci://registry/runtime@sha256:${"a".repeat(64)}` : null,
     runtimeCapabilitiesJson: { capabilities: ["event_stream"] },
     identityMode: "workload_token",
     networkZone: "external",
@@ -96,7 +104,7 @@ async function seedRuntimePublicationFixture(suffix = "") {
   const report = {
     runId: randomUUID(),
     runtimeRevisionId: revision.id,
-    runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
+    runtimeTargetDigest: revision.runtimeTargetDigest,
     runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
     protocolContractRevision: revision.protocolContractRevision,
     suiteRevision: "runtime-conformance@1",
@@ -110,7 +118,7 @@ async function seedRuntimePublicationFixture(suffix = "") {
       suiteRevision: "runtime-conformance@1",
       testEnvironmentRevision: "isolated-mysql8@1",
       runtimeRevisionId: revision.id,
-      runtimeArtifactDigest: `sha256:${"a".repeat(64)}`,
+      runtimeTargetDigest: revision.runtimeTargetDigest,
       runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
       protocolContractRevision: revision.protocolContractRevision,
       runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
@@ -146,29 +154,33 @@ async function seedRuntimePublicationFixture(suffix = "") {
     requestId: `request-${report.runId}`,
     actor: { actorType: "system", actorId: "test-trusted-runner" },
   });
-  const attestation = await createRecordArtifactAttestation({
-    store: mysqlArtifactAttestationPersistenceStore,
-  })({
-    tenantId: tenant.id,
-    artifactType: "runtime_revision",
-    artifactRevisionId: revision.id,
-    artifactDigest: `sha256:${"a".repeat(64)}`,
-    dsseEnvelopeRef: `attestation:signature:${suffix || "default"}`,
-    sbomRef: `attestation:sbom:${suffix || "default"}`,
-    provenanceRef: `attestation:provenance:${suffix || "default"}`,
-    builderIdentity: "builder:publication-test",
-    verificationState: "verified",
-    policyRevisionId: null,
-    failureCode: null,
-    verifiedAt: new Date(),
-    sourceRevision: null,
-    buildPipeline: null,
-    dependencyLockFileHash: null,
-    buildTime: null,
-    scanSummaryJson: null,
-    actor: { tenantId: tenant.id, actorType: "service", actorId: "test-builder" },
-    requestId: `attestation-request-${revision.id}`,
-  });
+  let attestationId: string | null = null;
+  if (evidenceKind === "hosted_artifact") {
+    const attestation = await createRecordArtifactAttestation({
+      store: mysqlArtifactAttestationPersistenceStore,
+    })({
+      tenantId: tenant.id,
+      artifactType: "runtime_revision",
+      artifactRevisionId: revision.id,
+      artifactDigest: `sha256:${"a".repeat(64)}`,
+      dsseEnvelopeRef: `attestation:signature:${suffix || "default"}`,
+      sbomRef: `attestation:sbom:${suffix || "default"}`,
+      provenanceRef: `attestation:provenance:${suffix || "default"}`,
+      builderIdentity: "builder:publication-test",
+      verificationState: "verified",
+      policyRevisionId: null,
+      failureCode: null,
+      verifiedAt: new Date(),
+      sourceRevision: null,
+      buildPipeline: null,
+      dependencyLockFileHash: null,
+      buildTime: null,
+      scanSummaryJson: null,
+      actor: { tenantId: tenant.id, actorType: "service", actorId: "test-builder" },
+      requestId: `attestation-request-${revision.id}`,
+    });
+    attestationId = attestation.id;
+  }
   return {
     tenantId: tenant.id,
     ownerId: owner.id,
@@ -176,7 +188,7 @@ async function seedRuntimePublicationFixture(suffix = "") {
     revision,
     idempotency,
     conformanceRunId: report.runId,
-    attestationId: attestation.id,
+    attestationId,
   };
 }
 
@@ -485,5 +497,66 @@ describe("RuntimeRevision publication application boundary", () => {
     expect((await getIdempotencyRecordById(fixture.idempotency.id))?.processingState).toBe(
       "processing",
     );
+  });
+});
+describe("Runtime Evidence 双轨门禁（03 §3/§4 — Hosted 不降级，External 不伪造）", () => {
+  it("external_endpoint 无 Artifact Attestation 可发布（发布链完整，不伪造 Artifact）", async () => {
+    const fixture = await seedRuntimePublicationFixture("external", {
+      evidenceKind: "external_endpoint",
+    });
+    expect(fixture.revision.runtimeEvidenceKind).toBe("external_endpoint");
+    expect(fixture.revision.runtimeArtifactRef).toBeNull();
+    expect(fixture.attestationId).toBeNull();
+
+    const publish = createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore });
+    const { revision, attestation } = await publish({
+      ...publicationCommand(fixture),
+      attestationId: null,
+      idempotency: undefined,
+    });
+
+    expect(revision.revisionState).toBe("published");
+    expect(revision.runtimeEvidenceKind).toBe("external_endpoint");
+    expect(revision.runtimeTargetDigest).toBe(fixture.revision.runtimeTargetDigest);
+    expect(attestation).toBeNull();
+
+    const publication = await getPublicationRecordBySubject({
+      tenantId: fixture.tenantId,
+      subjectType: "runtime_revision",
+      subjectRevisionId: revision.id,
+    });
+    expect(publication).toMatchObject({
+      subjectRevisionId: revision.id,
+      attestationIds: [],
+      conformanceRunId: fixture.conformanceRunId,
+    });
+  });
+
+  it("external_endpoint 携带 attestationId → 拒绝（不得伪造 Runtime Artifact）", async () => {
+    const fixture = await seedRuntimePublicationFixture("external-attest", {
+      evidenceKind: "external_endpoint",
+    });
+    const publish = createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore });
+    await expect(
+      publish({
+        ...publicationCommand(fixture),
+        attestationId: "attestation-forged",
+        idempotency: undefined,
+      }),
+    ).rejects.toThrow(/不得伪造 Runtime Artifact/);
+    expect((await getRuntimeRevisionById(fixture.revision.id))?.revisionState).toBe("draft");
+  });
+
+  it("hosted_artifact 缺少 attestationId → 拒绝（Hosted 证据不降级）", async () => {
+    const fixture = await seedRuntimePublicationFixture("hosted-no-attest");
+    const publish = createPublishRuntimeRevision({ store: mysqlRuntimePublicationStore });
+    await expect(
+      publish({
+        ...publicationCommand(fixture),
+        attestationId: null,
+        idempotency: undefined,
+      }),
+    ).rejects.toThrow(RuntimeArtifactAttestationRequiredError);
+    expect((await getRuntimeRevisionById(fixture.revision.id))?.revisionState).toBe("draft");
   });
 });

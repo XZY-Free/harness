@@ -27,6 +27,7 @@ const binding: ExecutionBinding = {
   agentArtifactDigest: `sha256:${"2".repeat(64)}`,
   runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
   runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
+  runtimeTargetDigest: `sha256:${"5".repeat(64)}`,
   capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
   agentAttestationIds: ["agent-attestation-1"],
   runtimeAttestationIds: ["runtime-attestation-1"],

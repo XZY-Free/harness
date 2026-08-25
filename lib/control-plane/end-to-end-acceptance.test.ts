@@ -407,8 +407,10 @@ async function seedPublishedRuntimeRevision(
     tenantId,
     runtimeId: runtime.id,
     protocolType: "a2a",
+    protocolContractRevision: "a2a@1",
+    runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
-    runtimeArtifactRef: `oci://registry/runtime@sha256:${contentSuffix}`,
+    runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
     runtimeCapabilitiesJson: ["event_stream", "steer", "cancel", "tool_call"],
     identityMode: "managed",
     networkZone: "internal",
@@ -488,7 +490,7 @@ async function seedEndToEndFixture(suffix: string) {
 
 function buildSignedConformanceReport(
   revisionId: string,
-  runtimeArtifactDigest: string,
+  runtimeTargetDigest: string,
   runtimeConfigDigest: string,
   protocolContractRevision: string,
   overrides: Record<string, unknown> = {},
@@ -507,7 +509,7 @@ function buildSignedConformanceReport(
   const baseReport = {
     runId: randomUUID(),
     runtimeRevisionId: revisionId,
-    runtimeArtifactDigest,
+    runtimeTargetDigest,
     runtimeConfigDigest,
     protocolContractRevision,
     suiteRevision: "runtime-conformance@1",
@@ -526,7 +528,7 @@ function buildSignedConformanceReport(
       suiteRevision: "runtime-conformance@1",
       testEnvironmentRevision: "isolated-mysql8@1",
       runtimeRevisionId: revisionId,
-      runtimeArtifactDigest,
+      runtimeTargetDigest,
       runtimeConfigDigest,
       protocolContractRevision,
       runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
@@ -745,6 +747,8 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
       tenantId: tenant.id,
       runtimeId: runtime.id,
       protocolType: "agent_runtime_protocol",
+      protocolContractRevision: "agent-runtime-protocol@2",
+      runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://conformance-runtime",
       runtimeArtifactRef: `oci://registry/runtime@sha256:${"a".repeat(64)}`,
       runtimeCapabilitiesJson: { event_stream: true },
@@ -756,7 +760,7 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
 
     const dsseEnvelope = buildSignedConformanceReport(
       revision.id,
-      `sha256:${"a".repeat(64)}`,
+      revision.runtimeTargetDigest,
       `sha256:${"b".repeat(64)}`,
       revision.protocolContractRevision,
     );

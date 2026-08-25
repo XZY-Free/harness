@@ -78,7 +78,7 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
       expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("hosted-run:revision-1");
       expect(JSON.parse(String(init?.body))).toMatchObject({
         runtime_revision_id: "revision-1",
-        runtime_artifact_digest: `sha256:${"b".repeat(64)}`,
+        runtime_target_digest: `sha256:${"b".repeat(64)}`,
       });
       return jsonResponse({ dsse_envelope: dsseEnvelope });
     });
@@ -92,7 +92,7 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
         tenantId: "tenant-1",
         runtimeRevisionId: "revision-1",
         idempotencyKey: "hosted-run:revision-1",
-        runtimeArtifactDigest: `sha256:${"b".repeat(64)}`,
+        runtimeTargetDigest: `sha256:${"b".repeat(64)}`,
         runtimeConfigDigest: `sha256:${"c".repeat(64)}`,
         protocolContractRevision: "agent-runtime-protocol@1",
       }),

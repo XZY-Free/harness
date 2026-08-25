@@ -210,7 +210,7 @@ function createEvidenceProvider(options?: {
       const report = {
         runId,
         runtimeRevisionId: input.runtimeRevisionId,
-        runtimeArtifactDigest: input.runtimeArtifactDigest,
+        runtimeTargetDigest: input.runtimeTargetDigest,
         runtimeConfigDigest: input.runtimeConfigDigest,
         protocolContractRevision: input.protocolContractRevision,
         suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
@@ -224,7 +224,7 @@ function createEvidenceProvider(options?: {
           suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
           testEnvironmentRevision: TEST_ENVIRONMENT_REVISION,
           runtimeRevisionId: input.runtimeRevisionId,
-          runtimeArtifactDigest: input.runtimeArtifactDigest,
+          runtimeTargetDigest: input.runtimeTargetDigest,
           runtimeConfigDigest: input.runtimeConfigDigest,
           protocolContractRevision: input.protocolContractRevision,
           runnerArtifactDigest,

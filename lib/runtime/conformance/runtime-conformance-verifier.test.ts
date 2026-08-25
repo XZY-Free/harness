@@ -42,7 +42,7 @@ function createBaseInput(envelopeJson: string, report = buildTestConformanceRepo
   return {
     dsseEnvelopeBytes: Buffer.from(envelopeJson, "utf-8"),
     expectedRuntimeRevisionId: report.runtimeRevisionId,
-    expectedRuntimeArtifactDigest: report.runtimeArtifactDigest,
+    expectedRuntimeTargetDigest: report.runtimeTargetDigest,
     expectedRuntimeConfigDigest: report.runtimeConfigDigest,
     expectedProtocolContractRevision: report.protocolContractRevision,
     tenantId: "t1",
@@ -148,7 +148,7 @@ describe("createDSSEConformanceVerifier", () => {
       subject: [
         {
           name: "runtime-artifact",
-          digest: { sha256: report.runtimeArtifactDigest.replace("sha256:", "") },
+          digest: { sha256: report.runtimeTargetDigest.replace("sha256:", "") },
         },
       ],
       predicateType: RUNTIME_CONFORMANCE_PREDICATE_TYPE,
@@ -170,7 +170,7 @@ describe("createDSSEConformanceVerifier", () => {
       subject: [
         {
           name: "runtime-artifact",
-          digest: { sha256: report.runtimeArtifactDigest.replace("sha256:", "") },
+          digest: { sha256: report.runtimeTargetDigest.replace("sha256:", "") },
         },
       ],
       predicateType: "https://example.com/wrong-predicate",
@@ -212,17 +212,17 @@ describe("createDSSEConformanceVerifier", () => {
     if (!result.verified) expect(result.failureReason).toBe("runtime_revision_mismatch");
   });
 
-  it("Artifact Digest 不一致 → artifact_digest_mismatch", async () => {
+  it("Runtime Target Digest 不一致 → target_digest_mismatch", async () => {
     const key = generateTestRunnerKey("runner-key-1");
     const verifier = createVerifierWithKey(key);
     const report = buildTestConformanceReport("rev-1");
     const envelope = buildDsseConformanceEnvelope(report, key);
     const result = await verifier.verify({
       ...createBaseInput(envelope, report),
-      expectedRuntimeArtifactDigest: `sha256:${"f".repeat(64)}`,
+      expectedRuntimeTargetDigest: `sha256:${"f".repeat(64)}`,
     });
     expect(result.verified).toBe(false);
-    if (!result.verified) expect(result.failureReason).toBe("artifact_digest_mismatch");
+    if (!result.verified) expect(result.failureReason).toBe("target_digest_mismatch");
   });
 
   it("Config Digest 不一致 → config_digest_mismatch", async () => {

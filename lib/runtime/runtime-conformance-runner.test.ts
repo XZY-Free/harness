@@ -54,6 +54,7 @@ import {
   validatePublicationConformanceGate,
 } from "@/lib/runtime/domain/runtime-conformance";
 import { RuntimeConformanceRunInvalidError } from "@/lib/runtime/domain/runtime-revision-publication-policy";
+import { computeRuntimeTargetDigest } from "@/lib/runtime/domain/runtime-target-digest";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import {
   createRuntime,
@@ -97,6 +98,12 @@ const RUNNER_SIGNING_IDENTITIES_JSON = JSON.stringify([
   },
 ]);
 const RUNTIME_DIGEST = `sha256:${"a".repeat(64)}`;
+const TARGET_DIGEST = computeRuntimeTargetDigest({
+  runtimeEvidenceKind: "hosted_artifact",
+  runtimeArtifactDigest: RUNTIME_DIGEST,
+  runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
+  protocolContractRevision: "agent-runtime-protocol@2",
+});
 const CONFIG_DIGEST = `sha256:${"b".repeat(64)}`;
 const RUNNER_DIGEST = `sha256:${"c".repeat(64)}`;
 
@@ -147,6 +154,8 @@ async function seedRuntimeAndRevision(
     tenantId,
     runtimeId: runtime.id,
     protocolType: "agent_runtime_protocol",
+    protocolContractRevision: "agent-runtime-protocol@2",
+    runtimeEvidenceKind: "hosted_artifact",
     endpointRef: "connection://doubao-prod",
     runtimeArtifactRef: `oci://registry/runtime@${RUNTIME_DIGEST}`,
     runtimeCapabilitiesJson: { steer: true, cancel: true, event_stream: true, tool_call: true },
@@ -197,7 +206,7 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
   const report = {
     runId: randomUUID(),
     runtimeRevisionId,
-    runtimeArtifactDigest: RUNTIME_DIGEST,
+    runtimeTargetDigest: TARGET_DIGEST,
     runtimeConfigDigest: CONFIG_DIGEST,
     protocolContractRevision: "agent-runtime-protocol@2",
     suiteRevision: "runtime-conformance@1",
@@ -211,7 +220,7 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
       suiteRevision: "runtime-conformance@1",
       testEnvironmentRevision: "isolated-mysql8@1",
       runtimeRevisionId,
-      runtimeArtifactDigest: RUNTIME_DIGEST,
+      runtimeTargetDigest: TARGET_DIGEST,
       runtimeConfigDigest: CONFIG_DIGEST,
       protocolContractRevision: "agent-runtime-protocol@2",
       runnerArtifactDigest: RUNNER_DIGEST,

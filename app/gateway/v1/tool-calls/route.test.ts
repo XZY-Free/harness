@@ -193,6 +193,7 @@ async function seedBinding(
     agentArtifactDigest: hash("2"),
     runtimeArtifactDigest: hash("3"),
     runtimeConfigDigest: hash("4"),
+    runtimeTargetDigest: hash("5"),
     capabilityManifestDigest: hash("5"),
     agentAttestationIds: ["agent-att-1"],
     runtimeAttestationIds: ["runtime-att-1"],

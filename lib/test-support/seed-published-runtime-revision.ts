@@ -46,6 +46,8 @@ export async function seedPublishedRuntimeRevision(
     tenantId,
     runtimeId: runtime.id,
     protocolType: "a2a",
+    protocolContractRevision: "a2a@1",
+    runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${artifactDigest}`,
     runtimeCapabilitiesJson: capabilities,
