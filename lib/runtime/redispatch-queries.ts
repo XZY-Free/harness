@@ -44,6 +44,7 @@ import type {
   RuntimeSessionBinding,
 } from "@/lib/persistence/schema/executions";
 import { invocationTable } from "@/lib/persistence/schema/executions";
+import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import type { RuntimeEndpointResolution } from "@/lib/runtime/dispatcher";
 import {
   InvocationNotFoundError,
@@ -92,7 +93,7 @@ export interface RedispatchInvocationParams {
   checkpointRef?: string | null;
   /** Runtime HTTP 客户端。 */
   runtimeClient: RuntimeHttpClient;
-  /** 从 ExecutionBinding 解析 runtimeEndpoint/authToken/gatewayEndpoints 的解析器。 */
+  /** 从 ExecutionBinding 解析 runtimeEndpoint/auth/gatewayEndpoints 的解析器。 */
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
   /** RuntimeRevision id（用于创建新 SessionBinding）。 */
   runtimeRevisionId: string;
@@ -218,7 +219,7 @@ export async function redispatchInvocation(
   });
 
   // 5. 调用 runtimeClient.startInvocation（带 attempt 字段）
-  const { runtimeEndpoint, authToken, gatewayEndpoints, governanceConfig, gatewayAccess } =
+  const { runtimeEndpoint, auth, gatewayEndpoints, governanceConfig, gatewayAccess } =
     await params.runtimeEndpointResolver(binding);
 
   // 读取 RuntimeRevision 获取 capabilities（用于 execution_limits）
@@ -332,7 +333,7 @@ export async function redispatchInvocation(
   try {
     response = await params.runtimeClient.startInvocation({
       runtimeEndpoint,
-      authToken,
+      auth,
       idempotencyKey,
       requestBody,
     });

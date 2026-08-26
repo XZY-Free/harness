@@ -23,7 +23,7 @@ describe("InProcessHostedRuntimeClient", () => {
 
     const response = await client.startInvocation({
       runtimeEndpoint: "in-process://hosted",
-      authToken: "runtime-token",
+      auth: { mode: "workload_token", token: "runtime-token" },
       idempotencyKey: "invoke-1",
       requestBody: {
         protocol_version: RUNTIME_PROTOCOL_VERSION,

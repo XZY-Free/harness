@@ -21,6 +21,7 @@ import {
   dispatchCancelCommand,
   dispatchResumeCommand,
 } from "@/lib/runtime/command-dispatcher";
+import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { IngressInvocationTerminalError, InvocationStateConflictError } from "@/lib/runtime/errors";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
@@ -130,15 +131,16 @@ async function resolveA2ACommandTransport(params: {
     },
   });
 
+  // 03 §11：Cancel/Resume 的 outbound auth 只能来自唯一 resolver
+  // （Binding.runtimeRevisionId → RuntimeRevision → resolveOutboundRuntimeAuth）；
+  // 不再给第三方 Agent 签内部 Workload Token。Resume 同时携带的新签发
+  // Gateway Access Token（gatewayAccess）职责完全不同，二者不混用。
   const endpointResolver = async (binding: ExecutionBinding) => ({
     runtimeEndpoint: endpoint,
-    authToken: issueWorkloadToken({
-      type: "runtime",
+    auth: await resolveOutboundRuntimeAuth({
       tenantId: params.tenantId,
-      invocationId: binding.invocationId,
-      runtimeRevisionId: binding.runtimeRevisionId,
-      audience: "runtime",
-      expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+      identityMode: runtimeRevision.identityMode,
+      credentialRefId: runtimeRevision.credentialRefId,
     }),
     // §27/§28：Resume 必须携带重新签发的 Gateway Access Token（新 jti/expiry）。
     gatewayAccess: {

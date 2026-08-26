@@ -9,6 +9,10 @@ import { type RouteResolver, createResolveRoute } from "@/lib/routes/application
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import type { HostedModelContext } from "@/lib/runtime/adapters/hosted-adapter";
+import {
+  type RuntimeTransportAuth,
+  resolveOutboundRuntimeAuth,
+} from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
@@ -133,6 +137,28 @@ export async function dispatchEmployeeTurn(params: {
   // external_endpoint → endpointRef 即外部 endpoint；hosted → in-process 引用。
   const managedEndpoint = isExternalEndpoint ? runtimeRevision.endpointRef : "in-process://hosted";
 
+  // 03 §10：External outbound auth 只能来自唯一 resolver（RuntimeRevision.identityMode +
+  // credentialRefId → RuntimeTransportAuth）；Hosted 继续签发内部 Workload Token。
+  // 每次网络调用前重新解析（Rotation fail closed，03 §13）。
+  const resolveOutboundAuth = (): Promise<RuntimeTransportAuth> =>
+    isExternalEndpoint
+      ? resolveOutboundRuntimeAuth({
+          tenantId: params.tenantId,
+          identityMode: runtimeRevision.identityMode,
+          credentialRefId: runtimeRevision.credentialRefId,
+        })
+      : Promise.resolve({
+          mode: "workload_token",
+          token: issueWorkloadToken({
+            type: "runtime",
+            tenantId: params.tenantId,
+            invocationId: "transport-resolution",
+            runtimeRevisionId: runtimeRevision.id,
+            audience: "runtime",
+            expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+          }),
+        });
+
   const resolveTransport = createRuntimeTransportResolver({
     factories: {
       agent_runtime_protocol: () =>
@@ -194,14 +220,7 @@ export async function dispatchEmployeeTurn(params: {
   const transport = await resolveTransport({
     protocolType: runtimeRevision.protocolType,
     endpoint: managedEndpoint,
-    authToken: issueWorkloadToken({
-      type: "runtime",
-      tenantId: params.tenantId,
-      invocationId: "transport-resolution",
-      runtimeRevisionId: runtimeRevision.id,
-      audience: "runtime",
-      expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
-    }),
+    auth: await resolveOutboundAuth(),
   });
 
   const result = await dispatchInvocationForTurn({
@@ -221,14 +240,7 @@ export async function dispatchEmployeeTurn(params: {
         // protocolType 决定 Transport：external endpoint（a2a）用 managedEndpoint；
         // Hosted 保持 in-process 引用（04 §10：Hosted 路径无行为回退）。
         runtimeEndpoint: managedEndpoint,
-        authToken: issueWorkloadToken({
-          type: "runtime",
-          tenantId: params.tenantId,
-          invocationId: binding.invocationId,
-          runtimeRevisionId: binding.runtimeRevisionId,
-          audience: "runtime",
-          expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
-        }),
+        auth: await resolveOutboundAuth(),
         gatewayEndpoints: {
           events: "in-process://events",
           cancel: "in-process://cancel",

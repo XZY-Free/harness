@@ -40,16 +40,16 @@ describe("createRuntimeTransportResolver（04 §3）", () => {
     const hosted = await resolve({
       protocolType: "agent_runtime_protocol",
       endpoint: "in-process://hosted",
-      authToken: "t",
+      auth: { mode: "workload_token", token: "t" },
     });
     const a2a = await resolve({
       protocolType: "a2a",
       endpoint: "https://agent.example.com",
-      authToken: "t",
+      auth: { mode: "bearer", token: "t" },
     });
     expect(created).toEqual(["hosted", "a2a"]);
     expect(await a2a.startInvocation({} as never)).toEqual({ invocation_id: "a2a" });
-    expect(await hosted.probeCapabilities("", "")).toBeDefined();
+    expect(await hosted.probeCapabilities("", { mode: "none" })).toBeDefined();
   });
 
   it("未知 protocolType → fail-closed（无回退默认 Transport）", async () => {
@@ -57,15 +57,15 @@ describe("createRuntimeTransportResolver（04 §3）", () => {
       factories: { a2a: () => fakeTransport("a2a") },
     });
     await expect(
-      resolve({ protocolType: "agentkit", endpoint: "https://x", authToken: "t" }),
+      resolve({ protocolType: "agentkit", endpoint: "https://x", auth: { mode: "none" } }),
     ).rejects.toThrow(UnsupportedRuntimeProtocolError);
     await expect(
-      resolve({ protocolType: "langgraph", endpoint: "https://x", authToken: "t" }),
+      resolve({ protocolType: "langgraph", endpoint: "https://x", auth: { mode: "none" } }),
     ).rejects.toThrow(UnsupportedRuntimeProtocolError);
   });
 
   it("工厂接收 managed endpoint/identity configuration（无 framework name/project path 输入）", async () => {
-    const seen: Array<{ endpoint: string; authToken: string }> = [];
+    const seen: Array<{ endpoint: string; auth: { mode: string; token?: string } }> = [];
     const resolve = createRuntimeTransportResolver({
       factories: {
         a2a: (input) => {
@@ -74,7 +74,13 @@ describe("createRuntimeTransportResolver（04 §3）", () => {
         },
       },
     });
-    await resolve({ protocolType: "a2a", endpoint: "https://agent.example.com", authToken: "tok" });
-    expect(seen).toEqual([{ endpoint: "https://agent.example.com", authToken: "tok" }]);
+    await resolve({
+      protocolType: "a2a",
+      endpoint: "https://agent.example.com",
+      auth: { mode: "bearer", token: "tok" },
+    });
+    expect(seen).toEqual([
+      { endpoint: "https://agent.example.com", auth: { mode: "bearer", token: "tok" } },
+    ]);
   });
 });

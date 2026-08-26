@@ -43,6 +43,7 @@ import {
 } from "@/lib/persistence/schema/conversation";
 import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/executions";
 import { invocationTable } from "@/lib/persistence/schema/executions";
+import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import {
   CommandAlreadyDispatchedError,
   CommandInvocationNotFoundError,
@@ -71,8 +72,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export interface CommandRuntimeEndpointResolution {
   /** Runtime HTTP 端点基础 URL。 */
   runtimeEndpoint: string;
-  /** 短期 Workload Token（绑定 runtime_revision/invocation/租户）。 */
-  authToken: string;
+  /** Outbound auth（03 §8）：Hosted=Workload Token；External=CredentialRef 凭据。 */
+  auth: RuntimeTransportAuth;
   /**
    * 平台 Gateway 回调端点（requires_redispatch=true 时必需，供 redispatchInvocation
    * 构造 StartInvocationRequestBody 使用）。
@@ -302,7 +303,7 @@ async function markCommandAcknowledged(commandId: string): Promise<void> {
  * 流程：
  * 1. 加载命令 + Invocation + ExecutionBinding（校验 queued 状态）。
  * 2. 事务内：CAS queued → dispatched（设置 dispatchedAt）。
- * 3. 解析 runtimeEndpoint + authToken。
+ * 3. 解析 runtimeEndpoint + auth.
  * 4. 调用 runtimeClient.steerInvocation（携带 steer_payload = commandPayloadJson）。
  * 5. 成功：事务内 CAS dispatched → acknowledged + 写 turn.steered Event。
  * 6. 网络/503：保持 dispatched（等待重试）。
@@ -342,8 +343,8 @@ export async function dispatchSteerCommand(params: {
     throw new CommandAlreadyDispatchedError(loaded.command.id, "dispatched");
   }
 
-  // 2. 解析 runtimeEndpoint + authToken
-  const { runtimeEndpoint, authToken } = await params.runtimeEndpointResolver(loaded.binding);
+  // 2. 解析 runtimeEndpoint + auth
+  const { runtimeEndpoint, auth } = await params.runtimeEndpointResolver(loaded.binding);
 
   // 3. 构造 steer 请求
   const steerPayload = loaded.command.commandPayloadJson as Record<string, unknown>;
@@ -354,7 +355,7 @@ export async function dispatchSteerCommand(params: {
 
   const request: SteerInvocationRequest = {
     runtimeEndpoint,
-    authToken,
+    auth,
     invocationId: loaded.invocation.id,
     idempotencyKey: runtimeIdempotencyKey,
     requestBody: {
@@ -415,7 +416,7 @@ export async function dispatchSteerCommand(params: {
  * 流程：
  * 1. 加载命令 + Invocation + ExecutionBinding（校验 queued 状态）。
  * 2. 事务内：CAS queued → dispatched（设置 dispatchedAt）。
- * 3. 解析 runtimeEndpoint + authToken。
+ * 3. 解析 runtimeEndpoint + auth.
  * 4. 调用 runtimeClient.cancelInvocation（携带 reason = commandPayloadJson.reason_code）。
  * 5. 成功：事务内 CAS dispatched → acknowledged（Turn 终态由 ingress execution.cancelled 推进）。
  * 6. 网络/503：保持 dispatched（等待重试）。
@@ -455,8 +456,8 @@ export async function dispatchCancelCommand(params: {
     throw new CommandAlreadyDispatchedError(loaded.command.id, "dispatched");
   }
 
-  // 2. 解析 runtimeEndpoint + authToken
-  const { runtimeEndpoint, authToken } = await params.runtimeEndpointResolver(loaded.binding);
+  // 2. 解析 runtimeEndpoint + auth
+  const { runtimeEndpoint, auth } = await params.runtimeEndpointResolver(loaded.binding);
 
   // 3. 构造 cancel 请求
   const commandPayload = loaded.command.commandPayloadJson as Record<string, unknown>;
@@ -469,7 +470,7 @@ export async function dispatchCancelCommand(params: {
 
   const request: CancelInvocationRequest = {
     runtimeEndpoint,
-    authToken,
+    auth,
     invocationId: loaded.invocation.id,
     idempotencyKey: runtimeIdempotencyKey,
     requestBody: {
@@ -509,7 +510,7 @@ export async function dispatchCancelCommand(params: {
  * 1. 加载命令 + Invocation + ExecutionBinding（校验 queued 状态）。
  * 2. 校验 Invocation 处于 waiting_user 状态（Resume 仅可作用于 waiting_user）。
  * 3. 事务内：CAS queued → dispatched（设置 dispatchedAt）。
- * 4. 解析 runtimeEndpoint + authToken（+ 可选 gatewayEndpoints）。
+ * 4. 解析 runtimeEndpoint + auth（+ 可选 gatewayEndpoints）。
  * 5. 调用 runtimeClient.resumeInvocation（携带 resume_payload = commandPayloadJson.resume_payload）。
  * 6. 成功：
  * - requires_redispatch=false/undefined：事务内 CAS dispatched → acknowledged +
@@ -586,9 +587,9 @@ export async function dispatchResumeCommand(params: {
     throw new CommandAlreadyDispatchedError(loaded.command.id, "dispatched");
   }
 
-  // 2. 解析 runtimeEndpoint + authToken（+ 可选 gatewayEndpoints）
+  // 2. 解析 runtimeEndpoint + auth（+ 可选 gatewayEndpoints）
   const endpointResolution = await params.runtimeEndpointResolver(loaded.binding);
-  const { runtimeEndpoint, authToken } = endpointResolution;
+  const { runtimeEndpoint, auth } = endpointResolution;
 
   // 3. 构造 resume 请求
   // §27/§28：resume 必须携带重新签发的新 Gateway Access Token（新 jti/expiry，绑定 same
@@ -618,7 +619,7 @@ export async function dispatchResumeCommand(params: {
 
   const request: ResumeInvocationRequest = {
     runtimeEndpoint,
-    authToken,
+    auth,
     invocationId: loaded.invocation.id,
     idempotencyKey: runtimeIdempotencyKey,
     requestBody: {
@@ -943,7 +944,7 @@ async function handleResumeRequiresRedispatch(
       }
       return {
         runtimeEndpoint: endpointResolution.runtimeEndpoint,
-        authToken: endpointResolution.authToken,
+        auth: endpointResolution.auth,
         gatewayEndpoints,
         governanceConfig,
         gatewayAccess,

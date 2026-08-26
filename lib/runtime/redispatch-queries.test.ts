@@ -520,7 +520,7 @@ function buildRedispatchParams(
     runtimeClient,
     runtimeEndpointResolver: async (binding: ExecutionBinding) => ({
       runtimeEndpoint: "https://redispatch-runtime.internal",
-      authToken: "test-token",
+      auth: { mode: "workload_token", token: "test-token" },
       gatewayEndpoints: {
         events: "https://gateway.internal/events",
         cancel: "https://gateway.internal/cancel",

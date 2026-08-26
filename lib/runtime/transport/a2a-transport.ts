@@ -20,6 +20,10 @@
  * 暴露供应商 SDK 异常字符串作为合同。
  */
 import { randomUUID } from "node:crypto";
+import {
+  type RuntimeTransportAuth,
+  outboundAuthHeaders,
+} from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import type {
   CancelInvocationRequest,
@@ -223,18 +227,21 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
 
   async function jsonRpc<T>(
     runtimeEndpoint: string,
-    authToken: string,
+    auth: RuntimeTransportAuth,
     method: string,
     rpcParams: unknown,
     idempotencyKey?: string,
   ): Promise<JsonRpcResponse<T>> {
+    // External A2A：workload_token 本地 fail closed（outboundAuthHeaders 不带
+    // allowWorkloadToken），none 完全不发 Authorization（03 §9）。
+    const authHeader = outboundAuthHeaders(auth);
     let resp: Response;
     try {
       resp = await fetchImpl(runtimeEndpoint, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${authToken}`,
+          ...authHeader,
           ...(idempotencyKey ? { "x-idempotency-key": idempotencyKey } : {}),
         },
         body: JSON.stringify({ jsonrpc: "2.0", id: randomUUID(), method, params: rpcParams }),
@@ -463,12 +470,15 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
   }
 
   return {
-    async probeCapabilities(endpoint: string, token: string): Promise<RuntimeCapabilitiesResponse> {
+    async probeCapabilities(
+      endpoint: string,
+      auth: RuntimeTransportAuth,
+    ): Promise<RuntimeCapabilitiesResponse> {
       let resp: Response;
       try {
         resp = await fetchImpl(`${endpoint.replace(/\/$/, "")}/.well-known/agent-card.json`, {
           method: "GET",
-          headers: { authorization: `Bearer ${token}` },
+          headers: outboundAuthHeaders(auth),
         });
       } catch (err) {
         throw new RuntimeTransportError(
@@ -557,7 +567,8 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
           headers: {
             "content-type": "application/json",
             accept: "text/event-stream",
-            authorization: `Bearer ${req.authToken}`,
+            // External A2A：workload_token 本地 fail closed；none 不发 Authorization（03 §9）。
+            ...outboundAuthHeaders(req.auth),
             "x-idempotency-key": req.idempotencyKey,
           },
           body: JSON.stringify({
@@ -739,7 +750,7 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
       }
       const resp = await jsonRpc(
         req.runtimeEndpoint,
-        req.authToken,
+        req.auth,
         "tasks/cancel",
         { taskId },
         req.idempotencyKey,
@@ -809,7 +820,7 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
       //    不携带任何内部 metadata。
       const resp = await jsonRpc<A2ATask>(
         req.runtimeEndpoint,
-        req.authToken,
+        req.auth,
         "message/send",
         {
           message: {

@@ -322,7 +322,7 @@ async function seedPublishedRuntimeRevision(
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
     runtimeCapabilitiesJson: capabilities,
-    identityMode: "managed",
+    identityMode: "none",
     networkZone: "internal",
     configHash: computeArtifactDigest(`runtime-config-${contentSuffix}`),
     createdBy: ownerId,
@@ -515,14 +515,17 @@ function buildCommandRuntimeEndpointResolution(
 ): CommandRuntimeEndpointResolution {
   return {
     runtimeEndpoint: "https://runtime-hosted.internal",
-    authToken: issueWorkloadToken({
-      type: "runtime",
-      tenantId: "test-tenant",
-      invocationId: "test-invocation",
-      runtimeRevisionId,
-      audience: "runtime",
-      expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
-    }),
+    auth: {
+      mode: "workload_token",
+      token: issueWorkloadToken({
+        type: "runtime",
+        tenantId: "test-tenant",
+        invocationId: "test-invocation",
+        runtimeRevisionId,
+        audience: "runtime",
+        expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+      }),
+    },
     gatewayEndpoints: {
       events: "https://gateway.internal/events",
       cancel: "https://gateway.internal/cancel",

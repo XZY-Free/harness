@@ -1,3 +1,4 @@
+import { OutboundRuntimeAuthError } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import type { StartInvocationRequestBody } from "@/lib/runtime/runtime-client";
 /**
  * A2A Transport 测试 — Batch 6 Gate（04 §9）；HR 公开合同 wire 冻结版。
@@ -205,7 +206,7 @@ function makeTransport(
 function resumeRequest(overrides: Record<string, unknown> = {}) {
   return {
     runtimeEndpoint: "https://agent.example.com",
-    authToken: "token",
+    auth: { mode: "bearer", token: "token" } as const,
     invocationId: "inv-1",
     idempotencyKey: "idem-resume",
     requestBody: {
@@ -227,7 +228,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     const transport = makeTransport(fixture);
     const resp = await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -264,7 +265,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     const transport = makeTransport(fixture);
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -294,7 +295,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     const transport = makeTransport(fixture);
     const resp = await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -310,7 +311,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     const transport = makeTransport(fixture);
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -333,7 +334,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     await expect(
       transport2.startInvocation({
         runtimeEndpoint: "https://agent.example.com",
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         idempotencyKey: "idem-1",
         requestBody: requestBody(),
       }),
@@ -346,7 +347,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     await expect(
       transport.startInvocation({
         runtimeEndpoint: "https://agent.example.com",
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         idempotencyKey: "idem-1",
         requestBody: requestBody(),
       }),
@@ -359,7 +360,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     await expect(
       transport2.startInvocation({
         runtimeEndpoint: "https://agent.example.com",
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         idempotencyKey: "idem-1",
         requestBody: requestBody(),
       }),
@@ -376,7 +377,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     });
     const resp = await transport.cancelInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       invocationId: "inv-1",
       idempotencyKey: "idem-cancel",
       requestBody: { reason: "user" },
@@ -394,7 +395,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     await expect(
       transport2.cancelInvocation({
         runtimeEndpoint: "https://agent.example.com",
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         invocationId: "inv-1",
         idempotencyKey: "idem",
         requestBody: { reason: "user" },
@@ -413,7 +414,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     const transport = makeTransport(fixture);
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -457,7 +458,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     });
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -512,7 +513,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     });
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -536,7 +537,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
       });
       await transport.startInvocation({
         runtimeEndpoint: "https://agent.example.com",
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         idempotencyKey: "idem-1",
         requestBody: requestBody(),
       });
@@ -565,7 +566,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     });
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -589,7 +590,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     });
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -626,7 +627,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     });
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -644,7 +645,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     });
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -659,7 +660,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     const transport = makeTransport(fixture);
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody(),
     });
@@ -675,7 +676,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     await expect(
       transport.startInvocation({
         runtimeEndpoint: "https://agent.example.com",
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         idempotencyKey: "idem-1",
         requestBody: requestBody(),
       }),
@@ -686,7 +687,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     await expect(
       transport2.startInvocation({
         runtimeEndpoint: "https://agent.example.com",
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         idempotencyKey: "idem-1",
         requestBody: requestBody(),
       }),
@@ -698,7 +699,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     const transport = makeTransport(fixture);
     await transport.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody({
         execution_subject: {
@@ -735,7 +736,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     const transport2 = makeTransport(fixture2);
     await transport2.startInvocation({
       runtimeEndpoint: "https://agent.example.com",
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody({
         execution_subject: {
@@ -759,7 +760,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     await expect(
       transport.steerInvocation({
         runtimeEndpoint: "https://agent.example.com",
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         invocationId: "inv-1",
         idempotencyKey: "idem",
         requestBody: { steer_payload: "x" },
@@ -775,7 +776,10 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
       }),
     ]);
     const transport = makeTransport(fixture);
-    const caps = await transport.probeCapabilities("https://agent.example.com", "token");
+    const caps = await transport.probeCapabilities("https://agent.example.com", {
+      mode: "bearer",
+      token: "token",
+    });
     expect(caps.features.event_stream).toBe(true);
     expect(caps.features.steer).toBe(false);
     // 标准路径唯一：恰一次 GET，且从不请求废弃 /.well-known/agent.json。
@@ -784,13 +788,46 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     expect(fixture.requests.some((r) => r.url.includes("/.well-known/agent.json"))).toBe(false);
   });
 
+  it("03 §9 boundary：auth=none 时 wire 上完全不发送 Authorization 头", async () => {
+    const fixture = createFixture([
+      sseResponse([
+        statusUpdate("working"),
+        statusUpdate("completed", "task-1", "ctx-1", "最终答复"),
+      ]),
+    ]);
+    const transport = makeTransport(fixture);
+    await transport.startInvocation({
+      runtimeEndpoint: "https://agent.example.com",
+      auth: { mode: "none" },
+      idempotencyKey: "idem-none",
+      requestBody: requestBody(),
+    });
+    const headers = fixture.requests[0]?.init.headers as Record<string, string>;
+    expect(headers.authorization).toBeUndefined();
+    expect(Object.keys(headers).some((k) => k.toLowerCase() === "authorization")).toBe(false);
+  });
+
+  it("03 §9 boundary：workload_token 本地 fail closed，不发任何网络请求", async () => {
+    const fixture = createFixture([]);
+    const transport = makeTransport(fixture);
+    await expect(
+      transport.startInvocation({
+        runtimeEndpoint: "https://agent.example.com",
+        auth: { mode: "workload_token", token: "internal-workload-token" },
+        idempotencyKey: "idem-wt",
+        requestBody: requestBody(),
+      }),
+    ).rejects.toThrow(OutboundRuntimeAuthError);
+    expect(fixture.requests).toHaveLength(0);
+  });
+
   it("错误分类为 RuntimeTransportError（稳定 kind，不暴露 SDK 异常字符串合同）", async () => {
     const fixture = createFixture([new Error("ECONNRESET")]);
     const transport = makeTransport(fixture);
     try {
       await transport.startInvocation({
         runtimeEndpoint: "https://agent.example.com",
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         idempotencyKey: "idem-1",
         requestBody: requestBody(),
       });

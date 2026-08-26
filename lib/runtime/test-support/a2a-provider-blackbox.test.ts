@@ -100,7 +100,10 @@ function requestBody(
 describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => {
   it("Agent Card：标准路径唯一（agent-card.json，不请求废弃 agent.json），公开 Capability Manifest 与 Invocation Context Contract", async () => {
     const { transport } = freshTransport();
-    const caps = await transport.probeCapabilities(provider.endpoint, "token");
+    const caps = await transport.probeCapabilities(provider.endpoint, {
+      mode: "bearer",
+      token: "token",
+    });
     expect(caps.features.event_stream).toBe(true);
     // Agent Card 通用扩展合同（07 §7）：明确版本、非函数列表、三种 necessity。
     expect(A2A_TEST_PROVIDER_CAPABILITY_MANIFEST.capabilities.length).toBeGreaterThanOrEqual(3);
@@ -120,7 +123,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     const { transport, batches } = freshTransport();
     const resp = await transport.startInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-completed",
       requestBody: requestBody(),
     });
@@ -146,7 +149,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     const { transport } = freshTransport();
     await transport.startInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-no-subject",
       requestBody: requestBody({ execution_subject: undefined }),
     });
@@ -162,14 +165,14 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     });
     const first = await transport.startInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-ctx-1",
       requestBody: requestBody({ invocation_id: "inv-ctx-1" }),
     });
     contextIds.push(first.runtime_session_ref);
     const second = await transport.startInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-ctx-2",
       requestBody: requestBody({ invocation_id: "inv-ctx-2" }),
     });
@@ -189,7 +192,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     });
     const resp = await transport.startInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-input",
       requestBody: requestBody(),
     });
@@ -208,7 +211,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     const startBatchCount = batches.length;
     const resumed = await transport.resumeInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       invocationId: "inv-1",
       idempotencyKey: "idem-resume",
       requestBody: {
@@ -248,7 +251,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     });
     const resp = await transport.startInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-corrupt",
       requestBody: requestBody(),
     });
@@ -260,7 +263,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     await expect(
       transport.resumeInvocation({
         runtimeEndpoint: provider.endpoint,
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         invocationId: "inv-1",
         idempotencyKey: "idem-resume-corrupt",
         requestBody: {
@@ -285,7 +288,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     });
     const resp = await transport.startInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-cancel",
       requestBody: requestBody(),
     });
@@ -293,7 +296,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     refs.sessionRef = resp.runtime_session_ref;
     const cancelled = await transport.cancelInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       invocationId: "inv-1",
       idempotencyKey: "idem-cancel-2",
       requestBody: { reason: "user" },
@@ -306,7 +309,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     const { transport, batches } = freshTransport();
     await transport.startInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-failed",
       requestBody: requestBody(),
     });
@@ -318,7 +321,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     await expect(
       freshTransport().transport.startInvocation({
         runtimeEndpoint: provider.endpoint,
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         idempotencyKey: "idem-rejected",
         requestBody: requestBody(),
       }),
@@ -328,7 +331,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     await expect(
       freshTransport().transport.startInvocation({
         runtimeEndpoint: provider.endpoint,
-        authToken: "token",
+        auth: { mode: "bearer", token: "token" },
         idempotencyKey: "idem-malformed",
         requestBody: requestBody(),
       }),
@@ -341,7 +344,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
     const { transport, batches } = freshTransport();
     await transport.startInvocation({
       runtimeEndpoint: provider.endpoint,
-      authToken: "token",
+      auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-echo",
       requestBody: requestBody(),
     });

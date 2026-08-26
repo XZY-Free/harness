@@ -78,9 +78,16 @@ export function createInProcessHostedRuntimeClient(params: {
         if (!invocation) return;
         pending.delete(invocationId);
 
+        // Hosted Runtime 只接受内部 Workload Token（03 §4/§9）。
+        if (invocation.request.auth.mode !== "workload_token") {
+          throw new Error(
+            `InProcessHostedRuntime 收到非法 auth mode（${invocation.request.auth.mode}）`,
+          );
+        }
+        const platformAuthToken = invocation.request.auth.token;
         const adapter: RuntimeAdapter = createHostedAdapter({
           platformEndpoint: "in-process://platform",
-          platformAuthToken: invocation.request.authToken,
+          platformAuthToken,
           modelRef,
           modelFn: params.modelFn,
           eventBatchSink: params.ingressEventBatch,
@@ -98,7 +105,7 @@ export function createInProcessHostedRuntimeClient(params: {
           workspace: invocation.request.requestBody.workspace ?? null,
           executionLimits: invocation.request.requestBody.execution_limits,
           traceContext: invocation.request.requestBody.trace_context,
-          authToken: invocation.request.authToken,
+          authToken: platformAuthToken,
         } satisfies StartInvocationParams);
         if (!started.accepted) {
           throw new Error(`InProcessHostedRuntime 拒绝 Invocation: ${invocationId}`);

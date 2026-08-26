@@ -388,14 +388,17 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
 function buildRuntimeEndpointResolution(runtimeRevisionId: string): RuntimeEndpointResolution {
   return {
     runtimeEndpoint: "https://runtime-hosted.internal",
-    authToken: issueWorkloadToken({
-      type: "runtime",
-      tenantId: "test-tenant",
-      invocationId: "test-invocation",
-      runtimeRevisionId,
-      audience: "runtime",
-      expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
-    }),
+    auth: {
+      mode: "workload_token",
+      token: issueWorkloadToken({
+        type: "runtime",
+        tenantId: "test-tenant",
+        invocationId: "test-invocation",
+        runtimeRevisionId,
+        audience: "runtime",
+        expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+      }),
+    },
     gatewayEndpoints: {
       events: "https://platform.internal/gateway/v1/events",
       cancel: "https://platform.internal/gateway/v1/cancel",
@@ -446,7 +449,10 @@ describe("S05-C02 probeRuntimeCapabilities", () => {
       probeCapabilities: async () => defaultRuntimeCapabilities(),
     });
 
-    const caps = await mockClient.probeCapabilities("https://rt.internal", "test-token");
+    const caps = await mockClient.probeCapabilities("https://rt.internal", {
+      mode: "workload_token",
+      token: "test-token",
+    });
 
     expect(caps.protocol_versions).toEqual(["2"]);
     expect(caps.features.event_stream).toBe(true);
@@ -468,11 +474,14 @@ describe("S05-C02 probeRuntimeCapabilities", () => {
 
   it("http client probeCapabilities 网络不可达 → RuntimeHttpClientError(kind=network)", async () => {
     const client = createHttpRuntimeClient({ timeoutMs: 1000 });
-    await expect(client.probeCapabilities("http://127.0.0.1:1", "token")).rejects.toThrow(
-      RuntimeHttpClientError,
-    );
+    await expect(
+      client.probeCapabilities("http://127.0.0.1:1", { mode: "workload_token", token: "token" }),
+    ).rejects.toThrow(RuntimeHttpClientError);
     try {
-      await client.probeCapabilities("http://127.0.0.1:1", "token");
+      await client.probeCapabilities("http://127.0.0.1:1", {
+        mode: "workload_token",
+        token: "token",
+      });
     } catch (err) {
       const e = err as RuntimeHttpClientError;
       expect(e.kind).toBe("network");
@@ -481,11 +490,17 @@ describe("S05-C02 probeRuntimeCapabilities", () => {
 
   it("mock probeCapabilities 未实现 handler → RuntimeHttpClientError(kind=protocol)", async () => {
     const mockClient = createMockRuntimeClient({});
-    await expect(mockClient.probeCapabilities("https://rt.internal", "token")).rejects.toThrow(
-      RuntimeHttpClientError,
-    );
+    await expect(
+      mockClient.probeCapabilities("https://rt.internal", {
+        mode: "workload_token",
+        token: "token",
+      }),
+    ).rejects.toThrow(RuntimeHttpClientError);
     try {
-      await mockClient.probeCapabilities("https://rt.internal", "token");
+      await mockClient.probeCapabilities("https://rt.internal", {
+        mode: "workload_token",
+        token: "token",
+      });
     } catch (err) {
       const e = err as RuntimeHttpClientError;
       expect(e.kind).toBe("protocol");
@@ -505,7 +520,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
 
     const response = await mockClient.startInvocation({
       runtimeEndpoint: "https://rt.internal",
-      authToken: "test-token",
+      auth: { mode: "workload_token", token: "test-token" },
       idempotencyKey: "invoke-test-1",
       requestBody: {
         protocol_version: RUNTIME_PROTOCOL_VERSION,
@@ -555,7 +570,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
     await expect(
       client.startInvocation({
         runtimeEndpoint: "http://127.0.0.1:1",
-        authToken: "token",
+        auth: { mode: "workload_token", token: "token" },
         idempotencyKey: "key-1",
         requestBody: {
           protocol_version: RUNTIME_PROTOCOL_VERSION,
@@ -605,7 +620,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
     await expect(
       mockClient.startInvocation({
         runtimeEndpoint: "https://rt.internal",
-        authToken: "token",
+        auth: { mode: "workload_token", token: "token" },
         idempotencyKey: "key-1",
         requestBody: {
           protocol_version: RUNTIME_PROTOCOL_VERSION,
@@ -655,7 +670,7 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
     try {
       await mockClient.startInvocation({
         runtimeEndpoint: "https://rt.internal",
-        authToken: "token",
+        auth: { mode: "workload_token", token: "token" },
         idempotencyKey: "key-1",
         requestBody: {
           protocol_version: RUNTIME_PROTOCOL_VERSION,

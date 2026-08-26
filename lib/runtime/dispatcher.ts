@@ -72,6 +72,7 @@ import {
   createConfiguredRouteResolver,
 } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import {
   DispatchTurnStateError,
   RuntimeHttpClientError,
@@ -179,8 +180,8 @@ export interface RuntimeDispatchResult {
 export interface RuntimeEndpointResolution {
   /** Runtime HTTP 端点基础 URL（如 https://runtime-1.internal）。 */
   runtimeEndpoint: string;
-  /** 短期 Workload Token（绑定 runtime_revision/invocation/租户）。 */
-  authToken: string;
+  /** Outbound auth（03 §8）：Hosted=Workload Token；External=CredentialRef 凭据。 */
+  auth: RuntimeTransportAuth;
   /** 平台 Gateway 回调端点（Runtime 通过这些 URL 上报事件和接收控制指令）。 */
   gatewayEndpoints: GatewayEndpoints;
   /** §24：下发给 Runtime 的 Governance Config 引用（Binding 冻结 Revision 的 configJson）。 */
@@ -223,7 +224,7 @@ export async function dispatchInvocationForTurn(params: {
   /** Runtime HTTP 客户端（不传则不调用 Runtime）。 */
   runtimeClient?: RuntimeHttpClient;
   /**
-   * 从 ExecutionBinding 解析 runtimeEndpoint/authToken/gatewayEndpoints 的解析器。
+   * 从 ExecutionBinding 解析 runtimeEndpoint/auth/gatewayEndpoints 的解析器。
    * 不传则不调用 Runtime（即使 runtimeClient 已传）。
    */
   runtimeEndpointResolver?: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
@@ -505,7 +506,7 @@ async function transitionTurnToQueued(params: {
  * 调用 Runtime HTTP 启动 Invocation（dispatchInvocationForTurn 内部 helper）。
  *
  * 流程：
- * 1. 通过 runtimeEndpointResolver 解析 runtimeEndpoint + authToken + gatewayEndpoints。
+ * 1. 通过 runtimeEndpointResolver 解析 runtimeEndpoint + auth + gatewayEndpoints。
  * 2. 读取 RuntimeRevision 获取 capabilities（用于 execution_limits）。
  * 3. 构造 StartInvocationRequestBody。
  * 4. 调用 runtimeClient.startInvocation。
@@ -534,8 +535,8 @@ async function dispatchToRuntime(params: {
   /** 服务端 Principal 生成的可信调用主体（06 §6）；可选（内部测试/基础路径）。 */
   executionSubject?: ExecutionSubject;
 }): Promise<RuntimeDispatchResult> {
-  // 1. 解析 runtimeEndpoint + authToken + gatewayEndpoints + governanceConfig + gatewayAccess
-  const { runtimeEndpoint, authToken, gatewayEndpoints, governanceConfig, gatewayAccess } =
+  // 1. 解析 runtimeEndpoint + auth + gatewayEndpoints + governanceConfig + gatewayAccess
+  const { runtimeEndpoint, auth, gatewayEndpoints, governanceConfig, gatewayAccess } =
     await params.runtimeEndpointResolver(params.binding);
 
   // 2. 读取 RuntimeRevision 获取 capabilities（用于 execution_limits）
@@ -637,7 +638,7 @@ async function dispatchToRuntime(params: {
   try {
     response = await params.runtimeClient.startInvocation({
       runtimeEndpoint,
-      authToken,
+      auth,
       idempotencyKey: params.idempotencyKey,
       requestBody,
     });

@@ -13,6 +13,7 @@
  * 禁止输入 framework name、Agent displayName、project path、业务判断（04 §3）。
  * 未知 protocolType → fail-closed（UnsupportedRuntimeProtocolError），无回退。
  */
+import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import type { RuntimeTransport } from "@/lib/runtime/transport/runtime-transport";
 
 /** protocolType 未注册（fail-closed，不回退到任何默认 Transport）。 */
@@ -27,8 +28,11 @@ export class UnsupportedRuntimeProtocolError extends Error {
 export type RuntimeTransportFactory = (input: {
   /** managed endpoint configuration（external endpoint URL 或 in-process 引用）。 */
   endpoint: string;
-  /** managed identity configuration（短期 Workload Token）。 */
-  authToken: string;
+  /**
+   * managed identity configuration（03 §8 协议中立）：
+   * Hosted = 短期 Workload Token；External = 唯一 resolver 解析的外部凭据。
+   */
+  auth: RuntimeTransportAuth;
 }) => RuntimeTransport;
 
 export type RuntimeTransportFactories = Partial<Record<string, RuntimeTransportFactory>>;
@@ -43,8 +47,11 @@ export interface ResolveRuntimeTransportInput {
   protocolType: string;
   /** managed endpoint configuration（external endpoint URL 或 in-process 引用）。 */
   endpoint: string;
-  /** managed identity configuration（短期 Workload Token）。 */
-  authToken: string;
+  /**
+   * managed identity configuration（03 §8 协议中立）：
+   * Hosted = 短期 Workload Token；External = 唯一 resolver 解析的外部凭据。
+   */
+  auth: RuntimeTransportAuth;
 }
 
 export type RuntimeTransportResolver = (
@@ -65,6 +72,6 @@ export function createRuntimeTransportResolver(
     if (!factory) {
       throw new UnsupportedRuntimeProtocolError(input.protocolType);
     }
-    return factory({ endpoint: input.endpoint, authToken: input.authToken });
+    return factory({ endpoint: input.endpoint, auth: input.auth });
   };
 }

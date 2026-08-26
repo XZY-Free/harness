@@ -12,8 +12,10 @@
  * - 五个端点：probeCapabilities / startInvocation / cancelInvocation / resumeInvocation / steerInvocation。
  *
  * 安全边界：
- * - 客户端只持有 runtimeEndpoint 和 authToken，不读数据库与平台 Secret。
- * - authToken 是短期 Workload Token（绑定 runtime_revision/invocation/租户），由调度器颁发。
+ * - 客户端只持有 runtimeEndpoint 和 auth（03 §8 协议中立 RuntimeTransportAuth），
+ *   不读数据库与平台 Secret。
+ * - auth 由调用方解析：Hosted = 短期 Workload Token；External = 唯一 resolver
+ *   resolveOutboundRuntimeAuth 解析的 CredentialRef 凭据；Transport 映射 HTTP header。
  * - 网络错误统一抛 RuntimeHttpClientError（kind=network），调度器据此判断是否重试。
  *
  * 关键约束：
@@ -24,6 +26,10 @@
  */
 
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/http";
+import {
+  type RuntimeTransportAuth,
+  outboundAuthHeaders,
+} from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 import type { ExecutionSubjectWire } from "@/lib/runtime/transport/execution-subject";
 
@@ -156,7 +162,7 @@ export interface StartInvocationResponse {
 /** startInvocation 请求参数。 */
 export interface StartInvocationRequest {
   runtimeEndpoint: string;
-  authToken: string;
+  auth: RuntimeTransportAuth;
   idempotencyKey: string;
   requestBody: StartInvocationRequestBody;
 }
@@ -177,7 +183,7 @@ export interface CancelInvocationResponse {
 /** cancelInvocation 请求参数。 */
 export interface CancelInvocationRequest {
   runtimeEndpoint: string;
-  authToken: string;
+  auth: RuntimeTransportAuth;
   invocationId: string;
   idempotencyKey: string;
   requestBody: CancelInvocationRequestBody;
@@ -209,7 +215,7 @@ export interface ResumeInvocationResponse {
 /** resumeInvocation 请求参数。 */
 export interface ResumeInvocationRequest {
   runtimeEndpoint: string;
-  authToken: string;
+  auth: RuntimeTransportAuth;
   invocationId: string;
   idempotencyKey: string;
   requestBody: ResumeInvocationRequestBody;
@@ -231,7 +237,7 @@ export interface SteerInvocationResponse {
 /** steerInvocation 请求参数。 */
 export interface SteerInvocationRequest {
   runtimeEndpoint: string;
-  authToken: string;
+  auth: RuntimeTransportAuth;
   invocationId: string;
   idempotencyKey: string;
   requestBody: SteerInvocationRequestBody;
@@ -241,7 +247,10 @@ export interface SteerInvocationRequest {
 
 /** Runtime HTTP 客户端接口。 */
 export interface RuntimeHttpClient {
-  probeCapabilities(endpoint: string, token: string): Promise<RuntimeCapabilitiesResponse>;
+  probeCapabilities(
+    endpoint: string,
+    auth: RuntimeTransportAuth,
+  ): Promise<RuntimeCapabilitiesResponse>;
   startInvocation(req: StartInvocationRequest): Promise<StartInvocationResponse>;
   cancelInvocation(req: CancelInvocationRequest): Promise<CancelInvocationResponse>;
   resumeInvocation(req: ResumeInvocationRequest): Promise<ResumeInvocationResponse>;
@@ -300,13 +309,15 @@ export function createHttpRuntimeClient(options?: {
   }
 
   return {
-    async probeCapabilities(endpoint: string, token: string): Promise<RuntimeCapabilitiesResponse> {
+    async probeCapabilities(
+      endpoint: string,
+      auth: RuntimeTransportAuth,
+    ): Promise<RuntimeCapabilitiesResponse> {
       const url = `${endpoint}/runtime/v1/capabilities?protocol_version=${RUNTIME_PROTOCOL_VERSION}`;
       const resp = await doFetch(url, {
         method: "GET",
-        headers: {
-          authorization: `Bearer ${token}`,
-        },
+        // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+        headers: outboundAuthHeaders(auth, { allowWorkloadToken: true }),
       });
       if (!resp.ok) {
         await throwHttpError(resp);
@@ -327,7 +338,8 @@ export function createHttpRuntimeClient(options?: {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${req.authToken}`,
+          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+          ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
           [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
         },
         body: JSON.stringify(req.requestBody),
@@ -351,7 +363,8 @@ export function createHttpRuntimeClient(options?: {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${req.authToken}`,
+          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+          ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
           [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
         },
         body: JSON.stringify(req.requestBody),
@@ -372,7 +385,8 @@ export function createHttpRuntimeClient(options?: {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${req.authToken}`,
+          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+          ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
           [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
         },
         body: JSON.stringify(req.requestBody),
@@ -393,7 +407,8 @@ export function createHttpRuntimeClient(options?: {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${req.authToken}`,
+          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+          ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
           [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
         },
         body: JSON.stringify(req.requestBody),
@@ -414,7 +429,10 @@ export function createHttpRuntimeClient(options?: {
 
 /** Mock 客户端的处理器集合（每个端点可独立 mock）。 */
 export interface MockRuntimeClientHandlers {
-  probeCapabilities?: (endpoint: string, token: string) => Promise<RuntimeCapabilitiesResponse>;
+  probeCapabilities?: (
+    endpoint: string,
+    auth: RuntimeTransportAuth,
+  ) => Promise<RuntimeCapabilitiesResponse>;
   startInvocation?: (req: StartInvocationRequest) => Promise<StartInvocationResponse>;
   cancelInvocation?: (req: CancelInvocationRequest) => Promise<CancelInvocationResponse>;
   resumeInvocation?: (req: ResumeInvocationRequest) => Promise<ResumeInvocationResponse>;
@@ -430,7 +448,7 @@ export interface MockRuntimeClientHandlers {
 export function createMockRuntimeClient(handlers: MockRuntimeClientHandlers): RuntimeHttpClient & {
   /** 累积调用记录，供测试断言。 */
   calls: {
-    probeCapabilities: Array<{ endpoint: string; token: string }>;
+    probeCapabilities: Array<{ endpoint: string; auth: RuntimeTransportAuth }>;
     startInvocation: StartInvocationRequest[];
     cancelInvocation: CancelInvocationRequest[];
     resumeInvocation: ResumeInvocationRequest[];
@@ -438,7 +456,7 @@ export function createMockRuntimeClient(handlers: MockRuntimeClientHandlers): Ru
   };
 } {
   const calls = {
-    probeCapabilities: [] as Array<{ endpoint: string; token: string }>,
+    probeCapabilities: [] as Array<{ endpoint: string; auth: RuntimeTransportAuth }>,
     startInvocation: [] as StartInvocationRequest[],
     cancelInvocation: [] as CancelInvocationRequest[],
     resumeInvocation: [] as ResumeInvocationRequest[],
@@ -448,12 +466,15 @@ export function createMockRuntimeClient(handlers: MockRuntimeClientHandlers): Ru
   return {
     calls,
 
-    async probeCapabilities(endpoint: string, token: string): Promise<RuntimeCapabilitiesResponse> {
-      calls.probeCapabilities.push({ endpoint, token });
+    async probeCapabilities(
+      endpoint: string,
+      auth: RuntimeTransportAuth,
+    ): Promise<RuntimeCapabilitiesResponse> {
+      calls.probeCapabilities.push({ endpoint, auth });
       if (!handlers.probeCapabilities) {
         throw new RuntimeHttpClientError("protocol", "mock probeCapabilities 未实现");
       }
-      return handlers.probeCapabilities(endpoint, token);
+      return handlers.probeCapabilities(endpoint, auth);
     },
 
     async startInvocation(req: StartInvocationRequest): Promise<StartInvocationResponse> {
