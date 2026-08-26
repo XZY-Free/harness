@@ -295,6 +295,64 @@ export async function removeCatalogEntry(params: {
   return result[0].affectedRows > 0;
 }
 
+// ─── 单 Agent 权威刷新（事件驱动）──────────────────────────
+
+/**
+ * 按权威 Agent 行刷新/创建单个 agent CatalogEntry（事件驱动入口）。
+ *
+ * 语义（员工 Catalog 事件投影，阶段 6 S06-C03 后续批）：
+ * - 精确读取单个 Agent（tenantId + agentId），不做全租户扫描。
+ * - Agent 存在且未软删 → refreshCatalogEntry（内部推进 employee CatalogRevision）。
+ * - Agent 不存在或已软删 → fail-closed：移除已有 entry（若有）并推进
+ *   employee CatalogRevision，使旧 ETag 失效。
+ *
+ * 抛出任何错误都由调用方（Outbox Delivery Worker）重试，不标记成功。
+ */
+export async function refreshAgentCatalogEntry(params: {
+  tenantId: string;
+  agentId: string;
+}): Promise<void> {
+  const [agentRow] = await db
+    .select({
+      id: agentTable.id,
+      displayName: agentTable.displayName,
+      description: agentTable.description,
+      ownerUserId: agentTable.ownerUserId,
+      lifecycleState: agentTable.lifecycleState,
+      updatedAt: agentTable.updatedAt,
+      deletedAt: agentTable.deletedAt,
+    })
+    .from(agentTable)
+    .where(and(eq(agentTable.tenantId, params.tenantId), eq(agentTable.id, params.agentId)))
+    .limit(1);
+
+  if (!agentRow || agentRow.deletedAt !== null) {
+    // fail-closed：资源不可见 → 移除读模型条目并推进修订号。
+    const removed = await removeCatalogEntry({
+      tenantId: params.tenantId,
+      resourceType: "agent",
+      resourceId: params.agentId,
+    });
+    if (removed) {
+      await advanceCatalogRevision({ tenantId: params.tenantId, audience: "employee" });
+    }
+    return;
+  }
+
+  await refreshCatalogEntry({
+    tenantId: params.tenantId,
+    resourceType: "agent",
+    resourceId: agentRow.id,
+    displayName: agentRow.displayName,
+    description: agentRow.description,
+    ownerUserId: agentRow.ownerUserId,
+    tagsJson: null,
+    lifecycleState: agentRow.lifecycleState,
+    visibilitySummary: "tenant",
+    sourceUpdatedAt: agentRow.updatedAt,
+  });
+}
+
 // ─── 事实源加载 ────────────────────────────────────────────
 
 /**

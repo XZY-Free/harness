@@ -20,11 +20,13 @@
  * - cursor 编码：base64url(JSON({catalogRevision, id}))；按 catalogRevision 降序 + id 升序游标。
  */
 import { db } from "@/lib/db/client";
+import { agentTable } from "@/lib/persistence/schema/agents";
 import {
   type CatalogEntry,
   type CatalogResourceType,
   catalogEntryTable,
 } from "@/lib/persistence/schema/catalog";
+import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { and, asc, desc, eq, gt, inArray, like, or, sql } from "drizzle-orm";
 
 // ─── 常量 ──────────────────────────────────────────────────
@@ -72,6 +74,42 @@ export interface CatalogSearchItem {
   etag: string;
 }
 
+// ─── 员工可执行 Agent 门禁 ─────────────────────────────────
+
+/**
+ * 员工端 Agent 可执行性门禁（correlated EXISTS）。
+ *
+ * 仅当调用方显式传入 routeScopeKey（如员工 Catalog API 的 "default"）时启用：
+ * - 非 Agent 资源不受影响（门禁只作用于 resourceType='agent'）。
+ * - Agent 条目必须同时满足：
+ *   a. 同 tenant 权威 Agent 未软删、lifecycle=enabled、currentRevisionId 非空；
+ *   b. 存在同 tenant/agent、routeScopeKey 匹配、eligibilityState=eligible 的
+ *      RouteEligibilityProjection。
+ * - EXISTS 语义天然去重：同一 Agent 多条 eligible route 只命中一次。
+ * - 未传 routeScopeKey（Admin Catalog 等）不启用门禁，行为不变。
+ */
+function employeeExecutableAgentGate(routeScopeKey: string) {
+  return sql`(
+    ${catalogEntryTable.resourceType} <> 'agent' OR (
+      EXISTS (
+        SELECT 1 FROM ${agentTable}
+        WHERE ${agentTable.id} = ${catalogEntryTable.resourceId}
+          AND ${agentTable.tenantId} = ${catalogEntryTable.tenantId}
+          AND ${agentTable.deletedAt} IS NULL
+          AND ${agentTable.lifecycleState} = 'enabled'
+          AND ${agentTable.currentRevisionId} IS NOT NULL
+      )
+      AND EXISTS (
+        SELECT 1 FROM ${routeEligibilityProjection}
+        WHERE ${routeEligibilityProjection.tenantId} = ${catalogEntryTable.tenantId}
+          AND ${routeEligibilityProjection.agentId} = ${catalogEntryTable.resourceId}
+          AND ${routeEligibilityProjection.routeScopeKey} = ${routeScopeKey}
+          AND ${routeEligibilityProjection.eligibilityState} = 'eligible'
+      )
+    )
+  )`;
+}
+
 // ─── listCatalogOptions ───────────────────────────────────
 
 /** listCatalogOptions 入参。 */
@@ -85,6 +123,12 @@ export interface ListCatalogOptionsParams {
   limit?: number;
   /** 不透明 cursor；不传则从最新条目开始。 */
   cursor?: string | null;
+  /**
+   * 员工可执行 Agent 门禁：显式传入 routeScopeKey（如 "default"）时，
+   * agent 条目必须存在该 scope 下 eligible 的 RouteEligibilityProjection 才返回。
+   * 不传则不启用门禁（Admin Catalog 查询不受影响）。
+   */
+  agentExecutableRouteScopeKey?: string;
 }
 
 /** listCatalogOptions 返回。 */
@@ -120,6 +164,10 @@ export async function listCatalogOptions(
   }
   if (params.lifecycleStates && params.lifecycleStates.length > 0) {
     conditions.push(inArray(catalogEntryTable.lifecycleState, [...params.lifecycleStates]));
+  }
+
+  if (params.agentExecutableRouteScopeKey) {
+    conditions.push(employeeExecutableAgentGate(params.agentExecutableRouteScopeKey));
   }
 
   if (params.cursor) {
@@ -182,6 +230,12 @@ export interface SearchCatalogParams {
   limit?: number;
   /** 不透明 cursor；不传则从最新条目开始。 */
   cursor?: string | null;
+  /**
+   * 员工可执行 Agent 门禁：显式传入 routeScopeKey（如 "default"）时，
+   * agent 条目必须存在该 scope 下 eligible 的 RouteEligibilityProjection 才返回。
+   * 不传则不启用门禁（Admin Catalog 查询不受影响）。
+   */
+  agentExecutableRouteScopeKey?: string;
 }
 
 /** searchCatalog 返回。 */
@@ -222,6 +276,10 @@ export async function searchCatalog(params: SearchCatalogParams): Promise<Search
   }
   if (params.lifecycleStates && params.lifecycleStates.length > 0) {
     conditions.push(inArray(catalogEntryTable.lifecycleState, [...params.lifecycleStates]));
+  }
+
+  if (params.agentExecutableRouteScopeKey) {
+    conditions.push(employeeExecutableAgentGate(params.agentExecutableRouteScopeKey));
   }
 
   if (params.cursor) {

@@ -8,6 +8,7 @@
  * 每个 Handler 幂等。
  */
 
+import { advanceCatalogRevision, refreshAgentCatalogEntry } from "@/lib/catalog/projector";
 import type { ControlPlaneEventType } from "@/lib/control-plane/events/control-plane-event";
 import type { ControlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { validateEventPayload } from "@/lib/control-plane/events/event-contracts";
@@ -274,6 +275,11 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
         // : 未知事件类型 — Fail-loud，不标记成功
         throw new ControlPlaneEventUnsupportedError(event.eventType, "switch 未覆盖的事件类型");
     }
+
+    // ─── 员工 Catalog 读模型（第二阶段）────────────────
+    // 只有上面 Route 投影处理全部成功后才执行；任何失败都向上抛出，
+    // 让 Outbox Delivery Worker retry，绝不标记成功（§4 幂等 + fail-loud）。
+    await projectEmployeeCatalog(event, payload);
   };
 
   /**
@@ -307,5 +313,40 @@ export function createProjectionEventHandler(deps: ProjectionEventHandlerDeps): 
     for (const { routeId } of routes) {
       await deps.store.markIneligible(routeId, reason);
     }
+  }
+}
+
+// ─── 员工 Catalog 读模型编排 ────────────────────────────────
+
+/**
+ * 在 Route 投影处理成功后更新员工 Catalog 读模型（单一 consumer，无第二消费者）。
+ *
+ * - agent.revision.published / agent.lifecycle.changed：按 event.tenantId + payload.agent_id
+ *   精确读取权威 Agent 行刷新/创建 agent CatalogEntry（refresh 内部推进
+ *   employee CatalogRevision，本事件不再重复推进）。Agent 不存在/已软删时
+ *   fail-closed：移除已有 entry（若有）并推进修订号。
+ * - 其余本 consumer 已订阅、可能改变路由资格的事件：推进该 tenant 的
+ *   employee CatalogRevision，使旧 ETag 失效（员工重新拉取最新目录）。
+ *
+ * 任何错误向上抛出 → Delivery retry；重复投递只会多增修订号（单调递增），
+ * 读模型状态保持幂等 — 不是严格 exactly-once。
+ */
+async function projectEmployeeCatalog(
+  event: ControlPlaneOutboxEvent,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const tenantId = event.tenantId;
+
+  switch (event.eventType) {
+    case "agent.revision.published":
+    case "agent.lifecycle.changed": {
+      const agentId = payload.agent_id as string;
+      // refresh 内部已推进 CatalogRevision，本事件不再重复推进。
+      await refreshAgentCatalogEntry({ tenantId, agentId });
+      break;
+    }
+    default:
+      await advanceCatalogRevision({ tenantId, audience: "employee" });
+      break;
   }
 }

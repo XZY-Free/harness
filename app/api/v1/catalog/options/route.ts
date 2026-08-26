@@ -168,6 +168,10 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   // 4. 执行查询
+  // 员工 Catalog API 对 agent 条目显式启用 default 路由可执行性门禁：
+  // 只有存在 routeScopeKey=default、eligibilityState=eligible 的
+  // RouteEligibilityProjection 且权威 Agent enabled/未删/currentRevisionId 非空的
+  // Agent 才返回（阶段 6 S06-C03 后续批）。
   let result: {
     items: CatalogSearchItem[];
     next_cursor: string | null;
@@ -182,6 +186,7 @@ export async function GET(request: Request): Promise<Response> {
         lifecycleStates,
         limit,
         cursor: cursor ?? null,
+        agentExecutableRouteScopeKey: "default",
       });
       result = searchResult;
     } else {
@@ -191,6 +196,7 @@ export async function GET(request: Request): Promise<Response> {
         lifecycleStates,
         limit,
         cursor: cursor ?? null,
+        agentExecutableRouteScopeKey: "default",
       });
       result = listResult;
     }
@@ -202,11 +208,13 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   // 5. 返回 200 + ETag
+  // catalog_revision 与 ETag 同源（当前 tenant+employee CatalogRevision），
+  // 即使过滤后 items 为空也不回落 0。
   return apiSuccess(
     {
       items: result.items,
       next_cursor: result.next_cursor,
-      catalog_revision: result.catalog_revision,
+      catalog_revision: currentRevision,
     },
     {
       status: 200,
