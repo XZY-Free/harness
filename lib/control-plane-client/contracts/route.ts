@@ -77,6 +77,25 @@ export interface RouteActivationDTO {
   activated_at: string;
 }
 
+/** RouteSet create-or-reuse（ensure）请求 — 严格三 key，无需知道 RouteSet id。 */
+export interface EnsureRouteSetRequest {
+  agent_id: string;
+  route_scope_key: string;
+  route_scope: Record<string, unknown>;
+}
+
+/** RouteSet ensure 响应 — 与详情 DTO 不同，不含 tenant_id。 */
+export interface EnsureRouteSetResponse {
+  id: string;
+  agent_id: string;
+  route_scope_key: string;
+  route_scope: unknown;
+  version_no: number;
+  created_at: string;
+  updated_at: string;
+  created: boolean;
+}
+
 /** RouteSet 激活请求。 */
 export interface ActivateRouteSetRequest {
   expected_version_no: number;

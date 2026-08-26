@@ -12,6 +12,8 @@ import type {
   DeploymentRouteSetDTO,
   DisableRouteRequest,
   DisableRouteResponse,
+  EnsureRouteSetRequest,
+  EnsureRouteSetResponse,
 } from "../contracts/route";
 import { type ApiClientConfig, createControlPlaneRequest } from "../http-client";
 
@@ -23,6 +25,11 @@ export interface RouteApiClient {
   listRoutes(routeSetId: string): Promise<{ items: DeploymentRouteDTO[]; total: number }>;
   /** 获取 Route 详情。 */
   getRoute(routeId: string): Promise<DeploymentRouteDTO>;
+  /** RouteSet create-or-reuse（默认 scope）— 必填 Idempotency-Key。 */
+  ensureRouteSet(
+    body: EnsureRouteSetRequest,
+    opts: { idempotencyKey: string },
+  ): Promise<EnsureRouteSetResponse>;
   /** RouteSet 原子激活 — 必填 Idempotency-Key + If-Match。 */
   activateRouteSet(
     routeSetId: string,
@@ -50,6 +57,14 @@ export function createRouteApiClient(config: ApiClientConfig): RouteApiClient {
       ),
     getRoute: (routeId) =>
       request<DeploymentRouteDTO>(`/admin/api/v1/deployment-routes/${routeId}`),
+    ensureRouteSet: (body, opts) =>
+      request<EnsureRouteSetResponse>("/admin/api/v1/deployment-route-sets", {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: {
+          "Idempotency-Key": opts.idempotencyKey,
+        },
+      }),
     activateRouteSet: (routeSetId, body, opts) =>
       request<ActivateRouteSetResponse>(
         `/admin/api/v1/deployment-route-sets/${routeSetId}/activation`,

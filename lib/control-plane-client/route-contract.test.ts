@@ -131,6 +131,12 @@ const CONTRACTS = [
     "app/admin/api/v1/deployment-routes/[route_id]/disable/route.ts",
     "POST",
   ],
+  [
+    "routes.ts",
+    "/admin/api/v1/deployment-route-sets",
+    "app/admin/api/v1/deployment-route-sets/route.ts",
+    "POST",
+  ],
   ["runtimes.ts", "/admin/api/v1/runtimes", "app/admin/api/v1/runtimes/route.ts", "GET"],
   [
     "runtimes.ts",
