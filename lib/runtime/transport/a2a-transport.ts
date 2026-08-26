@@ -24,6 +24,7 @@ import {
   type RuntimeTransportAuth,
   outboundAuthHeaders,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
+import { IngressInvocationTerminalError } from "@/lib/runtime/errors";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import type {
   CancelInvocationRequest,
@@ -201,7 +202,32 @@ export interface CreateA2ATransportParams {
   fetchImpl?: typeof fetch;
   /** 流读取超时（ms；缺省 300s）。 */
   streamTimeoutMs?: number;
+  /**
+   * 背景流失败上报（06 §3）：Transport 只报告 invocationId/failureKind/safeSummary，
+   * 不直接写 DB；外层 orchestration 再调用正式 markInvocationLost。
+   */
+  onBackgroundFailure?: A2ABackgroundFailureHandler;
 }
+
+/** 06 §4：背景流失败种类（固定合同，不把第三方 exception class 当合同）。 */
+export type A2ABackgroundFailureKind =
+  | "stream_eof_before_terminal"
+  | "stream_read_failed"
+  | "protocol_parse_failed"
+  | "ingress_failed"
+  | "correlation_lost";
+
+/** 06 §3：背景失败报告（只含 safe ids/failureKind/摘要）。 */
+export interface A2ABackgroundFailureReport {
+  readonly invocationId: string;
+  readonly failureKind: A2ABackgroundFailureKind;
+  readonly safeSummary: string;
+}
+
+/** 06 §3：Transport 只报告；恢复动作由外层注入的 handler 执行。 */
+export type A2ABackgroundFailureHandler = (
+  report: A2ABackgroundFailureReport,
+) => void | Promise<void>;
 
 /**
  * 创建 A2A 0.3.0 Transport（实现 RuntimeHttpClient 五端点形状）。
@@ -694,7 +720,40 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
         );
       }
 
-      // 批次进入归一化 ingress（幂等/终态拒绝按 Hosted 容错语义忽略）。
+      // ─── 06 §5/§6/§7/§8：detached stream 显式终态跟踪 + 背景失败上报 ───
+      // terminalObserved：明确 terminal event 已成功进入 Ingress 后置 true；
+      // waitingUserObserved：user_action.requested 已成功进入 Ingress 后置 true。
+      let terminalObserved = false;
+      let waitingUserObserved = false;
+      let backgroundFailureReported = false;
+      const reportBackgroundFailure = async (
+        failureKind: A2ABackgroundFailureKind,
+        safeSummary: string,
+      ): Promise<void> => {
+        if (backgroundFailureReported) return;
+        backgroundFailureReported = true;
+        if (!params.onBackgroundFailure) return;
+        try {
+          await params.onBackgroundFailure({
+            invocationId: body.invocation_id,
+            failureKind,
+            safeSummary,
+          });
+        } catch {
+          // handler 自身异常不改变流消费事实（06 §9 handler 幂等兜底）。
+        }
+      };
+
+      const isTerminalEvent = (type: string): boolean =>
+        type === "execution.completed" ||
+        type === "execution.failed" ||
+        type === "execution.cancelled";
+
+      // 批次进入归一化 ingress（06 §7：只忽略 typed expected condition）。
+      // 幂等重放由 ingress 静默复用（不抛错）；IngressInvocationTerminalError =
+      // 同批次前序终态已推进、后序冗余终态被拒绝 → 可忽略；
+      // 其余（DB error / schema / hash/sequence conflict / unknown ingress exception）
+      // 一律 onBackgroundFailure(ingress_failed) 并停止消费。
       const flushBatches = async (): Promise<void> => {
         for (const batch of pendingBatches.splice(0)) {
           try {
@@ -703,26 +762,72 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
               events: batch.events,
               producerSequenceStart: batch.start,
             });
-          } catch {
-            // ingress 幂等/终态拒绝与 Hosted 容错语义一致（终态后事件忽略）。
+          } catch (err) {
+            if (err instanceof IngressInvocationTerminalError) {
+              terminalObserved = true;
+              continue;
+            }
+            await reportBackgroundFailure(
+              "ingress_failed",
+              err instanceof Error ? err.message : "A2A 事件批次 ingress 失败",
+            );
+            throw err;
+          }
+          if (batch.events.some((e) => isTerminalEvent(e.type))) terminalObserved = true;
+          if (batch.events.some((e) => e.type === "user_action.requested")) {
+            waitingUserObserved = true;
           }
         }
       };
 
       // 后台消费剩余流 → Mapper → eventBatchSink（04 §6：只经归一化 ingress）。
+      // 06 §8：reader/network error → stream_read_failed；malformed JSON/protocol →
+      // protocol_parse_failed；remote explicit terminal（failed/rejected/canceled）
+      // 是协议终态（execution.failed/cancelled），不是 lost。
       const consumeRest = async (): Promise<void> => {
-        try {
-          while (!streamDone) {
+        let stopped = false;
+        while (!streamDone && !stopped) {
+          try {
             await collectOneEvent();
-            await flushBatches();
+          } catch (err) {
+            stopped = true;
+            if (err instanceof RuntimeTransportError && err.kind === "protocol_schema") {
+              await reportBackgroundFailure(
+                "protocol_parse_failed",
+                "A2A SSE data 不是合法协议事件",
+              );
+            } else {
+              await reportBackgroundFailure(
+                "stream_read_failed",
+                err instanceof Error ? err.message : "A2A stream 读取失败",
+              );
+            }
+            break;
           }
-        } catch {
-          // 中断已由 deadline/reader 错误表达；不再向调度方抛出（后台任务）。
+          try {
+            await flushBatches();
+          } catch {
+            // flushBatches 已上报 ingress_failed；停止消费（06 §7）。
+            stopped = true;
+            break;
+          }
         }
-        await flushBatches();
+        if (stopped) return;
+        // 正常 EOF：冲刷尾部批次后按 06 §6 判定。
+        try {
+          await flushBatches();
+        } catch {
+          return;
+        }
+        if (!terminalObserved && !waitingUserObserved) {
+          await reportBackgroundFailure(
+            "stream_eof_before_terminal",
+            "A2A stream EOF 前未观察到 terminal 或 input-required 事件",
+          );
+        }
       };
       const background = consumeRest();
-      // 保存后台 promise，避免 unhandled rejection（consumeRest 内部已吞错）。
+      // 保存后台 promise，避免 unhandled rejection（失败已按 06 §3 上报）。
       void background.catch(() => {});
 
       return {

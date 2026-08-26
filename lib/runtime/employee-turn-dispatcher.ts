@@ -8,6 +8,7 @@ import { logger } from "@/lib/logger";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import { handleA2ABackgroundFailure } from "@/lib/runtime/a2a-background-failure-handler";
 import type { HostedModelContext } from "@/lib/runtime/adapters/hosted-adapter";
 import { resolveRuntimeLevelCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import {
@@ -194,6 +195,10 @@ export async function dispatchEmployeeTurn(params: {
             resume: runtimeLevelCapabilities.resume,
             steer: runtimeLevelCapabilities.steer,
           },
+          // 06 §9：背景流失败 handler —— 复用现有 Recovery Authority，
+          // 已终态/waiting_user 幂等 no-op，其余 markInvocationLost。
+          onBackgroundFailure: (report) =>
+            handleA2ABackgroundFailure({ tenantId: params.tenantId, report }),
           eventBatchSink: async ({ invocationId, events, producerSequenceStart }) => {
             await ingressEventBatch({
               tenantId: params.tenantId,

@@ -1,4 +1,5 @@
 import { OutboundRuntimeAuthError } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
+import { IngressInvocationTerminalError } from "@/lib/runtime/errors";
 import type { StartInvocationRequestBody } from "@/lib/runtime/runtime-client";
 /**
  * A2A Transport 测试 — Batch 6 Gate（04 §9）；HR 公开合同 wire 冻结版。
@@ -894,5 +895,179 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
       expect(err).toBeInstanceOf(RuntimeTransportError);
       expect((err as RuntimeTransportError).kind).toBe("stream_interrupted");
     }
+  });
+});
+
+// ─── 06 §12：detached stream 异常终态与 Recovery ──────────────────────────────
+
+/** 等待条件成立（背景流消费是异步任务）。 */
+async function waitUntil(predicate: () => boolean, ms = 1_000): Promise<void> {
+  for (let i = 0; i < ms / 5 && !predicate(); i++) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+/**
+ * 中途 socket 断开的 SSE 流：逐块发出给定 raw 片段（每块单独一次 read），
+ * 发完后 reader 抛错（模拟 provider 断连）。
+ */
+function sseChunksThenError(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  const pending = [...chunks];
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const chunk = pending.shift();
+      if (chunk === undefined) {
+        controller.error(new Error("socket reset by peer"));
+        return;
+      }
+      controller.enqueue(encoder.encode(chunk));
+    },
+  });
+  return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+function startRequest() {
+  return {
+    runtimeEndpoint: "https://agent.example.com",
+    auth: { mode: "bearer", token: "token" } as const,
+    idempotencyKey: `idem-${Math.random().toString(36).slice(2)}`,
+    requestBody: requestBody(),
+  };
+}
+
+describe("createA2ATransport — 背景流终态与 Recovery（06 §5–§12）", () => {
+  it("completed → EOF：completed，不 lost（不上报背景失败）", async () => {
+    const fixture = createFixture([
+      sseResponse([statusUpdate("working"), statusUpdate("completed", "task-1", "ctx-1", "答复")]),
+    ]);
+    const failures: string[] = [];
+    const transport = makeTransport(fixture, {
+      onBackgroundFailure: (report) => {
+        failures.push(report.failureKind);
+      },
+    });
+    const resp = await transport.startInvocation(startRequest());
+    expect(resp.accepted).toBe(true);
+    await waitUntil(() => fixture.batches.length >= 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(failures).toEqual([]);
+  });
+
+  it("input-required → EOF：waiting_user，不 lost（06 §6：EOF 也正常）", async () => {
+    const fixture = createFixture([
+      sseResponse([statusUpdate("working"), statusUpdate("input-required")]),
+    ]);
+    const failures: string[] = [];
+    const transport = makeTransport(fixture, {
+      onBackgroundFailure: (report) => {
+        failures.push(report.failureKind);
+      },
+    });
+    await transport.startInvocation(startRequest());
+    await waitUntil(() => fixture.batches.length >= 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(failures).toEqual([]);
+  });
+
+  it("working → socket close：stream_read_failed → lost", async () => {
+    const fixture = createFixture([sseChunksThenError([`data: ${statusUpdate("working")}\n\n`])]);
+    const failures: Array<{ invocationId: string; failureKind: string }> = [];
+    const transport = makeTransport(fixture, {
+      onBackgroundFailure: (report) => {
+        failures.push({ invocationId: report.invocationId, failureKind: report.failureKind });
+      },
+    });
+    await transport.startInvocation(startRequest());
+    await waitUntil(() => failures.length > 0);
+    expect(failures).toEqual([{ invocationId: "inv-1", failureKind: "stream_read_failed" }]);
+  });
+
+  it("malformed JSON：lost + protocol_parse_failed", async () => {
+    const fixture = createFixture([
+      sseChunksThenError([`data: ${statusUpdate("working")}\n\n`, "data: {invalid\n\n"]),
+    ]);
+    const failures: string[] = [];
+    const transport = makeTransport(fixture, {
+      onBackgroundFailure: (report) => {
+        failures.push(report.failureKind);
+      },
+    });
+    await transport.startInvocation(startRequest());
+    await waitUntil(() => failures.length > 0);
+    expect(failures).toEqual(["protocol_parse_failed"]);
+  });
+
+  it("event sink DB error：ingress_failed → lost，停止消费", async () => {
+    const fixture = createFixture([sseResponse([statusUpdate("working")])]);
+    const failures: string[] = [];
+    let sinkCalls = 0;
+    const transport = makeTransport(fixture, {
+      eventBatchSink: async () => {
+        sinkCalls += 1;
+        throw new Error("db: connection refused");
+      },
+      onBackgroundFailure: (report) => {
+        failures.push(report.failureKind);
+      },
+    });
+    await transport.startInvocation(startRequest());
+    await waitUntil(() => failures.length > 0);
+    expect(failures).toEqual(["ingress_failed"]);
+    // 停止消费：sink 不再被反复调用。
+    const settled = sinkCalls;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sinkCalls).toBe(settled);
+  });
+
+  it("remote failed：execution.failed 协议终态，不 lost", async () => {
+    const fixture = createFixture([
+      sseResponse([statusUpdate("working"), statusUpdate("failed", "task-1", "ctx-1", "出错")]),
+    ]);
+    const failures: string[] = [];
+    const transport = makeTransport(fixture, {
+      onBackgroundFailure: (report) => {
+        failures.push(report.failureKind);
+      },
+    });
+    await transport.startInvocation(startRequest());
+    await waitUntil(() => fixture.batches.length >= 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(failures).toEqual([]);
+    expect(fixture.batches.some((b) => b.events.some((e) => e.type === "execution.failed"))).toBe(
+      true,
+    );
+  });
+
+  it("completed 后 late duplicate terminal：typed ignore，不 lost", async () => {
+    const fixture = createFixture([
+      sseResponse([
+        statusUpdate("working"),
+        statusUpdate("completed", "task-1", "ctx-1", "答复"),
+        statusUpdate("completed", "task-1", "ctx-1", "答复"),
+      ]),
+    ]);
+    const failures: string[] = [];
+    let terminalInIngress = false;
+    const transport = makeTransport(fixture, {
+      eventBatchSink: async (batch) => {
+        const terminal = batch.events.some((e) => e.type === "execution.completed");
+        if (terminal) {
+          if (terminalInIngress) {
+            // 冗余终态：ingress 拒绝（同批次前序终态已推进）。
+            throw new IngressInvocationTerminalError(batch.invocationId, "completed");
+          }
+          terminalInIngress = true;
+        }
+      },
+      onBackgroundFailure: (report) => {
+        failures.push(report.failureKind);
+      },
+    });
+    await transport.startInvocation(startRequest());
+    await waitUntil(() => fixture.batches.length >= 1);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(failures).toEqual([]);
+    expect(terminalInIngress).toBe(true);
   });
 });
