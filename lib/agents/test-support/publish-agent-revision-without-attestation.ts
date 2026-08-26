@@ -116,6 +116,8 @@ export function createPublishAgentRevisionWithoutAttestation(dependencies: {
           agentId: revision.agentId,
           revisionId: revision.id,
           expectedVersionNo: command.agentExpectedVersionNo,
+          // 与正式发布一致的生命周期不变量：draft→enabled，其余保持原状
+          lifecycleState: agent.lifecycleState === "draft" ? "enabled" : agent.lifecycleState,
           updatedAt: publishedAt,
         }))
       ) {

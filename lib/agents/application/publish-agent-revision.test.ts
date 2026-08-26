@@ -26,7 +26,7 @@ import {
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { agentRevisionTable } from "@/lib/persistence/schema/agents";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
@@ -215,6 +215,8 @@ describe("PublishAgentRevision Application Service", () => {
     const agent = await getAgentById(fixture.tenantId, fixture.agent.id);
     expect(agent?.currentRevisionId).toBe(fixture.revision.id);
     expect(agent?.versionNo).toBe(fixture.agent.versionNo + 1);
+    // 生命周期不变量：draft Agent 首次发布在同一事务内原子启用
+    expect(agent?.lifecycleState).toBe("enabled");
 
     const revisions = await getRevisionsByAgent(fixture.agent.id);
     expect(revisions).toHaveLength(1);
@@ -244,6 +246,82 @@ describe("PublishAgentRevision Application Service", () => {
     });
   });
 
+  it("首次发布 draft Agent 的合法 AgentRevision 时在同一事务内原子启用 Agent", async () => {
+    const fixture = await seedPublicationFixture();
+    const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
+
+    // 前置：合同登记创建的 Agent 一定是 draft，且从未发布
+    expect((await getAgentById(fixture.tenantId, fixture.agent.id))?.lifecycleState).toBe("draft");
+
+    const result = await publishAgentRevision({
+      ...publicationCommand(fixture),
+      idempotency: undefined,
+    });
+
+    expect(result.revision.revisionState).toBe("published");
+    const agent = await getAgentById(fixture.tenantId, fixture.agent.id);
+    // 精确冻结：enabled + current revision + version 只增加一次，全部由同一发布事务完成
+    expect(agent?.lifecycleState).toBe("enabled");
+    expect(agent?.currentRevisionId).toBe(fixture.revision.id);
+    expect(agent?.versionNo).toBe(fixture.agent.versionNo + 1);
+  });
+
+  it("已 enabled 的 Agent 发布新 revision 保持 enabled，version 每次只增加一次", async () => {
+    const fixture = await seedPublicationFixture();
+    const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
+
+    // 第一次发布：draft → enabled
+    await publishAgentRevision({ ...publicationCommand(fixture), idempotency: undefined });
+    const afterFirstPublish = await getAgentById(fixture.tenantId, fixture.agent.id);
+    expect(afterFirstPublish?.lifecycleState).toBe("enabled");
+
+    // 第二次发布：新 revision，Agent 原本 enabled
+    const secondRevision = await createDraftRevisionWithContractSnapshot({
+      tenantId: fixture.tenantId,
+      agentId: fixture.agent.id,
+      modelPolicyJson: { model: "gpt-4o" },
+      permissionRequirementsJson: {},
+      delegationPolicyJson: {},
+      agentInterfaceRequirementsJson: { required: [], optional: [] },
+      createdBy: fixture.ownerId,
+    });
+    await ensureAgentContractSnapshotBoundForRevision(secondRevision.id, fixture.tenantId);
+
+    const result = await publishAgentRevision({
+      ...publicationCommand(fixture),
+      revisionId: secondRevision.id,
+      agentExpectedVersionNo: afterFirstPublish!.versionNo,
+      idempotency: undefined,
+    });
+
+    expect(result.revision.revisionState).toBe("published");
+    const agent = await getAgentById(fixture.tenantId, fixture.agent.id);
+    expect(agent?.lifecycleState).toBe("enabled");
+    expect(agent?.currentRevisionId).toBe(secondRevision.id);
+    expect(agent?.versionNo).toBe(afterFirstPublish!.versionNo + 1);
+  });
+
+  it("disabled 的 Agent 允许发布新 revision 但保持 disabled，绝不因发布被重新启用", async () => {
+    const fixture = await seedPublicationFixture();
+    await db
+      .update(agentTable)
+      .set({ lifecycleState: "disabled" })
+      .where(eq(agentTable.id, fixture.agent.id));
+    const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
+
+    const result = await publishAgentRevision({
+      ...publicationCommand(fixture),
+      idempotency: undefined,
+    });
+
+    expect(result.revision.revisionState).toBe("published");
+    const agent = await getAgentById(fixture.tenantId, fixture.agent.id);
+    expect(agent?.currentRevisionId).toBe(fixture.revision.id);
+    expect(agent?.versionNo).toBe(fixture.agent.versionNo + 1);
+    // 发布不允许偷偷重新启用
+    expect(agent?.lifecycleState).toBe("disabled");
+  });
+
   it("两个并发发布只有一个提交，且不会产生重复 Audit 或 Outbox", async () => {
     const fixture = await seedPublicationFixture();
     const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
@@ -257,9 +335,11 @@ describe("PublishAgentRevision Application Service", () => {
     expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
     expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
     expect((await getRevisionById(fixture.revision.id))?.revisionState).toBe("published");
-    expect((await getAgentById(fixture.tenantId, fixture.agent.id))?.currentRevisionId).toBe(
-      fixture.revision.id,
-    );
+    const agent = await getAgentById(fixture.tenantId, fixture.agent.id);
+    expect(agent?.currentRevisionId).toBe(fixture.revision.id);
+    // 幂等/并发：竞争失败方不重放成功方事务，version 只增加一次，lifecycle 只迁移一次
+    expect(agent?.versionNo).toBe(fixture.agent.versionNo + 1);
+    expect(agent?.lifecycleState).toBe("enabled");
     expect(
       await listAuditEvents({
         tenantId: fixture.tenantId,
@@ -301,7 +381,9 @@ describe("PublishAgentRevision Application Service", () => {
     ).rejects.toBeInstanceOf(AgentRevisionPublicationNotFoundError);
 
     expect((await getRevisionById(fixture.revision.id))?.revisionState).toBe("draft");
-    expect((await getAgentById(fixture.tenantId, fixture.agent.id))?.currentRevisionId).toBeNull();
+    const untouchedAgent = await getAgentById(fixture.tenantId, fixture.agent.id);
+    expect(untouchedAgent?.currentRevisionId).toBeNull();
+    expect(untouchedAgent?.lifecycleState).toBe("draft");
   });
 
   it.each<PublicationStep>([
@@ -334,6 +416,8 @@ describe("PublishAgentRevision Application Service", () => {
     const agent = await getAgentById(fixture.tenantId, fixture.agent.id);
     expect(agent?.currentRevisionId).toBeNull();
     expect(agent?.versionNo).toBe(fixture.agent.versionNo);
+    // 回滚不变量：发布失败绝不留下 enabled 的 draft 流程 Agent
+    expect(agent?.lifecycleState).toBe("draft");
     expect(
       await listAuditEvents({
         tenantId: fixture.tenantId,

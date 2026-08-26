@@ -128,12 +128,17 @@ export function createPublishAgentRevision(dependencies: {
           "Revision 已被并发发布或状态已变化",
         );
       }
+      // 生命周期不变量：首个正式发布把 draft 原子迁移为 enabled（同一事务、同一次 update）；
+      // enabled/disabled 保持原状，发布绝不偷偷重新启用。
+      const nextLifecycleState =
+        agent.lifecycleState === "draft" ? "enabled" : agent.lifecycleState;
       if (
         !(await session.setAgentCurrentRevision({
           tenantId: command.tenantId,
           agentId: revision.agentId,
           revisionId: revision.id,
           expectedVersionNo: command.agentExpectedVersionNo,
+          lifecycleState: nextLifecycleState,
           updatedAt: publishedAt,
         }))
       ) {

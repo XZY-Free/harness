@@ -1,4 +1,5 @@
 import type { AgentRevisionPublicationState } from "@/lib/agents/domain/agent-revision-publication-policy";
+import type { AgentLifecycleState } from "@/lib/persistence/schema/agents";
 
 export interface AgentPublicationRevision {
   id: string;
@@ -14,6 +15,7 @@ export interface AgentPublicationAgent {
   id: string;
   tenantId: string;
   versionNo: number;
+  lifecycleState: AgentLifecycleState;
 }
 
 /** 发布冻结的 Agent Contract 证据（权威外部合同来源）。 */
@@ -61,6 +63,8 @@ export interface AgentPublicationSession {
     agentId: string;
     revisionId: string;
     expectedVersionNo: number;
+    /** 事务内基于锁定读到的 Agent lifecycle 决定的目标状态（draft→enabled，其余保持原状）。 */
+    lifecycleState: AgentLifecycleState;
     updatedAt: Date;
   }): Promise<boolean>;
   appendAudit(params: {

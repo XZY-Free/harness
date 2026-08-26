@@ -36,7 +36,8 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
             .select()
             .from(agentTable)
             .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
-            .limit(1);
+            .limit(1)
+            .for("update");
           return agent ?? null;
         },
         async findContractSnapshot(tenantId, snapshotId) {
@@ -99,6 +100,7 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
             .set({
               currentRevisionId: params.revisionId,
               versionNo: params.expectedVersionNo + 1,
+              lifecycleState: params.lifecycleState,
               updatedAt: params.updatedAt,
             })
             .where(
