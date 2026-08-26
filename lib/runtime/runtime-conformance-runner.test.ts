@@ -22,7 +22,10 @@ import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { db } from "@/lib/db/client";
 import { assertCrossTenantHidden, buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { getIdempotencyRecordById } from "@/lib/identity/idempotency-queries";
+import {
+  findIdempotencyRecord,
+  getIdempotencyRecordById,
+} from "@/lib/identity/idempotency-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
@@ -67,6 +70,7 @@ import {
   createDraftRuntimeRevision,
   getRuntimeRevisionById,
 } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { listRuntimeConformanceRuns } from "@/lib/runtime/provisioning/runtime-conformance-runs";
 import type { RuntimeCapabilitiesResponse } from "@/lib/runtime/runtime-client";
 import {
   ConformanceRunnerError,
@@ -964,5 +968,166 @@ describe("Admin API /admin/api/v1/runtime-revisions/{revision_id}/conformance", 
     expect(response.status).toBe(404);
     const body = (await response.json()) as { error: { code: string } };
     expect(body.error.code).toBe("RESOURCE_NOT_FOUND");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 5. Admin API external_endpoint POST 拒绝（证据来源 fail-closed）
+// ═══════════════════════════════════════════════════════════
+
+describe("Admin API /conformance external_endpoint 拒绝调用方上传验收报告", () => {
+  const EXTERNAL_ENDPOINT_REF = "https://external-runtime.example.com/a2a";
+  const EXTERNAL_TARGET_DIGEST = computeRuntimeTargetDigest({
+    runtimeEvidenceKind: "external_endpoint",
+    endpointRef: EXTERNAL_ENDPOINT_REF,
+    runtimeConfigDigest: CONFIG_DIGEST,
+    protocolType: "agent_runtime_protocol",
+    protocolContractRevision: "agent-runtime-protocol@2",
+    identityMode: "workload_token",
+    networkZone: "external",
+  });
+
+  let tenantId: string;
+  let ownerId: string;
+  let revisionId: string;
+
+  /** 构造与 external_endpoint Revision 实际 runtimeTargetDigest 绑定一致的可信 Runner 报告。 */
+  function trustedExternalRunnerBody(runtimeRevisionId: string) {
+    const caseResults = PUBLICATION_CONFORMANCE_CASES.map((caseId) => {
+      const evidence = { caseId, passed: true, reason: null };
+      return {
+        caseId,
+        passed: true,
+        reason: null,
+        evidenceDigest: computeCaseEvidenceDigest(evidence),
+        evidence,
+      };
+    });
+    const report = {
+      runId: randomUUID(),
+      runtimeRevisionId,
+      runtimeTargetDigest: EXTERNAL_TARGET_DIGEST,
+      runtimeConfigDigest: CONFIG_DIGEST,
+      protocolContractRevision: "agent-runtime-protocol@2",
+      suiteRevision: "runtime-conformance@1",
+      runnerArtifactDigest: RUNNER_DIGEST,
+      runnerIdentity: RUNNER_IDENTITY,
+      testEnvironmentRevision: "isolated-mysql8@1",
+      startedAt: "2026-08-02T01:00:00.000Z",
+      completedAt: "2026-08-02T01:00:01.000Z",
+      overallResult: "passed" as const,
+      evidenceManifestDigest: computeEvidenceManifestDigest({
+        suiteRevision: "runtime-conformance@1",
+        testEnvironmentRevision: "isolated-mysql8@1",
+        runtimeRevisionId,
+        runtimeTargetDigest: EXTERNAL_TARGET_DIGEST,
+        runtimeConfigDigest: CONFIG_DIGEST,
+        protocolContractRevision: "agent-runtime-protocol@2",
+        runnerArtifactDigest: RUNNER_DIGEST,
+        cases: caseResults.map((result) => ({
+          caseId: result.caseId,
+          passed: result.passed,
+          evidenceDigest: result.evidenceDigest,
+        })),
+      }),
+      caseResults,
+    };
+    return {
+      dsse_envelope: buildDsseConformanceEnvelope(
+        report as Parameters<typeof buildDsseConformanceEnvelope>[0],
+        TEST_RUNNER_KEY,
+      ),
+    };
+  }
+
+  beforeEach(async () => {
+    const seeded = await seedAdminWithRuntimePublish();
+    tenantId = seeded.tenantId;
+    ownerId = seeded.userIdentityId;
+    const runtime = await createRuntime({
+      tenantId,
+      runtimeKey: "external-provider",
+      displayName: "Runtime external-provider",
+      runtimeKind: "external",
+      ownerUserId: ownerId,
+    });
+    const revision = await createDraftRuntimeRevision({
+      tenantId,
+      runtimeId: runtime.id,
+      protocolType: "agent_runtime_protocol",
+      protocolContractRevision: "agent-runtime-protocol@2",
+      runtimeEvidenceKind: "external_endpoint",
+      endpointRef: EXTERNAL_ENDPOINT_REF,
+      runtimeArtifactRef: null,
+      runtimeCapabilitiesJson: { steer: true, cancel: true, event_stream: true, tool_call: true },
+      identityMode: "workload_token",
+      networkZone: "external",
+      configHash: CONFIG_DIGEST,
+      createdBy: ownerId,
+    });
+    revisionId = revision.id;
+  });
+
+  it("POST /conformance 对 external_endpoint 拒绝 DSSE 上传（即使签名可信）", async () => {
+    const request = buildApiRequest({
+      audience: "admin",
+      method: "POST",
+      path: `/runtime-revisions/${revisionId}/conformance`,
+      idempotencyKey: "idem-conf-external-reject-001",
+      body: { ...trustedExternalRunnerBody(revisionId), publish: false },
+    });
+
+    const response = await conformancePOST(request, {
+      params: Promise.resolve({ revision_id: revisionId }),
+    });
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as { error: { code: string; message?: string } };
+    expect(body.error.code).toBe("BUSINESS_CONSTRAINT_VIOLATION");
+    // 稳定中文文案：外部运行服务 + SnowHarness 主动验收/不能上传
+    expect(body.error.message).toContain("外部运行服务");
+    expect(body.error.message).toContain("SnowHarness 主动验收");
+    expect(body.error.message).toContain("不能上传");
+  });
+
+  it("POST /conformance 被拒后不产生 ConformanceRun / 发布 / 幂等完成事实", async () => {
+    const request = buildApiRequest({
+      audience: "admin",
+      method: "POST",
+      path: `/runtime-revisions/${revisionId}/conformance`,
+      idempotencyKey: "idem-conf-external-reject-002",
+      body: { ...trustedExternalRunnerBody(revisionId), publish: false },
+    });
+
+    const response = await conformancePOST(request, {
+      params: Promise.resolve({ revision_id: revisionId }),
+    });
+    expect(response.status).toBe(422);
+
+    // 不产生任何 conformance run
+    const runs = await listRuntimeConformanceRuns(tenantId, revisionId);
+    expect(runs).toHaveLength(0);
+
+    // Revision 保持 draft
+    const after = await getRuntimeRevisionById(revisionId);
+    expect(after?.revisionState).toBe("draft");
+
+    // 不产生发布事实
+    const publication = await getPublicationRecordBySubject({
+      tenantId,
+      subjectType: "runtime_revision",
+      subjectRevisionId: revisionId,
+    });
+    expect(publication).toBeNull();
+
+    // 被拒请求不留下幂等记录
+    const idempotency = await findIdempotencyRecord({
+      tenantId,
+      audience: "admin",
+      callerType: "user",
+      callerId: ownerId,
+      commandScope: `runtime.conformance:${revisionId}`,
+      idempotencyKey: "idem-conf-external-reject-002",
+    });
+    expect(idempotency).toBeNull();
   });
 });

@@ -46,6 +46,8 @@ import { RuntimeConformanceCaseFailedError } from "@/lib/runtime/domain/runtime-
  * - GET：列出 Revision 的全部 conformance 结果（按 caseId 升序）。
  * - POST：提交 conformance 结果。可选 `publish=true` 同时发布 Revision（通过门禁后）。
  * - publish=true时，发布事实、Runtime指针、Audit、Outbox和幂等完成同事务提交。
+ * - external_endpoint Revision 的 POST 一律拒绝（422）：External 验收只能由 SnowHarness
+ *   主动调用黑盒 endpoint 产生，管理员/调用方上传 DSSE 属证据来源错误，不做验签/落库。
  *
  * 身份与授权：
  * - 解析 admin 主体（SSO 管理员；CI/CD Service Identity 不允许 runtime.publish）。
@@ -63,6 +65,7 @@ import { RuntimeConformanceCaseFailedError } from "@/lib/runtime/domain/runtime-
  * - Attestation 不存在或已撤销 → 409 ARTIFACT_NOT_VERIFIED / ARTIFACT_ATTESTATION_REVOKED
  * - Attestation 绑定或 Digest 不匹配 → 409 ARTIFACT_BINDING_MISMATCH
  * - Conformance 绑定不一致 → 422 BUSINESS_CONSTRAINT_VIOLATION
+ * - external_endpoint 上传 Conformance 报告 → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - Conformance 门禁失败 → 422 BUSINESS_CONSTRAINT_VIOLATION
  * - Runtime 乐观锁冲突 → 412 ETAG_MISMATCH
  */
@@ -271,21 +274,26 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   );
   if (!scopeResult.ok) return scopeResult.response;
 
-  // 7. publish=true 时的额外校验
+  // 7. external_endpoint 证据来源 fail-closed：External 验收只能由 SnowHarness 主动调用
+  //    黑盒 endpoint 产生；管理员/调用方上传的 DSSE 一律拒绝（签名可信也不改变证据来源错误）。
+  //    拒绝发生在幂等守卫之前：不解析验签、不创建幂等记录、不落任何 ConformanceRun。
+  if (revision.runtimeEvidenceKind === "external_endpoint") {
+    return apiError(
+      "BUSINESS_CONSTRAINT_VIOLATION",
+      "外部运行服务（external_endpoint）的 Conformance 验收报告只能由 SnowHarness 主动验收产生，不能上传",
+      { requestId },
+    );
+  }
+
+  // 8. publish=true 时的额外校验
   const shouldPublish = body.publish === true;
   let expectedVersionNo: number | null = null;
   let ifMatchEtag: string | null = null;
 
   if (shouldPublish) {
-    // hosted_artifact 必填 artifact_attestation_id；external_endpoint 不得携带（03 §3/§4）
+    // hosted_artifact 必填 artifact_attestation_id（03 §3/§4；external_endpoint 已在 step 7 整体拒绝）
     if (revision.runtimeEvidenceKind === "hosted_artifact" && !body.artifact_attestation_id) {
       return schemaInvalidTable(requestId, "publish=true 时必填 artifact_attestation_id");
-    }
-    if (revision.runtimeEvidenceKind === "external_endpoint" && body.artifact_attestation_id) {
-      return schemaInvalidTable(
-        requestId,
-        "external_endpoint 证据不允许携带 artifact_attestation_id（不得伪造 Runtime Artifact）",
-      );
     }
     // 必填 expected_version_no
     if (typeof body.expected_version_no !== "number") {
@@ -314,7 +322,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     ifMatchEtag = ifMatch;
   }
 
-  // 8. 计算请求 hash + 幂等守卫
+  // 9. 计算请求 hash + 幂等守卫
   const path = new URL(request.url).pathname;
   const requestHash = computeRequestHash("POST", path, body);
   const caller = callerFromAdminPrincipal(principal);
@@ -327,7 +335,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     requestHash,
   });
 
-  // 9. 处理幂等结果
+  // 10. 处理幂等结果
   if (outcome.kind === "replay") {
     return buildReplayResponse(outcome.record, requestId);
   }
@@ -355,7 +363,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     recordId = reset.id;
   }
 
-  // 10. 执行业务
+  // 11. 执行业务
   try {
     const recorded = await recordRuntimeConformanceRun({
       tenantId: principal.tenantId,
@@ -429,7 +437,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       // publish=false 仅记录不可变 Run；失败结果同样保留为测试事实。
     }
 
-    // 11. 查询最新 conformance 结果
+    // 12. 查询最新 conformance 结果
     const publishedRevision = publishedResult?.revision ?? null;
     const results = recorded.caseResults.map((row) => ({
       caseId: row.caseId,
