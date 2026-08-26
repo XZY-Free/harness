@@ -77,7 +77,6 @@ export interface NewProvisioningRequestInput {
 export interface StepCheckpoint {
   agentRevisionId?: string | null;
   agentPublicationRecordId?: string | null;
-  agentAttestationId?: string | null;
   runtimeId?: string | null;
   runtimeRevisionId?: string | null;
   runtimeArtifactId?: string | null;

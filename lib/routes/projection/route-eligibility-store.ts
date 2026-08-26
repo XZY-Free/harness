@@ -43,7 +43,6 @@ export interface UpsertProjectionInput {
   policyRevisionId: string | null;
   policyRevisionState: string | null;
   capabilityCompatibilityDigest: string;
-  agentArtifactDigest: string | null;
   runtimeArtifactDigest: string | null;
   runtimeConfigDigest: string | null;
   runtimeTargetDigest: string | null;
@@ -57,10 +56,8 @@ export interface UpsertProjectionInput {
   // ─── : 完整执行证据 ID ──────────────────────
   agentPublicationRecordId: string | null;
   runtimePublicationRecordId: string | null;
-  agentAttestationIds: string[] | null;
   runtimeAttestationIds: string[] | null;
   conformanceRunId: string | null;
-  agentArtifactId: string | null;
   runtimeArtifactId: string | null;
   sourceEventId: string | null;
   sourceAggregateVersion: number | null;

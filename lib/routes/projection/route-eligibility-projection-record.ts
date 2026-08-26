@@ -92,10 +92,8 @@ export const routeEligibilityProjection = mysqlTable(
     // ─── : 完整执行证据 ID（不可填空字符串）────────
     agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }),
     runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }),
-    agentAttestationIds: json("agentAttestationIds").$type<string[]>(),
     runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>(),
     conformanceRunId: varchar("conformanceRunId", { length: 36 }),
-    agentArtifactId: varchar("agentArtifactId", { length: 36 }),
     runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }),
     sourceEventId: varchar("sourceEventId", { length: 36 }),
     sourceAggregateVersion: int("sourceAggregateVersion"),
@@ -110,7 +108,6 @@ export const routeEligibilityProjection = mysqlTable(
     agentContractSnapshotId: varchar("agentContractSnapshotId", { length: 36 }),
     agentContractDigest: varchar("agentContractDigest", { length: 71 }),
     agentContextDigest: varchar("agentContextDigest", { length: 71 }),
-    agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }),
     /** Runtime 目标摘要 — 发布证据权威（03 §6）。 */

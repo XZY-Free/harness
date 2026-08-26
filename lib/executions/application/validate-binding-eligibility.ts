@@ -38,7 +38,6 @@ export interface BindingEligibilityInput {
   frozenEvidence: {
     agentPublicationRecordId: string | null;
     runtimePublicationRecordId: string;
-    agentAttestationIds: string[] | null;
     runtimeAttestationIds: string[];
     conformanceRunId: string;
   };
@@ -158,17 +157,10 @@ export async function validateBindingEligibility(
       return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
     }
     // Agent 维度仅 Agent Route 校验（§7.4）；base route 为 not_applicable（§18），跳过。
+    // Agent 是源码不可见黑盒 → Agent Publication 恒无 Artifact Attestation（不伪造）。
     if (!isBaseRoute) {
       const currentAgentPubId = snapshot.agentPublication?.publicationRecordId ?? null;
       if (fe.agentPublicationRecordId !== currentAgentPubId) {
-        return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
-      }
-      if (
-        !exactEvidenceIdsEqual(
-          fe.agentAttestationIds as string[],
-          snapshot.agentPublication?.attestationIds ?? [],
-        )
-      ) {
         return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
       }
     }

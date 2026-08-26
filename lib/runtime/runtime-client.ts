@@ -101,8 +101,6 @@ export interface StartInvocationRequestBody {
    */
   agent?: {
     agent_revision_id: string | null;
-    instruction_hash: string | null;
-    artifact_ref: string | null;
     model_policy: Record<string, unknown> | null;
     permission_requirements: Record<string, unknown> | null;
     interface_requirements: Record<string, unknown> | null;

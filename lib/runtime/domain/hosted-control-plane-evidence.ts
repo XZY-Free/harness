@@ -30,7 +30,7 @@ export interface HostedControlPlaneEvidenceProvider {
   /** 返回受管制品引用和平台信任锚；验证结果仍由 Artifact 应用服务决定。 */
   loadArtifactEvidence(input: {
     tenantId: string;
-    artifactType: Extract<ArtifactKind, "agent_revision" | "runtime_revision">;
+    artifactType: Extract<ArtifactKind, "runtime_revision">;
   }): Promise<HostedArtifactEvidence>;
   /** 调用可信 Runner，返回与 draft RuntimeRevision 精确绑定且幂等的 DSSE 签名 Envelope。 */
   runRuntimeConformance(input: HostedRuntimeConformanceInput): Promise<{

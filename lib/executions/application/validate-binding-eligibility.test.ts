@@ -45,14 +45,12 @@ describe("BindingEligibilityInput frozenEvidence", () => {
       frozenEvidence: {
         agentPublicationRecordId: "apr1",
         runtimePublicationRecordId: "rpr1",
-        agentAttestationIds: ["aat1", "aat2"],
         runtimeAttestationIds: ["rat1"],
         conformanceRunId: "cr1",
       },
     };
     expect(input.frozenEvidence.agentPublicationRecordId).toBe("apr1");
     expect(input.frozenEvidence.runtimePublicationRecordId).toBe("rpr1");
-    expect(input.frozenEvidence.agentAttestationIds).toEqual(["aat1", "aat2"]);
     expect(input.frozenEvidence.runtimeAttestationIds).toEqual(["rat1"]);
     expect(input.frozenEvidence.conformanceRunId).toBe("cr1");
   });

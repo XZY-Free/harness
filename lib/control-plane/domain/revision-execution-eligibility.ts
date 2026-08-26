@@ -90,8 +90,6 @@ export interface RevisionExecutionEvidenceSnapshot {
    * null = 基础 Harness Route（无 Agent 资产约束），Agent 维度 Evidence 为 not_applicable。
    */
   agentRevisionId: string | null;
-  /** Agent Artifact Evidence（null = 无有效 Attestation / 无 Agent 约束）。 */
-  agentArtifactEvidence: ArtifactEvidenceSnapshot | null;
   /** Agent Active Publication（null = 未发布或已撤回 / 无 Agent 约束）。 */
   agentPublication: ActivePublicationSnapshot | null;
   /** Agent 生命周期状态（无 Agent 约束时为 "active" 占位，不参与判断）。 */
@@ -132,7 +130,6 @@ export interface RevisionExecutionEligibilityResult {
 export interface RevisionExecutionEligibilityError {
   dimension:
     | "agent_publication"
-    | "agent_attestation"
     | "agent_lifecycle"
     | "runtime_publication"
     | "runtime_attestation"
@@ -157,15 +154,14 @@ export const RevisionExecutionEligibilityPolicy = {
    * 判断 Revision 是否满足完整执行资格。
    *
    * 检查维度：
-   * 1. Agent Publication Active
-   * 2. Agent Attestation Verified & 未撤销
-   * 3. Agent 生命周期 Active
-   * 4. Runtime Publication Active
-   * 5. Runtime Attestation Verified & 未撤销
-   * 6. Runtime Conformance Passed & 完整
-   * 7. Runtime 生命周期 Active
-   * 8. Capability 兼容
-   * 9. Policy 状态
+   * 1. Agent Publication Active（含冻结的 AgentContractSnapshot 证据完整）
+   * 2. Agent 生命周期 Active
+   * 3. Runtime Publication Active
+   * 4. Runtime Attestation Verified & 未撤销（external_endpoint 除外）
+   * 5. Runtime Conformance Passed & 完整
+   * 6. Runtime 生命周期 Active
+   * 7. Capability 兼容
+   * 8. Policy 状态
    */
   isEligible(
     snapshot: RevisionExecutionEvidenceSnapshot,
@@ -179,37 +175,28 @@ export const RevisionExecutionEligibilityPolicy = {
     const hasAgentConstraint = snapshot.agentRevisionId !== null;
 
     if (hasAgentConstraint) {
-      // 1. Agent Publication Active
+      // 1. Agent Publication Active + 冻结的 AgentContractSnapshot 证据完整
+      //（Agent 是源码不可见黑盒；发布权威是 Contract 证据，不是 source Artifact/Attestation）。
       if (!snapshot.agentPublication) {
         errors.push({
           dimension: "agent_publication",
           code: "no_active_publication",
           message: `AgentRevision ${snapshot.agentRevisionId} 无 Active Publication`,
         });
-      }
-
-      // 2. Agent Attestation
-      if (!snapshot.agentArtifactEvidence) {
+      } else if (
+        !snapshot.agentPublication.agentContractSnapshotId ||
+        !snapshot.agentPublication.agentContractDigest ||
+        !snapshot.agentPublication.agentCapabilityDigest ||
+        !snapshot.agentPublication.agentContextDigest
+      ) {
         errors.push({
-          dimension: "agent_attestation",
-          code: "no_artifact_evidence",
-          message: `AgentRevision ${snapshot.agentRevisionId} 无有效 Artifact Evidence`,
-        });
-      } else if (snapshot.agentArtifactEvidence.verificationState !== "verified") {
-        errors.push({
-          dimension: "agent_attestation",
-          code: "evidence_not_verified",
-          message: `AgentRevision ${snapshot.agentRevisionId} Artifact Evidence 未验证`,
-        });
-      } else if (snapshot.agentArtifactEvidence.revokedAt !== null) {
-        errors.push({
-          dimension: "agent_attestation",
-          code: "evidence_revoked",
-          message: `AgentRevision ${snapshot.agentRevisionId} Artifact Evidence 已撤销`,
+          dimension: "agent_publication",
+          code: "agent_contract_evidence_missing",
+          message: `AgentRevision ${snapshot.agentRevisionId} Publication 缺少 AgentContractSnapshot 证据`,
         });
       }
 
-      // 3. Agent 生命周期
+      // 2. Agent 生命周期
       if (snapshot.agentLifecycleState !== "active") {
         errors.push({
           dimension: "agent_lifecycle",

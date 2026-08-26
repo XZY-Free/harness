@@ -14,8 +14,7 @@ import {
   getRevisionsByAgent,
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
-import { insertAttestation } from "@/lib/artifacts/persistence/artifact-attestation-writer";
-import { artifact } from "@/lib/artifacts/persistence/artifact-record";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -32,7 +31,7 @@ import { tenant } from "@/lib/persistence/schema/identity";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -60,43 +59,16 @@ async function seedPublicationFixture() {
     displayName: "Publication Agent",
     ownerUserId: identity.id,
   });
-  const revision = await createDraftRevision({
+  const revision = await createDraftRevisionWithContractSnapshot({
     tenantId: tenant.id,
     agentId: agent.id,
-    sourceType: "agent_yaml",
-    sourceRevision: "git:publication-v1",
-    instructionHash: "sha256:publication-instruction",
-    agentArtifactRef: "oci://registry/agent@sha256:publication",
     modelPolicyJson: { model: "gpt-4" },
     permissionRequirementsJson: {},
     delegationPolicyJson: {},
     agentInterfaceRequirementsJson: { required: [], optional: [] },
     createdBy: identity.id,
   });
-  const artifactDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-  const attestation = await insertAttestation({
-    tenantId: tenant.id,
-    artifactType: "agent_revision",
-    artifactRevisionId: revision.id,
-    artifactDigest,
-    dsseEnvelopeRef: "attestation:signature:publication",
-    sbomRef: "attestation:sbom:publication",
-    provenanceRef: "attestation:provenance:publication",
-    builderIdentity: "builder:publication-test",
-    verificationState: "verified",
-    verifiedAt: new Date(),
-  });
-  const [authority] = await db
-    .select()
-    .from(artifact)
-    .where(and(eq(artifact.tenantId, tenant.id), eq(artifact.digest, artifactDigest)))
-    .limit(1);
-  if (!authority) throw new Error("Agent publication fixture Artifact 未创建");
-  await db
-    .update(agentRevisionTable)
-    .set({ artifactId: authority.id, artifactDigest: authority.digest })
-    .where(eq(agentRevisionTable.id, revision.id));
-  // 发布命令强制 Revision 绑定 AgentContractSnapshot（权威外部合同）。
+  // Agent 是源码不可见黑盒：发布权威 = AgentContractSnapshot，无 Artifact/Attestation。
   const contractSnapshot = await ensureAgentContractSnapshotBoundForRevision(
     revision.id,
     tenant.id,
@@ -115,7 +87,6 @@ async function seedPublicationFixture() {
     ownerId: identity.id,
     agent,
     revision,
-    attestation,
     contractSnapshot,
     idempotency,
   };
@@ -163,7 +134,6 @@ function publicationCommand(fixture: Awaited<ReturnType<typeof seedPublicationFi
     tenantId: fixture.tenantId,
     revisionId: fixture.revision.id,
     agentExpectedVersionNo: fixture.agent.versionNo,
-    attestationId: fixture.attestation.id,
     actor: {
       tenantId: fixture.tenantId,
       actorType: "user" as const,
@@ -200,7 +170,6 @@ describe("PublishAgentRevision Application Service", () => {
       tenantId: fixture.tenantId,
       revisionId: fixture.revision.id,
       agentExpectedVersionNo: fixture.agent.versionNo,
-      attestationId: fixture.attestation.id,
       actor: { tenantId: fixture.tenantId, actorType: "user", actorId: fixture.ownerId },
       requestId: "req-agent-publication-success",
       idempotencyKey: fixture.idempotency.idempotencyKey,
@@ -228,7 +197,7 @@ describe("PublishAgentRevision Application Service", () => {
       id: result.publicationRecordId,
       subjectType: "agent_revision",
       subjectRevisionId: fixture.revision.id,
-      attestationIds: [fixture.attestation.id],
+      attestationIds: [],
       conformanceRunId: null,
       approvals: [],
       publishedByType: "user",
@@ -389,11 +358,9 @@ describe("PublishAgentRevision Application Service", () => {
 
     const result = await publishAgentRevision({
       ...publicationCommand(fixture),
-      attestationId: null,
       idempotency: undefined,
     });
 
-    expect(result.attestation).toBeNull();
     expect(result.revision.revisionState).toBe("published");
 
     const publication = await getPublicationRecordBySubject({
@@ -411,10 +378,10 @@ describe("PublishAgentRevision Application Service", () => {
 
   it("未绑定 AgentContractSnapshot 的 Revision 拒绝发布（AgentPublicationContractSnapshotMissingError）", async () => {
     const fixture = await seedPublicationFixture();
-    // 解绑 Snapshot，模拟旧/未绑定 Revision
+    // 指向不存在的 Snapshot，模拟未绑定/脏引用 Revision
     await db
       .update(agentRevisionTable)
-      .set({ agentContractSnapshotId: null })
+      .set({ agentContractSnapshotId: "not-a-real-snapshot" })
       .where(eq(agentRevisionTable.id, fixture.revision.id));
     const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 

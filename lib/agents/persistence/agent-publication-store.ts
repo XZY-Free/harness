@@ -5,10 +5,8 @@ export interface AgentPublicationRevision {
   agentId: string;
   revisionNo: number;
   revisionState: AgentRevisionPublicationState;
-  instructionHash: string;
-  agentArtifactRef: string;
-  /** 绑定的不可变 AgentContractSnapshot id；发布强约束（正式流禁止 null）。 */
-  agentContractSnapshotId: string | null;
+  /** 绑定的不可变 AgentContractSnapshot id；发布强约束（NOT NULL）。 */
+  agentContractSnapshotId: string;
   publishedAt: Date | null;
 }
 
@@ -18,12 +16,7 @@ export interface AgentPublicationAgent {
   versionNo: number;
 }
 
-export interface AgentPublicationAttestation {
-  id: string;
-  artifactDigest: string;
-}
-
-/** 发布冻结的 Agent Contract 证据（权威外部合同来源，替代 source Artifact/Attestation）。 */
+/** 发布冻结的 Agent Contract 证据（权威外部合同来源）。 */
 export interface AgentPublicationContractSnapshot {
   id: string;
   agentId: string;
@@ -50,17 +43,11 @@ export interface AgentPublicationSession {
     tenantId: string,
     snapshotId: string,
   ): Promise<AgentPublicationContractSnapshot | null>;
-  findVerifiedAttestation(params: {
-    tenantId: string;
-    revisionId: string;
-    attestationId: string;
-  }): Promise<AgentPublicationAttestation | null>;
   appendPublication(params: {
     id: string;
     tenantId: string;
     revisionId: string;
     evidenceSetDigest: string;
-    attestationIds: string[];
     contractEvidence: AgentPublicationContractEvidence;
     publishedByType: AgentPublicationActorType;
     publishedBy: string;

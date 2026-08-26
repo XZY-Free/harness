@@ -222,7 +222,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
   it("verifyAndPersistAttestation 成功后写入 sourceRevision/buildPipeline/dependencyLockFileHash/buildTime", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-prov-1",
       "agent.yaml content with provenance",
     );
@@ -236,7 +236,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
   it("verifyAndPersistAttestation 成功后写入 scanSummaryJson（含 packagesScanned/vulnerabilityCount/blockedLicenseCount）", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-prov-2",
       "agent.yaml content with scan summary",
     );
@@ -251,7 +251,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
   it("重新读取持久化记录包含 provenance 字段（不丢失）", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-prov-3",
       "agent.yaml content reread",
     );
@@ -294,7 +294,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
 
     const input: VerifyAttestationInput = {
       tenantId,
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: "rev-fail-1",
       artifactDigest: digest,
       dsseEnvelopeRef: "attestation:signature:fail",
@@ -305,7 +305,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
       verifyAndPersistAttestation(input, store, builderKeys, buildActor(tenantId, "ci-001")),
     ).rejects.toThrow();
 
-    const list = await listAttestationsByRevision(tenantId, "agent_revision", "rev-fail-1");
+    const list = await listAttestationsByRevision(tenantId, "runtime_revision", "rev-fail-1");
     expect(list).toHaveLength(1);
     const failed = list[0];
     expect(failed?.attestation.verificationState).toBe("failed");
@@ -345,7 +345,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
     const result = await verifyArtifactAttestation(
       {
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-pure-1",
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:signature:pure",
@@ -370,7 +370,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
   it("验证成功创建独立Artifact并让Attestation引用该权威对象", async () => {
     const { attestation, digest } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-authoritative-artifact",
       "authoritative artifact content",
     );
@@ -393,13 +393,13 @@ describe("S12-W04 provenance 摘要持久化", () => {
     const [left, right] = await Promise.all([
       createVerifiedAttestation(
         tenantId,
-        "agent_revision",
+        "runtime_revision",
         "rev-concurrent-artifact-left",
         "shared concurrent artifact",
       ),
       createVerifiedAttestation(
         tenantId,
-        "agent_revision",
+        "runtime_revision",
         "rev-concurrent-artifact-right",
         "shared concurrent artifact",
       ),
@@ -426,7 +426,7 @@ describe("S12-W04 provenance 摘要持久化", () => {
     await expect(
       createVerifiedAttestation(
         tenantId,
-        "agent_revision",
+        "runtime_revision",
         revisionId,
         content,
         "builder:company-agent-runtime",
@@ -467,7 +467,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
     for (let i = 0; i < 3; i++) {
       const att = await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: `rev-list-${i}`,
         artifactDigest: digest,
         dsseEnvelopeRef: `attestation:signature:list-${i}`,
@@ -483,7 +483,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
     await new Promise((r) => setTimeout(r, 5));
     const fourth = await insertAttestation({
       tenantId,
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: "rev-list-latest",
       artifactDigest: digest,
       dsseEnvelopeRef: "attestation:signature:list-latest",
@@ -507,7 +507,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
     for (let i = 0; i < 5; i++) {
       await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: `rev-page-${i}`,
         artifactDigest: digest,
         dsseEnvelopeRef: `attestation:signature:page-${i}`,
@@ -529,7 +529,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
     const digest = computeArtifactDigest("filter-content");
     await insertAttestation({
       tenantId,
-      artifactType: "agent_revision",
+      artifactType: "skill_package",
       artifactRevisionId: "rev-filter-1",
       artifactDigest: digest,
       dsseEnvelopeRef: "attestation:signature:f1",
@@ -564,7 +564,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
     const digest = computeArtifactDigest("state-content");
     await insertAttestation({
       tenantId,
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: "rev-state-1",
       artifactDigest: digest,
       dsseEnvelopeRef: "attestation:signature:s1",
@@ -576,7 +576,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
     });
     await insertAttestation({
       tenantId,
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: "rev-state-2",
       artifactDigest: digest,
       dsseEnvelopeRef: "attestation:signature:s2",
@@ -606,13 +606,13 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
   it("按 revoked=true 过滤仅返回已撤销", async () => {
     const { attestation: att1 } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revoke-filter-1",
       "content-revoke-1",
     );
     await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revoke-filter-2",
       "content-revoke-2",
     );
@@ -635,7 +635,7 @@ describe("S12-W04 listAttestations 分页 + 过滤", () => {
   it("跨租户隔离：他租户不可见", async () => {
     await insertAttestation({
       tenantId,
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: "rev-iso-1",
       artifactDigest: computeArtifactDigest("iso"),
       dsseEnvelopeRef: "attestation:signature:iso",
@@ -667,7 +667,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
   it("成功撤销：追加 AttestationRevocationRecord 权威事实 + 写审计", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revoke-1",
       "content-revoke-1",
     );
@@ -706,7 +706,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
   it("撤销追加AttestationRevocationRecord且不改写原Attestation", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-append-only-revocation",
       "append-only revocation content",
     );
@@ -754,7 +754,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
   it("两个并发撤销只有一个权威撤销事实", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-concurrent-revocation",
       "concurrent revocation content",
     );
@@ -789,7 +789,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
   it("Outbox写入失败会回滚撤销记录和Audit", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revocation-rollback",
       "revocation rollback content",
     );
@@ -841,7 +841,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
   it("撤销跨租户 attestation → AttestationNotFoundError", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revoke-cross-1",
       "content-revoke-cross",
     );
@@ -859,7 +859,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
   it("重复撤销 → AttestationAlreadyRevokedError（幂等保护）", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revoke-2",
       "content-revoke-2",
     );
@@ -890,7 +890,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
   it("撤销后 getVerifiedAttestationForRevision 不再返回此 attestation", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revoke-verified-1",
       "content-revoke-verified",
     );
@@ -898,7 +898,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
     // 撤销前可以查询到
     const before = await getVerifiedAttestationForRevision(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revoke-verified-1",
     );
     expect(before).not.toBeNull();
@@ -915,7 +915,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
     // 撤销后 getVerifiedAttestationForRevision 返回 null
     const after = await getVerifiedAttestationForRevision(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revoke-verified-1",
     );
     expect(after).toBeNull();
@@ -924,13 +924,13 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
   it("撤销后 assertAttestationGate 拒绝已撤销 attestation", async () => {
     const { attestation } = await createVerifiedAttestation(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-revoke-gate-1",
       "content-revoke-gate",
     );
 
     // 撤销前门禁通过
-    await assertAttestationGate(tenantId, "agent_revision", "rev-revoke-gate-1", attestation.id);
+    await assertAttestationGate(tenantId, "runtime_revision", "rev-revoke-gate-1", attestation.id);
 
     // 撤销
     await revokeAttestation(
@@ -942,7 +942,7 @@ describe("S12-W04 revokeAttestation 撤销流程", () => {
 
     // 撤销后 assertAttestationGate 抛错
     await expect(
-      assertAttestationGate(tenantId, "agent_revision", "rev-revoke-gate-1", attestation.id),
+      assertAttestationGate(tenantId, "runtime_revision", "rev-revoke-gate-1", attestation.id),
     ).rejects.toThrow(/已撤销/);
   });
 });

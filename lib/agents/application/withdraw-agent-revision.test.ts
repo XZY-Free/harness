@@ -14,6 +14,7 @@ import type {
   AgentWithdrawalStore,
 } from "@/lib/agents/persistence/agent-withdrawal-store";
 import { mysqlAgentWithdrawalStore } from "@/lib/agents/persistence/mysql-agent-withdrawal-store";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
@@ -62,13 +63,9 @@ async function seedPublishedRevisions(count = 2) {
   const revisions = [];
   let expectedVersionNo = agent.versionNo;
   for (let index = 1; index <= count; index += 1) {
-    const draft = await createDraftRevision({
+    const draft = await createDraftRevisionWithContractSnapshot({
       tenantId: tenant.id,
       agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: `git:withdrawal-v${index}`,
-      instructionHash: `sha256:withdrawal-instruction-${index}`,
-      agentArtifactRef: `builtin://withdrawal-agent/v${index}`,
       modelPolicyJson: {},
       permissionRequirementsJson: {},
       delegationPolicyJson: {},

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import {
   AgentPublicationContractSnapshotMissingError,
   AgentPublicationIdempotencyCompletionError,
-  AgentPublicationPrerequisiteError,
   AgentPublicationVersionConflictError,
   AgentRevisionPublicationNotFoundError,
   AgentRevisionPublicationStateError,
@@ -10,7 +9,6 @@ import {
 } from "@/lib/agents/domain/agent-revision-publication-policy";
 import type {
   AgentPublicationActorType,
-  AgentPublicationAttestation,
   AgentPublicationContractSnapshot,
   AgentPublicationRevision,
   AgentPublicationStore,
@@ -19,8 +17,6 @@ import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/p
 
 export interface PublishAgentRevisionResult {
   revision: AgentPublicationRevision;
-  /** 可选 source Attestation；发布权威是 AgentContractSnapshot，无 Attestation 时为 null。 */
-  attestation: AgentPublicationAttestation | null;
   auditEventId: string;
   outboxEventId: string;
   publicationRecordId: string;
@@ -30,8 +26,6 @@ export interface PublishAgentRevisionCommand {
   tenantId: string;
   revisionId: string;
   agentExpectedVersionNo: number;
-  /** 可选 source Attestation id（Batch 2 不再强制；传了但未验证则拒绝）。 */
-  attestationId?: string | null;
   actor: {
     tenantId: string;
     actorType: AgentPublicationActorType;
@@ -101,21 +95,6 @@ export function createPublishAgentRevision(dependencies: {
         throw new AgentPublicationContractSnapshotMissingError(revision.id);
       }
 
-      // 可选 source Attestation：未提供则仅凭 Contract 证据发布；提供了但未验证则拒绝。
-      let attestation: AgentPublicationAttestation | null = null;
-      let attestationIds: string[] = [];
-      if (command.attestationId) {
-        attestation = await session.findVerifiedAttestation({
-          tenantId: command.tenantId,
-          revisionId: revision.id,
-          attestationId: command.attestationId,
-        });
-        if (!attestation) {
-          throw new AgentPublicationPrerequisiteError(revision.id, command.attestationId);
-        }
-        attestationIds = [attestation.id];
-      }
-
       const contractEvidence = {
         agentContractSnapshotId: snapshot.id,
         agentContractDigest: snapshot.contractDigest,
@@ -130,12 +109,11 @@ export function createPublishAgentRevision(dependencies: {
         tenantId: command.tenantId,
         revisionId: revision.id,
         evidenceSetDigest: computePublicationEvidenceSetDigest({
-          attestationIds,
+          attestationIds: [],
           conformanceRunId: null,
           approvals: [],
           additionalEvidence: contractAdditionalEvidence(snapshot),
         }),
-        attestationIds,
         contractEvidence,
         publishedByType: command.actor.actorType,
         publishedBy: command.actor.actorId,
@@ -180,8 +158,6 @@ export function createPublishAgentRevision(dependencies: {
           contract_digest: snapshot.contractDigest,
           capability_digest: snapshot.capabilityDigest,
           context_digest: snapshot.contextDigest,
-          attestation_id: attestation?.id ?? null,
-          artifact_digest: attestation?.artifactDigest ?? null,
           publication_record_id: publicationRecordId,
         },
         reason: "AgentRevision 发布（AgentContractSnapshot 证据冻结）",
@@ -202,7 +178,6 @@ export function createPublishAgentRevision(dependencies: {
           revision_id: revision.id,
           revision_no: revision.revisionNo,
           agent_contract_snapshot_id: snapshot.id,
-          attestation_id: attestation?.id ?? null,
           audit_event_id: auditEventId,
           publication_record_id: publicationRecordId,
         },
@@ -211,7 +186,6 @@ export function createPublishAgentRevision(dependencies: {
 
       const result: PublishAgentRevisionResult = {
         revision: { ...revision, revisionState: "published", publishedAt },
-        attestation,
         auditEventId,
         outboxEventId,
         publicationRecordId,

@@ -52,7 +52,6 @@ export const hostedProvisioningRequestTable = mysqlTable(
     // ─── : Step Checkpoint 字段 ────────────────────────
     stepAgentRevisionId: varchar("stepAgentRevisionId", { length: 36 }),
     stepAgentPublicationRecordId: varchar("stepAgentPublicationRecordId", { length: 36 }),
-    stepAgentAttestationId: varchar("stepAgentAttestationId", { length: 36 }),
     stepRuntimeId: varchar("stepRuntimeId", { length: 36 }),
     stepRuntimeRevisionId: varchar("stepRuntimeRevisionId", { length: 36 }),
     stepRuntimeArtifactId: varchar("stepRuntimeArtifactId", { length: 36 }),

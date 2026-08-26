@@ -178,12 +178,8 @@ export const executionBindingTable = mysqlTable(
     routeRevisionId: varchar("routeRevisionId", { length: 36 }).notNull(),
     routeActivationId: varchar("routeActivationId", { length: 36 }).notNull(),
     routeContentDigest: varchar("routeContentDigest", { length: 71 }).notNull(),
-    /** null = 基础 Harness Route（Agent Evidence not_applicable，§18）。 */
-    agentArtifactId: varchar("agentArtifactId", { length: 36 }),
     /** null = external_endpoint Runtime（无 Runtime Artifact，03 §3）。 */
     runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }),
-    /** null = 基础 Harness Route（§18 not_applicable）。 */
-    agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
     /** null = external_endpoint Runtime（03 §3）。 */
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
     /** 冻结的 Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact（03 §3）。 */
@@ -202,8 +198,6 @@ export const executionBindingTable = mysqlTable(
     agentContractDigest: varchar("agentContractDigest", { length: 71 }),
     /** null = 基础 Harness Route（§18 not_applicable）。 */
     agentContextDigest: varchar("agentContextDigest", { length: 71 }),
-    /** null = 基础 Harness Route（§18 not_applicable，禁止伪装空数组）。 */
-    agentAttestationIds: json("agentAttestationIds").$type<string[] | null>(),
     runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>().notNull(),
     /** null = 基础 Harness Route（§18 not_applicable）。 */
     agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }),
@@ -224,7 +218,6 @@ export const executionBindingTable = mysqlTable(
     agentRevisionIdx: index("ExecutionBinding_agentRevision_idx").on(t.agentRevisionId),
     runtimeRevisionIdx: index("ExecutionBinding_runtimeRevision_idx").on(t.runtimeRevisionId),
     routeRevisionIdx: index("ExecutionBinding_routeRevision_idx").on(t.routeRevisionId),
-    agentArtifactIdx: index("ExecutionBinding_agentArtifact_idx").on(t.agentArtifactId),
     runtimeArtifactIdx: index("ExecutionBinding_runtimeArtifact_idx").on(t.runtimeArtifactId),
     conformanceRunIdx: index("ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
     runtimeAttestationIdsNonEmpty: check(
@@ -234,21 +227,21 @@ export const executionBindingTable = mysqlTable(
       sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND (JSON_LENGTH(${t.runtimeAttestationIds}) >= 1 OR ${t.runtimeEvidenceKind} = 'external_endpoint')`,
     ),
     // §10.3 Agent Evidence 条件性完整组：全部为空（base route，not_applicable）或 全部完整（agent route）。
-    // 禁止"随便 nullable"半完整组（禁 4 态模糊，§8.4）。
+    // Agent 是源码不可见黑盒 — Agent Route 证据 = Contract 三元组 + Publication 引用，
+    // 不含 source Artifact/Attestation（01 阶段收口）。禁止"随便 nullable"半完整组（禁 4 态模糊，§8.4）。
     agentEvidenceAllOrNothing: check(
       "ExecutionBinding_agentEvidence_all_or_nothing",
       sql`(
         ${t.agentRevisionId} IS NULL
-        AND ${t.agentArtifactId} IS NULL
-        AND ${t.agentArtifactDigest} IS NULL
-        AND ${t.agentAttestationIds} IS NULL
+        AND ${t.agentContractSnapshotId} IS NULL
+        AND ${t.agentContractDigest} IS NULL
+        AND ${t.agentContextDigest} IS NULL
         AND ${t.agentPublicationRecordId} IS NULL
       ) OR (
         ${t.agentRevisionId} IS NOT NULL
-        AND ${t.agentArtifactId} IS NOT NULL
-        AND ${t.agentArtifactDigest} IS NOT NULL
-        AND JSON_TYPE(${t.agentAttestationIds}) = 'ARRAY'
-        AND JSON_LENGTH(${t.agentAttestationIds}) >= 1
+        AND ${t.agentContractSnapshotId} IS NOT NULL
+        AND ${t.agentContractDigest} IS NOT NULL
+        AND ${t.agentContextDigest} IS NOT NULL
         AND ${t.agentPublicationRecordId} IS NOT NULL
       )`,
     ),

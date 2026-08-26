@@ -68,27 +68,13 @@ const BASE_RUNTIME_REVISION: RuntimeRevisionSummary = {
 const MOCK_ELIGIBLE_SNAPSHOT = {
   tenantId: TENANT_ID,
   agentRevisionId: BASE_AGENT_REVISION.id,
-  agentArtifactEvidence: {
-    tenantId: TENANT_ID,
-    artifactType: "agent_revision",
-    artifactRevisionId: BASE_AGENT_REVISION.id,
-    artifactId: "art-1",
-    artifactDigest: "sha256:a",
-    attestationId: "att-1",
-    verificationState: "verified" as const,
-    attestationFormat: "in_toto_dsse" as const,
-    verifiedAt: new Date(),
-    revokedAt: null,
-    revocationRecordId: null,
-    verificationPolicyRevisionId: null,
-    envelopeDigest: null,
-  },
+  // Agent 是源码不可见黑盒：无 Agent Artifact Evidence（发布权威 = AgentContractSnapshot）。
   agentPublication: {
     publicationRecordId: "pub-1",
     subjectType: "agent_revision" as const,
     subjectRevisionId: BASE_AGENT_REVISION.id,
     evidenceSetDigest: "sha256:e",
-    attestationIds: ["att-1"],
+    attestationIds: [],
     conformanceRunId: null,
     withdrawalRecordId: null,
     publishedAt: new Date(),
@@ -712,27 +698,6 @@ describe("activateRouteSet", () => {
         }),
       ),
     ).rejects.toThrow("执行资格不足");
-  });
-
-  it("Attestation 缺失 → ArtifactNotVerifiedForRouteError", async () => {
-    const store = createMockStore({
-      attestationResults: new Map([
-        ["agent_revision:agent-rev-1", false],
-        ["runtime_revision:runtime-rev-1", true],
-      ]),
-    });
-    const noAttestationSnapshot = { ...MOCK_ELIGIBLE_SNAPSHOT, agentArtifactEvidence: null };
-    const noAttestationReader: RevisionExecutionEvidenceReader = {
-      loadCurrentEvidence: vi.fn(async () => noAttestationSnapshot),
-      loadExactEvidence: vi.fn(async () => noAttestationSnapshot),
-    };
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: noAttestationReader,
-      now: () => NOW,
-    });
-
-    await expect(activateRouteSet(makeCommand())).rejects.toThrow("执行资格不足");
   });
 
   it("actor tenantId 与 command tenantId 不一致 → Error", async () => {

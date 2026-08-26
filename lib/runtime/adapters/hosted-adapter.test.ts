@@ -495,4 +495,3 @@ describe("S05-C05 HostedAdapter 命令处理", () => {
     expect(cancelEvent?.payload.reason).toBe("user_cancel");
   });
 });
-

@@ -12,7 +12,8 @@
  * Agent 是员工目录中的一种可治理能力资产，仅在 Route 绑定时参与执行；SnowHarness
  * 始终是 Harness，Agent 不是 Thread 或基础执行的前提。Agent 保存稳定身份、负责人、
  * 可见范围和当前发布摘要。
- * AgentRevision 保存 Agent 自身不可变的代码、指令、模型策略、权限要求、委派范围和制品摘要。
+ * AgentRevision 保存 Agent 的平台认可外部合同修订：绑定的 AgentContractSnapshot、模型策略、
+ * 权限要求、委派范围和 Runtime 技术接口要求。Agent 对平台是源码不可见黑盒。
  *
  * 关键约束：
  * - UNIQUE(tenantId, agentKey)：租户内稳定 key 唯一。
@@ -60,17 +61,6 @@ export type AgentLifecycleState = (typeof AGENT_LIFECYCLE_STATES)[number];
  */
 export const AGENT_REVISION_STATES = ["draft", "published", "withdrawn"] as const;
 export type AgentRevisionState = (typeof AGENT_REVISION_STATES)[number];
-
-// ─── Agent Revision Source Type ─────────────────────────────
-
-/**
- * Revision 来源类型（varchar 存储以便扩展，不使用 enum 约束）。
- * - code：源代码直接构建。
- * - agent_yaml：agent.yaml 声明式配置。
- * - veadk：veadk 制品。
- */
-export const AGENT_REVISION_SOURCE_TYPES = ["code", "agent_yaml", "veadk"] as const;
-export type AgentRevisionSourceType = (typeof AGENT_REVISION_SOURCE_TYPES)[number];
 
 // ─── Agent ──────────────────────────────────────────────────
 
@@ -134,24 +124,13 @@ export const agentRevisionTable = mysqlTable(
     /**
      * 绑定的不可变 AgentContractSnapshot id（逻辑外键 → AgentContractSnapshot.id）。
      * 创建 Revision 时必须精确引用一个同 tenant/Agent 的 Snapshot；发布证据从该
-     * 结构化快照冻结。SnowHarness 对 Agent 一律按源码不可见处理——Revision 的
-     * 权威来源是 AgentContractSnapshot，不是 sourceType/sourceRevision/agentArtifactRef。
+     * 结构化快照冻结。SnowHarness 对 Agent 一律按源码不可见黑盒处理——Revision 的
+     * 唯一权威来源是 AgentContractSnapshot，创建后不可换绑（合同变化必须
+     * new Snapshot → new AgentRevision）。
      */
-    agentContractSnapshotId: varchar("agentContractSnapshotId", { length: 36 }),
+    agentContractSnapshotId: varchar("agentContractSnapshotId", { length: 36 }).notNull(),
     /** Agent 内单调递增修订号。 */
     revisionNo: bigint("revisionNo", { mode: "number" }).notNull(),
-    /** 来源类型（code/agent_yaml/veadk）。varchar 存储以便扩展。 */
-    sourceType: varchar("sourceType", { length: 32 }).notNull(),
-    /** Git commit 或制品修订标识。 */
-    sourceRevision: varchar("sourceRevision", { length: 128 }).notNull(),
-    /** 指令内容 hash。 */
-    instructionHash: varchar("instructionHash", { length: 128 }).notNull(),
-    /** Agent 代码/agent.yaml 制品引用；由 Runtime 加载，不是 Runtime 主机镜像。 */
-    agentArtifactRef: varchar("agentArtifactRef", { length: 512 }).notNull(),
-    /** 权威控制面 Artifact；旧 Revision 可为空。 */
-    artifactId: varchar("artifactId", { length: 36 }),
-    /** 与 artifactId 同时冻结的内容摘要。 */
-    artifactDigest: varchar("artifactDigest", { length: 71 }),
     /** 默认模型策略。 */
     modelPolicyJson: json("modelPolicyJson").notNull(),
     /** 权限要求。 */
@@ -171,7 +150,6 @@ export const agentRevisionTable = mysqlTable(
   (t) => ({
     agentRevisionNoUq: uniqueIndex("AgentRevision_agent_revisionNo_uq").on(t.agentId, t.revisionNo),
     agentStateIdx: index("AgentRevision_agent_state_idx").on(t.agentId, t.revisionState),
-    artifactIdx: index("AgentRevision_artifact_idx").on(t.artifactId),
   }),
 );
 

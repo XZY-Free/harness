@@ -74,9 +74,6 @@ export const EXECUTION_BINDING_AUTHORITY_LOCK_ORDER = [
   "AgentWithdrawalRecord",
   "RuntimePublicationRecord",
   "RuntimeWithdrawalRecord",
-  "AgentArtifact",
-  "AgentArtifactAttestation",
-  "AgentAttestationRevocation",
   "RuntimeArtifact",
   "RuntimeArtifactAttestation",
   "RuntimeAttestationRevocation",
@@ -127,9 +124,6 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         frozenEvidence: {
           agentPublicationRecordId: evidence.agentPublicationRecordId,
           runtimePublicationRecordId: evidence.runtimePublicationRecordId,
-          agentAttestationIds: evidence.agentAttestationIds
-            ? [...evidence.agentAttestationIds].sort()
-            : null,
           runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
           conformanceRunId: evidence.conformanceRunId,
         },
@@ -173,9 +167,7 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         routeRevisionId: evidence.routeRevisionId,
         routeActivationId: evidence.routeActivationId,
         routeContentDigest: evidence.routeContentDigest,
-        agentArtifactId: evidence.agentArtifactId,
         runtimeArtifactId: evidence.runtimeArtifactId,
-        agentArtifactDigest: evidence.agentArtifactDigest,
         runtimeArtifactDigest: evidence.runtimeArtifactDigest,
         runtimeEvidenceKind: evidence.runtimeEvidenceKind,
         runtimeConfigDigest: evidence.runtimeConfigDigest,
@@ -184,10 +176,6 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         agentContractDigest: evidence.agentContractDigest,
         agentContextDigest: evidence.agentContextDigest,
         capabilityManifestDigest: evidence.capabilityManifestDigest,
-        // base route 的 agentAttestationIds 为 null（§18 not_applicable），保持 null。
-        agentAttestationIds: evidence.agentAttestationIds
-          ? [...evidence.agentAttestationIds].sort()
-          : null,
         runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
         agentPublicationRecordId: evidence.agentPublicationRecordId,
         runtimePublicationRecordId: evidence.runtimePublicationRecordId,
@@ -323,7 +311,9 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
           !agentRev ||
           agentRev.agentId !== agent.id ||
           agentRev.revisionState !== "published" ||
-          agentRev.artifactDigest !== evidence.agentArtifactDigest
+          // Agent 是源码不可见黑盒：发布权威是 AgentContractSnapshot，
+          // 冻结 evidence 必须与锁后 AgentRevision 的 Snapshot 一致（fail-closed）。
+          agentRev.agentContractSnapshotId !== evidence.agentContractSnapshotId
         ) {
           throw evidenceError("Agent 或 AgentRevision 当前权威事实不一致");
         }
@@ -566,9 +556,7 @@ async function lockAndVerifyProjection(
       runtimeRevisionId: routeEligibilityProjection.runtimeRevisionId,
       policyRevisionId: routeEligibilityProjection.policyRevisionId,
       routeContentDigest: routeEligibilityProjection.routeContentDigest,
-      agentArtifactId: routeEligibilityProjection.agentArtifactId,
       runtimeArtifactId: routeEligibilityProjection.runtimeArtifactId,
-      agentArtifactDigest: routeEligibilityProjection.agentArtifactDigest,
       runtimeArtifactDigest: routeEligibilityProjection.runtimeArtifactDigest,
       runtimeEvidenceKind: routeEligibilityProjection.runtimeEvidenceKind,
       runtimeConfigDigest: routeEligibilityProjection.runtimeConfigDigest,
@@ -579,7 +567,6 @@ async function lockAndVerifyProjection(
       capabilityCompatibilityDigest: routeEligibilityProjection.capabilityCompatibilityDigest,
       agentPublicationRecordId: routeEligibilityProjection.agentPublicationRecordId,
       runtimePublicationRecordId: routeEligibilityProjection.runtimePublicationRecordId,
-      agentAttestationIds: routeEligibilityProjection.agentAttestationIds,
       runtimeAttestationIds: routeEligibilityProjection.runtimeAttestationIds,
       conformanceRunId: routeEligibilityProjection.conformanceRunId,
     })
@@ -603,7 +590,6 @@ async function lockAndVerifyProjection(
       agentRevisionId: input.agentRevisionId,
       runtimeRevisionId: input.runtimeRevisionId,
       routeContentDigest: evidence.routeContentDigest,
-      agentArtifactDigest: evidence.agentArtifactDigest,
       runtimeArtifactDigest: evidence.runtimeArtifactDigest,
       runtimeEvidenceKind: evidence.runtimeEvidenceKind,
       runtimeConfigDigest: evidence.runtimeConfigDigest,
@@ -614,9 +600,7 @@ async function lockAndVerifyProjection(
       capabilityManifestDigest: evidence.capabilityManifestDigest,
       agentPublicationRecordId: evidence.agentPublicationRecordId,
       runtimePublicationRecordId: evidence.runtimePublicationRecordId,
-      agentArtifactId: evidence.agentArtifactId,
       runtimeArtifactId: evidence.runtimeArtifactId,
-      agentAttestationIds: evidence.agentAttestationIds,
       runtimeAttestationIds: evidence.runtimeAttestationIds,
       conformanceRunId: evidence.conformanceRunId,
     },
@@ -636,9 +620,9 @@ type FrozenProjectionRow = {
   runtimeRevisionId: string;
   policyRevisionId: string | null;
   routeContentDigest: string;
-  agentArtifactId: string | null;
+  /** null = external_endpoint Runtime（03 §3）。 */
   runtimeArtifactId: string | null;
-  agentArtifactDigest: string | null;
+  /** null = external_endpoint Runtime（03 §3）。 */
   runtimeArtifactDigest: string | null;
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   runtimeConfigDigest: string | null;
@@ -649,7 +633,6 @@ type FrozenProjectionRow = {
   capabilityCompatibilityDigest: string;
   agentPublicationRecordId: string | null;
   runtimePublicationRecordId: string | null;
-  agentAttestationIds: string[] | null;
   runtimeAttestationIds: string[] | null;
   conformanceRunId: string | null;
 };
@@ -664,12 +647,8 @@ type FrozenProjectionExpectation = {
   agentRevisionId: string | null;
   runtimeRevisionId: string;
   routeContentDigest: string;
-  /** null = 基础 Harness Route（Agent Evidence not_applicable，§18）。 */
-  agentArtifactId: string | null;
   /** null = external_endpoint Runtime（03 §3）。 */
   runtimeArtifactId: string | null;
-  /** null = 基础 Harness Route（§18 not_applicable）。 */
-  agentArtifactDigest: string | null;
   /** null = external_endpoint Runtime（03 §3）。 */
   runtimeArtifactDigest: string | null;
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
@@ -682,8 +661,6 @@ type FrozenProjectionExpectation = {
   /** null = 基础 Harness Route（§18 not_applicable）。 */
   agentPublicationRecordId: string | null;
   runtimePublicationRecordId: string;
-  /** null = 基础 Harness Route（§18 not_applicable）。 */
-  agentAttestationIds: string[] | null;
   runtimeAttestationIds: string[];
   conformanceRunId: string;
 };
@@ -716,17 +693,11 @@ export function validateFrozenProjectionAuthority(input: {
         )
       : !!projection?.runtimeAttestationIds &&
         areExactNonEmptyIdSets(projection.runtimeAttestationIds, expected.runtimeAttestationIds);
+  // Agent 维度（Agent Route）：Publication + Contract 三元组一致
+  //（Agent 是源码不可见黑盒，无 source Artifact/Attestation 证据）。
   const agentDimensionValid = isBaseRoute
     ? true
-    : !!projection &&
-      projection.agentArtifactId === expected.agentArtifactId &&
-      projection.agentArtifactDigest === expected.agentArtifactDigest &&
-      projection.agentPublicationRecordId === expected.agentPublicationRecordId &&
-      !!projection.agentAttestationIds &&
-      areExactNonEmptyIdSets(
-        projection.agentAttestationIds,
-        expected.agentAttestationIds as string[],
-      );
+    : !!projection && projection.agentPublicationRecordId === expected.agentPublicationRecordId;
   if (
     !projection ||
     projection.routeId !== expected.routeId ||
@@ -809,8 +780,10 @@ async function lockAndVerifyPublications(
             tenantId: input.tenantId,
             subjectType: "agent_revision",
             subjectRevisionId: input.agentRevisionId as string,
-            attestationIds: evidence.agentAttestationIds as string[],
+            // Agent 是源码不可见黑盒 → Agent Publication 恒无 Artifact Attestation。
+            attestationIds: [],
             conformanceRunId: null,
+            allowEmptyAttestations: true,
           },
         });
         if (!agentPub) throw evidenceError("冻结 Agent Publication 不存在");
@@ -1044,74 +1017,8 @@ async function lockAndVerifyAttestations(
   input: StoreExecutionBindingInput,
 ): Promise<void> {
   const evidence = input.controlPlaneEvidence;
-  // 基础 Harness Route → agentAttestationIds 为 null（§18 not_applicable），跳过 Agent 维度。
-  const agentAttestationIds = evidence.agentAttestationIds ?? [];
-
-  for (const attestationId of [...agentAttestationIds].sort()) {
-    const [attestationKey] = await tx
-      .select({ artifactId: artifactAttestation.artifactId })
-      .from(artifactAttestation)
-      .where(eq(artifactAttestation.id, attestationId))
-      .limit(1);
-    if (!attestationKey?.artifactId) {
-      throw evidenceError(`冻结 Attestation ${attestationId} 缺少 Artifact`);
-    }
-    if (attestationKey.artifactId !== evidence.agentArtifactId) {
-      throw evidenceError(`冻结 Attestation ${attestationId} 的 Artifact 已漂移`);
-    }
-    const [artifactRow] = await tx
-      .select({
-        id: artifact.id,
-        tenantId: artifact.tenantId,
-        kind: artifact.kind,
-        digest: artifact.digest,
-      })
-      .from(artifact)
-      .where(eq(artifact.id, evidence.agentArtifactId))
-      .limit(1)
-      .for("update");
-    const [attestation] = await tx
-      .select({
-        id: artifactAttestation.id,
-        artifactId: artifactAttestation.artifactId,
-        tenantId: artifactAttestation.tenantId,
-        artifactType: artifactAttestation.artifactType,
-        artifactRevisionId: artifactAttestation.artifactRevisionId,
-        artifactDigest: artifactAttestation.artifactDigest,
-        verificationState: artifactAttestation.verificationState,
-      })
-      .from(artifactAttestation)
-      .where(eq(artifactAttestation.id, attestationId))
-      .limit(1)
-      .for("update");
-    validateFrozenArtifactAuthority({
-      artifact: artifactRow ?? null,
-      attestationArtifactId: attestation?.artifactId ?? null,
-      expected: {
-        artifactId: evidence.agentArtifactId as string,
-        tenantId: input.tenantId,
-        artifactKind: "agent_revision",
-        artifactDigest: evidence.agentArtifactDigest as string,
-      },
-    });
-    const [revocation] = await tx
-      .select({ id: attestationRevocationRecord.id })
-      .from(attestationRevocationRecord)
-      .where(eq(attestationRevocationRecord.attestationId, attestationId))
-      .limit(1)
-      .for("update");
-    validateFrozenAttestationAuthority({
-      attestation: attestation ?? null,
-      revocation: revocation ?? null,
-      expected: {
-        attestationId,
-        tenantId: input.tenantId,
-        artifactType: "agent_revision",
-        artifactRevisionId: input.agentRevisionId as string,
-        artifactDigest: evidence.agentArtifactDigest as string,
-      },
-    });
-  }
+  // Agent 是源码不可见黑盒 → 无 Agent Artifact Attestation（不伪造）。
+  // 仅 hosted_artifact Runtime 携带 Attestation（03 §3）；external 集合为空不会进入。
 
   for (const attestationId of [...evidence.runtimeAttestationIds].sort()) {
     // 仅 hosted_artifact 携带 Runtime Attestation（03 §3）；external 集合为空不会进入。
@@ -1189,7 +1096,7 @@ export function validateFrozenArtifactAuthority(input: {
   expected: {
     artifactId: string;
     tenantId: string;
-    artifactKind: "agent_revision" | "runtime_revision";
+    artifactKind: "runtime_revision";
     artifactDigest: string;
   };
 }): void {
@@ -1219,9 +1126,8 @@ type FrozenAttestationRow = {
 type FrozenAttestationExpectation = {
   attestationId: string;
   tenantId: string;
-  artifactType: "agent_revision" | "runtime_revision";
-  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
-  artifactRevisionId: string | null;
+  artifactType: "runtime_revision";
+  artifactRevisionId: string;
   artifactDigest: string;
 };
 
@@ -1348,10 +1254,7 @@ export function toExecutionBinding(
     row.projectionVersionNo >= 0;
   const agentFieldsComplete =
     isBaseRoute ||
-    (!!row.agentArtifactId &&
-      !!row.agentArtifactDigest &&
-      !!row.agentAttestationIds &&
-      !!row.agentPublicationRecordId &&
+    (!!row.agentPublicationRecordId &&
       // Agent Contract 证据 all-or-nothing（05 §5）。
       !!row.agentContractSnapshotId &&
       !!row.agentContractDigest &&
@@ -1379,9 +1282,7 @@ export function toExecutionBinding(
     routeRevisionId: row.routeRevisionId,
     routeActivationId: row.routeActivationId,
     routeContentDigest: row.routeContentDigest,
-    agentArtifactId: row.agentArtifactId,
     runtimeArtifactId: row.runtimeArtifactId,
-    agentArtifactDigest: row.agentArtifactDigest,
     runtimeArtifactDigest: row.runtimeArtifactDigest,
     runtimeConfigDigest: row.runtimeConfigDigest,
     runtimeTargetDigest: row.runtimeTargetDigest,
@@ -1390,8 +1291,6 @@ export function toExecutionBinding(
     agentContractDigest: row.agentContractDigest,
     agentContextDigest: row.agentContextDigest,
     capabilityManifestDigest: row.capabilityManifestDigest,
-    // base route 的 agentAttestationIds 为 null（§18 not_applicable），保持 null。
-    agentAttestationIds: row.agentAttestationIds ? [...row.agentAttestationIds] : null,
     runtimeAttestationIds: [...row.runtimeAttestationIds],
     agentPublicationRecordId: row.agentPublicationRecordId,
     runtimePublicationRecordId: row.runtimePublicationRecordId,

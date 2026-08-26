@@ -16,6 +16,7 @@
  */
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { AgentPublicationContractSnapshotMissingError } from "@/lib/agents/domain/agent-revision-publication-policy";
+import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
 import type {
   AgentPublicationSession,
   AgentPublicationStore,
@@ -26,6 +27,7 @@ import {
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
@@ -42,8 +44,8 @@ beforeEach(async () => {
   await resetDatabase(db);
 });
 
-/** 直接写 Revision 的合同快照绑定（模拟脏数据/跨 Agent 引用，仅供失败用例）。 */
-async function bindRevisionContractSnapshot(revisionId: string, snapshotId: string | null) {
+/** 直接写 Revision 的合同快照绑定（模拟跨 Agent 引用，仅供失败用例）。 */
+async function bindRevisionContractSnapshot(revisionId: string, snapshotId: string) {
   await db
     .update(agentRevisionTable)
     .set({ agentContractSnapshotId: snapshotId })
@@ -70,14 +72,9 @@ async function seedContractPublishFixture() {
     displayName: "Contract Publish Agent",
     ownerUserId: identity.id,
   });
-  const revision = await createDraftRevision({
+  const revision = await createDraftRevisionWithContractSnapshot({
     tenantId: tenant.id,
     agentId: agent.id,
-    sourceType: "agent_yaml",
-    sourceRevision: "git:contract-publish-v1",
-    instructionHash: "sha256:contract-publish-instruction",
-    agentArtifactRef: "oci://registry/agent@sha256:contract-publish",
-    agentContractSnapshotId: null,
     modelPolicyJson: { model: "doubao-pro" },
     permissionRequirementsJson: {},
     delegationPolicyJson: {},
@@ -134,7 +131,6 @@ function publishCommand(fixture: {
     tenantId: fixture.tenantId,
     revisionId: fixture.revision.id,
     agentExpectedVersionNo: fixture.agent.versionNo,
-    attestationId: null,
     actor: {
       tenantId: fixture.tenantId,
       actorType: "user" as const,
@@ -182,25 +178,21 @@ describe("PublishAgentRevision（AgentContractSnapshot 发布权威）", () => {
       displayName: "HR Publish Agent",
       ownerUserId: owner.id,
     });
-    const snapshot = await seedAgentContractSnapshot({
+    const revision = await createDraftRevisionWithContractSnapshot({
       tenantId: tenant.id,
       agentId: agent.id,
-      createdBy: owner.id,
-    });
-    const revision = await createDraftRevision({
-      tenantId: tenant.id,
-      agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:hr-publish-v1",
-      instructionHash: "sha256:hr-publish-instruction",
-      agentArtifactRef: "oci://registry/agent@sha256:hr-publish",
-      agentContractSnapshotId: snapshot.id,
       modelPolicyJson: { model: "doubao-pro" },
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
       agentInterfaceRequirementsJson: { required: [], optional: [] },
       createdBy: owner.id,
     });
+
+    const boundRevision = await getRevisionById(revision.id);
+    const snapshot = await mysqlAgentContractStore.transaction((session) =>
+      session.findContractSnapshotById(tenant.id, boundRevision?.agentContractSnapshotId ?? ""),
+    );
+    if (!snapshot) throw new Error("合同快照未绑定");
 
     const { store, recorded } = withPublicationRecording();
     const publishAgentRevision = createPublishAgentRevision({ store });
@@ -209,7 +201,6 @@ describe("PublishAgentRevision（AgentContractSnapshot 发布权威）", () => {
       tenantId: tenant.id,
       revisionId: revision.id,
       agentExpectedVersionNo: agent.versionNo,
-      attestationId: null,
       actor: { tenantId: tenant.id, actorType: "user", actorId: owner.id },
       requestId: "req-contract-publish-happy",
       idempotencyKey: "publish-contract-revision-happy",

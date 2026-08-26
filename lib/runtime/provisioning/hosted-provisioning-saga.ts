@@ -205,7 +205,6 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     const checkpoint: StepCheckpoint = {
       agentRevisionId: agentRevision.revisionId,
       agentPublicationRecordId: agentRevision.publicationRecordId,
-      agentAttestationId: agentRevision.attestationId,
     };
 
     return advanceStep(request, "ensure_agent_publication", checkpoint);
@@ -342,7 +341,6 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
   async function stepActivateRoute(request: HostedProvisioningRequestRow): Promise<SagaStepResult> {
     const agentRevisionId = request.stepAgentRevisionId;
     const agentPublicationRecordId = request.stepAgentPublicationRecordId;
-    const agentAttestationId = request.stepAgentAttestationId;
     const runtimeRevisionId = request.stepRuntimeRevisionId;
     const runtimePublicationRecordId = request.stepRuntimePublicationRecordId;
     const conformanceRunId = request.stepConformanceRunId;
@@ -351,7 +349,6 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     if (
       !agentRevisionId ||
       !agentPublicationRecordId ||
-      !agentAttestationId ||
       !runtimeRevisionId ||
       !runtimePublicationRecordId ||
       !conformanceRunId ||
@@ -374,7 +371,6 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     const agentRevision = {
       revisionId: request.agentRevisionId,
       publicationRecordId: agentPublicationRecordId,
-      attestationId: agentAttestationId,
     };
     const runtimeRevision = {
       revisionId: runtimeRevisionId,

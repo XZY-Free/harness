@@ -253,7 +253,6 @@ export async function redispatchInvocation(
           {
             type: "agent_instruction_ref",
             agent_revision_id: params.agentRevision.id,
-            instruction_hash: params.agentRevision.instructionHash,
           },
         ]
       : []),
@@ -292,8 +291,6 @@ export async function redispatchInvocation(
     agent: params.agentRevision
       ? {
           agent_revision_id: params.agentRevision.id,
-          instruction_hash: params.agentRevision.instructionHash,
-          artifact_ref: params.agentRevision.agentArtifactRef,
           model_policy: (params.agentRevision.modelPolicyJson ?? {}) as Record<string, unknown>,
           permission_requirements: (params.agentRevision.permissionRequirementsJson ??
             {}) as Record<string, unknown>,

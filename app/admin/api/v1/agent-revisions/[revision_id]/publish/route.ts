@@ -11,7 +11,6 @@ import {
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import {
   AgentPublicationContractSnapshotMissingError,
-  AgentPublicationPrerequisiteError,
   AgentPublicationVersionConflictError,
   AgentRevisionPublicationNotFoundError,
   AgentRevisionPublicationStateError,
@@ -40,7 +39,7 @@ import {
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  * - Revision 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
  * - If-Match 不匹配 → 412 ETAG_MISMATCH
- * - attestation 未验证 → 409 ARTIFACT_NOT_VERIFIED
+ * - Snapshot 缺失/跨 Agent → 409 AGENT_CONTRACT_SNAPSHOT_MISSING
  * - Agent 乐观锁冲突 → 412 ETAG_MISMATCH
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  */
@@ -51,7 +50,6 @@ import {
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
-import { ArtifactNotVerifiedError } from "@/lib/artifacts/domain/artifact-attestation";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -91,22 +89,20 @@ interface RouteContext {
 interface PublishBody {
   release_notes: string;
   evidence_refs?: unknown[];
-  /** 可选 source Attestation id（不再强制；发布权威是 AgentContractSnapshot 证据）。 */
-  artifact_attestation_id?: string | null;
 }
+
+/** 旧 source Attestation 键（出现即 400）。 */
+const LEGACY_ATTESTATION_KEYS = new Set(["artifact_attestation_id"]);
 
 /** 校验请求体。 */
 function validateBody(body: unknown): body is PublishBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
+  for (const key of Object.keys(b)) {
+    if (LEGACY_ATTESTATION_KEYS.has(key)) return false;
+  }
   if (typeof b.release_notes !== "string") return false;
   if (b.evidence_refs !== undefined && !Array.isArray(b.evidence_refs)) return false;
-  if (
-    b.artifact_attestation_id !== undefined &&
-    b.artifact_attestation_id !== null &&
-    (typeof b.artifact_attestation_id !== "string" || b.artifact_attestation_id.length === 0)
-  )
-    return false;
   return true;
 }
 
@@ -248,7 +244,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       tenantId: principal.tenantId,
       revisionId,
       agentExpectedVersionNo: agent.versionNo,
-      attestationId: body.artifact_attestation_id ?? null,
       actor: actorFromAdminPrincipal(principal),
       requestId,
       idempotencyKey,
@@ -282,12 +277,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     if (err instanceof AgentPublicationContractSnapshotMissingError) {
       return apiError("AGENT_CONTRACT_SNAPSHOT_MISSING", err.message, { requestId });
-    }
-    if (err instanceof AgentPublicationPrerequisiteError) {
-      return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
-    }
-    if (err instanceof ArtifactNotVerifiedError) {
-      return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });
     }
     if (
       err instanceof AgentPublicationVersionConflictError ||

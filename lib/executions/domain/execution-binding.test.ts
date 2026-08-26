@@ -5,12 +5,11 @@ import {
 import { describe, expect, it } from "vitest";
 
 const EVIDENCE = {
+  agentRevisionId: "agent-revision-1",
   routeRevisionId: "route-revision-1",
   routeActivationId: "route-activation-1",
   routeContentDigest: `sha256:${"1".repeat(64)}`,
-  agentArtifactId: "agent-artifact-1",
   runtimeArtifactId: "runtime-artifact-1",
-  agentArtifactDigest: `sha256:${"2".repeat(64)}`,
   runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
   runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
   runtimeTargetDigest: `sha256:${"5".repeat(64)}`,
@@ -19,7 +18,6 @@ const EVIDENCE = {
   agentContractDigest: `sha256:${"7".repeat(64)}`,
   agentContextDigest: `sha256:${"8".repeat(64)}`,
   capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
-  agentAttestationIds: ["agent-attestation-b", "agent-attestation-a"],
   runtimeAttestationIds: ["runtime-attestation-b", "runtime-attestation-a"],
   agentPublicationRecordId: "agent-publication-1",
   runtimePublicationRecordId: "runtime-publication-1",
@@ -55,7 +53,6 @@ describe("ExecutionBinding domain", () => {
       ...bindingInput(),
       controlPlaneEvidence: {
         ...EVIDENCE,
-        agentAttestationIds: [...EVIDENCE.agentAttestationIds].reverse(),
         runtimeAttestationIds: [...EVIDENCE.runtimeAttestationIds].reverse(),
       },
     });

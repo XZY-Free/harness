@@ -45,7 +45,6 @@ export interface HostedProvisioningRequestDTO {
   /** Checkpoint 字段 — 步骤产出。 */
   agent_revision_id_checkpoint: string | null;
   agent_publication_record_id: string | null;
-  agent_attestation_id: string | null;
   runtime_id: string | null;
   runtime_revision_id_checkpoint: string | null;
   runtime_artifact_id: string | null;

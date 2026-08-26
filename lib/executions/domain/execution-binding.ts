@@ -73,10 +73,6 @@ export function computeExecutionBindingConfigHash(input: ExecutionBindingConfigI
       ...input,
       controlPlaneEvidence: {
         ...input.controlPlaneEvidence,
-        // 基础 Harness Route 的 agentAttestationIds 为 null（§18 not_applicable），保持 null。
-        agentAttestationIds: input.controlPlaneEvidence.agentAttestationIds
-          ? [...input.controlPlaneEvidence.agentAttestationIds].sort()
-          : null,
         runtimeAttestationIds: [...input.controlPlaneEvidence.runtimeAttestationIds].sort(),
       },
     }),
@@ -107,7 +103,7 @@ export function assertExecutionBindingEvidence(
 ): void {
   // 基础 Harness Route：agent 字段全 null（Agent Evidence not_applicable，§18），
   // 跳过 Agent 维度校验（禁止伪装 passed、禁止空串假证据）；Runtime 维度始终校验。
-  const isBaseRoute = evidence.agentArtifactId === null;
+  const isBaseRoute = evidence.agentRevisionId === null;
 
   // Runtime evidence all-or-nothing（03 §3）：hosted 要求 artifact 全集；
   // external_endpoint 无 Runtime Artifact（不伪造），attestation 集合为空。
@@ -137,16 +133,11 @@ export function assertExecutionBindingEvidence(
     throw new ExecutionBindingEvidenceError("Runtime Artifact Digest 格式非法");
   }
   if (!isBaseRoute) {
-    if (!evidence.agentArtifactId || !evidence.agentPublicationRecordId) {
-      throw new ExecutionBindingEvidenceError("缺少 Agent 引用");
-    }
-    if (!SHA256.test(evidence.agentArtifactDigest as string)) {
-      throw new ExecutionBindingEvidenceError("Agent Artifact Digest 格式非法");
-    }
-    if (!validIds(evidence.agentAttestationIds as string[])) {
-      throw new ExecutionBindingEvidenceError("Agent Attestation 引用不能为空或重复");
+    if (!evidence.agentPublicationRecordId) {
+      throw new ExecutionBindingEvidenceError("缺少 Agent Publication 引用");
     }
     // Agent evidence all-or-nothing（05 §5）：Contract 证据三元组缺一不可。
+    // Agent 是源码不可见黑盒 — 不再要求 source Artifact/Attestation 证据。
     if (
       !evidence.agentContractSnapshotId ||
       !SHA256.test(evidence.agentContractDigest as string) ||

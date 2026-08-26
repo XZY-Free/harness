@@ -16,14 +16,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 function bindingInsertSql(
   invocationId: string,
   agentRevisionId: string | null,
-  agentArtifactId: string | null,
-  agentArtifactDigest: string | null,
-  agentAttestationIds: string[] | null,
+  agentContractSnapshotId: string | null,
+  agentContractDigest: string | null,
   agentPublicationRecordId: string | null,
 ): string {
   const digest = (hex: string) => `sha256:${hex.repeat(64)}`;
-  const attestationSql = (ids: string[] | null) =>
-    ids === null ? "NULL" : `JSON_ARRAY(${ids.map((id) => `'${id}'`).join(",")})`;
   const s = (v: string | null) => (v === null ? "NULL" : `'${v}'`);
   return `INSERT INTO \`ExecutionBinding\` (
     invocationId, tenantId, runtimeRevisionId, deploymentRouteId, modelProvider, modelId,
@@ -31,15 +28,16 @@ function bindingInsertSql(
     routeRevisionId, routeActivationId, routeContentDigest, runtimeArtifactId, runtimeArtifactDigest,
     runtimeConfigDigest, capabilityManifestDigest, runtimeAttestationIds, runtimePublicationRecordId,
     conformanceRunId, resolutionInputDigest, projectionVersionNo, configHash, boundAt,
-    agentRevisionId, agentArtifactId, agentArtifactDigest, agentAttestationIds, agentPublicationRecordId
+    agentRevisionId, agentContractSnapshotId, agentContractDigest, agentContextDigest,
+    agentPublicationRecordId
   ) VALUES (
     '${invocationId}', 'tenant-1', 'runtime-rev-1', 'route-1', 'provider', 'model',
     'policy-rev-1', '${digest("a")}', 'gov-rev-1', '${digest("b")}',
     'route-rev-1', 'route-act-1', '${digest("c")}', 'runtime-art-1', '${digest("d")}',
     '${digest("e")}', '${digest("f")}', JSON_ARRAY('runtime-att-1'), 'runtime-pub-1',
     'conformance-1', '${digest("g")}', 1, '${digest("h")}', '2026-01-01 00:00:00.000',
-    ${s(agentRevisionId)}, ${s(agentArtifactId)}, ${s(agentArtifactDigest)},
-    ${attestationSql(agentAttestationIds)}, ${s(agentPublicationRecordId)}
+    ${s(agentRevisionId)}, ${s(agentContractSnapshotId)}, ${s(agentContractDigest)},
+    ${s(agentContractDigest)}, ${s(agentPublicationRecordId)}
   )`;
 }
 
@@ -68,7 +66,7 @@ describe("ExecutionBinding Agent Evidence 条件性完整组（§10.3/§10.4）"
 
   it("base route（agent 全 null）通过 DB CHECK —— §10.3 全部为空合法", async () => {
     await expect(
-      insertBinding(bindingInsertSql("inv-base-1", null, null, null, null, null)),
+      insertBinding(bindingInsertSql("inv-base-1", null, null, null, null)),
     ).resolves.toBeUndefined();
   });
 
@@ -78,39 +76,36 @@ describe("ExecutionBinding Agent Evidence 条件性完整组（§10.3/§10.4）"
         bindingInsertSql(
           "inv-agent-1",
           "agent-rev-1",
-          "agent-art-1",
+          "agent-snap-1",
           `sha256:${"2".repeat(64)}`,
-          ["agent-att-1"],
           "agent-pub-1",
         ),
       ),
     ).resolves.toBeUndefined();
   });
 
-  it("半完整组（agentRevisionId=null 但 agentArtifactId 非空）被 DB CHECK 拒绝 —— §10.3 禁 4 态模糊", async () => {
+  it("半完整组（agentRevisionId=null 但 agentContractSnapshotId 非空）被 DB CHECK 拒绝 —— §10.3 禁 4 态模糊", async () => {
     await expect(
       insertBinding(
         bindingInsertSql(
           "inv-half-1",
           null, // agentRevisionId null（base 语义）
-          "agent-art-1", // 但 agentArtifactId 非空 → 半完整组
+          "agent-snap-1", // 但 agentContractSnapshotId 非空 → 半完整组
           `sha256:${"2".repeat(64)}`,
-          ["agent-att-1"],
           "agent-pub-1",
         ),
       ),
     ).rejects.toThrow();
   });
 
-  it("半完整组（agentRevisionId 非空但 agentAttestationIds 空数组）被 DB CHECK 拒绝 —— §10.3", async () => {
+  it("半完整组（agentRevisionId 非空但 agentContractDigest 缺失）被 DB CHECK 拒绝 —— §10.3", async () => {
     await expect(
       insertBinding(
         bindingInsertSql(
           "inv-half-2",
           "agent-rev-1",
-          "agent-art-1",
-          `sha256:${"2".repeat(64)}`,
-          [], // 空数组非 JSON_LENGTH>=1 → 半完整
+          "agent-snap-1",
+          null, // Contract digest 缺失 → 半完整
           "agent-pub-1",
         ),
       ),

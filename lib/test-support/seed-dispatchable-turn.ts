@@ -82,10 +82,7 @@ async function seedPublishedAgentRevision(
   const revision = await createDraftRevision({
     tenantId,
     agentId: agent.id,
-    sourceType: "agent_yaml",
-    sourceRevision: `git:${contentSuffix}`,
-    instructionHash: `sha256:instruction_${contentSuffix}`,
-    agentArtifactRef: `oci://registry/agent@sha256:${contentSuffix}`,
+    agentContractSnapshotId: `snap_${contentSuffix}`,
     modelPolicyJson: modelPolicy ?? { default: "doubao-pro", provider: "doubao" },
     permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
     delegationPolicyJson: { allowed_agent_ids: [] },
@@ -93,23 +90,17 @@ async function seedPublishedAgentRevision(
     createdBy: ownerId,
   });
 
-  const attestation = await createVerifiedAttestation(
-    tenantId,
-    "agent_revision",
-    revision.id,
-    `agent-content-${contentSuffix}`,
-  );
+  // Agent 是源码不可见黑盒：发布权威 = AgentContractSnapshot，无 Attestation。
   await publishTrustedAgentRevisionForTest({
     tenantId,
     revisionId: revision.id,
     agentExpectedVersionNo: 1,
-    attestationId: attestation.id,
     actorId: ownerId,
   });
 
   const publishedRevision = await getRevisionById(revision.id);
   if (!publishedRevision) throw new Error("测试 AgentRevision 发布后无法回读");
-  return { agent, revision: publishedRevision, attestation };
+  return { agent, revision: publishedRevision };
 }
 
 // ─── seed 完整调度上下文 ─────────────────────────────────────

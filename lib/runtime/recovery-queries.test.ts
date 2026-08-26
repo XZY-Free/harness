@@ -1,5 +1,6 @@
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import {
   type BuilderKeyRegistry,
@@ -147,13 +148,9 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     lifecycleState: "enabled",
   });
 
-  const agentRevision = await createDraftRevision({
+  const agentRevision = await createDraftRevisionWithContractSnapshot({
     tenantId,
     agentId: agent.id,
-    sourceType: "agent_yaml",
-    sourceRevision: "git:recovery-v1",
-    instructionHash: "sha256:instruction_recovery_v1",
-    agentArtifactRef: "oci://registry/agent@sha256:recovery-v1",
     modelPolicyJson: { default: "doubao-pro", provider: "doubao" },
     permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
     delegationPolicyJson: { allowed_agent_ids: [] },
@@ -161,62 +158,7 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     createdBy: ownerId,
   });
 
-  // 创建 attestation（DSSE Envelope + 真实 ed25519 签名）
-  const builderKey = generateTestBuilderKey("builder:recovery");
-  const publicKeyBase64 = builderKey.publicKeyBase64;
-  const content = "agent-content-recovery-v1";
-  const digest = computeArtifactDigest(content);
-  const dsseEnvelopeRef = "attestation:signature:recovery-v1";
-  const sbomRef = "attestation:sbom:recovery-v1";
-  const provRef = "attestation:provenance:recovery-v1";
-
-  const sbomDoc = {
-    bomFormat: "CycloneDX",
-    specVersion: "1.6",
-    version: 1,
-    metadata: { component: { type: "application", name: "test-app", version: "1.0.0" } },
-    components: [
-      {
-        type: "library",
-        name: "lodash",
-        version: "4.17.21",
-        licenses: [{ license: { id: "MIT" } }],
-      },
-    ],
-  };
-  const provDoc = {
-    sourceRevision: "git:abc123",
-    buildPipeline: "ci-1",
-    dependencyLockFile: "package-lock.json:sha256:lockhash",
-    buildTime: "2026-07-15T01:00:00.000Z",
-  };
-  const supplyChain: PredicateSupplyChain = {
-    sbomRef,
-    sbomContent: sbomDoc,
-    provenanceRef: provRef,
-    provenanceContent: provDoc,
-  };
-  const store = new InMemoryManagedArtifactStore();
-  store.writeDsseEnvelope(
-    dsseEnvelopeRef,
-    buildDsseArtifactAttestationEnvelope(builderKey, digest, supplyChain),
-  );
-  store.writeSbom(sbomRef, sbomDoc);
-  store.writeProvenance(provRef, provDoc);
-
-  const builderKeys: BuilderKeyRegistry = {
-    "builder:recovery": publicKeyBase64,
-  };
-
-  const input: VerifyAttestationInput = {
-    tenantId,
-    artifactType: "agent_revision",
-    artifactRevisionId: agentRevision.id,
-    artifactDigest: digest,
-    dsseEnvelopeRef,
-    builderIdentity: "builder:recovery",
-  };
-  await verifyAndPersistAttestation(input, store, builderKeys, buildActor(tenantId, "ci-001"));
+  // Agent 是源码不可见黑盒：发布权威 = AgentContractSnapshot，无 Attestation。
   await publishRevision(tenantId, agentRevision.id, 1);
 
   // Runtime
@@ -244,7 +186,13 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     createdBy: ownerId,
   });
 
-  // Runtime attestation（DSSE Envelope，复用同一 builderKey）
+  // Runtime attestation builder（DSSE Envelope + 真实 ed25519 签名）
+  const builderKey = generateTestBuilderKey("builder:recovery");
+  const builderKeys: BuilderKeyRegistry = {
+    "builder:recovery": builderKey.publicKeyBase64,
+  };
+  const store = new InMemoryManagedArtifactStore();
+
   const rtContent = "runtime-content-recovery-v1";
   const rtDigest = computeArtifactDigest(rtContent);
   const rtDsseEnvelopeRef = "attestation:signature:rt-recovery-v1";
@@ -265,8 +213,8 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     ],
   };
   const rtProvDoc = {
-    sourceRevision: "git:abc123",
     buildPipeline: "ci-1",
+    sourceRevision: "git_commit_1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
   };

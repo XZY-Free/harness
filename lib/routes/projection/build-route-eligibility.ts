@@ -274,9 +274,13 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
 
     // 从统一 Snapshot 提取布尔字段
     const agentPublicationActive = evidenceSnapshot.agentPublication ? 1 : 0;
+    // Agent Evidence Valid = Publication 冻结的 AgentContractSnapshot 证据完整
+    //（Agent 是源码不可见黑盒，发布权威是 Contract 证据，不是 source Artifact/Attestation）。
     const agentEvidenceValid =
-      evidenceSnapshot.agentArtifactEvidence?.verificationState === "verified" &&
-      evidenceSnapshot.agentArtifactEvidence.revokedAt === null
+      evidenceSnapshot.agentPublication?.agentContractSnapshotId &&
+      evidenceSnapshot.agentPublication.agentContractDigest &&
+      evidenceSnapshot.agentPublication.agentCapabilityDigest &&
+      evidenceSnapshot.agentPublication.agentContextDigest
         ? 1
         : 0;
     const runtimePublicationActive = evidenceSnapshot.runtimePublication ? 1 : 0;
@@ -339,7 +343,6 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       policyRevisionId: revision.policyRevisionId,
       policyRevisionState,
       capabilityCompatibilityDigest,
-      agentArtifactDigest: agentRevision?.artifactDigest ?? null,
       runtimeArtifactDigest: runtimeRevision?.artifactDigest ?? null,
       runtimeConfigDigest: runtimeRevision?.configHash ?? null,
       runtimeTargetDigest: runtimeRevision?.runtimeTargetDigest ?? null,
@@ -349,10 +352,8 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       agentContextDigest: evidenceSnapshot.agentPublication?.agentContextDigest ?? null,
       agentPublicationRecordId: evidenceSnapshot.agentPublication?.publicationRecordId ?? null,
       runtimePublicationRecordId: evidenceSnapshot.runtimePublication?.publicationRecordId ?? null,
-      agentAttestationIds: evidenceSnapshot.agentPublication?.attestationIds ?? null,
       runtimeAttestationIds: evidenceSnapshot.runtimePublication?.attestationIds ?? null,
       conformanceRunId: evidenceSnapshot.runtimePublication?.conformanceRunId ?? null,
-      agentArtifactId: evidenceSnapshot.agentArtifactEvidence?.artifactId ?? null,
       runtimeArtifactId: evidenceSnapshot.runtimeArtifactEvidence?.artifactId ?? null,
       invalidReason: isEligible ? null : ineligibilityReasons.join(","),
       eligibilityState: (isEligible ? "eligible" : "ineligible") as "eligible" | "ineligible",

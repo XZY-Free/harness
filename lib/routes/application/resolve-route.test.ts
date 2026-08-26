@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  createAgent,
+  getAgentById,
+  updateAgentLifecycle,
+} from "@/lib/agents/persistence/agent-queries";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
+import {
   artifact,
   artifactAttestation,
   attestationRevocationRecord,
@@ -7,7 +13,6 @@ import {
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import {
   deploymentRouteSetTable,
   deploymentRouteTable,
@@ -28,6 +33,7 @@ import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -57,85 +63,44 @@ afterEach(async () => {
 
 async function seedAgentAuthority() {
   const tenant = await ensureDefaultTenant();
-  const agentId = randomUUID();
-  const agentRevisionId = randomUUID();
-  const artifactId = randomUUID();
-  const attestationId = randomUUID();
-  const digest = `sha256:${"a".repeat(64)}`;
-  await db.insert(agentTable).values({
-    id: agentId,
+  const createdAgent = await createAgent({
     tenantId: tenant.id,
-    agentKey: `resolver-${agentId}`,
+    agentKey: `resolver-${randomUUID()}`,
     displayName: "Resolver Agent",
     ownerUserId: randomUUID(),
-    lifecycleState: "enabled",
-    currentRevisionId: agentRevisionId,
-    versionNo: 2,
   });
-  await db.insert(artifact).values({ id: artifactId, tenantId: tenant.id, kind: "agent", digest });
-  await db.insert(agentRevisionTable).values({
-    id: agentRevisionId,
-    agentId,
-    revisionNo: 1,
-    sourceType: "code",
-    sourceRevision: "git:resolver-agent",
-    instructionHash: `sha256:${"b".repeat(64)}`,
-    agentArtifactRef: "oci://resolver-agent",
-    artifactId,
-    artifactDigest: digest,
+  await updateAgentLifecycle(tenant.id, createdAgent.id, "enabled", createdAgent.versionNo);
+  const agent = await getAgentById(tenant.id, createdAgent.id);
+  if (!agent) throw new Error("Agent 启用后无法回读");
+  const revision = await createDraftRevisionWithContractSnapshot({
+    tenantId: tenant.id,
+    agentId: agent.id,
     modelPolicyJson: { default: "resolver-model" },
     permissionRequirementsJson: {},
     delegationPolicyJson: {},
     agentInterfaceRequirementsJson: { required: ["event_stream"] },
-    revisionState: "published",
     createdBy: "resolver-test",
-    publishedAt: NOW,
   });
-  await db.insert(artifactAttestation).values({
-    id: attestationId,
+  const publication = await publishTrustedAgentRevisionForTest({
     tenantId: tenant.id,
-    artifactId,
-    artifactType: "agent_revision",
-    artifactRevisionId: agentRevisionId,
-    artifactDigest: digest,
-    dsseEnvelopeRef: `attestation://dsse/${attestationId}`,
-    sbomRef: `sbom://${attestationId}`,
-    provenanceRef: `provenance://${attestationId}`,
-    builderIdentity: "resolver-test-builder",
-    verificationState: "verified",
-    verifiedAt: NOW,
+    revisionId: revision.id,
+    agentExpectedVersionNo: agent.versionNo,
+    actorId: "resolver-test",
   });
-  const agentPublicationId = randomUUID();
-  await db.insert(publicationRecord).values({
-    id: agentPublicationId,
-    tenantId: tenant.id,
-    subjectType: "agent_revision",
-    subjectRevisionId: agentRevisionId,
-    evidenceSetDigest: `sha256:${"c".repeat(64)}`,
-    attestationIds: [attestationId],
-    conformanceRunId: null,
-    approvals: [],
-    publishedByType: "system",
-    publishedBy: "resolver-test",
-    publishedAt: NOW,
-    idempotencyKey: `publish-agent:${agentRevisionId}`,
-  });
+  const agentPublicationId = publication.publicationRecordId;
   const routeSetId = randomUUID();
   await db.insert(deploymentRouteSetTable).values({
     id: routeSetId,
     tenantId: tenant.id,
-    agentId,
+    agentId: agent.id,
     routeScopeKey: "prod",
     routeScopeJson: { environment: "prod" },
     versionNo: 1,
   });
   return {
     tenantId: tenant.id,
-    agentId,
-    agentRevisionId,
-    agentArtifactId: artifactId,
-    agentArtifactDigest: digest,
-    agentAttestationId: attestationId,
+    agentId: agent.id,
+    agentRevisionId: revision.id,
     agentPublicationId,
     routeSetId,
   };
@@ -403,13 +368,10 @@ describe("RouteResolver MySQL authority", () => {
       resolution: {
         routeRevisionId: fixture.routeRevisionId,
         controlPlaneEvidence: {
-          agentArtifactId: base.agentArtifactId,
           runtimeArtifactId: fixture.runtimeArtifactId,
-          agentArtifactDigest: base.agentArtifactDigest,
           runtimeTargetDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
           runtimeConfigDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
           capabilityManifestDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
-          agentAttestationIds: [base.agentAttestationId],
           runtimeAttestationIds: [fixture.runtimeAttestationId],
           agentPublicationRecordId: base.agentPublicationId,
           runtimePublicationRecordId: fixture.runtimePublicationId,

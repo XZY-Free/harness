@@ -14,13 +14,13 @@
  * 真实签名（ed25519）+ 真实可查询 SBOM/provenance（InMemoryManagedArtifactStore），不使用"跳过验证"假配置。
  */
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
-import { AgentPublicationPrerequisiteError } from "@/lib/agents/domain/agent-revision-publication-policy";
 import { AgentLifecycleError, createAgent } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import {
   ArtifactAttestationFailedError,
   ArtifactNotVerifiedError,
@@ -202,7 +202,7 @@ function buildCycloneDXWithLicense(licenseId: string, name = "lic-lib"): unknown
 
 function buildValidProvenance(): ProvenanceDocument {
   return {
-    sourceRevision: "git:abc123def456",
+    sourceRevision: "git_commit_1",
     buildPipeline: "ci-cd-pipeline-1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
@@ -445,7 +445,7 @@ describe("verifyArtifactAttestation 校验链", () => {
     store.writeProvenance("attestation:provenance:v1", buildValidProvenance());
     validInput = {
       tenantId: "tenant-1",
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: "rev-1",
       artifactDigest: digest,
       dsseEnvelopeRef: "attestation:signature:v1",
@@ -674,7 +674,6 @@ describe("verifyArtifactAttestation 校验链", () => {
 
   it("provenance 缺 sourceRevision → failed (provenance_missing_field)", async () => {
     const badProvenance = {
-      sourceRevision: "",
       buildPipeline: "pipeline-1",
       dependencyLockFile: "lock",
       buildTime: "2026-07-15T01:00:00.000Z",
@@ -691,7 +690,6 @@ describe("verifyArtifactAttestation 校验链", () => {
 
   it("provenance 缺 buildPipeline → failed", async () => {
     const badProvenance = {
-      sourceRevision: "git:abc",
       buildPipeline: "",
       dependencyLockFile: "lock",
       buildTime: "2026-07-15T01:00:00.000Z",
@@ -708,8 +706,8 @@ describe("verifyArtifactAttestation 校验链", () => {
 
   it("provenance buildTime 非有效时间 → failed (provenance_buildtime_invalid)", async () => {
     const badProvenance = {
-      sourceRevision: "git:abc",
       buildPipeline: "pipeline-1",
+      sourceRevision: "git_commit_1",
       dependencyLockFile: "lock",
       buildTime: "not-a-date",
     };
@@ -787,8 +785,8 @@ describe("verifyArtifactAttestation 校验链", () => {
     );
     // 签名后替换 store 中的 Provenance → digest 不匹配
     store.writeProvenance("attestation:provenance:v1", {
-      sourceRevision: "git:tampered",
       buildPipeline: "tampered-pipeline",
+      sourceRevision: "tampered-revision",
       dependencyLockFile: "tampered-lock",
       buildTime: "2026-01-01T00:00:00.000Z",
     });
@@ -816,7 +814,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
     it("插入并按 id 查询", async () => {
       const att = await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("content"),
         dsseEnvelopeRef: "attestation:signature:1",
@@ -838,7 +836,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
     it("跨租户隔离：他租户查询返回 null", async () => {
       const att = await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("content"),
         dsseEnvelopeRef: "attestation:signature:1",
@@ -855,7 +853,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
     it("失败记录持久化 failureCode", async () => {
       const att = await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("content"),
         dsseEnvelopeRef: "attestation:signature:1",
@@ -877,7 +875,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
       for (let i = 0; i < 3; i++) {
         await insertAttestation({
           tenantId,
-          artifactType: "agent_revision",
+          artifactType: "runtime_revision",
           artifactRevisionId: "rev-1",
           artifactDigest: digest,
           dsseEnvelopeRef: `attestation:signature:${i}`,
@@ -889,7 +887,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
           verifiedAt: new Date(),
         });
       }
-      const list = await listAttestationsByRevision(tenantId, "agent_revision", "rev-1");
+      const list = await listAttestationsByRevision(tenantId, "runtime_revision", "rev-1");
       expect(list).toHaveLength(3);
     });
 
@@ -897,7 +895,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
       const digest = computeArtifactDigest("content");
       await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:signature:0",
@@ -909,7 +907,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
       });
       await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:signature:1",
@@ -920,7 +918,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
         failureCode: "signature_invalid",
         verifiedAt: new Date(),
       });
-      const verified = await listAttestationsByRevision(tenantId, "agent_revision", "rev-1", {
+      const verified = await listAttestationsByRevision(tenantId, "runtime_revision", "rev-1", {
         verificationState: "verified",
       });
       expect(verified).toHaveLength(1);
@@ -930,7 +928,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
     it("跨租户隔离：他租户 revision 不可见", async () => {
       await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("c"),
         dsseEnvelopeRef: "attestation:signature:0",
@@ -940,7 +938,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
         verificationState: "verified",
         verifiedAt: new Date(),
       });
-      const list = await listAttestationsByRevision(otherTenantId, "agent_revision", "rev-1");
+      const list = await listAttestationsByRevision(otherTenantId, "runtime_revision", "rev-1");
       expect(list).toHaveLength(0);
     });
   });
@@ -950,7 +948,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
       const digest = computeArtifactDigest("shared-content");
       await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-a",
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:signature:a",
@@ -982,7 +980,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
       const digest = computeArtifactDigest("content");
       await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:signature:0",
@@ -995,7 +993,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
       });
       const latest = await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:signature:1",
@@ -1005,7 +1003,11 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
         verificationState: "verified",
         verifiedAt: new Date(),
       });
-      const fetched = await getVerifiedAttestationForRevision(tenantId, "agent_revision", "rev-1");
+      const fetched = await getVerifiedAttestationForRevision(
+        tenantId,
+        "runtime_revision",
+        "rev-1",
+      );
       expect(fetched).not.toBeNull();
       expect(fetched?.attestation.id).toBe(latest.id);
     });
@@ -1013,7 +1015,7 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
     it("无 verified 时返回 null", async () => {
       await insertAttestation({
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: computeArtifactDigest("c"),
         dsseEnvelopeRef: "attestation:signature:0",
@@ -1024,7 +1026,11 @@ describe("artifact-attestation-writer 仓储（真实 MySQL）", () => {
         failureCode: "signature_invalid",
         verifiedAt: new Date(),
       });
-      const fetched = await getVerifiedAttestationForRevision(tenantId, "agent_revision", "rev-1");
+      const fetched = await getVerifiedAttestationForRevision(
+        tenantId,
+        "runtime_revision",
+        "rev-1",
+      );
       expect(fetched).toBeNull();
     });
   });
@@ -1047,7 +1053,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
   it("成功路径：verified + 持久化 + 审计", async () => {
     const fixture = await createVerifiedAttestationFixture(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-1",
       "agent.yaml content",
     );
@@ -1100,7 +1106,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
 
     const input: VerifyAttestationInput = {
       tenantId,
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: "rev-1",
       artifactDigest: digest,
       dsseEnvelopeRef: "attestation:signature:bad",
@@ -1112,7 +1118,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
     ).rejects.toThrow(ArtifactAttestationFailedError);
 
     // 失败也持久化
-    const list = await listAttestationsByRevision(tenantId, "agent_revision", "rev-1");
+    const list = await listAttestationsByRevision(tenantId, "runtime_revision", "rev-1");
     expect(list).toHaveLength(1);
     expect(list[0]?.attestation.verificationState).toBe("failed");
     expect(list[0]?.attestation.failureCode).toBe("signature_invalid");
@@ -1149,7 +1155,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
     await verifyAndPersistAttestation(
       {
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:signature:a",
@@ -1178,7 +1184,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
     await verifyAndPersistAttestation(
       {
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: "rev-1",
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:signature:b",
@@ -1201,7 +1207,7 @@ describe("verifyAndPersistAttestation 完整流程", () => {
     // TypeScript 编译期保证调用方无法传入。运行时 verifyArtifactAttestation 自行决定结果。
     const input: VerifyAttestationInput = {
       tenantId: "t",
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: "r",
       artifactDigest: computeArtifactDigest("c"),
       dsseEnvelopeRef: "attestation:sig:1",
@@ -1226,13 +1232,13 @@ describe("assertAttestationGate 发布门禁", () => {
   it("成功路径：verified attestation 通过门禁", async () => {
     const fixture = await createVerifiedAttestationFixture(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-1",
       "content",
     );
     const att = await assertAttestationGate(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-1",
       fixture.attestation.id,
     );
@@ -1241,28 +1247,28 @@ describe("assertAttestationGate 发布门禁", () => {
 
   it("attestation 不存在 → ArtifactNotVerifiedError", async () => {
     await expect(
-      assertAttestationGate(tenantId, "agent_revision", "rev-1", "nonexistent-id"),
+      assertAttestationGate(tenantId, "runtime_revision", "rev-1", "nonexistent-id"),
     ).rejects.toThrow(ArtifactNotVerifiedError);
   });
 
   it("attestation 跨租户 → ArtifactNotVerifiedError", async () => {
     const fixture = await createVerifiedAttestationFixture(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-1",
       "content",
     );
     // ensureDefaultTenant 幂等返回同一租户，故用硬编码 UUID 模拟他租户
     const otherTenantId = "11111111-1111-4111-8111-111111111111";
     await expect(
-      assertAttestationGate(otherTenantId, "agent_revision", "rev-1", fixture.attestation.id),
+      assertAttestationGate(otherTenantId, "runtime_revision", "rev-1", fixture.attestation.id),
     ).rejects.toThrow(ArtifactNotVerifiedError);
   });
 
   it("verificationState 非 verified → ArtifactNotVerifiedError", async () => {
     const att = await insertAttestation({
       tenantId,
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: "rev-1",
       artifactDigest: computeArtifactDigest("c"),
       dsseEnvelopeRef: "attestation:sig:1",
@@ -1274,31 +1280,31 @@ describe("assertAttestationGate 发布门禁", () => {
       verifiedAt: new Date(),
     });
     await expect(
-      assertAttestationGate(tenantId, "agent_revision", "rev-1", att.id),
+      assertAttestationGate(tenantId, "runtime_revision", "rev-1", att.id),
     ).rejects.toThrow(ArtifactNotVerifiedError);
   });
 
   it("artifactType 不匹配 → ArtifactNotVerifiedError", async () => {
     const fixture = await createVerifiedAttestationFixture(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-1",
       "content",
     );
     await expect(
-      assertAttestationGate(tenantId, "runtime_revision", "rev-1", fixture.attestation.id),
+      assertAttestationGate(tenantId, "skill_package", "rev-1", fixture.attestation.id),
     ).rejects.toThrow(ArtifactNotVerifiedError);
   });
 
   it("artifactRevisionId 不匹配 → ArtifactNotVerifiedError", async () => {
     const fixture = await createVerifiedAttestationFixture(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       "rev-1",
       "content",
     );
     await expect(
-      assertAttestationGate(tenantId, "agent_revision", "rev-other", fixture.attestation.id),
+      assertAttestationGate(tenantId, "runtime_revision", "rev-other", fixture.attestation.id),
     ).rejects.toThrow(ArtifactNotVerifiedError);
   });
 });
@@ -1528,7 +1534,7 @@ describe("S03-W04 阶段验收场景", () => {
       const result = await verifyArtifactAttestation(
         {
           tenantId,
-          artifactType: "agent_revision",
+          artifactType: "runtime_revision",
           artifactRevisionId: "rev-1",
           artifactDigest: badDigest,
           dsseEnvelopeRef: "attestation:sig:1",
@@ -1568,7 +1574,7 @@ describe("S03-W04 阶段验收场景", () => {
       verifyAndPersistAttestation(
         {
           tenantId,
-          artifactType: "agent_revision",
+          artifactType: "runtime_revision",
           artifactRevisionId: "rev-1",
           artifactDigest: digest,
           dsseEnvelopeRef: "attestation:sig:1",
@@ -1581,7 +1587,7 @@ describe("S03-W04 阶段验收场景", () => {
     ).rejects.toThrow(ArtifactAttestationFailedError);
 
     // 失败记录持久化
-    const list = await listAttestationsByRevision(tenantId, "agent_revision", "rev-1");
+    const list = await listAttestationsByRevision(tenantId, "runtime_revision", "rev-1");
     expect(list).toHaveLength(1);
     expect(list[0]?.attestation.verificationState).toBe("failed");
     expect(list[0]?.attestation.failureCode).toBe("sbom_blocked_vulnerability");
@@ -1599,34 +1605,29 @@ describe("S03-W04 阶段验收场景", () => {
     expect(auditEvents[0]?.afterHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("发布门禁失败时 RouteSet 不变化（Agent.currentRevisionId 不变）", async () => {
+  it("Agent 发布权威是 Contract Snapshot：failed Attestation 不阻塞发布", async () => {
     const agent = await createAgent({
       tenantId,
       agentKey: "agent-gate",
       displayName: "Agent Gate",
       ownerUserId: ownerId,
     });
-    const revision = await createDraftRevision({
+    const revision = await createDraftRevisionWithContractSnapshot({
       tenantId,
       agentId: agent.id,
-      sourceType: "code",
-      sourceRevision: "git:abc",
-      instructionHash: "sha256:i",
-      agentArtifactRef: "oci://reg/a@sha256:abc",
       modelPolicyJson: {},
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
       agentInterfaceRequirementsJson: {},
       createdBy: ownerId,
     });
-    // 发布权威 = 绑定 AgentContractSnapshot；未绑定先走 snapshot 门禁。
-    // 本用例目标是校验「未验证 Attestation」→ AgentPublicationPrerequisiteError，故先绑定 Snapshot 越过 snapshot 门禁。
+    // 发布权威 = 绑定 AgentContractSnapshot（helper 已绑定真实 snapshot）。
     await ensureAgentContractSnapshotBoundForRevision(revision.id, tenantId);
 
     // 未验证的 attestation（failed 状态）
     const failedAtt = await insertAttestation({
       tenantId,
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
       artifactRevisionId: revision.id,
       artifactDigest: computeArtifactDigest("c"),
       dsseEnvelopeRef: "attestation:sig:f",
@@ -1638,25 +1639,18 @@ describe("S03-W04 阶段验收场景", () => {
       verifiedAt: new Date(),
     });
 
-    const beforeAgent = agent;
-    await expect(
-      publishAgentRevision({
-        tenantId,
-        revisionId: revision.id,
-        agentExpectedVersionNo: agent.versionNo,
-        attestationId: failedAtt.id,
-        actor: buildActor(tenantId, "ci-001"),
-        requestId: "test-publish-fail",
-        idempotencyKey: "test-publish-fail",
-      }),
-    ).rejects.toThrow(AgentPublicationPrerequisiteError);
-
-    // Agent.currentRevisionId 保持 null（未发布）
-    expect(beforeAgent.currentRevisionId).toBeNull();
-
-    // Revision 保持 draft
-    const afterRev = await getRevisionById(revision.id);
-    expect(afterRev?.revisionState).toBe("draft");
+    // Agent 是源码不可见黑盒：发布权威 = AgentContractSnapshot，
+    // failed Attestation 不再阻塞 Agent 发布（旧门禁语义已正式推翻）。
+    const result = await publishAgentRevision({
+      tenantId,
+      revisionId: revision.id,
+      agentExpectedVersionNo: agent.versionNo,
+      actor: buildActor(tenantId, "ci-001"),
+      requestId: "test-publish-fail",
+      idempotencyKey: "test-publish-fail",
+    });
+    expect(result.revision.revisionState).toBe("published");
+    expect(result.revision.agentContractSnapshotId).toBe(revision.agentContractSnapshotId);
   });
 
   it("同一制品 digest 可多份证明，发布引用其中 verified 的那份", async () => {
@@ -1666,13 +1660,9 @@ describe("S03-W04 阶段验收场景", () => {
       displayName: "Agent Multi",
       ownerUserId: ownerId,
     });
-    const revision = await createDraftRevision({
+    const revision = await createDraftRevisionWithContractSnapshot({
       tenantId,
       agentId: agent.id,
-      sourceType: "code",
-      sourceRevision: "git:multi",
-      instructionHash: "sha256:multi",
-      agentArtifactRef: "oci://reg/a@sha256:multi",
       modelPolicyJson: {},
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
@@ -1703,7 +1693,7 @@ describe("S03-W04 阶段验收场景", () => {
       verifyAndPersistAttestation(
         {
           tenantId,
-          artifactType: "agent_revision",
+          artifactType: "runtime_revision",
           artifactRevisionId: revision.id,
           artifactDigest: digest,
           dsseEnvelopeRef: "attestation:sig:a",
@@ -1733,7 +1723,7 @@ describe("S03-W04 阶段验收场景", () => {
     const verifiedAtt = await verifyAndPersistAttestation(
       {
         tenantId,
-        artifactType: "agent_revision",
+        artifactType: "runtime_revision",
         artifactRevisionId: revision.id,
         artifactDigest: digest,
         dsseEnvelopeRef: "attestation:sig:b",
@@ -1753,7 +1743,6 @@ describe("S03-W04 阶段验收场景", () => {
       tenantId,
       revisionId: revision.id,
       agentExpectedVersionNo: agent.versionNo,
-      attestationId: verifiedAtt.id,
       actor: buildActor(tenantId, "ci-002"),
       requestId: "test-publish-ok",
       idempotencyKey: "test-publish-ok",
@@ -1761,9 +1750,8 @@ describe("S03-W04 阶段验收场景", () => {
     expect(result.revision.revisionState).toBe("published");
   });
 
-  it("ARTIFACT_TYPES 包含 5 种制品类型", () => {
+  it("ARTIFACT_TYPES 包含 4 种制品类型（Agent 黑盒无 agent_revision）", () => {
     expect(ARTIFACT_TYPES).toEqual([
-      "agent_revision",
       "runtime_revision",
       "skill_package",
       "tool_provider",

@@ -18,9 +18,10 @@ import {
  * - 校验 action scope: agent.revision.create + resource { type: "agent", id: agent_id }。
  * - 校验 Idempotency-Key（必填）+ computeRequestHash → enforceIdempotency。
  * - 校验 Agent 存在且属于当前租户（跨租户隐藏为 404）。
- * - 校验请求体（严格键集：source/artifact_ref/instruction_hash/agent_contract_snapshot_id/
+ * - 校验请求体（严格键集：agent_contract_snapshot_id/
  *   model_policy/permission_requirements/delegation_policy/agent_interface_requirements；
- *   未知键（含 legacy agent_descriptor_snapshot_id）一律 400）。
+ *   旧 source 键（source/source_type/source_revision/artifact_ref/instruction_hash/artifact_id）
+ *   一律 400）。
  * - 调用 createDraftRevision 创建 draft Revision。
  * - 写 AuditEvent（agent.revision.create）。
  * - completeRecord + 返回 201 + revision 投影 + ETag。
@@ -74,9 +75,6 @@ interface RouteContext {
 
 /** 请求体 schema（与 OpenAPI requestBody 对齐）。 */
 interface CreateRevisionBody {
-  source: { source_type: "code" | "agent_yaml" | "veadk"; source_revision: string };
-  artifact_ref: string;
-  instruction_hash: string;
   /** 绑定的不可变 AgentContractSnapshot id（发布权威；必填且非空白）。 */
   agent_contract_snapshot_id: string;
   model_policy: Record<string, unknown>;
@@ -85,11 +83,8 @@ interface CreateRevisionBody {
   agent_interface_requirements: Record<string, unknown>;
 }
 
-/** 允许的顶层键集合（严格键集校验：多余键，含 legacy agent_descriptor_snapshot_id，一律拒绝）。 */
+/** 允许的顶层键集合（严格键集校验：多余键一律拒绝）。 */
 const REVISION_BODY_KEYS = new Set([
-  "source",
-  "artifact_ref",
-  "instruction_hash",
   "agent_contract_snapshot_id",
   "model_policy",
   "permission_requirements",
@@ -104,12 +99,6 @@ function validateBody(body: unknown): body is CreateRevisionBody {
   for (const key of Object.keys(b)) {
     if (!REVISION_BODY_KEYS.has(key)) return false;
   }
-  if (!b.source || typeof b.source !== "object" || Array.isArray(b.source)) return false;
-  const source = b.source as Record<string, unknown>;
-  if (!new Set(["code", "agent_yaml", "veadk"]).has(String(source.source_type))) return false;
-  if (typeof source.source_revision !== "string" || !source.source_revision.trim()) return false;
-  if (typeof b.artifact_ref !== "string" || !b.artifact_ref.trim()) return false;
-  if (typeof b.instruction_hash !== "string" || b.instruction_hash.length === 0) return false;
   if (typeof b.agent_contract_snapshot_id !== "string" || !b.agent_contract_snapshot_id.trim())
     return false;
   if (!b.model_policy || typeof b.model_policy !== "object" || Array.isArray(b.model_policy))
@@ -166,8 +155,7 @@ function projectRevision(revision: AgentRevision): Record<string, unknown> {
     agent_id: revision.agentId,
     revision_no: revision.revisionNo,
     revision_state: revision.revisionState,
-    source_revision: revision.sourceRevision,
-    agent_contract_snapshot_id: revision.agentContractSnapshotId ?? null,
+    agent_contract_snapshot_id: revision.agentContractSnapshotId,
     etag: `${AGENT_REVISION_ETAG_PREFIX}${revision.revisionNo}`,
   };
 }
@@ -272,10 +260,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const revision = await createDraftRevision({
       tenantId: principal.tenantId,
       agentId,
-      sourceType: body.source.source_type,
-      sourceRevision: body.source.source_revision,
-      instructionHash: body.instruction_hash,
-      agentArtifactRef: body.artifact_ref,
       agentContractSnapshotId: body.agent_contract_snapshot_id,
       modelPolicyJson: body.model_policy,
       permissionRequirementsJson: body.permission_requirements,
@@ -294,9 +278,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         agent_id: agentId,
         revision_no: revision.revisionNo,
         revision_state: revision.revisionState,
-        instruction_hash: revision.instructionHash,
-        artifact_ref: revision.agentArtifactRef,
-        agent_contract_snapshot_id: revision.agentContractSnapshotId ?? null,
+        agent_contract_snapshot_id: revision.agentContractSnapshotId,
       },
       reason: `创建 AgentRevision (draft, revisionNo=${revision.revisionNo})`,
       requestId,

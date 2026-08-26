@@ -183,8 +183,6 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
         set.stepAgentRevisionId = checkpoint.agentRevisionId;
       if (checkpoint.agentPublicationRecordId !== undefined)
         set.stepAgentPublicationRecordId = checkpoint.agentPublicationRecordId;
-      if (checkpoint.agentAttestationId !== undefined)
-        set.stepAgentAttestationId = checkpoint.agentAttestationId;
       if (checkpoint.runtimeId !== undefined) set.stepRuntimeId = checkpoint.runtimeId;
       if (checkpoint.runtimeRevisionId !== undefined)
         set.stepRuntimeRevisionId = checkpoint.runtimeRevisionId;

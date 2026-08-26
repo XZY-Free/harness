@@ -44,7 +44,6 @@ export function projectHostedProvisioningRequest(
     last_error: request.lastError,
     agent_revision_id_checkpoint: request.stepAgentRevisionId,
     agent_publication_record_id: request.stepAgentPublicationRecordId,
-    agent_attestation_id: request.stepAgentAttestationId,
     runtime_id: request.stepRuntimeId,
     runtime_revision_id_checkpoint: request.stepRuntimeRevisionId,
     runtime_artifact_id: request.stepRuntimeArtifactId,

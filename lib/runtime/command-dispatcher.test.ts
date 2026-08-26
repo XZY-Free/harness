@@ -20,7 +20,7 @@
  * 真实 MySQL 8 Testcontainers + 真实 ed25519 签名，不使用 mock。
  */
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -179,8 +179,8 @@ function buildCleanSbom(): unknown {
 
 function buildValidProvenance(): ProvenanceDocument {
   return {
-    sourceRevision: "git:abc123def456",
     buildPipeline: "ci-cd-pipeline-1",
+    sourceRevision: "git_commit_1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
   };
@@ -274,13 +274,9 @@ async function seedPublishedAgentRevision(
     lifecycleState: "enabled",
   });
 
-  const revision = await createDraftRevision({
+  const revision = await createDraftRevisionWithContractSnapshot({
     tenantId,
     agentId: agent.id,
-    sourceType: "agent_yaml",
-    sourceRevision: `git:${contentSuffix}`,
-    instructionHash: `sha256:instruction_${contentSuffix}`,
-    agentArtifactRef: `oci://registry/agent@sha256:${contentSuffix}`,
     modelPolicyJson: { default: "doubao-pro", provider: "doubao" },
     permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
     delegationPolicyJson: { allowed_agent_ids: [] },
@@ -288,17 +284,10 @@ async function seedPublishedAgentRevision(
     createdBy: ownerId,
   });
 
-  const attestation = await createVerifiedAttestation(
-    tenantId,
-    "agent_revision",
-    revision.id,
-    `agent-content-${contentSuffix}`,
-  );
   await publishTrustedAgentRevisionForTest({
     tenantId,
     revisionId: revision.id,
     agentExpectedVersionNo: 1,
-    attestationId: attestation.id,
     actorId: ownerId,
   });
 

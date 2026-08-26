@@ -96,7 +96,6 @@ export function createPublishAgentRevisionWithoutAttestation(dependencies: {
             },
           },
         }),
-        attestationIds: [],
         contractEvidence,
         publishedByType: "system",
         publishedBy: "test-support",

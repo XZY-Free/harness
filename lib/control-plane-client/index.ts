@@ -21,7 +21,6 @@ export type {
   AgentContractSnapshotDTO,
   AgentContractListResponse,
   AgentRevisionState,
-  AgentRevisionSourceType,
   AgentRevisionDTO,
   AgentRevisionSummaryDTO,
   AgentRevisionListResponse,

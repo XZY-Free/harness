@@ -23,7 +23,6 @@ describe("hosted provisioning admin projection", () => {
         updatedAt: new Date("2026-08-11T00:00:00.000Z"),
         stepAgentRevisionId: "agent-revision-1",
         stepAgentPublicationRecordId: "publication-agent-1",
-        stepAgentAttestationId: "attestation-agent-1",
         stepRuntimeId: "runtime-1",
         stepRuntimeRevisionId: "runtime-revision-1",
         stepRuntimeArtifactId: "artifact-runtime-1",

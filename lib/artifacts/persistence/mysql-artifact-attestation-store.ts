@@ -16,7 +16,6 @@ import {
 import { seedEventDeliveries } from "@/lib/control-plane/events/seed-event-deliveries";
 import { db } from "@/lib/db/client";
 import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/control-plane";
 import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { idempotencyRecord } from "@/lib/persistence/schema/control-plane";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/control-plane";
@@ -62,29 +61,6 @@ export const mysqlArtifactAttestationPersistenceStore: ArtifactAttestationPersis
           return row;
         },
         async findRevisionArtifactBinding(params) {
-          if (params.artifactType === "agent_revision") {
-            const [row] = await tx
-              .select({ revision: agentRevisionTable })
-              .from(agentRevisionTable)
-              .innerJoin(
-                agentTable,
-                and(
-                  eq(agentTable.id, agentRevisionTable.agentId),
-                  eq(agentTable.tenantId, params.tenantId),
-                ),
-              )
-              .where(eq(agentRevisionTable.id, params.revisionId))
-              .limit(1)
-              .for("update");
-            return row
-              ? {
-                  revisionState: row.revision.revisionState,
-                  artifactRef: row.revision.agentArtifactRef,
-                  artifactId: row.revision.artifactId,
-                  artifactDigest: row.revision.artifactDigest,
-                }
-              : null;
-          }
           if (params.artifactType === "runtime_revision") {
             const [row] = await tx
               .select({ revision: runtimeRevisionTable })
@@ -111,26 +87,6 @@ export const mysqlArtifactAttestationPersistenceStore: ArtifactAttestationPersis
           return null;
         },
         async bindRevisionArtifact(params) {
-          if (params.artifactType === "agent_revision") {
-            const result = await tx
-              .update(agentRevisionTable)
-              .set({ artifactId: params.artifactId, artifactDigest: params.artifactDigest })
-              .where(
-                and(
-                  eq(agentRevisionTable.id, params.revisionId),
-                  eq(agentRevisionTable.revisionState, "draft"),
-                  or(
-                    isNull(agentRevisionTable.artifactId),
-                    eq(agentRevisionTable.artifactId, params.artifactId),
-                  ),
-                  or(
-                    isNull(agentRevisionTable.artifactDigest),
-                    eq(agentRevisionTable.artifactDigest, params.artifactDigest),
-                  ),
-                ),
-              );
-            return result[0].affectedRows === 1;
-          }
           if (params.artifactType === "runtime_revision") {
             const result = await tx
               .update(runtimeRevisionTable)

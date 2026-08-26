@@ -14,10 +14,8 @@ export type RouteResolutionAttribute = string | number | boolean;
 
 export interface RouteControlPlaneEvidence {
   /** null = 基础 Harness Route（无 Agent 资产约束，Agent Evidence not_applicable，§18）。 */
-  agentArtifactId: string | null;
+  agentRevisionId: string | null;
   runtimeArtifactId: string | null;
-  /** null = 基础 Harness Route（§18 not_applicable）。 */
-  agentArtifactDigest: string | null;
   runtimeArtifactDigest: string | null;
   runtimeConfigDigest: string;
   /** Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact（03 §3）。 */
@@ -25,8 +23,6 @@ export interface RouteControlPlaneEvidence {
   /** Runtime 目标摘要 — hosted/external 统一发布证据权威（03 §6）。 */
   runtimeTargetDigest: string;
   capabilityManifestDigest: string;
-  /** null = 基础 Harness Route（§18 not_applicable；禁止伪装空数组）。 */
-  agentAttestationIds: string[] | null;
   /** Agent Contract 证据（Agent Route 必填，base route 为 null — 05 §5）。 */
   agentContractSnapshotId: string | null;
   agentContractDigest: string | null;
@@ -394,10 +390,6 @@ function requireControlPlaneEvidence(
 function cloneControlPlaneEvidence(evidence: RouteControlPlaneEvidence): RouteControlPlaneEvidence {
   return {
     ...evidence,
-    // 基础 Harness Route 的 agentAttestationIds 为 null（§18 not_applicable），保持 null。
-    agentAttestationIds: evidence.agentAttestationIds
-      ? [...evidence.agentAttestationIds].sort()
-      : null,
     runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
   };
 }

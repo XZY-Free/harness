@@ -20,7 +20,6 @@ export interface HostedRuntimeRoute {
 export interface PublishedHostedAgentRevision {
   revisionId: string;
   publicationRecordId: string;
-  attestationId: string;
 }
 
 export interface PublishedHostedRuntimeRevision {

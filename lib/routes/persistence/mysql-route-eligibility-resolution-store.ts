@@ -5,7 +5,7 @@
  * 一次查询 RouteEligibilityProjection 表获取所有 eligible 候选 + 完整执行证据 ID。
  * 不随 Route 数量增加 SQL 往返。
  *
- * 完整证据 ID（agentAttestationIds、runtimeAttestationIds、publicationRecordId、conformanceRunId）
+ * 完整证据 ID（runtimeAttestationIds、publicationRecordId、conformanceRunId）
  * 由 build-route-eligibility.ts 在构建投影时从权威事实写入。
  * Binding 仍会对权威事实做 FOR UPDATE 最终校验。
  */
@@ -113,9 +113,8 @@ function buildControlPlaneEvidence(p: RouteEligibilityProjectionRecord): RouteCo
     throw new Error("hosted_artifact 投影缺少 Runtime Artifact 证据");
   }
   return {
-    agentArtifactId: p.agentArtifactId,
+    agentRevisionId: p.agentRevisionId,
     runtimeArtifactId: p.runtimeArtifactId,
-    agentArtifactDigest: p.agentArtifactDigest,
     runtimeArtifactDigest: p.runtimeArtifactDigest,
     runtimeEvidenceKind: p.runtimeEvidenceKind,
     runtimeConfigDigest: p.runtimeConfigDigest,
@@ -124,7 +123,6 @@ function buildControlPlaneEvidence(p: RouteEligibilityProjectionRecord): RouteCo
     agentContractSnapshotId: p.agentContractSnapshotId,
     agentContractDigest: p.agentContractDigest,
     agentContextDigest: p.agentContextDigest,
-    agentAttestationIds: p.agentAttestationIds,
     runtimeAttestationIds: [...p.runtimeAttestationIds],
     agentPublicationRecordId: p.agentPublicationRecordId,
     runtimePublicationRecordId: p.runtimePublicationRecordId,

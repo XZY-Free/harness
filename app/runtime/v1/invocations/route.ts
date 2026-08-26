@@ -74,8 +74,7 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
   if (typeof agent.agent_revision_id !== "string" || agent.agent_revision_id.length === 0) {
     return false;
   }
-  if (typeof agent.instruction_hash !== "string") return false;
-  if (typeof agent.artifact_ref !== "string") return false;
+  // Agent 是源码不可见黑盒：agent 只携带 revision/policy/requirements，无 instruction_hash/artifact_ref。
   if (!Array.isArray(b.input_items) || b.input_items.length === 0) return false;
   if (typeof b.context_handle !== "string" || b.context_handle.length === 0) return false;
   if (!b.gateway_endpoints || typeof b.gateway_endpoints !== "object") return false;

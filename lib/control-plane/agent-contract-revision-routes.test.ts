@@ -69,9 +69,6 @@ async function seedRevisionCreator() {
 /** 合法 revision 请求体基线（除快照绑定 key 外全部字段齐备）。 */
 function baseRevisionBody() {
   return {
-    source: { source_type: "agent_yaml" as const, source_revision: "git:contract-v1" },
-    artifact_ref: "oci://registry/agent@sha256:contract-artifact",
-    instruction_hash: "sha256:contract-instruction",
     model_policy: { model: "doubao-pro" },
     permission_requirements: {},
     delegation_policy: { max_depth: 0 },
@@ -262,7 +259,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions（AgentContractSnapshot
 
     const conflict = await buildPost(
       agentId,
-      { ...body, instruction_hash: "sha256:conflicting-instruction" },
+      { ...body, model_policy: { model: "doubao-conflict" } },
       "idem-contract-rev-replay-001",
     );
     expect(conflict.status).toBe(409);

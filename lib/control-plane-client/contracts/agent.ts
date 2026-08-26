@@ -40,16 +40,12 @@ export interface AgentListResponse {
 /** AgentRevision 状态 — 服务端权威枚举。 */
 export type AgentRevisionState = "draft" | "published" | "withdrawn";
 
-/** AgentRevision 来源。 */
-export type AgentRevisionSourceType = "code" | "agent_yaml" | "veadk";
-
 /** AgentRevision 列表与命令响应的稳定摘要。 */
 export interface AgentRevisionSummaryDTO {
   id: string;
   agent_id: string;
   revision_no: number;
   revision_state: AgentRevisionState;
-  source_revision: string;
   agent_contract_snapshot_id: string | null;
   etag: string;
 }
@@ -60,15 +56,8 @@ export interface AgentRevisionDTO {
   agent_id: string;
   revision_no: number;
   revision_state: AgentRevisionState;
-  source_type: AgentRevisionSourceType;
-  source_revision: string;
-  artifact_id: string | null;
-  artifact_digest: string | null;
-  artifact_ref: string;
   /** 绑定的不可变 AgentContractSnapshot id（权威外部合同来源）。 */
-  agent_contract_snapshot_id: string | null;
-  /** 当前 Attestation 列表 — 不为 null 时表示已验证。 */
-  attestation_ids: string[];
+  agent_contract_snapshot_id: string;
   /** 当前 Publication Record — 不为 null 时表示已发布。 */
   publication_record_id: string | null;
   /** 当前 Withdrawal Record — 不为 null 时表示已撤回。 */
@@ -89,12 +78,6 @@ export interface AgentRevisionListResponse {
 
 /** 创建 Draft AgentRevision 请求。 */
 export interface CreateAgentRevisionRequest {
-  source: {
-    source_type: AgentRevisionSourceType;
-    source_revision: string;
-  };
-  artifact_ref: string;
-  instruction_hash: string;
   /** 绑定的不可变 AgentContractSnapshot id（发布强约束；必填非空白）。 */
   agent_contract_snapshot_id: string;
   model_policy: Record<string, unknown>;
@@ -105,8 +88,6 @@ export interface CreateAgentRevisionRequest {
 
 export interface PublishAgentRevisionRequest {
   release_notes: string;
-  /** 可选 source Attestation id — 不再强制；发布权威是 AgentContractSnapshot 证据。 */
-  artifact_attestation_id?: string | null;
 }
 
 export interface PublishAgentRevisionResponse {

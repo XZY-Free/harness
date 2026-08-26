@@ -26,9 +26,6 @@ export interface ExecutionBindingDTO {
   route_activation_id: string;
   route_content_digest: string;
   /** 冻结的 Agent 证据。null = 基础 Harness Route（Agent Evidence not_applicable，§18）。 */
-  agent_artifact_id: string | null;
-  agent_artifact_digest: string | null;
-  agent_attestation_ids: string[] | null;
   agent_publication_record_id: string | null;
   /** 冻结的 Agent Contract 证据。null = 基础 Harness Route（§18 not_applicable — 05 §5）。 */
   agent_contract_snapshot_id: string | null;

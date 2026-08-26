@@ -1,5 +1,4 @@
 export const ARTIFACT_KINDS = [
-  "agent_revision",
   "runtime_revision",
   "skill_package",
   "tool_provider",

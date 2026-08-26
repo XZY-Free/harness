@@ -166,35 +166,19 @@ const agentPublication: HostedAgentPublicationGateway = {
         `指定 AgentRevision 缺少有效发布证据 (${command.expectedAgentRevisionId})`,
       );
     }
-    const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
-      tenantId: command.tenantId,
-      artifactType: "agent_revision",
-    });
-    const attestation = await ensureVerifiedAttestation({
-      tenantId: command.tenantId,
-      artifactType: "agent_revision",
-      artifactRevisionId: revision.id,
-      evidence,
-    });
-
+    // Agent 是源码不可见黑盒：发布权威是 AgentContractSnapshot 证据，无 Artifact Attestation。
     try {
       const result = await publishAgentRevision({
         tenantId: command.tenantId,
         revisionId: revision.id,
         agentExpectedVersionNo: agent.versionNo,
-        attestationId: attestation.id,
         actor: { tenantId: command.tenantId, actorType: "system", actorId: HOSTED_ACTOR_ID },
         requestId: `hosted-agent-publish:${revision.id}`,
         idempotencyKey: `hosted-agent-publish:${revision.id}`,
       });
-      // 本路径总是提供 attestationId 且命令校验通过，故 result.attestation 必非空；仍用运行时守卫防御。
-      if (!result.attestation) {
-        throw new Error("Hosted Agent 发布应返回非空 Attestation");
-      }
       return {
         revisionId: result.revision.id,
         publicationRecordId: result.publicationRecordId,
-        attestationId: result.attestation.id,
       };
     } catch (error) {
       const winner = await loadPublishedAgentRevision(
@@ -454,14 +438,21 @@ async function loadPublishedAgentRevision(
     )
     .limit(1);
   if (!revision) return null;
-  const fact = await loadPublicationFact({
-    tenantId,
-    subjectType: "agent_revision",
-    revisionId: revision.revision.id,
-    artifactId: revision.revision.artifactId,
-    artifactDigest: revision.revision.artifactDigest,
-  });
-  return fact ? { revisionId: revision.revision.id, ...fact } : null;
+  // Agent 是源码不可见黑盒：发布事实 = Publication 存在且未撤回（无 Artifact 证据）。
+  const [publication, withdrawal] = await Promise.all([
+    getPublicationRecordBySubject({
+      tenantId,
+      subjectType: "agent_revision",
+      subjectRevisionId: revision.revision.id,
+    }),
+    getWithdrawalRecordBySubject({
+      tenantId,
+      subjectType: "agent_revision",
+      subjectRevisionId: revision.revision.id,
+    }),
+  ]);
+  if (!publication || withdrawal) return null;
+  return { revisionId: revision.revision.id, publicationRecordId: publication.id };
 }
 
 async function loadPublishedRuntimeRevision(

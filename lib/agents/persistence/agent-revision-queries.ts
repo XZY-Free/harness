@@ -12,7 +12,7 @@
  * - getRevision/getRevisionsByAgent/getLatestPublishedRevision：查询。
  *
  * 不可变性约束：
- * - published Revision 业务内容不可修改（model_policy/instruction_hash/artifact_ref 等）。
+ * - published Revision 业务内容不可修改（model_policy 等治理字段）。
  * - withdrawn 只变更 revisionState，不删除行，不修改业务内容。
  * - revisionNo 由 UNIQUE(agentId, revisionNo) 约束保证唯一；并发冲突时 fail-loud。
  *
@@ -33,12 +33,8 @@ import { and, desc, eq, max } from "drizzle-orm";
 export interface CreateDraftRevisionParams {
   tenantId: string;
   agentId: string;
-  sourceType: string;
-  sourceRevision: string;
-  instructionHash: string;
-  agentArtifactRef: string;
-  /** 绑定的不可变 AgentContractSnapshot id；创建路由强制必填，旧数据行可为 null。 */
-  agentContractSnapshotId?: string | null;
+  /** 绑定的不可变 AgentContractSnapshot id（必填；发布与路由权威）。 */
+  agentContractSnapshotId: string;
   modelPolicyJson: unknown;
   permissionRequirementsJson: unknown;
   delegationPolicyJson: unknown;
@@ -61,10 +57,6 @@ export async function createDraftRevision(
     id,
     agentId: params.agentId,
     revisionNo,
-    sourceType: params.sourceType,
-    sourceRevision: params.sourceRevision,
-    instructionHash: params.instructionHash,
-    agentArtifactRef: params.agentArtifactRef,
     agentContractSnapshotId: params.agentContractSnapshotId,
     modelPolicyJson: params.modelPolicyJson,
     permissionRequirementsJson: params.permissionRequirementsJson,
@@ -89,9 +81,6 @@ export async function createDraftRevision(
 export async function updateDraftContent(
   revisionId: string,
   patch: {
-    sourceRevision?: string;
-    instructionHash?: string;
-    agentArtifactRef?: string;
     modelPolicyJson?: unknown;
     permissionRequirementsJson?: unknown;
     delegationPolicyJson?: unknown;
@@ -107,13 +96,6 @@ export async function updateDraftContent(
   }
 
   const updates: Record<string, unknown> = {};
-  if (patch.sourceRevision !== undefined) updates.sourceRevision = patch.sourceRevision;
-  if (patch.instructionHash !== undefined) updates.instructionHash = patch.instructionHash;
-  if (patch.agentArtifactRef !== undefined) {
-    updates.agentArtifactRef = patch.agentArtifactRef;
-    updates.artifactId = null;
-    updates.artifactDigest = null;
-  }
   if (patch.modelPolicyJson !== undefined) updates.modelPolicyJson = patch.modelPolicyJson;
   if (patch.permissionRequirementsJson !== undefined) {
     updates.permissionRequirementsJson = patch.permissionRequirementsJson;
@@ -236,7 +218,4 @@ export class AgentVersionConflictError extends Error {
 
 /** Re-export 供外部统一从本模块引入类型。 */
 export type { AgentRevisionState, AgentRevisionRow } from "@/lib/persistence/schema/agents";
-export {
-  AGENT_REVISION_STATES,
-  AGENT_REVISION_SOURCE_TYPES,
-} from "@/lib/persistence/schema/agents";
+export { AGENT_REVISION_STATES } from "@/lib/persistence/schema/agents";

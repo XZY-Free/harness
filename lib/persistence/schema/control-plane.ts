@@ -12,14 +12,12 @@
 // ─── Agent ────────────────────────────────────────────────────────
 export {
   AGENT_LIFECYCLE_STATES,
-  AGENT_REVISION_SOURCE_TYPES,
   AGENT_REVISION_STATES,
   agentTable,
   agentRevisionTable,
 } from "@/lib/persistence/schema/agents";
 export type {
   AgentLifecycleState,
-  AgentRevisionSourceType,
   AgentRevisionState,
   AgentRow,
   AgentRevisionRow,

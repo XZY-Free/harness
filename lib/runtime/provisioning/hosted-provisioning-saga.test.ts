@@ -28,7 +28,6 @@ function request(
     updatedAt: now,
     stepAgentRevisionId: null,
     stepAgentPublicationRecordId: null,
-    stepAgentAttestationId: null,
     stepRuntimeId: null,
     stepRuntimeRevisionId: null,
     stepRuntimeArtifactId: null,
@@ -76,7 +75,6 @@ describe("HostedProvisioningSaga exact AgentRevision authority", () => {
     vi.mocked(gateways.agentPublication.ensurePublishedAgentRevision).mockResolvedValue({
       revisionId: "agent-revision-frozen",
       publicationRecordId: "publication-1",
-      attestationId: "attestation-1",
     });
 
     const result = await saga(request());
@@ -96,7 +94,6 @@ describe("HostedProvisioningSaga exact AgentRevision authority", () => {
     vi.mocked(gateways.agentPublication.ensurePublishedAgentRevision).mockResolvedValue({
       revisionId: "agent-revision-frozen",
       publicationRecordId: "publication-1",
-      attestationId: "attestation-1",
     });
 
     await saga(request());
@@ -113,7 +110,6 @@ describe("HostedProvisioningSaga exact AgentRevision authority", () => {
     vi.mocked(gateways.agentPublication.ensurePublishedAgentRevision).mockResolvedValue({
       revisionId: "agent-revision-other",
       publicationRecordId: "publication-1",
-      attestationId: "attestation-1",
     });
 
     const result = await saga(request());
@@ -162,7 +158,6 @@ describe("HostedProvisioningSaga exact AgentRevision authority", () => {
         currentStep: "activate_route",
         stepAgentRevisionId: "agent-revision-other",
         stepAgentPublicationRecordId: "publication-1",
-        stepAgentAttestationId: "attestation-1",
         stepRuntimeId: "runtime-1",
         stepRuntimeRevisionId: "runtime-revision-1",
         stepRuntimeAttestationIds: ["runtime-attestation-1"],
@@ -190,7 +185,6 @@ describe("HostedProvisioningSaga exact AgentRevision authority", () => {
         currentStep: "activate_route",
         stepAgentRevisionId: "agent-revision-frozen",
         stepAgentPublicationRecordId: "publication-1",
-        stepAgentAttestationId: "attestation-1",
         stepRuntimeId: "runtime-1",
         stepRuntimeRevisionId: "runtime-revision-1",
         stepRuntimeAttestationIds: ["runtime-attestation-1"],

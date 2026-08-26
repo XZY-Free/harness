@@ -12,10 +12,8 @@
  */
 import { randomUUID } from "node:crypto";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import {
-  createDraftRevision,
-  getRevisionById,
-} from "@/lib/agents/persistence/agent-revision-queries";
+import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -159,8 +157,8 @@ function buildCleanSbom(): unknown {
 
 function buildValidProvenance(): ProvenanceDocument {
   return {
-    sourceRevision: "git:abc123def456",
     buildPipeline: "ci-cd-pipeline-1",
+    sourceRevision: "git_commit_1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
   };
@@ -255,13 +253,9 @@ async function seedPublishedAgentRevision(
     lifecycleState: "enabled",
   });
 
-  const revision = await createDraftRevision({
+  const revision = await createDraftRevisionWithContractSnapshot({
     tenantId,
     agentId: agent.id,
-    sourceType: "agent_yaml",
-    sourceRevision: `git:${contentSuffix}`,
-    instructionHash: `sha256:instruction_${contentSuffix}`,
-    agentArtifactRef: `oci://registry/agent@sha256:${contentSuffix}`,
     modelPolicyJson: modelPolicy ?? { default: "doubao-pro", provider: "doubao" },
     permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
     delegationPolicyJson: { allowed_agent_ids: [] },
@@ -269,23 +263,16 @@ async function seedPublishedAgentRevision(
     createdBy: ownerId,
   });
 
-  const attestation = await createVerifiedAttestation(
-    tenantId,
-    "agent_revision",
-    revision.id,
-    `agent-content-${contentSuffix}`,
-  );
   const publication = await publishTrustedAgentRevisionForTest({
     tenantId,
     revisionId: revision.id,
     agentExpectedVersionNo: 1,
-    attestationId: attestation.id,
     actorId: ownerId,
   });
 
   const publishedRevision = await getRevisionById(revision.id);
   if (!publishedRevision) throw new Error("测试 AgentRevision 发布后无法回读");
-  return { agent, revision: publishedRevision, attestation, publication };
+  return { agent, revision: publishedRevision, publication };
 }
 
 // ─── 辅助：seed Runtime + published RuntimeRevision + attestation ─
@@ -350,7 +337,6 @@ interface FullDispatchContext {
   agentId: string;
   agentRevision: AgentRevision;
   runtimeRevision: RuntimeRevision;
-  agentAttestationId: string;
   runtimeAttestationId: string;
   agentPublicationRecordId: string;
   runtimePublicationRecordId: string;
@@ -368,7 +354,6 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
   const {
     agent,
     revision: agentRevision,
-    attestation: agentAttestation,
     publication: agentPublication,
   } = await seedPublishedAgentRevision(tenantId, ownerId, "finance", ["event_stream"], "v1");
 
@@ -425,7 +410,6 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     agentId: agent.id,
     agentRevision,
     runtimeRevision,
-    agentAttestationId: agentAttestation.id,
     runtimeAttestationId: runtimeAttestation.id,
     agentPublicationRecordId: agentPublication.publicationRecordId,
     runtimePublicationRecordId: runtimePublication.publicationRecordId,
@@ -953,11 +937,9 @@ describe("Dispatcher 调度", () => {
       routeActivationId: result.routeResolution?.routeActivationId,
       routeContentDigest: result.routeResolution?.routeContentDigest,
       resolutionInputDigest: result.routeResolution?.resolutionInputDigest,
-      agentArtifactDigest: ctx.agentRevision.artifactDigest,
       runtimeArtifactDigest: ctx.runtimeRevision.artifactDigest,
       runtimeConfigDigest: ctx.runtimeRevision.configHash,
       capabilityManifestDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
-      agentAttestationIds: [ctx.agentAttestationId],
       runtimeAttestationIds: [ctx.runtimeAttestationId],
       agentPublicationRecordId: ctx.agentPublicationRecordId,
       runtimePublicationRecordId: ctx.runtimePublicationRecordId,
@@ -1115,7 +1097,6 @@ describe("Dispatcher 调度", () => {
     const frozen = {
       routeRevisionId: result.binding.routeRevisionId,
       routeActivationId: result.binding.routeActivationId,
-      agentArtifactDigest: result.binding.agentArtifactDigest,
       runtimeArtifactDigest: result.binding.runtimeArtifactDigest,
       agentPublicationRecordId: result.binding.agentPublicationRecordId,
       runtimePublicationRecordId: result.binding.runtimePublicationRecordId,

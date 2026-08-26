@@ -70,8 +70,7 @@ class TestManagedArtifactStore implements ManagedArtifactStore {
 
 export function installTrustedHostedControlPlaneEvidenceForTest(options?: {
   failRuntimeConformanceAttempts?: number;
-  corruptArtifactSignatureFor?: "agent_revision" | "runtime_revision";
-  delaySecondAgentEvidenceMs?: number;
+  corruptArtifactSignatureFor?: "runtime_revision";
 }): () => void {
   setHostedControlPlaneEvidenceProvider(createEvidenceProvider(options));
   return () => {
@@ -81,8 +80,7 @@ export function installTrustedHostedControlPlaneEvidenceForTest(options?: {
 
 function createEvidenceProvider(options?: {
   failRuntimeConformanceAttempts?: number;
-  corruptArtifactSignatureFor?: "agent_revision" | "runtime_revision";
-  delaySecondAgentEvidenceMs?: number;
+  corruptArtifactSignatureFor?: "runtime_revision";
 }): HostedControlPlaneEvidenceProvider {
   const store = new TestManagedArtifactStore();
   const builderKey: TestBuilderKey = generateTestBuilderKey(BUILDER_IDENTITY);
@@ -90,18 +88,11 @@ function createEvidenceProvider(options?: {
     [BUILDER_IDENTITY]: builderKey.publicKeyBase64,
   };
   let remainingConformanceFailures = options?.failRuntimeConformanceAttempts ?? 0;
-  let agentEvidenceCalls = 0;
   /** 幂等缓存：idempotencyKey → 已执行并签名的 DSSE Envelope。 */
   const conformanceCache = new Map<string, string>();
 
   return {
     async loadArtifactEvidence({ artifactType }) {
-      if (artifactType === "agent_revision") {
-        agentEvidenceCalls += 1;
-        if (agentEvidenceCalls === 2 && options?.delaySecondAgentEvidenceMs) {
-          await new Promise((resolve) => setTimeout(resolve, options.delaySecondAgentEvidenceMs));
-        }
-      }
       const artifactDigest = digest(`snow-harness:${artifactType}:release-1`);
       const prefix = `managed://snow-harness/${artifactType}/release-1`;
       const dsseEnvelopeRef = `${prefix}/dsse-envelope`;

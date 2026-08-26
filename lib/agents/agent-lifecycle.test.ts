@@ -74,20 +74,15 @@ function buildDraftParams(
   agentId: string,
   createdBy: string,
   overrides: Partial<{
-    sourceType: string;
-    sourceRevision: string;
-    instructionHash: string;
-    agentArtifactRef: string;
+    agentContractSnapshotId: string;
+    modelPolicyJson: Record<string, unknown>;
   }> = {},
 ) {
   return {
     tenantId,
     agentId,
-    sourceType: overrides.sourceType ?? "agent_yaml",
-    sourceRevision: overrides.sourceRevision ?? "git_commit_1",
-    instructionHash: overrides.instructionHash ?? "sha256:instruction_1",
-    agentArtifactRef: overrides.agentArtifactRef ?? "oci://registry/agent@sha256:abc",
-    modelPolicyJson: { default: "doubao-pro" },
+    agentContractSnapshotId: overrides.agentContractSnapshotId ?? "snap_contract_1",
+    modelPolicyJson: overrides.modelPolicyJson ?? { default: "doubao-pro" },
     permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
     delegationPolicyJson: { allowed_agent_ids: [] },
     agentInterfaceRequirementsJson: { required: ["event_stream"], optional: ["steer"] },
@@ -413,7 +408,7 @@ describe("agent-revision-queries", () => {
     expect(rev.agentId).toBe(agentId);
     expect(rev.revisionNo).toBe(1);
     expect(rev.revisionState).toBe("draft");
-    expect(rev.sourceType).toBe("agent_yaml");
+    expect(rev.agentContractSnapshotId).toBe("snap_contract_1");
     expect(rev.publishedAt).toBeNull();
     expect(rev.modelPolicyJson).toEqual({ default: "doubao-pro" });
     expect(rev.agentInterfaceRequirementsJson).toEqual({
@@ -447,27 +442,25 @@ describe("agent-revision-queries", () => {
   it("updateDraftContent 修改 draft 业务内容", async () => {
     const rev = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
     const updated = await updateDraftContent(rev.id, {
-      instructionHash: "sha256:new_instruction",
       modelPolicyJson: { default: "doubao-lite" },
     });
-    expect(updated.instructionHash).toBe("sha256:new_instruction");
     expect(updated.modelPolicyJson).toEqual({ default: "doubao-lite" });
     // 其他字段保持不变
-    expect(updated.agentArtifactRef).toBe(rev.agentArtifactRef);
+    expect(updated.agentContractSnapshotId).toBe(rev.agentContractSnapshotId);
   });
 
   it("updateDraftContent 空 patch 返回原记录", async () => {
     const rev = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
     const updated = await updateDraftContent(rev.id, {});
     expect(updated.id).toBe(rev.id);
-    expect(updated.instructionHash).toBe(rev.instructionHash);
+    expect(updated.agentContractSnapshotId).toBe(rev.agentContractSnapshotId);
   });
 
   it("updateDraftContent published 状态抛 RevisionImmutableError", async () => {
     const rev = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
     await publishRevision(tenantId, rev.id, 1);
     await expect(
-      updateDraftContent(rev.id, { instructionHash: "sha256:modified" }),
+      updateDraftContent(rev.id, { modelPolicyJson: { default: "modified" } }),
     ).rejects.toThrow(RevisionImmutableError);
   });
 
@@ -476,14 +469,14 @@ describe("agent-revision-queries", () => {
     await publishRevision(tenantId, rev.id, 1);
     await withdrawRevision(rev.id);
     await expect(
-      updateDraftContent(rev.id, { instructionHash: "sha256:modified" }),
+      updateDraftContent(rev.id, { modelPolicyJson: { default: "modified" } }),
     ).rejects.toThrow(RevisionImmutableError);
   });
 
   it("updateDraftContent 不存在的 Revision 抛 RevisionNotFoundError", async () => {
-    await expect(updateDraftContent("missing-id", { instructionHash: "sha256:x" })).rejects.toThrow(
-      RevisionNotFoundError,
-    );
+    await expect(
+      updateDraftContent("missing-id", { modelPolicyJson: { default: "x" } }),
+    ).rejects.toThrow(RevisionNotFoundError);
   });
 
   it("publishRevision draft → published（publishedAt 写入，Agent.currentRevisionId 回填）", async () => {
@@ -532,7 +525,7 @@ describe("agent-revision-queries", () => {
     const published = await publishRevision(tenantId, rev.id, 1);
     const withdrawn = await withdrawRevision(rev.id);
     expect(withdrawn.revisionState).toBe("withdrawn");
-    expect(withdrawn.instructionHash).toBe(published.instructionHash);
+    expect(withdrawn.agentContractSnapshotId).toBe(published.agentContractSnapshotId);
     expect(withdrawn.publishedAt).toEqual(published.publishedAt);
     expect((await getAgentById(tenantId, agentId))?.currentRevisionId).toBeNull();
     expect(
@@ -655,15 +648,15 @@ describe("S03-W01 阶段验收场景", () => {
     // 指令变化生成新 Revision
     const r2 = await createDraftRevision(
       buildDraftParams(tenantId, agentId, ownerId, {
-        instructionHash: "sha256:v2_instruction",
+        agentContractSnapshotId: "snap_contract_v2",
       }),
     );
     await publishRevision(tenantId, r2.id, 2);
     expect(r2.revisionNo).toBe(2);
     // 旧 Revision r1 业务内容不可变
-    await expect(updateDraftContent(r1.id, { instructionHash: "sha256:modified" })).rejects.toThrow(
-      RevisionImmutableError,
-    );
+    await expect(
+      updateDraftContent(r1.id, { modelPolicyJson: { default: "modified" } }),
+    ).rejects.toThrow(RevisionImmutableError);
   });
 
   it("published Revision 业务内容不可修改（modelPolicyJson/permissionRequirementsJson 等）", async () => {
@@ -675,8 +668,6 @@ describe("S03-W01 阶段验收场景", () => {
         permissionRequirementsJson: { tool_risk_max: "low" },
         delegationPolicyJson: { allowed_agent_ids: ["agt_x"] },
         agentInterfaceRequirementsJson: { required: [], optional: [] },
-        agentArtifactRef: "oci://modified",
-        sourceRevision: "modified_commit",
       }),
     ).rejects.toThrow(RevisionImmutableError);
   });

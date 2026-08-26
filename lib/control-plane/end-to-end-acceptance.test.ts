@@ -22,6 +22,7 @@ import {
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { mysqlAgentWithdrawalStore } from "@/lib/agents/persistence/mysql-agent-withdrawal-store";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
 import { withdrawRevision } from "@/lib/agents/test-support/withdraw-agent-revision";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
@@ -210,7 +211,7 @@ function buildCleanSbom(): unknown {
 
 function buildValidProvenance(): ProvenanceDocument {
   return {
-    sourceRevision: "git:abc123def456",
+    sourceRevision: "git_commit_1",
     buildPipeline: "ci-cd-pipeline-1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
@@ -325,13 +326,9 @@ async function seedPublishedAgentRevision(
     lifecycleState: "enabled",
   });
 
-  const revision = await createDraftRevision({
+  const revision = await createDraftRevisionWithContractSnapshot({
     tenantId,
     agentId: agent.id,
-    sourceType: "agent_yaml",
-    sourceRevision: `git:${contentSuffix}`,
-    instructionHash: `sha256:instruction_${contentSuffix}`,
-    agentArtifactRef: `oci://registry/agent@sha256:${contentSuffix}`,
     modelPolicyJson: { default: "doubao-pro" },
     permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
     delegationPolicyJson: { allowed_agent_ids: [] },
@@ -339,34 +336,7 @@ async function seedPublishedAgentRevision(
     createdBy: ownerId,
   });
 
-  const attestationId = await createVerifiedAttestationDirect(
-    tenantId,
-    "agent_revision",
-    revision.id,
-    `agent-content-${contentSuffix}`,
-  );
-
-  // 不直接写 DB 绑定 Artifact——正式 record-artifact-attestation command（verifyAndPersistAttestation）
-  // 已在 verified 时通过 mysql store 原子 bindRevisionArtifact。此处仅用正式查询复核并 fail-closed，
-  // 禁止用 db.update 直接写正式数据库结论。
-  const found = await getAttestationById(tenantId, attestationId);
-  const attestation = found?.attestation;
-  if (!attestation?.artifactId || !attestation.artifactDigest) {
-    throw new Error(`测试 AgentRevision 缺少权威 Attestation: ${revision.id}`);
-  }
-  const boundRevision = await getRevisionById(revision.id);
-  if (
-    !boundRevision ||
-    boundRevision.artifactId !== attestation.artifactId ||
-    boundRevision.artifactDigest !== attestation.artifactDigest
-  ) {
-    throw new Error(
-      `正式 Attestation 命令未原子绑定 Artifact 到 AgentRevision（${revision.id}）：` +
-        `期望 artifactId=${attestation.artifactId} artifactDigest=${attestation.artifactDigest}`,
-    );
-  }
-
-  // 使用带 attestation 的正式发布服务，确保 PublicationRecord.attestationIds 非空
+  // Agent 是源码不可见黑盒：无 Agent Artifact/Attestation 权威。
   // 发布权威 = 绑定 AgentContractSnapshot；先幂等绑定（事务外），供正式命令走 snapshot 门禁。
   await ensureAgentContractSnapshotBoundForRevision(revision.id, tenantId);
   const publishAgentRevision = createPublishAgentRevision({
@@ -376,7 +346,6 @@ async function seedPublishedAgentRevision(
     tenantId,
     revisionId: revision.id,
     agentExpectedVersionNo: 1,
-    attestationId,
     actor: { tenantId, actorType: "system", actorId: "test-deploy-bot" },
     requestId: `test-publish-agent:${revision.id}`,
     idempotencyKey: `test-publish-agent:${revision.id}`,
@@ -665,13 +634,9 @@ describe("场景1：真实签名 Artifact Attestation 通过", () => {
       displayName: "Attest Agent",
       ownerUserId: userIdentityId,
     });
-    const draftRevision = await createDraftRevision({
+    const draftRevision = await createDraftRevisionWithContractSnapshot({
       tenantId,
       agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:attest-v1",
-      instructionHash: "sha256:instr-attest",
-      agentArtifactRef: "oci://registry/agent@sha256:attest",
       modelPolicyJson: { model: "gpt-4" },
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
@@ -707,7 +672,7 @@ describe("场景1：真实签名 Artifact Attestation 通过", () => {
 
     const attestationId = await createVerifiedAttestationDirect(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       draftRevision.id,
       "attest-artifact-content",
     );
@@ -715,7 +680,7 @@ describe("场景1：真实签名 Artifact Attestation 通过", () => {
     expect(attestationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     const attestations = await listAttestationsByRevision(
       tenantId,
-      "agent_revision",
+      "runtime_revision",
       draftRevision.id,
     );
     expect(attestations).toHaveLength(1);
@@ -1037,7 +1002,6 @@ describe("场景7：Projection Consumer 构建完整 eligible Projection", () =>
     expect(projection?.agentPublicationRecordId).toBeTruthy();
     expect(projection?.runtimePublicationRecordId).toBeTruthy();
     expect(projection?.conformanceRunId).toBeTruthy();
-    expect(projection?.agentAttestationIds).toHaveLength(1);
     expect(projection?.runtimeAttestationIds).toHaveLength(1);
   });
 
@@ -1225,7 +1189,6 @@ describe("场景9：Binding 在同一事务完成最终资格校验", () => {
     expect(binding.agentPublicationRecordId).toBeTruthy();
     expect(binding.runtimePublicationRecordId).toBeTruthy();
     expect(binding.conformanceRunId).toBeTruthy();
-    expect(binding.agentAttestationIds).toHaveLength(1);
     expect(binding.runtimeAttestationIds).toHaveLength(1);
     expect(binding.configHash).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
@@ -1433,25 +1396,15 @@ describe("场景12：最终调度继续使用 Request 冻结的 AgentRevision", 
     const frozenAgentRevisionId = binding.agentRevisionId;
 
     // 发布新 AgentRevision（但不撤回旧的）
-    const newRevision = await createDraftRevision({
+    const newRevision = await createDraftRevisionWithContractSnapshot({
       tenantId: fixture.tenantId,
       agentId: fixture.agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:frozen-v2",
-      instructionHash: "sha256:instr-frozen-v2",
-      agentArtifactRef: "oci://registry/agent@sha256:frozen-v2",
       modelPolicyJson: { model: "doubao-pro-v2" },
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
       agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
       createdBy: fixture.userIdentityId,
     });
-    await createVerifiedAttestationDirect(
-      fixture.tenantId,
-      "agent_revision",
-      newRevision.id,
-      "agent-content-frozen-v2",
-    );
     await publishRevision(fixture.tenantId, newRevision.id, 2);
 
     // 已有 Binding 的 configHash 和 agentRevisionId 不变
@@ -1506,8 +1459,8 @@ describe("场景14：Attestation 撤销后拒绝新 Binding", () => {
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
 
-    const [attestationId] = resolution.controlPlaneEvidence.agentAttestationIds ?? [];
-    if (!attestationId) throw new Error("冻结 Resolution 缺少 Agent Attestation");
+    const [attestationId] = resolution.controlPlaneEvidence.runtimeAttestationIds ?? [];
+    if (!attestationId) throw new Error("冻结 Resolution 缺少 Runtime Attestation");
 
     const revokeArtifactAttestation = createRevokeArtifactAttestation({
       store: mysqlAttestationRevocationStore,
@@ -1695,7 +1648,6 @@ describe("场景17：Worker 崩溃后租约可恢复", () => {
       checkpoint: {
         agentRevisionId: revision.id,
         agentPublicationRecordId: "publication-checkpoint-001",
-        agentAttestationId: "attestation-checkpoint-001",
       },
       nextAttemptAt: now,
       leaseOwner: null,
@@ -1844,25 +1796,15 @@ describe("场景19：Route Key 在 Revision 变化后保持不变", () => {
     expect(revision1?.routeKey).toBe("primary");
 
     // 发布新 AgentRevision
-    const newAgentRevision = await createDraftRevision({
+    const newAgentRevision = await createDraftRevisionWithContractSnapshot({
       tenantId: fixture.tenantId,
       agentId: fixture.agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:stable-key-v2",
-      instructionHash: "sha256:instr-stable-key-v2",
-      agentArtifactRef: "oci://registry/agent@sha256:stable-key-v2",
       modelPolicyJson: { model: "doubao-pro-v2" },
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
       agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
       createdBy: fixture.userIdentityId,
     });
-    await createVerifiedAttestationDirect(
-      fixture.tenantId,
-      "agent_revision",
-      newAgentRevision.id,
-      "agent-content-stable-key-v2",
-    );
     await publishRevision(fixture.tenantId, newAgentRevision.id, 2);
 
     // 使用新 AgentRevision 再次激活（同一 routeId）
@@ -2088,7 +2030,6 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
     expect(projection?.agentPublicationActive).toBe(1);
     expect(projection?.agentEvidenceValid).toBe(1);
     expect(projection?.agentPublicationRecordId).toBeTruthy();
-    expect(projection?.agentAttestationIds).toHaveLength(1);
 
     // ─── 4. 唯一 Resolver 解析到 agent route → ExecutionBinding 冻结完整 Agent Evidence ─
     const outcome = await createResolveRoute({
@@ -2113,8 +2054,8 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
     });
     // §8.1/§10.3：Agent-backed 时 Agent Evidence 条件性完整组为全完整（非 null）。
     expect(binding.agentRevisionId).toBe(agentRevision.id);
-    expect(binding.agentArtifactDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(binding.agentAttestationIds).toHaveLength(1);
+    expect(binding.agentContractSnapshotId).toBeTruthy();
+    expect(binding.agentContractDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(binding.agentPublicationRecordId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
@@ -2249,7 +2190,6 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
       revisionId: revision.id,
       runtimeExpectedVersionNo: runtime.versionNo,
       conformanceRunId: run.run.id,
-      attestationId: null,
       actor: { tenantId, actorType: "user", actorId: ownerId },
       requestId: `e2e-external-publish-${contentSuffix}`,
       idempotencyKey: `e2e-external-publish-${contentSuffix}`,

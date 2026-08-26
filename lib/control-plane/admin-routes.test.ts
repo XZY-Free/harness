@@ -24,6 +24,7 @@ import {
   createDraftRevision,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import {
   type BuilderKeyRegistry,
@@ -140,7 +141,7 @@ function buildCleanSbom(): unknown {
 
 function buildValidProvenance(): ProvenanceDocument {
   return {
-    sourceRevision: "git:abc123def456",
+    sourceRevision: "git_commit_1",
     buildPipeline: "ci-cd-pipeline-1",
     dependencyLockFile: "package-lock.json:sha256:lockhash",
     buildTime: "2026-07-15T01:00:00.000Z",
@@ -262,13 +263,9 @@ async function seedPublishedAgentRevision(
     lifecycleState,
   });
 
-  const revision = await createDraftRevision({
+  const revision = await createDraftRevisionWithContractSnapshot({
     tenantId,
     agentId: agent.id,
-    sourceType: "agent_yaml",
-    sourceRevision: `git:${contentSuffix}`,
-    instructionHash: `sha256:instruction_${contentSuffix}`,
-    agentArtifactRef: `oci://registry/agent@sha256:${contentSuffix}`,
     modelPolicyJson: { default: "doubao-pro" },
     permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
     delegationPolicyJson: { allowed_agent_ids: [] },
@@ -276,17 +273,11 @@ async function seedPublishedAgentRevision(
     createdBy: ownerId,
   });
 
-  const attestationId = await createVerifiedAttestationDirect(
-    tenantId,
-    "agent_revision",
-    revision.id,
-    `agent-content-${contentSuffix}`,
-  );
+  // Agent 是源码不可见黑盒：发布权威 = AgentContractSnapshot，无 Attestation。
   await publishTrustedAgentRevisionForTest({
     tenantId,
     revisionId: revision.id,
     agentExpectedVersionNo: 1,
-    attestationId,
     actorId: ownerId,
   });
 
@@ -550,13 +541,9 @@ describe("POST /admin/api/v1/artifact-attestations/verify", () => {
       displayName: "Verify Agent",
       ownerUserId: userIdentityId,
     });
-    const draftRevision = await createDraftRevision({
+    const draftRevision = await createDraftRevisionWithContractSnapshot({
       tenantId,
       agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:verify-v1",
-      instructionHash: "sha256:instr-verify",
-      agentArtifactRef: "oci://registry/agent@sha256:verify",
       modelPolicyJson: { model: "gpt-4" },
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
@@ -597,7 +584,7 @@ describe("POST /admin/api/v1/artifact-attestations/verify", () => {
       path: "/artifact-attestations/verify",
       idempotencyKey: "idem-verify-001",
       body: {
-        artifact_type: "agent_revision",
+        artifact_type: "runtime_revision",
         artifact_revision_id: draftRevision.id,
         artifact_digest: digest,
         dsse_envelope_ref: sigRef,
@@ -625,7 +612,7 @@ describe("POST /admin/api/v1/artifact-attestations/verify", () => {
       method: "POST",
       path: "/artifact-attestations/verify",
       body: {
-        artifact_type: "agent_revision",
+        artifact_type: "runtime_revision",
         artifact_revision_id: "rev-1",
         artifact_digest: digest,
         dsse_envelope_ref: "attestation:signature:x",
@@ -672,7 +659,7 @@ describe("POST /admin/api/v1/artifact-attestations/verify", () => {
     setBuilderKeyRegistryOverride(builderKeys);
 
     const requestBody = {
-      artifact_type: "agent_revision",
+      artifact_type: "runtime_revision",
       artifact_revision_id: "rev-bad-sig",
       artifact_digest: digest,
       dsse_envelope_ref: sigRef,
@@ -698,7 +685,7 @@ describe("POST /admin/api/v1/artifact-attestations/verify", () => {
     expect(replay.status).toBe(422);
     expect(await replay.json()).toEqual(body);
     expect(
-      await listAttestationsByRevision(tenantId, "agent_revision", "rev-bad-sig"),
+      await listAttestationsByRevision(tenantId, "runtime_revision", "rev-bad-sig"),
     ).toHaveLength(1);
     const idempotency = await findIdempotencyRecord({
       tenantId,
@@ -740,7 +727,7 @@ describe("POST /admin/api/v1/artifact-attestations/verify", () => {
     setBuilderKeyRegistryOverride(builderKeys);
 
     const body = {
-      artifact_type: "agent_revision",
+      artifact_type: "runtime_revision",
       artifact_revision_id: "rev-replay",
       artifact_digest: digest,
       dsse_envelope_ref: sigRef,
@@ -805,17 +792,12 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
   });
 
   it("成功创建 → 201 + ETag", async () => {
-    const artifactDigest = computeArtifactDigest("test-artifact-content");
-    const instructionHash = computeArtifactDigest("test-instruction-content");
     const request = buildApiRequest({
       audience: "admin",
       method: "POST",
       path: "/agents/test-agent-id/revisions",
       idempotencyKey: "idem-create-rev-001",
       body: {
-        source: { source_type: "agent_yaml", source_revision: "git:test-ref" },
-        artifact_ref: `oci://registry/agent@${artifactDigest}`,
-        instruction_hash: instructionHash,
         agent_contract_snapshot_id: contractSnapshot.id,
         model_policy: { model: "gpt-4" },
         permission_requirements: {},
@@ -932,7 +914,7 @@ describe("Agent control-plane detail and withdrawal", () => {
     const beforeBody = (await before.json()) as Record<string, unknown>;
     expect(beforeBody.execution_eligible).toBe(true);
     expect(beforeBody.publication_record_id).toEqual(expect.any(String));
-    expect(beforeBody.attestation_ids).toEqual([expect.any(String)]);
+    // Agent 黑盒：发布权威 = Contract Snapshot，无 Attestation 列表。
 
     const requestBody = { reason_code: "security_response", reason: "发现风险" };
     const buildWithdrawRequest = () =>
@@ -988,27 +970,16 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       displayName: "Publish Agent",
       ownerUserId: userIdentityId,
     });
-    const draftRevision = await createDraftRevision({
+    const draftRevision = await createDraftRevisionWithContractSnapshot({
       tenantId,
       agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:publish-v1",
-      instructionHash: "sha256:instr-publish",
-      agentArtifactRef: "oci://registry/agent@sha256:publish",
       modelPolicyJson: { model: "gpt-4" },
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
       agentInterfaceRequirementsJson: { required: [], optional: [] },
       createdBy: userIdentityId,
     });
-    const attestationId = await createVerifiedAttestationDirect(
-      tenantId,
-      "agent_revision",
-      draftRevision.id,
-      "publish-artifact-content",
-    );
-    // 发布路由强制 Revision 绑定 AgentContractSnapshot。
-    await ensureAgentContractSnapshotBoundForRevision(draftRevision.id, tenantId);
+    // 发布路由强制 Revision 绑定 AgentContractSnapshot（helper 已绑定）。
 
     const request = buildApiRequest({
       audience: "admin",
@@ -1018,7 +989,6 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       ifMatch: "agent-revision-1",
       body: {
         release_notes: "Initial release",
-        artifact_attestation_id: attestationId,
       },
     });
 
@@ -1056,7 +1026,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
         subjectRevisionId: draftRevision.id,
       }),
     ).toMatchObject({
-      attestationIds: [attestationId],
+      attestationIds: [],
       idempotencyKey: "idem-publish-001",
       idempotencyRecordId: idempotency?.id,
       publishedByType: "user",
@@ -1071,7 +1041,6 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       ifMatch: "agent-revision-1",
       body: {
         release_notes: "Initial release",
-        artifact_attestation_id: attestationId,
       },
     });
     const replayResponse = await publishPOST(replayRequest, {
@@ -1094,25 +1063,15 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       displayName: "Concurrent Publish Agent",
       ownerUserId: userIdentityId,
     });
-    const draftRevision = await createDraftRevision({
+    const draftRevision = await createDraftRevisionWithContractSnapshot({
       tenantId,
       agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:concurrent-publish-v1",
-      instructionHash: "sha256:instr-concurrent-publish",
-      agentArtifactRef: "oci://registry/agent@sha256:concurrent-publish",
       modelPolicyJson: {},
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
       agentInterfaceRequirementsJson: { required: [], optional: [] },
       createdBy: userIdentityId,
     });
-    const attestationId = await createVerifiedAttestationDirect(
-      tenantId,
-      "agent_revision",
-      draftRevision.id,
-      "concurrent-publish-content",
-    );
     await ensureAgentContractSnapshotBoundForRevision(draftRevision.id, tenantId);
     const buildRequest = (idempotencyKey: string) =>
       buildApiRequest({
@@ -1123,7 +1082,6 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
         ifMatch: "agent-revision-1",
         body: {
           release_notes: "Concurrent release",
-          artifact_attestation_id: attestationId,
         },
       });
 
@@ -1154,13 +1112,9 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       displayName: "No IfMatch Agent",
       ownerUserId: userIdentityId,
     });
-    const draftRevision = await createDraftRevision({
+    const draftRevision = await createDraftRevisionWithContractSnapshot({
       tenantId,
       agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:no-ifmatch",
-      instructionHash: "sha256:instr-no-ifmatch",
-      agentArtifactRef: "oci://registry/agent@sha256:no-ifmatch",
       modelPolicyJson: {},
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
@@ -1175,7 +1129,6 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       idempotencyKey: "idem-no-ifmatch-001",
       body: {
         release_notes: "Initial release",
-        artifact_attestation_id: "fake-attestation-id",
       },
     });
 
@@ -1194,25 +1147,15 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       displayName: "ETag Mismatch Agent",
       ownerUserId: userIdentityId,
     });
-    const draftRevision = await createDraftRevision({
+    const draftRevision = await createDraftRevisionWithContractSnapshot({
       tenantId,
       agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:etag-mismatch",
-      instructionHash: "sha256:instr-etag-mismatch",
-      agentArtifactRef: "oci://registry/agent@sha256:etag-mismatch",
       modelPolicyJson: {},
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
       agentInterfaceRequirementsJson: { required: [], optional: [] },
       createdBy: userIdentityId,
     });
-    const attestationId = await createVerifiedAttestationDirect(
-      tenantId,
-      "agent_revision",
-      draftRevision.id,
-      "etag-mismatch-content",
-    );
 
     const request = buildApiRequest({
       audience: "admin",
@@ -1222,7 +1165,6 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       ifMatch: "agent-revision-999",
       body: {
         release_notes: "Initial release",
-        artifact_attestation_id: attestationId,
       },
     });
 
@@ -1234,29 +1176,22 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
     expect(body.error.code).toBe("ETAG_MISMATCH");
   });
 
-  it("attestation 未验证 → 409 ARTIFACT_NOT_VERIFIED", async () => {
+  it("携带 legacy artifact_attestation_id → 400 REQUEST_SCHEMA_INVALID（黑盒权威）", async () => {
     const agent = await createAgent({
       tenantId,
       agentKey: "no-attest-agent",
       displayName: "No Attestation Agent",
       ownerUserId: userIdentityId,
     });
-    const draftRevision = await createDraftRevision({
+    const draftRevision = await createDraftRevisionWithContractSnapshot({
       tenantId,
       agentId: agent.id,
-      sourceType: "agent_yaml",
-      sourceRevision: "git:no-attest",
-      instructionHash: "sha256:instr-no-attest",
-      agentArtifactRef: "oci://registry/agent@sha256:no-attest",
       modelPolicyJson: {},
       permissionRequirementsJson: {},
       delegationPolicyJson: {},
       agentInterfaceRequirementsJson: { required: [], optional: [] },
       createdBy: userIdentityId,
     });
-    // 发布权威 = 绑定 AgentContractSnapshot；未绑定先走 snapshot 门禁（AGENT_CONTRACT_SNAPSHOT_MISSING）。
-    // 本用例目标是校验「提供了未验证 Attestation」→ ARTIFACT_NOT_VERIFIED，故先绑定 Snapshot 越过 snapshot 门禁。
-    await ensureAgentContractSnapshotBoundForRevision(draftRevision.id, tenantId);
 
     const request = buildApiRequest({
       audience: "admin",
@@ -1273,9 +1208,9 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
     const response = await publishPOST(request, {
       params: Promise.resolve({ revision_id: draftRevision.id }),
     });
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(400);
     const body = (await response.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("ARTIFACT_NOT_VERIFIED");
+    expect(body.error.code).toBe("REQUEST_SCHEMA_INVALID");
   });
 });
 

@@ -4,10 +4,7 @@ import { computeAgentRevisionEligibility } from "./agent-admin-projection";
 const BASE = {
   agentLifecycleState: "enabled",
   revisionState: "published",
-  artifactId: "artifact-1",
-  artifactDigest: "sha256:artifact",
-  publicationAttestationIds: ["attestation-1"],
-  verifiedActiveAttestationIds: ["attestation-1"],
+  agentContractSnapshotId: "snap-1",
   hasPublication: true,
   hasWithdrawal: false,
 };
@@ -20,15 +17,15 @@ describe("AgentRevision admin projection eligibility", () => {
     });
   });
 
-  it("证据缺失、多出或重复均 fail-closed", () => {
-    for (const publicationAttestationIds of [
-      [],
-      ["attestation-1", "attestation-2"],
-      ["attestation-1", "attestation-1"],
-    ]) {
-      expect(computeAgentRevisionEligibility({ ...BASE, publicationAttestationIds })).toMatchObject(
-        { executionEligible: false },
-      );
-    }
+  it("快照缺失或 Publication 缺失均 fail-closed", () => {
+    expect(computeAgentRevisionEligibility({ ...BASE, agentContractSnapshotId: "" })).toMatchObject(
+      { executionEligible: false },
+    );
+    expect(computeAgentRevisionEligibility({ ...BASE, hasPublication: false })).toMatchObject({
+      executionEligible: false,
+    });
+    expect(computeAgentRevisionEligibility({ ...BASE, hasWithdrawal: true })).toMatchObject({
+      executionEligible: false,
+    });
   });
 });

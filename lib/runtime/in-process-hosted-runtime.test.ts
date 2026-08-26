@@ -32,8 +32,6 @@ describe("InProcessHostedRuntimeClient", () => {
         job_context: null,
         agent: {
           agent_revision_id: "agent-revision-1",
-          instruction_hash: "sha256:instruction",
-          artifact_ref: "builtin://agent",
           model_policy: {},
           permission_requirements: {},
           interface_requirements: {},

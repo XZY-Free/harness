@@ -28,7 +28,6 @@ function claimedRequest(): HostedProvisioningRequestRow {
     updatedAt: now,
     stepAgentRevisionId: null,
     stepAgentPublicationRecordId: null,
-    stepAgentAttestationId: null,
     stepRuntimeId: null,
     stepRuntimeRevisionId: null,
     stepRuntimeArtifactId: null,

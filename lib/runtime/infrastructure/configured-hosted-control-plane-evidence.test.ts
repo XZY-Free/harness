@@ -53,7 +53,7 @@ describe("ConfiguredHostedControlPlaneEvidenceProvider", () => {
 
     const evidence = await provider.loadArtifactEvidence({
       tenantId: "tenant-1",
-      artifactType: "agent_revision",
+      artifactType: "runtime_revision",
     });
 
     await expect(

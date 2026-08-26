@@ -38,9 +38,7 @@ const bindingRow: BindingRow = {
   routeRevisionId: "route-revision-1",
   routeActivationId: "route-activation-1",
   routeContentDigest: `sha256:${"1".repeat(64)}`,
-  agentArtifactId: "agent-artifact-1",
   runtimeArtifactId: "runtime-artifact-1",
-  agentArtifactDigest: `sha256:${"2".repeat(64)}`,
   runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
   runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
   runtimeTargetDigest: `sha256:${"t".repeat(64)}`,
@@ -49,7 +47,6 @@ const bindingRow: BindingRow = {
   agentContractDigest: `sha256:${"p".repeat(64)}`,
   agentContextDigest: `sha256:${"c".repeat(64)}`,
   capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
-  agentAttestationIds: ["agent-attestation-1"],
   runtimeAttestationIds: ["runtime-attestation-1"],
   agentPublicationRecordId: "agent-publication-1",
   runtimePublicationRecordId: "runtime-publication-1",
@@ -118,9 +115,6 @@ describe("ExecutionBinding authority final validation", () => {
       "AgentWithdrawalRecord",
       "RuntimePublicationRecord",
       "RuntimeWithdrawalRecord",
-      "AgentArtifact",
-      "AgentArtifactAttestation",
-      "AgentAttestationRevocation",
       "RuntimeArtifact",
       "RuntimeArtifactAttestation",
       "RuntimeAttestationRevocation",
@@ -268,8 +262,6 @@ describe("ExecutionBinding authority final validation", () => {
       new URL("./mysql-execution-binding-store.ts", import.meta.url),
       "utf8",
     );
-    expect(source).toContain("for (const attestationId of [...agentAttestationIds].sort())");
-    expect(source).toContain("const agentAttestationIds = evidence.agentAttestationIds ?? [];");
     expect(source).toContain(
       "for (const attestationId of [...evidence.runtimeAttestationIds].sort())",
     );
@@ -307,14 +299,12 @@ describe("ExecutionBinding authority final validation", () => {
       new URL("./mysql-execution-binding-store.ts", import.meta.url),
       "utf8",
     );
-    expect(source).toContain('"AgentArtifact"');
     expect(source).toContain('"RuntimeArtifact"');
-    // 锁序契约：AgentArtifact 必须先于 AgentArtifactAttestation 加 FOR UPDATE 锁。
+    // 锁序契约：RuntimeArtifact 必须先于 RuntimeArtifactAttestation 加 FOR UPDATE 锁。
     // 仅比较文本出现的先后会误判（代码在加锁前会先做一次非加锁的 Attestation key 探测）。
     expect(firstForUpdateLockIndex(source, "artifact")).toBeLessThan(
       firstForUpdateLockIndex(source, "artifactAttestation"),
     );
-    expect(source).toContain("artifactId: evidence.agentArtifactId");
     // Runtime Artifact 锁校验仅 hosted_artifact 进入（external_endpoint 无 Artifact，03 §3）。
     expect(source).toContain('evidence.runtimeEvidenceKind === "hosted_artifact"');
     expect(source).toContain("const runtimeArtifactId = evidence.runtimeArtifactId as string;");
@@ -471,9 +461,7 @@ describe("ExecutionBinding authority final validation", () => {
       runtimeRevisionId: "runtime-revision-1",
       policyRevisionId: "policy-revision-1",
       routeContentDigest: `sha256:${"1".repeat(64)}`,
-      agentArtifactId: "agent-artifact-1",
       runtimeArtifactId: "runtime-artifact-1",
-      agentArtifactDigest: `sha256:${"2".repeat(64)}`,
       runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
       runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
       runtimeTargetDigest: `sha256:${"t".repeat(64)}`,
@@ -484,7 +472,6 @@ describe("ExecutionBinding authority final validation", () => {
       capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
       agentPublicationRecordId: "agent-publication-1",
       runtimePublicationRecordId: "runtime-publication-1",
-      agentAttestationIds: ["agent-attestation-1"],
       runtimeAttestationIds: ["runtime-attestation-1"],
       conformanceRunId: "conformance-run-1",
     };
@@ -503,7 +490,6 @@ describe("ExecutionBinding authority final validation", () => {
       { activationState: "disabled" as const },
       { runtimeArtifactDigest: `sha256:${"9".repeat(64)}` },
       { capabilityCompatibilityDigest: `sha256:${"9".repeat(64)}` },
-      { agentAttestationIds: ["agent-attestation-1", "agent-attestation-2"] },
       { runtimeAttestationIds: [] },
       { agentContractSnapshotId: "drifted-snapshot" },
       { runtimeEvidenceKind: "external_endpoint" as const },

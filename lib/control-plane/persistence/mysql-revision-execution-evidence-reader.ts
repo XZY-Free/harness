@@ -91,21 +91,12 @@ async function loadEvidence(
   // 无 Agent 约束（agentRevisionId === null）→ 基础 Harness Route，跳过 Agent 维度查询。
   const hasAgentConstraint = input.agentRevisionId !== null;
   const [
-    agentArtifactEvidence,
     runtimeArtifactEvidence,
     agentPublication,
     runtimePublication,
     agentRevisionRow,
     runtimeRevisionRow,
   ] = await Promise.all([
-    hasAgentConstraint
-      ? loadArtifactEvidenceSnapshot({
-          tenantId: input.tenantId,
-          artifactType: "agent_revision",
-          artifactRevisionId: input.agentRevisionId as string,
-          dbOrTx: dbOrTx,
-        })
-      : Promise.resolve(null),
     loadArtifactEvidenceSnapshot({
       tenantId: input.tenantId,
       artifactType: "runtime_revision",
@@ -204,7 +195,6 @@ async function loadEvidence(
   return {
     tenantId: input.tenantId,
     agentRevisionId: input.agentRevisionId,
-    agentArtifactEvidence,
     agentPublication,
     // 真实读取生命周期状态，禁止硬编码 active
     agentLifecycleState: agentRow?.lifecycleState === "enabled" ? "active" : "archived",
