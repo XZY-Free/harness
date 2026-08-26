@@ -206,10 +206,9 @@ describe("resolveBindingContextContract（05 §6）", () => {
       environment: {
         tenantId,
         executionSubject: {
-          userIdentityId: "user-1",
-          externalSubject: "employee-42",
-          email: "employee42@example.com",
-          displayName: "员工42",
+          tenantId,
+          subjectType: "user",
+          subjectId: "user-1",
         },
         now: new Date("2026-08-25T08:00:00.000Z"),
         timezone: "Asia/Shanghai",

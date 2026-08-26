@@ -133,9 +133,16 @@ export interface StartInvocationRequestBody {
   /**
    * ExecutionSubject（06 §6-§7）：可信调用主体，由服务端认证 Principal 生成，
    * 禁止 caller 自报。Agent Runtime Protocol 直接放 dispatch envelope；
-   * A2A Transport 映射为 namespaced metadata（snowharness.execution_subject）。
+   * A2A Transport 映射为公开 metadata（execution_subject，04 §11）。
    */
   execution_subject?: ExecutionSubjectWire;
+  /**
+   * 允许外发的 Invocation Context（04 §13）：Binding 冻结合同 + external egress
+   * policy 过滤后的 supplied 条目（公开合同 key + 已脱敏 value）。
+   * Transport 只做 wire 映射，不查 DB/合同/Policy/User/Context storage。
+   * Base Harness（无 Agent Contract）不携带该字段。
+   */
+  invocation_context?: Array<{ context_kind: string; value: unknown }>;
   attempt?: {
     attempt_no: number;
     /** 重调度时平台分配的 Attempt id（关联 InvocationAttempt 行）。 */

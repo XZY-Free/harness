@@ -97,6 +97,48 @@ function requestBody(
   };
 }
 
+describe("04 §11：Invocation Context Enrichment → A2A message.metadata", () => {
+  it("允许的公共 Context 以合同 key 直接进入 metadata；Provider 看不到任何内部字段", async () => {
+    const { transport } = freshTransport();
+    const resp = await transport.startInvocation({
+      runtimeEndpoint: provider.endpoint,
+      auth: { mode: "none" },
+      idempotencyKey: "idem-ctx-1",
+      requestBody: requestBody({
+        invocation_context: [
+          {
+            context_kind: "execution_subject",
+            value: { subject_id: "user-1", subject_kind: "platform_user" },
+          },
+          { context_kind: "current_datetime", value: "2026-08-26T09:30:00.000Z" },
+          { context_kind: "timezone", value: "Asia/Shanghai" },
+        ],
+      }),
+    });
+    expect(resp.accepted).toBe(true);
+    const captured = provider.captured[provider.captured.length - 1];
+    expect(captured?.messageMetadata).toMatchObject({
+      execution_subject: { subject_id: "user-1", subject_kind: "platform_user" },
+      current_datetime: "2026-08-26T09:30:00.000Z",
+      timezone: "Asia/Shanghai",
+    });
+    // 04 §12：Provider 看不到 tenant/thread/invocation/turn/trace/context_handle/token/email。
+    const wire = JSON.stringify(captured?.messageMetadata);
+    for (const forbidden of [
+      "tenant-1",
+      "thread-1",
+      "inv-1",
+      "trace-1",
+      "ctx-handle-1",
+      "tenant_id",
+      "email",
+      "gateway",
+    ]) {
+      expect(wire).not.toContain(forbidden);
+    }
+  });
+});
+
 describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => {
   it("Agent Card：标准路径唯一（agent-card.json，不请求废弃 agent.json），公开 Capability Manifest 与 Invocation Context Contract", async () => {
     const { transport } = freshTransport();

@@ -22,20 +22,18 @@
  */
 
 import type { InvocationContextContract } from "@/lib/agents/domain/public-agent-contract";
+import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 
-/** 认证 Principal（lib/identity/resolver）的可信主体信息。 */
-export interface TrustedExecutionSubject {
-  userIdentityId: string;
-  externalSubject: string;
-  email: string;
-  displayName: string | null;
-}
-
-/** 本次 Invocation 的平台可用上下文来源（由 Harness 组装，不含任何客户端自报 trusted 值）。 */
+/**
+ * 本次 Invocation 的平台可用上下文来源（由 Harness 组装，不含任何客户端自报 trusted 值）。
+ *
+ * 04 §4：subject 统一使用正式 ExecutionSubject（tenantId/subjectType/subjectId）；
+ * 对外只映射必要公开字段（subject_id/subject_kind），不发送 tenantId/email/displayName。
+ */
 export interface PlatformContextEnvironment {
   tenantId: string;
   /** 认证 Principal 生成的 trusted ExecutionSubject；null = 本次调用无可信主体。 */
-  executionSubject: TrustedExecutionSubject | null;
+  executionSubject: ExecutionSubject | null;
   now: Date;
   timezone?: string | null;
   locale?: string | null;
@@ -184,8 +182,19 @@ function enumeratePlatformContext(
 ): { available: boolean; value?: unknown } {
   switch (contextKind) {
     case "execution_subject":
+      // 04 §4/§11：对外只映射 subject_id/subject_kind（与 A2A wire 公开形态一致）；
+      // tenantId/email/displayName 等内部事实绝不出现在 value。
       return environment.executionSubject
-        ? { available: true, value: { ...environment.executionSubject } }
+        ? {
+            available: true,
+            value: {
+              subject_id: environment.executionSubject.subjectId,
+              subject_kind:
+                environment.executionSubject.subjectType === "service"
+                  ? "service"
+                  : "platform_user",
+            },
+          }
         : { available: false };
     case "tenant_context":
       return { available: true, value: { tenantId: environment.tenantId } };

@@ -38,6 +38,7 @@
 import { randomUUID } from "node:crypto";
 import { aiConfig } from "@/lib/config";
 import { issueContextHandle } from "@/lib/context/context-handle";
+import { buildBoundAgentInvocationContext } from "@/lib/context/enrichment/build-bound-agent-invocation-context";
 import { getItemById } from "@/lib/conversations/thread-item-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
@@ -632,6 +633,23 @@ async function dispatchToRuntime(params: {
         }
       : {}),
   };
+
+  // 04 §14：Context Enrichment 必须在 Binding 确定后——从 Binding 冻结的 exact
+  // Snapshot 构建 Allowed Bundle（Base Harness snapshot=null → null，不执行 Agent 级合同）。
+  const contextBundle = await buildBoundAgentInvocationContext({
+    tenantId: params.tenantId,
+    binding: {
+      agentContractSnapshotId: params.binding.agentContractSnapshotId,
+      agentContextDigest: params.binding.agentContextDigest,
+    },
+    executionSubject: params.executionSubject ?? null,
+    now: new Date(),
+  });
+  if (contextBundle) {
+    requestBody.invocation_context = contextBundle.entries
+      .filter((entry) => entry.supplied)
+      .map((entry) => ({ context_kind: entry.contextKind, value: entry.value }));
+  }
 
   // 4. 调用 runtimeClient.startInvocation（带错误处理）
   let response: StartInvocationResponse;

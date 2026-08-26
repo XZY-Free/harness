@@ -17,11 +17,13 @@ import { describe, expect, it } from "vitest";
 const NOW = new Date("2026-08-25T08:00:00.000Z");
 
 const SUBJECT = {
-  userIdentityId: "user-1",
-  externalSubject: "employee-42",
-  email: "employee42@example.com",
-  displayName: "员工42",
-};
+  tenantId: "tenant-1",
+  subjectType: "user",
+  subjectId: "user-1",
+} as const;
+
+/** 04 §4/§11：对外 value 只映射 subject_id/subject_kind（不含 tenantId/email）。 */
+const SUBJECT_PUBLIC_VALUE = { subject_id: "user-1", subject_kind: "platform_user" };
 
 function environment(
   overrides: Partial<PlatformContextEnvironment> = {},
@@ -59,7 +61,9 @@ describe("buildInvocationContextBundle（Batch 5 Gate）", () => {
     expect(subject?.trusted).toBe(true);
     expect(subject?.provenance).toBe("principal");
     expect(subject?.policyDecision.decision).toBe("allow");
-    expect(subject?.value).toEqual(SUBJECT);
+    expect(subject?.value).toEqual(SUBJECT_PUBLIC_VALUE);
+    expect(JSON.stringify(subject?.value)).not.toContain("tenant");
+    expect(JSON.stringify(subject?.value)).not.toContain("email");
     const datetime = bundle.entries.find((e) => e.contextKind === "current_datetime");
     expect(datetime?.value).toBe(NOW.toISOString());
     expect(datetime?.provenance).toBe("platform");

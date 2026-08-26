@@ -534,6 +534,19 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
           : null;
 
       const messageId = randomUUID();
+      // 04 §11：允许的 Context 放 message.metadata，键直接使用公共合同 key
+      // （不包 SnowHarness 私有 envelope）；内部 ID/trace/tenant/token 等一律不发。
+      const contextMetadata: Record<string, unknown> = {};
+      for (const entry of body.invocation_context ?? []) {
+        contextMetadata[entry.context_kind] = entry.value;
+      }
+      if (body.execution_subject && !("execution_subject" in contextMetadata)) {
+        contextMetadata.execution_subject = {
+          subject_id: body.execution_subject.subject_id,
+          subject_kind:
+            body.execution_subject.subject_type === "service" ? "service" : "platform_user",
+        };
+      }
       const rpcParams = {
         message: {
           kind: "message",
@@ -541,25 +554,14 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
           role: "user",
           parts: [{ kind: "text", text }],
           ...(existingContextId ? { contextId: existingContextId } : {}),
-          // 公开合同（HR 兼容）：metadata 仅允许 execution_subject 公开对象；
-          // 内部 ID/trace/protocol/tenant 等一律不得出现在 wire 上；缺省不发送。
-          ...(body.execution_subject
-            ? {
-                metadata: {
-                  execution_subject: {
-                    subject_id: body.execution_subject.subject_id,
-                    subject_kind:
-                      body.execution_subject.subject_type === "service"
-                        ? "service"
-                        : "platform_user",
-                  },
-                },
-              }
-            : {}),
+          ...(Object.keys(contextMetadata).length > 0 ? { metadata: contextMetadata } : {}),
         },
         configuration: { blocking: false },
       };
 
+      // External A2A：workload_token 本地 fail closed；none 不发 Authorization（03 §9）。
+      // 凭据错误在 fetch 之前抛出，不得被网络错误分类吞掉。
+      const authHeaders = outboundAuthHeaders(req.auth);
       let resp: Response;
       try {
         resp = await fetchImpl(req.runtimeEndpoint, {
@@ -567,8 +569,7 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
           headers: {
             "content-type": "application/json",
             accept: "text/event-stream",
-            // External A2A：workload_token 本地 fail closed；none 不发 Authorization（03 §9）。
-            ...outboundAuthHeaders(req.auth),
+            ...authHeaders,
             "x-idempotency-key": req.idempotencyKey,
           },
           body: JSON.stringify({
