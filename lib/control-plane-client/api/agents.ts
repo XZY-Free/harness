@@ -14,6 +14,10 @@ import type {
   CreateAgentRevisionRequest,
   PublishAgentRevisionRequest,
   PublishAgentRevisionResponse,
+  RegisterAgentContractRequest,
+  RegisterAgentContractResponse,
+  RegisterAgentRuntimeRequest,
+  RegisterAgentRuntimeResponse,
   WithdrawAgentRevisionRequest,
   WithdrawAgentRevisionResponse,
 } from "../contracts/agent";
@@ -31,6 +35,23 @@ export interface AgentApiClient {
   listContracts(agentId: string): Promise<AgentContractListResponse>;
   /** 获取 AgentRevision 详情。 */
   getRevision(revisionId: string): Promise<AgentRevisionDTO>;
+  /**
+   * 登记 Public Agent Contract（07 §4：POST /admin/api/v1/agent-registrations）。
+   * 只发送 protocol + contract；禁止 URL/Git/源码路径/endpoint/凭证字段。
+   */
+  registerContract(
+    body: RegisterAgentContractRequest,
+    opts: { idempotencyKey: string },
+  ): Promise<RegisterAgentContractResponse>;
+  /**
+   * 登记 External Runtime（07 §7：POST /admin/api/v1/agents/{agent_id}/runtime-registrations）。
+   * capability-driven Conformance；authentication 只允许 none/bearer + 已有 CredentialRef。
+   */
+  registerRuntime(
+    agentId: string,
+    body: RegisterAgentRuntimeRequest,
+    opts: { idempotencyKey: string },
+  ): Promise<RegisterAgentRuntimeResponse>;
   /** 创建 Draft AgentRevision。 */
   createRevision(
     agentId: string,
@@ -64,6 +85,21 @@ export function createAgentApiClient(config: ApiClientConfig): AgentApiClient {
       request<AgentContractListResponse>(`/admin/api/v1/agents/${agentId}/contracts`),
     getRevision: (revisionId) =>
       request<AgentRevisionDTO>(`/admin/api/v1/agent-revisions/${revisionId}`),
+    registerContract: (body, opts) =>
+      request<RegisterAgentContractResponse>("/admin/api/v1/agent-registrations", {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "Idempotency-Key": opts.idempotencyKey },
+      }),
+    registerRuntime: (agentId, body, opts) =>
+      request<RegisterAgentRuntimeResponse>(
+        `/admin/api/v1/agents/${agentId}/runtime-registrations`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: { "Idempotency-Key": opts.idempotencyKey },
+        },
+      ),
     createRevision: (agentId, body, opts) =>
       request<AgentRevisionSummaryDTO>(`/admin/api/v1/agents/${agentId}/revisions`, {
         method: "POST",

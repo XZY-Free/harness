@@ -97,9 +97,51 @@ export function AgentContractPanel({ agentId, loadContracts }: AgentContractPane
 
   return (
     <div className="space-y-3 px-3 py-3">
-      <div className="text-[12px] text-[var(--fg-muted)]">
-        合同版本 <span className="font-mono">{snapshot.contract_version}</span> ·{" "}
-        {snapshot.protocol_type}@{snapshot.protocol_contract_revision}
+      <div className="space-y-1 text-[12px] text-[var(--fg-muted)]">
+        <div>
+          Snapshot <span className="font-mono">{snapshot.snapshot_id}</span> · Agent version{" "}
+          <span className="font-mono">{snapshot.public_agent_version}</span>
+        </div>
+        <div>
+          合同版本 <span className="font-mono">{snapshot.contract_version}</span> ·{" "}
+          {snapshot.protocol_type}@{snapshot.protocol_contract_revision}
+        </div>
+        <div className="break-all">
+          contractDigest <span className="font-mono">{snapshot.contract_digest}</span>
+        </div>
+        <div className="break-all">
+          capabilityDigest <span className="font-mono">{snapshot.capability_digest}</span>
+        </div>
+        <div className="break-all">
+          contextDigest <span className="font-mono">{snapshot.context_digest}</span>
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[12px] font-medium text-[var(--fg)]">
+          交互能力（Interaction Capability）
+        </div>
+        <ul className="mt-1 flex flex-wrap gap-2 text-[12px] text-[var(--fg-muted)]">
+          {[
+            ["streaming_transport", snapshot.interaction.streaming_transport],
+            ["incremental_content", snapshot.interaction.incremental_content],
+            ["input_required", snapshot.interaction.input_required],
+            ["resume", snapshot.interaction.resume],
+            ["cancel", snapshot.interaction.cancel],
+            ["durable_task_recovery", snapshot.interaction.durable_task_recovery],
+          ].map(([key, enabled]) => (
+            <li
+              key={String(key)}
+              className="rounded bg-[var(--surface-2)] px-1.5 py-0.5"
+              aria-label={`interaction_${key}`}
+            >
+              <span className="font-mono">{String(key)}</span>
+              <span className={enabled ? " text-[var(--fg)]" : " text-[var(--fg-subtle)]"}>
+                {enabled ? " ✓" : " ✗"}
+              </span>
+            </li>
+          ))}
+        </ul>
       </div>
 
       <div>

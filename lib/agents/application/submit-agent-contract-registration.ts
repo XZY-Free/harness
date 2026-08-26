@@ -107,6 +107,8 @@ export function projectAgentContractWire(aggregate: AgentContractSnapshotAggrega
   protocol_type: string;
   protocol_contract_revision: string;
   contract_digest: string;
+  capability_digest: string;
+  context_digest: string;
   interaction: Record<string, unknown>;
   capabilities: Array<Record<string, unknown>>;
   invocation_context: Array<Record<string, unknown>>;
@@ -121,6 +123,8 @@ export function projectAgentContractWire(aggregate: AgentContractSnapshotAggrega
     protocol_type: h.protocolType,
     protocol_contract_revision: h.protocolContractRevision,
     contract_digest: h.contractDigest,
+    capability_digest: h.capabilityDigest,
+    context_digest: h.contextDigest,
     interaction: {
       streaming_transport: h.streamingTransport,
       incremental_content: h.incrementalContent,

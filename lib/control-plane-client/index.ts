@@ -25,6 +25,14 @@ export type {
   AgentRevisionSummaryDTO,
   AgentRevisionListResponse,
   CreateAgentRevisionRequest,
+  RegisterAgentContractRequest,
+  RegisterAgentContractResponse,
+  RegisterAgentRuntimeConformance,
+  RegisterAgentRuntimeRequest,
+  RegisterAgentRuntimeResponse,
+  RuntimeMeasuredEvidenceDTO,
+  CredentialRefSummaryDTO,
+  CredentialRefListResponse,
   PublishAgentRevisionRequest,
   PublishAgentRevisionResponse,
   WithdrawAgentRevisionRequest,
@@ -113,6 +121,9 @@ export type { ControlPlaneClient } from "./client";
 export { createControlPlaneClient } from "./client";
 export type { AgentApiClient } from "./api/agents";
 export { createAgentApiClient } from "./api/agents";
+
+export type { CredentialRefApiClient } from "./api/credentials";
+export { createCredentialRefApiClient } from "./api/credentials";
 
 export type { RuntimeApiClient } from "./api/runtimes";
 export { createRuntimeApiClient } from "./api/runtimes";

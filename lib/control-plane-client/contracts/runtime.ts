@@ -59,6 +59,8 @@ export interface RuntimeRevisionDTO {
   config_hash: string;
   runtime_capabilities: unknown;
   identity_mode: string;
+  /** CredentialRef 引用（仅 id，无 secret）。 */
+  credential_ref_id: string | null;
   network_zone: string;
   /** 当前验证通过且未撤销的 Attestation。 */
   attestation_ids: string[];

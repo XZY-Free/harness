@@ -198,6 +198,7 @@ export async function loadRuntimeRevisionAdminProjection(
     config_hash: revision.configHash,
     runtime_capabilities: revision.runtimeCapabilitiesJson,
     identity_mode: revision.identityMode,
+    credential_ref_id: revision.credentialRefId,
     network_zone: revision.networkZone,
     attestation_ids: verifiedActiveAttestationIds,
     publication_record_id: publication?.id ?? null,

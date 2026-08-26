@@ -11,6 +11,8 @@ function snapshotFixture(): AgentContractSnapshotDTO {
     protocol_type: "a2a",
     protocol_contract_revision: "a2a@1",
     contract_digest: `sha256:${"a".repeat(64)}`,
+    capability_digest: `sha256:${"b".repeat(64)}`,
+    context_digest: `sha256:${"c".repeat(64)}`,
     interaction: {
       streaming_transport: true,
       incremental_content: false,
@@ -84,6 +86,28 @@ describe("AgentContractPanel（09 §4/§5）", () => {
     expect(screen.getAllByText(/Agent 声明/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("管理员登记").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/timezone/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("展示 Snapshot id、Agent version、三个 digest 与 interaction 六布尔（07 §5）", async () => {
+    const loadContracts = vi.fn().mockResolvedValue({ items: [snapshotFixture()] });
+    render(<AgentContractPanel agentId="agent-1" loadContracts={loadContracts} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/snap-0001-full/).length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.getAllByText(/capabilityDigest/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/contextDigest/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(`sha256:${"b".repeat(64)}`).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(`sha256:${"c".repeat(64)}`).length).toBeGreaterThanOrEqual(1);
+    // 六布尔：true 显示 ✓、false 显示 ✗。
+    expect(screen.getAllByLabelText("interaction_streaming_transport")[0]?.textContent).toContain(
+      "✓",
+    );
+    expect(screen.getAllByLabelText("interaction_incremental_content")[0]?.textContent).toContain(
+      "✗",
+    );
+    expect(screen.getAllByLabelText("interaction_resume")[0]?.textContent).toContain("✓");
+    expect(screen.getAllByLabelText("interaction_cancel")[0]?.textContent).toContain("✗");
   });
 
   it("无 Snapshot 时显示空态（Agent 未登记外部合同）", async () => {

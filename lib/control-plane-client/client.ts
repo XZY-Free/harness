@@ -1,5 +1,6 @@
 import { createAgentApiClient } from "./api/agents";
 import { createArtifactApiClient } from "./api/artifacts";
+import { createCredentialRefApiClient } from "./api/credentials";
 import { createExecutionApiClient } from "./api/executions";
 import { createProvisioningApiClient } from "./api/provisioning";
 import { createPublicationApiClient } from "./api/publications";
@@ -11,6 +12,7 @@ import type { ApiClientConfig } from "./http-client";
 export function createControlPlaneClient(config: ApiClientConfig) {
   return {
     agents: createAgentApiClient(config),
+    credentials: createCredentialRefApiClient(config),
     artifacts: createArtifactApiClient(config),
     executions: createExecutionApiClient(config),
     provisioning: createProvisioningApiClient(config),

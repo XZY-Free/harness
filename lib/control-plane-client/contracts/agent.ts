@@ -144,6 +144,10 @@ export interface AgentContractSnapshotDTO {
   protocol_type: string;
   protocol_contract_revision: string;
   contract_digest: string;
+  /** Capability Manifest canonical digest（07 §5 展示用）。 */
+  capability_digest: string;
+  /** Invocation Context Contract canonical digest（07 §5 展示用）。 */
+  context_digest: string;
   interaction: {
     streaming_transport: boolean;
     incremental_content: boolean;
@@ -165,5 +169,99 @@ export interface AgentContractSnapshotDTO {
 
 export interface AgentContractListResponse {
   items: AgentContractSnapshotDTO[];
+  total: number;
+}
+
+// ─── Agent Contract 登记（07 §4，POST /admin/api/v1/agent-registrations） ────
+
+/** 登记请求：顶层恰为 protocol + contract（禁止 URL/Git/源码路径/endpoint/凭证字段）。 */
+export interface RegisterAgentContractRequest {
+  protocol: {
+    type: string;
+    contract_revision: string;
+  };
+  contract: unknown;
+}
+
+/** 登记响应：Agent 摘要 + 结构化快照投影（无原始合同回显）。 */
+export interface RegisterAgentContractResponse {
+  agent: {
+    id: string;
+    agent_key: string;
+    display_name: string;
+    lifecycle_state: AgentLifecycleState;
+  };
+  contract: AgentContractSnapshotDTO;
+}
+
+// ─── External Runtime 登记（07 §7，POST /admin/api/v1/agents/{id}/runtime-registrations） ──
+
+/** 能力驱动 Conformance probe 输入（02 §2；false 能力必须缺席，不发隐藏空字段）。 */
+export interface RegisterAgentRuntimeConformance {
+  basic: { input: string };
+  input_required?: { input: string };
+  resume?: { start_input: string; resume_input: string };
+  cancel?: { input: string };
+}
+
+/** External Runtime 登记请求（冻结 wire：authentication 恰为 mode + credential_ref_id）。 */
+export interface RegisterAgentRuntimeRequest {
+  contract_snapshot_id: string;
+  runtime_endpoint: string;
+  authentication: {
+    mode: "none" | "bearer";
+    credential_ref_id: string | null;
+  };
+  conformance: RegisterAgentRuntimeConformance;
+}
+
+/** 结构化 measured 证据矩阵（02 §9）。 */
+export interface RuntimeMeasuredEvidenceDTO {
+  agent_card: {
+    protocol_version: "pass";
+    transport: "pass";
+    streaming_consistency: "pass";
+  };
+  basic_invocation: { status: "pass" };
+  features: {
+    streaming_transport: "pass" | "not_applicable";
+    incremental_content: "pass" | "not_applicable";
+    input_required: "pass" | "not_applicable";
+    resume: "pass" | "not_applicable";
+    cancel: "pass" | "not_applicable";
+    durable_task_recovery: "not_measured";
+  };
+}
+
+/** External Runtime 登记响应（07 §9：只含 id/状态/digest/measured 矩阵）。 */
+export interface RegisterAgentRuntimeResponse {
+  agent_id: string;
+  agent_contract_snapshot_id: string;
+  runtime_id: string;
+  runtime_revision_id: string;
+  runtime_key: string;
+  runtime_endpoint: string;
+  protocol: { type: string; contract_revision: string };
+  verification_state: string;
+  verified_at: string;
+  runtime_target_digest: string;
+  evidence_digest: string;
+  config_hash: string;
+  measured: RuntimeMeasuredEvidenceDTO;
+}
+
+// ─── CredentialRef（07 §7：bearer 只能选择已有 CredentialRef） ───────────────
+
+/** CredentialRef 摘要（无 vaultRef/secret 值）。 */
+export interface CredentialRefSummaryDTO {
+  id: string;
+  provider: string;
+  fingerprint: string;
+  lifecycle_state: string;
+  expires_at: string | null;
+}
+
+export interface CredentialRefListResponse {
+  items: CredentialRefSummaryDTO[];
   total: number;
 }
