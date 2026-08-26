@@ -12,6 +12,7 @@
 import {
   type AgentRevisionSummaryDTO,
   ControlPlaneRequestError,
+  type PublishAgentRevisionResponse,
   createControlPlaneClient,
 } from "@/lib/control-plane-client";
 import { useCallback, useEffect, useState } from "react";
@@ -65,12 +66,15 @@ interface AgentRevisionActionsProps {
   readonly preferredSnapshotId?: string | null;
   /** 递增代次：上游变更后重新加载合同与版本列表。 */
   readonly refreshToken?: number;
+  /** 发布成功回调（完整 PublishAgentRevisionResponse），发布动作仍由用户点击触发。 */
+  readonly onPublished?: (result: PublishAgentRevisionResponse) => void;
 }
 
 export function AgentRevisionActions({
   agentId,
   preferredSnapshotId = null,
   refreshToken = 0,
+  onPublished,
 }: AgentRevisionActionsProps) {
   const [snapshots, setSnapshots] = useState<
     Array<{ snapshot_id: string; contract_version: string }>
@@ -164,11 +168,14 @@ export function AgentRevisionActions({
     setNotice(null);
     setBusy(true);
     try {
-      await client.agents.publishRevision(
+      const result = await client.agents.publishRevision(
         revision.id,
         { release_notes: "Studio 发布（07 §6）" },
         { idempotencyKey: crypto.randomUUID(), ifMatch: revision.etag },
       );
+      // 只用真实 publish API 返回的响应交接；在 reload 之前触发，
+      // 避免发布已成功但列表刷新失败时丢失真实发布事件。
+      onPublished?.(result);
       setNotice(`版本 ${revision.revision_no} 已发布`);
       await reload();
     } catch (err) {

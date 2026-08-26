@@ -4,7 +4,10 @@
  * AgentRevision 操作入口：选择 Agent 后渲染 AgentRevisionActions（07 §6）。
  */
 import { AgentRevisionActions } from "@/components/studio/agent-revision-actions";
-import { createControlPlaneClient } from "@/lib/control-plane-client";
+import {
+  type PublishAgentRevisionResponse,
+  createControlPlaneClient,
+} from "@/lib/control-plane-client";
 import { useEffect, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
@@ -16,12 +19,15 @@ interface AgentsRevisionSectionProps {
   readonly preferredSnapshotId?: string | null;
   /** 递增代次：上游变更后重新加载 Agent 列表。 */
   readonly refreshToken?: number;
+  /** 发布成功回调（完整 PublishAgentRevisionResponse），透传给 AgentRevisionActions。 */
+  readonly onPublished?: (result: PublishAgentRevisionResponse) => void;
 }
 
 export function AgentsRevisionSection({
   preferredAgentId = null,
   preferredSnapshotId = null,
   refreshToken = 0,
+  onPublished,
 }: AgentsRevisionSectionProps) {
   const [agents, setAgents] = useState<Array<{ id: string; display_name: string }>>([]);
   const [agentId, setAgentId] = useState("");
@@ -78,6 +84,7 @@ export function AgentsRevisionSection({
           agentId={agentId}
           preferredSnapshotId={preferredSnapshotId}
           refreshToken={refreshToken}
+          onPublished={onPublished}
         />
       )}
     </div>

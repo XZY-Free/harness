@@ -7,6 +7,10 @@
  * 一次点击先创建/复用默认 scope 的 RouteSet，再用返回版本原子激活
  * 唯一 route（primary / 10000 / 0）。不自动发布任何 Revision，
  * 运行服务只按 agent_contract_snapshot_id 精确匹配，不做名称/顺序推断。
+ *
+ * 同页发布交接：refreshToken 变化重新 GET 真实资产；preferred 版本只有在
+ * 新拉取的 published 列表中（运行服务还须与所选智能体版本快照精确匹配）
+ * 才被选中，绝不凭上游 id 造假选项。刷新失败 fail closed。
  */
 import {
   type AgentDTO,
@@ -16,7 +20,7 @@ import {
   type RuntimeRevisionDTO,
   createControlPlaneClient,
 } from "@/lib/control-plane-client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 
@@ -45,7 +49,22 @@ interface RuntimeOption {
   revision: RuntimeRevisionDTO;
 }
 
-export function RouteActivationPanel({ canManage }: { readonly canManage: boolean }) {
+interface RouteActivationPanelProps {
+  readonly canManage: boolean;
+  /** 递增代次：上游（如同页真实发布）成功后要求重新拉取真实资产。 */
+  readonly refreshToken?: number;
+  /** 上游交接：只有新 GET 的 published AgentRevision 中存在才选中。 */
+  readonly preferredAgentRevisionId?: string | null;
+  /** 上游交接：只有与所选 AgentRevision 快照精确匹配的 published 版本中存在才选中。 */
+  readonly preferredRuntimeRevisionId?: string | null;
+}
+
+export function RouteActivationPanel({
+  canManage,
+  refreshToken = 0,
+  preferredAgentRevisionId = null,
+  preferredRuntimeRevisionId = null,
+}: RouteActivationPanelProps) {
   const [agents, setAgents] = useState<AgentDTO[]>([]);
   const [agentRevisions, setAgentRevisions] = useState<AgentRevisionSummaryDTO[]>([]);
   const [runtimeOptions, setRuntimeOptions] = useState<RuntimeOption[]>([]);
@@ -56,9 +75,61 @@ export function RouteActivationPanel({ canManage }: { readonly canManage: boolea
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // 选择的最新值（刷新时判定“保留仍有效的人工选择”），避免闭包读到过期值。
+  const agentRevisionIdRef = useRef("");
+  const runtimeRevisionIdRef = useRef("");
+  // 递增代次：只有最新一次刷新的响应可以落地，过期响应不得覆盖新结果。
+  const loadGeneration = useRef(0);
+
+  function applyAgentRevisionId(value: string) {
+    agentRevisionIdRef.current = value;
+    setAgentRevisionId(value);
+  }
+
+  function applyRuntimeRevisionId(value: string) {
+    runtimeRevisionIdRef.current = value;
+    setRuntimeRevisionId(value);
+  }
+
+  /** 运行服务版本解析：preferred（精确匹配）→ 仍匹配的人工选择 → 唯一匹配 → 空。 */
+  function resolveRuntimeRevisionId(
+    selected: AgentRevisionSummaryDTO | null,
+    options: RuntimeOption[],
+    preferred: string | null,
+    current: string,
+  ): string {
+    // 运行服务只按 agent_contract_snapshot_id 精确匹配；null 不匹配。
+    if (!selected?.agent_contract_snapshot_id) return "";
+    const matching = options.filter(
+      (option) =>
+        option.revision.agent_contract_snapshot_id === selected.agent_contract_snapshot_id,
+    );
+    if (preferred && matching.some((option) => option.revision.id === preferred)) {
+      return preferred;
+    }
+    if (matching.some((option) => option.revision.id === current)) {
+      return current;
+    }
+    if (matching.length === 1) {
+      return matching[0]?.revision.id ?? "";
+    }
+    return "";
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken/preferred 是刷新交接信号（同页真实发布后重拉），apply*/resolve 为本组件稳定 helper，非直接引用
   const loadAssets = useCallback(async () => {
-    setLoading(true);
+    const generation = ++loadGeneration.current;
+    const currentAgentRevisionId = agentRevisionIdRef.current;
+    const currentRuntimeRevisionId = runtimeRevisionIdRef.current;
+    // 刷新开始即清空旧错误/成功文案与旧资产、旧选择：加载中与失败都 fail closed。
     setError(null);
+    setNotice(null);
+    setLoading(true);
+    setAgents([]);
+    setAgentRevisions([]);
+    setRuntimeOptions([]);
+    applyAgentRevisionId("");
+    applyRuntimeRevisionId("");
     try {
       const agentList = await client.agents.list();
       const revisionLists = await Promise.all(
@@ -80,15 +151,45 @@ export function RouteActivationPanel({ canManage }: { readonly canManage: boolea
             ),
         ),
       );
+      if (loadGeneration.current !== generation) return;
+
+      const publishedAgentRevisions = revisionLists.flat();
+      const publishedRuntimeOptions = runtimeRevisionLists.flat();
       setAgents(agentList.items);
-      setAgentRevisions(revisionLists.flat());
-      setRuntimeOptions(runtimeRevisionLists.flat());
+      setAgentRevisions(publishedAgentRevisions);
+      setRuntimeOptions(publishedRuntimeOptions);
+
+      // AgentRevision 解析：preferred（真实存在）→ 仍有效的人工选择 → 唯一 published → 空。
+      const publishedIds = new Set(publishedAgentRevisions.map((revision) => revision.id));
+      let nextAgentRevisionId = "";
+      if (preferredAgentRevisionId && publishedIds.has(preferredAgentRevisionId)) {
+        nextAgentRevisionId = preferredAgentRevisionId;
+      } else if (publishedIds.has(currentAgentRevisionId)) {
+        nextAgentRevisionId = currentAgentRevisionId;
+      } else if (publishedAgentRevisions.length === 1) {
+        nextAgentRevisionId = publishedAgentRevisions[0]?.id ?? "";
+      }
+      applyAgentRevisionId(nextAgentRevisionId);
+
+      const selected =
+        publishedAgentRevisions.find((revision) => revision.id === nextAgentRevisionId) ?? null;
+      applyRuntimeRevisionId(
+        resolveRuntimeRevisionId(
+          selected,
+          publishedRuntimeOptions,
+          preferredRuntimeRevisionId,
+          currentRuntimeRevisionId,
+        ),
+      );
     } catch (err) {
+      if (loadGeneration.current !== generation) return;
       setError(classifyError(err));
     } finally {
-      setLoading(false);
+      if (loadGeneration.current === generation) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [refreshToken, preferredAgentRevisionId, preferredRuntimeRevisionId]);
 
   useEffect(() => {
     void loadAssets();
@@ -114,20 +215,19 @@ export function RouteActivationPanel({ canManage }: { readonly canManage: boolea
     [runtimeOptions, selectedAgentRevision],
   );
 
-  // 唯一智能体版本自动选中；切换时清理旧运行服务选择，唯一匹配再自动选。
-  useEffect(() => {
-    if (!agentRevisionId && agentRevisions.length === 1) {
-      setAgentRevisionId(agentRevisions[0]?.id ?? "");
-    }
-  }, [agentRevisions, agentRevisionId]);
-
-  useEffect(() => {
-    if (matchingRuntimeOptions.length === 1) {
-      setRuntimeRevisionId(matchingRuntimeOptions[0]?.revision.id ?? "");
-      return;
-    }
-    setRuntimeRevisionId("");
-  }, [matchingRuntimeOptions]);
+  // 人工切换智能体版本：运行服务选择按新版本的精确匹配快照重新解析。
+  function handleAgentRevisionChange(value: string) {
+    const selected = agentRevisions.find((revision) => revision.id === value) ?? null;
+    applyAgentRevisionId(value);
+    applyRuntimeRevisionId(
+      resolveRuntimeRevisionId(
+        selected,
+        runtimeOptions,
+        preferredRuntimeRevisionId,
+        runtimeRevisionIdRef.current,
+      ),
+    );
+  }
 
   const noRuntimeReason =
     selectedAgentRevision && matchingRuntimeOptions.length === 0
@@ -199,7 +299,7 @@ export function RouteActivationPanel({ canManage }: { readonly canManage: boolea
           智能体版本
           <select
             value={agentRevisionId}
-            onChange={(e) => setAgentRevisionId(e.target.value)}
+            onChange={(e) => handleAgentRevisionChange(e.target.value)}
             aria-label="智能体版本"
             className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
           >
@@ -216,7 +316,7 @@ export function RouteActivationPanel({ canManage }: { readonly canManage: boolea
           运行服务版本
           <select
             value={runtimeRevisionId}
-            onChange={(e) => setRuntimeRevisionId(e.target.value)}
+            onChange={(e) => applyRuntimeRevisionId(e.target.value)}
             aria-label="运行服务版本"
             className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
           >

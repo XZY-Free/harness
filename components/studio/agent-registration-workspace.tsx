@@ -11,8 +11,11 @@ import { AgentContractRegistrationPanel } from "@/components/studio/agent-contra
 import { AgentsRevisionSection } from "@/components/studio/agent-revision-section";
 import { AgentRuntimeRegistrationPanel } from "@/components/studio/agent-runtime-registration-panel";
 import { AgentsViewer } from "@/components/studio/agents-viewer";
+import { RouteActivationPanel } from "@/components/studio/route-activation-panel";
 import { RuntimeControlPanel } from "@/components/studio/runtime-control-panel";
 import type {
+  PublishAgentRevisionResponse,
+  PublishRuntimeRevisionResponse,
   RegisterAgentContractResponse,
   RegisterAgentRuntimeResponse,
 } from "@/lib/control-plane-client";
@@ -31,6 +34,13 @@ interface RuntimeHandoff {
   readonly refreshToken: number;
 }
 
+/** 「发布给员工」交接：只携带各自真实 publish API 返回的 revision id。 */
+interface RouteHandoff {
+  readonly agentRevisionId: string | null;
+  readonly runtimeRevisionId: string | null;
+  readonly refreshToken: number;
+}
+
 interface AgentRegistrationWorkspaceProps {
   readonly canReadAgents: boolean;
   readonly canRegisterContract: boolean;
@@ -38,6 +48,8 @@ interface AgentRegistrationWorkspaceProps {
   readonly canRegisterRuntime: boolean;
   /** 发布运行服务版本权限（runtime.publish）；默认 false，无权限不渲染发布区域。 */
   readonly canPublishRuntime?: boolean;
+  /** 路由管理权限（route.update）；默认 false，无权限不渲染「发布给员工」区域。 */
+  readonly canManageRoutes?: boolean;
 }
 
 export function AgentRegistrationWorkspace({
@@ -46,6 +58,7 @@ export function AgentRegistrationWorkspace({
   canManageRevisions,
   canRegisterRuntime,
   canPublishRuntime = false,
+  canManageRoutes = false,
 }: AgentRegistrationWorkspaceProps) {
   const [handoff, setHandoff] = useState<RegistrationHandoff>({
     agentId: null,
@@ -54,6 +67,11 @@ export function AgentRegistrationWorkspace({
   });
   const [runtimeHandoff, setRuntimeHandoff] = useState<RuntimeHandoff>({
     revisionId: null,
+    refreshToken: 0,
+  });
+  const [routeHandoff, setRouteHandoff] = useState<RouteHandoff>({
+    agentRevisionId: null,
+    runtimeRevisionId: null,
     refreshToken: 0,
   });
 
@@ -70,6 +88,25 @@ export function AgentRegistrationWorkspace({
   const handleRuntimeRegistered = useCallback((result: RegisterAgentRuntimeResponse) => {
     setRuntimeHandoff((current) => ({
       revisionId: result.runtime_revision_id,
+      refreshToken: current.refreshToken + 1,
+    }));
+  }, []);
+
+  // 只由真实 Agent publish API 成功返回触发：交接返回 id 并刷新路由面板；
+  // 智能体版本变化后旧 runtime 交接不再有效，清空等待新的真实发布。
+  const handleAgentRevisionPublished = useCallback((result: PublishAgentRevisionResponse) => {
+    setRouteHandoff((current) => ({
+      agentRevisionId: result.id,
+      runtimeRevisionId: null,
+      refreshToken: current.refreshToken + 1,
+    }));
+  }, []);
+
+  // 只由真实 Runtime publish API 成功返回触发：保留智能体版本交接并刷新路由面板。
+  const handleRuntimeRevisionPublished = useCallback((result: PublishRuntimeRevisionResponse) => {
+    setRouteHandoff((current) => ({
+      agentRevisionId: current.agentRevisionId,
+      runtimeRevisionId: result.id,
       refreshToken: current.refreshToken + 1,
     }));
   }, []);
@@ -101,6 +138,7 @@ export function AgentRegistrationWorkspace({
             preferredAgentId={handoff.agentId}
             preferredSnapshotId={handoff.snapshotId}
             refreshToken={handoff.refreshToken}
+            onPublished={handleAgentRevisionPublished}
           />
         </div>
       )}
@@ -130,6 +168,25 @@ export function AgentRegistrationWorkspace({
             canPublish
             refreshToken={runtimeHandoff.refreshToken}
             preferredRuntimeRevisionId={runtimeHandoff.revisionId}
+            onPublished={handleRuntimeRevisionPublished}
+          />
+        </div>
+      )}
+
+      {/* route.update 的 action scope 由服务端独立授权；发布给员工入口只由
+          canManageRoutes 控制显示。面板只接收各自真实 publish API 返回的
+          revision id，并在重新 GET 的真实 published 列表中验证后才选择，
+          路由写仍由用户显式点击触发。 */}
+      {canManageRoutes && (
+        <div className="mt-6">
+          <p className="mb-2 text-[13px] text-[var(--fg-muted)]">
+            发布给员工：选择已发布的智能体版本与运行服务版本，激活默认路由。
+          </p>
+          <RouteActivationPanel
+            canManage
+            refreshToken={routeHandoff.refreshToken}
+            preferredAgentRevisionId={routeHandoff.agentRevisionId}
+            preferredRuntimeRevisionId={routeHandoff.runtimeRevisionId}
           />
         </div>
       )}

@@ -342,3 +342,227 @@ describe("RouteActivationPanel「发布给员工」（连续激活流程）", ()
     expect(screen.queryByText(/员工新会话现在可以选择该智能体/)).toBeNull();
   });
 });
+
+/** 多 published AgentRevision 场景：唯一自动选中不生效，preferred 必须显式交接。 */
+function multiPublishedFixture(): BackendFixture {
+  return {
+    agents: [agentFixture()],
+    agentRevisions: {
+      "agent-1": [
+        agentRevisionFixture(),
+        agentRevisionFixture({
+          id: "arev-other",
+          revision_no: 5,
+          agent_contract_snapshot_id: SNAP_MISMATCHED,
+        }),
+      ],
+    },
+    runtimes: [
+      runtimeFixture(),
+      runtimeFixture({
+        id: "rt-2",
+        runtime_key: "hr-similar-runtime",
+        display_name: "HR 相似 Runtime",
+        current_revision_id: "rtrv-2",
+      }),
+    ],
+    runtimeRevisions: {
+      "rt-1": [runtimeRevisionFixture()],
+      "rt-2": [
+        runtimeRevisionFixture({
+          id: "rtrv-2",
+          runtime_id: "rt-2",
+          revision_no: 5,
+          agent_contract_snapshot_id: SNAP_MISMATCHED,
+        }),
+      ],
+    },
+  };
+}
+
+function selectValue(labelText: string): string {
+  return (screen.getByLabelText(labelText) as HTMLSelectElement).value;
+}
+
+describe("RouteActivationPanel（上游发布交接：refreshToken + preferred）", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    calls = [];
+  });
+
+  afterEach(cleanup);
+
+  it("refreshToken 变化重新 GET 真实列表后按 preferred 选中，点击仅执行 ensure+activate 且 ID 来自真实 GET", async () => {
+    const fixture = multiPublishedFixture();
+    stubBackend(fixture);
+    const view = render(<RouteActivationPanel canManage refreshToken={0} />);
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/v1/agents").length,
+      ).toBeGreaterThanOrEqual(1),
+    );
+    await waitFor(() => expect(screen.queryByText(/正在加载/)).toBeNull());
+
+    // 两个 published AgentRevision：无唯一自动选中，初始未选择、按钮禁用。
+    expect(selectValue("智能体版本")).toBe("");
+    expect(selectValue("运行服务版本")).toBe("");
+    const submitBefore = screen.getByRole("button", {
+      name: /发布给员工/,
+    }) as HTMLButtonElement;
+    expect(submitBefore.disabled).toBe(true);
+
+    // 上游发布成功：递增 refreshToken 并交接 preferred（均须来自真实 publish 响应）。
+    view.rerender(
+      <RouteActivationPanel
+        canManage
+        refreshToken={1}
+        preferredAgentRevisionId="arev-1"
+        preferredRuntimeRevisionId="rtrv-1"
+      />,
+    );
+
+    await waitFor(() => expect(selectValue("智能体版本")).toBe("arev-1"));
+    await waitFor(() => expect(selectValue("运行服务版本")).toBe("rtrv-1"));
+
+    // refreshToken 变化确实重新 GET 了真实列表。
+    const agentsGetsAfter = calls.filter(
+      (call) => call.method === "GET" && call.url === "/admin/api/v1/agents",
+    ).length;
+    expect(agentsGetsAfter).toBeGreaterThanOrEqual(2);
+
+    // 未点击前不得有任何路由写。
+    expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
+
+    const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
+    await waitFor(() => expect(submit.disabled).toBe(false));
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(screen.getByText(/员工新会话现在可以选择该智能体/)).toBeTruthy());
+    const writeCalls = calls.filter((call) => call.method !== "GET");
+    expect(writeCalls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "POST /admin/api/v1/deployment-route-sets",
+      "PUT /admin/api/v1/deployment-route-sets/route-set-1/activation",
+    ]);
+    const activateBody = JSON.parse(String(writeCalls[1]?.init?.body));
+    expect(activateBody.routes).toEqual([
+      expect.objectContaining({
+        agent_revision_id: "arev-1",
+        runtime_revision_id: "rtrv-1",
+      }),
+    ]);
+  });
+
+  it("preferred 不在真实 GET 中或 runtime snapshot 不匹配时被忽略，不造假选项，按钮禁用", async () => {
+    stubBackend(multiPublishedFixture());
+    const view = render(<RouteActivationPanel canManage refreshToken={0} />);
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/v1/agents").length,
+      ).toBeGreaterThanOrEqual(1),
+    );
+    await waitFor(() => expect(screen.queryByText(/正在加载/)).toBeNull());
+
+    // preferred AgentRevision 是不存在的 id；preferred RuntimeRevision 存在但 snapshot 不匹配。
+    view.rerender(
+      <RouteActivationPanel
+        canManage
+        refreshToken={1}
+        preferredAgentRevisionId="arev-ghost"
+        preferredRuntimeRevisionId="rtrv-2"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/v1/agents").length,
+      ).toBeGreaterThanOrEqual(2),
+    );
+    // 失效 preferred 被忽略：未选择、不出现假 option。
+    expect(selectValue("智能体版本")).toBe("");
+    expect(enabledOptionValues()).not.toContain("arev-ghost");
+    expect(enabledOptionValues()).not.toContain("rtrv-2");
+
+    const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    // 没有任何路由写。
+    expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
+  });
+
+  it("刷新加载失败时 fail closed：显示稳定中文错误，选择清空，按钮禁用且无写", async () => {
+    stubBackend(multiPublishedFixture());
+    const view = render(
+      <RouteActivationPanel canManage refreshToken={0} preferredAgentRevisionId="arev-1" />,
+    );
+    await waitFor(() => expect(selectValue("智能体版本")).toBe("arev-1"));
+
+    // 下一次刷新失败：不得沿用旧的可用选择。
+    fetchMock.mockReset();
+    calls = [];
+    fetchMock.mockImplementation(async () =>
+      Response.json(
+        {
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "boom",
+            request_id: "req-test",
+            retryable: false,
+          },
+        },
+        { status: 500 },
+      ),
+    );
+    view.rerender(
+      <RouteActivationPanel
+        canManage
+        refreshToken={1}
+        preferredAgentRevisionId="arev-1"
+        preferredRuntimeRevisionId="rtrv-1"
+      />,
+    );
+
+    await waitFor(() => expect(document.body.textContent ?? "").toMatch(/失败/));
+    await waitFor(() => expect(selectValue("智能体版本")).toBe(""));
+    const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
+    expect(screen.queryByText(/员工新会话现在可以选择该智能体/)).toBeNull();
+  });
+
+  it("重复刷新只重新 GET，不产生写或成功文案", async () => {
+    stubBackend(multiPublishedFixture());
+    const view = render(
+      <RouteActivationPanel canManage refreshToken={0} preferredAgentRevisionId="arev-1" />,
+    );
+    await waitFor(() => expect(selectValue("智能体版本")).toBe("arev-1"));
+
+    view.rerender(
+      <RouteActivationPanel
+        canManage
+        refreshToken={1}
+        preferredAgentRevisionId="arev-1"
+        preferredRuntimeRevisionId="rtrv-1"
+      />,
+    );
+    await waitFor(() => expect(selectValue("运行服务版本")).toBe("rtrv-1"));
+
+    view.rerender(
+      <RouteActivationPanel
+        canManage
+        refreshToken={2}
+        preferredAgentRevisionId="arev-1"
+        preferredRuntimeRevisionId="rtrv-1"
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.method === "GET" && call.url === "/admin/api/v1/agents").length,
+      ).toBeGreaterThanOrEqual(3),
+    );
+
+    expect(calls.filter((call) => call.method !== "GET")).toHaveLength(0);
+    expect(screen.queryByText(/员工新会话现在可以选择该智能体/)).toBeNull();
+    // 选择保持为真实有效的 preferred，没有被重复刷新破坏。
+    expect(selectValue("智能体版本")).toBe("arev-1");
+    expect(selectValue("运行服务版本")).toBe("rtrv-1");
+  });
+});

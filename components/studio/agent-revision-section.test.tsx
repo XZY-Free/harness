@@ -89,4 +89,63 @@ describe("AgentsRevisionSection（刷新时选择保留/清空）", () => {
     view.rerender(<AgentsRevisionSection refreshToken={2} />);
     await waitFor(() => expect(select().value).toBe(""));
   });
+
+  it("透传 onPublished：版本真实发布成功后回调携带返回 id", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/admin/api/v1/agents") {
+        return Response.json({ items: [agent("agent-1", "HR 智能体")], total: 1 });
+      }
+      if (url === "/admin/api/v1/agents/agent-1/contracts") {
+        return Response.json({ items: [], total: 0 });
+      }
+      if (url === "/admin/api/v1/agents/agent-1/revisions" && init?.method === "POST") {
+        return Response.json({
+          id: "arev-1",
+          agent_id: "agent-1",
+          revision_no: 1,
+          revision_state: "draft",
+          agent_contract_snapshot_id: null,
+          etag: "agent-revision-1",
+        });
+      }
+      if (url === "/admin/api/v1/agents/agent-1/revisions") {
+        return Response.json({
+          items: [
+            {
+              id: "arev-1",
+              agent_id: "agent-1",
+              revision_no: 1,
+              revision_state: "draft",
+              agent_contract_snapshot_id: null,
+              etag: "agent-revision-1",
+            },
+          ],
+          total: 1,
+        });
+      }
+      if (url === "/admin/api/v1/agent-revisions/arev-1/publish") {
+        return Response.json({
+          id: "arev-1",
+          revision_state: "published",
+          published_at: "2026-08-27T00:00:00.000Z",
+          audit_event_id: "audit-arev-1",
+        });
+      }
+      return Response.json({ items: [], total: 0 });
+    });
+    const onPublished = vi.fn();
+
+    render(<AgentsRevisionSection preferredAgentId="agent-1" onPublished={onPublished} />);
+    const select = () => screen.getByLabelText("创建版本的智能体") as HTMLSelectElement;
+    await waitFor(() => expect(select().value).toBe("agent-1"));
+
+    const publishButton = await screen.findByRole("button", { name: "发布" });
+    fireEvent.click(publishButton);
+
+    await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1));
+    expect(onPublished).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "arev-1", revision_state: "published" }),
+    );
+  });
 });

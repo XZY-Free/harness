@@ -32,14 +32,37 @@ function snapshot(id: string): AgentContractSnapshotDTO {
   };
 }
 
+function draftRevision() {
+  return {
+    id: "arev-1",
+    agent_id: "agent-1",
+    revision_no: 1,
+    revision_state: "draft" as const,
+    agent_contract_snapshot_id: "snap-0001",
+    etag: "agent-revision-1",
+  };
+}
+
 function stubBackend(contracts: AgentContractSnapshotDTO[]) {
-  fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+  fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    const method = init?.method ?? "GET";
     if (url === "/admin/api/v1/agents/agent-1/contracts") {
       return Response.json({ items: contracts, total: contracts.length });
     }
+    if (url === "/admin/api/v1/agents/agent-1/revisions" && method === "POST") {
+      return Response.json(draftRevision());
+    }
     if (url === "/admin/api/v1/agents/agent-1/revisions") {
-      return Response.json({ items: [], total: 0 });
+      return Response.json({ items: [draftRevision()], total: 1 });
+    }
+    if (url === "/admin/api/v1/agent-revisions/arev-1/publish" && method === "POST") {
+      return Response.json({
+        id: "arev-1",
+        revision_state: "published",
+        published_at: "2026-08-27T00:00:00.000Z",
+        audit_event_id: "audit-arev-1",
+      });
     }
     return Response.json({ items: [], total: 0 });
   });
@@ -86,5 +109,97 @@ describe("AgentRevisionActions（刷新时选择保留/清空）", () => {
     stubBackend([snapshot("snap-0001")]);
     view.rerender(<AgentRevisionActions agentId="agent-1" refreshToken={1} />);
     await waitFor(() => expect(select().value).toBe(""));
+  });
+});
+
+describe("AgentRevisionActions（发布成功交接 onPublished）", () => {
+  it("真实 publish API 成功返回后，用返回响应对象调用 onPublished 恰好一次（携带返回 id）", async () => {
+    stubBackend([snapshot("snap-0001")]);
+    const onPublished = vi.fn();
+
+    render(<AgentRevisionActions agentId="agent-1" onPublished={onPublished} />);
+
+    const publishButton = await screen.findByRole("button", { name: "发布" });
+    fireEvent.click(publishButton);
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === "/admin/api/v1/agent-revisions/arev-1/publish" &&
+            init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+
+    // 只由真实 publish 响应触发，恰好一次，携带后端返回的 id。
+    await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1));
+    expect(onPublished).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "arev-1", revision_state: "published" }),
+    );
+  });
+
+  it("创建草稿版本不得触发 onPublished", async () => {
+    stubBackend([snapshot("snap-0001")]);
+    const onPublished = vi.fn();
+
+    render(
+      <AgentRevisionActions
+        agentId="agent-1"
+        preferredSnapshotId="snap-0001"
+        onPublished={onPublished}
+      />,
+    );
+
+    const createButton = await screen.findByRole("button", { name: "创建草稿版本" });
+    await waitFor(() => expect((createButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(createButton);
+
+    await waitFor(() => expect(screen.getByText(/已创建草稿版本/)).toBeTruthy());
+    // create POST 确已发出（真实 create API），但不得触发发布交接回调。
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === "/admin/api/v1/agents/agent-1/revisions" && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(onPublished).not.toHaveBeenCalled();
+  });
+
+  it("publish 失败时不调用 onPublished", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/admin/api/v1/agent-revisions/arev-1/publish") {
+        return Response.json(
+          {
+            error: {
+              code: "BUSINESS_CONSTRAINT_VIOLATION",
+              message: "前置条件未满足",
+              request_id: "req-test",
+              retryable: false,
+            },
+          },
+          { status: 400 },
+        );
+      }
+      if (url === "/admin/api/v1/agents/agent-1/contracts") {
+        return Response.json({ items: [snapshot("snap-0001")], total: 1 });
+      }
+      if (url === "/admin/api/v1/agents/agent-1/revisions") {
+        return Response.json({ items: [draftRevision()], total: 1 });
+      }
+      return Response.json({ items: [], total: 0 });
+    });
+    const onPublished = vi.fn();
+
+    render(<AgentRevisionActions agentId="agent-1" onPublished={onPublished} />);
+
+    const publishButton = await screen.findByRole("button", { name: "发布" });
+    fireEvent.click(publishButton);
+
+    await waitFor(() => expect(screen.getByText(/业务约束拒绝/)).toBeTruthy());
+    expect(onPublished).not.toHaveBeenCalled();
   });
 });

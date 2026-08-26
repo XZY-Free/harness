@@ -190,20 +190,69 @@ const publishResponse = {
   audit_event_id: "audit-1",
 };
 
+// ─── fixture：智能体版本创建/发布与路由激活（同页闭环） ───────────────────────
+
+const agentRevisionDraft = {
+  id: "arev-1",
+  agent_id: "agent-1",
+  revision_no: 1,
+  revision_state: "draft" as const,
+  agent_contract_snapshot_id: "snap-0001",
+  etag: "agent-revision-1",
+};
+
+const agentPublishResponse = {
+  id: "arev-1",
+  revision_state: "published" as const,
+  published_at: "2026-08-27T00:00:00.000Z",
+  audit_event_id: "audit-arev-1",
+};
+
+const routeSetEnsureResponse = {
+  id: "route-set-1",
+  agent_id: "agent-1",
+  route_scope_key: "default",
+  route_scope: {},
+  version_no: 7,
+  created_at: "2026-08-27T00:00:00.000Z",
+  updated_at: "2026-08-27T00:00:00.000Z",
+  created: true,
+};
+
+const routeActivationResponse = {
+  route_set_id: "route-set-1",
+  route_set_version_no: 8,
+  activations: [
+    {
+      route_id: "route-1",
+      route_revision_id: "rrev-1",
+      route_activation_id: "ract-1",
+      activation_state: "active",
+      route_group_id: "primary",
+      previous_route_revision_id: null,
+      previous_route_activation_id: null,
+    },
+  ],
+  affected_new_invocations_only: true,
+};
+
 // ─── fetch mock：登记前后有状态切换（初始无 Agent，登记后返回 HR） ─────────────
 
 let registered = false;
 let runtimeRegistered = false;
 let runtimePublished = false;
+let agentRevisionCreated = false;
+let agentRevisionPublished = false;
 
 function stubBackend() {
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url === "/admin/api/v1/agent-registrations" && init?.method === "POST") {
+    const method = init?.method ?? "GET";
+    if (url === "/admin/api/v1/agent-registrations" && method === "POST") {
       registered = true;
       return Response.json(registerResponse);
     }
-    if (url === "/admin/api/v1/agents/agent-1/runtime-registrations" && init?.method === "POST") {
+    if (url === "/admin/api/v1/agents/agent-1/runtime-registrations" && method === "POST") {
       runtimeRegistered = true;
       return Response.json(registerRuntimeResponse);
     }
@@ -228,7 +277,7 @@ function stubBackend() {
         total: 1,
       });
     }
-    if (url === "/admin/api/v1/runtime-revisions/rtr-1/publish" && init?.method === "POST") {
+    if (url === "/admin/api/v1/runtime-revisions/rtr-1/publish" && method === "POST") {
       runtimePublished = true;
       return Response.json(publishResponse);
     }
@@ -247,11 +296,45 @@ function stubBackend() {
         total: registered ? 1 : 0,
       });
     }
+    if (url === "/admin/api/v1/agents/agent-1/revisions" && method === "POST") {
+      agentRevisionCreated = true;
+      return Response.json(agentRevisionDraft);
+    }
     if (url === "/admin/api/v1/agents/agent-1/revisions") {
-      return Response.json({ items: [], total: 0 });
+      if (agentRevisionPublished) {
+        return Response.json({
+          items: [{ ...agentRevisionDraft, revision_state: "published" }],
+          total: 1,
+        });
+      }
+      return Response.json({
+        items: agentRevisionCreated ? [agentRevisionDraft] : [],
+        total: agentRevisionCreated ? 1 : 0,
+      });
+    }
+    if (url === "/admin/api/v1/agent-revisions/arev-1/publish" && method === "POST") {
+      agentRevisionPublished = true;
+      return Response.json(agentPublishResponse);
+    }
+    if (url === "/admin/api/v1/deployment-route-sets" && method === "POST") {
+      return Response.json(routeSetEnsureResponse, { status: 201 });
+    }
+    if (url === "/admin/api/v1/deployment-route-sets/route-set-1/activation" && method === "PUT") {
+      return Response.json(routeActivationResponse);
     }
     return Response.json({ items: [], total: 0 });
   });
+}
+
+function routeWriteCalls(): Array<{ method: string; url: string; init?: RequestInit }> {
+  return fetchMock.mock.calls
+    .filter(([url, init]) => String(url).includes("/admin/api/v1/deployment-route-sets"))
+    .map(([url, init]) => ({
+      method: init?.method ?? "GET",
+      url: String(url),
+      init,
+    }))
+    .filter((call) => call.method !== "GET");
 }
 
 function makeFile(content: string, name = "agent-contract.json", type = "application/json"): File {
@@ -342,6 +425,8 @@ beforeEach(() => {
   registered = false;
   runtimeRegistered = false;
   runtimePublished = false;
+  agentRevisionCreated = false;
+  agentRevisionPublished = false;
   stubBackend();
 });
 
@@ -465,5 +550,81 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
     await waitFor(() => expect(screen.getByText("暂无智能体")).toBeTruthy());
     expect(screen.queryByLabelText("选择智能体合同文件")).toBeNull();
     expect(screen.queryByRole("button", { name: "登记合同" })).toBeNull();
+  });
+
+  it("同一挂载内完成合同登记→创建/发布智能体版本→登记/发布运行服务→发布给员工；路由写只发生在最终点击", async () => {
+    await renderWorkspaceAndRegisterContract({
+      canPublishRuntime: true,
+      canManageRoutes: true,
+    });
+
+    // 创建草稿版本（合同已交接为 snap-0001，草稿本身不是可发布状态）。
+    const createButton = screen.getByRole("button", {
+      name: "创建草稿版本",
+    }) as HTMLButtonElement;
+    await waitFor(() => expect(createButton.disabled).toBe(false));
+    fireEvent.click(createButton);
+    await waitFor(() => expect(screen.getByText(/已创建草稿版本/)).toBeTruthy());
+
+    // 发布智能体版本：交接只能由真实 publish API 成功返回驱动。
+    fireEvent.click(screen.getByRole("button", { name: "发布" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === "/admin/api/v1/agent-revisions/arev-1/publish" &&
+            init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(screen.getByText(/版本 1 已发布/)).toBeTruthy());
+
+    // 登记并发布运行服务（真实 publish API）。
+    await registerRuntimeAfterContract();
+    fireEvent.click(await screen.findByRole("button", { name: "发布运行服务版本" }));
+    await waitFor(() => expect(publishPosts()).toHaveLength(1));
+
+    // 两次真实发布之前不得有任何路由写。
+    expect(routeWriteCalls()).toHaveLength(0);
+
+    // 路由面板接收并选择真实 GET 返回的 published arev-1 / rtr-1。
+    await waitFor(() =>
+      expect((screen.getByLabelText("智能体版本") as HTMLSelectElement).value).toBe("arev-1"),
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("运行服务版本") as HTMLSelectElement).value).toBe("rtr-1"),
+    );
+
+    const submit = screen.getByRole("button", {
+      name: "发布给员工",
+    }) as HTMLButtonElement;
+    await waitFor(() => expect(submit.disabled).toBe(false));
+    // 点击前仍然零路由写。
+    expect(routeWriteCalls()).toHaveLength(0);
+
+    fireEvent.click(submit);
+    await waitFor(() => expect(screen.getByText(/员工新会话现在可以选择该智能体/)).toBeTruthy());
+
+    const writes = routeWriteCalls();
+    expect(writes.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "POST /admin/api/v1/deployment-route-sets",
+      "PUT /admin/api/v1/deployment-route-sets/route-set-1/activation",
+    ]);
+    const activateBody = JSON.parse(String(writes[1]?.init?.body));
+    expect(activateBody.routes).toEqual([
+      expect.objectContaining({
+        agent_revision_id: "arev-1",
+        runtime_revision_id: "rtr-1",
+      }),
+    ]);
+  });
+
+  it("canManageRoutes 缺省为 false：不渲染「发布给员工」路由区域且零路由写", async () => {
+    await renderWorkspaceAndRegisterContract({ canPublishRuntime: true });
+    await registerRuntimeAfterContract();
+
+    expect(screen.queryByRole("button", { name: "发布给员工" })).toBeNull();
+    expect(screen.queryByLabelText("智能体版本")).toBeNull();
+    expect(routeWriteCalls()).toHaveLength(0);
   });
 });
