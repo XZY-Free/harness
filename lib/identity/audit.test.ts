@@ -169,7 +169,7 @@ describe("computeContentHash", () => {
 // ─── isKnownAuditActionType / assertAuditActionTypeKnown（纯逻辑）───
 
 describe("isKnownAuditActionType", () => {
-  it("目录中所有动作类型均已知（agent.contract.register 接入后共 32 种）", () => {
+  it("目录中所有动作类型均已知（移除 descriptor 旧动作并接入 runtime.register 后共 32 种）", () => {
     expect(AUDIT_ACTION_TYPES.length).toBe(32);
     for (const actionType of AUDIT_ACTION_TYPES) {
       expect(isKnownAuditActionType(actionType)).toBe(true);

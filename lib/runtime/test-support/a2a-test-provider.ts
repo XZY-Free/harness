@@ -62,6 +62,12 @@ export interface CapturedA2ARequest {
   messageMetadata: Record<string, unknown>;
   /** message.contextId（跨 Turn 连续性证据）。 */
   contextId?: string;
+  /** message.taskId（input-required → resume 同 Task 证据）。 */
+  taskId?: string;
+  /** Provider 为 message/stream 响应生成的 taskId。 */
+  responseTaskId?: string;
+  /** Provider 为 message/stream 响应生成的 contextId。 */
+  responseContextId?: string;
   /** message.parts 文本。 */
   text: string;
   /** resume message/send 时为 true。 */
@@ -74,6 +80,30 @@ export interface A2ATestProvider {
   endpoint: string;
   /** 已捕获的 message 请求（黑盒断言用）。 */
   captured: CapturedA2ARequest[];
+  /**
+   * 全部到达 Provider 的 HTTP 请求（method + path + Authorization 头，黑盒断言网络序列用；
+   * Authorization 只记录原样头值，供测试比对，不属于 Provider 状态）。
+   */
+  requests: Array<{ method: string; path: string; authorization?: string }>;
+  /** 每个已解析 JSON-RPC 请求的 method（含 tasks/cancel，分支前记录，wire 观测用）。 */
+  rpcMethods: string[];
+  /**
+   * 注册验收专用：下一次 resume（message/send）返回篡改后的 taskId/contextId，
+   * 用于冻结"correlation 变化必须 fail closed"的黑盒反例。
+   */
+  corruptResumeCorrelation(): void;
+  /**
+   * 注册验收专用：设置后所有请求必须携带恰好 `Authorization: Bearer <token>`，
+   * 否则 401（冻结"生产侧只解析被引用的 CredentialRef，而非请求原始输入"）。
+   */
+  setExpectedBearerToken(token: string | null): void;
+  /** 切换 message/send 的官方响应形态；注册验收使用完整 Task。 */
+  setResumeResponseShape(shape: "status-update" | "task"): void;
+  /**
+   * 注册验收专用：清空 requests/captured/rpcMethods、复位 correlation 篡改与
+   * Bearer 校验，并把场景重置为 input_required（测试间状态隔离）。
+   */
+  reset(): void;
   /** 场景切换（每个 Invocation 可用不同场景）。 */
   setScenario(scenario: A2ATestProviderScenario): void;
   close(): Promise<void>;
@@ -84,6 +114,8 @@ interface RpcRequest {
   method?: string;
   params?: {
     message?: {
+      kind?: string;
+      messageId?: string;
       role?: string;
       parts?: Array<{ kind?: string; text?: string }>;
       contextId?: string;
@@ -104,20 +136,52 @@ function sseFrame(payload: unknown): string {
  */
 export async function startA2ATestProvider(
   initialScenario: A2ATestProviderScenario = "completed",
+  options: { legacyCardOnly?: boolean } = {},
 ): Promise<A2ATestProvider> {
   const captured: CapturedA2ARequest[] = [];
+  const requests: Array<{ method: string; path: string; authorization?: string }> = [];
+  const rpcMethods: string[] = [];
   let scenario: A2ATestProviderScenario = initialScenario;
+  let resumeCorrelationCorrupted = false;
+  let expectedBearerToken: string | null = null;
+  let resumeResponseShape: "status-update" | "task" = "status-update";
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    requests.push({
+      method: req.method ?? "",
+      path: url.pathname,
+      authorization:
+        typeof req.headers.authorization === "string" ? req.headers.authorization : undefined,
+    });
+
+    // Bearer 校验（注册验收）：设置 expected token 后，任何请求不携带恰好匹配的
+    // Authorization 头即 401（真实 HTTP 401，供 fail-closed 断言）。
+    if (
+      expectedBearerToken !== null &&
+      req.headers.authorization !== `Bearer ${expectedBearerToken}`
+    ) {
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
 
     // ─── Agent Card（07 §3/§7：公开合同，含通用扩展）──────────
-    if (req.method === "GET" && url.pathname === "/.well-known/agent.json") {
+    // 注册验收黑盒：A2A 0.3.0 标准路径 /.well-known/agent-card.json（保留旧路径兼容既有测试；
+    // legacyCardOnly 只暴露旧 agent.json，用于冻结"旧路径不能通过注册验收"）。
+    const standardCardPath = !options.legacyCardOnly;
+    if (
+      req.method === "GET" &&
+      ((standardCardPath && url.pathname === "/.well-known/agent-card.json") ||
+        url.pathname === "/.well-known/agent.json")
+    ) {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
           name: "Test Enterprise Agent",
           description: "deterministic external test agent",
+          protocolVersion: "0.3.0",
+          preferredTransport: "JSONRPC",
           capabilities: { streaming: true, push_notifications: false },
           // 通用扩展合同（07 §7：不绑定 HR/veADK/AgentKit，明确版本）。
           "snowharness:capability_manifest": A2A_TEST_PROVIDER_CAPABILITY_MANIFEST,
@@ -151,6 +215,9 @@ export async function startA2ATestProvider(
         return;
       }
 
+      // wire 观测：分支前记录每个已解析 JSON-RPC method（含 tasks/cancel）。
+      rpcMethods.push(rpc.method ?? "");
+
       // ─── tasks/cancel（long-running cancel 场景）──────────────
       if (rpc.method === "tasks/cancel") {
         res.writeHead(200, { "content-type": "application/json" });
@@ -165,7 +232,7 @@ export async function startA2ATestProvider(
       }
 
       const message = rpc.params?.message;
-      if (!message) {
+      if (!message || message.kind !== "message" || !message.messageId) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
           JSON.stringify({
@@ -181,25 +248,62 @@ export async function startA2ATestProvider(
         .filter((p) => p.kind === "text")
         .map((p) => p.text ?? "")
         .join("");
-      captured.push({
+      const capturedRequest: CapturedA2ARequest = {
         method: rpc.method ?? "",
         messageMetadata: message.metadata ?? {},
         contextId: message.contextId,
+        taskId: message.taskId,
         text,
         resume: message.metadata?.resume === true || message.taskId !== undefined,
-      });
+      };
+      captured.push(capturedRequest);
 
       // ─── message/send（resume；08：继续原 taskId/context）──────
       if (rpc.method === "message/send") {
+        const resumeTaskId = message.taskId ?? "task-1";
+        const resumeContextId = message.contextId ?? "ctx-1";
         res.writeHead(200, { "content-type": "application/json" });
+        // 注册验收黑盒（input_required 场景）：同 taskId/contextId resume → completed；
+        // corruptResumeCorrelation() 后返回被篡改的 correlation（fail-closed 反例）。
+        if (scenario === "input_required") {
+          const result =
+            resumeResponseShape === "task"
+              ? {
+                  kind: "task",
+                  id: resumeCorrelationCorrupted ? `corrupted-${resumeTaskId}` : resumeTaskId,
+                  contextId: resumeCorrelationCorrupted
+                    ? `corrupted-${resumeContextId}`
+                    : resumeContextId,
+                  status: { state: "completed" },
+                }
+              : {
+                  kind: "status-update",
+                  taskId: resumeCorrelationCorrupted ? `corrupted-${resumeTaskId}` : resumeTaskId,
+                  contextId: resumeCorrelationCorrupted
+                    ? `corrupted-${resumeContextId}`
+                    : resumeContextId,
+                  status: {
+                    state: "completed",
+                    message: { role: "agent", parts: [{ kind: "text", text: "已收到补充信息" }] },
+                  },
+                };
+          res.end(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: rpc.id ?? 1,
+              result,
+            }),
+          );
+          return;
+        }
         res.end(
           JSON.stringify({
             jsonrpc: "2.0",
             id: rpc.id ?? 1,
             result: {
               kind: "status-update",
-              taskId: message.taskId ?? "task-1",
-              contextId: message.contextId ?? "ctx-1",
+              taskId: resumeTaskId,
+              contextId: resumeContextId,
               status: { state: "working" },
             },
           }),
@@ -210,6 +314,8 @@ export async function startA2ATestProvider(
       // ─── message/stream：按场景输出真实 SSE wire ─────────────
       const taskId = randomUUID();
       const contextId = message.contextId ?? randomUUID();
+      capturedRequest.responseTaskId = taskId;
+      capturedRequest.responseContextId = contextId;
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -302,6 +408,26 @@ export async function startA2ATestProvider(
     server,
     endpoint,
     captured,
+    requests,
+    rpcMethods,
+    corruptResumeCorrelation() {
+      resumeCorrelationCorrupted = true;
+    },
+    setExpectedBearerToken(token: string | null) {
+      expectedBearerToken = token;
+    },
+    setResumeResponseShape(shape: "status-update" | "task") {
+      resumeResponseShape = shape;
+    },
+    reset() {
+      captured.length = 0;
+      requests.length = 0;
+      rpcMethods.length = 0;
+      resumeCorrelationCorrupted = false;
+      expectedBearerToken = null;
+      resumeResponseShape = "status-update";
+      scenario = "input_required";
+    },
     setScenario(next: A2ATestProviderScenario) {
       scenario = next;
     },

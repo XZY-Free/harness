@@ -189,6 +189,19 @@ export const runtimeRevisionTable = mysqlTable(
     networkZone: varchar("networkZone", { length: 32 }).notNull(),
     /** 配置 hash（带算法前缀，如 sha256:...）。 */
     configHash: varchar("configHash", { length: 128 }).notNull(),
+    /**
+     * 绑定的结构化 AgentContractSnapshot（主动黑盒注册验收切片）；
+     * 旧 Revision 行为 null。协议/交互事实以该快照为权威。
+     */
+    agentContractSnapshotId: varchar("agentContractSnapshotId", { length: 36 }),
+    /** 绑定的同租户 CredentialRef（bearer 模式）；none 模式与旧行为 null。不存 secret。 */
+    credentialRefId: varchar("credentialRefId", { length: 36 }),
+    /** 主动一致性验收状态（verified）；未走注册验收的旧行为 null。 */
+    verificationState: varchar("verificationState", { length: 32 }),
+    /** 结构化验收证据 digest（RFC8785 canonical，sha256: 前缀；非原始 transcript）。 */
+    evidenceDigest: varchar("evidenceDigest", { length: 71 }),
+    /** 验收通过时间。 */
+    verifiedAt: datetime("verifiedAt", { mode: "date", fsp: 3 }),
     revisionState: mysqlEnum("revisionState", RUNTIME_REVISION_STATES).notNull().default("draft"),
     /** 创建者 userIdentityId 或 serviceId。 */
     createdBy: varchar("createdBy", { length: 128 }).notNull(),
