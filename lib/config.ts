@@ -133,6 +133,55 @@ export const runtimeConformanceConfig = {
       return [];
     }
   },
+
+  /**
+   * Active external A2A conformance signer 私有配置（SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON）。
+   *
+   * 格式：恰好三个键的对象 {keyId, runnerIdentity, privateKeyPkcs8Base64}。
+   *
+   * 缺失、空值、非法 JSON、非对象、字段缺失/为空或存在未知键一律返回 null，
+   * 不打日志、不抛错、不回显私钥内容（fail closed；信任校验由 resolver 负责）。
+   */
+  get activeExternalConformanceSigner(): {
+    keyId: string;
+    runnerIdentity: string;
+    privateKeyPkcs8Base64: string;
+  } | null {
+    const raw = optionalEnv("SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON", "");
+    if (!raw || raw.trim().length === 0) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const signer = parsed as Record<string, unknown>;
+    // 键集必须精确等于三键集合（拒绝未知额外键）。
+    const keys = Object.keys(signer).sort();
+    if (keys.length !== 3) return null;
+    if (
+      !(keys[0] === "keyId" && keys[1] === "privateKeyPkcs8Base64" && keys[2] === "runnerIdentity")
+    ) {
+      return null;
+    }
+    // 非空白校验（trim 判空），但保留原始值：不静默 trim 身份/私钥。
+    if (
+      typeof signer.keyId !== "string" ||
+      signer.keyId.trim().length === 0 ||
+      typeof signer.runnerIdentity !== "string" ||
+      signer.runnerIdentity.trim().length === 0 ||
+      typeof signer.privateKeyPkcs8Base64 !== "string" ||
+      signer.privateKeyPkcs8Base64.trim().length === 0
+    ) {
+      return null;
+    }
+    return {
+      keyId: signer.keyId,
+      runnerIdentity: signer.runnerIdentity,
+      privateKeyPkcs8Base64: signer.privateKeyPkcs8Base64,
+    };
+  },
 } as const;
 
 function isRunnerSigningIdentity(value: unknown): value is {
