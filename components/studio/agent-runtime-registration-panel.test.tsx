@@ -69,15 +69,42 @@ function stubBackend(contracts: AgentContractSnapshotDTO[]) {
 }
 
 async function selectAgentAndSnapshot() {
-  await waitFor(() => expect(screen.getByLabelText("agent")).toBeTruthy());
-  fireEvent.change(screen.getByLabelText("agent"), { target: { value: "agent-1" } });
-  await waitFor(() => expect(screen.getByLabelText("contract_snapshot_id")).toBeTruthy());
-  fireEvent.change(screen.getByLabelText("contract_snapshot_id"), {
+  await waitFor(() => expect(screen.getByLabelText("登记运行服务的智能体")).toBeTruthy());
+  fireEvent.change(screen.getByLabelText("登记运行服务的智能体"), { target: { value: "agent-1" } });
+  await waitFor(() => expect(screen.getByLabelText("运行服务使用的合同")).toBeTruthy());
+  fireEvent.change(screen.getByLabelText("运行服务使用的合同"), {
     target: { value: "snap-0001" },
   });
 }
 
 describe("AgentRuntimeRegistrationPanel（07 §7–§9）", () => {
+  it("刷新成功后清除旧智能体列表错误并恢复登记表单", async () => {
+    let failAgents = true;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/admin/api/v1/agents") {
+        if (failAgents) throw new Error("temporary failure");
+        return Response.json({ items: [{ id: "agent-1", display_name: "HR 智能体" }], total: 1 });
+      }
+      if (url === "/admin/api/v1/credential-refs") {
+        return Response.json({ items: [], total: 0 });
+      }
+      return Response.json({ items: [], total: 0 });
+    });
+
+    const view = render(<AgentRuntimeRegistrationPanel refreshToken={0} />);
+    await waitFor(() => expect(screen.getByText("智能体列表加载失败")).toBeTruthy());
+
+    failAgents = false;
+    view.rerender(<AgentRuntimeRegistrationPanel refreshToken={1} />);
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("登记运行服务的智能体") as HTMLSelectElement).options.length,
+      ).toBe(2),
+    );
+    expect(screen.queryByText("智能体列表加载失败")).toBeNull();
+  });
+
   it("bearer 模式只显示已有 CredentialRef 选择，不存在 Secret 文本框", async () => {
     stubBackend([snapshotFixture()]);
 

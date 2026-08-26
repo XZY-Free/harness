@@ -25,15 +25,15 @@ function classifyError(err: unknown): string {
   if (err instanceof ControlPlaneRequestError) {
     switch (err.code) {
       case "REQUEST_SCHEMA_INVALID":
-        return "请求 schema 非法（引用/endpoint/凭证/probe presence 不匹配）";
+        return "请求内容不符合规范（引用/地址/凭证/探测项不匹配）";
       case "RESOURCE_NOT_FOUND":
-        return "Agent / Snapshot / CredentialRef 不存在或无权访问";
+        return "智能体 / 合同快照 / 凭证引用不存在或无权访问";
       case "BUSINESS_CONSTRAINT_VIOLATION":
-        return "Conformance 验收失败（capability probe 未通过）";
+        return "运行验收失败（能力探测未通过）";
       case "IDEMPOTENCY_CONFLICT":
-        return "Idempotency-Key 冲突";
+        return "重复提交冲突，请重试";
       case "ACTION_SCOPE_DENIED":
-        return "无 agent.runtime.register 操作权限";
+        return "没有登记运行服务的权限";
       default:
         return `登记失败（${err.code ?? "未知错误"}）`;
     }
@@ -44,10 +44,19 @@ function classifyError(err: unknown): string {
 interface AgentRuntimeRegistrationPanelProps {
   /** 登记成功后刷新（Runtime 页/Agent 列表）。 */
   readonly onRegistered?: () => void;
+  /** 上游合同登记交接：智能体列表真实存在该智能体时自动选中。 */
+  readonly preferredAgentId?: string | null;
+  /** 上游合同登记交接：合同列表真实存在该快照时自动选中。 */
+  readonly preferredSnapshotId?: string | null;
+  /** 递增代次：上游变更后重新加载智能体与合同列表。 */
+  readonly refreshToken?: number;
 }
 
 export function AgentRuntimeRegistrationPanel({
   onRegistered,
+  preferredAgentId = null,
+  preferredSnapshotId = null,
+  refreshToken = 0,
 }: AgentRuntimeRegistrationPanelProps) {
   const [agents, setAgents] = useState<Array<{ id: string; display_name: string }>>([]);
   const [agentId, setAgentId] = useState("");
@@ -66,29 +75,67 @@ export function AgentRuntimeRegistrationPanel({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RegisterAgentRuntimeResponse | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken 是刷新代次信号（合同登记后重载智能体列表），非直接引用
   useEffect(() => {
+    let active = true;
+    setError(null);
     client.agents
       .list()
-      .then((list) =>
-        setAgents(list.items.map((a) => ({ id: a.id, display_name: a.display_name }))),
-      )
-      .catch(() => setError("Agent 列表加载失败"));
+      .then((list) => {
+        if (!active) return;
+        const items = list.items.map((a) => ({ id: a.id, display_name: a.display_name }));
+        setAgents(items);
+        const ids = new Set(items.map((a) => a.id));
+        // preferred agent 真实存在则优先交接；否则保留仍在真实列表中的人工选择；
+        // 两者都不在列表（如已被删除）时清空，绝不保留失效 id。
+        setAgentId((current) => {
+          if (preferredAgentId && ids.has(preferredAgentId)) return preferredAgentId;
+          return ids.has(current) ? current : "";
+        });
+      })
+      .catch(() => {
+        if (active) setError("智能体列表加载失败");
+      });
     client.credentials
       .list()
-      .then((list) => setCredentialRefs(list.items))
-      .catch(() => setError("CredentialRef 列表加载失败"));
-  }, []);
+      .then((list) => {
+        if (active) setCredentialRefs(list.items);
+      })
+      .catch(() => {
+        if (active) setError("凭证引用列表加载失败");
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshToken, preferredAgentId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken 是刷新代次信号（合同登记后重载合同列表），非直接引用
   useEffect(() => {
     setSnapshots([]);
     setSnapshotId("");
     setResult(null);
     if (!agentId) return;
+    let active = true;
     client.agents
       .listContracts(agentId)
-      .then((list) => setSnapshots(list.items))
-      .catch(() => setError("Snapshot 列表加载失败"));
-  }, [agentId]);
+      .then((list) => {
+        if (!active) return;
+        setSnapshots(list.items);
+        // 只有 preferred snapshot 真实存在时才选中，不生成假选项。
+        if (
+          preferredSnapshotId &&
+          list.items.some((item) => item.snapshot_id === preferredSnapshotId)
+        ) {
+          setSnapshotId(preferredSnapshotId);
+        }
+      })
+      .catch(() => {
+        if (active) setError("合同快照列表加载失败");
+      });
+    return () => {
+      active = false;
+    };
+  }, [agentId, refreshToken, preferredSnapshotId]);
 
   const snapshot = snapshots.find((item) => item.snapshot_id === snapshotId) ?? null;
   // 07 §8：probe 字段按 Snapshot interaction 动态显示；false 能力不显示。
@@ -108,7 +155,7 @@ export function AgentRuntimeRegistrationPanel({
     setError(null);
     setResult(null);
     if (!snapshot) {
-      setError("必须先选择 AgentContractSnapshot");
+      setError("必须先选择运行服务使用的合同");
       return;
     }
     const conformance: RegisterAgentRuntimeConformance = {
@@ -164,14 +211,14 @@ export function AgentRuntimeRegistrationPanel({
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="text-[12px] text-[var(--fg-muted)]">
-          Agent
+          登记运行服务的智能体
           <select
             value={agentId}
             onChange={(e) => setAgentId(e.target.value)}
-            aria-label="agent"
+            aria-label="登记运行服务的智能体"
             className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
           >
-            <option value="">（选择 Agent）</option>
+            <option value="">（选择智能体）</option>
             {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.display_name}
@@ -180,14 +227,14 @@ export function AgentRuntimeRegistrationPanel({
           </select>
         </label>
         <label className="text-[12px] text-[var(--fg-muted)]">
-          AgentContractSnapshot
+          运行服务使用的合同
           <select
             value={snapshotId}
             onChange={(e) => setSnapshotId(e.target.value)}
-            aria-label="contract_snapshot_id"
+            aria-label="运行服务使用的合同"
             className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
           >
-            <option value="">（选择 Snapshot）</option>
+            <option value="">（选择合同）</option>
             {snapshots.map((item) => (
               <option key={item.snapshot_id} value={item.snapshot_id}>
                 {item.snapshot_id}（{item.protocol_type}）

@@ -32,11 +32,11 @@ function classifyError(err: unknown): string {
   if (err instanceof ControlPlaneRequestError) {
     switch (err.code) {
       case "REQUEST_SCHEMA_INVALID":
-        return "请求 schema 非法";
+        return "请求内容不符合规范";
       case "ETAG_MISMATCH":
-        return "ETag 冲突（他人已修改，请刷新后重试）";
+        return "内容已被他人修改，请刷新后重试";
       case "IDEMPOTENCY_CONFLICT":
-        return "Idempotency-Key 冲突";
+        return "重复提交冲突，请重试";
       case "BUSINESS_CONSTRAINT_VIOLATION":
         return "业务约束拒绝（如发布前置条件未满足）";
       case "ACTION_SCOPE_DENIED":
@@ -59,7 +59,19 @@ function parseJsonObject(raw: string): Record<string, unknown> | null {
   }
 }
 
-export function AgentRevisionActions({ agentId }: { readonly agentId: string }) {
+interface AgentRevisionActionsProps {
+  readonly agentId: string;
+  /** 上游合同登记交接：合同列表真实存在该快照时自动选中，不生成假选项。 */
+  readonly preferredSnapshotId?: string | null;
+  /** 递增代次：上游变更后重新加载合同与版本列表。 */
+  readonly refreshToken?: number;
+}
+
+export function AgentRevisionActions({
+  agentId,
+  preferredSnapshotId = null,
+  refreshToken = 0,
+}: AgentRevisionActionsProps) {
   const [snapshots, setSnapshots] = useState<
     Array<{ snapshot_id: string; contract_version: string }>
   >([]);
@@ -75,6 +87,7 @@ export function AgentRevisionActions({ agentId }: { readonly agentId: string }) 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken 是刷新代次信号（合同登记后重载合同与版本列表），非直接引用
   const reload = useCallback(async () => {
     try {
       const [contracts, revisionList] = await Promise.all([
@@ -88,13 +101,21 @@ export function AgentRevisionActions({ agentId }: { readonly agentId: string }) 
         })),
       );
       setRevisions(revisionList.items);
+      // 保留仍在真实列表中的人工选择；当前选择已无效时才选择真实存在的 preferred；
+      // 都不存在则清空，绝不设置不存在的值或生成假 option。
+      const ids = new Set(contracts.items.map((item) => item.snapshot_id));
+      setSnapshotId((current) => {
+        if (ids.has(current)) return current;
+        return preferredSnapshotId && ids.has(preferredSnapshotId) ? preferredSnapshotId : "";
+      });
     } catch (err) {
       setError(classifyError(err));
     }
-  }, [agentId]);
+  }, [agentId, refreshToken, preferredSnapshotId]);
 
   useEffect(() => {
-    setSnapshotId("");
+    // 不在此处清空 snapshotId：是否保留/清空由 reload 按真实列表统一判定，
+    // 否则刷新代次变化会先把人工选择清掉。
     setRevisions(null);
     setError(null);
     setNotice(null);
@@ -129,7 +150,7 @@ export function AgentRevisionActions({ agentId }: { readonly agentId: string }) 
         },
         { idempotencyKey: crypto.randomUUID() },
       );
-      setNotice(`已创建 Draft Revision（${created.revision_no}，etag ${created.etag}）`);
+      setNotice(`已创建草稿版本（第 ${created.revision_no} 版）`);
       await reload();
     } catch (err) {
       setError(classifyError(err));
@@ -148,7 +169,7 @@ export function AgentRevisionActions({ agentId }: { readonly agentId: string }) 
         { release_notes: "Studio 发布（07 §6）" },
         { idempotencyKey: crypto.randomUUID(), ifMatch: revision.etag },
       );
-      setNotice(`Revision ${revision.revision_no} 已发布`);
+      setNotice(`版本 ${revision.revision_no} 已发布`);
       await reload();
     } catch (err) {
       setError(classifyError(err));
@@ -167,7 +188,7 @@ export function AgentRevisionActions({ agentId }: { readonly agentId: string }) 
         { reason_code: "studio_withdraw", reason: "Studio 撤回（07 §6）" },
         { idempotencyKey: crypto.randomUUID(), ifMatch: revision.etag },
       );
-      setNotice(`Revision ${revision.revision_no} 已撤回`);
+      setNotice(`版本 ${revision.revision_no} 已撤回`);
       await reload();
     } catch (err) {
       setError(classifyError(err));
@@ -178,17 +199,17 @@ export function AgentRevisionActions({ agentId }: { readonly agentId: string }) 
 
   return (
     <div className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="text-[13px] font-medium text-[var(--fg)]">AgentRevision 操作</div>
+      <div className="text-[13px] font-medium text-[var(--fg)]">智能体版本操作</div>
 
       <label className="block text-[12px] text-[var(--fg-muted)]">
-        精确 Snapshot（exact AgentContractSnapshot）
+        创建版本使用的合同
         <select
           value={snapshotId}
           onChange={(e) => setSnapshotId(e.target.value)}
-          aria-label="agent_contract_snapshot_id"
+          aria-label="创建版本使用的合同"
           className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
         >
-          <option value="">（选择 Snapshot）</option>
+          <option value="">（选择合同）</option>
           {snapshots.map((snapshot) => (
             <option key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
               {snapshot.snapshot_id}（{snapshot.contract_version}）
@@ -219,7 +240,7 @@ export function AgentRevisionActions({ agentId }: { readonly agentId: string }) 
         onClick={createRevision}
         className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-[13px] text-[var(--fg)] disabled:opacity-50"
       >
-        {busy ? "处理中…" : "创建 Draft Revision"}
+        {busy ? "处理中…" : "创建草稿版本"}
       </button>
 
       {revisions && revisions.length > 0 && (
@@ -227,7 +248,7 @@ export function AgentRevisionActions({ agentId }: { readonly agentId: string }) 
           <table className="w-full text-[12px]">
             <thead className="bg-[var(--surface-2)] text-[var(--fg-subtle)]">
               <tr>
-                <th className="px-2 py-1 text-left font-medium">Revision</th>
+                <th className="px-2 py-1 text-left font-medium">版本</th>
                 <th className="px-2 py-1 text-left font-medium">状态</th>
                 <th className="px-2 py-1 text-left font-medium">操作</th>
               </tr>

@@ -6,7 +6,7 @@ import {
   ControlPlaneRequestError,
   createControlPlaneClient,
 } from "@/lib/control-plane-client";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 
@@ -17,17 +17,27 @@ const LIFECYCLE_LABEL: Record<AgentDTO["lifecycle_state"], string> = {
   retired: "已退役",
 };
 
-export function AgentsViewer() {
+interface AgentsViewerProps {
+  /** 递增代次：合同登记等上游变更后重新加载 Agent 列表。 */
+  readonly refreshToken?: number;
+}
+
+export function AgentsViewer({ refreshToken = 0 }: AgentsViewerProps) {
   const [agents, setAgents] = useState<AgentDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const loadContracts = useCallback((agentId: string) => client.agents.listContracts(agentId), []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken 是刷新代次信号（合同登记后重载列表），非直接引用
   useEffect(() => {
     let active = true;
+    // 新一轮加载开始即清除上一轮的错误；失败时再设置本次真实错误。
+    setError(null);
     client.agents.list().then(
       (result) => {
-        if (active) setAgents(result.items);
+        if (!active) return;
+        setAgents(result.items);
+        setError(null);
       },
       (reason: unknown) => {
         if (!active) return;
@@ -41,7 +51,7 @@ export function AgentsViewer() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [refreshToken]);
 
   return (
     <div className="mt-4 overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
@@ -78,8 +88,8 @@ export function AgentsViewer() {
             </tr>
           )}
           {agents?.map((agent) => (
-            <>
-              <tr key={agent.id} className="border-t border-[var(--border)]">
+            <Fragment key={agent.id}>
+              <tr className="border-t border-[var(--border)]">
                 <td className="px-3 py-2 text-[var(--fg)]">
                   <button
                     type="button"
@@ -113,7 +123,7 @@ export function AgentsViewer() {
                   </td>
                 </tr>
               )}
-            </>
+            </Fragment>
           ))}
         </tbody>
       </table>

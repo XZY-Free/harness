@@ -40,4 +40,34 @@ describe("AgentsViewer", () => {
     expect(screen.getByText("已启用")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith("/admin/api/v1/agents", expect.any(Object));
   });
+
+  it("刷新成功后清除旧加载错误并显示最新档案", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("temporary failure"));
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        items: [
+          {
+            id: "agent-2",
+            agent_key: "hr-assistant",
+            display_name: "企业人力智能助手",
+            description: null,
+            lifecycle_state: "draft",
+            current_revision_id: null,
+            owner_user_id: "user-1",
+            visibility_policy_id: null,
+            version_no: 1,
+            updated_at: "2026-08-26T00:00:00.000Z",
+          },
+        ],
+        total: 1,
+      }),
+    );
+
+    const view = render(<AgentsViewer refreshToken={0} />);
+    await waitFor(() => expect(screen.getByText("智能体列表加载失败")).toBeTruthy());
+
+    view.rerender(<AgentsViewer refreshToken={1} />);
+    await waitFor(() => expect(screen.getByText("企业人力智能助手")).toBeTruthy());
+    expect(screen.queryByText("智能体列表加载失败")).toBeNull();
+  });
 });
