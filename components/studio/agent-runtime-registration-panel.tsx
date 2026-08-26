@@ -21,6 +21,42 @@ import { useCallback, useEffect, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 
+/** 实测能力名（后台英文枚举 → 管理员可见中文）。 */
+const FEATURE_LABELS: Record<string, string> = {
+  streaming_transport: "流式传输",
+  incremental_content: "增量内容",
+  input_required: "需要补充信息",
+  resume: "会话恢复",
+  cancel: "任务取消",
+  durable_task_recovery: "持久任务恢复",
+};
+
+/** 实测结果值映射。 */
+const MEASURED_VALUE_LABELS: Record<string, string> = {
+  pass: "通过",
+  fail: "未通过",
+  not_applicable: "不适用",
+  not_measured: "未测量",
+};
+
+/** 验证状态映射；未知值不回显后台英文内部枚举。 */
+const VERIFICATION_STATE_LABELS: Record<string, string> = {
+  verified: "已验证",
+};
+
+/** 未知值统一落到稳定中文兜底（能力名/实测值/状态）。 */
+function featureLabel(value: string): string {
+  return FEATURE_LABELS[value] ?? "其他能力";
+}
+
+function measuredLabel(value: string): string {
+  return MEASURED_VALUE_LABELS[value] ?? "未知结果";
+}
+
+function verificationLabel(value: string): string {
+  return VERIFICATION_STATE_LABELS[value] ?? "未知状态";
+}
+
 function classifyError(err: unknown): string {
   if (err instanceof ControlPlaneRequestError) {
     switch (err.code) {
@@ -35,15 +71,15 @@ function classifyError(err: unknown): string {
       case "ACTION_SCOPE_DENIED":
         return "没有登记运行服务的权限";
       default:
-        return `登记失败（${err.code ?? "未知错误"}）`;
+        return "登记失败，请稍后重试";
     }
   }
   return "登记失败";
 }
 
 interface AgentRuntimeRegistrationPanelProps {
-  /** 登记成功后刷新（Runtime 页/Agent 列表）。 */
-  readonly onRegistered?: () => void;
+  /** 登记成功回调：恰好一次，携带完整登记响应（含 runtime_revision_id，供同页发布交接）。 */
+  readonly onRegistered?: (result: RegisterAgentRuntimeResponse) => void;
   /** 上游合同登记交接：智能体列表真实存在该智能体时自动选中。 */
   readonly preferredAgentId?: string | null;
   /** 上游合同登记交接：合同列表真实存在该快照时自动选中。 */
@@ -186,7 +222,7 @@ export function AgentRuntimeRegistrationPanel({
       );
       setResult(response);
       reloadContracts();
-      onRegistered?.();
+      onRegistered?.(response);
     } catch (err) {
       setError(classifyError(err));
     } finally {
@@ -207,7 +243,7 @@ export function AgentRuntimeRegistrationPanel({
 
   return (
     <div className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="text-[13px] font-medium text-[var(--fg)]">登记 External Runtime</div>
+      <div className="text-[13px] font-medium text-[var(--fg)]">登记外部运行服务</div>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="text-[12px] text-[var(--fg-muted)]">
@@ -245,39 +281,39 @@ export function AgentRuntimeRegistrationPanel({
       </div>
 
       <label className="block text-[12px] text-[var(--fg-muted)]">
-        Runtime endpoint
+        运行服务地址
         <input
           value={endpoint}
           onChange={(e) => setEndpoint(e.target.value)}
           placeholder="https://agent.example.com"
-          aria-label="runtime_endpoint"
+          aria-label="运行服务地址"
           className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
         />
       </label>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="text-[12px] text-[var(--fg-muted)]">
-          Authentication mode
+          身份验证方式
           <select
             value={authMode}
             onChange={(e) => setAuthMode(e.target.value as "none" | "bearer")}
-            aria-label="authentication_mode"
+            aria-label="身份验证方式"
             className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
           >
-            <option value="none">none</option>
-            <option value="bearer">bearer</option>
+            <option value="none">无需认证</option>
+            <option value="bearer">访问令牌</option>
           </select>
         </label>
         {authMode === "bearer" && (
           <label className="text-[12px] text-[var(--fg-muted)]">
-            CredentialRef（已有引用，禁止密钥输入）
+            访问凭证（已有引用，禁止密钥输入）
             <select
               value={credentialRefId}
               onChange={(e) => setCredentialRefId(e.target.value)}
-              aria-label="credential_ref_id"
+              aria-label="访问凭证"
               className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
             >
-              <option value="">（选择 CredentialRef）</option>
+              <option value="">（选择访问凭证）</option>
               {credentialRefs.map((ref) => (
                 <option key={ref.id} value={ref.id}>
                   {ref.id}（{ref.provider}）
@@ -290,24 +326,24 @@ export function AgentRuntimeRegistrationPanel({
 
       <div className="space-y-2">
         <div className="text-[12px] font-medium text-[var(--fg)]">
-          Capability-driven Conformance probes
+          实际能力验收（探测项按合同能力动态显示）
         </div>
         <label className="block text-[12px] text-[var(--fg-muted)]">
-          Basic input（永远显示）
+          基础对话输入（始终显示）
           <input
             value={basicInput}
             onChange={(e) => setBasicInput(e.target.value)}
-            aria-label="conformance_basic_input"
+            aria-label="基础对话输入"
             className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
           />
         </label>
         {showInputRequired && (
           <label className="block text-[12px] text-[var(--fg-muted)]">
-            Input-required probe input
+            需要补充信息时的输入
             <input
               value={inputRequiredInput}
               onChange={(e) => setInputRequiredInput(e.target.value)}
-              aria-label="conformance_input_required_input"
+              aria-label="需要补充信息时的输入"
               className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
             />
           </label>
@@ -315,20 +351,20 @@ export function AgentRuntimeRegistrationPanel({
         {showResume && (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="text-[12px] text-[var(--fg-muted)]">
-              Resume start input
+              恢复会话的起始输入
               <input
                 value={resumeStartInput}
                 onChange={(e) => setResumeStartInput(e.target.value)}
-                aria-label="conformance_resume_start_input"
+                aria-label="恢复会话的起始输入"
                 className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
               />
             </label>
             <label className="text-[12px] text-[var(--fg-muted)]">
-              Resume input
+              恢复会话的继续输入
               <input
                 value={resumeInput}
                 onChange={(e) => setResumeInput(e.target.value)}
-                aria-label="conformance_resume_input"
+                aria-label="恢复会话的继续输入"
                 className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
               />
             </label>
@@ -336,11 +372,11 @@ export function AgentRuntimeRegistrationPanel({
         )}
         {showCancel && (
           <label className="block text-[12px] text-[var(--fg-muted)]">
-            Cancel probe input
+            取消任务的输入
             <input
               value={cancelInput}
               onChange={(e) => setCancelInput(e.target.value)}
-              aria-label="conformance_cancel_input"
+              aria-label="取消任务的输入"
               className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-[13px] text-[var(--fg)]"
             />
           </label>
@@ -353,45 +389,45 @@ export function AgentRuntimeRegistrationPanel({
         onClick={submit}
         className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-[13px] text-[var(--fg)] disabled:opacity-50"
       >
-        {busy ? "验收中…" : "登记 Runtime（真实 Conformance 验收）"}
+        {busy ? "验收中…" : "登记运行服务（执行实际能力验收）"}
       </button>
 
       {error && <div className="text-[12px] text-[var(--danger)]">{error}</div>}
 
       {result && (
         <div className="space-y-2 rounded border border-[var(--border)] bg-[var(--surface-2)] p-3">
-          <div className="text-[12px] font-medium text-[var(--fg)]">Registration Result</div>
+          <div className="text-[12px] font-medium text-[var(--fg)]">登记运行服务结果</div>
           <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-[12px] sm:grid-cols-2">
             <div className="text-[var(--fg-muted)]">
-              Runtime id：<span className="font-mono">{result.runtime_id}</span>
+              运行服务：<span className="font-mono">{result.runtime_id}</span>
             </div>
             <div className="text-[var(--fg-muted)]">
-              RuntimeRevision id：<span className="font-mono">{result.runtime_revision_id}</span>
+              运行服务版本：<span className="font-mono">{result.runtime_revision_id}</span>
             </div>
             <div className="text-[var(--fg-muted)]">
-              endpoint：<span className="font-mono">{result.runtime_endpoint}</span>
+              服务地址：<span className="font-mono">{result.runtime_endpoint}</span>
             </div>
             <div className="text-[var(--fg-muted)]">
-              protocol：<span className="font-mono">{result.protocol.type}</span>
+              协议：<span className="font-mono">{result.protocol.type}</span>
             </div>
             <div className="text-[var(--fg-muted)]">
-              verificationState：<span className="font-mono">{result.verification_state}</span>
+              验证状态：{verificationLabel(result.verification_state)}
             </div>
             <div className="text-[var(--fg-muted)]">
-              verifiedAt：<span className="font-mono">{result.verified_at}</span>
+              验证时间：<span className="font-mono">{result.verified_at}</span>
             </div>
             <div className="text-[var(--fg-muted)]">
-              runtimeTargetDigest：<span className="font-mono">{result.runtime_target_digest}</span>
+              运行目标摘要：<span className="font-mono">{result.runtime_target_digest}</span>
             </div>
             <div className="text-[var(--fg-muted)]">
-              evidenceDigest：<span className="font-mono">{result.evidence_digest}</span>
+              证据摘要：<span className="font-mono">{result.evidence_digest}</span>
             </div>
           </dl>
-          <div className="text-[12px] font-medium text-[var(--fg)]">Measured capability matrix</div>
+          <div className="text-[12px] font-medium text-[var(--fg)]">实测能力矩阵</div>
           <ul className="text-[12px] text-[var(--fg-muted)]">
             {Object.entries(result.measured.features).map(([key, value]) => (
               <li key={key}>
-                <span className="font-mono">{key}</span>：{String(value)}
+                {featureLabel(key)}：{measuredLabel(String(value))}
               </li>
             ))}
           </ul>

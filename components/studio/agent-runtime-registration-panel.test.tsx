@@ -110,9 +110,9 @@ describe("AgentRuntimeRegistrationPanel（07 §7–§9）", () => {
 
     render(<AgentRuntimeRegistrationPanel />);
     await selectAgentAndSnapshot();
-    fireEvent.change(screen.getByLabelText("authentication_mode"), { target: { value: "bearer" } });
+    fireEvent.change(screen.getByLabelText("身份验证方式"), { target: { value: "bearer" } });
 
-    expect(screen.getByLabelText("credential_ref_id")).toBeTruthy();
+    expect(screen.getByLabelText("访问凭证")).toBeTruthy();
     // 禁止任何 Secret 输入（07 §7）。
     expect(screen.queryByLabelText(/secret/i)).toBeNull();
     expect(screen.queryByPlaceholderText(/secret/i)).toBeNull();
@@ -124,12 +124,90 @@ describe("AgentRuntimeRegistrationPanel（07 §7–§9）", () => {
     render(<AgentRuntimeRegistrationPanel />);
     await selectAgentAndSnapshot();
 
-    expect(screen.getByLabelText("conformance_basic_input")).toBeTruthy();
+    expect(screen.getByLabelText("基础对话输入")).toBeTruthy();
     // input_required=true / resume=true 显示；cancel=false 不显示。
-    expect(screen.getByLabelText("conformance_input_required_input")).toBeTruthy();
-    expect(screen.getByLabelText("conformance_resume_start_input")).toBeTruthy();
-    expect(screen.getByLabelText("conformance_resume_input")).toBeTruthy();
-    expect(screen.queryByLabelText("conformance_cancel_input")).toBeNull();
+    expect(screen.getByLabelText("需要补充信息时的输入")).toBeTruthy();
+    expect(screen.getByLabelText("恢复会话的起始输入")).toBeTruthy();
+    expect(screen.getByLabelText("恢复会话的继续输入")).toBeTruthy();
+    expect(screen.queryByLabelText("取消任务的输入")).toBeNull();
+  });
+
+  it("登记成功后以完整 RegisterAgentRuntimeResponse 调用 onRegistered 一次", async () => {
+    const registerRuntimeResponse = {
+      agent_id: "agent-1",
+      agent_contract_snapshot_id: "snap-0001",
+      runtime_id: "rt-1",
+      runtime_revision_id: "rtr-1",
+      runtime_key: "hr-runtime",
+      runtime_endpoint: "https://agent.example.com",
+      protocol: { type: "a2a", contract_revision: "a2a@1" },
+      verification_state: "verified",
+      verified_at: "2026-08-26T00:00:00.000Z",
+      runtime_target_digest: `sha256:${"d".repeat(64)}`,
+      evidence_digest: `sha256:${"e".repeat(64)}`,
+      config_hash: `sha256:${"f".repeat(64)}`,
+      measured: {
+        agent_card: {
+          protocol_version: "pass",
+          transport: "pass",
+          streaming_consistency: "pass",
+        },
+        basic_invocation: { status: "pass" },
+        features: {
+          streaming_transport: "pass",
+          incremental_content: "not_applicable",
+          input_required: "pass",
+          resume: "pass",
+          cancel: "not_applicable",
+          durable_task_recovery: "not_measured",
+        },
+      },
+    };
+    stubBackend([snapshotFixture()]);
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/admin/api/v1/agents/agent-1/runtime-registrations") {
+        return Response.json(registerRuntimeResponse);
+      }
+      if (url === "/admin/api/v1/agents") {
+        return Response.json({ items: [{ id: "agent-1", display_name: "HR" }], total: 1 });
+      }
+      if (url === "/admin/api/v1/credential-refs") {
+        return Response.json({ items: [], total: 0 });
+      }
+      if (url === "/admin/api/v1/agents/agent-1/contracts") {
+        return Response.json({ items: [snapshotFixture()], total: 1 });
+      }
+      return Response.json({ items: [], total: 0 });
+    });
+
+    const onRegistered = vi.fn();
+    render(<AgentRuntimeRegistrationPanel onRegistered={onRegistered} />);
+    await selectAgentAndSnapshot();
+
+    fireEvent.change(screen.getByLabelText("运行服务地址"), {
+      target: { value: "https://agent.example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("基础对话输入"), {
+      target: { value: "你好" },
+    });
+    fireEvent.change(screen.getByLabelText("需要补充信息时的输入"), {
+      target: { value: "需要什么" },
+    });
+    fireEvent.change(screen.getByLabelText("恢复会话的起始输入"), {
+      target: { value: "开始" },
+    });
+    fireEvent.change(screen.getByLabelText("恢复会话的继续输入"), {
+      target: { value: "继续" },
+    });
+
+    const submit = screen.getByRole("button", { name: /登记运行服务/ }) as HTMLButtonElement;
+    await waitFor(() => expect(submit.disabled).toBe(false));
+    fireEvent.click(submit);
+
+    // 恰好一次，且是完整的登记响应（含 runtime_id / runtime_revision_id，供同页发布交接）。
+    await waitFor(() => expect(onRegistered).toHaveBeenCalledTimes(1));
+    expect(onRegistered).toHaveBeenCalledWith(registerRuntimeResponse);
   });
 
   it("登记成功展示 §9 结果字段与 measured 矩阵", async () => {
@@ -185,30 +263,31 @@ describe("AgentRuntimeRegistrationPanel（07 §7–§9）", () => {
     render(<AgentRuntimeRegistrationPanel />);
     await selectAgentAndSnapshot();
 
-    fireEvent.change(screen.getByLabelText("runtime_endpoint"), {
+    fireEvent.change(screen.getByLabelText("运行服务地址"), {
       target: { value: "https://agent.example.com" },
     });
-    fireEvent.change(screen.getByLabelText("conformance_basic_input"), {
+    fireEvent.change(screen.getByLabelText("基础对话输入"), {
       target: { value: "你好" },
     });
-    fireEvent.change(screen.getByLabelText("conformance_input_required_input"), {
+    fireEvent.change(screen.getByLabelText("需要补充信息时的输入"), {
       target: { value: "需要什么" },
     });
-    fireEvent.change(screen.getByLabelText("conformance_resume_start_input"), {
+    fireEvent.change(screen.getByLabelText("恢复会话的起始输入"), {
       target: { value: "开始" },
     });
-    fireEvent.change(screen.getByLabelText("conformance_resume_input"), {
+    fireEvent.change(screen.getByLabelText("恢复会话的继续输入"), {
       target: { value: "继续" },
     });
 
-    const submit = screen.getByRole("button", { name: /登记 Runtime/ }) as HTMLButtonElement;
+    const submit = screen.getByRole("button", { name: /登记运行服务/ }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
 
-    await waitFor(() => expect(screen.getByText("Registration Result")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("登记运行服务结果")).toBeTruthy());
     expect(screen.getByText(/rt-1/)).toBeTruthy();
-    expect(screen.getByText(/runtimeTargetDigest/)).toBeTruthy();
-    // measured 矩阵：input_required=pass。
-    expect(screen.getByText(/input_required/)).toBeTruthy();
+    expect(screen.getByText(/运行目标摘要/)).toBeTruthy();
+    // 实测能力矩阵：需要补充信息=通过（中文能力名，不展示后台英文枚举）。
+    expect(screen.getByText("实测能力矩阵")).toBeTruthy();
+    expect(screen.getByText("需要补充信息：通过")).toBeTruthy();
   });
 });

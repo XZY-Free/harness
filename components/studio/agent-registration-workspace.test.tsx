@@ -3,6 +3,8 @@ import type {
   AgentContractSnapshotDTO,
   AgentDTO,
   RegisterAgentContractResponse,
+  RuntimeDTO,
+  RuntimeRevisionDTO,
 } from "@/lib/control-plane-client";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -102,9 +104,97 @@ const hrSnapshot: AgentContractSnapshotDTO = {
   captured_at: "2026-08-26T00:00:00.000Z",
 };
 
+// ─── fixture：真实 Runtime 登记与发布链路（external_endpoint + conf-1） ──────
+
+const runtime: RuntimeDTO = {
+  id: "rt-1",
+  tenant_id: "tenant-1",
+  runtime_key: "hr-runtime",
+  display_name: "HR 外部运行服务",
+  kind: "external",
+  lifecycle_state: "draft",
+  owner_user_id: "user-1",
+  current_revision_id: "rtr-1",
+  version_no: 3,
+  created_at: "2026-08-26T00:00:00.000Z",
+  updated_at: "2026-08-26T00:00:00.000Z",
+};
+
+const runtimeRevision: RuntimeRevisionDTO = {
+  id: "rtr-1",
+  runtime_id: "rt-1",
+  revision_no: 1,
+  revision_state: "draft",
+  protocol_type: "a2a",
+  protocol_contract_revision: "a2a@1",
+  runtime_evidence_kind: "external_endpoint",
+  runtime_target_digest: `sha256:${"d".repeat(64)}`,
+  endpoint_ref: "https://agent.example.com",
+  artifact_id: null,
+  artifact_digest: null,
+  artifact_ref: null,
+  config_hash: `sha256:${"f".repeat(64)}`,
+  runtime_capabilities: { measured: { features: { streaming_transport: "pass" } } },
+  agent_contract_snapshot_id: "snap-0001",
+  identity_mode: "bearer",
+  credential_ref_id: "cred-1",
+  network_zone: "public",
+  attestation_ids: [],
+  publication_record_id: null,
+  withdrawal_record_id: null,
+  conformance_run_id: "conf-1",
+  conformance_overall_result: "passed",
+  execution_eligible: false,
+  ineligibility_reasons: [],
+  created_at: "2026-08-26T00:00:00.000Z",
+  published_at: null,
+};
+
+const registerRuntimeResponse = {
+  agent_id: "agent-1",
+  agent_contract_snapshot_id: "snap-0001",
+  runtime_id: "rt-1",
+  runtime_revision_id: "rtr-1",
+  runtime_key: "hr-runtime",
+  runtime_endpoint: "https://agent.example.com",
+  protocol: { type: "a2a", contract_revision: "a2a@1" },
+  verification_state: "verified",
+  verified_at: "2026-08-26T00:00:00.000Z",
+  runtime_target_digest: `sha256:${"d".repeat(64)}`,
+  evidence_digest: `sha256:${"e".repeat(64)}`,
+  config_hash: `sha256:${"f".repeat(64)}`,
+  measured: {
+    agent_card: {
+      protocol_version: "pass",
+      transport: "pass",
+      streaming_consistency: "pass",
+    },
+    basic_invocation: { status: "pass" },
+    features: {
+      streaming_transport: "pass",
+      incremental_content: "not_applicable",
+      input_required: "pass",
+      resume: "pass",
+      cancel: "not_applicable",
+      durable_task_recovery: "not_measured",
+    },
+  },
+};
+
+const publishResponse = {
+  id: "rtr-1",
+  revision_state: "published" as const,
+  published_at: "2026-08-26T01:00:00.000Z",
+  publication_record_id: "pub-1",
+  conformance_run_id: "conf-1",
+  audit_event_id: "audit-1",
+};
+
 // ─── fetch mock：登记前后有状态切换（初始无 Agent，登记后返回 HR） ─────────────
 
 let registered = false;
+let runtimeRegistered = false;
+let runtimePublished = false;
 
 function stubBackend() {
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -112,6 +202,35 @@ function stubBackend() {
     if (url === "/admin/api/v1/agent-registrations" && init?.method === "POST") {
       registered = true;
       return Response.json(registerResponse);
+    }
+    if (url === "/admin/api/v1/agents/agent-1/runtime-registrations" && init?.method === "POST") {
+      runtimeRegistered = true;
+      return Response.json(registerRuntimeResponse);
+    }
+    if (url === "/admin/api/v1/runtimes") {
+      return Response.json({
+        items: runtimeRegistered ? [runtime] : [],
+        total: runtimeRegistered ? 1 : 0,
+      });
+    }
+    if (url === "/admin/api/v1/runtimes/rt-1/revisions") {
+      return Response.json({
+        items: runtimePublished
+          ? [
+              {
+                ...runtimeRevision,
+                revision_state: "published",
+                publication_record_id: "pub-1",
+                published_at: "2026-08-26T01:00:00.000Z",
+              },
+            ]
+          : [runtimeRevision],
+        total: 1,
+      });
+    }
+    if (url === "/admin/api/v1/runtime-revisions/rtr-1/publish" && init?.method === "POST") {
+      runtimePublished = true;
+      return Response.json(publishResponse);
     }
     if (url === "/admin/api/v1/agents") {
       return Response.json({
@@ -151,6 +270,45 @@ function selectValue(label: string): string {
   return (screen.getByLabelText(label) as HTMLSelectElement).value;
 }
 
+function publishPosts(): Array<{ body: unknown; headers: Headers }> {
+  return fetchMock.mock.calls
+    .filter(
+      ([url, init]) =>
+        String(url) === "/admin/api/v1/runtime-revisions/rtr-1/publish" && init?.method === "POST",
+    )
+    .map(([, init]) => ({
+      body: JSON.parse(String(init?.body)),
+      headers: new Headers(init?.headers),
+    }));
+}
+
+/** 在“登记合同”之后继续完成真实 Runtime 登记（填写 endpoint + conformance 输入）。 */
+async function registerRuntimeAfterContract() {
+  await waitFor(() => expect(selectValue("登记运行服务的智能体")).toBe("agent-1"));
+  await waitFor(() => expect(selectValue("运行服务使用的合同")).toBe("snap-0001"));
+
+  fireEvent.change(screen.getByLabelText("运行服务地址"), {
+    target: { value: "https://agent.example.com" },
+  });
+  fireEvent.change(screen.getByLabelText("基础对话输入"), {
+    target: { value: "你好" },
+  });
+  fireEvent.change(screen.getByLabelText("需要补充信息时的输入"), {
+    target: { value: "需要什么" },
+  });
+  fireEvent.change(screen.getByLabelText("恢复会话的起始输入"), {
+    target: { value: "开始" },
+  });
+  fireEvent.change(screen.getByLabelText("恢复会话的继续输入"), {
+    target: { value: "继续" },
+  });
+
+  const submit = screen.getByRole("button", { name: /登记运行服务/ }) as HTMLButtonElement;
+  await waitFor(() => expect(submit.disabled).toBe(false));
+  fireEvent.click(submit);
+  await waitFor(() => expect(runtimeRegistered).toBe(true));
+}
+
 /** 全权限渲染，并完成“导入合同 → 登记成功”的连续交接前置动作。 */
 async function renderWorkspaceAndRegisterContract(
   props?: Partial<Parameters<typeof AgentRegistrationWorkspace>[0]>,
@@ -182,6 +340,8 @@ async function renderWorkspaceAndRegisterContract(
 beforeEach(() => {
   fetchMock.mockReset();
   registered = false;
+  runtimeRegistered = false;
+  runtimePublished = false;
   stubBackend();
 });
 
@@ -219,10 +379,10 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
     await renderWorkspaceAndRegisterContract();
 
     // 互不冲突的中文可访问名（getByLabelText 在重复时会抛错，本身就是唯一性断言）。
-    expect(screen.getByLabelText("创建版本的智能体")).toBeTruthy();
-    expect(screen.getByLabelText("创建版本使用的合同")).toBeTruthy();
-    expect(screen.getByLabelText("登记运行服务的智能体")).toBeTruthy();
-    expect(screen.getByLabelText("运行服务使用的合同")).toBeTruthy();
+    await waitFor(() => expect(screen.getByLabelText("创建版本的智能体")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("创建版本使用的合同")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("登记运行服务的智能体")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("运行服务使用的合同")).toBeTruthy());
 
     // 旧的重名 aria-label="agent" 必须消失。
     expect(screen.queryAllByLabelText("agent")).toHaveLength(0);
@@ -232,6 +392,64 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
     expect(screen.queryByLabelText(/source/i)).toBeNull();
     expect(screen.queryByLabelText(/secret/i)).toBeNull();
     expect(screen.queryByPlaceholderText(/secret/i)).toBeNull();
+  });
+
+  it("真实 Runtime 登记成功后同页出现发布按钮，须用户点击才 POST publish，body/headers 精确并刷新为已发布", async () => {
+    await renderWorkspaceAndRegisterContract({ canPublishRuntime: true });
+    await registerRuntimeAfterContract();
+
+    // 同一次挂载内：后端 state 从空 runtimes 切到真实 rt-1/rtr-1 后，发布按钮出现，
+    // 且聚焦显示刚登记的 revision（runtime_revision_id 交接给 RuntimeControlPanel）。
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "发布运行服务版本" })).toBeTruthy(),
+    );
+    expect(screen.getByText("HR 外部运行服务")).toBeTruthy();
+    expect(screen.getByText("本次登记")).toBeTruthy();
+
+    // 登记成功本身不得自动 POST publish（必须由用户点击）。
+    expect(publishPosts()).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "发布运行服务版本" }));
+
+    await waitFor(() => expect(publishPosts()).toHaveLength(1));
+    const post = publishPosts()[0];
+    if (!post) throw new Error("publish POST 未发出");
+    expect(post.body).toEqual({
+      expected_version_no: 3,
+      attestation_id: null,
+      conformance_run_id: "conf-1",
+    });
+    expect(post.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(post.headers.get("If-Match")).toBe("runtime-revision-1");
+
+    // 发布成功后刷新为已发布状态并出现撤回入口。
+    await waitFor(() => expect(screen.getByRole("button", { name: "撤回" })).toBeTruthy());
+    expect(screen.getByText("已发布")).toBeTruthy();
+  });
+
+  it("canPublishRuntime=false（默认）不渲染运行版本发布区域，登记 Runtime 后也没有发布按钮与 POST", async () => {
+    await renderWorkspaceAndRegisterContract();
+    await registerRuntimeAfterContract();
+
+    expect(screen.queryByRole("button", { name: "发布运行服务版本" })).toBeNull();
+    expect(screen.queryByText("本次登记")).toBeNull();
+    expect(publishPosts()).toHaveLength(0);
+  });
+
+  it("运行服务发布权限独立于智能体读取权限，不额外隐藏正式发布入口", async () => {
+    runtimeRegistered = true;
+    render(
+      <AgentRegistrationWorkspace
+        canReadAgents={false}
+        canRegisterContract={false}
+        canManageRevisions={false}
+        canRegisterRuntime={false}
+        canPublishRuntime
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("HR 外部运行服务")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "发布运行服务版本" })).toBeTruthy();
   });
 
   it("权限守卫：canRegisterContract=false 时合同登记区域不渲染", async () => {
