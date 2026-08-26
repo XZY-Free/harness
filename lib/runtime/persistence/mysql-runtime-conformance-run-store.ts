@@ -14,8 +14,14 @@ import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
-import type { RuntimeConformanceRunStore } from "@/lib/runtime/persistence/runtime-conformance-run-store";
+import type {
+  RuntimeConformanceRunSession,
+  RuntimeConformanceRunStore,
+} from "@/lib/runtime/persistence/runtime-conformance-run-store";
 import { and, asc, eq } from "drizzle-orm";
+
+/** 调用方可持有的 MySQL 事务句柄类型（db.transaction 回调入参）。 */
+export type MysqlRuntimeConformanceDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function findByIdempotency(params: {
   tenantId: string;
@@ -45,129 +51,139 @@ async function findByIdempotency(params: {
 export const mysqlRuntimeConformanceRunStore: RuntimeConformanceRunStore = {
   findByIdempotency,
   transaction: (operation) =>
-    db.transaction(async (tx) =>
-      operation({
-        async findRevision(tenantId, runtimeRevisionId) {
-          const [row] = await tx
-            .select({ revision: runtimeRevisionTable })
-            .from(runtimeRevisionTable)
-            .innerJoin(
-              runtimeTable,
-              and(
-                eq(runtimeTable.id, runtimeRevisionTable.runtimeId),
-                eq(runtimeTable.tenantId, tenantId),
-              ),
-            )
-            .where(eq(runtimeRevisionTable.id, runtimeRevisionId))
-            .limit(1)
-            .for("update");
-          return row?.revision ?? null;
-        },
-        async appendRun(params) {
-          const { report, verification } = params;
-          await tx.insert(runtimeConformanceRun).values({
-            id: report.runId,
-            tenantId: params.tenantId,
-            runtimeRevisionId: report.runtimeRevisionId,
-            runtimeTargetDigest: report.runtimeTargetDigest,
-            runtimeConfigDigest: report.runtimeConfigDigest,
-            protocolContractRevision: report.protocolContractRevision,
-            suiteRevision: report.suiteRevision,
-            runnerArtifactDigest: report.runnerArtifactDigest,
-            runnerIdentity: report.runnerIdentity,
-            testEnvironmentRevision: report.testEnvironmentRevision,
-            startedAt: new Date(report.startedAt),
-            completedAt: new Date(report.completedAt),
-            overallResult: report.overallResult,
-            evidenceManifestDigest: report.evidenceManifestDigest,
-            envelopeDigest: verification.envelopeDigest,
-            envelopeJson: verification.envelopeJson,
-            payloadDigest: verification.payloadDigest,
-            signingKeyId: verification.signingKeyId,
-            verificationEngine: verification.verificationEngine,
-            verificationEngineVersion: verification.verificationEngineVersion,
-            predicateType: verification.predicateType,
-            verifiedAt: verification.verifiedAt,
-            idempotencyKey: params.idempotencyKey,
-            requestId: params.requestId,
-            recordedAt: params.recordedAt,
-          });
-          const [run] = await tx
-            .select()
-            .from(runtimeConformanceRun)
-            .where(eq(runtimeConformanceRun.id, report.runId))
-            .limit(1);
-          if (!run) throw new Error("RuntimeConformanceRun 写入失败");
-          return run;
-        },
-        async appendCaseResults(report) {
-          await tx.insert(runtimeConformanceCaseResult).values(
-            report.caseResults.map((result) => ({
-              id: randomUUID(),
-              runId: report.runId,
-              caseId: result.caseId,
-              passed: result.passed,
-              reason: result.reason,
-              evidenceDigest: result.evidenceDigest,
-            })),
-          );
-          return tx
-            .select()
-            .from(runtimeConformanceCaseResult)
-            .where(eq(runtimeConformanceCaseResult.runId, report.runId))
-            .orderBy(asc(runtimeConformanceCaseResult.caseId));
-        },
-        async appendAudit(params) {
-          await tx.insert(auditEvent).values({
-            id: params.id,
-            tenantId: params.tenantId,
-            actorType: params.actorType,
-            actorId: params.actorId,
-            actionType: "runtime.conformance.run.record",
-            targetType: "runtime_conformance_run",
-            targetId: params.runId,
-            beforeHash: null,
-            afterHash: computeContentHash(params.after),
-            reason: "记录可信 Runtime Conformance Run",
-            requestId: params.requestId,
-            occurredAt: params.occurredAt,
-          });
-        },
-        async appendOutbox(params: ControlPlaneOutboxAppendParams) {
-          const resolved = resolveOutboxAppend(params);
-          await tx.insert(controlPlaneOutboxEvent).values({
-            id: resolved.id,
-            tenantId: resolved.tenantId,
-            schemaVersion: "1.0",
-            eventKey: `runtime-conformance-recorded:${resolved.aggregateId}`,
-            eventType: resolved.eventType,
-            aggregateType: resolved.aggregateType,
-            aggregateId: resolved.aggregateId,
-            aggregateVersion: resolved.aggregateVersion,
-            payloadJson: resolved.payloadJson,
-            occurredAt: resolved.occurredAt,
-          });
-          // §14: 同事务创建 Delivery 行，确保 Relay Worker 能领取
-          await seedEventDeliveries(tx, resolved.id, resolved.eventType, resolved.occurredAt);
-        },
-        async completeIdempotency(params) {
-          const result = await tx
-            .update(idempotencyRecord)
-            .set({
-              processingState: "completed",
-              httpStatus: params.httpStatus,
-              responseRef: params.responseRef,
-              responseRedactedJson: params.responseRedactedJson,
-              completedAt: params.completedAt,
-            })
-            .where(
-              and(
-                eq(idempotencyRecord.id, params.recordId),
-                eq(idempotencyRecord.processingState, "processing"),
-              ),
-            );
-          return result[0].affectedRows === 1;
-        },
-      }),
-    ),
+    db.transaction(async (tx) => operation(createMysqlRuntimeConformanceRunSession(tx))),
 };
+
+/**
+ * 基于调用方事务（或 db）创建 Conformance Run Session。
+ *
+ * 不开启新事务：直接复用传入的 tx，使 run/case/audit/outbox 写入
+ * 与调用方其余写入同属一个事务（如注册流程内联记录正式 Run）。
+ */
+export function createMysqlRuntimeConformanceRunSession(
+  tx: MysqlRuntimeConformanceDbTx,
+): RuntimeConformanceRunSession {
+  return {
+    async findRevision(tenantId, runtimeRevisionId) {
+      const [row] = await tx
+        .select({ revision: runtimeRevisionTable })
+        .from(runtimeRevisionTable)
+        .innerJoin(
+          runtimeTable,
+          and(
+            eq(runtimeTable.id, runtimeRevisionTable.runtimeId),
+            eq(runtimeTable.tenantId, tenantId),
+          ),
+        )
+        .where(eq(runtimeRevisionTable.id, runtimeRevisionId))
+        .limit(1)
+        .for("update");
+      return row?.revision ?? null;
+    },
+    async appendRun(params) {
+      const { report, verification } = params;
+      await tx.insert(runtimeConformanceRun).values({
+        id: report.runId,
+        tenantId: params.tenantId,
+        runtimeRevisionId: report.runtimeRevisionId,
+        runtimeTargetDigest: report.runtimeTargetDigest,
+        runtimeConfigDigest: report.runtimeConfigDigest,
+        protocolContractRevision: report.protocolContractRevision,
+        suiteRevision: report.suiteRevision,
+        runnerArtifactDigest: report.runnerArtifactDigest,
+        runnerIdentity: report.runnerIdentity,
+        testEnvironmentRevision: report.testEnvironmentRevision,
+        startedAt: new Date(report.startedAt),
+        completedAt: new Date(report.completedAt),
+        overallResult: report.overallResult,
+        evidenceManifestDigest: report.evidenceManifestDigest,
+        envelopeDigest: verification.envelopeDigest,
+        envelopeJson: verification.envelopeJson,
+        payloadDigest: verification.payloadDigest,
+        signingKeyId: verification.signingKeyId,
+        verificationEngine: verification.verificationEngine,
+        verificationEngineVersion: verification.verificationEngineVersion,
+        predicateType: verification.predicateType,
+        verifiedAt: verification.verifiedAt,
+        idempotencyKey: params.idempotencyKey,
+        requestId: params.requestId,
+        recordedAt: params.recordedAt,
+      });
+      const [run] = await tx
+        .select()
+        .from(runtimeConformanceRun)
+        .where(eq(runtimeConformanceRun.id, report.runId))
+        .limit(1);
+      if (!run) throw new Error("RuntimeConformanceRun 写入失败");
+      return run;
+    },
+    async appendCaseResults(report) {
+      await tx.insert(runtimeConformanceCaseResult).values(
+        report.caseResults.map((result) => ({
+          id: randomUUID(),
+          runId: report.runId,
+          caseId: result.caseId,
+          passed: result.passed,
+          reason: result.reason,
+          evidenceDigest: result.evidenceDigest,
+        })),
+      );
+      return tx
+        .select()
+        .from(runtimeConformanceCaseResult)
+        .where(eq(runtimeConformanceCaseResult.runId, report.runId))
+        .orderBy(asc(runtimeConformanceCaseResult.caseId));
+    },
+    async appendAudit(params) {
+      await tx.insert(auditEvent).values({
+        id: params.id,
+        tenantId: params.tenantId,
+        actorType: params.actorType,
+        actorId: params.actorId,
+        actionType: "runtime.conformance.run.record",
+        targetType: "runtime_conformance_run",
+        targetId: params.runId,
+        beforeHash: null,
+        afterHash: computeContentHash(params.after),
+        reason: "记录可信 Runtime Conformance Run",
+        requestId: params.requestId,
+        occurredAt: params.occurredAt,
+      });
+    },
+    async appendOutbox(params: ControlPlaneOutboxAppendParams) {
+      const resolved = resolveOutboxAppend(params);
+      await tx.insert(controlPlaneOutboxEvent).values({
+        id: resolved.id,
+        tenantId: resolved.tenantId,
+        schemaVersion: "1.0",
+        eventKey: `runtime-conformance-recorded:${resolved.aggregateId}`,
+        eventType: resolved.eventType,
+        aggregateType: resolved.aggregateType,
+        aggregateId: resolved.aggregateId,
+        aggregateVersion: resolved.aggregateVersion,
+        payloadJson: resolved.payloadJson,
+        occurredAt: resolved.occurredAt,
+      });
+      // §14: 同事务创建 Delivery 行，确保 Relay Worker 能领取
+      await seedEventDeliveries(tx, resolved.id, resolved.eventType, resolved.occurredAt);
+    },
+    async completeIdempotency(params) {
+      const result = await tx
+        .update(idempotencyRecord)
+        .set({
+          processingState: "completed",
+          httpStatus: params.httpStatus,
+          responseRef: params.responseRef,
+          responseRedactedJson: params.responseRedactedJson,
+          completedAt: params.completedAt,
+        })
+        .where(
+          and(
+            eq(idempotencyRecord.id, params.recordId),
+            eq(idempotencyRecord.processingState, "processing"),
+          ),
+        );
+      return result[0].affectedRows === 1;
+    },
+  };
+}
