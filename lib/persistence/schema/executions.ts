@@ -195,15 +195,13 @@ export const executionBindingTable = mysqlTable(
     /** 冻结的 Runtime 目标摘要 — 发布证据权威（03 §6）。 */
     runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
-    // ─── Agent Descriptor 证据（Agent Route 必填，base route 为 null — 05 §5）────
+    // ─── Agent Contract 证据（Agent Route 必填，base route 为 null — 05 §5）────
     /** null = 基础 Harness Route（§18 not_applicable）。 */
-    agentDescriptorSnapshotId: varchar("agentDescriptorSnapshotId", { length: 36 }),
+    agentContractSnapshotId: varchar("agentContractSnapshotId", { length: 36 }),
     /** null = 基础 Harness Route（§18 not_applicable）。 */
-    agentProviderDescriptorDigest: varchar("agentProviderDescriptorDigest", { length: 71 }),
+    agentContractDigest: varchar("agentContractDigest", { length: 71 }),
     /** null = 基础 Harness Route（§18 not_applicable）。 */
-    agentInvocationContextContractDigest: varchar("agentInvocationContextContractDigest", {
-      length: 71,
-    }),
+    agentContextDigest: varchar("agentContextDigest", { length: 71 }),
     /** null = 基础 Harness Route（§18 not_applicable，禁止伪装空数组）。 */
     agentAttestationIds: json("agentAttestationIds").$type<string[] | null>(),
     runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>().notNull(),

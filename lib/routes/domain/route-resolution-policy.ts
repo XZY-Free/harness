@@ -27,10 +27,10 @@ export interface RouteControlPlaneEvidence {
   capabilityManifestDigest: string;
   /** null = 基础 Harness Route（§18 not_applicable；禁止伪装空数组）。 */
   agentAttestationIds: string[] | null;
-  /** Agent Descriptor 证据（Agent Route 必填，base route 为 null — 05 §5）。 */
-  agentDescriptorSnapshotId: string | null;
-  agentProviderDescriptorDigest: string | null;
-  agentInvocationContextContractDigest: string | null;
+  /** Agent Contract 证据（Agent Route 必填，base route 为 null — 05 §5）。 */
+  agentContractSnapshotId: string | null;
+  agentContractDigest: string | null;
+  agentContextDigest: string | null;
   runtimeAttestationIds: string[];
   /** null = 基础 Harness Route（§18 not_applicable）。 */
   agentPublicationRecordId: string | null;

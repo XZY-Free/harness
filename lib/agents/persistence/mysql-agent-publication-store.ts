@@ -10,7 +10,7 @@ import { seedEventDeliveries } from "@/lib/control-plane/events/seed-event-deliv
 import { db } from "@/lib/db/client";
 import { computeContentHash } from "@/lib/identity/audit";
 import {
-  agentDescriptorSnapshotTable,
+  agentContractSnapshotTable,
   agentRevisionTable,
   agentTable,
 } from "@/lib/persistence/schema/agents";
@@ -44,14 +44,14 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
             .limit(1);
           return agent ?? null;
         },
-        async findDescriptorSnapshot(tenantId, snapshotId) {
+        async findContractSnapshot(tenantId, snapshotId) {
           const [row] = await tx
             .select()
-            .from(agentDescriptorSnapshotTable)
+            .from(agentContractSnapshotTable)
             .where(
               and(
-                eq(agentDescriptorSnapshotTable.tenantId, tenantId),
-                eq(agentDescriptorSnapshotTable.id, snapshotId),
+                eq(agentContractSnapshotTable.tenantId, tenantId),
+                eq(agentContractSnapshotTable.id, snapshotId),
               ),
             )
             .limit(1)
@@ -60,9 +60,9 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
           return {
             id: row.id,
             agentId: row.agentId,
-            providerDescriptorDigest: row.providerDescriptorDigest,
-            capabilityManifestDigest: row.capabilityManifestDigest,
-            invocationContextContractDigest: row.invocationContextContractDigest,
+            contractDigest: row.contractDigest,
+            capabilityDigest: row.capabilityDigest,
+            contextDigest: row.contextDigest,
           };
         },
         async findVerifiedAttestation(params) {
@@ -103,11 +103,10 @@ export const mysqlAgentPublicationStore: AgentPublicationStore = {
             attestationIds: params.attestationIds,
             conformanceRunId: null,
             approvals: [],
-            agentDescriptorSnapshotId: params.descriptorEvidence.agentDescriptorSnapshotId,
-            agentProviderDescriptorDigest: params.descriptorEvidence.agentProviderDescriptorDigest,
-            agentCapabilityManifestDigest: params.descriptorEvidence.agentCapabilityManifestDigest,
-            agentInvocationContextContractDigest:
-              params.descriptorEvidence.agentInvocationContextContractDigest,
+            agentContractSnapshotId: params.contractEvidence.agentContractSnapshotId,
+            agentContractDigest: params.contractEvidence.agentContractDigest,
+            agentCapabilityDigest: params.contractEvidence.agentCapabilityDigest,
+            agentContextDigest: params.contractEvidence.agentContextDigest,
             publishedByType: params.publishedByType,
             publishedBy: params.publishedBy,
             publishedAt: params.publishedAt,

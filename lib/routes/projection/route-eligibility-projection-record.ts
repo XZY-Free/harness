@@ -106,12 +106,10 @@ export const routeEligibilityProjection = mysqlTable(
     capabilityCompatibilityDigest: varchar("capabilityCompatibilityDigest", {
       length: 71,
     }).notNull(),
-    // ─── : Agent Descriptor 证据（Agent Route 必填，base route 为 null — 05 §5）────
-    agentDescriptorSnapshotId: varchar("agentDescriptorSnapshotId", { length: 36 }),
-    agentProviderDescriptorDigest: varchar("agentProviderDescriptorDigest", { length: 71 }),
-    agentInvocationContextContractDigest: varchar("agentInvocationContextContractDigest", {
-      length: 71,
-    }),
+    // ─── : Agent Contract 证据（Agent Route 必填，base route 为 null — 05 §5）────
+    agentContractSnapshotId: varchar("agentContractSnapshotId", { length: 36 }),
+    agentContractDigest: varchar("agentContractDigest", { length: 71 }),
+    agentContextDigest: varchar("agentContextDigest", { length: 71 }),
     agentArtifactDigest: varchar("agentArtifactDigest", { length: 71 }),
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }),

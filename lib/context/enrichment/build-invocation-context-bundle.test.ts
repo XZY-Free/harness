@@ -5,7 +5,7 @@
  * accepted 不默认全量 / trusted ExecutionSubject 只来自认证 Principal /
  * 集成 Binding 冻结 Contract（resolveBindingContextContract 结果直接可用）。
  */
-import type { InvocationContextContract } from "@/lib/agents/domain/agent-descriptor";
+import type { InvocationContextContract } from "@/lib/agents/domain/public-agent-contract";
 import {
   type PlatformContextEnvironment,
   RequiredContextDeniedError,

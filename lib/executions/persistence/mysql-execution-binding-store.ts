@@ -180,9 +180,9 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         runtimeEvidenceKind: evidence.runtimeEvidenceKind,
         runtimeConfigDigest: evidence.runtimeConfigDigest,
         runtimeTargetDigest: evidence.runtimeTargetDigest,
-        agentDescriptorSnapshotId: evidence.agentDescriptorSnapshotId,
-        agentProviderDescriptorDigest: evidence.agentProviderDescriptorDigest,
-        agentInvocationContextContractDigest: evidence.agentInvocationContextContractDigest,
+        agentContractSnapshotId: evidence.agentContractSnapshotId,
+        agentContractDigest: evidence.agentContractDigest,
+        agentContextDigest: evidence.agentContextDigest,
         capabilityManifestDigest: evidence.capabilityManifestDigest,
         // base route 的 agentAttestationIds 为 null（§18 not_applicable），保持 null。
         agentAttestationIds: evidence.agentAttestationIds
@@ -573,10 +573,9 @@ async function lockAndVerifyProjection(
       runtimeEvidenceKind: routeEligibilityProjection.runtimeEvidenceKind,
       runtimeConfigDigest: routeEligibilityProjection.runtimeConfigDigest,
       runtimeTargetDigest: routeEligibilityProjection.runtimeTargetDigest,
-      agentDescriptorSnapshotId: routeEligibilityProjection.agentDescriptorSnapshotId,
-      agentProviderDescriptorDigest: routeEligibilityProjection.agentProviderDescriptorDigest,
-      agentInvocationContextContractDigest:
-        routeEligibilityProjection.agentInvocationContextContractDigest,
+      agentContractSnapshotId: routeEligibilityProjection.agentContractSnapshotId,
+      agentContractDigest: routeEligibilityProjection.agentContractDigest,
+      agentContextDigest: routeEligibilityProjection.agentContextDigest,
       capabilityCompatibilityDigest: routeEligibilityProjection.capabilityCompatibilityDigest,
       agentPublicationRecordId: routeEligibilityProjection.agentPublicationRecordId,
       runtimePublicationRecordId: routeEligibilityProjection.runtimePublicationRecordId,
@@ -609,9 +608,9 @@ async function lockAndVerifyProjection(
       runtimeEvidenceKind: evidence.runtimeEvidenceKind,
       runtimeConfigDigest: evidence.runtimeConfigDigest,
       runtimeTargetDigest: evidence.runtimeTargetDigest,
-      agentDescriptorSnapshotId: evidence.agentDescriptorSnapshotId,
-      agentProviderDescriptorDigest: evidence.agentProviderDescriptorDigest,
-      agentInvocationContextContractDigest: evidence.agentInvocationContextContractDigest,
+      agentContractSnapshotId: evidence.agentContractSnapshotId,
+      agentContractDigest: evidence.agentContractDigest,
+      agentContextDigest: evidence.agentContextDigest,
       capabilityManifestDigest: evidence.capabilityManifestDigest,
       agentPublicationRecordId: evidence.agentPublicationRecordId,
       runtimePublicationRecordId: evidence.runtimePublicationRecordId,
@@ -644,9 +643,9 @@ type FrozenProjectionRow = {
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   runtimeConfigDigest: string | null;
   runtimeTargetDigest: string | null;
-  agentDescriptorSnapshotId: string | null;
-  agentProviderDescriptorDigest: string | null;
-  agentInvocationContextContractDigest: string | null;
+  agentContractSnapshotId: string | null;
+  agentContractDigest: string | null;
+  agentContextDigest: string | null;
   capabilityCompatibilityDigest: string;
   agentPublicationRecordId: string | null;
   runtimePublicationRecordId: string | null;
@@ -676,9 +675,9 @@ type FrozenProjectionExpectation = {
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   runtimeConfigDigest: string;
   runtimeTargetDigest: string;
-  agentDescriptorSnapshotId: string | null;
-  agentProviderDescriptorDigest: string | null;
-  agentInvocationContextContractDigest: string | null;
+  agentContractSnapshotId: string | null;
+  agentContractDigest: string | null;
+  agentContextDigest: string | null;
   capabilityManifestDigest: string;
   /** null = 基础 Harness Route（§18 not_applicable）。 */
   agentPublicationRecordId: string | null;
@@ -696,16 +695,15 @@ export function validateFrozenProjectionAuthority(input: {
   const { projection, expected } = input;
   const isBaseRoute = expected.agentRevisionId === null;
   // Agent 维度仅 Agent Route 校验（§7.4）；base route 为 not_applicable（§18），跳过。
-  // Agent Descriptor 证据 all-or-nothing（05 §5）：Agent Route 必须三元组一致。
-  const agentDescriptorValid = isBaseRoute
-    ? projection?.agentDescriptorSnapshotId === null &&
-      projection?.agentProviderDescriptorDigest === null &&
-      projection?.agentInvocationContextContractDigest === null
+  // Agent Contract 证据 all-or-nothing（05 §5）：Agent Route 必须三元组一致。
+  const agentContractValid = isBaseRoute
+    ? projection?.agentContractSnapshotId === null &&
+      projection?.agentContractDigest === null &&
+      projection?.agentContextDigest === null
     : !!projection &&
-      projection.agentDescriptorSnapshotId === expected.agentDescriptorSnapshotId &&
-      projection.agentProviderDescriptorDigest === expected.agentProviderDescriptorDigest &&
-      projection.agentInvocationContextContractDigest ===
-        expected.agentInvocationContextContractDigest;
+      projection.agentContractSnapshotId === expected.agentContractSnapshotId &&
+      projection.agentContractDigest === expected.agentContractDigest &&
+      projection.agentContextDigest === expected.agentContextDigest;
   // external_endpoint Runtime 的 Attestation 集合为空（03 §3，不伪造）；hosted 要求非空全集。
   const runtimeAttestationsExact =
     expected.runtimeEvidenceKind === "external_endpoint"
@@ -751,7 +749,7 @@ export function validateFrozenProjectionAuthority(input: {
     projection.conformanceRunId !== expected.conformanceRunId ||
     !runtimeAttestationsExact ||
     !agentDimensionValid ||
-    !agentDescriptorValid
+    !agentContractValid
   ) {
     throw staleEvidenceError("RouteEligibilityProjection 已漂移");
   }
@@ -786,11 +784,10 @@ async function lockAndVerifyPublications(
             conformanceRunId: publicationRecord.conformanceRunId,
             evidenceSetDigest: publicationRecord.evidenceSetDigest,
             approvals: publicationRecord.approvals,
-            agentDescriptorSnapshotId: publicationRecord.agentDescriptorSnapshotId,
-            agentProviderDescriptorDigest: publicationRecord.agentProviderDescriptorDigest,
-            agentCapabilityManifestDigest: publicationRecord.agentCapabilityManifestDigest,
-            agentInvocationContextContractDigest:
-              publicationRecord.agentInvocationContextContractDigest,
+            agentContractSnapshotId: publicationRecord.agentContractSnapshotId,
+            agentContractDigest: publicationRecord.agentContractDigest,
+            agentCapabilityDigest: publicationRecord.agentCapabilityDigest,
+            agentContextDigest: publicationRecord.agentContextDigest,
           })
           .from(publicationRecord)
           .where(eq(publicationRecord.id, evidence.agentPublicationRecordId as string))
@@ -817,26 +814,25 @@ async function lockAndVerifyPublications(
           },
         });
         if (!agentPub) throw evidenceError("冻结 Agent Publication 不存在");
-        // Batch 4：Binding 冻结的 Descriptor 三元组必须与 Agent Publication 冻结值一致
+        // Binding 冻结的 Contract 三元组必须与 Agent Publication 冻结值一致
         //（Agent evidence all-or-nothing，05 §5）。
         if (
-          agentPub.agentDescriptorSnapshotId !== evidence.agentDescriptorSnapshotId ||
-          agentPub.agentProviderDescriptorDigest !== evidence.agentProviderDescriptorDigest ||
-          agentPub.agentInvocationContextContractDigest !==
-            evidence.agentInvocationContextContractDigest
+          agentPub.agentContractSnapshotId !== evidence.agentContractSnapshotId ||
+          agentPub.agentContractDigest !== evidence.agentContractDigest ||
+          agentPub.agentContextDigest !== evidence.agentContextDigest
         ) {
-          throw evidenceError("冻结 Agent Descriptor 证据与 Agent Publication 不一致");
+          throw evidenceError("冻结 Agent Contract 证据与 Agent Publication 不一致");
         }
-        // Batch 2：Agent Publication 的 evidenceSetDigest 冻结了 DescriptorSnapshot 附加证据。
-        // 重算时须从 Publication 的 descriptor 列重建该 additionalEvidence，否则与锁后 digest 不一致。
+        // Agent Publication 的 evidenceSetDigest 冻结了 AgentContractSnapshot 附加证据。
+        // 重算时须从 Publication 的 contract 列重建该 additionalEvidence，否则与锁后 digest 不一致。
         validateFrozenPublicationEvidenceDigest({
           publication: agentPub,
           additionalEvidence: {
-            agent_descriptor_snapshot: {
-              id: agentPub.agentDescriptorSnapshotId,
-              provider_descriptor_digest: agentPub.agentProviderDescriptorDigest,
-              capability_manifest_digest: agentPub.agentCapabilityManifestDigest,
-              invocation_context_contract_digest: agentPub.agentInvocationContextContractDigest,
+            agent_contract_snapshot: {
+              id: agentPub.agentContractSnapshotId,
+              contract_digest: agentPub.agentContractDigest,
+              capability_digest: agentPub.agentCapabilityDigest,
+              context_digest: agentPub.agentContextDigest,
             },
           },
         });
@@ -853,10 +849,10 @@ async function lockAndVerifyPublications(
       conformanceRunId: publicationRecord.conformanceRunId,
       evidenceSetDigest: publicationRecord.evidenceSetDigest,
       approvals: publicationRecord.approvals,
-      agentDescriptorSnapshotId: publicationRecord.agentDescriptorSnapshotId,
-      agentProviderDescriptorDigest: publicationRecord.agentProviderDescriptorDigest,
-      agentCapabilityManifestDigest: publicationRecord.agentCapabilityManifestDigest,
-      agentInvocationContextContractDigest: publicationRecord.agentInvocationContextContractDigest,
+      agentContractSnapshotId: publicationRecord.agentContractSnapshotId,
+      agentContractDigest: publicationRecord.agentContractDigest,
+      agentCapabilityDigest: publicationRecord.agentCapabilityDigest,
+      agentContextDigest: publicationRecord.agentContextDigest,
     })
     .from(publicationRecord)
     .where(eq(publicationRecord.id, evidence.runtimePublicationRecordId))
@@ -893,11 +889,11 @@ type LockedPublicationEvidence = {
   attestationIds: string[];
   conformanceRunId: string | null;
   approvals: unknown[];
-  // Batch 2：Agent Publication 冻结的 DescriptorSnapshot 证据（runtime 为 null）。
-  agentDescriptorSnapshotId: string | null;
-  agentProviderDescriptorDigest: string | null;
-  agentCapabilityManifestDigest: string | null;
-  agentInvocationContextContractDigest: string | null;
+  // Agent Publication 冻结的 AgentContractSnapshot 证据（runtime 为 null）。
+  agentContractSnapshotId: string | null;
+  agentContractDigest: string | null;
+  agentCapabilityDigest: string | null;
+  agentContextDigest: string | null;
 };
 
 export function validateFrozenPublicationEvidenceDigest(input: {
@@ -1356,10 +1352,10 @@ export function toExecutionBinding(
       !!row.agentArtifactDigest &&
       !!row.agentAttestationIds &&
       !!row.agentPublicationRecordId &&
-      // Agent Descriptor 证据 all-or-nothing（05 §5）。
-      !!row.agentDescriptorSnapshotId &&
-      !!row.agentProviderDescriptorDigest &&
-      !!row.agentInvocationContextContractDigest);
+      // Agent Contract 证据 all-or-nothing（05 §5）。
+      !!row.agentContractSnapshotId &&
+      !!row.agentContractDigest &&
+      !!row.agentContextDigest);
   if (!runtimeFieldsComplete || !agentFieldsComplete) {
     throw evidenceError("新建 Binding 回读时证据字段不完整");
   }
@@ -1390,9 +1386,9 @@ export function toExecutionBinding(
     runtimeConfigDigest: row.runtimeConfigDigest,
     runtimeTargetDigest: row.runtimeTargetDigest,
     runtimeEvidenceKind: row.runtimeEvidenceKind,
-    agentDescriptorSnapshotId: row.agentDescriptorSnapshotId,
-    agentProviderDescriptorDigest: row.agentProviderDescriptorDigest,
-    agentInvocationContextContractDigest: row.agentInvocationContextContractDigest,
+    agentContractSnapshotId: row.agentContractSnapshotId,
+    agentContractDigest: row.agentContractDigest,
+    agentContextDigest: row.agentContextDigest,
     capabilityManifestDigest: row.capabilityManifestDigest,
     // base route 的 agentAttestationIds 为 null（§18 not_applicable），保持 null。
     agentAttestationIds: row.agentAttestationIds ? [...row.agentAttestationIds] : null,

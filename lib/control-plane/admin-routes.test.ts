@@ -24,6 +24,7 @@ import {
   createDraftRevision,
   getRevisionById,
 } from "@/lib/agents/persistence/agent-revision-queries";
+import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -65,7 +66,7 @@ import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-r
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
-import { ensureAgentDescriptorSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-descriptor-snapshot";
+import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { eq, sql } from "drizzle-orm";
@@ -783,6 +784,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
   let tenantId: string;
   let userIdentityId: string;
   let agentId: string;
+  let contractSnapshot: { id: string };
 
   beforeEach(async () => {
     const seeded = await seedAdminWithActionBindings();
@@ -795,6 +797,11 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
       ownerUserId: userIdentityId,
     });
     agentId = agent.id;
+    contractSnapshot = await seedAgentContractSnapshot({
+      tenantId,
+      agentId,
+      createdBy: userIdentityId,
+    });
   });
 
   it("成功创建 → 201 + ETag", async () => {
@@ -809,6 +816,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
         source: { source_type: "agent_yaml", source_revision: "git:test-ref" },
         artifact_ref: `oci://registry/agent@${artifactDigest}`,
         instruction_hash: instructionHash,
+        agent_contract_snapshot_id: contractSnapshot.id,
         model_policy: { model: "gpt-4" },
         permission_requirements: {},
         delegation_policy: { max_depth: 0 },
@@ -824,6 +832,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
     expect(body.id).toEqual(expect.any(String));
     expect(body.revision_no).toBe(1);
     expect(body.revision_state).toBe("draft");
+    expect(body.agent_contract_snapshot_id).toBe(contractSnapshot.id);
     const etag = response.headers.get("etag");
     expect(etag).toBeDefined();
     expect(etag).toContain("agent-revision-1");
@@ -838,6 +847,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
         source: { source_type: "agent_yaml", source_revision: "git:no-idem" },
         artifact_ref: `oci://registry/agent@${computeArtifactDigest("no-idem")}`,
         instruction_hash: computeArtifactDigest("no-idem-instr"),
+        agent_contract_snapshot_id: contractSnapshot.id,
         model_policy: { model: "gpt-4" },
         permission_requirements: {},
         delegation_policy: { max_depth: 0 },
@@ -865,6 +875,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/revisions", () => {
         source: { source_type: "agent_yaml", source_revision: "git:cross-tenant" },
         artifact_ref: `oci://registry/agent@${computeArtifactDigest("cross-tenant")}`,
         instruction_hash: computeArtifactDigest("cross-tenant-instr"),
+        agent_contract_snapshot_id: contractSnapshot.id,
         model_policy: { model: "gpt-4" },
         permission_requirements: {},
         delegation_policy: { max_depth: 0 },
@@ -996,8 +1007,8 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       draftRevision.id,
       "publish-artifact-content",
     );
-    // Batch 2：发布路由强制 Revision 绑定 AgentDescriptorSnapshot。
-    await ensureAgentDescriptorSnapshotBoundForRevision(draftRevision.id, tenantId);
+    // 发布路由强制 Revision 绑定 AgentContractSnapshot。
+    await ensureAgentContractSnapshotBoundForRevision(draftRevision.id, tenantId);
 
     const request = buildApiRequest({
       audience: "admin",
@@ -1102,7 +1113,7 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       draftRevision.id,
       "concurrent-publish-content",
     );
-    await ensureAgentDescriptorSnapshotBoundForRevision(draftRevision.id, tenantId);
+    await ensureAgentContractSnapshotBoundForRevision(draftRevision.id, tenantId);
     const buildRequest = (idempotencyKey: string) =>
       buildApiRequest({
         audience: "admin",
@@ -1243,9 +1254,9 @@ describe("POST /admin/api/v1/agent-revisions/{revision_id}/publish", () => {
       agentInterfaceRequirementsJson: { required: [], optional: [] },
       createdBy: userIdentityId,
     });
-    // Batch 2：发布权威 = 绑定 AgentDescriptorSnapshot；未绑定先走 snapshot 门禁（AGENT_DESCRIPTOR_SNAPSHOT_MISSING）。
+    // 发布权威 = 绑定 AgentContractSnapshot；未绑定先走 snapshot 门禁（AGENT_CONTRACT_SNAPSHOT_MISSING）。
     // 本用例目标是校验「提供了未验证 Attestation」→ ARTIFACT_NOT_VERIFIED，故先绑定 Snapshot 越过 snapshot 门禁。
-    await ensureAgentDescriptorSnapshotBoundForRevision(draftRevision.id, tenantId);
+    await ensureAgentContractSnapshotBoundForRevision(draftRevision.id, tenantId);
 
     const request = buildApiRequest({
       audience: "admin",

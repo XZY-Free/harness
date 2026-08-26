@@ -52,15 +52,15 @@ export class AgentPublicationPrerequisiteError extends Error {
 }
 
 /**
- * AgentRevision 发布缺少绑定的 AgentDescriptorSnapshot（Batch 2 权威外部合同来源）。
+ * AgentRevision 发布缺少绑定的 AgentContractSnapshot（权威外部合同来源）。
  * Revision 未绑定 Snapshot、Snapshot 不存在、或 Snapshot 不属于同 tenant/Agent 时抛出。
  */
-export class AgentPublicationDescriptorSnapshotMissingError extends Error {
+export class AgentPublicationContractSnapshotMissingError extends Error {
   constructor(public readonly revisionId: string) {
     super(
-      `AgentRevision ${revisionId} 缺少有效且属于同 Agent 的 AgentDescriptorSnapshot 绑定，无法发布`,
+      `AgentRevision ${revisionId} 缺少有效且属于同 Agent 的 AgentContractSnapshot 绑定，无法发布`,
     );
-    this.name = "AgentPublicationDescriptorSnapshotMissingError";
+    this.name = "AgentPublicationContractSnapshotMissingError";
   }
 }
 

@@ -45,9 +45,9 @@ const bindingRow: BindingRow = {
   runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
   runtimeTargetDigest: `sha256:${"t".repeat(64)}`,
   runtimeEvidenceKind: "hosted_artifact" as const,
-  agentDescriptorSnapshotId: "agent-descriptor-snapshot-1",
-  agentProviderDescriptorDigest: `sha256:${"p".repeat(64)}`,
-  agentInvocationContextContractDigest: `sha256:${"c".repeat(64)}`,
+  agentContractSnapshotId: "agent-descriptor-snapshot-1",
+  agentContractDigest: `sha256:${"p".repeat(64)}`,
+  agentContextDigest: `sha256:${"c".repeat(64)}`,
   capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
   agentAttestationIds: ["agent-attestation-1"],
   runtimeAttestationIds: ["runtime-attestation-1"],
@@ -331,10 +331,10 @@ describe("ExecutionBinding authority final validation", () => {
       attestationIds: ["attestation-1"],
       conformanceRunId: null,
       approvals: [],
-      agentDescriptorSnapshotId: null,
-      agentProviderDescriptorDigest: null,
-      agentCapabilityManifestDigest: null,
-      agentInvocationContextContractDigest: null,
+      agentContractSnapshotId: null,
+      agentContractDigest: null,
+      agentCapabilityDigest: null,
+      agentContextDigest: null,
     };
     expect(() => validateFrozenPublicationEvidenceDigest({ publication: agent })).not.toThrow();
 
@@ -348,10 +348,10 @@ describe("ExecutionBinding authority final validation", () => {
       attestationIds: ["attestation-2"],
       conformanceRunId: "run-1",
       approvals: [],
-      agentDescriptorSnapshotId: null,
-      agentProviderDescriptorDigest: null,
-      agentCapabilityManifestDigest: null,
-      agentInvocationContextContractDigest: null,
+      agentContractSnapshotId: null,
+      agentContractDigest: null,
+      agentCapabilityDigest: null,
+      agentContextDigest: null,
     };
     expect(() =>
       validateFrozenPublicationEvidenceDigest({
@@ -478,9 +478,9 @@ describe("ExecutionBinding authority final validation", () => {
       runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
       runtimeTargetDigest: `sha256:${"t".repeat(64)}`,
       runtimeEvidenceKind: "hosted_artifact" as const,
-      agentDescriptorSnapshotId: "agent-descriptor-snapshot-1",
-      agentProviderDescriptorDigest: `sha256:${"p".repeat(64)}`,
-      agentInvocationContextContractDigest: `sha256:${"c".repeat(64)}`,
+      agentContractSnapshotId: "agent-descriptor-snapshot-1",
+      agentContractDigest: `sha256:${"p".repeat(64)}`,
+      agentContextDigest: `sha256:${"c".repeat(64)}`,
       capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
       agentPublicationRecordId: "agent-publication-1",
       runtimePublicationRecordId: "runtime-publication-1",
@@ -505,7 +505,7 @@ describe("ExecutionBinding authority final validation", () => {
       { capabilityCompatibilityDigest: `sha256:${"9".repeat(64)}` },
       { agentAttestationIds: ["agent-attestation-1", "agent-attestation-2"] },
       { runtimeAttestationIds: [] },
-      { agentDescriptorSnapshotId: "drifted-snapshot" },
+      { agentContractSnapshotId: "drifted-snapshot" },
       { runtimeEvidenceKind: "external_endpoint" as const },
     ]) {
       expect(() =>

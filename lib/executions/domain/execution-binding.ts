@@ -146,23 +146,23 @@ export function assertExecutionBindingEvidence(
     if (!validIds(evidence.agentAttestationIds as string[])) {
       throw new ExecutionBindingEvidenceError("Agent Attestation 引用不能为空或重复");
     }
-    // Agent evidence all-or-nothing（05 §5）：Descriptor 证据三元组缺一不可。
+    // Agent evidence all-or-nothing（05 §5）：Contract 证据三元组缺一不可。
     if (
-      !evidence.agentDescriptorSnapshotId ||
-      !SHA256.test(evidence.agentProviderDescriptorDigest as string) ||
-      !SHA256.test(evidence.agentInvocationContextContractDigest as string)
+      !evidence.agentContractSnapshotId ||
+      !SHA256.test(evidence.agentContractDigest as string) ||
+      !SHA256.test(evidence.agentContextDigest as string)
     ) {
       throw new ExecutionBindingEvidenceError(
-        "Agent Descriptor 证据不完整（Snapshot/provider digest/context contract digest 缺一不可）",
+        "Agent Contract 证据不完整（Snapshot/contract digest/context digest 缺一不可）",
       );
     }
   } else if (
-    evidence.agentDescriptorSnapshotId !== null ||
-    evidence.agentProviderDescriptorDigest !== null ||
-    evidence.agentInvocationContextContractDigest !== null
+    evidence.agentContractSnapshotId !== null ||
+    evidence.agentContractDigest !== null ||
+    evidence.agentContextDigest !== null
   ) {
     throw new ExecutionBindingEvidenceError(
-      "基础 Harness Route 不允许携带 Agent Descriptor 证据（§18 not_applicable，禁止伪装）",
+      "基础 Harness Route 不允许携带 Agent Contract 证据（§18 not_applicable，禁止伪装）",
     );
   }
   if (isExternalRuntime) {

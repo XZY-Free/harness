@@ -5,8 +5,8 @@
  */
 
 import type {
+  AgentContractListResponse,
   AgentDTO,
-  AgentDescriptorListResponse,
   AgentListResponse,
   AgentRevisionDTO,
   AgentRevisionListResponse,
@@ -27,8 +27,8 @@ export interface AgentApiClient {
   get(agentId: string): Promise<AgentDTO>;
   /** 列出 AgentRevision。 */
   listRevisions(agentId: string): Promise<AgentRevisionListResponse>;
-  /** 列出 AgentDescriptorSnapshot（09 External Contract 展示）。 */
-  listDescriptors(agentId: string): Promise<AgentDescriptorListResponse>;
+  /** 列出已导入并结构化保存的合同快照。 */
+  listContracts(agentId: string): Promise<AgentContractListResponse>;
   /** 获取 AgentRevision 详情。 */
   getRevision(revisionId: string): Promise<AgentRevisionDTO>;
   /** 创建 Draft AgentRevision。 */
@@ -60,8 +60,8 @@ export function createAgentApiClient(config: ApiClientConfig): AgentApiClient {
     get: (agentId) => request<AgentDTO>(`/admin/api/v1/agents/${agentId}`),
     listRevisions: (agentId) =>
       request<AgentRevisionListResponse>(`/admin/api/v1/agents/${agentId}/revisions`),
-    listDescriptors: (agentId) =>
-      request<AgentDescriptorListResponse>(`/admin/api/v1/agents/${agentId}/descriptors`),
+    listContracts: (agentId) =>
+      request<AgentContractListResponse>(`/admin/api/v1/agents/${agentId}/contracts`),
     getRevision: (revisionId) =>
       request<AgentRevisionDTO>(`/admin/api/v1/agent-revisions/${revisionId}`),
     createRevision: (agentId, body, opts) =>

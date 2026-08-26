@@ -21,10 +21,7 @@ export function AgentsViewer() {
   const [agents, setAgents] = useState<AgentDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
-  const loadDescriptors = useCallback(
-    (agentId: string) => client.agents.listDescriptors(agentId),
-    [],
-  );
+  const loadContracts = useCallback((agentId: string) => client.agents.listContracts(agentId), []);
 
   useEffect(() => {
     let active = true;
@@ -112,7 +109,7 @@ export function AgentsViewer() {
               {expandedAgentId === agent.id && (
                 <tr className="border-t border-[var(--border)] bg-[var(--surface-2)]">
                   <td colSpan={5} className="p-0">
-                    <AgentContractPanel agentId={agent.id} loadDescriptors={loadDescriptors} />
+                    <AgentContractPanel agentId={agent.id} loadContracts={loadContracts} />
                   </td>
                 </tr>
               )}

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  AgentPublicationDescriptorSnapshotMissingError,
+  AgentPublicationContractSnapshotMissingError,
   AgentPublicationIdempotencyCompletionError,
   AgentPublicationPrerequisiteError,
   AgentPublicationVersionConflictError,
@@ -11,7 +11,7 @@ import {
 import type {
   AgentPublicationActorType,
   AgentPublicationAttestation,
-  AgentPublicationDescriptorSnapshot,
+  AgentPublicationContractSnapshot,
   AgentPublicationRevision,
   AgentPublicationStore,
 } from "@/lib/agents/persistence/agent-publication-store";
@@ -19,7 +19,7 @@ import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/p
 
 export interface PublishAgentRevisionResult {
   revision: AgentPublicationRevision;
-  /** 可选 source Attestation；Batch 2 起发布权威是 DescriptorSnapshot，无 Attestation 时为 null。 */
+  /** 可选 source Attestation；发布权威是 AgentContractSnapshot，无 Attestation 时为 null。 */
   attestation: AgentPublicationAttestation | null;
   auditEventId: string;
   outboxEventId: string;
@@ -47,14 +47,14 @@ export interface PublishAgentRevisionCommand {
   };
 }
 
-/** 从绑定的 DescriptorSnapshot 构造附加证据（Batch 2 权威外部合同）。 */
-function descriptorAdditionalEvidence(snapshot: AgentPublicationDescriptorSnapshot): unknown {
+/** 从绑定的 AgentContractSnapshot 构造附加证据（权威外部合同）。 */
+function contractAdditionalEvidence(snapshot: AgentPublicationContractSnapshot): unknown {
   return {
-    agent_descriptor_snapshot: {
+    agent_contract_snapshot: {
       id: snapshot.id,
-      provider_descriptor_digest: snapshot.providerDescriptorDigest,
-      capability_manifest_digest: snapshot.capabilityManifestDigest,
-      invocation_context_contract_digest: snapshot.invocationContextContractDigest,
+      contract_digest: snapshot.contractDigest,
+      capability_digest: snapshot.capabilityDigest,
+      context_digest: snapshot.contextDigest,
     },
   };
 }
@@ -92,16 +92,16 @@ export function createPublishAgentRevision(dependencies: {
         );
       }
 
-      // 发布权威 = 绑定的 AgentDescriptorSnapshot（Batch 2：无源码 Artifact/Attestation 强前置）。
+      // 发布权威 = 绑定的 AgentContractSnapshot（无源码 Artifact/Attestation 强前置）。
       // §5 门禁：Snapshot 必须存在且属于相同 tenant/Agent；digest 从不可变 Snapshot 冻结。
-      const snapshot = revision.agentDescriptorSnapshotId
-        ? await session.findDescriptorSnapshot(command.tenantId, revision.agentDescriptorSnapshotId)
+      const snapshot = revision.agentContractSnapshotId
+        ? await session.findContractSnapshot(command.tenantId, revision.agentContractSnapshotId)
         : null;
       if (!snapshot || snapshot.agentId !== revision.agentId) {
-        throw new AgentPublicationDescriptorSnapshotMissingError(revision.id);
+        throw new AgentPublicationContractSnapshotMissingError(revision.id);
       }
 
-      // 可选 source Attestation：未提供则仅凭 Descriptor 证据发布；提供了但未验证则拒绝。
+      // 可选 source Attestation：未提供则仅凭 Contract 证据发布；提供了但未验证则拒绝。
       let attestation: AgentPublicationAttestation | null = null;
       let attestationIds: string[] = [];
       if (command.attestationId) {
@@ -116,11 +116,11 @@ export function createPublishAgentRevision(dependencies: {
         attestationIds = [attestation.id];
       }
 
-      const descriptorEvidence = {
-        agentDescriptorSnapshotId: snapshot.id,
-        agentProviderDescriptorDigest: snapshot.providerDescriptorDigest,
-        agentCapabilityManifestDigest: snapshot.capabilityManifestDigest,
-        agentInvocationContextContractDigest: snapshot.invocationContextContractDigest,
+      const contractEvidence = {
+        agentContractSnapshotId: snapshot.id,
+        agentContractDigest: snapshot.contractDigest,
+        agentCapabilityDigest: snapshot.capabilityDigest,
+        agentContextDigest: snapshot.contextDigest,
       };
 
       const publishedAt = now();
@@ -133,10 +133,10 @@ export function createPublishAgentRevision(dependencies: {
           attestationIds,
           conformanceRunId: null,
           approvals: [],
-          additionalEvidence: descriptorAdditionalEvidence(snapshot),
+          additionalEvidence: contractAdditionalEvidence(snapshot),
         }),
         attestationIds,
-        descriptorEvidence,
+        contractEvidence,
         publishedByType: command.actor.actorType,
         publishedBy: command.actor.actorId,
         publishedAt,
@@ -176,14 +176,15 @@ export function createPublishAgentRevision(dependencies: {
           agent_id: revision.agentId,
           revision_no: revision.revisionNo,
           revision_state: "published",
-          agent_descriptor_snapshot_id: snapshot.id,
-          capability_manifest_digest: snapshot.capabilityManifestDigest,
-          invocation_context_contract_digest: snapshot.invocationContextContractDigest,
+          agent_contract_snapshot_id: snapshot.id,
+          contract_digest: snapshot.contractDigest,
+          capability_digest: snapshot.capabilityDigest,
+          context_digest: snapshot.contextDigest,
           attestation_id: attestation?.id ?? null,
           artifact_digest: attestation?.artifactDigest ?? null,
           publication_record_id: publicationRecordId,
         },
-        reason: "AgentRevision 发布（DescriptorSnapshot 证据冻结）",
+        reason: "AgentRevision 发布（AgentContractSnapshot 证据冻结）",
         requestId: command.requestId,
         occurredAt: publishedAt,
       });
@@ -200,7 +201,7 @@ export function createPublishAgentRevision(dependencies: {
           agent_id: revision.agentId,
           revision_id: revision.id,
           revision_no: revision.revisionNo,
-          agent_descriptor_snapshot_id: snapshot.id,
+          agent_contract_snapshot_id: snapshot.id,
           attestation_id: attestation?.id ?? null,
           audit_event_id: auditEventId,
           publication_record_id: publicationRecordId,

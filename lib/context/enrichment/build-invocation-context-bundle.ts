@@ -21,7 +21,7 @@
  * 复用现有 Context 体系（ContextHandle 等），不创建第二 Context 系统。
  */
 
-import type { InvocationContextContract } from "@/lib/agents/domain/agent-descriptor";
+import type { InvocationContextContract } from "@/lib/agents/domain/public-agent-contract";
 
 /** 认证 Principal（lib/identity/resolver）的可信主体信息。 */
 export interface TrustedExecutionSubject {

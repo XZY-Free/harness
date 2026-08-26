@@ -17,7 +17,7 @@
       "http": 422,
       "retryable": false
     },
-    "AGENT_DESCRIPTOR_SNAPSHOT_MISSING": {
+    "AGENT_CONTRACT_SNAPSHOT_MISSING": {
       "http": 409,
       "retryable": false
     },

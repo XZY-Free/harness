@@ -123,7 +123,7 @@ import {
   buildDsseConformanceEnvelope,
   generateTestRunnerKey,
 } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";
-import { ensureAgentDescriptorSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-descriptor-snapshot";
+import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import {
   installTrustedHostedControlPlaneEvidenceForTest,
@@ -367,8 +367,8 @@ async function seedPublishedAgentRevision(
   }
 
   // 使用带 attestation 的正式发布服务，确保 PublicationRecord.attestationIds 非空
-  // Batch 2：发布权威 = 绑定 AgentDescriptorSnapshot；先幂等绑定（事务外），供正式命令走 snapshot 门禁。
-  await ensureAgentDescriptorSnapshotBoundForRevision(revision.id, tenantId);
+  // 发布权威 = 绑定 AgentContractSnapshot；先幂等绑定（事务外），供正式命令走 snapshot 门禁。
+  await ensureAgentContractSnapshotBoundForRevision(revision.id, tenantId);
   const publishAgentRevision = createPublishAgentRevision({
     store: mysqlAgentPublicationStore,
   });
@@ -2320,8 +2320,8 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
     expect(binding.runtimeAttestationIds).toEqual([]);
     expect(binding.conformanceRunId).toBeTruthy();
     // Agent 维度证据完整（all-or-nothing，05 §5）。
-    expect(binding.agentDescriptorSnapshotId).toBeTruthy();
-    expect(binding.agentProviderDescriptorDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(binding.agentInvocationContextContractDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(binding.agentContractSnapshotId).toBeTruthy();
+    expect(binding.agentContractDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(binding.agentContextDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });

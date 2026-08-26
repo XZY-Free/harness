@@ -56,7 +56,7 @@ import {
   computeTestDigest,
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
-import { ensureAgentDescriptorSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-descriptor-snapshot";
+import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
 
 const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
@@ -1619,9 +1619,9 @@ describe("S03-W04 阶段验收场景", () => {
       agentInterfaceRequirementsJson: {},
       createdBy: ownerId,
     });
-    // Batch 2：发布权威 = 绑定 AgentDescriptorSnapshot；未绑定先走 snapshot 门禁。
+    // 发布权威 = 绑定 AgentContractSnapshot；未绑定先走 snapshot 门禁。
     // 本用例目标是校验「未验证 Attestation」→ AgentPublicationPrerequisiteError，故先绑定 Snapshot 越过 snapshot 门禁。
-    await ensureAgentDescriptorSnapshotBoundForRevision(revision.id, tenantId);
+    await ensureAgentContractSnapshotBoundForRevision(revision.id, tenantId);
 
     // 未验证的 attestation（failed 状态）
     const failedAtt = await insertAttestation({
@@ -1679,8 +1679,8 @@ describe("S03-W04 阶段验收场景", () => {
       agentInterfaceRequirementsJson: {},
       createdBy: ownerId,
     });
-    // Batch 2：发布权威 = 绑定 AgentDescriptorSnapshot；未绑定先走 snapshot 门禁。
-    await ensureAgentDescriptorSnapshotBoundForRevision(revision.id, tenantId);
+    // 发布权威 = 绑定 AgentContractSnapshot；未绑定先走 snapshot 门禁。
+    await ensureAgentContractSnapshotBoundForRevision(revision.id, tenantId);
 
     // builder A 验证失败（SBOM 命中漏洞）
     const keyA = generateTestBuilderKey("builder:company-agent-runtime");

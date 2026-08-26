@@ -18,7 +18,9 @@ import {
  * - 校验 action scope: agent.revision.create + resource { type: "agent", id: agent_id }。
  * - 校验 Idempotency-Key（必填）+ computeRequestHash → enforceIdempotency。
  * - 校验 Agent 存在且属于当前租户（跨租户隐藏为 404）。
- * - 校验请求体（source/artifact_digest/instruction_hash/model_policy/permission_requirements/delegation_policy/agent_interface_requirements）。
+ * - 校验请求体（严格键集：source/artifact_ref/instruction_hash/agent_contract_snapshot_id/
+ *   model_policy/permission_requirements/delegation_policy/agent_interface_requirements；
+ *   未知键（含 legacy agent_descriptor_snapshot_id）一律 400）。
  * - 调用 createDraftRevision 创建 draft Revision。
  * - 写 AuditEvent（agent.revision.create）。
  * - completeRecord + 返回 201 + revision 投影 + ETag。
@@ -30,12 +32,12 @@ import {
  * - Agent 不存在/跨租户 → 404 RESOURCE_NOT_FOUND
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  */
+import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
 import { getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
   getRevisionsByAgent,
 } from "@/lib/agents/persistence/agent-revision-queries";
-import { mysqlAgentDescriptorStore } from "@/lib/agents/persistence/mysql-agent-descriptor-store";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
@@ -75,28 +77,40 @@ interface CreateRevisionBody {
   source: { source_type: "code" | "agent_yaml" | "veadk"; source_revision: string };
   artifact_ref: string;
   instruction_hash: string;
-  /** 绑定的不可变 AgentDescriptorSnapshot id（Batch 2 正式发布强约束；可空以兼容旧 Revision）。 */
-  agent_descriptor_snapshot_id?: string;
+  /** 绑定的不可变 AgentContractSnapshot id（发布权威；必填且非空白）。 */
+  agent_contract_snapshot_id: string;
   model_policy: Record<string, unknown>;
   permission_requirements: Record<string, unknown>;
   delegation_policy: Record<string, unknown>;
   agent_interface_requirements: Record<string, unknown>;
 }
 
+/** 允许的顶层键集合（严格键集校验：多余键，含 legacy agent_descriptor_snapshot_id，一律拒绝）。 */
+const REVISION_BODY_KEYS = new Set([
+  "source",
+  "artifact_ref",
+  "instruction_hash",
+  "agent_contract_snapshot_id",
+  "model_policy",
+  "permission_requirements",
+  "delegation_policy",
+  "agent_interface_requirements",
+]);
+
 /** 校验请求体。 */
 function validateBody(body: unknown): body is CreateRevisionBody {
-  if (!body || typeof body !== "object") return false;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
   const b = body as Record<string, unknown>;
+  for (const key of Object.keys(b)) {
+    if (!REVISION_BODY_KEYS.has(key)) return false;
+  }
   if (!b.source || typeof b.source !== "object" || Array.isArray(b.source)) return false;
   const source = b.source as Record<string, unknown>;
   if (!new Set(["code", "agent_yaml", "veadk"]).has(String(source.source_type))) return false;
   if (typeof source.source_revision !== "string" || !source.source_revision.trim()) return false;
   if (typeof b.artifact_ref !== "string" || !b.artifact_ref.trim()) return false;
   if (typeof b.instruction_hash !== "string" || b.instruction_hash.length === 0) return false;
-  if (
-    b.agent_descriptor_snapshot_id !== undefined &&
-    (typeof b.agent_descriptor_snapshot_id !== "string" || !b.agent_descriptor_snapshot_id.trim())
-  )
+  if (typeof b.agent_contract_snapshot_id !== "string" || !b.agent_contract_snapshot_id.trim())
     return false;
   if (!b.model_policy || typeof b.model_policy !== "object" || Array.isArray(b.model_policy))
     return false;
@@ -153,7 +167,7 @@ function projectRevision(revision: AgentRevision): Record<string, unknown> {
     revision_no: revision.revisionNo,
     revision_state: revision.revisionState,
     source_revision: revision.sourceRevision,
-    agent_descriptor_snapshot_id: revision.agentDescriptorSnapshotId ?? null,
+    agent_contract_snapshot_id: revision.agentContractSnapshotId ?? null,
     etag: `${AGENT_REVISION_ETAG_PREFIX}${revision.revisionNo}`,
   };
 }
@@ -199,17 +213,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     return schemaInvalidTable(requestId, "请求体非法：缺少必填字段或字段类型错误");
   }
 
-  // 5.5 校验绑定的 AgentDescriptorSnapshot 存在且属于同一 Agent（跨 Agent 引用 → 400）
-  if (body.agent_descriptor_snapshot_id) {
-    const boundSnapshot = await mysqlAgentDescriptorStore.transaction((session) =>
-      session.findSnapshotById(body.agent_descriptor_snapshot_id as string),
+  // 5.5 校验绑定的 AgentContractSnapshot 存在、属于当前租户且属于同一 Agent
+  // （跨租户/跨 Agent/缺失引用 → 400，且在 Revision 插入前拒绝）
+  const boundSnapshot = await mysqlAgentContractStore.transaction((session) =>
+    session.findContractSnapshotById(principal.tenantId, body.agent_contract_snapshot_id),
+  );
+  if (!boundSnapshot || boundSnapshot.agentId !== agentId) {
+    return schemaInvalidTable(
+      requestId,
+      `AgentContractSnapshot 不存在或不属于该 Agent: ${body.agent_contract_snapshot_id}`,
     );
-    if (!boundSnapshot || boundSnapshot.agentId !== agentId) {
-      return schemaInvalidTable(
-        requestId,
-        `AgentDescriptorSnapshot 不存在或不属于该 Agent: ${body.agent_descriptor_snapshot_id}`,
-      );
-    }
   }
 
   // 6. 计算请求 hash + 幂等守卫
@@ -263,7 +276,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       sourceRevision: body.source.source_revision,
       instructionHash: body.instruction_hash,
       agentArtifactRef: body.artifact_ref,
-      agentDescriptorSnapshotId: body.agent_descriptor_snapshot_id ?? null,
+      agentContractSnapshotId: body.agent_contract_snapshot_id,
       modelPolicyJson: body.model_policy,
       permissionRequirementsJson: body.permission_requirements,
       delegationPolicyJson: body.delegation_policy,
@@ -283,7 +296,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         revision_state: revision.revisionState,
         instruction_hash: revision.instructionHash,
         artifact_ref: revision.agentArtifactRef,
-        agent_descriptor_snapshot_id: revision.agentDescriptorSnapshotId ?? null,
+        agent_contract_snapshot_id: revision.agentContractSnapshotId ?? null,
       },
       reason: `创建 AgentRevision (draft, revisionNo=${revision.revisionNo})`,
       requestId,

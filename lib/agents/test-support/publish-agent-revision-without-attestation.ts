@@ -17,7 +17,7 @@ import {
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
-import { ensureAgentDescriptorSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-descriptor-snapshot";
+import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
 
 export interface PublishAgentRevisionWithoutAttestationResult {
   revision: AgentPublicationRevision;
@@ -40,7 +40,7 @@ export function createPublishAgentRevisionWithoutAttestation(dependencies: {
     agentExpectedVersionNo: number;
     requestId: string;
   }): Promise<PublishAgentRevisionWithoutAttestationResult> {
-    // Batch 2：发布权威 = 绑定 AgentDescriptorSnapshot（无源码 Artifact 强前置）。
+    // 发布权威 = 绑定 AgentContractSnapshot（无源码 Artifact 强前置）。
     // 在事务外先幂等地绑定 Snapshot（不可变），避免在 db.transaction 内再开嵌套
     // db.transaction（ensure helper 内部）导致 MySQL 连接/锁死锁。
     // 缺失 Revision 走与事务路径一致的 AgentRevisionPublicationNotFoundError（publishRevision 包装映射为 RevisionNotFoundError）。
@@ -48,15 +48,15 @@ export function createPublishAgentRevisionWithoutAttestation(dependencies: {
     if (!found) {
       throw new AgentRevisionPublicationNotFoundError(command.revisionId);
     }
-    const descriptorSnapshot = await ensureAgentDescriptorSnapshotBoundForRevision(
+    const contractSnapshot = await ensureAgentContractSnapshotBoundForRevision(
       command.revisionId,
       command.tenantId,
     );
-    const descriptorEvidence = {
-      agentDescriptorSnapshotId: descriptorSnapshot.id,
-      agentProviderDescriptorDigest: descriptorSnapshot.providerDescriptorDigest,
-      agentCapabilityManifestDigest: descriptorSnapshot.capabilityManifestDigest,
-      agentInvocationContextContractDigest: descriptorSnapshot.invocationContextContractDigest,
+    const contractEvidence = {
+      agentContractSnapshotId: contractSnapshot.id,
+      agentContractDigest: contractSnapshot.contractDigest,
+      agentCapabilityDigest: contractSnapshot.capabilityDigest,
+      agentContextDigest: contractSnapshot.contextDigest,
     };
 
     return dependencies.store.transaction(async (session) => {
@@ -88,17 +88,16 @@ export function createPublishAgentRevisionWithoutAttestation(dependencies: {
           conformanceRunId: null,
           approvals: [],
           additionalEvidence: {
-            agent_descriptor_snapshot: {
-              id: descriptorSnapshot.id,
-              provider_descriptor_digest: descriptorSnapshot.providerDescriptorDigest,
-              capability_manifest_digest: descriptorSnapshot.capabilityManifestDigest,
-              invocation_context_contract_digest:
-                descriptorSnapshot.invocationContextContractDigest,
+            agent_contract_snapshot: {
+              id: contractSnapshot.id,
+              contract_digest: contractSnapshot.contractDigest,
+              capability_digest: contractSnapshot.capabilityDigest,
+              context_digest: contractSnapshot.contextDigest,
             },
           },
         }),
         attestationIds: [],
-        descriptorEvidence,
+        contractEvidence,
         publishedByType: "system",
         publishedBy: "test-support",
         publishedAt,

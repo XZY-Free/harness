@@ -1,24 +1,15 @@
 "use client";
 
 /**
- * Agent External Contract 面板（09 §1/§4/§5，Batch 11）。
- *
- * 展示最新 AgentDescriptorSnapshot：
- * - Capability Manifest：任务能力描述（名称/描述/标签/示例），禁止呈现为函数列表；
- * - Invocation Context Contract：required / preferred / accepted 三组，逐项
- *   context kind + purpose + declaration source（operator_declared 必须标"管理员登记"）。
- *
- * 数据来源：GET /admin/api/v1/agents/{agent_id}/descriptors（同一 Control Plane 合同）。
+ * 已注册智能体合同面板。展示后台结构化保存的最新合同快照；不读取远端 AgentCard，
+ * 也不消费整份原始合同 JSON。
  */
-import type {
-  AgentContextContractItemDTO,
-  AgentDescriptorSnapshotDTO,
-} from "@/lib/control-plane-client";
+import type { AgentContractContextDTO, AgentContractSnapshotDTO } from "@/lib/control-plane-client";
 import { useEffect, useState } from "react";
 
 interface AgentContractPanelProps {
   readonly agentId: string;
-  readonly loadDescriptors: (agentId: string) => Promise<{ items: AgentDescriptorSnapshotDTO[] }>;
+  readonly loadContracts: (agentId: string) => Promise<{ items: AgentContractSnapshotDTO[] }>;
 }
 
 const GROUPS = [
@@ -38,7 +29,7 @@ function ContextContractGroup({
   items,
 }: {
   readonly title: string;
-  readonly items: readonly AgentContextContractItemDTO[];
+  readonly items: readonly AgentContractContextDTO[];
 }) {
   return (
     <div>
@@ -50,9 +41,9 @@ function ContextContractGroup({
           {items.map((item) => {
             const label = declarationLabel(item.declaration_source);
             return (
-              <li key={item.context_kind} className="text-[12px] text-[var(--fg-muted)]">
-                <span className="font-mono">{item.context_kind}</span>
-                {item.purpose ? ` — ${item.purpose}` : ""}
+              <li key={item.key} className="text-[12px] text-[var(--fg-muted)]">
+                <span className="font-mono">{item.key}</span>
+                {item.description["zh-CN"] ? ` — ${item.description["zh-CN"]}` : ""}
                 {label && (
                   <span className="ml-1.5 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[11px] text-[var(--fg-subtle)]">
                     {label}
@@ -67,8 +58,8 @@ function ContextContractGroup({
   );
 }
 
-export function AgentContractPanel({ agentId, loadDescriptors }: AgentContractPanelProps) {
-  const [snapshot, setSnapshot] = useState<AgentDescriptorSnapshotDTO | null>(null);
+export function AgentContractPanel({ agentId, loadContracts }: AgentContractPanelProps) {
+  const [snapshot, setSnapshot] = useState<AgentContractSnapshotDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -77,7 +68,7 @@ export function AgentContractPanel({ agentId, loadDescriptors }: AgentContractPa
     setSnapshot(null);
     setError(null);
     setLoaded(false);
-    loadDescriptors(agentId).then(
+    loadContracts(agentId).then(
       (result) => {
         // 列表按 capturedAt 降序；取最新一条作当前合同。
         if (active) {
@@ -92,7 +83,7 @@ export function AgentContractPanel({ agentId, loadDescriptors }: AgentContractPa
     return () => {
       active = false;
     };
-  }, [agentId, loadDescriptors]);
+  }, [agentId, loadContracts]);
 
   if (error) return <div className="px-3 py-2 text-[12px] text-[var(--danger)]">{error}</div>;
   if (!loaded) {
@@ -102,21 +93,13 @@ export function AgentContractPanel({ agentId, loadDescriptors }: AgentContractPa
     return <div className="px-3 py-2 text-[12px] text-[var(--fg-muted)]">暂无外部合同</div>;
   }
 
-  const capabilities = snapshot.normalized_capability_manifest?.capabilities ?? [];
-  const contract = snapshot.invocation_context_contract ?? {};
-  const provenance = snapshot.contract_section_provenance ?? {};
-  const capabilitySource = declarationLabel(provenance.capability);
+  const capabilities = snapshot.capabilities;
 
   return (
     <div className="space-y-3 px-3 py-3">
       <div className="text-[12px] text-[var(--fg-muted)]">
-        Descriptor Snapshot <span className="font-mono">{snapshot.id.slice(0, 8)}</span> ·{" "}
+        合同版本 <span className="font-mono">{snapshot.contract_version}</span> ·{" "}
         {snapshot.protocol_type}@{snapshot.protocol_contract_revision}
-        {capabilitySource && (
-          <span className="ml-1.5 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[11px]">
-            {capabilitySource}
-          </span>
-        )}
       </div>
 
       <div>
@@ -126,11 +109,11 @@ export function AgentContractPanel({ agentId, loadDescriptors }: AgentContractPa
         ) : (
           <ul className="mt-1 space-y-1">
             {capabilities.map((capability) => (
-              <li key={capability.capability_key} className="text-[12px] text-[var(--fg-muted)]">
+              <li key={capability.key} className="text-[12px] text-[var(--fg-muted)]">
                 <span className="text-[var(--fg)]">
-                  {capability.display_name ?? capability.capability_key}
+                  {capability.name["zh-CN"] ?? capability.key}
                 </span>
-                {capability.description ? ` — ${capability.description}` : ""}
+                {capability.description["zh-CN"] ? ` — ${capability.description["zh-CN"]}` : ""}
                 {capability.tags && capability.tags.length > 0 && (
                   <span className="ml-1.5 text-[11px]">#{capability.tags.join(" #")}</span>
                 )}
@@ -153,7 +136,7 @@ export function AgentContractPanel({ agentId, loadDescriptors }: AgentContractPa
           <ContextContractGroup
             key={group.key}
             title={group.label}
-            items={(contract[group.key] ?? []) as AgentContextContractItemDTO[]}
+            items={snapshot.invocation_context.filter((item) => item.necessity === group.key)}
           />
         ))}
       </div>

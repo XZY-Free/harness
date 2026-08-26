@@ -22,7 +22,7 @@ export const API_ERROR_CODES = {
   ACTION_SCOPE_DENIED: { http: 403, retryable: false },
   ACTIVE_LEGAL_HOLD: { http: 409, retryable: false },
   AGENT_CAPABILITY_UNSUPPORTED: { http: 422, retryable: false },
-  AGENT_DESCRIPTOR_SNAPSHOT_MISSING: { http: 409, retryable: false },
+  AGENT_CONTRACT_SNAPSHOT_MISSING: { http: 409, retryable: false },
   ARTIFACT_ATTESTATION_FAILED: { http: 422, retryable: false },
   ARTIFACT_ATTESTATION_REVOKED: { http: 409, retryable: false },
   ARTIFACT_BINDING_MISMATCH: { http: 409, retryable: false },

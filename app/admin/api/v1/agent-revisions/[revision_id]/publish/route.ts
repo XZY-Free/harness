@@ -10,7 +10,7 @@ import {
 } from "@/lib/admin/route-helpers";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import {
-  AgentPublicationDescriptorSnapshotMissingError,
+  AgentPublicationContractSnapshotMissingError,
   AgentPublicationPrerequisiteError,
   AgentPublicationVersionConflictError,
   AgentRevisionPublicationNotFoundError,
@@ -91,7 +91,7 @@ interface RouteContext {
 interface PublishBody {
   release_notes: string;
   evidence_refs?: unknown[];
-  /** 可选 source Attestation id（Batch 2 不再强制；发布权威是 AgentDescriptorSnapshot 证据）。 */
+  /** 可选 source Attestation id（不再强制；发布权威是 AgentContractSnapshot 证据）。 */
   artifact_attestation_id?: string | null;
 }
 
@@ -280,8 +280,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   } catch (err) {
     await failRecord(recordId);
 
-    if (err instanceof AgentPublicationDescriptorSnapshotMissingError) {
-      return apiError("AGENT_DESCRIPTOR_SNAPSHOT_MISSING", err.message, { requestId });
+    if (err instanceof AgentPublicationContractSnapshotMissingError) {
+      return apiError("AGENT_CONTRACT_SNAPSHOT_MISSING", err.message, { requestId });
     }
     if (err instanceof AgentPublicationPrerequisiteError) {
       return apiError("ARTIFACT_NOT_VERIFIED", err.message, { requestId });

@@ -32,11 +32,11 @@ export interface ActivePublicationSnapshot {
   withdrawalRecordId: string | null;
   /** 发布时间。 */
   publishedAt: Date;
-  /** Agent Publication 冻结的 DescriptorSnapshot 证据（runtime 为 null — 05 §5）。 */
-  agentDescriptorSnapshotId: string | null;
-  agentProviderDescriptorDigest: string | null;
-  agentCapabilityManifestDigest: string | null;
-  agentInvocationContextContractDigest: string | null;
+  /** Agent Publication 冻结的 AgentContractSnapshot 证据（runtime 为 null — 05 §5）。 */
+  agentContractSnapshotId: string | null;
+  agentContractDigest: string | null;
+  agentCapabilityDigest: string | null;
+  agentContextDigest: string | null;
 }
 
 /**

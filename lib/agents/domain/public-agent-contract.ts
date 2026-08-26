@@ -11,17 +11,27 @@
  *
  * 事实源：Public Agent Contract 冻结目标模型（本切片）。
  */
-import { computeStableDigest } from "@/lib/agents/domain/agent-descriptor";
+import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 
 // ─── 语义枚举 ─────────────────────────────────────────────
 
-/** context 必要性（与 AgentDescriptor 合同一致）。 */
+/** 调用上下文必要性。 */
 export const CONTEXT_NECESSITIES = ["required", "preferred", "accepted"] as const;
 export type ContextNecessity = (typeof CONTEXT_NECESSITIES)[number];
 
 /** 合同声明来源。 */
 export const PROVENANCE_SOURCES = ["provider_declared", "operator_declared"] as const;
 export type ProvenanceSource = (typeof PROVENANCE_SOURCES)[number];
+
+/** 运行时按冻结快照重建的调用上下文合同。 */
+export interface InvocationContextContract {
+  contexts: Array<{
+    contextKind: string;
+    necessity: ContextNecessity;
+    purpose?: string;
+    provenance?: ProvenanceSource;
+  }>;
+}
 
 // ─── 错误 ─────────────────────────────────────────────────
 
@@ -281,7 +291,7 @@ function assertDeclarationSource(value: unknown, where: string): ProvenanceSourc
 // ─── digest ───────────────────────────────────────────────
 
 function digestOf(value: unknown): string {
-  return computeStableDigest(value);
+  return computeCanonicalDigest(value);
 }
 
 /** 合同 digest 载荷：结构化事实本身（不含 digest 字段）。 */

@@ -1,6 +1,6 @@
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import {
-  AgentPublicationDescriptorSnapshotMissingError,
+  AgentPublicationContractSnapshotMissingError,
   AgentRevisionPublicationNotFoundError,
 } from "@/lib/agents/domain/agent-revision-publication-policy";
 import type {
@@ -31,7 +31,7 @@ import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
-import { ensureAgentDescriptorSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-descriptor-snapshot";
+import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -96,8 +96,8 @@ async function seedPublicationFixture() {
     .update(agentRevisionTable)
     .set({ artifactId: authority.id, artifactDigest: authority.digest })
     .where(eq(agentRevisionTable.id, revision.id));
-  // Batch 2：发布命令强制 Revision 绑定 AgentDescriptorSnapshot（权威外部合同）。
-  const descriptorSnapshot = await ensureAgentDescriptorSnapshotBoundForRevision(
+  // 发布命令强制 Revision 绑定 AgentContractSnapshot（权威外部合同）。
+  const contractSnapshot = await ensureAgentContractSnapshotBoundForRevision(
     revision.id,
     tenant.id,
   );
@@ -116,7 +116,7 @@ async function seedPublicationFixture() {
     agent,
     revision,
     attestation,
-    descriptorSnapshot,
+    contractSnapshot,
     idempotency,
   };
 }
@@ -235,12 +235,11 @@ describe("PublishAgentRevision Application Service", () => {
       publishedBy: fixture.ownerId,
       idempotencyKey: fixture.idempotency.idempotencyKey,
       idempotencyRecordId: fixture.idempotency.id,
-      // Batch 2：Publication 精确绑定 DescriptorSnapshot 证据
-      agentDescriptorSnapshotId: fixture.descriptorSnapshot.id,
-      agentProviderDescriptorDigest: fixture.descriptorSnapshot.providerDescriptorDigest,
-      agentCapabilityManifestDigest: fixture.descriptorSnapshot.capabilityManifestDigest,
-      agentInvocationContextContractDigest:
-        fixture.descriptorSnapshot.invocationContextContractDigest,
+      // Publication 精确绑定 AgentContractSnapshot 证据
+      agentContractSnapshotId: fixture.contractSnapshot.id,
+      agentContractDigest: fixture.contractSnapshot.contractDigest,
+      agentCapabilityDigest: fixture.contractSnapshot.capabilityDigest,
+      agentContextDigest: fixture.contractSnapshot.contextDigest,
     });
     expect(publication?.publicationSequence).toBeGreaterThan(0);
     expect(publication?.evidenceSetDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
@@ -384,7 +383,7 @@ describe("PublishAgentRevision Application Service", () => {
     );
   });
 
-  it("无 source Attestation 时，仅凭 DescriptorSnapshot 证据正式发布（Batch 2 Gate）", async () => {
+  it("无 source Attestation 时，仅凭 AgentContractSnapshot 证据正式发布（Gate）", async () => {
     const fixture = await seedPublicationFixture();
     const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 
@@ -402,26 +401,20 @@ describe("PublishAgentRevision Application Service", () => {
       subjectType: "agent_revision",
       subjectRevisionId: fixture.revision.id,
     });
-    // 无 Attestation 但 Descriptor 证据已精确冻结
+    // 无 Attestation 但 Contract 证据已精确冻结
     expect(publication?.attestationIds).toEqual([]);
-    expect(publication?.agentDescriptorSnapshotId).toBe(fixture.descriptorSnapshot.id);
-    expect(publication?.agentProviderDescriptorDigest).toBe(
-      fixture.descriptorSnapshot.providerDescriptorDigest,
-    );
-    expect(publication?.agentCapabilityManifestDigest).toBe(
-      fixture.descriptorSnapshot.capabilityManifestDigest,
-    );
-    expect(publication?.agentInvocationContextContractDigest).toBe(
-      fixture.descriptorSnapshot.invocationContextContractDigest,
-    );
+    expect(publication?.agentContractSnapshotId).toBe(fixture.contractSnapshot.id);
+    expect(publication?.agentContractDigest).toBe(fixture.contractSnapshot.contractDigest);
+    expect(publication?.agentCapabilityDigest).toBe(fixture.contractSnapshot.capabilityDigest);
+    expect(publication?.agentContextDigest).toBe(fixture.contractSnapshot.contextDigest);
   });
 
-  it("未绑定 AgentDescriptorSnapshot 的 Revision 拒绝发布（AgentPublicationDescriptorSnapshotMissingError）", async () => {
+  it("未绑定 AgentContractSnapshot 的 Revision 拒绝发布（AgentPublicationContractSnapshotMissingError）", async () => {
     const fixture = await seedPublicationFixture();
     // 解绑 Snapshot，模拟旧/未绑定 Revision
     await db
       .update(agentRevisionTable)
-      .set({ agentDescriptorSnapshotId: null })
+      .set({ agentContractSnapshotId: null })
       .where(eq(agentRevisionTable.id, fixture.revision.id));
     const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 
@@ -430,7 +423,7 @@ describe("PublishAgentRevision Application Service", () => {
         ...publicationCommand(fixture),
         idempotency: undefined,
       }),
-    ).rejects.toBeInstanceOf(AgentPublicationDescriptorSnapshotMissingError);
+    ).rejects.toBeInstanceOf(AgentPublicationContractSnapshotMissingError);
 
     expect((await getRevisionById(fixture.revision.id))?.revisionState).toBe("draft");
   });

@@ -132,12 +132,12 @@ export const agentRevisionTable = mysqlTable(
       .notNull()
       .references(() => agentTable.id),
     /**
-     * 绑定的不可变 AgentDescriptorSnapshot id（逻辑外键 → AgentDescriptorSnapshot.id）。
-     * 旧 Revision 可为空；正式发布（Batch 2 强约束）必须精确引用一个 Snapshot。
-     * SnowHarness 对 Agent 一律按源码不可见处理——Revision 的权威来源是 DescriptorSnapshot，
-     * 不是 sourceType/sourceRevision/agentArtifactRef。
+     * 绑定的不可变 AgentContractSnapshot id（逻辑外键 → AgentContractSnapshot.id）。
+     * 创建 Revision 时必须精确引用一个同 tenant/Agent 的 Snapshot；发布证据从该
+     * 结构化快照冻结。SnowHarness 对 Agent 一律按源码不可见处理——Revision 的
+     * 权威来源是 AgentContractSnapshot，不是 sourceType/sourceRevision/agentArtifactRef。
      */
-    agentDescriptorSnapshotId: varchar("agentDescriptorSnapshotId", { length: 36 }),
+    agentContractSnapshotId: varchar("agentContractSnapshotId", { length: 36 }),
     /** Agent 内单调递增修订号。 */
     revisionNo: bigint("revisionNo", { mode: "number" }).notNull(),
     /** 来源类型（code/agent_yaml/veadk）。varchar 存储以便扩展。 */
@@ -177,79 +177,6 @@ export const agentRevisionTable = mysqlTable(
 
 export type AgentRevision = InferSelectModel<typeof agentRevisionTable>;
 export type NewAgentRevision = InferInsertModel<typeof agentRevisionTable>;
-
-// ─── AgentDescriptorSnapshot ────────────────────────────────
-
-/**
- * AgentDescriptorSnapshot：SnowHarness 接受的 Agent 外部合同（Descriptor / Agent Card）的一次
- * 不可变快照（docs/V12/01/agent补充/00 §6.2 / 01 §2）。
- *
- * SnowHarness 对 Agent 一律按源码不可见处理；Snapshot 是唯一 Authority，回答三件事：
- * 这个 Agent 是谁（Identity）、它声明会什么（CapabilityManifest）、调用它时平台应尽量提供
- * 什么上下文（InvocationContextContract），外加 Protocol Facts（protocolType / protocolContractRevision）。
- *
- * 关键约束：
- * - 整个 Snapshot 不可修改：登记后不可 UPDATE；任何改变能力/上下文/协议合同的变更都必须
- *   生成新 Snapshot（→ 新 AgentRevision）。
- * - canonicalProviderDescriptor 是 provider 原始声明的规范化 JSON（含 provider/operator provenance）。
- * - normalizedCapabilityManifest / invocationContextContract 是结构化、可查询的规范形式
- *   （不是 digest 唯一），供 Selector / 搜索 / 管理端展示。
- * - providerDescriptorDigest / capabilityManifestDigest / invocationContextContractDigest 为
- *   sha256: 前缀的稳定 canonical digest。
- * - providerDeclaredRevisionRef 可空：provider 声明的原始修订标识，仅作参考，不作 Authority。
- * - contractSectionProvenance 显式区分 provider_declared / operator_declared，禁止伪装来源。
- */
-export const agentDescriptorSnapshotTable = mysqlTable(
-  "AgentDescriptorSnapshot",
-  {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .notNull()
-      .$defaultFn(() => randomUUID()),
-    tenantId: varchar("tenantId", { length: 36 })
-      .notNull()
-      .references(() => tenant.id),
-    /** 归属 Agent（逻辑外键 → Agent.id）。 */
-    agentId: varchar("agentId", { length: 36 })
-      .notNull()
-      .references(() => agentTable.id),
-    /** Descriptor 种类（如 agent_card）。varchar 存储以便扩展。 */
-    descriptorKind: varchar("descriptorKind", { length: 32 }).notNull(),
-    /** 协议类型（agent_runtime_protocol/a2a/...）。varchar 以便扩展。 */
-    protocolType: varchar("protocolType", { length: 32 }).notNull(),
-    /** Conformance 与发布共同冻结的协议契约版本。 */
-    protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
-    /** provider 原始声明规范化后的 JSON（含 provenance）。 */
-    canonicalProviderDescriptor: json("canonicalProviderDescriptor").notNull(),
-    /** providerDescriptorDigest：sha256: 前缀的稳定 canonical digest。 */
-    providerDescriptorDigest: varchar("providerDescriptorDigest", { length: 71 }).notNull(),
-    /** 结构化 CapabilityManifest（可查询，非 digest 唯一）。 */
-    normalizedCapabilityManifest: json("normalizedCapabilityManifest").notNull(),
-    /** capabilityManifestDigest：sha256: 前缀。仅由业务能力构成，不混 Runtime interface requirements。 */
-    capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
-    /** 结构化 InvocationContextContract（required/preferred/accepted）。 */
-    invocationContextContract: json("invocationContextContract").notNull(),
-    /** invocationContextContractDigest：sha256: 前缀。 */
-    invocationContextContractDigest: varchar("invocationContextContractDigest", {
-      length: 71,
-    }).notNull(),
-    /** provider 声明的原始修订标识（可空，仅参考，不作 Authority）。 */
-    providerDeclaredRevisionRef: varchar("providerDeclaredRevisionRef", { length: 128 }),
-    /** 各合同节来源：{ capability, context, ... } ∈ provider_declared | operator_declared。 */
-    contractSectionProvenance: json("contractSectionProvenance").notNull(),
-    /** 登记捕获时间。 */
-    capturedAt: datetime("capturedAt", { mode: "date", fsp: 3 }).notNull(),
-    /** 创建者 userIdentityId 或 serviceId。 */
-    createdBy: varchar("createdBy", { length: 128 }).notNull(),
-  },
-  (t) => ({
-    tenantAgentIdx: index("AgentDescriptorSnapshot_tenant_agent_idx").on(t.tenantId, t.agentId),
-    agentIdx: index("AgentDescriptorSnapshot_agent_idx").on(t.agentId),
-  }),
-);
-
-export type AgentDescriptorSnapshot = InferSelectModel<typeof agentDescriptorSnapshotTable>;
-export type NewAgentDescriptorSnapshot = InferInsertModel<typeof agentDescriptorSnapshotTable>;
 
 // ─── Canonical Row 别名（领域面向的行类型名）────────────────
 export type AgentRow = Agent;
