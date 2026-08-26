@@ -1,27 +1,30 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 /**
- * POST /admin/api/v1/agents/{agent_id}/runtime-registrations — 主动黑盒注册验收（预期 RED）。
+ * POST /admin/api/v1/agents/{agent_id}/runtime-registrations — capability-driven
+ * 黑盒注册验收（02 专项）。
  *
  * 冻结不变量（Runtime Registration 权威切片）：
  * - 请求体严格 schema：contract_snapshot_id + runtime_endpoint + authentication{mode,
- *   credential_ref_id} + conformance{start_input, resume_input}，多余字段一律 400。
+ *   credential_ref_id} + conformance{basic 恒必填；input_required/resume/cancel 可选}，
+ *   probe presence 与快照 interaction 声明严格匹配，多余/缺失/多余字段一律 400。
  * - 协议/交互事实只能来自已导入的结构化 AgentContractSnapshot（同租户、同 Agent）；
  *   调用方不得上传 protocol/capabilities/report/passed/agent_card_url。
- * - SnowHarness 必须主动对黑盒 Runtime 发起真实 HTTP/SSE 一致性调用：
- *   GET /.well-known/agent-card.json → message/stream(start_input) 观测 input-required
- *   （同 taskId/contextId）→ message/send(resume_input) 观测 completed。cancel=false
- *   的快照不得调用 tasks/cancel；incremental_content=false 不得要求增量分片；
- *   streaming_transport=true 必须真实观测到 SSE 事件流。
- * - 成功响应/持久化只含结构化 id/status/measured digest，不含原始合同、conformance
- *   transcript、secret、AgentCard 事实覆盖。
- * - 一切失败 fail closed：不可达/路径错误/无 input-required/correlation 变化 → 非 2xx，
- *   永不 verified/published/enabled。
+ * - SnowHarness 必须主动对黑盒 Runtime 发起真实 HTTP/SSE 一致性调用（02 §3-§7）：
+ *   AgentCard → basic（按 streamingTransport 分 message/send / message/stream）→
+ *   按声明 input_required / resume / cancel probe；incremental_content=true 必须真实
+ *   观测内容增量；cancel=false 绝不调用 tasks/cancel。
+ * - durableTaskRecovery：measured=not_measured、effective=false（02 §8）。
+ * - 成功响应/持久化只含结构化 id/status/measured digest（declared/measured/effective
+ *   三态分离），不含原始合同、conformance transcript、secret、AgentCard 事实覆盖。
+ * - 一切失败 fail closed：不可达/路径错误/无 input-required/correlation 变化/协议冲突/
+ *   无增量 → 非 2xx，永不 verified/published/enabled，零 Runtime/Revision 行。
  * - 幂等：同 key 同 body 重放不产生第二次网络序列或重复行；同 key 不同 body 409。
  * - 专用授权动作 agent.runtime.register（按具体 Agent scope）；租户隔离。
  *
  * 真实 MySQL 8（Testcontainers）+ 真实 node:http Provider + 全局 fetch，无 mock。
  */
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
+import { hrAgentContract } from "@/lib/agents/test-support/hr-agent-contract";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { db } from "@/lib/db/client";
@@ -45,7 +48,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-routes.test.ts 一致）。
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
 
-/** 动态加载被测路由（RED 阶段：模块缺失 → 每个路由用例以缺路由失败）。 */
+/** 动态加载被测路由。 */
 type RoutePOST = (
   request: Request,
   context: { params: Promise<{ agent_id: string }> },
@@ -77,7 +80,8 @@ afterAll(async () => {
 beforeEach(async () => {
   process.env.SNOW_AUTH_MODE = "dev";
   await resetDatabase(db);
-  // Provider 状态隔离：清空 wire 记录、复位 correlation 篡改/Bearer 校验，场景回 input_required。
+  // Provider 状态隔离：清空 wire 记录、复位 correlation 篡改/Bearer 校验/card 覆盖，
+  // 场景回 input_required。
   provider.reset();
   // 官方非流式 message/send 返回完整 Task（id/contextId），不是 status-update 的 taskId。
   provider.setResumeResponseShape("task");
@@ -130,19 +134,70 @@ async function grantRuntimeRegisterAction(
   });
 }
 
-/** 完整种子：管理员 + HR Agent + 结构化合同快照 +（可选）授权。 */
-async function seedRegistrationTarget(options: { grantAction?: boolean } = {}) {
+/** interaction 覆盖（02 §12 Provider profile 的声明侧事实）。 */
+function contractWithInteraction(overrides: Record<string, boolean>): unknown {
+  const contract = structuredClone(hrAgentContract) as Record<string, unknown>;
+  contract.interaction = {
+    ...(contract.interaction as Record<string, unknown>),
+    ...overrides,
+  };
+  return contract;
+}
+
+/** Profile A：basic-only（streaming=false，无任何可选 probe）。 */
+const PROFILE_A_CONTRACT = contractWithInteraction({
+  streaming_transport: false,
+  incremental_content: false,
+  input_required: false,
+  resume: false,
+  cancel: false,
+});
+/** Profile B：streaming + input-required + resume。 */
+const PROFILE_B_CONTRACT = contractWithInteraction({
+  streaming_transport: true,
+  incremental_content: false,
+  input_required: true,
+  resume: true,
+  cancel: false,
+});
+/** Profile C：streaming + cancel。 */
+const PROFILE_C_CONTRACT = contractWithInteraction({
+  streaming_transport: true,
+  incremental_content: false,
+  input_required: false,
+  resume: false,
+  cancel: true,
+});
+/** incremental 声明（依赖流式，02 §4）。 */
+const INCREMENTAL_CONTRACT = contractWithInteraction({
+  streaming_transport: true,
+  incremental_content: true,
+  input_required: false,
+  resume: false,
+  cancel: false,
+});
+
+/** 持久化 capabilities JSON 的断言形态（declared/measured/effective）。 */
+type PersistedCapabilities = {
+  declared: Record<string, unknown>;
+  measured: Record<string, unknown> & { features: Record<string, unknown> };
+  effective: Record<string, unknown>;
+};
+
+/** 完整种子：管理员 + Agent + 指定 interaction 的合同快照 +（可选）授权。 */
+async function seedRegistrationTarget(options: { grantAction?: boolean; contract?: unknown } = {}) {
   const seeded = await seedAdmin();
   const agent = await createAgent({
     tenantId: seeded.tenantId,
-    agentKey: "hr-agent",
-    displayName: "HR Agent",
+    agentKey: `agent-${randomUUID().slice(0, 8)}`,
+    displayName: "Capability Agent",
     ownerUserId: seeded.userIdentityId,
   });
   const snapshot = await seedAgentContractSnapshot({
     tenantId: seeded.tenantId,
     agentId: agent.id,
     createdBy: seeded.userIdentityId,
+    ...(options.contract !== undefined ? { contract: options.contract } : {}),
   });
   if (options.grantAction !== false) {
     await grantRuntimeRegisterAction(seeded, agent.id);
@@ -172,15 +227,30 @@ async function seedCredentialRef(
   return id;
 }
 
-/** 合法注册请求体基线（mode=none 免密路径，不伪造 secret）。 */
-function baseBody(snapshotId: string, endpoint: string) {
+/** capability-driven 合法请求体基线（mode=none 免密路径，不伪造 secret）。 */
+function registrationBody(
+  snapshotId: string,
+  endpoint: string,
+  conformance: Record<string, unknown>,
+): Record<string, unknown> {
   return {
     contract_snapshot_id: snapshotId,
     runtime_endpoint: endpoint,
     authentication: { mode: "none", credential_ref_id: null },
-    conformance: { start_input: "我想请年假", resume_input: "明天一天" },
+    conformance,
   };
 }
+
+/** Profile B（streaming+input_required+resume）的 conformance 基线。 */
+const B_CONFORMANCE = {
+  basic: { input: "常规问题" },
+  input_required: { input: "请补充请假信息" },
+  resume: { start_input: "我想请年假", resume_input: "明天一天" },
+};
+/** Profile A（basic-only）的 conformance 基线。 */
+const A_CONFORMANCE = { basic: { input: "常规问题" } };
+/** Profile C（streaming+cancel）的 conformance 基线。 */
+const C_CONFORMANCE = { basic: { input: "开始长任务" }, cancel: { input: "开始长任务" } };
 
 async function callPOST(agentId: string, body: unknown, idempotencyKey: string): Promise<Response> {
   const POST = await loadRoutePOST();
@@ -246,62 +316,50 @@ async function expectFailClosed(tenantId: string) {
 
 // ─── 用例 ─────────────────────────────────────────────────
 
-describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑盒注册验收）", () => {
+describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（capability-driven 注册验收）", () => {
   it("action 目录冻结：必须存在专用稳定动作 agent.runtime.register", () => {
     expect(ACTION_CODES).toContain("agent.runtime.register");
   });
 
-  it("happy path：真实 HTTP/SSE 序列（标准 card 路径 → input-required → 同 task/context resume → completed），响应结构化且 fail-closed 状态干净", async () => {
-    const seeded = await seedRegistrationTarget();
-    // 本用例的 wire 切片（reset 已隔离，这里显式取切片以明确意图）。
+  it("01/02：basic-only Agent（Profile A，streaming=false）注册成功且绝不调用 message/stream 与 tasks/cancel", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_A_CONTRACT });
+    provider.setCardStreaming(false);
+    provider.setScenario("completed");
     const requestsBefore = provider.requests.length;
-    const capturedBefore = provider.captured.length;
     const rpcBefore = provider.rpcMethods.length;
     const response = await callPOST(
       seeded.agentId,
-      baseBody(seeded.snapshotId, provider.endpoint),
-      "idem-rt-reg-happy-001",
+      registrationBody(seeded.snapshotId, provider.endpoint, A_CONFORMANCE),
+      "idem-rt-reg-basic-a-001",
     );
     expect(response.status).toBe(201);
     const body = (await response.json()) as Record<string, unknown>;
 
-    // 结构化响应：回显 snapshot id 与 endpoint，status 为 verified；不含原始合同/transcript/secret/AgentCard 事实。
     expect(body.agent_contract_snapshot_id).toBe(seeded.snapshotId);
     expect(body.runtime_endpoint).toBe(provider.endpoint);
     expect(String(body.verification_state ?? body.status ?? "")).toContain("verified");
-    const serialized = JSON.stringify(body);
-    expect(serialized).not.toContain("Test Enterprise Agent");
-    expect(serialized).not.toContain("capability_manifest");
-    expect(serialized).not.toContain("请提供申请日期");
-    expect(serialized).not.toContain("已收到补充信息");
-    expect(serialized).not.toContain("vaultRef");
-    expect(serialized).not.toContain("raw_contract");
+    // 结构化 measured 矩阵（02 §9）。
+    expect(body.measured).toEqual({
+      agent_card: { protocol_version: "pass", transport: "pass", streaming_consistency: "pass" },
+      basic_invocation: { status: "pass" },
+      features: {
+        streaming_transport: "not_applicable",
+        incremental_content: "not_applicable",
+        input_required: "not_applicable",
+        resume: "not_applicable",
+        cancel: "not_applicable",
+        durable_task_recovery: "not_measured",
+      },
+    });
 
-    // 真实网络序列（黑盒 wire 证据，全部限定在本用例切片内）：
-    const newRequests = provider.requests.slice(requestsBefore);
-    const newCaptured = provider.captured.slice(capturedBefore);
+    // wire：basic probe 走 message/send（streaming=false 不调用 message/stream）；
+    // 快照未声明任何可选能力 → 无 input-required/resume 流，cancel=false 零 tasks/cancel。
     const newRpcMethods = provider.rpcMethods.slice(rpcBefore);
-    // 1) 标准 A2A 0.3.0 AgentCard 路径（旧 agent.json 路径不算通过），恰好一次。
-    expect(
-      newRequests.filter((r) => r.method === "GET" && r.path === "/.well-known/agent-card.json"),
-    ).toHaveLength(1);
-    expect(newRequests.some((r) => r.method === "POST")).toBe(true);
-    // 2) message/stream 携带 start_input（SSE 流，streaming_transport=true）。
-    const streamCall = newCaptured.find((c) => c.method === "message/stream");
-    expect(streamCall?.text).toContain("我想请年假");
-    // 3) message/send 携带 resume_input 且同 taskId/contextId。
-    const resumeCall = newCaptured.find((c) => c.method === "message/send");
-    expect(resumeCall?.text).toContain("明天一天");
-    expect(resumeCall?.taskId).toBe(streamCall?.responseTaskId);
-    expect(resumeCall?.contextId).toBe(streamCall?.responseContextId);
-    // 4) RPC method wire 观测：stream + send 各至少一次；snapshot cancel=false，绝不调用 tasks/cancel。
-    expect(newRpcMethods).toContain("message/stream");
     expect(newRpcMethods).toContain("message/send");
+    expect(newRpcMethods).not.toContain("message/stream");
     expect(newRpcMethods).not.toContain("tasks/cancel");
 
-    // 成功注册 ≠ 发布/启用：无 enabled Runtime、无 published Revision。
-    await expectFailClosed(seeded.tenantId);
-    await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(1);
+    // 持久化：declared 全 false → measured features 全 not_applicable、effective 全 false。
     const persisted = await loadRuntimeRevisions(seeded.tenantId);
     expect(persisted).toHaveLength(1);
     expect(persisted[0]?.revision).toMatchObject({
@@ -313,39 +371,298 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
       verificationState: "verified",
       revisionState: "draft",
     });
-    expect(persisted[0]?.revision.evidenceDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(persisted[0]?.revision.verifiedAt).toBeInstanceOf(Date);
     expect(persisted[0]?.revision.runtimeCapabilitiesJson).toEqual({
-      conformance: {
-        agent_card_protocol_version_match: true,
-        event_stream_observed: true,
-        input_required_observed: true,
-        resume_completed: true,
-      },
-      interaction: {
-        streaming_transport: true,
+      declared: {
+        streaming_transport: false,
         incremental_content: false,
-        input_required: true,
-        resume: true,
+        input_required: false,
+        resume: false,
+        cancel: false,
+        durable_task_recovery: false,
+      },
+      measured: {
+        agent_card: {
+          protocol_version: "pass",
+          transport: "pass",
+          streaming_consistency: "pass",
+        },
+        basic_invocation: { status: "pass" },
+        features: {
+          streaming_transport: "not_applicable",
+          incremental_content: "not_applicable",
+          input_required: "not_applicable",
+          resume: "not_applicable",
+          cancel: "not_applicable",
+          durable_task_recovery: "not_measured",
+        },
+      },
+      effective: {
+        streaming_transport: false,
+        incremental_content: false,
+        input_required: false,
+        resume: false,
         cancel: false,
         durable_task_recovery: false,
       },
     });
+    await expectFailClosed(seeded.tenantId);
+  });
+
+  it("03/08/11：streaming=true（Profile B）真实观测 SSE，cancel=false 零 tasks/cancel，durable=not_measured", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const requestsBefore = provider.requests.length;
+    const capturedBefore = provider.captured.length;
+    const rpcBefore = provider.rpcMethods.length;
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+      "idem-rt-reg-streaming-b-001",
+    );
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(body.measured).toEqual({
+      agent_card: { protocol_version: "pass", transport: "pass", streaming_consistency: "pass" },
+      basic_invocation: { status: "pass" },
+      features: {
+        streaming_transport: "pass",
+        incremental_content: "not_applicable",
+        input_required: "pass",
+        resume: "pass",
+        cancel: "not_applicable",
+        durable_task_recovery: "not_measured",
+      },
+    });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("Test Enterprise Agent");
+    expect(serialized).not.toContain("capability_manifest");
+    expect(serialized).not.toContain("请提供申请日期");
+    expect(serialized).not.toContain("已收到补充信息");
+    expect(serialized).not.toContain("vaultRef");
+    expect(serialized).not.toContain("raw_contract");
+
+    // 真实网络序列：card → basic(stream) → input-required(stream) → resume start(stream)
+    // + resume(message/send 同 correlation completed)。
+    const newRequests = provider.requests.slice(requestsBefore);
+    const newCaptured = provider.captured.slice(capturedBefore);
+    const newRpcMethods = provider.rpcMethods.slice(rpcBefore);
+    expect(
+      newRequests.filter((r) => r.method === "GET" && r.path === "/.well-known/agent-card.json"),
+    ).toHaveLength(1);
+    expect(newRpcMethods.filter((m) => m === "message/stream").length).toBeGreaterThanOrEqual(3);
+    expect(newRpcMethods).toContain("message/send");
+    // cancel=false：tasks/cancel 网络次数 = 0（02 §7）。
+    expect(newRpcMethods.filter((m) => m === "tasks/cancel")).toHaveLength(0);
+    // basic 与 input_required probe 使用各自声明的输入。
+    expect(newCaptured.filter((c) => c.text === "常规问题").length).toBeGreaterThanOrEqual(1);
+    const inputRequiredCall = newCaptured.find((c) => c.text === "我想请年假");
+    expect(inputRequiredCall).toBeDefined();
+    // resume：message/send 携带 resume_input 且同 taskId/contextId。
+    const resumeCall = newCaptured.find((c) => c.resume && c.text === "明天一天");
+    const startCall = newCaptured.find((c) => c.text === "我想请年假");
+    expect(resumeCall?.taskId).toBe(startCall?.responseTaskId);
+    expect(resumeCall?.contextId).toBe(startCall?.responseContextId);
+
+    // durable_task_recovery：not_measured 且 effective=false（02 §8/§11）。
+    const persisted = await loadRuntimeRevisions(seeded.tenantId);
+    expect(persisted).toHaveLength(1);
+    const capabilities = persisted[0]?.revision.runtimeCapabilitiesJson as PersistedCapabilities;
+    expect(capabilities.declared.durable_task_recovery).toBe(false);
+    expect(capabilities.measured.features.durable_task_recovery).toBe("not_measured");
+    expect(capabilities.effective.durable_task_recovery).toBe(false);
+    expect(capabilities.effective).toEqual({
+      streaming_transport: true,
+      incremental_content: false,
+      input_required: true,
+      resume: true,
+      cancel: false,
+      durable_task_recovery: false,
+    });
     const persistedJson = JSON.stringify(persisted);
     expect(persistedJson).not.toContain("我想请年假");
     expect(persistedJson).not.toContain("明天一天");
-    expect(persistedJson).not.toContain("Test Enterprise Agent");
-    expect(persistedJson).not.toContain("capability_manifest");
+    await expectFailClosed(seeded.tenantId);
+  });
+
+  it("04/06：inputRequired=false、resume=false 不跑对应 probe（completed 场景即可注册成功）", async () => {
+    const seeded = await seedRegistrationTarget({
+      contract: contractWithInteraction({
+        streaming_transport: true,
+        incremental_content: false,
+        input_required: false,
+        resume: false,
+        cancel: false,
+      }),
+    });
+    provider.setScenario("completed");
+    const rpcBefore = provider.rpcMethods.length;
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, A_CONFORMANCE),
+      "idem-rt-reg-no-optional-001",
+    );
+    expect(response.status).toBe(201);
+    // 只有 basic probe（一次 message/stream）；没有 resume 的 message/send（无 taskId 调用）。
+    const newRpcMethods = provider.rpcMethods.slice(rpcBefore);
+    expect(newRpcMethods.filter((m) => m === "message/stream")).toHaveLength(1);
+    expect(newRpcMethods).not.toContain("message/send");
+    expect(newRpcMethods).not.toContain("tasks/cancel");
+    const captured = provider.captured;
+    expect(captured.every((c) => !c.resume)).toBe(true);
+    await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(1);
+  });
+
+  it("05/13：声明 input_required=true 但未观测到 → 422 fail closed，零 Runtime/Revision 行", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    provider.setScenario("completed");
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+      "idem-rt-reg-no-input-required-001",
+    );
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+    await expectFailClosed(seeded.tenantId);
+    await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
+  });
+
+  it("07/13：resume correlation 被篡改 → 422 fail closed，零行", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    provider.corruptResumeCorrelation();
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+      "idem-rt-reg-correlation-001",
+    );
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+    await expectFailClosed(seeded.tenantId);
+    await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
+  });
+
+  it("09：cancel=true 真测取消（Profile C：start long-running → tasks/cancel → canceled）", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_C_CONTRACT });
+    provider.setScenario("long_running");
+    const requestsBefore = provider.requests.length;
+    const rpcBefore = provider.rpcMethods.length;
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, C_CONFORMANCE),
+      "idem-rt-reg-cancel-c-001",
+    );
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect((body.measured as Record<string, unknown>).features).toMatchObject({
+      cancel: "pass",
+      input_required: "not_applicable",
+      resume: "not_applicable",
+    });
+    // wire：真实调用了 tasks/cancel（且只有一次，同 correlation）。
+    const newRpcMethods = provider.rpcMethods.slice(rpcBefore);
+    expect(newRpcMethods.filter((m) => m === "tasks/cancel")).toHaveLength(1);
+    const persisted = await loadRuntimeRevisions(seeded.tenantId);
+    expect(persisted).toHaveLength(1);
+    const capabilities = persisted[0]?.revision.runtimeCapabilitiesJson as PersistedCapabilities;
+    expect(capabilities.effective.cancel).toBe(true);
+  });
+
+  it("10：incremental_content=true 无内容增量（仅状态 update）→ 422 fail closed", async () => {
+    const seeded = await seedRegistrationTarget({ contract: INCREMENTAL_CONTRACT });
+    provider.setScenario("chunks");
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, A_CONFORMANCE),
+      "idem-rt-reg-incremental-none-001",
+    );
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+    await expectFailClosed(seeded.tenantId);
+    await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
+  });
+
+  it("10：incremental_content=true 真实观测 artifact 增量 → 201，measured/effective=pass/true", async () => {
+    const seeded = await seedRegistrationTarget({ contract: INCREMENTAL_CONTRACT });
+    provider.setScenario("incremental");
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, A_CONFORMANCE),
+      "idem-rt-reg-incremental-ok-001",
+    );
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect((body.measured as Record<string, unknown>).features).toMatchObject({
+      incremental_content: "pass",
+    });
+    const persisted = await loadRuntimeRevisions(seeded.tenantId);
+    const capabilities = persisted[0]?.revision.runtimeCapabilitiesJson as PersistedCapabilities;
+    expect(capabilities.measured.features.incremental_content).toBe("pass");
+    expect(capabilities.effective.incremental_content).toBe(true);
+  });
+
+  it("12/13：AgentCard 协议版本/streaming 与快照冲突 → 422 fail closed，零行（不进入任何 message probe）", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    // 协议版本冲突。
+    provider.setCardProtocolVersion("0.2.5");
+    const mismatch = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+      "idem-rt-reg-card-mismatch-001",
+    );
+    expect(mismatch.status).toBeGreaterThanOrEqual(400);
+    expect(mismatch.status).toBeLessThan(500);
+    await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
+    // streaming 一致性冲突（快照 streaming=true，card 声明 false）。
+    provider.setCardStreaming(false);
+    const streamingMismatch = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+      "idem-rt-reg-card-streaming-001",
+    );
+    expect(streamingMismatch.status).toBeGreaterThanOrEqual(400);
+    expect(streamingMismatch.status).toBeLessThan(500);
+    await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
+    // 两次失败都停在 AgentCard：不发起任何 message 调用。
+    expect(provider.captured.length).toBe(0);
+    await expectFailClosed(seeded.tenantId);
+  });
+
+  it("13：malformed SSE（声明 streaming=true）→ 422 fail closed，零行", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    provider.setScenario("malformed");
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+      "idem-rt-reg-malformed-001",
+    );
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+    await expectFailClosed(seeded.tenantId);
+    await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
+  });
+
+  it("13：不可达 endpoint → 422 fail closed，零行", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const dead = await startA2ATestProvider("input_required");
+    const deadEndpoint = dead.endpoint;
+    await dead.close();
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, deadEndpoint, B_CONFORMANCE),
+      "idem-rt-reg-unreachable-001",
+    );
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+    await expectFailClosed(seeded.tenantId);
+    await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
   });
 
   it("旧 card 路径（仅 /.well-known/agent.json）不能通过注册验收：非 2xx 且 fail closed", async () => {
-    const seeded = await seedRegistrationTarget();
-    // 独立 Provider 实例：只暴露已废弃的旧 card 路径（其余 A2A wire 行为正常）。
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
     const legacyOnly = await startA2ATestProvider("input_required", { legacyCardOnly: true });
     try {
       const response = await callPOST(
         seeded.agentId,
-        baseBody(seeded.snapshotId, legacyOnly.endpoint),
+        registrationBody(seeded.snapshotId, legacyOnly.endpoint, B_CONFORMANCE),
         "idem-rt-reg-legacy-card-001",
       );
       expect(response.status).toBeGreaterThanOrEqual(400);
@@ -357,44 +674,141 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
     }
   });
 
+  it("presence 规则：probe 与快照声明不匹配（缺失/多余）→ 400，零网络零写（02 §2）", async () => {
+    // B 快照：声明 input_required/resume → 缺 input_required 或缺 resume 均 400。
+    const seededB = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const casesB: Array<{ label: string; conformance: Record<string, unknown> }> = [
+      {
+        label: "缺 input_required",
+        conformance: { basic: B_CONFORMANCE.basic, resume: B_CONFORMANCE.resume },
+      },
+      {
+        label: "缺 resume",
+        conformance: { basic: B_CONFORMANCE.basic, input_required: B_CONFORMANCE.input_required },
+      },
+      {
+        label: "多余 cancel",
+        conformance: { ...B_CONFORMANCE, cancel: { input: "x" } },
+      },
+    ];
+    for (const c of casesB) {
+      const before = provider.requests.length;
+      const response = await callPOST(
+        seededB.agentId,
+        registrationBody(seededB.snapshotId, provider.endpoint, c.conformance),
+        `idem-rt-reg-presence-b-${randomUUID().slice(0, 8)}`,
+      );
+      expect(response.status, c.label).toBe(400);
+      expectZeroNewNetwork(before);
+      await expect(countRuntimeRows(seededB.tenantId)).resolves.toBe(0);
+    }
+
+    // A 快照（未声明可选能力）：多余 input_required/resume/cancel 均 400。
+    const seededA = await seedRegistrationTarget({ contract: PROFILE_A_CONTRACT });
+    const casesA: Array<{ label: string; conformance: Record<string, unknown> }> = [
+      {
+        label: "多余 input_required",
+        conformance: { basic: A_CONFORMANCE.basic, input_required: { input: "x" } },
+      },
+      {
+        label: "多余 resume",
+        conformance: {
+          basic: A_CONFORMANCE.basic,
+          resume: { start_input: "x", resume_input: "y" },
+        },
+      },
+      { label: "多余 cancel", conformance: { basic: A_CONFORMANCE.basic, cancel: { input: "x" } } },
+    ];
+    for (const c of casesA) {
+      const before = provider.requests.length;
+      const response = await callPOST(
+        seededA.agentId,
+        registrationBody(seededA.snapshotId, provider.endpoint, c.conformance),
+        `idem-rt-reg-presence-a-${randomUUID().slice(0, 8)}`,
+      );
+      expect(response.status, c.label).toBe(400);
+      expectZeroNewNetwork(before);
+      await expect(countRuntimeRows(seededA.tenantId)).resolves.toBe(0);
+    }
+  });
+
   it("严格 schema：多余字段/上传报告/passed/protocol/agent_card_url → 400，零网络零写", async () => {
-    const seeded = await seedRegistrationTarget();
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const base = registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE);
     const cases: Array<{ label: string; body: Record<string, unknown> }> = [
       {
         label: "顶层多余字段 report",
-        body: { ...baseBody(seeded.snapshotId, provider.endpoint), report: { passed: true } },
+        body: { ...base, report: { passed: true } },
       },
       {
         label: "顶层多余字段 passed=true",
-        body: { ...baseBody(seeded.snapshotId, provider.endpoint), passed: true },
+        body: { ...base, passed: true },
       },
       {
         label: "顶层多余字段 agent_card_url",
         body: {
-          ...baseBody(seeded.snapshotId, provider.endpoint),
+          ...base,
           agent_card_url: `${provider.endpoint}/.well-known/agent-card.json`,
         },
       },
       {
         label: "上传 protocol 事实",
         body: {
-          ...baseBody(seeded.snapshotId, provider.endpoint),
+          ...base,
           protocol: { type: "a2a", version: "0.3.0" },
         },
       },
       {
         label: "上传 capabilities 事实",
         body: {
-          ...baseBody(seeded.snapshotId, provider.endpoint),
+          ...base,
           capabilities: { streaming: true },
         },
       },
       {
         label: "authentication 多余 raw token 字段",
         body: {
-          ...baseBody(seeded.snapshotId, provider.endpoint),
+          ...base,
           authentication: { mode: "none", credential_ref_id: null, token: "raw-secret" },
         },
+      },
+      {
+        label: "conformance 多余 probe",
+        body: {
+          ...base,
+          conformance: { ...B_CONFORMANCE, durable_recovery: { input: "x" } },
+        },
+      },
+      {
+        label: "conformance.basic 多余字段",
+        body: {
+          ...base,
+          conformance: { ...B_CONFORMANCE, basic: { input: "x", extra: true } },
+        },
+      },
+      {
+        label: "conformance.resume 多余字段",
+        body: {
+          ...base,
+          conformance: {
+            ...B_CONFORMANCE,
+            resume: { start_input: "x", resume_input: "y", final_confirm: true },
+          },
+        },
+      },
+      {
+        label: "缺失 conformance.basic",
+        body: {
+          ...base,
+          conformance: {
+            input_required: B_CONFORMANCE.input_required,
+            resume: B_CONFORMANCE.resume,
+          },
+        },
+      },
+      {
+        label: "空白 basic.input",
+        body: { ...base, conformance: { ...B_CONFORMANCE, basic: { input: "   " } } },
       },
     ];
     for (const c of cases) {
@@ -410,9 +824,9 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
     }
   });
 
-  it("缺省/null/空白矩阵：四个必填字段缺省或非法 → 400，零网络零写", async () => {
-    const seeded = await seedRegistrationTarget();
-    const base = baseBody(seeded.snapshotId, provider.endpoint);
+  it("缺省/null/空白矩阵：必填字段缺省或非法 → 400，零网络零写", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const base = registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE);
     const promptCases: Array<{ label: string; body: Record<string, unknown> }> = [
       { label: "缺失 contract_snapshot_id", body: { ...base, contract_snapshot_id: undefined } },
       { label: "null contract_snapshot_id", body: { ...base, contract_snapshot_id: null } },
@@ -458,19 +872,37 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
       { label: "缺失 conformance", body: { ...base, conformance: undefined } },
       { label: "null conformance", body: { ...base, conformance: null } },
       {
-        label: "空白 start_input",
-        body: { ...base, conformance: { start_input: "   ", resume_input: "明天一天" } },
+        label: "conformance 非对象",
+        body: { ...base, conformance: "start" },
       },
       {
-        label: "空白 resume_input",
-        body: { ...base, conformance: { start_input: "我想请年假", resume_input: "" } },
+        label: "input_required 非对象",
+        body: { ...base, conformance: { ...B_CONFORMANCE, input_required: "x" } },
       },
       {
-        label: "conformance 多余字段",
+        label: "input_required.input 空白",
         body: {
           ...base,
-          conformance: { start_input: "我想请年假", resume_input: "明天一天", final_confirm: true },
+          conformance: { ...B_CONFORMANCE, input_required: { input: "" } },
         },
+      },
+      {
+        label: "resume.start_input 空白",
+        body: {
+          ...base,
+          conformance: { ...B_CONFORMANCE, resume: { start_input: "  ", resume_input: "y" } },
+        },
+      },
+      {
+        label: "resume.resume_input 空白",
+        body: {
+          ...base,
+          conformance: { ...B_CONFORMANCE, resume: { start_input: "x", resume_input: "" } },
+        },
+      },
+      {
+        label: "cancel.input 空白",
+        body: { ...base, conformance: { ...B_CONFORMANCE, cancel: { input: "" } } },
       },
     ];
     for (const c of promptCases) {
@@ -487,7 +919,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
   });
 
   it("bearer：真实凭证解析（env 引用 + Provider 401 校验）；缺失/跨租户/inactive 引用在网络前 400", async () => {
-    const seeded = await seedRegistrationTarget();
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
     // 临时凭证：只存在于测试进程 env（不落 DB、不回显）；Provider 只接受恰好匹配的头。
     const token = randomBytes(24).toString("base64url");
     const envName = `SNOW_TEST_RUNTIME_BEARER_${randomUUID().slice(0, 8)}`;
@@ -501,7 +933,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
     const missing = await callPOST(
       seeded.agentId,
       {
-        ...baseBody(seeded.snapshotId, provider.endpoint),
+        ...registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
         authentication: { mode: "bearer", credential_ref_id: randomUUID() },
       },
       "idem-rt-reg-bearer-missing-001",
@@ -523,7 +955,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
     const crossTenant = await callPOST(
       seeded.agentId,
       {
-        ...baseBody(seeded.snapshotId, provider.endpoint),
+        ...registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
         authentication: { mode: "bearer", credential_ref_id: crossTenantRefId },
       },
       "idem-rt-reg-bearer-cross-tenant-001",
@@ -542,7 +974,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
     const inactive = await callPOST(
       seeded.agentId,
       {
-        ...baseBody(seeded.snapshotId, provider.endpoint),
+        ...registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
         authentication: { mode: "bearer", credential_ref_id: inactiveRefId },
       },
       "idem-rt-reg-bearer-inactive-001",
@@ -561,7 +993,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
     const ok = await callPOST(
       seeded.agentId,
       {
-        ...baseBody(seeded.snapshotId, provider.endpoint),
+        ...registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
         authentication: { mode: "bearer", credential_ref_id: credentialRefId },
       },
       "idem-rt-reg-bearer-ok-001",
@@ -587,11 +1019,14 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
   });
 
   it("授权：缺少 agent.runtime.register action scope → 403 ACTION_SCOPE_DENIED，零网络零写", async () => {
-    const seeded = await seedRegistrationTarget({ grantAction: false });
+    const seeded = await seedRegistrationTarget({
+      grantAction: false,
+      contract: PROFILE_B_CONTRACT,
+    });
     const before = provider.requests.length;
     const response = await callPOST(
       seeded.agentId,
-      baseBody(seeded.snapshotId, provider.endpoint),
+      registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
       "idem-rt-reg-forbidden-001",
     );
     expect(response.status).toBe(403);
@@ -602,7 +1037,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
   });
 
   it("快照一致性：不存在/跨 Agent/跨租户快照 → 非 2xx，零网络零写（协议事实只来自本 Agent 快照）", async () => {
-    const seeded = await seedRegistrationTarget();
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
     const otherAgent = await createAgent({
       tenantId: seeded.tenantId,
       agentKey: "other-agent",
@@ -640,7 +1075,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
       const before = provider.requests.length;
       const response = await callPOST(
         seeded.agentId,
-        baseBody(c.snapshotId, provider.endpoint),
+        registrationBody(c.snapshotId, provider.endpoint, B_CONFORMANCE),
         `idem-rt-reg-snapshot-${randomUUID().slice(0, 8)}`,
       );
       expect(response.status, c.label).toBeGreaterThanOrEqual(400);
@@ -652,49 +1087,9 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
     }
   });
 
-  it("fail closed：不可达 endpoint / 无 input-required / resume correlation 被篡改 → 非 2xx 且永不 verified/published/enabled", async () => {
-    const seeded = await seedRegistrationTarget();
-
-    // 1) 不可达：起真实 Provider 后立即关闭，得到已释放端口。
-    const dead = await startA2ATestProvider("input_required");
-    const deadEndpoint = dead.endpoint;
-    await dead.close();
-    const unreachable = await callPOST(
-      seeded.agentId,
-      baseBody(seeded.snapshotId, deadEndpoint),
-      "idem-rt-reg-unreachable-001",
-    );
-    expect(unreachable.status).toBeGreaterThanOrEqual(400);
-    expect(unreachable.status).toBeLessThan(500);
-    await expectFailClosed(seeded.tenantId);
-
-    // 2) 无 input-required：stream 直接 completed（HR 快照声明 input_required=true）。
-    provider.setScenario("completed");
-    const noInputRequired = await callPOST(
-      seeded.agentId,
-      baseBody(seeded.snapshotId, provider.endpoint),
-      "idem-rt-reg-no-input-required-001",
-    );
-    expect(noInputRequired.status).toBeGreaterThanOrEqual(400);
-    expect(noInputRequired.status).toBeLessThan(500);
-    await expectFailClosed(seeded.tenantId);
-    provider.setScenario("input_required");
-
-    // 3) resume correlation 被篡改（taskId/contextId 变化）。
-    provider.corruptResumeCorrelation();
-    const corrupted = await callPOST(
-      seeded.agentId,
-      baseBody(seeded.snapshotId, provider.endpoint),
-      "idem-rt-reg-correlation-001",
-    );
-    expect(corrupted.status).toBeGreaterThanOrEqual(400);
-    expect(corrupted.status).toBeLessThan(500);
-    await expectFailClosed(seeded.tenantId);
-  });
-
-  it("幂等：同 key 同 body 重放不发起第二次网络序列、不产生重复行；同 key 不同 body 409", async () => {
-    const seeded = await seedRegistrationTarget();
-    const body = baseBody(seeded.snapshotId, provider.endpoint);
+  it("14：幂等：同 key 同 body 重放不发起第二次网络序列、不产生重复行；同 key 不同 body 409", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const body = registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE);
     const first = await callPOST(seeded.agentId, body, "idem-rt-reg-replay-001");
     expect(first.status).toBe(201);
     const firstBody = await first.json();
@@ -709,7 +1104,13 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
 
     const conflict = await callPOST(
       seeded.agentId,
-      { ...body, conformance: { start_input: "我想请病假", resume_input: "明天一天" } },
+      {
+        ...body,
+        conformance: {
+          ...B_CONFORMANCE,
+          resume: { start_input: "我想请病假", resume_input: "明天一天" },
+        },
+      },
       "idem-rt-reg-replay-001",
     );
     expect(conflict.status).toBe(409);
@@ -717,8 +1118,8 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（主动黑
   });
 
   it("并发：同 key 同 body 并发重放不产生重复当前注册（接受 201+201 或 201+409，冻结唯一性）", async () => {
-    const seeded = await seedRegistrationTarget();
-    const body = baseBody(seeded.snapshotId, provider.endpoint);
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const body = registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE);
     const requestsBefore = provider.requests.length;
     const [a, b] = await Promise.all([
       callPOST(seeded.agentId, body, "idem-rt-reg-concurrent-001"),

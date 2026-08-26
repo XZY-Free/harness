@@ -58,7 +58,8 @@ export type A2ATestProviderScenario =
   | "failed"
   | "rejected"
   | "malformed"
-  | "subject_echo";
+  | "subject_echo"
+  | "incremental";
 
 /** Provider 收到的 message/stream|message/send 请求（供测试断言 wire 事实）。 */
 export interface CapturedA2ARequest {
@@ -104,6 +105,16 @@ export interface A2ATestProvider {
   setExpectedBearerToken(token: string | null): void;
   /** 切换 message/send 的响应形态；默认（冻结）为官方完整 Task。 */
   setResumeResponseShape(shape: "status-update" | "task"): void;
+  /**
+   * 注册验收专用：覆盖 AgentCard 协议版本（制造"AgentCard 与 Snapshot 冲突"反例，
+   * 02 §13-12）。缺省 "0.3.0"。
+   */
+  setCardProtocolVersion(version: string): void;
+  /**
+   * 注册验收专用：覆盖 AgentCard capabilities.streaming（02 §12 Provider profile
+   * A basic 需要 streaming=false 的 card 一致性证据）。缺省 true。
+   */
+  setCardStreaming(streaming: boolean): void;
   /**
    * 注册验收专用：清空 requests/captured/rpcMethods、复位 correlation 篡改与
    * Bearer 校验，并把场景重置为 input_required（测试间状态隔离）。
@@ -152,6 +163,8 @@ export async function startA2ATestProvider(
   // 官方非流式 message/send 返回完整 Task（默认冻结）；status-update 形态仅保留
   // 给既有注册验收反例。
   let resumeResponseShape: "status-update" | "task" = "task";
+  let cardProtocolVersion = "0.3.0";
+  let cardStreaming = true;
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -186,9 +199,9 @@ export async function startA2ATestProvider(
         JSON.stringify({
           name: "Test Enterprise Agent",
           description: "deterministic external test agent",
-          protocolVersion: "0.3.0",
+          protocolVersion: cardProtocolVersion,
           preferredTransport: "JSONRPC",
-          capabilities: { streaming: true, push_notifications: false },
+          capabilities: { streaming: cardStreaming, push_notifications: false },
           // 通用扩展合同（07 §7：不绑定 HR/veADK/AgentKit，明确版本）。
           "snowharness:capability_manifest": A2A_TEST_PROVIDER_CAPABILITY_MANIFEST,
           "snowharness:invocation_context_contract": A2A_TEST_PROVIDER_CONTEXT_CONTRACT,
@@ -264,40 +277,81 @@ export async function startA2ATestProvider(
       };
       captured.push(capturedRequest);
 
-      // ─── message/send（resume；HR 官方：返回完整 Task）────────
+      // ─── message/send ─────────────────────────────────────────
+      // 带 taskId = resume（官方：返回完整 Task，completed，可篡改 correlation）；
+      // 不带 taskId = 非流式 basic/input-required/cancel start 调用，按当前场景
+      // 返回对应状态的完整 Task（02 §3/§5/§7 capability-driven 验收）。
       if (rpc.method === "message/send") {
-        const resumeTaskId = message.taskId ?? "task-1";
-        const resumeContextId = message.contextId ?? "ctx-1";
         const corrupted = (id: string) => (resumeCorrelationCorrupted ? `corrupted-${id}` : id);
         res.writeHead(200, { "content-type": "application/json" });
-        const result =
-          resumeResponseShape === "task"
-            ? {
-                kind: "task",
-                id: corrupted(resumeTaskId),
-                contextId: corrupted(resumeContextId),
-                status: { state: "completed" },
-                artifacts: [
-                  {
-                    artifactId: "art-final",
-                    name: "answer",
-                    parts: [
-                      { kind: "text", text: "申请已提交完成" },
-                      { kind: "data", data: { result: { status: "ok" } } },
-                    ],
+        if (message.taskId !== undefined) {
+          const resumeTaskId = message.taskId ?? "task-1";
+          const resumeContextId = message.contextId ?? "ctx-1";
+          const result =
+            resumeResponseShape === "task"
+              ? {
+                  kind: "task",
+                  id: corrupted(resumeTaskId),
+                  contextId: corrupted(resumeContextId),
+                  status: { state: "completed" },
+                  artifacts: [
+                    {
+                      artifactId: "art-final",
+                      name: "answer",
+                      parts: [
+                        { kind: "text", text: "申请已提交完成" },
+                        { kind: "data", data: { result: { status: "ok" } } },
+                      ],
+                    },
+                  ],
+                }
+              : {
+                  kind: "status-update",
+                  taskId: corrupted(resumeTaskId),
+                  contextId: corrupted(resumeContextId),
+                  status: {
+                    state: "completed",
+                    message: { role: "agent", parts: [{ kind: "text", text: "已收到补充信息" }] },
                   },
-                ],
-              }
-            : {
-                kind: "status-update",
-                taskId: corrupted(resumeTaskId),
-                contextId: corrupted(resumeContextId),
-                status: {
-                  state: "completed",
-                  message: { role: "agent", parts: [{ kind: "text", text: "已收到补充信息" }] },
-                },
-              };
-        res.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id ?? 1, result }));
+                };
+          res.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id ?? 1, result }));
+          return;
+        }
+        // 非流式首次调用：新 Task（有效 id/contextId），状态由场景决定。
+        const taskId = randomUUID();
+        const contextId = randomUUID();
+        const stateByScenario: Record<string, string> = {
+          completed: "completed",
+          chunks: "completed",
+          input_required: "input-required",
+          long_running: "working",
+          incremental: "completed",
+          failed: "failed",
+        };
+        const state = stateByScenario[scenario] ?? "completed";
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: rpc.id ?? 1,
+            result: {
+              kind: "task",
+              id: taskId,
+              contextId,
+              status: { state },
+              ...(state === "completed"
+                ? {
+                    artifacts: [
+                      {
+                        artifactId: "art-final",
+                        name: "answer",
+                        parts: [{ kind: "text", text: "处理完成" }],
+                      },
+                    ],
+                  }
+                : {}),
+            },
+          }),
+        );
         return;
       }
 
@@ -408,6 +462,15 @@ export async function startA2ATestProvider(
         case "subject_echo":
           statusUpdate("completed");
           break;
+        case "incremental":
+          // 02 §4：真实内容增量（artifact-update 先于终态）；只看状态 update 不算增量。
+          statusUpdate("working");
+          artifactUpdate("art-chunk-1", "第一段内容");
+          artifactUpdate("art-chunk-2", "第二段内容");
+          statusUpdate("completed", {
+            message: { role: "agent", parts: [{ kind: "text", text: "分片完成" }] },
+          });
+          break;
       }
       res.end();
     });
@@ -436,6 +499,12 @@ export async function startA2ATestProvider(
     setResumeResponseShape(shape: "status-update" | "task") {
       resumeResponseShape = shape;
     },
+    setCardProtocolVersion(version: string) {
+      cardProtocolVersion = version;
+    },
+    setCardStreaming(streaming: boolean) {
+      cardStreaming = streaming;
+    },
     reset() {
       captured.length = 0;
       requests.length = 0;
@@ -443,6 +512,8 @@ export async function startA2ATestProvider(
       resumeCorrelationCorrupted = false;
       expectedBearerToken = null;
       resumeResponseShape = "task";
+      cardProtocolVersion = "0.3.0";
+      cardStreaming = true;
       scenario = "input_required";
     },
     setScenario(next: A2ATestProviderScenario) {

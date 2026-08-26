@@ -138,6 +138,26 @@ describe("parsePublicAgentContract", () => {
     expect(facts.capabilities[0]!.descriptionEn).toBeNull();
   });
 
+  it("02 §4 语义校验：incremental_content=true 要求 streaming_transport=true；组合合法时保留", () => {
+    const incrementalOnly = contract();
+    incrementalOnly.interaction = {
+      ...(incrementalOnly.interaction as Record<string, unknown>),
+      incremental_content: true,
+    };
+    expect(() => parsePublicAgentContract(incrementalOnly)).not.toThrow();
+    expect(parsePublicAgentContract(incrementalOnly).interaction.incrementalContent).toBe(true);
+
+    const nonStreamingIncremental = contract();
+    nonStreamingIncremental.interaction = {
+      ...(nonStreamingIncremental.interaction as Record<string, unknown>),
+      streaming_transport: false,
+      incremental_content: true,
+    };
+    expect(() => parsePublicAgentContract(nonStreamingIncremental)).toThrowError(
+      /incremental_content=true 要求 streaming_transport=true/,
+    );
+  });
+
   it("digest 为 sha256:64hex；对象键序无关，数组序即合同序", () => {
     const a = parsePublicAgentContract(contract());
     // 键序重排（顶层与嵌套均反序）

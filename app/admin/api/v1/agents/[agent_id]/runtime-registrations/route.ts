@@ -5,11 +5,13 @@
  * - 解析 admin 主体；action scope: agent.runtime.register（resource = 具体 Agent）。
  * - 要求 Idempotency-Key（任何写库前）。
  * - 严格请求体（顶层恰为 contract_snapshot_id + runtime_endpoint + authentication +
- *   conformance；authentication 恰为 mode + credential_ref_id；conformance 恰为
- *   start_input + resume_input）。任何 schema 失败都在网络/写库前 400。
- * - 委托权威应用服务 registerAgentRuntime：引用校验（网络前）→ 真实 HTTP/SSE
- *   一致性验收（AgentCard 协议证据 + input-required → 同 task/context resume → completed）
- *   → 单事务持久化（external Runtime + draft RuntimeRevision，无发布/启用/路由）。
+ *   conformance；authentication 恰为 mode + credential_ref_id；conformance 为
+ *   capability-driven probe 输入：basic 恒必填，input_required/resume/cancel 可选，
+ *   presence 与快照声明严格匹配）。任何 schema 失败都在网络/写库前 400。
+ * - 委托权威应用服务 registerAgentRuntime：引用/presence 校验（网络前）→ 真实
+ *   HTTP/SSE capability-driven 一致性验收（AgentCard 协议证据 + basic/input-required/
+ *   resume/cancel probe 按快照声明执行）→ 单事务持久化（external Runtime + draft
+ *   RuntimeRevision，无发布/启用/路由）。
  * - 审计 agent.runtime.register（target=Runtime），载荷只含 id/digest 级事实。
  * - completeRecord + 201 结构化投影（无原始合同/prompts/transcript/secret/AgentCard 身份）。
  *
@@ -75,8 +77,16 @@ const BODY_KEYS = [
 ] as const;
 /** 冻结 wire：authentication 只接受 mode + credential_ref_id。 */
 const AUTHENTICATION_KEYS = ["mode", "credential_ref_id"] as const;
-/** 冻结 wire：conformance 只接受 start_input + resume_input。 */
-const CONFORMANCE_KEYS = ["start_input", "resume_input"] as const;
+/** 冻结 wire：conformance 顶层只接受 basic + 可选 input_required/resume/cancel（02 §2）。 */
+const CONFORMANCE_KEYS = ["basic", "input_required", "resume", "cancel"] as const;
+/** 冻结 wire：basic 只接受 input。 */
+const BASIC_KEYS = ["input"] as const;
+/** 冻结 wire：input_required 只接受 input。 */
+const INPUT_REQUIRED_KEYS = ["input"] as const;
+/** 冻结 wire：resume 只接受 start_input + resume_input。 */
+const RESUME_KEYS = ["start_input", "resume_input"] as const;
+/** 冻结 wire：cancel 只接受 input。 */
+const CANCEL_KEYS = ["input"] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -96,7 +106,12 @@ function parseRequestBody(body: unknown): {
   contractSnapshotId: string;
   runtimeEndpoint: string;
   authentication: { mode: "none" | "bearer"; credentialRefId: string | null };
-  conformance: { startInput: string; resumeInput: string };
+  conformance: {
+    basic: { input: string };
+    input_required?: { input: string };
+    resume?: { startInput: string; resumeInput: string };
+    cancel?: { input: string };
+  };
 } | null {
   if (!isPlainObject(body) || !hasExactKeys(body, BODY_KEYS)) return null;
   if (!nonblankString(body.contract_snapshot_id)) return null;
@@ -116,10 +131,52 @@ function parseRequestBody(body: unknown): {
   } else {
     return null;
   }
+  // 02 §2 capability-driven conformance：basic 恒必填；input_required/resume/cancel
+  // 可选 probe（presence 与快照声明的匹配由权威应用服务在网络前校验）。
   const conformance = body.conformance;
-  if (!isPlainObject(conformance) || !hasExactKeys(conformance, CONFORMANCE_KEYS)) return null;
-  if (!nonblankString(conformance.start_input) || !nonblankString(conformance.resume_input)) {
+  if (!isPlainObject(conformance)) return null;
+  const conformanceKeys = Object.keys(conformance);
+  if (conformanceKeys.some((k) => !CONFORMANCE_KEYS.includes(k as never))) return null;
+  if (!isPlainObject(conformance.basic) || !hasExactKeys(conformance.basic, BASIC_KEYS)) {
     return null;
+  }
+  if (!nonblankString(conformance.basic.input)) return null;
+  let input_required: { input: string } | undefined;
+  if (conformance.input_required !== undefined) {
+    if (
+      !isPlainObject(conformance.input_required) ||
+      !hasExactKeys(conformance.input_required, INPUT_REQUIRED_KEYS) ||
+      !nonblankString(conformance.input_required.input)
+    ) {
+      return null;
+    }
+    input_required = { input: conformance.input_required.input };
+  }
+  let resume: { startInput: string; resumeInput: string } | undefined;
+  if (conformance.resume !== undefined) {
+    if (
+      !isPlainObject(conformance.resume) ||
+      !hasExactKeys(conformance.resume, RESUME_KEYS) ||
+      !nonblankString(conformance.resume.start_input) ||
+      !nonblankString(conformance.resume.resume_input)
+    ) {
+      return null;
+    }
+    resume = {
+      startInput: conformance.resume.start_input,
+      resumeInput: conformance.resume.resume_input,
+    };
+  }
+  let cancel: { input: string } | undefined;
+  if (conformance.cancel !== undefined) {
+    if (
+      !isPlainObject(conformance.cancel) ||
+      !hasExactKeys(conformance.cancel, CANCEL_KEYS) ||
+      !nonblankString(conformance.cancel.input)
+    ) {
+      return null;
+    }
+    cancel = { input: conformance.cancel.input };
   }
   return {
     contractSnapshotId: body.contract_snapshot_id,
@@ -128,7 +185,12 @@ function parseRequestBody(body: unknown): {
       mode,
       credentialRefId: mode === "none" ? null : authentication.credential_ref_id,
     },
-    conformance: { startInput: conformance.start_input, resumeInput: conformance.resume_input },
+    conformance: {
+      basic: { input: conformance.basic.input },
+      ...(input_required ? { input_required } : {}),
+      ...(resume ? { resume } : {}),
+      ...(cancel ? { cancel } : {}),
+    },
   };
 }
 
@@ -262,12 +324,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       runtime_target_digest: result.revision.runtimeTargetDigest,
       evidence_digest: result.revision.evidenceDigest,
       config_hash: result.revision.configHash,
-      measured: {
-        agent_card_protocol_version_match: result.evidence.agentCardProtocolVersionMatch,
-        event_stream_observed: result.evidence.eventStreamObserved,
-        input_required_observed: result.evidence.inputRequiredObserved,
-        resume_completed: result.evidence.resumeCompleted,
-      },
+      measured: result.measured,
     };
 
     // 9. 审计（载荷只含 id/digest 级事实）

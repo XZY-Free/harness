@@ -349,6 +349,12 @@ function parseInteraction(value: unknown): PublicAgentInteraction {
     throw new PublicAgentContractError("interaction.supported_locales 不能为空");
   }
   for (const locale of locales) assertLocale(locale, "interaction.supported_locales");
+  // 02 §4 语义校验：incremental_content 依赖流式传输；非流式合同不得声明内容增量。
+  if (flagOf("incremental_content") && !flagOf("streaming_transport")) {
+    throw new PublicAgentContractError(
+      "interaction.incremental_content=true 要求 streaming_transport=true",
+    );
+  }
   return {
     streamingTransport: flagOf("streaming_transport"),
     incrementalContent: flagOf("incremental_content"),

@@ -1,21 +1,26 @@
 /**
- * 主动黑盒 Runtime 注册验收（权威应用服务）。
+ * Capability-driven 黑盒 Runtime 注册验收（权威应用服务，02 专项）。
  *
  * 冻结不变量（Runtime Registration 权威切片）：
  * - 协议/交互事实只来自已导入的结构化 AgentContractSnapshot（同租户、同 Agent）；
+ *   快照 interaction 六布尔决定本次需要验证哪些 capability（declared ≠ measured）。
  *   远端 AgentCard 身份/skills/extensions 只是一致性证据，绝不覆盖导入事实。
+ * - probe presence 严格匹配快照：basic 永远必填；input_required/resume/cancel 仅在
+ *   快照声明对应能力时必填，否则必须缺席（多余/缺失一律 400，网络前）。
  * - SnowHarness 主动对黑盒 Runtime 发起真实 HTTP/SSE 一致性调用（全局 fetch，有限超时）：
- *   GET /.well-known/agent-card.json（协议版本/JSONRPC transport/streaming 与快照一致）
- *   → message/stream(start_input) 观测 input-required（非空 taskId/contextId）
- *   → message/send(resume_input) 同 taskId/contextId 观测 completed。
- *   快照 cancel=false 绝不调用 tasks/cancel；不发送内部 invocation/trace/主体字段。
- * - 一切校验失败（schema/引用/凭证）发生在任何网络调用之前；网络验收失败 fail closed，
- *   不产生任何 Runtime/RuntimeRevision 行。
+ *   GET /.well-known/agent-card.json → basic probe（按 streamingTransport 分
+ *   message/send / message/stream）→ 按声明依次 input_required / resume / cancel probe。
+ *   incremental_content=true 必须真实观测至少一条内容/artifact 增量（状态 update 不算）。
+ *   cancel=false 绝不调用 tasks/cancel；不发送内部 invocation/trace/主体字段。
+ * - durableTaskRecovery 阶段 1 不冒充验证：measured=not_measured、effective=false。
+ * - 一切校验失败（schema/引用/凭证/presence）发生在任何网络调用之前；网络验收失败
+ *   fail closed，不产生任何 Runtime/RuntimeRevision 行。
  * - 持久化只在验收成功后：单事务 create/reuse 恰一个 external Runtime + draft
- *   RuntimeRevision（绑定快照/凭证引用/endpoint/协议事实/measured 证据 digest）。
- *   不发布、不启用、不建路由；不落原始合同/AgentCard/prompts/transcript/secret。
+ *   RuntimeRevision（绑定快照/凭证引用/endpoint/协议事实/measured 证据 digest，
+ *   capabilities 区分 declared/measured/effective）。不发布、不启用、不建路由；
+ *   不落原始合同/AgentCard/prompts/transcript/secret。
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
 import { getAgentById } from "@/lib/agents/persistence/agent-queries";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
@@ -27,13 +32,18 @@ import {
   runtimeRevisionTable,
   runtimeTable,
 } from "@/lib/persistence/schema/runtimes";
-import { credentialRefTable } from "@/lib/persistence/schema/tool";
+import {
+  OutboundRuntimeAuthError,
+  type RuntimeTransportAuth,
+  outboundAuthHeaders,
+  resolveOutboundRuntimeAuth,
+} from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { computeRuntimeTargetDigest } from "@/lib/runtime/domain/runtime-target-digest";
 import { and, eq, max } from "drizzle-orm";
 
 /** 注册失败类别（路由据此映射稳定错误响应）。 */
 export type AgentRuntimeRegistrationErrorKind =
-  | "reference_invalid" // 快照/Agent/凭证引用非法（400，网络前）
+  | "reference_invalid" // 快照/Agent/凭证/presence 引用非法（400，网络前）
   | "endpoint_invalid" // endpoint 结构非法（400，网络前）
   | "credential_unresolvable" // 凭证引用存在但不可解析/指纹不符（400，网络前）
   | "runtime_conflict" // 稳定 Runtime 身份存在但形态/生命周期冲突（422，拒绝复用）
@@ -56,9 +66,54 @@ export interface AgentRuntimeRegistrationCommand {
   contractSnapshotId: string;
   runtimeEndpoint: string;
   authentication: { mode: "none" | "bearer"; credentialRefId: string | null };
-  conformance: { startInput: string; resumeInput: string };
+  /** capability-driven probe 输入：basic 永远必填，其余按快照声明 presence 匹配。 */
+  conformance: {
+    basic: { input: string };
+    input_required?: { input: string };
+    resume?: { startInput: string; resumeInput: string };
+    cancel?: { input: string };
+  };
   /** 创建者 userIdentityId 或 serviceId。 */
   createdBy: string;
+}
+
+/** 结构化 measured 证据矩阵（02 §9；替换 HR 命名固定四 boolean）。 */
+export interface RuntimeMeasuredEvidence {
+  agent_card: {
+    protocol_version: "pass";
+    transport: "pass";
+    streaming_consistency: "pass";
+  };
+  basic_invocation: { status: "pass" };
+  features: {
+    streaming_transport: "pass" | "not_applicable";
+    incremental_content: "pass" | "not_applicable";
+    input_required: "pass" | "not_applicable";
+    resume: "pass" | "not_applicable";
+    cancel: "pass" | "not_applicable";
+    durable_task_recovery: "not_measured";
+  };
+}
+
+/** 持久化的 RuntimeCapabilitiesJson：declared / measured / effective 三态严格分离（02 §10）。 */
+export interface RuntimeCapabilitiesProjection {
+  declared: {
+    streaming_transport: boolean;
+    incremental_content: boolean;
+    input_required: boolean;
+    resume: boolean;
+    cancel: boolean;
+    durable_task_recovery: boolean;
+  };
+  measured: RuntimeMeasuredEvidence;
+  effective: {
+    streaming_transport: boolean;
+    incremental_content: boolean;
+    input_required: boolean;
+    resume: boolean;
+    cancel: boolean;
+    durable_task_recovery: boolean;
+  };
 }
 
 /** 单次网络验收的超时上限（有限，禁止无限等待）。 */
@@ -97,63 +152,45 @@ export function normalizeRuntimeEndpoint(raw: string): string {
   return normalized;
 }
 
-// ─── 凭证解析（只解析被引用的 CredentialRef）──────────────
+// ─── 凭证解析（03 §7：唯一共享 resolver，禁止本地重复实现）────
 
 interface ResolvedCredential {
   identityMode: "none" | "bearer";
   credentialRefId: string | null;
-  authorizationHeader: string | null;
+  auth: RuntimeTransportAuth;
 }
 
-/** 解析凭证引用：本切片仅支持 provider=env（vaultRef 为 env 变量名，指纹必须精确匹配）。 */
+/**
+ * 解析 outbound auth：tenantId + identityMode + credentialRefId → RuntimeTransportAuth。
+ * 逐项验证（同租户/active/未过期/provider=env/env 存在/指纹一致）全部在共享
+ * resolver 内完成；失败在网络前 fail closed，不回显 token。
+ */
 async function resolveCredential(
   tenantId: string,
   authentication: AgentRuntimeRegistrationCommand["authentication"],
 ): Promise<ResolvedCredential> {
-  if (authentication.mode === "none") {
-    return { identityMode: "none", credentialRefId: null, authorizationHeader: null };
+  try {
+    const auth = await resolveOutboundRuntimeAuth({
+      tenantId,
+      identityMode: authentication.mode,
+      credentialRefId: authentication.mode === "none" ? null : authentication.credentialRefId,
+    });
+    return {
+      identityMode: authentication.mode,
+      credentialRefId: authentication.credentialRefId ?? null,
+      auth,
+    };
+  } catch (err) {
+    if (err instanceof OutboundRuntimeAuthError) {
+      throw new AgentRuntimeRegistrationError("credential_unresolvable", err.message);
+    }
+    throw err;
   }
-  const credentialRefId = authentication.credentialRefId;
-  if (!credentialRefId) {
-    throw new AgentRuntimeRegistrationError("credential_unresolvable", "缺少 credential_ref_id");
-  }
-  const [ref] = await db
-    .select()
-    .from(credentialRefTable)
-    .where(
-      and(eq(credentialRefTable.tenantId, tenantId), eq(credentialRefTable.id, credentialRefId)),
-    )
-    .limit(1);
-  if (!ref) {
-    throw new AgentRuntimeRegistrationError("credential_unresolvable", "credential_ref 不存在");
-  }
-  if (ref.lifecycleState !== "active") {
-    throw new AgentRuntimeRegistrationError("credential_unresolvable", "credential_ref 非 active");
-  }
-  if (ref.provider !== "env") {
-    throw new AgentRuntimeRegistrationError(
-      "credential_unresolvable",
-      "本切片仅支持 provider=env 的凭证引用",
-    );
-  }
-  // vaultRef 是 env 变量名：只加载该字段，不落库/不回显/不写日志。
-  const token = process.env[ref.vaultRef];
-  if (typeof token !== "string" || token.length === 0) {
-    throw new AgentRuntimeRegistrationError("credential_unresolvable", "凭证引用不可解析");
-  }
-  const fingerprint = `sha256:${createHash("sha256").update(token, "utf8").digest("hex")}`;
-  if (fingerprint !== ref.fingerprint) {
-    throw new AgentRuntimeRegistrationError("credential_unresolvable", "凭证指纹不匹配");
-  }
-  return {
-    identityMode: "bearer",
-    credentialRefId: ref.id,
-    authorizationHeader: `Bearer ${token}`,
-  };
 }
 
 function authHeaders(credential: ResolvedCredential): Record<string, string> {
-  return credential.authorizationHeader ? { authorization: credential.authorizationHeader } : {};
+  // Registration 是 External 调用：workload_token 在共享 resolver 内 fail closed。
+  return outboundAuthHeaders(credential.auth);
 }
 
 // ─── 主动一致性验收（真实 HTTP/SSE，全局 fetch）────────────
@@ -202,17 +239,103 @@ async function probeAgentCardConsistency(
   }
 }
 
-interface StreamProbeResult {
+// ─── A2A wire 基础（Message 官方形态 + correlation 归一化）──
+
+/** A2A 官方 Task/status-update 两种形态统一取 correlation。 */
+interface Correlation {
   taskId: string;
   contextId: string;
 }
 
-/** message/stream：观测 input-required 与非空 taskId/contextId（真实 SSE，跨 chunk 解析）。 */
-async function probeMessageStream(
+function correlationOf(result: Record<string, unknown>): Correlation | null {
+  const taskIdRaw =
+    result.kind === "task" && typeof result.id === "string" ? result.id : result.taskId;
+  const taskId = typeof taskIdRaw === "string" ? taskIdRaw.trim() : "";
+  const contextId = typeof result.contextId === "string" ? result.contextId.trim() : "";
+  if (!taskId || !contextId) return null;
+  return { taskId, contextId };
+}
+
+/** A2A 官方 Task / status-update 两种形态统一取 state。 */
+function resultState(result: Record<string, unknown>): string | null {
+  const status = result.status;
+  if (status && typeof status === "object" && !Array.isArray(status)) {
+    const state = (status as Record<string, unknown>).state;
+    if (typeof state === "string") return state;
+  }
+  if (typeof result.state === "string") return result.state;
+  return null;
+}
+
+/** 真实内容/artifact 增量：artifact-update 且 artifact.parts 非空（状态 update 不算，02 §4）。 */
+function isContentIncrement(result: Record<string, unknown>): boolean {
+  if (result.kind !== "artifact-update") return false;
+  const artifact = result.artifact;
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) return false;
+  const parts = (artifact as Record<string, unknown>).parts;
+  return Array.isArray(parts) && parts.length > 0;
+}
+
+/** 官方 Message wire：kind=message + 每次新 messageId；不携带内部 invocation/trace 键。 */
+function buildA2AMessage(input: string, correlation?: Correlation): Record<string, unknown> {
+  const message: Record<string, unknown> = {
+    kind: "message",
+    messageId: randomUUID(),
+    role: "user",
+    parts: [{ kind: "text", text: input }],
+  };
+  if (correlation) {
+    message.taskId = correlation.taskId;
+    message.contextId = correlation.contextId;
+  }
+  return message;
+}
+
+/** message/send：非流式调用（basic/input-required/resume 等按快照 transport 分派）。 */
+async function sendMessage(
   endpoint: string,
   credential: ResolvedCredential,
-  startInput: string,
-): Promise<StreamProbeResult> {
+  input: string,
+  correlation?: Correlation,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      ...authHeaders(credential),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: randomUUID(),
+      method: "message/send",
+      params: { message: buildA2AMessage(input, correlation) },
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  }).catch(() => {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "Runtime 不可达");
+  });
+  if (!response.ok) {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "message/send 被拒绝");
+  }
+  const payload = (await response.json().catch(() => null)) as {
+    result?: Record<string, unknown>;
+  } | null;
+  const result = payload?.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "message/send 响应非法");
+  }
+  return result;
+}
+
+/** message/stream：流式调用，返回全部已解析事件并登记内容增量。 */
+async function streamMessage(
+  endpoint: string,
+  credential: ResolvedCredential,
+  input: string,
+  correlation: Correlation | undefined,
+  increments: { observed: boolean },
+): Promise<Array<Record<string, unknown>>> {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -224,16 +347,7 @@ async function probeMessageStream(
       jsonrpc: "2.0",
       id: randomUUID(),
       method: "message/stream",
-      params: {
-        // A2A 0.3 官方 Message wire：kind=message + 每次新 messageId；不携带内部
-        // invocation/trace/protocol 键（metadata 保持缺席）。
-        message: {
-          kind: "message",
-          messageId: randomUUID(),
-          role: "user",
-          parts: [{ kind: "text", text: startInput }],
-        },
-      },
+      params: { message: buildA2AMessage(input, correlation) },
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   }).catch(() => {
@@ -247,29 +361,219 @@ async function probeMessageStream(
     throw new AgentRuntimeRegistrationError("conformance_failed", "message/stream 未返回事件流");
   }
   const events = await readSseResults(response);
-  for (const result of events) {
-    if (resultState(result) === "input-required") {
-      const taskId = typeof result.taskId === "string" ? result.taskId.trim() : "";
-      const contextId = typeof result.contextId === "string" ? result.contextId.trim() : "";
-      if (!taskId || !contextId) {
-        throw new AgentRuntimeRegistrationError(
-          "conformance_failed",
-          "input-required 缺少 correlation",
-        );
-      }
-      return { taskId, contextId };
-    }
+  if (events.some(isContentIncrement)) {
+    increments.observed = true;
   }
-  throw new AgentRuntimeRegistrationError("conformance_failed", "未观测到 input-required");
+  return events;
 }
 
-/** message/send：同 taskId/contextId resume 并要求 completed（官方 Task/status-update 均可）。 */
-async function probeResumeCompletion(
+/**
+ * message/stream（cancel 起始）：增量解析到第一个带 correlation 的事件即中止读取，
+ * 供 tasks/cancel 使用（long-running 流不等待终态）。
+ */
+async function streamUntilCorrelation(
   endpoint: string,
   credential: ResolvedCredential,
-  resumeInput: string,
-  correlation: StreamProbeResult,
+  input: string,
+): Promise<Correlation> {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "text/event-stream",
+      ...authHeaders(credential),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: randomUUID(),
+      method: "message/stream",
+      params: { message: buildA2AMessage(input) },
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  }).catch(() => {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "Runtime 不可达");
+  });
+  if (!response.ok) {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "message/stream 被拒绝");
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/event-stream")) {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "message/stream 未返回事件流");
+  }
+  if (!response.body) {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "message/stream 无响应体");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const results: Array<Record<string, unknown>> = [];
+  const consumeFrame = (frame: string) => {
+    const dataLines = frame
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart());
+    if (dataLines.length === 0) return;
+    try {
+      const parsed = JSON.parse(dataLines.join("\n")) as { result?: unknown };
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        parsed.result &&
+        typeof parsed.result === "object" &&
+        !Array.isArray(parsed.result)
+      ) {
+        results.push(parsed.result as Record<string, unknown>);
+      }
+    } catch {
+      // 非 JSON 帧（comment/keep-alive）忽略——验收以状态事件为准。
+    }
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value) {
+        buffer += decoder.decode(value, { stream: true });
+        for (;;) {
+          const match = /\r?\n\r?\n/.exec(buffer);
+          if (!match || match.index === undefined) break;
+          const frame = buffer.slice(0, match.index);
+          buffer = buffer.slice(match.index + match[0].length);
+          consumeFrame(frame);
+        }
+        const correlated = results.map(correlationOf).find((c) => c !== null);
+        if (correlated) {
+          // 拿到 correlation 即可发起 tasks/cancel，主动中止长驻流。
+          await reader.cancel().catch(() => undefined);
+          return correlated;
+        }
+      }
+      if (done) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  throw new AgentRuntimeRegistrationError("conformance_failed", "cancel 起始流缺少 correlation");
+}
+
+// ─── Capability-driven probes（02 §3/§5/§6/§7）─────────────
+
+/** Basic probe：按 streamingTransport 分 message/send / message/stream（02 §3）。 */
+async function probeBasic(
+  endpoint: string,
+  credential: ResolvedCredential,
+  input: string,
+  streamingTransport: boolean,
+  increments: { observed: boolean },
 ): Promise<void> {
+  if (!streamingTransport) {
+    const result = await sendMessage(endpoint, credential, input);
+    if (!correlationOf(result)) {
+      throw new AgentRuntimeRegistrationError(
+        "conformance_failed",
+        "basic probe 缺少有效 correlation",
+      );
+    }
+    return;
+  }
+  const events = await streamMessage(endpoint, credential, input, undefined, increments);
+  if (events.length === 0) {
+    throw new AgentRuntimeRegistrationError(
+      "conformance_failed",
+      "message/stream 未解析到任何事件",
+    );
+  }
+  if (!events.some((r) => correlationOf(r) !== null)) {
+    throw new AgentRuntimeRegistrationError(
+      "conformance_failed",
+      "basic probe 缺少有效 correlation",
+    );
+  }
+}
+
+/** Input-required probe：必须观测 input-required + taskId + contextId（02 §5）。 */
+async function probeInputRequired(
+  endpoint: string,
+  credential: ResolvedCredential,
+  input: string,
+  streamingTransport: boolean,
+  increments: { observed: boolean },
+): Promise<void> {
+  const requireEvidence = (result: Record<string, unknown>) => {
+    if (resultState(result) !== "input-required" || !correlationOf(result)) {
+      throw new AgentRuntimeRegistrationError(
+        "conformance_failed",
+        "未观测到 input-required（或缺少 correlation）",
+      );
+    }
+  };
+  if (!streamingTransport) {
+    const result = await sendMessage(endpoint, credential, input);
+    requireEvidence(result);
+    return;
+  }
+  const events = await streamMessage(endpoint, credential, input, undefined, increments);
+  const hit = events.find((r) => resultState(r) === "input-required");
+  if (!hit || !correlationOf(hit)) {
+    throw new AgentRuntimeRegistrationError(
+      "conformance_failed",
+      "未观测到 input-required（或缺少 correlation）",
+    );
+  }
+}
+
+/** Resume probe：专用 start_input/resume_input 同 correlation 至 completed（02 §6）。 */
+async function probeResume(
+  endpoint: string,
+  credential: ResolvedCredential,
+  startInput: string,
+  resumeInput: string,
+  streamingTransport: boolean,
+  increments: { observed: boolean },
+): Promise<void> {
+  let start: Correlation;
+  if (streamingTransport) {
+    const events = await streamMessage(endpoint, credential, startInput, undefined, increments);
+    const correlated = events.map(correlationOf).find((c) => c !== null);
+    if (!correlated) {
+      throw new AgentRuntimeRegistrationError("conformance_failed", "resume 起始缺少 correlation");
+    }
+    start = correlated;
+  } else {
+    const result = await sendMessage(endpoint, credential, startInput);
+    const correlated = correlationOf(result);
+    if (!correlated) {
+      throw new AgentRuntimeRegistrationError("conformance_failed", "resume 起始缺少 correlation");
+    }
+    start = correlated;
+  }
+  const result = await sendMessage(endpoint, credential, resumeInput, start);
+  const responded = correlationOf(result);
+  if (!responded || responded.taskId !== start.taskId || responded.contextId !== start.contextId) {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "resume correlation 发生变化");
+  }
+  if (resultState(result) !== "completed") {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "resume 未完成");
+  }
+}
+
+/** Cancel probe：start long-running task → tasks/cancel → 同 correlation canceled（02 §7）。 */
+async function probeCancel(
+  endpoint: string,
+  credential: ResolvedCredential,
+  input: string,
+  streamingTransport: boolean,
+): Promise<void> {
+  let start: Correlation;
+  if (streamingTransport) {
+    start = await streamUntilCorrelation(endpoint, credential, input);
+  } else {
+    const result = await sendMessage(endpoint, credential, input);
+    const correlated = correlationOf(result);
+    if (!correlated) {
+      throw new AgentRuntimeRegistrationError("conformance_failed", "cancel 起始缺少 correlation");
+    }
+    start = correlated;
+  }
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -280,42 +584,30 @@ async function probeResumeCompletion(
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: randomUUID(),
-      method: "message/send",
-      params: {
-        // A2A 0.3 官方 Message wire：kind=message + 每次新 messageId；同 taskId/contextId。
-        message: {
-          kind: "message",
-          messageId: randomUUID(),
-          role: "user",
-          parts: [{ kind: "text", text: resumeInput }],
-          taskId: correlation.taskId,
-          contextId: correlation.contextId,
-        },
-      },
+      method: "tasks/cancel",
+      params: { taskId: start.taskId },
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   }).catch(() => {
     throw new AgentRuntimeRegistrationError("conformance_failed", "Runtime 不可达");
   });
   if (!response.ok) {
-    throw new AgentRuntimeRegistrationError("conformance_failed", "message/send 被拒绝");
+    throw new AgentRuntimeRegistrationError("conformance_failed", "tasks/cancel 被拒绝");
   }
   const payload = (await response.json().catch(() => null)) as {
     result?: Record<string, unknown>;
   } | null;
   const result = payload?.result;
-  if (!result) {
-    throw new AgentRuntimeRegistrationError("conformance_failed", "message/send 响应非法");
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "tasks/cancel 响应非法");
   }
-  // 官方两种响应形态归一化取 correlation：Task={id, contextId}；
-  // status-update={taskId, contextId}。要求与原 correlation 精确一致。
-  const respondedTaskId =
+  const taskIdRaw =
     result.kind === "task" && typeof result.id === "string" ? result.id : result.taskId;
-  if (respondedTaskId !== correlation.taskId || result.contextId !== correlation.contextId) {
-    throw new AgentRuntimeRegistrationError("conformance_failed", "resume correlation 发生变化");
+  if (taskIdRaw !== start.taskId) {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "cancel correlation 发生变化");
   }
-  if (resultState(result) !== "completed") {
-    throw new AgentRuntimeRegistrationError("conformance_failed", "resume 未完成");
+  if (resultState(result) !== "canceled") {
+    throw new AgentRuntimeRegistrationError("conformance_failed", "未观察到取消终态");
   }
 }
 
@@ -374,17 +666,6 @@ async function readSseResults(response: Response): Promise<Array<Record<string, 
   return results;
 }
 
-/** A2A 官方 Task / status-update 两种形态统一取 state。 */
-function resultState(result: Record<string, unknown>): string | null {
-  const status = result.status;
-  if (status && typeof status === "object" && !Array.isArray(status)) {
-    const state = (status as Record<string, unknown>).state;
-    if (typeof state === "string") return state;
-  }
-  if (typeof result.state === "string") return result.state;
-  return null;
-}
-
 // ─── 持久化（单事务，仅验收成功后）────────────────────────
 
 export interface AgentRuntimeRegistrationResult {
@@ -392,22 +673,21 @@ export interface AgentRuntimeRegistrationResult {
   revision: RuntimeRevisionRow;
   snapshot: AgentContractSnapshot;
   runtimeEndpoint: string;
-  evidence: {
-    agentCardProtocolVersionMatch: boolean;
-    eventStreamObserved: boolean;
-    inputRequiredObserved: boolean;
-    resumeCompleted: boolean;
-  };
+  /** 结构化 measured 证据矩阵（02 §9）。 */
+  measured: RuntimeMeasuredEvidence;
+  /** declared/measured/effective 三态投影（02 §10）。 */
+  capabilities: RuntimeCapabilitiesProjection;
 }
 
 /**
- * 执行主动黑盒注册验收：引用校验（网络前）→ 真实 HTTP/SSE 一致性调用 → 单事务持久化。
- * 任何失败抛 AgentRuntimeRegistrationError，且不产生 Runtime/RuntimeRevision 行。
+ * 执行 capability-driven 黑盒注册验收：presence/引用校验（网络前）→ 真实 HTTP/SSE
+ * 一致性调用 → 单事务持久化。任何失败抛 AgentRuntimeRegistrationError，且不产生
+ * Runtime/RuntimeRevision 行。
  */
 export async function registerAgentRuntime(
   command: AgentRuntimeRegistrationCommand,
 ): Promise<AgentRuntimeRegistrationResult> {
-  // 1) 引用校验（网络前，fail-closed）
+  // 1) 引用 + probe presence 校验（网络前，fail-closed）
   const agent = await getAgentById(command.tenantId, command.agentId);
   if (!agent) {
     throw new AgentRuntimeRegistrationError("reference_invalid", "Agent 不存在或无权访问");
@@ -421,26 +701,123 @@ export async function registerAgentRuntime(
   if (snapshot.agentId !== command.agentId) {
     throw new AgentRuntimeRegistrationError("reference_invalid", "合同快照不属于该 Agent");
   }
-  // 本冻结流只支持 input_required + resume 的 HR 形交互；其余组合 fail closed。
-  if (!snapshot.inputRequired || !snapshot.resume) {
+  // 02 §2 Presence 规则：probe 输入严格匹配快照声明（多余/缺失一律网络前拒绝）。
+  if (snapshot.inputRequired !== (command.conformance.input_required !== undefined)) {
     throw new AgentRuntimeRegistrationError(
       "reference_invalid",
-      "该合同快照的交互形态不适用本注册验收流",
+      snapshot.inputRequired
+        ? "快照声明 input_required，conformance.input_required 必填"
+        : "快照未声明 input_required，conformance.input_required 必须缺席",
+    );
+  }
+  if (snapshot.resume !== (command.conformance.resume !== undefined)) {
+    throw new AgentRuntimeRegistrationError(
+      "reference_invalid",
+      snapshot.resume
+        ? "快照声明 resume，conformance.resume 必填"
+        : "快照未声明 resume，conformance.resume 必须缺席",
+    );
+  }
+  if (snapshot.cancel !== (command.conformance.cancel !== undefined)) {
+    throw new AgentRuntimeRegistrationError(
+      "reference_invalid",
+      snapshot.cancel
+        ? "快照声明 cancel，conformance.cancel 必填"
+        : "快照未声明 cancel，conformance.cancel 必须缺席",
+    );
+  }
+  // 防御历史快照：incremental_content 依赖流式传输（登记解析器已强制，02 §4）。
+  if (snapshot.incrementalContent && !snapshot.streamingTransport) {
+    throw new AgentRuntimeRegistrationError(
+      "reference_invalid",
+      "快照 incremental_content=true 但 streaming_transport=false（非法合同组合）",
     );
   }
   const endpoint = normalizeRuntimeEndpoint(command.runtimeEndpoint);
   const credential = await resolveCredential(command.tenantId, command.authentication);
 
-  // 2) AgentCard 协议证据 + 3) 主动一致性验收（顺序执行，一次网络序列）
+  // 2) AgentCard 协议证据 + capability-driven probes（顺序执行，一次网络序列）
   await probeAgentCardConsistency(endpoint, credential, snapshot);
-  const stream = await probeMessageStream(endpoint, credential, command.conformance.startInput);
-  await probeResumeCompletion(endpoint, credential, command.conformance.resumeInput, stream);
+  const increments = { observed: false };
+  await probeBasic(
+    endpoint,
+    credential,
+    command.conformance.basic.input,
+    snapshot.streamingTransport,
+    increments,
+  );
+  if (command.conformance.input_required) {
+    await probeInputRequired(
+      endpoint,
+      credential,
+      command.conformance.input_required.input,
+      snapshot.streamingTransport,
+      increments,
+    );
+  }
+  if (command.conformance.resume) {
+    await probeResume(
+      endpoint,
+      credential,
+      command.conformance.resume.startInput,
+      command.conformance.resume.resumeInput,
+      snapshot.streamingTransport,
+      increments,
+    );
+  }
+  if (command.conformance.cancel) {
+    await probeCancel(
+      endpoint,
+      credential,
+      command.conformance.cancel.input,
+      snapshot.streamingTransport,
+    );
+  }
+  // 02 §4：incremental_content=true 必须真实观测至少一条内容/artifact 增量。
+  if (snapshot.incrementalContent && !increments.observed) {
+    throw new AgentRuntimeRegistrationError(
+      "conformance_failed",
+      "incremental_content=true 但未观测到内容增量",
+    );
+  }
 
-  const evidence = {
-    agentCardProtocolVersionMatch: true,
-    eventStreamObserved: true,
-    inputRequiredObserved: true,
-    resumeCompleted: true,
+  // 3) 结构化 measured 证据（02 §9）与 declared/measured/effective 投影（02 §10）。
+  const measured: RuntimeMeasuredEvidence = {
+    agent_card: {
+      protocol_version: "pass",
+      transport: "pass",
+      streaming_consistency: "pass",
+    },
+    basic_invocation: { status: "pass" },
+    features: {
+      streaming_transport: snapshot.streamingTransport ? "pass" : "not_applicable",
+      incremental_content: snapshot.incrementalContent ? "pass" : "not_applicable",
+      input_required: snapshot.inputRequired ? "pass" : "not_applicable",
+      resume: snapshot.resume ? "pass" : "not_applicable",
+      cancel: snapshot.cancel ? "pass" : "not_applicable",
+      // 02 §8：阶段 1 不冒充 durable recovery 验证。
+      durable_task_recovery: "not_measured",
+    },
+  };
+  const capabilities: RuntimeCapabilitiesProjection = {
+    declared: {
+      streaming_transport: snapshot.streamingTransport,
+      incremental_content: snapshot.incrementalContent,
+      input_required: snapshot.inputRequired,
+      resume: snapshot.resume,
+      cancel: snapshot.cancel,
+      durable_task_recovery: snapshot.durableTaskRecovery,
+    },
+    measured,
+    // effective = declared=true AND measured=pass（durable 未测恒 false，02 §8/§10）。
+    effective: {
+      streaming_transport: snapshot.streamingTransport,
+      incremental_content: snapshot.incrementalContent,
+      input_required: snapshot.inputRequired,
+      resume: snapshot.resume,
+      cancel: snapshot.cancel,
+      durable_task_recovery: false,
+    },
   };
 
   // 4) 单事务持久化（create/reuse 恰一个 external Runtime + draft Revision）
@@ -512,31 +889,13 @@ export async function registerAgentRuntime(
       identityMode: credential.identityMode,
       networkZone: "external",
     });
+    // 证据摘要对结构化 measured facts 计算，不保存 raw transcript（02 §9）。
     const evidenceDigest = computeCanonicalDigest({
       agent_contract_snapshot_id: snapshot.id,
       runtime_endpoint: endpoint,
       runtime_target_digest: runtimeTargetDigest,
-      agent_card_protocol_version_match: evidence.agentCardProtocolVersionMatch,
-      event_stream_observed: evidence.eventStreamObserved,
-      input_required_observed: evidence.inputRequiredObserved,
-      resume_completed: evidence.resumeCompleted,
+      measured,
     });
-    const runtimeCapabilitiesJson = {
-      conformance: {
-        agent_card_protocol_version_match: evidence.agentCardProtocolVersionMatch,
-        event_stream_observed: evidence.eventStreamObserved,
-        input_required_observed: evidence.inputRequiredObserved,
-        resume_completed: evidence.resumeCompleted,
-      },
-      interaction: {
-        streaming_transport: snapshot.streamingTransport,
-        incremental_content: snapshot.incrementalContent,
-        input_required: snapshot.inputRequired,
-        resume: snapshot.resume,
-        cancel: snapshot.cancel,
-        durable_task_recovery: snapshot.durableTaskRecovery,
-      },
-    };
 
     const revisionId = randomUUID();
     await tx.insert(runtimeRevisionTable).values({
@@ -549,7 +908,7 @@ export async function registerAgentRuntime(
       runtimeTargetDigest,
       endpointRef: endpoint,
       runtimeArtifactRef: null,
-      runtimeCapabilitiesJson,
+      runtimeCapabilitiesJson: capabilities,
       identityMode: credential.identityMode,
       networkZone: "external",
       configHash,
@@ -581,6 +940,7 @@ export async function registerAgentRuntime(
     revision: persisted.revision,
     snapshot,
     runtimeEndpoint: endpoint,
-    evidence,
+    measured,
+    capabilities,
   };
 }
