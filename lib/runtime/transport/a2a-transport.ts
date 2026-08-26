@@ -46,7 +46,14 @@ const A2A_INPUT_ACTION_SCHEMA = {
   additionalProperties: false,
   required: ["text"],
   properties: {
-    text: { type: "string", minLength: 1, maxLength: 20_000 },
+    text: {
+      type: "string",
+      title: "补充信息",
+      minLength: 1,
+      maxLength: 20_000,
+      // 与 resume transport trim 后拒绝纯空白保持一致：至少一个非空白字符。
+      pattern: "\\S",
+    },
   },
 } as const;
 

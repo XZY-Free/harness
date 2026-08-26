@@ -28,7 +28,7 @@ import {
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { EventSequenceGapError } from "@/lib/conversations/errors";
-import { createThread } from "@/lib/conversations/thread-queries";
+import { computeEventPayloadHash, createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -38,7 +38,7 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import type { AgentRevision } from "@/lib/persistence/schema/agents";
-import { threadEventTable } from "@/lib/persistence/schema/conversation";
+import { threadEventTable, threadItemTable } from "@/lib/persistence/schema/conversation";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import {
@@ -613,6 +613,85 @@ describe("RuntimeEventIngress 核心入库", () => {
     expect(uaEvents).toHaveLength(1);
     const payload = uaEvents[0]!.payloadJson as { request_id?: string };
     expect(payload.request_id).toBe(uar.id);
+  });
+
+  it("user_action.requested（input）：Item contentJson 必须持久化 request_id，content hash 对应最终含 request_id 的内容（RED）", async () => {
+    const { invocationId, threadId } = await seedRunningInvocation(ctx);
+    const inputSchema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["text"],
+      properties: { text: { type: "string", minLength: 1, maxLength: 20_000 } },
+    };
+
+    const result = await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId,
+      producerSequenceStart: 1,
+      events: [
+        makeEvent("evt-ua-input", 1, "user_action.requested", {
+          request_type: "input",
+          purpose: "a2a_input_required",
+          prompt: "请提供请假事由",
+          input_schema: inputSchema,
+        }),
+      ],
+    });
+
+    expect(result.acceptedThroughProducerSequence).toBe(1);
+    const mapped = result.mappedEvents[0];
+    expect(mapped?.itemId).toBeTruthy();
+
+    const uars = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(eq(userActionRequestTable.tenantId, ctx.tenantId));
+    expect(uars).toHaveLength(1);
+    const uar = uars[0]!;
+    expect(uar.requestType).toBe("input");
+    expect(uar.inputSchemaJson).toEqual(inputSchema);
+
+    // 回读 ThreadItem Projection：Authority(=UAR) 与 Projection(=Item) 是两行不同 id，
+    // 真实流程禁止人为把两者设成相同来掩盖缺口。
+    const [item] = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.id, mapped!.itemId!))
+      .limit(1);
+    expect(item).toBeDefined();
+    expect(item!.id).not.toBe(uar.id);
+    expect(uar.itemId).toBe(item!.id);
+
+    // RED：Item contentJson 必须携带 request_id，Web :resolve 才能用 Item 找到 Authority。
+    const finalContent = {
+      kind: "user_action.requested",
+      request_type: "input",
+      purpose: "a2a_input_required",
+      prompt: "请提供请假事由",
+      input_schema: inputSchema,
+      request_id: uar.id,
+    };
+    expect(item!.contentJson).toEqual(finalContent);
+
+    // RED：contentHash 必须对应最终含 request_id 的 content（而非先建的中间版本）。
+    const expectedHash = computeEventPayloadHash(finalContent);
+    expect(item!.contentHash).toBe(expectedHash);
+
+    // RED：item.created 事件的 content_hash 同样匹配最终行。
+    const [itemCreatedEvent] = await db
+      .select()
+      .from(threadEventTable)
+      .where(
+        and(
+          eq(threadEventTable.threadId, threadId),
+          eq(threadEventTable.eventType, "item.created"),
+          eq(threadEventTable.itemId, item!.id),
+        ),
+      )
+      .limit(1);
+    expect(itemCreatedEvent).toBeDefined();
+    const itemCreatedPayload = itemCreatedEvent!.payloadJson as { content_hash?: string };
+    expect(itemCreatedPayload.content_hash).toBe(expectedHash);
   });
 
   it("user_action.requested 伪造 purpose=tool_permission_confirmation → 拒绝（§21）", async () => {

@@ -59,7 +59,43 @@ import {
   userActionRequestTable,
 } from "@/lib/persistence/schema/user-action-request";
 import { updateInvocationState } from "@/lib/runtime/invocation-queries";
+import Ajv, { type ValidateFunction } from "ajv";
 import { and, eq } from "drizzle-orm";
+
+/**
+ * input+submit：按 UAR.inputSchemaJson 真实 JSON Schema 校验响应（required/type/
+ * minLength/maxLength/pattern/additionalProperties 等）。
+ * fail-closed：schema 缺失/非法/无法编译一律拒绝；错误信息为固定文案，
+ * 不包含用户响应原文、secret 或 Ajv 内部细节。
+ */
+function validateInputResponseAgainstSchema(schemaJson: unknown, response: object): void {
+  if (!schemaJson || typeof schemaJson !== "object" || Array.isArray(schemaJson)) {
+    throw new UserActionValidationError(
+      "input 类型 submit 缺少合法的 input_schema，无法校验响应（fail-closed 拒绝）",
+    );
+  }
+  let ajv: Ajv;
+  try {
+    ajv = new Ajv({ strict: false, allErrors: true });
+  } catch {
+    throw new UserActionValidationError(
+      "input 类型 submit 的 input_schema 校验器初始化失败（fail-closed 拒绝）",
+    );
+  }
+  let validate: ValidateFunction;
+  try {
+    validate = ajv.compile(schemaJson);
+  } catch {
+    throw new UserActionValidationError(
+      "input 类型 submit 的 input_schema 非法，无法校验响应（fail-closed 拒绝）",
+    );
+  }
+  if (!validate(response)) {
+    throw new UserActionValidationError(
+      "input 类型 submit 响应不符合请求 input_schema 约束（required/type/minLength/maxLength/pattern/additionalProperties）",
+    );
+  }
+}
 
 /** resolveGenericUserAction 入参。 */
 export interface ResolveGenericUserActionParams {
@@ -174,13 +210,15 @@ export async function resolveGenericUserAction(
       );
     }
 
-    // input + submit 必须提供 responseRedactedJson
+    // input + submit 必须提供 responseRedactedJson，且在锁定 pending UAR 后、
+    // 任何 UPDATE/事件/命令写入前，按 inputSchemaJson 真实校验（Ajv）。
     if (request.requestType === "input" && params.resolution === "submit") {
       if (!params.responseRedactedJson || typeof params.responseRedactedJson !== "object") {
         throw new UserActionValidationError(
           "input 类型 submit 必须提供 responseRedactedJson（对象）",
         );
       }
+      validateInputResponseAgainstSchema(request.inputSchemaJson, params.responseRedactedJson);
     }
 
     // 2. SELECT FOR UPDATE Thread（锁定事件流 + 乐观锁基线）

@@ -816,6 +816,24 @@ async function mapUserActionRequested(
     { tx }, // §22：与 Item/Event/Invocation/Turn 状态变更同事务，禁止回落到全局 db。
   );
 
+  // 2.5 Authority 引用回填：创建 UAR 得到 id 后，在同一事务把 request_id 写入 Item 的
+  // 最终 contentJson 并重算 contentHash。Item 仍是唯一 Projection（不复制业务事实，
+  // request_id 只是 Authority 引用）；item.created 必须携带最终行/hash。
+  const finalContent = {
+    kind: "user_action.requested",
+    ...payload,
+    request_id: uar.id,
+  };
+  await tx
+    .update(threadItemTable)
+    .set({
+      contentJson: finalContent,
+      contentHash: computeItemContentHash(finalContent),
+      updatedAt: new Date(),
+    })
+    .where(eq(threadItemTable.id, item.id));
+  const itemContentHash = computeItemContentHash(finalContent);
+
   // 3. 分配 2 个 event sequence（item.created + user_action.requested）。
   const startSeq = await allocateEventSequences(tx, ctx.threadId, 2);
   const itemCreatedSeq = startSeq;
@@ -830,7 +848,7 @@ async function mapUserActionRequested(
     actorType: ctx.actorType,
     payload: {
       item_type: "user_action",
-      content_hash: item.contentHash,
+      content_hash: itemContentHash,
       source: "user_action.requested",
     },
     correlationId: ctx.correlationId ?? undefined,

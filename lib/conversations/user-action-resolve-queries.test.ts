@@ -16,10 +16,15 @@ import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { UserActionValidationError } from "@/lib/permission/user-action-queries";
-import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import {
+  invocationCommandTable,
+  threadEventTable,
+  threadTable,
+  turnTable,
+} from "@/lib/persistence/schema/conversation";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 const TENANT = DEFAULT_TENANT_ID;
@@ -112,7 +117,9 @@ async function seedWaitingInputRequest(): Promise<{
       type: "object",
       additionalProperties: false,
       required: ["text"],
-      properties: { text: { type: "string", minLength: 1, maxLength: 20_000 } },
+      properties: {
+        text: { type: "string", minLength: 1, maxLength: 20_000, pattern: "\\S" },
+      },
     },
     expiresAt: null,
     versionNo: 1,
@@ -188,5 +195,102 @@ describe("resolveGenericUserAction input submit（authority payload）", () => {
         responseRedactedJson: "年休假，明天一天",
       }),
     ).rejects.toThrow(UserActionValidationError);
+  });
+});
+
+describe("resolveGenericUserAction input submit 按 inputSchemaJson 校验（RED 矩阵）", () => {
+  /**
+   * 断言非法 response 在事务开始前被拒绝，且事务完全未消费：
+   * UAR 仍 pending、Invocation 仍 waiting_user、无 resume InvocationCommand、无 user_action.resolved 事件。
+   * 若 resolver 不校验 schema，会先把 UAR/Invocation 消费掉，transport 之后才失败，用户无法重试。
+   */
+  async function expectRejectedWithoutConsumption(responseRedactedJson: unknown): Promise<void> {
+    const seeded = await seedWaitingInputRequest();
+
+    await expect(
+      resolveGenericUserAction({
+        tenantId: TENANT,
+        requestId: seeded.requestId,
+        resolution: "submit",
+        resolvedBy: "user-1",
+        responseRedactedJson,
+        actorType: "user",
+        actorId: "user-1",
+      }),
+    ).rejects.toThrow(UserActionValidationError);
+
+    const [uarAfter] = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(eq(userActionRequestTable.id, seeded.requestId))
+      .limit(1);
+    expect(uarAfter?.requestState).toBe("pending");
+    expect(uarAfter?.resolution).toBeNull();
+
+    const [invAfter] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, seeded.invocationId))
+      .limit(1);
+    expect(invAfter?.executionState).toBe("waiting_user");
+
+    const commands = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.invocationId, seeded.invocationId));
+    expect(commands).toHaveLength(0);
+
+    const resolvedEvents = await db
+      .select()
+      .from(threadEventTable)
+      .where(
+        and(
+          eq(threadEventTable.threadId, seeded.threadId),
+          eq(threadEventTable.eventType, "user_action.resolved"),
+        ),
+      );
+    expect(resolvedEvents).toHaveLength(0);
+  }
+
+  it("合法 {text} 仍通过（不弱化既有权威断言）", async () => {
+    const seeded = await seedWaitingInputRequest();
+    const result = await resolveGenericUserAction({
+      tenantId: TENANT,
+      requestId: seeded.requestId,
+      resolution: "submit",
+      resolvedBy: "user-1",
+      responseRedactedJson: { text: "年休假，明天一天" },
+      actorType: "user",
+      actorId: "user-1",
+    });
+    expect(result.request.requestState).toBe("resolved");
+    expect(result.resumeCommand.commandPayloadJson).toMatchObject({
+      resume_source: "user_action_resolution",
+      resume_payload: { text: "年休假，明天一天" },
+    });
+  });
+
+  it("空对象 {} 违反 required:[text] → UserActionValidationError 且事务未消费", async () => {
+    await expectRejectedWithoutConsumption({});
+  });
+
+  it('{text:""} 违反 minLength:1 → UserActionValidationError 且事务未消费', async () => {
+    await expectRejectedWithoutConsumption({ text: "" });
+  });
+
+  it('{text:"   "} 纯空白违反 pattern:"\\\\S"（与 resume trim 语义一致）→ 拒绝且事务未消费', async () => {
+    await expectRejectedWithoutConsumption({ text: "   " });
+  });
+
+  it("text 长度 20001 违反 maxLength:20000 → UserActionValidationError 且事务未消费", async () => {
+    await expectRejectedWithoutConsumption({ text: "a".repeat(20_001) });
+  });
+
+  it('额外键 {text:"有效", extra:"x"} 违反 additionalProperties:false → 拒绝且事务未消费', async () => {
+    await expectRejectedWithoutConsumption({ text: "有效", extra: "x" });
+  });
+
+  it("{text:1} 违反 type:string → UserActionValidationError 且事务未消费", async () => {
+    await expectRejectedWithoutConsumption({ text: 1 });
   });
 });

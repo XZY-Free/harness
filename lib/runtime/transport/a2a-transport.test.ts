@@ -441,6 +441,10 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     expect(props.text?.minLength).toBe(1);
     expect(typeof props.text?.maxLength).toBe("number");
     expect(props.text?.maxLength as number).toBeGreaterThan(0);
+    // RED：resume 侧对纯空白文本（trim 后为空）会以 protocol_schema 拒绝，
+    // schema 必须表达稳定的非空白约束（如 pattern "\S"），让 UI/resolver 在消费前拦截。
+    expect(props.text?.pattern).toBe("\\S");
+    expect(props.text?.title).toBe("补充信息");
   });
 
   it("resume（官方 Task）：发送精确纯文本、标准 Message 字段无 metadata；completed 事件携带 artifact 实际答复且序号始于注入值", async () => {
