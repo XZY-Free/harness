@@ -43,6 +43,11 @@ const goal: ClientGoal = {
 };
 
 const latestTurn: ClientTurn = {
+  controls: {
+    cancel_supported: true,
+    resume_supported: false,
+    steer_supported: true,
+  },
   id: "turn-1",
   turn_sequence: 1,
   trigger_type: "message",

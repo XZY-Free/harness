@@ -193,6 +193,8 @@ function makeTransport(
   extra?: Partial<Parameters<typeof createA2ATransport>[0]> & Record<string, unknown>,
 ) {
   return createA2ATransport({
+    // 05 §6：默认冻结 profile（用例可用 extra 覆盖）。
+    capabilities: { cancel: true, resume: true, steer: false },
     eventBatchSink: async (batch) => {
       fixture.batches.push(batch);
     },
@@ -610,6 +612,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     ]);
     const batches: Array<Parameters<A2AEventBatchSink>[0]> = [];
     const transport = createA2ATransport({
+      capabilities: { cancel: true, resume: true, steer: false },
       eventBatchSink: async (batch) => {
         // 注入的 next-sequence 为 41：resume 批次（start 之外的批次）sink 必须失败。
         if (batch.producerSequenceStart === 41) {
@@ -786,6 +789,61 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     expect(fixture.requests).toHaveLength(1);
     expect(fixture.requests[0]?.url).toBe("https://agent.example.com/.well-known/agent-card.json");
     expect(fixture.requests.some((r) => r.url.includes("/.well-known/agent.json"))).toBe(false);
+  });
+
+  it("05 §6：冻结 profile cancel=false → 本地 unsupported_capability，不发任何网络请求", async () => {
+    const fixture = createFixture([]);
+    const denied = makeTransport(fixture, {
+      capabilities: { cancel: false, resume: true, steer: false },
+    });
+    await expect(
+      denied.cancelInvocation({
+        runtimeEndpoint: "https://agent.example.com",
+        auth: { mode: "bearer", token: "token" },
+        invocationId: "inv-1",
+        idempotencyKey: "idem-cancel-denied",
+        requestBody: { reason: "user_cancel" },
+      }),
+    ).rejects.toThrow("unsupported_capability");
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it("05 §6：冻结 profile resume=false → resumeInvocation 本地 unsupported_capability", async () => {
+    const fixture = createFixture([]);
+    const denied = makeTransport(fixture, {
+      capabilities: { cancel: true, resume: false, steer: false },
+    });
+    await expect(
+      denied.resumeInvocation({
+        runtimeEndpoint: "https://agent.example.com",
+        auth: { mode: "bearer", token: "token" },
+        invocationId: "inv-1",
+        idempotencyKey: "idem-resume-denied",
+        requestBody: {
+          resume_payload: { text: "订单号 123" },
+          gateway_access: { access_token: "t", expires_at: "2026-08-25T09:00:00.000Z" },
+        },
+      }),
+    ).rejects.toThrow("unsupported_capability");
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it("05 §5：probeCapabilities 不冒充 Runtime effective capability（cancel/resume/user_action=false）", async () => {
+    const fixture = createFixture([
+      jsonResponse({
+        name: "agent",
+        capabilities: { streaming: true },
+      }),
+    ]);
+    const transport = makeTransport(fixture);
+    const caps = await transport.probeCapabilities("https://agent.example.com", {
+      mode: "bearer",
+      token: "token",
+    });
+    expect(caps.features.event_stream).toBe(true);
+    expect(caps.features.cancel).toBe(false);
+    expect(caps.features.resume).toBe(false);
+    expect(caps.features.user_action).toBe(false);
   });
 
   it("03 §9 boundary：auth=none 时 wire 上完全不发送 Authorization 头", async () => {

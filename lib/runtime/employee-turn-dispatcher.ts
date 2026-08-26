@@ -9,6 +9,7 @@ import { type RouteResolver, createResolveRoute } from "@/lib/routes/application
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import type { HostedModelContext } from "@/lib/runtime/adapters/hosted-adapter";
+import { resolveRuntimeLevelCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import {
   type RuntimeTransportAuth,
   resolveOutboundRuntimeAuth,
@@ -132,6 +133,8 @@ export async function dispatchEmployeeTurn(params: {
   if (!runtimeRevision) {
     throw new Error(`Turn 调度失败：RuntimeRevision 不存在（${runtimeRevisionId}）`);
   }
+  // 05 §2：Runtime 层 measured 能力（Base Harness 语义；Start 路径 Transport 冻结用）。
+  const runtimeLevelCapabilities = resolveRuntimeLevelCapabilities(runtimeRevision);
   const isExternalEndpoint = runtimeRevision.runtimeEvidenceKind === "external_endpoint";
   // managed endpoint/identity configuration（04 §3）：
   // external_endpoint → endpointRef 即外部 endpoint；hosted → in-process 引用。
@@ -183,6 +186,14 @@ export async function dispatchEmployeeTurn(params: {
         }),
       a2a: () =>
         createA2ATransport({
+          // 05 §6：Transport 冻结能力 profile。Start 路径 Transport 只承载
+          // startInvocation；cancel/resume 能力以 Runtime 层 measured 事实冻结
+          // （Agent 级合同因子在 Binding 创建后的命令网关按精确 Binding 复核）。
+          capabilities: {
+            cancel: runtimeLevelCapabilities.cancel,
+            resume: runtimeLevelCapabilities.resume,
+            steer: runtimeLevelCapabilities.steer,
+          },
           eventBatchSink: async ({ invocationId, events, producerSequenceStart }) => {
             await ingressEventBatch({
               tenantId: params.tenantId,

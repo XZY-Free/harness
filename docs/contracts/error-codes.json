@@ -1,5 +1,5 @@
 {
-  "contract_version": "11.0.0",
+  "contract_version": "11.1.0",
   "errors": {
     "ACCESS_DENIED": {
       "http": 403,
@@ -85,6 +85,14 @@
       "http": 409,
       "retryable": true
     },
+    "CONTROL_PLANE_EVENT_CONTRACT_VIOLATION": {
+      "http": 422,
+      "retryable": false
+    },
+    "CONTROL_PLANE_EVENT_UNSUPPORTED": {
+      "http": 422,
+      "retryable": false
+    },
     "DELEGATION_DEPTH_EXCEEDED": {
       "http": 422,
       "retryable": false
@@ -97,6 +105,14 @@
       "http": 503,
       "retryable": true
     },
+    "EGRESS_BLOCKED": {
+      "http": 422,
+      "retryable": false
+    },
+    "ELIGIBILITY_SNAPSHOT_STALE": {
+      "http": 409,
+      "retryable": true
+    },
     "ENVIRONMENT_CHANGE_NOT_SAFE": {
       "http": 422,
       "retryable": false
@@ -104,10 +120,6 @@
     "ETAG_MISMATCH": {
       "http": 412,
       "retryable": true
-    },
-    "EGRESS_BLOCKED": {
-      "http": 422,
-      "retryable": false
     },
     "EVENT_CURSOR_EXPIRED": {
       "http": 409,
@@ -129,6 +141,14 @@
       "http": 409,
       "retryable": false
     },
+    "FEATURE_NOT_READY": {
+      "http": 503,
+      "retryable": true
+    },
+    "HOSTED_REVISION_BINDING_INVALID": {
+      "http": 422,
+      "retryable": false
+    },
     "IDEMPOTENCY_CONFLICT": {
       "http": 409,
       "retryable": false
@@ -141,10 +161,6 @@
       "http": 422,
       "retryable": false
     },
-    "JOB_USER_ACTION_NOT_ALLOWED": {
-      "http": 409,
-      "retryable": false
-    },
     "JOB_NOT_TERMINAL": {
       "http": 409,
       "retryable": false
@@ -154,6 +170,10 @@
       "retryable": false
     },
     "JOB_RETRY_BLOCKED_BY_UNKNOWN_EFFECT": {
+      "http": 409,
+      "retryable": false
+    },
+    "JOB_USER_ACTION_NOT_ALLOWED": {
       "http": 409,
       "retryable": false
     },
@@ -197,6 +217,14 @@
       "http": 403,
       "retryable": false
     },
+    "PROJECTION_EVIDENCE_INCOMPLETE": {
+      "http": 422,
+      "retryable": false
+    },
+    "PROJECTION_ORPHANED_ROUTE": {
+      "http": 422,
+      "retryable": false
+    },
     "RATE_LIMITED": {
       "http": 429,
       "retryable": true
@@ -209,11 +237,39 @@
       "http": 404,
       "retryable": false
     },
-    "RUNTIME_UNAVAILABLE": {
-      "http": 503,
-      "retryable": true
+    "ROUTE_ELIGIBILITY_INVALID": {
+      "http": 422,
+      "retryable": false
     },
-    "FEATURE_NOT_READY": {
+    "ROUTE_EXECUTION_INELIGIBLE": {
+      "http": 422,
+      "retryable": false
+    },
+    "ROUTE_GROUP_SELECTOR_MISMATCH": {
+      "http": 422,
+      "retryable": false
+    },
+    "ROUTE_REVISION_NOT_ELIGIBLE": {
+      "http": 422,
+      "retryable": false
+    },
+    "ROUTE_SELECTOR_AMBIGUOUS": {
+      "http": 422,
+      "retryable": false
+    },
+    "ROUTE_SET_REQUIRES_ATOMIC_UPDATE": {
+      "http": 409,
+      "retryable": false
+    },
+    "ROUTE_SET_VERSION_CONFLICT": {
+      "http": 412,
+      "retryable": false
+    },
+    "ROUTE_WEIGHT_TOTAL_INVALID": {
+      "http": 422,
+      "retryable": false
+    },
+    "RUNTIME_UNAVAILABLE": {
       "http": 503,
       "retryable": true
     },
@@ -229,12 +285,20 @@
       "http": 409,
       "retryable": true
     },
+    "TURN_ALREADY_TERMINAL": {
+      "http": 409,
+      "retryable": false
+    },
     "TURN_REQUIRES_USER_ACTION": {
       "http": 409,
       "retryable": false
     },
-    "TURN_ALREADY_TERMINAL": {
+    "UNSUPPORTED_CAPABILITY": {
       "http": 409,
+      "retryable": false
+    },
+    "WORKLOAD_TOKEN_REVOKED": {
+      "http": 401,
       "retryable": false
     },
     "WORKSPACE_OVERLAY_MERGE_CONFLICT": {
@@ -252,66 +316,6 @@
     "WORKSPACE_WRITE_LOCK_STATE_CONFLICT": {
       "http": 409,
       "retryable": false
-    },
-    "WORKLOAD_TOKEN_REVOKED": {
-      "http": 401,
-      "retryable": false
-    },
-    "ROUTE_WEIGHT_TOTAL_INVALID": {
-      "http": 422,
-      "retryable": false
-    },
-    "ROUTE_GROUP_SELECTOR_MISMATCH": {
-      "http": 422,
-      "retryable": false
-    },
-    "ROUTE_SELECTOR_AMBIGUOUS": {
-      "http": 422,
-      "retryable": false
-    },
-    "ROUTE_SET_REQUIRES_ATOMIC_UPDATE": {
-      "http": 409,
-      "retryable": false
-    },
-    "ROUTE_REVISION_NOT_ELIGIBLE": {
-      "http": 422,
-      "retryable": false
-    },
-    "ROUTE_SET_VERSION_CONFLICT": {
-      "http": 412,
-      "retryable": false
-    },
-    "ROUTE_EXECUTION_INELIGIBLE": {
-      "http": 422,
-      "retryable": false
-    },
-    "ROUTE_ELIGIBILITY_INVALID": {
-      "http": 422,
-      "retryable": false
-    },
-    "CONTROL_PLANE_EVENT_UNSUPPORTED": {
-      "http": 422,
-      "retryable": false
-    },
-    "CONTROL_PLANE_EVENT_CONTRACT_VIOLATION": {
-      "http": 422,
-      "retryable": false
-    },
-    "PROJECTION_EVIDENCE_INCOMPLETE": {
-      "http": 422,
-      "retryable": false
-    },
-    "PROJECTION_ORPHANED_ROUTE": {
-      "http": 422,
-      "retryable": false
-    },
-    "HOSTED_REVISION_BINDING_INVALID": {
-      "http": 422,
-      "retryable": false
-    },
-    "ELIGIBILITY_SNAPSHOT_STALE": {
-      "http": 409,
-      "retryable": true
     }
   }
 }

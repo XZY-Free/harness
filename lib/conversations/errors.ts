@@ -168,6 +168,20 @@ export class ProjectionFailureError extends Error {
  * docs/architecture/api-and-events.md -3.10。
  * 映射 404 RESOURCE_NOT_FOUND（隐藏式，不泄露存在）。
  */
+/**
+ * 当前 Invocation 的 Binding effective cancel=false，Turn 不支持 Stop。
+ * 映射 409 UNSUPPORTED_CAPABILITY（05 §7：不创建 command、不写 interrupt_requested）。
+ */
+export class TurnCancelUnsupportedError extends Error {
+  constructor(
+    public readonly turnId: string,
+    public readonly reason: string,
+  ) {
+    super(`Turn ${turnId} 绑定的执行不支持 Cancel：${reason}`);
+    this.name = "TurnCancelUnsupportedError";
+  }
+}
+
 export class PendingInputNotFoundError extends Error {
   constructor(public readonly pendingInputId: string) {
     super(`PendingInput 不存在或不可见：${pendingInputId}`);

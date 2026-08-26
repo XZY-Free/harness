@@ -16,6 +16,7 @@ import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/ex
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { invocationCommandTable } from "@/lib/persistence/schema/conversation";
 import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
+import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import {
   type CommandRuntimeEndpointResolution,
   dispatchCancelCommand,
@@ -36,7 +37,7 @@ export interface CommandGatewayResult {
   /** 是否真正执行了协议调度（false = 非 A2A 协议或命令不存在，由既有状态机吸收）。 */
   dispatched: boolean;
   /** 未调度原因。 */
-  reason?: "command_not_found" | "protocol_not_remote";
+  reason?: "command_not_found" | "protocol_not_remote" | "unsupported_capability";
 }
 
 /** 查询命令关联的 Invocation + Binding（跨租户隔离）。 */
@@ -62,6 +63,8 @@ async function loadCommandContext(tenantId: string, commandId: string) {
 async function resolveA2ACommandTransport(params: {
   tenantId: string;
   binding: ExecutionBinding;
+  /** 05 §6：Transport 冻结能力 profile（Binding 派生）。 */
+  capabilities: { cancel: boolean; resume: boolean; steer: boolean };
 }): Promise<{
   transport: ReturnType<typeof createA2ATransport>;
   endpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
@@ -72,6 +75,8 @@ async function resolveA2ACommandTransport(params: {
   const endpoint = runtimeRevision.endpointRef;
 
   const transport = createA2ATransport({
+    // 05 §6：Transport 创建即获得冻结能力 profile（Binding 派生）。
+    capabilities: params.capabilities,
     eventBatchSink: async ({ invocationId, events }) => {
       // 逐事件提交（与 Hosted Agent Loop 语义一致，hosted-adapter 6 步：response.completed
       // 与 execution.completed 分批提交）。容错规则：
@@ -170,7 +175,24 @@ export async function dispatchInterruptCommandToRuntime(params: {
 }): Promise<CommandGatewayResult> {
   const ctx = await loadCommandContext(params.tenantId, params.commandId);
   if (!ctx) return { dispatched: false, reason: "command_not_found" };
-  const a2a = await resolveA2ACommandTransport({ tenantId: params.tenantId, binding: ctx.binding });
+  // 05 §8：命令网关二次门禁 —— 依据 Binding 重新检查 effective cancel；
+  // false → 不发 tasks/cancel，明确返回 unsupported reason（不发任何网络请求）。
+  const capabilities = await resolveEffectiveInvocationCapabilities({
+    tenantId: params.tenantId,
+    binding: ctx.binding,
+  });
+  if (!capabilities.cancel) {
+    return { dispatched: false, reason: "unsupported_capability" };
+  }
+  const a2a = await resolveA2ACommandTransport({
+    tenantId: params.tenantId,
+    binding: ctx.binding,
+    capabilities: {
+      cancel: capabilities.cancel,
+      resume: capabilities.resume,
+      steer: capabilities.steer,
+    },
+  });
   if (!a2a) return { dispatched: false, reason: "protocol_not_remote" };
 
   await dispatchCancelCommand({
@@ -196,7 +218,23 @@ export async function dispatchResumeCommandToRuntime(params: {
 }): Promise<CommandGatewayResult> {
   const ctx = await loadCommandContext(params.tenantId, params.commandId);
   if (!ctx) return { dispatched: false, reason: "command_not_found" };
-  const a2a = await resolveA2ACommandTransport({ tenantId: params.tenantId, binding: ctx.binding });
+  // 05 §11：Resume 沿同一 Effective Capability 模型门禁；false 不兜底新建 Invocation。
+  const capabilities = await resolveEffectiveInvocationCapabilities({
+    tenantId: params.tenantId,
+    binding: ctx.binding,
+  });
+  if (!capabilities.resume) {
+    return { dispatched: false, reason: "unsupported_capability" };
+  }
+  const a2a = await resolveA2ACommandTransport({
+    tenantId: params.tenantId,
+    binding: ctx.binding,
+    capabilities: {
+      cancel: capabilities.cancel,
+      resume: capabilities.resume,
+      steer: capabilities.steer,
+    },
+  });
   if (!a2a) return { dispatched: false, reason: "protocol_not_remote" };
 
   await dispatchResumeCommand({

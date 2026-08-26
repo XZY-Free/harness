@@ -270,10 +270,27 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
 import { getTurnsByThread } from "@/lib/conversations/turn-queries";
 import type { Turn } from "@/lib/persistence/schema/conversation";
+import { type TurnControls, resolveTurnControls } from "@/lib/runtime/capabilities/turn-controls";
 
-/** 投影 Turn 为响应体（snake_case）。 */
-function projectTurn(turn: Turn): Record<string, unknown> {
+/**
+ * 投影 Turn 为响应体（snake_case）。
+ * controls（05 §9）由服务端按精确 Binding 派生（EffectiveInvocationCapabilities），
+ * 终态 Turn 恒 false；无 Binding → fail-closed 全 false。
+ */
+function projectTurn(
+  turn: Turn,
+  controls: TurnControls = {
+    cancel_supported: false,
+    resume_supported: false,
+    steer_supported: false,
+  },
+): Record<string, unknown> {
   return {
+    controls: {
+      cancel_supported: controls.cancel_supported,
+      resume_supported: controls.resume_supported,
+      steer_supported: controls.steer_supported,
+    },
     id: turn.id,
     turn_sequence: turn.turnSequence,
     trigger_type: turn.triggerType,
@@ -339,9 +356,11 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 4. 查询 Turn 列表
   const turns = await getTurnsByThread(principal.tenantId, threadId);
 
-  // 5. 返回 200 + Turn 列表（按 turn_sequence 升序）
+  // 5. 解析 Turn controls（服务端 Binding 派生，05 §9）并返回列表（按 turn_sequence 升序）
+  const visibleTurns = turns.slice(0, limit);
+  const controlsByTurn = await resolveTurnControls(principal.tenantId, visibleTurns);
   const responseBody = {
-    turns: turns.slice(0, limit).map(projectTurn),
+    turns: visibleTurns.map((turn) => projectTurn(turn, controlsByTurn.get(turn.id))),
   };
 
   return apiSuccess(responseBody, {

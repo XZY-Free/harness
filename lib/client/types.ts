@@ -262,8 +262,16 @@ export interface ClientGoal {
   readonly completed_at: string | null;
 }
 
+/** Turn controls（服务端 Binding 派生，05 §9；终态 Turn 恒 false）。 */
+export interface ClientTurnControls {
+  readonly cancel_supported: boolean;
+  readonly resume_supported: boolean;
+  readonly steer_supported: boolean;
+}
+
 /** GET /api/v1/threads/{thread_id}/turns 返回的 Turn 投影。 */
 export interface ClientTurn {
+  readonly controls: ClientTurnControls;
   readonly id: string;
   readonly turn_sequence: number;
   readonly trigger_type: string;

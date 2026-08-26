@@ -20,6 +20,14 @@ import {
 } from "@/lib/conversations/route-helpers";
 import { getThreadById, updateThreadLifecycle } from "@/lib/conversations/thread-queries";
 import { getTurnsByThread } from "@/lib/conversations/turn-queries";
+import { type TurnControls, resolveTurnControls } from "@/lib/runtime/capabilities/turn-controls";
+
+/** fail-closed 默认 controls（解析失败/无 Binding → 全 false）。 */
+const TERMINAL_TURN_CONTROLS: TurnControls = {
+  cancel_supported: false,
+  resume_supported: false,
+  steer_supported: false,
+};
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId, resourceNotFound } from "@/lib/http";
 import type { Goal, Thread, Turn } from "@/lib/persistence/schema/conversation";
 
@@ -63,9 +71,17 @@ function projectGoal(goal: Goal): Record<string, unknown> {
   };
 }
 
-/** 投影 Turn 为响应体（snake_case，仅最新 Turn 的摘要字段）。 */
-function projectTurnSummary(turn: Turn): Record<string, unknown> {
+/**
+ * 投影 Turn 为响应体（snake_case，仅最新 Turn 的摘要字段）。
+ * controls（05 §9）由服务端按精确 Binding 派生；终态 Turn 恒 false。
+ */
+function projectTurnSummary(turn: Turn, controls: TurnControls): Record<string, unknown> {
   return {
+    controls: {
+      cancel_supported: controls.cancel_supported,
+      resume_supported: controls.resume_supported,
+      steer_supported: controls.steer_supported,
+    },
     id: turn.id,
     turn_sequence: turn.turnSequence,
     trigger_type: turn.triggerType,
@@ -116,11 +132,16 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 最新 Turn = turnSequence 最大的（数组已按 turnSequence 升序）
   const latestTurn = turns.length > 0 ? turns[turns.length - 1] : null;
 
-  // 4. 返回 200 + Thread + Goal + 最新 Turn
+  // 4. 解析最新 Turn controls（服务端 Binding 派生，05 §9）并返回
+  const controlsByTurn = latestTurn
+    ? await resolveTurnControls(principal.tenantId, [latestTurn])
+    : null;
   const responseBody = {
     thread: projectThread(thread),
     active_goal: activeGoal ? projectGoal(activeGoal) : null,
-    latest_turn: latestTurn ? projectTurnSummary(latestTurn) : null,
+    latest_turn: latestTurn
+      ? projectTurnSummary(latestTurn, controlsByTurn?.get(latestTurn.id) ?? TERMINAL_TURN_CONTROLS)
+      : null,
   };
 
   return apiSuccess(responseBody, {

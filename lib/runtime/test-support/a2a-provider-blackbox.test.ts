@@ -40,6 +40,8 @@ function freshTransport(
 ) {
   const batches: Array<Parameters<A2AEventBatchSink>[0]> = [];
   const transport = createA2ATransport({
+    // 05 §6：默认冻结 profile（cancel/resume 可用；steer 不在 A2A 冻结范围）。
+    capabilities: { cancel: true, resume: true, steer: false },
     eventBatchSink: async (batch) => {
       batches.push(batch);
     },

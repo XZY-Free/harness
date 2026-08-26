@@ -49,7 +49,11 @@ import {
   type WorkloadTokenClaims,
   issueWorkloadToken,
 } from "@/lib/identity/workload-token";
-import { type AgentRevision, agentTable } from "@/lib/persistence/schema/agents";
+import {
+  type AgentRevision,
+  agentContractSnapshotTable,
+  agentTable,
+} from "@/lib/persistence/schema/agents";
 import type {
   InvocationCommand,
   ThreadEvent,
@@ -2168,6 +2172,17 @@ describe("S05-C04 基础 Harness Route redispatch 不依赖 Agent（§8.3）", (
   });
 });
 
+// ─── 辅助：把 Binding 冻结 Snapshot 的合同 cancel/resume 打开（05 专项）──
+
+async function enableContractCancelOnSnapshot(ctx: FullCommandContext): Promise<void> {
+  const snapshotId = ctx.agentRevision.agentContractSnapshotId;
+  if (!snapshotId) throw new Error("seed 未生成 AgentContractSnapshot");
+  await db
+    .update(agentContractSnapshotTable)
+    .set({ cancel: true, resume: true })
+    .where(eq(agentContractSnapshotTable.id, snapshotId));
+}
+
 // ─── 辅助：为远端调用装配 runtimeExecutionRef + SessionBinding（Batch 10） ─
 
 async function attachRemoteRefsToInvocation(
@@ -2207,6 +2222,9 @@ describe("Batch 10 命令调度生产网关", () => {
 
   it("非 a2a 协议：protocol_not_remote，命令保持 queued 由既有状态机吸收", async () => {
     const ctx = await seedFullCommandContext("agent_runtime_protocol");
+    // 05 §3：合同声明 cancel=true，使本用例聚焦协议分流（合同 cancel=false 的
+    // unsupported_capability 分支由专项 05 用例覆盖）。
+    await enableContractCancelOnSnapshot(ctx);
     const running = await seedRunningInvocationWithRunningTurn(ctx);
 
     const interruptResult = await requestInterrupt({
@@ -2227,6 +2245,44 @@ describe("Batch 10 命令调度生产网关", () => {
     expect((await getCommandRow(interruptResult.command.id))?.commandState).toBe("queued");
   });
 
+  it("05 §8：Binding effective cancel=false → 不发 tasks/cancel（unsupported_capability）", async () => {
+    const provider = await startA2ATestProvider("long_running");
+    try {
+      const ctx = await seedFullCommandContext("a2a");
+      await db
+        .update(runtimeRevisionTable)
+        .set({ endpointRef: provider.endpoint })
+        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
+      // 合同 cancel=false（HR 默认快照）→ Agent Route effective cancel=false（05 §3）。
+      // 不调用 enableContractCancelOnSnapshot。
+      const running = await seedRunningInvocationWithRunningTurn(ctx);
+      await attachRemoteRefsToInvocation(ctx, running.invocationId, "ctx-gw-cancel-denied");
+
+      const interruptResult = await requestInterrupt({
+        tenantId: ctx.tenantId,
+        ownerUserId: ctx.ownerId,
+        turnId: ctx.turnId,
+        reasonCode: "user_cancel",
+        idempotencyKey: "gw-cancel-denied-1",
+      });
+      await bindInvocationIdToCommand(interruptResult.command.id, running.invocationId);
+
+      const rpcMethodsBefore = [...provider.rpcMethods];
+      const result = await dispatchInterruptCommandToRuntime({
+        tenantId: ctx.tenantId,
+        commandId: interruptResult.command.id,
+      });
+      expect(result).toEqual({ dispatched: false, reason: "unsupported_capability" });
+      // 不发任何网络请求：Provider 未观测到新的 JSON-RPC 调用（尤其 tasks/cancel）。
+      expect(provider.rpcMethods).toEqual(rpcMethodsBefore);
+      expect(provider.rpcMethods).not.toContain("tasks/cancel");
+      // 命令保持 queued（未被远端 ack）。
+      expect((await getCommandRow(interruptResult.command.id))?.commandState).toBe("queued");
+    } finally {
+      await provider.close();
+    }
+  });
+
   it("a2a 协议 Interrupt：真实 tasks/cancel 远端调度 + acknowledged（08 §6）", async () => {
     const provider = await startA2ATestProvider("long_running");
     try {
@@ -2236,6 +2292,8 @@ describe("Batch 10 命令调度生产网关", () => {
         .update(runtimeRevisionTable)
         .set({ endpointRef: provider.endpoint })
         .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
+      // 05 §3：cancel=true 合同 + measured pass + a2a tasks/cancel 实现 → effective true。
+      await enableContractCancelOnSnapshot(ctx);
       const running = await seedRunningInvocationWithRunningTurn(ctx);
       await attachRemoteRefsToInvocation(ctx, running.invocationId, "ctx-gw-cancel-1");
 

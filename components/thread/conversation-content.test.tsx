@@ -52,6 +52,51 @@ function stubModelsFetch() {
   );
 }
 
+/** 构造运行中 Turn（controls 可控）供 ThreadInput 渲染。 */
+function makeRunningTurn(cancelSupported: boolean) {
+  return {
+    controls: {
+      cancel_supported: cancelSupported,
+      resume_supported: false,
+      steer_supported: false,
+    },
+    id: "turn-running",
+    turn_sequence: 1,
+    trigger_type: "message",
+    trigger_ref: null,
+    trigger_item_id: null,
+    turn_state: "running",
+    active_invocation_id: "inv-1",
+    latest_invocation_id: "inv-1",
+    adopted_invocation_id: null,
+    final_item_id: null,
+    error_code: null,
+    regeneration_no: 0,
+    accepted_at: "2026-08-26T00:00:00.000Z",
+    started_at: "2026-08-26T00:00:01.000Z",
+    waiting_at: null,
+    finished_at: null,
+  } as const;
+}
+
+describe("ThreadInput Stop 按钮 capability 门禁（05 §10）", () => {
+  it("运行中 Turn 且 controls.cancel_supported=true → 渲染停止按钮", () => {
+    stubModelsFetch();
+    const { container } = render(
+      <ThreadInput threadId="thread-1" latestTurn={makeRunningTurn(true)} availableAgents={[]} />,
+    );
+    expect(container.querySelector('[aria-label="停止任务"]')).not.toBeNull();
+  });
+
+  it("controls.cancel_supported=false → 无可点击 Stop（不发送 interrupt API）", () => {
+    stubModelsFetch();
+    const { container } = render(
+      <ThreadInput threadId="thread-1" latestTurn={makeRunningTurn(false)} availableAgents={[]} />,
+    );
+    expect(container.querySelector('[aria-label="停止任务"]')).toBeNull();
+  });
+});
+
 describe("消息轨道与输入轨道拆分", () => {
   it("ThreadTimeline 使用独立消息轨道 .message-track，不再使用 composer 轨道或旧共享类", () => {
     const { container } = render(<ThreadTimeline items={[]} streamStatus="idle" />);

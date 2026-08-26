@@ -102,8 +102,11 @@ export function ThreadInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const busy = threadBusy || customBusy || turnBusy;
   const isRunning = route === "pending_input";
+  // 05 §10：Stop 可用 = isRunning AND latestTurn.controls.cancel_supported
+  // （服务端 Binding 派生；cancel=false → 无可点击 Stop、不发送 interrupt API）。
+  const cancelSupported = latestTurn?.controls?.cancel_supported ?? false;
   // 新建页（onSubmitText）不暴露停止按钮；停止按钮仅对既有 Thread + 运行中 Turn 生效。
-  const stopAvailable = isRunning && !onSubmitText && turnId !== "";
+  const stopAvailable = isRunning && !onSubmitText && turnId !== "" && cancelSupported;
   const stopRequested = lastInterrupt !== null;
   // 运行中且输入框为空 → 显示停止按钮；否则显示发送按钮。
   const showStopButton = stopAvailable && !text.trim();

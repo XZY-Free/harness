@@ -18,6 +18,7 @@
  * - Turn 已终态 → 409 TURN_ALREADY_TERMINAL
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
+import { TurnCancelUnsupportedError } from "@/lib/conversations/errors";
 import { requestInterrupt } from "@/lib/conversations/interrupt-queries";
 import {
   type Principal,
@@ -28,9 +29,11 @@ import {
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
+import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
   apiSuccess,
   getRequestId,
   resourceNotFound,
@@ -46,6 +49,7 @@ import {
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
 import { logger } from "@/lib/logger";
+import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import { dispatchInterruptCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 
 export const dynamic = "force-dynamic";
@@ -93,6 +97,30 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   const thread = await getThreadById(principal.tenantId, turn.threadId);
   if (!thread || thread.ownerUserId !== principal.userIdentityId) {
     return resourceNotFound(requestId, `Turn 不存在或无权访问: ${turnId}`);
+  }
+
+  // 2.5 05 §7 前置门禁：Turn → 当前 Invocation → Binding → EffectiveInvocationCapabilities。
+  // cancel=false → 不创建 command、不写 interrupt_requested、不调用 Gateway，
+  // 返回稳定 UNSUPPORTED_CAPABILITY（不用笼统错误掩盖能力不支持）。
+  const currentInvocationId = turn.activeInvocationId ?? turn.latestInvocationId;
+  if (currentInvocationId) {
+    const binding = await getExecutionBindingByInvocation(principal.tenantId, currentInvocationId);
+    if (binding) {
+      const capabilities = await resolveEffectiveInvocationCapabilities({
+        tenantId: principal.tenantId,
+        binding,
+      });
+      if (!capabilities.cancel) {
+        const unsupported = new TurnCancelUnsupportedError(
+          turnId,
+          "Binding effective cancel=false（合同/Runtime measured/协议实现未全满足）",
+        );
+        return apiError("UNSUPPORTED_CAPABILITY", unsupported.message, {
+          requestId,
+          details: { turn_id: turnId, capability: "cancel" },
+        });
+      }
+    }
   }
 
   // 3. 解析 Idempotency-Key（必填）

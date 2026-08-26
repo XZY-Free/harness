@@ -176,6 +176,16 @@ export type A2AExistingContextResolver = (threadId: string) => Promise<string | 
 export type A2ANextProducerSequenceResolver = (invocationId: string) => Promise<number | null>;
 
 export interface CreateA2ATransportParams {
+  /**
+   * 冻结的能力 profile（05 §6 二次保护）：创建时由调用方从 Binding 派生。
+   * cancel=false / resume=false 时对应方法在网络之前本地拒绝（unsupported_capability，
+   * 网络请求次数=0）；Transport 不得用"协议方法实现存在"冒充 capability。
+   */
+  capabilities: {
+    cancel: boolean;
+    resume: boolean;
+    steer: boolean;
+  };
   /** 归一化事件批次出口（RuntimeCandidateEvent → RuntimeEventIngress）。 */
   eventBatchSink: A2AEventBatchSink;
   /** invocation → taskId/contextId（cancel/resume 必需；缺省 fail-closed）。 */
@@ -505,15 +515,18 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
         throw new RuntimeTransportError("protocol_schema", "A2A Agent Card 结构非法");
       }
       // Agent Card → RuntimeCapabilitiesResponse（协议中立能力视图）。
+      // 05 §5：Transport 的"协议方法实现存在"不得冒充 Runtime effective capability；
+      // cancel/resume/user_action 不无条件为 true —— Runtime effective capability
+      // 来自阶段 B Conformance 的 measured 证据（Agent Card 无对应声明 → false）。
       return {
         protocol_versions: ["2"],
         features: {
           event_stream: card.capabilities?.streaming !== false,
-          cancel: true,
-          resume: true,
+          cancel: false,
+          resume: false,
           steer: false,
           dynamic_tools: false,
-          user_action: true,
+          user_action: false,
           workspace_types: [],
           filesystem_checkpoint: false,
         },
@@ -739,6 +752,13 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
     },
 
     async cancelInvocation(req: CancelInvocationRequest): Promise<CancelInvocationResponse> {
+      // 05 §6：frozen profile 二次保护 —— cancel=false 本地拒绝，不发任何网络请求。
+      if (!params.capabilities.cancel) {
+        throw new RuntimeTransportError(
+          "unsupported_capability",
+          `A2A Transport 冻结能力不含 cancel（invocation=${req.invocationId}）`,
+        );
+      }
       const refs = params.resolveRuntimeRefs
         ? await params.resolveRuntimeRefs(req.invocationId)
         : null;
@@ -772,6 +792,13 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
     },
 
     async resumeInvocation(req: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
+      // 05 §6：frozen profile 二次保护 —— resume=false 本地拒绝，不发任何网络请求。
+      if (!params.capabilities.resume) {
+        throw new RuntimeTransportError(
+          "unsupported_capability",
+          `A2A Transport 冻结能力不含 resume（invocation=${req.invocationId}）`,
+        );
+      }
       // 1) payload 校验（网络之前）：非空纯文本字符串，或 text 为非空字符串的对象；
       //    发送 trim 后的精确纯文本，绝不 JSON.stringify 任意对象。
       const payload = req.requestBody.resume_payload;

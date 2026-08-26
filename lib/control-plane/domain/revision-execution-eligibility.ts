@@ -364,17 +364,38 @@ export function extractRequiredCapabilities(jsonValue: unknown): string[] {
 /**
  * 从 RuntimeRevision.runtimeCapabilitiesJson 提取 Capability 列表。
  *
+ * 两种权威形状（02 §10）：
+ * - Hosted：string[] 能力名列表（hosted gateways 契约）；
+ * - External：三态投影 { declared, measured, effective } → 取 effective=true
+ *   的 feature 名（streaming_transport 投影为既有能力名 event_stream）。
+ *
  * Fail-closed 语义：
  * - 字段缺失 → []（Runtime 无能力声明）
- * - 字段存在但不是数组 → 抛 EligibilityError
+ * - 非法形状（既非数组也非投影对象）→ 抛 EligibilityError
  * - 数组包含非字符串项 → 抛 EligibilityError
  */
 export function extractRuntimeCapabilities(jsonValue: unknown): string[] {
   // 字段缺失 → 无能力声明
   if (jsonValue === null || jsonValue === undefined) return [];
 
-  // 字段存在但不是数组 → 非法结构
   if (!Array.isArray(jsonValue)) {
+    // External 三态投影（02 §10）：effective=true 的 feature → 能力名。
+    if (typeof jsonValue === "object" && jsonValue !== null && "effective" in jsonValue) {
+      const effective = (jsonValue as { effective: Record<string, unknown> }).effective;
+      if (typeof effective !== "object" || effective === null) {
+        throw new EligibilityError(
+          "runtime_capability_contract_invalid",
+          "runtimeCapabilities 投影缺少 effective",
+        );
+      }
+      const names: string[] = [];
+      for (const [key, value] of Object.entries(effective)) {
+        if (value === true) {
+          names.push(key === "streaming_transport" ? "event_stream" : key);
+        }
+      }
+      return names;
+    }
     throw new EligibilityError(
       "runtime_capability_contract_invalid",
       "runtimeCapabilities 不是数组",

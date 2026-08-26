@@ -8,6 +8,7 @@ import {
   ThreadNotAcceptingTurnsError,
   ThreadNotFoundError,
   ThreadVersionConflictError,
+  TurnCancelUnsupportedError,
   TurnNotFoundError,
   TurnRequiresUserActionError,
   TurnStateConflictError,
@@ -175,6 +176,7 @@ export function etagMismatchTable(requestId: string, message: string): Response 
  * - ThreadNotAcceptingTurnsError → 409 BUSINESS_CONSTRAINT_VIOLATION（archived/deleted 禁止新 Turn）
  * - ThreadVersionConflictError → 412 ETAG_MISMATCH
  * - TurnStateConflictError → 409 TURN_ALREADY_TERMINAL
+ * - TurnCancelUnsupportedError → 409 UNSUPPORTED_CAPABILITY（05 §7 前置门禁）
  * - ItemSupersedeCycleError → 409 BUSINESS_CONSTRAINT_VIOLATION
  * - PendingInputNotFoundError → 404 RESOURCE_NOT_FOUND
  * - PendingInputNotPendingError → 422 BUSINESS_CONSTRAINT_VIOLATION
@@ -210,6 +212,12 @@ export function conversationErrorToResponse(error: unknown, requestId: string): 
         turn_state: error.currentState,
         attempted_action: error.attemptedAction,
       },
+    });
+  }
+  if (error instanceof TurnCancelUnsupportedError) {
+    return apiError("UNSUPPORTED_CAPABILITY", error.message, {
+      requestId,
+      details: { turn_id: error.turnId, capability: "cancel", reason: error.reason },
     });
   }
   if (error instanceof ItemSupersedeCycleError) {

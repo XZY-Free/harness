@@ -24,12 +24,12 @@ describe("error-codes projection", () => {
     }
   });
 
-  it("contract_version 为 11.0.0", () => {
-    expect(CONTRACT.contract_version).toBe("11.0.0");
+  it("contract_version 为 11.1.0", () => {
+    expect(CONTRACT.contract_version).toBe("11.1.0");
   });
 
-  it("错误码 78 个", () => {
-    expect(Object.keys(API_ERROR_CODES)).toHaveLength(78);
+  it("错误码 79 个", () => {
+    expect(Object.keys(API_ERROR_CODES)).toHaveLength(79);
   });
 
   it("errorDefinition 对未知码 fail-closed", () => {
