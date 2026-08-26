@@ -1,10 +1,13 @@
 /**
  * A2A 0.3.0 RuntimeTransport 实现（04 §4–§6）。
  *
- * 冻结 wire 合同（04 §4，不实现 A2A 1.x 兼容层）：
+ * 冻结 wire 合同（04 §4，不实现 A2A 1.x 兼容层；HR 公开合同兼容）：
  * - JSON-RPC over HTTP（POST {endpoint}）；
- * - message/stream（SSE Task/Artifact updates）；
- * - message/send（resume）；
+ * - Agent Card 仅 /.well-known/agent-card.json（无旧 agent.json 回退）；
+ * - message/stream（SSE Task/Artifact updates）；start Message metadata 仅允许
+ *   execution_subject 公开对象（subject_id/subject_kind），内部 ID/trace 一律不发；
+ * - message/send（resume）：发送精确纯文本（标准 Message 字段），同步返回官方
+ *   Task（kind:"task" + id/contextId/status/artifacts），correlation 必须一致；
  * - tasks/get（诊断）；
  * - tasks/cancel；
  * - contextId / taskId 关联。
@@ -30,11 +33,17 @@ import type {
   SteerInvocationRequest,
   SteerInvocationResponse,
 } from "@/lib/runtime/runtime-client";
-import {
-  A2A_EXECUTION_SUBJECT_METADATA_KEY,
-  executionSubjectToA2AMetadata,
-} from "@/lib/runtime/transport/execution-subject";
 import { RuntimeTransportError } from "@/lib/runtime/transport/runtime-transport";
+
+/** 公开合同（HR 兼容）：input 型 user_action 的通用严格 JSON Schema。 */
+const A2A_INPUT_ACTION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["text"],
+  properties: {
+    text: { type: "string", minLength: 1, maxLength: 20_000 },
+  },
+} as const;
 
 /** A2A 事件批次出口（进入归一化 RuntimeEventIngress，04 §6）。 */
 export type A2AEventBatchSink = (batch: {
@@ -85,7 +94,7 @@ interface A2AArtifactUpdate {
   kind: "artifact-update";
   taskId: string;
   contextId: string;
-  artifact: { artifactId: string; name?: string; parts?: A2APart[] };
+  artifact: A2AArtifact;
 }
 
 /** A2A Message（role/parts）。 */
@@ -94,10 +103,27 @@ interface A2AMessage {
   parts: A2APart[];
 }
 
-/** A2A Part（取 text）。 */
+/** A2A Part（TextPart 展示文本 / DataPart 公共结构化结果）。 */
 interface A2APart {
   kind: string;
   text?: string;
+  data?: unknown;
+}
+
+/** A2A Artifact（parts 携带展示文本与结构化结果）。 */
+interface A2AArtifact {
+  artifactId: string;
+  name?: string;
+  parts?: A2APart[];
+}
+
+/** A2A Task（官方 message/send 同步结果形态）。 */
+interface A2ATask {
+  kind: "task";
+  id: string;
+  contextId: string;
+  status: { state: A2ATaskState; message?: A2AMessage | null };
+  artifacts?: A2AArtifact[];
 }
 
 type A2AStreamUpdate = A2AStatusUpdate | A2AArtifactUpdate;
@@ -142,6 +168,9 @@ export type A2ARuntimeRefResolver = (
 /** 线程已有 A2A contextId 解析（context reuse，04 §5）。 */
 export type A2AExistingContextResolver = (threadId: string) => Promise<string | null>;
 
+/** invocation → 下一个 producer_sequence 解析（resume 事件重定位；缺省 fail-closed）。 */
+export type A2ANextProducerSequenceResolver = (invocationId: string) => Promise<number | null>;
+
 export interface CreateA2ATransportParams {
   /** 归一化事件批次出口（RuntimeCandidateEvent → RuntimeEventIngress）。 */
   eventBatchSink: A2AEventBatchSink;
@@ -149,6 +178,11 @@ export interface CreateA2ATransportParams {
   resolveRuntimeRefs?: A2ARuntimeRefResolver;
   /** thread → 已有 contextId（context reuse；不传则每次新会话）。 */
   resolveExistingContextId?: A2AExistingContextResolver;
+  /**
+   * invocation → 下一个 producer_sequence（resume 归一化事件重定位用；
+   * resume 必需，缺省/非法值 fail-closed，不回退到进程内计数器或全局状态）。
+   */
+  resolveNextProducerSequence?: A2ANextProducerSequenceResolver;
   /** 注入 fetch（测试用；缺省全局 fetch）。 */
   fetchImpl?: typeof fetch;
   /** 流读取超时（ms；缺省 300s）。 */
@@ -169,6 +203,23 @@ export interface CreateA2ATransportParams {
 export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHttpClient {
   const fetchImpl = params.fetchImpl ?? fetch;
   const streamTimeoutMs = params.streamTimeoutMs ?? 300_000;
+
+  // Task 级最新 artifact 缓存（仅本 Transport 实例内）：HR 官方顺序中 artifact-update
+  // 携带 TextPart 展示文本 + DataPart 公共结构化结果；input-required/completed 的
+  // status.message 缺失时，追问/答复文本取自该 task 最新 artifact。
+  const latestArtifactByTask = new Map<string, { text: string | null; data: unknown }>();
+
+  function cacheArtifact(taskId: string, artifact: A2AArtifact): void {
+    const parts = Array.isArray(artifact.parts) ? artifact.parts : [];
+    const texts = parts
+      .filter((p) => typeof p?.text === "string" && p.text.length > 0)
+      .map((p) => p.text as string);
+    const dataPart = parts.find((p) => p && "data" in p && p.data !== undefined);
+    latestArtifactByTask.set(taskId, {
+      text: texts.length > 0 ? texts.join("\n") : null,
+      data: dataPart?.data,
+    });
+  }
 
   async function jsonRpc<T>(
     runtimeEndpoint: string,
@@ -249,6 +300,7 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
       occurred_at: new Date().toISOString(),
     };
     if (update.kind === "artifact-update") {
+      cacheArtifact(update.taskId, update.artifact);
       return [
         {
           ...base,
@@ -278,7 +330,12 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
             },
           },
         ];
-      case "input-required":
+      case "input-required": {
+        // status.message 缺失时（HR 官方顺序），追问文本取最新 artifact 的 TextPart。
+        const text =
+          messageText(update.status.message) ??
+          latestArtifactByTask.get(update.taskId)?.text ??
+          null;
         return [
           {
             ...base,
@@ -286,15 +343,21 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
             payload: {
               source: "a2a",
               task_id: update.taskId,
+              context_id: update.contextId,
               request_type: "input",
               purpose: "a2a_input_required",
-              prompt: messageText(update.status.message) ?? "Agent 请求补充输入",
-              message: messageText(update.status.message),
+              prompt: text ?? "Agent 请求补充输入",
+              message: text,
+              input_schema: A2A_INPUT_ACTION_SCHEMA,
             },
           },
         ];
+      }
       case "completed": {
-        const text = messageText(update.status.message);
+        const text =
+          messageText(update.status.message) ??
+          latestArtifactByTask.get(update.taskId)?.text ??
+          null;
         // completed → response.completed + execution.completed（两个序号）。
         return [
           {
@@ -403,7 +466,7 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
     async probeCapabilities(endpoint: string, token: string): Promise<RuntimeCapabilitiesResponse> {
       let resp: Response;
       try {
-        resp = await fetchImpl(`${endpoint.replace(/\/$/, "")}/.well-known/agent.json`, {
+        resp = await fetchImpl(`${endpoint.replace(/\/$/, "")}/.well-known/agent-card.json`, {
           method: "GET",
           headers: { authorization: `Bearer ${token}` },
         });
@@ -468,24 +531,21 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
           role: "user",
           parts: [{ kind: "text", text }],
           ...(existingContextId ? { contextId: existingContextId } : {}),
-          metadata: {
-            invocation_id: body.invocation_id,
-            trace_id: body.trace_context?.trace_id ?? body.invocation_id,
-            span_id: body.trace_context?.span_id ?? body.invocation_id,
-            protocol: "a2a",
-            // ExecutionSubject（06 §7）：服务端 Principal 生成的可信主体，
-            // 冻结 namespaced metadata 下发；SnowHarness 不假设远端如何映射 subjectId。
-            ...(body.execution_subject
-              ? {
-                  [A2A_EXECUTION_SUBJECT_METADATA_KEY]: executionSubjectToA2AMetadata({
-                    tenantId: body.execution_subject.tenant_id,
-                    subjectType:
-                      body.execution_subject.subject_type === "service" ? "service" : "user",
-                    subjectId: body.execution_subject.subject_id,
-                  }),
-                }
-              : {}),
-          },
+          // 公开合同（HR 兼容）：metadata 仅允许 execution_subject 公开对象；
+          // 内部 ID/trace/protocol/tenant 等一律不得出现在 wire 上；缺省不发送。
+          ...(body.execution_subject
+            ? {
+                metadata: {
+                  execution_subject: {
+                    subject_id: body.execution_subject.subject_id,
+                    subject_kind:
+                      body.execution_subject.subject_type === "service"
+                        ? "service"
+                        : "platform_user",
+                  },
+                },
+              }
+            : {}),
         },
         configuration: { blocking: false },
       };
@@ -700,6 +760,24 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
     },
 
     async resumeInvocation(req: ResumeInvocationRequest): Promise<ResumeInvocationResponse> {
+      // 1) payload 校验（网络之前）：非空纯文本字符串，或 text 为非空字符串的对象；
+      //    发送 trim 后的精确纯文本，绝不 JSON.stringify 任意对象。
+      const payload = req.requestBody.resume_payload;
+      let resumeText: string | null = null;
+      if (typeof payload === "string") {
+        resumeText = payload.trim();
+      } else if (payload !== null && typeof payload === "object") {
+        const text = (payload as Record<string, unknown>).text;
+        if (typeof text === "string") resumeText = text.trim();
+      }
+      if (!resumeText) {
+        throw new RuntimeTransportError(
+          "protocol_schema",
+          "resume_payload 必须是非空纯文本或含非空 text 字段",
+        );
+      }
+
+      // 2) 关联 refs：taskId/contextId 必须精确已知（fail-closed）。
       const refs = params.resolveRuntimeRefs
         ? await params.resolveRuntimeRefs(req.invocationId)
         : null;
@@ -711,13 +789,25 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
           `无 taskId/contextId 可恢复（invocation=${req.invocationId}）`,
         );
       }
-      // resume → message/send（blocking 语义下返回最终/下一个 Task 状态）。
-      const resumeText =
-        typeof req.requestBody.resume_payload === "object" &&
-        req.requestBody.resume_payload !== null
-          ? JSON.stringify(req.requestBody.resume_payload)
-          : String(req.requestBody.resume_payload ?? "");
-      const resp = await jsonRpc<A2AStatusUpdate>(
+
+      // 3) 注入的 next producer sequence（resume 事件重定位；禁止回退进程内计数器）。
+      if (!params.resolveNextProducerSequence) {
+        throw new RuntimeTransportError(
+          "invalid_correlation",
+          `resume 缺少 next-producer-sequence resolver（invocation=${req.invocationId}）`,
+        );
+      }
+      const nextSequence = await params.resolveNextProducerSequence(req.invocationId);
+      if (typeof nextSequence !== "number" || !Number.isInteger(nextSequence) || nextSequence < 1) {
+        throw new RuntimeTransportError(
+          "invalid_correlation",
+          `next-producer-sequence 非法（invocation=${req.invocationId}）`,
+        );
+      }
+
+      // 4) message/send：标准 Message 字段（kind/messageId/role/contextId/taskId/parts），
+      //    不携带任何内部 metadata。
+      const resp = await jsonRpc<A2ATask>(
         req.runtimeEndpoint,
         req.authToken,
         "message/send",
@@ -729,7 +819,6 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
             contextId,
             taskId,
             parts: [{ kind: "text", text: resumeText }],
-            metadata: { invocation_id: req.invocationId, resume: true },
           },
         },
         req.idempotencyKey,
@@ -737,11 +826,47 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
       if (resp.error) {
         throwRpcError(resp.error);
       }
-      const update = resp.result;
-      if (!update || typeof update !== "object" || !("taskId" in update)) {
-        throw new RuntimeTransportError("protocol_schema", "A2A message/send 响应缺少 Task");
+      // 5) 官方 Task 形态（冻结）：kind:"task" + id/contextId/status/artifacts；
+      //    不保留非标准同步 status-update 兼容路径。
+      const task = resp.result;
+      if (
+        !task ||
+        typeof task !== "object" ||
+        task.kind !== "task" ||
+        typeof task.id !== "string" ||
+        typeof task.contextId !== "string" ||
+        !task.status
+      ) {
+        throw new RuntimeTransportError(
+          "protocol_schema",
+          "A2A message/send 响应不是官方 Task 形态",
+        );
       }
-      // resume 后续状态经归一化事件进入（Batch 10 完整接入流式 resume）。
+      if (task.id !== taskId || task.contextId !== contextId) {
+        throw new RuntimeTransportError(
+          "invalid_correlation",
+          "A2A message/send Task correlation 与存储 refs 不一致",
+        );
+      }
+      // Task artifacts 进入 task 级缓存（status.message 缺失时的答复文本来源）；
+      // 同步 resume 批次不为 artifacts 单独产 progress 事件。
+      for (const artifact of task.artifacts ?? []) {
+        cacheArtifact(taskId, artifact);
+      }
+
+      // 6) 终态 status 经同一 Mapper 归一化，事件序号重定位到注入的 next sequence；
+      //    sink 恰一次且失败上抛，成功后才返回 resumed=true。
+      const events = mapUpdate(req.invocationId, nextSequence, {
+        kind: "status-update",
+        taskId: task.id,
+        contextId: task.contextId,
+        status: task.status,
+      });
+      await params.eventBatchSink({
+        invocationId: req.invocationId,
+        events,
+        producerSequenceStart: nextSequence,
+      });
       return { invocation_id: req.invocationId, resumed: true, attempt_no: 1 };
     },
 

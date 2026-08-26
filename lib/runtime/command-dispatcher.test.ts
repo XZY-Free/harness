@@ -58,12 +58,14 @@ import type {
 import {
   invocationCommandTable,
   threadEventTable,
+  threadItemTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
 import {
   type ExecutionBinding,
   invocationAttemptTable,
   invocationTable,
+  runtimeEventIngressTable,
 } from "@/lib/persistence/schema/executions";
 import { type RuntimeRevision, runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import {
@@ -95,6 +97,7 @@ import {
   ResumeInvocationNotWaitingError,
   RuntimeHttpClientError,
 } from "@/lib/runtime/errors";
+import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
@@ -2321,5 +2324,262 @@ describe("Batch 10 命令调度生产网关", () => {
       commandId: interruptResult.command.id,
     });
     expect(result).toEqual({ dispatched: false, reason: "command_not_found" });
+  });
+});
+
+// ─── 辅助：authority 忠实的 post-authority resume 命令 ────
+
+/**
+ * 模拟 resolveGenericUserAction（input+submit）权威产物：pending input UAR（真实行）+
+ * queued resume 命令携带完整来源标记 resume_source/request_id/精确 resume_payload。
+ * 不得用普通 createResumeCommand 冒充 authority。
+ */
+async function createPostAuthorityResumeCommand(params: {
+  tenantId: string;
+  threadId: string;
+  turnId: string;
+  invocationId: string;
+  responseRedactedJson: Record<string, unknown>;
+  idempotencyKey: string;
+}): Promise<{ commandId: string; requestId: string }> {
+  const { randomUUID } = await import("node:crypto");
+  const { computeInvocationCommandPayloadHash } = await import(
+    "@/lib/conversations/regenerate-queries"
+  );
+  const { userActionRequestTable } = await import("@/lib/persistence/schema/user-action-request");
+
+  const requestId = randomUUID();
+  await db.insert(userActionRequestTable).values({
+    id: requestId,
+    tenantId: params.tenantId,
+    threadId: params.threadId,
+    turnId: params.turnId,
+    invocationId: params.invocationId,
+    toolCallId: null,
+    itemId: null,
+    requestType: "input",
+    purpose: "a2a_input_required",
+    requestState: "pending",
+    promptJson: { kind: "user_action.requested", prompt: "请提供请假事由" },
+    inputSchemaJson: {
+      type: "object",
+      additionalProperties: false,
+      required: ["text"],
+      properties: { text: { type: "string", minLength: 1, maxLength: 20_000 } },
+    },
+    expiresAt: null,
+    versionNo: 1,
+  });
+
+  const commandId = randomUUID();
+  const now = new Date();
+  const commandPayload = {
+    request_id: requestId,
+    request_type: "input",
+    purpose: "a2a_input_required",
+    resolution: "submit",
+    resumed_by: "user-1",
+    has_response: true,
+    resume_source: "user_action_resolution",
+    resume_payload: params.responseRedactedJson,
+  };
+  const commandPayloadHash = computeInvocationCommandPayloadHash(commandPayload);
+
+  await db.insert(invocationCommandTable).values({
+    id: commandId,
+    invocationId: params.invocationId,
+    threadId: params.threadId,
+    turnId: params.turnId,
+    commandType: "resume",
+    commandPayloadJson: commandPayload,
+    commandPayloadHash,
+    commandState: "queued",
+    runtimeExecutionRef: null,
+    idempotencyKey: params.idempotencyKey,
+    errorCode: null,
+    errorMessage: null,
+    createdAt: now,
+    dispatchedAt: null,
+    acknowledgedAt: null,
+    failedAt: null,
+    updatedAt: now,
+  });
+
+  return { commandId, requestId };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 生产网关 A2A Resume：authority 已推进 Invocation=running（08 §5 后续切片）
+// ═══════════════════════════════════════════════════════════
+//
+// 冻结设计：
+// - resolveGenericUserAction 是 waiting_user→running 的权威；生产 dispatch 仅接受
+//   携带 resume_source=user_action_resolution + request_id + resume_payload 对象的
+//   running Invocation resume 命令；普通未标记命令仍拒绝。
+// - resume 事件序号从 MAX(producer_sequence)+1 继续，不硬编码 1。
+// - 远端返回官方 completed Task → response.completed/execution.completed 持久化后
+//   才 acknowledged；dispatcher 不得把终态 Invocation/Turn 回退 running，也不得在
+//   终态之后补写 resumed 事件。
+
+describe("生产网关 A2A Resume（post-authority Invocation=running）", () => {
+  it("input submit 补充文本精确送达同一 task/context + 事件序号 MAX+1 + 终态不被回退", async () => {
+    const provider = await startA2ATestProvider("completed");
+    try {
+      const ctx = await seedFullCommandContext("a2a");
+      await db
+        .update(runtimeRevisionTable)
+        .set({ endpointRef: provider.endpoint })
+        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
+      const running = await seedRunningInvocationWithRunningTurn(ctx);
+      const contextRef = "ctx-gw-resume-input-1";
+      const taskId = await attachRemoteRefsToInvocation(ctx, running.invocationId, contextRef);
+
+      // 前置 ingress 事件（producer_sequence=1）：resume 事件必须从 MAX+1=2 继续。
+      await ingressEventBatch({
+        tenantId: ctx.tenantId,
+        invocationId: running.invocationId,
+        producerSequenceStart: 1,
+        events: [
+          {
+            producer_event_id: `seed:${running.invocationId}:1`,
+            producer_sequence: 1,
+            schema_version: 1,
+            type: "progress.snapshot",
+            payload: { source: "a2a", task_id: taskId, task_state: "working" },
+          },
+        ],
+      });
+
+      // authority 解析后的真实状态：Invocation=running + queued resume 命令携带
+      // 完整来源标记（真实 UAR 行 + resume_source/request_id/精确 resume_payload）。
+      const { commandId } = await createPostAuthorityResumeCommand({
+        tenantId: ctx.tenantId,
+        threadId: ctx.threadId,
+        turnId: ctx.turnId,
+        invocationId: running.invocationId,
+        responseRedactedJson: { text: "年休假，明天一天" },
+        idempotencyKey: "gw-resume-post-authority-1",
+      });
+
+      const result = await dispatchResumeCommandToRuntime({
+        tenantId: ctx.tenantId,
+        commandId,
+        actorId: ctx.ownerId,
+        correlationId: "gw-resume-post-authority",
+      });
+      expect(result.dispatched).toBe(true);
+
+      // Provider 捕获精确补充文本 + 同一 taskId/contextId + 无 metadata（wire 事实）。
+      const resumeCaptured = provider.captured.filter((c) => c.resume);
+      expect(resumeCaptured).toHaveLength(1);
+      expect(resumeCaptured[0]?.text).toBe("年休假，明天一天");
+      expect(resumeCaptured[0]?.taskId).toBe(taskId);
+      expect(resumeCaptured[0]?.contextId).toBe(contextRef);
+      expect(resumeCaptured[0]?.messageMetadata).toBeUndefined();
+
+      // 命令仅在 response/completion 事件持久化后 acknowledged。
+      const cmdRow = await getCommandRow(commandId);
+      expect(cmdRow?.commandState).toBe("acknowledged");
+      expect(cmdRow?.acknowledgedAt).toBeTruthy();
+
+      // ingress 序号从 MAX+1 连续推进无 gap/collision（1 前置 + response.completed）；
+      // execution.completed 属"终态后事件"（Hosted 容错语义，hosted-adapter 6 步先例），
+      // ingress 拒绝且不消费序号。
+      const ingressRows = await db
+        .select({ seq: runtimeEventIngressTable.producerSequence })
+        .from(runtimeEventIngressTable)
+        .where(eq(runtimeEventIngressTable.invocationId, running.invocationId));
+      const sequences = ingressRows.map((r) => r.seq).sort((a, b) => a - b);
+      expect(sequences).toEqual([1, 2]);
+
+      // 官方答复文本持久化为 agent_message Item。
+      const [replyItem] = await db
+        .select()
+        .from(threadItemTable)
+        .where(
+          and(
+            eq(threadItemTable.invocationId, running.invocationId),
+            eq(threadItemTable.itemType, "agent_message"),
+          ),
+        )
+        .limit(1);
+      expect(replyItem?.contentJson).toMatchObject({ text: "申请已提交完成" });
+
+      // Invocation/Turn 保持终态 completed（不得回退 running）。
+      const invocation = await getInvocationById(ctx.tenantId, running.invocationId);
+      expect(invocation?.executionState).toBe("completed");
+      const [turnRow] = await db
+        .select()
+        .from(turnTable)
+        .where(eq(turnTable.id, ctx.turnId))
+        .limit(1);
+      expect(turnRow?.turnState).toBe("completed");
+
+      // 终态之后不得补写 resumed 事件。
+      const resumedEvents = await db
+        .select()
+        .from(threadEventTable)
+        .where(
+          and(
+            eq(threadEventTable.threadId, ctx.threadId),
+            and(
+              eq(threadEventTable.eventType, "turn.resumed"),
+              eq(threadEventTable.threadId, ctx.threadId),
+            ),
+          ),
+        );
+      expect(resumedEvents).toHaveLength(0);
+      const invocationResumedEvents = await db
+        .select()
+        .from(threadEventTable)
+        .where(
+          and(
+            eq(threadEventTable.threadId, ctx.threadId),
+            eq(threadEventTable.eventType, "invocation.resumed"),
+          ),
+        );
+      expect(invocationResumedEvents).toHaveLength(0);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("负例：Invocation=running 但普通未标记 resume 命令 → ResumeInvocationNotWaitingError，命令保持 queued 且无网络请求", async () => {
+    const provider = await startA2ATestProvider("completed");
+    try {
+      const ctx = await seedFullCommandContext("a2a");
+      await db
+        .update(runtimeRevisionTable)
+        .set({ endpointRef: provider.endpoint })
+        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
+      const running = await seedRunningInvocationWithRunningTurn(ctx);
+      await attachRemoteRefsToInvocation(ctx, running.invocationId, "ctx-gw-resume-neg-1");
+
+      // 普通命令（无 resume_source/request_id 来源标记）不得冒充 post-authority Resume。
+      const commandId = await createResumeCommand({
+        threadId: ctx.threadId,
+        turnId: ctx.turnId,
+        invocationId: running.invocationId,
+        resumePayload: { text: "未标记的补充" },
+        idempotencyKey: "gw-resume-neg-1",
+      });
+
+      await expect(
+        dispatchResumeCommandToRuntime({
+          tenantId: ctx.tenantId,
+          commandId,
+          actorId: ctx.ownerId,
+        }),
+      ).rejects.toThrow(ResumeInvocationNotWaitingError);
+
+      // 命令未调度（无 dispatchedAt），Provider 未收到任何 message/send。
+      const cmdRow = await getCommandRow(commandId);
+      expect(cmdRow?.commandState).toBe("queued");
+      expect(cmdRow?.dispatchedAt).toBeNull();
+      expect(provider.captured.filter((c) => c.resume)).toHaveLength(0);
+      expect(provider.rpcMethods).not.toContain("message/send");
+    } finally {
+      await provider.close();
+    }
   });
 });

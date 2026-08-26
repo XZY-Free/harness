@@ -42,6 +42,7 @@ import {
   turnTable,
 } from "@/lib/persistence/schema/conversation";
 import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/executions";
+import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
   CommandAlreadyDispatchedError,
   CommandInvocationNotFoundError,
@@ -556,8 +557,21 @@ export async function dispatchResumeCommand(params: {
     throw new CommandAlreadyDispatchedError(loaded.command.id, loaded.command.commandType);
   }
 
-  // 校验 Invocation 处于 waiting_user 状态
-  if (loaded.invocation.executionState !== "waiting_user") {
+  // post-authority Resume：resolveGenericUserAction 已把 Invocation waiting_user→running
+  // 并入队 resume 命令。仅当 payload 同时携带内部来源标记 + 非空 request_id +
+  // 非 null 对象 resume_payload 时才接受 running；普通/缺标记/伪造不完整的 running
+  // Resume 与 terminal 状态仍按 waiting_user 校验拒绝。
+  const loadedPayload = loaded.command.commandPayloadJson as Record<string, unknown>;
+  const isPostAuthorityResume =
+    loaded.invocation.executionState === "running" &&
+    loadedPayload.resume_source === "user_action_resolution" &&
+    typeof loadedPayload.request_id === "string" &&
+    loadedPayload.request_id.length > 0 &&
+    loadedPayload.resume_payload !== null &&
+    typeof loadedPayload.resume_payload === "object";
+
+  // 校验 Invocation 处于 waiting_user 状态（或 post-authority running）
+  if (loaded.invocation.executionState !== "waiting_user" && !isPostAuthorityResume) {
     throw new ResumeInvocationNotWaitingError(
       loaded.invocation.id,
       loaded.invocation.executionState,
@@ -624,7 +638,40 @@ export async function dispatchResumeCommand(params: {
 
   // 5. 检查 requires_redispatch 分支
   if (response.requires_redispatch === true) {
+    if (isPostAuthorityResume) {
+      // post-authority 分支 fail closed：不套用旧 waiting_user redispatch 路径，
+      // 不伪造成功；命令标记 failed（无状态回退，Invocation/Turn 保持 sink 已落状态）。
+      await markCommandFailed(
+        loaded.command.id,
+        "RESUME_POST_AUTHORITY_REDISPATCH_UNSUPPORTED",
+        "post-authority Resume 不支持 requires_redispatch=true",
+      );
+      return {
+        commandId: loaded.command.id,
+        commandState: "failed",
+        failedAt: new Date(),
+        errorCode: "RESUME_POST_AUTHORITY_REDISPATCH_UNSUPPORTED",
+        errorMessage: "post-authority Resume 不支持 requires_redispatch=true",
+        events: [],
+      };
+    }
     return await handleResumeRequiresRedispatch(params, loaded, endpointResolution, actorType);
+  }
+
+  // 6a. post-authority 成功：只 CAS dispatched → acknowledged。transport 的
+  // eventBatchSink 可能已把 Invocation/Turn 推进到 completed/failed/waiting_user 等
+  // 状态；本分支绝不回写 running、绝不补 turn.resumed/invocation.resumed 事件。
+  if (isPostAuthorityResume) {
+    await db.transaction(async (tx) => {
+      await transitionCommandToAcknowledged(tx, loaded.command.id);
+    });
+    return {
+      commandId: loaded.command.id,
+      commandState: "acknowledged",
+      runtimeExecutionRef: undefined,
+      acknowledgedAt: new Date(),
+      events: [],
+    };
   }
 
   // 6. 成功（requires_redispatch=false/undefined）：事务内 CAS dispatched → acknowledged
@@ -653,8 +700,17 @@ export async function dispatchResumeCommand(params: {
     // CAS dispatched → acknowledged
     await transitionCommandToAcknowledged(tx, loaded.command.id);
 
-    // Invocation waiting_user → running
-    await updateInvocationState(tx, params.tenantId, loaded.invocation.id, "running");
+    // Invocation waiting_user → running（仅当仍处于 waiting_user；transport 的
+    // eventBatchSink 可能已在网络调用期间把 Invocation 推进到终态，不得回退）
+    const [invRowForResume] = await tx
+      .select({ state: invocationTable.executionState })
+      .from(invocationTable)
+      .where(eq(invocationTable.id, loaded.invocation.id))
+      .for("update")
+      .limit(1);
+    if (invRowForResume?.state === "waiting_user") {
+      await updateInvocationState(tx, params.tenantId, loaded.invocation.id, "running");
+    }
 
     // CAS Turn waiting_user → running（仅在 turnId 存在且 Turn 处于 waiting_user 时）
     if (turnId) {

@@ -21,9 +21,11 @@ import {
   dispatchCancelCommand,
   dispatchResumeCommand,
 } from "@/lib/runtime/command-dispatcher";
+import { IngressInvocationTerminalError, InvocationStateConflictError } from "@/lib/runtime/errors";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
 import { getSessionBindingById } from "@/lib/runtime/session-binding-queries";
 import { createA2ATransport } from "@/lib/runtime/transport/a2a-transport";
 import { and, eq } from "drizzle-orm";
@@ -69,13 +71,45 @@ async function resolveA2ACommandTransport(params: {
   const endpoint = runtimeRevision.endpointRef;
 
   const transport = createA2ATransport({
-    eventBatchSink: async ({ invocationId, events, producerSequenceStart }) => {
-      await ingressEventBatch({
-        tenantId: params.tenantId,
-        invocationId,
-        events,
-        producerSequenceStart,
-      });
+    eventBatchSink: async ({ invocationId, events }) => {
+      // 逐事件提交（与 Hosted Agent Loop 语义一致，hosted-adapter 6 步：response.completed
+      // 与 execution.completed 分批提交）。容错规则：
+      // - IngressInvocationTerminalError（response.completed 已推进终态，后续
+      //   execution.completed 属"终态后事件"）→ 按平台既有容错语义忽略；
+      // - waiting_user→终态冲突（远端已接受 Resume 但 dispatcher 尚未推进 running）→
+      //   先执行 Resume 本身的 waiting_user→running 恢复转换再重试该事件；
+      // - 其余错误上抛（transport fail-closed，不 false ack）。
+      for (const event of events) {
+        try {
+          await ingressEventBatch({
+            tenantId: params.tenantId,
+            invocationId,
+            events: [event],
+            producerSequenceStart: event.producer_sequence,
+          });
+        } catch (err) {
+          if (err instanceof InvocationStateConflictError) {
+            const invocation = await getInvocationById(params.tenantId, invocationId);
+            if (invocation?.executionState === "waiting_user") {
+              await db.transaction(async (tx) => {
+                await updateInvocationState(tx, params.tenantId, invocationId, "running");
+              });
+              await ingressEventBatch({
+                tenantId: params.tenantId,
+                invocationId,
+                events: [event],
+                producerSequenceStart: event.producer_sequence,
+              });
+              continue;
+            }
+            throw err;
+          }
+          if (err instanceof IngressInvocationTerminalError) {
+            continue;
+          }
+          throw err;
+        }
+      }
     },
     resolveRuntimeRefs: async (invocationId) => {
       const invocation = await getInvocationById(params.tenantId, invocationId);
@@ -87,6 +121,12 @@ async function resolveA2ACommandTransport(params: {
         runtimeExecutionRef: invocation.runtimeExecutionRef,
         runtimeSessionRef: bindingRow?.externalSessionRef ?? null,
       };
+    },
+    // resume 事件序号重定位：MAX(producer_sequence)+1（租户隔离查询；Invocation
+    // 不存在/跨租户返回 null → transport fail-closed；无进程内计数器）。
+    resolveNextProducerSequence: async (invocationId) => {
+      const latest = await getLatestProducerSequence(params.tenantId, invocationId);
+      return latest === null ? null : latest + 1;
     },
   });
 

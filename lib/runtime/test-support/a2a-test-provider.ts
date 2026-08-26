@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 /**
- * 仓内标准 A2A 验收 Provider（07，Batch 9）。
+ * 仓内标准 A2A 验收 Provider（07，Batch 9；HR wire 形态冻结版）。
  *
  * 真实 HTTP A2A 0.3.0 Provider（node:http），仅存在 test-support，production 不 import。
  * 黑盒原则（07 §2）：平台侧只通过 Agent Card + 真实 A2A wire behavior 与其交互，
@@ -8,16 +8,21 @@ import { randomUUID } from "node:crypto";
  *
  * 公开合同（07 §3）：
  * - Agent Card：name/description + capabilities + 通用扩展（capability manifest 与
- *   Invocation Context Contract，明确版本，不绑定任何框架）。
+ *   Invocation Context Contract，明确版本，不绑定任何框架）。标准路径唯一：
+ *   /.well-known/agent-card.json（无旧 agent.json 回退）。
  * - Capability Manifest：general assistance / context-aware task / user-input-required
  *   task（任务能力描述，不是函数列表）。
  * - Invocation Context Contract：required=[execution_subject]、
  *   preferred=[current_datetime, timezone, locale, conversation_context]、
  *   accepted=[attachment_references, workspace_context]。
  *
- * 场景（07 §5）：completed / chunks / input_required / failed / rejected /
- * malformed / subject_echo / long_running（cancel）。场景由测试显式选择，
- * Provider 按 A2A wire 语义响应，供 dispatch E2E 黑盒验证。
+ * HR 官方顺序（冻结）：Task/status start（working）→ artifact-update
+ * （TextPart 追问文本 + DataPart 公共结构化结果）→ 终态 status 无 status.message。
+ * message/send（resume）同步返回完整 Task（kind:"task"，id/contextId/status/artifacts）。
+ *
+ * 场景（07 §5）：completed / chunks / input_required / long_running / failed /
+ * rejected / malformed / subject_echo。场景由测试显式选择，Provider 按 A2A wire
+ * 语义响应，供 dispatch E2E 黑盒验证。
  */
 import { type Server, createServer } from "node:http";
 
@@ -55,11 +60,11 @@ export type A2ATestProviderScenario =
   | "malformed"
   | "subject_echo";
 
-/** Provider 收到的 message/stream 请求（供测试断言 wire 事实）。 */
+/** Provider 收到的 message/stream|message/send 请求（供测试断言 wire 事实）。 */
 export interface CapturedA2ARequest {
   method: string;
-  /** message.metadata（含 invocation_id / snowharness.execution_subject）。 */
-  messageMetadata: Record<string, unknown>;
+  /** message.metadata（公开合同：仅 execution_subject 对象，或无 metadata）。 */
+  messageMetadata: Record<string, unknown> | undefined;
   /** message.contextId（跨 Turn 连续性证据）。 */
   contextId?: string;
   /** message.taskId（input-required → resume 同 Task 证据）。 */
@@ -97,7 +102,7 @@ export interface A2ATestProvider {
    * 否则 401（冻结"生产侧只解析被引用的 CredentialRef，而非请求原始输入"）。
    */
   setExpectedBearerToken(token: string | null): void;
-  /** 切换 message/send 的官方响应形态；注册验收使用完整 Task。 */
+  /** 切换 message/send 的响应形态；默认（冻结）为官方完整 Task。 */
   setResumeResponseShape(shape: "status-update" | "task"): void;
   /**
    * 注册验收专用：清空 requests/captured/rpcMethods、复位 correlation 篡改与
@@ -144,7 +149,9 @@ export async function startA2ATestProvider(
   let scenario: A2ATestProviderScenario = initialScenario;
   let resumeCorrelationCorrupted = false;
   let expectedBearerToken: string | null = null;
-  let resumeResponseShape: "status-update" | "task" = "status-update";
+  // 官方非流式 message/send 返回完整 Task（默认冻结）；status-update 形态仅保留
+  // 给既有注册验收反例。
+  let resumeResponseShape: "status-update" | "task" = "task";
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -167,12 +174,11 @@ export async function startA2ATestProvider(
     }
 
     // ─── Agent Card（07 §3/§7：公开合同，含通用扩展）──────────
-    // 注册验收黑盒：A2A 0.3.0 标准路径 /.well-known/agent-card.json（保留旧路径兼容既有测试；
-    // legacyCardOnly 只暴露旧 agent.json，用于冻结"旧路径不能通过注册验收"）。
-    const standardCardPath = !options.legacyCardOnly;
+    // A2A 0.3.0 标准路径唯一：/.well-known/agent-card.json（无旧 agent.json 回退；
+    // legacyCardOnly 只暴露已废弃旧路径，用于冻结"旧路径不能通过注册验收"反例）。
     if (
       req.method === "GET" &&
-      ((standardCardPath && url.pathname === "/.well-known/agent-card.json") ||
+      ((options.legacyCardOnly ? false : url.pathname === "/.well-known/agent-card.json") ||
         url.pathname === "/.well-known/agent.json")
     ) {
       res.writeHead(200, { "content-type": "application/json" });
@@ -250,64 +256,48 @@ export async function startA2ATestProvider(
         .join("");
       const capturedRequest: CapturedA2ARequest = {
         method: rpc.method ?? "",
-        messageMetadata: message.metadata ?? {},
+        messageMetadata: message.metadata,
         contextId: message.contextId,
         taskId: message.taskId,
         text,
-        resume: message.metadata?.resume === true || message.taskId !== undefined,
+        resume: message.taskId !== undefined,
       };
       captured.push(capturedRequest);
 
-      // ─── message/send（resume；08：继续原 taskId/context）──────
+      // ─── message/send（resume；HR 官方：返回完整 Task）────────
       if (rpc.method === "message/send") {
         const resumeTaskId = message.taskId ?? "task-1";
         const resumeContextId = message.contextId ?? "ctx-1";
+        const corrupted = (id: string) => (resumeCorrelationCorrupted ? `corrupted-${id}` : id);
         res.writeHead(200, { "content-type": "application/json" });
-        // 注册验收黑盒（input_required 场景）：同 taskId/contextId resume → completed；
-        // corruptResumeCorrelation() 后返回被篡改的 correlation（fail-closed 反例）。
-        if (scenario === "input_required") {
-          const result =
-            resumeResponseShape === "task"
-              ? {
-                  kind: "task",
-                  id: resumeCorrelationCorrupted ? `corrupted-${resumeTaskId}` : resumeTaskId,
-                  contextId: resumeCorrelationCorrupted
-                    ? `corrupted-${resumeContextId}`
-                    : resumeContextId,
-                  status: { state: "completed" },
-                }
-              : {
-                  kind: "status-update",
-                  taskId: resumeCorrelationCorrupted ? `corrupted-${resumeTaskId}` : resumeTaskId,
-                  contextId: resumeCorrelationCorrupted
-                    ? `corrupted-${resumeContextId}`
-                    : resumeContextId,
-                  status: {
-                    state: "completed",
-                    message: { role: "agent", parts: [{ kind: "text", text: "已收到补充信息" }] },
+        const result =
+          resumeResponseShape === "task"
+            ? {
+                kind: "task",
+                id: corrupted(resumeTaskId),
+                contextId: corrupted(resumeContextId),
+                status: { state: "completed" },
+                artifacts: [
+                  {
+                    artifactId: "art-final",
+                    name: "answer",
+                    parts: [
+                      { kind: "text", text: "申请已提交完成" },
+                      { kind: "data", data: { result: { status: "ok" } } },
+                    ],
                   },
-                };
-          res.end(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id: rpc.id ?? 1,
-              result,
-            }),
-          );
-          return;
-        }
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: rpc.id ?? 1,
-            result: {
-              kind: "status-update",
-              taskId: resumeTaskId,
-              contextId: resumeContextId,
-              status: { state: "working" },
-            },
-          }),
-        );
+                ],
+              }
+            : {
+                kind: "status-update",
+                taskId: corrupted(resumeTaskId),
+                contextId: corrupted(resumeContextId),
+                status: {
+                  state: "completed",
+                  message: { role: "agent", parts: [{ kind: "text", text: "已收到补充信息" }] },
+                },
+              };
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id ?? 1, result }));
         return;
       }
 
@@ -322,7 +312,35 @@ export async function startA2ATestProvider(
       });
 
       const frame = (payload: unknown) => res.write(sseFrame(payload));
-      const subject = message.metadata?.["snowharness.execution_subject"];
+      // HR 官方顺序：artifact-update（TextPart 追问 + DataPart 公共结构化结果）
+      // 先于无 status.message 的 input-required 终态。
+      const artifactUpdate = (artifactId: string, question: string) =>
+        frame({
+          jsonrpc: "2.0",
+          id: rpc.id ?? 1,
+          result: {
+            kind: "artifact-update",
+            taskId,
+            contextId,
+            artifact: {
+              artifactId,
+              name: "answer",
+              parts: [
+                { kind: "text", text: question },
+                { kind: "data", data: { result: { question } } },
+              ],
+            },
+          },
+        });
+      const subject = message.metadata?.execution_subject;
+      const subjectId =
+        subject && typeof subject === "object"
+          ? String((subject as Record<string, unknown>).subject_id ?? "")
+          : "";
+      const subjectKind =
+        subject && typeof subject === "object"
+          ? String((subject as Record<string, unknown>).subject_kind ?? "")
+          : "";
 
       const statusUpdate = (state: string, extra: Record<string, unknown> = {}) =>
         frame({
@@ -335,11 +353,11 @@ export async function startA2ATestProvider(
             status: {
               state,
               ...extra,
-              ...(scenario === "subject_echo" && subject
+              ...(scenario === "subject_echo" && subjectId
                 ? {
                     message: {
                       role: "agent",
-                      parts: [{ kind: "text", text: `subject:${String(subject)}` }],
+                      parts: [{ kind: "text", text: `subject:${subjectId}:${subjectKind}` }],
                     },
                   }
                 : {}),
@@ -363,9 +381,8 @@ export async function startA2ATestProvider(
           break;
         case "input_required":
           statusUpdate("working");
-          statusUpdate("input-required", {
-            message: { role: "agent", parts: [{ kind: "text", text: "请提供申请日期" }] },
-          });
+          artifactUpdate("art-question", "请提供申请日期");
+          statusUpdate("input-required");
           break;
         case "long_running":
           statusUpdate("working");
@@ -425,7 +442,7 @@ export async function startA2ATestProvider(
       rpcMethods.length = 0;
       resumeCorrelationCorrupted = false;
       expectedBearerToken = null;
-      resumeResponseShape = "status-update";
+      resumeResponseShape = "task";
       scenario = "input_required";
     },
     setScenario(next: A2ATestProviderScenario) {

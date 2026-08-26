@@ -368,6 +368,14 @@ export async function resolveGenericUserAction(
       resumed_by: params.resolvedBy,
       ...(grantId ? { grant_id: grantId } : {}),
       ...(params.responseRedactedJson ? { has_response: true } : {}),
+      // input+submit：精确脱敏响应对象 + 内部来源标记（post-authority Resume 凭证，
+      // 其他类型不发明 resume_payload）。
+      ...(request.requestType === "input" && params.resolution === "submit"
+        ? {
+            resume_source: "user_action_resolution",
+            resume_payload: params.responseRedactedJson,
+          }
+        : {}),
     };
     const resumePayloadHash = computeEventPayloadHash(resumePayload);
     await tx.insert(invocationCommandTable).values({
