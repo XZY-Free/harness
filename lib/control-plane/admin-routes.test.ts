@@ -1509,7 +1509,9 @@ describe("POST /admin/api/v1/agent-registrations（Public Agent Contract 登记�
     expect(Object.keys(body.contract).sort()).toEqual(
       [
         "capabilities",
+        "capability_digest",
         "captured_at",
+        "context_digest",
         "contract_digest",
         "contract_version",
         "interaction",
