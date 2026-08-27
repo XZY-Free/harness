@@ -49,7 +49,7 @@ const registerResponse: RegisterAgentContractResponse = {
     contract_version: "1.0.0",
     public_agent_version: "1.0.0",
     protocol_type: "a2a",
-    protocol_contract_revision: "a2a@0.3.0",
+    protocol_contract_revision: "0.3.0",
     contract_digest: "digest-contract",
     capability_digest: "digest-capability",
     context_digest: "digest-context",
@@ -142,7 +142,7 @@ describe("AgentContractRegistrationPanel（合同文件导入）", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("提交 wire 精确为 protocol {type:a2a, contract_revision:a2a@0.3.0} + contract 原解析对象，带 Idempotency-Key", async () => {
+  it("提交协议版本与 AgentCard 的 0.3.0 一致，保留原合同字段及 Idempotency-Key", async () => {
     fetchMock.mockResolvedValue(Response.json(registerResponse));
 
     const onRegistered = vi.fn();
@@ -170,7 +170,7 @@ describe("AgentContractRegistrationPanel（合同文件导入）", () => {
     // wire：恰为 protocol + contract；不得夹带 filename/path/raw_contract/contract_json。
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     expect(body).toEqual({
-      protocol: { type: "a2a", contract_revision: "a2a@0.3.0" },
+      protocol: { type: "a2a", contract_revision: "0.3.0" },
       contract: hrContract,
     });
     expect(JSON.stringify(body)).not.toMatch(

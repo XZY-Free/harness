@@ -6,7 +6,7 @@
  * 唯一入口是本地 JSON 文件：文件只在组件内存中读取解析，不上传文件本体，
  * 不保存 filename/路径/原始文本，不使用任何浏览器存储。
  * 前端只做轻量结构校验与中文预览；完整严格 schema 由后端权威验证。
- * wire 固定 { protocol:{type:"a2a",contract_revision:"a2a@0.3.0"}, contract }，
+ * wire 固定 { protocol:{type:"a2a",contract_revision:"0.3.0"}, contract }，
  * 禁止 Agent Card URL、Git URL、source path、Runtime endpoint、Credential 字段。
  */
 import {
@@ -202,7 +202,7 @@ export function AgentContractRegistrationPanel({
       const result = await client.agents.registerContract(
         {
           // operator runbook：协议固定 A2A 0.3.0，不由界面编辑。
-          protocol: { type: "a2a", contract_revision: "a2a@0.3.0" },
+          protocol: { type: "a2a", contract_revision: "0.3.0" },
           contract: preview.contract,
         },
         // 每次提交独立 Idempotency-Key（正式端点强制要求）。
