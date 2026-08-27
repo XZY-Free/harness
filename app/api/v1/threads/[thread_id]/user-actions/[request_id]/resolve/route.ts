@@ -230,24 +230,97 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       correlationId: requestId,
     });
 
-    // 03 §4：Hosted / protocol_not_remote / command_not_found / unsupported —
-    // 沿用 in-process 状态机语义；返回 200 但明确 mode=local_runtime，
-    // 不伪造 A2A ack。
-    const resumeDispatch =
-      gatewayResult.dispatched && gatewayResult.command.commandState === "acknowledged"
-        ? { mode: "remote" as const, command_state: "acknowledged" as const }
-        : gatewayResult.dispatched && gatewayResult.command.commandState === "dispatched"
-          ? {
-              mode: "remote" as const,
-              command_state: "dispatched" as const,
-              pending_retry: true as const,
-            }
-          : gatewayResult.dispatched && gatewayResult.command.commandState === "failed"
-            ? { mode: "remote" as const, command_state: "failed" as const }
-            : {
-                mode: "local_runtime" as const,
-                command_state: result.resumeCommand.commandState as string,
-              };
+    // 04 专项（P1-4）：dispatched=false 必须显式 switch——只有 protocol_not_remote
+    // 是 local runtime success；unsupported_capability / command_not_found 是真实失败，
+    // 不再一把梭成 local_runtime 200。
+    let resumeDispatch: {
+      mode: "remote" | "local_runtime";
+      command_state: string;
+      pending_retry?: boolean;
+    };
+    if (gatewayResult.dispatched) {
+      if (gatewayResult.command.commandState === "acknowledged") {
+        resumeDispatch = { mode: "remote", command_state: "acknowledged" };
+      } else if (gatewayResult.command.commandState === "dispatched") {
+        // 01 专项完成后 dispatched 已具备 nextDispatchAt + Durable Worker，
+        // 202 pending_retry=true 是完整产品事实。
+        resumeDispatch = {
+          mode: "remote",
+          command_state: "dispatched",
+          pending_retry: true,
+        };
+      } else {
+        resumeDispatch = { mode: "remote", command_state: "failed" };
+      }
+    } else if (gatewayResult.reason === "protocol_not_remote") {
+      // 唯一 local runtime success（hosted in-process 由既有状态机吸收）。
+      resumeDispatch = {
+        mode: "local_runtime",
+        command_state: result.resumeCommand.commandState as string,
+      };
+    } else if (gatewayResult.reason === "unsupported_capability") {
+      // 合同/Runtime 能力不允许 Resume：422；UAR 已 resolved 的事实保持。
+      // Invocation 已被 UAR 流程推进 running 但永远不可能 resume → 唯一 Recovery
+      // Authority 收口（Turn failed）。
+      await finalizeResumeFailure({
+        tenantId: principal.tenantId,
+        invocation: result.invocation,
+        reasonCode: "resume_unsupported",
+        errorSummary: "Runtime/合同能力不支持 Resume",
+        actorId: principal.userIdentityId,
+        correlationId: requestId,
+        commandId: result.resumeCommand.id,
+        recordId,
+        requestId,
+        httpStatus: 422,
+        errorCode: "UNSUPPORTED_CAPABILITY",
+        message: "补充信息已保存，但该智能体不支持恢复执行。",
+        details: {
+          request_id: result.request.id,
+          invocation_id: result.invocation.id,
+          resume_command_id: result.resumeCommand.id,
+          reason: "unsupported_capability",
+        },
+      });
+      return unsupportedCapabilityResponse(requestId, {
+        request_id: result.request.id,
+        invocation_id: result.invocation.id,
+        resume_command_id: result.resumeCommand.id,
+        reason: "unsupported_capability",
+      });
+    } else {
+      // command_not_found：内部一致性错误，不是用户业务成功 → 409；
+      // 同步收口 Invocation（resume_command_missing）。
+      await finalizeResumeFailure({
+        tenantId: principal.tenantId,
+        invocation: result.invocation,
+        reasonCode: "resume_command_missing",
+        errorSummary: "Resume 命令缺失（内部一致性错误）",
+        actorId: principal.userIdentityId,
+        correlationId: requestId,
+        commandId: result.resumeCommand.id,
+        recordId,
+        requestId,
+        httpStatus: 409,
+        errorCode: "OPERATION_PAYLOAD_CONFLICT",
+        message: "补充信息已保存，但恢复命令状态异常。",
+        details: {
+          request_id: result.request.id,
+          invocation_id: result.invocation.id,
+          resume_command_id: result.resumeCommand.id,
+          reason: "command_not_found",
+        },
+      });
+      return apiError("OPERATION_PAYLOAD_CONFLICT", "补充信息已保存，但恢复命令状态异常。", {
+        requestId,
+        details: {
+          request_id: result.request.id,
+          invocation_id: result.invocation.id,
+          resume_command_id: result.resumeCommand.id,
+          reason: "command_not_found",
+        },
+      });
+    }
 
     const responseBody = {
       thread_id: result.thread.id,
@@ -335,4 +408,76 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     if (errorResp) return errorResp;
     throw err;
   }
+}
+
+/** UNSUPPORTED_CAPABILITY 固定 422（errorDefinition 默认 409，此处按 04 专项语义覆写）。 */
+function unsupportedCapabilityResponse(
+  requestId: string,
+  details: Record<string, unknown>,
+): Response {
+  return Response.json(
+    {
+      error: {
+        code: "UNSUPPORTED_CAPABILITY",
+        message: "补充信息已保存，但该智能体不支持恢复执行。",
+        request_id: requestId,
+        retryable: false,
+        details,
+      },
+    },
+    { status: 422 },
+  );
+}
+
+/**
+ * Resume 失败终局：唯一 Recovery Authority 收口 Invocation（终态幂等容忍）+
+ * 幂等记录完成成稳定失败响应（同 key 重放返回同一失败，不重复副作用）。
+ */
+async function finalizeResumeFailure(params: {
+  tenantId: string;
+  invocation: { id: string; executionState: string };
+  reasonCode: string;
+  errorSummary: string;
+  actorId: string;
+  correlationId: string;
+  commandId: string;
+  recordId: string;
+  requestId: string;
+  httpStatus: number;
+  errorCode: string;
+  message: string;
+  details: Record<string, unknown>;
+}): Promise<void> {
+  const NON_TERMINAL = new Set(["queued", "running", "waiting_user"]);
+  if (NON_TERMINAL.has(params.invocation.executionState)) {
+    try {
+      await markInvocationLost({
+        tenantId: params.tenantId,
+        invocationId: params.invocation.id,
+        reasonCode: params.reasonCode,
+        errorSummary: params.errorSummary,
+        actorType: "system",
+        actorId: params.actorId,
+        correlationId: params.correlationId,
+        idempotencyKey: `resume-failure:${params.commandId}`,
+      });
+    } catch (lostErr) {
+      if (!(lostErr instanceof InvocationAlreadyTerminalError)) {
+        throw lostErr;
+      }
+    }
+  }
+  await completeRecord({
+    recordId: params.recordId,
+    httpStatus: params.httpStatus,
+    responseRedactedJson: JSON.stringify({
+      error: {
+        code: params.errorCode,
+        message: params.message,
+        request_id: params.requestId,
+        retryable: false,
+        details: params.details,
+      },
+    }),
+  });
 }

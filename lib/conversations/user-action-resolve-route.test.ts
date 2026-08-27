@@ -445,3 +445,108 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
     expect(provider.captured.filter((c) => c.resume).length).toBe(1);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 04 专项：Resume Command 真值（dispatched=false 显式 switch）
+// ═══════════════════════════════════════════════════════════
+
+describe("POST resolve — dispatched=false 显式 switch（04 专项 P1-4）", () => {
+  it("unsupported_capability（effective resume=false）→ 422 UNSUPPORTED_CAPABILITY + Invocation lost；不恢复 pending", async () => {
+    const ctx = await seedDispatchableTurn();
+    const { threadId, turnId, tenantId, ownerId } = ctx;
+    const { invocationId, requestId } = await seedWaitingInputOnThread({
+      tenantId,
+      ownerId,
+      threadId,
+      turnId,
+    });
+    // Binding 有效，但 RuntimeRevision measured resume=fail → effective resume=false
+    await attachA2ABinding({ tenantId, invocationId, threadId, endpoint: provider.endpoint });
+    const [rev] = await db
+      .select()
+      .from(runtimeRevisionTable)
+      .where(eq(runtimeRevisionTable.endpointRef, provider.endpoint))
+      .limit(1);
+    const caps = rev?.runtimeCapabilitiesJson as {
+      measured: { features: Record<string, string> };
+    };
+    caps.measured.features.resume = "fail";
+    await db
+      .update(runtimeRevisionTable)
+      .set({ runtimeCapabilitiesJson: caps })
+      .where(eq(runtimeRevisionTable.id, rev?.id ?? ""));
+
+    const response = await callResolve(threadId, requestId, "idem-resolve-unsupported-1");
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as {
+      error?: { code?: string; details?: Record<string, unknown> };
+    };
+    expect(body.error?.code).toBe("UNSUPPORTED_CAPABILITY");
+    expect(body.error?.details?.reason).toBe("unsupported_capability");
+
+    // Invocation 由唯一 Recovery Authority 收口（resume_unsupported）；UAR 不回 pending
+    const [inv] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, invocationId))
+      .limit(1);
+    expect(inv?.executionState).toBe("lost");
+    expect(inv?.errorCode).toBe("resume_unsupported");
+    const [uar] = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(eq(userActionRequestTable.id, requestId))
+      .limit(1);
+    expect(uar?.requestState).toBe("resolved");
+
+    // 同 key 同 body 重放 → 同一 422 失败（幂等 terminal replay，不重复副作用）
+    const replay = await callResolve(threadId, requestId, "idem-resolve-unsupported-1");
+    expect(replay.status).toBe(422);
+    const replayBody = (await replay.json()) as { error?: { code?: string } };
+    expect(replayBody.error?.code).toBe("UNSUPPORTED_CAPABILITY");
+  });
+
+  it("command_not_found（Binding 缺失 → 内部一致性错误）→ 409，不能 200；Invocation lost", async () => {
+    const ctx = await seedDispatchableTurn();
+    const { threadId, turnId, tenantId, ownerId } = ctx;
+    const { invocationId, requestId } = await seedWaitingInputOnThread({
+      tenantId,
+      ownerId,
+      threadId,
+      turnId,
+    });
+    // 不 attach ExecutionBinding → 网关 loadCommandContext 返回 command_not_found
+    // （Invocation 存在但 Binding 缺失 = 内部一致性错误）。
+
+    const response = await callResolve(threadId, requestId, "idem-resolve-cnf-1");
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as {
+      error?: { code?: string; details?: Record<string, unknown> };
+    };
+    expect(body.error?.code).toBe("OPERATION_PAYLOAD_CONFLICT");
+    expect(body.error?.details?.reason).toBe("command_not_found");
+
+    const [inv] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, invocationId))
+      .limit(1);
+    expect(inv?.executionState).toBe("lost");
+    expect(inv?.errorCode).toBe("resume_command_missing");
+  });
+
+  it("raw runtime error / endpoint / bearer 不出现在响应中（sanitized）", async () => {
+    const ctx = await seedDispatchableTurn();
+    const { threadId, turnId, tenantId, ownerId } = ctx;
+    const { requestId } = await seedWaitingInputOnThread({
+      tenantId,
+      ownerId,
+      threadId,
+      turnId,
+    });
+    const response = await callResolve(threadId, requestId, "idem-resolve-sanitized-1");
+    const text = JSON.stringify(await response.json());
+    expect(text).not.toContain("Bearer");
+    expect(text).not.toContain(provider.endpoint);
+  });
+});
