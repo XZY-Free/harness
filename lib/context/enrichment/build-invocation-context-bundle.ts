@@ -22,7 +22,10 @@
  */
 
 import type { InvocationContextContract } from "@/lib/agents/domain/public-agent-contract";
-import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
+import {
+  type ExecutionSubject,
+  executionSubjectToPublicAgentSubject,
+} from "@/lib/runtime/transport/execution-subject";
 
 /**
  * 本次 Invocation 的平台可用上下文来源（由 Harness 组装，不含任何客户端自报 trusted 值）。
@@ -182,18 +185,12 @@ function enumeratePlatformContext(
 ): { available: boolean; value?: unknown } {
   switch (contextKind) {
     case "execution_subject":
-      // 04 §4/§11：对外只映射 subject_id/subject_kind（与 A2A wire 公开形态一致）；
+      // 04 §4/§11 + 05 §4：经唯一公共 mapper 映射 subject_id/subject_kind；
       // tenantId/email/displayName 等内部事实绝不出现在 value。
       return environment.executionSubject
         ? {
             available: true,
-            value: {
-              subject_id: environment.executionSubject.subjectId,
-              subject_kind:
-                environment.executionSubject.subjectType === "service"
-                  ? "service"
-                  : "platform_user",
-            },
+            value: executionSubjectToPublicAgentSubject(environment.executionSubject),
           }
         : { available: false };
     case "tenant_context":

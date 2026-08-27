@@ -64,6 +64,21 @@ export type A2AEventBatchSink = (batch: {
   producerSequenceStart: number;
 }) => Promise<void>;
 
+/**
+ * Start/Resume 共用的唯一公共 Context → A2A message.metadata mapper（04 §12）。
+ * 键直接使用公共合同 context_kind；内部 ID/trace/tenant/token 等一律不发，
+ * 输出是对象（绝非 JSON string）。
+ */
+export function buildA2APublicMessageMetadata(
+  invocationContext?: Array<{ context_kind: string; value: unknown }>,
+): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  for (const entry of invocationContext ?? []) {
+    metadata[entry.context_kind] = entry.value;
+  }
+  return metadata;
+}
+
 /** 从 input_items 提取用户消息文本（与 HostedAdapter 相同结构约定）。 */
 function extractUserMessage(inputItems: unknown[]): string {
   for (const item of inputItems) {
@@ -300,6 +315,11 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
         "endpoint_auth",
         `A2A endpoint 认证失败（HTTP ${resp.status}）`,
       );
+    }
+    // 03 专项：503 视为暂不可用（retryable），与网络不可达同语义等待重试，
+    // 不进入确定性拒绝分类。
+    if (resp.status === 503) {
+      throw new RuntimeTransportError("stream_interrupted", "A2A endpoint HTTP 503 暂不可用");
     }
     if (!resp.ok) {
       throw new RuntimeTransportError("protocol_schema", `A2A endpoint HTTP ${resp.status}`);
@@ -580,19 +600,9 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
           : null;
 
       const messageId = randomUUID();
-      // 04 §11：允许的 Context 放 message.metadata，键直接使用公共合同 key
-      // （不包 SnowHarness 私有 envelope）；内部 ID/trace/tenant/token 等一律不发。
-      const contextMetadata: Record<string, unknown> = {};
-      for (const entry of body.invocation_context ?? []) {
-        contextMetadata[entry.context_kind] = entry.value;
-      }
-      if (body.execution_subject && !("execution_subject" in contextMetadata)) {
-        contextMetadata.execution_subject = {
-          subject_id: body.execution_subject.subject_id,
-          subject_kind:
-            body.execution_subject.subject_type === "service" ? "service" : "platform_user",
-        };
-      }
+      // 04 §12/05 §5：Start 与 Resume 共用唯一公共 metadata mapper；
+      // execution_subject 只来自 invocation_context 单一 Authority（无 fallback）。
+      const contextMetadata = buildA2APublicMessageMetadata(body.invocation_context);
       const rpcParams = {
         message: {
           kind: "message",
@@ -956,8 +966,10 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
         );
       }
 
-      // 4) message/send：标准 Message 字段（kind/messageId/role/contextId/taskId/parts），
-      //    不携带任何内部 metadata。
+      // 4) message/send：标准 Message 字段（kind/messageId/role/contextId/taskId/parts）
+      //    + 04 §11 重建的公共 Context metadata（same task/context、fresh metadata；
+      //    内部 ID/trace/tenant/token 等一律不发）。
+      const resumeMetadata = buildA2APublicMessageMetadata(req.requestBody.invocation_context);
       const resp = await jsonRpc<A2ATask>(
         req.runtimeEndpoint,
         req.auth,
@@ -970,6 +982,7 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
             contextId,
             taskId,
             parts: [{ kind: "text", text: resumeText }],
+            ...(Object.keys(resumeMetadata).length > 0 ? { metadata: resumeMetadata } : {}),
           },
         },
         req.idempotencyKey,

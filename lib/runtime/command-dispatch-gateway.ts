@@ -1,3 +1,4 @@
+import { buildBoundAgentInvocationContext } from "@/lib/context/enrichment/build-bound-agent-invocation-context";
 import { db } from "@/lib/db/client";
 /**
  * 命令调度生产网关（08 §5/§6，Batch 10）。
@@ -14,10 +15,11 @@ import { db } from "@/lib/db/client";
  */
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
-import { invocationCommandTable } from "@/lib/persistence/schema/conversation";
+import { invocationCommandTable, threadTable } from "@/lib/persistence/schema/conversation";
 import type { ExecutionBinding } from "@/lib/persistence/schema/executions";
 import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import {
+  type CommandDispatchResult,
   type CommandRuntimeEndpointResolution,
   dispatchCancelCommand,
   dispatchResumeCommand,
@@ -30,15 +32,19 @@ import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revisi
 import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
 import { getSessionBindingById } from "@/lib/runtime/session-binding-queries";
 import { createA2ATransport } from "@/lib/runtime/transport/a2a-transport";
+import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
 
-/** 网关调度结果。 */
-export interface CommandGatewayResult {
-  /** 是否真正执行了协议调度（false = 非 A2A 协议或命令不存在，由既有状态机吸收）。 */
-  dispatched: boolean;
-  /** 未调度原因。 */
-  reason?: "command_not_found" | "protocol_not_remote" | "unsupported_capability";
-}
+/**
+ * 网关调度结果（03 §3 判别联合）：真正远端调度时携带真实 CommandDispatchResult
+ * （acknowledged/dispatched/failed），调用方不得丢弃；skipped 携带稳定 reason。
+ */
+export type CommandGatewayResult =
+  | { dispatched: true; command: CommandDispatchResult }
+  | {
+      dispatched: false;
+      reason: "command_not_found" | "protocol_not_remote" | "unsupported_capability";
+    };
 
 /** 查询命令关联的 Invocation + Binding（跨租户隔离）。 */
 async function loadCommandContext(tenantId: string, commandId: string) {
@@ -195,7 +201,7 @@ export async function dispatchInterruptCommandToRuntime(params: {
   });
   if (!a2a) return { dispatched: false, reason: "protocol_not_remote" };
 
-  await dispatchCancelCommand({
+  const command = await dispatchCancelCommand({
     tenantId: params.tenantId,
     commandId: params.commandId,
     runtimeClient: a2a.transport,
@@ -203,12 +209,41 @@ export async function dispatchInterruptCommandToRuntime(params: {
     actorId: params.actorId ?? null,
     correlationId: params.correlationId ?? null,
   });
-  return { dispatched: true };
+  return { dispatched: true, command };
+}
+
+/**
+ * 04 §6：从持久化 Authority 重建 trusted ExecutionSubject（Resume retry 可脱离
+ * 原 HTTP request）。固定来源：Invocation 所属 Thread owner；actorId（UAR
+ * resolvedBy 语义）与 owner 不一致 → fail closed，绝不取当前登录用户覆盖原 subject。
+ */
+async function resolveResumeExecutionSubject(params: {
+  tenantId: string;
+  invocationThreadId: string | null;
+  actorId?: string | null;
+}) {
+  if (!params.invocationThreadId) return null;
+  const [thread] = await db
+    .select({ tenantId: threadTable.tenantId, ownerUserId: threadTable.ownerUserId })
+    .from(threadTable)
+    .where(eq(threadTable.id, params.invocationThreadId))
+    .limit(1);
+  if (!thread || thread.tenantId !== params.tenantId) return null;
+  if (params.actorId && params.actorId !== thread.ownerUserId) {
+    throw new Error(
+      "dispatchResumeCommandToRuntime: Resume actor 与 Thread owner 不一致（fail closed）",
+    );
+  }
+  return executionSubjectFromUserIdentity(params.tenantId, thread.ownerUserId);
 }
 
 /**
  * 调度 Resume 命令（08 §5：继续原 Invocation/taskId/contextId，不新建 continuation）。
  * 仅供生产 route 在 UserAction resolve 后调用；幂等由命令状态机保证。
+ *
+ * 04 专项：每次真正 dispatch 前重新做 Binding-frozen Context Enrichment
+ * （same task/context、same trusted subject、fresh current_datetime），并把 supplied
+ * entries 经 invocation_context 传入 Transport（Transport 只做 wire 映射）。
  */
 export async function dispatchResumeCommandToRuntime(params: {
   tenantId: string;
@@ -237,13 +272,36 @@ export async function dispatchResumeCommandToRuntime(params: {
   });
   if (!a2a) return { dispatched: false, reason: "protocol_not_remote" };
 
-  await dispatchResumeCommand({
+  const executionSubject = await resolveResumeExecutionSubject({
+    tenantId: params.tenantId,
+    invocationThreadId: ctx.invocation.threadId,
+    actorId: params.actorId ?? null,
+  });
+
+  const command = await dispatchResumeCommand({
     tenantId: params.tenantId,
     commandId: params.commandId,
     runtimeClient: a2a.transport,
     runtimeEndpointResolver: a2a.endpointResolver,
     actorId: params.actorId ?? null,
     correlationId: params.correlationId ?? null,
+    // 04 §5/§7：Context 在 Harness dispatch 层构建（Transport 不猜上下文）；
+    // now 每次 dispatch 刷新（retry 的 current_datetime 可以变化）。
+    resolveInvocationContext: async () => {
+      const bundle = await buildBoundAgentInvocationContext({
+        tenantId: params.tenantId,
+        binding: {
+          agentContractSnapshotId: ctx.binding.agentContractSnapshotId,
+          agentContextDigest: ctx.binding.agentContextDigest,
+        },
+        executionSubject,
+        now: new Date(),
+      });
+      if (!bundle) return null;
+      return bundle.entries
+        .filter((entry) => entry.supplied)
+        .map((entry) => ({ context_kind: entry.contextKind, value: entry.value }));
+    },
   });
-  return { dispatched: true };
+  return { dispatched: true, command };
 }

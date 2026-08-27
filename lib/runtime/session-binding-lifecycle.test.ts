@@ -20,9 +20,9 @@ import {
   markSessionBindingLost,
 } from "@/lib/runtime/session-binding-queries";
 import {
-  A2A_EXECUTION_SUBJECT_METADATA_KEY,
-  executionSubjectToA2AMetadata,
-  isValidExecutionSubjectWire,
+  executionSubjectFromServiceIdentity,
+  executionSubjectFromUserIdentity,
+  executionSubjectToPublicAgentSubject,
 } from "@/lib/runtime/transport/execution-subject";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -223,36 +223,43 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
   });
 });
 
-describe("ExecutionSubject（06 §6-§7）", () => {
-  it("isValidExecutionSubjectWire：合法 wire 通过；缺字段/类型错误拒绝", () => {
+describe("ExecutionSubject 公共 wire（05 专项）", () => {
+  it("executionSubjectToPublicAgentSubject：user → platform_user；service → platform_service；无 tenant", () => {
     expect(
-      isValidExecutionSubjectWire({
-        tenant_id: "t-1",
-        subject_type: "user",
-        subject_id: "u-1",
+      executionSubjectToPublicAgentSubject({
+        tenantId: "t-1",
+        subjectType: "user",
+        subjectId: "u-1",
       }),
-    ).toBe(true);
-    expect(isValidExecutionSubjectWire(null)).toBe(false);
+    ).toEqual({ subject_id: "u-1", subject_kind: "platform_user" });
     expect(
-      isValidExecutionSubjectWire({ tenant_id: "", subject_type: "user", subject_id: "u" }),
-    ).toBe(false);
-    expect(isValidExecutionSubjectWire({ tenant_id: "t", subject_type: 1, subject_id: "u" })).toBe(
-      false,
+      executionSubjectToPublicAgentSubject({
+        tenantId: "t-1",
+        subjectType: "service",
+        subjectId: "svc-1",
+      }),
+    ).toEqual({ subject_id: "svc-1", subject_kind: "platform_service" });
+    const serialized = JSON.stringify(
+      executionSubjectToPublicAgentSubject({
+        tenantId: "t-1",
+        subjectType: "user",
+        subjectId: "u-1",
+      }),
     );
-    expect(isValidExecutionSubjectWire({ tenant_id: "t", subject_type: "user" })).toBe(false);
+    expect(serialized).not.toContain("tenant");
+    expect(serialized).not.toContain("snowharness.execution_subject");
   });
 
-  it("executionSubjectToA2AMetadata：冻结 namespaced key，snake_case wire 形态", () => {
-    expect(A2A_EXECUTION_SUBJECT_METADATA_KEY).toBe("snowharness.execution_subject");
-    const value = executionSubjectToA2AMetadata({
+  it("服务端身份 helper：user/service 构造 trusted ExecutionSubject", () => {
+    expect(executionSubjectFromUserIdentity("t-1", "u-1")).toEqual({
       tenantId: "t-1",
       subjectType: "user",
       subjectId: "u-1",
     });
-    expect(JSON.parse(value)).toEqual({
-      tenant_id: "t-1",
-      subject_type: "user",
-      subject_id: "u-1",
+    expect(executionSubjectFromServiceIdentity("t-1", "svc-1")).toEqual({
+      tenantId: "t-1",
+      subjectType: "service",
+      subjectId: "svc-1",
     });
   });
 });

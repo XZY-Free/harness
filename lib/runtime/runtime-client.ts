@@ -31,7 +31,6 @@ import {
   outboundAuthHeaders,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { RuntimeHttpClientError } from "@/lib/runtime/errors";
-import type { ExecutionSubjectWire } from "@/lib/runtime/transport/execution-subject";
 
 // ─── 共享类型 ──────────────────────────────────────────────
 
@@ -131,16 +130,12 @@ export interface StartInvocationRequestBody {
     span_id: string;
   };
   /**
-   * ExecutionSubject（06 §6-§7）：可信调用主体，由服务端认证 Principal 生成，
-   * 禁止 caller 自报。Agent Runtime Protocol 直接放 dispatch envelope；
-   * A2A Transport 映射为公开 metadata（execution_subject，04 §11）。
-   */
-  execution_subject?: ExecutionSubjectWire;
-  /**
    * 允许外发的 Invocation Context（04 §13）：Binding 冻结合同 + external egress
    * policy 过滤后的 supplied 条目（公开合同 key + 已脱敏 value）。
    * Transport 只做 wire 映射，不查 DB/合同/Policy/User/Context storage。
    * Base Harness（无 Agent Contract）不携带该字段。
+   * 05 §5：execution_subject 只经 invocation_context 单一 Authority 进入 wire，
+   * 独立 execution_subject 字段已删除（A2A 不再 fallback 第二份 subject）。
    */
   invocation_context?: Array<{ context_kind: string; value: unknown }>;
   attempt?: {
@@ -202,6 +197,12 @@ export interface ResumeInvocationRequestBody {
   trace_context?: { trace_id: string; span_id: string } | null;
   /** §28：员工 resolve 后 resume 必须重新签发新 Gateway Access Token。 */
   gateway_access: GatewayAccess;
+  /**
+   * 04 专项：Resume 重新构建的 Binding-frozen Invocation Context（与 Start 同一
+   * 语义字段；每次真正 dispatch 刷新 current_datetime 等）。Transport 只做 wire
+   * 映射，不查 DB/合同/Policy。
+   */
+  invocation_context?: Array<{ context_kind: string; value: unknown }>;
 }
 
 /** resumeInvocation 响应体。 */

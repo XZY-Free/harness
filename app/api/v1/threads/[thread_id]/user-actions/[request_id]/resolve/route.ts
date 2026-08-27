@@ -45,6 +45,7 @@ import { db } from "@/lib/db/client";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
+  apiError,
   apiSuccess,
   getRequestId,
   resourceNotFound,
@@ -59,10 +60,11 @@ import {
   failRecord,
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
-import { logger } from "@/lib/logger";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import type { UserActionResolution } from "@/lib/persistence/schema/user-action-request";
 import { dispatchResumeCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
+import { InvocationAlreadyTerminalError } from "@/lib/runtime/errors";
+import { markInvocationLost } from "@/lib/runtime/recovery-queries";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -144,23 +146,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     );
   }
 
-  // 5. 校验 UserActionRequest 属于该 Thread + state=pending
-  //    （非该 Thread / 非 pending → 404 隐藏式，不泄露存在）
-  const [requestRow] = await db
-    .select()
-    .from(userActionRequestTable)
-    .where(
-      and(
-        eq(userActionRequestTable.tenantId, principal.tenantId),
-        eq(userActionRequestTable.id, userActionRequestId),
-      ),
-    )
-    .limit(1);
-  if (!requestRow || requestRow.threadId !== threadId || requestRow.requestState !== "pending") {
-    return resourceNotFound(requestId, `UserAction 请求不存在或无权访问: ${userActionRequestId}`);
-  }
-
-  // 6. 计算请求 hash + 幂等守卫
+  // 5. 计算请求 hash + 幂等守卫（先于 UAR pending 校验：同 key 同 body 重放必须
+  //    返回与第一次相同的 200/202/422 结果，即使 UAR 已 resolved —— 03 §8）。
   const path = new URL(request.url).pathname;
   const requestHash = computeRequestHash("POST", path, body);
   const caller = callerFromPrincipal(principal);
@@ -173,7 +160,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     requestHash,
   });
 
-  // 7. 处理幂等结果
+  // 6. 处理幂等结果
   if (outcome.kind === "replay") {
     return buildReplayResponse(outcome.record, requestId);
   }
@@ -201,6 +188,23 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     recordId = reset.id;
   }
 
+  // 7. 校验 UserActionRequest 属于该 Thread + state=pending（非 replay 请求；
+  //    非 pending → 404 隐藏式，不泄露存在）
+  const [requestRow] = await db
+    .select()
+    .from(userActionRequestTable)
+    .where(
+      and(
+        eq(userActionRequestTable.tenantId, principal.tenantId),
+        eq(userActionRequestTable.id, userActionRequestId),
+      ),
+    )
+    .limit(1);
+  if (!requestRow || requestRow.threadId !== threadId || requestRow.requestState !== "pending") {
+    await failRecord(recordId);
+    return resourceNotFound(requestId, `UserAction 请求不存在或无权访问: ${userActionRequestId}`);
+  }
+
   // 8. 执行业务：事务内解析 UserAction
   try {
     const result = await resolveGenericUserAction({
@@ -216,19 +220,34 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         : {}),
     });
 
-    // 08 §5：A2A 协议下真实调用远端 resume（继续原 Invocation/taskId/contextId）；
-    // hosted 协议由既有状态机吸收。网关幂等：非远端协议跳过，不影响本响应。
-    await dispatchResumeCommandToRuntime({
+    // 08 §5 + 03 专项：A2A 协议下真实调用远端 resume（继续原 Invocation/taskId/
+    // contextId）；hosted 协议由既有状态机吸收。网关返回真实命令结果，
+    // 本路由绝不吞掉远端 failed/dispatched 而虚报成功。
+    const gatewayResult = await dispatchResumeCommandToRuntime({
       tenantId: principal.tenantId,
       commandId: result.resumeCommand.id,
       actorId: principal.userIdentityId,
       correlationId: requestId,
-    }).catch((err) => {
-      logger.warn("Resume 命令远端调度失败（保持命令状态机重试）", {
-        commandId: result.resumeCommand.id,
-        error: String(err),
-      });
     });
+
+    // 03 §4：Hosted / protocol_not_remote / command_not_found / unsupported —
+    // 沿用 in-process 状态机语义；返回 200 但明确 mode=local_runtime，
+    // 不伪造 A2A ack。
+    const resumeDispatch =
+      gatewayResult.dispatched && gatewayResult.command.commandState === "acknowledged"
+        ? { mode: "remote" as const, command_state: "acknowledged" as const }
+        : gatewayResult.dispatched && gatewayResult.command.commandState === "dispatched"
+          ? {
+              mode: "remote" as const,
+              command_state: "dispatched" as const,
+              pending_retry: true as const,
+            }
+          : gatewayResult.dispatched && gatewayResult.command.commandState === "failed"
+            ? { mode: "remote" as const, command_state: "failed" as const }
+            : {
+                mode: "local_runtime" as const,
+                command_state: result.resumeCommand.commandState as string,
+              };
 
     const responseBody = {
       thread_id: result.thread.id,
@@ -240,19 +259,74 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       invocation_id: result.invocation.id,
       invocation_state: result.invocation.executionState,
       resume_command_id: result.resumeCommand.id,
-      resume_command_state: result.resumeCommand.commandState,
+      // 03 §9：唯一 Authority 是真实 Gateway/Command 结果（resume_dispatch）。
+      resume_dispatch: resumeDispatch,
       ...(result.grantId ? { grant_id: result.grantId } : {}),
       event_ids: result.events.map((e) => e.id),
     };
 
+    // 03 §4 A2A failed：远端明确拒绝的不可重试终态 → 422；UAR 已提交事实不回滚
+    //（UserAction remains resolved / responseRedactedJson remains stored）。
+    if (resumeDispatch.command_state === "failed") {
+      // 03 §6：terminal failed 后 Invocation 不得永久 running —— 转入平台已有
+      // lost 终态（不伪造成 execution.failed）；transport 已推进终态则保留真实终态。
+      try {
+        await markInvocationLost({
+          tenantId: principal.tenantId,
+          invocationId: result.invocation.id,
+          reasonCode: "resume_dispatch_failed",
+          errorSummary: "Resume 命令未被运行服务接受",
+          actorType: "system",
+          actorId: principal.userIdentityId,
+          correlationId: requestId,
+          idempotencyKey: `resume-dispatch-failed:${result.resumeCommand.id}`,
+        });
+      } catch (lostErr) {
+        if (!(lostErr instanceof InvocationAlreadyTerminalError)) {
+          throw lostErr;
+        }
+      }
+      const failureDetails = {
+        request_id: result.request.id,
+        invocation_id: result.invocation.id,
+        resume_command_id: result.resumeCommand.id,
+        resume_command_state: "failed",
+        safe_error_code: (gatewayResult.dispatched && gatewayResult.command.errorCode) || "UNKNOWN",
+      };
+      // 03 §8：幂等记录完成成 422 响应（同 key 重放返回同一失败结果，
+      // 不允许第二次 resolve UAR / 第二次远端调用）。存储体与 apiError wire 完全一致。
+      await completeRecord({
+        recordId,
+        httpStatus: 422,
+        responseRedactedJson: JSON.stringify({
+          error: {
+            code: "BUSINESS_CONSTRAINT_VIOLATION",
+            message: "补充信息已保存，但运行服务未能恢复执行。",
+            request_id: requestId,
+            retryable: false,
+            details: failureDetails,
+          },
+        }),
+      });
+      return apiError("BUSINESS_CONSTRAINT_VIOLATION", "补充信息已保存，但运行服务未能恢复执行。", {
+        requestId,
+        details: failureDetails,
+      });
+    }
+
+    // 03 §4 A2A dispatched：网络不可达/503，命令进入 retryable dispatched 状态 →
+    // 202（补充信息已正式接受，远端恢复尚未确认，等待平台重试；不虚报完成）。
+    const httpStatus =
+      resumeDispatch.mode === "remote" && resumeDispatch.command_state === "dispatched" ? 202 : 200;
+
     await completeRecord({
       recordId,
-      httpStatus: 200,
+      httpStatus,
       responseRedactedJson: JSON.stringify(responseBody),
     });
 
     return apiSuccess(responseBody, {
-      status: 200,
+      status: httpStatus,
       headers: { [REQUEST_ID_HEADER]: requestId },
     });
   } catch (err) {

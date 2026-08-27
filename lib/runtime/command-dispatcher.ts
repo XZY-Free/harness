@@ -63,6 +63,7 @@ import type {
   RuntimeHttpClient,
   SteerInvocationRequest,
 } from "@/lib/runtime/runtime-client";
+import { RuntimeTransportError } from "@/lib/runtime/transport/runtime-transport";
 import { and, eq } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -550,6 +551,16 @@ export async function dispatchResumeCommand(params: {
   actorType?: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
+  /**
+   * 04 专项：Resume 每次真正 dispatch 前重建 Binding-frozen Invocation Context
+   * （Harness dispatch 层构建；Transport 只做 wire 映射）。返回 null = 无 Agent
+   * Contract（Base Harness）不携带；required context 缺失/被拒时抛错 → 命令标记
+   * failed（fail closed，不发网络）。
+   */
+  resolveInvocationContext?: (loaded: {
+    invocation: Invocation;
+    binding: ExecutionBinding;
+  }) => Promise<Array<{ context_kind: string; value: unknown }> | null>;
 }): Promise<CommandDispatchResult> {
   const actorType: ThreadEventActorType = params.actorType ?? "system";
   const loaded = await loadCommandForDispatch(params.tenantId, params.commandId);
@@ -617,6 +628,28 @@ export async function dispatchResumeCommand(params: {
     ? { trace_id: params.correlationId, span_id: loaded.invocation.id }
     : null;
 
+  // 04 专项：网络前重建 Binding-frozen Context；required 缺失/被拒 → fail closed。
+  let invocationContext: Array<{ context_kind: string; value: unknown }> | null = null;
+  if (params.resolveInvocationContext) {
+    try {
+      invocationContext = await params.resolveInvocationContext({
+        invocation: loaded.invocation,
+        binding: loaded.binding,
+      });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      await markCommandFailed(loaded.command.id, "RESUME_CONTEXT_UNAVAILABLE", errorMessage);
+      return {
+        commandId: loaded.command.id,
+        commandState: "failed",
+        failedAt: new Date(),
+        errorCode: "RESUME_CONTEXT_UNAVAILABLE",
+        errorMessage,
+        events: [],
+      };
+    }
+  }
+
   const request: ResumeInvocationRequest = {
     runtimeEndpoint,
     auth,
@@ -626,6 +659,9 @@ export async function dispatchResumeCommand(params: {
       resume_payload: resumePayload,
       trace_context: traceContext,
       gateway_access: gatewayAccess,
+      ...(invocationContext && invocationContext.length > 0
+        ? { invocation_context: invocationContext }
+        : {}),
     },
   };
 
@@ -988,6 +1024,18 @@ async function handleResumeRequiresRedispatch(
  * - 其他 → 标记 failed（Runtime 拒绝，不伪造成功）。
  */
 async function handleRuntimeError(err: unknown, commandId: string): Promise<CommandDispatchResult> {
+  // 03 专项：A2A Transport 网络不可达/503（stream_interrupted，jsonRpc 出口）→
+  // 保持 dispatched（等待重试），与 RuntimeHttpClientError network 分支同语义，
+  // 不判终态 failed。resume/cancel 的同步 jsonRpc 只在不可达/503 抛该 kind。
+  if (err instanceof RuntimeTransportError && err.kind === "stream_interrupted") {
+    return {
+      commandId,
+      commandState: "dispatched",
+      skipped: true,
+      skipReason: "runtime_network_unavailable",
+      events: [],
+    };
+  }
   if (err instanceof RuntimeHttpClientError) {
     // 网络不可达 → 保持 dispatched（等待重试）
     if (err.kind === "network") {

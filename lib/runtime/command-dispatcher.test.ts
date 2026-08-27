@@ -33,6 +33,7 @@ import {
   buildDsseArtifactAttestationEnvelope,
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
+import { RequiredContextUnavailableError } from "@/lib/context/enrichment/build-invocation-context-bundle";
 import { requestInterrupt } from "@/lib/conversations/interrupt-queries";
 import { queueSteer } from "@/lib/conversations/steer-queries";
 import { createThread } from "@/lib/conversations/thread-queries";
@@ -1123,6 +1124,71 @@ describe("S05-C04 dispatchResumeCommand", () => {
     expect(turnRow?.turnState).toBe("running");
 
     expect(mockClient.calls.resumeInvocation).toHaveLength(1);
+  });
+
+  it("04 专项：resolveInvocationContext 的 supplied entries 进入 resume wire（每次 dispatch 重建）", async () => {
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await transitionToWaitingUser(ctx, running);
+    const resumeCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { text: "明天一天" },
+      idempotencyKey: "resume-ctx-key-1",
+    });
+    const mockClient = createMockRuntimeClient({
+      resumeInvocation: async (req) => buildResumeResponse(req.invocationId),
+    });
+    const contextEntries = [
+      {
+        context_kind: "execution_subject",
+        value: { subject_id: "user-1", subject_kind: "platform_user" },
+      },
+      { context_kind: "current_datetime", value: "2026-08-27T00:00:00.000Z" },
+    ];
+    const result = await dispatchResumeCommand({
+      tenantId: ctx.tenantId,
+      commandId: resumeCommandId,
+      runtimeClient: mockClient,
+      runtimeEndpointResolver: async () =>
+        buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+      resolveInvocationContext: async () => contextEntries,
+    });
+    expect(result.commandState).toBe("acknowledged");
+    expect(mockClient.calls.resumeInvocation).toHaveLength(1);
+    expect(mockClient.calls.resumeInvocation[0]?.requestBody.invocation_context).toEqual(
+      contextEntries,
+    );
+  });
+
+  it("04 专项：required context 缺失 → 命令 failed（fail closed，零网络）", async () => {
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await transitionToWaitingUser(ctx, running);
+    const resumeCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { text: "明天一天" },
+      idempotencyKey: "resume-ctx-key-2",
+    });
+    const mockClient = createMockRuntimeClient({
+      resumeInvocation: async (req) => buildResumeResponse(req.invocationId),
+    });
+    const result = await dispatchResumeCommand({
+      tenantId: ctx.tenantId,
+      commandId: resumeCommandId,
+      runtimeClient: mockClient,
+      runtimeEndpointResolver: async () =>
+        buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+      resolveInvocationContext: async () => {
+        throw new RequiredContextUnavailableError("execution_subject");
+      },
+    });
+    expect(result.commandState).toBe("failed");
+    expect(result.errorCode).toBe("RESUME_CONTEXT_UNAVAILABLE");
+    expect(mockClient.calls.resumeInvocation).toHaveLength(0);
+    const cmdRow = await getCommandRow(resumeCommandId);
+    expect(cmdRow?.commandState).toBe("failed");
   });
 
   it("网络不可达：保持 dispatched（skipped=true，等待重试）", async () => {
@@ -2519,13 +2585,23 @@ describe("生产网关 A2A Resume（post-authority Invocation=running）", () =>
       });
       expect(result.dispatched).toBe(true);
 
-      // Provider 捕获精确补充文本 + 同一 taskId/contextId + 无 metadata（wire 事实）。
+      // Provider 捕获精确补充文本 + 同一 taskId/contextId + 公共 Context metadata
+      //（04 专项：Resume 重新做 Binding-frozen Enrichment；same trusted subject、
+      //  fresh current_datetime；无任何 SnowHarness 内部 ID）。
       const resumeCaptured = provider.captured.filter((c) => c.resume);
       expect(resumeCaptured).toHaveLength(1);
       expect(resumeCaptured[0]?.text).toBe("年休假，明天一天");
       expect(resumeCaptured[0]?.taskId).toBe(taskId);
       expect(resumeCaptured[0]?.contextId).toBe(contextRef);
-      expect(resumeCaptured[0]?.messageMetadata).toBeUndefined();
+      const metadata = resumeCaptured[0]?.messageMetadata as Record<string, unknown>;
+      expect(metadata?.execution_subject).toEqual({
+        subject_id: ctx.ownerId,
+        subject_kind: "platform_user",
+      });
+      expect(typeof metadata?.current_datetime).toBe("string");
+      expect(new Date(String(metadata?.current_datetime)).toString()).not.toBe("Invalid Date");
+      expect(JSON.stringify(metadata)).not.toContain("snowharness.execution_subject");
+      expect(JSON.stringify(metadata)).not.toContain("tenant");
 
       // 命令仅在 response/completion 事件持久化后 acknowledged。
       const cmdRow = await getCommandRow(commandId);

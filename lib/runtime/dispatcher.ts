@@ -623,15 +623,6 @@ async function dispatchToRuntime(params: {
       span_id: params.invocation.id,
     },
     attempt: { attempt_no: 1 },
-    ...(params.executionSubject
-      ? {
-          execution_subject: {
-            tenant_id: params.executionSubject.tenantId,
-            subject_type: params.executionSubject.subjectType,
-            subject_id: params.executionSubject.subjectId,
-          },
-        }
-      : {}),
   };
 
   // 04 §14：Context Enrichment 必须在 Binding 确定后——从 Binding 冻结的 exact

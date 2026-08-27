@@ -7,10 +7,10 @@
  * - ExecutionSubject 与 ContextHandle 是两个对象（06 §8）：
  *   ContextHandle 是 Context Gateway 的签名能力句柄，不是用户身份 Token。
  *
- * Transport 映射（06 §7）：
- * - Agent Runtime Protocol：dispatch envelope 增加 execution subject；
- * - A2A：冻结 namespaced metadata（snowharness.execution_subject）发送，
- *   SnowHarness 不假设对方如何把 subjectId 映射到其内部员工/客户 ID。
+ * 公共 wire（05 专项唯一 mapper）：executionSubjectToPublicAgentSubject 输出严格
+ * {subject_id, subject_kind: platform_user|platform_service}；旧
+ * snowharness.execution_subject namespaced metadata / tenant_id / JSON string
+ * serializer 已物理删除，禁止任何第二 Authority。
  */
 
 /** 可信执行主体（服务端权威生成）。 */
@@ -23,35 +23,42 @@ export interface ExecutionSubject {
   subjectId: string;
 }
 
-/** wire 形态（snake_case，进入 dispatch envelope / A2A metadata）。 */
-export interface ExecutionSubjectWire {
-  tenant_id: string;
-  subject_type: string;
+/** Agent 公共合同 execution_subject wire 形态（无 tenant，05 §2/§6）。 */
+export interface PublicAgentExecutionSubject {
   subject_id: string;
+  subject_kind: "platform_user" | "platform_service";
 }
 
-/** 校验 wire 形态（Transport 入口 fail-closed）。 */
-export function isValidExecutionSubjectWire(value: unknown): value is ExecutionSubjectWire {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.tenant_id === "string" &&
-    record.tenant_id.length > 0 &&
-    typeof record.subject_type === "string" &&
-    record.subject_type.length > 0 &&
-    typeof record.subject_id === "string" &&
-    record.subject_id.length > 0
-  );
-}
-
-/** 转换为 A2A namespaced metadata value（06 §7 冻结命名空间）。 */
-export const A2A_EXECUTION_SUBJECT_METADATA_KEY = "snowharness.execution_subject";
-
-/** 序列化为 A2A metadata value（JSON 字符串，供远端按合同解析）。 */
-export function executionSubjectToA2AMetadata(subject: ExecutionSubject): string {
-  return JSON.stringify({
-    tenant_id: subject.tenantId,
-    subject_type: subject.subjectType,
+/**
+ * 唯一公共 mapper：ExecutionSubject → Agent 公共 execution_subject。
+ * subjectType→subject_kind 映射只有这一处；输出永不包含 tenant。
+ */
+export function executionSubjectToPublicAgentSubject(
+  subject: ExecutionSubject,
+): PublicAgentExecutionSubject {
+  return {
     subject_id: subject.subjectId,
-  });
+    subject_kind: subject.subjectType === "service" ? "platform_service" : "platform_user",
+  };
+}
+
+/**
+ * 从服务端已认证的用户身份生成 trusted ExecutionSubject（04 §6：Start 与 Resume
+ * 共用；只接受服务端 principal / persisted user identity，不接受客户端自报值）。
+ */
+export function executionSubjectFromUserIdentity(
+  tenantId: string,
+  userIdentityId: string,
+): ExecutionSubject {
+  return { tenantId, subjectType: "user", subjectId: userIdentityId };
+}
+
+/**
+ * 从服务端服务身份生成 trusted ExecutionSubject（平台 workload/service principal）。
+ */
+export function executionSubjectFromServiceIdentity(
+  tenantId: string,
+  serviceId: string,
+): ExecutionSubject {
+  return { tenantId, subjectType: "service", subjectId: serviceId };
 }

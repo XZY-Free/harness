@@ -90,11 +90,13 @@ function requestBody(
     execution_limits: { max_invocation_seconds: 600, max_event_bytes: 1048576 },
     trace_context: { trace_id: "trace-1", span_id: "span-1" },
     attempt: { attempt_no: 1 },
-    execution_subject: {
-      tenant_id: "tenant-1",
-      subject_type: "user",
-      subject_id: "user-1",
-    },
+    // 05 §5：execution_subject 只经 invocation_context 单一 Authority 进入 wire。
+    invocation_context: [
+      {
+        context_kind: "execution_subject",
+        value: { subject_id: "user-1", subject_kind: "platform_user" },
+      },
+    ],
     ...overrides,
   };
 }
@@ -195,7 +197,7 @@ describe("仓内 A2A Provider 黑盒 E2E（07，HR 公开合同 wire）", () => 
       runtimeEndpoint: provider.endpoint,
       auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-no-subject",
-      requestBody: requestBody({ execution_subject: undefined }),
+      requestBody: requestBody({ invocation_context: undefined }),
     });
     const last = provider.captured[provider.captured.length - 1];
     expect(last?.messageMetadata).toBeUndefined();

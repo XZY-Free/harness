@@ -489,6 +489,56 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     expect(rpc.params.message.taskId).toBe("task-1");
     expect(rpc.params.message.contextId).toBe("ctx-1");
 
+    // 04 专项 §11：携带 invocation_context 时，resume Message 带同一公共 mapper
+    // 产出的 metadata（same task/context、fresh metadata、对象非 JSON string）。
+    const fixture2 = createFixture([
+      sseResponse([statusUpdate("working")]),
+      jsonResponse({ jsonrpc: "2.0", id: "rpc-2", result: taskResult() }),
+    ]);
+    const transport2 = makeTransport(fixture2, {
+      resolveRuntimeRefs: async () => ({
+        runtimeExecutionRef: "task-1",
+        runtimeSessionRef: "ctx-1",
+      }),
+      resolveNextProducerSequence: async () => 41,
+    });
+    await transport2.startInvocation({
+      runtimeEndpoint: "https://agent.example.com",
+      auth: { mode: "bearer", token: "token" },
+      idempotencyKey: "idem-1",
+      requestBody: requestBody(),
+    });
+    await waitForBatches(fixture2, 1);
+    await transport2.resumeInvocation(
+      resumeRequest({
+        requestBody: {
+          resume_payload: { text: "订单号 123" },
+          gateway_access: { access_token: "t", expires_at: "2026-08-25T09:00:00.000Z" },
+          invocation_context: [
+            {
+              context_kind: "execution_subject",
+              value: { subject_id: "user-1", subject_kind: "platform_user" },
+            },
+            { context_kind: "current_datetime", value: "2026-08-27T01:02:03.000Z" },
+          ],
+        },
+      }),
+    );
+    const resumeRpc = JSON.parse(String(fixture2.requests[1]?.init.body)) as {
+      method: string;
+      params: { message: Record<string, unknown> & { metadata?: Record<string, unknown> } };
+    };
+    expect(resumeRpc.method).toBe("message/send");
+    expect(resumeRpc.params.message.taskId).toBe("task-1");
+    expect(resumeRpc.params.message.contextId).toBe("ctx-1");
+    expect(resumeRpc.params.message.metadata).toEqual({
+      execution_subject: { subject_id: "user-1", subject_kind: "platform_user" },
+      current_datetime: "2026-08-27T01:02:03.000Z",
+    });
+    expect(typeof resumeRpc.params.message.metadata?.execution_subject).toBe("object");
+    expect(JSON.stringify(resumeRpc.params.message.metadata)).not.toContain("snowharness.execution_subject");
+    expect(JSON.stringify(resumeRpc.params.message.metadata)).not.toContain("tenant");
+
     // 归一化事件：response.completed 用 artifact 实际答复 + execution.completed，
     // producer_sequence 从注入的 next-sequence 开始。
     await waitForBatches(fixture, startBatchCount + 1);
@@ -702,7 +752,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     ).rejects.toMatchObject({ kind: "endpoint_auth" });
   });
 
-  it("execution_subject（06 §7，HR 公开合同）：metadata 恰为 execution_subject 对象；service 主体映射 subject_kind=service", async () => {
+  it("execution_subject（05 专项单一 Authority）：metadata 恰为公共对象；service 主体映射 platform_service", async () => {
     const fixture = createFixture([sseResponse([statusUpdate("working", "task-4", "ctx-4")])]);
     const transport = makeTransport(fixture);
     await transport.startInvocation({
@@ -710,20 +760,22 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
       auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody({
-        execution_subject: {
-          tenant_id: "tenant-1",
-          subject_type: "user",
-          subject_id: "user-1",
-        },
+        invocation_context: [
+          {
+            context_kind: "execution_subject",
+            value: { subject_id: "user-1", subject_kind: "platform_user" },
+          },
+        ],
       }),
     });
     const rpc = JSON.parse(String(fixture.requests[0]?.init.body)) as {
       params: { message: { metadata?: Record<string, unknown> } };
     };
-    // 公开合同精确形态：仅 execution_subject（subject_id/subject_kind）。
+    // 公开合同精确形态：仅 execution_subject（subject_id/subject_kind），对象非 JSON string。
     expect(rpc.params.message.metadata).toEqual({
       execution_subject: { subject_id: "user-1", subject_kind: "platform_user" },
     });
+    expect(typeof rpc.params.message.metadata?.execution_subject).toBe("object");
     // 禁止键（内部 trace/tenant/员工等一律不得出现在 wire 上）。
     const keys = Object.keys(rpc.params.message.metadata ?? {});
     for (const forbidden of [
@@ -739,7 +791,7 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
       expect(keys).not.toContain(forbidden);
     }
 
-    // service 主体 → subject_kind=service。
+    // service 主体 → platform_service（05 §2 唯一 mapper 语义）。
     const fixture2 = createFixture([sseResponse([statusUpdate("working", "task-5", "ctx-5")])]);
     const transport2 = makeTransport(fixture2);
     await transport2.startInvocation({
@@ -747,18 +799,19 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
       auth: { mode: "bearer", token: "token" },
       idempotencyKey: "idem-1",
       requestBody: requestBody({
-        execution_subject: {
-          tenant_id: "tenant-1",
-          subject_type: "service",
-          subject_id: "svc-1",
-        },
+        invocation_context: [
+          {
+            context_kind: "execution_subject",
+            value: { subject_id: "svc-1", subject_kind: "platform_service" },
+          },
+        ],
       }),
     });
     const rpc2 = JSON.parse(String(fixture2.requests[0]?.init.body)) as {
       params: { message: { metadata?: Record<string, unknown> } };
     };
     expect(rpc2.params.message.metadata).toEqual({
-      execution_subject: { subject_id: "svc-1", subject_kind: "service" },
+      execution_subject: { subject_id: "svc-1", subject_kind: "platform_service" },
     });
   });
 
