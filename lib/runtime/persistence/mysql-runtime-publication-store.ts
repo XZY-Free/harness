@@ -21,7 +21,7 @@ import {
   runtimeConformanceRun,
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
 import type { RuntimePublicationStore } from "@/lib/runtime/persistence/runtime-publication-store";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 
 export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
   transaction: (operation) =>
@@ -183,12 +183,18 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
           return result[0].affectedRows === 1;
         },
         async setRuntimeCurrentRevision(params) {
+          // 发布原子启用（与 Agent 发布同一模式，7f0d696）：draft Runtime 在首次
+          // Revision 发布事务内同步 draft→enabled；enabled/disabled 等既有状态
+          // 保持不变（显式 disable 不被发布覆盖）。
           const result = await tx
             .update(runtimeTable)
             .set({
               currentRevisionId: params.revisionId,
               versionNo: params.expectedVersionNo + 1,
               updatedAt: params.updatedAt,
+              ...(params.enableIfDraft === true
+                ? { lifecycleState: sql`IF(${runtimeTable.lifecycleState} = 'draft', 'enabled', ${runtimeTable.lifecycleState})` }
+                : {}),
             })
             .where(
               and(

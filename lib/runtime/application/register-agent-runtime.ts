@@ -11,7 +11,8 @@
  *   GET /.well-known/agent-card.json → basic probe（按 streamingTransport 分
  *   message/send / message/stream）→ 按声明依次 input_required / resume / cancel probe。
  *   incremental_content=true 必须真实观测至少一条内容/artifact 增量（状态 update 不算）。
- *   cancel=false 绝不调用 tasks/cancel；不发送内部 invocation/trace/主体字段。
+ *   cancel=false 绝不调用 tasks/cancel；不发送内部 invocation/trace/tenant 键
+ *   （probe 携带平台系统验收身份的公共 Context metadata，00 §5）。
  * - durableTaskRecovery 阶段 1 不冒充验证：measured=not_measured、effective=false。
  * - 一切校验失败（schema/引用/凭证/presence）发生在任何网络调用之前；网络验收失败
  *   fail closed，不产生任何 Runtime/RuntimeRevision 行。
@@ -56,6 +57,11 @@ import type {
   RuntimeConformanceCaseResultRecord,
   RuntimeConformanceRunRecord,
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import { buildA2APublicMessageMetadata } from "@/lib/runtime/transport/a2a-transport";
+import {
+  executionSubjectFromServiceIdentity,
+  executionSubjectToPublicAgentSubject,
+} from "@/lib/runtime/transport/execution-subject";
 import {
   appendRuntimeConformanceRun,
   prepareRuntimeConformanceRun,
@@ -302,8 +308,20 @@ function isContentIncrement(result: Record<string, unknown>): boolean {
   return Array.isArray(parts) && parts.length > 0;
 }
 
-/** 官方 Message wire：kind=message + 每次新 messageId；不携带内部 invocation/trace 键。 */
-function buildA2AMessage(input: string, correlation?: Correlation): Record<string, unknown> {
+/**
+ * 官方 Message wire：kind=message + 每次新 messageId；不携带内部 invocation/trace 键。
+ *
+ * probe 携带平台系统验收身份的公共 Context metadata（execution_subject=
+ * platform_service + fresh current_datetime + 合同首个 supported locale）：
+ * 真实 Provider 按公共合同从当前 message.metadata 提取执行上下文（00 §5），
+ * 匿名 probe 会落入 Provider 的匿名分支使验收结果不可靠。经唯一公共 mapper
+ * 构造，键为公共合同 context_kind，绝不出现内部 ID/trace/tenant。
+ */
+function buildA2AMessage(
+  input: string,
+  correlation?: Correlation,
+  metadata?: Record<string, unknown>,
+): Record<string, unknown> {
   const message: Record<string, unknown> = {
     kind: "message",
     messageId: randomUUID(),
@@ -314,6 +332,9 @@ function buildA2AMessage(input: string, correlation?: Correlation): Record<strin
     message.taskId = correlation.taskId;
     message.contextId = correlation.contextId;
   }
+  if (metadata && Object.keys(metadata).length > 0) {
+    message.metadata = metadata;
+  }
   return message;
 }
 
@@ -323,6 +344,7 @@ async function sendMessage(
   credential: ResolvedCredential,
   input: string,
   correlation?: Correlation,
+  metadata?: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const response = await fetch(endpoint, {
     method: "POST",
@@ -361,6 +383,7 @@ async function streamMessage(
   input: string,
   correlation: Correlation | undefined,
   increments: { observed: boolean },
+  metadata?: Record<string, unknown>,
 ): Promise<Array<Record<string, unknown>>> {
   const response = await fetch(endpoint, {
     method: "POST",
@@ -490,9 +513,10 @@ async function probeBasic(
   input: string,
   streamingTransport: boolean,
   increments: { observed: boolean },
+  metadata: () => Record<string, unknown>,
 ): Promise<void> {
   if (!streamingTransport) {
-    const result = await sendMessage(endpoint, credential, input);
+    const result = await sendMessage(endpoint, credential, input, undefined, metadata());
     if (!correlationOf(result)) {
       throw new AgentRuntimeRegistrationError(
         "conformance_failed",
@@ -501,7 +525,14 @@ async function probeBasic(
     }
     return;
   }
-  const events = await streamMessage(endpoint, credential, input, undefined, increments);
+  const events = await streamMessage(
+    endpoint,
+    credential,
+    input,
+    undefined,
+    increments,
+    metadata(),
+  );
   if (events.length === 0) {
     throw new AgentRuntimeRegistrationError(
       "conformance_failed",
@@ -523,6 +554,7 @@ async function probeInputRequired(
   input: string,
   streamingTransport: boolean,
   increments: { observed: boolean },
+  metadata: () => Record<string, unknown>,
 ): Promise<void> {
   const requireEvidence = (result: Record<string, unknown>) => {
     if (resultState(result) !== "input-required" || !correlationOf(result)) {
@@ -533,11 +565,18 @@ async function probeInputRequired(
     }
   };
   if (!streamingTransport) {
-    const result = await sendMessage(endpoint, credential, input);
+    const result = await sendMessage(endpoint, credential, input, undefined, metadata());
     requireEvidence(result);
     return;
   }
-  const events = await streamMessage(endpoint, credential, input, undefined, increments);
+  const events = await streamMessage(
+    endpoint,
+    credential,
+    input,
+    undefined,
+    increments,
+    metadata(),
+  );
   const hit = events.find((r) => resultState(r) === "input-required");
   if (!hit || !correlationOf(hit)) {
     throw new AgentRuntimeRegistrationError(
@@ -555,24 +594,32 @@ async function probeResume(
   resumeInput: string,
   streamingTransport: boolean,
   increments: { observed: boolean },
+  metadata: () => Record<string, unknown>,
 ): Promise<void> {
   let start: Correlation;
   if (streamingTransport) {
-    const events = await streamMessage(endpoint, credential, startInput, undefined, increments);
+    const events = await streamMessage(
+      endpoint,
+      credential,
+      startInput,
+      undefined,
+      increments,
+      metadata(),
+    );
     const correlated = events.map(correlationOf).find((c) => c !== null);
     if (!correlated) {
       throw new AgentRuntimeRegistrationError("conformance_failed", "resume 起始缺少 correlation");
     }
     start = correlated;
   } else {
-    const result = await sendMessage(endpoint, credential, startInput);
+    const result = await sendMessage(endpoint, credential, startInput, undefined, metadata());
     const correlated = correlationOf(result);
     if (!correlated) {
       throw new AgentRuntimeRegistrationError("conformance_failed", "resume 起始缺少 correlation");
     }
     start = correlated;
   }
-  const result = await sendMessage(endpoint, credential, resumeInput, start);
+  const result = await sendMessage(endpoint, credential, resumeInput, start, metadata());
   const responded = correlationOf(result);
   if (!responded || responded.taskId !== start.taskId || responded.contextId !== start.contextId) {
     throw new AgentRuntimeRegistrationError("conformance_failed", "resume correlation 发生变化");
@@ -788,7 +835,22 @@ export async function registerAgentRuntime(
     throw err;
   }
 
-  // 2) AgentCard 协议证据 + capability-driven probes（顺序执行，一次网络序列）
+  // 2) AgentCard 协议证据 + capability-driven probes（顺序执行，一次网络序列）。
+  // probe 携带平台系统验收身份的公共 Context metadata（每次调用刷新 current_datetime）；
+  // 真实 Provider 按公共合同从当前 message.metadata 提取执行上下文（00 §5）。
+  const probeMetadata = (): Record<string, unknown> =>
+    buildA2APublicMessageMetadata([
+      {
+        context_kind: "execution_subject",
+        value: executionSubjectToPublicAgentSubject(
+          executionSubjectFromServiceIdentity(command.tenantId, signer.runnerIdentity),
+        ),
+      },
+      { context_kind: "current_datetime", value: new Date().toISOString() },
+      ...(Array.isArray(snapshot.supportedLocales) && snapshot.supportedLocales.length > 0
+        ? [{ context_kind: "locale", value: snapshot.supportedLocales[0] as string }]
+        : []),
+    ]);
   const probeStartedAt = new Date();
   await probeAgentCardConsistency(endpoint, credential, snapshot);
   const increments = { observed: false };
@@ -798,6 +860,7 @@ export async function registerAgentRuntime(
     command.conformance.basic.input,
     snapshot.streamingTransport,
     increments,
+    probeMetadata,
   );
   if (command.conformance.input_required) {
     await probeInputRequired(
@@ -806,6 +869,7 @@ export async function registerAgentRuntime(
       command.conformance.input_required.input,
       snapshot.streamingTransport,
       increments,
+      probeMetadata,
     );
   }
   if (command.conformance.resume) {
@@ -816,6 +880,7 @@ export async function registerAgentRuntime(
       command.conformance.resume.resumeInput,
       snapshot.streamingTransport,
       increments,
+      probeMetadata,
     );
   }
   if (command.conformance.cancel) {

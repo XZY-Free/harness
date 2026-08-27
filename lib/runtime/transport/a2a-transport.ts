@@ -673,15 +673,17 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
           return;
         }
         buffer += decoder.decode(value, { stream: true });
-        // SSE 事件以空行分隔；每个事件内取 data: 行。
-        let boundary = buffer.indexOf("\n\n");
-        while (boundary !== -1) {
-          const rawEvent = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
+        // SSE 事件以空行分隔（规范允许 LF 或 CRLF，Provider 实现两者皆有；
+        // 只认 \n\n 会把 CRLF 流整段当作未完结事件，永远解析不出首事件）。
+        // 每个事件内取 data: 行。
+        let boundaryMatch = /\r?\n\r?\n/.exec(buffer);
+        while (boundaryMatch !== null) {
+          const rawEvent = buffer.slice(0, boundaryMatch.index);
+          buffer = buffer.slice(boundaryMatch.index + boundaryMatch[0].length);
           // 先推进 boundary（continue 分支不再重复处理同一事件）。
-          boundary = buffer.indexOf("\n\n");
+          boundaryMatch = /\r?\n\r?\n/.exec(buffer);
           const dataLines = rawEvent
-            .split("\n")
+            .split(/\r?\n/)
             .filter((l) => l.startsWith("data:"))
             .map((l) => l.slice(5).trim());
           if (dataLines.length === 0) continue;
@@ -710,7 +712,27 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
             }
             continue;
           }
-          if (!isUpdate(parsed)) continue;
+          if (!isUpdate(parsed)) {
+            // 官方 Task 形态首事件（kind=task + id/contextId，无 taskId 字段）：
+            // 与 registration probe 的 correlationOf 同语义，作为 correlation 来源。
+            if (
+              parsed &&
+              typeof parsed === "object" &&
+              (parsed as Record<string, unknown>).kind === "task"
+            ) {
+              const task = parsed as { id?: unknown; contextId?: unknown };
+              if (
+                typeof task.id === "string" &&
+                task.id.length > 0 &&
+                typeof task.contextId === "string" &&
+                task.contextId.length > 0
+              ) {
+                taskId = task.id;
+                contextId = task.contextId;
+              }
+            }
+            continue;
+          }
           taskId = parsed.taskId;
           contextId = parsed.contextId ?? contextId;
           const events = mapUpdate(body.invocation_id, nextSequence, parsed);

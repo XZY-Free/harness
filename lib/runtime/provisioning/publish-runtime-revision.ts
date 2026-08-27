@@ -257,7 +257,7 @@ export function createPublishRuntimeRevision(dependencies: {
         );
       }
 
-      // 17. CAS 更新 Runtime 指针
+      // 17. CAS 更新 Runtime 指针 + 发布原子启用（draft→enabled，与 Agent 发布同一模式）
       if (
         !(await session.setRuntimeCurrentRevision({
           tenantId: command.tenantId,
@@ -265,6 +265,7 @@ export function createPublishRuntimeRevision(dependencies: {
           revisionId: revision.id,
           expectedVersionNo: command.runtimeExpectedVersionNo,
           updatedAt: publishedAt,
+          enableIfDraft: true,
         }))
       ) {
         throw new RuntimePublicationVersionConflictError(

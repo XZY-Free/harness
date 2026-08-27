@@ -103,6 +103,8 @@ export interface RuntimePublicationSession {
     revisionId: string;
     expectedVersionNo: number;
     updatedAt: Date;
+    /** 发布原子启用：draft Runtime 首次发布时 draft→enabled（7f0d696 同一模式）。 */
+    enableIfDraft?: boolean;
   }): Promise<boolean>;
   appendAudit(params: {
     id: string;

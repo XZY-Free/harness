@@ -365,6 +365,7 @@ export async function runLiveExternalAgentJoin(
       method: "PUT",
       path: `/admin/api/v1/deployment-route-sets/${routeSetId}/activation`,
       idempotencyKey: idem("route-activation"),
+      ifMatch: `route-set-${routeSetVersionNo}`,
       body: {
         expected_version_no: routeSetVersionNo,
         reason: `live-external-agent ${runId}`,
@@ -373,7 +374,7 @@ export async function runLiveExternalAgentJoin(
             route_group_id: "primary",
             agent_revision_id: agentRevisionId,
             runtime_revision_id: runtimeRevisionId,
-            traffic_weight: 100,
+            traffic_weight: 10000,
             priority_no: 1,
           },
         ],
@@ -465,7 +466,7 @@ async function exerciseEmployeeFlow(params: {
       path: `/api/v1/threads/${threadId}/turns`,
       idempotencyKey: idem("turn"),
       body: {
-        input: { text: config.resumeStartInput ?? config.basicInput },
+        input: { type: "text", text: config.resumeStartInput ?? config.basicInput },
         agent_selection: { agent_id: agentId, mode: "required" },
       },
     }),
@@ -507,7 +508,7 @@ async function exerciseEmployeeFlow(params: {
     "R7-correlation",
     await client.request({ method: "GET", path: `/api/v1/threads/${threadId}` }),
   );
-  const turnBefore = (threadBefore.turn ?? {}) as Record<string, unknown>;
+  const turnBefore = (threadBefore.latest_turn ?? {}) as Record<string, unknown>;
   const invocationId = requireString("R7-correlation", turnBefore, "active_invocation_id");
   const invocationBefore = expectOk(
     "R7-correlation",
@@ -549,7 +550,7 @@ async function exerciseEmployeeFlow(params: {
         "R7-wait-terminal",
         await client.request({ method: "GET", path: `/api/v1/threads/${threadId}` }),
       );
-      const turnNow = (threadNow.turn ?? {}) as Record<string, unknown>;
+      const turnNow = (threadNow.latest_turn ?? {}) as Record<string, unknown>;
       // same Invocation：active_invocation_id 不得漂移。
       if (turnNow.active_invocation_id !== invocationId) {
         throw new LiveJoinStepError(
