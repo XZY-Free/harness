@@ -152,6 +152,14 @@ class FakeSnowHarnessServer implements LiveHttpClient {
         ],
       });
     }
+    if (method === "GET" && path === "/admin/api/v1/deployment-routes/route-1") {
+      return ok({
+        id: "route-1",
+        active_route_revision_id: "rr-1",
+        agent_revision_id: "agent-rev-1",
+        runtime_revision_id: "rtr-1",
+      });
+    }
     if (method === "GET" && path.startsWith("/api/v1/catalog/options")) {
       if (!this.catalogReady) {
         this.catalogReady = true;

@@ -387,6 +387,29 @@ export async function runLiveExternalAgentJoin(
     throw new LiveJoinStepError("R5-route-activation", "响应缺少 route_revision_id");
   }
   const routeRevisionId = activation.route_revision_id;
+  const routeId =
+    typeof activation.route_id === "string" ? activation.route_id : null;
+  if (!routeId) {
+    throw new LiveJoinStepError("R5-route-activation", "响应缺少 route_id");
+  }
+  // 激活新鲜度门：正式 Admin read API 投影反映本次 route_revision_id 后才进入
+  // 员工链路（RouteEligibilityProjection 异步更新，投影滞后会让 Binding 落到
+  // 已被取代的 activation 上 → route_activation_superseded）。
+  await pollUntil(
+    "R5-route-projection",
+    { timeoutMs: config.catalogWaitMs },
+    async () => {
+      const route = expectOk(
+        "R5-route-projection",
+        await client.request({
+          method: "GET",
+          path: `/admin/api/v1/deployment-routes/${routeId}`,
+        }),
+      );
+      return route.active_route_revision_id === routeRevisionId;
+    },
+    sleep,
+  );
 
   // ─── R6 Catalog 轮询（正式 Employee API）──────────────
   await pollUntil(
@@ -551,8 +574,12 @@ async function exerciseEmployeeFlow(params: {
         await client.request({ method: "GET", path: `/api/v1/threads/${threadId}` }),
       );
       const turnNow = (threadNow.latest_turn ?? {}) as Record<string, unknown>;
-      // same Invocation：active_invocation_id 不得漂移。
-      if (turnNow.active_invocation_id !== invocationId) {
+      // same Invocation：active 指针非空时不得漂移（终态 Turn 可能清空 active 指针，
+      // null 视为正常收尾而非新建 continuation）。
+      if (
+        turnNow.active_invocation_id != null &&
+        turnNow.active_invocation_id !== invocationId
+      ) {
         throw new LiveJoinStepError(
           "R7-wait-terminal",
           "active_invocation_id 漂移（Resume 不得新建 continuation Invocation）",
