@@ -38,7 +38,11 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import type { AgentRevision } from "@/lib/persistence/schema/agents";
-import { threadEventTable, threadItemTable, turnTable } from "@/lib/persistence/schema/conversation";
+import {
+  threadEventTable,
+  threadItemTable,
+  turnTable,
+} from "@/lib/persistence/schema/conversation";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import {
@@ -624,9 +628,7 @@ describe("RuntimeEventIngress 核心入库", () => {
       tenantId: ctx.tenantId,
       invocationId,
       producerSequenceStart: 1,
-      events: [
-        makeEvent("a2a:split:1", 1, "response.completed", { source: "a2a", text: "答案" }),
-      ],
+      events: [makeEvent("a2a:split:1", 1, "response.completed", { source: "a2a", text: "答案" })],
     });
     const agentMessageItemId = respResult.mappedEvents[0]?.itemId;
     expect(agentMessageItemId).toBeTruthy();

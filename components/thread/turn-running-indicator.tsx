@@ -33,10 +33,7 @@ interface TurnRunningIndicatorProps {
 }
 
 /** 取该 Turn 最新 progress.snapshot 携带的公开 message（无则 null）。 */
-function latestProgressMessage(
-  turn: ClientTurn,
-  items: readonly ClientItem[],
-): string | null {
+function latestProgressMessage(turn: ClientTurn, items: readonly ClientItem[]): string | null {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i];
     if (!item || item.turn_id !== turn.id) continue;
@@ -80,9 +77,8 @@ export function TurnRunningIndicator({ turn, items }: TurnRunningIndicatorProps)
   const longRunning = seconds >= LONG_RUNNING_SECONDS;
 
   return (
-    <div
+    <output
       data-testid="turn-running-indicator"
-      role="status"
       className="flex items-center gap-2 py-2 text-muted-foreground text-sm"
     >
       <Loader2
@@ -91,10 +87,9 @@ export function TurnRunningIndicator({ turn, items }: TurnRunningIndicatorProps)
         strokeWidth={1.75}
       />
       <span>
-        {progressMessage ??
-          (longRunning ? "仍在处理中..." : baseLabel)}
+        {progressMessage ?? (longRunning ? "仍在处理中..." : baseLabel)}
         {seconds > 0 ? ` ${seconds} 秒` : ""}
       </span>
-    </div>
+    </output>
   );
 }
