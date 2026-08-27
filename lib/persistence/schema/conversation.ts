@@ -690,6 +690,22 @@ export const invocationCommandTable = mysqlTable(
     /** 失败时填入稳定错误码。 */
     errorCode: varchar("errorCode", { length: 128 }),
     errorMessage: text("errorMessage"),
+    /**
+     * 基础设施 dispatch retry（Durable Dispatch / Retry Authority）。
+     * 状态机保持 queued → dispatched → acknowledged/failed（不新增 retry_wait 状态）；
+     * transient retry 通过 nextDispatchAt + lease 字段表达。
+     */
+    dispatchAttemptCount: int("dispatchAttemptCount").notNull().default(0),
+    /** 下一次允许 Retry Worker 领取的时间（dispatched + 非空 = 正式 retry work）。 */
+    nextDispatchAt: datetime("nextDispatchAt", { mode: "date", fsp: 3 }),
+    /** 当前持有 dispatch lease 的调度者身份（API dispatcher / Retry Worker）。 */
+    dispatchLeaseOwner: varchar("dispatchLeaseOwner", { length: 128 }),
+    /** dispatch lease 过期时间；过期后 Retry Worker 可接管。 */
+    dispatchLeaseExpiresAt: datetime("dispatchLeaseExpiresAt", { mode: "date", fsp: 3 }),
+    /** 最近一次 dispatch HTTP 发起时间。 */
+    lastDispatchAttemptAt: datetime("lastDispatchAttemptAt", { mode: "date", fsp: 3 }),
+    /** 最近一次 transient 错误的安全错误码（不存 endpoint/stack/token）。 */
+    lastTransientErrorCode: varchar("lastTransientErrorCode", { length: 128 }),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -703,6 +719,13 @@ export const invocationCommandTable = mysqlTable(
   (t) => ({
     threadTurnIdx: index("InvocationCommand_thread_turn_idx").on(t.threadId, t.turnId),
     invocationIdx: index("InvocationCommand_invocation_idx").on(t.invocationId),
+    commandDispatchRetryIdx: index("InvocationCommand_dispatch_retry_idx").on(
+      t.commandState,
+      t.nextDispatchAt,
+    ),
+    commandDispatchLeaseIdx: index("InvocationCommand_dispatch_lease_idx").on(
+      t.dispatchLeaseExpiresAt,
+    ),
     threadIdempotencyUq: uniqueIndex("InvocationCommand_thread_idempotency_uq").on(
       t.threadId,
       t.idempotencyKey,

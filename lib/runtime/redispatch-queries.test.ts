@@ -51,6 +51,7 @@ import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { agentContractSnapshotTable } from "@/lib/persistence/schema/agents";
 import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import { threadEventTable, threadItemTable } from "@/lib/persistence/schema/conversation";
 import type { ExecutionBinding, RuntimeSessionBinding } from "@/lib/persistence/schema/executions";
@@ -83,6 +84,9 @@ import {
   type RedispatchResult,
   redispatchInvocation,
 } from "@/lib/runtime/redispatch-queries";
+import { dispatchQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
+import { claimDueInvocationAttempts } from "@/lib/runtime/retry/dispatch-retry-queries";
+import { createRuntimeDispatchRetryWorker } from "@/lib/runtime/retry/runtime-dispatch-retry-worker";
 import {
   type RuntimeHttpClient,
   type StartInvocationRequest,
@@ -374,9 +378,21 @@ async function seedInvocation(params: {
   };
   const { invocation } = await createInvocation(invocationParams);
 
-  // 创建 ExecutionBinding
+  // 创建 ExecutionBinding（Agent Evidence 指向 exact Snapshot：retry 也要重建 Context Enrichment）
+  const [contractSnapshot] = await db
+    .select()
+    .from(agentContractSnapshotTable)
+    .where(eq(agentContractSnapshotTable.id, params.agentRevision.agentContractSnapshotId))
+    .limit(1);
   const binding = await createExecutionBinding({
     ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
+    controlPlaneEvidence: {
+      ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS.controlPlaneEvidence,
+      agentRevisionId: params.agentRevision.id,
+      agentContractSnapshotId: contractSnapshot?.id ?? null,
+      agentContractDigest: contractSnapshot?.contractDigest ?? null,
+      agentContextDigest: contractSnapshot?.contextDigest ?? null,
+    },
     invocationId: invocation.id,
     tenantId: params.tenantId,
     agentRevisionId: params.agentRevision.id,
@@ -884,7 +900,7 @@ describe("S09-C06 redispatchInvocation 错误处理", () => {
     expect(oldBinding?.bindingState).toBe("active");
   });
 
-  it("其他 HTTP 错误（400）→ 抛出原错误", async () => {
+  it("其他 HTTP 错误（400）→ terminal 拒绝：Attempt failed + Invocation lost（不再抛出）", async () => {
     const seeded = await seedInvocation({
       tenantId,
       ownerId,
@@ -904,9 +920,20 @@ describe("S09-C06 redispatchInvocation 错误处理", () => {
       },
     });
 
-    await expect(redispatchInvocation(buildRedispatchParams(seeded, client))).rejects.toThrow(
-      RuntimeHttpClientError,
-    );
+    // 01 专项：terminal reject 不再向上抛（调用方拿到判别结果），
+    // Attempt → failed + Invocation → lost（唯一 Recovery Authority 收口）。
+    const result = await redispatchInvocation(buildRedispatchParams(seeded, client));
+    expect(result.redispatched).toBe(false);
+    expect(result.failureErrorCode).toBe("REQUEST_SCHEMA_INVALID");
+    expect(result.attempt?.attemptState).toBe("failed");
+    expect(result.attempt?.errorCode).toBe("REQUEST_SCHEMA_INVALID");
+
+    const [invocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, seeded.invocationId))
+      .limit(1);
+    expect(invocation?.executionState).toBe("lost");
   });
 });
 
@@ -979,3 +1006,443 @@ describe("S09-C06 redispatchInvocation 状态校验", () => {
     await expect(redispatchInvocation(params)).rejects.toThrow(InvocationNotFoundError);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 01 专项：Durable Dispatch Retry（Attempt lane）
+// ═══════════════════════════════════════════════════════════
+
+describe("01 专项 Durable Dispatch Retry（Attempt lane）", () => {
+  let tenantId: string;
+  let ownerId: string;
+  let agentRevision: AgentRevision;
+  let runtimeRevisionId: string;
+  let threadId: string;
+  let routeId: string;
+
+  beforeEach(async () => {
+    const tenantCtx = await seedTenantAndOwner();
+    tenantId = tenantCtx.tenantId;
+    ownerId = tenantCtx.ownerId;
+    const seeded = await seedAgentAndRuntime(tenantId, ownerId);
+    agentRevision = seeded.agentRevision;
+    runtimeRevisionId = seeded.runtimeRevision.id;
+    routeId = seeded.route.id;
+    const thread = await createThreadForTest(tenantId, ownerId, seeded.agent.id);
+    threadId = thread.id;
+  });
+
+  /** 直接对指定 Attempt 执行 dispatch（Worker lane 正式入口）。 */
+  function buildAttemptParams(
+    seeded: SeededInvocation,
+    runtimeClient: RuntimeHttpClient,
+    attemptId: string,
+  ) {
+    return {
+      tenantId: seeded.tenantId,
+      attemptId,
+      runtimeClient,
+      runtimeEndpointResolver: async (binding: ExecutionBinding) => ({
+        runtimeEndpoint: "https://redispatch-runtime.internal",
+        auth: { mode: "workload_token", token: "test-token" } as const,
+        gatewayEndpoints: {
+          events: "https://gateway.internal/events",
+          cancel: "https://gateway.internal/cancel",
+          resume: "https://gateway.internal/resume",
+          steer: "https://gateway.internal/steer",
+          tools: "https://gateway.internal/tools",
+          tool_calls: "https://gateway.internal/tool-calls",
+          user_action_requests: "https://gateway.internal/user-action-requests",
+        },
+        governanceConfig: {
+          revision_id: "test-governance-revision",
+          config_digest: `sha256:${"b".repeat(64)}`,
+          config: {},
+        },
+        gatewayAccess: {
+          access_token: "test-gateway-token",
+          expires_at: new Date().toISOString(),
+        },
+      }),
+    };
+  }
+
+  it("transient → 同一 Attempt 排定 durable retry（count+1 + nextDispatchAt），不创建新 Attempt", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-1",
+      initialExecutionState: "waiting_user",
+    });
+    const attemptId = (await createAttempt({ invocationId: seeded.invocationId })).id;
+
+    let fail = true;
+    const client = createMockRuntimeClient({
+      startInvocation: async () => {
+        if (fail) throw new RuntimeHttpClientError("network", "Runtime 网络不可达");
+        return buildStartInvocationResponse(seeded.invocationId, 1);
+      },
+    });
+
+    const result = await dispatchQueuedInvocationAttempt(
+      buildAttemptParams(seeded, client, attemptId),
+    );
+    expect(result.status).toBe("transient_scheduled");
+    if (result.status !== "transient_scheduled") return;
+    expect(result.dispatchAttemptCount).toBe(1);
+    expect(result.nextDispatchAt.getTime()).toBeGreaterThan(Date.now());
+    expect(result.attempt.attemptState).toBe("queued");
+
+    // 只有一个 Attempt（未创建第二个）
+    const attempts = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.invocationId, seeded.invocationId));
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.nextDispatchAt).not.toBeNull();
+    expect(attempts[0]?.dispatchAttemptCount).toBe(1);
+    expect(attempts[0]?.lastTransientErrorCode).toBe("runtime_network_unavailable");
+    expect(attempts[0]?.dispatchLeaseOwner).toBeNull();
+
+    // 第二次 transient → 仍同一 Attempt，count 递增
+    const result2 = await dispatchQueuedInvocationAttempt(
+      buildAttemptParams(seeded, client, attemptId),
+    );
+    expect(result2.status).toBe("transient_scheduled");
+    const attempts2 = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.invocationId, seeded.invocationId));
+    expect(attempts2).toHaveLength(1);
+    expect(attempts2[0]?.dispatchAttemptCount).toBe(2);
+
+    // 成功 → Attempt running + Invocation running
+    fail = false;
+    const result3 = await dispatchQueuedInvocationAttempt(
+      buildAttemptParams(seeded, client, attemptId),
+    );
+    expect(result3.status).toBe("started");
+    const [finalAttempt] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, attemptId))
+      .limit(1);
+    expect(finalAttempt?.attemptState).toBe("running");
+    const refreshed = await getInvocationById(tenantId, seeded.invocationId);
+    expect(refreshed?.executionState).toBe("running");
+  });
+
+  it("稳定 Runtime Idempotency-Key：所有 retry 都使用 invocation-attempt:<attemptId>", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-1",
+      initialExecutionState: "waiting_user",
+    });
+    const attemptId = (await createAttempt({ invocationId: seeded.invocationId })).id;
+
+    let calls = 0;
+    const client = createMockRuntimeClient({
+      startInvocation: async () => {
+        calls += 1;
+        if (calls < 3)
+          throw new RuntimeHttpClientError("http", "Runtime 暂不可用", 503, "RUNTIME_UNAVAILABLE");
+        return buildStartInvocationResponse(seeded.invocationId, 1);
+      },
+    });
+
+    await dispatchQueuedInvocationAttempt(buildAttemptParams(seeded, client, attemptId));
+    await dispatchQueuedInvocationAttempt(buildAttemptParams(seeded, client, attemptId));
+    await dispatchQueuedInvocationAttempt(buildAttemptParams(seeded, client, attemptId));
+
+    expect(client.calls.startInvocation).toHaveLength(3);
+    const keys = client.calls.startInvocation.map((c) => c.idempotencyKey);
+    expect(new Set(keys)).toEqual(new Set([`invocation-attempt:${attemptId}`]));
+  });
+
+  it("5 次耗尽 → Attempt failed + Invocation lost（Recovery Authority 收口）", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-1",
+      initialExecutionState: "waiting_user",
+      withSessionBinding: true,
+    });
+    const attemptId = (await createAttempt({ invocationId: seeded.invocationId })).id;
+
+    const client = createMockRuntimeClient({
+      startInvocation: async () => {
+        throw new RuntimeHttpClientError("network", "Runtime 网络不可达");
+      },
+    });
+
+    for (let i = 0; i < 5; i += 1) {
+      const result = await dispatchQueuedInvocationAttempt(
+        buildAttemptParams(seeded, client, attemptId),
+      );
+      if (i < 4) {
+        expect(result.status).toBe("transient_scheduled");
+      } else {
+        expect(result.status).toBe("transient_exhausted");
+      }
+    }
+
+    const [finalAttempt] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, attemptId))
+      .limit(1);
+    expect(finalAttempt?.attemptState).toBe("failed");
+    expect(finalAttempt?.errorCode).toBe("dispatch_retry_exhausted");
+    expect(finalAttempt?.nextDispatchAt).toBeNull();
+
+    const refreshed = await getInvocationById(tenantId, seeded.invocationId);
+    expect(refreshed?.executionState).toBe("lost");
+    expect(refreshed?.errorCode).toBe("dispatch_retry_exhausted");
+  });
+
+  it("retry Start 仍带正确 public Context（invocation_context 来自 Binding 冻结合同）", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-1",
+      initialExecutionState: "waiting_user",
+    });
+    const attemptId = (
+      await createAttempt({
+        invocationId: seeded.invocationId,
+        retryReasonCode: "requires_redispatch",
+      })
+    ).id;
+
+    const client = createMockRuntimeClient({
+      startInvocation: async () => buildStartInvocationResponse(seeded.invocationId, 1),
+    });
+
+    await dispatchQueuedInvocationAttempt(buildAttemptParams(seeded, client, attemptId));
+
+    const call = client.calls.startInvocation[0];
+    if (!call) throw new Error("startInvocation 未被调用");
+    const context = call.requestBody.invocation_context as
+      | Array<{ context_kind: string; value: unknown }>
+      | undefined;
+    expect(context).toBeDefined();
+    expect(context?.length).toBeGreaterThan(0);
+    const kinds = context?.map((entry) => entry.context_kind);
+    // 合同声明的 preferred context（execution_subject 等）被提供；tenantId 等平台内部字段绝不外发
+    expect(kinds).not.toContain("tenantId");
+    expect(kinds).not.toContain("threadId");
+    expect(kinds).not.toContain("invocationId");
+  });
+
+  it("claimDueInvocationAttempts：due 可领取（写 lease），非 due / 终态不领取", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-1",
+      initialExecutionState: "waiting_user",
+    });
+    const dueAttempt = await createAttempt({ invocationId: seeded.invocationId });
+    const futureAttempt = await createAwaitingAttempt(seeded.invocationId);
+
+    const now = new Date();
+    await db
+      .update(invocationAttemptTable)
+      .set({ nextDispatchAt: new Date(now.getTime() - 1_000) })
+      .where(eq(invocationAttemptTable.id, dueAttempt.id));
+
+    const claimed = await claimDueInvocationAttempts({
+      now,
+      leaseOwner: "worker-a",
+      leaseDurationMs: 30_000,
+      limit: 10,
+    });
+    const claimedIds = claimed.map((a) => a.id);
+    expect(claimedIds).toContain(dueAttempt.id);
+    expect(claimedIds).not.toContain(futureAttempt.id);
+    expect(claimed.find((a) => a.id === dueAttempt.id)?.dispatchLeaseOwner).toBe("worker-a");
+    expect(claimed.find((a) => a.id === dueAttempt.id)?.dispatchLeaseExpiresAt).toBeTruthy();
+  });
+});
+
+/** 创建一个 nextDispatchAt 在未来的 queued Attempt（不会被 claim）。 */
+async function createAwaitingAttempt(invocationId: string) {
+  const attempt = await createAttempt({ invocationId });
+  await db
+    .update(invocationAttemptTable)
+    .set({ nextDispatchAt: new Date(Date.now() + 60_000) })
+    .where(eq(invocationAttemptTable.id, attempt.id));
+  return attempt;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 01 专项：Runtime Dispatch Retry Worker（组合 lane）
+// ═══════════════════════════════════════════════════════════
+
+describe("01 专项 Runtime Dispatch Retry Worker", () => {
+  let tenantId: string;
+  let ownerId: string;
+  let agentRevision: AgentRevision;
+  let runtimeRevisionId: string;
+  let threadId: string;
+  let routeId: string;
+
+  beforeEach(async () => {
+    const tenantCtx = await seedTenantAndOwner();
+    tenantId = tenantCtx.tenantId;
+    ownerId = tenantCtx.ownerId;
+    const seeded = await seedAgentAndRuntime(tenantId, ownerId);
+    agentRevision = seeded.agentRevision;
+    runtimeRevisionId = seeded.runtimeRevision.id;
+    routeId = seeded.route.id;
+    const thread = await createThreadForTest(tenantId, ownerId, seeded.agent.id);
+    threadId = thread.id;
+  });
+
+  it("Worker tick：claim due Attempt → 同一 Attempt dispatch 成功（Invocation running）", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-1",
+      initialExecutionState: "waiting_user",
+    });
+    const attempt = await createAttempt({
+      invocationId: seeded.invocationId,
+      retryReasonCode: "initial_dispatch_unavailable",
+    });
+    // 排定 durable retry（已到期）
+    await db
+      .update(invocationAttemptTable)
+      .set({ nextDispatchAt: new Date(Date.now() - 1) })
+      .where(eq(invocationAttemptTable.id, attempt.id));
+
+    let attemptsSeen = 0;
+    const worker = createRuntimeDispatchRetryWorker({
+      workerId: "worker-test-1",
+      dispatchAttempt: async (claimed) => {
+        attemptsSeen += 1;
+        expect(claimed.id).toBe(attempt.id);
+        const client = createMockRuntimeClient({
+          startInvocation: async () => buildStartInvocationResponse(seeded.invocationId, 1),
+        });
+        const params = buildWorkerAttemptParams(seeded, client, claimed.id);
+        const result = await dispatchQueuedInvocationAttempt(params);
+        expect(result.status).toBe("started");
+      },
+      dispatchCommand: async () => {},
+    });
+
+    const tickResult = await worker.tick();
+    expect(tickResult.attempts).toBe(1);
+    expect(attemptsSeen).toBe(1);
+
+    const [finalAttempt] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, attempt.id))
+      .limit(1);
+    expect(finalAttempt?.attemptState).toBe("running");
+    const refreshed = await getInvocationById(tenantId, seeded.invocationId);
+    expect(refreshed?.executionState).toBe("running");
+
+    // 再次 tick：无 due work
+    const tickResult2 = await worker.tick();
+    expect(tickResult2.attempts).toBe(0);
+    expect(attemptsSeen).toBe(1);
+  });
+
+  it("Worker 两实例并发：同一 Attempt 只被一个 lane 处理（SKIP LOCKED）", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-1",
+      initialExecutionState: "waiting_user",
+    });
+    const attempt = await createAttempt({
+      invocationId: seeded.invocationId,
+      retryReasonCode: "initial_dispatch_unavailable",
+    });
+    await db
+      .update(invocationAttemptTable)
+      .set({ nextDispatchAt: new Date(Date.now() - 1) })
+      .where(eq(invocationAttemptTable.id, attempt.id));
+
+    let dispatchCount = 0;
+    const makeWorker = (id: string) =>
+      createRuntimeDispatchRetryWorker({
+        workerId: id,
+        dispatchAttempt: async () => {
+          dispatchCount += 1;
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        },
+        dispatchCommand: async () => {},
+      });
+
+    // 并发 tick 两个 worker
+    await Promise.all([makeWorker("worker-a").tick(), makeWorker("worker-b").tick()]);
+    // SKIP LOCKED：同一个 Attempt 只被处理一次
+    expect(dispatchCount).toBe(1);
+  });
+});
+
+/** Worker 测试用 Attempt dispatch 参数（成功 mock）。 */
+function buildWorkerAttemptParams(
+  seeded: SeededInvocation,
+  runtimeClient: RuntimeHttpClient,
+  attemptId: string,
+) {
+  return {
+    tenantId: seeded.tenantId,
+    attemptId,
+    runtimeClient,
+    runtimeEndpointResolver: async () => ({
+      runtimeEndpoint: "https://redispatch-runtime.internal",
+      auth: { mode: "workload_token", token: "test-token" } as const,
+      gatewayEndpoints: {
+        events: "https://gateway.internal/events",
+        cancel: "https://gateway.internal/cancel",
+        resume: "https://gateway.internal/resume",
+        steer: "https://gateway.internal/steer",
+        tools: "https://gateway.internal/tools",
+        tool_calls: "https://gateway.internal/tool-calls",
+        user_action_requests: "https://gateway.internal/user-action-requests",
+      },
+      governanceConfig: {
+        revision_id: "test-governance-revision",
+        config_digest: `sha256:${"b".repeat(64)}`,
+        config: {},
+      },
+      gatewayAccess: {
+        access_token: "test-gateway-token",
+        expires_at: new Date().toISOString(),
+      },
+    }),
+  };
+}

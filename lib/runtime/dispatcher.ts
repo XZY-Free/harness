@@ -22,9 +22,9 @@
  * 8. 事务内：锁 Thread、分配 event sequence、CAS 更新 Turn accepted → queued、写 turn.queued Event。
  * 9. 调用 runtimeClient.startInvocation 持久化 runtime_session_ref + runtime_execution_ref。
  * - Runtime accepted → Invocation executionState queued → running + 写 invocation.started Event。
- * - Runtime 网络不可达 → Turn 保持 queued，不报错（后续重试）。
+ * - Runtime 网络不可达 → Turn 保持 queued；同一 Attempt 排定 durable retry（nextDispatchAt，由 Runtime Dispatch Retry Worker 领取）。
  * - Runtime 409 IDEMPOTENCY_CONFLICT → 复用现有 SessionBinding。
- * - Runtime 503 RUNTIME_UNAVAILABLE → Turn 保持 queued，不报错。
+ * - Runtime 503 RUNTIME_UNAVAILABLE → 同上（durable retry，耗尽后 Recovery Authority 收口）。
  *
  * 关键约束：
  * - 无 DeploymentRoute → Turn 保持 accepted（不报错，等待路由配置后重试）。
@@ -37,9 +37,6 @@
  */
 import { randomUUID } from "node:crypto";
 import { aiConfig } from "@/lib/config";
-import { issueContextHandle } from "@/lib/context/context-handle";
-import { buildBoundAgentInvocationContext } from "@/lib/context/enrichment/build-bound-agent-invocation-context";
-import { getItemById } from "@/lib/conversations/thread-item-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
@@ -73,6 +70,10 @@ import {
   createConfiguredRouteResolver,
 } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import {
+  buildRuntimeStartRequestForInvocation,
+  invocationAttemptIdempotencyKey,
+} from "@/lib/runtime/application/build-runtime-start-request";
 import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import {
   DispatchTurnStateError,
@@ -86,21 +87,20 @@ import {
   getInvocationById,
   updateInvocationState,
 } from "@/lib/runtime/invocation-queries";
-import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { markInvocationLost } from "@/lib/runtime/recovery-queries";
 import {
   type ExecutionPlan,
   extractModelInfo,
   resolveExecutionPlan,
 } from "@/lib/runtime/resolve-execution-plan";
+import { recordAttemptDispatchTransientFailure } from "@/lib/runtime/retry/dispatch-retry-queries";
 import type {
   GatewayAccess,
   GatewayEndpoints,
   GovernanceConfigRef,
   RuntimeHttpClient,
-  StartInvocationRequestBody,
   StartInvocationResponse,
 } from "@/lib/runtime/runtime-client";
-import { RUNTIME_PROTOCOL_VERSION } from "@/lib/runtime/runtime-client";
 import {
   createSessionBinding,
   getSessionBindingByExternalRef,
@@ -200,7 +200,7 @@ export interface RuntimeEndpointResolution {
  * Runtime 启动行为：
  * - 传入 runtimeClient 时调用 runtimeClient.startInvocation 持久化 runtime_session_ref/runtime_execution_ref。
  * - Runtime accepted → Invocation queued → running + 写 invocation.started Event。
- * - Runtime 网络不可达 / 503 → Turn 保持 queued，不报错（runtimeDispatch.skipped=true）。
+ * - Runtime 网络不可达 / 503 → Turn 保持 queued（runtimeDispatch.skipped=true；Attempt 已排定 durable retry）。
  * - Runtime 409 IDEMPOTENCY_CONFLICT → 复用现有 SessionBinding。
  * - 不传 runtimeClient → 只创建调度状态，不调用 Runtime。
  *
@@ -367,9 +367,10 @@ export async function dispatchInvocationForTurn(params: {
       agentRevision: plan.agentRevision,
       runtimeRevisionId: routeResolution.runtimeRevisionId,
       turn,
+      attempt,
       runtimeClient: params.runtimeClient,
       runtimeEndpointResolver: params.runtimeEndpointResolver,
-      idempotencyKey: params.runtimeIdempotencyKey ?? `invoke-${invocation.id}`,
+      idempotencyKey: params.runtimeIdempotencyKey ?? invocationAttemptIdempotencyKey(attempt.id),
       actorType,
       actorId: params.actorId ?? null,
       correlationId: params.correlationId ?? null,
@@ -512,8 +513,8 @@ async function transitionTurnToQueued(params: {
  * 3. 构造 StartInvocationRequestBody。
  * 4. 调用 runtimeClient.startInvocation。
  * 5. 错误处理：
- * - kind=network → 跳过（Turn 保持 queued，不报错）
- * - kind=http + 503 → 跳过（Turn 保持 queued，不报错）
+ * - kind=network → 跳过（Turn 保持 queued；Attempt 排定 durable retry）
+ * - kind=http + 503 → 跳过（Turn 保持 queued；Attempt 排定 durable retry）
  * - kind=http + 409 IDEMPOTENCY_CONFLICT → 复用现有 SessionBinding
  * 6. 成功：持久化 runtime_session_ref + 事务内更新 Invocation + 写 invocation.started Event。
  * 7. 返回 RuntimeDispatchResult。
@@ -527,6 +528,8 @@ async function dispatchToRuntime(params: {
   agentRevision: AgentRevision | null;
   runtimeRevisionId: string;
   turn: Turn;
+  /** 本次调度对应的 Attempt（attemptNo=1；transient 失败时在其上排定 durable retry）。 */
+  attempt: InvocationAttempt;
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
   idempotencyKey: string;
@@ -540,107 +543,27 @@ async function dispatchToRuntime(params: {
   const { runtimeEndpoint, auth, gatewayEndpoints, governanceConfig, gatewayAccess } =
     await params.runtimeEndpointResolver(params.binding);
 
-  // 2. 读取 RuntimeRevision 获取 capabilities（用于 execution_limits）
-  const runtimeRevision = await getRuntimeRevisionById(params.runtimeRevisionId);
-  if (!runtimeRevision) {
-    throw new Error(`dispatchToRuntime: RuntimeRevision 不存在（id=${params.runtimeRevisionId}）`);
-  }
-  const caps = runtimeRevision.runtimeCapabilitiesJson as {
-    limits?: { max_invocation_seconds?: number; max_event_bytes?: number };
-  } | null;
-  const maxInvocationSeconds = caps?.limits?.max_invocation_seconds ?? 600;
-  const maxEventBytes = caps?.limits?.max_event_bytes ?? 1_048_576;
-
-  // 3. 构造 StartInvocationRequestBody
-  const triggerItem = params.invocation.triggerItemId
-    ? await getItemById(params.tenantId, params.invocation.triggerItemId)
-    : null;
-  if (!triggerItem) {
-    throw new Error(
-      `dispatchToRuntime: 当前输入 Item 不存在（invocationId=${params.invocation.id}）`,
-    );
-  }
-  const contextHandle = await issueContextHandle({
+  // 2+3. 构造 StartInvocationRequestBody（唯一正式 builder；初始调度要求 trigger Item 存在）
+  const { requestBody } = await buildRuntimeStartRequestForInvocation({
     tenantId: params.tenantId,
-    invocationId: params.invocation.id,
-  });
-  const requestBody: StartInvocationRequestBody = {
-    protocol_version: RUNTIME_PROTOCOL_VERSION,
-    invocation_id: params.invocation.id,
-    turn_context: {
-      thread_id: params.threadId,
-      turn_id: params.turn.id,
-      trigger_item_id: params.turn.triggerItemId ?? null,
-    },
-    job_context: null,
-    agent: params.agentRevision
-      ? {
-          agent_revision_id: params.agentRevision.id,
-          model_policy: (params.agentRevision.modelPolicyJson ?? {}) as Record<string, unknown>,
-          permission_requirements: (params.agentRevision.permissionRequirementsJson ??
-            {}) as Record<string, unknown>,
-          interface_requirements: (params.agentRevision.agentInterfaceRequirementsJson ??
-            {}) as Record<string, unknown>,
-        }
-      : null,
-    input_items: [
-      {
-        type: "platform_rule",
-        content: "仅使用当前 Invocation 授权的 Context Gateway 与 Workspace 资源。",
-      },
-      ...(params.agentRevision
-        ? [
-            {
-              type: "agent_instruction_ref",
-              agent_revision_id: params.agentRevision.id,
-            },
-          ]
-        : []),
-      {
-        type: "user_message",
-        item_id: triggerItem.id,
-        content: triggerItem.contentJson,
-      },
-      {
-        type: "resource_index",
-        sources: ["recent_items", "skill", "workspace_map", "memory", "knowledge"],
-      },
-    ],
-    context_handle: contextHandle,
-    gateway_endpoints: gatewayEndpoints,
-    governance_config: governanceConfig,
-    gateway_access: gatewayAccess,
-    workspace: {
-      workspace_binding_id: params.binding.workspaceBindingId,
-      workspace_type: params.binding.workspaceBindingId ? "managed" : "none",
-    },
-    execution_limits: {
-      max_invocation_seconds: maxInvocationSeconds,
-      max_event_bytes: maxEventBytes,
-    },
-    trace_context: {
-      trace_id: params.correlationId ?? params.invocation.id,
-      span_id: params.invocation.id,
-    },
-    attempt: { attempt_no: 1 },
-  };
-
-  // 04 §14：Context Enrichment 必须在 Binding 确定后——从 Binding 冻结的 exact
-  // Snapshot 构建 Allowed Bundle（Base Harness snapshot=null → null，不执行 Agent 级合同）。
-  const contextBundle = await buildBoundAgentInvocationContext({
-    tenantId: params.tenantId,
-    binding: {
-      agentContractSnapshotId: params.binding.agentContractSnapshotId,
-      agentContextDigest: params.binding.agentContextDigest,
-    },
+    invocation: params.invocation,
+    binding: params.binding,
+    agentRevision: params.agentRevision,
+    runtimeRevisionId: params.runtimeRevisionId,
+    gatewayEndpoints,
+    governanceConfig,
+    gatewayAccess,
     executionSubject: params.executionSubject ?? null,
+    correlationId: params.correlationId ?? null,
+    attempt: {
+      attemptNo: params.attempt.attemptNo,
+      attemptId: params.attempt.id,
+      retryReason: params.attempt.retryReasonCode,
+      checkpointRef: params.attempt.checkpointRef,
+    },
+    requireTriggerItem: true,
     now: new Date(),
   });
-  if (contextBundle) {
-    requestBody.invocation_context = contextBundle.entries
-      .filter((entry) => entry.supplied)
-      .map((entry) => ({ context_kind: entry.contextKind, value: entry.value }));
-  }
 
   // 4. 调用 runtimeClient.startInvocation（带错误处理）
   let response: StartInvocationResponse;
@@ -653,20 +576,33 @@ async function dispatchToRuntime(params: {
     });
   } catch (err) {
     if (err instanceof RuntimeHttpClientError) {
-      // 网络不可达 → 跳过（Turn 保持 queued，不报错）
-      if (err.kind === "network") {
+      // transient（网络不可达 / 503）→ 在同一 Attempt 上排定 durable retry work
+      // （dispatchAttemptCount+1 + nextDispatchAt + 清 lease）；耗尽时由唯一
+      // Recovery Authority（markInvocationLost）收口 Invocation/Turn。不再只写“等待重试”。
+      if (err.kind === "network" || (err.kind === "http" && err.httpStatus === 503)) {
+        const skipReason: "runtime_network_unavailable" | "runtime_unavailable" =
+          err.kind === "network" ? "runtime_network_unavailable" : "runtime_unavailable";
+        const outcome = await recordAttemptDispatchTransientFailure({
+          attemptId: params.attempt.id,
+          errorCode: skipReason,
+          now: new Date(),
+          retryReasonCode: params.attempt.retryReasonCode ?? "initial_dispatch_unavailable",
+        });
+        if (outcome.outcome === "exhausted") {
+          await markInvocationLost({
+            tenantId: params.tenantId,
+            invocationId: params.invocation.id,
+            reasonCode: "dispatch_retry_exhausted",
+            errorSummary: `Initial dispatch retry exhausted（lastTransient=${skipReason}）`,
+            actorType: params.actorType,
+            actorId: params.actorId ?? null,
+            correlationId: params.correlationId ?? null,
+          });
+        }
         return {
           sessionBindingCreated: false,
           skipped: true,
-          skipReason: "runtime_network_unavailable",
-        };
-      }
-      // 503 RUNTIME_UNAVAILABLE → 跳过（Turn 保持 queued，不报错）
-      if (err.kind === "http" && err.httpStatus === 503) {
-        return {
-          sessionBindingCreated: false,
-          skipped: true,
-          skipReason: "runtime_unavailable",
+          skipReason,
         };
       }
       // 409 IDEMPOTENCY_CONFLICT → 复用现有 SessionBinding

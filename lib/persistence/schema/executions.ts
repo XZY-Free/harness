@@ -306,6 +306,22 @@ export const invocationAttemptTable = mysqlTable(
     lastHeartbeatAt: datetime("lastHeartbeatAt", { mode: "date", fsp: 3 }),
     errorCode: varchar("errorCode", { length: 128 }),
     errorSummary: text("errorSummary"),
+    /**
+     * 基础设施 dispatch retry（Durable Dispatch / Retry Authority）。
+     * dispatchAttemptCount = 该 Attempt 自身因 transient（网络/503）对 Runtime
+     * startInvocation 累计发起的 HTTP 次数；区别于 attemptNo（第几次基础设施重调度）。
+     */
+    dispatchAttemptCount: int("dispatchAttemptCount").notNull().default(0),
+    /** 下一次允许 Retry Worker 领取的时间（attemptState=queued + 非空 = 正式 retry work）。 */
+    nextDispatchAt: datetime("nextDispatchAt", { mode: "date", fsp: 3 }),
+    /** 当前持有 dispatch lease 的 Worker 身份（仅 lease 语义，非安全 Principal）。 */
+    dispatchLeaseOwner: varchar("dispatchLeaseOwner", { length: 128 }),
+    /** dispatch lease 过期时间；过期后其他 Worker 可接管。 */
+    dispatchLeaseExpiresAt: datetime("dispatchLeaseExpiresAt", { mode: "date", fsp: 3 }),
+    /** 最近一次 dispatch HTTP 发起时间。 */
+    lastDispatchAttemptAt: datetime("lastDispatchAttemptAt", { mode: "date", fsp: 3 }),
+    /** 最近一次 transient 错误的安全错误码（不存 endpoint/stack/token）。 */
+    lastTransientErrorCode: varchar("lastTransientErrorCode", { length: 128 }),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -322,6 +338,11 @@ export const invocationAttemptTable = mysqlTable(
       t.invocationId,
       t.attemptState,
     ),
+    dispatchRetryIdx: index("InvocationAttempt_dispatch_retry_idx").on(
+      t.attemptState,
+      t.nextDispatchAt,
+    ),
+    dispatchLeaseIdx: index("InvocationAttempt_dispatch_lease_idx").on(t.dispatchLeaseExpiresAt),
   }),
 );
 

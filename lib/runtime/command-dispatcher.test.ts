@@ -93,6 +93,7 @@ import {
   dispatchCancelCommand,
   dispatchResumeCommand,
   dispatchSteerCommand,
+  retryDispatchedInvocationCommand,
 } from "@/lib/runtime/command-dispatcher";
 import { DEFAULT_ROUTE_SCOPE_KEY, dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import {
@@ -106,6 +107,7 @@ import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
+import { claimDueInvocationCommands } from "@/lib/runtime/retry/dispatch-retry-queries";
 import {
   type CancelInvocationResponse,
   type ResumeInvocationResponse,
@@ -2707,5 +2709,284 @@ describe("生产网关 A2A Resume（post-authority Invocation=running）", () =>
     } finally {
       await provider.close();
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 01 专项：Durable Dispatch Retry（Command lane）
+// ═══════════════════════════════════════════════════════════
+
+describe("01 专项 Durable Dispatch Retry（Command lane）", () => {
+  let ctx: FullCommandContext;
+
+  beforeEach(async () => {
+    ctx = await seedFullCommandContext();
+  });
+
+  it("Resume network → dispatched + nextDispatchAt（durable retry work），不误 failed", async () => {
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await transitionToWaitingUser(ctx, running);
+
+    const resumeCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { action: "confirm" },
+      idempotencyKey: "resume-durable-1",
+    });
+
+    const mockClient = createMockRuntimeClient({
+      resumeInvocation: async () => {
+        throw new RuntimeHttpClientError("network", "网络不可达");
+      },
+    });
+
+    const result = await dispatchResumeCommand({
+      tenantId: ctx.tenantId,
+      commandId: resumeCommandId,
+      runtimeClient: mockClient,
+      runtimeEndpointResolver: async () =>
+        buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+    });
+
+    expect(result.commandState).toBe("dispatched");
+    expect(result.skipped).toBe(true);
+    expect(result.pendingRetry).toBeDefined();
+    expect(result.pendingRetry?.dispatchAttemptCount).toBe(1);
+    expect(result.pendingRetry?.nextDispatchAt.getTime()).toBeGreaterThan(Date.now());
+
+    const [command] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, resumeCommandId))
+      .limit(1);
+    expect(command?.commandState).toBe("dispatched");
+    expect(command?.nextDispatchAt).not.toBeNull();
+    expect(command?.dispatchAttemptCount).toBe(1);
+    expect(command?.lastTransientErrorCode).toBe("runtime_network_unavailable");
+    expect(command?.dispatchLeaseOwner).toBeNull();
+  });
+
+  it("Worker retry 同一 Command（同 idempotency key）成功 → acknowledged", async () => {
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await transitionToWaitingUser(ctx, running);
+
+    const resumeCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { action: "confirm" },
+      idempotencyKey: "resume-durable-2",
+    });
+
+    const failClient = createMockRuntimeClient({
+      resumeInvocation: async () => {
+        throw new RuntimeHttpClientError("network", "网络不可达");
+      },
+    });
+    await dispatchResumeCommand({
+      tenantId: ctx.tenantId,
+      commandId: resumeCommandId,
+      runtimeClient: failClient,
+      runtimeEndpointResolver: async () =>
+        buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+    });
+
+    // Worker 领取后 retry（同一 command idempotency key）
+    const okClient = createMockRuntimeClient({
+      resumeInvocation: async () => ({
+        invocation_id: running.invocationId,
+        resumed: true,
+        attempt_no: 1,
+      }),
+    });
+    const result = await retryDispatchedInvocationCommand({
+      tenantId: ctx.tenantId,
+      commandId: resumeCommandId,
+      runtimeClient: okClient,
+      runtimeEndpointResolver: async () =>
+        buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+    });
+
+    expect(result.commandState).toBe("acknowledged");
+    const [command] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, resumeCommandId))
+      .limit(1);
+    expect(command?.commandState).toBe("acknowledged");
+    expect(command?.nextDispatchAt).toBeNull();
+    expect(command?.dispatchLeaseOwner).toBeNull();
+    // 两次调用使用同一 idempotency key（稳定）
+    const keys = [...failClient.calls.resumeInvocation, ...okClient.calls.resumeInvocation].map(
+      (c) => c.idempotencyKey,
+    );
+    expect(new Set(keys).size).toBe(1);
+    expect(keys[0]).toBe("resume-durable-2");
+  });
+
+  it("5 次耗尽 → command failed(retry_exhausted) + Resume Invocation lost（Turn failed）", async () => {
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await transitionToWaitingUser(ctx, running);
+
+    const resumeCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { action: "confirm" },
+      idempotencyKey: "resume-durable-3",
+    });
+
+    const mockClient = createMockRuntimeClient({
+      resumeInvocation: async () => {
+        throw new RuntimeHttpClientError("http", "不可用", 503, "RUNTIME_UNAVAILABLE");
+      },
+    });
+
+    // 首次 dispatch + 4 次 worker retry = 5 次
+    let result = await dispatchResumeCommand({
+      tenantId: ctx.tenantId,
+      commandId: resumeCommandId,
+      runtimeClient: mockClient,
+      runtimeEndpointResolver: async () =>
+        buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+    });
+    expect(result.commandState).toBe("dispatched");
+    for (let i = 0; i < 3; i += 1) {
+      result = await retryDispatchedInvocationCommand({
+        tenantId: ctx.tenantId,
+        commandId: resumeCommandId,
+        runtimeClient: mockClient,
+        runtimeEndpointResolver: async () =>
+          buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+      });
+      expect(result.commandState).toBe("dispatched");
+    }
+    // 第 5 次：耗尽
+    result = await retryDispatchedInvocationCommand({
+      tenantId: ctx.tenantId,
+      commandId: resumeCommandId,
+      runtimeClient: mockClient,
+      runtimeEndpointResolver: async () =>
+        buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+    });
+    expect(result.commandState).toBe("failed");
+    expect(result.retryExhausted).toBe(true);
+    expect(result.errorCode).toBe("retry_exhausted");
+
+    const [command] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, resumeCommandId))
+      .limit(1);
+    expect(command?.commandState).toBe("failed");
+    expect(command?.errorCode).toBe("retry_exhausted");
+    expect(command?.dispatchAttemptCount).toBe(5);
+
+    // Resume → 唯一 Recovery Authority 收口：Invocation lost + active Turn failed
+    const invocation = await getInvocationById(ctx.tenantId, running.invocationId);
+    expect(invocation?.executionState).toBe("lost");
+    expect(invocation?.errorCode).toBe("resume_retry_exhausted");
+    // Batch B（Recovery 与 Turn 终态事务一致性）落地后：active Turn → failed +
+    // turn.failed Event 同事务断言在此补齐。
+  });
+
+  it("Cancel transient 5 次耗尽 → command failed，但不伪造 Invocation cancelled", async () => {
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+
+    const interruptResult = await requestInterrupt({
+      tenantId: ctx.tenantId,
+      ownerUserId: ctx.ownerId,
+      turnId: ctx.turnId,
+      reasonCode: "user_cancel",
+      idempotencyKey: "cancel-durable-1",
+    });
+    await bindInvocationIdToCommand(interruptResult.command.id, running.invocationId);
+    const cancelCommandId = interruptResult.command.id;
+
+    const mockClient = createMockRuntimeClient({
+      cancelInvocation: async () => {
+        throw new RuntimeHttpClientError("network", "网络不可达");
+      },
+    });
+
+    await dispatchCancelCommand({
+      tenantId: ctx.tenantId,
+      commandId: cancelCommandId,
+      runtimeClient: mockClient,
+      runtimeEndpointResolver: async () =>
+        buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+    });
+    let result: Awaited<ReturnType<typeof retryDispatchedInvocationCommand>> | undefined;
+    for (let i = 0; i < 4; i += 1) {
+      result = await retryDispatchedInvocationCommand({
+        tenantId: ctx.tenantId,
+        commandId: cancelCommandId,
+        runtimeClient: mockClient,
+        runtimeEndpointResolver: async () =>
+          buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
+      });
+    }
+    expect(result?.commandState).toBe("failed");
+    expect(result?.errorCode).toBe("retry_exhausted");
+
+    // Cancel 耗尽：不把 Invocation 伪造成 cancelled（由现有 cancel 状态机决定）
+    const invocation = await getInvocationById(ctx.tenantId, running.invocationId);
+    expect(invocation?.executionState).not.toBe("cancelled");
+  });
+
+  it("claimDueInvocationCommands：lease 过期可接管（crash recovery），非 due 不领取", async () => {
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await transitionToWaitingUser(ctx, running);
+
+    const resumeCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { action: "confirm" },
+      idempotencyKey: "resume-durable-4",
+    });
+    const futureCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { action: "confirm" },
+      idempotencyKey: "resume-durable-5",
+    });
+
+    const now = new Date();
+    // 命令 A：dispatcher CAS dispatched 后崩溃（lease 已过期，nextDispatchAt 未到）
+    await db
+      .update(invocationCommandTable)
+      .set({
+        commandState: "dispatched",
+        dispatchedAt: now,
+        dispatchAttemptCount: 1,
+        lastDispatchAttemptAt: now,
+        dispatchLeaseOwner: "worker-crashed",
+        dispatchLeaseExpiresAt: new Date(now.getTime() - 1_000),
+      })
+      .where(eq(invocationCommandTable.id, resumeCommandId));
+    // 命令 B：正常 transient retry 但时间未到
+    await db
+      .update(invocationCommandTable)
+      .set({
+        commandState: "dispatched",
+        dispatchedAt: now,
+        nextDispatchAt: new Date(now.getTime() + 60_000),
+        dispatchAttemptCount: 1,
+      })
+      .where(eq(invocationCommandTable.id, futureCommandId));
+
+    const claimed = await claimDueInvocationCommands({
+      now,
+      leaseOwner: "worker-b",
+      leaseDurationMs: 30_000,
+      limit: 10,
+    });
+    const claimedIds = claimed.map((c) => c.id);
+    expect(claimedIds).toContain(resumeCommandId);
+    expect(claimedIds).not.toContain(futureCommandId);
+    expect(claimed.find((c) => c.id === resumeCommandId)?.dispatchLeaseOwner).toBe("worker-b");
   });
 });

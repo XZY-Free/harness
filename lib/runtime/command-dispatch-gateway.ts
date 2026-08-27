@@ -23,6 +23,7 @@ import {
   type CommandRuntimeEndpointResolution,
   dispatchCancelCommand,
   dispatchResumeCommand,
+  retryDispatchedInvocationCommand,
 } from "@/lib/runtime/command-dispatcher";
 import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
 import { IngressInvocationTerminalError, InvocationStateConflictError } from "@/lib/runtime/errors";
@@ -287,6 +288,82 @@ export async function dispatchResumeCommandToRuntime(params: {
     correlationId: params.correlationId ?? null,
     // 04 §5/§7：Context 在 Harness dispatch 层构建（Transport 不猜上下文）；
     // now 每次 dispatch 刷新（retry 的 current_datetime 可以变化）。
+    resolveInvocationContext: async () => {
+      const bundle = await buildBoundAgentInvocationContext({
+        tenantId: params.tenantId,
+        binding: {
+          agentContractSnapshotId: ctx.binding.agentContractSnapshotId,
+          agentContextDigest: ctx.binding.agentContextDigest,
+        },
+        executionSubject,
+        now: new Date(),
+      });
+      if (!bundle) return null;
+      return bundle.entries
+        .filter((entry) => entry.supplied)
+        .map((entry) => ({ context_kind: entry.contextKind, value: entry.value }));
+    },
+  });
+  return { dispatched: true, command };
+}
+
+/**
+ * Durable Retry Worker 命令 lane 网关入口：对已 dispatched 的命令重新发起远端调度。
+ *
+ * 与首次调度同一门禁（05 §8/05 §11：effective capability 复核 + protocolType=a2a），
+ * 复用同一 Transport 构建与稳定 idempotency key（命令 idempotencyKey 不变）。
+ * 命令不在 dispatched 状态（已被并发处理/终态）→ command_not_found 语义的 no-op。
+ */
+export async function retryDispatchedCommandToRuntime(params: {
+  tenantId: string;
+  commandId: string;
+  actorId?: string | null;
+  correlationId?: string | null;
+}): Promise<CommandGatewayResult> {
+  const ctx = await loadCommandContext(params.tenantId, params.commandId);
+  if (!ctx) return { dispatched: false, reason: "command_not_found" };
+  const capabilities = await resolveEffectiveInvocationCapabilities({
+    tenantId: params.tenantId,
+    binding: ctx.binding,
+  });
+  const commandType = await (async () => {
+    const [row] = await db
+      .select({ commandType: invocationCommandTable.commandType })
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, params.commandId))
+      .limit(1);
+    return row?.commandType ?? null;
+  })();
+  if (commandType === "interrupt" && !capabilities.cancel) {
+    return { dispatched: false, reason: "unsupported_capability" };
+  }
+  if (commandType === "resume" && !capabilities.resume) {
+    return { dispatched: false, reason: "unsupported_capability" };
+  }
+  const a2a = await resolveA2ACommandTransport({
+    tenantId: params.tenantId,
+    binding: ctx.binding,
+    capabilities: {
+      cancel: capabilities.cancel,
+      resume: capabilities.resume,
+      steer: capabilities.steer,
+    },
+  });
+  if (!a2a) return { dispatched: false, reason: "protocol_not_remote" };
+
+  const executionSubject = await resolveResumeExecutionSubject({
+    tenantId: params.tenantId,
+    invocationThreadId: ctx.invocation.threadId,
+    actorId: params.actorId ?? null,
+  });
+
+  const command = await retryDispatchedInvocationCommand({
+    tenantId: params.tenantId,
+    commandId: params.commandId,
+    runtimeClient: a2a.transport,
+    runtimeEndpointResolver: a2a.endpointResolver,
+    actorId: params.actorId ?? null,
+    correlationId: params.correlationId ?? null,
     resolveInvocationContext: async () => {
       const bundle = await buildBoundAgentInvocationContext({
         tenantId: params.tenantId,
