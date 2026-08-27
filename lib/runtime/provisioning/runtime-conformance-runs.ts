@@ -1,7 +1,5 @@
-import { runtimeConformanceConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
-import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
-import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
+import { createConfiguredRuntimeConformanceVerifier } from "@/lib/runtime/conformance/configured-runtime-conformance-verifier";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
 import {
   runtimeConformanceCaseResult,
@@ -9,11 +7,6 @@ import {
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import { and, desc, eq } from "drizzle-orm";
-
-/** 从唯一的正式配置构建 RunnerSigningIdentityRegistry。 */
-function buildRegistry(): RunnerSigningIdentityRegistry {
-  return new RunnerSigningIdentityRegistry(runtimeConformanceConfig.runnerSigningIdentities);
-}
 
 type RecordRuntimeConformanceRunCommand = Parameters<
   ReturnType<typeof createRecordRuntimeConformanceRun>
@@ -26,7 +19,7 @@ type RecordRuntimeConformanceRunCommand = Parameters<
 export function recordRuntimeConformanceRun(command: RecordRuntimeConformanceRunCommand) {
   return createRecordRuntimeConformanceRun({
     store: mysqlRuntimeConformanceRunStore,
-    verifier: createDSSEConformanceVerifier({ runnerIdentityRegistry: buildRegistry() }),
+    verifier: createConfiguredRuntimeConformanceVerifier(),
   })(command);
 }
 

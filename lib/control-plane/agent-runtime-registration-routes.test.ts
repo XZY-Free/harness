@@ -34,10 +34,17 @@ import { ACTION_CODES } from "@/lib/identity/action-codes";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { roleActionBinding } from "@/lib/persistence/schema/authorization";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { credentialRefTable } from "@/lib/persistence/schema/tool";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
+import {
+  runtimeConformanceCaseResult,
+  runtimeConformanceRun,
+} from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import { generateEd25519SignerKeyPair } from "@/lib/runtime/test-support/ed25519-signer-keypair";
 import {
   type A2ATestProvider,
   startA2ATestProvider,
@@ -47,6 +54,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 // vitest 不加载 .env.test，需手动设置 SNOW_AUTH_MODE=dev（与 admin-routes.test.ts 一致）。
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
+const ORIGINAL_SIGNER_ENV = process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
+const ORIGINAL_RUNNERS_ENV = process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON;
 
 /** 动态加载被测路由。 */
 type RoutePOST = (
@@ -69,12 +78,48 @@ let provider: A2ATestProvider;
 /** 本文件注入的临时 env 变量名（bearer 用例），afterEach 统一删除恢复。 */
 const injectedEnvKeys: string[] = [];
 
+/** 平台 active-external signer 测试身份（01 专项：Registration 主动 Conformance）。 */
+const SIGNER_KEY_ID = "test-active-external-signer-key-1";
+const SIGNER_RUNNER_IDENTITY = "snowharness/active-external-conformance@test";
+const signerKeyPair = generateEd25519SignerKeyPair();
+
+/** 写入正式 signer/注册表 env（生产 getter 每次读取，无冻结）。 */
+function configureActiveSignerEnv(): void {
+  process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = JSON.stringify({
+    keyId: SIGNER_KEY_ID,
+    runnerIdentity: SIGNER_RUNNER_IDENTITY,
+    privateKeyPkcs8Base64: signerKeyPair.privateKeyPkcs8Base64,
+  });
+  process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = JSON.stringify([
+    {
+      keyId: SIGNER_KEY_ID,
+      publicKey: signerKeyPair.publicKeyBase64,
+      runnerIdentity: SIGNER_RUNNER_IDENTITY,
+      tenantScope: null,
+      validFrom: "2020-01-01T00:00:00.000Z",
+      validUntil: null,
+      revokedAt: null,
+    },
+  ]);
+}
+
 beforeAll(async () => {
+  configureActiveSignerEnv();
   provider = await startA2ATestProvider("input_required");
 });
 
 afterAll(async () => {
   await provider.close();
+  if (ORIGINAL_SIGNER_ENV === undefined) {
+    delete process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
+  } else {
+    process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = ORIGINAL_SIGNER_ENV;
+  }
+  if (ORIGINAL_RUNNERS_ENV === undefined) {
+    delete process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON;
+  } else {
+    process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = ORIGINAL_RUNNERS_ENV;
+  }
 });
 
 beforeEach(async () => {
@@ -306,6 +351,39 @@ async function loadRuntimeRevisions(tenantId: string) {
 /** 断言零网络：Provider 请求数不变。 */
 function expectZeroNewNetwork(before: number) {
   expect(provider.requests.length, "校验失败必须发生在任何网络调用之前").toBe(before);
+}
+
+// ─── Conformance DB 断言辅助（01 专项）─────────────────────
+
+async function loadConformanceRuns(tenantId: string) {
+  return db
+    .select()
+    .from(runtimeConformanceRun)
+    .where(eq(runtimeConformanceRun.tenantId, tenantId));
+}
+
+async function loadCaseResults(runId: string) {
+  return db
+    .select()
+    .from(runtimeConformanceCaseResult)
+    .where(eq(runtimeConformanceCaseResult.runId, runId));
+}
+
+/** 断言事务回滚：Revision/Run/Cases/Audit/Outbox 全部零残留。 */
+async function expectNoConformanceResidue(tenantId: string): Promise<void> {
+  await expect(loadConformanceRuns(tenantId)).resolves.toHaveLength(0);
+  const revisions = await loadRuntimeRevisions(tenantId);
+  expect(revisions).toHaveLength(0);
+  const audits = await db
+    .select({ id: auditEvent.id })
+    .from(auditEvent)
+    .where(eq(auditEvent.tenantId, tenantId));
+  expect(audits.filter((a) => a.id !== undefined).length).toBe(0);
+  const outbox = await db
+    .select({ id: controlPlaneOutboxEvent.id })
+    .from(controlPlaneOutboxEvent)
+    .where(eq(controlPlaneOutboxEvent.tenantId, tenantId));
+  expect(outbox).toHaveLength(0);
 }
 
 /** 断言 fail closed：无 verified/enabled/published 持久化状态。 */
@@ -1142,5 +1220,141 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（capabilit
     ).toBeLessThanOrEqual(1);
     await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(1);
     await expectFailClosed(seeded.tenantId);
+  });
+
+  // ─── 01 专项：Registration 主动 Conformance 正式接线 ──────
+
+  it("01/§15-1：Profile B 注册成功原子落库 1 RuntimeRevision + 1 ConformanceRun + 6 Cases（overall passed，精确绑定）", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+      "idem-rt-reg-conformance-b-001",
+    );
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as Record<string, unknown>;
+
+    // API 返回真实 conformance 证据（仅 id/结果/数量，无 envelope/签名材料）。
+    expect(typeof body.conformance_run_id).toBe("string");
+    expect(body.conformance_overall_result).toBe("passed");
+    expect(body.conformance_case_count).toBe(6);
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("payloadType");
+    expect(serialized).not.toContain("signatures");
+    expect(serialized).not.toContain("privateKey");
+
+    // 持久化：恰一个 Run，绑定同租户 + 响应中的 revision。
+    const runs = await loadConformanceRuns(seeded.tenantId);
+    expect(runs).toHaveLength(1);
+    const run = runs[0];
+    expect(run.id).toBe(body.conformance_run_id);
+    expect(run.overallResult).toBe("passed");
+    expect(run.runtimeRevisionId).toBe(body.runtime_revision_id);
+    expect(run.runnerIdentity).toBe(SIGNER_RUNNER_IDENTITY);
+    expect(run.idempotencyKey).toBe("runtime-registration-conformance:idem-rt-reg-conformance-b-001");
+    // run 与 revision 的 digest/协议绑定完全一致（禁止第二份 digest 计算）。
+    const revisions = await loadRuntimeRevisions(seeded.tenantId);
+    expect(revisions).toHaveLength(1);
+    const revision = revisions[0].revision;
+    expect(run.runtimeTargetDigest).toBe(revision.runtimeTargetDigest);
+    expect(run.runtimeConfigDigest).toBe(revision.configHash);
+    expect(run.protocolContractRevision).toBe(revision.protocolContractRevision);
+    // probe 时间事实：startedAt/completedAt 覆盖 verifiedAt 语义且合法有序。
+    expect(run.startedAt.getTime()).toBeLessThanOrEqual(run.completedAt.getTime());
+    expect(run.completedAt.getTime()).toBe(revision.verifiedAt?.getTime() ?? -1);
+
+    // 6 个 Case 全部 passed；cancel=false 以诚实不适用语义通过。
+    const cases = await loadCaseResults(run.id);
+    expect(cases).toHaveLength(6);
+    expect(cases.every((c) => c.passed)).toBe(true);
+    const cancelCase = cases.find((c) => c.caseId === "cancel-acknowledgement");
+    expect(cancelCase).toBeDefined();
+    // replay 语义：conformance 幂等键已绑定本 Run。
+    expect(run.requestId).toBeTruthy();
+  });
+
+  it("§15-3：signer 未配置 → 非 2xx，Provider 零请求，DB 零 Runtime/Revision/Run", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const before = provider.requests.length;
+    const originalSigner = process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
+    delete process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
+    try {
+      const response = await callPOST(
+        seeded.agentId,
+        registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+        "idem-rt-reg-no-signer-001",
+      );
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(response.status).toBeLessThan(500);
+      expectZeroNewNetwork(before);
+      await expectNoConformanceResidue(seeded.tenantId);
+      await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
+    } finally {
+      process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = originalSigner;
+    }
+  });
+
+  it("§15-4：signer 私钥与注册公钥不匹配 → 非 2xx，Provider 零请求，零行", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const before = provider.requests.length;
+    const originalSigner = process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
+    // 注册表仍是 keyPair A 的公钥，signer 换成另一对私钥 → 公钥不匹配 fail closed。
+    const other = generateEd25519SignerKeyPair();
+    process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = JSON.stringify({
+      keyId: SIGNER_KEY_ID,
+      runnerIdentity: SIGNER_RUNNER_IDENTITY,
+      privateKeyPkcs8Base64: other.privateKeyPkcs8Base64,
+    });
+    try {
+      const response = await callPOST(
+        seeded.agentId,
+        registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+        "idem-rt-reg-signer-mismatch-001",
+      );
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(response.status).toBeLessThan(500);
+      expectZeroNewNetwork(before);
+      await expectNoConformanceResidue(seeded.tenantId);
+      await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
+    } finally {
+      process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = originalSigner;
+    }
+  });
+
+  it("§15-5：append 之后事务失败 → Revision/Run/Cases/Audit/Outbox 全部回滚", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const { __setRuntimeRegistrationPostAppendHookForTests } = await import(
+      "@/lib/runtime/application/register-agent-runtime"
+    );
+    __setRuntimeRegistrationPostAppendHookForTests(() => {
+      throw new Error("injected post-append failure");
+    });
+    try {
+      // 路由对非 AgentRuntimeRegistrationError 直接上抛（fail loudly），无 5xx 响应体。
+      await expect(
+        callPOST(
+          seeded.agentId,
+          registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE),
+          "idem-rt-reg-rollback-001",
+        ),
+      ).rejects.toThrow("injected post-append failure");
+      await expectNoConformanceResidue(seeded.tenantId);
+      await expect(countRuntimeRows(seeded.tenantId)).resolves.toBe(0);
+    } finally {
+      __setRuntimeRegistrationPostAppendHookForTests(null);
+    }
+  });
+
+  it("§15-6：同 key 同 body replay 不新建第二 ConformanceRun", async () => {
+    const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
+    const body = registrationBody(seeded.snapshotId, provider.endpoint, B_CONFORMANCE);
+    const first = await callPOST(seeded.agentId, body, "idem-rt-reg-conformance-replay-001");
+    expect(first.status).toBe(201);
+    await expect(loadConformanceRuns(seeded.tenantId)).resolves.toHaveLength(1);
+
+    const replay = await callPOST(seeded.agentId, body, "idem-rt-reg-conformance-replay-001");
+    expect(replay.status).toBe(201);
+    expect(await replay.json()).toEqual(await first.json());
+    await expect(loadConformanceRuns(seeded.tenantId)).resolves.toHaveLength(1);
   });
 });

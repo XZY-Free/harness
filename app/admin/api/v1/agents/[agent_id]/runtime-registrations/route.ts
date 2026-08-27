@@ -304,6 +304,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       authentication: parsed.authentication,
       conformance: parsed.conformance,
       createdBy,
+      idempotencyKey,
+      requestId,
     });
 
     // 8. 结构化投影（只含 id/状态/measured digest/endpoint；无合同/transcript/secret）
@@ -324,6 +326,10 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       runtime_target_digest: result.revision.runtimeTargetDigest,
       evidence_digest: result.revision.evidenceDigest,
       config_hash: result.revision.configHash,
+      // 01 专项：正式签名 Conformance 证据（仅 id/结果/数量级事实，无 envelope/密钥材料）。
+      conformance_run_id: result.conformanceRun.id,
+      conformance_overall_result: result.conformanceRun.overallResult,
+      conformance_case_count: result.conformanceCaseResults.length,
       measured: result.measured,
     };
 
@@ -341,6 +347,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         runtime_target_digest: result.revision.runtimeTargetDigest,
         evidence_digest: result.revision.evidenceDigest,
         verification_state: "verified",
+        conformance_run_id: result.conformanceRun.id,
+        conformance_overall_result: result.conformanceRun.overallResult,
       },
       reason: `注册外部 Runtime（agent=${agent.agentKey}，snapshot=${result.snapshot.id}）`,
       requestId,
@@ -360,7 +368,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   } catch (err) {
     await failRecord(recordId);
     if (err instanceof AgentRuntimeRegistrationError) {
-      if (err.kind === "conformance_failed" || err.kind === "runtime_conflict") {
+      if (
+        err.kind === "conformance_failed" ||
+        err.kind === "runtime_conflict" ||
+        err.kind === "signer_untrusted"
+      ) {
         // 验收失败/稳定身份冲突：fail closed（无新行），不回显远端响应内容。
         return apiError("BUSINESS_CONSTRAINT_VIOLATION", "Runtime 一致性验收失败，注册被拒绝", {
           requestId,

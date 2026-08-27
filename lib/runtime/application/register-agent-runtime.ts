@@ -19,6 +19,12 @@
  *   RuntimeRevision（绑定快照/凭证引用/endpoint/协议事实/measured 证据 digest，
  *   capabilities 区分 declared/measured/effective）。不发布、不启用、不建路由；
  *   不落原始合同/AgentCard/prompts/transcript/secret。
+ * - 01 专项：平台 signer 在任何 Provider 网络请求前解析（不可信即 fail closed，
+ *   零网络零行）；Probe 区间时间冻结进 Builder；Revision ID 预生成并同时绑定
+ *   RuntimeRevision insert 与 buildActiveExternalConformance 报告；正式
+ *   RuntimeConformanceRun/Cases/Audit/Outbox/Delivery 经 prepare（事务外验签）+
+ *   append（调用方事务）与 RuntimeRevision 原子落库。Conformance idempotency
+ *   由注册幂等键确定性派生；actor 为平台系统身份，非外部 Agent 自证。
  */
 import { randomUUID } from "node:crypto";
 import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
@@ -38,7 +44,22 @@ import {
   outboundAuthHeaders,
   resolveOutboundRuntimeAuth,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
+import {
+  ActiveExternalConformanceSignerError,
+  resolveActiveExternalConformanceSigner,
+} from "@/lib/runtime/application/resolve-active-external-conformance-signer";
+import { buildActiveExternalConformanceReport } from "@/lib/runtime/application/build-active-external-conformance";
+import { createConfiguredRuntimeConformanceVerifier } from "@/lib/runtime/conformance/configured-runtime-conformance-verifier";
 import { computeRuntimeTargetDigest } from "@/lib/runtime/domain/runtime-target-digest";
+import { createMysqlRuntimeConformanceRunSession } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
+import type {
+  RuntimeConformanceCaseResultRecord,
+  RuntimeConformanceRunRecord,
+} from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import {
+  appendRuntimeConformanceRun,
+  prepareRuntimeConformanceRun,
+} from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import { and, eq, max } from "drizzle-orm";
 
 /** 注册失败类别（路由据此映射稳定错误响应）。 */
@@ -46,6 +67,7 @@ export type AgentRuntimeRegistrationErrorKind =
   | "reference_invalid" // 快照/Agent/凭证/presence 引用非法（400，网络前）
   | "endpoint_invalid" // endpoint 结构非法（400，网络前）
   | "credential_unresolvable" // 凭证引用存在但不可解析/指纹不符（400，网络前）
+  | "signer_untrusted" // 平台 active-external signer 缺失/不可信（422，网络前 fail closed）
   | "runtime_conflict" // 稳定 Runtime 身份存在但形态/生命周期冲突（422，拒绝复用）
   | "conformance_failed"; // 主动网络验收失败（422，fail closed）
 
@@ -75,6 +97,10 @@ export interface AgentRuntimeRegistrationCommand {
   };
   /** 创建者 userIdentityId 或 serviceId。 */
   createdBy: string;
+  /** HTTP 注册幂等键（Conformance idempotency 由其确定性派生）。 */
+  idempotencyKey: string;
+  /** 本次注册请求 ID（进入 Conformance Run 审计链）。 */
+  requestId: string;
 }
 
 /** 结构化 measured 证据矩阵（02 §9；替换 HR 命名固定四 boolean）。 */
@@ -677,6 +703,19 @@ export interface AgentRuntimeRegistrationResult {
   measured: RuntimeMeasuredEvidence;
   /** declared/measured/effective 三态投影（02 §10）。 */
   capabilities: RuntimeCapabilitiesProjection;
+  /** 与 RuntimeRevision 同事务落库的正式 Conformance Run（01 专项）。 */
+  conformanceRun: RuntimeConformanceRunRecord;
+  conformanceCaseResults: RuntimeConformanceCaseResultRecord[];
+}
+
+// ─── 仅供测试：事务内 Conformance append 之后注入失败（验证整体回滚）──
+let runtimeRegistrationPostAppendHook: (() => void | Promise<void>) | null = null;
+
+/** 注入/清除事务内 append 后失败钩子（生产恒为 null，禁止业务代码调用）。 */
+export function __setRuntimeRegistrationPostAppendHookForTests(
+  hook: (() => void | Promise<void>) | null,
+): void {
+  runtimeRegistrationPostAppendHook = hook;
 }
 
 /**
@@ -736,7 +775,21 @@ export async function registerAgentRuntime(
   const endpoint = normalizeRuntimeEndpoint(command.runtimeEndpoint);
   const credential = await resolveCredential(command.tenantId, command.authentication);
 
+  // 1.5) 平台 active-external signer 必须在任何 Provider 网络请求之前解析成功
+  //（01 专项 §3：无可信 signer 则即使 Probe 通过也无法产生正式发布证据 → fail closed，
+  //  Provider 请求次数 = 0）。
+  let signer: ReturnType<typeof resolveActiveExternalConformanceSigner>;
+  try {
+    signer = resolveActiveExternalConformanceSigner(command.tenantId);
+  } catch (err) {
+    if (err instanceof ActiveExternalConformanceSignerError) {
+      throw new AgentRuntimeRegistrationError("signer_untrusted", err.message);
+    }
+    throw err;
+  }
+
   // 2) AgentCard 协议证据 + capability-driven probes（顺序执行，一次网络序列）
+  const probeStartedAt = new Date();
   await probeAgentCardConsistency(endpoint, credential, snapshot);
   const increments = { observed: false };
   await probeBasic(
@@ -780,6 +833,9 @@ export async function registerAgentRuntime(
       "incremental_content=true 但未观测到内容增量",
     );
   }
+  // 01 专项 §4：Probe 时间事实只来自真实网络区间（首条 AgentCard 请求前 →
+  // 全部声明能力验证完成），禁止模块加载/服务启动/写库后反推时间。
+  const probeCompletedAt = new Date();
 
   // 3) 结构化 measured 证据（02 §9）与 declared/measured/effective 投影（02 §10）。
   const measured: RuntimeMeasuredEvidence = {
@@ -820,7 +876,72 @@ export async function registerAgentRuntime(
     },
   };
 
-  // 4) 单事务持久化（create/reuse 恰一个 external Runtime + draft Revision）
+  // 4) 正式 Conformance 事实（01 专项）：Digest Authority 不变，Revision ID 预冻结。
+  const configHash = computeCanonicalDigest({
+    agent_contract_snapshot_id: snapshot.id,
+    credential_ref_id: credential.credentialRefId,
+    runtime_endpoint: endpoint,
+    protocol_type: snapshot.protocolType,
+    protocol_contract_revision: snapshot.protocolContractRevision,
+    identity_mode: credential.identityMode,
+  });
+  const runtimeTargetDigest = computeRuntimeTargetDigest({
+    runtimeEvidenceKind: "external_endpoint",
+    endpointRef: endpoint,
+    runtimeConfigDigest: configHash,
+    protocolType: snapshot.protocolType,
+    protocolContractRevision: snapshot.protocolContractRevision,
+    identityMode: credential.identityMode,
+    networkZone: "external",
+  });
+  // 证据摘要对结构化 measured facts 计算，不保存 raw transcript（02 §9）。
+  const evidenceDigest = computeCanonicalDigest({
+    agent_contract_snapshot_id: snapshot.id,
+    runtime_endpoint: endpoint,
+    runtime_target_digest: runtimeTargetDigest,
+    measured,
+  });
+  // 同一 Revision ID 同时用于 Builder 报告、insert 与 Conformance 绑定（01 §5）。
+  const runtimeRevisionId = randomUUID();
+
+  // 构建 DSSE 签名正式报告（复用权威 Builder，禁止第二份 digest 计算）。
+  const built = buildActiveExternalConformanceReport({
+    runtimeRevisionId,
+    runtimeTargetDigest,
+    runtimeConfigDigest: configHash,
+    protocolContractRevision: snapshot.protocolContractRevision,
+    startedAt: probeStartedAt.toISOString(),
+    completedAt: probeCompletedAt.toISOString(),
+    measured,
+    capabilities,
+    signer,
+  });
+  if (built.report.overallResult !== "passed") {
+    // 诚实一致性裁决失败（如声明 durable 未测）：fail closed，零行落库。
+    throw new AgentRuntimeRegistrationError(
+      "conformance_failed",
+      "正式 Conformance 裁决未通过，注册被拒绝",
+    );
+  }
+
+  // prepare：DSSE 验签 + 报告校验（事务外，零 DB 写）。
+  // Conformance idempotency 从注册幂等键确定性派生（禁止随机 key）；这是 SnowHarness
+  // 主动验收，actor 固定为平台系统身份（signer.runnerIdentity），非外部 Agent 自证。
+  const conformanceCommand = {
+    tenantId: command.tenantId,
+    runtimeRevisionId,
+    dsseEnvelope: built.dsseEnvelopeJson,
+    idempotencyKey: `runtime-registration-conformance:${command.idempotencyKey}`,
+    requestId: command.requestId,
+    actor: { actorType: "system" as const, actorId: signer.runnerIdentity },
+  };
+  const prepared = await prepareRuntimeConformanceRun({
+    verifier: createConfiguredRuntimeConformanceVerifier(),
+    command: conformanceCommand,
+  });
+
+  // 5) 单事务持久化：Runtime + draft RuntimeRevision + ConformanceRun/Cases/
+  //    Audit/Outbox/Delivery 原子绑定（任何失败全部回滚）。
   const runtimeKey = `agent-${command.agentId}`;
   const persisted = await db.transaction(async (tx) => {
     const [existingRuntime] = await tx
@@ -872,34 +993,8 @@ export async function registerAgentRuntime(
       .where(eq(runtimeRevisionTable.runtimeId, runtime.id));
     const revisionNo = (maxRow?.maxRevisionNo ?? 0) + 1;
 
-    const configHash = computeCanonicalDigest({
-      agent_contract_snapshot_id: snapshot.id,
-      credential_ref_id: credential.credentialRefId,
-      runtime_endpoint: endpoint,
-      protocol_type: snapshot.protocolType,
-      protocol_contract_revision: snapshot.protocolContractRevision,
-      identity_mode: credential.identityMode,
-    });
-    const runtimeTargetDigest = computeRuntimeTargetDigest({
-      runtimeEvidenceKind: "external_endpoint",
-      endpointRef: endpoint,
-      runtimeConfigDigest: configHash,
-      protocolType: snapshot.protocolType,
-      protocolContractRevision: snapshot.protocolContractRevision,
-      identityMode: credential.identityMode,
-      networkZone: "external",
-    });
-    // 证据摘要对结构化 measured facts 计算，不保存 raw transcript（02 §9）。
-    const evidenceDigest = computeCanonicalDigest({
-      agent_contract_snapshot_id: snapshot.id,
-      runtime_endpoint: endpoint,
-      runtime_target_digest: runtimeTargetDigest,
-      measured,
-    });
-
-    const revisionId = randomUUID();
     await tx.insert(runtimeRevisionTable).values({
-      id: revisionId,
+      id: runtimeRevisionId,
       runtimeId: runtime.id,
       revisionNo,
       protocolType: snapshot.protocolType,
@@ -916,14 +1011,15 @@ export async function registerAgentRuntime(
       credentialRefId: credential.credentialRefId,
       verificationState: "verified",
       evidenceDigest,
-      verifiedAt: new Date(),
+      // 01 §11：verifiedAt 唯一由真实 Probe 完成时间决定，禁止第二条时间事实。
+      verifiedAt: probeCompletedAt,
       revisionState: "draft",
       createdBy: command.createdBy,
     });
     const [revision] = await tx
       .select()
       .from(runtimeRevisionTable)
-      .where(eq(runtimeRevisionTable.id, revisionId))
+      .where(eq(runtimeRevisionTable.id, runtimeRevisionId))
       .limit(1);
     if (!revision) {
       throw new AgentRuntimeRegistrationError("reference_invalid", "RuntimeRevision 落库失败");
@@ -932,7 +1028,18 @@ export async function registerAgentRuntime(
       // fail loudly：verified Revision 必须携带精确的持久化验收时间，禁止伪造回退值。
       throw new Error("registerAgentRuntime: verified Revision 缺少 verifiedAt（读回失败）");
     }
-    return { runtime, revision };
+
+    // Conformance append 与 Revision 同事务（01 §10，禁止第二事务/补偿删除）。
+    const session = createMysqlRuntimeConformanceRunSession(tx);
+    const appended = await appendRuntimeConformanceRun({
+      session,
+      prepared,
+      command: conformanceCommand,
+    });
+    if (runtimeRegistrationPostAppendHook) {
+      await runtimeRegistrationPostAppendHook();
+    }
+    return { runtime, revision, appended };
   });
 
   return {
@@ -942,5 +1049,7 @@ export async function registerAgentRuntime(
     runtimeEndpoint: endpoint,
     measured,
     capabilities,
+    conformanceRun: persisted.appended.run,
+    conformanceCaseResults: persisted.appended.caseResults,
   };
 }
