@@ -15,7 +15,7 @@
  * - 加载 Thread 详情（useThreadDetail）+ Item 投影（useThread）。
  * - SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）。
  * - 错误展示（visibleError → ErrorCard）。
- * - W3-4：输入区集成 ＋菜单、模型选择器（专题01：既有 Thread 不再有 Agent 选择器，切换主 Agent 的 handoff 语义已废弃）。
+ * - 输入区集成助手单次调用选择、模型选择；不绑定主 Agent，不做 handoff。
  * - 专题01 §35：不再绑定主 Agent（primary_agent_id 已移除），无 Agent 时输入区照常可用。
  * - W4-1：顶部 Steer/Stop 横条与时间线上方的待办队列移入 ThreadInput 内部，
  *   停止按钮复用 codex 形态（输入框右下圆钮变 ■），待办队列复用紧凑单行条。
@@ -250,6 +250,7 @@ export function ThreadPage({
   const inputArea = (isFirstLoad || thread) && (
     <fieldset disabled={isFirstLoad} data-testid="thread-input-frame" className="contents">
       <ThreadInput
+        key={threadId}
         threadId={threadId}
         latestTurn={latestTurn}
         thread={thread}

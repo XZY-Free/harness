@@ -42,7 +42,7 @@ interface ThreadInputProps {
   readonly thread?: ClientThread | null;
   /** Desktop 已加载的真实助手列表。 */
   readonly availableAgents?: readonly AgentOption[];
-  readonly onAgentChange?: (agentId: string) => void;
+  readonly onAgentChange?: (agentId: string | null) => void;
   readonly onModelChange?: (modelRef: string) => void;
   readonly settingsBusy?: boolean;
   /** 草稿隔离键；默认使用 threadId。 */
@@ -74,6 +74,21 @@ export function ThreadInput({
   currentModelRef,
   defaultModelRef,
 }: ThreadInputProps) {
+  // 仅属于这一次待发送消息；不读写 Thread 默认值或上一轮 Invocation。
+  const [selection, setSelection] = useState<{ threadId: string | null; agentId: string | null }>({
+    threadId,
+    agentId: null,
+  });
+  if (selection.threadId !== threadId) setSelection({ threadId, agentId: null });
+  const selectedAgentId = onAgentChange
+    ? (currentAgentId ?? null)
+    : selection.threadId === threadId
+      ? selection.agentId
+      : null;
+  const changeAgent = (agentId: string | null) => {
+    if (onAgentChange) onAgentChange(agentId);
+    else setSelection({ threadId, agentId });
+  };
   const {
     send,
     busy: threadBusy,
@@ -99,6 +114,7 @@ export function ThreadInput({
   // threadId 为 null 时仅新建页（必带 draftKey）会命中；调用方漏传时兜底到新建草稿键。
   const { text, setText, clear: clearDraft } = useThreadDraft(draftKey ?? threadId ?? "new-thread");
   const [customBusy, setCustomBusy] = useState(false);
+  const sending = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const busy = threadBusy || customBusy || turnBusy;
   const isRunning = route === "pending_input";
@@ -128,15 +144,18 @@ export function ThreadInput({
   }, [error]);
 
   const handleSend = async () => {
-    if (!text.trim() || busy) return;
+    if (!text.trim() || busy || sending.current) return;
+    sending.current = true;
     setCustomBusy(Boolean(onSubmitText));
     let ok = false;
     try {
-      ok = await (onSubmitText ?? send)(text);
+      ok = onSubmitText ? await onSubmitText(text) : await send(text, selectedAgentId);
     } finally {
+      sending.current = false;
       setCustomBusy(false);
     }
     if (ok) {
+      changeAgent(null);
       clearDraft();
       // 重置高度
       const el = textareaRef.current;
@@ -229,15 +248,13 @@ export function ThreadInput({
           <div className="mt-2 flex min-w-0 items-center gap-1">
             <PlusMenuPopover />
 
-            {/* 专题01：Agent 选择器仅在建会话（new-thread 提供 onAgentChange）渲染；
-                既有 Thread 不再绑主 Agent（primary_agent_id 已移除），选择无 handoff 动作，故不渲染。 */}
-            {onAgentChange && (
-              <AgentSelectorPopover
-                currentAgentId={currentAgentId ?? null}
-                onChange={onAgentChange}
-                agentOptions={availableAgents}
-              />
-            )}
+            {/* 助手按次选择；运行或等待补充信息时不能重定向正在执行的任务。 */}
+            <AgentSelectorPopover
+              currentAgentId={selectedAgentId}
+              onChange={changeAgent}
+              agentOptions={availableAgents}
+              disabled={busy || isRunning}
+            />
 
             <div className="flex-1" />
 

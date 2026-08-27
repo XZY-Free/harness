@@ -29,7 +29,7 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { toVisibleError } from "@/lib/client/error-messages";
 import type { ClientErrorBody, ClientTurn, ClientVisibleError } from "@/lib/client/types";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 /** 运行中状态集合（这些状态下发送消息走 PendingInput）。 */
 const RUNNING_STATES = new Set(["accepted", "queued", "running", "waiting_user", "regenerating"]);
@@ -48,7 +48,7 @@ export interface UseThreadInputResult {
   /** 根据当前 Turn 状态推断发送路由。 */
   readonly route: SendRoute;
   /** 发送消息。返回 true 表示成功，false 表示失败（错误已写入 error）。 */
-  readonly send: (text: string) => Promise<boolean>;
+  readonly send: (text: string, agentId?: string | null) => Promise<boolean>;
   /** 清除错误。 */
   readonly clearError: () => void;
 }
@@ -100,6 +100,7 @@ export function useThreadInput({
   latestTurn,
 }: UseThreadInputParams): UseThreadInputResult {
   const [busy, setBusy] = useState(false);
+  const sending = useRef(false);
   const [error, setError] = useState<ClientVisibleError | null>(null);
   const [lastRoute, setLastRoute] = useState<SendRoute>("none");
 
@@ -107,7 +108,8 @@ export function useThreadInput({
   const route = threadId === null ? "none" : deriveSendRoute(latestTurn);
 
   const send = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, agentId?: string | null): Promise<boolean> => {
+      if (sending.current) return false;
       if (!text.trim()) {
         setError({
           code: "REQUEST_SCHEMA_INVALID",
@@ -132,6 +134,7 @@ export function useThreadInput({
         setLastRoute("none");
         return false;
       }
+      sending.current = true;
       setBusy(true);
       setError(null);
       const idempotencyKey = generateIdempotencyKey();
@@ -170,6 +173,7 @@ export function useThreadInput({
           },
           body: JSON.stringify({
             input: { type: "message", text },
+            ...(agentId ? { agent_selection: { mode: "required", agent_id: agentId } } : {}),
           }),
         });
         if (!resp.ok) {
@@ -189,6 +193,7 @@ export function useThreadInput({
         });
         return false;
       } finally {
+        sending.current = false;
         setBusy(false);
       }
     },

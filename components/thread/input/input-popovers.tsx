@@ -206,9 +206,11 @@ export function AgentSelectorPopover({
   currentAgentId,
   onChange,
   agentOptions,
+  disabled = false,
 }: {
   readonly currentAgentId: string | null;
-  readonly onChange?: (agentId: string) => void;
+  readonly onChange?: (agentId: string | null) => void;
+  readonly disabled?: boolean;
   /** Desktop 已加载的会话助手；提供后不再等待独立目录接口。 */
   readonly agentOptions?: readonly AgentOption[];
 }) {
@@ -240,14 +242,15 @@ export function AgentSelectorPopover({
 
   return (
     <Popover
-      open={open}
+      open={open && !disabled}
       onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
+        setOpen(nextOpen && !disabled);
         if (!nextOpen) setQuery("");
       }}
     >
       <PopoverTrigger
         aria-label={currentAgent?.displayName ?? "助手"}
+        disabled={disabled}
         className="group rounded-full outline-none"
       >
         <TriggerPill marker="agent-pill">
@@ -276,6 +279,19 @@ export function AgentSelectorPopover({
       >
         <SelectorPopoverHeader title="助手" query={query} onQueryChange={setQuery} />
         <div className="max-h-72 overflow-y-auto px-2 pb-2">
+          {currentAgentId && (
+            <button
+              type="button"
+              className="w-full rounded-[11px] px-2.5 py-2 text-left text-[13px] text-muted-foreground hover:bg-muted"
+              onClick={() => {
+                onChange?.(null);
+                setOpen(false);
+                setQuery("");
+              }}
+            >
+              不指定助手
+            </button>
+          )}
           {loading && <SelectorMessage>加载中…</SelectorMessage>}
           {error && <SelectorMessage destructive>{error.description}</SelectorMessage>}
           {!loading && !error && agents.length === 0 && (
