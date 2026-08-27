@@ -49,8 +49,9 @@ function revisionFixture(overrides?: Partial<RuntimeRevisionDTO>): RuntimeRevisi
     attestation_ids: [],
     publication_record_id: null,
     withdrawal_record_id: null,
-    conformance_run_id: "conf-1",
-    conformance_overall_result: "passed",
+    latest_valid_conformance_run_id: "conf-1",
+    latest_valid_conformance_overall_result: "passed",
+    publication_conformance_run_id: null,
     execution_eligible: false,
     ineligibility_reasons: [],
     created_at: "2026-08-26T00:00:00.000Z",
@@ -196,8 +197,8 @@ describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () 
     expect(screen.getByText("已发布")).toBeTruthy();
   });
 
-  it("external_endpoint 缺 conformance_run_id：发布按钮不出现且零 publish POST", async () => {
-    backend.revisions = [revisionFixture({ id: "rtr-2", conformance_run_id: null })];
+  it("external_endpoint 缺 latest_valid_conformance_run_id：发布按钮不出现且零 publish POST", async () => {
+    backend.revisions = [revisionFixture({ id: "rtr-2", latest_valid_conformance_run_id: null })];
 
     render(<RuntimeControlPanel canPublish refreshToken={0} />);
     await waitFor(() => expect(screen.getByText("第 1 版")).toBeTruthy());
@@ -207,10 +208,12 @@ describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () 
   });
 
   it("external_endpoint 验收未通过时即使有 run id 也不提供发布入口", async () => {
-    backend.revisions = [revisionFixture({ conformance_overall_result: "failed" })];
+    backend.revisions = [revisionFixture({ latest_valid_conformance_overall_result: "failed" })];
 
     render(<RuntimeControlPanel canPublish refreshToken={0} />);
-    await waitFor(() => expect(screen.getByText("验收：验收失败")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("本次可发布验收：验收失败")).toBeTruthy(),
+    );
 
     expect(screen.queryByRole("button", { name: "发布运行服务版本" })).toBeNull();
     expect(publishPosts()).toHaveLength(0);

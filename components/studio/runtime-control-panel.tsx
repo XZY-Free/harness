@@ -157,13 +157,14 @@ function RevisionRow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // external_endpoint：必须已有真实 Conformance Run（非空 id）且验收总结果为 passed
-  // 才提供发布入口，绝不用空字符串顶替（03 §4/§6）；failed/error/cancelled/null 均不放行。
+  // external_endpoint：发布门禁只认真实 Admin GET 投影里的 Candidate Conformance
+  // （latest_valid_conformance_run_id + passed，02 §6）；failed/error/cancelled/null 均不放行。
   const canPublishRevision =
     canPublish &&
     revision.revision_state === "draft" &&
     (revision.runtime_evidence_kind === "external_endpoint"
-      ? Boolean(revision.conformance_run_id) && revision.conformance_overall_result === "passed"
+      ? Boolean(revision.latest_valid_conformance_run_id) &&
+        revision.latest_valid_conformance_overall_result === "passed"
       : true);
 
   async function publish() {
@@ -179,7 +180,8 @@ function RevisionRow({
             revision.runtime_evidence_kind === "hosted_artifact"
               ? (revision.attestation_ids[0] ?? null)
               : null,
-          conformance_run_id: revision.conformance_run_id ?? "",
+          // Publish request 携带精确 evidence ID：Candidate Conformance（02 §6）。
+          conformance_run_id: revision.latest_valid_conformance_run_id ?? "",
         },
         {
           idempotencyKey: crypto.randomUUID(),
@@ -221,9 +223,19 @@ function RevisionRow({
         <span>{label(REVISION_STATE_LABELS, revision.revision_state, "未知状态")}</span>
         <span className="font-mono">{revision.protocol_type}</span>
         <span>{label(EVIDENCE_KIND_LABELS, revision.runtime_evidence_kind, "未知状态")}</span>
-        <span>
-          验收：{label(VERIFICATION_LABELS, revision.conformance_overall_result, "未知状态")}
-        </span>
+        {revision.revision_state === "published" ? (
+          // 已发布版本：管理员调试信息区分「已发布绑定验收」（02 §8）。
+          <span>已发布绑定验收：{revision.publication_conformance_run_id ? "已绑定" : "未绑定"}</span>
+        ) : (
+          <span>
+            本次可发布验收：
+            {label(
+              VERIFICATION_LABELS,
+              revision.latest_valid_conformance_overall_result,
+              "未知状态",
+            )}
+          </span>
+        )}
         {focused && (
           <span className="rounded border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 text-[12px] text-[var(--fg)]">
             本次登记

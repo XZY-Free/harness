@@ -4,7 +4,7 @@ import type {
   RuntimeDTO,
   RuntimeRevisionDTO,
 } from "@/lib/control-plane-client/contracts/runtime";
-import type { RuntimeRow } from "@/lib/persistence/schema/runtimes";
+import type { RuntimeRevisionRow, RuntimeRow } from "@/lib/persistence/schema/runtimes";
 import {
   getPublicationRecordBySubject,
   getWithdrawalRecordBySubject,
@@ -19,6 +19,7 @@ import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revisi
 import {
   getRuntimeConformanceRunById,
   listRuntimeConformanceCaseResults,
+  listRuntimeConformanceRuns,
 } from "@/lib/runtime/provisioning/runtime-conformance-runs";
 
 export function projectRuntime(runtime: RuntimeRow): RuntimeDTO {
@@ -125,6 +126,35 @@ export function projectRuntimeConformanceRun(
   };
 }
 
+/**
+ * Candidate Conformance 选择（02 §4）：当前 exact RuntimeRevision 下最新一条
+ * 「passed 且六个 publication conformance cases 完整全过」且 digest/协议精确绑定的 Run。
+ * 排序 completedAt DESC、recordedAt DESC；最新一条可能 failed，绝不能只取 latest row。
+ */
+async function selectLatestValidConformanceRun(
+  tenantId: string,
+  revision: RuntimeRevisionRow,
+): Promise<RuntimeConformanceRunRecord | null> {
+  const runs = await listRuntimeConformanceRuns(tenantId, revision.id);
+  const ordered = [...runs].sort((a, b) => {
+    const byCompleted = b.completedAt.getTime() - a.completedAt.getTime();
+    if (byCompleted !== 0) return byCompleted;
+    return b.recordedAt.getTime() - a.recordedAt.getTime();
+  });
+  for (const run of ordered) {
+    if (run.overallResult !== "passed") continue;
+    if (run.runtimeTargetDigest !== revision.runtimeTargetDigest) continue;
+    if (run.runtimeConfigDigest !== revision.configHash) continue;
+    if (run.protocolContractRevision !== revision.protocolContractRevision) continue;
+    const caseResults = await listRuntimeConformanceCaseResults(run.id);
+    const complete = validateCompletePublicationConformanceResult(
+      caseResults as Parameters<typeof validateCompletePublicationConformanceResult>[0],
+    );
+    if (complete.valid) return run;
+  }
+  return null;
+}
+
 export async function loadRuntimeRevisionAdminProjection(
   tenantId: string,
   revisionId: string,
@@ -182,6 +212,10 @@ export async function loadRuntimeRevisionAdminProjection(
     hasPublication: publication !== null,
     hasWithdrawal: withdrawal !== null,
   });
+  // Candidate Conformance 与 Publication-bound Conformance 语义分离（02 §2）：
+  // eligibility 仍以 PublicationRecord.conformanceRunId 为 Authority，draft 新 Run
+  // 绝不改变已发布版本的执行资格。
+  const latestValidRun = await selectLatestValidConformanceRun(tenantId, revision);
   return {
     id: revision.id,
     runtime_id: revision.runtimeId,
@@ -204,8 +238,9 @@ export async function loadRuntimeRevisionAdminProjection(
     attestation_ids: verifiedActiveAttestationIds,
     publication_record_id: publication?.id ?? null,
     withdrawal_record_id: withdrawal?.id ?? null,
-    conformance_run_id: publication?.conformanceRunId ?? null,
-    conformance_overall_result: run?.overallResult ?? null,
+    latest_valid_conformance_run_id: latestValidRun?.id ?? null,
+    latest_valid_conformance_overall_result: latestValidRun?.overallResult ?? null,
+    publication_conformance_run_id: publication?.conformanceRunId ?? null,
     execution_eligible: eligibility.executionEligible,
     ineligibility_reasons: eligibility.ineligibilityReasons,
     created_at: revision.createdAt.toISOString(),

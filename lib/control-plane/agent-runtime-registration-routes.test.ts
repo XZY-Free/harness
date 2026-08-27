@@ -1247,6 +1247,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（capabilit
     const runs = await loadConformanceRuns(seeded.tenantId);
     expect(runs).toHaveLength(1);
     const run = runs[0];
+    if (!run) throw new Error("ConformanceRun 未落库");
     expect(run.id).toBe(body.conformance_run_id);
     expect(run.overallResult).toBe("passed");
     expect(run.runtimeRevisionId).toBe(body.runtime_revision_id);
@@ -1255,7 +1256,8 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（capabilit
     // run 与 revision 的 digest/协议绑定完全一致（禁止第二份 digest 计算）。
     const revisions = await loadRuntimeRevisions(seeded.tenantId);
     expect(revisions).toHaveLength(1);
-    const revision = revisions[0].revision;
+    const revision = revisions[0]?.revision;
+    if (!revision) throw new Error("RuntimeRevision 未落库");
     expect(run.runtimeTargetDigest).toBe(revision.runtimeTargetDigest);
     expect(run.runtimeConfigDigest).toBe(revision.configHash);
     expect(run.protocolContractRevision).toBe(revision.protocolContractRevision);

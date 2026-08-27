@@ -70,9 +70,11 @@ export interface RuntimeRevisionDTO {
   publication_record_id: string | null;
   /** Withdrawal Record。 */
   withdrawal_record_id: string | null;
-  /** Conformance Run — 不为 null 时表示已通过 Conformance。 */
-  conformance_run_id: string | null;
-  conformance_overall_result: RuntimeConformanceOverallResult | null;
+  /** Candidate Conformance — 当前可发布的最新 passed 且 exact-bound Run（02 §2/§4）。 */
+  latest_valid_conformance_run_id: string | null;
+  latest_valid_conformance_overall_result: RuntimeConformanceOverallResult | null;
+  /** Publication-bound Conformance — 发布时 PublicationRecord 冻结的 Run（执行资格 Authority）。 */
+  publication_conformance_run_id: string | null;
   /** 执行资格 — 由服务端计算。 */
   execution_eligible: boolean;
   ineligibility_reasons: string[];
