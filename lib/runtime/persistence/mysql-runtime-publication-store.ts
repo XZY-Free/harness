@@ -193,7 +193,9 @@ export const mysqlRuntimePublicationStore: RuntimePublicationStore = {
               versionNo: params.expectedVersionNo + 1,
               updatedAt: params.updatedAt,
               ...(params.enableIfDraft === true
-                ? { lifecycleState: sql`IF(${runtimeTable.lifecycleState} = 'draft', 'enabled', ${runtimeTable.lifecycleState})` }
+                ? {
+                    lifecycleState: sql`IF(${runtimeTable.lifecycleState} = 'draft', 'enabled', ${runtimeTable.lifecycleState})`,
+                  }
                 : {}),
             })
             .where(

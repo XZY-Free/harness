@@ -39,33 +39,33 @@ import {
   runtimeRevisionTable,
   runtimeTable,
 } from "@/lib/persistence/schema/runtimes";
+import { buildActiveExternalConformanceReport } from "@/lib/runtime/application/build-active-external-conformance";
+import {
+  ActiveExternalConformanceSignerError,
+  resolveActiveExternalConformanceSigner,
+} from "@/lib/runtime/application/resolve-active-external-conformance-signer";
+import { createConfiguredRuntimeConformanceVerifier } from "@/lib/runtime/conformance/configured-runtime-conformance-verifier";
 import {
   OutboundRuntimeAuthError,
   type RuntimeTransportAuth,
   outboundAuthHeaders,
   resolveOutboundRuntimeAuth,
 } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
-import {
-  ActiveExternalConformanceSignerError,
-  resolveActiveExternalConformanceSigner,
-} from "@/lib/runtime/application/resolve-active-external-conformance-signer";
-import { buildActiveExternalConformanceReport } from "@/lib/runtime/application/build-active-external-conformance";
-import { createConfiguredRuntimeConformanceVerifier } from "@/lib/runtime/conformance/configured-runtime-conformance-verifier";
 import { computeRuntimeTargetDigest } from "@/lib/runtime/domain/runtime-target-digest";
 import { createMysqlRuntimeConformanceRunSession } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
 import type {
   RuntimeConformanceCaseResultRecord,
   RuntimeConformanceRunRecord,
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import {
+  appendRuntimeConformanceRun,
+  prepareRuntimeConformanceRun,
+} from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import { buildA2APublicMessageMetadata } from "@/lib/runtime/transport/a2a-transport";
 import {
   executionSubjectFromServiceIdentity,
   executionSubjectToPublicAgentSubject,
 } from "@/lib/runtime/transport/execution-subject";
-import {
-  appendRuntimeConformanceRun,
-  prepareRuntimeConformanceRun,
-} from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import { and, eq, max } from "drizzle-orm";
 
 /** 注册失败类别（路由据此映射稳定错误响应）。 */

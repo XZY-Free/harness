@@ -225,7 +225,9 @@ function RevisionRow({
         <span>{label(EVIDENCE_KIND_LABELS, revision.runtime_evidence_kind, "未知状态")}</span>
         {revision.revision_state === "published" ? (
           // 已发布版本：管理员调试信息区分「已发布绑定验收」（02 §8）。
-          <span>已发布绑定验收：{revision.publication_conformance_run_id ? "已绑定" : "未绑定"}</span>
+          <span>
+            已发布绑定验收：{revision.publication_conformance_run_id ? "已绑定" : "未绑定"}
+          </span>
         ) : (
           <span>
             本次可发布验收：

@@ -4,8 +4,8 @@ import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
+import { publicationRecord } from "@/lib/publications/persistence/publication-record";
 import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
 import {
   runtimeConformanceCaseResult,

@@ -27,6 +27,7 @@ import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { hrAgentContract } from "@/lib/agents/test-support/hr-agent-contract";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
+import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -34,21 +35,20 @@ import { ACTION_CODES } from "@/lib/identity/action-codes";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { roleActionBinding } from "@/lib/persistence/schema/authorization";
+import { auditEvent } from "@/lib/persistence/schema/control-plane";
 import { tenant } from "@/lib/persistence/schema/identity";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
 import { credentialRefTable } from "@/lib/persistence/schema/tool";
-import { controlPlaneOutboxEvent } from "@/lib/control-plane/events/control-plane-outbox";
 import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
-import { generateEd25519SignerKeyPair } from "@/lib/runtime/test-support/ed25519-signer-keypair";
 import {
   type A2ATestProvider,
   startA2ATestProvider,
 } from "@/lib/runtime/test-support/a2a-test-provider";
+import { generateEd25519SignerKeyPair } from "@/lib/runtime/test-support/ed25519-signer-keypair";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -110,16 +110,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await provider.close();
-  if (ORIGINAL_SIGNER_ENV === undefined) {
-    delete process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
-  } else {
-    process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = ORIGINAL_SIGNER_ENV;
-  }
-  if (ORIGINAL_RUNNERS_ENV === undefined) {
-    delete process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON;
-  } else {
-    process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = ORIGINAL_RUNNERS_ENV;
-  }
+  process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = ORIGINAL_SIGNER_ENV;
+  process.env.SNOW_RUNNER_SIGNING_IDENTITIES_JSON = ORIGINAL_RUNNERS_ENV;
 });
 
 beforeEach(async () => {
@@ -1252,7 +1244,9 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（capabilit
     expect(run.overallResult).toBe("passed");
     expect(run.runtimeRevisionId).toBe(body.runtime_revision_id);
     expect(run.runnerIdentity).toBe(SIGNER_RUNNER_IDENTITY);
-    expect(run.idempotencyKey).toBe("runtime-registration-conformance:idem-rt-reg-conformance-b-001");
+    expect(run.idempotencyKey).toBe(
+      "runtime-registration-conformance:idem-rt-reg-conformance-b-001",
+    );
     // run 与 revision 的 digest/协议绑定完全一致（禁止第二份 digest 计算）。
     const revisions = await loadRuntimeRevisions(seeded.tenantId);
     expect(revisions).toHaveLength(1);
@@ -1279,7 +1273,7 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（capabilit
     const seeded = await seedRegistrationTarget({ contract: PROFILE_B_CONTRACT });
     const before = provider.requests.length;
     const originalSigner = process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
-    delete process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON;
+    process.env.SNOW_ACTIVE_EXTERNAL_CONFORMANCE_SIGNER_JSON = undefined;
     try {
       const response = await callPOST(
         seeded.agentId,

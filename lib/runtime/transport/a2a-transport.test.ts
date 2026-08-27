@@ -536,7 +536,9 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
       current_datetime: "2026-08-27T01:02:03.000Z",
     });
     expect(typeof resumeRpc.params.message.metadata?.execution_subject).toBe("object");
-    expect(JSON.stringify(resumeRpc.params.message.metadata)).not.toContain("snowharness.execution_subject");
+    expect(JSON.stringify(resumeRpc.params.message.metadata)).not.toContain(
+      "snowharness.execution_subject",
+    );
     expect(JSON.stringify(resumeRpc.params.message.metadata)).not.toContain("tenant");
 
     // 归一化事件：response.completed 用 artifact 实际答复 + execution.completed，

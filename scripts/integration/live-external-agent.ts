@@ -387,8 +387,7 @@ export async function runLiveExternalAgentJoin(
     throw new LiveJoinStepError("R5-route-activation", "响应缺少 route_revision_id");
   }
   const routeRevisionId = activation.route_revision_id;
-  const routeId =
-    typeof activation.route_id === "string" ? activation.route_id : null;
+  const routeId = typeof activation.route_id === "string" ? activation.route_id : null;
   if (!routeId) {
     throw new LiveJoinStepError("R5-route-activation", "响应缺少 route_id");
   }
@@ -576,10 +575,7 @@ async function exerciseEmployeeFlow(params: {
       const turnNow = (threadNow.latest_turn ?? {}) as Record<string, unknown>;
       // same Invocation：active 指针非空时不得漂移（终态 Turn 可能清空 active 指针，
       // null 视为正常收尾而非新建 continuation）。
-      if (
-        turnNow.active_invocation_id != null &&
-        turnNow.active_invocation_id !== invocationId
-      ) {
+      if (turnNow.active_invocation_id != null && turnNow.active_invocation_id !== invocationId) {
         throw new LiveJoinStepError(
           "R7-wait-terminal",
           "active_invocation_id 漂移（Resume 不得新建 continuation Invocation）",

@@ -211,9 +211,7 @@ describe("RuntimeControlPanel（真实 Runtime 登记后的同页发布）", () 
     backend.revisions = [revisionFixture({ latest_valid_conformance_overall_result: "failed" })];
 
     render(<RuntimeControlPanel canPublish refreshToken={0} />);
-    await waitFor(() =>
-      expect(screen.getByText("本次可发布验收：验收失败")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("本次可发布验收：验收失败")).toBeTruthy());
 
     expect(screen.queryByRole("button", { name: "发布运行服务版本" })).toBeNull();
     expect(publishPosts()).toHaveLength(0);
