@@ -466,8 +466,12 @@ describe("buildActiveExternalConformanceReport — fail closed", () => {
     // true/pass/false → fail（平台无 durable 正式 Probe，measured=pass 属伪造）
     const forgedMeasured = {
       ...measured,
-      features: { ...measured.features, durable_task_recovery: "pass" },
-    };
+      features: {
+        ...measured.features,
+        // 伪造：平台无 durable 正式 Probe 却声称 measured=pass（类型层用 as 表达反例）
+        durable_task_recovery: "pass",
+      },
+    } as unknown as RuntimeMeasuredEvidence;
     const forgedReport = buildActiveExternalConformanceReport(
       hrLikeInput({
         measured: forgedMeasured,
