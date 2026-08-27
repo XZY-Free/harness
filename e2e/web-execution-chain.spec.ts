@@ -67,11 +67,11 @@ interface ExecutionBindingResponse {
   route_revision_id: string;
   route_activation_id: string;
   route_content_digest: string;
-  agent_artifact_digest: string | null;
+  agent_contract_snapshot_id: string | null;
   runtime_artifact_digest: string;
   runtime_config_digest: string;
   capability_manifest_digest: string;
-  agent_attestation_ids: readonly string[] | null;
+  agent_contract_digest: string | null;
   runtime_attestation_ids: readonly string[];
   agent_publication_record_id: string | null;
   runtime_publication_record_id: string;
@@ -192,8 +192,8 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   // §10.3/§18：0-Agent 基础 Harness Route — Agent Evidence 条件性完整组为「全空」（canonical null）。
   // Agent 不是 Thread 或基础 Harness 执行的前置条件（§35），agent_* 全部为 null 是合法终态。
   expect(binding.agent_revision_id).toBeNull();
-  expect(binding.agent_artifact_digest).toBeNull();
-  expect(binding.agent_attestation_ids).toBeNull();
+  expect(binding.agent_contract_snapshot_id).toBeNull();
+  expect(binding.agent_contract_digest).toBeNull();
   expect(binding.agent_publication_record_id).toBeNull();
 
   // §8.5：Runtime Attestation 集合必须非空（不是"子集"，是当时的完整集合）。

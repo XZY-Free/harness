@@ -140,8 +140,8 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     // §10.3/§18：0-Agent 基础 Harness Route — Agent Evidence 条件性完整组为「全空」（canonical null）。
     // Desktop 与 Web 走同一正式 Binding 模型；Agent 不是执行前置（§35）。
     expect(binding.agent_revision_id).toBeNull();
-    expect(binding.agent_artifact_digest).toBeNull();
-    expect(binding.agent_attestation_ids).toBeNull();
+    expect(binding.agent_contract_snapshot_id).toBeNull();
+    expect(binding.agent_contract_digest).toBeNull();
     expect(binding.agent_publication_record_id).toBeNull();
     expect((binding.runtime_attestation_ids as string[]).length).toBeGreaterThan(0);
 

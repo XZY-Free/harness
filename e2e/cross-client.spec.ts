@@ -37,8 +37,8 @@ interface ExecutionBinding {
   runtime_revision_id: string;
   deployment_route_id: string;
   route_revision_id: string;
-  agent_artifact_digest: string | null;
-  agent_attestation_ids: readonly string[] | null;
+  agent_contract_snapshot_id: string | null;
+  agent_contract_digest: string | null;
   agent_publication_record_id: string | null;
   runtime_publication_record_id: string;
   conformance_run_id: string;
@@ -165,8 +165,11 @@ test.describe("§20.6 跨端一致性", () => {
       expect(binding, `${label} Binding 应存在`).toBeTruthy();
       // Agent Evidence 全空：fresh DB 没有 Agent（§24.1 count=0）。
       expect(binding?.agent_revision_id, `${label} agent_revision_id 应为 null`).toBeNull();
-      expect(binding?.agent_artifact_digest, `${label} agent_artifact_digest 应为 null`).toBeNull();
-      expect(binding?.agent_attestation_ids, `${label} agent_attestation_ids 应为 null`).toBeNull();
+      expect(
+        binding?.agent_contract_snapshot_id,
+        `${label} agent_contract_snapshot_id 应为 null（基础 Harness Route）`,
+      ).toBeNull();
+      expect(binding?.agent_contract_digest, `${label} agent_contract_digest 应为 null`).toBeNull();
       expect(
         binding?.agent_publication_record_id,
         `${label} agent_publication_record_id 应为 null`,
