@@ -357,7 +357,7 @@ async function sendMessage(
       jsonrpc: "2.0",
       id: randomUUID(),
       method: "message/send",
-      params: { message: buildA2AMessage(input, correlation) },
+      params: { message: buildA2AMessage(input, correlation, metadata) },
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   }).catch(() => {
@@ -396,7 +396,7 @@ async function streamMessage(
       jsonrpc: "2.0",
       id: randomUUID(),
       method: "message/stream",
-      params: { message: buildA2AMessage(input, correlation) },
+      params: { message: buildA2AMessage(input, correlation, metadata) },
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   }).catch(() => {
