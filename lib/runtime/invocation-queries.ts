@@ -28,6 +28,7 @@ import {
   turnTable,
 } from "@/lib/persistence/schema/conversation";
 import {
+  INVOCATION_TERMINAL_STATES,
   type Invocation,
   type InvocationExecutionState,
   type InvocationKind,
@@ -358,6 +359,61 @@ export async function updateInvocationState(
     .limit(1);
   if (!updated) {
     throw new Error(`updateInvocationState: Invocation 行未找到（id=${invocationId}）`);
+  }
+  return updated;
+}
+
+/**
+ * 设置 Invocation.outputItemId（内容终结 Authority 的正式 helper）。
+ *
+ * 冻结语义（response.completed / execution.completed Authority 拆分）：
+ * - 只由「最终响应内容 Authority」（response.completed）调用；
+ * - caller-owned tx：SELECT FOR UPDATE 精确锁定 + 租户校验；
+ * - 只允许 non-terminal Invocation（terminal 后内容投影不可变）；
+ * - 只设置 outputItemId 并按现有 version 规则递增 versionNo；
+ * - 不修改 executionState / finishedAt / 终态错误字段，
+ *   不得经 updateInvocationState(..., "running") 曲线更新。
+ *
+ * @throws InvocationNotFoundError Invocation 不存在或跨租户不可见
+ * @throws InvocationStateConflictError Invocation 已终态
+ */
+export async function setInvocationOutputItem(
+  tx: Tx,
+  tenantId: string,
+  invocationId: string,
+  outputItemId: string,
+): Promise<Invocation> {
+  const [current] = await tx
+    .select()
+    .from(invocationTable)
+    .where(and(eq(invocationTable.tenantId, tenantId), eq(invocationTable.id, invocationId)))
+    .for("update")
+    .limit(1);
+
+  if (!current) {
+    throw new InvocationNotFoundError(invocationId);
+  }
+  if (INVOCATION_TERMINAL_STATES.includes(current.executionState)) {
+    throw new InvocationStateConflictError(
+      invocationId,
+      current.executionState,
+      "设置 outputItemId（终态后内容投影不可变）",
+    );
+  }
+
+  const now = new Date();
+  await tx
+    .update(invocationTable)
+    .set({ outputItemId, versionNo: current.versionNo + 1, updatedAt: now })
+    .where(eq(invocationTable.id, invocationId));
+
+  const [updated] = await tx
+    .select()
+    .from(invocationTable)
+    .where(eq(invocationTable.id, invocationId))
+    .limit(1);
+  if (!updated) {
+    throw new Error(`setInvocationOutputItem: Invocation 行未找到（id=${invocationId}）`);
   }
   return updated;
 }

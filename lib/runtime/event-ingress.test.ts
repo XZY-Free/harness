@@ -38,7 +38,7 @@ import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
 import type { AgentRevision } from "@/lib/persistence/schema/agents";
-import { threadEventTable, threadItemTable } from "@/lib/persistence/schema/conversation";
+import { threadEventTable, threadItemTable, turnTable } from "@/lib/persistence/schema/conversation";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import { userActionRequestTable } from "@/lib/persistence/schema/user-action-request";
 import {
@@ -51,6 +51,7 @@ import {
   EventPayloadHashConflictError,
   IngressInvocationNotFoundError,
   IngressInvocationTerminalError,
+  InvocationStateConflictError,
 } from "@/lib/runtime/errors";
 import {
   IngressBatchEmptyError,
@@ -60,13 +61,17 @@ import {
   getIngressByProducerEventId,
   ingressEventBatch,
 } from "@/lib/runtime/event-ingress-queries";
-import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
+import {
+  getInvocationById,
+  setInvocationOutputItem,
+  updateInvocationState,
+} from "@/lib/runtime/invocation-queries";
 import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { TransientSequenceGapError, ingressTransientBatch } from "@/lib/runtime/transient-events";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -488,8 +493,8 @@ describe("RuntimeEventIngress 核心入库", () => {
     expect(ingress?.mappedThreadEventId).toBe(mapped?.threadEventId);
   });
 
-  it("response.completed：创建 agent_message Item + 终态 + Turn→completed", async () => {
-    const { invocationId } = await seedRunningInvocation(ctx);
+  it("response.completed：内容 Authority——agent_message + outputItemId，不改执行终态", async () => {
+    const { invocationId, threadId, turnId } = await seedRunningInvocation(ctx);
 
     const result = await ingressEventBatch({
       tenantId: ctx.tenantId,
@@ -504,10 +509,30 @@ describe("RuntimeEventIngress 核心入库", () => {
     const mapped = result.mappedEvents[0];
     expect(mapped?.itemId).toBeTruthy();
 
-    // Invocation 应为 completed
+    // 冻结语义（Authority 拆分）：response.completed 只设 outputItemId，
+    // Invocation/Turn 均保持 running（执行终态归 execution.completed 唯一 Authority）。
     const invocation = await getInvocationById(ctx.tenantId, invocationId);
-    expect(invocation?.executionState).toBe("completed");
+    expect(invocation?.executionState).toBe("running");
     expect(invocation?.outputItemId).toBe(mapped?.itemId);
+
+    const [turn] = await db
+      .select({ turnState: turnTable.turnState, finalItemId: turnTable.finalItemId })
+      .from(turnTable)
+      .where(eq(turnTable.id, turnId))
+      .limit(1);
+    expect(turn?.turnState).toBe("queued");
+    expect(turn?.finalItemId).toBeNull();
+
+    // item.created + item.completed 已落库；无 invocation.completed。
+    const events = await db
+      .select({ eventType: threadEventTable.eventType })
+      .from(threadEventTable)
+      .where(eq(threadEventTable.threadId, threadId))
+      .orderBy(asc(threadEventTable.eventSequence));
+    const types = events.map((e) => e.eventType);
+    expect(types).toContain("item.created");
+    expect(types).toContain("item.completed");
+    expect(types).not.toContain("invocation.completed");
   });
 
   it("execution.completed：invocation.completed 事件 + Invocation→completed", async () => {
@@ -527,6 +552,155 @@ describe("RuntimeEventIngress 核心入库", () => {
 
     const invocation = await getInvocationById(ctx.tenantId, invocationId);
     expect(invocation?.executionState).toBe("completed");
+  });
+
+  it("同一批次 response.completed + execution.completed：单事务提交，无状态机冲突（A2A completed 根因回归）", async () => {
+    const { invocationId, threadId, turnId } = await seedRunningInvocation(ctx);
+
+    // A2A 单条 completed status 经 mapper 拆成的两个候选事件，同批同事务。
+    const result = await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId,
+      producerSequenceStart: 1,
+      events: [
+        makeEvent("a2a:pair:1", 1, "response.completed", {
+          source: "a2a",
+          task_id: "t-1",
+          text: "分析完成",
+        }),
+        makeEvent("a2a:pair:2", 2, "execution.completed", {
+          source: "a2a",
+          task_id: "t-1",
+          finish_reason: "a2a_task_completed",
+        }),
+      ],
+    });
+
+    expect(result.acceptedThroughProducerSequence).toBe(2);
+    expect(result.mappedEvents).toHaveLength(2);
+
+    // 两条 ingress 行均 mapped。
+    const respIngress = await getIngressByProducerEventId(ctx.tenantId, invocationId, "a2a:pair:1");
+    const execIngress = await getIngressByProducerEventId(ctx.tenantId, invocationId, "a2a:pair:2");
+    expect(respIngress?.ingressState).toBe("mapped");
+    expect(execIngress?.ingressState).toBe("mapped");
+
+    // Invocation completed，outputItemId = agent_message Item。
+    const invocation = await getInvocationById(ctx.tenantId, invocationId);
+    expect(invocation?.executionState).toBe("completed");
+    const agentMessageItemId = respIngress?.mappedItemId;
+    expect(agentMessageItemId).toBeTruthy();
+    expect(invocation?.outputItemId).toBe(agentMessageItemId);
+
+    // Turn completed，finalItemId = 同一 agent_message Item。
+    const [turn] = await db
+      .select({ turnState: turnTable.turnState, finalItemId: turnTable.finalItemId })
+      .from(turnTable)
+      .where(eq(turnTable.id, turnId))
+      .limit(1);
+    expect(turn?.turnState).toBe("completed");
+    expect(turn?.finalItemId).toBe(agentMessageItemId);
+
+    // 唯一 invocation.completed；item.created/item.completed 各一条；无 lost/failed。
+    const events = await db
+      .select({ eventType: threadEventTable.eventType })
+      .from(threadEventTable)
+      .where(eq(threadEventTable.threadId, threadId))
+      .orderBy(asc(threadEventTable.eventSequence));
+    const types = events.map((e) => e.eventType);
+    expect(types.filter((t) => t === "invocation.completed")).toHaveLength(1);
+    // item.created 至少含用户消息与 agent_message 各一条；item.completed 唯一
+    //（agent_message 内容终结）。
+    expect(types.filter((t) => t === "item.created").length).toBeGreaterThanOrEqual(1);
+    expect(types.filter((t) => t === "item.completed")).toHaveLength(1);
+    expect(types).not.toContain("invocation.lost");
+    expect(types).not.toContain("turn.failed");
+  });
+
+  it("分两批 response.completed → execution.completed：第二批沿用第一批 outputItemId 作 finalItemId", async () => {
+    const { invocationId, turnId } = await seedRunningInvocation(ctx);
+
+    const respResult = await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId,
+      producerSequenceStart: 1,
+      events: [
+        makeEvent("a2a:split:1", 1, "response.completed", { source: "a2a", text: "答案" }),
+      ],
+    });
+    const agentMessageItemId = respResult.mappedEvents[0]?.itemId;
+    expect(agentMessageItemId).toBeTruthy();
+
+    const execResult = await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId,
+      producerSequenceStart: 2,
+      events: [
+        makeEvent("a2a:split:2", 2, "execution.completed", {
+          source: "a2a",
+          finish_reason: "a2a_task_completed",
+        }),
+      ],
+    });
+    expect(execResult.acceptedThroughProducerSequence).toBe(2);
+
+    const invocation = await getInvocationById(ctx.tenantId, invocationId);
+    expect(invocation?.executionState).toBe("completed");
+    expect(invocation?.outputItemId).toBe(agentMessageItemId);
+
+    const [turn] = await db
+      .select({ turnState: turnTable.turnState, finalItemId: turnTable.finalItemId })
+      .from(turnTable)
+      .where(eq(turnTable.id, turnId))
+      .limit(1);
+    expect(turn?.turnState).toBe("completed");
+    expect(turn?.finalItemId).toBe(agentMessageItemId);
+  });
+
+  it("重复 execution.completed 仍 fail closed（不允许 completed→completed）", async () => {
+    const { invocationId } = await seedRunningInvocation(ctx);
+
+    await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId,
+      producerSequenceStart: 1,
+      events: [makeEvent("dup-exec-1", 1, "execution.completed", { finish_reason: "done" })],
+    });
+
+    // 第二个不同 producer_event_id 的 execution.completed：Invocation 已终态，
+    // 入口 fail closed（IngressInvocationTerminalError），未放宽状态机。
+    await expect(
+      ingressEventBatch({
+        tenantId: ctx.tenantId,
+        invocationId,
+        producerSequenceStart: 2,
+        events: [makeEvent("dup-exec-2", 2, "execution.completed", { finish_reason: "done" })],
+      }),
+    ).rejects.toThrow(IngressInvocationTerminalError);
+  });
+
+  it("setInvocationOutputItem：设置 outputItemId 不改 executionState；终态后不可变", async () => {
+    const { invocationId } = await seedRunningInvocation(ctx);
+
+    // non-terminal：只设置 outputItemId + versionNo 递增，状态保持 running。
+    await db.transaction(async (tx) => {
+      const updated = await setInvocationOutputItem(tx, ctx.tenantId, invocationId, "item-out-1");
+      expect(updated.executionState).toBe("running");
+      expect(updated.outputItemId).toBe("item-out-1");
+    });
+    const invocation = await getInvocationById(ctx.tenantId, invocationId);
+    expect(invocation?.executionState).toBe("running");
+    expect(invocation?.outputItemId).toBe("item-out-1");
+
+    // 终态后内容投影不可变：fail closed。
+    await db.transaction(async (tx) => {
+      await updateInvocationState(tx, ctx.tenantId, invocationId, "completed");
+    });
+    await expect(
+      db.transaction(async (tx) => {
+        await setInvocationOutputItem(tx, ctx.tenantId, invocationId, "item-out-2");
+      }),
+    ).rejects.toThrow(InvocationStateConflictError);
   });
 
   it("execution.failed：invocation.failed 事件 + Invocation→failed", async () => {

@@ -58,7 +58,11 @@ import {
   IngressInvocationNotFoundError,
   IngressInvocationTerminalError,
 } from "@/lib/runtime/errors";
-import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
+import {
+  getInvocationById,
+  setInvocationOutputItem,
+  updateInvocationState,
+} from "@/lib/runtime/invocation-queries";
 import { redactSensitiveData } from "@/lib/security/unified-redaction";
 import { and, asc, eq, gt } from "drizzle-orm";
 
@@ -631,7 +635,17 @@ async function mapProgressSnapshot(
   };
 }
 
-/** response.completed：创建 agent_message Item + item.created + item.completed + invocation.completed + 终态。 */
+/**
+ * response.completed：最终响应内容 Authority（冻结语义）。
+ *
+ * 职责（且仅限）：创建 agent_message Item + item.created + item.completed +
+ * 经正式 helper 设置 Invocation.outputItemId。
+ *
+ * 明确不做（执行终态归 execution.completed 唯一 Authority）：
+ * - 不修改 Invocation.executionState；
+ * - 不写 invocation.completed ThreadEvent；
+ * - 不把 Turn 转 completed / 不设 Turn.finishedAt。
+ */
 async function mapResponseCompleted(
   tx: Tx,
   ctx: {
@@ -665,11 +679,11 @@ async function mapResponseCompleted(
     invocationId: ctx.invocation.id,
   });
 
-  // 2. 分配 3 个 event sequence（item.created + item.completed + invocation.completed）
-  const startSeq = await allocateEventSequences(tx, ctx.threadId, 3);
+  // 2. 分配 2 个 event sequence（item.created + item.completed；invocation.completed
+  //    由 execution.completed 唯一写入）
+  const startSeq = await allocateEventSequences(tx, ctx.threadId, 2);
   const itemCreatedSeq = startSeq;
   const itemCompletedSeq = startSeq + 1;
-  const invocationCompletedSeq = startSeq + 2;
 
   // 3. 写 item.created ThreadEvent
   await insertThreadEvent(tx, ctx.threadId, itemCreatedSeq, {
@@ -700,33 +714,10 @@ async function mapResponseCompleted(
     correlationId: ctx.correlationId ?? undefined,
   });
 
-  // 5. 更新 Invocation：outputItemId + → completed
-  await updateInvocationState(tx, ctx.tenantId, ctx.invocation.id, "completed", {
-    outputItemId: item.id,
-  });
-
-  // 6. 写 invocation.completed ThreadEvent
-  await insertThreadEvent(tx, ctx.threadId, invocationCompletedSeq, {
-    eventType: "invocation.completed",
-    turnId: ctx.turnId,
-    itemId: item.id,
-    invocationId: ctx.invocation.id,
-    actorType: ctx.actorType,
-    payload: {
-      output_item_id: item.id,
-      finish_reason: "response.completed",
-    },
-    correlationId: ctx.correlationId ?? undefined,
-  });
-
-  // 7. CAS 更新 Turn：running → completed（finalItemId 指向 agent_message Item）
-  await casUpdateTurn(tx, {
-    turnId: ctx.turnId,
-    expectedVersionNo: ctx.invocation.versionNo, // 占位，实际从 Turn 行读取
-    nextState: "completed",
-    finalItemId: item.id,
-    adoptedInvocationId: ctx.invocation.id,
-  });
+  // 5. 设置 Invocation.outputItemId（正式 helper：不改 executionState，终态后不可变）。
+  //    执行终态（Invocation→completed / invocation.completed / Turn→completed）由
+  //    execution.completed 唯一 Authority 承担，本 mapper 不再越权。
+  await setInvocationOutputItem(tx, ctx.tenantId, ctx.invocation.id, item.id);
 
   return {
     threadEventId: itemCompletedEvent.id,
@@ -917,15 +908,25 @@ async function mapExecutionCompleted(
     correlationId: ctx.correlationId ?? undefined,
   });
 
-  // 2. 更新 Invocation：→ completed
-  await updateInvocationState(tx, ctx.tenantId, ctx.invocation.id, "completed");
+  // 2. 更新 Invocation：→ completed（执行终态唯一 Authority）。
+  //    使用更新后返回的 exact Invocation：response.completed 可能刚在同一事务
+  //    （或前一批次）设置了 outputItemId——finalItemId 必须取回读值，禁止依赖
+  //    入参 ctx.invocation 的旧快照。
+  const completedInvocation = await updateInvocationState(
+    tx,
+    ctx.tenantId,
+    ctx.invocation.id,
+    "completed",
+  );
 
-  // 3. CAS 更新 Turn：running → completed
+  // 3. CAS 更新 Turn：running → completed（finalItemId 指向 Invocation.outputItemId，
+  //    无响应内容的 Runtime 允许为 null——通用能力，不强制 A2A 特例）。
   await casUpdateTurn(tx, {
     turnId: ctx.turnId,
     expectedVersionNo: ctx.invocation.versionNo,
     nextState: "completed",
-    adoptedInvocationId: ctx.invocation.id,
+    finalItemId: completedInvocation.outputItemId ?? undefined,
+    adoptedInvocationId: completedInvocation.id,
   });
 
   return {

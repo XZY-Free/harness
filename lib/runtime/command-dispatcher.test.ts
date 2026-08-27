@@ -2610,15 +2610,15 @@ describe("生产网关 A2A Resume（post-authority Invocation=running）", () =>
       expect(cmdRow?.commandState).toBe("acknowledged");
       expect(cmdRow?.acknowledgedAt).toBeTruthy();
 
-      // ingress 序号从 MAX+1 连续推进无 gap/collision（1 前置 + response.completed）；
-      // execution.completed 属"终态后事件"（Hosted 容错语义，hosted-adapter 6 步先例），
-      // ingress 拒绝且不消费序号。
+      // ingress 序号从 MAX+1 连续推进无 gap/collision（1 前置 + response.completed +
+      // execution.completed）。Authority 拆分后 response.completed 不再提前终态，
+      // execution.completed（执行终态唯一 Authority）同批/后续均被接受并消费序号。
       const ingressRows = await db
         .select({ seq: runtimeEventIngressTable.producerSequence })
         .from(runtimeEventIngressTable)
         .where(eq(runtimeEventIngressTable.invocationId, running.invocationId));
       const sequences = ingressRows.map((r) => r.seq).sort((a, b) => a - b);
-      expect(sequences).toEqual([1, 2]);
+      expect(sequences).toEqual([1, 2, 3]);
 
       // 官方答复文本持久化为 agent_message Item。
       const [replyItem] = await db

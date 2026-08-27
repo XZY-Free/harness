@@ -280,6 +280,12 @@ describe("createA2ATransport（04 §4–§9，HR 公开合同 wire）", () => {
     expect(types).toContain("execution.completed");
     const completed = all.find((e) => e.type === "response.completed");
     expect((completed?.payload as { text?: string }).text).toBe("最终答复");
+    // 冻结语义：同一 completed update 拆出的两个候选事件，response.completed
+    //（内容 Authority）必须先于 execution.completed（执行终态 Authority）。
+    const responseIdx = types.indexOf("response.completed");
+    const executionIdx = types.indexOf("execution.completed");
+    expect(responseIdx).toBeGreaterThanOrEqual(0);
+    expect(executionIdx).toBeGreaterThan(responseIdx);
     // producer_sequence 连续递增。
     const seqs = all.map((e) => e.producer_sequence);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
