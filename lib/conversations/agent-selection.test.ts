@@ -16,6 +16,7 @@ import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { threadEventTable, turnTable } from "@/lib/persistence/schema/conversation";
 import {
   MAX_TRAFFIC_WEIGHT,
   createRouteSet,
@@ -23,6 +24,7 @@ import {
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
 import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
@@ -134,6 +136,52 @@ describe("Per-Invocation Agent Selection（05）", () => {
     expect(resp.status).toBe(422);
     const body = (await resp.json()) as { error: { code: string } };
     expect(body.error.code).toBe("BUSINESS_CONSTRAINT_VIOLATION");
+  });
+
+  it("06 专项 P2-4：required Route race（accept 后 resolve 失败）→ Turn failed + turn.failed Event + Idempotency completed + 0 Invocation；同 key replay 不重复 Turn", async () => {
+    const ctx = await seedDispatchableTurn({ agentKey: "sel-agent-race" });
+    const threadId = await createThreadForOwner("sel-race");
+    const resp = await postTurn(threadId, "sel-race", {
+      input: { type: "text", text: "路由竞态" },
+      agent_selection: { mode: "required", agent_id: ctx.agentId },
+    });
+    expect(resp.status).toBe(422);
+    const body = (await resp.json()) as {
+      error: { code: string; details?: { reason?: string; turn_id?: string } };
+    };
+    expect(body.error.code).toBe("BUSINESS_CONSTRAINT_VIOLATION");
+    expect(body.error.details?.reason).toBe("no_effective_route");
+    const turnId = body.error.details?.turn_id;
+    expect(turnId).toBeTruthy();
+
+    // Turn 终态 failed（不再 accepted forever）+ errorCode
+    const turn = await getTurnById(ctx.tenantId, turnId as string);
+    expect(turn?.turnState).toBe("failed");
+    expect(turn?.errorCode).toBe("no_effective_route");
+    expect(turn?.finishedAt).not.toBeNull();
+    expect(turn?.activeInvocationId).toBeNull();
+    // 0 Invocation（Route resolve 在 createInvocation 之前失败）
+    expect(turn?.latestInvocationId).toBeNull();
+
+    // turn.failed Event（正式 Contract 事件，SSE/投影可见）
+    const events = await db
+      .select()
+      .from(threadEventTable)
+      .where(eq(threadEventTable.turnId, turnId as string));
+    expect(events.some((e) => e.eventType === "turn.failed")).toBe(true);
+
+    // 同 key 同 body replay → 同一 422 失败；Turn 数量不增加
+    const replay = await postTurn(threadId, "sel-race", {
+      input: { type: "text", text: "路由竞态" },
+      agent_selection: { mode: "required", agent_id: ctx.agentId },
+    });
+    expect(replay.status).toBe(422);
+    const replayBody = (await replay.json()) as {
+      error: { details?: { turn_id?: string } };
+    };
+    expect(replayBody.error.details?.turn_id).toBe(turnId);
+    const turns = await db.select().from(turnTable).where(eq(turnTable.threadId, threadId));
+    expect(turns).toHaveLength(1);
   });
 
   it("agent_selection 非法 → 400 REQUEST_SCHEMA_INVALID", async () => {

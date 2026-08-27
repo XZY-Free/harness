@@ -30,6 +30,7 @@ import {
   allocateEventSequences,
   allocateItemSequence,
   allocateTurnSequence,
+  insertThreadEvent,
 } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import {
@@ -555,6 +556,121 @@ export async function acceptChildTaskTurn(params: {
 }
 
 /** 按 id 获取 Turn（跨租户隔离）。不存在返回 null。 */
+// ─── 06 专项：接纳后调度失败终态化 ─────────────────────────
+
+/** finalizeAcceptedTurnDispatchFailure 入参。 */
+export interface FinalizeAcceptedTurnDispatchFailureParams {
+  tenantId: string;
+  threadId: string;
+  turnId: string;
+  /** 稳定失败原因码（route_* 系，如 no_effective_route / agent_revision_not_found）。 */
+  reasonCode: string;
+  actorType?: ThreadEventActorType;
+  actorId?: string | null;
+  correlationId?: string | null;
+  /** 幂等键（用于 ThreadEvent UNIQUE 约束）。 */
+  idempotencyKey?: string | null;
+}
+
+/** finalizeAcceptedTurnDispatchFailure 结果。 */
+export interface FinalizeAcceptedTurnDispatchFailureResult {
+  turn: Turn;
+  event: ThreadEvent;
+}
+
+/**
+ * 接纳后调度失败的正式终态化事务（06 专项 P2-4）。
+ *
+ * 场景：acceptUserMessageTurn 已提交（Turn=accepted）之后、dispatch 阶段发生
+ * 确定性失败（required Agent Route race 不可用等）。Route resolve 在 createInvocation
+ * 之前失败，因此这里没有 Invocation，不使用 Invocation failure Authority。
+ *
+ * 同一事务：
+ * 1. lock Turn（FOR UPDATE）
+ * 2. 只允许 Turn.state=accepted（并发/已终态 → TurnAlreadyFinalizedError 语义，
+ *    本实现返回 null 由调用方按幂等处理）
+ * 3. Turn → failed（errorCode=reasonCode、finishedAt=now、activeInvocationId=null）
+ * 4. allocate event sequence + append turn.failed Event（payload: reason_code）
+ *
+ * 不变量：
+ * - 不 fallback base route、不自动复活；Route 恢复后用户重新提交新 Turn。
+ * - 不把所有 no-route 都终态化：调用方只在 agent_selection.required 的确定性
+ *   失败时调用本函数；基础 Harness no-route 保持 accepted（等待路由配置）。
+ */
+export async function finalizeAcceptedTurnDispatchFailure(
+  params: FinalizeAcceptedTurnDispatchFailureParams,
+): Promise<FinalizeAcceptedTurnDispatchFailureResult | null> {
+  const actorType: ThreadEventActorType = params.actorType ?? "system";
+  const now = new Date();
+
+  return db.transaction(async (tx) => {
+    // 锁定 Thread 行（event sequence 分配的既有并发模式）
+    const [thread] = await tx
+      .select({ id: threadTable.id })
+      .from(threadTable)
+      .where(eq(threadTable.id, params.threadId))
+      .for("update")
+      .limit(1);
+    if (!thread) {
+      throw new Error(
+        `finalizeAcceptedTurnDispatchFailure: Thread 不存在（id=${params.threadId}）`,
+      );
+    }
+
+    // 1. lock Turn
+    const [turnRow] = await tx
+      .select()
+      .from(turnTable)
+      .where(eq(turnTable.id, params.turnId))
+      .for("update")
+      .limit(1);
+    if (!turnRow) {
+      throw new Error(`finalizeAcceptedTurnDispatchFailure: Turn 不存在（id=${params.turnId}）`);
+    }
+
+    // 2. 只允许 accepted（已推进/已终态 → 幂等返回 null）
+    if (turnRow.turnState !== "accepted") {
+      return null;
+    }
+
+    // 3. Turn → failed
+    await tx
+      .update(turnTable)
+      .set({
+        turnState: "failed",
+        errorCode: params.reasonCode,
+        finishedAt: now,
+        activeInvocationId: null,
+        versionNo: turnRow.versionNo + 1,
+      })
+      .where(eq(turnTable.id, params.turnId));
+
+    // 4. append turn.failed Event
+    const seq = await allocateEventSequences(tx, params.threadId, 1);
+    const event = await insertThreadEvent(tx, params.threadId, seq, {
+      eventType: "turn.failed",
+      turnId: params.turnId,
+      actorType,
+      actorId: params.actorId ?? undefined,
+      payload: {
+        reason_code: params.reasonCode,
+      },
+      correlationId: params.correlationId ?? undefined,
+      idempotencyKey: params.idempotencyKey ?? undefined,
+    });
+
+    const [updated] = await tx
+      .select()
+      .from(turnTable)
+      .where(eq(turnTable.id, params.turnId))
+      .limit(1);
+    if (!updated) {
+      throw new Error(`finalizeAcceptedTurnDispatchFailure: Turn 行未找到（id=${params.turnId}）`);
+    }
+    return { turn: updated, event };
+  });
+}
+
 export async function getTurnById(tenantId: string, turnId: string): Promise<Turn | null> {
   const [row] = await db
     .select()

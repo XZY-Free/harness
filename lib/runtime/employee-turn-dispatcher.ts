@@ -52,6 +52,12 @@ const resolveRoute: RouteResolver = async (input) => {
 
 export interface EmployeeTurnDispatchResult {
   dispatched: boolean;
+  /** 未调度原因（dispatched=false 时填；06 专项 P2-4 的稳定 route_* 原因码）。 */
+  reason?:
+    | "no_effective_route"
+    | "ambiguous_route_configuration"
+    | "invalid_traffic_weight_total"
+    | "agent_revision_not_found";
   /** Agent Loop 的后台执行；HTTP 路由不等待它，测试可等待。 */
   completion: Promise<void>;
 }
@@ -122,9 +128,20 @@ export async function dispatchEmployeeTurn(params: {
 
   if (routeOutcome.status !== "resolved") {
     // Thread 不绑定 Agent；无 Ready Route 时热路径不发起 Agent-specific Hosted Provisioning。
-    // Turn 保持 accepted 并返回未调度，
-    // 基础 Harness Route 由正式控制面初始化供应策略。
-    return { dispatched: false, completion: Promise.resolve() };
+    // Turn 保持 accepted 并返回未调度（基础 Harness Route 由正式控制面初始化供应策略）；
+    // reason 供调用方区分确定性失败（06 专项 P2-4：required Route race 终态化）。
+    return {
+      dispatched: false,
+      reason:
+        routeOutcome.status === "unresolved"
+          ? routeOutcome.reason === "ambiguous_route_configuration"
+            ? "ambiguous_route_configuration"
+            : routeOutcome.reason === "invalid_traffic_weight_total"
+              ? "invalid_traffic_weight_total"
+              : "no_effective_route"
+          : undefined,
+      completion: Promise.resolve(),
+    };
   }
 
   // ─── 有 Ready Route → 按 protocolType 解析 Transport（04 §3/§10）──────────
