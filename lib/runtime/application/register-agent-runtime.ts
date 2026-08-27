@@ -44,6 +44,10 @@ import {
   ActiveExternalConformanceSignerError,
   resolveActiveExternalConformanceSigner,
 } from "@/lib/runtime/application/resolve-active-external-conformance-signer";
+import {
+  ConformanceProbeContextUnavailableError,
+  buildExternalConformanceProbeContext,
+} from "@/lib/runtime/conformance/build-external-conformance-probe-context";
 import { createConfiguredRuntimeConformanceVerifier } from "@/lib/runtime/conformance/configured-runtime-conformance-verifier";
 import {
   OutboundRuntimeAuthError,
@@ -75,7 +79,8 @@ export type AgentRuntimeRegistrationErrorKind =
   | "credential_unresolvable" // 凭证引用存在但不可解析/指纹不符（400，网络前）
   | "signer_untrusted" // 平台 active-external signer 缺失/不可信（422，网络前 fail closed）
   | "runtime_conflict" // 稳定 Runtime 身份存在但形态/生命周期冲突（422，拒绝复用）
-  | "conformance_failed"; // 主动网络验收失败（422，fail closed）
+  | "conformance_failed" // 主动网络验收失败（422，fail closed）
+  | "conformance_context_unavailable"; // required context 无法由 Conformance Runner 提供（422，网络前 fail closed，03 专项）
 
 export class AgentRuntimeRegistrationError extends Error {
   constructor(
@@ -424,6 +429,7 @@ async function streamUntilCorrelation(
   endpoint: string,
   credential: ResolvedCredential,
   input: string,
+  metadata?: () => Record<string, unknown>,
 ): Promise<Correlation> {
   const response = await fetch(endpoint, {
     method: "POST",
@@ -436,7 +442,7 @@ async function streamUntilCorrelation(
       jsonrpc: "2.0",
       id: randomUUID(),
       method: "message/stream",
-      params: { message: buildA2AMessage(input) },
+      params: { message: buildA2AMessage(input, undefined, metadata?.()) },
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   }).catch(() => {
@@ -635,12 +641,14 @@ async function probeCancel(
   credential: ResolvedCredential,
   input: string,
   streamingTransport: boolean,
+  /** 03 专项：start long-running task 的 Message 也必须携带合法 Context（同一 Builder）。 */
+  metadata: () => Record<string, unknown>,
 ): Promise<void> {
   let start: Correlation;
   if (streamingTransport) {
-    start = await streamUntilCorrelation(endpoint, credential, input);
+    start = await streamUntilCorrelation(endpoint, credential, input, metadata);
   } else {
-    const result = await sendMessage(endpoint, credential, input);
+    const result = await sendMessage(endpoint, credential, input, undefined, metadata());
     const correlated = correlationOf(result);
     if (!correlated) {
       throw new AgentRuntimeRegistrationError("conformance_failed", "cancel 起始缺少 correlation");
@@ -836,21 +844,31 @@ export async function registerAgentRuntime(
   }
 
   // 2) AgentCard 协议证据 + capability-driven probes（顺序执行，一次网络序列）。
-  // probe 携带平台系统验收身份的公共 Context metadata（每次调用刷新 current_datetime）；
-  // 真实 Provider 按公共合同从当前 message.metadata 提取执行上下文（00 §5）。
-  const probeMetadata = (): Record<string, unknown> =>
-    buildA2APublicMessageMetadata([
-      {
-        context_kind: "execution_subject",
-        value: executionSubjectToPublicAgentSubject(
-          executionSubjectFromServiceIdentity(command.tenantId, signer.runnerIdentity),
-        ),
-      },
-      { context_kind: "current_datetime", value: new Date().toISOString() },
-      ...(Array.isArray(snapshot.supportedLocales) && snapshot.supportedLocales.length > 0
-        ? [{ context_kind: "locale", value: snapshot.supportedLocales[0] as string }]
-        : []),
-    ]);
+  // 03 专项：Probe Context 必须按 exact InvocationContextContract 构建（唯一 Builder）——
+  // 只发送该 Agent 合同声明且 Conformance Runner 合法可提供的 Context；required 无法
+  // 提供时网络前 fail closed；每条 Message 刷新 current_datetime。禁止硬编码塞
+  // execution_subject/current_datetime/locale。
+  let probeContext: Awaited<ReturnType<typeof buildExternalConformanceProbeContext>>;
+  try {
+    probeContext = await buildExternalConformanceProbeContext({
+      tenantId: command.tenantId,
+      snapshotId: snapshot.id,
+      supportedLocales: Array.isArray(snapshot.supportedLocales)
+        ? (snapshot.supportedLocales as string[])
+        : [],
+      runnerIdentity: signer.runnerIdentity,
+    });
+  } catch (err) {
+    if (err instanceof ConformanceProbeContextUnavailableError) {
+      // 稳定 Registration error reason（03 §四）：网络请求次数 = 0。
+      throw new AgentRuntimeRegistrationError(
+        "conformance_context_unavailable",
+        `合同 required context 无法由 Conformance Runner 提供：${err.contextKind}`,
+      );
+    }
+    throw err;
+  }
+  const probeMetadata = probeContext.metadataFactory;
   const probeStartedAt = new Date();
   await probeAgentCardConsistency(endpoint, credential, snapshot);
   const increments = { observed: false };
@@ -889,6 +907,7 @@ export async function registerAgentRuntime(
       credential,
       command.conformance.cancel.input,
       snapshot.streamingTransport,
+      probeMetadata,
     );
   }
   // 02 §4：incremental_content=true 必须真实观测至少一条内容/artifact 增量。
@@ -980,6 +999,12 @@ export async function registerAgentRuntime(
     measured,
     capabilities,
     signer,
+    // 03 §九：审计摘要只记录 kind（supplied/omitted_preferred/unavailable_required 恒空）。
+    probeContextKinds: {
+      supplied: probeContext.probeContextKinds.supplied,
+      omitted_preferred: probeContext.probeContextKinds.omittedPreferred,
+      unavailable_required: probeContext.probeContextKinds.unavailableRequired,
+    },
   });
   if (built.report.overallResult !== "passed") {
     // 诚实一致性裁决失败（如声明 durable 未测）：fail closed，零行落库。

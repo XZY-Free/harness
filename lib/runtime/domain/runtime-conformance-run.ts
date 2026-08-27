@@ -23,6 +23,15 @@ export interface RuntimeConformanceReport {
   completedAt: string;
   overallResult: RuntimeConformanceOverallResult;
   evidenceManifestDigest: string;
+  /**
+   * 03 专项：Probe Context 审计摘要（只记录 kind，不记录 subject_id/datetime/attachment 等
+   * 具体 Context value；成功时 unavailable_required 恒空）。可选：兼容既有历史报告。
+   */
+  probe_context_kinds?: {
+    supplied: string[];
+    omitted_preferred: string[];
+    unavailable_required: string[];
+  };
   caseResults: Array<{
     caseId: RuntimeConformanceCaseId;
     passed: boolean;

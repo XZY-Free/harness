@@ -116,6 +116,11 @@ export interface A2ATestProvider {
    */
   setCardStreaming(streaming: boolean): void;
   /**
+   * 03 专项 Strict Provider：设置后任何 message.metadata 携带 allowlist 之外的
+   * context key 即返回 JSON-RPC error（严格 Provider 对未知 key fail closed 的反例）。
+   */
+  setStrictMetadataAllowlist(keys: string[] | null): void;
+  /**
    * 注册验收专用：清空 requests/captured/rpcMethods、复位 correlation 篡改与
    * Bearer 校验，并把场景重置为 input_required（测试间状态隔离）。
    */
@@ -165,6 +170,7 @@ export async function startA2ATestProvider(
   let resumeResponseShape: "status-update" | "task" = "task";
   let cardProtocolVersion = "0.3.0";
   let cardStreaming = true;
+  let strictMetadataAllowlist: string[] | null = null;
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -263,6 +269,22 @@ export async function startA2ATestProvider(
         return;
       }
 
+      // 03 专项 Strict Provider：未知 metadata context key → JSON-RPC error（fail closed）。
+      const allowlist = strictMetadataAllowlist;
+      if (allowlist !== null) {
+        const metaKeys = Object.keys(message.metadata ?? {});
+        if (metaKeys.some((k) => !allowlist.includes(k))) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: rpc.id ?? 1,
+              error: { code: -32602, message: "unexpected context key" },
+            }),
+          );
+          return;
+        }
+      }
       const text = (message.parts ?? [])
         .filter((p) => p.kind === "text")
         .map((p) => p.text ?? "")
@@ -505,7 +527,11 @@ export async function startA2ATestProvider(
     setCardStreaming(streaming: boolean) {
       cardStreaming = streaming;
     },
+    setStrictMetadataAllowlist(keys: string[] | null) {
+      strictMetadataAllowlist = keys;
+    },
     reset() {
+      strictMetadataAllowlist = null;
       captured.length = 0;
       requests.length = 0;
       rpcMethods.length = 0;

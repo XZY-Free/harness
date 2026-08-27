@@ -371,9 +371,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       if (
         err.kind === "conformance_failed" ||
         err.kind === "runtime_conflict" ||
-        err.kind === "signer_untrusted"
+        err.kind === "signer_untrusted" ||
+        err.kind === "conformance_context_unavailable"
       ) {
-        // 验收失败/稳定身份冲突：fail closed（无新行），不回显远端响应内容。
+        // 验收失败/稳定身份冲突/required context 无法提供：fail closed（无新行），
+        // 不回显远端响应内容。03 专项：conformance_context_unavailable 为网络前失败。
         return apiError("BUSINESS_CONSTRAINT_VIOLATION", "Runtime 一致性验收失败，注册被拒绝", {
           requestId,
         });

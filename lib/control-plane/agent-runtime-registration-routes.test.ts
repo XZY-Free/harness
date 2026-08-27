@@ -1354,3 +1354,133 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（capabilit
     await expect(loadConformanceRuns(seeded.tenantId)).resolves.toHaveLength(1);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 03 专项：Contract-driven Conformance Context
+// ═══════════════════════════════════════════════════════════
+
+/** 覆盖合同 invocation_context + interaction（其余 HR 合同事实保留）。 */
+function contractWithProbeContextProfile(
+  contexts: Array<Record<string, unknown>>,
+  interaction: Record<string, unknown>,
+): unknown {
+  const contract = structuredClone(hrAgentContract) as Record<string, unknown>;
+  contract.invocation_context = contexts;
+  contract.interaction = {
+    durable_task_recovery: false,
+    supported_locales: ["zh-CN", "en-US"],
+    ...interaction,
+  };
+  return contract;
+}
+
+describe("03 专项 Contract-driven Conformance Context（注册验收）", () => {
+  it("Strict-Minimal：合同只声明 locale preferred → 只发送 locale（严格 Provider 拒绝任何额外 key 仍注册成功）", async () => {
+    const contract = contractWithProbeContextProfile(
+      [{ key: "locale", name: { "zh-CN": "语言环境" }, necessity: "preferred" }],
+      {
+        streaming_transport: false,
+        incremental_content: false,
+        input_required: false,
+        resume: false,
+        cancel: false,
+      },
+    );
+    const seeded = await seedRegistrationTarget({ contract });
+    provider.setCardStreaming(false);
+    provider.setScenario("completed");
+    provider.setStrictMetadataAllowlist(["locale"]);
+    const before = provider.requests.length;
+
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, A_CONFORMANCE),
+      "idem-rt-ctx-strict-minimal-001",
+    );
+    expect(response.status).toBe(201);
+    expect(provider.requests.length - before).toBeGreaterThan(0);
+
+    // 每条 message.metadata 只有 locale（绝无 execution_subject/current_datetime/timezone）
+    expect(provider.captured.length).toBeGreaterThan(0);
+    for (const c of provider.captured) {
+      expect(Object.keys(c.messageMetadata ?? {})).toEqual(["locale"]);
+    }
+  });
+
+  it("Required-Subject：execution_subject required → 全部 probe message（含 cancel start）都带 platform_service subject", async () => {
+    const contract = contractWithProbeContextProfile(
+      [
+        { key: "execution_subject", name: { "zh-CN": "执行主体" }, necessity: "required" },
+        { key: "current_datetime", name: { "zh-CN": "当前时间" }, necessity: "preferred" },
+      ],
+      {
+        streaming_transport: true,
+        incremental_content: false,
+        input_required: false,
+        resume: false,
+        cancel: true,
+      },
+    );
+    const seeded = await seedRegistrationTarget({ contract });
+    provider.setScenario("long_running");
+    provider.setCardStreaming(true);
+
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, C_CONFORMANCE),
+      "idem-rt-ctx-required-subject-001",
+    );
+    expect(response.status).toBe(201);
+
+    expect(provider.captured.length).toBeGreaterThan(0);
+    for (const c of provider.captured) {
+      const subject = c.messageMetadata?.execution_subject as { subject_kind?: string } | undefined;
+      expect(subject?.subject_kind).toBe("platform_service");
+    }
+    // 报告审计摘要：probe_context_kinds 只含 kind
+    const runs = await loadConformanceRuns(seeded.tenantId);
+    expect(runs).toHaveLength(1);
+    // DSSE envelope payload 解码出正式报告（03 §九：审计摘要只记录 kind）
+    const envelope = JSON.parse(runs[0]?.envelopeJson ?? "{}") as {
+      payload?: string;
+    };
+    const report = JSON.parse(Buffer.from(envelope.payload ?? "", "base64").toString("utf8")) as {
+      predicate?: {
+        probe_context_kinds?: {
+          supplied?: string[];
+          unavailable_required?: string[];
+        };
+      };
+    };
+    expect(report.predicate?.probe_context_kinds?.supplied).toContain("execution_subject");
+    expect(report.predicate?.probe_context_kinds?.supplied).toContain("current_datetime");
+    expect(report.predicate?.probe_context_kinds?.unavailable_required).toEqual([]);
+  });
+
+  it("Required unavailable：workspace_context required → 422 + 网络零请求 + 零 Runtime/Revision/Run", async () => {
+    const contract = contractWithProbeContextProfile(
+      [{ key: "workspace_context", name: { "zh-CN": "工作区上下文" }, necessity: "required" }],
+      {
+        streaming_transport: false,
+        incremental_content: false,
+        input_required: false,
+        resume: false,
+        cancel: false,
+      },
+    );
+    const seeded = await seedRegistrationTarget({ contract });
+    provider.setCardStreaming(false);
+    provider.setScenario("completed");
+    const before = provider.requests.length;
+
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, A_CONFORMANCE),
+      "idem-rt-ctx-unavailable-001",
+    );
+    expect(response.status).toBe(422);
+    // 网络请求次数 = 0（fail closed 在任何 Provider 请求之前）
+    expect(provider.requests.length - before).toBe(0);
+    await expectNoConformanceResidue(seeded.tenantId);
+  });
+});

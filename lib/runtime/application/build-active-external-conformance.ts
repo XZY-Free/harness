@@ -70,6 +70,12 @@ export interface ActiveExternalConformanceBuilderInput {
   /** declared/measured/effective 三态投影（measured 必须与顶层一致）。 */
   capabilities: RuntimeCapabilitiesProjection;
   signer: ActiveExternalConformanceSigner;
+  /** 03 专项：Probe Context 审计摘要（只记录 kind；可选）。 */
+  probeContextKinds?: {
+    supplied: string[];
+    omitted_preferred: string[];
+    unavailable_required: string[];
+  };
 }
 
 export interface ActiveExternalConformanceBuildResult {
@@ -366,6 +372,7 @@ export function buildActiveExternalConformanceReport(
     startedAt: input.startedAt,
     completedAt: input.completedAt,
     overallResult,
+    ...(input.probeContextKinds ? { probe_context_kinds: input.probeContextKinds } : {}),
     evidenceManifestDigest: computeEvidenceManifestDigest({
       suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
       testEnvironmentRevision: TEST_ENVIRONMENT_REVISION,
