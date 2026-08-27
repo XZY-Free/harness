@@ -1250,6 +1250,69 @@ describe("01 专项 Durable Dispatch Retry（Attempt lane）", () => {
     expect(kinds).not.toContain("invocationId");
   });
 
+  it("claimDueInvocationAttempts：活跃 lease 内不可被其他 worker 重复领取；lease 过期后可接管", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: "turn-1",
+      initialExecutionState: "waiting_user",
+    });
+    const attemptId = (await createAttempt({ invocationId: seeded.invocationId })).id;
+
+    // 注入时钟：nextDispatchAt 已到期
+    const now = new Date("2026-08-27T10:00:00.000Z");
+    await db
+      .update(invocationAttemptTable)
+      .set({ nextDispatchAt: new Date(now.getTime() - 1_000) })
+      .where(eq(invocationAttemptTable.id, attemptId));
+
+    // worker-a 领取（30s lease，10:00:30 到期）
+    const claimedByA = await claimDueInvocationAttempts({
+      now,
+      leaseOwner: "worker-a",
+      leaseDurationMs: 30_000,
+      limit: 10,
+    });
+    expect(claimedByA.map((a) => a.id)).toContain(attemptId);
+
+    // worker-a 已提交 lease 后的第二次 poll：lease 仍活跃（10:00:05 < 10:00:30），
+    // worker-b 不得领取同一行（否则会产生重复 HTTP dispatch）
+    const claimedByB = await claimDueInvocationAttempts({
+      now: new Date(now.getTime() + 5_000),
+      leaseOwner: "worker-b",
+      leaseDurationMs: 30_000,
+      limit: 10,
+    });
+    expect(claimedByB.filter((a) => a.id === attemptId)).toHaveLength(0);
+
+    // DB owner 仍是 worker-a（未被 worker-b 覆盖）
+    const [leased] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, attemptId))
+      .limit(1);
+    expect(leased?.dispatchLeaseOwner).toBe("worker-a");
+
+    // lease 过期后（10:00:31 > 10:00:30）：worker-b 可接管
+    const reclaimed = await claimDueInvocationAttempts({
+      now: new Date(now.getTime() + 31_000),
+      leaseOwner: "worker-b",
+      leaseDurationMs: 30_000,
+      limit: 10,
+    });
+    expect(reclaimed.map((a) => a.id)).toContain(attemptId);
+    const [takenOver] = await db
+      .select()
+      .from(invocationAttemptTable)
+      .where(eq(invocationAttemptTable.id, attemptId))
+      .limit(1);
+    expect(takenOver?.dispatchLeaseOwner).toBe("worker-b");
+  });
+
   it("claimDueInvocationAttempts：due 可领取（写 lease），非 due / 终态不领取", async () => {
     const seeded = await seedInvocation({
       tenantId,

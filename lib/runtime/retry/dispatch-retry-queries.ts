@@ -27,14 +27,15 @@ import {
   backoffDelayMs,
   isRetryExhausted,
 } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
-import { and, asc, eq, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * 领取 due 的 queued InvocationAttempt（正式 retry work）。
- * 候选：attemptState=queued AND nextDispatchAt IS NOT NULL AND nextDispatchAt <= now。
+ * 候选：attemptState=queued AND nextDispatchAt IS NOT NULL AND nextDispatchAt <= now
+ * AND（dispatchLeaseExpiresAt IS NULL OR dispatchLeaseExpiresAt <= now）——活跃 lease 阻断领取。
  * 事务内 FOR UPDATE SKIP LOCKED + 写 lease；返回的行已持 lease（含续约时间）。
  */
 export async function claimDueInvocationAttempts(params: {
@@ -52,6 +53,11 @@ export async function claimDueInvocationAttempts(params: {
           eq(invocationAttemptTable.attemptState, "queued"),
           isNotNull(invocationAttemptTable.nextDispatchAt),
           lte(invocationAttemptTable.nextDispatchAt, params.now),
+          // 活跃 lease 阻断领取：无 lease 或 lease 已过期才可被 claim
+          or(
+            isNull(invocationAttemptTable.dispatchLeaseExpiresAt),
+            lte(invocationAttemptTable.dispatchLeaseExpiresAt, params.now),
+          ),
         ),
       )
       .orderBy(asc(invocationAttemptTable.nextDispatchAt))
@@ -112,10 +118,10 @@ export async function recordAttemptDispatchAttemptStarted(params: {
 
 /**
  * 领取 due 的 dispatched InvocationCommand。
- * 候选：commandState=dispatched AND (
+ * 候选：commandState=dispatched AND（无 lease OR lease 已过期）AND (
  *   nextDispatchAt IS NOT NULL AND nextDispatchAt <= now   -- 正式 transient retry work
  *   OR dispatchLeaseExpiresAt IS NOT NULL AND dispatchLeaseExpiresAt <= now  -- dispatcher 崩溃接管
- * )。
+ * )。活跃 lease 始终阻断领取（即使 nextDispatchAt 已 due）。
  */
 export async function claimDueInvocationCommands(params: {
   now: Date;
@@ -130,6 +136,11 @@ export async function claimDueInvocationCommands(params: {
       .where(
         and(
           eq(invocationCommandTable.commandState, "dispatched"),
+          // 活跃 lease 始终阻断领取（即使 nextDispatchAt 已 due）
+          or(
+            isNull(invocationCommandTable.dispatchLeaseExpiresAt),
+            lte(invocationCommandTable.dispatchLeaseExpiresAt, params.now),
+          ),
           or(
             and(
               isNotNull(invocationCommandTable.nextDispatchAt),

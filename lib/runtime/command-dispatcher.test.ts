@@ -2941,6 +2941,67 @@ describe("01 专项 Durable Dispatch Retry（Command lane）", () => {
     expect(invocation?.executionState).not.toBe("cancelled");
   });
 
+  it("claimDueInvocationCommands：活跃 lease 内（含 nextDispatchAt 已 due）不可被其他 worker 领取；过期后可接管", async () => {
+    const running = await seedRunningInvocationWithRunningTurn(ctx);
+    await transitionToWaitingUser(ctx, running);
+
+    const resumeCommandId = await createResumeCommand({
+      threadId: ctx.threadId,
+      turnId: ctx.turnId,
+      invocationId: running.invocationId,
+      resumePayload: { action: "confirm" },
+      idempotencyKey: "resume-lease-active-1",
+    });
+
+    // 注入时钟：worker-a 已通过 transient retry lane 领取（nextDispatchAt 已 due + 30s 活跃 lease）
+    const now = new Date("2026-08-27T10:00:00.000Z");
+    await db
+      .update(invocationCommandTable)
+      .set({
+        commandState: "dispatched",
+        dispatchedAt: now,
+        nextDispatchAt: new Date(now.getTime() - 1_000),
+        dispatchAttemptCount: 1,
+        lastDispatchAttemptAt: now,
+        dispatchLeaseOwner: "worker-a",
+        dispatchLeaseExpiresAt: new Date(now.getTime() + 30_000),
+      })
+      .where(eq(invocationCommandTable.id, resumeCommandId));
+
+    // worker-b 在 lease 活跃期间（10:00:05 < 10:00:30）poll：nextDispatchAt 虽已 due，
+    // 但活跃 lease 必须阻断领取（否则 due 的 nextDispatchAt 会绕过 lease 造成重复 HTTP dispatch）
+    const claimedByB = await claimDueInvocationCommands({
+      now: new Date(now.getTime() + 5_000),
+      leaseOwner: "worker-b",
+      leaseDurationMs: 30_000,
+      limit: 10,
+    });
+    expect(claimedByB.filter((c) => c.id === resumeCommandId)).toHaveLength(0);
+
+    // DB owner 仍是 worker-a
+    const [leased] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, resumeCommandId))
+      .limit(1);
+    expect(leased?.dispatchLeaseOwner).toBe("worker-a");
+
+    // lease 过期后（10:00:31 > 10:00:30）：worker-b 可接管（crash / lease recovery）
+    const reclaimed = await claimDueInvocationCommands({
+      now: new Date(now.getTime() + 31_000),
+      leaseOwner: "worker-b",
+      leaseDurationMs: 30_000,
+      limit: 10,
+    });
+    expect(reclaimed.map((c) => c.id)).toContain(resumeCommandId);
+    const [takenOver] = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.id, resumeCommandId))
+      .limit(1);
+    expect(takenOver?.dispatchLeaseOwner).toBe("worker-b");
+  });
+
   it("claimDueInvocationCommands：lease 过期可接管（crash recovery），非 due 不领取", async () => {
     const running = await seedRunningInvocationWithRunningTurn(ctx);
     await transitionToWaitingUser(ctx, running);
