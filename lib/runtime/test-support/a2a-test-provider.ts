@@ -90,7 +90,13 @@ export interface A2ATestProvider {
    * 全部到达 Provider 的 HTTP 请求（method + path + Authorization 头，黑盒断言网络序列用；
    * Authorization 只记录原样头值，供测试比对，不属于 Provider 状态）。
    */
-  requests: Array<{ method: string; path: string; authorization?: string }>;
+  requests: Array<{
+    method: string;
+    path: string;
+    authorization?: string;
+    /** x-idempotency-key 头（稳定 Runtime Idempotency-Key 断言用）。 */
+    idempotencyKey?: string;
+  }>;
   /** 每个已解析 JSON-RPC 请求的 method（含 tasks/cancel，分支前记录，wire 观测用）。 */
   rpcMethods: string[];
   /**
@@ -120,6 +126,11 @@ export interface A2ATestProvider {
    * context key 即返回 JSON-RPC error（严格 Provider 对未知 key fail closed 的反例）。
    */
   setStrictMetadataAllowlist(keys: string[] | null): void;
+  /**
+   * Failure E2E：设置后前 N 个 POST /（JSON-RPC）请求返回 HTTP 503
+   *（真实 transient 反例：第一次 503、第二次 200）。
+   */
+  setFlaky(failures: number): void;
   /**
    * 注册验收专用：清空 requests/captured/rpcMethods、复位 correlation 篡改与
    * Bearer 校验，并把场景重置为 input_required（测试间状态隔离）。
@@ -160,7 +171,12 @@ export async function startA2ATestProvider(
   options: { legacyCardOnly?: boolean } = {},
 ): Promise<A2ATestProvider> {
   const captured: CapturedA2ARequest[] = [];
-  const requests: Array<{ method: string; path: string; authorization?: string }> = [];
+  const requests: Array<{
+    method: string;
+    path: string;
+    authorization?: string;
+    idempotencyKey?: string;
+  }> = [];
   const rpcMethods: string[] = [];
   let scenario: A2ATestProviderScenario = initialScenario;
   let resumeCorrelationCorrupted = false;
@@ -171,6 +187,8 @@ export async function startA2ATestProvider(
   let cardProtocolVersion = "0.3.0";
   let cardStreaming = true;
   let strictMetadataAllowlist: string[] | null = null;
+  // 03/Failure-E2E：前 N 个 POST / 请求返回 HTTP 503（transient 反例）；随后恢复正常。
+  let flakyFailuresRemaining = 0;
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -179,6 +197,10 @@ export async function startA2ATestProvider(
       path: url.pathname,
       authorization:
         typeof req.headers.authorization === "string" ? req.headers.authorization : undefined,
+      idempotencyKey:
+        typeof req.headers["x-idempotency-key"] === "string"
+          ? (req.headers["x-idempotency-key"] as string)
+          : undefined,
     });
 
     // Bearer 校验（注册验收）：设置 expected token 后，任何请求不携带恰好匹配的
@@ -219,6 +241,14 @@ export async function startA2ATestProvider(
     if (req.method !== "POST" || url.pathname !== "/") {
       res.writeHead(404, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+
+    // Failure E2E：真实 transient 反例（前 N 个 JSON-RPC 请求 → HTTP 503）。
+    if (flakyFailuresRemaining > 0) {
+      flakyFailuresRemaining -= 1;
+      res.writeHead(503, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "temporarily unavailable" }));
       return;
     }
 
@@ -530,8 +560,12 @@ export async function startA2ATestProvider(
     setStrictMetadataAllowlist(keys: string[] | null) {
       strictMetadataAllowlist = keys;
     },
+    setFlaky(failures: number) {
+      flakyFailuresRemaining = failures;
+    },
     reset() {
       strictMetadataAllowlist = null;
+      flakyFailuresRemaining = 0;
       captured.length = 0;
       requests.length = 0;
       rpcMethods.length = 0;

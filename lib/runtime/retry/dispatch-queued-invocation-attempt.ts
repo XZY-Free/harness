@@ -62,6 +62,7 @@ import {
 } from "@/lib/runtime/session-binding-queries";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
+import { RuntimeTransportError } from "@/lib/runtime/transport/runtime-transport";
 import { and, eq } from "drizzle-orm";
 
 /** 允许重调度的非终态 Invocation 状态（唯一事实源；redispatch-queries 从此处 re-export）。 */
@@ -268,6 +269,36 @@ export async function dispatchQueuedInvocationAttempt(
       now,
     });
   } catch (err) {
+    // A2A Transport 网络不可达/503（stream_interrupted）→ 与 RuntimeHttpClientError
+    // network/503 同语义：transient，进入 durable retry。
+    if (err instanceof RuntimeTransportError && err.kind === "stream_interrupted") {
+      const skipReason: TransientDispatchErrorCode = "runtime_network_unavailable";
+      const outcome = await recordAttemptDispatchTransientFailure({
+        attemptId: attempt.id,
+        errorCode: skipReason,
+        now,
+        counted: true,
+      });
+      if (outcome.outcome === "exhausted") {
+        await markInvocationLost({
+          tenantId: params.tenantId,
+          invocationId: invocation.id,
+          reasonCode: "dispatch_retry_exhausted",
+          errorSummary: `Attempt dispatch retry exhausted（lastTransient=${skipReason}）`,
+          actorType,
+          actorId: params.actorId ?? null,
+          correlationId: params.correlationId ?? null,
+        });
+        return { status: "transient_exhausted", attempt: outcome.attempt, skipReason };
+      }
+      return {
+        status: "transient_scheduled",
+        attempt: outcome.attempt,
+        skipReason,
+        nextDispatchAt: outcome.nextDispatchAt,
+        dispatchAttemptCount: outcome.dispatchAttemptCount,
+      };
+    }
     if (err instanceof RuntimeHttpClientError) {
       // transient → durable retry scheduling
       if (err.kind === "network" || (err.kind === "http" && err.httpStatus === 503)) {

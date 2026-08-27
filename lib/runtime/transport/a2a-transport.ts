@@ -655,6 +655,14 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
           `A2A message/stream 认证失败（HTTP ${resp.status}）`,
         );
       }
+      if (resp.status === 503) {
+        // 01 专项：HTTP 503 = transient（Runtime 暂不可用）→ stream_interrupted 语义，
+        // 进入 durable retry；不得判 protocol_schema 终态。
+        throw new RuntimeTransportError(
+          "stream_interrupted",
+          `A2A message/stream HTTP 503（Runtime 暂不可用）`,
+        );
+      }
       if (!resp.ok || !resp.body) {
         throw new RuntimeTransportError(
           "protocol_schema",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type SourceDocument,
+  checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
   checkRuntimeRegistrationEvidence,
   collectCloseoutBoundaryViolations,
@@ -376,5 +377,152 @@ describe("checkResumeTruthfulnessGate（08 §5）", () => {
       ),
     ]);
     expect(result).toEqual({ passed: true, failures: [] });
+  });
+});
+
+// ─── 九项收口 Gate F1-F8 ────────────────────────────────────
+
+describe("checkNineIssueCloseoutGate（F1-F8）", () => {
+  const PATHS = {
+    commandDispatcher: "lib/runtime/command-dispatcher.ts",
+    dispatcher: "lib/runtime/dispatcher.ts",
+    attemptService: "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
+    recovery: "lib/runtime/recovery-queries.ts",
+    registration: "lib/runtime/application/register-agent-runtime.ts",
+    resolveRoute: "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+    transport: "lib/runtime/transport/a2a-transport.ts",
+    parser: "lib/agents/domain/public-agent-contract.ts",
+    builder: "lib/runtime/application/build-active-external-conformance.ts",
+  };
+
+  function compliantDocs(): SourceDocument[] {
+    return [
+      doc(PATHS.commandDispatcher, "scheduleCommandTransientRetry({});"),
+      doc(PATHS.dispatcher, "recordAttemptDispatchTransientFailure({});"),
+      doc(PATHS.attemptService, "recordAttemptDispatchTransientFailure({});"),
+      doc(
+        PATHS.recovery,
+        'import { markSessionBindingLostInSession } from "@/lib/runtime/session-binding-queries"; markSessionBindingLostInSession(tx, id);',
+      ),
+      doc(
+        PATHS.registration,
+        [
+          "import { buildExternalConformanceProbeContext } from 'x';",
+          "async function probeCancel(endpoint, credential, input, streaming, metadata) { sendMessage(endpoint, credential, input, undefined, metadata()); }",
+          "await probeCancel(endpoint, credential, input, streaming, probeMetadata);",
+        ].join("\n"),
+      ),
+      doc(
+        PATHS.resolveRoute,
+        [
+          'if (gatewayResult.reason === "protocol_not_remote") { mode: "local_runtime" }',
+          'if (gatewayResult.reason === "unsupported_capability") { return 422; }',
+          'if (gatewayResult.reason === "command_not_found") { return 409; }',
+        ].join("\n"),
+      ),
+      doc(
+        PATHS.transport,
+        "runtime_session_ref: contextId, capabilities: { features: { cancel: params.capabilities.cancel, resume: params.capabilities.resume, user_action: params.capabilities.user_action ?? false } }",
+      ),
+      doc(
+        PATHS.parser,
+        'throw new PublicAgentContractError("interaction.input_required=true 要求 interaction.resume=true");',
+      ),
+      doc(PATHS.builder, 'const passed = measuredDurable === "not_measured" && !effectiveDurable;'),
+    ];
+  }
+
+  it("全部合规 → 通过", () => {
+    const result = checkNineIssueCloseoutGate(compliantDocs());
+    expect(result).toEqual({ passed: true, failures: [] });
+  });
+
+  it("F1 缺 retry owner → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === PATHS.commandDispatcher ? doc(d.path, "return skipped;") : d,
+    );
+    const result = checkNineIssueCloseoutGate(docs);
+    expect(result.passed).toBe(false);
+    expect(result.failures.some((f) => f.includes("F1"))).toBe(true);
+  });
+
+  it("F2 recovery 使用全局 markSessionBindingLost → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === PATHS.recovery
+        ? doc(
+            d.path,
+            'import { markSessionBindingLost } from "@/lib/runtime/session-binding-queries";',
+          )
+        : d,
+    );
+    const result = checkNineIssueCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("F2"))).toBe(true);
+  });
+
+  it("F3 手写 Probe context kind → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === PATHS.registration
+        ? doc(
+            d.path,
+            'const m = [{ context_kind: "execution_subject", value: 1 }, { context_kind: "current_datetime", value: 2 }];',
+          )
+        : d,
+    );
+    const result = checkNineIssueCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("F3"))).toBe(true);
+  });
+
+  it("F4 probeCancel 无 metadata → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === PATHS.registration
+        ? doc(
+            d.path,
+            "async function probeCancel(a, b, c, d) { send(c); } await probeCancel(a, b, c, d);",
+          )
+        : d,
+    );
+    const result = checkNineIssueCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("F4"))).toBe(true);
+  });
+
+  it("F5 缺 command_not_found 显式分支 → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === PATHS.resolveRoute
+        ? doc(
+            d.path,
+            'if (gatewayResult.reason === "protocol_not_remote") {} if (gatewayResult.reason === "unsupported_capability") {}',
+          )
+        : d,
+    );
+    const result = checkNineIssueCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("command_not_found"))).toBe(true);
+  });
+
+  it("F6 硬编码 user_action=true → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === PATHS.transport
+        ? doc(d.path, "runtime_session_ref: contextId, features: { user_action: true }")
+        : d,
+    );
+    const result = checkNineIssueCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("F6"))).toBe(true);
+  });
+
+  it("F7 Parser 缺 input_required/resume 约束 → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === PATHS.parser ? doc(d.path, "return flags;") : d,
+    );
+    const result = checkNineIssueCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("F7"))).toBe(true);
+  });
+
+  it("F8 Builder 因 declared 未测判 fail → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === PATHS.builder
+        ? doc(d.path, "const passed = !declaredDurable && !effectiveDurable && measuredDurable;")
+        : d,
+    );
+    const result = checkNineIssueCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("F8"))).toBe(true);
   });
 });

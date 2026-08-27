@@ -1484,3 +1484,42 @@ describe("03 专项 Contract-driven Conformance Context（注册验收）", () =
     await expectNoConformanceResidue(seeded.tenantId);
   });
 });
+
+// ─── 05 专项（P2-3）：durable=true 声明可注册（E2E-10） ────────
+
+describe("05 专项：durable_task_recovery=true 声明（E2E-10）", () => {
+  it("durable=true + not_measured + effective=false → Registration 成功（201），effective durable=false", async () => {
+    const contract = contractWithProbeContextProfile(
+      [{ key: "execution_subject", name: { "zh-CN": "执行主体" }, necessity: "required" }],
+      {
+        streaming_transport: true,
+        incremental_content: false,
+        input_required: false,
+        resume: false,
+        cancel: false,
+        durable_task_recovery: true,
+      },
+    );
+    const seeded = await seedRegistrationTarget({ contract });
+    provider.setScenario("completed");
+    provider.setCardStreaming(true);
+
+    const response = await callPOST(
+      seeded.agentId,
+      registrationBody(seeded.snapshotId, provider.endpoint, { basic: { input: "常规问题" } }),
+      "idem-rt-durable-declared-001",
+    );
+    expect(response.status).toBe(201);
+
+    const revisions = await loadRuntimeRevisions(seeded.tenantId);
+    expect(revisions).toHaveLength(1);
+    const caps = revisions[0]?.revision.runtimeCapabilitiesJson as {
+      declared: { durable_task_recovery: boolean };
+      measured: { features: { durable_task_recovery: string } };
+      effective: { durable_task_recovery: boolean };
+    };
+    expect(caps.declared.durable_task_recovery).toBe(true);
+    expect(caps.measured.features.durable_task_recovery).toBe("not_measured");
+    expect(caps.effective.durable_task_recovery).toBe(false);
+  });
+});

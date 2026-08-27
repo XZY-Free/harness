@@ -319,3 +319,183 @@ export function checkResumeTruthfulnessGate(
   }
   return { passed: failures.length === 0, failures };
 }
+
+// ─── 九项问题最终收口（V12/01 08 专项）Gate F1-F8 ────────────
+
+/**
+ * F1-F8：九项问题收口红线（生产作用域，按精确文件做结构性检查）：
+ * - F1 Fake retry：command-dispatcher transient 分支必须排定 durable retry；
+ *   dispatcher/Attempt 服务的 transient 分支必须产生/更新 queued Attempt retry work。
+ * - F2 Recovery global-db leak：markInvocationLost 事务内必须使用 caller-owned
+ *   SessionBinding 版本（markSessionBindingLostInSession），禁止全局 db 版本。
+ * - F3 Hard-coded Conformance Context：register-agent-runtime 的 Probe metadata
+ *   必须来自正式 Conformance Context Builder，禁止手写 execution_subject/
+ *   current_datetime/locale。
+ * - F4 Cancel Probe context：probeCancel 必须接收并使用 metadata factory。
+ * - F5 Resume dispatched=false：resolve route 必须显式 switch 三种 reason，
+ *   禁止 if(!dispatched) local 200 一把梭。
+ * - F6 Capability hardcode：A2A Start response 不得硬编码 cancel/resume/user_action=true，
+ *   必须投影 params.capabilities。
+ * - F7 Contract invalid combo：Parser 必须包含 input_required=true → resume=true。
+ * - F8 Durable semantics：Builder 不得因 declared durable=true + not_measured +
+ *   effective=false 判 Conformance fail。
+ */
+export interface NineIssueCloseoutGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+function docOrFail(
+  documents: readonly SourceDocument[],
+  path: string,
+  failures: string[],
+): SourceDocument | null {
+  const document = documents.find((item) => item.path === path);
+  if (!document) {
+    failures.push(`${path} 不存在`);
+    return null;
+  }
+  return document;
+}
+
+export function checkNineIssueCloseoutGate(
+  documents: readonly SourceDocument[],
+): NineIssueCloseoutGateResult {
+  const failures: string[] = [];
+
+  // F1 Fake retry
+  const commandDispatcher = docOrFail(documents, "lib/runtime/command-dispatcher.ts", failures);
+  if (commandDispatcher) {
+    if (!commandDispatcher.source.includes("scheduleCommandTransientRetry")) {
+      failures.push("F1 command-dispatcher transient 分支未调用 scheduleCommandTransientRetry");
+    }
+  }
+  const dispatcher = docOrFail(documents, "lib/runtime/dispatcher.ts", failures);
+  if (dispatcher) {
+    if (!dispatcher.source.includes("recordAttemptDispatchTransientFailure")) {
+      failures.push("F1 dispatcher transient 分支未调用 recordAttemptDispatchTransientFailure");
+    }
+  }
+  const attemptService = docOrFail(
+    documents,
+    "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
+    failures,
+  );
+  if (attemptService && !attemptService.source.includes("recordAttemptDispatchTransientFailure")) {
+    failures.push("F1 Attempt dispatch 服务 transient 分支未排定 durable retry");
+  }
+
+  // F2 Recovery global-db leak
+  const recovery = docOrFail(documents, "lib/runtime/recovery-queries.ts", failures);
+  if (recovery) {
+    if (!recovery.source.includes("markSessionBindingLostInSession")) {
+      failures.push("F2 markInvocationLost 未使用 caller-owned markSessionBindingLostInSession");
+    }
+    if (/import\s*\{[^}]*\bmarkSessionBindingLost\b[^}]*\}\s*from/.test(recovery.source)) {
+      failures.push("F2 recovery-queries import 了全局 db 版本 markSessionBindingLost");
+    }
+  }
+
+  // F3 Hard-coded Conformance Context
+  const registration = docOrFail(
+    documents,
+    "lib/runtime/application/register-agent-runtime.ts",
+    failures,
+  );
+  if (registration) {
+    if (!registration.source.includes("buildExternalConformanceProbeContext")) {
+      failures.push("F3 register-agent-runtime 未使用正式 Conformance Context Builder");
+    }
+    // 剥离注释后禁止手写公共 context kind 构造（正则自身含这些词，规则文件已排除）。
+    const source = stripComments(registration.source);
+    if (/context_kind:\s*["'](execution_subject|current_datetime|locale)["']/.test(source)) {
+      failures.push("F3 register-agent-runtime 手写 Probe context kind（硬编码 metadata）");
+    }
+  }
+
+  // F4 Cancel Probe context
+  if (registration) {
+    const cancelIndex = registration.source.indexOf("async function probeCancel");
+    const cancelSlice =
+      cancelIndex >= 0 ? registration.source.slice(cancelIndex, cancelIndex + 1200) : "";
+    if (!cancelSlice || !/metadata/.test(cancelSlice)) {
+      failures.push("F4 probeCancel 缺少 metadata factory 参数（Cancel start message Context）");
+    }
+    const cancelCallIndex = registration.source.indexOf("await probeCancel(");
+    const cancelCallSlice =
+      cancelCallIndex >= 0 ? registration.source.slice(cancelCallIndex, cancelCallIndex + 400) : "";
+    if (!cancelCallSlice || !/probeMetadata/.test(cancelCallSlice)) {
+      failures.push("F4 probeCancel 调用未传入 probeMetadata");
+    }
+  }
+
+  // F5 Resume dispatched=false 显式 switch
+  const resolveRoute = docOrFail(
+    documents,
+    "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
+    failures,
+  );
+  if (resolveRoute) {
+    for (const reason of ["protocol_not_remote", "unsupported_capability", "command_not_found"]) {
+      if (!resolveRoute.source.includes(reason)) {
+        failures.push(`F5 resolve route 缺少 ${reason} 显式分支`);
+      }
+    }
+    const source = stripComments(resolveRoute.source);
+    if (/!gatewayResult\.dispatched[\s\S]{0,200}local_runtime/.test(source)) {
+      // 唯一 local_runtime 语义只允许 protocol_not_remote 分支
+      const m = /if\s*\(\s*gatewayResult\.reason\s*===\s*["']protocol_not_remote["']\s*\)/.test(
+        source,
+      );
+      const blindLocal = /else\s*\{[^}]{0,400}mode:\s*["']local_runtime["']/.test(source);
+      if (!m || blindLocal) {
+        failures.push("F5 resolve route 存在非 protocol_not_remote 的 local_runtime 兜底分支");
+      }
+    }
+  }
+
+  // F6 Capability hardcode：Start response 投影
+  const transport = docOrFail(documents, "lib/runtime/transport/a2a-transport.ts", failures);
+  if (transport) {
+    const source = stripComments(transport.source);
+    if (
+      /cancel:\s*true\b/.test(source) ||
+      /resume:\s*true\b/.test(source) ||
+      /user_action:\s*true\b/.test(source)
+    ) {
+      failures.push("F6 A2A Transport 硬编码 cancel/resume/user_action=true");
+    }
+    const startIdx = source.indexOf("runtime_session_ref: contextId");
+    const startSlice = startIdx >= 0 ? source.slice(startIdx, startIdx + 1200) : "";
+    if (!startSlice || !startSlice.includes("params.capabilities.cancel")) {
+      failures.push("F6 Start response 未投影冻结 params.capabilities");
+    }
+  }
+
+  // F7 Contract invalid combo
+  const parser = docOrFail(documents, "lib/agents/domain/public-agent-contract.ts", failures);
+  if (
+    parser &&
+    !parser.source.includes("interaction.input_required=true 要求 interaction.resume=true")
+  ) {
+    failures.push("F7 Parser 缺少 input_required=true → resume=true 语义约束");
+  }
+
+  // F8 Durable semantics
+  const builder = docOrFail(
+    documents,
+    "lib/runtime/application/build-active-external-conformance.ts",
+    failures,
+  );
+  if (builder) {
+    const source = stripComments(builder.source);
+    if (/!declaredDurable\s*&&/.test(source)) {
+      failures.push("F8 Builder 仍因 declared durable 未测而判 Conformance fail");
+    }
+    if (!source.includes('measuredDurable === "not_measured"')) {
+      failures.push("F8 Builder durable case 未按 not_measured 三态诚实裁决");
+    }
+  }
+
+  return { passed: failures.length === 0, failures };
+}

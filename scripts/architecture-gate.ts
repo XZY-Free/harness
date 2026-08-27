@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import {
   type SourceDocument,
+  checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
   checkRuntimeRegistrationEvidence,
   collectCloseoutBoundaryViolations,
@@ -183,6 +184,13 @@ function checkCloseoutRules(): void {
   const resume = checkResumeTruthfulnessGate(documents);
   if (resume.passed) pass("Resume 真值 Gate（无 catch 吞错 + 公共 metadata mapper）");
   else fail(`Resume 真值 Gate：\n  ${resume.failures.join("\n  ")}`);
+
+  const nineIssue = checkNineIssueCloseoutGate(documents);
+  if (nineIssue.passed)
+    pass(
+      "九项收口 Gate F1-F8（retry owner/recovery 事务/probe context/resume switch/capability/durable）",
+    );
+  else fail(`九项收口 Gate F1-F8：\n  ${nineIssue.failures.join("\n  ")}`);
 }
 
 function main(): void {
