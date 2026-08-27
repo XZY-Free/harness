@@ -21,7 +21,7 @@
  */
 "use client";
 
-import type { ClientItem, ClientStreamStatus } from "@/lib/client/types";
+import type { ClientItem, ClientStreamStatus, ClientTurn } from "@/lib/client/types";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
@@ -34,6 +34,7 @@ import { UserActionItem } from "./items/user-action-item";
 import { UserMessageItem } from "./items/user-message-item";
 import { MessageLocator } from "./message-locator";
 import { ProcessFold } from "./process-fold";
+import { TurnRunningIndicator } from "./turn-running-indicator";
 
 /** 段数量阈值；超过后启用虚拟化。 */
 const VIRTUALIZATION_THRESHOLD = 100;
@@ -52,6 +53,8 @@ interface ThreadTimelineProps {
   readonly showMessageLocator?: boolean;
   /** 右侧工作台请求定位的 Item；requestId 支持重复定位同一条记录。 */
   readonly locateItem?: { readonly itemId: string; readonly requestId: number } | null;
+  /** 最新 Turn 投影（真实运行状态反馈：非终态时时间线底部渲染运行指示）。 */
+  readonly activeTurn?: ClientTurn | null;
 }
 
 /**
@@ -156,6 +159,7 @@ export function ThreadTimeline({
   showSuperseded = false,
   showMessageLocator = false,
   locateItem = null,
+  activeTurn = null,
 }: ThreadTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -354,6 +358,10 @@ export function ThreadTimeline({
             </div>
           ))
         )}
+
+        {/* 真实运行状态反馈：当前 Turn 非终态时的时间线底部指示
+            （纯执行状态 UI，不创建 ThreadItem、不进入会话历史）。 */}
+        <TurnRunningIndicator turn={activeTurn} items={items} />
 
         {/* 连接异常提示（W4-1）。
             正常连接（open）不提示——健康状态无需占用视线；

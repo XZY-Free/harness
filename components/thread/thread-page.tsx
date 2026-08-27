@@ -278,6 +278,7 @@ export function ThreadPage({
             reconnectAttempt={reconnectAttempt}
             reconnectMax={reconnectMax}
             threadId={threadId}
+            activeTurn={latestTurn}
           />
           <TurnFailureNotice
             turnState={latestTurn?.turn_state}
@@ -316,6 +317,7 @@ export function ThreadPage({
                   threadId={threadId}
                   showMessageLocator
                   locateItem={locateItem}
+                  activeTurn={latestTurn}
                 />
                 <TurnFailureNotice
                   turnState={latestTurn?.turn_state}
