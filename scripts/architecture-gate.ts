@@ -3,6 +3,9 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import {
   type SourceDocument,
+  checkResumeTruthfulnessGate,
+  checkRuntimeRegistrationEvidence,
+  collectCloseoutBoundaryViolations,
   collectDeprecatedArchitectureViolations,
   collectTopic01BoundaryViolations,
 } from "./architecture-gate-rules";
@@ -153,6 +156,35 @@ function checkTopic01Boundaries(): void {
   pass("专题01 Harness/Agent 边界规则归零");
 }
 
+/** 剩余代码收口（V12/01 08 专项）边界规则 E1-E4 + Registration 证据 + Resume 门禁。 */
+function checkCloseoutRules(): void {
+  const PRODUCTION_ROOTS = ["app", "components", "desktop", "lib", "scripts"];
+  const documents: SourceDocument[] = PRODUCTION_ROOTS.flatMap((root) =>
+    filesUnder(resolve(ROOT, root)),
+  )
+    .filter((file) => SOURCE_EXTENSIONS.has(file.slice(file.lastIndexOf("."))))
+    .map((file) => ({ path: relative(ROOT, file), source: readFileSync(file, "utf8") }));
+
+  const boundaryViolations = collectCloseoutBoundaryViolations(documents);
+  if (boundaryViolations.length > 0) {
+    fail(
+      `收口边界规则违规（E1-E4）：\n  ${boundaryViolations
+        .map((v) => `${v.title} → ${v.path}`)
+        .join("\n  ")}`,
+    );
+  } else {
+    pass("收口边界规则 E1-E4 归零");
+  }
+
+  const evidence = checkRuntimeRegistrationEvidence(documents);
+  if (evidence.passed) pass("Runtime Registration 证据链完整（正式 Builder/prepare/append/tx）");
+  else fail(`Runtime Registration 证据 Gate：\n  ${evidence.failures.join("\n  ")}`);
+
+  const resume = checkResumeTruthfulnessGate(documents);
+  if (resume.passed) pass("Resume 真值 Gate（无 catch 吞错 + 公共 metadata mapper）");
+  else fail(`Resume 真值 Gate：\n  ${resume.failures.join("\n  ")}`);
+}
+
 function main(): void {
   checkMigrationJournal();
   checkRetiredNaming();
@@ -202,6 +234,7 @@ function main(): void {
   }
   checkDeprecatedArchitecture();
   checkTopic01Boundaries();
+  checkCloseoutRules();
   if (failures > 0) process.exitCode = 1;
 }
 

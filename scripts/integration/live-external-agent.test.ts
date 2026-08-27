@@ -165,8 +165,8 @@ class FakeSnowHarnessServer implements LiveHttpClient {
   }
 }
 
-function ok(body: unknown): { status: number; body: unknown } {
-  return { status: 200, body };
+function ok(body: unknown): Promise<{ status: number; body: unknown }> {
+  return Promise.resolve({ status: 200, body });
 }
 
 const sleep = async () => {};

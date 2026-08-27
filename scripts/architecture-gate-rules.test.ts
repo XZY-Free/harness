@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   type SourceDocument,
+  checkResumeTruthfulnessGate,
+  checkRuntimeRegistrationEvidence,
+  collectCloseoutBoundaryViolations,
   collectDeprecatedArchitectureViolations,
   collectTopic01BoundaryViolations,
 } from "./architecture-gate-rules";
@@ -238,5 +241,140 @@ describe("collectTopic01BoundaryViolations", () => {
       ),
     ];
     expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+  });
+});
+
+// ─── 剩余代码收口（V12/01 08 专项）规则 ────────────────────
+
+describe("collectCloseoutBoundaryViolations（E1-E4）", () => {
+  it("E1：生产 A2A wire 出现 snowharness.execution_subject → 违规", () => {
+    const documents = [
+      doc("lib/runtime/transport/a2a-transport.ts", 'const key = "snowharness.execution_subject";'),
+    ];
+    expect(collectCloseoutBoundaryViolations(documents)).toEqual([
+      {
+        path: "lib/runtime/transport/a2a-transport.ts",
+        title: "E1 旧 namespaced execution_subject wire",
+      },
+    ]);
+  });
+
+  it("E2：subject_kind 裸 service 输出 → 违规；platform_service 合法", () => {
+    const bad = doc(
+      "lib/runtime/transport/x.ts",
+      'const subject = { subject_kind: subjectType === "service" ? "service" : "platform_user" };',
+    );
+    expect(collectCloseoutBoundaryViolations([bad])).toEqual([
+      { path: "lib/runtime/transport/x.ts", title: "E2 subject_kind 裸 service 输出" },
+    ]);
+    const good = doc(
+      "lib/runtime/transport/x.ts",
+      'const subject = { subject_kind: "platform_service" };',
+    );
+    expect(collectCloseoutBoundaryViolations([good])).toEqual([]);
+  });
+
+  it("E3：Studio 生产自行构造 conformance_run_id 字面量 → 违规；DTO 值合法", () => {
+    const bad = doc("components/studio/panel.tsx", 'conformance_run_id: "conf-1",');
+    expect(collectCloseoutBoundaryViolations([bad])).toEqual([
+      {
+        path: "components/studio/panel.tsx",
+        title: "E3 Studio/生产自行构造 conformance_run_id 字面量",
+      },
+    ]);
+    const good = doc(
+      "components/studio/panel.tsx",
+      'conformance_run_id: revision.latest_valid_conformance_run_id ?? "",',
+    );
+    expect(collectCloseoutBoundaryViolations([good])).toEqual([]);
+  });
+
+  it("E4：HR 特例分支（hr-assistant/veadk/8100）→ 违规；fixture 精确白名单跳过", () => {
+    expect(
+      collectCloseoutBoundaryViolations([
+        doc("lib/runtime/x.ts", 'if (agent === "hr-assistant") { }'),
+      ]),
+    ).toHaveLength(1);
+    expect(
+      collectCloseoutBoundaryViolations([doc("lib/runtime/x.ts", "const port = 8100;")]),
+    ).toHaveLength(1);
+    expect(
+      collectCloseoutBoundaryViolations([
+        doc("lib/agents/test-support/hr-agent-contract.ts", 'id: "hr-assistant"'),
+      ]),
+    ).toEqual([]);
+  });
+
+  it(".test.* 文件与注释不违规", () => {
+    const documents = [
+      doc("lib/runtime/x.test.ts", 'const key = "snowharness.execution_subject";'),
+      doc("lib/runtime/x.ts", "// 注释中的 hr-assistant 不算"),
+    ];
+    expect(collectCloseoutBoundaryViolations(documents)).toEqual([]);
+  });
+});
+
+describe("checkRuntimeRegistrationEvidence（08 §4）", () => {
+  const FULL_SOURCE = [
+    'import { buildActiveExternalConformanceReport } from "a";',
+    'import { prepareRuntimeConformanceRun } from "b";',
+    'import { appendRuntimeConformanceRun } from "c";',
+    'import { createMysqlRuntimeConformanceRunSession } from "d";',
+  ].join("\n");
+
+  it("完整正式证据链 → 通过", () => {
+    expect(
+      checkRuntimeRegistrationEvidence([
+        doc("lib/runtime/application/register-agent-runtime.ts", FULL_SOURCE),
+      ]),
+    ).toEqual({ passed: true, failures: [] });
+  });
+
+  it("缺失 append/prepare → 失败；import 测试 DSSE builder → 失败", () => {
+    const missing = checkRuntimeRegistrationEvidence([
+      doc(
+        "lib/runtime/application/register-agent-runtime.ts",
+        FULL_SOURCE.replace('import { appendRuntimeConformanceRun } from "c";', ""),
+      ),
+    ]);
+    expect(missing.passed).toBe(false);
+    const testImport = checkRuntimeRegistrationEvidence([
+      doc(
+        "lib/runtime/application/register-agent-runtime.ts",
+        `${FULL_SOURCE}\nimport { buildDsseConformanceEnvelope } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";`,
+      ),
+    ]);
+    expect(testImport.passed).toBe(false);
+  });
+});
+
+describe("checkResumeTruthfulnessGate（08 §5）", () => {
+  const RESOLVE_ROUTE = "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
+  const A2A = "lib/runtime/transport/a2a-transport.ts";
+
+  it("catch 吞错 + 无 resume_dispatch → 失败", () => {
+    const result = checkResumeTruthfulnessGate([
+      doc(
+        RESOLVE_ROUTE,
+        "await dispatchResumeCommandToRuntime({...}).catch((err) => logger.warn(err)); return ok(200);",
+      ),
+      doc(A2A, "async resumeInvocation(req) { send(req); }"),
+    ]);
+    expect(result.passed).toBe(false);
+    expect(result.failures).toHaveLength(3);
+  });
+
+  it("真实结果投影 + 公共 metadata mapper → 通过", () => {
+    const result = checkResumeTruthfulnessGate([
+      doc(
+        RESOLVE_ROUTE,
+        "const gatewayResult = await dispatchResumeCommandToRuntime({...}); const responseBody = { resume_dispatch };",
+      ),
+      doc(
+        A2A,
+        "async resumeInvocation(req) { const m = buildA2APublicMessageMetadata(req.requestBody.invocation_context); }",
+      ),
+    ]);
+    expect(result).toEqual({ passed: true, failures: [] });
   });
 });

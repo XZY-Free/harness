@@ -160,3 +160,162 @@ export function collectTopic01BoundaryViolations(documents: readonly SourceDocum
   }
   return violations;
 }
+
+// ─── 剩余代码收口（V12/01 08 专项）边界规则 E1-E4 ─────────────
+
+/**
+ * E1-E4：本轮新增真实红线（生产作用域，剥离注释，排除 .test.* 与规则定义文件）：
+ * - E1 A2A external production wire 不得出现 snowharness.execution_subject；
+ * - E2 公共 subject 映射不得输出裸 "service"（必须 platform_service）；
+ * - E3 Studio production 不得自行构造 conformance_run_id 字面量（只能来自 DTO）；
+ * - E4 生产代码不得有 HR-specific runtime branch。
+ */
+const CLOSEOUT_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
+  { pattern: /snowharness\.execution_subject/, title: "E1 旧 namespaced execution_subject wire" },
+  {
+    // 捕获直接赋值与三元输出映射（"platform_service" 因引号边界不匹配）；
+    // === / !== / < / > 后的 "service" 是比较而非输出，可变长 lookbehind 排除。
+    pattern: /subject_kind\s*[:=][^;\n]{0,60}(?<![=!<>]\s*)["']service["']/,
+    title: "E2 subject_kind 裸 service 输出",
+  },
+  {
+    // 仅捕获对象字面量/赋值中的 run id 字符串字面量（=== 比较不匹配）。
+    pattern: /conformance_run_id\s*:\s*["'][A-Za-z0-9][A-Za-z0-9_-]*["']/,
+    title: "E3 Studio/生产自行构造 conformance_run_id 字面量",
+  },
+  { pattern: /\bhr-assistant\b/i, title: "E4 HR 特例分支" },
+  { pattern: /\bveadk\b/i, title: "E4 HR 特例分支" },
+  { pattern: /\bagentkit\b/i, title: "E4 HR 特例分支" },
+  { pattern: /\bemployee-data\b/i, title: "E4 HR 特例分支" },
+  { pattern: /\bconsult-agent\b/i, title: "E4 HR 特例分支" },
+];
+
+/** HR Provider 端口号特例（禁止生产分支）：匹配 8100 端口字面量。 */
+const CLOSEOUT_PORT_PATTERN = /[:/]8100\b|port\s*[:=]\s*8100\b/i;
+
+/**
+ * 精确文件白名单（逐文件，绝不目录豁免）：
+ * - hr-agent-contract.ts 是登记事实测试夹具（真实首个集成的公共合同副本），
+ *   doc 08 §2 明确允许 fixture 存在，但其内容含 HR 标识。
+ */
+const CLOSEOUT_ALLOWLIST = new Set([
+  "lib/agents/test-support/hr-agent-contract.ts",
+  // Studio 测试夹具（DTO fixture，非生产构造；08 §2 fixture 可存在）。
+  "components/studio/test-support/route-activation-fixtures.ts",
+]);
+
+export function collectCloseoutBoundaryViolations(
+  documents: readonly SourceDocument[],
+): Array<{ path: string; title: string }> {
+  const seen = new Set<string>();
+  const violations: Array<{ path: string; title: string }> = [];
+  for (const document of documents) {
+    const path = document.path;
+    if (!TOPIC01_SCOPE.test(path)) continue;
+    if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) continue;
+    if (TOPIC01_RULE_DEFINITIONS.has(path)) continue;
+    if (CLOSEOUT_ALLOWLIST.has(path)) continue;
+    const source = stripComments(document.source);
+    for (const rule of [
+      ...CLOSEOUT_BOUNDARY_PATTERNS,
+      { pattern: CLOSEOUT_PORT_PATTERN, title: "E4 HR 特例分支（8100 端口）" },
+    ]) {
+      if (rule.pattern.test(source)) {
+        const key = `${rule.title}:${path}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          violations.push({ path, title: rule.title });
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+// ─── Runtime Registration 证据 Gate（08 §4）─────────────────
+
+const REGISTRATION_EVIDENCE_PATH = "lib/runtime/application/register-agent-runtime.ts";
+
+/** Registration 必须引用的正式 Conformance 证据链标识。 */
+const REGISTRATION_REQUIRED_IDENTIFIERS = [
+  "buildActiveExternalConformanceReport",
+  "prepareRuntimeConformanceRun",
+  "appendRuntimeConformanceRun",
+  "createMysqlRuntimeConformanceRunSession",
+] as const;
+
+/** Registration 禁止 import 的测试/伪造证据来源。 */
+const REGISTRATION_FORBIDDEN_IMPORTS = [
+  "@/lib/runtime/test-support/build-dsse-conformance-envelope",
+  "@/lib/artifacts/test-support/",
+  "ed25519-signer-keypair",
+] as const;
+
+export interface RegistrationEvidenceGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+export function checkRuntimeRegistrationEvidence(
+  documents: readonly SourceDocument[],
+): RegistrationEvidenceGateResult {
+  const document = documents.find((item) => item.path === REGISTRATION_EVIDENCE_PATH);
+  if (!document) {
+    return { passed: false, failures: [`${REGISTRATION_EVIDENCE_PATH} 不存在`] };
+  }
+  const failures: string[] = [];
+  for (const identifier of REGISTRATION_REQUIRED_IDENTIFIERS) {
+    if (!document.source.includes(identifier)) {
+      failures.push(`缺少正式证据链引用：${identifier}`);
+    }
+  }
+  for (const forbidden of REGISTRATION_FORBIDDEN_IMPORTS) {
+    if (document.source.includes(forbidden)) {
+      failures.push(`禁止 import 测试/伪造证据来源：${forbidden}`);
+    }
+  }
+  return { passed: failures.length === 0, failures };
+}
+
+// ─── Resume Gate（08 §5）────────────────────────────────────
+
+const RESOLVE_ROUTE_PATH =
+  "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
+const A2A_TRANSPORT_PATH = "lib/runtime/transport/a2a-transport.ts";
+
+export interface ResumeGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+export function checkResumeTruthfulnessGate(
+  documents: readonly SourceDocument[],
+): ResumeGateResult {
+  const failures: string[] = [];
+  const resolveRoute = documents.find((item) => item.path === RESOLVE_ROUTE_PATH);
+  if (!resolveRoute) {
+    failures.push(`${RESOLVE_ROUTE_PATH} 不存在`);
+  } else {
+    // Resume dispatch 不得 .catch 吞错后无条件 200。
+    if (/dispatchResumeCommandToRuntime[\s\S]{0,400}?\.catch\s*\(/.test(resolveRoute.source)) {
+      failures.push("resolve route 对 dispatchResumeCommandToRuntime 使用 .catch 吞掉结果");
+    }
+    // 响应必须携带唯一 Authority resume_dispatch（真实 Gateway 结果）。
+    if (!resolveRoute.source.includes("resume_dispatch")) {
+      failures.push("resolve route 缺少 resume_dispatch 真实调度结果投影");
+    }
+  }
+  const transport = documents.find((item) => item.path === A2A_TRANSPORT_PATH);
+  if (!transport) {
+    failures.push(`${A2A_TRANSPORT_PATH} 不存在`);
+  } else {
+    // A2A resumeInvocation 必须使用公共 metadata mapper（04 §12）。
+    const resumeIndex = transport.source.indexOf("async resumeInvocation");
+    const resumeSlice =
+      resumeIndex >= 0 ? transport.source.slice(resumeIndex, resumeIndex + 3000) : "";
+    if (!resumeSlice.includes("buildA2APublicMessageMetadata")) {
+      failures.push("a2a-transport.resumeInvocation 未使用公共 metadata mapper");
+    }
+  }
+  return { passed: failures.length === 0, failures };
+}

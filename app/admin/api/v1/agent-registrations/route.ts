@@ -4,7 +4,7 @@
  * 行为：
  * - 解析 admin 主体（SSO 管理员或 CI/CD Service Identity）。
  * - 校验 action scope: agent.contract.register + resource { type: "agent", id: null }
- *   （DB Agent id 在登记前不存在，资源以类型表达；不做 legacy descriptor.create）。
+ *   （DB Agent id 在登记前不存在，资源以类型表达；不做旧 descriptor.create 兼容路径）。
  * - 要求 Idempotency-Key（在任何写库前）。
  * - 严格请求体：顶层键恰为 protocol + contract；protocol 键恰为 type + contract_revision；
  *   合同由 parsePublicAgentContract fail-closed（未知键/URL/secret/员工身份字段一律拒绝）。
