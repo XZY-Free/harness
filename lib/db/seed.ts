@@ -27,7 +27,7 @@ import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 
-/** 默认用户授予的 Studio 动作码（admin 等值：全部 Studio 长期业务动作）。 */
+/** 默认用户授予的 Studio 动作码（admin 等值：全部 Studio 长期业务动作，tenant-wildcard）。 */
 export const DEFAULT_GRANT_ACTION_CODES: ActionCode[] = [
   "studio.access",
   "skill.read",
@@ -42,6 +42,30 @@ export const DEFAULT_GRANT_ACTION_CODES: ActionCode[] = [
   "workspace.write",
   "analytics.read",
   "audit.read",
+];
+
+/**
+ * 外部 Agent onboarding 动作 → 显式资源 scope（专题01 §14，07-Studio管理闭环.md）。
+ *
+ * 默认开发者管理员必须能走完现有 Studio 外部 Agent 注册闭环：注册合同 →
+ * 建 Revision → 发布 Agent Revision → 注册外部 Runtime → 发布 RuntimeRevision →
+ * 发布员工路由。scope type 取自 ACTION_RESOURCE_TYPES 与各 admin 路由的
+ * requireAdminActionScope 实参（agent.contract.register 为 pre-create，
+ * resource id=null，wildcard 同样覆盖）。
+ *
+ * 不用 tenant scope：tenant-wildcard 只覆盖 type=tenant 的请求资源，
+ * scopeCovers 要求 type 严格相等，必须按动作显式给 agent / runtime wildcard。
+ */
+const ONBOARDING_GRANT_ACTION_SCOPES: ReadonlyArray<{
+  actionCode: ActionCode;
+  resourceScopeType: "agent" | "runtime";
+}> = [
+  { actionCode: "agent.contract.register", resourceScopeType: "agent" },
+  { actionCode: "agent.revision.create", resourceScopeType: "agent" },
+  { actionCode: "agent.publish", resourceScopeType: "agent" },
+  { actionCode: "agent.runtime.register", resourceScopeType: "agent" },
+  { actionCode: "runtime.publish", resourceScopeType: "runtime" },
+  { actionCode: "route.update", resourceScopeType: "agent" },
 ];
 
 /**
@@ -76,7 +100,8 @@ export async function seedDefaultIdentity(): Promise<{
 }
 
 /**
- * 为默认用户授予全部 Studio 动作码（tenant-wildcard scope，admin 等值）。
+ * 为默认用户授予全部 Studio 动作码（tenant-wildcard scope，admin 等值），
+ * 以及外部 Agent onboarding 六动作（显式 agent / runtime wildcard scope）。
  *
  * thread 类动作额外授予 self-wildcard scope：正式授权模型里 ".self" 解码为
  * (self 资源)，tenant-wildcard grant 不覆盖 self 类型请求资源（scopeCovers 要求
@@ -108,6 +133,15 @@ export async function seedDefaultGrants(
       resourceScope: { type: "self", wildcard: true },
     });
   }
+  // 外部 Agent onboarding：按动作显式 agent / runtime wildcard（见上方说明）。
+  for (const { actionCode, resourceScopeType } of ONBOARDING_GRANT_ACTION_SCOPES) {
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode,
+      resourceScope: { type: resourceScopeType, wildcard: true },
+    });
+  }
 }
 
 // ─── CLI runner（pnpm db:seed → tsx lib/db/seed.ts）─────────
@@ -121,7 +155,10 @@ async function main() {
   );
 
   await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
-  console.log(`[seed] 默认用户授予 ${DEFAULT_GRANT_ACTION_CODES.length} 个 Studio 动作码`);
+  console.log(
+    `[seed] 默认用户授予 ${DEFAULT_GRANT_ACTION_CODES.length} 个 Studio 动作码（tenant-wildcard）` +
+      ` + ${ONBOARDING_GRANT_ACTION_SCOPES.length} 个外部 Agent onboarding 动作码（agent/runtime wildcard）`,
+  );
 
   // 专题01 §15：不创建默认 Agent（Agent 空表合法）。基础 Harness Runtime 走正式控制面初始化。
   console.log("[seed] 正式 schema seed 完成");
