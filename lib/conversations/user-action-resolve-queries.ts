@@ -49,6 +49,7 @@ import {
   type ThreadEvent,
   type ThreadEventActorType,
   invocationCommandTable,
+  threadItemTable,
   threadTable,
 } from "@/lib/persistence/schema/conversation";
 import { type Invocation, invocationTable } from "@/lib/persistence/schema/executions";
@@ -351,6 +352,39 @@ export async function resolveGenericUserAction(
         },
         tx,
       );
+    }
+
+    // 请求与可见卡片同事务推进；不把用户填写内容复制进公开时间线。
+    if (request.itemId) {
+      const [item] = await tx
+        .select()
+        .from(threadItemTable)
+        .where(
+          and(
+            eq(threadItemTable.id, request.itemId),
+            eq(threadItemTable.threadId, request.threadId),
+            eq(threadItemTable.turnId, request.turnId),
+            eq(threadItemTable.invocationId, request.invocationId),
+            eq(threadItemTable.itemType, "user_action"),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (!item) throw new UserActionStateError("操作卡片与请求不匹配");
+      const content = {
+        ...(item.contentJson as Record<string, unknown>),
+        state: "resolved",
+        resolution: params.resolution,
+      };
+      await tx
+        .update(threadItemTable)
+        .set({
+          itemState: "completed",
+          contentJson: content,
+          contentHash: computeEventPayloadHash(content),
+          updatedAt: now,
+        })
+        .where(eq(threadItemTable.id, item.id));
     }
 
     // 6. UPDATE Invocation: waiting_user → running

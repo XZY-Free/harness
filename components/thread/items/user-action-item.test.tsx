@@ -57,6 +57,35 @@ afterEach(() => {
 });
 
 describe("UserActionItem input submit 主流程", () => {
+  it("展示请求的问题，不把内部 purpose 当正文", () => {
+    render(<UserActionItem threadId="thread-1" item={makeInputItem()} />);
+    expect(screen.getByText("请提供请假事由")).toBeTruthy();
+    expect(screen.queryByText("a2a_input_required")).toBeNull();
+  });
+
+  it.each([undefined, null, "", "  ", 0, {}])(
+    "缺少可读 prompt（%s）时不暴露内部 purpose",
+    (prompt) => {
+      render(<UserActionItem threadId="thread-1" item={makeInputItem({ prompt })} />);
+      expect(screen.getByText("需要你的操作")).toBeTruthy();
+      expect(screen.queryByText("a2a_input_required")).toBeNull();
+    },
+  );
+
+  it("刷新后按持久化 resolution 展示已提交，不能再次提交", () => {
+    render(
+      <UserActionItem
+        threadId="thread-1"
+        item={{
+          ...makeInputItem({ state: "resolved", resolution: "submit" }),
+          item_state: "completed",
+        }}
+      />,
+    );
+    expect(screen.getAllByText("已提交").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "提交" })).toBeNull();
+  });
+
   it("提交使用 content.request_id（request-1）而非 item.id，body 为精确脱敏对象", async () => {
     const fetchMock = makeFetchMock();
     vi.stubGlobal("fetch", fetchMock);

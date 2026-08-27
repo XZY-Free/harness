@@ -218,6 +218,26 @@ function applyEventToItems(
   event: ClientEvent,
 ): readonly ClientItem[] | null {
   switch (event.event_type) {
+    case "user_action.resolved": {
+      const payload = event.payload as Record<string, unknown> | null;
+      const item = event.item_id ? state.itemsById[event.item_id] : undefined;
+      if (
+        !item ||
+        item.item_type !== "user_action" ||
+        !payload ||
+        typeof item.content !== "object" ||
+        item.content === null ||
+        !("request_id" in item.content) ||
+        item.content.request_id !== payload.request_id ||
+        !["approve", "deny", "submit", "cancel"].includes(String(payload.resolution))
+      )
+        return null;
+      return insertItemSorted(state.items, {
+        ...item,
+        item_state: "completed",
+        content: { ...item.content, state: "resolved", resolution: payload.resolution },
+      });
+    }
     case "item.created":
     case "item.updated": {
       const item = extractItemFromPayload(event.payload);

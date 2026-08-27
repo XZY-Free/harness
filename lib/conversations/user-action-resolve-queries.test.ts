@@ -19,6 +19,7 @@ import { UserActionValidationError } from "@/lib/permission/user-action-queries"
 import {
   invocationCommandTable,
   threadEventTable,
+  threadItemTable,
   threadTable,
   turnTable,
 } from "@/lib/persistence/schema/conversation";
@@ -101,6 +102,19 @@ async function seedWaitingInputRequest(): Promise<{
   });
 
   const requestId = randomUUID();
+  const itemId = randomUUID();
+  await db.insert(threadItemTable).values({
+    id: itemId,
+    threadId,
+    turnId,
+    invocationId,
+    itemSequence: 1,
+    itemType: "user_action",
+    itemState: "pending",
+    authorType: "agent",
+    contentJson: { request_id: requestId, request_type: "input", prompt: "请提供请假事由" },
+    contentHash: "initial",
+  });
   await db.insert(userActionRequestTable).values({
     id: requestId,
     tenantId: TENANT,
@@ -108,7 +122,7 @@ async function seedWaitingInputRequest(): Promise<{
     turnId,
     invocationId,
     toolCallId: null,
-    itemId: null,
+    itemId,
     requestType: "input",
     purpose: "a2a_input_required",
     requestState: "pending",
@@ -134,6 +148,106 @@ beforeEach(async () => {
 });
 
 describe("resolveGenericUserAction input submit（authority payload）", () => {
+  it("并发提交只消费一次，请求和卡片一致且只有一条恢复命令", async () => {
+    const seeded = await seedWaitingInputRequest();
+    const params = {
+      tenantId: TENANT,
+      requestId: seeded.requestId,
+      resolution: "submit" as const,
+      resolvedBy: "user-1",
+      responseRedactedJson: { text: "明天一天" },
+    };
+    const results = await Promise.allSettled([
+      resolveGenericUserAction(params),
+      resolveGenericUserAction(params),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
+    const commands = await db
+      .select()
+      .from(invocationCommandTable)
+      .where(eq(invocationCommandTable.invocationId, seeded.invocationId));
+    expect(commands).toHaveLength(1);
+    const items = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.threadId, seeded.threadId));
+    expect(items).toHaveLength(1);
+    expect(items[0]!.itemState).toBe("completed");
+  });
+
+  it("卡片引用跨会话时回滚整个解析，不能修改另一会话卡片", async () => {
+    const seeded = await seedWaitingInputRequest();
+    const other = await seedWaitingInputRequest();
+    const [otherItem] = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.threadId, other.threadId));
+    await db
+      .update(userActionRequestTable)
+      .set({ itemId: null })
+      .where(eq(userActionRequestTable.id, other.requestId));
+    await db
+      .update(userActionRequestTable)
+      .set({ itemId: otherItem!.id })
+      .where(eq(userActionRequestTable.id, seeded.requestId));
+    await expect(
+      resolveGenericUserAction({
+        tenantId: TENANT,
+        requestId: seeded.requestId,
+        resolution: "submit",
+        resolvedBy: "user-1",
+        responseRedactedJson: { text: "明天一天" },
+      }),
+    ).rejects.toThrow("操作卡片与请求不匹配");
+    const [request] = await db
+      .select()
+      .from(userActionRequestTable)
+      .where(eq(userActionRequestTable.id, seeded.requestId));
+    expect(request!.requestState).toBe("pending");
+    expect(request!.resolution).toBeNull();
+    const [invocation] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, seeded.invocationId));
+    expect(invocation!.executionState).toBe("waiting_user");
+    const [item] = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.id, otherItem!.id));
+    expect(item!.itemState).toBe("pending");
+    expect(
+      await db
+        .select()
+        .from(invocationCommandTable)
+        .where(eq(invocationCommandTable.invocationId, seeded.invocationId)),
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(threadEventTable)
+        .where(eq(threadEventTable.threadId, seeded.threadId)),
+    ).toHaveLength(0);
+  });
+
+  it("跨租户解析不可消费请求或卡片", async () => {
+    const seeded = await seedWaitingInputRequest();
+    await expect(
+      resolveGenericUserAction({
+        tenantId: randomUUID(),
+        requestId: seeded.requestId,
+        resolution: "submit",
+        resolvedBy: "user-1",
+        responseRedactedJson: { text: "明天一天" },
+      }),
+    ).rejects.toThrow("不存在或跨租户不可见");
+    const [item] = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.threadId, seeded.threadId));
+    expect(item!.itemState).toBe("pending");
+  });
+
   it("submit：Invocation waiting_user→running + resume 命令持久化精确 resume_payload 对象", async () => {
     const seeded = await seedWaitingInputRequest();
     const response = { text: "年休假，明天一天" };
@@ -170,6 +284,23 @@ describe("resolveGenericUserAction input submit（authority payload）", () => {
     expect(result.request.requestState).toBe("resolved");
     expect(result.request.resolution).toBe("submit");
     expect(result.request.responseRedactedJson).toEqual({ text: "年休假，明天一天" });
+
+    const [item] = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.id, result.request.itemId!));
+    if (!item) throw new Error("请求卡片未持久化");
+    expect(item.itemState).toBe("completed");
+    expect(item.contentJson).toEqual({
+      request_id: seeded.requestId,
+      request_type: "input",
+      prompt: "请提供请假事由",
+      state: "resolved",
+      resolution: "submit",
+    });
+    expect(item.contentHash).not.toBe("initial");
+    expect(JSON.stringify(item.contentJson)).not.toContain(response.text);
+    expect(result.events[0]!.itemId).toBe(item.id);
   });
 
   it("submit 缺失 responseRedactedJson：维持既有拒绝", async () => {
@@ -226,6 +357,13 @@ describe("resolveGenericUserAction input submit 按 inputSchemaJson 校验（RED
       .limit(1);
     expect(uarAfter?.requestState).toBe("pending");
     expect(uarAfter?.resolution).toBeNull();
+    const [itemAfter] = await db
+      .select()
+      .from(threadItemTable)
+      .where(eq(threadItemTable.id, uarAfter!.itemId!));
+    if (!itemAfter) throw new Error("请求卡片丢失");
+    expect(itemAfter.itemState).toBe("pending");
+    expect(itemAfter.contentHash).toBe("initial");
 
     const [invAfter] = await db
       .select()

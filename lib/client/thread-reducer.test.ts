@@ -58,6 +58,35 @@ function loadedState(
 }
 
 describe("threadProjectionReducer", () => {
+  it("user_action.resolved 只更新匹配 request 的卡片，重放幂等且保留新待处理卡片", () => {
+    const item = makeItem({
+      item_type: "user_action",
+      item_state: "pending",
+      content: { request_id: "request-1", prompt: "请提供日期" },
+    });
+    const nextItem = makeItem({
+      id: "item-2",
+      item_sequence: 2,
+      item_type: "user_action",
+      item_state: "pending",
+      content: { request_id: "request-2" },
+    });
+    const state = loadedState([item, nextItem], null);
+    const event = makeEvent({
+      event_type: "user_action.resolved",
+      item_id: item.id,
+      payload: { request_id: "request-1", resolution: "submit" },
+    });
+    const next = threadProjectionReducer(state, { type: "event.received", event });
+    expect(next.items[0]).toEqual({
+      ...item,
+      item_state: "completed",
+      content: { ...(item.content as object), state: "resolved", resolution: "submit" },
+    });
+    expect(next.items[1]).toBe(nextItem);
+    expect(threadProjectionReducer(next, { type: "event.received", event })).toBe(next);
+  });
+
   describe("snapshot.loaded", () => {
     it("用空 snapshot 初始化状态", () => {
       const state = loadedState([], null);

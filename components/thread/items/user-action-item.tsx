@@ -63,6 +63,9 @@ interface UserActionContent {
   title?: string;
   /** 请求方提供的摘要（覆盖 reason 显示）。 */
   summary?: string;
+  /** 面向用户的问题；purpose 是内部分类，不作为展示正文。 */
+  prompt?: string;
+  resolution?: UserActionResolution;
   /** confirmation 类型：等待确认的目标文件。 */
   target_path?: string;
   /** confirmation 类型：diff 新增/删除行数。 */
@@ -246,7 +249,9 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
   const resolvedResolution =
     requestId && userActionHook.lastResolve?.request_id === requestId
       ? userActionHook.lastResolve.resolution
-      : null;
+      : content.state === "resolved"
+        ? (content.resolution ?? null)
+        : null;
 
   const busy = userActionHook.busy;
   const error = userActionHook.error;
@@ -254,7 +259,10 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
 
   const requestTypeLabel = getRequestTypeLabel(content.request_type);
   const displayTitle = content.title ?? requestTypeLabel;
-  const displayReason = content.summary ?? content.reason ?? content.purpose ?? "需要你的操作";
+  const displayReason =
+    [content.prompt, content.summary, content.reason].find(
+      (value) => typeof value === "string" && value.trim().length > 0,
+    ) ?? "需要你的操作";
 
   // input 类型的字段（schema 缺失/空/不支持/非法 pattern → ok=false，fail-closed）
   const inputSchema = useMemo(
