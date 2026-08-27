@@ -119,7 +119,7 @@ export async function buildExternalConformanceProbeContext(
   }
 
   /** 按合同声明的 kind 现取 value（current_datetime 每次调用刷新）。 */
-  const valueOf = (kind: string): unknown => {
+  const contextValueOf = (kind: string): unknown => {
     switch (kind) {
       case "execution_subject":
         return executionSubjectToPublicAgentSubject(
@@ -139,7 +139,7 @@ export async function buildExternalConformanceProbeContext(
   const metadataFactory = (): Record<string, unknown> => {
     const metadata: Record<string, unknown> = {};
     for (const kind of supplied) {
-      metadata[kind] = valueOf(kind);
+      metadata[kind] = contextValueOf(kind);
     }
     return metadata;
   };

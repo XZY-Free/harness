@@ -660,7 +660,7 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
         // 进入 durable retry；不得判 protocol_schema 终态。
         throw new RuntimeTransportError(
           "stream_interrupted",
-          `A2A message/stream HTTP 503（Runtime 暂不可用）`,
+          "A2A message/stream HTTP 503（Runtime 暂不可用）",
         );
       }
       if (!resp.ok || !resp.body) {
