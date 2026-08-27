@@ -70,8 +70,14 @@ async function loadCommandContext(tenantId: string, commandId: string) {
 async function resolveA2ACommandTransport(params: {
   tenantId: string;
   binding: ExecutionBinding;
-  /** 05 §6：Transport 冻结能力 profile（Binding 派生）。 */
-  capabilities: { cancel: boolean; resume: boolean; steer: boolean };
+  /** 05 §6：Transport 冻结能力 profile（Binding 派生；含 user_action/streaming 投影）。 */
+  capabilities: {
+    cancel: boolean;
+    resume: boolean;
+    steer: boolean;
+    user_action?: boolean;
+    streaming?: boolean;
+  };
 }): Promise<{
   transport: ReturnType<typeof createA2ATransport>;
   endpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
@@ -198,6 +204,8 @@ export async function dispatchInterruptCommandToRuntime(params: {
       cancel: capabilities.cancel,
       resume: capabilities.resume,
       steer: capabilities.steer,
+      user_action: capabilities.user_action,
+      streaming: capabilities.streaming,
     },
   });
   if (!a2a) return { dispatched: false, reason: "protocol_not_remote" };
@@ -269,6 +277,8 @@ export async function dispatchResumeCommandToRuntime(params: {
       cancel: capabilities.cancel,
       resume: capabilities.resume,
       steer: capabilities.steer,
+      user_action: capabilities.user_action,
+      streaming: capabilities.streaming,
     },
   });
   if (!a2a) return { dispatched: false, reason: "protocol_not_remote" };
@@ -347,6 +357,8 @@ export async function retryDispatchedCommandToRuntime(params: {
       cancel: capabilities.cancel,
       resume: capabilities.resume,
       steer: capabilities.steer,
+      user_action: capabilities.user_action,
+      streaming: capabilities.streaming,
     },
   });
   if (!a2a) return { dispatched: false, reason: "protocol_not_remote" };

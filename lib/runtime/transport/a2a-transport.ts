@@ -208,6 +208,14 @@ export interface CreateA2ATransportParams {
     cancel: boolean;
     resume: boolean;
     steer: boolean;
+    /**
+     * 05 专项（P2-1）：Start response user_action 投影 = effective input_required AND
+     * effective resume。Transport 不是 Capability Authority，只投影调用方冻结的
+     * effective 事实；缺省 false（fail closed）。
+     */
+    user_action?: boolean;
+    /** Start response event_stream 投影（effective streaming / 本次实际 transport mode）。缺省 true（A2A stream）。 */
+    streaming?: boolean;
   };
   /** 归一化事件批次出口（RuntimeCandidateEvent → RuntimeEventIngress）。 */
   eventBatchSink: A2AEventBatchSink;
@@ -877,13 +885,16 @@ export function createA2ATransport(params: CreateA2ATransportParams): RuntimeHtt
         runtime_execution_ref: taskId,
         capabilities: {
           protocol_versions: ["2"],
+          // 05 专项（P2-1）：Start response 只投影冻结 effective capability profile，
+          // 不再硬编码 cancel/resume/user_action=true。Transport 实现了协议方法 ≠
+          // 当前 Agent 支持该能力（declared ∩ measured = effective）。
           features: {
-            event_stream: true,
-            cancel: true,
-            resume: true,
-            steer: false,
+            event_stream: params.capabilities.streaming ?? true,
+            cancel: params.capabilities.cancel,
+            resume: params.capabilities.resume,
+            steer: params.capabilities.steer,
             dynamic_tools: false,
-            user_action: true,
+            user_action: params.capabilities.user_action ?? false,
             workspace_types: [],
             filesystem_checkpoint: false,
           },

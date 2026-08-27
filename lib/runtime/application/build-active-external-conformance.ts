@@ -316,13 +316,18 @@ function buildCaseDrafts(input: ActiveExternalConformanceBuilderInput): CaseDraf
         measured: measuredDurable,
         effective: effectiveDurable,
       };
-      const passed = !declaredDurable && !effectiveDurable && measuredDurable === "not_measured";
+      // 05 专项（P2-3）：case 职责是三态诚实，不是"声明即必须验证"。
+      // - declared=false / true 且平台未测（not_measured + effective=false）→ pass
+      //   （声明了但未验证 → 平台不承诺该能力；Registration/Publication 仍可通过）。
+      // - measured=pass（平台无对应正式 Probe，属伪造）→ fail。
+      // - effective=true 但 measured!=pass（三态矛盾）→ fail。
+      const passed = measuredDurable === "not_measured" && !effectiveDurable;
       return {
         caseId: "session-recovery-declaration" as const,
         passed,
         reason: passed
           ? null
-          : "durable_task_recovery=true 但未测量（not_measured/effective=false），fail closed",
+          : "durable_task_recovery 三态不诚实（measured 非 not_measured 或 effective 与 measured 矛盾）",
         evidence: {
           caseId: "session-recovery-declaration",
           passed,

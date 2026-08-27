@@ -1130,3 +1130,70 @@ describe("createA2ATransport — 背景流终态与 Recovery（06 §5–§12）"
     expect(terminalInIngress).toBe(true);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 05 专项（P2-1）：Start response capability 真值投影
+// ═══════════════════════════════════════════════════════════
+
+describe("05 专项：Start response capabilities 只投影冻结 effective profile", () => {
+  it("HR-like（cancel=false/resume=true/input_required=true）→ response cancel=false resume=true user_action=true", async () => {
+    const fixture = createFixture([
+      sseResponse([
+        statusUpdate("working"),
+        statusUpdate("completed", "task-1", "ctx-1", "最终答复"),
+      ]),
+    ]);
+    const transport = makeTransport(fixture, {
+      capabilities: {
+        cancel: false,
+        resume: true,
+        steer: false,
+        user_action: true,
+        streaming: true,
+      },
+    });
+    const resp = await transport.startInvocation({
+      runtimeEndpoint: "https://agent.example.com",
+      auth: { mode: "bearer", token: "token" },
+      idempotencyKey: "idem-cap-hr",
+      requestBody: requestBody(),
+    });
+    expect(resp.capabilities.features).toMatchObject({
+      cancel: false,
+      resume: true,
+      steer: false,
+      user_action: true,
+      event_stream: true,
+      dynamic_tools: false,
+    });
+  });
+
+  it("Basic-only（cancel=false/resume=false/input_required=false）→ response 全 false（无能力冒充）", async () => {
+    const fixture = createFixture([
+      sseResponse([
+        statusUpdate("working"),
+        statusUpdate("completed", "task-2", "ctx-2", "基础答复"),
+      ]),
+    ]);
+    const transport = makeTransport(fixture, {
+      capabilities: {
+        cancel: false,
+        resume: false,
+        steer: false,
+        user_action: false,
+        streaming: true,
+      },
+    });
+    const resp = await transport.startInvocation({
+      runtimeEndpoint: "https://agent.example.com",
+      auth: { mode: "bearer", token: "token" },
+      idempotencyKey: "idem-cap-basic",
+      requestBody: requestBody(),
+    });
+    expect(resp.capabilities.features).toMatchObject({
+      cancel: false,
+      resume: false,
+      user_action: false,
+    });
+  });
+});

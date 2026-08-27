@@ -194,6 +194,9 @@ export async function dispatchEmployeeTurn(params: {
             cancel: runtimeLevelCapabilities.cancel,
             resume: runtimeLevelCapabilities.resume,
             steer: runtimeLevelCapabilities.steer,
+            // 05 专项：Start response 投影 effective user_action（input_required AND resume）。
+            user_action: runtimeLevelCapabilities.user_action && runtimeLevelCapabilities.resume,
+            streaming: runtimeLevelCapabilities.streaming,
           },
           // 06 §9：背景流失败 handler —— 复用现有 Recovery Authority，
           // 已终态/waiting_user 幂等 no-op，其余 markInvocationLost。

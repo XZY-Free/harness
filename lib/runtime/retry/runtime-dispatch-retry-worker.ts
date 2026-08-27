@@ -137,6 +137,8 @@ export function createRuntimeDispatchRetryWorker(
         cancel: runtimeLevelCapabilities.cancel,
         resume: runtimeLevelCapabilities.resume,
         steer: runtimeLevelCapabilities.steer,
+        user_action: runtimeLevelCapabilities.user_action && runtimeLevelCapabilities.resume,
+        streaming: runtimeLevelCapabilities.streaming,
       },
       onBackgroundFailure: (report) =>
         handleA2ABackgroundFailure({ tenantId: invocation.tenantId, report }),

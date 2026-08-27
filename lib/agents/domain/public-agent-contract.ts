@@ -355,6 +355,13 @@ function parseInteraction(value: unknown): PublicAgentInteraction {
       "interaction.incremental_content=true 要求 streaming_transport=true",
     );
   }
+  // 05 专项（P2-2）：input-required 产品模型只能 Resume 原 Invocation（无"新 Task 继续"
+  // 的第二模式），因此 input_required=true 必须依赖 resume=true —— 在合同登记阶段拒绝。
+  if (flagOf("input_required") && !flagOf("resume")) {
+    throw new PublicAgentContractError(
+      "interaction.input_required=true 要求 interaction.resume=true",
+    );
+  }
   return {
     streamingTransport: flagOf("streaming_transport"),
     incrementalContent: flagOf("incremental_content"),

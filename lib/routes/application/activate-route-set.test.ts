@@ -802,3 +802,63 @@ describe("activateRouteSet", () => {
     );
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 05 专项（P2-3）：durable 需求的 Route fail closed
+// ═══════════════════════════════════════════════════════════
+
+describe("05 专项：durable_task_recovery 需求 fail closed", () => {
+  it("Agent Interface 要求 durable_task_recovery 而 Runtime effective durable=false → 拒绝激活（fail closed）", async () => {
+    const store = createMockStore({
+      agentRevisions: new Map([
+        [
+          "agent-rev-1",
+          { ...BASE_AGENT_REVISION, requiredCapabilities: ["durable_task_recovery"] },
+        ],
+      ]),
+      runtimeRevisions: new Map([
+        // external 投影（declared/measured/effective）→ runtimeCapabilities 解析为空集：
+        // effective durable=false（未测恒 false）绝不进入能力集合。
+        ["runtime-rev-1", { ...BASE_RUNTIME_REVISION, capabilities: [] }],
+      ]),
+    });
+    const storeWithCapDb = {
+      ...store,
+      transaction: async <T>(
+        operation: (session: RouteSetActivationSession) => Promise<T>,
+      ): Promise<T> => {
+        return store.transaction(async (session) => {
+          const origGetDbOrTx = session.getDbOrTx.bind(session);
+          return operation({
+            ...session,
+            getDbOrTx: () =>
+              ({
+                ...origGetDbOrTx(),
+                select: () => ({
+                  from: () => ({
+                    where: () => ({
+                      limit: () =>
+                        Promise.resolve([
+                          {
+                            agentInterfaceRequirementsJson: {
+                              required: ["durable_task_recovery"],
+                            },
+                          },
+                        ]),
+                    }),
+                  }),
+                }),
+              }) as any,
+          });
+        });
+      },
+    };
+    const activateRouteSet = createActivateRouteSet({
+      store: storeWithCapDb,
+      evidenceReaderForTest: mockEvidenceReader,
+      now: () => NOW,
+    });
+
+    await expect(activateRouteSet(makeCommand())).rejects.toThrow("执行资格不足");
+  });
+});

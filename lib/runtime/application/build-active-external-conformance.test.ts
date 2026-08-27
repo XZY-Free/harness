@@ -432,7 +432,7 @@ describe("buildActiveExternalConformanceReport — DSSE envelope", () => {
 });
 
 describe("buildActiveExternalConformanceReport — fail closed", () => {
-  it("durable=true + not_measured/effective=false：session-recovery case 失败且 overall=failed", () => {
+  it("05 专项 P2-3：durable 三态诚实矩阵（declared=true + not_measured + effective=false → PASS）", () => {
     const declared = {
       streaming_transport: true,
       incremental_content: false,
@@ -448,32 +448,48 @@ describe("buildActiveExternalConformanceReport — fail closed", () => {
       resume: true,
       cancel: false,
     });
-    const input = hrLikeInput({
-      measured,
-      capabilities: {
-        declared,
+    const effective = {
+      streaming_transport: true,
+      incremental_content: false,
+      input_required: true,
+      resume: true,
+      cancel: false,
+      durable_task_recovery: false,
+    };
+    // true/not_measured/false → pass（声明未验证 → 平台不承诺，Registration 仍可过）
+    const passReport = buildActiveExternalConformanceReport(
+      hrLikeInput({ measured, capabilities: { declared, measured, effective } }),
+    );
+    const passCase = capabilityCase(passReport.report, "session-recovery-declaration");
+    expect(passCase.passed).toBe(true);
+
+    // true/pass/false → fail（平台无 durable 正式 Probe，measured=pass 属伪造）
+    const forgedMeasured = {
+      ...measured,
+      features: { ...measured.features, durable_task_recovery: "pass" },
+    };
+    const forgedReport = buildActiveExternalConformanceReport(
+      hrLikeInput({
+        measured: forgedMeasured,
+        capabilities: { declared, measured: forgedMeasured, effective },
+      }),
+    );
+    expect(capabilityCase(forgedReport.report, "session-recovery-declaration").passed).toBe(false);
+
+    // true/not_measured/true → fail（effective=true 但 measured!=pass，三态矛盾）
+    const contradictionReport = buildActiveExternalConformanceReport(
+      hrLikeInput({
         measured,
-        effective: {
-          streaming_transport: true,
-          incremental_content: false,
-          input_required: true,
-          resume: true,
-          cancel: false,
-          durable_task_recovery: false,
+        capabilities: {
+          declared,
+          measured,
+          effective: { ...effective, durable_task_recovery: true },
         },
-      },
-    });
-    const { report } = buildActiveExternalConformanceReport(input);
-    const c = capabilityCase(report, "session-recovery-declaration");
-    expect(c.passed).toBe(false);
-    const evidence = c.evidence as unknown as CapabilityConsistencyEvidence;
-    expect(evidence.capability).toEqual({
-      declared: true,
-      measured: "not_measured",
-      effective: false,
-    });
-    expect(report.overallResult).toBe("failed");
-    expect(() => validateRuntimeConformanceReport(report)).not.toThrow();
+      }),
+    );
+    expect(capabilityCase(contradictionReport.report, "session-recovery-declaration").passed).toBe(
+      false,
+    );
   });
 
   it("cancel=true 但 measured 非 pass：cancel case 失败且 overall=failed", () => {

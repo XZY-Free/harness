@@ -327,6 +327,24 @@ describe("parsePublicAgentContract", () => {
       expect(facts.interaction.streamingTransport).toBe(false);
     });
 
+    it("05 专项 P2-2：input_required=true 要求 resume=true（登记阶段拒绝）", () => {
+      // input_required=true + resume=false → 拒绝（当前产品模型只能 Resume 原 Invocation）
+      expectReject((i) => {
+        (i.interaction as Record<string, unknown>).input_required = true;
+        (i.interaction as Record<string, unknown>).resume = false;
+      });
+      // input_required=false + resume=false → 合法
+      const basicOnly = contract();
+      (basicOnly.interaction as Record<string, unknown>).input_required = false;
+      (basicOnly.interaction as Record<string, unknown>).resume = false;
+      expect(parsePublicAgentContract(basicOnly).interaction.resume).toBe(false);
+      // input_required=true + resume=true → 合法
+      const both = contract();
+      (both.interaction as Record<string, unknown>).input_required = true;
+      (both.interaction as Record<string, unknown>).resume = true;
+      expect(parsePublicAgentContract(both).interaction.inputRequired).toBe(true);
+    });
+
     it("supported_locales 缺失/空/非法 locale 拒绝", () => {
       expectReject((i) => {
         (i.interaction as Record<string, unknown>).supported_locales = undefined;
