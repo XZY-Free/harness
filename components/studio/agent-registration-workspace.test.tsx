@@ -284,7 +284,9 @@ function stubBackend() {
     }
     if (url === "/admin/api/v1/agents") {
       return Response.json({
-        items: registered ? [hrAgent] : [],
+        items: registered
+          ? [{ ...hrAgent, current_revision_id: agentRevisionPublished ? "arev-1" : null }]
+          : [],
         total: registered ? 1 : 0,
       });
     }
@@ -579,6 +581,8 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
       ).toBe(true),
     );
     await waitFor(() => expect(screen.getByText(/版本 1 已发布/)).toBeTruthy());
+    // 发布后档案当前版本同步刷新，不要求用户重载页面。
+    await waitFor(() => expect(screen.getByRole("cell", { name: "arev-1" })).toBeTruthy());
 
     // 登记并发布运行服务（真实 publish API）。
     await registerRuntimeAfterContract();

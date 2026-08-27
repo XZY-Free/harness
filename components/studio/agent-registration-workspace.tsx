@@ -118,7 +118,7 @@ export function AgentRegistrationWorkspace({
       ) : (
         <div className="mt-4">
           <p className="mb-2 text-[13px] text-[var(--fg-muted)]">智能体档案与当前版本。</p>
-          <AgentsViewer refreshToken={handoff.refreshToken} />
+          <AgentsViewer refreshToken={handoff.refreshToken + routeHandoff.refreshToken} />
         </div>
       )}
 
