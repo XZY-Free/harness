@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger";
 import { INVOCATION_TERMINAL_STATES } from "@/lib/persistence/schema/executions";
+import { InvocationAlreadyTerminalError } from "@/lib/runtime/errors";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { markInvocationLost } from "@/lib/runtime/recovery-queries";
 /**
@@ -49,7 +50,16 @@ export async function handleA2ABackgroundFailure(params: {
     });
   } catch (err) {
     // 后台任务不向调度方抛出；只记录 safe ids/failureKind（06 §9.8）。
-    logger.warn("[runtime] A2A 背景流失败处理异常", {
+    // 错误分级（02 专项）：终态幂等冲突（已 lost）→ info no-op；
+    // 真正的 DB/infrastructure 失败 → error 级日志暴露，绝不当作“处理成功”。
+    if (err instanceof InvocationAlreadyTerminalError) {
+      logger.info("[runtime] A2A 背景流失败处理：Invocation 已终态（幂等 no-op）", {
+        invocationId: report.invocationId,
+        failureKind: report.failureKind,
+      });
+      return;
+    }
+    logger.error("[runtime] A2A 背景流失败处理失败（recovery 未成立，不得视为已收口）", {
       invocationId: report.invocationId,
       failureKind: report.failureKind,
       error: String(err),

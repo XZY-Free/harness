@@ -1,3 +1,19 @@
+/**
+ * S09-C06：Worker 重启恢复仓储集成测试（真实 MySQL 8）。
+ *
+ * 覆盖：
+ * - findStaleInvocations（5 例）：找到心跳超时的 running/waiting_user/queued Invocation /
+ *   不返回未超时的 Invocation / 不返回终态 Invocation / 不返回 lastHeartbeatAt=null /
+ *   跨租户隔离
+ * - markInvocationLost（5 例）：running → lost + 写 invocation.lost Event + 标记 SessionBinding lost /
+ *   waiting_user → lost / 终态抛 InvocationAlreadyTerminalError / 跨租户 InvocationNotFoundError /
+ *   Job 模式（threadId=null）不写 ThreadEvent
+ * - getLatestProducerSequence（3 例）：返回 MAX(producer_sequence) / 无候选事件返回 0 /
+ *   Invocation 不存在返回 null
+ *
+ * 真实 MySQL 8 Testcontainers，不使用 mock。
+ */
+import { randomUUID } from "node:crypto";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
 import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
@@ -16,21 +32,6 @@ import {
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { createThread } from "@/lib/conversations/thread-queries";
-/**
- * S09-C06：Worker 重启恢复仓储集成测试（真实 MySQL 8）。
- *
- * 覆盖：
- * - findStaleInvocations（5 例）：找到心跳超时的 running/waiting_user/queued Invocation /
- *   不返回未超时的 Invocation / 不返回终态 Invocation / 不返回 lastHeartbeatAt=null /
- *   跨租户隔离
- * - markInvocationLost（5 例）：running → lost + 写 invocation.lost Event + 标记 SessionBinding lost /
- *   waiting_user → lost / 终态抛 InvocationAlreadyTerminalError / 跨租户 InvocationNotFoundError /
- *   Job 模式（threadId=null）不写 ThreadEvent
- * - getLatestProducerSequence（3 例）：返回 MAX(producer_sequence) / 无候选事件返回 0 /
- *   Invocation 不存在返回 null
- *
- * 真实 MySQL 8 Testcontainers，不使用 mock。
- */
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -42,6 +43,8 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import type { AgentRevision } from "@/lib/persistence/schema/agents";
+import { threadEventTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import type { Turn } from "@/lib/persistence/schema/conversation";
 import type { RuntimeSessionBinding } from "@/lib/persistence/schema/executions";
 import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/schema/executions";
 import {
@@ -49,6 +52,7 @@ import {
   createRouteSet,
 } from "@/lib/routes/application/deployment-route-service";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
+import { resolveTurnControls } from "@/lib/runtime/capabilities/turn-controls";
 import { InvocationAlreadyTerminalError, InvocationNotFoundError } from "@/lib/runtime/errors";
 import { createAttempt } from "@/lib/runtime/invocation-attempt-queries";
 import {
@@ -583,9 +587,9 @@ describe("S09-C06 markInvocationLost", () => {
     expect(result.invocation.errorSummary).toBe("Worker 心跳超时");
 
     // 写入 invocation.lost Event
-    expect(result.event).not.toBeNull();
-    expect(result.event?.eventType).toBe("invocation.lost");
-    const payload = result.event?.payloadJson as Record<string, unknown>;
+    expect(result.invocationLostEvent).not.toBeNull();
+    expect(result.invocationLostEvent?.eventType).toBe("invocation.lost");
+    const payload = result.invocationLostEvent?.payloadJson as Record<string, unknown>;
     expect(payload.reason_code).toBe("heartbeat_timeout");
 
     // SessionBinding 标记为 lost
@@ -616,7 +620,7 @@ describe("S09-C06 markInvocationLost", () => {
     });
 
     expect(result.invocation.executionState).toBe("lost");
-    expect(result.event?.eventType).toBe("invocation.lost");
+    expect(result.invocationLostEvent?.eventType).toBe("invocation.lost");
   });
 
   it("终态 Invocation 抛 InvocationAlreadyTerminalError", async () => {
@@ -698,7 +702,7 @@ describe("S09-C06 markInvocationLost", () => {
     });
 
     expect(result.invocation.executionState).toBe("lost");
-    expect(result.event).toBeNull(); // Job 模式不写 ThreadEvent
+    expect(result.invocationLostEvent).toBeNull(); // Job 模式不写 ThreadEvent
   });
 });
 
@@ -777,5 +781,260 @@ describe("S09-C06 getLatestProducerSequence", () => {
       "00000000-0000-0000-0000-000000000000",
     );
     expect(result).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 02 专项：Recovery 与 Turn 终态事务一致性
+// ═══════════════════════════════════════════════════════════
+
+describe("02 专项 Recovery 与 Turn 终态事务一致性", () => {
+  let tenantId: string;
+  let ownerId: string;
+  let agentRevision: AgentRevision;
+  let runtimeRevisionId: string;
+  let threadId: string;
+
+  beforeEach(async () => {
+    const tenantCtx = await seedTenantAndOwner();
+    tenantId = tenantCtx.tenantId;
+    ownerId = tenantCtx.ownerId;
+    const seeded = await seedAgentAndRuntime(tenantId, ownerId);
+    agentRevision = seeded.agentRevision;
+    runtimeRevisionId = seeded.runtimeRevision.id;
+    const thread = await createThreadForTest(tenantId, ownerId, seeded.agent.id);
+    threadId = thread.id;
+  });
+
+  /** 创建真实 Turn 行（running + activeInvocationId 指向 invocation）。 */
+  async function createRunningTurnForInvocation(
+    invocationId: string,
+    activeInvocationId: string | null,
+  ): Promise<string> {
+    const turnId = randomUUID();
+    await db.insert(turnTable).values({
+      id: turnId,
+      threadId,
+      turnSequence: 1,
+      triggerType: "user_message",
+      turnState: "running",
+      activeInvocationId,
+      latestInvocationId: activeInvocationId,
+      acceptedAt: new Date(),
+      startedAt: new Date(),
+    });
+    return turnId;
+  }
+
+  it("active Invocation lost → 同一事务：Invocation lost + Session lost + Turn failed + invocation.lost/turn.failed 两个 Event 连续", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      threadId,
+      turnId: "turn-pending",
+      initialExecutionState: "running",
+      withSessionBinding: true,
+      lastHeartbeatAt: new Date(Date.now() - 10_000),
+    });
+    const turnId = await createRunningTurnForInvocation(seeded.invocationId, seeded.invocationId);
+    // 修正 invocation.turnId 指向真实 Turn
+    await db
+      .update(invocationTable)
+      .set({ turnId })
+      .where(eq(invocationTable.id, seeded.invocationId));
+
+    const result = await markInvocationLost({
+      tenantId,
+      invocationId: seeded.invocationId,
+      reasonCode: "heartbeat_timeout",
+      errorSummary: "Worker 心跳超时",
+    });
+
+    expect(result.invocation.executionState).toBe("lost");
+    expect(result.sessionBinding?.bindingState).toBe("lost");
+    expect(result.invocationLostEvent?.eventType).toBe("invocation.lost");
+    expect(result.turnFailedEvent?.eventType).toBe("turn.failed");
+
+    // Turn → failed + activeInvocationId 清空 + errorCode/finishedAt
+    const [turnRow] = await db.select().from(turnTable).where(eq(turnTable.id, turnId)).limit(1);
+    expect(turnRow?.turnState).toBe("failed");
+    expect(turnRow?.activeInvocationId).toBeNull();
+    expect(turnRow?.latestInvocationId).toBe(seeded.invocationId);
+    expect(turnRow?.errorCode).toBe("heartbeat_timeout");
+    expect(turnRow?.finishedAt).not.toBeNull();
+
+    // 两个 Event sequence 连续
+    expect(
+      result.turnFailedEvent && result.invocationLostEvent
+        ? result.turnFailedEvent.eventSequence - result.invocationLostEvent.eventSequence
+        : 99,
+    ).toBe(1);
+  });
+
+  it("lost Invocation 不是 active（superseded）→ 只把 Invocation lost，不改 Turn", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      threadId,
+      turnId: "turn-pending",
+      initialExecutionState: "running",
+      lastHeartbeatAt: new Date(),
+    });
+    // Turn 当前 active 是另一个 Invocation B
+    const otherInvocationId = randomUUID();
+    const turnId = await createRunningTurnForInvocation(seeded.invocationId, otherInvocationId);
+    await db
+      .update(invocationTable)
+      .set({ turnId })
+      .where(eq(invocationTable.id, seeded.invocationId));
+
+    const result = await markInvocationLost({
+      tenantId,
+      invocationId: seeded.invocationId,
+      reasonCode: "runtime_lost",
+    });
+
+    expect(result.invocation.executionState).toBe("lost");
+    expect(result.turnFailedEvent).toBeNull();
+    const [turnRow] = await db.select().from(turnTable).where(eq(turnTable.id, turnId)).limit(1);
+    expect(turnRow?.turnState).toBe("running");
+    expect(turnRow?.activeInvocationId).toBe(otherInvocationId);
+  });
+
+  it("事务故障注入：Event 写入失败 → Invocation/Session/Turn 全部回滚", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      threadId,
+      turnId: "turn-pending",
+      initialExecutionState: "running",
+      withSessionBinding: true,
+      lastHeartbeatAt: new Date(),
+    });
+    const turnId = await createRunningTurnForInvocation(seeded.invocationId, seeded.invocationId);
+    await db
+      .update(invocationTable)
+      .set({ turnId })
+      .where(eq(invocationTable.id, seeded.invocationId));
+
+    // 预先在同 thread 写入一个占用 idempotencyKey 的 Event → invocation.lost insert 唯一冲突
+    const conflictKey = "recovery-tx-inject";
+    const [threadRow] = await db
+      .select({ lastEventSequence: threadTable.lastEventSequence })
+      .from(threadTable)
+      .where(eq(threadTable.id, threadId))
+      .limit(1);
+    const conflictSeq = (threadRow?.lastEventSequence ?? 0) + 1;
+    await db.insert(threadEventTable).values({
+      id: randomUUID(),
+      threadId,
+      eventSequence: conflictSeq,
+      eventType: "turn.queued",
+      schemaVersion: 1,
+      turnId,
+      actorType: "system",
+      payloadJson: {},
+      idempotencyKey: conflictKey,
+      occurredAt: new Date(),
+      ingestedAt: new Date(),
+    });
+
+    await expect(
+      markInvocationLost({
+        tenantId,
+        invocationId: seeded.invocationId,
+        reasonCode: "heartbeat_timeout",
+        idempotencyKey: conflictKey,
+      }),
+    ).rejects.toThrow();
+
+    // 全部回滚：Invocation 仍 running、Session 仍 active、Turn 仍 running
+    const refreshed = await getInvocationById(tenantId, seeded.invocationId);
+    expect(refreshed?.executionState).toBe("running");
+    const [turnRow] = await db.select().from(turnTable).where(eq(turnTable.id, turnId)).limit(1);
+    expect(turnRow?.turnState).toBe("running");
+    expect(turnRow?.activeInvocationId).toBe(seeded.invocationId);
+    if (seeded.sessionBinding) {
+      const sb = await getSessionBindingById(tenantId, seeded.sessionBinding.id);
+      expect(sb?.bindingState).toBe("active");
+    }
+  });
+
+  it("Turn 客户端投影：Invocation lost → turn_state=failed → controls.cancel_supported=false", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      threadId,
+      turnId: "turn-pending",
+      initialExecutionState: "running",
+      withSessionBinding: true,
+      lastHeartbeatAt: new Date(),
+    });
+    const turnId = await createRunningTurnForInvocation(seeded.invocationId, seeded.invocationId);
+    await db
+      .update(invocationTable)
+      .set({ turnId })
+      .where(eq(invocationTable.id, seeded.invocationId));
+
+    await markInvocationLost({
+      tenantId,
+      invocationId: seeded.invocationId,
+      reasonCode: "runtime_lost",
+    });
+
+    const [turnRow] = await db.select().from(turnTable).where(eq(turnTable.id, turnId)).limit(1);
+    expect(turnRow?.turnState).toBe("failed");
+    const controls = await resolveTurnControls(tenantId, [turnRow as Turn]);
+    expect(controls.get(turnId)?.cancel_supported).toBe(false);
+    expect(controls.get(turnId)?.resume_supported).toBe(false);
+    expect(controls.get(turnId)?.steer_supported).toBe(false);
+  });
+
+  it("重复 mark：第二次抛 InvocationAlreadyTerminalError，Event 不重复", async () => {
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      threadId,
+      turnId: "turn-pending",
+      initialExecutionState: "running",
+      lastHeartbeatAt: new Date(),
+    });
+    const turnId = await createRunningTurnForInvocation(seeded.invocationId, seeded.invocationId);
+    await db
+      .update(invocationTable)
+      .set({ turnId })
+      .where(eq(invocationTable.id, seeded.invocationId));
+
+    await markInvocationLost({
+      tenantId,
+      invocationId: seeded.invocationId,
+      reasonCode: "heartbeat_timeout",
+    });
+    await expect(
+      markInvocationLost({
+        tenantId,
+        invocationId: seeded.invocationId,
+        reasonCode: "heartbeat_timeout",
+      }),
+    ).rejects.toThrow(InvocationAlreadyTerminalError);
+
+    const events = await db
+      .select()
+      .from(threadEventTable)
+      .where(eq(threadEventTable.threadId, threadId));
+    const lostCount = events.filter((e) => e.eventType === "invocation.lost").length;
+    const turnFailedCount = events.filter((e) => e.eventType === "turn.failed").length;
+    expect(lostCount).toBe(1);
+    expect(turnFailedCount).toBe(1);
   });
 });

@@ -2887,8 +2887,14 @@ describe("01 专项 Durable Dispatch Retry（Command lane）", () => {
     const invocation = await getInvocationById(ctx.tenantId, running.invocationId);
     expect(invocation?.executionState).toBe("lost");
     expect(invocation?.errorCode).toBe("resume_retry_exhausted");
-    // Batch B（Recovery 与 Turn 终态事务一致性）落地后：active Turn → failed +
-    // turn.failed Event 同事务断言在此补齐。
+    // 02 专项：active Turn 同事务收口为 failed（turn.failed Event 由 Recovery Authority 写入）
+    const [turnRow] = await db
+      .select()
+      .from(turnTable)
+      .where(eq(turnTable.id, ctx.turnId))
+      .limit(1);
+    expect(turnRow?.turnState).toBe("failed");
+    expect(turnRow?.errorCode).toBe("resume_retry_exhausted");
   });
 
   it("Cancel transient 5 次耗尽 → command failed，但不伪造 Invocation cancelled", async () => {

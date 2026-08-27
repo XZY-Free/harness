@@ -265,23 +265,28 @@ export async function closeSessionBinding(bindingId: string): Promise<RuntimeSes
   return updated;
 }
 
+/** 事务句柄类型（caller-owned session 版本使用）。 */
+type Session = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
- * 标记 RuntimeSessionBinding 为 lost（bindingState active → lost）。
+ * 标记 RuntimeSessionBinding 为 lost（bindingState active → lost）— caller-owned session 版本。
  *
- * 事实源：docs/architecture/persistence.md （bindingState 含 lost 终态）、
- * §13（Worker 失联恢复：原 Runtime 会话失联，平台标记 lost 并创建新 Attempt + 新 SessionBinding）。
+ * 事实源：docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/02-Recovery与Turn终态事务一致性.md §三。
  *
- * 仅 active 状态可标记 lost；closed/lost 静默返回当前行（幂等）。
- * 与 closeSessionBinding 区别：lost 表示 Runtime 侧异常失联（非正常关闭），
- * 用于诊断和清理；closed 表示正常关闭。
+ * 唯一 SQL 实现：行锁（FOR UPDATE）+ active → lost + closedAt/lastUsedAt；closed/lost 幂等。
+ * markInvocationLost 等组合事务必须使用本版本，保证 Invocation/Session/Turn/Event 同事务。
  *
  * @throws RuntimeSessionBindingNotFoundError 绑定不存在
  */
-export async function markSessionBindingLost(bindingId: string): Promise<RuntimeSessionBinding> {
-  const [current] = await db
+export async function markSessionBindingLostInSession(
+  session: Session,
+  bindingId: string,
+): Promise<RuntimeSessionBinding> {
+  const [current] = await session
     .select()
     .from(runtimeSessionBindingTable)
     .where(eq(runtimeSessionBindingTable.id, bindingId))
+    .for("update")
     .limit(1);
   if (!current) {
     throw new RuntimeSessionBindingNotFoundError(bindingId);
@@ -293,18 +298,35 @@ export async function markSessionBindingLost(bindingId: string): Promise<Runtime
   }
 
   const now = new Date();
-  await db
+  await session
     .update(runtimeSessionBindingTable)
     .set({ bindingState: "lost", closedAt: now, lastUsedAt: now })
     .where(eq(runtimeSessionBindingTable.id, bindingId));
 
-  const [updated] = await db
+  const [updated] = await session
     .select()
     .from(runtimeSessionBindingTable)
     .where(eq(runtimeSessionBindingTable.id, bindingId))
     .limit(1);
   if (!updated) {
-    throw new Error(`markSessionBindingLost: RuntimeSessionBinding 行未找到（id=${bindingId}）`);
+    throw new Error(
+      `markSessionBindingLostInSession: RuntimeSessionBinding 行未找到（id=${bindingId}）`,
+    );
   }
   return updated;
+}
+
+/**
+ * 标记 RuntimeSessionBinding 为 lost（bindingState active → lost）— 独立事务包装。
+ *
+ * 事实源：docs/architecture/persistence.md （bindingState 含 lost 终态）、
+ * §13（Worker 失联恢复：原 Runtime 会话失联，平台标记 lost 并创建新 Attempt + 新 SessionBinding）。
+ *
+ * 与 closeSessionBinding 区别：lost 表示 Runtime 侧异常失联（非正常关闭），
+ * 用于诊断和清理；closed 表示正常关闭。SQL 唯一实现在 markSessionBindingLostInSession。
+ *
+ * @throws RuntimeSessionBindingNotFoundError 绑定不存在
+ */
+export async function markSessionBindingLost(bindingId: string): Promise<RuntimeSessionBinding> {
+  return db.transaction(async (tx) => markSessionBindingLostInSession(tx, bindingId));
 }

@@ -26,9 +26,12 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  * - producerSequence 在整个 Invocation 内连续，不按 Attempt 从 1 重启（）。
  */
 import { db } from "@/lib/db/client";
-import type { ThreadEventActorType } from "@/lib/persistence/schema/conversation";
-import { threadTable } from "@/lib/persistence/schema/conversation";
-import type { InvocationExecutionState } from "@/lib/persistence/schema/executions";
+import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
+import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
+import type {
+  InvocationExecutionState,
+  RuntimeSessionBinding,
+} from "@/lib/persistence/schema/executions";
 import {
   INVOCATION_TERMINAL_STATES,
   invocationTable,
@@ -36,7 +39,7 @@ import {
 } from "@/lib/persistence/schema/executions";
 import { InvocationAlreadyTerminalError, InvocationNotFoundError } from "@/lib/runtime/errors";
 import { updateInvocationState } from "@/lib/runtime/invocation-queries";
-import { markSessionBindingLost } from "@/lib/runtime/session-binding-queries";
+import { markSessionBindingLostInSession } from "@/lib/runtime/session-binding-queries";
 import { and, asc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 
 /** 事务句柄类型。 */
@@ -130,7 +133,7 @@ export async function findStaleInvocations(
 export interface MarkInvocationLostParams {
   tenantId: string;
   invocationId: string;
-  /** 失联原因码（如 heartbeat_timeout / runtime_lost / worker_restart）。 */
+  /** 失联原因码（如 heartbeat_timeout / runtime_lost / worker_restart / resume_retry_exhausted）。 */
   reasonCode: string;
   /** 失联原因摘要（写入 invocation.lost Event payload + Invocation.errorSummary）。 */
   errorSummary?: string | null;
@@ -148,29 +151,39 @@ export interface MarkInvocationLostResult {
   /** 更新后的 Invocation（executionState=lost）。 */
   invocation: Awaited<ReturnType<typeof updateInvocationState>>;
   /** 写入的 invocation.lost ThreadEvent（threadId 为空时为 null）。 */
-  event: Awaited<ReturnType<typeof insertThreadEvent>> | null;
+  invocationLostEvent: ThreadEvent | null;
+  /** 写入的 turn.failed ThreadEvent（active Turn 被收口时；否则 null）。 */
+  turnFailedEvent: ThreadEvent | null;
   /** 标记为 lost 的 RuntimeSessionBinding（runtimeSessionBindingId 为空时为 null）。 */
-  sessionBinding: Awaited<ReturnType<typeof markSessionBindingLost>> | null;
+  sessionBinding: RuntimeSessionBinding | null;
 }
 
+/** Turn 非终态集合（turn.failed 收口仅在非终态 active Turn 上执行）。 */
+const TURN_TERMINAL_STATES: readonly string[] = ["completed", "failed", "cancelled", "interrupted"];
+
 /**
- * 将非终态 Invocation 标记为 lost 终态 + 写 invocation.lost ThreadEvent
- * + 标记关联 RuntimeSessionBinding 为 lost。
+ * 将 active Invocation 标记为 lost 终态 —— 唯一原子 Recovery Authority。
  *
- * 事实源：（lost 终态）、（事务边界：Invocation 状态写入 + Event 同事务）、
- * §13（不伪造完成：心跳超时只能转 lost，不能转 completed）。
+ * 事实源：
+ * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/02-Recovery与Turn终态事务一致性.md §四
+ * - docs/architecture/persistence.md （事务边界）、§13（不伪造完成）
  *
- * 流程（同事务）：
- * 1. SELECT FOR UPDATE Invocation（跨租户隔离）
- * 2. 校验 executionState ∈ (queued, running, waiting_user)；终态抛 InvocationAlreadyTerminalError
- * 3. updateInvocationState: → lost（含 errorCode/errorSummary 写入）
- * 4. 如果 runtimeSessionBindingId 非空：markSessionBindingLost
- * 5. 如果 threadId 非空：allocateEventSequences(1) + 写 invocation.lost ThreadEvent
+ * 同一 MySQL transaction 内：
+ * 1. SELECT Invocation FOR UPDATE + 校验非终态
+ * 2. load Turn FOR UPDATE（如 turnId）
+ * 3. load RuntimeSessionBinding FOR UPDATE（如存在；caller-owned session 版本）
+ * 4. Invocation → lost（errorCode/errorSummary/finishedAt）
+ * 5. SessionBinding active → lost
+ * 6. 仅当 Turn.activeInvocationId === Invocation.id 且 Turn 非终态：
+ *    Turn → failed（errorCode/finishedAt/activeInvocationId=null；latest/adopted 保留）
+ * 7. allocate ThreadEvent sequences + append invocation.lost（+ turn.failed，如第 6 步执行）
  *
  * 不变量：
- * - 终态 Invocation 不能再 markInvocationLost（幂等性靠状态机校验保证）。
- * - Job 模式（threadId 为空）不写 ThreadEvent；JobEvent 由调用方按需写入（本阶段不实现 job.lost Event）。
- * - 失联检测与恢复分离：本函数只标记 lost，不触发 redispatch（redispatch 由 redispatchInvocation 编排）。
+ * - 不新增 Turn.lost 状态（Invocation 失联是基础设施事实，Turn 的用户语义是 failed）。
+ * - 非 active（superseded/regenerate）Invocation lost 不改变 Turn。
+ * - Job 模式（threadId=null）：只收口 Invocation/Session，不写 ThreadEvent、不操作 Turn。
+ * - SessionBinding 更新必须走 caller-owned 事务版本（markSessionBindingLostInSession），
+ *   禁止在事务内调用全局 db 版本。
  *
  * @throws InvocationNotFoundError Invocation 不存在或跨租户不可见
  * @throws InvocationAlreadyTerminalError Invocation 已终态
@@ -182,7 +195,7 @@ export async function markInvocationLost(
   const errorSummary = params.errorSummary ?? `Invocation 失联：${params.reasonCode}`;
 
   return db.transaction(async (tx) => {
-    // 1. SELECT FOR UPDATE Invocation（updateInvocationState 内部会再次锁定，这里先校验状态）
+    // 1. SELECT FOR UPDATE Invocation（跨租户隔离）
     const [current] = await tx
       .select()
       .from(invocationTable)
@@ -214,7 +227,19 @@ export async function markInvocationLost(
       );
     }
 
-    // 3. updateInvocationState: → lost（事务内 SELECT FOR UPDATE + 状态机校验）
+    // 3. load Turn FOR UPDATE（如 turnId；Turn 收口判定需要行锁防并发）
+    let turnRow: typeof turnTable.$inferSelect | null = null;
+    if (current.turnId) {
+      const [t] = await tx
+        .select()
+        .from(turnTable)
+        .where(eq(turnTable.id, current.turnId))
+        .for("update")
+        .limit(1);
+      turnRow = t ?? null;
+    }
+
+    // 4. Invocation → lost（含 errorCode/errorSummary/finishedAt）
     const updatedInvocation = await updateInvocationState(
       tx,
       params.tenantId,
@@ -226,18 +251,39 @@ export async function markInvocationLost(
       },
     );
 
-    // 4. 标记关联 RuntimeSessionBinding 为 lost（事务外调用，但同事务提交后生效）
-    // markSessionBindingLost 内部使用 db（非 tx），但其幂等性保证即使事务回滚也不会影响下一次调用
-    // 为保证事务一致性，事务内不调用 markSessionBindingLost；提交后由调用方或后续清理流程处理
-    // —— 实际上为简化设计，本函数在事务提交前调用 markSessionBindingLost（非 tx），
-    // 若 markSessionBindingLost 失败，事务回滚，Invocation 也回 lost 转换。
+    // 5. SessionBinding active → lost（caller-owned session 版本，同事务）
     let sessionBinding: MarkInvocationLostResult["sessionBinding"] = null;
     if (updatedInvocation.runtimeSessionBindingId) {
-      sessionBinding = await markSessionBindingLost(updatedInvocation.runtimeSessionBindingId);
+      sessionBinding = await markSessionBindingLostInSession(
+        tx,
+        updatedInvocation.runtimeSessionBindingId,
+      );
     }
 
-    // 5. 写 invocation.lost ThreadEvent（仅会话模式；job 模式无 ThreadEvent 流）
-    let event: MarkInvocationLostResult["event"] = null;
+    // 6. Turn 收口：仅当 Turn.activeInvocationId === Invocation.id 且 Turn 非终态
+    let turnFailed = false;
+    if (
+      turnRow &&
+      turnRow.activeInvocationId === params.invocationId &&
+      !TURN_TERMINAL_STATES.includes(turnRow.turnState)
+    ) {
+      const now = new Date();
+      await tx
+        .update(turnTable)
+        .set({
+          turnState: "failed",
+          errorCode: params.reasonCode,
+          finishedAt: now,
+          activeInvocationId: null,
+          versionNo: turnRow.versionNo + 1,
+        })
+        .where(eq(turnTable.id, turnRow.id));
+      turnFailed = true;
+    }
+
+    // 7. ThreadEvent：invocation.lost（+ turn.failed）
+    let invocationLostEvent: ThreadEvent | null = null;
+    let turnFailedEvent: ThreadEvent | null = null;
     if (updatedInvocation.threadId) {
       // 锁定 Thread 行（与现有模式一致）
       const [thread] = await tx
@@ -250,8 +296,8 @@ export async function markInvocationLost(
         throw new Error(`markInvocationLost: Thread 不存在（id=${updatedInvocation.threadId}）`);
       }
 
-      const seq = await allocateEventSequences(tx, updatedInvocation.threadId, 1);
-      event = await insertThreadEvent(tx, updatedInvocation.threadId, seq, {
+      const seq = await allocateEventSequences(tx, updatedInvocation.threadId, turnFailed ? 2 : 1);
+      invocationLostEvent = await insertThreadEvent(tx, updatedInvocation.threadId, seq, {
         eventType: "invocation.lost",
         turnId: updatedInvocation.turnId ?? undefined,
         invocationId: updatedInvocation.id,
@@ -267,9 +313,24 @@ export async function markInvocationLost(
         correlationId: params.correlationId ?? undefined,
         idempotencyKey: params.idempotencyKey ?? undefined,
       });
+      if (turnFailed) {
+        turnFailedEvent = await insertThreadEvent(tx, updatedInvocation.threadId, seq + 1, {
+          eventType: "turn.failed",
+          turnId: updatedInvocation.turnId ?? undefined,
+          invocationId: updatedInvocation.id,
+          actorType,
+          actorId: params.actorId ?? undefined,
+          payload: {
+            reason_code: params.reasonCode,
+            error_summary: errorSummary,
+          },
+          correlationId: params.correlationId ?? undefined,
+          idempotencyKey: params.idempotencyKey ? `${params.idempotencyKey}-turn` : undefined,
+        });
+      }
     }
 
-    return { invocation: updatedInvocation, event, sessionBinding };
+    return { invocation: updatedInvocation, invocationLostEvent, turnFailedEvent, sessionBinding };
   });
 }
 
