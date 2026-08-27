@@ -10,6 +10,7 @@
  */
 "use client";
 
+import { Markdown } from "@/components/markdown";
 import type { ClientItem } from "@/lib/client/types";
 
 interface AgentMessageItemProps {
@@ -26,7 +27,7 @@ export function AgentMessageItem({ item }: AgentMessageItemProps) {
   return (
     <div className="message-row mb-5" data-testid="agent-message" data-item-state={item.item_state}>
       <div className="conversation-copy prose-markdown text-foreground">
-        {displayText}
+        <Markdown>{displayText}</Markdown>
         {isPending && (
           <span
             aria-hidden="true"
