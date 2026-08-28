@@ -2,7 +2,7 @@
  * Root Schema（单一 Canonical Schema Authority）。
  *
  * 本文件是整仓唯一的 Schema 聚合入口（关口02 §3 / §21）：
- * - 聚合 lib/persistence/schema/ 内全部 Canonical 表定义（37 个）。
+ * - 聚合 lib/persistence/schema/ 内全部 Canonical 表定义（38 个）。
  * - 聚合领域内、目录位于其他模块的 Canonical 表定义（8 个外部 Canonical：
  *   control-plane / artifacts / publications / routes / runtime）。
  * - Facade（agents/artifacts/control-plane/executions/publications/routes/runtimes）
@@ -12,9 +12,10 @@
  * 任何新增 Canonical 表都必须在此聚合，否则 Architexture Gate 会失败。
  */
 
-// ─── lib/persistence/schema 内 Canonical（37）──────────────────────
+// ─── lib/persistence/schema 内 Canonical（38）──────────────────────
 export * from "@/lib/persistence/schema/admin-export";
 export * from "@/lib/persistence/schema/agents";
+export * from "@/lib/persistence/schema/agent-calls";
 export * from "@/lib/persistence/schema/audit";
 export * from "@/lib/persistence/schema/authorization";
 export * from "@/lib/persistence/schema/capability-use";
