@@ -6,16 +6,12 @@
  * Resolver 纯内存选择，不再N+1查询权威事实。
  */
 
-import type { RouteResolutionCandidate } from "../domain/route-resolution-policy";
+import type { RouteResolutionCandidate, RouteTarget } from "../domain/route-resolution-policy";
 
 export interface LoadProjectionCandidatesInput {
   tenantId: string;
-  /**
-   * 调用方显式提供的可选 Agent 控制面约束（§8.3）。
-   * null = 无 Agent 约束，查询基础 Harness Route（projection.agentId IS NULL）；
-   * concrete = 带 Agent 约束，查询该 Agent 的 Route。
-   */
-  agentConstraint?: string | null;
+  /** 显式解析目标 — runtime 查基础 Harness Route，agent 查指定 Agent 的 Route（专题01）。 */
+  target: RouteTarget;
   routeScopeKey: string;
 }
 

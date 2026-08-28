@@ -888,7 +888,7 @@ describe("Dispatcher 调度", () => {
     expect(commands).toEqual([
       {
         tenantId: ctx.tenantId,
-        agentConstraint: null,
+        target: { kind: "runtime" },
         routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
         businessKey: { threadId: ctx.threadId },
         attributes: {},
@@ -975,7 +975,7 @@ describe("Dispatcher 调度", () => {
     const routeResolver = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
     const staleOutcome = await routeResolver({
       tenantId: ctx.tenantId,
-      agentConstraint: null,
+      target: { kind: "runtime" },
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
       businessKey: { threadId: ctx.threadId },
     });
@@ -1017,7 +1017,7 @@ describe("Dispatcher 调度", () => {
     });
     const outcome = await createResolveRoute({ store: mysqlRouteEligibilityResolutionStore })({
       tenantId: ctx.tenantId,
-      agentConstraint: null,
+      target: { kind: "runtime" },
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
       businessKey: { threadId: ctx.threadId },
     });

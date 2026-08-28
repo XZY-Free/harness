@@ -128,7 +128,7 @@ export async function resolveExecutionPlan(
   // 1. 路由解析（顶层恒为 runtime target，无 Agent 约束）
   const routeOutcome = await (input.routeResolver ?? defaultResolver)({
     tenantId: input.tenantId,
-    agentConstraint: null,
+    target: { kind: "runtime" },
     routeScopeKey: input.routeScopeKey,
     businessKey: input.businessKey,
     attributes: input.attributes ?? {},

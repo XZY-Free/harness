@@ -42,13 +42,25 @@ import {
 export const ROUTE_STATES = ["enabled", "disabled"] as const;
 export type RouteState = (typeof ROUTE_STATES)[number];
 
+// ─── Route Target ──────────────────────────────────────────
+
+/**
+ * Route 目标类型 — 显式判别，禁止再用 agentId null/non-null 隐式猜测目标。
+ * - runtime：SnowHarness Harness Runtime Route（顶层执行目标）。
+ * - agent：Agent 能力 Route（Harness 调用外部 Agent 能力）。
+ * 仍只有一套 Route 体系，targetKind 只区分目标，不建立第二套路由 Authority。
+ */
+export const ROUTE_TARGET_KINDS = ["runtime", "agent"] as const;
+export type RouteTargetKind = (typeof ROUTE_TARGET_KINDS)[number];
+
 // ─── DeploymentRouteSet ─────────────────────────────────
 
 /**
- * 路由集合：同一“可选 Agent 约束 + scope”下所有路由的聚合更新单元。
+ * 路由集合：同一“Agent 能力 + scope”或“基础 Harness + scope”下所有路由的聚合更新单元。
  *
  * - versionNo 是 ETag 来源，每次聚合更新递增（含回滚）。
  * - routeScopeKey 如 "prod"、"canary"；routeScopeJson 携带结构化范围描述。
+ * - targetKind 显式声明目标类型；runtime 时 agentId 必须为 NULL，agent 时 agentId 必须非空。
  */
 export const deploymentRouteSetTable = mysqlTable(
   "DeploymentRouteSet",
@@ -61,9 +73,14 @@ export const deploymentRouteSetTable = mysqlTable(
       .notNull()
       .references(() => tenant.id),
     /**
-     * 归属 Agent ID。
-     * null = 基础 Harness RouteSet（无 Agent 资产约束）；有值 = Agent RouteSet。
-     * 与 routeScopeKey 共同参与 UNIQUE(tenantId, agentId, routeScopeKey)。
+     * 目标类型。
+     * - runtime：基础 Harness RouteSet，agentId 必须 NULL。
+     * - agent：Agent 能力 RouteSet，agentId 必须非空。
+     */
+    targetKind: mysqlEnum("targetKind", ROUTE_TARGET_KINDS).notNull().default("runtime"),
+    /**
+     * 归属 Agent ID（仅 targetKind=agent 时非空）。
+     * runtime 时必为 null。与 routeScopeKey 共同参与 UNIQUE(tenantId, targetKind, agentId, routeScopeKey)。
      */
     agentId: varchar("agentId", { length: 36 }),
     routeScopeKey: varchar("routeScopeKey", { length: 128 }).notNull(),

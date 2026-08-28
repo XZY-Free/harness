@@ -127,6 +127,7 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
     expect(Object.keys(body).sort()).toEqual(
       [
         "id",
+        "target_kind",
         "agent_id",
         "route_scope_key",
         "route_scope",

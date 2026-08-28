@@ -8,6 +8,9 @@
 /** Route 状态。 */
 export type RouteState = "enabled" | "disabled";
 
+/** Route 目标类型 — 显式判别（专题01 Batch4，禁止隐式 null 猜测）。 */
+export type RouteTargetKind = "runtime" | "agent";
+
 /** Route Activation 状态。 */
 export type RouteActivationState = "active" | "disabled";
 
@@ -18,7 +21,9 @@ export type RouteEligibilityState = "eligible" | "ineligible" | "pending_rebuild
 export interface DeploymentRouteSetDTO {
   id: string;
   tenant_id: string;
-  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
+  /** 显式目标类型 — runtime 或 agent（专题01 Batch4）。 */
+  target_kind: RouteTargetKind;
+  /** runtime 时为 null；agent 时非空。 */
   agent_id: string | null;
   route_scope_key: string;
   route_scope: unknown;
@@ -34,6 +39,8 @@ export interface DeploymentRouteDTO {
   route_key: string;
   route_group_id: string | null;
   route_state: RouteState;
+  /** 显式目标类型 — runtime 或 agent（专题01 Batch4）。 */
+  target_kind: RouteTargetKind;
   agent_revision_id: string | null;
   runtime_revision_id: string | null;
   policy_revision_id: string | null;
@@ -87,6 +94,8 @@ export interface EnsureRouteSetRequest {
 /** RouteSet ensure 响应 — 与详情 DTO 不同，不含 tenant_id。 */
 export interface EnsureRouteSetResponse {
   id: string;
+  /** 显式目标类型 — runtime 或 agent（专题01 Batch4）。 */
+  target_kind: RouteTargetKind;
   agent_id: string;
   route_scope_key: string;
   route_scope: unknown;

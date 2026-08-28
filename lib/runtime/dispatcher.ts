@@ -122,7 +122,7 @@ const configuredResolver = createConfiguredRouteResolver({
 const defaultRouteResolver: RouteResolver = async (input) => {
   const result = await configuredResolver({
     tenantId: input.tenantId,
-    agentConstraint: input.agentConstraint ?? null,
+    target: input.target,
     routeScopeKey: input.routeScopeKey,
     businessKey: input.businessKey,
     attributes: input.attributes,

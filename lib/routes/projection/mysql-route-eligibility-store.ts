@@ -15,6 +15,7 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
     const values = {
       routeId: input.routeId,
       tenantId: input.tenantId,
+      targetKind: input.targetKind,
       agentId: input.agentId,
       routeSetId: input.routeSetId,
       routeScopeKey: input.routeScopeKey,
@@ -74,6 +75,7 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
       .onDuplicateKeyUpdate({
         set: {
           tenantId: sql`VALUES(tenantId)`,
+          targetKind: sql`VALUES(targetKind)`,
           agentId: sql`VALUES(agentId)`,
           routeSetId: sql`VALUES(routeSetId)`,
           routeScopeKey: sql`VALUES(routeScopeKey)`,

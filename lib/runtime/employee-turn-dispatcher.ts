@@ -32,7 +32,7 @@ const configuredResolver = createConfiguredRouteResolver({
 const resolveRoute: RouteResolver = async (input) => {
   const result = await configuredResolver({
     tenantId: input.tenantId,
-    agentConstraint: input.agentConstraint ?? null,
+    target: input.target,
     routeScopeKey: input.routeScopeKey,
     businessKey: input.businessKey,
     attributes: input.attributes,
@@ -70,7 +70,7 @@ function configuredModelFn(): ModelFn {
 /**
  * 调度员工发起的会话 Turn。
  *
- * 正式热路径（§9.3）：读取 Thread → Resolve 基础 Harness Route（agentConstraint 默认 null，§8.3）
+ * 正式热路径（§9.3）：读取 Thread → Resolve 基础 Harness Route（显式 runtime target，专题01 冻结架构）
  * → 创建 Invocation → 创建 ExecutionBinding → Runtime Dispatch。
  * 无 Ready Route 时保持 accepted 并返回未调度（热路径不做 Agent-specific Hosted Provisioning，§11.2/§11.5）；
  * 基础 Harness Route 的供应策略由正式控制面初始化。
@@ -99,7 +99,7 @@ export async function dispatchEmployeeTurn(params: {
   // ─── 热路径：查询正式 RouteResolver（恒为 runtime target）───
   const routeOutcome = await resolveRoute({
     tenantId: params.tenantId,
-    agentConstraint: null,
+    target: { kind: "runtime" },
     routeScopeKey: "default",
     businessKey: { jobId: `employee-turn:${thread.id}` },
     threadDefaultModelRef: thread.defaultModelRef,

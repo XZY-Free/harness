@@ -32,6 +32,7 @@ function candidate(
     routeRevisionNo: 1,
     routeActivationId: `route-activation-${id}`,
     routeActivationSequence: 1,
+    targetKind: "agent",
     agentRevisionId: `agent-revision-${id}`,
     runtimeRevisionId: `runtime-revision-${id}`,
     policyRevisionId: null,
@@ -64,7 +65,7 @@ function resolve(
 ) {
   return resolveRouteCandidates({
     tenantId: "tenant-1",
-    agentConstraint: "agent-1",
+    target: { kind: "agent", agentId: "agent-1" },
     routeScopeKey: "prod",
     businessKey: { threadId: "thread-1" },
     attributes: {},
@@ -89,7 +90,7 @@ describe("deterministic route resolution policy", () => {
   it("resolved 结果携带本次完整输入的 resolutionInputDigest", () => {
     const input = {
       tenantId: "tenant-1",
-      agentConstraint: "agent-1",
+      target: { kind: "agent", agentId: "agent-1" } as const,
       routeScopeKey: "prod",
       businessKey: { threadId: "thread-1" },
       attributes: { environment: "prod" },

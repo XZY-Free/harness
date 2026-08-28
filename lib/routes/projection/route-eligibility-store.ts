@@ -10,7 +10,9 @@ import type { RouteEligibilityProjectionRecord } from "./route-eligibility-proje
 export interface UpsertProjectionInput {
   routeId: string;
   tenantId: string;
-  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+  /** 显式目标类型 — runtime 或 agent（专题01 冻结架构）。 */
+  targetKind: "runtime" | "agent";
+  /** runtime 时为 null；agent 时非空。 */
   agentId: string | null;
   routeSetId: string;
   routeScopeKey: string;

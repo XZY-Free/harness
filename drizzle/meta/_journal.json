@@ -134,6 +134,13 @@
       "when": 1787910946455,
       "tag": "0018_black_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1787924424620,
+      "tag": "0019_flowery_menace",
+      "breakpoints": true
     }
   ]
 }

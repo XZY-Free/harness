@@ -27,9 +27,11 @@ export const routeEligibilityProjection = mysqlTable(
     /** 路由 ID（与 DeploymentRoute.id 对应，业务主键）。 */
     routeId: varchar("routeId", { length: 36 }).primaryKey().notNull(),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
+    /** 显式目标类型 — runtime 或 agent（专题01 冻结架构，禁止隐式 null 猜测）。 */
+    targetKind: mysqlEnum("targetKind", ["runtime", "agent"]).notNull().default("runtime"),
     /**
      * 归属 Agent ID。
-     * null = 基础 Harness Route（无 Agent 资产约束），Resolver 无约束查询命中此列 IS NULL。
+     * runtime 时 null；agent 时非空。Resolver 按 target 命中此列 IS NULL / =agentId。
      */
     agentId: varchar("agentId", { length: 36 }),
     routeSetId: varchar("routeSetId", { length: 36 }).notNull(),

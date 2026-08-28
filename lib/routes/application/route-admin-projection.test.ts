@@ -73,6 +73,7 @@ describe("route admin projection", () => {
       projectAdminRouteSet({
         id: "set-1",
         tenantId: "tenant-1",
+        targetKind: "agent",
         agentId: "agent-1",
         routeScopeKey: "prod",
         routeScopeJson: { environment: "prod" },

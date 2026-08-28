@@ -114,8 +114,8 @@ const routeReader: HostedRouteReader = {
   async resolveEligibleRoute(command) {
     const outcome = await resolveRoute({
       ...command,
-      // agentConstraint 表达可选 Agent 资产约束；null 表示基础 Harness Route。
-      agentConstraint: command.agentId,
+      // 显式 agent target：解析指定 Agent 能力 Route（专题01 冻结架构）。
+      target: { kind: "agent", agentId: command.agentId },
       businessKey: { jobId: `hosted-provision:${command.agentId}` },
     });
     if (outcome.status !== "resolved") return null;
@@ -848,6 +848,7 @@ async function ensureRouteSet(command: {
     await tx.insert(deploymentRouteSetTable).values({
       id,
       tenantId: command.tenantId,
+      targetKind: "agent",
       agentId: command.agentId,
       routeScopeKey: command.routeScopeKey,
       routeScopeJson: { runtime: BUILTIN_HOSTED_RUNTIME_KEY },

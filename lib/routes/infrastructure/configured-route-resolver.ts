@@ -12,6 +12,7 @@ import type {
   ResolveRouteCandidatesInput,
   RouteResolutionAttribute,
   RouteResolutionOutcome,
+  RouteTarget,
 } from "@/lib/routes/domain/route-resolution-policy";
 import { resolveRouteCandidates } from "@/lib/routes/domain/route-resolution-policy";
 import type { RouteEligibilityResolutionStore } from "@/lib/routes/persistence/route-eligibility-resolution-store";
@@ -20,8 +21,8 @@ import type { RouteEligibilityResolutionStore } from "@/lib/routes/persistence/r
 
 export interface ConfiguredResolveRouteCommand {
   tenantId: string;
-  /** 可选 Agent 控制面约束；null = 基础 Harness Route（§8.3）。 */
-  agentConstraint?: string | null;
+  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（专题01 冻结架构）。 */
+  target: RouteTarget;
   routeScopeKey: string;
   businessKey: { threadId?: string; jobId?: string };
   attributes?: Record<string, RouteResolutionAttribute>;
@@ -68,14 +69,14 @@ export function createConfiguredRouteResolver(
     // Projection 是唯一数据源 — 单次 SQL 查询 eligible 候选
     const candidates = await deps.projectionStore.loadCandidates({
       tenantId: command.tenantId,
-      agentConstraint: command.agentConstraint ?? null,
+      target: command.target,
       routeScopeKey: command.routeScopeKey,
     });
 
     // 纯内存选择算法
     const outcome = resolveRouteCandidates({
       tenantId: command.tenantId,
-      agentConstraint: command.agentConstraint ?? null,
+      target: command.target,
       routeScopeKey: command.routeScopeKey,
       businessKey: command.businessKey,
       attributes: command.attributes ?? {},

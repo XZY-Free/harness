@@ -1,6 +1,7 @@
 import type {
   DeploymentRouteDTO,
   DeploymentRouteSetDTO,
+  RouteTargetKind,
 } from "@/lib/control-plane-client/contracts/route";
 
 export interface AdminRouteProjectionInput {
@@ -41,7 +42,9 @@ export interface AdminRouteProjectionInput {
 export function projectAdminRouteSet(routeSet: {
   id: string;
   tenantId: string;
-  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
+  /** 显式目标类型 — runtime 或 agent（专题01 Batch4）。 */
+  targetKind: RouteTargetKind;
+  /** runtime 时为 null；agent 时非空。 */
   agentId: string | null;
   routeScopeKey: string;
   routeScopeJson: unknown;
@@ -52,6 +55,7 @@ export function projectAdminRouteSet(routeSet: {
   return {
     id: routeSet.id,
     tenant_id: routeSet.tenantId,
+    target_kind: routeSet.targetKind,
     agent_id: routeSet.agentId,
     route_scope_key: routeSet.routeScopeKey,
     route_scope: routeSet.routeScopeJson,
@@ -70,6 +74,7 @@ export function projectAdminRoute(input: AdminRouteProjectionInput): DeploymentR
     route_key: route.routeKey,
     route_group_id: revision?.routeGroupId ?? null,
     route_state: route.routeState,
+    target_kind: revision ? (revision.agentRevisionId ? "agent" : "runtime") : "runtime",
     agent_revision_id: revision?.agentRevisionId ?? null,
     runtime_revision_id: revision?.runtimeRevisionId ?? null,
     policy_revision_id: revision?.policyRevisionId ?? null,

@@ -102,6 +102,12 @@ const TOPIC01_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string 
   { pattern: /["']\/desktop\/new["']/, title: "/desktop/new 假 new 路由" },
   { pattern: /route\.kind\s*===\s*["']chat["']/, title: "route.kind=chat 漂移" },
   {
+    // 专题01 Batch4：RouteResolver 命令必须用显式 target:{kind:"runtime"|"agent"}，
+    // 禁止再用 agentConstraint 隐式表达目标（隐式 null=Harness 的旧 Authority）。
+    pattern: /\bagentConstraint\b/,
+    title: "RouteResolver agentConstraint 隐式 target",
+  },
+  {
     // §35：仅禁止「agents.length===0 执行阻断」（return/throw，允许可选大括号）。
     // 「暂无可用助手」空态展示（agents.length === 0 && <SelectorMessage>）合法，不匹配。
     pattern: /agents\.length\s*===?\s*0\s*\)?\s*\{?\s*(?:return|throw)/,

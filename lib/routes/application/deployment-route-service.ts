@@ -44,7 +44,9 @@ export async function createRouteSet(params: {
   routeScopeJson: Record<string, unknown>;
 }): Promise<DeploymentRouteSetRow> {
   const id = randomUUID();
-  await db.insert(deploymentRouteSetTable).values({ ...params, id, versionNo: 1 });
+  await db
+    .insert(deploymentRouteSetTable)
+    .values({ ...params, targetKind: params.agentId ? "agent" : "runtime", id, versionNo: 1 });
   const [row] = await db
     .select()
     .from(deploymentRouteSetTable)
@@ -91,7 +93,9 @@ export async function ensureRouteSetByAgentScope(params: {
 
   const id = randomUUID();
   try {
-    await db.insert(deploymentRouteSetTable).values({ ...params, id, versionNo: 1 });
+    await db
+      .insert(deploymentRouteSetTable)
+      .values({ ...params, targetKind: params.agentId ? "agent" : "runtime", id, versionNo: 1 });
   } catch (error) {
     if (!isMysqlDuplicateEntryError(error)) throw error;
     const [row] = await db

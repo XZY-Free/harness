@@ -1,18 +1,10 @@
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
+import { normalizeTarget, type RouteTarget } from "@/lib/routes/domain/route-resolution-policy";
 
 export interface ResolutionInputDigestInput {
   tenantId: string;
-  /**
-   * 调用方显式提供的可选 Agent 控制面约束（§8.3）。
-   *
-   * - null = 无 Agent 约束，解析基础 Harness Route。
-   * - concrete string = 带 Agent 控制面约束，解析 Agent Route。
-   *
-   * null 与 concrete 必须产生不同 digest（§8.4），RFC 8785 天然区分。
-   * 禁止 undefined / null / empty / "default" 四态模糊：本层统一归一到
-   * 明确两态（null = 无约束，或 concrete = 有约束）。
-   */
-  agentConstraint?: string | null;
+  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（专题01 冻结架构）。 */
+  target: RouteTarget;
   routeScopeKey: string;
   businessKey: { threadId?: string | null; jobId?: string | null };
   attributes: Record<string, unknown>;
@@ -24,13 +16,13 @@ export interface ResolutionInputDigestInput {
  *
  * 对象遵循 RFC 8785 递归排序，数组保持领域顺序。可选字段 missing 与 null
  * 均归一为 null；attributes 内的 undefined 等非 JSON 值则直接拒绝。
- * agentConstraint 缺失与 null 归一为 null，concrete 保持原值 → 两种状态产生
- * 不同 digest（§8.4）。
+ * target 归一到显式两态（runtime → null，agent → agentId），两种状态产生
+ * 不同 digest（§8.4），杜绝隐式 null 模糊。
  */
 export function computeResolutionInputDigest(input: ResolutionInputDigestInput): string {
   return computeCanonicalDigest({
     tenantId: input.tenantId,
-    agentConstraint: input.agentConstraint ?? null,
+    target: normalizeTarget(input.target),
     routeScopeKey: input.routeScopeKey,
     businessKey: {
       threadId: input.businessKey.threadId ?? null,

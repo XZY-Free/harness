@@ -541,7 +541,7 @@ async function resolveFrozenRouteForBinding(
     store: mysqlRouteEligibilityResolutionStore,
   })({
     tenantId: fixture.tenantId,
-    agentConstraint: fixture.agent.id,
+    target: { kind: "agent", agentId: fixture.agent.id },
     routeScopeKey: "prod",
     businessKey: { threadId },
   });
@@ -1107,7 +1107,7 @@ describe("场景7：Projection Consumer 构建完整 eligible Projection", () =>
       store: mysqlRouteEligibilityResolutionStore,
     })({
       tenantId: fixture.tenantId,
-      agentConstraint: fixture.agent.id,
+      target: { kind: "agent", agentId: fixture.agent.id },
       routeScopeKey: "prod",
       businessKey: { threadId: "disabled-projection" },
     });
@@ -1139,7 +1139,7 @@ describe("场景8：Employee Turn 只执行一次 Route Resolution", () => {
 
     const outcome1 = await resolveRoute({
       tenantId: fixture.tenantId,
-      agentConstraint: fixture.agent.id,
+      target: { kind: "agent", agentId: fixture.agent.id },
       routeScopeKey: "prod",
       businessKey: { threadId: "thread-e2e-001" },
     });
@@ -1149,7 +1149,7 @@ describe("场景8：Employee Turn 只执行一次 Route Resolution", () => {
     // 同一 Turn 重复调用 → 幂等，返回相同 resolutionKeyDigest
     const outcome2 = await resolveRoute({
       tenantId: fixture.tenantId,
-      agentConstraint: fixture.agent.id,
+      target: { kind: "agent", agentId: fixture.agent.id },
       routeScopeKey: "prod",
       businessKey: { threadId: "thread-e2e-001" },
     });
@@ -1355,7 +1355,7 @@ describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活",
         store: mysqlRouteEligibilityResolutionStore,
       })({
         tenantId,
-        agentConstraint: agent.id,
+        target: { kind: "agent", agentId: agent.id },
         routeScopeKey: "prod",
         businessKey: { threadId: `hosted-e2e-${requestId}` },
       });
@@ -2034,7 +2034,7 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
       store: mysqlRouteEligibilityResolutionStore,
     })({
       tenantId,
-      agentConstraint: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "prod",
       businessKey: { threadId: "lifecycle-thread" },
     });
@@ -2093,7 +2093,7 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
       store: mysqlRouteEligibilityResolutionStore,
     })({
       tenantId,
-      agentConstraint: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "prod",
       businessKey: { threadId: "lifecycle-thread-post-withdrawal" },
     });

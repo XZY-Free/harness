@@ -22,7 +22,10 @@ import {
   publicationRecord,
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
-import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import {
+  createResolveRoute,
+  type ResolveRouteCommand,
+} from "@/lib/routes/application/resolve-route";
 import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
@@ -92,6 +95,7 @@ async function seedAgentAuthority() {
   await db.insert(deploymentRouteSetTable).values({
     id: routeSetId,
     tenantId: tenant.id,
+    targetKind: "agent",
     agentId: agent.id,
     routeScopeKey: "prod",
     routeScopeJson: { environment: "prod" },
@@ -327,11 +331,14 @@ function digest(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
-function command(fixture: Awaited<ReturnType<typeof seedAgentAuthority>>, threadId: string) {
+function command(
+  fixture: Awaited<ReturnType<typeof seedAgentAuthority>>,
+  threadId: string,
+): ResolveRouteCommand {
   return {
     tenantId: fixture.tenantId,
-    // : ResolveRouteCommand 字段已从 agentId 改为 agentConstraint（§8.3）。
-    agentConstraint: fixture.agentId,
+    // 显式 agent target：解析指定 Agent 能力 Route（专题01 冻结架构）。
+    target: { kind: "agent", agentId: fixture.agentId },
     routeScopeKey: "prod",
     businessKey: { threadId },
     attributes: {},
@@ -675,10 +682,10 @@ describe("RouteResolver MySQL authority", () => {
       routeId,
     });
 
-    // 无 Agent 约束解析 → 命中基础 Harness Route，agentRevisionId=null
+    // 显式 runtime target 解析 → 命中基础 Harness Route，agentRevisionId=null
     const result = await resolveRoute({
       tenantId,
-      agentConstraint: null,
+      target: { kind: "runtime" },
       routeScopeKey: "prod",
       businessKey: { threadId: "base-thread" },
       attributes: {},

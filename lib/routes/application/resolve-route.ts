@@ -1,17 +1,15 @@
 import {
   type RouteResolutionAttribute,
   type RouteResolutionOutcome,
+  type RouteTarget,
   resolveRouteCandidates,
 } from "../domain/route-resolution-policy";
 import type { RouteEligibilityResolutionStore } from "../persistence/route-eligibility-resolution-store";
 
 export interface ResolveRouteCommand {
   tenantId: string;
-  /**
-   * 调用方显式提供的可选 Agent 控制面约束（§8.3）。
-   * null = 无 Agent 约束，解析基础 Harness Route；concrete = 带 Agent 约束。
-   */
-  agentConstraint?: string | null;
+  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（专题01 冻结架构）。 */
+  target: RouteTarget;
   routeScopeKey: string;
   businessKey: { threadId?: string; jobId?: string };
   attributes?: Record<string, RouteResolutionAttribute>;
@@ -32,12 +30,12 @@ export function createResolveRoute(dependencies: {
   return async (command) => {
     const candidates = await dependencies.store.loadCandidates({
       tenantId: command.tenantId,
-      agentConstraint: command.agentConstraint ?? null,
+      target: command.target,
       routeScopeKey: command.routeScopeKey,
     });
     return resolveRouteCandidates({
       tenantId: command.tenantId,
-      agentConstraint: command.agentConstraint ?? null,
+      target: command.target,
       routeScopeKey: command.routeScopeKey,
       businessKey: command.businessKey,
       attributes: command.attributes ?? {},

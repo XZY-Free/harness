@@ -308,6 +308,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     const projectionFields = {
       routeId: route.id,
       tenantId: input.tenantId,
+      targetKind: routeSet.targetKind,
       agentId: routeSet.agentId,
       routeSetId: routeSet.id,
       routeScopeKey: routeSet.routeScopeKey,

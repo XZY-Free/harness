@@ -77,6 +77,7 @@ function callerFromAdminPrincipal(principal: AdminPrincipal) {
 function buildRouteSetProjection(row: DeploymentRouteSetRow, created: boolean) {
   return {
     id: row.id,
+    target_kind: row.targetKind,
     agent_id: row.agentId,
     route_scope_key: row.routeScopeKey,
     route_scope: row.routeScopeJson,

@@ -1,0 +1,2 @@
+ALTER TABLE `DeploymentRouteSet` ADD `targetKind` enum('runtime','agent') DEFAULT 'runtime' NOT NULL;--> statement-breakpoint
+ALTER TABLE `RouteEligibilityProjection` ADD `targetKind` enum('runtime','agent') DEFAULT 'runtime' NOT NULL;

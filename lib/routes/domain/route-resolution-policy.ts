@@ -12,6 +12,19 @@ export const ROUTE_TRAFFIC_WEIGHT_TOTAL = 10_000;
 
 export type RouteResolutionAttribute = string | number | boolean;
 
+/**
+ * Route 解析目标 — 显式判别，禁止再用 agentConstraint?: string|null 隐式表达。
+ * - { kind: "runtime" }：解析基础 Harness Runtime Route（顶层执行目标）。
+ * - { kind: "agent", agentId }：解析指定 Agent 能力 Route（Harness 调用 Agent）。
+ * 仍只有一套 Route Authority；target 只区分解析目标。
+ */
+export type RouteTarget = { kind: "runtime" } | { kind: "agent"; agentId: string };
+
+/** 从显式 target 提取解析用的 agent 约束 ID（runtime 为 null）。 */
+export function targetToAgentId(target: RouteTarget): string | null {
+  return target.kind === "agent" ? target.agentId : null;
+}
+
 export interface RouteControlPlaneEvidence {
   /** null = 基础 Harness Route（无 Agent 资产约束，Agent Evidence not_applicable，§18）。 */
   agentRevisionId: string | null;
@@ -42,9 +55,11 @@ export interface RouteResolutionCandidate {
   routeRevisionNo: number;
   routeActivationId: string;
   routeActivationSequence: number;
+  /** 显式目标类型 — runtime 或 agent，禁止隐式 null 猜测。 */
+  targetKind: "runtime" | "agent";
   /**
    * 绑定的 AgentRevision ID。
-   * null = 基础 Harness Route（无 Agent 资产约束）；有值 = Agent Route。
+   * runtime 为 null；agent 必填。
    */
   agentRevisionId: string | null;
   runtimeRevisionId: string;
@@ -81,9 +96,11 @@ export interface RouteResolution {
   routeRevisionNo: number;
   routeActivationId: string;
   routeActivationSequence: number;
+  /** 显式目标类型 — runtime 或 agent。 */
+  targetKind: "runtime" | "agent";
   /**
    * 绑定的 AgentRevision ID。
-   * null = 基础 Harness Route（无 Agent 资产约束）；有值 = Agent Route。
+   * runtime 为 null；agent 必填。
    */
   agentRevisionId: string | null;
   runtimeRevisionId: string;
@@ -99,8 +116,8 @@ export interface RouteResolution {
   resolvedAt: Date;
   /**
    * 控制面证据（恒非空）。
-   * 基础 Harness Route（agentRevisionId=null）→ agent 字段为 null（Agent Evidence
-   * not_applicable，§18），Runtime 字段始终填充；Agent Route → 完整成组（§7.4）。
+   * 基础 Harness Route（targetKind=runtime，agentRevisionId=null）→ agent 字段为 null
+   * （Agent Evidence not_applicable，§18），Runtime 字段始终填充；Agent Route → 完整成组（§7.4）。
    */
   controlPlaneEvidence: RouteControlPlaneEvidence;
   /** Projection 版本号（来自 RouteEligibilityProjection），用于 Binding 版本一致性校验。 */
@@ -133,12 +150,8 @@ export type RouteResolutionOutcome =
 
 export interface ResolveRouteCandidatesInput {
   tenantId: string;
-  /**
-   * 调用方显式提供的可选 Agent 控制面约束（§8.3）。
-   * null = 无 Agent 约束，解析基础 Harness Route；concrete = 带 Agent 约束。
-   * 与 concrete 产生不同 resolutionKeyDigest / resolutionInputDigest（§8.4）。
-   */
-  agentConstraint?: string | null;
+  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（专题01 冻结架构）。 */
+  target: RouteTarget;
   routeScopeKey: string;
   businessKey: { threadId?: string; jobId?: string };
   attributes: Record<string, RouteResolutionAttribute>;
@@ -232,7 +245,7 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
   const resolutionKeyDigest = computeResolutionKeyDigest({
     tenantId: input.tenantId,
     executionKey,
-    agentConstraint: input.agentConstraint ?? null,
+    target: input.target,
     routeGroupId: selectedGroupId,
   });
   const trafficBucket = hashBucket(resolutionKeyDigest, ROUTE_TRAFFIC_WEIGHT_TOTAL);
@@ -255,6 +268,7 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
       routeRevisionNo: selected.candidate.routeRevisionNo,
       routeActivationId: selected.candidate.routeActivationId,
       routeActivationSequence: selected.candidate.routeActivationSequence,
+      targetKind: selected.candidate.targetKind,
       agentRevisionId: selected.candidate.agentRevisionId,
       runtimeRevisionId: selected.candidate.runtimeRevisionId,
       policyRevisionId: selected.candidate.policyRevisionId,
@@ -267,7 +281,7 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
       resolutionKeyDigest,
       resolutionInputDigest: computeResolutionInputDigest({
         tenantId: input.tenantId,
-        agentConstraint: input.agentConstraint ?? null,
+        target: input.target,
         routeScopeKey: input.routeScopeKey,
         businessKey: input.businessKey,
         attributes: input.attributes,
@@ -292,17 +306,22 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
 export function computeResolutionKeyDigest(input: {
   tenantId: string;
   executionKey: string;
-  /** 无 Agent 约束为 null，与 concrete 产生不同 digest（§8.4）。 */
-  agentConstraint: string | null;
+  /** 显式解析目标 — runtime 与不同 agent 产生不同 digest（§8.4）。 */
+  target: RouteTarget;
   routeGroupId: string;
 }): string {
   const canonical = JSON.stringify([
     input.tenantId,
     input.executionKey,
-    input.agentConstraint,
+    normalizeTarget(input.target),
     input.routeGroupId,
   ]);
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
+/** 将显式 target 归一为 digest 规范形（与 agentConstraint 语义保持 digest 兼容）。 */
+export function normalizeTarget(target: RouteTarget): unknown {
+  return target.kind === "agent" ? target.agentId : null;
 }
 
 export function computeCapabilityManifestDigest(input: {
@@ -339,7 +358,7 @@ function isControlPlaneEligible(candidate: RouteResolutionCandidate, now: Date):
     candidate.runtimeConformanceValid &&
     (candidate.policyRevisionId === null || candidate.policyRevisionState === "published");
 
-  if (candidate.agentRevisionId === null) {
+  if (candidate.targetKind === "runtime") {
     // 基础 Harness Route：无 Agent 资产约束，Agent Evidence 为 not_applicable（§18），
     // 不参与资格判断，也不伪装成 passed。仅需 Runtime 证据。
     return (

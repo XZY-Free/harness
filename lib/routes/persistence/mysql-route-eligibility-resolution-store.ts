@@ -33,10 +33,10 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
       .where(
         and(
           eq(routeEligibilityProjection.tenantId, input.tenantId),
-          // 无 Agent 约束 → 查询基础 Harness Route（agentId IS NULL）；
-          // 有约束 → 查询该 Agent 的 Route。
-          input.agentConstraint
-            ? eq(routeEligibilityProjection.agentId, input.agentConstraint)
+          // 显式 target：runtime → 基础 Harness Route（targetKind=runtime，agentId IS NULL）；
+          // agent → 指定 Agent 的 Route。
+          input.target.kind === "agent"
+            ? eq(routeEligibilityProjection.agentId, input.target.agentId)
             : isNull(routeEligibilityProjection.agentId),
           eq(routeEligibilityProjection.routeScopeKey, input.routeScopeKey),
           eq(routeEligibilityProjection.eligibilityState, "eligible"),
@@ -46,7 +46,7 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
     // 将 Projection 记录转换为 RouteResolutionCandidate
     // Projection 只包含 eligible 条目，Resolver 纯内存选择
     return projections.map((p): RouteResolutionCandidate => {
-      // 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）→ agent 字段为
+      // 控制面证据恒非空。基础 Harness Route（targetKind=runtime）→ agent 字段为
       // null（Agent Evidence not_applicable，§18）；Runtime 字段始终填充（base route
       // 也有 runtime revision/attestation）。Agent Route → 完整成组（§7.4）。
       const controlPlaneEvidence = buildControlPlaneEvidence(p);
@@ -59,6 +59,7 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
         routeRevisionNo: p.routeRevisionNo,
         routeActivationId: p.routeActivationId,
         routeActivationSequence: p.routeActivationSequence,
+        targetKind: p.targetKind,
         agentRevisionId: p.agentRevisionId,
         runtimeRevisionId: p.runtimeRevisionId,
         policyRevisionId: p.policyRevisionId,

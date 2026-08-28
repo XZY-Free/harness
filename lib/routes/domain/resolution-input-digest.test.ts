@@ -3,7 +3,7 @@ import { computeResolutionInputDigest } from "./resolution-input-digest";
 
 const baseInput = {
   tenantId: "tenant-1",
-  agentConstraint: "agent-1",
+  target: { kind: "agent", agentId: "agent-1" } as const,
   routeScopeKey: "production",
   businessKey: { threadId: "thread-1" },
   attributes: {
@@ -25,7 +25,7 @@ describe("computeResolutionInputDigest", () => {
       },
       businessKey: { threadId: "thread-1" },
       routeScopeKey: "production",
-      agentConstraint: "agent-1",
+      target: { kind: "agent", agentId: "agent-1" } as const,
       tenantId: "tenant-1",
     };
 
@@ -52,7 +52,7 @@ describe("computeResolutionInputDigest", () => {
 
   it.each([
     ["tenantId", { tenantId: "tenant-2" }],
-    ["agentConstraint", { agentConstraint: "agent-2" }],
+    ["target", { target: { kind: "agent", agentId: "agent-2" } as const }],
     ["routeScopeKey", { routeScopeKey: "staging" }],
     ["businessKey", { businessKey: { jobId: "job-1" } }],
     ["attributes", { attributes: { ...baseInput.attributes, region: "eu-west" } }],
@@ -63,22 +63,19 @@ describe("computeResolutionInputDigest", () => {
     );
   });
 
-  it("agentConstraint null（基础 Harness Route）与 concrete 产生不同摘要（§8.4）", () => {
-    const base = computeResolutionInputDigest(baseInput);
-    // 显式 null（缺失与 null 统一为 null）不得与 concrete 混同。
-    expect(computeResolutionInputDigest({ ...baseInput, agentConstraint: null })).not.toBe(base);
-    // missing 与 null 统一为 null（同一态）。
-    const { agentConstraint: _omitted, ...missing } = baseInput;
-    expect(computeResolutionInputDigest(missing)).toBe(
-      computeResolutionInputDigest({ ...baseInput, agentConstraint: null }),
-    );
-    // 禁 empty / "default" 四态：空串与 "default" 也按 concrete 处理，不得吞并 null。
-    expect(computeResolutionInputDigest({ ...baseInput, agentConstraint: "" })).not.toBe(
-      computeResolutionInputDigest({ ...baseInput, agentConstraint: null }),
-    );
-    expect(computeResolutionInputDigest({ ...baseInput, agentConstraint: "default" })).not.toBe(
-      computeResolutionInputDigest({ ...baseInput, agentConstraint: null }),
-    );
+  it("runtime target（基础 Harness Route）与 agent target 产生不同摘要（§8.4）", () => {
+    const agentBase = computeResolutionInputDigest(baseInput);
+    // runtime target 归一到 null，与 agent concrete 不得混同。
+    expect(
+      computeResolutionInputDigest({ ...baseInput, target: { kind: "runtime" } as const }),
+    ).not.toBe(agentBase);
+    // 不同 agent 也产生不同摘要（同 kind 不同 agentId）。
+    expect(
+      computeResolutionInputDigest({
+        ...baseInput,
+        target: { kind: "agent", agentId: "agent-other" } as const,
+      }),
+    ).not.toBe(agentBase);
   });
 
   it("返回 UTF-8 RFC 8785 canonical JSON 的 SHA-256", () => {
