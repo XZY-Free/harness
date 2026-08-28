@@ -7,7 +7,6 @@ import {
   createActivateRouteSet,
 } from "@/lib/routes/application/activate-route-set";
 import {
-  AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
   RouteIdempotencyCompletionError,
@@ -717,7 +716,7 @@ describe("activateRouteSet", () => {
     ).rejects.toThrow("actor tenant");
   });
 
-  it("RuntimeRevision capability 不满足 → AgentCapabilityUnsupportedError", async () => {
+  it("RuntimeRevision capability 不满足 → RouteExecutionIneligibleError（统一 Policy，fail-closed）", async () => {
     const store = createMockStore({
       agentRevisions: new Map([
         ["agent-rev-1", { ...BASE_AGENT_REVISION, requiredCapabilities: ["gpu"] }],

@@ -1034,7 +1034,7 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
     expect(respBody.capabilities.protocol_versions).toEqual(["2"]);
   });
 
-  it("Runtime route 把当前输入、handle、workspace、limits、trace 传入实际 HostedAgentLoop", async () => {
+  it("Runtime route 把当前输入、handle、workspace、limits、trace 传入实际 HostedHarnessLoop", async () => {
     let modelArgs: unknown[] = [];
     const adapter = createHostedAdapter({
       platformEndpoint: "https://platform.internal",

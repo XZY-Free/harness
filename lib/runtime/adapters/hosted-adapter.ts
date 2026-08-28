@@ -8,15 +8,15 @@
  *
  * 职责：
  * - 定义 RuntimeAdapter 接口（probeCapabilities / startInvocation / handleCancel / handleResume / handleSteer）。
- * - 定义 GatewayEndpoints / EventIngressClient / HostedAgentLoop 等共享类型与实现。
+ * - 定义 GatewayEndpoints / EventIngressClient / HostedHarnessLoop 等共享类型与实现。
  * - createHostedAdapter：工厂函数，返回 Hosted 参考适配器。
- * - startInvocation：生成 runtime_session_ref/runtime_execution_ref，异步启动 HostedAgentLoop。
+ * - startInvocation：生成 runtime_session_ref/runtime_execution_ref，异步启动 HostedHarnessLoop。
  * - handleCancel/handleResume/handleSteer：返回 Runtime ack，异步回传候选事件。
  * - 事件回传通过可注入的 EventBatchSink（HTTP 或直接调用 ingressEventBatch 仓储函数）。
  *
  * 关键约束：
  * - Adapter 不直读平台库和 Secret（通过 EventBatchSink 回传事件）。
- * - 正式文本必须在终态前形成 response.completed（由 HostedAgentLoop 保证）。
+ * - 正式文本必须在终态前形成 response.completed（由 HostedHarnessLoop 保证）。
  * - Invocation 终态必须形成公开 Event（execution.completed/failed/cancelled）。
  * - producer_sequence 在整个 Invocation 内连续递增（Adapter 跟踪 nextSequence）。
  * - 模型声称"已完成"不等同于平台确认成功（由 ingress 映射决定终态）。
@@ -137,7 +137,7 @@ export interface RuntimeAdapter {
    * 获取最后一次 startInvocation 触发的 loop.run() Promise（测试用 await）。
    * 非 startInvocation 路径或未启动时返回 null。
    */
-  getLastLoopPromise?(): Promise<HostedAgentLoopResult> | null;
+  getLastLoopPromise?(): Promise<HostedHarnessLoopResult> | null;
 }
 
 // ─── 事件回传 Sink ────────────────────────────────────────
@@ -288,10 +288,10 @@ export function hostedAdapterCapabilities(): RuntimeCapabilitiesResponse {
   };
 }
 
-// ─── HostedAgentLoop ─────────────────────────────────────
+// ─── HostedHarnessLoop ─────────────────────────────────────
 
-/** HostedAgentLoop 参数。 */
-export interface HostedAgentLoopParams {
+/** HostedHarnessLoop 参数。 */
+export interface HostedHarnessLoopParams {
   invocationId: string;
   threadId: string | null;
   turnId: string | null;
@@ -317,8 +317,8 @@ export interface HostedAgentLoopParams {
   correlationId?: string | null;
 }
 
-/** HostedAgentLoop 运行结果。 */
-export interface HostedAgentLoopResult {
+/** HostedHarnessLoop 运行结果。 */
+export interface HostedHarnessLoopResult {
   /** 是否成功完成（execution.completed 已发送或被平台视为终态）。 */
   completed: boolean;
   /** Agent 回复文本（response.completed payload.text）。 */
@@ -375,13 +375,13 @@ function extractUserMessage(inputItems: unknown[]): string {
  * execution.completed 会被 ingress 拒绝（IngressInvocationTerminalError）。
  * 捕获此错误视为成功（终态已达成）。
  */
-export class HostedAgentLoop {
-  private readonly params: HostedAgentLoopParams;
+export class HostedHarnessLoop {
+  private readonly params: HostedHarnessLoopParams;
   private readonly sentEvents: RuntimeCandidateEvent[] = [];
   private nextSequence = 1;
   private nextTransientSequence = 1;
 
-  constructor(params: HostedAgentLoopParams) {
+  constructor(params: HostedHarnessLoopParams) {
     this.params = params;
   }
 
@@ -390,7 +390,7 @@ export class HostedAgentLoop {
    *
    * @returns Loop 结果（completed/responseText/sentEvents）
    */
-  async run(): Promise<HostedAgentLoopResult> {
+  async run(): Promise<HostedHarnessLoopResult> {
     const ingressClient =
       this.params.ingressClient ??
       createHttpEventIngressClient({
@@ -512,9 +512,9 @@ interface AdapterState {
   /** 下一个可用的 producer_sequence（整个 Invocation 内连续递增）。 */
   nextSequence: number;
   /** 最后一次 startInvocation 触发的 loop.run() Promise（测试 await）。 */
-  lastLoopPromise: Promise<HostedAgentLoopResult> | null;
-  /** 最后一次创建的 HostedAgentLoop 实例（诊断用）。 */
-  lastLoop: HostedAgentLoop | null;
+  lastLoopPromise: Promise<HostedHarnessLoopResult> | null;
+  /** 最后一次创建的 HostedHarnessLoop 实例（诊断用）。 */
+  lastLoop: HostedHarnessLoop | null;
 }
 
 // ─── createHostedAdapter 工厂 ─────────────────────────────
@@ -649,7 +649,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           startParams.authToken,
         );
 
-        const loopParams: HostedAgentLoopParams = {
+        const loopParams: HostedHarnessLoopParams = {
           invocationId: startParams.invocationId,
           threadId: startParams.threadId,
           turnId: startParams.turnId,
@@ -669,7 +669,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           correlationId: startParams.correlationId,
         };
 
-        const loop = new HostedAgentLoop(loopParams);
+        const loop = new HostedHarnessLoop(loopParams);
         state.lastLoop = loop;
         const runPromise = loop.run();
         state.lastLoopPromise = runPromise;
@@ -733,7 +733,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
       };
     },
 
-    getLastLoopPromise(): Promise<HostedAgentLoopResult> | null {
+    getLastLoopPromise(): Promise<HostedHarnessLoopResult> | null {
       return state.lastLoopPromise;
     },
   };

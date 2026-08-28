@@ -46,7 +46,6 @@ import {
 } from "@/lib/routes/application/activate-route-set";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import {
-  AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
   RouteSetNotFoundError,
@@ -328,9 +327,6 @@ export async function PUT(
     }
     if (err instanceof RevisionNotPublishedError) {
       return apiError("BUSINESS_CONSTRAINT_VIOLATION", err.message, { requestId });
-    }
-    if (err instanceof AgentCapabilityUnsupportedError) {
-      return apiError("AGENT_CAPABILITY_UNSUPPORTED", err.message, { requestId });
     }
     if (err instanceof RouteSetRequiresAtomicUpdateError) {
       return apiError("ROUTE_SET_REQUIRES_ATOMIC_UPDATE", err.message, { requestId });

@@ -17,7 +17,6 @@ import { createMySqlRevisionExecutionEvidenceReader } from "@/lib/control-plane/
 import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { eq } from "drizzle-orm";
 import {
-  AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
   RouteEligibilityInvalidError,

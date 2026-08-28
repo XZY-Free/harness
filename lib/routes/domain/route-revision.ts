@@ -86,19 +86,6 @@ export class ArtifactNotVerifiedForRouteError extends Error {
   }
 }
 
-export class AgentCapabilityUnsupportedError extends Error {
-  constructor(
-    public readonly missingCapabilities: string[],
-    public readonly agentRevisionId: string,
-    public readonly runtimeRevisionId: string,
-  ) {
-    super(
-      `AgentRevision ${agentRevisionId} required capabilities [${missingCapabilities.join(", ")}] 不在 RuntimeRevision ${runtimeRevisionId} capabilities 内`,
-    );
-    this.name = "AgentCapabilityUnsupportedError";
-  }
-}
-
 export class RouteIdempotencyCompletionError extends Error {
   constructor(public readonly recordId: string) {
     super(`RouteActivation 幂等记录完成失败: ${recordId}`);

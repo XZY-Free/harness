@@ -11,7 +11,7 @@
  * - 校验 Idempotency-Key（必填）。
  * - 校验请求体（invocation_id / agent / gateway_endpoints / execution_limits 必填）。
  * - 生成 runtime_session_ref + runtime_execution_ref，返回 accepted=true（HTTP 202）。
- * - S05-C05 扩展：异步启动 HostedAgentLoop（不阻塞 dispatch 响应）。
+ * - S05-C05 扩展：异步启动 HostedHarnessLoop（不阻塞 dispatch 响应）。
  *   - 从 turn_context 提取 thread_id / turn_id（缺失时回退到 placeholder）。
  *   - 调用 startHostedAdapter，loop.run() 内部通过 Event Ingress 回传候选事件。
  *   - 测试可通过 setHostedAdapterOverrides 注入 ingressClient/modelFn；通过 getLastLoopPromise await 完成。
@@ -163,7 +163,7 @@ export async function POST(request: Request): Promise<Response> {
     capabilities,
   };
 
-  // 5. S05-C05 扩展：异步启动 HostedAgentLoop（不阻塞 dispatch 响应）
+  // 5. S05-C05 扩展：异步启动 HostedHarnessLoop（不阻塞 dispatch 响应）
   //
   // route handler 解析 turn_context，调用 getRouteHostedAdapter().startInvocation
   // 触发 loop.run()。loop.run() 不被 await：dispatch 立即返回 202；loop 内部通过 Event Ingress 回传候选事件。

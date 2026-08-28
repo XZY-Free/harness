@@ -16,7 +16,6 @@ import {
   deploymentRouteTable,
 } from "@/lib/persistence/schema/routes";
 import {
-  AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
   MAX_ROUTE_TRAFFIC_WEIGHT,
   RevisionNotPublishedError,
@@ -29,7 +28,6 @@ import { and, desc, eq } from "drizzle-orm";
 
 export const MAX_TRAFFIC_WEIGHT = MAX_ROUTE_TRAFFIC_WEIGHT;
 export {
-  AgentCapabilityUnsupportedError,
   ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
   RouteNotFoundError,
