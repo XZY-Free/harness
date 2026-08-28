@@ -74,17 +74,17 @@ export function ThreadInput({
   currentModelRef,
   defaultModelRef,
 }: ThreadInputProps) {
-  // 仅属于这一次待发送消息；不读写 Thread 默认值或上一轮 Invocation。
-  const [selection, setSelection] = useState<{ threadId: string | null; agentId: string | null }>({
+  // 保留用户选择；重新进入会话时使用上一轮明确选择，不建立 Thread 默认绑定。
+  // undefined 表示尚未手动选择，null 表示用户明确选择“不指定助手”。
+  const [selection, setSelection] = useState<{ threadId: string | null; agentId?: string | null }>({
     threadId,
-    agentId: null,
   });
-  if (selection.threadId !== threadId) setSelection({ threadId, agentId: null });
+  if (selection.threadId !== threadId) setSelection({ threadId });
   const selectedAgentId = onAgentChange
     ? (currentAgentId ?? null)
-    : selection.threadId === threadId
+    : selection.threadId === threadId && selection.agentId !== undefined
       ? selection.agentId
-      : null;
+      : (latestTurn?.requested_agent_id ?? null);
   const changeAgent = (agentId: string | null) => {
     if (onAgentChange) onAgentChange(agentId);
     else setSelection({ threadId, agentId });
@@ -155,7 +155,6 @@ export function ThreadInput({
       setCustomBusy(false);
     }
     if (ok) {
-      changeAgent(null);
       clearDraft();
       // 重置高度
       const el = textareaRef.current;

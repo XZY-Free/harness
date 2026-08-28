@@ -338,6 +338,7 @@ function projectTurn(
     id: turn.id,
     turn_sequence: turn.turnSequence,
     trigger_type: turn.triggerType,
+    requested_agent_id: turn.requestedAgentId,
     trigger_ref: turn.triggerRef,
     trigger_item_id: turn.triggerItemId,
     turn_state: turn.turnState,

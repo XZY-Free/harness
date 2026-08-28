@@ -273,6 +273,7 @@ export interface ClientTurnControls {
 export interface ClientTurn {
   readonly controls: ClientTurnControls;
   readonly id: string;
+  readonly requested_agent_id: string | null;
   readonly turn_sequence: number;
   readonly trigger_type: string;
   readonly trigger_ref: string | null;

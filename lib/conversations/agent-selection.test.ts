@@ -9,7 +9,8 @@
  * - agent_selection 非法（mode/agent_id 缺失）→ 400 REQUEST_SCHEMA_INVALID。
  * - CreateThread 无 agent_id（Thread 不绑定 Agent；多余字段不产生绑定）。
  */
-import { POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
+import { GET as getThreadGET } from "@/app/api/v1/threads/[thread_id]/route";
+import { GET as getTurnsGET, POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
@@ -116,6 +117,14 @@ describe("Per-Invocation Agent Selection（05）", () => {
     const turn = await getTurnById(ctx.tenantId, body.turn.id);
     expect(turn?.requestedAgentId).toBe(ctx.agentId);
     expect(turn?.agentSelectionMode).toBe("required");
+
+    const params = { params: Promise.resolve({ thread_id: threadId }) };
+    const detail = await getThreadGET(buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}` }), params);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).latest_turn.requested_agent_id).toBe(ctx.agentId);
+    const turns = await getTurnsGET(buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}/turns` }), params);
+    expect(turns.status).toBe(200);
+    expect((await turns.json()).turns.at(-1).requested_agent_id).toBe(ctx.agentId);
 
     // 调度走 Agent Route：Binding 冻结该 AgentRevision（05 §5）。
     expect(turn?.latestInvocationId).toBeTruthy();
