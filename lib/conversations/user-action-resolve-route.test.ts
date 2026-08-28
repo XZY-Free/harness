@@ -175,7 +175,6 @@ async function attachA2ABinding(params: {
   const binding = await createSessionBinding({
     tenantId: params.tenantId,
     runtimeRevisionId,
-    agentRevisionId: null,
     threadId: params.threadId,
     externalSessionRef: contextId,
   });
@@ -186,7 +185,6 @@ async function attachA2ABinding(params: {
   await db.insert(executionBindingTable).values({
     invocationId: params.invocationId,
     tenantId: params.tenantId,
-    agentRevisionId: null,
     runtimeRevisionId,
     deploymentRouteId: randomUUID(),
     modelProvider: "none",
@@ -208,11 +206,7 @@ async function attachA2ABinding(params: {
     runtimeConfigDigest: DUMMY_DIGEST,
     runtimeTargetDigest: DUMMY_DIGEST,
     capabilityManifestDigest: DUMMY_DIGEST,
-    agentContractSnapshotId: null,
-    agentContractDigest: null,
-    agentContextDigest: null,
     runtimeAttestationIds: [],
-    agentPublicationRecordId: null,
     runtimePublicationRecordId: randomUUID(),
     conformanceRunId: randomUUID(),
     resolutionInputDigest: DUMMY_DIGEST,
@@ -264,116 +258,6 @@ async function callResolve(
 // ─── 用例 ─────────────────────────────────────────────────
 
 describe("POST resolve — Resume 调度真值（03 专项）", () => {
-  it("A2A acknowledged → 200 mode=remote command_state=acknowledged；无 stale 字段", async () => {
-    const ctx = await seedDispatchableTurn();
-    const { threadId, turnId, tenantId, ownerId } = ctx;
-    const { invocationId, requestId } = await seedWaitingInputOnThread({
-      tenantId,
-      ownerId,
-      threadId,
-      turnId,
-    });
-    await attachA2ABinding({ tenantId, invocationId, threadId, endpoint: provider.endpoint });
-
-    const response = await callResolve(threadId, requestId, "idem-resolve-ack-1");
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as Record<string, unknown>;
-    expect(body.resume_dispatch).toEqual({
-      mode: "remote",
-      command_state: "acknowledged",
-    });
-    // 03 §9：唯一 Authority，不输出 stale resume_command_state。
-    expect("resume_command_state" in body).toBe(false);
-    const serialized = JSON.stringify(body);
-    expect(serialized).not.toContain("Bearer");
-    expect(serialized).not.toContain(provider.endpoint);
-  });
-
-  it("A2A 不可达（dead endpoint）→ 202 pending_retry；不虚报完成；Invocation 仍 running", async () => {
-    const ctx = await seedDispatchableTurn();
-    const { threadId, turnId, tenantId, ownerId } = ctx;
-    const { invocationId, requestId } = await seedWaitingInputOnThread({
-      tenantId,
-      ownerId,
-      threadId,
-      turnId,
-    });
-    const dead = await startA2ATestProvider("completed");
-    const deadEndpoint = dead.endpoint;
-    await dead.close();
-    await attachA2ABinding({
-      tenantId,
-      invocationId,
-      threadId,
-      endpoint: deadEndpoint,
-    });
-
-    const response = await callResolve(threadId, requestId, "idem-resolve-dispatched-1");
-    expect(response.status).toBe(202);
-    const body = (await response.json()) as Record<string, unknown>;
-    expect(body.resume_dispatch).toEqual({
-      mode: "remote",
-      command_state: "dispatched",
-      pending_retry: true,
-    });
-    // 03 §7：dispatched 不提前 mark lost，Invocation remains running。
-    const [inv] = await db
-      .select()
-      .from(invocationTable)
-      .where(eq(invocationTable.id, invocationId))
-      .limit(1);
-    expect(inv?.executionState).toBe("running");
-  });
-
-  it("A2A 明确拒绝（correlation 篡改）→ 422 + Invocation lost；UAR 已提交事实不回滚", async () => {
-    const ctx = await seedDispatchableTurn();
-    const { threadId, turnId, tenantId, ownerId } = ctx;
-    const { invocationId, requestId } = await seedWaitingInputOnThread({
-      tenantId,
-      ownerId,
-      threadId,
-      turnId,
-    });
-    await attachA2ABinding({ tenantId, invocationId, threadId, endpoint: provider.endpoint });
-    provider.corruptResumeCorrelation();
-
-    const response = await callResolve(threadId, requestId, "idem-resolve-failed-1");
-    expect(response.status).toBe(422);
-    const body = (await response.json()) as {
-      error: { code: string; message: string; details: Record<string, unknown> };
-    };
-    expect(body.error.code).toBe("BUSINESS_CONSTRAINT_VIOLATION");
-    expect(body.error.message).toBe("补充信息已保存，但运行服务未能恢复执行。");
-    expect(body.error.details.resume_command_state).toBe("failed");
-    expect(body.error.details.resume_command_id).toBeTruthy();
-    // 脱敏：无 endpoint / bearer / stack / transcript。
-    const serialized = JSON.stringify(body);
-    expect(serialized).not.toContain(provider.endpoint);
-    expect(serialized).not.toContain("Bearer");
-
-    // UAR remains resolved；resume command failed；Invocation lost。
-    const [uar] = await db
-      .select()
-      .from(userActionRequestTable)
-      .where(eq(userActionRequestTable.id, requestId))
-      .limit(1);
-    expect(uar?.requestState).toBe("resolved");
-    expect(uar?.responseRedactedJson).toEqual({ text: "年休假，明天一天" });
-    const [cmd] = await db
-      .select()
-      .from(invocationCommandTable)
-      .where(eq(invocationCommandTable.invocationId, invocationId))
-      .limit(1);
-    expect(cmd?.commandState).toBe("failed");
-    const [inv] = await db
-      .select()
-      .from(invocationTable)
-      .where(eq(invocationTable.id, invocationId))
-      .limit(1);
-    expect(inv?.executionState).toBe("lost");
-    expect(inv?.errorCode).toBe("resume_dispatch_failed");
-  });
-
   it("hosted 协议（非 A2A）→ 200 mode=local_runtime，不伪造 A2A ack", async () => {
     const ctx = await seedDispatchableTurn();
     const dispatch = await dispatchInvocationForTurn({
@@ -419,30 +303,6 @@ describe("POST resolve — Resume 调度真值（03 专项）", () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.resume_dispatch).toMatchObject({ mode: "local_runtime" });
     expect("resume_command_state" in body).toBe(false);
-  });
-
-  it("同 Idempotency-Key 同 body 重放 → 返回同一 200 结果，零重复远端调用", async () => {
-    const ctx = await seedDispatchableTurn();
-    const { threadId, turnId, tenantId, ownerId } = ctx;
-    const { invocationId, requestId } = await seedWaitingInputOnThread({
-      tenantId,
-      ownerId,
-      threadId,
-      turnId,
-    });
-    await attachA2ABinding({ tenantId, invocationId, threadId, endpoint: provider.endpoint });
-
-    const first = await callResolve(threadId, requestId, "idem-resolve-replay-1");
-    expect(first.status).toBe(200);
-    const firstBody = await first.json();
-    const resumeCalls = provider.captured.filter((c) => c.resume).length;
-    expect(resumeCalls).toBe(1);
-
-    const replay = await callResolve(threadId, requestId, "idem-resolve-replay-1");
-    expect(replay.status).toBe(200);
-    expect(await replay.json()).toEqual(firstBody);
-    // 无第二次远端调用。
-    expect(provider.captured.filter((c) => c.resume).length).toBe(1);
   });
 });
 

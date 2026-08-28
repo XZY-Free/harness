@@ -1,22 +1,19 @@
-import { db } from "@/lib/db/client";
 /**
  * EffectiveInvocationCapabilities（05 §2/§3/§4）。
  *
  * 只读派生服务，不是新 Authority：全部输入来自已冻结事实
- * （ExecutionBinding 的 agentContractSnapshotId / runtimeRevisionId），
- * 禁止查"当前最新 Agent/Runtime"。
+ * （ExecutionBinding 的 runtimeRevisionId），禁止查"当前最新 Agent/Runtime"。
  *
+ * 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再有 Agent Contract
+ * 证据，effective capability 退化为 runtime-only——
  * ```text
- * Agent Route:  contract.cancel AND runtime.measured.cancel==pass AND 协议实现支持
  * Base Harness: runtime.measured.cancel AND 协议实现支持（保持 Hosted 现有语义）
  * ```
  *
  * 事实源：docs/V12/01/SnowHarness_阶段1_代码收口详细方案_2026-08-26/05-Cancel能力贯通.md。
  */
-import { agentContractSnapshotTable } from "@/lib/persistence/schema/agents";
 import type { RuntimeRevisionRow } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
-import { and, eq } from "drizzle-orm";
 
 /** Invocation 级 effective 能力（至少统一表达 05 §2 五项）。 */
 export interface EffectiveInvocationCapabilities {
@@ -27,9 +24,8 @@ export interface EffectiveInvocationCapabilities {
   readonly streaming: boolean;
 }
 
-/** ExecutionBinding 冻结证据（05 §3 精确公式输入）。 */
+/** ExecutionBinding 冻结证据（05 §3 精确公式输入；专题01 冻结架构：runtime-only）。 */
 export interface EffectiveCapabilityBindingEvidence {
-  readonly agentContractSnapshotId: string | null;
   readonly runtimeRevisionId: string;
 }
 
@@ -144,46 +140,12 @@ export function resolveRuntimeLevelCapabilities(
   };
 }
 
-/** Binding 冻结的 Agent Contract 能力声明（Base Harness → null）。 */
-async function loadContractCapabilities(
-  tenantId: string,
-  agentContractSnapshotId: string | null,
-): Promise<{
-  cancel: boolean;
-  resume: boolean;
-  streaming: boolean;
-  userAction: boolean;
-} | null> {
-  if (agentContractSnapshotId === null) return null;
-  const [snapshot] = await db
-    .select({
-      cancel: agentContractSnapshotTable.cancel,
-      resume: agentContractSnapshotTable.resume,
-      streamingTransport: agentContractSnapshotTable.streamingTransport,
-      inputRequired: agentContractSnapshotTable.inputRequired,
-    })
-    .from(agentContractSnapshotTable)
-    .where(
-      and(
-        eq(agentContractSnapshotTable.tenantId, tenantId),
-        eq(agentContractSnapshotTable.id, agentContractSnapshotId),
-      ),
-    )
-    .limit(1);
-  if (!snapshot) return null;
-  return {
-    cancel: snapshot.cancel,
-    resume: snapshot.resume,
-    streaming: snapshot.streamingTransport,
-    userAction: snapshot.inputRequired,
-  };
-}
-
 /**
  * 按精确 Binding 事实派生 Invocation 级 effective 能力（05 §3）。
  *
- * 事实不可解析（Revision/Snapshot 缺失或跨租户）→ fail-closed 全 false；
- * Agent Route 三项全满足才为 true；Base Harness 走 Runtime 层公式。
+ * 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，effective capability
+ * 退化为 runtime-only（Base Harness 公式：runtime measured AND 协议实现支持）。
+ * 事实不可解析（Revision 缺失）→ fail-closed 全 false。
  */
 export async function resolveEffectiveInvocationCapabilities(params: {
   tenantId: string;
@@ -193,24 +155,5 @@ export async function resolveEffectiveInvocationCapabilities(params: {
   if (!runtimeRevision) {
     return NO_CAPABILITIES;
   }
-  const runtimeLevel = resolveRuntimeLevelCapabilities(runtimeRevision);
-  try {
-    const contract = await loadContractCapabilities(
-      params.tenantId,
-      params.binding.agentContractSnapshotId,
-    );
-    if (params.binding.agentContractSnapshotId !== null && contract === null) {
-      // Binding 冻结的 Snapshot 不可解析（缺失/跨租户）→ fail-closed。
-      return NO_CAPABILITIES;
-    }
-    return {
-      cancel: (contract ? contract.cancel : true) && runtimeLevel.cancel,
-      resume: (contract ? contract.resume : true) && runtimeLevel.resume,
-      steer: runtimeLevel.steer,
-      user_action: (contract ? contract.userAction : true) && runtimeLevel.user_action,
-      streaming: (contract ? contract.streaming : true) && runtimeLevel.streaming,
-    };
-  } catch {
-    return NO_CAPABILITIES;
-  }
+  return resolveRuntimeLevelCapabilities(runtimeRevision);
 }

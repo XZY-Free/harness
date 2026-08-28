@@ -1,9 +1,10 @@
 /**
  * RuntimeSessionBinding 生命周期与匹配维度测试（06 §3-§4，Batch 7 Gate）。
  *
- * 覆盖：
- * - agentRevisionId 持久化（null = 基础 Harness Route）。
- * - findReusableSessionBinding 四维匹配：Tenant+Thread+AgentRevision+RuntimeRevision；
+ * 覆盖（专题01 冻结架构：RuntimeSessionBinding 只绑定 Harness Runtime，
+ * 匹配维度为 Tenant+Thread+RuntimeRevision，不再有 agentRevisionId 维度）：
+ * - createSessionBinding 持久化基础绑定字段（threadId + runtimeRevisionId + externalSessionRef）。
+ * - findReusableSessionBinding 三维匹配：Tenant+Thread+RuntimeRevision；
  *   任一维度不同不误复用；closed/lost 不复用（06 §3 关闭条件）。
  * - Turn completed 不是关闭条件（06 §3）：closeSessionBinding 只能显式调用生效，
  *   无任何 Turn 终态路径自动关闭（grep 层断言由 Architecture Gate 负责，这里断言语义）。
@@ -42,55 +43,44 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
     await resetDatabase(db);
   });
 
-  it("createSessionBinding 持久化 agentRevisionId；null 表示基础 Harness Route", async () => {
+  it("createSessionBinding 持久化 runtimeRevisionId / threadId / externalSessionRef", async () => {
     const { tenantId, threadId } = await setup();
-    const withAgent = await createSessionBinding({
+    const binding = await createSessionBinding({
       tenantId,
       runtimeRevisionId: "rr-1",
-      agentRevisionId: "ar-1",
       threadId,
       externalSessionRef: "ctx-1",
     });
-    expect(withAgent.agentRevisionId).toBe("ar-1");
-    expect(withAgent.bindingState).toBe("active");
-
-    const basic = await createSessionBinding({
-      tenantId,
-      runtimeRevisionId: "rr-1",
-      agentRevisionId: null,
-      threadId,
-      externalSessionRef: "ctx-2",
-    });
-    expect(basic.agentRevisionId).toBeNull();
+    expect(binding.runtimeRevisionId).toBe("rr-1");
+    expect(binding.threadId).toBe(threadId);
+    expect(binding.externalSessionRef).toBe("ctx-1");
+    expect(binding.bindingState).toBe("active");
   });
 
-  it("findReusableSessionBinding：四维全等命中（最近 active 优先）", async () => {
+  it("findReusableSessionBinding：三维全等命中（最近 active 优先）", async () => {
     const { tenantId, threadId } = await setup();
     await createSessionBinding({
       tenantId,
       runtimeRevisionId: "rr-1",
-      agentRevisionId: "ar-1",
       threadId,
       externalSessionRef: "ctx-old",
     });
     await createSessionBinding({
       tenantId,
       runtimeRevisionId: "rr-1",
-      agentRevisionId: "ar-1",
       threadId,
       externalSessionRef: "ctx-new",
     });
     const reusable = await findReusableSessionBinding({
       tenantId,
       threadId,
-      agentRevisionId: "ar-1",
       runtimeRevisionId: "rr-1",
     });
     // createdAt 降序 → 最近一条。
     expect(reusable?.externalSessionRef).toBe("ctx-new");
   });
 
-  it("findReusableSessionBinding：AgentRevision / RuntimeRevision / Thread 任一不同不误复用", async () => {
+  it("findReusableSessionBinding：RuntimeRevision / Thread 任一不同不误复用", async () => {
     const { tenantId, threadId } = await setup();
     const { thread: otherThread } = await createThread({
       tenantId,
@@ -101,34 +91,15 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
     await createSessionBinding({
       tenantId,
       runtimeRevisionId: "rr-1",
-      agentRevisionId: "ar-1",
       threadId,
       externalSessionRef: "ctx-1",
     });
 
-    // AgentRevision 不同（含 null = 基础 Route）。
-    expect(
-      await findReusableSessionBinding({
-        tenantId,
-        threadId,
-        agentRevisionId: "ar-2",
-        runtimeRevisionId: "rr-1",
-      }),
-    ).toBeNull();
-    expect(
-      await findReusableSessionBinding({
-        tenantId,
-        threadId,
-        agentRevisionId: null,
-        runtimeRevisionId: "rr-1",
-      }),
-    ).toBeNull();
     // RuntimeRevision 不同。
     expect(
       await findReusableSessionBinding({
         tenantId,
         threadId,
-        agentRevisionId: "ar-1",
         runtimeRevisionId: "rr-2",
       }),
     ).toBeNull();
@@ -137,28 +108,9 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
       await findReusableSessionBinding({
         tenantId,
         threadId: otherThread.id,
-        agentRevisionId: "ar-1",
         runtimeRevisionId: "rr-1",
       }),
     ).toBeNull();
-  });
-
-  it("基础 Harness Route（双方 agentRevisionId=null）匹配", async () => {
-    const { tenantId, threadId } = await setup();
-    await createSessionBinding({
-      tenantId,
-      runtimeRevisionId: "rr-1",
-      agentRevisionId: null,
-      threadId,
-      externalSessionRef: "ctx-basic",
-    });
-    const reusable = await findReusableSessionBinding({
-      tenantId,
-      threadId,
-      agentRevisionId: null,
-      runtimeRevisionId: "rr-1",
-    });
-    expect(reusable?.externalSessionRef).toBe("ctx-basic");
   });
 
   it("closed / lost 不复用（06 §3：关闭条件后必须新会话）", async () => {
@@ -166,7 +118,6 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
     const closed = await createSessionBinding({
       tenantId,
       runtimeRevisionId: "rr-1",
-      agentRevisionId: "ar-1",
       threadId,
       externalSessionRef: "ctx-closed",
     });
@@ -175,7 +126,6 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
       await findReusableSessionBinding({
         tenantId,
         threadId,
-        agentRevisionId: "ar-1",
         runtimeRevisionId: "rr-1",
       }),
     ).toBeNull();
@@ -183,7 +133,6 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
     const lost = await createSessionBinding({
       tenantId,
       runtimeRevisionId: "rr-1",
-      agentRevisionId: "ar-1",
       threadId,
       externalSessionRef: "ctx-lost",
     });
@@ -192,7 +141,6 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
       await findReusableSessionBinding({
         tenantId,
         threadId,
-        agentRevisionId: "ar-1",
         runtimeRevisionId: "rr-1",
       }),
     ).toBeNull();
@@ -203,7 +151,6 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
     const binding = await createSessionBinding({
       tenantId,
       runtimeRevisionId: "rr-1",
-      agentRevisionId: "ar-1",
       threadId,
       externalSessionRef: "ctx-keep",
     });
@@ -211,7 +158,6 @@ describe("RuntimeSessionBinding（06 §3-§4）", () => {
     const reusable = await findReusableSessionBinding({
       tenantId,
       threadId,
-      agentRevisionId: "ar-1",
       runtimeRevisionId: "rr-1",
     });
     expect(reusable?.id).toBe(binding.id);

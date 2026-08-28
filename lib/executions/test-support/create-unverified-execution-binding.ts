@@ -27,18 +27,13 @@ export const TEST_EXECUTION_BINDING_EVIDENCE: ExecutionBindingControlPlaneEviden
   routeRevisionId: "test-route-revision",
   routeActivationId: "test-route-activation",
   routeContentDigest: `sha256:${"1".repeat(64)}`,
-  agentRevisionId: "test-agent-revision",
   runtimeArtifactId: "test-runtime-artifact",
   runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
   runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
   runtimeEvidenceKind: "hosted_artifact" as const,
-  agentContractSnapshotId: "test-agent-contract-snapshot",
-  agentContractDigest: `sha256:${"7".repeat(64)}`,
-  agentContextDigest: `sha256:${"8".repeat(64)}`,
   runtimeTargetDigest: `sha256:${"5".repeat(64)}`,
   capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
   runtimeAttestationIds: ["test-runtime-attestation"],
-  agentPublicationRecordId: "test-agent-publication",
   runtimePublicationRecordId: "test-runtime-publication",
   conformanceRunId: "test-conformance-run",
   resolutionInputDigest: `sha256:${"6".repeat(64)}`,
@@ -57,7 +52,6 @@ export const TEST_EXECUTION_BINDING_REQUIRED_FIELDS = {
 export interface CreateExecutionBindingParams {
   invocationId: string;
   tenantId: string;
-  agentRevisionId: string;
   runtimeRevisionId: string;
   deploymentRouteId: string;
   modelProvider: string;
@@ -77,8 +71,6 @@ export interface CreateExecutionBindingParams {
 
 /** computeBindingConfigHash 入参（与 CreateExecutionBindingParams 字段一致，便于规范化）。 */
 export interface BindingConfigHashInput {
-  /** null = 基础 Harness Route（agentRevisionId 为 canonical null 进入 hash，§10.4）。 */
-  agentRevisionId: string | null;
   runtimeRevisionId: string;
   deploymentRouteId: string;
   modelProvider: string;
@@ -103,7 +95,6 @@ export interface BindingConfigHashInput {
  */
 export function computeBindingConfigHash(input: BindingConfigHashInput): string {
   const normalized: Record<string, unknown> = {
-    agentRevisionId: input.agentRevisionId,
     contextCheckpointId: input.contextCheckpointId,
     deploymentRouteId: input.deploymentRouteId,
     governanceConfigDigest: input.governanceConfigDigest ?? `sha256:${"b".repeat(64)}`,
@@ -158,7 +149,6 @@ export async function createExecutionBinding(
 
   // 2. 计算 configHash
   const configHash = computeBindingConfigHash({
-    agentRevisionId: params.agentRevisionId,
     runtimeRevisionId: params.runtimeRevisionId,
     deploymentRouteId: params.deploymentRouteId,
     modelProvider: params.modelProvider,
@@ -177,7 +167,6 @@ export async function createExecutionBinding(
   await db.insert(executionBindingTable).values({
     invocationId: params.invocationId,
     tenantId: params.tenantId,
-    agentRevisionId: params.agentRevisionId,
     runtimeRevisionId: params.runtimeRevisionId,
     deploymentRouteId: params.deploymentRouteId,
     modelProvider: params.modelProvider,
@@ -198,12 +187,8 @@ export async function createExecutionBinding(
     runtimeConfigDigest: params.controlPlaneEvidence.runtimeConfigDigest,
     runtimeTargetDigest: params.controlPlaneEvidence.runtimeTargetDigest,
     runtimeEvidenceKind: params.controlPlaneEvidence.runtimeEvidenceKind,
-    agentContractSnapshotId: params.controlPlaneEvidence.agentContractSnapshotId,
-    agentContractDigest: params.controlPlaneEvidence.agentContractDigest,
-    agentContextDigest: params.controlPlaneEvidence.agentContextDigest,
     capabilityManifestDigest: params.controlPlaneEvidence.capabilityManifestDigest,
     runtimeAttestationIds: params.controlPlaneEvidence.runtimeAttestationIds,
-    agentPublicationRecordId: params.controlPlaneEvidence.agentPublicationRecordId,
     runtimePublicationRecordId: params.controlPlaneEvidence.runtimePublicationRecordId,
     conformanceRunId: params.controlPlaneEvidence.conformanceRunId,
     resolutionInputDigest: params.controlPlaneEvidence.resolutionInputDigest,

@@ -156,8 +156,6 @@ export const executionBindingTable = mysqlTable(
       .notNull()
       .references(() => invocationTable.id),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
-    /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
-    agentRevisionId: varchar("agentRevisionId", { length: 36 }),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
     deploymentRouteId: varchar("deploymentRouteId", { length: 36 }).notNull(),
     modelProvider: varchar("modelProvider", { length: 128 }).notNull(),
@@ -191,16 +189,7 @@ export const executionBindingTable = mysqlTable(
     /** 冻结的 Runtime 目标摘要 — 发布证据权威（03 §6）。 */
     runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
-    // ─── Agent Contract 证据（Agent Route 必填，base route 为 null — 05 §5）────
-    /** null = 基础 Harness Route（§18 not_applicable）。 */
-    agentContractSnapshotId: varchar("agentContractSnapshotId", { length: 36 }),
-    /** null = 基础 Harness Route（§18 not_applicable）。 */
-    agentContractDigest: varchar("agentContractDigest", { length: 71 }),
-    /** null = 基础 Harness Route（§18 not_applicable）。 */
-    agentContextDigest: varchar("agentContextDigest", { length: 71 }),
     runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>().notNull(),
-    /** null = 基础 Harness Route（§18 not_applicable）。 */
-    agentPublicationRecordId: varchar("agentPublicationRecordId", { length: 36 }),
     runtimePublicationRecordId: varchar("runtimePublicationRecordId", { length: 36 }).notNull(),
     conformanceRunId: varchar("conformanceRunId", { length: 36 }).notNull(),
     /** 冻结解析时刻的请求参数 Digest。 */
@@ -215,7 +204,6 @@ export const executionBindingTable = mysqlTable(
   },
   (t) => ({
     tenantIdx: index("ExecutionBinding_tenant_idx").on(t.tenantId),
-    agentRevisionIdx: index("ExecutionBinding_agentRevision_idx").on(t.agentRevisionId),
     runtimeRevisionIdx: index("ExecutionBinding_runtimeRevision_idx").on(t.runtimeRevisionId),
     routeRevisionIdx: index("ExecutionBinding_routeRevision_idx").on(t.routeRevisionId),
     runtimeArtifactIdx: index("ExecutionBinding_runtimeArtifact_idx").on(t.runtimeArtifactId),
@@ -225,25 +213,6 @@ export const executionBindingTable = mysqlTable(
       // external_endpoint Runtime 无 Artifact Attestation（03 §3，不伪造）→ 空数组合法；
       // hosted_artifact 仍要求非空全集。
       sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND (JSON_LENGTH(${t.runtimeAttestationIds}) >= 1 OR ${t.runtimeEvidenceKind} = 'external_endpoint')`,
-    ),
-    // §10.3 Agent Evidence 条件性完整组：全部为空（base route，not_applicable）或 全部完整（agent route）。
-    // Agent 是源码不可见黑盒 — Agent Route 证据 = Contract 三元组 + Publication 引用，
-    // 不含 source Artifact/Attestation（01 阶段收口）。禁止"随便 nullable"半完整组（禁 4 态模糊，§8.4）。
-    agentEvidenceAllOrNothing: check(
-      "ExecutionBinding_agentEvidence_all_or_nothing",
-      sql`(
-        ${t.agentRevisionId} IS NULL
-        AND ${t.agentContractSnapshotId} IS NULL
-        AND ${t.agentContractDigest} IS NULL
-        AND ${t.agentContextDigest} IS NULL
-        AND ${t.agentPublicationRecordId} IS NULL
-      ) OR (
-        ${t.agentRevisionId} IS NOT NULL
-        AND ${t.agentContractSnapshotId} IS NOT NULL
-        AND ${t.agentContractDigest} IS NOT NULL
-        AND ${t.agentContextDigest} IS NOT NULL
-        AND ${t.agentPublicationRecordId} IS NOT NULL
-      )`,
     ),
   }),
 );
@@ -425,15 +394,12 @@ export type RuntimeSessionBindingState = (typeof RUNTIME_SESSION_BINDING_STATES)
  *
  * 关键约束：
  * - threadId/jobId 恰有一个非空（应用层校验，DB 不加 CHECK）。
- * - externalSessionRef 由 Runtime 颁发（A2A = contextId，不透明引用），平台仅持久化，
- *   不解析其内容；禁止 contextId = threadId 硬编码（06 §2）。
+ * - externalSessionRef 由 Runtime 颁发（不透明引用），平台仅持久化，不解析其内容。
  * - UNIQUE(runtimeRevisionId, externalSessionRef)：同一 RuntimeRevision 下外部会话引用唯一。
- * - Session 复用匹配维度：Tenant + Thread + AgentRevision + RuntimeRevision（06 §4）；
- *   agentRevisionId 可空 = 基础 Harness Route。
+ * - Session 复用匹配维度：Tenant + Thread + RuntimeRevision（专题01 冻结架构：
+ *   RuntimeSessionBinding 只绑定 Harness Runtime；A2A contextId 属 AgentSessionBinding）。
  * - 生命周期跨 Turn（06 §3）：关闭条件只有 Thread 关闭/删除、用户显式 reset、
  *   continuity policy 不允许复用、Runtime 报 lost、管理操作；Turn completed 不关闭。
- * - taskId（A2A Task）不进入 RuntimeSessionBinding（06 §5）：contextId 跨 Turn 连续，
- *   taskId 属于单个 Invocation（Invocation.runtimeExecutionRef）。
  */
 export const runtimeSessionBindingTable = mysqlTable(
   "RuntimeSessionBinding",
@@ -446,8 +412,6 @@ export const runtimeSessionBindingTable = mysqlTable(
       .notNull()
       .references(() => tenant.id),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
-    /** Agent 维度（06 §4）：null = 基础 Harness Route（无 Agent 资产约束）。 */
-    agentRevisionId: varchar("agentRevisionId", { length: 36 }),
     /** 会话执行时存在；后台 Job 执行时为空。 */
     threadId: varchar("threadId", { length: 36 }),
     /** 后台执行时存在；会话执行时为空。 */

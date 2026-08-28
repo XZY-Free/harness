@@ -1,11 +1,13 @@
 /**
  * Per-Invocation Agent Selection 集成测试（05 §1-§3/§11/§12，Batch 8 Gate）。
  *
- * 覆盖：
- * - no selection → 基础 Harness Route（requestedAgentId=null，Binding agent evidence 不变）。
- * - required A → exact A：Turn.requestedAgentId 持久化 + 调度解析 Agent Route，
- *   ExecutionBinding 冻结该 Agent 的 AgentRevision。
- * - required A no route → fail（422 BUSINESS_CONSTRAINT_VIOLATION），不 fallback 到 base route。
+ * 覆盖（专题01 冻结架构：顶层 Employee Turn 恒走基础 Harness Route，
+ * ExecutionBinding 为 runtime-only，不再冻结 AgentRevision）：
+ * - no selection → 基础 Harness Route（requestedAgentId=null，正常调度）。
+ * - required A → Turn.requestedAgentId 持久化 + 顶层走 base route 正常调度
+ *   （用户选择 Agent 是"本轮使用该 Agent 能力"的约束，不改变顶层执行目标）。
+ * - required A no route → POST Turn 正常 201（顶层不受 Agent route 影响；
+ *   Agent 不可用由 AgentCall 层 fail-closed，属后续 AgentCall 域）。
  * - agent_selection 非法（mode/agent_id 缺失）→ 400 REQUEST_SCHEMA_INVALID。
  * - CreateThread 无 agent_id（Thread 不绑定 Agent；多余字段不产生绑定）。
  */
@@ -17,15 +19,7 @@ import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { threadEventTable, turnTable } from "@/lib/persistence/schema/conversation";
-import {
-  MAX_TRAFFIC_WEIGHT,
-  createRouteSet,
-} from "@/lib/routes/application/deployment-route-service";
-import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
-import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
-import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const ORIGINAL_AUTH_MODE = process.env.SNOW_AUTH_MODE;
@@ -85,26 +79,11 @@ describe("Per-Invocation Agent Selection（05）", () => {
     expect(turn?.latestInvocationId).toBeTruthy();
   });
 
-  it("required A → exact A：requestedAgentId 持久化 + Agent Route 解析 + Binding 冻结该 AgentRevision", async () => {
+  it("required A：requestedAgentId 持久化 + 顶层走 base route 调度 + Web 回显", async () => {
     const ctx = await seedDispatchableTurn({ agentKey: "sel-agent-a" });
-    // Agent-specific Route（05 §3：requestedAgentId → AgentConstraint → AgentRevision）。
-    const routeSet = await createRouteSet({
-      tenantId: ctx.tenantId,
-      agentId: ctx.agentId,
-      routeScopeKey: "default",
-      routeScopeJson: { networkZone: "internal" },
-    });
-    await activateSingleRouteForTest({
-      tenantId: ctx.tenantId,
-      routeSetId: routeSet.id,
-      routeSetExpectedVersionNo: 1,
-      agentRevisionId: ctx.agentRevision.id,
-      runtimeRevisionId: ctx.runtimeRevision.id,
-      trafficWeight: MAX_TRAFFIC_WEIGHT,
-      priorityNo: 1,
-      actor: buildActor(ctx.tenantId, "deploy-bot-001"),
-    });
-
+    // 专题01 冻结架构：顶层 Employee Turn 恒走基础 Harness Route（seed 已建 base route），
+    // 用户选择 required A 只作为"本轮使用该 Agent 能力"的约束记录在 Turn，不改变顶层执行目标，
+    // 也不再为顶层创建 Agent-specific Route（Agent route 属 AgentCall 层）。
     const threadId = await createThreadForOwner("sel-exact");
     const resp = await postTurn(threadId, "sel-exact", {
       input: { type: "text", text: "必须用 A" },
@@ -126,71 +105,41 @@ describe("Per-Invocation Agent Selection（05）", () => {
     expect(turns.status).toBe(200);
     expect((await turns.json()).turns.at(-1).requested_agent_id).toBe(ctx.agentId);
 
-    // 调度走 Agent Route：Binding 冻结该 AgentRevision（05 §5）。
+    // 调度走 Agent Route：Binding 存在（专题01 冻结架构：ExecutionBinding 不再携带 Agent 证据字段）。
     expect(turn?.latestInvocationId).toBeTruthy();
     if (turn?.latestInvocationId) {
       const binding = await getExecutionBindingByInvocation(ctx.tenantId, turn.latestInvocationId);
-      expect(binding?.agentRevisionId).toBe(ctx.agentRevision.id);
+      expect(binding).toBeTruthy();
     }
   });
 
-  it("required A no route → fail（422），不 fallback 到 base route", async () => {
+  it("required A no route → POST Turn 201（顶层恒走 base route；Agent 不可用由 AgentCall 层 fail-closed）", async () => {
     const ctx = await seedDispatchableTurn({ agentKey: "sel-agent-noroute" });
-    // 不建 Agent Route（只存在 base route）。
+    // 专题01 冻结架构：顶层 Employee Turn 不再解析 Agent Route，required Agent 无 route
+    // 不影响 POST Turn —— 顶层恒走 base route 正常启动；Agent 不可用由 AgentCall 层（后续域）
+    // fail-closed，禁止在 POST Turn 阶段因 Agent no-route 直接 422。
     const threadId = await createThreadForOwner("sel-noroute");
     const resp = await postTurn(threadId, "sel-noroute", {
       input: { type: "text", text: "没有路由的 Agent" },
       agent_selection: { mode: "required", agent_id: ctx.agentId },
     });
-    expect(resp.status).toBe(422);
-    const body = (await resp.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("BUSINESS_CONSTRAINT_VIOLATION");
-  });
+    expect(resp.status).toBe(201);
+    const body = (await resp.json()) as { turn: { id: string } };
 
-  it("06 专项 P2-4：required Route race（accept 后 resolve 失败）→ Turn failed + turn.failed Event + Idempotency completed + 0 Invocation；同 key replay 不重复 Turn", async () => {
-    const ctx = await seedDispatchableTurn({ agentKey: "sel-agent-race" });
-    const threadId = await createThreadForOwner("sel-race");
-    const resp = await postTurn(threadId, "sel-race", {
-      input: { type: "text", text: "路由竞态" },
-      agent_selection: { mode: "required", agent_id: ctx.agentId },
-    });
-    expect(resp.status).toBe(422);
-    const body = (await resp.json()) as {
-      error: { code: string; details?: { reason?: string; turn_id?: string } };
-    };
-    expect(body.error.code).toBe("BUSINESS_CONSTRAINT_VIOLATION");
-    expect(body.error.details?.reason).toBe("no_effective_route");
-    const turnId = body.error.details?.turn_id;
-    expect(turnId).toBeTruthy();
+    // Turn 持久化 required facts。
+    const turn = await getTurnById(ctx.tenantId, body.turn.id);
+    expect(turn?.requestedAgentId).toBe(ctx.agentId);
+    expect(turn?.agentSelectionMode).toBe("required");
 
-    // Turn 终态 failed（不再 accepted forever）+ errorCode
-    const turn = await getTurnById(ctx.tenantId, turnId as string);
-    expect(turn?.turnState).toBe("failed");
-    expect(turn?.errorCode).toBe("no_effective_route");
-    expect(turn?.finishedAt).not.toBeNull();
-    expect(turn?.activeInvocationId).toBeNull();
-    // 0 Invocation（Route resolve 在 createInvocation 之前失败）
-    expect(turn?.latestInvocationId).toBeNull();
-
-    // turn.failed Event（正式 Contract 事件，SSE/投影可见）
-    const events = await db
-      .select()
-      .from(threadEventTable)
-      .where(eq(threadEventTable.turnId, turnId as string));
-    expect(events.some((e) => e.eventType === "turn.failed")).toBe(true);
-
-    // 同 key 同 body replay → 同一 422 失败；Turn 数量不增加
-    const replay = await postTurn(threadId, "sel-race", {
-      input: { type: "text", text: "路由竞态" },
-      agent_selection: { mode: "required", agent_id: ctx.agentId },
-    });
-    expect(replay.status).toBe(422);
-    const replayBody = (await replay.json()) as {
-      error: { details?: { turn_id?: string } };
-    };
-    expect(replayBody.error.details?.turn_id).toBe(turnId);
-    const turns = await db.select().from(turnTable).where(eq(turnTable.threadId, threadId));
-    expect(turns).toHaveLength(1);
+    // 顶层走 base route 正常调度：创建 runtime-only ExecutionBinding（不冻结 Agent）。
+    expect(turn?.latestInvocationId).toBeTruthy();
+    if (turn?.latestInvocationId) {
+      const binding = await getExecutionBindingByInvocation(
+        ctx.tenantId,
+        turn.latestInvocationId,
+      );
+      expect(binding).toBeTruthy();
+    }
   });
 
   it("agent_selection 非法 → 400 REQUEST_SCHEMA_INVALID", async () => {

@@ -32,7 +32,6 @@
  * - Policy digest 不一致 → 409 POLICY_INTEGRITY_MISMATCH（fail-closed）
  * - block → 403 POLICY_BLOCKED；Job pause → 403 POLICY_REQUIRES_PREAUTH
  */
-import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
 import { redactArguments } from "@/lib/capability/redact-arguments";
 import {
   type ToolCall,
@@ -269,17 +268,9 @@ export async function POST(request: Request): Promise<Response> {
           return { kind: "replay" as const, toolCall };
         }
 
-        // Agent 更严要求（immutable Revision）。
-        let agentRequirements: { toolRiskMax?: string | null } | null = null;
-        if (binding.agentRevisionId) {
-          const agentRevision = await getRevisionById(binding.agentRevisionId);
-          const req = (agentRevision?.permissionRequirementsJson ?? {}) as {
-            tool_risk_max?: string | null;
-          };
-          if (req.tool_risk_max) {
-            agentRequirements = { toolRiskMax: req.tool_risk_max };
-          }
-        }
+        // 专题01 冻结架构：ExecutionBinding 不再绑定 AgentRevision。Agent 的更严
+        // 权限要求属于 AgentCall 层（Agent 能力调用时评估），不进入顶层 tool-call 网关。
+        const agentRequirements: { toolRiskMax?: string | null } | null = null;
 
         // Formal Policy Evaluator（纯函数）。
         const evaluation = evaluatePolicy({

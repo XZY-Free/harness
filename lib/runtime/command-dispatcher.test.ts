@@ -1983,7 +1983,7 @@ async function seedBaseHarnessContext(): Promise<BaseHarnessContext> {
 async function seedBaseHarnessRunningInvocation(
   ctx: BaseHarnessContext,
 ): Promise<BaseHarnessRunningContext> {
-  // 基础 Harness：顶层无 Agent 约束，得到真实 ExecutionBinding 且 agentRevisionId=null。
+  // 基础 Harness：顶层无 Agent 约束，得到真实 ExecutionBinding（专题01 冻结架构下不含 Agent 维度）。
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
@@ -1996,7 +1996,6 @@ async function seedBaseHarnessRunningInvocation(
   if (!invocation || !binding) {
     throw new Error("基础 Harness 调度失败：未创建 Invocation/ExecutionBinding");
   }
-  expect(binding.agentRevisionId).toBeNull();
 
   // Invocation queued → running
   await db.transaction(async (tx) => {
@@ -2138,7 +2137,6 @@ describe("S05-C04 基础 Harness Route redispatch 不依赖 Agent（§8.3）", (
     const bindingAfter = await getExecutionBindingByInvocation(ctx.tenantId, running.invocationId);
     expect(bindingAfter?.runtimeRevisionId).toBe(running.binding.runtimeRevisionId);
     expect(bindingAfter?.deploymentRouteId).toBe(running.binding.deploymentRouteId);
-    expect(bindingAfter?.agentRevisionId).toBeNull();
     expect(bindingAfter?.runtimeRevisionId).toBe(ctx.runtimeRevision.id);
   });
 });
@@ -2167,7 +2165,6 @@ async function attachRemoteRefsToInvocation(
     runtimeRevisionId: ctx.runtimeRevision.id,
     threadId: ctx.threadId,
     externalSessionRef,
-    agentRevisionId: ctx.agentRevision.id,
   });
   const taskId = `task-${binding.id.slice(0, 8)}`;
   await db

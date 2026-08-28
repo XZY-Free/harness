@@ -18,18 +18,20 @@ describe("ExecutionBinding Attestation JSON 基线约束", () => {
     expect(schema).not.toContain("agentArtifactDigest");
   });
 
-  it("Agent Contract 证据列存在；Runtime Artifact ID 可空（external_endpoint）", () => {
+  it("专题01 冻结架构：ExecutionBinding 不再携带 Agent Contract 证据列；Runtime Artifact ID 可空（external_endpoint）", () => {
     const schema = projectFile("lib/persistence/schema/executions.ts");
     const latest = projectFile("drizzle/0016_youthful_redwing.sql");
 
-    // Agent 发布权威 = AgentContractSnapshot 三元组（contract/capability/context digest）。
+    // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带任何 Agent evidence，
+    // Agent Contract / Publication 证据列已从 schema 移除。
     for (const column of [
       "agentContractSnapshotId",
       "agentContractDigest",
       "agentContextDigest",
       "agentPublicationRecordId",
+      "agentRevisionId",
     ]) {
-      expect(schema).toContain(`"${column}"`);
+      expect(schema).not.toContain(`"${column}"`);
     }
     // Runtime 维度证据种类分派（03 §3）：hosted_artifact 必填 artifact；external_endpoint 无 artifact（可空）。
     expect(schema).toContain(`runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 })`);

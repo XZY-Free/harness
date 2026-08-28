@@ -5,7 +5,6 @@ import {
 import { describe, expect, it } from "vitest";
 
 const EVIDENCE = {
-  agentRevisionId: "agent-revision-1",
   routeRevisionId: "route-revision-1",
   routeActivationId: "route-activation-1",
   routeContentDigest: `sha256:${"1".repeat(64)}`,
@@ -14,12 +13,8 @@ const EVIDENCE = {
   runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
   runtimeTargetDigest: `sha256:${"5".repeat(64)}`,
   runtimeEvidenceKind: "hosted_artifact" as const,
-  agentContractSnapshotId: "agent-descriptor-snapshot-1",
-  agentContractDigest: `sha256:${"7".repeat(64)}`,
-  agentContextDigest: `sha256:${"8".repeat(64)}`,
   capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
   runtimeAttestationIds: ["runtime-attestation-b", "runtime-attestation-a"],
-  agentPublicationRecordId: "agent-publication-1",
   runtimePublicationRecordId: "runtime-publication-1",
   conformanceRunId: "conformance-run-1",
   resolutionInputDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -27,7 +22,6 @@ const EVIDENCE = {
 
 function bindingInput() {
   return {
-    agentRevisionId: "agent-revision-1",
     runtimeRevisionId: "runtime-revision-1",
     deploymentRouteId: "route-1",
     modelProvider: "provider",

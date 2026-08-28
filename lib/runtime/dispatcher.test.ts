@@ -634,7 +634,6 @@ describe("ExecutionBinding 仓储", () => {
 
   it("computeBindingConfigHash 相同输入产生相同 hash", async () => {
     const input = {
-      agentRevisionId: "agent-rev-1",
       runtimeRevisionId: "runtime-rev-1",
       deploymentRouteId: "route-1",
       modelProvider: "doubao",
@@ -653,7 +652,6 @@ describe("ExecutionBinding 仓储", () => {
 
   it("computeBindingConfigHash 字段顺序不影响 hash", async () => {
     const hash1 = computeBindingConfigHash({
-      agentRevisionId: "a",
       runtimeRevisionId: "b",
       deploymentRouteId: "c",
       modelProvider: "d",
@@ -675,7 +673,6 @@ describe("ExecutionBinding 仓储", () => {
       modelProvider: "d",
       deploymentRouteId: "c",
       runtimeRevisionId: "b",
-      agentRevisionId: "a",
     });
     expect(hash1).toBe(hash2);
   });
@@ -685,7 +682,6 @@ describe("ExecutionBinding 仓储", () => {
       ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
       invocationId,
       tenantId: ctx.tenantId,
-      agentRevisionId: ctx.agentRevision.id,
       runtimeRevisionId: ctx.runtimeRevision.id,
       deploymentRouteId: ctx.routeId,
       modelProvider: "doubao",
@@ -695,7 +691,6 @@ describe("ExecutionBinding 仓储", () => {
 
     expect(binding.invocationId).toBe(invocationId);
     expect(binding.tenantId).toBe(ctx.tenantId);
-    expect(binding.agentRevisionId).toBe(ctx.agentRevision.id);
     expect(binding.runtimeRevisionId).toBe(ctx.runtimeRevision.id);
     expect(binding.deploymentRouteId).toBe(ctx.routeId);
     expect(binding.modelProvider).toBe("doubao");
@@ -708,7 +703,6 @@ describe("ExecutionBinding 仓储", () => {
       ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
       invocationId,
       tenantId: ctx.tenantId,
-      agentRevisionId: ctx.agentRevision.id,
       runtimeRevisionId: ctx.runtimeRevision.id,
       deploymentRouteId: ctx.routeId,
       modelProvider: "doubao",
@@ -720,7 +714,6 @@ describe("ExecutionBinding 仓储", () => {
         ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
         invocationId,
         tenantId: ctx.tenantId,
-        agentRevisionId: ctx.agentRevision.id,
         runtimeRevisionId: ctx.runtimeRevision.id,
         deploymentRouteId: ctx.routeId,
         modelProvider: "doubao",
@@ -734,7 +727,6 @@ describe("ExecutionBinding 仓储", () => {
       ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
       invocationId,
       tenantId: ctx.tenantId,
-      agentRevisionId: ctx.agentRevision.id,
       runtimeRevisionId: ctx.runtimeRevision.id,
       deploymentRouteId: ctx.routeId,
       modelProvider: "doubao",
@@ -925,9 +917,8 @@ describe("Dispatcher 调度", () => {
     expect(result.invocation?.invocationKind).toBe("initial");
     expect(result.invocation?.executionState).toBe("queued");
 
-    // ExecutionBinding 验证（顶层 base harness route → agentRevisionId 恒 null）
+    // ExecutionBinding 验证（专题01 冻结架构：ExecutionBinding 不再携带 Agent 证据字段）
     expect(result.binding?.invocationId).toBe(result.invocation?.id);
-    expect(result.binding?.agentRevisionId).toBeNull();
     expect(result.binding?.runtimeRevisionId).toBe(ctx.runtimeRevision.id);
     expect(result.binding?.deploymentRouteId).toBe(ctx.routeId);
     expect(result.binding).toMatchObject({
@@ -939,7 +930,6 @@ describe("Dispatcher 调度", () => {
       runtimeConfigDigest: ctx.runtimeRevision.configHash,
       capabilityManifestDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       runtimeAttestationIds: [ctx.runtimeAttestationId],
-      agentPublicationRecordId: null,
       runtimePublicationRecordId: ctx.runtimePublicationRecordId,
       conformanceRunId: ctx.conformanceRunId,
     });
@@ -1094,7 +1084,6 @@ describe("Dispatcher 调度", () => {
       routeRevisionId: result.binding.routeRevisionId,
       routeActivationId: result.binding.routeActivationId,
       runtimeArtifactDigest: result.binding.runtimeArtifactDigest,
-      agentPublicationRecordId: result.binding.agentPublicationRecordId,
       runtimePublicationRecordId: result.binding.runtimePublicationRecordId,
       conformanceRunId: result.binding.conformanceRunId,
       configHash: result.binding.configHash,
@@ -1255,7 +1244,6 @@ describe("Dispatcher 调度", () => {
     });
 
     expect(result.dispatched).toBe(true);
-    expect(result.binding?.agentRevisionId).toBeNull();
     expect(result.binding?.modelProvider).toBe("default");
     expect(result.binding?.modelId).toBe("gpt-4o");
     expect(result.binding?.modelRevisionRef).toBeNull();

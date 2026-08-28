@@ -307,14 +307,11 @@ export async function dispatchInvocationForTurn(params: {
     params.tenantId,
     routeResolution.policyRevisionId,
   );
-  // 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）的证据 agent 字段
-  // 为 null（§18 Agent Evidence not_applicable），会正确展开写入 Binding；Runtime 字段
-  // 照常。Agent Route → 完整成组。
+  // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带 Agent evidence。
   const controlPlaneEvidence = routeResolution.controlPlaneEvidence;
   const bindingParams: CreateExecutionBindingCommand = {
     invocationId: invocation.id,
     tenantId: params.tenantId,
-    agentRevisionId: routeResolution.agentRevisionId,
     runtimeRevisionId: routeResolution.runtimeRevisionId,
     deploymentRouteId: routeResolution.deploymentRouteId,
     modelProvider: modelInfo.modelProvider,

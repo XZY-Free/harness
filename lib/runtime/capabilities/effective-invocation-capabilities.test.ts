@@ -1,16 +1,13 @@
 /**
  * EffectiveInvocationCapabilities 测试（05 §2/§3/§4/§7/§8）。
  *
- * 不变量：
- * - Agent Route：contract.cancel AND runtime.measured.cancel==pass AND 协议实现支持；
- * - Base Harness（无 Snapshot）：runtime measured AND 协议实现（Hosted 现有语义保持）；
- * - 事实不可解析（Revision/Snapshot 缺失或跨租户）→ fail-closed 全 false；
- * - 输入只来自 Binding 冻结证据，不查最新 Agent/Runtime。
+ * 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，effective capability
+ * 退化为 runtime-only。不变量：
+ * - runtime measured AND 协议实现（Hosted 现有语义保持）；
+ * - 事实不可解析（RuntimeRevision 缺失）→ fail-closed 全 false；
+ * - 输入只来自 Binding 冻结证据（runtimeRevisionId），不查最新 Agent/Runtime。
  */
 import { randomUUID } from "node:crypto";
-import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import { hrAgentContract } from "@/lib/agents/test-support/hr-agent-contract";
-import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { computeArtifactDigest } from "@/lib/artifacts/domain/artifact-attestation";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -110,33 +107,6 @@ async function seedRuntimeRevision(
   return revision.id;
 }
 
-async function seedSnapshot(
-  tenantId: string,
-  ownerId: string,
-  flags: { cancel: boolean; resume: boolean },
-): Promise<{ id: string; contextDigest: string }> {
-  const agent = await createAgent({
-    tenantId,
-    agentKey: `caps-agent-${randomUUID()}`,
-    displayName: "Caps Agent",
-    ownerUserId: ownerId,
-  });
-  const snapshot = await seedAgentContractSnapshot({
-    tenantId,
-    agentId: agent.id,
-    createdBy: "test-operator",
-    contract: {
-      ...hrAgentContract,
-      interaction: {
-        ...hrAgentContract.interaction,
-        cancel: flags.cancel,
-        resume: flags.resume,
-      },
-    },
-  });
-  return { id: snapshot.id, contextDigest: snapshot.contextDigest };
-}
-
 describe("resolveRuntimeLevelCapabilities（05 §4 Base Harness）", () => {
   it("Hosted（string[] 契约）：cancel/resume 可用（Hosted 现有语义保持）", () => {
     const caps = resolveRuntimeLevelCapabilities({
@@ -175,56 +145,42 @@ describe("resolveRuntimeLevelCapabilities（05 §4 Base Harness）", () => {
   });
 });
 
-describe("resolveEffectiveInvocationCapabilities（05 §3 精确公式）", () => {
-  it("Agent Route：contract.cancel AND measured pass AND 协议实现 → true", async () => {
+describe("resolveEffectiveInvocationCapabilities（05 §3 精确公式；专题01 冻结架构 runtime-only）", () => {
+  it("Hosted（string[] 契约）：cancel/resume → true", async () => {
     const { tenantId, ownerId } = await seedTenant();
     const runtimeRevisionId = await seedRuntimeRevision(
       tenantId,
       ownerId,
       projection({ cancel: "pass", resume: "pass" }),
     );
-    const snapshot = await seedSnapshot(tenantId, ownerId, { cancel: true, resume: true });
     const caps = await resolveEffectiveInvocationCapabilities({
       tenantId,
-      binding: { agentContractSnapshotId: snapshot.id, runtimeRevisionId },
+      binding: { runtimeRevisionId },
     });
     expect(caps.cancel).toBe(true);
     expect(caps.resume).toBe(true);
   });
 
-  it("合同 cancel=false → false（即使 measured pass + 协议支持）", async () => {
-    const { tenantId, ownerId } = await seedTenant();
-    const runtimeRevisionId = await seedRuntimeRevision(tenantId, ownerId, projection({}));
-    const snapshot = await seedSnapshot(tenantId, ownerId, { cancel: false, resume: true });
-    const caps = await resolveEffectiveInvocationCapabilities({
-      tenantId,
-      binding: { agentContractSnapshotId: snapshot.id, runtimeRevisionId },
-    });
-    expect(caps.cancel).toBe(false);
-    expect(caps.resume).toBe(true);
-  });
-
-  it("measured cancel=not_applicable → false（即使合同声明 true）", async () => {
+  it("measured cancel=not_applicable → false", async () => {
     const { tenantId, ownerId } = await seedTenant();
     const runtimeRevisionId = await seedRuntimeRevision(
       tenantId,
       ownerId,
       projection({ cancel: "not_applicable" }),
     );
-    const snapshot = await seedSnapshot(tenantId, ownerId, { cancel: true, resume: true });
     const caps = await resolveEffectiveInvocationCapabilities({
       tenantId,
-      binding: { agentContractSnapshotId: snapshot.id, runtimeRevisionId },
+      binding: { runtimeRevisionId },
     });
     expect(caps.cancel).toBe(false);
   });
 
-  it("Base Harness（snapshot null）：runtime measured AND 协议实现", async () => {
+  it("runtime measured AND 协议实现（Base Harness 公式）", async () => {
     const { tenantId, ownerId } = await seedTenant();
     const runtimeRevisionId = await seedRuntimeRevision(tenantId, ownerId, projection({}));
     const caps = await resolveEffectiveInvocationCapabilities({
       tenantId,
-      binding: { agentContractSnapshotId: null, runtimeRevisionId },
+      binding: { runtimeRevisionId },
     });
     expect(caps.cancel).toBe(true);
   });
@@ -233,19 +189,8 @@ describe("resolveEffectiveInvocationCapabilities（05 §3 精确公式）", () =
     const { tenantId } = await seedTenant();
     const caps = await resolveEffectiveInvocationCapabilities({
       tenantId,
-      binding: { agentContractSnapshotId: null, runtimeRevisionId: "revision-not-exist" },
+      binding: { runtimeRevisionId: "revision-not-exist" },
     });
     expect(caps.cancel).toBe(false);
-  });
-
-  it("Snapshot 跨租户/缺失 → fail-closed 全 false", async () => {
-    const { tenantId, ownerId } = await seedTenant();
-    const runtimeRevisionId = await seedRuntimeRevision(tenantId, ownerId, projection({}));
-    const other = await resolveEffectiveInvocationCapabilities({
-      tenantId: "other-tenant",
-      binding: { agentContractSnapshotId: "snapshot-not-exist", runtimeRevisionId },
-    });
-    expect(other.cancel).toBe(false);
-    expect(other.resume).toBe(false);
   });
 });

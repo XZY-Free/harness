@@ -9,7 +9,7 @@
  * 职责：
  * - createSessionBinding：INSERT RuntimeSessionBinding（externalSessionRef 来自 Runtime 响应）。
  * - getSessionBindingById / getSessionBindingByExternalRef / getSessionBindingsByThread：查询。
- * - findReusableSessionBinding：按 06 §4 匹配维度（Tenant+Thread+AgentRevision+RuntimeRevision）
+ * - findReusableSessionBinding：按 专题01 冻结架构匹配维度（Tenant+Thread+RuntimeRevision）
  *   查找可复用的 active Session（Turn completed 不是关闭条件，06 §3）。
  * - updateLastUsedAt：调用 Runtime 后刷新最近使用时间。
  * - closeSessionBinding：显式关闭（Thread 关闭/删除、用户 reset、continuity policy 不允许、
@@ -28,7 +28,7 @@ import {
   RuntimeSessionBindingConflictError,
   RuntimeSessionBindingNotFoundError,
 } from "@/lib/runtime/errors";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 /** createSessionBinding 入参。 */
 export interface CreateSessionBindingParams {
@@ -40,8 +40,6 @@ export interface CreateSessionBindingParams {
   jobId?: string | null;
   /** Runtime 颁发的外部会话引用。 */
   externalSessionRef: string;
-  /** Agent 维度（06 §4）；null/省略 = 基础 Harness Route（无 Agent 资产约束）。 */
-  agentRevisionId?: string | null;
 }
 
 /**
@@ -86,7 +84,6 @@ export async function createSessionBinding(
   await db.insert(runtimeSessionBindingTable).values({
     tenantId: params.tenantId,
     runtimeRevisionId: params.runtimeRevisionId,
-    agentRevisionId: params.agentRevisionId ?? null,
     threadId: params.threadId ?? null,
     jobId: params.jobId ?? null,
     externalSessionRef: params.externalSessionRef,
@@ -170,20 +167,18 @@ export async function getSessionBindingsByThread(
 }
 
 /**
- * 查找可复用的 active RuntimeSessionBinding（06 §4 匹配维度）。
+ * 查找可复用的 active RuntimeSessionBinding（专题01 冻结架构匹配维度）。
  *
- * 匹配维度：tenantId + threadId + agentRevisionId + runtimeRevisionId 全等
- * （agentRevisionId 双方皆空 = 基础 Harness Route，视为匹配）。
+ * 匹配维度：tenantId + threadId + runtimeRevisionId 全等
+ * （RuntimeSessionBinding 只绑定 Harness Runtime，不再含 Agent 维度）。
  * 只返回 bindingState=active 的最近一条（createdAt 降序）；
  * closed/lost 不复用（06 §3 关闭条件）。
  */
 export async function findReusableSessionBinding(params: {
   tenantId: string;
   threadId: string;
-  agentRevisionId?: string | null;
   runtimeRevisionId: string;
 }): Promise<RuntimeSessionBinding | null> {
-  const agentRevisionId = params.agentRevisionId ?? null;
   const [row] = await db
     .select()
     .from(runtimeSessionBindingTable)
@@ -191,9 +186,6 @@ export async function findReusableSessionBinding(params: {
       and(
         eq(runtimeSessionBindingTable.tenantId, params.tenantId),
         eq(runtimeSessionBindingTable.threadId, params.threadId),
-        agentRevisionId === null
-          ? isNull(runtimeSessionBindingTable.agentRevisionId)
-          : eq(runtimeSessionBindingTable.agentRevisionId, agentRevisionId),
         eq(runtimeSessionBindingTable.runtimeRevisionId, params.runtimeRevisionId),
         eq(runtimeSessionBindingTable.bindingState, "active"),
       ),

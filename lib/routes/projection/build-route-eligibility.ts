@@ -266,8 +266,10 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     const specificity = normalized ? computeSpecificity(normalized) : 0;
 
     const capabilityCompatibilityDigest = computeCapabilityManifestDigest({
-      agentRevisionId: revision.agentRevisionId,
-      agentInterfaceRequirements: agentRevision?.agentInterfaceRequirementsJson ?? null,
+      // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度，
+      // capability digest 为 runtime-only，与 mysql-execution-binding-store 重算一致。
+      agentRevisionId: null,
+      agentInterfaceRequirements: null,
       runtimeRevisionId: revision.runtimeRevisionId,
       runtimeCapabilities: runtimeRevision?.runtimeCapabilitiesJson ?? null,
     });

@@ -51,7 +51,6 @@ import type { AuditActor } from "@/lib/identity/audit";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { agentContractSnapshotTable } from "@/lib/persistence/schema/agents";
 import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import { threadEventTable, threadItemTable } from "@/lib/persistence/schema/conversation";
 import type { ExecutionBinding, RuntimeSessionBinding } from "@/lib/persistence/schema/executions";
@@ -378,24 +377,12 @@ async function seedInvocation(params: {
   };
   const { invocation } = await createInvocation(invocationParams);
 
-  // 创建 ExecutionBinding（Agent Evidence 指向 exact Snapshot：retry 也要重建 Context Enrichment）
-  const [contractSnapshot] = await db
-    .select()
-    .from(agentContractSnapshotTable)
-    .where(eq(agentContractSnapshotTable.id, params.agentRevision.agentContractSnapshotId))
-    .limit(1);
+  // 创建 ExecutionBinding（顶层 Harness Invocation 的不可变绑定，不含 Agent evidence）
   const binding = await createExecutionBinding({
     ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS,
-    controlPlaneEvidence: {
-      ...TEST_EXECUTION_BINDING_REQUIRED_FIELDS.controlPlaneEvidence,
-      agentRevisionId: params.agentRevision.id,
-      agentContractSnapshotId: contractSnapshot?.id ?? null,
-      agentContractDigest: contractSnapshot?.contractDigest ?? null,
-      agentContextDigest: contractSnapshot?.contextDigest ?? null,
-    },
+    controlPlaneEvidence: TEST_EXECUTION_BINDING_REQUIRED_FIELDS.controlPlaneEvidence,
     invocationId: invocation.id,
     tenantId: params.tenantId,
-    agentRevisionId: params.agentRevision.id,
     runtimeRevisionId: params.runtimeRevisionId,
     deploymentRouteId: params.routeId,
     modelProvider: "doubao",

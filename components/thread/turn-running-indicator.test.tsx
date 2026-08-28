@@ -17,6 +17,7 @@ function makeTurn(state: string, overrides: Partial<ClientTurn> = {}): ClientTur
   return {
     controls: { cancel_supported: false, resume_supported: false, steer_supported: false },
     id: "turn-1",
+    requested_agent_id: null,
     turn_sequence: 1,
     trigger_type: "user_message",
     trigger_ref: null,

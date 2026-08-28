@@ -3,8 +3,6 @@ import type { ExecutionBindingDTO } from "@/lib/control-plane-client/contracts/e
 export interface SerializableExecutionBinding {
   invocationId: string;
   tenantId: string;
-  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
-  agentRevisionId: string | null;
   runtimeRevisionId: string;
   deploymentRouteId: string;
   modelProvider: string;
@@ -22,14 +20,9 @@ export interface SerializableExecutionBinding {
   runtimeArtifactDigest: string | null;
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   runtimeTargetDigest: string;
-  agentContractSnapshotId: string | null;
-  agentContractDigest: string | null;
-  agentContextDigest: string | null;
   runtimeConfigDigest: string;
   capabilityManifestDigest: string;
   runtimeAttestationIds: string[];
-  /** null = 基础 Harness Route（§18 not_applicable）。 */
-  agentPublicationRecordId: string | null;
   runtimePublicationRecordId: string;
   conformanceRunId: string;
   resolutionInputDigest: string;
@@ -45,7 +38,6 @@ export function serializeExecutionBinding(
   return {
     invocation_id: binding.invocationId,
     tenant_id: binding.tenantId,
-    agent_revision_id: binding.agentRevisionId,
     runtime_revision_id: binding.runtimeRevisionId,
     deployment_route_id: binding.deploymentRouteId,
     model_provider: binding.modelProvider,
@@ -62,13 +54,9 @@ export function serializeExecutionBinding(
     runtime_artifact_digest: binding.runtimeArtifactDigest,
     runtime_evidence_kind: binding.runtimeEvidenceKind,
     runtime_target_digest: binding.runtimeTargetDigest,
-    agent_contract_snapshot_id: binding.agentContractSnapshotId,
-    agent_contract_digest: binding.agentContractDigest,
-    agent_context_digest: binding.agentContextDigest,
     runtime_config_digest: binding.runtimeConfigDigest,
     capability_manifest_digest: binding.capabilityManifestDigest,
     runtime_attestation_ids: binding.runtimeAttestationIds,
-    agent_publication_record_id: binding.agentPublicationRecordId,
     runtime_publication_record_id: binding.runtimePublicationRecordId,
     conformance_run_id: binding.conformanceRunId,
     resolution_input_digest: binding.resolutionInputDigest,

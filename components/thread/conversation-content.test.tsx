@@ -61,6 +61,7 @@ function makeRunningTurn(cancelSupported: boolean) {
       steer_supported: false,
     },
     id: "turn-running",
+    requested_agent_id: null,
     turn_sequence: 1,
     trigger_type: "message",
     trigger_ref: null,

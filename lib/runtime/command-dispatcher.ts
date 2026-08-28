@@ -1,4 +1,3 @@
-import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
  * 命令调度器。
@@ -594,8 +593,8 @@ interface ResumeExecutionParams {
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
   /**
    * requires_redispatch=true 时使用的已加载 AgentRevision（用于构造 redispatch 的
-   * StartInvocationRequestBody）。仅作可选已加载对象；以 ExecutionBinding.agentRevisionId 为权威：
-   * 传 null 或不传时均按 binding 决定。Agent Revision 可选（§8.3）：基础 Harness Route 无 Agent。
+   * StartInvocationRequestBody）。专题01 冻结架构下 ExecutionBinding 不再绑定 Agent，
+   * 本字段为 Agent 层合法可选字段；未提供 → redispatch 不携带 Agent Revision。
    */
   agentRevision?: AgentRevision | null;
   actorType?: ThreadEventActorType;
@@ -1025,10 +1024,9 @@ async function executeResumeDispatch(
  * docs/architecture/persistence.md §13（Worker 失联恢复）。
  *
  * 流程：
- * 1. 解析并校验 AgentRevision（在任何 Command/Invocation/Turn/Event/Attempt 写入之前）：
- * - binding.agentRevisionId=null → agentRevision=null（基础 Harness 零 Agent）。
- * - 调用方已提供 params.agentRevision → 其 id 必须与 binding.agentRevisionId 严格一致，否则抛不一致错误。
- * - 未提供 → 按 binding id 查询，缺失即抛不存在错误（fail-closed）。
+ * 1. 解析 AgentRevision（在任何 Command/Invocation/Turn/Event/Attempt 写入之前）：
+ * 专题01 冻结架构下 ExecutionBinding 不再绑定 Agent，直接采用调用方已加载的
+ * params.agentRevision（可选，Agent 层合法字段；未提供 → null）。
  * 2. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running +
  * 写 turn.resumed Event（带 redispatched=true 标记）。不写 invocation.resumed Event
  * （因为不是简单恢复，而是重新调度）。
@@ -1070,29 +1068,10 @@ async function handleResumeRequiresRedispatch(
   }
   const gatewayEndpoints = endpointResolution.gatewayEndpoints;
 
-  // 1. 解析并校验 AgentRevision：以 ExecutionBinding.agentRevisionId 为权威（§8.3 长期 Agent 可选语义）。
-  // 必须在任何 Command/Invocation/Turn/Event/Attempt 写入之前完成，避免校验失败时留下半完成状态。
-  // 基础 Harness Route（binding.agentRevisionId=null）→ agentRevision=null，不查询/不要求 Agent。
-  // Agent Route → 若调用方已加载（params.agentRevision）必须与 binding 冻结 id 精确一致；否则按
-  // binding id 加载，缺失即 fail-closed（binding 冻结的 AgentRevision 必须存在）。
-  let agentRevision: AgentRevision | null;
-  if (loaded.binding.agentRevisionId === null) {
-    agentRevision = null;
-  } else if (params.agentRevision) {
-    if (params.agentRevision.id !== loaded.binding.agentRevisionId) {
-      throw new Error(
-        `handleResumeRequiresRedispatch: 提供的 AgentRevision(id=${params.agentRevision.id}) 与 binding.agentRevisionId(${loaded.binding.agentRevisionId}) 不一致`,
-      );
-    }
-    agentRevision = params.agentRevision;
-  } else {
-    agentRevision = await getRevisionById(loaded.binding.agentRevisionId);
-    if (!agentRevision) {
-      throw new Error(
-        `handleResumeRequiresRedispatch: AgentRevision 不存在（id=${loaded.binding.agentRevisionId}）`,
-      );
-    }
-  }
+  // 1. 解析 AgentRevision：专题01 冻结架构下 ExecutionBinding 不再绑定 Agent，
+  // 无 binding 侧权威可校验；直接采用调用方已加载的 AgentRevision（可选，Agent 层合法字段）。
+  // 必须在任何 Command/Invocation/Turn/Event/Attempt 写入之前完成。
+  const agentRevision = params.agentRevision ?? null;
 
   // 2. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running + 写 turn.resumed Event
   const turnResumedEvent = await db.transaction(async (tx) => {

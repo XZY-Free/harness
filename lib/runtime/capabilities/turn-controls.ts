@@ -66,7 +66,6 @@ export async function resolveTurnControls(
   const bindingRows = await db
     .select({
       invocationId: executionBindingTable.invocationId,
-      agentContractSnapshotId: executionBindingTable.agentContractSnapshotId,
       runtimeRevisionId: executionBindingTable.runtimeRevisionId,
     })
     .from(executionBindingTable)
@@ -86,7 +85,6 @@ export async function resolveTurnControls(
       const capabilities = await resolveEffectiveInvocationCapabilities({
         tenantId,
         binding: {
-          agentContractSnapshotId: binding.agentContractSnapshotId,
           runtimeRevisionId: binding.runtimeRevisionId,
         },
       });

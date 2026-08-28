@@ -36,7 +36,6 @@ import {
   loadPolicySetAndRevision,
   toRulesDigestInput,
 } from "@/lib/permission/policy-queries";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import {
   governanceConfigRevisionTable,
@@ -66,12 +65,8 @@ export const EXECUTION_BINDING_AUTHORITY_LOCK_ORDER = [
   "DeploymentRoute+DeploymentRouteSet",
   "RouteActivation",
   "RouteRevision",
-  "Agent",
-  "AgentRevision",
   "Runtime",
   "RuntimeRevision",
-  "AgentPublicationRecord",
-  "AgentWithdrawalRecord",
   "RuntimePublicationRecord",
   "RuntimeWithdrawalRecord",
   "RuntimeArtifact",
@@ -115,14 +110,14 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         routeId: input.deploymentRouteId,
         routeRevisionId: evidence.routeRevisionId,
         routeActivationId: evidence.routeActivationId,
-        // 基础 Harness Route（agentRevisionId=null）→ agent 维度 not_applicable（§18），
-        // validateBindingEligibility 内部跳过 Agent 维度校验；Runtime 维度照常。
-        agentRevisionId: input.agentRevisionId,
+        // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
+        // agentRevisionId / agentPublicationRecordId 恒为 null（Agent not_applicable）。
+        agentRevisionId: null,
         runtimeRevisionId: input.runtimeRevisionId,
         policyRevisionId: input.policyRevisionId,
         projectionVersionNo: input.projectionVersionNo,
         frozenEvidence: {
-          agentPublicationRecordId: evidence.agentPublicationRecordId,
+          agentPublicationRecordId: null,
           runtimePublicationRecordId: evidence.runtimePublicationRecordId,
           runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
           conformanceRunId: evidence.conformanceRunId,
@@ -136,10 +131,11 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
       const revisions = await lockAndVerifyRoute(tx, input);
 
       // 4. : Capability Manifest Digest 一致性（TOCTOU 防御）
-      // base route 的 agent 维度为 not_applicable（§18），agentRevisionId/interface 传 null。
+      // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度，
+      // agentRevisionId/interface 恒为 null。
       const capabilityManifestDigest = computeCapabilityManifestDigest({
-        agentRevisionId: revisions.agentRevision?.id ?? null,
-        agentInterfaceRequirements: revisions.agentRevision?.agentInterfaceRequirementsJson ?? null,
+        agentRevisionId: null,
+        agentInterfaceRequirements: null,
         runtimeRevisionId: revisions.runtimeRevision.id,
         runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
       });
@@ -151,7 +147,6 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
       await tx.insert(executionBindingTable).values({
         invocationId: input.invocationId,
         tenantId: input.tenantId,
-        agentRevisionId: input.agentRevisionId,
         runtimeRevisionId: input.runtimeRevisionId,
         deploymentRouteId: input.deploymentRouteId,
         modelProvider: input.modelProvider,
@@ -172,12 +167,8 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         runtimeEvidenceKind: evidence.runtimeEvidenceKind,
         runtimeConfigDigest: evidence.runtimeConfigDigest,
         runtimeTargetDigest: evidence.runtimeTargetDigest,
-        agentContractSnapshotId: evidence.agentContractSnapshotId,
-        agentContractDigest: evidence.agentContractDigest,
-        agentContextDigest: evidence.agentContextDigest,
         capabilityManifestDigest: evidence.capabilityManifestDigest,
         runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
-        agentPublicationRecordId: evidence.agentPublicationRecordId,
         runtimePublicationRecordId: evidence.runtimePublicationRecordId,
         conformanceRunId: evidence.conformanceRunId,
         resolutionInputDigest: evidence.resolutionInputDigest,
@@ -208,8 +199,7 @@ type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingInput) {
   const evidence = input.controlPlaneEvidence;
-  // 基础 Harness Route（agentRevisionId=null）→ Agent 维度 not_applicable（§18），跳过。
-  const isBaseRoute = input.agentRevisionId === null;
+  // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
 
   // A. Route + RouteSet（FOR UPDATE）
   const [routeRow] = await tx
@@ -266,7 +256,6 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
     revision.tenantId !== input.tenantId ||
     revision.routeId !== input.deploymentRouteId ||
     revision.routeSetId !== routeRow.routeSet.id ||
-    revision.agentRevisionId !== input.agentRevisionId ||
     revision.runtimeRevisionId !== input.runtimeRevisionId ||
     // §10：Route 显式指定 PolicyRevision 时，Binding 必须与其一致；
     // Route 未指定（null）→ Tenant baseline fallback，effective 由 lockAndVerifyPolicy 校验。
@@ -275,50 +264,6 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
   ) {
     throw evidenceError("RouteRevision 内容与解析结果不一致");
   }
-
-  // D. Agent → AgentRevision（FOR UPDATE），只用预读键定位主体，最终判断全部基于锁后行
-  // 基础 Harness Route（agentRevisionId=null）→ 无 Agent 资产约束，Agent 维度
-  // not_applicable（§18），跳过 Agent 事实校验；Runtime 维度仍验证。
-  const agentRevision = isBaseRoute
-    ? null
-    : await (async () => {
-        const [agentRevisionKey] = await tx
-          .select({ agentId: agentRevisionTable.agentId })
-          .from(agentRevisionTable)
-          .where(eq(agentRevisionTable.id, input.agentRevisionId as string))
-          .limit(1);
-        if (!agentRevisionKey) throw evidenceError("AgentRevision 不存在");
-        const [agent] = await tx
-          .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
-          .from(agentTable)
-          .where(
-            and(
-              eq(agentTable.id, agentRevisionKey.agentId),
-              eq(agentTable.tenantId, input.tenantId),
-            ),
-          )
-          .limit(1)
-          .for("update");
-        const [agentRev] = await tx
-          .select()
-          .from(agentRevisionTable)
-          .where(eq(agentRevisionTable.id, input.agentRevisionId as string))
-          .limit(1)
-          .for("update");
-        if (
-          !agent ||
-          agent.lifecycleState !== "enabled" ||
-          !agentRev ||
-          agentRev.agentId !== agent.id ||
-          agentRev.revisionState !== "published" ||
-          // Agent 是源码不可见黑盒：发布权威是 AgentContractSnapshot，
-          // 冻结 evidence 必须与锁后 AgentRevision 的 Snapshot 一致（fail-closed）。
-          agentRev.agentContractSnapshotId !== evidence.agentContractSnapshotId
-        ) {
-          throw evidenceError("Agent 或 AgentRevision 当前权威事实不一致");
-        }
-        return agentRev;
-      })();
 
   // E. Runtime → RuntimeRevision（FOR UPDATE），严格串行获取
   const [runtimeRevisionKey] = await tx
@@ -384,7 +329,7 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
   // J. GovernanceRevision（FOR UPDATE）— 最终 authority 锁与精确冻结校验（§11/§42）
   await lockAndVerifyGovernance(tx, input);
   await lockAndVerifyProjection(tx, input);
-  return { agentRevision, runtimeRevision };
+  return { runtimeRevision };
 }
 
 async function lockAndVerifyPolicy(
@@ -552,7 +497,6 @@ async function lockAndVerifyProjection(
       projectionVersionNo: routeEligibilityProjection.projectionVersionNo,
       routeRevisionId: routeEligibilityProjection.routeRevisionId,
       routeActivationId: routeEligibilityProjection.routeActivationId,
-      agentRevisionId: routeEligibilityProjection.agentRevisionId,
       runtimeRevisionId: routeEligibilityProjection.runtimeRevisionId,
       policyRevisionId: routeEligibilityProjection.policyRevisionId,
       routeContentDigest: routeEligibilityProjection.routeContentDigest,
@@ -561,11 +505,7 @@ async function lockAndVerifyProjection(
       runtimeEvidenceKind: routeEligibilityProjection.runtimeEvidenceKind,
       runtimeConfigDigest: routeEligibilityProjection.runtimeConfigDigest,
       runtimeTargetDigest: routeEligibilityProjection.runtimeTargetDigest,
-      agentContractSnapshotId: routeEligibilityProjection.agentContractSnapshotId,
-      agentContractDigest: routeEligibilityProjection.agentContractDigest,
-      agentContextDigest: routeEligibilityProjection.agentContextDigest,
       capabilityCompatibilityDigest: routeEligibilityProjection.capabilityCompatibilityDigest,
-      agentPublicationRecordId: routeEligibilityProjection.agentPublicationRecordId,
       runtimePublicationRecordId: routeEligibilityProjection.runtimePublicationRecordId,
       runtimeAttestationIds: routeEligibilityProjection.runtimeAttestationIds,
       conformanceRunId: routeEligibilityProjection.conformanceRunId,
@@ -587,18 +527,13 @@ async function lockAndVerifyProjection(
       projectionVersionNo: input.projectionVersionNo,
       routeRevisionId: evidence.routeRevisionId,
       routeActivationId: evidence.routeActivationId,
-      agentRevisionId: input.agentRevisionId,
       runtimeRevisionId: input.runtimeRevisionId,
       routeContentDigest: evidence.routeContentDigest,
       runtimeArtifactDigest: evidence.runtimeArtifactDigest,
       runtimeEvidenceKind: evidence.runtimeEvidenceKind,
       runtimeConfigDigest: evidence.runtimeConfigDigest,
       runtimeTargetDigest: evidence.runtimeTargetDigest,
-      agentContractSnapshotId: evidence.agentContractSnapshotId,
-      agentContractDigest: evidence.agentContractDigest,
-      agentContextDigest: evidence.agentContextDigest,
       capabilityManifestDigest: evidence.capabilityManifestDigest,
-      agentPublicationRecordId: evidence.agentPublicationRecordId,
       runtimePublicationRecordId: evidence.runtimePublicationRecordId,
       runtimeArtifactId: evidence.runtimeArtifactId,
       runtimeAttestationIds: evidence.runtimeAttestationIds,
@@ -615,8 +550,6 @@ type FrozenProjectionRow = {
   projectionVersionNo: number;
   routeRevisionId: string;
   routeActivationId: string;
-  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
-  agentRevisionId: string | null;
   runtimeRevisionId: string;
   policyRevisionId: string | null;
   routeContentDigest: string;
@@ -627,11 +560,7 @@ type FrozenProjectionRow = {
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   runtimeConfigDigest: string | null;
   runtimeTargetDigest: string | null;
-  agentContractSnapshotId: string | null;
-  agentContractDigest: string | null;
-  agentContextDigest: string | null;
   capabilityCompatibilityDigest: string;
-  agentPublicationRecordId: string | null;
   runtimePublicationRecordId: string | null;
   runtimeAttestationIds: string[] | null;
   conformanceRunId: string | null;
@@ -643,8 +572,6 @@ type FrozenProjectionExpectation = {
   projectionVersionNo: number;
   routeRevisionId: string;
   routeActivationId: string;
-  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
-  agentRevisionId: string | null;
   runtimeRevisionId: string;
   routeContentDigest: string;
   /** null = external_endpoint Runtime（03 §3）。 */
@@ -654,12 +581,7 @@ type FrozenProjectionExpectation = {
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   runtimeConfigDigest: string;
   runtimeTargetDigest: string;
-  agentContractSnapshotId: string | null;
-  agentContractDigest: string | null;
-  agentContextDigest: string | null;
   capabilityManifestDigest: string;
-  /** null = 基础 Harness Route（§18 not_applicable）。 */
-  agentPublicationRecordId: string | null;
   runtimePublicationRecordId: string;
   runtimeAttestationIds: string[];
   conformanceRunId: string;
@@ -670,17 +592,6 @@ export function validateFrozenProjectionAuthority(input: {
   expected: FrozenProjectionExpectation;
 }): void {
   const { projection, expected } = input;
-  const isBaseRoute = expected.agentRevisionId === null;
-  // Agent 维度仅 Agent Route 校验（§7.4）；base route 为 not_applicable（§18），跳过。
-  // Agent Contract 证据 all-or-nothing（05 §5）：Agent Route 必须三元组一致。
-  const agentContractValid = isBaseRoute
-    ? projection?.agentContractSnapshotId === null &&
-      projection?.agentContractDigest === null &&
-      projection?.agentContextDigest === null
-    : !!projection &&
-      projection.agentContractSnapshotId === expected.agentContractSnapshotId &&
-      projection.agentContractDigest === expected.agentContractDigest &&
-      projection.agentContextDigest === expected.agentContextDigest;
   // external_endpoint Runtime 的 Attestation 集合为空（03 §3，不伪造）；hosted 要求非空全集。
   const runtimeAttestationsExact =
     expected.runtimeEvidenceKind === "external_endpoint"
@@ -693,11 +604,6 @@ export function validateFrozenProjectionAuthority(input: {
         )
       : !!projection?.runtimeAttestationIds &&
         areExactNonEmptyIdSets(projection.runtimeAttestationIds, expected.runtimeAttestationIds);
-  // Agent 维度（Agent Route）：Publication + Contract 三元组一致
-  //（Agent 是源码不可见黑盒，无 source Artifact/Attestation 证据）。
-  const agentDimensionValid = isBaseRoute
-    ? true
-    : !!projection && projection.agentPublicationRecordId === expected.agentPublicationRecordId;
   if (
     !projection ||
     projection.routeId !== expected.routeId ||
@@ -707,7 +613,6 @@ export function validateFrozenProjectionAuthority(input: {
     projection.projectionVersionNo !== expected.projectionVersionNo ||
     projection.routeRevisionId !== expected.routeRevisionId ||
     projection.routeActivationId !== expected.routeActivationId ||
-    projection.agentRevisionId !== expected.agentRevisionId ||
     projection.runtimeRevisionId !== expected.runtimeRevisionId ||
     projection.routeContentDigest !== expected.routeContentDigest ||
     projection.runtimeArtifactId !== expected.runtimeArtifactId ||
@@ -718,9 +623,7 @@ export function validateFrozenProjectionAuthority(input: {
     projection.capabilityCompatibilityDigest !== expected.capabilityManifestDigest ||
     projection.runtimePublicationRecordId !== expected.runtimePublicationRecordId ||
     projection.conformanceRunId !== expected.conformanceRunId ||
-    !runtimeAttestationsExact ||
-    !agentDimensionValid ||
-    !agentContractValid
+    !runtimeAttestationsExact
   ) {
     throw staleEvidenceError("RouteEligibilityProjection 已漂移");
   }
@@ -734,83 +637,10 @@ async function lockAndVerifyPublications(
   tx: Transaction,
   input: StoreExecutionBindingInput,
 ): Promise<{
-  agentPublication: LockedPublicationEvidence | null;
   runtimePublication: LockedPublicationEvidence;
 }> {
   const evidence = input.controlPlaneEvidence;
-  // 基础 Harness Route（agentRevisionId=null）→ Agent 维度 not_applicable（§18），跳过。
-  const isBaseRoute = input.agentRevisionId === null;
-
-  // Agent Publication（仅 Agent Route 校验；base route 为 null，§18）。
-  const agentPublication = isBaseRoute
-    ? null
-    : await (async () => {
-        const [agentPub] = await tx
-          .select({
-            id: publicationRecord.id,
-            tenantId: publicationRecord.tenantId,
-            subjectType: publicationRecord.subjectType,
-            subjectRevisionId: publicationRecord.subjectRevisionId,
-            attestationIds: publicationRecord.attestationIds,
-            conformanceRunId: publicationRecord.conformanceRunId,
-            evidenceSetDigest: publicationRecord.evidenceSetDigest,
-            approvals: publicationRecord.approvals,
-            agentContractSnapshotId: publicationRecord.agentContractSnapshotId,
-            agentContractDigest: publicationRecord.agentContractDigest,
-            agentCapabilityDigest: publicationRecord.agentCapabilityDigest,
-            agentContextDigest: publicationRecord.agentContextDigest,
-          })
-          .from(publicationRecord)
-          .where(eq(publicationRecord.id, evidence.agentPublicationRecordId as string))
-          .limit(1)
-          .for("update");
-        const [agentWithdrawal] = await tx
-          .select({ id: withdrawalRecord.id })
-          .from(withdrawalRecord)
-          .where(
-            eq(withdrawalRecord.publicationRecordId, evidence.agentPublicationRecordId as string),
-          )
-          .limit(1)
-          .for("update");
-        validateFrozenPublicationAuthority({
-          publication: agentPub ?? null,
-          withdrawal: agentWithdrawal ?? null,
-          expected: {
-            publicationRecordId: evidence.agentPublicationRecordId as string,
-            tenantId: input.tenantId,
-            subjectType: "agent_revision",
-            subjectRevisionId: input.agentRevisionId as string,
-            // Agent 是源码不可见黑盒 → Agent Publication 恒无 Artifact Attestation。
-            attestationIds: [],
-            conformanceRunId: null,
-            allowEmptyAttestations: true,
-          },
-        });
-        if (!agentPub) throw evidenceError("冻结 Agent Publication 不存在");
-        // Binding 冻结的 Contract 三元组必须与 Agent Publication 冻结值一致
-        //（Agent evidence all-or-nothing，05 §5）。
-        if (
-          agentPub.agentContractSnapshotId !== evidence.agentContractSnapshotId ||
-          agentPub.agentContractDigest !== evidence.agentContractDigest ||
-          agentPub.agentContextDigest !== evidence.agentContextDigest
-        ) {
-          throw evidenceError("冻结 Agent Contract 证据与 Agent Publication 不一致");
-        }
-        // Agent Publication 的 evidenceSetDigest 冻结了 AgentContractSnapshot 附加证据。
-        // 重算时须从 Publication 的 contract 列重建该 additionalEvidence，否则与锁后 digest 不一致。
-        validateFrozenPublicationEvidenceDigest({
-          publication: agentPub,
-          additionalEvidence: {
-            agent_contract_snapshot: {
-              id: agentPub.agentContractSnapshotId,
-              contract_digest: agentPub.agentContractDigest,
-              capability_digest: agentPub.agentCapabilityDigest,
-              context_digest: agentPub.agentContextDigest,
-            },
-          },
-        });
-        return agentPub;
-      })();
+  // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent Publication 维度。
 
   const [runtimePublication] = await tx
     .select({
@@ -852,7 +682,6 @@ async function lockAndVerifyPublications(
   });
   if (!runtimePublication) throw evidenceError("冻结 Runtime Publication 不存在");
   return {
-    agentPublication,
     runtimePublication,
   };
 }
@@ -1234,9 +1063,6 @@ function areExactNonEmptyIdSets(current: string[], frozen: string[]): boolean {
 export function toExecutionBinding(
   row: typeof executionBindingTable.$inferSelect,
 ): ExecutionBinding {
-  // 基础 Harness Route（agentRevisionId=null）→ Agent 字段为 null（§18 not_applicable），
-  // 跳过 Agent 维度校验；Runtime 维度始终必填。
-  const isBaseRoute = row.agentRevisionId === null;
   const runtimeFieldsComplete =
     !!row.routeRevisionId &&
     !!row.routeActivationId &&
@@ -1252,20 +1078,12 @@ export function toExecutionBinding(
     !!row.resolutionInputDigest &&
     Number.isInteger(row.projectionVersionNo) &&
     row.projectionVersionNo >= 0;
-  const agentFieldsComplete =
-    isBaseRoute ||
-    (!!row.agentPublicationRecordId &&
-      // Agent Contract 证据 all-or-nothing（05 §5）。
-      !!row.agentContractSnapshotId &&
-      !!row.agentContractDigest &&
-      !!row.agentContextDigest);
-  if (!runtimeFieldsComplete || !agentFieldsComplete) {
+  if (!runtimeFieldsComplete) {
     throw evidenceError("新建 Binding 回读时证据字段不完整");
   }
   return {
     invocationId: row.invocationId,
     tenantId: row.tenantId,
-    agentRevisionId: row.agentRevisionId,
     runtimeRevisionId: row.runtimeRevisionId,
     deploymentRouteId: row.deploymentRouteId,
     modelProvider: row.modelProvider,
@@ -1287,12 +1105,8 @@ export function toExecutionBinding(
     runtimeConfigDigest: row.runtimeConfigDigest,
     runtimeTargetDigest: row.runtimeTargetDigest,
     runtimeEvidenceKind: row.runtimeEvidenceKind,
-    agentContractSnapshotId: row.agentContractSnapshotId,
-    agentContractDigest: row.agentContractDigest,
-    agentContextDigest: row.agentContextDigest,
     capabilityManifestDigest: row.capabilityManifestDigest,
     runtimeAttestationIds: [...row.runtimeAttestationIds],
-    agentPublicationRecordId: row.agentPublicationRecordId,
     runtimePublicationRecordId: row.runtimePublicationRecordId,
     conformanceRunId: row.conformanceRunId,
     resolutionInputDigest: row.resolutionInputDigest,

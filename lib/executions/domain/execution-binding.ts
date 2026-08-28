@@ -3,7 +3,15 @@ import type { RouteControlPlaneEvidence } from "@/lib/routes/domain/route-resolu
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 
-export interface ExecutionBindingControlPlaneEvidence extends RouteControlPlaneEvidence {
+export interface ExecutionBindingControlPlaneEvidence
+  extends Omit<
+    RouteControlPlaneEvidence,
+    | "agentRevisionId"
+    | "agentContractSnapshotId"
+    | "agentContractDigest"
+    | "agentContextDigest"
+    | "agentPublicationRecordId"
+  > {
   routeRevisionId: string;
   routeActivationId: string;
   routeContentDigest: string;
@@ -12,8 +20,6 @@ export interface ExecutionBindingControlPlaneEvidence extends RouteControlPlaneE
 }
 
 export interface ExecutionBindingConfigInput {
-  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
-  agentRevisionId: string | null;
   runtimeRevisionId: string;
   deploymentRouteId: string;
   modelProvider: string;
@@ -101,10 +107,7 @@ export function assertExecutionBindingPolicyGovernance(input: ExecutionBindingCo
 export function assertExecutionBindingEvidence(
   evidence: ExecutionBindingControlPlaneEvidence,
 ): void {
-  // 基础 Harness Route：agent 字段全 null（Agent Evidence not_applicable，§18），
-  // 跳过 Agent 维度校验（禁止伪装 passed、禁止空串假证据）；Runtime 维度始终校验。
-  const isBaseRoute = evidence.agentRevisionId === null;
-
+  // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带任何 Agent evidence。
   // Runtime evidence all-or-nothing（03 §3）：hosted 要求 artifact 全集；
   // external_endpoint 无 Runtime Artifact（不伪造），attestation 集合为空。
   const isExternalRuntime = evidence.runtimeEvidenceKind === "external_endpoint";
@@ -131,30 +134,6 @@ export function assertExecutionBindingEvidence(
   }
   if (!isExternalRuntime && !SHA256.test(evidence.runtimeArtifactDigest as string)) {
     throw new ExecutionBindingEvidenceError("Runtime Artifact Digest 格式非法");
-  }
-  if (!isBaseRoute) {
-    if (!evidence.agentPublicationRecordId) {
-      throw new ExecutionBindingEvidenceError("缺少 Agent Publication 引用");
-    }
-    // Agent evidence all-or-nothing（05 §5）：Contract 证据三元组缺一不可。
-    // Agent 是源码不可见黑盒 — 不再要求 source Artifact/Attestation 证据。
-    if (
-      !evidence.agentContractSnapshotId ||
-      !SHA256.test(evidence.agentContractDigest as string) ||
-      !SHA256.test(evidence.agentContextDigest as string)
-    ) {
-      throw new ExecutionBindingEvidenceError(
-        "Agent Contract 证据不完整（Snapshot/contract digest/context digest 缺一不可）",
-      );
-    }
-  } else if (
-    evidence.agentContractSnapshotId !== null ||
-    evidence.agentContractDigest !== null ||
-    evidence.agentContextDigest !== null
-  ) {
-    throw new ExecutionBindingEvidenceError(
-      "基础 Harness Route 不允许携带 Agent Contract 证据（§18 not_applicable，禁止伪装）",
-    );
   }
   if (isExternalRuntime) {
     if (evidence.runtimeAttestationIds.length > 0) {

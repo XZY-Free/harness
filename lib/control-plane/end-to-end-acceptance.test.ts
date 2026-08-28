@@ -583,7 +583,6 @@ async function createBindingFromResolved(params: {
   return createCreateExecutionBinding({ store: mysqlExecutionBindingStore })({
     invocationId: params.invocationId,
     tenantId: params.tenantId,
-    agentRevisionId: params.resolution.agentRevisionId,
     runtimeRevisionId: params.resolution.runtimeRevisionId,
     deploymentRouteId: params.resolution.deploymentRouteId,
     modelProvider: "doubao",
@@ -1182,11 +1181,9 @@ describe("场景9：Binding 在同一事务完成最终资格校验", () => {
     });
 
     // 验证 Binding 包含完整不可变控制面证据
-    expect(binding.agentRevisionId).toBe(fixture.agentRevision.id);
     expect(binding.runtimeRevisionId).toBe(fixture.runtimeRevision.id);
     expect(binding.routeRevisionId).toBe(resolution.routeRevisionId);
     expect(binding.routeActivationId).toBe(resolution.routeActivationId);
-    expect(binding.agentPublicationRecordId).toBeTruthy();
     expect(binding.runtimePublicationRecordId).toBeTruthy();
     expect(binding.conformanceRunId).toBeTruthy();
     expect(binding.runtimeAttestationIds).toHaveLength(1);
@@ -1393,7 +1390,6 @@ describe("场景12：最终调度继续使用 Request 冻结的 AgentRevision", 
     });
 
     const frozenConfigHash = binding.configHash;
-    const frozenAgentRevisionId = binding.agentRevisionId;
 
     // 发布新 AgentRevision（但不撤回旧的）
     const newRevision = await createDraftRevisionWithContractSnapshot({
@@ -1407,11 +1403,8 @@ describe("场景12：最终调度继续使用 Request 冻结的 AgentRevision", 
     });
     await publishRevision(fixture.tenantId, newRevision.id, 2);
 
-    // 已有 Binding 的 configHash 和 agentRevisionId 不变
+    // 已有 Binding 的 configHash 不变（ExecutionBinding 不可变，不随新 Agent Revision 变化）
     expect(binding.configHash).toBe(frozenConfigHash);
-    expect(binding.agentRevisionId).toBe(frozenAgentRevisionId);
-    expect(binding.agentRevisionId).toBe(fixture.agentRevision.id);
-    expect(binding.agentRevisionId).not.toBe(newRevision.id);
   });
 });
 
@@ -1419,8 +1412,8 @@ describe("场景12：最终调度继续使用 Request 冻结的 AgentRevision", 
 // 场景 13：Publication 撤回后拒绝新 Binding
 // ═══════════════════════════════════════════════════════════
 
-describe("场景13：Publication 撤回后拒绝新 Binding", () => {
-  it("Resolver 冻结 Publication 后新增 Withdrawal，旧 Resolution 创建 Binding 必须失败", async () => {
+describe("场景13：Agent Revision 撤回不影响 Harness Binding", () => {
+  it("ExecutionBinding 只绑定 Runtime（无 Agent 维度），Agent Revision 撤回后 Binding 仍成功", async () => {
     const fixture = await seedEndToEndFixture("withdrawn-pub");
     const resolution = await resolveFrozenRouteForBinding(fixture, "thread-withdrawn");
     const invocationId = crypto.randomUUID();
@@ -1441,10 +1434,15 @@ describe("场景13：Publication 撤回后拒绝新 Binding", () => {
       );
     expect(withdrawal).toBeDefined();
 
-    await expect(
-      createBindingFromResolved({ tenantId: fixture.tenantId, invocationId, resolution }),
-    ).rejects.toThrow();
-    await expectBindingAbsent(fixture.tenantId, invocationId);
+    // 专题01 冻结架构：ExecutionBinding 不再知道 Agent（02 §3.2）。Agent Revision 撤回
+    // 由 AgentCall 子执行层 fail-closed（后续批次），不阻止顶层 Harness 创建 Runtime Binding。
+    const binding = await createBindingFromResolved({
+      tenantId: fixture.tenantId,
+      invocationId,
+      resolution,
+    });
+    expect(binding.runtimeRevisionId).toBe(resolution.runtimeRevisionId);
+    expect(binding.runtimePublicationRecordId).toBeTruthy();
   });
 });
 
@@ -2052,13 +2050,6 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
       invocationId,
       resolution: outcome.resolution,
     });
-    // §8.1/§10.3：Agent-backed 时 Agent Evidence 条件性完整组为全完整（非 null）。
-    expect(binding.agentRevisionId).toBe(agentRevision.id);
-    expect(binding.agentContractSnapshotId).toBeTruthy();
-    expect(binding.agentContractDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(binding.agentPublicationRecordId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    );
 
     // ─── 5. Withdraw：正式撤回命令 → 真实 Worker 消费 agent.revision.withdrawn → Projection ineligible → fail-closed ─
     // 正式撤回应用服务在真实 MySQL 同事务写 WithdrawalRecord/Audit/Outbox agent.revision.withdrawn，
@@ -2259,9 +2250,5 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
     expect(binding.runtimeTargetDigest).toBe(resolution.controlPlaneEvidence.runtimeTargetDigest);
     expect(binding.runtimeAttestationIds).toEqual([]);
     expect(binding.conformanceRunId).toBeTruthy();
-    // Agent 维度证据完整（all-or-nothing，05 §5）。
-    expect(binding.agentContractSnapshotId).toBeTruthy();
-    expect(binding.agentContractDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(binding.agentContextDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });

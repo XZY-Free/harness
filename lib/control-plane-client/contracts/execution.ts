@@ -9,8 +9,6 @@
 export interface ExecutionBindingDTO {
   invocation_id: string;
   tenant_id: string;
-  /** null = 基础 Harness Route，无 Agent 资产约束（§8.3）。 */
-  agent_revision_id: string | null;
   runtime_revision_id: string;
   deployment_route_id: string;
   model_provider: string;
@@ -25,12 +23,6 @@ export interface ExecutionBindingDTO {
   route_revision_id: string;
   route_activation_id: string;
   route_content_digest: string;
-  /** 冻结的 Agent 证据。null = 基础 Harness Route（Agent Evidence not_applicable，§18）。 */
-  agent_publication_record_id: string | null;
-  /** 冻结的 Agent Contract 证据。null = 基础 Harness Route（§18 not_applicable — 05 §5）。 */
-  agent_contract_snapshot_id: string | null;
-  agent_contract_digest: string | null;
-  agent_context_digest: string | null;
   /** 冻结的 Runtime 证据。runtime_artifact_* null = external_endpoint（03 §3）。 */
   runtime_artifact_id: string | null;
   runtime_artifact_digest: string | null;

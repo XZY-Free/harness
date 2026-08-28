@@ -1,6 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { threadTable } from "@/lib/persistence/schema/conversation";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { and, eq } from "drizzle-orm";
@@ -22,16 +21,27 @@ export const CONTEXT_CLASSIFICATIONS = [
 ] as const;
 export type ContextClassification = (typeof CONTEXT_CLASSIFICATIONS)[number];
 
+/**
+ * 基础 Harness Route 的 Context 策略默认值。
+ *
+ * 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带 Agent Context
+ * Contract（原 classification/allowedSources/allowedSkillIds 由 AgentRevision
+ * permissionRequirementsJson 派生）。无 Agent Contract 时按基础 Harness 默认：
+ * 允许全部已声明的上下文来源、无额外 skill 白名单、敏感级别 internal。
+ * （A2A 的 AgentSessionBinding Context Contract 属后续批次。）
+ */
+export const BASE_HARNESS_CONTEXT_POLICY = {
+  classification: "internal" as ContextClassification,
+  allowedSources: [...CONTEXT_SOURCE_TYPES],
+  allowedSkillIds: [] as string[],
+};
+
 export interface ContextHandleBinding {
   tenantId: string;
   invocationId: string;
   threadId: string;
   triggerItemId: string;
   userId: string;
-  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
-  agentId: string | null;
-  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
-  agentRevisionId: string | null;
   workspaceId: string | null;
   workspaceBindingId: string | null;
   policyRevisionId: string | null;
@@ -99,8 +109,6 @@ function decode(handle: string): ContextHandleBinding {
     typeof binding.threadId !== "string" ||
     typeof binding.triggerItemId !== "string" ||
     typeof binding.userId !== "string" ||
-    (binding.agentId !== null && typeof binding.agentId !== "string") ||
-    (binding.agentRevisionId !== null && typeof binding.agentRevisionId !== "string") ||
     typeof binding.nonce !== "string" ||
     typeof binding.issuedAt !== "number" ||
     typeof binding.expiresAt !== "number" ||
@@ -127,18 +135,13 @@ async function loadPersistedBinding(tenantId: string, invocationId: string) {
       threadId: invocationTable.threadId,
       triggerItemId: invocationTable.triggerItemId,
       userId: threadTable.ownerUserId,
-      // 从已创建的执行链（ExecutionBinding → AgentRevision）反查；null = 基础 Harness Route。
-      agentId: agentRevisionTable.agentId,
       workspaceId: threadTable.defaultWorkspaceId,
-      agentRevisionId: executionBindingTable.agentRevisionId,
       workspaceBindingId: executionBindingTable.workspaceBindingId,
       policyRevisionId: executionBindingTable.policyRevisionId,
-      permissionRequirementsJson: agentRevisionTable.permissionRequirementsJson,
     })
     .from(invocationTable)
     .innerJoin(executionBindingTable, eq(executionBindingTable.invocationId, invocationTable.id))
     .innerJoin(threadTable, eq(threadTable.id, invocationTable.threadId))
-    .leftJoin(agentRevisionTable, eq(agentRevisionTable.id, executionBindingTable.agentRevisionId))
     .where(
       and(
         eq(invocationTable.tenantId, tenantId),
@@ -151,38 +154,13 @@ async function loadPersistedBinding(tenantId: string, invocationId: string) {
   if (!row?.threadId || !row.triggerItemId) {
     throw new ContextHandleError("binding_not_found", "Invocation 上下文绑定不存在或不完整");
   }
-  const policy = deriveContextPolicy(row.permissionRequirementsJson);
-  const { permissionRequirementsJson: _permissionRequirementsJson, ...binding } = row;
-  return { ...binding, ...policy, threadId: row.threadId, triggerItemId: row.triggerItemId };
-}
-
-function deriveContextPolicy(
-  value: unknown,
-): Pick<ContextHandleBinding, "classification" | "allowedSources" | "allowedSkillIds"> {
-  const policy =
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
-  const classification = CONTEXT_CLASSIFICATIONS.includes(
-    policy.context_classification as ContextClassification,
-  )
-    ? (policy.context_classification as ContextClassification)
-    : "restricted";
-  const allowedSources = Array.isArray(policy.context_sources)
-    ? policy.context_sources.filter(
-        (source): source is ContextSourceType =>
-          typeof source === "string" && CONTEXT_SOURCE_TYPES.includes(source as ContextSourceType),
-      )
-    : [];
-  const allowedSkillIds = Array.isArray(policy.context_skill_ids)
-    ? policy.context_skill_ids.filter(
-        (skillId): skillId is string => typeof skillId === "string" && skillId.length > 0,
-      )
-    : [];
+  // 专题01 冻结架构：ExecutionBinding 不再携带 Agent Context Contract，
+  // Context 策略按基础 Harness 默认（无 Agent 读取）。
   return {
-    classification,
-    allowedSources: [...new Set(allowedSources)],
-    allowedSkillIds: [...new Set(allowedSkillIds)],
+    ...row,
+    ...BASE_HARNESS_CONTEXT_POLICY,
+    threadId: row.threadId,
+    triggerItemId: row.triggerItemId,
   };
 }
 
@@ -216,8 +194,6 @@ export async function resolveContextHandle(
     "threadId",
     "triggerItemId",
     "userId",
-    "agentId",
-    "agentRevisionId",
     "workspaceId",
     "workspaceBindingId",
     "policyRevisionId",

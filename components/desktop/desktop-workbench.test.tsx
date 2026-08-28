@@ -49,6 +49,7 @@ const latestTurn: ClientTurn = {
     steer_supported: true,
   },
   id: "turn-1",
+  requested_agent_id: null,
   turn_sequence: 1,
   trigger_type: "message",
   trigger_ref: null,
