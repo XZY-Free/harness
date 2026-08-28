@@ -460,7 +460,7 @@ export type RuntimeEventIngressState = (typeof RUNTIME_EVENT_INGRESS_STATES)[num
  *
  * 事实源：11-api-and-event-boundaries.md §4（Runtime Protocol）。
  * - progress.snapshot：进度快照（创建 user_guidance Item）。
- * - response.completed：正式回答完成（创建 agent_message Item + 终态）。
+ * - response.completed：正式回答完成（创建 assistant_message Item + 终态）。
  * - user_action.requested：请求用户操作（创建 user_action Item + waiting_user）。
  * - execution.completed：执行正常完成（终态，无 final_item）。
  * - execution.failed：执行失败（终态）。

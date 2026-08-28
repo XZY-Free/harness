@@ -1,5 +1,5 @@
 /**
- * Agent 消息 Item（agent_message）——W3-3 全宽正文形态（方案 §4.1）。
+ * Agent 消息 Item（assistant_message）——W3-3 全宽正文形态（方案 §4.1）。
  *
  * content 结构：{ text }
  *
@@ -13,11 +13,11 @@
 import { Markdown } from "@/components/markdown";
 import type { ClientItem } from "@/lib/client/types";
 
-interface AgentMessageItemProps {
+interface AssistantMessageItemProps {
   readonly item: ClientItem;
 }
 
-export function AgentMessageItem({ item }: AgentMessageItemProps) {
+export function AssistantMessageItem({ item }: AssistantMessageItemProps) {
   const content = item.content as { text?: string };
   const isPending = item.item_state === "pending";
   const isFailed = item.item_state === "failed";

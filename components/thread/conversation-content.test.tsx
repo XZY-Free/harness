@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type { ClientItem } from "@/lib/client/types";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentMessageItem } from "./items/agent-message-item";
+import { AssistantMessageItem } from "./items/assistant-message-item";
 import { UserMessageItem } from "./items/user-message-item";
 import { NewThreadPage } from "./new-thread-page";
 import { ThreadInput } from "./thread-input";
@@ -13,7 +13,7 @@ import { TurnFailureNotice } from "./turn-failure-notice";
 const globalsCss = readFileSync(resolve(process.cwd(), "app/globals.css"), "utf8");
 
 /** 构造最小 ClientItem 供消息 Item 组件渲染。 */
-function makeItem(type: "user_message" | "agent_message", text: string): ClientItem {
+function makeItem(type: "user_message" | "assistant_message", text: string): ClientItem {
   return {
     id: `item-${type}`,
     turn_id: "turn-1",
@@ -156,7 +156,7 @@ describe("用户/助手消息共享 message-track 宽度体系", () => {
   it("用户消息行与助手消息行都使用共享 .message-row 结构，各占同一轨道全宽", () => {
     const user = render(<UserMessageItem item={makeItem("user_message", "你好")} />).container;
     const agent = render(
-      <AgentMessageItem item={makeItem("agent_message", "回复正文")} />,
+      <AssistantMessageItem item={makeItem("assistant_message", "回复正文")} />,
     ).container;
 
     // 共享行结构：两种消息都在 .message-row 内
@@ -167,7 +167,7 @@ describe("用户/助手消息共享 message-track 宽度体系", () => {
   it("用户/助手各自保留语义 class（conversation-user-bubble / conversation-copy）", () => {
     const user = render(<UserMessageItem item={makeItem("user_message", "你好")} />).container;
     const agent = render(
-      <AgentMessageItem item={makeItem("agent_message", "回复正文")} />,
+      <AssistantMessageItem item={makeItem("assistant_message", "回复正文")} />,
     ).container;
 
     expect(user.querySelector(".conversation-user-bubble")).not.toBeNull();

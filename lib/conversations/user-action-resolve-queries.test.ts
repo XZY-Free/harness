@@ -111,7 +111,7 @@ async function seedWaitingInputRequest(): Promise<{
     itemSequence: 1,
     itemType: "user_action",
     itemState: "pending",
-    authorType: "agent",
+    authorType: "assistant",
     contentJson: { request_id: requestId, request_type: "input", prompt: "请提供请假事由" },
     contentHash: "initial",
   });

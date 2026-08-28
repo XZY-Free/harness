@@ -440,7 +440,7 @@ describe("RuntimeEventIngress 核心入库", () => {
     expect(ingress?.mappedThreadEventId).toBe(mapped?.threadEventId);
   });
 
-  it("response.completed：内容 Authority——agent_message + outputItemId，不改执行终态", async () => {
+  it("response.completed：内容 Authority——assistant_message + outputItemId，不改执行终态", async () => {
     const { invocationId, threadId, turnId } = await seedRunningInvocation(ctx);
 
     const result = await ingressEventBatch({
@@ -532,14 +532,14 @@ describe("RuntimeEventIngress 核心入库", () => {
     expect(respIngress?.ingressState).toBe("mapped");
     expect(execIngress?.ingressState).toBe("mapped");
 
-    // Invocation completed，outputItemId = agent_message Item。
+    // Invocation completed，outputItemId = assistant_message Item。
     const invocation = await getInvocationById(ctx.tenantId, invocationId);
     expect(invocation?.executionState).toBe("completed");
     const agentMessageItemId = respIngress?.mappedItemId;
     expect(agentMessageItemId).toBeTruthy();
     expect(invocation?.outputItemId).toBe(agentMessageItemId);
 
-    // Turn completed，finalItemId = 同一 agent_message Item。
+    // Turn completed，finalItemId = 同一 assistant_message Item。
     const [turn] = await db
       .select({ turnState: turnTable.turnState, finalItemId: turnTable.finalItemId })
       .from(turnTable)
@@ -556,8 +556,8 @@ describe("RuntimeEventIngress 核心入库", () => {
       .orderBy(asc(threadEventTable.eventSequence));
     const types = events.map((e) => e.eventType);
     expect(types.filter((t) => t === "invocation.completed")).toHaveLength(1);
-    // item.created 至少含用户消息与 agent_message 各一条；item.completed 唯一
-    //（agent_message 内容终结）。
+    // item.created 至少含用户消息与 assistant_message 各一条；item.completed 唯一
+    //（assistant_message 内容终结）。
     expect(types.filter((t) => t === "item.created").length).toBeGreaterThanOrEqual(1);
     expect(types.filter((t) => t === "item.completed")).toHaveLength(1);
     expect(types).not.toContain("invocation.lost");

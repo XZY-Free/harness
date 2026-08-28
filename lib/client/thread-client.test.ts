@@ -68,7 +68,7 @@ function makeSseHarness() {
 function digestEvent(overrides: Partial<ClientEvent> = {}): ClientEvent {
   return event({
     event_type: "item.created",
-    payload: { item_type: "agent_message", content_hash: "sha256:example" },
+    payload: { item_type: "assistant_message", content_hash: "sha256:example" },
     ...overrides,
   });
 }
@@ -216,7 +216,7 @@ describe("createThreadClient 摘要 Item resnapshot（防重放循环）", () =>
       sequence: 1,
       item_id: "item-1",
       turn_id: "turn-1",
-      item_type: "agent_message",
+      item_type: "assistant_message",
       content_hash: "sha256:example",
     });
     // 服务端此时已有该 item，cursor 前进到 1（新 SSE 将从 cursor=1 补发）。
@@ -232,7 +232,7 @@ describe("createThreadClient 摘要 Item resnapshot（防重放循环）", () =>
       sequence: 1,
       item_id: "item-1",
       turn_id: "turn-1",
-      item_type: "agent_message",
+      item_type: "assistant_message",
       content_hash: "sha256:example",
     });
 
@@ -249,7 +249,7 @@ describe("requiresSnapshotRefresh", () => {
   it("Item 事件只有摘要时要求重新读取完整快照", () => {
     expect(
       requiresSnapshotRefresh(
-        event({ payload: { item_type: "agent_message", content_hash: "sha256:example" } }),
+        event({ payload: { item_type: "assistant_message", content_hash: "sha256:example" } }),
       ),
     ).toBe(true);
   });
@@ -263,7 +263,7 @@ describe("requiresSnapshotRefresh", () => {
               id: "item-1",
               turn_id: "turn-1",
               item_sequence: 1,
-              item_type: "agent_message",
+              item_type: "assistant_message",
               item_state: "completed",
               content: { text: "已完成" },
               created_at: "2026-07-30T00:00:00.000Z",

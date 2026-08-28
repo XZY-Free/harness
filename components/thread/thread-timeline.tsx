@@ -10,7 +10,7 @@
  * W3-3 信息架构（视觉基准：03 原型）：
  * - 过程层：同一 Turn 内连续的 tool_call 聚合进 ProcessFold（"已处理"折叠条），
  *   运行中默认展开实时呈现、完成后自动收纳；
- * - 结论层：agent_message 全宽正文；
+ * - 结论层：assistant_message 全宽正文；
  * - 行动项层：user_action / artifact 重卡片，独立渲染不进折叠；
  * - 用户消息：右对齐浅灰气泡。
  *
@@ -25,7 +25,7 @@ import type { ClientItem, ClientStreamStatus, ClientTurn } from "@/lib/client/ty
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { AgentMessageItem } from "./items/agent-message-item";
+import { AssistantMessageItem } from "./items/assistant-message-item";
 import { ArtifactItem } from "./items/artifact-item";
 import { ChildThreadItem } from "./items/child-thread-item";
 import { JobResultItem } from "./items/job-result-item";
@@ -60,7 +60,7 @@ interface ThreadTimelineProps {
 /**
  * 渲染段：过程段（同 Turn 连续 tool_call 聚合）或普通 Item 段。
  * 聚合规则（方案 §4.1）：仅 tool_call 进过程段；跨 Turn 不合并；
- * 被 agent_message / 行动项打断后开新段。
+ * 被 assistant_message / 行动项打断后开新段。
  */
 type TimelineSegment =
   | { readonly kind: "item"; readonly item: ClientItem }
@@ -85,7 +85,7 @@ function buildSegments(items: readonly ClientItem[]): TimelineSegment[] {
 
 function hasTextContent(item: ClientItem): boolean {
   if (item.item_type !== "user_message" && item.item_type !== "user_guidance") {
-    if (item.item_type !== "agent_message") return true;
+    if (item.item_type !== "assistant_message") return true;
   }
   if (!item.content || typeof item.content !== "object") return false;
   const content = item.content as Record<string, unknown>;
@@ -100,8 +100,8 @@ function renderItem(item: ClientItem, threadId: string): React.ReactNode {
       case "user_message":
       case "user_guidance":
         return <UserMessageItem item={item} />;
-      case "agent_message":
-        return <AgentMessageItem item={item} />;
+      case "assistant_message":
+        return <AssistantMessageItem item={item} />;
       case "tool_call":
         return <ToolCallItem item={item} />;
       case "artifact":

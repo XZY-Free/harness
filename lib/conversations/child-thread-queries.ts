@@ -128,7 +128,7 @@ export interface ChildThreadItemContent {
   resultRef?: string | null;
   /** 终态结果 hash（sha256: 前缀）。 */
   resultHash?: string | null;
-  /** 结构化摘要（来自子 Thread 最终 agent_message Item）。 */
+  /** 结构化摘要（来自子 Thread 最终 assistant_message Item）。 */
   summary?: string | null;
   /** 子 Thread 关联 Artifact id 列表。 */
   artifactIds?: string[];
@@ -154,7 +154,7 @@ export interface ProjectChildThreadResultParams {
   correlationId?: string;
   /**
    * 显式传入的子 Thread 最终 Item（可选）。
-   * 不传时由本函数自动查询子 Thread 最后一个 completed 状态的 agent_message / job_result Item。
+   * 不传时由本函数自动查询子 Thread 最后一个 completed 状态的 assistant_message / job_result Item。
    */
   finalItem?: ThreadItem | null;
   /** 显式传入的结构化摘要（可选；不传时从 finalItem.contentJson 提取 text 字段）。 */
@@ -555,7 +555,7 @@ export async function requestChildThreadCancellation(params: {
  * - 12 文档 行 294：取消协议；relation_state 由 active/cancel_requested → completed。
  *
  * 流程：
- * 1. 事务外预查询子 Thread 最终 agent_message / job_result Item（若 finalItem 未传）
+ * 1. 事务外预查询子 Thread 最终 assistant_message / job_result Item（若 finalItem 未传）
  * 2. 事务内 SELECT FOR UPDATE 父 Thread（锁定事件流）
  * 3. SELECT FOR UPDATE relation（锁定行）
  * 4. 校验 relation 存在 + 跨租户隔离 + relation_state ∈ {active, cancel_requested}
@@ -656,7 +656,7 @@ export async function projectChildThreadResult(
     if (!finalItem) {
       throw new ChildThreadResultProjectionError(
         params.relationId,
-        "子 Thread 无 completed 状态的 agent_message / job_result Item 可投影",
+        "子 Thread 无 completed 状态的 assistant_message / job_result Item 可投影",
       );
     }
     const finalContentJson = (finalItem.contentJson ?? {}) as Record<string, unknown>;
@@ -812,7 +812,7 @@ export async function projectChildThreadResult(
 }
 
 /**
- * 查询子 Thread 最后一个 completed 状态的 agent_message / job_result Item。
+ * 查询子 Thread 最后一个 completed 状态的 assistant_message / job_result Item。
  * 不存在返回 null。
  */
 async function findLatestCompletedChildItem(childThreadId: string): Promise<ThreadItem | null> {
@@ -824,9 +824,9 @@ async function findLatestCompletedChildItem(childThreadId: string): Promise<Thre
     )
     .orderBy(desc(threadItemTable.itemSequence))
     .limit(1);
-  // 仅接受 agent_message / job_result 类型（其它类型如 user_message 不算最终结果）
+  // 仅接受 assistant_message / job_result 类型（其它类型如 user_message 不算最终结果）
   if (!row) return null;
-  if (row.itemType !== "agent_message" && row.itemType !== "job_result") return null;
+  if (row.itemType !== "assistant_message" && row.itemType !== "job_result") return null;
   return row;
 }
 

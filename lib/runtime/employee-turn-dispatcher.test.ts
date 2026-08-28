@@ -284,7 +284,7 @@ describe("dispatchEmployeeTurn", () => {
     expect(deltas).toEqual(["真实执行器", "回复：请确认已经接通"]);
     expect(updatedTurn?.turnState).toBe("completed");
     expect(binding?.modelId).toBe("test-model");
-    expect(items.find((item) => item.itemType === "agent_message")?.contentJson).toMatchObject({
+    expect(items.find((item) => item.itemType === "assistant_message")?.contentJson).toMatchObject({
       text: "真实执行器回复：请确认已经接通",
       model_ref: "test-model",
     });

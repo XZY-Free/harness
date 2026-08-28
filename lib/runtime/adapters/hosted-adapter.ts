@@ -439,7 +439,7 @@ export class HostedHarnessLoop {
       // 4. response.completed（seq=1）
       await this.sendEvent(ingressClient, "response.completed", {
         text: responseText,
-        item_type: "agent_message",
+        item_type: "assistant_message",
         model_ref: this.params.modelRef ?? "unknown",
         finish_reason: "stop",
       });

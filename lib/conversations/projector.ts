@@ -592,10 +592,10 @@ async function projectToTurnTimeline(
         updates.triggerItemCreatedAt = event.occurredAt;
       }
 
-      // 最终 Item（agent_message 或 job_result）
+      // 最终 Item（assistant_message 或 job_result）
       if (
         (event.eventType === "item.completed" || event.eventType === "item.created") &&
-        (itemType === "agent_message" || itemType === "job_result")
+        (itemType === "assistant_message" || itemType === "job_result")
       ) {
         updates.finalItemId = itemId ?? null;
         updates.finalItemType = itemType;

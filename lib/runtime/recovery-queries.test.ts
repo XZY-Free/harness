@@ -746,7 +746,7 @@ describe("S09-C06 getLatestProducerSequence", () => {
         invocationId: seeded.invocationId,
         producerEventId: `evt-${i}`,
         producerSequence: i,
-        candidateType: "agent_message_chunk",
+        candidateType: "assistant_message_chunk",
         payloadHash: `sha256:hash-${i}`,
         payloadJson: { content: `chunk-${i}` },
         receivedAt: new Date(),

@@ -73,7 +73,7 @@ function isItemEqual(a: ClientItem, b: ClientItem): boolean {
  *
  * 合并策略：
  * - 保留现有 transient items（id 以 `stream-` 开头），它们不在服务端 snapshot 中。
- * 但如果 snapshot 中已有同 turn_id 的 agent_message（AI 回复已完成），
+ * 但如果 snapshot 中已有同 turn_id 的 assistant_message（AI 回复已完成），
  * 移除对应的 transient item，避免重复显示。
  * - 对 snapshot 中的 item，如果与现有 item 投影等价，保留旧引用。
  * - 新增或变化的 item 用新引用。
@@ -88,17 +88,17 @@ function mergeSnapshotItems(
     prevById[item.id] = item;
   }
 
-  // 收集 snapshot 中已完成的 agent_message 的 turn_id，
+  // 收集 snapshot 中已完成的 assistant_message 的 turn_id，
   // 用于移除对应的 transient item（stream-{turn_id}）
   const completedTurnIds = new Set<string>();
   for (const snapItem of snapshotItems) {
-    if (snapItem.item_type === "agent_message" && snapItem.item_state !== "pending") {
+    if (snapItem.item_type === "assistant_message" && snapItem.item_state !== "pending") {
       completedTurnIds.add(snapItem.turn_id);
     }
   }
 
-  // 保留 transient items（stream-xxx），它们是前端 stream.delta 投影的 pending agent_message。
-  // 如果 snapshot 中已有同 turn_id 的完成 agent_message，移除 transient item 避免重复。
+  // 保留 transient items（stream-xxx），它们是前端 stream.delta 投影的 pending assistant_message。
+  // 如果 snapshot 中已有同 turn_id 的完成 assistant_message，移除 transient item 避免重复。
   const transientItems = prevItems.filter(
     (item) => item.id.startsWith("stream-") && !completedTurnIds.has(item.turn_id),
   );
@@ -243,7 +243,7 @@ function applyEventToItems(
       const item = extractItemFromPayload(event.payload);
       if (!item) return null;
       const withoutTransient =
-        item.item_type === "agent_message"
+        item.item_type === "assistant_message"
           ? state.items.filter((candidate) => candidate.id !== `stream-${item.turn_id}`)
           : state.items;
       return insertItemSorted(withoutTransient, item);
@@ -378,7 +378,7 @@ export function threadProjectionReducer(
       const hasCompletedReply = state.items.some(
         (item) =>
           item.turn_id === event.turn_id &&
-          item.item_type === "agent_message" &&
+          item.item_type === "assistant_message" &&
           item.item_state !== "pending",
       );
       if (hasCompletedReply) return state;
@@ -406,7 +406,7 @@ export function threadProjectionReducer(
         item_sequence:
           existing?.item_sequence ??
           state.items.reduce((max, candidate) => Math.max(max, candidate.item_sequence), 0) + 1,
-        item_type: "agent_message",
+        item_type: "assistant_message",
         item_state: "pending",
         content: {
           text: `${existingText}${event.delta}`,

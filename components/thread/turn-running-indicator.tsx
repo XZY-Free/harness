@@ -7,7 +7,7 @@
  * 冻结语义：
  * - 状态只来自正式 Turn 投影（turn_state：accepted/queued → 正在准备...；
  *   running/regenerating → 正在处理...）。waiting_user/completed/failed 等
- *   终态或等待态一律不渲染，交由既有 agent_message / 错误 UI / UserAction UI。
+ *   终态或等待态一律不渲染，交由既有 assistant_message / 错误 UI / UserAction UI。
  * - progress.snapshot 是 Provider 的公开进度事实：仅当其携带非空公开 message
  *   时展示该文本；缺失时保持通用文案。禁止推断黑盒 Agent 内部阶段
  *   （如"正在查询政策库"）。

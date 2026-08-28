@@ -479,7 +479,7 @@ interface CandidateMappingResult {
  *
  * 映射规则（+ Invocation 生命周期）：
  * - progress.snapshot：创建 user_guidance Item（completed）+ item.created ThreadEvent。
- * - response.completed：创建 agent_message Item（completed）+ item.created + item.completed ThreadEvent
+ * - response.completed：创建 assistant_message Item（completed）+ item.created + item.completed ThreadEvent
  * + 更新 Invocation.outputItemId + invocation.completed ThreadEvent + Invocation → completed + Turn → completed。
  * - user_action.requested：创建 user_action Item（pending）+ item.created + user_action.requested ThreadEvent
  * + Invocation → waiting_user + Turn → waiting_user。
@@ -604,7 +604,7 @@ async function mapProgressSnapshot(
     itemSequence: itemSeq,
     itemType: "user_guidance",
     itemState: "completed",
-    authorType: "agent",
+    authorType: "assistant",
     authorId: null,
     content: {
       kind: "progress.snapshot",
@@ -638,7 +638,7 @@ async function mapProgressSnapshot(
 /**
  * response.completed：最终响应内容 Authority（冻结语义）。
  *
- * 职责（且仅限）：创建 agent_message Item + item.created + item.completed +
+ * 职责（且仅限）：创建 assistant_message Item + item.created + item.completed +
  * 经正式 helper 设置 Invocation.outputItemId。
  *
  * 明确不做（执行终态归 execution.completed 唯一 Authority）：
@@ -662,15 +662,15 @@ async function mapResponseCompleted(
     throw new IngressInvocationNotFoundError(ctx.invocation.id);
   }
 
-  // 1. 创建 agent_message Item（completed）
+  // 1. 创建 assistant_message Item（completed）
   const itemSeq = await allocateItemSequence(tx, ctx.threadId);
   const item = await createThreadItem(tx, {
     threadId: ctx.threadId,
     turnId: ctx.turnId,
     itemSequence: itemSeq,
-    itemType: "agent_message",
+    itemType: "assistant_message",
     itemState: "completed",
-    authorType: "agent",
+    authorType: "assistant",
     authorId: null,
     content: {
       kind: "response.completed",
@@ -693,7 +693,7 @@ async function mapResponseCompleted(
     invocationId: ctx.invocation.id,
     actorType: ctx.actorType,
     payload: {
-      item_type: "agent_message",
+      item_type: "assistant_message",
       content_hash: item.contentHash,
       source: "response.completed",
     },
@@ -708,7 +708,7 @@ async function mapResponseCompleted(
     invocationId: ctx.invocation.id,
     actorType: ctx.actorType,
     payload: {
-      item_type: "agent_message",
+      item_type: "assistant_message",
       content_hash: item.contentHash,
     },
     correlationId: ctx.correlationId ?? undefined,
@@ -776,7 +776,7 @@ async function mapUserActionRequested(
     itemSequence: itemSeq,
     itemType: "user_action",
     itemState: "pending",
-    authorType: "agent",
+    authorType: "assistant",
     authorId: null,
     content: {
       kind: "user_action.requested",

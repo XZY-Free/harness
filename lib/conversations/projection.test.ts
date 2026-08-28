@@ -471,7 +471,7 @@ describe("sequence 空洞检测", () => {
 
     // 插入 sequence=3 的 event（跳过 sequence=2）
     const gapEventId = await insertRawEvent(threadId, 3, "item.created", {
-      item_type: "agent_message",
+      item_type: "assistant_message",
       content_hash: "sha256:fake",
     });
 

@@ -402,7 +402,7 @@ export class ChildThreadAlreadyTerminalError extends Error {
  * 触发场景：
  * - relation 不存在或跨租户不可见
  * - relation 状态非终态（active/cancel_requested 才允许投影；creating 拒绝）
- * - 子 Thread 无可读取的最终 Item（agent_message / job_result）
+ * - 子 Thread 无可读取的最终 Item（assistant_message / job_result）
  * - relation.itemId 为空（delegateChildThread 未回填 ChildThread Item）
  * - relation 已 completed（幂等重放除外）
  * 映射 409 CHILD_THREAD_RESULT_PROJECTION_FAILED。

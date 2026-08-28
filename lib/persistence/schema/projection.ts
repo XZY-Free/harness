@@ -274,7 +274,7 @@ export const turnTimelineProjectionTable = mysqlTable(
     triggerItemType: varchar("triggerItemType", { length: 32 }),
     triggerItemSummary: text("triggerItemSummary"),
     triggerItemCreatedAt: datetime("triggerItemCreatedAt", { mode: "date", fsp: 3 }),
-    /** 最终 Item（agent_message 或 job_result）。 */
+    /** 最终 Item（assistant_message 或 job_result）。 */
     finalItemId: varchar("finalItemId", { length: 36 }),
     finalItemType: varchar("finalItemType", { length: 32 }),
     finalItemSummary: text("finalItemSummary"),

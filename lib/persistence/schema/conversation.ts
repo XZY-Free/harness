@@ -113,7 +113,9 @@ export const TURN_TERMINAL_STATES: readonly TurnState[] = [
  * ThreadItem 类型。
  * - user_message：员工用户消息。
  * - user_guidance：员工引导（steer），pending 状态不进入模型上下文。
- * - agent_message：Agent 回答。
+ * - assistant_message：Harness 最终回答（专题01 冻结架构：顶层 Thread 回答统一由
+ *   Harness 生成 assistant_message；外部 Agent 原始消息经 AgentCall result 持久化，
+ *   不直接落成顶层 Thread assistant item）。
  * - tool_call：Tool 调用。
  * - artifact：Artifact 引用。
  * - job_result：Job 结果。
@@ -123,7 +125,7 @@ export const TURN_TERMINAL_STATES: readonly TurnState[] = [
 export const THREAD_ITEM_TYPES = [
   "user_message",
   "user_guidance",
-  "agent_message",
+  "assistant_message",
   "tool_call",
   "artifact",
   "job_result",
@@ -153,7 +155,7 @@ export type ThreadItemState = (typeof THREAD_ITEM_STATES)[number];
 
 // ─── ThreadItem Author Type ─────────────────────────────────
 
-export const THREAD_ITEM_AUTHOR_TYPES = ["user", "agent", "system", "tool"] as const;
+export const THREAD_ITEM_AUTHOR_TYPES = ["user", "assistant", "system", "tool"] as const;
 export type ThreadItemAuthorType = (typeof THREAD_ITEM_AUTHOR_TYPES)[number];
 
 // ─── ThreadItem Context Policy ──────────────────────────────

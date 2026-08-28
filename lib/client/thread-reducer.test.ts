@@ -340,7 +340,7 @@ describe("threadProjectionReducer", () => {
       expect(second.items).toHaveLength(2);
       expect(second.items[1]).toMatchObject({
         id: "stream-turn-1",
-        item_type: "agent_message",
+        item_type: "assistant_message",
         item_state: "pending",
         content: { text: "你好" },
       });
@@ -365,7 +365,7 @@ describe("threadProjectionReducer", () => {
           makeItem({
             id: "agent-1",
             turn_id: "turn-1",
-            item_type: "agent_message",
+            item_type: "assistant_message",
             content: { text: "正式回复" },
           }),
         ],

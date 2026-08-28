@@ -58,7 +58,7 @@ export interface ClientNewThreadSubmission {
 export type ClientItemType =
   | "user_message"
   | "user_guidance"
-  | "agent_message"
+  | "assistant_message"
   | "tool_call"
   | "artifact"
   | "job_result"

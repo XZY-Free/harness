@@ -384,7 +384,7 @@ describe("requestChildThreadCancellation 取消请求", () => {
 // ─── S09-C02: projectChildThreadResult ────────────────────
 
 /**
- * 在子 Thread 上创建 completed agent_message Item，模拟子 Thread 终态结果。
+ * 在子 Thread 上创建 completed assistant_message Item，模拟子 Thread 终态结果。
  * 同时为子 Thread 创建一条 completed Invocation 以满足 projectChildThreadResult 前置条件。
  */
 async function seedChildThreadCompletedResult(
@@ -422,10 +422,10 @@ async function seedChildThreadCompletedResult(
     completedInvocation = await updateInvocationState(tx, tenantId, invocation.id, "completed");
   });
 
-  // 3. 创建 agent_message Item（itemState=completed）
+  // 3. 创建 assistant_message Item（itemState=completed）
   const itemId = randomUUID();
 
-  // 直接 INSERT 一个 completed agent_message Item
+  // 直接 INSERT 一个 completed assistant_message Item
   const [threadRow] = await db
     .select()
     .from(threadTable)
@@ -447,9 +447,9 @@ async function seedChildThreadCompletedResult(
     threadId: childThreadId,
     turnId: turn.id,
     itemSequence,
-    itemType: "agent_message",
+    itemType: "assistant_message",
     itemState: "completed",
-    authorType: "agent",
+    authorType: "assistant",
     authorId: agentId,
     contentJson,
     contentHash,
@@ -493,7 +493,7 @@ describe("projectChildThreadResult 结果投影", () => {
     relationId = seed.relationId;
     childThreadId = seed.childThreadId;
 
-    // 在子 Thread 上创建 completed agent_message Item
+    // 在子 Thread 上创建 completed assistant_message Item
     const seeded = await seedChildThreadCompletedResult(
       tenantId,
       childThreadId,
@@ -872,7 +872,7 @@ describe("handleChildThreadTerminal 终态协调器", () => {
   });
 
   it("completed 分派 → 调用 projectChildThreadResult", async () => {
-    // 在子 Thread 上创建 completed agent_message Item + completed Invocation
+    // 在子 Thread 上创建 completed assistant_message Item + completed Invocation
     await seedChildThreadCompletedResult(
       tenantId,
       childThreadId,

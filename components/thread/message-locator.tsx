@@ -180,7 +180,7 @@ function PreviewCard({
   for (let i = tick.index + 1; i < items.length; i++) {
     const item = items[i];
     if (!item) continue;
-    if (item.item_type === "agent_message") {
+    if (item.item_type === "assistant_message") {
       agentText = extractItemText(item);
       break;
     }

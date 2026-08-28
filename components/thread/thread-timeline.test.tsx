@@ -12,7 +12,7 @@ function agentItem(text: string): ClientItem {
     id: "agent-1",
     turn_id: "turn-1",
     item_sequence: 1,
-    item_type: "agent_message",
+    item_type: "assistant_message",
     item_state: "pending",
     content: { text },
     created_at: "2026-08-14T00:00:00.000Z",

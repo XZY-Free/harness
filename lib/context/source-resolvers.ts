@@ -116,7 +116,7 @@ export interface SourceResolver {
 /**
  * 最近 Thread Item 解析器（最近必要对话）。
  *
- * 查询当前 Thread 的最近 Item，转换为 user/agent_message/tool_call/tool_result Fragment。
+ * 查询当前 Thread 的最近 Item，转换为 user/assistant_message/tool_call/tool_result Fragment。
  * - threadId 缺失 → empty。
  * - 无 Item → empty。
  * - 查询成功 → ok + fragments。
@@ -263,7 +263,7 @@ function itemTypeToFragmentKind(itemType: string): ContextFragment["kind"] {
     case "user_message":
     case "user_guidance":
       return "user";
-    case "agent_message":
+    case "assistant_message":
       return "user";
     case "tool_call":
     case "tool_result":
