@@ -13,8 +13,6 @@
  */
 import { GET as capabilitiesGET } from "@/app/runtime/v1/capabilities/route";
 import { POST as invocationsPOST } from "@/app/runtime/v1/invocations/route";
-import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -37,7 +35,6 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
-import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
   MAX_TRAFFIC_WEIGHT,
@@ -71,7 +68,6 @@ import {
   updateLastUsedAt,
 } from "@/lib/runtime/session-binding-queries";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
-import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 beforeEach(async () => {
@@ -216,44 +212,6 @@ async function createVerifiedAttestation(
   );
 }
 
-// ─── 辅助：seed Agent + published AgentRevision + attestation ─
-
-async function seedPublishedAgentRevision(
-  tenantId: string,
-  ownerId: string,
-  agentKey: string,
-  requiredCaps: string[],
-  contentSuffix: string,
-  modelPolicy?: Record<string, unknown>,
-) {
-  const agent = await createAgent({
-    tenantId,
-    agentKey,
-    displayName: `Agent ${agentKey}`,
-    ownerUserId: ownerId,
-    lifecycleState: "enabled",
-  });
-
-  const revision = await createDraftRevisionWithContractSnapshot({
-    tenantId,
-    agentId: agent.id,
-    modelPolicyJson: modelPolicy ?? { default: "doubao-pro", provider: "doubao" },
-    permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
-    delegationPolicyJson: { allowed_agent_ids: [] },
-    agentInterfaceRequirementsJson: { required: requiredCaps, optional: [] },
-    createdBy: ownerId,
-  });
-
-  await publishTrustedAgentRevisionForTest({
-    tenantId,
-    revisionId: revision.id,
-    agentExpectedVersionNo: 1,
-    actorId: ownerId,
-  });
-
-  return { agent, revision };
-}
-
 // ─── 辅助：seed Runtime + published RuntimeRevision + attestation ─
 
 async function seedPublishedRuntimeRevision(
@@ -275,8 +233,8 @@ async function seedPublishedRuntimeRevision(
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
@@ -308,8 +266,6 @@ async function seedPublishedRuntimeRevision(
 interface FullDispatchContext {
   tenantId: string;
   ownerId: string;
-  agentId: string;
-  agentRevision: AgentRevision;
   runtimeRevision: RuntimeRevision;
   routeId: string;
   routeSetId: string;
@@ -321,14 +277,6 @@ interface FullDispatchContext {
 async function seedFullDispatchContext(): Promise<FullDispatchContext> {
   const { tenantId, ownerId } = await seedTenantAndOwner();
 
-  const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
-    tenantId,
-    ownerId,
-    "finance",
-    ["event_stream"],
-    "v1",
-  );
-
   const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
     tenantId,
     ownerId,
@@ -337,9 +285,10 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     "v1",
   );
 
+  // 顶层恒为 base harness route（agentId/agentRevisionId=null）。
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: agent.id,
+    agentId: null,
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
@@ -348,7 +297,7 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: agentRevision.id,
+    agentRevisionId: null,
     runtimeRevisionId: runtimeRevision.id,
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
@@ -372,8 +321,6 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
   return {
     tenantId,
     ownerId,
-    agentId: agent.id,
-    agentRevision,
     runtimeRevision,
     routeId: routeResult.route.id,
     routeSetId: routeSet.id,
@@ -527,12 +474,6 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
         invocation_id: "inv-test-001",
         turn_context: null,
         job_context: null,
-        agent: {
-          agent_revision_id: "ar-1",
-          model_policy: {},
-          permission_requirements: {},
-          interface_requirements: {},
-        },
         input_items: [{ type: "user_message", content: { text: "test" } }],
         context_handle: "ctx_test",
         gateway_endpoints: {
@@ -577,12 +518,6 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
           invocation_id: "inv-1",
           turn_context: null,
           job_context: null,
-          agent: {
-            agent_revision_id: "ar-1",
-            model_policy: {},
-            permission_requirements: {},
-            interface_requirements: {},
-          },
           input_items: [{ type: "user_message", content: { text: "test" } }],
           context_handle: "ctx_test",
           gateway_endpoints: {
@@ -627,12 +562,6 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
           invocation_id: "inv-1",
           turn_context: null,
           job_context: null,
-          agent: {
-            agent_revision_id: "ar-1",
-            model_policy: {},
-            permission_requirements: {},
-            interface_requirements: {},
-          },
           input_items: [{ type: "user_message", content: { text: "test" } }],
           context_handle: "ctx_test",
           gateway_endpoints: {
@@ -677,12 +606,6 @@ describe("S05-C02 startInvocation HTTP 客户端", () => {
           invocation_id: "inv-1",
           turn_context: null,
           job_context: null,
-          agent: {
-            agent_revision_id: "ar-1",
-            model_policy: {},
-            permission_requirements: {},
-            interface_requirements: {},
-          },
           input_items: [{ type: "user_message", content: { text: "test" } }],
           context_handle: "ctx_test",
           gateway_endpoints: {
@@ -736,7 +659,6 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -780,7 +702,6 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -804,7 +725,6 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -819,7 +739,6 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
     });
 
     expect(result.dispatched).toBe(true);
@@ -836,7 +755,6 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -861,7 +779,6 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
       runtimeClient: mockClient,
       runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
     });
@@ -1028,9 +945,6 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
         },
         body: JSON.stringify({
           invocation_id: "test-inv",
-          agent: {
-            agent_revision_id: "ar-1",
-          },
           input_items: [],
           context_handle: null,
           gateway_endpoints: {
@@ -1075,12 +989,6 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
       invocation_id: "inv-test-001",
       turn_context: null,
       job_context: null,
-      agent: {
-        agent_revision_id: "ar-1",
-        model_policy: {},
-        permission_requirements: {},
-        interface_requirements: {},
-      },
       input_items: [{ type: "user_message", content: { text: "test" } }],
       context_handle: "ctx_test",
       gateway_endpoints: {
@@ -1160,12 +1068,6 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
           invocation_id: "inv-actual-adapter",
           turn_context: { thread_id: "thread-1", turn_id: "turn-1" },
           job_context: null,
-          agent: {
-            agent_revision_id: "ar-1",
-            model_policy: {},
-            permission_requirements: {},
-            interface_requirements: {},
-          },
           input_items: [{ type: "user_message", content: { text: "真实当前输入" } }],
           context_handle: "ctx_actual",
           gateway_endpoints: {

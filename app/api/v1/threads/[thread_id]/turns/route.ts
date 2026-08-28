@@ -26,14 +26,10 @@ import { getThreadById } from "@/lib/conversations/thread-queries";
  * - 请求体非法 → 400 REQUEST_SCHEMA_INVALID
  * - Idempotency 冲突 → 409 IDEMPOTENCY_CONFLICT
  */
-import {
-  acceptUserMessageTurn,
-  finalizeAcceptedTurnDispatchFailure,
-} from "@/lib/conversations/turn-queries";
+import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import {
   IDEMPOTENCY_KEY_HEADER,
   REQUEST_ID_HEADER,
-  apiError,
   apiSuccess,
   getRequestId,
   resourceNotFound,
@@ -233,59 +229,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       },
     });
     if (!dispatch.dispatched) {
-      // required Agent 无 eligible route 必须失败，不 fallback 到 base route（05 §3）。
-      if (body.agent_selection) {
-        // 06 专项（P2-4）：accept 已提交、dispatch 确定性失败 → 正式终态化事务
-        //（Turn accepted → failed + turn.failed Event），并把幂等记录完成成稳定失败
-        //（同 key 重放返回同一失败，不创建第二个 Turn，不回退 pending）。
-        const reasonCode = dispatch.reason ?? "no_effective_route";
-        const finalizeResult = await finalizeAcceptedTurnDispatchFailure({
-          tenantId: principal.tenantId,
-          threadId,
-          turnId: result.turn.id,
-          reasonCode,
-          actorType: "system",
-          actorId: principal.userIdentityId,
-          correlationId: requestId,
-          idempotencyKey: `turn-dispatch-failed:${result.turn.id}`,
-        });
-        if (finalizeResult) {
-          logger.warn("[runtime] required Agent Route 不可用：接纳后 Turn 终态化失败收口", {
-            threadId,
-            turnId: result.turn.id,
-            reasonCode,
-          });
-        }
-        const failureDetails = {
-          agent_id: body.agent_selection.agent_id,
-          mode: "required" as const,
-          reason: reasonCode,
-          turn_id: result.turn.id,
-        };
-        const failureBody = {
-          error: {
-            code: "BUSINESS_CONSTRAINT_VIOLATION",
-            message: `agent_selection.required 无 eligible route（agentId=${body.agent_selection.agent_id}）`,
-            request_id: requestId,
-            retryable: false,
-            details: failureDetails,
-          },
-        };
-        await completeRecord({
-          recordId,
-          httpStatus: 422,
-          responseRedactedJson: JSON.stringify(failureBody),
-        });
-        return apiError(
-          "BUSINESS_CONSTRAINT_VIOLATION",
-          `agent_selection.required 无 eligible route（agentId=${body.agent_selection.agent_id}）`,
-          {
-            requestId,
-            details: failureDetails,
-          },
-        );
-      }
-      throw new Error(`Turn 调度未启动（turnId=${result.turn.id}）`);
+      // 顶层无有效 Runtime Route → Turn 保持 accepted（专题01 冻结架构）。
+      // 用户选择 Agent 是能力要求约束，不作为顶层 Route 判断；顶层无 Route 时
+      // 由正式控制面初始化供应 / dispatch retry 处理，POST Turn 不在此做同步失败。
+      logger.warn("[runtime] 顶层 Harness Route 未就绪，Turn 保持 accepted", {
+        threadId,
+        turnId: result.turn.id,
+        reason: dispatch.reason ?? "no_effective_route",
+      });
     }
 
     await completeRecord({

@@ -58,8 +58,6 @@ export interface RuntimeRevisionDTO {
   artifact_ref: string | null;
   config_hash: string;
   runtime_capabilities: unknown;
-  /** 结构化 AgentContractSnapshot 绑定（外部登记精确 id；hosted/legacy 为 null）。 */
-  agent_contract_snapshot_id: string | null;
   identity_mode: string;
   /** CredentialRef 引用（仅 id，无 secret）。 */
   credential_ref_id: string | null;

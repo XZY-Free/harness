@@ -54,7 +54,7 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
     "invocation_id",
     "turn_context",
     "job_context",
-    "agent",
+    "capability_requirements",
     "input_items",
     "context_handle",
     "gateway_endpoints",
@@ -66,15 +66,24 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
     "attempt",
   ]);
   if (Object.keys(b).some((key) => !allowedKeys.has(key))) return false;
-  // §23/§49：agent-runtime-protocol@2，无 @1 fallback。
+  // §23/§49：harness-runtime-protocol@1，无 @1 fallback。
   if (b.protocol_version !== "2") return false;
   if (typeof b.invocation_id !== "string" || b.invocation_id.length === 0) return false;
-  if (!b.agent || typeof b.agent !== "object") return false;
-  const agent = b.agent as Record<string, unknown>;
-  if (typeof agent.agent_revision_id !== "string" || agent.agent_revision_id.length === 0) {
+  // 专题01 冻结架构：本轮 Harness 能力要求（可选），非执行目标。仅支持 capability_type=agent + mode=required。
+  if (
+    b.capability_requirements !== undefined &&
+    (!Array.isArray(b.capability_requirements) ||
+      b.capability_requirements.some(
+        (c) =>
+          !c ||
+          typeof c !== "object" ||
+          (c as Record<string, unknown>).capability_type !== "agent" ||
+          typeof (c as Record<string, unknown>).capability_id !== "string" ||
+          (c as Record<string, unknown>).mode !== "required",
+      ))
+  ) {
     return false;
   }
-  // Agent 是源码不可见黑盒：agent 只携带 revision/policy/requirements，无 instruction_hash/artifact_ref。
   if (!Array.isArray(b.input_items) || b.input_items.length === 0) return false;
   if (typeof b.context_handle !== "string" || b.context_handle.length === 0) return false;
   if (!b.gateway_endpoints || typeof b.gateway_endpoints !== "object") return false;
@@ -138,7 +147,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!validateBody(body)) {
     return apiError(
       "REQUEST_SCHEMA_INVALID",
-      "请求体非法：缺少 invocation_id/agent/gateway_endpoints/execution_limits 或字段类型错误",
+      "请求体非法：缺少 invocation_id/gateway_endpoints/execution_limits 或字段类型错误",
       { requestId },
     );
   }
@@ -156,7 +165,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // 5. S05-C05 扩展：异步启动 HostedAgentLoop（不阻塞 dispatch 响应）
   //
-  // route handler 解析 turn_context 与 agent 信息，调用 getRouteHostedAdapter().startInvocation
+  // route handler 解析 turn_context，调用 getRouteHostedAdapter().startInvocation
   // 触发 loop.run()。loop.run() 不被 await：dispatch 立即返回 202；loop 内部通过 Event Ingress 回传候选事件。
   // 测试可通过 setRouteHostedAdapter 注入带 mock sink 的 Adapter。
   //
@@ -173,7 +182,7 @@ export async function POST(request: Request): Promise<Response> {
       invocationId: body.invocation_id,
       threadId: turnContext.thread_id,
       turnId: turnContext.turn_id,
-      agentRevisionId: body.agent?.agent_revision_id ?? null,
+      agentRevisionId: null,
       inputItems: body.input_items,
       contextHandle: body.context_handle,
       gatewayEndpoints: body.gateway_endpoints,

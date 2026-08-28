@@ -13,8 +13,6 @@
  *
  * 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -37,7 +35,6 @@ import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { type WorkloadTokenClaims, issueWorkloadToken } from "@/lib/identity/workload-token";
-import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import {
   threadEventTable,
   threadItemTable,
@@ -74,7 +71,6 @@ import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { TransientSequenceGapError, ingressTransientBatch } from "@/lib/runtime/transient-events";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
-import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { and, asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -220,43 +216,6 @@ async function createVerifiedAttestation(
   );
 }
 
-// ─── 辅助：seed Agent + published AgentRevision + attestation ─
-
-async function seedPublishedAgentRevision(
-  tenantId: string,
-  ownerId: string,
-  agentKey: string,
-  requiredCaps: string[],
-  contentSuffix: string,
-) {
-  const agent = await createAgent({
-    tenantId,
-    agentKey,
-    displayName: `Agent ${agentKey}`,
-    ownerUserId: ownerId,
-    lifecycleState: "enabled",
-  });
-
-  const revision = await createDraftRevisionWithContractSnapshot({
-    tenantId,
-    agentId: agent.id,
-    modelPolicyJson: { default: "doubao-pro", provider: "doubao" },
-    permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
-    delegationPolicyJson: { allowed_agent_ids: [] },
-    agentInterfaceRequirementsJson: { required: requiredCaps, optional: [] },
-    createdBy: ownerId,
-  });
-
-  await publishTrustedAgentRevisionForTest({
-    tenantId,
-    revisionId: revision.id,
-    agentExpectedVersionNo: 1,
-    actorId: ownerId,
-  });
-
-  return { agent, revision };
-}
-
 // ─── 辅助：seed Runtime + published RuntimeRevision + attestation ─
 
 async function seedPublishedRuntimeRevision(
@@ -278,8 +237,8 @@ async function seedPublishedRuntimeRevision(
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
@@ -311,11 +270,7 @@ async function seedPublishedRuntimeRevision(
 interface FullIngressContext {
   tenantId: string;
   ownerId: string;
-  agentId: string;
-  agentRevision: AgentRevision;
   runtimeRevision: RuntimeRevision;
-  routeId: string;
-  routeSetId: string;
   threadId: string;
   turnId: string;
   triggerItemId: string | null;
@@ -323,14 +278,6 @@ interface FullIngressContext {
 
 async function seedFullIngressContext(): Promise<FullIngressContext> {
   const { tenantId, ownerId } = await seedTenantAndOwner();
-
-  const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
-    tenantId,
-    ownerId,
-    "ingress-agent",
-    ["event_stream"],
-    "v1",
-  );
 
   const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
     tenantId,
@@ -340,18 +287,19 @@ async function seedFullIngressContext(): Promise<FullIngressContext> {
     "v1",
   );
 
+  // 顶层恒为 base harness route（agentId/agentRevisionId=null）。
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: agent.id,
+    agentId: null,
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
 
-  const routeResult = await activateSingleRouteForTest({
+  await activateSingleRouteForTest({
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: agentRevision.id,
+    agentRevisionId: null,
     runtimeRevisionId: runtimeRevision.id,
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
@@ -375,11 +323,7 @@ async function seedFullIngressContext(): Promise<FullIngressContext> {
   return {
     tenantId,
     ownerId,
-    agentId: agent.id,
-    agentRevision,
     runtimeRevision,
-    routeId: routeResult.route.id,
-    routeSetId: routeSet.id,
     threadId: thread.id,
     turnId: turn.id,
     triggerItemId: turn.triggerItemId ?? null,
@@ -396,11 +340,10 @@ interface DispatchedInvocation {
 }
 
 async function seedRunningInvocation(ctx: FullIngressContext): Promise<DispatchedInvocation> {
-  // 调度（不传 runtimeClient，Invocation 保持 queued）
+  // 调度（不传 runtimeClient，Invocation 保持 queued）；顶层 base harness route。
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
-    agentConstraint: ctx.agentId,
   });
 
   const invocation = result.invocation;

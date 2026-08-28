@@ -69,7 +69,6 @@ function requestBody(
     invocation_id: "inv-1",
     turn_context: { thread_id: "thread-1", turn_id: "turn-1", trigger_item_id: null },
     job_context: null,
-    agent: null,
     input_items: [
       { type: "platform_rule", content: "rule" },
       { type: "user_message", item_id: "item-1", content: { text: "帮我提交申请" } },

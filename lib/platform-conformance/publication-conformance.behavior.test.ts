@@ -213,7 +213,7 @@ describe("Runtime Publication Conformance 职责拆分", () => {
       runtimeRevisionId: "revision-verifier",
       runtimeTargetDigest: `sha256:${"a".repeat(64)}`,
       runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolContractRevision: "harness-runtime-protocol@1",
       suiteRevision: contract.PUBLICATION_CONFORMANCE_SUITE_REVISION,
       runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
       runnerIdentity: "behavior/runner",
@@ -227,7 +227,7 @@ describe("Runtime Publication Conformance 职责拆分", () => {
         runtimeRevisionId: "revision-verifier",
         runtimeTargetDigest: `sha256:${"a".repeat(64)}`,
         runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-        protocolContractRevision: "agent-runtime-protocol@2",
+        protocolContractRevision: "harness-runtime-protocol@1",
         runnerArtifactDigest: `sha256:${"c".repeat(64)}`,
         cases: caseResults.map((result) => ({
           caseId: result.caseId,

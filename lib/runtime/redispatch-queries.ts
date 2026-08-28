@@ -173,7 +173,6 @@ export async function redispatchInvocation(
     attemptId: newAttempt.id,
     runtimeClient: params.runtimeClient,
     runtimeEndpointResolver: params.runtimeEndpointResolver,
-    agentRevision: params.agentRevision,
     actorType: params.actorType,
     actorId: params.actorId,
     correlationId: params.correlationId,

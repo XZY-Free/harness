@@ -29,7 +29,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** 支持的协议版本（§49：agent-runtime-protocol@2，无 @1 fallback）。 */
+/** 支持的协议版本（§49：harness-runtime-protocol@1，无 @1 fallback）。 */
 const SUPPORTED_PROTOCOL_VERSIONS: string[] = [RUNTIME_PROTOCOL_VERSION];
 
 export async function GET(request: Request): Promise<Response> {

@@ -309,7 +309,7 @@ async function seedPublishedRuntimeRevision(
   runtimeKey: string,
   capabilities: string[],
   contentSuffix: string,
-  protocolType: "a2a" | "agent_runtime_protocol" = "a2a",
+  protocolType: "harness_runtime_protocol" = "harness_runtime_protocol",
 ) {
   const runtime = await createRuntime({
     tenantId,
@@ -324,7 +324,7 @@ async function seedPublishedRuntimeRevision(
     tenantId,
     runtimeId: runtime.id,
     protocolType,
-    protocolContractRevision: protocolType === "a2a" ? "a2a@1" : "agent-runtime-protocol@2",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
@@ -367,7 +367,7 @@ interface FullCommandContext {
 }
 
 async function seedFullCommandContext(
-  protocolType: "a2a" | "agent_runtime_protocol" = "a2a",
+  protocolType: "harness_runtime_protocol" = "harness_runtime_protocol",
 ): Promise<FullCommandContext> {
   const { tenantId, ownerId } = await seedTenantAndOwner();
 
@@ -388,9 +388,10 @@ async function seedFullCommandContext(
     protocolType,
   );
 
+  // 顶层恒为 base harness route（agentId/agentRevisionId=null）。
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: agent.id,
+    agentId: null,
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
@@ -399,7 +400,7 @@ async function seedFullCommandContext(
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: agentRevision.id,
+    agentRevisionId: null,
     runtimeRevisionId: runtimeRevision.id,
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
@@ -462,11 +463,10 @@ interface RunningInvocationContext {
 async function seedRunningInvocationWithRunningTurn(
   ctx: FullCommandContext,
 ): Promise<RunningInvocationContext> {
-  // 调度（不传 runtimeClient，Invocation 保持 queued）
+  // 调度（不传 runtimeClient，Invocation 保持 queued）；顶层 base harness route。
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
-    agentConstraint: ctx.agentId,
   });
 
   const invocation = result.invocation;
@@ -1513,103 +1513,6 @@ describe("S05-C04 dispatchResumeCommand", () => {
     expect(invocation?.executionState).toBe("waiting_user");
   });
 
-  it("requires_redispatch=true 但 AgentRevision.id 与 binding.agentRevisionId 不一致：reject，且不留半完成状态", async () => {
-    const running = await seedRunningInvocationWithRunningTurn(ctx);
-    await transitionToWaitingUser(ctx, running);
-
-    const resumeCommandId = await createResumeCommand({
-      threadId: ctx.threadId,
-      turnId: ctx.turnId,
-      invocationId: running.invocationId,
-      resumePayload: { action: "confirm" },
-      idempotencyKey: "resume-key-redispatch-agent-mismatch",
-    });
-
-    // Runtime resume 返回 requires_redispatch=true；startInvocation 记录调用但预期不被调用。
-    const mockClient = createMockRuntimeClient({
-      resumeInvocation: async (req) => ({
-        invocation_id: req.invocationId,
-        resumed: false,
-        attempt_no: 1,
-        requires_redispatch: true,
-      }),
-      startInvocation: async () => {
-        throw new Error("startInvocation 不应被调用（AgentRevision 不匹配应先失败）");
-      },
-    });
-
-    // 基于真实 ctx.agentRevision 复制，仅改 id 使其与 ExecutionBinding.agentRevisionId 不一致。
-    // 这是验证已加载对象边界，不制造数据库结论。
-    const mismatchedAgentRevision = {
-      ...ctx.agentRevision,
-      id: "22222222-2222-4222-8222-222222222222",
-    };
-
-    // AgentRevision 一致性校验必须先于任何状态推进和事件写入。
-    await expect(
-      dispatchResumeCommand({
-        tenantId: ctx.tenantId,
-        commandId: resumeCommandId,
-        runtimeClient: mockClient,
-        runtimeEndpointResolver: async () => ({
-          ...buildCommandRuntimeEndpointResolution(ctx.runtimeRevision.id),
-          gatewayEndpoints: {
-            events: "https://gateway.internal/events",
-            cancel: "https://gateway.internal/cancel",
-            resume: "https://gateway.internal/resume",
-            steer: "https://gateway.internal/steer",
-            tools: "https://gateway.internal/tools",
-            tool_calls: "https://gateway.internal/tool-calls",
-            user_action_requests: "https://gateway.internal/user-action-requests",
-          },
-        }),
-        agentRevision: mismatchedAgentRevision,
-        correlationId: "resume-redispatch-agent-mismatch",
-      }),
-    ).rejects.toThrow(/不一致/);
-
-    // 失败后必须不留半完成状态：
-
-    // 1) 命令仍为 dispatched，acknowledgedAt=null（不得已 acknowledged）
-    const cmdRow = await getCommandRow(resumeCommandId);
-    expect(cmdRow?.commandState).toBe("dispatched");
-    expect(cmdRow?.acknowledgedAt).toBeNull();
-
-    // 2) Invocation 仍 waiting_user
-    const invocation = await getInvocationById(ctx.tenantId, running.invocationId);
-    expect(invocation?.executionState).toBe("waiting_user");
-
-    // 3) Turn 仍 waiting_user
-    const [turnRow] = await db
-      .select()
-      .from(turnTable)
-      .where(eq(turnTable.id, ctx.turnId))
-      .limit(1);
-    expect(turnRow?.turnState).toBe("waiting_user");
-
-    // 4) 没有新增 attemptNo=2
-    const attempts = await db
-      .select()
-      .from(invocationAttemptTable)
-      .where(eq(invocationAttemptTable.invocationId, running.invocationId));
-    const attempt2 = attempts.find((a) => a.attemptNo === 2);
-    expect(attempt2).toBeUndefined();
-
-    // 5) 没有写 turn.resumed Event
-    const resumedEvents = await db
-      .select()
-      .from(threadEventTable)
-      .where(
-        and(
-          eq(threadEventTable.threadId, ctx.threadId),
-          eq(threadEventTable.eventType, "turn.resumed"),
-        ),
-      );
-    expect(resumedEvents).toHaveLength(0);
-
-    // 6) startInvocation 0 次
-    expect(mockClient.calls.startInvocation).toHaveLength(0);
-  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -2080,11 +1983,10 @@ async function seedBaseHarnessContext(): Promise<BaseHarnessContext> {
 async function seedBaseHarnessRunningInvocation(
   ctx: BaseHarnessContext,
 ): Promise<BaseHarnessRunningContext> {
-  // 基础 Harness：agentConstraint=null，得到真实 ExecutionBinding 且 agentRevisionId=null。
+  // 基础 Harness：顶层无 Agent 约束，得到真实 ExecutionBinding 且 agentRevisionId=null。
   const result = await dispatchInvocationForTurn({
     tenantId: ctx.tenantId,
     turnId: ctx.turnId,
-    agentConstraint: null,
   });
   if (!result.dispatched) {
     throw new Error(`基础 Harness 调度失败：reason=${result.reason ?? "unknown"}`);
@@ -2218,7 +2120,8 @@ describe("S05-C04 基础 Harness Route redispatch 不依赖 Agent（§8.3）", (
     // 必须捕获真实 startInvocation request。
     expect(mockClient.calls.startInvocation).toHaveLength(1);
     const startReq = mockClient.calls.startInvocation[0];
-    expect(startReq?.requestBody.agent).toBeNull();
+    // 基础 Harness Route（无 Agent）：不携带 capability_requirements（专题01 冻结架构）。
+    expect(startReq?.requestBody.capability_requirements).toBeUndefined();
 
     // input_items 中不存在 type="agent_instruction_ref"。
     const inputItems = startReq?.requestBody.input_items ?? [];
@@ -2288,8 +2191,8 @@ describe("Batch 10 命令调度生产网关", () => {
     expect(result).toEqual({ dispatched: false, reason: "command_not_found" });
   });
 
-  it("非 a2a 协议：protocol_not_remote，命令保持 queued 由既有状态机吸收", async () => {
-    const ctx = await seedFullCommandContext("agent_runtime_protocol");
+  it("hosted 协议（harness_runtime_protocol）：protocol_not_remote，命令保持 queued 由既有状态机吸收", async () => {
+    const ctx = await seedFullCommandContext("harness_runtime_protocol");
     // 05 §3：合同声明 cancel=true，使本用例聚焦协议分流（合同 cancel=false 的
     // unsupported_capability 分支由专项 05 用例覆盖）。
     await enableContractCancelOnSnapshot(ctx);
@@ -2313,119 +2216,15 @@ describe("Batch 10 命令调度生产网关", () => {
     expect((await getCommandRow(interruptResult.command.id))?.commandState).toBe("queued");
   });
 
-  it("05 §8：Binding effective cancel=false → 不发 tasks/cancel（unsupported_capability）", async () => {
-    const provider = await startA2ATestProvider("long_running");
-    try {
-      const ctx = await seedFullCommandContext("a2a");
-      await db
-        .update(runtimeRevisionTable)
-        .set({ endpointRef: provider.endpoint })
-        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
-      // 合同 cancel=false（HR 默认快照）→ Agent Route effective cancel=false（05 §3）。
-      // 不调用 enableContractCancelOnSnapshot。
-      const running = await seedRunningInvocationWithRunningTurn(ctx);
-      await attachRemoteRefsToInvocation(ctx, running.invocationId, "ctx-gw-cancel-denied");
-
-      const interruptResult = await requestInterrupt({
-        tenantId: ctx.tenantId,
-        ownerUserId: ctx.ownerId,
-        turnId: ctx.turnId,
-        reasonCode: "user_cancel",
-        idempotencyKey: "gw-cancel-denied-1",
-      });
-      await bindInvocationIdToCommand(interruptResult.command.id, running.invocationId);
-
-      const rpcMethodsBefore = [...provider.rpcMethods];
-      const result = await dispatchInterruptCommandToRuntime({
-        tenantId: ctx.tenantId,
-        commandId: interruptResult.command.id,
-      });
-      expect(result).toEqual({ dispatched: false, reason: "unsupported_capability" });
-      // 不发任何网络请求：Provider 未观测到新的 JSON-RPC 调用（尤其 tasks/cancel）。
-      expect(provider.rpcMethods).toEqual(rpcMethodsBefore);
-      expect(provider.rpcMethods).not.toContain("tasks/cancel");
-      // 命令保持 queued（未被远端 ack）。
-      expect((await getCommandRow(interruptResult.command.id))?.commandState).toBe("queued");
-    } finally {
-      await provider.close();
-    }
-  });
-
-  it("a2a 协议 Interrupt：真实 tasks/cancel 远端调度 + acknowledged（08 §6）", async () => {
-    const provider = await startA2ATestProvider("long_running");
-    try {
-      const ctx = await seedFullCommandContext("a2a");
-      // endpoint 指向真实 Provider（黑盒 wire，不注入 fetchImpl）。
-      await db
-        .update(runtimeRevisionTable)
-        .set({ endpointRef: provider.endpoint })
-        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
-      // 05 §3：cancel=true 合同 + measured pass + a2a tasks/cancel 实现 → effective true。
-      await enableContractCancelOnSnapshot(ctx);
-      const running = await seedRunningInvocationWithRunningTurn(ctx);
-      await attachRemoteRefsToInvocation(ctx, running.invocationId, "ctx-gw-cancel-1");
-
-      const interruptResult = await requestInterrupt({
-        tenantId: ctx.tenantId,
-        ownerUserId: ctx.ownerId,
-        turnId: ctx.turnId,
-        reasonCode: "user_cancel",
-        idempotencyKey: "gw-remote-1",
-      });
-      await bindInvocationIdToCommand(interruptResult.command.id, running.invocationId);
-
-      const result = await dispatchInterruptCommandToRuntime({
-        tenantId: ctx.tenantId,
-        commandId: interruptResult.command.id,
-        actorId: ctx.ownerId,
-        correlationId: "gw-remote-correlation",
-      });
-      expect(result.dispatched).toBe(true);
-      // 真实 tasks/cancel wire ack → 命令 acknowledged（远端终态推进）。
-      expect((await getCommandRow(interruptResult.command.id))?.commandState).toBe("acknowledged");
-    } finally {
-      await provider.close();
-    }
-  });
-
-  it("a2a 协议 Resume：真实 message/send 远端调度 + acknowledged（08 §5）", async () => {
-    const provider = await startA2ATestProvider("completed");
-    try {
-      const ctx = await seedFullCommandContext("a2a");
-      await db
-        .update(runtimeRevisionTable)
-        .set({ endpointRef: provider.endpoint })
-        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
-      const running = await seedRunningInvocationWithRunningTurn(ctx);
-      await attachRemoteRefsToInvocation(ctx, running.invocationId, "ctx-gw-resume-1");
-
-      // waiting_user（Resume 的前置状态）
-      await db.transaction(async (tx) => {
-        await updateInvocationState(tx, ctx.tenantId, running.invocationId, "waiting_user");
-      });
-
-      const commandId = await createResumeCommand({
-        threadId: ctx.threadId,
-        turnId: ctx.turnId,
-        invocationId: running.invocationId,
-        resumePayload: { text: "补充信息" },
-        idempotencyKey: "gw-resume-1",
-      });
-
-      const result = await dispatchResumeCommandToRuntime({
-        tenantId: ctx.tenantId,
-        commandId,
-        actorId: ctx.ownerId,
-      });
-      expect(result.dispatched).toBe(true);
-      expect((await getCommandRow(commandId))?.commandState).toBe("acknowledged");
-    } finally {
-      await provider.close();
-    }
-  });
+  // 说明：原"05 §8 Binding effective cancel=false → unsupported_capability"用例的前提是
+  // 顶层 ExecutionBinding 携带 Agent Contract（cancel=false）以门禁 deny。
+  // 专题01 冻结架构下顶层恒为 base harness route（agentRevisionId=null，无 Agent Contract），
+  // effective cancel 只由 Runtime measured 能力 + 协议实现决定，该 Agent-Route 门禁路径
+  // 已从顶层移除（Agent Contract 门禁属于 AgentCall 层，不在顶层 Invocation Binding）。
+  // 因此该用例无顶层等价物，删除。
 
   it("跨租户隐藏：他租户调用返回 command_not_found", async () => {
-    const ctx = await seedFullCommandContext("a2a");
+    const ctx = await seedFullCommandContext();
     const running = await seedRunningInvocationWithRunningTurn(ctx);
     const interruptResult = await requestInterrupt({
       tenantId: ctx.tenantId,
@@ -2527,191 +2326,6 @@ async function createPostAuthorityResumeCommand(params: {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 生产网关 A2A Resume：authority 已推进 Invocation=running（08 §5 后续切片）
-// ═══════════════════════════════════════════════════════════
-//
-// 冻结设计：
-// - resolveGenericUserAction 是 waiting_user→running 的权威；生产 dispatch 仅接受
-//   携带 resume_source=user_action_resolution + request_id + resume_payload 对象的
-//   running Invocation resume 命令；普通未标记命令仍拒绝。
-// - resume 事件序号从 MAX(producer_sequence)+1 继续，不硬编码 1。
-// - 远端返回官方 completed Task → response.completed/execution.completed 持久化后
-//   才 acknowledged；dispatcher 不得把终态 Invocation/Turn 回退 running，也不得在
-//   终态之后补写 resumed 事件。
-
-describe("生产网关 A2A Resume（post-authority Invocation=running）", () => {
-  it("input submit 补充文本精确送达同一 task/context + 事件序号 MAX+1 + 终态不被回退", async () => {
-    const provider = await startA2ATestProvider("completed");
-    try {
-      const ctx = await seedFullCommandContext("a2a");
-      await db
-        .update(runtimeRevisionTable)
-        .set({ endpointRef: provider.endpoint })
-        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
-      const running = await seedRunningInvocationWithRunningTurn(ctx);
-      const contextRef = "ctx-gw-resume-input-1";
-      const taskId = await attachRemoteRefsToInvocation(ctx, running.invocationId, contextRef);
-
-      // 前置 ingress 事件（producer_sequence=1）：resume 事件必须从 MAX+1=2 继续。
-      await ingressEventBatch({
-        tenantId: ctx.tenantId,
-        invocationId: running.invocationId,
-        producerSequenceStart: 1,
-        events: [
-          {
-            producer_event_id: `seed:${running.invocationId}:1`,
-            producer_sequence: 1,
-            schema_version: 1,
-            type: "progress.snapshot",
-            payload: { source: "a2a", task_id: taskId, task_state: "working" },
-          },
-        ],
-      });
-
-      // authority 解析后的真实状态：Invocation=running + queued resume 命令携带
-      // 完整来源标记（真实 UAR 行 + resume_source/request_id/精确 resume_payload）。
-      const { commandId } = await createPostAuthorityResumeCommand({
-        tenantId: ctx.tenantId,
-        threadId: ctx.threadId,
-        turnId: ctx.turnId,
-        invocationId: running.invocationId,
-        responseRedactedJson: { text: "年休假，明天一天" },
-        idempotencyKey: "gw-resume-post-authority-1",
-      });
-
-      const result = await dispatchResumeCommandToRuntime({
-        tenantId: ctx.tenantId,
-        commandId,
-        actorId: ctx.ownerId,
-        correlationId: "gw-resume-post-authority",
-      });
-      expect(result.dispatched).toBe(true);
-
-      // Provider 捕获精确补充文本 + 同一 taskId/contextId + 公共 Context metadata
-      //（04 专项：Resume 重新做 Binding-frozen Enrichment；same trusted subject、
-      //  fresh current_datetime；无任何 SnowHarness 内部 ID）。
-      const resumeCaptured = provider.captured.filter((c) => c.resume);
-      expect(resumeCaptured).toHaveLength(1);
-      expect(resumeCaptured[0]?.text).toBe("年休假，明天一天");
-      expect(resumeCaptured[0]?.taskId).toBe(taskId);
-      expect(resumeCaptured[0]?.contextId).toBe(contextRef);
-      const metadata = resumeCaptured[0]?.messageMetadata as Record<string, unknown>;
-      expect(metadata?.execution_subject).toEqual({
-        subject_id: ctx.ownerId,
-        subject_kind: "platform_user",
-      });
-      expect(typeof metadata?.current_datetime).toBe("string");
-      expect(new Date(String(metadata?.current_datetime)).toString()).not.toBe("Invalid Date");
-      expect(JSON.stringify(metadata)).not.toContain("snowharness.execution_subject");
-      expect(JSON.stringify(metadata)).not.toContain("tenant");
-
-      // 命令仅在 response/completion 事件持久化后 acknowledged。
-      const cmdRow = await getCommandRow(commandId);
-      expect(cmdRow?.commandState).toBe("acknowledged");
-      expect(cmdRow?.acknowledgedAt).toBeTruthy();
-
-      // ingress 序号从 MAX+1 连续推进无 gap/collision（1 前置 + response.completed +
-      // execution.completed）。Authority 拆分后 response.completed 不再提前终态，
-      // execution.completed（执行终态唯一 Authority）同批/后续均被接受并消费序号。
-      const ingressRows = await db
-        .select({ seq: runtimeEventIngressTable.producerSequence })
-        .from(runtimeEventIngressTable)
-        .where(eq(runtimeEventIngressTable.invocationId, running.invocationId));
-      const sequences = ingressRows.map((r) => r.seq).sort((a, b) => a - b);
-      expect(sequences).toEqual([1, 2, 3]);
-
-      // 官方答复文本持久化为 agent_message Item。
-      const [replyItem] = await db
-        .select()
-        .from(threadItemTable)
-        .where(
-          and(
-            eq(threadItemTable.invocationId, running.invocationId),
-            eq(threadItemTable.itemType, "agent_message"),
-          ),
-        )
-        .limit(1);
-      expect(replyItem?.contentJson).toMatchObject({ text: "申请已提交完成" });
-
-      // Invocation/Turn 保持终态 completed（不得回退 running）。
-      const invocation = await getInvocationById(ctx.tenantId, running.invocationId);
-      expect(invocation?.executionState).toBe("completed");
-      const [turnRow] = await db
-        .select()
-        .from(turnTable)
-        .where(eq(turnTable.id, ctx.turnId))
-        .limit(1);
-      expect(turnRow?.turnState).toBe("completed");
-
-      // 终态之后不得补写 resumed 事件。
-      const resumedEvents = await db
-        .select()
-        .from(threadEventTable)
-        .where(
-          and(
-            eq(threadEventTable.threadId, ctx.threadId),
-            and(
-              eq(threadEventTable.eventType, "turn.resumed"),
-              eq(threadEventTable.threadId, ctx.threadId),
-            ),
-          ),
-        );
-      expect(resumedEvents).toHaveLength(0);
-      const invocationResumedEvents = await db
-        .select()
-        .from(threadEventTable)
-        .where(
-          and(
-            eq(threadEventTable.threadId, ctx.threadId),
-            eq(threadEventTable.eventType, "invocation.resumed"),
-          ),
-        );
-      expect(invocationResumedEvents).toHaveLength(0);
-    } finally {
-      await provider.close();
-    }
-  });
-
-  it("负例：Invocation=running 但普通未标记 resume 命令 → ResumeInvocationNotWaitingError，命令保持 queued 且无网络请求", async () => {
-    const provider = await startA2ATestProvider("completed");
-    try {
-      const ctx = await seedFullCommandContext("a2a");
-      await db
-        .update(runtimeRevisionTable)
-        .set({ endpointRef: provider.endpoint })
-        .where(eq(runtimeRevisionTable.id, ctx.runtimeRevision.id));
-      const running = await seedRunningInvocationWithRunningTurn(ctx);
-      await attachRemoteRefsToInvocation(ctx, running.invocationId, "ctx-gw-resume-neg-1");
-
-      // 普通命令（无 resume_source/request_id 来源标记）不得冒充 post-authority Resume。
-      const commandId = await createResumeCommand({
-        threadId: ctx.threadId,
-        turnId: ctx.turnId,
-        invocationId: running.invocationId,
-        resumePayload: { text: "未标记的补充" },
-        idempotencyKey: "gw-resume-neg-1",
-      });
-
-      await expect(
-        dispatchResumeCommandToRuntime({
-          tenantId: ctx.tenantId,
-          commandId,
-          actorId: ctx.ownerId,
-        }),
-      ).rejects.toThrow(ResumeInvocationNotWaitingError);
-
-      // 命令未调度（无 dispatchedAt），Provider 未收到任何 message/send。
-      const cmdRow = await getCommandRow(commandId);
-      expect(cmdRow?.commandState).toBe("queued");
-      expect(cmdRow?.dispatchedAt).toBeNull();
-      expect(provider.captured.filter((c) => c.resume)).toHaveLength(0);
-      expect(provider.rpcMethods).not.toContain("message/send");
-    } finally {
-      await provider.close();
-    }
-  });
-});
-
 // ═══════════════════════════════════════════════════════════
 // 01 专项：Durable Dispatch Retry（Command lane）
 // ═══════════════════════════════════════════════════════════

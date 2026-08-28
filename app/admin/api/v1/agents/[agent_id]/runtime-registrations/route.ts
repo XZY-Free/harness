@@ -321,10 +321,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         contract_revision: result.snapshot.protocolContractRevision,
       },
       verification_state: "verified",
-      // 精确序列化持久化的验收时间；服务层保证 verifiedAt 非空（缺失 fail loudly）。
-      verified_at: (result.revision.verifiedAt as Date).toISOString(),
       runtime_target_digest: result.revision.runtimeTargetDigest,
-      evidence_digest: result.revision.evidenceDigest,
       config_hash: result.revision.configHash,
       // 01 专项：正式签名 Conformance 证据（仅 id/结果/数量级事实，无 envelope/密钥材料）。
       conformance_run_id: result.conformanceRun.id,
@@ -345,7 +342,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         runtime_revision_id: result.revision.id,
         agent_contract_snapshot_id: result.snapshot.id,
         runtime_target_digest: result.revision.runtimeTargetDigest,
-        evidence_digest: result.revision.evidenceDigest,
         verification_state: "verified",
         conformance_run_id: result.conformanceRun.id,
         conformance_overall_result: result.conformanceRun.overallResult,

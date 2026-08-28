@@ -2,14 +2,16 @@
  * RuntimeTransport Port（04 §2）。
  *
  * Transport 是协议抽象，不是框架抽象：
- * - agent_runtime_protocol → SnowHarness Runtime Protocol（HTTP wire）；
- * - a2a → A2A 0.3.0（JSON-RPC over HTTP + SSE，04 §4）。
+ * - harness_runtime_protocol → SnowHarness Runtime Protocol（HTTP wire）。
  *
  * 不同 Transport 内部可以使用不同 wire protocol，但必须产出同一 SnowHarness
  * 归一化 Runtime Event（经 Transport Mapper → RuntimeEventIngress，04 §6）。
  *
  * 端口形状与 RuntimeHttpClient 五端点一致（probe/start/cancel/resume/steer）；
  * Transport 实现不得暴露 framework 分支或 callCapability 式旁路（04 §10）。
+ *
+ * A2A 不是 Runtime 协议：A2A 是外部 Agent 能力调用协议，属于 AgentCall Transport，
+ * 不在此 Runtime Transport 端口内（专题01 冻结架构）。
  */
 
 import type { RuntimeHttpClient } from "@/lib/runtime/runtime-client";
@@ -41,6 +43,6 @@ export class RuntimeTransportError extends Error {
 }
 
 /** Runtime 协议类型（RuntimeRevision.protocolType 权威值）。 */
-export const SUPPORTED_RUNTIME_PROTOCOL_TYPES = ["agent_runtime_protocol", "a2a"] as const;
+export const SUPPORTED_RUNTIME_PROTOCOL_TYPES = ["harness_runtime_protocol"] as const;
 
 export type SupportedRuntimeProtocolType = (typeof SUPPORTED_RUNTIME_PROTOCOL_TYPES)[number];

@@ -433,12 +433,10 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（capabilit
     const persisted = await loadRuntimeRevisions(seeded.tenantId);
     expect(persisted).toHaveLength(1);
     expect(persisted[0]?.revision).toMatchObject({
-      agentContractSnapshotId: seeded.snapshotId,
       credentialRefId: null,
       endpointRef: provider.endpoint,
       protocolType: "a2a",
       protocolContractRevision: "0.3.0",
-      verificationState: "verified",
       revisionState: "draft",
     });
     expect(persisted[0]?.revision.runtimeCapabilitiesJson).toEqual({
@@ -1255,9 +1253,8 @@ describe("POST /admin/api/v1/agents/{agent_id}/runtime-registrations（capabilit
     expect(run.runtimeTargetDigest).toBe(revision.runtimeTargetDigest);
     expect(run.runtimeConfigDigest).toBe(revision.configHash);
     expect(run.protocolContractRevision).toBe(revision.protocolContractRevision);
-    // probe 时间事实：startedAt/completedAt 覆盖 verifiedAt 语义且合法有序。
+    // probe 时间事实：startedAt/completedAt 是唯一持久化验收时间，合法有序。
     expect(run.startedAt.getTime()).toBeLessThanOrEqual(run.completedAt.getTime());
-    expect(run.completedAt.getTime()).toBe(revision.verifiedAt?.getTime() ?? -1);
 
     // 6 个 Case 全部 passed；cancel=false 以诚实不适用语义通过。
     const cases = await loadCaseResults(run.id);

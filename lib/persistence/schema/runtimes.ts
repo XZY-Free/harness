@@ -86,8 +86,8 @@ export type RuntimeRevisionState = (typeof RUNTIME_REVISION_STATES)[number];
 // ─── Protocol Type / Identity Mode / Network Zone ──────────
 // 契约未固定枚举值，使用 varchar 存储以便扩展；以下为已知常量。
 
-/** 已知协议类型。 */
-export const RUNTIME_PROTOCOL_TYPES = ["agent_runtime_protocol", "a2a"] as const;
+/** 已知协议类型 — Runtime 只表示 SnowHarness Harness Runtime。 */
+export const RUNTIME_PROTOCOL_TYPES = ["harness_runtime_protocol"] as const;
 export type RuntimeProtocolType = (typeof RUNTIME_PROTOCOL_TYPES)[number];
 
 /** 已知身份模式。 */
@@ -159,7 +159,7 @@ export const runtimeRevisionTable = mysqlTable(
       .references(() => runtimeTable.id),
     /** Runtime 内单调递增修订号。 */
     revisionNo: bigint("revisionNo", { mode: "number" }).notNull(),
-    /** 协议类型（agent_runtime_protocol/a2a/...）；varchar 以便扩展。 */
+    /** 协议类型（harness_runtime_protocol/...）；varchar 以便扩展。 */
     protocolType: varchar("protocolType", { length: 32 }).notNull(),
     /**
      * Conformance 与发布共同冻结的协议契约版本（显式传入，禁止默认值污染全部协议 —
@@ -189,19 +189,8 @@ export const runtimeRevisionTable = mysqlTable(
     networkZone: varchar("networkZone", { length: 32 }).notNull(),
     /** 配置 hash（带算法前缀，如 sha256:...）。 */
     configHash: varchar("configHash", { length: 128 }).notNull(),
-    /**
-     * 绑定的结构化 AgentContractSnapshot（主动黑盒注册验收切片）；
-     * 旧 Revision 行为 null。协议/交互事实以该快照为权威。
-     */
-    agentContractSnapshotId: varchar("agentContractSnapshotId", { length: 36 }),
     /** 绑定的同租户 CredentialRef（bearer 模式）；none 模式与旧行为 null。不存 secret。 */
     credentialRefId: varchar("credentialRefId", { length: 36 }),
-    /** 主动一致性验收状态（verified）；未走注册验收的旧行为 null。 */
-    verificationState: varchar("verificationState", { length: 32 }),
-    /** 结构化验收证据 digest（RFC8785 canonical，sha256: 前缀；非原始 transcript）。 */
-    evidenceDigest: varchar("evidenceDigest", { length: 71 }),
-    /** 验收通过时间。 */
-    verifiedAt: datetime("verifiedAt", { mode: "date", fsp: 3 }),
     revisionState: mysqlEnum("revisionState", RUNTIME_REVISION_STATES).notNull().default("draft"),
     /** 创建者 userIdentityId 或 serviceId。 */
     createdBy: varchar("createdBy", { length: 128 }).notNull(),

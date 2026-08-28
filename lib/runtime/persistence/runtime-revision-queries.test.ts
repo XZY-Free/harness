@@ -48,8 +48,8 @@ describe("RuntimeRevision 证据完整性 fail-closed（03 §3/§4/§5）", () =
       createDraftRuntimeRevision({
         tenantId: tenant.id,
         runtimeId: runtime.id,
-        protocolType: "agent_runtime_protocol",
-        protocolContractRevision: "agent-runtime-protocol@2",
+        protocolType: "harness_runtime_protocol",
+        protocolContractRevision: "harness-runtime-protocol@1",
         runtimeEvidenceKind: "hosted_artifact",
         endpointRef: "managed://runtime/evidence",
         runtimeArtifactRef: null,
@@ -68,8 +68,8 @@ describe("RuntimeRevision 证据完整性 fail-closed（03 §3/§4/§5）", () =
       createDraftRuntimeRevision({
         tenantId: tenant.id,
         runtimeId: runtime.id,
-        protocolType: "a2a",
-        protocolContractRevision: "a2a@1",
+        protocolType: "harness_runtime_protocol",
+        protocolContractRevision: "harness-runtime-protocol@1",
         runtimeEvidenceKind: "external_endpoint",
         endpointRef: "https://external.example.com/a2a",
         runtimeArtifactRef: HOSTED_REF,
@@ -88,7 +88,7 @@ describe("RuntimeRevision 证据完整性 fail-closed（03 §3/§4/§5）", () =
       createDraftRuntimeRevision({
         tenantId: tenant.id,
         runtimeId: runtime.id,
-        protocolType: "a2a",
+        protocolType: "harness_runtime_protocol",
         protocolContractRevision: "  ",
         runtimeEvidenceKind: "external_endpoint",
         endpointRef: "https://external.example.com/a2a",
@@ -107,8 +107,8 @@ describe("RuntimeRevision 证据完整性 fail-closed（03 §3/§4/§5）", () =
     const revision = await createDraftRuntimeRevision({
       tenantId: tenant.id,
       runtimeId: runtime.id,
-      protocolType: "a2a",
-      protocolContractRevision: "a2a@1",
+      protocolType: "harness_runtime_protocol",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "external_endpoint",
       endpointRef: "https://external.example.com/a2a",
       runtimeArtifactRef: null,

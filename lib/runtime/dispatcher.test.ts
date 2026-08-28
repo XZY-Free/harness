@@ -299,8 +299,8 @@ async function seedPublishedRuntimeRevision(
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${artifactDigest}`,
@@ -369,10 +369,10 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     "v1",
   );
 
-  // 创建 RouteSet + Route
+  // 创建 RouteSet + Route（顶层恒为 base harness route，agentId/agentRevisionId=null）
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: agent.id,
+    agentId: null,
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
@@ -381,7 +381,7 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: agentRevision.id,
+    agentRevisionId: null,
     runtimeRevisionId: runtimeRevision.id,
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
@@ -889,7 +889,6 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
       routeResolver,
     });
 
@@ -897,7 +896,7 @@ describe("Dispatcher 调度", () => {
     expect(commands).toEqual([
       {
         tenantId: ctx.tenantId,
-        agentConstraint: ctx.agentId,
+        agentConstraint: null,
         routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
         businessKey: { threadId: ctx.threadId },
         attributes: {},
@@ -912,7 +911,6 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
     });
 
     expect(result.dispatched).toBe(true);
@@ -927,9 +925,9 @@ describe("Dispatcher 调度", () => {
     expect(result.invocation?.invocationKind).toBe("initial");
     expect(result.invocation?.executionState).toBe("queued");
 
-    // ExecutionBinding 验证
+    // ExecutionBinding 验证（顶层 base harness route → agentRevisionId 恒 null）
     expect(result.binding?.invocationId).toBe(result.invocation?.id);
-    expect(result.binding?.agentRevisionId).toBe(ctx.agentRevision.id);
+    expect(result.binding?.agentRevisionId).toBeNull();
     expect(result.binding?.runtimeRevisionId).toBe(ctx.runtimeRevision.id);
     expect(result.binding?.deploymentRouteId).toBe(ctx.routeId);
     expect(result.binding).toMatchObject({
@@ -941,7 +939,7 @@ describe("Dispatcher 调度", () => {
       runtimeConfigDigest: ctx.runtimeRevision.configHash,
       capabilityManifestDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       runtimeAttestationIds: [ctx.runtimeAttestationId],
-      agentPublicationRecordId: ctx.agentPublicationRecordId,
+      agentPublicationRecordId: null,
       runtimePublicationRecordId: ctx.runtimePublicationRecordId,
       conformanceRunId: ctx.conformanceRunId,
     });
@@ -968,7 +966,6 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
       routeResolver: async (command) => {
         const outcome = await realResolver(command);
         if (outcome.status !== "resolved") return outcome;
@@ -988,7 +985,7 @@ describe("Dispatcher 调度", () => {
     const routeResolver = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
     const staleOutcome = await routeResolver({
       tenantId: ctx.tenantId,
-      agentConstraint: ctx.agentId,
+      agentConstraint: null,
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
       businessKey: { threadId: ctx.threadId },
     });
@@ -1030,7 +1027,7 @@ describe("Dispatcher 调度", () => {
     });
     const outcome = await createResolveRoute({ store: mysqlRouteEligibilityResolutionStore })({
       tenantId: ctx.tenantId,
-      agentConstraint: ctx.agentId,
+      agentConstraint: null,
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
       businessKey: { threadId: ctx.threadId },
     });
@@ -1064,7 +1061,7 @@ describe("Dispatcher 调度", () => {
         routeActivationId: resolution.routeActivationId,
         routeContentDigest: resolution.routeContentDigest,
         resolutionInputDigest: resolution.resolutionInputDigest,
-        // : 测试构造 Agent Route 解析，controlPlaneEvidence 恒非空。
+        // : 测试构造 base harness Route 解析，controlPlaneEvidence 恒非空。
         ...resolution.controlPlaneEvidence,
       },
     };
@@ -1090,7 +1087,6 @@ describe("Dispatcher 调度", () => {
     const result = await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
     });
     const invocationId = result.invocation?.id;
     if (!invocationId || !result.binding) throw new Error("测试 Binding 未创建");
@@ -1164,7 +1160,6 @@ describe("Dispatcher 调度", () => {
     await dispatchInvocationForTurn({
       tenantId: ctx.tenantId,
       turnId: ctx.turnId,
-      agentConstraint: ctx.agentId,
     });
 
     // 再次调度（Turn 已是 queued）
@@ -1172,7 +1167,6 @@ describe("Dispatcher 调度", () => {
       dispatchInvocationForTurn({
         tenantId: ctx.tenantId,
         turnId: ctx.turnId,
-        agentConstraint: ctx.agentId,
       }),
     ).rejects.toThrow(DispatchTurnStateError);
   });
@@ -1199,11 +1193,12 @@ describe("Dispatcher 调度", () => {
     ).rejects.toThrow(DispatchTurnStateError);
   });
 
-  it("dispatchInvocationForTurn 从 AgentRevision.modelPolicyJson 提取模型信息写入 Binding", async () => {
+  it("dispatchInvocationForTurn 顶层模型取自 Thread selectedModelRef（不再从 Agent.modelPolicyJson 提取）", async () => {
     const { tenantId, ownerId } = await seedTenantAndOwner();
 
-    // 使用自定义模型策略
-    const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
+    // Agent 的 modelPolicyJson 声明了 gpt-4o，但顶层 base harness 语义下不再使用它。
+    // 顶层模型只由 Thread 模型事实（selectedModelRef / defaultModelRef）与平台默认决定。
+    await seedPublishedAgentRevision(
       tenantId,
       ownerId,
       "custom-model-agent",
@@ -1220,9 +1215,10 @@ describe("Dispatcher 调度", () => {
       "v2",
     );
 
+    // 顶层恒为 base harness route（agentId/agentRevisionId=null）。
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      agentId: null,
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
       routeScopeJson: {},
     });
@@ -1231,7 +1227,7 @@ describe("Dispatcher 调度", () => {
       tenantId,
       routeSetId: routeSet.id,
       routeSetExpectedVersionNo: 1,
-      agentRevisionId: agentRevision.id,
+      agentRevisionId: null,
       runtimeRevisionId: runtimeRevision.id,
       trafficWeight: MAX_TRAFFIC_WEIGHT,
       actor: buildActor(tenantId, "deploy-bot-001"),
@@ -1251,16 +1247,18 @@ describe("Dispatcher 调度", () => {
       actorId: ownerId,
     });
 
+    // 员工本次为 Invocation 选择模型 → 进入 Binding，而非 agent modelPolicyJson。
     const result = await dispatchInvocationForTurn({
       tenantId,
       turnId: turn.id,
-      agentConstraint: agent.id,
+      selectedModelRef: "gpt-4o",
     });
 
     expect(result.dispatched).toBe(true);
-    expect(result.binding?.modelProvider).toBe("openai");
+    expect(result.binding?.agentRevisionId).toBeNull();
+    expect(result.binding?.modelProvider).toBe("default");
     expect(result.binding?.modelId).toBe("gpt-4o");
-    expect(result.binding?.modelRevisionRef).toBe("2024-08");
+    expect(result.binding?.modelRevisionRef).toBeNull();
     expect(result.binding?.deploymentRouteId).toBe(routeResult.route.id);
   });
 });
@@ -1270,25 +1268,56 @@ describe("Dispatcher 调度", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("路由解析与有效路由查询", () => {
+  // listEnabledRouteProjections 是 Agent 作用域的路由查询（Agent 仍是能力资产），
+  // 需要 agent 作用域 Route；与顶层 base harness seed（seedFullDispatchContext）解耦。
+  async function seedAgentScopedRoute() {
+    const { tenantId, ownerId } = await seedTenantAndOwner();
+    const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
+      tenantId,
+      ownerId,
+      "finance",
+      ["event_stream"],
+      "v1",
+    );
+    const routeSet = await createRouteSet({
+      tenantId,
+      agentId: agent.id,
+      routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
+      routeScopeJson: {},
+    });
+    await activateSingleRouteForTest({
+      tenantId,
+      routeSetId: routeSet.id,
+      routeSetExpectedVersionNo: 1,
+      agentRevisionId: agentRevision.id,
+      runtimeRevisionId: (
+        await seedPublishedRuntimeRevision(tenantId, ownerId, "doubao-hosted", ["event_stream"], "v1")
+      ).revision.id,
+      trafficWeight: MAX_TRAFFIC_WEIGHT,
+      actor: buildActor(tenantId, "deploy-bot-001"),
+    });
+    return { tenantId, agentId: agent.id, agentRevision };
+  }
+
   it("listEnabledRouteProjections 返回 enabled 路由", async () => {
-    const ctx = await seedFullDispatchContext();
+    const { tenantId, agentId, agentRevision } = await seedAgentScopedRoute();
 
     const routes = await listEnabledRouteProjections(
-      ctx.tenantId,
-      ctx.agentId,
+      tenantId,
+      agentId,
       DEFAULT_ROUTE_SCOPE_KEY,
     );
     expect(routes).toHaveLength(1);
     expect(routes[0]?.routeState).toBe("enabled");
-    expect(routes[0]?.agentRevisionId).toBe(ctx.agentRevision.id);
+    expect(routes[0]?.agentRevisionId).toBe(agentRevision.id);
   });
 
   it("listEnabledRouteProjections 跨租户返回空", async () => {
-    const ctx = await seedFullDispatchContext();
+    const { tenantId, agentId } = await seedAgentScopedRoute();
 
     const routes = await listEnabledRouteProjections(
       "11111111-1111-4111-8111-111111111111",
-      ctx.agentId,
+      agentId,
       DEFAULT_ROUTE_SCOPE_KEY,
     );
     expect(routes).toHaveLength(0);

@@ -34,7 +34,7 @@ import { RuntimeHttpClientError } from "@/lib/runtime/errors";
 
 // ─── 共享类型 ──────────────────────────────────────────────
 
-/** Runtime Protocol 协商版本（冻结方案 §23：agent-runtime-protocol@2，无 @1 fallback）。 */
+/** Runtime Protocol 协商版本（冻结方案 §23：harness-runtime-protocol@1，无 @1 fallback）。 */
 export const RUNTIME_PROTOCOL_VERSION = "2" as const;
 
 /** Gateway Access Token（§25 / §27：type=gateway，与 inbound auth token 不混用）。 */
@@ -101,15 +101,15 @@ export interface StartInvocationRequestBody {
     trigger_item_id?: string | null;
   } | null;
   /**
-   * Agent 控制面资产约束；基础 Harness Route 传 null（无 Agent 资产约束，§8.3）。
-   * 单个字段为 null 表示该维度无约束。
+   * 本轮 Harness 执行约束（capability requirements），不是执行目标（专题01 冻结架构）。
+   * 用户选择 Agent = 本轮要求 Harness 使用该 Agent 能力；顶层执行主体恒为 Harness。
+   * 专题01 仅支持 capability_type=agent + mode=required。
    */
-  agent?: {
-    agent_revision_id: string | null;
-    model_policy: Record<string, unknown> | null;
-    permission_requirements: Record<string, unknown> | null;
-    interface_requirements: Record<string, unknown> | null;
-  } | null;
+  capability_requirements?: Array<{
+    capability_type: "agent";
+    capability_id: string;
+    mode: "required";
+  }>;
   input_items: unknown[];
   context_handle: string;
   /** §24：下发 Governance Config 引用（Runtime 按 Snapshot 约束本地行为；不含 permission_policy.rules）。 */

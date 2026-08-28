@@ -98,7 +98,7 @@ export function createInProcessHostedRuntimeClient(params: {
           invocationId,
           threadId: turnContext?.thread_id ?? null,
           turnId: turnContext?.turn_id ?? null,
-          agentRevisionId: invocation.request.requestBody.agent?.agent_revision_id ?? null,
+          agentRevisionId: null,
           inputItems: invocation.request.requestBody.input_items,
           contextHandle: invocation.request.requestBody.context_handle,
           gatewayEndpoints: invocation.request.requestBody.gateway_endpoints,

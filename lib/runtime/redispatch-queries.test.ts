@@ -208,8 +208,8 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
   const runtimeRevision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: "https://redispatch-runtime.internal",
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest("runtime-content-redispatch-v1")}`,
@@ -1212,7 +1212,7 @@ describe("01 专项 Durable Dispatch Retry（Attempt lane）", () => {
     expect(refreshed?.errorCode).toBe("dispatch_retry_exhausted");
   });
 
-  it("retry Start 仍带正确 public Context（invocation_context 来自 Binding 冻结合同）", async () => {
+  it("retry Start 不携带 Agent Contract Context（Base Harness；Allowed Bundle 属 AgentCall 专属后续批次）", async () => {
     const seeded = await seedInvocation({
       tenantId,
       ownerId,
@@ -1238,16 +1238,9 @@ describe("01 专项 Durable Dispatch Retry（Attempt lane）", () => {
 
     const call = client.calls.startInvocation[0];
     if (!call) throw new Error("startInvocation 未被调用");
-    const context = call.requestBody.invocation_context as
-      | Array<{ context_kind: string; value: unknown }>
-      | undefined;
-    expect(context).toBeDefined();
-    expect(context?.length).toBeGreaterThan(0);
-    const kinds = context?.map((entry) => entry.context_kind);
-    // 合同声明的 preferred context（execution_subject 等）被提供；tenantId 等平台内部字段绝不外发
-    expect(kinds).not.toContain("tenantId");
-    expect(kinds).not.toContain("threadId");
-    expect(kinds).not.toContain("invocationId");
+    // 专题01 冻结架构：Base Harness 顶层 Start Request 不执行 Agent Contract Context
+    // Enrichment；invocation_context（Allowed Bundle）属 AgentCall 专属，不进入顶层。
+    expect(call.requestBody.invocation_context).toBeUndefined();
   });
 
   it("claimDueInvocationAttempts：活跃 lease 内不可被其他 worker 重复领取；lease 过期后可接管", async () => {

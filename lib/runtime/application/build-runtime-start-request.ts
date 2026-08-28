@@ -5,11 +5,12 @@
  * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/01-DurableDispatch与RetryAuthority.md §十
  *
  * 职责：
- * - 从 exact Invocation + immutable ExecutionBinding + AgentRevision + RuntimeRevision 构建
- *   完整 StartInvocationRequestBody：agent / input_items / context_handle / invocation_context /
- *   workspace / gateway / governance / trace / execution_limits。
- * - Context 不能在 retry 时丢失：每次构建都重新执行 Binding-frozen Context Enrichment
- *   （fresh current_datetime、当前 allowed Context），禁止调用方手写无 invocation_context 的旧 body。
+ * - 从 exact Invocation + immutable ExecutionBinding + RuntimeRevision 构建
+ *   完整 StartInvocationRequestBody：capability_requirements / input_items / context_handle /
+ *   invocation_context / workspace / gateway / governance / trace / execution_limits。
+ * - 顶层 Invocation 恒属于 Harness（专题01 冻结架构）：不携带 Agent 执行目标，
+ *   只携带 capability_requirements 表达"本轮要求使用某 Agent 能力"（由 Harness Loop 调用）。
+ * - Base Harness 路径不执行 Agent Contract Context Enrichment（该职责属 AgentCall，后续批次）。
  * - Attempt 维度差异只体现在 attempt 字段（attempt_no/attempt_id/retry_reason/checkpoint_ref/
  *   producer_sequence_start），由入参 attempt 提供。
  *
@@ -18,9 +19,7 @@
  *   全部调用本函数。
  */
 import { issueContextHandle } from "@/lib/context/context-handle";
-import { buildBoundAgentInvocationContext } from "@/lib/context/enrichment/build-bound-agent-invocation-context";
 import { getItemById } from "@/lib/conversations/thread-item-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type { ExecutionBinding, Invocation } from "@/lib/persistence/schema/executions";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { RUNTIME_PROTOCOL_VERSION } from "@/lib/runtime/runtime-client";
@@ -37,8 +36,16 @@ export interface BuildRuntimeStartRequestInput {
   tenantId: string;
   invocation: Invocation;
   binding: ExecutionBinding;
-  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
-  agentRevision: AgentRevision | null;
+  /**
+   * 本轮 Harness 执行约束（capability requirements，非执行目标）。
+   * 由调用方从 Turn 的 requestedAgentId / selectionMode 构建；专题01 仅支持
+   * capability_type=agent + mode=required。省略/空数组 = 本轮无强制能力要求。
+   */
+  capabilityRequirements?: Array<{
+    capability_type: "agent";
+    capability_id: string;
+    mode: "required";
+  }>;
   /** Binding 冻结的 RuntimeRevision（读取 capabilities/execution_limits）。 */
   runtimeRevisionId: string;
   gatewayEndpoints: GatewayEndpoints;
@@ -77,7 +84,7 @@ export interface BuildRuntimeStartRequestResult {
 export async function buildRuntimeStartRequestForInvocation(
   input: BuildRuntimeStartRequestInput,
 ): Promise<BuildRuntimeStartRequestResult> {
-  const { invocation, binding, agentRevision } = input;
+  const { invocation, binding } = input;
   const now = input.now ?? new Date();
 
   // 读取 RuntimeRevision capabilities（execution_limits）
@@ -99,20 +106,12 @@ export async function buildRuntimeStartRequestForInvocation(
     invocationId: invocation.id,
   });
 
-  // input_items：platform_rule + agent_instruction_ref（仅 Agent Route）+ user_message（如有）+ resource_index
+  // input_items：platform_rule + user_message（如有）+ resource_index
   const inputItems: unknown[] = [
     {
       type: "platform_rule",
       content: "仅使用当前 Invocation 授权的 Context Gateway 与 Workspace 资源。",
     },
-    ...(agentRevision
-      ? [
-          {
-            type: "agent_instruction_ref",
-            agent_revision_id: agentRevision.id,
-          },
-        ]
-      : []),
   ];
   let triggerItemId: string | null = null;
   if (invocation.triggerItemId) {
@@ -155,20 +154,9 @@ export async function buildRuntimeStartRequestForInvocation(
           trigger_item_id: invocation.triggerItemId ?? null,
         }
       : null,
-    agent: agentRevision
-      ? {
-          agent_revision_id: agentRevision.id,
-          model_policy: (agentRevision.modelPolicyJson ?? {}) as Record<string, unknown>,
-          permission_requirements: (agentRevision.permissionRequirementsJson ?? {}) as Record<
-            string,
-            unknown
-          >,
-          interface_requirements: (agentRevision.agentInterfaceRequirementsJson ?? {}) as Record<
-            string,
-            unknown
-          >,
-        }
-      : null,
+    ...(input.capabilityRequirements && input.capabilityRequirements.length > 0
+      ? { capability_requirements: input.capabilityRequirements }
+      : {}),
     input_items: inputItems,
     context_handle: contextHandle,
     gateway_endpoints: input.gatewayEndpoints,
@@ -199,22 +187,9 @@ export async function buildRuntimeStartRequestForInvocation(
     },
   };
 
-  // 04 §14：Binding 确定后从 exact Snapshot 构建 Allowed Bundle（Base Harness snapshot=null
-  // → bundle=null 不携带；每次 dispatch 重新构建，current_datetime 刷新）。
-  const contextBundle = await buildBoundAgentInvocationContext({
-    tenantId: input.tenantId,
-    binding: {
-      agentContractSnapshotId: binding.agentContractSnapshotId,
-      agentContextDigest: binding.agentContextDigest,
-    },
-    executionSubject: input.executionSubject ?? null,
-    now,
-  });
-  if (contextBundle) {
-    requestBody.invocation_context = contextBundle.entries
-      .filter((entry) => entry.supplied)
-      .map((entry) => ({ context_kind: entry.contextKind, value: entry.value }));
-  }
+  // 专题01 冻结架构：Base Harness 路径不执行 Agent Contract Context Enrichment。
+  // invocation_context（Allowed Bundle）构建属于 AgentCall 专属（后续批次），
+  // 顶层 Harness Start Request 不再携带 Agent Contract Context。
 
   return { requestBody, triggerItemId };
 }

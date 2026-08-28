@@ -87,7 +87,7 @@ const HOSTED_RUNTIME_CAPABILITIES = ["event_stream"];
 /**
  * Hosted in-process 协议契约版本 — 显式冻结，不再从 protocolType 自动推导（03 §5）。
  */
-const HOSTED_PROTOCOL_CONTRACT_REVISION = "agent-runtime-protocol@2";
+const HOSTED_PROTOCOL_CONTRACT_REVISION = "harness-runtime-protocol@1";
 const HOSTED_RUNTIME_CONFIG_DIGEST = digest({
   protocolType: "in_process",
   endpointRef: HOSTED_RUNTIME_ENDPOINT,

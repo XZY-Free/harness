@@ -178,8 +178,8 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
   const runtimeRevision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: "https://recovery-runtime.internal",
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest("runtime-content-recovery-v1")}`,

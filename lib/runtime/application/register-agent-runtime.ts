@@ -978,13 +978,6 @@ export async function registerAgentRuntime(
     identityMode: credential.identityMode,
     networkZone: "external",
   });
-  // 证据摘要对结构化 measured facts 计算，不保存 raw transcript（02 §9）。
-  const evidenceDigest = computeCanonicalDigest({
-    agent_contract_snapshot_id: snapshot.id,
-    runtime_endpoint: endpoint,
-    runtime_target_digest: runtimeTargetDigest,
-    measured,
-  });
   // 同一 Revision ID 同时用于 Builder 报告、insert 与 Conformance 绑定（01 §5）。
   const runtimeRevisionId = randomUUID();
 
@@ -1097,12 +1090,7 @@ export async function registerAgentRuntime(
       identityMode: credential.identityMode,
       networkZone: "external",
       configHash,
-      agentContractSnapshotId: snapshot.id,
       credentialRefId: credential.credentialRefId,
-      verificationState: "verified",
-      evidenceDigest,
-      // 01 §11：verifiedAt 唯一由真实 Probe 完成时间决定，禁止第二条时间事实。
-      verifiedAt: probeCompletedAt,
       revisionState: "draft",
       createdBy: command.createdBy,
     });
@@ -1113,10 +1101,6 @@ export async function registerAgentRuntime(
       .limit(1);
     if (!revision) {
       throw new AgentRuntimeRegistrationError("reference_invalid", "RuntimeRevision 落库失败");
-    }
-    if (!revision.verifiedAt) {
-      // fail loudly：verified Revision 必须携带精确的持久化验收时间，禁止伪造回退值。
-      throw new Error("registerAgentRuntime: verified Revision 缺少 verifiedAt（读回失败）");
     }
 
     // Conformance append 与 Revision 同事务（01 §10，禁止第二事务/补偿删除）。

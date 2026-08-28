@@ -19,23 +19,12 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
-import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { logger } from "@/lib/logger";
 import type { InvocationCommand } from "@/lib/persistence/schema/conversation";
 import { threadTable } from "@/lib/persistence/schema/conversation";
 import type { InvocationAttempt } from "@/lib/persistence/schema/executions";
 import { invocationTable } from "@/lib/persistence/schema/executions";
-import { handleA2ABackgroundFailure } from "@/lib/runtime/a2a-background-failure-handler";
-import { resolveRuntimeLevelCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import { retryDispatchedCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
-import { resolveOutboundRuntimeAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
-import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
-import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
-import { getLatestProducerSequence } from "@/lib/runtime/recovery-queries";
-import { dispatchQueuedInvocationAttempt } from "@/lib/runtime/retry/dispatch-queued-invocation-attempt";
 import {
   claimDueInvocationAttempts,
   claimDueInvocationCommands,
@@ -46,8 +35,6 @@ import {
   RUNTIME_DISPATCH_RETRY_POLICY,
   realDispatchClock,
 } from "@/lib/runtime/retry/runtime-dispatch-retry-policy";
-import { getSessionBindingById } from "@/lib/runtime/session-binding-queries";
-import { createA2ATransport } from "@/lib/runtime/transport/a2a-transport";
 import { eq } from "drizzle-orm";
 
 /** Worker 依赖（可注入用于测试）。 */
@@ -104,111 +91,12 @@ export function createRuntimeDispatchRetryWorker(
       });
       return;
     }
-    const binding = await getExecutionBindingByInvocation(invocation.tenantId, invocation.id);
-    if (!binding) {
-      logger.warn("[runtime-dispatch-retry-worker] Attempt 关联 ExecutionBinding 不存在", {
-        attemptId: attempt.id,
-        invocationId: invocation.id,
-      });
-      return;
-    }
-    const runtimeRevision = await getRuntimeRevisionById(binding.runtimeRevisionId);
-    if (!runtimeRevision) {
-      logger.warn("[runtime-dispatch-retry-worker] RuntimeRevision 不存在", {
-        attemptId: attempt.id,
-        runtimeRevisionId: binding.runtimeRevisionId,
-      });
-      return;
-    }
-    if (runtimeRevision.protocolType !== "a2a") {
-      // 非 a2a（hosted in-process）没有远端 HTTP dispatch；按 transient 记录推进
-      // backoff/耗尽，避免同一 work 被无限重复领取。
-      await recordAttemptDispatchTransientFailure({
-        attemptId: attempt.id,
-        errorCode: "runtime_unavailable",
-        now: clock(),
-      });
-      return;
-    }
-
-    const runtimeLevelCapabilities = resolveRuntimeLevelCapabilities(runtimeRevision);
-    const transport = createA2ATransport({
-      capabilities: {
-        cancel: runtimeLevelCapabilities.cancel,
-        resume: runtimeLevelCapabilities.resume,
-        steer: runtimeLevelCapabilities.steer,
-        user_action: runtimeLevelCapabilities.user_action && runtimeLevelCapabilities.resume,
-        streaming: runtimeLevelCapabilities.streaming,
-      },
-      onBackgroundFailure: (report) =>
-        handleA2ABackgroundFailure({ tenantId: invocation.tenantId, report }),
-      eventBatchSink: async ({ invocationId, events, producerSequenceStart }) => {
-        await ingressEventBatch({
-          tenantId: invocation.tenantId,
-          invocationId,
-          events,
-          producerSequenceStart,
-        });
-      },
-      resolveRuntimeRefs: async (invocationId) => {
-        const inv = await getInvocationById(invocation.tenantId, invocationId);
-        if (!inv) return null;
-        const bindingRow = inv.runtimeSessionBindingId
-          ? await getSessionBindingById(invocation.tenantId, inv.runtimeSessionBindingId)
-          : null;
-        return {
-          runtimeExecutionRef: inv.runtimeExecutionRef,
-          runtimeSessionRef: bindingRow?.externalSessionRef ?? null,
-        };
-      },
-      resolveNextProducerSequence: async (invocationId) => {
-        const latest = await getLatestProducerSequence(invocation.tenantId, invocationId);
-        return latest === null ? null : latest + 1;
-      },
-    });
-
-    await dispatchQueuedInvocationAttempt({
-      tenantId: invocation.tenantId,
+    // Runtime 恒为 harness（harness_runtime_protocol），Attempt lane 不做远端 HTTP
+    // dispatch；按 transient 记录推进 backoff/耗尽，避免同一 work 被无限重复领取。
+    await recordAttemptDispatchTransientFailure({
       attemptId: attempt.id,
-      runtimeClient: transport,
-      runtimeEndpointResolver: async (b) => {
-        const frozenGovernance = await loadFrozenGovernanceConfig(
-          b.tenantId,
-          b.governanceConfigRevisionId,
-        );
-        return {
-          runtimeEndpoint: runtimeRevision.endpointRef,
-          auth: await resolveOutboundRuntimeAuth({
-            tenantId: invocation.tenantId,
-            identityMode: runtimeRevision.identityMode,
-            credentialRefId: runtimeRevision.credentialRefId,
-          }),
-          gatewayEndpoints: {
-            events: "in-process://events",
-            cancel: "in-process://cancel",
-            resume: "in-process://resume",
-            steer: "in-process://steer",
-            tools: "in-process://gateway/v1/tools",
-            tool_calls: "in-process://gateway/v1/tool-calls",
-            user_action_requests: "in-process://gateway/v1/user-action-requests",
-          },
-          governanceConfig: {
-            revision_id: b.governanceConfigRevisionId,
-            config_digest: b.governanceConfigDigest,
-            config: frozenGovernance.config as unknown as Record<string, unknown>,
-          },
-          gatewayAccess: {
-            access_token: issueWorkloadToken({
-              type: "gateway",
-              tenantId: b.tenantId,
-              invocationId: b.invocationId,
-              audience: "gateway",
-              expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
-            }),
-            expires_at: new Date(Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway).toISOString(),
-          },
-        };
-      },
+      errorCode: "runtime_unavailable",
+      now: clock(),
     });
   };
 

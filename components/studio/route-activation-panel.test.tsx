@@ -92,15 +92,7 @@ function defaultFixture(): BackendFixture {
         }),
       ],
     },
-    runtimes: [
-      runtimeFixture(),
-      runtimeFixture({
-        id: "rt-2",
-        runtime_key: "hr-similar-runtime",
-        display_name: "HR 相似 Runtime",
-        current_revision_id: "rtrv-2",
-      }),
-    ],
+    runtimes: [runtimeFixture()],
     runtimeRevisions: {
       "rt-1": [
         runtimeRevisionFixture(),
@@ -108,14 +100,6 @@ function defaultFixture(): BackendFixture {
           id: "rtrv-draft",
           revision_no: 3,
           revision_state: "draft",
-        }),
-      ],
-      "rt-2": [
-        runtimeRevisionFixture({
-          id: "rtrv-2",
-          runtime_id: "rt-2",
-          revision_no: 5,
-          agent_contract_snapshot_id: SNAP_MISMATCHED,
         }),
       ],
     },
@@ -213,23 +197,59 @@ describe("RouteActivationPanel「发布给员工」（连续激活流程）", ()
     expect(runtimeOption.textContent).not.toContain("rt-1");
   });
 
-  it("名称相似但 snapshot 不匹配的 published Runtime 不可选；draft Revision 不可选；唯一匹配自动选中且按钮可用", async () => {
-    await loadPanel(defaultFixture(), "HR 智能体");
+  it("选定智能体版本后所有 published Runtime 均可选（不再按 snapshot 过滤）；draft Revision 不可选", async () => {
+    // 多个 published Runtime：专题01 冻结架构下不再按 contract snapshot 过滤，
+    // 选定智能体版本后全部运行服务都作为可选运行服务出现。
+    await loadPanel(
+      {
+        agents: [agentFixture()],
+        agentRevisions: {
+          "agent-1": [
+            agentRevisionFixture(),
+            agentRevisionFixture({
+              id: "arev-draft",
+              revision_no: 4,
+              revision_state: "draft",
+            }),
+          ],
+        },
+        runtimes: [
+          runtimeFixture(),
+          runtimeFixture({
+            id: "rt-2",
+            runtime_key: "hr-similar-runtime",
+            display_name: "HR 相似 Runtime",
+            current_revision_id: "rtrv-2",
+          }),
+        ],
+        runtimeRevisions: {
+          "rt-1": [
+            runtimeRevisionFixture(),
+            runtimeRevisionFixture({
+              id: "rtrv-draft",
+              revision_no: 3,
+              revision_state: "draft",
+            }),
+          ],
+          "rt-2": [
+            runtimeRevisionFixture({
+              id: "rtrv-2",
+              runtime_id: "rt-2",
+              revision_no: 5,
+            }),
+          ],
+        },
+      },
+      "HR 智能体",
+    );
 
-    // 相似名 Runtime：要么完全不出现，要么以禁用选项出现。
-    const similarOption = screen.queryByRole("option", { name: /HR 相似 Runtime/ });
-    if (similarOption !== null) {
-      expect((similarOption as HTMLOptionElement).disabled).toBe(true);
-    }
-    // draft AgentRevision / draft RuntimeRevision 不可作为可选值。
+    // 两个 published Runtime（含名称相似者）都是可选运行服务，不再被排除。
     const enabledValues = enabledOptionValues();
+    expect(enabledValues).toContain("rtrv-1");
+    expect(enabledValues).toContain("rtrv-2");
+    // draft AgentRevision / draft RuntimeRevision 不可作为可选值。
     expect(enabledValues).not.toContain("arev-draft");
     expect(enabledValues).not.toContain("rtrv-draft");
-    expect(enabledValues).not.toContain("rtrv-2");
-
-    // 唯一匹配 published AgentRevision + RuntimeRevision 自动选中，无需人工选择。
-    const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
-    await waitFor(() => expect(submit.disabled).toBe(false));
   });
 
   it("一次点击先 ensure 默认 scope RouteSet，再用返回 version 激活唯一 route（primary/10000/0），且不自动发布 Revision", async () => {
@@ -278,7 +298,7 @@ describe("RouteActivationPanel「发布给员工」（连续激活流程）", ()
     ]);
   });
 
-  it("没有匹配的 published Runtime 时按钮禁用并显示中文原因，不出现成功文案", async () => {
+  it("没有可用的 published Runtime 时按钮禁用并显示中文原因，不出现成功文案", async () => {
     await loadPanel(
       {
         agents: [
@@ -294,13 +314,13 @@ describe("RouteActivationPanel「发布给员工」（连续激活流程）", ()
               id: "arev-9",
               agent_id: "agent-9",
               revision_no: 1,
-              agent_contract_snapshot_id: SNAP_MATCHING,
             }),
           ],
         },
+        // 唯一 published AgentRevision 自动选中，但没有任何 published Runtime 可用。
         runtimes: [runtimeFixture()],
         runtimeRevisions: {
-          "rt-1": [runtimeRevisionFixture({ agent_contract_snapshot_id: SNAP_MISMATCHED })],
+          "rt-1": [runtimeRevisionFixture({ revision_state: "draft" })],
         },
       },
       "财务智能体",
@@ -309,9 +329,9 @@ describe("RouteActivationPanel「发布给员工」（连续激活流程）", ()
     const submit = screen.getByRole("button", { name: /发布给员工/ }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
 
-    // 清楚的纯中文原因（明确提到运行服务与无法匹配，不暴露 Runtime 术语）。
-    expect(document.body.textContent ?? "").toMatch(/没有匹配的运行服务/);
-    expect(document.body.textContent ?? "").toMatch(/请先为该智能体版本发布对应的运行服务/);
+    // 清楚的纯中文原因（明确提到没有可用运行服务，不暴露 Runtime 术语）。
+    expect(document.body.textContent ?? "").toMatch(/没有可用的运行服务/);
+    expect(document.body.textContent ?? "").toMatch(/请先发布运行服务/);
     expect(screen.queryByText(/员工新会话现在可以选择该智能体/)).toBeNull();
 
     // 未发生任何写请求。
@@ -373,7 +393,6 @@ function multiPublishedFixture(): BackendFixture {
           id: "rtrv-2",
           runtime_id: "rt-2",
           revision_no: 5,
-          agent_contract_snapshot_id: SNAP_MISMATCHED,
         }),
       ],
     },
@@ -452,7 +471,7 @@ describe("RouteActivationPanel（上游发布交接：refreshToken + preferred�
     ]);
   });
 
-  it("preferred 不在真实 GET 中或 runtime snapshot 不匹配时被忽略，不造假选项，按钮禁用", async () => {
+  it("preferred AgentRevision 不在真实 GET 中时被忽略，不造假选项，按钮禁用", async () => {
     stubBackend(multiPublishedFixture());
     const view = render(<RouteActivationPanel canManage refreshToken={0} />);
     await waitFor(() =>
@@ -462,7 +481,8 @@ describe("RouteActivationPanel（上游发布交接：refreshToken + preferred�
     );
     await waitFor(() => expect(screen.queryByText(/正在加载/)).toBeNull());
 
-    // preferred AgentRevision 是不存在的 id；preferred RuntimeRevision 存在但 snapshot 不匹配。
+    // preferred AgentRevision 是不存在的 id → 无选中智能体，运行服务选项为空；
+    // preferred RuntimeRevision（rtrv-2）即使存在也不会被凭 id 造假选中。
     view.rerender(
       <RouteActivationPanel
         canManage

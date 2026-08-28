@@ -1,4 +1,4 @@
-import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
+import { getTurnById } from "@/lib/conversations/turn-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
  * dispatchQueuedInvocationAttempt：执行已有 queued InvocationAttempt 的正式 dispatch。
@@ -22,7 +22,6 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  */
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
 import { threadTable } from "@/lib/persistence/schema/conversation";
 import type {
@@ -80,10 +79,6 @@ export interface DispatchQueuedAttemptParams {
   runtimeClient: RuntimeHttpClient;
   /** 从 ExecutionBinding 解析 runtimeEndpoint/auth/gatewayEndpoints 的解析器。 */
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
-  /**
-   * 已加载的 AgentRevision（可选；以 ExecutionBinding.agentRevisionId 为权威，不一致抛错）。
-   */
-  agentRevision?: AgentRevision | null;
   actorType?: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
@@ -189,23 +184,21 @@ export async function dispatchQueuedInvocationAttempt(
     throw new InvocationNotFoundError(invocation.id);
   }
 
-  // 4. AgentRevision：以 binding.agentRevisionId 为权威
-  let agentRevision: AgentRevision | null;
-  if (binding.agentRevisionId === null) {
-    agentRevision = null;
-  } else if (params.agentRevision !== undefined && params.agentRevision !== null) {
-    if (params.agentRevision.id !== binding.agentRevisionId) {
-      throw new Error(
-        `dispatchQueuedInvocationAttempt: 提供的 AgentRevision(id=${params.agentRevision.id}) 与 binding.agentRevisionId(${binding.agentRevisionId}) 不一致`,
-      );
-    }
-    agentRevision = params.agentRevision;
-  } else {
-    agentRevision = await getRevisionById(binding.agentRevisionId);
-    if (!agentRevision) {
-      throw new Error(
-        `dispatchQueuedInvocationAttempt: AgentRevision 不存在（id=${binding.agentRevisionId}）`,
-      );
+  // 4. capability requirements（专题01 冻结架构）：用户选择的 Agent 是能力要求约束，
+  // 非执行目标。Retry 与原 Invocation 一致，从 invocation 的 Turn 读取 requestedAgentId 构建。
+  let capabilityRequirements:
+    | Array<{ capability_type: "agent"; capability_id: string; mode: "required" }>
+    | undefined;
+  if (invocation.turnId) {
+    const turn = await getTurnById(params.tenantId, invocation.turnId);
+    if (turn?.requestedAgentId && turn.agentSelectionMode === "required") {
+      capabilityRequirements = [
+        {
+          capability_type: "agent",
+          capability_id: turn.requestedAgentId,
+          mode: "required",
+        },
+      ];
     }
   }
 
@@ -224,7 +217,7 @@ export async function dispatchQueuedInvocationAttempt(
     tenantId: params.tenantId,
     invocation,
     binding,
-    agentRevision,
+    capabilityRequirements,
     runtimeRevisionId: binding.runtimeRevisionId,
     gatewayEndpoints,
     governanceConfig,
@@ -258,7 +251,6 @@ export async function dispatchQueuedInvocationAttempt(
       params,
       invocation,
       attempt,
-      agentRevisionId: binding.agentRevisionId,
       runtimeRevisionId: binding.runtimeRevisionId,
       response: {
         runtime_session_ref: response.runtime_session_ref,
@@ -401,7 +393,6 @@ async function applyAttemptStartAccepted(params: {
   params: DispatchQueuedAttemptParams;
   invocation: Invocation;
   attempt: InvocationAttempt;
-  agentRevisionId: string | null;
   runtimeRevisionId: string;
   response: { runtime_session_ref: string; runtime_execution_ref: string };
   producerSequenceStart: number;

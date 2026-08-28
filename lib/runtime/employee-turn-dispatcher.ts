@@ -1,16 +1,13 @@
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { getThreadById } from "@/lib/conversations/thread-queries";
-import { getTurnById } from "@/lib/conversations/turn-queries";
 import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { logger } from "@/lib/logger";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
-import { handleA2ABackgroundFailure } from "@/lib/runtime/a2a-background-failure-handler";
 import type { HostedModelContext } from "@/lib/runtime/adapters/hosted-adapter";
-import { resolveRuntimeLevelCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
 import {
   type RuntimeTransportAuth,
   resolveOutboundRuntimeAuth,
@@ -19,15 +16,9 @@ import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { createInProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
 import type { InProcessHostedRuntimeClient } from "@/lib/runtime/in-process-hosted-runtime";
-import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { collectModelText } from "@/lib/runtime/model-text-stream";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
-import {
-  findReusableSessionBinding,
-  getSessionBindingById,
-} from "@/lib/runtime/session-binding-queries";
 import { ingressTransientBatch } from "@/lib/runtime/transient-events";
-import { createA2ATransport } from "@/lib/runtime/transport/a2a-transport";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { createRuntimeTransportResolver } from "@/lib/runtime/transport/runtime-transport-resolver";
 import { streamText } from "ai";
@@ -91,12 +82,6 @@ export async function dispatchEmployeeTurn(params: {
   modelRef?: string;
   modelFn?: ModelFn;
   /**
-   * 调用方显式提供的可选 Agent 控制面约束（§8.3）。
-   * 默认 null = 解析基础 Harness Route（§9.3 Employee Turn 热路径）。
-   * 调用方可显式传 agent.id 以约束 Agent Route，这是长期正式能力。
-   */
-  agentConstraint?: string | null;
-  /**
    * ExecutionSubject（06 §6）：由调用方（服务端 route 层）从认证 Principal 生成。
    * 禁止从 Turn JSON / 请求体接受 caller 自报 subject；本层不做校验兜底。
    */
@@ -107,20 +92,14 @@ export async function dispatchEmployeeTurn(params: {
     throw new Error(`Turn 调度失败：会话不存在 (${params.threadId})`);
   }
 
-  // Per-Invocation Agent Selection（05 §2/§3）：requestedAgentId 权威来自 Turn 行，
-  // 不是 caller 自报；dispatchEmployeeTurn 调用方无需重复传 agentConstraint。
-  const turn = await getTurnById(params.tenantId, params.turnId);
-  if (!turn) {
-    throw new Error(`Turn 调度失败：Turn 不存在 (${params.turnId})`);
-  }
-  const requestedAgentId = turn.requestedAgentId ?? params.agentConstraint ?? null;
-
-  // ─── 热路径：查询正式 RouteResolver ──────────────────────────
+  // 顶层 Employee Turn 永远解析基础 Harness Route（专题01 冻结架构）。
+  // 用户选择 Agent 是"本轮使用该 Agent 能力"的约束，不改变顶层执行目标：
+  // 顶层 Invocation 始终由 Harness Runtime 执行，Agent 由 Harness Loop 通过
+  // AgentCall 调用（本模块不读取 turn.requestedAgentId 作为 Route 约束）。
+  // ─── 热路径：查询正式 RouteResolver（恒为 runtime target）───
   const routeOutcome = await resolveRoute({
     tenantId: params.tenantId,
-    // 线程不绑定 Agent：Turn 无 selection → 基础 Harness Route（05 §11）；
-    // Turn 带 required selection → Agent 约束解析（05 §3）。
-    agentConstraint: requestedAgentId,
+    agentConstraint: null,
     routeScopeKey: "default",
     businessKey: { jobId: `employee-turn:${thread.id}` },
     threadDefaultModelRef: thread.defaultModelRef,
@@ -151,8 +130,6 @@ export async function dispatchEmployeeTurn(params: {
   if (!runtimeRevision) {
     throw new Error(`Turn 调度失败：RuntimeRevision 不存在（${runtimeRevisionId}）`);
   }
-  // 05 §2：Runtime 层 measured 能力（Base Harness 语义；Start 路径 Transport 冻结用）。
-  const runtimeLevelCapabilities = resolveRuntimeLevelCapabilities(runtimeRevision);
   const isExternalEndpoint = runtimeRevision.runtimeEvidenceKind === "external_endpoint";
   // managed endpoint/identity configuration（04 §3）：
   // external_endpoint → endpointRef 即外部 endpoint；hosted → in-process 引用。
@@ -182,7 +159,7 @@ export async function dispatchEmployeeTurn(params: {
 
   const resolveTransport = createRuntimeTransportResolver({
     factories: {
-      agent_runtime_protocol: () =>
+      harness_runtime_protocol: () =>
         createInProcessHostedRuntimeClient({
           modelFn: params.modelFn ?? configuredModelFn(),
           ingressEventBatch: async ({ invocationId, events, producerSequenceStart }) => {
@@ -202,55 +179,6 @@ export async function dispatchEmployeeTurn(params: {
             });
           },
         }),
-      a2a: () =>
-        createA2ATransport({
-          // 05 §6：Transport 冻结能力 profile。Start 路径 Transport 只承载
-          // startInvocation；cancel/resume 能力以 Runtime 层 measured 事实冻结
-          // （Agent 级合同因子在 Binding 创建后的命令网关按精确 Binding 复核）。
-          capabilities: {
-            cancel: runtimeLevelCapabilities.cancel,
-            resume: runtimeLevelCapabilities.resume,
-            steer: runtimeLevelCapabilities.steer,
-            // 05 专项：Start response 投影 effective user_action（input_required AND resume）。
-            user_action: runtimeLevelCapabilities.user_action && runtimeLevelCapabilities.resume,
-            streaming: runtimeLevelCapabilities.streaming,
-          },
-          // 06 §9：背景流失败 handler —— 复用现有 Recovery Authority，
-          // 已终态/waiting_user 幂等 no-op，其余 markInvocationLost。
-          onBackgroundFailure: (report) =>
-            handleA2ABackgroundFailure({ tenantId: params.tenantId, report }),
-          eventBatchSink: async ({ invocationId, events, producerSequenceStart }) => {
-            await ingressEventBatch({
-              tenantId: params.tenantId,
-              invocationId,
-              events,
-              producerSequenceStart,
-            });
-          },
-          resolveRuntimeRefs: async (invocationId) => {
-            const invocation = await getInvocationById(params.tenantId, invocationId);
-            if (!invocation) return null;
-            // A2A taskId = Invocation.runtimeExecutionRef；contextId = SessionBinding.externalSessionRef。
-            const binding = invocation.runtimeSessionBindingId
-              ? await getSessionBindingById(params.tenantId, invocation.runtimeSessionBindingId)
-              : null;
-            return {
-              runtimeExecutionRef: invocation.runtimeExecutionRef,
-              runtimeSessionRef: binding?.externalSessionRef ?? null,
-            };
-          },
-          resolveExistingContextId: async (threadId) => {
-            // context reuse（04 §5 / 06 §4）：按 Tenant+Thread+AgentRevision+RuntimeRevision
-            // 精确匹配 active SessionBinding → 复用 contextId；Turn completed 不关闭。
-            const reusable = await findReusableSessionBinding({
-              tenantId: params.tenantId,
-              threadId,
-              agentRevisionId: routeOutcome.resolution.agentRevisionId,
-              runtimeRevisionId,
-            });
-            return reusable?.externalSessionRef ?? null;
-          },
-        }),
     },
   });
   const transport = await resolveTransport({
@@ -263,7 +191,6 @@ export async function dispatchEmployeeTurn(params: {
     tenantId: params.tenantId,
     turnId: params.turnId,
     selectedModelRef: params.modelRef,
-    agentConstraint: requestedAgentId,
     executionSubject: params.executionSubject,
     runtimeClient: transport,
     runtimeEndpointResolver: async (binding) => {

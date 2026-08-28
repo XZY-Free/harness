@@ -106,7 +106,7 @@ const TARGET_DIGEST = computeRuntimeTargetDigest({
   runtimeEvidenceKind: "hosted_artifact",
   runtimeArtifactDigest: RUNTIME_DIGEST,
   runtimeConfigDigest: `sha256:${"b".repeat(64)}`,
-  protocolContractRevision: "agent-runtime-protocol@2",
+  protocolContractRevision: "harness-runtime-protocol@1",
 });
 const CONFIG_DIGEST = `sha256:${"b".repeat(64)}`;
 const RUNNER_DIGEST = `sha256:${"c".repeat(64)}`;
@@ -157,8 +157,8 @@ async function seedRuntimeAndRevision(
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "agent_runtime_protocol",
-    protocolContractRevision: "agent-runtime-protocol@2",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: "connection://doubao-prod",
     runtimeArtifactRef: `oci://registry/runtime@${RUNTIME_DIGEST}`,
@@ -212,7 +212,7 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
     runtimeRevisionId,
     runtimeTargetDigest: TARGET_DIGEST,
     runtimeConfigDigest: CONFIG_DIGEST,
-    protocolContractRevision: "agent-runtime-protocol@2",
+    protocolContractRevision: "harness-runtime-protocol@1",
     suiteRevision: "runtime-conformance@1",
     runnerArtifactDigest: RUNNER_DIGEST,
     runnerIdentity: RUNNER_IDENTITY,
@@ -226,7 +226,7 @@ function trustedRunnerBody(runtimeRevisionId: string, passed = true) {
       runtimeRevisionId,
       runtimeTargetDigest: TARGET_DIGEST,
       runtimeConfigDigest: CONFIG_DIGEST,
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runnerArtifactDigest: RUNNER_DIGEST,
       cases: caseResults.map((result) => ({
         caseId: result.caseId,
@@ -981,8 +981,8 @@ describe("Admin API /conformance external_endpoint 拒绝调用方上传验收�
     runtimeEvidenceKind: "external_endpoint",
     endpointRef: EXTERNAL_ENDPOINT_REF,
     runtimeConfigDigest: CONFIG_DIGEST,
-    protocolType: "agent_runtime_protocol",
-    protocolContractRevision: "agent-runtime-protocol@2",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     identityMode: "workload_token",
     networkZone: "external",
   });
@@ -1008,7 +1008,7 @@ describe("Admin API /conformance external_endpoint 拒绝调用方上传验收�
       runtimeRevisionId,
       runtimeTargetDigest: EXTERNAL_TARGET_DIGEST,
       runtimeConfigDigest: CONFIG_DIGEST,
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolContractRevision: "harness-runtime-protocol@1",
       suiteRevision: "runtime-conformance@1",
       runnerArtifactDigest: RUNNER_DIGEST,
       runnerIdentity: RUNNER_IDENTITY,
@@ -1022,7 +1022,7 @@ describe("Admin API /conformance external_endpoint 拒绝调用方上传验收�
         runtimeRevisionId,
         runtimeTargetDigest: EXTERNAL_TARGET_DIGEST,
         runtimeConfigDigest: CONFIG_DIGEST,
-        protocolContractRevision: "agent-runtime-protocol@2",
+        protocolContractRevision: "harness-runtime-protocol@1",
         runnerArtifactDigest: RUNNER_DIGEST,
         cases: caseResults.map((result) => ({
           caseId: result.caseId,
@@ -1054,8 +1054,8 @@ describe("Admin API /conformance external_endpoint 拒绝调用方上传验收�
     const revision = await createDraftRuntimeRevision({
       tenantId,
       runtimeId: runtime.id,
-      protocolType: "agent_runtime_protocol",
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolType: "harness_runtime_protocol",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "external_endpoint",
       endpointRef: EXTERNAL_ENDPOINT_REF,
       runtimeArtifactRef: null,

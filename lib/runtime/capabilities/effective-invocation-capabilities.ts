@@ -53,22 +53,16 @@ const NO_CAPABILITIES: EffectiveInvocationCapabilities = {
 
 /**
  * 协议实现能力（05 §3 第三因子）：Transport/执行模型是否实现该方法。
- * - agent_runtime_protocol（Hosted in-process）：cancel/resume 由 Turn/Invocation
- *   状态机与 in-process adapter 吸收（05 §4 保持现有语义）；
- * - a2a：cancel=tasks/cancel、resume=message/send 已实现；steer 不在 A2A 0.3.0 冻结范围。
+ * 冻结架构下 Runtime 仅 harness_runtime_protocol（Hosted in-process）：
+ * cancel/resume/steer/user_action/streaming 由 Turn/Invocation 状态机与
+ * in-process adapter 吸收（05 §4 保持现有语义）。A2A 协议实现属后续
+ * AgentCall 批次，不在 Runtime 协议能力范围。
  */
 const PROTOCOL_IMPLEMENTATION_SUPPORT: Readonly<Record<string, RuntimeLevelCapabilities>> = {
-  agent_runtime_protocol: {
+  harness_runtime_protocol: {
     cancel: true,
     resume: true,
     steer: true,
-    user_action: true,
-    streaming: true,
-  },
-  a2a: {
-    cancel: true,
-    resume: true,
-    steer: false,
     user_action: true,
     streaming: true,
   },

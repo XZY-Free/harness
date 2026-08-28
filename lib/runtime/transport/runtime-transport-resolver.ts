@@ -2,8 +2,7 @@
  * RuntimeTransport Resolver（04 §3）。
  *
  * protocolType 真正决定 Transport：
- * - agent_runtime_protocol → SnowHarness Runtime Protocol（Hosted/HTTP wire）；
- * - a2a → A2A 0.3.0 Transport。
+ * - harness_runtime_protocol → SnowHarness Runtime Protocol（Hosted/HTTP wire）。
  *
  * Resolver 输入只来自：
  * - ExecutionBinding；

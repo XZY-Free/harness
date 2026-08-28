@@ -81,7 +81,6 @@ export function runtimeRevisionFixture(
     artifact_ref: null,
     config_hash: `sha256:${"f".repeat(64)}`,
     runtime_capabilities: {},
-    agent_contract_snapshot_id: SNAP_MATCHING,
     identity_mode: "bearer",
     credential_ref_id: null,
     network_zone: "public",

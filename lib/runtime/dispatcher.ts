@@ -47,7 +47,6 @@ import {
 import { resolveBindingGovernance } from "@/lib/executions/application/resolve-binding-governance";
 import type { ExecutionBinding } from "@/lib/executions/domain/execution-binding";
 import { mysqlExecutionBindingStore } from "@/lib/executions/persistence/mysql-execution-binding-store";
-import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type {
   ThreadEvent,
   ThreadEventActorType,
@@ -210,8 +209,6 @@ export interface RuntimeEndpointResolution {
 export async function dispatchInvocationForTurn(params: {
   tenantId: string;
   turnId: string;
-  /** 调用方显式提供的可选 Agent 控制面约束；null = 基础 Harness Route（§8.3）。 */
-  agentConstraint?: string | null;
   /** 路由 scope key（默认 "default"）。 */
   routeScopeKey?: string;
   /** 参与 RouteRevision eligibility 匹配的标量属性。 */
@@ -266,7 +263,6 @@ export async function dispatchInvocationForTurn(params: {
   const plan = await resolveExecutionPlan(
     {
       tenantId: params.tenantId,
-      agentConstraint: params.agentConstraint ?? null,
       routeScopeKey,
       businessKey: { threadId: thread.id },
       attributes: params.routeAttributes ?? {},
@@ -365,7 +361,6 @@ export async function dispatchInvocationForTurn(params: {
       threadId: thread.id,
       invocation,
       binding,
-      agentRevision: plan.agentRevision,
       runtimeRevisionId: routeResolution.runtimeRevisionId,
       turn,
       attempt,
@@ -525,8 +520,6 @@ async function dispatchToRuntime(params: {
   threadId: string;
   invocation: Invocation;
   binding: ExecutionBinding;
-  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
-  agentRevision: AgentRevision | null;
   runtimeRevisionId: string;
   turn: Turn;
   /** 本次调度对应的 Attempt（attemptNo=1；transient 失败时在其上排定 durable retry）。 */
@@ -544,12 +537,26 @@ async function dispatchToRuntime(params: {
   const { runtimeEndpoint, auth, gatewayEndpoints, governanceConfig, gatewayAccess } =
     await params.runtimeEndpointResolver(params.binding);
 
+  // 专题01 冻结架构：用户选择的 Agent 是能力要求约束（非执行目标）。
+  // 从 Turn 的 requestedAgentId/agentSelectionMode 构建 capability_requirements，
+  // 由 Harness Loop 读取并调 AgentCall。
+  const capabilityRequirements =
+    params.turn.requestedAgentId && params.turn.agentSelectionMode === "required"
+      ? [
+          {
+            capability_type: "agent" as const,
+            capability_id: params.turn.requestedAgentId,
+            mode: "required" as const,
+          },
+        ]
+      : undefined;
+
   // 2+3. 构造 StartInvocationRequestBody（唯一正式 builder；初始调度要求 trigger Item 存在）
   const { requestBody } = await buildRuntimeStartRequestForInvocation({
     tenantId: params.tenantId,
     invocation: params.invocation,
     binding: params.binding,
-    agentRevision: params.agentRevision,
+    capabilityRequirements,
     runtimeRevisionId: params.runtimeRevisionId,
     gatewayEndpoints,
     governanceConfig,
@@ -652,7 +659,6 @@ async function dispatchToRuntime(params: {
     sessionBinding = await createSessionBinding({
       tenantId: params.tenantId,
       runtimeRevisionId: params.runtimeRevisionId,
-      agentRevisionId: params.agentRevision?.id ?? null,
       threadId: params.threadId,
       externalSessionRef: response.runtime_session_ref,
     });

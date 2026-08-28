@@ -1338,8 +1338,8 @@ describe("publishRuntimeRevisionWithAttestation 双门禁", () => {
     const revision = await createDraftRuntimeRevision({
       tenantId,
       runtimeId: runtime.id,
-      protocolType: "agent_runtime_protocol",
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolType: "harness_runtime_protocol",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://doubao",
       runtimeArtifactRef: `oci://reg/runtime@${computeArtifactDigest("runtime image content")}`,
@@ -1397,8 +1397,8 @@ describe("publishRuntimeRevisionWithAttestation 双门禁", () => {
     const revision = await createDraftRuntimeRevision({
       tenantId,
       runtimeId: runtime.id,
-      protocolType: "agent_runtime_protocol",
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolType: "harness_runtime_protocol",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://x",
       runtimeArtifactRef: `oci://reg/r@${computeArtifactDigest("runtime image content")}`,
@@ -1450,8 +1450,8 @@ describe("publishRuntimeRevisionWithAttestation 双门禁", () => {
     const revision = await createDraftRuntimeRevision({
       tenantId,
       runtimeId: runtime.id,
-      protocolType: "agent_runtime_protocol",
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolType: "harness_runtime_protocol",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://y",
       runtimeArtifactRef: `oci://reg/r@${computeArtifactDigest("runtime image content")}`,

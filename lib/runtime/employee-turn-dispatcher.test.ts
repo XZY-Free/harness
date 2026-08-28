@@ -1,5 +1,3 @@
-import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import {
   type BuilderKeyRegistry,
   type ManagedArtifactStore,
@@ -20,7 +18,6 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import type { AuditActor } from "@/lib/identity/audit";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import { executionBindingTable } from "@/lib/persistence/schema/executions";
 import type { RuntimeRevision } from "@/lib/persistence/schema/runtimes";
 import {
@@ -33,7 +30,6 @@ import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
 import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { subscribeThreadTransientEvents } from "@/lib/runtime/transient-event-bus";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
-import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -159,42 +155,6 @@ async function createVerifiedAttestation(
   );
 }
 
-// ─── 辅助：seed Agent + published AgentRevision + attestation ─
-
-async function seedPublishedAgentRevision(
-  tenantId: string,
-  ownerId: string,
-  agentKey: string,
-  contentSuffix: string,
-): Promise<{ agent: { id: string }; revision: AgentRevision }> {
-  const agent = await createAgent({
-    tenantId,
-    agentKey,
-    displayName: `Agent ${agentKey}`,
-    ownerUserId: ownerId,
-    lifecycleState: "enabled",
-  });
-
-  const revision = await createDraftRevisionWithContractSnapshot({
-    tenantId,
-    agentId: agent.id,
-    modelPolicyJson: { default: "doubao-pro", provider: "doubao" },
-    permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
-    delegationPolicyJson: { allowed_agent_ids: [] },
-    agentInterfaceRequirementsJson: { required: ["event_stream"], optional: [] },
-    createdBy: ownerId,
-  });
-
-  await publishTrustedAgentRevisionForTest({
-    tenantId,
-    revisionId: revision.id,
-    agentExpectedVersionNo: 1,
-    actorId: ownerId,
-  });
-
-  return { agent, revision };
-}
-
 // ─── 辅助：seed Runtime + published RuntimeRevision + attestation ─
 
 async function seedPublishedRuntimeRevision(
@@ -215,8 +175,8 @@ async function seedPublishedRuntimeRevision(
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "agent_runtime_protocol",
-    protocolContractRevision: "agent-runtime-protocol@2",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: `https://runtime-${contentSuffix}.internal`,
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
@@ -255,14 +215,8 @@ describe("dispatchEmployeeTurn", () => {
     const tenantId = tenant.id;
     const ownerId = owner.id;
 
-    // seed 完整 ready route：Agent + published Revision、Runtime + published Revision、
-    // RouteSet + active Route（投影在 activateSingleRouteForTest 中构建）。
-    const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
-      tenantId,
-      ownerId,
-      "default",
-      "v1",
-    );
+    // seed 完整 ready route：Runtime + published Revision、
+    // RouteSet + active base harness Route（顶层恒为 runtime target，agentId/agentRevisionId=null）。
     const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
       tenantId,
       ownerId,
@@ -272,7 +226,7 @@ describe("dispatchEmployeeTurn", () => {
 
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      agentId: null,
       routeScopeKey: "default",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -280,7 +234,7 @@ describe("dispatchEmployeeTurn", () => {
       tenantId,
       routeSetId: routeSet.id,
       routeSetExpectedVersionNo: 1,
-      agentRevisionId: agentRevision.id,
+      agentRevisionId: null,
       runtimeRevisionId: runtimeRevision.id,
       trafficWeight: MAX_TRAFFIC_WEIGHT,
       priorityNo: 1,
@@ -309,8 +263,7 @@ describe("dispatchEmployeeTurn", () => {
       threadId: thread.id,
       turnId: turn.id,
       modelRef: "test-model",
-      // : 线程不再绑定 Agent，测试显式传 agentConstraint 覆盖 seed 的 Agent route（§8.3）。
-      agentConstraint: agent.id,
+      // 顶层恒为 base harness route；modelRef 作为 Thread 模型事实进入 Binding。
       modelFn: async (message, context) => {
         await context.emitTextDelta?.("真实执行器");
         await context.emitTextDelta?.(`回复：${message}`);

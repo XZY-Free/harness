@@ -42,7 +42,6 @@ function revisionFixture(overrides?: Partial<RuntimeRevisionDTO>): RuntimeRevisi
     artifact_ref: null,
     config_hash: `sha256:${"f".repeat(64)}`,
     runtime_capabilities: { measured: { features: { streaming_transport: "pass" } } },
-    agent_contract_snapshot_id: "snap-0001",
     identity_mode: "bearer",
     credential_ref_id: "cred-1",
     network_zone: "public",

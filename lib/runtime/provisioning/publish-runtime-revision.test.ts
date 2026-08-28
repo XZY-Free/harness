@@ -70,8 +70,8 @@ async function seedRuntimePublicationFixture(
   const revision = await createDraftRuntimeRevision({
     tenantId: tenant.id,
     runtimeId: runtime.id,
-    protocolType: "agent_runtime_protocol",
-    protocolContractRevision: "agent-runtime-protocol@2",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: evidenceKind,
     endpointRef: "managed://runtime/publication",
     runtimeArtifactRef:

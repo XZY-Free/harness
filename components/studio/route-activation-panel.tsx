@@ -5,11 +5,12 @@
  *
  * 管理员只需选择智能体版本与运行服务版本（均以业务名称展示），
  * 一次点击先创建/复用默认 scope 的 RouteSet，再用返回版本原子激活
- * 唯一 route（primary / 10000 / 0）。不自动发布任何 Revision，
- * 运行服务只按 agent_contract_snapshot_id 精确匹配，不做名称/顺序推断。
+ * 唯一 route（primary / 10000 / 0）。不自动发布任何 Revision。
+ * 专题01 冻结架构：RuntimeRevision 不再绑定 Agent Contract，选定智能体版本后
+ * 从全部 published 运行服务中解析运行服务版本，不做 snapshot/名称/顺序推断。
  *
  * 同页发布交接：refreshToken 变化重新 GET 真实资产；preferred 版本只有在
- * 新拉取的 published 列表中（运行服务还须与所选智能体版本快照精确匹配）
+ * 新拉取的 published 列表中（AgentRevision 与 RuntimeRevision 各自独立）
  * 才被选中，绝不凭上游 id 造假选项。刷新失败 fail closed。
  */
 import {
@@ -91,27 +92,26 @@ export function RouteActivationPanel({
     setRuntimeRevisionId(value);
   }
 
-  /** 运行服务版本解析：preferred（精确匹配）→ 仍匹配的人工选择 → 唯一匹配 → 空。 */
+  /**
+   * 运行服务版本解析：preferred（精确匹配）→ 仍选择的人工选择 → 唯一匹配 → 空。
+   * 专题01 冻结架构：RuntimeRevision 不再绑定 Agent Contract，运行服务与智能体
+   * 版本不再通过 contract snapshot 自动关联；此处按运行时选项直接解析。
+   */
   function resolveRuntimeRevisionId(
     selected: AgentRevisionSummaryDTO | null,
     options: RuntimeOption[],
     preferred: string | null,
     current: string,
   ): string {
-    // 运行服务只按 agent_contract_snapshot_id 精确匹配；null 不匹配。
-    if (!selected?.agent_contract_snapshot_id) return "";
-    const matching = options.filter(
-      (option) =>
-        option.revision.agent_contract_snapshot_id === selected.agent_contract_snapshot_id,
-    );
-    if (preferred && matching.some((option) => option.revision.id === preferred)) {
+    if (!selected) return "";
+    if (preferred && options.some((option) => option.revision.id === preferred)) {
       return preferred;
     }
-    if (matching.some((option) => option.revision.id === current)) {
+    if (options.some((option) => option.revision.id === current)) {
       return current;
     }
-    if (matching.length === 1) {
-      return matching[0]?.revision.id ?? "";
+    if (options.length === 1) {
+      return options[0]?.revision.id ?? "";
     }
     return "";
   }
@@ -202,16 +202,10 @@ export function RouteActivationPanel({
     [agentRevisions, agentRevisionId],
   );
 
-  // 运行服务只按 agent_contract_snapshot_id 精确匹配；null 不匹配。
+  // 专题01 冻结架构：RuntimeRevision 不再绑定 Agent Contract，运行服务选项不再
+  // 按 contract snapshot 过滤；选定智能体版本后从全部运行服务中解析。
   const matchingRuntimeOptions = useMemo(
-    () =>
-      selectedAgentRevision?.agent_contract_snapshot_id
-        ? runtimeOptions.filter(
-            (option) =>
-              option.revision.agent_contract_snapshot_id ===
-              selectedAgentRevision.agent_contract_snapshot_id,
-          )
-        : [],
+    () => (selectedAgentRevision ? runtimeOptions : []),
     [runtimeOptions, selectedAgentRevision],
   );
 
@@ -231,7 +225,7 @@ export function RouteActivationPanel({
 
   const noRuntimeReason =
     selectedAgentRevision && matchingRuntimeOptions.length === 0
-      ? "没有匹配的运行服务：请先为该智能体版本发布对应的运行服务"
+      ? "没有可用的运行服务：请先发布运行服务"
       : null;
 
   const canSubmit = Boolean(selectedAgentRevision && runtimeRevisionId) && !busy && !loading;

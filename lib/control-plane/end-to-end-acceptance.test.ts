@@ -713,8 +713,8 @@ describe("场景2：真实签名 Runtime Conformance 通过", () => {
     const revision = await createDraftRuntimeRevision({
       tenantId: tenant.id,
       runtimeId: runtime.id,
-      protocolType: "agent_runtime_protocol",
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolType: "harness_runtime_protocol",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://conformance-runtime",
       runtimeArtifactRef: `oci://registry/runtime@sha256:${"a".repeat(64)}`,

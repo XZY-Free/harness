@@ -67,87 +67,6 @@ describe("runtime admin projection", () => {
   });
 });
 
-describe("loadRuntimeRevisionAdminProjection agent_contract_snapshot_id", () => {
-  beforeEach(async () => {
-    await resetDatabase(db);
-  });
-
-  afterEach(async () => {
-    await resetDatabase(db);
-  });
-
-  async function seedRuntimeRevision(options: {
-    agentContractSnapshotId: string | null;
-  }): Promise<{ tenantId: string; revisionId: string }> {
-    const tenant = await ensureDefaultTenant();
-    const agent = await createAgent({
-      tenantId: tenant.id,
-      agentKey: `projection-runtime-${randomUUID()}`,
-      displayName: "Projection Runtime",
-      ownerUserId: randomUUID(),
-    });
-    const runtimeId = randomUUID();
-    const revisionId = randomUUID();
-    await db.insert(runtimeTable).values({
-      id: runtimeId,
-      tenantId: tenant.id,
-      runtimeKey: `runtime-${revisionId}`,
-      displayName: "Runtime",
-      runtimeKind: "external",
-      ownerUserId: randomUUID(),
-      lifecycleState: "enabled",
-      currentRevisionId: revisionId,
-      versionNo: 1,
-    });
-    await db.insert(runtimeRevisionTable).values({
-      id: revisionId,
-      runtimeId,
-      revisionNo: 1,
-      protocolType: "a2a",
-      protocolContractRevision: "a2a@0.3.0",
-      runtimeEvidenceKind: "external_endpoint",
-      runtimeTargetDigest: `sha256:${"b".repeat(64)}`,
-      endpointRef: `https://runtime.example.test/${revisionId}`,
-      runtimeCapabilitiesJson: [],
-      identityMode: "workload_token",
-      networkZone: "internal",
-      configHash: `sha256:${"c".repeat(64)}`,
-      revisionState: "draft",
-      createdBy: "projection-test",
-      agentContractSnapshotId: options.agentContractSnapshotId,
-    });
-    return { tenantId: tenant.id, revisionId };
-  }
-
-  it("外部登记 Revision 投影精确的 AgentContractSnapshot id", async () => {
-    const tenant = await ensureDefaultTenant();
-    const agent = await createAgent({
-      tenantId: tenant.id,
-      agentKey: `projection-agent-${randomUUID()}`,
-      displayName: "Projection Agent",
-      ownerUserId: randomUUID(),
-    });
-    const snapshot = await seedAgentContractSnapshot({
-      tenantId: tenant.id,
-      agentId: agent.id,
-      createdBy: "projection-test",
-    });
-    const seeded = await seedRuntimeRevision({
-      agentContractSnapshotId: snapshot.id,
-    });
-    const projection = await loadRuntimeRevisionAdminProjection(seeded.tenantId, seeded.revisionId);
-    expect(projection).not.toBeNull();
-    expect(projection?.agent_contract_snapshot_id).toBe(snapshot.id);
-  });
-
-  it("无合同快照绑定的 Revision 投影 null", async () => {
-    const seeded = await seedRuntimeRevision({ agentContractSnapshotId: null });
-    const projection = await loadRuntimeRevisionAdminProjection(seeded.tenantId, seeded.revisionId);
-    expect(projection).not.toBeNull();
-    expect(projection?.agent_contract_snapshot_id).toBeNull();
-  });
-});
-
 // ─── 02 专项：Candidate 与 Publication-bound Conformance 分离 ──
 
 describe("loadRuntimeRevisionAdminProjection conformance 语义分离", () => {
@@ -188,8 +107,8 @@ describe("loadRuntimeRevisionAdminProjection conformance 语义分离", () => {
       id: revisionId,
       runtimeId,
       revisionNo: 1,
-      protocolType: "a2a",
-      protocolContractRevision: "a2a@0.3.0",
+      protocolType: "harness_runtime_protocol",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "external_endpoint",
       runtimeTargetDigest,
       endpointRef: `https://runtime.example.test/${revisionId}`,
@@ -199,14 +118,13 @@ describe("loadRuntimeRevisionAdminProjection conformance 语义分离", () => {
       configHash,
       revisionState: "draft",
       createdBy: "projection-test",
-      agentContractSnapshotId: null,
     });
     return {
       tenantId: tenant.id,
       revisionId,
       runtimeTargetDigest,
       configHash,
-      protocolContractRevision: "a2a@0.3.0",
+      protocolContractRevision: "harness-runtime-protocol@1",
     };
   }
 

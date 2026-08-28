@@ -59,7 +59,7 @@ const TARGET_DIGEST = computeRuntimeTargetDigest({
   runtimeEvidenceKind: "hosted_artifact",
   runtimeArtifactDigest: DIGEST_A,
   runtimeConfigDigest: DIGEST_B,
-  protocolContractRevision: "agent-runtime-protocol@2",
+  protocolContractRevision: "harness-runtime-protocol@1",
 });
 
 const DIGEST_C = `sha256:${"c".repeat(64)}`;
@@ -111,8 +111,8 @@ async function seedRevision() {
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "agent_runtime_protocol",
-    protocolContractRevision: "agent-runtime-protocol@2",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: "connection://trusted-runner-test",
     runtimeArtifactRef: `oci://registry/runtime@${DIGEST_A}`,
@@ -150,7 +150,7 @@ function buildDsseEnvelope(
     runtimeRevisionId: revisionId,
     runtimeTargetDigest: TARGET_DIGEST,
     runtimeConfigDigest: DIGEST_B,
-    protocolContractRevision: "agent-runtime-protocol@2",
+    protocolContractRevision: "harness-runtime-protocol@1",
     suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
     runnerArtifactDigest: DIGEST_C,
     runnerIdentity: RUNNER_IDENTITY,
@@ -507,8 +507,8 @@ async function insertDraftRevisionInTx(
     id,
     runtimeId: params.runtimeId,
     revisionNo,
-    protocolType: "agent_runtime_protocol",
-    protocolContractRevision: "agent-runtime-protocol@2",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     runtimeTargetDigest: TARGET_DIGEST,
     endpointRef: "connection://caller-tx-runner",
@@ -738,8 +738,8 @@ describe("RuntimeConformanceRun 调用方事务内追加", () => {
     const revisionA = await createDraftRuntimeRevision({
       tenantId,
       runtimeId: runtime.id,
-      protocolType: "agent_runtime_protocol",
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolType: "harness_runtime_protocol",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://revision-a",
       runtimeArtifactRef: `oci://registry/runtime@${DIGEST_A}`,
@@ -752,8 +752,8 @@ describe("RuntimeConformanceRun 调用方事务内追加", () => {
     const revisionB = await createDraftRuntimeRevision({
       tenantId,
       runtimeId: runtime.id,
-      protocolType: "agent_runtime_protocol",
-      protocolContractRevision: "agent-runtime-protocol@2",
+      protocolType: "harness_runtime_protocol",
+      protocolContractRevision: "harness-runtime-protocol@1",
       runtimeEvidenceKind: "hosted_artifact",
       endpointRef: "connection://revision-b",
       runtimeArtifactRef: `oci://registry/runtime@${DIGEST_A}`,

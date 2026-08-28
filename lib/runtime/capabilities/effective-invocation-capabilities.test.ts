@@ -84,8 +84,8 @@ async function seedRuntimeRevision(
   const revision = await createDraftRuntimeRevision({
     tenantId,
     runtimeId: runtime.id,
-    protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
+    protocolType: "harness_runtime_protocol",
+    protocolContractRevision: "harness-runtime-protocol@1",
     runtimeEvidenceKind: "hosted_artifact",
     endpointRef: "https://caps-runtime.internal",
     runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(content)}`,
@@ -140,7 +140,7 @@ async function seedSnapshot(
 describe("resolveRuntimeLevelCapabilities（05 §4 Base Harness）", () => {
   it("Hosted（string[] 契约）：cancel/resume 可用（Hosted 现有语义保持）", () => {
     const caps = resolveRuntimeLevelCapabilities({
-      protocolType: "agent_runtime_protocol",
+      protocolType: "harness_runtime_protocol",
       runtimeCapabilitiesJson: HOSTED_CAPS,
     });
     expect(caps.cancel).toBe(true);
@@ -150,19 +150,19 @@ describe("resolveRuntimeLevelCapabilities（05 §4 Base Harness）", () => {
 
   it("External 三态投影：只认 measured.features===pass", () => {
     const caps = resolveRuntimeLevelCapabilities({
-      protocolType: "a2a",
+      protocolType: "harness_runtime_protocol",
       runtimeCapabilitiesJson: projection({ cancel: "pass", resume: "not_applicable" }),
     });
     expect(caps.cancel).toBe(true);
     expect(caps.resume).toBe(false);
-    // A2A 冻结范围不含 steer。
+    // External 投影不含 steer（measured.steer 恒 false）。
     expect(caps.steer).toBe(false);
   });
 
   it("形状不可识别/未知协议 → fail-closed 全 false", () => {
     expect(
       resolveRuntimeLevelCapabilities({
-        protocolType: "a2a",
+        protocolType: "harness_runtime_protocol",
         runtimeCapabilitiesJson: { unknown: true },
       }).cancel,
     ).toBe(false);

@@ -150,7 +150,7 @@ describe("validateRuntimePublicationConformanceEvidence", () => {
 
   it("protocol contract 漂移 → conformance_protocol_mismatch", () => {
     const result = validateRuntimePublicationConformanceEvidence(
-      makeEvidence({ run: { protocolContractRevision: "agent-runtime-protocol@2" } }),
+      makeEvidence({ run: { protocolContractRevision: "harness-runtime-protocol@1" } }),
     );
     expect(result.valid).toBe(false);
     expect(codes(result)).toContain("conformance_protocol_mismatch");
