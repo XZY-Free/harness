@@ -12,29 +12,29 @@
  * - 不实现 resume/cancel。
  */
 import { createHash } from "node:crypto";
-import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
-import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
+import type { AgentCall } from "@/lib/agents/calls/domain/agent-call";
+import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
+import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
 import {
-  type ContextNecessity,
-  type InvocationContextContract,
-} from "@/lib/agents/domain/public-agent-contract";
-import {
-  buildInvocationContextBundle,
-  type PlatformContextEnvironment,
-} from "@/lib/context/enrichment/build-invocation-context-bundle";
-import { externalAgentContextPolicyFilter } from "@/lib/context/enrichment/external-agent-context-policy";
-import {
-  AgentTransportError,
   type AgentBackgroundFailureHandler,
   type AgentCallCandidateEvent,
   type AgentCallEventSink,
   type AgentCallTransportAuth,
+  AgentTransportError,
 } from "@/lib/agents/calls/transport/agent-transport";
-import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
-import { resolveOutboundCredential } from "@/lib/identity/resolve-outbound-credential";
-import type { AgentCall } from "@/lib/agents/calls/domain/agent-call";
+import type {
+  ContextNecessity,
+  InvocationContextContract,
+} from "@/lib/agents/domain/public-agent-contract";
+import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
+import {
+  type PlatformContextEnvironment,
+  buildInvocationContextBundle,
+} from "@/lib/context/enrichment/build-invocation-context-bundle";
+import { externalAgentContextPolicyFilter } from "@/lib/context/enrichment/external-agent-context-policy";
 import { db } from "@/lib/db/client";
+import { resolveOutboundCredential } from "@/lib/identity/resolve-outbound-credential";
 import { agentCallEventIngressTable } from "@/lib/persistence/schema/agent-calls";
 import { and, eq, max } from "drizzle-orm";
 
@@ -94,7 +94,10 @@ export class AgentCallContractSnapshotError extends AgentCallStartError {
 
 export class AgentCallContractMismatchError extends AgentCallStartError {
   constructor(callId: string) {
-    super("AGENT_CALL_CONTRACT_MISMATCH", `AgentCall ${callId} 的 contract digest 与 binding 不一致`);
+    super(
+      "AGENT_CALL_CONTRACT_MISMATCH",
+      `AgentCall ${callId} 的 contract digest 与 binding 不一致`,
+    );
   }
 }
 
@@ -124,7 +127,9 @@ export class AgentCallClaimConflictError extends AgentCallStartError {
 
 /** 规范化排序后 sha256（与 ingress payloadHash 语义一致）。 */
 function canonicalSha256(value: unknown): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(sortKeys(value))).digest("hex")}`;
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify(sortKeys(value)))
+    .digest("hex")}`;
 }
 
 function sortKeys(value: unknown): unknown {
@@ -179,8 +184,21 @@ async function synthesizeTerminalEvent(
 async function loadContract(
   tenantId: string,
   callId: string,
-  binding: { agentContractSnapshotId: string; agentContractDigest: string; agentCapabilityDigest: string; agentContextDigest: string },
-): Promise<{ contract: InvocationContextContract; snapshot: { cancel: boolean; resume: boolean; streamingTransport: boolean; inputRequired: boolean } }> {
+  binding: {
+    agentContractSnapshotId: string;
+    agentContractDigest: string;
+    agentCapabilityDigest: string;
+    agentContextDigest: string;
+  },
+): Promise<{
+  contract: InvocationContextContract;
+  snapshot: {
+    cancel: boolean;
+    resume: boolean;
+    streamingTransport: boolean;
+    inputRequired: boolean;
+  };
+}> {
   const snapshot = await mysqlAgentContractStore.transaction((s) =>
     s.findContractSnapshotById(tenantId, binding.agentContractSnapshotId),
   );
@@ -230,7 +248,11 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
   // 3. 协议只接受 a2a 且 contract revision 精确支持 0.3.0/a2a-0.3.0；其它网络前拒绝。
   const supportedRevisions = new Set(["0.3.0", "a2a-0.3.0"]);
   if (binding.protocolType !== "a2a" || !supportedRevisions.has(binding.protocolContractRevision)) {
-    throw new AgentCallUnsupportedProtocolError(callId, binding.protocolType, binding.protocolContractRevision);
+    throw new AgentCallUnsupportedProtocolError(
+      callId,
+      binding.protocolType,
+      binding.protocolContractRevision,
+    );
   }
 
   // 4. 只按 binding.agentContractSnapshotId 读取 header + invocation contexts（exact，不 list latest）。
@@ -342,6 +364,3 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
   // 11. 返回 claim 后的 AgentCall（已 running）；后台流继续经 eventSink 持久化 terminal。
   return claim.call;
 }
-
-
-

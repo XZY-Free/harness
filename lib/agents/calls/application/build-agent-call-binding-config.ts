@@ -11,8 +11,8 @@
  * 由调用方从 ContractSnapshot 提供。本 builder 只做证据装配 + fail-closed 校验。
  */
 import {
-  AgentCallBindingEvidenceError,
   type AgentCallBindingConfigInput,
+  AgentCallBindingEvidenceError,
   assertAgentCallBindingEvidence,
 } from "@/lib/agents/calls/domain/agent-call-binding";
 import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";

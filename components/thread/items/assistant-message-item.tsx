@@ -25,7 +25,11 @@ export function AssistantMessageItem({ item }: AssistantMessageItemProps) {
   if (!displayText && !isPending && !isFailed) return null;
 
   return (
-    <div className="message-row mb-5" data-testid="agent-message" data-item-state={item.item_state}>
+    <div
+      className="message-row mb-5"
+      data-testid="assistant-message"
+      data-item-state={item.item_state}
+    >
       <div className="conversation-copy prose-markdown text-foreground">
         <Markdown>{displayText}</Markdown>
         {isPending && (

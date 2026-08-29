@@ -1,3 +1,8 @@
+import {
+  type IngestAgentCallEventsInput,
+  type IngestAgentCallEventsResult,
+  applyAgentCallEvents,
+} from "@/lib/agents/calls/persistence/apply-agent-call-events";
 /**
  * ingestAgentCallEvents — AgentCallEventIngress 原子应用应用服务（专题01 Batch6）。
  *
@@ -8,11 +13,6 @@
  * Turn / ThreadItems。任何事件非法/不匹配 → 整批回滚。
  */
 import { db } from "@/lib/db/client";
-import {
-  applyAgentCallEvents,
-  type IngestAgentCallEventsInput,
-  type IngestAgentCallEventsResult,
-} from "@/lib/agents/calls/persistence/apply-agent-call-events";
 
 export type { IngestAgentCallEventsInput, IngestAgentCallEventsResult };
 

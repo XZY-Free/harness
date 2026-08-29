@@ -25,8 +25,8 @@ import type { ClientItem, ClientStreamStatus, ClientTurn } from "@/lib/client/ty
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { AssistantMessageItem } from "./items/assistant-message-item";
 import { ArtifactItem } from "./items/artifact-item";
+import { AssistantMessageItem } from "./items/assistant-message-item";
 import { ChildThreadItem } from "./items/child-thread-item";
 import { JobResultItem } from "./items/job-result-item";
 import { ToolCallItem } from "./items/tool-call-item";

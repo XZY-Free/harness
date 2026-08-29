@@ -18,9 +18,9 @@ import { randomUUID } from "node:crypto";
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
 import {
   type ExecutionScenario,
-  seedAgentCallExecutionScenario,
-  loadFrozenBinding,
   loadAttempt,
+  loadFrozenBinding,
+  seedAgentCallExecutionScenario,
   waitForCallTerminal,
 } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { db } from "@/lib/db/client";
@@ -33,8 +33,8 @@ import {
 import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/schema/executions";
 import { credentialRefTable } from "@/lib/persistence/schema/tool";
 import {
-  executionSubjectFromUserIdentity,
   type ExecutionSubject,
+  executionSubjectFromUserIdentity,
 } from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -45,7 +45,10 @@ const NOW = new Date("2026-08-29T00:00:00.000Z");
 const trackedEnvVars = new Set<string>();
 
 /** 生成 trusted executionSubject（tenant 与 call 一致，满足"verify its tenant equals call tenant"）。 */
-function subjectFor(scenario: ExecutionScenario, overrides?: Partial<ExecutionSubject>): ExecutionSubject {
+function subjectFor(
+  scenario: ExecutionScenario,
+  overrides?: Partial<ExecutionSubject>,
+): ExecutionSubject {
   const subject = executionSubjectFromUserIdentity(scenario.tenantId, `user:${randomUUID()}`);
   return overrides ? { ...subject, ...overrides } : subject;
 }
@@ -266,7 +269,9 @@ describe("startAgentCall 执行域启动", () => {
     expect(authHeader).toBe(`Bearer ${scenario.credentialToken}`);
     // 新 credential 的 token 绝不进入任何 Authorization（不能用 credentialRefId 冒充 token）。
     expect(
-      scenario.provider.requests.every((r) => r.authorization !== `Bearer ${latest.newCredentialToken}`),
+      scenario.provider.requests.every(
+        (r) => r.authorization !== `Bearer ${latest.newCredentialToken}`,
+      ),
     ).toBe(true);
     // contract 元数据来自 binding 冻结 snapshot：outbound 仍发 current_datetime（冻结合同声明），
     // 而绝不含新合同才声明的 timezone —— 若错误使用最新修订合同，此处会反转。
@@ -307,9 +312,7 @@ describe("startAgentCall 执行域启动", () => {
       contract: {
         contract_version: "1.0.0",
         agent: { id: "exec-agent", name: { "zh-CN": "执行测试Agent" }, version: "1.0.0" },
-        capabilities: [
-          { key: "general_assistance", name: { "zh-CN": "通用协助" } },
-        ],
+        capabilities: [{ key: "general_assistance", name: { "zh-CN": "通用协助" } }],
         invocation_context: [
           { key: "conversation_context", name: { "zh-CN": "会话" }, necessity: "required" },
         ],
@@ -342,7 +345,11 @@ describe("startAgentCall 执行域启动", () => {
 
     // 三种失败均不触碰父 Invocation。
     for (const s of [emptyInput, missingCtx, deniedCtx]) {
-      const [p] = await db.select().from(invocationTable).where(eq(invocationTable.id, s.parentInvocationId)).limit(1);
+      const [p] = await db
+        .select()
+        .from(invocationTable)
+        .where(eq(invocationTable.id, s.parentInvocationId))
+        .limit(1);
       expect(p?.executionState).toBe("running");
     }
   });
@@ -387,7 +394,10 @@ describe("startAgentCall 执行域启动", () => {
     await badProtocol.provider.close();
 
     // 凭据失败参数化：missing/revoked/rotated(fingerprint)/expired。
-    const credentialCases: Array<{ name: string; mutate: (p: { id: string; envVar: string; token: string; tenantId: string }) => Promise<void> }> = [
+    const credentialCases: Array<{
+      name: string;
+      mutate: (p: { id: string; envVar: string; token: string; tenantId: string }) => Promise<void>;
+    }> = [
       {
         name: "credential 缺失",
         mutate: async (p) => {
@@ -397,19 +407,28 @@ describe("startAgentCall 执行域启动", () => {
       {
         name: "credential revoked",
         mutate: async (p) => {
-          await db.update(credentialRefTable).set({ lifecycleState: "revoked" }).where(eq(credentialRefTable.id, p.id));
+          await db
+            .update(credentialRefTable)
+            .set({ lifecycleState: "revoked" })
+            .where(eq(credentialRefTable.id, p.id));
         },
       },
       {
         name: "credential 过期",
         mutate: async (p) => {
-          await db.update(credentialRefTable).set({ expiresAt: new Date("2020-01-01T00:00:00Z") }).where(eq(credentialRefTable.id, p.id));
+          await db
+            .update(credentialRefTable)
+            .set({ expiresAt: new Date("2020-01-01T00:00:00Z") })
+            .where(eq(credentialRefTable.id, p.id));
         },
       },
       {
         name: "credential fingerprint 不匹配（rotated）",
         mutate: async (p) => {
-          await db.update(credentialRefTable).set({ fingerprint: "sha256:" + "a".repeat(64) }).where(eq(credentialRefTable.id, p.id));
+          await db
+            .update(credentialRefTable)
+            .set({ fingerprint: `sha256:${"a".repeat(64)}` })
+            .where(eq(credentialRefTable.id, p.id));
         },
       },
     ];
@@ -422,7 +441,11 @@ describe("startAgentCall 执行域启动", () => {
       // 错误/ingress 中不得出现 token（secret 红线）。
       expect(JSON.stringify(err)).not.toContain(s.credentialToken);
       // 无 parent 变更。
-      const [p] = await db.select().from(invocationTable).where(eq(invocationTable.id, s.parentInvocationId)).limit(1);
+      const [p] = await db
+        .select()
+        .from(invocationTable)
+        .where(eq(invocationTable.id, s.parentInvocationId))
+        .limit(1);
       expect(p?.executionState).toBe("running");
       await s.provider.close();
     }
@@ -437,9 +460,16 @@ describe("startAgentCall 执行域启动", () => {
     await startAgentCall(startParams(dead)).catch(() => {});
     const deadTerminal = await waitForCallTerminal(dead.callId, dead.tenantId);
     expect(["failed", "lost"]).toContain(deadTerminal.state);
-    const [deadParent] = await db.select().from(invocationTable).where(eq(invocationTable.id, dead.parentInvocationId)).limit(1);
+    const [deadParent] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, dead.parentInvocationId))
+      .limit(1);
     expect(deadParent?.executionState).toBe("running");
-    const deadSessions = await db.select().from(agentSessionBindingTable).where(eq(agentSessionBindingTable.tenantId, dead.tenantId));
+    const deadSessions = await db
+      .select()
+      .from(agentSessionBindingTable)
+      .where(eq(agentSessionBindingTable.tenantId, dead.tenantId));
     expect(deadSessions.length).toBe(0);
     await dead.provider.close();
 
@@ -450,7 +480,10 @@ describe("startAgentCall 执行域启动", () => {
     await startAgentCall(startParams(auth)).catch(() => {});
     const authTerminal = await waitForCallTerminal(auth.callId, auth.tenantId);
     expect(authTerminal.state).toBe("failed");
-    const authSessions = await db.select().from(agentSessionBindingTable).where(eq(agentSessionBindingTable.tenantId, auth.tenantId));
+    const authSessions = await db
+      .select()
+      .from(agentSessionBindingTable)
+      .where(eq(agentSessionBindingTable.tenantId, auth.tenantId));
     expect(authSessions.length).toBe(0);
     await auth.provider.close();
 
@@ -461,7 +494,11 @@ describe("startAgentCall 执行域启动", () => {
     await startAgentCall(startParams(flaky)).catch(() => {});
     const flakyTerminal = await waitForCallTerminal(flaky.callId, flaky.tenantId);
     expect(["failed", "lost"]).toContain(flakyTerminal.state);
-    const [flakyParent] = await db.select().from(invocationTable).where(eq(invocationTable.id, flaky.parentInvocationId)).limit(1);
+    const [flakyParent] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, flaky.parentInvocationId))
+      .limit(1);
     expect(flakyParent?.executionState).toBe("running");
     await flaky.provider.close();
 
@@ -471,9 +508,16 @@ describe("startAgentCall 执行域启动", () => {
     await startAgentCall(startParams(malformed)).catch(() => {});
     const malformedTerminal = await waitForCallTerminal(malformed.callId, malformed.tenantId);
     expect(["failed", "lost"]).toContain(malformedTerminal.state);
-    const [malformedParent] = await db.select().from(invocationTable).where(eq(invocationTable.id, malformed.parentInvocationId)).limit(1);
+    const [malformedParent] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, malformed.parentInvocationId))
+      .limit(1);
     expect(malformedParent?.executionState).toBe("running");
-    const malformedSessions = await db.select().from(agentSessionBindingTable).where(eq(agentSessionBindingTable.tenantId, malformed.tenantId));
+    const malformedSessions = await db
+      .select()
+      .from(agentSessionBindingTable)
+      .where(eq(agentSessionBindingTable.tenantId, malformed.tenantId));
     expect(malformedSessions.length).toBe(0);
     await malformed.provider.close();
   });
@@ -507,9 +551,12 @@ describe("startAgentCall 执行域启动", () => {
     const failAttempt = await loadAttempt(remoteFail.callId, remoteFail.tenantId);
     expect(failAttempt?.attemptState).toBe("failed");
     expect(failAttempt?.dispatchAttemptCount).toBe(1);
-    const [failParent] = await db.select().from(invocationTable).where(eq(invocationTable.id, remoteFail.parentInvocationId)).limit(1);
+    const [failParent] = await db
+      .select()
+      .from(invocationTable)
+      .where(eq(invocationTable.id, remoteFail.parentInvocationId))
+      .limit(1);
     expect(failParent?.executionState).toBe("running");
     await remoteFail.provider.close();
   });
 });
-

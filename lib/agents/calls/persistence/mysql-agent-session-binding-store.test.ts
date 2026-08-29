@@ -189,7 +189,9 @@ describe("mysqlAgentSessionBindingStore", () => {
 });
 
 /** 尝试 create 并捕获结果：返回 { ok, value } 或 { ok:false }（失败即 fail-closed，可接受）。 */
-async function captureCreate<T>(fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+async function captureCreate<T>(
+  fn: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false }> {
   try {
     return { ok: true, value: await fn() };
   } catch {

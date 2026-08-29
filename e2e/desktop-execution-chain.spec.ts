@@ -17,8 +17,8 @@
  * 断言策略与 Web 一致：结构性事实全断言，回复文本只记日志不校验。
  *
  * 本用例跑在 e2e-bootstrap 的**基础 Harness Route**（§8.3 base route，
- * agentRevisionId=null）之上，即专题01 的 0-Agent 场景：ExecutionBinding 的
- * Agent Evidence 为条件性完整组的「全空」终态（canonical null，§10.3/§18）。
+ * agentRevisionId=null）之上，即专题01 的 0-Agent 场景：冻结架构下 ExecutionBinding
+ * 不携带任何 Agent evidence 字段（serializeExecutionBinding 已移除，字段缺席）。
  * Agent-backed 场景由 agent-execution-chain.spec.ts（J-3 集成侧）+ 场景21 覆盖。
  */
 import { type Page, expect, test } from "@playwright/test";
@@ -103,7 +103,7 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     await expect(window.getByTestId("desktop-thread-titlebar")).toBeVisible({ timeout: 30_000 });
 
     // ─── 4. Agent 回复渲染（结构性断言）────────────────────
-    const agentMessage = window.getByTestId("agent-message").first();
+    const agentMessage = window.getByTestId("assistant-message").first();
     await expect(agentMessage).toBeVisible({ timeout: 90_000 });
     await expect
       .poll(async () => (await agentMessage.innerText()).trim().length, { timeout: 90_000 })
@@ -137,12 +137,13 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     expect(binding.conformance_run_id).toMatch(UUID_PATTERN);
     expect(binding.resolution_input_digest).toMatch(SHA256_PATTERN);
     expect(binding.resolution_input_digest).not.toBe(PLACEHOLDER_DIGEST);
-    // §10.3/§18：0-Agent 基础 Harness Route — Agent Evidence 条件性完整组为「全空」（canonical null）。
-    // Desktop 与 Web 走同一正式 Binding 模型；Agent 不是执行前置（§35）。
-    expect(binding.agent_revision_id).toBeNull();
-    expect(binding.agent_contract_snapshot_id).toBeNull();
-    expect(binding.agent_contract_digest).toBeNull();
-    expect(binding.agent_publication_record_id).toBeNull();
+    // 冻结架构（专题01 §5/§6）：ExecutionBinding 只绑定 Harness Runtime，不再携带任何 Agent evidence。
+    // serializeExecutionBinding 已彻底移除 agent_revision_id / agent_contract_* / agent_publication_record_id
+    // 字段（Batch4 删除，字段缺席 undefined，非 null）。Desktop 与 Web 走同一正式 Binding 模型。
+    expect(binding.agent_revision_id).toBeUndefined();
+    expect(binding.agent_contract_snapshot_id).toBeUndefined();
+    expect(binding.agent_contract_digest).toBeUndefined();
+    expect(binding.agent_publication_record_id).toBeUndefined();
     expect((binding.runtime_attestation_ids as string[]).length).toBeGreaterThan(0);
 
     // ─── 6. Workspace / Environment 正常 ────────────────────
@@ -155,8 +156,8 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     // ─── 7. Timeline 恢复（重载 renderer 后历史仍在）────────
     await window.reload();
     await waitForShell(window);
-    await expect(window.getByTestId("agent-message").first()).toBeVisible({ timeout: 90_000 });
-    const restoredText = (await window.getByTestId("agent-message").first().innerText()).trim();
+    await expect(window.getByTestId("assistant-message").first()).toBeVisible({ timeout: 90_000 });
+    const restoredText = (await window.getByTestId("assistant-message").first().innerText()).trim();
     expect(restoredText.length).toBeGreaterThan(0);
 
     console.log(

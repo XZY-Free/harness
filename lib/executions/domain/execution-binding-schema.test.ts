@@ -20,10 +20,10 @@ describe("ExecutionBinding Attestation JSON 基线约束", () => {
 
   it("专题01 冻结架构：ExecutionBinding 不再携带 Agent Contract 证据列；Runtime Artifact ID 可空（external_endpoint）", () => {
     const schema = projectFile("lib/persistence/schema/executions.ts");
-    const latest = projectFile("drizzle/0016_youthful_redwing.sql");
+    const baseline = projectFile("drizzle/0000_initial_schema.sql");
 
     // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带任何 Agent evidence，
-    // Agent Contract / Publication 证据列已从 schema 移除。
+    // Agent Contract / Publication 证据列已从 schema 移除（源码与迁移基线均不得含）。
     for (const column of [
       "agentContractSnapshotId",
       "agentContractDigest",
@@ -42,9 +42,10 @@ describe("ExecutionBinding Attestation JSON 基线约束", () => {
     expect(schema).toContain('"hosted_artifact",');
     expect(schema).toContain('"external_endpoint",');
 
-    // 迁移 0016 正式删除 Agent 源码权威列。
+    // 干净基线（Batch9 收口重建单一 0000）：ExecutionBinding 自始不再创建 Agent 源码权威列
+    // （旧增量迁移 0016 的 DROP COLUMN 已随历史折叠，基线本身无这些列，0 DROP COLUMN）。
     for (const column of ["agentArtifactId", "agentArtifactDigest", "agentAttestationIds"]) {
-      expect(latest).toContain(`DROP COLUMN \`${column}\``);
+      expect(baseline).not.toContain(`\`${column}\``);
     }
     expect(schema).toContain("ExecutionBinding_runtimeArtifact_idx");
   });

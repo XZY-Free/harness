@@ -230,7 +230,9 @@ describe("mysqlAgentCallEventIngressStore", () => {
 });
 
 /** 尝试 accept 并捕获结果：{ ok, value } 或 { ok:false }（抛错即 fail-closed，可接受）。 */
-async function captureAccept<T>(fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+async function captureAccept<T>(
+  fn: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false }> {
   try {
     return { ok: true, value: await fn() };
   } catch {

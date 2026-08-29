@@ -14,10 +14,7 @@ import type {
  */
 import { db } from "@/lib/db/client";
 import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
-import {
-  agentCallEventIngressTable,
-  agentCallTable,
-} from "@/lib/persistence/schema/agent-calls";
+import { agentCallEventIngressTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import { and, eq } from "drizzle-orm";
 
 export const mysqlAgentCallEventIngressStore: AgentCallEventIngressStore = {
@@ -43,7 +40,10 @@ export const mysqlAgentCallEventIngressStore: AgentCallEventIngressStore = {
       )
       .limit(1);
     if (byEventId) {
-      if (byEventId.payloadHash === input.payloadHash && byEventId.candidateType === input.candidateType) {
+      if (
+        byEventId.payloadHash === input.payloadHash &&
+        byEventId.candidateType === input.candidateType
+      ) {
         return { status: "duplicate", ingress: toAgentCallEventIngress(byEventId) };
       }
       return { status: "hash_conflict" };
@@ -77,7 +77,10 @@ export const mysqlAgentCallEventIngressStore: AgentCallEventIngressStore = {
           )
           .limit(1);
         if (bySeq) {
-          if (bySeq.payloadHash === input.payloadHash && bySeq.candidateType === input.candidateType) {
+          if (
+            bySeq.payloadHash === input.payloadHash &&
+            bySeq.candidateType === input.candidateType
+          ) {
             return { status: "duplicate", ingress: toAgentCallEventIngress(bySeq) };
           }
           return { status: "hash_conflict" };

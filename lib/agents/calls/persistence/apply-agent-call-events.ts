@@ -14,8 +14,10 @@
  * canonical payloadHash 含事件 TYPE + 递归规范化 payload（computePayloadHash 已排序）。
  */
 import { createHash } from "node:crypto";
-import type { AgentCallCandidateEvent } from "@/lib/agents/calls/transport/agent-transport";
+import { randomUUID } from "node:crypto";
 import type { AgentCallState } from "@/lib/agents/calls/domain/agent-call";
+import type { AgentCallCandidateEvent } from "@/lib/agents/calls/transport/agent-transport";
+import type { DbOrTx } from "@/lib/db/client";
 import {
   agentCallAttemptTable,
   agentCallBindingTable,
@@ -24,9 +26,7 @@ import {
   agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
 import { invocationTable } from "@/lib/persistence/schema/executions";
-import type { DbOrTx } from "@/lib/db/client";
 import { and, eq } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 
 const SUPPORTED_TYPES = new Set([
   "call.started",
@@ -75,14 +75,18 @@ interface ParsedEvent {
 
 /** 结构化校验单个事件；非法即抛稳定错误（不泄露 payload 细节）。 */
 function parseEvent(e: AgentCallCandidateEvent): ParsedEvent {
-  if (!e.producer_event_id || typeof e.producer_event_id !== "string" || e.producer_event_id.trim() === "") {
+  if (
+    !e.producer_event_id ||
+    typeof e.producer_event_id !== "string" ||
+    e.producer_event_id.trim() === ""
+  ) {
     throw new Error("AgentCallEvent 缺少合法 producer_event_id");
   }
   if (!Number.isInteger(e.producer_sequence) || e.producer_sequence < 1) {
     throw new Error("AgentCallEvent producer_sequence 必须为正整数");
   }
   if (!SUPPORTED_TYPES.has(e.type)) {
-    throw new Error(`不支持的 AgentCall 候选事件类型`);
+    throw new Error("不支持的 AgentCall 候选事件类型");
   }
   if (e.payload === null || typeof e.payload !== "object" || Array.isArray(e.payload)) {
     throw new Error("AgentCallEvent payload 必须为对象");
@@ -123,7 +127,9 @@ async function lockCall(tx: DbOrTx, callId: string, tenantId: string): Promise<C
   const [binding] = await tx
     .select()
     .from(agentCallBindingTable)
-    .where(and(eq(agentCallBindingTable.callId, callId), eq(agentCallBindingTable.tenantId, tenantId)))
+    .where(
+      and(eq(agentCallBindingTable.callId, callId), eq(agentCallBindingTable.tenantId, tenantId)),
+    )
     .limit(1)
     .for("update");
   if (!binding) throw new Error(`AgentCallBinding ${callId} 不存在`);
@@ -242,7 +248,12 @@ async function writeIngress(
   return "accepted";
 }
 
-async function markMapped(tx: DbOrTx, callId: string, tenantId: string, producerEventId: string): Promise<void> {
+async function markMapped(
+  tx: DbOrTx,
+  callId: string,
+  tenantId: string,
+  producerEventId: string,
+): Promise<void> {
   await tx
     .update(agentCallEventIngressTable)
     .set({ ingressState: "mapped", mappedAt: new Date() })
@@ -295,7 +306,11 @@ export async function applyAgentCallEvents(
       if (p.taskId && externalTaskRef === null) {
         externalTaskRef = p.taskId;
         externalContextRef = p.contextId ?? null;
-        await ensureSession(tx, lock, input.tenantId, lock.parentThreadId, p.contextId!);
+        // call.started 首次官方 Task 必须携带 contextId 才能建立会话；缺失即 fail closed。
+        if (!p.contextId) {
+          throw new Error("call.started 缺少 contextId，无法建立 AgentCall 会话");
+        }
+        await ensureSession(tx, lock, input.tenantId, lock.parentThreadId, p.contextId);
         await tx
           .update(agentCallTable)
           .set({ externalTaskRef, externalContextRef, versionNo: lock.versionNo + 1 })
@@ -339,7 +354,15 @@ export async function applyAgentCallEvents(
           versionNo: lock.versionNo + 1,
         })
         .where(eq(agentCallTable.id, input.callId));
-      await updateAttempt(tx, input.callId, input.tenantId, "completed", externalTaskRef, null, null);
+      await updateAttempt(
+        tx,
+        input.callId,
+        input.tenantId,
+        "completed",
+        externalTaskRef,
+        null,
+        null,
+      );
       await markMapped(tx, input.callId, input.tenantId, p.e.producer_event_id);
       continue;
     }
@@ -355,7 +378,10 @@ export async function applyAgentCallEvents(
     }
 
     // call.failed / call.cancelled / call.lost
-    const terminalState = TERMINAL[p.type]!;
+    const terminalState = TERMINAL[p.type];
+    if (!terminalState) {
+      throw new Error(`未知 AgentCall 终态事件类型: ${p.type}`);
+    }
     state = terminalState;
     const err = (p.e.payload.error ?? {}) as Record<string, unknown>;
     const errorCode = typeof err.code === "string" ? err.code : p.type;
@@ -372,7 +398,15 @@ export async function applyAgentCallEvents(
         versionNo: lock.versionNo + 1,
       })
       .where(eq(agentCallTable.id, input.callId));
-    await updateAttempt(tx, input.callId, input.tenantId, terminalState, externalTaskRef, errorCode, errorSummary);
+    await updateAttempt(
+      tx,
+      input.callId,
+      input.tenantId,
+      terminalState,
+      externalTaskRef,
+      errorCode,
+      errorSummary,
+    );
     await markMapped(tx, input.callId, input.tenantId, p.e.producer_event_id);
   }
 
@@ -391,16 +425,27 @@ async function updateAttempt(
   const [attempt] = await tx
     .select()
     .from(agentCallAttemptTable)
-    .where(and(eq(agentCallAttemptTable.callId, callId), eq(agentCallAttemptTable.tenantId, tenantId)))
+    .where(
+      and(eq(agentCallAttemptTable.callId, callId), eq(agentCallAttemptTable.tenantId, tenantId)),
+    )
     .orderBy(agentCallAttemptTable.attemptNo)
     .limit(1);
   if (!attempt) return;
   const updates: Record<string, unknown> = { attemptState, updatedAt: new Date() };
-  if (externalTaskRef !== undefined && externalTaskRef !== null) updates.externalTaskRef = externalTaskRef;
-  if (attemptState === "completed" || attemptState === "failed" || attemptState === "cancelled" || attemptState === "lost") {
+  if (externalTaskRef !== undefined && externalTaskRef !== null)
+    updates.externalTaskRef = externalTaskRef;
+  if (
+    attemptState === "completed" ||
+    attemptState === "failed" ||
+    attemptState === "cancelled" ||
+    attemptState === "lost"
+  ) {
     updates.finishedAt = new Date();
   }
   if (errorCode) updates.errorCode = errorCode;
   if (errorSummary) updates.errorSummary = errorSummary;
-  await tx.update(agentCallAttemptTable).set(updates).where(eq(agentCallAttemptTable.id, attempt.id));
+  await tx
+    .update(agentCallAttemptTable)
+    .set(updates)
+    .where(eq(agentCallAttemptTable.id, attempt.id));
 }

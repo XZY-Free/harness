@@ -16,10 +16,8 @@
  * - **不断言回复文本内容**——模型措辞不是被测对象，写死会造成脆弱断言。
  *   回复原文打到测试日志，供人工与 CI 日志核对是否正常。
  * - ExecutionBinding 逐字段核对：route + runtime 无条件证据必填（§8.1），
- *   Agent Evidence 为条件性完整组的「全空」终态（canonical null，§10.3/§18）；
+ *   冻结架构下 ExecutionBinding 不再携带任何 Agent evidence 字段（Batch4 移除，字段缺席）；
  *   并明确拒绝 §18.6 禁止的全零占位摘要。
- *
- * Agent-backed 场景（Agent 证据全完整）由 agent-execution-chain.spec.ts（J-3）覆盖。
  *
  * 事实源：docs/V12/01/SnowHarness 专题 01 最终收口实施总方案.md §8.1 / §10.3 / §18.6 / §20.4
  */
@@ -61,19 +59,15 @@ interface ThreadEventItem {
 
 interface ExecutionBindingResponse {
   invocation_id: string;
-  agent_revision_id: string | null;
   runtime_revision_id: string;
   deployment_route_id: string;
   route_revision_id: string;
   route_activation_id: string;
   route_content_digest: string;
-  agent_contract_snapshot_id: string | null;
   runtime_artifact_digest: string;
   runtime_config_digest: string;
   capability_manifest_digest: string;
-  agent_contract_digest: string | null;
   runtime_attestation_ids: readonly string[];
-  agent_publication_record_id: string | null;
   runtime_publication_record_id: string;
   conformance_run_id: string;
   resolution_input_digest: string;
@@ -137,7 +131,7 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   expect(threadId).toMatch(UUID_PATTERN);
 
   // ─── 3. Agent 回复在时间线渲染（结构性断言，不校验文本）──
-  const agentMessage = page.getByTestId("agent-message").first();
+  const agentMessage = page.getByTestId("assistant-message").first();
   await expect(agentMessage).toBeVisible({ timeout: 90_000 });
   await expect
     .poll(async () => (await agentMessage.innerText()).trim().length, { timeout: 90_000 })
@@ -189,17 +183,22 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   expect(binding.runtime_config_digest).toMatch(SHA256_PATTERN);
   expect(binding.capability_manifest_digest).toMatch(SHA256_PATTERN);
 
-  // §10.3/§18：0-Agent 基础 Harness Route — Agent Evidence 条件性完整组为「全空」（canonical null）。
-  // Agent 不是 Thread 或基础 Harness 执行的前置条件（§35），agent_* 全部为 null 是合法终态。
-  expect(binding.agent_revision_id).toBeNull();
-  expect(binding.agent_contract_snapshot_id).toBeNull();
-  expect(binding.agent_contract_digest).toBeNull();
-  expect(binding.agent_publication_record_id).toBeNull();
+  // 冻结架构（专题01 §5/§6）：ExecutionBinding 只绑定 Harness Runtime，不再携带任何 Agent evidence。
+  // serializeExecutionBinding 已彻底移除 agent_revision_id / agent_contract_* / agent_publication_record_id
+  // 字段（Batch4 删除，非 null 而是字段缺席 undefined）。Agent 不是 Thread 或基础 Harness 执行的前置条件（§35）。
+  expect((binding as unknown as Record<string, unknown>).agent_revision_id).toBeUndefined();
+  expect(
+    (binding as unknown as Record<string, unknown>).agent_contract_snapshot_id,
+  ).toBeUndefined();
+  expect((binding as unknown as Record<string, unknown>).agent_contract_digest).toBeUndefined();
+  expect(
+    (binding as unknown as Record<string, unknown>).agent_publication_record_id,
+  ).toBeUndefined();
 
   // §8.5：Runtime Attestation 集合必须非空（不是"子集"，是当时的完整集合）。
   expect(binding.runtime_attestation_ids.length).toBeGreaterThan(0);
 
-  // §8.6：Publication 精确绑定 — Runtime 无条件、Agent 条件性（此处为 null）。
+  // §8.6：Publication 精确绑定 — Runtime 无条件（ExecutionBinding 只冻结 Runtime Publication）。
   expect(binding.runtime_publication_record_id).toMatch(UUID_PATTERN);
 
   // §8.4：冻结的是确切的 ConformanceRun（Runtime Publication Conformance 无条件严格）。
@@ -236,11 +235,15 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   // 有关的运行时事件，否则任何"空跑"都会误判为通过（§20.4 / §21）。
   // 本次 Web 链产生的真实运行时事件（事实源 lib/runtime/event-ingress-queries.ts）：
   //   - item.created   payload.item_type="user_message"（用户输入）
-  //   - item.created   payload.item_type="agent_message" payload.source="response.completed"（Agent 回复落地）
-  //   - invocation.completed  payload.finish_reason="response.completed"（本次 Invocation 完成）
+  //   - item.created   payload.item_type="assistant_message" payload.source="response.completed"（Harness 最终回答落地）
+  //   - invocation.completed  payload.finish_reason="execution.completed"（本次 Invocation 完成；
+  //     终态 Authority 拆分后由 execution.completed 唯一写入，专题01 c98cf91）
+  //
+  // 冻结架构（专题01 §19）：顶层正式回答统一为 assistant_message（由 Harness 生成），
+  // 外部 Agent 原始输出经 AgentCall result 持久化，绝不冒充顶层 agent_message。
   //
   // 关联规则（§事件溯源）：用户消息 item.created 在 Invocation 创建**之前**写入，
-  // 故不带 invocation_id，只能按 turn_id 关联；agent_message / invocation.completed
+  // 故不带 invocation_id，只能按 turn_id 关联；assistant_message / invocation.completed
   // 属于本次 Invocation 内部事件，按 invocation_id + turn_id 关联。
   const turnEvents = eventsBody.items.filter((event) => event.turn_id === turnId);
   expect(turnEvents.length, `本次 Turn(${turnId}) 必须产生运行时事件`).toBeGreaterThan(0);
@@ -256,7 +259,7 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   expect(userItemEvent, "必须存在用户消息 item.created 运行时事件").toBeTruthy();
   expect(userItemEvent?.item_id).toMatch(UUID_PATTERN);
 
-  // agent_message / invocation.completed：属于本次 Invocation → 按 invocation_id + turn_id。
+  // assistant_message / invocation.completed：属于本次 Invocation → 按 invocation_id + turn_id。
   const invocationEvents = eventsBody.items.filter(
     (event) => event.invocation_id === invocationId && event.turn_id === turnId,
   );
@@ -269,23 +272,40 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
     expect(event.turn_id).toBe(turnId);
   }
 
-  const agentItemEvent = invocationEvents.find(
+  const assistantItemEvent = invocationEvents.find(
     (event) =>
       event.event_type === "item.created" &&
-      event.payload_json?.item_type === "agent_message" &&
+      event.payload_json?.item_type === "assistant_message" &&
       event.payload_json?.source === "response.completed",
   );
   expect(
-    agentItemEvent,
-    "必须存在 agent_message 落地（response.completed）运行时事件",
+    assistantItemEvent,
+    "必须存在 assistant_message 落地（response.completed）运行时事件",
   ).toBeTruthy();
-  expect(agentItemEvent?.item_id).toMatch(UUID_PATTERN);
+  expect(assistantItemEvent?.item_id).toMatch(UUID_PATTERN);
 
-  const invocationCompletedEvent = invocationEvents.find(
-    (event) =>
-      event.event_type === "invocation.completed" &&
-      event.payload_json?.finish_reason === "response.completed",
-  );
+  // 冻结架构（专题01）：invocation.completed 由 execution.completed 独立 Authority 异步写入
+  // （response.completed 只落 assistant_message，不越权写终态；event-ingress §「response.completed」）。
+  // 故必须轮询等待该终态事件出现，而非单次查询（避免与异步写入竞态）。
+  let invocationCompletedEvent: ThreadEventItem | undefined;
+  await expect
+    .poll(
+      async () => {
+        const pollResponse = await request.get(`${ADMIN_BASE}/threads/${threadId}/events`);
+        if (pollResponse.status() !== 200) return false;
+        const pollBody = (await pollResponse.json()) as ThreadEventsResponse;
+        invocationCompletedEvent = pollBody.items.find(
+          (event) =>
+            event.invocation_id === invocationId &&
+            event.turn_id === turnId &&
+            event.event_type === "invocation.completed" &&
+            event.payload_json?.finish_reason === "execution.completed",
+        );
+        return invocationCompletedEvent !== undefined;
+      },
+      { timeout: 30_000, intervals: [250, 500, 1000, 2000] },
+    )
+    .toBe(true);
   expect(invocationCompletedEvent, "必须存在本次 Invocation 的 assistant 完成事件").toBeTruthy();
   expect(invocationCompletedEvent?.invocation_id).toBe(invocationId);
 

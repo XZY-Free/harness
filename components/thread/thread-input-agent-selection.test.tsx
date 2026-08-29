@@ -41,7 +41,11 @@ describe("已有会话单轮助手选择", () => {
     render(<ThreadInput {...props} />);
     await chooseAgent();
     await send();
-    await waitFor(() => expect((screen.getByRole("textbox", { name: "消息输入框" }) as HTMLTextAreaElement).value).toBe(""));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("textbox", { name: "消息输入框" }) as HTMLTextAreaElement).value,
+      ).toBe(""),
+    );
     expect(screen.getByRole("button", { name: "人力助手" })).toBeTruthy();
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
     expect(JSON.parse(post[1]!.body as string)).toEqual({
@@ -52,10 +56,17 @@ describe("已有会话单轮助手选择", () => {
     fetchMock.mockClear();
     await send();
     const second = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
-    expect(JSON.parse(second[1]!.body as string).agent_selection).toEqual({ mode: "required", agent_id: "hr-agent" });
+    expect(JSON.parse(second[1]!.body as string).agent_selection).toEqual({
+      mode: "required",
+      agent_id: "hr-agent",
+    });
   });
   it("首条消息后或刷新时从已保存的本轮选择复显，主动清空优先于旧选择", async () => {
-    const latestTurn = { id: "turn-1", turn_state: "completed", requested_agent_id: "hr-agent" } as ClientTurn;
+    const latestTurn = {
+      id: "turn-1",
+      turn_state: "completed",
+      requested_agent_id: "hr-agent",
+    } as ClientTurn;
     render(<ThreadInput {...props} latestTurn={latestTurn} />);
     fireEvent.click(screen.getByRole("button", { name: "人力助手" }));
     fireEvent.click(await screen.findByRole("button", { name: "不指定助手" }));
