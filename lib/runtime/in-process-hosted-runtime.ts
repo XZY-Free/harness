@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type AgentCallExecutor,
   type HostedModelContext,
   type RuntimeAdapter,
   type StartInvocationParams,
@@ -40,6 +41,10 @@ export interface InProcessHostedRuntimeClient extends RuntimeHttpClient {
 
 export function createInProcessHostedRuntimeClient(params: {
   modelFn: ModelFn;
+  /** 平台租户 id（Harness Loop 调 AgentCall 时作用域）。 */
+  tenantId?: string;
+  /** Harness Loop → AgentCall 桥接器（有 required Agent 时调用）。 */
+  agentCallExecutor?: AgentCallExecutor;
   ingressEventBatch: (params: {
     invocationId: string;
     events: RuntimeCandidateEvent[];
@@ -96,9 +101,13 @@ export function createInProcessHostedRuntimeClient(params: {
         const turnContext = invocation.request.requestBody.turn_context;
         const started = await adapter.startInvocation({
           invocationId,
+          tenantId: params.tenantId,
           threadId: turnContext?.thread_id ?? null,
           turnId: turnContext?.turn_id ?? null,
           agentRevisionId: null,
+          // 专题01 Batch7：本轮 capability requirements（required Agent）传给 Harness Loop。
+          capabilityRequirements: invocation.request.requestBody.capability_requirements,
+          agentCallExecutor: params.agentCallExecutor,
           inputItems: invocation.request.requestBody.input_items,
           contextHandle: invocation.request.requestBody.context_handle,
           gatewayEndpoints: invocation.request.requestBody.gateway_endpoints,

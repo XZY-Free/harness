@@ -11,6 +11,7 @@
  *
  * 真实 MySQL 8 Testcontainers（e2e 场景），mock sink（单元场景），不使用 DB mock。
  */
+import { randomUUID } from "node:crypto";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
 import {
@@ -46,6 +47,7 @@ import type { GatewayEndpoints } from "@/lib/runtime/adapters/hosted-adapter";
 import {
   type CreateHostedAdapterParams,
   type EventBatchSink,
+  type StartInvocationParams,
   createHostedAdapter,
   hostedAdapterCapabilities,
   setRouteHostedAdapter,
@@ -493,5 +495,132 @@ describe("S05-C05 HostedAdapter 命令处理", () => {
     expect(cancelEvent).toBeDefined();
     expect(cancelEvent?.payload.cancelled_by).toBe("test-user");
     expect(cancelEvent?.payload.reason).toBe("user_cancel");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Batch7：required Agent capability 分支
+// ═══════════════════════════════════════════════════════════
+
+describe("S05-C05 HostedAdapter required Agent capability（Batch7）", () => {
+  const REQUIRED_CAPS = [
+    { capability_type: "agent" as const, capability_id: "agent-1", mode: "required" as const },
+  ];
+
+  function startWithExecutor(
+    sink: EventBatchSink,
+    executor: NonNullable<StartInvocationParams["agentCallExecutor"]>,
+    modelFn?: NonNullable<CreateHostedAdapterParams["modelFn"]>,
+  ) {
+    const adapter = createHostedAdapter({
+      platformEndpoint: "https://platform.internal",
+      platformAuthToken: "test-token",
+      eventBatchSink: sink,
+      ...(modelFn ? { modelFn } : {}),
+      modelRef: "test-model",
+    });
+    return {
+      adapter,
+      start: () =>
+        adapter.startInvocation({
+          invocationId: `inv-required-${randomUUID()}`,
+          threadId: "thread-required",
+          turnId: "turn-required",
+          agentRevisionId: "agent-rev-001",
+          capabilityRequirements: REQUIRED_CAPS,
+          agentCallExecutor: executor,
+          inputItems: mockInputItems("调用 Agent"),
+          gatewayEndpoints: mockGatewayEndpoints(),
+          authToken: mockAuthToken(),
+        }),
+    };
+  }
+
+  it("completed：required Agent 结果注入 modelFn → response.completed 发送", async () => {
+    const { sink, events } = createMockSink();
+    let receivedAgentResult: unknown;
+    let modelCalled = false;
+    const { adapter, start } = startWithExecutor(
+      sink,
+      async () => ({
+        outcome: "completed" as const,
+        callId: "call-1",
+        resultText: "Agent 完成结果",
+        resultJson: { ok: true },
+      }),
+      (userMessage, ctx) => {
+        modelCalled = true;
+        receivedAgentResult = ctx.agentResult;
+        return `整合回复：${userMessage}`;
+      },
+    );
+
+    await start();
+    const result = await adapter.getLastLoopPromise?.();
+    expect(result?.completed).toBe(true);
+    expect(modelCalled).toBe(true);
+    // required Agent completed 结果作为受信任 capability result 注入模型上下文。
+    expect(receivedAgentResult).toMatchObject({
+      callId: "call-1",
+      resultText: "Agent 完成结果",
+      resultJson: { ok: true },
+    });
+    expect(events.some((e) => e.type === "response.completed")).toBe(true);
+  });
+
+  it("failed：required Agent 失败 → execution.failed（fail closed，不调用 modelFn）", async () => {
+    const { sink, events } = createMockSink();
+    let modelCalled = false;
+    const { adapter, start } = startWithExecutor(
+      sink,
+      async () => ({
+        outcome: "failed" as const,
+        callId: "call-fail",
+        errorCode: "AGENT_TRANSPORT_XXX",
+        errorSummary: "required Agent 调用失败",
+      }),
+      () => {
+        modelCalled = true;
+        return "";
+      },
+    );
+
+    await start();
+    const result = await adapter.getLastLoopPromise?.();
+    expect(result?.completed).toBe(false);
+    // required 无法满足 → fail closed，绝不 model-only fallback。
+    expect(modelCalled).toBe(false);
+    expect(result?.failureReason).toContain("required Agent 调用失败");
+    const failedEvent = events.find((e) => e.type === "execution.failed");
+    expect(failedEvent).toBeDefined();
+    expect(failedEvent?.payload.error_code).toBe("AGENT_TRANSPORT_XXX");
+  });
+
+  it("waiting_user：required Agent 等待用户 → user_action.requested（含 agent_call_id，不调用 modelFn）", async () => {
+    const { sink, events } = createMockSink();
+    let modelCalled = false;
+    const { adapter, start } = startWithExecutor(
+      sink,
+      async () => ({
+        outcome: "waiting_user" as const,
+        callId: "call-wait",
+        taskId: "task-1",
+        contextId: "ctx-1",
+      }),
+      () => {
+        modelCalled = true;
+        return "";
+      },
+    );
+
+    await start();
+    const result = await adapter.getLastLoopPromise?.();
+    expect(result?.completed).toBe(false);
+    expect(modelCalled).toBe(false);
+    const userActionEvent = events.find((e) => e.type === "user_action.requested");
+    expect(userActionEvent).toBeDefined();
+    // resume 复用 SAME AgentCall（agent_call_id 关联）。
+    expect(userActionEvent?.payload.agent_call_id).toBe("call-wait");
+    expect(userActionEvent?.payload.request_type).toBe("input");
   });
 });

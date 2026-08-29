@@ -1,3 +1,4 @@
+import { invokeRequiredAgent } from "@/lib/agents/calls/application/harness-required-agent";
 import { getChatModel } from "@/lib/ai/provider";
 import { aiConfig } from "@/lib/config";
 import { getThreadById } from "@/lib/conversations/thread-queries";
@@ -162,6 +163,20 @@ export async function dispatchEmployeeTurn(params: {
       harness_runtime_protocol: () =>
         createInProcessHostedRuntimeClient({
           modelFn: params.modelFn ?? configuredModelFn(),
+          tenantId: params.tenantId,
+          // 专题01 Batch7：Harness Loop → AgentCall 桥接器（required Agent capability）。
+          // 有 required Agent 时由 HostedHarnessLoop 调用；无 required Agent 恒不调用。
+          agentCallExecutor: (exec) =>
+            invokeRequiredAgent({
+              tenantId: params.tenantId,
+              parentInvocationId: exec.parentInvocationId,
+              threadId: exec.threadId,
+              turnId: exec.turnId,
+              agentId: exec.agentId,
+              input: exec.input,
+              executionSubject: params.executionSubject ?? null,
+              resolveRoute,
+            }),
           ingressEventBatch: async ({ invocationId, events, producerSequenceStart }) => {
             await ingressEventBatch({
               tenantId: params.tenantId,
