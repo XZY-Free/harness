@@ -51,8 +51,8 @@ const NO_CAPABILITIES: EffectiveInvocationCapabilities = {
  * 协议实现能力（05 §3 第三因子）：Transport/执行模型是否实现该方法。
  * 冻结架构下 Runtime 仅 harness_runtime_protocol（Hosted in-process）：
  * cancel/resume/steer/user_action/streaming 由 Turn/Invocation 状态机与
- * in-process adapter 吸收（05 §4 保持现有语义）。A2A 协议实现属后续
- * AgentCall 批次，不在 Runtime 协议能力范围。
+ * in-process adapter 吸收（05 §4 保持现有语义）。A2A 是外部 Agent 能力调用
+ * 协议，归属 AgentCall 域，不在 Runtime 协议能力范围。
  */
 const PROTOCOL_IMPLEMENTATION_SUPPORT: Readonly<Record<string, RuntimeLevelCapabilities>> = {
   harness_runtime_protocol: {

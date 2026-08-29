@@ -460,3 +460,138 @@ export function checkNineIssueCloseoutGate(
 
   return { passed: failures.length === 0, failures };
 }
+
+// ─── Batch9 最终收口 Gate（V12/01 方案 §四 15 条红线）────────────
+
+/**
+ * Batch9 最终架构红线：冻结架构下旧 Authority 不得重新出现。
+ *
+ * 全部检查剥离注释，排除 .test.* 与规则定义文件，逐文件精确匹配（不目录豁免）。
+ *
+ * 覆盖（§四 缺失项）：
+ * - R1 ExecutionBinding/RuntimeSessionBinding schema 不得出现 Agent evidence 列。
+ * - R2 RuntimeRevision schema 不得出现 Agent/A2A contract authority 字段。
+ * - R3 Runtime Start Request 不得出现 agent execution target / agent_instruction_ref。
+ * - R4 不得出现 HostedAgentLoop。
+ * - R5 顶层 ThreadItem 不得恢复 agent_message。
+ * - R6 只能有一个 Route Resolver（禁第二套 resolveHarnessRoute/resolveAgentRoute 等）。
+ * - R7 AgentCall 必须作为 child domain 存在（parentInvocationId 恒必填）。
+ * - R8 A2A lifecycle 必须落到 AgentCall，不得直接改 parent Invocation 终态。
+ */
+export interface Topic01FinalCloseoutGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+const FINAL_SCOPE = /^(app|components|desktop|lib|scripts)\//;
+
+/** 规则定义文件自身（含检测正则/说明文字），按文件精确排除。 */
+const FINAL_RULE_DEFINITIONS = new Set([
+  "scripts/architecture-gate.ts",
+  "scripts/architecture-gate-rules.ts",
+]);
+
+/**
+ * ExecutionBinding / RuntimeSessionBinding 表（lib/persistence/schema/executions.ts）
+ * 禁止出现任何 Agent evidence 列名（§四 #3/#4）。
+ */
+const EXECUTION_SCHEMA_PATH = "lib/persistence/schema/executions.ts";
+const EXECUTION_AGENT_COLUMNS =
+  /\bagentRevisionId\b|\bagentContractSnapshotId\b|\bagentContractDigest\b|\bagentContextDigest\b|\bagentPublicationRecordId\b|\bagentCapabilityDigest\b/;
+
+/**
+ * RuntimeRevision 表（lib/persistence/schema/runtimes.ts）禁止出现
+ * Agent/A2A contract authority 字段（§四 #5）。
+ */
+const RUNTIME_SCHEMA_PATH = "lib/persistence/schema/runtimes.ts";
+const RUNTIME_AGENT_AUTHORITY =
+  /\bagentContractSnapshotId\b|\bverificationState\b|\bevidenceDigest\b/;
+
+/**
+ * Runtime Start Request（lib/runtime/runtime-client.ts）禁止出现
+ * agent execution target / agent_instruction_ref / Agent model-permission-interface
+ * 下发字段（§四 #8）。允许 capability_requirements[type=agent]。
+ */
+const START_REQUEST_PATH = "lib/runtime/runtime-client.ts";
+const START_REQUEST_AGENT_TARGET =
+  /\bagent_instruction_ref\b|\bmodel_policy\b|\bpermission_requirements\b|\binterface_requirements\b/;
+
+/** 全仓标识符级禁词（生产 scope，剥离注释）。 */
+const FINAL_IDENTIFIER_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
+  { pattern: /\bHostedAgentLoop\b/, title: "R4 HostedAgentLoop 旧 Loop 命名" },
+  {
+    pattern: /\bresolveHarnessRoute\b|\bresolveAgentRoute\b/,
+    title: "R6 第二套 Route Resolver 命令",
+  },
+  {
+    pattern: /\bAgentRouteResolver\b|\bRuntimeRouteResolver\b|\bHarnessRouteResolver\b/,
+    title: "R6 第二套 Resolver Authority",
+  },
+  { pattern: /["']agent_message["']/, title: "R5 顶层 ThreadItem agent_message" },
+];
+
+/** AgentCall child domain 文件必须存在且恒含 parentInvocationId（§四 #13）。 */
+const AGENT_CALL_DOMAIN_PATH = "lib/agents/calls/domain/agent-call.ts";
+const AGENT_CALL_SCHEMA_PATH = "lib/persistence/schema/agent-calls.ts";
+
+/**
+ * A2A lifecycle 归属（§四 #14）：Agent transport 不得直接改 parent Invocation 终态。
+ * 要求 A2A transport 目录内生产代码不得出现对 parent Invocation / 顶层 Turn 终态的
+ * 直接写入标记；统一通过 AgentCall 事件归一化（a2a-mapper 注释声明该约束）。
+ */
+const A2A_TRANSPORT_SCOPE = /^lib\/agents\/calls\/transport\//;
+const A2A_PARENT_WRITE_FORBIDDEN =
+  /\bmarkInvocationLost\b|\bmarkInvocationCompleted\b|\bmarkTurnCompleted\b|\bRuntimeEventIngress\b/;
+
+export function checkTopic01FinalCloseoutGate(
+  documents: readonly SourceDocument[],
+): Topic01FinalCloseoutGateResult {
+  const failures: string[] = [];
+
+  for (const document of documents) {
+    const path = document.path;
+    if (!FINAL_SCOPE.test(path)) continue;
+    if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) continue;
+    if (FINAL_RULE_DEFINITIONS.has(path)) continue;
+    const source = stripComments(document.source);
+
+    // R1：ExecutionBinding / RuntimeSessionBinding schema 无 Agent evidence 列。
+    if (path === EXECUTION_SCHEMA_PATH && EXECUTION_AGENT_COLUMNS.test(source)) {
+      failures.push("R1 ExecutionBinding/RuntimeSessionBinding schema 出现 Agent evidence 列");
+    }
+    // R2：RuntimeRevision schema 无 Agent/A2A contract authority。
+    if (path === RUNTIME_SCHEMA_PATH && RUNTIME_AGENT_AUTHORITY.test(source)) {
+      failures.push("R2 RuntimeRevision schema 出现 Agent/A2A contract authority 字段");
+    }
+    // R3：Runtime Start Request 无 agent execution target。
+    if (path === START_REQUEST_PATH && START_REQUEST_AGENT_TARGET.test(source)) {
+      failures.push("R3 Runtime Start Request 出现 agent execution target / 下发字段");
+    }
+    // R4/R5/R6：全仓标识符禁词。
+    for (const rule of FINAL_IDENTIFIER_PATTERNS) {
+      if (rule.pattern.test(source)) {
+        failures.push(rule.title);
+      }
+    }
+    // R8：A2A transport 不得直接改 parent Invocation 终态。
+    if (A2A_TRANSPORT_SCOPE.test(path) && A2A_PARENT_WRITE_FORBIDDEN.test(source)) {
+      failures.push("R8 A2A transport 直接修改 parent Invocation 终态");
+    }
+  }
+
+  // R7：AgentCall child domain 存在且 parentInvocationId 恒必填。
+  const agentCallDomain = documents.find((item) => item.path === AGENT_CALL_DOMAIN_PATH);
+  if (!agentCallDomain) {
+    failures.push("R7 AgentCall domain 不存在（lib/agents/calls/domain/agent-call.ts）");
+  } else if (!agentCallDomain.source.includes("parentInvocationId")) {
+    failures.push("R7 AgentCall domain 缺少 parentInvocationId（未作为 child Invocation）");
+  }
+  const agentCallSchema = documents.find((item) => item.path === AGENT_CALL_SCHEMA_PATH);
+  if (!agentCallSchema) {
+    failures.push("R7 AgentCall schema 不存在（lib/persistence/schema/agent-calls.ts）");
+  } else if (!stripComments(agentCallSchema.source).includes("parentInvocationId")) {
+    failures.push("R7 AgentCall schema 缺少 parentInvocationId 列");
+  }
+
+  return { passed: failures.length === 0, failures };
+}

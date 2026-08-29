@@ -2,15 +2,16 @@
  * 唯一 Outbound Runtime Auth Resolver（03 专项：External Runtime Credential Authority）。
  *
  * 冻结不变量：
- * - SnowHarness → 第三方 External Agent endpoint 的所有真实网络调用（Registration /
- *   Conformance、Employee Start Invocation、Command Gateway Cancel/Resume）只能使用
- *   RuntimeRevision.identityMode + RuntimeRevision.credentialRefId 解析出的外部凭据；
- *   禁止 SnowHarness 内部 Workload Token 被当作第三方 Agent 的 Bearer Token。
+ * - SnowHarness → 第三方 External Harness Runtime endpoint 的所有真实网络调用
+ *   （Registration / Conformance、Employee Start Invocation、Command Gateway
+ *   Cancel/Resume）只能使用 RuntimeRevision.identityMode + RuntimeRevision.credentialRefId
+ *   解析出的外部凭据；禁止 SnowHarness 内部 Workload Token 被当作外部 Runtime 的
+ *   Bearer Token。
  * - 本模块是唯一共享 resolver（禁止三套实现）：只做
  *   tenantId + identityMode + credentialRefId → RuntimeTransportAuth，
  *   不发 HTTP、不选择 Route/Runtime、不解析 Agent Contract、不写 DB、不输出 secret。
  * - identityMode 阶段 1 只允许 none/bearer（external）；workload_token 仅限 Hosted /
- *   SnowHarness Runtime Protocol，External A2A 侧本地 fail closed 不发网络；
+ *   SnowHarness Runtime Protocol，External Runtime 侧本地 fail closed 不发网络；
  *   api_key 等已知但未实现的 mode 一律 fail closed，禁止自动映射 bearer。
  * - Secret 红线：external token 只允许存在于发请求前的短生命周期内存（RuntimeTransportAuth），
  *   不得进入 RuntimeRevision/ExecutionBinding/Audit/Thread/Event/Error/Logger/Trace/
@@ -27,7 +28,7 @@ import { and, eq } from "drizzle-orm";
  * 协议中立认证语义（03 §4）。Transport 负责把 auth 映射为 HTTP header：
  * - none：完全不发送 Authorization；
  * - bearer：Authorization: Bearer <external token>（仅 External Runtime）；
- * - workload_token：仅 Hosted / SnowHarness Runtime Protocol；External A2A
+ * - workload_token：仅 Hosted / SnowHarness Runtime Protocol；External Runtime
  *   Transport 收到时本地 fail closed，不发网络。
  */
 export type RuntimeTransportAuth =
@@ -140,7 +141,7 @@ export async function resolveOutboundRuntimeAuth(params: {
  * - none：完全不发送 Authorization；
  * - bearer：Authorization: Bearer <external token>；
  * - workload_token：仅允许 Hosted / SnowHarness Runtime Protocol 调用方使用；
- *   External A2A Transport 传入时本地 fail closed（调用方在网络前抛错）。
+ *   External Runtime Transport 传入时本地 fail closed（调用方在网络前抛错）。
  */
 export function outboundAuthHeaders(
   auth: RuntimeTransportAuth,
@@ -149,9 +150,9 @@ export function outboundAuthHeaders(
   if (auth.mode === "none") return {};
   if (auth.mode === "bearer") return { authorization: `Bearer ${auth.token}` };
   if (options.allowWorkloadToken) return { authorization: `Bearer ${auth.token}` };
-  // External A2A 收到 workload_token：本地 fail closed，不发网络（03 §9）。
+  // External Runtime 收到 workload_token：本地 fail closed，不发网络（03 §9）。
   throw new OutboundRuntimeAuthError(
     "identity_mode_invalid",
-    "External A2A Transport 不允许使用内部 Workload Token 作为 outbound 凭据",
+    "External Runtime Transport 不允许使用内部 Workload Token 作为 outbound 凭据",
   );
 }

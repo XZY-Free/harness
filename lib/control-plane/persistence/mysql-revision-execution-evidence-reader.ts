@@ -26,10 +26,7 @@ import type {
   PolicyRevisionSnapshot,
   RevisionExecutionEvidenceSnapshot,
 } from "../domain/revision-execution-eligibility";
-import {
-  EligibilityError,
-  extractRuntimeCapabilities,
-} from "../domain/revision-execution-eligibility";
+import { EligibilityError } from "../domain/revision-execution-eligibility";
 
 import type { DbOrTx, db as DbType } from "@/lib/db/client";
 import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
@@ -187,11 +184,6 @@ async function loadEvidence(
   }
   const policyRequirement = policyResult.requirement;
 
-  // Fail-closed Capability 解析
-  const runtimeCapabilities = extractRuntimeCapabilities(
-    runtimeRevisionRow?.runtimeCapabilitiesJson,
-  );
-
   return {
     tenantId: input.tenantId,
     agentRevisionId: input.agentRevisionId,
@@ -215,7 +207,6 @@ async function loadEvidence(
         : runtimeRevisionRow?.revisionState === "withdrawn"
           ? "withdrawn"
           : "draft",
-    runtimeCapabilities,
     runtimeEvidenceKind: runtimeRevisionRow?.runtimeEvidenceKind ?? "hosted_artifact",
     policyRequirement,
   };

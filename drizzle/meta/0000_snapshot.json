@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "07330f7c-de1b-4e42-83e7-f97c2c265942",
+  "id": "8b624225-1036-4920-aa9e-7574b1e1b8ef",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "RuntimeArtifact": {
@@ -184,7 +184,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "admin_export": {
       "name": "admin_export",
@@ -357,7 +358,514 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "AgentContractCapability": {
+      "name": "AgentContractCapability",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "snapshotId": {
+          "name": "snapshotId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "position": {
+          "name": "position",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nameZhCn": {
+          "name": "nameZhCn",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nameEn": {
+          "name": "nameEn",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "descriptionZhCn": {
+          "name": "descriptionZhCn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "descriptionEn": {
+          "name": "descriptionEn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tags": {
+          "name": "tags",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "examples": {
+          "name": "examples",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "inputModes": {
+          "name": "inputModes",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "outputModes": {
+          "name": "outputModes",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "AgentContractCapability_snapshot_position_uq": {
+          "name": "AgentContractCapability_snapshot_position_uq",
+          "columns": [
+            "snapshotId",
+            "position"
+          ],
+          "isUnique": true
+        },
+        "AgentContractCapability_snapshot_key_uq": {
+          "name": "AgentContractCapability_snapshot_key_uq",
+          "columns": [
+            "snapshotId",
+            "key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "AgentContractCapability_snapshot_fk": {
+          "name": "AgentContractCapability_snapshot_fk",
+          "tableFrom": "AgentContractCapability",
+          "tableTo": "AgentContractSnapshot",
+          "columnsFrom": [
+            "snapshotId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AgentContractCapability_id": {
+          "name": "AgentContractCapability_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "AgentContractInvocationContext": {
+      "name": "AgentContractInvocationContext",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "snapshotId": {
+          "name": "snapshotId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "position": {
+          "name": "position",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nameZhCn": {
+          "name": "nameZhCn",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nameEn": {
+          "name": "nameEn",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "descriptionZhCn": {
+          "name": "descriptionZhCn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "descriptionEn": {
+          "name": "descriptionEn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "necessity": {
+          "name": "necessity",
+          "type": "enum('required','preferred','accepted')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "appliesTo": {
+          "name": "appliesTo",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "trustRequirement": {
+          "name": "trustRequirement",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "declarationSource": {
+          "name": "declarationSource",
+          "type": "enum('provider_declared','operator_declared')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "AgentContractInvocationContext_snapshot_position_uq": {
+          "name": "AgentContractInvocationContext_snapshot_position_uq",
+          "columns": [
+            "snapshotId",
+            "position"
+          ],
+          "isUnique": true
+        },
+        "AgentContractInvocationContext_snapshot_key_uq": {
+          "name": "AgentContractInvocationContext_snapshot_key_uq",
+          "columns": [
+            "snapshotId",
+            "key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "AgentContractInvocationContext_snapshot_fk": {
+          "name": "AgentContractInvocationContext_snapshot_fk",
+          "tableFrom": "AgentContractInvocationContext",
+          "tableTo": "AgentContractSnapshot",
+          "columnsFrom": [
+            "snapshotId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AgentContractInvocationContext_id": {
+          "name": "AgentContractInvocationContext_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "AgentContractSnapshot": {
+      "name": "AgentContractSnapshot",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentId": {
+          "name": "agentId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contractVersion": {
+          "name": "contractVersion",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publicAgentId": {
+          "name": "publicAgentId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publicAgentVersion": {
+          "name": "publicAgentVersion",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentNameZhCn": {
+          "name": "agentNameZhCn",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentNameEn": {
+          "name": "agentNameEn",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "protocolType": {
+          "name": "protocolType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocolContractRevision": {
+          "name": "protocolContractRevision",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "streamingTransport": {
+          "name": "streamingTransport",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "incrementalContent": {
+          "name": "incrementalContent",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "inputRequired": {
+          "name": "inputRequired",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resume": {
+          "name": "resume",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cancel": {
+          "name": "cancel",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "durableTaskRecovery": {
+          "name": "durableTaskRecovery",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "supportedLocales": {
+          "name": "supportedLocales",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resultFields": {
+          "name": "resultFields",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "errorCodes": {
+          "name": "errorCodes",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resultNotesZhCn": {
+          "name": "resultNotesZhCn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resultNotesEn": {
+          "name": "resultNotesEn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "contractDigest": {
+          "name": "contractDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capabilityDigest": {
+          "name": "capabilityDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contextDigest": {
+          "name": "contextDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capturedAt": {
+          "name": "capturedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdBy": {
+          "name": "createdBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "AgentContractSnapshot_tenant_agent_idx": {
+          "name": "AgentContractSnapshot_tenant_agent_idx",
+          "columns": [
+            "tenantId",
+            "agentId"
+          ],
+          "isUnique": false
+        },
+        "AgentContractSnapshot_agent_idx": {
+          "name": "AgentContractSnapshot_agent_idx",
+          "columns": [
+            "agentId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "AgentContractSnapshot_tenantId_Tenant_id_fk": {
+          "name": "AgentContractSnapshot_tenantId_Tenant_id_fk",
+          "tableFrom": "AgentContractSnapshot",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "AgentContractSnapshot_agentId_Agent_id_fk": {
+          "name": "AgentContractSnapshot_agentId_Agent_id_fk",
+          "tableFrom": "AgentContractSnapshot",
+          "tableTo": "Agent",
+          "columnsFrom": [
+            "agentId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AgentContractSnapshot_id": {
+          "name": "AgentContractSnapshot_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "AgentRevision": {
       "name": "AgentRevision",
@@ -376,53 +884,18 @@
           "notNull": true,
           "autoincrement": false
         },
+        "agentContractSnapshotId": {
+          "name": "agentContractSnapshotId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "revisionNo": {
           "name": "revisionNo",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "sourceType": {
-          "name": "sourceType",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "sourceRevision": {
-          "name": "sourceRevision",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "instructionHash": {
-          "name": "instructionHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentArtifactRef": {
-          "name": "agentArtifactRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "artifactId": {
-          "name": "artifactId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "artifactDigest": {
-          "name": "artifactDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "modelPolicyJson": {
@@ -499,13 +972,6 @@
             "revisionState"
           ],
           "isUnique": false
-        },
-        "AgentRevision_artifact_idx": {
-          "name": "AgentRevision_artifact_idx",
-          "columns": [
-            "artifactId"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -531,7 +997,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Agent": {
       "name": "Agent",
@@ -672,7 +1139,910 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "AgentCallAttempt": {
+      "name": "AgentCallAttempt",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "callId": {
+          "name": "callId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attemptNo": {
+          "name": "attemptNo",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attemptState": {
+          "name": "attemptState",
+          "type": "enum('queued','running','completed','failed','cancelled','lost')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'queued'"
+        },
+        "externalTaskRef": {
+          "name": "externalTaskRef",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchAttemptCount": {
+          "name": "dispatchAttemptCount",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "retryReasonCode": {
+          "name": "retryReasonCode",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "requestDigest": {
+          "name": "requestDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "startedAt": {
+          "name": "startedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "finishedAt": {
+          "name": "finishedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "errorCode": {
+          "name": "errorCode",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "errorSummary": {
+          "name": "errorSummary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "AgentCallAttempt_call_attempt_uq": {
+          "name": "AgentCallAttempt_call_attempt_uq",
+          "columns": [
+            "callId",
+            "attemptNo"
+          ],
+          "isUnique": true
+        },
+        "AgentCallAttempt_call_state_idx": {
+          "name": "AgentCallAttempt_call_state_idx",
+          "columns": [
+            "callId",
+            "attemptState"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "AgentCallAttempt_callId_AgentCall_id_fk": {
+          "name": "AgentCallAttempt_callId_AgentCall_id_fk",
+          "tableFrom": "AgentCallAttempt",
+          "tableTo": "AgentCall",
+          "columnsFrom": [
+            "callId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AgentCallAttempt_id": {
+          "name": "AgentCallAttempt_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "AgentCallBinding": {
+      "name": "AgentCallBinding",
+      "columns": {
+        "callId": {
+          "name": "callId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentId": {
+          "name": "agentId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentRevisionId": {
+          "name": "agentRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentContractSnapshotId": {
+          "name": "agentContractSnapshotId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentContractDigest": {
+          "name": "agentContractDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentCapabilityDigest": {
+          "name": "agentCapabilityDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentContextDigest": {
+          "name": "agentContextDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentPublicationRecordId": {
+          "name": "agentPublicationRecordId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deploymentRouteId": {
+          "name": "deploymentRouteId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeRevisionId": {
+          "name": "routeRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeActivationId": {
+          "name": "routeActivationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeContentDigest": {
+          "name": "routeContentDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolutionInputDigest": {
+          "name": "resolutionInputDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "projectionVersionNo": {
+          "name": "projectionVersionNo",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "endpointRef": {
+          "name": "endpointRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "identityMode": {
+          "name": "identityMode",
+          "type": "enum('none','bearer')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credentialRefId": {
+          "name": "credentialRefId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "networkZone": {
+          "name": "networkZone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocolType": {
+          "name": "protocolType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocolContractRevision": {
+          "name": "protocolContractRevision",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policyRevisionId": {
+          "name": "policyRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policyRulesDigest": {
+          "name": "policyRulesDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "governanceConfigRevisionId": {
+          "name": "governanceConfigRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "governanceConfigDigest": {
+          "name": "governanceConfigDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bindingHash": {
+          "name": "bindingHash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "boundAt": {
+          "name": "boundAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "AgentCallBinding_tenant_idx": {
+          "name": "AgentCallBinding_tenant_idx",
+          "columns": [
+            "tenantId"
+          ],
+          "isUnique": false
+        },
+        "AgentCallBinding_agentRevision_idx": {
+          "name": "AgentCallBinding_agentRevision_idx",
+          "columns": [
+            "agentRevisionId"
+          ],
+          "isUnique": false
+        },
+        "AgentCallBinding_routeRevision_idx": {
+          "name": "AgentCallBinding_routeRevision_idx",
+          "columns": [
+            "routeRevisionId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "AgentCallBinding_callId_AgentCall_id_fk": {
+          "name": "AgentCallBinding_callId_AgentCall_id_fk",
+          "tableFrom": "AgentCallBinding",
+          "tableTo": "AgentCall",
+          "columnsFrom": [
+            "callId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AgentCallBinding_callId": {
+          "name": "AgentCallBinding_callId",
+          "columns": [
+            "callId"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "AgentCallEventIngress": {
+      "name": "AgentCallEventIngress",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "callId": {
+          "name": "callId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "producerEventId": {
+          "name": "producerEventId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "producerSequence": {
+          "name": "producerSequence",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "candidateType": {
+          "name": "candidateType",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payloadHash": {
+          "name": "payloadHash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payloadJson": {
+          "name": "payloadJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ingressState": {
+          "name": "ingressState",
+          "type": "enum('accepted','mapped','rejected')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'accepted'"
+        },
+        "receivedAt": {
+          "name": "receivedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mappedAt": {
+          "name": "mappedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rejectedReason": {
+          "name": "rejectedReason",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "AgentCallEventIngress_call_producer_event_uq": {
+          "name": "AgentCallEventIngress_call_producer_event_uq",
+          "columns": [
+            "callId",
+            "producerEventId"
+          ],
+          "isUnique": true
+        },
+        "AgentCallEventIngress_call_producer_seq_uq": {
+          "name": "AgentCallEventIngress_call_producer_seq_uq",
+          "columns": [
+            "callId",
+            "producerSequence"
+          ],
+          "isUnique": true
+        },
+        "AgentCallEventIngress_call_state_idx": {
+          "name": "AgentCallEventIngress_call_state_idx",
+          "columns": [
+            "callId",
+            "ingressState"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "AgentCallEventIngress_callId_AgentCall_id_fk": {
+          "name": "AgentCallEventIngress_callId_AgentCall_id_fk",
+          "tableFrom": "AgentCallEventIngress",
+          "tableTo": "AgentCall",
+          "columnsFrom": [
+            "callId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AgentCallEventIngress_id": {
+          "name": "AgentCallEventIngress_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "AgentCall": {
+      "name": "AgentCall",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "parentInvocationId": {
+          "name": "parentInvocationId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentId": {
+          "name": "agentId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentRevisionId": {
+          "name": "agentRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sourceType": {
+          "name": "sourceType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sourceRef": {
+          "name": "sourceRef",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "enum('queued','running','waiting_user','completed','failed','cancelled','lost')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'queued'"
+        },
+        "externalContextRef": {
+          "name": "externalContextRef",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "externalTaskRef": {
+          "name": "externalTaskRef",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resultText": {
+          "name": "resultText",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resultJson": {
+          "name": "resultJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resultDigest": {
+          "name": "resultDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "errorCode": {
+          "name": "errorCode",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "errorSummary": {
+          "name": "errorSummary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "logicalCallKey": {
+          "name": "logicalCallKey",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "startedAt": {
+          "name": "startedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "waitingAt": {
+          "name": "waitingAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "finishedAt": {
+          "name": "finishedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "AgentCall_tenant_state_idx": {
+          "name": "AgentCall_tenant_state_idx",
+          "columns": [
+            "tenantId",
+            "state"
+          ],
+          "isUnique": false
+        },
+        "AgentCall_parent_idx": {
+          "name": "AgentCall_parent_idx",
+          "columns": [
+            "parentInvocationId"
+          ],
+          "isUnique": false
+        },
+        "AgentCall_agent_idx": {
+          "name": "AgentCall_agent_idx",
+          "columns": [
+            "agentId"
+          ],
+          "isUnique": false
+        },
+        "AgentCall_parent_logical_key_uq": {
+          "name": "AgentCall_parent_logical_key_uq",
+          "columns": [
+            "parentInvocationId",
+            "logicalCallKey"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "AgentCall_tenantId_Tenant_id_fk": {
+          "name": "AgentCall_tenantId_Tenant_id_fk",
+          "tableFrom": "AgentCall",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "AgentCall_parentInvocationId_Invocation_id_fk": {
+          "name": "AgentCall_parentInvocationId_Invocation_id_fk",
+          "tableFrom": "AgentCall",
+          "tableTo": "Invocation",
+          "columnsFrom": [
+            "parentInvocationId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AgentCall_id": {
+          "name": "AgentCall_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "AgentSessionBinding": {
+      "name": "AgentSessionBinding",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "threadId": {
+          "name": "threadId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentId": {
+          "name": "agentId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agentRevisionId": {
+          "name": "agentRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deploymentRouteId": {
+          "name": "deploymentRouteId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "routeRevisionId": {
+          "name": "routeRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "externalContextRef": {
+          "name": "externalContextRef",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bindingState": {
+          "name": "bindingState",
+          "type": "enum('active','closed','lost')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lastUsedAt": {
+          "name": "lastUsedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "closedAt": {
+          "name": "closedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "AgentSessionBinding_revision_route_context_uq": {
+          "name": "AgentSessionBinding_revision_route_context_uq",
+          "columns": [
+            "agentRevisionId",
+            "routeRevisionId",
+            "externalContextRef"
+          ],
+          "isUnique": true
+        },
+        "AgentSessionBinding_thread_idx": {
+          "name": "AgentSessionBinding_thread_idx",
+          "columns": [
+            "threadId"
+          ],
+          "isUnique": false
+        },
+        "AgentSessionBinding_agent_idx": {
+          "name": "AgentSessionBinding_agent_idx",
+          "columns": [
+            "agentId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "AgentSessionBinding_tenantId_Tenant_id_fk": {
+          "name": "AgentSessionBinding_tenantId_Tenant_id_fk",
+          "tableFrom": "AgentSessionBinding",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "AgentSessionBinding_id": {
+          "name": "AgentSessionBinding_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "AuditEvent": {
       "name": "AuditEvent",
@@ -821,7 +2191,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RoleActionBinding": {
       "name": "RoleActionBinding",
@@ -937,7 +2308,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "CapabilityUse": {
       "name": "CapabilityUse",
@@ -1085,7 +2457,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "CatalogEntry": {
       "name": "CatalogEntry",
@@ -1233,7 +2606,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "CatalogRevision": {
       "name": "CatalogRevision",
@@ -1308,7 +2682,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ContextCheckpoint": {
       "name": "ContextCheckpoint",
@@ -1464,7 +2839,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Goal": {
       "name": "Goal",
@@ -1581,7 +2957,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "InvocationCommand": {
       "name": "InvocationCommand",
@@ -1671,6 +3048,49 @@
           "notNull": false,
           "autoincrement": false
         },
+        "dispatchAttemptCount": {
+          "name": "dispatchAttemptCount",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "nextDispatchAt": {
+          "name": "nextDispatchAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchLeaseOwner": {
+          "name": "dispatchLeaseOwner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchLeaseExpiresAt": {
+          "name": "dispatchLeaseExpiresAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastDispatchAttemptAt": {
+          "name": "lastDispatchAttemptAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastTransientErrorCode": {
+          "name": "lastTransientErrorCode",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "createdAt": {
           "name": "createdAt",
           "type": "datetime(3)",
@@ -1723,6 +3143,21 @@
           ],
           "isUnique": false
         },
+        "InvocationCommand_dispatch_retry_idx": {
+          "name": "InvocationCommand_dispatch_retry_idx",
+          "columns": [
+            "commandState",
+            "nextDispatchAt"
+          ],
+          "isUnique": false
+        },
+        "InvocationCommand_dispatch_lease_idx": {
+          "name": "InvocationCommand_dispatch_lease_idx",
+          "columns": [
+            "dispatchLeaseExpiresAt"
+          ],
+          "isUnique": false
+        },
         "InvocationCommand_thread_idempotency_uq": {
           "name": "InvocationCommand_thread_idempotency_uq",
           "columns": [
@@ -1755,7 +3190,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "PendingInput": {
       "name": "PendingInput",
@@ -1896,7 +3332,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ThreadEvent": {
       "name": "ThreadEvent",
@@ -2081,7 +3518,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ThreadItem": {
       "name": "ThreadItem",
@@ -2116,7 +3554,7 @@
         },
         "itemType": {
           "name": "itemType",
-          "type": "enum('user_message','user_guidance','agent_message','tool_call','artifact','job_result','child_thread','user_action')",
+          "type": "enum('user_message','user_guidance','assistant_message','tool_call','artifact','job_result','child_thread','user_action')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -2131,7 +3569,7 @@
         },
         "authorType": {
           "name": "authorType",
-          "type": "enum('user','agent','system','tool')",
+          "type": "enum('user','assistant','system','tool')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -2243,7 +3681,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ThreadRelation": {
       "name": "ThreadRelation",
@@ -2452,7 +3891,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Thread": {
       "name": "Thread",
@@ -2473,13 +3913,6 @@
         },
         "ownerUserId": {
           "name": "ownerUserId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "primaryAgentId": {
-          "name": "primaryAgentId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
@@ -2607,15 +4040,6 @@
             "lastActivityAt"
           ],
           "isUnique": false
-        },
-        "Thread_tenant_agent_activity_idx": {
-          "name": "Thread_tenant_agent_activity_idx",
-          "columns": [
-            "tenantId",
-            "primaryAgentId",
-            "lastActivityAt"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -2641,7 +4065,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Turn": {
       "name": "Turn",
@@ -2774,6 +4199,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "requestedAgentId": {
+          "name": "requestedAgentId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentSelectionMode": {
+          "name": "agentSelectionMode",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "versionNo": {
           "name": "versionNo",
           "type": "bigint",
@@ -2825,7 +4264,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "DeletionRequest": {
       "name": "DeletionRequest",
@@ -2988,7 +4428,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "DeletionStep": {
       "name": "DeletionStep",
@@ -3143,7 +4584,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "DeploymentRouteSet": {
       "name": "DeploymentRouteSet",
@@ -3162,11 +4604,19 @@
           "notNull": true,
           "autoincrement": false
         },
+        "targetKind": {
+          "name": "targetKind",
+          "type": "enum('runtime','agent')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'runtime'"
+        },
         "agentId": {
           "name": "agentId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "routeScopeKey": {
@@ -3249,7 +4699,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "DeploymentRoute": {
       "name": "DeploymentRoute",
@@ -3279,7 +4730,7 @@
           "name": "agentRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimeRevisionId": {
@@ -3410,7 +4861,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Device": {
       "name": "Device",
@@ -3556,7 +5008,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "EffectRecord": {
       "name": "EffectRecord",
@@ -3710,7 +5163,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "EffectTarget": {
       "name": "EffectTarget",
@@ -3863,7 +5317,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "EnvironmentChangeRequest": {
       "name": "EnvironmentChangeRequest",
@@ -4043,7 +5498,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "EnvironmentDefinition": {
       "name": "EnvironmentDefinition",
@@ -4206,7 +5662,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "EnvironmentLease": {
       "name": "EnvironmentLease",
@@ -4399,7 +5856,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "evaluation_case": {
       "name": "evaluation_case",
@@ -4545,7 +6003,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "evaluation_result": {
       "name": "evaluation_result",
@@ -4698,7 +6157,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "evaluation_run": {
       "name": "evaluation_run",
@@ -4896,7 +6356,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "FileChange": {
       "name": "FileChange",
@@ -5034,7 +6495,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "FilesystemCheckpoint": {
       "name": "FilesystemCheckpoint",
@@ -5172,7 +6634,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "GovernanceConfigRevision": {
       "name": "GovernanceConfigRevision",
@@ -5283,7 +6746,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "GovernanceConfigSet": {
       "name": "GovernanceConfigSet",
@@ -5403,7 +6867,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "IdempotencyRecord": {
       "name": "IdempotencyRecord",
@@ -5560,7 +7025,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "PrincipalBinding": {
       "name": "PrincipalBinding",
@@ -5677,7 +7143,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Tenant": {
       "name": "Tenant",
@@ -5744,7 +7211,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "UserIdentity": {
       "name": "UserIdentity",
@@ -5848,7 +7316,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "JobCommand": {
       "name": "JobCommand",
@@ -6010,7 +7479,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "JobEvent": {
       "name": "JobEvent",
@@ -6189,7 +7659,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "JobResultProjection": {
       "name": "JobResultProjection",
@@ -6320,7 +7791,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Job": {
       "name": "Job",
@@ -6549,7 +8021,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "KnowledgeBase": {
       "name": "KnowledgeBase",
@@ -6697,7 +8170,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "KnowledgeChunk": {
       "name": "KnowledgeChunk",
@@ -6820,7 +8294,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "KnowledgeDocument": {
       "name": "KnowledgeDocument",
@@ -6980,7 +8455,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "KnowledgeDocumentRevision": {
       "name": "KnowledgeDocumentRevision",
@@ -7148,7 +8624,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "KnowledgeIndex": {
       "name": "KnowledgeIndex",
@@ -7264,7 +8741,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "MemoryCandidate": {
       "name": "MemoryCandidate",
@@ -7510,7 +8988,21 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "MemoryCandidate_exactly_one_source_ck": {
+          "name": "MemoryCandidate_exactly_one_source_ck",
+          "value": "((`MemoryCandidate`.`sourceItemId` IS NOT NULL) + (`MemoryCandidate`.`sourceJobId` IS NOT NULL) + (`MemoryCandidate`.`sourceArtifactId` IS NOT NULL)) = 1"
+        },
+        "MemoryCandidate_accepted_entry_ck": {
+          "name": "MemoryCandidate_accepted_entry_ck",
+          "value": "(`MemoryCandidate`.`candidateState` <> 'accepted' OR `MemoryCandidate`.`resolvedMemoryEntryId` IS NOT NULL)"
+        },
+        "MemoryCandidate_rejected_entry_ck": {
+          "name": "MemoryCandidate_rejected_entry_ck",
+          "value": "(`MemoryCandidate`.`candidateState` NOT IN ('rejected','expired') OR `MemoryCandidate`.`resolvedMemoryEntryId` IS NULL)"
+        }
+      }
     },
     "MemoryEntry": {
       "name": "MemoryEntry",
@@ -7680,7 +9172,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "MemoryIndex": {
       "name": "MemoryIndex",
@@ -7768,7 +9261,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "MemorySource": {
       "name": "MemorySource",
@@ -7865,7 +9359,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Grant": {
       "name": "Grant",
@@ -8042,7 +9537,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "PermissionDecision": {
       "name": "PermissionDecision",
@@ -8181,7 +9677,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "PolicyRevision": {
       "name": "PolicyRevision",
@@ -8292,7 +9789,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "PolicySet": {
       "name": "PolicySet",
@@ -8412,7 +9910,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Policy": {
       "name": "Policy",
@@ -8559,7 +10058,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "EventDeliveryFailure": {
       "name": "EventDeliveryFailure",
@@ -8718,7 +10218,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "EventStreamFloor": {
       "name": "EventStreamFloor",
@@ -8787,7 +10288,8 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ProjectionCheckpoint": {
       "name": "ProjectionCheckpoint",
@@ -8857,7 +10359,8 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ThreadListProjection": {
       "name": "ThreadListProjection",
@@ -8878,13 +10381,6 @@
         },
         "ownerUserId": {
           "name": "ownerUserId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "primaryAgentId": {
-          "name": "primaryAgentId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
@@ -9017,15 +10513,6 @@
           ],
           "isUnique": false
         },
-        "ThreadListProjection_tenant_agent_activity_idx": {
-          "name": "ThreadListProjection_tenant_agent_activity_idx",
-          "columns": [
-            "tenantId",
-            "primaryAgentId",
-            "lastActivityAt"
-          ],
-          "isUnique": false
-        },
         "ThreadListProjection_tenant_lifecycle_idx": {
           "name": "ThreadListProjection_tenant_lifecycle_idx",
           "columns": [
@@ -9058,7 +10545,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "TurnTimelineProjection": {
       "name": "TurnTimelineProjection",
@@ -9315,7 +10803,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RecoveryDrillCheck": {
       "name": "RecoveryDrillCheck",
@@ -9468,7 +10957,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RecoveryDrill": {
       "name": "RecoveryDrill",
@@ -9673,7 +11163,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "LegalHold": {
       "name": "LegalHold",
@@ -9820,7 +11311,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RetentionPolicy": {
       "name": "RetentionPolicy",
@@ -9951,7 +11443,339 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "RuntimeRevision": {
+      "name": "RuntimeRevision",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeId": {
+          "name": "runtimeId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revisionNo": {
+          "name": "revisionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocolType": {
+          "name": "protocolType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocolContractRevision": {
+          "name": "protocolContractRevision",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeEvidenceKind": {
+          "name": "runtimeEvidenceKind",
+          "type": "enum('hosted_artifact','external_endpoint')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeTargetDigest": {
+          "name": "runtimeTargetDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "endpointRef": {
+          "name": "endpointRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeArtifactRef": {
+          "name": "runtimeArtifactRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "artifactId": {
+          "name": "artifactId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "artifactDigest": {
+          "name": "artifactDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runtimeCapabilitiesJson": {
+          "name": "runtimeCapabilitiesJson",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "identityMode": {
+          "name": "identityMode",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "networkZone": {
+          "name": "networkZone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "configHash": {
+          "name": "configHash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credentialRefId": {
+          "name": "credentialRefId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "revisionState": {
+          "name": "revisionState",
+          "type": "enum('draft','published','withdrawn')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft'"
+        },
+        "createdBy": {
+          "name": "createdBy",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "publishedAt": {
+          "name": "publishedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "RuntimeRevision_runtime_revisionNo_uq": {
+          "name": "RuntimeRevision_runtime_revisionNo_uq",
+          "columns": [
+            "runtimeId",
+            "revisionNo"
+          ],
+          "isUnique": true
+        },
+        "RuntimeRevision_runtime_state_idx": {
+          "name": "RuntimeRevision_runtime_state_idx",
+          "columns": [
+            "runtimeId",
+            "revisionState"
+          ],
+          "isUnique": false
+        },
+        "RuntimeRevision_artifact_idx": {
+          "name": "RuntimeRevision_artifact_idx",
+          "columns": [
+            "artifactId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "RuntimeRevision_runtimeId_Runtime_id_fk": {
+          "name": "RuntimeRevision_runtimeId_Runtime_id_fk",
+          "tableFrom": "RuntimeRevision",
+          "tableTo": "Runtime",
+          "columnsFrom": [
+            "runtimeId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "RuntimeRevision_id": {
+          "name": "RuntimeRevision_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "Runtime": {
+      "name": "Runtime",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeKey": {
+          "name": "runtimeKey",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "displayName": {
+          "name": "displayName",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeKind": {
+          "name": "runtimeKind",
+          "type": "enum('hosted','external')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ownerUserId": {
+          "name": "ownerUserId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lifecycleState": {
+          "name": "lifecycleState",
+          "type": "enum('draft','enabled','disabled','retired')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft'"
+        },
+        "currentRevisionId": {
+          "name": "currentRevisionId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "versionNo": {
+          "name": "versionNo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "datetime",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "Runtime_tenant_runtimeKey_uq": {
+          "name": "Runtime_tenant_runtimeKey_uq",
+          "columns": [
+            "tenantId",
+            "runtimeKey"
+          ],
+          "isUnique": true
+        },
+        "Runtime_tenant_lifecycle_updated_idx": {
+          "name": "Runtime_tenant_lifecycle_updated_idx",
+          "columns": [
+            "tenantId",
+            "lifecycleState",
+            "updatedAt"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "Runtime_tenantId_Tenant_id_fk": {
+          "name": "Runtime_tenantId_Tenant_id_fk",
+          "tableFrom": "Runtime",
+          "tableTo": "Tenant",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "Runtime_id": {
+          "name": "Runtime_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ExecutionBinding": {
       "name": "ExecutionBinding",
@@ -9965,13 +11789,6 @@
         },
         "tenantId": {
           "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentRevisionId": {
-          "name": "agentRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
@@ -10082,36 +11899,36 @@
           "notNull": true,
           "autoincrement": false
         },
-        "agentArtifactId": {
-          "name": "agentArtifactId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "runtimeArtifactId": {
           "name": "runtimeArtifactId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentArtifactDigest": {
-          "name": "agentArtifactDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimeArtifactDigest": {
           "name": "runtimeArtifactDigest",
           "type": "varchar(71)",
           "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runtimeEvidenceKind": {
+          "name": "runtimeEvidenceKind",
+          "type": "enum('hosted_artifact','external_endpoint')",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
         "runtimeConfigDigest": {
           "name": "runtimeConfigDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtimeTargetDigest": {
+          "name": "runtimeTargetDigest",
           "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
@@ -10124,23 +11941,9 @@
           "notNull": true,
           "autoincrement": false
         },
-        "agentAttestationIds": {
-          "name": "agentAttestationIds",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "runtimeAttestationIds": {
           "name": "runtimeAttestationIds",
           "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentPublicationRecordId": {
-          "name": "agentPublicationRecordId",
-          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -10203,13 +12006,6 @@
           ],
           "isUnique": false
         },
-        "ExecutionBinding_agentRevision_idx": {
-          "name": "ExecutionBinding_agentRevision_idx",
-          "columns": [
-            "agentRevisionId"
-          ],
-          "isUnique": false
-        },
         "ExecutionBinding_runtimeRevision_idx": {
           "name": "ExecutionBinding_runtimeRevision_idx",
           "columns": [
@@ -10221,13 +12017,6 @@
           "name": "ExecutionBinding_routeRevision_idx",
           "columns": [
             "routeRevisionId"
-          ],
-          "isUnique": false
-        },
-        "ExecutionBinding_agentArtifact_idx": {
-          "name": "ExecutionBinding_agentArtifact_idx",
-          "columns": [
-            "agentArtifactId"
           ],
           "isUnique": false
         },
@@ -10269,7 +12058,13 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "ExecutionBinding_runtimeAttestationIds_non_empty": {
+          "name": "ExecutionBinding_runtimeAttestationIds_non_empty",
+          "value": "JSON_TYPE(`ExecutionBinding`.`runtimeAttestationIds`) = 'ARRAY' AND (JSON_LENGTH(`ExecutionBinding`.`runtimeAttestationIds`) >= 1 OR `ExecutionBinding`.`runtimeEvidenceKind` = 'external_endpoint')"
+        }
+      }
     },
     "ExecutionOwnership": {
       "name": "ExecutionOwnership",
@@ -10366,7 +12161,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "InvocationAttempt": {
       "name": "InvocationAttempt",
@@ -10470,6 +12266,49 @@
           "notNull": false,
           "autoincrement": false
         },
+        "dispatchAttemptCount": {
+          "name": "dispatchAttemptCount",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "nextDispatchAt": {
+          "name": "nextDispatchAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchLeaseOwner": {
+          "name": "dispatchLeaseOwner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatchLeaseExpiresAt": {
+          "name": "dispatchLeaseExpiresAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastDispatchAttemptAt": {
+          "name": "lastDispatchAttemptAt",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lastTransientErrorCode": {
+          "name": "lastTransientErrorCode",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "createdAt": {
           "name": "createdAt",
           "type": "datetime(3)",
@@ -10501,6 +12340,21 @@
             "attemptState"
           ],
           "isUnique": false
+        },
+        "InvocationAttempt_dispatch_retry_idx": {
+          "name": "InvocationAttempt_dispatch_retry_idx",
+          "columns": [
+            "attemptState",
+            "nextDispatchAt"
+          ],
+          "isUnique": false
+        },
+        "InvocationAttempt_dispatch_lease_idx": {
+          "name": "InvocationAttempt_dispatch_lease_idx",
+          "columns": [
+            "dispatchLeaseExpiresAt"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -10526,7 +12380,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Invocation": {
       "name": "Invocation",
@@ -10744,7 +12599,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RuntimeEventIngress": {
       "name": "RuntimeEventIngress",
@@ -10926,182 +12782,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
-    },
-    "RuntimeRevision": {
-      "name": "RuntimeRevision",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeId": {
-          "name": "runtimeId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revisionNo": {
-          "name": "revisionNo",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "protocolType": {
-          "name": "protocolType",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "protocolContractRevision": {
-          "name": "protocolContractRevision",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'agent-runtime-protocol@1'"
-        },
-        "endpointRef": {
-          "name": "endpointRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeArtifactRef": {
-          "name": "runtimeArtifactRef",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "artifactId": {
-          "name": "artifactId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "artifactDigest": {
-          "name": "artifactDigest",
-          "type": "varchar(71)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "runtimeCapabilitiesJson": {
-          "name": "runtimeCapabilitiesJson",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "identityMode": {
-          "name": "identityMode",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "networkZone": {
-          "name": "networkZone",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "configHash": {
-          "name": "configHash",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revisionState": {
-          "name": "revisionState",
-          "type": "enum('draft','published','withdrawn')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'draft'"
-        },
-        "createdBy": {
-          "name": "createdBy",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "publishedAt": {
-          "name": "publishedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "RuntimeRevision_runtime_revisionNo_uq": {
-          "name": "RuntimeRevision_runtime_revisionNo_uq",
-          "columns": [
-            "runtimeId",
-            "revisionNo"
-          ],
-          "isUnique": true
-        },
-        "RuntimeRevision_runtime_state_idx": {
-          "name": "RuntimeRevision_runtime_state_idx",
-          "columns": [
-            "runtimeId",
-            "revisionState"
-          ],
-          "isUnique": false
-        },
-        "RuntimeRevision_artifact_idx": {
-          "name": "RuntimeRevision_artifact_idx",
-          "columns": [
-            "artifactId"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "RuntimeRevision_runtimeId_Runtime_id_fk": {
-          "name": "RuntimeRevision_runtimeId_Runtime_id_fk",
-          "tableFrom": "RuntimeRevision",
-          "tableTo": "Runtime",
-          "columnsFrom": [
-            "runtimeId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "RuntimeRevision_id": {
-          "name": "RuntimeRevision_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RuntimeSessionBinding": {
       "name": "RuntimeSessionBinding",
@@ -11225,141 +12907,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
-    },
-    "Runtime": {
-      "name": "Runtime",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenantId": {
-          "name": "tenantId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeKey": {
-          "name": "runtimeKey",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "displayName": {
-          "name": "displayName",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "runtimeKind": {
-          "name": "runtimeKind",
-          "type": "enum('hosted','external')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ownerUserId": {
-          "name": "ownerUserId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lifecycleState": {
-          "name": "lifecycleState",
-          "type": "enum('draft','enabled','disabled','retired')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'draft'"
-        },
-        "currentRevisionId": {
-          "name": "currentRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "versionNo": {
-          "name": "versionNo",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "deletedAt": {
-          "name": "deletedAt",
-          "type": "datetime",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "Runtime_tenant_runtimeKey_uq": {
-          "name": "Runtime_tenant_runtimeKey_uq",
-          "columns": [
-            "tenantId",
-            "runtimeKey"
-          ],
-          "isUnique": true
-        },
-        "Runtime_tenant_lifecycle_updated_idx": {
-          "name": "Runtime_tenant_lifecycle_updated_idx",
-          "columns": [
-            "tenantId",
-            "lifecycleState",
-            "updatedAt"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "Runtime_tenantId_Tenant_id_fk": {
-          "name": "Runtime_tenantId_Tenant_id_fk",
-          "tableFrom": "Runtime",
-          "tableTo": "Tenant",
-          "columnsFrom": [
-            "tenantId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "Runtime_id": {
-          "name": "Runtime_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "IncidentContainment": {
       "name": "IncidentContainment",
@@ -11519,7 +13068,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "SecurityIncident": {
       "name": "SecurityIncident",
@@ -11732,7 +13282,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Skill": {
       "name": "Skill",
@@ -11882,7 +13433,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "SkillVersion": {
       "name": "SkillVersion",
@@ -12015,7 +13567,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "SkillSyncBinding": {
       "name": "SkillSyncBinding",
@@ -12216,7 +13769,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "CapabilityReview": {
       "name": "CapabilityReview",
@@ -12379,7 +13933,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ToolCall": {
       "name": "ToolCall",
@@ -12612,7 +14167,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Connection": {
       "name": "Connection",
@@ -12747,7 +14303,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "CredentialRef": {
       "name": "CredentialRef",
@@ -12885,7 +14442,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ToolProvider": {
       "name": "ToolProvider",
@@ -13047,7 +14605,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ToolSchemaRevision": {
       "name": "ToolSchemaRevision",
@@ -13179,7 +14738,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Tool": {
       "name": "Tool",
@@ -13335,7 +14895,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "observation": {
       "name": "observation",
@@ -13484,7 +15045,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "span": {
       "name": "span",
@@ -13648,7 +15210,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "trace": {
       "name": "trace",
@@ -13822,7 +15385,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "capacity_snapshot": {
       "name": "capacity_snapshot",
@@ -13959,7 +15523,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "cost_aggregate": {
       "name": "cost_aggregate",
@@ -14106,7 +15671,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "service_level_indicator": {
       "name": "service_level_indicator",
@@ -14256,7 +15822,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "usage_record": {
       "name": "usage_record",
@@ -14441,7 +16008,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "UserActionRequest": {
       "name": "UserActionRequest",
@@ -14689,7 +16257,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "WorkloadTokenRevocation": {
       "name": "WorkloadTokenRevocation",
@@ -14799,7 +16368,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "WorkspaceMergeConflict": {
       "name": "WorkspaceMergeConflict",
@@ -14972,7 +16542,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "WorkspaceOverlay": {
       "name": "WorkspaceOverlay",
@@ -15167,7 +16738,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "WorkspaceWriteLock": {
       "name": "WorkspaceWriteLock",
@@ -15363,7 +16935,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Workspace": {
       "name": "Workspace",
@@ -15518,7 +17091,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "WorkspaceAttachment": {
       "name": "WorkspaceAttachment",
@@ -15706,7 +17280,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "WorkspaceAttachmentUse": {
       "name": "WorkspaceAttachmentUse",
@@ -15809,7 +17384,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "WorkspaceBinding": {
       "name": "WorkspaceBinding",
@@ -15982,7 +17558,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ControlPlaneEventDelivery": {
       "name": "ControlPlaneEventDelivery",
@@ -16110,7 +17687,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ControlPlaneOutboxEvent": {
       "name": "ControlPlaneOutboxEvent",
@@ -16222,7 +17800,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "Artifact": {
       "name": "Artifact",
@@ -16326,7 +17905,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "ArtifactAttestation": {
       "name": "ArtifactAttestation",
@@ -16590,7 +18170,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "AttestationRevocationRecord": {
       "name": "AttestationRevocationRecord",
@@ -16692,7 +18273,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "PublicationRecord": {
       "name": "PublicationRecord",
@@ -16758,6 +18340,34 @@
           "type": "json",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "agentContractSnapshotId": {
+          "name": "agentContractSnapshotId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentContractDigest": {
+          "name": "agentContractDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentCapabilityDigest": {
+          "name": "agentCapabilityDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentContextDigest": {
+          "name": "agentContextDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "publishedByType": {
@@ -16837,7 +18447,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "WithdrawalRecord": {
       "name": "WithdrawalRecord",
@@ -16961,7 +18572,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RouteActivation": {
       "name": "RouteActivation",
@@ -17122,7 +18734,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RouteRevision": {
       "name": "RouteRevision",
@@ -17173,7 +18786,7 @@
           "name": "agentRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimeRevisionId": {
@@ -17181,6 +18794,34 @@
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "agentEndpointRef": {
+          "name": "agentEndpointRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentIdentityMode": {
+          "name": "agentIdentityMode",
+          "type": "enum('none','bearer')",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentCredentialRefId": {
+          "name": "agentCredentialRefId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentNetworkZone": {
+          "name": "agentNetworkZone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "policyRevisionId": {
@@ -17350,7 +18991,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RouteEligibilityProjection": {
       "name": "RouteEligibilityProjection",
@@ -17369,11 +19011,19 @@
           "notNull": true,
           "autoincrement": false
         },
+        "targetKind": {
+          "name": "targetKind",
+          "type": "enum('runtime','agent')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'runtime'"
+        },
         "agentId": {
           "name": "agentId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "routeSetId": {
@@ -17492,7 +19142,35 @@
           "name": "agentRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentEndpointRef": {
+          "name": "agentEndpointRef",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentIdentityMode": {
+          "name": "agentIdentityMode",
+          "type": "enum('none','bearer')",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentCredentialRefId": {
+          "name": "agentCredentialRefId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentNetworkZone": {
+          "name": "agentNetworkZone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "agentRevisionState": {
@@ -17565,6 +19243,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "runtimeEvidenceKind": {
+          "name": "runtimeEvidenceKind",
+          "type": "enum('hosted_artifact','external_endpoint')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "policyRevisionId": {
           "name": "policyRevisionId",
           "type": "varchar(36)",
@@ -17593,13 +19278,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "agentAttestationIds": {
-          "name": "agentAttestationIds",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "runtimeAttestationIds": {
           "name": "runtimeAttestationIds",
           "type": "json",
@@ -17609,13 +19287,6 @@
         },
         "conformanceRunId": {
           "name": "conformanceRunId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "agentArtifactId": {
-          "name": "agentArtifactId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
@@ -17656,8 +19327,22 @@
           "notNull": true,
           "autoincrement": false
         },
-        "agentArtifactDigest": {
-          "name": "agentArtifactDigest",
+        "agentContractSnapshotId": {
+          "name": "agentContractSnapshotId",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentContractDigest": {
+          "name": "agentContractDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agentContextDigest": {
+          "name": "agentContextDigest",
           "type": "varchar(71)",
           "primaryKey": false,
           "notNull": false,
@@ -17672,6 +19357,13 @@
         },
         "runtimeConfigDigest": {
           "name": "runtimeConfigDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "runtimeTargetDigest": {
+          "name": "runtimeTargetDigest",
           "type": "varchar(71)",
           "primaryKey": false,
           "notNull": false,
@@ -17766,7 +19458,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RuntimeConformanceCaseResult": {
       "name": "RuntimeConformanceCaseResult",
@@ -17847,7 +19540,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "RuntimeConformanceRun": {
       "name": "RuntimeConformanceRun",
@@ -17873,8 +19567,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "runtimeArtifactDigest": {
-          "name": "runtimeArtifactDigest",
+        "runtimeTargetDigest": {
+          "name": "runtimeTargetDigest",
           "type": "varchar(71)",
           "primaryKey": false,
           "notNull": true,
@@ -18072,7 +19766,8 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
     "HostedProvisioningRequest": {
       "name": "HostedProvisioningRequest",
@@ -18200,13 +19895,6 @@
         },
         "stepAgentPublicationRecordId": {
           "name": "stepAgentPublicationRecordId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "stepAgentAttestationId": {
-          "name": "stepAgentAttestationId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
@@ -18363,9 +20051,11 @@
           ]
         }
       },
-      "uniqueConstraints": {}
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     }
   },
+  "views": {},
   "_meta": {
     "schemas": {},
     "tables": {},

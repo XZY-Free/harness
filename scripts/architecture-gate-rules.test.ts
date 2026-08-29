@@ -3,6 +3,7 @@ import {
   type SourceDocument,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
+  checkTopic01FinalCloseoutGate,
   collectCloseoutBoundaryViolations,
   collectDeprecatedArchitectureViolations,
   collectTopic01BoundaryViolations,
@@ -634,5 +635,126 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
     );
     const result = checkNineIssueCloseoutGate(docs);
     expect(result.failures.some((f) => f.includes("F7"))).toBe(true);
+  });
+});
+
+// ─── Batch9 最终收口 Gate（R1-R8）──────────────────────────────
+
+describe("checkTopic01FinalCloseoutGate（Batch9 R1-R8）", () => {
+  /** 合规 fixture：旧 Authority 归零 + AgentCall child domain 存在。 */
+  function compliantDocs(): SourceDocument[] {
+    return [
+      doc("lib/persistence/schema/executions.ts", "runtimeRevisionId: varchar(...);"),
+      doc(
+        "lib/persistence/schema/runtimes.ts",
+        "protocolType: mysqlEnum('harness_runtime_protocol');",
+      ),
+      doc("lib/runtime/runtime-client.ts", "capability_type: 'agent'; mode: 'required';"),
+      doc("lib/agents/calls/domain/agent-call.ts", "parentInvocationId: string;"),
+      doc("lib/persistence/schema/agent-calls.ts", "parentInvocationId: varchar(...);"),
+      doc("lib/agents/calls/transport/a2a/a2a-mapper.ts", "A2A completed -> AgentCall.completed;"),
+    ];
+  }
+
+  it("合规代码 → passed", () => {
+    const result = checkTopic01FinalCloseoutGate(compliantDocs());
+    expect(result.passed).toBe(true);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("R1 ExecutionBinding schema 出现 Agent evidence 列 → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === "lib/persistence/schema/executions.ts"
+        ? doc(d.path, "agentRevisionId: varchar(...); agentPublicationRecordId: varchar(...);")
+        : d,
+    );
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("R1"))).toBe(true);
+  });
+
+  it("R2 RuntimeRevision schema 出现 Agent/A2A contract authority → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === "lib/persistence/schema/runtimes.ts"
+        ? doc(d.path, "agentContractSnapshotId: varchar(...);")
+        : d,
+    );
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("R2"))).toBe(true);
+  });
+
+  it("R3 Runtime Start Request 出现 agent_instruction_ref → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === "lib/runtime/runtime-client.ts" ? doc(d.path, "agent_instruction_ref: '...';") : d,
+    );
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("R3"))).toBe(true);
+  });
+
+  it("R4 HostedAgentLoop → 失败", () => {
+    const docs = [
+      ...compliantDocs(),
+      doc("lib/runtime/adapters/hosted-adapter.ts", "class HostedAgentLoop {}"),
+    ];
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("R4"))).toBe(true);
+  });
+
+  it("R5 顶层 ThreadItem agent_message → 失败", () => {
+    const docs = [
+      ...compliantDocs(),
+      doc("lib/persistence/schema/conversation.ts", "itemType: 'agent_message'"),
+    ];
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("R5"))).toBe(true);
+  });
+
+  it("R6 第二套 Resolver（resolveAgentRoute）→ 失败", () => {
+    const docs = [
+      ...compliantDocs(),
+      doc(
+        "lib/routes/application/resolve-agent-route.ts",
+        "export function resolveAgentRoute() {}",
+      ),
+    ];
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("R6"))).toBe(true);
+  });
+
+  it("R7 AgentCall domain 缺 parentInvocationId → 失败", () => {
+    const docs = compliantDocs().map((d) =>
+      d.path === "lib/agents/calls/domain/agent-call.ts" ? doc(d.path, "agentId: string;") : d,
+    );
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("R7"))).toBe(true);
+  });
+
+  it("R8 A2A transport 直接改 parent Invocation 终态 → 失败", () => {
+    const docs = [
+      ...compliantDocs(),
+      doc(
+        "lib/agents/calls/transport/a2a/a2a-client.ts",
+        "markInvocationCompleted(parentInvocationId);",
+      ),
+    ];
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.failures.some((f) => f.includes("R8"))).toBe(true);
+  });
+
+  it("禁词在注释中 → 不违规（剥离注释）", () => {
+    const docs = [
+      ...compliantDocs(),
+      doc("lib/runtime/dispatcher.ts", "// 旧的 HostedAgentLoop 已移除，现在用 Harness Loop"),
+    ];
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.passed).toBe(true);
+  });
+
+  it("测试文件可构造旧场景 → 不违规（排除 .test.*）", () => {
+    const docs = [
+      ...compliantDocs(),
+      doc("lib/runtime/adapters/hosted-adapter.test.ts", "class HostedAgentLoop {}"),
+    ];
+    const result = checkTopic01FinalCloseoutGate(docs);
+    expect(result.passed).toBe(true);
   });
 });

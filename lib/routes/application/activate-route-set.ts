@@ -9,13 +9,8 @@
  */
 import { randomUUID } from "node:crypto";
 import type { RevisionExecutionEvidenceReader } from "@/lib/control-plane/application/revision-execution-evidence-reader";
-import {
-  RevisionExecutionEligibilityPolicy,
-  extractRequiredCapabilities,
-} from "@/lib/control-plane/domain/revision-execution-eligibility";
+import { RevisionExecutionEligibilityPolicy } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import { createMySqlRevisionExecutionEvidenceReader } from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
-import { agentRevisionTable } from "@/lib/persistence/schema/agents";
-import { eq } from "drizzle-orm";
 import {
   ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
@@ -191,26 +186,10 @@ export function createActivateRouteSet(dependencies: {
             runtimeRevisionId: desired.runtimeRevisionId,
             policyRevisionId: desired.policyRevisionId ?? null,
           });
-          // 使用统一 RevisionExecutionEligibilityPolicy（fail-closed，无降级路径）
-          // 从同一事务读取 agentInterfaceRequirementsJson；无 Agent 约束时为 null。
-          let requiredCapabilities: string[] = [];
-          if (hasAgentConstraint) {
-            const [fullAgentRevision] = await session
-              .getDbOrTx()
-              .select({
-                agentInterfaceRequirementsJson: agentRevisionTable.agentInterfaceRequirementsJson,
-              })
-              .from(agentRevisionTable)
-              .where(eq(agentRevisionTable.id, desired.agentRevisionId as string))
-              .limit(1);
-            requiredCapabilities = extractRequiredCapabilities(
-              fullAgentRevision?.agentInterfaceRequirementsJson,
-            );
-          }
-          const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
-            evidence,
-            requiredCapabilities,
-          );
+          // 使用统一 RevisionExecutionEligibilityPolicy（fail-closed，无降级路径）。
+          // 冻结架构：本 Policy 不做 Agent required capabilities vs Runtime
+          // capabilities 交叉校验（外部 Agent 自己是能力提供方，§14）。
+          const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(evidence);
           if (!eligibilityResult.eligible) {
             throw new RouteExecutionIneligibleError(desired.routeKey, eligibilityResult.errors);
           }

@@ -39,7 +39,7 @@ const DEFAULT_MODEL_PROVIDER = "default";
  * 优先级：员工为本次 Invocation 选择的模型 / 会话默认模型 > 平台默认模型
  * > "default" 占位。
  *
- * Harness 顶层执行不再从任何 AgentRevision 模型策略提取模型（专题01 冻结架构）：
+ * Harness 顶层执行不再从任何 AgentRevision 模型策略提取模型（冻结架构）：
  * Agent 是能力资产，不是顶层执行目标；顶层模型只由 Thread 事实与平台默认决定。
  */
 export function extractModelInfo(

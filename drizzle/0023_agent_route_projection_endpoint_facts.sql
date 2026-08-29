@@ -1,1 +1,0 @@
-ALTER TABLE `RouteEligibilityProjection` ADD `agentEndpointRef` varchar(512), ADD `agentIdentityMode` enum('none','bearer'), ADD `agentCredentialRefId` varchar(36), ADD `agentNetworkZone` varchar(32);

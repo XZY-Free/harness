@@ -1,1 +1,0 @@
-ALTER TABLE `AgentCallAttempt` ADD `requestDigest` varchar(71);

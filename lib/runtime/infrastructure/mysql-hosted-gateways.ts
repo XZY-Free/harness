@@ -79,8 +79,7 @@ function buildRunnerIdentityRegistry(): RunnerSigningIdentityRegistry {
 const BUILTIN_HOSTED_RUNTIME_KEY = "builtin-hosted";
 const HOSTED_ACTOR_ID = "hosted-runtime-provisioner";
 const HOSTED_RUNTIME_ENDPOINT = "in-process://hosted";
-// runtimeCapabilitiesJson 的权威契约是 string[]（能力名列表），
-// 见 extractRuntimeCapabilities / mysql-route-control-store（Route 资格权威）。
+// runtimeCapabilitiesJson 的权威契约是 string[]（能力名列表）。
 // hosted runtime 声明 event_stream 能力；执行限额（600s / 1MB）由
 // dispatcher/redispatch 的默认值承载，二者数值一致，故不在此对象承载。
 const HOSTED_RUNTIME_CAPABILITIES = ["event_stream"];
@@ -114,7 +113,7 @@ const routeReader: HostedRouteReader = {
   async resolveEligibleRoute(command) {
     const outcome = await resolveRoute({
       ...command,
-      // 显式 agent target：解析指定 Agent 能力 Route（专题01 冻结架构）。
+      // 显式 agent target：解析指定 Agent 能力 Route（冻结架构）。
       target: { kind: "agent", agentId: command.agentId },
       businessKey: { jobId: `hosted-provision:${command.agentId}` },
     });
@@ -323,7 +322,7 @@ const routeActivation: HostedRouteActivationGateway = {
           routeKey: "primary",
           agentRevisionId: command.agentRevision.revisionId,
           runtimeRevisionId: command.runtimeRevision.revisionId,
-          // 专题01 Batch4 补漏：Agent Route 必须冻结生产调用事实。
+          // Agent Route 必须冻结生产调用事实。
           // Hosted 内置 Agent 的生产调用端点是 Hosted in-process Runtime 本身：
           // 无外部出站 bearer 身份（identityMode=none），网络区域 internal。
           agentEndpointRef: HOSTED_RUNTIME_ENDPOINT,

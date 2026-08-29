@@ -27,7 +27,7 @@ export const routeEligibilityProjection = mysqlTable(
     /** 路由 ID（与 DeploymentRoute.id 对应，业务主键）。 */
     routeId: varchar("routeId", { length: 36 }).primaryKey().notNull(),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
-    /** 显式目标类型 — runtime 或 agent（专题01 冻结架构，禁止隐式 null 猜测）。 */
+    /** 显式目标类型 — runtime 或 agent（冻结架构，禁止隐式 null 猜测）。 */
     targetKind: mysqlEnum("targetKind", ["runtime", "agent"]).notNull().default("runtime"),
     /**
      * 归属 Agent ID。
@@ -64,7 +64,7 @@ export const routeEligibilityProjection = mysqlTable(
      * null = 基础 Harness Route（无 Agent 资产约束），Agent Evidence 为 not_applicable。
      */
     agentRevisionId: varchar("agentRevisionId", { length: 36 }),
-    // ─── Agent Route 生产调用事实（专题01 Batch4 补漏）──
+    // ─── Agent Route 生产调用事实──
     // Agent Route 冻结 endpoint/identity/credential/network；基础 Harness Route 为 null。
     agentEndpointRef: varchar("agentEndpointRef", { length: 512 }),
     agentIdentityMode: mysqlEnum("agentIdentityMode", ["none", "bearer"]),

@@ -5,6 +5,7 @@ import {
   type SourceDocument,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
+  checkTopic01FinalCloseoutGate,
   collectCloseoutBoundaryViolations,
   collectDeprecatedArchitectureViolations,
   collectTopic01BoundaryViolations,
@@ -186,6 +187,21 @@ function checkCloseoutRules(): void {
   else fail(`九项收口 Gate F1-F8：\n  ${nineIssue.failures.join("\n  ")}`);
 }
 
+/** Batch9 最终收口 Gate（§四 15 条红线：ExecutionBinding/RuntimeSessionBinding/RuntimeRevision schema、start request、HostedAgentLoop、agent_message、单一 Resolver、AgentCall child、A2A lifecycle）。 */
+function checkFinalCloseout(): void {
+  const PRODUCTION_ROOTS = ["app", "components", "desktop", "lib", "scripts"];
+  const documents: SourceDocument[] = PRODUCTION_ROOTS.flatMap((root) =>
+    filesUnder(resolve(ROOT, root)),
+  )
+    .filter((file) => SOURCE_EXTENSIONS.has(file.slice(file.lastIndexOf("."))))
+    .map((file) => ({ path: relative(ROOT, file), source: readFileSync(file, "utf8") }));
+
+  const result = checkTopic01FinalCloseoutGate(documents);
+  if (result.passed)
+    pass("Batch9 最终收口 Gate R1-R8（旧 Authority 归零 + 单一 Resolver + AgentCall child）");
+  else fail(`Batch9 最终收口 Gate R1-R8：\n  ${result.failures.join("\n  ")}`);
+}
+
 function main(): void {
   checkMigrationJournal();
   checkRetiredNaming();
@@ -236,6 +252,7 @@ function main(): void {
   checkDeprecatedArchitecture();
   checkTopic01Boundaries();
   checkCloseoutRules();
+  checkFinalCloseout();
   if (failures > 0) process.exitCode = 1;
 }
 

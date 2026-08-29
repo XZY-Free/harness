@@ -199,7 +199,6 @@ describe("Projection authority", () => {
       },
       runtimeLifecycleState: "active",
       runtimeRevisionState: "published",
-      runtimeCapabilities: [],
       policyRequirement: { kind: "none" },
     });
 
@@ -299,8 +298,6 @@ describe("Projection 资格判定逻辑", () => {
   describe("computeCapabilityManifestDigest", () => {
     it("相同输入产生相同 digest", () => {
       const input = {
-        agentRevisionId: "agent-rev-1",
-        agentInterfaceRequirements: { tools: ["read", "write"] },
         runtimeRevisionId: "rt-rev-1",
         runtimeCapabilities: { protocols: ["https"] },
       };
@@ -312,15 +309,11 @@ describe("Projection 资格判定逻辑", () => {
 
     it("不同输入产生不同 digest", () => {
       const d1 = computeCapabilityManifestDigest({
-        agentRevisionId: "agent-rev-1",
-        agentInterfaceRequirements: { tools: ["read"] },
         runtimeRevisionId: "rt-rev-1",
         runtimeCapabilities: {},
       });
       const d2 = computeCapabilityManifestDigest({
-        agentRevisionId: "agent-rev-2",
-        agentInterfaceRequirements: { tools: ["read"] },
-        runtimeRevisionId: "rt-rev-1",
+        runtimeRevisionId: "rt-rev-2",
         runtimeCapabilities: {},
       });
       expect(d1).not.toBe(d2);

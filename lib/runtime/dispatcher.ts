@@ -307,7 +307,7 @@ export async function dispatchInvocationForTurn(params: {
     params.tenantId,
     routeResolution.policyRevisionId,
   );
-  // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带 Agent evidence。
+  // 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带 Agent evidence。
   const controlPlaneEvidence = routeResolution.controlPlaneEvidence;
   const bindingParams: CreateExecutionBindingCommand = {
     invocationId: invocation.id,
@@ -534,7 +534,7 @@ async function dispatchToRuntime(params: {
   const { runtimeEndpoint, auth, gatewayEndpoints, governanceConfig, gatewayAccess } =
     await params.runtimeEndpointResolver(params.binding);
 
-  // 专题01 冻结架构：用户选择的 Agent 是能力要求约束（非执行目标）。
+  // 冻结架构：用户选择的 Agent 是能力要求约束（非执行目标）。
   // 从 Turn 的 requestedAgentId/agentSelectionMode 构建 capability_requirements，
   // 由 Harness Loop 读取并调 AgentCall。
   const capabilityRequirements =
@@ -580,7 +580,7 @@ async function dispatchToRuntime(params: {
       requestBody,
     });
   } catch (err) {
-    // A2A Transport 网络不可达/503（stream_interrupted）→ 同 transient 语义。
+    // Harness Runtime Transport 网络不可达/503（stream_interrupted）→ 同 transient 语义。
     if (err instanceof RuntimeTransportError && err.kind === "stream_interrupted") {
       const skipReason: "runtime_network_unavailable" | "runtime_unavailable" =
         "runtime_network_unavailable";

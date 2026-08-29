@@ -21,7 +21,7 @@ import type { RouteEligibilityResolutionStore } from "@/lib/routes/persistence/r
 
 export interface ConfiguredResolveRouteCommand {
   tenantId: string;
-  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（专题01 冻结架构）。 */
+  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（冻结架构）。 */
   target: RouteTarget;
   routeScopeKey: string;
   businessKey: { threadId?: string; jobId?: string };

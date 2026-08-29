@@ -110,14 +110,10 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
         routeId: input.deploymentRouteId,
         routeRevisionId: evidence.routeRevisionId,
         routeActivationId: evidence.routeActivationId,
-        // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
-        // agentRevisionId / agentPublicationRecordId 恒为 null（Agent not_applicable）。
-        agentRevisionId: null,
         runtimeRevisionId: input.runtimeRevisionId,
         policyRevisionId: input.policyRevisionId,
         projectionVersionNo: input.projectionVersionNo,
         frozenEvidence: {
-          agentPublicationRecordId: null,
           runtimePublicationRecordId: evidence.runtimePublicationRecordId,
           runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
           conformanceRunId: evidence.conformanceRunId,
@@ -131,11 +127,8 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
       const revisions = await lockAndVerifyRoute(tx, input);
 
       // 4. : Capability Manifest Digest 一致性（TOCTOU 防御）
-      // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度，
-      // agentRevisionId/interface 恒为 null。
+      // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
       const capabilityManifestDigest = computeCapabilityManifestDigest({
-        agentRevisionId: null,
-        agentInterfaceRequirements: null,
         runtimeRevisionId: revisions.runtimeRevision.id,
         runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
       });
@@ -652,10 +645,6 @@ async function lockAndVerifyPublications(
       conformanceRunId: publicationRecord.conformanceRunId,
       evidenceSetDigest: publicationRecord.evidenceSetDigest,
       approvals: publicationRecord.approvals,
-      agentContractSnapshotId: publicationRecord.agentContractSnapshotId,
-      agentContractDigest: publicationRecord.agentContractDigest,
-      agentCapabilityDigest: publicationRecord.agentCapabilityDigest,
-      agentContextDigest: publicationRecord.agentContextDigest,
     })
     .from(publicationRecord)
     .where(eq(publicationRecord.id, evidence.runtimePublicationRecordId))
@@ -691,11 +680,6 @@ type LockedPublicationEvidence = {
   attestationIds: string[];
   conformanceRunId: string | null;
   approvals: unknown[];
-  // Agent Publication 冻结的 AgentContractSnapshot 证据（runtime 为 null）。
-  agentContractSnapshotId: string | null;
-  agentContractDigest: string | null;
-  agentCapabilityDigest: string | null;
-  agentContextDigest: string | null;
 };
 
 export function validateFrozenPublicationEvidenceDigest(input: {

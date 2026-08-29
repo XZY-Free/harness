@@ -39,16 +39,77 @@ CREATE TABLE `admin_export` (
 	CONSTRAINT `admin_export_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
+CREATE TABLE `AgentContractCapability` (
+	`id` varchar(36) NOT NULL,
+	`snapshotId` varchar(36) NOT NULL,
+	`position` bigint NOT NULL,
+	`key` varchar(128) NOT NULL,
+	`nameZhCn` varchar(256) NOT NULL,
+	`nameEn` varchar(256),
+	`descriptionZhCn` text,
+	`descriptionEn` text,
+	`tags` json NOT NULL,
+	`examples` json NOT NULL,
+	`inputModes` json NOT NULL,
+	`outputModes` json NOT NULL,
+	CONSTRAINT `AgentContractCapability_id` PRIMARY KEY(`id`),
+	CONSTRAINT `AgentContractCapability_snapshot_position_uq` UNIQUE(`snapshotId`,`position`),
+	CONSTRAINT `AgentContractCapability_snapshot_key_uq` UNIQUE(`snapshotId`,`key`)
+);
+--> statement-breakpoint
+CREATE TABLE `AgentContractInvocationContext` (
+	`id` varchar(36) NOT NULL,
+	`snapshotId` varchar(36) NOT NULL,
+	`position` bigint NOT NULL,
+	`key` varchar(128) NOT NULL,
+	`nameZhCn` varchar(256) NOT NULL,
+	`nameEn` varchar(256),
+	`descriptionZhCn` text,
+	`descriptionEn` text,
+	`necessity` enum('required','preferred','accepted') NOT NULL,
+	`appliesTo` json,
+	`trustRequirement` varchar(64),
+	`declarationSource` enum('provider_declared','operator_declared') NOT NULL,
+	CONSTRAINT `AgentContractInvocationContext_id` PRIMARY KEY(`id`),
+	CONSTRAINT `AgentContractInvocationContext_snapshot_position_uq` UNIQUE(`snapshotId`,`position`),
+	CONSTRAINT `AgentContractInvocationContext_snapshot_key_uq` UNIQUE(`snapshotId`,`key`)
+);
+--> statement-breakpoint
+CREATE TABLE `AgentContractSnapshot` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`agentId` varchar(36) NOT NULL,
+	`contractVersion` varchar(64) NOT NULL,
+	`publicAgentId` varchar(128) NOT NULL,
+	`publicAgentVersion` varchar(64) NOT NULL,
+	`agentNameZhCn` varchar(256) NOT NULL,
+	`agentNameEn` varchar(256),
+	`protocolType` varchar(32) NOT NULL,
+	`protocolContractRevision` varchar(128) NOT NULL,
+	`streamingTransport` boolean NOT NULL,
+	`incrementalContent` boolean NOT NULL,
+	`inputRequired` boolean NOT NULL,
+	`resume` boolean NOT NULL,
+	`cancel` boolean NOT NULL,
+	`durableTaskRecovery` boolean NOT NULL,
+	`supportedLocales` json NOT NULL,
+	`resultFields` json NOT NULL,
+	`errorCodes` json NOT NULL,
+	`resultNotesZhCn` text,
+	`resultNotesEn` text,
+	`contractDigest` varchar(71) NOT NULL,
+	`capabilityDigest` varchar(71) NOT NULL,
+	`contextDigest` varchar(71) NOT NULL,
+	`capturedAt` datetime(3) NOT NULL,
+	`createdBy` varchar(128) NOT NULL,
+	CONSTRAINT `AgentContractSnapshot_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
 CREATE TABLE `AgentRevision` (
 	`id` varchar(36) NOT NULL,
 	`agentId` varchar(36) NOT NULL,
+	`agentContractSnapshotId` varchar(36) NOT NULL,
 	`revisionNo` bigint NOT NULL,
-	`sourceType` varchar(32) NOT NULL,
-	`sourceRevision` varchar(128) NOT NULL,
-	`instructionHash` varchar(128) NOT NULL,
-	`agentArtifactRef` varchar(512) NOT NULL,
-	`artifactId` varchar(36),
-	`artifactDigest` varchar(71),
 	`modelPolicyJson` json NOT NULL,
 	`permissionRequirementsJson` json NOT NULL,
 	`delegationPolicyJson` json NOT NULL,
@@ -77,6 +138,118 @@ CREATE TABLE `Agent` (
 	`deletedAt` datetime,
 	CONSTRAINT `Agent_id` PRIMARY KEY(`id`),
 	CONSTRAINT `Agent_tenant_agentKey_uq` UNIQUE(`tenantId`,`agentKey`)
+);
+--> statement-breakpoint
+CREATE TABLE `AgentCallAttempt` (
+	`id` varchar(36) NOT NULL,
+	`callId` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`attemptNo` int NOT NULL,
+	`attemptState` enum('queued','running','completed','failed','cancelled','lost') NOT NULL DEFAULT 'queued',
+	`externalTaskRef` varchar(256),
+	`dispatchAttemptCount` int NOT NULL DEFAULT 0,
+	`retryReasonCode` varchar(64),
+	`requestDigest` varchar(71),
+	`startedAt` datetime(3),
+	`finishedAt` datetime(3),
+	`errorCode` varchar(128),
+	`errorSummary` text,
+	`createdAt` datetime(3) NOT NULL,
+	`updatedAt` datetime(3) NOT NULL,
+	CONSTRAINT `AgentCallAttempt_id` PRIMARY KEY(`id`),
+	CONSTRAINT `AgentCallAttempt_call_attempt_uq` UNIQUE(`callId`,`attemptNo`)
+);
+--> statement-breakpoint
+CREATE TABLE `AgentCallBinding` (
+	`callId` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`agentId` varchar(36) NOT NULL,
+	`agentRevisionId` varchar(36) NOT NULL,
+	`agentContractSnapshotId` varchar(36) NOT NULL,
+	`agentContractDigest` varchar(71) NOT NULL,
+	`agentCapabilityDigest` varchar(71) NOT NULL,
+	`agentContextDigest` varchar(71) NOT NULL,
+	`agentPublicationRecordId` varchar(36) NOT NULL,
+	`deploymentRouteId` varchar(36) NOT NULL,
+	`routeRevisionId` varchar(36) NOT NULL,
+	`routeActivationId` varchar(36) NOT NULL,
+	`routeContentDigest` varchar(71) NOT NULL,
+	`resolutionInputDigest` varchar(71) NOT NULL,
+	`projectionVersionNo` int NOT NULL,
+	`endpointRef` varchar(512) NOT NULL,
+	`identityMode` enum('none','bearer') NOT NULL,
+	`credentialRefId` varchar(36),
+	`networkZone` varchar(32) NOT NULL,
+	`protocolType` varchar(32) NOT NULL,
+	`protocolContractRevision` varchar(128) NOT NULL,
+	`policyRevisionId` varchar(36) NOT NULL,
+	`policyRulesDigest` varchar(71) NOT NULL,
+	`governanceConfigRevisionId` varchar(36) NOT NULL,
+	`governanceConfigDigest` varchar(71) NOT NULL,
+	`bindingHash` varchar(128) NOT NULL,
+	`boundAt` datetime(3) NOT NULL,
+	CONSTRAINT `AgentCallBinding_callId` PRIMARY KEY(`callId`)
+);
+--> statement-breakpoint
+CREATE TABLE `AgentCallEventIngress` (
+	`id` varchar(36) NOT NULL,
+	`callId` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`producerEventId` varchar(128) NOT NULL,
+	`producerSequence` bigint NOT NULL,
+	`candidateType` varchar(64) NOT NULL,
+	`payloadHash` varchar(128) NOT NULL,
+	`payloadJson` json,
+	`ingressState` enum('accepted','mapped','rejected') NOT NULL DEFAULT 'accepted',
+	`receivedAt` datetime(3) NOT NULL,
+	`mappedAt` datetime(3),
+	`rejectedReason` varchar(256),
+	CONSTRAINT `AgentCallEventIngress_id` PRIMARY KEY(`id`),
+	CONSTRAINT `AgentCallEventIngress_call_producer_event_uq` UNIQUE(`callId`,`producerEventId`),
+	CONSTRAINT `AgentCallEventIngress_call_producer_seq_uq` UNIQUE(`callId`,`producerSequence`)
+);
+--> statement-breakpoint
+CREATE TABLE `AgentCall` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`parentInvocationId` varchar(36) NOT NULL,
+	`agentId` varchar(36) NOT NULL,
+	`agentRevisionId` varchar(36) NOT NULL,
+	`sourceType` varchar(32) NOT NULL,
+	`sourceRef` varchar(256),
+	`state` enum('queued','running','waiting_user','completed','failed','cancelled','lost') NOT NULL DEFAULT 'queued',
+	`externalContextRef` varchar(256),
+	`externalTaskRef` varchar(256),
+	`resultText` text,
+	`resultJson` json,
+	`resultDigest` varchar(71),
+	`errorCode` varchar(128),
+	`errorSummary` text,
+	`logicalCallKey` varchar(256),
+	`createdAt` datetime(3) NOT NULL,
+	`startedAt` datetime(3),
+	`waitingAt` datetime(3),
+	`finishedAt` datetime(3),
+	`versionNo` bigint NOT NULL DEFAULT 1,
+	CONSTRAINT `AgentCall_id` PRIMARY KEY(`id`),
+	CONSTRAINT `AgentCall_parent_logical_key_uq` UNIQUE(`parentInvocationId`,`logicalCallKey`)
+);
+--> statement-breakpoint
+CREATE TABLE `AgentSessionBinding` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`threadId` varchar(36) NOT NULL,
+	`agentId` varchar(36) NOT NULL,
+	`agentRevisionId` varchar(36) NOT NULL,
+	`deploymentRouteId` varchar(36) NOT NULL,
+	`routeRevisionId` varchar(36) NOT NULL,
+	`externalContextRef` varchar(256) NOT NULL,
+	`bindingState` enum('active','closed','lost') NOT NULL DEFAULT 'active',
+	`createdAt` datetime(3) NOT NULL,
+	`lastUsedAt` datetime(3) NOT NULL,
+	`closedAt` datetime(3),
+	CONSTRAINT `AgentSessionBinding_id` PRIMARY KEY(`id`),
+	CONSTRAINT `AgentSessionBinding_revision_route_context_uq` UNIQUE(`agentRevisionId`,`routeRevisionId`,`externalContextRef`)
 );
 --> statement-breakpoint
 CREATE TABLE `AuditEvent` (
@@ -200,6 +373,12 @@ CREATE TABLE `InvocationCommand` (
 	`idempotencyKey` varchar(128),
 	`errorCode` varchar(128),
 	`errorMessage` text,
+	`dispatchAttemptCount` int NOT NULL DEFAULT 0,
+	`nextDispatchAt` datetime(3),
+	`dispatchLeaseOwner` varchar(128),
+	`dispatchLeaseExpiresAt` datetime(3),
+	`lastDispatchAttemptAt` datetime(3),
+	`lastTransientErrorCode` varchar(128),
 	`createdAt` datetime(3) NOT NULL,
 	`dispatchedAt` datetime(3),
 	`acknowledgedAt` datetime(3),
@@ -254,9 +433,9 @@ CREATE TABLE `ThreadItem` (
 	`threadId` varchar(36) NOT NULL,
 	`turnId` varchar(36) NOT NULL,
 	`itemSequence` bigint NOT NULL,
-	`itemType` enum('user_message','user_guidance','agent_message','tool_call','artifact','job_result','child_thread','user_action') NOT NULL,
+	`itemType` enum('user_message','user_guidance','assistant_message','tool_call','artifact','job_result','child_thread','user_action') NOT NULL,
 	`itemState` enum('pending','completed','failed','superseded','cancelled') NOT NULL DEFAULT 'pending',
-	`authorType` enum('user','agent','system','tool') NOT NULL,
+	`authorType` enum('user','assistant','system','tool') NOT NULL,
 	`authorId` varchar(36),
 	`contentJson` json NOT NULL,
 	`contentHash` varchar(128) NOT NULL,
@@ -298,7 +477,6 @@ CREATE TABLE `Thread` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`ownerUserId` varchar(36) NOT NULL,
-	`primaryAgentId` varchar(36) NOT NULL,
 	`defaultWorkspaceId` varchar(36),
 	`activeGoalId` varchar(36),
 	`title` text,
@@ -336,6 +514,8 @@ CREATE TABLE `Turn` (
 	`startedAt` datetime(3),
 	`waitingAt` datetime(3),
 	`finishedAt` datetime(3),
+	`requestedAgentId` varchar(36),
+	`agentSelectionMode` varchar(32),
 	`versionNo` bigint NOT NULL DEFAULT 1,
 	CONSTRAINT `Turn_id` PRIMARY KEY(`id`),
 	CONSTRAINT `Turn_thread_sequence_uq` UNIQUE(`threadId`,`turnSequence`)
@@ -380,7 +560,8 @@ CREATE TABLE `DeletionStep` (
 CREATE TABLE `DeploymentRouteSet` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`agentId` varchar(36) NOT NULL,
+	`targetKind` enum('runtime','agent') NOT NULL DEFAULT 'runtime',
+	`agentId` varchar(36),
 	`routeScopeKey` varchar(128) NOT NULL,
 	`routeScopeJson` json NOT NULL,
 	`versionNo` bigint unsigned NOT NULL DEFAULT 1,
@@ -394,7 +575,7 @@ CREATE TABLE `DeploymentRoute` (
 	`id` varchar(36) NOT NULL,
 	`routeSetId` varchar(36) NOT NULL,
 	`routeKey` varchar(128) NOT NULL,
-	`agentRevisionId` varchar(36) NOT NULL,
+	`agentRevisionId` varchar(36),
 	`runtimeRevisionId` varchar(36) NOT NULL,
 	`trafficWeight` int NOT NULL,
 	`priorityNo` int NOT NULL DEFAULT 0,
@@ -876,7 +1057,10 @@ CREATE TABLE `MemoryCandidate` (
 	`createdAt` datetime(3) NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `MemoryCandidate_id` PRIMARY KEY(`id`),
-	CONSTRAINT `MemoryCandidate_candidateKey_uq` UNIQUE(`candidateKey`)
+	CONSTRAINT `MemoryCandidate_candidateKey_uq` UNIQUE(`candidateKey`),
+	CONSTRAINT `MemoryCandidate_exactly_one_source_ck` CHECK(((`MemoryCandidate`.`sourceItemId` IS NOT NULL) + (`MemoryCandidate`.`sourceJobId` IS NOT NULL) + (`MemoryCandidate`.`sourceArtifactId` IS NOT NULL)) = 1),
+	CONSTRAINT `MemoryCandidate_accepted_entry_ck` CHECK((`MemoryCandidate`.`candidateState` <> 'accepted' OR `MemoryCandidate`.`resolvedMemoryEntryId` IS NOT NULL)),
+	CONSTRAINT `MemoryCandidate_rejected_entry_ck` CHECK((`MemoryCandidate`.`candidateState` NOT IN ('rejected','expired') OR `MemoryCandidate`.`resolvedMemoryEntryId` IS NULL))
 );
 --> statement-breakpoint
 CREATE TABLE `MemoryEntry` (
@@ -1052,7 +1236,6 @@ CREATE TABLE `ThreadListProjection` (
 	`threadId` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`ownerUserId` varchar(36) NOT NULL,
-	`primaryAgentId` varchar(36) NOT NULL,
 	`title` text,
 	`lifecycleState` varchar(32) NOT NULL DEFAULT 'active',
 	`lastActivityAt` datetime(3) NOT NULL,
@@ -1181,10 +1364,51 @@ CREATE TABLE `RetentionPolicy` (
 	CONSTRAINT `RetentionPolicy_tenant_object_uq` UNIQUE(`tenantId`,`objectType`)
 );
 --> statement-breakpoint
+CREATE TABLE `RuntimeRevision` (
+	`id` varchar(36) NOT NULL,
+	`runtimeId` varchar(36) NOT NULL,
+	`revisionNo` bigint NOT NULL,
+	`protocolType` varchar(32) NOT NULL,
+	`protocolContractRevision` varchar(128) NOT NULL,
+	`runtimeEvidenceKind` enum('hosted_artifact','external_endpoint') NOT NULL,
+	`runtimeTargetDigest` varchar(71) NOT NULL,
+	`endpointRef` varchar(512) NOT NULL,
+	`runtimeArtifactRef` varchar(512),
+	`artifactId` varchar(36),
+	`artifactDigest` varchar(71),
+	`runtimeCapabilitiesJson` json NOT NULL,
+	`identityMode` varchar(32) NOT NULL,
+	`networkZone` varchar(32) NOT NULL,
+	`configHash` varchar(128) NOT NULL,
+	`credentialRefId` varchar(36),
+	`revisionState` enum('draft','published','withdrawn') NOT NULL DEFAULT 'draft',
+	`createdBy` varchar(128) NOT NULL,
+	`createdAt` datetime(3) NOT NULL,
+	`publishedAt` datetime(3),
+	CONSTRAINT `RuntimeRevision_id` PRIMARY KEY(`id`),
+	CONSTRAINT `RuntimeRevision_runtime_revisionNo_uq` UNIQUE(`runtimeId`,`revisionNo`)
+);
+--> statement-breakpoint
+CREATE TABLE `Runtime` (
+	`id` varchar(36) NOT NULL,
+	`tenantId` varchar(36) NOT NULL,
+	`runtimeKey` varchar(128) NOT NULL,
+	`displayName` varchar(256) NOT NULL,
+	`runtimeKind` enum('hosted','external') NOT NULL,
+	`ownerUserId` varchar(36) NOT NULL,
+	`lifecycleState` enum('draft','enabled','disabled','retired') NOT NULL DEFAULT 'draft',
+	`currentRevisionId` varchar(36),
+	`versionNo` bigint NOT NULL DEFAULT 1,
+	`createdAt` datetime(3) NOT NULL,
+	`updatedAt` datetime(3) NOT NULL,
+	`deletedAt` datetime,
+	CONSTRAINT `Runtime_id` PRIMARY KEY(`id`),
+	CONSTRAINT `Runtime_tenant_runtimeKey_uq` UNIQUE(`tenantId`,`runtimeKey`)
+);
+--> statement-breakpoint
 CREATE TABLE `ExecutionBinding` (
 	`invocationId` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`agentRevisionId` varchar(36) NOT NULL,
 	`runtimeRevisionId` varchar(36) NOT NULL,
 	`deploymentRouteId` varchar(36) NOT NULL,
 	`modelProvider` varchar(128) NOT NULL,
@@ -1200,15 +1424,13 @@ CREATE TABLE `ExecutionBinding` (
 	`routeRevisionId` varchar(36) NOT NULL,
 	`routeActivationId` varchar(36) NOT NULL,
 	`routeContentDigest` varchar(71) NOT NULL,
-	`agentArtifactId` varchar(36) NOT NULL,
-	`runtimeArtifactId` varchar(36) NOT NULL,
-	`agentArtifactDigest` varchar(71) NOT NULL,
-	`runtimeArtifactDigest` varchar(71) NOT NULL,
+	`runtimeArtifactId` varchar(36),
+	`runtimeArtifactDigest` varchar(71),
+	`runtimeEvidenceKind` enum('hosted_artifact','external_endpoint') NOT NULL,
 	`runtimeConfigDigest` varchar(71) NOT NULL,
+	`runtimeTargetDigest` varchar(71) NOT NULL,
 	`capabilityManifestDigest` varchar(71) NOT NULL,
-	`agentAttestationIds` json NOT NULL,
 	`runtimeAttestationIds` json NOT NULL,
-	`agentPublicationRecordId` varchar(36) NOT NULL,
 	`runtimePublicationRecordId` varchar(36) NOT NULL,
 	`conformanceRunId` varchar(36) NOT NULL,
 	`resolutionInputDigest` varchar(71) NOT NULL,
@@ -1217,8 +1439,7 @@ CREATE TABLE `ExecutionBinding` (
 	`configHash` varchar(128) NOT NULL,
 	`boundAt` datetime(3) NOT NULL,
 	CONSTRAINT `ExecutionBinding_invocationId` PRIMARY KEY(`invocationId`),
-	CONSTRAINT `ExecutionBinding_agentAttestationIds_non_empty` CHECK (JSON_TYPE(`agentAttestationIds`) = 'ARRAY' AND JSON_LENGTH(`agentAttestationIds`) >= 1),
-	CONSTRAINT `ExecutionBinding_runtimeAttestationIds_non_empty` CHECK (JSON_TYPE(`runtimeAttestationIds`) = 'ARRAY' AND JSON_LENGTH(`runtimeAttestationIds`) >= 1)
+	CONSTRAINT `ExecutionBinding_runtimeAttestationIds_non_empty` CHECK(JSON_TYPE(`ExecutionBinding`.`runtimeAttestationIds`) = 'ARRAY' AND (JSON_LENGTH(`ExecutionBinding`.`runtimeAttestationIds`) >= 1 OR `ExecutionBinding`.`runtimeEvidenceKind` = 'external_endpoint'))
 );
 --> statement-breakpoint
 CREATE TABLE `ExecutionOwnership` (
@@ -1250,6 +1471,12 @@ CREATE TABLE `InvocationAttempt` (
 	`lastHeartbeatAt` datetime(3),
 	`errorCode` varchar(128),
 	`errorSummary` text,
+	`dispatchAttemptCount` int NOT NULL DEFAULT 0,
+	`nextDispatchAt` datetime(3),
+	`dispatchLeaseOwner` varchar(128),
+	`dispatchLeaseExpiresAt` datetime(3),
+	`lastDispatchAttemptAt` datetime(3),
+	`lastTransientErrorCode` varchar(128),
 	`createdAt` datetime(3) NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `InvocationAttempt_id` PRIMARY KEY(`id`),
@@ -1306,28 +1533,6 @@ CREATE TABLE `RuntimeEventIngress` (
 	CONSTRAINT `RuntimeEventIngress_invocation_producer_seq_uq` UNIQUE(`invocationId`,`producerSequence`)
 );
 --> statement-breakpoint
-CREATE TABLE `RuntimeRevision` (
-	`id` varchar(36) NOT NULL,
-	`runtimeId` varchar(36) NOT NULL,
-	`revisionNo` bigint NOT NULL,
-	`protocolType` varchar(32) NOT NULL,
-	`protocolContractRevision` varchar(128) NOT NULL DEFAULT 'agent-runtime-protocol@1',
-	`endpointRef` varchar(512) NOT NULL,
-	`runtimeArtifactRef` varchar(512) NOT NULL,
-	`artifactId` varchar(36),
-	`artifactDigest` varchar(71),
-	`runtimeCapabilitiesJson` json NOT NULL,
-	`identityMode` varchar(32) NOT NULL,
-	`networkZone` varchar(32) NOT NULL,
-	`configHash` varchar(128) NOT NULL,
-	`revisionState` enum('draft','published','withdrawn') NOT NULL DEFAULT 'draft',
-	`createdBy` varchar(128) NOT NULL,
-	`createdAt` datetime(3) NOT NULL,
-	`publishedAt` datetime(3),
-	CONSTRAINT `RuntimeRevision_id` PRIMARY KEY(`id`),
-	CONSTRAINT `RuntimeRevision_runtime_revisionNo_uq` UNIQUE(`runtimeId`,`revisionNo`)
-);
---> statement-breakpoint
 CREATE TABLE `RuntimeSessionBinding` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
@@ -1341,23 +1546,6 @@ CREATE TABLE `RuntimeSessionBinding` (
 	`closedAt` datetime(3),
 	CONSTRAINT `RuntimeSessionBinding_id` PRIMARY KEY(`id`),
 	CONSTRAINT `RuntimeSessionBinding_runtime_external_ref_uq` UNIQUE(`runtimeRevisionId`,`externalSessionRef`)
-);
---> statement-breakpoint
-CREATE TABLE `Runtime` (
-	`id` varchar(36) NOT NULL,
-	`tenantId` varchar(36) NOT NULL,
-	`runtimeKey` varchar(128) NOT NULL,
-	`displayName` varchar(256) NOT NULL,
-	`runtimeKind` enum('hosted','external') NOT NULL,
-	`ownerUserId` varchar(36) NOT NULL,
-	`lifecycleState` enum('draft','enabled','disabled','retired') NOT NULL DEFAULT 'draft',
-	`currentRevisionId` varchar(36),
-	`versionNo` bigint NOT NULL DEFAULT 1,
-	`createdAt` datetime(3) NOT NULL,
-	`updatedAt` datetime(3) NOT NULL,
-	`deletedAt` datetime,
-	CONSTRAINT `Runtime_id` PRIMARY KEY(`id`),
-	CONSTRAINT `Runtime_tenant_runtimeKey_uq` UNIQUE(`tenantId`,`runtimeKey`)
 );
 --> statement-breakpoint
 CREATE TABLE `IncidentContainment` (
@@ -1998,6 +2186,10 @@ CREATE TABLE `PublicationRecord` (
 	`attestationIds` json NOT NULL,
 	`conformanceRunId` varchar(36),
 	`approvals` json NOT NULL,
+	`agentContractSnapshotId` varchar(36),
+	`agentContractDigest` varchar(71),
+	`agentCapabilityDigest` varchar(71),
+	`agentContextDigest` varchar(71),
 	`publishedByType` enum('user','service','workload','system') NOT NULL,
 	`publishedBy` varchar(128) NOT NULL,
 	`publishedAt` datetime(3) NOT NULL,
@@ -2054,8 +2246,12 @@ CREATE TABLE `RouteRevision` (
 	`routeSetId` varchar(36) NOT NULL,
 	`routeKey` varchar(128) NOT NULL,
 	`revisionNo` bigint unsigned NOT NULL,
-	`agentRevisionId` varchar(36) NOT NULL,
+	`agentRevisionId` varchar(36),
 	`runtimeRevisionId` varchar(36) NOT NULL,
+	`agentEndpointRef` varchar(512),
+	`agentIdentityMode` enum('none','bearer'),
+	`agentCredentialRefId` varchar(36),
+	`agentNetworkZone` varchar(32),
 	`policyRevisionId` varchar(36),
 	`modelPolicyRevisionId` varchar(36),
 	`toolsetRevisionId` varchar(36),
@@ -2080,7 +2276,8 @@ CREATE TABLE `RouteRevision` (
 CREATE TABLE `RouteEligibilityProjection` (
 	`routeId` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`agentId` varchar(36) NOT NULL,
+	`targetKind` enum('runtime','agent') NOT NULL DEFAULT 'runtime',
+	`agentId` varchar(36),
 	`routeSetId` varchar(36) NOT NULL,
 	`routeScopeKey` varchar(128) NOT NULL,
 	`routeSetVersionNo` bigint unsigned NOT NULL,
@@ -2097,7 +2294,11 @@ CREATE TABLE `RouteEligibilityProjection` (
 	`trafficWeight` int NOT NULL,
 	`effectiveFrom` datetime(3),
 	`effectiveUntil` datetime(3),
-	`agentRevisionId` varchar(36) NOT NULL,
+	`agentRevisionId` varchar(36),
+	`agentEndpointRef` varchar(512),
+	`agentIdentityMode` enum('none','bearer'),
+	`agentCredentialRefId` varchar(36),
+	`agentNetworkZone` varchar(32),
 	`agentRevisionState` varchar(32) NOT NULL,
 	`agentLifecycleState` varchar(32) NOT NULL,
 	`agentPublicationActive` int NOT NULL,
@@ -2108,22 +2309,24 @@ CREATE TABLE `RouteEligibilityProjection` (
 	`runtimePublicationActive` int NOT NULL,
 	`runtimeEvidenceValid` int NOT NULL,
 	`runtimeConformanceValid` int NOT NULL,
+	`runtimeEvidenceKind` enum('hosted_artifact','external_endpoint') NOT NULL,
 	`policyRevisionId` varchar(36),
 	`policyRevisionState` varchar(32),
 	`agentPublicationRecordId` varchar(36),
 	`runtimePublicationRecordId` varchar(36),
-	`agentAttestationIds` json,
 	`runtimeAttestationIds` json,
 	`conformanceRunId` varchar(36),
-	`agentArtifactId` varchar(36),
 	`runtimeArtifactId` varchar(36),
 	`sourceEventId` varchar(36),
 	`sourceAggregateVersion` int,
 	`invalidReason` varchar(255),
 	`capabilityCompatibilityDigest` varchar(71) NOT NULL,
-	`agentArtifactDigest` varchar(71),
+	`agentContractSnapshotId` varchar(36),
+	`agentContractDigest` varchar(71),
+	`agentContextDigest` varchar(71),
 	`runtimeArtifactDigest` varchar(71),
 	`runtimeConfigDigest` varchar(71),
+	`runtimeTargetDigest` varchar(71),
 	`routeContentDigest` varchar(71) NOT NULL,
 	`eligibilityState` enum('eligible','ineligible','pending_rebuild') NOT NULL,
 	`projectionContentDigest` varchar(71) NOT NULL,
@@ -2148,7 +2351,7 @@ CREATE TABLE `RuntimeConformanceRun` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
 	`runtimeRevisionId` varchar(36) NOT NULL,
-	`runtimeArtifactDigest` varchar(71) NOT NULL,
+	`runtimeTargetDigest` varchar(71) NOT NULL,
 	`runtimeConfigDigest` varchar(71) NOT NULL,
 	`protocolContractRevision` varchar(128) NOT NULL,
 	`suiteRevision` varchar(128) NOT NULL,
@@ -2195,7 +2398,6 @@ CREATE TABLE `HostedProvisioningRequest` (
 	`updatedAt` datetime(3) NOT NULL,
 	`stepAgentRevisionId` varchar(36),
 	`stepAgentPublicationRecordId` varchar(36),
-	`stepAgentAttestationId` varchar(36),
 	`stepRuntimeId` varchar(36),
 	`stepRuntimeRevisionId` varchar(36),
 	`stepRuntimeArtifactId` varchar(36),
@@ -2216,8 +2418,18 @@ CREATE TABLE `HostedProvisioningRequest` (
 --> statement-breakpoint
 ALTER TABLE `RuntimeArtifact` ADD CONSTRAINT `RuntimeArtifact_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `admin_export` ADD CONSTRAINT `admin_export_tenant_id_Tenant_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentContractCapability` ADD CONSTRAINT `AgentContractCapability_snapshot_fk` FOREIGN KEY (`snapshotId`) REFERENCES `AgentContractSnapshot`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentContractInvocationContext` ADD CONSTRAINT `AgentContractInvocationContext_snapshot_fk` FOREIGN KEY (`snapshotId`) REFERENCES `AgentContractSnapshot`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentContractSnapshot` ADD CONSTRAINT `AgentContractSnapshot_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentContractSnapshot` ADD CONSTRAINT `AgentContractSnapshot_agentId_Agent_id_fk` FOREIGN KEY (`agentId`) REFERENCES `Agent`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `AgentRevision` ADD CONSTRAINT `AgentRevision_agentId_Agent_id_fk` FOREIGN KEY (`agentId`) REFERENCES `Agent`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Agent` ADD CONSTRAINT `Agent_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentCallAttempt` ADD CONSTRAINT `AgentCallAttempt_callId_AgentCall_id_fk` FOREIGN KEY (`callId`) REFERENCES `AgentCall`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentCallBinding` ADD CONSTRAINT `AgentCallBinding_callId_AgentCall_id_fk` FOREIGN KEY (`callId`) REFERENCES `AgentCall`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentCallEventIngress` ADD CONSTRAINT `AgentCallEventIngress_callId_AgentCall_id_fk` FOREIGN KEY (`callId`) REFERENCES `AgentCall`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentCall` ADD CONSTRAINT `AgentCall_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentCall` ADD CONSTRAINT `AgentCall_parentInvocationId_Invocation_id_fk` FOREIGN KEY (`parentInvocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentSessionBinding` ADD CONSTRAINT `AgentSessionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `AuditEvent` ADD CONSTRAINT `AuditEvent_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RoleActionBinding` ADD CONSTRAINT `RoleActionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RoleActionBinding` ADD CONSTRAINT `RoleActionBinding_principalBindingId_PrincipalBinding_id_fk` FOREIGN KEY (`principalBindingId`) REFERENCES `PrincipalBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2249,8 +2461,8 @@ ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_
 ALTER TABLE `EnvironmentChangeRequest` ADD CONSTRAINT `EnvironmentChangeRequest_requestedEnvironmentDefinitionId_Ene6d1` FOREIGN KEY (`requestedEnvironmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentDefinition` ADD CONSTRAINT `EnvironmentDefinition_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_environmentDefinitionId_EnvironmentDefinitie317` FOREIGN KEY (`environmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `EnvironmentLease` ADD CONSTRAINT `EnvironmentLease_environmentDefinitionId_EnvironmentDefinitie317` FOREIGN KEY (`environmentDefinitionId`) REFERENCES `EnvironmentDefinition`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `evaluation_case` ADD CONSTRAINT `evaluation_case_tenant_id_Tenant_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `evaluation_case` ADD CONSTRAINT `evaluation_case_run_id_evaluation_run_id_fk` FOREIGN KEY (`run_id`) REFERENCES `evaluation_run`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `evaluation_result` ADD CONSTRAINT `evaluation_result_tenant_id_Tenant_id_fk` FOREIGN KEY (`tenant_id`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2298,14 +2510,14 @@ ALTER TABLE `RecoveryDrillCheck` ADD CONSTRAINT `RecoveryDrillCheck_drillId_Reco
 ALTER TABLE `RecoveryDrill` ADD CONSTRAINT `RecoveryDrill_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `LegalHold` ADD CONSTRAINT `LegalHold_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RetentionPolicy` ADD CONSTRAINT `RetentionPolicy_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `RuntimeRevision` ADD CONSTRAINT `RuntimeRevision_runtimeId_Runtime_id_fk` FOREIGN KEY (`runtimeId`) REFERENCES `Runtime`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `Runtime` ADD CONSTRAINT `Runtime_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `ExecutionBinding` ADD CONSTRAINT `ExecutionBinding_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `InvocationAttempt` ADD CONSTRAINT `InvocationAttempt_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `Invocation` ADD CONSTRAINT `Invocation_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RuntimeEventIngress` ADD CONSTRAINT `RuntimeEventIngress_invocationId_Invocation_id_fk` FOREIGN KEY (`invocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RuntimeEventIngress` ADD CONSTRAINT `RuntimeEventIngress_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `RuntimeRevision` ADD CONSTRAINT `RuntimeRevision_runtimeId_Runtime_id_fk` FOREIGN KEY (`runtimeId`) REFERENCES `Runtime`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RuntimeSessionBinding` ADD CONSTRAINT `RuntimeSessionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `Runtime` ADD CONSTRAINT `Runtime_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `IncidentContainment` ADD CONSTRAINT `IncidentContainment_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `IncidentContainment` ADD CONSTRAINT `IncidentContainment_incidentId_SecurityIncident_id_fk` FOREIGN KEY (`incidentId`) REFERENCES `SecurityIncident`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `SecurityIncident` ADD CONSTRAINT `SecurityIncident_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2361,9 +2573,20 @@ CREATE INDEX `RuntimeArtifact_tenant_expires_idx` ON `RuntimeArtifact` (`tenantI
 CREATE INDEX `tenant_status_idx` ON `admin_export` (`tenant_id`,`status`);--> statement-breakpoint
 CREATE INDEX `tenant_kind_idx` ON `admin_export` (`tenant_id`,`export_kind`);--> statement-breakpoint
 CREATE INDEX `tenant_requested_by_idx` ON `admin_export` (`tenant_id`,`requested_by`);--> statement-breakpoint
+CREATE INDEX `AgentContractSnapshot_tenant_agent_idx` ON `AgentContractSnapshot` (`tenantId`,`agentId`);--> statement-breakpoint
+CREATE INDEX `AgentContractSnapshot_agent_idx` ON `AgentContractSnapshot` (`agentId`);--> statement-breakpoint
 CREATE INDEX `AgentRevision_agent_state_idx` ON `AgentRevision` (`agentId`,`revisionState`);--> statement-breakpoint
-CREATE INDEX `AgentRevision_artifact_idx` ON `AgentRevision` (`artifactId`);--> statement-breakpoint
 CREATE INDEX `Agent_tenant_lifecycle_updated_idx` ON `Agent` (`tenantId`,`lifecycleState`,`updatedAt`);--> statement-breakpoint
+CREATE INDEX `AgentCallAttempt_call_state_idx` ON `AgentCallAttempt` (`callId`,`attemptState`);--> statement-breakpoint
+CREATE INDEX `AgentCallBinding_tenant_idx` ON `AgentCallBinding` (`tenantId`);--> statement-breakpoint
+CREATE INDEX `AgentCallBinding_agentRevision_idx` ON `AgentCallBinding` (`agentRevisionId`);--> statement-breakpoint
+CREATE INDEX `AgentCallBinding_routeRevision_idx` ON `AgentCallBinding` (`routeRevisionId`);--> statement-breakpoint
+CREATE INDEX `AgentCallEventIngress_call_state_idx` ON `AgentCallEventIngress` (`callId`,`ingressState`);--> statement-breakpoint
+CREATE INDEX `AgentCall_tenant_state_idx` ON `AgentCall` (`tenantId`,`state`);--> statement-breakpoint
+CREATE INDEX `AgentCall_parent_idx` ON `AgentCall` (`parentInvocationId`);--> statement-breakpoint
+CREATE INDEX `AgentCall_agent_idx` ON `AgentCall` (`agentId`);--> statement-breakpoint
+CREATE INDEX `AgentSessionBinding_thread_idx` ON `AgentSessionBinding` (`threadId`);--> statement-breakpoint
+CREATE INDEX `AgentSessionBinding_agent_idx` ON `AgentSessionBinding` (`agentId`);--> statement-breakpoint
 CREATE INDEX `AuditEvent_tenant_occurred_idx` ON `AuditEvent` (`tenantId`,`occurredAt`);--> statement-breakpoint
 CREATE INDEX `AuditEvent_tenant_actor_idx` ON `AuditEvent` (`tenantId`,`actorType`,`actorId`);--> statement-breakpoint
 CREATE INDEX `AuditEvent_tenant_target_idx` ON `AuditEvent` (`tenantId`,`targetType`,`targetId`);--> statement-breakpoint
@@ -2379,6 +2602,8 @@ CREATE INDEX `ContextCheckpoint_tenant_expires_idx` ON `ContextCheckpoint` (`ten
 CREATE INDEX `Goal_thread_state_idx` ON `Goal` (`threadId`,`goalState`);--> statement-breakpoint
 CREATE INDEX `InvocationCommand_thread_turn_idx` ON `InvocationCommand` (`threadId`,`turnId`);--> statement-breakpoint
 CREATE INDEX `InvocationCommand_invocation_idx` ON `InvocationCommand` (`invocationId`);--> statement-breakpoint
+CREATE INDEX `InvocationCommand_dispatch_retry_idx` ON `InvocationCommand` (`commandState`,`nextDispatchAt`);--> statement-breakpoint
+CREATE INDEX `InvocationCommand_dispatch_lease_idx` ON `InvocationCommand` (`dispatchLeaseExpiresAt`);--> statement-breakpoint
 CREATE INDEX `PendingInput_thread_state_position_idx` ON `PendingInput` (`threadId`,`inputState`,`queuePosition`);--> statement-breakpoint
 CREATE INDEX `ThreadEvent_thread_occurred_id_idx` ON `ThreadEvent` (`threadId`,`occurredAt`,`id`);--> statement-breakpoint
 CREATE INDEX `ThreadEvent_turn_sequence_idx` ON `ThreadEvent` (`turnId`,`eventSequence`);--> statement-breakpoint
@@ -2388,7 +2613,6 @@ CREATE INDEX `ThreadItem_invocation_idx` ON `ThreadItem` (`invocationId`);--> st
 CREATE INDEX `ThreadRelation_parent_state_idx` ON `ThreadRelation` (`parentThreadId`,`relationState`);--> statement-breakpoint
 CREATE INDEX `ThreadRelation_child_idx` ON `ThreadRelation` (`childThreadId`);--> statement-breakpoint
 CREATE INDEX `Thread_tenant_owner_lifecycle_activity_idx` ON `Thread` (`tenantId`,`ownerUserId`,`lifecycleState`,`lastActivityAt`);--> statement-breakpoint
-CREATE INDEX `Thread_tenant_agent_activity_idx` ON `Thread` (`tenantId`,`primaryAgentId`,`lastActivityAt`);--> statement-breakpoint
 CREATE INDEX `Turn_thread_state_accepted_idx` ON `Turn` (`threadId`,`turnState`,`acceptedAt`);--> statement-breakpoint
 CREATE INDEX `DeletionRequest_tenant_subject_idx` ON `DeletionRequest` (`tenantId`,`subjectType`,`subjectId`);--> statement-breakpoint
 CREATE INDEX `DeletionRequest_tenant_state_idx` ON `DeletionRequest` (`tenantId`,`requestState`);--> statement-breakpoint
@@ -2474,7 +2698,6 @@ CREATE INDEX `EventDeliveryFailure_consumer_stream_sequence_idx` ON `EventDelive
 CREATE INDEX `EventDeliveryFailure_state_retry_idx` ON `EventDeliveryFailure` (`failureState`,`nextRetryAt`);--> statement-breakpoint
 CREATE INDEX `EventStreamFloor_tenant_idx` ON `EventStreamFloor` (`tenantId`);--> statement-breakpoint
 CREATE INDEX `ThreadListProjection_tenant_owner_activity_idx` ON `ThreadListProjection` (`tenantId`,`ownerUserId`,`lastActivityAt`);--> statement-breakpoint
-CREATE INDEX `ThreadListProjection_tenant_agent_activity_idx` ON `ThreadListProjection` (`tenantId`,`primaryAgentId`,`lastActivityAt`);--> statement-breakpoint
 CREATE INDEX `ThreadListProjection_tenant_lifecycle_idx` ON `ThreadListProjection` (`tenantId`,`lifecycleState`);--> statement-breakpoint
 CREATE INDEX `TurnTimelineProjection_tenant_thread_sequence_idx` ON `TurnTimelineProjection` (`tenantId`,`threadId`,`turnSequence`);--> statement-breakpoint
 CREATE INDEX `TurnTimelineProjection_thread_state_idx` ON `TurnTimelineProjection` (`threadId`,`turnState`);--> statement-breakpoint
@@ -2487,23 +2710,23 @@ CREATE INDEX `RecoveryDrill_tenant_executed_by_idx` ON `RecoveryDrill` (`tenantI
 CREATE INDEX `LegalHold_tenant_state_idx` ON `LegalHold` (`tenantId`,`holdState`);--> statement-breakpoint
 CREATE INDEX `LegalHold_valid_until_idx` ON `LegalHold` (`validUntil`);--> statement-breakpoint
 CREATE INDEX `RetentionPolicy_tenant_data_class_idx` ON `RetentionPolicy` (`tenantId`,`dataClass`);--> statement-breakpoint
+CREATE INDEX `RuntimeRevision_runtime_state_idx` ON `RuntimeRevision` (`runtimeId`,`revisionState`);--> statement-breakpoint
+CREATE INDEX `RuntimeRevision_artifact_idx` ON `RuntimeRevision` (`artifactId`);--> statement-breakpoint
+CREATE INDEX `Runtime_tenant_lifecycle_updated_idx` ON `Runtime` (`tenantId`,`lifecycleState`,`updatedAt`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_tenant_idx` ON `ExecutionBinding` (`tenantId`);--> statement-breakpoint
-CREATE INDEX `ExecutionBinding_agentRevision_idx` ON `ExecutionBinding` (`agentRevisionId`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_runtimeRevision_idx` ON `ExecutionBinding` (`runtimeRevisionId`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_routeRevision_idx` ON `ExecutionBinding` (`routeRevisionId`);--> statement-breakpoint
-CREATE INDEX `ExecutionBinding_agentArtifact_idx` ON `ExecutionBinding` (`agentArtifactId`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_runtimeArtifact_idx` ON `ExecutionBinding` (`runtimeArtifactId`);--> statement-breakpoint
 CREATE INDEX `ExecutionBinding_conformanceRun_idx` ON `ExecutionBinding` (`conformanceRunId`);--> statement-breakpoint
 CREATE INDEX `ExecutionOwnership_invocation_state_idx` ON `ExecutionOwnership` (`invocationId`,`ownershipState`);--> statement-breakpoint
 CREATE INDEX `InvocationAttempt_invocation_state_idx` ON `InvocationAttempt` (`invocationId`,`attemptState`);--> statement-breakpoint
+CREATE INDEX `InvocationAttempt_dispatch_retry_idx` ON `InvocationAttempt` (`attemptState`,`nextDispatchAt`);--> statement-breakpoint
+CREATE INDEX `InvocationAttempt_dispatch_lease_idx` ON `InvocationAttempt` (`dispatchLeaseExpiresAt`);--> statement-breakpoint
 CREATE INDEX `Invocation_tenant_state_idx` ON `Invocation` (`tenantId`,`executionState`);--> statement-breakpoint
 CREATE INDEX `Invocation_turn_idx` ON `Invocation` (`turnId`);--> statement-breakpoint
 CREATE INDEX `RuntimeEventIngress_invocation_state_idx` ON `RuntimeEventIngress` (`invocationId`,`ingressState`);--> statement-breakpoint
-CREATE INDEX `RuntimeRevision_runtime_state_idx` ON `RuntimeRevision` (`runtimeId`,`revisionState`);--> statement-breakpoint
-CREATE INDEX `RuntimeRevision_artifact_idx` ON `RuntimeRevision` (`artifactId`);--> statement-breakpoint
 CREATE INDEX `RuntimeSessionBinding_thread_idx` ON `RuntimeSessionBinding` (`threadId`);--> statement-breakpoint
 CREATE INDEX `RuntimeSessionBinding_job_idx` ON `RuntimeSessionBinding` (`jobId`);--> statement-breakpoint
-CREATE INDEX `Runtime_tenant_lifecycle_updated_idx` ON `Runtime` (`tenantId`,`lifecycleState`,`updatedAt`);--> statement-breakpoint
 CREATE INDEX `IncidentContainment_tenant_incident_idx` ON `IncidentContainment` (`tenantId`,`incidentId`);--> statement-breakpoint
 CREATE INDEX `IncidentContainment_incident_state_idx` ON `IncidentContainment` (`incidentId`,`actionState`);--> statement-breakpoint
 CREATE INDEX `SecurityIncident_tenant_state_idx` ON `SecurityIncident` (`tenantId`,`incidentState`);--> statement-breakpoint

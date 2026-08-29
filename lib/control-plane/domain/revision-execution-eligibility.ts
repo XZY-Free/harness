@@ -109,8 +109,6 @@ export interface RevisionExecutionEvidenceSnapshot {
   runtimeLifecycleState: "active" | "quarantined" | "retired";
   /** Runtime Revision 发布状态。 */
   runtimeRevisionState: "draft" | "published" | "withdrawn";
-  /** Runtime Capabilities，必须经过 fail-closed 解析。 */
-  runtimeCapabilities: string[];
   /** Runtime 证据种类（hosted 要求 artifact 全集；external 无 artifact — 03 §3）。 */
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
 
@@ -160,13 +158,13 @@ export const RevisionExecutionEligibilityPolicy = {
    * 4. Runtime Attestation Verified & 未撤销（external_endpoint 除外）
    * 5. Runtime Conformance Passed & 完整
    * 6. Runtime 生命周期 Active
-   * 7. Capability 兼容
-   * 8. Policy 状态
+   * 7. Policy 状态
+   *
+   * 冻结架构：不得检查 Agent required capabilities 是否被 RuntimeRevision
+   * capabilities 支持（外部 Agent 自己是能力提供方，不是"装在某 RuntimeRevision 里的
+   * Agent"，§14）。因此本 Policy 不做 capability 交叉校验。
    */
-  isEligible(
-    snapshot: RevisionExecutionEvidenceSnapshot,
-    requiredCapabilities: string[],
-  ): RevisionExecutionEligibilityResult {
+  isEligible(snapshot: RevisionExecutionEvidenceSnapshot): RevisionExecutionEligibilityResult {
     const errors: RevisionExecutionEligibilityError[] = [];
 
     // Agent 维度：仅在 Route 绑定 AgentRevision（agentRevisionId != null）时成组必填（§18）。
@@ -279,18 +277,7 @@ export const RevisionExecutionEligibilityPolicy = {
       });
     }
 
-    // 8. Capability 兼容
-    const runtimeCapSet = new Set(snapshot.runtimeCapabilities);
-    const missingCapabilities = requiredCapabilities.filter((cap) => !runtimeCapSet.has(cap));
-    if (missingCapabilities.length > 0) {
-      errors.push({
-        dimension: "capability",
-        code: "capability_unsupported",
-        message: `Runtime 缺少必要 Capability: ${missingCapabilities.join(", ")}`,
-      });
-    }
-
-    // 9. : Policy 引用 — Fail-closed 校验
+    // 8. : Policy 引用 — Fail-closed 校验
     // kind="referenced" → Policy 必须存在且 revisionState = "published"（非 draft/withdrawn）
     // kind="none" → Route 不引用 Policy，不阻断
     if (snapshot.policyRequirement.kind === "referenced") {
@@ -313,109 +300,6 @@ export const RevisionExecutionEligibilityPolicy = {
     return { eligible: errors.length === 0, errors };
   },
 } as const;
-
-// ─── Capability Parsing（Fail-closed）────────────────
-
-/**
- * 从 AgentRevision.agentInterfaceRequirementsJson 提取必要 Capability 列表。
- *
- * Fail-closed 语义：
- * - 字段缺失且合同允许缺失 → []（无要求）
- * - 字段存在但不是合法结构 → 抛 EligibilityError
- * - 字段包含非字符串项 → 抛 EligibilityError
- */
-export function extractRequiredCapabilities(jsonValue: unknown): string[] {
-  // 字段缺失 → 合同允许缺失，返回空数组
-  if (jsonValue === null || jsonValue === undefined) return [];
-
-  // 字段存在但不是对象 → 非法结构
-  if (typeof jsonValue !== "object" || Array.isArray(jsonValue)) {
-    throw new EligibilityError(
-      "capability_contract_invalid",
-      "agentInterfaceRequirements 不是合法对象结构",
-    );
-  }
-
-  const obj = jsonValue as { required?: unknown };
-  // required 字段缺失 → 等同于无要求
-  if (obj.required === undefined || obj.required === null) return [];
-
-  // required 存在但不是数组 → 非法结构
-  if (!Array.isArray(obj.required)) {
-    throw new EligibilityError(
-      "capability_contract_invalid",
-      "agentInterfaceRequirements.required 不是数组",
-    );
-  }
-
-  // 检查数组每一项是否为字符串
-  for (const item of obj.required) {
-    if (typeof item !== "string") {
-      throw new EligibilityError(
-        "capability_contract_invalid",
-        "agentInterfaceRequirements.required 包含非字符串项",
-      );
-    }
-  }
-
-  return obj.required.filter((c): c is string => c.length > 0);
-}
-
-/**
- * 从 RuntimeRevision.runtimeCapabilitiesJson 提取 Capability 列表。
- *
- * 两种权威形状（02 §10）：
- * - Hosted：string[] 能力名列表（hosted gateways 契约）；
- * - External：三态投影 { declared, measured, effective } → 取 effective=true
- *   的 feature 名（streaming_transport 投影为既有能力名 event_stream）。
- *
- * Fail-closed 语义：
- * - 字段缺失 → []（Runtime 无能力声明）
- * - 非法形状（既非数组也非投影对象）→ 抛 EligibilityError
- * - 数组包含非字符串项 → 抛 EligibilityError
- */
-export function extractRuntimeCapabilities(jsonValue: unknown): string[] {
-  // 字段缺失 → 无能力声明
-  if (jsonValue === null || jsonValue === undefined) return [];
-
-  if (!Array.isArray(jsonValue)) {
-    // External 三态投影（02 §10）：effective=true 的 feature → 能力名。
-    if (typeof jsonValue === "object" && jsonValue !== null && "effective" in jsonValue) {
-      const effective = (jsonValue as { effective: Record<string, unknown> }).effective;
-      if (typeof effective !== "object" || effective === null) {
-        throw new EligibilityError(
-          "runtime_capability_contract_invalid",
-          "runtimeCapabilities 投影缺少 effective",
-        );
-      }
-      const names: string[] = [];
-      for (const [key, value] of Object.entries(effective)) {
-        if (value === true) {
-          names.push(key === "streaming_transport" ? "event_stream" : key);
-        }
-      }
-      return names;
-    }
-    throw new EligibilityError(
-      "runtime_capability_contract_invalid",
-      "runtimeCapabilities 不是数组",
-    );
-  }
-
-  // 检查数组每一项是否为字符串
-  for (const item of jsonValue) {
-    if (typeof item !== "string") {
-      throw new EligibilityError(
-        "runtime_capability_contract_invalid",
-        "runtimeCapabilities 包含非字符串项",
-      );
-    }
-  }
-
-  return (jsonValue as unknown[]).filter(
-    (c: unknown): c is string => typeof c === "string" && c.length > 0,
-  );
-}
 
 // ─── Errors ───────────────────────────────────────────────
 

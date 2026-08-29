@@ -24,7 +24,7 @@ export type ContextClassification = (typeof CONTEXT_CLASSIFICATIONS)[number];
 /**
  * 基础 Harness Route 的 Context 策略默认值。
  *
- * 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带 Agent Context
+ * 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带 Agent Context
  * Contract（原 classification/allowedSources/allowedSkillIds 由 AgentRevision
  * permissionRequirementsJson 派生）。无 Agent Contract 时按基础 Harness 默认：
  * 允许全部已声明的上下文来源、无额外 skill 白名单、敏感级别 internal。
@@ -154,7 +154,7 @@ async function loadPersistedBinding(tenantId: string, invocationId: string) {
   if (!row?.threadId || !row.triggerItemId) {
     throw new ContextHandleError("binding_not_found", "Invocation 上下文绑定不存在或不完整");
   }
-  // 专题01 冻结架构：ExecutionBinding 不再携带 Agent Context Contract，
+  // 冻结架构：ExecutionBinding 不再携带 Agent Context Contract，
   // Context 策略按基础 Harness 默认（无 Agent 读取）。
   return {
     ...row,

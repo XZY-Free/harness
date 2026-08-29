@@ -1,12 +1,16 @@
 /**
  * ExecutionBinding 最终校验 — 单事务内 Fail-closed 校验。
  *
+ * 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带任何 Agent evidence。
+ * 因此本校验是纯 Runtime 维度（Runtime Publication / Attestation / Conformance / Lifecycle +
+ * Policy），不读取 AgentRevision、不检查 Agent Publication、不做 capability 交叉校验。
+ *
  * tx 必须传入，不允许可选。该函数不从其他 Application 或 API 直接调用。
  * 禁止全局 db；所有读取使用 Binding Store 创建的同一事务。
  * Projection 冻结的证据 ID 必须与当前权威一致。
  */
 
-import { type DbOrTx, db } from "@/lib/db/client";
+import type { DbOrTx } from "@/lib/db/client";
 import { routeActivation } from "@/lib/routes/persistence/route-revision-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { desc, eq } from "drizzle-orm";
@@ -15,10 +19,6 @@ import { desc, eq } from "drizzle-orm";
 import { RevisionExecutionEligibilityPolicy } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import { createMySqlRevisionExecutionEvidenceReader } from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
 
-import { extractRequiredCapabilities } from "@/lib/control-plane/domain/revision-execution-eligibility";
-// AgentRevision 读取 requiredCapabilities
-import { agentRevisionTable } from "@/lib/persistence/schema/agents";
-
 export interface BindingEligibilityInput {
   tenantId: string;
   routeId: string;
@@ -26,17 +26,14 @@ export interface BindingEligibilityInput {
   routeRevisionId: string;
   /** Resolver 冻结的 RouteActivationId。 */
   routeActivationId: string;
-  /** Resolver 冻结的 AgentRevisionId。null = 基础 Harness Route（无 Agent 资产约束）。 */
-  agentRevisionId: string | null;
   /** Resolver 冻结的 RuntimeRevisionId。 */
   runtimeRevisionId: string;
   /** Resolver 冻结的 PolicyRevisionId（可 null）。 */
   policyRevisionId: string | null;
   /** Projection 版本号 — 用于检测 Projection 滞后。 */
   projectionVersionNo: number;
-  /** Resolver 冻结的精确证据 ID。base route 的 agent 维度为 null（§18 not_applicable）。 */
+  /** Resolver 冻结的精确 Runtime 证据 ID。 */
   frozenEvidence: {
-    agentPublicationRecordId: string | null;
     runtimePublicationRecordId: string;
     runtimeAttestationIds: string[];
     conformanceRunId: string;
@@ -105,30 +102,17 @@ export async function validateBindingEligibility(
   }
 
   // C. 使用统一 Reader + tx 加载精确证据快照
-  // 基础 Harness Route（agentRevisionId=null）→ 跳过 Agent 维度查询（§18 not_applicable）。
-  const isBaseRoute = input.agentRevisionId === null;
+  // ExecutionBinding 恒为 runtime target：不读取 Agent 维度（Agent not_applicable）。
   const evidenceReader = createMySqlRevisionExecutionEvidenceReader({ db: tx });
-  const [agentRevisionRow] = isBaseRoute
-    ? [null]
-    : await tx
-        .select()
-        .from(agentRevisionTable)
-        .where(eq(agentRevisionTable.id, input.agentRevisionId as string))
-        .limit(1);
-
-  const requiredCapabilities = extractRequiredCapabilities(
-    agentRevisionRow?.agentInterfaceRequirementsJson,
-  );
-
   const snapshot = await evidenceReader.loadExactEvidence({
     tenantId: input.tenantId,
-    agentRevisionId: input.agentRevisionId,
+    agentRevisionId: null,
     runtimeRevisionId: input.runtimeRevisionId,
     policyRevisionId: input.policyRevisionId,
     conformanceRunId: input.frozenEvidence.conformanceRunId,
   });
 
-  // D. 验证精确证据 ID — Projection 冻结的证据 ID 必须与当前权威一致
+  // D. 验证精确证据 ID — Projection 冻结的 Runtime 证据 ID 必须与当前权威一致
   {
     const fe = input.frozenEvidence;
     const currentRuntimePubId = snapshot.runtimePublication?.publicationRecordId ?? null;
@@ -156,21 +140,10 @@ export async function validateBindingEligibility(
     if (!runtimeAttestationsExact) {
       return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
     }
-    // Agent 维度仅 Agent Route 校验（§7.4）；base route 为 not_applicable（§18），跳过。
-    // Agent 是源码不可见黑盒 → Agent Publication 恒无 Artifact Attestation（不伪造）。
-    if (!isBaseRoute) {
-      const currentAgentPubId = snapshot.agentPublication?.publicationRecordId ?? null;
-      if (fe.agentPublicationRecordId !== currentAgentPubId) {
-        return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
-      }
-    }
   }
 
-  // E. 调用统一 Policy 校验
-  const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
-    snapshot,
-    requiredCapabilities,
-  );
+  // E. 调用统一 Policy 校验（Runtime 维度 + Policy；无 Agent / capability 交叉校验）
+  const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(snapshot);
 
   if (!eligibilityResult.eligible) {
     const reason = eligibilityResult.errors.map((e) => e.code).join(",");

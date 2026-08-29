@@ -26,10 +26,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import type { RouteEligibilityStore, UpsertProjectionInput } from "./route-eligibility-store";
 
 // 统一 Policy + Reader（从 control-plane/domain）
-import {
-  RevisionExecutionEligibilityPolicy,
-  extractRequiredCapabilities,
-} from "@/lib/control-plane/domain/revision-execution-eligibility";
+import { RevisionExecutionEligibilityPolicy } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import { createMySqlRevisionExecutionEvidenceReader } from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
 
 export interface BuildProjectionDependencies {
@@ -187,12 +184,6 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       policyRevisionId: revision.policyRevisionId,
     });
 
-    // 8. 从 AgentRevision 提取 requiredCapabilities（fail-closed）
-    // 无 Agent 约束时 agentRevision 为 null → extractRequiredCapabilities 返回 []。
-    const requiredCapabilities = extractRequiredCapabilities(
-      agentRevision?.agentInterfaceRequirementsJson,
-    );
-
     // 8. Route 自身、latest activation、revision 窗口和 selector 共同参与资格判断。
     const normalized = normalizeEligibility(revision.eligibilityConditionsJson);
     const routeAuthorityEligible =
@@ -205,10 +196,8 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     // 9. 使用统一 Policy 判断证据资格
     // RevisionExecutionEligibilityPolicy 内部已调用统一 Runtime Conformance 纯验证器，
     // 投影据此派生 runtimeConformanceValid，不重复调用第二套 Policy。
-    const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(
-      evidenceSnapshot,
-      requiredCapabilities,
-    );
+    // 冻结架构：不做 Agent required capabilities vs Runtime capabilities 交叉校验。
+    const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(evidenceSnapshot);
 
     // 无 Agent 约束（基础 Harness Route）→ Agent 生命周期不参与资格判断（§18 not_applicable）；
     // Runtime 生命周期始终必填（§12）。
@@ -266,10 +255,8 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     const specificity = normalized ? computeSpecificity(normalized) : 0;
 
     const capabilityCompatibilityDigest = computeCapabilityManifestDigest({
-      // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度，
+      // 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度，
       // capability digest 为 runtime-only，与 mysql-execution-binding-store 重算一致。
-      agentRevisionId: null,
-      agentInterfaceRequirements: null,
       runtimeRevisionId: revision.runtimeRevisionId,
       runtimeCapabilities: runtimeRevision?.runtimeCapabilitiesJson ?? null,
     });
@@ -327,7 +314,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       effectiveFrom: revision.effectiveFrom?.toISOString() ?? null,
       effectiveUntil: revision.effectiveUntil?.toISOString() ?? null,
       agentRevisionId: revision.agentRevisionId,
-      // Agent Route 生产调用事实（专题01 Batch4 补漏）：权威 RouteRevision → 投影。
+      // Agent Route 生产调用事实：权威 RouteRevision → 投影。
       // 基础 Harness Route（无 Agent 约束）为 null。
       agentEndpointRef: revision.agentEndpointRef,
       agentIdentityMode: revision.agentIdentityMode,

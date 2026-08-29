@@ -1,1 +1,0 @@
-ALTER TABLE `RuntimeSessionBinding` ADD `agentRevisionId` varchar(36);

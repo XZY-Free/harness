@@ -32,24 +32,21 @@ describe("EligibilitySnapshotStaleError", () => {
 });
 
 describe("BindingEligibilityInput frozenEvidence", () => {
-  it("§07.5: frozenEvidence 可包含完整证据 ID", () => {
+  it("§07.5: frozenEvidence 只含 Runtime 证据 ID（专题01 冻结架构）", () => {
     const input: BindingEligibilityInput = {
       tenantId: "t1",
       routeId: "r1",
       routeRevisionId: "rr1",
       routeActivationId: "ra1",
-      agentRevisionId: "ar1",
       runtimeRevisionId: "rvr1",
       policyRevisionId: "pr1",
       projectionVersionNo: 3,
       frozenEvidence: {
-        agentPublicationRecordId: "apr1",
         runtimePublicationRecordId: "rpr1",
         runtimeAttestationIds: ["rat1"],
         conformanceRunId: "cr1",
       },
     };
-    expect(input.frozenEvidence.agentPublicationRecordId).toBe("apr1");
     expect(input.frozenEvidence.runtimePublicationRecordId).toBe("rpr1");
     expect(input.frozenEvidence.runtimeAttestationIds).toEqual(["rat1"]);
     expect(input.frozenEvidence.conformanceRunId).toBe("cr1");

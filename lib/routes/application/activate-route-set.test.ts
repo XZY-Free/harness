@@ -54,7 +54,6 @@ const BASE_AGENT_REVISION: AgentRevisionSummary = {
   id: "agent-rev-1",
   agentId: AGENT_ID,
   revisionState: "published",
-  requiredCapabilities: [],
 };
 
 // 专题01 Batch4 补漏：Agent Route 生产调用事实（agentRevisionId 非空时必须冻结）。
@@ -69,7 +68,6 @@ const AGENT_ROUTE_FACTS = {
 const BASE_RUNTIME_REVISION: RuntimeRevisionSummary = {
   id: "runtime-rev-1",
   revisionState: "published",
-  capabilities: [],
 };
 
 // §04: Mock Evidence Reader — 返回完全资格的快照，供单元测试使用
@@ -147,7 +145,6 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
   },
   runtimeLifecycleState: "active" as const,
   runtimeRevisionState: "published" as const,
-  runtimeCapabilities: [],
   runtimeEvidenceKind: "hosted_artifact" as const,
   policyRequirement: { kind: "none" as const },
 } satisfies RevisionExecutionEvidenceSnapshot;
@@ -734,53 +731,6 @@ describe("activateRouteSet", () => {
     ).rejects.toThrow("actor tenant");
   });
 
-  it("RuntimeRevision capability 不满足 → RouteExecutionIneligibleError（统一 Policy，fail-closed）", async () => {
-    const store = createMockStore({
-      agentRevisions: new Map([
-        ["agent-rev-1", { ...BASE_AGENT_REVISION, requiredCapabilities: ["gpu"] }],
-      ]),
-      runtimeRevisions: new Map([
-        ["runtime-rev-1", { ...BASE_RUNTIME_REVISION, capabilities: [] }],
-      ]),
-    });
-    // Override getDbOrTx to return agentInterfaceRequirementsJson with gpu requirement
-    const origStore = store;
-    const storeWithCapDb = {
-      ...origStore,
-      transaction: async <T>(
-        operation: (session: RouteSetActivationSession) => Promise<T>,
-      ): Promise<T> => {
-        return origStore.transaction(async (session) => {
-          const origGetDbOrTx = session.getDbOrTx.bind(session);
-          return operation({
-            ...session,
-            getDbOrTx: () =>
-              ({
-                ...origGetDbOrTx(),
-                select: () => ({
-                  from: () => ({
-                    where: () => ({
-                      limit: () =>
-                        Promise.resolve([
-                          { agentInterfaceRequirementsJson: { required: ["gpu"] } },
-                        ]),
-                    }),
-                  }),
-                }),
-              }) as any,
-          });
-        });
-      },
-    };
-    const activateRouteSet = createActivateRouteSet({
-      store: storeWithCapDb,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
-    await expect(activateRouteSet(makeCommand())).rejects.toThrow("执行资格不足");
-  });
-
   it("IdempotencyRecord authority 缺失时拒绝提交", async () => {
     const store = createMockStore({ completeIdempotency: vi.fn(async () => false) });
     const activateRouteSet = createActivateRouteSet({
@@ -817,65 +767,5 @@ describe("activateRouteSet", () => {
     await expect(activateRouteSet(makeCommand())).rejects.toThrow(
       "历史 Activation 与当前 Route authority 不一致",
     );
-  });
-});
-
-// ═══════════════════════════════════════════════════════════
-// 05 专项（P2-3）：durable 需求的 Route fail closed
-// ═══════════════════════════════════════════════════════════
-
-describe("05 专项：durable_task_recovery 需求 fail closed", () => {
-  it("Agent Interface 要求 durable_task_recovery 而 Runtime effective durable=false → 拒绝激活（fail closed）", async () => {
-    const store = createMockStore({
-      agentRevisions: new Map([
-        [
-          "agent-rev-1",
-          { ...BASE_AGENT_REVISION, requiredCapabilities: ["durable_task_recovery"] },
-        ],
-      ]),
-      runtimeRevisions: new Map([
-        // external 投影（declared/measured/effective）→ runtimeCapabilities 解析为空集：
-        // effective durable=false（未测恒 false）绝不进入能力集合。
-        ["runtime-rev-1", { ...BASE_RUNTIME_REVISION, capabilities: [] }],
-      ]),
-    });
-    const storeWithCapDb = {
-      ...store,
-      transaction: async <T>(
-        operation: (session: RouteSetActivationSession) => Promise<T>,
-      ): Promise<T> => {
-        return store.transaction(async (session) => {
-          const origGetDbOrTx = session.getDbOrTx.bind(session);
-          return operation({
-            ...session,
-            getDbOrTx: () =>
-              ({
-                ...origGetDbOrTx(),
-                select: () => ({
-                  from: () => ({
-                    where: () => ({
-                      limit: () =>
-                        Promise.resolve([
-                          {
-                            agentInterfaceRequirementsJson: {
-                              required: ["durable_task_recovery"],
-                            },
-                          },
-                        ]),
-                    }),
-                  }),
-                }),
-              }) as any,
-          });
-        });
-      },
-    };
-    const activateRouteSet = createActivateRouteSet({
-      store: storeWithCapDb,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
-    await expect(activateRouteSet(makeCommand())).rejects.toThrow("执行资格不足");
   });
 });

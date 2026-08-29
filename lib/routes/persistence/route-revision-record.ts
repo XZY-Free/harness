@@ -28,7 +28,7 @@ export const routeRevision = mysqlTable(
      */
     agentRevisionId: varchar("agentRevisionId", { length: 36 }),
     runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
-    // ─── Agent Route 生产调用事实（专题01 Batch4 补漏，02 §12.2/12.3）──
+    // ─── Agent Route 生产调用事实──
     // Agent Route 冻结 endpoint/identity/credential/network；基础 Harness Route 为 null。
     agentEndpointRef: varchar("agentEndpointRef", { length: 512 }),
     agentIdentityMode: mysqlEnum("agentIdentityMode", ["none", "bearer"]),

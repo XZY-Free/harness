@@ -62,7 +62,7 @@ export interface RouteResolutionCandidate {
    * runtime 为 null；agent 必填。
    */
   agentRevisionId: string | null;
-  // ─── Agent Route 生产调用事实（专题01 Batch4 补漏，02 §12.2/12.3）──
+  // ─── Agent Route 生产调用事实──
   // agent target 解析返回 exact route facts；基础 Harness Route（runtime）为 null。
   agentEndpointRef: string | null;
   agentIdentityMode: "none" | "bearer" | null;
@@ -109,7 +109,7 @@ export interface RouteResolution {
    * runtime 为 null；agent 必填。
    */
   agentRevisionId: string | null;
-  // ─── Agent Route 生产调用事实（专题01 Batch4 补漏）──
+  // ─── Agent Route 生产调用事实──
   // agent target 解析返回 exact route facts；基础 Harness Route（runtime）为 null。
   agentEndpointRef: string | null;
   agentIdentityMode: "none" | "bearer" | null;
@@ -162,7 +162,7 @@ export type RouteResolutionOutcome =
 
 export interface ResolveRouteCandidatesInput {
   tenantId: string;
-  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（专题01 冻结架构）。 */
+  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（冻结架构）。 */
   target: RouteTarget;
   routeScopeKey: string;
   businessKey: { threadId?: string; jobId?: string };
@@ -282,7 +282,7 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
       routeActivationSequence: selected.candidate.routeActivationSequence,
       targetKind: selected.candidate.targetKind,
       agentRevisionId: selected.candidate.agentRevisionId,
-      // Agent Route 生产调用事实（专题01 Batch4 补漏）：解析 agent target 时返回 exact route facts。
+      // Agent Route 生产调用事实：解析 agent target 时返回 exact route facts。
       agentEndpointRef: selected.candidate.agentEndpointRef,
       agentIdentityMode: selected.candidate.agentIdentityMode,
       agentCredentialRefId: selected.candidate.agentCredentialRefId,
@@ -342,9 +342,6 @@ export function normalizeTarget(target: RouteTarget): unknown {
 }
 
 export function computeCapabilityManifestDigest(input: {
-  /** 无 Agent 约束为 null（基础 Harness Route），不参与能力兼容。 */
-  agentRevisionId: string | null;
-  agentInterfaceRequirements: unknown;
   runtimeRevisionId: string;
   runtimeCapabilities: unknown;
 }): string {

@@ -593,7 +593,7 @@ interface ResumeExecutionParams {
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
   /**
    * requires_redispatch=true 时使用的已加载 AgentRevision（用于构造 redispatch 的
-   * StartInvocationRequestBody）。专题01 冻结架构下 ExecutionBinding 不再绑定 Agent，
+   * StartInvocationRequestBody）。冻结架构下 ExecutionBinding 不再绑定 Agent，
    * 本字段为 Agent 层合法可选字段；未提供 → redispatch 不携带 Agent Revision。
    */
   agentRevision?: AgentRevision | null;
@@ -1025,7 +1025,7 @@ async function executeResumeDispatch(
  *
  * 流程：
  * 1. 解析 AgentRevision（在任何 Command/Invocation/Turn/Event/Attempt 写入之前）：
- * 专题01 冻结架构下 ExecutionBinding 不再绑定 Agent，直接采用调用方已加载的
+ * 冻结架构下 ExecutionBinding 不再绑定 Agent，直接采用调用方已加载的
  * params.agentRevision（可选，Agent 层合法字段；未提供 → null）。
  * 2. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running +
  * 写 turn.resumed Event（带 redispatched=true 标记）。不写 invocation.resumed Event
@@ -1068,7 +1068,7 @@ async function handleResumeRequiresRedispatch(
   }
   const gatewayEndpoints = endpointResolution.gatewayEndpoints;
 
-  // 1. 解析 AgentRevision：专题01 冻结架构下 ExecutionBinding 不再绑定 Agent，
+  // 1. 解析 AgentRevision：冻结架构下 ExecutionBinding 不再绑定 Agent，
   // 无 binding 侧权威可校验；直接采用调用方已加载的 AgentRevision（可选，Agent 层合法字段）。
   // 必须在任何 Command/Invocation/Turn/Event/Attempt 写入之前完成。
   const agentRevision = params.agentRevision ?? null;

@@ -23,23 +23,6 @@ import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-r
 import type { RouteSetActivationStore } from "@/lib/routes/persistence/route-set-activation-store";
 import { and, desc, eq, max } from "drizzle-orm";
 
-function requiredCapabilities(value: unknown): string[] {
-  if (!value || typeof value !== "object") return [];
-  const required = (value as { required?: unknown }).required;
-  return Array.isArray(required)
-    ? required.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
-function runtimeCapabilities(value: unknown): string[] {
-  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
-  if (!value || typeof value !== "object") return [];
-  const capabilities = (value as { capabilities?: unknown }).capabilities;
-  return Array.isArray(capabilities)
-    ? capabilities.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
 export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
   transaction: (operation) =>
     db.transaction(async (tx) =>
@@ -94,7 +77,6 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
                 id: row.id,
                 agentId: row.agentId,
                 revisionState: row.revisionState,
-                requiredCapabilities: requiredCapabilities(row.agentInterfaceRequirementsJson),
               }
             : null;
         },
@@ -110,7 +92,6 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
             ? {
                 id: row.id,
                 revisionState: row.revisionState,
-                capabilities: runtimeCapabilities(row.runtimeCapabilitiesJson),
               }
             : null;
         },

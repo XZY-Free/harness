@@ -59,8 +59,8 @@ export type TransientDispatchErrorCode = "runtime_network_unavailable" | "runtim
 
 /**
  * 判定错误是否为可 retry 的 transient 错误。
- * 只允许 RuntimeHttpClientError.kind=network 与 HTTP 503（含 A2A stream_interrupted 语义，
- * 由调用方先行归一化为 RuntimeHttpClientError 或传入 skipReason）。
+ * 只允许 RuntimeHttpClientError.kind=network 与 HTTP 503（含 Harness Runtime
+ * stream_interrupted 语义，由调用方先行归一化为 RuntimeHttpClientError 或传入 skipReason）。
  */
 export function isTransientDispatchError(err: unknown): err is { __transient: true } {
   // 结构化判定由调用方完成（RuntimeHttpClientError 在 lib/runtime/errors，

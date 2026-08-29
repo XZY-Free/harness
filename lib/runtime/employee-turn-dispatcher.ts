@@ -71,7 +71,7 @@ function configuredModelFn(): ModelFn {
 /**
  * 调度员工发起的会话 Turn。
  *
- * 正式热路径（§9.3）：读取 Thread → Resolve 基础 Harness Route（显式 runtime target，专题01 冻结架构）
+ * 正式热路径（§9.3）：读取 Thread → Resolve 基础 Harness Route（显式 runtime target，冻结架构）
  * → 创建 Invocation → 创建 ExecutionBinding → Runtime Dispatch。
  * 无 Ready Route 时保持 accepted 并返回未调度（热路径不做 Agent-specific Hosted Provisioning，§11.2/§11.5）；
  * 基础 Harness Route 的供应策略由正式控制面初始化。
@@ -93,7 +93,7 @@ export async function dispatchEmployeeTurn(params: {
     throw new Error(`Turn 调度失败：会话不存在 (${params.threadId})`);
   }
 
-  // 顶层 Employee Turn 永远解析基础 Harness Route（专题01 冻结架构）。
+  // 顶层 Employee Turn 永远解析基础 Harness Route（冻结架构）。
   // 用户选择 Agent 是"本轮使用该 Agent 能力"的约束，不改变顶层执行目标：
   // 顶层 Invocation 始终由 Harness Runtime 执行，Agent 由 Harness Loop 通过
   // AgentCall 调用（本模块不读取 turn.requestedAgentId 作为 Route 约束）。
@@ -164,7 +164,7 @@ export async function dispatchEmployeeTurn(params: {
         createInProcessHostedRuntimeClient({
           modelFn: params.modelFn ?? configuredModelFn(),
           tenantId: params.tenantId,
-          // 专题01 Batch7：Harness Loop → AgentCall 桥接器（required Agent capability）。
+          // Harness Loop → AgentCall 桥接器（required Agent capability）。
           // 有 required Agent 时由 HostedHarnessLoop 调用；无 required Agent 恒不调用。
           agentCallExecutor: (exec) =>
             invokeRequiredAgent({
@@ -215,7 +215,7 @@ export async function dispatchEmployeeTurn(params: {
         binding.governanceConfigRevisionId,
       );
       return {
-        // protocolType 决定 Transport：external endpoint（a2a）用 managedEndpoint；
+        // protocolType 决定 Transport：external Harness Runtime endpoint 用 managedEndpoint；
         // Hosted 保持 in-process 引用（04 §10：Hosted 路径无行为回退）。
         runtimeEndpoint: managedEndpoint,
         auth: await resolveOutboundAuth(),
@@ -254,8 +254,8 @@ export async function dispatchEmployeeTurn(params: {
   if (!result.binding) {
     throw new Error(`Turn 调度缺少 ExecutionBinding（turnId=${params.turnId}）`);
   }
-  // Hosted Transport 需要显式启动 Agent Loop；A2A Transport 的事件流由
-  // Transport 内部消费并经归一化 ingress 进入（04 §10）。
+  // Hosted Transport 需要显式启动 Agent Loop；External Harness Runtime Transport
+  // 的事件流由 Transport 内部消费并经归一化 ingress 进入（04 §10）。
   const hostedClient = transport as Partial<InProcessHostedRuntimeClient>;
   if (typeof hostedClient.launchAcceptedInvocation !== "function") {
     return { dispatched: true, completion: Promise.resolve() };
