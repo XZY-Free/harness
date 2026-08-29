@@ -177,7 +177,12 @@ export function validateRouteRevisionContent(content: RouteRevisionContent): voi
       throw new RouteAgentEndpointFactsError("agent route 必须冻结 agentNetworkZone");
     }
   } else {
-    if (endpointRef !== null || identityMode !== null || credentialRefId !== null || networkZone !== null) {
+    if (
+      endpointRef !== null ||
+      identityMode !== null ||
+      credentialRefId !== null ||
+      networkZone !== null
+    ) {
       throw new RouteAgentEndpointFactsError("基础 Harness Route 不得携带 Agent endpoint 事实");
     }
   }

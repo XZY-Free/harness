@@ -223,9 +223,7 @@ export function createActivateRouteSet(dependencies: {
           runtimeRevisionId: desired.runtimeRevisionId,
           agentEndpointRef: hasAgentConstraint ? (desired.agentEndpointRef ?? null) : null,
           agentIdentityMode: hasAgentConstraint ? (desired.agentIdentityMode ?? null) : null,
-          agentCredentialRefId: hasAgentConstraint
-            ? (desired.agentCredentialRefId ?? null)
-            : null,
+          agentCredentialRefId: hasAgentConstraint ? (desired.agentCredentialRefId ?? null) : null,
           agentNetworkZone: hasAgentConstraint ? (desired.agentNetworkZone ?? null) : null,
           policyRevisionId: desired.policyRevisionId ?? null,
           modelPolicyRevisionId: desired.modelPolicyRevisionId ?? null,
