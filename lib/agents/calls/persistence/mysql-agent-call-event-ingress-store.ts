@@ -14,23 +14,36 @@ import type {
  */
 import { db } from "@/lib/db/client";
 import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
-import { agentCallEventIngressTable } from "@/lib/persistence/schema/agent-calls";
+import {
+  agentCallEventIngressTable,
+  agentCallTable,
+} from "@/lib/persistence/schema/agent-calls";
 import { and, eq } from "drizzle-orm";
 
 export const mysqlAgentCallEventIngressStore: AgentCallEventIngressStore = {
   accept: async (input): Promise<AcceptAgentCallEventResult> => {
+    // 先证明 call 属于本租户（fail-closed）：异租户绝不可见/不可写。
+    const [call] = await db
+      .select({ id: agentCallTable.id })
+      .from(agentCallTable)
+      .where(and(eq(agentCallTable.id, input.callId), eq(agentCallTable.tenantId, input.tenantId)))
+      .limit(1);
+    if (!call) {
+      throw new Error(`AgentCall ${input.callId} 不存在或不属于租户`);
+    }
     const [byEventId] = await db
       .select()
       .from(agentCallEventIngressTable)
       .where(
         and(
           eq(agentCallEventIngressTable.callId, input.callId),
+          eq(agentCallEventIngressTable.tenantId, input.tenantId),
           eq(agentCallEventIngressTable.producerEventId, input.producerEventId),
         ),
       )
       .limit(1);
     if (byEventId) {
-      if (byEventId.payloadHash === input.payloadHash) {
+      if (byEventId.payloadHash === input.payloadHash && byEventId.candidateType === input.candidateType) {
         return { status: "duplicate", ingress: toAgentCallEventIngress(byEventId) };
       }
       return { status: "hash_conflict" };
@@ -51,19 +64,20 @@ export const mysqlAgentCallEventIngressStore: AgentCallEventIngressStore = {
       });
     } catch (err) {
       if (isMysqlDuplicateEntryError(err)) {
-        // UNIQUE(callId, producerSequence) 冲突 → 回查。
+        // UNIQUE(callId, producerSequence) 冲突 → 回查（tenant-scoped）。
         const [bySeq] = await db
           .select()
           .from(agentCallEventIngressTable)
           .where(
             and(
               eq(agentCallEventIngressTable.callId, input.callId),
+              eq(agentCallEventIngressTable.tenantId, input.tenantId),
               eq(agentCallEventIngressTable.producerSequence, input.producerSequence),
             ),
           )
           .limit(1);
         if (bySeq) {
-          if (bySeq.payloadHash === input.payloadHash) {
+          if (bySeq.payloadHash === input.payloadHash && bySeq.candidateType === input.candidateType) {
             return { status: "duplicate", ingress: toAgentCallEventIngress(bySeq) };
           }
           return { status: "hash_conflict" };

@@ -33,18 +33,25 @@ export const mysqlAgentSessionBindingStore: AgentSessionBindingStore = {
       });
     } catch (err) {
       if (isMysqlDuplicateEntryError(err)) {
+        // 唯一键冲突：仅当 tenant/thread/agent/revision/route/context 全部精确一致才可复用；
+        // 否则为「同一 externalContext 属不同 owner/thread」的稳定关联冲突 → 抛错，绝不跨租户/跨线程复用。
         const [existing] = await db
           .select()
           .from(agentSessionBindingTable)
           .where(
             and(
+              eq(agentSessionBindingTable.tenantId, input.tenantId),
+              eq(agentSessionBindingTable.threadId, input.threadId),
+              eq(agentSessionBindingTable.agentId, input.agentId),
               eq(agentSessionBindingTable.agentRevisionId, input.agentRevisionId),
+              eq(agentSessionBindingTable.deploymentRouteId, input.deploymentRouteId),
               eq(agentSessionBindingTable.routeRevisionId, input.routeRevisionId),
               eq(agentSessionBindingTable.externalContextRef, input.externalContextRef),
             ),
           )
           .limit(1);
         if (existing) return toAgentSessionBinding(existing);
+        throw new Error("AgentSessionBinding 关联冲突：externalContext 已被其它 owner/thread 占用");
       }
       throw err;
     }

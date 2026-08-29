@@ -148,6 +148,13 @@
       "when": 1787926077266,
       "tag": "0020_chilly_zuras",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1787964146950,
+      "tag": "0021_agent_call_attempt_request_digest",
+      "breakpoints": true
     }
   ]
 }

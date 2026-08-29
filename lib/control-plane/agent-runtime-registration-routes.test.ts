@@ -1,4 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  type A2ATestProvider,
+  startA2ATestProvider,
+} from "@/lib/agents/calls/test/a2a-test-provider";
 /**
  * POST /admin/api/v1/agents/{agent_id}/runtime-registrations — capability-driven
  * 黑盒注册验收（02 专项）。
@@ -44,10 +48,6 @@ import {
   runtimeConformanceCaseResult,
   runtimeConformanceRun,
 } from "@/lib/runtime/persistence/runtime-conformance-run-record";
-import {
-  type A2ATestProvider,
-  startA2ATestProvider,
-} from "@/lib/runtime/test-support/a2a-test-provider";
 import { generateEd25519SignerKeyPair } from "@/lib/runtime/test-support/ed25519-signer-keypair";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";

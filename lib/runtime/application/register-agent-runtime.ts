@@ -28,6 +28,7 @@
  *   由注册幂等键确定性派生；actor 为平台系统身份，非外部 Agent 自证。
  */
 import { randomUUID } from "node:crypto";
+import { buildA2APublicMessageMetadata } from "@/lib/agents/calls/transport/a2a/a2a-mapper";
 import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
 import { getAgentById } from "@/lib/agents/persistence/agent-queries";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
@@ -65,7 +66,6 @@ import {
   appendRuntimeConformanceRun,
   prepareRuntimeConformanceRun,
 } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
-import { buildA2APublicMessageMetadata } from "@/lib/runtime/transport/a2a-transport";
 import {
   executionSubjectFromServiceIdentity,
   executionSubjectToPublicAgentSubject,

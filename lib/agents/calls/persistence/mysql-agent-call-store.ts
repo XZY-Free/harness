@@ -3,7 +3,10 @@ import {
   type AgentCallState,
   isAgentCallTerminal,
 } from "@/lib/agents/calls/domain/agent-call";
-import type { AgentCallAttempt } from "@/lib/agents/calls/domain/agent-call-attempt";
+import {
+  type AgentCallAttempt,
+  isAgentCallAttemptTerminal,
+} from "@/lib/agents/calls/domain/agent-call-attempt";
 import {
   AgentCallBindingAlreadyExistsError,
   type AgentCallBindingConfigInput,
@@ -196,6 +199,68 @@ export const mysqlAgentCallStore: AgentCallStore = {
     if (!after) throw new Error("AgentCallAttempt outbound 后无法回读");
     return toAttempt(after);
   },
+
+  claimInitialAttempt: ({ callId, tenantId, requestDigest, now }) =>
+    db.transaction(async (tx) => {
+      const [callRow] = await tx
+        .select()
+        .from(agentCallTable)
+        .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
+        .limit(1)
+        .for("update");
+      if (!callRow) throw new Error(`AgentCall ${callId} 不存在或不属于租户`);
+      const [attemptRow] = await tx
+        .select()
+        .from(agentCallAttemptTable)
+        .where(
+          and(
+            eq(agentCallAttemptTable.callId, callId),
+            eq(agentCallAttemptTable.tenantId, tenantId),
+            eq(agentCallAttemptTable.attemptNo, 1),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!attemptRow) throw new Error(`AgentCallAttempt ${callId}#1 不存在`);
+
+      const call = toAgentCall(callRow);
+      const attempt = toAttempt(attemptRow);
+
+      // 已认领：同 digest → idempotent；异 digest → conflict（稳定冲突，含终态后）。
+      if (attemptRow.requestDigest !== null) {
+        if (attemptRow.requestDigest === requestDigest) {
+          return { status: "idempotent", attempt, call } as const;
+        }
+        return { status: "conflict", attempt, call } as const;
+      }
+
+      // 未认领但已终态：返回既有结果，不重复 outbound。
+      if (isAgentCallAttemptTerminal(attemptRow.attemptState) || isAgentCallTerminal(callRow.state)) {
+        return { status: "terminal", attempt, call } as const;
+      }
+
+      // 赢得认领：唯一发 HTTP 者。requestDigest + running + outbound=1。
+      await tx
+        .update(agentCallAttemptTable)
+        .set({
+          requestDigest,
+          attemptState: "running",
+          dispatchAttemptCount: 1,
+          startedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(agentCallAttemptTable.id, attemptRow.id));
+      // call queued→running（含 startedAt）；若已是 running 则不动 versionNo。
+      const updatedCall = await doClaimCallRunning(tx, callRow, now);
+
+      const [afterAttempt] = await tx
+        .select()
+        .from(agentCallAttemptTable)
+        .where(eq(agentCallAttemptTable.id, attemptRow.id))
+        .limit(1);
+      if (!afterAttempt) throw new Error("AgentCallAttempt claim 后无法回读");
+      return { status: "owner", attempt: toAttempt(afterAttempt), call: updatedCall } as const;
+    }),
 };
 
 export class AgentCallStateConcurrencyError extends Error {
@@ -209,6 +274,27 @@ export class AgentCallStateConcurrencyError extends Error {
 }
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** claim owner 使 call 进入 running（queued→running CAS；已 running 则仅回读，不重复 bump versionNo）。 */
+async function doClaimCallRunning(
+  tx: Transaction,
+  callRow: typeof agentCallTable.$inferSelect,
+  now: Date,
+): Promise<AgentCall> {
+  if (callRow.state === "queued") {
+    await tx
+      .update(agentCallTable)
+      .set({ state: "running", startedAt: now, versionNo: callRow.versionNo + 1 })
+      .where(eq(agentCallTable.id, callRow.id));
+  }
+  const [after] = await tx
+    .select()
+    .from(agentCallTable)
+    .where(eq(agentCallTable.id, callRow.id))
+    .limit(1);
+  if (!after) throw new Error("AgentCall claim 后无法回读");
+  return toAgentCall(after);
+}
 
 async function doCreate(tx: Transaction, input: StoreAgentCallInput): Promise<AgentCall> {
   // 1. 校验 parent Invocation 存在且属于同 tenant（cross-tenant fail-closed）。
@@ -389,6 +475,7 @@ function toAttempt(row: typeof agentCallAttemptTable.$inferSelect): AgentCallAtt
     externalTaskRef: row.externalTaskRef,
     dispatchAttemptCount: row.dispatchAttemptCount,
     retryReasonCode: row.retryReasonCode,
+    requestDigest: row.requestDigest,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
     errorCode: row.errorCode,

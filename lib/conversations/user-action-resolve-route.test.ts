@@ -15,6 +15,10 @@
  */
 import { randomUUID } from "node:crypto";
 import { POST as resolvePOST } from "@/app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route";
+import {
+  type A2ATestProvider,
+  startA2ATestProvider,
+} from "@/lib/agents/calls/test/a2a-test-provider";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
@@ -26,10 +30,6 @@ import { userActionRequestTable } from "@/lib/persistence/schema/user-action-req
 import { dispatchInvocationForTurn } from "@/lib/runtime/dispatcher";
 import { ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { createSessionBinding } from "@/lib/runtime/session-binding-queries";
-import {
-  type A2ATestProvider,
-  startA2ATestProvider,
-} from "@/lib/runtime/test-support/a2a-test-provider";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

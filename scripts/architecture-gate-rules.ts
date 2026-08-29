@@ -124,6 +124,38 @@ function stripComments(source: string): string {
     .join("\n");
 }
 
+// ─── A2A AgentCall 边界（Batch6）───────────────────────────
+
+/**
+ * 旧 A2A Runtime 生产路径：lib/runtime 下任意子目录的 a2a 前缀文件名
+ * （含 transport/a2a-transport.ts、a2a-background-failure-handler.ts 等）。
+ * 文件名自身为旧残留，无论内容（含注释）均违规。
+ */
+const OLD_A2A_RUNTIME_PATH = /^lib\/runtime\/(?:.*\/)?a2a/;
+
+/** 从旧 A2A Runtime 路径 import/require/export-from（含别名）的模块引用。 */
+const OLD_A2A_RUNTIME_REF =
+  /(?:from\s*["']|require\(\s*["']|import\s+[^"'\n]*?\bfrom\s*["']|export\s+[^"'\n]*?\bfrom\s*["'])[^"']*lib\/runtime\/[^"']*\/?a2a[^"']*["']/;
+
+/** 旧 A2A Runtime authority 标识符（全局生产作用域禁）。 */
+const OLD_A2A_IDENTIFIERS = /\bA2AEventBatchSink\b|\bA2ARuntimeRefResolver\b/;
+
+/**
+ * Agent calls（transport/application/test-support）禁引用的 Runtime 渗漏：
+ * RuntimeHttpClient、runtimeExecutionRef/runtimeSessionRef、RuntimeEventIngress、
+ * markInvocationLost，或 runtime event-ingress/recovery 模块。ParentInvocationId 合法。
+ */
+const AGENT_CALLS_SCOPE = /^lib\/agents\/calls\/(transport|application|test-support)\//;
+const AGENT_CALLS_FORBIDDEN =
+  /\bRuntimeHttpClient\b|\bruntimeExecutionRef\b|\bruntimeSessionRef\b|\bRuntimeEventIngress\b|\bmarkInvocationLost\b|\/runtime\/(?:event-ingress|recovery|recovery-queries)/;
+
+/** Schema 已知 RUNTIME_PROTOCOL_TYPES 不得含 a2a（仅 schema 文件）。 */
+const SCHEMA_RUNTIMES_PATH = "lib/persistence/schema/runtimes.ts";
+const SCHEMA_PROTOCOL_A2A = /RUNTIME_PROTOCOL_TYPES\s*=\s*\[[^\]]*["']a2a["']/;
+
+/** Runtime 生产 protocolType 赋值不得为 a2a（lib/runtime 下；AgentContractSnapshot 属 lib/agents 不受限）。 */
+const RUNTIME_PROTOCOL_A2A = /protocolType\s*[:=]\s*["']a2a["']/;
+
 /**
  * 收集专题01 §23.2 边界规则违规路径。
  *
@@ -157,6 +189,31 @@ export function collectTopic01BoundaryViolations(documents: readonly SourceDocum
     }
     // 正式 Route 系统（lib/routes）不得出现 chat kind 漂移。
     if (!flagged && path.startsWith("lib/routes/") && /kind\s*[:=]\s*["']chat["']/.test(source)) {
+      flagged = true;
+    }
+    // ── A2A AgentCall 边界（Batch6）──
+    // 旧 A2A Runtime 生产路径：文件名自身 lib/runtime/**/a2a* 即违规（无论内容/注释）。
+    if (!flagged && OLD_A2A_RUNTIME_PATH.test(path)) {
+      flagged = true;
+    }
+    // 从旧 A2A Runtime 路径 import/require/export-from（含别名）全局禁。
+    if (!flagged && OLD_A2A_RUNTIME_REF.test(source)) {
+      flagged = true;
+    }
+    // 旧 A2A Runtime authority 标识符全局禁。
+    if (!flagged && OLD_A2A_IDENTIFIERS.test(source)) {
+      flagged = true;
+    }
+    // Agent calls 作用域不得渗漏 Runtime 权威字段/标识符/模块。
+    if (!flagged && AGENT_CALLS_SCOPE.test(path) && AGENT_CALLS_FORBIDDEN.test(source)) {
+      flagged = true;
+    }
+    // Schema 已知 RUNTIME_PROTOCOL_TYPES 不得含 a2a。
+    if (!flagged && path === SCHEMA_RUNTIMES_PATH && SCHEMA_PROTOCOL_A2A.test(source)) {
+      flagged = true;
+    }
+    // Runtime 生产 protocolType 赋值不得为 a2a（lib/runtime/**，AgentContractSnapshot 属 lib/agents 不受限）。
+    if (!flagged && path.startsWith("lib/runtime/") && RUNTIME_PROTOCOL_A2A.test(source)) {
       flagged = true;
     }
     if (flagged && !seen.has(path)) {
@@ -287,7 +344,7 @@ export function checkRuntimeRegistrationEvidence(
 
 const RESOLVE_ROUTE_PATH =
   "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
-const A2A_TRANSPORT_PATH = "lib/runtime/transport/a2a-transport.ts";
+const A2A_TRANSPORT_PATH = "lib/agents/calls/transport/a2a/a2a-client.ts";
 
 export interface ResumeGateResult {
   passed: boolean;
@@ -315,12 +372,12 @@ export function checkResumeTruthfulnessGate(
   if (!transport) {
     failures.push(`${A2A_TRANSPORT_PATH} 不存在`);
   } else {
-    // A2A resumeInvocation 必须使用公共 metadata mapper（04 §12）。
-    const resumeIndex = transport.source.indexOf("async resumeInvocation");
+    // Agent transport resumeCall 必须使用公共 metadata mapper（04 §12）。
+    const resumeIndex = transport.source.indexOf("async resumeCall");
     const resumeSlice =
       resumeIndex >= 0 ? transport.source.slice(resumeIndex, resumeIndex + 3000) : "";
     if (!resumeSlice.includes("buildA2APublicMessageMetadata")) {
-      failures.push("a2a-transport.resumeInvocation 未使用公共 metadata mapper");
+      failures.push("a2a-client.resumeCall 未使用公共 metadata mapper");
     }
   }
   return { passed: failures.length === 0, failures };
@@ -461,7 +518,7 @@ export function checkNineIssueCloseoutGate(
   }
 
   // F6 Capability hardcode：Start response 投影
-  const transport = docOrFail(documents, "lib/runtime/transport/a2a-transport.ts", failures);
+  const transport = docOrFail(documents, "lib/agents/calls/transport/a2a/a2a-client.ts", failures);
   if (transport) {
     const source = stripComments(transport.source);
     if (
@@ -469,11 +526,9 @@ export function checkNineIssueCloseoutGate(
       /resume:\s*true\b/.test(source) ||
       /user_action:\s*true\b/.test(source)
     ) {
-      failures.push("F6 A2A Transport 硬编码 cancel/resume/user_action=true");
+      failures.push("F6 Agent transport 硬编码 cancel/resume/user_action=true");
     }
-    const startIdx = source.indexOf("runtime_session_ref: contextId");
-    const startSlice = startIdx >= 0 ? source.slice(startIdx, startIdx + 1200) : "";
-    if (!startSlice || !startSlice.includes("params.capabilities.cancel")) {
+    if (!source.includes("params.capabilities.cancel")) {
       failures.push("F6 Start response 未投影冻结 params.capabilities");
     }
   }

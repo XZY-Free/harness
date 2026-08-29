@@ -38,6 +38,8 @@ export interface AgentCallAttempt {
   /** 该 Attempt 累计 outbound 次数（防重复 outbound）。 */
   dispatchAttemptCount: number;
   retryReasonCode: string | null;
+  /** 初始 claim 的 durable 请求摘要（sha256: 前缀）；null=未被认领。 */
+  requestDigest: string | null;
   startedAt: Date | null;
   finishedAt: Date | null;
   errorCode: string | null;

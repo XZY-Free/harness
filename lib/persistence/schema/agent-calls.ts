@@ -233,6 +233,13 @@ export const agentCallAttemptTable = mysqlTable(
     /** 该 Attempt 累计 outbound 次数。 */
     dispatchAttemptCount: int("dispatchAttemptCount").notNull().default(0),
     retryReasonCode: varchar("retryReasonCode", { length: 64 }),
+    /**
+     * 初始 claim 的 durable 请求摘要（sha256: 前缀）。
+     * 原子 claim 语义：requestDigest IS NULL 表示未被认领；非空即已被某次 start 认领。
+     * 同 call 同 input 并发 start → 共享同一 digest → 幂等；不同 input → digest 不同 → 冲突。
+     * 不得滥用 retryReasonCode 承载该语义。
+     */
+    requestDigest: varchar("requestDigest", { length: 71 }),
     startedAt: datetime("startedAt", { mode: "date", fsp: 3 }),
     finishedAt: datetime("finishedAt", { mode: "date", fsp: 3 }),
     errorCode: varchar("errorCode", { length: 128 }),

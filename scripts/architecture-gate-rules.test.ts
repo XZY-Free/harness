@@ -234,7 +234,7 @@ describe("collectTopic01BoundaryViolations", () => {
       doc(
         "lib/runtime/execution-engine.ts",
         [
-          "const constraint: HarnessConstraint = { agentConstraint: null, threadId: null };",
+          "const constraint: HarnessConstraint = { target: { kind: 'runtime' }, threadId: null };",
           "let threadId: string | null = null;",
           "if (route.kind === 'thread') { run(threadId); }",
           "const target = '/chat/thread';",
@@ -242,6 +242,198 @@ describe("collectTopic01BoundaryViolations", () => {
       ),
     ];
     expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+  });
+});
+
+// ─── A2A AgentCall 边界（Batch6，RED 测试）───────────────
+
+/**
+ * 专题：Topic01 gate 必须拒绝任何旧 A2A Runtime authority 与兼容残留，
+ * 而合法 AgentCall A2A（lib/agents/calls/transport/a2a/…）必须通过。
+ * 字段检查（runtimeExecutionRef/runtimeSessionRef）仅绑定 AgentCall
+ * transport 作用域，合法 Harness runtime 字段不受牵连。
+ */
+
+describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED）", () => {
+  it("旧 A2A Runtime 文件 lib/runtime/transport/a2a-transport.ts 即使内容无关紧要也违规", () => {
+    const documents = [doc("lib/runtime/transport/a2a-transport.ts", "export const VERSION = 1;")];
+    expect(collectTopic01BoundaryViolations(documents)).toContain(
+      "lib/runtime/transport/a2a-transport.ts",
+    );
+  });
+
+  it("runtime a2a 后台失败处理器违规", () => {
+    const documents = [
+      doc(
+        "lib/runtime/transport/a2a-background-failure-handler.ts",
+        "export class A2ABackgroundFailureHandler { handle(err: Error): void {} }",
+      ),
+    ];
+    expect(collectTopic01BoundaryViolations(documents)).toContain(
+      "lib/runtime/transport/a2a-background-failure-handler.ts",
+    );
+  });
+
+  it("runtime a2a protocol enum/assignment 违规：schema RUNTIME_PROTOCOL_TYPES 含 a2a、runtime 生产 protocolType 赋值 a2a", () => {
+    // schema 已知 RUNTIME_PROTOCOL_TYPES 不得含 a2a。
+    const schema = doc(
+      "lib/persistence/schema/runtimes.ts",
+      'export const RUNTIME_PROTOCOL_TYPES = ["harness_runtime_protocol", "a2a"] as const;',
+    );
+    expect(collectTopic01BoundaryViolations([schema])).toContain(
+      "lib/persistence/schema/runtimes.ts",
+    );
+    // runtime 生产 protocolType 赋值不得为 a2a（文件名不含 a2a，靠赋值规则判别）。
+    const registration = doc("lib/runtime/registration.ts", 'const r = { protocolType: "a2a" };');
+    expect(collectTopic01BoundaryViolations([registration])).toContain(
+      "lib/runtime/registration.ts",
+    );
+    // 合法 AgentContractSnapshot protocolType a2a 仍允许。
+    const agentSnapshot = doc(
+      "lib/agents/domain/agent-contract-snapshot.ts",
+      'export const snapshot = { protocolType: "a2a" as const };',
+    );
+    expect(collectTopic01BoundaryViolations([agentSnapshot])).toEqual([]);
+  });
+
+  it("app/lib 从旧 a2a transport import/export 违规", () => {
+    const documents = [
+      doc(
+        "app/api/v1/runtime/ingest/route.ts",
+        'import { A2AMessage } from "@/lib/runtime/transport/a2a-transport";',
+      ),
+      doc(
+        "lib/agents/gateway.ts",
+        'export { A2AResponse } from "@/lib/runtime/transport/a2a-transport";',
+      ),
+    ];
+    const violations = collectTopic01BoundaryViolations(documents);
+    expect(violations).toContain("app/api/v1/runtime/ingest/route.ts");
+    expect(violations).toContain("lib/agents/gateway.ts");
+  });
+
+  it("A2AEventBatchSink 与 A2ARuntimeRefResolver 标识符违规", () => {
+    const documents = [
+      doc("lib/runtime/sink.ts", "export const sink = new A2AEventBatchSink();"),
+      doc("lib/runtime/resolver.ts", "export const resolver = new A2ARuntimeRefResolver();"),
+    ];
+    const violations = collectTopic01BoundaryViolations(documents);
+    expect(violations).toContain("lib/runtime/sink.ts");
+    expect(violations).toContain("lib/runtime/resolver.ts");
+  });
+
+  it("lib/agents/calls/transport 内 RuntimeHttpClient 实现/import 违规", () => {
+    const documents = [
+      doc(
+        "lib/agents/calls/transport/runtime-http-client.ts",
+        "export class RuntimeHttpClient { post(): Promise<Response> { return fetch(''); } }",
+      ),
+      doc(
+        "lib/agents/calls/transport/a2a/x.ts",
+        'import { RuntimeHttpClient } from "../runtime-http-client";',
+      ),
+    ];
+    const violations = collectTopic01BoundaryViolations(documents);
+    expect(violations).toContain("lib/agents/calls/transport/runtime-http-client.ts");
+    expect(violations).toContain("lib/agents/calls/transport/a2a/x.ts");
+  });
+
+  it("AgentCall transport 作用域写 runtimeExecutionRef/runtimeSessionRef 违规", () => {
+    const documents = [
+      doc("lib/agents/calls/transport/a2a/y.ts", "const ref = { runtimeExecutionRef: 're1' };"),
+      doc("lib/agents/calls/transport/a2a/z.ts", "const ref = { runtimeSessionRef: 'rs1' };"),
+    ];
+    const violations = collectTopic01BoundaryViolations(documents);
+    expect(violations).toContain("lib/agents/calls/transport/a2a/y.ts");
+    expect(violations).toContain("lib/agents/calls/transport/a2a/z.ts");
+  });
+
+  it("合法 Harness runtime 字段不受 AgentCall 作用域约束牵连", () => {
+    const documents = [
+      doc("lib/runtime/session-binding.ts", "const ref = { runtimeSessionRef: 'rs1' };"),
+      doc("lib/runtime/execution-ref.ts", "const ref = { runtimeExecutionRef: 're1' };"),
+    ];
+    expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+  });
+
+  it("AgentCall transport 从 runtime event-ingress 或 recovery/markInvocationLost import 违规", () => {
+    const documents = [
+      doc(
+        "lib/agents/calls/transport/a2a/ingest.ts",
+        'import { EventIngress } from "@/lib/runtime/event-ingress";',
+      ),
+      doc(
+        "lib/agents/calls/transport/a2a/recover.ts",
+        'import { markInvocationLost } from "@/lib/runtime/recovery";',
+      ),
+    ];
+    const violations = collectTopic01BoundaryViolations(documents);
+    expect(violations).toContain("lib/agents/calls/transport/a2a/ingest.ts");
+    expect(violations).toContain("lib/agents/calls/transport/a2a/recover.ts");
+  });
+
+  it("从旧 A2A 路径 reexport/alias 禁止", () => {
+    const documents = [
+      doc(
+        "lib/agents/calls/transport/a2a/bridge.ts",
+        'export { A2ARequest } from "@/lib/runtime/transport/a2a-transport";',
+      ),
+      doc(
+        "lib/agents/calls/transport/a2a/alias.ts",
+        'import a2a = require("@/lib/runtime/transport/a2a-transport");',
+      ),
+    ];
+    const violations = collectTopic01BoundaryViolations(documents);
+    expect(violations).toContain("lib/agents/calls/transport/a2a/bridge.ts");
+    expect(violations).toContain("lib/agents/calls/transport/a2a/alias.ts");
+  });
+
+  it("合法 lib/agents/calls/transport/a2a/a2a-client.ts 与 ingress 自有 AgentCall 类型通过", () => {
+    const documents = [
+      doc(
+        "lib/agents/calls/transport/a2a/a2a-client.ts",
+        'import type { AgentCallRequest, AgentCallResponse } from "@/lib/agents/calls/domain/agent-call-types";\nexport class A2AClient { async send(req: AgentCallRequest): Promise<AgentCallResponse> { return { ok: true }; } }',
+      ),
+      doc(
+        "lib/agents/calls/transport/a2a/ingress.ts",
+        'export interface AgentCallIngressEvent { kind: "agent_call"; id: string; }',
+      ),
+    ];
+    expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+  });
+
+  it("注释记录被禁边界接受（除非文件名自身被禁）", () => {
+    const commentOnly = [
+      doc(
+        "lib/agents/calls/transport/a2a/note.ts",
+        "// A2ARuntimeRefResolver、markInvocationLost、a2a-transport 均被禁，AgentCall 不再绑定 runtime ExecutionRef。",
+      ),
+    ];
+    expect(collectTopic01BoundaryViolations(commentOnly)).toEqual([]);
+
+    // 文件名自身为旧 A2A Runtime 残留则即使全注释也违规。
+    const forbiddenFile = [
+      doc("lib/runtime/transport/a2a-transport.ts", "// 已被 AgentCall A2A 取代，本文件仅作注释。"),
+    ];
+    expect(collectTopic01BoundaryViolations(forbiddenFile)).toContain(
+      "lib/runtime/transport/a2a-transport.ts",
+    );
+  });
+
+  it("test-support 不整体豁免：AgentCall transport 作用域内字段/旧残留仍扫", () => {
+    const documents = [
+      doc(
+        "lib/agents/calls/test-support/a2a-client-helper.ts",
+        'import { A2ARequest } from "@/lib/runtime/transport/a2a-transport";',
+      ),
+      doc(
+        "lib/agents/calls/test-support/transport-helper.ts",
+        "const ref = { runtimeExecutionRef: 're1' };",
+      ),
+    ];
+    const violations = collectTopic01BoundaryViolations(documents);
+    expect(violations).toContain("lib/agents/calls/test-support/a2a-client-helper.ts");
+    expect(violations).toContain("lib/agents/calls/test-support/transport-helper.ts");
   });
 });
 
@@ -351,7 +543,7 @@ describe("checkRuntimeRegistrationEvidence（08 §4）", () => {
 
 describe("checkResumeTruthfulnessGate（08 §5）", () => {
   const RESOLVE_ROUTE = "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
-  const A2A = "lib/runtime/transport/a2a-transport.ts";
+  const A2A = "lib/agents/calls/transport/a2a/a2a-client.ts";
 
   it("catch 吞错 + 无 resume_dispatch → 失败", () => {
     const result = checkResumeTruthfulnessGate([
@@ -359,7 +551,7 @@ describe("checkResumeTruthfulnessGate（08 §5）", () => {
         RESOLVE_ROUTE,
         "await dispatchResumeCommandToRuntime({...}).catch((err) => logger.warn(err)); return ok(200);",
       ),
-      doc(A2A, "async resumeInvocation(req) { send(req); }"),
+      doc(A2A, "async resumeCall(req) { send(req); }"),
     ]);
     expect(result.passed).toBe(false);
     expect(result.failures).toHaveLength(3);
@@ -373,7 +565,7 @@ describe("checkResumeTruthfulnessGate（08 §5）", () => {
       ),
       doc(
         A2A,
-        "async resumeInvocation(req) { const m = buildA2APublicMessageMetadata(req.requestBody.invocation_context); }",
+        "async resumeCall(req) { const m = buildA2APublicMessageMetadata(req.requestBody.invocation_context); }",
       ),
     ]);
     expect(result).toEqual({ passed: true, failures: [] });
@@ -390,7 +582,7 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
     recovery: "lib/runtime/recovery-queries.ts",
     registration: "lib/runtime/application/register-agent-runtime.ts",
     resolveRoute: "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
-    transport: "lib/runtime/transport/a2a-transport.ts",
+    transport: "lib/agents/calls/transport/a2a/a2a-client.ts",
     parser: "lib/agents/domain/public-agent-contract.ts",
     builder: "lib/runtime/application/build-active-external-conformance.ts",
   };

@@ -1,6 +1,5 @@
-import { randomUUID } from "node:crypto";
 /**
- * 仓内标准 A2A 验收 Provider（07，Batch 9；HR wire 形态冻结版）。
+ * 仓内标准 A2A 验收 Provider（AgentCall 子执行域测试支撑）。
  *
  * 真实 HTTP A2A 0.3.0 Provider（node:http），仅存在 test-support，production 不 import。
  * 黑盒原则（07 §2）：平台侧只通过 Agent Card + 真实 A2A wire behavior 与其交互，
@@ -22,8 +21,9 @@ import { randomUUID } from "node:crypto";
  *
  * 场景（07 §5）：completed / chunks / input_required / long_running / failed /
  * rejected / malformed / subject_echo。场景由测试显式选择，Provider 按 A2A wire
- * 语义响应，供 dispatch E2E 黑盒验证。
+ * 语义响应。
  */
+import { randomUUID } from "node:crypto";
 import { type Server, createServer } from "node:http";
 
 /** Provider 公开的 Capability Manifest（任务能力描述，非函数列表）。 */
@@ -87,54 +87,32 @@ export interface A2ATestProvider {
   /** 已捕获的 message 请求（黑盒断言用）。 */
   captured: CapturedA2ARequest[];
   /**
-   * 全部到达 Provider 的 HTTP 请求（method + path + Authorization 头，黑盒断言网络序列用；
-   * Authorization 只记录原样头值，供测试比对，不属于 Provider 状态）。
+   * 全部到达 Provider 的 HTTP 请求（method + path + Authorization 头，黑盒断言网络序列用）。
    */
   requests: Array<{
     method: string;
     path: string;
     authorization?: string;
-    /** x-idempotency-key 头（稳定 Runtime Idempotency-Key 断言用）。 */
+    /** x-idempotency-key 头（稳定 Idempotency-Key 断言用）。 */
     idempotencyKey?: string;
   }>;
   /** 每个已解析 JSON-RPC 请求的 method（含 tasks/cancel，分支前记录，wire 观测用）。 */
   rpcMethods: string[];
-  /**
-   * 注册验收专用：下一次 resume（message/send）返回篡改后的 taskId/contextId，
-   * 用于冻结"correlation 变化必须 fail closed"的黑盒反例。
-   */
+  /** 下一次 resume（message/send）返回篡改后的 taskId/contextId（correlation 反例）。 */
   corruptResumeCorrelation(): void;
-  /**
-   * 注册验收专用：设置后所有请求必须携带恰好 `Authorization: Bearer <token>`，
-   * 否则 401（冻结"生产侧只解析被引用的 CredentialRef，而非请求原始输入"）。
-   */
+  /** 设置后所有请求必须携带恰好 `Authorization: Bearer <token>`，否则 401。 */
   setExpectedBearerToken(token: string | null): void;
   /** 切换 message/send 的响应形态；默认（冻结）为官方完整 Task。 */
   setResumeResponseShape(shape: "status-update" | "task"): void;
-  /**
-   * 注册验收专用：覆盖 AgentCard 协议版本（制造"AgentCard 与 Snapshot 冲突"反例，
-   * 02 §13-12）。缺省 "0.3.0"。
-   */
+  /** 覆盖 AgentCard 协议版本（制造 "AgentCard 与 Snapshot 冲突" 反例）。缺省 "0.3.0"。 */
   setCardProtocolVersion(version: string): void;
-  /**
-   * 注册验收专用：覆盖 AgentCard capabilities.streaming（02 §12 Provider profile
-   * A basic 需要 streaming=false 的 card 一致性证据）。缺省 true。
-   */
+  /** 覆盖 AgentCard capabilities.streaming。缺省 true。 */
   setCardStreaming(streaming: boolean): void;
-  /**
-   * 03 专项 Strict Provider：设置后任何 message.metadata 携带 allowlist 之外的
-   * context key 即返回 JSON-RPC error（严格 Provider 对未知 key fail closed 的反例）。
-   */
+  /** 设置后任何 message.metadata 携带 allowlist 之外的 context key 即返回 JSON-RPC error。 */
   setStrictMetadataAllowlist(keys: string[] | null): void;
-  /**
-   * Failure E2E：设置后前 N 个 POST /（JSON-RPC）请求返回 HTTP 503
-   *（真实 transient 反例：第一次 503、第二次 200）。
-   */
+  /** 设置后前 N 个 POST /（JSON-RPC）请求返回 HTTP 503（真实 transient 反例）。 */
   setFlaky(failures: number): void;
-  /**
-   * 注册验收专用：清空 requests/captured/rpcMethods、复位 correlation 篡改与
-   * Bearer 校验，并把场景重置为 input_required（测试间状态隔离）。
-   */
+  /** 清空 requests/captured/rpcMethods、复位 correlation 篡改与 Bearer 校验，并重置场景。 */
   reset(): void;
   /** 场景切换（每个 Invocation 可用不同场景）。 */
   setScenario(scenario: A2ATestProviderScenario): void;
@@ -154,6 +132,8 @@ interface RpcRequest {
       taskId?: string;
       metadata?: Record<string, unknown>;
     };
+    /** tasks/get 与 tasks/cancel 官方 TaskQueryParams/TaskIdParams 的 id 字段。 */
+    id?: string;
     taskId?: string;
   };
   id?: string | number;
@@ -164,7 +144,7 @@ function sseFrame(payload: unknown): string {
 }
 
 /**
- * 启动真实 A2A Provider。resolveTransport 的黑盒 E2E 用真实 fetch 与之交互。
+ * 启动真实 A2A Provider。黑盒 E2E 用真实 fetch 与之交互。
  */
 export async function startA2ATestProvider(
   initialScenario: A2ATestProviderScenario = "completed",
@@ -181,13 +161,12 @@ export async function startA2ATestProvider(
   let scenario: A2ATestProviderScenario = initialScenario;
   let resumeCorrelationCorrupted = false;
   let expectedBearerToken: string | null = null;
-  // 官方非流式 message/send 返回完整 Task（默认冻结）；status-update 形态仅保留
-  // 给既有注册验收反例。
+  // 官方非流式 message/send 返回完整 Task（默认冻结）。
   let resumeResponseShape: "status-update" | "task" = "task";
   let cardProtocolVersion = "0.3.0";
   let cardStreaming = true;
   let strictMetadataAllowlist: string[] | null = null;
-  // 03/Failure-E2E：前 N 个 POST / 请求返回 HTTP 503（transient 反例）；随后恢复正常。
+  // 前 N 个 POST / 请求返回 HTTP 503（transient 反例）；随后恢复正常。
   let flakyFailuresRemaining = 0;
 
   const server = createServer((req, res) => {
@@ -203,8 +182,7 @@ export async function startA2ATestProvider(
           : undefined,
     });
 
-    // Bearer 校验（注册验收）：设置 expected token 后，任何请求不携带恰好匹配的
-    // Authorization 头即 401（真实 HTTP 401，供 fail-closed 断言）。
+    // Bearer 校验：设置 expected token 后，任何请求不携带恰好匹配的 Authorization 头即 401。
     if (
       expectedBearerToken !== null &&
       req.headers.authorization !== `Bearer ${expectedBearerToken}`
@@ -216,7 +194,7 @@ export async function startA2ATestProvider(
 
     // ─── Agent Card（07 §3/§7：公开合同，含通用扩展）──────────
     // A2A 0.3.0 标准路径唯一：/.well-known/agent-card.json（无旧 agent.json 回退；
-    // legacyCardOnly 只暴露已废弃旧路径，用于冻结"旧路径不能通过注册验收"反例）。
+    // legacyCardOnly 只暴露已废弃旧路径，用于冻结 "旧路径不能通过注册验收" 反例）。
     if (
       req.method === "GET" &&
       ((options.legacyCardOnly ? false : url.pathname === "/.well-known/agent-card.json") ||
@@ -230,7 +208,6 @@ export async function startA2ATestProvider(
           protocolVersion: cardProtocolVersion,
           preferredTransport: "JSONRPC",
           capabilities: { streaming: cardStreaming, push_notifications: false },
-          // 通用扩展合同（07 §7：不绑定 HR/veADK/AgentKit，明确版本）。
           "snowharness:capability_manifest": A2A_TEST_PROVIDER_CAPABILITY_MANIFEST,
           "snowharness:invocation_context_contract": A2A_TEST_PROVIDER_CONTEXT_CONTRACT,
         }),
@@ -274,13 +251,36 @@ export async function startA2ATestProvider(
       rpcMethods.push(rpc.method ?? "");
 
       // ─── tasks/cancel（long-running cancel 场景）──────────────
+      // 兼容两种 wire：官方 A2A 0.3.0 TaskIdParams.id，与旧 Runtime conformance
+      // probe 的 TaskIdParams.taskId；响应同时回填 id 与 taskId。
       if (rpc.method === "tasks/cancel") {
+        const taskId = rpc.params?.id ?? rpc.params?.taskId ?? "unknown";
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
           JSON.stringify({
             jsonrpc: "2.0",
             id: rpc.id ?? 1,
-            result: { taskId: rpc.params?.taskId ?? "unknown", state: "canceled" },
+            result: { id: taskId, taskId, state: "canceled" },
+          }),
+        );
+        return;
+      }
+
+      // ─── tasks/get（诊断）────────────────────────────────────
+      // 官方 A2A 0.3.0：TaskQueryParams.id；响应回填 id/contextId/status。
+      if (rpc.method === "tasks/get") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: rpc.id ?? 1,
+            result: {
+              kind: "task",
+              id: rpc.params?.id ?? rpc.params?.taskId ?? "unknown",
+              taskId: rpc.params?.id ?? rpc.params?.taskId ?? "unknown",
+              contextId: "ctx-get",
+              status: { state: "working" },
+            },
           }),
         );
         return;
@@ -331,8 +331,7 @@ export async function startA2ATestProvider(
 
       // ─── message/send ─────────────────────────────────────────
       // 带 taskId = resume（官方：返回完整 Task，completed，可篡改 correlation）；
-      // 不带 taskId = 非流式 basic/input-required/cancel start 调用，按当前场景
-      // 返回对应状态的完整 Task（02 §3/§5/§7 capability-driven 验收）。
+      // 不带 taskId = 非流式 start 调用，按当前场景返回对应状态的完整 Task。
       if (rpc.method === "message/send") {
         const corrupted = (id: string) => (resumeCorrelationCorrupted ? `corrupted-${id}` : id);
         res.writeHead(200, { "content-type": "application/json" });
@@ -448,6 +447,9 @@ export async function startA2ATestProvider(
           ? String((subject as Record<string, unknown>).subject_kind ?? "")
           : "";
 
+      // A2A 0.3.0 规范：status-update 的 final 为必需字段（终态 final=true，
+      // 非终态 final=false）。fixture 按规范发出。
+      const FINAL_STATES = new Set(["completed", "failed", "canceled", "rejected"]);
       const statusUpdate = (state: string, extra: Record<string, unknown> = {}) =>
         frame({
           jsonrpc: "2.0",
@@ -458,6 +460,7 @@ export async function startA2ATestProvider(
             contextId,
             status: {
               state,
+              final: FINAL_STATES.has(state),
               ...extra,
               ...(scenario === "subject_echo" && subjectId
                 ? {
@@ -473,10 +476,27 @@ export async function startA2ATestProvider(
 
       switch (scenario) {
         case "completed":
+          // HR 官方顺序：artifact-update（TextPart 答复 + DataPart 公共结构化结果）
+          // 先于无 status.message 的 completed 终态 → resultText/resultJson 均非空。
           statusUpdate("working");
-          statusUpdate("completed", {
-            message: { role: "agent", parts: [{ kind: "text", text: "处理完成" }] },
+          frame({
+            jsonrpc: "2.0",
+            id: rpc.id ?? 1,
+            result: {
+              kind: "artifact-update",
+              taskId,
+              contextId,
+              artifact: {
+                artifactId: "art-final",
+                name: "answer",
+                parts: [
+                  { kind: "text", text: "处理完成" },
+                  { kind: "data", data: { result: { status: "ok" } } },
+                ],
+              },
+            },
           });
+          statusUpdate("completed");
           break;
         case "chunks":
           statusUpdate("working");
@@ -515,7 +535,6 @@ export async function startA2ATestProvider(
           statusUpdate("completed");
           break;
         case "incremental":
-          // 02 §4：真实内容增量（artifact-update 先于终态）；只看状态 update 不算增量。
           statusUpdate("working");
           artifactUpdate("art-chunk-1", "第一段内容");
           artifactUpdate("art-chunk-2", "第二段内容");

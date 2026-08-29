@@ -116,7 +116,6 @@ import {
   createMockRuntimeClient,
 } from "@/lib/runtime/runtime-client";
 import { createSessionBinding } from "@/lib/runtime/session-binding-queries";
-import { startA2ATestProvider } from "@/lib/runtime/test-support/a2a-test-provider";
 import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { and, eq } from "drizzle-orm";
@@ -1512,7 +1511,6 @@ describe("S05-C04 dispatchResumeCommand", () => {
     const invocation = await getInvocationById(ctx.tenantId, running.invocationId);
     expect(invocation?.executionState).toBe("waiting_user");
   });
-
 });
 
 // ═══════════════════════════════════════════════════════════
