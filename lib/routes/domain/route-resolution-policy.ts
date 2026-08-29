@@ -62,6 +62,12 @@ export interface RouteResolutionCandidate {
    * runtime 为 null；agent 必填。
    */
   agentRevisionId: string | null;
+  // ─── Agent Route 生产调用事实（专题01 Batch4 补漏，02 §12.2/12.3）──
+  // agent target 解析返回 exact route facts；基础 Harness Route（runtime）为 null。
+  agentEndpointRef: string | null;
+  agentIdentityMode: "none" | "bearer" | null;
+  agentCredentialRefId: string | null;
+  agentNetworkZone: string | null;
   runtimeRevisionId: string;
   policyRevisionId: string | null;
   contentDigest: string;
@@ -103,6 +109,12 @@ export interface RouteResolution {
    * runtime 为 null；agent 必填。
    */
   agentRevisionId: string | null;
+  // ─── Agent Route 生产调用事实（专题01 Batch4 补漏）──
+  // agent target 解析返回 exact route facts；基础 Harness Route（runtime）为 null。
+  agentEndpointRef: string | null;
+  agentIdentityMode: "none" | "bearer" | null;
+  agentCredentialRefId: string | null;
+  agentNetworkZone: string | null;
   runtimeRevisionId: string;
   policyRevisionId: string | null;
   routeContentDigest: string;
@@ -270,6 +282,11 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
       routeActivationSequence: selected.candidate.routeActivationSequence,
       targetKind: selected.candidate.targetKind,
       agentRevisionId: selected.candidate.agentRevisionId,
+      // Agent Route 生产调用事实（专题01 Batch4 补漏）：解析 agent target 时返回 exact route facts。
+      agentEndpointRef: selected.candidate.agentEndpointRef,
+      agentIdentityMode: selected.candidate.agentIdentityMode,
+      agentCredentialRefId: selected.candidate.agentCredentialRefId,
+      agentNetworkZone: selected.candidate.agentNetworkZone,
       runtimeRevisionId: selected.candidate.runtimeRevisionId,
       policyRevisionId: selected.candidate.policyRevisionId,
       routeContentDigest: selected.candidate.contentDigest,

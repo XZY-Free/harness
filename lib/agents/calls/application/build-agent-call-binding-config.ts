@@ -1,32 +1,31 @@
 /**
- * buildAgentCallBindingConfig — 从 Agent Route 解析结果 + endpoint 事实构建不可变冻结配置。
+ * buildAgentCallBindingConfig — 从 Agent Route 解析结果构建不可变冻结配置。
  *
  * 专题01 冻结架构：AgentCallBinding 冻结 exact AgentRevision / Contract / Publication /
  * Route / endpoint / credential / resolution digest / projection / policy。
  *
- * 本 builder 只做证据装配 + 校验（assertAgentCallBindingEvidence fail-closed）。
- * endpoint/credential/networkZone 等 endpoint 事实由调用方提供（Batch6 从 Agent Route
- * 权威读取；Batch5 测试用明确 test fake）。本 builder 不解析 AgentRevision，不触碰 Runtime。
+ * endpoint/identity/credential/network 事实直接冻结自本次 exact Agent Route 解析结果
+ * （Batch4 补漏：Agent Route/RouteRevision 承载生产调用事实，RouteResolver 解析 agent
+ * target 时返回，Batch7 直接冻结，不另设第二套 endpoint authority）。
+ * protocol 事实以 exact AgentContractSnapshot 为权威（Route 不维护第二份协议真相），
+ * 由调用方从 ContractSnapshot 提供。本 builder 只做证据装配 + fail-closed 校验。
  */
 import {
+  AgentCallBindingEvidenceError,
   type AgentCallBindingConfigInput,
   assertAgentCallBindingEvidence,
 } from "@/lib/agents/calls/domain/agent-call-binding";
 import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
 
-export interface AgentEndpointFacts {
-  endpointRef: string;
-  identityMode: "none" | "bearer";
-  credentialRefId: string | null;
-  networkZone: string;
-  /** 协议事实以 exact AgentContractSnapshot 为权威（Route 不再维护第二份协议真相）。 */
+/** 协议事实（来自 exact AgentContractSnapshot，权威）。 */
+export interface AgentProtocolFacts {
   protocolType: string;
   protocolContractRevision: string;
 }
 
 export interface BuildAgentCallBindingConfigInput {
   tenantId: string;
-  /** Batch4 完成的 exact Agent Route 解析结果。 */
+  /** Batch4/7 完成的 exact Agent Route 解析结果（agent target 携带 endpoint 事实）。 */
   resolution: RouteResolution;
   agentId: string;
   agentRevisionId: string;
@@ -35,7 +34,8 @@ export interface BuildAgentCallBindingConfigInput {
   agentCapabilityDigest: string;
   agentContextDigest: string;
   agentPublicationRecordId: string;
-  endpointFacts: AgentEndpointFacts;
+  /** 协议事实（以 exact AgentContractSnapshot 为权威）。 */
+  protocolFacts: AgentProtocolFacts;
   policyRevisionId: string;
   policyRulesDigest: string;
   governanceConfigRevisionId: string;
@@ -49,6 +49,12 @@ export interface BuildAgentCallBindingConfigInput {
 export function buildAgentCallBindingConfig(
   input: BuildAgentCallBindingConfigInput,
 ): AgentCallBindingConfigInput {
+  const resolution = input.resolution;
+  if (resolution.targetKind !== "agent") {
+    throw new AgentCallBindingEvidenceError(
+      `AgentCallBinding 只能从 targetKind=agent 的 RouteResolution 冻结（收到 ${resolution.targetKind}）`,
+    );
+  }
   const config: AgentCallBindingConfigInput = {
     agentId: input.agentId,
     agentRevisionId: input.agentRevisionId,
@@ -57,18 +63,19 @@ export function buildAgentCallBindingConfig(
     agentCapabilityDigest: input.agentCapabilityDigest,
     agentContextDigest: input.agentContextDigest,
     agentPublicationRecordId: input.agentPublicationRecordId,
-    deploymentRouteId: input.resolution.deploymentRouteId,
-    routeRevisionId: input.resolution.routeRevisionId,
-    routeActivationId: input.resolution.routeActivationId,
-    routeContentDigest: input.resolution.routeContentDigest,
-    resolutionInputDigest: input.resolution.resolutionInputDigest,
-    projectionVersionNo: input.resolution.projectionVersionNo ?? 0,
-    endpointRef: input.endpointFacts.endpointRef,
-    identityMode: input.endpointFacts.identityMode,
-    credentialRefId: input.endpointFacts.credentialRefId,
-    networkZone: input.endpointFacts.networkZone,
-    protocolType: input.endpointFacts.protocolType,
-    protocolContractRevision: input.endpointFacts.protocolContractRevision,
+    deploymentRouteId: resolution.deploymentRouteId,
+    routeRevisionId: resolution.routeRevisionId,
+    routeActivationId: resolution.routeActivationId,
+    routeContentDigest: resolution.routeContentDigest,
+    resolutionInputDigest: resolution.resolutionInputDigest,
+    projectionVersionNo: resolution.projectionVersionNo ?? 0,
+    // 直接冻结 RouteResolution 的 exact agent route facts（Batch4 补漏）。
+    endpointRef: resolution.agentEndpointRef ?? "",
+    identityMode: resolution.agentIdentityMode ?? "none",
+    credentialRefId: resolution.agentCredentialRefId ?? null,
+    networkZone: resolution.agentNetworkZone ?? "",
+    protocolType: input.protocolFacts.protocolType,
+    protocolContractRevision: input.protocolFacts.protocolContractRevision,
     policyRevisionId: input.policyRevisionId,
     policyRulesDigest: input.policyRulesDigest,
     governanceConfigRevisionId: input.governanceConfigRevisionId,

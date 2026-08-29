@@ -57,6 +57,15 @@ const BASE_AGENT_REVISION: AgentRevisionSummary = {
   requiredCapabilities: [],
 };
 
+// 专题01 Batch4 补漏：Agent Route 生产调用事实（agentRevisionId 非空时必须冻结）。
+// 所有 agent DesiredRoute fixture 必须携带，否则 validateRouteRevisionContent fail-closed。
+const AGENT_ROUTE_FACTS = {
+  agentEndpointRef: "https://agent.example.com/a2a",
+  agentIdentityMode: "bearer" as const,
+  agentCredentialRefId: "cred-1",
+  agentNetworkZone: "private",
+};
+
 const BASE_RUNTIME_REVISION: RuntimeRevisionSummary = {
   id: "runtime-rev-1",
   revisionState: "published",
@@ -156,6 +165,7 @@ function makeRevisionRecord(overrides: Partial<RouteRevisionRecord> = {}): Route
     revisionNo: 1,
     agentRevisionId: BASE_AGENT_REVISION.id,
     runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+    ...AGENT_ROUTE_FACTS,
     policyRevisionId: null,
     modelPolicyRevisionId: null,
     toolsetRevisionId: null,
@@ -344,6 +354,7 @@ function makeCommand(overrides: Partial<ActivateRouteSetCommand> = {}): Activate
         routeGroupId: "primary",
         agentRevisionId: BASE_AGENT_REVISION.id,
         runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+        ...AGENT_ROUTE_FACTS,
         trafficWeight: 10000,
         priorityNo: 0,
         eligibilityConditions: {},
@@ -548,6 +559,7 @@ describe("activateRouteSet", () => {
             routeGroupId: "primary",
             agentRevisionId: BASE_AGENT_REVISION.id,
             runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+            ...AGENT_ROUTE_FACTS,
             trafficWeight: 5000,
             priorityNo: 0,
             eligibilityConditions: {},
@@ -558,6 +570,7 @@ describe("activateRouteSet", () => {
             routeGroupId: "primary",
             agentRevisionId: BASE_AGENT_REVISION.id,
             runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+            ...AGENT_ROUTE_FACTS,
             trafficWeight: 5000,
             priorityNo: 0,
             eligibilityConditions: {},
@@ -587,6 +600,7 @@ describe("activateRouteSet", () => {
               routeGroupId: "primary",
               agentRevisionId: BASE_AGENT_REVISION.id,
               runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              ...AGENT_ROUTE_FACTS,
               trafficWeight: 5000,
               priorityNo: 0,
               eligibilityConditions: {},
@@ -597,6 +611,7 @@ describe("activateRouteSet", () => {
               routeGroupId: "primary",
               agentRevisionId: BASE_AGENT_REVISION.id,
               runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              ...AGENT_ROUTE_FACTS,
               trafficWeight: 4000,
               priorityNo: 0,
               eligibilityConditions: {},
@@ -625,6 +640,7 @@ describe("activateRouteSet", () => {
               routeGroupId: "group-a",
               agentRevisionId: BASE_AGENT_REVISION.id,
               runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              ...AGENT_ROUTE_FACTS,
               trafficWeight: 10000,
               priorityNo: 0,
               eligibilityConditions: {},
@@ -635,6 +651,7 @@ describe("activateRouteSet", () => {
               routeGroupId: "group-b",
               agentRevisionId: BASE_AGENT_REVISION.id,
               runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              ...AGENT_ROUTE_FACTS,
               trafficWeight: 10000,
               priorityNo: 0,
               eligibilityConditions: {},
@@ -688,6 +705,7 @@ describe("activateRouteSet", () => {
               routeGroupId: "primary",
               agentRevisionId: "agent-rev-draft",
               runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+              ...AGENT_ROUTE_FACTS,
               trafficWeight: 10000,
               priorityNo: 0,
               eligibilityConditions: {},

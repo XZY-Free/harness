@@ -173,6 +173,11 @@ async function activateDefaultRouteFormal(params: {
       routeGroupId: routeKey,
       agentRevisionId: params.agentRevisionId,
       runtimeRevisionId: params.runtimeRevisionId,
+      // 专题01 Batch4 补漏：agent route 必须冻结生产调用事实。
+      agentEndpointRef: "https://agent.example.com/a2a",
+      agentIdentityMode: "bearer" as const,
+      agentCredentialRefId: "cred-1",
+      agentNetworkZone: "private",
       trafficWeight: 10000,
       priorityNo: index + 1,
       eligibilityConditions: {},

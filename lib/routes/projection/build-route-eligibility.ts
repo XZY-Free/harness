@@ -327,6 +327,12 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       effectiveFrom: revision.effectiveFrom?.toISOString() ?? null,
       effectiveUntil: revision.effectiveUntil?.toISOString() ?? null,
       agentRevisionId: revision.agentRevisionId,
+      // Agent Route 生产调用事实（专题01 Batch4 补漏）：权威 RouteRevision → 投影。
+      // 基础 Harness Route（无 Agent 约束）为 null。
+      agentEndpointRef: revision.agentEndpointRef,
+      agentIdentityMode: revision.agentIdentityMode,
+      agentCredentialRefId: revision.agentCredentialRefId,
+      agentNetworkZone: revision.agentNetworkZone,
       // 无 Agent 约束（基础 Harness Route）→ Agent Evidence not_applicable，不伪装 passed（§18）。
       agentRevisionState: hasAgentConstraint
         ? (agentRevision?.revisionState ?? "missing")

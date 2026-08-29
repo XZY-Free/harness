@@ -12,6 +12,21 @@ export interface RouteRevisionContent {
    */
   agentRevisionId: string | null;
   runtimeRevisionId: string;
+
+  // ─── Agent Route 生产调用事实（专题01 Batch4 补漏，02 §12.2/12.3）────────
+  // Agent Route（agentRevisionId 非空）必须冻结 endpoint/identity/credential/network
+  // 事实；基础 Harness Route（runtime）为 null。这些 exact route facts 由 RouteResolver
+  // 在解析 agent target 时返回，Batch7 创建 AgentCallBinding 时直接冻结（不另设第二套
+  // endpoint authority）。参与 content digest。
+  /** Agent 能力 endpoint 引用（URL 或 managed endpoint 引用）。 */
+  agentEndpointRef?: string | null;
+  /** Agent 出站身份模式（none/bearer）。 */
+  agentIdentityMode?: "none" | "bearer" | null;
+  /** 按 identityMode 条件要求；bearer 必填，none 可为 null。 */
+  agentCredentialRefId?: string | null;
+  /** Agent 网络区域。 */
+  agentNetworkZone?: string | null;
+
   policyRevisionId: string | null;
   modelPolicyRevisionId: string | null;
   toolsetRevisionId: string | null;
@@ -143,11 +158,46 @@ export function validateRouteRevisionContent(content: RouteRevisionContent): voi
     }
     throw new RouteEffectiveWindowInvalidError();
   }
+  // Agent Route 必须冻结生产调用事实；基础 Harness Route 不得携带。
+  const endpointRef = content.agentEndpointRef ?? null;
+  const identityMode = content.agentIdentityMode ?? null;
+  const credentialRefId = content.agentCredentialRefId ?? null;
+  const networkZone = content.agentNetworkZone ?? null;
+  if (content.agentRevisionId !== null) {
+    if (!endpointRef) {
+      throw new RouteAgentEndpointFactsError("agent route 必须冻结 agentEndpointRef");
+    }
+    if (identityMode !== "none" && identityMode !== "bearer") {
+      throw new RouteAgentEndpointFactsError("agent route 必须冻结合法 agentIdentityMode");
+    }
+    if (identityMode === "bearer" && !credentialRefId) {
+      throw new RouteAgentEndpointFactsError("bearer agent route 必须冻结 agentCredentialRefId");
+    }
+    if (!networkZone) {
+      throw new RouteAgentEndpointFactsError("agent route 必须冻结 agentNetworkZone");
+    }
+  } else {
+    if (endpointRef !== null || identityMode !== null || credentialRefId !== null || networkZone !== null) {
+      throw new RouteAgentEndpointFactsError("基础 Harness Route 不得携带 Agent endpoint 事实");
+    }
+  }
+}
+
+export class RouteAgentEndpointFactsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RouteAgentEndpointFactsError";
+  }
 }
 
 export function computeRouteRevisionContentDigest(content: RouteRevisionContent): string {
   const canonical = canonicalize({
     agent_revision_id: content.agentRevisionId,
+    // Agent Route 生产调用事实（02 §12.3：Route digest 必须包括 target 全部 target-specific 字段）。
+    agent_endpoint_ref: content.agentEndpointRef ?? null,
+    agent_identity_mode: content.agentIdentityMode ?? null,
+    agent_credential_ref_id: content.agentCredentialRefId ?? null,
+    agent_network_zone: content.agentNetworkZone ?? null,
     runtime_revision_id: content.runtimeRevisionId,
     policy_revision_id: content.policyRevisionId,
     model_policy_revision_id: content.modelPolicyRevisionId,

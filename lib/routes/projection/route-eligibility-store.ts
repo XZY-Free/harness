@@ -32,6 +32,11 @@ export interface UpsertProjectionInput {
   effectiveUntil: Date | null;
   /** null = 基础 Harness Route（无 Agent 资产约束）。 */
   agentRevisionId: string | null;
+  // ─── Agent Route 生产调用事实（专题01 Batch4 补漏）──
+  agentEndpointRef: string | null;
+  agentIdentityMode: "none" | "bearer" | null;
+  agentCredentialRefId: string | null;
+  agentNetworkZone: string | null;
   agentRevisionState: string;
   agentLifecycleState: string;
   agentPublicationActive: number;

@@ -377,6 +377,11 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
               route_group_id: "primary",
               agent_revision_id: agentResult.revision.id,
               runtime_revision_id: runtimeResult.revision.id,
+              // 专题01 Batch4 补漏：agent route 必须冻结生产调用事实。
+              agent_endpoint_ref: "https://agent.example.com/a2a",
+              agent_identity_mode: "bearer",
+              agent_credential_ref_id: "cred-1",
+              agent_network_zone: "private",
               traffic_weight: 10000,
               priority_no: 1,
               activation_state: "active",
@@ -477,6 +482,11 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
             routeGroupId: "primary",
             agentRevisionId: agentResult.revision.id,
             runtimeRevisionId: runtimeResult.revision.id,
+            // 专题01 Batch4 补漏：agent route 必须冻结生产调用事实。
+            agentEndpointRef: "https://agent.example.com/a2a",
+            agentIdentityMode: "bearer",
+            agentCredentialRefId: "cred-1",
+            agentNetworkZone: "private",
             trafficWeight: 10000,
             priorityNo: 1,
             activationState: "active",

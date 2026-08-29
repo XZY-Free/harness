@@ -96,6 +96,11 @@ const revision = {
   routeSetId: "route-set-1",
   agentRevisionId: "agent-revision-1",
   runtimeRevisionId: "runtime-revision-1",
+  // 专题01 Batch4 补漏：Agent Route 生产调用事实（agent route 必须冻结）。
+  agentEndpointRef: "https://agent.example.com/a2a",
+  agentIdentityMode: "bearer",
+  agentCredentialRefId: "cred-1",
+  agentNetworkZone: "private",
   policyRevisionId: null,
   revisionNo: 2,
   routeGroupId: "primary",

@@ -69,6 +69,12 @@ export interface DesiredRoute {
    */
   agentRevisionId: string | null;
   runtimeRevisionId: string;
+  // ─── Agent Route 生产调用事实（专题01 Batch4 补漏）────────
+  // Agent Route（agentRevisionId 非空）必填；基础 Harness Route 省略/null。
+  agentEndpointRef?: string | null;
+  agentIdentityMode?: "none" | "bearer" | null;
+  agentCredentialRefId?: string | null;
+  agentNetworkZone?: string | null;
   policyRevisionId?: string | null;
   modelPolicyRevisionId?: string | null;
   toolsetRevisionId?: string | null;

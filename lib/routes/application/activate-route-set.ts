@@ -217,10 +217,16 @@ export function createActivateRouteSet(dependencies: {
         }
         // disabled Route 不检查执行资格，只验证基本存在性（已在上方完成）
 
-        // 构造 RouteRevisionContent
+        // 构造 RouteRevisionContent（Agent Route 冻结生产调用事实；基础 Harness Route 为 null）
         const content: RouteRevisionContent = {
           agentRevisionId: desired.agentRevisionId,
           runtimeRevisionId: desired.runtimeRevisionId,
+          agentEndpointRef: hasAgentConstraint ? (desired.agentEndpointRef ?? null) : null,
+          agentIdentityMode: hasAgentConstraint ? (desired.agentIdentityMode ?? null) : null,
+          agentCredentialRefId: hasAgentConstraint
+            ? (desired.agentCredentialRefId ?? null)
+            : null,
+          agentNetworkZone: hasAgentConstraint ? (desired.agentNetworkZone ?? null) : null,
           policyRevisionId: desired.policyRevisionId ?? null,
           modelPolicyRevisionId: desired.modelPolicyRevisionId ?? null,
           toolsetRevisionId: desired.toolsetRevisionId ?? null,

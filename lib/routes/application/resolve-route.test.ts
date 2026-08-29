@@ -23,8 +23,8 @@ import {
   withdrawalRecord,
 } from "@/lib/publications/persistence/publication-record";
 import {
-  createResolveRoute,
   type ResolveRouteCommand,
+  createResolveRoute,
 } from "@/lib/routes/application/resolve-route";
 import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
@@ -123,6 +123,13 @@ async function addRuntimeRoute(
     activationState?: "active" | "disabled";
     eligibilityConditions?: unknown;
     conformanceConfigDigest?: string;
+    /** 专题01 Batch4 补漏：Agent Route 生产调用事实（agent route 冻结）。 */
+    agentRouteFacts?: {
+      agentEndpointRef: string;
+      agentIdentityMode: "none" | "bearer";
+      agentCredentialRefId: string | null;
+      agentNetworkZone: string;
+    };
   } = {},
 ): Promise<AuthorityFixture> {
   const runtimeId = randomUUID();
@@ -267,6 +274,15 @@ async function addRuntimeRoute(
     revisionNo: routeRevisionNo,
     agentRevisionId: base.agentRevisionId,
     runtimeRevisionId,
+    // 专题01 Batch4 补漏：Agent Route 生产调用事实（agent route 冻结，仅显式提供时写入）。
+    ...(options.agentRouteFacts
+      ? {
+          agentEndpointRef: options.agentRouteFacts.agentEndpointRef,
+          agentIdentityMode: options.agentRouteFacts.agentIdentityMode,
+          agentCredentialRefId: options.agentRouteFacts.agentCredentialRefId,
+          agentNetworkZone: options.agentRouteFacts.agentNetworkZone,
+        }
+      : {}),
     policyRevisionId: null,
     modelPolicyRevisionId: null,
     toolsetRevisionId: null,
@@ -384,6 +400,32 @@ describe("RouteResolver MySQL authority", () => {
           runtimePublicationRecordId: fixture.runtimePublicationId,
           conformanceRunId: expect.any(String),
         },
+      },
+    });
+  });
+
+  it("Agent Route 生产调用事实（endpoint/identity/credential/network）从 RouteRevision → 投影 → resolution 无损贯通", async () => {
+    const base = await seedAgentAuthority();
+    const fixture = await addRuntimeRoute(base, "facts", {
+      agentRouteFacts: {
+        agentEndpointRef: "https://agent.example.com/a2a",
+        agentIdentityMode: "bearer",
+        agentCredentialRefId: "cred-1",
+        agentNetworkZone: "private",
+      },
+    });
+
+    await expect(resolveRoute(command(base, "thread-facts"))).resolves.toMatchObject({
+      status: "resolved",
+      resolution: {
+        targetKind: "agent",
+        agentRevisionId: base.agentRevisionId,
+        routeRevisionId: fixture.routeRevisionId,
+        // Batch4 补漏：Resolver 解析 agent target 时返回 exact route facts。
+        agentEndpointRef: "https://agent.example.com/a2a",
+        agentIdentityMode: "bearer",
+        agentCredentialRefId: "cred-1",
+        agentNetworkZone: "private",
       },
     });
   });

@@ -155,6 +155,20 @@
       "when": 1787964146950,
       "tag": "0021_agent_call_attempt_request_digest",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1787968888390,
+      "tag": "0022_agent_route_endpoint_facts",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1787968890000,
+      "tag": "0023_agent_route_projection_endpoint_facts",
+      "breakpoints": true
     }
   ]
 }

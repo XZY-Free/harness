@@ -42,6 +42,17 @@ export async function activateSingleRouteForTest(params: {
   /** : null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
   agentRevisionId: string | null;
   runtimeRevisionId: string;
+  /**
+   * 专题01 Batch4 补漏：Agent Route 生产调用事实。
+   * agentRevisionId 非空时必须冻结；默认提供合法 facts（测试夹具构造合法路由）。
+   * base route（agentRevisionId=null）必须为 undefined/null。
+   */
+  agentRouteFacts?: {
+    agentEndpointRef: string;
+    agentIdentityMode: "none" | "bearer";
+    agentCredentialRefId: string | null;
+    agentNetworkZone: string;
+  };
   trafficWeight: number;
   priorityNo?: number;
   routeState?: RouteState;
@@ -91,6 +102,16 @@ export async function activateSingleRouteForTest(params: {
         routeGroupId: "primary",
         agentRevisionId: params.agentRevisionId,
         runtimeRevisionId: params.runtimeRevisionId,
+        // 专题01 Batch4 补漏：agent route 冻结生产调用事实；base route 禁止携带。
+        ...(params.agentRevisionId !== null
+          ? {
+              agentEndpointRef:
+                params.agentRouteFacts?.agentEndpointRef ?? "https://agent.example.com/a2a",
+              agentIdentityMode: params.agentRouteFacts?.agentIdentityMode ?? "bearer",
+              agentCredentialRefId: params.agentRouteFacts?.agentCredentialRefId ?? "cred-1",
+              agentNetworkZone: params.agentRouteFacts?.agentNetworkZone ?? "private",
+            }
+          : {}),
         policyRevisionId: null,
         modelPolicyRevisionId: null,
         toolsetRevisionId: null,

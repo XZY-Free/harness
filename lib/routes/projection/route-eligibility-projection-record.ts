@@ -64,6 +64,12 @@ export const routeEligibilityProjection = mysqlTable(
      * null = 基础 Harness Route（无 Agent 资产约束），Agent Evidence 为 not_applicable。
      */
     agentRevisionId: varchar("agentRevisionId", { length: 36 }),
+    // ─── Agent Route 生产调用事实（专题01 Batch4 补漏）──
+    // Agent Route 冻结 endpoint/identity/credential/network；基础 Harness Route 为 null。
+    agentEndpointRef: varchar("agentEndpointRef", { length: 512 }),
+    agentIdentityMode: mysqlEnum("agentIdentityMode", ["none", "bearer"]),
+    agentCredentialRefId: varchar("agentCredentialRefId", { length: 36 }),
+    agentNetworkZone: varchar("agentNetworkZone", { length: 32 }),
     agentRevisionState: varchar("agentRevisionState", { length: 32 }).notNull(),
     agentLifecycleState: varchar("agentLifecycleState", { length: 32 }).notNull(),
     /** 1=Publication活跃, 0=否。 */

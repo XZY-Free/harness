@@ -323,6 +323,13 @@ const routeActivation: HostedRouteActivationGateway = {
           routeKey: "primary",
           agentRevisionId: command.agentRevision.revisionId,
           runtimeRevisionId: command.runtimeRevision.revisionId,
+          // 专题01 Batch4 补漏：Agent Route 必须冻结生产调用事实。
+          // Hosted 内置 Agent 的生产调用端点是 Hosted in-process Runtime 本身：
+          // 无外部出站 bearer 身份（identityMode=none），网络区域 internal。
+          agentEndpointRef: HOSTED_RUNTIME_ENDPOINT,
+          agentIdentityMode: "none",
+          agentCredentialRefId: null,
+          agentNetworkZone: "internal",
           policyRevisionId: null,
           modelPolicyRevisionId: null,
           toolsetRevisionId: null,

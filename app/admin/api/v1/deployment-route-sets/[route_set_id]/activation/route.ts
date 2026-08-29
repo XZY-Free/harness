@@ -70,6 +70,11 @@ interface ActivationRequestBody {
     policy_revision_id?: string;
     model_policy_revision_id?: string;
     toolset_revision_id?: string;
+    // 专题01 Batch4 补漏：Agent Route 生产调用事实（agent route 必填，base route 忽略）。
+    agent_endpoint_ref?: string;
+    agent_identity_mode?: "none" | "bearer";
+    agent_credential_ref_id?: string | null;
+    agent_network_zone?: string;
     traffic_weight: number;
     priority_no: number;
     effective_from?: string;
@@ -94,6 +99,21 @@ function validateBody(body: unknown): body is ActivationRequestBody {
     if (typeof r.route_group_id !== "string") return false;
     if (typeof r.traffic_weight !== "number" || !Number.isInteger(r.traffic_weight)) return false;
     if (typeof r.priority_no !== "number" || !Number.isInteger(r.priority_no)) return false;
+    // 专题01 Batch4 补漏：Agent Route（agent_revision_id 非空）必须冻结生产调用事实；
+    // 基础 Harness Route 不得携带。
+    if (r.agent_revision_id !== null) {
+      if (typeof r.agent_endpoint_ref !== "string" || r.agent_endpoint_ref.length === 0)
+        return false;
+      if (r.agent_identity_mode !== "none" && r.agent_identity_mode !== "bearer") return false;
+      if (
+        r.agent_identity_mode === "bearer" &&
+        (typeof r.agent_credential_ref_id !== "string" || r.agent_credential_ref_id.length === 0)
+      ) {
+        return false;
+      }
+      if (typeof r.agent_network_zone !== "string" || r.agent_network_zone.length === 0)
+        return false;
+    }
   }
   return true;
 }
@@ -283,6 +303,12 @@ export async function PUT(
         routeGroupId: r.route_group_id,
         agentRevisionId: r.agent_revision_id ?? "",
         runtimeRevisionId: r.runtime_revision_id ?? "",
+        // 专题01 Batch4 补漏：Agent Route 生产调用事实（agent route 冻结，base route 为 null）。
+        agentEndpointRef: r.agent_revision_id !== null ? (r.agent_endpoint_ref ?? null) : null,
+        agentIdentityMode: r.agent_revision_id !== null ? (r.agent_identity_mode ?? null) : null,
+        agentCredentialRefId:
+          r.agent_revision_id !== null ? (r.agent_credential_ref_id ?? null) : null,
+        agentNetworkZone: r.agent_revision_id !== null ? (r.agent_network_zone ?? null) : null,
         policyRevisionId: r.policy_revision_id ?? null,
         modelPolicyRevisionId: r.model_policy_revision_id ?? null,
         toolsetRevisionId: r.toolset_revision_id ?? null,

@@ -117,6 +117,11 @@ export interface ActivateRouteSetRequest {
     policy_revision_id?: string;
     model_policy_revision_id?: string;
     toolset_revision_id?: string;
+    // 专题01 Batch4 补漏：Agent Route 生产调用事实（agent route 必填）。
+    agent_endpoint_ref?: string;
+    agent_identity_mode?: "none" | "bearer";
+    agent_credential_ref_id?: string | null;
+    agent_network_zone?: string;
     traffic_weight: number;
     priority_no: number;
     effective_from?: string;

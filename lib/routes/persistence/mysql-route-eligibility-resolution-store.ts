@@ -61,6 +61,11 @@ export const mysqlRouteEligibilityResolutionStore: RouteEligibilityResolutionSto
         routeActivationSequence: p.routeActivationSequence,
         targetKind: p.targetKind,
         agentRevisionId: p.agentRevisionId,
+        // Agent Route 生产调用事实（专题01 Batch4 补漏）：投影 → 候选。
+        agentEndpointRef: p.agentEndpointRef,
+        agentIdentityMode: p.agentIdentityMode,
+        agentCredentialRefId: p.agentCredentialRefId,
+        agentNetworkZone: p.agentNetworkZone,
         runtimeRevisionId: p.runtimeRevisionId,
         policyRevisionId: p.policyRevisionId,
         contentDigest: p.routeContentDigest,
