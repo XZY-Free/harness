@@ -14,8 +14,6 @@ import { ResourceScopeError, type ResourceScopeType } from "@/lib/identity/resou
 export const ACTION_CODES = [
   // Public Agent Contract 登记（agent-registrations 端点）
   "agent.contract.register",
-  // 外部 A2A Runtime 主动黑盒注册验收（agents/{id}/runtime-registrations 端点）
-  "agent.runtime.register",
   "agent.revision.create",
   "agent.publish",
   "agent.retract",
@@ -100,7 +98,6 @@ export function isKnownActionCode(code: string): code is ActionCode {
 /** 每个 action code 允许的 resource scope types（方案 ）。 */
 export const ACTION_RESOURCE_TYPES: Record<ActionCode, readonly ResourceScopeType[]> = {
   "agent.contract.register": ["agent"],
-  "agent.runtime.register": ["agent"],
   "agent.revision.create": ["agent", "team"],
   "agent.publish": ["agent", "environment"],
   "agent.retract": ["agent", "environment"],

@@ -1,10 +1,12 @@
-import { buildAgentCallBindingConfig } from "@/lib/agents/calls/application/build-agent-call-binding-config";
 import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
+import {
+  RequiredAgentUnavailableError,
+  type ResolvedRequiredAgentBinding,
+  resolveRequiredAgentBinding,
+} from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
-import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
 import { db } from "@/lib/db/client";
-import { resolveBindingGovernance } from "@/lib/executions/application/resolve-binding-governance";
 import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 /**
  * invokeRequiredAgent — Harness Loop 消费 required Agent capability（专题01 Batch7）。
@@ -36,6 +38,10 @@ import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
 
+// RequiredAgentUnavailableError 的冻结语义随共享冻结链移动（Batch8）；re-export 保持
+// harness-required-agent 作为 Harness Loop 编排入口的既有类型入口不变。
+export { RequiredAgentUnavailableError } from "@/lib/agents/calls/application/resolve-agent-call-binding";
+
 export type HarnessRequiredAgentOutcome =
   | { outcome: "completed"; callId: string; resultText: string; resultJson: unknown }
   | { outcome: "waiting_user"; callId: string; taskId: string; contextId: string }
@@ -57,14 +63,6 @@ export interface InvokeRequiredAgentParams {
   routeScopeKey?: string;
   /** 轮询超时（ms），默认 30s。 */
   pollTimeoutMs?: number;
-}
-
-/** Required Agent 无法满足（fail closed）。 */
-export class RequiredAgentUnavailableError extends Error {
-  constructor(agentId: string, reason: string) {
-    super(`required Agent ${agentId} 无法满足：${reason}`);
-    this.name = "RequiredAgentUnavailableError";
-  }
 }
 
 /** 等待 AgentCall 进入终态/waiting_user（轮询 AgentCall store）。 */
@@ -144,70 +142,16 @@ export async function invokeRequiredAgent(
   const now = new Date();
   const { tenantId, parentInvocationId, threadId, turnId, agentId, input } = params;
 
-  // 1. 解析 Agent Route（target={kind:"agent", agentId}）— 唯一 Route Authority。
-  const routeOutcome = await params.resolveRoute({
+  // 1-3. 解析 Agent Route（唯一 Route Authority）+ 读取 exact ContractSnapshot +
+  //       冻结 exact AgentCallBinding — 共享冻结链（Batch8 提取）。
+  const resolved: ResolvedRequiredAgentBinding = await resolveRequiredAgentBinding({
     tenantId,
-    target: { kind: "agent", agentId },
+    agentId,
+    resolveRoute: params.resolveRoute,
     routeScopeKey: params.routeScopeKey ?? "default",
     businessKey: { threadId },
   });
-  if (routeOutcome.status !== "resolved") {
-    throw new RequiredAgentUnavailableError(
-      agentId,
-      routeOutcome.status === "unresolved"
-        ? routeOutcome.reason
-        : "route 解析未找到 eligible Agent Route",
-    );
-  }
-  const resolution = routeOutcome.resolution;
-  // resolveRoute 按 target:{kind:"agent", agentId} 解析，Projection loader 已按 agentId
-  // 过滤候选，resolution 必属于该 Agent；这里只断言确实是 agent target（不比较
-  // agentRevisionId 与 agentId——二者本就不是同一身份：agentId 是 Agent.id，
-  // agentRevisionId 是 AgentRevision.id，比较恒不成立）。agent target 必带 revision。
-  if (resolution.targetKind !== "agent") {
-    throw new RequiredAgentUnavailableError(agentId, "解析结果不是 agent Route");
-  }
-  if (!resolution.agentRevisionId) {
-    throw new RequiredAgentUnavailableError(agentId, "agent Route 缺少 AgentRevision");
-  }
-
-  // 2. 读取 exact AgentContractSnapshot（capabilityDigest + protocol 事实，权威）。
-  const contractSnapshotId = resolution.controlPlaneEvidence?.agentContractSnapshotId;
-  const contractDigest = resolution.controlPlaneEvidence?.agentContractDigest;
-  const contextDigest = resolution.controlPlaneEvidence?.agentContextDigest;
-  const publicationRecordId = resolution.controlPlaneEvidence?.agentPublicationRecordId;
-  if (!contractSnapshotId || !contractDigest || !contextDigest || !publicationRecordId) {
-    throw new RequiredAgentUnavailableError(agentId, "Agent Route 缺少 exact Agent Contract 证据");
-  }
-  const snapshot = await mysqlAgentContractStore.transaction((s) =>
-    s.findContractSnapshotById(tenantId, contractSnapshotId),
-  );
-  if (!snapshot) {
-    throw new RequiredAgentUnavailableError(agentId, "AgentContractSnapshot 不存在");
-  }
-
-  // 3. 冻结 exact AgentCallBinding（endpoint facts 来自 RouteResolution — Batch4 补漏；
-  //    protocol facts 来自 ContractSnapshot）。
-  const policy = await resolveBindingGovernance(db, tenantId, resolution.policyRevisionId);
-  const binding = buildAgentCallBindingConfig({
-    tenantId,
-    resolution,
-    agentId,
-    agentRevisionId: resolution.agentRevisionId,
-    agentContractSnapshotId: contractSnapshotId,
-    agentContractDigest: contractDigest,
-    agentCapabilityDigest: snapshot.capabilityDigest,
-    agentContextDigest: contextDigest,
-    agentPublicationRecordId: publicationRecordId,
-    protocolFacts: {
-      protocolType: snapshot.protocolType,
-      protocolContractRevision: snapshot.protocolContractRevision,
-    },
-    policyRevisionId: policy.policyRevisionId,
-    policyRulesDigest: policy.policyRulesDigest,
-    governanceConfigRevisionId: policy.governanceConfigRevisionId,
-    governanceConfigDigest: policy.governanceConfigDigest,
-  });
+  const binding = resolved.binding;
 
   // 4. createAgentCall（幂等 logicalCallKey：required-agent:<turnId>:<agentId>）。
   const logicalCallKey = `required-agent:${turnId}:${agentId}`;
@@ -215,7 +159,7 @@ export async function invokeRequiredAgent(
     tenantId,
     parentInvocationId,
     agentId,
-    agentRevisionId: resolution.agentRevisionId,
+    agentRevisionId: resolved.agentRevisionId,
     sourceType: "user_selected",
     sourceRef: turnId,
     logicalCallKey,

@@ -56,6 +56,7 @@ const VALID_CAPABILITY_USE_SOURCE_TYPES = new Set<string>([
   "dynamic_discovery",
   "user_selected",
   "policy",
+  "gateway",
 ]);
 
 function assertValidCapabilityType(value: string): asserts value is CapabilityUseType {

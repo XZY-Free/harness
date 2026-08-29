@@ -78,14 +78,14 @@ describe("seedDefaultIdentity", () => {
  *
  * 事实源是现有 admin 路由的 requireAdminActionScope 调用参数，不是 UI：
  * - agent.contract.register → { type: "agent", id: null }（DB Agent id 登记前不存在）
- * - agent.revision.create / agent.publish / agent.runtime.register / route.update
+ * - agent.revision.create / agent.publish / route.update
  *   → { type: "agent", id: <已建记录的具体 id> }
  * - runtime.publish → { type: "runtime", id: <已建 Runtime 的具体 id> }
  *
  * 不 mock checkActionScope / 查询 / DB：走真实 MySQL 的 RoleActionBinding 行。
  * 未知 action 仍 fail-closed；Agent 空表断言保持不变。
  */
-describe("seedDefaultGrants：外部 Agent onboarding 六动作全通", () => {
+describe("seedDefaultGrants：外部 Agent onboarding 五动作全通", () => {
   it("seed 后 checkActionScope 对六个 onboarding action/resource 组合全部 allowed", async () => {
     const identity = await seedDefaultIdentity();
     await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
@@ -101,11 +101,9 @@ describe("seedDefaultGrants：外部 Agent onboarding 六动作全通", () => {
       { actionCode: "agent.revision.create", resource: { type: "agent", id: agentId } },
       // 3. 发布 AgentRevision（route: agent-revisions/[revision_id]/publish）
       { actionCode: "agent.publish", resource: { type: "agent", id: agentId } },
-      // 4. 注册外部 Runtime（route: agents/[agent_id]/runtime-registrations）
-      { actionCode: "agent.runtime.register", resource: { type: "agent", id: agentId } },
-      // 5. 发布 RuntimeRevision（route: runtime-revisions/[revision_id]/publish）
+      // 4. 发布 RuntimeRevision（route: runtime-revisions/[revision_id]/publish）
       { actionCode: "runtime.publish", resource: { type: "runtime", id: runtimeId } },
-      // 6. 发布员工路由（route: deployment-route-sets / hosted-provisioning）
+      // 5. 发布员工路由（route: deployment-route-sets / hosted-provisioning）
       { actionCode: "route.update", resource: { type: "agent", id: agentId } },
     ] as const;
 

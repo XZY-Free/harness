@@ -63,7 +63,6 @@ const ONBOARDING_GRANT_ACTION_SCOPES: ReadonlyArray<{
   { actionCode: "agent.contract.register", resourceScopeType: "agent" },
   { actionCode: "agent.revision.create", resourceScopeType: "agent" },
   { actionCode: "agent.publish", resourceScopeType: "agent" },
-  { actionCode: "agent.runtime.register", resourceScopeType: "agent" },
   { actionCode: "runtime.publish", resourceScopeType: "runtime" },
   { actionCode: "route.update", resourceScopeType: "agent" },
 ];

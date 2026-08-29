@@ -19,7 +19,6 @@ export default async function ResourcesPage() {
   const canReadAgents = await hasStudioAction(gate.principal, "agent.read");
   const canRegisterContract = await hasStudioAction(gate.principal, "agent.contract.register");
   const canManageRevisions = await hasStudioAction(gate.principal, "agent.revision.create");
-  const canRegisterRuntime = await hasStudioAction(gate.principal, "agent.runtime.register");
   const canPublishRuntime = await hasStudioAction(gate.principal, "runtime.publish");
   const canManageRoutes = await hasStudioAction(gate.principal, "route.update");
 
@@ -30,7 +29,6 @@ export default async function ResourcesPage() {
         canReadAgents={canReadAgents}
         canRegisterContract={canRegisterContract}
         canManageRevisions={canManageRevisions}
-        canRegisterRuntime={canRegisterRuntime}
         canPublishRuntime={canPublishRuntime}
         canManageRoutes={canManageRoutes}
       />

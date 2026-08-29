@@ -5,7 +5,6 @@ import {
   type SourceDocument,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
-  checkRuntimeRegistrationEvidence,
   collectCloseoutBoundaryViolations,
   collectDeprecatedArchitectureViolations,
   collectTopic01BoundaryViolations,
@@ -177,19 +176,13 @@ function checkCloseoutRules(): void {
     pass("收口边界规则 E1-E4 归零");
   }
 
-  const evidence = checkRuntimeRegistrationEvidence(documents);
-  if (evidence.passed) pass("Runtime Registration 证据链完整（正式 Builder/prepare/append/tx）");
-  else fail(`Runtime Registration 证据 Gate：\n  ${evidence.failures.join("\n  ")}`);
-
   const resume = checkResumeTruthfulnessGate(documents);
   if (resume.passed) pass("Resume 真值 Gate（无 catch 吞错 + 公共 metadata mapper）");
   else fail(`Resume 真值 Gate：\n  ${resume.failures.join("\n  ")}`);
 
   const nineIssue = checkNineIssueCloseoutGate(documents);
   if (nineIssue.passed)
-    pass(
-      "九项收口 Gate F1-F8（retry owner/recovery 事务/probe context/resume switch/capability/durable）",
-    );
+    pass("九项收口 Gate F1-F8（retry owner/recovery/resume switch/capability/contract）");
   else fail(`九项收口 Gate F1-F8：\n  ${nineIssue.failures.join("\n  ")}`);
 }
 

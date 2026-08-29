@@ -295,51 +295,6 @@ export function collectCloseoutBoundaryViolations(
   return violations;
 }
 
-// ─── Runtime Registration 证据 Gate（08 §4）─────────────────
-
-const REGISTRATION_EVIDENCE_PATH = "lib/runtime/application/register-agent-runtime.ts";
-
-/** Registration 必须引用的正式 Conformance 证据链标识。 */
-const REGISTRATION_REQUIRED_IDENTIFIERS = [
-  "buildActiveExternalConformanceReport",
-  "prepareRuntimeConformanceRun",
-  "appendRuntimeConformanceRun",
-  "createMysqlRuntimeConformanceRunSession",
-] as const;
-
-/** Registration 禁止 import 的测试/伪造证据来源。 */
-const REGISTRATION_FORBIDDEN_IMPORTS = [
-  "@/lib/runtime/test-support/build-dsse-conformance-envelope",
-  "@/lib/artifacts/test-support/",
-  "ed25519-signer-keypair",
-] as const;
-
-export interface RegistrationEvidenceGateResult {
-  passed: boolean;
-  failures: string[];
-}
-
-export function checkRuntimeRegistrationEvidence(
-  documents: readonly SourceDocument[],
-): RegistrationEvidenceGateResult {
-  const document = documents.find((item) => item.path === REGISTRATION_EVIDENCE_PATH);
-  if (!document) {
-    return { passed: false, failures: [`${REGISTRATION_EVIDENCE_PATH} 不存在`] };
-  }
-  const failures: string[] = [];
-  for (const identifier of REGISTRATION_REQUIRED_IDENTIFIERS) {
-    if (!document.source.includes(identifier)) {
-      failures.push(`缺少正式证据链引用：${identifier}`);
-    }
-  }
-  for (const forbidden of REGISTRATION_FORBIDDEN_IMPORTS) {
-    if (document.source.includes(forbidden)) {
-      failures.push(`禁止 import 测试/伪造证据来源：${forbidden}`);
-    }
-  }
-  return { passed: failures.length === 0, failures };
-}
-
 // ─── Resume Gate（08 §5）────────────────────────────────────
 
 const RESOLVE_ROUTE_PATH =
@@ -391,17 +346,11 @@ export function checkResumeTruthfulnessGate(
  *   dispatcher/Attempt 服务的 transient 分支必须产生/更新 queued Attempt retry work。
  * - F2 Recovery global-db leak：markInvocationLost 事务内必须使用 caller-owned
  *   SessionBinding 版本（markSessionBindingLostInSession），禁止全局 db 版本。
- * - F3 Hard-coded Conformance Context：register-agent-runtime 的 Probe metadata
- *   必须来自正式 Conformance Context Builder，禁止手写 execution_subject/
- *   current_datetime/locale。
- * - F4 Cancel Probe context：probeCancel 必须接收并使用 metadata factory。
  * - F5 Resume dispatched=false：resolve route 必须显式 switch 三种 reason，
  *   禁止 if(!dispatched) local 200 一把梭。
  * - F6 Capability hardcode：A2A Start response 不得硬编码 cancel/resume/user_action=true，
  *   必须投影 params.capabilities。
  * - F7 Contract invalid combo：Parser 必须包含 input_required=true → resume=true。
- * - F8 Durable semantics：Builder 不得因 declared durable=true + not_measured +
- *   effective=false 判 Conformance fail。
  */
 export interface NineIssueCloseoutGateResult {
   passed: boolean;
@@ -459,39 +408,6 @@ export function checkNineIssueCloseoutGate(
     }
   }
 
-  // F3 Hard-coded Conformance Context
-  const registration = docOrFail(
-    documents,
-    "lib/runtime/application/register-agent-runtime.ts",
-    failures,
-  );
-  if (registration) {
-    if (!registration.source.includes("buildExternalConformanceProbeContext")) {
-      failures.push("F3 register-agent-runtime 未使用正式 Conformance Context Builder");
-    }
-    // 剥离注释后禁止手写公共 context kind 构造（正则自身含这些词，规则文件已排除）。
-    const source = stripComments(registration.source);
-    if (/context_kind:\s*["'](execution_subject|current_datetime|locale)["']/.test(source)) {
-      failures.push("F3 register-agent-runtime 手写 Probe context kind（硬编码 metadata）");
-    }
-  }
-
-  // F4 Cancel Probe context
-  if (registration) {
-    const cancelIndex = registration.source.indexOf("async function probeCancel");
-    const cancelSlice =
-      cancelIndex >= 0 ? registration.source.slice(cancelIndex, cancelIndex + 1200) : "";
-    if (!cancelSlice || !/metadata/.test(cancelSlice)) {
-      failures.push("F4 probeCancel 缺少 metadata factory 参数（Cancel start message Context）");
-    }
-    const cancelCallIndex = registration.source.indexOf("await probeCancel(");
-    const cancelCallSlice =
-      cancelCallIndex >= 0 ? registration.source.slice(cancelCallIndex, cancelCallIndex + 400) : "";
-    if (!cancelCallSlice || !/probeMetadata/.test(cancelCallSlice)) {
-      failures.push("F4 probeCancel 调用未传入 probeMetadata");
-    }
-  }
-
   // F5 Resume dispatched=false 显式 switch
   const resolveRoute = docOrFail(
     documents,
@@ -540,22 +456,6 @@ export function checkNineIssueCloseoutGate(
     !parser.source.includes("interaction.input_required=true 要求 interaction.resume=true")
   ) {
     failures.push("F7 Parser 缺少 input_required=true → resume=true 语义约束");
-  }
-
-  // F8 Durable semantics
-  const builder = docOrFail(
-    documents,
-    "lib/runtime/application/build-active-external-conformance.ts",
-    failures,
-  );
-  if (builder) {
-    const source = stripComments(builder.source);
-    if (/!declaredDurable\s*&&/.test(source)) {
-      failures.push("F8 Builder 仍因 declared durable 未测而判 Conformance fail");
-    }
-    if (!source.includes('measuredDurable === "not_measured"')) {
-      failures.push("F8 Builder durable case 未按 not_measured 三态诚实裁决");
-    }
   }
 
   return { passed: failures.length === 0, failures };

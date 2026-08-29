@@ -31,7 +31,6 @@ export type AuditActorType = (typeof AUDIT_ACTOR_TYPES)[number];
 export const AUDIT_ACTION_TYPES = [
   // 管理写动作（与 ACTION_CODES 对齐）
   "agent.contract.register",
-  "agent.runtime.register",
   "agent.revision.create",
   "agent.publish",
   "agent.retract",

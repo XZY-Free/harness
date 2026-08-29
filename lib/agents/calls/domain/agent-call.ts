@@ -42,7 +42,12 @@ export const AGENT_CALL_TERMINAL_STATES: readonly AgentCallState[] = [
 ];
 
 /** AgentCall 来源类型（专题01 第一阶段只会出现 user_selected）。 */
-export const AGENT_CALL_SOURCE_TYPES = ["user_selected", "dynamic_discovery", "policy"] as const;
+export const AGENT_CALL_SOURCE_TYPES = [
+  "user_selected",
+  "dynamic_discovery",
+  "policy",
+  "gateway",
+] as const;
 export type AgentCallSourceType = (typeof AGENT_CALL_SOURCE_TYPES)[number];
 
 /**

@@ -56,8 +56,13 @@ export const AGENT_CALL_STATES = [
 ] as const;
 export type AgentCallState = (typeof AGENT_CALL_STATES)[number];
 
-/** AgentCall 来源类型（专题01 第一阶段只会出现 user_selected）。 */
-export const AGENT_CALL_SOURCE_TYPES = ["user_selected", "dynamic_discovery", "policy"] as const;
+/** AgentCall 来源类型（专题01：user_selected=用户明确选择；gateway=Harness Runtime 经 Gateway 调用）。 */
+export const AGENT_CALL_SOURCE_TYPES = [
+  "user_selected",
+  "dynamic_discovery",
+  "policy",
+  "gateway",
+] as const;
 export type AgentCallSourceType = (typeof AGENT_CALL_SOURCE_TYPES)[number];
 
 // ─── AgentCall ─────────────────────────────────────────────

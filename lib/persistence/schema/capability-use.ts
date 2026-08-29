@@ -58,6 +58,7 @@ export const CAPABILITY_USE_SOURCE_TYPES = [
   "dynamic_discovery",
   "user_selected",
   "policy",
+  "gateway",
 ] as const;
 export type CapabilityUseSourceType = (typeof CAPABILITY_USE_SOURCE_TYPES)[number];
 

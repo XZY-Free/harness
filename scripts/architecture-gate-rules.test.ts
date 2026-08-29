@@ -3,7 +3,6 @@ import {
   type SourceDocument,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
-  checkRuntimeRegistrationEvidence,
   collectCloseoutBoundaryViolations,
   collectDeprecatedArchitectureViolations,
   collectTopic01BoundaryViolations,
@@ -507,40 +506,6 @@ describe("collectCloseoutBoundaryViolations（E1-E4）", () => {
   });
 });
 
-describe("checkRuntimeRegistrationEvidence（08 §4）", () => {
-  const FULL_SOURCE = [
-    'import { buildActiveExternalConformanceReport } from "a";',
-    'import { prepareRuntimeConformanceRun } from "b";',
-    'import { appendRuntimeConformanceRun } from "c";',
-    'import { createMysqlRuntimeConformanceRunSession } from "d";',
-  ].join("\n");
-
-  it("完整正式证据链 → 通过", () => {
-    expect(
-      checkRuntimeRegistrationEvidence([
-        doc("lib/runtime/application/register-agent-runtime.ts", FULL_SOURCE),
-      ]),
-    ).toEqual({ passed: true, failures: [] });
-  });
-
-  it("缺失 append/prepare → 失败；import 测试 DSSE builder → 失败", () => {
-    const missing = checkRuntimeRegistrationEvidence([
-      doc(
-        "lib/runtime/application/register-agent-runtime.ts",
-        FULL_SOURCE.replace('import { appendRuntimeConformanceRun } from "c";', ""),
-      ),
-    ]);
-    expect(missing.passed).toBe(false);
-    const testImport = checkRuntimeRegistrationEvidence([
-      doc(
-        "lib/runtime/application/register-agent-runtime.ts",
-        `${FULL_SOURCE}\nimport { buildDsseConformanceEnvelope } from "@/lib/runtime/test-support/build-dsse-conformance-envelope";`,
-      ),
-    ]);
-    expect(testImport.passed).toBe(false);
-  });
-});
-
 describe("checkResumeTruthfulnessGate（08 §5）", () => {
   const RESOLVE_ROUTE = "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
   const A2A = "lib/agents/calls/transport/a2a/a2a-client.ts";
@@ -580,11 +545,9 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
     dispatcher: "lib/runtime/dispatcher.ts",
     attemptService: "lib/runtime/retry/dispatch-queued-invocation-attempt.ts",
     recovery: "lib/runtime/recovery-queries.ts",
-    registration: "lib/runtime/application/register-agent-runtime.ts",
     resolveRoute: "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
     transport: "lib/agents/calls/transport/a2a/a2a-client.ts",
     parser: "lib/agents/domain/public-agent-contract.ts",
-    builder: "lib/runtime/application/build-active-external-conformance.ts",
   };
 
   function compliantDocs(): SourceDocument[] {
@@ -595,14 +558,6 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
       doc(
         PATHS.recovery,
         'import { markSessionBindingLostInSession } from "@/lib/runtime/session-binding-queries"; markSessionBindingLostInSession(tx, id);',
-      ),
-      doc(
-        PATHS.registration,
-        [
-          "import { buildExternalConformanceProbeContext } from 'x';",
-          "async function probeCancel(endpoint, credential, input, streaming, metadata) { sendMessage(endpoint, credential, input, undefined, metadata()); }",
-          "await probeCancel(endpoint, credential, input, streaming, probeMetadata);",
-        ].join("\n"),
       ),
       doc(
         PATHS.resolveRoute,
@@ -620,7 +575,6 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
         PATHS.parser,
         'throw new PublicAgentContractError("interaction.input_required=true 要求 interaction.resume=true");',
       ),
-      doc(PATHS.builder, 'const passed = measuredDurable === "not_measured" && !effectiveDurable;'),
     ];
   }
 
@@ -649,32 +603,6 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
     );
     const result = checkNineIssueCloseoutGate(docs);
     expect(result.failures.some((f) => f.includes("F2"))).toBe(true);
-  });
-
-  it("F3 手写 Probe context kind → 失败", () => {
-    const docs = compliantDocs().map((d) =>
-      d.path === PATHS.registration
-        ? doc(
-            d.path,
-            'const m = [{ context_kind: "execution_subject", value: 1 }, { context_kind: "current_datetime", value: 2 }];',
-          )
-        : d,
-    );
-    const result = checkNineIssueCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("F3"))).toBe(true);
-  });
-
-  it("F4 probeCancel 无 metadata → 失败", () => {
-    const docs = compliantDocs().map((d) =>
-      d.path === PATHS.registration
-        ? doc(
-            d.path,
-            "async function probeCancel(a, b, c, d) { send(c); } await probeCancel(a, b, c, d);",
-          )
-        : d,
-    );
-    const result = checkNineIssueCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("F4"))).toBe(true);
   });
 
   it("F5 缺 command_not_found 显式分支 → 失败", () => {
@@ -706,15 +634,5 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
     );
     const result = checkNineIssueCloseoutGate(docs);
     expect(result.failures.some((f) => f.includes("F7"))).toBe(true);
-  });
-
-  it("F8 Builder 因 declared 未测判 fail → 失败", () => {
-    const docs = compliantDocs().map((d) =>
-      d.path === PATHS.builder
-        ? doc(d.path, "const passed = !declaredDurable && !effectiveDurable && measuredDurable;")
-        : d,
-    );
-    const result = checkNineIssueCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("F8"))).toBe(true);
   });
 });
