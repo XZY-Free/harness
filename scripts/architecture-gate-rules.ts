@@ -34,6 +34,93 @@ export interface AgentCallRuntimeBoundaryGateResult {
   failures: string[];
 }
 
+export interface AgentRevisionAuthorityGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+/** Package05：AgentRevision 是唯一版本轴，currentRevisionId 只作发布摘要。 */
+export function checkAgentRevisionAuthorityGate(
+  documents: readonly SourceDocument[],
+): AgentRevisionAuthorityGateResult {
+  const failures: string[] = [];
+  const source = (path: string) =>
+    documents.find((document) => document.path === path)?.source ?? "";
+  const schema = source("lib/persistence/schema/agents.ts");
+  const revisionQueries = stripComments(source("lib/agents/persistence/agent-revision-queries.ts"));
+  const publication = stripComments(source("lib/agents/application/publish-agent-revision.ts"));
+
+  if (
+    !schema.includes("反规范化摘要") ||
+    !schema.includes("Publication") ||
+    !schema.includes("Route") ||
+    !schema.includes("Projection") ||
+    !schema.includes("Binding")
+  ) {
+    failures.push("Agent.currentRevisionId 未声明为非执行 Authority 的发布摘要");
+  }
+  if (
+    !revisionQueries.includes("agentContractSnapshotTable") ||
+    !revisionQueries.includes("params.tenantId") ||
+    !revisionQueries.includes("snapshot.agentId !== params.agentId")
+  ) {
+    failures.push("AgentRevision 创建未原子校验 Snapshot 同 tenant + 同 Agent");
+  }
+  if (
+    !publication.includes("recomputedContractDigest") ||
+    !publication.includes("recomputedCapabilityDigest") ||
+    !publication.includes("recomputedContextDigest")
+  ) {
+    failures.push("AgentRevision 发布前未验证结构化 ContractSnapshot 摘要");
+  }
+
+  const constructionNaming =
+    /docs\/V(?:11|12)|专题0?1|\bBatch\d+\b|(?:第一)?阶段\s*\d+|\bS\d{2}-[CW]\d{2}\b|(?:^|[\s（(])0[0-7]\s*§/m;
+  for (const document of documents) {
+    const path = document.path;
+    const isTest = path.endsWith(".test.ts") || path.endsWith(".test.tsx");
+    const isSupport = path.includes("/test/") || path.includes("/test-support/");
+    const isAgentControlPlane =
+      path === "lib/persistence/schema/agents.ts" ||
+      path === "lib/control-plane-client/contracts/agent.ts" ||
+      path.startsWith("lib/agents/") ||
+      path.startsWith("app/admin/api/v1/agents/") ||
+      path.startsWith("app/admin/api/v1/agent-revisions/") ||
+      path.startsWith("app/gateway/v1/agent-calls/") ||
+      path === "app/admin/api/v1/agents/route.ts" ||
+      path === "app/gateway/v1/agent-calls/route.ts";
+    if (!isAgentControlPlane || isTest || isSupport) continue;
+
+    const productionSource = stripComments(document.source);
+    const isExecutionPath =
+      path.startsWith("lib/agents/calls/") ||
+      path.startsWith("lib/routes/application/") ||
+      path.startsWith("lib/routes/projection/");
+    if (
+      isExecutionPath &&
+      /\bagent(?:Table)?\.currentRevisionId\b|\bAgent\.currentRevisionId\b/.test(productionSource)
+    ) {
+      failures.push(`Agent 执行路径读取 currentRevisionId：${path}`);
+    }
+    if (
+      isExecutionPath &&
+      /\b(?:getLatestPublishedRevision|getCurrentAgentRevision|latestAgentRevision)\b/.test(
+        productionSource,
+      )
+    ) {
+      failures.push(`Agent 执行路径仍含 latest/current revision fallback：${path}`);
+    }
+    if (/\bAgentContractRevision\b|\bContractPublication\b/.test(productionSource)) {
+      failures.push(`Agent Contract 第二版本轴/发布 Authority 仍存在：${path}`);
+    }
+    if (constructionNaming.test(document.source)) {
+      failures.push(`Agent 控制面生产源码仍含施工版本命名：${path}`);
+    }
+  }
+
+  return { passed: failures.length === 0, failures: [...new Set(failures)] };
+}
+
 /** Package04：Harness 只映射一次 durable disposition；A2A outbound 仍归 AgentTransport。 */
 export function checkAgentCallRuntimeBoundaryGate(
   documents: readonly SourceDocument[],

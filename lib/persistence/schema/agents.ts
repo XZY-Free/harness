@@ -1,7 +1,7 @@
 /**
  * 稳定 Agent Schema — 正式控制面职责命名。
  *
- * 本文件是 Agent / AgentRevision 的单一物理 Schema 权威（docs/V12/01 §20 / §29 H）：
+ * 本文件是 Agent / AgentRevision 的单一物理 Schema 权威：
  * - 本文件持有 Agent / AgentRevision 的物理 MySQL 表定义（表名即存储名）。
  * - 正式模块只使用本文件导出的职责命名，不 Import lib/persistence/schema。
  *
@@ -82,7 +82,10 @@ export const agentTable = mysqlTable(
     /** 负责人 userIdentityId（逻辑外键 → UserIdentity.id）。 */
     ownerUserId: varchar("ownerUserId", { length: 36 }).notNull(),
     lifecycleState: mysqlEnum("lifecycleState", AGENT_LIFECYCLE_STATES).notNull().default("draft"),
-    /** 当前发布修订 id（逻辑外键 → AgentRevision.id）；null 表示未发布。 */
+    /**
+     * 当前已发布修订的反规范化摘要（逻辑外键 → AgentRevision.id）；null 表示无当前发布。
+     * 仅供管理投影与目录快速判断；执行资格由 Publication + Route + Projection + Binding 冻结。
+     */
     currentRevisionId: varchar("currentRevisionId", { length: 36 }),
     /** 乐观并发版本号。 */
     versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),

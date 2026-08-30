@@ -1,10 +1,10 @@
 /**
- * AgentTransport Port（专题01 冻结架构 00 §九 / 03 §12）。
+ * AgentTransport Port — AgentCall 的唯一外部 Agent 通信边界。
  *
  * Agent Transport 是「AgentCall → 外部 Agent」的协议抽象，不是框架抽象：
  * - A2A 0.3.0 → 外部 Agent 能力调用协议（AgentCall 子执行域）。
  *
- * 边界（专题01 最高级原则）：
+ * 边界：
  * - A2A 绝不是 Harness Runtime Protocol；Agent Transport 不实现 RuntimeHttpClient。
  * - 正确调用链：
  *     Parent Harness Invocation → Harness Runtime → Harness Loop → AgentCall
@@ -13,7 +13,7 @@
  *   由 Harness Loop 决定顶层 Invocation 走向。绝不能：
  *     AgentCall event → 直接写顶层 Invocation/Turn 终态。
  *
- * 冻结协议能力（04 §4，A2A 0.3.0 公开合同，不实现 A2A 1.x 兼容层）：
+ * 冻结协议能力来自 A2A 0.3.0 公开合同，不实现 A2A 1.x 兼容层：
  * - Agent Card（/.well-known/agent-card.json）；
  * - JSON-RPC over HTTP；
  * - message/stream（SSE Task/Artifact updates）；
@@ -63,12 +63,10 @@ export type AgentCallEventSink = (batch: {
  * AgentCall 出站认证（协议中立）。
  *
  * 只允许 none / bearer 两种 External Agent 形态；workload_token 是 SnowHarness
- * Runtime Protocol 专属，Agent transport 收到时本地 fail closed（03 §9），
+ * Runtime Protocol 专属，Agent transport 收到时本地 fail closed，
  * 绝不把内部 Workload Token 当作外部 Agent 的 Bearer Token。
  */
-export type AgentCallTransportAuth =
-  | { mode: "none" }
-  | { mode: "bearer"; token: string };
+export type AgentCallTransportAuth = { mode: "none" } | { mode: "bearer"; token: string };
 
 /** Agent 出站 auth 失败（网络前 fail closed）。 */
 export class AgentTransportAuthError extends Error {
@@ -79,14 +77,12 @@ export class AgentTransportAuthError extends Error {
 }
 
 /** 把 AgentCallTransportAuth 映射为 HTTP header。 */
-export function agentCallAuthHeaders(
-  auth: AgentCallTransportAuth,
-): Record<string, string> {
+export function agentCallAuthHeaders(auth: AgentCallTransportAuth): Record<string, string> {
   if (auth.mode === "none") return {};
   return { authorization: `Bearer ${auth.token}` };
 }
 
-/** Agent transport 错误分类（04 §7：进入 SnowHarness 稳定错误码，不暴露供应商 SDK 异常字符串）。 */
+/** Agent transport 错误分类：进入 SnowHarness 稳定错误码，不暴露供应商 SDK 异常字符串。 */
 export type AgentTransportFailureKind =
   | "endpoint_auth"
   | "protocol_schema"
@@ -109,7 +105,7 @@ export class AgentTransportError extends Error {
   }
 }
 
-/** 背景流失败种类（06 §4：固定合同，不把第三方 exception class 当合同）。 */
+/** 背景流失败种类：固定合同，不把第三方 exception class 当合同。 */
 export type AgentBackgroundFailureKind =
   | "stream_eof_before_terminal"
   | "stream_read_failed"
@@ -124,7 +120,7 @@ export interface AgentBackgroundFailureReport {
   readonly safeSummary: string;
 }
 
-/** 背景流失败上报（06 §3）：Transport 只报告；恢复动作由外层注入的 handler 执行。 */
+/** 背景流失败上报：Transport 只报告；恢复动作由外层注入的 handler 执行。 */
 export type AgentBackgroundFailureHandler = (
   report: AgentBackgroundFailureReport,
 ) => void | Promise<void>;
@@ -164,7 +160,7 @@ export interface StartAgentCallParams {
   idempotencyKey: string;
   /** 流读取超时（ms）。 */
   streamTimeoutMs?: number;
-  /** 冻结能力 profile（05 §6 二次保护）：由调用方从 Binding/Conformance 派生。 */
+  /** 冻结能力 profile：由调用方从 Binding/Contract 派生。 */
   capabilities: {
     cancel: boolean;
     resume: boolean;
@@ -242,5 +238,7 @@ export interface AgentTransport {
   /** 取消 AgentCall（tasks/cancel）。 */
   cancelCall(params: CancelAgentCallParams): Promise<void>;
   /** 诊断读取 AgentCall 状态（tasks/get）。 */
-  getCall(params: GetAgentCallParams): Promise<{ state: string; taskId: string; contextId: string }>;
+  getCall(
+    params: GetAgentCallParams,
+  ): Promise<{ state: string; taskId: string; contextId: string }>;
 }

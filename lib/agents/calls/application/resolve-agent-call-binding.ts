@@ -2,19 +2,20 @@ import { buildAgentCallBindingCandidate } from "@/lib/agents/calls/application/b
 import type { AgentCallBindingCandidate } from "@/lib/agents/calls/domain/agent-call-binding";
 /**
  * resolveRequiredAgentBinding — 解析 Agent target Route 并装配 AgentCallBinding candidate
- * （专题01 Batch8 · Gateway 收口，从 harness-required-agent 提取共享）。
+ * Harness 与 Gateway 共用这一条 exact binding 解析路径。
  *
  * 单一冻结链（唯一 Route Authority）：
  *   resolveRoute(target={kind:"agent", agentId}) → 断言 agent target + AgentRevision
  *   → 读取 exact AgentContractSnapshot（capabilityDigest + protocol 事实，权威）
  *   → buildAgentCallBindingCandidate 装配候选事实
- *     （endpoint/identity/credential/network 直接来自 RouteResolution — Batch4 补漏）。
+ *     （endpoint/identity/credential/network 直接来自 RouteResolution）。
  *
  * harness-required-agent（Harness Loop 进程内）与 Gateway AgentCall endpoints（HTTP）
  * 共用同一冻结链，不重复 Domain，保证 hosted 与 external Runtime 走同一正式路径。
  *
  * 事实源：
- * - 03_代码级实施方案.md §11 / §16 / §21。
+ * - docs/architecture/agent-control-plane.md
+ * - docs/architecture/api-and-events.md
  * - 冻结架构：Agent Route Authority 是唯一 Agent target 权威。
  */
 import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";
@@ -111,7 +112,7 @@ export async function resolveRequiredAgentBinding(
     throw new RequiredAgentUnavailableError(agentId, "AgentContractSnapshot 不存在");
   }
 
-  // 3. 装配 AgentCallBinding candidate（endpoint facts 来自 RouteResolution — Batch4 补漏；
+  // 3. 装配 AgentCallBinding candidate（endpoint facts 来自 RouteResolution；
   //    protocol facts 来自 ContractSnapshot）。
   const policy = await resolveBindingGovernance(db, tenantId, resolution.policyRevisionId);
   const bindingCandidate = buildAgentCallBindingCandidate({

@@ -143,9 +143,9 @@ export interface AgentContractSnapshotDTO {
   protocol_type: string;
   protocol_contract_revision: string;
   contract_digest: string;
-  /** Capability Manifest canonical digest（07 §5 展示用）。 */
+  /** Capability Manifest canonical digest（能力摘要展示用）。 */
   capability_digest: string;
-  /** Invocation Context Contract canonical digest（07 §5 展示用）。 */
+  /** Invocation Context Contract canonical digest（上下文摘要展示用）。 */
   context_digest: string;
   interaction: {
     streaming_transport: boolean;
@@ -171,7 +171,7 @@ export interface AgentContractListResponse {
   total: number;
 }
 
-// ─── Agent Contract 登记（07 §4，POST /admin/api/v1/agent-registrations） ────
+// ─── Agent Contract 登记（POST /admin/api/v1/agent-registrations） ────
 
 /** 登记请求：顶层恰为 protocol + contract（禁止 URL/Git/源码路径/endpoint/凭证字段）。 */
 export interface RegisterAgentContractRequest {
@@ -193,7 +193,7 @@ export interface RegisterAgentContractResponse {
   contract: AgentContractSnapshotDTO;
 }
 
-// ─── CredentialRef（07 §7：bearer 只能选择已有 CredentialRef） ───────────────
+// ─── CredentialRef（bearer 只能选择已有 CredentialRef） ───────────────
 
 /** CredentialRef 摘要（无 vaultRef/secret 值）。 */
 export interface CredentialRefSummaryDTO {

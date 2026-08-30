@@ -6,6 +6,7 @@ import {
   checkAgentCallFinalizationGate,
   checkAgentCallRuntimeBoundaryGate,
   checkAgentInvokeAuthorizationGate,
+  checkAgentRevisionAuthorityGate,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
   checkTopic01FinalCloseoutGate,
@@ -235,6 +236,16 @@ function checkAgentCallRuntimeBoundary(): void {
   else fail(`Package04 AgentCall 运行边界 Gate：\n  ${result.failures.join("\n  ")}`);
 }
 
+function checkAgentRevisionAuthority(): void {
+  const documents: SourceDocument[] = ["app", "components", "desktop", "lib", "scripts"]
+    .flatMap((root) => filesUnder(resolve(ROOT, root)))
+    .filter((file) => SOURCE_EXTENSIONS.has(file.slice(file.lastIndexOf("."))))
+    .map((file) => ({ path: relative(ROOT, file), source: readFileSync(file, "utf8") }));
+  const result = checkAgentRevisionAuthorityGate(documents);
+  if (result.passed) pass("Package05 AgentRevision / ContractSnapshot Authority Gate");
+  else fail(`Package05 AgentRevision Authority Gate：\n  ${result.failures.join("\n  ")}`);
+}
+
 function main(): void {
   checkMigrationJournal();
   checkRetiredNaming();
@@ -287,6 +298,7 @@ function main(): void {
   checkAgentInvokeAuthorization();
   checkAgentCallFinalization();
   checkAgentCallRuntimeBoundary();
+  checkAgentRevisionAuthority();
   checkCloseoutRules();
   checkFinalCloseout();
   if (failures > 0) process.exitCode = 1;

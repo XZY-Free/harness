@@ -9,7 +9,7 @@
  * - createDraftRevision：创建 draft Revision（revisionNo 在 Agent 内单调递增）。
  * - withdrawRevision：published → withdrawn（只阻止新发布/路由，不删除历史引用）。
  * - updateDraftContent：仅 draft 状态可编辑业务内容（published/withdrawn 不可改）。
- * - getRevision/getRevisionsByAgent/getLatestPublishedRevision：查询。
+ * - getRevision/getRevisionsByAgent：按显式身份查询。
  *
  * 不可变性约束：
  * - published Revision 业务内容不可修改（model_policy 等治理字段）。
@@ -25,7 +25,9 @@ import { db } from "@/lib/db/client";
 import {
   type AgentRevisionRow,
   type AgentRevisionState,
+  agentContractSnapshotTable,
   agentRevisionTable,
+  agentTable,
 } from "@/lib/persistence/schema/agents";
 import { and, desc, eq, max } from "drizzle-orm";
 
@@ -51,30 +53,62 @@ export interface CreateDraftRevisionParams {
 export async function createDraftRevision(
   params: CreateDraftRevisionParams,
 ): Promise<AgentRevisionRow> {
-  const revisionNo = await nextRevisionNo(params.agentId);
-  const id = randomUUID();
-  await db.insert(agentRevisionTable).values({
-    id,
-    agentId: params.agentId,
-    revisionNo,
-    agentContractSnapshotId: params.agentContractSnapshotId,
-    modelPolicyJson: params.modelPolicyJson,
-    permissionRequirementsJson: params.permissionRequirementsJson,
-    delegationPolicyJson: params.delegationPolicyJson,
-    agentInterfaceRequirementsJson: params.agentInterfaceRequirementsJson,
-    revisionState: "draft",
-    createdBy: params.createdBy,
-  });
+  return db.transaction(async (tx) => {
+    const [agent] = await tx
+      .select({ id: agentTable.id })
+      .from(agentTable)
+      .where(and(eq(agentTable.tenantId, params.tenantId), eq(agentTable.id, params.agentId)))
+      .limit(1)
+      .for("update");
+    if (!agent) {
+      throw new AgentRevisionAgentNotFoundError(params.tenantId, params.agentId);
+    }
 
-  const [row] = await db
-    .select()
-    .from(agentRevisionTable)
-    .where(eq(agentRevisionTable.id, id))
-    .limit(1);
-  if (!row) {
-    throw new Error(`createDraftRevision: 行未找到（id=${id}）`);
-  }
-  return row;
+    const [snapshot] = await tx
+      .select({ agentId: agentContractSnapshotTable.agentId })
+      .from(agentContractSnapshotTable)
+      .where(
+        and(
+          eq(agentContractSnapshotTable.tenantId, params.tenantId),
+          eq(agentContractSnapshotTable.id, params.agentContractSnapshotId),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (!snapshot || snapshot.agentId !== params.agentId) {
+      throw new AgentRevisionContractSnapshotMismatchError(
+        params.agentId,
+        params.agentContractSnapshotId,
+      );
+    }
+
+    const [sequence] = await tx
+      .select({ maxNo: max(agentRevisionTable.revisionNo) })
+      .from(agentRevisionTable)
+      .where(eq(agentRevisionTable.agentId, params.agentId));
+    const revisionNo = (sequence?.maxNo ?? 0) + 1;
+    const id = randomUUID();
+    await tx.insert(agentRevisionTable).values({
+      id,
+      agentId: params.agentId,
+      revisionNo,
+      agentContractSnapshotId: params.agentContractSnapshotId,
+      modelPolicyJson: params.modelPolicyJson,
+      permissionRequirementsJson: params.permissionRequirementsJson,
+      delegationPolicyJson: params.delegationPolicyJson,
+      agentInterfaceRequirementsJson: params.agentInterfaceRequirementsJson,
+      revisionState: "draft",
+      createdBy: params.createdBy,
+    });
+
+    const [row] = await tx
+      .select()
+      .from(agentRevisionTable)
+      .where(eq(agentRevisionTable.id, id))
+      .limit(1);
+    if (!row) throw new Error(`createDraftRevision: 行未找到（id=${id}）`);
+    return row;
+  });
 }
 
 /** 仅 draft 状态可编辑业务内容；published/withdrawn 抛错（不可变）。 */
@@ -139,38 +173,18 @@ export async function getRevisionsByAgent(
     .orderBy(desc(agentRevisionTable.revisionNo));
 }
 
-/** 获取 Agent 的最新 published Revision（用于路由查询）。 */
-export async function getLatestPublishedRevision(
-  agentId: string,
-): Promise<AgentRevisionRow | null> {
-  const list = await db
-    .select()
-    .from(agentRevisionTable)
-    .where(
-      and(
-        eq(agentRevisionTable.agentId, agentId),
-        eq(agentRevisionTable.revisionState, "published"),
-      ),
-    )
-    .orderBy(desc(agentRevisionTable.revisionNo))
-    .limit(1);
-  return list[0] ?? null;
+export class AgentRevisionAgentNotFoundError extends Error {
+  constructor(tenantId: string, agentId: string) {
+    super(`Agent ${agentId} 不存在或不属于租户 ${tenantId}`);
+    this.name = "AgentRevisionAgentNotFoundError";
+  }
 }
 
-/**
- * 计算 Agent 内下一个 revisionNo（max +1）。
- *
- * 并发安全：UNIQUE(agentId, revisionNo) 约束保证唯一；并发冲突时 fail-loud，
- * 调用方应重试或返回 409。
- */
-async function nextRevisionNo(agentId: string): Promise<number> {
-  const [row] = await db
-    .select({ maxNo: max(agentRevisionTable.revisionNo) })
-    .from(agentRevisionTable)
-    .where(eq(agentRevisionTable.agentId, agentId));
-  const currentMax = row?.maxNo;
-  if (currentMax === null || currentMax === undefined) return 1;
-  return currentMax + 1;
+export class AgentRevisionContractSnapshotMismatchError extends Error {
+  constructor(agentId: string, snapshotId: string) {
+    super(`AgentContractSnapshot ${snapshotId} 不存在或不属于同一 Agent ${agentId}`);
+    this.name = "AgentRevisionContractSnapshotMismatchError";
+  }
 }
 
 /** Revision 不存在错误。 */

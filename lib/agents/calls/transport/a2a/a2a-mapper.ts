@@ -1,9 +1,9 @@
 /**
  * A2A Mapper（lib/agents/calls/transport/a2a/a2a-mapper.ts）。
  *
- * A2A wire update → AgentCallCandidateEvent（AgentCall 域归一化，04 §6）。
+ * A2A wire update → AgentCallCandidateEvent（AgentCall 域归一化）。
  *
- * 关键边界（专题01 最高级原则）：
+ * 关键边界：
  * - A2A 事件必须先成为 AgentCall event/state（经 AgentCallEventIngress），
  *   由 Harness Loop 决定是否继续 / 是否最终完成顶层 Invocation。
  * - A2A completed → AgentCall.completed（绝不直接 parent Invocation.completed）。
@@ -21,17 +21,18 @@
  */
 
 import {
-  AgentTransportError,
-  type AgentCallCandidateEvent,
-} from "@/lib/agents/calls/transport/agent-transport";
-import {
   type A2AArtifact,
   type A2AArtifactUpdate,
   type A2AMessage,
   type A2AStreamUpdate,
   type A2ATaskState,
+  type JsonRpcResponse,
   a2aMessageText,
 } from "@/lib/agents/calls/transport/a2a/a2a-types";
+import {
+  type AgentCallCandidateEvent,
+  AgentTransportError,
+} from "@/lib/agents/calls/transport/agent-transport";
 
 /**
  * Mapper 可接受的 status-update 形状。
@@ -50,7 +51,7 @@ export interface A2AMappableStatusUpdate {
 /** Mapper 输入：artifact-update 或 status-update（含官方 Task 形态投影）。 */
 export type A2AMappableUpdate = A2AArtifactUpdate | A2AMappableStatusUpdate;
 
-/** 公共 Context 合同键 allowlist（04 §12/§11：只允许公开合同键，绝不加入内部标识）。 */
+/** 公共 Context 合同键 allowlist：只允许公开合同键，绝不加入内部标识。 */
 export const A2A_PUBLIC_CONTEXT_KEYS = new Set([
   "execution_subject",
   "current_datetime",
@@ -62,7 +63,7 @@ export const A2A_PUBLIC_CONTEXT_KEYS = new Set([
 ]);
 
 /**
- * Start/Resume 共用的唯一公共 Context → A2A message.metadata mapper（04 §12）。
+ * Start/Resume 共用的唯一公共 Context → A2A message.metadata mapper。
  * 输入是已验证的公共 Context 对象，但只透传 allowlist 内的合同键；内部 ID/trace/
  * tenant/token 等一律不发，输出是对象（绝非 JSON string）。
  */
@@ -292,10 +293,7 @@ export function mapAgentCallUpdate(
       // unknown 状态：不伪造终态、不静默忽略 → 归为稳定 protocol_schema 分类。
       // start 首事件同步抛（调用方以其拒绝）；背景时由调用方按 protocol_parse_failed
       // 上报，绝不以裸 Error 漏出。
-      throw new AgentTransportError(
-        "protocol_schema",
-        `A2A unknown task state: ${String(state)}`,
-      );
+      throw new AgentTransportError("protocol_schema", `A2A unknown task state: ${String(state)}`);
   }
 }
 
@@ -314,18 +312,16 @@ function artifactData(artifact: A2AArtifact): unknown {
 }
 
 /** 解析 SSE 流的一行 data JSON。 */
-export function parseAgentCallUpdate(
-  raw: string,
-): A2AStreamUpdate | import("@/lib/agents/calls/transport/a2a/a2a-types").JsonRpcResponse | null {
-  let parsed: import("@/lib/agents/calls/transport/a2a/a2a-types").JsonRpcResponse<A2AStreamUpdate> | A2AStreamUpdate;
+export function parseAgentCallUpdate(raw: string): A2AStreamUpdate | JsonRpcResponse | null {
+  let parsed: JsonRpcResponse<A2AStreamUpdate> | A2AStreamUpdate;
   try {
-    parsed = JSON.parse(raw) as import("@/lib/agents/calls/transport/a2a/a2a-types").JsonRpcResponse<A2AStreamUpdate>;
+    parsed = JSON.parse(raw) as JsonRpcResponse<A2AStreamUpdate>;
   } catch {
     throw new Error("A2A SSE data 不是合法 JSON");
   }
   // JSON-RPC envelope（有 result/error 字段）→ 解包。
   if (parsed && typeof parsed === "object" && ("result" in parsed || "error" in parsed)) {
-    const envelope = parsed as import("@/lib/agents/calls/transport/a2a/a2a-types").JsonRpcResponse<A2AStreamUpdate>;
+    const envelope = parsed as JsonRpcResponse<A2AStreamUpdate>;
     if (envelope.error) {
       return envelope; // 调用方按 error 处理
     }
@@ -338,10 +334,8 @@ export function isA2AStreamUpdate(v: unknown): v is A2AStreamUpdate {
   return !!v && typeof v === "object" && "kind" in v && "taskId" in v;
 }
 
-export function isRpcError(
-  v: unknown,
-): v is import("@/lib/agents/calls/transport/a2a/a2a-types").JsonRpcResponse & {
-  error: NonNullable<import("@/lib/agents/calls/transport/a2a/a2a-types").JsonRpcResponse["error"]>;
+export function isRpcError(v: unknown): v is JsonRpcResponse & {
+  error: NonNullable<JsonRpcResponse["error"]>;
 } {
   return !!v && typeof v === "object" && "error" in v && !("kind" in v);
 }

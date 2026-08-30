@@ -1,5 +1,5 @@
 /**
- * AgentSessionBinding — Agent 会话绑定（专题01 冻结架构 02 §六 / 00 §九）。
+ * AgentSessionBinding — Agent 会话的持久化外部上下文绑定。
  *
  * 冻结映射：
  * - A2A contextId → AgentSessionBinding.externalContextRef

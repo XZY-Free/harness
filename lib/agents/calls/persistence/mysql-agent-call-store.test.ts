@@ -15,7 +15,7 @@ import {
   agentCallBindingTable,
   agentCallTable,
 } from "@/lib/persistence/schema/agent-calls";
-import { agentRevisionTable } from "@/lib/persistence/schema/agents";
+import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { capabilityUseTable } from "@/lib/persistence/schema/capability-use";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { governanceConfigRevisionTable } from "@/lib/persistence/schema/governance-config";
@@ -216,6 +216,26 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
         createdAt: NOW,
       }),
     ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
+  });
+
+  it("Agent.currentRevisionId 摘要被篡改时仍按 Route exact Revision 冻结 Call", async () => {
+    const scenario = await seed();
+    await db
+      .update(agentTable)
+      .set({ currentRevisionId: randomUUID() })
+      .where(eq(agentTable.id, scenario.agentId));
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+
+    const result = await create(
+      commandFor(scenario, { logicalCallKey: `current-summary-drift:${randomUUID()}` }),
+    );
+
+    expect(result.call.agentRevisionId).toBe(scenario.agentRevisionId);
+    const [binding] = await db
+      .select()
+      .from(agentCallBindingTable)
+      .where(eq(agentCallBindingTable.callId, result.call.id));
+    expect(binding?.agentRevisionId).toBe(scenario.agentRevisionId);
   });
 
   it("Parent Invocation 非 running 时不得新建 AgentCall", async () => {

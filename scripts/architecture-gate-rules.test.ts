@@ -4,6 +4,7 @@ import {
   checkAgentCallFinalizationGate,
   checkAgentCallRuntimeBoundaryGate,
   checkAgentInvokeAuthorizationGate,
+  checkAgentRevisionAuthorityGate,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
   checkTopic01FinalCloseoutGate,
@@ -81,6 +82,67 @@ describe("checkAgentCallRuntimeBoundaryGate", () => {
     );
     expect(checkAgentCallRuntimeBoundaryGate(documents).failures).toContain(
       "Hosted Harness 未保留 pending AgentCall durable handoff",
+    );
+  });
+});
+
+describe("checkAgentRevisionAuthorityGate", () => {
+  const valid = (): SourceDocument[] => [
+    doc(
+      "lib/persistence/schema/agents.ts",
+      "currentRevisionId; 反规范化摘要; Publication Route Projection Binding;",
+    ),
+    doc(
+      "lib/agents/persistence/agent-revision-queries.ts",
+      "agentContractSnapshotTable; params.tenantId; snapshot.agentId !== params.agentId;",
+    ),
+    doc(
+      "lib/agents/application/publish-agent-revision.ts",
+      "snapshot.recomputedContractDigest; snapshot.recomputedCapabilityDigest; snapshot.recomputedContextDigest;",
+    ),
+    doc(
+      "lib/agents/calls/application/start-agent-call.ts",
+      "binding.agentRevisionId; binding.agentContractSnapshotId;",
+    ),
+  ];
+
+  it("currentRevision 摘要、Snapshot 精确绑定与发布重算齐备时通过", () => {
+    expect(checkAgentRevisionAuthorityGate(valid())).toEqual({ passed: true, failures: [] });
+  });
+
+  it("AgentCall 执行读取 Agent.currentRevisionId 或 latest helper 时失败", () => {
+    const documents = [
+      ...valid(),
+      doc(
+        "lib/agents/calls/application/resolve.ts",
+        "const revision = agentTable.currentRevisionId ?? getLatestPublishedRevision(agent.id);",
+      ),
+    ];
+    const failures = checkAgentRevisionAuthorityGate(documents).failures.join("\n");
+    expect(failures).toContain("currentRevisionId");
+    expect(failures).toContain("latest/current revision fallback");
+  });
+
+  it("第二套 Contract 版本或发布 Authority 命名失败", () => {
+    const documents = [
+      ...valid(),
+      doc(
+        "lib/agents/application/contract-publication.ts",
+        "class AgentContractRevision {} class ContractPublication {}",
+      ),
+    ];
+    expect(checkAgentRevisionAuthorityGate(documents).failures).toContain(
+      "Agent Contract 第二版本轴/发布 Authority 仍存在：lib/agents/application/contract-publication.ts",
+    );
+  });
+
+  it("Agent 控制面生产注释保留施工版本命名时失败", () => {
+    const documents = [
+      ...valid(),
+      doc("lib/agents/application/example.ts", "// 专题01 Batch8 docs/V12/01 阶段 5"),
+    ];
+    expect(checkAgentRevisionAuthorityGate(documents).failures).toContain(
+      "Agent 控制面生产源码仍含施工版本命名：lib/agents/application/example.ts",
     );
   });
 });

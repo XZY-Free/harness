@@ -1,7 +1,7 @@
 /**
  * AgentCall 领域实体与状态机。
  *
- * 专题01 冻结架构（00 §5.2 / 02 §五）：
+ * 领域边界：
  * - AgentCall 是 Parent Harness Invocation 内部的 Agent 能力调用子执行域，
  *   绝不成为第二个顶层 Invocation。
  * - AgentCall.parentInvocationId 恒必填，且必须属于同一 tenant。
@@ -43,7 +43,7 @@ export const AGENT_CALL_TERMINAL_STATES: readonly AgentCallState[] = [
   "lost",
 ];
 
-/** AgentCall 来源类型（专题01 第一阶段只会出现 user_selected）。 */
+/** AgentCall 来源类型；当前正式入口只创建 user_selected。 */
 export const AGENT_CALL_SOURCE_TYPES = [
   "user_selected",
   "dynamic_discovery",
@@ -55,7 +55,7 @@ export type AgentCallSourceType = (typeof AGENT_CALL_SOURCE_TYPES)[number];
 /**
  * AgentCall 状态转移表。
  *
- * 合法转移（专题01 冻结）：
+ * 合法状态转移：
  * - queued → running：开始执行。
  * - running → waiting_user：远端 input-required，等待用户。
  * - waiting_user → running：用户补充后 resume。

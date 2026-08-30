@@ -1,5 +1,5 @@
 /**
- * cancelAgentCall — 取消既有 AgentCall 子执行（应用服务，专题01 Batch8 · Gateway 收口）。
+ * cancelAgentCall — 取消既有 AgentCall 子执行。
  *
  * 冻结边界：
  * - 只 tenant-scoped 加载 existing AgentCall + exact AgentCallBinding；endpoint /
@@ -10,7 +10,8 @@
  * - cancelCall 网络/协议失败 → 合成子域 call.failed（无法取消），parent 不变，由 Harness 收口。
  *
  * 事实源：
- * - 03_代码级实施方案.md §14（Agent cancel）、§16（Gateway）。
+ * - docs/architecture/agent-control-plane.md
+ * - docs/architecture/api-and-events.md
  * - 冻结架构：AgentCall 与 parent Invocation 各自有状态 Authority。
  */
 import { agentCallStore } from "@/lib/agents/calls/application/agent-call-events-common";

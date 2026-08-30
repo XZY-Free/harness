@@ -7,11 +7,11 @@ import {
   schemaInvalidTable,
 } from "@/lib/admin/route-helpers";
 /**
- * POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision（S03-C05）。
+ * POST /admin/api/v1/agents/{agent_id}/revisions — 创建 AgentRevision。
  *
  * 事实源：docs/contracts/openapi.json（post_admin_api_v1_agents_by_agent_id_revisions）、
  *         docs/architecture/api-and-events.md §6、
- *         docs/architecture/agent-control-plane.md S03-W05。
+ *         docs/architecture/agent-control-plane.md。
  *
  * 行为：
  * - 解析 admin 主体（SSO 管理员或 CI/CD Service Identity）。
@@ -306,7 +306,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 }
 
 /**
- * GET /admin/api/v1/agents/{agent_id}/revisions — 列出 Agent 的所有 Revision（S11-W02）。
+ * GET /admin/api/v1/agents/{agent_id}/revisions — 列出 Agent 的所有 Revision。
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。

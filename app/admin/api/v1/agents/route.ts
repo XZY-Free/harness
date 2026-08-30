@@ -1,8 +1,8 @@
 /**
- * GET /admin/api/v1/agents — 列出当前租户下所有 Agent（S11-W02）。
+ * GET /admin/api/v1/agents — 列出当前租户下所有 Agent。
  *
  * 事实源：docs/architecture/runtime-control-plane.md
- *   S11-W02：「管理 Agent 元数据、访问范围、Revision、RuntimeRevision、DeploymentRoute、灰度、回滚和下线」
+ *   管理 Agent 元数据、访问范围、Revision、DeploymentRoute、灰度、回滚和下线。
  *
  * 行为：
  * - 解析 admin 主体（SSO 管理员）。

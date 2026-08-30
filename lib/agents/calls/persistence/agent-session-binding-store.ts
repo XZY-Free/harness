@@ -1,7 +1,7 @@
 /**
  * AgentSessionBinding Store — 仓储接口。
  *
- * A2A contextId 属于 AgentSessionBinding.externalContextRef（专题01 冻结映射）。
+ * A2A contextId 只映射到 AgentSessionBinding.externalContextRef。
  * 查询按 tenant 隔离；复用匹配维度 Tenant + Thread + AgentRevision + RouteRevision + active。
  */
 import type { AgentSessionBinding } from "@/lib/agents/calls/domain/agent-session-binding";

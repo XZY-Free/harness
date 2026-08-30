@@ -1,7 +1,7 @@
 /**
  * createAgentCall — 创建 AgentCall 子执行（应用服务）。
  *
- * 专题01 冻结架构：AgentCall 是 Parent Harness Invocation 内部的 Agent 能力调用。
+ * AgentCall 是 Parent Harness Invocation 内部的 Agent 能力调用。
  * 创建时：
  * 1. 把 candidate 交给 Store 在单一事务中锁定并最终验证全部 Authority。
  * 2. 原子持久化 AgentCall + Binding + 初始 Attempt(1)。

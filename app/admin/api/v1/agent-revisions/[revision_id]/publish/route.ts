@@ -16,11 +16,11 @@ import {
   AgentRevisionPublicationStateError,
 } from "@/lib/agents/domain/agent-revision-publication-policy";
 /**
- * POST /admin/api/v1/agent-revisions/{revision_id}/publish — 发布 AgentRevision（S03-C05）。
+ * POST /admin/api/v1/agent-revisions/{revision_id}/publish — 发布 AgentRevision。
  *
  * 事实源：docs/contracts/openapi.json（post_admin_api_v1_agent_revisions_by_revision_id_publish）、
  *         docs/architecture/api-and-events.md §6、
- *         docs/architecture/agent-control-plane.md S03-W05。
+ *         docs/architecture/agent-control-plane.md。
  *
  * 行为：
  * - 解析 admin 主体（SSO 管理员；CI/CD Service Identity 不允许发布）。

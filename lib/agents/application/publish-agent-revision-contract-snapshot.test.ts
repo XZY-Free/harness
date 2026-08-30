@@ -1,5 +1,5 @@
 /**
- * PublishAgentRevision — AgentContractSnapshot 发布权威先行冻结（预期 RED）。
+ * PublishAgentRevision — AgentContractSnapshot 发布证据与摘要完整性。
  *
  * 冻结不变量（AgentContractSnapshot 权威切片）：
  * - 发布证据从绑定的结构化 AgentContractSnapshot 冻结：snapshot id + contractDigest +
@@ -34,7 +34,7 @@ import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
-import { agentRevisionTable } from "@/lib/persistence/schema/agents";
+import { agentContractSnapshotTable, agentRevisionTable } from "@/lib/persistence/schema/agents";
 import { auditEvent } from "@/lib/persistence/schema/audit";
 import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { and, eq } from "drizzle-orm";
@@ -284,6 +284,20 @@ describe("PublishAgentRevision（AgentContractSnapshot 发布权威）", () => {
     await expect(publishAgentRevision(publishCommand(fixture))).rejects.toBeInstanceOf(
       AgentPublicationContractSnapshotMissingError,
     );
+    await assertNothingPublished(fixture.tenantId, fixture.revision.id);
+  });
+
+  it("发布前重算结构化 ContractSnapshot 摘要，持久化摘要被篡改时整体回滚", async () => {
+    const fixture = await seedContractPublishFixture();
+    await db
+      .update(agentContractSnapshotTable)
+      .set({ capabilityDigest: `sha256:${"f".repeat(64)}` })
+      .where(eq(agentContractSnapshotTable.id, fixture.revision.agentContractSnapshotId));
+    const publishAgentRevision = createPublishAgentRevision({
+      store: mysqlAgentPublicationStore,
+    });
+
+    await expect(publishAgentRevision(publishCommand(fixture))).rejects.toThrow(/digest|摘要/i);
     await assertNothingPublished(fixture.tenantId, fixture.revision.id);
   });
 });

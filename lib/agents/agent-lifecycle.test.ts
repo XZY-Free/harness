@@ -14,15 +14,15 @@ import {
   RevisionNotFoundError,
   RevisionStateError,
   createDraftRevision,
-  getLatestPublishedRevision,
   getRevisionById,
   getRevisionsByAgent,
   updateDraftContent,
 } from "@/lib/agents/persistence/agent-revision-queries";
 import { publishRevision } from "@/lib/agents/test-support/publish-agent-revision-without-attestation";
+import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
 import { withdrawRevision } from "@/lib/agents/test-support/withdraw-agent-revision";
 /**
- * S03-C01：Agent 修订模型集成测试（真实 MySQL 8）。
+ * Agent 身份、修订与生命周期集成测试（真实 MySQL 8）。
  *
  * 覆盖：
  * - agent-queries：createAgent/getAgentById/getAgentByKey/listAgents/updateAgentLifecycle/setCurrentRevision/softDeleteAgent。
@@ -38,6 +38,7 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
+import { tenant } from "@/lib/persistence/schema/identity";
 import { getWithdrawalRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -81,7 +82,7 @@ function buildDraftParams(
   return {
     tenantId,
     agentId,
-    agentContractSnapshotId: overrides.agentContractSnapshotId ?? "snap_contract_1",
+    agentContractSnapshotId: overrides.agentContractSnapshotId ?? defaultContractSnapshotId,
     modelPolicyJson: overrides.modelPolicyJson ?? { default: "doubao-pro" },
     permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
     delegationPolicyJson: { allowed_agent_ids: [] },
@@ -89,6 +90,8 @@ function buildDraftParams(
     createdBy,
   };
 }
+
+let defaultContractSnapshotId = "";
 
 // ─── agent-queries（DB）──────────────────────────────────
 
@@ -400,6 +403,9 @@ describe("agent-revision-queries", () => {
       ownerUserId: ownerId,
     });
     agentId = agent.id;
+    defaultContractSnapshotId = (
+      await seedAgentContractSnapshot({ tenantId, agentId, createdBy: ownerId })
+    ).id;
   });
 
   it("createDraftRevision 创建 draft Revision（revisionNo=1）", async () => {
@@ -408,7 +414,7 @@ describe("agent-revision-queries", () => {
     expect(rev.agentId).toBe(agentId);
     expect(rev.revisionNo).toBe(1);
     expect(rev.revisionState).toBe("draft");
-    expect(rev.agentContractSnapshotId).toBe("snap_contract_1");
+    expect(rev.agentContractSnapshotId).toBe(defaultContractSnapshotId);
     expect(rev.publishedAt).toBeNull();
     expect(rev.modelPolicyJson).toEqual({ default: "doubao-pro" });
     expect(rev.agentInterfaceRequirementsJson).toEqual({
@@ -433,8 +439,17 @@ describe("agent-revision-queries", () => {
       displayName: "Chart Agent",
       ownerUserId: ownerId,
     });
+    const otherSnapshot = await seedAgentContractSnapshot({
+      tenantId,
+      agentId: otherAgent.id,
+      createdBy: ownerId,
+    });
     const r1a = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
-    const r1b = await createDraftRevision(buildDraftParams(tenantId, otherAgent.id, ownerId));
+    const r1b = await createDraftRevision(
+      buildDraftParams(tenantId, otherAgent.id, ownerId, {
+        agentContractSnapshotId: otherSnapshot.id,
+      }),
+    );
     expect(r1a.revisionNo).toBe(1);
     expect(r1b.revisionNo).toBe(1);
   });
@@ -454,6 +469,61 @@ describe("agent-revision-queries", () => {
     const updated = await updateDraftContent(rev.id, {});
     expect(updated.id).toBe(rev.id);
     expect(updated.agentContractSnapshotId).toBe(rev.agentContractSnapshotId);
+  });
+
+  it("Revision 创建后不能通过 draft patch 换绑 ContractSnapshot", async () => {
+    const revision = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
+    const anotherSnapshot = await seedAgentContractSnapshot({
+      tenantId,
+      agentId,
+      createdBy: ownerId,
+    });
+    const patch = {
+      agentContractSnapshotId: anotherSnapshot.id,
+    } as Parameters<typeof updateDraftContent>[1] & { agentContractSnapshotId: string };
+
+    const updated = await updateDraftContent(revision.id, patch);
+
+    expect(updated.agentContractSnapshotId).toBe(defaultContractSnapshotId);
+  });
+
+  it("createDraftRevision 拒绝绑定其他 Agent 的 ContractSnapshot", async () => {
+    const otherAgent = await createAgent({
+      tenantId,
+      agentKey: "other-snapshot-owner",
+      displayName: "Other Snapshot Owner",
+      ownerUserId: ownerId,
+    });
+    const otherSnapshot = await seedAgentContractSnapshot({
+      tenantId,
+      agentId: otherAgent.id,
+      createdBy: ownerId,
+    });
+
+    await expect(
+      createDraftRevision(
+        buildDraftParams(tenantId, agentId, ownerId, {
+          agentContractSnapshotId: otherSnapshot.id,
+        }),
+      ),
+    ).rejects.toThrow(/ContractSnapshot.*同一 Agent/);
+  });
+
+  it("createDraftRevision 拒绝跨租户命令，即使 Agent 与 Snapshot id 存在", async () => {
+    const otherTenantId = "agent-revision-other-tenant";
+    await db.insert(tenant).values({
+      id: otherTenantId,
+      key: "agent-revision-other",
+      name: "Agent Revision Other Tenant",
+    });
+
+    await expect(
+      createDraftRevision(
+        buildDraftParams(otherTenantId, agentId, ownerId, {
+          agentContractSnapshotId: defaultContractSnapshotId,
+        }),
+      ),
+    ).rejects.toThrow(/Agent.*租户/);
   });
 
   it("updateDraftContent published 状态抛 RevisionImmutableError", async () => {
@@ -585,38 +655,11 @@ describe("agent-revision-queries", () => {
     expect(published).toHaveLength(1);
     expect(published[0]?.id).toBe(r1.id);
   });
-
-  it("getLatestPublishedRevision 返回最大 revisionNo 的 published", async () => {
-    const r1 = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
-    const r2 = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
-    await publishRevision(tenantId, r1.id, 1);
-    // r1 publish 后 Agent.versionNo=2，r2 publish 需用 versionNo=2
-    await publishRevision(tenantId, r2.id, 2);
-    const latest = await getLatestPublishedRevision(agentId);
-    expect(latest?.id).toBe(r2.id);
-    expect(latest?.revisionNo).toBe(2);
-  });
-
-  it("getLatestPublishedRevision 无 published 返回 null", async () => {
-    await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
-    expect(await getLatestPublishedRevision(agentId)).toBeNull();
-  });
-
-  it("getLatestPublishedRevision 排除 withdrawn", async () => {
-    const r1 = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
-    const r2 = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
-    await publishRevision(tenantId, r1.id, 1);
-    await publishRevision(tenantId, r2.id, 2);
-    await withdrawRevision(r2.id);
-    // r2 withdrawn，最新 published 应为 r1
-    const latest = await getLatestPublishedRevision(agentId);
-    expect(latest?.id).toBe(r1.id);
-  });
 });
 
-// ─── 阶段验收场景（S03-W01）──────────────────────────────
+// ─── Revision 边界行为 ───────────────────────────────
 
-describe("S03-W01 阶段验收场景", () => {
+describe("AgentRevision 变更边界", () => {
   let tenantId: string;
   let ownerId: string;
   let agentId: string;
@@ -632,6 +675,9 @@ describe("S03-W01 阶段验收场景", () => {
       ownerUserId: ownerId,
     });
     agentId = agent.id;
+    defaultContractSnapshotId = (
+      await seedAgentContractSnapshot({ tenantId, agentId, createdBy: ownerId })
+    ).id;
   });
 
   it("Skill 文案更新 → AgentRevision 数量不变（应用层不生成 Revision）", async () => {
@@ -645,14 +691,21 @@ describe("S03-W01 阶段验收场景", () => {
   it("Agent 指令更新 → 生成新 Revision，旧 Revision 不可变", async () => {
     const r1 = await createDraftRevision(buildDraftParams(tenantId, agentId, ownerId));
     await publishRevision(tenantId, r1.id, 1);
-    // 指令变化生成新 Revision
+    const nextSnapshot = await seedAgentContractSnapshot({
+      tenantId,
+      agentId,
+      createdBy: ownerId,
+    });
+    // 合同/指令变化生成新 Snapshot + 新 Revision。
     const r2 = await createDraftRevision(
       buildDraftParams(tenantId, agentId, ownerId, {
-        agentContractSnapshotId: "snap_contract_v2",
+        agentContractSnapshotId: nextSnapshot.id,
       }),
     );
     await publishRevision(tenantId, r2.id, 2);
     expect(r2.revisionNo).toBe(2);
+    expect(r2.agentContractSnapshotId).toBe(nextSnapshot.id);
+    expect(r1.agentContractSnapshotId).toBe(defaultContractSnapshotId);
     // 旧 Revision r1 业务内容不可变
     await expect(
       updateDraftContent(r1.id, { modelPolicyJson: { default: "modified" } }),

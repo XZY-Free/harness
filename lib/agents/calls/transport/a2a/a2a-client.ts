@@ -1,7 +1,7 @@
 /**
  * A2A 0.3.0 AgentTransport 实现（lib/agents/calls/transport/a2a/a2a-client.ts）。
  *
- * 冻结 wire 合同（04 §4，不实现 A2A 1.x 兼容层；HR 公开合同兼容）：
+ * 冻结 A2A 0.3.0 wire 合同，不实现 A2A 1.x 兼容层：
  * - JSON-RPC over HTTP（POST {endpoint}）；
  * - Agent Card 仅 /.well-known/agent-card.json（无旧 agent.json 回退）；
  * - message/stream（SSE Task/Artifact updates）；start Message metadata 仅允许
@@ -12,36 +12,18 @@
  * - tasks/cancel；
  * - contextId / taskId 关联。
  *
- * 归属（专题01 最高级原则）：A2A 是「AgentCall → 外部 Agent」的通信协议，绝不是
+ * 归属：A2A 是「AgentCall → 外部 Agent」的通信协议，绝不是
  * Harness Runtime Protocol。本实现是 AgentTransport，不实现 RuntimeHttpClient。
  *
- * 事件归一化（04 §6）：A2A wire event 必须先进入本 Mapper → AgentCallCandidateEvent
+ * 事件归一化：A2A wire event 必须先进入本 Mapper → AgentCallCandidateEvent
  * （callId 关联）→ eventSink → AgentCallEventIngress → AgentCall state。禁止
  * Web/Desktop 解析 A2A JSON；禁止 Transport 直接更新 Turn/Item；禁止 Transport
  * 直接完成/失败/丢失 parent Invocation。
  *
- * 错误分类（04 §7）：统一抛 AgentTransportError（稳定 kind），不向调用方暴露
+ * 错误分类：统一抛 AgentTransportError（稳定 kind），不向调用方暴露
  * 供应商 SDK 异常字符串作为合同。
  */
 import { randomUUID } from "node:crypto";
-import {
-  AgentTransportAuthError,
-  AgentTransportError,
-  type AgentBackgroundFailureHandler,
-  type AgentBackgroundFailureKind,
-  type AgentCallEventSink,
-  type AgentCallTransportAuth,
-  type AgentTransport,
-  agentCallAuthHeaders,
-} from "@/lib/agents/calls/transport/agent-transport";
-import type {
-  AgentCallCandidateEvent,
-  CancelAgentCallParams,
-  GetAgentCallParams,
-  ResumeAgentCallParams,
-  StartAgentCallParams,
-  StartAgentCallResult,
-} from "@/lib/agents/calls/transport/agent-transport";
 import {
   buildA2APublicMessageMetadata,
   createA2AArtifactCache,
@@ -60,10 +42,28 @@ import type {
   JsonRpcResponse,
   a2aMessageText,
 } from "@/lib/agents/calls/transport/a2a/a2a-types";
+import {
+  type AgentBackgroundFailureHandler,
+  type AgentBackgroundFailureKind,
+  type AgentCallEventSink,
+  type AgentCallTransportAuth,
+  type AgentTransport,
+  AgentTransportAuthError,
+  AgentTransportError,
+  agentCallAuthHeaders,
+} from "@/lib/agents/calls/transport/agent-transport";
+import type {
+  AgentCallCandidateEvent,
+  CancelAgentCallParams,
+  GetAgentCallParams,
+  ResumeAgentCallParams,
+  StartAgentCallParams,
+  StartAgentCallResult,
+} from "@/lib/agents/calls/transport/agent-transport";
 
 export interface CreateA2AAgentTransportParams {
   /**
-   * 冻结的能力 profile（05 §6 二次保护）：创建时由调用方从 Binding 派生。
+   * 冻结的能力 profile：创建时由调用方从 Binding 派生。
    * cancel=false / resume=false 时对应方法在网络之前本地拒绝（unsupported_capability，
    * 网络请求次数=0）；Transport 不得用"协议方法实现存在"冒充 capability。
    */
@@ -87,13 +87,13 @@ export interface CreateA2AAgentTransportParams {
   /** 流读取超时（ms；缺省 300s）。 */
   streamTimeoutMs?: number;
   /**
-   * 背景流失败上报（06 §3）：Transport 只报告 callId/failureKind/safeSummary，
+   * 背景流失败上报：Transport 只报告 callId/failureKind/safeSummary，
    * 不直接写 DB；外层 orchestration 再调用正式 AgentCall lost/failed 转移。
    */
   onBackgroundFailure?: AgentBackgroundFailureHandler;
 }
 
-/** 抛出 JSON-RPC error 映射（04 §7 错误分类）。 */
+/** 抛出 JSON-RPC error 的稳定分类映射。 */
 function throwRpcError(error: NonNullable<JsonRpcResponse["error"]>): never {
   const code = error.code ?? 0;
   // JSON-RPC error → 稳定分类：task 不存在 → resume/correlation；-32700/-32600 系列 → protocol_schema；
@@ -113,10 +113,7 @@ function throwRpcError(error: NonNullable<JsonRpcResponse["error"]>): never {
       `A2A task 被拒绝：${error.message ?? code}`,
     );
   }
-  throw new AgentTransportError(
-    "remote_task_failed",
-    `A2A task 失败：${error.message ?? code}`,
-  );
+  throw new AgentTransportError("remote_task_failed", `A2A task 失败：${error.message ?? code}`);
 }
 
 /**
@@ -133,9 +130,7 @@ function throwRpcError(error: NonNullable<JsonRpcResponse["error"]>): never {
  * 本实现绝不触碰 parent Invocation 终态：completed/failed/lost/input-required
  * 一律落到 AgentCall，由 Harness Loop 决定顶层走向。
  */
-export function createA2AAgentTransport(
-  params: CreateA2AAgentTransportParams,
-): AgentTransport {
+export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): AgentTransport {
   const fetchImpl = params.fetchImpl ?? fetch;
   // 超时配置由调用方注入；不再二次固定回退路径。
   const streamTimeoutMs = params.streamTimeoutMs ?? 300_000;
@@ -275,7 +270,7 @@ export function createA2AAgentTransport(
         );
       }
       // Agent Card → AgentCardCapabilities（协议中立能力视图）。
-      // 05 §5：Transport 的"协议方法实现存在"不得冒充 effective capability；
+      // Transport 的“协议方法实现存在”不得冒充 effective capability；
       // cancel/resume/user_action 不无条件为 true —— effective capability
       // 来自 Conformance 的 measured 证据（Agent Card 无对应声明 → false）。
       return {
@@ -307,9 +302,7 @@ export function createA2AAgentTransport(
 
       const text = req.input;
       const existingContextId = req.existingContextId ?? null;
-      const contextMetadata = buildA2APublicMessageMetadata(
-        toContextEntries(req.contextMetadata),
-      );
+      const contextMetadata = buildA2APublicMessageMetadata(toContextEntries(req.contextMetadata));
       const rpcParams = {
         message: {
           kind: "message",
@@ -363,10 +356,7 @@ export function createA2AAgentTransport(
         );
       }
       if (!resp.ok || !resp.body) {
-        throw new AgentTransportError(
-          "protocol_schema",
-          `A2A message/stream HTTP ${resp.status}`,
-        );
+        throw new AgentTransportError("protocol_schema", `A2A message/stream HTTP ${resp.status}`);
       }
 
       // SSE 解析：等首个含 taskId 的 update 确定 correlation 后返回；
@@ -380,7 +370,7 @@ export function createA2AAgentTransport(
       let contextId: string | null = null;
       let firstError: JsonRpcResponse["error"] | null = null;
       let streamDone = false;
-      let stopped = false;
+      const stopped = false;
       // 背景失败上报 per-call（非 transport 全局）：多个独立 call 互不抑制。
       let backgroundFailureReported = false;
       const reportBackgroundFailure = async (
@@ -480,10 +470,7 @@ export function createA2AAgentTransport(
                 task.contextId.length > 0
               ) {
                 // correlation 已确立后，Task 形态也必须 exact match，否则 fail closed。
-                if (
-                  taskId !== null &&
-                  (task.id !== taskId || task.contextId !== contextId)
-                ) {
+                if (taskId !== null && (task.id !== taskId || task.contextId !== contextId)) {
                   correlationBroken = true;
                   await reportBackgroundFailure(
                     "correlation_lost",
@@ -560,7 +547,7 @@ export function createA2AAgentTransport(
         );
       }
 
-      // ─── detached stream 显式终态跟踪 + 背景失败上报（06 §5–§9）───
+      // ─── detached stream 显式终态跟踪 + 背景失败上报 ───
       // terminalObserved：明确 terminal 事件已成功进入 Ingress 后置 true；
       // waitingUserObserved：call.input_required 已成功进入 Ingress 后置 true。
       let terminalObserved = false;
@@ -572,7 +559,7 @@ export function createA2AAgentTransport(
         type === "call.cancelled" ||
         type === "call.lost";
 
-      // 批次进入归一化 AgentCallEventIngress（06 §7：只忽略 typed expected condition）。
+      // 批次进入归一化 AgentCallEventIngress；只忽略 typed expected condition。
       // 幂等重放由 ingress 静默复用（不抛错）。
       const flushBatches = async (): Promise<void> => {
         for (const batch of pendingBatches.splice(0)) {
@@ -588,10 +575,7 @@ export function createA2AAgentTransport(
               req.callId,
               "A2A 事件批次 ingress 失败",
             );
-            throw new AgentTransportError(
-              "stream_interrupted",
-              "A2A 事件批次 ingress 失败",
-            );
+            throw new AgentTransportError("stream_interrupted", "A2A 事件批次 ingress 失败");
           }
           if (batch.events.some((e) => isTerminalEvent(e.type))) terminalObserved = true;
           if (batch.events.some((e) => e.type === "call.input_required")) {
@@ -600,8 +584,8 @@ export function createA2AAgentTransport(
         }
       };
 
-      // 后台消费剩余流 → Mapper → eventSink（04 §6：只经归一化 ingress）。
-      // 06 §8：reader/network error → stream_read_failed；malformed JSON/protocol →
+      // 后台消费剩余流 → Mapper → eventSink；只经归一化 ingress。
+      // reader/network error → stream_read_failed；malformed JSON/protocol →
       // protocol_parse_failed；remote explicit terminal（failed/rejected/canceled）
       // 是协议终态（call.failed/cancelled），不是 lost。
       const consumeRest = async (): Promise<void> => {
@@ -635,7 +619,7 @@ export function createA2AAgentTransport(
         }
         // correlation 失配已上报（correlation_lost），不再冲刷/不覆盖为 EOF lost。
         if (stopped || correlationBroken) return;
-        // 正常 EOF：冲刷尾部批次后按 06 §6 判定。
+        // 正常 EOF：冲刷尾部批次后按正式终态规则判定。
         try {
           await flushBatches();
         } catch {
@@ -677,7 +661,7 @@ export function createA2AAgentTransport(
     },
 
     async resumeCall(req: ResumeAgentCallParams): Promise<void> {
-      // 05 §6：frozen profile 二次保护 —— resume=false 本地拒绝，不发任何网络请求。
+      // frozen profile 二次保护：resume=false 本地拒绝，不发任何网络请求。
       if (!params.capabilities.resume) {
         throw new AgentTransportError(
           "unsupported_capability",
@@ -687,10 +671,7 @@ export function createA2AAgentTransport(
       // 1) payload 校验（网络之前）：非空纯文本字符串（null/undefined/对象等非字符串
       //    也必须在此 fail closed，绝不在 .trim() 上抛裸 TypeError）。
       if (typeof req.text !== "string" || req.text.trim().length === 0) {
-        throw new AgentTransportError(
-          "protocol_schema",
-          "resume_payload 必须是非空纯文本",
-        );
+        throw new AgentTransportError("protocol_schema", "resume_payload 必须是非空纯文本");
       }
       const resumeText = req.text.trim();
 
@@ -703,7 +684,11 @@ export function createA2AAgentTransport(
       }
 
       // 3) next producer sequence 重定位（resume 事件；禁止回退进程内计数器）。
-      if (typeof req.nextProducerSequence !== "number" || !Number.isInteger(req.nextProducerSequence) || req.nextProducerSequence < 1) {
+      if (
+        typeof req.nextProducerSequence !== "number" ||
+        !Number.isInteger(req.nextProducerSequence) ||
+        req.nextProducerSequence < 1
+      ) {
         throw new AgentTransportError(
           "invalid_correlation",
           `next-producer-sequence 非法（call=${req.callId}）`,
@@ -744,10 +729,7 @@ export function createA2AAgentTransport(
         typeof task.contextId !== "string" ||
         !task.status
       ) {
-        throw new AgentTransportError(
-          "protocol_schema",
-          "A2A message/send 响应不是官方 Task 形态",
-        );
+        throw new AgentTransportError("protocol_schema", "A2A message/send 响应不是官方 Task 形态");
       }
       if (task.id !== req.taskId || task.contextId !== req.contextId) {
         throw new AgentTransportError(
@@ -762,12 +744,17 @@ export function createA2AAgentTransport(
 
       // 6) 终态 status 经同一 Mapper 归一化，事件序号重定位到注入的 next sequence；
       //    sink 恰一次且失败上抛，成功后才返回。
-      const events = mapAgentCallUpdate(req.callId, req.nextProducerSequence, {
-        kind: "status-update",
-        taskId: task.id,
-        contextId: task.contextId,
-        status: task.status,
-      }, artifacts);
+      const events = mapAgentCallUpdate(
+        req.callId,
+        req.nextProducerSequence,
+        {
+          kind: "status-update",
+          taskId: task.id,
+          contextId: task.contextId,
+          status: task.status,
+        },
+        artifacts,
+      );
       await params.eventSink({
         callId: req.callId,
         events,
@@ -776,7 +763,7 @@ export function createA2AAgentTransport(
     },
 
     async cancelCall(req: CancelAgentCallParams): Promise<void> {
-      // 05 §6：frozen profile 二次保护 —— cancel=false 本地拒绝，不发任何网络请求。
+      // frozen profile 二次保护：cancel=false 本地拒绝，不发任何网络请求。
       if (!params.capabilities.cancel) {
         throw new AgentTransportError(
           "unsupported_capability",
@@ -811,7 +798,9 @@ export function createA2AAgentTransport(
       }
     },
 
-    async getCall(req: GetAgentCallParams): Promise<{ state: string; taskId: string; contextId: string }> {
+    async getCall(
+      req: GetAgentCallParams,
+    ): Promise<{ state: string; taskId: string; contextId: string }> {
       const resp = await jsonRpc<{
         kind?: string;
         id?: string;

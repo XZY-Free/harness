@@ -25,6 +25,10 @@ export interface AgentPublicationContractSnapshot {
   contractDigest: string;
   capabilityDigest: string;
   contextDigest: string;
+  /** 从结构化 header/capability/context 事实现场重算的摘要。 */
+  recomputedContractDigest: string;
+  recomputedCapabilityDigest: string;
+  recomputedContextDigest: string;
 }
 
 export type AgentPublicationActorType = "user" | "service" | "workload" | "system";

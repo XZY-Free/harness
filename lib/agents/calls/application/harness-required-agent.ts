@@ -11,17 +11,17 @@ import {
 } from "@/lib/agents/calls/domain/agent-call";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 /**
- * invokeRequiredAgent — Harness Loop 消费 required Agent capability（专题01 Batch7）。
+ * invokeRequiredAgent — Harness Loop 消费 required Agent capability。
  *
- * 冻结调用链（00 §八 / 03 §15.2）：
+ * 正式调用链：
  *   Harness Loop → AgentCall application → resolve agent target → exact AgentCallBinding
  *   → AgentCall → AgentTransport/A2A → Agent Result → Harness Loop。
  *
- * 本服务是「Harness Loop → AgentCall」的确定性编排（第一阶段无通用 Planner）：
+ * 本服务是「Harness Loop → AgentCall」的确定性编排：
  * 1. 解析 Agent Route（target={kind:"agent", agentId}）；unresolved → required 无法满足 → fail closed。
  * 2. 读取 exact AgentContractSnapshot（capabilityDigest + protocol 事实，权威）。
  * 3. 装配 AgentCallBinding candidate，由 createAgentCall 最终事务冻结
- *    （endpoint/identity/credential/network 直接来自 RouteResolution — Batch4 补漏）。
+ *    （endpoint/identity/credential/network 直接来自 RouteResolution）。
  * 4. createAgentCall（sourceType=user_selected，sourceRef=Turn.id，幂等 logicalCallKey）。
  * 5. startAgentCall（A2A）。
  * 6. 只回读一次当前 durable disposition，并交回 Harness。
@@ -39,7 +39,7 @@ import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 
-// RequiredAgentUnavailableError 的冻结语义随共享冻结链移动（Batch8）；re-export 保持
+// re-export 保持 Harness 编排入口的稳定错误类型入口。
 // harness-required-agent 作为 Harness Loop 编排入口的既有类型入口不变。
 export { RequiredAgentUnavailableError } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 
@@ -54,7 +54,7 @@ export interface InvokeRequiredAgentParams {
   agentId: string;
   /** 用户输入文本（A2A start message）。 */
   input: string;
-  /** 可信调用主体（06 §6）。 */
+  /** 可信调用主体。 */
   executionSubject: ExecutionSubject | null;
   /** Agent target Route Resolver（唯一 Route Authority）。 */
   resolveRoute: RouteResolver;
@@ -73,7 +73,7 @@ export async function invokeRequiredAgent(
   const { tenantId, parentInvocationId, threadId, turnId, agentId, input } = params;
 
   // 1-3. 解析 Agent Route（唯一 Route Authority）+ 读取 exact ContractSnapshot +
-  //       装配 AgentCallBinding candidate — 共享解析链（Batch8 提取）。
+  //       装配 AgentCallBinding candidate — Harness/Gateway 共享解析链。
   const resolved: ResolvedRequiredAgentBinding = await resolveRequiredAgentBinding({
     tenantId,
     agentId,

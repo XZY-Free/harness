@@ -1,5 +1,5 @@
 /**
- * resumeAgentCall — 恢复既有 AgentCall 子执行（应用服务，专题01 Batch8 · Gateway 收口）。
+ * resumeAgentCall — 恢复既有 AgentCall 子执行。
  *
  * 冻结边界：
  * - 只 tenant-scoped 加载 existing AgentCall + exact AgentCallBinding；endpoint /
@@ -13,7 +13,8 @@
  *   绝不触碰 parent Invocation / RuntimeSessionBinding / RuntimeEventIngress。
  *
  * 事实源：
- * - 03_代码级实施方案.md §13（input-required / resume 重挂载）、§16（Gateway）。
+ * - docs/architecture/agent-control-plane.md
+ * - docs/architecture/api-and-events.md
  * - 冻结架构：AgentCall 是 child fact，resume 属于 AgentCall 子域 Authority。
  */
 import { agentCallStore } from "@/lib/agents/calls/application/agent-call-events-common";

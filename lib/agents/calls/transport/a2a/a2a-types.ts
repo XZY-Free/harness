@@ -2,7 +2,7 @@
  * A2A 0.3.0 wire 类型（lib/agents/calls/transport/a2a/a2a-types.ts）。
  *
  * A2A 是「AgentCall → 外部 Agent」的通信协议，不是 SnowHarness Runtime Protocol。
- * 本文件只定义 A2A wire 的冻结子集（04 §4，不实现 A2A 1.x 兼容层）。
+ * 本文件只定义 A2A 0.3.0 wire 的冻结子集，不实现 A2A 1.x 兼容层。
  *
  * 官方 0.3.0 合同约束：
  * - status-update 的 status.final 为必需布尔字段；
@@ -99,9 +99,7 @@ export interface A2AAgentCard {
 }
 
 /** 从 Message parts 提取文本。 */
-export function a2aMessageText(
-  message: A2AMessage | null | undefined,
-): string | null {
+export function a2aMessageText(message: A2AMessage | null | undefined): string | null {
   if (!message || !Array.isArray(message.parts)) return null;
   const texts = message.parts
     .map((p) => (typeof p?.text === "string" ? p.text : null))

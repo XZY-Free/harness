@@ -1,9 +1,9 @@
 import { agentCallStore } from "@/lib/agents/calls/application/agent-call-events-common";
 /**
  * POST /gateway/v1/agent-calls/{call_id}/cancel — 取消 AgentCall（A2A tasks/cancel）
- * （专题01 Batch8 · Gateway 收口）。
+ * 取消只改变 AgentCall 子执行，不直接修改 parent Invocation。
  *
- * 语义（03 §14）：
+ * 语义：
  *   running / waiting_user → cancelled。取消只把 AgentCall 置为 cancelled（child fact），
  *   绝不直接改 parent Invocation / Turn 终态 —— parent 由 Harness cancel authority 编排。
  *

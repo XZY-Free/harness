@@ -4,7 +4,7 @@ import {
   applyAgentCallEvents,
 } from "@/lib/agents/calls/persistence/apply-agent-call-events";
 /**
- * ingestAgentCallEvents — AgentCallEventIngress 原子应用应用服务（专题01 Batch6）。
+ * ingestAgentCallEvents — AgentCallEventIngress 原子应用服务。
  *
  * 包装 applyAgentCallEvents：一个 caller-owned MySQL 事务内原子应用整批 Agent
  * transport 候选事件到 AgentCall 子生命周期。

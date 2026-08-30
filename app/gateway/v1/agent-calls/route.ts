@@ -1,7 +1,7 @@
 /**
- * POST /gateway/v1/agent-calls — AgentCall Gateway 创建并启动（专题01 Batch8 · Gateway 收口）。
+ * POST /gateway/v1/agent-calls — AgentCall Gateway 创建并启动。
  *
- * 语义（冻结架构 §十六 / 03 §11 / §16）：
+ * 语义：
  *   Harness Runtime（或外部 Harness Runtime）通过本 Gateway 调用 Agent Capability。
  *   Runtime 绝不直接拿 Agent endpoint secret / credential —— 只走 Gateway。
  *   Gateway 负责：policy / Agent Route resolution / AgentCall Binding / context

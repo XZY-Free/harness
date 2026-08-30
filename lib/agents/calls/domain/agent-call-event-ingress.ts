@@ -1,5 +1,5 @@
 /**
- * AgentCallEventIngress — AgentCall 回传候选事件的持久批次账本（专题01 02 §六）。
+ * AgentCallEventIngress — AgentCall 回传候选事件的持久批次账本。
  *
  * 职责：对 Agent transport 回传的事件做幂等接收与归一化，防止重复处理。
  *

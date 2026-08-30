@@ -1,5 +1,5 @@
 /**
- * GET /gateway/v1/agent-calls/{call_id} — 查询 AgentCall 状态（专题01 Batch8 · Gateway 收口）。
+ * GET /gateway/v1/agent-calls/{call_id} — 查询 AgentCall 状态。
  *
  * 认证：
  *   Gateway Workload Token（audience=gateway）→ tenantId + invocationId。

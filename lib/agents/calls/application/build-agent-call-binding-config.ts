@@ -1,12 +1,12 @@
 /**
  * buildAgentCallBindingCandidate — 从 Agent Route 解析结果装配待最终验证的 candidate。
  *
- * 专题01 冻结架构：AgentCallBinding 冻结 exact AgentRevision / Contract / Publication /
+ * AgentCallBinding 冻结 exact AgentRevision / Contract / Publication /
  * Route / endpoint / credential / resolution digest / projection / policy。
  *
  * endpoint/identity/credential/network 事实直接冻结自本次 exact Agent Route 解析结果
- * （Batch4 补漏：Agent Route/RouteRevision 承载生产调用事实，RouteResolver 解析 agent
- * target 时返回，Batch7 直接冻结，不另设第二套 endpoint authority）。
+ * Agent Route/RouteRevision 承载生产调用事实，RouteResolver 解析 agent target 时返回，
+ * 调用链直接冻结，不另设第二套 endpoint authority。
  * protocol 事实以 exact AgentContractSnapshot 为权威（Route 不维护第二份协议真相），
  * 由调用方从 ContractSnapshot 提供。本 builder 只做证据装配 + fail-closed 校验。
  */
@@ -25,7 +25,7 @@ export interface AgentProtocolFacts {
 
 export interface BuildAgentCallBindingCandidateInput {
   tenantId: string;
-  /** Batch4/7 完成的 exact Agent Route 解析结果（agent target 携带 endpoint 事实）。 */
+  /** exact Agent Route 解析结果（agent target 携带 endpoint 事实）。 */
   resolution: RouteResolution;
   agentId: string;
   agentRevisionId: string;
@@ -72,7 +72,7 @@ export function buildAgentCallBindingCandidate(
     routeContentDigest: resolution.routeContentDigest,
     resolutionInputDigest: resolution.resolutionInputDigest,
     projectionVersionNo: resolution.projectionVersionNo,
-    // 直接冻结判别 target 的 exact agent route facts（Batch4 补漏；缺失即 fail-closed）。
+    // 直接冻结判别 target 的 exact agent route facts；缺失即 fail-closed。
     endpointRef: target.agentEndpointRef,
     identityMode: target.agentIdentityMode,
     credentialRefId: target.agentCredentialRefId,

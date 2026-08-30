@@ -1,5 +1,5 @@
 /**
- * AgentCallBinding — AgentCall 的不可变运行绑定（专题01 冻结架构 02 §五）。
+ * AgentCallBinding — AgentCall 的不可变运行绑定。
  *
  * 回答：某次 AgentCall 用哪个 exact AgentRevision、通过哪个部署路由、用什么协议和
  * 凭据调用哪个外部 Agent。
@@ -7,7 +7,7 @@
  * AgentCallBinding 在 AgentCall 创建时一次性冻结以下证据，之后不允许修改：
  * - exact AgentRevision + AgentContractSnapshot（contract/capability/context digest）；
  * - Agent Publication；
- * - exact Agent Route / RouteRevision / RouteActivation（Batch4 已完成 targetKind=agent）；
+ * - exact Agent Route / RouteRevision / RouteActivation（targetKind=agent）；
  * - endpoint / identity / credential reference / networkZone / protocol；
  * - resolution digest / projection version；
  * - policy / governance 等真正相关证据。
@@ -46,7 +46,7 @@ export interface AgentCallBindingConfigInput {
   /** Agent PublicationRecord.id。 */
   agentPublicationRecordId: string;
 
-  // ─── exact Agent Route（Batch4 targetKind=agent）──────────
+  // ─── exact Agent Route（targetKind=agent）──────────
   deploymentRouteId: string;
   routeRevisionId: string;
   routeActivationId: string;

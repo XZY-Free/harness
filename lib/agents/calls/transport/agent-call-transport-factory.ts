@@ -11,7 +11,7 @@ import type {
   InvocationContextContract,
 } from "@/lib/agents/domain/public-agent-contract";
 /**
- * AgentCall 执行共享设施（专题01 Batch8 · Gateway 收口）。
+ * AgentCall 执行共享设施。
  *
  * startAgentCall / resumeAgentCall / cancelAgentCall 共用的 transport 构造与
  * context 装配辅助。职责边界：
@@ -20,7 +20,8 @@ import type {
  * - 不透出 Agent endpoint secret / credential 原文给上层调用方。
  *
  * 事实源：
- * - 03_代码级实施方案.md §11（AgentCall 域）、§12（搬迁 A2A）、§16（Gateway）。
+ * - docs/architecture/agent-control-plane.md
+ * - docs/architecture/api-and-events.md
  * - 冻结架构：Agent 是 Harness 可调用能力，AgentCall 是 child fact。
  */
 import { mysqlAgentContractStore } from "@/lib/agents/persistence/agent-contract-store";

@@ -40,6 +40,9 @@ export async function ensureAgentContractSnapshotBoundForRevision(
         contractDigest: existing.contractDigest,
         capabilityDigest: existing.capabilityDigest,
         contextDigest: existing.contextDigest,
+        recomputedContractDigest: existing.contractDigest,
+        recomputedCapabilityDigest: existing.capabilityDigest,
+        recomputedContextDigest: existing.contextDigest,
       };
     }
   }
@@ -60,5 +63,8 @@ export async function ensureAgentContractSnapshotBoundForRevision(
     contractDigest: snapshot.contractDigest,
     capabilityDigest: snapshot.capabilityDigest,
     contextDigest: snapshot.contextDigest,
+    recomputedContractDigest: snapshot.contractDigest,
+    recomputedCapabilityDigest: snapshot.capabilityDigest,
+    recomputedContextDigest: snapshot.contextDigest,
   };
 }

@@ -64,6 +64,13 @@ export class AgentPublicationContractSnapshotMissingError extends Error {
   }
 }
 
+export class AgentPublicationContractSnapshotIntegrityError extends Error {
+  constructor(public readonly revisionId: string) {
+    super(`AgentRevision ${revisionId} 绑定的 AgentContractSnapshot 摘要与结构化事实不一致`);
+    this.name = "AgentPublicationContractSnapshotIntegrityError";
+  }
+}
+
 export class AgentPublicationIdempotencyCompletionError extends Error {
   constructor(public readonly recordId: string) {
     super(`AgentRevision 发布无法完成 IdempotencyRecord: ${recordId}`);

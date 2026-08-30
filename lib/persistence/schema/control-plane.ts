@@ -1,8 +1,7 @@
 /**
  * 稳定控制面 Schema 映射。
  *
- * 数据库物理表名在历史迁移兼容期继续保留 前缀；正式模块只使用本文件导出的
- * 职责命名，避免方案版本进入领域和持久化实现。
+ * 本文件只是跨控制面基础表的 import convenience；不定义第二套物理 Schema Authority。
  *
  * 生产代码应优先从独立 schema 文件导入：
  * agents.ts, runtimes.ts, routes.ts, executions.ts, artifacts.ts, publications.ts

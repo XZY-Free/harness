@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  AgentPublicationContractSnapshotIntegrityError,
   AgentPublicationContractSnapshotMissingError,
   AgentPublicationIdempotencyCompletionError,
   AgentPublicationVersionConflictError,
@@ -93,6 +94,13 @@ export function createPublishAgentRevision(dependencies: {
         : null;
       if (!snapshot || snapshot.agentId !== revision.agentId) {
         throw new AgentPublicationContractSnapshotMissingError(revision.id);
+      }
+      if (
+        snapshot.contractDigest !== snapshot.recomputedContractDigest ||
+        snapshot.capabilityDigest !== snapshot.recomputedCapabilityDigest ||
+        snapshot.contextDigest !== snapshot.recomputedContextDigest
+      ) {
+        throw new AgentPublicationContractSnapshotIntegrityError(revision.id);
       }
 
       const contractEvidence = {

@@ -1,12 +1,13 @@
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
 /**
- * AgentCall 子域事件持久化共享辅助（专题01 Batch8 · Gateway 收口）。
+ * AgentCall 子域终态事件持久化共享辅助。
  *
  * startAgentCall / resumeAgentCall / cancelAgentCall 共用的 durable 序列推进与
  * 子域终态合成。全部只落 AgentCall 子域事实，绝不触碰 parent Invocation 终态。
  *
  * 事实源：
- * - 03_代码级实施方案.md §11 / §12 / §13 / §14。
+ * - docs/architecture/agent-control-plane.md
+ * - docs/architecture/api-and-events.md
  * - 冻结架构：AgentCall 是 child fact；AgentCall completed ≠ parent Invocation completed。
  */
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";

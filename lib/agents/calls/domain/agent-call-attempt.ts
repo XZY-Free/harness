@@ -1,5 +1,5 @@
 /**
- * AgentCallAttempt — AgentCall 的尝试执行记录（专题01 02 §六）。
+ * AgentCallAttempt — AgentCall 的持久化出站尝试记录。
  *
  * - 用于幂等与唯一性：一次 AgentCall 的远端 Task 只能成功创建一个（Attempt 幂等边界）。
  * - 业务幂等键：parentInvocationId + logicalCallKey；同一 Invocation 重试不得重复创建

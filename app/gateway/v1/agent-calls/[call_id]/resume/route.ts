@@ -1,9 +1,9 @@
 import { agentCallStore } from "@/lib/agents/calls/application/agent-call-events-common";
 /**
  * POST /gateway/v1/agent-calls/{call_id}/resume — 恢复 AgentCall（A2A message/send）
- * （专题01 Batch8 · Gateway 收口）。
+ * 仅恢复既有 durable AgentCall，不创建新的逻辑调用。
  *
- * 语义（03 §13）：
+ * 语义：
  *   waiting_user → running；复用 SAME AgentCall / SAME exact AgentRevision / SAME
  *   binding / SAME external contextId；不新建顶层 Invocation，不重新解析成别的 AgentRevision。
  *
