@@ -24,7 +24,6 @@ export interface AgentDTO {
   lifecycle_state: AgentLifecycleState;
   current_revision_id: string | null;
   owner_user_id: string;
-  visibility_policy_id: string | null;
   version_no: number;
   updated_at: string | null;
 }

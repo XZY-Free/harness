@@ -58,15 +58,15 @@ export const ACTION_CODES = [
   "admin.export.completed",
   "admin.export.failed",
   "admin.operations.read",
-  // 运行时安全动作（S12-W05）：Workload Token 撤销
+  // 运行时安全动作：Workload Token 撤销
   "workload.token.revoke",
-  // 备份恢复演练动作（S12-W08）：恢复演练发起与读取
+  // 备份恢复演练动作：恢复演练发起与读取
   "recovery.drill",
-  // 安全与事故处置动作（S12-W09）：安全事件创建、隔离止损、解决
+  // 安全与事故处置动作：安全事件创建、隔离止损、解决
   "security.incident.create",
   "security.incident.isolate",
   "security.incident.resolve",
-  // ── Studio 访问动作（关口02 02-2 并入正式授权单一模型）─────────────
+  // ── Studio 访问动作 ─────────────────────────────────────
   // 解码旧 RBAC 把 scope 编进权限字符串的语义（thread.write.self / thread.read.all）：
   // Action Code = 动作，Resource Scope = 资源范围。以下为正式模型缺失的
   // Studio 长期业务动作；粗粒度租户内访问由 (tenant 资源) 表达，.self 由
@@ -80,6 +80,7 @@ export const ACTION_CODES = [
   "policy.write",
   "user.manage",
   "agent.read",
+  "agent.invoke",
   "workspace.read",
   "workspace.write",
   "analytics.read",
@@ -158,6 +159,7 @@ export const ACTION_RESOURCE_TYPES: Record<ActionCode, readonly ResourceScopeTyp
   "policy.write": ["tenant", "policy"],
   "user.manage": ["tenant"],
   "agent.read": ["tenant", "agent"],
+  "agent.invoke": ["tenant", "agent"],
   "workspace.read": ["tenant", "workspace"],
   "workspace.write": ["tenant", "workspace"],
   "analytics.read": ["tenant"],

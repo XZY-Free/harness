@@ -15,16 +15,18 @@
  * - WorkloadPrincipal callerType=service → 查 CICD_SERVICE_ALLOWED_ACTIONS（无 resource_scope 绑定）。
  * - WorkloadPrincipal callerType=workload（runtime/gateway）→ 不走 action scope（由 ExecutionBinding 约束）→ 拒绝。
  */
+import { createHash } from "node:crypto";
 import type { ApiErrorCode } from "@/lib/error-codes";
 import { apiError, generateRequestId } from "@/lib/http";
 import {
+  ACTION_RESOURCE_TYPES,
   type ActionCode,
   type ResourceScopeType,
   isKnownActionCode,
 } from "@/lib/identity/action-codes";
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
 import type { ResourceScope } from "@/lib/identity/resource-scope";
-import { scopeCovers } from "@/lib/identity/resource-scope";
+import { scopeCovers, serializeResourceScope } from "@/lib/identity/resource-scope";
 import {
   listActiveActionBindingsForUser,
   parseBindingScope,
@@ -36,6 +38,89 @@ export interface ActionScopeRequest {
   actionCode: ActionCode;
   /** 目标资源（type + id）。wildcard 绑定覆盖同 type 下所有 id；null = 基础 Harness RouteSet（无 Agent）。 */
   resource: { type: ResourceScopeType; id: string | null };
+}
+
+/** 当前主体对某个 action/resource type 的有效覆盖，用于批量查询与缓存摘要。 */
+export interface ActionScopeCoverage {
+  actionCode: ActionCode;
+  resourceType: ResourceScopeType;
+  wildcard: boolean;
+  resourceIds: readonly string[];
+  authorizationDigest: string;
+}
+
+function actionScopeCovers(
+  actionCode: ActionCode,
+  tenantId: string,
+  binding: ResourceScope,
+  requested: { type: ResourceScopeType; id: string | null },
+): boolean {
+  if (scopeCovers(binding, requested)) return true;
+  return (
+    actionCode === "agent.invoke" &&
+    requested.type === "agent" &&
+    binding.type === "tenant" &&
+    (binding.wildcard === true || binding.ids?.includes(tenantId) === true) &&
+    ACTION_RESOURCE_TYPES[actionCode].includes("tenant")
+  );
+}
+
+/**
+ * 读取当前主体对一个 action/resource type 的覆盖集合。
+ * RoleActionBinding 仍是唯一事实源；非法 scope 被忽略，空集合即全拒绝。
+ */
+export async function resolveActionScopeCoverage(
+  tenantId: string,
+  userIdentityId: string,
+  request: { actionCode: ActionCode; resourceType: ResourceScopeType },
+): Promise<ActionScopeCoverage> {
+  const bindings = isKnownActionCode(request.actionCode)
+    ? (await listActiveActionBindingsForUser(tenantId, userIdentityId)).filter(
+        (binding) => binding.actionCode === request.actionCode,
+      )
+    : [];
+  const resourceIds = new Set<string>();
+  let wildcard = false;
+  const digestFacts: string[] = [];
+
+  for (const binding of bindings) {
+    const scope = parseBindingScope(binding);
+    if (scope === null) continue;
+    const coversRequestedType =
+      scope.type === request.resourceType ||
+      (request.actionCode === "agent.invoke" &&
+        request.resourceType === "agent" &&
+        scope.type === "tenant" &&
+        (scope.wildcard === true || scope.ids?.includes(tenantId) === true) &&
+        ACTION_RESOURCE_TYPES[request.actionCode].includes("tenant"));
+    if (!coversRequestedType) continue;
+
+    if (scope.wildcard || (scope.type === "tenant" && scope.ids?.includes(tenantId) === true)) {
+      wildcard = true;
+    }
+    if (scope.type === request.resourceType) {
+      for (const id of scope.ids ?? []) resourceIds.add(id);
+    }
+    digestFacts.push(
+      JSON.stringify({
+        id: binding.id,
+        principalBindingId: binding.principalBindingId,
+        actionCode: binding.actionCode,
+        resourceScope: serializeResourceScope(scope),
+        validFrom: binding.validFrom.toISOString(),
+        validUntil: binding.validUntil?.toISOString() ?? null,
+      }),
+    );
+  }
+
+  digestFacts.sort();
+  return {
+    actionCode: request.actionCode,
+    resourceType: request.resourceType,
+    wildcard,
+    resourceIds: [...resourceIds].sort(),
+    authorizationDigest: createHash("sha256").update(JSON.stringify(digestFacts)).digest("hex"),
+  };
 }
 
 /** 授权失败原因。 */
@@ -78,12 +163,25 @@ export async function checkActionScope(
     const scope = parseBindingScope(binding);
     // DB 中存了非法 scope（不应发生）→ 跳过该绑定（fail-closed）。
     if (scope === null) continue;
-    if (scopeCovers(scope, request.resource)) {
+    if (actionScopeCovers(request.actionCode, tenantId, scope, request.resource)) {
       return { allowed: true };
     }
   }
 
   return { allowed: false, reason: "action_scope_denied" };
+}
+
+/** Turn 选择 Agent 的正式服务端授权入口。 */
+export function requireAgentInvokeScope(
+  principal: Principal | WorkloadPrincipal,
+  agentId: string,
+  requestId?: string,
+) {
+  return requireActionScope(
+    principal,
+    { actionCode: "agent.invoke", resource: { type: "agent", id: agentId } },
+    requestId,
+  );
 }
 
 /**

@@ -348,7 +348,7 @@ export async function refreshAgentCatalogEntry(params: {
     ownerUserId: agentRow.ownerUserId,
     tagsJson: null,
     lifecycleState: agentRow.lifecycleState,
-    visibilitySummary: "tenant",
+    visibilitySummary: "authorization_scoped",
     sourceUpdatedAt: agentRow.updatedAt,
   });
 }
@@ -359,7 +359,7 @@ export async function refreshAgentCatalogEntry(params: {
  * 从事实源表读取资源行并转为 CatalogEntryInput。
  *
  * 支持的类型：
- * - agent：从 Agent 读取（lifecycleState + visibilitySummary=tenant）。
+ * - agent：从 Agent 读取（lifecycleState + visibilitySummary=authorization_scoped）。
  * - skill：从 Skill 读取（lifecycleState + visibilityScope）。
  * - tool：从 Tool 读取（lifecycleState + visibilitySummary=tenant）。
  *
@@ -409,7 +409,7 @@ async function loadAgents(tenantId: string): Promise<CatalogEntryInput[]> {
     ownerUserId: row.ownerUserId,
     tagsJson: null,
     lifecycleState: row.lifecycleState,
-    visibilitySummary: "tenant",
+    visibilitySummary: "authorization_scoped",
     sourceUpdatedAt: row.updatedAt,
   }));
 }

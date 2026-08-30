@@ -14,7 +14,6 @@ function agent(id: string, name: string) {
     lifecycle_state: "draft" as const,
     current_revision_id: null,
     owner_user_id: "user-1",
-    visibility_policy_id: null,
     version_no: 1,
     updated_at: null,
   };

@@ -42,7 +42,6 @@ function projectBase(base: {
   displayName: string;
   description: string | null;
   ownerUserId: string | null;
-  visibilityPolicyId: string | null;
   indexState: string;
   lifecycleState: string;
   versionNo: string;
@@ -55,7 +54,6 @@ function projectBase(base: {
     display_name: base.displayName,
     description: base.description,
     owner_user_id: base.ownerUserId,
-    visibility_policy_id: base.visibilityPolicyId,
     index_state: base.indexState,
     lifecycle_state: base.lifecycleState,
     version_no: base.versionNo,

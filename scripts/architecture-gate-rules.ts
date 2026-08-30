@@ -19,6 +19,70 @@ export interface SourceDocument {
   source: string;
 }
 
+export interface AgentInvokeAuthorizationGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+/** Agent 发现与 Turn 选择必须共用 RoleActionBinding 授权。 */
+export function checkAgentInvokeAuthorizationGate(
+  documents: readonly SourceDocument[],
+): AgentInvokeAuthorizationGateResult {
+  const failures: string[] = [];
+  const source = (path: string) => documents.find((document) => document.path === path)?.source;
+  const actionCodes = source("lib/identity/action-codes.ts") ?? "";
+  if (!actionCodes.includes('"agent.invoke"')) {
+    failures.push("agent.invoke 未进入稳定 ActionCode 目录");
+  }
+  if (!/"agent\.invoke"\s*:\s*\["tenant",\s*"agent"\]/.test(actionCodes)) {
+    failures.push("agent.invoke resource types 不是 tenant | agent");
+  }
+
+  if (source("app/api/v1/agents/route.ts") !== undefined) {
+    failures.push("员工 /api/v1/agents 双轨入口仍存在");
+  }
+
+  for (const document of documents) {
+    if (
+      document.path.includes(".test.") ||
+      document.path === "scripts/architecture-gate-rules.ts" ||
+      document.path === "scripts/architecture-gate.ts"
+    ) {
+      continue;
+    }
+    if (/visibilityPolicyId|visibility_policy_id/.test(stripComments(document.source))) {
+      failures.push(`visibility policy 旧 Authority 仍存在：${document.path}`);
+    }
+  }
+
+  const turnRoute = source("app/api/v1/threads/[thread_id]/turns/route.ts") ?? "";
+  const authorizationIndex = turnRoute.indexOf("requireAgentInvokeScope(");
+  const idempotencyIndex = turnRoute.indexOf("enforceIdempotency(");
+  if (authorizationIndex < 0 || idempotencyIndex < 0 || authorizationIndex > idempotencyIndex) {
+    failures.push("Turn agent selection 未在幂等/写入前经过 requireAgentInvokeScope");
+  }
+
+  const catalogRoute = source("app/api/v1/catalog/options/route.ts") ?? "";
+  if (
+    !catalogRoute.includes("resolveActionScopeCoverage(") ||
+    !catalogRoute.includes("agentInvokeAuthorization") ||
+    !catalogRoute.includes("buildEmployeeCatalogEtag(")
+  ) {
+    failures.push("Employee Catalog 未绑定 agent.invoke 覆盖与授权摘要 ETag");
+  }
+
+  for (const document of documents) {
+    if (!/^(app|components|desktop)\//.test(document.path) || document.path.includes(".test.")) {
+      continue;
+    }
+    if (/['"]\/api\/v1\/agents['"]/.test(stripComments(document.source))) {
+      failures.push(`客户端仍消费员工 /api/v1/agents：${document.path}`);
+    }
+  }
+
+  return { passed: failures.length === 0, failures: [...new Set(failures)] };
+}
+
 /**
  * 收集已废弃架构表述违规路径。
  *

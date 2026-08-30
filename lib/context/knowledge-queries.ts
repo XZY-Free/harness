@@ -125,7 +125,6 @@ export async function createKnowledgeBase(params: {
   displayName: string;
   description?: string | null;
   ownerUserId?: string | null;
-  visibilityPolicyId?: string | null;
   createdBy: string;
   tx?: DbOrTx;
 }): Promise<KnowledgeBase> {
@@ -147,7 +146,6 @@ export async function createKnowledgeBase(params: {
     displayName: params.displayName,
     description: params.description ?? null,
     ownerUserId: params.ownerUserId ?? null,
-    visibilityPolicyId: params.visibilityPolicyId ?? null,
     indexState: "pending",
     lifecycleState: "active",
     versionNo: randomUUID(),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type SourceDocument,
+  checkAgentInvokeAuthorizationGate,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
   checkTopic01FinalCloseoutGate,
@@ -25,6 +26,58 @@ import {
 function doc(path: string, source: string): SourceDocument {
   return { path, source };
 }
+
+describe("checkAgentInvokeAuthorizationGate", () => {
+  const validDocuments = (): SourceDocument[] => [
+    doc(
+      "lib/identity/action-codes.ts",
+      'const ACTION_CODES = ["agent.invoke"]; const TYPES = { "agent.invoke": ["tenant", "agent"] };',
+    ),
+    doc("lib/persistence/schema/agents.ts", "export const agentTable = {}"),
+    doc("lib/agents/persistence/agent-queries.ts", "export function createAgent() {}"),
+    doc("lib/agents/application/agent-admin-projection.ts", "export function projectAgent() {}"),
+    doc("lib/control-plane-client/contracts/agent.ts", "export interface AgentDTO {}"),
+    doc(
+      "app/api/v1/threads/[thread_id]/turns/route.ts",
+      "requireAgentInvokeScope(); enforceIdempotency();",
+    ),
+    doc(
+      "app/api/v1/catalog/options/route.ts",
+      "resolveActionScopeCoverage(); agentInvokeAuthorization; buildEmployeeCatalogEtag();",
+    ),
+    doc("components/hooks/use-catalog.ts", 'fetch("/api/v1/catalog/options?resource_type=agent")'),
+  ];
+
+  it("正式 agent.invoke/Catalog/Turn 单一路径通过", () => {
+    expect(checkAgentInvokeAuthorizationGate(validDocuments())).toEqual({
+      passed: true,
+      failures: [],
+    });
+  });
+
+  it("旧员工 Agent endpoint 与 visibility Authority 被拦截", () => {
+    const documents = validDocuments();
+    documents.push(doc("app/api/v1/agents/route.ts", "export function GET() {}"));
+    documents.push(doc("components/selector.tsx", 'fetch("/api/v1/agents")'));
+    documents[1] = doc("lib/persistence/schema/agents.ts", "const visibilityPolicyId = null");
+    const result = checkAgentInvokeAuthorizationGate(documents);
+    expect(result.passed).toBe(false);
+    expect(result.failures.join("\n")).toContain("双轨入口");
+    expect(result.failures.join("\n")).toContain("旧 Authority");
+    expect(result.failures.join("\n")).toContain("客户端仍消费");
+  });
+
+  it("Turn 授权晚于幂等写入时失败", () => {
+    const documents = validDocuments();
+    documents[5] = doc(
+      "app/api/v1/threads/[thread_id]/turns/route.ts",
+      "enforceIdempotency(); requireAgentInvokeScope();",
+    );
+    expect(checkAgentInvokeAuthorizationGate(documents).failures).toContain(
+      "Turn agent selection 未在幂等/写入前经过 requireAgentInvokeScope",
+    );
+  });
+});
 
 describe("collectDeprecatedArchitectureViolations", () => {
   it("lib/runtime/test-support/fixture.ts 含 @deprecated 时返回违规（test-support 不被整体豁免）", () => {

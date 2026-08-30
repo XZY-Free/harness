@@ -11,7 +11,7 @@
  *
  * Agent 是员工目录中的一种可治理能力资产，仅在 Route 绑定时参与执行；SnowHarness
  * 始终是 Harness，Agent 不是 Thread 或基础执行的前提。Agent 保存稳定身份、负责人、
- * 可见范围和当前发布摘要。
+ * 生命周期和当前发布摘要。
  * AgentRevision 保存 Agent 的平台认可外部合同修订：绑定的 AgentContractSnapshot、模型策略、
  * 权限要求、委派范围和 Runtime 技术接口要求。Agent 对平台是源码不可见黑盒。
  *
@@ -84,8 +84,6 @@ export const agentTable = mysqlTable(
     lifecycleState: mysqlEnum("lifecycleState", AGENT_LIFECYCLE_STATES).notNull().default("draft"),
     /** 当前发布修订 id（逻辑外键 → AgentRevision.id）；null 表示未发布。 */
     currentRevisionId: varchar("currentRevisionId", { length: 36 }),
-    /** 员工使用范围策略 id（可选逻辑外键引用）。 */
-    visibilityPolicyId: varchar("visibilityPolicyId", { length: 36 }),
     /** 乐观并发版本号。 */
     versionNo: bigint("versionNo", { mode: "number" }).notNull().default(1),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 })

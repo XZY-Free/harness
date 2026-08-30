@@ -38,6 +38,7 @@ export const DEFAULT_GRANT_ACTION_CODES: ActionCode[] = [
   "policy.write",
   "user.manage",
   "agent.read",
+  "agent.invoke",
   "workspace.read",
   "workspace.write",
   "analytics.read",

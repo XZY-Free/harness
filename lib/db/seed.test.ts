@@ -85,8 +85,8 @@ describe("seedDefaultIdentity", () => {
  * 不 mock checkActionScope / 查询 / DB：走真实 MySQL 的 RoleActionBinding 行。
  * 未知 action 仍 fail-closed；Agent 空表断言保持不变。
  */
-describe("seedDefaultGrants：外部 Agent onboarding 五动作全通", () => {
-  it("seed 后 checkActionScope 对六个 onboarding action/resource 组合全部 allowed", async () => {
+describe("seedDefaultGrants：Agent 管理与调用授权", () => {
+  it("seed 后 checkActionScope 对 Agent 管理与调用的六个组合全部 allowed", async () => {
     const identity = await seedDefaultIdentity();
     await seedDefaultGrants(identity.tenantId, identity.principalBindingId);
 
@@ -94,7 +94,7 @@ describe("seedDefaultGrants：外部 Agent onboarding 五动作全通", () => {
     const agentId = randomUUID();
     const runtimeId = randomUUID();
 
-    const onboardingRequests = [
+    const authorizedRequests = [
       // 1. 注册 Agent 合同（route: agent-registrations，pre-create → id=null）
       { actionCode: "agent.contract.register", resource: { type: "agent", id: null } },
       // 2. 创建 AgentRevision（route: agents/[agent_id]/revisions）
@@ -105,9 +105,11 @@ describe("seedDefaultGrants：外部 Agent onboarding 五动作全通", () => {
       { actionCode: "runtime.publish", resource: { type: "runtime", id: runtimeId } },
       // 5. 发布员工路由（route: deployment-route-sets / hosted-provisioning）
       { actionCode: "route.update", resource: { type: "agent", id: agentId } },
+      // 6. 员工调用租户内 Agent（tenant scope 覆盖 exact Agent）。
+      { actionCode: "agent.invoke", resource: { type: "agent", id: agentId } },
     ] as const;
 
-    for (const request of onboardingRequests) {
+    for (const request of authorizedRequests) {
       const decision = await checkActionScope(identity.tenantId, identity.userIdentityId, request);
       expect(decision, `${request.actionCode} 应被默认授权`).toEqual({ allowed: true });
     }

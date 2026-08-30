@@ -120,14 +120,6 @@ export const TOOL_PROVIDER_ETAG_PREFIX = "tool-provider-";
 export const CONNECTION_ETAG_PREFIX = "connection-";
 
 /**
- * Catalog Revision ETag 前缀：`catalog-{tenantId}-{audience}-{revisionNo}`（阶段 6 S06-C03）。
- *
- * 员工目录 API 用此 ETag 实现 If-None-Match 短路径 304。
- * 完整 ETag 值由 route handler 拼接（含 tenantId 与 audience，保证跨租户/跨受众不混淆）。
- */
-export const CATALOG_REVISION_ETAG_PREFIX = "catalog-";
-
-/**
  * 从 RouteSet ETag 字符串提取 versionNo。
  *
  * ETag 格式：`route-set-{versionNo}`（如 `route-set-13`）。
@@ -289,50 +281,6 @@ export function parseConnectionEtag(etag: string): number {
     throw new Error(`非法 Connection ETag 版本号: ${etag}`);
   }
   return versionNo;
-}
-
-/**
- * 构造 Catalog Revision ETag 字符串（阶段 6 S06-C03）。
- *
- * ETag 格式：`catalog-{tenantId}-{audience}-{revisionNo}`
- * （如 `catalog-00000000-0000-4000-8000-000000000000-employee-7`）。
- * 客户端用此值作 If-None-Match 短路径 304。
- */
-export function buildCatalogRevisionEtag(
-  tenantId: string,
-  audience: "employee" | "runtime",
-  revisionNo: number,
-): string {
-  return `${CATALOG_REVISION_ETAG_PREFIX}${tenantId}-${audience}-${revisionNo}`;
-}
-
-/**
- * 从 Catalog Revision ETag 字符串提取 revisionNo（阶段 6 S06-C03）。
- *
- * ETag 格式：`catalog-{tenantId}-{audience}-{revisionNo}`。
- * 解析失败抛错（route 层应捕获并返回 400 CATALOG_REVISION_INVALID）。
- *
- * @throws Error ETag 格式非法
- */
-export function parseCatalogRevisionEtag(etag: string): number {
-  if (!etag.startsWith(CATALOG_REVISION_ETAG_PREFIX)) {
-    throw new Error(
-      `非法 Catalog Revision ETag: ${etag}（期望前缀 ${CATALOG_REVISION_ETAG_PREFIX}）`,
-    );
-  }
-  // 形如 catalog-{tenantId}-{audience}-{revisionNo}：tenantId 含 4 个 '-'，audience 无 '-'，revisionNo 无 '-'。
-  // 直接取最后一个 '-' 后的部分作为 revisionNo。
-  const body = etag.slice(CATALOG_REVISION_ETAG_PREFIX.length);
-  const lastDashIdx = body.lastIndexOf("-");
-  if (lastDashIdx <= 0) {
-    throw new Error(`非法 Catalog Revision ETag: ${etag}`);
-  }
-  const revisionStr = body.slice(lastDashIdx + 1);
-  const revisionNo = Number.parseInt(revisionStr, 10);
-  if (!Number.isFinite(revisionNo) || revisionNo < 0) {
-    throw new Error(`非法 Catalog Revision ETag 版本号: ${etag}`);
-  }
-  return revisionNo;
 }
 
 // ─── 错误响应工具 ──────────────────────────────────────────

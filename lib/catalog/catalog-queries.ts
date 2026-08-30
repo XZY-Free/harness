@@ -20,6 +20,7 @@
  * - cursor 编码：base64url(JSON({catalogRevision, id}))；按 catalogRevision 降序 + id 升序游标。
  */
 import { db } from "@/lib/db/client";
+import type { ActionScopeCoverage } from "@/lib/identity/authorization";
 import { agentTable } from "@/lib/persistence/schema/agents";
 import {
   type CatalogEntry,
@@ -110,6 +111,24 @@ function employeeExecutableAgentGate(routeScopeKey: string) {
   )`;
 }
 
+/** Employee Agent 授权门禁：非 Agent 不受影响；Agent 只接受 agent.invoke 覆盖。 */
+function employeeAgentAuthorizationGate(coverage: ActionScopeCoverage | undefined) {
+  if (!coverage || coverage.actionCode !== "agent.invoke" || coverage.resourceType !== "agent") {
+    return sql`${catalogEntryTable.resourceType} <> 'agent'`;
+  }
+  if (coverage.wildcard) return sql`1 = 1`;
+  if (coverage.resourceIds.length === 0) {
+    return sql`${catalogEntryTable.resourceType} <> 'agent'`;
+  }
+  return sql`(
+    ${catalogEntryTable.resourceType} <> 'agent'
+    OR ${catalogEntryTable.resourceId} IN (${sql.join(
+      coverage.resourceIds.map((id) => sql`${id}`),
+      sql`, `,
+    )})
+  )`;
+}
+
 // ─── listCatalogOptions ───────────────────────────────────
 
 /** listCatalogOptions 入参。 */
@@ -129,6 +148,8 @@ export interface ListCatalogOptionsParams {
    * 不传则不启用门禁（Admin Catalog 查询不受影响）。
    */
   agentExecutableRouteScopeKey?: string;
+  /** 当前主体的 agent.invoke 覆盖；由 Employee API 从 RoleActionBinding 解析。 */
+  agentInvokeAuthorization?: ActionScopeCoverage;
 }
 
 /** listCatalogOptions 返回。 */
@@ -168,6 +189,9 @@ export async function listCatalogOptions(
 
   if (params.agentExecutableRouteScopeKey) {
     conditions.push(employeeExecutableAgentGate(params.agentExecutableRouteScopeKey));
+  }
+  if (params.agentExecutableRouteScopeKey || params.agentInvokeAuthorization) {
+    conditions.push(employeeAgentAuthorizationGate(params.agentInvokeAuthorization));
   }
 
   if (params.cursor) {
@@ -236,6 +260,8 @@ export interface SearchCatalogParams {
    * 不传则不启用门禁（Admin Catalog 查询不受影响）。
    */
   agentExecutableRouteScopeKey?: string;
+  /** 当前主体的 agent.invoke 覆盖；由 Employee API 从 RoleActionBinding 解析。 */
+  agentInvokeAuthorization?: ActionScopeCoverage;
 }
 
 /** searchCatalog 返回。 */
@@ -280,6 +306,9 @@ export async function searchCatalog(params: SearchCatalogParams): Promise<Search
 
   if (params.agentExecutableRouteScopeKey) {
     conditions.push(employeeExecutableAgentGate(params.agentExecutableRouteScopeKey));
+  }
+  if (params.agentExecutableRouteScopeKey || params.agentInvokeAuthorization) {
+    conditions.push(employeeAgentAuthorizationGate(params.agentInvokeAuthorization));
   }
 
   if (params.cursor) {

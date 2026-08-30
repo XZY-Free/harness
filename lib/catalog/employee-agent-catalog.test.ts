@@ -23,7 +23,6 @@ import { randomUUID } from "node:crypto";
  * 环境：APP_ENV=test + SNOW_AUTH_MODE=dev（员工身份 = DEFAULT_USER，默认租户）。
  */
 import { GET as catalogOptionsGET } from "@/app/api/v1/catalog/options/route";
-import { parseCatalogRevisionEtag } from "@/lib/admin/route-helpers";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { createWithdrawAgentRevision } from "@/lib/agents/application/withdraw-agent-revision";
 import { getAgentById } from "@/lib/agents/persistence/agent-queries";
@@ -32,13 +31,16 @@ import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries
 import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { mysqlAgentWithdrawalStore } from "@/lib/agents/persistence/mysql-agent-withdrawal-store";
 import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
-import { getCatalogEntryByResource } from "@/lib/catalog/catalog-queries";
+import { getCatalogEntryByResource, listCatalogOptions } from "@/lib/catalog/catalog-queries";
+import { parseEmployeeCatalogEtag } from "@/lib/catalog/employee-catalog-etag";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { controlPlaneEventDelivery } from "@/lib/control-plane/events/control-plane-event-delivery";
 import { createOutboxRelayWorker } from "@/lib/control-plane/events/outbox-relay-worker";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
+import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding, revokeActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import { tenant } from "@/lib/persistence/schema/identity";
@@ -108,7 +110,7 @@ async function drainUntilProjectionState(
 
 // ─── 装配：员工身份 + 正式控制面命令 ────────────────────────
 
-async function seedEmployeeTenant() {
+async function seedEmployeeTenant(options: { grantInvoke?: boolean } = {}) {
   const tenant = await ensureDefaultTenant();
   const identity = await upsertUserIdentity({
     tenantId: tenant.id,
@@ -116,7 +118,29 @@ async function seedEmployeeTenant() {
     email: DEFAULT_USER_EMAIL,
     displayName: DEFAULT_USER_NAME,
   });
-  return { tenantId: tenant.id, ownerId: identity.id };
+  const principalBinding = await upsertPrincipalBinding({
+    tenantId: tenant.id,
+    subjectType: "user",
+    externalId: DEFAULT_USER_ID,
+    displayName: DEFAULT_USER_NAME,
+    userIdentityId: identity.id,
+  });
+  let invokeBindingId: string | null = null;
+  if (options.grantInvoke !== false) {
+    const invokeBinding = await grantActionBinding({
+      tenantId: tenant.id,
+      principalBindingId: principalBinding.id,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "tenant", wildcard: true },
+    });
+    invokeBindingId = invokeBinding.id;
+  }
+  return {
+    tenantId: tenant.id,
+    ownerId: identity.id,
+    principalBindingId: principalBinding.id,
+    invokeBindingId,
+  };
 }
 
 /** 创建 draft Agent + 已绑定合同快照的 draft AgentRevision（不发布）。 */
@@ -189,6 +213,36 @@ async function activateDefaultRouteFormal(params: {
   });
 }
 
+async function seedEligibleAgent(params: {
+  tenantId: string;
+  ownerId: string;
+  agentKey: string;
+}) {
+  const { agent, revision } = await seedDraftAgent(
+    params.tenantId,
+    params.ownerId,
+    params.agentKey,
+  );
+  await publishAgentRevisionFormal(params.tenantId, revision.id);
+  const routeSet = await createRouteSet({
+    tenantId: params.tenantId,
+    target: { kind: "agent", agentId: agent.id },
+    routeScopeKey: "default",
+    routeScopeJson: { networkZone: "internal" },
+  });
+  const activated = await activateDefaultRouteFormal({
+    tenantId: params.tenantId,
+    routeSetId: routeSet.id,
+    expectedVersionNo: routeSet.versionNo,
+    agentRevisionId: revision.id,
+  });
+  const activation = activated.activations[0];
+  if (!activation) throw new Error("eligible Agent 用例缺少 RouteActivation");
+  const worker = buildRealOutboxWorker();
+  await drainUntilProjectionState(worker, activation.routeId, "eligible");
+  return { agent, revision, routeSet, activated, activation, worker };
+}
+
 // ─── 装配：真实 Employee Catalog API 调用 ──────────────────
 
 interface CatalogApiResponse {
@@ -197,6 +251,7 @@ interface CatalogApiResponse {
     resource_id: string;
     display_name: string;
     lifecycle_state: string;
+    visibility_summary: string;
   }>;
   next_cursor: string | null;
   catalog_revision: number;
@@ -230,6 +285,85 @@ function rawEtagFrom(response: Response): string {
 // ═══════════════════════════════════════════════════════════
 
 describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => {
+  it("旧 catalog revision ETag 不兼容解析，明确返回 400", async () => {
+    await seedEmployeeTenant();
+    const response = await callEmployeeAgentCatalog({
+      "if-none-match": '"catalog-00000000-0000-4000-8000-000000000000-employee-0"',
+    });
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("CATALOG_REVISION_INVALID");
+  });
+
+  it("无 agent.invoke binding：Agent 已 enabled/eligible 仍隐藏", async () => {
+    const { tenantId, ownerId } = await seedEmployeeTenant({ grantInvoke: false });
+    const { agent } = await seedEligibleAgent({
+      tenantId,
+      ownerId,
+      agentKey: "eligible-without-invoke",
+    });
+
+    const body = await readCatalogItems(await callEmployeeAgentCatalog());
+    expect(body.items.map((item) => item.resource_id)).not.toContain(agent.id);
+    const directQuery = await listCatalogOptions({
+      tenantId,
+      resourceTypes: ["agent"],
+      lifecycleStates: ["enabled"],
+      agentExecutableRouteScopeKey: "default",
+    });
+    expect(directQuery.items).toHaveLength(0);
+  });
+
+  it("agent exact scope：多个 eligible Agent 中只返回授权目标，list/search 语义一致", async () => {
+    const { tenantId, ownerId, principalBindingId } = await seedEmployeeTenant({
+      grantInvoke: false,
+    });
+    const first = await seedEligibleAgent({ tenantId, ownerId, agentKey: "exact-agent-a" });
+    const second = await seedEligibleAgent({ tenantId, ownerId, agentKey: "exact-agent-b" });
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "agent", ids: [first.agent.id] },
+    });
+
+    const listed = await readCatalogItems(await callEmployeeAgentCatalog());
+    expect(listed.items.map((item) => item.resource_id)).toEqual([first.agent.id]);
+
+    const searched = await catalogOptionsGET(
+      buildApiRequest({
+        audience: "employee",
+        method: "GET",
+        path: "/catalog/options?resource_type=agent&lifecycle_state=enabled&q=Agent",
+      }),
+    );
+    const searchedBody = await readCatalogItems(searched);
+    expect(searchedBody.items.map((item) => item.resource_id)).toEqual([first.agent.id]);
+    expect(searchedBody.items.map((item) => item.resource_id)).not.toContain(second.agent.id);
+  });
+
+  it("撤销 agent.invoke 后授权摘要改变：旧 ETag 不得 304 且 Agent 立即隐藏", async () => {
+    const { tenantId, ownerId, invokeBindingId } = await seedEmployeeTenant();
+    const { agent } = await seedEligibleAgent({
+      tenantId,
+      ownerId,
+      agentKey: "authorization-etag-agent",
+    });
+    if (!invokeBindingId) throw new Error("授权 ETag 用例缺少 invoke binding");
+
+    const first = await callEmployeeAgentCatalog();
+    const firstBody = await readCatalogItems(first);
+    expect(firstBody.items.map((item) => item.resource_id)).toContain(agent.id);
+    const firstEtag = rawEtagFrom(first);
+
+    expect(await revokeActionBinding(tenantId, invokeBindingId)).toBe(true);
+    const second = await callEmployeeAgentCatalog({ "if-none-match": `"${firstEtag}"` });
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as CatalogApiResponse;
+    expect(secondBody.items).toHaveLength(0);
+    expect(secondBody.catalog_revision).toBe(firstBody.catalog_revision);
+    expect(rawEtagFrom(second)).not.toBe(firstEtag);
+  });
+
   it("1. Agent 仍 draft / 合同已登记但未发布 → 实际 API 返回空", async () => {
     const { tenantId, ownerId } = await seedEmployeeTenant();
     const { agent, revision } = await seedDraftAgent(tenantId, ownerId, "draft-only-agent");
@@ -304,6 +438,7 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
       resource_id: agent.id,
       display_name: agent.displayName,
       lifecycle_state: "enabled",
+      visibility_summary: "authorization_scoped",
     });
   });
 
@@ -478,7 +613,7 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     const firstBody = await readCatalogItems(first);
     expect(firstBody.items.map((item) => item.resource_id)).toContain(agent.id);
     const firstEtag = rawEtagFrom(first);
-    const firstRevision = parseCatalogRevisionEtag(firstEtag);
+    const firstRevision = parseEmployeeCatalogEtag(firstEtag).catalogRevision;
 
     await createDisableRoute({ store: mysqlRouteSetActivationStore })({
       tenantId,
@@ -497,7 +632,7 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     const secondBody = (await second.json()) as CatalogApiResponse;
     expect(secondBody.items).toHaveLength(0);
     const secondEtag = rawEtagFrom(second);
-    const secondRevision = parseCatalogRevisionEtag(secondEtag);
+    const secondRevision = parseEmployeeCatalogEtag(secondEtag).catalogRevision;
     expect(secondRevision).toBeGreaterThan(firstRevision);
     expect(secondBody.catalog_revision).toBe(secondRevision);
     expect(secondBody.catalog_revision).toBeGreaterThan(firstBody.catalog_revision);

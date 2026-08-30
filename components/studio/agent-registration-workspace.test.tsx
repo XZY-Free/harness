@@ -83,7 +83,6 @@ const hrAgent: AgentDTO = {
   lifecycle_state: "draft",
   current_revision_id: null,
   owner_user_id: "user-1",
-  visibility_policy_id: null,
   version_no: 1,
   updated_at: "2026-08-26T00:00:00.000Z",
 };

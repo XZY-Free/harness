@@ -16,7 +16,6 @@ export function projectAgentAdmin(agent: AgentRow): AgentDTO {
     lifecycle_state: agent.lifecycleState,
     current_revision_id: agent.currentRevisionId,
     owner_user_id: agent.ownerUserId,
-    visibility_policy_id: agent.visibilityPolicyId,
     version_no: agent.versionNo,
     updated_at: agent.updatedAt.toISOString(),
   };

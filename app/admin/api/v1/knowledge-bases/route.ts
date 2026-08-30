@@ -61,7 +61,6 @@ interface CreateBody {
   display_name: string;
   description?: string;
   owner_user_id?: string;
-  visibility_policy_id?: string;
 }
 
 function validateBody(body: unknown): body is CreateBody {
@@ -71,8 +70,6 @@ function validateBody(body: unknown): body is CreateBody {
   if (typeof b.display_name !== "string" || b.display_name.length === 0) return false;
   if (b.description !== undefined && typeof b.description !== "string") return false;
   if (b.owner_user_id !== undefined && typeof b.owner_user_id !== "string") return false;
-  if (b.visibility_policy_id !== undefined && typeof b.visibility_policy_id !== "string")
-    return false;
   return true;
 }
 
@@ -96,7 +93,6 @@ function projectBase(base: {
   displayName: string;
   description: string | null;
   ownerUserId: string | null;
-  visibilityPolicyId: string | null;
   indexState: string;
   lifecycleState: string;
   versionNo: string;
@@ -109,7 +105,6 @@ function projectBase(base: {
     display_name: base.displayName,
     description: base.description,
     owner_user_id: base.ownerUserId,
-    visibility_policy_id: base.visibilityPolicyId,
     index_state: base.indexState,
     lifecycle_state: base.lifecycleState,
     version_no: base.versionNo,
@@ -249,7 +244,6 @@ export async function POST(request: Request): Promise<Response> {
       displayName: body.display_name,
       description: body.description ?? null,
       ownerUserId: body.owner_user_id ?? null,
-      visibilityPolicyId: body.visibility_policy_id ?? null,
       createdBy: createdByFromAdminPrincipal(principal),
     });
 

@@ -112,8 +112,6 @@ export const knowledgeBase = mysqlTable(
     description: text("description"),
     /** 所有者用户 id（逻辑外键 → UserIdentity.id）。 */
     ownerUserId: varchar("ownerUserId", { length: 36 }),
-    /** 可见性策略 id（逻辑外键 → PolicySet.id；null 表示租户默认策略）。 */
-    visibilityPolicyId: varchar("visibilityPolicyId", { length: 36 }),
     /** 索引状态（base 级聚合；document_revision 级有独立 index_state）。 */
     indexState: mysqlEnum("indexState", KNOWLEDGE_INDEX_STATES).notNull().default("pending"),
     lifecycleState: mysqlEnum("lifecycleState", KNOWLEDGE_BASE_LIFECYCLE_STATES)

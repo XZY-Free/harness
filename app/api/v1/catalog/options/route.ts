@@ -1,4 +1,3 @@
-import { buildCatalogRevisionEtag, parseCatalogRevisionEtag } from "@/lib/admin/route-helpers";
 import {
   CatalogQueryError,
   type CatalogSearchItem,
@@ -7,6 +6,10 @@ import {
   listCatalogOptions,
   searchCatalog,
 } from "@/lib/catalog/catalog-queries";
+import {
+  buildEmployeeCatalogEtag,
+  parseEmployeeCatalogEtag,
+} from "@/lib/catalog/employee-catalog-etag";
 import { getCurrentCatalogRevision } from "@/lib/catalog/projector";
 /**
  * GET /api/v1/catalog/options — Employee Catalog API（阶段 6 S06-C03）。
@@ -17,9 +20,9 @@ import { getCurrentCatalogRevision } from "@/lib/catalog/projector";
  * 行为：
  * - 解析员工身份（employee audience）。
  * - 支持查询参数：resource_type（逗号分隔）、lifecycle_state（逗号分隔）、limit、cursor、q（搜索关键词）。
- * - If-None-Match 短路径：客户端 ETag 与当前 catalogRevision 匹配时返回 304 Not Modified
+ * - If-None-Match 短路径：客户端 ETag 与当前 catalogRevision + 授权摘要匹配时返回 304
  *   （仅当无 q 搜索时生效；搜索结果可能因内容匹配变化，不参与短路径）。
- * - 200 响应附带 ETag 头（catalog-{tenantId}-employee-{revisionNo}）。
+ * - 200 响应附带 Employee Catalog 不透明 ETag。
  *
  * 错误映射：
  * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
@@ -35,6 +38,7 @@ import {
 } from "@/lib/conversations/route-helpers";
 import { API_ERROR_CODES } from "@/lib/error-codes";
 import { REQUEST_ID_HEADER, apiSuccess, etagHeader, getRequestId } from "@/lib/http";
+import { resolveActionScopeCoverage } from "@/lib/identity/authorization";
 import type { CatalogResourceType } from "@/lib/persistence/schema/catalog";
 
 export const dynamic = "force-dynamic";
@@ -139,22 +143,33 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   // 3. 处理 If-None-Match 短路径（仅 listCatalogOptions 适用；searchQuery 不参与短路径）
-  const currentRevision = await getCurrentCatalogRevision({
+  const [currentRevision, agentInvokeAuthorization] = await Promise.all([
+    getCurrentCatalogRevision({ tenantId: principal.tenantId, audience: "employee" }),
+    resolveActionScopeCoverage(principal.tenantId, principal.userIdentityId, {
+      actionCode: "agent.invoke",
+      resourceType: "agent",
+    }),
+  ]);
+  const currentEtag = buildEmployeeCatalogEtag({
     tenantId: principal.tenantId,
-    audience: "employee",
+    catalogRevision: currentRevision,
+    authorizationDigest: agentInvokeAuthorization.authorizationDigest,
   });
-  const currentEtag = buildCatalogRevisionEtag(principal.tenantId, "employee", currentRevision);
 
   if (!searchQuery) {
     const ifNoneMatch = parseIfNoneMatch(request);
     if (ifNoneMatch) {
-      let parsedRevision: number;
+      let parsed: ReturnType<typeof parseEmployeeCatalogEtag>;
       try {
-        parsedRevision = parseCatalogRevisionEtag(ifNoneMatch);
+        parsed = parseEmployeeCatalogEtag(ifNoneMatch);
       } catch {
         return catalogRevisionInvalid(requestId, `If-None-Match 格式非法: ${ifNoneMatch}`);
       }
-      if (parsedRevision === currentRevision) {
+      if (
+        parsed.tenantId === principal.tenantId &&
+        parsed.catalogRevision === currentRevision &&
+        parsed.authorizationDigest === agentInvokeAuthorization.authorizationDigest
+      ) {
         // 短路径：目录未变化，返回 304
         return new Response(null, {
           status: 304,
@@ -187,6 +202,7 @@ export async function GET(request: Request): Promise<Response> {
         limit,
         cursor: cursor ?? null,
         agentExecutableRouteScopeKey: "default",
+        agentInvokeAuthorization,
       });
       result = searchResult;
     } else {
@@ -197,6 +213,7 @@ export async function GET(request: Request): Promise<Response> {
         limit,
         cursor: cursor ?? null,
         agentExecutableRouteScopeKey: "default",
+        agentInvokeAuthorization,
       });
       result = listResult;
     }

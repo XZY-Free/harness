@@ -71,10 +71,12 @@ test.describe("§20.5 Desktop 正式执行链", () => {
 
     // Fresh DB：真实 Agent 目录必须为空数组；Desktop 的 Agent API 请求必须指向 E2E_ORIGIN
     //（Desktop 只把服务端当 API 提供方，UI 来自本机打包 renderer，§0.8）。
-    const agentsResponse = await request.get(`${E2E_ORIGIN}/api/v1/agents`);
+    const agentsResponse = await request.get(
+      `${E2E_ORIGIN}/api/v1/catalog/options?resource_type=agent&lifecycle_state=enabled`,
+    );
     expect(agentsResponse.status()).toBe(200);
-    const agentsBody = (await agentsResponse.json()) as { agents: readonly unknown[] };
-    expect(agentsBody.agents).toEqual([]);
+    const agentsBody = (await agentsResponse.json()) as { items: readonly unknown[] };
+    expect(agentsBody.items).toEqual([]);
 
     // Agent selector 空态：触发按钮可点（aria-label 稳定为"助手"），打开 popover
     // 后必须显示权威要求的空态文案「还没有智能体」（§24.1/§25：不阻止输入，不伪造 Agent）。

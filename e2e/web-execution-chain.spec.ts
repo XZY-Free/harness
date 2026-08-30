@@ -102,10 +102,12 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   expect(initialPath).not.toContain("/new");
 
   // Fresh DB：真实 Agent 目录必须为空数组（§24.1 count=0），不能 fallback 出任何 Agent。
-  const agentsResponse = await request.get("/api/v1/agents");
+  const agentsResponse = await request.get(
+    "/api/v1/catalog/options?resource_type=agent&lifecycle_state=enabled",
+  );
   expect(agentsResponse.status()).toBe(200);
-  const agentsBody = (await agentsResponse.json()) as { agents: readonly unknown[] };
-  expect(agentsBody.agents).toEqual([]);
+  const agentsBody = (await agentsResponse.json()) as { items: readonly unknown[] };
+  expect(agentsBody.items).toEqual([]);
 
   // Agent selector 空态：触发按钮可点（aria-label 稳定为"助手"），打开 popover
   // 后必须显示权威要求的空态文案「还没有智能体」（§24.1/§25：不阻止输入，不伪造 Agent）。

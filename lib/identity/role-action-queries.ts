@@ -155,7 +155,7 @@ export async function listActiveActionBindingsForUser(
 ): Promise<RoleActionBinding[]> {
   const all = await listActionBindingsByUser(tenantId, userIdentityId);
   const now = new Date();
-  return all.filter((b) => b.validUntil === null || b.validUntil > now);
+  return all.filter((b) => b.validFrom <= now && (b.validUntil === null || b.validUntil > now));
 }
 
 /** 按 id 获取绑定。不存在返回 null。 */

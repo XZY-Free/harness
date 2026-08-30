@@ -10,7 +10,7 @@
  * 旧权限字符串 → 正式 Action Code + Resource Scope 解码：
  * - `.all`（thread.read.all / analytics.read.global 等）→ (tenant, wildcard)。
  * - `.self`（thread.write.self / analytics.read.self）→ (self, wildcard)。
- * - ADMIN = 13 个 Studio 动作码全量；其中 thread.read/thread.write 给 tenant + self
+ * - ADMIN = Studio 动作码全量；其中 thread.read/thread.write 给 tenant + self
  *   双态（默认用户要能过 requireStudioAction(…, {type:"self"}) 门禁，而 tenant grant
  *   不覆盖 self 请求资源——scopeCovers 要求 type 相同）。
  * - MEMBER 仅基础动作，thread.read/thread.write 仅 self 态（member 只能操作自己的 thread）。
@@ -37,7 +37,7 @@ export interface RoleTemplate {
 const tenant = (): ResourceScope => ({ type: "tenant", wildcard: true });
 const self = (): ResourceScope => ({ type: "self", wildcard: true });
 
-/** ADMIN：13 个 Studio 动作码；thread 双态（tenant + self）。 */
+/** ADMIN：Studio 动作码全量；thread 双态（tenant + self）。 */
 const ADMIN_GRANTS: RoleTemplateGrant[] = [
   { actionCode: "studio.access", resourceScope: tenant() },
   { actionCode: "skill.read", resourceScope: tenant() },
@@ -50,6 +50,7 @@ const ADMIN_GRANTS: RoleTemplateGrant[] = [
   { actionCode: "policy.write", resourceScope: tenant() },
   { actionCode: "user.manage", resourceScope: tenant() },
   { actionCode: "agent.read", resourceScope: tenant() },
+  { actionCode: "agent.invoke", resourceScope: tenant() },
   { actionCode: "workspace.read", resourceScope: tenant() },
   { actionCode: "workspace.write", resourceScope: tenant() },
   { actionCode: "analytics.read", resourceScope: tenant() },
@@ -64,6 +65,7 @@ const MEMBER_GRANTS: RoleTemplateGrant[] = [
   { actionCode: "thread.write", resourceScope: self() },
   { actionCode: "policy.read", resourceScope: tenant() },
   { actionCode: "agent.read", resourceScope: tenant() },
+  { actionCode: "agent.invoke", resourceScope: tenant() },
   { actionCode: "workspace.read", resourceScope: tenant() },
   { actionCode: "analytics.read", resourceScope: tenant() },
 ];

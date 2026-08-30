@@ -1060,13 +1060,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "visibilityPolicyId": {
-          "name": "visibilityPolicyId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "versionNo": {
           "name": "versionNo",
           "type": "bigint",
@@ -8086,13 +8079,6 @@
         },
         "ownerUserId": {
           "name": "ownerUserId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "visibilityPolicyId": {
-          "name": "visibilityPolicyId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,

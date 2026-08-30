@@ -23,6 +23,7 @@ import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/co
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
+import { grantActionBinding } from "@/lib/identity/role-action-queries";
 import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
 import { upsertUserIdentity } from "@/lib/identity/user-identity-queries";
 import type { AgentRevision } from "@/lib/persistence/schema/agents";
@@ -51,14 +52,14 @@ async function seedTenantAndOwner() {
     email: DEFAULT_USER_EMAIL,
     displayName: DEFAULT_USER_NAME,
   });
-  await upsertPrincipalBinding({
+  const binding = await upsertPrincipalBinding({
     tenantId: tenant.id,
     subjectType: "user",
     externalId: DEFAULT_USER_ID,
     displayName: DEFAULT_USER_NAME,
     userIdentityId: identity.id,
   });
-  return { tenantId: tenant.id, ownerId: identity.id };
+  return { tenantId: tenant.id, ownerId: identity.id, principalBindingId: binding.id };
 }
 
 // ─── seed Agent + published AgentRevision ────────────────────
@@ -116,6 +117,7 @@ export interface DispatchableTurnContext {
   threadId: string;
   turnId: string;
   triggerItemId: string | null;
+  agentInvokeBindingId: string | null;
 }
 
 /**
@@ -124,13 +126,18 @@ export interface DispatchableTurnContext {
  * @param overrides 可选的 agentKey / runtimeKey / contentSuffix，便于并发测试隔离。
  */
 export async function seedDispatchableTurn(
-  overrides: { agentKey?: string; runtimeKey?: string; contentSuffix?: string } = {},
+  overrides: {
+    agentKey?: string;
+    runtimeKey?: string;
+    contentSuffix?: string;
+    grantAgentInvoke?: boolean;
+  } = {},
 ): Promise<DispatchableTurnContext> {
   const suffix = overrides.contentSuffix ?? randomUUID().slice(0, 8);
   const agentKey = overrides.agentKey ?? `finance-${suffix}`;
   const runtimeKey = overrides.runtimeKey ?? `hosted-${suffix}`;
 
-  const { tenantId, ownerId } = await seedTenantAndOwner();
+  const { tenantId, ownerId, principalBindingId } = await seedTenantAndOwner();
 
   const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
     tenantId,
@@ -139,6 +146,15 @@ export async function seedDispatchableTurn(
     ["event_stream"],
     suffix,
   );
+  const invokeBinding =
+    overrides.grantAgentInvoke === false
+      ? null
+      : await grantActionBinding({
+          tenantId,
+          principalBindingId,
+          actionCode: "agent.invoke",
+          resourceScope: { type: "agent", ids: [agent.id] },
+        });
   const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
     tenantId,
     ownerId,
@@ -149,7 +165,7 @@ export async function seedDispatchableTurn(
 
   // Employee Turn 热路径解析基础 Harness Route（显式 runtime target，专题01 冻结架构），
   // 故 seed 一个 base RouteSet（target={kind:"runtime"}）+ RouteRevision（target runtime，不携带 Agent 字段）。
-  // Agent 仍创建以维持返回类型（agentId/agentRevision）兼容；路由本身为 base runtime。
+  // Agent 作为本轮可选择的黑盒能力创建；路由本身仍是 base runtime。
   const routeSet = await createRouteSet({
     tenantId,
     target: { kind: "runtime" },
@@ -192,5 +208,6 @@ export async function seedDispatchableTurn(
     threadId: thread.id,
     turnId: turn.id,
     triggerItemId: turn.triggerItemId ?? null,
+    agentInvokeBindingId: invokeBinding?.id ?? null,
   };
 }

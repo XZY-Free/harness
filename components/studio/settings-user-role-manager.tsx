@@ -48,6 +48,7 @@ const PERMISSION_LABEL: Record<string, string> = {
   "policy.write": "策略写入",
   "user.manage": "用户管理",
   "agent.read": "智能体读取",
+  "agent.invoke": "智能体调用",
   "workspace.read": "工作区读取",
   "workspace.write": "工作区写入",
   "analytics.read": "数据分析",

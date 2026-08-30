@@ -12,13 +12,19 @@
  * - CreateThread 无 agent_id（Thread 不绑定 Agent；多余字段不产生绑定）。
  */
 import { GET as getThreadGET } from "@/app/api/v1/threads/[thread_id]/route";
-import { GET as getTurnsGET, POST as createTurnPOST } from "@/app/api/v1/threads/[thread_id]/turns/route";
+import {
+  POST as createTurnPOST,
+  GET as getTurnsGET,
+} from "@/app/api/v1/threads/[thread_id]/turns/route";
 import { POST as createThreadPOST } from "@/app/api/v1/threads/route";
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
+import { revokeActionBinding } from "@/lib/identity/role-action-queries";
+import { turnTable } from "@/lib/persistence/schema/conversation";
+import { idempotencyRecord } from "@/lib/persistence/schema/idempotency";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -63,8 +69,54 @@ async function postTurn(
 }
 
 describe("Per-Invocation Agent Selection（05）", () => {
+  it("无 agent.invoke：selected Agent 统一 403，且不写 Turn/幂等记录", async () => {
+    const ctx = await seedDispatchableTurn({
+      agentKey: "sel-unauthorized-agent",
+      grantAgentInvoke: false,
+    });
+    const threadId = await createThreadForOwner("sel-unauthorized");
+    const turnsBefore = await db.select().from(turnTable);
+    const idempotencyBefore = await db.select().from(idempotencyRecord);
+
+    const response = await postTurn(threadId, "sel-unauthorized", {
+      input: { type: "text", text: "无授权选择" },
+      agent_selection: { mode: "required", agent_id: ctx.agentId },
+    });
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.code).toBe("ACTION_SCOPE_DENIED");
+    expect(await db.select().from(turnTable)).toHaveLength(turnsBefore.length);
+    expect(await db.select().from(idempotencyRecord)).toHaveLength(idempotencyBefore.length);
+  });
+
+  it("缓存选择后撤销 agent.invoke：再次 POST 必须 403", async () => {
+    const ctx = await seedDispatchableTurn({ agentKey: "sel-revoked-agent" });
+    if (!ctx.agentInvokeBindingId) throw new Error("撤销用例缺少 agent.invoke binding");
+    const threadId = await createThreadForOwner("sel-revoked");
+    expect(await revokeActionBinding(ctx.tenantId, ctx.agentInvokeBindingId)).toBe(true);
+
+    const response = await postTurn(threadId, "sel-revoked", {
+      input: { type: "text", text: "撤销后继续选择" },
+      agent_selection: { mode: "required", agent_id: ctx.agentId },
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it("foreign/unknown Agent id 不查存在性，统一返回 403", async () => {
+    await seedDispatchableTurn({ agentKey: "sel-foreign-agent" });
+    const threadId = await createThreadForOwner("sel-foreign");
+    const response = await postTurn(threadId, "sel-foreign", {
+      input: { type: "text", text: "选择外部 id" },
+      agent_selection: { mode: "required", agent_id: "foreign-agent-id" },
+    });
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.code).toBe("ACTION_SCOPE_DENIED");
+  });
+
   it("no selection → 基础 Harness Route：requestedAgentId=null，正常调度", async () => {
-    const ctx = await seedDispatchableTurn({ agentKey: "sel-base-agent" });
+    const ctx = await seedDispatchableTurn({
+      agentKey: "sel-base-agent",
+      grantAgentInvoke: false,
+    });
     const threadId = await createThreadForOwner("sel-base");
 
     const resp = await postTurn(threadId, "sel-base", {
@@ -98,10 +150,16 @@ describe("Per-Invocation Agent Selection（05）", () => {
     expect(turn?.agentSelectionMode).toBe("required");
 
     const params = { params: Promise.resolve({ thread_id: threadId }) };
-    const detail = await getThreadGET(buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}` }), params);
+    const detail = await getThreadGET(
+      buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}` }),
+      params,
+    );
     expect(detail.status).toBe(200);
     expect((await detail.json()).latest_turn.requested_agent_id).toBe(ctx.agentId);
-    const turns = await getTurnsGET(buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}/turns` }), params);
+    const turns = await getTurnsGET(
+      buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}/turns` }),
+      params,
+    );
     expect(turns.status).toBe(200);
     expect((await turns.json()).turns.at(-1).requested_agent_id).toBe(ctx.agentId);
 
@@ -134,10 +192,7 @@ describe("Per-Invocation Agent Selection（05）", () => {
     // 顶层走 base route 正常调度：创建 runtime-only ExecutionBinding（不冻结 Agent）。
     expect(turn?.latestInvocationId).toBeTruthy();
     if (turn?.latestInvocationId) {
-      const binding = await getExecutionBindingByInvocation(
-        ctx.tenantId,
-        turn.latestInvocationId,
-      );
+      const binding = await getExecutionBindingByInvocation(ctx.tenantId, turn.latestInvocationId);
       expect(binding).toBeTruthy();
     }
   });

@@ -21,7 +21,6 @@ export function agentFixture(overrides?: Partial<AgentDTO>): AgentDTO {
     lifecycle_state: "enabled",
     current_revision_id: "arev-1",
     owner_user_id: "user-1",
-    visibility_policy_id: null,
     version_no: 1,
     updated_at: "2026-08-25T00:00:00.000Z",
     ...overrides,

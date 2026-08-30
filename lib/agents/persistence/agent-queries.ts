@@ -34,7 +34,6 @@ export async function createAgent(params: {
   displayName: string;
   description?: string | null;
   ownerUserId: string;
-  visibilityPolicyId?: string | null;
   lifecycleState?: AgentLifecycleState;
 }): Promise<AgentRow> {
   const id = randomUUID();
@@ -45,7 +44,6 @@ export async function createAgent(params: {
     displayName: params.displayName,
     description: params.description ?? null,
     ownerUserId: params.ownerUserId,
-    visibilityPolicyId: params.visibilityPolicyId ?? null,
     lifecycleState: params.lifecycleState ?? "draft",
   });
   const [row] = await db.select().from(agentTable).where(eq(agentTable.id, id)).limit(1);

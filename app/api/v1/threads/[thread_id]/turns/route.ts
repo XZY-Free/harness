@@ -34,6 +34,7 @@ import {
   getRequestId,
   resourceNotFound,
 } from "@/lib/http";
+import { requireAgentInvokeScope } from "@/lib/identity/authorization";
 import {
   buildIdempotencyErrorResponse,
   buildReplayResponse,
@@ -94,7 +95,9 @@ function validateBody(body: unknown): body is CreateTurnBody {
     if (!b.agent_selection || typeof b.agent_selection !== "object") return false;
     const selection = b.agent_selection as Record<string, unknown>;
     if (selection.mode !== "required") return false;
-    if (typeof selection.agent_id !== "string" || selection.agent_id.length === 0) return false;
+    if (typeof selection.agent_id !== "string" || selection.agent_id.trim().length === 0) {
+      return false;
+    }
   }
   return true;
 }
@@ -132,6 +135,14 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       requestId,
       "请求体非法：缺少 input 或字段类型错误（input.type 必填）",
     );
+  }
+
+  // Catalog 是发现入口，不是安全边界。任何 Agent 选择都必须在写入幂等记录和 Turn 前
+  // 按当前 RoleActionBinding 重新检查 exact agent.invoke；统一 403，不查询 Agent 存在性。
+  const selectedAgentId = body.agent_selection?.agent_id.trim() ?? null;
+  if (selectedAgentId) {
+    const authorization = await requireAgentInvokeScope(principal, selectedAgentId, requestId);
+    if (!authorization.ok) return authorization.response;
   }
 
   // 5. 计算请求 hash + 幂等守卫
@@ -188,7 +199,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       },
       actorId: principal.userIdentityId,
       agentSelection: body.agent_selection
-        ? { mode: "required", agentId: body.agent_selection.agent_id }
+        ? { mode: "required", agentId: selectedAgentId as string }
         : null,
       idempotencyKey,
       correlationId: requestId,

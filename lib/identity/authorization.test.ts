@@ -20,6 +20,7 @@ import {
   checkActionScope,
   checkServiceActionScope,
   requireActionScope,
+  resolveActionScopeCoverage,
 } from "@/lib/identity/authorization";
 import { upsertPrincipalBinding } from "@/lib/identity/principal-binding-queries";
 import type { Principal, WorkloadPrincipal } from "@/lib/identity/resolver";
@@ -160,6 +161,8 @@ describe("action-codes", () => {
     // 方案 §5.1 最低动作集 15 个；后续阶段（5/6/7）扩展 runtime.publish / skill.* / tool.* / memory.review 等。
     expect(ACTION_CODES.length).toBeGreaterThanOrEqual(15);
     expect(ACTION_CODES).toContain("agent.publish");
+    expect(ACTION_CODES).toContain("agent.invoke");
+    expect(ACTION_RESOURCE_TYPES["agent.invoke"]).toEqual(["tenant", "agent"]);
     expect(ACTION_CODES).toContain("artifact.attestation.verify");
     expect(ACTION_CODES).toContain("deletion.request");
     expect(ACTION_CODES).toContain("audit.export");
@@ -351,6 +354,17 @@ describe("role-action-queries", () => {
     expect(list[0]?.actionCode).toBe("policy.publish");
   });
 
+  it("listActiveActionBindingsForUser 过滤尚未生效的绑定", async () => {
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "agent", wildcard: true },
+      validFrom: new Date(Date.now() + 60_000),
+    });
+    expect(await listActiveActionBindingsForUser(tenantId, userIdentityId)).toHaveLength(0);
+  });
+
   it("getActionBindingById 存在时返回绑定", async () => {
     const binding = await grantActionBinding({
       tenantId,
@@ -443,6 +457,93 @@ describe("authorization", () => {
       resource: { type: "agent", id: "agt_any" },
     });
     expect(result.allowed).toBe(true);
+  });
+
+  it("checkActionScope agent.invoke tenant wildcard 覆盖租户内 exact Agent", async () => {
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "tenant", wildcard: true },
+    });
+    const result = await checkActionScope(tenantId, userIdentityId, {
+      actionCode: "agent.invoke",
+      resource: { type: "agent", id: "agt_any" },
+    });
+    expect(result.allowed).toBe(true);
+  });
+
+  it("checkActionScope agent.invoke tenant exact 只接受当前 tenant id", async () => {
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "tenant", ids: ["wrong-tenant"] },
+    });
+    expect(
+      await checkActionScope(tenantId, userIdentityId, {
+        actionCode: "agent.invoke",
+        resource: { type: "agent", id: "agt_any" },
+      }),
+    ).toMatchObject({ allowed: false });
+
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "tenant", ids: [tenantId] },
+    });
+    expect(
+      await checkActionScope(tenantId, userIdentityId, {
+        actionCode: "agent.invoke",
+        resource: { type: "agent", id: "agt_any" },
+      }),
+    ).toEqual({ allowed: true });
+  });
+
+  it("resolveActionScopeCoverage 汇总 exact ids，授权撤销后 digest 改变并 fail-closed", async () => {
+    const binding = await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "agent", ids: ["agt_2", "agt_1"] },
+    });
+    const before = await resolveActionScopeCoverage(tenantId, userIdentityId, {
+      actionCode: "agent.invoke",
+      resourceType: "agent",
+    });
+    expect(before.wildcard).toBe(false);
+    expect(before.resourceIds).toEqual(["agt_1", "agt_2"]);
+
+    await revokeActionBinding(tenantId, binding.id);
+    const after = await resolveActionScopeCoverage(tenantId, userIdentityId, {
+      actionCode: "agent.invoke",
+      resourceType: "agent",
+    });
+    expect(after.resourceIds).toEqual([]);
+    expect(after.authorizationDigest).not.toBe(before.authorizationDigest);
+  });
+
+  it("resolveActionScopeCoverage 忽略 wrong resource 与 future binding", async () => {
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode: "agent.invoke",
+      resourceScope: { type: "agent", ids: ["future-agent"] },
+      validFrom: new Date(Date.now() + 60_000),
+    });
+    await grantActionBinding({
+      tenantId,
+      principalBindingId,
+      actionCode: "agent.read",
+      resourceScope: { type: "agent", wildcard: true },
+    });
+    const coverage = await resolveActionScopeCoverage(tenantId, userIdentityId, {
+      actionCode: "agent.invoke",
+      resourceType: "agent",
+    });
+    expect(coverage.wildcard).toBe(false);
+    expect(coverage.resourceIds).toEqual([]);
   });
 
   it("checkActionScope ids 绑定包含目标 → allow", async () => {
