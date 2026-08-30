@@ -6,11 +6,11 @@
  * - docs/architecture/api-and-events.md
  * - docs/architecture/agent-control-plane.md
  *
- * RouteSet 按“可选 Agent 约束 + scope”聚合所有 DeploymentRoute，使用 ETag（versionNo）做乐观并发。
- * DeploymentRoute 固定一个 RuntimeRevision，并可选 AgentRevision，承载灰度权重。
+ * RouteSet 按“显式 target + scope”聚合所有 DeploymentRoute，使用 ETag（versionNo）做乐观并发。
+ * DeploymentRoute 是 runtime | agent 判别联合，承载灰度权重。
  *
  * 关键约束：
- * - UNIQUE(tenantId, agentId, routeScopeKey)：一组路由共用 ETag 和聚合锁。
+ * - UNIQUE(tenantId, targetKind, targetIdentity, routeScopeKey)：一组路由共用 ETag 和聚合锁。
  * - UNIQUE(routeSetId, routeKey)：routeKey 在同一 RouteSet 内唯一，作为 Route 稳定身份。
  * - route_state 仅 enabled/disabled；不物理删除路由行（回滚依赖历史行）。
  * - traffic_weight 为 0–10000 基点（1% = 100 基点）。
@@ -19,9 +19,10 @@
  */
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
-import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import { type InferInsertModel, type InferSelectModel, sql } from "drizzle-orm";
 import {
   bigint,
+  check,
   datetime,
   index,
   int,
@@ -74,13 +75,21 @@ export const deploymentRouteSetTable = mysqlTable(
       .references(() => tenant.id),
     /**
      * 目标类型。
-     * - runtime：基础 Harness RouteSet，agentId 必须 NULL。
-     * - agent：Agent 能力 RouteSet，agentId 必须非空。
+     * - runtime：基础 Harness RouteSet，targetIdentity=runtime，agentId 必须 NULL。
+     * - agent：Agent 能力 RouteSet，targetIdentity=agentId，agentId 必须非空。
+     * 无隐式默认：调用方必须显式给出 target 判别。
      */
-    targetKind: mysqlEnum("targetKind", ROUTE_TARGET_KINDS).notNull().default("runtime"),
+    targetKind: mysqlEnum("targetKind", ROUTE_TARGET_KINDS).notNull(),
+    /**
+     * 目标唯一身份（非空、非空串）：
+     * - runtime：固定 "runtime"。
+     * - agent：= agentId。
+     * 与 targetKind/agentId 一起被 CHECK 约束强制一致，并参与唯一性。
+     */
+    targetIdentity: varchar("targetIdentity", { length: 36 }).notNull(),
     /**
      * 归属 Agent ID（仅 targetKind=agent 时非空）。
-     * runtime 时必为 null。与 routeScopeKey 共同参与 UNIQUE(tenantId, targetKind, agentId, routeScopeKey)。
+     * runtime 时必为 null。targetKind/targetIdentity/agentId 一致性由 CHECK 保证。
      */
     agentId: varchar("agentId", { length: 36 }),
     routeScopeKey: varchar("routeScopeKey", { length: 128 }).notNull(),
@@ -94,16 +103,33 @@ export const deploymentRouteSetTable = mysqlTable(
       .$defaultFn(() => new Date()),
   },
   (t) => ({
-    // 一组路由共用 ETag 和聚合锁
-    tenantAgentScopeUq: uniqueIndex("DeploymentRouteSet_tenant_agent_scope_uq").on(
+    // 唯一身份 = tenantId + targetKind + targetIdentity + routeScopeKey（全部 NOT NULL，
+    // 杜绝 runtime agentId=NULL 绕过唯一性）。
+    tenantTargetScopeUq: uniqueIndex("DeploymentRouteSet_tenant_target_scope_uq").on(
       t.tenantId,
-      t.agentId,
+      t.targetKind,
+      t.targetIdentity,
       t.routeScopeKey,
     ),
-    tenantAgentScopeIdx: index("DeploymentRouteSet_tenant_agent_scope_idx").on(
+    tenantTargetScopeIdx: index("DeploymentRouteSet_tenant_target_scope_idx").on(
       t.tenantId,
-      t.agentId,
+      t.targetKind,
+      t.targetIdentity,
       t.routeScopeKey,
+    ),
+    // targetIdentity 非空；runtime/agent 与 targetIdentity/agentId 一致性（判别联合）。
+    targetIdentityCheck: check(
+      "DeploymentRouteSet_target_identity_check",
+      sql`TRIM(\`targetIdentity\`) <> ''`,
+    ),
+    targetConsistencyCheck: check(
+      "DeploymentRouteSet_target_consistency_check",
+      sql`(
+        (\`targetKind\` = 'runtime' AND \`targetIdentity\` = 'runtime' AND \`agentId\` IS NULL)
+        OR
+        (\`targetKind\` = 'agent' AND \`targetIdentity\` = \`agentId\`
+          AND \`agentId\` IS NOT NULL AND TRIM(\`agentId\`) <> '')
+      )`,
     ),
   }),
 );
@@ -113,7 +139,7 @@ export type DeploymentRouteSetInsert = InferInsertModel<typeof deploymentRouteSe
 // ─── DeploymentRoute ────────────────────────────────────
 
 /**
- * 部署路由：固定一个 RuntimeRevision（可选 AgentRevision），承载灰度权重。
+ * 部署路由：固定 runtime | agent 之一，承载灰度权重。
  *
  * - 引用的 Revision 必须为 published 状态（withdrawn 只阻止新路由，不删除历史引用）。
  * - traffic_weight 为 0–10000 基点。
@@ -136,7 +162,8 @@ export const deploymentRouteTable = mysqlTable(
      * null = 基础 Harness Route（无 Agent 资产约束）；有值 = Agent Route。
      */
     agentRevisionId: varchar("agentRevisionId", { length: 36 }),
-    runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
+    /** 目标判别：runtime 时非空、agent 时为空。与 agentRevisionId 恰好一个非空（CHECK）。 */
+    runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }),
     trafficWeight: int("trafficWeight").notNull(),
     priorityNo: int("priorityNo").notNull().default(0),
     routeState: mysqlEnum("routeState", ROUTE_STATES).notNull().default("enabled"),
@@ -159,6 +186,15 @@ export const deploymentRouteTable = mysqlTable(
     runtimeRevisionIdx: index("DeploymentRoute_runtimeRevision_idx").on(t.runtimeRevisionId),
     activeRouteRevisionIdx: index("DeploymentRoute_activeRouteRevision_idx").on(
       t.activeRouteRevisionId,
+    ),
+    // 恰好一个目标 revision 非空（判别联合）。
+    exactOneTargetCheck: check(
+      "DeploymentRoute_exact_one_target_check",
+      sql`(
+        (\`runtimeRevisionId\` IS NOT NULL AND \`agentRevisionId\` IS NULL)
+        OR
+        (\`runtimeRevisionId\` IS NULL AND \`agentRevisionId\` IS NOT NULL)
+      )`,
     ),
   }),
 );

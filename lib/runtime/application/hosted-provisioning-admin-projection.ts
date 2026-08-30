@@ -6,7 +6,6 @@ import type { HostedProvisioningRequestRow } from "@/lib/runtime/persistence/hos
 
 const STEPS = new Set<ProvisioningStep>([
   "validate_request",
-  "ensure_agent_publication",
   "prepare_runtime_revision",
   "verify_runtime_artifact",
   "record_runtime_conformance",
@@ -30,10 +29,8 @@ export function projectHostedProvisioningRequest(
   return {
     id: request.id,
     tenant_id: request.tenantId,
-    agent_id: request.agentId,
-    agent_revision_id: request.agentRevisionId,
+    requester_id: request.requesterId,
     route_scope_key: request.routeScopeKey,
-    desired_runtime_key: request.desiredRuntimeKey,
     state: request.state,
     current_step: projectStep(request.currentStep),
     last_completed_step: projectStep(request.lastCompletedStep),
@@ -42,8 +39,6 @@ export function projectHostedProvisioningRequest(
     last_attempt_at: request.lastAttemptAt?.toISOString() ?? null,
     lease_expires_at: request.leaseExpiresAt?.toISOString() ?? null,
     last_error: request.lastError,
-    agent_revision_id_checkpoint: request.stepAgentRevisionId,
-    agent_publication_record_id: request.stepAgentPublicationRecordId,
     runtime_id: request.stepRuntimeId,
     runtime_revision_id_checkpoint: request.stepRuntimeRevisionId,
     runtime_artifact_id: request.stepRuntimeArtifactId,

@@ -6,11 +6,21 @@ import { describe, expect, it } from "vitest";
 import { detectProjectionDrift } from "./authoritative-route-set-state";
 import type { AuthoritativeRouteSetState } from "./authoritative-route-set-state";
 
+/** agent RouteRevision target — 冻结判别联合，绝不携带 runtime 字段。 */
+const agentTarget = {
+  kind: "agent" as const,
+  agentRevisionId: "ar-1",
+  agentEndpointRef: "https://agent.example.com/a2a",
+  agentIdentityMode: "bearer" as const,
+  agentCredentialRefId: "cred-1",
+  agentNetworkZone: "private",
+};
+
 function makeState(routes: Partial<AuthoritativeRouteSetState> = {}): AuthoritativeRouteSetState {
   return {
     routeSetId: "rs-1",
     tenantId: "t1",
-    agentId: "a1",
+    target: { kind: "agent", agentId: "a1" },
     routeScopeKey: "prod",
     versionNo: 1,
     routes: [],
@@ -27,8 +37,7 @@ describe("detectProjectionDrift", () => {
           routeKey: "primary",
           activeRouteRevisionId: "rev-1",
           activeRevision: {
-            agentRevisionId: "ar-1",
-            runtimeRevisionId: "rr-1",
+            target: agentTarget,
             policyRevisionId: null,
             modelPolicyRevisionId: null,
             toolsetRevisionId: null,
@@ -49,8 +58,7 @@ describe("detectProjectionDrift", () => {
       {
         routeId: "r1",
         routeKey: "primary",
-        agentRevisionId: "ar-1",
-        runtimeRevisionId: "rr-1",
+        target: agentTarget,
         activeRouteRevisionId: "rev-1",
         routeState: "enabled",
       },
@@ -76,8 +84,7 @@ describe("detectProjectionDrift", () => {
       {
         routeId: "r1",
         routeKey: "primary",
-        agentRevisionId: "ar-1",
-        runtimeRevisionId: "rr-1",
+        target: agentTarget,
         activeRouteRevisionId: "rev-1",
         routeState: "enabled",
       },
@@ -123,8 +130,7 @@ describe("detectProjectionDrift", () => {
       {
         routeId: "r1",
         routeKey: "primary",
-        agentRevisionId: "ar-1",
-        runtimeRevisionId: "rr-1",
+        target: agentTarget,
         activeRouteRevisionId: "rev-1",
         routeState: "enabled",
       },

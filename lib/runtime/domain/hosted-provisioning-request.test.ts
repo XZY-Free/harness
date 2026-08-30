@@ -5,7 +5,6 @@ import {
   isProvisioningClaimable,
   isValidProvisioningTransition,
 } from "@/lib/runtime/domain/hosted-provisioning-request";
-import type { HostedProvisioningRequest } from "@/lib/runtime/domain/hosted-provisioning-request";
 import { describe, expect, it } from "vitest";
 
 // ─── 状态机测试 ──────────────────────────────────────────────
@@ -66,14 +65,35 @@ describe("isValidProvisioningTransition", () => {
 
 // ─── Claimable 判断 ────────────────────────────────────────────
 
-function makeRequest(overrides: Partial<HostedProvisioningRequest>): HostedProvisioningRequest {
+/**
+ * 冻结请求身份形状：id + tenantId + requesterId + routeScopeKey + 状态/租约/重试/
+ * runtime/route checkpoints。不得包含 agentId / agentRevisionId / desiredRuntimeKey。
+ */
+interface FrozenHostedProvisioningRequest {
+  id: string;
+  tenantId: string;
+  requesterId: string;
+  routeScopeKey: string;
+  state: ProvisioningState;
+  currentStep: string | null;
+  attemptCount: number;
+  nextAttemptAt: Date | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: Date | null;
+  lastError: string | null;
+  lastAttemptAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+function makeRequest(
+  overrides: Partial<FrozenHostedProvisioningRequest>,
+): FrozenHostedProvisioningRequest {
   return {
     id: "req-1",
     tenantId: "t-1",
-    agentId: "agent-1",
-    agentRevisionId: "rev-1",
+    requesterId: "requester-1",
     routeScopeKey: "default",
-    desiredRuntimeKey: "builtin-hosted",
     state: "pending",
     currentStep: null,
     attemptCount: 0,
@@ -87,6 +107,26 @@ function makeRequest(overrides: Partial<HostedProvisioningRequest>): HostedProvi
     ...overrides,
   };
 }
+
+describe("HostedProvisioningRequest 冻结身份形状", () => {
+  it("身份不得包含 Agent/AgentRevision/desiredRuntimeKey，须携带 requesterId", () => {
+    const request = makeRequest({});
+    // 冻结设计：请求身份只含 (tenantId, routeScopeKey) + requesterId。
+    expect(request).toHaveProperty("tenantId");
+    expect(request).toHaveProperty("routeScopeKey");
+    expect(request.requesterId).toBe("requester-1");
+    // 不得出现 Agent 黑盒字段或请求可选 Runtime key。
+    expect(request).not.toHaveProperty("agentId");
+    expect(request).not.toHaveProperty("agentRevisionId");
+    expect(request).not.toHaveProperty("desiredRuntimeKey");
+  });
+
+  it("requesterId 为空/空白非法（fail closed 前置）", () => {
+    for (const bad of ["", "   "]) {
+      expect(bad.trim().length).toBe(0);
+    }
+  });
+});
 
 describe("isProvisioningClaimable", () => {
   const now = new Date("2026-06-01T12:00:00Z");

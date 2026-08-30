@@ -213,6 +213,15 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
   if (!routeRow || routeRow.route.routeState !== "enabled") {
     throw evidenceError("Route 当前投影已变化");
   }
+  // 冻结架构：ExecutionBinding 恒为 runtime target。RouteSet 必须是 runtime 目标身份
+  // （targetIdentity=runtime、agentId=NULL），不得依赖 Agent RouteSet。
+  if (
+    routeRow.routeSet.targetKind !== "runtime" ||
+    routeRow.routeSet.targetIdentity !== "runtime" ||
+    routeRow.routeSet.agentId !== null
+  ) {
+    throw evidenceError("RouteSet 不是 runtime target，ExecutionBinding 拒绝 Agent RouteSet");
+  }
 
   // B. RouteActivation（FOR UPDATE）— 当前最新 + Active + 一致
   const [activation] = await tx
@@ -250,6 +259,13 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
     revision.routeId !== input.deploymentRouteId ||
     revision.routeSetId !== routeRow.routeSet.id ||
     revision.runtimeRevisionId !== input.runtimeRevisionId ||
+    // runtime target：Agent 目标事实必须全部不适用（null）。与 runtimeRevisionId 精确匹配
+    // 一起保证这是精确的 runtime RouteRevision，而非 Agent 或混合目标。
+    revision.agentRevisionId !== null ||
+    revision.agentEndpointRef !== null ||
+    revision.agentIdentityMode !== null ||
+    revision.agentCredentialRefId !== null ||
+    revision.agentNetworkZone !== null ||
     // §10：Route 显式指定 PolicyRevision 时，Binding 必须与其一致；
     // Route 未指定（null）→ Tenant baseline fallback，effective 由 lockAndVerifyPolicy 校验。
     (revision.policyRevisionId !== null && revision.policyRevisionId !== input.policyRevisionId) ||
@@ -485,6 +501,9 @@ async function lockAndVerifyProjection(
     .select({
       routeId: routeEligibilityProjection.routeId,
       tenantId: routeEligibilityProjection.tenantId,
+      targetKind: routeEligibilityProjection.targetKind,
+      targetIdentity: routeEligibilityProjection.targetIdentity,
+      agentId: routeEligibilityProjection.agentId,
       eligibilityState: routeEligibilityProjection.eligibilityState,
       activationState: routeEligibilityProjection.activationState,
       projectionVersionNo: routeEligibilityProjection.projectionVersionNo,
@@ -502,6 +521,20 @@ async function lockAndVerifyProjection(
       runtimePublicationRecordId: routeEligibilityProjection.runtimePublicationRecordId,
       runtimeAttestationIds: routeEligibilityProjection.runtimeAttestationIds,
       conformanceRunId: routeEligibilityProjection.conformanceRunId,
+      // Agent 目标事实（runtime target 必须全部不适用）— 用于拒绝 Agent/混合投影。
+      agentRevisionId: routeEligibilityProjection.agentRevisionId,
+      agentEndpointRef: routeEligibilityProjection.agentEndpointRef,
+      agentIdentityMode: routeEligibilityProjection.agentIdentityMode,
+      agentCredentialRefId: routeEligibilityProjection.agentCredentialRefId,
+      agentNetworkZone: routeEligibilityProjection.agentNetworkZone,
+      agentRevisionState: routeEligibilityProjection.agentRevisionState,
+      agentLifecycleState: routeEligibilityProjection.agentLifecycleState,
+      agentPublicationActive: routeEligibilityProjection.agentPublicationActive,
+      agentEvidenceValid: routeEligibilityProjection.agentEvidenceValid,
+      agentPublicationRecordId: routeEligibilityProjection.agentPublicationRecordId,
+      agentContractSnapshotId: routeEligibilityProjection.agentContractSnapshotId,
+      agentContractDigest: routeEligibilityProjection.agentContractDigest,
+      agentContextDigest: routeEligibilityProjection.agentContextDigest,
     })
     .from(routeEligibilityProjection)
     .where(
@@ -538,25 +571,48 @@ async function lockAndVerifyProjection(
 type FrozenProjectionRow = {
   routeId: string;
   tenantId: string;
+  /** 判别列 — runtime target 必须为 "runtime"；agent 投影被拒绝。 */
+  targetKind: "runtime" | "agent" | null;
+  /** runtime target 的稳定身份 — 必须为 "runtime"。 */
+  targetIdentity: string | null;
+  /** runtime target 时归属 Agent ID 必须为 null。 */
+  agentId: string | null;
   eligibilityState: "eligible" | "ineligible" | "pending_rebuild";
   activationState: "active" | "disabled";
   projectionVersionNo: number;
   routeRevisionId: string;
   routeActivationId: string;
-  runtimeRevisionId: string;
+  /** discriminated schema 中 nullable — 仅 runtime target 非空。 */
+  runtimeRevisionId: string | null;
   policyRevisionId: string | null;
   routeContentDigest: string;
   /** null = external_endpoint Runtime（03 §3）。 */
   runtimeArtifactId: string | null;
   /** null = external_endpoint Runtime（03 §3）。 */
   runtimeArtifactDigest: string | null;
-  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
+  /** DB 原始 nullable 列 — agent target 或 external_endpoint 时可为 null。 */
+  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint" | null;
   runtimeConfigDigest: string | null;
   runtimeTargetDigest: string | null;
-  capabilityCompatibilityDigest: string;
+  /** DB 原始 nullable 列 — 仅 runtime target 计算。 */
+  capabilityCompatibilityDigest: string | null;
   runtimePublicationRecordId: string | null;
   runtimeAttestationIds: string[] | null;
   conformanceRunId: string | null;
+  // Agent 目标事实 — runtime target 必须全部不适用（null）。
+  agentRevisionId: string | null;
+  agentEndpointRef: string | null;
+  agentIdentityMode: "none" | "bearer" | null;
+  agentCredentialRefId: string | null;
+  agentNetworkZone: string | null;
+  agentRevisionState: string | null;
+  agentLifecycleState: string | null;
+  agentPublicationActive: number | null;
+  agentEvidenceValid: number | null;
+  agentPublicationRecordId: string | null;
+  agentContractSnapshotId: string | null;
+  agentContractDigest: string | null;
+  agentContextDigest: string | null;
 };
 
 type FrozenProjectionExpectation = {
@@ -599,6 +655,28 @@ export function validateFrozenProjectionAuthority(input: {
         areExactNonEmptyIdSets(projection.runtimeAttestationIds, expected.runtimeAttestationIds);
   if (
     !projection ||
+    // ExecutionBinding 只绑定 Harness Runtime：Projection 必须是精确 runtime target。
+    // targetKind 显式 runtime；Agent 目标事实全部不适用（null）。任何 Agent/混合投影
+    // 即使共享 ID/digest 也拒绝；runtime target 必须携带非空 runtimeRevisionId（精确匹配）。
+    projection.targetKind !== "runtime" ||
+    // runtime target 稳定身份必须为 "runtime"，且归属 Agent ID 必须为 null。
+    projection.targetIdentity !== "runtime" ||
+    projection.agentId !== null ||
+    projection.runtimeRevisionId === null ||
+    projection.runtimeRevisionId !== expected.runtimeRevisionId ||
+    projection.agentRevisionId !== null ||
+    projection.agentEndpointRef !== null ||
+    projection.agentIdentityMode !== null ||
+    projection.agentCredentialRefId !== null ||
+    projection.agentNetworkZone !== null ||
+    projection.agentRevisionState !== null ||
+    projection.agentLifecycleState !== null ||
+    projection.agentPublicationActive !== null ||
+    projection.agentEvidenceValid !== null ||
+    projection.agentPublicationRecordId !== null ||
+    projection.agentContractSnapshotId !== null ||
+    projection.agentContractDigest !== null ||
+    projection.agentContextDigest !== null ||
     projection.routeId !== expected.routeId ||
     projection.tenantId !== expected.tenantId ||
     projection.eligibilityState !== "eligible" ||
@@ -606,7 +684,6 @@ export function validateFrozenProjectionAuthority(input: {
     projection.projectionVersionNo !== expected.projectionVersionNo ||
     projection.routeRevisionId !== expected.routeRevisionId ||
     projection.routeActivationId !== expected.routeActivationId ||
-    projection.runtimeRevisionId !== expected.runtimeRevisionId ||
     projection.routeContentDigest !== expected.routeContentDigest ||
     projection.runtimeArtifactId !== expected.runtimeArtifactId ||
     projection.runtimeArtifactDigest !== expected.runtimeArtifactDigest ||

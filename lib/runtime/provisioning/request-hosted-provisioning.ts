@@ -1,18 +1,22 @@
 /**
  * requestHostedProvisioning — 幂等创建/确认 HostedProvisioningRequest。
  *
- * 用户 Turn 发现无 Ready Route 时调用此入口。
- * 只写入 Request 记录，不执行外部网络调用。
- * Worker 异步执行供应 Saga。
+ * 专题01 冻结（runtime-only）：
+ * - 请求权威 = (tenantId, routeScopeKey)；builtin Runtime key 固定在 Hosted Runtime
+ *   Gateway，不由请求选择。
+ * - 请求携带非空 requesterId（供首次创建 Runtime 记录 owner）。
+ * - 空白 tenantId/requesterId/routeScopeKey 在 store 写入前 fail closed（返回 typed invalid，
+ *   不抛错、不写入）。
+ * - 重复 (tenantId, routeScopeKey) 返回同一 request，不覆盖 first requester。
  *
- * : 创建前必须验证 AgentRevision 存在、属于 Tenant/Agent、是当前期望 Revision。
- * 禁止 agentRevisionId = "unknown"。
+ * 用户 Turn 发现无 Ready Route 时调用此入口。
+ * 只写入 Request 记录，不执行外部网络调用。Worker 异步执行供应 Saga。
+ * 本工厂只依赖 store；AgentRevision 验证/黑盒 A2A 不在 Hosted 供应范围内。
  */
 
 import { randomUUID } from "node:crypto";
 import type { HostedProvisioningRequestRow } from "@/lib/runtime/persistence/hosted-provisioning-request-record";
 import type { HostedProvisioningRequestStore } from "@/lib/runtime/persistence/hosted-provisioning-request-store";
-import type { RevisionValidationDeps } from "./validate-hosted-provisioning-revision";
 
 export interface RequestHostedProvisioningResult {
   /** 供应请求 ID。 */
@@ -23,8 +27,8 @@ export interface RequestHostedProvisioningResult {
   retryAfterMs: number;
 }
 
-/** : Revision 验证失败结果。 */
-export interface RequestHostedProvisioningRevisionInvalid {
+/** : 参数校验失败（空白 tenantId/requesterId/routeScopeKey）结果。 */
+export interface RequestHostedProvisioningInvalid {
   valid: false;
   /** 错误码。 */
   code: string;
@@ -32,46 +36,39 @@ export interface RequestHostedProvisioningRevisionInvalid {
   reason: string;
 }
 
+/** 空白校验：空串或全空白视为非法。 */
+function isBlank(value: string): boolean {
+  return value.trim().length === 0;
+}
+
 /**
- * 创建幂等供应请求工厂。
+ * 创建幂等供应请求工厂。只依赖 store。
  *
- * : 新增 revisionValidator 依赖，在创建前验证 AgentRevision。
+ * : 参数合法才落库；任一空白 tenantId/requesterId/routeScopeKey 在 store 写入前 fail closed。
  */
 export function createRequestHostedProvisioning(deps: {
   store: HostedProvisioningRequestStore;
-  /** : AgentRevision 验证器。 */
-  revisionValidator: RevisionValidationDeps;
 }) {
   return async function requestHostedProvisioning(params: {
     tenantId: string;
-    agentId: string;
-    agentRevisionId: string;
+    requesterId: string;
     routeScopeKey: string;
-    desiredRuntimeKey?: string;
-  }): Promise<RequestHostedProvisioningResult | RequestHostedProvisioningRevisionInvalid> {
-    const desiredRuntimeKey = params.desiredRuntimeKey ?? "builtin-hosted";
-
-    // : 验证 AgentRevision 精确绑定
-    const validation = await deps.revisionValidator.validateRevision({
-      tenantId: params.tenantId,
-      agentId: params.agentId,
-      agentRevisionId: params.agentRevisionId,
-    });
-
-    if (!validation.valid) {
-      return {
-        valid: false,
-        code: validation.code,
-        reason: validation.reason,
-      };
+  }): Promise<RequestHostedProvisioningResult | RequestHostedProvisioningInvalid> {
+    // : 空白校验——store 写入前 fail closed（不抛错、不写入）。
+    if (isBlank(params.tenantId)) {
+      return { valid: false, code: "BLANK_TENANT", reason: "tenantId 不能为空" };
+    }
+    if (isBlank(params.requesterId)) {
+      return { valid: false, code: "BLANK_REQUESTER", reason: "requesterId 不能为空" };
+    }
+    if (isBlank(params.routeScopeKey)) {
+      return { valid: false, code: "BLANK_ROUTE_SCOPE", reason: "routeScopeKey 不能为空" };
     }
 
-    // 幂等：查找已有请求
+    // 幂等：同 (tenantId, routeScopeKey) 已有请求则返回同一请求，不覆盖 first requester。
     const existing = await deps.store.findActiveRequest({
       tenantId: params.tenantId,
-      agentRevisionId: params.agentRevisionId,
       routeScopeKey: params.routeScopeKey,
-      desiredRuntimeKey,
     });
 
     if (existing) {
@@ -88,10 +85,8 @@ export function createRequestHostedProvisioning(deps: {
     const created = await deps.store.insert({
       id,
       tenantId: params.tenantId,
-      agentId: params.agentId,
-      agentRevisionId: params.agentRevisionId,
+      requesterId: params.requesterId,
       routeScopeKey: params.routeScopeKey,
-      desiredRuntimeKey,
       createdAt: now,
       updatedAt: now,
     });

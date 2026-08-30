@@ -25,29 +25,51 @@ export function targetToAgentId(target: RouteTarget): string | null {
   return target.kind === "agent" ? target.agentId : null;
 }
 
-export interface RouteControlPlaneEvidence {
-  /** null = 基础 Harness Route（无 Agent 资产约束，Agent Evidence not_applicable，§18）。 */
-  agentRevisionId: string | null;
-  runtimeArtifactId: string | null;
-  runtimeArtifactDigest: string | null;
-  runtimeConfigDigest: string;
-  /** Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact（03 §3）。 */
-  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
-  /** Runtime 目标摘要 — hosted/external 统一发布证据权威（03 §6）。 */
-  runtimeTargetDigest: string;
-  capabilityManifestDigest: string;
-  /** Agent Contract 证据（Agent Route 必填，base route 为 null — 05 §5）。 */
-  agentContractSnapshotId: string | null;
-  agentContractDigest: string | null;
-  agentContextDigest: string | null;
-  runtimeAttestationIds: string[];
-  /** null = 基础 Harness Route（§18 not_applicable）。 */
-  agentPublicationRecordId: string | null;
-  runtimePublicationRecordId: string;
-  conformanceRunId: string;
-}
+/**
+ * 候选/解析的判别 target — 只含所选 target 自己的事实。
+ * - runtime：只含 runtimeRevisionId。
+ * - agent：只含 exact Agent 生产调用事实（endpoint/identity/credential/network）。
+ */
+export type RouteResolutionTarget =
+  | { kind: "runtime"; runtimeRevisionId: string }
+  | {
+      kind: "agent";
+      agentRevisionId: string;
+      agentEndpointRef: string;
+      agentIdentityMode: "none" | "bearer";
+      agentCredentialRefId: string | null;
+      agentNetworkZone: string;
+    };
 
-export interface RouteResolutionCandidate {
+/**
+ * 控制面证据 — 严格 runtime|agent 判别联合。
+ * - runtime：只含 Runtime artifact/config/target/publication/conformance/attestation/capability 事实。
+ * - agent：只含 AgentContract/Publication 事实（供 AgentCallBinding 冻结），不含 Runtime 字段或占位符。
+ */
+export type RouteEvidence =
+  | {
+      kind: "runtime";
+      runtimeArtifactId: string | null;
+      runtimeArtifactDigest: string | null;
+      runtimeConfigDigest: string;
+      /** Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact（03 §3）。 */
+      runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
+      /** Runtime 目标摘要 — hosted/external 统一发布证据权威（03 §6）。 */
+      runtimeTargetDigest: string;
+      capabilityManifestDigest: string;
+      runtimeAttestationIds: string[];
+      runtimePublicationRecordId: string;
+      conformanceRunId: string;
+    }
+  | {
+      kind: "agent";
+      agentContractSnapshotId: string;
+      agentContractDigest: string;
+      agentContextDigest: string;
+      agentPublicationRecordId: string;
+    };
+
+interface RouteResolutionCandidateCommon {
   deploymentRouteId: string;
   routeSetId: string;
   routeSetVersionNo: number;
@@ -55,20 +77,6 @@ export interface RouteResolutionCandidate {
   routeRevisionNo: number;
   routeActivationId: string;
   routeActivationSequence: number;
-  /** 显式目标类型 — runtime 或 agent，禁止隐式 null 猜测。 */
-  targetKind: "runtime" | "agent";
-  /**
-   * 绑定的 AgentRevision ID。
-   * runtime 为 null；agent 必填。
-   */
-  agentRevisionId: string | null;
-  // ─── Agent Route 生产调用事实──
-  // agent target 解析返回 exact route facts；基础 Harness Route（runtime）为 null。
-  agentEndpointRef: string | null;
-  agentIdentityMode: "none" | "bearer" | null;
-  agentCredentialRefId: string | null;
-  agentNetworkZone: string | null;
-  runtimeRevisionId: string;
   policyRevisionId: string | null;
   contentDigest: string;
   trafficWeight: number;
@@ -78,23 +86,45 @@ export interface RouteResolutionCandidate {
   effectiveUntil: Date | null;
   eligibilityConditions: unknown;
   activationState: "active" | "disabled";
-  agentLifecycleState: string;
-  agentRevisionState: string;
-  agentPublicationActive: boolean;
-  agentEvidenceValid: boolean;
-  runtimeLifecycleState: string;
-  runtimeRevisionState: string;
-  runtimePublicationActive: boolean;
-  runtimeEvidenceValid: boolean;
-  runtimeConformanceValid: boolean;
   policyRevisionState: string | null;
-  /** 控制面证据（恒非空；base route 的 agent 字段为 null，§18）。 */
-  controlPlaneEvidence: RouteControlPlaneEvidence;
-  /** Projection 版本号（仅 Projection 候选有值，Authority 候选为 undefined）。 */
-  projectionVersionNo?: number;
+  /** Projection 版本号 — 本 store 为 projection-only，候选/解析必须携带（resolve 成功须为正整数）。 */
+  projectionVersionNo: number;
 }
 
-export interface RouteResolution {
+/**
+ * 判别候选 — target 指定 runtime 或 agent，各自只携带本 target 的资格事实。
+ * - runtime 候选不 inspect Agent 生命周期/发布/证据。
+ * - agent 候选不 inspect Runtime 生命周期/发布/证据/conformance。
+ */
+export type RouteResolutionCandidate = RouteResolutionCandidateCommon &
+  (
+    | {
+        target: { kind: "runtime"; runtimeRevisionId: string };
+        runtimeLifecycleState: string;
+        runtimeRevisionState: string;
+        runtimePublicationActive: boolean;
+        runtimeEvidenceValid: boolean;
+        runtimeConformanceValid: boolean;
+        controlPlaneEvidence: Extract<RouteEvidence, { kind: "runtime" }>;
+      }
+    | {
+        target: {
+          kind: "agent";
+          agentRevisionId: string;
+          agentEndpointRef: string;
+          agentIdentityMode: "none" | "bearer";
+          agentCredentialRefId: string | null;
+          agentNetworkZone: string;
+        };
+        agentLifecycleState: string;
+        agentRevisionState: string;
+        agentPublicationActive: boolean;
+        agentEvidenceValid: boolean;
+        controlPlaneEvidence: Extract<RouteEvidence, { kind: "agent" }>;
+      }
+  );
+
+interface RouteResolutionCommon {
   deploymentRouteId: string;
   routeSetId: string;
   routeSetVersionNo: number;
@@ -102,20 +132,6 @@ export interface RouteResolution {
   routeRevisionNo: number;
   routeActivationId: string;
   routeActivationSequence: number;
-  /** 显式目标类型 — runtime 或 agent。 */
-  targetKind: "runtime" | "agent";
-  /**
-   * 绑定的 AgentRevision ID。
-   * runtime 为 null；agent 必填。
-   */
-  agentRevisionId: string | null;
-  // ─── Agent Route 生产调用事实──
-  // agent target 解析返回 exact route facts；基础 Harness Route（runtime）为 null。
-  agentEndpointRef: string | null;
-  agentIdentityMode: "none" | "bearer" | null;
-  agentCredentialRefId: string | null;
-  agentNetworkZone: string | null;
-  runtimeRevisionId: string;
   policyRevisionId: string | null;
   routeContentDigest: string;
   routeGroupId: string;
@@ -126,15 +142,29 @@ export interface RouteResolution {
   resolutionKeyDigest: string;
   resolutionInputDigest: string;
   resolvedAt: Date;
-  /**
-   * 控制面证据（恒非空）。
-   * 基础 Harness Route（targetKind=runtime，agentRevisionId=null）→ agent 字段为 null
-   * （Agent Evidence not_applicable，§18），Runtime 字段始终填充；Agent Route → 完整成组（§7.4）。
-   */
-  controlPlaneEvidence: RouteControlPlaneEvidence;
-  /** Projection 版本号（来自 RouteEligibilityProjection），用于 Binding 版本一致性校验。 */
-  projectionVersionNo?: number;
+  /** Projection 版本号（成功 projection 解析必须为正整数）。 */
+  projectionVersionNo: number;
 }
+
+/** 判别解析结果 — 通过 target.kind 收窄对应 target 事实与控制面证据。 */
+export type RouteResolution = RouteResolutionCommon &
+  (
+    | {
+        target: { kind: "runtime"; runtimeRevisionId: string };
+        controlPlaneEvidence: Extract<RouteEvidence, { kind: "runtime" }>;
+      }
+    | {
+        target: {
+          kind: "agent";
+          agentRevisionId: string;
+          agentEndpointRef: string;
+          agentIdentityMode: "none" | "bearer";
+          agentCredentialRefId: string | null;
+          agentNetworkZone: string;
+        };
+        controlPlaneEvidence: Extract<RouteEvidence, { kind: "agent" }>;
+      }
+  );
 
 export type RouteResolutionOutcome =
   | {
@@ -194,7 +224,7 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
 
   // 1. 过滤不匹配或无资格候选，使用 RouteSelector 统一规范化
   const eligible = input.candidates.flatMap((candidate): EligibleCandidate[] => {
-    if (!isControlPlaneEligible(candidate, input.now)) return [];
+    if (!isControlPlaneEligible(candidate, input.now, input.target)) return [];
     const normalized = normalizeEligibility(candidate.eligibilityConditions);
     if (!normalized) return [];
     // 检查 eligibility 条件是否匹配输入属性
@@ -272,50 +302,81 @@ export function resolveRouteCandidates(input: ResolveRouteCandidatesInput): Rout
 
   return {
     status: "resolved",
-    resolution: {
-      deploymentRouteId: selected.candidate.deploymentRouteId,
-      routeSetId: selected.candidate.routeSetId,
-      routeSetVersionNo: selected.candidate.routeSetVersionNo,
-      routeRevisionId: selected.candidate.routeRevisionId,
-      routeRevisionNo: selected.candidate.routeRevisionNo,
-      routeActivationId: selected.candidate.routeActivationId,
-      routeActivationSequence: selected.candidate.routeActivationSequence,
-      targetKind: selected.candidate.targetKind,
-      agentRevisionId: selected.candidate.agentRevisionId,
-      // Agent Route 生产调用事实：解析 agent target 时返回 exact route facts。
-      agentEndpointRef: selected.candidate.agentEndpointRef,
-      agentIdentityMode: selected.candidate.agentIdentityMode,
-      agentCredentialRefId: selected.candidate.agentCredentialRefId,
-      agentNetworkZone: selected.candidate.agentNetworkZone,
-      runtimeRevisionId: selected.candidate.runtimeRevisionId,
-      policyRevisionId: selected.candidate.policyRevisionId,
-      routeContentDigest: selected.candidate.contentDigest,
+    resolution: buildRouteResolution(selected, {
+      tenantId: input.tenantId,
+      target: input.target,
+      routeScopeKey: input.routeScopeKey,
+      businessKey: input.businessKey,
+      attributes: input.attributes,
+      threadDefaultModelRef: input.threadDefaultModelRef,
       routeGroupId: selectedGroupId,
-      specificity: selected.specificity,
-      priorityNo: selected.candidate.priorityNo,
-      trafficWeight: selected.candidate.trafficWeight,
       trafficBucket,
       resolutionKeyDigest,
-      resolutionInputDigest: computeResolutionInputDigest({
-        tenantId: input.tenantId,
-        target: input.target,
-        routeScopeKey: input.routeScopeKey,
-        businessKey: input.businessKey,
-        attributes: input.attributes,
-        threadDefaultModelRef: input.threadDefaultModelRef,
-      }),
-      resolvedAt: input.now,
-      // 控制面证据恒非空。基础 Harness Route（agentRevisionId=null）的 agent 字段
-      // 由 loader 填 null（§18 Agent Evidence not_applicable）；Runtime 字段始终填充。
-      // Agent Route → 完整控制面证据。
-      controlPlaneEvidence: cloneControlPlaneEvidence(
-        requireControlPlaneEvidence(selected.candidate),
-      ),
-      /** 从候选透传 Projection 版本号。 */
-      projectionVersionNo: selected.candidate.projectionVersionNo,
-    },
+      now: input.now,
+    }),
     eligibleCandidateCount: group.length,
   };
+}
+
+function buildRouteResolution(
+  selected: EligibleCandidate,
+  ctx: {
+    tenantId: string;
+    target: RouteTarget;
+    routeScopeKey: string;
+    businessKey: { threadId?: string; jobId?: string };
+    attributes: Record<string, RouteResolutionAttribute>;
+    threadDefaultModelRef?: string | null;
+    routeGroupId: string;
+    trafficBucket: number;
+    resolutionKeyDigest: string;
+    now: Date;
+  },
+): RouteResolution {
+  const c = selected.candidate;
+  const common = {
+    deploymentRouteId: c.deploymentRouteId,
+    routeSetId: c.routeSetId,
+    routeSetVersionNo: c.routeSetVersionNo,
+    routeRevisionId: c.routeRevisionId,
+    routeRevisionNo: c.routeRevisionNo,
+    routeActivationId: c.routeActivationId,
+    routeActivationSequence: c.routeActivationSequence,
+    policyRevisionId: c.policyRevisionId,
+    routeContentDigest: c.contentDigest,
+    routeGroupId: ctx.routeGroupId,
+    specificity: selected.specificity,
+    priorityNo: c.priorityNo,
+    trafficWeight: c.trafficWeight,
+    trafficBucket: ctx.trafficBucket,
+    resolutionKeyDigest: ctx.resolutionKeyDigest,
+    resolutionInputDigest: computeResolutionInputDigest({
+      tenantId: ctx.tenantId,
+      target: ctx.target,
+      routeScopeKey: ctx.routeScopeKey,
+      businessKey: ctx.businessKey,
+      attributes: ctx.attributes,
+      threadDefaultModelRef: ctx.threadDefaultModelRef,
+    }),
+    resolvedAt: ctx.now,
+    projectionVersionNo: requirePositiveProjectionVersionNo(c.projectionVersionNo),
+  };
+  if (isRuntimeCandidate(c)) {
+    return {
+      ...common,
+      target: c.target,
+      controlPlaneEvidence: cloneRuntimeEvidence(c.controlPlaneEvidence),
+    };
+  }
+  if (isAgentCandidate(c)) {
+    return {
+      ...common,
+      target: c.target,
+      controlPlaneEvidence: cloneAgentEvidence(c.controlPlaneEvidence),
+    };
+  }
+  // target 与证据 kind 矛盾（类型上不可能）→ fail-closed，不把另一分支证据带入结果。
+  throw new Error("RouteResolver 候选 target 与控制面证据 kind 不一致");
 }
 
 // ─── 导出工具 ──────────────────────────────────────────────
@@ -336,7 +397,7 @@ export function computeResolutionKeyDigest(input: {
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
 
-/** 将显式 target 归一为 digest 规范形（与 agentConstraint 语义保持 digest 兼容）。 */
+/** 将显式 target 归一为唯一解析输入的 digest 规范形。 */
 export function normalizeTarget(target: RouteTarget): unknown {
   return target.kind === "agent" ? target.agentId : null;
 }
@@ -360,41 +421,78 @@ function requireExecutionKey(businessKey: { threadId?: string; jobId?: string })
   return threadId ? `thread:${threadId}` : `job:${jobId}`;
 }
 
-function isControlPlaneEligible(candidate: RouteResolutionCandidate, now: Date): boolean {
-  // Runtime Evidence 无条件必填（§12/§10.2），无 Agent Route 也必须满足。
-  // controlPlaneEvidence 恒非空；Agent 维度仅 Agent Route 参与资格判断（§7.4），
-  // 基础 Harness Route 不要求（Agent Evidence not_applicable，§18，运行时证据已由下方布尔标志独立校验）。
-  const runtimeEligible =
-    candidate.runtimeLifecycleState === "enabled" &&
-    candidate.runtimeRevisionState === "published" &&
-    candidate.runtimePublicationActive &&
-    candidate.runtimeEvidenceValid &&
-    candidate.runtimeConformanceValid &&
-    (candidate.policyRevisionId === null || candidate.policyRevisionState === "published");
+/**
+ * nested 判别联合收窄 guard — target.kind 收窄无法自动关联 sibling target-specific
+ * 字段与 controlPlaneEvidence，故用 type predicate 一次收窄整个候选到对应分支。
+ * - runtime：证据必须是 runtime，target 必须是 runtime。
+ * - agent：证据必须是 agent，target 必须是 agent。
+ */
+type RuntimeCandidate = Extract<RouteResolutionCandidate, { target: { kind: "runtime" } }>;
+type AgentCandidate = Extract<RouteResolutionCandidate, { target: { kind: "agent" } }>;
 
-  if (candidate.targetKind === "runtime") {
-    // 基础 Harness Route：无 Agent 资产约束，Agent Evidence 为 not_applicable（§18），
-    // 不参与资格判断，也不伪装成 passed。仅需 Runtime 证据。
-    return (
-      candidate.activationState === "active" &&
-      (!candidate.effectiveFrom || candidate.effectiveFrom <= now) &&
-      (!candidate.effectiveUntil || candidate.effectiveUntil > now) &&
-      runtimeEligible
-    );
-  }
+function isRuntimeCandidate(candidate: RouteResolutionCandidate): candidate is RuntimeCandidate {
+  return candidate.target.kind === "runtime" && candidate.controlPlaneEvidence.kind === "runtime";
+}
 
-  // Agent Route：Agent Evidence 完整成组必填（§7.4）。
-  return (
+function isAgentCandidate(candidate: RouteResolutionCandidate): candidate is AgentCandidate {
+  return candidate.target.kind === "agent" && candidate.controlPlaneEvidence.kind === "agent";
+}
+
+function isControlPlaneEligible(
+  candidate: RouteResolutionCandidate,
+  now: Date,
+  inputTarget: RouteTarget,
+): boolean {
+  // 候选 target kind 必须与输入 target kind 匹配（agent 只比较 kind：输入 agentId 为
+  // 稳定身份，候选 target 携带 AgentRevision 身份，不比较 agentId 与 agentRevisionId）。
+  if (candidate.target.kind !== inputTarget.kind) return false;
+  // 成功 projection 解析必须携带正整数 projectionVersionNo（缺省/0/非整数不可 resolved）。
+  if (!isPositiveProjectionVersionNo(candidate.projectionVersionNo)) return false;
+
+  const commonEligible =
     candidate.activationState === "active" &&
     (!candidate.effectiveFrom || candidate.effectiveFrom <= now) &&
     (!candidate.effectiveUntil || candidate.effectiveUntil > now) &&
-    candidate.agentLifecycleState === "enabled" &&
-    candidate.agentRevisionState === "published" &&
-    candidate.agentPublicationActive &&
-    candidate.agentEvidenceValid &&
-    candidate.controlPlaneEvidence !== null &&
-    runtimeEligible
-  );
+    (candidate.policyRevisionId === null || candidate.policyRevisionState === "published");
+
+  // 用 type predicate 同时收窄 candidate.target 与其 sibling target-specific 事实与
+  // controlPlaneEvidence（nested discriminant 无法由 target.kind 自动收窄兄弟字段）。
+  if (isRuntimeCandidate(candidate)) {
+    // Runtime 候选只 inspect Runtime 生命周期/发布/证据/conformance。
+    return (
+      commonEligible &&
+      candidate.runtimeLifecycleState === "enabled" &&
+      candidate.runtimeRevisionState === "published" &&
+      candidate.runtimePublicationActive &&
+      candidate.runtimeEvidenceValid &&
+      candidate.runtimeConformanceValid
+    );
+  }
+
+  // Agent 候选只 inspect Agent 生命周期/发布/证据，不 inspect 任何 Runtime 事实。
+  if (isAgentCandidate(candidate)) {
+    return (
+      commonEligible &&
+      candidate.agentLifecycleState === "enabled" &&
+      candidate.agentRevisionState === "published" &&
+      candidate.agentPublicationActive &&
+      candidate.agentEvidenceValid
+    );
+  }
+
+  // target 与证据 kind 矛盾（类型上不可能）→ fail-closed。
+  return false;
+}
+
+function isPositiveProjectionVersionNo(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
+
+function requirePositiveProjectionVersionNo(value: number | undefined): number {
+  if (!isPositiveProjectionVersionNo(value)) {
+    throw new Error("RouteResolver 已选候选缺少正整数 projectionVersionNo");
+  }
+  return value;
 }
 
 /**
@@ -411,20 +509,19 @@ function eligibilityMatches(
   return true;
 }
 
-function requireControlPlaneEvidence(
-  candidate: RouteResolutionCandidate,
-): RouteControlPlaneEvidence {
-  if (!candidate.controlPlaneEvidence) {
-    throw new Error("RouteResolver 已选候选缺少控制面证据");
-  }
-  return candidate.controlPlaneEvidence;
-}
-
-function cloneControlPlaneEvidence(evidence: RouteControlPlaneEvidence): RouteControlPlaneEvidence {
+function cloneRuntimeEvidence(
+  evidence: Extract<RouteEvidence, { kind: "runtime" }>,
+): Extract<RouteEvidence, { kind: "runtime" }> {
   return {
     ...evidence,
     runtimeAttestationIds: [...evidence.runtimeAttestationIds].sort(),
   };
+}
+
+function cloneAgentEvidence(
+  evidence: Extract<RouteEvidence, { kind: "agent" }>,
+): Extract<RouteEvidence, { kind: "agent" }> {
+  return { ...evidence };
 }
 
 function sortKeys(value: unknown): unknown {

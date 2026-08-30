@@ -560,7 +560,8 @@ CREATE TABLE `DeletionStep` (
 CREATE TABLE `DeploymentRouteSet` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`targetKind` enum('runtime','agent') NOT NULL DEFAULT 'runtime',
+	`targetKind` enum('runtime','agent') NOT NULL,
+	`targetIdentity` varchar(36) NOT NULL,
 	`agentId` varchar(36),
 	`routeScopeKey` varchar(128) NOT NULL,
 	`routeScopeJson` json NOT NULL,
@@ -568,7 +569,9 @@ CREATE TABLE `DeploymentRouteSet` (
 	`createdAt` datetime(3) NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `DeploymentRouteSet_id` PRIMARY KEY(`id`),
-	CONSTRAINT `DeploymentRouteSet_tenant_agent_scope_uq` UNIQUE(`tenantId`,`agentId`,`routeScopeKey`)
+	CONSTRAINT `DeploymentRouteSet_tenant_target_scope_uq` UNIQUE(`tenantId`,`targetKind`,`targetIdentity`,`routeScopeKey`),
+	CONSTRAINT `DeploymentRouteSet_target_identity_check` CHECK (TRIM(`targetIdentity`) <> ''),
+	CONSTRAINT `DeploymentRouteSet_target_consistency_check` CHECK ((`targetKind` = 'runtime' AND `targetIdentity` = 'runtime' AND `agentId` IS NULL) OR (`targetKind` = 'agent' AND `targetIdentity` = `agentId` AND `agentId` IS NOT NULL AND TRIM(`agentId`) <> ''))
 );
 --> statement-breakpoint
 CREATE TABLE `DeploymentRoute` (
@@ -576,7 +579,7 @@ CREATE TABLE `DeploymentRoute` (
 	`routeSetId` varchar(36) NOT NULL,
 	`routeKey` varchar(128) NOT NULL,
 	`agentRevisionId` varchar(36),
-	`runtimeRevisionId` varchar(36) NOT NULL,
+	`runtimeRevisionId` varchar(36),
 	`trafficWeight` int NOT NULL,
 	`priorityNo` int NOT NULL DEFAULT 0,
 	`routeState` enum('enabled','disabled') NOT NULL DEFAULT 'enabled',
@@ -586,7 +589,8 @@ CREATE TABLE `DeploymentRoute` (
 	`createdAt` datetime(3) NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `DeploymentRoute_id` PRIMARY KEY(`id`),
-	CONSTRAINT `DeploymentRoute_set_routeKey_uq` UNIQUE(`routeSetId`,`routeKey`)
+	CONSTRAINT `DeploymentRoute_set_routeKey_uq` UNIQUE(`routeSetId`,`routeKey`),
+	CONSTRAINT `DeploymentRoute_exact_one_target_check` CHECK (((`runtimeRevisionId` IS NOT NULL AND `agentRevisionId` IS NULL) OR (`runtimeRevisionId` IS NULL AND `agentRevisionId` IS NOT NULL)))
 );
 --> statement-breakpoint
 CREATE TABLE `Device` (
@@ -2247,7 +2251,7 @@ CREATE TABLE `RouteRevision` (
 	`routeKey` varchar(128) NOT NULL,
 	`revisionNo` bigint unsigned NOT NULL,
 	`agentRevisionId` varchar(36),
-	`runtimeRevisionId` varchar(36) NOT NULL,
+	`runtimeRevisionId` varchar(36),
 	`agentEndpointRef` varchar(512),
 	`agentIdentityMode` enum('none','bearer'),
 	`agentCredentialRefId` varchar(36),
@@ -2270,13 +2274,15 @@ CREATE TABLE `RouteRevision` (
 	`createdAt` datetime(3) NOT NULL,
 	CONSTRAINT `RouteRevision_id` PRIMARY KEY(`id`),
 	CONSTRAINT `RouteRevision_route_revisionNo_uq` UNIQUE(`routeId`,`revisionNo`),
-	CONSTRAINT `RouteRevision_route_content_uq` UNIQUE(`routeId`,`contentDigest`)
+	CONSTRAINT `RouteRevision_route_content_uq` UNIQUE(`routeId`,`contentDigest`),
+	CONSTRAINT `RouteRevision_exact_target_group_check` CHECK ((`runtimeRevisionId` IS NOT NULL AND TRIM(`runtimeRevisionId`) <> '' AND `agentRevisionId` IS NULL AND `agentEndpointRef` IS NULL AND `agentIdentityMode` IS NULL AND `agentCredentialRefId` IS NULL AND `agentNetworkZone` IS NULL) OR (`runtimeRevisionId` IS NULL AND `agentRevisionId` IS NOT NULL AND TRIM(`agentRevisionId`) <> '' AND `agentEndpointRef` IS NOT NULL AND TRIM(`agentEndpointRef`) <> '' AND `agentIdentityMode` IN ('none','bearer') AND `agentNetworkZone` IS NOT NULL AND TRIM(`agentNetworkZone`) <> '' AND ((`agentIdentityMode` = 'bearer' AND `agentCredentialRefId` IS NOT NULL AND TRIM(`agentCredentialRefId`) <> '') OR (`agentIdentityMode` = 'none' AND (`agentCredentialRefId` IS NULL OR TRIM(`agentCredentialRefId`) <> '')))))
 );
 --> statement-breakpoint
 CREATE TABLE `RouteEligibilityProjection` (
 	`routeId` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`targetKind` enum('runtime','agent') NOT NULL DEFAULT 'runtime',
+	`targetKind` enum('runtime','agent') NOT NULL,
+	`targetIdentity` varchar(36) NOT NULL,
 	`agentId` varchar(36),
 	`routeSetId` varchar(36) NOT NULL,
 	`routeScopeKey` varchar(128) NOT NULL,
@@ -2299,41 +2305,44 @@ CREATE TABLE `RouteEligibilityProjection` (
 	`agentIdentityMode` enum('none','bearer'),
 	`agentCredentialRefId` varchar(36),
 	`agentNetworkZone` varchar(32),
-	`agentRevisionState` varchar(32) NOT NULL,
-	`agentLifecycleState` varchar(32) NOT NULL,
-	`agentPublicationActive` int NOT NULL,
-	`agentEvidenceValid` int NOT NULL,
-	`runtimeRevisionId` varchar(36) NOT NULL,
-	`runtimeRevisionState` varchar(32) NOT NULL,
-	`runtimeLifecycleState` varchar(32) NOT NULL,
-	`runtimePublicationActive` int NOT NULL,
-	`runtimeEvidenceValid` int NOT NULL,
-	`runtimeConformanceValid` int NOT NULL,
-	`runtimeEvidenceKind` enum('hosted_artifact','external_endpoint') NOT NULL,
-	`policyRevisionId` varchar(36),
-	`policyRevisionState` varchar(32),
+	`agentRevisionState` varchar(32),
+	`agentLifecycleState` varchar(32),
+	`agentPublicationActive` int,
+	`agentEvidenceValid` int,
 	`agentPublicationRecordId` varchar(36),
+	`agentContractSnapshotId` varchar(36),
+	`agentContractDigest` varchar(71),
+	`agentContextDigest` varchar(71),
+	`runtimeRevisionId` varchar(36),
+	`runtimeRevisionState` varchar(32),
+	`runtimeLifecycleState` varchar(32),
+	`runtimePublicationActive` int,
+	`runtimeEvidenceValid` int,
+	`runtimeConformanceValid` int,
+	`runtimeEvidenceKind` enum('hosted_artifact','external_endpoint'),
 	`runtimePublicationRecordId` varchar(36),
 	`runtimeAttestationIds` json,
 	`conformanceRunId` varchar(36),
 	`runtimeArtifactId` varchar(36),
-	`sourceEventId` varchar(36),
-	`sourceAggregateVersion` int,
-	`invalidReason` varchar(255),
-	`capabilityCompatibilityDigest` varchar(71) NOT NULL,
-	`agentContractSnapshotId` varchar(36),
-	`agentContractDigest` varchar(71),
-	`agentContextDigest` varchar(71),
 	`runtimeArtifactDigest` varchar(71),
 	`runtimeConfigDigest` varchar(71),
 	`runtimeTargetDigest` varchar(71),
+	`capabilityCompatibilityDigest` varchar(71),
+	`policyRevisionId` varchar(36),
+	`policyRevisionState` varchar(32),
+	`sourceEventId` varchar(36),
+	`sourceAggregateVersion` int,
+	`invalidReason` varchar(255),
 	`routeContentDigest` varchar(71) NOT NULL,
 	`eligibilityState` enum('eligible','ineligible','pending_rebuild') NOT NULL,
 	`projectionContentDigest` varchar(71) NOT NULL,
 	`projectionVersionNo` bigint unsigned NOT NULL,
 	`lastRebuiltAt` datetime(3) NOT NULL,
 	CONSTRAINT `RouteEligibilityProjection_routeId` PRIMARY KEY(`routeId`),
-	CONSTRAINT `RouteEligibilityProjection_revision_activation_uq` UNIQUE(`routeRevisionId`,`routeActivationId`)
+	CONSTRAINT `RouteEligibilityProjection_revision_activation_uq` UNIQUE(`routeRevisionId`,`routeActivationId`),
+	CONSTRAINT `RouteEligibilityProjection_target_identity_check` CHECK (TRIM(`targetIdentity`) <> ''),
+	CONSTRAINT `RouteEligibilityProjection_target_consistency_check` CHECK ((`targetKind` = 'runtime' AND `targetIdentity` = 'runtime' AND `agentId` IS NULL) OR (`targetKind` = 'agent' AND `targetIdentity` = `agentId` AND `agentId` IS NOT NULL AND TRIM(`agentId`) <> '')),
+	CONSTRAINT `RouteEligibilityProjection_target_group_exclusion_check` CHECK ((`targetKind` = 'agent' AND `agentRevisionId` IS NOT NULL AND TRIM(`agentRevisionId`) <> '' AND `runtimeRevisionId` IS NULL AND `runtimeRevisionState` IS NULL AND `runtimeLifecycleState` IS NULL AND `runtimePublicationActive` IS NULL AND `runtimeEvidenceValid` IS NULL AND `runtimeConformanceValid` IS NULL AND `runtimeEvidenceKind` IS NULL AND `runtimePublicationRecordId` IS NULL AND `runtimeAttestationIds` IS NULL AND `conformanceRunId` IS NULL AND `runtimeArtifactId` IS NULL AND `runtimeArtifactDigest` IS NULL AND `runtimeConfigDigest` IS NULL AND `runtimeTargetDigest` IS NULL AND `capabilityCompatibilityDigest` IS NULL) OR (`targetKind` = 'runtime' AND `runtimeRevisionId` IS NOT NULL AND TRIM(`runtimeRevisionId`) <> '' AND `agentRevisionId` IS NULL AND `agentEndpointRef` IS NULL AND `agentIdentityMode` IS NULL AND `agentCredentialRefId` IS NULL AND `agentNetworkZone` IS NULL AND `agentRevisionState` IS NULL AND `agentLifecycleState` IS NULL AND `agentPublicationActive` IS NULL AND `agentEvidenceValid` IS NULL AND `agentPublicationRecordId` IS NULL AND `agentContractSnapshotId` IS NULL AND `agentContractDigest` IS NULL AND `agentContextDigest` IS NULL))
 );
 --> statement-breakpoint
 CREATE TABLE `RuntimeConformanceCaseResult` (
@@ -2382,10 +2391,8 @@ CREATE TABLE `RuntimeConformanceRun` (
 CREATE TABLE `HostedProvisioningRequest` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`agentId` varchar(36) NOT NULL,
-	`agentRevisionId` varchar(36) NOT NULL,
+	`requesterId` varchar(36) NOT NULL,
 	`routeScopeKey` varchar(64) NOT NULL,
-	`desiredRuntimeKey` varchar(64) NOT NULL,
 	`state` enum('pending','running','ready','retryable_failed','permanent_failed','cancelled') NOT NULL DEFAULT 'pending',
 	`currentStep` varchar(64),
 	`attemptCount` int NOT NULL DEFAULT 0,
@@ -2396,8 +2403,6 @@ CREATE TABLE `HostedProvisioningRequest` (
 	`lastAttemptAt` datetime(3),
 	`createdAt` datetime(3) NOT NULL,
 	`updatedAt` datetime(3) NOT NULL,
-	`stepAgentRevisionId` varchar(36),
-	`stepAgentPublicationRecordId` varchar(36),
 	`stepRuntimeId` varchar(36),
 	`stepRuntimeRevisionId` varchar(36),
 	`stepRuntimeArtifactId` varchar(36),
@@ -2413,7 +2418,7 @@ CREATE TABLE `HostedProvisioningRequest` (
 	`workflowVersion` varchar(16) NOT NULL DEFAULT '3.0',
 	`lastCompletedStep` varchar(64),
 	CONSTRAINT `HostedProvisioningRequest_id` PRIMARY KEY(`id`),
-	CONSTRAINT `HostedProvisioningRequest_active_uq` UNIQUE(`tenantId`,`agentRevisionId`,`routeScopeKey`,`desiredRuntimeKey`)
+	CONSTRAINT `HostedProvisioningRequest_active_uq` UNIQUE(`tenantId`,`routeScopeKey`)
 );
 --> statement-breakpoint
 ALTER TABLE `RuntimeArtifact` ADD CONSTRAINT `RuntimeArtifact_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2619,7 +2624,7 @@ CREATE INDEX `DeletionRequest_tenant_state_idx` ON `DeletionRequest` (`tenantId`
 CREATE INDEX `DeletionRequest_tenant_requested_by_idx` ON `DeletionRequest` (`tenantId`,`requestedBy`);--> statement-breakpoint
 CREATE INDEX `DeletionStep_tenant_request_idx` ON `DeletionStep` (`tenantId`,`requestId`);--> statement-breakpoint
 CREATE INDEX `DeletionStep_request_state_idx` ON `DeletionStep` (`requestId`,`stepState`);--> statement-breakpoint
-CREATE INDEX `DeploymentRouteSet_tenant_agent_scope_idx` ON `DeploymentRouteSet` (`tenantId`,`agentId`,`routeScopeKey`);--> statement-breakpoint
+CREATE INDEX `DeploymentRouteSet_tenant_target_scope_idx` ON `DeploymentRouteSet` (`tenantId`,`targetKind`,`targetIdentity`,`routeScopeKey`);--> statement-breakpoint
 CREATE INDEX `DeploymentRoute_set_state_idx` ON `DeploymentRoute` (`routeSetId`,`routeState`);--> statement-breakpoint
 CREATE INDEX `DeploymentRoute_agentRevision_idx` ON `DeploymentRoute` (`agentRevisionId`);--> statement-breakpoint
 CREATE INDEX `DeploymentRoute_runtimeRevision_idx` ON `DeploymentRoute` (`runtimeRevisionId`);--> statement-breakpoint
@@ -2810,7 +2815,6 @@ CREATE INDEX `RouteEligibilityProjection_group_selector_priority_idx` ON `RouteE
 CREATE INDEX `RouteEligibilityProjection_tenant_idx` ON `RouteEligibilityProjection` (`tenantId`);--> statement-breakpoint
 CREATE INDEX `RuntimeConformanceRun_revision_completed_idx` ON `RuntimeConformanceRun` (`runtimeRevisionId`,`completedAt`);--> statement-breakpoint
 CREATE INDEX `HostedProvisioningRequest_tenantId_idx` ON `HostedProvisioningRequest` (`tenantId`);--> statement-breakpoint
-CREATE INDEX `HostedProvisioningRequest_agentId_idx` ON `HostedProvisioningRequest` (`agentId`);--> statement-breakpoint
 CREATE INDEX `HostedProvisioningRequest_state_idx` ON `HostedProvisioningRequest` (`state`);--> statement-breakpoint
 CREATE INDEX `HostedProvisioningRequest_claimable_idx` ON `HostedProvisioningRequest` (`state`,`nextAttemptAt`,`leaseExpiresAt`);--> statement-breakpoint
 CREATE TRIGGER `RouteRevision_prevent_update` BEFORE UPDATE ON `RouteRevision` FOR EACH ROW BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'RouteRevision is append-only'; END;--> statement-breakpoint

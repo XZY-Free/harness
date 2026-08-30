@@ -15,6 +15,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { createWithdrawAgentRevision } from "@/lib/agents/application/withdraw-agent-revision";
+import { resolveRequiredAgentBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
@@ -119,7 +120,6 @@ import { createHostedProvisioningWorker } from "@/lib/runtime/provisioning/hoste
 import { createPublishRuntimeRevision } from "@/lib/runtime/provisioning/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import { createRequestHostedProvisioning } from "@/lib/runtime/provisioning/request-hosted-provisioning";
-import { validateAgentRevisionForProvisioning } from "@/lib/runtime/provisioning/validate-hosted-provisioning-revision";
 import {
   buildDsseConformanceEnvelope,
   generateTestRunnerKey,
@@ -407,9 +407,9 @@ async function seedPublishedRuntimeRevision(
   return { runtime, revision: publishedRevision ?? revision };
 }
 
-// ─── 辅助：seed 完整端到端 fixture（Agent + Runtime + Route + Projection）─
+// ─── 辅助：seed 完整端到端 fixture（Agent + Runtime + 判别 Route + Projection）─
 
-async function seedEndToEndFixture(suffix: string) {
+async function seedEndToEndFixture(suffix: string, targetKind: "agent" | "runtime" = "agent") {
   const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
 
   const agentResult = await seedPublishedAgentRevision(
@@ -427,7 +427,10 @@ async function seedEndToEndFixture(suffix: string) {
 
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: agentResult.agent.id,
+    target:
+      targetKind === "agent"
+        ? { kind: "agent", agentId: agentResult.agent.id }
+        : { kind: "runtime" },
     routeScopeKey: "prod",
     routeScopeJson: { networkZone: "internal" },
   });
@@ -436,8 +439,17 @@ async function seedEndToEndFixture(suffix: string) {
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: agentResult.revision.id,
-    runtimeRevisionId: runtimeResult.revision.id,
+    target:
+      targetKind === "agent"
+        ? {
+            kind: "agent",
+            agentRevisionId: agentResult.revision.id,
+            agentEndpointRef: "https://agent.example.com/a2a",
+            agentIdentityMode: "none",
+            agentCredentialRefId: null,
+            agentNetworkZone: "private",
+          }
+        : { kind: "runtime", runtimeRevisionId: runtimeResult.revision.id },
     trafficWeight: 10000,
     priorityNo: 1,
     actor: { tenantId, actorType: "service", actorId: "test-deploy-bot" },
@@ -529,9 +541,16 @@ async function seedInvocation(tenantId: string, invocationId: string): Promise<v
 }
 
 async function resolveFrozenRouteForBinding(
-  fixture: Awaited<ReturnType<typeof seedEndToEndFixture>>,
+  fixture: {
+    tenantId: string;
+    routeSet: { targetKind: "runtime" | "agent" };
+    route: { id: string };
+  },
   threadId: string,
-): Promise<RouteResolution> {
+): Promise<Extract<RouteResolution, { target: { kind: "runtime" } }>> {
+  if (fixture.routeSet.targetKind !== "runtime") {
+    throw new Error("ExecutionBinding 测试必须使用 runtime RouteSet");
+  }
   await createBuildRouteEligibility({ store: mysqlRouteEligibilityStore })({
     tenantId: fixture.tenantId,
     routeId: fixture.route.id,
@@ -541,7 +560,7 @@ async function resolveFrozenRouteForBinding(
     store: mysqlRouteEligibilityResolutionStore,
   })({
     tenantId: fixture.tenantId,
-    target: { kind: "agent", agentId: fixture.agent.id },
+    target: { kind: "runtime" },
     routeScopeKey: "prod",
     businessKey: { threadId },
   });
@@ -554,23 +573,29 @@ async function resolveFrozenRouteForBinding(
   if (
     !Number.isInteger(outcome.resolution.projectionVersionNo) ||
     outcome.resolution.projectionVersionNo === undefined ||
-    outcome.resolution.projectionVersionNo < 0
+    outcome.resolution.projectionVersionNo < 1
   ) {
     throw new Error("Route Resolution 缺少有效 projectionVersionNo");
   }
-  return outcome.resolution;
+  if (
+    outcome.resolution.target.kind !== "runtime" ||
+    outcome.resolution.controlPlaneEvidence.kind !== "runtime"
+  ) {
+    throw new Error("Runtime Route Resolution 判别事实不一致");
+  }
+  return outcome.resolution as Extract<RouteResolution, { target: { kind: "runtime" } }>;
 }
 
 async function createBindingFromResolved(params: {
   tenantId: string;
   invocationId: string;
-  resolution: RouteResolution;
+  resolution: Extract<RouteResolution, { target: { kind: "runtime" } }>;
 }): Promise<ExecutionBinding> {
   const projectionVersionNo = params.resolution.projectionVersionNo;
   if (
     !Number.isInteger(projectionVersionNo) ||
     projectionVersionNo === undefined ||
-    projectionVersionNo < 0
+    projectionVersionNo < 1
   ) {
     throw new Error("Route Resolution 缺少有效 projectionVersionNo");
   }
@@ -583,7 +608,7 @@ async function createBindingFromResolved(params: {
   return createCreateExecutionBinding({ store: mysqlExecutionBindingStore })({
     invocationId: params.invocationId,
     tenantId: params.tenantId,
-    runtimeRevisionId: params.resolution.runtimeRevisionId,
+    runtimeRevisionId: params.resolution.target.runtimeRevisionId,
     deploymentRouteId: params.resolution.deploymentRouteId,
     modelProvider: "doubao",
     modelId: "doubao-pro",
@@ -597,8 +622,10 @@ async function createBindingFromResolved(params: {
     contextCheckpointId: null,
     environmentDefinitionRevisionId: null,
     controlPlaneEvidence: {
-      // : 测试构造 Agent Route 解析，controlPlaneEvidence 恒非空。
-      ...params.resolution.controlPlaneEvidence,
+      ...(() => {
+        const { kind: _kind, ...evidence } = params.resolution.controlPlaneEvidence;
+        return evidence;
+      })(),
       routeRevisionId: params.resolution.routeRevisionId,
       routeActivationId: params.resolution.routeActivationId,
       routeContentDigest: params.resolution.routeContentDigest,
@@ -850,16 +877,9 @@ describe("场景5：RouteSet 原子激活", () => {
       "atomic-agent",
       "atomic-agent-v1",
     );
-    const runtimeResult = await seedPublishedRuntimeRevision(
-      tenantId,
-      userIdentityId,
-      "atomic-runtime",
-      "atomic-runtime-v1",
-    );
-
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agentResult.agent.id,
+      target: { kind: "agent", agentId: agentResult.agent.id },
       routeScopeKey: "prod",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -876,13 +896,14 @@ describe("场景5：RouteSet 原子激活", () => {
         {
           routeKey: "primary",
           routeGroupId: "primary",
-          agentRevisionId: agentResult.revision.id,
-          runtimeRevisionId: runtimeResult.revision.id,
-          // 专题01 Batch4 补漏：agent route 必须冻结生产调用事实。
-          agentEndpointRef: "https://agent.example.com/a2a",
-          agentIdentityMode: "bearer",
-          agentCredentialRefId: "cred-1",
-          agentNetworkZone: "private",
+          target: {
+            kind: "agent",
+            agentRevisionId: agentResult.revision.id,
+            agentEndpointRef: "https://agent.example.com/a2a",
+            agentIdentityMode: "none",
+            agentCredentialRefId: null,
+            agentNetworkZone: "private",
+          },
           trafficWeight: 10000,
           priorityNo: 1,
           eligibilityConditions: {},
@@ -914,13 +935,14 @@ describe("场景5：RouteSet 原子激活", () => {
           {
             routeKey: "primary",
             routeGroupId: "primary",
-            agentRevisionId: "99999999-9999-4999-8999-999999999999",
-            runtimeRevisionId: runtimeResult.revision.id,
-            // 专题01 Batch4 补漏：agent route 必须冻结生产调用事实。
-            agentEndpointRef: "https://agent.example.com/a2a",
-            agentIdentityMode: "bearer",
-            agentCredentialRefId: "cred-1",
-            agentNetworkZone: "private",
+            target: {
+              kind: "agent",
+              agentRevisionId: "99999999-9999-4999-8999-999999999999",
+              agentEndpointRef: "https://agent.example.com/a2a",
+              agentIdentityMode: "none",
+              agentCredentialRefId: null,
+              agentNetworkZone: "private",
+            },
             trafficWeight: 10000,
             priorityNo: 1,
             activationState: "active",
@@ -1005,13 +1027,13 @@ describe("场景7：Projection Consumer 构建完整 eligible Projection", () =>
     expect(projection?.eligibilityState).toBe("eligible");
     expect(projection?.agentPublicationActive).toBe(1);
     expect(projection?.agentEvidenceValid).toBe(1);
-    expect(projection?.runtimePublicationActive).toBe(1);
-    expect(projection?.runtimeEvidenceValid).toBe(1);
-    expect(projection?.runtimeConformanceValid).toBe(1);
+    expect(projection?.runtimePublicationActive).toBeNull();
+    expect(projection?.runtimeEvidenceValid).toBeNull();
+    expect(projection?.runtimeConformanceValid).toBeNull();
     expect(projection?.agentPublicationRecordId).toBeTruthy();
-    expect(projection?.runtimePublicationRecordId).toBeTruthy();
-    expect(projection?.conformanceRunId).toBeTruthy();
-    expect(projection?.runtimeAttestationIds).toHaveLength(1);
+    expect(projection?.runtimePublicationRecordId).toBeNull();
+    expect(projection?.conformanceRunId).toBeNull();
+    expect(projection?.runtimeAttestationIds).toBeNull();
   });
 
   it("activeRouteRevisionId 漂移时仍按 latest activation 自愈并被 SourceReader 发现", async () => {
@@ -1168,7 +1190,10 @@ describe("场景8：Employee Turn 只执行一次 Route Resolution", () => {
     if (outcome1.status === "resolved" && outcome2.status === "resolved") {
       expect(outcome2.resolution.routeRevisionId).toBe(outcome1.resolution.routeRevisionId);
       expect(outcome2.resolution.routeActivationId).toBe(outcome1.resolution.routeActivationId);
-      expect(outcome2.resolution.agentRevisionId).toBe(fixture.agentRevision.id);
+      expect(outcome2.resolution.target).toMatchObject({
+        kind: "agent",
+        agentRevisionId: fixture.agentRevision.id,
+      });
     }
   });
 });
@@ -1179,7 +1204,7 @@ describe("场景8：Employee Turn 只执行一次 Route Resolution", () => {
 
 describe("场景9：Binding 在同一事务完成最终资格校验", () => {
   it("ExecutionBinding 创建在单事务内完成资格校验 + 行级锁 + Insert", async () => {
-    const fixture = await seedEndToEndFixture("binding-tx");
+    const fixture = await seedEndToEndFixture("binding-tx", "runtime");
     const resolution = await resolveFrozenRouteForBinding(fixture, "thread-binding-e2e");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
@@ -1202,77 +1227,56 @@ describe("场景9：Binding 在同一事务完成最终资格校验", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 场景 10：Hosted 无 Route 时创建精确 Revision 请求
+// 场景 10：Hosted 无 Runtime Route 时创建 runtime-only 请求
 // ═══════════════════════════════════════════════════════════
 
-describe("场景10：Hosted 无 Route 时创建精确 Revision 请求", () => {
-  it("无 Ready Route 时创建 HostedProvisioningRequest 绑定精确 agentRevisionId", async () => {
+describe("场景10：Hosted 无 Runtime Route 时创建 runtime-only 请求", () => {
+  it("请求只冻结 tenant/requester/scope，不保存任何 Agent 身份或 Runtime key", async () => {
     const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
-    const { agent, revision } = await seedPublishedAgentRevision(
-      tenantId,
-      userIdentityId,
-      "hosted-agent",
-      "hosted-agent-v1",
-    );
 
     const requestHostedProvisioning = createRequestHostedProvisioning({
       store: mysqlHostedProvisioningRequestStore,
-      revisionValidator: { validateRevision: validateAgentRevisionForProvisioning },
     });
 
     const result = await requestHostedProvisioning({
       tenantId,
-      agentId: agent.id,
-      agentRevisionId: revision.id,
+      requesterId: userIdentityId,
       routeScopeKey: "prod",
     });
 
-    if ("valid" in result && result.valid === false) {
-      throw new Error(`Revision 验证失败: ${result.reason}`);
-    }
     if (!("requestId" in result)) {
-      throw new Error("Expected RequestHostedProvisioningResult but got invalid revision");
+      throw new Error(`Hosted 请求失败: ${result.reason}`);
     }
     expect(result.state).toBeDefined();
     expect(result.requestId).toBeTruthy();
 
-    // 验证请求精确绑定了 agentRevisionId
     const requests = await db.select().from(hostedProvisioningRequestTable);
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.agentRevisionId).toBe(revision.id);
-    expect(requests[0]?.agentId).toBe(agent.id);
+    expect(requests[0]?.requesterId).toBe(userIdentityId);
     expect(requests[0]?.routeScopeKey).toBe("prod");
-    expect(requests[0]?.desiredRuntimeKey).toBe("builtin-hosted");
     expect(requests[0]?.state).toBe("pending");
+    expect(requests[0]).not.toHaveProperty("agentId");
+    expect(requests[0]).not.toHaveProperty("agentRevisionId");
+    expect(requests[0]).not.toHaveProperty("desiredRuntimeKey");
   });
 
-  it("agentRevisionId='unknown' 被拒绝", async () => {
-    const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
-    const agent = await createAgent({
-      tenantId,
-      agentKey: "hosted-reject-agent",
-      displayName: "Hosted Reject Agent",
-      ownerUserId: userIdentityId,
-      lifecycleState: "enabled",
-    });
-
+  it("空白 requesterId 在写库前 fail-closed", async () => {
+    const { tenantId } = await seedAdminWithActionBindings();
     const requestHostedProvisioning = createRequestHostedProvisioning({
       store: mysqlHostedProvisioningRequestStore,
-      revisionValidator: { validateRevision: validateAgentRevisionForProvisioning },
     });
 
     const result = await requestHostedProvisioning({
       tenantId,
-      agentId: agent.id,
-      agentRevisionId: "unknown",
+      requesterId: "   ",
       routeScopeKey: "prod",
     });
 
-    expect("valid" in result).toBe(true);
     if ("valid" in result) {
       expect(result.valid).toBe(false);
-      expect(result.code).toBe("REVISION_ID_UNKNOWN");
+      expect(result.code).toBe("BLANK_REQUESTER");
     }
+    expect(await db.select().from(hostedProvisioningRequestTable)).toHaveLength(0);
   });
 });
 
@@ -1283,23 +1287,14 @@ describe("场景10：Hosted 无 Route 时创建精确 Revision 请求", () => {
 describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活", () => {
   it("Hosted Provisioning Saga 从 start 到 ready 完成全部步骤", async () => {
     const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
-    const { agent, revision: agentRevision } = await seedPublishedAgentRevision(
-      tenantId,
-      userIdentityId,
-      "hosted-saga-agent",
-      "hosted-saga-agent-v1",
-    );
 
     const requestHostedProvisioning = createRequestHostedProvisioning({
       store: mysqlHostedProvisioningRequestStore,
-      revisionValidator: { validateRevision: validateAgentRevisionForProvisioning },
     });
     const request = await requestHostedProvisioning({
       tenantId,
-      agentId: agent.id,
-      agentRevisionId: agentRevision.id,
+      requesterId: userIdentityId,
       routeScopeKey: "prod",
-      desiredRuntimeKey: "builtin-hosted",
     });
     expect(request).toBeTruthy();
     expect("requestId" in request!).toBe(true);
@@ -1349,8 +1344,6 @@ describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活",
 
       expect(persisted?.state).toBe("ready");
       expect(persisted?.currentStep).toBe("done");
-      expect(persisted?.stepAgentRevisionId).toBe(agentRevision.id);
-      expect(persisted?.stepAgentPublicationRecordId).toBeTruthy();
       expect(persisted?.stepRuntimeRevisionId).toBeTruthy();
       expect(persisted?.stepRuntimeArtifactId).toBeTruthy();
       expect(persisted?.stepRuntimeAttestationIds).toHaveLength(1);
@@ -1365,15 +1358,17 @@ describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活",
         store: mysqlRouteEligibilityResolutionStore,
       })({
         tenantId,
-        target: { kind: "agent", agentId: agent.id },
+        target: { kind: "runtime" },
         routeScopeKey: "prod",
         businessKey: { threadId: `hosted-e2e-${requestId}` },
       });
       expect(resolved.status).toBe("resolved");
       if (resolved.status !== "resolved")
         throw new Error(`Hosted Route 未解析: ${resolved.reason}`);
-      expect(resolved.resolution.agentRevisionId).toBe(agentRevision.id);
-      expect(resolved.resolution.runtimeRevisionId).toBe(persisted?.stepRuntimeRevisionId);
+      expect(resolved.resolution.target).toEqual({
+        kind: "runtime",
+        runtimeRevisionId: persisted?.stepRuntimeRevisionId,
+      });
       expect(resolved.resolution.routeRevisionId).toBe(persisted?.stepRouteRevisionId);
       expect(resolved.resolution.routeActivationId).toBe(persisted?.stepRouteActivationId);
     } finally {
@@ -1383,12 +1378,12 @@ describe("场景11：Hosted Worker 完成发布、Conformance 和 Route 激活",
 });
 
 // ═══════════════════════════════════════════════════════════
-// 场景 12：最终调度继续使用 Request 冻结的 AgentRevision
+// 场景 12：已冻结 Runtime Binding 不受无关 AgentRevision 变化影响
 // ═══════════════════════════════════════════════════════════
 
-describe("场景12：最终调度继续使用 Request 冻结的 AgentRevision", () => {
+describe("场景12：已冻结 Runtime Binding 不受无关 AgentRevision 变化影响", () => {
   it("已创建 ExecutionBinding 不因 Agent 新 Revision 发布而变化", async () => {
-    const fixture = await seedEndToEndFixture("frozen-revision");
+    const fixture = await seedEndToEndFixture("frozen-revision", "runtime");
     const resolution = await resolveFrozenRouteForBinding(fixture, "thread-frozen");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
@@ -1413,7 +1408,7 @@ describe("场景12：最终调度继续使用 Request 冻结的 AgentRevision", 
     });
     await publishRevision(fixture.tenantId, newRevision.id, 2);
 
-    // 已有 Binding 的 configHash 不变（ExecutionBinding 不可变，不随新 Agent Revision 变化）
+    // 已有 Runtime Binding 的 configHash 不变（ExecutionBinding 不携带 Agent Authority）。
     expect(binding.configHash).toBe(frozenConfigHash);
   });
 });
@@ -1424,7 +1419,7 @@ describe("场景12：最终调度继续使用 Request 冻结的 AgentRevision", 
 
 describe("场景13：Agent Revision 撤回不影响 Harness Binding", () => {
   it("ExecutionBinding 只绑定 Runtime（无 Agent 维度），Agent Revision 撤回后 Binding 仍成功", async () => {
-    const fixture = await seedEndToEndFixture("withdrawn-pub");
+    const fixture = await seedEndToEndFixture("withdrawn-pub", "runtime");
     const resolution = await resolveFrozenRouteForBinding(fixture, "thread-withdrawn");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
@@ -1433,25 +1428,26 @@ describe("场景13：Agent Revision 撤回不影响 Harness Binding", () => {
     await withdrawRevision(fixture.agentRevision.id);
     const withdrawn = await getRevisionById(fixture.agentRevision.id);
     expect(withdrawn?.revisionState).toBe("withdrawn");
+    const agentPublication = await getPublicationRecordBySubject({
+      tenantId: fixture.tenantId,
+      subjectType: "agent_revision",
+      subjectRevisionId: fixture.agentRevision.id,
+    });
+    if (!agentPublication) throw new Error("Agent PublicationRecord 缺失");
     const [withdrawal] = await db
       .select()
       .from(withdrawalRecord)
-      .where(
-        eq(
-          withdrawalRecord.publicationRecordId,
-          resolution.controlPlaneEvidence.agentPublicationRecordId as string,
-        ),
-      );
+      .where(eq(withdrawalRecord.publicationRecordId, agentPublication.id));
     expect(withdrawal).toBeDefined();
 
-    // 专题01 冻结架构：ExecutionBinding 不再知道 Agent（02 §3.2）。Agent Revision 撤回
-    // 由 AgentCall 子执行层 fail-closed（后续批次），不阻止顶层 Harness 创建 Runtime Binding。
+    // 专题01 冻结架构：ExecutionBinding 不知道 Agent（02 §3.2）。Agent Revision 撤回由
+    // AgentCall 子执行层 fail-closed，不阻止顶层 Harness 创建 Runtime Binding。
     const binding = await createBindingFromResolved({
       tenantId: fixture.tenantId,
       invocationId,
       resolution,
     });
-    expect(binding.runtimeRevisionId).toBe(resolution.runtimeRevisionId);
+    expect(binding.runtimeRevisionId).toBe(resolution.target.runtimeRevisionId);
     expect(binding.runtimePublicationRecordId).toBeTruthy();
   });
 });
@@ -1462,7 +1458,7 @@ describe("场景13：Agent Revision 撤回不影响 Harness Binding", () => {
 
 describe("场景14：Attestation 撤销后拒绝新 Binding", () => {
   it("Resolver 冻结 Attestation 后新增 Revocation，旧 Resolution 创建 Binding 必须失败", async () => {
-    const fixture = await seedEndToEndFixture("revoked-attest");
+    const fixture = await seedEndToEndFixture("revoked-attest", "runtime");
     const resolution = await resolveFrozenRouteForBinding(fixture, "thread-revoked");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
@@ -1494,7 +1490,7 @@ describe("场景14：Attestation 撤销后拒绝新 Binding", () => {
 
 describe("场景15：Runtime Conformance 失效后拒绝新 Binding", () => {
   it("Resolver 冻结 Conformance 后权威 Run/Case 变为不合格，旧 Resolution 创建 Binding 必须失败", async () => {
-    const fixture = await seedEndToEndFixture("conformance-invalid");
+    const fixture = await seedEndToEndFixture("conformance-invalid", "runtime");
     const resolution = await resolveFrozenRouteForBinding(fixture, "thread-conformance-fail");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
@@ -1547,7 +1543,7 @@ describe("场景15：Runtime Conformance 失效后拒绝新 Binding", () => {
 
 describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", () => {
   it("Resolver 冻结 Route 后出现新 Revision/Activation，旧 Resolution 创建 Binding 必须失败", async () => {
-    const fixture = await seedEndToEndFixture("stale-route-activation");
+    const fixture = await seedEndToEndFixture("stale-route-activation", "runtime");
     const resolution = await resolveFrozenRouteForBinding(fixture, "thread-stale-route-activation");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
@@ -1557,8 +1553,7 @@ describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", ()
       routeSetId: fixture.routeSet.id,
       routeSetExpectedVersionNo: 2,
       routeId: fixture.route.id,
-      agentRevisionId: fixture.agentRevision.id,
-      runtimeRevisionId: fixture.runtimeRevision.id,
+      target: { kind: "runtime", runtimeRevisionId: fixture.runtimeRevision.id },
       trafficWeight: 10000,
       priorityNo: 2,
       routeState: "enabled",
@@ -1574,7 +1569,7 @@ describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", ()
   });
 
   it("Binding 创建后新禁用 Activation 不修改数据库中的任何冻结字段", async () => {
-    const fixture = await seedEndToEndFixture("immutable-binding");
+    const fixture = await seedEndToEndFixture("immutable-binding", "runtime");
     const resolution = await resolveFrozenRouteForBinding(fixture, "thread-immutable");
     const invocationId = crypto.randomUUID();
     await seedInvocation(fixture.tenantId, invocationId);
@@ -1616,22 +1611,14 @@ describe("场景16：已创建 ExecutionBinding 不因后续变化被修改", ()
 describe("场景17：Worker 崩溃后租约可恢复", () => {
   it("B 从 A 的最后 checkpoint 重领，A 恢复后不能覆盖或释放 B 的租约", async () => {
     const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
-    const { agent, revision } = await seedPublishedAgentRevision(
-      tenantId,
-      userIdentityId,
-      "lease-agent",
-      "lease-v1",
-    );
 
     // 创建请求
     const requestHostedProvisioning = createRequestHostedProvisioning({
       store: mysqlHostedProvisioningRequestStore,
-      revisionValidator: { validateRevision: validateAgentRevisionForProvisioning },
     });
     const result = await requestHostedProvisioning({
       tenantId,
-      agentId: agent.id,
-      agentRevisionId: revision.id,
+      requesterId: userIdentityId,
       routeScopeKey: "prod",
     });
     if (!("requestId" in result)) throw new Error("请求创建失败");
@@ -1651,11 +1638,11 @@ describe("场景17：Worker 崩溃后租约可恢复", () => {
       requestId: result.requestId,
       workerId: worker1Id,
       state: "pending",
-      currentStep: "prepare_runtime_revision",
-      lastCompletedStep: "ensure_agent_publication",
+      currentStep: "verify_runtime_artifact",
+      lastCompletedStep: "prepare_runtime_revision",
       checkpoint: {
-        agentRevisionId: revision.id,
-        agentPublicationRecordId: "publication-checkpoint-001",
+        runtimeId: "runtime-checkpoint-001",
+        runtimeRevisionId: "runtime-revision-checkpoint-001",
       },
       nextAttemptAt: now,
       leaseOwner: null,
@@ -1669,8 +1656,8 @@ describe("场景17：Worker 崩溃后租约可恢复", () => {
       now: new Date(now.getTime() + 1_000),
     });
     expect(claimedByWorker1?.leaseOwner).toBe(worker1Id);
-    expect(claimedByWorker1?.lastCompletedStep).toBe("ensure_agent_publication");
-    expect(claimedByWorker1?.stepAgentRevisionId).toBe(revision.id);
+    expect(claimedByWorker1?.lastCompletedStep).toBe("prepare_runtime_revision");
+    expect(claimedByWorker1?.stepRuntimeRevisionId).toBe("runtime-revision-checkpoint-001");
 
     const worker2Id = "worker-recovery-002";
     const [claimedByWorker2] = await mysqlHostedProvisioningRequestStore.claimRequests({
@@ -1681,9 +1668,9 @@ describe("场景17：Worker 崩溃后租约可恢复", () => {
     });
     expect(claimedByWorker2?.id).toBe(result.requestId);
     expect(claimedByWorker2?.leaseOwner).toBe(worker2Id);
-    expect(claimedByWorker2?.currentStep).toBe("prepare_runtime_revision");
-    expect(claimedByWorker2?.lastCompletedStep).toBe("ensure_agent_publication");
-    expect(claimedByWorker2?.stepAgentRevisionId).toBe(revision.id);
+    expect(claimedByWorker2?.currentStep).toBe("verify_runtime_artifact");
+    expect(claimedByWorker2?.lastCompletedStep).toBe("prepare_runtime_revision");
+    expect(claimedByWorker2?.stepRuntimeRevisionId).toBe("runtime-revision-checkpoint-001");
 
     await expect(
       mysqlHostedProvisioningRequestStore.updateState({
@@ -1704,15 +1691,15 @@ describe("场景17：Worker 崩溃后租约可恢复", () => {
       requestId: result.requestId,
       workerId: worker2Id,
       state: "pending",
-      currentStep: "prepare_runtime_revision",
+      currentStep: "verify_runtime_artifact",
       nextAttemptAt: new Date(now.getTime() + 62_000),
       leaseOwner: null,
       leaseExpiresAt: null,
     });
     expect(resumed.state).toBe("pending");
     expect(resumed.leaseOwner).toBeNull();
-    expect(resumed.lastCompletedStep).toBe("ensure_agent_publication");
-    expect(resumed.stepAgentRevisionId).toBe(revision.id);
+    expect(resumed.lastCompletedStep).toBe("prepare_runtime_revision");
+    expect(resumed.stepRuntimeRevisionId).toBe("runtime-revision-checkpoint-001");
   });
 });
 
@@ -1824,8 +1811,14 @@ describe("场景19：Route Key 在 Revision 变化后保持不变", () => {
       routeSetId: fixture.routeSet.id,
       routeSetExpectedVersionNo: expectedVersion,
       routeId: fixture.route.id,
-      agentRevisionId: newAgentRevision.id,
-      runtimeRevisionId: fixture.runtimeRevision.id,
+      target: {
+        kind: "agent",
+        agentRevisionId: newAgentRevision.id,
+        agentEndpointRef: "https://agent.example.com/a2a",
+        agentIdentityMode: "none",
+        agentCredentialRefId: null,
+        agentNetworkZone: "private",
+      },
       trafficWeight: 10000,
       priorityNo: 1,
       actor: { tenantId: fixture.tenantId, actorType: "service", actorId: "test-updater" },
@@ -1966,16 +1959,10 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
     );
     expect(agentRevision.revisionState).toBe("published");
 
-    // ─── 2. Deploy: Runtime + agent-backed RouteSet + RouteActivation ─
-    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
-      tenantId,
-      userIdentityId,
-      "lifecycle-runtime",
-      "lifecycle-rt-v1",
-    );
+    // ─── 2. Deploy: black-box Agent RouteSet + RouteActivation ─
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "prod",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -1990,13 +1977,14 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
         {
           routeKey: "primary",
           routeGroupId: "primary",
-          agentRevisionId: agentRevision.id,
-          runtimeRevisionId: runtimeRevision.id,
-          // 专题01 Batch4 补漏：agent route 必须冻结生产调用事实。
-          agentEndpointRef: "https://agent.example.com/a2a",
-          agentIdentityMode: "bearer",
-          agentCredentialRefId: "cred-1",
-          agentNetworkZone: "private",
+          target: {
+            kind: "agent",
+            agentRevisionId: agentRevision.id,
+            agentEndpointRef: "https://agent.example.com/a2a",
+            agentIdentityMode: "none",
+            agentCredentialRefId: null,
+            agentNetworkZone: "private",
+          },
           trafficWeight: 10000,
           priorityNo: 1,
           eligibilityConditions: {},
@@ -2044,10 +2032,11 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
     expect(projection?.agentEvidenceValid).toBe(1);
     expect(projection?.agentPublicationRecordId).toBeTruthy();
 
-    // ─── 4. 唯一 Resolver 解析到 agent route → ExecutionBinding 冻结完整 Agent Evidence ─
-    const outcome = await createResolveRoute({
+    // ─── 4. 唯一 Resolver 解析到 Agent Route → AgentCallBinding 冻结完整 Agent Evidence ─
+    const resolveRoute = createResolveRoute({
       store: mysqlRouteEligibilityResolutionStore,
-    })({
+    });
+    const outcome = await resolveRoute({
       tenantId,
       target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "prod",
@@ -2055,16 +2044,22 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
     });
     expect(outcome.status).toBe("resolved");
     if (outcome.status !== "resolved") throw new Error(`J-3 解析失败: ${outcome.reason}`);
-    expect(outcome.resolution.agentRevisionId).toBe(agentRevision.id);
-    expect(outcome.resolution.projectionVersionNo).toBeGreaterThan(0);
-
-    const invocationId = crypto.randomUUID();
-    await seedInvocation(tenantId, invocationId);
-    const binding = await createBindingFromResolved({
-      tenantId,
-      invocationId,
-      resolution: outcome.resolution,
+    expect(outcome.resolution.target).toMatchObject({
+      kind: "agent",
+      agentRevisionId: agentRevision.id,
     });
+    expect(outcome.resolution.projectionVersionNo).toBeGreaterThan(0);
+    const resolvedAgent = await resolveRequiredAgentBinding({
+      tenantId,
+      agentId: agent.id,
+      resolveRoute,
+      routeScopeKey: "prod",
+      businessKey: { threadId: "lifecycle-agent-call-binding" },
+    });
+    expect(resolvedAgent.binding.agentRevisionId).toBe(agentRevision.id);
+    expect(resolvedAgent.binding.endpointRef).toBe("https://agent.example.com/a2a");
+    expect(resolvedAgent.binding.identityMode).toBe("none");
+    expect(resolvedAgent.binding.credentialRefId).toBeNull();
 
     // ─── 5. Withdraw：正式撤回命令 → 真实 Worker 消费 agent.revision.withdrawn → Projection ineligible → fail-closed ─
     // 正式撤回应用服务在真实 MySQL 同事务写 WithdrawalRecord/Audit/Outbox agent.revision.withdrawn，
@@ -2206,12 +2201,6 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
 
   it("external_endpoint 全链：发布（无 Artifact）→ 解析 → Binding 冻结 external 证据", async () => {
     const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
-    const agentResult = await seedPublishedAgentRevision(
-      tenantId,
-      userIdentityId,
-      "e2e-external-agent",
-      "e2e-external-agent-v1",
-    );
     const runtimeResult = await seedPublishedExternalRuntimeRevision(
       tenantId,
       userIdentityId,
@@ -2220,7 +2209,7 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
 
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agentResult.agent.id,
+      target: { kind: "runtime" },
       routeScopeKey: "prod",
       routeScopeJson: { networkZone: "external" },
     });
@@ -2228,25 +2217,18 @@ describe("场景22：External Endpoint Runtime Binding 端到端（03 §3 all-or
       tenantId,
       routeSetId: routeSet.id,
       routeSetExpectedVersionNo: 1,
-      agentRevisionId: agentResult.revision.id,
-      runtimeRevisionId: runtimeResult.revision.id,
+      target: { kind: "runtime", runtimeRevisionId: runtimeResult.revision.id },
       trafficWeight: 10000,
       priorityNo: 1,
       actor: { tenantId, actorType: "service", actorId: "test-deploy-bot" },
     });
     const fixture = {
       tenantId,
-      agent: agentResult.agent,
-      agentRevision: agentResult.revision,
-      runtime: runtimeResult.runtime,
-      runtimeRevision: runtimeResult.revision,
+      routeSet,
       route: upsertResult.route,
     };
 
-    const resolution = await resolveFrozenRouteForBinding(
-      fixture as Parameters<typeof resolveFrozenRouteForBinding>[0],
-      "thread-external-binding-e2e",
-    );
+    const resolution = await resolveFrozenRouteForBinding(fixture, "thread-external-binding-e2e");
     // 解析结果冻结 external 证据：无 artifact 引用、kind=external_endpoint。
     expect(resolution.controlPlaneEvidence.runtimeEvidenceKind).toBe("external_endpoint");
     expect(resolution.controlPlaneEvidence.runtimeArtifactId).toBeNull();

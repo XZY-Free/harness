@@ -12,24 +12,44 @@
 
 import type { RevisionExecutionEvidenceSnapshot } from "../domain/revision-execution-eligibility";
 
-/** 加载执行资格证据的输入参数。 */
-export interface LoadEvidenceInput {
+/** 加载 Agent target 证据的输入 — 只含 agentRevisionId，不含 runtimeRevisionId。 */
+export interface AgentTargetEvidenceInput {
+  kind: "agent";
   tenantId: string;
-  /**
-   * 绑定的 AgentRevision ID。
-   * null = 基础 Harness Route（无 Agent 资产约束），Agent 维度证据为 not_applicable。
-   */
-  agentRevisionId: string | null;
+  /** 绑定的 AgentRevision ID（agent target 恒非空）。 */
+  agentRevisionId: string;
+  /** Route 引用的 PolicyRevisionId（null = Route 未引用 Policy）。 */
+  policyRevisionId: string | null;
+}
+
+/** 加载 Runtime target 证据的输入 — 只含 runtimeRevisionId，不含 agentRevisionId。 */
+export interface RuntimeTargetEvidenceInput {
+  kind: "runtime";
+  tenantId: string;
   runtimeRevisionId: string;
   /** Route 引用的 PolicyRevisionId（null = Route 未引用 Policy）。 */
   policyRevisionId: string | null;
 }
 
-/** loadExactEvidence 额外参数 — Resolver 冻结的精确证据引用。 */
-export interface LoadExactEvidenceInput extends LoadEvidenceInput {
+/** 加载执行资格证据的输入参数 — target 判别联合。 */
+export type LoadEvidenceInput = AgentTargetEvidenceInput | RuntimeTargetEvidenceInput;
+
+/** Agent target 精确证据输入 — Resolver 冻结的精确证据引用。 */
+export interface AgentTargetExactEvidenceInput extends AgentTargetEvidenceInput {
+  /** Resolver 冻结的 ConformanceRun ID（agent target 无 conformance，恒 null）。 */
+  conformanceRunId: null;
+}
+
+/** Runtime target 精确证据输入 — Resolver 冻结的精确证据引用。 */
+export interface RuntimeTargetExactEvidenceInput extends RuntimeTargetEvidenceInput {
   /** Resolver 冻结的 ConformanceRun ID。 */
   conformanceRunId: string | null;
 }
+
+/** loadExactEvidence 输入 — target 判别联合 + 精确证据引用。 */
+export type LoadExactEvidenceInput =
+  | AgentTargetExactEvidenceInput
+  | RuntimeTargetExactEvidenceInput;
 
 /**
  * Revision 执行资格证据 Reader 接口。

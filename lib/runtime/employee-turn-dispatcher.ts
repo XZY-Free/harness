@@ -126,7 +126,16 @@ export async function dispatchEmployeeTurn(params: {
 
   // ─── 有 Ready Route → 按 protocolType 解析 Transport（04 §3/§10）──────────
   // Dispatcher 不再固定创建 in-process Hosted client；protocolType 真正决定 Transport。
-  const runtimeRevisionId = routeOutcome.resolution.runtimeRevisionId;
+  // 顶层 Employee Turn 只消费 runtime target：resolver 若违反命令返回 Agent 解析
+  // （target 或证据 kind 为 agent），必须 fail-closed 抛出，绝不产出 undefined/nullable runtime ID。
+  const resolution = routeOutcome.resolution;
+  if (resolution.target.kind !== "runtime" || resolution.controlPlaneEvidence.kind !== "runtime") {
+    throw new Error(
+      "EmployeeTurnDispatcher 只接受 runtime target 的 RouteResolution（顶层执行不冻结 Agent）",
+    );
+  }
+  // runtimeRevisionId 只从收窄后的 target.runtimeRevisionId 读取，禁止 flat fallback。
+  const runtimeRevisionId = resolution.target.runtimeRevisionId;
   const runtimeRevision = await getRuntimeRevisionById(runtimeRevisionId);
   if (!runtimeRevision) {
     throw new Error(`Turn 调度失败：RuntimeRevision 不存在（${runtimeRevisionId}）`);

@@ -1,7 +1,11 @@
 import { db } from "@/lib/db/client";
 import type { DeploymentRouteRow } from "@/lib/persistence/schema/routes";
 import type { AdminRouteProjectionInput } from "@/lib/routes/application/route-admin-projection";
-import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import {
+  routeActivation,
+  routeRevision,
+  routeRevisionTargetFromRecord,
+} from "@/lib/routes/persistence/route-revision-record";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { and, desc, eq } from "drizzle-orm";
 
@@ -38,6 +42,10 @@ export async function readAdminRoute(
     .limit(1);
   if (!revision) return { route, activation, revision: null, projection: null };
 
+  // 从 DB 记录严格构造判别 target；畸形（混合/缺字段/占位）fail-closed → 视为无 Authority。
+  const target = routeRevisionTargetFromRecord(revision);
+  if (!target) return { route, activation, revision: null, projection: null };
+
   const [projection] = await db
     .select()
     .from(routeEligibilityProjection)
@@ -51,5 +59,20 @@ export async function readAdminRoute(
     )
     .limit(1);
 
-  return { route, activation, revision, projection: projection ?? null };
+  return {
+    route,
+    activation,
+    revision: {
+      id: revision.id,
+      routeGroupId: revision.routeGroupId,
+      target,
+      policyRevisionId: revision.policyRevisionId,
+      trafficWeight: revision.trafficWeight,
+      priorityNo: revision.priorityNo,
+      effectiveFrom: revision.effectiveFrom,
+      effectiveUntil: revision.effectiveUntil,
+      contentDigest: revision.contentDigest,
+    },
+    projection: projection ?? null,
+  };
 }

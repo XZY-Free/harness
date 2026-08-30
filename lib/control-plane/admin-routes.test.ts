@@ -10,7 +10,6 @@
  * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID）。
  * 真实 ed25519 签名 + 真实 MySQL 8 Testcontainers，不使用 mock。
  */
-import { createHash } from "node:crypto";
 import { POST as publishPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]/publish/route";
 import { GET as getAgentRevisionGET } from "@/app/admin/api/v1/agent-revisions/[revision_id]/route";
 import { POST as withdrawAgentRevisionPOST } from "@/app/admin/api/v1/agent-revisions/[revision_id]/withdraw/route";
@@ -65,10 +64,7 @@ import { RouteIdempotencyCompletionError } from "@/lib/routes/domain/route-revis
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
 import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
-import { createRuntime } from "@/lib/runtime/persistence/runtime-queries";
-import { createDraftRuntimeRevision } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
-import { publishRuntimeRevisionForTest } from "@/lib/test-support/publish-runtime-revision-for-test";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -198,54 +194,6 @@ async function seedAdminWithActionBindings() {
   return { tenantId: tenant.id, userIdentityId: identity.id };
 }
 
-// ─── 辅助：直接创建 verified attestation（绕过 route handler）─
-
-async function createVerifiedAttestationDirect(
-  tenantId: string,
-  artifactType: string,
-  artifactRevisionId: string,
-  artifactContent: string,
-): Promise<string> {
-  const keyPair = generateTestBuilderKey("builder:company-agent-runtime");
-  const builderKeys: BuilderKeyRegistry = {
-    "builder:company-agent-runtime": keyPair.publicKeyBase64,
-  };
-  const digest = computeArtifactDigest(artifactContent);
-  const sigRef = `attestation:signature:${digest.slice(7, 15)}`;
-  const sbomRef = `attestation:sbom:${digest.slice(7, 15)}`;
-  const provRef = `attestation:provenance:${digest.slice(7, 15)}`;
-  const store = new InMemoryManagedArtifactStore();
-  const sbomContent = buildCleanSbom();
-  const provenanceContent = buildValidProvenance();
-  const supplyChain: PredicateSupplyChain = {
-    sbomRef,
-    sbomContent,
-    provenanceRef: provRef,
-    provenanceContent,
-  };
-  store.writeDsseEnvelope(
-    sigRef,
-    buildDsseArtifactAttestationEnvelope(keyPair, digest, supplyChain),
-  );
-  store.writeSbom(sbomRef, sbomContent);
-  store.writeProvenance(provRef, provenanceContent);
-  const attestation = await verifyAndPersistAttestation(
-    {
-      tenantId,
-      artifactType,
-      artifactRevisionId,
-      artifactDigest: digest,
-      dsseEnvelopeRef: sigRef,
-      builderIdentity: "builder:company-agent-runtime",
-    },
-    store,
-    builderKeys,
-    { tenantId, actorType: "service", actorId: "test-builder" },
-    "test-request-id",
-  );
-  return attestation.id;
-}
-
 // ─── 辅助：seed Agent + published AgentRevision + attestation ─
 
 async function seedPublishedAgentRevision(
@@ -284,55 +232,6 @@ async function seedPublishedAgentRevision(
   return { agent, revision };
 }
 
-// ─── 辅助：seed Runtime + published RuntimeRevision + attestation ─
-
-async function seedPublishedRuntimeRevision(
-  tenantId: string,
-  ownerId: string,
-  runtimeKey: string,
-  contentSuffix: string,
-  lifecycleState: "draft" | "enabled" = "draft",
-) {
-  const runtime = await createRuntime({
-    tenantId,
-    runtimeKey,
-    displayName: `Runtime ${runtimeKey}`,
-    runtimeKind: "hosted",
-    ownerUserId: ownerId,
-    lifecycleState,
-  });
-
-  const revision = await createDraftRuntimeRevision({
-    tenantId,
-    runtimeId: runtime.id,
-    protocolType: "a2a",
-    protocolContractRevision: "a2a@1",
-    runtimeEvidenceKind: "hosted_artifact",
-    endpointRef: `https://runtime-${contentSuffix}.internal`,
-    runtimeArtifactRef: `oci://registry/runtime@${computeArtifactDigest(`runtime-content-${contentSuffix}`)}`,
-    runtimeCapabilitiesJson: ["event_stream", "steer", "cancel", "tool_call"],
-    identityMode: "managed",
-    networkZone: "internal",
-    configHash: `sha256:${createHash("sha256").update(`config_${contentSuffix}`).digest("hex")}`,
-    createdBy: ownerId,
-  });
-
-  const attestationId = await createVerifiedAttestationDirect(
-    tenantId,
-    "runtime_revision",
-    revision.id,
-    `runtime-content-${contentSuffix}`,
-  );
-  await publishRuntimeRevisionForTest({
-    tenantId,
-    revisionId: revision.id,
-    runtimeExpectedVersionNo: 1,
-    attestationId,
-  });
-
-  return { runtime, revision };
-}
-
 describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", () => {
   it("连续激活同一 Route 时返回完整 previous Activation 历史", async () => {
     const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
@@ -343,16 +242,9 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
       "route-set-api-agent-v1",
       "enabled",
     );
-    const runtimeResult = await seedPublishedRuntimeRevision(
-      tenantId,
-      userIdentityId,
-      "route-set-api-runtime",
-      "route-set-api-runtime-v1",
-      "enabled",
-    );
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agentResult.agent.id,
+      target: { kind: "agent", agentId: agentResult.agent.id },
       routeScopeKey: "prod",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -375,13 +267,15 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
             {
               ...(routeId ? { route_id: routeId } : {}),
               route_group_id: "primary",
-              agent_revision_id: agentResult.revision.id,
-              runtime_revision_id: runtimeResult.revision.id,
-              // 专题01 Batch4 补漏：agent route 必须冻结生产调用事实。
-              agent_endpoint_ref: "https://agent.example.com/a2a",
-              agent_identity_mode: "bearer",
-              agent_credential_ref_id: "cred-1",
-              agent_network_zone: "private",
+              // 判别 target：agent RouteRevision 只携带 Agent 事实，绝不携带 runtime_revision_id。
+              target: {
+                kind: "agent",
+                agent_revision_id: agentResult.revision.id,
+                endpoint_ref: "https://agent.example.com/a2a",
+                identity_mode: "bearer",
+                credential_ref_id: "cred-1",
+                network_zone: "private",
+              },
               traffic_weight: 10000,
               priority_no: 1,
               activation_state: "active",
@@ -399,6 +293,19 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
     const firstActivation = firstBody.activations[0]!;
     expect(firstActivation).toHaveProperty("previous_route_revision_id", null);
     expect(firstActivation).toHaveProperty("previous_route_activation_id", null);
+
+    // 落库 RouteRevision：agent target → runtimeRevisionId=null，Agent endpoint facts 精确。
+    const [persistedRevision] = await db
+      .select()
+      .from(routeRevision)
+      .where(eq(routeRevision.routeSetId, routeSet.id));
+    expect(persistedRevision).toBeDefined();
+    expect(persistedRevision?.runtimeRevisionId).toBeNull();
+    expect(persistedRevision?.agentRevisionId).toBe(agentResult.revision.id);
+    expect(persistedRevision?.agentEndpointRef).toBe("https://agent.example.com/a2a");
+    expect(persistedRevision?.agentIdentityMode).toBe("bearer");
+    expect(persistedRevision?.agentCredentialRefId).toBe("cred-1");
+    expect(persistedRevision?.agentNetworkZone).toBe("private");
 
     const replayResponse = await activateRouteSetPUT(
       buildActivationRequest(1, "idem-route-set-api-001"),
@@ -456,16 +363,9 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
       "route-set-missing-authority-agent-v1",
       "enabled",
     );
-    const runtimeResult = await seedPublishedRuntimeRevision(
-      tenantId,
-      userIdentityId,
-      "route-set-missing-authority-runtime",
-      "route-set-missing-authority-runtime-v1",
-      "enabled",
-    );
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agentResult.agent.id,
+      target: { kind: "agent", agentId: agentResult.agent.id },
       routeScopeKey: "missing-authority",
       routeScopeJson: {},
     });
@@ -480,13 +380,15 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
           {
             routeKey: "primary",
             routeGroupId: "primary",
-            agentRevisionId: agentResult.revision.id,
-            runtimeRevisionId: runtimeResult.revision.id,
-            // 专题01 Batch4 补漏：agent route 必须冻结生产调用事实。
-            agentEndpointRef: "https://agent.example.com/a2a",
-            agentIdentityMode: "bearer",
-            agentCredentialRefId: "cred-1",
-            agentNetworkZone: "private",
+            // 判别 target — agent RouteRevision 只携带 Agent 事实，不携带 runtimeRevisionId。
+            target: {
+              kind: "agent",
+              agentRevisionId: agentResult.revision.id,
+              agentEndpointRef: "https://agent.example.com/a2a",
+              agentIdentityMode: "bearer",
+              agentCredentialRefId: "cred-1",
+              agentNetworkZone: "private",
+            },
             trafficWeight: 10000,
             priorityNo: 1,
             activationState: "active",
@@ -526,6 +428,202 @@ describe("PUT /admin/api/v1/deployment-route-sets/{route_set_id}/activation", ()
         .where(eq(controlPlaneOutboxEvent.aggregateId, routeSet.id)),
     ).toHaveLength(0);
     expect((await getRouteSetById(tenantId, routeSet.id))?.versionNo).toBe(1);
+  });
+
+  it("旧 flat payload（agent_revision_id/runtime_revision_id/agent_endpoint_ref）→ 400 且零落库", async () => {
+    const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
+    const agentResult = await seedPublishedAgentRevision(
+      tenantId,
+      userIdentityId,
+      "route-set-flat-reject-agent",
+      "flat-v1",
+      "enabled",
+    );
+    const routeSet = await createRouteSet({
+      tenantId,
+      target: { kind: "agent", agentId: agentResult.agent.id },
+      routeScopeKey: "flat-reject",
+      routeScopeJson: {},
+    });
+
+    // 冻结架构拒绝 flat/nullable 双轨：agent target 不得携带 runtime 事实，也不得用扁平字段猜测。
+    const flatBodies = [
+      // 旧混合双轨形状：同时携带 agent 与 runtime 事实。
+      {
+        expected_version_no: 1,
+        reason: "legacy mixed flat payload",
+        routes: [
+          {
+            route_group_id: "primary",
+            agent_revision_id: agentResult.revision.id,
+            runtime_revision_id: "rtrv-legacy",
+            agent_endpoint_ref: "https://agent.example.com/a2a",
+            agent_identity_mode: "bearer",
+            agent_credential_ref_id: "cred-1",
+            agent_network_zone: "private",
+            traffic_weight: 10000,
+            priority_no: 1,
+          },
+        ],
+      },
+      // 旧 flat agent-only（无 target 包装）。
+      {
+        expected_version_no: 1,
+        reason: "legacy flat agent payload",
+        routes: [
+          {
+            route_group_id: "primary",
+            agent_revision_id: agentResult.revision.id,
+            agent_endpoint_ref: "https://agent.example.com/a2a",
+            agent_identity_mode: "bearer",
+            agent_credential_ref_id: "cred-1",
+            agent_network_zone: "private",
+            traffic_weight: 10000,
+            priority_no: 1,
+          },
+        ],
+      },
+    ];
+
+    for (let i = 0; i < flatBodies.length; i++) {
+      const response = await activateRouteSetPUT(
+        buildApiRequest({
+          audience: "admin",
+          method: "PUT",
+          path: `/deployment-route-sets/${routeSet.id}/activation`,
+          idempotencyKey: `idem-route-set-flat-reject-${i}`,
+          ifMatch: "route-set-1",
+          body: flatBodies[i],
+        }),
+        { params: Promise.resolve({ route_set_id: routeSet.id }) },
+      );
+      expect(response.status).toBe(400);
+    }
+
+    expect(
+      await db.select().from(routeRevision).where(eq(routeRevision.routeSetId, routeSet.id)),
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(routeActivation).where(eq(routeActivation.routeSetId, routeSet.id)),
+    ).toHaveLength(0);
+  });
+
+  it("nested target omitted/null/extra key/cross-group → fail-closed 400 且零落库", async () => {
+    const { tenantId, userIdentityId } = await seedAdminWithActionBindings();
+    const agentResult = await seedPublishedAgentRevision(
+      tenantId,
+      userIdentityId,
+      "route-set-nested-reject-agent",
+      "nested-v1",
+      "enabled",
+    );
+    const routeSet = await createRouteSet({
+      tenantId,
+      target: { kind: "agent", agentId: agentResult.agent.id },
+      routeScopeKey: "nested-reject",
+      routeScopeJson: {},
+    });
+    const validTarget = {
+      kind: "agent",
+      agent_revision_id: agentResult.revision.id,
+      endpoint_ref: "https://agent.example.com/a2a",
+      identity_mode: "bearer",
+      credential_ref_id: "cred-1",
+      network_zone: "private",
+    };
+
+    const badBodies = [
+      // target 整体缺失。
+      {
+        expected_version_no: 1,
+        reason: "missing target",
+        routes: [{ route_group_id: "primary", traffic_weight: 10000, priority_no: 1 }],
+      },
+      // target = null。
+      {
+        expected_version_no: 1,
+        reason: "null target",
+        routes: [
+          { route_group_id: "primary", target: null, traffic_weight: 10000, priority_no: 1 },
+        ],
+      },
+      // cross-group：agent target 不得携带对侧 runtime 字段。
+      {
+        expected_version_no: 1,
+        reason: "cross-group target",
+        routes: [
+          {
+            route_group_id: "primary",
+            target: { ...validTarget, runtime_revision_id: "rtrv-x" },
+            traffic_weight: 10000,
+            priority_no: 1,
+          },
+        ],
+      },
+      // target 额外 key。
+      {
+        expected_version_no: 1,
+        reason: "extra key",
+        routes: [
+          {
+            route_group_id: "primary",
+            target: { ...validTarget, agent_extra: "x" },
+            traffic_weight: 10000,
+            priority_no: 1,
+          },
+        ],
+      },
+      // route_id 类型非法：不得在映射阶段抛异常或生成空串身份。
+      {
+        expected_version_no: 1,
+        reason: "invalid route id",
+        routes: [
+          {
+            route_id: 42,
+            route_group_id: "primary",
+            target: validTarget,
+            traffic_weight: 10000,
+            priority_no: 1,
+          },
+        ],
+      },
+      // 顶层 extra key。
+      {
+        expected_version_no: 1,
+        reason: "top-level extra key",
+        routes: [
+          {
+            route_group_id: "primary",
+            target: validTarget,
+            traffic_weight: 10000,
+            priority_no: 1,
+          },
+        ],
+        compatibility_mode: true,
+      },
+    ];
+
+    for (let i = 0; i < badBodies.length; i++) {
+      const response = await activateRouteSetPUT(
+        buildApiRequest({
+          audience: "admin",
+          method: "PUT",
+          path: `/deployment-route-sets/${routeSet.id}/activation`,
+          idempotencyKey: `idem-route-set-nested-reject-${i}`,
+          ifMatch: "route-set-1",
+          body: badBodies[i],
+        }),
+        { params: Promise.resolve({ route_set_id: routeSet.id }) },
+      );
+      expect(response.status).toBe(400);
+    }
+
+    expect(
+      await db.select().from(routeRevision).where(eq(routeRevision.routeSetId, routeSet.id)),
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(routeActivation).where(eq(routeActivation.routeSetId, routeSet.id)),
+    ).toHaveLength(0);
   });
 });
 
@@ -1233,7 +1331,6 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}/disable", () => {
   let userIdentityId: string;
   let agentId: string;
   let agentRevisionId: string;
-  let runtimeRevisionId: string;
   let routeSetId: string;
   let routeId: string;
   let currentVersionNo: number;
@@ -1253,18 +1350,9 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}/disable", () => {
     agentId = agentResult.agent.id;
     agentRevisionId = agentResult.revision.id;
 
-    const runtimeResult = await seedPublishedRuntimeRevision(
-      tenantId,
-      userIdentityId,
-      "route-disable-runtime",
-      "runtime-v1",
-      "enabled",
-    );
-    runtimeRevisionId = runtimeResult.revision.id;
-
     const routeSet = await createRouteSet({
       tenantId,
-      agentId,
+      target: { kind: "agent", agentId },
       routeScopeKey: "prod",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -1274,8 +1362,14 @@ describe("POST /admin/api/v1/deployment-routes/{route_id}/disable", () => {
       tenantId,
       routeSetId,
       routeSetExpectedVersionNo: 1,
-      agentRevisionId,
-      runtimeRevisionId,
+      target: {
+        kind: "agent",
+        agentRevisionId,
+        agentEndpointRef: "https://agent.example.com/a2a",
+        agentIdentityMode: "bearer",
+        agentCredentialRefId: "cred-1",
+        agentNetworkZone: "private",
+      },
       trafficWeight: 10_000,
       priorityNo: 1,
       actor: { tenantId, actorType: "service", actorId: "test-deploy-bot" },

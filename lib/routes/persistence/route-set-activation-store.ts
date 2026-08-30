@@ -5,7 +5,7 @@ import type { DbOrTx } from "@/lib/db/client";
  * 支持 ActivateRouteSet 命令的 22 步事务流程。
  */
 import type { AuditActor } from "@/lib/identity/audit";
-import type { RouteRevisionContent } from "@/lib/routes/domain/route-revision";
+import type { RouteRevisionContent, RouteRevisionTarget } from "@/lib/routes/domain/route-revision";
 import type {
   RouteActivationRecord,
   RouteRevisionRecord,
@@ -15,11 +15,14 @@ import type {
 
 export type RouteActorType = "user" | "service" | "workload" | "system";
 
+/** RouteSet target 判别联合（专题01 冻结架构）。 */
+export type RouteSetTarget = { kind: "runtime" } | { kind: "agent"; agentId: string };
+
 export interface RouteSetRow {
   id: string;
   tenantId: string;
-  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
-  agentId: string | null;
+  /** RouteSet 目标判别联合 — runtime 或 agent。不保留 null agentId 表示 runtime 的兼容形状。 */
+  target: RouteSetTarget;
   routeScopeKey: string;
   routeScopeJson: unknown;
   versionNo: number;
@@ -32,9 +35,12 @@ export interface RouteRow {
   routeSetId: string;
   /** Route 稳定身份键。 */
   routeKey: string;
-  /** 无 Agent 约束（基础 Harness Route）为 null。 */
+  /**
+   * 存储列仍为 nullable target-specific（不改变持久化投影列），
+   * 但不再作为命令语义暴露 — target 由 RouteRevisionContent.target 决定。
+   */
   agentRevisionId: string | null;
-  runtimeRevisionId: string;
+  runtimeRevisionId: string | null;
   trafficWeight: number;
   priorityNo: number;
   routeState: "enabled" | "disabled";
@@ -61,18 +67,8 @@ export interface DesiredRoute {
   /** Route 稳定身份键 — 调用方必须显式指定。 */
   routeKey: string;
   routeGroupId: string;
-  /**
-   * 绑定的 AgentRevision ID。
-   * null = 基础 Harness Route（无 Agent 资产约束）；有值 = Agent Route。
-   */
-  agentRevisionId: string | null;
-  runtimeRevisionId: string;
-  // ─── Agent Route 生产调用事实────────
-  // Agent Route（agentRevisionId 非空）必填；基础 Harness Route 省略/null。
-  agentEndpointRef?: string | null;
-  agentIdentityMode?: "none" | "bearer" | null;
-  agentCredentialRefId?: string | null;
-  agentNetworkZone?: string | null;
+  /** 判别 target — 只含所选 target 自己的事实。 */
+  target: RouteRevisionTarget;
   policyRevisionId?: string | null;
   modelPolicyRevisionId?: string | null;
   toolsetRevisionId?: string | null;

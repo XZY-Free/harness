@@ -22,6 +22,7 @@ export default defineConfig({
             // 02-6 及其后续批：新正式领域的 DB 集成测试也必须走串行（db）project，
             // 否则会在并行 unit project 里 resetDatabase 清表，互相/与 db project 竞争。
             "app/gateway/**/*.test.ts",
+            "app/admin/api/v1/deployment-route-sets/route.test.ts",
             "lib/governance/**/*.test.ts",
             "lib/executions/**/*.test.ts",
             "lib/permission/**/*.test.ts",
@@ -61,6 +62,7 @@ export default defineConfig({
             "lib/browser/**",
             "lib/analytics/**",
             "app/gateway/**",
+            "app/admin/api/v1/deployment-route-sets/route.test.ts",
             "lib/governance/**",
             "lib/executions/**",
             "lib/permission/**",

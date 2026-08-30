@@ -5,12 +5,19 @@
  * 用户 Turn 发现无 Ready Route 时只幂等创建 ProvisioningRequest，
  * 不执行外部网络调用。Worker 异步执行供应 Saga。
  *
+ * 专题01 冻结（runtime-only）：
+ * HostedProvisioningRequest 只表示 tenant 内 builtin Harness Runtime 在某 route scope
+ * 的供应请求。身份权威 = (tenantId, routeScopeKey)，builtin Runtime key 固定在 Hosted
+ * Runtime Gateway（不由请求选择），请求携带非空 requesterId 供首次创建 Runtime 记录
+ * owner。请求身份中不得包含 Agent/AgentRevision。
+ *
  * : 正式步骤序列：
- * validate_request → ensure_agent_publication → prepare_runtime_revision
+ * validate_request → prepare_runtime_revision
  * → verify_runtime_artifact → record_runtime_conformance → publish_runtime_revision
  * → activate_route → await_projection → verify_route → ready
  *
  * : 删除 waiting_external_evidence / waiting_conformance（同步调用不得保留等待状态）。
+ * : 删除 Agent 黑盒字段（agentId/agentRevisionId/desiredRuntimeKey）与 Agent publication checkpoint。
  */
 
 /** ProvisioningRequest 状态机。: 只保留 6 个有效状态。 */
@@ -24,14 +31,13 @@ export const PROVISIONING_STATES = [
 ] as const;
 export type ProvisioningState = (typeof PROVISIONING_STATES)[number];
 
-/** HostedProvisioningRequest 领域对象。 */
+/** HostedProvisioningRequest 领域对象。: 冻结身份 (tenantId, routeScopeKey) + requesterId。 */
 export interface HostedProvisioningRequest {
   id: string;
   tenantId: string;
-  agentId: string;
-  agentRevisionId: string;
+  /** 首次创建请求的 actor（供首次创建 Runtime 记录 owner）。不可为空。 */
+  requesterId: string;
   routeScopeKey: string;
-  desiredRuntimeKey: string;
   state: ProvisioningState;
   currentStep: string | null;
   attemptCount: number;

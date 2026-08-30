@@ -50,11 +50,14 @@ export function buildAgentCallBindingConfig(
   input: BuildAgentCallBindingConfigInput,
 ): AgentCallBindingConfigInput {
   const resolution = input.resolution;
-  if (resolution.targetKind !== "agent") {
+  // 判别式 agent target：只接受 resolution.target.kind=agent（runtime 一律 fail-closed）。
+  if (resolution.target.kind !== "agent") {
     throw new AgentCallBindingEvidenceError(
-      `AgentCallBinding 只能从 targetKind=agent 的 RouteResolution 冻结（收到 ${resolution.targetKind}）`,
+      `AgentCallBinding 只能从 target.kind=agent 的 RouteResolution 冻结（收到 ${resolution.target.kind}）`,
     );
   }
+  // 只从判别 target 冻结 exact agent 生产调用事实（不读取任何平铺字段/默认填充值）。
+  const target = resolution.target;
   const config: AgentCallBindingConfigInput = {
     agentId: input.agentId,
     agentRevisionId: input.agentRevisionId,
@@ -68,12 +71,12 @@ export function buildAgentCallBindingConfig(
     routeActivationId: resolution.routeActivationId,
     routeContentDigest: resolution.routeContentDigest,
     resolutionInputDigest: resolution.resolutionInputDigest,
-    projectionVersionNo: resolution.projectionVersionNo ?? 0,
-    // 直接冻结 RouteResolution 的 exact agent route facts（Batch4 补漏）。
-    endpointRef: resolution.agentEndpointRef ?? "",
-    identityMode: resolution.agentIdentityMode ?? "none",
-    credentialRefId: resolution.agentCredentialRefId ?? null,
-    networkZone: resolution.agentNetworkZone ?? "",
+    projectionVersionNo: resolution.projectionVersionNo,
+    // 直接冻结判别 target 的 exact agent route facts（Batch4 补漏；缺失即 fail-closed）。
+    endpointRef: target.agentEndpointRef,
+    identityMode: target.agentIdentityMode,
+    credentialRefId: target.agentCredentialRefId,
+    networkZone: target.agentNetworkZone,
     protocolType: input.protocolFacts.protocolType,
     protocolContractRevision: input.protocolFacts.protocolContractRevision,
     policyRevisionId: input.policyRevisionId,

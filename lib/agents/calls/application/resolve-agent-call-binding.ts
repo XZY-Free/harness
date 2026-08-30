@@ -77,22 +77,30 @@ export async function resolveRequiredAgentBinding(
     );
   }
   const resolution = routeOutcome.resolution;
+  // 判别式 agent target：只接受 resolution.target.kind=agent（runtime 一律 fail-closed）。
   // resolveRoute 按 target:{kind:"agent", agentId} 解析，Projection loader 已按 agentId
   // 过滤候选，resolution 必属于该 Agent；这里只断言确实是 agent target（不比较
   // agentRevisionId 与 agentId——二者本就不是同一身份：agentId 是 Agent.id，
   // agentRevisionId 是 AgentRevision.id，比较恒不成立）。agent target 必带 revision。
-  if (resolution.targetKind !== "agent") {
+  if (resolution.target.kind !== "agent") {
     throw new RequiredAgentUnavailableError(agentId, "解析结果不是 agent Route");
   }
-  if (!resolution.agentRevisionId) {
+  const agentRevisionId = resolution.target.agentRevisionId;
+  if (!agentRevisionId) {
     throw new RequiredAgentUnavailableError(agentId, "agent Route 缺少 AgentRevision");
   }
 
   // 2. 读取 exact AgentContractSnapshot（capabilityDigest + protocol 事实，权威）。
-  const contractSnapshotId = resolution.controlPlaneEvidence?.agentContractSnapshotId;
-  const contractDigest = resolution.controlPlaneEvidence?.agentContractDigest;
-  const contextDigest = resolution.controlPlaneEvidence?.agentContextDigest;
-  const publicationRecordId = resolution.controlPlaneEvidence?.agentPublicationRecordId;
+  // 已判定 target=agent 后仍须显式确认 controlPlaneEvidence.kind==="agent"（nested
+  // discriminant 收窄不会自动关联 controlPlaneEvidence；矛盾时 fail-closed），
+  // 只从 agent evidence 读取 Contract 字段，绝不把 runtime evidence 带入。
+  if (resolution.controlPlaneEvidence.kind !== "agent") {
+    throw new RequiredAgentUnavailableError(agentId, "Agent Route 缺少 exact Agent Contract 证据");
+  }
+  const contractSnapshotId = resolution.controlPlaneEvidence.agentContractSnapshotId;
+  const contractDigest = resolution.controlPlaneEvidence.agentContractDigest;
+  const contextDigest = resolution.controlPlaneEvidence.agentContextDigest;
+  const publicationRecordId = resolution.controlPlaneEvidence.agentPublicationRecordId;
   if (!contractSnapshotId || !contractDigest || !contextDigest || !publicationRecordId) {
     throw new RequiredAgentUnavailableError(agentId, "Agent Route 缺少 exact Agent Contract 证据");
   }
@@ -110,7 +118,7 @@ export async function resolveRequiredAgentBinding(
     tenantId,
     resolution,
     agentId,
-    agentRevisionId: resolution.agentRevisionId,
+    agentRevisionId,
     agentContractSnapshotId: contractSnapshotId,
     agentContractDigest: contractDigest,
     agentCapabilityDigest: snapshot.capabilityDigest,
@@ -129,7 +137,7 @@ export async function resolveRequiredAgentBinding(
   return {
     resolution,
     binding,
-    agentRevisionId: resolution.agentRevisionId,
+    agentRevisionId,
     contractSnapshotId,
     contractDigest,
     contextDigest,

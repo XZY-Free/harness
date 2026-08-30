@@ -60,16 +60,46 @@ export async function validateBindingEligibility(
   tx: DbOrTx,
   input: BindingEligibilityInput,
 ): Promise<BindingEligibilityResult> {
-  // A. 校验 Projection 版本
+  // A. 校验 Projection — 读取其他权威之前，先 fail-closed 确认投影是精确 runtime target。
   const [projection] = await tx
     .select()
     .from(routeEligibilityProjection)
     .where(eq(routeEligibilityProjection.routeId, input.routeId))
     .limit(1);
 
-  const projectionVersionMatch = projection
-    ? projection.projectionVersionNo === input.projectionVersionNo
-    : false;
+  // ExecutionBinding 只绑定 Harness Runtime：Projection 必须 targetKind=runtime 且
+  // Agent 目标事实全部不适用（null）。Agent/混合/缺失 runtime 事实一律拒绝，不用
+  // nullable fallback。任何不一致都视为快照漂移，由 Dispatcher 重试。
+  if (
+    !projection ||
+    projection.targetKind !== "runtime" ||
+    // runtime target 稳定身份必须为 "runtime"，且归属 Agent ID 必须为 null。
+    projection.targetIdentity !== "runtime" ||
+    projection.agentId !== null ||
+    projection.runtimeRevisionId === null ||
+    projection.runtimeRevisionId !== input.runtimeRevisionId ||
+    projection.agentRevisionId !== null ||
+    projection.agentEndpointRef !== null ||
+    projection.agentIdentityMode !== null ||
+    projection.agentCredentialRefId !== null ||
+    projection.agentNetworkZone !== null ||
+    projection.agentRevisionState !== null ||
+    projection.agentLifecycleState !== null ||
+    projection.agentPublicationActive !== null ||
+    projection.agentEvidenceValid !== null ||
+    projection.agentPublicationRecordId !== null ||
+    projection.agentContractSnapshotId !== null ||
+    projection.agentContractDigest !== null ||
+    projection.agentContextDigest !== null
+  ) {
+    return {
+      valid: false,
+      reason: "eligibility_snapshot_stale",
+      projectionVersionMatch: false,
+    };
+  }
+
+  const projectionVersionMatch = projection.projectionVersionNo === input.projectionVersionNo;
 
   // Projection 版本过时 → ELIGIBILITY_SNAPSHOT_STALE
   if (input.projectionVersionNo !== undefined && !projectionVersionMatch) {
@@ -102,15 +132,18 @@ export async function validateBindingEligibility(
   }
 
   // C. 使用统一 Reader + tx 加载精确证据快照
-  // ExecutionBinding 恒为 runtime target：不读取 Agent 维度（Agent not_applicable）。
+  // ExecutionBinding 恒为 runtime target：不读取 Agent 维度。
   const evidenceReader = createMySqlRevisionExecutionEvidenceReader({ db: tx });
   const snapshot = await evidenceReader.loadExactEvidence({
+    kind: "runtime",
     tenantId: input.tenantId,
-    agentRevisionId: null,
     runtimeRevisionId: input.runtimeRevisionId,
     policyRevisionId: input.policyRevisionId,
     conformanceRunId: input.frozenEvidence.conformanceRunId,
   });
+  if (snapshot.kind !== "runtime") {
+    return { valid: false, reason: "eligibility_target_mismatch", projectionVersionMatch };
+  }
 
   // D. 验证精确证据 ID — Projection 冻结的 Runtime 证据 ID 必须与当前权威一致
   {

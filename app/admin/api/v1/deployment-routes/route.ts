@@ -6,14 +6,16 @@
  *
  * 行为：
  * - 解析 admin 主体（读操作，无需专门 action scope）。
- * - 必填查询参数 agent_id（按 Agent 过滤 RouteSet）。
+ * - 必填查询参数 target_kind=runtime|agent。
+ *   - agent：必填非空 agent_id。
+ *   - runtime：禁止 agent_id。
  * - 可选查询参数 scope_key（按 routeScopeKey 过滤，如 prod/canary；默认 "default"）。
- * - 调用 getRouteSetByAgentScope + listRoutesBySet 返回 Route 列表。
+ * - 调用 getRouteSetByTargetScope + listRoutesBySet 返回 Route 列表。
  * - 返回 200 + Route 投影数组 + RouteSet ETag（供 PUT 时 If-Match 使用）。
  *
  * 错误映射：
  * - 缺少身份 → 401 AUTHENTICATION_REQUIRED
- * - 缺少 agent_id → 400 REQUEST_SCHEMA_INVALID
+ * - 参数非法 → 400 REQUEST_SCHEMA_INVALID
  * - RouteSet 不存在 → 200 空数组（非错误，Agent 未配置路由）
  */
 import {
@@ -25,7 +27,7 @@ import {
 } from "@/lib/admin/route-helpers";
 import { REQUEST_ID_HEADER, apiSuccess, getRequestId } from "@/lib/http";
 import {
-  getRouteSetByAgentScope,
+  getRouteSetByTargetScope,
   listRoutesBySet,
 } from "@/lib/routes/application/deployment-route-service";
 import {
@@ -48,14 +50,29 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const url = new URL(request.url);
-  const agentId = url.searchParams.get("agent_id");
-  if (!agentId) {
-    return schemaInvalidTable(requestId, "缺少必填查询参数 agent_id");
-  }
+  const targetKind = url.searchParams.get("target_kind");
+  const agentIdParam = url.searchParams.get("agent_id");
   const scopeKey = url.searchParams.get("scope_key") ?? "default";
 
-  // 查询 RouteSet（不存在 → 200 空数组，Agent 未配置路由）
-  const routeSet = await getRouteSetByAgentScope(principal.tenantId, agentId, scopeKey);
+  // 显式判别查询：runtime 或 agent。
+  if (targetKind !== "runtime" && targetKind !== "agent") {
+    return schemaInvalidTable(requestId, "缺少或非法必填查询参数 target_kind（runtime|agent）");
+  }
+  let target: { kind: "runtime" } | { kind: "agent"; agentId: string };
+  if (targetKind === "agent") {
+    const agentId = agentIdParam?.trim();
+    if (!agentId) {
+      return schemaInvalidTable(requestId, "agent target 必须提供非空 agent_id");
+    }
+    target = { kind: "agent", agentId };
+  } else if (agentIdParam !== null) {
+    return schemaInvalidTable(requestId, "runtime target 禁止携带 agent_id");
+  } else {
+    target = { kind: "runtime" };
+  }
+
+  // 查询 RouteSet（不存在 → 200 空数组）
+  const routeSet = await getRouteSetByTargetScope(principal.tenantId, target, scopeKey);
   if (!routeSet) {
     return apiSuccess(
       { items: [], total: 0, route_set: null, etag: null },

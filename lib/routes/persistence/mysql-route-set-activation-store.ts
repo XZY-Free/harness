@@ -20,8 +20,42 @@ import { runtimeRevisionTable } from "@/lib/persistence/schema/runtimes";
 import { RouteNotFoundError } from "@/lib/routes/domain/route-revision";
 import { computeSelectorDigest, normalizeEligibility } from "@/lib/routes/domain/route-selector";
 import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
-import type { RouteSetActivationStore } from "@/lib/routes/persistence/route-set-activation-store";
+import type {
+  RouteSetActivationStore,
+  RouteSetRow,
+} from "@/lib/routes/persistence/route-set-activation-store";
 import { and, desc, eq, max } from "drizzle-orm";
+
+/**
+ * 把 DB RouteSet 行（targetKind/targetIdentity/agentId 列）映射为 RouteSetRow target 判别联合。
+ * 不做 flat 兼容：runtime → {kind:"runtime"}；agent → {kind:"agent", agentId}。
+ */
+function toRouteSetRow(row: {
+  id: string;
+  tenantId: string;
+  targetKind: "runtime" | "agent";
+  targetIdentity: string;
+  agentId: string | null;
+  routeScopeKey: string;
+  routeScopeJson: unknown;
+  versionNo: number;
+  createdAt: Date;
+  updatedAt: Date;
+}): RouteSetRow {
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    target:
+      row.targetKind === "agent"
+        ? { kind: "agent", agentId: row.agentId as string }
+        : { kind: "runtime" },
+    routeScopeKey: row.routeScopeKey,
+    routeScopeJson: row.routeScopeJson,
+    versionNo: row.versionNo,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
 
 export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
   transaction: (operation) =>
@@ -44,7 +78,7 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
             )
             .limit(1)
             .for("update");
-          return row ?? null;
+          return row ? toRouteSetRow(row) : null;
         },
 
         async listRoutesBySet(routeSetId) {
@@ -127,13 +161,15 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
           if (params.routeId) {
             throw new RouteNotFoundError(params.routeId);
           }
+          const target = params.content.target;
           const id = randomUUID();
           await tx.insert(deploymentRouteTable).values({
             id,
             routeSetId: params.routeSetId,
             routeKey: params.routeKey ?? `route-${id}`,
-            agentRevisionId: params.content.agentRevisionId,
-            runtimeRevisionId: params.content.runtimeRevisionId,
+            // 按 content.target.kind 写入 nullable target-specific 列（判别目标）。
+            agentRevisionId: target.kind === "agent" ? target.agentRevisionId : null,
+            runtimeRevisionId: target.kind === "runtime" ? target.runtimeRevisionId : null,
             trafficWeight: params.content.trafficWeight,
             priorityNo: params.content.priorityNo,
             routeState: "enabled",
@@ -176,6 +212,7 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
 
         async appendRevision(params) {
           const normalized = normalizeEligibility(params.content.eligibilityConditions);
+          const target = params.content.target;
           await tx.insert(routeRevision).values({
             id: params.id,
             tenantId: params.tenantId,
@@ -183,12 +220,14 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
             routeSetId: params.routeSetId,
             routeKey: params.routeKey ?? `route-${params.routeId}`,
             revisionNo: params.revisionNo,
-            agentRevisionId: params.content.agentRevisionId,
-            runtimeRevisionId: params.content.runtimeRevisionId,
-            agentEndpointRef: params.content.agentEndpointRef ?? null,
-            agentIdentityMode: params.content.agentIdentityMode ?? null,
-            agentCredentialRefId: params.content.agentCredentialRefId ?? null,
-            agentNetworkZone: params.content.agentNetworkZone ?? null,
+            // 按 content.target.kind 写入 nullable target-specific 列（判别目标）。
+            // agent target 不写 runtimeRevisionId；runtime target 不写 agent 事实组。
+            agentRevisionId: target.kind === "agent" ? target.agentRevisionId : null,
+            runtimeRevisionId: target.kind === "runtime" ? target.runtimeRevisionId : null,
+            agentEndpointRef: target.kind === "agent" ? target.agentEndpointRef : null,
+            agentIdentityMode: target.kind === "agent" ? target.agentIdentityMode : null,
+            agentCredentialRefId: target.kind === "agent" ? target.agentCredentialRefId : null,
+            agentNetworkZone: target.kind === "agent" ? target.agentNetworkZone : null,
             policyRevisionId: params.content.policyRevisionId,
             modelPolicyRevisionId: params.content.modelPolicyRevisionId,
             toolsetRevisionId: params.content.toolsetRevisionId,
@@ -296,7 +335,7 @@ export const mysqlRouteSetActivationStore: RouteSetActivationStore = {
             .from(deploymentRouteSetTable)
             .where(eq(deploymentRouteSetTable.id, params.routeSetId))
             .limit(1);
-          return row ?? null;
+          return row ? toRouteSetRow(row) : null;
         },
 
         async appendAudit(params) {

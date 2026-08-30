@@ -1,5 +1,5 @@
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
-import { normalizeTarget, type RouteTarget } from "@/lib/routes/domain/route-resolution-policy";
+import { type RouteTarget, normalizeTarget } from "@/lib/routes/domain/route-resolution-policy";
 
 export interface ResolutionInputDigestInput {
   tenantId: string;

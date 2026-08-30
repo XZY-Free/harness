@@ -1,8 +1,13 @@
 /**
  * HostedProvisioningRequest 的 Drizzle 表定义。
  *
+ * 专题01 冻结（runtime-only）：只供应 tenant 内 builtin Harness Runtime。
+ * - 身份权威 (tenantId, routeScopeKey)，唯一键恰好为该两列；非空 requesterId 供首次
+ *   创建 Runtime 记录 owner。
+ * - 删除 agentId / agentRevisionId / desiredRuntimeKey（Agent 黑盒、可选 Runtime key）。
+ * - 删除 Agent publication checkpoint（stepAgentRevisionId / stepAgentPublicationRecordId）。
  * : 删除 waiting_external_evidence / waiting_conformance 状态。
- * : 新增 checkpoint 字段（runtimeId, runtimeArtifactId, runtimeAttestationIds, routeId, projectionVersionNo）。
+ * : 保留 runtime/route checkpoint 字段。
  */
 
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
@@ -32,10 +37,9 @@ export const hostedProvisioningRequestTable = mysqlTable(
   {
     id: varchar("id", { length: 36 }).primaryKey().notNull(),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
-    agentId: varchar("agentId", { length: 36 }).notNull(),
-    agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
+    /** : 首次创建请求的 actor（首次创建 Runtime 记录 owner）。非空。 */
+    requesterId: varchar("requesterId", { length: 36 }).notNull(),
     routeScopeKey: varchar("routeScopeKey", { length: 64 }).notNull(),
-    desiredRuntimeKey: varchar("desiredRuntimeKey", { length: 64 }).notNull(),
     state: mysqlEnum("state", [...PROVISIONING_STATES])
       .notNull()
       .default("pending"),
@@ -49,9 +53,7 @@ export const hostedProvisioningRequestTable = mysqlTable(
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 }).notNull(),
     updatedAt: datetime("updatedAt", { mode: "date", fsp: 3 }).notNull(),
 
-    // ─── : Step Checkpoint 字段 ────────────────────────
-    stepAgentRevisionId: varchar("stepAgentRevisionId", { length: 36 }),
-    stepAgentPublicationRecordId: varchar("stepAgentPublicationRecordId", { length: 36 }),
+    // ─── : Step Checkpoint 字段（runtime/route；不含 Agent）────────
     stepRuntimeId: varchar("stepRuntimeId", { length: 36 }),
     stepRuntimeRevisionId: varchar("stepRuntimeRevisionId", { length: 36 }),
     stepRuntimeArtifactId: varchar("stepRuntimeArtifactId", { length: 36 }),
@@ -71,15 +73,12 @@ export const hostedProvisioningRequestTable = mysqlTable(
     lastCompletedStep: varchar("lastCompletedStep", { length: 64 }),
   },
   (table) => ({
-    /** 同一 AgentRevision + RouteScope + RuntimeKey 只能有一个活跃请求。 */
+    /** 同 (tenantId, routeScopeKey) 只能有一个供应请求。 */
     activeRequestUq: uniqueIndex("HostedProvisioningRequest_active_uq").on(
       table.tenantId,
-      table.agentRevisionId,
       table.routeScopeKey,
-      table.desiredRuntimeKey,
     ),
     tenantIdx: index("HostedProvisioningRequest_tenantId_idx").on(table.tenantId),
-    agentIdx: index("HostedProvisioningRequest_agentId_idx").on(table.agentId),
     stateIdx: index("HostedProvisioningRequest_state_idx").on(table.state),
     /** Worker 领取索引：按状态+下次尝试+租约到期扫描。 */
     claimableIdx: index("HostedProvisioningRequest_claimable_idx").on(

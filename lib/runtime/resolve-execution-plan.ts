@@ -22,6 +22,25 @@ import type {
   RouteResolutionOutcome,
 } from "@/lib/routes/domain/route-resolution-policy";
 
+/**
+ * 顶层执行计划的 RouteResolution — 恒为 runtime target 的收窄类型。
+ * 顶层只冻结 Harness Runtime 目标，Agent 是能力资产，不进入 ExecutionPlan。
+ */
+export type RuntimeRouteResolution = Extract<RouteResolution, { target: { kind: "runtime" } }>;
+
+/**
+ * 真实类型守卫 — 同时验证 target.kind==="runtime" 与 controlPlaneEvidence.kind==="runtime"。
+ *
+ * RouteResolution 的 target 与 evidence 是两个独立的判别联合成员，仅检查其一不会让 TS
+ * 关联收窄整个 union；本守卫一次性收窄两个分支到 RuntimeRouteResolution。非 runtime 时
+ * 返回 false（调用方 fail-closed 抛出），不使用 any/never/未验证断言。
+ */
+export function isRuntimeRouteResolution(
+  resolution: RouteResolution,
+): resolution is RuntimeRouteResolution {
+  return resolution.target.kind === "runtime" && resolution.controlPlaneEvidence.kind === "runtime";
+}
+
 // ─── 模型信息 ─────────────────────────────────────────────
 
 /** 从 Thread 模型事实与平台默认提取的模型信息。 */
@@ -67,13 +86,23 @@ export function extractModelInfo(
 
 // ─── ResolveExecutionPlan ──────────────────────────────────
 
+/**
+ * 顶层执行计划冻结的 RouteResolution Outcome — 恒为 resolved 且 resolution 为 runtime target。
+ * 类型上不再暴露 unresolved 或 Agent 成功分支。
+ */
+export type ResolvedRouteOutcome = {
+  status: "resolved";
+  resolution: RuntimeRouteResolution;
+  eligibleCandidateCount: number;
+};
+
 /** 解析成功的结果。 */
 export interface ResolvedExecutionPlan {
   resolved: true;
-  /** 路由解析完整结果（顶层恒为 runtime target）。 */
-  routeResolution: RouteResolution;
-  /** 路由解析原始 Outcome（含 candidateCount）。 */
-  routeOutcome: RouteResolutionOutcome;
+  /** 路由解析完整结果（顶层恒为 runtime target，已收窄）。 */
+  routeResolution: RuntimeRouteResolution;
+  /** 路由解析原始 Outcome（恒为 resolved 的 runtime target）。 */
+  routeOutcome: ResolvedRouteOutcome;
   /** 冻结的 RuntimeRevisionId。 */
   runtimeRevisionId: string;
   /** 提取的模型信息。 */
@@ -147,6 +176,14 @@ export async function resolveExecutionPlan(
 
   const routeResolution = routeOutcome.resolution;
 
+  // 顶层执行计划恒为 runtime target：resolver 若违反命令返回 Agent 解析，isRuntimeRouteResolution
+  // 返回 false → fail-closed 抛出，绝不产出 undefined/nullable runtime ID。
+  if (!isRuntimeRouteResolution(routeResolution)) {
+    throw new Error(
+      "ResolveExecutionPlan 只接受 runtime target 的 RouteResolution（顶层执行不冻结 Agent）",
+    );
+  }
+
   // 2. 模型信息：顶层 Harness 执行不依赖任何 AgentRevision 模型策略。
   const modelInfo = extractModelInfo(
     null,
@@ -154,11 +191,19 @@ export async function resolveExecutionPlan(
     input.platformDefaultModelRef,
   );
 
+  // runtimeRevisionId 只从收窄后的 resolution.target.runtimeRevisionId 读取。
+  // routeOutcome 收窄为恒 resolved 的 runtime target（eligibleCandidateCount 原样透传）。
+  const resolvedRouteOutcome: ResolvedRouteOutcome = {
+    status: "resolved",
+    resolution: routeResolution,
+    eligibleCandidateCount: routeOutcome.eligibleCandidateCount,
+  };
+
   return {
     resolved: true,
     routeResolution,
-    routeOutcome,
-    runtimeRevisionId: routeResolution.runtimeRevisionId,
+    routeOutcome: resolvedRouteOutcome,
+    runtimeRevisionId: routeResolution.target.runtimeRevisionId,
     modelInfo,
     projectionVersionNo: routeResolution.projectionVersionNo,
   };

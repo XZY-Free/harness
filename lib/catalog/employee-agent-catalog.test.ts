@@ -52,7 +52,6 @@ import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-
 import { createProjectionEventHandler } from "@/lib/routes/projection/projection-event-handlers";
 import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
 import { ensureAgentContractSnapshotBoundForRevision } from "@/lib/test-support/ensure-agent-contract-snapshot";
-import { seedPublishedRuntimeRevision } from "@/lib/test-support/seed-published-runtime-revision";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -160,7 +159,6 @@ async function activateDefaultRouteFormal(params: {
   routeSetId: string;
   expectedVersionNo: number;
   agentRevisionId: string;
-  runtimeRevisionId: string;
   routeKeys?: string[];
 }) {
   const routeKeys = params.routeKeys ?? ["primary"];
@@ -171,13 +169,14 @@ async function activateDefaultRouteFormal(params: {
     desiredRoutes: routeKeys.map((routeKey, index) => ({
       routeKey,
       routeGroupId: routeKey,
-      agentRevisionId: params.agentRevisionId,
-      runtimeRevisionId: params.runtimeRevisionId,
-      // 专题01 Batch4 补漏：agent route 必须冻结生产调用事实。
-      agentEndpointRef: "https://agent.example.com/a2a",
-      agentIdentityMode: "bearer" as const,
-      agentCredentialRefId: "cred-1",
-      agentNetworkZone: "private",
+      target: {
+        kind: "agent" as const,
+        agentRevisionId: params.agentRevisionId,
+        agentEndpointRef: "https://agent.example.com/a2a",
+        agentIdentityMode: "none" as const,
+        agentCredentialRefId: null,
+        agentNetworkZone: "private",
+      },
       trafficWeight: 10000,
       priorityNo: index + 1,
       eligibilityConditions: {},
@@ -272,17 +271,9 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     const { tenantId, ownerId } = await seedEmployeeTenant();
     const { agent, revision } = await seedDraftAgent(tenantId, ownerId, "default-visible-agent");
     await publishAgentRevisionFormal(tenantId, revision.id);
-    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "catalog-default-runtime",
-      ["event_stream"],
-      "catalog-default-rt",
-    );
-
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "default",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -291,7 +282,6 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
       routeSetId: routeSet.id,
       expectedVersionNo: routeSet.versionNo,
       agentRevisionId: revision.id,
-      runtimeRevisionId: runtimeRevision.id,
     });
     const activation = activated.activations[0];
     if (!activation) throw new Error("default RouteSet 激活缺少 RouteActivation");
@@ -321,17 +311,9 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     const { tenantId, ownerId } = await seedEmployeeTenant();
     const { agent, revision } = await seedDraftAgent(tenantId, ownerId, "prod-only-agent");
     await publishAgentRevisionFormal(tenantId, revision.id);
-    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "catalog-prod-runtime",
-      ["event_stream"],
-      "catalog-prod-rt",
-    );
-
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "prod",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -340,7 +322,6 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
       routeSetId: routeSet.id,
       expectedVersionNo: routeSet.versionNo,
       agentRevisionId: revision.id,
-      runtimeRevisionId: runtimeRevision.id,
     });
     const activation = activated.activations[0];
     if (!activation) throw new Error("prod RouteSet 激活缺少 RouteActivation");
@@ -364,17 +345,9 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     const { tenantId, ownerId } = await seedEmployeeTenant();
     const { agent, revision } = await seedDraftAgent(tenantId, ownerId, "multi-route-agent");
     await publishAgentRevisionFormal(tenantId, revision.id);
-    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "catalog-multi-runtime",
-      ["event_stream"],
-      "catalog-multi-rt",
-    );
-
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "default",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -383,7 +356,6 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
       routeSetId: routeSet.id,
       expectedVersionNo: routeSet.versionNo,
       agentRevisionId: revision.id,
-      runtimeRevisionId: runtimeRevision.id,
       routeKeys: ["primary", "secondary"],
     });
     expect(activated.activations).toHaveLength(2);
@@ -402,17 +374,9 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     const { tenantId, ownerId } = await seedEmployeeTenant();
     const { agent, revision } = await seedDraftAgent(tenantId, ownerId, "disable-route-agent");
     await publishAgentRevisionFormal(tenantId, revision.id);
-    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "catalog-disable-runtime",
-      ["event_stream"],
-      "catalog-disable-rt",
-    );
-
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "default",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -421,7 +385,6 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
       routeSetId: routeSet.id,
       expectedVersionNo: routeSet.versionNo,
       agentRevisionId: revision.id,
-      runtimeRevisionId: runtimeRevision.id,
     });
     const activation = activated.activations[0];
     if (!activation) throw new Error("disable 用例缺少 RouteActivation");
@@ -451,17 +414,9 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     const { tenantId, ownerId } = await seedEmployeeTenant();
     const { agent, revision } = await seedDraftAgent(tenantId, ownerId, "withdraw-agent");
     await publishAgentRevisionFormal(tenantId, revision.id);
-    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "catalog-withdraw-runtime",
-      ["event_stream"],
-      "catalog-withdraw-rt",
-    );
-
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "default",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -470,7 +425,6 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
       routeSetId: routeSet.id,
       expectedVersionNo: routeSet.versionNo,
       agentRevisionId: revision.id,
-      runtimeRevisionId: runtimeRevision.id,
     });
     const activation = activated.activations[0];
     if (!activation) throw new Error("withdraw 用例缺少 RouteActivation");
@@ -502,17 +456,9 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     const { tenantId, ownerId } = await seedEmployeeTenant();
     const { agent, revision } = await seedDraftAgent(tenantId, ownerId, "etag-agent");
     await publishAgentRevisionFormal(tenantId, revision.id);
-    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
-      tenantId,
-      ownerId,
-      "catalog-etag-runtime",
-      ["event_stream"],
-      "catalog-etag-rt",
-    );
-
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "default",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -521,7 +467,6 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
       routeSetId: routeSet.id,
       expectedVersionNo: routeSet.versionNo,
       agentRevisionId: revision.id,
-      runtimeRevisionId: runtimeRevision.id,
     });
     const activation = activated.activations[0];
     if (!activation) throw new Error("ETag 用例缺少 RouteActivation");
@@ -583,16 +528,9 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
       "foreign-agent",
     );
     await publishAgentRevisionFormal(foreignTenantId, revision.id);
-    const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
-      foreignTenantId,
-      foreignOwner.id,
-      "foreign-runtime",
-      ["event_stream"],
-      "foreign-rt",
-    );
     const routeSet = await createRouteSet({
       tenantId: foreignTenantId,
-      agentId: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: "default",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -601,7 +539,6 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
       routeSetId: routeSet.id,
       expectedVersionNo: routeSet.versionNo,
       agentRevisionId: revision.id,
-      runtimeRevisionId: runtimeRevision.id,
     });
     const activation = activated.activations[0];
     if (!activation) throw new Error("跨租户用例缺少 RouteActivation");
@@ -636,7 +573,7 @@ describe("员工端真实 Agent Catalog（default 路由资格过滤）", () => 
     await publishAgentRevisionFormal(tenantId, pendingRevision.id);
     await createRouteSet({
       tenantId,
-      agentId: pendingAgent.id,
+      target: { kind: "agent", agentId: pendingAgent.id },
       routeScopeKey: "default",
       routeScopeJson: { networkZone: "internal" },
     });

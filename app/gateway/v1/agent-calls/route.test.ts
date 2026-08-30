@@ -63,15 +63,17 @@ function mockResolveRoute(
     status: "resolved" as const,
     eligibleCandidateCount: 1,
     resolution: validAgentRouteResolution({
-      agentRevisionId: scenario.agentRevisionId,
-      agentEndpointRef: scenario.endpoint,
-      agentIdentityMode: "bearer",
-      agentCredentialRefId: scenario.credentialRefId,
-      agentNetworkZone: "private",
+      target: {
+        kind: "agent",
+        agentRevisionId: scenario.agentRevisionId,
+        agentEndpointRef: scenario.endpoint,
+        agentIdentityMode: "bearer",
+        agentCredentialRefId: scenario.credentialRefId,
+        agentNetworkZone: "private",
+      },
       policyRevisionId: null,
       controlPlaneEvidence: {
         ...validAgentRouteResolution().controlPlaneEvidence,
-        agentRevisionId: scenario.agentRevisionId,
         agentContractSnapshotId: scenario.agentContractSnapshotId,
         agentContractDigest: scenario.agentContractDigest,
         agentContextDigest: scenario.agentContextDigest,

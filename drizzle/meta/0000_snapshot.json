@@ -4609,8 +4609,14 @@
           "type": "enum('runtime','agent')",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'runtime'"
+          "autoincrement": false
+        },
+        "targetIdentity": {
+          "name": "targetIdentity",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         },
         "agentId": {
           "name": "agentId",
@@ -4657,20 +4663,22 @@
         }
       },
       "indexes": {
-        "DeploymentRouteSet_tenant_agent_scope_uq": {
-          "name": "DeploymentRouteSet_tenant_agent_scope_uq",
+        "DeploymentRouteSet_tenant_target_scope_uq": {
+          "name": "DeploymentRouteSet_tenant_target_scope_uq",
           "columns": [
             "tenantId",
-            "agentId",
+            "targetKind",
+            "targetIdentity",
             "routeScopeKey"
           ],
           "isUnique": true
         },
-        "DeploymentRouteSet_tenant_agent_scope_idx": {
-          "name": "DeploymentRouteSet_tenant_agent_scope_idx",
+        "DeploymentRouteSet_tenant_target_scope_idx": {
+          "name": "DeploymentRouteSet_tenant_target_scope_idx",
           "columns": [
             "tenantId",
-            "agentId",
+            "targetKind",
+            "targetIdentity",
             "routeScopeKey"
           ],
           "isUnique": false
@@ -4700,7 +4708,16 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "DeploymentRouteSet_target_identity_check": {
+          "name": "DeploymentRouteSet_target_identity_check",
+          "value": "(TRIM(`targetIdentity`) <> '')"
+        },
+        "DeploymentRouteSet_target_consistency_check": {
+          "name": "DeploymentRouteSet_target_consistency_check",
+          "value": "((`targetKind` = 'runtime' AND `targetIdentity` = 'runtime' AND `agentId` IS NULL) OR (`targetKind` = 'agent' AND `targetIdentity` = `agentId` AND `agentId` IS NOT NULL AND TRIM(`agentId`) <> ''))"
+        }
+      }
     },
     "DeploymentRoute": {
       "name": "DeploymentRoute",
@@ -4737,7 +4754,7 @@
           "name": "runtimeRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "trafficWeight": {
@@ -4862,7 +4879,12 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "DeploymentRoute_exact_one_target_check": {
+          "name": "DeploymentRoute_exact_one_target_check",
+          "value": "((`runtimeRevisionId` IS NOT NULL AND `agentRevisionId` IS NULL) OR (`runtimeRevisionId` IS NULL AND `agentRevisionId` IS NOT NULL))"
+        }
+      }
     },
     "Device": {
       "name": "Device",
@@ -18793,7 +18815,7 @@
           "name": "runtimeRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "agentEndpointRef": {
@@ -18992,7 +19014,12 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "RouteRevision_exact_target_group_check": {
+          "name": "RouteRevision_exact_target_group_check",
+          "value": "((`runtimeRevisionId` IS NOT NULL AND TRIM(`runtimeRevisionId`) <> '' AND `agentRevisionId` IS NULL AND `agentEndpointRef` IS NULL AND `agentIdentityMode` IS NULL AND `agentCredentialRefId` IS NULL AND `agentNetworkZone` IS NULL) OR (`runtimeRevisionId` IS NULL AND `agentRevisionId` IS NOT NULL AND TRIM(`agentRevisionId`) <> '' AND `agentEndpointRef` IS NOT NULL AND TRIM(`agentEndpointRef`) <> '' AND `agentIdentityMode` IN ('none','bearer') AND `agentNetworkZone` IS NOT NULL AND TRIM(`agentNetworkZone`) <> '' AND ((`agentIdentityMode` = 'bearer' AND `agentCredentialRefId` IS NOT NULL AND TRIM(`agentCredentialRefId`) <> '') OR (`agentIdentityMode` = 'none' AND (`agentCredentialRefId` IS NULL OR TRIM(`agentCredentialRefId`) <> '')))))"
+        }
+      }
     },
     "RouteEligibilityProjection": {
       "name": "RouteEligibilityProjection",
@@ -19017,7 +19044,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'runtime'"
+          "default": null
+        },
+        "targetIdentity": {
+          "autoincrement": false,
+          "name": "targetIdentity",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(36)"
         },
         "agentId": {
           "name": "agentId",
@@ -19177,77 +19211,77 @@
           "name": "agentRevisionState",
           "type": "varchar(32)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "agentLifecycleState": {
           "name": "agentLifecycleState",
           "type": "varchar(32)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "agentPublicationActive": {
           "name": "agentPublicationActive",
           "type": "int",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "agentEvidenceValid": {
           "name": "agentEvidenceValid",
           "type": "int",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimeRevisionId": {
           "name": "runtimeRevisionId",
           "type": "varchar(36)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimeRevisionState": {
           "name": "runtimeRevisionState",
           "type": "varchar(32)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimeLifecycleState": {
           "name": "runtimeLifecycleState",
           "type": "varchar(32)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimePublicationActive": {
           "name": "runtimePublicationActive",
           "type": "int",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimeEvidenceValid": {
           "name": "runtimeEvidenceValid",
           "type": "int",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimeConformanceValid": {
           "name": "runtimeConformanceValid",
           "type": "int",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "runtimeEvidenceKind": {
           "name": "runtimeEvidenceKind",
           "type": "enum('hosted_artifact','external_endpoint')",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "policyRevisionId": {
@@ -19324,7 +19358,7 @@
           "name": "capabilityCompatibilityDigest",
           "type": "varchar(71)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "agentContractSnapshotId": {
@@ -19459,7 +19493,20 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "RouteEligibilityProjection_target_identity_check": {
+          "name": "RouteEligibilityProjection_target_identity_check",
+          "value": "(TRIM(`targetIdentity`) <> '')"
+        },
+        "RouteEligibilityProjection_target_consistency_check": {
+          "name": "RouteEligibilityProjection_target_consistency_check",
+          "value": "((`targetKind` = 'runtime' AND `targetIdentity` = 'runtime' AND `agentId` IS NULL) OR (`targetKind` = 'agent' AND `targetIdentity` = `agentId` AND `agentId` IS NOT NULL AND TRIM(`agentId`) <> ''))"
+        },
+        "RouteEligibilityProjection_target_group_exclusion_check": {
+          "name": "RouteEligibilityProjection_target_group_exclusion_check",
+          "value": "((`targetKind` = 'agent' AND `agentRevisionId` IS NOT NULL AND TRIM(`agentRevisionId`) <> '' AND `runtimeRevisionId` IS NULL AND `runtimeRevisionState` IS NULL AND `runtimeLifecycleState` IS NULL AND `runtimePublicationActive` IS NULL AND `runtimeEvidenceValid` IS NULL AND `runtimeConformanceValid` IS NULL AND `runtimeEvidenceKind` IS NULL AND `runtimePublicationRecordId` IS NULL AND `runtimeAttestationIds` IS NULL AND `conformanceRunId` IS NULL AND `runtimeArtifactId` IS NULL AND `runtimeArtifactDigest` IS NULL AND `runtimeConfigDigest` IS NULL AND `runtimeTargetDigest` IS NULL AND `capabilityCompatibilityDigest` IS NULL) OR (`targetKind` = 'runtime' AND `runtimeRevisionId` IS NOT NULL AND TRIM(`runtimeRevisionId`) <> '' AND `agentRevisionId` IS NULL AND `agentEndpointRef` IS NULL AND `agentIdentityMode` IS NULL AND `agentCredentialRefId` IS NULL AND `agentNetworkZone` IS NULL AND `agentRevisionState` IS NULL AND `agentLifecycleState` IS NULL AND `agentPublicationActive` IS NULL AND `agentEvidenceValid` IS NULL AND `agentPublicationRecordId` IS NULL AND `agentContractSnapshotId` IS NULL AND `agentContractDigest` IS NULL AND `agentContextDigest` IS NULL))"
+        }
+      }
     },
     "RuntimeConformanceCaseResult": {
       "name": "RuntimeConformanceCaseResult",
@@ -19786,15 +19833,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "agentId": {
-          "name": "agentId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "agentRevisionId": {
-          "name": "agentRevisionId",
+        "requesterId": {
+          "name": "requesterId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true,
@@ -19802,13 +19842,6 @@
         },
         "routeScopeKey": {
           "name": "routeScopeKey",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "desiredRuntimeKey": {
-          "name": "desiredRuntimeKey",
           "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true,
@@ -19884,20 +19917,6 @@
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "stepAgentRevisionId": {
-          "name": "stepAgentRevisionId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "stepAgentPublicationRecordId": {
-          "name": "stepAgentPublicationRecordId",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "stepRuntimeId": {
@@ -20005,9 +20024,7 @@
           "name": "HostedProvisioningRequest_active_uq",
           "columns": [
             "tenantId",
-            "agentRevisionId",
-            "routeScopeKey",
-            "desiredRuntimeKey"
+            "routeScopeKey"
           ],
           "isUnique": true
         },
@@ -20015,13 +20032,6 @@
           "name": "HostedProvisioningRequest_tenantId_idx",
           "columns": [
             "tenantId"
-          ],
-          "isUnique": false
-        },
-        "HostedProvisioningRequest_agentId_idx": {
-          "name": "HostedProvisioningRequest_agentId_idx",
-          "columns": [
-            "agentId"
           ],
           "isUnique": false
         },

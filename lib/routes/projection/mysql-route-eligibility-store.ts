@@ -16,6 +16,7 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
       routeId: input.routeId,
       tenantId: input.tenantId,
       targetKind: input.targetKind,
+      targetIdentity: input.targetIdentity,
       agentId: input.agentId,
       routeSetId: input.routeSetId,
       routeScopeKey: input.routeScopeKey,
@@ -80,6 +81,7 @@ export const mysqlRouteEligibilityStore: RouteEligibilityStore = {
         set: {
           tenantId: sql`VALUES(tenantId)`,
           targetKind: sql`VALUES(targetKind)`,
+          targetIdentity: sql`VALUES(targetIdentity)`,
           agentId: sql`VALUES(agentId)`,
           routeSetId: sql`VALUES(routeSetId)`,
           routeScopeKey: sql`VALUES(routeScopeKey)`,

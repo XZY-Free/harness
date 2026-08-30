@@ -19,11 +19,11 @@
  * 仍用 binding 冻结的旧证据（outbound 元数据与 binding hash 均保持冻结值）。
  */
 import { createHash, randomUUID } from "node:crypto";
+import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
 import {
   type AgentCallBindingConfigInput,
   computeAgentCallBindingHash,
 } from "@/lib/agents/calls/domain/agent-call-binding";
-import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
   type A2ATestProvider,
@@ -42,7 +42,6 @@ import {
 } from "@/lib/agents/persistence/agent-queries";
 import { createDraftRevision } from "@/lib/agents/persistence/agent-revision-queries";
 import { seedAgentContractSnapshot } from "@/lib/agents/test-support/seed-agent-contract-snapshot";
-import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { db } from "@/lib/db/client";
 import {
   agentCallAttemptTable,
@@ -51,6 +50,7 @@ import {
 } from "@/lib/persistence/schema/agent-calls";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { credentialRefTable } from "@/lib/persistence/schema/tool";
+import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { and, eq } from "drizzle-orm";
 
 /** sha256 指纹 helper（与 resolveOutboundRuntimeAuth 重算逻辑一致）。 */
@@ -287,6 +287,8 @@ export async function seedAgentCallExecutionScenario(options?: {
   const provider = await startA2ATestProvider(options?.providerScenario ?? "completed");
 
   // ─── RouteResolution（binding 冻结证据，非 start 读取源）───
+  // 判别 agent target：冻结 scenario 的 revision + 真实 endpoint/identity/credential/network；
+  // agent evidence 只覆盖 Contract/Publication 字段。
   const deploymentRouteId = randomUUID();
   const routeRevisionId = randomUUID();
   const routeActivationId = randomUUID();
@@ -294,13 +296,26 @@ export async function seedAgentCallExecutionScenario(options?: {
     deploymentRouteId,
     routeRevisionId,
     routeActivationId,
-    agentRevisionId: revision.id,
+    target: {
+      kind: "agent",
+      agentRevisionId: revision.id,
+      agentEndpointRef: provider.endpoint,
+      agentIdentityMode: "bearer",
+      agentCredentialRefId: credentialRefId,
+      agentNetworkZone: "private",
+    },
   });
+
+  // agent guard：binding 的 resolved agent revision 只从判别 agent target 取得（不信任未判别字段）。
+  const agentTarget = resolution.target;
+  if (agentTarget.kind !== "agent") {
+    throw new Error("执行夹具要求判别 agent target");
+  }
 
   // ─── 冻结 binding（endpoint 来自 provider；credential 来自真实 ref）───
   let binding: AgentCallBindingConfigInput = {
     agentId: agent.id,
-    agentRevisionId: revision.id,
+    agentRevisionId: agentTarget.agentRevisionId,
     agentContractSnapshotId: snapshot.id,
     agentContractDigest: snapshot.contractDigest,
     agentCapabilityDigest: snapshot.capabilityDigest,
@@ -311,7 +326,7 @@ export async function seedAgentCallExecutionScenario(options?: {
     routeActivationId: resolution.routeActivationId,
     routeContentDigest: resolution.routeContentDigest,
     resolutionInputDigest: resolution.resolutionInputDigest,
-    projectionVersionNo: resolution.projectionVersionNo ?? 0,
+    projectionVersionNo: resolution.projectionVersionNo,
     endpointRef: provider.endpoint,
     identityMode: "bearer",
     credentialRefId,
@@ -416,7 +431,9 @@ export async function loadFrozenBinding(callId: string, tenantId: string) {
   const [row] = await db
     .select()
     .from(agentCallBindingTable)
-    .where(and(eq(agentCallBindingTable.callId, callId), eq(agentCallBindingTable.tenantId, tenantId)))
+    .where(
+      and(eq(agentCallBindingTable.callId, callId), eq(agentCallBindingTable.tenantId, tenantId)),
+    )
     .limit(1);
   return row;
 }

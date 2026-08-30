@@ -387,10 +387,10 @@ async function seedFullCommandContext(
     protocolType,
   );
 
-  // 顶层恒为 base harness route（agentId/agentRevisionId=null）。
+  // 顶层恒为 base harness route（target={kind:"runtime"}）。
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: null,
+    target: { kind: "runtime" },
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
@@ -399,8 +399,7 @@ async function seedFullCommandContext(
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: null,
-    runtimeRevisionId: runtimeRevision.id,
+    target: { kind: "runtime", runtimeRevisionId: runtimeRevision.id },
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
     actor: buildActor(tenantId, "deploy-bot-001"),
@@ -1934,21 +1933,20 @@ async function seedBaseHarnessContext(): Promise<BaseHarnessContext> {
     "v1",
   );
 
-  // 创建 agentId=null 的 RouteSet（基础 Harness）。
+  // 创建 target={kind:"runtime"} 的 RouteSet（基础 Harness）。
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: null,
+    target: { kind: "runtime" },
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
 
-  // 激活 agentRevisionId=null 的基础 Route。
+  // 激活 runtime target 的基础 Route。
   const routeResult = await activateSingleRouteForTest({
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: null,
-    runtimeRevisionId: runtimeRevision.id,
+    target: { kind: "runtime", runtimeRevisionId: runtimeRevision.id },
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
     actor: buildActor(tenantId, "deploy-bot-001"),

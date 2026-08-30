@@ -1,16 +1,20 @@
 /**
  * HostedProvisioningSaga — Hosted 供应的异步步骤编排。
  *
- * : 正式步骤序列：
- * validate_request → ensure_agent_publication → prepare_runtime_revision
- * → verify_runtime_artifact → record_runtime_conformance → publish_runtime_revision
+ * 专题01 冻结（runtime-only）：
+ * HostedProvisioningSaga 只供应 tenant 内 builtin Harness Runtime 及其
+ * targetKind=runtime Route。无 Agent 发布、Agent revision、Agent route，
+ * 或 builtin-runtime binding 检查。
+ *
+ * 正式步骤序列：
+ * validate_request → prepare_runtime_revision → verify_runtime_artifact
+ * → record_runtime_conformance → publish_runtime_revision
  * → activate_route → await_projection → verify_route → ready
  *
- * : Agent Gateway 接受 agentRevisionId 并验证一致性。
- * : Runtime 拆为 4 步 Gateway。
- * : Worker 每次只执行一个步骤，完成后保存 Checkpoint + 清除 Lease。
- * : Route Activation 返回路由详情。
- * : verify_route 验证精确 ID，非仅非空。
+ * - Runtime 拆为 4 步 Gateway + runtimeRouteActivation / runtimeRouteReader。
+ * - Worker 每次只执行一个步骤，完成后保存 Checkpoint + 清除 Lease。
+ * - validate_request 对空白 tenantId/requesterId/routeScopeKey fail-closed。
+ * - verify_route 验证精确 ID（runtimeRevisionId/routeRevisionId/routeActivationId），非仅非空。
  */
 
 import {
@@ -23,11 +27,11 @@ import type {
   HostedProvisioningRequestStore,
   StepCheckpoint,
 } from "@/lib/runtime/persistence/hosted-provisioning-request-store";
+import type { HostedRuntimeRoute } from "@/lib/runtime/provisioning/provision-hosted-runtime";
 
-/** : 正式步骤名称。 */
+/** 正式步骤名称（runtime-only）。 */
 export const PROVISIONING_STEPS = [
   "validate_request",
-  "ensure_agent_publication",
   "prepare_runtime_revision",
   "verify_runtime_artifact",
   "record_runtime_conformance",
@@ -40,8 +44,7 @@ export type ProvisioningStep = (typeof PROVISIONING_STEPS)[number];
 
 /** 下一步映射。 */
 const NEXT_STEP: Record<string, string | null> = {
-  validate_request: "ensure_agent_publication",
-  ensure_agent_publication: "prepare_runtime_revision",
+  validate_request: "prepare_runtime_revision",
   prepare_runtime_revision: "verify_runtime_artifact",
   verify_runtime_artifact: "record_runtime_conformance",
   record_runtime_conformance: "publish_runtime_revision",
@@ -92,8 +95,6 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       switch (step) {
         case "validate_request":
           return await stepValidateRequest(request);
-        case "ensure_agent_publication":
-          return await stepEnsureAgentPublication(request);
         case "prepare_runtime_revision":
           return await stepPrepareRuntimeRevision(request);
         case "verify_runtime_artifact":
@@ -160,58 +161,25 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
 
   // ─── 步骤实现 ────────────────────────────────────────────
 
-  /** : validate_request — 校验请求冻结值完整性。 */
+  /** validate_request — 校验请求冻结值完整性，fail-closed。 */
   async function stepValidateRequest(
     request: HostedProvisioningRequestRow,
   ): Promise<SagaStepResult> {
-    if (!request.agentRevisionId) {
-      throw permanentError("HOSTED_REQUEST_INVALID", "agentRevisionId 缺失");
+    if (isBlank(request.tenantId)) {
+      throw permanentError("HOSTED_REQUEST_INVALID", "tenantId 缺失");
+    }
+    if (isBlank(request.requesterId)) {
+      throw permanentError("HOSTED_REQUEST_INVALID", "requesterId 缺失");
+    }
+    if (isBlank(request.routeScopeKey)) {
+      throw permanentError("HOSTED_REQUEST_INVALID", "routeScopeKey 缺失");
     }
     return advanceStep(request, "validate_request");
   }
 
   /**
-   * : ensure_agent_publication — Agent 发布，验证 revision 一致性。
-   */
-  async function stepEnsureAgentPublication(
-    request: HostedProvisioningRequestRow,
-  ): Promise<SagaStepResult> {
-    // Checkpoint 跳过
-    if (request.stepAgentRevisionId && request.stepAgentPublicationRecordId) {
-      if (request.stepAgentRevisionId !== request.agentRevisionId) {
-        throw permanentError(
-          "HOSTED_AGENT_REVISION_MISMATCH",
-          `Agent 发布 Checkpoint revisionId=${request.stepAgentRevisionId}，请求要求=${request.agentRevisionId}`,
-        );
-      }
-      return advanceStep(request, "ensure_agent_publication");
-    }
-
-    // : 传入 agentRevisionId
-    const agentRevision = await gateways.agentPublication.ensurePublishedAgentRevision({
-      tenantId: request.tenantId,
-      agentId: request.agentId,
-      expectedAgentRevisionId: request.agentRevisionId,
-    });
-
-    // : 验证 Revision 一致性
-    if (agentRevision.revisionId !== request.agentRevisionId) {
-      throw permanentError(
-        "HOSTED_AGENT_REVISION_MISMATCH",
-        `Agent 发布返回 revisionId=${agentRevision.revisionId}，请求要求=${request.agentRevisionId}`,
-      );
-    }
-
-    const checkpoint: StepCheckpoint = {
-      agentRevisionId: agentRevision.revisionId,
-      agentPublicationRecordId: agentRevision.publicationRecordId,
-    };
-
-    return advanceStep(request, "ensure_agent_publication", checkpoint);
-  }
-
-  /**
-   * : prepare_runtime_revision — 准备 Runtime Revision。
+   * prepare_runtime_revision — 准备 Runtime Revision。
+   * 命令只含 {tenantId, requesterId}。
    */
   async function stepPrepareRuntimeRevision(
     request: HostedProvisioningRequestRow,
@@ -222,8 +190,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
 
     const result = await gateways.runtimePrepare.prepareRuntimeRevision({
       tenantId: request.tenantId,
-      agentId: request.agentId,
-      agentRevisionId: request.agentRevisionId,
+      requesterId: request.requesterId,
     });
 
     const checkpoint: StepCheckpoint = {
@@ -321,11 +288,20 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       return advanceStep(request, "publish_runtime_revision");
     }
 
+    const conformanceRunId = request.stepConformanceRunId;
+    const runtimeAttestationIds = request.stepRuntimeAttestationIds;
+    if (!conformanceRunId || !runtimeAttestationIds?.[0]) {
+      throw permanentError(
+        "CHECKPOINT_BROKEN",
+        "Conformance 或 Attestation Checkpoint 缺失，无法发布 Runtime",
+      );
+    }
+
     const result = await gateways.runtimePublish.publishRuntimeRevision({
       tenantId: request.tenantId,
       runtimeRevisionId,
-      conformanceRunId: request.stepConformanceRunId ?? "",
-      runtimeAttestationIds: request.stepRuntimeAttestationIds ?? [],
+      conformanceRunId,
+      runtimeAttestationIds,
     });
 
     const checkpoint: StepCheckpoint = {
@@ -336,19 +312,17 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
   }
 
   /**
-   * : activate_route — Route 激活，返回路由详情。
+   * activate_route — Route 激活，返回路由详情。
+   * 只要求 runtimeRevisionId / runtimePublicationRecordId / conformanceRunId /
+   * 非空 runtimeAttestationId，不引用任何 Agent checkpoint。
    */
   async function stepActivateRoute(request: HostedProvisioningRequestRow): Promise<SagaStepResult> {
-    const agentRevisionId = request.stepAgentRevisionId;
-    const agentPublicationRecordId = request.stepAgentPublicationRecordId;
     const runtimeRevisionId = request.stepRuntimeRevisionId;
     const runtimePublicationRecordId = request.stepRuntimePublicationRecordId;
     const conformanceRunId = request.stepConformanceRunId;
 
     const runtimeAttestationId = request.stepRuntimeAttestationIds?.[0];
     if (
-      !agentRevisionId ||
-      !agentPublicationRecordId ||
       !runtimeRevisionId ||
       !runtimePublicationRecordId ||
       !conformanceRunId ||
@@ -356,22 +330,12 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     ) {
       throw permanentError("CHECKPOINT_BROKEN", "Checkpoint 不完整，无法激活 Route");
     }
-    if (agentRevisionId !== request.agentRevisionId) {
-      throw permanentError(
-        "HOSTED_AGENT_REVISION_MISMATCH",
-        `Route 激活 Checkpoint revisionId=${agentRevisionId}，请求要求=${request.agentRevisionId}`,
-      );
-    }
 
     // Checkpoint 跳过（已激活）
     if (request.stepRouteSetId && request.stepRouteRevisionId && request.stepRouteActivationId) {
       return advanceStep(request, "activate_route");
     }
 
-    const agentRevision = {
-      revisionId: request.agentRevisionId,
-      publicationRecordId: agentPublicationRecordId,
-    };
     const runtimeRevision = {
       revisionId: runtimeRevisionId,
       publicationRecordId: runtimePublicationRecordId,
@@ -379,12 +343,10 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       conformanceRunId,
     };
 
-    // : Route Activation 返回路由详情
-    const routeResult = await gateways.routeActivation.activateRoute({
+    // Route Activation 返回路由详情（无 Agent 字段）
+    const routeResult = await gateways.runtimeRouteActivation.activateRuntimeRoute({
       tenantId: request.tenantId,
-      agentId: request.agentId,
       routeScopeKey: request.routeScopeKey,
-      agentRevision,
       runtimeRevision,
     });
 
@@ -403,15 +365,14 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
    * await_projection — 等待 Projection 构建。
    *
    * Route 激活后需要等待 Projection 事件处理器完成构建。
-   * 检查 Projection 是否已存在且 eligible。
+   * 通过 runtimeRouteReader 检查 targetKind=runtime Projection 是否已可见且 eligible。
    */
   async function stepAwaitProjection(
     request: HostedProvisioningRequestRow,
   ): Promise<SagaStepResult> {
     // 通过 Resolver 检查 Projection 是否已可见
-    const route = await gateways.routeReader.resolveEligibleRoute({
+    const route = await gateways.runtimeRouteReader.resolveEligibleRuntimeRoute({
       tenantId: request.tenantId,
-      agentId: request.agentId,
       routeScopeKey: request.routeScopeKey,
     });
 
@@ -438,19 +399,18 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     const checkpoint: StepCheckpoint = {
       routeRevisionId: route.routeRevisionId,
       routeActivationId: route.routeActivationId,
-      projectionVersionNo: route.projectionVersionNo ?? null,
+      projectionVersionNo: route.projectionVersionNo,
     };
 
     return advanceStep(request, "await_projection", checkpoint);
   }
 
   /**
-   * : verify_route — 验证精确 ID，非仅非空。
+   * verify_route — 验证精确 ID（runtimeRevisionId/routeRevisionId/routeActivationId），非仅非空。
    */
   async function stepVerifyRoute(request: HostedProvisioningRequestRow): Promise<SagaStepResult> {
-    const route = await gateways.routeReader.resolveEligibleRoute({
+    const route = await gateways.runtimeRouteReader.resolveEligibleRuntimeRoute({
       tenantId: request.tenantId,
-      agentId: request.agentId,
       routeScopeKey: request.routeScopeKey,
     });
 
@@ -472,8 +432,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
 
     assertResolvedRouteMatchesRequest(request, route);
 
-    // : 精确 ID 验证
-    // 全部完成
+    // 精确 ID 验证 — 全部完成
     const checkpoint: StepCheckpoint = {
       routeRevisionId: route.routeRevisionId,
       routeActivationId: route.routeActivationId,
@@ -484,14 +443,9 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
 
   function assertResolvedRouteMatchesRequest(
     request: HostedProvisioningRequestRow,
-    route: Awaited<ReturnType<HostedGateways["routeReader"]["resolveEligibleRoute"]>> & {},
+    route: HostedRuntimeRoute,
   ): void {
     const mismatches: string[] = [];
-    if (route.agentRevisionId !== request.agentRevisionId) {
-      mismatches.push(
-        `agentRevisionId: route=${route.agentRevisionId} != request=${request.agentRevisionId}`,
-      );
-    }
     if (
       request.stepRuntimeRevisionId &&
       route.runtimeRevisionId !== request.stepRuntimeRevisionId
@@ -559,6 +513,11 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     });
     return { step, completed: false, newState: "retryable_failed" };
   }
+}
+
+/** 空白校验：空串或全空白视为非法。 */
+function isBlank(value: string): boolean {
+  return value.trim().length === 0;
 }
 
 /** 创建永久错误 — 不可重试。 */

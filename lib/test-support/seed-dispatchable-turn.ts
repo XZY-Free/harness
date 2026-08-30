@@ -148,11 +148,11 @@ export async function seedDispatchableTurn(
   );
 
   // Employee Turn 热路径解析基础 Harness Route（显式 runtime target，专题01 冻结架构），
-  // 故 seed 一个 base RouteSet（targetKind=runtime，agentId=null）+ RouteRevision（agentRevisionId=null）。
+  // 故 seed 一个 base RouteSet（target={kind:"runtime"}）+ RouteRevision（target runtime，不携带 Agent 字段）。
   // Agent 仍创建以维持返回类型（agentId/agentRevision）兼容；路由本身为 base runtime。
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: null,
+    target: { kind: "runtime" },
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
@@ -161,8 +161,7 @@ export async function seedDispatchableTurn(
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: null,
-    runtimeRevisionId: runtimeRevision.id,
+    target: { kind: "runtime", runtimeRevisionId: runtimeRevision.id },
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
     actor: buildActor(tenantId, "deploy-bot-001"),

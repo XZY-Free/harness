@@ -179,6 +179,42 @@ describe("collectTopic01BoundaryViolations", () => {
     expect(collectTopic01BoundaryViolations(documents)).toContain("lib/routes/chat-route.ts");
   });
 
+  it("Agent target 与 Runtime evidence 同对象构造违规", () => {
+    const documents = [
+      doc(
+        "lib/routes/projection/legacy-agent-route.ts",
+        'const row = { targetKind: "agent", runtimeRevisionId: "runtime-1" };',
+      ),
+    ];
+    expect(collectTopic01BoundaryViolations(documents)).toContain(
+      "lib/routes/projection/legacy-agent-route.ts",
+    );
+  });
+
+  it("Agent target fallback 到 Runtime target 违规", () => {
+    const documents = [
+      doc(
+        "lib/routes/application/fallback.ts",
+        'const target = input.target === "agent" ? { kind: "runtime" } : input.target;',
+      ),
+    ];
+    expect(collectTopic01BoundaryViolations(documents)).toContain(
+      "lib/routes/application/fallback.ts",
+    );
+  });
+
+  it("RouteSet 唯一索引依赖 nullable agentId 违规", () => {
+    const documents = [
+      doc(
+        "lib/persistence/schema/deployment-route.ts",
+        'uniqueIndex("uq").on(table.tenantId, table.agentId, table.routeScopeKey);',
+      ),
+    ];
+    expect(collectTopic01BoundaryViolations(documents)).toContain(
+      "lib/persistence/schema/deployment-route.ts",
+    );
+  });
+
   it("agents.length === 0 后 return/throw 的执行阻断违规", () => {
     const documents = [
       doc("app/desktop/harness.tsx", "if (agents.length === 0) return;"),
@@ -346,6 +382,18 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
     const violations = collectTopic01BoundaryViolations(documents);
     expect(violations).toContain("lib/agents/calls/transport/a2a/y.ts");
     expect(violations).toContain("lib/agents/calls/transport/a2a/z.ts");
+  });
+
+  it("AgentCall resolution 读取 runtimeRevisionId 违规", () => {
+    const documents = [
+      doc(
+        "lib/agents/calls/application/resolve-agent-call-binding.ts",
+        "const revisionId = resolution.runtimeRevisionId;",
+      ),
+    ];
+    expect(collectTopic01BoundaryViolations(documents)).toContain(
+      "lib/agents/calls/application/resolve-agent-call-binding.ts",
+    );
   });
 
   it("合法 Harness runtime 字段不受 AgentCall 作用域约束牵连", () => {

@@ -14,10 +14,9 @@ export type HostedProvisioningState =
   | "ready"
   | "cancelled";
 
-/** Hosted 供应步骤 — 正式步骤序列。 */
+/** Hosted 供应步骤 — runtime-only 正式步骤序列（8 步，无 Agent 步骤）。 */
 export type ProvisioningStep =
   | "validate_request"
-  | "ensure_agent_publication"
   | "prepare_runtime_revision"
   | "verify_runtime_artifact"
   | "record_runtime_conformance"
@@ -26,14 +25,15 @@ export type ProvisioningStep =
   | "await_projection"
   | "verify_route";
 
-/** HostedProvisioningRequest 详情。 */
+/**
+ * HostedProvisioningRequest 详情（runtime-only）。
+ * 只含 requester_id 与 runtime/route checkpoint；无 Agent/runtime-key 字段。
+ */
 export interface HostedProvisioningRequestDTO {
   id: string;
   tenant_id: string;
-  agent_id: string;
-  agent_revision_id: string;
+  requester_id: string;
   route_scope_key: string;
-  desired_runtime_key: string;
   state: HostedProvisioningState;
   current_step: ProvisioningStep | null;
   last_completed_step: ProvisioningStep | null;
@@ -43,8 +43,6 @@ export interface HostedProvisioningRequestDTO {
   lease_expires_at: string | null;
   last_error: string | null;
   /** Checkpoint 字段 — 步骤产出。 */
-  agent_revision_id_checkpoint: string | null;
-  agent_publication_record_id: string | null;
   runtime_id: string | null;
   runtime_revision_id_checkpoint: string | null;
   runtime_artifact_id: string | null;
@@ -62,10 +60,7 @@ export interface HostedProvisioningRequestDTO {
   updated_at: string;
 }
 
-/** 请求 Hosted 供应。 */
+/** 请求 Hosted 供应（runtime-only）：客户端只能命名 route scope。 */
 export interface RequestHostedProvisioningRequest {
-  agent_id: string;
-  agent_revision_id: string;
   route_scope_key: string;
-  desired_runtime_key?: string;
 }

@@ -1,5 +1,9 @@
 import type { RevisionExecutionEvidenceReader } from "@/lib/control-plane/application/revision-execution-evidence-reader";
-import type { RevisionExecutionEvidenceSnapshot } from "@/lib/control-plane/domain/revision-execution-eligibility";
+import type {
+  AgentTargetEvidenceSnapshot,
+  RevisionExecutionEvidenceSnapshot,
+  RuntimeTargetEvidenceSnapshot,
+} from "@/lib/control-plane/domain/revision-execution-eligibility";
 import {
   type ActivateRouteSetCommand,
   type ActivateRouteSetResult,
@@ -7,9 +11,9 @@ import {
   createActivateRouteSet,
 } from "@/lib/routes/application/activate-route-set";
 import {
-  ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
   RouteIdempotencyCompletionError,
+  type RouteRevisionTarget,
   RouteSetVersionConflictError,
 } from "@/lib/routes/domain/route-revision";
 import type {
@@ -23,6 +27,7 @@ import type {
   RouteSetActivationSession,
   RouteSetActivationStore,
   RouteSetRow,
+  RouteSetTarget,
   RuntimeRevisionSummary,
 } from "@/lib/routes/persistence/route-set-activation-store";
 import {
@@ -31,18 +36,43 @@ import {
 } from "@/lib/runtime/domain/runtime-conformance-contract";
 import { describe, expect, it, vi } from "vitest";
 
+// ─── 专题01 冻结架构：target 判别联合 ──────────────────────
+// 正式 target 类型来自领域定义（route-revision / route-set-activation-store /
+// revision-execution-eligibility）。测试直接使用正式类型，不得再定义重复本地形状或窄型 cast。
+type AgentTarget = Extract<RouteRevisionTarget, { kind: "agent" }>;
+type RuntimeTarget = Extract<RouteRevisionTarget, { kind: "runtime" }>;
+/** Agent 目标 DesiredRoute — target 收敛到 agent 分支，只携带 Agent 事实。 */
+type AgentDesiredRoute = DesiredRoute & { target: AgentTarget };
+/** Runtime 目标 DesiredRoute — target 收敛到 runtime 分支，只携带 Runtime 事实。 */
+type RuntimeDesiredRoute = DesiredRoute & { target: RuntimeTarget };
+
 // ─── 测试 Fixtures ──────────────────────────────────────────
 
 const TENANT_ID = "tenant-1";
 const AGENT_ID = "agent-1";
+const AGENT_REVISION_ID = "agent-rev-1";
+const RUNTIME_REVISION_ID = "runtime-rev-1";
 const ROUTE_SET_ID = "rs-1";
 const ROUTE_SCOPE_KEY = "prod";
 const ACTOR = { tenantId: TENANT_ID, actorType: "user" as const, actorId: "user-1" };
 
-const BASE_ROUTE_SET: RouteSetRow = {
+/** Agent RouteSet — target:{kind:"agent", agentId}。 */
+const BASE_AGENT_ROUTE_SET: RouteSetRow = {
   id: ROUTE_SET_ID,
   tenantId: TENANT_ID,
-  agentId: AGENT_ID,
+  target: { kind: "agent", agentId: AGENT_ID } satisfies RouteSetTarget,
+  routeScopeKey: ROUTE_SCOPE_KEY,
+  routeScopeJson: {},
+  versionNo: 1,
+  createdAt: new Date("2026-01-01"),
+  updatedAt: new Date("2026-01-01"),
+};
+
+/** Runtime RouteSet — target:{kind:"runtime"}，不携带 agentId。 */
+const BASE_RUNTIME_ROUTE_SET: RouteSetRow = {
+  id: ROUTE_SET_ID,
+  tenantId: TENANT_ID,
+  target: { kind: "runtime" } satisfies RouteSetTarget,
   routeScopeKey: ROUTE_SCOPE_KEY,
   routeScopeJson: {},
   versionNo: 1,
@@ -51,34 +81,34 @@ const BASE_ROUTE_SET: RouteSetRow = {
 };
 
 const BASE_AGENT_REVISION: AgentRevisionSummary = {
-  id: "agent-rev-1",
+  id: AGENT_REVISION_ID,
   agentId: AGENT_ID,
   revisionState: "published",
 };
 
-// 专题01 Batch4 补漏：Agent Route 生产调用事实（agentRevisionId 非空时必须冻结）。
-// 所有 agent DesiredRoute fixture 必须携带，否则 validateRouteRevisionContent fail-closed。
-const AGENT_ROUTE_FACTS = {
-  agentEndpointRef: "https://agent.example.com/a2a",
-  agentIdentityMode: "bearer" as const,
-  agentCredentialRefId: "cred-1",
-  agentNetworkZone: "private",
-};
-
-const BASE_RUNTIME_REVISION: RuntimeRevisionSummary = {
-  id: "runtime-rev-1",
+/** 另一 Agent 的 Revision — 用于 D（跨 Agent 拒绝）。 */
+const OTHER_AGENT_REVISION: AgentRevisionSummary = {
+  id: "agent-rev-other",
+  agentId: "agent-other",
   revisionState: "published",
 };
 
-// §04: Mock Evidence Reader — 返回完全资格的快照，供单元测试使用
-const MOCK_ELIGIBLE_SNAPSHOT = {
+const BASE_RUNTIME_REVISION: RuntimeRevisionSummary = {
+  id: RUNTIME_REVISION_ID,
+  revisionState: "published",
+};
+
+// §04: Agent target Evidence Snapshot — 只含 Agent publication / lifecycle /
+// revision state + public policy。不得携带任何 runtime 字段（专题01 冻结架构）。
+const AGENT_ELIGIBLE_SNAPSHOT = {
+  kind: "agent",
   tenantId: TENANT_ID,
-  agentRevisionId: BASE_AGENT_REVISION.id,
+  agentRevisionId: AGENT_REVISION_ID,
   // Agent 是源码不可见黑盒：无 Agent Artifact Evidence（发布权威 = AgentContractSnapshot）。
   agentPublication: {
     publicationRecordId: "pub-1",
-    subjectType: "agent_revision" as const,
-    subjectRevisionId: BASE_AGENT_REVISION.id,
+    subjectType: "agent_revision",
+    subjectRevisionId: AGENT_REVISION_ID,
     evidenceSetDigest: "sha256:e",
     attestationIds: [],
     conformanceRunId: null,
@@ -89,18 +119,25 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
     agentCapabilityDigest: "sha256:m",
     agentContextDigest: "sha256:c",
   },
-  agentLifecycleState: "active" as const,
-  agentRevisionState: "published" as const,
-  runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+  agentLifecycleState: "active",
+  agentRevisionState: "published",
+  policyRequirement: { kind: "none" },
+} satisfies AgentTargetEvidenceSnapshot;
+
+// §04: Runtime target Evidence Snapshot — 只含 Runtime evidence（不含任何 Agent 字段）。
+const RUNTIME_ELIGIBLE_SNAPSHOT = {
+  kind: "runtime",
+  tenantId: TENANT_ID,
+  runtimeRevisionId: RUNTIME_REVISION_ID,
   runtimeArtifactEvidence: {
     tenantId: TENANT_ID,
     artifactType: "runtime_revision",
-    artifactRevisionId: BASE_RUNTIME_REVISION.id,
+    artifactRevisionId: RUNTIME_REVISION_ID,
     artifactId: "art-2",
     artifactDigest: "sha256:b",
     attestationId: "att-2",
-    verificationState: "verified" as const,
-    attestationFormat: "in_toto_dsse" as const,
+    verificationState: "verified",
+    attestationFormat: "in_toto_dsse",
     verifiedAt: new Date(),
     revokedAt: null,
     revocationRecordId: null,
@@ -109,8 +146,8 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
   },
   runtimePublication: {
     publicationRecordId: "pub-2",
-    subjectType: "runtime_revision" as const,
-    subjectRevisionId: BASE_RUNTIME_REVISION.id,
+    subjectType: "runtime_revision",
+    subjectRevisionId: RUNTIME_REVISION_ID,
     evidenceSetDigest: "sha256:f",
     attestationIds: ["att-2"],
     conformanceRunId: "conf-1",
@@ -125,44 +162,47 @@ const MOCK_ELIGIBLE_SNAPSHOT = {
     run: {
       runId: "conf-1",
       tenantId: TENANT_ID,
-      runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-      overallResult: "passed" as const,
+      runtimeRevisionId: RUNTIME_REVISION_ID,
+      overallResult: "passed",
       runtimeTargetDigest: "sha256:b",
       runtimeConfigDigest: "sha256:config",
       protocolContractRevision: "agent-runtime-protocol@1",
       suiteRevision: PUBLICATION_CONFORMANCE_SUITE_REVISION,
-      conformanceFormat: "standard_dsse" as const,
+      conformanceFormat: "standard_dsse",
     },
     caseResults: PUBLICATION_CONFORMANCE_CASES.map((caseId) => ({ caseId, passed: true })),
     expected: {
       tenantId: TENANT_ID,
-      runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+      runtimeRevisionId: RUNTIME_REVISION_ID,
       runtimeTargetDigest: "sha256:b",
       runtimeConfigDigest: "sha256:config",
       protocolContractRevision: "agent-runtime-protocol@1",
       allowedFormats: ["standard_dsse"],
     },
   },
-  runtimeLifecycleState: "active" as const,
-  runtimeRevisionState: "published" as const,
-  runtimeEvidenceKind: "hosted_artifact" as const,
-  policyRequirement: { kind: "none" as const },
-} satisfies RevisionExecutionEvidenceSnapshot;
-const mockEvidenceReader: RevisionExecutionEvidenceReader = {
-  loadCurrentEvidence: vi.fn(async () => MOCK_ELIGIBLE_SNAPSHOT),
-  loadExactEvidence: vi.fn(async () => MOCK_ELIGIBLE_SNAPSHOT),
-};
+  runtimeLifecycleState: "active",
+  runtimeRevisionState: "published",
+  runtimeEvidenceKind: "hosted_artifact",
+  policyRequirement: { kind: "none" },
+} satisfies RuntimeTargetEvidenceSnapshot;
 
-function makeRevisionRecord(overrides: Partial<RouteRevisionRecord> = {}): RouteRevisionRecord {
+// RouteRevisionRecord fixture — 构造单一合法 DB target row。
+// Agent 组：agent 事实非空 + runtime 组字段为 null（不混合，CHECK 约束）。
+function makeAgentRevisionRecord(
+  overrides: Partial<RouteRevisionRecord> = {},
+): RouteRevisionRecord {
   return {
     id: "rev-1",
     tenantId: TENANT_ID,
     routeId: "route-1",
     routeSetId: ROUTE_SET_ID,
     revisionNo: 1,
-    agentRevisionId: BASE_AGENT_REVISION.id,
-    runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-    ...AGENT_ROUTE_FACTS,
+    agentRevisionId: AGENT_REVISION_ID,
+    runtimeRevisionId: null,
+    agentEndpointRef: "https://agent.example.com/a2a",
+    agentIdentityMode: "bearer",
+    agentCredentialRefId: "cred-1",
+    agentNetworkZone: "private",
     policyRevisionId: null,
     modelPolicyRevisionId: null,
     toolsetRevisionId: null,
@@ -181,7 +221,44 @@ function makeRevisionRecord(overrides: Partial<RouteRevisionRecord> = {}): Route
     validatedAt: new Date("2026-01-01"),
     createdAt: new Date("2026-01-01"),
     ...overrides,
-  } as RouteRevisionRecord;
+  };
+}
+
+// Runtime 组：runtimeRevisionId 非空 + agent 组字段为 null（不混合，CHECK 约束）。
+function makeRuntimeRevisionRecord(
+  overrides: Partial<RouteRevisionRecord> = {},
+): RouteRevisionRecord {
+  return {
+    id: "rev-1",
+    tenantId: TENANT_ID,
+    routeId: "route-1",
+    routeSetId: ROUTE_SET_ID,
+    revisionNo: 1,
+    agentRevisionId: null,
+    runtimeRevisionId: RUNTIME_REVISION_ID,
+    agentEndpointRef: null,
+    agentIdentityMode: null,
+    agentCredentialRefId: null,
+    agentNetworkZone: null,
+    policyRevisionId: null,
+    modelPolicyRevisionId: null,
+    toolsetRevisionId: null,
+    trafficAllocationJson: {},
+    routeKey: "primary",
+    routeGroupId: "primary",
+    selectorDigest: "sha256:abc",
+    trafficWeight: 10000,
+    priorityNo: 0,
+    effectiveFrom: null,
+    effectiveUntil: null,
+    eligibilityConditionsJson: {},
+    contentDigest: "sha256:content",
+    createdByType: "user",
+    createdBy: "user-1",
+    validatedAt: new Date("2026-01-01"),
+    createdAt: new Date("2026-01-01"),
+    ...overrides,
+  };
 }
 
 function makeActivationRecord(
@@ -215,7 +292,6 @@ function createMockStore(overrides: {
   existingRoutes?: RouteRow[];
   agentRevisions?: Map<string, AgentRevisionSummary>;
   runtimeRevisions?: Map<string, RuntimeRevisionSummary>;
-  attestationResults?: Map<string, boolean>;
   routeSetVersionConflict?: boolean;
   latestActivations?: Map<string, RouteActivationRecord>;
   revisionsById?: Map<string, RouteRevisionRecord>;
@@ -223,141 +299,167 @@ function createMockStore(overrides: {
   appendOutbox?: ReturnType<typeof vi.fn>;
   completeIdempotency?: ReturnType<typeof vi.fn>;
 }): RouteSetActivationStore {
-  const routeSet = overrides.routeSet ?? BASE_ROUTE_SET;
+  const routeSet = overrides.routeSet ?? BASE_AGENT_ROUTE_SET;
   const existingRoutes = overrides.existingRoutes ?? [];
   const agentRevisions =
-    overrides.agentRevisions ?? new Map([[BASE_AGENT_REVISION.id, BASE_AGENT_REVISION]]);
+    overrides.agentRevisions ?? new Map([[AGENT_REVISION_ID, BASE_AGENT_REVISION]]);
   const runtimeRevisions =
-    overrides.runtimeRevisions ?? new Map([[BASE_RUNTIME_REVISION.id, BASE_RUNTIME_REVISION]]);
-  const attestationResults =
-    overrides.attestationResults ??
-    new Map([
-      ["agent_revision:agent-rev-1", true],
-      ["runtime_revision:runtime-rev-1", true],
-    ]);
+    overrides.runtimeRevisions ?? new Map([[RUNTIME_REVISION_ID, BASE_RUNTIME_REVISION]]);
 
   let revisionNo = 1;
   let activationSeq = 1;
   let routeCounter = 1;
 
-  return {
-    transaction: async <T>(
-      operation: (session: RouteSetActivationSession) => Promise<T>,
-    ): Promise<T> => {
-      const mockDbOrTx = {
-        select: () => ({
-          from: () => ({
-            where: () => ({
-              limit: () => Promise.resolve([{ agentInterfaceRequirementsJson: null }]),
-            }),
-          }),
+  const mockDbOrTx = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () => Promise.resolve([{ agentInterfaceRequirementsJson: null }]),
         }),
-      } as any;
-      const session: RouteSetActivationSession = {
-        getDbOrTx: vi.fn(() => mockDbOrTx),
-        lockRouteSet: vi.fn(async () => routeSet),
-        listRoutesBySet: vi.fn(async () => existingRoutes),
-        findLatestActivation: vi.fn(
-          async (routeId: string) => overrides.latestActivations?.get(routeId) ?? null,
-        ),
-        findRevisionById: vi.fn(async (id: string) => overrides.revisionsById?.get(id) ?? null),
-        findAgentRevision: vi.fn(async (id: string) => agentRevisions.get(id) ?? null),
-        findRuntimeRevision: vi.fn(async (id: string) => runtimeRevisions.get(id) ?? null),
-        resolveOrCreateRouteIdentity: vi.fn(
-          async (params: { routeSetId: string; routeId?: string; routeKey: string }) => {
-            const resolvedId = params.routeId ?? `route-${routeCounter++}`;
-            return {
-              id: resolvedId,
-              routeSetId: params.routeSetId,
-              routeKey: params.routeKey,
-              agentRevisionId: BASE_AGENT_REVISION.id,
-              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-              trafficWeight: 10000,
-              priorityNo: 0,
-              routeState: "enabled" as const,
-              effectiveFrom: null,
-              effectiveUntil: null,
-              activeRouteRevisionId: null,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            };
-          },
-        ),
-        findRevisionByContent: vi.fn(async () => null),
-        nextRevisionNo: vi.fn(async () => revisionNo++),
-        appendRevision: vi.fn(async (params: any) =>
-          makeRevisionRecord({
-            id: params.id,
-            routeId: params.routeId,
-            routeSetId: params.routeSetId,
-            revisionNo: params.revisionNo,
-            trafficWeight: params.content?.trafficWeight ?? 10000,
-            routeGroupId: params.content?.routeGroupId ?? "primary",
-          }),
-        ),
-        nextActivationSequence: vi.fn(async () => activationSeq++),
-        appendActivation: vi.fn(async (params: any) =>
-          makeActivationRecord({
-            id: params.id,
-            routeId: params.routeId,
-            routeRevisionId: params.routeRevisionId,
-            routeSetId: params.routeSetId,
-            activationSequence: params.activationSequence,
-            activationState: params.activationState,
-            previousRouteRevisionId: params.previousRouteRevisionId,
-            previousRouteActivationId: params.previousRouteActivationId,
-            routeSetVersionNo: params.routeSetVersionNo,
-          }),
-        ),
-        updateRouteProjection: vi.fn(async () => ({
-          id: "route-1",
-          routeSetId: ROUTE_SET_ID,
-          routeKey: "primary",
-          agentRevisionId: BASE_AGENT_REVISION.id,
-          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+      }),
+    }),
+  } as any;
+
+  // 单一 session 在工厂闭包内共享，事务多次调用复用同一 session 的 vi.fn，
+  // 使测试可从 store 上捕获到激活实际使用的 session。
+  const session: RouteSetActivationSession = {
+    getDbOrTx: vi.fn(() => mockDbOrTx),
+    lockRouteSet: vi.fn(async () => routeSet),
+    listRoutesBySet: vi.fn(async () => existingRoutes),
+    findLatestActivation: vi.fn(
+      async (routeId: string) => overrides.latestActivations?.get(routeId) ?? null,
+    ),
+    findRevisionById: vi.fn(async (id: string) => overrides.revisionsById?.get(id) ?? null),
+    findAgentRevision: vi.fn(async (id: string) => agentRevisions.get(id) ?? null),
+    findRuntimeRevision: vi.fn(async (id: string) => runtimeRevisions.get(id) ?? null),
+    resolveOrCreateRouteIdentity: vi.fn(
+      async (params: { routeSetId: string; routeId?: string; routeKey: string }) => {
+        const resolvedId = params.routeId ?? `route-${routeCounter++}`;
+        return {
+          id: resolvedId,
+          routeSetId: params.routeSetId,
+          routeKey: params.routeKey,
+          agentRevisionId: AGENT_REVISION_ID,
+          runtimeRevisionId: RUNTIME_REVISION_ID,
           trafficWeight: 10000,
           priorityNo: 0,
           routeState: "enabled" as const,
           effectiveFrom: null,
           effectiveUntil: null,
-          activeRouteRevisionId: "rev-1",
+          activeRouteRevisionId: null,
           createdAt: new Date(),
           updatedAt: new Date(),
-        })),
-        advanceRouteSetVersion: vi.fn(async () =>
-          overrides.routeSetVersionConflict
-            ? null
-            : { ...routeSet, versionNo: routeSet.versionNo + 1, updatedAt: new Date() },
-        ),
-        appendAudit: overrides.appendAudit ?? vi.fn(async () => {}),
-        appendOutbox: overrides.appendOutbox ?? vi.fn(async () => {}),
-        completeIdempotency: overrides.completeIdempotency ?? vi.fn(async () => true),
-      };
-      return operation(session);
-    },
+        };
+      },
+    ),
+    findRevisionByContent: vi.fn(async () => null),
+    nextRevisionNo: vi.fn(async () => revisionNo++),
+    appendRevision: vi.fn(async (params: any) =>
+      (params.content?.target?.kind === "runtime"
+        ? makeRuntimeRevisionRecord
+        : makeAgentRevisionRecord)({
+        id: params.id,
+        routeId: params.routeId,
+        routeSetId: params.routeSetId,
+        revisionNo: params.revisionNo,
+        trafficWeight: params.content?.trafficWeight ?? 10000,
+        routeGroupId: params.content?.routeGroupId ?? "primary",
+      }),
+    ),
+    nextActivationSequence: vi.fn(async () => activationSeq++),
+    appendActivation: vi.fn(async (params: any) =>
+      makeActivationRecord({
+        id: params.id,
+        routeId: params.routeId,
+        routeRevisionId: params.routeRevisionId,
+        routeSetId: params.routeSetId,
+        activationSequence: params.activationSequence,
+        activationState: params.activationState,
+        previousRouteRevisionId: params.previousRouteRevisionId,
+        previousRouteActivationId: params.previousRouteActivationId,
+        routeSetVersionNo: params.routeSetVersionNo,
+      }),
+    ),
+    updateRouteProjection: vi.fn(async () => ({
+      id: "route-1",
+      routeSetId: ROUTE_SET_ID,
+      routeKey: "primary",
+      agentRevisionId: AGENT_REVISION_ID,
+      runtimeRevisionId: RUNTIME_REVISION_ID,
+      trafficWeight: 10000,
+      priorityNo: 0,
+      routeState: "enabled" as const,
+      effectiveFrom: null,
+      effectiveUntil: null,
+      activeRouteRevisionId: "rev-1",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })),
+    advanceRouteSetVersion: vi.fn(async () =>
+      overrides.routeSetVersionConflict
+        ? null
+        : { ...routeSet, versionNo: routeSet.versionNo + 1, updatedAt: new Date() },
+    ),
+    appendAudit: overrides.appendAudit ?? vi.fn(async () => {}),
+    appendOutbox: overrides.appendOutbox ?? vi.fn(async () => {}),
+    completeIdempotency: overrides.completeIdempotency ?? vi.fn(async () => true),
   };
+
+  const store: RouteSetActivationStore = {
+    transaction: async <T>(operation: (s: RouteSetActivationSession) => Promise<T>): Promise<T> =>
+      operation(session),
+  };
+  // 暴露共享 session，供测试捕获激活实际使用的 session。
+  (store as any).__session = session;
+  return store;
 }
 
 const NOW = new Date("2026-06-01T00:00:00Z");
 
-function makeCommand(overrides: Partial<ActivateRouteSetCommand> = {}): ActivateRouteSetCommand {
+// ─── target 形状的 DesiredRoute 构造器 ─────────────────────
+
+function agentDesired(overrides: Partial<AgentDesiredRoute> = {}): AgentDesiredRoute {
+  return {
+    routeKey: "primary",
+    routeGroupId: "primary",
+    target: {
+      kind: "agent",
+      agentRevisionId: AGENT_REVISION_ID,
+      agentEndpointRef: "https://agent.example.com/a2a",
+      agentIdentityMode: "bearer",
+      agentCredentialRefId: "cred-1",
+      agentNetworkZone: "private",
+    },
+    trafficWeight: 10000,
+    priorityNo: 0,
+    eligibilityConditions: {},
+    activationState: "active",
+    ...overrides,
+  };
+}
+
+function runtimeDesired(overrides: Partial<RuntimeDesiredRoute> = {}): RuntimeDesiredRoute {
+  return {
+    routeKey: "primary",
+    routeGroupId: "primary",
+    target: { kind: "runtime", runtimeRevisionId: RUNTIME_REVISION_ID },
+    trafficWeight: 10000,
+    priorityNo: 0,
+    eligibilityConditions: {},
+    activationState: "active",
+    ...overrides,
+  };
+}
+
+function makeCommand(
+  desiredRoutes: DesiredRoute[],
+  overrides: Partial<ActivateRouteSetCommand> = {},
+): ActivateRouteSetCommand {
   return {
     tenantId: TENANT_ID,
     routeSetId: ROUTE_SET_ID,
     expectedVersionNo: 1,
-    desiredRoutes: [
-      {
-        routeKey: "primary",
-        routeGroupId: "primary",
-        agentRevisionId: BASE_AGENT_REVISION.id,
-        runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-        ...AGENT_ROUTE_FACTS,
-        trafficWeight: 10000,
-        priorityNo: 0,
-        eligibilityConditions: {},
-        activationState: "active",
-      },
-    ],
+    desiredRoutes,
     actor: ACTOR,
     reason: "test activation",
     requestId: "req-1",
@@ -366,9 +468,24 @@ function makeCommand(overrides: Partial<ActivateRouteSetCommand> = {}): Activate
   };
 }
 
-// ─── 测试 ──────────────────────────────────────────────────
+function makeReader(snapshot: RevisionExecutionEvidenceSnapshot): RevisionExecutionEvidenceReader {
+  return {
+    loadCurrentEvidence: vi.fn(async () => snapshot),
+    loadExactEvidence: vi.fn(async () => snapshot),
+  };
+}
 
-describe("activateRouteSet", () => {
+function activate(store: RouteSetActivationStore, reader: RevisionExecutionEvidenceReader) {
+  return createActivateRouteSet({
+    store,
+    evidenceReaderForTest: reader,
+    now: () => NOW,
+  });
+}
+
+// ─── 原有行为（迁移到 target 形状，保留语义）───────────────
+
+describe("activateRouteSet — 原有行为（target 形状）", () => {
   it("完整 replacement 把隐式 disabled Route 同时写入结果和 outbox", async () => {
     const appendAudit = vi.fn(async () => {});
     const appendOutbox = vi.fn(async () => {});
@@ -377,7 +494,7 @@ describe("activateRouteSet", () => {
       routeId: "route-removed",
       routeRevisionId: "rev-removed",
     });
-    const previousRevision = makeRevisionRecord({
+    const previousRevision = makeAgentRevisionRecord({
       id: "rev-removed",
       routeId: "route-removed",
       routeGroupId: "removed-group",
@@ -388,8 +505,8 @@ describe("activateRouteSet", () => {
           id: "route-removed",
           routeSetId: ROUTE_SET_ID,
           routeKey: "removed",
-          agentRevisionId: BASE_AGENT_REVISION.id,
-          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+          agentRevisionId: AGENT_REVISION_ID,
+          runtimeRevisionId: RUNTIME_REVISION_ID,
           trafficWeight: 10000,
           priorityNo: 0,
           routeState: "enabled",
@@ -405,13 +522,11 @@ describe("activateRouteSet", () => {
       appendAudit,
       appendOutbox,
     });
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
 
-    const result = await activateRouteSet(makeCommand());
+    const result = await activate(
+      store,
+      makeReader(AGENT_ELIGIBLE_SNAPSHOT),
+    )(makeCommand([agentDesired()]));
 
     expect(result.activations).toEqual([
       {
@@ -459,8 +574,8 @@ describe("activateRouteSet", () => {
           id: "route-removed",
           routeSetId: ROUTE_SET_ID,
           routeKey: "removed",
-          agentRevisionId: BASE_AGENT_REVISION.id,
-          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+          agentRevisionId: AGENT_REVISION_ID,
+          runtimeRevisionId: RUNTIME_REVISION_ID,
           trafficWeight: 10000,
           priorityNo: 0,
           routeState: "enabled",
@@ -482,15 +597,10 @@ describe("activateRouteSet", () => {
         ],
       ]),
     });
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
 
-    await expect(activateRouteSet(makeCommand())).rejects.toThrow(
-      "隐式禁用 Route route-removed 时找不到历史 Revision rev-missing",
-    );
+    await expect(
+      activate(store, makeReader(AGENT_ELIGIBLE_SNAPSHOT))(makeCommand([agentDesired()])),
+    ).rejects.toThrow("隐式禁用 Route route-removed 时找不到历史 Revision rev-missing");
   });
 
   it("隐式 disabled Route 的历史 Activation 缺失时拒绝部分成功", async () => {
@@ -500,8 +610,8 @@ describe("activateRouteSet", () => {
           id: "route-removed",
           routeSetId: ROUTE_SET_ID,
           routeKey: "removed",
-          agentRevisionId: BASE_AGENT_REVISION.id,
-          runtimeRevisionId: BASE_RUNTIME_REVISION.id,
+          agentRevisionId: AGENT_REVISION_ID,
+          runtimeRevisionId: RUNTIME_REVISION_ID,
           trafficWeight: 10000,
           priorityNo: 0,
           routeState: "enabled",
@@ -513,26 +623,18 @@ describe("activateRouteSet", () => {
         },
       ],
     });
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
 
-    await expect(activateRouteSet(makeCommand())).rejects.toThrow(
-      "隐式禁用 Route route-removed 时找不到历史 Activation",
-    );
+    await expect(
+      activate(store, makeReader(AGENT_ELIGIBLE_SNAPSHOT))(makeCommand([agentDesired()])),
+    ).rejects.toThrow("隐式禁用 Route route-removed 时找不到历史 Activation");
   });
 
   it("单条 10000 权重激活 — 成功", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({
+    const result = await activate(
       store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
-    const result = await activateRouteSet(makeCommand());
+      makeReader(AGENT_ELIGIBLE_SNAPSHOT),
+    )(makeCommand([agentDesired()]));
     expect(result.routeSetId).toBe(ROUTE_SET_ID);
     expect(result.routeSetVersionNo).toBe(2);
     expect(result.activations).toHaveLength(1);
@@ -542,39 +644,14 @@ describe("activateRouteSet", () => {
 
   it("两条 5000/5000 同 Group 原子激活 — 成功", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({
+    const result = await activate(
       store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
-    const result = await activateRouteSet(
-      makeCommand({
-        desiredRoutes: [
-          {
-            routeKey: "primary",
-            routeGroupId: "primary",
-            agentRevisionId: BASE_AGENT_REVISION.id,
-            runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-            ...AGENT_ROUTE_FACTS,
-            trafficWeight: 5000,
-            priorityNo: 0,
-            eligibilityConditions: {},
-            activationState: "active",
-          },
-          {
-            routeKey: "secondary",
-            routeGroupId: "primary",
-            agentRevisionId: BASE_AGENT_REVISION.id,
-            runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-            ...AGENT_ROUTE_FACTS,
-            trafficWeight: 5000,
-            priorityNo: 0,
-            eligibilityConditions: {},
-            activationState: "active",
-          },
-        ],
-      }),
+      makeReader(AGENT_ELIGIBLE_SNAPSHOT),
+    )(
+      makeCommand([
+        agentDesired({ routeKey: "primary", trafficWeight: 5000 }),
+        agentDesired({ routeKey: "secondary", trafficWeight: 5000 }),
+      ]),
     );
     expect(result.activations).toHaveLength(2);
     expect(result.routeSetVersionNo).toBe(2);
@@ -582,149 +659,52 @@ describe("activateRouteSet", () => {
 
   it("权重合计不为 10000 → RouteSetRequiresAtomicUpdateError", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
     await expect(
-      activateRouteSet(
-        makeCommand({
-          desiredRoutes: [
-            {
-              routeKey: "primary",
-              routeGroupId: "primary",
-              agentRevisionId: BASE_AGENT_REVISION.id,
-              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-              ...AGENT_ROUTE_FACTS,
-              trafficWeight: 5000,
-              priorityNo: 0,
-              eligibilityConditions: {},
-              activationState: "active",
-            },
-            {
-              routeKey: "primary",
-              routeGroupId: "primary",
-              agentRevisionId: BASE_AGENT_REVISION.id,
-              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-              ...AGENT_ROUTE_FACTS,
-              trafficWeight: 4000,
-              priorityNo: 0,
-              eligibilityConditions: {},
-              activationState: "active",
-            },
-          ],
-        }),
+      activate(
+        store,
+        makeReader(AGENT_ELIGIBLE_SNAPSHOT),
+      )(
+        makeCommand([
+          agentDesired({ routeKey: "primary", trafficWeight: 5000 }),
+          agentDesired({ routeKey: "primary", trafficWeight: 4000 }),
+        ]),
       ),
     ).rejects.toThrow(RouteSetRequiresAtomicUpdateError);
   });
 
   it("不同 Group 相同 Selector 和 Priority → RouteSetRequiresAtomicUpdateError", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
     await expect(
-      activateRouteSet(
-        makeCommand({
-          desiredRoutes: [
-            {
-              routeKey: "group-a",
-              routeGroupId: "group-a",
-              agentRevisionId: BASE_AGENT_REVISION.id,
-              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-              ...AGENT_ROUTE_FACTS,
-              trafficWeight: 10000,
-              priorityNo: 0,
-              eligibilityConditions: {},
-              activationState: "active",
-            },
-            {
-              routeKey: "group-b",
-              routeGroupId: "group-b",
-              agentRevisionId: BASE_AGENT_REVISION.id,
-              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-              ...AGENT_ROUTE_FACTS,
-              trafficWeight: 10000,
-              priorityNo: 0,
-              eligibilityConditions: {},
-              activationState: "active",
-            },
-          ],
-        }),
+      activate(
+        store,
+        makeReader(AGENT_ELIGIBLE_SNAPSHOT),
+      )(
+        makeCommand([
+          agentDesired({ routeKey: "group-a", routeGroupId: "group-a" }),
+          agentDesired({ routeKey: "group-b", routeGroupId: "group-b" }),
+        ]),
       ),
     ).rejects.toThrow(RouteSetRequiresAtomicUpdateError);
   });
 
   it("RouteSet 版本冲突 → RouteSetVersionConflictError", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
-    await expect(activateRouteSet(makeCommand({ expectedVersionNo: 999 }))).rejects.toThrow(
-      RouteSetVersionConflictError,
-    );
-  });
-
-  it("AgentRevision 非 published → RevisionNotPublishedError", async () => {
-    const store = createMockStore({
-      agentRevisions: new Map([
-        [
-          "agent-rev-draft",
-          { ...BASE_AGENT_REVISION, id: "agent-rev-draft", revisionState: "draft" },
-        ],
-      ]),
-    });
-    const draftSnapshot = { ...MOCK_ELIGIBLE_SNAPSHOT, agentRevisionState: "draft" as const };
-    const draftReader: RevisionExecutionEvidenceReader = {
-      loadCurrentEvidence: vi.fn(async () => draftSnapshot),
-      loadExactEvidence: vi.fn(async () => draftSnapshot),
-    };
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: draftReader,
-      now: () => NOW,
-    });
-
     await expect(
-      activateRouteSet(
-        makeCommand({
-          desiredRoutes: [
-            {
-              routeKey: "primary",
-              routeGroupId: "primary",
-              agentRevisionId: "agent-rev-draft",
-              runtimeRevisionId: BASE_RUNTIME_REVISION.id,
-              ...AGENT_ROUTE_FACTS,
-              trafficWeight: 10000,
-              priorityNo: 0,
-              eligibilityConditions: {},
-              activationState: "active",
-            },
-          ],
-        }),
-      ),
-    ).rejects.toThrow("执行资格不足");
+      activate(
+        store,
+        makeReader(AGENT_ELIGIBLE_SNAPSHOT),
+      )(makeCommand([agentDesired()], { expectedVersionNo: 999 })),
+    ).rejects.toThrow(RouteSetVersionConflictError);
   });
 
   it("actor tenantId 与 command tenantId 不一致 → Error", async () => {
     const store = createMockStore({});
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
     await expect(
-      activateRouteSet(
-        makeCommand({
+      activate(
+        store,
+        makeReader(AGENT_ELIGIBLE_SNAPSHOT),
+      )(
+        makeCommand([agentDesired()], {
           actor: { tenantId: "other-tenant", actorType: "user", actorId: "user-1" },
         }),
       ),
@@ -733,15 +713,12 @@ describe("activateRouteSet", () => {
 
   it("IdempotencyRecord authority 缺失时拒绝提交", async () => {
     const store = createMockStore({ completeIdempotency: vi.fn(async () => false) });
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
     await expect(
-      activateRouteSet(
-        makeCommand({
+      activate(
+        store,
+        makeReader(AGENT_ELIGIBLE_SNAPSHOT),
+      )(
+        makeCommand([agentDesired()], {
           idempotencyCompletion: {
             recordId: "missing-record",
             httpStatus: 200,
@@ -758,14 +735,205 @@ describe("activateRouteSet", () => {
         ["route-1", makeActivationRecord({ tenantId: "other-tenant", routeId: "route-1" })],
       ]),
     });
-    const activateRouteSet = createActivateRouteSet({
-      store,
-      evidenceReaderForTest: mockEvidenceReader,
-      now: () => NOW,
-    });
-
-    await expect(activateRouteSet(makeCommand())).rejects.toThrow(
-      "历史 Activation 与当前 Route authority 不一致",
-    );
+    await expect(
+      activate(store, makeReader(AGENT_ELIGIBLE_SNAPSHOT))(makeCommand([agentDesired()])),
+    ).rejects.toThrow("历史 Activation 与当前 Route authority 不一致");
   });
 });
+
+// ─── 专题01 target 判别断言 A–F ────────────────────────────
+
+describe("activateRouteSet — target 判别（专题01 冻结架构）", () => {
+  it("A. agent Route activation 成功，不读 runtimeRevisionId / runtime evidence", async () => {
+    const store = createMockStore({});
+    const reader = makeReader(AGENT_ELIGIBLE_SNAPSHOT);
+    const activateRouteSet = activate(store, reader);
+
+    const result = await activateRouteSet(makeCommand([agentDesired()]));
+
+    // 成功 + 生成 agent target content
+    expect(result.routeSetVersionNo).toBe(2);
+    expect(result.activations).toHaveLength(1);
+    const session = captureSession(store);
+    const appendRevisionMock = (session.appendRevision as unknown as { mock: { calls: any[][] } })
+      .mock;
+    expect(appendRevisionMock.calls).toHaveLength(1);
+    const appendedContent = appendRevisionMock.calls[0]?.[0]?.content;
+    expect(appendedContent?.target?.kind).toBe("agent");
+    expect(appendedContent?.target?.agentRevisionId).toBe(AGENT_REVISION_ID);
+    // target 必须不携带 runtimeRevisionId own property（不得构造 placeholder）
+    expect(Object.prototype.hasOwnProperty.call(appendedContent?.target, "runtimeRevisionId")).toBe(
+      false,
+    );
+
+    // 依赖隔离：agent target 不得调用 findRuntimeRevision，也不得要求 runtime evidence
+    expect(session.findRuntimeRevision).not.toHaveBeenCalled();
+    const loadCurrent = reader.loadCurrentEvidence as ReturnType<typeof vi.fn>;
+    expect(loadCurrent).toHaveBeenCalledTimes(1);
+    const input = loadCurrent.mock.calls[0]?.[0];
+    expect(Object.prototype.hasOwnProperty.call(input, "runtimeRevisionId")).toBe(false);
+  });
+
+  it("B. runtime Route activation 成功，target 不含 agent fields，不读 findAgentRevision", async () => {
+    const store = createMockStore({ routeSet: BASE_RUNTIME_ROUTE_SET });
+    const reader = makeReader(RUNTIME_ELIGIBLE_SNAPSHOT);
+    const activateRouteSet = activate(store, reader);
+
+    const result = await activateRouteSet(makeCommand([runtimeDesired()]));
+
+    expect(result.routeSetVersionNo).toBe(2);
+    expect(result.activations).toHaveLength(1);
+    const session = captureSession(store);
+    const appendRevisionMock = (session.appendRevision as unknown as { mock: { calls: any[][] } })
+      .mock;
+    const appendedContent = appendRevisionMock.calls[0]?.[0]?.content;
+    expect(appendedContent?.target?.kind).toBe("runtime");
+    expect(appendedContent?.target?.runtimeRevisionId).toBe(RUNTIME_REVISION_ID);
+    // runtime target 不得携带任何 agent target 事实 own property
+    for (const key of [
+      "agentRevisionId",
+      "agentEndpointRef",
+      "agentIdentityMode",
+      "agentCredentialRefId",
+      "agentNetworkZone",
+    ]) {
+      expect(Object.prototype.hasOwnProperty.call(appendedContent?.target, key)).toBe(false);
+    }
+
+    // 依赖隔离：runtime target 不得调用 findAgentRevision
+    expect(session.findAgentRevision).not.toHaveBeenCalled();
+    const loadCurrent = reader.loadCurrentEvidence as ReturnType<typeof vi.fn>;
+    const input = loadCurrent.mock.calls[0]?.[0];
+    expect(input?.agentRevisionId ?? null).toBeNull();
+    expect(Object.prototype.hasOwnProperty.call(input, "agentRevisionId")).toBe(false);
+  });
+
+  it("C. Agent RouteSet 拒绝 runtime desired；Runtime RouteSet 拒绝 agent desired", async () => {
+    const agentStore = createMockStore({ routeSet: BASE_AGENT_ROUTE_SET });
+    await expect(
+      activate(agentStore, makeReader(RUNTIME_ELIGIBLE_SNAPSHOT))(makeCommand([runtimeDesired()])),
+    ).rejects.toThrow();
+
+    const runtimeStore = createMockStore({ routeSet: BASE_RUNTIME_ROUTE_SET });
+    await expect(
+      activate(runtimeStore, makeReader(AGENT_ELIGIBLE_SNAPSHOT))(makeCommand([agentDesired()])),
+    ).rejects.toThrow();
+  });
+
+  it("D. agent Route 的 AgentRevision 属于另一 Agent 时拒绝", async () => {
+    const store = createMockStore({
+      routeSet: BASE_AGENT_ROUTE_SET,
+      agentRevisions: new Map([
+        [OTHER_AGENT_REVISION.id, OTHER_AGENT_REVISION],
+        [AGENT_REVISION_ID, BASE_AGENT_REVISION],
+      ]),
+    });
+    const reader = makeReader({
+      ...AGENT_ELIGIBLE_SNAPSHOT,
+      agentRevisionId: OTHER_AGENT_REVISION.id,
+    });
+    await expect(
+      activate(
+        store,
+        reader,
+      )(
+        makeCommand([
+          agentDesired({
+            target: {
+              kind: "agent",
+              agentRevisionId: OTHER_AGENT_REVISION.id,
+              agentEndpointRef: "https://agent.example.com/a2a",
+              agentIdentityMode: "bearer",
+              agentCredentialRefId: "cred-1",
+              agentNetworkZone: "private",
+            },
+          }),
+        ]),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("E. 撤回/不合格 Agent publication 拒绝 agent active，但 unrelated Runtime 状态不影响 Agent Route", async () => {
+    const store = createMockStore({ routeSet: BASE_AGENT_ROUTE_SET });
+    // Agent publication 撤回（无 Active Publication）+ AgentRevision 撤回；
+    // runtime 状态/证据完全不相关，Agent Route 不得受其影响。
+    const reader = makeReader({
+      ...AGENT_ELIGIBLE_SNAPSHOT,
+      agentPublication: null,
+      agentRevisionState: "withdrawn",
+    });
+    await expect(activate(store, reader)(makeCommand([agentDesired()]))).rejects.toThrow(
+      "执行资格不足",
+    );
+
+    // 即便 runtime 状态完全不同（quarantined/无 publication），Agent Route 判定的
+    // 失败维度仍必须来自 Agent publication/revision，而非 runtime。reader input 不得含 runtime。
+    const loadCurrent = reader.loadCurrentEvidence as ReturnType<typeof vi.fn>;
+    const input = loadCurrent.mock.calls[0]?.[0];
+    expect(Object.prototype.hasOwnProperty.call(input, "runtimeRevisionId")).toBe(false);
+  });
+
+  it("F. policy 在 agent 与 runtime 两种 target 上都 fail-closed", async () => {
+    // agent target + 引用了已撤回 policy → 拒绝
+    const agentStore = createMockStore({ routeSet: BASE_AGENT_ROUTE_SET });
+    const agentPolicyReader = makeReader({
+      ...AGENT_ELIGIBLE_SNAPSHOT,
+      policyRequirement: {
+        kind: "referenced",
+        policyRevisionId: "policy-1",
+        policyRevision: { id: "policy-1", revisionState: "withdrawn", publishedAt: null },
+      },
+    });
+    await expect(
+      activate(
+        agentStore,
+        agentPolicyReader,
+      )(
+        makeCommand([
+          agentDesired({
+            policyRevisionId: "policy-1",
+            target: {
+              kind: "agent",
+              agentRevisionId: AGENT_REVISION_ID,
+              agentEndpointRef: "https://agent.example.com/a2a",
+              agentIdentityMode: "bearer",
+              agentCredentialRefId: "cred-1",
+              agentNetworkZone: "private",
+            },
+          }),
+        ]),
+      ),
+    ).rejects.toThrow("执行资格不足");
+
+    // runtime target + 引用了未 published policy → 拒绝
+    const runtimeStore = createMockStore({ routeSet: BASE_RUNTIME_ROUTE_SET });
+    const runtimePolicyReader = makeReader({
+      ...RUNTIME_ELIGIBLE_SNAPSHOT,
+      policyRequirement: {
+        kind: "referenced",
+        policyRevisionId: "policy-2",
+        policyRevision: { id: "policy-2", revisionState: "draft", publishedAt: null },
+      },
+    });
+    await expect(
+      activate(
+        runtimeStore,
+        runtimePolicyReader,
+      )(
+        makeCommand([
+          runtimeDesired({
+            policyRevisionId: "policy-2",
+            target: { kind: "runtime", runtimeRevisionId: RUNTIME_REVISION_ID },
+          }),
+        ]),
+      ),
+    ).rejects.toThrow("执行资格不足");
+  });
+});
+
+// ─── 辅助：从 store 捕获激活实际使用的共享 session ─────────
+function captureSession(store: RouteSetActivationStore): RouteSetActivationSession {
+  const captured = (store as any).__session as RouteSetActivationSession | undefined;
+  if (!captured) throw new Error("captureSession: no session captured");
+  return captured;
+}

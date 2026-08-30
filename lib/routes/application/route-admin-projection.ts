@@ -1,8 +1,10 @@
 import type {
   DeploymentRouteDTO,
   DeploymentRouteSetDTO,
-  RouteTargetKind,
+  RouteRevisionTargetDTO,
+  RouteSetTargetDTO,
 } from "@/lib/control-plane-client/contracts/route";
+import type { RouteRevisionTarget } from "@/lib/routes/domain/route-revision";
 
 export interface AdminRouteProjectionInput {
   route: {
@@ -22,9 +24,8 @@ export interface AdminRouteProjectionInput {
   revision: {
     id: string;
     routeGroupId: string;
-    /** null = 基础 Harness Route（无 Agent 资产约束）。 */
-    agentRevisionId: string | null;
-    runtimeRevisionId: string;
+    /** 判别 target — 只含所选 target 自己的事实。 */
+    target: RouteRevisionTarget;
     policyRevisionId: string | null;
     trafficWeight: number;
     priorityNo: number;
@@ -39,12 +40,53 @@ export interface AdminRouteProjectionInput {
   } | null;
 }
 
+/** 从显式 DB trio（targetKind/targetIdentity/agentId）严格构造 RouteSet wire target，畸形抛错。 */
+function routeSetTargetToWire(input: {
+  targetKind: "runtime" | "agent";
+  targetIdentity: string;
+  agentId: string | null;
+}): RouteSetTargetDTO {
+  if (input.targetKind === "runtime") {
+    if (input.targetIdentity !== "runtime" || input.agentId !== null) {
+      throw new Error(
+        `RouteSet runtime target 需 identity="runtime" 且 agentId=null，畸形（identity=${input.targetIdentity}）`,
+      );
+    }
+    return { kind: "runtime" };
+  }
+  if (input.targetKind === "agent") {
+    if (
+      typeof input.agentId !== "string" ||
+      input.agentId.trim() === "" ||
+      input.agentId !== input.targetIdentity
+    ) {
+      throw new Error("RouteSet agent target 需 agentId 非空且 identity=agentId，畸形");
+    }
+    return { kind: "agent", agent_id: input.agentId.trim() };
+  }
+  throw new Error(`RouteSet targetKind 非法: ${String(input.targetKind)}`);
+}
+
+/** 把 domain RouteRevisionTarget 映射为 wire RouteRevisionTargetDTO。 */
+function routeRevisionTargetToWire(target: RouteRevisionTarget): RouteRevisionTargetDTO {
+  if (target.kind === "runtime") {
+    return { kind: "runtime", runtime_revision_id: target.runtimeRevisionId };
+  }
+  return {
+    kind: "agent",
+    agent_revision_id: target.agentRevisionId,
+    endpoint_ref: target.agentEndpointRef,
+    identity_mode: target.agentIdentityMode,
+    credential_ref_id: target.agentCredentialRefId,
+    network_zone: target.agentNetworkZone,
+  };
+}
+
 export function projectAdminRouteSet(routeSet: {
   id: string;
   tenantId: string;
-  /** 显式目标类型 — runtime 或 agent（专题01 Batch4）。 */
-  targetKind: RouteTargetKind;
-  /** runtime 时为 null；agent 时非空。 */
+  targetKind: "runtime" | "agent";
+  targetIdentity: string;
   agentId: string | null;
   routeScopeKey: string;
   routeScopeJson: unknown;
@@ -55,8 +97,7 @@ export function projectAdminRouteSet(routeSet: {
   return {
     id: routeSet.id,
     tenant_id: routeSet.tenantId,
-    target_kind: routeSet.targetKind,
-    agent_id: routeSet.agentId,
+    target: routeSetTargetToWire(routeSet),
     route_scope_key: routeSet.routeScopeKey,
     route_scope: routeSet.routeScopeJson,
     version_no: routeSet.versionNo,
@@ -74,9 +115,8 @@ export function projectAdminRoute(input: AdminRouteProjectionInput): DeploymentR
     route_key: route.routeKey,
     route_group_id: revision?.routeGroupId ?? null,
     route_state: route.routeState,
-    target_kind: revision ? (revision.agentRevisionId ? "agent" : "runtime") : "runtime",
-    agent_revision_id: revision?.agentRevisionId ?? null,
-    runtime_revision_id: revision?.runtimeRevisionId ?? null,
+    // 判别 target — 仅 Authority 完整时非 null，否则整体 null（禁止 flat 猜测）。
+    target: authorityComplete && revision ? routeRevisionTargetToWire(revision.target) : null,
     policy_revision_id: revision?.policyRevisionId ?? null,
     traffic_weight: revision?.trafficWeight ?? null,
     priority_no: revision?.priorityNo ?? null,

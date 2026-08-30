@@ -8,8 +8,23 @@
 /** Route 状态。 */
 export type RouteState = "enabled" | "disabled";
 
-/** Route 目标类型 — 显式判别（专题01 Batch4，禁止隐式 null 猜测）。 */
-export type RouteTargetKind = "runtime" | "agent";
+/** RouteSet 目标判别 wire 形状 — 禁止 flat/nullable 双轨。 */
+export type RouteSetTargetDTO = { kind: "runtime" } | { kind: "agent"; agent_id: string };
+
+/**
+ * RouteRevision/Route target 判别 wire 形状。
+ * Agent target 绝不携带 runtime 字段；Runtime target 绝不携带 Agent 字段。
+ */
+export type RouteRevisionTargetDTO =
+  | { kind: "runtime"; runtime_revision_id: string }
+  | {
+      kind: "agent";
+      agent_revision_id: string;
+      endpoint_ref: string;
+      identity_mode: "none" | "bearer";
+      credential_ref_id: string | null;
+      network_zone: string;
+    };
 
 /** Route Activation 状态。 */
 export type RouteActivationState = "active" | "disabled";
@@ -21,10 +36,8 @@ export type RouteEligibilityState = "eligible" | "ineligible" | "pending_rebuild
 export interface DeploymentRouteSetDTO {
   id: string;
   tenant_id: string;
-  /** 显式目标类型 — runtime 或 agent（专题01 Batch4）。 */
-  target_kind: RouteTargetKind;
-  /** runtime 时为 null；agent 时非空。 */
-  agent_id: string | null;
+  /** 判别 target — runtime 或 agent。 */
+  target: RouteSetTargetDTO;
   route_scope_key: string;
   route_scope: unknown;
   version_no: number;
@@ -39,10 +52,8 @@ export interface DeploymentRouteDTO {
   route_key: string;
   route_group_id: string | null;
   route_state: RouteState;
-  /** 显式目标类型 — runtime 或 agent（专题01 Batch4）。 */
-  target_kind: RouteTargetKind;
-  agent_revision_id: string | null;
-  runtime_revision_id: string | null;
+  /** 判别 target — 仅 Authority 完整（有最新 Revision）时非 null，否则整体 null。 */
+  target: RouteRevisionTargetDTO | null;
   policy_revision_id: string | null;
   traffic_weight: number | null;
   priority_no: number | null;
@@ -64,8 +75,8 @@ export interface RouteRevisionDTO {
   id: string;
   route_id: string;
   tenant_id: string;
-  agent_revision_id: string;
-  runtime_revision_id: string;
+  /** 判别 target — RouteRevision 永远有 Authority，故非 null。 */
+  target: RouteRevisionTargetDTO;
   policy_revision_id: string | null;
   content_digest: string;
   activation_state: RouteActivationState;
@@ -84,9 +95,9 @@ export interface RouteActivationDTO {
   activated_at: string;
 }
 
-/** RouteSet create-or-reuse（ensure）请求 — 严格三 key，无需知道 RouteSet id。 */
+/** RouteSet create-or-reuse（ensure）请求 — 严格三 key，target 为判别联合。 */
 export interface EnsureRouteSetRequest {
-  agent_id: string;
+  target: RouteSetTargetDTO;
   route_scope_key: string;
   route_scope: Record<string, unknown>;
 }
@@ -94,9 +105,8 @@ export interface EnsureRouteSetRequest {
 /** RouteSet ensure 响应 — 与详情 DTO 不同，不含 tenant_id。 */
 export interface EnsureRouteSetResponse {
   id: string;
-  /** 显式目标类型 — runtime 或 agent（专题01 Batch4）。 */
-  target_kind: RouteTargetKind;
-  agent_id: string;
+  /** 判别 target。 */
+  target: RouteSetTargetDTO;
   route_scope_key: string;
   route_scope: unknown;
   version_no: number;
@@ -112,16 +122,11 @@ export interface ActivateRouteSetRequest {
   routes: Array<{
     route_id?: string;
     route_group_id: string;
-    agent_revision_id: string;
-    runtime_revision_id: string;
+    /** 判别 target — 只含所选 target 自己的事实。 */
+    target: RouteRevisionTargetDTO;
     policy_revision_id?: string;
     model_policy_revision_id?: string;
     toolset_revision_id?: string;
-    // 专题01 Batch4 补漏：Agent Route 生产调用事实（agent route 必填）。
-    agent_endpoint_ref?: string;
-    agent_identity_mode?: "none" | "bearer";
-    agent_credential_ref_id?: string | null;
-    agent_network_zone?: string;
     traffic_weight: number;
     priority_no: number;
     effective_from?: string;

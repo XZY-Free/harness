@@ -45,6 +45,7 @@ import {
   RouteSetRequiresAtomicUpdateError,
 } from "@/lib/routes/application/activate-route-set";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
+import type { RouteRevisionTarget } from "@/lib/routes/domain/route-revision";
 import {
   ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
@@ -59,22 +60,28 @@ export const dynamic = "force-dynamic";
 
 // ─── 请求体类型 ────────────────────────────────────────────
 
+/** wire 判别 target（snake_case），严格 exact keys。 */
+type WireRouteTarget =
+  | { kind: "runtime"; runtime_revision_id: string }
+  | {
+      kind: "agent";
+      agent_revision_id: string;
+      endpoint_ref: string;
+      identity_mode: "none" | "bearer";
+      credential_ref_id: string | null;
+      network_zone: string;
+    };
+
 interface ActivationRequestBody {
   expected_version_no: number;
   reason: string;
   routes: Array<{
     route_id?: string;
     route_group_id: string;
-    agent_revision_id: string;
-    runtime_revision_id: string;
+    target: WireRouteTarget;
     policy_revision_id?: string;
     model_policy_revision_id?: string;
     toolset_revision_id?: string;
-    // 专题01 Batch4 补漏：Agent Route 生产调用事实（agent route 必填，base route 忽略）。
-    agent_endpoint_ref?: string;
-    agent_identity_mode?: "none" | "bearer";
-    agent_credential_ref_id?: string | null;
-    agent_network_zone?: string;
     traffic_weight: number;
     priority_no: number;
     effective_from?: string;
@@ -84,36 +91,145 @@ interface ActivationRequestBody {
   }>;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+const ROUTE_KEYS = [
+  "activation_state",
+  "effective_from",
+  "effective_until",
+  "eligibility_conditions",
+  "model_policy_revision_id",
+  "policy_revision_id",
+  "priority_no",
+  "route_group_id",
+  "route_id",
+  "target",
+  "toolset_revision_id",
+  "traffic_weight",
+].sort();
+const BODY_KEYS = ["expected_version_no", "reason", "routes"].sort();
+
+/**
+ * 严格解析判别 target（exact keys，fail-closed）。
+ * - runtime：仅 {kind, runtime_revision_id}。
+ * - agent：仅 {kind, agent_revision_id, endpoint_ref, identity_mode, credential_ref_id, network_zone}；
+ *   bearer 必须非空 credential_ref_id；none 允许 null 或合法非空（跟随 domain）。
+ * omitted/null/extra/cross-group/旧 flat 一律 null。
+ */
+function parseWireTarget(raw: unknown): WireRouteTarget | null {
+  if (!isPlainObject(raw)) return null;
+  if (raw.kind === "runtime") {
+    const keys = Object.keys(raw).sort();
+    if (keys.length !== 2 || keys.join(",") !== "kind,runtime_revision_id") return null;
+    if (!isNonBlankString(raw.runtime_revision_id)) return null;
+    return { kind: "runtime", runtime_revision_id: raw.runtime_revision_id.trim() };
+  }
+  if (raw.kind === "agent") {
+    const keys = Object.keys(raw).sort();
+    const expected = [
+      "agent_revision_id",
+      "credential_ref_id",
+      "endpoint_ref",
+      "identity_mode",
+      "kind",
+      "network_zone",
+    ];
+    if (keys.length !== 6 || keys.join(",") !== expected.join(",")) return null;
+    if (!isNonBlankString(raw.agent_revision_id)) return null;
+    if (!isNonBlankString(raw.endpoint_ref)) return null;
+    if (raw.identity_mode !== "none" && raw.identity_mode !== "bearer") return null;
+    if (!isNonBlankString(raw.network_zone)) return null;
+    if (raw.identity_mode === "bearer") {
+      if (!isNonBlankString(raw.credential_ref_id)) return null;
+    } else if (raw.credential_ref_id !== null && !isNonBlankString(raw.credential_ref_id)) {
+      return null;
+    }
+    return {
+      kind: "agent",
+      agent_revision_id: raw.agent_revision_id.trim(),
+      endpoint_ref: raw.endpoint_ref.trim(),
+      identity_mode: raw.identity_mode,
+      credential_ref_id:
+        typeof raw.credential_ref_id === "string" ? raw.credential_ref_id.trim() : null,
+      network_zone: raw.network_zone.trim(),
+    };
+  }
+  return null;
+}
+
+/** 把 wire 判别 target 映射为唯一 camelCase RouteRevisionTarget。 */
+function wireTargetToCamel(wire: WireRouteTarget): RouteRevisionTarget {
+  if (wire.kind === "runtime") {
+    return { kind: "runtime", runtimeRevisionId: wire.runtime_revision_id };
+  }
+  return {
+    kind: "agent",
+    agentRevisionId: wire.agent_revision_id,
+    agentEndpointRef: wire.endpoint_ref,
+    agentIdentityMode: wire.identity_mode,
+    agentCredentialRefId: wire.credential_ref_id,
+    agentNetworkZone: wire.network_zone,
+  };
+}
+
 function validateBody(body: unknown): body is ActivationRequestBody {
-  if (!body || typeof body !== "object") return false;
-  const b = body as Record<string, unknown>;
-  if (typeof b.expected_version_no !== "number" || !Number.isInteger(b.expected_version_no))
+  if (!isPlainObject(body)) return false;
+  const b = body;
+  const bodyKeys = Object.keys(b).sort();
+  if (bodyKeys.length !== BODY_KEYS.length || bodyKeys.join(",") !== BODY_KEYS.join(",")) {
     return false;
-  if (typeof b.reason !== "string") return false;
+  }
+  if (
+    typeof b.expected_version_no !== "number" ||
+    !Number.isInteger(b.expected_version_no) ||
+    b.expected_version_no < 1
+  )
+    return false;
+  if (!isNonBlankString(b.reason)) return false;
   if (!Array.isArray(b.routes) || b.routes.length === 0) return false;
   for (const route of b.routes) {
-    if (!route || typeof route !== "object") return false;
+    if (!isPlainObject(route)) return false;
     const r = route as Record<string, unknown>;
-    if (typeof r.agent_revision_id !== "string") return false;
-    if (typeof r.runtime_revision_id !== "string") return false;
-    if (typeof r.route_group_id !== "string") return false;
-    if (typeof r.traffic_weight !== "number" || !Number.isInteger(r.traffic_weight)) return false;
-    if (typeof r.priority_no !== "number" || !Number.isInteger(r.priority_no)) return false;
-    // 专题01 Batch4 补漏：Agent Route（agent_revision_id 非空）必须冻结生产调用事实；
-    // 基础 Harness Route 不得携带。
-    if (r.agent_revision_id !== null) {
-      if (typeof r.agent_endpoint_ref !== "string" || r.agent_endpoint_ref.length === 0)
-        return false;
-      if (r.agent_identity_mode !== "none" && r.agent_identity_mode !== "bearer") return false;
-      if (
-        r.agent_identity_mode === "bearer" &&
-        (typeof r.agent_credential_ref_id !== "string" || r.agent_credential_ref_id.length === 0)
-      ) {
+    // 每 route 严格 exact known keys，extra key fail-closed。
+    const routeKeys = Object.keys(r).sort();
+    if (routeKeys.length !== routeKeys.filter((k) => ROUTE_KEYS.includes(k)).length) return false;
+    if ("route_id" in r && !isNonBlankString(r.route_id)) return false;
+    if (typeof r.route_group_id !== "string" || r.route_group_id.trim().length === 0) return false;
+    for (const key of [
+      "policy_revision_id",
+      "model_policy_revision_id",
+      "toolset_revision_id",
+    ] as const) {
+      if (key in r && !isNonBlankString(r[key])) return false;
+    }
+    for (const key of ["effective_from", "effective_until"] as const) {
+      if (key in r && (!isNonBlankString(r[key]) || !Number.isFinite(Date.parse(r[key])))) {
         return false;
       }
-      if (typeof r.agent_network_zone !== "string" || r.agent_network_zone.length === 0)
-        return false;
     }
+    if (
+      typeof r.traffic_weight !== "number" ||
+      !Number.isInteger(r.traffic_weight) ||
+      r.traffic_weight < 0 ||
+      r.traffic_weight > 10_000
+    )
+      return false;
+    if (typeof r.priority_no !== "number" || !Number.isInteger(r.priority_no)) return false;
+    if ("eligibility_conditions" in r && !isPlainObject(r.eligibility_conditions)) return false;
+    if (
+      "activation_state" in r &&
+      r.activation_state !== "active" &&
+      r.activation_state !== "disabled"
+    ) {
+      return false;
+    }
+    if (parseWireTarget(r.target) === null) return false;
   }
   return true;
 }
@@ -298,17 +414,11 @@ export async function PUT(
       routeSetId,
       expectedVersionNo: body.expected_version_no,
       desiredRoutes: body.routes.map((r) => ({
-        routeId: r.route_id ?? "",
-        routeKey: `route-${r.route_id ?? randomUUID()}`,
+        // routeId 省略时不传（不落地空串 fallback）；routeKey 仍是稳定身份键。
+        ...(r.route_id ? { routeId: r.route_id.trim() } : {}),
+        routeKey: `route-${r.route_id?.trim() || randomUUID()}`,
         routeGroupId: r.route_group_id,
-        agentRevisionId: r.agent_revision_id ?? "",
-        runtimeRevisionId: r.runtime_revision_id ?? "",
-        // 专题01 Batch4 补漏：Agent Route 生产调用事实（agent route 冻结，base route 为 null）。
-        agentEndpointRef: r.agent_revision_id !== null ? (r.agent_endpoint_ref ?? null) : null,
-        agentIdentityMode: r.agent_revision_id !== null ? (r.agent_identity_mode ?? null) : null,
-        agentCredentialRefId:
-          r.agent_revision_id !== null ? (r.agent_credential_ref_id ?? null) : null,
-        agentNetworkZone: r.agent_revision_id !== null ? (r.agent_network_zone ?? null) : null,
+        target: wireTargetToCamel(r.target),
         policyRevisionId: r.policy_revision_id ?? null,
         modelPolicyRevisionId: r.model_policy_revision_id ?? null,
         toolsetRevisionId: r.toolset_revision_id ?? null,

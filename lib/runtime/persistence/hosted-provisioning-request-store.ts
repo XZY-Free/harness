@@ -1,5 +1,10 @@
 /**
  * HostedProvisioningRequest Store 接口。
+ *
+ * 专题01 冻结（runtime-only）：身份权威 (tenantId, routeScopeKey)。
+ * - insert 携带非空 requesterId，无 Agent 字段、无可选 desiredRuntimeKey。
+ * - findActiveRequest 只按 (tenantId, routeScopeKey) 幂等。
+ * - 已删除 findReadyByAgent（Agent 黑盒 A2A，Hosted 不按 Agent 查 ready 请求）。
  */
 
 import type { ProvisioningState } from "../domain/hosted-provisioning-request";
@@ -15,18 +20,9 @@ export interface HostedProvisioningRequestStore {
     requestId: string;
   }): Promise<HostedProvisioningRequestRow | null>;
 
-  /** 按 AgentRevision + RouteScope + RuntimeKey 查找活跃请求。 */
+  /** 按 (tenantId, routeScopeKey) 查找活跃请求（幂等权威）。 */
   findActiveRequest(params: {
     tenantId: string;
-    agentRevisionId: string;
-    routeScopeKey: string;
-    desiredRuntimeKey: string;
-  }): Promise<HostedProvisioningRequestRow | null>;
-
-  /** 按 Agent 查找 ready 请求。 */
-  findReadyByAgent(params: {
-    tenantId: string;
-    agentId: string;
     routeScopeKey: string;
   }): Promise<HostedProvisioningRequestRow | null>;
 
@@ -43,7 +39,7 @@ export interface HostedProvisioningRequestStore {
     leaseExpiresAt?: Date | null;
     lastError?: string | null;
     lastAttemptAt?: Date | null;
-    /** : Step Checkpoint 更新。 */
+    /** : Step Checkpoint 更新（runtime/route；不含 Agent）。 */
     checkpoint?: StepCheckpoint;
     /** : 最近完成的步骤。 */
     lastCompletedStep?: string | null;
@@ -64,19 +60,15 @@ export interface HostedProvisioningRequestStore {
 export interface NewProvisioningRequestInput {
   id: string;
   tenantId: string;
-  agentId: string;
-  agentRevisionId: string;
+  requesterId: string;
   routeScopeKey: string;
-  desiredRuntimeKey: string;
   state?: ProvisioningState;
   createdAt: Date;
   updatedAt: Date;
 }
 
-/** : Step Checkpoint — Saga 每步完成后的产出数据。 */
+/** : Step Checkpoint — Saga 每步完成后的产出数据（runtime/route；不含 Agent）。 */
 export interface StepCheckpoint {
-  agentRevisionId?: string | null;
-  agentPublicationRecordId?: string | null;
   runtimeId?: string | null;
   runtimeRevisionId?: string | null;
   runtimeArtifactId?: string | null;

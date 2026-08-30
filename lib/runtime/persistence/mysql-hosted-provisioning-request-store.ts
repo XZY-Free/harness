@@ -1,9 +1,12 @@
 /**
  * HostedProvisioningRequest Store 的 MySQL 实现。
  *
+ * 专题01 冻结（runtime-only）：身份权威 (tenantId, routeScopeKey)，携带 requesterId。
+ * - findActiveRequest 只按 (tenantId, routeScopeKey)。
+ * - 已删除 findReadyByAgent。
  * : updateState/releaseLease 必须 WHERE leaseOwner=workerId。
  * : claimRequests 包含 running+expired lease（崩溃恢复）。
- * : 新增 checkpoint 字段。
+ * : 保留 runtime/route checkpoint 字段（不含 Agent publication checkpoint）。
  */
 
 import { db } from "@/lib/db/client";
@@ -91,10 +94,8 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
     await db.insert(hostedProvisioningRequestTable).values({
       id: input.id,
       tenantId: input.tenantId,
-      agentId: input.agentId,
-      agentRevisionId: input.agentRevisionId,
+      requesterId: input.requesterId,
       routeScopeKey: input.routeScopeKey,
-      desiredRuntimeKey: input.desiredRuntimeKey,
       state: input.state ?? "pending",
       createdAt: input.createdAt,
       updatedAt: input.updatedAt,
@@ -122,32 +123,14 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
     return row ?? null;
   },
 
-  async findActiveRequest({ tenantId, agentRevisionId, routeScopeKey, desiredRuntimeKey }) {
+  async findActiveRequest({ tenantId, routeScopeKey }) {
     const [row] = await db
       .select()
       .from(hostedProvisioningRequestTable)
       .where(
         and(
           eq(hostedProvisioningRequestTable.tenantId, tenantId),
-          eq(hostedProvisioningRequestTable.agentRevisionId, agentRevisionId),
           eq(hostedProvisioningRequestTable.routeScopeKey, routeScopeKey),
-          eq(hostedProvisioningRequestTable.desiredRuntimeKey, desiredRuntimeKey),
-        ),
-      )
-      .limit(1);
-    return row ?? null;
-  },
-
-  async findReadyByAgent({ tenantId, agentId, routeScopeKey }) {
-    const [row] = await db
-      .select()
-      .from(hostedProvisioningRequestTable)
-      .where(
-        and(
-          eq(hostedProvisioningRequestTable.tenantId, tenantId),
-          eq(hostedProvisioningRequestTable.agentId, agentId),
-          eq(hostedProvisioningRequestTable.routeScopeKey, routeScopeKey),
-          eq(hostedProvisioningRequestTable.state, "ready"),
         ),
       )
       .limit(1);
@@ -177,12 +160,8 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
     if (lastError !== undefined) set.lastError = lastError;
     if (lastAttemptAt !== undefined) set.lastAttemptAt = lastAttemptAt;
     if (lastCompletedStep !== undefined) set.lastCompletedStep = lastCompletedStep;
-    // : Step Checkpoint 字段
+    // : Step Checkpoint 字段（runtime/route；Agent publication checkpoint 已冻结删除）
     if (checkpoint) {
-      if (checkpoint.agentRevisionId !== undefined)
-        set.stepAgentRevisionId = checkpoint.agentRevisionId;
-      if (checkpoint.agentPublicationRecordId !== undefined)
-        set.stepAgentPublicationRecordId = checkpoint.agentPublicationRecordId;
       if (checkpoint.runtimeId !== undefined) set.stepRuntimeId = checkpoint.runtimeId;
       if (checkpoint.runtimeRevisionId !== undefined)
         set.stepRuntimeRevisionId = checkpoint.runtimeRevisionId;

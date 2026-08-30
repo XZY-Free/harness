@@ -279,10 +279,11 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     attestationId: rtAttestation.id,
   });
 
-  // Route（用于 ExecutionBinding.deploymentRouteId 引用）
+  // Route（用于 ExecutionBinding.deploymentRouteId 引用）— agent target，
+  // RouteSet target={kind:"agent",agentId}，RouteRevision 只携带 Agent 事实，不携带 runtimeRevisionId。
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: agent.id,
+    target: { kind: "agent", agentId: agent.id },
     routeScopeKey: "default",
     routeScopeJson: { networkZone: "internal" },
   });
@@ -290,8 +291,14 @@ async function seedAgentAndRuntime(tenantId: string, ownerId: string) {
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: agentRevision.id,
-    runtimeRevisionId: runtimeRevision.id,
+    target: {
+      kind: "agent",
+      agentRevisionId: agentRevision.id,
+      agentEndpointRef: "https://agent.example.com/a2a",
+      agentIdentityMode: "bearer",
+      agentCredentialRefId: "cred-1",
+      agentNetworkZone: "private",
+    },
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
     actor: buildActor(tenantId, "deploy-bot-001"),

@@ -136,12 +136,35 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
     }
 
-    // 5. 读取 Agent + AgentRevision + Runtime + RuntimeRevision（权威事实）
-    // 无 Agent 约束（routeSet.agentId / revision.agentRevisionId 为 null）→
-    // 基础 Harness Route，Agent 维度事实跳过，Agent Evidence 为 not_applicable（§18）。
-    const hasAgentConstraint = routeSet.agentId !== null && revision.agentRevisionId !== null;
+    // 4b. 交叉验证：RouteActivation → RouteRevision 的 exact target 必须与 RouteSet
+    // targetKind/targetIdentity/agentId 一致。revision 或 RouteSet 的 target 不完整/混合/
+    // 不匹配一律 fail-closed（不写 placeholder）。
+    const revisionIsAgent =
+      revision.agentRevisionId !== null && revision.agentRevisionId.trim() !== "";
+    const revisionIsRuntime =
+      revision.runtimeRevisionId !== null && revision.runtimeRevisionId.trim() !== "";
+    const routeSetIsAgent =
+      routeSet.targetKind === "agent" &&
+      routeSet.agentId !== null &&
+      routeSet.agentId.trim() !== "";
+    const routeSetIsRuntime = routeSet.targetKind === "runtime" && routeSet.agentId === null;
+    if (
+      revisionIsAgent === revisionIsRuntime || // 混合或都不存在
+      revisionIsAgent !== routeSetIsAgent ||
+      revisionIsRuntime !== routeSetIsRuntime
+    ) {
+      await deps.store.deleteProjection(input.routeId);
+      return { routeId: input.routeId, eligibilityState: "ineligible", projectionVersionNo: 0 };
+    }
+    const isAgentRoute = revisionIsAgent;
+    // targetIdentity：agent = agentId；runtime = "runtime"。
+    const targetIdentity = isAgentRoute ? (routeSet.agentId as string) : "runtime";
+
+    // 5. 按 Route target 读取对应权威事实。
+    // 专题01 冻结架构：只读取所选 target 的实体；
+    // agent Route 不查询 Runtime，runtime Route 不查询 Agent。
     const [agent, agentRevision, runtimeRevision] = await Promise.all([
-      hasAgentConstraint && routeSet.agentId
+      isAgentRoute && routeSet.agentId
         ? db
             .select()
             .from(agentTable)
@@ -149,7 +172,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
             .limit(1)
             .then((r) => r[0] ?? null)
         : Promise.resolve(null),
-      hasAgentConstraint
+      isAgentRoute
         ? db
             .select()
             .from(agentRevisionTable)
@@ -157,32 +180,44 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
             .limit(1)
             .then((r) => r[0] ?? null)
         : Promise.resolve(null),
-      db
-        .select()
-        .from(runtimeRevisionTable)
-        .where(eq(runtimeRevisionTable.id, revision.runtimeRevisionId))
-        .limit(1)
-        .then((r) => r[0] ?? null),
+      !isAgentRoute && revision.runtimeRevisionId
+        ? db
+            .select()
+            .from(runtimeRevisionTable)
+            .where(eq(runtimeRevisionTable.id, revision.runtimeRevisionId))
+            .limit(1)
+            .then((r) => r[0] ?? null)
+        : Promise.resolve(null),
     ]);
 
-    const [runtime] = runtimeRevision
-      ? await db
-          .select()
-          .from(runtimeTable)
-          .where(
-            and(eq(runtimeTable.id, runtimeRevision.runtimeId), isNull(runtimeTable.deletedAt)),
-          )
-          .limit(1)
-      : [null];
+    const [runtime] =
+      !isAgentRoute && runtimeRevision
+        ? await db
+            .select()
+            .from(runtimeTable)
+            .where(
+              and(eq(runtimeTable.id, runtimeRevision.runtimeId), isNull(runtimeTable.deletedAt)),
+            )
+            .limit(1)
+        : [null];
 
-    // 7. 使用统一 Reader 加载完整证据快照（无 Agent 约束时 Reader 内部跳过 Agent 维度）
+    // 7. 使用统一 Reader 加载所选 target 的证据快照（target 判别 input）
     const evidenceReader = createMySqlRevisionExecutionEvidenceReader({ db });
-    const evidenceSnapshot = await evidenceReader.loadCurrentEvidence({
-      tenantId: input.tenantId,
-      agentRevisionId: revision.agentRevisionId,
-      runtimeRevisionId: revision.runtimeRevisionId,
-      policyRevisionId: revision.policyRevisionId,
-    });
+    const evidenceSnapshot = await evidenceReader.loadCurrentEvidence(
+      isAgentRoute && revision.agentRevisionId
+        ? {
+            kind: "agent",
+            tenantId: input.tenantId,
+            agentRevisionId: revision.agentRevisionId,
+            policyRevisionId: revision.policyRevisionId,
+          }
+        : {
+            kind: "runtime",
+            tenantId: input.tenantId,
+            runtimeRevisionId: revision.runtimeRevisionId as string,
+            policyRevisionId: revision.policyRevisionId,
+          },
+    );
 
     // 8. Route 自身、latest activation、revision 窗口和 selector 共同参与资格判断。
     const normalized = normalizeEligibility(revision.eligibilityConditionsJson);
@@ -199,13 +234,9 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     // 冻结架构：不做 Agent required capabilities vs Runtime capabilities 交叉校验。
     const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(evidenceSnapshot);
 
-    // 无 Agent 约束（基础 Harness Route）→ Agent 生命周期不参与资格判断（§18 not_applicable）；
-    // Runtime 生命周期始终必填（§12）。
-    const entityLifecycleEligible = hasAgentConstraint
-      ? agent?.lifecycleState === "enabled" &&
-        agentRevision?.revisionState === "published" &&
-        runtime?.lifecycleState === "enabled" &&
-        runtimeRevision?.revisionState === "published"
+    // 专题01 冻结架构：agent Route 只校验 Agent 生命周期，runtime Route 只校验 Runtime 生命周期。
+    const entityLifecycleEligible = isAgentRoute
+      ? agent?.lifecycleState === "enabled" && agentRevision?.revisionState === "published"
       : runtime?.lifecycleState === "enabled" && runtimeRevision?.revisionState === "published";
     const isEligible =
       routeAuthorityEligible && entityLifecycleEligible && eligibilityResult.eligible;
@@ -227,8 +258,8 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       ineligibilityReasons.push("revision_expired");
     }
     if (!normalized) ineligibilityReasons.push("selector_invalid");
-    // 无 Agent 约束（基础 Harness Route）→ Agent 维度原因不参与（not_applicable，§18）。
-    if (hasAgentConstraint) {
+    // 只收集所选 target 维度的原因。
+    if (isAgentRoute) {
       if (!agent) ineligibilityReasons.push("agent_not_found");
       if (!agentRevision) ineligibilityReasons.push("agent_revision_not_found");
       if (agent && agent.lifecycleState !== "enabled") {
@@ -237,16 +268,17 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       if (agentRevision && agentRevision.revisionState !== "published") {
         ineligibilityReasons.push("agent_revision_not_published");
       }
+    } else {
+      if (!runtime) ineligibilityReasons.push("runtime_not_found");
+      if (!runtimeRevision) ineligibilityReasons.push("runtime_revision_not_found");
+      if (runtime && runtime.lifecycleState !== "enabled") {
+        ineligibilityReasons.push("runtime_not_enabled");
+      }
+      if (runtimeRevision && runtimeRevision.revisionState !== "published") {
+        ineligibilityReasons.push("runtime_revision_not_published");
+      }
     }
-    if (!runtime) ineligibilityReasons.push("runtime_not_found");
-    if (!runtimeRevision) ineligibilityReasons.push("runtime_revision_not_found");
-    if (runtime && runtime.lifecycleState !== "enabled") {
-      ineligibilityReasons.push("runtime_not_enabled");
-    }
-    if (runtimeRevision && runtimeRevision.revisionState !== "published") {
-      ineligibilityReasons.push("runtime_revision_not_published");
-    }
-    // 从统一 Policy 错误中提取原因（含 runtime_conformance dimension 的 Conformance 失败）
+    // 从统一 Policy 错误中提取原因（含所选 target 的 conformance 等维度）
     for (const err of eligibilityResult.errors) {
       ineligibilityReasons.push(err.code);
     }
@@ -254,33 +286,38 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     // 10. 计算选择属性
     const specificity = normalized ? computeSpecificity(normalized) : 0;
 
-    const capabilityCompatibilityDigest = computeCapabilityManifestDigest({
-      // 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度，
-      // capability digest 为 runtime-only，与 mysql-execution-binding-store 重算一致。
-      runtimeRevisionId: revision.runtimeRevisionId,
-      runtimeCapabilities: runtimeRevision?.runtimeCapabilitiesJson ?? null,
-    });
+    // 冻结架构：capability digest 仅 runtime target 计算；agent target 写 null（无 Runtime 维度）。
+    const capabilityCompatibilityDigest = isAgentRoute
+      ? null
+      : computeCapabilityManifestDigest({
+          // ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度，
+          // capability digest 为 runtime-only，与 mysql-execution-binding-store 重算一致。
+          runtimeRevisionId: revision.runtimeRevisionId as string,
+          runtimeCapabilities: runtimeRevision?.runtimeCapabilitiesJson ?? null,
+        });
 
-    // 从统一 Snapshot 提取布尔字段
-    const agentPublicationActive = evidenceSnapshot.agentPublication ? 1 : 0;
+    // 从统一 Snapshot 提取布尔字段 — 按 target 判别取值。
+    const agentSnapshot = evidenceSnapshot.kind === "agent" ? evidenceSnapshot : null;
+    const runtimeSnapshot = evidenceSnapshot.kind === "runtime" ? evidenceSnapshot : null;
+    const agentPublicationActive = agentSnapshot?.agentPublication ? 1 : 0;
     // Agent Evidence Valid = Publication 冻结的 AgentContractSnapshot 证据完整
     //（Agent 是源码不可见黑盒，发布权威是 Contract 证据，不是 source Artifact/Attestation）。
     const agentEvidenceValid =
-      evidenceSnapshot.agentPublication?.agentContractSnapshotId &&
-      evidenceSnapshot.agentPublication.agentContractDigest &&
-      evidenceSnapshot.agentPublication.agentCapabilityDigest &&
-      evidenceSnapshot.agentPublication.agentContextDigest
+      agentSnapshot?.agentPublication?.agentContractSnapshotId &&
+      agentSnapshot.agentPublication.agentContractDigest &&
+      agentSnapshot.agentPublication.agentCapabilityDigest &&
+      agentSnapshot.agentPublication.agentContextDigest
         ? 1
         : 0;
-    const runtimePublicationActive = evidenceSnapshot.runtimePublication ? 1 : 0;
+    const runtimePublicationActive = runtimeSnapshot?.runtimePublication ? 1 : 0;
     // Runtime evidence all-or-nothing（03 §3）：hosted 要求 Artifact 全集 verified；
     // external_endpoint 无 Runtime Artifact（不伪造），证据有效即 1。
-    const runtimeEvidenceKind = runtimeRevision?.runtimeEvidenceKind ?? null;
+    const runtimeEvidenceKind = runtimeSnapshot?.runtimeEvidenceKind ?? null;
     const runtimeEvidenceValid =
       runtimeEvidenceKind === "external_endpoint"
         ? 1
-        : evidenceSnapshot.runtimeArtifactEvidence?.verificationState === "verified" &&
-            evidenceSnapshot.runtimeArtifactEvidence.revokedAt === null
+        : runtimeSnapshot?.runtimeArtifactEvidence?.verificationState === "verified" &&
+            runtimeSnapshot.runtimeArtifactEvidence.revokedAt === null
           ? 1
           : 0;
     // Conformance: 由同一次 RevisionExecutionEligibilityPolicy 结果派生
@@ -292,10 +329,13 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       : 1;
 
     // 11. 计算 projectionContentDigest 并确定版本号
+    // 冻结架构：target 不相关的证据组必须全 NULL（禁止 "missing"/"not_applicable"/0/
+    // "hosted_artifact" placeholder）。agent target 写 runtime 组 null；runtime target 写 agent 组 null。
     const projectionFields = {
       routeId: route.id,
       tenantId: input.tenantId,
       targetKind: routeSet.targetKind,
+      targetIdentity,
       agentId: routeSet.agentId,
       routeSetId: routeSet.id,
       routeScopeKey: routeSet.routeScopeKey,
@@ -313,44 +353,56 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
       trafficWeight: revision.trafficWeight,
       effectiveFrom: revision.effectiveFrom?.toISOString() ?? null,
       effectiveUntil: revision.effectiveUntil?.toISOString() ?? null,
-      agentRevisionId: revision.agentRevisionId,
-      // Agent Route 生产调用事实：权威 RouteRevision → 投影。
-      // 基础 Harness Route（无 Agent 约束）为 null。
-      agentEndpointRef: revision.agentEndpointRef,
-      agentIdentityMode: revision.agentIdentityMode,
-      agentCredentialRefId: revision.agentCredentialRefId,
-      agentNetworkZone: revision.agentNetworkZone,
-      // 无 Agent 约束（基础 Harness Route）→ Agent Evidence not_applicable，不伪装 passed（§18）。
-      agentRevisionState: hasAgentConstraint
-        ? (agentRevision?.revisionState ?? "missing")
-        : "not_applicable",
-      agentLifecycleState: hasAgentConstraint
-        ? (agent?.lifecycleState ?? "missing")
-        : "not_applicable",
-      agentPublicationActive,
-      agentEvidenceValid,
-      runtimeRevisionId: revision.runtimeRevisionId,
-      runtimeRevisionState: runtimeRevision?.revisionState ?? "missing",
-      runtimeLifecycleState: runtime?.lifecycleState ?? "missing",
-      runtimePublicationActive,
-      runtimeEvidenceValid,
-      runtimeConformanceValid,
-      runtimeEvidenceKind: runtimeEvidenceKind ?? "hosted_artifact",
+      // ─── Agent 侧资格 ──
+      agentRevisionId: isAgentRoute ? revision.agentRevisionId : null,
+      agentEndpointRef: isAgentRoute ? revision.agentEndpointRef : null,
+      agentIdentityMode: isAgentRoute ? revision.agentIdentityMode : null,
+      agentCredentialRefId: isAgentRoute ? revision.agentCredentialRefId : null,
+      agentNetworkZone: isAgentRoute ? revision.agentNetworkZone : null,
+      agentRevisionState: isAgentRoute ? (agentRevision?.revisionState ?? null) : null,
+      agentLifecycleState: isAgentRoute ? (agent?.lifecycleState ?? null) : null,
+      agentPublicationActive: isAgentRoute ? agentPublicationActive : null,
+      agentEvidenceValid: isAgentRoute ? agentEvidenceValid : null,
+      agentPublicationRecordId: isAgentRoute
+        ? (agentSnapshot?.agentPublication?.publicationRecordId ?? null)
+        : null,
+      agentContractSnapshotId: isAgentRoute
+        ? (agentSnapshot?.agentPublication?.agentContractSnapshotId ?? null)
+        : null,
+      agentContractDigest: isAgentRoute
+        ? (agentSnapshot?.agentPublication?.agentContractDigest ?? null)
+        : null,
+      agentContextDigest: isAgentRoute
+        ? (agentSnapshot?.agentPublication?.agentContextDigest ?? null)
+        : null,
+      // ─── Runtime 侧资格 ──
+      runtimeRevisionId: isAgentRoute ? null : revision.runtimeRevisionId,
+      runtimeRevisionState: isAgentRoute ? null : (runtimeRevision?.revisionState ?? null),
+      runtimeLifecycleState: isAgentRoute ? null : (runtime?.lifecycleState ?? null),
+      runtimePublicationActive: isAgentRoute ? null : runtimePublicationActive,
+      runtimeEvidenceValid: isAgentRoute ? null : runtimeEvidenceValid,
+      runtimeConformanceValid: isAgentRoute ? null : runtimeConformanceValid,
+      runtimeEvidenceKind: isAgentRoute ? null : runtimeEvidenceKind,
+      runtimePublicationRecordId: isAgentRoute
+        ? null
+        : (runtimeSnapshot?.runtimePublication?.publicationRecordId ?? null),
+      runtimeAttestationIds: isAgentRoute
+        ? null
+        : (runtimeSnapshot?.runtimePublication?.attestationIds ?? null),
+      conformanceRunId: isAgentRoute
+        ? null
+        : (runtimeSnapshot?.runtimePublication?.conformanceRunId ?? null),
+      runtimeArtifactId: isAgentRoute
+        ? null
+        : (runtimeSnapshot?.runtimeArtifactEvidence?.artifactId ?? null),
+      runtimeArtifactDigest: isAgentRoute ? null : (runtimeRevision?.artifactDigest ?? null),
+      runtimeConfigDigest: isAgentRoute ? null : (runtimeRevision?.configHash ?? null),
+      runtimeTargetDigest: isAgentRoute ? null : (runtimeRevision?.runtimeTargetDigest ?? null),
+      capabilityCompatibilityDigest: isAgentRoute ? null : capabilityCompatibilityDigest,
+      // ─── Policy（公共语义）───
       policyRevisionId: revision.policyRevisionId,
       policyRevisionState,
-      capabilityCompatibilityDigest,
-      runtimeArtifactDigest: runtimeRevision?.artifactDigest ?? null,
-      runtimeConfigDigest: runtimeRevision?.configHash ?? null,
-      runtimeTargetDigest: runtimeRevision?.runtimeTargetDigest ?? null,
       routeContentDigest: revision.contentDigest,
-      agentContractSnapshotId: evidenceSnapshot.agentPublication?.agentContractSnapshotId ?? null,
-      agentContractDigest: evidenceSnapshot.agentPublication?.agentContractDigest ?? null,
-      agentContextDigest: evidenceSnapshot.agentPublication?.agentContextDigest ?? null,
-      agentPublicationRecordId: evidenceSnapshot.agentPublication?.publicationRecordId ?? null,
-      runtimePublicationRecordId: evidenceSnapshot.runtimePublication?.publicationRecordId ?? null,
-      runtimeAttestationIds: evidenceSnapshot.runtimePublication?.attestationIds ?? null,
-      conformanceRunId: evidenceSnapshot.runtimePublication?.conformanceRunId ?? null,
-      runtimeArtifactId: evidenceSnapshot.runtimeArtifactEvidence?.artifactId ?? null,
       invalidReason: isEligible ? null : ineligibilityReasons.join(","),
       eligibilityState: (isEligible ? "eligible" : "ineligible") as "eligible" | "ineligible",
     };

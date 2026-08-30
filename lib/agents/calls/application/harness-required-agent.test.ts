@@ -19,7 +19,10 @@ import {
   invokeRequiredAgent,
 } from "@/lib/agents/calls/application/harness-required-agent";
 import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
-import { validAgentRouteResolution } from "@/lib/agents/calls/test/agent-call-test-fixtures";
+import {
+  runtimeRouteResolution,
+  validAgentRouteResolution,
+} from "@/lib/agents/calls/test/agent-call-test-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { bootstrapTenantBaselines } from "@/lib/identity/tenant-bootstrap";
@@ -48,17 +51,20 @@ function mockResolveRoute(
     status: "resolved" as const,
     eligibleCandidateCount: 1,
     resolution: validAgentRouteResolution({
-      agentRevisionId: scenario.agentRevisionId,
-      // Batch4 补漏：agent route facts 冻结自这次 RouteResolution。
-      agentEndpointRef: scenario.endpoint,
-      agentIdentityMode: "bearer",
-      agentCredentialRefId: scenario.credentialRefId,
-      agentNetworkZone: "private",
+      // 判别 target：覆盖 scenario 的 revision + route facts（endpoint/identity/credential/network）。
+      target: {
+        kind: "agent",
+        agentRevisionId: scenario.agentRevisionId,
+        agentEndpointRef: scenario.endpoint,
+        agentIdentityMode: "bearer",
+        agentCredentialRefId: scenario.credentialRefId,
+        agentNetworkZone: "private",
+      },
       // 走 tenant baseline（不虚构 policy revision）。
       policyRevisionId: null,
+      // agent evidence 只覆盖 Contract/Publication 字段，绝不加入 agentRevisionId。
       controlPlaneEvidence: {
-        ...validAgentRouteResolution().controlPlaneEvidence,
-        agentRevisionId: scenario.agentRevisionId,
+        kind: "agent",
         agentContractSnapshotId: scenario.agentContractSnapshotId,
         agentContractDigest: scenario.agentContractDigest,
         agentContextDigest: scenario.agentContextDigest,
@@ -201,8 +207,11 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
 
   it("解析结果非 agent target → RequiredAgentUnavailableError（fail closed）", async () => {
     const scenario = await seedScenario("completed");
-    const resolveRoute = mockResolveRoute(scenario, {
-      targetKind: "runtime",
+    // Runtime fail-closed：用合法 runtime resolution（判别 target/evidence 分支），不做 targetKind 覆盖。
+    const resolveRoute: RouteResolver = async () => ({
+      status: "resolved" as const,
+      eligibleCandidateCount: 1,
+      resolution: runtimeRouteResolution(),
     });
     await expect(
       invokeRequiredAgent({

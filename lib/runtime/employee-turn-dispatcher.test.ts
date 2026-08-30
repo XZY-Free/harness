@@ -216,7 +216,7 @@ describe("dispatchEmployeeTurn", () => {
     const ownerId = owner.id;
 
     // seed 完整 ready route：Runtime + published Revision、
-    // RouteSet + active base harness Route（顶层恒为 runtime target，agentId/agentRevisionId=null）。
+    // RouteSet + active base harness Route（顶层恒为 runtime target={kind:"runtime"}，不携带 Agent 字段）。
     const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
       tenantId,
       ownerId,
@@ -226,7 +226,7 @@ describe("dispatchEmployeeTurn", () => {
 
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: null,
+      target: { kind: "runtime" },
       routeScopeKey: "default",
       routeScopeJson: { networkZone: "internal" },
     });
@@ -234,8 +234,7 @@ describe("dispatchEmployeeTurn", () => {
       tenantId,
       routeSetId: routeSet.id,
       routeSetExpectedVersionNo: 1,
-      agentRevisionId: null,
-      runtimeRevisionId: runtimeRevision.id,
+      target: { kind: "runtime", runtimeRevisionId: runtimeRevision.id },
       trafficWeight: MAX_TRAFFIC_WEIGHT,
       priorityNo: 1,
       actor: buildActor(tenantId, "deploy-bot-001"),

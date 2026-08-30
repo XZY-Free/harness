@@ -1,6 +1,7 @@
-import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
+import { type InferInsertModel, type InferSelectModel, sql } from "drizzle-orm";
 import {
   bigint,
+  check,
   datetime,
   index,
   int,
@@ -27,7 +28,8 @@ export const routeRevision = mysqlTable(
      * null = 基础 Harness Route（无 Agent 资产约束）；有值 = Agent Route。
      */
     agentRevisionId: varchar("agentRevisionId", { length: 36 }),
-    runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }).notNull(),
+    /** 目标判别：runtime 时非空、agent 时为空。与 Agent 事实组互斥（CHECK）。 */
+    runtimeRevisionId: varchar("runtimeRevisionId", { length: 36 }),
     // ─── Agent Route 生产调用事实──
     // Agent Route 冻结 endpoint/identity/credential/network；基础 Harness Route 为 null。
     agentEndpointRef: varchar("agentEndpointRef", { length: 512 }),
@@ -71,6 +73,29 @@ export const routeRevision = mysqlTable(
     routeSetSelectorDigestPriorityIdx: index(
       "RouteRevision_routeSetId_selectorDigest_priorityNo_idx",
     ).on(table.routeSetId, table.selectorDigest, table.priorityNo),
+    // 恰好一个目标组合法（判别联合）：runtime 组或 agent 组，不允许混合/不完整组。
+    exactTargetGroupCheck: check(
+      "RouteRevision_exact_target_group_check",
+      sql`(
+        (\`runtimeRevisionId\` IS NOT NULL AND TRIM(\`runtimeRevisionId\`) <> ''
+          AND \`agentRevisionId\` IS NULL
+          AND \`agentEndpointRef\` IS NULL
+          AND \`agentIdentityMode\` IS NULL
+          AND \`agentCredentialRefId\` IS NULL
+          AND \`agentNetworkZone\` IS NULL)
+        OR
+        (\`runtimeRevisionId\` IS NULL
+          AND \`agentRevisionId\` IS NOT NULL AND TRIM(\`agentRevisionId\`) <> ''
+          AND \`agentEndpointRef\` IS NOT NULL AND TRIM(\`agentEndpointRef\`) <> ''
+          AND \`agentIdentityMode\` IN ('none','bearer')
+          AND \`agentNetworkZone\` IS NOT NULL AND TRIM(\`agentNetworkZone\`) <> ''
+          AND (
+            (\`agentIdentityMode\` = 'bearer' AND \`agentCredentialRefId\` IS NOT NULL AND TRIM(\`agentCredentialRefId\`) <> '')
+            OR
+            (\`agentIdentityMode\` = 'none' AND (\`agentCredentialRefId\` IS NULL OR TRIM(\`agentCredentialRefId\`) <> ''))
+          ))
+      )`,
+    ),
   }),
 );
 
@@ -126,3 +151,81 @@ export type RouteRevisionRecord = InferSelectModel<typeof routeRevision>;
 export type NewRouteRevisionRecord = InferInsertModel<typeof routeRevision>;
 export type RouteActivationRecord = InferSelectModel<typeof routeActivation>;
 export type NewRouteActivationRecord = InferInsertModel<typeof routeActivation>;
+
+// ─── Target 分支映射（不改 schema）──────────────────────
+// 存储列仍是 nullable target-specific（runtime 组 vs agent 组互斥 CHECK），
+// 这里提供唯一权威映射：DB 记录 → domain target 判别联合。
+// 仅用于内部把 existing record 转回 domain content，不得回到二义 flat 形状。
+
+import type { RouteRevisionTarget } from "@/lib/routes/domain/route-revision";
+
+/**
+ * 从 RouteRevisionRecord 派生其 target 判别联合。
+ *
+ * 只有完整互斥事实才返回 target；混合、空白、缺字段、非法 identity、bearer 无
+ * credential 均返回 null，调用方 fail-closed。不得制造空字符串 / none placeholder。
+ *
+ * - runtime 分支：runtimeRevisionId 非空，且不携带任何 Agent 事实。
+ * - agent 分支：agentRevisionId + endpoint + network 非空、identity 合法，
+ *   bearer 必须冻结 credential，none 允许 null 或合法非空。
+ */
+export function routeRevisionTargetFromRecord(
+  record: RouteRevisionRecord,
+): RouteRevisionTarget | null {
+  const agentRevisionId = record.agentRevisionId;
+  const runtimeRevisionId = record.runtimeRevisionId;
+
+  const agentPresent = agentRevisionId !== null && agentRevisionId.trim() !== "";
+  const runtimePresent = runtimeRevisionId !== null && runtimeRevisionId.trim() !== "";
+  // 恰好一个目标组（互斥）；同时存在 / 同时缺失 → 畸形。
+  if (agentPresent === runtimePresent) return null;
+
+  if (runtimePresent) {
+    const normalizedRuntimeRevisionId = runtimeRevisionId?.trim();
+    if (!normalizedRuntimeRevisionId) return null;
+    // runtime 分支不得携带任何 Agent 事实（即便占位）。
+    if (
+      record.agentRevisionId !== null ||
+      record.agentEndpointRef !== null ||
+      record.agentIdentityMode !== null ||
+      record.agentCredentialRefId !== null ||
+      record.agentNetworkZone !== null
+    ) {
+      return null;
+    }
+    return { kind: "runtime", runtimeRevisionId: normalizedRuntimeRevisionId };
+  }
+
+  // agent 分支：完整冻结 endpoint/identity/credential/network，缺一不可。
+  const normalizedAgentRevisionId = agentRevisionId?.trim();
+  const endpointRef = record.agentEndpointRef?.trim();
+  const networkZone = record.agentNetworkZone?.trim();
+  const identityMode = record.agentIdentityMode;
+  if (
+    !normalizedAgentRevisionId ||
+    !endpointRef ||
+    !networkZone ||
+    (identityMode !== "none" && identityMode !== "bearer")
+  ) {
+    return null;
+  }
+  if (identityMode === "bearer") {
+    if (!(record.agentCredentialRefId !== null && record.agentCredentialRefId.trim() !== "")) {
+      return null;
+    }
+  } else if (record.agentCredentialRefId !== null && record.agentCredentialRefId.trim() === "") {
+    return null;
+  }
+
+  return {
+    kind: "agent",
+    agentRevisionId: normalizedAgentRevisionId,
+    agentEndpointRef: endpointRef,
+    agentIdentityMode: identityMode,
+    agentCredentialRefId:
+      record.agentCredentialRefId !== null && record.agentCredentialRefId.trim() !== ""
+        ? record.agentCredentialRefId.trim()
+        : null,
+    agentNetworkZone: networkZone,
+  };
+}

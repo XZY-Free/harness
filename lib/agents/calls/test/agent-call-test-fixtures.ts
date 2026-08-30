@@ -76,8 +76,12 @@ export function validBindingConfig(
   };
 }
 
-/** 合法 Batch4 targetKind=agent RouteResolution。 */
-export function validAgentRouteResolution(overrides?: Partial<RouteResolution>): RouteResolution {
+type AgentRouteResolution = Extract<RouteResolution, { target: { kind: "agent" } }>;
+
+/** 合法 agent target RouteResolution（判别 resolution.target.kind=agent + agent evidence）。 */
+export function validAgentRouteResolution(
+  overrides?: Partial<AgentRouteResolution>,
+): AgentRouteResolution {
   return {
     deploymentRouteId: "route-1",
     routeSetId: "route-set-1",
@@ -86,14 +90,7 @@ export function validAgentRouteResolution(overrides?: Partial<RouteResolution>):
     routeRevisionNo: 1,
     routeActivationId: "route-act-1",
     routeActivationSequence: 1,
-    targetKind: "agent",
-    agentRevisionId: "agent-rev-1",
-    agentEndpointRef: "https://agent.example.com/a2a",
-    agentIdentityMode: "bearer",
-    agentCredentialRefId: "cred-1",
-    agentNetworkZone: "private",
-    runtimeRevisionId: "runtime-rev-1",
-    policyRevisionId: "policy-rev-1",
+    policyRevisionId: null,
     routeContentDigest: D("1"),
     routeGroupId: "primary",
     specificity: 1,
@@ -103,25 +100,129 @@ export function validAgentRouteResolution(overrides?: Partial<RouteResolution>):
     resolutionKeyDigest: D("k"),
     resolutionInputDigest: D("2"),
     resolvedAt: new Date("2026-08-28T00:00:00.000Z"),
-    controlPlaneEvidence: {
+    projectionVersionNo: 3,
+    target: {
+      kind: "agent",
       agentRevisionId: "agent-rev-1",
+      agentEndpointRef: "https://agent.example.com/a2a",
+      agentIdentityMode: "bearer",
+      agentCredentialRefId: "cred-1",
+      agentNetworkZone: "private",
+    },
+    controlPlaneEvidence: {
+      kind: "agent",
+      agentContractSnapshotId: "contract-1",
+      agentContractDigest: D("a"),
+      agentContextDigest: D("c"),
+      agentPublicationRecordId: "pub-1",
+    },
+    ...overrides,
+  };
+}
+
+type RuntimeRouteResolution = Extract<RouteResolution, { target: { kind: "runtime" } }>;
+
+/** 合法 runtime target RouteResolution（判别 resolution.target.kind=runtime + runtime evidence）。 */
+export function runtimeRouteResolution(
+  overrides?: Partial<RuntimeRouteResolution>,
+): RuntimeRouteResolution {
+  return {
+    deploymentRouteId: "route-1",
+    routeSetId: "route-set-1",
+    routeSetVersionNo: 1,
+    routeRevisionId: "route-rev-1",
+    routeRevisionNo: 1,
+    routeActivationId: "route-act-1",
+    routeActivationSequence: 1,
+    policyRevisionId: null,
+    routeContentDigest: D("1"),
+    routeGroupId: "primary",
+    specificity: 1,
+    priorityNo: 0,
+    trafficWeight: 100,
+    trafficBucket: 0,
+    resolutionKeyDigest: D("k"),
+    resolutionInputDigest: D("2"),
+    resolvedAt: new Date("2026-08-28T00:00:00.000Z"),
+    projectionVersionNo: 3,
+    target: { kind: "runtime", runtimeRevisionId: "runtime-rev-1" },
+    controlPlaneEvidence: {
+      kind: "runtime",
       runtimeArtifactId: null,
       runtimeArtifactDigest: null,
       runtimeConfigDigest: D("rc"),
       runtimeEvidenceKind: "external_endpoint",
       runtimeTargetDigest: D("rt"),
       capabilityManifestDigest: D("cm"),
-      agentContractSnapshotId: "contract-1",
-      agentContractDigest: D("a"),
-      agentContextDigest: D("c"),
       runtimeAttestationIds: [],
-      agentPublicationRecordId: "pub-1",
       runtimePublicationRecordId: "pub-runtime-1",
       conformanceRunId: "conf-1",
     },
-    projectionVersionNo: 3,
     ...overrides,
   };
+}
+
+/**
+ * 构造带指定 agent target 的 RouteResolution，允许 target 缺省某项生产事实以测试 fail-closed。
+ * 仅测试用：类型系统无法表达"缺字段的合法 agent target"，故在组装边界收窄为 RouteResolution。
+ */
+export function agentResolutionWithAgentTarget(
+  target: {
+    kind: "agent";
+    agentRevisionId: string;
+    agentEndpointRef?: string;
+    agentIdentityMode?: "none" | "bearer";
+    agentCredentialRefId?: string | null;
+    agentNetworkZone?: string;
+  },
+  overrides?: Partial<AgentRouteResolution>,
+): RouteResolution {
+  const base: AgentRouteResolution = {
+    deploymentRouteId: "route-1",
+    routeSetId: "route-set-1",
+    routeSetVersionNo: 1,
+    routeRevisionId: "route-rev-1",
+    routeRevisionNo: 1,
+    routeActivationId: "route-act-1",
+    routeActivationSequence: 1,
+    policyRevisionId: null,
+    routeContentDigest: D("1"),
+    routeGroupId: "primary",
+    specificity: 1,
+    priorityNo: 0,
+    trafficWeight: 100,
+    trafficBucket: 0,
+    resolutionKeyDigest: D("k"),
+    resolutionInputDigest: D("2"),
+    resolvedAt: new Date("2026-08-28T00:00:00.000Z"),
+    projectionVersionNo: 3,
+    target: {
+      kind: "agent",
+      agentRevisionId: "agent-rev-1",
+      agentEndpointRef: "https://agent.example.com/a2a",
+      agentIdentityMode: "bearer",
+      agentCredentialRefId: "cred-1",
+      agentNetworkZone: "private",
+    },
+    controlPlaneEvidence: {
+      kind: "agent",
+      agentContractSnapshotId: "contract-1",
+      agentContractDigest: D("a"),
+      agentContextDigest: D("c"),
+      agentPublicationRecordId: "pub-1",
+    },
+  };
+  // 显式逐字段取 target：省略的事实必须成为 undefined（而非继承 base 的合法事实），
+  // 以触发 fail-closed；组装边界收窄为 AgentRouteResolution["target"]（untrusted 缺事实）。
+  const mergedTarget = {
+    kind: "agent" as const,
+    agentRevisionId: target.agentRevisionId,
+    agentEndpointRef: target.agentEndpointRef,
+    agentIdentityMode: target.agentIdentityMode,
+    agentCredentialRefId: target.agentCredentialRefId,
+    agentNetworkZone: target.agentNetworkZone,
+  } as AgentRouteResolution["target"];
+  return { ...base, target: mergedTarget, ...overrides };
 }
 
 /** 计算候选负载 hash（递归排序 key 后 sha256，与 AgentCallEventIngress.payloadHash 语义一致）。 */

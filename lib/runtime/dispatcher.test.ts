@@ -369,10 +369,10 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     "v1",
   );
 
-  // 创建 RouteSet + Route（顶层恒为 base harness route，agentId/agentRevisionId=null）
+  // 创建 RouteSet + Route（顶层恒为 base harness route，target={kind:"runtime"}）
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: null,
+    target: { kind: "runtime" },
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
@@ -381,8 +381,7 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: null,
-    runtimeRevisionId: runtimeRevision.id,
+    target: { kind: "runtime", runtimeRevisionId: runtimeRevision.id },
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
     actor: buildActor(tenantId, "deploy-bot-001"),
@@ -1028,11 +1027,21 @@ describe("Dispatcher 调度", () => {
       ctx.tenantId,
       resolution.policyRevisionId,
     );
+    // 冻结架构：Dispatcher 顶层只消费 runtime target；Binding 只绑定 Runtime。
+    // 判别联合的 target 与 controlPlaneEvidence 是独立 intersection 属性，需分别按 kind 收窄。
+    if (resolution.target.kind !== "runtime") {
+      throw new Error("测试路由解析必须为 runtime target");
+    }
+    const runtimeTarget = resolution.target;
+    if (resolution.controlPlaneEvidence.kind !== "runtime") {
+      throw new Error("测试路由解析 controlPlaneEvidence 必须为 runtime");
+    }
+    const runtimeEvidence = resolution.controlPlaneEvidence;
+    const { kind: _runtimeEvidenceKind, ...runtimeControlPlaneEvidence } = runtimeEvidence;
     const command = {
       invocationId: invocation.id,
       tenantId: ctx.tenantId,
-      agentRevisionId: resolution.agentRevisionId,
-      runtimeRevisionId: resolution.runtimeRevisionId,
+      runtimeRevisionId: runtimeTarget.runtimeRevisionId,
       deploymentRouteId: resolution.deploymentRouteId,
       modelProvider: "doubao",
       modelId: "doubao-pro",
@@ -1051,8 +1060,8 @@ describe("Dispatcher 调度", () => {
         routeActivationId: resolution.routeActivationId,
         routeContentDigest: resolution.routeContentDigest,
         resolutionInputDigest: resolution.resolutionInputDigest,
-        // : 测试构造 base harness Route 解析，controlPlaneEvidence 恒非空。
-        ...resolution.controlPlaneEvidence,
+        // : 从 runtime controlPlaneEvidence 剥离判别 kind 后再展开 — Binding 存储层扁平化，不含 kind/Agent evidence。
+        ...runtimeControlPlaneEvidence,
       },
     };
     const createBinding = createCreateExecutionBinding({ store: mysqlExecutionBindingStore });
@@ -1068,8 +1077,14 @@ describe("Dispatcher 调度", () => {
       getExecutionBindingByInvocation(ctx.tenantId, invocation.id),
     ).resolves.toMatchObject({
       routeRevisionId: resolution.routeRevisionId,
-      runtimePublicationRecordId: resolution.controlPlaneEvidence.runtimePublicationRecordId,
+      runtimePublicationRecordId: runtimeEvidence.runtimePublicationRecordId,
     });
+    // 冻结架构：ExecutionBinding 不得含判别 kind 或任何 Agent evidence。
+    const persisted = await getExecutionBindingByInvocation(ctx.tenantId, invocation.id);
+    expect(persisted).not.toBeNull();
+    expect(persisted).not.toHaveProperty("kind");
+    expect(persisted).not.toHaveProperty("agentRevisionId");
+    expect(persisted).not.toHaveProperty("agentEndpointRef");
   });
 
   it("发布撤回不会改写已创建 Binding 的历史证据", async () => {
@@ -1204,10 +1219,10 @@ describe("Dispatcher 调度", () => {
       "v2",
     );
 
-    // 顶层恒为 base harness route（agentId/agentRevisionId=null）。
+    // 顶层恒为 base harness route（target={kind:"runtime"}）。
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: null,
+      target: { kind: "runtime" },
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
       routeScopeJson: {},
     });
@@ -1216,8 +1231,7 @@ describe("Dispatcher 调度", () => {
       tenantId,
       routeSetId: routeSet.id,
       routeSetExpectedVersionNo: 1,
-      agentRevisionId: null,
-      runtimeRevisionId: runtimeRevision.id,
+      target: { kind: "runtime", runtimeRevisionId: runtimeRevision.id },
       trafficWeight: MAX_TRAFFIC_WEIGHT,
       actor: buildActor(tenantId, "deploy-bot-001"),
     });
@@ -1269,7 +1283,7 @@ describe("路由解析与有效路由查询", () => {
     );
     const routeSet = await createRouteSet({
       tenantId,
-      agentId: agent.id,
+      target: { kind: "agent", agentId: agent.id },
       routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
       routeScopeJson: {},
     });
@@ -1277,10 +1291,14 @@ describe("路由解析与有效路由查询", () => {
       tenantId,
       routeSetId: routeSet.id,
       routeSetExpectedVersionNo: 1,
-      agentRevisionId: agentRevision.id,
-      runtimeRevisionId: (
-        await seedPublishedRuntimeRevision(tenantId, ownerId, "doubao-hosted", ["event_stream"], "v1")
-      ).revision.id,
+      target: {
+        kind: "agent",
+        agentRevisionId: agentRevision.id,
+        agentEndpointRef: "https://agent.example.com/a2a",
+        agentIdentityMode: "bearer",
+        agentCredentialRefId: "cred-1",
+        agentNetworkZone: "private",
+      },
       trafficWeight: MAX_TRAFFIC_WEIGHT,
       actor: buildActor(tenantId, "deploy-bot-001"),
     });
@@ -1290,11 +1308,7 @@ describe("路由解析与有效路由查询", () => {
   it("listEnabledRouteProjections 返回 enabled 路由", async () => {
     const { tenantId, agentId, agentRevision } = await seedAgentScopedRoute();
 
-    const routes = await listEnabledRouteProjections(
-      tenantId,
-      agentId,
-      DEFAULT_ROUTE_SCOPE_KEY,
-    );
+    const routes = await listEnabledRouteProjections(tenantId, agentId, DEFAULT_ROUTE_SCOPE_KEY);
     expect(routes).toHaveLength(1);
     expect(routes[0]?.routeState).toBe("enabled");
     expect(routes[0]?.agentRevisionId).toBe(agentRevision.id);

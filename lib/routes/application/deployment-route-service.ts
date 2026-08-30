@@ -36,17 +36,59 @@ export {
   RouteWeightInvalidError,
 };
 
+/** RouteSet 目标判别联合（冻结）：runtime 或 agent。禁止 nullable agentId 隐式猜测。 */
+export type RouteTarget = { kind: "runtime" } | { kind: "agent"; agentId: string };
+
+/**
+ * 把显式 target 解析为持久化 (targetKind, targetIdentity, agentId)。
+ * 缺失/畸形 target、空/空白 agentId 一律 fail-closed，绝不落到 DB。
+ */
+function resolveRouteTarget(target: RouteTarget): {
+  targetKind: "runtime" | "agent";
+  targetIdentity: string;
+  agentId: string | null;
+} {
+  if (target === null || typeof target !== "object") {
+    throw new Error("RouteSet target 必须为 {kind:'runtime'} 或 {kind:'agent',agentId} 之一");
+  }
+  if (target.kind === "runtime") {
+    return { targetKind: "runtime", targetIdentity: "runtime", agentId: null };
+  }
+  if (target.kind === "agent") {
+    if (typeof target.agentId !== "string" || target.agentId.trim() === "") {
+      throw new Error("RouteSet agent target 必须携带非空 agentId");
+    }
+    return { targetKind: "agent", targetIdentity: target.agentId, agentId: target.agentId };
+  }
+  throw new Error(`RouteSet target 类型非法：${String(target)}`);
+}
+
+/** routeScopeKey 空/空白在 DB 写入前被拒绝。 */
+function assertRouteScopeKey(routeScopeKey: string): void {
+  if (typeof routeScopeKey !== "string" || routeScopeKey.trim() === "") {
+    throw new Error("RouteSet routeScopeKey 必须为非空字符串");
+  }
+}
+
 export async function createRouteSet(params: {
   tenantId: string;
-  /** null = 基础 Harness RouteSet（无 Agent 资产约束）。 */
-  agentId: string | null;
+  target: RouteTarget;
   routeScopeKey: string;
   routeScopeJson: Record<string, unknown>;
 }): Promise<DeploymentRouteSetRow> {
+  assertRouteScopeKey(params.routeScopeKey);
+  const { targetKind, targetIdentity, agentId } = resolveRouteTarget(params.target);
   const id = randomUUID();
-  await db
-    .insert(deploymentRouteSetTable)
-    .values({ ...params, targetKind: params.agentId ? "agent" : "runtime", id, versionNo: 1 });
+  await db.insert(deploymentRouteSetTable).values({
+    tenantId: params.tenantId,
+    targetKind,
+    targetIdentity,
+    agentId,
+    routeScopeKey: params.routeScopeKey,
+    routeScopeJson: params.routeScopeJson,
+    id,
+    versionNo: 1,
+  });
   const [row] = await db
     .select()
     .from(deploymentRouteSetTable)
@@ -56,7 +98,7 @@ export async function createRouteSet(params: {
   return row;
 }
 
-/** 同自然键 (tenantId, agentId, routeScopeKey) 下 route_scope 语义不一致。 */
+/** 同自然键 (tenantId, targetKind, targetIdentity, routeScopeKey) 下 route_scope 语义不一致。 */
 export class RouteSetScopeMismatchError extends Error {
   constructor(routeSetId: string) {
     super(`RouteSet 已存在且 route_scope 与请求不一致（routeSetId=${routeSetId}）`);
@@ -71,21 +113,25 @@ export interface EnsureRouteSetResult {
 }
 
 /**
- * create-or-reuse：按自然键 (tenantId, agentId, routeScopeKey) 创建或复用 RouteSet。
+ * create-or-reuse：按显式 target 自然键 (tenantId, targetKind, targetIdentity, routeScopeKey)
+ * 创建或复用 RouteSet。
  *
  * - 首次创建固定 route_scope（RFC 8785 语义比较，key 顺序无关）；此后不可变。
  * - 并发不同调用竞争同一自然键：依赖 MySQL UNIQUE 约束，duplicate-entry 判定
  *   仅认 isMysqlDuplicateEntryError，其余 DB 错误原样上抛；败者回读复用。
+ * - 不接受旧 nullable agentId 契约：显式 target 之外的形状 fail-closed。
  */
-export async function ensureRouteSetByAgentScope(params: {
+export async function ensureRouteSetByTargetScope(params: {
   tenantId: string;
-  agentId: string;
+  target: RouteTarget;
   routeScopeKey: string;
   routeScopeJson: Record<string, unknown>;
 }): Promise<EnsureRouteSetResult> {
-  const existing = await getRouteSetByAgentScope(
+  assertRouteScopeKey(params.routeScopeKey);
+  const { targetKind, targetIdentity, agentId } = resolveRouteTarget(params.target);
+  const existing = await getRouteSetByTargetScope(
     params.tenantId,
-    params.agentId,
+    params.target,
     params.routeScopeKey,
   );
   if (existing)
@@ -93,9 +139,16 @@ export async function ensureRouteSetByAgentScope(params: {
 
   const id = randomUUID();
   try {
-    await db
-      .insert(deploymentRouteSetTable)
-      .values({ ...params, targetKind: params.agentId ? "agent" : "runtime", id, versionNo: 1 });
+    await db.insert(deploymentRouteSetTable).values({
+      tenantId: params.tenantId,
+      targetKind,
+      targetIdentity,
+      agentId,
+      routeScopeKey: params.routeScopeKey,
+      routeScopeJson: params.routeScopeJson,
+      id,
+      versionNo: 1,
+    });
   } catch (error) {
     if (!isMysqlDuplicateEntryError(error)) throw error;
     const [row] = await db
@@ -104,7 +157,8 @@ export async function ensureRouteSetByAgentScope(params: {
       .where(
         and(
           eq(deploymentRouteSetTable.tenantId, params.tenantId),
-          eq(deploymentRouteSetTable.agentId, params.agentId),
+          eq(deploymentRouteSetTable.targetKind, targetKind),
+          eq(deploymentRouteSetTable.targetIdentity, targetIdentity),
           eq(deploymentRouteSetTable.routeScopeKey, params.routeScopeKey),
         ),
       )
@@ -117,7 +171,7 @@ export async function ensureRouteSetByAgentScope(params: {
     .from(deploymentRouteSetTable)
     .where(eq(deploymentRouteSetTable.id, id))
     .limit(1);
-  if (!row) throw new Error(`ensureRouteSetByAgentScope: 行未找到（id=${id}）`);
+  if (!row) throw new Error(`ensureRouteSetByTargetScope: 行未找到（id=${id}）`);
   return { routeSet: row, created: true };
 }
 
@@ -149,18 +203,20 @@ export async function getRouteSetById(
   return row ?? null;
 }
 
-export async function getRouteSetByAgentScope(
+export async function getRouteSetByTargetScope(
   tenantId: string,
-  agentId: string,
+  target: RouteTarget,
   routeScopeKey: string,
 ): Promise<DeploymentRouteSetRow | null> {
+  const { targetKind, targetIdentity } = resolveRouteTarget(target);
   const [row] = await db
     .select()
     .from(deploymentRouteSetTable)
     .where(
       and(
         eq(deploymentRouteSetTable.tenantId, tenantId),
-        eq(deploymentRouteSetTable.agentId, agentId),
+        eq(deploymentRouteSetTable.targetKind, targetKind),
+        eq(deploymentRouteSetTable.targetIdentity, targetIdentity),
         eq(deploymentRouteSetTable.routeScopeKey, routeScopeKey),
       ),
     )
@@ -210,7 +266,12 @@ export async function listEnabledRouteProjections(
   agentId: string,
   routeScopeKey: string,
 ): Promise<DeploymentRouteRow[]> {
-  const routeSet = await getRouteSetByAgentScope(tenantId, agentId, routeScopeKey);
+  // 显式 target 查询（agent 专用控制面 helper）：不引入 nullable agentId 语义。
+  const routeSet = await getRouteSetByTargetScope(
+    tenantId,
+    { kind: "agent", agentId },
+    routeScopeKey,
+  );
   if (!routeSet) return [];
   return listRoutesBySet(routeSet.id, { routeState: "enabled" });
 }

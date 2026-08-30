@@ -73,30 +73,38 @@ export type PolicyRequirementResult =
 // ─── Evidence Snapshot ───────────────────────────────────
 
 /**
- * Revision 执行资格快照 — 组合双方完整证据。
+ * Revision 执行资格快照 — target 判别联合（专题01 冻结架构）。
  *
- * 这是唯一权威的执行资格数据结构，
- * 任何模块不得自行定义第二套。
+ * 这是唯一权威的执行资格数据结构，任何模块不得自行定义第二套。
+ * - Agent target：只含 Agent 维度证据 + public policy，不含任何 Runtime 字段。
+ * - Runtime target：只含 Runtime 维度证据 + public policy，不含任何 Agent 字段。
+ *
+ * 禁止为 Agent target 编造 runtimeRevisionId placeholder；禁止兼容 flat alias/fallback。
  *
  * policyRevision 使用结构化快照表达。
  * 所有字段必须来自事实源，禁止硬编码。
  */
-export interface RevisionExecutionEvidenceSnapshot {
+export interface AgentTargetEvidenceSnapshot {
+  kind: "agent";
   /** 租户 ID。 */
   tenantId: string;
-
-  /**
-   * Agent Revision ID。
-   * null = 基础 Harness Route（无 Agent 资产约束），Agent 维度 Evidence 为 not_applicable。
-   */
-  agentRevisionId: string | null;
-  /** Agent Active Publication（null = 未发布或已撤回 / 无 Agent 约束）。 */
+  /** Agent Revision ID（agent target 恒非空）。 */
+  agentRevisionId: string;
+  /** Agent Active Publication（null = 未发布或已撤回）。 */
   agentPublication: ActivePublicationSnapshot | null;
-  /** Agent 生命周期状态（无 Agent 约束时为 "active" 占位，不参与判断）。 */
+  /** Agent 生命周期状态。 */
   agentLifecycleState: "active" | "archived";
-  /** Agent Revision 发布状态（无 Agent 约束时为 "published" 占位，不参与判断）。 */
+  /** Agent Revision 发布状态。 */
   agentRevisionState: "draft" | "published" | "withdrawn";
+  /** Policy 引用需求。kind="none" = Route 未引用 Policy；kind="referenced" = 引用了 Policy。 */
+  policyRequirement: PolicyRequirement;
+}
 
+/** Runtime target Evidence — 只含 Runtime 维度证据 + public policy。 */
+export interface RuntimeTargetEvidenceSnapshot {
+  kind: "runtime";
+  /** 租户 ID。 */
+  tenantId: string;
   /** Runtime Revision ID。 */
   runtimeRevisionId: string;
   /** Runtime Artifact Evidence（null = 无有效 Attestation）。 */
@@ -111,9 +119,19 @@ export interface RevisionExecutionEvidenceSnapshot {
   runtimeRevisionState: "draft" | "published" | "withdrawn";
   /** Runtime 证据种类（hosted 要求 artifact 全集；external 无 artifact — 03 §3）。 */
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
-
   /** Policy 引用需求。kind="none" = Route 未引用 Policy；kind="referenced" = 引用了 Policy。 */
   policyRequirement: PolicyRequirement;
+}
+
+export type RevisionExecutionEvidenceSnapshot =
+  | AgentTargetEvidenceSnapshot
+  | RuntimeTargetEvidenceSnapshot;
+
+/** Snapshot 公共字段访问器（policyRequirement / tenantId 两种 target 都有）。 */
+export function snapshotPolicyRequirement(
+  snapshot: RevisionExecutionEvidenceSnapshot,
+): PolicyRequirement {
+  return snapshot.policyRequirement;
 }
 
 // ─── Eligibility Result ──────────────────────────────────
@@ -165,55 +183,67 @@ export const RevisionExecutionEligibilityPolicy = {
    * Agent"，§14）。因此本 Policy 不做 capability 交叉校验。
    */
   isEligible(snapshot: RevisionExecutionEvidenceSnapshot): RevisionExecutionEligibilityResult {
+    // 专题01 冻结架构：按 target 判别分支。Agent target 只校验 Agent 维度 + policy；
+    // Runtime target 只校验 Runtime 维度 + policy。互不读取对方证据。
+    return snapshot.kind === "agent"
+      ? this.evaluateAgent(snapshot)
+      : this.evaluateRuntime(snapshot);
+  },
+
+  /** Agent target 资格 — 只校验 Agent publication / lifecycle / revision state + public policy。 */
+  evaluateAgent(snapshot: AgentTargetEvidenceSnapshot): RevisionExecutionEligibilityResult {
     const errors: RevisionExecutionEligibilityError[] = [];
 
-    // Agent 维度：仅在 Route 绑定 AgentRevision（agentRevisionId != null）时成组必填（§18）。
-    // 基础 Harness Route（agentRevisionId === null）→ Agent Evidence not_applicable，跳过，
-    // 不伪装成 passed，也不制造假证据。
-    const hasAgentConstraint = snapshot.agentRevisionId !== null;
-
-    if (hasAgentConstraint) {
-      // 1. Agent Publication Active + 冻结的 AgentContractSnapshot 证据完整
-      //（Agent 是源码不可见黑盒；发布权威是 Contract 证据，不是 source Artifact/Attestation）。
-      if (!snapshot.agentPublication) {
-        errors.push({
-          dimension: "agent_publication",
-          code: "no_active_publication",
-          message: `AgentRevision ${snapshot.agentRevisionId} 无 Active Publication`,
-        });
-      } else if (
-        !snapshot.agentPublication.agentContractSnapshotId ||
-        !snapshot.agentPublication.agentContractDigest ||
-        !snapshot.agentPublication.agentCapabilityDigest ||
-        !snapshot.agentPublication.agentContextDigest
-      ) {
-        errors.push({
-          dimension: "agent_publication",
-          code: "agent_contract_evidence_missing",
-          message: `AgentRevision ${snapshot.agentRevisionId} Publication 缺少 AgentContractSnapshot 证据`,
-        });
-      }
-
-      // 2. Agent 生命周期
-      if (snapshot.agentLifecycleState !== "active") {
-        errors.push({
-          dimension: "agent_lifecycle",
-          code: "agent_not_active",
-          message: `Agent 生命周期状态为 ${snapshot.agentLifecycleState}，要求 active`,
-        });
-      }
-
-      // 3b. Agent Revision 发布状态
-      if (snapshot.agentRevisionState !== "published") {
-        errors.push({
-          dimension: "agent_publication",
-          code: "agent_revision_not_published",
-          message: `AgentRevision ${snapshot.agentRevisionId} 状态为 ${snapshot.agentRevisionState}，要求 published`,
-        });
-      }
+    // 1. Agent Publication Active + 冻结的 AgentContractSnapshot 证据完整
+    //（Agent 是源码不可见黑盒；发布权威是 Contract 证据，不是 source Artifact/Attestation）。
+    if (!snapshot.agentPublication) {
+      errors.push({
+        dimension: "agent_publication",
+        code: "no_active_publication",
+        message: `AgentRevision ${snapshot.agentRevisionId} 无 Active Publication`,
+      });
+    } else if (
+      !snapshot.agentPublication.agentContractSnapshotId ||
+      !snapshot.agentPublication.agentContractDigest ||
+      !snapshot.agentPublication.agentCapabilityDigest ||
+      !snapshot.agentPublication.agentContextDigest
+    ) {
+      errors.push({
+        dimension: "agent_publication",
+        code: "agent_contract_evidence_missing",
+        message: `AgentRevision ${snapshot.agentRevisionId} Publication 缺少 AgentContractSnapshot 证据`,
+      });
     }
 
-    // 4. Runtime Publication Active
+    // 2. Agent 生命周期
+    if (snapshot.agentLifecycleState !== "active") {
+      errors.push({
+        dimension: "agent_lifecycle",
+        code: "agent_not_active",
+        message: `Agent 生命周期状态为 ${snapshot.agentLifecycleState}，要求 active`,
+      });
+    }
+
+    // 3. Agent Revision 发布状态
+    if (snapshot.agentRevisionState !== "published") {
+      errors.push({
+        dimension: "agent_publication",
+        code: "agent_revision_not_published",
+        message: `AgentRevision ${snapshot.agentRevisionId} 状态为 ${snapshot.agentRevisionState}，要求 published`,
+      });
+    }
+
+    // 4. Policy 引用 — Fail-closed（两种 target 共用公共规则）
+    this.collectPolicyErrors(snapshot.policyRequirement, errors);
+
+    return { eligible: errors.length === 0, errors };
+  },
+
+  /** Runtime target 资格 — 只校验 Runtime evidence + public policy。 */
+  evaluateRuntime(snapshot: RuntimeTargetEvidenceSnapshot): RevisionExecutionEligibilityResult {
+    const errors: RevisionExecutionEligibilityError[] = [];
+
+    // 1. Runtime Publication Active
     if (!snapshot.runtimePublication) {
       errors.push({
         dimension: "runtime_publication",
@@ -222,32 +252,32 @@ export const RevisionExecutionEligibilityPolicy = {
       });
     }
 
-    // 5. Runtime Attestation — Runtime evidence all-or-nothing（03 §3）：
+    // 2. Runtime Attestation — Runtime evidence all-or-nothing（03 §3）：
     // external_endpoint 无 Runtime Artifact（不伪造），跳过 Attestation 维度；
     // hosted_artifact 要求全集 verified 且未撤销。
-    if (snapshot.runtimeEvidenceKind === "external_endpoint") {
-      // external 无 Artifact Attestation，无此维度错误。
-    } else if (!snapshot.runtimeArtifactEvidence) {
-      errors.push({
-        dimension: "runtime_attestation",
-        code: "no_artifact_evidence",
-        message: `RuntimeRevision ${snapshot.runtimeRevisionId} 无有效 Artifact Evidence`,
-      });
-    } else if (snapshot.runtimeArtifactEvidence.verificationState !== "verified") {
-      errors.push({
-        dimension: "runtime_attestation",
-        code: "evidence_not_verified",
-        message: `RuntimeRevision ${snapshot.runtimeRevisionId} Artifact Evidence 未验证`,
-      });
-    } else if (snapshot.runtimeArtifactEvidence.revokedAt !== null) {
-      errors.push({
-        dimension: "runtime_attestation",
-        code: "evidence_revoked",
-        message: `RuntimeRevision ${snapshot.runtimeRevisionId} Artifact Evidence 已撤销`,
-      });
+    if (snapshot.runtimeEvidenceKind !== "external_endpoint") {
+      if (!snapshot.runtimeArtifactEvidence) {
+        errors.push({
+          dimension: "runtime_attestation",
+          code: "no_artifact_evidence",
+          message: `RuntimeRevision ${snapshot.runtimeRevisionId} 无有效 Artifact Evidence`,
+        });
+      } else if (snapshot.runtimeArtifactEvidence.verificationState !== "verified") {
+        errors.push({
+          dimension: "runtime_attestation",
+          code: "evidence_not_verified",
+          message: `RuntimeRevision ${snapshot.runtimeRevisionId} Artifact Evidence 未验证`,
+        });
+      } else if (snapshot.runtimeArtifactEvidence.revokedAt !== null) {
+        errors.push({
+          dimension: "runtime_attestation",
+          code: "evidence_revoked",
+          message: `RuntimeRevision ${snapshot.runtimeRevisionId} Artifact Evidence 已撤销`,
+        });
+      }
     }
 
-    // 6. Runtime Conformance — 调用统一纯验证器，每个错误映射为 runtime_conformance dimension
+    // 3. Runtime Conformance — 调用统一纯验证器，每个错误映射为 runtime_conformance dimension
     const conformanceResult = validateRuntimePublicationConformanceEvidence(
       snapshot.runtimeConformance,
     );
@@ -259,7 +289,7 @@ export const RevisionExecutionEligibilityPolicy = {
       });
     }
 
-    // 7. Runtime 生命周期
+    // 4. Runtime 生命周期
     if (snapshot.runtimeLifecycleState !== "active") {
       errors.push({
         dimension: "runtime_lifecycle",
@@ -268,7 +298,7 @@ export const RevisionExecutionEligibilityPolicy = {
       });
     }
 
-    // 7b. Runtime Revision 发布状态
+    // 5. Runtime Revision 发布状态
     if (snapshot.runtimeRevisionState !== "published") {
       errors.push({
         dimension: "runtime_publication",
@@ -277,11 +307,21 @@ export const RevisionExecutionEligibilityPolicy = {
       });
     }
 
-    // 8. : Policy 引用 — Fail-closed 校验
+    // 6. Policy 引用 — Fail-closed（两种 target 共用公共规则）
+    this.collectPolicyErrors(snapshot.policyRequirement, errors);
+
+    return { eligible: errors.length === 0, errors };
+  },
+
+  /** 公共 policy fail-closed 校验。 */
+  collectPolicyErrors(
+    requirement: PolicyRequirement,
+    errors: RevisionExecutionEligibilityError[],
+  ): void {
     // kind="referenced" → Policy 必须存在且 revisionState = "published"（非 draft/withdrawn）
     // kind="none" → Route 不引用 Policy，不阻断
-    if (snapshot.policyRequirement.kind === "referenced") {
-      const policy = snapshot.policyRequirement.policyRevision;
+    if (requirement.kind === "referenced") {
+      const policy = requirement.policyRevision;
       if (policy.revisionState === "withdrawn") {
         errors.push({
           dimension: "policy",
@@ -296,8 +336,6 @@ export const RevisionExecutionEligibilityPolicy = {
         });
       }
     }
-
-    return { eligible: errors.length === 0, errors };
   },
 } as const;
 

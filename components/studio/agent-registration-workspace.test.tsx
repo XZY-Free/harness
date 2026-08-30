@@ -466,7 +466,7 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
     expect(screen.queryByRole("button", { name: "登记合同" })).toBeNull();
   });
 
-  it("同一挂载内完成合同登记→创建/发布智能体版本→发布运行服务→发布给员工；路由写只发生在最终点击", async () => {
+  it("同一挂载内完成合同登记→创建/发布智能体版本→发布给员工；Agent 发布交接刷新路由面板并选 preferred，路由写只发生在最终点击", async () => {
     await renderWorkspaceAndRegisterContract({
       canPublishRuntime: true,
       canManageRoutes: true,
@@ -495,21 +495,21 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
     // 发布后档案当前版本同步刷新，不要求用户重载页面。
     await waitFor(() => expect(screen.getByRole("cell", { name: "arev-1" })).toBeTruthy());
 
-    // 发布运行服务（真实 publish API）。
-    fireEvent.click(await screen.findByRole("button", { name: "发布运行服务版本" }));
-    await waitFor(() => expect(publishPosts()).toHaveLength(1));
-
-    // 两次真实发布之前不得有任何路由写。
-    expect(routeWriteCalls()).toHaveLength(0);
-
-    // 路由面板接收并选择真实 GET 返回的 published arev-1 / rtr-1。
+    // Agent 发布后路由面板被刷新并选中真实 published arev-1（preferred 交接）。
     await waitFor(() =>
       expect((screen.getByLabelText("智能体版本") as HTMLSelectElement).value).toBe("arev-1"),
     );
-    await waitFor(() =>
-      expect((screen.getByLabelText("运行服务版本") as HTMLSelectElement).value).toBe("rtr-1"),
-    );
 
+    // 路由面板绝不提供运行服务版本选择（Runtime 与 Agent 端点事实解耦）。
+    expect(screen.queryByLabelText("运行服务版本")).toBeNull();
+    // 同页 RuntimeControlPanel 独立读取自己的资产；Agent Route 面板的零 Runtime
+    // 依赖由 RouteActivationPanel 单组件测试精确验证，不能在共享工作台误归因。
+
+    // 填端点/网络（identity 保持 none）后点击发布给员工。
+    fireEvent.change(screen.getByLabelText("端点 URL"), {
+      target: { value: "https://agent.example.com/a2a" },
+    });
+    fireEvent.change(screen.getByLabelText("网络区域"), { target: { value: "public" } });
     const submit = screen.getByRole("button", {
       name: "发布给员工",
     }) as HTMLButtonElement;
@@ -525,13 +525,52 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
       "POST /admin/api/v1/deployment-route-sets",
       "PUT /admin/api/v1/deployment-route-sets/route-set-1/activation",
     ]);
+    const ensureBody = JSON.parse(String(writes[0]?.init?.body));
+    expect(ensureBody.target).toEqual({ kind: "agent", agent_id: "agent-1" });
     const activateBody = JSON.parse(String(writes[1]?.init?.body));
-    expect(activateBody.routes).toEqual([
-      expect.objectContaining({
-        agent_revision_id: "arev-1",
-        runtime_revision_id: "rtr-1",
-      }),
-    ]);
+    expect(activateBody.routes[0].target).toEqual({
+      kind: "agent",
+      agent_revision_id: "arev-1",
+      endpoint_ref: "https://agent.example.com/a2a",
+      identity_mode: "none",
+      credential_ref_id: null,
+      network_zone: "public",
+    });
+    expect(JSON.stringify(activateBody)).not.toContain("runtime_revision_id");
+  });
+
+  it("Runtime 发布独立于 Agent 路由面板：不触发额外路由资产 GET、不 refresh 也不选 preferred", async () => {
+    await renderWorkspaceAndRegisterContract({
+      canPublishRuntime: true,
+      canManageRoutes: true,
+    });
+
+    // 记录发布运行服务前的 Agent Route 资产 GET 次数。
+    const agentGets = () =>
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          (String(url) === "/admin/api/v1/agents" ||
+            (String(url).includes("/admin/api/v1/agents/") &&
+              String(url).endsWith("/revisions"))) &&
+          (init?.method ?? "GET") === "GET",
+      ).length;
+    const agentGetsBeforePublish = agentGets();
+
+    // 发布运行服务（真实 publish API）—— Runtime 发布保持独立。
+    fireEvent.click(await screen.findByRole("button", { name: "发布运行服务版本" }));
+    await waitFor(() => expect(publishPosts()).toHaveLength(1));
+
+    // Runtime 发布后 Agent 路由面板未被刷新：无新增 Agent 资产 GET，无偏好交接。
+    expect(agentGets()).toBe(agentGetsBeforePublish);
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).startsWith("/admin/api/v1/runtimes") && (init?.method ?? "GET") === "GET",
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
+
+    // 未发布智能体版本：路由面板不预选任何 AgentRevision（无 fabricated 交接）。
+    expect((screen.getByLabelText("智能体版本") as HTMLSelectElement).value).toBe("");
   });
 
   it("canManageRoutes 缺省为 false：不渲染「发布给员工」路由区域且零路由写", async () => {

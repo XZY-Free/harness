@@ -287,10 +287,10 @@ async function seedFullIngressContext(): Promise<FullIngressContext> {
     "v1",
   );
 
-  // 顶层恒为 base harness route（agentId/agentRevisionId=null）。
+  // 顶层恒为 base harness route（target={kind:"runtime"}）。
   const routeSet = await createRouteSet({
     tenantId,
-    agentId: null,
+    target: { kind: "runtime" },
     routeScopeKey: DEFAULT_ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
@@ -299,8 +299,7 @@ async function seedFullIngressContext(): Promise<FullIngressContext> {
     tenantId,
     routeSetId: routeSet.id,
     routeSetExpectedVersionNo: 1,
-    agentRevisionId: null,
-    runtimeRevisionId: runtimeRevision.id,
+    target: { kind: "runtime", runtimeRevisionId: runtimeRevision.id },
     trafficWeight: MAX_TRAFFIC_WEIGHT,
     priorityNo: 1,
     actor: buildActor(tenantId, "deploy-bot-001"),

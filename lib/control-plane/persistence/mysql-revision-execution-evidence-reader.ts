@@ -17,14 +17,19 @@ import { loadActivePublicationSnapshot } from "@/lib/publications/persistence/pu
 import type { RuntimeConformanceEvidence } from "@/lib/runtime/domain/runtime-conformance-eligibility";
 import { loadRuntimeConformanceFacts } from "@/lib/runtime/persistence/runtime-conformance-evidence-reader";
 import type {
+  AgentTargetEvidenceInput,
   LoadEvidenceInput,
   LoadExactEvidenceInput,
   RevisionExecutionEvidenceReader,
+  RuntimeTargetEvidenceInput,
 } from "../application/revision-execution-evidence-reader";
 import type {
+  AgentTargetEvidenceSnapshot,
+  PolicyRequirement,
   PolicyRequirementResult,
   PolicyRevisionSnapshot,
   RevisionExecutionEvidenceSnapshot,
+  RuntimeTargetEvidenceSnapshot,
 } from "../domain/revision-execution-eligibility";
 import { EligibilityError } from "../domain/revision-execution-eligibility";
 
@@ -71,57 +76,103 @@ export function createMySqlRevisionExecutionEvidenceReader(
 type DbLike = DbOrTx;
 
 /**
- * 核心证据加载逻辑 — loadCurrentEvidence 和 loadExactEvidence 共用。
+ * 核心证据加载逻辑 — loadCurrentEvidence 和 loadExactEvidence 共用，按 target 判别分支。
  *
  * @param dbOrTx 由调用方传入的 DB 实例或事务
- * @param input 加载参数
- * @param exactConformanceRunId 非null时使用精确冻结的 conformanceRunId
+ * @param input 加载参数（target 判别联合）
+ * @param exactConformanceRunId 非null时使用精确冻结的 conformanceRunId（仅 runtime target）
  */
 async function loadEvidence(
   dbOrTx: DbLike,
   input: LoadEvidenceInput,
   exactConformanceRunId: string | null,
 ): Promise<RevisionExecutionEvidenceSnapshot> {
-  // 并行加载所有证据 — 真实读取，禁止硬编码
+  // 专题01 冻结架构：按 target 判别分支加载，互不读取对方维度。
+  return input.kind === "agent"
+    ? loadAgentEvidence(dbOrTx, input)
+    : loadRuntimeEvidence(dbOrTx, input, exactConformanceRunId);
+}
 
-  // 1. 并行加载 Evidence + Publication + Revision 行
-  // 无 Agent 约束（agentRevisionId === null）→ 基础 Harness Route，跳过 Agent 维度查询。
-  const hasAgentConstraint = input.agentRevisionId !== null;
-  const [
-    runtimeArtifactEvidence,
+/**
+ * Agent target 证据 — 只读 Agent publication / lifecycle / revision state + policy。
+ * 不得触发任何 Runtime artifact / publication / conformance / revision 查询。
+ */
+async function loadAgentEvidence(
+  dbOrTx: DbLike,
+  input: AgentTargetEvidenceInput,
+): Promise<AgentTargetEvidenceSnapshot> {
+  // 并行读取 Agent Publication + AgentRevision 行
+  const [agentPublication, agentRevisionRow] = await Promise.all([
+    loadActivePublicationSnapshot({
+      tenantId: input.tenantId,
+      subjectType: "agent_revision",
+      subjectRevisionId: input.agentRevisionId,
+      dbOrTx: dbOrTx,
+    }),
+    dbOrTx
+      .select()
+      .from(agentRevisionTable)
+      .where(eq(agentRevisionTable.id, input.agentRevisionId))
+      .limit(1)
+      .then((r) => r[0] ?? null),
+  ]);
+
+  // 用 Revision 行的 agentId 加载 Agent 主体
+  const agentRow = agentRevisionRow
+    ? await dbOrTx
+        .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
+        .from(agentTable)
+        .where(and(eq(agentTable.id, agentRevisionRow.agentId), isNull(agentTable.deletedAt)))
+        .limit(1)
+        .then((r) => r[0] ?? null)
+    : null;
+
+  // 加载 Policy Requirement（Fail-closed，含租户校验）
+  const policyRequirement = await loadPolicyRequirementStrict(
+    dbOrTx,
+    input.policyRevisionId,
+    input.tenantId,
+  );
+
+  return {
+    kind: "agent",
+    tenantId: input.tenantId,
+    agentRevisionId: input.agentRevisionId,
     agentPublication,
-    runtimePublication,
-    agentRevisionRow,
-    runtimeRevisionRow,
-  ] = await Promise.all([
+    // 真实读取生命周期状态，禁止硬编码 active
+    agentLifecycleState: agentRow?.lifecycleState === "enabled" ? "active" : "archived",
+    agentRevisionState:
+      agentRevisionRow?.revisionState === "published"
+        ? "published"
+        : agentRevisionRow?.revisionState === "withdrawn"
+          ? "withdrawn"
+          : "draft",
+    policyRequirement,
+  };
+}
+
+/**
+ * Runtime target 证据 — 只读 Runtime evidence + policy。不读取 Agent 维度。
+ */
+async function loadRuntimeEvidence(
+  dbOrTx: DbLike,
+  input: RuntimeTargetEvidenceInput,
+  exactConformanceRunId: string | null,
+): Promise<RuntimeTargetEvidenceSnapshot> {
+  // 并行加载 Runtime Artifact Evidence + Publication + Revision 行
+  const [runtimeArtifactEvidence, runtimePublication, runtimeRevisionRow] = await Promise.all([
     loadArtifactEvidenceSnapshot({
       tenantId: input.tenantId,
       artifactType: "runtime_revision",
       artifactRevisionId: input.runtimeRevisionId,
       dbOrTx: dbOrTx,
     }),
-    hasAgentConstraint
-      ? loadActivePublicationSnapshot({
-          tenantId: input.tenantId,
-          subjectType: "agent_revision",
-          subjectRevisionId: input.agentRevisionId as string,
-          dbOrTx: dbOrTx,
-        })
-      : Promise.resolve(null),
     loadActivePublicationSnapshot({
       tenantId: input.tenantId,
       subjectType: "runtime_revision",
       subjectRevisionId: input.runtimeRevisionId,
       dbOrTx: dbOrTx,
     }),
-    hasAgentConstraint
-      ? dbOrTx
-          .select()
-          .from(agentRevisionTable)
-          .where(eq(agentRevisionTable.id, input.agentRevisionId as string))
-          .limit(1)
-          .then((r) => r[0] ?? null)
-      : Promise.resolve(null),
     dbOrTx
       .select()
       .from(runtimeRevisionTable)
@@ -130,29 +181,19 @@ async function loadEvidence(
       .then((r) => r[0] ?? null),
   ]);
 
-  // 2. 用 Revision 行的 agentId/runtimeId 加载 Agent/Runtime 主体
-  const [agentRow, runtimeRow] = await Promise.all([
-    agentRevisionRow
-      ? dbOrTx
-          .select({ id: agentTable.id, lifecycleState: agentTable.lifecycleState })
-          .from(agentTable)
-          .where(and(eq(agentTable.id, agentRevisionRow.agentId), isNull(agentTable.deletedAt)))
-          .limit(1)
-          .then((r) => r[0] ?? null)
-      : Promise.resolve(null),
-    runtimeRevisionRow
-      ? dbOrTx
-          .select({ id: runtimeTable.id, lifecycleState: runtimeTable.lifecycleState })
-          .from(runtimeTable)
-          .where(
-            and(eq(runtimeTable.id, runtimeRevisionRow.runtimeId), isNull(runtimeTable.deletedAt)),
-          )
-          .limit(1)
-          .then((r) => r[0] ?? null)
-      : Promise.resolve(null),
-  ]);
+  // 用 Revision 行的 runtimeId 加载 Runtime 主体
+  const runtimeRow = runtimeRevisionRow
+    ? await dbOrTx
+        .select({ id: runtimeTable.id, lifecycleState: runtimeTable.lifecycleState })
+        .from(runtimeTable)
+        .where(
+          and(eq(runtimeTable.id, runtimeRevisionRow.runtimeId), isNull(runtimeTable.deletedAt)),
+        )
+        .limit(1)
+        .then((r) => r[0] ?? null)
+    : null;
 
-  // 3. 加载 Conformance 证据
+  // 加载 Conformance 证据
   // 规范化为包含原始 Run/Case 事实 + 从当前 RuntimeRevision 真实读取的期望值。
   // 期望值缺失显式 null 并 fail-closed，禁止空字符串兜底。
   const conformanceRunId = exactConformanceRunId ?? runtimePublication?.conformanceRunId ?? null;
@@ -177,25 +218,16 @@ async function loadEvidence(
       }
     : null;
 
-  // 4. 加载 Policy Requirement（Fail-closed，含租户校验）
-  const policyResult = await loadPolicyRequirement(dbOrTx, input.policyRevisionId, input.tenantId);
-  if (!policyResult.ok) {
-    throw new EligibilityError(policyResult.failureCode, policyResult.failureReason);
-  }
-  const policyRequirement = policyResult.requirement;
+  // 加载 Policy Requirement（Fail-closed，含租户校验）
+  const policyRequirement = await loadPolicyRequirementStrict(
+    dbOrTx,
+    input.policyRevisionId,
+    input.tenantId,
+  );
 
   return {
+    kind: "runtime",
     tenantId: input.tenantId,
-    agentRevisionId: input.agentRevisionId,
-    agentPublication,
-    // 真实读取生命周期状态，禁止硬编码 active
-    agentLifecycleState: agentRow?.lifecycleState === "enabled" ? "active" : "archived",
-    agentRevisionState:
-      agentRevisionRow?.revisionState === "published"
-        ? "published"
-        : agentRevisionRow?.revisionState === "withdrawn"
-          ? "withdrawn"
-          : "draft",
     runtimeRevisionId: input.runtimeRevisionId,
     runtimeArtifactEvidence,
     runtimePublication,
@@ -210,6 +242,19 @@ async function loadEvidence(
     runtimeEvidenceKind: runtimeRevisionRow?.runtimeEvidenceKind ?? "hosted_artifact",
     policyRequirement,
   };
+}
+
+/** 加载 Policy Requirement，读取失败时抛错（fail-closed）。 */
+async function loadPolicyRequirementStrict(
+  dbOrTx: DbLike,
+  policyRevisionId: string | null,
+  tenantId: string,
+): Promise<PolicyRequirement> {
+  const policyResult = await loadPolicyRequirement(dbOrTx, policyRevisionId, tenantId);
+  if (!policyResult.ok) {
+    throw new EligibilityError(policyResult.failureCode, policyResult.failureReason);
+  }
+  return policyResult.requirement;
 }
 
 /**

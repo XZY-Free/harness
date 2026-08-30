@@ -1,17 +1,20 @@
 import { createHash } from "node:crypto";
-import type { RouteControlPlaneEvidence } from "@/lib/routes/domain/route-resolution-policy";
+import type { RouteEvidence } from "@/lib/routes/domain/route-resolution-policy";
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 
-export interface ExecutionBindingControlPlaneEvidence
-  extends Omit<
-    RouteControlPlaneEvidence,
-    | "agentRevisionId"
-    | "agentContractSnapshotId"
-    | "agentContractDigest"
-    | "agentContextDigest"
-    | "agentPublicationRecordId"
-  > {
+/**
+ * ExecutionBinding 控制面证据 — 只绑定 Harness Runtime。
+ *
+ * 从 RouteEvidence 的 runtime 变体派生，明确去掉判别 kind 包装（Binding 存储层扁平化）。
+ * 不含任何 Agent evidence 字段；Agent 调用由 AgentCallBinding 单独负责。
+ */
+export type ExecutionBindingRuntimeEvidence = Omit<
+  Extract<RouteEvidence, { kind: "runtime" }>,
+  "kind"
+>;
+
+export interface ExecutionBindingControlPlaneEvidence extends ExecutionBindingRuntimeEvidence {
   routeRevisionId: string;
   routeActivationId: string;
   routeContentDigest: string;

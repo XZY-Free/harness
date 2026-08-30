@@ -12,7 +12,6 @@ import type { RevisionExecutionEvidenceReader } from "@/lib/control-plane/applic
 import { RevisionExecutionEligibilityPolicy } from "@/lib/control-plane/domain/revision-execution-eligibility";
 import { createMySqlRevisionExecutionEvidenceReader } from "@/lib/control-plane/persistence/mysql-revision-execution-evidence-reader";
 import {
-  ArtifactNotVerifiedForRouteError,
   RevisionNotPublishedError,
   RouteEligibilityInvalidError,
   RouteExecutionIneligibleError,
@@ -22,7 +21,7 @@ import {
   computeRouteRevisionContentDigest,
   validateRouteRevisionContent,
 } from "../domain/route-revision";
-import type { RouteRevisionContent } from "../domain/route-revision";
+import type { RouteRevisionContent, RouteRevisionTarget } from "../domain/route-revision";
 import {
   computeSelectorDigest,
   computeSpecificity,
@@ -150,60 +149,78 @@ export function createActivateRouteSet(dependencies: {
 
       for (const desired of command.desiredRoutes) {
         const activationState = desired.activationState ?? "active";
+        const target = desired.target;
+        const routeSetTarget = routeSet.target;
 
-        // 6. 校验 AgentRevision 基本存在性（无 Agent 约束 → 基础 Harness Route，跳过 Agent 校验）
-        const hasAgentConstraint = desired.agentRevisionId !== null;
-        if (hasAgentConstraint) {
-          const agentRevision = await session.findAgentRevision(desired.agentRevisionId as string);
-          if (!agentRevision) {
-            throw new RevisionNotPublishedError(
-              desired.agentRevisionId as string,
-              "agent",
-              "not_found",
-            );
-          }
-          if (agentRevision.agentId !== routeSet.agentId) {
-            throw new RevisionNotPublishedError(
-              desired.agentRevisionId as string,
-              "agent",
-              "wrong_agent",
-            );
-          }
+        // 6a. 判别 target 与 RouteSet target kind 必须一致（agent ↔ agent，runtime ↔ runtime）。
+        if (target.kind !== routeSetTarget.kind) {
+          throw new RevisionNotPublishedError(
+            target.kind === "agent" ? target.agentRevisionId : target.runtimeRevisionId,
+            target.kind,
+            "wrong_target_kind",
+          );
         }
 
-        // 6. 校验 RuntimeRevision 基本存在性
-        const runtimeRevision = await session.findRuntimeRevision(desired.runtimeRevisionId);
-        if (!runtimeRevision) {
-          throw new RevisionNotPublishedError(desired.runtimeRevisionId, "runtime", "not_found");
+        if (target.kind === "agent") {
+          // 6b. Agent target 只校验 AgentRevision 基本存在性 + 归属 RouteSet 的 agentId。
+          const agentRevision = await session.findAgentRevision(target.agentRevisionId);
+          if (!agentRevision) {
+            throw new RevisionNotPublishedError(target.agentRevisionId, "agent", "not_found");
+          }
+          // AgentRevision 必须属于该 RouteSet 的 agentId。
+          if (routeSetTarget.kind !== "agent" || agentRevision.agentId !== routeSetTarget.agentId) {
+            throw new RevisionNotPublishedError(target.agentRevisionId, "agent", "wrong_agent");
+          }
+        } else {
+          // 6c. Runtime target 只校验 RuntimeRevision 基本存在性。
+          const runtimeRevision = await session.findRuntimeRevision(target.runtimeRevisionId);
+          if (!runtimeRevision) {
+            throw new RevisionNotPublishedError(target.runtimeRevisionId, "runtime", "not_found");
+          }
         }
 
         if (activationState === "active") {
           // 使用统一 Reader + Policy 进行完整执行资格检查，不允许布尔旁路。
-          // 无 Agent 约束 → Reader/Policy 内部跳过 Agent 维度（not_applicable，§18）。
-          const evidence = await evidenceReader.loadCurrentEvidence({
-            tenantId: command.tenantId,
-            agentRevisionId: desired.agentRevisionId,
-            runtimeRevisionId: desired.runtimeRevisionId,
-            policyRevisionId: desired.policyRevisionId ?? null,
-          });
+          // target 判别 input：agent 只传 agentRevisionId，runtime 只传 runtimeRevisionId。
+          const evidence = await evidenceReader.loadCurrentEvidence(
+            target.kind === "agent"
+              ? {
+                  kind: "agent",
+                  tenantId: command.tenantId,
+                  agentRevisionId: target.agentRevisionId,
+                  policyRevisionId: desired.policyRevisionId ?? null,
+                }
+              : {
+                  kind: "runtime",
+                  tenantId: command.tenantId,
+                  runtimeRevisionId: target.runtimeRevisionId,
+                  policyRevisionId: desired.policyRevisionId ?? null,
+                },
+          );
           // 使用统一 RevisionExecutionEligibilityPolicy（fail-closed，无降级路径）。
-          // 冻结架构：本 Policy 不做 Agent required capabilities vs Runtime
-          // capabilities 交叉校验（外部 Agent 自己是能力提供方，§14）。
+          // 冻结架构：本 Policy 按 target 只校验自身维度，不做 Agent required capabilities
+          // vs Runtime capabilities 交叉校验（外部 Agent 自己是能力提供方，§14）。
           const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(evidence);
           if (!eligibilityResult.eligible) {
             throw new RouteExecutionIneligibleError(desired.routeKey, eligibilityResult.errors);
           }
         }
-        // disabled Route 不检查执行资格，只验证基本存在性（已在上方完成）
+        // disabled Route 不检查执行资格，只验证对应目标 Revision 基本存在性（已在上方完成）
 
-        // 构造 RouteRevisionContent（Agent Route 冻结生产调用事实；基础 Harness Route 为 null）
+        // 构造 RouteRevisionContent — target 判别联合（只含所选 target 自己的事实）。
+        const contentTarget: RouteRevisionTarget =
+          target.kind === "agent"
+            ? {
+                kind: "agent",
+                agentRevisionId: target.agentRevisionId,
+                agentEndpointRef: target.agentEndpointRef,
+                agentIdentityMode: target.agentIdentityMode,
+                agentCredentialRefId: target.agentCredentialRefId,
+                agentNetworkZone: target.agentNetworkZone,
+              }
+            : { kind: "runtime", runtimeRevisionId: target.runtimeRevisionId };
         const content: RouteRevisionContent = {
-          agentRevisionId: desired.agentRevisionId,
-          runtimeRevisionId: desired.runtimeRevisionId,
-          agentEndpointRef: hasAgentConstraint ? (desired.agentEndpointRef ?? null) : null,
-          agentIdentityMode: hasAgentConstraint ? (desired.agentIdentityMode ?? null) : null,
-          agentCredentialRefId: hasAgentConstraint ? (desired.agentCredentialRefId ?? null) : null,
-          agentNetworkZone: hasAgentConstraint ? (desired.agentNetworkZone ?? null) : null,
+          target: contentTarget,
           policyRevisionId: desired.policyRevisionId ?? null,
           modelPolicyRevisionId: desired.modelPolicyRevisionId ?? null,
           toolsetRevisionId: desired.toolsetRevisionId ?? null,
@@ -246,7 +263,7 @@ export function createActivateRouteSet(dependencies: {
         routeSetId: command.routeSetId,
         routeScopeKey: routeSet.routeScopeKey,
         tenantId: command.tenantId,
-        agentId: routeSet.agentId,
+        agentId: routeSet.target.kind === "agent" ? routeSet.target.agentId : null,
         desiredRoutes: policyInput,
       });
 

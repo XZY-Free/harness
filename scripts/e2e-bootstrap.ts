@@ -1,7 +1,7 @@
 /**
  * e2e 正式链引导（在 dev server 启动前执行）。
  *
- * 建出可执行的**基础 Harness Route** 正式链（§8.3 base route，agentRevisionId=null），
+ * 建出可执行的**基础 Harness Runtime Route** 正式链（§8.3 base route），
  * 使 Web / Desktop 客户端发送的首条消息能真正走通 §9.3 Employee Turn 热路径
  * Route Resolver → ExecutionBinding → Runtime，而不是在
  * `POST /api/v1/threads/{id}/turns` 因 `dispatched=false` 抛错。
@@ -9,7 +9,7 @@
  * 专题01 §15：不再创建默认 Agent（Agent 空表是合法平台状态，§6.2/§33.1）；
  * 基础 Harness Runtime 初始化走正式 Runtime 控制面（§15.3/§11.4），不伪装成 Agent seed。
  * 故本脚本只装配 hosted Runtime → published RuntimeRevision → base RouteSet →
- * RouteActivation（agentRevisionId=null）→ RouteEligibilityProjection，全程走正式服务
+ * Runtime RouteActivation → RouteEligibilityProjection，全程走正式服务
  * 与正式验签器（复用 `lib/test-support/seed-published-runtime-revision.ts` 的 §11.2 合规说明）。
  *
  * 【关口 07 真实链】RouteActivation 后**不再直连 buildRouteEligibility**：
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
 
   const routeSet = await createRouteSet({
     tenantId: tenant.id,
-    agentId: null, // 基础 Harness Route（§8.3）
+    target: { kind: "runtime" }, // 基础 Harness Route（§8.3）
     routeScopeKey: ROUTE_SCOPE_KEY,
     routeScopeJson: { networkZone: "internal" },
   });
@@ -111,8 +111,7 @@ async function main(): Promise<void> {
         routeId: undefined,
         routeKey: "primary",
         routeGroupId: "primary",
-        agentRevisionId: null, // 基础 Harness Route（§8.3，无 Agent 资产约束）
-        runtimeRevisionId: runtimeRevision.id,
+        target: { kind: "runtime", runtimeRevisionId: runtimeRevision.id },
         policyRevisionId: null,
         modelPolicyRevisionId: null,
         toolsetRevisionId: null,

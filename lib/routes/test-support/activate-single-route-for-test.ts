@@ -8,6 +8,7 @@ import type {
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
 import { getRouteById, getRouteSetById } from "@/lib/routes/application/deployment-route-service";
 import { createDisableRoute } from "@/lib/routes/application/disable-route";
+import type { RouteRevisionTarget } from "@/lib/routes/domain/route-revision";
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
 import { createBuildRouteEligibility } from "@/lib/routes/projection/build-route-eligibility";
 import { mysqlRouteEligibilityStore } from "@/lib/routes/projection/mysql-route-eligibility-store";
@@ -33,26 +34,22 @@ export interface ActivatedSingleRouteForTestResult {
 const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 const disableRoute = createDisableRoute({ store: mysqlRouteSetActivationStore });
 
-/** 测试夹具只通过正式 RouteSet Activation / DisableRoute 创建单路由事实。 */
+/**
+ * 测试夹具只通过正式 RouteSet Activation / DisableRoute 创建单路由事实。
+ *
+ * 唯一 `target: RouteRevisionTarget` 判别联合决定 RouteSet 与 RouteRevision 的目标：
+ * - runtime => { kind: "runtime", runtimeRevisionId }
+ * - agent   => { kind: "agent", agentRevisionId, agentEndpointRef, agentIdentityMode, agentCredentialRefId, agentNetworkZone }
+ *
+ * 不保留任何 flat 兼容字段（agentRevisionId/runtimeRevisionId/agentRouteFacts），
+ * runtime Route 不携带任何 Agent 字段，agent Route 不携带 runtimeRevisionId。
+ */
 export async function activateSingleRouteForTest(params: {
   tenantId: string;
   routeSetId: string;
   routeId?: string;
   routeSetExpectedVersionNo: number;
-  /** : null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
-  agentRevisionId: string | null;
-  runtimeRevisionId: string;
-  /**
-   * 专题01 Batch4 补漏：Agent Route 生产调用事实。
-   * agentRevisionId 非空时必须冻结；默认提供合法 facts（测试夹具构造合法路由）。
-   * base route（agentRevisionId=null）必须为 undefined/null。
-   */
-  agentRouteFacts?: {
-    agentEndpointRef: string;
-    agentIdentityMode: "none" | "bearer";
-    agentCredentialRefId: string | null;
-    agentNetworkZone: string;
-  };
+  target: RouteRevisionTarget;
   trafficWeight: number;
   priorityNo?: number;
   routeState?: RouteState;
@@ -100,18 +97,8 @@ export async function activateSingleRouteForTest(params: {
         routeId: params.routeId,
         routeKey: "primary",
         routeGroupId: "primary",
-        agentRevisionId: params.agentRevisionId,
-        runtimeRevisionId: params.runtimeRevisionId,
-        // 专题01 Batch4 补漏：agent route 冻结生产调用事实；base route 禁止携带。
-        ...(params.agentRevisionId !== null
-          ? {
-              agentEndpointRef:
-                params.agentRouteFacts?.agentEndpointRef ?? "https://agent.example.com/a2a",
-              agentIdentityMode: params.agentRouteFacts?.agentIdentityMode ?? "bearer",
-              agentCredentialRefId: params.agentRouteFacts?.agentCredentialRefId ?? "cred-1",
-              agentNetworkZone: params.agentRouteFacts?.agentNetworkZone ?? "private",
-            }
-          : {}),
+        // 判别 target 直接传入 — 只含所选 target 自己的事实。
+        target: params.target,
         policyRevisionId: null,
         modelPolicyRevisionId: null,
         toolsetRevisionId: null,

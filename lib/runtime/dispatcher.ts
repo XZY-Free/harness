@@ -60,10 +60,7 @@ import type {
 } from "@/lib/persistence/schema/executions";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { type RouteResolver, createResolveRoute } from "@/lib/routes/application/resolve-route";
-import type {
-  RouteResolution,
-  RouteResolutionAttribute,
-} from "@/lib/routes/domain/route-resolution-policy";
+import type { RouteResolutionAttribute } from "@/lib/routes/domain/route-resolution-policy";
 import {
   type ConfiguredRouteResolver,
   createConfiguredRouteResolver,
@@ -89,6 +86,7 @@ import {
 import { markInvocationLost } from "@/lib/runtime/recovery-queries";
 import {
   type ExecutionPlan,
+  type RuntimeRouteResolution,
   extractModelInfo,
   resolveExecutionPlan,
 } from "@/lib/runtime/resolve-execution-plan";
@@ -147,8 +145,8 @@ export interface DispatchResult {
   invocation?: Invocation;
   /** 调度的 ExecutionBinding（dispatched=true 时填）。 */
   binding?: ExecutionBinding;
-  /** 本次执行使用的确定性路由解析结果（dispatched=true 时填）。 */
-  routeResolution?: RouteResolution;
+  /** 本次执行使用的确定性路由解析结果（dispatched=true 时填；顶层恒为 runtime target，已收窄，不暴露 Agent 形状）。 */
+  routeResolution?: RuntimeRouteResolution;
   /** 调度的 Attempt（dispatched=true 时填）。 */
   attempt?: InvocationAttempt;
   /** 更新后的 Turn（dispatched=true 时填，turnState=queued）。 */
@@ -308,11 +306,14 @@ export async function dispatchInvocationForTurn(params: {
     routeResolution.policyRevisionId,
   );
   // 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带 Agent evidence。
-  const controlPlaneEvidence = routeResolution.controlPlaneEvidence;
+  // 先从 runtime RouteEvidence 剥离判别字段 kind，再展开扁平 evidence — Binding 不得出现 kind 或任何 Agent evidence。
+  const { kind: _runtimeEvidenceKind, ...runtimeControlPlaneEvidence } =
+    routeResolution.controlPlaneEvidence;
   const bindingParams: CreateExecutionBindingCommand = {
     invocationId: invocation.id,
     tenantId: params.tenantId,
-    runtimeRevisionId: routeResolution.runtimeRevisionId,
+    // Runtime ID 只从已收窄的 ExecutionPlan 冻结值读取，禁止 flat fallback。
+    runtimeRevisionId: plan.runtimeRevisionId,
     deploymentRouteId: routeResolution.deploymentRouteId,
     modelProvider: modelInfo.modelProvider,
     modelId: modelInfo.modelId,
@@ -332,7 +333,7 @@ export async function dispatchInvocationForTurn(params: {
       routeActivationId: routeResolution.routeActivationId,
       routeContentDigest: routeResolution.routeContentDigest,
       resolutionInputDigest: routeResolution.resolutionInputDigest,
-      ...controlPlaneEvidence,
+      ...runtimeControlPlaneEvidence,
     },
   };
   const binding = await createExecutionBinding(bindingParams);
@@ -358,7 +359,8 @@ export async function dispatchInvocationForTurn(params: {
       threadId: thread.id,
       invocation,
       binding,
-      runtimeRevisionId: routeResolution.runtimeRevisionId,
+      // 使用已冻结的 runtime ID，不再重复从泛型 Resolution 取值。
+      runtimeRevisionId: plan.runtimeRevisionId,
       turn,
       attempt,
       runtimeClient: params.runtimeClient,

@@ -461,8 +461,25 @@ describe("ExecutionBinding authority final validation", () => {
       runtimeAttestationIds: ["runtime-attestation-1"],
       conformanceRunId: "conformance-run-1",
     };
+    // 判别列：targetKind 显式 runtime，Agent 目标事实全为 null（runtime 不适用）。
     const projection = {
       ...expected,
+      targetKind: "runtime" as const,
+      targetIdentity: "runtime",
+      agentId: null,
+      agentRevisionId: null,
+      agentEndpointRef: null,
+      agentIdentityMode: null,
+      agentCredentialRefId: null,
+      agentNetworkZone: null,
+      agentRevisionState: null,
+      agentLifecycleState: null,
+      agentPublicationActive: null,
+      agentEvidenceValid: null,
+      agentPublicationRecordId: null,
+      agentContractSnapshotId: null,
+      agentContractDigest: null,
+      agentContextDigest: null,
       eligibilityState: "eligible" as const,
       activationState: "active" as const,
       capabilityCompatibilityDigest: expected.capabilityManifestDigest,
@@ -478,11 +495,109 @@ describe("ExecutionBinding authority final validation", () => {
       { capabilityCompatibilityDigest: `sha256:${"9".repeat(64)}` },
       { runtimeAttestationIds: [] },
       { runtimeEvidenceKind: "external_endpoint" as const },
+      { targetKind: "agent" as const },
+      { targetIdentity: "agent-1" },
+      { agentId: "agent-1" },
+      { agentRevisionId: "agent-revision-1" },
     ]) {
       expect(() =>
         validateFrozenProjectionAuthority({ projection: { ...projection, ...changed }, expected }),
       ).toThrow(/stale/);
     }
+  });
+
+  it("Projection 必须显式 targetKind=runtime，拒绝 Agent/混合/缺失 runtime 事实", () => {
+    const expected = {
+      routeId: "route-1",
+      tenantId: "tenant-1",
+      projectionVersionNo: 7,
+      routeRevisionId: "route-revision-1",
+      routeActivationId: "activation-1",
+      runtimeRevisionId: "runtime-revision-1",
+      policyRevisionId: "policy-revision-1",
+      routeContentDigest: `sha256:${"1".repeat(64)}`,
+      runtimeArtifactId: "runtime-artifact-1",
+      runtimeArtifactDigest: `sha256:${"3".repeat(64)}`,
+      runtimeConfigDigest: `sha256:${"4".repeat(64)}`,
+      runtimeTargetDigest: `sha256:${"t".repeat(64)}`,
+      runtimeEvidenceKind: "hosted_artifact" as const,
+      capabilityManifestDigest: `sha256:${"5".repeat(64)}`,
+      runtimePublicationRecordId: "runtime-publication-1",
+      runtimeAttestationIds: ["runtime-attestation-1"],
+      conformanceRunId: "conformance-run-1",
+    };
+    // 判别列：targetKind 显式 runtime，Agent 目标事实全为 null（不适用）。
+    const runtimeProjection = {
+      ...expected,
+      targetKind: "runtime" as const,
+      targetIdentity: "runtime",
+      agentId: null,
+      agentRevisionId: null,
+      agentEndpointRef: null,
+      agentIdentityMode: null,
+      agentCredentialRefId: null,
+      agentNetworkZone: null,
+      agentRevisionState: null,
+      agentLifecycleState: null,
+      agentPublicationActive: null,
+      agentEvidenceValid: null,
+      agentPublicationRecordId: null,
+      agentContractSnapshotId: null,
+      agentContractDigest: null,
+      agentContextDigest: null,
+      eligibilityState: "eligible" as const,
+      activationState: "active" as const,
+      capabilityCompatibilityDigest: expected.capabilityManifestDigest,
+    };
+
+    // 有效 targetKind=runtime、所有 Agent 字段为 null 通过。
+    expect(() =>
+      validateFrozenProjectionAuthority({ projection: runtimeProjection, expected }),
+    ).not.toThrow();
+
+    // targetKind=agent 被拒绝（即便共享 ID/digest 一致）。
+    expect(() =>
+      validateFrozenProjectionAuthority({
+        projection: { ...runtimeProjection, targetKind: "agent" as const },
+        expected,
+      }),
+    ).toThrow(/stale/);
+
+    // runtime target 且 runtimeRevisionId 为 null 被拒绝。
+    expect(() =>
+      validateFrozenProjectionAuthority({
+        projection: {
+          ...runtimeProjection,
+          targetKind: "runtime" as const,
+          runtimeRevisionId: null,
+        } as never,
+        expected,
+      }),
+    ).toThrow(/stale/);
+
+    // runtime target 且任一 Agent 目标事实被填充被拒绝。
+    for (const agentFact of [
+      { agentRevisionId: "agent-revision-1" },
+      { agentEndpointRef: "endpoint-1" },
+      { agentIdentityMode: "bearer" as const },
+      { agentCredentialRefId: "credential-1" },
+      { agentNetworkZone: "zone-1" },
+    ]) {
+      expect(() =>
+        validateFrozenProjectionAuthority({
+          projection: { ...runtimeProjection, ...agentFact },
+          expected,
+        }),
+      ).toThrow(/stale/);
+    }
+
+    // expected/runtime ID 仍要求精确一致。
+    expect(() =>
+      validateFrozenProjectionAuthority({
+        projection: { ...runtimeProjection, runtimeRevisionId: "other-revision" },
+        expected,
+      }),
+    ).toThrow(/stale/);
   });
 
   it("Policy 后最终锁 Projection", () => {

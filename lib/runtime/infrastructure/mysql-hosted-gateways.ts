@@ -1,64 +1,50 @@
 /**
  * MySQL Hosted Gateways 实现 — 纯适配器层。
  *
- * 将 mysql-hosted-runtime-control-plane.ts 单体拆分为 6 个职责清晰的 Gateway，
- * 每个 Gateway 只做 DB 访问 + 对应领域调用。
- * Saga 负责步骤编排；此文件只提供基础设施适配。
+ * 专题01 冻结（runtime-only）：
+ * 将 mysql-hosted-runtime-control-plane.ts 单体拆分为职责清晰的 Gateway，
+ * 每个 Gateway 只做 DB 访问 + 对应领域调用。Saga 负责步骤编排；此文件只提供基础设施适配。
+ *
+ * 本文件只供应 tenant 内 builtin Harness Runtime 及其 targetKind=runtime Route。
+ * 无 Agent 发布、Agent revision、Agent route，或 builtin-runtime binding 检查。
+ * runtimePrepare 使用 requesterId 作为首次创建 Runtime 记录 owner，不查询 Agent。
  *
  * 事实源：docs/architecture/agent-control-plane.md 与 docs/architecture/persistence.md。
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
-import { mysqlAgentPublicationStore } from "@/lib/agents/persistence/mysql-agent-publication-store";
 import { createRecordArtifactAttestation } from "@/lib/artifacts/application/record-artifact-attestation";
 import {
   ArtifactAttestationFailedError,
   verifyArtifactAttestation,
 } from "@/lib/artifacts/domain/artifact-attestation";
-import {
-  getAttestationById,
-  listAttestationsByRevision,
-} from "@/lib/artifacts/persistence/artifact-attestation-reader";
+import { listAttestationsByRevision } from "@/lib/artifacts/persistence/artifact-attestation-reader";
 import { mysqlArtifactAttestationPersistenceStore } from "@/lib/artifacts/persistence/mysql-artifact-attestation-store";
 import { runtimeConformanceConfig } from "@/lib/config";
 import { db } from "@/lib/db/client";
-import { agentRevisionTable, agentTable } from "@/lib/persistence/schema/agents";
 import { tenantTable } from "@/lib/persistence/schema/control-plane";
-import { deploymentRouteSetTable } from "@/lib/persistence/schema/routes";
 import { runtimeRevisionTable, runtimeTable } from "@/lib/persistence/schema/runtimes";
-import { getPublicationRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
-import { getWithdrawalRecordBySubject } from "@/lib/publications/persistence/publication-record-queries";
 import { createActivateRouteSet } from "@/lib/routes/application/activate-route-set";
+import { ensureRouteSetByTargetScope } from "@/lib/routes/application/deployment-route-service";
 import { createResolveRoute } from "@/lib/routes/application/resolve-route";
 import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { mysqlRouteSetActivationStore } from "@/lib/routes/persistence/mysql-route-set-activation-store";
 import { createDSSEConformanceVerifier } from "@/lib/runtime/conformance/runtime-conformance-verifier";
 import { getHostedControlPlaneEvidenceProvider } from "@/lib/runtime/domain/hosted-control-plane-evidence";
 import { RunnerSigningIdentityRegistry } from "@/lib/runtime/domain/runner-signing-identity";
-import { PUBLICATION_CONFORMANCE_CASES } from "@/lib/runtime/domain/runtime-conformance-contract";
 import { computeRuntimeTargetDigest } from "@/lib/runtime/domain/runtime-target-digest";
 import type {
-  HostedAgentPublicationGateway,
   HostedGateways,
-  HostedRouteActivationGateway,
-  HostedRouteReader,
   HostedRuntimeArtifactVerifyGateway,
   HostedRuntimeConformanceGateway,
   HostedRuntimePrepareGateway,
   HostedRuntimePublishGateway,
+  HostedRuntimeRouteActivationGateway,
+  HostedRuntimeRouteReader,
 } from "@/lib/runtime/infrastructure/hosted-gateways";
 import { mysqlRuntimeConformanceRunStore } from "@/lib/runtime/persistence/mysql-runtime-conformance-run-store";
 import { mysqlRuntimePublicationStore } from "@/lib/runtime/persistence/mysql-runtime-publication-store";
-import {
-  runtimeConformanceCaseResult,
-  runtimeConformanceRun,
-} from "@/lib/runtime/persistence/runtime-conformance-run-record";
-import type {
-  HostedRuntimeRoute,
-  PublishedHostedAgentRevision,
-  PublishedHostedRuntimeRevision,
-} from "@/lib/runtime/provisioning/provision-hosted-runtime";
+import type { HostedRuntimeRoute } from "@/lib/runtime/provisioning/provision-hosted-runtime";
 import { createPublishRuntimeRevision } from "@/lib/runtime/provisioning/publish-runtime-revision";
 import { createRecordRuntimeConformanceRun } from "@/lib/runtime/provisioning/record-runtime-conformance-run";
 import { and, desc, eq, max } from "drizzle-orm";
@@ -100,100 +86,40 @@ const HOSTED_RUNTIME_CONFIG_DIGEST = digest({
 const recordArtifactAttestation = createRecordArtifactAttestation({
   store: mysqlArtifactAttestationPersistenceStore,
 });
-const publishAgentRevision = createPublishAgentRevision({ store: mysqlAgentPublicationStore });
 const publishRuntimeRevision = createPublishRuntimeRevision({
   store: mysqlRuntimePublicationStore,
 });
 const resolveRoute = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
 const activateRouteSet = createActivateRouteSet({ store: mysqlRouteSetActivationStore });
 
-// ─── 1. HostedRouteReader ──────────────────────────────────
+// ─── 1. HostedRuntimeRouteReader ───────────────────────────
 
-const routeReader: HostedRouteReader = {
-  async resolveEligibleRoute(command) {
+const runtimeRouteReader: HostedRuntimeRouteReader = {
+  async resolveEligibleRuntimeRoute(command) {
     const outcome = await resolveRoute({
-      ...command,
-      // 显式 agent target：解析指定 Agent 能力 Route（冻结架构）。
-      target: { kind: "agent", agentId: command.agentId },
-      businessKey: { jobId: `hosted-provision:${command.agentId}` },
+      tenantId: command.tenantId,
+      // 显式 runtime target：解析 targetKind=runtime Route（专题01 冻结架构）。
+      target: { kind: "runtime" },
+      routeScopeKey: command.routeScopeKey,
+      businessKey: { jobId: `hosted-provision:${command.routeScopeKey}` },
     });
     if (outcome.status !== "resolved") return null;
-    if (
-      !(await isBuiltinHostedRuntimeRevision(
-        command.tenantId,
-        outcome.resolution.runtimeRevisionId,
-      ))
-    ) {
-      return null;
-    }
+    const resolution = outcome.resolution;
+    // 从 resolution.target 读取 runtimeRevisionId（判别联合，无扁平旧字段）。
+    if (resolution.target.kind !== "runtime") return null;
     return {
-      routeId: outcome.resolution.deploymentRouteId,
-      routeRevisionId: outcome.resolution.routeRevisionId,
-      routeActivationId: outcome.resolution.routeActivationId,
-      agentRevisionId: outcome.resolution.agentRevisionId,
-      runtimeRevisionId: outcome.resolution.runtimeRevisionId,
-      projectionVersionNo: outcome.resolution.projectionVersionNo ?? null,
+      routeId: resolution.deploymentRouteId,
+      routeRevisionId: resolution.routeRevisionId,
+      routeActivationId: resolution.routeActivationId,
+      runtimeRevisionId: resolution.target.runtimeRevisionId,
+      projectionVersionNo: resolution.projectionVersionNo,
     };
   },
 };
 
-// ─── 2. HostedAgentPublicationGateway ──────────────────────
+// ─── 2. Runtime Step Gateways ─────────────────────────
 
-const agentPublication: HostedAgentPublicationGateway = {
-  async ensurePublishedAgentRevision(command) {
-    const existing = await loadPublishedAgentRevision(
-      command.tenantId,
-      command.agentId,
-      command.expectedAgentRevisionId,
-    );
-    if (existing) return existing;
-
-    const { agent, revision } = await loadExpectedAgentRevision({
-      tenantId: command.tenantId,
-      agentId: command.agentId,
-      expectedAgentRevisionId: command.expectedAgentRevisionId,
-    });
-    if (revision.revisionState === "published") {
-      const winner = await loadPublishedAgentRevision(
-        command.tenantId,
-        command.agentId,
-        command.expectedAgentRevisionId,
-      );
-      if (winner) return winner;
-      throw hostedPermanentError(
-        "HOSTED_AGENT_REVISION_EVIDENCE_INVALID",
-        `指定 AgentRevision 缺少有效发布证据 (${command.expectedAgentRevisionId})`,
-      );
-    }
-    // Agent 是源码不可见黑盒：发布权威是 AgentContractSnapshot 证据，无 Artifact Attestation。
-    try {
-      const result = await publishAgentRevision({
-        tenantId: command.tenantId,
-        revisionId: revision.id,
-        agentExpectedVersionNo: agent.versionNo,
-        actor: { tenantId: command.tenantId, actorType: "system", actorId: HOSTED_ACTOR_ID },
-        requestId: `hosted-agent-publish:${revision.id}`,
-        idempotencyKey: `hosted-agent-publish:${revision.id}`,
-      });
-      return {
-        revisionId: result.revision.id,
-        publicationRecordId: result.publicationRecordId,
-      };
-    } catch (error) {
-      const winner = await loadPublishedAgentRevision(
-        command.tenantId,
-        command.agentId,
-        command.expectedAgentRevisionId,
-      );
-      if (winner) return winner;
-      throw error;
-    }
-  },
-};
-
-// ─── 3. Runtime Step Gateways ─────────────────────────
-
-/** prepareRuntimeRevision */
+/** prepareRuntimeRevision — 命令只含 {tenantId, requesterId}。 */
 const runtimePrepare: HostedRuntimePrepareGateway = {
   async prepareRuntimeRevision(command) {
     const evidence = await getHostedControlPlaneEvidenceProvider().loadArtifactEvidence({
@@ -202,11 +128,8 @@ const runtimePrepare: HostedRuntimePrepareGateway = {
     });
     const { runtime, revision } = await ensureRuntimeDraft({
       tenantId: command.tenantId,
-      ownerUserId: await loadAgentRevisionOwner(
-        command.tenantId,
-        command.agentId,
-        command.agentRevisionId,
-      ),
+      // requesterId 仅作为首次创建 Runtime 记录 owner；不查询 Agent/AgentRevision。
+      ownerUserId: command.requesterId,
       artifactRef: evidence.artifactRef,
       artifactDigest: evidence.artifactDigest,
     });
@@ -227,8 +150,11 @@ const runtimeArtifactVerify: HostedRuntimeArtifactVerifyGateway = {
       artifactRevisionId: command.runtimeRevisionId,
       evidence,
     });
+    if (!attestation.artifactId?.trim()) {
+      throw new Error(`Runtime Attestation 缺少 artifactId (${attestation.id})`);
+    }
     return {
-      runtimeArtifactId: attestation.artifactId ?? "",
+      runtimeArtifactId: attestation.artifactId,
       runtimeAttestationIds: [attestation.id],
     };
   },
@@ -278,6 +204,10 @@ function createRuntimeConformanceGateway(
 /** publishRuntimeRevision */
 const runtimePublish: HostedRuntimePublishGateway = {
   async publishRuntimeRevision(command) {
+    const attestationId = command.runtimeAttestationIds[0]?.trim();
+    if (!command.conformanceRunId.trim() || !attestationId) {
+      throw new Error("发布 Hosted RuntimeRevision 缺少 Conformance 或 Attestation 事实");
+    }
     const [runtime] = await db
       .select()
       .from(runtimeTable)
@@ -295,7 +225,7 @@ const runtimePublish: HostedRuntimePublishGateway = {
       revisionId: command.runtimeRevisionId,
       runtimeExpectedVersionNo: runtime.versionNo,
       conformanceRunId: command.conformanceRunId,
-      attestationId: command.runtimeAttestationIds[0] ?? "",
+      attestationId,
       actor: { tenantId: command.tenantId, actorType: "system", actorId: HOSTED_ACTOR_ID },
       requestId: `hosted-runtime-publish:${command.runtimeRevisionId}`,
       idempotencyKey: `hosted-runtime-publish:${command.runtimeRevisionId}`,
@@ -304,15 +234,21 @@ const runtimePublish: HostedRuntimePublishGateway = {
   },
 };
 
-// ─── 4. HostedRouteActivationGateway ────────────────────────
+// ─── 3. HostedRuntimeRouteActivationGateway ─────────────────
 //
 // 使用 ActivateRouteSet 原子激活整个 RouteSet。
-// 将单 Route 激活转换为 RouteSet 原子激活：先 ensureRouteSet，
-// 再 activateRouteSet with desiredRoutes 含一条 active 路由。
+// 先 ensureRouteSetByTargetScope（targetKind=runtime），
+// 再 activateRouteSet with desiredRoutes 含一条 active runtime 路由。
+// 不接受任何 Agent endpoint/identity/credential/network 字段。
 
-const routeActivation: HostedRouteActivationGateway = {
-  async activateRoute(command) {
-    const routeSet = await ensureRouteSet(command);
+const runtimeRouteActivation: HostedRuntimeRouteActivationGateway = {
+  async activateRuntimeRoute(command) {
+    const { routeSet } = await ensureRouteSetByTargetScope({
+      tenantId: command.tenantId,
+      target: { kind: "runtime" },
+      routeScopeKey: command.routeScopeKey,
+      routeScopeJson: { runtimeKey: BUILTIN_HOSTED_RUNTIME_KEY },
+    });
     const activated = await activateRouteSet({
       tenantId: command.tenantId,
       routeSetId: routeSet.id,
@@ -320,15 +256,10 @@ const routeActivation: HostedRouteActivationGateway = {
       desiredRoutes: [
         {
           routeKey: "primary",
-          agentRevisionId: command.agentRevision.revisionId,
-          runtimeRevisionId: command.runtimeRevision.revisionId,
-          // Agent Route 必须冻结生产调用事实。
-          // Hosted 内置 Agent 的生产调用端点是 Hosted in-process Runtime 本身：
-          // 无外部出站 bearer 身份（identityMode=none），网络区域 internal。
-          agentEndpointRef: HOSTED_RUNTIME_ENDPOINT,
-          agentIdentityMode: "none",
-          agentCredentialRefId: null,
-          agentNetworkZone: "internal",
+          target: {
+            kind: "runtime",
+            runtimeRevisionId: command.runtimeRevision.revisionId,
+          },
           policyRevisionId: null,
           modelPolicyRevisionId: null,
           toolsetRevisionId: null,
@@ -343,21 +274,25 @@ const routeActivation: HostedRouteActivationGateway = {
       ],
       actor: { tenantId: command.tenantId, actorType: "system", actorId: HOSTED_ACTOR_ID },
       reason: "激活内置 Hosted Runtime 正式路由",
-      requestId: `hosted-route-activate:${command.agentId}`,
+      requestId: `hosted-route-activate:${command.routeScopeKey}:${command.runtimeRevision.revisionId}`,
       idempotencyKey: [
         "hosted-route-activate",
-        command.agentRevision.revisionId,
+        command.routeScopeKey,
         command.runtimeRevision.revisionId,
       ].join(":"),
     });
 
+    const activation = activated.activations[0];
+    if (!activation) {
+      throw new Error("Hosted Runtime Route 激活未返回 Activation 事实");
+    }
     // 返回路由详情
     return {
       routeSetId: activated.routeSetId,
       routeSetVersionNo: activated.routeSetVersionNo,
-      routeId: activated.activations[0]?.routeId ?? "",
-      routeRevisionId: activated.activations[0]?.routeRevisionId ?? "",
-      routeActivationId: activated.activations[0]?.routeActivationId ?? "",
+      routeId: activation.routeId,
+      routeRevisionId: activation.routeRevisionId,
+      routeActivationId: activation.routeActivationId,
     };
   },
 };
@@ -372,7 +307,7 @@ const routeActivation: HostedRouteActivationGateway = {
 
 /**
  * 创建 MySQL Hosted Gateways 实例。
- * 返回 7 个 Gateway 的组合对象，供 Saga 编排使用。
+ * 返回 6 个 runtime-only Gateway 的组合对象，供 Saga 编排使用。
  */
 export interface MysqlHostedGatewaysDependencies {
   runnerSigningIdentityRegistry?: RunnerSigningIdentityRegistry;
@@ -389,225 +324,17 @@ export function createMysqlHostedGateways(
     }),
   });
   return {
-    routeReader,
-    agentPublication,
+    runtimeRouteReader,
     runtimePrepare,
     runtimeArtifactVerify,
     runtimeConformance: createRuntimeConformanceGateway(recordRuntimeConformanceRun),
     runtimePublish,
-    routeActivation,
+    runtimeRouteActivation,
   };
 }
 
 // ─── 内部辅助函数 ──────────────────────────────────────────
 // (从 mysql-hosted-runtime-control-plane.ts 搬运，逻辑不变)
-
-async function isBuiltinHostedRuntimeRevision(
-  tenantId: string,
-  runtimeRevisionId: string,
-): Promise<boolean> {
-  const [row] = await db
-    .select({ runtimeId: runtimeTable.id })
-    .from(runtimeRevisionTable)
-    .innerJoin(
-      runtimeTable,
-      and(
-        eq(runtimeTable.id, runtimeRevisionTable.runtimeId),
-        eq(runtimeTable.tenantId, tenantId),
-        eq(runtimeTable.runtimeKey, BUILTIN_HOSTED_RUNTIME_KEY),
-        eq(runtimeTable.runtimeKind, "hosted"),
-      ),
-    )
-    .where(eq(runtimeRevisionTable.id, runtimeRevisionId))
-    .limit(1);
-  return Boolean(row);
-}
-
-async function loadPublishedAgentRevision(
-  tenantId: string,
-  agentId: string,
-  expectedAgentRevisionId: string,
-): Promise<PublishedHostedAgentRevision | null> {
-  const [revision] = await db
-    .select({ revision: agentRevisionTable })
-    .from(agentRevisionTable)
-    .innerJoin(
-      agentTable,
-      and(eq(agentTable.id, agentRevisionTable.agentId), eq(agentTable.tenantId, tenantId)),
-    )
-    .where(
-      and(
-        eq(agentRevisionTable.id, expectedAgentRevisionId),
-        eq(agentRevisionTable.agentId, agentId),
-        eq(agentRevisionTable.revisionState, "published"),
-      ),
-    )
-    .limit(1);
-  if (!revision) return null;
-  // Agent 是源码不可见黑盒：发布事实 = Publication 存在且未撤回（无 Artifact 证据）。
-  const [publication, withdrawal] = await Promise.all([
-    getPublicationRecordBySubject({
-      tenantId,
-      subjectType: "agent_revision",
-      subjectRevisionId: revision.revision.id,
-    }),
-    getWithdrawalRecordBySubject({
-      tenantId,
-      subjectType: "agent_revision",
-      subjectRevisionId: revision.revision.id,
-    }),
-  ]);
-  if (!publication || withdrawal) return null;
-  return { revisionId: revision.revision.id, publicationRecordId: publication.id };
-}
-
-async function loadPublishedRuntimeRevision(
-  tenantId: string,
-): Promise<PublishedHostedRuntimeRevision | null> {
-  const [runtime] = await db
-    .select()
-    .from(runtimeTable)
-    .where(
-      and(
-        eq(runtimeTable.tenantId, tenantId),
-        eq(runtimeTable.runtimeKey, BUILTIN_HOSTED_RUNTIME_KEY),
-      ),
-    )
-    .limit(1);
-  if (!runtime?.currentRevisionId) return null;
-  const [revision] = await db
-    .select()
-    .from(runtimeRevisionTable)
-    .where(
-      and(
-        eq(runtimeRevisionTable.id, runtime.currentRevisionId),
-        eq(runtimeRevisionTable.runtimeId, runtime.id),
-        eq(runtimeRevisionTable.revisionState, "published"),
-      ),
-    )
-    .limit(1);
-  if (!revision) return null;
-  const fact = await loadPublicationFact({
-    tenantId,
-    subjectType: "runtime_revision",
-    revisionId: revision.id,
-    artifactId: revision.artifactId,
-    artifactDigest: revision.artifactDigest,
-  });
-  if (!fact?.conformanceRunId) return null;
-  const [run] = await db
-    .select()
-    .from(runtimeConformanceRun)
-    .where(
-      and(
-        eq(runtimeConformanceRun.id, fact.conformanceRunId),
-        eq(runtimeConformanceRun.tenantId, tenantId),
-        eq(runtimeConformanceRun.runtimeRevisionId, revision.id),
-        eq(runtimeConformanceRun.overallResult, "passed"),
-        eq(runtimeConformanceRun.runtimeTargetDigest, revision.runtimeTargetDigest),
-        eq(runtimeConformanceRun.runtimeConfigDigest, revision.configHash),
-        eq(runtimeConformanceRun.protocolContractRevision, revision.protocolContractRevision),
-      ),
-    )
-    .limit(1);
-  if (!run) return null;
-  const cases = await db
-    .select()
-    .from(runtimeConformanceCaseResult)
-    .where(eq(runtimeConformanceCaseResult.runId, run.id));
-  if (cases.length !== PUBLICATION_CONFORMANCE_CASES.length || cases.some((item) => !item.passed))
-    return null;
-  return { revisionId: revision.id, ...fact, conformanceRunId: fact.conformanceRunId };
-}
-
-async function loadPublicationFact(params: {
-  tenantId: string;
-  subjectType: "agent_revision" | "runtime_revision";
-  revisionId: string;
-  artifactId: string | null;
-  artifactDigest: string | null;
-}) {
-  const [publication, withdrawal] = await Promise.all([
-    getPublicationRecordBySubject({
-      tenantId: params.tenantId,
-      subjectType: params.subjectType,
-      subjectRevisionId: params.revisionId,
-    }),
-    getWithdrawalRecordBySubject({
-      tenantId: params.tenantId,
-      subjectType: params.subjectType,
-      subjectRevisionId: params.revisionId,
-    }),
-  ]);
-  if (!publication || withdrawal || !params.artifactId || !params.artifactDigest) return null;
-  const attestationId = publication.attestationIds[0];
-  if (!attestationId) return null;
-  const found = await getAttestationById(params.tenantId, attestationId);
-  if (
-    !found ||
-    found.revocation ||
-    found.attestation.verificationState !== "verified" ||
-    found.attestation.artifactRevisionId !== params.revisionId ||
-    found.attestation.artifactType !== params.subjectType ||
-    found.attestation.artifactId !== params.artifactId ||
-    found.attestation.artifactDigest !== params.artifactDigest
-  ) {
-    return null;
-  }
-  return {
-    publicationRecordId: publication.id,
-    attestationId,
-    conformanceRunId: publication.conformanceRunId,
-  };
-}
-
-async function loadExpectedAgentRevision(params: {
-  tenantId: string;
-  agentId: string;
-  expectedAgentRevisionId: string;
-}) {
-  return db.transaction(async (tx) => {
-    const [agent] = await tx
-      .select()
-      .from(agentTable)
-      .where(and(eq(agentTable.tenantId, params.tenantId), eq(agentTable.id, params.agentId)))
-      .limit(1)
-      .for("update");
-    if (!agent) {
-      throw hostedPermanentError(
-        "HOSTED_AGENT_REVISION_MISMATCH",
-        `指定 Agent 不存在 (${params.agentId})`,
-      );
-    }
-    const [revision] = await tx
-      .select()
-      .from(agentRevisionTable)
-      .where(
-        and(
-          eq(agentRevisionTable.id, params.expectedAgentRevisionId),
-          eq(agentRevisionTable.agentId, agent.id),
-        ),
-      )
-      .limit(1)
-      .for("update");
-    if (
-      !revision ||
-      (revision.revisionState !== "draft" && revision.revisionState !== "published")
-    ) {
-      throw hostedPermanentError(
-        "HOSTED_AGENT_REVISION_MISMATCH",
-        `指定 AgentRevision 不存在或不可发布 (${params.expectedAgentRevisionId})`,
-      );
-    }
-    return { agent, revision };
-  });
-}
-
-function hostedPermanentError(code: string, message: string): Error {
-  const error = new Error(`[${code}] ${message}`);
-  error.name = "HostedProvisioningPermanentError";
-  return error;
-}
 
 async function ensureRuntimeDraft(params: {
   tenantId: string;
@@ -716,7 +443,7 @@ async function ensureRuntimeDraft(params: {
 
 async function ensureVerifiedAttestation(params: {
   tenantId: string;
-  artifactType: "agent_revision" | "runtime_revision";
+  artifactType: "runtime_revision";
   artifactRevisionId: string;
   evidence: Awaited<
     ReturnType<ReturnType<typeof getHostedControlPlaneEvidenceProvider>["loadArtifactEvidence"]>
@@ -796,78 +523,6 @@ async function ensureVerifiedAttestation(params: {
     );
   }
   return recorded;
-}
-
-async function loadAgentRevisionOwner(
-  tenantId: string,
-  agentId: string,
-  agentRevisionId: string,
-): Promise<string> {
-  const [agent] = await db
-    .select({ ownerUserId: agentTable.ownerUserId })
-    .from(agentTable)
-    .innerJoin(
-      agentRevisionTable,
-      and(
-        eq(agentRevisionTable.id, agentRevisionId),
-        eq(agentRevisionTable.agentId, agentTable.id),
-        eq(agentRevisionTable.revisionState, "published"),
-      ),
-    )
-    .where(and(eq(agentTable.tenantId, tenantId), eq(agentTable.id, agentId)))
-    .limit(1);
-  if (!agent) {
-    throw hostedPermanentError(
-      "HOSTED_AGENT_REVISION_MISMATCH",
-      `指定 AgentRevision 不属于请求 Agent 或尚未发布 (${agentRevisionId})`,
-    );
-  }
-  return agent.ownerUserId;
-}
-
-async function ensureRouteSet(command: {
-  tenantId: string;
-  agentId: string;
-  routeScopeKey: string;
-}) {
-  return db.transaction(async (tx) => {
-    const [agent] = await tx
-      .select({ id: agentTable.id })
-      .from(agentTable)
-      .where(and(eq(agentTable.tenantId, command.tenantId), eq(agentTable.id, command.agentId)))
-      .limit(1)
-      .for("update");
-    if (!agent) throw new Error(`Hosted Route 初始化失败：助手不存在 (${command.agentId})`);
-    const [existing] = await tx
-      .select()
-      .from(deploymentRouteSetTable)
-      .where(
-        and(
-          eq(deploymentRouteSetTable.tenantId, command.tenantId),
-          eq(deploymentRouteSetTable.agentId, command.agentId),
-          eq(deploymentRouteSetTable.routeScopeKey, command.routeScopeKey),
-        ),
-      )
-      .limit(1);
-    if (existing) return existing;
-    const id = randomUUID();
-    await tx.insert(deploymentRouteSetTable).values({
-      id,
-      tenantId: command.tenantId,
-      targetKind: "agent",
-      agentId: command.agentId,
-      routeScopeKey: command.routeScopeKey,
-      routeScopeJson: { runtime: BUILTIN_HOSTED_RUNTIME_KEY },
-      versionNo: 1,
-    });
-    const [created] = await tx
-      .select()
-      .from(deploymentRouteSetTable)
-      .where(eq(deploymentRouteSetTable.id, id))
-      .limit(1);
-    if (!created) throw new Error("Hosted RouteSet 创建失败");
-    return created;
-  });
 }
 
 function digest(value: unknown): string {

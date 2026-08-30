@@ -10,9 +10,16 @@ import type { RouteEligibilityProjectionRecord } from "./route-eligibility-proje
 export interface UpsertProjectionInput {
   routeId: string;
   tenantId: string;
-  /** 显式目标类型 — runtime 或 agent（冻结架构）。 */
+  /** 显式目标类型 — runtime 或 agent（冻结架构，无默认）。 */
   targetKind: "runtime" | "agent";
-  /** runtime 时为 null；agent 时非空。 */
+  /**
+   * 目标唯一身份：
+   * - runtime：固定 "runtime"。
+   * - agent：= agentId。
+   * 与 targetKind/agentId 一致由 DB CHECK 保证。
+   */
+  targetIdentity: string;
+  /** runtime 时为 null；agent 时非空且 = targetIdentity。 */
   agentId: string | null;
   routeSetId: string;
   routeScopeKey: string;
@@ -30,42 +37,42 @@ export interface UpsertProjectionInput {
   trafficWeight: number;
   effectiveFrom: Date | null;
   effectiveUntil: Date | null;
-  /** null = 基础 Harness Route（无 Agent 资产约束）。 */
+  /** agent target 非空；runtime target 必须 null（组互斥由 DB CHECK 保证）。 */
   agentRevisionId: string | null;
   // ─── Agent Route 生产调用事实──
   agentEndpointRef: string | null;
   agentIdentityMode: "none" | "bearer" | null;
   agentCredentialRefId: string | null;
   agentNetworkZone: string | null;
-  agentRevisionState: string;
-  agentLifecycleState: string;
-  agentPublicationActive: number;
-  agentEvidenceValid: number;
-  runtimeRevisionId: string;
-  runtimeRevisionState: string;
-  runtimeLifecycleState: string;
-  runtimePublicationActive: number;
-  runtimeEvidenceValid: number;
-  runtimeConformanceValid: number;
-  policyRevisionId: string | null;
-  policyRevisionState: string | null;
-  capabilityCompatibilityDigest: string;
-  runtimeArtifactDigest: string | null;
-  runtimeConfigDigest: string | null;
-  runtimeTargetDigest: string | null;
-  /** Runtime 证据种类（hosted_artifact | external_endpoint — 03 §3）。 */
-  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
-  /** Agent Contract 证据（Agent Route 必填，base route 为 null — 05 §5）。 */
+  agentRevisionState: string | null;
+  agentLifecycleState: string | null;
+  agentPublicationActive: number | null;
+  agentEvidenceValid: number | null;
+  agentPublicationRecordId: string | null;
   agentContractSnapshotId: string | null;
   agentContractDigest: string | null;
   agentContextDigest: string | null;
-  routeContentDigest: string;
-  // ─── : 完整执行证据 ID ──────────────────────
-  agentPublicationRecordId: string | null;
+  // ─── Runtime 侧资格 ─────────────────────────
+  runtimeRevisionId: string | null;
+  runtimeRevisionState: string | null;
+  runtimeLifecycleState: string | null;
+  runtimePublicationActive: number | null;
+  runtimeEvidenceValid: number | null;
+  runtimeConformanceValid: number | null;
+  runtimeEvidenceKind: "hosted_artifact" | "external_endpoint" | null;
   runtimePublicationRecordId: string | null;
   runtimeAttestationIds: string[] | null;
   conformanceRunId: string | null;
   runtimeArtifactId: string | null;
+  runtimeArtifactDigest: string | null;
+  runtimeConfigDigest: string | null;
+  runtimeTargetDigest: string | null;
+  /** 兼容性摘要 — 仅 runtime target 计算；agent target null。 */
+  capabilityCompatibilityDigest: string | null;
+  // ─── Policy（公共语义）───────────────
+  policyRevisionId: string | null;
+  policyRevisionState: string | null;
+  routeContentDigest: string;
   sourceEventId: string | null;
   sourceAggregateVersion: number | null;
   invalidReason: string | null;

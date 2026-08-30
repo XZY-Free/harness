@@ -2,7 +2,7 @@
  * RouteSet 权威状态模型 — 从事实源读取，禁止从 DeploymentRoute 投影反向重建。
  *
  * 权威事实源：
- * - RouteRevision：每条 Route 当前有效的 Revision
+ * - RouteRevision：每条 Route 当前有效的 Revision（含判别 target）
  * - RouteActivation：每条 Route 最新的 Activation
  *
  * 不得从 DeploymentRoute 投影反向推导：
@@ -15,6 +15,11 @@
  * 参见：SnowHarness专题01全局统一与最终收敛方案
  */
 
+import type { RouteRevisionTarget } from "@/lib/routes/domain/route-revision";
+
+/** RouteSet 目标判别联合 — 禁止 nullable agentId 隐式猜测。 */
+export type RouteSetTarget = { kind: "runtime" } | { kind: "agent"; agentId: string };
+
 /**
  * 单条 Route 的权威状态。
  */
@@ -25,11 +30,10 @@ export interface AuthoritativeRouteState {
   routeKey: string;
   /** 最新 RouteRevision ID。 */
   activeRouteRevisionId: string | null;
-  /** 最新 RouteRevision 的内容摘要。 */
+  /** 最新 RouteRevision 的内容摘要（含判别 target）。 */
   activeRevision: {
-    /** null = 基础 Harness Route（无 Agent 资产约束）。 */
-    agentRevisionId: string | null;
-    runtimeRevisionId: string;
+    /** 判别 target — 只含所选 target 自己的事实。 */
+    target: RouteRevisionTarget;
     policyRevisionId: string | null;
     modelPolicyRevisionId: string | null;
     toolsetRevisionId: string | null;
@@ -56,14 +60,35 @@ export interface AuthoritativeRouteSetState {
   routeSetId: string;
   /** 租户 ID。 */
   tenantId: string;
-  /** Agent ID；null = 基础 Harness Route（无 Agent 资产约束）。 */
-  agentId: string | null;
+  /** RouteSet 目标判别联合 — runtime 或 agent。 */
+  target: RouteSetTarget;
   /** Route Scope Key。 */
   routeScopeKey: string;
   /** RouteSet 版本号（ETag）。 */
   versionNo: number;
   /** 各条 Route 的权威状态。 */
   routes: AuthoritativeRouteState[];
+}
+
+/** 比较两个判别 target 是否一致（按所选 target 自己的事实）。 */
+export function routeTargetsEqual(a: RouteRevisionTarget, b: RouteRevisionTarget): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "runtime") {
+    return b.kind === "runtime" && a.runtimeRevisionId === b.runtimeRevisionId;
+  }
+  return (
+    b.kind === "agent" &&
+    a.agentRevisionId === b.agentRevisionId &&
+    a.agentEndpointRef === b.agentEndpointRef &&
+    a.agentIdentityMode === b.agentIdentityMode &&
+    a.agentCredentialRefId === b.agentCredentialRefId &&
+    a.agentNetworkZone === b.agentNetworkZone
+  );
+}
+
+/** target 稳定标识（用于 drift 报告，不含二义 flat 形状）。 */
+function routeTargetKey(target: RouteRevisionTarget): string {
+  return JSON.stringify(target);
 }
 
 /**
@@ -77,8 +102,8 @@ export function detectProjectionDrift(
   projectionRoutes: Array<{
     routeId: string;
     routeKey: string;
-    agentRevisionId: string;
-    runtimeRevisionId: string;
+    /** 判别 target — 只含所选 target 自己的事实。 */
+    target: RouteRevisionTarget;
     activeRouteRevisionId: string | null;
     routeState: string;
   }>,
@@ -99,6 +124,17 @@ export function detectProjectionDrift(
         kind: "revision_mismatch",
         authoritative: route.activeRouteRevisionId,
         projection: proj.activeRouteRevisionId,
+      });
+      continue;
+    }
+    // 同一 Revision 下 target 不一致 → 投影 target 漂移。
+    const authTarget = route.activeRevision?.target ?? null;
+    if (authTarget && !routeTargetsEqual(authTarget, proj.target)) {
+      drifts.push({
+        routeId: route.routeId,
+        kind: "target_mismatch",
+        authoritative: routeTargetKey(authTarget),
+        projection: routeTargetKey(proj.target),
       });
     }
     const expectedState = route.activationState === "active" ? "enabled" : "disabled";
@@ -127,5 +163,11 @@ export type ProjectionDrift =
       kind: "revision_mismatch";
       authoritative: string | null;
       projection: string | null;
+    }
+  | {
+      routeId: string;
+      kind: "target_mismatch";
+      authoritative: string;
+      projection: string;
     }
   | { routeId: string; kind: "state_mismatch"; authoritative: string; projection: string };

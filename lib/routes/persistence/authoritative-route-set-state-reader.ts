@@ -12,17 +12,48 @@ import { deploymentRouteSetTable } from "@/lib/persistence/schema/deployment-rou
 import type {
   AuthoritativeRouteSetState,
   AuthoritativeRouteState,
+  RouteSetTarget,
 } from "@/lib/routes/domain/authoritative-route-set-state";
-import { routeActivation, routeRevision } from "@/lib/routes/persistence/route-revision-record";
+import {
+  routeActivation,
+  routeRevision,
+  routeRevisionTargetFromRecord,
+} from "@/lib/routes/persistence/route-revision-record";
 import { desc, eq } from "drizzle-orm";
+
+/** 从显式 DB trio（targetKind/targetIdentity/agentId）严格构造 RouteSet target；畸形返回 null。 */
+function routeSetTargetFromTrio(input: {
+  targetKind: string;
+  targetIdentity: string;
+  agentId: string | null;
+}): RouteSetTarget | null {
+  if (input.targetKind === "runtime") {
+    if (input.targetIdentity !== "runtime" || input.agentId !== null) return null;
+    return { kind: "runtime" };
+  }
+  if (input.targetKind === "agent") {
+    if (
+      typeof input.agentId !== "string" ||
+      input.agentId.trim() === "" ||
+      input.agentId !== input.targetIdentity
+    ) {
+      return null;
+    }
+    return { kind: "agent", agentId: input.agentId };
+  }
+  return null;
+}
 
 /**
  * 加载 RouteSet 的权威状态。
  *
  * 数据源：
- * - DeploymentRouteSet：基本信息
- * - RouteRevision：每条 Route 最新 Revision
+ * - DeploymentRouteSet：基本信息（含判别 target）
+ * - RouteRevision：每条 Route 最新 Revision（含判别 target）
  * - RouteActivation：每条 Route 最新 Activation
+ *
+ * RouteSet 或某条 RouteRevision 的 target 畸形时 fail-closed：整体返回 null /
+ * 该 Route 视为无权威 Revision，绝不制造默认 target。
  */
 export async function loadAuthoritativeRouteSetState(
   routeSetId: string,
@@ -36,8 +67,11 @@ export async function loadAuthoritativeRouteSetState(
 
   if (!routeSet) return null;
 
+  // 1b. 严格构造 RouteSet 判别 target；畸形 → fail-closed。
+  const routeSetTarget = routeSetTargetFromTrio(routeSet);
+  if (!routeSetTarget) return null;
+
   // 2. 读取 RouteSet 下所有 Route（从 RouteRevision 的最新版本获取 Route 列表）
-  // 使用子查询获取每个 routeId 的最新 revisionNo
   const revisions = await db
     .select()
     .from(routeRevision)
@@ -71,13 +105,15 @@ export async function loadAuthoritativeRouteSetState(
   const routes: AuthoritativeRouteState[] = [];
   for (const [routeId, revision] of latestRevisions) {
     const activation = latestActivations.get(routeId);
+    // 严格构造 Revision 判别 target；畸形（混合/占位/缺字段）→ 该 Route 无权威 Revision。
+    const target = routeRevisionTargetFromRecord(revision);
+    if (!target) continue;
     routes.push({
       routeId,
       routeKey: revision.routeKey,
       activeRouteRevisionId: revision.id,
       activeRevision: {
-        agentRevisionId: revision.agentRevisionId,
-        runtimeRevisionId: revision.runtimeRevisionId,
+        target,
         policyRevisionId: revision.policyRevisionId,
         modelPolicyRevisionId: revision.modelPolicyRevisionId,
         toolsetRevisionId: revision.toolsetRevisionId,
@@ -97,7 +133,7 @@ export async function loadAuthoritativeRouteSetState(
   return {
     routeSetId: routeSet.id,
     tenantId: routeSet.tenantId,
-    agentId: routeSet.agentId,
+    target: routeSetTarget,
     routeScopeKey: routeSet.routeScopeKey,
     versionNo: Number(routeSet.versionNo),
     routes,

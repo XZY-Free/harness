@@ -147,7 +147,19 @@ const OLD_A2A_IDENTIFIERS = /\bA2AEventBatchSink\b|\bA2ARuntimeRefResolver\b/;
  */
 const AGENT_CALLS_SCOPE = /^lib\/agents\/calls\/(transport|application|test-support)\//;
 const AGENT_CALLS_FORBIDDEN =
-  /\bRuntimeHttpClient\b|\bruntimeExecutionRef\b|\bruntimeSessionRef\b|\bRuntimeEventIngress\b|\bmarkInvocationLost\b|\/runtime\/(?:event-ingress|recovery|recovery-queries)/;
+  /\bRuntimeHttpClient\b|\bruntimeRevisionId\b|\bruntimeExecutionRef\b|\bruntimeSessionRef\b|\bRuntimeEventIngress\b|\bmarkInvocationLost\b|\/runtime\/(?:event-ingress|recovery|recovery-queries)/;
+
+/** Agent target 对象不得同时构造 Runtime evidence 字段组。 */
+const AGENT_TARGET_WITH_RUNTIME_EVIDENCE =
+  /targetKind\s*:\s*["']agent["'][^{}]{0,800}\b(?:runtimeRevisionId|runtimePublicationRecordId|runtimeAttestationIds|runtimeConformanceValid)\s*:/;
+
+/** Agent target 不得通过三元表达式回退成 Runtime target。 */
+const AGENT_TARGET_RUNTIME_FALLBACK =
+  /target(?:\.kind)?\s*===?\s*["']agent["']\s*\?\s*\{[^{}]{0,300}\bkind\s*:\s*["']runtime["']/;
+
+/** RouteSet 唯一索引不得继续依赖 nullable agentId。 */
+const ROUTE_SET_NULLABLE_AGENT_UNIQUE =
+  /uniqueIndex\([\s\S]{0,300}?\.on\(\s*(?:\w+\.)?tenantId\s*,\s*(?:\w+\.)?agentId\s*,\s*(?:\w+\.)?routeScopeKey/;
 
 /** Schema 已知 RUNTIME_PROTOCOL_TYPES 不得含 a2a（仅 schema 文件）。 */
 const SCHEMA_RUNTIMES_PATH = "lib/persistence/schema/runtimes.ts";
@@ -189,6 +201,22 @@ export function collectTopic01BoundaryViolations(documents: readonly SourceDocum
     }
     // 正式 Route 系统（lib/routes）不得出现 chat kind 漂移。
     if (!flagged && path.startsWith("lib/routes/") && /kind\s*[:=]\s*["']chat["']/.test(source)) {
+      flagged = true;
+    }
+    // Route target 必须保持判别互斥：Agent 对象不可携带 Runtime evidence，也不可
+    // fallback 为 Runtime target。
+    if (!flagged && AGENT_TARGET_WITH_RUNTIME_EVIDENCE.test(source)) {
+      flagged = true;
+    }
+    if (!flagged && path.startsWith("lib/routes/") && AGENT_TARGET_RUNTIME_FALLBACK.test(source)) {
+      flagged = true;
+    }
+    // RouteSet 唯一 Authority 必须由非空 targetKind + targetIdentity 构成。
+    if (
+      !flagged &&
+      path === "lib/persistence/schema/deployment-route.ts" &&
+      ROUTE_SET_NULLABLE_AGENT_UNIQUE.test(source)
+    ) {
       flagged = true;
     }
     // ── A2A AgentCall 边界（Batch6）──
