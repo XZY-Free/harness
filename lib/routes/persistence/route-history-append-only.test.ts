@@ -50,7 +50,7 @@ async function seedRouteHistory() {
     routeSetId,
     routeKey: "append-only-route",
     revisionNo: 1,
-    agentRevisionId: randomUUID(),
+    agentRevisionId: null,
     runtimeRevisionId: randomUUID(),
     trafficAllocationJson: { percentage: 100 },
     routeGroupId: "primary",

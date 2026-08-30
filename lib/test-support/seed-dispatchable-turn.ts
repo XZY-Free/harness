@@ -15,10 +15,8 @@
  */
 import { randomUUID } from "node:crypto";
 import { createAgent } from "@/lib/agents/persistence/agent-queries";
-import {
-  createDraftRevision,
-  getRevisionById,
-} from "@/lib/agents/persistence/agent-revision-queries";
+import { getRevisionById } from "@/lib/agents/persistence/agent-revision-queries";
+import { createDraftRevisionWithContractSnapshot } from "@/lib/agents/test-support/create-draft-revision-with-contract";
 import { DEFAULT_USER_EMAIL, DEFAULT_USER_ID, DEFAULT_USER_NAME } from "@/lib/constants";
 import { createThread } from "@/lib/conversations/thread-queries";
 import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
@@ -69,7 +67,6 @@ async function seedPublishedAgentRevision(
   ownerId: string,
   agentKey: string,
   requiredCaps: string[],
-  contentSuffix: string,
   modelPolicy?: Record<string, unknown>,
 ) {
   const agent = await createAgent({
@@ -80,10 +77,9 @@ async function seedPublishedAgentRevision(
     lifecycleState: "enabled",
   });
 
-  const revision = await createDraftRevision({
+  const revision = await createDraftRevisionWithContractSnapshot({
     tenantId,
     agentId: agent.id,
-    agentContractSnapshotId: `snap_${contentSuffix}`,
     modelPolicyJson: modelPolicy ?? { default: "doubao-pro", provider: "doubao" },
     permissionRequirementsJson: { tool_risk_max: "high_with_confirmation" },
     delegationPolicyJson: { allowed_agent_ids: [] },
@@ -144,7 +140,6 @@ export async function seedDispatchableTurn(
     ownerId,
     agentKey,
     ["event_stream"],
-    suffix,
   );
   const invokeBinding =
     overrides.grantAgentInvoke === false

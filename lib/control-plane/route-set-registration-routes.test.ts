@@ -1,8 +1,8 @@
 /**
  * POST /admin/api/v1/deployment-route-sets — RouteSet 登记（create-or-reuse）RED 测试。
  *
- * 目标行为：授权管理员只需给出 agent_id + route_scope_key + route_scope，即可
- * 创建或复用该 Agent+Scope 的正式 RouteSet，无需知道/粘贴 RouteSet id。
+ * 目标行为：授权管理员给出判别 target + route_scope_key + route_scope，即可
+ * 创建或复用对应 Target+Scope 的正式 RouteSet，无需知道/粘贴 RouteSet id。
  *
  * 测试环境：APP_ENV=test，auth mode=dev（resolvePrincipal 使用 DEFAULT_USER_ID），
  * 真实 MySQL 8 Testcontainers，真实路由 handler 动态 import，不使用 mock。
@@ -101,7 +101,7 @@ function buildCreateRequest(body: unknown, idempotencyKey: string, token?: strin
 
 interface RouteSetProjection {
   id: string;
-  agent_id: string;
+  target: { kind: "runtime" } | { kind: "agent"; agent_id: string };
   route_scope_key: string;
   route_scope: unknown;
   version_no: number;
@@ -118,7 +118,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
 
     const response = await POST(
       buildCreateRequest(
-        { agent_id: agent.id, route_scope_key: "default", route_scope: {} },
+        {
+          target: { kind: "agent", agent_id: agent.id },
+          route_scope_key: "default",
+          route_scope: {},
+        },
         "idem-route-set-register-happy-001",
       ),
     );
@@ -127,8 +131,7 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
     expect(Object.keys(body).sort()).toEqual(
       [
         "id",
-        "target_kind",
-        "agent_id",
+        "target",
         "route_scope_key",
         "route_scope",
         "version_no",
@@ -137,7 +140,7 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
         "created",
       ].sort(),
     );
-    expect(body.agent_id).toBe(agent.id);
+    expect(body.target).toEqual({ kind: "agent", agent_id: agent.id });
     expect(body.route_scope_key).toBe("default");
     expect(body.route_scope).toEqual({});
     expect(body.version_no).toBe(1);
@@ -156,7 +159,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
 
     const first = await POST(
       buildCreateRequest(
-        { agent_id: agent.id, route_scope_key: "default", route_scope: { zone: "internal" } },
+        {
+          target: { kind: "agent", agent_id: agent.id },
+          route_scope_key: "default",
+          route_scope: { zone: "internal" },
+        },
         "idem-route-set-register-natural-a",
       ),
     );
@@ -165,7 +172,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
 
     const second = await POST(
       buildCreateRequest(
-        { agent_id: agent.id, route_scope_key: "default", route_scope: { zone: "internal" } },
+        {
+          target: { kind: "agent", agent_id: agent.id },
+          route_scope_key: "default",
+          route_scope: { zone: "internal" },
+        },
         "idem-route-set-register-natural-b",
       ),
     );
@@ -179,7 +190,7 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
     const padded = await POST(
       buildCreateRequest(
         {
-          agent_id: ` ${agent.id} `,
+          target: { kind: "agent", agent_id: ` ${agent.id} ` },
           route_scope_key: "default",
           route_scope: { zone: "internal" },
         },
@@ -197,7 +208,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
     const { POST } = await loadCreateRouteSetRoute();
     const { tenantId, userIdentityId } = await seedAdmin();
     const agent = await seedAgent(tenantId, userIdentityId, "route-set-register-agent-3");
-    const body = { agent_id: agent.id, route_scope_key: "prod", route_scope: { zone: "dmz" } };
+    const body = {
+      target: { kind: "agent", agent_id: agent.id },
+      route_scope_key: "prod",
+      route_scope: { zone: "dmz" },
+    };
 
     const first = await POST(buildCreateRequest(body, "idem-route-set-register-replay-1"));
     expect(first.status).toBe(201);
@@ -226,17 +241,64 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
     const agent = await seedAgent(tenantId, userIdentityId, "route-set-register-agent-4");
 
     const invalidBodies: unknown[] = [
-      { route_scope_key: "default", route_scope: {} }, // 缺 agent_id
-      { agent_id: null, route_scope_key: "default", route_scope: {} },
-      { agent_id: "   ", route_scope_key: "default", route_scope: {} },
-      { agent_id: agent.id, route_scope: {} }, // 缺 route_scope_key
-      { agent_id: agent.id, route_scope_key: null, route_scope: {} },
-      { agent_id: agent.id, route_scope_key: "  ", route_scope: {} },
-      { agent_id: agent.id, route_scope_key: "default" }, // 缺 route_scope
-      { agent_id: agent.id, route_scope_key: "default", route_scope: null },
-      { agent_id: agent.id, route_scope_key: "default", route_scope: [] }, // 数组
-      { agent_id: agent.id, route_scope_key: "default", route_scope: "prod" }, // 标量
-      { agent_id: agent.id, route_scope_key: "default", route_scope: {}, extra: 1 }, // 未知键
+      { route_scope_key: "default", route_scope: {} }, // 缺 target
+      { target: null, route_scope_key: "default", route_scope: {} },
+      { target: {}, route_scope_key: "default", route_scope: {} },
+      { target: { kind: "agent" }, route_scope_key: "default", route_scope: {} },
+      {
+        target: { kind: "agent", agent_id: null },
+        route_scope_key: "default",
+        route_scope: {},
+      },
+      {
+        target: { kind: "agent", agent_id: "   " },
+        route_scope_key: "default",
+        route_scope: {},
+      },
+      {
+        target: { kind: "agent", agent_id: agent.id, extra: 1 },
+        route_scope_key: "default",
+        route_scope: {},
+      },
+      {
+        target: { kind: "runtime", agent_id: agent.id },
+        route_scope_key: "default",
+        route_scope: {},
+      },
+      { agent_id: agent.id, route_scope_key: "default", route_scope: {} }, // 旧扁平 body
+      { target: { kind: "agent", agent_id: agent.id }, route_scope: {} }, // 缺 route_scope_key
+      {
+        target: { kind: "agent", agent_id: agent.id },
+        route_scope_key: null,
+        route_scope: {},
+      },
+      {
+        target: { kind: "agent", agent_id: agent.id },
+        route_scope_key: "  ",
+        route_scope: {},
+      },
+      { target: { kind: "agent", agent_id: agent.id }, route_scope_key: "default" },
+      {
+        target: { kind: "agent", agent_id: agent.id },
+        route_scope_key: "default",
+        route_scope: null,
+      },
+      {
+        target: { kind: "agent", agent_id: agent.id },
+        route_scope_key: "default",
+        route_scope: [],
+      },
+      {
+        target: { kind: "agent", agent_id: agent.id },
+        route_scope_key: "default",
+        route_scope: "prod",
+      },
+      {
+        target: { kind: "agent", agent_id: agent.id },
+        route_scope_key: "default",
+        route_scope: {},
+        extra: 1,
+      },
     ];
 
     for (const [index, body] of invalidBodies.entries()) {
@@ -254,7 +316,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
         audience: "admin",
         method: "POST",
         path: "/deployment-route-sets",
-        body: { agent_id: agent.id, route_scope_key: "default", route_scope: {} },
+        body: {
+          target: { kind: "agent", agent_id: agent.id },
+          route_scope_key: "default",
+          route_scope: {},
+        },
       }),
     );
     expect(noKey.status).toBe(400);
@@ -266,7 +332,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
     const { POST } = await loadCreateRouteSetRoute();
     const { tenantId, userIdentityId } = await seedAdmin({ withRouteUpdate: false });
     const agent = await seedAgent(tenantId, userIdentityId, "route-set-register-agent-5");
-    const body = { agent_id: agent.id, route_scope_key: "default", route_scope: {} };
+    const body = {
+      target: { kind: "agent", agent_id: agent.id },
+      route_scope_key: "default",
+      route_scope: {},
+    };
 
     const unauthorized = await POST(
       buildCreateRequest(body, "idem-route-set-register-unauth", "not-a-real-workload-token"),
@@ -291,7 +361,10 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
     const missing = await POST(
       buildCreateRequest(
         {
-          agent_id: "00000000-0000-4000-8000-000000000000",
+          target: {
+            kind: "agent",
+            agent_id: "00000000-0000-4000-8000-000000000000",
+          },
           route_scope_key: "default",
           route_scope: {},
         },
@@ -315,7 +388,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
     });
     const cross = await POST(
       buildCreateRequest(
-        { agent_id: otherAgent.id, route_scope_key: "default", route_scope: {} },
+        {
+          target: { kind: "agent", agent_id: otherAgent.id },
+          route_scope_key: "default",
+          route_scope: {},
+        },
         "idem-route-set-register-cross",
       ),
     );
@@ -333,7 +410,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
 
     const first = await POST(
       buildCreateRequest(
-        { agent_id: agent.id, route_scope_key: "default", route_scope: { zone: "internal" } },
+        {
+          target: { kind: "agent", agent_id: agent.id },
+          route_scope_key: "default",
+          route_scope: { zone: "internal" },
+        },
         "idem-route-set-register-scope-1",
       ),
     );
@@ -342,7 +423,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
 
     const mismatch = await POST(
       buildCreateRequest(
-        { agent_id: agent.id, route_scope_key: "default", route_scope: { zone: "dmz" } },
+        {
+          target: { kind: "agent", agent_id: agent.id },
+          route_scope_key: "default",
+          route_scope: { zone: "dmz" },
+        },
         "idem-route-set-register-scope-2",
       ),
     );
@@ -363,7 +448,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
     const { POST } = await loadCreateRouteSetRoute();
     const { tenantId, userIdentityId } = await seedAdmin();
     const agent = await seedAgent(tenantId, userIdentityId, "route-set-register-agent-7");
-    const body = { agent_id: agent.id, route_scope_key: "default", route_scope: {} };
+    const body = {
+      target: { kind: "agent", agent_id: agent.id },
+      route_scope_key: "default",
+      route_scope: {},
+    };
 
     const [a, b] = await Promise.all([
       POST(buildCreateRequest(body, "idem-route-set-register-race-a")),
@@ -385,7 +474,11 @@ describe("POST /admin/api/v1/deployment-route-sets（RouteSet 登记 create-or-r
 
     const response = await POST(
       buildCreateRequest(
-        { agent_id: agent.id, route_scope_key: "default", route_scope: {} },
+        {
+          target: { kind: "agent", agent_id: agent.id },
+          route_scope_key: "default",
+          route_scope: {},
+        },
         "idem-route-set-register-redaction",
       ),
     );
