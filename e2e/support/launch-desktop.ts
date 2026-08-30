@@ -20,6 +20,7 @@ import { E2E_ORIGIN } from "../../playwright.config";
 
 const PACKAGE_APP_DIR = join(process.cwd(), "desktop/package-app");
 const MAIN_BUNDLE = join(PACKAGE_APP_DIR, "bundle/main/index.js");
+const REAL_KEYRING_LOADER = join(process.cwd(), "e2e/support/electron-real-keyring-loader.cjs");
 
 export interface LaunchedDesktop {
   app: ElectronApplication;
@@ -28,20 +29,15 @@ export interface LaunchedDesktop {
 }
 
 /**
- * Electron 把首个非 switch 参数视为应用入口；Chromium switch 必须排在入口之前，
- * 否则 Linux 无桌面环境时不会选中 gnome-libsecret，safeStorage 会 fail-closed。
+ * Playwright 自带 loader 会追加 basic/mock keychain；先 preload 修正器撤销该默认值，
+ * 再进入应用。Linux 修正器选择 gnome-libsecret，macOS 则回到系统 Keychain。
  */
 export function buildDesktopLaunchArgs(userDataDir: string): string[] {
   return [
+    "-r",
+    REAL_KEYRING_LOADER,
     // CI 容器内 Chromium 沙箱不可用。
     "--no-sandbox",
-    // 必须显式指定 gnome-libsecret backend。CI 容器无 XDG_CURRENT_DESKTOP 等
-    // 桌面环境标识，Chromium 识别不了桌面环境会默认 fallback 到 basic_text，
-    // 而 basic_text 下 safeStorage.isEncryptionAvailable() 恒为 false（无真实
-    // secret key），导致设备身份 keychain.set 抛 KEYCHAIN_ERROR 拒绝启动。
-    // 显式选 gnome_libsecret，配合 CI 的 dbus-run-session + gnome-keyring 提供
-    // org.freedesktop.secrets 服务，safeStorage 才可用。macOS 忽略该 flag。
-    "--password-store=gnome-libsecret",
     `--user-data-dir=${userDataDir}`,
     PACKAGE_APP_DIR,
   ];
