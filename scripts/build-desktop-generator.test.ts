@@ -41,6 +41,18 @@ describe("build-desktop 生成器冻结不变量", () => {
         "// stale legacy residue\n",
       );
 
+      // build-desktop.mjs 的正式输入包含 renderer-dist。干净 CI 不应依赖工作区中
+      // 偶然残留的上一次 renderer 构建，因此先运行真实 renderer builder。
+      const rendererResult = spawnSync(process.execPath, ["scripts/build-desktop-renderer.mjs"], {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: { ...process.env, CI: "1" },
+      });
+      expect(
+        rendererResult.status,
+        `Desktop renderer 生成失败（status=${rendererResult.status}）\n---stdout---\n${rendererResult.stdout}\n---stderr---\n${rendererResult.stderr}`,
+      ).toBe(0);
+
       const result = spawnSync(process.execPath, [GENERATOR], {
         cwd: ROOT,
         encoding: "utf8",
