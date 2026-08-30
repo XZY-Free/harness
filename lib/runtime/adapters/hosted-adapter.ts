@@ -23,6 +23,7 @@
  * - Agent Loop 6 步：理解—查看索引—按需加载—行动—验证—继续/完成。
  */
 import { randomUUID } from "node:crypto";
+import type { AgentCallDisposition } from "@/lib/agents/calls/domain/agent-call";
 import { IngressInvocationTerminalError } from "@/lib/runtime/errors";
 import type { RuntimeCandidateEvent } from "@/lib/runtime/event-ingress-queries";
 import type {
@@ -172,25 +173,13 @@ export type TransientEventBatchSink = (params: {
 /**
  * required Agent 调用结果（归一化，由 Harness Loop 消费）。
  *
- * - completed：Agent 结果作为受信任 capability result，交给 Harness 决定最终回答。
+ * - terminal/completed：Agent 结果作为受信任 capability result，交给 Harness 决定最终回答。
+ * - pending：AgentCall 仍 queued/running，返回 durable handoff，不调用模型 fallback。
  * - waiting_user：AgentCall 等待用户补充（A2A input-required），Harness Loop 转 parent
  *   waiting_user，resume 复用 SAME AgentCall/task/context。
- * - failed：required capability 无法满足，Harness fail closed（绝不 model-only fallback）。
+ * - terminal/failed|cancelled|lost：required capability 无法满足，Harness fail closed。
  */
-export type HarnessRequiredAgentResult =
-  | { outcome: "completed"; callId: string; resultText: string; resultJson: unknown }
-  | {
-      outcome: "waiting_user";
-      callId: string;
-      taskId: string;
-      contextId: string;
-    }
-  | {
-      outcome: "failed";
-      callId: string;
-      errorCode: string;
-      errorSummary: string;
-    };
+export type HarnessRequiredAgentResult = AgentCallDisposition;
 
 /** Harness Loop → AgentCall 桥接器。 */
 export type AgentCallExecutor = (params: {
@@ -380,8 +369,10 @@ export interface HostedHarnessLoopResult {
   completed: boolean;
   /** Agent 回复文本（response.completed payload.text）。 */
   responseText: string;
-  /** 失败原因（completed=false 时填）。 */
+  /** 真实失败时填写；pending/waiting_user 不伪装成失败。 */
   failureReason?: string;
+  /** required Agent 尚未终结时的正式 child handoff。 */
+  agentCallHandoff?: Extract<HarnessRequiredAgentResult, { outcome: "pending" | "waiting_user" }>;
   /** 已发送的候选事件列表。 */
   sentEvents: RuntimeCandidateEvent[];
 }
@@ -486,7 +477,7 @@ export class HostedHarnessLoop {
           agentId: requiredAgent.capability_id,
           input: userMessage,
         });
-        if (agentResult.outcome === "failed") {
+        if (agentResult.outcome === "terminal" && agentResult.state !== "completed") {
           // required capability 无法满足 → fail closed，绝不 model-only fallback。
           await this.sendEvent(ingressClient, "execution.failed", {
             error_code: agentResult.errorCode ?? "REQUIRED_AGENT_FAILED",
@@ -515,10 +506,20 @@ export class HostedHarnessLoop {
           return {
             completed: false,
             responseText: "",
+            agentCallHandoff: agentResult,
             sentEvents: this.sentEvents,
           };
         }
-        // completed：Agent 结果作为 capability result 交给 Harness 整合最终回答。
+        if (agentResult.outcome === "pending") {
+          // durable child 仍运行：明确 handoff，禁止 model-only fallback 或伪造失败。
+          return {
+            completed: false,
+            responseText: "",
+            agentCallHandoff: agentResult,
+            sentEvents: this.sentEvents,
+          };
+        }
+        // terminal/completed：Agent 结果作为 capability result 交给 Harness 整合最终回答。
       }
       const responseText = await this.params.modelFn(userMessage, {
         modelRef: this.params.modelRef ?? "unknown",
@@ -527,7 +528,7 @@ export class HostedHarnessLoop {
         executionLimits: this.params.executionLimits,
         traceContext: this.params.traceContext,
         // required Agent completed 结果注入模型上下文（受信任 capability result）。
-        ...(agentResult && agentResult.outcome === "completed"
+        ...(agentResult && agentResult.outcome === "terminal" && agentResult.state === "completed"
           ? {
               agentResult: {
                 callId: agentResult.callId,

@@ -4,6 +4,7 @@ import { relative, resolve } from "node:path";
 import {
   type SourceDocument,
   checkAgentCallFinalizationGate,
+  checkAgentCallRuntimeBoundaryGate,
   checkAgentInvokeAuthorizationGate,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
@@ -224,6 +225,16 @@ function checkAgentCallFinalization(): void {
   else fail(`Package03 AgentCall 最终事务 Gate：\n  ${result.failures.join("\n  ")}`);
 }
 
+function checkAgentCallRuntimeBoundary(): void {
+  const documents: SourceDocument[] = ["app", "components", "desktop", "lib", "scripts"]
+    .flatMap((root) => filesUnder(resolve(ROOT, root)))
+    .filter((file) => SOURCE_EXTENSIONS.has(file.slice(file.lastIndexOf("."))))
+    .map((file) => ({ path: relative(ROOT, file), source: readFileSync(file, "utf8") }));
+  const result = checkAgentCallRuntimeBoundaryGate(documents);
+  if (result.passed) pass("Package04 AgentCall durable handoff 与 Runtime 边界 Gate");
+  else fail(`Package04 AgentCall 运行边界 Gate：\n  ${result.failures.join("\n  ")}`);
+}
+
 function main(): void {
   checkMigrationJournal();
   checkRetiredNaming();
@@ -275,6 +286,7 @@ function main(): void {
   checkTopic01Boundaries();
   checkAgentInvokeAuthorization();
   checkAgentCallFinalization();
+  checkAgentCallRuntimeBoundary();
   checkCloseoutRules();
   checkFinalCloseout();
   if (failures > 0) process.exitCode = 1;

@@ -35,6 +35,10 @@ import {
 } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { startAgentCall } from "@/lib/agents/calls/application/start-agent-call";
 import {
+  type AgentCallDisposition,
+  toAgentCallDisposition,
+} from "@/lib/agents/calls/domain/agent-call";
+import {
   type GatewayPrincipal,
   gatewayAuthErrorResponse,
   gatewaySchemaInvalidTable,
@@ -99,7 +103,8 @@ export async function createAgentCallViaGateway(params: {
   body: CreateAgentCallBody;
   resolveRoute?: RouteResolver;
 }): Promise<{
-  status: "created" | "replayed" | "start_failed";
+  status: "created" | "replayed";
+  disposition: AgentCallDisposition;
   payload: Record<string, unknown>;
 }> {
   const { tenantId, parentInvocationId, body } = params;
@@ -129,35 +134,33 @@ export async function createAgentCallViaGateway(params: {
   const callId = call.id;
 
   // 3. startAgentCall（A2A；event 只走 AgentCallEventIngress）。
-  try {
-    await startAgentCall({
+  const currentCall = await startAgentCall({
+    tenantId,
+    callId,
+    input: body.input,
+    contextEnvironment: {
       tenantId,
-      callId,
-      input: body.input,
-      contextEnvironment: {
-        tenantId,
-        executionSubject: executionSubjectFromServiceIdentity(tenantId, "gateway"),
-        now: new Date(),
-        timezone: "Asia/Shanghai",
-        locale: "zh-CN",
-      },
-    });
-  } catch {
-    // 启动失败已归一化为子域 call.failed；返回 callId + 当前状态，parent 不变。
-    return {
-      status: "start_failed",
-      payload: { call_id: callId, state: call.state, agent_id: body.agent_id },
-    };
-  }
+      executionSubject: executionSubjectFromServiceIdentity(tenantId, "gateway"),
+      now: new Date(),
+      timezone: "Asia/Shanghai",
+      locale: "zh-CN",
+    },
+  });
+  const disposition = toAgentCallDisposition(currentCall);
 
-  // 4. 返回 callId + state（Runtime 只拿到 call 身份，不透出 endpoint secret）。
+  // 4. 返回 durable disposition（Runtime 只拿到 child refs，不透出 endpoint secret）。
   return {
     status: finalizationStatus,
+    disposition,
     payload: {
       call_id: callId,
-      state: call.state,
+      disposition: disposition.outcome,
+      state: disposition.state,
       agent_id: body.agent_id,
       agent_revision_id: resolved.agentRevisionId,
+      ...(disposition.outcome === "waiting_user"
+        ? { task_id: disposition.taskId, context_id: disposition.contextId }
+        : {}),
     },
   };
 }

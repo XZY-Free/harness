@@ -13,7 +13,7 @@
  */
 import { createHash } from "node:crypto";
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
-import type { AgentCall } from "@/lib/agents/calls/domain/agent-call";
+import { type AgentCall, isAgentCallTerminal } from "@/lib/agents/calls/domain/agent-call";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
 import {
@@ -230,7 +230,7 @@ async function loadContract(
   };
 }
 
-/** 启动既有 AgentCall。返回当前持久化 AgentCall（调用方可在 detached stream 处理期间轮询 DB）。 */
+/** 启动既有 AgentCall，并回读一次当前持久化 AgentCall；后续进展由正式事件路径推进。 */
 export async function startAgentCall(command: StartAgentCallCommand): Promise<AgentCall> {
   const { tenantId, callId } = command;
 
@@ -356,11 +356,17 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
     try {
       await synthesizeTerminalEvent(callId, tenantId, "call.failed", code, summary);
     } catch {
-      // 终态合成失败（如已 lost/terminal）则不再二次改终态，抛出原始错误即可。
+      // 可能已被并发 ingress 推进到其他终态；下方按 durable row 判断。
+    }
+    const current = await mysqlAgentCallStore.getById({ callId, tenantId });
+    if (current && isAgentCallTerminal(current.state)) {
+      return current;
     }
     throw err;
   }
 
-  // 11. 返回 claim 后的 AgentCall（已 running）；后台流继续经 eventSink 持久化 terminal。
-  return claim.call;
+  // 11. 只回读一次当前 durable disposition；后台流继续经 eventSink 推进状态。
+  const current = await mysqlAgentCallStore.getById({ callId, tenantId });
+  if (!current) throw new AgentCallNotFoundError(callId, tenantId);
+  return current;
 }

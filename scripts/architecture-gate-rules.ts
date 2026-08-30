@@ -29,6 +29,53 @@ export interface AgentCallFinalizationGateResult {
   failures: string[];
 }
 
+export interface AgentCallRuntimeBoundaryGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+/** Package04：Harness 只映射一次 durable disposition；A2A outbound 仍归 AgentTransport。 */
+export function checkAgentCallRuntimeBoundaryGate(
+  documents: readonly SourceDocument[],
+): AgentCallRuntimeBoundaryGateResult {
+  const failures: string[] = [];
+  const source = (path: string) =>
+    stripComments(documents.find((document) => document.path === path)?.source ?? "");
+  const harness = source("lib/agents/calls/application/harness-required-agent.ts");
+  const start = source("lib/agents/calls/application/start-agent-call.ts");
+  const hosted = source("lib/runtime/adapters/hosted-adapter.ts");
+
+  if (!harness.includes("startAgentCall") || !harness.includes("toAgentCallDisposition")) {
+    failures.push("Harness AgentCall bridge 未执行一次 start + durable disposition mapping");
+  }
+  if (
+    /\b(?:MAX_WAIT_MS|POLL_INTERVAL_MS|pollTimeoutMs|waitForAgentCallTerminal)\b|\bset(?:Timeout|Interval)\s*\(|\bwhile\s*\(|\bfor\s*\(\s*;\s*;\s*\)|\bPromise\.race\s*\(/.test(
+      harness,
+    )
+  ) {
+    failures.push("Harness AgentCall bridge 仍包含同步轮询或 timeout 生命周期");
+  }
+  if (!start.includes("createA2AAgentTransport") || !start.includes("getById")) {
+    failures.push("startAgentCall 未经唯一 AgentTransport 出站并回读 durable AgentCall");
+  }
+  if (!hosted.includes('outcome === "pending"') || !hosted.includes("agentCallHandoff")) {
+    failures.push("Hosted Harness 未保留 pending AgentCall durable handoff");
+  }
+
+  for (const document of documents) {
+    if (!document.path.startsWith("lib/runtime/")) continue;
+    if (document.path.endsWith(".test.ts") || document.path.endsWith(".test.tsx")) continue;
+    const productionSource = stripComments(document.source);
+    if (
+      /\bcreateA2AAgentTransport\b|agents\/calls\/transport\/a2a\/a2a-client/.test(productionSource)
+    ) {
+      failures.push(`Runtime 越权建立 Agent A2A outbound：${document.path}`);
+    }
+  }
+
+  return { passed: failures.length === 0, failures: [...new Set(failures)] };
+}
+
 /** Package03：AgentCall 只能通过单一最终事务冻结，禁止旧幂等入口与假事实。 */
 export function checkAgentCallFinalizationGate(
   documents: readonly SourceDocument[],

@@ -31,6 +31,24 @@ import {
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+async function waitForState(
+  tenantId: string,
+  callId: string,
+  expected: "completed" | "failed" | "waiting_user",
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    const [call] = await db
+      .select({ state: agentCallTable.state })
+      .from(agentCallTable)
+      .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
+      .limit(1);
+    if (call?.state === expected) return;
+    if (Date.now() >= deadline) throw new Error(`AgentCall 未进入测试期望状态 ${expected}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 /** trusted executionSubject（tenant 与 call 一致，满足 startAgentCall 的 execution_subject required）。 */
 function subjectFor(
   scenario: Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>,
@@ -61,19 +79,54 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
     // 清理测试播种的 credential env + 关闭 provider。
     for (const s of scenarios) {
       delete process.env[s.credentialEnvVar];
-      await s.provider.server.close();
+      await s.provider.close();
     }
   });
 
-  async function seedScenario(providerScenario: "completed" | "input_required" | "failed") {
+  async function seedScenario(
+    providerScenario: "completed" | "input_required" | "long_running" | "failed",
+  ) {
     const scenario = await seedAgentCallExecutionScenario({ providerScenario });
     scenarios.push(scenario);
     return scenario;
   }
 
+  it("long-running：bridge 不等待本地超时，立即返回 pending + SAME callId", async () => {
+    const scenario = await seedScenario("long_running");
+    const params = {
+      tenantId: scenario.tenantId,
+      parentInvocationId: scenario.parentInvocationId,
+      threadId: scenario.threadId,
+      turnId: scenario.turnId,
+      agentId: scenario.agentId,
+      input: "长任务",
+      executionSubject: subjectFor(scenario),
+      resolveRoute: mockResolveRoute(scenario),
+    };
+    const result = await invokeRequiredAgent(params);
+
+    expect(result).toMatchObject({
+      outcome: "pending",
+      state: "running",
+    });
+    const [call] = await db
+      .select()
+      .from(agentCallTable)
+      .where(eq(agentCallTable.id, result.callId))
+      .limit(1);
+    expect(call?.state).toBe("running");
+    await db
+      .update(agentCallTable)
+      .set({ startedAt: new Date(Date.now() - 31_000) })
+      .where(eq(agentCallTable.id, result.callId));
+    const replay = await invokeRequiredAgent(params);
+    expect(replay).toEqual(result);
+    expect(scenario.provider.captured).toHaveLength(1);
+  });
+
   it("completed：required Agent 走真实 A2A → 返回受信任 capability result（fail-open 于 Agent 成功）", async () => {
     const scenario = await seedScenario("completed");
-    const result = await invokeRequiredAgent({
+    const params = {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       threadId: scenario.threadId,
@@ -82,11 +135,15 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
       input: "帮我查一下请假余额",
       executionSubject: subjectFor(scenario),
       resolveRoute: mockResolveRoute(scenario),
-      pollTimeoutMs: 15_000,
-    });
+    };
+    const first = await invokeRequiredAgent(params);
+    expect(first).toMatchObject({ outcome: "pending", state: "running" });
+    await waitForState(scenario.tenantId, first.callId, "completed");
+    const result = await invokeRequiredAgent(params);
 
-    expect(result.outcome).toBe("completed");
-    if (result.outcome === "completed") {
+    expect(result).toMatchObject({ outcome: "terminal", state: "completed" });
+    if (result.outcome === "terminal" && result.state === "completed") {
+      expect(result.callId).toBe(first.callId);
       expect(result.callId).toBeTruthy();
       // completed 结果文本来自 A2A provider 的 task 结果（非空）。
       expect(typeof result.resultText).toBe("string");
@@ -96,7 +153,7 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
   it("waiting_user：AgentCall 进入 waiting_user → 返回 taskId/contextId（resume 复用 SAME AgentCall）", async () => {
     const scenario = await seedScenario("input_required");
     const turnId = scenario.turnId;
-    const result = await invokeRequiredAgent({
+    const params = {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       threadId: scenario.threadId,
@@ -105,11 +162,15 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
       input: "帮我补充信息",
       executionSubject: subjectFor(scenario),
       resolveRoute: mockResolveRoute(scenario),
-      pollTimeoutMs: 15_000,
-    });
+    };
+    const first = await invokeRequiredAgent(params);
+    expect(first).toMatchObject({ outcome: "pending", state: "running" });
+    await waitForState(scenario.tenantId, first.callId, "waiting_user");
+    const result = await invokeRequiredAgent(params);
 
     expect(result.outcome).toBe("waiting_user");
     if (result.outcome === "waiting_user") {
+      expect(result.callId).toBe(first.callId);
       expect(result.taskId).toBeTruthy();
       expect(result.contextId).toBeTruthy();
       // waiting_user 的 AgentCall 保持存在（resume 复用，不新建）。
@@ -126,7 +187,7 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
 
   it("failed：required Agent 调用失败 → fail closed（绝不 model-only fallback）", async () => {
     const scenario = await seedScenario("failed");
-    const result = await invokeRequiredAgent({
+    const params = {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       threadId: scenario.threadId,
@@ -135,11 +196,15 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
       input: "触发失败",
       executionSubject: subjectFor(scenario),
       resolveRoute: mockResolveRoute(scenario),
-      pollTimeoutMs: 15_000,
-    });
+    };
+    const first = await invokeRequiredAgent(params);
+    expect(first).toMatchObject({ outcome: "pending", state: "running" });
+    await waitForState(scenario.tenantId, first.callId, "failed");
+    const result = await invokeRequiredAgent(params);
 
-    expect(result.outcome).toBe("failed");
-    if (result.outcome === "failed") {
+    expect(result).toMatchObject({ outcome: "terminal", state: "failed" });
+    if (result.outcome === "terminal" && result.state === "failed") {
+      expect(result.callId).toBe(first.callId);
       // fail closed：返回真实 AgentCall 终态码 + 摘要（绝不 model-only fallback）。
       expect(result.errorCode).toBeTruthy();
       expect(result.errorSummary).toBeTruthy();
@@ -172,7 +237,6 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
         input: "x",
         executionSubject: subjectFor(scenario),
         resolveRoute,
-        pollTimeoutMs: 5_000,
       }),
     ).rejects.toThrow(RequiredAgentUnavailableError);
   });
@@ -195,7 +259,6 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
         input: "x",
         executionSubject: subjectFor(scenario),
         resolveRoute,
-        pollTimeoutMs: 5_000,
       }),
     ).rejects.toThrow(RequiredAgentUnavailableError);
   });
@@ -212,13 +275,13 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
       input: "幂等测试",
       executionSubject: subjectFor(scenario),
       resolveRoute: mockResolveRoute(scenario),
-      pollTimeoutMs: 15_000,
     };
     const first = await invokeRequiredAgent(params);
+    expect(first).toMatchObject({ outcome: "pending", state: "running" });
+    await waitForState(scenario.tenantId, first.callId, "completed");
     const second = await invokeRequiredAgent(params);
-    expect(first.outcome).toBe("completed");
-    expect(second.outcome).toBe("completed");
-    if (first.outcome === "completed" && second.outcome === "completed") {
+    expect(second).toMatchObject({ outcome: "terminal", state: "completed" });
+    if (second.outcome === "terminal" && second.state === "completed") {
       // 同 turn 同 agent → 复用 SAME AgentCall（不新建）。
       expect(second.callId).toBe(first.callId);
       const [call] = await db
@@ -248,29 +311,26 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
       input: "binding facts",
       executionSubject: subjectFor(scenario),
       resolveRoute: mockResolveRoute(scenario),
-      pollTimeoutMs: 15_000,
     });
-    expect(result.outcome).toBe("completed");
-    if (result.outcome === "completed") {
-      const [binding] = await db
-        .select()
-        .from(agentCallBindingTable)
-        .where(
-          and(
-            eq(agentCallBindingTable.callId, result.callId),
-            eq(agentCallBindingTable.tenantId, scenario.tenantId),
-          ),
-        )
-        .limit(1);
-      expect(binding).toBeTruthy();
-      // Batch4 补漏：endpoint/identity/credential/network facts 冻结自本次 RouteResolution。
-      expect(binding?.endpointRef).toBe(scenario.endpoint);
-      expect(binding?.identityMode).toBe("bearer");
-      expect(binding?.credentialRefId).toBe(scenario.credentialRefId);
-      expect(binding?.networkZone).toBe("private");
-      // exact AgentRevision / Contract 证据一并冻结。
-      expect(binding?.agentRevisionId).toBe(scenario.agentRevisionId);
-      expect(binding?.agentContractSnapshotId).toBe(scenario.agentContractSnapshotId);
-    }
+    expect(result).toMatchObject({ outcome: "pending", state: "running" });
+    const [binding] = await db
+      .select()
+      .from(agentCallBindingTable)
+      .where(
+        and(
+          eq(agentCallBindingTable.callId, result.callId),
+          eq(agentCallBindingTable.tenantId, scenario.tenantId),
+        ),
+      )
+      .limit(1);
+    expect(binding).toBeTruthy();
+    // Batch4 补漏：endpoint/identity/credential/network facts 冻结自本次 RouteResolution。
+    expect(binding?.endpointRef).toBe(scenario.endpoint);
+    expect(binding?.identityMode).toBe("bearer");
+    expect(binding?.credentialRefId).toBe(scenario.credentialRefId);
+    expect(binding?.networkZone).toBe("private");
+    // exact AgentRevision / Contract 证据一并冻结。
+    expect(binding?.agentRevisionId).toBe(scenario.agentRevisionId);
+    expect(binding?.agentContractSnapshotId).toBe(scenario.agentContractSnapshotId);
   });
 });

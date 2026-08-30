@@ -543,7 +543,8 @@ describe("S05-C05 HostedAdapter required Agent capability（Batch7）", () => {
     const { adapter, start } = startWithExecutor(
       sink,
       async () => ({
-        outcome: "completed" as const,
+        outcome: "terminal" as const,
+        state: "completed" as const,
         callId: "call-1",
         resultText: "Agent 完成结果",
         resultJson: { ok: true },
@@ -574,7 +575,8 @@ describe("S05-C05 HostedAdapter required Agent capability（Batch7）", () => {
     const { adapter, start } = startWithExecutor(
       sink,
       async () => ({
-        outcome: "failed" as const,
+        outcome: "terminal" as const,
+        state: "failed" as const,
         callId: "call-fail",
         errorCode: "AGENT_TRANSPORT_XXX",
         errorSummary: "required Agent 调用失败",
@@ -603,6 +605,7 @@ describe("S05-C05 HostedAdapter required Agent capability（Batch7）", () => {
       sink,
       async () => ({
         outcome: "waiting_user" as const,
+        state: "waiting_user" as const,
         callId: "call-wait",
         taskId: "task-1",
         contextId: "ctx-1",
@@ -622,5 +625,39 @@ describe("S05-C05 HostedAdapter required Agent capability（Batch7）", () => {
     // resume 复用 SAME AgentCall（agent_call_id 关联）。
     expect(userActionEvent?.payload.agent_call_id).toBe("call-wait");
     expect(userActionEvent?.payload.request_type).toBe("input");
+    expect(result?.agentCallHandoff).toMatchObject({
+      outcome: "waiting_user",
+      callId: "call-wait",
+    });
+  });
+
+  it("pending：返回 durable child handoff，不调用 modelFn、不发 completion/failure", async () => {
+    const { sink, events } = createMockSink();
+    let modelCalled = false;
+    const { adapter, start } = startWithExecutor(
+      sink,
+      async () => ({
+        outcome: "pending" as const,
+        state: "running" as const,
+        callId: "call-running",
+      }),
+      () => {
+        modelCalled = true;
+        return "不得调用";
+      },
+    );
+
+    await start();
+    const result = await adapter.getLastLoopPromise?.();
+    expect(result?.completed).toBe(false);
+    expect(result?.failureReason).toBeUndefined();
+    expect(result?.agentCallHandoff).toEqual({
+      outcome: "pending",
+      state: "running",
+      callId: "call-running",
+    });
+    expect(modelCalled).toBe(false);
+    expect(events.some((event) => event.type === "response.completed")).toBe(false);
+    expect(events.some((event) => event.type === "execution.failed")).toBe(false);
   });
 });

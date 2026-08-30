@@ -154,6 +154,77 @@ export interface AgentCall {
   versionNo: number;
 }
 
+/** Harness/Gateway 消费的 durable AgentCall 当前 disposition。 */
+export type AgentCallDisposition =
+  | {
+      outcome: "terminal";
+      state: "completed";
+      callId: string;
+      resultText: string;
+      resultJson: unknown;
+    }
+  | {
+      outcome: "terminal";
+      state: "failed" | "cancelled" | "lost";
+      callId: string;
+      errorCode: string;
+      errorSummary: string;
+    }
+  | {
+      outcome: "waiting_user";
+      state: "waiting_user";
+      callId: string;
+      taskId: string;
+      contextId: string;
+    }
+  | {
+      outcome: "pending";
+      state: "queued" | "running";
+      callId: string;
+    };
+
+export class AgentCallDispositionEvidenceError extends Error {
+  constructor(callId: string, detail: string) {
+    super(`AgentCall ${callId} disposition 证据无效：${detail}`);
+    this.name = "AgentCallDispositionEvidenceError";
+  }
+}
+
+/** 只映射 durable Call 当前事实；不等待、不推进状态、不制造失败。 */
+export function toAgentCallDisposition(call: AgentCall): AgentCallDisposition {
+  if (call.state === "completed") {
+    return {
+      outcome: "terminal",
+      state: "completed",
+      callId: call.id,
+      resultText: call.resultText ?? "",
+      resultJson: call.resultJson,
+    };
+  }
+  if (call.state === "failed" || call.state === "cancelled" || call.state === "lost") {
+    return {
+      outcome: "terminal",
+      state: call.state,
+      callId: call.id,
+      errorCode: call.errorCode ?? `AGENT_CALL_${call.state.toUpperCase()}`,
+      errorSummary: call.errorSummary ?? `required Agent 调用 ${call.state}`,
+    };
+  }
+  if (call.state === "waiting_user") {
+    if (!call.externalTaskRef || !call.externalContextRef) {
+      throw new AgentCallDispositionEvidenceError(call.id, "waiting_user 缺少 task/context refs");
+    }
+    return {
+      outcome: "waiting_user",
+      state: "waiting_user",
+      callId: call.id,
+      taskId: call.externalTaskRef,
+      contextId: call.externalContextRef,
+    };
+  }
+  return { outcome: "pending", state: call.state, callId: call.id };
+}
+
 /** 计算 AgentCall 创建语义摘要；排除随机 id 与时间戳。 */
 export function computeAgentCallCreationRequestDigest(input: {
   tenantId: string;

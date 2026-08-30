@@ -24,7 +24,7 @@
  * 语义响应。
  */
 import { randomUUID } from "node:crypto";
-import { type Server, createServer } from "node:http";
+import { type Server, type ServerResponse, createServer } from "node:http";
 
 /** Provider 公开的 Capability Manifest（任务能力描述，非函数列表）。 */
 export const A2A_TEST_PROVIDER_CAPABILITY_MANIFEST = {
@@ -168,6 +168,7 @@ export async function startA2ATestProvider(
   let strictMetadataAllowlist: string[] | null = null;
   // 前 N 个 POST / 请求返回 HTTP 503（transient 反例）；随后恢复正常。
   let flakyFailuresRemaining = 0;
+  const longRunningResponses = new Map<string, { response: ServerResponse; contextId: string }>();
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -255,6 +256,23 @@ export async function startA2ATestProvider(
       // probe 的 TaskIdParams.taskId；响应同时回填 id 与 taskId。
       if (rpc.method === "tasks/cancel") {
         const taskId = rpc.params?.id ?? rpc.params?.taskId ?? "unknown";
+        const running = longRunningResponses.get(taskId);
+        if (running) {
+          running.response.write(
+            sseFrame({
+              jsonrpc: "2.0",
+              id: rpc.id ?? 1,
+              result: {
+                kind: "status-update",
+                taskId,
+                contextId: running.contextId,
+                status: { state: "canceled", final: true },
+              },
+            }),
+          );
+          running.response.end();
+          longRunningResponses.delete(taskId);
+        }
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
           JSON.stringify({
@@ -512,7 +530,8 @@ export async function startA2ATestProvider(
           break;
         case "long_running":
           statusUpdate("working");
-          // 不发终态，等 cancel（测试侧断言 cancel 后连接结束）。
+          // 不发终态、不关闭 SSE；只由显式 cancel 或测试 teardown 结束。
+          longRunningResponses.set(taskId, { response: res, contextId });
           break;
         case "failed":
           statusUpdate("failed", {
@@ -543,7 +562,7 @@ export async function startA2ATestProvider(
           });
           break;
       }
-      res.end();
+      if (scenario !== "long_running") res.end();
     });
   });
 
@@ -583,6 +602,8 @@ export async function startA2ATestProvider(
       flakyFailuresRemaining = failures;
     },
     reset() {
+      for (const { response } of longRunningResponses.values()) response.destroy();
+      longRunningResponses.clear();
       strictMetadataAllowlist = null;
       flakyFailuresRemaining = 0;
       captured.length = 0;
@@ -599,6 +620,8 @@ export async function startA2ATestProvider(
       scenario = next;
     },
     close() {
+      for (const { response } of longRunningResponses.values()) response.destroy();
+      longRunningResponses.clear();
       return new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve())),
       );

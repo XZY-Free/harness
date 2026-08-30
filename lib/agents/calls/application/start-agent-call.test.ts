@@ -457,7 +457,9 @@ describe("startAgentCall 执行域启动", () => {
       mutateBinding: (b) => ({ ...b, endpointRef: "http://127.0.0.1:1" }),
     });
     trackedEnvVars.add(dead.credentialEnvVar);
-    await startAgentCall(startParams(dead)).catch(() => {});
+    const deadResult = await startAgentCall(startParams(dead));
+    expect(["failed", "lost"]).toContain(deadResult.state);
+    expect(deadResult.id).toBe(dead.callId);
     const deadTerminal = await waitForCallTerminal(dead.callId, dead.tenantId);
     expect(["failed", "lost"]).toContain(deadTerminal.state);
     const [deadParent] = await db

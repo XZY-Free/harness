@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type SourceDocument,
   checkAgentCallFinalizationGate,
+  checkAgentCallRuntimeBoundaryGate,
   checkAgentInvokeAuthorizationGate,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
@@ -27,6 +28,62 @@ import {
 function doc(path: string, source: string): SourceDocument {
   return { path, source };
 }
+
+describe("checkAgentCallRuntimeBoundaryGate", () => {
+  const valid = (): SourceDocument[] => [
+    doc(
+      "lib/agents/calls/application/harness-required-agent.ts",
+      "const current = await startAgentCall(command); return toAgentCallDisposition(current);",
+    ),
+    doc(
+      "lib/agents/calls/application/start-agent-call.ts",
+      "const transport = createA2AAgentTransport(options); return store.getById(query);",
+    ),
+    doc(
+      "lib/runtime/adapters/hosted-adapter.ts",
+      'if (result.outcome === "pending") return { agentCallHandoff: result };',
+    ),
+  ];
+
+  it("一次 start + durable disposition + pending handoff 时通过", () => {
+    expect(checkAgentCallRuntimeBoundaryGate(valid())).toEqual({ passed: true, failures: [] });
+  });
+
+  it("Harness bridge 出现同步轮询、等待常量或 timeout 参数时失败", () => {
+    const documents = valid();
+    documents[0] = doc(
+      "lib/agents/calls/application/harness-required-agent.ts",
+      "const MAX_WAIT_MS = 30_000; while (true) { await setTimeout(POLL_INTERVAL_MS); } const pollTimeoutMs = 1;",
+    );
+    expect(checkAgentCallRuntimeBoundaryGate(documents).failures).toContain(
+      "Harness AgentCall bridge 仍包含同步轮询或 timeout 生命周期",
+    );
+  });
+
+  it("Runtime 生产代码直接建立 A2A AgentTransport 时失败", () => {
+    const documents = [
+      ...valid(),
+      doc(
+        "lib/runtime/hosted-agent.ts",
+        'import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";',
+      ),
+    ];
+    expect(checkAgentCallRuntimeBoundaryGate(documents).failures).toContain(
+      "Runtime 越权建立 Agent A2A outbound：lib/runtime/hosted-agent.ts",
+    );
+  });
+
+  it("Hosted adapter 缺 pending durable handoff 时失败", () => {
+    const documents = valid();
+    documents[2] = doc(
+      "lib/runtime/adapters/hosted-adapter.ts",
+      'if (result.outcome === "terminal") return result;',
+    );
+    expect(checkAgentCallRuntimeBoundaryGate(documents).failures).toContain(
+      "Hosted Harness 未保留 pending AgentCall durable handoff",
+    );
+  });
+});
 
 describe("checkAgentCallFinalizationGate", () => {
   const valid = (): SourceDocument[] => [

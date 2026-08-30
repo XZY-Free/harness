@@ -2,10 +2,13 @@ import {
   AGENT_CALL_STATES,
   AGENT_CALL_TERMINAL_STATES,
   AGENT_CALL_TRANSITIONS,
+  type AgentCall,
+  AgentCallDispositionEvidenceError,
   AgentCallStateTransitionError,
   assertAgentCallTransition,
   computeAgentCallCreationRequestDigest,
   isAgentCallTerminal,
+  toAgentCallDisposition,
 } from "@/lib/agents/calls/domain/agent-call";
 import { describe, expect, it } from "vitest";
 
@@ -98,5 +101,75 @@ describe("AgentCall 状态机", () => {
         agentRevisionId: "agent-revision-2",
       }),
     ).not.toBe(digest);
+  });
+});
+
+function callInState(state: AgentCall["state"], overrides: Partial<AgentCall> = {}): AgentCall {
+  return {
+    id: "call-1",
+    tenantId: "tenant-1",
+    parentInvocationId: "invocation-1",
+    agentId: "agent-1",
+    agentRevisionId: "agent-revision-1",
+    sourceType: "user_selected",
+    sourceRef: "turn-1",
+    state,
+    externalContextRef: null,
+    externalTaskRef: null,
+    resultText: null,
+    resultJson: null,
+    resultDigest: null,
+    errorCode: null,
+    errorSummary: null,
+    logicalCallKey: "required-agent:turn-1:agent-1",
+    creationRequestDigest: `sha256:${"a".repeat(64)}`,
+    createdAt: new Date("2026-08-30T00:00:00.000Z"),
+    startedAt: null,
+    waitingAt: null,
+    finishedAt: null,
+    versionNo: 1,
+    ...overrides,
+  };
+}
+
+describe("AgentCall durable disposition", () => {
+  it("queued/running 只映射 pending，不制造失败", () => {
+    expect(toAgentCallDisposition(callInState("queued"))).toEqual({
+      outcome: "pending",
+      state: "queued",
+      callId: "call-1",
+    });
+    expect(toAgentCallDisposition(callInState("running"))).toEqual({
+      outcome: "pending",
+      state: "running",
+      callId: "call-1",
+    });
+  });
+
+  it("completed/failed 映射真实 terminal 事实", () => {
+    expect(
+      toAgentCallDisposition(
+        callInState("completed", { resultText: "完成", resultJson: { ok: true } }),
+      ),
+    ).toMatchObject({ outcome: "terminal", state: "completed", resultText: "完成" });
+    expect(
+      toAgentCallDisposition(
+        callInState("failed", { errorCode: "REMOTE_FAILED", errorSummary: "远端失败" }),
+      ),
+    ).toMatchObject({ outcome: "terminal", state: "failed", errorCode: "REMOTE_FAILED" });
+  });
+
+  it("waiting_user 必须携带 task/context refs", () => {
+    expect(() => toAgentCallDisposition(callInState("waiting_user"))).toThrow(
+      AgentCallDispositionEvidenceError,
+    );
+    expect(
+      toAgentCallDisposition(
+        callInState("waiting_user", {
+          externalTaskRef: "task-1",
+          externalContextRef: "context-1",
+        }),
+      ),
+    ).toMatchObject({ outcome: "waiting_user", taskId: "task-1", contextId: "context-1" });
   });
 });

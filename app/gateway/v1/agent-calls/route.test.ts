@@ -98,12 +98,12 @@ describe("Gateway AgentCall endpoints（Batch8）", () => {
   afterEach(async () => {
     for (const s of scenarios) {
       delete process.env[s.credentialEnvVar];
-      await s.provider.server.close();
+      await s.provider.close();
     }
   });
 
   async function seedScenario(
-    providerScenario: "completed" | "input_required" | "failed",
+    providerScenario: "completed" | "input_required" | "long_running" | "failed",
     contract?: unknown,
   ) {
     const scenario = await seedAgentCallExecutionScenario({
@@ -167,6 +167,23 @@ describe("Gateway AgentCall endpoints（Batch8）", () => {
       )
       .limit(1);
     expect(binding[0]?.endpointRef).toBe(scenario.endpoint);
+  });
+
+  it("long-running：Gateway 返回 pending disposition + durable callId，不伪造失败", async () => {
+    const scenario = await seedScenario("long_running");
+    const result = await createAgentCallViaGateway({
+      tenantId: scenario.tenantId,
+      parentInvocationId: scenario.parentInvocationId,
+      body: { agent_id: scenario.agentId, input: "长任务" },
+      resolveRoute,
+    });
+    expect(result.status).toBe("created");
+    expect(result.disposition).toMatchObject({ outcome: "pending", state: "running" });
+    expect(result.payload).toMatchObject({
+      call_id: result.disposition.callId,
+      disposition: "pending",
+      state: "running",
+    });
   });
 
   it("幂等：同 (parentInvocationId, agentId) 重试只创建一个 AgentCall", async () => {
