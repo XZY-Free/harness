@@ -28,6 +28,26 @@ export interface LaunchedDesktop {
 }
 
 /**
+ * Electron 把首个非 switch 参数视为应用入口；Chromium switch 必须排在入口之前，
+ * 否则 Linux 无桌面环境时不会选中 gnome-libsecret，safeStorage 会 fail-closed。
+ */
+export function buildDesktopLaunchArgs(userDataDir: string): string[] {
+  return [
+    // CI 容器内 Chromium 沙箱不可用。
+    "--no-sandbox",
+    // 必须显式指定 gnome-libsecret backend。CI 容器无 XDG_CURRENT_DESKTOP 等
+    // 桌面环境标识，Chromium 识别不了桌面环境会默认 fallback 到 basic_text，
+    // 而 basic_text 下 safeStorage.isEncryptionAvailable() 恒为 false（无真实
+    // secret key），导致设备身份 keychain.set 抛 KEYCHAIN_ERROR 拒绝启动。
+    // 显式选 gnome_libsecret，配合 CI 的 dbus-run-session + gnome-keyring 提供
+    // org.freedesktop.secrets 服务，safeStorage 才可用。macOS 忽略该 flag。
+    "--password-store=gnome-libsecret",
+    `--user-data-dir=${userDataDir}`,
+    PACKAGE_APP_DIR,
+  ];
+}
+
+/**
  * 真启动打包后的 Electron 应用，服务端指向 e2e 测试服务器。
  *
  * 未构建时**明确抛错**而非跳过——§22 禁止把 skip 当作完成。
@@ -55,19 +75,7 @@ export async function launchDesktopApp(): Promise<LaunchedDesktop> {
     }
   };
   const app = await electron.launch({
-    args: [
-      PACKAGE_APP_DIR,
-      `--user-data-dir=${userDataDir}`,
-      // CI 容器内 Chromium 沙箱不可用。
-      "--no-sandbox",
-      // 必须显式指定 gnome-libsecret backend。CI 容器无 XDG_CURRENT_DESKTOP 等
-      // 桌面环境标识，Chromium 识别不了桌面环境会默认 fallback 到 basic_text，
-      // 而 basic_text 下 safeStorage.isEncryptionAvailable() 恒为 false（无真实
-      // secret key），导致设备身份 keychain.set 抛 KEYCHAIN_ERROR 拒绝启动。
-      // 显式选 gnome_libsecret，配合 CI 的 dbus-run-session + gnome-keyring 提供
-      // org.freedesktop.secrets 服务，safeStorage 才可用。macOS 忽略该 flag。
-      "--password-store=gnome-libsecret",
-    ],
+    args: buildDesktopLaunchArgs(userDataDir),
     env: {
       ...process.env,
       // Desktop 只把服务端当作 API/SSE 提供方，UI 来自本机打包 renderer。
