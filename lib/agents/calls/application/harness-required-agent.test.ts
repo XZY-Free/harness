@@ -19,13 +19,9 @@ import {
   invokeRequiredAgent,
 } from "@/lib/agents/calls/application/harness-required-agent";
 import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
-import {
-  runtimeRouteResolution,
-  validAgentRouteResolution,
-} from "@/lib/agents/calls/test/agent-call-test-fixtures";
+import { runtimeRouteResolution } from "@/lib/agents/calls/test/agent-call-test-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { bootstrapTenantBaselines } from "@/lib/identity/tenant-bootstrap";
 import { agentCallBindingTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
 import {
@@ -45,33 +41,11 @@ function subjectFor(
 /** 构造 mock RouteResolver：返回覆盖为 scenario 真实证据的 agent RouteResolution。 */
 function mockResolveRoute(
   scenario: Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>,
-  overrides?: Parameters<typeof validAgentRouteResolution>[0],
 ): RouteResolver {
   return async () => ({
     status: "resolved" as const,
     eligibleCandidateCount: 1,
-    resolution: validAgentRouteResolution({
-      // 判别 target：覆盖 scenario 的 revision + route facts（endpoint/identity/credential/network）。
-      target: {
-        kind: "agent",
-        agentRevisionId: scenario.agentRevisionId,
-        agentEndpointRef: scenario.endpoint,
-        agentIdentityMode: "bearer",
-        agentCredentialRefId: scenario.credentialRefId,
-        agentNetworkZone: "private",
-      },
-      // 走 tenant baseline（不虚构 policy revision）。
-      policyRevisionId: null,
-      // agent evidence 只覆盖 Contract/Publication 字段，绝不加入 agentRevisionId。
-      controlPlaneEvidence: {
-        kind: "agent",
-        agentContractSnapshotId: scenario.agentContractSnapshotId,
-        agentContractDigest: scenario.agentContractDigest,
-        agentContextDigest: scenario.agentContextDigest,
-        agentPublicationRecordId: scenario.agentPublicationRecordId,
-      },
-      ...overrides,
-    }),
+    resolution: scenario.resolution,
   });
 }
 
@@ -94,8 +68,6 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
   async function seedScenario(providerScenario: "completed" | "input_required" | "failed") {
     const scenario = await seedAgentCallExecutionScenario({ providerScenario });
     scenarios.push(scenario);
-    // required Agent 调用走 resolveBindingGovernance → tenant 必须有 policy/governance baseline。
-    await bootstrapTenantBaselines(db, scenario.tenantId, "harness-test-actor");
     return scenario;
   }
 
@@ -105,7 +77,7 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       threadId: scenario.threadId,
-      turnId: `turn-${randomUUID()}`,
+      turnId: scenario.turnId,
       agentId: scenario.agentId,
       input: "帮我查一下请假余额",
       executionSubject: subjectFor(scenario),
@@ -123,7 +95,7 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
 
   it("waiting_user：AgentCall 进入 waiting_user → 返回 taskId/contextId（resume 复用 SAME AgentCall）", async () => {
     const scenario = await seedScenario("input_required");
-    const turnId = `turn-${randomUUID()}`;
+    const turnId = scenario.turnId;
     const result = await invokeRequiredAgent({
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
@@ -158,7 +130,7 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       threadId: scenario.threadId,
-      turnId: `turn-${randomUUID()}`,
+      turnId: scenario.turnId,
       agentId: scenario.agentId,
       input: "触发失败",
       executionSubject: subjectFor(scenario),
@@ -195,7 +167,7 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
         tenantId: scenario.tenantId,
         parentInvocationId: scenario.parentInvocationId,
         threadId: scenario.threadId,
-        turnId: `turn-${randomUUID()}`,
+        turnId: scenario.turnId,
         agentId: scenario.agentId,
         input: "x",
         executionSubject: subjectFor(scenario),
@@ -218,7 +190,7 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
         tenantId: scenario.tenantId,
         parentInvocationId: scenario.parentInvocationId,
         threadId: scenario.threadId,
-        turnId: `turn-${randomUUID()}`,
+        turnId: scenario.turnId,
         agentId: scenario.agentId,
         input: "x",
         executionSubject: subjectFor(scenario),
@@ -230,7 +202,7 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
 
   it("幂等：同 (turnId, agentId) 只创建一个 AgentCall（logicalCallKey 幂等）", async () => {
     const scenario = await seedScenario("completed");
-    const turnId = `turn-${randomUUID()}`;
+    const turnId = scenario.turnId;
     const params = {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
@@ -266,7 +238,7 @@ describe("invokeRequiredAgent（Batch7 Harness Loop → AgentCall 桥接器）",
   it("AgentCallBinding 冻结本次 RouteResolution 的 exact agent route facts（Batch4 补漏）", async () => {
     const scenario = await seedScenario("completed");
     // 记录创建出的 AgentCallBinding，断言 facts 冻结自 resolution。
-    const turnId = `turn-${randomUUID()}`;
+    const turnId = scenario.turnId;
     const result = await invokeRequiredAgent({
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,

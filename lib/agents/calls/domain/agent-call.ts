@@ -22,6 +22,8 @@
  * 终态不可逆；进入终态后不允许再转移。
  */
 
+import { createHash } from "node:crypto";
+
 export const AGENT_CALL_STATES = [
   "queued",
   "running",
@@ -143,9 +145,35 @@ export interface AgentCall {
   errorSummary: string | null;
   /** 业务幂等键（parentInvocationId + logicalCallKey 幂等）。 */
   logicalCallKey: string | null;
+  /** canonical 创建请求摘要；与 outbound Attempt.requestDigest 语义独立。 */
+  creationRequestDigest: string;
   createdAt: Date;
   startedAt: Date | null;
   waitingAt: Date | null;
   finishedAt: Date | null;
   versionNo: number;
+}
+
+/** 计算 AgentCall 创建语义摘要；排除随机 id 与时间戳。 */
+export function computeAgentCallCreationRequestDigest(input: {
+  tenantId: string;
+  parentInvocationId: string;
+  agentId: string;
+  agentRevisionId: string;
+  sourceType: AgentCallSourceType;
+  sourceRef: string | null;
+  logicalCallKey: string | null;
+  bindingHash: string;
+}): string {
+  const canonical = JSON.stringify({
+    agentId: input.agentId,
+    agentRevisionId: input.agentRevisionId,
+    bindingHash: input.bindingHash,
+    logicalCallKey: input.logicalCallKey,
+    parentInvocationId: input.parentInvocationId,
+    sourceRef: input.sourceRef,
+    sourceType: input.sourceType,
+    tenantId: input.tenantId,
+  });
+  return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
 }

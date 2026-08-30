@@ -2056,10 +2056,10 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
       routeScopeKey: "prod",
       businessKey: { threadId: "lifecycle-agent-call-binding" },
     });
-    expect(resolvedAgent.binding.agentRevisionId).toBe(agentRevision.id);
-    expect(resolvedAgent.binding.endpointRef).toBe("https://agent.example.com/a2a");
-    expect(resolvedAgent.binding.identityMode).toBe("none");
-    expect(resolvedAgent.binding.credentialRefId).toBeNull();
+    expect(resolvedAgent.bindingCandidate.agentRevisionId).toBe(agentRevision.id);
+    expect(resolvedAgent.bindingCandidate.endpointRef).toBe("https://agent.example.com/a2a");
+    expect(resolvedAgent.bindingCandidate.identityMode).toBe("none");
+    expect(resolvedAgent.bindingCandidate.credentialRefId).toBeNull();
 
     // ─── 5. Withdraw：正式撤回命令 → 真实 Worker 消费 agent.revision.withdrawn → Projection ineligible → fail-closed ─
     // 正式撤回应用服务在真实 MySQL 同事务写 WithdrawalRecord/Audit/Outbox agent.revision.withdrawn，

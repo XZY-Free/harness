@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type SourceDocument,
+  checkAgentCallFinalizationGate,
   checkAgentInvokeAuthorizationGate,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
@@ -26,6 +27,49 @@ import {
 function doc(path: string, source: string): SourceDocument {
   return { path, source };
 }
+
+describe("checkAgentCallFinalizationGate", () => {
+  const valid = (): SourceDocument[] => [
+    doc("lib/agents/calls/application/create-agent-call.ts", "store.finalizeAgentCall(candidate);"),
+    doc(
+      "lib/agents/calls/persistence/mysql-agent-call-store.ts",
+      "finalizeAgentCall; lockAndValidateAgentCallAuthority; recordCapabilityUse(tx);",
+    ),
+    doc(
+      "lib/agents/calls/application/resolve-agent-call-binding.ts",
+      "bindingCandidate; buildAgentCallBindingCandidate();",
+    ),
+    doc("lib/persistence/schema/agent-calls.ts", "creationRequestDigest; projectionVersionNo;"),
+  ];
+
+  it("finalize 事务、creation digest 与 candidate 语义齐备时通过", () => {
+    expect(checkAgentCallFinalizationGate(valid()).passed).toBe(true);
+  });
+
+  it("create application 在提交后补记 CapabilityUse 时失败", () => {
+    const docs = valid().map((item) =>
+      item.path === "lib/agents/calls/application/create-agent-call.ts"
+        ? doc(item.path, "store.finalizeAgentCall(candidate); recordCapabilityUse(input);")
+        : item,
+    );
+    expect(checkAgentCallFinalizationGate(docs).failures).toContain(
+      "AgentCall creation 仍在事务外写 CapabilityUse",
+    );
+  });
+
+  it("旧 createIdempotent 或假事实 fallback 仍存在时失败", () => {
+    const docs = [
+      ...valid(),
+      doc(
+        "lib/agents/calls/persistence/old-store.ts",
+        'createIdempotent(); const version = projectionVersionNo ?? 0; const endpoint = endpointRef ?? "";',
+      ),
+    ];
+    const failures = checkAgentCallFinalizationGate(docs).failures.join("\n");
+    expect(failures).toContain("createIdempotent");
+    expect(failures).toContain("假事实 fallback");
+  });
+});
 
 describe("checkAgentInvokeAuthorizationGate", () => {
   const validDocuments = (): SourceDocument[] => [

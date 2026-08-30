@@ -9,6 +9,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AgentCallBindingConfigInput } from "@/lib/agents/calls/domain/agent-call-binding";
 import { db } from "@/lib/db/client";
+import { bootstrapTenantBaselines } from "@/lib/identity/tenant-bootstrap";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
@@ -24,6 +25,7 @@ export async function seedTenant(overrides?: { id?: string; key?: string }): Pro
     name: "AgentCall Test Tenant",
     status: "active",
   });
+  await bootstrapTenantBaselines(db, tenantId, "agent-call-test");
   return tenantId;
 }
 

@@ -18,7 +18,7 @@ import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
  * 本服务是「Harness Loop → AgentCall」的确定性编排（第一阶段无通用 Planner）：
  * 1. 解析 Agent Route（target={kind:"agent", agentId}）；unresolved → required 无法满足 → fail closed。
  * 2. 读取 exact AgentContractSnapshot（capabilityDigest + protocol 事实，权威）。
- * 3. 用 buildAgentCallBindingConfig 冻结 exact AgentCallBinding
+ * 3. 装配 AgentCallBinding candidate，由 createAgentCall 最终事务冻结
  *    （endpoint/identity/credential/network 直接来自 RouteResolution — Batch4 补漏）。
  * 4. createAgentCall（sourceType=user_selected，sourceRef=Turn.id，幂等 logicalCallKey）。
  * 5. startAgentCall（A2A）。
@@ -143,7 +143,7 @@ export async function invokeRequiredAgent(
   const { tenantId, parentInvocationId, threadId, turnId, agentId, input } = params;
 
   // 1-3. 解析 Agent Route（唯一 Route Authority）+ 读取 exact ContractSnapshot +
-  //       冻结 exact AgentCallBinding — 共享冻结链（Batch8 提取）。
+  //       装配 AgentCallBinding candidate — 共享解析链（Batch8 提取）。
   const resolved: ResolvedRequiredAgentBinding = await resolveRequiredAgentBinding({
     tenantId,
     agentId,
@@ -151,11 +151,11 @@ export async function invokeRequiredAgent(
     routeScopeKey: params.routeScopeKey ?? "default",
     businessKey: { threadId },
   });
-  const binding = resolved.binding;
+  const binding = resolved.bindingCandidate;
 
   // 4. createAgentCall（幂等 logicalCallKey：required-agent:<turnId>:<agentId>）。
   const logicalCallKey = `required-agent:${turnId}:${agentId}`;
-  const { call, created } = await createAgentCall({
+  const { call } = await createAgentCall({
     tenantId,
     parentInvocationId,
     agentId,
@@ -163,7 +163,7 @@ export async function invokeRequiredAgent(
     sourceType: "user_selected",
     sourceRef: turnId,
     logicalCallKey,
-    binding,
+    bindingCandidate: binding,
     now,
   });
   const callId = call.id;

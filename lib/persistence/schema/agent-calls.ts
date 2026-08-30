@@ -114,6 +114,8 @@ export const agentCallTable = mysqlTable(
     errorSummary: text("errorSummary"),
     /** 业务幂等键（parentInvocationId + logicalCallKey 幂等）。 */
     logicalCallKey: varchar("logicalCallKey", { length: 256 }),
+    /** canonical 创建请求摘要；与 outbound Attempt.requestDigest 分离。 */
+    creationRequestDigest: varchar("creationRequestDigest", { length: 71 }).notNull(),
     createdAt: datetime("createdAt", { mode: "date", fsp: 3 })
       .notNull()
       .$defaultFn(() => new Date()),

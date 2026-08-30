@@ -1,13 +1,13 @@
-import { buildAgentCallBindingConfig } from "@/lib/agents/calls/application/build-agent-call-binding-config";
-import type { AgentCallBindingConfigInput } from "@/lib/agents/calls/domain/agent-call-binding";
+import { buildAgentCallBindingCandidate } from "@/lib/agents/calls/application/build-agent-call-binding-config";
+import type { AgentCallBindingCandidate } from "@/lib/agents/calls/domain/agent-call-binding";
 /**
- * resolveRequiredAgentBinding — 解析 Agent target Route 并冻结 exact AgentCallBinding
+ * resolveRequiredAgentBinding — 解析 Agent target Route 并装配 AgentCallBinding candidate
  * （专题01 Batch8 · Gateway 收口，从 harness-required-agent 提取共享）。
  *
  * 单一冻结链（唯一 Route Authority）：
  *   resolveRoute(target={kind:"agent", agentId}) → 断言 agent target + AgentRevision
  *   → 读取 exact AgentContractSnapshot（capabilityDigest + protocol 事实，权威）
- *   → buildAgentCallBindingConfig 冻结 exact AgentCallBinding
+ *   → buildAgentCallBindingCandidate 装配候选事实
  *     （endpoint/identity/credential/network 直接来自 RouteResolution — Batch4 补漏）。
  *
  * harness-required-agent（Harness Loop 进程内）与 Gateway AgentCall endpoints（HTTP）
@@ -43,8 +43,8 @@ export interface ResolveRequiredAgentBindingParams {
 
 export interface ResolvedRequiredAgentBinding {
   resolution: RouteResolution;
-  /** exact 冻结的 AgentCallBinding（不可变证据）。 */
-  binding: AgentCallBindingConfigInput;
+  /** Resolver 组装的候选；只有 finalizeAgentCall 事务成功后才成为冻结 Binding。 */
+  bindingCandidate: AgentCallBindingCandidate;
   agentRevisionId: string;
   contractSnapshotId: string;
   contractDigest: string;
@@ -53,7 +53,7 @@ export interface ResolvedRequiredAgentBinding {
 }
 
 /**
- * 解析 Agent target Route 并冻结 exact AgentCallBinding。
+ * 解析 Agent target Route 并装配待最终事务验证的 AgentCallBinding candidate。
  * 失败即抛 RequiredAgentUnavailableError（fail closed）。
  */
 export async function resolveRequiredAgentBinding(
@@ -111,10 +111,10 @@ export async function resolveRequiredAgentBinding(
     throw new RequiredAgentUnavailableError(agentId, "AgentContractSnapshot 不存在");
   }
 
-  // 3. 冻结 exact AgentCallBinding（endpoint facts 来自 RouteResolution — Batch4 补漏；
+  // 3. 装配 AgentCallBinding candidate（endpoint facts 来自 RouteResolution — Batch4 补漏；
   //    protocol facts 来自 ContractSnapshot）。
   const policy = await resolveBindingGovernance(db, tenantId, resolution.policyRevisionId);
-  const binding = buildAgentCallBindingConfig({
+  const bindingCandidate = buildAgentCallBindingCandidate({
     tenantId,
     resolution,
     agentId,
@@ -136,7 +136,7 @@ export async function resolveRequiredAgentBinding(
 
   return {
     resolution,
-    binding,
+    bindingCandidate,
     agentRevisionId,
     contractSnapshotId,
     contractDigest,

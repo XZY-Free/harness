@@ -7,11 +7,11 @@
  *   （execution_subject=required，匹配仓内 A2A Provider 的 Invocation Context Contract；
  *    供"required context 缺失/被拒"反例断言）。
  * - 真实 CredentialRef（provider=env，唯一 TEST env token + fingerprint）。
- * - 冻结的 AgentCall + AgentCallBinding（bindingHash 由不可变证据计算）。
+ * - 正式 Agent Route → Activation → Projection → Resolver。
+ * - 经 finalizeAgentCall 事务冻结的 AgentCall + AgentCallBinding。
  *
- * Route 证据：startAgentCall 从 binding 读取 endpoint/protocol/credential/contract，绝不
- * 重新解析 Route（exact Route 已在创建时冻结进 binding）。故 RouteResolution 证据用
- * agent-call-test-fixtures 的合法构造，不播种完整 Runtime 图（route 不是 start 流程读取源）。
+ * startAgentCall 从 binding 读取 endpoint/protocol/credential/contract，绝不重新解析
+ * Route；但创建夹具仍必须经真实 Agent Route Authority 完成冻结。
  *
  * 提供 createNewLatestEvidence 用于"冻结后新建最新 AgentRevision/Credential"反例：
  * 新建一个内容可观察不同的 published 修订（NEW_LATEST_CONTRACT：agent version/name 不同、
@@ -20,6 +20,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
+import { resolveRequiredAgentBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import {
   type AgentCallBindingConfigInput,
   computeAgentCallBindingHash,
@@ -29,12 +30,7 @@ import {
   type A2ATestProvider,
   startA2ATestProvider,
 } from "@/lib/agents/calls/test/a2a-test-provider";
-import {
-  D,
-  seedInvocation,
-  seedTenant,
-  validAgentRouteResolution,
-} from "@/lib/agents/calls/test/agent-call-test-fixtures";
+import { seedInvocation, seedTenant } from "@/lib/agents/calls/test/agent-call-test-fixtures";
 import {
   createAgent,
   getAgentById,
@@ -48,8 +44,18 @@ import {
   agentCallBindingTable,
   agentCallTable,
 } from "@/lib/persistence/schema/agent-calls";
+import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { credentialRefTable } from "@/lib/persistence/schema/tool";
+import {
+  MAX_TRAFFIC_WEIGHT,
+  createRouteSet,
+} from "@/lib/routes/application/deployment-route-service";
+import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import type { RouteResolution } from "@/lib/routes/domain/route-resolution-policy";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
+import { buildActor } from "@/lib/test-support/create-verified-attestation";
 import { publishTrustedAgentRevisionForTest } from "@/lib/test-support/publish-trusted-agent-revision";
 import { and, eq } from "drizzle-orm";
 
@@ -176,6 +182,9 @@ export interface ExecutionScenario {
   credentialToken: string;
   provider: A2ATestProvider;
   threadId: string;
+  turnId: string;
+  logicalCallKey: string;
+  resolution: Extract<RouteResolution, { target: { kind: "agent" } }>;
   /** 在给定租户播种一个"新的最新 published 修订 + 新 CredentialRef"，返回其证据 id/env/token。 */
   createNewLatestEvidence(): Promise<{
     newAgentRevisionId: string;
@@ -195,7 +204,10 @@ export interface ExecutionScenario {
  * 调用方负责 afterEach 删除 process.env[credentialEnvVar] 并关闭 provider。
  */
 export async function seedAgentCallExecutionScenario(options?: {
-  /** 覆盖 binding 构造（如 identityMode=none、错误 protocol 等）。 */
+  /**
+   * 正式冻结完成后，仅为 startAgentCall fail-closed 测试篡改已持久化 binding。
+   * 不得用于绕过 finalizeAgentCall Authority 校验。
+   */
   mutateBinding?: (b: AgentCallBindingConfigInput) => AgentCallBindingConfigInput;
   /** 覆盖冻结 credential（如 revoked/expired/错误 fingerprint）。 */
   mutateCredential?: (params: {
@@ -215,6 +227,20 @@ export async function seedAgentCallExecutionScenario(options?: {
   const tenantId = await seedTenant();
   const parentInvocationId = await seedInvocation(tenantId);
   const threadId = randomUUID();
+  const turnId = randomUUID();
+
+  await db.insert(threadTable).values({
+    id: threadId,
+    tenantId,
+    ownerUserId: randomUUID(),
+    lifecycleState: "active",
+    lastActivityAt: now,
+    lastTurnSequence: 1,
+    lastItemSequence: 0,
+    lastEventSequence: 0,
+    pendingQueueVersionNo: 1,
+    versionNo: 1,
+  });
 
   // 父 Invocation 置为 running（含 refs）——startAgentCall 期间父必须保持 running 不变。
   await db
@@ -222,6 +248,7 @@ export async function seedAgentCallExecutionScenario(options?: {
     .set({
       executionState: "running",
       threadId,
+      turnId,
       runtimeExecutionRef: `rt:${parentInvocationId}`,
       startedAt: now,
     })
@@ -286,16 +313,32 @@ export async function seedAgentCallExecutionScenario(options?: {
   // ─── 真实 A2A Provider ───
   const provider = await startA2ATestProvider(options?.providerScenario ?? "completed");
 
-  // ─── RouteResolution（binding 冻结证据，非 start 读取源）───
-  // 判别 agent target：冻结 scenario 的 revision + 真实 endpoint/identity/credential/network；
-  // agent evidence 只覆盖 Contract/Publication 字段。
-  const deploymentRouteId = randomUUID();
-  const routeRevisionId = randomUUID();
-  const routeActivationId = randomUUID();
-  const resolution = validAgentRouteResolution({
-    deploymentRouteId,
-    routeRevisionId,
-    routeActivationId,
+  await db.insert(turnTable).values({
+    id: turnId,
+    threadId,
+    turnSequence: 1,
+    triggerType: "user_message",
+    turnState: "running",
+    activeInvocationId: parentInvocationId,
+    latestInvocationId: parentInvocationId,
+    requestedAgentId: agent.id,
+    agentSelectionMode: "required",
+    acceptedAt: now,
+    startedAt: now,
+    versionNo: 1,
+  });
+
+  // ─── 正式 Agent Route → Activation → Projection → Resolver ───
+  const routeSet = await createRouteSet({
+    tenantId,
+    target: { kind: "agent", agentId: agent.id },
+    routeScopeKey: "default",
+    routeScopeJson: { networkZone: "private" },
+  });
+  await activateSingleRouteForTest({
+    tenantId,
+    routeSetId: routeSet.id,
+    routeSetExpectedVersionNo: 1,
     target: {
       kind: "agent",
       agentRevisionId: revision.id,
@@ -304,42 +347,24 @@ export async function seedAgentCallExecutionScenario(options?: {
       agentCredentialRefId: credentialRefId,
       agentNetworkZone: "private",
     },
+    trafficWeight: MAX_TRAFFIC_WEIGHT,
+    actor: buildActor(tenantId, "agent-call-exec-fixture"),
   });
-
-  // agent guard：binding 的 resolved agent revision 只从判别 agent target 取得（不信任未判别字段）。
-  const agentTarget = resolution.target;
-  if (agentTarget.kind !== "agent") {
+  const resolveRoute = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
+  const resolved = await resolveRequiredAgentBinding({
+    tenantId,
+    agentId: agent.id,
+    resolveRoute,
+    routeScopeKey: "default",
+    businessKey: { threadId },
+  });
+  if (resolved.resolution.target.kind !== "agent") {
     throw new Error("执行夹具要求判别 agent target");
   }
-
-  // ─── 冻结 binding（endpoint 来自 provider；credential 来自真实 ref）───
-  let binding: AgentCallBindingConfigInput = {
-    agentId: agent.id,
-    agentRevisionId: agentTarget.agentRevisionId,
-    agentContractSnapshotId: snapshot.id,
-    agentContractDigest: snapshot.contractDigest,
-    agentCapabilityDigest: snapshot.capabilityDigest,
-    agentContextDigest: snapshot.contextDigest,
-    agentPublicationRecordId: publication.publicationRecordId,
-    deploymentRouteId: resolution.deploymentRouteId,
-    routeRevisionId: resolution.routeRevisionId,
-    routeActivationId: resolution.routeActivationId,
-    routeContentDigest: resolution.routeContentDigest,
-    resolutionInputDigest: resolution.resolutionInputDigest,
-    projectionVersionNo: resolution.projectionVersionNo,
-    endpointRef: provider.endpoint,
-    identityMode: "bearer",
-    credentialRefId,
-    networkZone: "private",
-    protocolType: "a2a",
-    protocolContractRevision: "a2a-0.3.0",
-    policyRevisionId: "policy-rev-exec",
-    policyRulesDigest: D("e"),
-    governanceConfigRevisionId: "gov-rev-exec",
-    governanceConfigDigest: D("f"),
-  };
-  binding = options?.mutateBinding?.(binding) ?? binding;
-  const bindingHash = computeAgentCallBindingHash(binding);
+  const resolution = resolved.resolution as Extract<RouteResolution, { target: { kind: "agent" } }>;
+  const finalizedBinding = resolved.bindingCandidate;
+  const finalizedBindingHash = computeAgentCallBindingHash(finalizedBinding);
+  const logicalCallKey = options?.logicalCallKey ?? `required-agent:${randomUUID()}:${agent.id}`;
 
   const createAgentCall = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => now });
   const { call } = await createAgentCall({
@@ -348,11 +373,53 @@ export async function seedAgentCallExecutionScenario(options?: {
     agentId: agent.id,
     agentRevisionId: revision.id,
     sourceType: "user_selected",
-    sourceRef: options?.sourceRef ?? `turn:${randomUUID()}`,
-    logicalCallKey: options?.logicalCallKey ?? `required-agent:${randomUUID()}:${agent.id}`,
-    binding,
+    sourceRef: options?.sourceRef ?? turnId,
+    logicalCallKey,
+    bindingCandidate: finalizedBinding,
     now,
   });
+
+  const binding = options?.mutateBinding?.(finalizedBinding) ?? finalizedBinding;
+  const bindingHash = computeAgentCallBindingHash(binding);
+  if (binding !== finalizedBinding) {
+    // 测试专用：模拟冻结后存储损坏，验证 startAgentCall 在网络前 fail closed。
+    await db
+      .update(agentCallBindingTable)
+      .set({
+        agentId: binding.agentId,
+        agentRevisionId: binding.agentRevisionId,
+        agentContractSnapshotId: binding.agentContractSnapshotId,
+        agentContractDigest: binding.agentContractDigest,
+        agentCapabilityDigest: binding.agentCapabilityDigest,
+        agentContextDigest: binding.agentContextDigest,
+        agentPublicationRecordId: binding.agentPublicationRecordId,
+        deploymentRouteId: binding.deploymentRouteId,
+        routeRevisionId: binding.routeRevisionId,
+        routeActivationId: binding.routeActivationId,
+        routeContentDigest: binding.routeContentDigest,
+        resolutionInputDigest: binding.resolutionInputDigest,
+        projectionVersionNo: binding.projectionVersionNo,
+        endpointRef: binding.endpointRef,
+        identityMode: binding.identityMode,
+        credentialRefId: binding.credentialRefId,
+        networkZone: binding.networkZone,
+        protocolType: binding.protocolType,
+        protocolContractRevision: binding.protocolContractRevision,
+        policyRevisionId: binding.policyRevisionId,
+        policyRulesDigest: binding.policyRulesDigest,
+        governanceConfigRevisionId: binding.governanceConfigRevisionId,
+        governanceConfigDigest: binding.governanceConfigDigest,
+        bindingHash,
+      })
+      .where(
+        and(
+          eq(agentCallBindingTable.callId, call.id),
+          eq(agentCallBindingTable.tenantId, tenantId),
+        ),
+      );
+  } else if (bindingHash !== finalizedBindingHash) {
+    throw new Error("正式 AgentCallBinding hash 在夹具内发生漂移");
+  }
 
   return {
     tenantId,
@@ -373,6 +440,9 @@ export async function seedAgentCallExecutionScenario(options?: {
     credentialToken,
     provider,
     threadId,
+    turnId,
+    logicalCallKey,
+    resolution,
     async createNewLatestEvidence() {
       // 新修订：真实 published + 内容可观察不同的 ContractSnapshot（NEW_LATEST_CONTRACT）。
       const newSnapshot = await seedAgentContractSnapshot({

@@ -19,11 +19,8 @@
 import { randomUUID } from "node:crypto";
 import { ingestAgentCallEvents } from "@/lib/agents/calls/application/ingest-agent-call-events";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
-import {
-  seedInvocation,
-  seedTenant,
-  validBindingConfig,
-} from "@/lib/agents/calls/test/agent-call-test-fixtures";
+import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
+import { seedTenant } from "@/lib/agents/calls/test/agent-call-test-fixtures";
 import type { AgentCallCandidateEvent } from "@/lib/agents/calls/transport/agent-transport";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
@@ -35,37 +32,34 @@ import {
 } from "@/lib/persistence/schema/agent-calls";
 import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/schema/executions";
 import { and, eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const NOW = new Date("2026-08-28T00:00:00.000Z");
+const scenarios: Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>[] = [];
 
 beforeEach(async () => {
   await resetDatabase(db);
 });
 
+afterEach(async () => {
+  for (const scenario of scenarios.splice(0)) {
+    delete process.env[scenario.credentialEnvVar];
+    await scenario.provider.server.close();
+  }
+});
+
 /** Invocation.threadId 为逻辑非 FK 列（无 references），可安全写入任意 UUID。 */
 async function seedRunningCall(threadId?: string) {
-  const tenantId = await seedTenant();
-  const parentId = await seedInvocation(tenantId);
-  if (threadId) {
-    await db
-      .update(invocationTable)
-      .set({ threadId, executionState: "running" })
-      .where(eq(invocationTable.id, parentId));
-  }
-  const { call } = await mysqlAgentCallStore.createIdempotent({
-    id: randomUUID(),
-    tenantId,
-    parentInvocationId: parentId,
-    agentId: "agent-1",
-    agentRevisionId: "agent-rev-1",
-    sourceType: "user_selected",
-    sourceRef: "turn-1",
-    logicalCallKey: "required-agent:turn-1:agent-1",
-    binding: validBindingConfig(),
-    bindingHash: `sha256:${"0".repeat(64)}`,
-    createdAt: NOW,
-  });
+  const scenario = await seedAgentCallExecutionScenario();
+  scenarios.push(scenario);
+  const tenantId = scenario.tenantId;
+  const parentId = scenario.parentInvocationId;
+  await db
+    .update(invocationTable)
+    .set({ threadId: threadId ?? null, executionState: "running", runtimeExecutionRef: null })
+    .where(eq(invocationTable.id, parentId));
+  const call = await mysqlAgentCallStore.getById({ callId: scenario.callId, tenantId });
+  if (!call) throw new Error("测试 AgentCall 缺失");
   await mysqlAgentCallStore.updateState({
     callId: call.id,
     tenantId,

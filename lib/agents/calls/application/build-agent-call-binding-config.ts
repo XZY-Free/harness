@@ -1,5 +1,5 @@
 /**
- * buildAgentCallBindingConfig — 从 Agent Route 解析结果构建不可变冻结配置。
+ * buildAgentCallBindingCandidate — 从 Agent Route 解析结果装配待最终验证的 candidate。
  *
  * 专题01 冻结架构：AgentCallBinding 冻结 exact AgentRevision / Contract / Publication /
  * Route / endpoint / credential / resolution digest / projection / policy。
@@ -11,7 +11,7 @@
  * 由调用方从 ContractSnapshot 提供。本 builder 只做证据装配 + fail-closed 校验。
  */
 import {
-  type AgentCallBindingConfigInput,
+  type AgentCallBindingCandidate,
   AgentCallBindingEvidenceError,
   assertAgentCallBindingEvidence,
 } from "@/lib/agents/calls/domain/agent-call-binding";
@@ -23,7 +23,7 @@ export interface AgentProtocolFacts {
   protocolContractRevision: string;
 }
 
-export interface BuildAgentCallBindingConfigInput {
+export interface BuildAgentCallBindingCandidateInput {
   tenantId: string;
   /** Batch4/7 完成的 exact Agent Route 解析结果（agent target 携带 endpoint 事实）。 */
   resolution: RouteResolution;
@@ -46,9 +46,9 @@ export interface BuildAgentCallBindingConfigInput {
  * 构建并校验 AgentCallBinding 冻结配置。
  * 返回不可变配置；任何证据缺失/非法 → AgentCallBindingEvidenceError（fail-closed）。
  */
-export function buildAgentCallBindingConfig(
-  input: BuildAgentCallBindingConfigInput,
-): AgentCallBindingConfigInput {
+export function buildAgentCallBindingCandidate(
+  input: BuildAgentCallBindingCandidateInput,
+): AgentCallBindingCandidate {
   const resolution = input.resolution;
   // 判别式 agent target：只接受 resolution.target.kind=agent（runtime 一律 fail-closed）。
   if (resolution.target.kind !== "agent") {
@@ -58,7 +58,7 @@ export function buildAgentCallBindingConfig(
   }
   // 只从判别 target 冻结 exact agent 生产调用事实（不读取任何平铺字段/默认填充值）。
   const target = resolution.target;
-  const config: AgentCallBindingConfigInput = {
+  const config: AgentCallBindingCandidate = {
     agentId: input.agentId,
     agentRevisionId: input.agentRevisionId,
     agentContractSnapshotId: input.agentContractSnapshotId,

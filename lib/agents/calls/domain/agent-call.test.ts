@@ -4,6 +4,7 @@ import {
   AGENT_CALL_TRANSITIONS,
   AgentCallStateTransitionError,
   assertAgentCallTransition,
+  computeAgentCallCreationRequestDigest,
   isAgentCallTerminal,
 } from "@/lib/agents/calls/domain/agent-call";
 import { describe, expect, it } from "vitest";
@@ -75,5 +76,27 @@ describe("AgentCall 状态机", () => {
     expect(() => assertAgentCallTransition("c1", "queued", "lost")).toThrow(
       AgentCallStateTransitionError,
     );
+  });
+
+  it("creationRequestDigest 只由 canonical 创建语义决定并对目标变化敏感", () => {
+    const input = {
+      tenantId: "tenant-1",
+      parentInvocationId: "invocation-1",
+      agentId: "agent-1",
+      agentRevisionId: "agent-revision-1",
+      sourceType: "user_selected" as const,
+      sourceRef: "turn-1",
+      logicalCallKey: "required-agent:turn-1:agent-1",
+      bindingHash: `sha256:${"a".repeat(64)}`,
+    };
+    const digest = computeAgentCallCreationRequestDigest(input);
+    expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(computeAgentCallCreationRequestDigest({ ...input })).toBe(digest);
+    expect(
+      computeAgentCallCreationRequestDigest({
+        ...input,
+        agentRevisionId: "agent-revision-2",
+      }),
+    ).not.toBe(digest);
   });
 });

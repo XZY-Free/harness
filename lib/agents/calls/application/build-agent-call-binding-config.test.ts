@@ -12,7 +12,7 @@
  */
 import {
   type AgentProtocolFacts,
-  buildAgentCallBindingConfig,
+  buildAgentCallBindingCandidate,
 } from "@/lib/agents/calls/application/build-agent-call-binding-config";
 import { AgentCallBindingEvidenceError } from "@/lib/agents/calls/domain/agent-call-binding";
 import {
@@ -31,7 +31,7 @@ function validProtocolFacts(overrides?: Partial<AgentProtocolFacts>): AgentProto
   };
 }
 
-function validInput(overrides?: Partial<Parameters<typeof buildAgentCallBindingConfig>[0]>) {
+function validInput(overrides?: Partial<Parameters<typeof buildAgentCallBindingCandidate>[0]>) {
   return {
     tenantId: "tenant-1",
     resolution: validAgentRouteResolution(),
@@ -51,10 +51,10 @@ function validInput(overrides?: Partial<Parameters<typeof buildAgentCallBindingC
   };
 }
 
-describe("buildAgentCallBindingConfig", () => {
+describe("buildAgentCallBindingCandidate", () => {
   it("合法 agent resolution 冻结 exact target 事实（endpoint/identity/credential/network 全部来自 target）", () => {
     const resolution = validAgentRouteResolution();
-    const config = buildAgentCallBindingConfig(validInput({ resolution }));
+    const config = buildAgentCallBindingCandidate(validInput({ resolution }));
     expect(config.agentRevisionId).toBe("agent-rev-1");
     expect(config.deploymentRouteId).toBe("route-1");
     expect(config.routeRevisionId).toBe("route-rev-1");
@@ -80,14 +80,14 @@ describe("buildAgentCallBindingConfig", () => {
 
   it("runtime resolution（target.kind=runtime）→ fail-closed", () => {
     const resolution = runtimeRouteResolution();
-    expect(() => buildAgentCallBindingConfig(validInput({ resolution }))).toThrow(
+    expect(() => buildAgentCallBindingCandidate(validInput({ resolution }))).toThrow(
       AgentCallBindingEvidenceError,
     );
   });
 
   it("resolution 缺 route 证据 → fail-closed", () => {
     const resolution = validAgentRouteResolution({ routeActivationId: "" });
-    expect(() => buildAgentCallBindingConfig(validInput({ resolution }))).toThrow(
+    expect(() => buildAgentCallBindingCandidate(validInput({ resolution }))).toThrow(
       AgentCallBindingEvidenceError,
     );
   });
@@ -98,7 +98,7 @@ describe("buildAgentCallBindingConfig", () => {
       agentRevisionId: "agent-rev-1",
       // 故意缺 agentEndpointRef — 类型无法表达，经 fixture 组装边界模拟 untrusted 缺事实。
     });
-    expect(() => buildAgentCallBindingConfig(validInput({ resolution }))).toThrow(
+    expect(() => buildAgentCallBindingCandidate(validInput({ resolution }))).toThrow(
       AgentCallBindingEvidenceError,
     );
   });
@@ -112,7 +112,7 @@ describe("buildAgentCallBindingConfig", () => {
       agentCredentialRefId: "cred-1",
       // 故意缺 agentNetworkZone。
     });
-    expect(() => buildAgentCallBindingConfig(validInput({ resolution }))).toThrow(
+    expect(() => buildAgentCallBindingCandidate(validInput({ resolution }))).toThrow(
       AgentCallBindingEvidenceError,
     );
   });
@@ -126,7 +126,7 @@ describe("buildAgentCallBindingConfig", () => {
       agentNetworkZone: "private",
       // 故意缺 agentCredentialRefId（bearer 必须冻结 credential）。
     });
-    expect(() => buildAgentCallBindingConfig(validInput({ resolution }))).toThrow(
+    expect(() => buildAgentCallBindingCandidate(validInput({ resolution }))).toThrow(
       AgentCallBindingEvidenceError,
     );
   });
@@ -135,7 +135,7 @@ describe("buildAgentCallBindingConfig", () => {
     // 旧平铺字段（targetKind/agentEndpointRef/agentIdentityMode/...）在冻结模型下不存在；
     // 若 builder 仍尝试读取它们（当前旧实现），得到 undefined → 以 "" / "none" / null 默认值
     // 填充 → 证据校验失败，绝不可能产出"伪造"的合法 binding。
-    const config = buildAgentCallBindingConfig(validInput());
+    const config = buildAgentCallBindingCandidate(validInput());
     // 合法 agent target 的真实事实被冻结，绝无默认填充值混入。
     expect(config.endpointRef).toBe("https://agent.example.com/a2a");
     expect(config.identityMode).toBe("bearer");

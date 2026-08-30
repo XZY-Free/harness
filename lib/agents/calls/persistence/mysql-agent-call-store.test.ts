@@ -1,28 +1,13 @@
-/**
- * mysqlAgentCallStore 集成测试 — 真实 MySQL。
- *
- * 目标不变量：
- * 1. createIdempotent 幂等：同一 (parentInvocationId, logicalCallKey) 不重复创建。
- * 2. cross-tenant fail-closed：parent Invocation 不存在/异租户 → AgentCallParentInvocationError。
- * 3. create 统一事务：AgentCall + AgentCallBinding + 初始 Attempt(1) 原子。
- * 4. AgentCallBinding 不可变：getBinding 返回冻结配置，create 后无 update 路径。
- * 5. updateState 状态机 CAS：合法转移成功；from 不匹配 → AgentCallStateConcurrencyError。
- * 6. Attempt UNIQUE(callId, attemptNo)：createAttempt 幂等；recordOutbound 递增。
- * 7. getById/getBinding 按 tenantId 隔离。
- * 8. AgentCall 不越权修改 parent Invocation：create/updateState 后 parent Invocation 不变。
- */
 import { randomUUID } from "node:crypto";
-import { AgentCallBindingAlreadyExistsError } from "@/lib/agents/calls/domain/agent-call-binding";
+import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
+import { resolveRequiredAgentBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
+import { computeAgentCallBindingHash } from "@/lib/agents/calls/domain/agent-call-binding";
 import {
   AgentCallStateConcurrencyError,
+  createMysqlAgentCallStore,
   mysqlAgentCallStore,
 } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
-import {
-  D,
-  seedInvocation,
-  seedTenant,
-  validBindingConfig,
-} from "@/lib/agents/calls/test/agent-call-test-fixtures";
+import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -30,295 +15,499 @@ import {
   agentCallBindingTable,
   agentCallTable,
 } from "@/lib/persistence/schema/agent-calls";
+import { agentRevisionTable } from "@/lib/persistence/schema/agents";
+import { capabilityUseTable } from "@/lib/persistence/schema/capability-use";
 import { invocationTable } from "@/lib/persistence/schema/executions";
-import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { governanceConfigRevisionTable } from "@/lib/persistence/schema/governance-config";
+import { policyRevisionTable } from "@/lib/persistence/schema/permission";
+import { computePublicationEvidenceSetDigest } from "@/lib/publications/domain/publication-record";
+import {
+  publicationRecord,
+  withdrawalRecord,
+} from "@/lib/publications/persistence/publication-record";
+import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
+import { routeEligibilityProjection } from "@/lib/routes/projection/route-eligibility-projection-record";
+import { activateSingleRouteForTest } from "@/lib/routes/test-support/activate-single-route-for-test";
+import { buildActor } from "@/lib/test-support/create-verified-attestation";
+import { and, count, eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const NOW = new Date("2026-08-28T00:00:00.000Z");
+const NOW = new Date("2026-08-29T00:00:00.000Z");
+type Scenario = Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>;
+let scenarios: Scenario[] = [];
+let extraCredentialEnvVars: string[] = [];
 
 beforeEach(async () => {
   await resetDatabase(db);
+  scenarios = [];
+  extraCredentialEnvVars = [];
 });
 
-function seedInput(
-  tenantId: string,
-  parentInvocationId: string,
-  opts: {
-    id?: string;
-    logicalCallKey?: string | null;
-    binding?: ReturnType<typeof validBindingConfig>;
-  } = {},
+afterEach(async () => {
+  for (const scenario of scenarios) {
+    delete process.env[scenario.credentialEnvVar];
+    await scenario.provider.server.close();
+  }
+  for (const envVar of extraCredentialEnvVars) delete process.env[envVar];
+});
+
+async function seed(options?: Parameters<typeof seedAgentCallExecutionScenario>[0]) {
+  const scenario = await seedAgentCallExecutionScenario(options);
+  scenarios.push(scenario);
+  return scenario;
+}
+
+function commandFor(
+  scenario: Scenario,
+  overrides: Partial<Parameters<ReturnType<typeof createCreateAgentCall>>[0]> = {},
 ) {
   return {
-    id: opts.id ?? randomUUID(),
-    tenantId,
-    parentInvocationId,
-    agentId: "agent-1",
-    agentRevisionId: "agent-rev-1",
+    tenantId: scenario.tenantId,
+    parentInvocationId: scenario.parentInvocationId,
+    agentId: scenario.agentId,
+    agentRevisionId: scenario.agentRevisionId,
     sourceType: "user_selected" as const,
-    sourceRef: "turn-1",
-    logicalCallKey:
-      "logicalCallKey" in opts ? (opts.logicalCallKey ?? null) : "required-agent:turn-1:agent-1",
-    binding: opts.binding ?? validBindingConfig(),
-    bindingHash: `sha256:${"0".repeat(64)}`,
-    createdAt: NOW,
+    sourceRef: scenario.turnId,
+    logicalCallKey: scenario.logicalCallKey,
+    bindingCandidate: scenario.binding,
+    now: NOW,
+    ...overrides,
   };
 }
 
-const inputFor = seedInput;
-
-describe("mysqlAgentCallStore", () => {
-  it("createIdempotent 统一事务创建 AgentCall + Binding + Attempt(1)", async () => {
-    const tenantId = await seedTenant();
-    const parentId = await seedInvocation(tenantId);
-    const result = await mysqlAgentCallStore.createIdempotent(inputFor(tenantId, parentId));
-
-    expect(result.created).toBe(true);
-    expect(result.call.parentInvocationId).toBe(parentId);
-    expect(result.call.state).toBe("queued");
-    expect(result.call.tenantId).toBe(tenantId);
-
-    const binding = await mysqlAgentCallStore.getBinding({ callId: result.call.id, tenantId });
-    expect(binding).toEqual(validBindingConfig());
-
-    const [callRow] = await db
+describe("mysqlAgentCallStore.finalizeAgentCall", () => {
+  it("单事务创建 Call + Binding + Attempt(1) + CapabilityUse", async () => {
+    const scenario = await seed();
+    const [call] = await db
       .select()
       .from(agentCallTable)
-      .where(eq(agentCallTable.id, result.call.id))
-      .limit(1);
-    expect(callRow).toBeTruthy();
-    const [bindingRow] = await db
+      .where(eq(agentCallTable.id, scenario.callId));
+    const [binding] = await db
       .select()
       .from(agentCallBindingTable)
-      .where(eq(agentCallBindingTable.callId, result.call.id))
-      .limit(1);
-    expect(bindingRow).toBeTruthy();
-    const [attemptRow] = await db
+      .where(eq(agentCallBindingTable.callId, scenario.callId));
+    const [attempt] = await db
       .select()
       .from(agentCallAttemptTable)
-      .where(eq(agentCallAttemptTable.callId, result.call.id))
-      .limit(1);
-    expect(attemptRow?.attemptNo).toBe(1);
-    expect(attemptRow?.dispatchAttemptCount).toBe(0);
+      .where(eq(agentCallAttemptTable.callId, scenario.callId));
+    const [use] = await db
+      .select()
+      .from(capabilityUseTable)
+      .where(
+        and(
+          eq(capabilityUseTable.invocationId, scenario.parentInvocationId),
+          eq(capabilityUseTable.capabilityType, "agent"),
+        ),
+      );
+    expect(call?.creationRequestDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(binding?.bindingHash).toBe(scenario.bindingHash);
+    expect(attempt?.attemptNo).toBe(1);
+    expect(use?.revisionId).toBe(scenario.agentRevisionId);
   });
 
-  it("createIdempotent 幂等：同 (parentInvocationId, logicalCallKey) 不重复创建", async () => {
-    const tenantId = await seedTenant();
-    const parentId = await seedInvocation(tenantId);
-    const first = await mysqlAgentCallStore.createIdempotent(inputFor(tenantId, parentId));
-    const second = await mysqlAgentCallStore.createIdempotent(
-      inputFor(tenantId, parentId, { logicalCallKey: first.call.logicalCallKey }),
-    );
-
-    expect(second.created).toBe(false);
-    expect(second.call.id).toBe(first.call.id);
-    expect(second.binding).toEqual(first.binding);
-
-    const count = await db.select({ c: agentCallTable.id }).from(agentCallTable);
-    expect(count.length).toBe(1);
+  it("同 key 同 canonical request 重放，返回原 Call 且不重复 Attempt/CapabilityUse", async () => {
+    const scenario = await seed();
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+    const replay = await create(commandFor(scenario));
+    expect(replay.status).toBe("replayed");
+    expect(replay.call.id).toBe(scenario.callId);
+    expect(
+      await db
+        .select()
+        .from(agentCallAttemptTable)
+        .where(eq(agentCallAttemptTable.callId, scenario.callId)),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(capabilityUseTable)
+        .where(eq(capabilityUseTable.invocationId, scenario.parentInvocationId)),
+    ).toHaveLength(1);
   });
 
-  it("无 logicalCallKey 时不幂等（每次新建）", async () => {
-    const tenantId = await seedTenant();
-    const parentId = await seedInvocation(tenantId);
-    await mysqlAgentCallStore.createIdempotent(
-      inputFor(tenantId, parentId, { logicalCallKey: null }),
-    );
-    await mysqlAgentCallStore.createIdempotent(
-      inputFor(tenantId, parentId, { logicalCallKey: null }),
-    );
-    const count = await db.select({ c: agentCallTable.id }).from(agentCallTable);
-    expect(count.length).toBe(2);
-  });
-
-  it("cross-tenant fail-closed：parent Invocation 不存在 → AgentCallParentInvocationError", async () => {
-    const tenantId = await seedTenant();
+  it("同 key 但来源语义不同返回 AGENT_CALL_IDEMPOTENCY_CONFLICT", async () => {
+    const scenario = await seed();
+    const resolved = await resolveRequiredAgentBinding({
+      tenantId: scenario.tenantId,
+      agentId: scenario.agentId,
+      resolveRoute: createResolveRoute({ store: mysqlRouteEligibilityResolutionStore }),
+      routeScopeKey: "default",
+      businessKey: { jobId: scenario.parentInvocationId },
+    });
+    const binding = resolved.bindingCandidate;
     await expect(
-      mysqlAgentCallStore.createIdempotent(inputFor(tenantId, "missing-invocation")),
-    ).rejects.toThrow(/parent Invocation missing-invocation 不存在或不属于租户/);
-    const count = await db.select({ c: agentCallTable.id }).from(agentCallTable);
-    expect(count.length).toBe(0);
+      mysqlAgentCallStore.finalizeAgentCall({
+        id: randomUUID(),
+        tenantId: scenario.tenantId,
+        parentInvocationId: scenario.parentInvocationId,
+        agentId: scenario.agentId,
+        agentRevisionId: scenario.agentRevisionId,
+        sourceType: "gateway",
+        sourceRef: scenario.parentInvocationId,
+        logicalCallKey: scenario.logicalCallKey,
+        bindingCandidate: binding,
+        bindingHash: computeAgentCallBindingHash(binding),
+        createdAt: NOW,
+      }),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_IDEMPOTENCY_CONFLICT" });
   });
 
-  it("cross-tenant fail-closed：异租户 parent Invocation → 拒绝", async () => {
-    const tenantA = await seedTenant();
-    const tenantB = await seedTenant();
-    const parentA = await seedInvocation(tenantA);
-    // 用 tenantB 的 AgentCall 指向 tenantA 的 Invocation。
-    await expect(mysqlAgentCallStore.createIdempotent(inputFor(tenantB, parentA))).rejects.toThrow(
-      /parent Invocation .* 不存在或不属于租户/,
-    );
-    const count = await db.select({ c: agentCallTable.id }).from(agentCallTable);
-    expect(count.length).toBe(0);
+  it("同 key 切到另一个有效 AgentRevision 也必须幂等冲突", async () => {
+    const scenario = await seed();
+    const latest = await scenario.createNewLatestEvidence();
+    extraCredentialEnvVars.push(latest.newCredentialEnvVar);
+    await activateSingleRouteForTest({
+      tenantId: scenario.tenantId,
+      routeSetId: scenario.resolution.routeSetId,
+      routeId: scenario.resolution.deploymentRouteId,
+      routeSetExpectedVersionNo: scenario.resolution.routeSetVersionNo,
+      target: {
+        kind: "agent",
+        agentRevisionId: latest.newAgentRevisionId,
+        agentEndpointRef: scenario.endpoint,
+        agentIdentityMode: "bearer",
+        agentCredentialRefId: latest.newCredentialRefId,
+        agentNetworkZone: "private",
+      },
+      trafficWeight: 10_000,
+      actor: buildActor(scenario.tenantId, "idempotency-revision-switch"),
+    });
+    const resolved = await resolveRequiredAgentBinding({
+      tenantId: scenario.tenantId,
+      agentId: scenario.agentId,
+      resolveRoute: createResolveRoute({ store: mysqlRouteEligibilityResolutionStore }),
+      routeScopeKey: "default",
+      businessKey: { threadId: scenario.threadId },
+    });
+    const binding = resolved.bindingCandidate;
+    await expect(
+      mysqlAgentCallStore.finalizeAgentCall({
+        id: randomUUID(),
+        tenantId: scenario.tenantId,
+        parentInvocationId: scenario.parentInvocationId,
+        agentId: scenario.agentId,
+        agentRevisionId: resolved.agentRevisionId,
+        sourceType: "user_selected",
+        sourceRef: scenario.turnId,
+        logicalCallKey: scenario.logicalCallKey,
+        bindingCandidate: binding,
+        bindingHash: computeAgentCallBindingHash(binding),
+        createdAt: NOW,
+      }),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_IDEMPOTENCY_CONFLICT" });
   });
 
-  it("getById / getBinding 按 tenantId 隔离", async () => {
-    const tenantA = await seedTenant();
-    const tenantB = await seedTenant();
-    const parentA = await seedInvocation(tenantA);
-    const { call } = await mysqlAgentCallStore.createIdempotent(inputFor(tenantA, parentA));
-
-    // 异租户查询返回 null。
-    expect(await mysqlAgentCallStore.getById({ callId: call.id, tenantId: tenantB })).toBeNull();
-    expect(await mysqlAgentCallStore.getBinding({ callId: call.id, tenantId: tenantB })).toBeNull();
-    // 同租户返回。
-    expect((await mysqlAgentCallStore.getById({ callId: call.id, tenantId: tenantA }))?.id).toBe(
-      call.id,
-    );
-    expect(await mysqlAgentCallStore.getBinding({ callId: call.id, tenantId: tenantA })).toEqual(
-      validBindingConfig(),
-    );
+  it("candidate 的 Agent 身份必须与创建命令精确一致", async () => {
+    const scenario = await seed();
+    const binding = { ...scenario.binding, agentId: randomUUID() };
+    await expect(
+      mysqlAgentCallStore.finalizeAgentCall({
+        id: randomUUID(),
+        tenantId: scenario.tenantId,
+        parentInvocationId: scenario.parentInvocationId,
+        agentId: scenario.agentId,
+        agentRevisionId: scenario.agentRevisionId,
+        sourceType: "user_selected",
+        sourceRef: scenario.turnId,
+        logicalCallKey: `identity-mismatch:${randomUUID()}`,
+        bindingCandidate: binding,
+        bindingHash: computeAgentCallBindingHash(binding),
+        createdAt: NOW,
+      }),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
   });
 
-  it("updateState 合法转移（queued→running→waiting_user→completed）", async () => {
-    const tenantId = await seedTenant();
-    const parentId = await seedInvocation(tenantId);
-    const { call } = await mysqlAgentCallStore.createIdempotent(inputFor(tenantId, parentId));
+  it("Parent Invocation 非 running 时不得新建 AgentCall", async () => {
+    const scenario = await seed();
+    await db
+      .update(invocationTable)
+      .set({ executionState: "queued" })
+      .where(eq(invocationTable.id, scenario.parentInvocationId));
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+    await expect(
+      create(commandFor(scenario, { logicalCallKey: `parent-not-running:${randomUUID()}` })),
+    ).rejects.toMatchObject({
+      code: "AGENT_CALL_BINDING_STALE",
+    });
+  });
 
+  it("同请求并发最终化只创建一个 Call", async () => {
+    const scenario = await seed();
+    const logicalCallKey = `concurrent:${randomUUID()}`;
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+    const [left, right] = await Promise.all([
+      create(commandFor(scenario, { logicalCallKey })),
+      create(commandFor(scenario, { logicalCallKey })),
+    ]);
+    expect([left.status, right.status].sort()).toEqual(["created", "replayed"]);
+    expect(left.call.id).toBe(right.call.id);
+    expect(
+      await db
+        .select()
+        .from(agentCallTable)
+        .where(
+          and(
+            eq(agentCallTable.parentInvocationId, scenario.parentInvocationId),
+            eq(agentCallTable.logicalCallKey, logicalCallKey),
+          ),
+        ),
+    ).toHaveLength(1);
+  });
+
+  it("Resolve 后 Publication withdraw，最终事务 fail closed 且不写 Call", async () => {
+    const scenario = await seed();
+    const [publication] = await db
+      .select()
+      .from(publicationRecord)
+      .where(eq(publicationRecord.id, scenario.agentPublicationRecordId));
+    if (!publication) throw new Error("测试 publication 缺失");
+    await db.insert(withdrawalRecord).values({
+      id: randomUUID(),
+      tenantId: scenario.tenantId,
+      publicationRecordId: publication.id,
+      subjectType: "agent_revision",
+      subjectRevisionId: scenario.agentRevisionId,
+      reasonCode: "test",
+      reason: "stale candidate",
+      withdrawnByType: "service",
+      withdrawnBy: "test",
+      withdrawnAt: NOW,
+    });
+    const logicalCallKey = `withdrawn:${randomUUID()}`;
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+    await expect(create(commandFor(scenario, { logicalCallKey }))).rejects.toMatchObject({
+      code: "AGENT_CALL_BINDING_STALE",
+    });
+    expect(
+      await db
+        .select()
+        .from(agentCallTable)
+        .where(eq(agentCallTable.logicalCallKey, logicalCallKey)),
+    ).toHaveLength(0);
+  });
+
+  it("Resolve 后 RouteActivation 切版，旧 candidate 最终化失败", async () => {
+    const scenario = await seed();
+    await activateSingleRouteForTest({
+      tenantId: scenario.tenantId,
+      routeSetId: scenario.resolution.routeSetId,
+      routeId: scenario.resolution.deploymentRouteId,
+      routeSetExpectedVersionNo: scenario.resolution.routeSetVersionNo,
+      target: scenario.resolution.target,
+      trafficWeight: 10_000,
+      actor: buildActor(scenario.tenantId, "route-switch-test"),
+    });
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+    await expect(
+      create(commandFor(scenario, { logicalCallKey: `route-switch:${randomUUID()}` })),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
+  });
+
+  it("Resolve 后 Projection version bump，旧 candidate 最终化失败", async () => {
+    const scenario = await seed();
+    await db
+      .update(routeEligibilityProjection)
+      .set({ projectionVersionNo: scenario.binding.projectionVersionNo + 1 })
+      .where(eq(routeEligibilityProjection.routeId, scenario.binding.deploymentRouteId));
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+    await expect(
+      create(commandFor(scenario, { logicalCallKey: `projection-bump:${randomUUID()}` })),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
+  });
+
+  it("candidate 的 resolutionInputDigest 必须与 source provenance 精确一致", async () => {
+    const scenario = await seed();
+    const binding = {
+      ...scenario.binding,
+      resolutionInputDigest: `sha256:${"f".repeat(64)}`,
+    };
+    await expect(
+      mysqlAgentCallStore.finalizeAgentCall({
+        id: randomUUID(),
+        tenantId: scenario.tenantId,
+        parentInvocationId: scenario.parentInvocationId,
+        agentId: scenario.agentId,
+        agentRevisionId: scenario.agentRevisionId,
+        sourceType: "user_selected",
+        sourceRef: scenario.turnId,
+        logicalCallKey: `forged-resolution:${randomUUID()}`,
+        bindingCandidate: binding,
+        bindingHash: computeAgentCallBindingHash(binding),
+        createdAt: NOW,
+      }),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
+  });
+
+  it("黑盒 Agent Publication 被注入 Attestation 后必须 fail closed", async () => {
+    const scenario = await seed();
+    const injectedAttestationId = randomUUID();
+    await db
+      .update(publicationRecord)
+      .set({
+        attestationIds: [injectedAttestationId],
+        evidenceSetDigest: computePublicationEvidenceSetDigest({
+          attestationIds: [injectedAttestationId],
+          conformanceRunId: null,
+          approvals: [],
+          additionalEvidence: {
+            agent_contract_snapshot: {
+              id: scenario.agentContractSnapshotId,
+              contract_digest: scenario.agentContractDigest,
+              capability_digest: scenario.agentCapabilityDigest,
+              context_digest: scenario.agentContextDigest,
+            },
+          },
+        }),
+      })
+      .where(eq(publicationRecord.id, scenario.agentPublicationRecordId));
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+    await expect(
+      create(commandFor(scenario, { logicalCallKey: `agent-attestation:${randomUUID()}` })),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
+  });
+
+  it("Policy 或 Governance 内容在 Resolve 后漂移时必须 fail closed", async () => {
+    const scenario = await seed();
+    await db
+      .update(policyRevisionTable)
+      .set({ defaultDecision: "allow" })
+      .where(eq(policyRevisionTable.id, scenario.binding.policyRevisionId));
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+    await expect(
+      create(commandFor(scenario, { logicalCallKey: `policy-drift:${randomUUID()}` })),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
+
+    await db
+      .update(policyRevisionTable)
+      .set({ defaultDecision: "pause" })
+      .where(eq(policyRevisionTable.id, scenario.binding.policyRevisionId));
+    const [governance] = await db
+      .select()
+      .from(governanceConfigRevisionTable)
+      .where(eq(governanceConfigRevisionTable.id, scenario.binding.governanceConfigRevisionId));
+    if (!governance) throw new Error("测试 GovernanceConfigRevision 缺失");
+    await db
+      .update(governanceConfigRevisionTable)
+      .set({
+        configJson: {
+          ...governance.configJson,
+          formatOnWrite: !governance.configJson.formatOnWrite,
+        },
+      })
+      .where(eq(governanceConfigRevisionTable.id, governance.id));
+    await expect(
+      create(commandFor(scenario, { logicalCallKey: `governance-drift:${randomUUID()}` })),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
+  });
+
+  it("AgentRevision 的 ContractSnapshot commitment 漂移时失败", async () => {
+    const scenario = await seed();
+    await db
+      .update(agentRevisionTable)
+      .set({ agentContractSnapshotId: randomUUID() })
+      .where(eq(agentRevisionTable.id, scenario.agentRevisionId));
+    const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
+    await expect(
+      create(commandFor(scenario, { logicalCallKey: `contract-drift:${randomUUID()}` })),
+    ).rejects.toMatchObject({ code: "AGENT_CALL_BINDING_STALE" });
+  });
+
+  it("CapabilityUse 写失败时 Call/Binding/Attempt 一并回滚，无孤儿", async () => {
+    const scenario = await seed();
+    const before = await Promise.all([
+      db
+        .select({ value: count() })
+        .from(agentCallTable)
+        .where(eq(agentCallTable.tenantId, scenario.tenantId)),
+      db
+        .select({ value: count() })
+        .from(agentCallBindingTable)
+        .where(eq(agentCallBindingTable.tenantId, scenario.tenantId)),
+      db
+        .select({ value: count() })
+        .from(agentCallAttemptTable)
+        .where(eq(agentCallAttemptTable.tenantId, scenario.tenantId)),
+      db
+        .select({ value: count() })
+        .from(capabilityUseTable)
+        .where(eq(capabilityUseTable.tenantId, scenario.tenantId)),
+    ]);
+    const failingStore = createMysqlAgentCallStore({
+      recordCapabilityUse: async () => {
+        throw new Error("simulated capability ledger failure");
+      },
+    });
+    const create = createCreateAgentCall({ store: failingStore, now: () => NOW });
+    const logicalCallKey = `rollback:${randomUUID()}`;
+    await expect(create(commandFor(scenario, { logicalCallKey }))).rejects.toThrow(
+      "simulated capability ledger failure",
+    );
+    expect(
+      await db
+        .select()
+        .from(agentCallTable)
+        .where(eq(agentCallTable.logicalCallKey, logicalCallKey)),
+    ).toHaveLength(0);
+    const after = await Promise.all([
+      db
+        .select({ value: count() })
+        .from(agentCallTable)
+        .where(eq(agentCallTable.tenantId, scenario.tenantId)),
+      db
+        .select({ value: count() })
+        .from(agentCallBindingTable)
+        .where(eq(agentCallBindingTable.tenantId, scenario.tenantId)),
+      db
+        .select({ value: count() })
+        .from(agentCallAttemptTable)
+        .where(eq(agentCallAttemptTable.tenantId, scenario.tenantId)),
+      db
+        .select({ value: count() })
+        .from(capabilityUseTable)
+        .where(eq(capabilityUseTable.tenantId, scenario.tenantId)),
+    ]);
+    expect(after).toEqual(before);
+  });
+});
+
+describe("AgentCall 后续状态与 Attempt", () => {
+  it("状态 CAS、Attempt 幂等与 parent 隔离保持不变", async () => {
+    const scenario = await seed();
     const running = await mysqlAgentCallStore.updateState({
-      callId: call.id,
-      tenantId,
+      callId: scenario.callId,
+      tenantId: scenario.tenantId,
       from: "queued",
       to: "running",
       now: NOW,
-      externalTaskRef: "task-1",
     });
     expect(running.state).toBe("running");
-    expect(running.externalTaskRef).toBe("task-1");
-    expect(running.versionNo).toBe(2);
-
-    const waiting = await mysqlAgentCallStore.updateState({
-      callId: call.id,
-      tenantId,
-      from: "running",
-      to: "waiting_user",
-      now: NOW,
-      lifecycle: { waitingAt: NOW },
-    });
-    expect(waiting.state).toBe("waiting_user");
-    expect(waiting.waitingAt).toBeTruthy();
-
-    const completed = await mysqlAgentCallStore.updateState({
-      callId: call.id,
-      tenantId,
-      from: "waiting_user",
-      to: "completed",
-      now: NOW,
-      lifecycle: { finishedAt: NOW },
-      resultText: "ok",
-    });
-    expect(completed.state).toBe("completed");
-    expect(completed.finishedAt).toBeTruthy();
-    expect(completed.resultText).toBe("ok");
-    expect(completed.versionNo).toBe(4);
-  });
-
-  it("updateState from 不匹配（并发冲突）→ AgentCallStateConcurrencyError", async () => {
-    const tenantId = await seedTenant();
-    const parentId = await seedInvocation(tenantId);
-    const { call } = await mysqlAgentCallStore.createIdempotent(inputFor(tenantId, parentId));
-
     await expect(
       mysqlAgentCallStore.updateState({
-        callId: call.id,
-        tenantId,
-        from: "running",
-        to: "completed",
-        now: NOW,
-      }),
-    ).rejects.toBeInstanceOf(AgentCallStateConcurrencyError);
-  });
-
-  it("终态不可再转移（Store CAS 拒绝）", async () => {
-    const tenantId = await seedTenant();
-    const parentId = await seedInvocation(tenantId);
-    const { call } = await mysqlAgentCallStore.createIdempotent(inputFor(tenantId, parentId));
-    await mysqlAgentCallStore.updateState({
-      callId: call.id,
-      tenantId,
-      from: "queued",
-      to: "completed",
-      now: NOW,
-    });
-    await expect(
-      mysqlAgentCallStore.updateState({
-        callId: call.id,
-        tenantId,
-        from: "completed",
+        callId: scenario.callId,
+        tenantId: scenario.tenantId,
+        from: "queued",
         to: "running",
         now: NOW,
       }),
     ).rejects.toBeInstanceOf(AgentCallStateConcurrencyError);
-  });
-
-  it("createAttempt UNIQUE(callId, attemptNo) 幂等：重复创建返回已存在", async () => {
-    const tenantId = await seedTenant();
-    const parentId = await seedInvocation(tenantId);
-    const { call } = await mysqlAgentCallStore.createIdempotent(inputFor(tenantId, parentId));
-
-    const a1 = await mysqlAgentCallStore.createAttempt({
-      callId: call.id,
-      tenantId,
-      attemptNo: 1,
-      now: NOW,
-    });
-    const a1again = await mysqlAgentCallStore.createAttempt({
-      callId: call.id,
-      tenantId,
-      attemptNo: 1,
-      now: NOW,
-    });
-    expect(a1again.attemptNo).toBe(1);
-    expect(a1again.id).toBe(a1.id);
-
-    const a2 = await mysqlAgentCallStore.createAttempt({
-      callId: call.id,
-      tenantId,
+    const attempt2 = await mysqlAgentCallStore.createAttempt({
+      callId: scenario.callId,
+      tenantId: scenario.tenantId,
       attemptNo: 2,
       now: NOW,
     });
-    expect(a2.attemptNo).toBe(2);
-    expect(a2.id).not.toBe(a1.id);
-  });
-
-  it("recordOutbound 递增 dispatchAttemptCount", async () => {
-    const tenantId = await seedTenant();
-    const parentId = await seedInvocation(tenantId);
-    const { call } = await mysqlAgentCallStore.createIdempotent(inputFor(tenantId, parentId));
-
-    const one = await mysqlAgentCallStore.recordOutbound({
-      callId: call.id,
-      tenantId,
-      attemptNo: 1,
-    });
-    expect(one.dispatchAttemptCount).toBe(1);
-    const two = await mysqlAgentCallStore.recordOutbound({
-      callId: call.id,
-      tenantId,
-      attemptNo: 1,
-    });
-    expect(two.dispatchAttemptCount).toBe(2);
-  });
-
-  it("AgentCall 不越权修改 parent Invocation：create/updateState 后 parent 不变", async () => {
-    const tenantId = await seedTenant();
-    const parentId = await seedInvocation(tenantId);
-    const { call } = await mysqlAgentCallStore.createIdempotent(inputFor(tenantId, parentId));
-
-    await mysqlAgentCallStore.updateState({
-      callId: call.id,
-      tenantId,
-      from: "queued",
-      to: "completed",
+    const replayAttempt2 = await mysqlAgentCallStore.createAttempt({
+      callId: scenario.callId,
+      tenantId: scenario.tenantId,
+      attemptNo: 2,
       now: NOW,
     });
-
-    const [parentRow] = await db
+    expect(replayAttempt2.id).toBe(attempt2.id);
+    const [parent] = await db
       .select()
       .from(invocationTable)
-      .where(eq(invocationTable.id, parentId))
-      .limit(1);
-    expect(parentRow?.executionState).toBe("queued"); // 未被 AgentCall completed 触碰
-    expect(parentRow?.finishedAt).toBeNull();
+      .where(eq(invocationTable.id, scenario.parentInvocationId));
+    expect(parent?.executionState).toBe("running");
   });
 });

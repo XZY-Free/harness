@@ -12,42 +12,38 @@
 import { randomUUID } from "node:crypto";
 import { mysqlAgentCallEventIngressStore } from "@/lib/agents/calls/persistence/mysql-agent-call-event-ingress-store";
 import { mysqlAgentCallStore } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
-import {
-  computePayloadHash,
-  seedInvocation,
-  seedTenant,
-  validBindingConfig,
-} from "@/lib/agents/calls/test/agent-call-test-fixtures";
+import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
+import { computePayloadHash, seedTenant } from "@/lib/agents/calls/test/agent-call-test-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { agentCallEventIngressTable } from "@/lib/persistence/schema/agent-calls";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const NOW = new Date("2026-08-28T00:00:00.000Z");
+const scenarios: Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>[] = [];
 
 beforeEach(async () => {
   await resetDatabase(db);
 });
 
+afterEach(async () => {
+  for (const scenario of scenarios.splice(0)) {
+    delete process.env[scenario.credentialEnvVar];
+    await scenario.provider.server.close();
+  }
+});
+
 async function seedCall() {
-  const tenantId = await seedTenant();
-  const parentId = await seedInvocation(tenantId);
-  const { call } = await mysqlAgentCallStore.createIdempotent({
-    id: randomUUID(),
-    tenantId,
-    parentInvocationId: parentId,
-    agentId: "agent-1",
-    agentRevisionId: "agent-rev-1",
-    sourceType: "user_selected",
-    sourceRef: "turn-1",
-    logicalCallKey: "required-agent:turn-1:agent-1",
-    binding: validBindingConfig(),
-    bindingHash: `sha256:${"0".repeat(64)}`,
-    createdAt: NOW,
+  const scenario = await seedAgentCallExecutionScenario();
+  scenarios.push(scenario);
+  const call = await mysqlAgentCallStore.getById({
+    callId: scenario.callId,
+    tenantId: scenario.tenantId,
   });
-  return { tenantId, parentId, call };
+  if (!call) throw new Error("测试 AgentCall 缺失");
+  return { tenantId: scenario.tenantId, parentId: scenario.parentInvocationId, call };
 }
 
 function seedIngress(
@@ -175,7 +171,7 @@ describe("mysqlAgentCallEventIngressStore", () => {
       .from(invocationTable)
       .where(eq(invocationTable.id, parentId))
       .limit(1);
-    expect(parentRow?.executionState).toBe("queued");
+    expect(parentRow?.executionState).toBe("running");
   });
 
   it("跨租户 accept：异租户同 (callId, producerEventId) 须 fail-closed，绝不透出/写入", async () => {

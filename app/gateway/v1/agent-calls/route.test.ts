@@ -3,8 +3,7 @@
  *
  * 真实 MySQL + 真实 loopback A2A Provider（复用 seedAgentCallExecutionScenario，
  * 不 mock transport / store / DB）。POST 的核心编排 createAgentCallViaGateway 注入
- * mock RouteResolver（复用 validAgentRouteResolution 覆盖为 scenario 真实证据），
- * 与 harness-required-agent.test.ts 一致。
+ * 正式 MySQL Projection Resolver，与 harness-required-agent.test.ts 使用同一 Authority。
  *
  * 目标不变量（Batch8）：
  * 1. Runtime 调 Agent 通过 AgentCall Gateway，不直接拿 endpoint secret / credential。
@@ -23,13 +22,12 @@ import {
   EXECUTION_FIXTURE_CONTRACT,
   seedAgentCallExecutionScenario,
 } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
-import { validAgentRouteResolution } from "@/lib/agents/calls/test/agent-call-test-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { bootstrapTenantBaselines } from "@/lib/identity/tenant-bootstrap";
 import { issueWorkloadToken } from "@/lib/identity/workload-token";
 import { agentCallBindingTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
-import type { RouteResolver } from "@/lib/routes/application/resolve-route";
+import { createResolveRoute } from "@/lib/routes/application/resolve-route";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -55,33 +53,8 @@ const RESUME_CAPABLE_CONTRACT = {
   },
 };
 
-/** mock RouteResolver：返回覆盖为 scenario 真实证据的 agent RouteResolution。 */
-function mockResolveRoute(
-  scenario: Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>,
-): RouteResolver {
-  return async () => ({
-    status: "resolved" as const,
-    eligibleCandidateCount: 1,
-    resolution: validAgentRouteResolution({
-      target: {
-        kind: "agent",
-        agentRevisionId: scenario.agentRevisionId,
-        agentEndpointRef: scenario.endpoint,
-        agentIdentityMode: "bearer",
-        agentCredentialRefId: scenario.credentialRefId,
-        agentNetworkZone: "private",
-      },
-      policyRevisionId: null,
-      controlPlaneEvidence: {
-        ...validAgentRouteResolution().controlPlaneEvidence,
-        agentContractSnapshotId: scenario.agentContractSnapshotId,
-        agentContractDigest: scenario.agentContractDigest,
-        agentContextDigest: scenario.agentContextDigest,
-        agentPublicationRecordId: scenario.agentPublicationRecordId,
-      },
-    }),
-  });
-}
+/** 测试也走正式 MySQL Projection Resolver，不伪造 RouteResolution。 */
+const resolveRoute = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
 
 /** 等待 AgentCall 进入指定状态（轮询 DB）。 */
 async function waitForCallState(
@@ -138,7 +111,6 @@ describe("Gateway AgentCall endpoints（Batch8）", () => {
       ...(contract ? { contract } : {}),
     });
     scenarios.push(scenario);
-    await bootstrapTenantBaselines(db, scenario.tenantId, "harness-test-actor");
     return scenario;
   }
 
@@ -170,7 +142,7 @@ describe("Gateway AgentCall endpoints（Batch8）", () => {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       body: { agent_id: scenario.agentId, input: "帮我查余额" },
-      resolveRoute: mockResolveRoute(scenario),
+      resolveRoute,
     });
     expect(result.status).toBe("created");
     const callId = result.payload.call_id as string;
@@ -203,11 +175,12 @@ describe("Gateway AgentCall endpoints（Batch8）", () => {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       body: { agent_id: scenario.agentId, input: "x" },
-      resolveRoute: mockResolveRoute(scenario),
+      resolveRoute,
     };
     const r1 = await createAgentCallViaGateway(params);
     const r2 = await createAgentCallViaGateway(params);
     expect(r1.payload.call_id).toBe(r2.payload.call_id);
+    expect([r1.status, r2.status]).toEqual(["created", "replayed"]);
 
     // fixture 自身也会创建一个 required-agent 前缀 call；此处只断言 gateway 幂等键唯一。
     const rows = await db
@@ -232,7 +205,7 @@ describe("Gateway AgentCall endpoints（Batch8）", () => {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       body: { agent_id: scenario.agentId, input: "hi" },
-      resolveRoute: mockResolveRoute(scenario),
+      resolveRoute,
     });
     const callId = result.payload.call_id as string;
 
@@ -263,7 +236,7 @@ describe("Gateway AgentCall endpoints（Batch8）", () => {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       body: { agent_id: scenario.agentId, input: "补充" },
-      resolveRoute: mockResolveRoute(scenario),
+      resolveRoute,
     });
     const callId = result.payload.call_id as string;
     await waitForCallState(scenario.tenantId, callId, ["waiting_user"]);
@@ -292,7 +265,7 @@ describe("Gateway AgentCall endpoints（Batch8）", () => {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       body: { agent_id: scenario.agentId, input: "hi" },
-      resolveRoute: mockResolveRoute(scenario),
+      resolveRoute,
     });
     const callId = result.payload.call_id as string;
     await waitForCallState(scenario.tenantId, callId, ["waiting_user"]);
@@ -316,7 +289,7 @@ describe("Gateway AgentCall endpoints（Batch8）", () => {
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       body: { agent_id: scenario.agentId, input: "hi" },
-      resolveRoute: mockResolveRoute(scenario),
+      resolveRoute,
     });
     const callId = result.payload.call_id as string;
 

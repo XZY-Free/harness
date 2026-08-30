@@ -1789,6 +1789,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "creationRequestDigest": {
+          "name": "creationRequestDigest",
+          "type": "varchar(71)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "createdAt": {
           "name": "createdAt",
           "type": "datetime(3)",

@@ -76,6 +76,9 @@ export interface AgentCallBindingConfigInput {
   governanceConfigDigest: string;
 }
 
+/** Resolver/Application 提交给最终事务的候选；事务成功前不代表已冻结事实。 */
+export type AgentCallBindingCandidate = AgentCallBindingConfigInput;
+
 export interface AgentCallBinding extends AgentCallBindingConfigInput {
   callId: string;
   tenantId: string;
@@ -105,8 +108,8 @@ export class AgentCallBindingAlreadyExistsError extends Error {
  */
 export function computeAgentCallBindingHash(input: AgentCallBindingConfigInput): string {
   assertAgentCallBindingEvidence(input);
-  if (!Number.isInteger(input.projectionVersionNo) || input.projectionVersionNo < 0) {
-    throw new AgentCallBindingEvidenceError("projectionVersionNo 必须为非负整数");
+  if (!Number.isInteger(input.projectionVersionNo) || input.projectionVersionNo <= 0) {
+    throw new AgentCallBindingEvidenceError("projectionVersionNo 必须为正整数");
   }
   const canonical = JSON.stringify(sortKeys(input));
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
@@ -138,36 +141,43 @@ export function assertAgentCallBindingEvidence(input: AgentCallBindingConfigInpu
     input.routeRevisionId,
     input.routeActivationId,
   ];
-  if (identifiers.some((value) => !value)) {
+  if (identifiers.some(isBlankString)) {
     throw new AgentCallBindingEvidenceError("缺少 Agent/Route/Publication 引用");
   }
   if (!SHA256.test(input.routeContentDigest) || !SHA256.test(input.resolutionInputDigest)) {
     throw new AgentCallBindingEvidenceError("routeContentDigest/resolutionInputDigest 格式非法");
   }
-  if (!input.endpointRef) {
+  if (isBlankString(input.endpointRef)) {
     throw new AgentCallBindingEvidenceError("AgentCall 必须冻结 endpointRef");
   }
-  if (!input.networkZone) {
+  if (isBlankString(input.networkZone)) {
     throw new AgentCallBindingEvidenceError("AgentCall 必须冻结 networkZone");
   }
-  if (!input.protocolType || !input.protocolContractRevision) {
+  if (isBlankString(input.protocolType) || isBlankString(input.protocolContractRevision)) {
     throw new AgentCallBindingEvidenceError("AgentCall 必须冻结 protocol 事实");
   }
   if (!AGENT_IDENTITY_MODES.includes(input.identityMode)) {
     throw new AgentCallBindingEvidenceError(`identityMode 非法: ${input.identityMode}`);
   }
-  if (input.identityMode === "bearer" && !input.credentialRefId) {
+  if (input.identityMode === "bearer" && isBlankString(input.credentialRefId)) {
     throw new AgentCallBindingEvidenceError("bearer identityMode 必须冻结 credentialRefId");
   }
   if (input.identityMode === "none" && input.credentialRefId) {
     throw new AgentCallBindingEvidenceError("none identityMode 不允许携带 credentialRefId");
   }
-  if (!input.policyRevisionId || !SHA256.test(input.policyRulesDigest)) {
+  if (isBlankString(input.policyRevisionId) || !SHA256.test(input.policyRulesDigest)) {
     throw new AgentCallBindingEvidenceError("AgentCall 必须冻结有效 policy 证据");
   }
-  if (!input.governanceConfigRevisionId || !SHA256.test(input.governanceConfigDigest)) {
+  if (
+    isBlankString(input.governanceConfigRevisionId) ||
+    !SHA256.test(input.governanceConfigDigest)
+  ) {
     throw new AgentCallBindingEvidenceError("AgentCall 必须冻结有效 governance 证据");
   }
+}
+
+function isBlankString(value: unknown): boolean {
+  return typeof value !== "string" || value.trim().length === 0;
 }
 
 function sortKeys(value: unknown): unknown {

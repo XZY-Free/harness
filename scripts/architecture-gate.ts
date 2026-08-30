@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import {
   type SourceDocument,
+  checkAgentCallFinalizationGate,
   checkAgentInvokeAuthorizationGate,
   checkNineIssueCloseoutGate,
   checkResumeTruthfulnessGate,
@@ -213,6 +214,16 @@ function checkFinalCloseout(): void {
   else fail(`Batch9 最终收口 Gate R1-R8：\n  ${result.failures.join("\n  ")}`);
 }
 
+function checkAgentCallFinalization(): void {
+  const documents: SourceDocument[] = ["app", "components", "desktop", "lib", "scripts"]
+    .flatMap((root) => filesUnder(resolve(ROOT, root)))
+    .filter((file) => SOURCE_EXTENSIONS.has(file.slice(file.lastIndexOf("."))))
+    .map((file) => ({ path: relative(ROOT, file), source: readFileSync(file, "utf8") }));
+  const result = checkAgentCallFinalizationGate(documents);
+  if (result.passed) pass("Package03 AgentCall 最终事务 Gate");
+  else fail(`Package03 AgentCall 最终事务 Gate：\n  ${result.failures.join("\n  ")}`);
+}
+
 function main(): void {
   checkMigrationJournal();
   checkRetiredNaming();
@@ -263,6 +274,7 @@ function main(): void {
   checkDeprecatedArchitecture();
   checkTopic01Boundaries();
   checkAgentInvokeAuthorization();
+  checkAgentCallFinalization();
   checkCloseoutRules();
   checkFinalCloseout();
   if (failures > 0) process.exitCode = 1;

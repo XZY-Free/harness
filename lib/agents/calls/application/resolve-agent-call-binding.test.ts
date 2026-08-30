@@ -33,7 +33,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
   resolveBindingGovernance: vi.fn(),
-  buildAgentCallBindingConfig: vi.fn(),
+  buildAgentCallBindingCandidate: vi.fn(),
   /** builder 配置的返回产物（断言返回的 binding 就是 build 的产物）。 */
   builtBinding: undefined as ReturnType<typeof validBindingConfig> | undefined,
 }));
@@ -45,7 +45,7 @@ vi.mock("@/lib/executions/application/resolve-binding-governance", () => ({
   resolveBindingGovernance: mocks.resolveBindingGovernance,
 }));
 vi.mock("@/lib/agents/calls/application/build-agent-call-binding-config", () => ({
-  buildAgentCallBindingConfig: mocks.buildAgentCallBindingConfig,
+  buildAgentCallBindingCandidate: mocks.buildAgentCallBindingCandidate,
 }));
 vi.mock("@/lib/db/client", () => ({ db: {} }));
 
@@ -56,7 +56,7 @@ describe("resolveRequiredAgentBinding（消费者迁移 · 判别 target 冻结�
   beforeEach(() => {
     mocks.transaction.mockReset();
     mocks.resolveBindingGovernance.mockReset();
-    mocks.buildAgentCallBindingConfig.mockReset();
+    mocks.buildAgentCallBindingCandidate.mockReset();
 
     // mock store：transaction 调用回调并返回一个合法 ContractSnapshot（含 capability/protocol 事实）。
     mocks.transaction.mockImplementation(
@@ -83,7 +83,7 @@ describe("resolveRequiredAgentBinding（消费者迁移 · 判别 target 冻结�
       governanceConfigDigest: D("f"),
     });
     mocks.builtBinding = validBindingConfig();
-    mocks.buildAgentCallBindingConfig.mockReturnValue(mocks.builtBinding);
+    mocks.buildAgentCallBindingCandidate.mockReturnValue(mocks.builtBinding);
   });
 
   /** mock RouteResolver：记录调用 target 并返回给定 resolution。 */
@@ -113,7 +113,7 @@ describe("resolveRequiredAgentBinding（消费者迁移 · 判别 target 冻结�
     // 返回同一 revision（来自判别 target.agentRevisionId，非平铺字段）。
     expect(result.agentRevisionId).toBe("agent-rev-1");
     // build 收到的 agentRevisionId 必须来自 resolution.target.agentRevisionId。
-    const buildInput = mocks.buildAgentCallBindingConfig.mock.calls[0]?.[0];
+    const buildInput = mocks.buildAgentCallBindingCandidate.mock.calls[0]?.[0];
     expect(buildInput).toBeTruthy();
     // fixture 是合法 agent resolution → 先按 target.kind 收窄再读 agentRevisionId。
     const resolvedTarget = agentResolution.target;
@@ -123,7 +123,7 @@ describe("resolveRequiredAgentBinding（消费者迁移 · 判别 target 冻结�
     expect(buildInput?.agentRevisionId).toBe(resolvedTarget.agentRevisionId);
     expect(buildInput?.agentRevisionId).toBe("agent-rev-1");
     // 返回的 binding 即 build 的产物（同一对象）。
-    expect(result.binding).toBe(mocks.builtBinding);
+    expect(result.bindingCandidate).toBe(mocks.builtBinding);
   });
 
   it("invariant3：resolveRoute 始终以 target={kind:'agent', agentId} 调用（无宽松 Runtime fallback）", async () => {
@@ -154,6 +154,6 @@ describe("resolveRequiredAgentBinding（消费者迁移 · 判别 target 冻结�
     // 读取 ContractSnapshot / governance / build binding 一律不得发生。
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.resolveBindingGovernance).not.toHaveBeenCalled();
-    expect(mocks.buildAgentCallBindingConfig).not.toHaveBeenCalled();
+    expect(mocks.buildAgentCallBindingCandidate).not.toHaveBeenCalled();
   });
 });

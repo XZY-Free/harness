@@ -13,7 +13,7 @@
  *
  * 流程：
  *   1. resolveRequiredAgentBinding（唯一 Route Authority：resolveRoute target=agent）
- *      → 冻结 exact AgentCallBinding（endpoint/identity/credential/network facts）。
+ *      → 装配 AgentCallBinding candidate（endpoint/identity/credential/network facts）。
  *   2. createAgentCall（sourceType=gateway，sourceRef=parentInvocationId，幂等
  *      logicalCallKey=gateway:<invocationId>:<agentId>）。
  *   3. startAgentCall（A2A，event 只走 AgentCallEventIngress）。
@@ -99,24 +99,24 @@ export async function createAgentCallViaGateway(params: {
   body: CreateAgentCallBody;
   resolveRoute?: RouteResolver;
 }): Promise<{
-  status: "created" | "start_failed";
+  status: "created" | "replayed" | "start_failed";
   payload: Record<string, unknown>;
 }> {
   const { tenantId, parentInvocationId, body } = params;
   const resolveRoute = params.resolveRoute ?? defaultResolveRoute;
 
-  // 1. 解析 Agent Route + 冻结 exact AgentCallBinding（唯一 Route Authority）。
+  // 1. 解析 Agent Route + 装配 AgentCallBinding candidate（唯一 Route Authority）。
   const resolved = await resolveRequiredAgentBinding({
     tenantId,
     agentId: body.agent_id,
     resolveRoute,
     routeScopeKey: body.route_scope_key ?? "default",
-    businessKey: { invocationId: parentInvocationId },
+    businessKey: { jobId: parentInvocationId },
   });
 
   // 2. createAgentCall（幂等 logicalCallKey：gateway:<invocationId>:<agentId>）。
   const logicalCallKey = `gateway:${parentInvocationId}:${body.agent_id}`;
-  const { call } = await createAgentCall({
+  const { call, status: finalizationStatus } = await createAgentCall({
     tenantId,
     parentInvocationId,
     agentId: body.agent_id,
@@ -124,7 +124,7 @@ export async function createAgentCallViaGateway(params: {
     sourceType: "gateway",
     sourceRef: parentInvocationId,
     logicalCallKey,
-    binding: resolved.binding,
+    bindingCandidate: resolved.bindingCandidate,
   });
   const callId = call.id;
 
@@ -152,7 +152,7 @@ export async function createAgentCallViaGateway(params: {
 
   // 4. 返回 callId + state（Runtime 只拿到 call 身份，不透出 endpoint secret）。
   return {
-    status: "created",
+    status: finalizationStatus,
     payload: {
       call_id: callId,
       state: call.state,
@@ -188,7 +188,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // 3. 核心编排（真实 resolver；Runtime 不直接拿 endpoint secret）。
   try {
-    const { status, payload } = await createAgentCallViaGateway({
+    const { payload } = await createAgentCallViaGateway({
       tenantId,
       parentInvocationId,
       body,

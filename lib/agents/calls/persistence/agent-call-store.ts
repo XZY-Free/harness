@@ -2,9 +2,8 @@
  * AgentCall Store — 仓储接口。
  *
  * 职责：
- * - create：统一事务创建 AgentCall + AgentCallBinding + 初始 Attempt(1)，并校验
- *   parent Invocation 同租户（cross-tenant fail-closed）与幂等（parentInvocationId +
- *   logicalCallKey）。
+ * - finalizeAgentCall：统一事务锁定全部 Authority，严格处理幂等，并原子创建
+ *   AgentCall + AgentCallBinding + 初始 Attempt(1) + CapabilityUse。
  * - updateState：AgentCall 状态转移（合法转移由 domain 校验，Store 做原子 CAS）。
  * - recordOutbound：记录一次 outbound（Attempt.dispatchAttemptCount++）。
  * - 查询按 tenantId 过滤（跨租户隔离）。
@@ -15,7 +14,10 @@ import type {
   AgentCallState,
 } from "@/lib/agents/calls/domain/agent-call";
 import type { AgentCallAttempt } from "@/lib/agents/calls/domain/agent-call-attempt";
-import type { AgentCallBindingConfigInput } from "@/lib/agents/calls/domain/agent-call-binding";
+import type {
+  AgentCallBindingCandidate,
+  AgentCallBindingConfigInput,
+} from "@/lib/agents/calls/domain/agent-call-binding";
 
 export interface StoreAgentCallInput {
   id: string;
@@ -27,8 +29,8 @@ export interface StoreAgentCallInput {
   sourceRef: string | null;
   /** 业务幂等键。 */
   logicalCallKey: string | null;
-  /** 冻结的不可变证据。 */
-  binding: AgentCallBindingConfigInput;
+  /** 待最终事务验证的候选证据。 */
+  bindingCandidate: AgentCallBindingCandidate;
   bindingHash: string;
   createdAt: Date;
 }
@@ -64,12 +66,11 @@ export type InitialAttemptClaimResult =
   | { status: "terminal"; attempt: AgentCallAttempt; call: AgentCall };
 
 export interface AgentCallStore {
-  create(input: StoreAgentCallInput): Promise<AgentCall>;
-  /** 幂等创建：若 (parentInvocationId, logicalCallKey) 已存在则返回已存在 call（不重复创建）。 */
-  createIdempotent(input: StoreAgentCallInput): Promise<{
+  /** 最终事务冻结：Authority 校验 + 幂等 + Call/Binding/Attempt/CapabilityUse 原子写。 */
+  finalizeAgentCall(input: StoreAgentCallInput): Promise<{
     call: AgentCall;
     binding: AgentCallBindingConfigInput;
-    created: boolean;
+    status: "created" | "replayed";
   }>;
   /** 原子状态转移（CAS on versionNo）。非法转移由 domain 层校验后调用。 */
   updateState(input: UpdateAgentCallStateInput): Promise<AgentCall>;

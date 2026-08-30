@@ -97,6 +97,12 @@ describe("AgentCallBinding 不可变冻结", () => {
     expect(() =>
       assertAgentCallBindingEvidence(validConfig({ protocolContractRevision: "" })),
     ).toThrow(AgentCallBindingEvidenceError);
+    expect(() => assertAgentCallBindingEvidence(validConfig({ endpointRef: "   " }))).toThrow(
+      AgentCallBindingEvidenceError,
+    );
+    expect(() => assertAgentCallBindingEvidence(validConfig({ networkZone: "\t" }))).toThrow(
+      AgentCallBindingEvidenceError,
+    );
   });
 
   it("policy/governance 必须冻结", () => {
@@ -127,8 +133,11 @@ describe("AgentCallBinding 不可变冻结", () => {
     );
   });
 
-  it("projectionVersionNo 必须为非负整数", () => {
+  it("projectionVersionNo 必须为正整数，0 不得伪装成有效投影版本", () => {
     expect(() => computeAgentCallBindingHash(validConfig({ projectionVersionNo: -1 }))).toThrow(
+      AgentCallBindingEvidenceError,
+    );
+    expect(() => computeAgentCallBindingHash(validConfig({ projectionVersionNo: 0 }))).toThrow(
       AgentCallBindingEvidenceError,
     );
   });

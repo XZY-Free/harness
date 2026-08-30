@@ -225,6 +225,7 @@ CREATE TABLE `AgentCall` (
 	`errorCode` varchar(128),
 	`errorSummary` text,
 	`logicalCallKey` varchar(256),
+	`creationRequestDigest` varchar(71) NOT NULL,
 	`createdAt` datetime(3) NOT NULL,
 	`startedAt` datetime(3),
 	`waitingAt` datetime(3),

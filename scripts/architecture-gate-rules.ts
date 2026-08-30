@@ -24,6 +24,71 @@ export interface AgentInvokeAuthorizationGateResult {
   failures: string[];
 }
 
+export interface AgentCallFinalizationGateResult {
+  passed: boolean;
+  failures: string[];
+}
+
+/** Package03：AgentCall 只能通过单一最终事务冻结，禁止旧幂等入口与假事实。 */
+export function checkAgentCallFinalizationGate(
+  documents: readonly SourceDocument[],
+): AgentCallFinalizationGateResult {
+  const failures: string[] = [];
+  const source = (path: string) =>
+    documents.find((document) => document.path === path)?.source ?? "";
+  const createApplication = stripComments(
+    source("lib/agents/calls/application/create-agent-call.ts"),
+  );
+  const store = stripComments(source("lib/agents/calls/persistence/mysql-agent-call-store.ts"));
+  const resolver = stripComments(
+    source("lib/agents/calls/application/resolve-agent-call-binding.ts"),
+  );
+  const schema = stripComments(source("lib/persistence/schema/agent-calls.ts"));
+
+  if (!createApplication.includes("finalizeAgentCall")) {
+    failures.push("AgentCall creation 未委托 finalizeAgentCall");
+  }
+  if (/\brecordCapabilityUse(?:InSession)?\s*\(/.test(createApplication)) {
+    failures.push("AgentCall creation 仍在事务外写 CapabilityUse");
+  }
+  if (
+    !store.includes("finalizeAgentCall") ||
+    !store.includes("lockAndValidateAgentCallAuthority") ||
+    !store.includes("recordCapabilityUse")
+  ) {
+    failures.push("mysql AgentCall Store 未统一 Authority/CapabilityUse 最终事务");
+  }
+  if (
+    !resolver.includes("bindingCandidate") ||
+    !resolver.includes("buildAgentCallBindingCandidate")
+  ) {
+    failures.push("Agent Route Resolver 仍把事务外结果声明为最终 Binding");
+  }
+  if (!schema.includes("creationRequestDigest") || !schema.includes("projectionVersionNo")) {
+    failures.push("AgentCall Schema 缺 creationRequestDigest/projectionVersionNo");
+  }
+
+  for (const document of documents) {
+    if (!document.path.startsWith("lib/agents/calls/") || document.path.includes(".test."))
+      continue;
+    const productionSource = stripComments(document.source);
+    if (/\bcreateIdempotent\b/.test(productionSource)) {
+      failures.push(`AgentCall 旧 createIdempotent 入口仍存在：${document.path}`);
+    }
+    if (
+      /projectionVersionNo\s*\?\?\s*0/.test(productionSource) ||
+      /(?:endpointRef|networkZone)\s*\?\?\s*["']{2}/.test(productionSource)
+    ) {
+      failures.push(`AgentCall 假事实 fallback 仍存在：${document.path}`);
+    }
+    if (/\bAgent\.?currentRevisionId\b|\bagent\.currentRevisionId\b/.test(productionSource)) {
+      failures.push(`AgentCall 执行读取 Agent.currentRevisionId：${document.path}`);
+    }
+  }
+
+  return { passed: failures.length === 0, failures: [...new Set(failures)] };
+}
+
 /** Agent 发现与 Turn 选择必须共用 RoleActionBinding 授权。 */
 export function checkAgentInvokeAuthorizationGate(
   documents: readonly SourceDocument[],

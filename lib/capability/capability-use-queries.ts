@@ -17,7 +17,7 @@
  * - capabilityUseKey 是稳定 hash，相同能力修订产生相同 key。
  */
 import { createHash, randomUUID } from "node:crypto";
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import { isMysqlDuplicateEntryError } from "@/lib/db/mysql-error";
 import {
   type CapabilityUse,
@@ -145,6 +145,14 @@ export interface RecordCapabilityUseParams {
 export async function recordCapabilityUse(
   params: RecordCapabilityUseParams,
 ): Promise<CapabilityUse> {
+  return recordCapabilityUseInSession(db, params);
+}
+
+/** 在调用方提供的 transaction/session 内原子写入 CapabilityUse。 */
+export async function recordCapabilityUseInSession(
+  source: DbOrTx,
+  params: RecordCapabilityUseParams,
+): Promise<CapabilityUse> {
   assertValidCapabilityType(params.capabilityType);
   const sourceType = params.sourceType ?? "dynamic_discovery";
   assertValidSourceType(sourceType);
@@ -167,7 +175,7 @@ export async function recordCapabilityUse(
   });
 
   // 先查重：避免不必要的 INSERT（同 Invocation 同 key 已记录则返回原行）。
-  const existing = await getCapabilityUseByKey({
+  const existing = await getCapabilityUseByKeyInSession(source, {
     tenantId: params.tenantId,
     invocationId: params.invocationId,
     capabilityUseKey,
@@ -178,7 +186,7 @@ export async function recordCapabilityUse(
 
   const id = randomUUID();
   try {
-    await db.insert(capabilityUseTable).values({
+    await source.insert(capabilityUseTable).values({
       id,
       tenantId: params.tenantId,
       invocationId: params.invocationId,
@@ -195,7 +203,7 @@ export async function recordCapabilityUse(
   } catch (err) {
     if (isMysqlDuplicateEntryError(err)) {
       // 并发竞态：UNIQUE(invocationId, capabilityUseKey) 冲突 → 回查返回已存在行。
-      const retried = await getCapabilityUseByKey({
+      const retried = await getCapabilityUseByKeyInSession(source, {
         tenantId: params.tenantId,
         invocationId: params.invocationId,
         capabilityUseKey,
@@ -205,7 +213,7 @@ export async function recordCapabilityUse(
     throw err;
   }
 
-  const [row] = await db
+  const [row] = await source
     .select()
     .from(capabilityUseTable)
     .where(eq(capabilityUseTable.id, id))
@@ -224,7 +232,18 @@ export async function getCapabilityUseByKey(params: {
   invocationId: string;
   capabilityUseKey: string;
 }): Promise<CapabilityUse | null> {
-  const [row] = await db
+  return getCapabilityUseByKeyInSession(db, params);
+}
+
+async function getCapabilityUseByKeyInSession(
+  source: DbOrTx,
+  params: {
+    tenantId: string;
+    invocationId: string;
+    capabilityUseKey: string;
+  },
+): Promise<CapabilityUse | null> {
+  const [row] = await source
     .select()
     .from(capabilityUseTable)
     .where(
