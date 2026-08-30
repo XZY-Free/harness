@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Runtime 治理控制面板（07 §10/§11）。
+ * Runtime 治理控制面板。
  *
  * 展示 Runtime / RuntimeRevision 权威字段（runtimeKind/runtimeEvidenceKind/protocol/
  * endpoint/identityMode/credentialRefId 引用/verificationState/measured capabilities/
@@ -25,7 +25,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 
-/** External 三态投影形状（02 §10；hosted 为 string[]）。 */
+/** External 三态投影形状（hosted 为 string[]）。 */
 interface CapabilitiesProjection {
   declared?: Record<string, boolean>;
   measured?: { features?: Record<string, string> };
@@ -175,12 +175,12 @@ function RevisionRow({
         revision.id,
         {
           expected_version_no: runtime.version_no,
-          // 03 §4：external_endpoint 不得携带 Artifact Attestation（不伪造）。
+          // external_endpoint 不得携带 Artifact Attestation（不伪造）。
           attestation_id:
             revision.runtime_evidence_kind === "hosted_artifact"
               ? (revision.attestation_ids[0] ?? null)
               : null,
-          // Publish request 携带精确 evidence ID：Candidate Conformance（02 §6）。
+          // Publish request 携带精确 evidence ID：Candidate Conformance。
           conformance_run_id: revision.latest_valid_conformance_run_id ?? "",
         },
         {
@@ -202,7 +202,7 @@ function RevisionRow({
     try {
       await client.runtimes.withdrawRevision(
         revision.id,
-        { reason_code: "studio_withdraw", reason: "Studio 撤回（07 §11）" },
+        { reason_code: "studio_withdraw", reason: "Studio 撤回" },
         {
           idempotencyKey: crypto.randomUUID(),
           ifMatch: `runtime-revision-${revision.revision_no}`,
@@ -224,7 +224,7 @@ function RevisionRow({
         <span className="font-mono">{revision.protocol_type}</span>
         <span>{label(EVIDENCE_KIND_LABELS, revision.runtime_evidence_kind, "未知状态")}</span>
         {revision.revision_state === "published" ? (
-          // 已发布版本：管理员调试信息区分「已发布绑定验收」（02 §8）。
+          // 已发布版本：管理员调试信息区分「已发布绑定验收」。
           <span>
             已发布绑定验收：{revision.publication_conformance_run_id ? "已绑定" : "未绑定"}
           </span>

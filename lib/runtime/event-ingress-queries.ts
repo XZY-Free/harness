@@ -1,11 +1,11 @@
 /**
- * RuntimeEventIngress 仓储（S05-C03）。
+ * RuntimeEventIngress 仓储。
  *
  * 事实源：
  * - docs/architecture/persistence.md （RuntimeEventIngress L486-500）、（事务边界）
  * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）、§8（Item 投影）
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
- * - docs/architecture/runtime-control-plane.md S05-C03
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - ingressEventBatch：接收 Runtime 回传候选事件批次，去重 + 序列校验 + 映射到平台状态。
@@ -121,7 +121,7 @@ export interface IngressBatchResult {
 /**
  * 入口：接收 Runtime 候选事件批次。
  *
- * 事务内（）：
+ * 事务内：
  * 1. 查 Invocation（跨租户隔离），不存在 → IngressInvocationNotFoundError。
  * 2. 校验 Invocation 非终态 → IngressInvocationTerminalError。
  * 3. 校验批次非空 + producerSequenceStart 与 events[0] 一致。
@@ -280,7 +280,7 @@ async function processIngressBatch(
   const actorType: ThreadEventActorType = "service";
   const correlationId = params.correlationId ?? null;
 
-  // S12-W05：写入前对所有事件 payload 脱敏（防 Secret 落库）
+  // 写入前对所有事件 payload 脱敏（防 Secret 落库）
   // redactSensitiveData 组合：禁采字段名 + Secret 正则模式 + 已知明文值（按 invocationId scope）
   const safeEvents: RuntimeCandidateEvent[] = params.events.map((event) => ({
     ...event,

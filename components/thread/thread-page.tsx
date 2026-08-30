@@ -3,12 +3,12 @@
  *
  * 事实源：
  * - docs/architecture/product-surfaces-and-admin.md
- *   S10-W02：「Thread 顶部固定展示主 Agent、可选 Goal、当前任务状态和默认执行位置」
+ *   「Thread 顶部固定展示主 Agent、可选 Goal、当前任务状态和默认执行位置」
  *   「时间线覆盖用户与 Agent Item、公开进度、ToolCall、Artifact、UserAction、Child Thread 与 Job 结果投影」
- *   S10-W03：「空闲时发送创建正式 UserMessage/Turn；运行中默认创建 PendingInput」
+ *   「空闲时发送创建正式 UserMessage/Turn；运行中默认创建 PendingInput」
  *   「PendingInput 队列展示在时间线上方，Steer/Stop 控制条在 Header 与 Timeline 之间」
- *   S10-W04：「员工在发送消息前选择 Agent / Model / Skill / Environment」
- *   S10-W06：「Desktop 复用共同时间线，在右侧增加文件、页面和内部系统任务操作面板」
+ *   「员工在发送消息前选择 Agent / Model / Skill / Environment」
+ *   「Desktop 复用共同时间线，在右侧增加文件、页面和内部系统任务操作面板」
  *
  * 职责：
  * - 组合 ThreadHeader（顶部固定）+ ThreadTimeline（时间线）+ ThreadInput（输入框，内嵌运行控制与待办队列）。
@@ -16,7 +16,7 @@
  * - SSE 事件到达时刷新 Thread 详情（turn.accepted / turn.state_changed / thread.updated）。
  * - 错误展示（visibleError → ErrorCard）。
  * - 输入区集成助手单次调用选择、模型选择；不绑定主 Agent，不做 handoff。
- * - 专题01 §35：不再绑定主 Agent（primary_agent_id 已移除），无 Agent 时输入区照常可用。
+ * - Agent 与 Runtime Authority §35：不再绑定主 Agent（primary_agent_id 已移除），无 Agent 时输入区照常可用。
  * - W4-1：顶部 Steer/Stop 横条与时间线上方的待办队列移入 ThreadInput 内部，
  *   停止按钮复用 codex 形态（输入框右下圆钮变 ■），待办队列复用紧凑单行条。
  * - Desktop：右侧渲染任务工作台，提供文件、审阅、浏览器和会话上下文入口。
@@ -114,7 +114,7 @@ export function ThreadPage({
   // - 侧栏收起后从 160px 开始拖拽，为搜索与展开按钮保留真实鼠标命中区。
   // - 无条件渲染：thread 未加载时标题显示"新会话"占位、状态点隐藏。
   const taskStatus = deriveTaskStatus(latestTurn);
-  // : 专题01 §15：Thread 不再绑定主 Agent（primary_agent_id 已移除，§35）。
+  // Agent 与 Runtime Authority §15：Thread 不再绑定主 Agent（primary_agent_id 已移除，§35）。
   // 移除 default-agent fallback 展示（"助手"兜底）；Agent 目录为空时不再伪装主 Agent。
   const desktopTitlebar = variant === "desktop" && (
     <div

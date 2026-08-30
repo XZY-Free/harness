@@ -2,7 +2,7 @@
  * Conformance Probe Context Builder（Contract-driven，03 专项唯一实现）。
  *
  * 事实源：
- * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/03-ContractDriven-ConformanceContext.md
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - 读取 exact AgentContractSnapshot 的 InvocationContextContract（结构化 invocation context 子记录），
@@ -99,7 +99,7 @@ export async function buildExternalConformanceProbeContext(
   for (const row of rows) {
     const kind = row.key;
     if (row.necessity === "accepted") {
-      // accepted：Conformance 默认不主动选择（03 §四）。
+      // accepted：Conformance 默认不主动选择。
       continue;
     }
     if (SUPPORTED_PROBE_CONTEXT_KINDS.has(kind)) {
@@ -114,7 +114,7 @@ export async function buildExternalConformanceProbeContext(
   }
 
   if (unavailableRequired.length > 0) {
-    // required 无法提供 → 网络前 fail closed（03 §四）。
+    // required 无法提供 → 网络前 fail closed。
     throw new ConformanceProbeContextUnavailableError(unavailableRequired[0] as string);
   }
 

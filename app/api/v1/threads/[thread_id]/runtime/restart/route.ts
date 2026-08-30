@@ -17,7 +17,7 @@ import {
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getRequestId, jsonError, resourceNotFound } from "@/lib/http";
 import { logger } from "@/lib/logger";
-import { resolveRuntimeTypeForThread, resolveRuntimes } from "@/lib/runtime/registry";
+import { resolveRuntimes } from "@/lib/runtime/registry";
 
 export const dynamic = "force-dynamic";
 
@@ -46,8 +46,7 @@ export async function POST(
     return resourceNotFound(requestId, `Thread 不存在或无权访问: ${thread_id}`);
   }
 
-  const runtimeType = resolveRuntimeTypeForThread(null, null);
-  const { preview } = resolveRuntimes(thread_id, runtimeType);
+  const { preview } = resolveRuntimes(thread_id);
 
   try {
     // 先停止当前 runtime

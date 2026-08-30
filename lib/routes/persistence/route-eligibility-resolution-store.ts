@@ -10,7 +10,7 @@ import type { RouteResolutionCandidate, RouteTarget } from "../domain/route-reso
 
 export interface LoadProjectionCandidatesInput {
   tenantId: string;
-  /** 显式解析目标 — runtime 查基础 Harness Route，agent 查指定 Agent 的 Route（专题01）。 */
+  /** 显式解析目标 — runtime 查基础 Harness Route，agent 查指定 Agent 的 Route（Agent 与 Runtime Authority）。 */
   target: RouteTarget;
   routeScopeKey: string;
 }

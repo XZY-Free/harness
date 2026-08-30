@@ -1,5 +1,5 @@
 /**
- * POST /api/v1/threads/{thread_id}/forks — Fork Thread（S04-C06，§3.10）。
+ * POST /api/v1/threads/{thread_id}/forks — Fork Thread（§3.10）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.10、
  *         docs/architecture/agent-control-plane.md §3.10（Fork）、

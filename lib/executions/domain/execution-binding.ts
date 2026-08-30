@@ -111,7 +111,7 @@ export function assertExecutionBindingEvidence(
   evidence: ExecutionBindingControlPlaneEvidence,
 ): void {
   // 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再携带任何 Agent evidence。
-  // Runtime evidence all-or-nothing（03 §3）：hosted 要求 artifact 全集；
+  // Runtime evidence all-or-nothing：hosted 要求 artifact 全集；
   // external_endpoint 无 Runtime Artifact（不伪造），attestation 集合为空。
   const isExternalRuntime = evidence.runtimeEvidenceKind === "external_endpoint";
   const identifiers = [

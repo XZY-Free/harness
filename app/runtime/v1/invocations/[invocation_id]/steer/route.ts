@@ -1,16 +1,16 @@
 /**
- * POST /runtime/v1/invocations/{invocation_id}/steer — Hosted Runtime 引导（steer）Invocation（S05-C04 + S05-C05 参考实现）。
+ * POST /runtime/v1/invocations/{invocation_id}/steer — Hosted Runtime 引导（steer）Invocation（ +  参考实现）。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
  * - docs/architecture/agent-control-plane.md §3.7（Steer）
- * - docs/architecture/runtime-control-plane.md S05-C04/S05-C05
+ * - docs/architecture/runtime-control-plane.md
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=runtime + invocation 绑定校验）。
  * - 校验 Idempotency-Key（必填）。
  * - 校验请求体（steer_payload 必填）。
- * - S05-C05 扩展：调用 RuntimeAdapter.handleSteer，返回 steer ack。
+ * -  扩展：调用 RuntimeAdapter.handleSteer，返回 steer ack。
  * - 返回 steered=true（Runtime ack，平台标记命令 acknowledged + 写 turn.steered Event）。
  *
  * 错误映射：
@@ -85,7 +85,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     return runtimeSchemaInvalidTable(requestId, "请求体非法：steer_payload 必填");
   }
 
-  // 4. S05-C05 扩展：调用 RuntimeAdapter.handleSteer，返回 steer ack
+  // 4.  扩展：调用 RuntimeAdapter.handleSteer，返回 steer ack
   //
   // adapter.handleSteer 返回 steer_state="accepted" + applies_at="next_safe_point" +
   // generation_interrupted=false。路由层把 adapter 响应翻译为 SteerInvocationResponse

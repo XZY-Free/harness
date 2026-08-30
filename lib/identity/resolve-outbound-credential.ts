@@ -112,10 +112,7 @@ export async function resolveOutboundCredential(params: {
     throw new OutboundCredentialError("credential_unresolvable", "credential_ref 已过期");
   }
   if (ref.provider !== "env") {
-    throw new OutboundCredentialError(
-      "credential_unresolvable",
-      "仅支持 provider=env 的凭证引用",
-    );
+    throw new OutboundCredentialError("credential_unresolvable", "仅支持 provider=env 的凭证引用");
   }
   // vaultRef 是 env 变量名：只加载该字段，不落库/不回显/不写日志。
   const token = process.env[ref.vaultRef];

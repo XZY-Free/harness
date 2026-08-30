@@ -4,7 +4,7 @@
  * 事实源：
  * - docs/architecture/persistence.md （ExecutionBinding L405-423）
  * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
- * - docs/architecture/runtime-control-plane.md S05-C01
+ * - docs/architecture/runtime-control-plane.md
  *
  * 仅供旧集成测试构造历史数据；生产调度必须通过正式 Application Service
  * 校验 Route、Publication、Attestation 和 Conformance 证据。

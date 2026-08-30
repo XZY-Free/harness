@@ -32,7 +32,6 @@ vi.mock("@/lib/conversations/thread-queries", () => ({
   getThreadById: threadQueries.getThreadById,
 }));
 vi.mock("@/lib/runtime/registry", () => ({
-  resolveRuntimeTypeForThread: () => "host",
   resolveRuntimes: registry.resolveRuntimes,
 }));
 
@@ -75,7 +74,7 @@ describe("POST /api/preview owner guard (正式 v1)", () => {
     // 静态页面显式指向 index.html，保证相对 CSS/JS 仍落在 thread 目录内。
     expect(body.data).toMatchObject({ status: "ready", url: "/preview/t1/index.html" });
     // 正式 Thread 无 runtimeType 列，落全局默认 host。
-    expect(registry.resolveRuntimes).toHaveBeenCalledWith("t1", "host");
+    expect(registry.resolveRuntimes).toHaveBeenCalledWith("t1");
     expect(preview.start).toHaveBeenCalledTimes(1);
     expect(preview.start).toHaveBeenCalledWith("t1");
   });

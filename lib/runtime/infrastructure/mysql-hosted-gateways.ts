@@ -1,7 +1,7 @@
 /**
  * MySQL Hosted Gateways 实现 — 纯适配器层。
  *
- * 专题01 冻结（runtime-only）：
+ * Runtime-only Authority：
  * 将 mysql-hosted-runtime-control-plane.ts 单体拆分为职责清晰的 Gateway，
  * 每个 Gateway 只做 DB 访问 + 对应领域调用。Saga 负责步骤编排；此文件只提供基础设施适配。
  *
@@ -70,7 +70,7 @@ const HOSTED_RUNTIME_ENDPOINT = "in-process://hosted";
 // dispatcher/redispatch 的默认值承载，二者数值一致，故不在此对象承载。
 const HOSTED_RUNTIME_CAPABILITIES = ["event_stream"];
 /**
- * Hosted in-process 协议契约版本 — 显式冻结，不再从 protocolType 自动推导（03 §5）。
+ * Hosted in-process 协议契约版本 — 显式冻结，不再从 protocolType 自动推导。
  */
 const HOSTED_PROTOCOL_CONTRACT_REVISION = "harness-runtime-protocol@1";
 const HOSTED_RUNTIME_CONFIG_DIGEST = digest({
@@ -98,7 +98,7 @@ const runtimeRouteReader: HostedRuntimeRouteReader = {
   async resolveEligibleRuntimeRoute(command) {
     const outcome = await resolveRoute({
       tenantId: command.tenantId,
-      // 显式 runtime target：解析 targetKind=runtime Route（专题01 冻结架构）。
+      // 显式 runtime target：解析 targetKind=runtime Route（Agent 与 Runtime Authority 分离）。
       target: { kind: "runtime" },
       routeScopeKey: command.routeScopeKey,
       businessKey: { jobId: `hosted-provision:${command.routeScopeKey}` },

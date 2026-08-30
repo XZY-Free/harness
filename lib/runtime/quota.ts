@@ -2,7 +2,7 @@ import { quotaConfig } from "@/lib/config";
 import type { ResourceQuota } from "./types";
 
 /**
- * Stage A：per-thread 资源配额解析。
+ * per-thread 资源配额解析。
  *
  * 配额继承全局默认(quotaConfig)，per-thread 覆盖**只能收紧不能放宽**：
  * - CPU/memory：取更小值（解析 "1.0"/"0.5" → 数值比较；"1g"/"512m" → 字节数比较）。

@@ -9,7 +9,7 @@ import type {
 
 export interface RevisionArtifactBinding {
   revisionState: string;
-  /** external_endpoint RuntimeRevision 无 Artifact 证据（03 §4），允许 null。 */
+  /** external_endpoint RuntimeRevision 无 Artifact 证据，允许 null。 */
   artifactRef: string | null;
   artifactId: string | null;
   artifactDigest: string | null;
@@ -53,10 +53,10 @@ export interface ArtifactAttestationPersistenceSession {
     id: string;
     tenantId: string;
     eventKey: string;
-    /** : 事件类型固定为 artifact.attestation.recorded。 */
+    /** 事件类型固定为 artifact.attestation.recorded。 */
     eventType: "artifact.attestation.recorded";
     aggregateId: string;
-    /** : 聚合版本号。 */
+    /** 聚合版本号。 */
     aggregateVersion: number;
     payload: Record<string, unknown>;
     occurredAt: Date;

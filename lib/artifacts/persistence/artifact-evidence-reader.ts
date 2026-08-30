@@ -4,7 +4,7 @@
  * 提供 FOR UPDATE 读取能力，供发布、RouteSet 激活等事务内使用。
  * 所有模块必须通过此 Reader 读取证据，不得自行构造 SQL 查询。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 参见：正式架构
  */
 
 import type {
@@ -31,13 +31,13 @@ import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
  *
  * 不存在返回 null。
  *
- * : 接受 dbOrTx 参数，默认全局 db（向后兼容）。
+ * 传入 dbOrTx 时复用调用方事务，省略时执行独立查询。
  */
 export async function loadArtifactEvidenceSnapshot(params: {
   tenantId: string;
   artifactType: ArtifactType;
   artifactRevisionId: string;
-  /** : 事务内传入 tx，默认使用全局 db。 */
+  /** 事务内传入 tx，默认使用全局 db。 */
   dbOrTx?: DbOrTx;
 }): Promise<ArtifactEvidenceSnapshot | null> {
   const conn = params.dbOrTx ?? db;
@@ -96,7 +96,7 @@ export async function loadArtifactEvidenceSnapshot(params: {
 export async function loadArtifactEvidenceSnapshots(params: {
   tenantId: string;
   revisions: Array<{ artifactType: ArtifactType; artifactRevisionId: string }>;
-  /** : 事务内传入 tx，默认使用全局 db。 */
+  /** 事务内传入 tx，默认使用全局 db。 */
   dbOrTx?: DbOrTx;
 }): Promise<Map<string, ArtifactEvidenceSnapshot>> {
   const result = new Map<string, ArtifactEvidenceSnapshot>();

@@ -158,7 +158,7 @@ export async function validateBindingEligibility(
       return { valid: false, reason: "eligibility_snapshot_stale", projectionVersionMatch };
     }
     // Runtime Attestation IDs 必须与 Publication 绑定的完整集合精确相等。
-    // external_endpoint Runtime 无 Artifact Attestation（03 §3，不伪造）→ 空集合合法；
+    // external_endpoint Runtime 无 Artifact Attestation（不伪造）→ 空集合合法；
     // hosted_artifact 仍要求非空全集。
     const externalRuntime = snapshot.runtimeEvidenceKind === "external_endpoint";
     const runtimeAttestationsExact = externalRuntime

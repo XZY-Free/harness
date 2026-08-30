@@ -2,7 +2,7 @@
  * 稳定 Executions Schema — 正式控制面职责命名。
  *
  * 本文件是 Invocation / ExecutionBinding / InvocationAttempt / ExecutionOwnership /
- * RuntimeSessionBinding / RuntimeEventIngress 的单一物理 Schema 权威（docs/V12/01 §20 / §29 H）。
+ * RuntimeSessionBinding / RuntimeEventIngress 的单一物理 Schema 权威。
  */
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
@@ -25,7 +25,7 @@ import {
 // ─── Invocation Kind ───────────────────────────────────────
 
 /**
- * Invocation 类型（）。
+ * Invocation 类型。
  * - initial：Turn 或 Job 的首次执行。
  * - regenerate：Regenerate 创建的新 Invocation，替代原 Invocation。
  * - job：后台 Job 触发的执行。
@@ -36,7 +36,7 @@ export type InvocationKind = (typeof INVOCATION_KINDS)[number];
 // ─── Invocation Execution State ────────────────────────────
 
 /**
- * Invocation 执行状态（）。
+ * Invocation 执行状态。
  * - queued：已排队等待 Runtime。
  * - running：Runtime 正在执行。
  * - waiting_user：等待用户操作。
@@ -67,7 +67,7 @@ export const INVOCATION_TERMINAL_STATES: readonly InvocationExecutionState[] = [
 // ─── Invocation ────────────────────────────────────────────
 
 /**
- * Invocation 表：一次 AgentRevision + RuntimeRevision 的执行（L366-387）。
+ * Invocation 表：一次 Harness Runtime 执行。
  *
  * 关键约束：
  * - turnId/jobId 恰有一个非空（应用层校验，DB 不加 CHECK）。
@@ -178,15 +178,15 @@ export const executionBindingTable = mysqlTable(
     routeContentDigest: varchar("routeContentDigest", { length: 71 }).notNull(),
     /** null = external_endpoint Runtime（无 Runtime Artifact，03 §3）。 */
     runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }),
-    /** null = external_endpoint Runtime（03 §3）。 */
+    /** null = external_endpoint Runtime。 */
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
-    /** 冻结的 Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact（03 §3）。 */
+    /** 冻结的 Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact。 */
     runtimeEvidenceKind: mysqlEnum("runtimeEvidenceKind", [
       "hosted_artifact",
       "external_endpoint",
     ]).notNull(),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }).notNull(),
-    /** 冻结的 Runtime 目标摘要 — 发布证据权威（03 §6）。 */
+    /** 冻结的 Runtime 目标摘要 — 发布证据权威。 */
     runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     capabilityManifestDigest: varchar("capabilityManifestDigest", { length: 71 }).notNull(),
     runtimeAttestationIds: json("runtimeAttestationIds").$type<string[]>().notNull(),
@@ -210,7 +210,7 @@ export const executionBindingTable = mysqlTable(
     conformanceRunIdx: index("ExecutionBinding_conformanceRun_idx").on(t.conformanceRunId),
     runtimeAttestationIdsNonEmpty: check(
       "ExecutionBinding_runtimeAttestationIds_non_empty",
-      // external_endpoint Runtime 无 Artifact Attestation（03 §3，不伪造）→ 空数组合法；
+      // external_endpoint Runtime 无 Artifact Attestation（不伪造）→ 空数组合法；
       // hosted_artifact 仍要求非空全集。
       sql`JSON_TYPE(${t.runtimeAttestationIds}) = 'ARRAY' AND (JSON_LENGTH(${t.runtimeAttestationIds}) >= 1 OR ${t.runtimeEvidenceKind} = 'external_endpoint')`,
     ),
@@ -223,7 +223,7 @@ export type NewExecutionBinding = InferInsertModel<typeof executionBindingTable>
 // ─── InvocationAttempt State ───────────────────────────────
 
 /**
- * InvocationAttempt 状态（）。
+ * InvocationAttempt 状态。
  * - queued：已排队。
  * - running：Runtime 正在执行此 Attempt。
  * - completed：成功完成。
@@ -321,7 +321,7 @@ export type NewInvocationAttempt = InferInsertModel<typeof invocationAttemptTabl
 // ─── ExecutionOwnership State ──────────────────────────────
 
 /**
- * ExecutionOwnership 状态（）。
+ * ExecutionOwnership 状态。
  * - active：当前持有执行权。
  * - released：主动释放。
  * - lost：心跳超时，被标记为丢失。
@@ -382,7 +382,7 @@ export type NewExecutionOwnership = InferInsertModel<typeof executionOwnershipTa
  * - closed：显式关闭（Thread 关闭/删除、用户 reset、continuity policy 不允许复用、管理操作）。
  * - lost：Runtime 心跳超时或自报丢失。
  *
- * Turn completed 不是关闭条件（06 §3：Session 生命周期跨 Turn）。
+ * Turn completed 不是关闭条件（Session 生命周期跨 Turn）。
  */
 export const RUNTIME_SESSION_BINDING_STATES = ["active", "closed", "lost"] as const;
 export type RuntimeSessionBindingState = (typeof RUNTIME_SESSION_BINDING_STATES)[number];
@@ -390,15 +390,15 @@ export type RuntimeSessionBindingState = (typeof RUNTIME_SESSION_BINDING_STATES)
 // ─── RuntimeSessionBinding ────────────────────────────────
 
 /**
- * RuntimeSessionBinding 表：Runtime 维护的会话引用（06 §2）。
+ * RuntimeSessionBinding 表：Runtime 维护的会话引用。
  *
  * 关键约束：
  * - threadId/jobId 恰有一个非空（应用层校验，DB 不加 CHECK）。
  * - externalSessionRef 由 Runtime 颁发（不透明引用），平台仅持久化，不解析其内容。
  * - UNIQUE(runtimeRevisionId, externalSessionRef)：同一 RuntimeRevision 下外部会话引用唯一。
- * - Session 复用匹配维度：Tenant + Thread + RuntimeRevision（专题01 冻结架构：
+ * - Session 复用匹配维度：Tenant + Thread + RuntimeRevision（Agent 与 Runtime Authority 分离：
  *   RuntimeSessionBinding 只绑定 Harness Runtime；A2A contextId 属 AgentSessionBinding）。
- * - 生命周期跨 Turn（06 §3）：关闭条件只有 Thread 关闭/删除、用户显式 reset、
+ * - 生命周期跨 Turn：关闭条件只有 Thread 关闭/删除、用户显式 reset、
  *   continuity policy 不允许复用、Runtime 报 lost、管理操作；Turn completed 不关闭。
  */
 export const runtimeSessionBindingTable = mysqlTable(

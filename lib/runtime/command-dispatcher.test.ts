@@ -618,7 +618,7 @@ async function getCommandRow(commandId: string): Promise<InvocationCommand | nul
 
 async function bindInvocationIdToCommand(commandId: string, invocationId: string): Promise<void> {
   // requestInterrupt 创建的命令 invocationId=null（queued 状态可空），
-  // 调度器 loadCommandForDispatch 要求 invocationId 非空，
+  // 调度器首次加载 queued Command 时要求 invocationId 非空，
   // 此处模拟 Runtime 拉取后的 invocationId 绑定。
   await db
     .update(invocationCommandTable)

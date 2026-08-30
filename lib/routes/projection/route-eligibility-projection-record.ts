@@ -7,7 +7,7 @@
  * Resolver 从此表一次查询候选，纯内存选择。
  * Binding 仍需对权威事实做最终 Fail-closed 校验。
  *
- * 专题01 冻结架构（01 §4.D）：单一投影必须显式携带 targetKind + targetIdentity。
+ * Agent 与 Runtime Authority 分离（D）：单一投影必须显式携带 targetKind + targetIdentity。
  * Agent target 与 Runtime target 证据组互斥：target 不相关的一组必须全 NULL，
  * 禁止 "not_applicable"/"hosted_artifact"/0/空串 placeholder。
  */
@@ -106,9 +106,9 @@ export const routeEligibilityProjection = mysqlTable(
     runtimeArtifactId: varchar("runtimeArtifactId", { length: 36 }),
     runtimeArtifactDigest: varchar("runtimeArtifactDigest", { length: 71 }),
     runtimeConfigDigest: varchar("runtimeConfigDigest", { length: 71 }),
-    /** Runtime 目标摘要 — 发布证据权威（03 §6）。 */
+    /** Runtime 目标摘要 — 发布证据权威。 */
     runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }),
-    /** 兼容性摘要 — 仅 runtime target 计算；agent target NULL。 */
+    /** 能力匹配摘要 — 仅 runtime target 计算；agent target NULL。 */
     capabilityCompatibilityDigest: varchar("capabilityCompatibilityDigest", { length: 71 }),
 
     // ─── Policy（公共语义，两 target 皆可有）─────

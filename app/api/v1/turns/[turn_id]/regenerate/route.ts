@@ -1,5 +1,5 @@
 /**
- * POST /api/v1/turns/{turn_id}/regenerate — Regenerate Turn（S04-C06，§3.9）。
+ * POST /api/v1/turns/{turn_id}/regenerate — Regenerate Turn（§3.9）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.9、
  *         docs/architecture/agent-control-plane.md §3.9（Regenerate）。

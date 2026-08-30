@@ -1,5 +1,5 @@
 /**
- * RuntimeTransport Resolver（04 §3）。
+ * RuntimeTransport Resolver。
  *
  * protocolType 真正决定 Transport：
  * - harness_runtime_protocol → SnowHarness Runtime Protocol（Hosted/HTTP wire）。
@@ -9,7 +9,7 @@
  * - RuntimeRevision protocol facts（protocolType/endpointRef）；
  * - managed endpoint/identity configuration（endpoint/token）。
  *
- * 禁止输入 framework name、Agent displayName、project path、业务判断（04 §3）。
+ * 禁止输入 framework name、Agent displayName、project path、业务判断。
  * 未知 protocolType → fail-closed（UnsupportedRuntimeProtocolError），无回退。
  */
 import type { RuntimeTransportAuth } from "@/lib/runtime/credentials/resolve-outbound-runtime-auth";
@@ -28,7 +28,7 @@ export type RuntimeTransportFactory = (input: {
   /** managed endpoint configuration（external endpoint URL 或 in-process 引用）。 */
   endpoint: string;
   /**
-   * managed identity configuration（03 §8 协议中立）：
+   * managed identity configuration（ 协议中立）：
    * Hosted = 短期 Workload Token；External = 唯一 resolver 解析的外部凭据。
    */
   auth: RuntimeTransportAuth;
@@ -47,7 +47,7 @@ export interface ResolveRuntimeTransportInput {
   /** managed endpoint configuration（external endpoint URL 或 in-process 引用）。 */
   endpoint: string;
   /**
-   * managed identity configuration（03 §8 协议中立）：
+   * managed identity configuration（ 协议中立）：
    * Hosted = 短期 Workload Token；External = 唯一 resolver 解析的外部凭据。
    */
   auth: RuntimeTransportAuth;
@@ -61,7 +61,7 @@ export type RuntimeTransportResolver = (
  * 创建 RuntimeTransport Resolver。
  *
  * Resolver 不含任何 framework/业务分支：只按 protocolType 查工厂表；
- * 未知 protocolType 抛 UnsupportedRuntimeProtocolError（04 §10：Hosted 路径无行为回退）。
+ * 未知 protocolType 抛 UnsupportedRuntimeProtocolError（Hosted 路径无行为回退）。
  */
 export function createRuntimeTransportResolver(
   params: CreateRuntimeTransportResolverParams,

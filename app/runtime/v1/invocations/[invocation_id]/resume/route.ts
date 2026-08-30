@@ -1,16 +1,16 @@
 /**
- * POST /runtime/v1/invocations/{invocation_id}/resume — Hosted Runtime 恢复 waiting_user Invocation（S05-C04 + S05-C05 参考实现）。
+ * POST /runtime/v1/invocations/{invocation_id}/resume — Hosted Runtime 恢复 waiting_user Invocation（ +  参考实现）。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
  * - docs/architecture/agent-control-plane.md §3.10（Resume）
- * - docs/architecture/runtime-control-plane.md S05-C04/S05-C05
+ * - docs/architecture/runtime-control-plane.md
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=runtime + invocation 绑定校验）。
  * - 校验 Idempotency-Key（必填）。
  * - 校验请求体（resume_payload 必填）。
- * - S05-C05 扩展：调用 RuntimeAdapter.handleResume，返回 resume ack。
+ * -  扩展：调用 RuntimeAdapter.handleResume，返回 resume ack。
  * - 返回 resumed=true（Runtime ack，平台标记命令 acknowledged + Invocation waiting_user → running）。
  *
  * 错误映射：
@@ -85,7 +85,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     return runtimeSchemaInvalidTable(requestId, "请求体非法：resume_payload 必填");
   }
 
-  // 4. S05-C05 扩展：调用 RuntimeAdapter.handleResume，返回 resume ack
+  // 4.  扩展：调用 RuntimeAdapter.handleResume，返回 resume ack
   //
   // adapter.handleResume 返回 resume_state="accepted" + runtime_execution_ref + requires_redispatch。
   // 路由层把 adapter 响应翻译为 ResumeInvocationResponse（保持外部 API 契约不变）。

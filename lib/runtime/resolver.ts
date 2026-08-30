@@ -1,21 +1,11 @@
 import { type RuntimeType, runtimeConfig } from "@/lib/config";
 
 /**
- * 纯配置解析层：按优先级解析线程应使用的 runtimeType。
+ * 解析平台配置的本地预览 Runtime 类型。
  *
- * 优先级（plan ）：thread.runtimeType → skill_version.runtimeType → 全局默认。
- * 非法值跳过，最终回退 host。
- *
- * 本文件刻意不依赖 preview-runtime / execution-runtime，供 app route 顶层静态 import，
- * 避免 Next.js 构建 trace 把 preview-runtime 及其依赖 trace 进 server bundle。
+ * Thread 与 Skill 不携带 Runtime 选择权；Harness 调度位置由正式 Runtime Route 冻结。
+ * 本地预览只读取平台 runtimeConfig；非法配置由配置层直接拒绝。
  */
-export function resolveRuntimeTypeForThread(
-  thread: { runtimeType?: string | null } | null | undefined,
-  skillVersion: { runtimeType?: string | null } | null | undefined,
-): RuntimeType {
-  const candidates = [thread?.runtimeType, skillVersion?.runtimeType, runtimeConfig.defaultType];
-  for (const c of candidates) {
-    if (c === "host" || c === "container") return c;
-  }
-  return "host";
+export function resolveConfiguredRuntimeType(): RuntimeType {
+  return runtimeConfig.defaultType;
 }

@@ -10,9 +10,9 @@ export interface RuntimePublicationRevision {
   runtimeId: string;
   revisionNo: number;
   revisionState: RuntimeRevisionPublicationState;
-  /** 证据种类（03 §2 语义字段，不允许 nullable 组合猜测）。 */
+  /** 证据种类（ 语义字段，不允许 nullable 组合猜测）。 */
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
-  /** 被测对象统一 digest（03 §6）。 */
+  /** 被测对象统一 digest。 */
   runtimeTargetDigest: string;
   runtimeArtifactRef: string | null;
   artifactId: string | null;
@@ -121,10 +121,10 @@ export interface RuntimePublicationSession {
     id: string;
     tenantId: string;
     eventKey: string;
-    /** : 事件类型 — 必须来自合同，aggregateType 由合同推导。 */
+    /** 事件类型 — 必须来自合同，aggregateType 由合同推导。 */
     eventType: "runtime.revision.published";
     aggregateId: string;
-    /** : 聚合版本号。 */
+    /** 聚合版本号。 */
     aggregateVersion: number;
     payload: Record<string, unknown>;
     occurredAt: Date;

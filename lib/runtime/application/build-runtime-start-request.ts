@@ -2,13 +2,13 @@
  * StartInvocationRequestBody 唯一正式 builder（初始 dispatch 与 retry Attempt 共用）。
  *
  * 事实源：
- * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/01-DurableDispatch与RetryAuthority.md §十
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - 从 exact Invocation + immutable ExecutionBinding + RuntimeRevision 构建
  *   完整 StartInvocationRequestBody：capability_requirements / input_items / context_handle /
  *   invocation_context / workspace / gateway / governance / trace / execution_limits。
- * - 顶层 Invocation 恒属于 Harness（专题01 冻结架构）：不携带 Agent 执行目标，
+ * - 顶层 Invocation 恒属于 Harness（Agent 与 Runtime Authority 分离）：不携带 Agent 执行目标，
  *   只携带 capability_requirements 表达"本轮要求使用某 Agent 能力"（由 Harness Loop 调用）。
  * - Base Harness 路径不执行 Agent Contract Context Enrichment（该职责属 AgentCall，后续批次）。
  * - Attempt 维度差异只体现在 attempt 字段（attempt_no/attempt_id/retry_reason/checkpoint_ref/
@@ -38,7 +38,7 @@ export interface BuildRuntimeStartRequestInput {
   binding: ExecutionBinding;
   /**
    * 本轮 Harness 执行约束（capability requirements，非执行目标）。
-   * 由调用方从 Turn 的 requestedAgentId / selectionMode 构建；专题01 仅支持
+   * 由调用方从 Turn 的 requestedAgentId / selectionMode 构建；Agent 与 Runtime Authority 仅支持
    * capability_type=agent + mode=required。省略/空数组 = 本轮无强制能力要求。
    */
   capabilityRequirements?: Array<{
@@ -51,7 +51,7 @@ export interface BuildRuntimeStartRequestInput {
   gatewayEndpoints: GatewayEndpoints;
   governanceConfig: GovernanceConfigRef;
   gatewayAccess: GatewayAccess;
-  /** 可信调用主体（06 §6）；null/省略 = 不发送 execution_subject context。 */
+  /** 可信调用主体；null/省略 = 不发送 execution_subject context。 */
   executionSubject?: ExecutionSubject | null;
   correlationId?: string | null;
   /** Attempt 维度信息（attempt_no=1 且无 retry_reason 时即初始调度形态）。 */
@@ -187,7 +187,7 @@ export async function buildRuntimeStartRequestForInvocation(
     },
   };
 
-  // 专题01 冻结架构：Base Harness 路径不执行 Agent Contract Context Enrichment。
+  // Agent 与 Runtime Authority 分离：Base Harness 路径不执行 Agent Contract Context Enrichment。
   // invocation_context（Allowed Bundle）构建属于 AgentCall 专属（后续批次），
   // 顶层 Harness Start Request 不再携带 Agent Contract Context。
 

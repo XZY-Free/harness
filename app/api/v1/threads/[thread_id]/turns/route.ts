@@ -7,10 +7,9 @@ import {
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 /**
- * POST /api/v1/threads/{thread_id}/turns — 创建 Turn（S04-C03，§3.4）。
+ * POST /api/v1/threads/{thread_id}/turns — 创建 Turn（§3.4）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.4、
- *         docs/architecture/conversations.md S04-W02。
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。
@@ -71,7 +70,7 @@ interface CreateTurnBody {
   input: TurnInput;
   selected_model?: string;
   workspace_attachment_ids?: string[];
-  /** Per-Invocation Agent Selection（05 §1）：第一阶段只支持 mode=required。 */
+  /** Per-Invocation Agent Selection：当前只支持 mode=required。 */
   agent_selection?: { mode: "required"; agent_id: string };
 }
 
@@ -90,7 +89,7 @@ function validateBody(body: unknown): body is CreateTurnBody {
     }
   }
   // agent_selection：省略 = 无 selection（基础 Harness Route，05 §11）；
-  // 提供时 mode 必须为 "required" 且 agent_id 非空（第一阶段冻结，05 §1）。
+  // 提供时 mode 必须为 "required" 且 agent_id 非空（当前冻结，05 §1）。
   if (b.agent_selection !== undefined && b.agent_selection !== null) {
     if (!b.agent_selection || typeof b.agent_selection !== "object") return false;
     const selection = b.agent_selection as Record<string, unknown>;
@@ -232,7 +231,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       threadId,
       turnId: result.turn.id,
       modelRef: body.selected_model,
-      // ExecutionSubject（06 §6）：服务端从认证 Principal 生成，禁止 caller 自报。
+      // ExecutionSubject：服务端从认证 Principal 生成，禁止 caller 自报。
       executionSubject: {
         tenantId: principal.tenantId,
         subjectType: "user",
@@ -240,7 +239,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       },
     });
     if (!dispatch.dispatched) {
-      // 顶层无有效 Runtime Route → Turn 保持 accepted（专题01 冻结架构）。
+      // 顶层无有效 Runtime Route → Turn 保持 accepted（Agent 与 Runtime Authority 分离）。
       // 用户选择 Agent 是能力要求约束，不作为顶层 Route 判断；顶层无 Route 时
       // 由正式控制面初始化供应 / dispatch retry 处理，POST Turn 不在此做同步失败。
       logger.warn("[runtime] 顶层 Harness Route 未就绪，Turn 保持 accepted", {
@@ -272,7 +271,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   }
 }
 
-// ─── GET /api/v1/threads/{thread_id}/turns — 查询 Turn 列表（S10-W02） ────────
+// ─── GET /api/v1/threads/{thread_id}/turns — 查询 Turn 列表 ────────
 
 import { getTurnsByThread } from "@/lib/conversations/turn-queries";
 import type { Turn } from "@/lib/persistence/schema/conversation";
@@ -280,7 +279,7 @@ import { type TurnControls, resolveTurnControls } from "@/lib/runtime/capabiliti
 
 /**
  * 投影 Turn 为响应体（snake_case）。
- * controls（05 §9）由服务端按精确 Binding 派生（EffectiveInvocationCapabilities），
+ * controls由服务端按精确 Binding 派生（EffectiveInvocationCapabilities），
  * 终态 Turn 恒 false；无 Binding → fail-closed 全 false。
  */
 function projectTurn(
@@ -318,10 +317,9 @@ function projectTurn(
 }
 
 /**
- * GET /api/v1/threads/{thread_id}/turns — 查询 Thread 的 Turn 列表（S10-W02，§3.4）。
+ * GET /api/v1/threads/{thread_id}/turns — 查询 Thread 的 Turn 列表（§3.4）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.4、
- *         docs/architecture/product-surfaces-and-admin.md S10-W02。
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

@@ -6,7 +6,7 @@
  * tags/examples/input_modes/output_modes，invocation_context 不含 trust_requirement /
  * declaration_source（wire 上缺席即缺席，不虚构）。
  *
- * 与当前 artifact 的唯一差异：interaction.resume 按冻结目标模型（batch 8 目标）显式为 true；
+ * 与当前 artifact 的唯一差异：interaction.resume 按冻结目标模型（Agent target）显式为 true；
  * 现行 artifact 遗漏 resume —— 相关拒绝测试另行覆盖，不得默认补值。
  */
 

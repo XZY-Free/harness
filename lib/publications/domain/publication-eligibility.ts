@@ -7,7 +7,7 @@
  * revisionState 仅作为一致性投影检查，不能替代 Publication 事实。
  * 所有模块（RouteSet 激活、Projection、Binding）必须通过此模型判断发布状态。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 参见：正式架构
  */
 
 import type { PublicationSubjectType } from "@/lib/publications/domain/publication-record";
@@ -32,7 +32,7 @@ export interface ActivePublicationSnapshot {
   withdrawalRecordId: string | null;
   /** 发布时间。 */
   publishedAt: Date;
-  /** Agent Publication 冻结的 AgentContractSnapshot 证据（runtime 为 null — 05 §5）。 */
+  /** Agent Publication 冻结的 AgentContractSnapshot 证据（runtime 为 null — ）。 */
   agentContractSnapshotId: string | null;
   agentContractDigest: string | null;
   agentCapabilityDigest: string | null;

@@ -6,12 +6,12 @@ import {
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getRequestId, jsonError, jsonOk, resourceNotFound } from "@/lib/http";
-import { resolveRuntimeTypeForThread, resolveRuntimes } from "@/lib/runtime/registry";
+import { resolveRuntimes } from "@/lib/runtime/registry";
 
 /**
  * 预览 API：为会话工作区起 / 停静态预览服务，返回可嵌入 iframe 的 URL。
  *
- * Phase 4-3：启动 / 停止 preview 前校验 thread owner，foreign thread → 404，
+ * 启动 / 停止 preview 前校验 thread owner，foreign thread → 404，
  * 不启动副作用。正式 Employee API 不走 action scope，经 Thread.ownerUserId 鉴权。
  */
 export async function POST(request: Request) {
@@ -47,9 +47,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    // V8 阶段 8：preview 不依赖 Skill 的 runtimeType；正式 Thread 无 runtimeType 列，落全局默认。
-    const runtimeType = resolveRuntimeTypeForThread(null, null);
-    const preview = resolveRuntimes(threadId, runtimeType).preview;
+    const preview = resolveRuntimes(threadId).preview;
     if (action === "stop") {
       await preview.stop(threadId);
       return jsonOk({ status: "idle" });

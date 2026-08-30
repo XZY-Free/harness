@@ -13,139 +13,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 
-/**
- * SnowHarness 数据模型。
- *
- * - Thread：执行线程，承载 agent 生命周期（status 真状态列）
- * - Message：线程消息，type 列做消息分层（写入时按 role 填充）
- * - User：单租户固定用户（接 SSO）
- */
-
-// ─── Thread Status ───────────────────────────────────────────
-
-// 扩展为完整 agent 生命周期状态。新增值追加在尾部，保留既有 enum 存储顺序，
-// 现有 chat 路径仍只写 idle/executing/ready_for_review/failed，不影响行为（）。
-export const THREAD_STATUSES = [
-  "idle",
-  "executing",
-  "ready_for_review",
-  "failed",
-  // V3 新增：planning / awaiting_input / awaiting_approval / verifying / delivering / completed / cancelled
-  "planning",
-  "awaiting_input",
-  "awaiting_approval",
-  "verifying",
-  "delivering",
-  "completed",
-  "cancelled",
-] as const;
-
-export type ThreadStatus = (typeof THREAD_STATUSES)[number];
-
-// ─── Message Type ────────────────────────────────────────────
-
-export const MESSAGE_TYPES = [
-  "user_input",
-  "assistant_text",
-  "tool_call",
-  "tool_result",
-  "system",
-] as const;
-
-export type MessageType = (typeof MESSAGE_TYPES)[number];
-
-/** 按消息 role 推导默认 type（消息分层最小实现，写入时调用）。 */
-export function messageTypeForRole(role: string): MessageType {
-  if (role === "user") return "user_input";
-  if (role === "system") return "system";
-  return "assistant_text";
-}
-
-// ─── Thread Event Types (.1 权威表) ─────────────────────
-
-/**
- * 事件类型——取自蓝图 词表。
- * 本枚举是全文事件名的唯一权威定义。
- *
- * 激活：delivery.succeeded / delivery.failed（交付终态）+ git.checkpoint_*。
- * 预留但不实现的后续 Phase 事件：review.requested
- */
-export const THREAD_EVENT_TYPES = [
-  "agent.started",
-  "agent.status_changed",
-  "tool.called",
-  "tool.succeeded",
-  "tool.failed",
-  "artifact.created",
-  "artifact.updated",
-  // context manifest 与 plan/todo 事件（只追加，不改旧事件含义）
-  "context.snapshot_created",
-  // a：上下文压缩（只追加，不改旧事件含义）
-  "context.summary_created",
-  "context.compressed",
-  "plan.created",
-  "plan.updated",
-  "plan.item_updated",
-  // 工具审批暂停/恢复（只追加）
-  "tool.approval_requested",
-  "tool.approval_resolved",
-  // 后台任务生命周期（只追加）
-  "task.started",
-  "task.stopped",
-  "task.failed",
-  // 交付生命周期事件（从注释态激活）+ checkpoint 事件
-  "delivery.succeeded",
-  "delivery.failed",
-  "git.checkpoint_created",
-  "git.checkpoint_restored",
-  // 外部资料与 MCP 调用（只追加，不改旧事件含义）
-  // external.fetched：webFetch/webSearch/searchDocs 一次外部资料访问（payload 含来源/hash/artifact）
-  // external.searched：webSearch 一次搜索（S1 06-，payload 含 query/resultCount）
-  // external.docs_searched：searchDocs 一次文档搜索（S1 06-）
-  // mcp.listed：listMcpTools 列出某 server 工具集
-  // mcp.called：callMcpTool 一次 MCP 工具调用（payload 含 permissionKey/ok）
-  "external.fetched",
-  "external.searched",
-  "external.docs_searched",
-  "mcp.listed",
-  "mcp.called",
-  // 子代理生命周期（只追加，不改旧事件含义）
-  // subagent.spawned：子代理发起（payload 含 runId/role/goal 摘要/writeScope?）
-  // subagent.joined：子代理加入并收集结构化结果（payload 含 runId/status/resultSummary 摘要/outputArtifactId?）
-  // subagent.failed：子代理失败/超时（payload 含 runId/errorMessage 摘要）
-  "subagent.spawned",
-  "subagent.joined",
-  "subagent.failed",
-  // 浏览器 QA gate 生命周期（只追加，不改旧事件含义）
-  // qa.check_passed：一次 QA 检查通过（payload 含 checkId/kind/viewports/durationMs）
-  // qa.check_failed：一次 QA 检查失败（payload 含 checkId/kind/failures[]/durationMs）
-  // kind=gate 表示 reportReady 自动跑的 gate；其余表示 agent 主动调 QA 工具。
-  "qa.check_passed",
-  "qa.check_failed",
-  // 部署与 secret 生命周期（只追加，不改旧事件含义）
-  // deployment.deploying：部署已被 CI/CD 接收，等待终态（payload 含 deploymentId/environment/cicdJobId?/imageTag?）
-  // deployment.succeeded：部署成功（payload 含 deploymentId/environment/cicdJobId?/imageTag?）
-  // deployment.failed：部署失败（payload 含 deploymentId/errorMessage 摘要）
-  // deployment.rolled_back：部署回滚（payload 含 deploymentId/previousDeploymentId）
-  // secret.rotated：secret 轮换（payload 含 secretMountId/name/scope）
-  // secret.revoked：secret 撤销（payload 含 secretMountId/name/scope）
-  "deployment.deploying",
-  "deployment.succeeded",
-  "deployment.failed",
-  "deployment.rolled_back",
-  "secret.rotated",
-  "secret.revoked",
-  // P1 修复(01 AI Core ): agent 每轮 token 用量审计(供计费/用量分析)。
-  // 由 chat route streamText.onFinish 落库,payload { promptTokens, completionTokens, totalTokens, model }。
-  // 只追加,不改旧事件顺序(避免破坏 slice(0,7) 等历史断言)。
-  "agent.usage",
-  // 会话标题被自动或手动更新。payload { title, source, reason? }。
-  "thread.title_updated",
-  // 预留：Phase 3+ 事件
-  // "review.requested",
-] as const;
-
-export type ThreadEventType = (typeof THREAD_EVENT_TYPES)[number];
+/** B1 数据表只承载仍在使用的 Tool/Context/Skill/Deployment 等非会话 Authority。 */
 
 // ─── Tool Run Statuses ──────────────────────────────────────
 
@@ -164,7 +32,7 @@ export const user = mysqlTable(
       .primaryKey()
       .notNull()
       .$defaultFn(() => randomUUID()),
-    // 公司用户中心 subject / employee id（：SSO 身份映射键）
+    // 公司用户中心 subject / employee id（SSO 身份映射键）
     externalId: varchar("externalId", { length: 128 }).notNull(),
     email: varchar("email", { length: 128 }).notNull(),
     name: text("name"),
@@ -219,7 +87,7 @@ export const toolRun = mysqlTable(
 );
 export type ToolRun = InferSelectModel<typeof toolRun>;
 
-// ─── RBAC (: role → permission, user → role) ────────
+// ─── RBAC（role → permission, user → role）──────────
 
 /**
  * 内置角色 key（seed 灌 admin / member）。isSystem=true 的角色不可删除（保留扩展位）。
@@ -263,7 +131,7 @@ export const ADMIN_AUDIT_ACTIONS = [
   "permission_rule.deleted",
   // admin 彻底删除 thread(物理删主记录 + 子表)
   "thread.purged",
-  // :审批决议独立 action(原复用 tool.high_risk.executed/policies.updated 语义错乱)
+  // 审批决议使用独立 action，避免与工具执行或策略更新混淆。
   "approval.resolved",
 ] as const;
 
@@ -781,25 +649,15 @@ export const auditFailureLog = mysqlTable(
 );
 export type AuditFailureLog = InferSelectModel<typeof auditFailureLog>;
 
-// ：V9 内置浏览器表（UserBrowserProfile / BrowserSession /
-// BrowserDownload）已移除。原表由破坏性 migration 0059 删除。
-// Desktop 浏览器的 Profile / Session / Download 由 Desktop 本地 SQLite
-// 管理（Phase 3+），不经 Server MySQL。
+// Browser Profile / Session / Download 由 Desktop 本地 SQLite 管理，不进入 Server MySQL。
 
-// ─── Schema（阶段 2 起拆入身份、授权、幂等、审计表组）─────────
+// ─── B1 Schema 导出 ────────────────────────────────────────
 export * from "@/lib/persistence/schema/identity";
-export * from "@/lib/runtime/persistence/runtime-conformance-run-record";
 export * from "@/lib/persistence/schema/device";
 export * from "@/lib/persistence/schema/authorization";
 export * from "@/lib/persistence/schema/idempotency";
 export * from "@/lib/persistence/schema/audit";
-export * from "@/lib/persistence/schema/agents";
-export * from "@/lib/persistence/schema/runtimes";
-export * from "@/lib/persistence/schema/executions";
 export * from "@/lib/persistence/schema/artifact";
-export * from "@/lib/persistence/schema/deployment-route";
-export * from "@/lib/persistence/schema/conversation";
-export * from "@/lib/persistence/schema/projection";
 export * from "@/lib/persistence/schema/skill";
 export * from "@/lib/persistence/schema/tool";
 export * from "@/lib/persistence/schema/catalog";

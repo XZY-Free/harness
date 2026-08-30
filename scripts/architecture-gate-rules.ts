@@ -7,16 +7,63 @@
  * checkDeprecatedArchitecture 一致，抽取为可单测的纯函数。
  */
 
-/** 目标作用域前缀：正式领域（lib/{agents,artifacts,executions,publications,routes,runtime}）与 admin 管理 API。 */
-const SCOPED_PATTERN =
-  /^(lib\/(agents|artifacts|executions|publications|routes|runtime)\/|app\/admin\/api\/v1\/)/;
+/** Agent/Runtime/Route Authority 及其正式消费者。 */
+const AUTHORITY_SOURCE_SCOPE =
+  /^(lib\/(agents|artifacts|control-plane|executions|publications|routes|runtime)\/|lib\/persistence\/schema\/(agents|agent-calls|runtimes|executions|deployment-route|conversation|projection)\.ts$|app\/(admin\/api\/v1\/(agents|agent-revisions|deployment-route)|gateway\/v1\/agent-calls|api\/v1\/(threads|turns)|runtime\/v1)\/|components\/(thread|studio\/(agent|route|runtime))|desktop\/renderer\/)/;
 
 /** deprecated 禁词（大小写不敏感）：@deprecated、单词 legacy/cutover/shadow、fallback legacy。 */
-const DEPRECATED_PATTERN = /@deprecated|\blegacy\b|\bcutover\b|\bshadow\b|fallback legacy/i;
+const DEPRECATED_PATTERN = /@deprecated|\blegacy\b|\bcutover\b|fallback legacy/i;
+
+/** 施工历史只能留在 docs，不能成为生产领域说明。 */
+const IMPLEMENTATION_HISTORY_PATTERN =
+  /docs\/V(?:11|12)\/01|专题0?1|\bBatch\s*\d+\b|\bPhase\s*[A-Z0-9]+\b|\bStage\s*[A-Z0-9]+\b|阶段\s*[0-9一二三四五六七八九十]+|关口\s*\d+|\bS\d{2}-[CW]\d{2}\b|(?:^|[\s（(])0[0-7]\s*§\s*[0-9一二三四五六七八九十]+/im;
+
+/** 已物理删除的第二入口。测试可以写拒绝文本，但不能再依赖这些模块。 */
+const RETIRED_MODULE_SPECIFIER =
+  /(?:@\/|(?:\.\.\/)+)(?:lib\/runtime\/(?:.*\/)?a2a[^"']*|lib\/routes\/application\/(?:upsert|disable)-deployment-route|app\/api\/v1\/agents(?:\/route)?|lib\/agents\/(?:hosted-agent-publication|hosted-agent-route)[^"']*)/;
+
+const MODULE_DEPENDENCY =
+  /(?:from\s*|require\(\s*|import\(\s*|export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s+from\s*)["']([^"']+)["']/g;
 
 export interface SourceDocument {
   path: string;
   source: string;
+}
+
+/** 返回仍把施工历史写进 Agent/Runtime/Route 正式源码的文件。 */
+export function collectImplementationHistoryViolations(
+  documents: readonly SourceDocument[],
+  allowlist: ReadonlySet<string> = new Set<string>(),
+): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (!AUTHORITY_SOURCE_SCOPE.test(document.path)) continue;
+    if (document.path.includes(".test.")) continue;
+    if (allowlist.has(document.path)) continue;
+    if (IMPLEMENTATION_HISTORY_PATTERN.test(document.source)) violations.add(document.path);
+  }
+  return [...violations];
+}
+
+/** 返回仍 import/require/export 已删除第二入口的源码，包括测试与 test-support。 */
+export function collectRetiredModuleDependencyViolations(
+  documents: readonly SourceDocument[],
+): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (!/^(app|components|desktop|hooks|lib|scripts)\//.test(document.path)) continue;
+    if (
+      document.path === "scripts/architecture-gate-rules.ts" ||
+      document.path === "scripts/architecture-gate-rules.test.ts"
+    ) {
+      continue;
+    }
+    MODULE_DEPENDENCY.lastIndex = 0;
+    for (const match of document.source.matchAll(MODULE_DEPENDENCY)) {
+      if (RETIRED_MODULE_SPECIFIER.test(match[1] ?? "")) violations.add(document.path);
+    }
+  }
+  return [...violations];
 }
 
 export interface AgentInvokeAuthorizationGateResult {
@@ -39,7 +86,7 @@ export interface AgentRevisionAuthorityGateResult {
   failures: string[];
 }
 
-/** Package05：AgentRevision 是唯一版本轴，currentRevisionId 只作发布摘要。 */
+/** AgentRevision 是唯一版本轴，currentRevisionId 只作发布摘要。 */
 export function checkAgentRevisionAuthorityGate(
   documents: readonly SourceDocument[],
 ): AgentRevisionAuthorityGateResult {
@@ -74,8 +121,6 @@ export function checkAgentRevisionAuthorityGate(
     failures.push("AgentRevision 发布前未验证结构化 ContractSnapshot 摘要");
   }
 
-  const constructionNaming =
-    /docs\/V(?:11|12)|专题0?1|\bBatch\d+\b|(?:第一)?阶段\s*\d+|\bS\d{2}-[CW]\d{2}\b|(?:^|[\s（(])0[0-7]\s*§/m;
   for (const document of documents) {
     const path = document.path;
     const isTest = path.endsWith(".test.ts") || path.endsWith(".test.tsx");
@@ -113,15 +158,12 @@ export function checkAgentRevisionAuthorityGate(
     if (/\bAgentContractRevision\b|\bContractPublication\b/.test(productionSource)) {
       failures.push(`Agent Contract 第二版本轴/发布 Authority 仍存在：${path}`);
     }
-    if (constructionNaming.test(document.source)) {
-      failures.push(`Agent 控制面生产源码仍含施工版本命名：${path}`);
-    }
   }
 
   return { passed: failures.length === 0, failures: [...new Set(failures)] };
 }
 
-/** Package04：Harness 只映射一次 durable disposition；A2A outbound 仍归 AgentTransport。 */
+/** Harness 只映射一次 durable disposition；A2A outbound 仍归 AgentTransport。 */
 export function checkAgentCallRuntimeBoundaryGate(
   documents: readonly SourceDocument[],
 ): AgentCallRuntimeBoundaryGateResult {
@@ -163,7 +205,7 @@ export function checkAgentCallRuntimeBoundaryGate(
   return { passed: failures.length === 0, failures: [...new Set(failures)] };
 }
 
-/** Package03：AgentCall 只能通过单一最终事务冻结，禁止旧幂等入口与假事实。 */
+/** AgentCall 只能通过单一最终事务冻结，禁止旧幂等入口与假事实。 */
 export function checkAgentCallFinalizationGate(
   documents: readonly SourceDocument[],
 ): AgentCallFinalizationGateResult {
@@ -300,7 +342,7 @@ export function collectDeprecatedArchitectureViolations(
   const seen = new Set<string>();
   const violations: string[] = [];
   for (const document of documents) {
-    if (!SCOPED_PATTERN.test(document.path)) continue;
+    if (!AUTHORITY_SOURCE_SCOPE.test(document.path)) continue;
     if (document.path.endsWith(".test.ts") || document.path.endsWith(".test.tsx")) continue;
     if (allowlist.has(document.path)) continue;
     if (!DEPRECATED_PATTERN.test(document.source)) continue;
@@ -312,9 +354,9 @@ export function collectDeprecatedArchitectureViolations(
 }
 
 /**
- * 专题01 §23.2 最终 Architecture Gate 边界规则的纯规则模块。
+ * Harness Agent Authority 边界规则的纯规则模块。
  *
- * 业务不变量（与 architecture-gate.ts 原有 checkTopic01Boundaries 一致，抽取为
+ * 业务不变量（与 architecture-gate.ts 原有 checkHarnessAgentBoundaries 一致，抽取为
  * 可单测纯函数）：
  * - 生产作用域 app/components/desktop/lib/scripts；docs 是方案说明文档（含被禁词
  *   是为了描述检测项），不扫。
@@ -337,19 +379,19 @@ export function collectDeprecatedArchitectureViolations(
  * - 任意正式消费者 route.kind === 'chat'、lib/routes 内 kind: 'chat'
  * - 客户端 agents.length===0 执行阻断（return/throw，允许可选大括号）
  */
-const TOPIC01_SCOPE = /^(app|components|desktop|lib|scripts)\//;
+const ARCHITECTURE_SCOPE = /^(app|components|desktop|lib|scripts)\//;
 
 /** 规则定义文件（含检测正则自身），按文件精确排除。 */
-const TOPIC01_RULE_DEFINITIONS = new Set([
+const ARCHITECTURE_RULE_DEFINITIONS = new Set([
   "scripts/architecture-gate.ts",
   "scripts/architecture-gate-rules.ts",
 ]);
 
 /** CreateThread 正式 route：其可执行代码只要出现 agent_id 字段即违规。 */
-const TOPIC01_CREATE_THREAD_ROUTE = "app/api/v1/threads/route.ts";
+const CREATE_THREAD_ROUTE = "app/api/v1/threads/route.ts";
 
-/** 专题01 边界规则模式。 */
-const TOPIC01_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
+/** Harness Agent 边界规则模式。 */
+const HARNESS_AGENT_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
   {
     pattern: /\.primaryAgentId\b|\bprimaryAgentId\s*:|\bprimary_agent_id\b/,
     title: "Thread.primaryAgentId 身份字段",
@@ -365,13 +407,13 @@ const TOPIC01_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string 
   { pattern: /["']\/desktop\/new["']/, title: "/desktop/new 假 new 路由" },
   { pattern: /route\.kind\s*===\s*["']chat["']/, title: "route.kind=chat 漂移" },
   {
-    // 专题01 Batch4：RouteResolver 命令必须用显式 target:{kind:"runtime"|"agent"}，
-    // 禁止再用 agentConstraint 隐式表达目标（隐式 null=Harness 的旧 Authority）。
+    // RouteResolver 命令必须用显式 target:{kind:"runtime"|"agent"}，
+    // 禁止用 agentConstraint 或 null 隐式表达目标。
     pattern: /\bagentConstraint\b/,
     title: "RouteResolver agentConstraint 隐式 target",
   },
   {
-    // §35：仅禁止「agents.length===0 执行阻断」（return/throw，允许可选大括号）。
+    // 仅禁止「agents.length===0 执行阻断」（return/throw，允许可选大括号）。
     // 「暂无可用助手」空态展示（agents.length === 0 && <SelectorMessage>）合法，不匹配。
     pattern: /agents\.length\s*===?\s*0\s*\)?\s*\{?\s*(?:return|throw)/,
     title: "客户端 agents.length===0 执行阻断",
@@ -387,7 +429,7 @@ function stripComments(source: string): string {
     .join("\n");
 }
 
-// ─── A2A AgentCall 边界（Batch6）───────────────────────────
+// ─── A2A AgentCall 边界 ───────────────────────────────────
 
 /**
  * 旧 A2A Runtime 生产路径：lib/runtime 下任意子目录的 a2a 前缀文件名
@@ -424,15 +466,35 @@ const AGENT_TARGET_RUNTIME_FALLBACK =
 const ROUTE_SET_NULLABLE_AGENT_UNIQUE =
   /uniqueIndex\([\s\S]{0,300}?\.on\(\s*(?:\w+\.)?tenantId\s*,\s*(?:\w+\.)?agentId\s*,\s*(?:\w+\.)?routeScopeKey/;
 
+/** 对外 RouteSet DTO 不得再用 flat nullable agent 字段表达目标。 */
+const ROUTE_SET_CONTRACT_PATH = "lib/control-plane-client/contracts/route.ts";
+const ROUTE_SET_NULLABLE_EXTERNAL_TARGET =
+  /\b(?:agentId|agent_id)\??\s*:\s*(?:string\s*\|\s*null|null\s*\|\s*string)/;
+
+/** 不得根据 agentId 的真假/null 反推 Route target。 */
+const ROUTE_TARGET_NULL_INFERENCE =
+  /(?:(?:const|let|var)\s+\w*[Tt]arget\w*\s*=|return)\s*(?:\w+\.)?\b(?:agentId|agent_id)\b\s*\?[^;\n]{0,200}\bkind\s*:\s*["'](?:runtime|agent)["']/;
+
+const ROUTE_ACTIVATION_STORE_PATH = "lib/routes/persistence/mysql-route-set-activation-store.ts";
+const ROUTE_ELIGIBILITY_STORE_PATH = "lib/routes/projection/mysql-route-eligibility-store.ts";
+
 /** Schema 已知 RUNTIME_PROTOCOL_TYPES 不得含 a2a（仅 schema 文件）。 */
 const SCHEMA_RUNTIMES_PATH = "lib/persistence/schema/runtimes.ts";
 const SCHEMA_PROTOCOL_A2A = /RUNTIME_PROTOCOL_TYPES\s*=\s*\[[^\]]*["']a2a["']/;
+
+const B1_SCHEMA_PATH = "lib/db/schema.ts";
+const B1_FORMAL_AUTHORITY =
+  /\bTHREAD_STATUSES\b|\bTHREAD_EVENT_TYPES\b|\bMESSAGE_TYPES\b|from\s+["']@\/lib\/(?:persistence\/schema\/(?:agents|runtimes|executions|deployment-route|conversation|projection)|runtime\/persistence\/runtime-conformance-run-record)["']/;
+
+const LOCAL_RUNTIME_RESOLVER_PATH = "lib/runtime/resolver.ts";
+const THREAD_RUNTIME_SELECTION =
+  /\bresolveRuntimeTypeForThread\b|\bthread\??\.runtimeType\b|\bskillVersion\??\.runtimeType\b/;
 
 /** Runtime 生产 protocolType 赋值不得为 a2a（lib/runtime 下；AgentContractSnapshot 属 lib/agents 不受限）。 */
 const RUNTIME_PROTOCOL_A2A = /protocolType\s*[:=]\s*["']a2a["']/;
 
 /**
- * 收集专题01 §23.2 边界规则违规路径。
+ * 收集 Harness Agent Authority 边界违规路径。
  *
  * 对每个在生产作用域内、非 .test.ts/.test.tsx、非规则定义文件的文档，剥离注释后
  * 匹配边界模式；命中任一规则即计入违规。返回唯一 path，保持输入顺序。
@@ -440,22 +502,24 @@ const RUNTIME_PROTOCOL_A2A = /protocolType\s*[:=]\s*["']a2a["']/;
  * @param documents 全部候选文档（含 test-support 与测试文件，规则自行过滤）。
  * @returns 违规 path，保持输入顺序、唯一。
  */
-export function collectTopic01BoundaryViolations(documents: readonly SourceDocument[]): string[] {
+export function collectHarnessAgentBoundaryViolations(
+  documents: readonly SourceDocument[],
+): string[] {
   const seen = new Set<string>();
   const violations: string[] = [];
   for (const document of documents) {
     const path = document.path;
-    if (!TOPIC01_SCOPE.test(path)) continue;
+    if (!ARCHITECTURE_SCOPE.test(path)) continue;
     if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) continue;
-    if (TOPIC01_RULE_DEFINITIONS.has(path)) continue;
+    if (ARCHITECTURE_RULE_DEFINITIONS.has(path)) continue;
     const source = stripComments(document.source);
     let flagged = false;
     // CreateThread 正式 route：出现 agent_id 字段即违规（不区分 required/optional）。
-    if (path === TOPIC01_CREATE_THREAD_ROUTE && /\bagent_id\b/.test(source)) {
+    if (path === CREATE_THREAD_ROUTE && /\bagent_id\b/.test(source)) {
       flagged = true;
     }
     if (!flagged) {
-      for (const rule of TOPIC01_BOUNDARY_PATTERNS) {
+      for (const rule of HARNESS_AGENT_BOUNDARY_PATTERNS) {
         if (rule.pattern.test(source)) {
           flagged = true;
           break;
@@ -482,7 +546,32 @@ export function collectTopic01BoundaryViolations(documents: readonly SourceDocum
     ) {
       flagged = true;
     }
-    // ── A2A AgentCall 边界（Batch6）──
+    if (
+      !flagged &&
+      path === ROUTE_SET_CONTRACT_PATH &&
+      ROUTE_SET_NULLABLE_EXTERNAL_TARGET.test(source)
+    ) {
+      flagged = true;
+    }
+    if (!flagged && path.startsWith("lib/routes/") && ROUTE_TARGET_NULL_INFERENCE.test(source)) {
+      flagged = true;
+    }
+    // RouteActivation 与 RouteEligibilityProjection 只能由各自唯一 Store 写入。
+    if (
+      !flagged &&
+      path !== ROUTE_ACTIVATION_STORE_PATH &&
+      /\.update\(\s*deploymentRouteTable\s*\)[\s\S]{0,300}?activeRouteRevisionId/.test(source)
+    ) {
+      flagged = true;
+    }
+    if (
+      !flagged &&
+      path !== ROUTE_ELIGIBILITY_STORE_PATH &&
+      /\.(?:insert|update|delete)\(\s*routeEligibilityProjection(?:Table)?\s*\)/.test(source)
+    ) {
+      flagged = true;
+    }
+    // ── A2A AgentCall 边界 ──
     // 旧 A2A Runtime 生产路径：文件名自身 lib/runtime/**/a2a* 即违规（无论内容/注释）。
     if (!flagged && OLD_A2A_RUNTIME_PATH.test(path)) {
       flagged = true;
@@ -507,6 +596,14 @@ export function collectTopic01BoundaryViolations(documents: readonly SourceDocum
     if (!flagged && path.startsWith("lib/runtime/") && RUNTIME_PROTOCOL_A2A.test(source)) {
       flagged = true;
     }
+    // B1 聚合层不再暴露 Thread/Message 执行状态或转出正式 Authority Schema。
+    if (!flagged && path === B1_SCHEMA_PATH && B1_FORMAL_AUTHORITY.test(source)) {
+      flagged = true;
+    }
+    // 本地预览 Runtime 只能读取平台配置，不得恢复 Thread/Skill Runtime 选择轴。
+    if (!flagged && path === LOCAL_RUNTIME_RESOLVER_PATH && THREAD_RUNTIME_SELECTION.test(source)) {
+      flagged = true;
+    }
     if (flagged && !seen.has(path)) {
       seen.add(path);
       violations.push(path);
@@ -515,64 +612,63 @@ export function collectTopic01BoundaryViolations(documents: readonly SourceDocum
   return violations;
 }
 
-// ─── 剩余代码收口（V12/01 08 专项）边界规则 E1-E4 ─────────────
+// ─── Execution wire 与特例分支边界 ────────────────────────
 
 /**
- * E1-E4：本轮新增真实红线（生产作用域，剥离注释，排除 .test.* 与规则定义文件）：
- * - E1 A2A external production wire 不得出现 snowharness.execution_subject；
- * - E2 公共 subject 映射不得输出裸 "service"（必须 platform_service）；
- * - E3 Studio production 不得自行构造 conformance_run_id 字面量（只能来自 DTO）；
- * - E4 生产代码不得有 HR-specific runtime branch。
+ * 生产作用域在剥离注释后必须满足：
+ * - A2A external production wire 不得出现 snowharness.execution_subject；
+ * - 公共 subject 映射不得输出裸 "service"（必须 platform_service）；
+ * - Studio production 不得自行构造 conformance_run_id 字面量（只能来自 DTO）；
+ * - 生产代码不得有 HR-specific runtime branch。
  */
-const CLOSEOUT_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
-  { pattern: /snowharness\.execution_subject/, title: "E1 旧 namespaced execution_subject wire" },
+const EXECUTION_BOUNDARY_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
+  { pattern: /snowharness\.execution_subject/, title: "namespaced execution_subject wire" },
   {
     // 捕获直接赋值与三元输出映射（"platform_service" 因引号边界不匹配）；
     // === / !== / < / > 后的 "service" 是比较而非输出，可变长 lookbehind 排除。
     pattern: /subject_kind\s*[:=][^;\n]{0,60}(?<![=!<>]\s*)["']service["']/,
-    title: "E2 subject_kind 裸 service 输出",
+    title: "subject_kind 裸 service 输出",
   },
   {
     // 仅捕获对象字面量/赋值中的 run id 字符串字面量（=== 比较不匹配）。
     pattern: /conformance_run_id\s*:\s*["'][A-Za-z0-9][A-Za-z0-9_-]*["']/,
-    title: "E3 Studio/生产自行构造 conformance_run_id 字面量",
+    title: "Studio/生产自行构造 conformance_run_id 字面量",
   },
-  { pattern: /\bhr-assistant\b/i, title: "E4 HR 特例分支" },
-  { pattern: /\bveadk\b/i, title: "E4 HR 特例分支" },
-  { pattern: /\bagentkit\b/i, title: "E4 HR 特例分支" },
-  { pattern: /\bemployee-data\b/i, title: "E4 HR 特例分支" },
-  { pattern: /\bconsult-agent\b/i, title: "E4 HR 特例分支" },
+  { pattern: /\bhr-assistant\b/i, title: "HR 特例分支" },
+  { pattern: /\bveadk\b/i, title: "HR 特例分支" },
+  { pattern: /\bagentkit\b/i, title: "HR 特例分支" },
+  { pattern: /\bemployee-data\b/i, title: "HR 特例分支" },
+  { pattern: /\bconsult-agent\b/i, title: "HR 特例分支" },
 ];
 
 /** HR Provider 端口号特例（禁止生产分支）：匹配 8100 端口字面量。 */
-const CLOSEOUT_PORT_PATTERN = /[:/]8100\b|port\s*[:=]\s*8100\b/i;
+const HR_PROVIDER_PORT_PATTERN = /[:/]8100\b|port\s*[:=]\s*8100\b/i;
 
 /**
  * 精确文件白名单（逐文件，绝不目录豁免）：
- * - hr-agent-contract.ts 是登记事实测试夹具（真实首个集成的公共合同副本），
- *   doc 08 §2 明确允许 fixture 存在，但其内容含 HR 标识。
+ * - hr-agent-contract.ts 是登记事实测试夹具，其内容含 HR 标识。
  */
-const CLOSEOUT_ALLOWLIST = new Set([
+const EXECUTION_BOUNDARY_ALLOWLIST = new Set([
   "lib/agents/test-support/hr-agent-contract.ts",
-  // Studio 测试夹具（DTO fixture，非生产构造；08 §2 fixture 可存在）。
+  // Studio DTO 测试夹具，非生产构造。
   "components/studio/test-support/route-activation-fixtures.ts",
 ]);
 
-export function collectCloseoutBoundaryViolations(
+export function collectExecutionBoundaryViolations(
   documents: readonly SourceDocument[],
 ): Array<{ path: string; title: string }> {
   const seen = new Set<string>();
   const violations: Array<{ path: string; title: string }> = [];
   for (const document of documents) {
     const path = document.path;
-    if (!TOPIC01_SCOPE.test(path)) continue;
+    if (!ARCHITECTURE_SCOPE.test(path)) continue;
     if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) continue;
-    if (TOPIC01_RULE_DEFINITIONS.has(path)) continue;
-    if (CLOSEOUT_ALLOWLIST.has(path)) continue;
+    if (ARCHITECTURE_RULE_DEFINITIONS.has(path)) continue;
+    if (EXECUTION_BOUNDARY_ALLOWLIST.has(path)) continue;
     const source = stripComments(document.source);
     for (const rule of [
-      ...CLOSEOUT_BOUNDARY_PATTERNS,
-      { pattern: CLOSEOUT_PORT_PATTERN, title: "E4 HR 特例分支（8100 端口）" },
+      ...EXECUTION_BOUNDARY_PATTERNS,
+      { pattern: HR_PROVIDER_PORT_PATTERN, title: "HR 特例分支（8100 端口）" },
     ]) {
       if (rule.pattern.test(source)) {
         const key = `${rule.title}:${path}`;
@@ -586,7 +682,7 @@ export function collectCloseoutBoundaryViolations(
   return violations;
 }
 
-// ─── Resume Gate（08 §5）────────────────────────────────────
+// ─── Resume 结果真实性 ────────────────────────────────────
 
 const RESOLVE_ROUTE_PATH =
   "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
@@ -618,7 +714,7 @@ export function checkResumeTruthfulnessGate(
   if (!transport) {
     failures.push(`${A2A_TRANSPORT_PATH} 不存在`);
   } else {
-    // Agent transport resumeCall 必须使用公共 metadata mapper（04 §12）。
+    // Agent transport resumeCall 必须使用公共 metadata mapper。
     const resumeIndex = transport.source.indexOf("async resumeCall");
     const resumeSlice =
       resumeIndex >= 0 ? transport.source.slice(resumeIndex, resumeIndex + 3000) : "";
@@ -629,21 +725,21 @@ export function checkResumeTruthfulnessGate(
   return { passed: failures.length === 0, failures };
 }
 
-// ─── 九项问题最终收口（V12/01 08 专项）Gate F1-F8 ────────────
+// ─── Dispatch 与 Recovery Authority ───────────────────────
 
 /**
- * F1-F8：九项问题收口红线（生产作用域，按精确文件做结构性检查）：
- * - F1 Fake retry：command-dispatcher transient 分支必须排定 durable retry；
+ * 生产作用域按精确文件检查以下职责：
+ * - command-dispatcher transient 分支必须排定 durable retry；
  *   dispatcher/Attempt 服务的 transient 分支必须产生/更新 queued Attempt retry work。
- * - F2 Recovery global-db leak：markInvocationLost 事务内必须使用 caller-owned
+ * - markInvocationLost 事务内必须使用 caller-owned
  *   SessionBinding 版本（markSessionBindingLostInSession），禁止全局 db 版本。
- * - F5 Resume dispatched=false：resolve route 必须显式 switch 三种 reason，
+ * - Resume dispatched=false 时 resolve route 必须显式 switch 三种 reason，
  *   禁止 if(!dispatched) local 200 一把梭。
- * - F6 Capability hardcode：A2A Start response 不得硬编码 cancel/resume/user_action=true，
+ * - A2A Start response 不得硬编码 cancel/resume/user_action=true，
  *   必须投影 params.capabilities。
- * - F7 Contract invalid combo：Parser 必须包含 input_required=true → resume=true。
+ * - Parser 必须包含 input_required=true → resume=true。
  */
-export interface NineIssueCloseoutGateResult {
+export interface DispatchRecoveryAuthorityGateResult {
   passed: boolean;
   failures: string[];
 }
@@ -661,22 +757,22 @@ function docOrFail(
   return document;
 }
 
-export function checkNineIssueCloseoutGate(
+export function checkDispatchRecoveryAuthorityGate(
   documents: readonly SourceDocument[],
-): NineIssueCloseoutGateResult {
+): DispatchRecoveryAuthorityGateResult {
   const failures: string[] = [];
 
-  // F1 Fake retry
+  // Durable retry ownership
   const commandDispatcher = docOrFail(documents, "lib/runtime/command-dispatcher.ts", failures);
   if (commandDispatcher) {
     if (!commandDispatcher.source.includes("scheduleCommandTransientRetry")) {
-      failures.push("F1 command-dispatcher transient 分支未调用 scheduleCommandTransientRetry");
+      failures.push("command-dispatcher transient 分支未调用 scheduleCommandTransientRetry");
     }
   }
   const dispatcher = docOrFail(documents, "lib/runtime/dispatcher.ts", failures);
   if (dispatcher) {
     if (!dispatcher.source.includes("recordAttemptDispatchTransientFailure")) {
-      failures.push("F1 dispatcher transient 分支未调用 recordAttemptDispatchTransientFailure");
+      failures.push("dispatcher transient 分支未调用 recordAttemptDispatchTransientFailure");
     }
   }
   const attemptService = docOrFail(
@@ -685,21 +781,21 @@ export function checkNineIssueCloseoutGate(
     failures,
   );
   if (attemptService && !attemptService.source.includes("recordAttemptDispatchTransientFailure")) {
-    failures.push("F1 Attempt dispatch 服务 transient 分支未排定 durable retry");
+    failures.push("Attempt dispatch 服务 transient 分支未排定 durable retry");
   }
 
-  // F2 Recovery global-db leak
+  // Recovery transaction ownership
   const recovery = docOrFail(documents, "lib/runtime/recovery-queries.ts", failures);
   if (recovery) {
     if (!recovery.source.includes("markSessionBindingLostInSession")) {
-      failures.push("F2 markInvocationLost 未使用 caller-owned markSessionBindingLostInSession");
+      failures.push("markInvocationLost 未使用 caller-owned markSessionBindingLostInSession");
     }
     if (/import\s*\{[^}]*\bmarkSessionBindingLost\b[^}]*\}\s*from/.test(recovery.source)) {
-      failures.push("F2 recovery-queries import 了全局 db 版本 markSessionBindingLost");
+      failures.push("recovery-queries import 了全局 db 版本 markSessionBindingLost");
     }
   }
 
-  // F5 Resume dispatched=false 显式 switch
+  // Resume dispatched=false 显式 switch
   const resolveRoute = docOrFail(
     documents,
     "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts",
@@ -708,7 +804,7 @@ export function checkNineIssueCloseoutGate(
   if (resolveRoute) {
     for (const reason of ["protocol_not_remote", "unsupported_capability", "command_not_found"]) {
       if (!resolveRoute.source.includes(reason)) {
-        failures.push(`F5 resolve route 缺少 ${reason} 显式分支`);
+        failures.push(`resolve route 缺少 ${reason} 显式分支`);
       }
     }
     const source = stripComments(resolveRoute.source);
@@ -719,12 +815,12 @@ export function checkNineIssueCloseoutGate(
       );
       const blindLocal = /else\s*\{[^}]{0,400}mode:\s*["']local_runtime["']/.test(source);
       if (!m || blindLocal) {
-        failures.push("F5 resolve route 存在非 protocol_not_remote 的 local_runtime 兜底分支");
+        failures.push("resolve route 存在非 protocol_not_remote 的 local_runtime 兜底分支");
       }
     }
   }
 
-  // F6 Capability hardcode：Start response 投影
+  // Start response capability projection
   const transport = docOrFail(documents, "lib/agents/calls/transport/a2a/a2a-client.ts", failures);
   if (transport) {
     const source = stripComments(transport.source);
@@ -733,58 +829,51 @@ export function checkNineIssueCloseoutGate(
       /resume:\s*true\b/.test(source) ||
       /user_action:\s*true\b/.test(source)
     ) {
-      failures.push("F6 Agent transport 硬编码 cancel/resume/user_action=true");
+      failures.push("Agent transport 硬编码 cancel/resume/user_action=true");
     }
     if (!source.includes("params.capabilities.cancel")) {
-      failures.push("F6 Start response 未投影冻结 params.capabilities");
+      failures.push("Start response 未投影冻结 params.capabilities");
     }
   }
 
-  // F7 Contract invalid combo
+  // Contract capability implication
   const parser = docOrFail(documents, "lib/agents/domain/public-agent-contract.ts", failures);
   if (
     parser &&
     !parser.source.includes("interaction.input_required=true 要求 interaction.resume=true")
   ) {
-    failures.push("F7 Parser 缺少 input_required=true → resume=true 语义约束");
+    failures.push("Parser 缺少 input_required=true → resume=true 语义约束");
   }
 
   return { passed: failures.length === 0, failures };
 }
 
-// ─── Batch9 最终收口 Gate（V12/01 方案 §四 15 条红线）────────────
+// ─── Agent execution Authority ────────────────────────────
 
 /**
- * Batch9 最终架构红线：冻结架构下旧 Authority 不得重新出现。
+ * Agent execution Authority 必须保持与 Harness Runtime 分离。
  *
  * 全部检查剥离注释，排除 .test.* 与规则定义文件，逐文件精确匹配（不目录豁免）。
  *
- * 覆盖（§四 缺失项）：
- * - R1 ExecutionBinding/RuntimeSessionBinding schema 不得出现 Agent evidence 列。
- * - R2 RuntimeRevision schema 不得出现 Agent/A2A contract authority 字段。
- * - R3 Runtime Start Request 不得出现 agent execution target / agent_instruction_ref。
- * - R4 不得出现 HostedAgentLoop。
- * - R5 顶层 ThreadItem 不得恢复 agent_message。
- * - R6 只能有一个 Route Resolver（禁第二套 resolveHarnessRoute/resolveAgentRoute 等）。
- * - R7 AgentCall 必须作为 child domain 存在（parentInvocationId 恒必填）。
- * - R8 A2A lifecycle 必须落到 AgentCall，不得直接改 parent Invocation 终态。
+ * 覆盖 ExecutionBinding、RuntimeRevision、Runtime Start Request、Hosted Runtime、
+ * ThreadItem、Route Resolver、AgentCall child domain 与 A2A lifecycle 的 Authority 边界。
  */
-export interface Topic01FinalCloseoutGateResult {
+export interface AgentExecutionAuthorityGateResult {
   passed: boolean;
   failures: string[];
 }
 
-const FINAL_SCOPE = /^(app|components|desktop|lib|scripts)\//;
+const AGENT_EXECUTION_SCOPE = /^(app|components|desktop|lib|scripts)\//;
 
 /** 规则定义文件自身（含检测正则/说明文字），按文件精确排除。 */
-const FINAL_RULE_DEFINITIONS = new Set([
+const AGENT_EXECUTION_RULE_DEFINITIONS = new Set([
   "scripts/architecture-gate.ts",
   "scripts/architecture-gate-rules.ts",
 ]);
 
 /**
  * ExecutionBinding / RuntimeSessionBinding 表（lib/persistence/schema/executions.ts）
- * 禁止出现任何 Agent evidence 列名（§四 #3/#4）。
+ * 禁止出现任何 Agent evidence 列名。
  */
 const EXECUTION_SCHEMA_PATH = "lib/persistence/schema/executions.ts";
 const EXECUTION_AGENT_COLUMNS =
@@ -792,7 +881,7 @@ const EXECUTION_AGENT_COLUMNS =
 
 /**
  * RuntimeRevision 表（lib/persistence/schema/runtimes.ts）禁止出现
- * Agent/A2A contract authority 字段（§四 #5）。
+ * Agent/A2A contract authority 字段。
  */
 const RUNTIME_SCHEMA_PATH = "lib/persistence/schema/runtimes.ts";
 const RUNTIME_AGENT_AUTHORITY =
@@ -801,32 +890,36 @@ const RUNTIME_AGENT_AUTHORITY =
 /**
  * Runtime Start Request（lib/runtime/runtime-client.ts）禁止出现
  * agent execution target / agent_instruction_ref / Agent model-permission-interface
- * 下发字段（§四 #8）。允许 capability_requirements[type=agent]。
+ * 下发字段。允许 capability_requirements[type=agent]。
  */
 const START_REQUEST_PATH = "lib/runtime/runtime-client.ts";
 const START_REQUEST_AGENT_TARGET =
   /\bagent_instruction_ref\b|\bmodel_policy\b|\bpermission_requirements\b|\binterface_requirements\b/;
 
+/** Runtime start DTO/调用方不得携带 AgentRevision 占位或选择字段。 */
+const RUNTIME_START_AGENT_REVISION = /\bagentRevisionId\??\s*:/;
+
 /** 全仓标识符级禁词（生产 scope，剥离注释）。 */
-const FINAL_IDENTIFIER_PATTERNS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
-  { pattern: /\bHostedAgentLoop\b/, title: "R4 HostedAgentLoop 旧 Loop 命名" },
+const AGENT_EXECUTION_FORBIDDEN_IDENTIFIERS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
+  { pattern: /\bHostedAgentLoop\b/, title: "HostedAgentLoop 执行形态" },
   {
     pattern: /\bresolveHarnessRoute\b|\bresolveAgentRoute\b/,
-    title: "R6 第二套 Route Resolver 命令",
+    title: "第二套 Route Resolver 命令",
   },
   {
-    pattern: /\bAgentRouteResolver\b|\bRuntimeRouteResolver\b|\bHarnessRouteResolver\b/,
-    title: "R6 第二套 Resolver Authority",
+    pattern:
+      /\bAgentRouteResolver\b|\bRuntimeRouteResolver\b|\bHarnessRouteResolver\b|\bShadowRouteResolver\b|\bAlternateRouteResolver\b|\bresolveShadowRoute\b|\bresolveAlternateRoute\b/,
+    title: "第二套 Resolver Authority",
   },
-  { pattern: /["']agent_message["']/, title: "R5 顶层 ThreadItem agent_message" },
+  { pattern: /["']agent_message["']/, title: "顶层 ThreadItem agent_message" },
 ];
 
-/** AgentCall child domain 文件必须存在且恒含 parentInvocationId（§四 #13）。 */
+/** AgentCall child domain 文件必须存在且恒含 parentInvocationId。 */
 const AGENT_CALL_DOMAIN_PATH = "lib/agents/calls/domain/agent-call.ts";
 const AGENT_CALL_SCHEMA_PATH = "lib/persistence/schema/agent-calls.ts";
 
 /**
- * A2A lifecycle 归属（§四 #14）：Agent transport 不得直接改 parent Invocation 终态。
+ * A2A lifecycle 归属：Agent transport 不得直接改 parent Invocation 终态。
  * 要求 A2A transport 目录内生产代码不得出现对 parent Invocation / 顶层 Turn 终态的
  * 直接写入标记；统一通过 AgentCall 事件归一化（a2a-mapper 注释声明该约束）。
  */
@@ -834,54 +927,60 @@ const A2A_TRANSPORT_SCOPE = /^lib\/agents\/calls\/transport\//;
 const A2A_PARENT_WRITE_FORBIDDEN =
   /\bmarkInvocationLost\b|\bmarkInvocationCompleted\b|\bmarkTurnCompleted\b|\bRuntimeEventIngress\b/;
 
-export function checkTopic01FinalCloseoutGate(
+export function checkAgentExecutionAuthorityGate(
   documents: readonly SourceDocument[],
-): Topic01FinalCloseoutGateResult {
+): AgentExecutionAuthorityGateResult {
   const failures: string[] = [];
 
   for (const document of documents) {
     const path = document.path;
-    if (!FINAL_SCOPE.test(path)) continue;
+    if (!AGENT_EXECUTION_SCOPE.test(path)) continue;
     if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) continue;
-    if (FINAL_RULE_DEFINITIONS.has(path)) continue;
+    if (AGENT_EXECUTION_RULE_DEFINITIONS.has(path)) continue;
     const source = stripComments(document.source);
 
-    // R1：ExecutionBinding / RuntimeSessionBinding schema 无 Agent evidence 列。
+    // ExecutionBinding / RuntimeSessionBinding schema 无 Agent evidence 列。
     if (path === EXECUTION_SCHEMA_PATH && EXECUTION_AGENT_COLUMNS.test(source)) {
-      failures.push("R1 ExecutionBinding/RuntimeSessionBinding schema 出现 Agent evidence 列");
+      failures.push("ExecutionBinding/RuntimeSessionBinding schema 出现 Agent evidence 列");
     }
-    // R2：RuntimeRevision schema 无 Agent/A2A contract authority。
+    // RuntimeRevision schema 无 Agent/A2A contract authority。
     if (path === RUNTIME_SCHEMA_PATH && RUNTIME_AGENT_AUTHORITY.test(source)) {
-      failures.push("R2 RuntimeRevision schema 出现 Agent/A2A contract authority 字段");
+      failures.push("RuntimeRevision schema 出现 Agent/A2A contract authority 字段");
     }
-    // R3：Runtime Start Request 无 agent execution target。
+    // Runtime Start Request 无 agent execution target。
     if (path === START_REQUEST_PATH && START_REQUEST_AGENT_TARGET.test(source)) {
-      failures.push("R3 Runtime Start Request 出现 agent execution target / 下发字段");
+      failures.push("Runtime Start Request 出现 agent execution target / 下发字段");
     }
-    // R4/R5/R6：全仓标识符禁词。
-    for (const rule of FINAL_IDENTIFIER_PATTERNS) {
+    if (
+      (path.startsWith("lib/runtime/") || path.startsWith("app/runtime/")) &&
+      RUNTIME_START_AGENT_REVISION.test(source)
+    ) {
+      failures.push(`Runtime start 通道出现 agentRevisionId：${path}`);
+    }
+    // 全仓被禁执行标识符。
+    for (const rule of AGENT_EXECUTION_FORBIDDEN_IDENTIFIERS) {
       if (rule.pattern.test(source)) {
         failures.push(rule.title);
       }
     }
-    // R8：A2A transport 不得直接改 parent Invocation 终态。
+    // A2A transport 不得直接改 parent Invocation 终态。
     if (A2A_TRANSPORT_SCOPE.test(path) && A2A_PARENT_WRITE_FORBIDDEN.test(source)) {
-      failures.push("R8 A2A transport 直接修改 parent Invocation 终态");
+      failures.push("A2A transport 直接修改 parent Invocation 终态");
     }
   }
 
-  // R7：AgentCall child domain 存在且 parentInvocationId 恒必填。
+  // AgentCall child domain 存在且 parentInvocationId 恒必填。
   const agentCallDomain = documents.find((item) => item.path === AGENT_CALL_DOMAIN_PATH);
   if (!agentCallDomain) {
-    failures.push("R7 AgentCall domain 不存在（lib/agents/calls/domain/agent-call.ts）");
+    failures.push("AgentCall domain 不存在（lib/agents/calls/domain/agent-call.ts）");
   } else if (!agentCallDomain.source.includes("parentInvocationId")) {
-    failures.push("R7 AgentCall domain 缺少 parentInvocationId（未作为 child Invocation）");
+    failures.push("AgentCall domain 缺少 parentInvocationId（未作为 child Invocation）");
   }
   const agentCallSchema = documents.find((item) => item.path === AGENT_CALL_SCHEMA_PATH);
   if (!agentCallSchema) {
-    failures.push("R7 AgentCall schema 不存在（lib/persistence/schema/agent-calls.ts）");
+    failures.push("AgentCall schema 不存在（lib/persistence/schema/agent-calls.ts）");
   } else if (!stripComments(agentCallSchema.source).includes("parentInvocationId")) {
-    failures.push("R7 AgentCall schema 缺少 parentInvocationId 列");
+    failures.push("AgentCall schema 缺少 parentInvocationId 列");
   }
 
   return { passed: failures.length === 0, failures };

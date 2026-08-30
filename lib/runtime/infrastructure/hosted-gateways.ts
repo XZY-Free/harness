@@ -1,7 +1,7 @@
 /**
  * Hosted Provisioning Gateway 接口 — 纯适配器层。
  *
- * 专题01 冻结（runtime-only）：
+ * Runtime-only Authority：
  * - 只供应 tenant 内 builtin Harness Runtime 及其 targetKind=runtime Route。
  * - 无 Agent 发布、Agent revision、Agent route，或 builtin-runtime binding 检查。
  * - runtimeRouteActivation / runtimeRouteReader 替代旧 Agent 导向 routeActivation / routeReader。

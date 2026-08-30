@@ -1,5 +1,5 @@
 /**
- * : Revision 执行资格唯一跨领域 Reader Port。
+ * Revision 执行资格唯一跨领域 Reader Port。
  *
  * 只提供两种明确语义：
  * - loadCurrentEvidence(): 读取当前最新证据快照，用于 RouteSet 激活和 Projection 构建
@@ -7,7 +7,7 @@
  *
  * 不得创建第三套 Reader。
  *
- * 参见：SnowHarness专题01最终差距整改与正式链路收口实施方案
+ * 参见：正式架构
  */
 
 import type { RevisionExecutionEvidenceSnapshot } from "../domain/revision-execution-eligibility";
@@ -55,9 +55,9 @@ export type LoadExactEvidenceInput =
  * Revision 执行资格证据 Reader 接口。
  *
  * 实现必须：
- * - 真实读取所有证据字段（: 禁止硬编码）
- * - 使用调用方传入的 DB Session 或 Transaction（: 禁止内部使用全局 db）
- * - Policy 为 null 仅当 Route 未引用 Policy（）
+ * - 真实读取所有证据字段（禁止硬编码）
+ * - 使用调用方传入的 DB Session 或 Transaction（禁止内部使用全局 db）
+ * - Policy 为 null 仅当 Route 未引用 Policy
  */
 export interface RevisionExecutionEvidenceReader {
   /**

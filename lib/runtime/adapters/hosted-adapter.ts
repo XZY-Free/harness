@@ -1,10 +1,10 @@
 /**
- * Hosted Runtime Adapter（S05-C05 参考实现）。
+ * Hosted Runtime Adapter（ 参考实现）。
  *
  * 事实源：
  * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）、-3.10（Steer/Cancel/Resume）
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
- * - docs/architecture/runtime-control-plane.md S05-C05
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - 定义 RuntimeAdapter 接口（probeCapabilities / startInvocation / handleCancel / handleResume / handleSteer）。
@@ -168,7 +168,7 @@ export type TransientEventBatchSink = (params: {
   }>;
 }) => Promise<void>;
 
-// ─── Harness Loop → AgentCall 桥接（专题01 Batch7）──────────
+// ─── Harness Loop → AgentCall 桥接（Agent 与 Runtime Authority ）──────────
 
 /**
  * required Agent 调用结果（归一化，由 Harness Loop 消费）。
@@ -202,9 +202,7 @@ export interface StartInvocationParams {
   threadId?: string | null;
   /** 会话模式 Turn id（Job 模式为 null）。 */
   turnId?: string | null;
-  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
-  agentRevisionId: string | null;
-  /** 本轮 Harness 执行约束（capability requirements），非执行目标（专题01 冻结架构）。 */
+  /** 本轮 Harness 执行约束（capability requirements），非执行目标（Agent 与 Runtime Authority 分离）。 */
   capabilityRequirements?: Array<{
     capability_type: "agent";
     capability_id: string;
@@ -301,7 +299,7 @@ export interface SteerResult {
 /**
  * Hosted Runtime 参考能力声明。
  *
- * 事实源：S05-C05 规范——Hosted Runtime 支持完整事件流 + cancel/resume/steer，
+ * 事实源： 规范——Hosted Runtime 支持完整事件流 + cancel/resume/steer，
  * 不支持 dynamic_tools/user_action（本阶段），workspace_types=["cloud"]，
  * 不支持 filesystem_checkpoint。
  */
@@ -333,8 +331,6 @@ export interface HostedHarnessLoopParams {
   tenantId: string;
   threadId: string | null;
   turnId: string | null;
-  /** null = 基础 Harness Route（无 Agent 资产约束，§8.3）。 */
-  agentRevisionId: string | null;
   /** 本轮 Harness 执行约束（capability requirements），非执行目标。 */
   capabilityRequirements?: Array<{
     capability_type: "agent";
@@ -460,7 +456,7 @@ export class HostedHarnessLoop {
       if (!this.params.modelFn) {
         throw new Error("Hosted Runtime 未配置模型执行器");
       }
-      // ─── 专题01 Batch7：required Agent capability ─────────────
+      // ─── Agent 与 Runtime Authority：required Agent capability ─────────────
       // Harness Loop 读取 capability_requirements；有 required Agent → 必须先调用该
       // Agent（AgentCall → A2A），completed 后把 Agent 结果作为受信任 capability result
       // 交给 modelFn 做最终整合。无 required Agent → 原有 model 路径。
@@ -783,7 +779,6 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           tenantId: startParams.tenantId ?? "",
           threadId: startParams.threadId,
           turnId: startParams.turnId,
-          agentRevisionId: startParams.agentRevisionId,
           capabilityRequirements: startParams.capabilityRequirements,
           agentCallExecutor: startParams.agentCallExecutor,
           inputItems: startParams.inputItems,

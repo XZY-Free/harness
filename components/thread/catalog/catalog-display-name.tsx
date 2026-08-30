@@ -1,9 +1,9 @@
 /**
- * Catalog 显示名组件（S10-W04）。
+ * Catalog 显示名组件。
  *
  * 事实源：
  * - docs/architecture/product-surfaces-and-admin.md
- *   S10-W04：「Thread 顶部展示 Agent 显示名 / Environment 显示名」
+ *   「Thread 顶部展示 Agent 显示名 / Environment 显示名」
  *
  * 职责：
  * - 接受 resourceId + resourceType，自动从 Catalog API 拉取 display_name。

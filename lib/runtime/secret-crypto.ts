@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { secretConfig } from "@/lib/config";
 
 /**
- * Stage C：AES-256-GCM secret 加密/解密。
+ * AES-256-GCM secret 加密/解密。
  *
  * 生产级 secret at rest 保护（plan §1 决策）：
  * - 加密算法：AES-256-GCM（认证加密，密文含 auth tag，防篡改）
@@ -139,8 +139,7 @@ export function encryptCicdToken(plaintext: string): string {
 /**
  * 解密 cicdApiToken。fail-closed:仅接受 encryptCicdToken 产的 JSON 密文,否则抛错。
  *
- * : 移除明文兼容回退——原实现把非密文 stored 当明文直接返回,攻击者篡改 DB cicdApiToken
- * 为任意明文即可被系统接受用于 CI/CD 鉴权。开发阶段无遗留明文,直接 fail-closed。
+ * 非密文 stored 一律拒绝，避免数据库中的任意明文被接受为 CI/CD 凭据。
  */
 export function decryptCicdToken(stored: string | null | undefined): string | null {
   if (!stored) return null;

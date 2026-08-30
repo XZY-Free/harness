@@ -7,7 +7,6 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  * - docs/architecture/agent-control-plane.md （Steer）、（Stop/Interrupt）、（Regenerate）、（Resume）
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API：cancel/resume/steer）
  * - docs/architecture/runtime-control-plane.md
- * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/01-DurableDispatch与RetryAuthority.md §七
  *
  * 职责：
  * - dispatchSteerCommand：将 queued Steer 命令调度到 Runtime（POST /invocations/{id}:steer），ack 后标记 acknowledged + 写 turn.steered。
@@ -37,7 +36,6 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  */
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type {
   InvocationCommand,
   ThreadEvent,
@@ -86,7 +84,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export interface CommandRuntimeEndpointResolution {
   /** Runtime HTTP 端点基础 URL。 */
   runtimeEndpoint: string;
-  /** Outbound auth（03 §8）：Hosted=Workload Token；External=CredentialRef 凭据。 */
+  /** Outbound auth：Hosted=Workload Token；External=CredentialRef 凭据。 */
   auth: RuntimeTransportAuth;
   /**
    * 平台 Gateway 回调端点（requires_redispatch=true 时必需，供 redispatchInvocation
@@ -223,11 +221,6 @@ async function loadCommand(
     invocation,
     binding,
   };
-}
-
-/** 兼容旧名（首次调度入口）。 */
-async function loadCommandForDispatch(tenantId: string, commandId: string): Promise<LoadedCommand> {
-  return loadCommand(tenantId, commandId, "queued");
 }
 
 /**
@@ -374,7 +367,7 @@ export async function dispatchSteerCommand(params: {
   actorId?: string | null;
   correlationId?: string | null;
 }): Promise<CommandDispatchResult> {
-  const loaded = await loadCommandForDispatch(params.tenantId, params.commandId);
+  const loaded = await loadCommand(params.tenantId, params.commandId, "queued");
 
   if (loaded.command.commandType !== "steer") {
     throw new CommandAlreadyDispatchedError(loaded.command.id, loaded.command.commandType);
@@ -507,7 +500,7 @@ export async function dispatchCancelCommand(params: {
   actorId?: string | null;
   correlationId?: string | null;
 }): Promise<CommandDispatchResult> {
-  const loaded = await loadCommandForDispatch(params.tenantId, params.commandId);
+  const loaded = await loadCommand(params.tenantId, params.commandId, "queued");
 
   if (loaded.command.commandType !== "interrupt") {
     throw new CommandAlreadyDispatchedError(loaded.command.id, loaded.command.commandType);
@@ -591,12 +584,6 @@ interface ResumeExecutionParams {
   tenantId: string;
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
-  /**
-   * requires_redispatch=true 时使用的已加载 AgentRevision（用于构造 redispatch 的
-   * StartInvocationRequestBody）。冻结架构下 ExecutionBinding 不再绑定 Agent，
-   * 本字段为 Agent 层合法可选字段；未提供 → redispatch 不携带 Agent Revision。
-   */
-  agentRevision?: AgentRevision | null;
   actorType?: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
@@ -630,7 +617,6 @@ export async function dispatchResumeCommand(params: {
   commandId: string;
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
-  agentRevision?: AgentRevision | null;
   actorType?: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
@@ -639,7 +625,7 @@ export async function dispatchResumeCommand(params: {
     binding: ExecutionBinding;
   }) => Promise<Array<{ context_kind: string; value: unknown }> | null>;
 }): Promise<CommandDispatchResult> {
-  const loaded = await loadCommandForDispatch(params.tenantId, params.commandId);
+  const loaded = await loadCommand(params.tenantId, params.commandId, "queued");
 
   if (loaded.command.commandType !== "resume") {
     throw new CommandAlreadyDispatchedError(loaded.command.id, loaded.command.commandType);
@@ -660,7 +646,6 @@ export async function dispatchResumeCommand(params: {
       tenantId: params.tenantId,
       runtimeClient: params.runtimeClient,
       runtimeEndpointResolver: params.runtimeEndpointResolver,
-      agentRevision: params.agentRevision,
       actorType: params.actorType,
       actorId: params.actorId,
       correlationId: params.correlationId,
@@ -682,7 +667,6 @@ export async function retryDispatchedInvocationCommand(params: {
   commandId: string;
   runtimeClient: RuntimeHttpClient;
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<CommandRuntimeEndpointResolution>;
-  agentRevision?: AgentRevision | null;
   actorType?: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
@@ -720,7 +704,6 @@ export async function retryDispatchedInvocationCommand(params: {
         tenantId: params.tenantId,
         runtimeClient: params.runtimeClient,
         runtimeEndpointResolver: params.runtimeEndpointResolver,
-        agentRevision: params.agentRevision,
         actorType: params.actorType,
         actorId: params.actorId,
         correlationId: params.correlationId,
@@ -1024,20 +1007,16 @@ async function executeResumeDispatch(
  * docs/architecture/persistence.md §13（Worker 失联恢复）。
  *
  * 流程：
- * 1. 解析 AgentRevision（在任何 Command/Invocation/Turn/Event/Attempt 写入之前）：
- * 冻结架构下 ExecutionBinding 不再绑定 Agent，直接采用调用方已加载的
- * params.agentRevision（可选，Agent 层合法字段；未提供 → null）。
- * 2. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running +
+ * 1. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running +
  * 写 turn.resumed Event（带 redispatched=true 标记）。不写 invocation.resumed Event
  * （因为不是简单恢复，而是重新调度）。
- * 3. 调用 redispatchInvocation（组合函数：创建 queued Attempt + dispatchQueuedInvocationAttempt）。
- * 4. 返回组合事件（turn.resumed + invocation.started）。
+ * 2. 调用 redispatchInvocation（组合函数：创建 queued Attempt + dispatchQueuedInvocationAttempt）。
+ * 3. 返回组合事件（turn.resumed + invocation.started）。
  */
 async function handleResumeRequiresRedispatch(
   params: {
     tenantId: string;
     runtimeClient: RuntimeHttpClient;
-    agentRevision?: AgentRevision | null;
     actorType?: ThreadEventActorType;
     actorId?: string | null;
     correlationId?: string | null;
@@ -1068,12 +1047,7 @@ async function handleResumeRequiresRedispatch(
   }
   const gatewayEndpoints = endpointResolution.gatewayEndpoints;
 
-  // 1. 解析 AgentRevision：冻结架构下 ExecutionBinding 不再绑定 Agent，
-  // 无 binding 侧权威可校验；直接采用调用方已加载的 AgentRevision（可选，Agent 层合法字段）。
-  // 必须在任何 Command/Invocation/Turn/Event/Attempt 写入之前完成。
-  const agentRevision = params.agentRevision ?? null;
-
-  // 2. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running + 写 turn.resumed Event
+  // 1. 事务内：CAS dispatched → acknowledged + CAS Turn waiting_user → running + 写 turn.resumed Event
   const turnResumedEvent = await db.transaction(async (tx) => {
     if (!threadId) {
       throw new CommandInvocationNotFoundError(loaded.invocation.id);
@@ -1135,7 +1109,7 @@ async function handleResumeRequiresRedispatch(
     });
   });
 
-  // 3. 调用 redispatchInvocation（创建 queued Attempt + 调用 Runtime startInvocation + 写 invocation.started Event）
+  // 2. 调用 redispatchInvocation（创建 queued Attempt + 调用 Runtime startInvocation + 写 invocation.started Event）
   const redispatchResult = await redispatchInvocation({
     tenantId: params.tenantId,
     invocationId: loaded.invocation.id,
@@ -1158,14 +1132,12 @@ async function handleResumeRequiresRedispatch(
         gatewayAccess,
       };
     },
-    runtimeRevisionId: loaded.binding.runtimeRevisionId,
-    agentRevision,
     actorType,
     actorId: params.actorId ?? null,
     correlationId: params.correlationId ?? null,
   });
 
-  // 4. 返回组合事件
+  // 3. 返回组合事件
   const events: ThreadEvent[] = [];
   if (turnResumedEvent) {
     events.push(turnResumedEvent);

@@ -1,11 +1,10 @@
 /**
  * 稳定 Runtime Schema — 正式控制面职责命名。
  *
- * 本文件是 Runtime / RuntimeRevision 的单一物理 Schema 权威（docs/V12/01 §20 / §29 H）。
+ * 本文件是 Runtime / RuntimeRevision 的单一物理 Schema 权威。
  *
  * 事实源：docs/architecture/persistence.md 、
  * docs/architecture/domain-model.md 、
- * docs/architecture/agent-control-plane.md 。
  *
  * Runtime 表示一种逻辑运行入口（hosted 或 external）；RuntimeRevision 固定主机/Adapter 制品、
  * 协议、网络区、身份模式、配置 hash 和真实 capabilities。
@@ -63,7 +62,7 @@ export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 // ─── Runtime Evidence Kind ────────────────────────────────
 
 /**
- * RuntimeRevision 证据种类（docs/V12/01/agent补充/03 §2）。
+ * RuntimeRevision 证据种类。
  * - hosted_artifact：平台托管运行时，必须携带真实 Runtime Artifact 证据。
  * - external_endpoint：外部运行时，使用 endpoint + config/protocol 证据，不得伪造 Artifact。
  *
@@ -162,19 +161,18 @@ export const runtimeRevisionTable = mysqlTable(
     /** 协议类型（harness_runtime_protocol/...）；varchar 以便扩展。 */
     protocolType: varchar("protocolType", { length: 32 }).notNull(),
     /**
-     * Conformance 与发布共同冻结的协议契约版本（显式传入，禁止默认值污染全部协议 —
-     * docs/V12/01/agent补充/03 §5）。
+     * Conformance 与发布共同冻结的协议契约版本（显式传入，禁止默认值污染全部协议）。
      */
     protocolContractRevision: varchar("protocolContractRevision", { length: 128 }).notNull(),
-    /** 证据种类：hosted_artifact | external_endpoint（03 §2，语义字段）。 */
+    /** 证据种类：hosted_artifact | external_endpoint（语义字段）。 */
     runtimeEvidenceKind: mysqlEnum("runtimeEvidenceKind", RUNTIME_EVIDENCE_KINDS).notNull(),
-    /** 被测对象统一 digest（03 §6，canonical 计算自证据事实）。 */
+    /** 被测对象统一 digest（canonical 计算自证据事实）。 */
     runtimeTargetDigest: varchar("runtimeTargetDigest", { length: 71 }).notNull(),
     /** 受管连接引用，不保存带 Secret 的 URL。 */
     endpointRef: varchar("endpointRef", { length: 512 }).notNull(),
     /**
      * Runtime 主机/Adapter 制品引用（仅 hosted_artifact 非空；external_endpoint 为 null，
-     * 不作为通用必填字段 — 03 §5）。
+     * 不作为通用必填字段 — ）。
      */
     runtimeArtifactRef: varchar("runtimeArtifactRef", { length: 512 }),
     /** 权威控制面 Artifact；旧 Revision 可为空。 */

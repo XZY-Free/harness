@@ -103,7 +103,7 @@ export const dbConfig = {
   },
 } as const;
 
-/** : Runtime Conformance DSSE 验签配置。缺失时 fail-closed。 */
+/** Runtime Conformance DSSE 验签配置。缺失时 fail-closed。 */
 export const runtimeConformanceConfig = {
   /**
    * Runner 签名身份注册表 JSON（SNOW_RUNNER_SIGNING_IDENTITIES_JSON）。
@@ -446,10 +446,9 @@ export const studioConfig = {
 } as const;
 
 /**
- * 运行时隔离配置（Phase 5）。
+ * 本地 Workspace/Execution/Preview Runtime 配置。
  *
- * - `defaultType`：全局默认 runtimeType（host / container）。默认 host 零回归；
- * container 由 skill / 显式配置开启（解析优先级：thread.runtimeType → skill → 本默认）。
+ * - `defaultType`：平台 runtimeType（host / container），不接受 Thread/Skill 覆盖。
  * - docker 可用性由 `lib/runtime/container/availability.ts` 探测缓存（不在 config，因 config 零副作用）；
  * defaultType=container 但 docker 不可用 → 默认 fail-closed；仅显式开启降级时回退 host。
  * - `idleTtlMs`：容器空闲回收 TTL（默认 10min）。
@@ -678,7 +677,7 @@ export const memoryConfig = {
  * 返回 `Infinity` → 永不压缩 → 零回归。部署时通过 `SNOW_CONTEXT_WINDOWS`（JSON map）
  * 注入，例如 `{"kimi-k2.7-code": 131072}`。解析失败回退空 map（不抛错，保持零副作用）。
  * - `budgetThreshold`：触发压缩的预算占比（默认 0.7，蓝图 ）。
- * - `toolOutputThreshold`：单工具输出超此 token 估算 → 该 toolRun 单独摘要（Stage C）。
+ * - `toolOutputThreshold`：单工具输出超过此 token 估算时单独摘要该 toolRun。
  */
 export const contextConfig = {
   get contextWindowByModel(): Record<string, number> {
@@ -880,7 +879,7 @@ export const prConfig = {
  * WebRTC + TURN）已全部删除。V10 Desktop 浏览器由 Electron + WebContentsView
  * 本地承载，partition 隔离（persist:snowharness-browser-{userId}）。以下
  * networkAllowlist / blockPrivateNetwork / maxUploadFileMb 等通用限制仍用于
- * Desktop Browser Tool 策略校验（Phase 6）。profileRetentionDays /
+ * Desktop Browser Tool 策略校验。profileRetentionDays /
  * sessionIdleTimeoutMinutes 等字段保留但当前无消费者，供未来 Desktop 策略扩展使用。
  *
  * - `profileRetentionDays`：用户级登录态保留天数（V10 暂未使用，预留扩展）。默认 30。
@@ -991,13 +990,10 @@ export const browserConfig = {
   },
 } as const;
 
-// ：remoteBrowserConfig 和 webrtcConfig 已删除。
-// 原 V9 自研远程浏览器运行时配置（Docker 容器 + Chromium + Xvfb + FFmpeg +
-// streamer + WebRTC + TURN）整条链路已移除。Desktop 浏览器由 Electron +
-// WebContentsView 本地承载（Phase 3+），不经 Server 配置。
+// Desktop 浏览器由 Electron + WebContentsView 本地承载，不经 Server 配置。
 // browserConfig 保留：通用浏览器限制（networkAllowlist、blockPrivateNetwork、
 // maxUploadFileMb、uploadAllowedMimeTypes、maxApiBodyBytes、apiRateLimitPerMinute）
-// 仍用于 Desktop Browser Tool 的策略校验（Phase 6）。
+// 仍用于 Desktop Browser Tool 的策略校验。
 
 // ─── 运行时校验 + 启动日志（由 instrumentation 调用）──────────────────
 

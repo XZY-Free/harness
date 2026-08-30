@@ -33,8 +33,7 @@ export function parseEmployeeCatalogEtag(etag: string): EmployeeCatalogEtagFacts
   }
   const facts = parsed as Record<string, unknown>;
   if (
-    Object.keys(facts).sort().join(",") !==
-      "authorizationDigest,catalogRevision,tenantId" ||
+    Object.keys(facts).sort().join(",") !== "authorizationDigest,catalogRevision,tenantId" ||
     typeof facts.tenantId !== "string" ||
     facts.tenantId.length === 0 ||
     typeof facts.catalogRevision !== "number" ||

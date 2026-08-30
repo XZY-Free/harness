@@ -15,13 +15,13 @@ import type {
 
 export type RouteActorType = "user" | "service" | "workload" | "system";
 
-/** RouteSet target 判别联合（专题01 冻结架构）。 */
+/** RouteSet target 判别联合（Agent 与 Runtime Authority 分离）。 */
 export type RouteSetTarget = { kind: "runtime" } | { kind: "agent"; agentId: string };
 
 export interface RouteSetRow {
   id: string;
   tenantId: string;
-  /** RouteSet 目标判别联合 — runtime 或 agent。不保留 null agentId 表示 runtime 的兼容形状。 */
+  /** RouteSet 目标判别联合 — runtime 或 agent；不得通过 null agentId 推断 runtime。 */
   target: RouteSetTarget;
   routeScopeKey: string;
   routeScopeJson: unknown;

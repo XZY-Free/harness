@@ -5,20 +5,20 @@ import {
   getTakeoverConditions,
 } from "@/lib/conversations/environment-takeover-queries";
 /**
- * GET /api/v1/threads/{thread_id}/environment — 查询 Thread 当前 Environment 状态（S10-W06 / S10-W07）。
+ * GET /api/v1/threads/{thread_id}/environment — 查询 Thread 当前 Environment 状态。
  *
  * 事实源：
  * - docs/architecture/product-surfaces-and-admin.md
- *   S10-W06：「Desktop 复用共同时间线，在右侧增加文件、页面和内部系统任务操作面板」
+ *   「Desktop 复用共同时间线，在右侧增加文件、页面和内部系统任务操作面板」
  *   「本地 Shell、Git、测试、构建、浏览器和应用操作显示实际执行设备、目录、权限和结果」
- *   S10-W07：「页面显示当前 Environment owner、在线状态、租约和接管条件」
+ *   「页面显示当前 Environment owner、在线状态、租约和接管条件」
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。
  * - 读取 Thread.defaultEnvironmentDefinitionId + latest Turn.activeInvocationId。
  * - 调用 getEnvironmentStatus 聚合查询 EnvironmentDefinition + active Lease + ExecutionOwnership。
  * - 推导 availability（no_environment/cloud/online_desktop/pending_device/offline_desktop）。
- * - S10-W07：调用 getTakeoverConditions 聚合接管条件（未完成 ToolCall/Effect/写锁/owner 心跳）。
+ * - 调用 getTakeoverConditions 聚合接管条件（未完成 ToolCall/Effect/写锁/owner 心跳）。
  * - 返回 200 + 投影响应体（snake_case，含 takeover_conditions）。
  *
  * 错误映射：
@@ -153,7 +153,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     activeInvocationId,
   });
 
-  // 5. S10-W07：聚合查询接管条件（仅当有 active ownership 时才有意义）
+  // 5. 聚合查询接管条件（仅当有 active ownership 时才有意义）
   let takeoverConditions: TakeoverConditions = EMPTY_CONDITIONS;
   if (status.activeOwnership) {
     takeoverConditions = await getTakeoverConditions({

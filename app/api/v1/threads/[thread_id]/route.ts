@@ -1,9 +1,8 @@
 import { getActiveGoalByThread } from "@/lib/conversations/goal-queries";
 /**
- * GET /api/v1/threads/{thread_id} — 查询 Thread 详情（S10-W02，§3.1）。
+ * GET /api/v1/threads/{thread_id} — 查询 Thread 详情（§3.1）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.1、
- *         docs/architecture/product-surfaces-and-admin.md S10-W02。
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。
@@ -73,7 +72,7 @@ function projectGoal(goal: Goal): Record<string, unknown> {
 
 /**
  * 投影 Turn 为响应体（snake_case，仅最新 Turn 的摘要字段）。
- * controls（05 §9）由服务端按精确 Binding 派生；终态 Turn 恒 false。
+ * controls由服务端按精确 Binding 派生；终态 Turn 恒 false。
  */
 function projectTurnSummary(turn: Turn, controls: TurnControls): Record<string, unknown> {
   return {

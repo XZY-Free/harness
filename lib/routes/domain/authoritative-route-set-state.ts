@@ -12,7 +12,7 @@
  * - Toolset Revision
  * - Model Policy Revision
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 参见：正式架构
  */
 
 import type { RouteRevisionTarget } from "@/lib/routes/domain/route-revision";

@@ -586,7 +586,6 @@ function buildStartInvocationParams(
     invocationId: `conformance-test-invocation-${tenantId}-${runtimeRevisionId}`,
     threadId: `conformance-test-thread-${tenantId}`,
     turnId: `conformance-test-turn-${tenantId}`,
-    agentRevisionId: "conformance-test-agent-revision",
     inputItems: [
       {
         type: "user_message",

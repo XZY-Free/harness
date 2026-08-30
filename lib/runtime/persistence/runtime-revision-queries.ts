@@ -2,7 +2,6 @@
  * RuntimeRevision 仓储。
  *
  * 事实源：docs/architecture/persistence.md 、
- * docs/architecture/agent-control-plane.md 。
  *
  * 职责：
  * - createDraftRevision：创建 draft Revision（revisionNo 在 Runtime 内单调递增）。
@@ -40,14 +39,14 @@ export interface CreateDraftRuntimeRevisionParams {
   tenantId: string;
   runtimeId: string;
   protocolType: string;
-  /** 协议契约版本（显式传入；禁止按 protocolType 自动推导 — 03 §5）。 */
+  /** 协议契约版本（显式传入；禁止按 protocolType 自动推导 — ）。 */
   protocolContractRevision: string;
   /** 证据种类（hosted_artifact | external_endpoint）。 */
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   endpointRef: string;
   /**
    * Runtime 制品引用；仅 hosted_artifact 非空，external_endpoint 必须为 null/undefined
-   * （External 不伪造 Runtime Artifact — 03 §4）。
+   * （External 不伪造 Runtime Artifact — ）。
    */
   runtimeArtifactRef?: string | null;
   runtimeCapabilitiesJson: unknown;
@@ -104,7 +103,7 @@ function computeTargetDigestOrFail(params: {
   return computeRuntimeTargetDigest(facts);
 }
 
-/** RuntimeRevision 证据完整性错误（03 §3/§4 fail-closed）。 */
+/** RuntimeRevision 证据完整性错误（ fail-closed）。 */
 export class RuntimeRevisionEvidenceError extends Error {
   constructor(message: string) {
     super(message);

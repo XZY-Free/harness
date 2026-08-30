@@ -179,7 +179,7 @@ export interface RuntimeDispatchResult {
 export interface RuntimeEndpointResolution {
   /** Runtime HTTP 端点基础 URL（如 https://runtime-1.internal）。 */
   runtimeEndpoint: string;
-  /** Outbound auth（03 §8）：Hosted=Workload Token；External=CredentialRef 凭据。 */
+  /** Outbound auth：Hosted=Workload Token；External=CredentialRef 凭据。 */
   auth: RuntimeTransportAuth;
   /** 平台 Gateway 回调端点（Runtime 通过这些 URL 上报事件和接收控制指令）。 */
   gatewayEndpoints: GatewayEndpoints;
@@ -228,7 +228,7 @@ export async function dispatchInvocationForTurn(params: {
   /** Idempotency-Key（不传则自动生成）。 */
   runtimeIdempotencyKey?: string;
   /**
-   * ExecutionSubject（06 §6）：可信调用主体。必须由服务端认证 Principal 生成，
+   * ExecutionSubject：可信调用主体。必须由服务端认证 Principal 生成，
    * 禁止从请求体透传 caller 自报 subject。不传则不发送该字段。
    */
   executionSubject?: ExecutionSubject;
@@ -257,7 +257,7 @@ export async function dispatchInvocationForTurn(params: {
     throw new DispatchTurnStateError(params.turnId, "thread_not_found");
   }
 
-  // 4+5. : 单次解析执行计划（Route 解析 + AgentRevision + 模型信息）
+  // 4+5. 单次解析执行计划（Runtime Route + 模型信息）
   const plan = await resolveExecutionPlan(
     {
       tenantId: params.tenantId,
@@ -529,7 +529,7 @@ async function dispatchToRuntime(params: {
   actorType: ThreadEventActorType;
   actorId?: string | null;
   correlationId?: string | null;
-  /** 服务端 Principal 生成的可信调用主体（06 §6）；可选（内部测试/基础路径）。 */
+  /** 服务端 Principal 生成的可信调用主体；可选（内部测试/基础路径）。 */
   executionSubject?: ExecutionSubject;
 }): Promise<RuntimeDispatchResult> {
   // 1. 解析 runtimeEndpoint + auth + gatewayEndpoints + governanceConfig + gatewayAccess

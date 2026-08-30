@@ -36,7 +36,7 @@ export interface PublishRuntimeRevisionResult {
     protocolContractRevision: string;
     publishedAt: Date | null;
   };
-  /** 可选 Attestation；hosted_artifact 必填，external_endpoint 必须为 null（03 §3/§4）。 */
+  /** 可选 Attestation；hosted_artifact 必填，external_endpoint 必须为 null。 */
   attestation: RuntimePublicationAttestation | null;
   conformanceResults: Array<{
     caseId: string;
@@ -60,7 +60,7 @@ export interface PublishRuntimeRevisionCommand {
   conformanceRunId: string;
   /**
    * hosted_artifact 必填：验证通过且与 Revision/Artifact 绑定一致的 ArtifactAttestation。
-   * external_endpoint 必须为空（外部运行时不伪造 Runtime Artifact — 03 §4）。
+   * external_endpoint 必须为空（外部运行时不伪造 Runtime Artifact — ）。
    */
   attestationId?: string | null;
   actor: {
@@ -123,7 +123,7 @@ export function createPublishRuntimeRevision(dependencies: {
         );
       }
 
-      // 7. 按 runtimeEvidenceKind 分派证据门禁（03 §3/§4：Hosted 不降级，External 不伪造）
+      // 7. 按 runtimeEvidenceKind 分派证据门禁（Hosted 不降级，External 不伪造）
       let attestation: RuntimePublicationAttestation | null = null;
       let attestationIds: string[] = [];
       if (revision.runtimeEvidenceKind === "hosted_artifact") {
@@ -186,7 +186,7 @@ export function createPublishRuntimeRevision(dependencies: {
         );
       }
 
-      // 11-13. 校验 Run 与 Revision 的绑定一致（被测对象统一为 runtimeTargetDigest — 03 §6）
+      // 11-13. 校验 Run 与 Revision 的绑定一致（被测对象统一为 runtimeTargetDigest — ）
       if (conformanceRun.runtimeTargetDigest !== revision.runtimeTargetDigest) {
         throw new RuntimeConformanceRunInvalidError(
           revision.id,

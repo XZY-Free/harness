@@ -7,7 +7,7 @@ import type {
 export interface RuntimeConformanceRevisionBinding {
   id: string;
   revisionState: "draft" | "published" | "withdrawn";
-  /** Conformance 被测对象统一 digest（03 §6）。 */
+  /** Conformance 被测对象统一 digest。 */
   runtimeTargetDigest: string;
   artifactDigest: string | null;
   configHash: string;
@@ -66,10 +66,10 @@ export interface RuntimeConformanceRunSession {
     id: string;
     tenantId: string;
     eventKey: string;
-    /** : 事件类型固定为 runtime.conformance.recorded。 */
+    /** 事件类型固定为 runtime.conformance.recorded。 */
     eventType: "runtime.conformance.recorded";
     aggregateId: string;
-    /** : 聚合版本号。 */
+    /** 聚合版本号。 */
     aggregateVersion: number;
     payload: Record<string, unknown>;
     occurredAt: Date;

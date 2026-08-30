@@ -5,7 +5,7 @@
  * 一次查询 RouteEligibilityProjection 表获取所有 eligible 候选 + 完整执行证据 ID。
  * 不随 Route 数量增加 SQL 往返。
  *
- * 专题01 冻结架构（01 §4.D）：
+ * Agent 与 Runtime Authority 分离（D）：
  * - 查询必须按显式 (tenantId,targetKind,targetIdentity,routeScopeKey,eligibilityState) 过滤；
  *   runtime 用 targetIdentity='runtime'，agent 用 targetIdentity=agentId。
  *   绝不使用 agentId IS NULL 代替 target，也绝不可只按 agentId 过滤而不验 targetKind/identity。
@@ -130,7 +130,7 @@ function buildRuntimeCandidate(p: RouteEligibilityProjectionRecord): RouteResolu
   }
   // group 互斥：runtime target 不得携带任何 Agent 事实。
   assertRuntimeGroupIsolated(p);
-  // Runtime 证据 all-or-nothing（03 §3）：缺失即非法投影。
+  // Runtime 证据 all-or-nothing：缺失即非法投影。
   const evidence = buildRuntimeEvidence(p);
 
   const common = buildCandidateCommon(p);
@@ -220,7 +220,7 @@ function buildRuntimeEvidence(
   ) {
     throw new Error("RouteEligibilityProjection 缺少必需的 Runtime 控制面证据");
   }
-  // Runtime evidence all-or-nothing（03 §3）：hosted 要求 artifact 全集；external 无 artifact。
+  // Runtime evidence all-or-nothing：hosted 要求 artifact 全集；external 无 artifact。
   if (
     p.runtimeEvidenceKind === "hosted_artifact" &&
     (!p.runtimeArtifactId || !p.runtimeArtifactDigest)

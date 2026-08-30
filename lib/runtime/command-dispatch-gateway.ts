@@ -1,13 +1,13 @@
 import { db } from "@/lib/db/client";
 /**
- * 命令调度生产网关（08 §5/§6，Batch 10）。
+ * 命令调度生产网关（08 §5/§6，）。
  *
  * Interrupt（Cancel）/ Resume 命令入队后的生产接线：按 ExecutionBinding 的
  * RuntimeRevision.protocolType 解析 Transport 并调度到 Runtime。
  *
- * 专题01 冻结架构：A2A 不再是 Harness Runtime 协议。Runtime 只有
+ * Agent 与 Runtime Authority 分离：A2A 不再是 Harness Runtime 协议。Runtime 只有
  * `harness_runtime_protocol`（hosted in-process），无远端协议端点可调，
- * 命令保持队列由 Turn/Invocation 状态机与 in-process adapter 吸收（04 §10）。
+ * 命令保持队列由 Turn/Invocation 状态机与 in-process adapter 吸收。
  * 网关因此只保留门禁（command_not_found / unsupported_capability）与
  * protocol_not_remote 的 hosted 语义；A2A 真实远端命令调度属后续批次
  * AgentCall 语义，不在本网关范围。
@@ -20,7 +20,7 @@ import { getInvocationById } from "@/lib/runtime/invocation-queries";
 import { eq } from "drizzle-orm";
 
 /**
- * 网关调度结果（03 §3 判别联合）：hosted 协议下恒为 protocol_not_remote
+ * 网关调度结果（ 判别联合）：hosted 协议下恒为 protocol_not_remote
  * （命令留在队列由状态机吸收）；command_not_found / unsupported_capability
  * 是真实失败。真正远端调度（A2A）属后续 AgentCall 批次。
  */
@@ -60,7 +60,7 @@ export async function dispatchInterruptCommandToRuntime(params: {
 }): Promise<CommandGatewayResult> {
   const ctx = await loadCommandContext(params.tenantId, params.commandId);
   if (!ctx) return { dispatched: false, reason: "command_not_found" };
-  // 05 §8：命令网关门禁 —— 依据 Binding 重新检查 effective cancel；
+  // 命令网关门禁 —— 依据 Binding 重新检查 effective cancel；
   // false → 明确返回 unsupported reason（不发送任何网络请求）。
   const capabilities = await resolveEffectiveInvocationCapabilities({
     tenantId: params.tenantId,
@@ -86,7 +86,7 @@ export async function dispatchResumeCommandToRuntime(params: {
 }): Promise<CommandGatewayResult> {
   const ctx = await loadCommandContext(params.tenantId, params.commandId);
   if (!ctx) return { dispatched: false, reason: "command_not_found" };
-  // 05 §11：Resume 沿同一 Effective Capability 模型门禁。
+  // Resume 沿同一 Effective Capability 模型门禁。
   const capabilities = await resolveEffectiveInvocationCapabilities({
     tenantId: params.tenantId,
     binding: ctx.binding,

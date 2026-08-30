@@ -6,10 +6,10 @@ import {
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 import { getRequestId } from "@/lib/http";
-import { resolveRuntimeTypeForThread, resolveRuntimes } from "@/lib/runtime/registry";
+import { resolveRuntimes } from "@/lib/runtime/registry";
 
 /**
- * Phase 5 Stage D：预览反向代理 `/preview/[threadId]/*`。
+ * 预览反向代理 `/preview/[threadId]/*`。
  *
  * 部署形态下浏览器经 localhost:动态端口不可达（蓝图 §8.2 头号约束）。本 route 作平台进程内
  * 反向代理：按 threadId 查 PreviewRuntime.status，ready 则转发到 `127.0.0.1:{port}`（host 模式
@@ -46,10 +46,7 @@ export async function GET(
     return new Response(null, { status: 404 });
   }
 
-  // V8 阶段 8：preview 不依赖 Skill 的 runtimeType；正式 Thread 无 runtimeType 列，落全局默认。
-  // S1 previewUrl 自动恢复已移除（正式 Thread 无 previewUrl 列，该能力由 02-9 承接）。
-  const runtimeType = resolveRuntimeTypeForThread(null, null);
-  const preview = resolveRuntimes(threadId, runtimeType).preview;
+  const preview = resolveRuntimes(threadId).preview;
   const status = preview.status(threadId);
   if (!status || status.state !== "ready" || status.port == null) {
     return new Response("预览未就绪，请等待 agent 完成自检后重试", {

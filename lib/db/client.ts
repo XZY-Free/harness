@@ -5,6 +5,7 @@ import * as adminExportSchemaTable from "@/lib/persistence/schema/admin-export";
 import * as agentSchemaTable from "@/lib/persistence/schema/agents";
 import * as auditSchemaTable from "@/lib/persistence/schema/audit";
 import * as authorizationSchemaTable from "@/lib/persistence/schema/authorization";
+import * as conversationSchemaTable from "@/lib/persistence/schema/conversation";
 import * as deploymentRouteSchemaTable from "@/lib/persistence/schema/deployment-route";
 import * as deviceSchemaTable from "@/lib/persistence/schema/device";
 import * as effectSchemaTable from "@/lib/persistence/schema/effect";
@@ -16,6 +17,7 @@ import * as filesystemCheckpointSchemaTable from "@/lib/persistence/schema/files
 import * as idempotencySchemaTable from "@/lib/persistence/schema/idempotency";
 import * as identitySchemaTable from "@/lib/persistence/schema/identity";
 import * as permissionSchemaTable from "@/lib/persistence/schema/permission";
+import * as projectionSchemaTable from "@/lib/persistence/schema/projection";
 import * as recoveryDrillSchemaTable from "@/lib/persistence/schema/recovery-drill";
 import * as runtimeArtifactSchemaTable from "@/lib/persistence/schema/runtime-artifact";
 import * as runtimeSchemaTable from "@/lib/persistence/schema/runtimes";
@@ -31,7 +33,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import * as schema from "./schema";
 
-/** 合并旧 schema 与 schema，使 db.query.* 关系查询覆盖 表。 */
+/** 合并 B1 数据表与各正式领域 Schema，供 Drizzle 关系查询使用。 */
 const fullSchema = {
   ...schema,
   ...controlPlaneOutboxSchema,
@@ -49,6 +51,8 @@ const fullSchema = {
   ...runtimeSchemaTable,
   ...executionsSchemaTable,
   ...deploymentRouteSchemaTable,
+  ...conversationSchemaTable,
+  ...projectionSchemaTable,
   ...workspaceSchemaTable,
   ...environmentSchemaTable,
   ...permissionSchemaTable,
@@ -67,8 +71,9 @@ const fullSchema = {
 /**
  * 外部 MySQL + Drizzle（mysql2 驱动）。
  *
- * v2 改造：
- * - ensureSchema() 已退役，改用 drizzle-kit migration 管理（db:migrate）
+ * 数据库结构只由 drizzle-kit migration 管理（db:migrate）。
+ *
+ * - 应用启动不执行动态建表。
  * - 连接池与 migration 生命周期由 drizzle-kit + 应用启动时 db:migrate 脚本负责
  *
  * 用 globalThis 缓存连接池，避免 Next.js 开发模式热重载反复建池。
@@ -97,7 +102,7 @@ if (!globalForDb.__snowMysqlPool) {
 export const db = drizzle(pool, { schema: fullSchema, mode: "default" });
 
 /**
- * : DB 或事务的公共查询接口类型。
+ * DB 或事务的公共查询接口类型。
  *
  * Drizzle 的 MySqlTransaction 和 MySql2Database 共享 .select()/.from()/.where()
  * 等查询构建器方法，但 TypeScript 类型系统未建立继承关系（Transaction 缺少 $client）。

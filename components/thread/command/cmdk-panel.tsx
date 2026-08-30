@@ -116,7 +116,7 @@ export function CmdkPanel({ threads, open, onOpenChange, surface = "desktop" }: 
                 <div className="py-6 text-center text-sm text-muted-foreground">没有匹配的会话</div>
               ) : (
                 filteredThreads.slice(0, 9).map((thread, index) => {
-                  // 专题01 §35：Thread 不再绑主 Agent（primaryAgentId 已移除），不显示 Agent 分组标签。
+                  // Agent 与 Runtime Authority §35：Thread 不再绑主 Agent（primaryAgentId 已移除），不显示 Agent 分组标签。
                   return (
                     <Command.Item
                       key={thread.id}

@@ -4,7 +4,7 @@
  * 所有模块（RouteSet 激活、Projection、Binding、Hosted Readiness）
  * 必须通过此 Reader 读取 Conformance 事实，不得自行构造 SQL 查询。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 参见：正式架构
  */
 
 import { type DbOrTx, db } from "@/lib/db/client";
@@ -23,14 +23,14 @@ import { and, desc, eq } from "drizzle-orm";
  *
  * 不存在返回 null。
  *
- * : 接受 dbOrTx 参数，默认全局 db（向后兼容）。
+ * 传入 dbOrTx 时复用调用方事务，省略时执行独立查询。
  */
 export async function loadRuntimeConformanceFacts(params: {
   tenantId: string;
   runtimeRevisionId: string;
   /** 可选：指定 Run ID（用于 Binding 校验冻结的精确 Run）。 */
   conformanceRunId?: string | null;
-  /** : 事务内传入 tx，默认使用全局 db。 */
+  /** 事务内传入 tx，默认使用全局 db。 */
   dbOrTx?: DbOrTx;
 }): Promise<RuntimeConformanceFacts | null> {
   const conn = params.dbOrTx ?? db;

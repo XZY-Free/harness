@@ -23,7 +23,7 @@ import type {
  * 每个 thread 一个 `http.Server`，`127.0.0.1:0` 随机端口，服务 `workspaces/{threadId}`。
  * 全局 `previews` Map 单例保留（preview-gate 与 api/preview 共用同一实例）。
  *
- * 仍返回 `http://localhost:{port}/`（相对化在 Stage D）。
+ * 仍返回 `http://localhost:{port}/`（相对化在 ）。
  * DevServerPreviewRuntime（容器内 dev server）在 提供第二实现。
  */
 
@@ -51,7 +51,7 @@ const globalForPreview = globalThis as unknown as {
 const previews = globalForPreview.__snowPreviews ?? new Map<string, PreviewEntry>();
 globalForPreview.__snowPreviews = previews;
 
-/** V9 阶段 5：从 Cookie 头解析 preview-token（内置浏览器首次带 ?token= 加载后，子资源走 cookie 鉴权）。 */
+/** V9 当前：从 Cookie 头解析 preview-token（内置浏览器首次带 ?token= 加载后，子资源走 cookie 鉴权）。 */
 function parsePreviewTokenCookie(cookieHeader: string | undefined): string | undefined {
   if (!cookieHeader) return undefined;
   const match = cookieHeader.match(/(?:^|;\s*)preview-token=([^;]+)/);
@@ -61,7 +61,7 @@ function parsePreviewTokenCookie(cookieHeader: string | undefined): string | und
 function createStaticServer(threadId: string, token: string): Server {
   return createServer(async (req, res) => {
     // 鉴权——?token= / X-Preview-Token 头 / preview-token cookie 任一匹配即可。
-    // V9 阶段 5：新增 cookie 支持——内置浏览器首次以 ?token= 加载 HTML 后，Set-Cookie 让
+    // V9 当前：新增 cookie 支持——内置浏览器首次以 ?token= 加载 HTML 后，Set-Cookie 让
     // 后续 CSS/JS/图片子资源请求自动带 cookie 鉴权，否则每个子资源都会 403。
     const url = new URL(req.url ?? "/", "http://localhost");
     const queryToken = url.searchParams.get("token");
@@ -127,7 +127,7 @@ function listen(server: Server): Promise<number> {
   });
 }
 
-/** 关闭单个 thread 的预览 server（同步 close，供过渡薄转发复用）。 */
+/** 关闭单个 thread 的预览 server。 */
 function closePreview(threadId: string): void {
   const entry = previews.get(threadId);
   if (entry) {
@@ -180,13 +180,13 @@ export class StaticPreviewRuntime implements PreviewRuntime {
   }
 }
 
-/** 进程内单例（preview-gate / api/preview / 过渡薄转发共用）。 */
+/** preview-gate 与 preview API 共用的进程内单例。 */
 export const staticPreviewRuntime = new StaticPreviewRuntime();
 
 /** 暴露 closeAllPreviews 供进程退出 / 测试清理复用。 */
 export { closeAllPreviews, closePreview };
 
-// ─── DevServerPreviewRuntime（）─────────────────────────
+// ─── DevServerPreviewRuntime─────────────────────────
 
 type DevServerEntry = {
   port: number;
@@ -224,11 +224,9 @@ async function pollReady(url: string, timeoutMs: number): Promise<boolean> {
 /**
  * DevServerPreviewRuntime——容器内 spawn `npm run dev` + ready 探测。
  *
- * 补齐 未达成的「static + dev-server 双实现」。经同一 PreviewRuntime interface 调用。
- *
  * start 流程：
  * 1. 已 ready → 复用返回
- * 2. 无 dev script → 委托 staticPreviewRuntime（本轮不强制 dev server，skill 可声明）
+ * 2. 无 dev script → 委托 staticPreviewRuntime
  * 3. 有 dev script → startContainer（惰性复用）→ `docker exec -d ... PORT={port} HOST=0.0.0.0 npm run dev`
  * → 轮询 probePreviewUrl（127.0.0.1:{port}）→ ready / failed（超时 runtimeConfig.readyTimeoutMs）
  *
@@ -236,7 +234,7 @@ async function pollReady(url: string, timeoutMs: number): Promise<boolean> {
  * status：按 entry state 返回；委托 static 的则委托 status。
  *
  * Note：dev server 需监听 0.0.0.0 才能经 docker port mapping 可达——注入 HOST=0.0.0.0 env，
- * 框架不支持 HOST 时由 dev script 自带 --host（skill 声明责任）。本轮 url 仍 localhost（相对化 Stage D）。
+ * 框架不支持 HOST 时由 dev script 自带 --host；预览 URL 由本机 preview proxy 暴露。
  */
 export class DevServerPreviewRuntime implements PreviewRuntime {
   private secretsCache?: SecretEnvMap;

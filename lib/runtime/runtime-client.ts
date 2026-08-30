@@ -1,10 +1,10 @@
 /**
- * Runtime HTTP 客户端（S05-C02）。
+ * Runtime HTTP 客户端。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
  * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
- * - docs/architecture/runtime-control-plane.md S05-C02
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - 提供调用 Runtime HTTP API 的接口（Runtime 协议 = HTTP+JSON）。
@@ -12,7 +12,7 @@
  * - 五个端点：probeCapabilities / startInvocation / cancelInvocation / resumeInvocation / steerInvocation。
  *
  * 安全边界：
- * - 客户端只持有 runtimeEndpoint 和 auth（03 §8 协议中立 RuntimeTransportAuth），
+ * - 客户端只持有 runtimeEndpoint 和 auth（ 协议中立 RuntimeTransportAuth），
  *   不读数据库与平台 Secret。
  * - auth 由调用方解析：Hosted = 短期 Workload Token；External = 唯一 resolver
  *   resolveOutboundRuntimeAuth 解析的 CredentialRef 凭据；Transport 映射 HTTP header。
@@ -101,9 +101,9 @@ export interface StartInvocationRequestBody {
     trigger_item_id?: string | null;
   } | null;
   /**
-   * 本轮 Harness 执行约束（capability requirements），不是执行目标（专题01 冻结架构）。
+   * 本轮 Harness 执行约束（capability requirements），不是执行目标（Agent 与 Runtime Authority 分离）。
    * 用户选择 Agent = 本轮要求 Harness 使用该 Agent 能力；顶层执行主体恒为 Harness。
-   * 专题01 仅支持 capability_type=agent + mode=required。
+   * Agent 与 Runtime Authority 仅支持 capability_type=agent + mode=required。
    */
   capability_requirements?: Array<{
     capability_type: "agent";
@@ -130,11 +130,11 @@ export interface StartInvocationRequestBody {
     span_id: string;
   };
   /**
-   * 允许外发的 Invocation Context（04 §13）：Binding 冻结合同 + external egress
+   * 允许外发的 Invocation Context：Binding 冻结合同 + external egress
    * policy 过滤后的 supplied 条目（公开合同 key + 已脱敏 value）。
    * Transport 只做 wire 映射，不查 DB/合同/Policy/User/Context storage。
    * Base Harness（无 Agent Contract）不携带该字段。
-   * 05 §5：execution_subject 只经 invocation_context 单一 Authority 进入 wire，
+   * execution_subject 只经 invocation_context 单一 Authority 进入 wire，
    * 独立 execution_subject 字段已删除（A2A 不再 fallback 第二份 subject）。
    */
   invocation_context?: Array<{ context_kind: string; value: unknown }>;
@@ -324,7 +324,7 @@ export function createHttpRuntimeClient(options?: {
       const url = `${endpoint}/runtime/v1/capabilities?protocol_version=${RUNTIME_PROTOCOL_VERSION}`;
       const resp = await doFetch(url, {
         method: "GET",
-        // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+        // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
         headers: outboundAuthHeaders(auth, { allowWorkloadToken: true }),
       });
       if (!resp.ok) {
@@ -346,7 +346,7 @@ export function createHttpRuntimeClient(options?: {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
           ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
           [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
         },
@@ -371,7 +371,7 @@ export function createHttpRuntimeClient(options?: {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
           ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
           [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
         },
@@ -393,7 +393,7 @@ export function createHttpRuntimeClient(options?: {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
           ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
           [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
         },
@@ -415,7 +415,7 @@ export function createHttpRuntimeClient(options?: {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime（03 §9）。
+          // Runtime Protocol 客户端仅服务 Hosted/SnowHarness Runtime。
           ...outboundAuthHeaders(req.auth, { allowWorkloadToken: true }),
           [IDEMPOTENCY_KEY_HEADER]: req.idempotencyKey,
         },

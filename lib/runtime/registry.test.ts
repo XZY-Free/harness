@@ -7,6 +7,7 @@ import { resolveRuntimes } from "./registry";
 
 afterEach(() => {
   __resetDockerAvailableForTest();
+  Reflect.deleteProperty(process.env, "RUNTIME_DEFAULT");
   Reflect.deleteProperty(process.env, "RUNTIME_DEGRADE_ON_DOCKER_UNAVAILABLE");
   vi.restoreAllMocks();
 });
@@ -14,17 +15,19 @@ afterEach(() => {
 describe("resolveRuntimes docker availability", () => {
   it("container runtime 在 docker 不可用且未允许降级时 fail-closed", () => {
     __setDockerAvailableForTest(false);
+    process.env.RUNTIME_DEFAULT = "container";
     process.env.RUNTIME_DEGRADE_ON_DOCKER_UNAVAILABLE = "false";
 
-    expect(() => resolveRuntimes("tid", "container")).toThrow(/拒绝降级 host/);
+    expect(() => resolveRuntimes("tid")).toThrow(/拒绝降级 host/);
   });
 
   it("显式允许降级时返回 host capability 并记录 warn", () => {
     __setDockerAvailableForTest(false);
+    process.env.RUNTIME_DEFAULT = "container";
     process.env.RUNTIME_DEGRADE_ON_DOCKER_UNAVAILABLE = "true";
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    const runtime = resolveRuntimes("tid", "container");
+    const runtime = resolveRuntimes("tid");
 
     expect(runtime.capability.runtimeType).toBe("host");
     expect(runtime.capability.available).toBe(true);

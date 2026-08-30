@@ -15,7 +15,7 @@ export interface SerializableExecutionBinding {
   routeRevisionId: string;
   routeActivationId: string;
   routeContentDigest: string;
-  /** null = external_endpoint Runtime（03 §3）。 */
+  /** null = external_endpoint Runtime。 */
   runtimeArtifactId: string | null;
   runtimeArtifactDigest: string | null;
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";

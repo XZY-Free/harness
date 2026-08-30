@@ -1,7 +1,7 @@
 import type { RuntimeCapability } from "@/lib/runtime/types";
 
 /**
- * V3.8 Stage E：Studio runtime capability 面板（只读展示）。
+ * Studio runtime capability 面板（只读展示）。
  *
  * 展示 runtimeType / imageVersion / networkPolicy + enforced / quotas + enforced /
  * secretMount / available。host 模式诚实展示 open + not enforced（不伪装有硬隔离）。

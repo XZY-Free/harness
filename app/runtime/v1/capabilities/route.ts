@@ -1,9 +1,9 @@
 /**
- * GET /runtime/v1/capabilities — Hosted Runtime 能力探测（S05-C02 参考实现）。
+ * GET /runtime/v1/capabilities — Hosted Runtime 能力探测（ 参考实现）。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
- * - docs/architecture/runtime-control-plane.md S05-C02
+ * - docs/architecture/runtime-control-plane.md
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=runtime）。

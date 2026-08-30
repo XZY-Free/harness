@@ -32,12 +32,11 @@ import {
   prepareRetryForFailedRecord,
 } from "@/lib/identity/idempotency";
 /**
- * POST /api/v1/threads/{thread_id}/environment/takeover — 员工请求接管 Desktop Environment（S10-W07）。
+ * POST /api/v1/threads/{thread_id}/environment/takeover — 员工请求接管 Desktop Environment。
  *
  * 事实源：
  * - docs/architecture/product-surfaces-and-admin.md
- *   S10-W07：
- *   「接管前核对未完成 ToolCall/Effect；重复连接不能并发执行同一需要写锁的本地操作」
+ *   *   「接管前核对未完成 ToolCall/Effect；重复连接不能并发执行同一需要写锁的本地操作」
  *   「Web 发起的本地任务在指定 Desktop 离线时进入等待，不静默迁移到 Cloud」
  *
  * 行为：

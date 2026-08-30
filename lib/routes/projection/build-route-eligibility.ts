@@ -161,7 +161,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     const targetIdentity = isAgentRoute ? (routeSet.agentId as string) : "runtime";
 
     // 5. 按 Route target 读取对应权威事实。
-    // 专题01 冻结架构：只读取所选 target 的实体；
+    // Agent 与 Runtime Authority 分离：只读取所选 target 的实体；
     // agent Route 不查询 Runtime，runtime Route 不查询 Agent。
     const [agent, agentRevision, runtimeRevision] = await Promise.all([
       isAgentRoute && routeSet.agentId
@@ -234,7 +234,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
     // 冻结架构：不做 Agent required capabilities vs Runtime capabilities 交叉校验。
     const eligibilityResult = RevisionExecutionEligibilityPolicy.isEligible(evidenceSnapshot);
 
-    // 专题01 冻结架构：agent Route 只校验 Agent 生命周期，runtime Route 只校验 Runtime 生命周期。
+    // Agent 与 Runtime Authority 分离：agent Route 只校验 Agent 生命周期，runtime Route 只校验 Runtime 生命周期。
     const entityLifecycleEligible = isAgentRoute
       ? agent?.lifecycleState === "enabled" && agentRevision?.revisionState === "published"
       : runtime?.lifecycleState === "enabled" && runtimeRevision?.revisionState === "published";
@@ -310,7 +310,7 @@ export function createBuildRouteEligibility(deps: BuildProjectionDependencies) {
         ? 1
         : 0;
     const runtimePublicationActive = runtimeSnapshot?.runtimePublication ? 1 : 0;
-    // Runtime evidence all-or-nothing（03 §3）：hosted 要求 Artifact 全集 verified；
+    // Runtime evidence all-or-nothing：hosted 要求 Artifact 全集 verified；
     // external_endpoint 无 Runtime Artifact（不伪造），证据有效即 1。
     const runtimeEvidenceKind = runtimeSnapshot?.runtimeEvidenceKind ?? null;
     const runtimeEvidenceValid =

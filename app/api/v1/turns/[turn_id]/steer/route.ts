@@ -6,7 +6,7 @@ import {
   schemaInvalidTable,
 } from "@/lib/conversations/route-helpers";
 /**
- * POST /api/v1/turns/{turn_id}/steer — Steer Turn（S04-C06，§3.7）。
+ * POST /api/v1/turns/{turn_id}/steer — Steer Turn（§3.7）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.7、
  *         docs/architecture/agent-control-plane.md §3.7（Steer）。

@@ -16,7 +16,7 @@
  *
  * 各入口可以增加不同要求，但不得复制基础规则。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 参见：正式架构
  */
 
 import type {
@@ -111,7 +111,7 @@ function validateBaseRules(
   if (!allowedFormats.includes(snapshot.attestationFormat)) {
     errors.push({
       code: "evidence_format_not_allowed",
-      message: `Attestation 格式 ${snapshot.attestationFormat} 在当前阶段不允许（允许: ${allowedFormats.join(", ")}）`,
+      message: `Attestation 格式 ${snapshot.attestationFormat} 不符合当前策略（允许: ${allowedFormats.join(", ")}）`,
     });
   }
 

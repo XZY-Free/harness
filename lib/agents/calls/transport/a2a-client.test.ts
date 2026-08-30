@@ -1,3 +1,4 @@
+import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
 /**
  * A2A AgentTransport 测试 — 协议层 Gate（04 §4–§9，A2A 0.3.0 wire 冻结版）。
  *
@@ -23,15 +24,14 @@
  * 网络前类型校验、reader 超时上报等），不因生产未达标而弱化。
  */
 import {
-  AgentTransportAuthError,
-  AgentTransportError,
   type AgentCallEventSink,
   type AgentCardCapabilities,
   type AgentTransport,
+  AgentTransportAuthError,
+  AgentTransportError,
   type StartAgentCallParams,
   type StartAgentCallResult,
 } from "@/lib/agents/calls/transport/agent-transport";
-import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -253,7 +253,10 @@ describe("createA2AAgentTransport — start message/stream wire + 归一化（04
 
   it("completed → 归一化 call.completed（AgentCall 事件，非 parent 输出），payload 携带 task_id/context_id/text", async () => {
     const fixture = createFixture([
-      sseResponse([statusUpdate("working"), statusUpdate("completed", "task-1", "ctx-1", "最终答复", true)]),
+      sseResponse([
+        statusUpdate("working"),
+        statusUpdate("completed", "task-1", "ctx-1", "最终答复", true),
+      ]),
     ]);
     const transport = makeTransport(fixture);
     await transport.startCall(startRequest());
@@ -292,7 +295,9 @@ describe("createA2AAgentTransport — start message/stream wire + 归一化（04
 
   it("CRLF 分隔的 SSE 流：\r\n\r\n 边界事件完整解析", async () => {
     const crlf = (l: string) => `data: ${l}\r\n\r\n`;
-    const body = crlf(statusUpdate("working")) + crlf(statusUpdate("completed", "task-1", "ctx-1", "ok", true));
+    const body =
+      crlf(statusUpdate("working")) +
+      crlf(statusUpdate("completed", "task-1", "ctx-1", "ok", true));
     const encoder = new TextEncoder();
     let offset = 0;
     const stream = new ReadableStream<Uint8Array>({
@@ -553,7 +558,7 @@ describe("createA2AAgentTransport — artifact / input-required / resume（04 §
   });
 
   it("resume next producer sequence 非法（null/0/负/非整数/非数字）→ invalid_correlation，且不发起网络请求", async () => {
-    const badSeqs: unknown[] = [null, undefined, 0, -1, 1.5, "5", NaN];
+    const badSeqs: unknown[] = [null, undefined, 0, -1, 1.5, "5", Number.NaN];
     for (const seq of badSeqs) {
       const fixture = createFixture([sseResponse([statusUpdate("working")])]);
       const transport = makeTransport(fixture);
@@ -669,7 +674,12 @@ describe("createA2AAgentTransport — artifact / input-required / resume（04 §
       jsonResponse({
         jsonrpc: "2.0",
         id: "x",
-        result: { kind: "task", id: "corrupted-7", contextId: "ctx-7", status: { state: "working" } },
+        result: {
+          kind: "task",
+          id: "corrupted-7",
+          contextId: "ctx-7",
+          status: { state: "working" },
+        },
       }),
     ]);
     const transport = makeTransport(fixture);
@@ -745,7 +755,10 @@ describe("createA2AAgentTransport — auth / probe / capabilities / 错误分类
       }),
     ]);
     const transport = makeTransport(fixture);
-    const caps = await transport.probe({ endpoint: "https://agent.example.com", auth: { mode: "bearer", token: "token" } });
+    const caps = await transport.probe({
+      endpoint: "https://agent.example.com",
+      auth: { mode: "bearer", token: "token" },
+    });
     expect(caps.features.event_stream).toBe(true);
     expect(caps.features.steer).toBe(false);
     expect(fixture.requests).toHaveLength(1);
@@ -763,7 +776,10 @@ describe("createA2AAgentTransport — auth / probe / capabilities / 错误分类
     ]);
     const transport = makeTransport(fixture);
     await expect(
-      transport.probe({ endpoint: "https://agent.example.com", auth: { mode: "bearer", token: "token" } }),
+      transport.probe({
+        endpoint: "https://agent.example.com",
+        auth: { mode: "bearer", token: "token" },
+      }),
     ).rejects.toMatchObject({ kind: "protocol_schema" });
   });
 
@@ -773,7 +789,10 @@ describe("createA2AAgentTransport — auth / probe / capabilities / 错误分类
       jsonResponse({ name: "agent", protocolVersion: "0.3.0", capabilities: { streaming: true } }),
     ]);
     const transport = makeTransport(fixture);
-    const caps = await transport.probe({ endpoint: "https://agent.example.com", auth: { mode: "bearer", token: "token" } });
+    const caps = await transport.probe({
+      endpoint: "https://agent.example.com",
+      auth: { mode: "bearer", token: "token" },
+    });
     expect(caps.features.cancel).toBe(false);
     expect(caps.features.resume).toBe(false);
     expect(caps.features.user_action).toBe(false);
@@ -781,7 +800,10 @@ describe("createA2AAgentTransport — auth / probe / capabilities / 错误分类
 
   it("startCall：auth=none 时 wire 上完全不发送 Authorization 头", async () => {
     const fixture = createFixture([
-      sseResponse([statusUpdate("working"), statusUpdate("completed", "task-1", "ctx-1", "ok", true)]),
+      sseResponse([
+        statusUpdate("working"),
+        statusUpdate("completed", "task-1", "ctx-1", "ok", true),
+      ]),
     ]);
     const transport = makeTransport(fixture);
     await transport.startCall(startRequest({ auth: { mode: "none" } }));
@@ -861,9 +883,7 @@ describe("createA2AAgentTransport — auth / probe / capabilities / 错误分类
   });
 
   it("startCall：capabilities.protocol_versions 是 A2A 0.3.0，不是 runtime protocol 2", async () => {
-    const fixture = createFixture([
-      sseResponse([statusUpdate("working", "task-1", "ctx-1")]),
-    ]);
+    const fixture = createFixture([sseResponse([statusUpdate("working", "task-1", "ctx-1")])]);
     const transport = makeTransport(fixture);
     const resp = await transport.startCall(startRequest());
     // 端口类型不表达 protocol_versions（见 capabilitiesEvidence helper）；生产 draft
@@ -872,11 +892,15 @@ describe("createA2AAgentTransport — auth / probe / capabilities / 错误分类
   });
 
   it("05 专项：startCall 只投影冻结 effective profile（cancel=false/resume=true/user_action=true）", async () => {
-    const fixture = createFixture([
-      sseResponse([statusUpdate("working", "task-1", "ctx-1")]),
-    ]);
+    const fixture = createFixture([sseResponse([statusUpdate("working", "task-1", "ctx-1")])]);
     const transport = makeTransport(fixture, {
-      capabilities: { cancel: false, resume: true, steer: false, user_action: true, streaming: true },
+      capabilities: {
+        cancel: false,
+        resume: true,
+        steer: false,
+        user_action: true,
+        streaming: true,
+      },
     });
     const resp = await transport.startCall(startRequest());
     expect(capabilitiesEvidence(resp).features).toMatchObject({
@@ -954,7 +978,10 @@ describe("createA2AAgentTransport — 背景流终态与 Recovery（06 §5–§9
 
   it("completed → EOF：不 lost（不上报背景失败）", async () => {
     const fixture = createFixture([
-      sseResponse([statusUpdate("working"), statusUpdate("completed", "task-1", "ctx-1", "答复", true)]),
+      sseResponse([
+        statusUpdate("working"),
+        statusUpdate("completed", "task-1", "ctx-1", "答复", true),
+      ]),
     ]);
     const failures: string[] = [];
     const transport = makeTransport(fixture, {
@@ -1035,7 +1062,10 @@ describe("createA2AAgentTransport — 背景流终态与 Recovery（06 §5–§9
 
   it("remote failed：call.failed 协议终态，不 lost", async () => {
     const fixture = createFixture([
-      sseResponse([statusUpdate("working"), statusUpdate("failed", "task-1", "ctx-1", "出错", true)]),
+      sseResponse([
+        statusUpdate("working"),
+        statusUpdate("failed", "task-1", "ctx-1", "出错", true),
+      ]),
     ]);
     const failures: string[] = [];
     const transport = makeTransport(fixture, {
@@ -1047,9 +1077,7 @@ describe("createA2AAgentTransport — 背景流终态与 Recovery（06 §5–§9
     await waitForBatches(fixture, 3);
     await new Promise((r) => setTimeout(r, 50));
     expect(failures).toEqual([]);
-    expect(
-      fixture.batches.some((b) => b.events.some((e) => e.type === "call.failed")),
-    ).toBe(true);
+    expect(fixture.batches.some((b) => b.events.some((e) => e.type === "call.failed"))).toBe(true);
   });
 });
 
@@ -1130,7 +1158,12 @@ describe("createA2AAgentTransport — A2A wire 契约缺陷（生产 draft 未�
         JSON.stringify({
           jsonrpc: "2.0",
           id: "x",
-          result: { kind: "status-update", taskId: "task-1", contextId: "ctx-1", status: { state: "bogus-state" } },
+          result: {
+            kind: "status-update",
+            taskId: "task-1",
+            contextId: "ctx-1",
+            status: { state: "bogus-state" },
+          },
         }),
       ]),
     ]);
@@ -1160,7 +1193,9 @@ describe("createA2AAgentTransport — A2A wire 契约缺陷（生产 draft 未�
     await waitUntil(() => failures.some((f) => f.callId === "call-B"));
     // 生产 draft 的 backgroundFailureReported 是 transport 级全局布尔，call-A 失败后
     // 会抑制 call-B 的上报 → 第二个 call 的失败被吞掉。
-    expect(failures.some((f) => f.callId === "call-B" && f.failureKind === "stream_read_failed")).toBe(true);
+    expect(
+      failures.some((f) => f.callId === "call-B" && f.failureKind === "stream_read_failed"),
+    ).toBe(true);
   });
 
   it("start stream 首事件为官方 Task 形态（kind:task + 状态）时，该初始 Task 状态须归一化为 call.started", async () => {
@@ -1222,4 +1257,3 @@ describe("createA2AAgentTransport — A2A wire 契约缺陷（生产 draft 未�
     expect(failures).not.toEqual([]);
   });
 });
-

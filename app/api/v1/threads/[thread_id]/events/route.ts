@@ -17,14 +17,14 @@ import {
   listThreadEvents,
 } from "@/lib/conversations/thread-queries";
 /**
- * GET /api/v1/threads/{thread_id}/events — 订阅 Event（SSE，S04-C05，§3.6；S12-W02 连接配额）。
+ * GET /api/v1/threads/{thread_id}/events — 订阅 Event（SSE，，§3.6； 连接配额）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.6、
  *         docs/architecture/security.md §2.2。
  *
  * 行为：
  * 1. 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。
- * 2. 获取 SSE 连接配额（S12-W02）：超限 → 429 STREAM_BACKPRESSURE + retry_after_ms。
+ * 2. 获取 SSE 连接配额：超限 → 429 STREAM_BACKPRESSURE + retry_after_ms。
  * 3. 解析 Last-Event-ID（优先）或 after_sequence 作为游标起点。
  * 4. 校验游标未过期（cursor > 0 时）：cursor < earliest_available_sequence → 409。
  * 5. 创建 SSE 流，发送 stream.resumed {latest_sequence}。
@@ -109,7 +109,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     return resourceNotFound(requestId, `Thread 不存在或无权访问: ${threadId}`);
   }
 
-  // 2.5 获取 SSE 连接配额（S12-W02）：超限 → 429 STREAM_BACKPRESSURE
+  // 2.5 获取 SSE 连接配额：超限 → 429 STREAM_BACKPRESSURE
   const sseQuota = getSSEConnectionQuota();
   const quotaResult = sseQuota.acquire(principal.tenantId, principal.userIdentityId, threadId);
   if (!quotaResult.allowed) {

@@ -1,5 +1,5 @@
 /**
- * : CycloneDX SBOM 验证器 — 完整 Schema 验证 + 业务 Policy。
+ * CycloneDX SBOM 验证器 — 完整 Schema 验证 + 业务 Policy。
  *
  * 两阶段验证:
  * 1. Schema 阶段: 使用官方 CycloneDX JSON Schema 验证文档结构
@@ -75,10 +75,10 @@ ajv.addSchema({
 const validateCycloneDXSchema = ajv.compile(cyclonedxSchema);
 
 /**
- * : 验证 CycloneDX SBOM 文档 — 两阶段验证。
+ * 验证 CycloneDX SBOM 文档 — 两阶段验证。
  *
- * Phase 1: JSON Schema 验证（使用官方 CycloneDX 1.6 Schema）
- * Phase 2: 业务 Policy 验证
+ * 步骤 1: JSON Schema 验证（使用官方 CycloneDX 1.6 Schema）
+ * 步骤 2: 业务 Policy 验证
  */
 export function validateCycloneDX(input: ValidateCycloneDXInput): ValidateCycloneDXResult {
   const allowedVersions = input.allowedVersions ?? DEFAULT_ALLOWED_VERSIONS;
@@ -90,7 +90,7 @@ export function validateCycloneDX(input: ValidateCycloneDXInput): ValidateCyclon
 
   const failures: string[] = [];
 
-  // ─── Phase 1: JSON Schema 验证 ────────────────────────────
+  // ─── 步骤 1: JSON Schema 验证 ────────────────────────────
   const schemaValid = validateCycloneDXSchema(doc) as boolean;
   if (!schemaValid) {
     const schemaErrors = (validateCycloneDXSchema.errors ?? []).map(
@@ -106,7 +106,7 @@ export function validateCycloneDX(input: ValidateCycloneDXInput): ValidateCyclon
     };
   }
 
-  // ─── Phase 2: 业务 Policy 验证 ────────────────────────────
+  // ─── 步骤 2: 业务 Policy 验证 ────────────────────────────
 
   // 1. bomFormat
   const bomFormat = doc.bomFormat as string | undefined;

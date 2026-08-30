@@ -20,7 +20,7 @@ import type { GrepMatch, GrepResult, WorkspaceStore } from "./types";
  * 薄封装 `lib/workspace` 现有函数（零行为变更）：路径解析、读写删 stat list 全走宿主
  * 文件系统 + 既有的 safeJoin / symlink / realpath 安全边界。
  *
- * container 模式（Stage B）由 `ContainerWorkspaceStore` 提供第二实现；`root()` 仍返回
+ * container 模式由 `ContainerWorkspaceStore` 提供第二实现；`root()` 仍返回
  * 宿主路径（平台进程读写经 bind mount 同步到容器），`mountTarget()` 返回 `/workspace`。
  *
  * glob/grep 优先走 `rg`（host 直接 execa；container 经 docker exec seam）。

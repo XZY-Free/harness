@@ -1,5 +1,5 @@
 /**
- * POST /api/v1/turns/{turn_id}/interrupt — Interrupt Turn（S04-C06，§3.8）。
+ * POST /api/v1/turns/{turn_id}/interrupt — Interrupt Turn（§3.8）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.8、
  *         docs/architecture/agent-control-plane.md §3.8（Stop/Interrupt）。
@@ -99,7 +99,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     return resourceNotFound(requestId, `Turn 不存在或无权访问: ${turnId}`);
   }
 
-  // 2.5 05 §7 前置门禁：Turn → 当前 Invocation → Binding → EffectiveInvocationCapabilities。
+  // 2.5  前置门禁：Turn → 当前 Invocation → Binding → EffectiveInvocationCapabilities。
   // cancel=false → 不创建 command、不写 interrupt_requested、不调用 Gateway，
   // 返回稳定 UNSUPPORTED_CAPABILITY（不用笼统错误掩盖能力不支持）。
   const currentInvocationId = turn.activeInvocationId ?? turn.latestInvocationId;

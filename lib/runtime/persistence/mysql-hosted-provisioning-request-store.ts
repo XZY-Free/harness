@@ -1,12 +1,12 @@
 /**
  * HostedProvisioningRequest Store 的 MySQL 实现。
  *
- * 专题01 冻结（runtime-only）：身份权威 (tenantId, routeScopeKey)，携带 requesterId。
+ * Runtime-only Authority：身份权威 (tenantId, routeScopeKey)，携带 requesterId。
  * - findActiveRequest 只按 (tenantId, routeScopeKey)。
  * - 已删除 findReadyByAgent。
- * : updateState/releaseLease 必须 WHERE leaseOwner=workerId。
- * : claimRequests 包含 running+expired lease（崩溃恢复）。
- * : 保留 runtime/route checkpoint 字段（不含 Agent publication checkpoint）。
+ * updateState/releaseLease 必须 WHERE leaseOwner=workerId。
+ * claimRequests 包含 running+expired lease（崩溃恢复）。
+ * 保留 runtime/route checkpoint 字段（不含 Agent publication checkpoint）。
  */
 
 import { db } from "@/lib/db/client";
@@ -160,7 +160,7 @@ export const mysqlHostedProvisioningRequestStore: HostedProvisioningRequestStore
     if (lastError !== undefined) set.lastError = lastError;
     if (lastAttemptAt !== undefined) set.lastAttemptAt = lastAttemptAt;
     if (lastCompletedStep !== undefined) set.lastCompletedStep = lastCompletedStep;
-    // : Step Checkpoint 字段（runtime/route；Agent publication checkpoint 已冻结删除）
+    // Step Checkpoint 字段（runtime/route；Agent publication checkpoint 已冻结删除）
     if (checkpoint) {
       if (checkpoint.runtimeId !== undefined) set.stepRuntimeId = checkpoint.runtimeId;
       if (checkpoint.runtimeRevisionId !== undefined)

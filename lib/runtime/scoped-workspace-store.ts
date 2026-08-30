@@ -1,7 +1,7 @@
 import type { GrepResult, WorkspaceStore } from "./types";
 
 /**
- * Stage B：ScopedWorkspaceStore——写范围收窄包装层。
+ * ScopedWorkspaceStore——写范围收窄包装层。
  *
  * 包装一个底层 WorkspaceStore，在**存储层**强制 writeScope：
  * - write / delete 校验路径在 writeScope 内，否则 throw WriteScopeError（对应工具返回 ok:false）。

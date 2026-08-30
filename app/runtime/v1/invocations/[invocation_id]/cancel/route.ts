@@ -1,16 +1,16 @@
 /**
- * POST /runtime/v1/invocations/{invocation_id}/cancel — Hosted Runtime 取消 Invocation（S05-C04 + S05-C05 参考实现）。
+ * POST /runtime/v1/invocations/{invocation_id}/cancel — Hosted Runtime 取消 Invocation（ +  参考实现）。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
  * - docs/architecture/agent-control-plane.md §3.8（Stop/Interrupt）
- * - docs/architecture/runtime-control-plane.md S05-C04/S05-C05
+ * - docs/architecture/runtime-control-plane.md
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=runtime + invocation 绑定校验）。
  * - 校验 Idempotency-Key（必填）。
  * - 校验请求体（reason 必填）。
- * - S05-C05 扩展：调用 RuntimeAdapter.handleCancel，异步回传 execution.cancelled 事件。
+ * -  扩展：调用 RuntimeAdapter.handleCancel，异步回传 execution.cancelled 事件。
  * - 返回 cancelled=true（Runtime ack，平台标记命令 acknowledged）。
  *
  * 错误映射：
@@ -85,7 +85,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     return runtimeSchemaInvalidTable(requestId, "请求体非法：reason 必填且为非空字符串");
   }
 
-  // 4. S05-C05 扩展：调用 RuntimeAdapter.handleCancel，异步回传 execution.cancelled 事件
+  // 4.  扩展：调用 RuntimeAdapter.handleCancel，异步回传 execution.cancelled 事件
   //
   // adapter.handleCancel 立即返回 ack（cancel_state="accepted"），异步通过 EventBatchSink 回传
   // execution.cancelled 事件（fire-and-forget，不阻塞响应）。

@@ -83,7 +83,7 @@ export function createInProcessHostedRuntimeClient(params: {
         if (!invocation) return;
         pending.delete(invocationId);
 
-        // Hosted Runtime 只接受内部 Workload Token（03 §4/§9）。
+        // Hosted Runtime 只接受内部 Workload Token。
         if (invocation.request.auth.mode !== "workload_token") {
           throw new Error(
             `InProcessHostedRuntime 收到非法 auth mode（${invocation.request.auth.mode}）`,
@@ -104,8 +104,7 @@ export function createInProcessHostedRuntimeClient(params: {
           tenantId: params.tenantId,
           threadId: turnContext?.thread_id ?? null,
           turnId: turnContext?.turn_id ?? null,
-          agentRevisionId: null,
-          // 专题01 Batch7：本轮 capability requirements（required Agent）传给 Harness Loop。
+          // Agent 与 Runtime Authority：本轮 capability requirements（required Agent）传给 Harness Loop。
           capabilityRequirements: invocation.request.requestBody.capability_requirements,
           agentCallExecutor: params.agentCallExecutor,
           inputItems: invocation.request.requestBody.input_items,

@@ -1,5 +1,5 @@
 /**
- * AgentCall Schema — AgentCall 子执行域（专题01 冻结架构 02 §五/§六）。
+ * AgentCall Schema — AgentCall 子执行域（Agent 与 Runtime Authority 分离 ）。
  *
  * AgentCall 是 Parent Harness Invocation 内部的 Agent 能力调用子执行域，绝非第二个
  * 顶层 Invocation。本文件定义以下表的单一物理 Schema 权威：
@@ -56,7 +56,7 @@ export const AGENT_CALL_STATES = [
 ] as const;
 export type AgentCallState = (typeof AGENT_CALL_STATES)[number];
 
-/** AgentCall 来源类型（专题01：user_selected=用户明确选择；gateway=Harness Runtime 经 Gateway 调用）。 */
+/** AgentCall 来源类型（Agent 与 Runtime Authority：user_selected=用户明确选择；gateway=Harness Runtime 经 Gateway 调用）。 */
 export const AGENT_CALL_SOURCE_TYPES = [
   "user_selected",
   "dynamic_discovery",

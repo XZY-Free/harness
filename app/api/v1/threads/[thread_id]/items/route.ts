@@ -1,8 +1,7 @@
 /**
- * GET /api/v1/threads/{thread_id}/items — 查询 Item（S04-C03，§3.5）。
+ * GET /api/v1/threads/{thread_id}/items — 查询 Item（§3.5）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.5、
- *         docs/architecture/conversations.md S04-W03。
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。

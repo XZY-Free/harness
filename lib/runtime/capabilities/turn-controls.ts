@@ -1,13 +1,13 @@
 import { db } from "@/lib/db/client";
 import type { Turn } from "@/lib/persistence/schema/conversation";
 /**
- * Turn Controls 投影（05 §9）。
+ * Turn Controls 投影。
  *
  * Turn DTO 的 controls（cancel_supported/resume_supported/steer_supported）
  * 必须由服务端按精确 Binding 派生（EffectiveInvocationCapabilities），
  * 客户端不得自行从 Agent Selector 卡片猜测；终态 Turn 恒 false。
  *
- * 事实源：docs/V12/01/SnowHarness_阶段1_代码收口详细方案_2026-08-26/05-Cancel能力贯通.md §9。
+ * 事实源：docs/architecture/runtime-control-plane.md。
  */
 import { executionBindingTable } from "@/lib/persistence/schema/executions";
 import { resolveEffectiveInvocationCapabilities } from "@/lib/runtime/capabilities/effective-invocation-capabilities";
@@ -20,7 +20,7 @@ export interface TurnControls {
   readonly steer_supported: boolean;
 }
 
-/** 终态 Turn：controls 全 false（05 §9）。 */
+/** 终态 Turn：controls 全 false。 */
 const TERMINAL_TURN_CONTROLS: TurnControls = {
   cancel_supported: false,
   resume_supported: false,

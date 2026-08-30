@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Agent Contract 登记面板（07 §4）— agent-contract.json 文件导入形态。
+ * Agent Contract 登记面板— agent-contract.json 文件导入形态。
  *
  * 唯一入口是本地 JSON 文件：文件只在组件内存中读取解析，不上传文件本体，
  * 不保存 filename/路径/原始文本，不使用任何浏览器存储。
@@ -21,7 +21,7 @@ const client = createControlPlaneClient({ baseUrl: "", headers: () => ({}) });
 /** 上传体积上限：1 MiB（超大文件直接前端拒绝，不读取内容）。 */
 const MAX_CONTRACT_BYTES = 1024 * 1024;
 
-/** 07 §15：错误分类标签（中文，不显示 raw 第三方 stack、message 或内部 code）。 */
+/** 错误分类标签（中文，不显示 raw 第三方 stack、message 或内部 code）。 */
 function classifyError(err: unknown): string {
   if (err instanceof ControlPlaneRequestError) {
     switch (err.code) {
@@ -112,7 +112,7 @@ function buildPreview(contract: unknown): ContractPreview | null {
   };
 }
 
-/** File.text 与 FileReader 兼容读取（仅内存，不持久化）。 */
+/** 按浏览器可用的 File API 读取内容（仅内存，不持久化）。 */
 function readFileText(file: File): Promise<string> {
   if (typeof file.text === "function") return file.text();
   return new Promise((resolve, reject) => {

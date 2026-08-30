@@ -1,8 +1,8 @@
 /**
  * ExecutionBinding Store — MySQL 实现。
  *
- * : 统一事务 — 资格校验 + 行级锁 + Insert 在单一 db.transaction 内完成。
- * : validateBindingEligibility(tx, input) — tx 必须传入，复用 Store 事务。
+ * 统一事务 — 资格校验 + 行级锁 + Insert 在单一 db.transaction 内完成。
+ * validateBindingEligibility(tx, input) — tx 必须传入，复用 Store 事务。
  *
  * 事务内执行：
  * 1. Lock Invocation（FOR UPDATE）+ 检查重复 Binding
@@ -127,7 +127,7 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
       const revisions = await lockAndVerifyRoute(tx, input);
 
       // 4. : Capability Manifest Digest 一致性（TOCTOU 防御）
-      // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
+      // Agent 与 Runtime Authority 分离：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
       const capabilityManifestDigest = computeCapabilityManifestDigest({
         runtimeRevisionId: revisions.runtimeRevision.id,
         runtimeCapabilities: revisions.runtimeRevision.runtimeCapabilitiesJson,
@@ -184,7 +184,7 @@ export const mysqlExecutionBindingStore: ExecutionBindingStore = {
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * : Lock + TOCTOU 一致性校验。
+ * Lock + TOCTOU 一致性校验。
  *
  * 仅做 Digest/ID 一致性比较（防御 Resolver 与 Store 之间的 TOCTOU）。
  * 不再做 Publication/Attestation/Conformance 的 Policy 校验 — 那些已由
@@ -192,7 +192,7 @@ type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingInput) {
   const evidence = input.controlPlaneEvidence;
-  // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
+  // Agent 与 Runtime Authority 分离：ExecutionBinding 只绑定 Harness Runtime，无 Agent 维度。
 
   // A. Route + RouteSet（FOR UPDATE）
   const [routeRow] = await tx
@@ -322,8 +322,8 @@ async function lockAndVerifyRoute(tx: Transaction, input: StoreExecutionBindingI
 
   // H. 冻结 ConformanceRun → CaseResult（FOR UPDATE）— 精确 Run 与完整合同
   const conformanceRun = await lockAndVerifyConformance(tx, input, runtimeRevision);
-  // Batch 3：Runtime Publication 的 evidenceSetDigest 冻结了 target digest 附加证据，
-  // 重算时须与 publish-runtime-revision 的 additionalEvidence 完全一致（03 §6）。
+  // Runtime Publication 的 evidenceSetDigest 冻结了 target digest 附加证据，
+  // 重算时须与 publish-runtime-revision 的 additionalEvidence 完全一致。
   validateFrozenPublicationEvidenceDigest({
     publication: publications.runtimePublication,
     additionalEvidence: {
@@ -586,9 +586,9 @@ type FrozenProjectionRow = {
   runtimeRevisionId: string | null;
   policyRevisionId: string | null;
   routeContentDigest: string;
-  /** null = external_endpoint Runtime（03 §3）。 */
+  /** null = external_endpoint Runtime。 */
   runtimeArtifactId: string | null;
-  /** null = external_endpoint Runtime（03 §3）。 */
+  /** null = external_endpoint Runtime。 */
   runtimeArtifactDigest: string | null;
   /** DB 原始 nullable 列 — agent target 或 external_endpoint 时可为 null。 */
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint" | null;
@@ -623,9 +623,9 @@ type FrozenProjectionExpectation = {
   routeActivationId: string;
   runtimeRevisionId: string;
   routeContentDigest: string;
-  /** null = external_endpoint Runtime（03 §3）。 */
+  /** null = external_endpoint Runtime。 */
   runtimeArtifactId: string | null;
-  /** null = external_endpoint Runtime（03 §3）。 */
+  /** null = external_endpoint Runtime。 */
   runtimeArtifactDigest: string | null;
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   runtimeConfigDigest: string;
@@ -641,7 +641,7 @@ export function validateFrozenProjectionAuthority(input: {
   expected: FrozenProjectionExpectation;
 }): void {
   const { projection, expected } = input;
-  // external_endpoint Runtime 的 Attestation 集合为空（03 §3，不伪造）；hosted 要求非空全集。
+  // external_endpoint Runtime 的 Attestation 集合为空（不伪造）；hosted 要求非空全集。
   const runtimeAttestationsExact =
     expected.runtimeEvidenceKind === "external_endpoint"
       ? areExactIdSetsAllowEmpty(
@@ -710,7 +710,7 @@ async function lockAndVerifyPublications(
   runtimePublication: LockedPublicationEvidence;
 }> {
   const evidence = input.controlPlaneEvidence;
-  // 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，无 Agent Publication 维度。
+  // Agent 与 Runtime Authority 分离：ExecutionBinding 只绑定 Harness Runtime，无 Agent Publication 维度。
 
   const [runtimePublication] = await tx
     .select({
@@ -908,10 +908,10 @@ async function lockAndVerifyAttestations(
 ): Promise<void> {
   const evidence = input.controlPlaneEvidence;
   // Agent 是源码不可见黑盒 → 无 Agent Artifact Attestation（不伪造）。
-  // 仅 hosted_artifact Runtime 携带 Attestation（03 §3）；external 集合为空不会进入。
+  // 仅 hosted_artifact Runtime 携带 Attestation；external 集合为空不会进入。
 
   for (const attestationId of [...evidence.runtimeAttestationIds].sort()) {
-    // 仅 hosted_artifact 携带 Runtime Attestation（03 §3）；external 集合为空不会进入。
+    // 仅 hosted_artifact 携带 Runtime Attestation；external 集合为空不会进入。
     const runtimeArtifactId = evidence.runtimeArtifactId as string;
     const runtimeArtifactDigest = evidence.runtimeArtifactDigest as string;
     const [attestationKey] = await tx
@@ -1060,7 +1060,7 @@ type FrozenPublicationExpectation = {
   subjectRevisionId: string | null;
   attestationIds: string[];
   conformanceRunId: string | null;
-  /** external_endpoint Runtime 无 Artifact Attestation（03 §3）→ 空集合合法。 */
+  /** external_endpoint Runtime 无 Artifact Attestation，空集合合法。 */
   allowEmptyAttestations?: boolean;
 };
 

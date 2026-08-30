@@ -1,7 +1,7 @@
 /**
  * HostedProvisioningSaga — Hosted 供应的异步步骤编排。
  *
- * 专题01 冻结（runtime-only）：
+ * Runtime-only Authority：
  * HostedProvisioningSaga 只供应 tenant 内 builtin Harness Runtime 及其
  * targetKind=runtime Route。无 Agent 发布、Agent revision、Agent route，
  * 或 builtin-runtime binding 检查。
@@ -62,7 +62,7 @@ export interface SagaStepResult {
   completed: boolean;
   /** 请求的新状态。 */
   newState: "pending" | "ready" | "retryable_failed" | "permanent_failed";
-  /** : 步骤产出 Checkpoint。 */
+  /** 步骤产出 Checkpoint。 */
   checkpoint?: StepCheckpoint;
 }
 
@@ -73,12 +73,12 @@ export interface SagaConfig {
   store: HostedProvisioningRequestStore;
   /** 最大重试次数。 */
   maxAttempts: number;
-  /** : 当前 Worker ID，用于 lease owner 校验。 */
+  /** 当前 Worker ID，用于 lease owner 校验。 */
   workerId: string;
 }
 
 /**
- * : 创建 Hosted 供应 Saga 执行器。
+ * 创建 Hosted 供应 Saga 执行器。
  *
  * 每步完成后持久化产出到 Checkpoint 字段。
  * Worker 每次只执行一个步骤。
@@ -135,14 +135,14 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
         lastAttemptAt: new Date(),
         lastCompletedStep: completedStep,
         checkpoint,
-        // : 清除 Lease
+        // 清除 Lease
         leaseOwner: null,
         leaseExpiresAt: null,
       });
       return { step: completedStep, completed: true, newState: "ready", checkpoint };
     }
 
-    // : 成功非终态 → 保存 Checkpoint → currentStep=下一步 → state=pending → 清除 Lease
+    // 成功非终态 → 保存 Checkpoint → currentStep=下一步 → state=pending → 清除 Lease
     await config.store.updateState({
       requestId: request.id,
       workerId: config.workerId,
@@ -151,7 +151,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       lastAttemptAt: new Date(),
       lastCompletedStep: completedStep,
       checkpoint,
-      // : 清除 Lease
+      // 清除 Lease
       leaseOwner: null,
       leaseExpiresAt: null,
       nextAttemptAt: new Date(), // 立即可被领取
@@ -202,7 +202,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
   }
 
   /**
-   * : verify_runtime_artifact — Runtime Artifact Attestation。
+   * verify_runtime_artifact — Runtime Artifact Attestation。
    */
   async function stepVerifyRuntimeArtifact(
     request: HostedProvisioningRequestRow,
@@ -230,7 +230,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
   }
 
   /**
-   * : record_runtime_conformance — 记录 Runtime Conformance。
+   * record_runtime_conformance — 记录 Runtime Conformance。
    */
   async function stepRecordRuntimeConformance(
     request: HostedProvisioningRequestRow,
@@ -274,7 +274,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
   }
 
   /**
-   * : publish_runtime_revision — 发布 Runtime Revision。
+   * publish_runtime_revision — 发布 Runtime Revision。
    */
   async function stepPublishRuntimeRevision(
     request: HostedProvisioningRequestRow,
@@ -486,7 +486,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
     const step = request.currentStep ?? "unknown";
 
     if (classification.category === "permanent" || request.attemptCount >= config.maxAttempts) {
-      // : 永久失败 → 清除 Lease
+      // 永久失败 → 清除 Lease
       await config.store.updateState({
         requestId: request.id,
         workerId: config.workerId,
@@ -499,7 +499,7 @@ export function createHostedProvisioningSaga(config: SagaConfig) {
       return { step, completed: false, newState: "permanent_failed" };
     }
 
-    // : 可重试失败 → backoff + 清除 Lease
+    // 可重试失败 → backoff + 清除 Lease
     const backoff = computeProvisioningBackoff(request.attemptCount);
     await config.store.updateState({
       requestId: request.id,

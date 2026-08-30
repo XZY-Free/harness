@@ -7,20 +7,20 @@ import {
 } from "@/lib/conversations/route-helpers";
 import { getThreadById } from "@/lib/conversations/thread-queries";
 /**
- * POST /api/v1/threads/{thread_id}/user-actions/{request_id}/resolve — 员工解析通用 UserAction 请求（S10-W05，§3.18）。
+ * POST /api/v1/threads/{thread_id}/user-actions/{request_id}/resolve — 员工解析通用 UserAction 请求（§3.18）。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §3.18（解析 UserActionRequest）、
  *   §3.19（auth callback）、§7.2（user_action.resolved Event）
  * - docs/architecture/persistence.md §6.8（user_action_request 表）
- * - docs/architecture/product-surfaces-and-admin.md S10-W05
+ * - docs/architecture/product-surfaces-and-admin.md
  *
  * 行为：
  * - 解析员工身份 + 校验 Thread 属于当前员工（非 owner → 404 隐藏式）。
  * - 校验 Idempotency-Key（必填）+ computeRequestHash → enforceIdempotency。
  * - 校验请求体（resolution: approve/deny/submit/cancel；input+submit 时 response_redacted 必填）。
  * - 校验 UserActionRequest 属于该 Thread + state=pending（否则 404 隐藏式）。
- * - 通用 resolve 处理 confirmation/auth/grant/input 类型（专题01 废弃 handoff 类型，purpose=handoff 不再有专用路径）。
+ * - 通用 resolve 处理 confirmation/auth/grant/input 类型（Agent 与 Runtime Authority 废弃 handoff 类型，purpose=handoff 不再有专用路径）。
  * - 调用 resolveGenericUserAction 事务内：
  *   - 原子 UPDATE UserActionRequest: pending → resolved
  *   - grant+approve 时创建 Grant + 回填 grant_id
@@ -147,7 +147,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
   }
 
   // 5. 计算请求 hash + 幂等守卫（先于 UAR pending 校验：同 key 同 body 重放必须
-  //    返回与第一次相同的 200/202/422 结果，即使 UAR 已 resolved —— 03 §8）。
+  //    返回与第一次相同的 200/202/422 结果，即使 UAR 已 resolved —— ）。
   const path = new URL(request.url).pathname;
   const requestHash = computeRequestHash("POST", path, body);
   const caller = callerFromPrincipal(principal);
@@ -332,16 +332,16 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       invocation_id: result.invocation.id,
       invocation_state: result.invocation.executionState,
       resume_command_id: result.resumeCommand.id,
-      // 03 §9：唯一 Authority 是真实 Gateway/Command 结果（resume_dispatch）。
+      // 唯一 Authority 是真实 Gateway/Command 结果（resume_dispatch）。
       resume_dispatch: resumeDispatch,
       ...(result.grantId ? { grant_id: result.grantId } : {}),
       event_ids: result.events.map((e) => e.id),
     };
 
-    // 03 §4 A2A failed：远端明确拒绝的不可重试终态 → 422；UAR 已提交事实不回滚
+    //  A2A failed：远端明确拒绝的不可重试终态 → 422；UAR 已提交事实不回滚
     //（UserAction remains resolved / responseRedactedJson remains stored）。
     if (resumeDispatch.command_state === "failed") {
-      // 03 §6：terminal failed 后 Invocation 不得永久 running —— 转入平台已有
+      // terminal failed 后 Invocation 不得永久 running —— 转入平台已有
       // lost 终态（不伪造成 execution.failed）；transport 已推进终态则保留真实终态。
       try {
         await markInvocationLost({
@@ -366,7 +366,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         resume_command_state: "failed",
         safe_error_code: (gatewayResult.dispatched && gatewayResult.command.errorCode) || "UNKNOWN",
       };
-      // 03 §8：幂等记录完成成 422 响应（同 key 重放返回同一失败结果，
+      // 幂等记录完成成 422 响应（同 key 重放返回同一失败结果，
       // 不允许第二次 resolve UAR / 第二次远端调用）。存储体与 apiError wire 完全一致。
       await completeRecord({
         recordId,
@@ -387,7 +387,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       });
     }
 
-    // 03 §4 A2A dispatched：网络不可达/503，命令进入 retryable dispatched 状态 →
+    //  A2A dispatched：网络不可达/503，命令进入 retryable dispatched 状态 →
     // 202（补充信息已正式接受，远端恢复尚未确认，等待平台重试；不虚报完成）。
     const httpStatus =
       resumeDispatch.mode === "remote" && resumeDispatch.command_state === "dispatched" ? 202 : 200;

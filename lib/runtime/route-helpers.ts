@@ -1,5 +1,5 @@
 /**
- * Runtime API route handler 公共助手（S05-C03）。
+ * Runtime API route handler 公共助手。
  *
  * 事实源：docs/architecture/api-and-events.md §4（Runtime Protocol API）、
  * （身份与授权：Runtime API 走 Workload Token，audience=runtime）、
@@ -49,7 +49,7 @@ export type { WorkloadTokenClaims };
  * 2. 解码 Token claims；格式/过期错误 → WorkloadTokenError。
  * 3. 校验 audience=runtime。
  * 4. 校验 Token 的 invocationId === path 的 invocationId。
- * 5. S12-W05：校验 jti 未被撤销；命中 → WorkloadTokenError(token_revoked)。
+ * 5. 校验 jti 未被撤销；命中 → WorkloadTokenError(token_revoked)。
  *
  * @throws WorkloadTokenError 缺少/非法/过期 Token、audience 不匹配、invocation 不匹配、token 已撤销
  */
@@ -64,7 +64,7 @@ export async function resolveRuntimePrincipal(
   const claims = decodeWorkloadToken(token);
   assertAudienceMatch(claims, "runtime");
   assertInvocationMatch(claims, invocationId);
-  // S12-W05：撤销校验（DB 查询）
+  // 撤销校验（DB 查询）
   if (await isTokenRevoked(claims.tenantId, claims.jti)) {
     throw new WorkloadTokenError("token_revoked", `Workload Token 已被撤销（jti=${claims.jti}）`);
   }

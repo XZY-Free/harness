@@ -34,7 +34,7 @@ export interface NormalizedEligibility {
  * - 输出键按字母序排列
  * - 空条件（无约束）规范化为 `{ all: {} }`
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 参见：正式架构
  */
 export function normalizeEligibility(conditions: unknown): NormalizedEligibility | null {
   if (conditions === null || conditions === undefined) {

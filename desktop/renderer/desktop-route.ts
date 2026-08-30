@@ -1,4 +1,4 @@
-// 专题01 §33.7：Desktop 产品入口为 /desktop（新建空态）与 /desktop/chat/{threadId}。
+// Agent 与 Runtime Authority §33.7：Desktop 产品入口为 /desktop（新建空态）与 /desktop/chat/{threadId}。
 // 假 new 路由 /desktop/new 已移除；/desktop 恒为新建空态页（不再自动跳最近会话）。
 export type DesktopRoute =
   | { readonly kind: "home" }

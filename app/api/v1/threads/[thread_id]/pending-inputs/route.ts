@@ -1,6 +1,6 @@
 /**
- * GET  /api/v1/threads/{thread_id}/pending-inputs — 查询 PendingInput 队列（S04-C04，§3.6）。
- * POST /api/v1/threads/{thread_id}/pending-inputs — 创建 PendingInput（S04-C04，§3.7）。
+ * GET  /api/v1/threads/{thread_id}/pending-inputs — 查询 PendingInput 队列（§3.6）。
+ * POST /api/v1/threads/{thread_id}/pending-inputs — 创建 PendingInput（§3.7）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.6-3.7、
  *         docs/architecture/agent-control-plane.md §3.14（创建不生成 user_message Item）。

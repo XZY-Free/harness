@@ -2,7 +2,7 @@
  * 重调度编排（组合函数：创建 queued Attempt + 交由 dispatchQueuedInvocationAttempt 执行）。
  *
  * 事实源：
- * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/01-DurableDispatch与RetryAuthority.md §六
+ * - docs/architecture/runtime-control-plane.md
  * - docs/architecture/persistence.md / conversations.md / api-and-events.md
  *
  * 职责：
@@ -21,7 +21,6 @@
  */
 import { db } from "@/lib/db/client";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
-import type { AgentRevision } from "@/lib/persistence/schema/agents";
 import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
 import type {
   ExecutionBinding,
@@ -57,13 +56,6 @@ export interface RedispatchInvocationParams {
   runtimeClient: RuntimeHttpClient;
   /** 从 ExecutionBinding 解析 runtimeEndpoint/auth/gatewayEndpoints 的解析器。 */
   runtimeEndpointResolver: (binding: ExecutionBinding) => Promise<RuntimeEndpointResolution>;
-  /** RuntimeRevision id（兼容入参；实际以 ExecutionBinding.runtimeRevisionId 为权威）。 */
-  runtimeRevisionId: string;
-  /**
-   * AgentRevision（可选已加载对象；以 ExecutionBinding.agentRevisionId 为权威）。
-   * 基础 Harness Route 为 null。
-   */
-  agentRevision: AgentRevision | null;
   /** 触发事件的 actor 类型（默认 system）。 */
   actorType?: ThreadEventActorType;
   actorId?: string | null;

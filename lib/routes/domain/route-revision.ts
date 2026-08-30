@@ -3,13 +3,13 @@ import { createHash } from "node:crypto";
 export const MAX_ROUTE_TRAFFIC_WEIGHT = 10_000;
 
 /**
- * Route content target — 严格判别联合（专题01 冻结架构）。
+ * Route content target — 严格判别联合（Agent 与 Runtime Authority 分离）。
  *
  * - runtime：顶层执行目标，只携带 RuntimeRevision 事实。
  * - agent：Harness 调用 Agent 能力，只携带 exact Agent 生产调用事实
- *   （endpoint/identity/credential/network，Batch4 补漏 02 §12.2/12.3）。
+ *   （endpoint/identity/credential/network， 补漏 /12.3）。
  *
- * 禁止 flat 兼容字段/别名。target 之外的字段为公共 route 字段。
+ * 禁止 flat 字段或别名。target 之外的字段为公共 route 字段。
  */
 export type RouteRevisionTarget =
   | { kind: "runtime"; runtimeRevisionId: string }
@@ -254,7 +254,7 @@ export function computeRouteRevisionContentDigest(content: RouteRevisionContent)
   // fail-closed：畸形/混合 target 一律拒绝，不得静默忽略。
   validateRouteRevisionContent(content);
   const canonical = canonicalize({
-    // 只包含所选 target 自己的事实（02 §7.5/§12.3）。
+    // 只包含所选 target 自己的事实。
     target: normalizeTargetForDigest(content.target),
     policy_revision_id: content.policyRevisionId,
     model_policy_revision_id: content.modelPolicyRevisionId,

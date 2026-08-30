@@ -1,6 +1,6 @@
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
 /**
- * Worker 重启恢复仓储（S09-C06）。
+ * Worker 重启恢复仓储。
  *
  * 事实源：
  * - docs/architecture/persistence.md （Invocation 状态机含 lost 终态）、
@@ -10,7 +10,7 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  * §14（Durable Workflow 边界：Workflow Provider 不成为业务状态源）
  * - docs/architecture/api-and-events.md （Resume 与 requires_redispatch）、
  * （JobEvent 不进员工 Thread SSE）
- * - docs/architecture/conversations.md 、S09-C06
+ * - docs/architecture/conversations.md 、
  *
  * 职责：
  * - findStaleInvocations：扫描心跳超时的非终态 Invocation（Worker 重启恢复入口）。
@@ -23,7 +23,7 @@ import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/t
  * - 终态 Invocation 不可恢复（INVOCATION_TERMINAL_STATES）。
  * - invocation.lost Event 必须形成（Invocation 终态必须形成公开 Event）。
  * - 跨租户隔离：所有查询按 tenantId 过滤。
- * - producerSequence 在整个 Invocation 内连续，不按 Attempt 从 1 重启（）。
+ * - producerSequence 在整个 Invocation 内连续，不按 Attempt 从 1 重启。
  */
 import { db } from "@/lib/db/client";
 import type { ThreadEvent, ThreadEventActorType } from "@/lib/persistence/schema/conversation";
@@ -165,7 +165,7 @@ const TURN_TERMINAL_STATES: readonly string[] = ["completed", "failed", "cancell
  * 将 active Invocation 标记为 lost 终态 —— 唯一原子 Recovery Authority。
  *
  * 事实源：
- * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/02-Recovery与Turn终态事务一致性.md §四
+ * - docs/architecture/runtime-control-plane.md
  * - docs/architecture/persistence.md （事务边界）、§13（不伪造完成）
  *
  * 同一 MySQL transaction 内：

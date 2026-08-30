@@ -210,7 +210,7 @@ export async function execInContainer(
     logCapBytes?: number;
     /** 流式回写回调。 */
     onChunk?: (stream: "stdout" | "stderr", chunk: string) => void;
-    /** V6-Batch1-M1：AbortSignal 注入，让 docker exec 子进程响应取消。 */
+    /** AbortSignal 注入，让 docker exec 子进程响应取消。 */
     signal?: AbortSignal;
   },
 ): Promise<ExecResult> {
@@ -223,7 +223,7 @@ export async function execInContainer(
       reject: false,
       timeout,
       maxBuffer: 1024 * 1024,
-      // V6-Batch1-M1：注入 AbortSignal
+      // 注入 AbortSignal
       signal: opts?.signal,
     });
     // 流式回写
@@ -251,9 +251,9 @@ export async function execInContainer(
   }
 }
 
-// ─── 远程浏览器运行时容器（阶段五）──────────────────────────────────
+// ─── 远程浏览器运行时容器（当前）──────────────────────────────────
 
-// ：V9 远程浏览器容器专属扩展已删除。
+// V9 远程浏览器容器专属扩展已删除。
 // 原 BROWSER_CONTAINER_LABELS / RunBrowserContainerOpts / runBrowserContainer /
 // listBrowserContainersByLabel 仅供 RemoteBrowserManager 使用，随 V9 链路移除。
 // inspectContainerLabels / isContainerRunning / listContainersByLabelKey 保留，

@@ -87,7 +87,7 @@ async function loadEvidence(
   input: LoadEvidenceInput,
   exactConformanceRunId: string | null,
 ): Promise<RevisionExecutionEvidenceSnapshot> {
-  // 专题01 冻结架构：按 target 判别分支加载，互不读取对方维度。
+  // Agent 与 Runtime Authority 分离：按 target 判别分支加载，互不读取对方维度。
   return input.kind === "agent"
     ? loadAgentEvidence(dbOrTx, input)
     : loadRuntimeEvidence(dbOrTx, input, exactConformanceRunId);

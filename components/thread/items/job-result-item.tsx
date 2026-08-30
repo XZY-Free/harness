@@ -85,7 +85,7 @@ export function JobResultItem({ item }: JobResultItemProps) {
           </span>
         </div>
 
-        {/* 进度条（S10-W08：role=progressbar + aria-valuenow/min/max 公告给辅助技术） */}
+        {/* 进度条（role=progressbar + aria-valuenow/min/max 公告给辅助技术） */}
         {isPending && typeof content.progress === "number" && (
           <div className="mt-3">
             <div

@@ -1,8 +1,7 @@
 /**
- * POST /api/v1/threads — 创建 Thread（S04-C03，§3.1）。
+ * POST /api/v1/threads — 创建 Thread（§3.1）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.1、
- *         docs/architecture/conversations.md S04-W01。
  *
  * 行为：
  * - 解析员工身份（employee audience）。

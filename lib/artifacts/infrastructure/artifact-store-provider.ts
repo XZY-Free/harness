@@ -6,60 +6,33 @@
  *
  * 职责：
  * - 为 admin route handler 提供 ManagedArtifactStore 与 BuilderKeyRegistry 的运行时实例。
- * - 生产环境从配置/PolicyRevision 读取（阶段 11 完整接入）；当前阶段提供 in-memory 默认实现。
  * - 测试环境通过 setArtifactStoreOverride / setBuilderKeyRegistryOverride 注入真实密钥与产物。
  *
  * 安全边界：
- * - 默认 in-memory store 为空，任何 verify 调用都会因 readDsseEnvelope 抛错而 failed（fail-closed）。
+ * - 未配置 ManagedArtifactStore 时明确失败，不伪装存在空存储实现。
  * - builder 密钥注册表默认为空，任何 builder_identity 都不在白名单（fail-closed）。
  * - override 仅供测试使用；生产环境通过 SNOW_HOSTED_BUILDER_KEYS_JSON 注入。
  */
 import type {
   BuilderKeyRegistry,
   ManagedArtifactStore,
-  ProvenanceDocument,
 } from "@/lib/artifacts/domain/artifact-attestation";
 import { hostedControlPlaneConfig } from "@/lib/config";
-
-// ─── 默认 in-memory 实现（空 store，fail-closed）──────────
-
-/**
- * 空 ManagedArtifactStore：所有 read 抛错（fail-closed）。
- *
- * 生产环境应替换为真实受管对象存储实现（OCI registry / 对象存储）。
- * 测试环境通过 setArtifactStoreOverride 注入填充了产物的 store。
- */
-class EmptyManagedArtifactStore implements ManagedArtifactStore {
-  async readDsseEnvelope(_ref: string): Promise<Buffer> {
-    throw new Error(`EmptyManagedArtifactStore: DSSE envelope not found: ${_ref}`);
-  }
-  async readSbom(_ref: string): Promise<unknown> {
-    throw new Error(`EmptyManagedArtifactStore: sbom not found: ${_ref}`);
-  }
-  async readProvenance(_ref: string): Promise<ProvenanceDocument> {
-    throw new Error(`EmptyManagedArtifactStore: provenance not found: ${_ref}`);
-  }
-}
 
 // ─── 单例 + override ──────────────────────────────────────
 
 let storeOverride: ManagedArtifactStore | null = null;
 let registryOverride: BuilderKeyRegistry | null = null;
-let defaultStore: ManagedArtifactStore | null = null;
 let defaultRegistry: BuilderKeyRegistry | null = null;
 
 /**
  * 获取运行时 ManagedArtifactStore。
  *
- * 优先级：test override > 环境变量配置 > 空 store（fail-closed）。
+ * 生产调用必须接入真实受管对象存储；测试可注入生产同构的 Store 实现。
  */
 export function getManagedArtifactStore(): ManagedArtifactStore {
   if (storeOverride) return storeOverride;
-  if (!defaultStore) {
-    // 生产环境从配置读取（阶段 11 接入）；当前阶段使用空 store。
-    defaultStore = new EmptyManagedArtifactStore();
-  }
-  return defaultStore;
+  throw new Error("ManagedArtifactStore 未配置");
 }
 
 /**

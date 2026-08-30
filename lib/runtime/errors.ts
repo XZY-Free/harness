@@ -1,8 +1,7 @@
 /**
- * Runtime 域共享错误类（S05-C01）。
+ * Runtime 域共享错误类。
  *
  * 事实源：docs/architecture/persistence.md -、、
- * docs/architecture/api-and-events.md 。
  *
  * Route 层根据 error 实例映射 HTTP 状态码和稳定 error_code。
  */
@@ -113,7 +112,7 @@ export class NoEffectiveRouteError extends Error {
   }
 }
 
-// ─── RuntimeSessionBinding 错误（S05-C02） ────────────────
+// ─── RuntimeSessionBinding 错误 ────────────────
 
 /** RuntimeSessionBinding 不存在或跨租户不可见。映射 404 RESOURCE_NOT_FOUND。 */
 export class RuntimeSessionBindingNotFoundError extends Error {
@@ -141,7 +140,7 @@ export class RuntimeSessionBindingConflictError extends Error {
   }
 }
 
-// ─── Runtime HTTP 客户端错误（S05-C02） ───────────────────
+// ─── Runtime HTTP 客户端错误 ───────────────────
 
 /**
  * Runtime HTTP 调用错误。
@@ -165,7 +164,7 @@ export class RuntimeHttpClientError extends Error {
   }
 }
 
-// ─── RuntimeEventIngress 错误（S05-C03） ──────────────────
+// ─── RuntimeEventIngress 错误 ──────────────────
 
 /**
  * 候选事件 payload hash 冲突：相同 producerEventId/producerSequence 但 payloadHash 不同。
@@ -218,7 +217,7 @@ export class IngressInvocationTerminalError extends Error {
   }
 }
 
-// ─── 命令调度错误（S05-C04） ───────────────────────────────
+// ─── 命令调度错误 ───────────────────────────────
 
 /**
  * InvocationCommand 不存在或跨租户不可见。
@@ -281,7 +280,7 @@ export class ResumeInvocationNotWaitingError extends Error {
   }
 }
 
-// ─── 恢复与重调度错误（S09-C06） ───────────────────────────
+// ─── 恢复与重调度错误 ───────────────────────────
 
 /**
  * Invocation 已终态，不能标记 lost 或重调度。

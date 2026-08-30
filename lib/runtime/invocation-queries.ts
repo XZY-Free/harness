@@ -1,10 +1,10 @@
 /**
- * Invocation 仓储（S05-C01）。
+ * Invocation 仓储。
  *
  * 事实源：
  * - docs/architecture/persistence.md （Invocation L366-387）、（事务边界）
  * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
- * - docs/architecture/runtime-control-plane.md S05-C01
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - createInvocation：事务内分配 invocationSequence + INSERT Invocation + 写 invocation.queued Event。
@@ -83,7 +83,7 @@ export interface CreateInvocationResult {
 /**
  * 创建 Invocation 并写 invocation.queued Event。
  *
- * 事务内（）：
+ * 事务内：
  * 1. 校验 turnId/jobId 恰有一个非空。
  * 2. 如果 threadId 存在：SELECT FOR UPDATE Thread 行（防止并发分配 sequence 冲突）。
  * 3. 分配 invocationSequence（COALESCE(MAX(invocationSequence), 0) + 1，按 threadId 或 jobId 维度）。
@@ -272,7 +272,7 @@ export interface UpdateInvocationStateOptions {
 /**
  * 更新 Invocation 状态（事务内 SELECT FOR UPDATE + 状态机校验 + 递增 versionNo）。
  *
- * 状态机（）：
+ * 状态机：
  * - queued → running / cancelled / failed / lost
  * - running → waiting_user / completed / failed / cancelled / lost
  * - waiting_user → running / cancelled / failed / lost
@@ -459,7 +459,7 @@ export async function getThreadIdByTurn(tenantId: string, turnId: string): Promi
 /**
  * 列出 Thread 下所有 Invocation（按 invocationSequence 升序，跨租户隔离）。
  *
- * 事实源：S11-W04 管理面排障端点 /admin/api/v1/threads/[thread_id]/invocations 使用本函数。
+ * 事实源： 管理面排障端点 /admin/api/v1/threads/[thread_id]/invocations 使用本函数。
  *
  * Invocation 表存在 threadId 直接字段（schema/runtime.ts L249），无需通过 turn 关联子查询。
  *

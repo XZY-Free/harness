@@ -1,3 +1,10 @@
+import {
+  type A2ATestProvider,
+  A2A_TEST_PROVIDER_CAPABILITY_MANIFEST,
+  A2A_TEST_PROVIDER_CONTEXT_CONTRACT,
+  startA2ATestProvider,
+} from "@/lib/agents/calls/test/a2a-test-provider";
+import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
 /**
  * A2A AgentTransport 黑盒 E2E 测试（AgentCall 协议层；真实 HTTP/SSE wire）。
  *
@@ -13,16 +20,9 @@
  * 不用 Runtime fixtures。所有归一化输出必须是 AgentCall 候选事件（call.*）。
  */
 import {
-  AgentTransportError,
   type AgentCallEventSink,
+  AgentTransportError,
 } from "@/lib/agents/calls/transport/agent-transport";
-import { createA2AAgentTransport } from "@/lib/agents/calls/transport/a2a/a2a-client";
-import {
-  type A2ATestProvider,
-  A2A_TEST_PROVIDER_CAPABILITY_MANIFEST,
-  A2A_TEST_PROVIDER_CONTEXT_CONTRACT,
-  startA2ATestProvider,
-} from "@/lib/agents/calls/test/a2a-test-provider";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 /** 测试共享 Provider（真实 HTTP server）；事件 batch 每用例独立收集。 */
@@ -37,9 +37,7 @@ afterAll(async () => {
 });
 
 /** 每用例独立的 transport + 事件收集器。 */
-function freshTransport(
-  extra?: Partial<Parameters<typeof createA2AAgentTransport>[0]>,
-) {
+function freshTransport(extra?: Partial<Parameters<typeof createA2AAgentTransport>[0]>) {
   const batches: Array<Parameters<AgentCallEventSink>[0]> = [];
   const transport = createA2AAgentTransport({
     capabilities: { cancel: true, resume: true, steer: false },

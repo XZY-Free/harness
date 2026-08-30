@@ -3,7 +3,7 @@ import { resolveQuota } from "./quota";
 import type { NetworkPolicy, NetworkPolicyMode, ResourceQuota, RuntimeCapability } from "./types";
 
 /**
- * Stage A：Runtime 能力上报。
+ * Runtime 能力上报。
  *
  * 构建 `RuntimeCapability`——平台审计 + UI 可见 + 部署决策依据。
  *
@@ -27,7 +27,7 @@ export function buildCapability(opts: {
   runtimeType: "host" | "container";
   imageVersion?: string;
   quota?: ResourceQuota;
-  /** Stage B：已解析的 per-thread 网络策略。 */
+  /** 已解析的 per-thread 网络策略。 */
   networkPolicy?: NetworkPolicy;
   secretMount?: boolean;
   available?: boolean;

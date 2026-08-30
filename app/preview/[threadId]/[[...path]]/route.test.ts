@@ -24,7 +24,6 @@ vi.mock("@/lib/conversations/thread-queries", () => ({
   getThreadById: threadQueries.getThreadById,
 }));
 vi.mock("@/lib/runtime/registry", () => ({
-  resolveRuntimeTypeForThread: () => "host",
   resolveRuntimes: registry.resolveRuntimes,
 }));
 
@@ -74,7 +73,7 @@ describe("GET /preview/[threadId]/* 反向代理 (Phase 5 Stage D, 正式 v1)", 
 
     expect(res.status).toBe(503);
     // 正式 Thread 无 runtimeType 列，落全局默认 host。
-    expect(registry.resolveRuntimes).toHaveBeenCalledWith("t1", "host");
+    expect(registry.resolveRuntimes).toHaveBeenCalledWith("t1");
     expect(preview.status).toHaveBeenCalledWith("t1");
   });
 

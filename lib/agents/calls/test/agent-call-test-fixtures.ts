@@ -3,7 +3,7 @@
  *
  * 提供：
  * - 真实 Tenant / Invocation 播种（parent Invocation FK 满足）。
- * - 合法 AgentCallBindingConfigInput 与合法 RouteResolution（Batch4 targetKind=agent）。
+ * - 合法 AgentCallBindingConfigInput 与合法 RouteResolution（ targetKind=agent）。
  * - 计算 payloadHash（递归排序 key 后 sha256，与 schema 注释一致）。
  */
 import { createHash, randomUUID } from "node:crypto";

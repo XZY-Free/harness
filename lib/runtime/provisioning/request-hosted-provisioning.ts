@@ -1,7 +1,7 @@
 /**
  * requestHostedProvisioning — 幂等创建/确认 HostedProvisioningRequest。
  *
- * 专题01 冻结（runtime-only）：
+ * Runtime-only Authority：
  * - 请求权威 = (tenantId, routeScopeKey)；builtin Runtime key 固定在 Hosted Runtime
  *   Gateway，不由请求选择。
  * - 请求携带非空 requesterId（供首次创建 Runtime 记录 owner）。
@@ -27,7 +27,7 @@ export interface RequestHostedProvisioningResult {
   retryAfterMs: number;
 }
 
-/** : 参数校验失败（空白 tenantId/requesterId/routeScopeKey）结果。 */
+/** 参数校验失败（空白 tenantId/requesterId/routeScopeKey）结果。 */
 export interface RequestHostedProvisioningInvalid {
   valid: false;
   /** 错误码。 */
@@ -44,7 +44,7 @@ function isBlank(value: string): boolean {
 /**
  * 创建幂等供应请求工厂。只依赖 store。
  *
- * : 参数合法才落库；任一空白 tenantId/requesterId/routeScopeKey 在 store 写入前 fail closed。
+ * 参数合法才落库；任一空白 tenantId/requesterId/routeScopeKey 在 store 写入前 fail closed。
  */
 export function createRequestHostedProvisioning(deps: {
   store: HostedProvisioningRequestStore;
@@ -54,7 +54,7 @@ export function createRequestHostedProvisioning(deps: {
     requesterId: string;
     routeScopeKey: string;
   }): Promise<RequestHostedProvisioningResult | RequestHostedProvisioningInvalid> {
-    // : 空白校验——store 写入前 fail closed（不抛错、不写入）。
+    // 空白校验——store 写入前 fail closed（不抛错、不写入）。
     if (isBlank(params.tenantId)) {
       return { valid: false, code: "BLANK_TENANT", reason: "tenantId 不能为空" };
     }

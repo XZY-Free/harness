@@ -20,14 +20,14 @@ import { createHash } from "node:crypto";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
-import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
-import { tenant as tenantTable } from "@/lib/persistence/schema/identity";
-import { credentialRefTable } from "@/lib/persistence/schema/tool";
 import {
   OutboundCredentialError,
   outboundCredentialHeaders,
   resolveOutboundCredential,
 } from "@/lib/identity/resolve-outbound-credential";
+import { ensureDefaultTenant } from "@/lib/identity/tenant-queries";
+import { tenant as tenantTable } from "@/lib/persistence/schema/identity";
+import { credentialRefTable } from "@/lib/persistence/schema/tool";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const TOKEN = "external-secret-token-a2a";
@@ -51,7 +51,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   delete process.env[ENV_NAME];
-  delete process.env["SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING"];
+  process.env.SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING = undefined;
 });
 
 async function seedCredentialRef(
@@ -154,7 +154,7 @@ describe("resolveOutboundCredential（external authority）", () => {
   });
 
   it("bearer：env token 空 → 拒绝", async () => {
-    process.env["SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING"] = "";
+    process.env.SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING = "";
     const refId = await seedCredentialRef({
       vaultRef: "SNOWHARNESS_TEST_OUTBOUND_CREDENTIAL_MISSING",
       fingerprint: `sha256:${createHash("sha256").update("", "utf8").digest("hex")}`,
@@ -199,7 +199,11 @@ describe("resolveOutboundCredential（external authority）", () => {
   it("unsupported identity（workload_token/api_key）→ identity_mode_invalid，不自动映射 bearer", async () => {
     // workload_token 属 Runtime 域 hosted token，不进入 external authority。
     await expectAuthErrorKind(
-      resolveOutboundCredential({ tenantId, identityMode: "workload_token", credentialRefId: null }),
+      resolveOutboundCredential({
+        tenantId,
+        identityMode: "workload_token",
+        credentialRefId: null,
+      }),
       "identity_mode_invalid",
     );
     await expectAuthErrorKind(

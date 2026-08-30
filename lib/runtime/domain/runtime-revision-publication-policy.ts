@@ -7,7 +7,7 @@
  * ⚠️ Attestation 证据策略已迁移至统一模型：
  * lib/artifacts/domain/artifact-evidence-policy.ts
  * 本文件保留 Runtime 发布专有错误类型，不再定义 ArtifactEvidencePolicy。
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 参见：正式架构
  */
 import type { PublicationConformanceCaseId } from "@/lib/runtime/domain/runtime-conformance-contract";
 

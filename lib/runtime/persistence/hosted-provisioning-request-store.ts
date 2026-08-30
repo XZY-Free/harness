@@ -1,7 +1,7 @@
 /**
  * HostedProvisioningRequest Store 接口。
  *
- * 专题01 冻结（runtime-only）：身份权威 (tenantId, routeScopeKey)。
+ * Runtime-only Authority：身份权威 (tenantId, routeScopeKey)。
  * - insert 携带非空 requesterId，无 Agent 字段、无可选 desiredRuntimeKey。
  * - findActiveRequest 只按 (tenantId, routeScopeKey) 幂等。
  * - 已删除 findReadyByAgent（Agent 黑盒 A2A，Hosted 不按 Agent 查 ready 请求）。
@@ -29,7 +29,7 @@ export interface HostedProvisioningRequestStore {
   /** 更新状态。: 必须提供 workerId 进行 lease owner 校验。 */
   updateState(params: {
     requestId: string;
-    /** : Lease Owner 校验 — WHERE leaseOwner = workerId。 */
+    /** Lease Owner 校验 — WHERE leaseOwner = workerId。 */
     workerId: string;
     state: ProvisioningState;
     currentStep?: string | null;
@@ -39,9 +39,9 @@ export interface HostedProvisioningRequestStore {
     leaseExpiresAt?: Date | null;
     lastError?: string | null;
     lastAttemptAt?: Date | null;
-    /** : Step Checkpoint 更新（runtime/route；不含 Agent）。 */
+    /** Step Checkpoint 更新（runtime/route；不含 Agent）。 */
     checkpoint?: StepCheckpoint;
-    /** : 最近完成的步骤。 */
+    /** 最近完成的步骤。 */
     lastCompletedStep?: string | null;
   }): Promise<HostedProvisioningRequestRow>;
 
@@ -67,7 +67,7 @@ export interface NewProvisioningRequestInput {
   updatedAt: Date;
 }
 
-/** : Step Checkpoint — Saga 每步完成后的产出数据（runtime/route；不含 Agent）。 */
+/** Step Checkpoint — Saga 每步完成后的产出数据（runtime/route；不含 Agent）。 */
 export interface StepCheckpoint {
   runtimeId?: string | null;
   runtimeRevisionId?: string | null;

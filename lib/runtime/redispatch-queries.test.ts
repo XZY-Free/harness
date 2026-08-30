@@ -550,8 +550,6 @@ function buildRedispatchParams(
         expires_at: new Date(Date.now() + 60000).toISOString(),
       },
     }),
-    runtimeRevisionId: seeded.runtimeRevisionId,
-    agentRevision: seeded.agentRevision,
     actorType: "system",
     actorId: null,
     correlationId: "redispatch-test-1",

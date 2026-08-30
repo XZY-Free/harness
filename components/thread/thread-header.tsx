@@ -1,9 +1,9 @@
 /**
- * Thread 顶部固定头部（S10-W02）。
+ * Thread 顶部固定头部。
  *
  * 事实源：
  * - docs/architecture/product-surfaces-and-admin.md
- *   S10-W02：「Thread 顶部固定展示主 Agent、可选 Goal、当前任务状态和默认执行位置」
+ *   「Thread 顶部固定展示主 Agent、可选 Goal、当前任务状态和默认执行位置」
  *
  * 职责：
  * - 展示 Thread title（或 "新会话"）。
@@ -11,7 +11,7 @@
  * - 展示当前任务状态（从 latest_turn.turn_state 推导）。
  * - 展示默认执行位置（default_environment_definition_id → "Cloud" / "Desktop"，W04 接入 Environment 目录后替换）。
  *
- * 专题01 §15/§35：Thread 不再绑定主 Agent（primary_agent_id 已移除），
+ * Agent 与 Runtime Authority §15/§35：Thread 不再绑定主 Agent（primary_agent_id 已移除），
  * 头部不再展示「主 Agent」行（Agent 目录为空时不伪装助手）。
  *
  * 当前任务状态推导：

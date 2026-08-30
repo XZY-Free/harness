@@ -52,9 +52,9 @@ export type RouteEvidence =
       runtimeArtifactId: string | null;
       runtimeArtifactDigest: string | null;
       runtimeConfigDigest: string;
-      /** Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact（03 §3）。 */
+      /** Runtime 证据种类 — hosted 要求 artifact 全集；external 无 artifact。 */
       runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
-      /** Runtime 目标摘要 — hosted/external 统一发布证据权威（03 §6）。 */
+      /** Runtime 目标摘要 — hosted/external 统一发布证据权威。 */
       runtimeTargetDigest: string;
       capabilityManifestDigest: string;
       runtimeAttestationIds: string[];

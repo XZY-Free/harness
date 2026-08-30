@@ -21,7 +21,7 @@
  * RouteSet 激活、Projection、Binding 必须通过
  * RevisionExecutionEligibilityPolicy 间接调用此验证器，不得各自实现第二套。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 参见：正式架构
  */
 
 import {
@@ -205,7 +205,7 @@ export function validateRuntimePublicationConformanceEvidence(
   if (run.conformanceFormat === null || !allowedFormats.includes(run.conformanceFormat)) {
     errors.push({
       code: "conformance_format_not_allowed",
-      message: `Conformance 格式 ${run.conformanceFormat} 在当前阶段不允许`,
+      message: `Conformance 格式 ${run.conformanceFormat} 不符合当前策略`,
     });
   }
 

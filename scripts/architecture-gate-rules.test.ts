@@ -3,18 +3,20 @@ import {
   type SourceDocument,
   checkAgentCallFinalizationGate,
   checkAgentCallRuntimeBoundaryGate,
+  checkAgentExecutionAuthorityGate,
   checkAgentInvokeAuthorizationGate,
   checkAgentRevisionAuthorityGate,
-  checkNineIssueCloseoutGate,
+  checkDispatchRecoveryAuthorityGate,
   checkResumeTruthfulnessGate,
-  checkTopic01FinalCloseoutGate,
-  collectCloseoutBoundaryViolations,
   collectDeprecatedArchitectureViolations,
-  collectTopic01BoundaryViolations,
+  collectExecutionBoundaryViolations,
+  collectHarnessAgentBoundaryViolations,
+  collectImplementationHistoryViolations,
+  collectRetiredModuleDependencyViolations,
 } from "./architecture-gate-rules";
 
 /**
- * 专题：Architecture Gate 的 deprecated/legacy 检查边界（纯规则模块）。
+ * Architecture Gate 的 retired implementation 检查边界（纯规则模块）。
  *
  * 业务不变量：/test-support/ 不因路径整体豁免——只允许 .test.ts/.test.tsx 与
  * 显式精确文件白名单跳过。该模块是抽取自 architecture-gate.ts 的纯规则实现
@@ -29,6 +31,71 @@ import {
 function doc(path: string, source: string): SourceDocument {
   return { path, source };
 }
+
+describe("source history and retired dependency gates", () => {
+  it("Agent/Runtime/Route 正式源码出现施工编号时失败", () => {
+    const documents = [
+      doc("lib/agents/application/example.ts", "// Batch 8"),
+      doc("lib/runtime/example.ts", "// docs/V12/01/03 §5"),
+      doc("lib/routes/example.ts", "// 阶段 6 S06-C04"),
+    ];
+    expect(collectImplementationHistoryViolations(documents)).toEqual([
+      "lib/agents/application/example.ts",
+      "lib/runtime/example.ts",
+      "lib/routes/example.ts",
+    ]);
+  });
+
+  it("docs 历史、测试拒绝文本与合法协议版本不误报", () => {
+    const documents = [
+      doc("docs/V12/01/history.md", "Batch 8 Stage C"),
+      doc("lib/runtime/example.test.ts", "expect(source).not.toContain('专题01')"),
+      doc("lib/agents/transport.ts", 'const protocolVersion = "0.3.0"; const api = "/v1";'),
+    ];
+    expect(collectImplementationHistoryViolations(documents)).toEqual([]);
+  });
+
+  it("test-support 不按目录豁免施工历史", () => {
+    const documents = [doc("lib/agents/test-support/provider.ts", "// Phase 2 temporary provider")];
+    expect(collectImplementationHistoryViolations(documents)).toEqual([
+      "lib/agents/test-support/provider.ts",
+    ]);
+  });
+
+  it("外部规范只可按精确文件豁免", () => {
+    const documents = [
+      doc("lib/artifacts/verification/schemas/external.json", "Phase 2"),
+      doc("lib/runtime/internal.ts", "Phase 2"),
+    ];
+    expect(
+      collectImplementationHistoryViolations(
+        documents,
+        new Set(["lib/artifacts/verification/schemas/external.json"]),
+      ),
+    ).toEqual(["lib/runtime/internal.ts"]);
+  });
+
+  it("生产或测试 import 已删除模块时失败，纯拒绝文本合法", () => {
+    const documents = [
+      doc(
+        "lib/routes/example.test.ts",
+        'import { upsert } from "@/lib/routes/application/upsert-deployment-route";',
+      ),
+      doc(
+        "lib/agents/test-support/provider.ts",
+        'export { old } from "@/lib/runtime/transport/a2a-transport";',
+      ),
+      doc(
+        "lib/routes/rejection.test.ts",
+        'expect(source).not.toContain("@/lib/routes/application/disable-deployment-route")',
+      ),
+    ];
+    expect(collectRetiredModuleDependencyViolations(documents)).toEqual([
+      "lib/routes/example.test.ts",
+      "lib/agents/test-support/provider.ts",
+    ]);
+  });
+});
 
 describe("checkAgentCallRuntimeBoundaryGate", () => {
   const valid = (): SourceDocument[] => [
@@ -133,16 +200,6 @@ describe("checkAgentRevisionAuthorityGate", () => {
     ];
     expect(checkAgentRevisionAuthorityGate(documents).failures).toContain(
       "Agent Contract 第二版本轴/发布 Authority 仍存在：lib/agents/application/contract-publication.ts",
-    );
-  });
-
-  it("Agent 控制面生产注释保留施工版本命名时失败", () => {
-    const documents = [
-      ...valid(),
-      doc("lib/agents/application/example.ts", "// 专题01 Batch8 docs/V12/01 阶段 5"),
-    ];
-    expect(checkAgentRevisionAuthorityGate(documents).failures).toContain(
-      "Agent 控制面生产源码仍含施工版本命名：lib/agents/application/example.ts",
     );
   });
 });
@@ -309,20 +366,20 @@ describe("collectDeprecatedArchitectureViolations", () => {
  * 专题：Architecture Gate 23.2 边界规则（纯规则模块）。
  *
  * API：
- *   collectTopic01BoundaryViolations(documents: readonly SourceDocument[]) => string[]
+ *   collectHarnessAgentBoundaryViolations(documents: readonly SourceDocument[]) => string[]
  *
  * 返回违规 path，保持输入顺序、唯一。规则定义文件 scripts/architecture-gate.ts 与
  * scripts/architecture-gate-rules.ts 精确排除（按文件，非目录豁免）；注释剥离后仅对
  * 可执行代码匹配。
  */
 
-describe("collectTopic01BoundaryViolations", () => {
+describe("collectHarnessAgentBoundaryViolations", () => {
   it("Thread.primaryAgentId 与 primary_agent_id 均违规", () => {
     const documents = [
       doc("lib/runtime/thread.ts", "const t: Thread = { primaryAgentId: 'a1' };"),
       doc("lib/runtime/thread-snake.ts", "const t: Thread = { primary_agent_id: 'a1' };"),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("lib/runtime/thread.ts");
     expect(violations).toContain("lib/runtime/thread-snake.ts");
   });
@@ -331,17 +388,23 @@ describe("collectTopic01BoundaryViolations", () => {
     const documents = [
       doc("app/api/v1/threads/route.ts", "type Body = { agent_id: string; title: string };"),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toContain("app/api/v1/threads/route.ts");
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
+      "app/api/v1/threads/route.ts",
+    );
   });
 
   it("app/api/v1/threads/route.ts 可执行代码出现 agent_id 字段即违规（optional 不豁免）", () => {
     const documents = [doc("app/api/v1/threads/route.ts", "type Body = { agent_id?: string };")];
-    expect(collectTopic01BoundaryViolations(documents)).toContain("app/api/v1/threads/route.ts");
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
+      "app/api/v1/threads/route.ts",
+    );
   });
 
   it("agent_id 规则仅针对 app/api/v1/threads/route.ts，不扩大到其他文件", () => {
     const documents = [doc("app/api/v1/agents/route.ts", "type Body = { agent_id?: string };")];
-    expect(collectTopic01BoundaryViolations(documents)).not.toContain("app/api/v1/agents/route.ts");
+    expect(collectHarnessAgentBoundaryViolations(documents)).not.toContain(
+      "app/api/v1/agents/route.ts",
+    );
   });
 
   it("DEFAULT_AGENT_KEY / seedDefaultAgent / defaultAgentId 各自违规", () => {
@@ -350,15 +413,35 @@ describe("collectTopic01BoundaryViolations", () => {
       doc("lib/runtime/seed.ts", "function seedDefaultAgent() { return; }"),
       doc("lib/runtime/creator.ts", "const defaultAgentId = null;"),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("lib/runtime/defaults.ts");
     expect(violations).toContain("lib/runtime/seed.ts");
     expect(violations).toContain("lib/runtime/creator.ts");
   });
 
+  it("B1 schema 继续暴露旧 Thread 状态或转出正式 Authority Schema 时违规", () => {
+    const documents = [
+      doc(
+        "lib/db/schema.ts",
+        'export const THREAD_STATUSES = ["idle"]; export * from "@/lib/persistence/schema/agents";',
+      ),
+    ];
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain("lib/db/schema.ts");
+  });
+
+  it("本地 Runtime resolver 接受 Thread/Skill Runtime 选择时违规", () => {
+    const documents = [
+      doc(
+        "lib/runtime/resolver.ts",
+        "export function resolveRuntimeTypeForThread(thread) { return thread?.runtimeType; }",
+      ),
+    ];
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain("lib/runtime/resolver.ts");
+  });
+
   it("agentKey === 'default' fallback 违规", () => {
     const documents = [doc("lib/runtime/selector.ts", "if (agentKey === 'default') { select(); }")];
-    expect(collectTopic01BoundaryViolations(documents)).toContain("lib/runtime/selector.ts");
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain("lib/runtime/selector.ts");
   });
 
   it("threadId === 'new'、JSX threadId=\"new\"、JSX threadId={'new'} 各自违规", () => {
@@ -367,7 +450,7 @@ describe("collectTopic01BoundaryViolations", () => {
       doc("app/harness/row-a.tsx", 'const a = <ThreadRow threadId="new" />;'),
       doc("app/harness/row-b.tsx", "const b = <ThreadRow threadId={'new'} />;"),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("app/harness/list.tsx");
     expect(violations).toContain("app/harness/row-a.tsx");
     expect(violations).toContain("app/harness/row-b.tsx");
@@ -378,7 +461,7 @@ describe("collectTopic01BoundaryViolations", () => {
       doc("lib/router/chat.ts", "const p = '/chat/new';"),
       doc("lib/router/desktop.ts", "const q = '/desktop/new';"),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("lib/router/chat.ts");
     expect(violations).toContain("lib/router/desktop.ts");
   });
@@ -387,12 +470,14 @@ describe("collectTopic01BoundaryViolations", () => {
     const documents = [
       doc("components/thread-launcher.ts", "if (route.kind === 'chat') { launch(); }"),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toContain("components/thread-launcher.ts");
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
+      "components/thread-launcher.ts",
+    );
   });
 
   it("lib/routes 内 kind: 'chat' 违规", () => {
     const documents = [doc("lib/routes/chat-route.ts", "const route = { kind: 'chat' };")];
-    expect(collectTopic01BoundaryViolations(documents)).toContain("lib/routes/chat-route.ts");
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain("lib/routes/chat-route.ts");
   });
 
   it("Agent target 与 Runtime evidence 同对象构造违规", () => {
@@ -402,7 +487,7 @@ describe("collectTopic01BoundaryViolations", () => {
         'const row = { targetKind: "agent", runtimeRevisionId: "runtime-1" };',
       ),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toContain(
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
       "lib/routes/projection/legacy-agent-route.ts",
     );
   });
@@ -414,7 +499,7 @@ describe("collectTopic01BoundaryViolations", () => {
         'const target = input.target === "agent" ? { kind: "runtime" } : input.target;',
       ),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toContain(
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
       "lib/routes/application/fallback.ts",
     );
   });
@@ -426,9 +511,50 @@ describe("collectTopic01BoundaryViolations", () => {
         'uniqueIndex("uq").on(table.tenantId, table.agentId, table.routeScopeKey);',
       ),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toContain(
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
       "lib/persistence/schema/deployment-route.ts",
     );
+  });
+
+  it("RouteSet 对外合同用 nullable agent 字段表达 target 违规", () => {
+    const documents = [
+      doc(
+        "lib/control-plane-client/contracts/route.ts",
+        "export interface RouteSetDTO { agent_id?: string | null }",
+      ),
+    ];
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
+      "lib/control-plane-client/contracts/route.ts",
+    );
+  });
+
+  it("根据 nullable agentId 推断 Route target 违规", () => {
+    const documents = [
+      doc(
+        "lib/routes/application/infer-target.ts",
+        'const target = agentId ? { kind: "agent" } : { kind: "runtime" };',
+      ),
+    ];
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
+      "lib/routes/application/infer-target.ts",
+    );
+  });
+
+  it("Route activation 与 eligibility projection 绕唯一 Store 直接写入时违规", () => {
+    const documents = [
+      doc(
+        "lib/routes/application/direct-activation.ts",
+        "db.update(deploymentRouteTable).set({ activeRouteRevisionId });",
+      ),
+      doc(
+        "lib/routes/application/direct-projection.ts",
+        "db.insert(routeEligibilityProjectionTable).values(row);",
+      ),
+    ];
+    expect(collectHarnessAgentBoundaryViolations(documents)).toEqual([
+      "lib/routes/application/direct-activation.ts",
+      "lib/routes/application/direct-projection.ts",
+    ]);
   });
 
   it("agents.length === 0 后 return/throw 的执行阻断违规", () => {
@@ -436,14 +562,16 @@ describe("collectTopic01BoundaryViolations", () => {
       doc("app/desktop/harness.tsx", "if (agents.length === 0) return;"),
       doc("app/desktop/harness-throw.tsx", "if (agents.length === 0) throw new Error('none');"),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("app/desktop/harness.tsx");
     expect(violations).toContain("app/desktop/harness-throw.tsx");
   });
 
   it('/test-support/ 不整体豁免：helper.ts 中 threadId="new" 违规', () => {
     const documents = [doc("lib/test-support/helper.ts", 'const id = threadId="new";')];
-    expect(collectTopic01BoundaryViolations(documents)).toContain("lib/test-support/helper.ts");
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
+      "lib/test-support/helper.ts",
+    );
   });
 
   it('.test.ts/.test.tsx 可排除（含 threadId="new"）', () => {
@@ -451,7 +579,7 @@ describe("collectTopic01BoundaryViolations", () => {
       doc("lib/runtime/example.test.ts", 'const id = threadId="new";'),
       doc("lib/runtime/example.test.tsx", "const id = threadId={'new'};"),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+    expect(collectHarnessAgentBoundaryViolations(documents)).toEqual([]);
   });
 
   it("注释中的边界词不应违规", () => {
@@ -461,7 +589,7 @@ describe("collectTopic01BoundaryViolations", () => {
         "// primaryAgentId 与 DEFAULT_AGENT_KEY 已退役，agentKey === 'default' 禁用，threadId=\"new\" 为假路由，'/chat/new' 不应使用。",
       ),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+    expect(collectHarnessAgentBoundaryViolations(documents)).toEqual([]);
   });
 
   it("规则定义文件精确排除：scripts/architecture-gate.ts", () => {
@@ -471,14 +599,14 @@ describe("collectTopic01BoundaryViolations", () => {
         "// primaryAgentId DEFAULT_AGENT_KEY agentKey === 'default' threadId=\"new\" '/chat/new' agents.length === 0 return",
       ),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+    expect(collectHarnessAgentBoundaryViolations(documents)).toEqual([]);
   });
 
   it("规则定义文件精确排除：scripts/architecture-gate-rules.ts", () => {
     const documents = [
       doc("scripts/architecture-gate-rules.ts", "const p = 'primaryAgentId DEFAULT_AGENT_KEY';"),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+    expect(collectHarnessAgentBoundaryViolations(documents)).toEqual([]);
   });
 
   it("正常基础 Harness 代码无违规", () => {
@@ -493,23 +621,23 @@ describe("collectTopic01BoundaryViolations", () => {
         ].join("\n"),
       ),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+    expect(collectHarnessAgentBoundaryViolations(documents)).toEqual([]);
   });
 });
 
-// ─── A2A AgentCall 边界（Batch6，RED 测试）───────────────
+// ─── A2A AgentCall 边界 ──────────────────────────────────
 
 /**
- * 专题：Topic01 gate 必须拒绝任何旧 A2A Runtime authority 与兼容残留，
+ * Gate 必须拒绝任何旧 A2A Runtime authority 与双轨残留，
  * 而合法 AgentCall A2A（lib/agents/calls/transport/a2a/…）必须通过。
  * 字段检查（runtimeExecutionRef/runtimeSessionRef）仅绑定 AgentCall
  * transport 作用域，合法 Harness runtime 字段不受牵连。
  */
 
-describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED）", () => {
+describe("collectHarnessAgentBoundaryViolations A2A AgentCall boundary", () => {
   it("旧 A2A Runtime 文件 lib/runtime/transport/a2a-transport.ts 即使内容无关紧要也违规", () => {
     const documents = [doc("lib/runtime/transport/a2a-transport.ts", "export const VERSION = 1;")];
-    expect(collectTopic01BoundaryViolations(documents)).toContain(
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
       "lib/runtime/transport/a2a-transport.ts",
     );
   });
@@ -521,7 +649,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
         "export class A2ABackgroundFailureHandler { handle(err: Error): void {} }",
       ),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toContain(
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
       "lib/runtime/transport/a2a-background-failure-handler.ts",
     );
   });
@@ -532,12 +660,12 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
       "lib/persistence/schema/runtimes.ts",
       'export const RUNTIME_PROTOCOL_TYPES = ["harness_runtime_protocol", "a2a"] as const;',
     );
-    expect(collectTopic01BoundaryViolations([schema])).toContain(
+    expect(collectHarnessAgentBoundaryViolations([schema])).toContain(
       "lib/persistence/schema/runtimes.ts",
     );
     // runtime 生产 protocolType 赋值不得为 a2a（文件名不含 a2a，靠赋值规则判别）。
     const registration = doc("lib/runtime/registration.ts", 'const r = { protocolType: "a2a" };');
-    expect(collectTopic01BoundaryViolations([registration])).toContain(
+    expect(collectHarnessAgentBoundaryViolations([registration])).toContain(
       "lib/runtime/registration.ts",
     );
     // 合法 AgentContractSnapshot protocolType a2a 仍允许。
@@ -545,7 +673,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
       "lib/agents/domain/agent-contract-snapshot.ts",
       'export const snapshot = { protocolType: "a2a" as const };',
     );
-    expect(collectTopic01BoundaryViolations([agentSnapshot])).toEqual([]);
+    expect(collectHarnessAgentBoundaryViolations([agentSnapshot])).toEqual([]);
   });
 
   it("app/lib 从旧 a2a transport import/export 违规", () => {
@@ -559,7 +687,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
         'export { A2AResponse } from "@/lib/runtime/transport/a2a-transport";',
       ),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("app/api/v1/runtime/ingest/route.ts");
     expect(violations).toContain("lib/agents/gateway.ts");
   });
@@ -569,7 +697,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
       doc("lib/runtime/sink.ts", "export const sink = new A2AEventBatchSink();"),
       doc("lib/runtime/resolver.ts", "export const resolver = new A2ARuntimeRefResolver();"),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("lib/runtime/sink.ts");
     expect(violations).toContain("lib/runtime/resolver.ts");
   });
@@ -585,7 +713,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
         'import { RuntimeHttpClient } from "../runtime-http-client";',
       ),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("lib/agents/calls/transport/runtime-http-client.ts");
     expect(violations).toContain("lib/agents/calls/transport/a2a/x.ts");
   });
@@ -595,7 +723,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
       doc("lib/agents/calls/transport/a2a/y.ts", "const ref = { runtimeExecutionRef: 're1' };"),
       doc("lib/agents/calls/transport/a2a/z.ts", "const ref = { runtimeSessionRef: 'rs1' };"),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("lib/agents/calls/transport/a2a/y.ts");
     expect(violations).toContain("lib/agents/calls/transport/a2a/z.ts");
   });
@@ -607,7 +735,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
         "const revisionId = resolution.runtimeRevisionId;",
       ),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toContain(
+    expect(collectHarnessAgentBoundaryViolations(documents)).toContain(
       "lib/agents/calls/application/resolve-agent-call-binding.ts",
     );
   });
@@ -617,7 +745,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
       doc("lib/runtime/session-binding.ts", "const ref = { runtimeSessionRef: 'rs1' };"),
       doc("lib/runtime/execution-ref.ts", "const ref = { runtimeExecutionRef: 're1' };"),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+    expect(collectHarnessAgentBoundaryViolations(documents)).toEqual([]);
   });
 
   it("AgentCall transport 从 runtime event-ingress 或 recovery/markInvocationLost import 违规", () => {
@@ -631,7 +759,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
         'import { markInvocationLost } from "@/lib/runtime/recovery";',
       ),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("lib/agents/calls/transport/a2a/ingest.ts");
     expect(violations).toContain("lib/agents/calls/transport/a2a/recover.ts");
   });
@@ -647,7 +775,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
         'import a2a = require("@/lib/runtime/transport/a2a-transport");',
       ),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("lib/agents/calls/transport/a2a/bridge.ts");
     expect(violations).toContain("lib/agents/calls/transport/a2a/alias.ts");
   });
@@ -663,7 +791,7 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
         'export interface AgentCallIngressEvent { kind: "agent_call"; id: string; }',
       ),
     ];
-    expect(collectTopic01BoundaryViolations(documents)).toEqual([]);
+    expect(collectHarnessAgentBoundaryViolations(documents)).toEqual([]);
   });
 
   it("注释记录被禁边界接受（除非文件名自身被禁）", () => {
@@ -673,13 +801,13 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
         "// A2ARuntimeRefResolver、markInvocationLost、a2a-transport 均被禁，AgentCall 不再绑定 runtime ExecutionRef。",
       ),
     ];
-    expect(collectTopic01BoundaryViolations(commentOnly)).toEqual([]);
+    expect(collectHarnessAgentBoundaryViolations(commentOnly)).toEqual([]);
 
     // 文件名自身为旧 A2A Runtime 残留则即使全注释也违规。
     const forbiddenFile = [
       doc("lib/runtime/transport/a2a-transport.ts", "// 已被 AgentCall A2A 取代，本文件仅作注释。"),
     ];
-    expect(collectTopic01BoundaryViolations(forbiddenFile)).toContain(
+    expect(collectHarnessAgentBoundaryViolations(forbiddenFile)).toContain(
       "lib/runtime/transport/a2a-transport.ts",
     );
   });
@@ -695,68 +823,68 @@ describe("collectTopic01BoundaryViolations A2A AgentCall boundary（Batch6 RED�
         "const ref = { runtimeExecutionRef: 're1' };",
       ),
     ];
-    const violations = collectTopic01BoundaryViolations(documents);
+    const violations = collectHarnessAgentBoundaryViolations(documents);
     expect(violations).toContain("lib/agents/calls/test-support/a2a-client-helper.ts");
     expect(violations).toContain("lib/agents/calls/test-support/transport-helper.ts");
   });
 });
 
-// ─── 剩余代码收口（V12/01 08 专项）规则 ────────────────────
+// ─── Execution wire 与特例分支边界 ────────────────────────
 
-describe("collectCloseoutBoundaryViolations（E1-E4）", () => {
-  it("E1：生产 A2A wire 出现 snowharness.execution_subject → 违规", () => {
+describe("collectExecutionBoundaryViolations", () => {
+  it("生产 A2A wire 出现 snowharness.execution_subject → 违规", () => {
     const documents = [
       doc("lib/runtime/transport/a2a-transport.ts", 'const key = "snowharness.execution_subject";'),
     ];
-    expect(collectCloseoutBoundaryViolations(documents)).toEqual([
+    expect(collectExecutionBoundaryViolations(documents)).toEqual([
       {
         path: "lib/runtime/transport/a2a-transport.ts",
-        title: "E1 旧 namespaced execution_subject wire",
+        title: "namespaced execution_subject wire",
       },
     ]);
   });
 
-  it("E2：subject_kind 裸 service 输出 → 违规；platform_service 合法", () => {
+  it("subject_kind 裸 service 输出 → 违规；platform_service 合法", () => {
     const bad = doc(
       "lib/runtime/transport/x.ts",
       'const subject = { subject_kind: subjectType === "service" ? "service" : "platform_user" };',
     );
-    expect(collectCloseoutBoundaryViolations([bad])).toEqual([
-      { path: "lib/runtime/transport/x.ts", title: "E2 subject_kind 裸 service 输出" },
+    expect(collectExecutionBoundaryViolations([bad])).toEqual([
+      { path: "lib/runtime/transport/x.ts", title: "subject_kind 裸 service 输出" },
     ]);
     const good = doc(
       "lib/runtime/transport/x.ts",
       'const subject = { subject_kind: "platform_service" };',
     );
-    expect(collectCloseoutBoundaryViolations([good])).toEqual([]);
+    expect(collectExecutionBoundaryViolations([good])).toEqual([]);
   });
 
-  it("E3：Studio 生产自行构造 conformance_run_id 字面量 → 违规；DTO 值合法", () => {
+  it("Studio 生产自行构造 conformance_run_id 字面量 → 违规；DTO 值合法", () => {
     const bad = doc("components/studio/panel.tsx", 'conformance_run_id: "conf-1",');
-    expect(collectCloseoutBoundaryViolations([bad])).toEqual([
+    expect(collectExecutionBoundaryViolations([bad])).toEqual([
       {
         path: "components/studio/panel.tsx",
-        title: "E3 Studio/生产自行构造 conformance_run_id 字面量",
+        title: "Studio/生产自行构造 conformance_run_id 字面量",
       },
     ]);
     const good = doc(
       "components/studio/panel.tsx",
       'conformance_run_id: revision.latest_valid_conformance_run_id ?? "",',
     );
-    expect(collectCloseoutBoundaryViolations([good])).toEqual([]);
+    expect(collectExecutionBoundaryViolations([good])).toEqual([]);
   });
 
-  it("E4：HR 特例分支（hr-assistant/veadk/8100）→ 违规；fixture 精确白名单跳过", () => {
+  it("HR 特例分支（hr-assistant/veadk/8100）→ 违规；fixture 精确白名单跳过", () => {
     expect(
-      collectCloseoutBoundaryViolations([
+      collectExecutionBoundaryViolations([
         doc("lib/runtime/x.ts", 'if (agent === "hr-assistant") { }'),
       ]),
     ).toHaveLength(1);
     expect(
-      collectCloseoutBoundaryViolations([doc("lib/runtime/x.ts", "const port = 8100;")]),
+      collectExecutionBoundaryViolations([doc("lib/runtime/x.ts", "const port = 8100;")]),
     ).toHaveLength(1);
     expect(
-      collectCloseoutBoundaryViolations([
+      collectExecutionBoundaryViolations([
         doc("lib/agents/test-support/hr-agent-contract.ts", 'id: "hr-assistant"'),
       ]),
     ).toEqual([]);
@@ -767,11 +895,11 @@ describe("collectCloseoutBoundaryViolations（E1-E4）", () => {
       doc("lib/runtime/x.test.ts", 'const key = "snowharness.execution_subject";'),
       doc("lib/runtime/x.ts", "// 注释中的 hr-assistant 不算"),
     ];
-    expect(collectCloseoutBoundaryViolations(documents)).toEqual([]);
+    expect(collectExecutionBoundaryViolations(documents)).toEqual([]);
   });
 });
 
-describe("checkResumeTruthfulnessGate（08 §5）", () => {
+describe("checkResumeTruthfulnessGate", () => {
   const RESOLVE_ROUTE = "app/api/v1/threads/[thread_id]/user-actions/[request_id]/resolve/route.ts";
   const A2A = "lib/agents/calls/transport/a2a/a2a-client.ts";
 
@@ -802,9 +930,9 @@ describe("checkResumeTruthfulnessGate（08 §5）", () => {
   });
 });
 
-// ─── 九项收口 Gate F1-F8 ────────────────────────────────────
+// ─── Dispatch 与 Recovery Authority ───────────────────────
 
-describe("checkNineIssueCloseoutGate（F1-F8）", () => {
+describe("checkDispatchRecoveryAuthorityGate", () => {
   const PATHS = {
     commandDispatcher: "lib/runtime/command-dispatcher.ts",
     dispatcher: "lib/runtime/dispatcher.ts",
@@ -844,20 +972,20 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
   }
 
   it("全部合规 → 通过", () => {
-    const result = checkNineIssueCloseoutGate(compliantDocs());
+    const result = checkDispatchRecoveryAuthorityGate(compliantDocs());
     expect(result).toEqual({ passed: true, failures: [] });
   });
 
-  it("F1 缺 retry owner → 失败", () => {
+  it("缺 retry owner → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === PATHS.commandDispatcher ? doc(d.path, "return skipped;") : d,
     );
-    const result = checkNineIssueCloseoutGate(docs);
+    const result = checkDispatchRecoveryAuthorityGate(docs);
     expect(result.passed).toBe(false);
-    expect(result.failures.some((f) => f.includes("F1"))).toBe(true);
+    expect(result.failures.some((f) => f.includes("scheduleCommandTransientRetry"))).toBe(true);
   });
 
-  it("F2 recovery 使用全局 markSessionBindingLost → 失败", () => {
+  it("recovery 使用全局 markSessionBindingLost → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === PATHS.recovery
         ? doc(
@@ -866,11 +994,11 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
           )
         : d,
     );
-    const result = checkNineIssueCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("F2"))).toBe(true);
+    const result = checkDispatchRecoveryAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("全局 db 版本"))).toBe(true);
   });
 
-  it("F5 缺 command_not_found 显式分支 → 失败", () => {
+  it("缺 command_not_found 显式分支 → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === PATHS.resolveRoute
         ? doc(
@@ -879,32 +1007,32 @@ describe("checkNineIssueCloseoutGate（F1-F8）", () => {
           )
         : d,
     );
-    const result = checkNineIssueCloseoutGate(docs);
+    const result = checkDispatchRecoveryAuthorityGate(docs);
     expect(result.failures.some((f) => f.includes("command_not_found"))).toBe(true);
   });
 
-  it("F6 硬编码 user_action=true → 失败", () => {
+  it("硬编码 user_action=true → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === PATHS.transport
         ? doc(d.path, "runtime_session_ref: contextId, features: { user_action: true }")
         : d,
     );
-    const result = checkNineIssueCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("F6"))).toBe(true);
+    const result = checkDispatchRecoveryAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("硬编码"))).toBe(true);
   });
 
-  it("F7 Parser 缺 input_required/resume 约束 → 失败", () => {
+  it("Parser 缺 input_required/resume 约束 → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === PATHS.parser ? doc(d.path, "return flags;") : d,
     );
-    const result = checkNineIssueCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("F7"))).toBe(true);
+    const result = checkDispatchRecoveryAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("语义约束"))).toBe(true);
   });
 });
 
-// ─── Batch9 最终收口 Gate（R1-R8）──────────────────────────────
+// ─── Agent execution Authority ────────────────────────────
 
-describe("checkTopic01FinalCloseoutGate（Batch9 R1-R8）", () => {
+describe("checkAgentExecutionAuthorityGate", () => {
   /** 合规 fixture：旧 Authority 归零 + AgentCall child domain 存在。 */
   function compliantDocs(): SourceDocument[] {
     return [
@@ -921,58 +1049,70 @@ describe("checkTopic01FinalCloseoutGate（Batch9 R1-R8）", () => {
   }
 
   it("合规代码 → passed", () => {
-    const result = checkTopic01FinalCloseoutGate(compliantDocs());
+    const result = checkAgentExecutionAuthorityGate(compliantDocs());
     expect(result.passed).toBe(true);
     expect(result.failures).toEqual([]);
   });
 
-  it("R1 ExecutionBinding schema 出现 Agent evidence 列 → 失败", () => {
+  it("ExecutionBinding schema 出现 Agent evidence 列 → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === "lib/persistence/schema/executions.ts"
         ? doc(d.path, "agentRevisionId: varchar(...); agentPublicationRecordId: varchar(...);")
         : d,
     );
-    const result = checkTopic01FinalCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("R1"))).toBe(true);
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("ExecutionBinding"))).toBe(true);
   });
 
-  it("R2 RuntimeRevision schema 出现 Agent/A2A contract authority → 失败", () => {
+  it("RuntimeRevision schema 出现 Agent/A2A contract authority → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === "lib/persistence/schema/runtimes.ts"
         ? doc(d.path, "agentContractSnapshotId: varchar(...);")
         : d,
     );
-    const result = checkTopic01FinalCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("R2"))).toBe(true);
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("RuntimeRevision"))).toBe(true);
   });
 
-  it("R3 Runtime Start Request 出现 agent_instruction_ref → 失败", () => {
+  it("Runtime Start Request 出现 agent_instruction_ref → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === "lib/runtime/runtime-client.ts" ? doc(d.path, "agent_instruction_ref: '...';") : d,
     );
-    const result = checkTopic01FinalCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("R3"))).toBe(true);
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("Runtime Start Request"))).toBe(true);
   });
 
-  it("R4 HostedAgentLoop → 失败", () => {
+  it("Runtime adapter start 参数出现 agentRevisionId → 失败", () => {
+    const docs = [
+      ...compliantDocs(),
+      doc(
+        "lib/runtime/adapters/hosted-adapter.ts",
+        "interface StartInvocationParams { agentRevisionId: string | null }",
+      ),
+    ];
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("agentRevisionId"))).toBe(true);
+  });
+
+  it("HostedAgentLoop → 失败", () => {
     const docs = [
       ...compliantDocs(),
       doc("lib/runtime/adapters/hosted-adapter.ts", "class HostedAgentLoop {}"),
     ];
-    const result = checkTopic01FinalCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("R4"))).toBe(true);
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("HostedAgentLoop"))).toBe(true);
   });
 
-  it("R5 顶层 ThreadItem agent_message → 失败", () => {
+  it("顶层 ThreadItem agent_message → 失败", () => {
     const docs = [
       ...compliantDocs(),
       doc("lib/persistence/schema/conversation.ts", "itemType: 'agent_message'"),
     ];
-    const result = checkTopic01FinalCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("R5"))).toBe(true);
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("agent_message"))).toBe(true);
   });
 
-  it("R6 第二套 Resolver（resolveAgentRoute）→ 失败", () => {
+  it("第二套 Resolver（resolveAgentRoute）→ 失败", () => {
     const docs = [
       ...compliantDocs(),
       doc(
@@ -980,19 +1120,19 @@ describe("checkTopic01FinalCloseoutGate（Batch9 R1-R8）", () => {
         "export function resolveAgentRoute() {}",
       ),
     ];
-    const result = checkTopic01FinalCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("R6"))).toBe(true);
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("Route Resolver"))).toBe(true);
   });
 
-  it("R7 AgentCall domain 缺 parentInvocationId → 失败", () => {
+  it("AgentCall domain 缺 parentInvocationId → 失败", () => {
     const docs = compliantDocs().map((d) =>
       d.path === "lib/agents/calls/domain/agent-call.ts" ? doc(d.path, "agentId: string;") : d,
     );
-    const result = checkTopic01FinalCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("R7"))).toBe(true);
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("parentInvocationId"))).toBe(true);
   });
 
-  it("R8 A2A transport 直接改 parent Invocation 终态 → 失败", () => {
+  it("A2A transport 直接改 parent Invocation 终态 → 失败", () => {
     const docs = [
       ...compliantDocs(),
       doc(
@@ -1000,8 +1140,8 @@ describe("checkTopic01FinalCloseoutGate（Batch9 R1-R8）", () => {
         "markInvocationCompleted(parentInvocationId);",
       ),
     ];
-    const result = checkTopic01FinalCloseoutGate(docs);
-    expect(result.failures.some((f) => f.includes("R8"))).toBe(true);
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("parent Invocation"))).toBe(true);
   });
 
   it("禁词在注释中 → 不违规（剥离注释）", () => {
@@ -1009,7 +1149,7 @@ describe("checkTopic01FinalCloseoutGate（Batch9 R1-R8）", () => {
       ...compliantDocs(),
       doc("lib/runtime/dispatcher.ts", "// 旧的 HostedAgentLoop 已移除，现在用 Harness Loop"),
     ];
-    const result = checkTopic01FinalCloseoutGate(docs);
+    const result = checkAgentExecutionAuthorityGate(docs);
     expect(result.passed).toBe(true);
   });
 
@@ -1018,7 +1158,7 @@ describe("checkTopic01FinalCloseoutGate（Batch9 R1-R8）", () => {
       ...compliantDocs(),
       doc("lib/runtime/adapters/hosted-adapter.test.ts", "class HostedAgentLoop {}"),
     ];
-    const result = checkTopic01FinalCloseoutGate(docs);
+    const result = checkAgentExecutionAuthorityGate(docs);
     expect(result.passed).toBe(true);
   });
 });

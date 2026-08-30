@@ -298,7 +298,7 @@ export function DesktopSidebar({
 
 /**
  * 会话列表。
- * - 全部平铺（专题01 §15/§35：Thread 不再绑主 Agent，primary_agent_id 已移除，
+ * - 全部平铺（Agent 与 Runtime Authority §15/§35：Thread 不再绑主 Agent，primary_agent_id 已移除，
  *   不再按 Agent 分组；Agent 目录为空时无分组语义）。
  * - 当前会话浅灰底高亮。
  */

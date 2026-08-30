@@ -1,10 +1,10 @@
 /**
- * Thread 任务时间线（S10-W02 / S10-W08 / W3-3）。
+ * Thread 任务时间线（ /  / W3-3）。
  *
  * 事实源：
  * - docs/architecture/product-surfaces-and-admin.md
- *   S10-W02：「时间线覆盖用户与 Agent Item、公开进度、ToolCall、Artifact、UserAction、Child Thread 与 Job 结果投影」
- *   S10-W08：「长 Thread、密集 Tool/Event 和大 Artifact 列表保持可交互，按需加载不改变事件顺序」
+ *   「时间线覆盖用户与 Agent Item、公开进度、ToolCall、Artifact、UserAction、Child Thread 与 Job 结果投影」
+ *   「长 Thread、密集 Tool/Event 和大 Artifact 列表保持可交互，按需加载不改变事件顺序」
  * - docs/solutions/desktop-ui-redesign/04-light-theme-and-conversation.md §4（W3-3 分层原则）
  *
  * W3-3 信息架构（视觉基准：03 原型）：

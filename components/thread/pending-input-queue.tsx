@@ -1,9 +1,9 @@
 /**
- * PendingInput 队列 UI（S10-W03 / W4-1 重构）。
+ * PendingInput 队列 UI（ / W4-1 重构）。
  *
  * 事实源：
  * - docs/architecture/product-surfaces-and-admin.md
- *   S10-W03：「PendingInput 可编辑、删除和排序，尚未正式发送的内容不出现在消息历史」
+ *   「PendingInput 可编辑、删除和排序，尚未正式发送的内容不出现在消息历史」
  * - W4-1：从时间线上方移入输入框正上方，紧凑单行条，宽度与输入框对齐。
  *
  * 职责：

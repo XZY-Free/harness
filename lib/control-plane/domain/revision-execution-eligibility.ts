@@ -35,9 +35,7 @@ export interface PolicyRevisionSnapshot {
  * { kind: "none" } → Route 故意不引用 Policy（允许）
  * { kind: "referenced", policyRevisionId, policyRevision } → Route 引用了 Policy
  *
- * 此类型消除了 policyRevisionId: null 的歧义：
- * - 旧语义：null 同时表示"没引用"和"引用失败"
- * - 新语义：kind="none" 表示"没引用"，kind="referenced" 且 policyRevision 存在表示"引用有效"
+ * kind="none" 表示"没引用"，kind="referenced" 且 policyRevision 存在表示"引用有效"。
  */
 export type PolicyRequirement =
   | { kind: "none" }
@@ -73,13 +71,13 @@ export type PolicyRequirementResult =
 // ─── Evidence Snapshot ───────────────────────────────────
 
 /**
- * Revision 执行资格快照 — target 判别联合（专题01 冻结架构）。
+ * Revision 执行资格快照 — target 判别联合（Agent 与 Runtime Authority 分离）。
  *
  * 这是唯一权威的执行资格数据结构，任何模块不得自行定义第二套。
  * - Agent target：只含 Agent 维度证据 + public policy，不含任何 Runtime 字段。
  * - Runtime target：只含 Runtime 维度证据 + public policy，不含任何 Agent 字段。
  *
- * 禁止为 Agent target 编造 runtimeRevisionId placeholder；禁止兼容 flat alias/fallback。
+ * Agent target 不得出现 runtimeRevisionId placeholder、flat alias 或 fallback。
  *
  * policyRevision 使用结构化快照表达。
  * 所有字段必须来自事实源，禁止硬编码。
@@ -117,7 +115,7 @@ export interface RuntimeTargetEvidenceSnapshot {
   runtimeLifecycleState: "active" | "quarantined" | "retired";
   /** Runtime Revision 发布状态。 */
   runtimeRevisionState: "draft" | "published" | "withdrawn";
-  /** Runtime 证据种类（hosted 要求 artifact 全集；external 无 artifact — 03 §3）。 */
+  /** Runtime 证据种类（hosted 要求 artifact 全集；external 无 artifact — ）。 */
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   /** Policy 引用需求。kind="none" = Route 未引用 Policy；kind="referenced" = 引用了 Policy。 */
   policyRequirement: PolicyRequirement;
@@ -183,7 +181,7 @@ export const RevisionExecutionEligibilityPolicy = {
    * Agent"，§14）。因此本 Policy 不做 capability 交叉校验。
    */
   isEligible(snapshot: RevisionExecutionEvidenceSnapshot): RevisionExecutionEligibilityResult {
-    // 专题01 冻结架构：按 target 判别分支。Agent target 只校验 Agent 维度 + policy；
+    // Agent 与 Runtime Authority 分离：按 target 判别分支。Agent target 只校验 Agent 维度 + policy；
     // Runtime target 只校验 Runtime 维度 + policy。互不读取对方证据。
     return snapshot.kind === "agent"
       ? this.evaluateAgent(snapshot)
@@ -252,7 +250,7 @@ export const RevisionExecutionEligibilityPolicy = {
       });
     }
 
-    // 2. Runtime Attestation — Runtime evidence all-or-nothing（03 §3）：
+    // 2. Runtime Attestation — Runtime evidence all-or-nothing：
     // external_endpoint 无 Runtime Artifact（不伪造），跳过 Attestation 维度；
     // hosted_artifact 要求全集 verified 且未撤销。
     if (snapshot.runtimeEvidenceKind !== "external_endpoint") {

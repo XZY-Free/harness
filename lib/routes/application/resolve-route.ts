@@ -8,7 +8,7 @@ import type { RouteEligibilityResolutionStore } from "../persistence/route-eligi
 
 export interface ResolveRouteCommand {
   tenantId: string;
-  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（专题01 冻结架构）。 */
+  /** 显式解析目标 — {kind:"runtime"} 或 {kind:"agent", agentId}（Agent 与 Runtime Authority 分离）。 */
   target: RouteTarget;
   routeScopeKey: string;
   businessKey: { threadId?: string; jobId?: string };
@@ -20,7 +20,7 @@ export interface ResolveRouteCommand {
 export type RouteResolver = (command: ResolveRouteCommand) => Promise<RouteResolutionOutcome>;
 
 /**
- * : 唯一 Resolver — 使用 Projection 作为唯一数据源。
+ * 唯一 Resolver — 使用 Projection 作为唯一数据源。
  */
 export function createResolveRoute(dependencies: {
   store: RouteEligibilityResolutionStore;

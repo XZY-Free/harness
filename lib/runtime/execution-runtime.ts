@@ -18,7 +18,7 @@ import type { ExecResult, ExecutionRuntime, NetworkPolicy, ResourceQuota } from 
  * - spawn 级异常（ENOENT / timeout）内部 catch → `{ ok:false, exitCode:-1 }`，
  * 对齐现有 try/catch 兜底契约，不向上抛
  *
- * container 模式（Stage B）由 `ContainerExecutionRuntime` 提供：`docker exec` 进容器执行。
+ * container 模式由 `ContainerExecutionRuntime` 提供：`docker exec` 进容器执行。
  */
 
 /** stdout / stderr 截断上限（与现有 runCommand/runTests 一致）。 */
@@ -44,7 +44,7 @@ export class HostExecutionRuntime implements ExecutionRuntime {
       timeoutMs?: number;
       logCapBytes?: number;
       onChunk?: (stream: "stdout" | "stderr", chunk: string) => void;
-      /** V6-Batch1-M1：AbortSignal 注入，让 execa 子进程响应取消。 */
+      /** AbortSignal 注入，让 execa 子进程响应取消。 */
       signal?: AbortSignal;
     },
   ): Promise<ExecResult> {
@@ -86,7 +86,7 @@ export class HostExecutionRuntime implements ExecutionRuntime {
         // P1 修复(02-):env 白名单过滤,防 AI 命令 printenv 泄露平台 secret。
         // 白名单(PATH/HOME/NPM_CONFIG_* 等)+ 敏感关键字黑名单兜底;secretsCache 显式注入。
         env: buildSafeEnv(this.secretsCache),
-        // V6-Batch1-M1：注入 AbortSignal，让 execa 子进程响应取消
+        // 注入 AbortSignal，让 execa 子进程响应取消
         signal: opts?.signal,
       });
       // 流式回写——caller 传 onChunk 时逐块推送 stdout/stderr
@@ -121,7 +121,7 @@ export class HostExecutionRuntime implements ExecutionRuntime {
  *
  * `docker exec snow-thread-{id} sh -lc "cd /workspace && {command}"`（经 docker-cli seam）。
  * 首次 exec 惰性 `startContainer`（含 ensureRuntimeImage），thread 内复用同一容器；
- * 每次 exec 后 `touchActivity` 刷新 idle TTL（Stage E 回收依据）。
+ * 每次 exec 后 `touchActivity` 刷新 idle TTL（ 回收依据）。
  * 超时 / buffer 截断 / 异常兜底与 HostExecutionRuntime 一致（docker-cli.execInContainer 内处理）。
  * 容器拉起级失败（ensureRuntimeImage / runContainer 抛）在此 catch 成 { ok:false }，
  * 不向上抛——对齐 host 的异常契约。
@@ -146,7 +146,7 @@ export class ContainerExecutionRuntime implements ExecutionRuntime {
       timeoutMs?: number;
       logCapBytes?: number;
       onChunk?: (stream: "stdout" | "stderr", chunk: string) => void;
-      /** V6-Batch1-M1：AbortSignal 注入，让 execa 子进程响应取消。 */
+      /** AbortSignal 注入，让 execa 子进程响应取消。 */
       signal?: AbortSignal;
     },
   ): Promise<ExecResult> {
@@ -178,7 +178,7 @@ export class ContainerExecutionRuntime implements ExecutionRuntime {
                 : this.quota.logCapBytes;
           }
         }
-        // V6-Batch1-M1：透传 signal 给 execInContainer
+        // 透传 signal 给 execInContainer
         const result = await execInContainer(entry.containerName, command, execOpts);
         touchActivity(this.threadId);
         return result;

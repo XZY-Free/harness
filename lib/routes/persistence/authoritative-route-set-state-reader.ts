@@ -4,7 +4,7 @@
  * 禁止从 DeploymentRoute 投影反向重建。
  * 所有需要 RouteSet 当前状态的模块必须通过此 Reader 读取。
  *
- * 参见：SnowHarness专题01全局统一与最终收敛方案
+ * 参见：正式架构
  */
 
 import { db } from "@/lib/db/client";

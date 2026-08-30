@@ -41,7 +41,7 @@ export function projectRuntime(runtime: RuntimeRow): RuntimeDTO {
 export interface RuntimeRevisionEligibilityInput {
   runtimeLifecycleState: string;
   revisionState: string;
-  /** hosted_artifact 才要求 Artifact 证据；external_endpoint 不得伪造（03 §3/§4）。 */
+  /** hosted_artifact 才要求 Artifact 证据；external_endpoint 不得伪造。 */
   runtimeEvidenceKind: "hosted_artifact" | "external_endpoint";
   artifactId: string | null;
   artifactDigest: string | null;
@@ -127,7 +127,7 @@ export function projectRuntimeConformanceRun(
 }
 
 /**
- * Candidate Conformance 选择（02 §4）：当前 exact RuntimeRevision 下最新一条
+ * Candidate Conformance 选择：当前 exact RuntimeRevision 下最新一条
  * 「passed 且六个 publication conformance cases 完整全过」且 digest/协议精确绑定的 Run。
  * 排序 completedAt DESC、recordedAt DESC；最新一条可能 failed，绝不能只取 latest row。
  */
@@ -212,7 +212,7 @@ export async function loadRuntimeRevisionAdminProjection(
     hasPublication: publication !== null,
     hasWithdrawal: withdrawal !== null,
   });
-  // Candidate Conformance 与 Publication-bound Conformance 语义分离（02 §2）：
+  // Candidate Conformance 与 Publication-bound Conformance 语义分离：
   // eligibility 仍以 PublicationRecord.conformanceRunId 为 Authority，draft 新 Run
   // 绝不改变已发布版本的执行资格。
   const latestValidRun = await selectLatestValidConformanceRun(tenantId, revision);

@@ -1,5 +1,5 @@
 /**
- * POST /api/v1/threads/{thread_id}/pending-inputs/reorder — 重排 PendingInput 队列（S04-C04，§3.8）。
+ * POST /api/v1/threads/{thread_id}/pending-inputs/reorder — 重排 PendingInput 队列（§3.8）。
  *
  * 事实源：docs/architecture/api-and-events.md §3.8、
  *         docs/architecture/persistence.md §5.6。

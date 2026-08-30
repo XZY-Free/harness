@@ -19,7 +19,7 @@
  * 工作区存储责任面：路径解析 + 文件读写删 stat list。
  *
  * host 实现：走宿主文件系统（`lib/workspace`）。
- * container 实现（Stage B）：`root()` 仍返回宿主路径（平台进程读写用），
+ * container 实现：`root()` 仍返回宿主路径（平台进程读写用），
  * `mountTarget()` 返回容器内 bind mount 路径（`/workspace`），读写仍走宿主 + bind mount。
  */
 export interface WorkspaceStore {
@@ -92,7 +92,7 @@ export interface ExecResult {
  * 命令执行责任面。
  *
  * host 实现：`execa(command, { shell, cwd: workspaceRoot, timeout, reject:false, maxBuffer })`。
- * container 实现（Stage B）：`docker exec snow-thread-{id} sh -c "cd /workspace && {command}"`。
+ * container 实现：`docker exec snow-thread-{id} sh -c "cd /workspace && {command}"`。
  *
  * 异常语义：exec 内部 catch spawn 级失败（ENOENT / timeout），返回 `{ ok:false, exitCode:-1 }`，
  * 不向上抛——对齐现有 runCommand/runTests 的 try/catch 兜底契约。
@@ -144,9 +144,9 @@ export interface PreviewStatus {
  * 预览运行时责任面。
  *
  * - `StaticPreviewRuntime`（host 默认）：进程内静态文件 server，迁入自 `lib/preview/manager`。
- * - `DevServerPreviewRuntime`（Stage C）：容器内 spawn `npm run dev` + ready 探测。
+ * - `DevServerPreviewRuntime`：容器内 spawn `npm run dev` + ready 探测。
  *
- * 零行为变更：`start` 仍返回 `http://localhost:{port}/`（相对化在 Stage D）。
+ * 零行为变更：`start` 仍返回 `http://localhost:{port}/`（相对化在 ）。
  */
 export interface PreviewRuntime {
   start(threadId: string): Promise<PreviewHandle>;

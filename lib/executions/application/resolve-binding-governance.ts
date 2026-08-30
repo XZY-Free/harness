@@ -1,5 +1,5 @@
 /**
- * ExecutionBinding 的 Policy/Governance 冻结解析（关口02 02-6 · 冻结方案 §10 / §11 / §42）。
+ * ExecutionBinding 的 Policy/Governance 冻结解析（ · 冻结方案 §10 / §11 / §42）。
  *
  * Binding 时把四字段解析为最终非空值（§9）：
  * - PolicyRevision：RouteRevision.policyRevisionId != null → 用 Route 显式指定的 Revision；

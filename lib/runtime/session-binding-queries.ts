@@ -1,15 +1,15 @@
 /**
- * RuntimeSessionBinding 仓储（S05-C02）。
+ * RuntimeSessionBinding 仓储。
  *
  * 事实源：
  * - docs/architecture/persistence.md （RuntimeSessionBinding L506-508）
  * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
- * - docs/architecture/runtime-control-plane.md S05-C02
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - createSessionBinding：INSERT RuntimeSessionBinding（externalSessionRef 来自 Runtime 响应）。
  * - getSessionBindingById / getSessionBindingByExternalRef / getSessionBindingsByThread：查询。
- * - findReusableSessionBinding：按 专题01 冻结架构匹配维度（Tenant+Thread+RuntimeRevision）
+ * - findReusableSessionBinding：按 Agent 与 Runtime Authority 分离匹配维度（Tenant+Thread+RuntimeRevision）
  *   查找可复用的 active Session（Turn completed 不是关闭条件，06 §3）。
  * - updateLastUsedAt：调用 Runtime 后刷新最近使用时间。
  * - closeSessionBinding：显式关闭（Thread 关闭/删除、用户 reset、continuity policy 不允许、
@@ -167,12 +167,12 @@ export async function getSessionBindingsByThread(
 }
 
 /**
- * 查找可复用的 active RuntimeSessionBinding（专题01 冻结架构匹配维度）。
+ * 查找可复用的 active RuntimeSessionBinding（Agent 与 Runtime Authority 分离匹配维度）。
  *
  * 匹配维度：tenantId + threadId + runtimeRevisionId 全等
  * （RuntimeSessionBinding 只绑定 Harness Runtime，不再含 Agent 维度）。
  * 只返回 bindingState=active 的最近一条（createdAt 降序）；
- * closed/lost 不复用（06 §3 关闭条件）。
+ * closed/lost 不复用（ 关闭条件）。
  */
 export async function findReusableSessionBinding(params: {
   tenantId: string;
@@ -263,7 +263,7 @@ type Session = Parameters<Parameters<typeof db.transaction>[0]>[0];
 /**
  * 标记 RuntimeSessionBinding 为 lost（bindingState active → lost）— caller-owned session 版本。
  *
- * 事实源：docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/02-Recovery与Turn终态事务一致性.md §三。
+ * 事实源：docs/architecture/runtime-control-plane.md。
  *
  * 唯一 SQL 实现：行锁（FOR UPDATE）+ active → lost + closedAt/lastUsedAt；closed/lost 幂等。
  * markInvocationLost 等组合事务必须使用本版本，保证 Invocation/Session/Turn/Event 同事务。

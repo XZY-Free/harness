@@ -1,21 +1,21 @@
 /**
- * EffectiveInvocationCapabilities（05 §2/§3/§4）。
+ * EffectiveInvocationCapabilities。
  *
  * 只读派生服务，不是新 Authority：全部输入来自已冻结事实
  * （ExecutionBinding 的 runtimeRevisionId），禁止查"当前最新 Agent/Runtime"。
  *
- * 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，不再有 Agent Contract
+ * Agent 与 Runtime Authority 分离：ExecutionBinding 只绑定 Harness Runtime，不再有 Agent Contract
  * 证据，effective capability 退化为 runtime-only——
  * ```text
  * Base Harness: runtime.measured.cancel AND 协议实现支持（保持 Hosted 现有语义）
  * ```
  *
- * 事实源：docs/V12/01/SnowHarness_阶段1_代码收口详细方案_2026-08-26/05-Cancel能力贯通.md。
+ * 事实源：docs/architecture/runtime-control-plane.md
  */
 import type { RuntimeRevisionRow } from "@/lib/runtime/persistence/runtime-revision-queries";
 import { getRuntimeRevisionById } from "@/lib/runtime/persistence/runtime-revision-queries";
 
-/** Invocation 级 effective 能力（至少统一表达 05 §2 五项）。 */
+/** Invocation 级 effective 能力（至少统一表达  五项）。 */
 export interface EffectiveInvocationCapabilities {
   readonly cancel: boolean;
   readonly resume: boolean;
@@ -24,12 +24,12 @@ export interface EffectiveInvocationCapabilities {
   readonly streaming: boolean;
 }
 
-/** ExecutionBinding 冻结证据（05 §3 精确公式输入；专题01 冻结架构：runtime-only）。 */
+/** ExecutionBinding 冻结证据（ 精确公式输入；Agent 与 Runtime Authority 分离：runtime-only）。 */
 export interface EffectiveCapabilityBindingEvidence {
   readonly runtimeRevisionId: string;
 }
 
-/** Runtime 层（无 Agent Contract）能力：measured AND 协议实现（05 §4 Base Harness）。 */
+/** Runtime 层（无 Agent Contract）能力：measured AND 协议实现（ Base Harness）。 */
 export interface RuntimeLevelCapabilities {
   readonly cancel: boolean;
   readonly resume: boolean;
@@ -48,10 +48,10 @@ const NO_CAPABILITIES: EffectiveInvocationCapabilities = {
 };
 
 /**
- * 协议实现能力（05 §3 第三因子）：Transport/执行模型是否实现该方法。
+ * 协议实现能力（ 第三因子）：Transport/执行模型是否实现该方法。
  * 冻结架构下 Runtime 仅 harness_runtime_protocol（Hosted in-process）：
  * cancel/resume/steer/user_action/streaming 由 Turn/Invocation 状态机与
- * in-process adapter 吸收（05 §4 保持现有语义）。A2A 是外部 Agent 能力调用
+ * in-process adapter 吸收（ 保持现有语义）。A2A 是外部 Agent 能力调用
  * 协议，归属 AgentCall 域，不在 Runtime 协议能力范围。
  */
 const PROTOCOL_IMPLEMENTATION_SUPPORT: Readonly<Record<string, RuntimeLevelCapabilities>> = {
@@ -67,7 +67,7 @@ const PROTOCOL_IMPLEMENTATION_SUPPORT: Readonly<Record<string, RuntimeLevelCapab
 /** Hosted runtimeCapabilitiesJson 的权威契约是 string[] 能力名列表（hosted gateways）。 */
 type HostedCapabilityNames = readonly string[];
 
-/** External RuntimeRevision.runtimeCapabilitiesJson 的三态投影（02 §10）。 */
+/** External RuntimeRevision.runtimeCapabilitiesJson 的三态投影。 */
 interface ExternalCapabilitiesProjection {
   measured?: {
     features?: {
@@ -84,7 +84,7 @@ function pass(value: string | undefined): boolean {
 }
 
 /**
- * Runtime 层 measured 能力（05 §4）。
+ * Runtime 层 measured 能力。
  * Hosted（string[] 契约）语义由状态机承载：cancel/resume/user_action 恒可用，
  * streaming 取 event_stream 声明；External 只认 measured.features===pass。
  */
@@ -141,9 +141,9 @@ export function resolveRuntimeLevelCapabilities(
 }
 
 /**
- * 按精确 Binding 事实派生 Invocation 级 effective 能力（05 §3）。
+ * 按精确 Binding 事实派生 Invocation 级 effective 能力。
  *
- * 专题01 冻结架构：ExecutionBinding 只绑定 Harness Runtime，effective capability
+ * Agent 与 Runtime Authority 分离：ExecutionBinding 只绑定 Harness Runtime，effective capability
  * 退化为 runtime-only（Base Harness 公式：runtime measured AND 协议实现支持）。
  * 事实不可解析（Revision 缺失）→ fail-closed 全 false。
  */

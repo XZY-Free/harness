@@ -15,7 +15,7 @@ import { cleanupSecretFileCache } from "./start-options";
  *
  * 生命周期：
  * - 拉起：`startContainer(threadId)` 惰性（首次 exec / startPreview 前），thread 内复用
- * - 回收：`stopContainer(threadId)` 主动停删；idle TTL 回收在 Stage E 实现
+ * - 回收：`stopContainer(threadId)` 主动停删；idle TTL 回收在  实现
  * - 退出：`closeAllContainers()` 进程退出时清所有容器
  *
  * 容器名 `snow-thread-{threadId}`，标签 `snow-harness.threadId={threadId}` 便于查询。
@@ -140,7 +140,7 @@ export async function closeAllContainers(): Promise<void> {
   await Promise.all(ids.map((id) => stopContainerById(id).catch(() => {})));
 }
 
-// ─── idle TTL 回收（Stage E）──────────────────────────────
+// ─── idle TTL 回收──────────────────────────────
 
 let sweepTimer: NodeJS.Timeout | null = null;
 
@@ -169,7 +169,7 @@ export function startIdleSweep(intervalMs = 60_000): void {
 
 /**
  * 进程退出清理：best-effort（不阻塞退出）。
- * Note：Stage E 引入 idle TTL 定时回收；此处只做退出清理。
+ * Note： 引入 idle TTL 定时回收；此处只做退出清理。
  */
 if (!globalThis.__snowContainerCleanup) {
   globalThis.__snowContainerCleanup = true;

@@ -4,7 +4,7 @@ import { getDockerAvailable } from "./container/availability";
 import { ContainerExecutionRuntime, HostExecutionRuntime } from "./execution-runtime";
 import { resolveNetworkPolicy } from "./network-policy";
 import { resolveQuota } from "./quota";
-import { resolveRuntimeTypeForThread } from "./resolver";
+import { resolveConfiguredRuntimeType } from "./resolver";
 import { type SecretEnvMap, resolveSecrets } from "./secret-mount";
 import { isSecretMountAvailable } from "./secret-redaction";
 import type { NetworkPolicy, PreviewRuntime, ResourceQuota, RuntimeHandle } from "./types";
@@ -44,31 +44,22 @@ function lazyPreviewRuntime(
 const lazyStaticPreviewRuntime = lazyPreviewRuntime("static");
 
 /**
- * Stage E：runtime 工厂——按 thread + runtimeType 组装三层 runtime 实现。
+ * 按平台配置组装本地 Workspace/Execution/Preview Runtime。
  *
- * runtimeType 解析优先级（plan ）：
- * thread.runtimeType → skill_version.runtimeType → 全局默认 `runtimeConfig.defaultType`
- * 由 `resolveRuntimeTypeForThread` 在调用方（chat route，已有 thread + skill 上下文）同步算出，
- * 经 buildTools / reportThreadReady 透传到 resolveRuntimes。默认 host 零回归。
- *
- * 降级：解析出 container 但 docker 不可用（`getDockerAvailable()` false）→ 默认 fail-closed；
- * 仅在 `RUNTIME_DEGRADE_ON_DOCKER_UNAVAILABLE=true` 时降级 host + warn。
- *
- * 预览：container 模式走 DevServerPreviewRuntime（无 dev script 时内部委托 static）；
- * host 模式走 staticPreviewRuntime。
+ * container 在 Docker 不可用时默认 fail closed；只有显式配置才降级 host。
+ * 该本地工具 Runtime 不接受 Thread/Skill/调用方选择，避免形成 Harness Route 之外的执行位置入口。
  */
 
-export { resolveRuntimeTypeForThread } from "./resolver";
+export { resolveConfiguredRuntimeType } from "./resolver";
 
 export function resolveRuntimes(
   threadId: string,
-  type?: RuntimeType,
   opts?: {
     quotaOverride?: Partial<ResourceQuota>;
     networkPolicyOverride?: Partial<NetworkPolicy>;
   },
 ): RuntimeHandle {
-  const resolved = type ?? runtimeConfig.defaultType;
+  const resolved: RuntimeType = resolveConfiguredRuntimeType();
   // 解析 per-thread 配额（全局默认 + thread 覆盖，只能收紧）。
   const quota = resolveQuota({ threadOverride: opts?.quotaOverride });
   // 解析 per-thread 网络策略（host 恒 open；container 按 config + override）。

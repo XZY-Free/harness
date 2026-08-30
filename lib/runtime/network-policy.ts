@@ -2,7 +2,7 @@ import { networkPolicyConfig } from "@/lib/config";
 import type { NetworkPolicy, NetworkPolicyMode } from "./types";
 
 /**
- * Stage B：per-thread 网络策略解析 + docker network 应用。
+ * per-thread 网络策略解析 + docker network 应用。
  *
  * S1 修复（02-P0-2，方案 B）：删除 `allowlist` 模式。原 allowlist 与 disabled 等价却谎报
  * "白名单模式"，契约不兑现。不可绕过的容器 egress 隔离需 iptables/网络插件改造（未实现），

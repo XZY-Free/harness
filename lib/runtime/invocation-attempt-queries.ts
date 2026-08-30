@@ -1,10 +1,10 @@
 /**
- * InvocationAttempt 仓储（S05-C01）。
+ * InvocationAttempt 仓储。
  *
  * 事实源：
  * - docs/architecture/persistence.md （InvocationAttempt L389-403）
  * - docs/architecture/agent-control-plane.md §6（Attempt 基础设施重调度）
- * - docs/architecture/runtime-control-plane.md S05-C01
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - createAttempt：分配 attemptNo（max+1）+ INSERT Attempt。
@@ -196,7 +196,7 @@ export interface UpdateAttemptStateOptions {
 /**
  * 更新 Attempt 状态（事务内 SELECT FOR UPDATE + 状态机校验 + 递增 updatedAt）。
  *
- * 状态机（）：
+ * 状态机：
  * - queued → running / cancelled / failed / lost
  * - running → completed / failed / cancelled / lost
  * - completed / failed / cancelled / lost：终态，不可恢复

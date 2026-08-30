@@ -1,10 +1,10 @@
 /**
- * ExecutionSubject（06 §6）— 正式 dispatch contract 的可信调用主体。
+ * ExecutionSubject— 正式 dispatch contract 的可信调用主体。
  *
  * - Employee Turn 的 subject 必须由服务端认证 Principal 生成；
  * - 禁止从 Turn JSON / 请求体接受 caller 自报 subjectId；
  * - tenant 不可由客户端覆盖；
- * - ExecutionSubject 与 ContextHandle 是两个对象（06 §8）：
+ * - ExecutionSubject 与 ContextHandle 是两个对象：
  *   ContextHandle 是 Context Gateway 的签名能力句柄，不是用户身份 Token。
  *
  * 公共 wire（05 专项唯一 mapper）：executionSubjectToPublicAgentSubject 输出严格
@@ -43,7 +43,7 @@ export function executionSubjectToPublicAgentSubject(
 }
 
 /**
- * 从服务端已认证的用户身份生成 trusted ExecutionSubject（04 §6：Start 与 Resume
+ * 从服务端已认证的用户身份生成 trusted ExecutionSubject（Start 与 Resume
  * 共用；只接受服务端 principal / persisted user identity，不接受客户端自报值）。
  */
 export function executionSubjectFromUserIdentity(

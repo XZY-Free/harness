@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * AgentRevision 操作面板（07 §6）。
+ * AgentRevision 操作面板。
  *
  * 先选 exact Snapshot，再以四个严格 JSON editor 输入
  * model_policy / permission_requirements / delegation_policy /
@@ -170,7 +170,7 @@ export function AgentRevisionActions({
     try {
       const result = await client.agents.publishRevision(
         revision.id,
-        { release_notes: "Studio 发布（07 §6）" },
+        { release_notes: "Studio 发布" },
         { idempotencyKey: crypto.randomUUID(), ifMatch: revision.etag },
       );
       // 只用真实 publish API 返回的响应交接；在 reload 之前触发，
@@ -192,7 +192,7 @@ export function AgentRevisionActions({
     try {
       await client.agents.withdrawRevision(
         revision.id,
-        { reason_code: "studio_withdraw", reason: "Studio 撤回（07 §6）" },
+        { reason_code: "studio_withdraw", reason: "Studio 撤回" },
         { idempotencyKey: crypto.randomUUID(), ifMatch: revision.etag },
       );
       setNotice(`版本 ${revision.revision_no} 已撤回`);

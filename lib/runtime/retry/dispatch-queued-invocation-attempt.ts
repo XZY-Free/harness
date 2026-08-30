@@ -1,13 +1,13 @@
-import { getTurnById } from "@/lib/conversations/turn-queries";
 import { allocateEventSequences, insertThreadEvent } from "@/lib/conversations/thread-queries";
+import { getTurnById } from "@/lib/conversations/turn-queries";
 /**
  * dispatchQueuedInvocationAttempt：执行已有 queued InvocationAttempt 的正式 dispatch。
  *
  * 事实源：
- * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/01-DurableDispatch与RetryAuthority.md §六
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责（唯一正式 Attempt dispatch 服务；初始调度之后的 retry 与 redispatch 共用）：
- * 1. 读取 exact queued Attempt + Invocation + immutable ExecutionBinding + AgentRevision/RuntimeRevision。
+ * 1. 读取 exact queued Attempt + Invocation + immutable ExecutionBinding + RuntimeRevision。
  * 2. 重建 StartInvocationRequest（复用唯一 builder，Context 不在 retry 时丢失）。
  * 3. 使用稳定 Runtime Idempotency-Key：invocation-attempt:<attemptId>（同一 Attempt 重试不换 key）。
  * 4. 成功：Attempt → running、Invocation → running、SessionBinding、invocation.started Event。
@@ -184,7 +184,7 @@ export async function dispatchQueuedInvocationAttempt(
     throw new InvocationNotFoundError(invocation.id);
   }
 
-  // 4. capability requirements（专题01 冻结架构）：用户选择的 Agent 是能力要求约束，
+  // 4. capability requirements（Agent 与 Runtime Authority 分离）：用户选择的 Agent 是能力要求约束，
   // 非执行目标。Retry 与原 Invocation 一致，从 invocation 的 Turn 读取 requestedAgentId 构建。
   let capabilityRequirements:
     | Array<{ capability_type: "agent"; capability_id: string; mode: "required" }>

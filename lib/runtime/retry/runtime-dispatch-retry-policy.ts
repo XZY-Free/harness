@@ -2,7 +2,7 @@
  * Runtime Dispatch Retry Policy（Durable Dispatch / Retry Authority 唯一策略源）。
  *
  * 事实源：
- * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/01-DurableDispatch与RetryAuthority.md §五
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - 固定第一版 retry policy：maxDispatchAttempts / 指数 backoff / lease 时长 / 批量 / 轮询间隔。

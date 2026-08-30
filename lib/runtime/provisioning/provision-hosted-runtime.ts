@@ -5,7 +5,7 @@
  * 异步 Saga（hosted-provisioning-saga.ts）+ Gateway 接口是唯一的供应路径。
  * 本文件仅保留 Gateway 接口共享的类型定义。
  *
- * 专题01 冻结（runtime-only）：
+ * Runtime-only Authority：
  * - HostedRuntimeRoute 只表示 tenant 内 builtin Harness Runtime 的 targetKind=runtime Route，
  *   不包含 agentRevisionId（Agent Route 从不引用 RuntimeRevision，Hosted 不 inspect Agent）。
  * - 已删除 PublishedHostedAgentRevision（Agent 发布不在 Hosted 供应范围内）。

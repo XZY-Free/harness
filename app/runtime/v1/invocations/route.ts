@@ -1,17 +1,17 @@
 /**
- * POST /runtime/v1/invocations — Hosted Runtime 启动 Invocation（S05-C02 + S05-C05 参考实现）。
+ * POST /runtime/v1/invocations — Hosted Runtime 启动 Invocation（ +  参考实现）。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §4（Runtime Protocol API）
  * - docs/architecture/agent-control-plane.md §6（Invocation 生命周期）
- * - docs/architecture/runtime-control-plane.md S05-C02/S05-C05
+ * - docs/architecture/runtime-control-plane.md
  *
  * 行为：
  * - 解析 Bearer Token（Workload Token，audience=runtime）。
  * - 校验 Idempotency-Key（必填）。
  * - 校验请求体（invocation_id / agent / gateway_endpoints / execution_limits 必填）。
  * - 生成 runtime_session_ref + runtime_execution_ref，返回 accepted=true（HTTP 202）。
- * - S05-C05 扩展：异步启动 HostedHarnessLoop（不阻塞 dispatch 响应）。
+ * -  扩展：异步启动 HostedHarnessLoop（不阻塞 dispatch 响应）。
  *   - 从 turn_context 提取 thread_id / turn_id（缺失时回退到 placeholder）。
  *   - 调用 startHostedAdapter，loop.run() 内部通过 Event Ingress 回传候选事件。
  *   - 测试可通过 setHostedAdapterOverrides 注入 ingressClient/modelFn；通过 getLastLoopPromise await 完成。
@@ -69,7 +69,7 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
   // §23/§49：harness-runtime-protocol@1，无 @1 fallback。
   if (b.protocol_version !== "2") return false;
   if (typeof b.invocation_id !== "string" || b.invocation_id.length === 0) return false;
-  // 专题01 冻结架构：本轮 Harness 能力要求（可选），非执行目标。仅支持 capability_type=agent + mode=required。
+  // Agent 与 Runtime Authority 分离：本轮 Harness 能力要求（可选），非执行目标。仅支持 capability_type=agent + mode=required。
   if (
     b.capability_requirements !== undefined &&
     (!Array.isArray(b.capability_requirements) ||
@@ -163,14 +163,13 @@ export async function POST(request: Request): Promise<Response> {
     capabilities,
   };
 
-  // 5. S05-C05 扩展：异步启动 HostedHarnessLoop（不阻塞 dispatch 响应）
+  // 5. 异步启动 HostedHarnessLoop（不阻塞 dispatch 响应）
   //
   // route handler 解析 turn_context，调用 getRouteHostedAdapter().startInvocation
   // 触发 loop.run()。loop.run() 不被 await：dispatch 立即返回 202；loop 内部通过 Event Ingress 回传候选事件。
   // 测试可通过 setRouteHostedAdapter 注入带 mock sink 的 Adapter。
   //
-  // turn_context 可为 null（Job Invocation 路径，本阶段未启用 Agent Loop），
-  // 此时跳过 startInvocation 调用；Job 模式由后续阶段接入 JobEvent 投影。
+  // turn_context 可为 null（Job Invocation 路径不启动会话 Harness Loop）。
   const turnContext = body.turn_context;
   if (turnContext) {
     const adapter = getRouteHostedAdapter();
@@ -182,7 +181,6 @@ export async function POST(request: Request): Promise<Response> {
       invocationId: body.invocation_id,
       threadId: turnContext.thread_id,
       turnId: turnContext.turn_id,
-      agentRevisionId: null,
       inputItems: body.input_items,
       contextHandle: body.context_handle,
       gatewayEndpoints: body.gateway_endpoints,

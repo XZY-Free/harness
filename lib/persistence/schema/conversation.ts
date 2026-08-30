@@ -65,8 +65,8 @@ export type TurnTriggerType = (typeof TURN_TRIGGER_TYPES)[number];
 // ─── Agent Selection Mode ───────────────────────────────────
 
 /**
- * Per-Invocation Agent Selection mode（05 §1）。
- * 第一阶段只支持 required：员工显式选择 Agent，无 eligible route 必须失败，
+ * Per-Invocation Agent Selection mode。
+ * 当前只支持 required：员工显式选择 Agent，无 eligible route 必须失败，
  * 不 fallback 到 base route。不实现 preferred / 自动选择 / default Agent。
  */
 export const AGENT_SELECTION_MODES = ["required"] as const;
@@ -311,10 +311,10 @@ export const turnTable = mysqlTable(
     waitingAt: datetime("waitingAt", { mode: "date", fsp: 3 }),
     finishedAt: datetime("finishedAt", { mode: "date", fsp: 3 }),
     /**
-     * Per-Invocation Agent Selection（05 §1/§2）：本 Turn 的请求 Agent 事实。
-     * 第一阶段只支持 mode=required（不实现 preferred ranking / LLM 自动选择 /
+     * Per-Invocation Agent Selection：本 Turn 的请求 Agent 事实。
+     * 当前只支持 mode=required（不实现 preferred ranking / LLM 自动选择 /
      * Thread default Agent / organization default Agent）。
-     * requestedAgentId 为 null = 无 selection → 基础 Harness Route（05 §11）。
+     * requestedAgentId 为 null = 无 selection → 基础 Harness Route。
      */
     requestedAgentId: varchar("requestedAgentId", { length: 36 }),
     /** Selection mode（AGENTS_SELECTION_MODES）；null = 无 selection。 */
@@ -510,7 +510,7 @@ export const threadRelationTable = mysqlTable(
     contextTransferPolicyJson: json("contextTransferPolicyJson"),
     budgetPolicyJson: json("budgetPolicyJson"),
     /**
-     * 子 Thread 实际预算用量累积（S09-C02）。
+     * 子 Thread 实际预算用量累积。
      * 形状：{ tokens, cost, tool_calls, wall_clock_ms, unknown_effect }
      * 与 budgetPolicyJson（上限）分离存储；预算耗尽由应用服务发出 cancel command。
      */
@@ -641,7 +641,7 @@ export type InvocationCommandState = (typeof INVOCATION_COMMAND_STATES)[number];
  * - interrupt：请求中断 Turn（Runtime ack 后才进入终态）。
  * - regenerate：请求 Regenerate（生成新 Invocation 替代当前 final_item）。
  * - resume：请求 Runtime 恢复 waiting_user Invocation（携带用户响应 resume_payload）。
- * - cancel：请求取消一条 delegate Child Thread 关系（S09-C01；携带 relation_id 与 reason）。
+ * - cancel：请求取消一条 delegate Child Thread 关系（携带 relation_id 与 reason）。
  * 取消请求 ≠ 已取消：relation_state 由 active → cancel_requested → cancelled，
  * 终态由 Runtime/应用服务在执行确认后落库（05 文档 §9 行 412-417）。
  */

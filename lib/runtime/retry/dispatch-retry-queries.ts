@@ -2,7 +2,7 @@
  * Durable Dispatch Retry 仓储（claim / schedule / lease）。
  *
  * 事实源：
- * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/01-DurableDispatch与RetryAuthority.md §四/§八
+ * - docs/architecture/runtime-control-plane.md
  *
  * 职责：
  * - claimDueInvocationAttempts / claimDueInvocationCommands：

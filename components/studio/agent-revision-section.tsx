@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * AgentRevision 操作入口：选择 Agent 后渲染 AgentRevisionActions（07 §6）。
+ * AgentRevision 操作入口：选择 Agent 后渲染 AgentRevisionActions。
  */
 import { AgentRevisionActions } from "@/components/studio/agent-revision-actions";
 import {

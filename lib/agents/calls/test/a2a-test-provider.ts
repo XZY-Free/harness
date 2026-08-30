@@ -2,10 +2,10 @@
  * 仓内标准 A2A 验收 Provider（AgentCall 子执行域测试支撑）。
  *
  * 真实 HTTP A2A 0.3.0 Provider（node:http），仅存在 test-support，production 不 import。
- * 黑盒原则（07 §2）：平台侧只通过 Agent Card + 真实 A2A wire behavior 与其交互，
+ * 黑盒原则：平台侧只通过 Agent Card + 真实 A2A wire behavior 与其交互，
  * 禁止读取本文件源码形成 AgentRevision / CapabilityManifest / Route / Transport 选择。
  *
- * 公开合同（07 §3）：
+ * 公开合同：
  * - Agent Card：name/description + capabilities + 通用扩展（capability manifest 与
  *   Invocation Context Contract，明确版本，不绑定任何框架）。标准路径唯一：
  *   /.well-known/agent-card.json（无旧 agent.json 回退）。
@@ -19,7 +19,7 @@
  * （TextPart 追问文本 + DataPart 公共结构化结果）→ 终态 status 无 status.message。
  * message/send（resume）同步返回完整 Task（kind:"task"，id/contextId/status/artifacts）。
  *
- * 场景（07 §5）：completed / chunks / input_required / long_running / failed /
+ * 场景：completed / chunks / input_required / long_running / failed /
  * rejected / malformed / subject_echo。场景由测试显式选择，Provider 按 A2A wire
  * 语义响应。
  */
@@ -49,7 +49,7 @@ export const A2A_TEST_PROVIDER_CONTEXT_CONTRACT = {
   accepted: [{ context_kind: "attachment_references" }, { context_kind: "workspace_context" }],
 } as const;
 
-/** 场景名（07 §5）。 */
+/** 场景名。 */
 export type A2ATestProviderScenario =
   | "completed"
   | "chunks"
@@ -134,7 +134,6 @@ interface RpcRequest {
     };
     /** tasks/get 与 tasks/cancel 官方 TaskQueryParams/TaskIdParams 的 id 字段。 */
     id?: string;
-    taskId?: string;
   };
   id?: string | number;
 }
@@ -148,7 +147,6 @@ function sseFrame(payload: unknown): string {
  */
 export async function startA2ATestProvider(
   initialScenario: A2ATestProviderScenario = "completed",
-  options: { legacyCardOnly?: boolean } = {},
 ): Promise<A2ATestProvider> {
   const captured: CapturedA2ARequest[] = [];
   const requests: Array<{
@@ -193,14 +191,9 @@ export async function startA2ATestProvider(
       return;
     }
 
-    // ─── Agent Card（07 §3/§7：公开合同，含通用扩展）──────────
-    // A2A 0.3.0 标准路径唯一：/.well-known/agent-card.json（无旧 agent.json 回退；
-    // legacyCardOnly 只暴露已废弃旧路径，用于冻结 "旧路径不能通过注册验收" 反例）。
-    if (
-      req.method === "GET" &&
-      ((options.legacyCardOnly ? false : url.pathname === "/.well-known/agent-card.json") ||
-        url.pathname === "/.well-known/agent.json")
-    ) {
+    // ─── Agent Card（公开合同，含通用扩展）──────────
+    // A2A 0.3.0 标准路径唯一：/.well-known/agent-card.json。
+    if (req.method === "GET" && url.pathname === "/.well-known/agent-card.json") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
@@ -252,10 +245,9 @@ export async function startA2ATestProvider(
       rpcMethods.push(rpc.method ?? "");
 
       // ─── tasks/cancel（long-running cancel 场景）──────────────
-      // 兼容两种 wire：官方 A2A 0.3.0 TaskIdParams.id，与旧 Runtime conformance
-      // probe 的 TaskIdParams.taskId；响应同时回填 id 与 taskId。
+      // A2A 0.3.0 TaskIdParams 使用 id。
       if (rpc.method === "tasks/cancel") {
-        const taskId = rpc.params?.id ?? rpc.params?.taskId ?? "unknown";
+        const taskId = rpc.params?.id ?? "unknown";
         const running = longRunningResponses.get(taskId);
         if (running) {
           running.response.write(
@@ -278,7 +270,7 @@ export async function startA2ATestProvider(
           JSON.stringify({
             jsonrpc: "2.0",
             id: rpc.id ?? 1,
-            result: { id: taskId, taskId, state: "canceled" },
+            result: { id: taskId, state: "canceled" },
           }),
         );
         return;
@@ -294,8 +286,7 @@ export async function startA2ATestProvider(
             id: rpc.id ?? 1,
             result: {
               kind: "task",
-              id: rpc.params?.id ?? rpc.params?.taskId ?? "unknown",
-              taskId: rpc.params?.id ?? rpc.params?.taskId ?? "unknown",
+              id: rpc.params?.id ?? "unknown",
               contextId: "ctx-get",
               status: { state: "working" },
             },

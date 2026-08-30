@@ -1,9 +1,9 @@
 /**
- * 用户操作 Item（user_action）— S10-W05 统一四类 UserAction 体验。
+ * 用户操作 Item（user_action）—  统一四类 UserAction 体验。
  *
  * 事实源：
  * - docs/architecture/api-and-events.md §3.18（解析 UserActionRequest）
- * - docs/architecture/product-surfaces-and-admin.md S10-W05
+ * - docs/architecture/product-surfaces-and-admin.md
  *
  * content 结构（按 request_type）：
  * - 通用字段：{ request_type, purpose?, reason?, impact?, state?, expires_at?, title?, summary? }
@@ -12,10 +12,10 @@
  * - grant：{ scope?, target_tool?, credential_ref_id? }
  * - input：{ input_schema? }
  *
- * 渲染规则（S10-W05）：
+ * 渲染规则：
  * - confirmation/auth/grant/input 四类使用统一卡片，展示请求方、原因、范围、有效期和影响。
  * - 高影响操作展示目标对象与预计副作用；超时或拒绝后不伪装成执行成功。
- * - 专题01：废弃 handoff（「把会话交接给主 Agent」语义随 Agent 非前置移除），
+ * - Agent 与 Runtime Authority：废弃 handoff（「把会话交接给主 Agent」语义随 Agent 非前置移除），
  *   不再有 handoff 专属分支；一律走 useUserAction。
  * - auth 类型 :resolve 接口仅接受 cancel；approve 由可信 callback 写入，UI 显示「去授权」链接。
  * - input 类型 submit 时收集用户输入并作为 responseRedactedJson 提交。
@@ -225,7 +225,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
   const content = item.content as UserActionContent;
 
   // userAction hook 处理 confirmation/auth/grant/input 类型。
-  // 专题01 废弃 handoff（「把会话交接给主 Agent」语义随 Agent 非前置移除），不再有 handoff 专属分支。
+  // Agent 与 Runtime Authority 废弃 handoff（「把会话交接给主 Agent」语义随 Agent 非前置移除），不再有 handoff 专属分支。
   const userActionHook = useUserAction({ threadId });
 
   // 请求状态：优先用 content.state，其次用 item.item_state 推断

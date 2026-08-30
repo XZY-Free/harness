@@ -2,7 +2,7 @@
  * Runtime Dispatch Retry Worker（Durable Dispatch / Retry Authority 的唯一执行 Owner）。
  *
  * 事实源：
- * - docs/V12/01/SnowHarness_九项问题最终代码收口方案_2026-08-27/01-DurableDispatch与RetryAuthority.md §八/§九
+ * - docs/architecture/runtime-control-plane.md
  *
  * 每轮：
  * 1. claim due InvocationAttempts（FOR UPDATE SKIP LOCKED + lease）

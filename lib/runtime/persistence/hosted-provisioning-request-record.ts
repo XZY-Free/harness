@@ -1,13 +1,13 @@
 /**
  * HostedProvisioningRequest 的 Drizzle 表定义。
  *
- * 专题01 冻结（runtime-only）：只供应 tenant 内 builtin Harness Runtime。
+ * Runtime-only Authority：只供应 tenant 内 builtin Harness Runtime。
  * - 身份权威 (tenantId, routeScopeKey)，唯一键恰好为该两列；非空 requesterId 供首次
  *   创建 Runtime 记录 owner。
  * - 删除 agentId / agentRevisionId / desiredRuntimeKey（Agent 黑盒、可选 Runtime key）。
  * - 删除 Agent publication checkpoint（stepAgentRevisionId / stepAgentPublicationRecordId）。
- * : 删除 waiting_external_evidence / waiting_conformance 状态。
- * : 保留 runtime/route checkpoint 字段。
+ * 删除 waiting_external_evidence / waiting_conformance 状态。
+ * 保留 runtime/route checkpoint 字段。
  */
 
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
@@ -22,7 +22,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 
-/** : 只保留 6 个有效状态。 */
+/** 只保留 6 个有效状态。 */
 export const PROVISIONING_STATES = [
   "pending",
   "running",
@@ -37,7 +37,7 @@ export const hostedProvisioningRequestTable = mysqlTable(
   {
     id: varchar("id", { length: 36 }).primaryKey().notNull(),
     tenantId: varchar("tenantId", { length: 36 }).notNull(),
-    /** : 首次创建请求的 actor（首次创建 Runtime 记录 owner）。非空。 */
+    /** 首次创建请求的 actor（首次创建 Runtime 记录 owner）。非空。 */
     requesterId: varchar("requesterId", { length: 36 }).notNull(),
     routeScopeKey: varchar("routeScopeKey", { length: 64 }).notNull(),
     state: mysqlEnum("state", [...PROVISIONING_STATES])
@@ -57,7 +57,7 @@ export const hostedProvisioningRequestTable = mysqlTable(
     stepRuntimeId: varchar("stepRuntimeId", { length: 36 }),
     stepRuntimeRevisionId: varchar("stepRuntimeRevisionId", { length: 36 }),
     stepRuntimeArtifactId: varchar("stepRuntimeArtifactId", { length: 36 }),
-    /** : JSON array of attestation IDs。 */
+    /** JSON array of attestation IDs。 */
     stepRuntimeAttestationIds: json("stepRuntimeAttestationIds").$type<string[] | null>(),
     stepRuntimePublicationRecordId: varchar("stepRuntimePublicationRecordId", { length: 36 }),
     stepConformanceRunId: varchar("stepConformanceRunId", { length: 36 }),
@@ -67,9 +67,9 @@ export const hostedProvisioningRequestTable = mysqlTable(
     stepRouteRevisionId: varchar("stepRouteRevisionId", { length: 36 }),
     stepRouteActivationId: varchar("stepRouteActivationId", { length: 36 }),
     stepProjectionVersionNo: int("stepProjectionVersionNo"),
-    /** : 工作流版本标识。 */
+    /** 工作流版本标识。 */
     workflowVersion: varchar("workflowVersion", { length: 16 }).notNull().default("3.0"),
-    /** : 最近完成的步骤名称。 */
+    /** 最近完成的步骤名称。 */
     lastCompletedStep: varchar("lastCompletedStep", { length: 64 }),
   },
   (table) => ({

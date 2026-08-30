@@ -83,7 +83,7 @@ export async function dispatchEmployeeTurn(params: {
   modelRef?: string;
   modelFn?: ModelFn;
   /**
-   * ExecutionSubject（06 §6）：由调用方（服务端 route 层）从认证 Principal 生成。
+   * ExecutionSubject：由调用方（服务端 route 层）从认证 Principal 生成。
    * 禁止从 Turn JSON / 请求体接受 caller 自报 subject；本层不做校验兜底。
    */
   executionSubject?: ExecutionSubject;
@@ -124,7 +124,7 @@ export async function dispatchEmployeeTurn(params: {
     };
   }
 
-  // ─── 有 Ready Route → 按 protocolType 解析 Transport（04 §3/§10）──────────
+  // ─── 有 Ready Route → 按 protocolType 解析 Transport──────────
   // Dispatcher 不再固定创建 in-process Hosted client；protocolType 真正决定 Transport。
   // 顶层 Employee Turn 只消费 runtime target：resolver 若违反命令返回 Agent 解析
   // （target 或证据 kind 为 agent），必须 fail-closed 抛出，绝不产出 undefined/nullable runtime ID。
@@ -141,11 +141,11 @@ export async function dispatchEmployeeTurn(params: {
     throw new Error(`Turn 调度失败：RuntimeRevision 不存在（${runtimeRevisionId}）`);
   }
   const isExternalEndpoint = runtimeRevision.runtimeEvidenceKind === "external_endpoint";
-  // managed endpoint/identity configuration（04 §3）：
+  // managed endpoint/identity configuration：
   // external_endpoint → endpointRef 即外部 endpoint；hosted → in-process 引用。
   const managedEndpoint = isExternalEndpoint ? runtimeRevision.endpointRef : "in-process://hosted";
 
-  // 03 §10：External outbound auth 只能来自唯一 resolver（RuntimeRevision.identityMode +
+  // External outbound auth 只能来自唯一 resolver（RuntimeRevision.identityMode +
   // credentialRefId → RuntimeTransportAuth）；Hosted 继续签发内部 Workload Token。
   // 每次网络调用前重新解析（Rotation fail closed，03 §13）。
   const resolveOutboundAuth = (): Promise<RuntimeTransportAuth> =>
@@ -225,7 +225,7 @@ export async function dispatchEmployeeTurn(params: {
       );
       return {
         // protocolType 决定 Transport：external Harness Runtime endpoint 用 managedEndpoint；
-        // Hosted 保持 in-process 引用（04 §10：Hosted 路径无行为回退）。
+        // Hosted 保持 in-process 引用（Hosted 路径无行为回退）。
         runtimeEndpoint: managedEndpoint,
         auth: await resolveOutboundAuth(),
         gatewayEndpoints: {
@@ -264,7 +264,7 @@ export async function dispatchEmployeeTurn(params: {
     throw new Error(`Turn 调度缺少 ExecutionBinding（turnId=${params.turnId}）`);
   }
   // Hosted Transport 需要显式启动 Agent Loop；External Harness Runtime Transport
-  // 的事件流由 Transport 内部消费并经归一化 ingress 进入（04 §10）。
+  // 的事件流由 Transport 内部消费并经归一化 ingress 进入。
   const hostedClient = transport as Partial<InProcessHostedRuntimeClient>;
   if (typeof hostedClient.launchAcceptedInvocation !== "function") {
     return { dispatched: true, completion: Promise.resolve() };

@@ -1,5 +1,5 @@
 /**
- * Runtime Target Digest — Conformance 被测对象的统一绑定（docs/V12/01/agent补充/03 §6）。
+ * Runtime Target Digest — Conformance 被测对象的统一绑定。
  *
  * Conformance 需要统一绑定"被测对象"，但不能强迫都是 Artifact：
  * - hosted_artifact：canonical(runtimeArtifactDigest, runtimeConfigDigest, protocolContractRevision)；

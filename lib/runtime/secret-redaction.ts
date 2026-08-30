@@ -1,7 +1,7 @@
 import { isMasterKeyConfigured } from "./secret-crypto";
 
 /**
- * Stage C：Secret 脱敏注册表（全链路防泄露）。
+ * Secret 脱敏注册表（全链路防泄露）。
  *
  * 维护当前 thread 解析出的 secret 明文值集合（运行时内存），供：
  * - `executeToolRun` 输出扫描替换 `***`

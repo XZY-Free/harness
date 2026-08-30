@@ -12,7 +12,7 @@ import { decrypt, encrypt, isMasterKeyConfigured } from "./secret-crypto";
 import { clearThreadSecrets, registerSecretValues } from "./secret-redaction";
 
 /**
- * Stage C：Secret mount 生命周期管理 + env 注入 + 脱敏注册。
+ * Secret mount 生命周期管理 + env 注入 + 脱敏注册。
  *
  * 生产级 secret 管理（plan §1/§7）：
  * - create：加密存储（AES-256-GCM）+ status=active
