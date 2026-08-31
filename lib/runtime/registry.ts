@@ -5,8 +5,6 @@ import { ContainerExecutionRuntime, HostExecutionRuntime } from "./execution-run
 import { resolveNetworkPolicy } from "./network-policy";
 import { resolveQuota } from "./quota";
 import { resolveConfiguredRuntimeType } from "./resolver";
-import { type SecretEnvMap, resolveSecrets } from "./secret-mount";
-import { isSecretMountAvailable } from "./secret-redaction";
 import type { NetworkPolicy, PreviewRuntime, ResourceQuota, RuntimeHandle } from "./types";
 import { ContainerWorkspaceStore, HostWorkspaceStore } from "./workspace-store";
 
@@ -15,7 +13,6 @@ function lazyPreviewRuntime(
   defaults?: {
     quota?: ResourceQuota;
     networkPolicy?: NetworkPolicy;
-    secretResolver?: () => Promise<SecretEnvMap>;
   },
 ): PreviewRuntime {
   let loaded: PreviewRuntime | null = null;
@@ -68,23 +65,17 @@ export function resolveRuntimes(
     runtimeType: resolved,
   });
 
-  // secret 解析器（懒加载，首次 exec 时调；master key 缺失时由 resolveSecrets 抛错）
-  const secretResolver = isSecretMountAvailable()
-    ? () => resolveSecrets(threadId, "thread", threadId)
-    : undefined;
-  const secretMountAvailable = isSecretMountAvailable();
-
   if (resolved === "container" && getDockerAvailable()) {
     return {
       workspace: new ContainerWorkspaceStore(threadId),
-      execution: new ContainerExecutionRuntime(threadId, quota, networkPolicy, secretResolver),
-      preview: lazyPreviewRuntime("dev-server", { quota, networkPolicy, secretResolver }),
+      execution: new ContainerExecutionRuntime(threadId, quota, networkPolicy),
+      preview: lazyPreviewRuntime("dev-server", { quota, networkPolicy }),
       capability: buildCapability({
         runtimeType: "container",
         imageVersion: runtimeConfig.runtimeImage,
         quota,
         networkPolicy,
-        secretMount: secretMountAvailable,
+        secretMount: false,
       }),
     };
   }
@@ -101,13 +92,13 @@ export function resolveRuntimes(
   const isDegraded = resolved === "container" && !getDockerAvailable();
   return {
     workspace: new HostWorkspaceStore(threadId),
-    execution: new HostExecutionRuntime(threadId, quota, secretResolver),
+    execution: new HostExecutionRuntime(threadId, quota),
     preview: lazyStaticPreviewRuntime,
     capability: buildCapability({
       runtimeType: "host",
       quota,
       available: true,
-      secretMount: secretMountAvailable,
+      secretMount: false,
       degradedFrom: isDegraded ? "container" : undefined,
       degradedReason: isDegraded ? "docker_unavailable" : undefined,
     }),

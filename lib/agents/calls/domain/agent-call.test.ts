@@ -110,11 +110,11 @@ function callInState(state: AgentCall["state"], overrides: Partial<AgentCall> = 
     tenantId: "tenant-1",
     parentInvocationId: "invocation-1",
     agentId: "agent-1",
-    agentRevisionId: "agent-revision-1",
     sourceType: "harness_planned",
     sourceRef: "action-1",
     state,
-    externalContextRef: null,
+    agentSessionBindingId: null,
+    sessionBinding: null,
     externalTaskRef: null,
     resultText: null,
     resultJson: null,
@@ -167,7 +167,8 @@ describe("AgentCall durable disposition", () => {
       toAgentCallDisposition(
         callInState("waiting_user", {
           externalTaskRef: "task-1",
-          externalContextRef: "context-1",
+          agentSessionBindingId: "session-1",
+          sessionBinding: { id: "session-1", externalContextRef: "context-1" },
         }),
       ),
     ).toMatchObject({ outcome: "waiting_user", taskId: "task-1", contextId: "context-1" });

@@ -5,9 +5,8 @@ import { runtimeConfig } from "@/lib/config";
 import { readWorkspaceFile, safeJoin, workspaceRoot } from "@/lib/workspace";
 import { execDetached } from "./container/docker-cli";
 import { startContainer, stopContainerById } from "./container/manager";
-import { prepareContainerStartOptions } from "./container/start-options";
+import { type SecretEnvMap, prepareContainerStartOptions } from "./container/start-options";
 import { probePreviewUrl } from "./preview-probe";
-import type { SecretEnvMap } from "./secret-mount";
 import type {
   NetworkPolicy,
   PreviewHandle,

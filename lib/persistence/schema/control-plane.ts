@@ -28,12 +28,14 @@ export type {
 export {
   AUDIT_ACTION_TYPES,
   AUDIT_ACTOR_TYPES,
+  AUDIT_OUTCOMES,
   auditEvent,
 } from "@/lib/persistence/schema/audit";
 export type {
   AuditActionType,
   AuditActorType,
   AuditEvent,
+  AuditOutcome,
   NewAuditEvent,
 } from "@/lib/persistence/schema/audit";
 

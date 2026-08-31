@@ -34,19 +34,21 @@ function extractCallId(url: string): string | null {
 }
 
 /** 把 AgentCall 行投影为 API 响应体（snake_case；不含任何 secret）。 */
-function projectCall(call: {
-  id: string;
-  parentInvocationId: string;
-  agentId: string;
-  agentRevisionId: string;
-  sourceType: string;
-  state: string;
-  externalTaskRef: string | null;
-  externalContextRef: string | null;
-  resultText: string | null;
-  errorCode: string | null;
-  errorSummary: string | null;
-}): {
+function projectCall(
+  call: {
+    id: string;
+    parentInvocationId: string;
+    agentId: string;
+    sessionBinding: { externalContextRef: string } | null;
+    sourceType: string;
+    state: string;
+    externalTaskRef: string | null;
+    resultText: string | null;
+    errorCode: string | null;
+    errorSummary: string | null;
+  },
+  agentRevisionId: string,
+): {
   call_id: string;
   parent_invocation_id: string;
   agent_id: string;
@@ -63,11 +65,11 @@ function projectCall(call: {
     call_id: call.id,
     parent_invocation_id: call.parentInvocationId,
     agent_id: call.agentId,
-    agent_revision_id: call.agentRevisionId,
+    agent_revision_id: agentRevisionId,
     source_type: call.sourceType,
     state: call.state,
     task_id: call.externalTaskRef,
-    context_id: call.externalContextRef,
+    context_id: call.sessionBinding?.externalContextRef ?? null,
     result_text: call.resultText,
     error_code: call.errorCode,
     error_summary: call.errorSummary,
@@ -100,7 +102,9 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   // 4. 返回投影（不含 secret）。
-  return apiSuccess(projectCall(call), {
+  const binding = await agentCallStore.getBinding({ callId, tenantId: claims.tenantId });
+  if (!binding) return resourceNotFound(requestId, "AgentCallBinding 不存在");
+  return apiSuccess(projectCall(call, binding.agentRevisionId), {
     headers: { [REQUEST_ID_HEADER]: requestId },
   });
 }

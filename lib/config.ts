@@ -66,41 +66,6 @@ export const dbConfig = {
   get url(): string {
     return process.env.DATABASE_URL ?? "";
   },
-  /**
-   * 已结束 thread 明细数据保留天数。
-   * 超过此天数的已结束(idle/ready_for_review/failed/cancelled/completed)thread 的
-   * 明细(threadEvent/toolRun/contextSnapshot/contextSummary)可被 purgeExpiredThreadDetails
-   * 清理,避免表无限膨胀。thread 主记录保留(历史列表可见)。
-   * 默认 90 天;0 表示禁用清理(保留所有数据,仅排查用)。
-   */
-  get retentionDays(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_DB_RETENTION_DAYS", "90"), 10);
-    return Number.isFinite(n) && n >= 0 ? n : 90;
-  },
-  /**
-   * ContextSnapshot 独立短保留期。
-   *
-   * 用户已决策保留全量 + 收紧 retention(不做分区/增量)。ContextSnapshot 每轮模型调用都落一行,
-   * 体积远大于 threadEvent/toolRun,90 天保留下表膨胀严重。给它独立的、更短的保留期(默认 7 天),
-   * cleanupOldSnapshots 用这个值;其他表仍用 retentionDays(90)。
-   * 0 表示禁用 snapshot 清理(保留全部,仅排查用)。
-   */
-  get snapshotRetentionDays(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_DB_SNAPSHOT_RETENTION_DAYS", "7"), 10);
-    return Number.isFinite(n) && n >= 0 ? n : 7;
-  },
-  /**
-   * 已软删 thread 主记录的物理删除阈值(天)。
-   *
-   * purgeExpiredThreadDetails 先清明细(retentionDays),主记录默认永久保留(软删可见于历史列表)。
-   * 设此阈值后,软删(deletedAt 非空)且超过阈值天数的 thread 主记录由 deleteThreadRecursive 物理删除,
-   * 形成软删 →(阈值天)→ 物理删闭环。
-   * 默认 0 = 禁用(主记录永久保留,仅 admin 显式彻底删除入口可物理删);仅长周期生产按需开启。
-   */
-  get hardDeleteRetentionDays(): number {
-    const n = Number.parseInt(optionalEnv("SNOW_DB_HARD_DELETE_DAYS", "0"), 10);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
-  },
 } as const;
 
 /** Runtime Conformance DSSE 验签配置。缺失时 fail-closed。 */
@@ -556,27 +521,11 @@ export const networkPolicyConfig = {
 } as const;
 
 /**
- * Secret mount 配置。
- *
- * - `masterKey`：AES-256-GCM 平台 master key（来自 env/secret manager）。
- * 缺失时 secretMount fail-closed（拒绝启用，不明文回退）。
- * - `keyId`：当前 master key 的标识符（用于密文记录加密用 key，支持后续 key 轮换）。
- */
-export const secretConfig = {
-  get masterKey(): string {
-    return process.env.SECRET_MASTER_KEY ?? "";
-  },
-  get keyId(): string {
-    return optionalEnv("SECRET_MASTER_KEY_ID", "default");
-  },
-} as const;
-
-/**
  * 部署配置（CI/CD webhook 交接）。
  *
  * - `cicdWebhookUrl`：CI/CD 部署 webhook URL。空 → 部署工具明确错误（不静默失败）。
  * - `cicdStatusUrl`：CI/CD job 状态查询 URL（{jobId} 占位符）。
- * - `cicdApiToken`：CI/CD webhook 鉴权 token（secret，可存 SecretMount）。
+ * - `cicdApiToken`：CI/CD webhook 鉴权 token（secret，只从外部配置源加载）。
  * - `environments`：允许的 environment 列表（逗号分隔，默认 staging,prod）。
  * - `timeoutMs`：webhook 请求超时（默认 30s）。
  * - `maxRetries`：失败重试次数（默认 3）。

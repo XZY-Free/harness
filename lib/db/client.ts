@@ -1,72 +1,7 @@
-import * as artifactRecordSchema from "@/lib/artifacts/persistence/artifact-record";
 import { dbConfig } from "@/lib/config";
-import * as controlPlaneOutboxSchema from "@/lib/control-plane/events/control-plane-outbox";
-import * as adminExportSchemaTable from "@/lib/persistence/schema/admin-export";
-import * as agentSchemaTable from "@/lib/persistence/schema/agents";
-import * as auditSchemaTable from "@/lib/persistence/schema/audit";
-import * as authorizationSchemaTable from "@/lib/persistence/schema/authorization";
-import * as conversationSchemaTable from "@/lib/persistence/schema/conversation";
-import * as deploymentRouteSchemaTable from "@/lib/persistence/schema/deployment-route";
-import * as deviceSchemaTable from "@/lib/persistence/schema/device";
-import * as effectSchemaTable from "@/lib/persistence/schema/effect";
-import * as environmentSchemaTable from "@/lib/persistence/schema/environment";
-import * as evaluationSchemaTable from "@/lib/persistence/schema/evaluation";
-import * as executionsSchemaTable from "@/lib/persistence/schema/executions";
-import * as fileChangeSchemaTable from "@/lib/persistence/schema/file-change";
-import * as filesystemCheckpointSchemaTable from "@/lib/persistence/schema/filesystem-checkpoint";
-import * as idempotencySchemaTable from "@/lib/persistence/schema/idempotency";
-import * as identitySchemaTable from "@/lib/persistence/schema/identity";
-import * as permissionSchemaTable from "@/lib/persistence/schema/permission";
-import * as projectionSchemaTable from "@/lib/persistence/schema/projection";
-import * as recoveryDrillSchemaTable from "@/lib/persistence/schema/recovery-drill";
-import * as runtimeArtifactSchemaTable from "@/lib/persistence/schema/runtime-artifact";
-import * as runtimeSchemaTable from "@/lib/persistence/schema/runtimes";
-import * as securityIncidentSchemaTable from "@/lib/persistence/schema/security-incident";
-import * as traceSchemaTable from "@/lib/persistence/schema/trace";
-import * as usageSchemaTable from "@/lib/persistence/schema/usage";
-import * as userActionRequestSchemaTable from "@/lib/persistence/schema/user-action-request";
-import * as workspaceSchemaTable from "@/lib/persistence/schema/workspace";
-import * as publicationRecordSchema from "@/lib/publications/persistence/publication-record";
-import * as routeRevisionSchema from "@/lib/routes/persistence/route-revision-record";
-import * as runtimeConformanceRunSchema from "@/lib/runtime/persistence/runtime-conformance-run-record";
+import * as schema from "@/lib/persistence/schema";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
-import * as schema from "./schema";
-
-/** 合并 B1 数据表与各正式领域 Schema，供 Drizzle 关系查询使用。 */
-const fullSchema = {
-  ...schema,
-  ...controlPlaneOutboxSchema,
-  ...artifactRecordSchema,
-  ...publicationRecordSchema,
-  ...runtimeConformanceRunSchema,
-  ...routeRevisionSchema,
-  ...identitySchemaTable,
-  ...deviceSchemaTable,
-  ...authorizationSchemaTable,
-  ...idempotencySchemaTable,
-  ...auditSchemaTable,
-  ...adminExportSchemaTable,
-  ...agentSchemaTable,
-  ...runtimeSchemaTable,
-  ...executionsSchemaTable,
-  ...deploymentRouteSchemaTable,
-  ...conversationSchemaTable,
-  ...projectionSchemaTable,
-  ...workspaceSchemaTable,
-  ...environmentSchemaTable,
-  ...permissionSchemaTable,
-  ...userActionRequestSchemaTable,
-  ...effectSchemaTable,
-  ...runtimeArtifactSchemaTable,
-  ...fileChangeSchemaTable,
-  ...filesystemCheckpointSchemaTable,
-  ...traceSchemaTable,
-  ...evaluationSchemaTable,
-  ...usageSchemaTable,
-  ...recoveryDrillSchemaTable,
-  ...securityIncidentSchemaTable,
-};
 
 /**
  * 外部 MySQL + Drizzle（mysql2 驱动）。
@@ -99,7 +34,7 @@ if (!globalForDb.__snowMysqlPool) {
   globalForDb.__snowMysqlPool = pool;
 }
 
-export const db = drizzle(pool, { schema: fullSchema, mode: "default" });
+export const db = drizzle(pool, { schema, mode: "default" });
 
 /**
  * DB 或事务的公共查询接口类型。

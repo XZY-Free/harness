@@ -44,7 +44,7 @@ export interface UpdateAgentCallStateInput {
   /** 进入终态时填 finishedAt；waiting_user 填 waitingAt；running 填 startedAt。 */
   lifecycle?: Partial<Pick<AgentCall, "startedAt" | "waitingAt" | "finishedAt">>;
   externalTaskRef?: string | null;
-  externalContextRef?: string | null;
+  agentSessionBindingId?: string | null;
   resultText?: string | null;
   resultJson?: unknown;
   resultDigest?: string | null;

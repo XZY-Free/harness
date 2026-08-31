@@ -169,8 +169,8 @@ describe("computeContentHash", () => {
 // ─── isKnownAuditActionType / assertAuditActionTypeKnown（纯逻辑）───
 
 describe("isKnownAuditActionType", () => {
-  it("目录中所有动作类型均已知（移除 descriptor 旧动作与旧 Agent Runtime 注册 authority 后共 31 种）", () => {
-    expect(AUDIT_ACTION_TYPES.length).toBe(31);
+  it("目录中所有动作类型均已知（包含 Studio 写操作，共 49 种）", () => {
+    expect(AUDIT_ACTION_TYPES.length).toBe(49);
     for (const actionType of AUDIT_ACTION_TYPES) {
       expect(isKnownAuditActionType(actionType)).toBe(true);
     }
@@ -785,7 +785,7 @@ describe("recordAuditEvent", () => {
     expect(event.actorId).toBe("inv_01");
   });
 
-  it("所有已知动作类型均可成功写入（Policy/Governance 接入后共 30 种）", async () => {
+  it("所有已知动作类型均可成功写入", async () => {
     for (const actionType of AUDIT_ACTION_TYPES) {
       await recordAuditEvent({
         actor: { tenantId, actorType: "user", actorId: userIdentityId },

@@ -9,14 +9,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * - 文件操作只记 path + bytes，content 被剔除。
  * - 嵌套对象深度限制到 2，超深折叠。
  * - metadata 仍可 JSON 序列化。
- * - recordAdminAudit 脱敏后转发给 appendAdminAuditLog。
+ * - recordAdminAudit 解析 actor 租户，脱敏后追加 AuditEvent。
  */
 
-const queries = vi.hoisted(() => ({ appendAdminAuditLog: vi.fn() }));
-vi.mock("@/lib/db/queries", () => ({ appendAdminAuditLog: queries.appendAdminAuditLog }));
+const auditQueries = vi.hoisted(() => ({ appendAuditEvent: vi.fn() }));
+const dbMocks = vi.hoisted(() => {
+  const limit = vi.fn().mockResolvedValue([{ tenantId: "t1" }]);
+  const where = vi.fn(() => ({ limit }));
+  const from = vi.fn(() => ({ where }));
+  const select = vi.fn(() => ({ from }));
+  return { db: { select }, select, from, where, limit };
+});
+vi.mock("@/lib/db/client", () => ({ db: dbMocks.db }));
+vi.mock("@/lib/identity/audit-queries", () => ({
+  appendAuditEvent: auditQueries.appendAuditEvent,
+  listAuditEvents: vi.fn(),
+}));
 
 import {
-  type AppendAdminAuditLogInput,
   recordAdminAudit,
   sanitizeAuditMetadata,
   summarizeRoleChange,
@@ -24,11 +34,8 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  queries.appendAdminAuditLog.mockImplementation(async (input: AppendAdminAuditLogInput) => ({
-    id: "audit-1",
-    createdAt: new Date(),
-    ...input,
-  }));
+  dbMocks.limit.mockResolvedValue([{ tenantId: "t1" }]);
+  auditQueries.appendAuditEvent.mockResolvedValue({ id: "audit-1" });
 });
 
 describe("sanitizeAuditMetadata (切片 C)", () => {
@@ -110,7 +117,7 @@ describe("summarizeRoleChange (切片 C)", () => {
 });
 
 describe("recordAdminAudit (切片 C)", () => {
-  it("脱敏 metadata 后转发给 appendAdminAuditLog", async () => {
+  it("解析 actor 租户，脱敏 metadata 后追加 AuditEvent", async () => {
     await recordAdminAudit({
       actorUserId: "u1",
       action: "policies.updated",
@@ -119,9 +126,33 @@ describe("recordAdminAudit (切片 C)", () => {
       outcome: "succeeded",
       metadata: { keys: ["a"], changedKeys: ["a"], apiKey: "sk-leak", content: "secret-content" },
     });
-    expect(queries.appendAdminAuditLog).toHaveBeenCalledTimes(1);
-    const passed = queries.appendAdminAuditLog.mock.calls[0]?.[0] as AppendAdminAuditLogInput;
-    expect(passed.metadata).toEqual({ keys: ["a"], changedKeys: ["a"] });
-    expect(JSON.stringify(passed.metadata)).not.toContain("sk-leak");
+    expect(auditQueries.appendAuditEvent).toHaveBeenCalledTimes(1);
+    const passed = auditQueries.appendAuditEvent.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(passed).toMatchObject({
+      tenantId: "t1",
+      actorType: "user",
+      actorId: "u1",
+      actionType: "policies.updated",
+      targetType: "policy",
+      targetId: "policy",
+      outcome: "succeeded",
+      metadataRedacted: { keys: ["a"], changedKeys: ["a"] },
+    });
+    expect(JSON.stringify(passed.metadataRedacted)).not.toContain("sk-leak");
+  });
+
+  it("actor 不存在时明确失败，不写审计", async () => {
+    dbMocks.limit.mockResolvedValueOnce([]);
+    await expect(
+      recordAdminAudit({
+        actorUserId: "missing",
+        action: "policies.updated",
+        targetType: "policy",
+        targetId: "policy",
+        outcome: "failed",
+        metadata: {},
+      }),
+    ).rejects.toThrow("审计 actor 不存在");
+    expect(auditQueries.appendAuditEvent).not.toHaveBeenCalled();
   });
 });

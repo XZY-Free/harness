@@ -1,5 +1,9 @@
 import { db } from "@/lib/db/client";
-import { agentCallBindingTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
+import {
+  agentCallBindingTable,
+  agentCallTable,
+  agentSessionBindingTable,
+} from "@/lib/persistence/schema/agent-calls";
 import { capabilityUseTable } from "@/lib/persistence/schema/capability-use";
 import {
   threadEventTable,
@@ -92,7 +96,7 @@ export async function loadHarnessExecutionTraceForAgentCall(tenantId: string, ca
         actionId: agentCallTable.sourceRef,
         state: agentCallTable.state,
         taskId: agentCallTable.externalTaskRef,
-        contextId: agentCallTable.externalContextRef,
+        contextId: agentSessionBindingTable.externalContextRef,
         errorCode: agentCallTable.errorCode,
         createdAt: agentCallTable.createdAt,
         startedAt: agentCallTable.startedAt,
@@ -109,6 +113,13 @@ export async function loadHarnessExecutionTraceForAgentCall(tenantId: string, ca
         and(
           eq(agentCallBindingTable.callId, agentCallTable.id),
           eq(agentCallBindingTable.tenantId, agentCallTable.tenantId),
+        ),
+      )
+      .leftJoin(
+        agentSessionBindingTable,
+        and(
+          eq(agentSessionBindingTable.id, agentCallTable.agentSessionBindingId),
+          eq(agentSessionBindingTable.tenantId, agentCallTable.tenantId),
         ),
       )
       .where(

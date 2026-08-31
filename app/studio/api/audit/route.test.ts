@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * Phase 4-4 切片 C Stage D：GET /studio/api/audit 守卫与查询测试。
  * 断言：
  * - 无 audit.read → 403，不查 DB。
- * - 合法 query 调 listAdminAuditLogs 并返回 { logs }。
+ * - 合法 query 调 listStudioAuditEvents 并返回 { logs }。
  * - 非法 limit 被钳制（不报错）。
  * - 未知 action → 400 invalid_action。
  */
@@ -14,16 +14,16 @@ const studio = vi.hoisted(() => ({
   hasStudioAction: vi.fn(),
   resolveStudioPrincipal: vi.fn(),
 }));
-const queries = vi.hoisted(() => ({ listAdminAuditLogs: vi.fn() }));
+const audit = vi.hoisted(() => ({ listStudioAuditEvents: vi.fn() }));
 
 vi.mock("@/lib/identity/studio-access", () => ({
   requireStudioAction: studio.requireStudioAction,
   hasStudioAction: studio.hasStudioAction,
   resolveStudioPrincipal: studio.resolveStudioPrincipal,
 }));
-vi.mock("@/lib/db/queries", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/db/queries")>();
-  return { ...actual, listAdminAuditLogs: queries.listAdminAuditLogs };
+vi.mock("@/lib/studio/admin-audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/studio/admin-audit")>();
+  return { ...actual, listStudioAuditEvents: audit.listStudioAuditEvents };
 });
 
 import { GET } from "@/app/studio/api/audit/route";
@@ -46,29 +46,29 @@ function req(url: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   studio.requireStudioAction.mockResolvedValue({ ok: true, principal: PRINCIPAL });
-  queries.listAdminAuditLogs.mockResolvedValue([
+  audit.listStudioAuditEvents.mockResolvedValue([
     {
       id: "a1",
-      actorUserId: "u1",
-      action: "policies.updated",
+      actorId: "u1",
+      actionType: "policies.updated",
       targetType: "policy",
       targetId: "policy",
       outcome: "succeeded",
-      metadata: { keys: ["protectedPaths"], changedKeys: ["protectedPaths"] },
-      createdAt: new Date(),
+      metadataRedacted: { keys: ["protectedPaths"], changedKeys: ["protectedPaths"] },
+      occurredAt: new Date(),
     },
   ]);
 });
 
 describe("GET /studio/api/audit (切片 C)", () => {
-  it("audit.read 通过 → 200 + { logs }，调 listAdminAuditLogs", async () => {
+  it("audit.read 通过 → 200 + { logs }，调 listStudioAuditEvents", async () => {
     const res = await GET(req("http://localhost/studio/api/audit?limit=50"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.logs).toHaveLength(1);
-    expect(body.data.logs[0].action).toBe("policies.updated");
+    expect(body.data.logs[0].actionType).toBe("policies.updated");
     expect(studio.requireStudioAction).toHaveBeenCalledWith(expect.anything(), "audit.read");
-    expect(queries.listAdminAuditLogs).toHaveBeenCalledTimes(1);
+    expect(audit.listStudioAuditEvents).toHaveBeenCalledTimes(1);
   });
 
   it("传递 actor/action/target 过滤参数", async () => {
@@ -77,8 +77,9 @@ describe("GET /studio/api/audit (切片 C)", () => {
         "http://localhost/studio/api/audit?actorUserId=u2&action=skills.published&targetType=skill&targetId=s1",
       ),
     );
-    const arg = queries.listAdminAuditLogs.mock.calls[0]?.[0] as Record<string, unknown>;
+    const arg = audit.listStudioAuditEvents.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(arg).toMatchObject({
+      tenantId: "t1",
       actorUserId: "u2",
       action: "skills.published",
       targetType: "skill",
@@ -89,7 +90,7 @@ describe("GET /studio/api/audit (切片 C)", () => {
   it("非法 limit（非数字）→ 透传 undefined，钳制由查询层负责，不报错", async () => {
     const res = await GET(req("http://localhost/studio/api/audit?limit=abc"));
     expect(res.status).toBe(200);
-    expect(queries.listAdminAuditLogs).toHaveBeenCalledWith(
+    expect(audit.listStudioAuditEvents).toHaveBeenCalledWith(
       expect.objectContaining({ limit: undefined }),
     );
   });
@@ -98,7 +99,7 @@ describe("GET /studio/api/audit (切片 C)", () => {
     const res = await GET(req("http://localhost/studio/api/audit?action=evil.action"));
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe("invalid_action");
-    expect(queries.listAdminAuditLogs).not.toHaveBeenCalled();
+    expect(audit.listStudioAuditEvents).not.toHaveBeenCalled();
   });
 
   it("无 audit.read → 403，不查 DB", async () => {
@@ -108,6 +109,6 @@ describe("GET /studio/api/audit (切片 C)", () => {
     });
     const res = await GET(req("http://localhost/studio/api/audit"));
     expect(res.status).toBe(403);
-    expect(queries.listAdminAuditLogs).not.toHaveBeenCalled();
+    expect(audit.listStudioAuditEvents).not.toHaveBeenCalled();
   });
 });

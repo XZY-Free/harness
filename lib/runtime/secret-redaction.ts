@@ -1,10 +1,8 @@
-import { isMasterKeyConfigured } from "./secret-crypto";
-
 /**
  * Secret 脱敏注册表（全链路防泄露）。
  *
  * 维护当前 thread 解析出的 secret 明文值集合（运行时内存），供：
- * - `executeToolRun` 输出扫描替换 `***`
+ * - ToolCall 执行输出扫描替换 `***`
  * - `logger` 日志扫描替换 `***`
  * - manifest / context 不含 secret 值
  *
@@ -65,7 +63,7 @@ export function redactText(text: string, threadId: string): string {
 
 /**
  * 脱敏对象（深遍历，替换所有 string 值中的 secret）。
- * 用于 ToolRun output / event payload 等结构化数据。
+ * 用于 ToolCall output / event payload 等结构化数据。
  *
  * 审计修复：加入 WeakSet 防止循环引用导致无限递归（stack overflow）。
  */
@@ -106,11 +104,6 @@ function redactTextFromSet(text: string, secrets: Set<string>): string {
     }
   }
   return result;
-}
-
-/** 检查 secret mount 是否可用（master key 已配置）。 */
-export function isSecretMountAvailable(): boolean {
-  return isMasterKeyConfigured();
 }
 
 /**

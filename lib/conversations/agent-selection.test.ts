@@ -184,7 +184,6 @@ describe("Turn-scoped AgentUseDirective", () => {
       tenantId: ctx.tenantId,
       parentInvocationId: turn.latestInvocationId,
       agentId: ctx.agentId,
-      agentRevisionId: ctx.agentRevision.id,
       sourceType: "harness_planned",
       sourceRef: "action-consult-agent-a",
       state: "completed",

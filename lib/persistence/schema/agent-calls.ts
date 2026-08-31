@@ -18,7 +18,7 @@
  * - AgentCall.parentInvocationId 必须属于同 tenant（Store 校验，DB 加 FK 到 Invocation）。
  * - AgentCallBinding 只有 create，没有 update（证据不可变）。
  * - AgentCallAttempt UNIQUE(callId, attemptNo)。
- * - AgentSessionBinding UNIQUE(agentRevisionId, routeRevisionId, externalContextRef)。
+ * - AgentSessionBinding UNIQUE(tenantId, agentRevisionId, routeRevisionId, externalContextRef)。
  * - AgentCallEventIngress UNIQUE(callId, producerEventId) / UNIQUE(callId, producerSequence)。
  */
 import { randomUUID } from "node:crypto";
@@ -67,7 +67,7 @@ export type AgentCallSourceType = (typeof AGENT_CALL_SOURCE_TYPES)[number];
  *
  * 关键约束：
  * - parentInvocationId 恒必填且属于同 tenant（AgentCall 永远是子执行域）。
- * - agentId 为 stable Agent.id；agentRevisionId 为 exact AgentRevision.id。
+ * - agentId 为 stable Agent.id；exact AgentRevision 只由 AgentCallBinding 持有。
  * - state 独立状态机，不复用 Invocation 状态。
  * - 业务幂等：parentInvocationId + logicalCallKey（应用层/UNIQUE 兜底）。
  */
@@ -87,16 +87,16 @@ export const agentCallTable = mysqlTable(
       .references(() => invocationTable.id),
     /** stable Agent.id（能力资产）。 */
     agentId: varchar("agentId", { length: 36 }).notNull(),
-    /** exact AgentRevision.id（冻结，见 AgentCallBinding）。 */
-    agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
     /** 调用来源类型。 */
     sourceType: varchar("sourceType", { length: 32 }).notNull(),
     /** 来源 Harness actionId。 */
     sourceRef: varchar("sourceRef", { length: 256 }),
     /** 独立状态机。 */
     state: mysqlEnum("state", AGENT_CALL_STATES).notNull().default("queued"),
-    /** A2A contextId 快照（权威在 AgentSessionBinding.externalContextRef）。 */
-    externalContextRef: varchar("externalContextRef", { length: 256 }),
+    /** 指向唯一 A2A context Authority；contextId 不在 AgentCall 复制。 */
+    agentSessionBindingId: varchar("agentSessionBindingId", { length: 36 }).references(
+      () => agentSessionBindingTable.id,
+    ),
     /** A2A taskId。 */
     externalTaskRef: varchar("externalTaskRef", { length: 256 }),
     /** 归一化结果文本。 */
@@ -123,6 +123,7 @@ export const agentCallTable = mysqlTable(
     tenantStateIdx: index("AgentCall_tenant_state_idx").on(t.tenantId, t.state),
     parentIdx: index("AgentCall_parent_idx").on(t.parentInvocationId),
     agentIdx: index("AgentCall_agent_idx").on(t.agentId),
+    sessionBindingIdx: index("AgentCall_session_binding_idx").on(t.agentSessionBindingId),
     parentLogicalKeyUq: uniqueIndex("AgentCall_parent_logical_key_uq").on(
       t.parentInvocationId,
       t.logicalCallKey,
@@ -292,7 +293,8 @@ export const agentSessionBindingTable = mysqlTable(
     tenantId: varchar("tenantId", { length: 36 })
       .notNull()
       .references(() => tenant.id),
-    threadId: varchar("threadId", { length: 36 }).notNull(),
+    /** Thread 会话必填；Job 类 AgentCall 无 Thread 时为 null。 */
+    threadId: varchar("threadId", { length: 36 }),
     agentId: varchar("agentId", { length: 36 }).notNull(),
     agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
     deploymentRouteId: varchar("deploymentRouteId", { length: 36 }).notNull(),
@@ -312,6 +314,7 @@ export const agentSessionBindingTable = mysqlTable(
   },
   (t) => ({
     revisionRouteContextUq: uniqueIndex("AgentSessionBinding_revision_route_context_uq").on(
+      t.tenantId,
       t.agentRevisionId,
       t.routeRevisionId,
       t.externalContextRef,

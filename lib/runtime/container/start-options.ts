@@ -1,6 +1,9 @@
-import { access } from "node:fs/promises";
-import { type SecretEnvMap, cleanupSecretEnvFile, writeSecretEnvFile } from "../secret-mount";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { NetworkPolicy, ResourceQuota } from "../types";
+
+/** 运行时短生命内存的环境变量映射；不是持久化 Authority。 */
+export type SecretEnvMap = Record<string, string>;
 
 type ContainerStartOptions = {
   quota?: ResourceQuota;
@@ -21,6 +24,28 @@ type ContainerStartOptions = {
  * cleanup 改为 no-op（文件跨 exec 复用），由 `cleanupSecretFileCache(threadId)` 在容器停止时清理。
  */
 const secretFileCache = new Map<string, { path: string; hash: string }>();
+
+async function writeSecretEnvFile(
+  secrets: SecretEnvMap,
+  dir: string,
+  threadId: string,
+): Promise<string> {
+  if (!/^[a-zA-Z0-9-]+$/.test(threadId)) {
+    throw new Error(`非法 threadId（含不安全字符）：${threadId}`);
+  }
+  const filePath = join(dir, `.snow/runtime/${threadId}/secret-env-${Date.now()}.env`);
+  await mkdir(dirname(filePath), { recursive: true });
+  const lines = Object.entries(secrets).map(([key, value]) => {
+    const escaped = value.replace(/'/g, "'\\''");
+    return `${key}='${escaped}'`;
+  });
+  await writeFile(filePath, lines.join("\n"), { mode: 0o600 });
+  return filePath;
+}
+
+async function cleanupSecretEnvFile(filePath: string): Promise<void> {
+  await rm(filePath, { force: true });
+}
 
 function hashSecrets(secrets: SecretEnvMap): string {
   // secrets 是小对象，JSON.stringify 作 hash 足够（键稳定排序）

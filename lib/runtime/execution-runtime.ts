@@ -1,11 +1,10 @@
 import { workspaceRoot } from "@/lib/workspace";
 import { execInContainer } from "./container/docker-cli";
 import { startContainer, touchActivity } from "./container/manager";
-import { prepareContainerStartOptions } from "./container/start-options";
+import { type SecretEnvMap, prepareContainerStartOptions } from "./container/start-options";
 import { wrapWithHostRlimits } from "./rlimit";
 import { buildSafeEnv } from "./safe-env";
 import { wrapWithHostSandbox } from "./sandbox";
-import type { SecretEnvMap } from "./secret-mount";
 import type { ExecResult, ExecutionRuntime, NetworkPolicy, ResourceQuota } from "./types";
 
 /**

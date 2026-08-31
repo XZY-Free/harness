@@ -14,13 +14,50 @@
  * - legacy summarizePolicyChange（PolicyConfig 审计）已随 02-6 P9 物理删除；正式 Policy Revision
  *   审计摘要由 /studio/governance 侧按 Policy Revision 维度构造。
  */
-import {
-  type AppendAdminAuditLogInput,
-  type DbTxClient,
-  appendAdminAuditLog,
-} from "@/lib/db/queries";
+import { type DbOrTx, db } from "@/lib/db/client";
+import { generateRequestId } from "@/lib/http";
+import { assertAuditActionTypeKnown } from "@/lib/identity/audit";
+import { appendAuditEvent, listAuditEvents } from "@/lib/identity/audit-queries";
+import type { AuditEvent, AuditOutcome } from "@/lib/persistence/schema/audit";
+import { userIdentity } from "@/lib/persistence/schema/identity";
+import { and, eq, inArray } from "drizzle-orm";
 
-export type { AppendAdminAuditLogInput };
+export const STUDIO_AUDIT_ACTIONS = [
+  "settings.user_roles.updated",
+  "policies.updated",
+  "skills.published",
+  "skills.rolled_back",
+  "skills.created",
+  "skills.updated",
+  "skills.deleted",
+  "skills.matched",
+  "skills.synced",
+  "skills.unsynced",
+  "workspace.file.written",
+  "workspace.file.deleted",
+  "tool.high_risk.executed",
+  "permission_rule.created",
+  "permission_rule.updated",
+  "permission_rule.deleted",
+  "thread.purged",
+  "approval.resolved",
+] as const;
+export type StudioAuditAction = (typeof STUDIO_AUDIT_ACTIONS)[number];
+
+export interface StudioAuditInput {
+  actorUserId: string;
+  action: StudioAuditAction;
+  targetType: string;
+  targetId: string;
+  outcome: AuditOutcome;
+  metadata: Record<string, unknown>;
+  requestId?: string;
+}
+
+export type StudioAuditRow = AuditEvent & {
+  actorName: string | null;
+  actorEmail: string | null;
+};
 
 /** key 名命中以下子串（小写）即剔除。 */
 const REDACT_KEY_PATTERNS = [
@@ -84,12 +121,75 @@ export function summarizeRoleChange(
 }
 
 /**
- * 记录一条审计：对 metadata 做防御性脱敏后调用 appendAdminAuditLog 落库。
+ * 记录一条审计：对 metadata 做防御性脱敏后写入 AuditEvent。
  * 各 route 在原权限通过、进入业务写意图后调用（成功 / 业务失败两路）。
  */
-export async function recordAdminAudit(
-  input: AppendAdminAuditLogInput,
-  tx?: DbTxClient,
-): Promise<void> {
-  await appendAdminAuditLog({ ...input, metadata: sanitizeAuditMetadata(input.metadata) }, tx);
+export async function recordAdminAudit(input: StudioAuditInput, tx?: DbOrTx): Promise<void> {
+  assertAuditActionTypeKnown(input.action);
+  const client = tx ?? db;
+  const [actor] = await client
+    .select({ tenantId: userIdentity.tenantId })
+    .from(userIdentity)
+    .where(eq(userIdentity.id, input.actorUserId))
+    .limit(1);
+  if (!actor) throw new Error(`Studio 审计 actor 不存在: ${input.actorUserId}`);
+  const metadataRedacted = sanitizeAuditMetadata(input.metadata);
+  await appendAuditEvent(
+    {
+      tenantId: actor.tenantId,
+      actorType: "user",
+      actorId: input.actorUserId,
+      actionType: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      outcome: input.outcome,
+      metadataRedacted,
+      reason: typeof metadataRedacted.reasonCode === "string" ? metadataRedacted.reasonCode : null,
+      requestId: input.requestId ?? generateRequestId(),
+    },
+    client,
+  );
+}
+
+/** Studio 审计只读投影：Authority 仍是 AuditEvent，名称只从 UserIdentity 补充。 */
+export async function listStudioAuditEvents(params: {
+  tenantId: string;
+  limit?: number;
+  actorUserId?: string;
+  targetType?: string;
+  targetId?: string;
+  action?: StudioAuditAction;
+}): Promise<StudioAuditRow[]> {
+  const events = await listAuditEvents({
+    tenantId: params.tenantId,
+    actorType: params.actorUserId ? "user" : undefined,
+    actorId: params.actorUserId,
+    targetType: params.targetType,
+    targetId: params.targetId,
+    actionType: params.action,
+    limit: Math.min(200, Math.max(1, Math.floor(params.limit ?? 100))),
+    order: "desc",
+  });
+  const actorIds = Array.from(
+    new Set(events.filter((event) => event.actorType === "user").map((event) => event.actorId)),
+  );
+  const actors =
+    actorIds.length > 0
+      ? await db
+          .select({
+            id: userIdentity.id,
+            name: userIdentity.displayName,
+            email: userIdentity.email,
+          })
+          .from(userIdentity)
+          .where(
+            and(eq(userIdentity.tenantId, params.tenantId), inArray(userIdentity.id, actorIds)),
+          )
+      : [];
+  const actorsById = new Map(actors.map((actor) => [actor.id, actor]));
+  return events.map((event) => ({
+    ...event,
+    actorName: actorsById.get(event.actorId)?.name ?? null,
+    actorEmail: actorsById.get(event.actorId)?.email ?? null,
+  }));
 }

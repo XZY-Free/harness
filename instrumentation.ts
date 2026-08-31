@@ -35,62 +35,6 @@ export async function register() {
     const { startIdleSweep } = await import("./lib/runtime/container/manager");
     startIdleSweep();
 
-    // P1-11: 启动时重放审计失败队列(auditFailureLog 原只有入队无消费者)。
-    const { replayAuditFailures } = await import("./lib/audit/retry-queue");
-    const replayed = await replayAuditFailures().catch((err) => {
-      console.error("[instrumentation] replayAuditFailures 启动重放失败:", err);
-      return 0;
-    });
-    if (replayed > 0) {
-      console.info(`[instrumentation] replayed ${replayed} audit failures on startup`);
-    }
-
-    // V6-M2-7：定时清理旧快照（每小时，unref 不阻塞进程退出）。
-    // cleanupOldSnapshots 删超过 retentionDays 的 contextSnapshot。
-    // 02-5：legacy 过期记忆清理（cleanupExpiredMemories，删 memoryEntry/memoryEmbedding）
-    // 已随 memory 轨删除；正式 Memory Authority 的 memoryState/expiresAt 生命周期由正式链自身管理。
-    const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-    const cleanupTimer = setInterval(async () => {
-      try {
-        const { cleanupOldSnapshots } = await import("./lib/db/queries");
-        const snapshots = await cleanupOldSnapshots();
-        if (snapshots > 0) {
-          console.info(`[instrumentation] cleanup: ${snapshots} old snapshots`);
-        }
-      } catch (e) {
-        console.warn("[instrumentation] cleanup sweep failed:", e);
-      }
-    }, CLEANUP_INTERVAL_MS);
-    cleanupTimer.unref();
-
-    // P1-11: 定时重放审计失败队列(每小时),补齐 auditFailureLog 的消费者。
-    const AUDIT_REPLAY_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-    const auditReplayTimer = setInterval(async () => {
-      try {
-        const { replayAuditFailures: replay } = await import("./lib/audit/retry-queue");
-        const n = await replay();
-        if (n > 0) console.info(`[instrumentation] audit replay: ${n} rows`);
-      } catch (e) {
-        console.warn("[instrumentation] audit replay sweep failed:", e);
-      }
-    }, AUDIT_REPLAY_INTERVAL_MS);
-    auditReplayTimer.unref();
-
-    // 状态机兜底 sweep：deploying 状态定时轮询 CI/CD 确认（防 gitPush 成功后
-    // deliverySummary 未调用导致永久悬空）。02-3：移除 legacy thread delivering→failed
-    // 超时扫描（正式 Thread 无 delivering/failed 状态机；"交付超时扫描"后续在正式
-    // Deployment/Execution/Delivery Authority 上重新实现）。
-    const SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-    const sweepTimer = setInterval(async () => {
-      try {
-        const { sweepDeployingStatuses } = await import("./lib/deploy/cicd-target");
-        await sweepDeployingStatuses();
-      } catch (e) {
-        console.warn("[instrumentation] state machine sweep failed:", e);
-      }
-    }, SWEEP_INTERVAL_MS);
-    sweepTimer.unref();
-
     // V10 Phase 2：V9 浏览器 idle 释放 sweep 和 retention 清理 sweep 已删除。
     // 原 V9 在此启动 browserIdleTimer（每分钟释放 idle Playwright context）和
     // browserRetentionTimer（每小时清理过期 UserBrowserProfile / BrowserSession /

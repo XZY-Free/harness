@@ -95,7 +95,7 @@ export async function resumeAgentCall(command: ResumeAgentCallCommand): Promise<
 
   // 3. resume 必须复用 existing task/context（同 AgentCall）。
   const taskId = call.externalTaskRef;
-  const contextId = call.externalContextRef;
+  const contextId = call.sessionBinding?.externalContextRef;
   if (!taskId || !contextId) {
     throw new AgentCallResumeError(
       "AgentCall waiting_user 缺少 externalTaskRef/externalContextRef",

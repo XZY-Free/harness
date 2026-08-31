@@ -122,7 +122,7 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
     const [callRow] = await db.select().from(agentCallTable).where(eq(agentCallTable.id, call.id));
     expect(callRow?.state).toBe("completed");
     expect(callRow?.externalTaskRef).toBe("task-1");
-    expect(callRow?.externalContextRef).toBe("ctx-1");
+    expect(callRow?.agentSessionBindingId).not.toBeNull();
     expect(callRow?.resultText).toBe("done");
     expect(callRow?.resultJson).toEqual({ n: 1 });
     expect(callRow?.resultDigest).toMatch(/^sha256:/);
@@ -133,6 +133,7 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
     expect(attempt?.attemptState).toBe("completed");
     const [session] = await db.select().from(agentSessionBindingTable);
     expect(session?.externalContextRef).toBe("ctx-1");
+    expect(callRow?.agentSessionBindingId).toBe(session?.id);
     expect(session?.tenantId).toBe(tenantId);
     expect(session?.threadId).toBe("thread-1");
     const ingress = await db.select().from(agentCallEventIngressTable);
@@ -315,7 +316,7 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
     expect(attempt?.attemptState).toBe("queued");
   });
 
-  it("session thread 只来自 parent；parent 无 thread 不建会话；同 refs 异 owner 拒绝", async () => {
+  it("session thread 只来自 parent；Job 也建立 context Authority；同 refs 异 owner 拒绝", async () => {
     const { tenantId, call } = await seedRunningCall();
     await ingestAgentCallEvents({
       tenantId,
@@ -331,7 +332,10 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
     });
     const [callRow] = await db.select().from(agentCallTable).where(eq(agentCallTable.id, call.id));
     expect(callRow?.externalTaskRef).toBe("task-job");
-    expect(await db.select().from(agentSessionBindingTable)).toHaveLength(0); // Job 无 thread 不建会话
+    const [jobSession] = await db.select().from(agentSessionBindingTable);
+    expect(jobSession?.threadId).toBeNull();
+    expect(jobSession?.externalContextRef).toBe("ctx-job");
+    expect(callRow?.agentSessionBindingId).toBe(jobSession?.id);
     // 同 task/context refs 但不同 owner（异租户）拒绝，不建跨租户会话。
     const otherTenant = await seedTenant();
     const { call: call2 } = await seedRunningCall("thread-x");

@@ -1,4 +1,4 @@
-import * as schema from "@/lib/db/schema";
+import * as schema from "@/lib/persistence/schema";
 /**
  * S1（08 同构）：真实 MySQL 测试基础设施。
  *

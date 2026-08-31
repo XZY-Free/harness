@@ -109,7 +109,7 @@ export function isAgentCallTerminal(state: AgentCallState): boolean {
 /**
  * AgentCall 领域实体（持久化面向）。
  *
- * 可变字段仅限：state、externalContextRef、externalTaskRef、result、
+ * 可变字段仅限：state、agentSessionBindingId、externalTaskRef、result、
  * error、lifecycle timestamp、versionNo、attempts 等。
  * 证据类字段（见 AgentCallBinding）不可变。
  */
@@ -120,16 +120,16 @@ export interface AgentCall {
   parentInvocationId: string;
   /** stable Agent.id（能力资产）。 */
   agentId: string;
-  /** exact AgentRevision.id（冻结，见 AgentCallBinding）。 */
-  agentRevisionId: string;
   /** 调用来源类型。 */
   sourceType: AgentCallSourceType;
   /** 来源 Harness actionId。 */
   sourceRef: string | null;
   /** 当前状态。 */
   state: AgentCallState;
-  /** A2A contextId（外部上下文引用）；由 AgentSessionBinding.externalContextRef 持有，此处为冗余快照。 */
-  externalContextRef: string | null;
+  /** 唯一 A2A context Authority 的引用。 */
+  agentSessionBindingId: string | null;
+  /** 从 AgentSessionBinding join 出的只读投影，不是 AgentCall 可写字段。 */
+  sessionBinding: { id: string; externalContextRef: string } | null;
   /** A2A taskId（外部任务引用）。 */
   externalTaskRef: string | null;
   /** 归一化结果（resultText / resultJson / resultDigest 见 result 持久化）。 */
@@ -206,7 +206,7 @@ export function toAgentCallDisposition(call: AgentCall): AgentCallDisposition {
     };
   }
   if (call.state === "waiting_user") {
-    if (!call.externalTaskRef || !call.externalContextRef) {
+    if (!call.externalTaskRef || !call.sessionBinding?.externalContextRef) {
       throw new AgentCallDispositionEvidenceError(call.id, "waiting_user 缺少 task/context refs");
     }
     return {
@@ -214,7 +214,7 @@ export function toAgentCallDisposition(call: AgentCall): AgentCallDisposition {
       state: "waiting_user",
       callId: call.id,
       taskId: call.externalTaskRef,
-      contextId: call.externalContextRef,
+      contextId: call.sessionBinding.externalContextRef,
     };
   }
   return { outcome: "pending", state: call.state, callId: call.id };

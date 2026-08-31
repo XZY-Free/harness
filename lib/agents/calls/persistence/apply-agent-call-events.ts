@@ -104,6 +104,7 @@ function parseEvent(e: AgentCallCandidateEvent): ParsedEvent {
 interface CallLock {
   state: AgentCallState;
   externalTaskRef: string | null;
+  agentSessionBindingId: string | null;
   externalContextRef: string | null;
   versionNo: number;
   agentId: string;
@@ -139,17 +140,34 @@ async function lockCall(tx: DbOrTx, callId: string, tenantId: string): Promise<C
     .where(eq(invocationTable.id, callRow.parentInvocationId))
     .limit(1)
     .for("update");
-  return {
+  const result: CallLock = {
     state: callRow.state as AgentCallState,
     externalTaskRef: callRow.externalTaskRef,
-    externalContextRef: callRow.externalContextRef,
+    agentSessionBindingId: callRow.agentSessionBindingId,
+    externalContextRef: null,
     versionNo: callRow.versionNo,
     agentId: callRow.agentId,
-    agentRevisionId: callRow.agentRevisionId,
+    agentRevisionId: binding.agentRevisionId,
     deploymentRouteId: binding.deploymentRouteId,
     routeRevisionId: binding.routeRevisionId,
     parentThreadId: parent?.threadId ?? null,
   };
+  if (callRow.agentSessionBindingId) {
+    const [session] = await tx
+      .select({ externalContextRef: agentSessionBindingTable.externalContextRef })
+      .from(agentSessionBindingTable)
+      .where(
+        and(
+          eq(agentSessionBindingTable.id, callRow.agentSessionBindingId),
+          eq(agentSessionBindingTable.tenantId, tenantId),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (!session) throw new Error(`AgentSessionBinding ${callRow.agentSessionBindingId} 不存在`);
+    result.externalContextRef = session.externalContextRef;
+  }
+  return result;
 }
 
 /** 校验当前已绑定 refs 与事件 refs 精确匹配；已绑定但事件 refs 存在且不同 → 关联不匹配。 */
@@ -168,22 +186,20 @@ function assertRefsMatch(
   }
 }
 
-/** 建立/复用 AgentSessionBinding（仅当 parent 有 thread）。精确维度一致才可复用。 */
+/** 建立/复用 AgentSessionBinding。精确维度一致才可复用。 */
 async function ensureSession(
   tx: DbOrTx,
   lock: CallLock,
   tenantId: string,
   threadId: string | null,
   contextId: string,
-): Promise<void> {
-  if (!threadId) return; // Job：无 thread 不建会话。
+): Promise<string> {
   const [existing] = await tx
     .select()
     .from(agentSessionBindingTable)
     .where(
       and(
         eq(agentSessionBindingTable.tenantId, tenantId),
-        eq(agentSessionBindingTable.threadId, threadId),
         eq(agentSessionBindingTable.agentId, lock.agentId),
         eq(agentSessionBindingTable.agentRevisionId, lock.agentRevisionId),
         eq(agentSessionBindingTable.deploymentRouteId, lock.deploymentRouteId),
@@ -192,9 +208,15 @@ async function ensureSession(
       ),
     )
     .limit(1);
-  if (existing) return;
+  if (existing) {
+    if (existing.threadId !== threadId || existing.bindingState !== "active") {
+      throw new Error("AgentSessionBinding 关联冲突：context 已归属其它会话或已关闭");
+    }
+    return existing.id;
+  }
+  const id = randomUUID();
   await tx.insert(agentSessionBindingTable).values({
-    id: randomUUID(),
+    id,
     tenantId,
     threadId,
     agentId: lock.agentId,
@@ -206,6 +228,7 @@ async function ensureSession(
     createdAt: new Date(),
     lastUsedAt: new Date(),
   });
+  return id;
 }
 
 /** 幂等写入 ingress 账本；返回 accepted / duplicate，冲突抛错（回滚）。 */
@@ -285,6 +308,7 @@ export async function applyAgentCallEvents(
 
   let state = lock.state;
   let externalTaskRef = lock.externalTaskRef;
+  let agentSessionBindingId = lock.agentSessionBindingId;
   let externalContextRef = lock.externalContextRef;
   let accepted = 0;
   let duplicate = 0;
@@ -310,10 +334,16 @@ export async function applyAgentCallEvents(
         if (!p.contextId) {
           throw new Error("call.started 缺少 contextId，无法建立 AgentCall 会话");
         }
-        await ensureSession(tx, lock, input.tenantId, lock.parentThreadId, p.contextId);
+        agentSessionBindingId = await ensureSession(
+          tx,
+          lock,
+          input.tenantId,
+          lock.parentThreadId,
+          p.contextId,
+        );
         await tx
           .update(agentCallTable)
-          .set({ externalTaskRef, externalContextRef, versionNo: lock.versionNo + 1 })
+          .set({ externalTaskRef, agentSessionBindingId, versionNo: lock.versionNo + 1 })
           .where(eq(agentCallTable.id, input.callId));
       } else if (p.taskId && externalTaskRef !== null && externalTaskRef !== p.taskId) {
         throw new Error("AgentCall taskId 关联不匹配");
@@ -346,7 +376,6 @@ export async function applyAgentCallEvents(
         .set({
           state,
           externalTaskRef,
-          externalContextRef,
           resultText: text,
           resultJson: data,
           resultDigest,
@@ -366,7 +395,13 @@ export async function applyAgentCallEvents(
         }
         externalTaskRef = p.taskId;
         externalContextRef = p.contextId;
-        await ensureSession(tx, lock, input.tenantId, lock.parentThreadId, p.contextId);
+        agentSessionBindingId = await ensureSession(
+          tx,
+          lock,
+          input.tenantId,
+          lock.parentThreadId,
+          p.contextId,
+        );
       }
       state = "waiting_user";
       await tx
@@ -374,7 +409,7 @@ export async function applyAgentCallEvents(
         .set({
           state,
           externalTaskRef,
-          externalContextRef,
+          agentSessionBindingId,
           waitingAt: new Date(),
           versionNo: lock.versionNo + 1,
         })
@@ -397,7 +432,6 @@ export async function applyAgentCallEvents(
       .set({
         state,
         externalTaskRef,
-        externalContextRef,
         errorCode,
         errorSummary,
         finishedAt: new Date(),

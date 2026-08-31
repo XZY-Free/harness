@@ -1,6 +1,10 @@
 import { EventSequenceGapError } from "@/lib/conversations/errors";
 import { db } from "@/lib/db/client";
-import { agentCallEventIngressTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
+import {
+  agentCallEventIngressTable,
+  agentCallTable,
+  agentSessionBindingTable,
+} from "@/lib/persistence/schema/agent-calls";
 import { agentTable } from "@/lib/persistence/schema/agents";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
@@ -25,8 +29,24 @@ export async function coordinateAgentInputRequired(
   callId: string,
 ): Promise<CoordinateAgentInputRequiredResult> {
   const [call] = await db
-    .select()
+    .select({
+      id: agentCallTable.id,
+      parentInvocationId: agentCallTable.parentInvocationId,
+      agentId: agentCallTable.agentId,
+      sourceType: agentCallTable.sourceType,
+      sourceRef: agentCallTable.sourceRef,
+      state: agentCallTable.state,
+      externalTaskRef: agentCallTable.externalTaskRef,
+      externalContextRef: agentSessionBindingTable.externalContextRef,
+    })
     .from(agentCallTable)
+    .leftJoin(
+      agentSessionBindingTable,
+      and(
+        eq(agentSessionBindingTable.id, agentCallTable.agentSessionBindingId),
+        eq(agentSessionBindingTable.tenantId, agentCallTable.tenantId),
+      ),
+    )
     .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
     .limit(1);
   if (!call || call.state !== "waiting_user") return { coordinated: false };

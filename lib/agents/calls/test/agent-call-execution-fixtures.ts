@@ -43,6 +43,7 @@ import {
   agentCallAttemptTable,
   agentCallBindingTable,
   agentCallTable,
+  agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
 import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationTable } from "@/lib/persistence/schema/executions";
@@ -536,8 +537,19 @@ export async function waitForCallTerminal(
   const start = Date.now();
   for (;;) {
     const [row] = await db
-      .select()
+      .select({
+        state: agentCallTable.state,
+        externalTaskRef: agentCallTable.externalTaskRef,
+        externalContextRef: agentSessionBindingTable.externalContextRef,
+      })
       .from(agentCallTable)
+      .leftJoin(
+        agentSessionBindingTable,
+        and(
+          eq(agentSessionBindingTable.id, agentCallTable.agentSessionBindingId),
+          eq(agentSessionBindingTable.tenantId, agentCallTable.tenantId),
+        ),
+      )
       .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
       .limit(1);
     if (row) {

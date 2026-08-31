@@ -73,7 +73,7 @@ export class AgentCallBindingNotFoundError extends AgentCallStartError {
 
 export class AgentCallBindingMismatchError extends AgentCallStartError {
   constructor(callId: string) {
-    super("AGENT_CALL_BINDING_MISMATCH", `AgentCall ${callId} 的 agent/revision 与 binding 不一致`);
+    super("AGENT_CALL_BINDING_MISMATCH", `AgentCall ${callId} 的 stable agent 与 binding 不一致`);
   }
 }
 
@@ -240,8 +240,8 @@ export async function startAgentCall(command: StartAgentCallCommand): Promise<Ag
   const binding = await mysqlAgentCallStore.getBinding({ callId, tenantId });
   if (!binding) throw new AgentCallBindingNotFoundError(callId);
 
-  // 2. 验证 call.agentId/revision 与 binding 一致（exact binding）。
-  if (call.agentId !== binding.agentId || call.agentRevisionId !== binding.agentRevisionId) {
+  // 2. AgentCall 只保留 stable agentId；exact revision 唯一权威在 binding。
+  if (call.agentId !== binding.agentId) {
     throw new AgentCallBindingMismatchError(callId);
   }
 

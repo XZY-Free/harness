@@ -36,7 +36,11 @@ import {
   createUserActionRequest,
   isUserActionRequestType,
 } from "@/lib/permission/user-action-queries";
-import { agentCallEventIngressTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
+import {
+  agentCallEventIngressTable,
+  agentCallTable,
+  agentSessionBindingTable,
+} from "@/lib/persistence/schema/agent-calls";
 import {
   type ThreadEventActorType,
   type ThreadItem,
@@ -838,7 +842,7 @@ async function mapUserActionRequested(
         id: agentCallTable.id,
         sourceRef: agentCallTable.sourceRef,
         externalTaskRef: agentCallTable.externalTaskRef,
-        externalContextRef: agentCallTable.externalContextRef,
+        agentSessionBindingId: agentCallTable.agentSessionBindingId,
       })
       .from(agentCallTable)
       .where(
@@ -868,8 +872,21 @@ async function mapUserActionRequested(
       !callEvent ||
       call.sourceRef !== payload.action_id ||
       call.externalTaskRef !== payload.task_id ||
-      call.externalContextRef !== payload.context_id
+      !call.agentSessionBindingId
     ) {
+      throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
+    }
+    const [session] = await tx
+      .select({ externalContextRef: agentSessionBindingTable.externalContextRef })
+      .from(agentSessionBindingTable)
+      .where(
+        and(
+          eq(agentSessionBindingTable.id, call.agentSessionBindingId),
+          eq(agentSessionBindingTable.tenantId, ctx.tenantId),
+        ),
+      )
+      .limit(1);
+    if (!session || session.externalContextRef !== payload.context_id) {
       throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
     }
   }

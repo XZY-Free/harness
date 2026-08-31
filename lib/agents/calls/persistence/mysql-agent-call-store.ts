@@ -35,6 +35,7 @@ import {
   agentCallAttemptTable,
   agentCallBindingTable,
   agentCallTable,
+  agentSessionBindingTable,
 } from "@/lib/persistence/schema/agent-calls";
 import { and, eq } from "drizzle-orm";
 
@@ -79,7 +80,11 @@ export function createMysqlAgentCallStore(
                 input.logicalCallKey,
               );
             }
-            return { call: toAgentCall(existing), binding, status: "replayed" };
+            return {
+              call: await toAgentCallWithSession(tx, existing),
+              binding,
+              status: "replayed",
+            };
           }
         }
         const call = await doCreate(tx, input, dependencies.recordCapabilityUse);
@@ -116,8 +121,8 @@ export function createMysqlAgentCallStore(
           ...(input.externalTaskRef !== undefined
             ? { externalTaskRef: input.externalTaskRef }
             : {}),
-          ...(input.externalContextRef !== undefined
-            ? { externalContextRef: input.externalContextRef }
+          ...(input.agentSessionBindingId !== undefined
+            ? { agentSessionBindingId: input.agentSessionBindingId }
             : {}),
           ...(input.resultText !== undefined ? { resultText: input.resultText } : {}),
           ...(input.resultJson !== undefined ? { resultJson: input.resultJson } : {}),
@@ -132,7 +137,7 @@ export function createMysqlAgentCallStore(
           .where(eq(agentCallTable.id, input.callId))
           .limit(1);
         if (!after) throw new Error("AgentCall 状态转移后无法回读");
-        return toAgentCall(after);
+        return toAgentCallWithSession(tx, after);
       }),
 
     getById: async ({ callId, tenantId }) => {
@@ -141,7 +146,7 @@ export function createMysqlAgentCallStore(
         .from(agentCallTable)
         .where(and(eq(agentCallTable.id, callId), eq(agentCallTable.tenantId, tenantId)))
         .limit(1);
-      return row ? toAgentCall(row) : null;
+      return row ? toAgentCallWithSession(db, row) : null;
     },
 
     getByLogicalCallKey: async ({ parentInvocationId, tenantId, logicalCallKey }) => {
@@ -156,7 +161,7 @@ export function createMysqlAgentCallStore(
           ),
         )
         .limit(1);
-      return row ? toAgentCall(row) : null;
+      return row ? toAgentCallWithSession(db, row) : null;
     },
 
     getBinding: async ({ callId, tenantId }) => {
@@ -263,7 +268,7 @@ export function createMysqlAgentCallStore(
           .for("update");
         if (!attemptRow) throw new Error(`AgentCallAttempt ${callId}#1 不存在`);
 
-        const call = toAgentCall(callRow);
+        const call = await toAgentCallWithSession(tx, callRow);
         const attempt = toAttempt(attemptRow);
 
         // 已认领：同 digest → idempotent；异 digest → conflict（稳定冲突，含终态后）。
@@ -353,7 +358,7 @@ async function doClaimCallRunning(
     .where(eq(agentCallTable.id, callRow.id))
     .limit(1);
   if (!after) throw new Error("AgentCall claim 后无法回读");
-  return toAgentCall(after);
+  return toAgentCallWithSession(tx, after);
 }
 
 async function doCreate(
@@ -375,7 +380,6 @@ async function doCreate(
     tenantId: input.tenantId,
     parentInvocationId: input.parentInvocationId,
     agentId: input.agentId,
-    agentRevisionId: input.agentRevisionId,
     sourceType: input.sourceType,
     sourceRef: input.sourceRef ?? null,
     state: "queued",
@@ -478,11 +482,11 @@ function toAgentCall(row: typeof agentCallTable.$inferSelect): AgentCall {
     tenantId: row.tenantId,
     parentInvocationId: row.parentInvocationId,
     agentId: row.agentId,
-    agentRevisionId: row.agentRevisionId,
     sourceType: row.sourceType as AgentCall["sourceType"],
     sourceRef: row.sourceRef,
     state: row.state as AgentCallState,
-    externalContextRef: row.externalContextRef,
+    agentSessionBindingId: row.agentSessionBindingId,
+    sessionBinding: null,
     externalTaskRef: row.externalTaskRef,
     resultText: row.resultText,
     resultJson: row.resultJson,
@@ -496,6 +500,31 @@ function toAgentCall(row: typeof agentCallTable.$inferSelect): AgentCall {
     waitingAt: row.waitingAt,
     finishedAt: row.finishedAt,
     versionNo: Number(row.versionNo),
+  };
+}
+
+async function toAgentCallWithSession(
+  client: Pick<typeof db, "select">,
+  row: typeof agentCallTable.$inferSelect,
+): Promise<AgentCall> {
+  const call = toAgentCall(row);
+  if (!row.agentSessionBindingId) return call;
+  const [session] = await client
+    .select({
+      id: agentSessionBindingTable.id,
+      externalContextRef: agentSessionBindingTable.externalContextRef,
+    })
+    .from(agentSessionBindingTable)
+    .where(
+      and(
+        eq(agentSessionBindingTable.id, row.agentSessionBindingId),
+        eq(agentSessionBindingTable.tenantId, row.tenantId),
+      ),
+    )
+    .limit(1);
+  return {
+    ...call,
+    sessionBinding: session ?? null,
   };
 }
 

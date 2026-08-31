@@ -24,7 +24,7 @@ export type AgentSessionBindingState = (typeof AGENT_SESSION_BINDING_STATES)[num
 export interface AgentSessionBinding {
   id: string;
   tenantId: string;
-  threadId: string;
+  threadId: string | null;
   /** stable Agent.id。 */
   agentId: string;
   /** exact AgentRevision.id。 */

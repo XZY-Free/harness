@@ -247,36 +247,3 @@ export async function triggerRollback(params: {
     threadCicdToken: params.threadCicdToken,
   });
 }
-
-// 后台轮询 deploying 状态的 deployment
-/**
- * 扫描所有 deploying 状态的 deployment，查询 CI/CD 状态，更新终态。
- * 由 idle sweep 定时调用（防 deployment 永远停在 deploying）。
- */
-export async function sweepDeployingStatuses(): Promise<void> {
-  const { listDeployingDeployments, updateDeployment } = await import("@/lib/db/queries");
-  const deploying = await listDeployingDeployments();
-  for (const d of deploying) {
-    if (!d.cicdJobId) continue;
-    try {
-      // 02-3：legacy thread 无 cicdApiToken（正式 Thread 无此列）；per-thread token 由 02-9 正式化。
-      // 此处用全局 deployConfig.cicdApiToken 兜底（queryStatus 内部回退）。
-      const status = await queryStatus(d.cicdJobId);
-      if (status.status === "succeeded") {
-        await updateDeployment(d.id, { status: "deployed", deployedAt: new Date() });
-      } else if (status.status === "failed") {
-        await updateDeployment(d.id, {
-          status: "failed",
-          errorMessage: status.message ?? "CI/CD 失败",
-        });
-      }
-    } catch (err) {
-      // P2-12: 查询失败 → 保持 deploying(下次 sweep 再试),但记 warn 供运维排查
-      logger.warn("[cicd] sweep 查询失败,deployment 暂保持 deploying", {
-        deploymentId: d.id,
-        cicdJobId: d.cicdJobId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-}

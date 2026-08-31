@@ -21,6 +21,7 @@ import {
   AUDIT_ACTION_TYPES,
   type AuditActorType,
   type AuditEvent,
+  type AuditOutcome,
 } from "@/lib/persistence/schema/control-plane";
 
 interface EmployeePrincipal {
@@ -57,6 +58,9 @@ export interface RecordAuditEventParams {
   /** 已计算好的 afterHash；优先于 after。 */
   afterHash?: string | null;
   reason?: string | null;
+  outcome?: AuditOutcome | null;
+  /** 调用方必须先完成脱敏；员工聊天正文、凭证和完整命令输出不得进入。 */
+  metadataRedacted?: Record<string, unknown> | null;
   /** 关联请求 id；缺省由平台生成。 */
   requestId?: string;
   occurredAt?: Date;
@@ -88,6 +92,8 @@ export async function recordAuditEvent(params: RecordAuditEventParams): Promise<
     beforeHash,
     afterHash,
     reason: params.reason ?? null,
+    outcome: params.outcome ?? null,
+    metadataRedacted: params.metadataRedacted ?? null,
     requestId,
     occurredAt: params.occurredAt,
   });

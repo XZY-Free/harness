@@ -43,8 +43,8 @@ function loadEnvFile(filename: string, overwrite: boolean): void {
  * 加载 .env.{appEnv}.local 与 .env.{appEnv}。
  *
  * : 生产环境(APP_ENV=production)禁止 .local 覆盖平台注入——能写入应用 cwd 的攻击者
- * 可用 .env.production.local 静默替换 K8s/docker 注入的 secret(LLM_API_KEY/SECRET_MASTER_KEY
- * 等),优先级反直觉高于平台注入。生产改为 overwrite=false(仅填补空缺),与 .env.{appEnv} 同级。
+ * 可用 .env.production.local 静默替换 K8s/docker 注入的 secret（例如 LLM_API_KEY），
+ * 优先级反直觉高于平台注入。生产改为 overwrite=false(仅填补空缺),与 .env.{appEnv} 同级。
  * dev/test 保留 overwrite=true,供开发者个人密钥覆盖。
  */
 export function loadAppEnvFiles(appEnv: string): void {

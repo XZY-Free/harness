@@ -1,6 +1,6 @@
 import { AuditLogTable } from "@/components/studio/audit-log-table";
 import { StudioGatePage } from "@/components/studio/gate-page";
-import { listAdminAuditLogs } from "@/lib/db/queries";
+import { listStudioAuditEvents } from "@/lib/studio/admin-audit";
 import { requireStudioPagePermission } from "@/lib/studio/page-auth";
 
 /**
@@ -16,7 +16,7 @@ export default async function AuditPage() {
   const gate = await requireStudioPagePermission("audit.read");
   if (!gate.ok) return <StudioGatePage status={gate.status} message={gate.message} />;
 
-  const logs = await listAdminAuditLogs({ limit: 100 });
+  const logs = await listStudioAuditEvents({ tenantId: gate.principal.tenantId, limit: 100 });
 
   return (
     <div>

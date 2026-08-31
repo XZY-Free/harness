@@ -12,17 +12,29 @@
 import { randomUUID } from "node:crypto";
 import { tenant } from "@/lib/persistence/schema/identity";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
-import { datetime, index, mysqlEnum, mysqlTable, text, varchar } from "drizzle-orm/mysql-core";
+import {
+  datetime,
+  index,
+  json,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  varchar,
+} from "drizzle-orm/mysql-core";
 
 /** 审计执行者类型（谁执行了被审计的操作）。 */
 export const AUDIT_ACTOR_TYPES = ["user", "service", "workload", "system"] as const;
 export type AuditActorType = (typeof AUDIT_ACTOR_TYPES)[number];
 
+/** 审计动作结果；历史只读事件允许 null。 */
+export const AUDIT_OUTCOMES = ["succeeded", "failed"] as const;
+export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
+
 /**
- * 审计动作类型目录（）。
+ * 审计动作类型目录。
  *
  * 覆盖：发布、路由、策略、授权、Credential、删除、Legal Hold、隔离事件处理、诊断内容查看和导出。
- * - 前 15 个与 ACTION_CODES 管理动作对齐（操作发生即审计）。
+ * - 管理 API 和 Studio 写操作共用这一目录（操作发生即审计）。
  * - 额外包含只读敏感查看类动作（diagnostic.view / audit.export 本身也是审计动作）。
  *
  * actionType 存储为 varchar（非 enum 约束），未来扩展不需 migration；
@@ -66,6 +78,25 @@ export const AUDIT_ACTION_TYPES = [
   "recovery.drill",
   // 安全与事故处置动作（S12-W09）：security.incident 审计（创建/调查/隔离/解决/升级）
   "security.incident",
+  // Studio 管理动作同样进入 Canonical AuditEvent，不再使用第二审计账本。
+  "settings.user_roles.updated",
+  "policies.updated",
+  "skills.published",
+  "skills.rolled_back",
+  "skills.created",
+  "skills.updated",
+  "skills.deleted",
+  "skills.matched",
+  "skills.synced",
+  "skills.unsynced",
+  "workspace.file.written",
+  "workspace.file.deleted",
+  "tool.high_risk.executed",
+  "permission_rule.created",
+  "permission_rule.updated",
+  "permission_rule.deleted",
+  "thread.purged",
+  "approval.resolved",
 ] as const;
 export type AuditActionType = (typeof AUDIT_ACTION_TYPES)[number];
 
@@ -94,6 +125,10 @@ export const auditEvent = mysqlTable(
     afterHash: varchar("afterHash", { length: 64 }),
     /** 操作原因（人工填写或系统生成）。 */
     reason: text("reason"),
+    /** 成功/失败结果；纯查看或无结果语义的事件为 null。 */
+    outcome: mysqlEnum("outcome", AUDIT_OUTCOMES),
+    /** 只允许写入已经脱敏的结构化摘要，不保存原始 payload。 */
+    metadataRedacted: json("metadataRedacted").$type<Record<string, unknown>>(),
     /** 关联请求 id（X-Request-ID），保证可跟踪。 */
     requestId: varchar("requestId", { length: 64 }).notNull(),
     occurredAt: datetime("occurredAt", { mode: "date", fsp: 3 })

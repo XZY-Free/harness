@@ -205,7 +205,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       commandFor(scenario, { logicalCallKey: `current-summary-drift:${randomUUID()}` }),
     );
 
-    expect(result.call.agentRevisionId).toBe(scenario.agentRevisionId);
+    expect(result.call).not.toHaveProperty("agentRevisionId");
     const [binding] = await db
       .select()
       .from(agentCallBindingTable)

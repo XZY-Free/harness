@@ -105,6 +105,8 @@ export async function GET(request: Request): Promise<Response> {
     before_hash: e.beforeHash,
     after_hash: e.afterHash,
     reason: e.reason,
+    outcome: e.outcome,
+    metadata_redacted: e.metadataRedacted,
     request_id: e.requestId,
     occurred_at: e.occurredAt.toISOString(),
   }));

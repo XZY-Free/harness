@@ -1,4 +1,4 @@
-import type { AuditLogRow } from "@/lib/db/queries";
+import type { StudioAuditRow } from "@/lib/studio/admin-audit";
 
 /**
  * 审计日志密集表（Phase 4-4 切片 C）。
@@ -7,7 +7,7 @@ import type { AuditLogRow } from "@/lib/db/queries";
  * target / outcome / metadata 摘要。metadata 用紧凑 key:value chips 展示，由 React 文本节点
  * 自动转义；不渲染原始大 JSON 块。审计只读 append-only，本组件不含任何写操作。
  */
-type Props = { logs: AuditLogRow[] };
+type Props = { logs: StudioAuditRow[] };
 
 /** 动作常量 → 中文标签（未知 action 原样回退）。 */
 const ACTION_LABEL: Record<string, string> = {
@@ -36,7 +36,7 @@ const TARGET_TYPE_LABEL: Record<string, string> = {
   workspace: "工作区",
 };
 
-function outcomeTone(outcome: AuditLogRow["outcome"]): string {
+function outcomeTone(outcome: StudioAuditRow["outcome"]): string {
   return outcome === "succeeded" ? "text-[var(--ok)]" : "text-[var(--danger)]";
 }
 
@@ -79,26 +79,26 @@ export function AuditLogTable({ logs }: Props) {
         </thead>
         <tbody>
           {logs.map((log) => {
-            const chips = metadataChips(log.metadata);
+            const chips = metadataChips(log.metadataRedacted);
             const targetLabel = TARGET_TYPE_LABEL[log.targetType] ?? log.targetType;
             return (
               <tr key={log.id} className="border-t border-[var(--border)] align-top">
                 <td className="px-3 py-2 font-mono text-[12px] text-[var(--fg-muted)]">
-                  {fmtTime(log.createdAt)}
+                  {fmtTime(log.occurredAt)}
                 </td>
                 <td className="px-3 py-2 text-[var(--fg-muted)]">
                   {log.actorName ?? log.actorEmail ?? (
-                    <span className="font-mono text-[12px]">{log.actorUserId.slice(0, 8)}</span>
+                    <span className="font-mono text-[12px]">{log.actorId.slice(0, 8)}</span>
                   )}
                 </td>
                 <td className="px-3 py-2 text-[var(--fg)]">
-                  {ACTION_LABEL[log.action] ?? log.action}
+                  {ACTION_LABEL[log.actionType] ?? log.actionType}
                 </td>
                 <td className="px-3 py-2 font-mono text-[12px] text-[var(--fg-muted)]">
                   {targetLabel}:{log.targetId}
                 </td>
                 <td className={`px-3 py-2 font-medium ${outcomeTone(log.outcome)}`}>
-                  {OUTCOME_LABEL[log.outcome] ?? log.outcome}
+                  {log.outcome ? (OUTCOME_LABEL[log.outcome] ?? log.outcome) : "—"}
                 </td>
                 <td className="px-3 py-2">
                   {chips.length === 0 ? (

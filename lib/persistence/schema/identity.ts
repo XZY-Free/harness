@@ -1,13 +1,13 @@
 /**
  * 身份 schema：租户、用户身份、主体绑定。
  *
- * 阶段 2（）：建立四类 API 共用的可信身份与租户边界。
+ * 建立四类 API 共用的可信身份与租户边界。
  * - tenant：租户根，所有业务根对象必须校验 tenant。
  * - userIdentity：租户内稳定用户 id，externalSubject 作 SSO 映射键，email/displayName 允许漂移。
  * - principalBinding：外部主体（user/group/role/department）到内部 userIdentity 的映射，不复制组织树。
  *
  * 事实源：docs/architecture/persistence.md 第 2、8 节。
- * 旧 `User` 表保持只读兼容，最终删除安排在阶段 13。
+ * `UserIdentity` 是唯一用户身份事实源；旧 `User` 表已删除。
  */
 import { randomUUID } from "node:crypto";
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";

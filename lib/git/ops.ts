@@ -44,7 +44,7 @@ export function assertGitRefName(name: string): void {
 const BOT_NAME = "SnowHarness";
 const BOT_EMAIL = "bot@snow-harness.local";
 
-/** diff 文本上限（避免把超大 diff 灌入 agent 上下文，完整 diff 走 ToolRun/artifact）。 */
+/** diff 文本上限（避免把超大 diff 灌入 agent 上下文，完整 diff 走 Artifact）。 */
 const MAX_DIFF_BYTES = 20_000;
 
 /**

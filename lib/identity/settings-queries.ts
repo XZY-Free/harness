@@ -7,7 +7,6 @@
  */
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { type AppendAdminAuditLogInput, appendAdminAuditLog } from "@/lib/db/queries";
 import { parseResourceScope } from "@/lib/identity/resource-scope";
 import {
   type ActionCode,
@@ -18,6 +17,7 @@ import {
 } from "@/lib/identity/role-templates";
 import { roleActionBinding } from "@/lib/persistence/schema/authorization";
 import { principalBinding, userIdentity } from "@/lib/persistence/schema/identity";
+import { type StudioAuditInput, recordAdminAudit } from "@/lib/studio/admin-audit";
 import { and, asc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 
 /** Settings 用户 + 有效 grant 摘要。 */
@@ -165,8 +165,8 @@ export async function replaceUserGrantsWithAudit(
   tenantId: string,
   userIdentityId: string,
   grants: Array<{ actionCode: ActionCode; resourceScope: ResourceScope }>,
-  auditInput: Pick<AppendAdminAuditLogInput, "actorUserId" | "targetId" | "metadata"> & {
-    action: AppendAdminAuditLogInput["action"];
+  auditInput: Pick<StudioAuditInput, "actorUserId" | "targetId" | "metadata"> & {
+    action: StudioAuditInput["action"];
   },
 ): Promise<void> {
   await db.transaction(async (tx) => {
@@ -220,7 +220,7 @@ export async function replaceUserGrantsWithAudit(
     }
 
     // 4. succeeded 审计（同事务；写失败 → 回滚）
-    await appendAdminAuditLog(
+    await recordAdminAudit(
       {
         actorUserId: auditInput.actorUserId,
         action: auditInput.action,

@@ -1,7 +1,10 @@
-import { listAdminAuditLogs } from "@/lib/db/queries";
-import { ADMIN_AUDIT_ACTIONS, type AdminAuditAction } from "@/lib/db/schema";
 import { jsonError, jsonOk } from "@/lib/http";
 import { requireStudioAction } from "@/lib/identity/studio-access";
+import {
+  STUDIO_AUDIT_ACTIONS,
+  type StudioAuditAction,
+  listStudioAuditEvents,
+} from "@/lib/studio/admin-audit";
 import type { NextRequest } from "next/server";
 
 /**
@@ -14,7 +17,7 @@ import type { NextRequest } from "next/server";
  *
  * 审计 append-only：本 API 只读，不提供 update/delete（约束 7）。
  */
-const ACTION_SET: ReadonlySet<string> = new Set(ADMIN_AUDIT_ACTIONS);
+const ACTION_SET: ReadonlySet<string> = new Set(STUDIO_AUDIT_ACTIONS);
 
 export async function GET(req: NextRequest) {
   const r = await requireStudioAction(req, "audit.read");
@@ -33,12 +36,13 @@ export async function GET(req: NextRequest) {
     return jsonError(400, "invalid_action", "未知审计动作");
   }
 
-  const logs = await listAdminAuditLogs({
+  const logs = await listStudioAuditEvents({
+    tenantId: r.principal.tenantId,
     limit,
     actorUserId,
     targetType,
     targetId,
-    action: action as AdminAuditAction | undefined,
+    action: action as StudioAuditAction | undefined,
   });
   return jsonOk({ logs });
 }

@@ -7,7 +7,7 @@ import type {
  * AgentSessionBinding Store — MySQL 实现。
  *
  * A2A contextId 属于 AgentSessionBinding.externalContextRef。
- * 幂等：UNIQUE(agentRevisionId, routeRevisionId, externalContextRef) 兜底；
+ * 幂等：UNIQUE(tenantId, agentRevisionId, routeRevisionId, externalContextRef) 兜底；
  * 并发冲突回查返回已存在行。
  */
 import { db } from "@/lib/db/client";

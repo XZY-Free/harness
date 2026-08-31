@@ -16,31 +16,37 @@
  * 只追加语义：本模块不导出任何 update/delete 函数（deleteExpiredEvents 除外，
  * 仅供阶段 12 数据生命周期流程使用，普通应用账号无权调用）。
  */
-import { db } from "@/lib/db/client";
+import { type DbOrTx, db } from "@/lib/db/client";
 import {
   type AuditActorType,
   type AuditEvent,
+  type AuditOutcome,
   auditEvent,
 } from "@/lib/persistence/schema/control-plane";
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 
 /** 追加审计事件（只写不更新）。 */
-export async function appendAuditEvent(params: {
-  tenantId: string;
-  actorType: AuditActorType;
-  actorId: string;
-  actionType: string;
-  targetType: string;
-  targetId?: string | null;
-  beforeHash?: string | null;
-  afterHash?: string | null;
-  reason?: string | null;
-  requestId: string;
-  occurredAt?: Date;
-}): Promise<AuditEvent> {
+export async function appendAuditEvent(
+  params: {
+    tenantId: string;
+    actorType: AuditActorType;
+    actorId: string;
+    actionType: string;
+    targetType: string;
+    targetId?: string | null;
+    beforeHash?: string | null;
+    afterHash?: string | null;
+    reason?: string | null;
+    outcome?: AuditOutcome | null;
+    metadataRedacted?: Record<string, unknown> | null;
+    requestId: string;
+    occurredAt?: Date;
+  },
+  client: DbOrTx = db,
+): Promise<AuditEvent> {
   const occurredAt = params.occurredAt ?? new Date();
   const id = crypto.randomUUID();
-  await db.insert(auditEvent).values({
+  await client.insert(auditEvent).values({
     id,
     tenantId: params.tenantId,
     actorType: params.actorType,
@@ -51,10 +57,12 @@ export async function appendAuditEvent(params: {
     beforeHash: params.beforeHash ?? null,
     afterHash: params.afterHash ?? null,
     reason: params.reason ?? null,
+    outcome: params.outcome ?? null,
+    metadataRedacted: params.metadataRedacted ?? null,
     requestId: params.requestId,
     occurredAt,
   });
-  const [row] = await db.select().from(auditEvent).where(eq(auditEvent.id, id)).limit(1);
+  const [row] = await client.select().from(auditEvent).where(eq(auditEvent.id, id)).limit(1);
   if (!row) {
     throw new Error(`appendAuditEvent: 行未找到（id=${id}）`);
   }
@@ -81,6 +89,8 @@ export interface AuditEventFilter {
   occurredTo?: Date;
   /** 返回上限；默认 100，最大 500。 */
   limit?: number;
+  /** 默认按时间升序；Studio 最近记录使用 desc。 */
+  order?: "asc" | "desc";
 }
 
 /**
@@ -116,7 +126,10 @@ export async function listAuditEvents(filter: AuditEventFilter): Promise<AuditEv
     .select()
     .from(auditEvent)
     .where(and(...conditions))
-    .orderBy(asc(auditEvent.occurredAt))
+    .orderBy(
+      filter.order === "desc" ? desc(auditEvent.occurredAt) : asc(auditEvent.occurredAt),
+      filter.order === "desc" ? desc(auditEvent.id) : asc(auditEvent.id),
+    )
     .limit(limit);
 }
 
@@ -139,4 +152,5 @@ export type {
   AuditActionType,
   AuditActorType,
   AuditEvent,
+  AuditOutcome,
 } from "@/lib/persistence/schema/control-plane";
