@@ -173,9 +173,11 @@ curl -X PATCH 'https://snow.example.com/api/v1/threads/thr_01J.../settings' \
 
 实际模型和 Lease 仍以 ExecutionBinding 为准；当前等待恢复的 Invocation 不因默认设置变化换 Binding。
 
-### 3.3 Thread 不再支持"更换主 Agent"
+### 3.3 Agent 选择是 Turn 级指令
 
-专题 01 已移除 `POST /api/v1/threads/{thread_id}/change-primary-agent` 及 `primary_agent_id`：Thread 不保存主 Agent 身份，也不存在 `thread.primary_agent_changed` 事件。用户在某个 Turn/Invocation 偏好某 Agent、Agent 交接（handoff）与调用规划的语义由后续 Agent 调用专题定义，届时另行设计相应 API，不在 Thread 上伪造主 Agent 事实。
+Thread 不保存主 Agent，也不保存 primary/default/current/active/preferred Agent 字段。客户端必须在每个新 Turn 的 `agent_use` 中显式发送“优先助手”；省略或 `null` 都表示本 Turn 无 Agent 偏好，服务端不从历史 Turn 继承。
+
+该指令是 Harness 规划输入，不是必调约束。例如用户选择 HR 后发送“你好”，Harness 可以 0 次 AgentCall 直接回答；询问年假余额时才计划 `agent.call` action。后续改选只影响新 Turn，不修改运行中 Turn、历史 Turn 或已创建 AgentCall。
 ### 3.4 创建 Turn
 
 `POST /api/v1/threads/{thread_id}/turns`
@@ -189,6 +191,7 @@ curl -X PATCH 'https://snow.example.com/api/v1/threads/thr_01J.../settings' \
 | input | Body | object | 是 | 类型化文本、附件引用或结构化输入 |
 | selected_model | Body | string | 否 | 仅在 Agent 支持且员工有权选择时有效 |
 | workspace_attachment_ids | Body | string[] | 否 | 已通过 Attachment API 创建且仍有效的 Thread Attachment；不接收裸位置 |
+| agent_use | Body | object/null | 否 | mode 只能为 preferred 且 agent_id 必填；省略/null 不继承历史选择 |
 | expected_thread_version | Body | integer | 否 | 可选的界面状态保护，不代替权限校验 |
 
 ```bash
@@ -200,6 +203,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../turns' \
   -H 'Content-Type: application/json' \
   -d '{
     "input":{"type":"text","text":"分析销售表并生成月报"},
+    "agent_use":{"mode":"preferred","agent_id":"agt_hr"},
     "workspace_attachment_ids":["watt_01J..."]
   }'
 ```
@@ -211,7 +215,20 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../turns' \
     "thread_id": "thr_01J...",
     "turn_sequence": 7,
     "trigger_type": "user_message",
-    "turn_state": "accepted"
+    "turn_state": "accepted",
+    "agent_use": {
+      "mode": "preferred",
+      "agent_id": "agt_hr",
+      "display_name": "HR 助手"
+    },
+    "actual_agent_calls": {
+      "count": 0,
+      "active_call_id": null,
+      "last_state": null,
+      "calls": [],
+      "selected_agent_called": false,
+      "selected_but_unused": true
+    }
   },
   "input_item": {
     "id": "item_user_01J...",
@@ -223,7 +240,7 @@ curl -X POST 'https://snow.example.com/api/v1/threads/thr_01J.../turns' \
 }
 ```
 
-同一事务写入 user_message Item、Turn、`workspace_attachment_use`、`item.created` 和 `turn.accepted`；Attachment 必须已属于当前 Thread、仍有效且设备/权限匹配。Runtime 暂不可用不会回滚员工消息，Turn 后续进入 queued 或 failed。
+同一事务写入 user_message Item、Turn、`workspace_attachment_use`、`item.created` 和 `turn.accepted`；Attachment 必须已属于当前 Thread、仍有效且设备/权限匹配。指定 `agent_use` 时必须通过 `agent.invoke` 授权，未知、跨租户或未授权 Agent 统一返回 `ACTION_SCOPE_DENIED`，且不创建 Turn。Runtime 暂不可用不会回滚员工消息，Turn 后续进入 queued 或 failed。
 
 ### 3.5 查询 Item
 
@@ -1441,6 +1458,7 @@ system_turn 在一个事务创建 trigger_type=job_result_projection、无 Invoc
 | Item | item.created、item.updated、item.completed、item.failed、item.superseded、item.cancelled | 可查询内容变化 |
 | Pending input | pending_input.created、pending_input.updated、pending_input.reordered、pending_input.admitted、pending_input.removed | Desktop/Web 队列同步 |
 | Invocation | invocation.queued、invocation.started、invocation.waiting、invocation.resumed、invocation.completed、invocation.failed、invocation.cancelled、invocation.lost | Thread 所属执行的关键边界；员工端可过滤，Job 使用 JobEvent |
+| Harness action | harness.action.proposed、harness.action.started、harness.action.completed、harness.action.failed | Harness 对 model/knowledge/tool/agent/final 行动的持久编排记录；AgentCall 是其中 `agent.call` 的子执行事实 |
 | Tool | tool_call.proposed、tool_call.paused、tool_call.started、tool_call.succeeded、tool_call.failed、tool_call.cancelled、tool_call.effect_confirmed、tool_call.effect_failed、tool_call.effect_unknown、tool_call.effect_reconciled | Tool 与副作用状态变化 |
 | User action | user_action.requested、user_action.resolved、user_action.expired | 确认、登录、授权、输入 |
 | Workspace/result | workspace.changed、workspace_attachment.added、workspace_attachment.removed、artifact.created、file.changed、job_result.published | 资源位置、产物和后台结果投影变化 |

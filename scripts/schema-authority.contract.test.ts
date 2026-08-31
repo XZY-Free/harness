@@ -1,5 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { db } from "@/lib/db/client";
+import * as canonicalSchema from "@/lib/persistence/schema";
+import { Table, getTableName, is } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
@@ -18,6 +21,25 @@ const LEGACY_TABLES = [
   "Deployment",
   "AuditFailureLog",
 ] as const;
+
+function canonicalTableNames(): string[] {
+  return (Object.values(canonicalSchema) as unknown[])
+    .filter((value) => is(value, Table))
+    .map((table) => getTableName(table as Table))
+    .sort();
+}
+
+function runtimeTableNames(): string[] {
+  return Object.values(db._.schema ?? {})
+    .map((table) => table.dbName)
+    .sort();
+}
+
+function migrationTableNames(sql: string): string[] {
+  return Array.from(sql.matchAll(/CREATE TABLE `([^`]+)`/g), (match) => match[1])
+    .filter((name): name is string => Boolean(name))
+    .sort();
+}
 
 function listSourceFiles(path: string): string[] {
   if (!existsSync(path)) return [];
@@ -87,5 +109,42 @@ describe("Schema 单一 Authority", () => {
     expect(binding).toContain("agentRevisionId:");
     expect(attempt).not.toContain("externalTaskRef:");
     expect(session).toContain("externalContextRef:");
+  });
+
+  it("clean initial migration 只有一条，不含开发期 drop/rename 兼容链", () => {
+    const migrationFiles = readdirSync(join(ROOT, "drizzle"))
+      .filter((file) => /^\d{4}_.+\.sql$/.test(file))
+      .sort();
+    expect(migrationFiles).toEqual(["0000_initial_schema.sql"]);
+    const migration = readFileSync(join(ROOT, "drizzle", migrationFiles[0] as string), "utf8");
+    expect(migration).not.toMatch(/\b(?:DROP TABLE|DROP COLUMN|RENAME TABLE|RENAME COLUMN)\b/i);
+
+    const journal = JSON.parse(readFileSync(join(ROOT, "drizzle/meta/_journal.json"), "utf8")) as {
+      entries: Array<{ idx: number; tag: string }>;
+    };
+    expect(journal.entries).toEqual([
+      expect.objectContaining({ idx: 0, tag: "0000_initial_schema" }),
+    ]);
+  });
+
+  it("Canonical Root、Runtime、Migration 与最终 manifest 完全一致", () => {
+    const manifestPath = join(
+      ROOT,
+      "docs/implementation/topic-01-loop-schema/07-final-schema-manifest.json",
+    );
+    expect(existsSync(manifestPath), "最终 Schema manifest 必须存在").toBe(true);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      tableCount: number;
+      tables: string[];
+    };
+    const migration = readFileSync(join(ROOT, "drizzle/0000_initial_schema.sql"), "utf8");
+    const canonical = canonicalTableNames();
+
+    expect(canonical).toHaveLength(123);
+    expect(runtimeTableNames()).toEqual(canonical);
+    expect(migrationTableNames(migration)).toEqual(canonical);
+    expect(manifest.tableCount).toBe(canonical.length);
+    expect(manifest.tables).toEqual(canonical);
+    for (const legacy of LEGACY_TABLES) expect(canonical).not.toContain(legacy);
   });
 });

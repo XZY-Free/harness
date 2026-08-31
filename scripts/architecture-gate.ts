@@ -1,6 +1,9 @@
 #!/usr/bin/env npx tsx
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
+import { db } from "@/lib/db/client";
+import * as canonicalSchema from "@/lib/persistence/schema";
+import { Table, getTableName, is } from "drizzle-orm";
 import {
   type SourceDocument,
   checkAgentCallFinalizationGate,
@@ -90,6 +93,56 @@ function checkMigrationJournal(): void {
   } catch (error) {
     fail(`无法读取 migration journal：${String(error)}`);
   }
+}
+
+function checkSchemaAuthority(): void {
+  const migrationFiles = readdirSync(resolve(ROOT, "drizzle"))
+    .filter((file) => /^\d{4}_.+\.sql$/.test(file))
+    .sort();
+  if (migrationFiles.length !== 1 || migrationFiles[0] !== "0000_initial_schema.sql") {
+    fail(`clean initial migration 不唯一：${migrationFiles.join(", ")}`);
+    return;
+  }
+
+  const migration = readFileSync(resolve(ROOT, "drizzle/0000_initial_schema.sql"), "utf8");
+  if (/\b(?:DROP TABLE|DROP COLUMN|RENAME TABLE|RENAME COLUMN)\b/i.test(migration)) {
+    fail("clean initial migration 仍含 drop/rename 兼容链");
+    return;
+  }
+
+  const canonical = (Object.values(canonicalSchema) as unknown[])
+    .filter((value) => is(value, Table))
+    .map((table) => getTableName(table as Table))
+    .sort();
+  const runtime = Object.values(db._.schema ?? {})
+    .map((table) => table.dbName)
+    .sort();
+  const migrationTables = Array.from(
+    migration.matchAll(/CREATE TABLE `([^`]+)`/g),
+    (match) => match[1],
+  )
+    .filter((name): name is string => Boolean(name))
+    .sort();
+  const manifest = JSON.parse(
+    readFileSync(
+      resolve(ROOT, "docs/implementation/topic-01-loop-schema/07-final-schema-manifest.json"),
+      "utf8",
+    ),
+  ) as { tableCount: number; tables: string[] };
+
+  if (
+    canonical.length !== 123 ||
+    manifest.tableCount !== canonical.length ||
+    JSON.stringify(runtime) !== JSON.stringify(canonical) ||
+    JSON.stringify(migrationTables) !== JSON.stringify(canonical) ||
+    JSON.stringify(manifest.tables) !== JSON.stringify(canonical)
+  ) {
+    fail(
+      `Schema manifest 不一致：Root=${canonical.length}, Runtime=${runtime.length}, Migration=${migrationTables.length}, Fresh=${manifest.tableCount}`,
+    );
+    return;
+  }
+  pass(`Schema Root/Runtime/Migration/Fresh manifest 一致：${canonical.length} 表`);
 }
 
 function checkRetiredNaming(): void {
@@ -233,6 +286,7 @@ function checkSourceHistoryAndRetiredDependencies(): void {
 
 function main(): void {
   checkMigrationJournal();
+  checkSchemaAuthority();
   checkRetiredNaming();
   checkAbsent(
     [

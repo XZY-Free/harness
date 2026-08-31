@@ -55,6 +55,12 @@ Resume（恢复会话）读取：
 
 业务例子：Desktop 在本地测试运行时断电。恢复后平台先确认测试进程已结束、文件 hash 和 diff 是否变化，再决定重跑测试；不会重新执行之前已经成功的代码修改。
 
+### 3.1 Turn 级优先助手
+
+Agent 选择保存在每个 Turn 的 `AgentUseDirective`，不保存在 Thread。Web 和 Desktop 在每次创建新 Turn 时各自发送 `agent_use`；省略或 `null` 表示本 Turn 无偏好，服务端不从前一 Turn 继承。
+
+同一 Thread 可以连续使用 `HR → Contract → null → HR`，每个 Turn 独立。运行中改选只影响下一 Turn；Regenerate 保留原 Turn 指令，需要换 Agent 时创建新 Turn。AgentCall 处于 `waiting_user` 时，resolve 只根据 UserActionRequest 中冻结的 AgentCall/session/context/task 继续原调用，不读取 Composer 的当前选择。
+
 ## 4. Fork
 
 Fork 从指定 Turn 创建新 Thread：
@@ -95,7 +101,7 @@ Turn 运行中，普通新输入先进入 PendingInput：
 4. Runtime 在安全点 ack 后，Item 才完成并记录 `turn.steered`；拒绝或不支持则把 command/Item 标记 failed。
 5. Agent Loop 在下一个决策点读取新要求，员工端随后显示“已引导本次对话”。
 
-waiting_user 必须解析对应 UserActionRequest，不能用 Steer 绕过确认、登录或授权。Agent 约束、Environment 或高风险能力变化需要显式配置事件；不能把带隐式扩权的输入直接注入正在执行的 ToolCall。
+waiting_user 必须解析对应 UserActionRequest，不能用 Steer 绕过确认、登录或授权。Agent 指令、Environment 或高风险能力变化只能作用于新 Turn 或显式受理的控制命令；不能把带隐式扩权的输入直接注入正在执行的 ToolCall/AgentCall。
 
 ### 5.3 Stop / 停止
 

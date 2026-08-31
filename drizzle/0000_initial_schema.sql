@@ -145,7 +145,6 @@ CREATE TABLE `AgentCallAttempt` (
 	`tenantId` varchar(36) NOT NULL,
 	`attemptNo` int NOT NULL,
 	`attemptState` enum('queued','running','completed','failed','cancelled','lost') NOT NULL DEFAULT 'queued',
-	`externalTaskRef` varchar(256),
 	`dispatchAttemptCount` int NOT NULL DEFAULT 0,
 	`retryReasonCode` varchar(64),
 	`requestDigest` varchar(71),
@@ -213,11 +212,10 @@ CREATE TABLE `AgentCall` (
 	`tenantId` varchar(36) NOT NULL,
 	`parentInvocationId` varchar(36) NOT NULL,
 	`agentId` varchar(36) NOT NULL,
-	`agentRevisionId` varchar(36) NOT NULL,
 	`sourceType` varchar(32) NOT NULL,
 	`sourceRef` varchar(256),
 	`state` enum('queued','running','waiting_user','completed','failed','cancelled','lost') NOT NULL DEFAULT 'queued',
-	`externalContextRef` varchar(256),
+	`agentSessionBindingId` varchar(36),
 	`externalTaskRef` varchar(256),
 	`resultText` text,
 	`resultJson` json,
@@ -238,7 +236,7 @@ CREATE TABLE `AgentCall` (
 CREATE TABLE `AgentSessionBinding` (
 	`id` varchar(36) NOT NULL,
 	`tenantId` varchar(36) NOT NULL,
-	`threadId` varchar(36) NOT NULL,
+	`threadId` varchar(36),
 	`agentId` varchar(36) NOT NULL,
 	`agentRevisionId` varchar(36) NOT NULL,
 	`deploymentRouteId` varchar(36) NOT NULL,
@@ -249,7 +247,7 @@ CREATE TABLE `AgentSessionBinding` (
 	`lastUsedAt` datetime(3) NOT NULL,
 	`closedAt` datetime(3),
 	CONSTRAINT `AgentSessionBinding_id` PRIMARY KEY(`id`),
-	CONSTRAINT `AgentSessionBinding_revision_route_context_uq` UNIQUE(`agentRevisionId`,`routeRevisionId`,`externalContextRef`)
+	CONSTRAINT `AgentSessionBinding_revision_route_context_uq` UNIQUE(`tenantId`,`agentRevisionId`,`routeRevisionId`,`externalContextRef`)
 );
 --> statement-breakpoint
 CREATE TABLE `AuditEvent` (
@@ -263,6 +261,8 @@ CREATE TABLE `AuditEvent` (
 	`beforeHash` varchar(64),
 	`afterHash` varchar(64),
 	`reason` text,
+	`outcome` enum('succeeded','failed'),
+	`metadataRedacted` json,
 	`requestId` varchar(64) NOT NULL,
 	`occurredAt` datetime(3) NOT NULL,
 	CONSTRAINT `AuditEvent_id` PRIMARY KEY(`id`)
@@ -571,8 +571,13 @@ CREATE TABLE `DeploymentRouteSet` (
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `DeploymentRouteSet_id` PRIMARY KEY(`id`),
 	CONSTRAINT `DeploymentRouteSet_tenant_target_scope_uq` UNIQUE(`tenantId`,`targetKind`,`targetIdentity`,`routeScopeKey`),
-	CONSTRAINT `DeploymentRouteSet_target_identity_check` CHECK (TRIM(`targetIdentity`) <> ''),
-	CONSTRAINT `DeploymentRouteSet_target_consistency_check` CHECK ((`targetKind` = 'runtime' AND `targetIdentity` = 'runtime' AND `agentId` IS NULL) OR (`targetKind` = 'agent' AND `targetIdentity` = `agentId` AND `agentId` IS NOT NULL AND TRIM(`agentId`) <> ''))
+	CONSTRAINT `DeploymentRouteSet_target_identity_check` CHECK(TRIM(`targetIdentity`) <> ''),
+	CONSTRAINT `DeploymentRouteSet_target_consistency_check` CHECK((
+        (`targetKind` = 'runtime' AND `targetIdentity` = 'runtime' AND `agentId` IS NULL)
+        OR
+        (`targetKind` = 'agent' AND `targetIdentity` = `agentId`
+          AND `agentId` IS NOT NULL AND TRIM(`agentId`) <> '')
+      ))
 );
 --> statement-breakpoint
 CREATE TABLE `DeploymentRoute` (
@@ -591,7 +596,11 @@ CREATE TABLE `DeploymentRoute` (
 	`updatedAt` datetime(3) NOT NULL,
 	CONSTRAINT `DeploymentRoute_id` PRIMARY KEY(`id`),
 	CONSTRAINT `DeploymentRoute_set_routeKey_uq` UNIQUE(`routeSetId`,`routeKey`),
-	CONSTRAINT `DeploymentRoute_exact_one_target_check` CHECK (((`runtimeRevisionId` IS NOT NULL AND `agentRevisionId` IS NULL) OR (`runtimeRevisionId` IS NULL AND `agentRevisionId` IS NOT NULL)))
+	CONSTRAINT `DeploymentRoute_exact_one_target_check` CHECK((
+        (`runtimeRevisionId` IS NOT NULL AND `agentRevisionId` IS NULL)
+        OR
+        (`runtimeRevisionId` IS NULL AND `agentRevisionId` IS NOT NULL)
+      ))
 );
 --> statement-breakpoint
 CREATE TABLE `Device` (
@@ -2275,7 +2284,25 @@ CREATE TABLE `RouteRevision` (
 	CONSTRAINT `RouteRevision_id` PRIMARY KEY(`id`),
 	CONSTRAINT `RouteRevision_route_revisionNo_uq` UNIQUE(`routeId`,`revisionNo`),
 	CONSTRAINT `RouteRevision_route_content_uq` UNIQUE(`routeId`,`contentDigest`),
-	CONSTRAINT `RouteRevision_exact_target_group_check` CHECK ((`runtimeRevisionId` IS NOT NULL AND TRIM(`runtimeRevisionId`) <> '' AND `agentRevisionId` IS NULL AND `agentEndpointRef` IS NULL AND `agentIdentityMode` IS NULL AND `agentCredentialRefId` IS NULL AND `agentNetworkZone` IS NULL) OR (`runtimeRevisionId` IS NULL AND `agentRevisionId` IS NOT NULL AND TRIM(`agentRevisionId`) <> '' AND `agentEndpointRef` IS NOT NULL AND TRIM(`agentEndpointRef`) <> '' AND `agentIdentityMode` IN ('none','bearer') AND `agentNetworkZone` IS NOT NULL AND TRIM(`agentNetworkZone`) <> '' AND ((`agentIdentityMode` = 'bearer' AND `agentCredentialRefId` IS NOT NULL AND TRIM(`agentCredentialRefId`) <> '') OR (`agentIdentityMode` = 'none' AND (`agentCredentialRefId` IS NULL OR TRIM(`agentCredentialRefId`) <> '')))))
+	CONSTRAINT `RouteRevision_exact_target_group_check` CHECK((
+        (`runtimeRevisionId` IS NOT NULL AND TRIM(`runtimeRevisionId`) <> ''
+          AND `agentRevisionId` IS NULL
+          AND `agentEndpointRef` IS NULL
+          AND `agentIdentityMode` IS NULL
+          AND `agentCredentialRefId` IS NULL
+          AND `agentNetworkZone` IS NULL)
+        OR
+        (`runtimeRevisionId` IS NULL
+          AND `agentRevisionId` IS NOT NULL AND TRIM(`agentRevisionId`) <> ''
+          AND `agentEndpointRef` IS NOT NULL AND TRIM(`agentEndpointRef`) <> ''
+          AND `agentIdentityMode` IN ('none','bearer')
+          AND `agentNetworkZone` IS NOT NULL AND TRIM(`agentNetworkZone`) <> ''
+          AND (
+            (`agentIdentityMode` = 'bearer' AND `agentCredentialRefId` IS NOT NULL AND TRIM(`agentCredentialRefId`) <> '')
+            OR
+            (`agentIdentityMode` = 'none' AND (`agentCredentialRefId` IS NULL OR TRIM(`agentCredentialRefId`) <> ''))
+          ))
+      ))
 );
 --> statement-breakpoint
 CREATE TABLE `RouteEligibilityProjection` (
@@ -2340,9 +2367,48 @@ CREATE TABLE `RouteEligibilityProjection` (
 	`lastRebuiltAt` datetime(3) NOT NULL,
 	CONSTRAINT `RouteEligibilityProjection_routeId` PRIMARY KEY(`routeId`),
 	CONSTRAINT `RouteEligibilityProjection_revision_activation_uq` UNIQUE(`routeRevisionId`,`routeActivationId`),
-	CONSTRAINT `RouteEligibilityProjection_target_identity_check` CHECK (TRIM(`targetIdentity`) <> ''),
-	CONSTRAINT `RouteEligibilityProjection_target_consistency_check` CHECK ((`targetKind` = 'runtime' AND `targetIdentity` = 'runtime' AND `agentId` IS NULL) OR (`targetKind` = 'agent' AND `targetIdentity` = `agentId` AND `agentId` IS NOT NULL AND TRIM(`agentId`) <> '')),
-	CONSTRAINT `RouteEligibilityProjection_target_group_exclusion_check` CHECK ((`targetKind` = 'agent' AND `agentRevisionId` IS NOT NULL AND TRIM(`agentRevisionId`) <> '' AND `runtimeRevisionId` IS NULL AND `runtimeRevisionState` IS NULL AND `runtimeLifecycleState` IS NULL AND `runtimePublicationActive` IS NULL AND `runtimeEvidenceValid` IS NULL AND `runtimeConformanceValid` IS NULL AND `runtimeEvidenceKind` IS NULL AND `runtimePublicationRecordId` IS NULL AND `runtimeAttestationIds` IS NULL AND `conformanceRunId` IS NULL AND `runtimeArtifactId` IS NULL AND `runtimeArtifactDigest` IS NULL AND `runtimeConfigDigest` IS NULL AND `runtimeTargetDigest` IS NULL AND `capabilityCompatibilityDigest` IS NULL) OR (`targetKind` = 'runtime' AND `runtimeRevisionId` IS NOT NULL AND TRIM(`runtimeRevisionId`) <> '' AND `agentRevisionId` IS NULL AND `agentEndpointRef` IS NULL AND `agentIdentityMode` IS NULL AND `agentCredentialRefId` IS NULL AND `agentNetworkZone` IS NULL AND `agentRevisionState` IS NULL AND `agentLifecycleState` IS NULL AND `agentPublicationActive` IS NULL AND `agentEvidenceValid` IS NULL AND `agentPublicationRecordId` IS NULL AND `agentContractSnapshotId` IS NULL AND `agentContractDigest` IS NULL AND `agentContextDigest` IS NULL))
+	CONSTRAINT `RouteEligibilityProjection_target_identity_check` CHECK(TRIM(`targetIdentity`) <> ''),
+	CONSTRAINT `RouteEligibilityProjection_target_consistency_check` CHECK((
+        (`targetKind` = 'runtime' AND `targetIdentity` = 'runtime' AND `agentId` IS NULL)
+        OR
+        (`targetKind` = 'agent' AND `targetIdentity` = `agentId`
+          AND `agentId` IS NOT NULL AND TRIM(`agentId`) <> '')
+      )),
+	CONSTRAINT `RouteEligibilityProjection_target_group_exclusion_check` CHECK((
+        (`targetKind` = 'agent'
+          AND `agentRevisionId` IS NOT NULL AND TRIM(`agentRevisionId`) <> ''
+          AND `runtimeRevisionId` IS NULL
+          AND `runtimeRevisionState` IS NULL
+          AND `runtimeLifecycleState` IS NULL
+          AND `runtimePublicationActive` IS NULL
+          AND `runtimeEvidenceValid` IS NULL
+          AND `runtimeConformanceValid` IS NULL
+          AND `runtimeEvidenceKind` IS NULL
+          AND `runtimePublicationRecordId` IS NULL
+          AND `runtimeAttestationIds` IS NULL
+          AND `conformanceRunId` IS NULL
+          AND `runtimeArtifactId` IS NULL
+          AND `runtimeArtifactDigest` IS NULL
+          AND `runtimeConfigDigest` IS NULL
+          AND `runtimeTargetDigest` IS NULL
+          AND `capabilityCompatibilityDigest` IS NULL)
+        OR
+        (`targetKind` = 'runtime'
+          AND `runtimeRevisionId` IS NOT NULL AND TRIM(`runtimeRevisionId`) <> ''
+          AND `agentRevisionId` IS NULL
+          AND `agentEndpointRef` IS NULL
+          AND `agentIdentityMode` IS NULL
+          AND `agentCredentialRefId` IS NULL
+          AND `agentNetworkZone` IS NULL
+          AND `agentRevisionState` IS NULL
+          AND `agentLifecycleState` IS NULL
+          AND `agentPublicationActive` IS NULL
+          AND `agentEvidenceValid` IS NULL
+          AND `agentPublicationRecordId` IS NULL
+          AND `agentContractSnapshotId` IS NULL
+          AND `agentContractDigest` IS NULL
+          AND `agentContextDigest` IS NULL)
+      ))
 );
 --> statement-breakpoint
 CREATE TABLE `RuntimeConformanceCaseResult` (
@@ -2434,6 +2500,7 @@ ALTER TABLE `AgentCallBinding` ADD CONSTRAINT `AgentCallBinding_callId_AgentCall
 ALTER TABLE `AgentCallEventIngress` ADD CONSTRAINT `AgentCallEventIngress_callId_AgentCall_id_fk` FOREIGN KEY (`callId`) REFERENCES `AgentCall`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `AgentCall` ADD CONSTRAINT `AgentCall_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `AgentCall` ADD CONSTRAINT `AgentCall_parentInvocationId_Invocation_id_fk` FOREIGN KEY (`parentInvocationId`) REFERENCES `Invocation`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `AgentCall` ADD CONSTRAINT `AgentCall_agentSessionBindingId_AgentSessionBinding_id_fk` FOREIGN KEY (`agentSessionBindingId`) REFERENCES `AgentSessionBinding`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `AgentSessionBinding` ADD CONSTRAINT `AgentSessionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `AuditEvent` ADD CONSTRAINT `AuditEvent_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `RoleActionBinding` ADD CONSTRAINT `RoleActionBinding_tenantId_Tenant_id_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -2590,6 +2657,7 @@ CREATE INDEX `AgentCallEventIngress_call_state_idx` ON `AgentCallEventIngress` (
 CREATE INDEX `AgentCall_tenant_state_idx` ON `AgentCall` (`tenantId`,`state`);--> statement-breakpoint
 CREATE INDEX `AgentCall_parent_idx` ON `AgentCall` (`parentInvocationId`);--> statement-breakpoint
 CREATE INDEX `AgentCall_agent_idx` ON `AgentCall` (`agentId`);--> statement-breakpoint
+CREATE INDEX `AgentCall_session_binding_idx` ON `AgentCall` (`agentSessionBindingId`);--> statement-breakpoint
 CREATE INDEX `AgentSessionBinding_thread_idx` ON `AgentSessionBinding` (`threadId`);--> statement-breakpoint
 CREATE INDEX `AgentSessionBinding_agent_idx` ON `AgentSessionBinding` (`agentId`);--> statement-breakpoint
 CREATE INDEX `AuditEvent_tenant_occurred_idx` ON `AuditEvent` (`tenantId`,`occurredAt`);--> statement-breakpoint
@@ -2816,6 +2884,4 @@ CREATE INDEX `RouteEligibilityProjection_tenant_idx` ON `RouteEligibilityProject
 CREATE INDEX `RuntimeConformanceRun_revision_completed_idx` ON `RuntimeConformanceRun` (`runtimeRevisionId`,`completedAt`);--> statement-breakpoint
 CREATE INDEX `HostedProvisioningRequest_tenantId_idx` ON `HostedProvisioningRequest` (`tenantId`);--> statement-breakpoint
 CREATE INDEX `HostedProvisioningRequest_state_idx` ON `HostedProvisioningRequest` (`state`);--> statement-breakpoint
-CREATE INDEX `HostedProvisioningRequest_claimable_idx` ON `HostedProvisioningRequest` (`state`,`nextAttemptAt`,`leaseExpiresAt`);--> statement-breakpoint
-CREATE TRIGGER `RouteRevision_prevent_update` BEFORE UPDATE ON `RouteRevision` FOR EACH ROW BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'RouteRevision is append-only'; END;--> statement-breakpoint
-CREATE TRIGGER `RouteActivation_prevent_update` BEFORE UPDATE ON `RouteActivation` FOR EACH ROW BEGIN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'RouteActivation is append-only'; END;
+CREATE INDEX `HostedProvisioningRequest_claimable_idx` ON `HostedProvisioningRequest` (`state`,`nextAttemptAt`,`leaseExpiresAt`);

@@ -367,7 +367,7 @@ EvaluationRun 引用确定的 AgentRevision、RuntimeRevision、测试数据集�
 
 ### 7.3 Audit
 
-AuditEvent 记录管理员配置修改、发布、策略决策、用户授权和敏感访问。Audit 保存 actor、action、target、before/after hash、理由和时间，不复制无关聊天正文。
+AuditEvent 记录管理员配置修改、发布、策略决策、用户授权和敏感访问，也是 Studio 管理操作的唯一审计账本。Audit 保存 actor、action、target、outcome、before/after hash、理由、已脱敏 metadata 和时间，不复制原始 payload 或无关聊天正文。
 
 ## 8. 聚合边界与事务
 

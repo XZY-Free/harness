@@ -350,6 +350,59 @@
                         },
                         "turn_state": {
                           "type": "string"
+                        },
+                        "agent_use": {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string"
+                            },
+                            "agent_id": {
+                              "type": "string"
+                            },
+                            "display_name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "agent_id",
+                            "display_name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "actual_agent_calls": {
+                          "type": "object",
+                          "properties": {
+                            "count": {
+                              "type": "integer"
+                            },
+                            "active_call_id": {
+                              "type": "null"
+                            },
+                            "last_state": {
+                              "type": "null"
+                            },
+                            "calls": {
+                              "type": "array",
+                              "items": {}
+                            },
+                            "selected_agent_called": {
+                              "type": "boolean"
+                            },
+                            "selected_but_unused": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "count",
+                            "active_call_id",
+                            "last_state",
+                            "calls",
+                            "selected_agent_called",
+                            "selected_but_unused"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -357,7 +410,9 @@
                         "thread_id",
                         "turn_sequence",
                         "trigger_type",
-                        "turn_state"
+                        "turn_state",
+                        "agent_use",
+                        "actual_agent_calls"
                       ],
                       "additionalProperties": false
                     },
@@ -415,7 +470,20 @@
                     "thread_id": "thr_01J...",
                     "turn_sequence": 7,
                     "trigger_type": "user_message",
-                    "turn_state": "accepted"
+                    "turn_state": "accepted",
+                    "agent_use": {
+                      "mode": "preferred",
+                      "agent_id": "agt_hr",
+                      "display_name": "HR 助手"
+                    },
+                    "actual_agent_calls": {
+                      "count": 0,
+                      "active_call_id": null,
+                      "last_state": null,
+                      "calls": [],
+                      "selected_agent_called": false,
+                      "selected_but_unused": true
+                    }
                   },
                   "input_item": {
                     "id": "item_user_01J...",
@@ -439,6 +507,7 @@
         "x-snowharness-boundary": "employee",
         "x-snowharness-error-codes": [
           "ACCESS_DENIED",
+          "ACTION_SCOPE_DENIED",
           "AUTHENTICATION_REQUIRED",
           "IDEMPOTENCY_CONFLICT",
           "RATE_LIMITED",
@@ -467,6 +536,32 @@
                       "type": "string"
                     },
                     "description": "已通过 Attachment API 创建且仍有效的 Thread Attachment；不接收裸位置"
+                  },
+                  "agent_use": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "const": "preferred"
+                          },
+                          "agent_id": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "agent_id"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Turn 级优先 Agent 指令；省略或 null 不继承历史选择。"
                   },
                   "expected_thread_version": {
                     "type": "integer",

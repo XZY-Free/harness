@@ -149,7 +149,7 @@ LLM 负责：
 
 ### 4.1 Thread 与 Agent 解耦
 
-Thread 是连续工作容器，不保存主 Agent 身份，也不要求先有 Agent 才能创建（专题 01 已删除 `primaryAgentId`）。Agent 是 Harness 可调用资产，与 Thread 从"存在性强绑定"改为"调用时可组合"。用户在某次 Turn/Invocation 偏好某 Agent、Agent 交接（handoff）与调用规划的语义由后续 Agent 调用专题定义，专题 01 不在 Thread 上伪造主 Agent 事实。调用辅助 Agent 通常创建 Child Thread。
+Thread 是连续工作容器，不保存主 Agent 身份，也不要求先有 Agent 才能创建。Agent 是 Harness 可调用资产，与 Thread 从"存在性强绑定"改为"调用时可组合"。用户在新 Turn 的 `agent_use` 中显式设置优先助手；省略或 `null` 不继承历史选择。Harness 根据任务需要决定是否生成 `agent.call` action，实际调用由 AgentCall 记录，不在 Thread 上伪造绑定事实。需要独立上下文的多 Agent 协作仍使用 Child Thread。
 
 业务例子：用户在财务助手会话中让风险审核 Agent检查一份报表，系统创建 Child Thread；财务助手仍负责最终回答。用户明确选择“接下来由风险审核助手负责”时的交接语义，由后续 Agent 调用专题定义。
 

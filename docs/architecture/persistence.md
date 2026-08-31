@@ -648,50 +648,34 @@ ThreadEvent sequence 通过锁定 Thread.last_event_sequence 原子递增；JobE
 3. Invocation 完成时写入最终 Item 和持久 Event。
 4. 诊断策略要求保留原始流时，压缩后写对象存储并由 Trace 引用，不写数千行 thread_event。
 
-## 10. 现有表迁移映射
+## 10. Schema 权威与 clean migration
 
-当前 `lib/db/schema.ts` 是 V10 运行事实，迁移时不原地猜测语义，按下表转换：
+`lib/persistence/schema/index.ts` 是唯一 Canonical Root（标准根入口）。`drizzle.config.ts`、`lib/db/client.ts` 和 MySQL 测试基建都直接消费该 Root，不再手工 spread Schema，也不存在第二定义入口。
 
-| 现有表/字段 | 去向 | 迁移规则 |
+当前 clean initial migration 为 `drizzle/0000_initial_schema.sql`，从最终 Root 生成 123 张业务表。开发期增量 migration 已删除；该初始迁移不含 rename/drop/backfill 兼容链。Root、Runtime Drizzle、Migration 和 Fresh MySQL 的表名集必须与 `docs/implementation/topic-01-loop-schema/07-final-schema-manifest.json` 完全一致。
+
+### 10.1 已删除的第二事实
+
+| 旧表 | 最终处理 | 当前 Authority |
 |---|---|---|
-| Thread | thread | 保留 id/owner/title/time；activeSkill 字段停止使用；projectId 转 Workspace/Project 关联；runtimeType 转 ExecutionBinding；token 汇总转读模型 |
-| Thread.pinnedFacts | memory_entry | 每条事实按 Thread scope 建 Memory，保留来源；敏感内容先分类 |
-| Thread.cicdApiToken | credential_ref + Vault | 解密后迁入 Vault，仅保存引用；迁移验证后清除应用表密文 |
-| Message | thread_item | role/type/parts 转类型化 content；runId 通过映射关联 turn/invocation |
-| ThreadEvent | thread_event | 保留 id、thread、sequence、type、payload、time；补 schema_version、actor 和关联 id；历史 payload 标记 legacy version |
-| ThreadRun | turn + invocation/attempt/job | user_message 创建 Turn+Invocation；用户 Regenerate 才建新 Invocation；approval_resume 继续原 Invocation；基础设施 retry 转 Attempt；无员工时间线语义的 system/scheduled 转 Job |
-| RunTranscriptChunk | 实时流冷归档 + 最终 Item 和 Event | completed Message 已存在时不重复迁移；artifact/error/done 转持久事实；Token chunk 不逐条转 Event，按保留策略冷归档 |
-| ToolRun | tool_call | toolName 先解析稳定 Tool；input/output 脱敏；runId 映射 invocation；无法确认副作用时 effect_state=unknown_effect |
-| ThreadRunSkill | capability_use | 保留 skill/version/contentHash/source/reason；仅实际使用行迁移 |
-| ContextSnapshot | context checkpoint 引用或冷归档 | 不继续每次复制全量上下文；保存 hash、来源和对象存储 ref |
-| ContextSummary | 上下文压缩 Checkpoint | 转 checkpoint metadata，保留原始 Item 范围；不制造员工消息 Item |
-| ThreadPlan / ThreadPlanItem | plan Item | 转一个类型化 plan Item；更新通过 Event 记录 |
-| Agent | agent + 初始 agent_revision | 现有模型、Skill/config 规范化为初始修订；动态 Skill 不再固化为依赖树 |
-| Skill / SkillVersion / SkillSyncMapping | skill / skill_version / 来源映射 | 保留稳定 id 与版本；同步来源进入 source_ref，不改变运行语义 |
-| PolicyConfig / History | —（不迁移） | Legacy 不迁数据；正式体系由 GovernanceConfigSet/Revision + PolicySet/PolicyRevision 按新执行链产生 |
-| ToolPermissionRule | —（不迁移） | Legacy 不迁数据；正式规则由 PolicySet/PolicyRevision + PermissionDecision 按新执行链产生 |
-| ToolApprovalRequest | —（不迁移） | Legacy 不迁数据；正式审批由 UserActionRequest + PermissionDecision 按新执行链产生 |
-| BackgroundTask | 内部 job/invocation | 有员工会话归属则关联 Turn；纯后台任务保留 Job，不暴露成普通 Thread 层级 |
-| GitCheckpoint | filesystem_checkpoint | 绑定 WorkspaceBinding，不再代表会话恢复点 |
-| MemoryEntry / MemoryEmbedding | memory_entry / memory_index | 保留 scope/source/hash，重建索引 |
-| McpServerConfig | tool_provider + connection | provider_type=mcp；不创建 MCP 独立产品生命周期 |
-| CustomTool | tool + tool_schema_revision | 从配置生成稳定 Tool 和初始 Schema 修订 |
-| SubagentDefinition | agent_revision 的委派配置或受限 Agent | 可独立运行的定义升为 Agent；仅委派参数转 delegation policy |
-| SubagentRun | child thread + relation + invocation | 结果与 Transcript 归子 Thread；父 Thread 只保留关系和结果 Item |
-| SecretMount | credential_ref + Vault | 密文移出业务库，Scope 转结构化引用 |
-| Deployment | workload_deployment | 现表是业务制品 CI/CD 记录，不能与新 Agent `deployment_route` 混名 |
-| DesktopDevice | device | 保留公钥和撤销状态，供 WorkspaceBinding/EnvironmentLease 引用 |
+| User | merge/delete | UserIdentity + PrincipalBinding |
+| AdminAuditLog | merge/delete | AuditEvent（含 outcome 与脱敏 metadata） |
+| ToolRun | delete | ToolCall + EffectRecord + Artifact |
+| ContextSnapshot / ContextSummary | delete | ContextCheckpoint + Trace/Observation |
+| ThreadPlan / ThreadPlanItem | delete | Harness action history + Goal |
+| GitCheckpoint | delete | FilesystemCheckpoint |
+| McpServerConfig / CustomTool | delete | Connection + ToolProvider + Tool + ToolSchemaRevision |
+| SecretMount | delete | CredentialRef + 外部 Credential Provider |
+| Deployment | delete | HostedProvisioningRequest + PublicationRecord + RouteActivation + Artifact |
+| AuditFailureLog | delete | ControlPlaneOutboxEvent + ControlPlaneEventDelivery / EventDeliveryFailure |
 
-### 10.1 双重事实处理
+### 10.2 AgentCall 字段 Authority
 
-迁移后只保留以下权威关系：
+- exact AgentRevision 只在 `AgentCallBinding.agentRevisionId`。
+- A2A contextId 只在 `AgentSessionBinding.externalContextRef`；`AgentCall.agentSessionBindingId` 只是外键。
+- A2A taskId 只在 `AgentCall.externalTaskRef`；Attempt 不复制 taskId。
 
-- `thread_item` 是消息和当前展示事实，不再双写 Message。
-- `thread_event` 是持久会话变化，不再把 RunTranscriptChunk 当第二 Event 流。
-- `turn` 表示正式交互，`invocation` 表示实际执行，不再由 ThreadRun 同时承担两者。
-- `execution_binding + capability_use` 解释实际版本，不再依赖 Thread.activeSkill 或全量 ContextSnapshot。
-
-迁移期间的兼容视图只能读，所有新写入先进入 表；完成校验后删除旧写路径，不长期双轨。
+这些边界由 Schema contract test 与 Fresh MySQL manifest test 共同校验，旧 `lib/db/schema.ts`、`lib/db/queries.ts` 及其 writer/consumer 已物理删除。
 
 ## 11. 查询读模型
 

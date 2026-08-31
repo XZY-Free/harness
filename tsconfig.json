@@ -31,7 +31,9 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     ".next-e2e/types/**/*.ts",
-    ".next-e2e/dev/types/**/*.ts"
+    ".next-e2e/dev/types/**/*.ts",
+    ".next-fresh-db/types/**/*.ts",
+    ".next-fresh-db/dev/types/**/*.ts"
   ],
   "exclude": ["node_modules", "upstreams", "docs", ".omx", ".omc", "desktop", ".next-e2e"]
 }

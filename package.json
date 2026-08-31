@@ -23,6 +23,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx lib/db/seed.ts",
+    "db:verify-fresh": "tsx scripts/verify-fresh-db.mts",
     "db:purge-retention": "tsx lib/db/purge-retention.ts",
     "build:runtime": "docker build -t snow-harness-runtime:node22 docker/runtime",
     "lint": "biome check .",

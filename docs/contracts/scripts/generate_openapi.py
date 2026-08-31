@@ -306,6 +306,22 @@ def add_conditional_request_rules(path: str, request_body: dict[str, Any]) -> No
     if not json_media:
         return
     schema = json_media["schema"]
+    if path == "/api/v1/threads/{thread_id}/turns":
+        schema["properties"]["agent_use"] = {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "mode": {"type": "string", "const": "preferred"},
+                        "agent_id": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["mode", "agent_id"],
+                    "additionalProperties": False,
+                },
+                {"type": "null"},
+            ],
+            "description": "Turn 级优先 Agent 指令；省略或 null 不继承历史选择。",
+        }
     rules: dict[str, list[dict[str, Any]]] = {
         "/gateway/v1/user-action-requests": [
             {
