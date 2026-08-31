@@ -184,19 +184,18 @@ export async function dispatchQueuedInvocationAttempt(
     throw new InvocationNotFoundError(invocation.id);
   }
 
-  // 4. capability requirements（Agent 与 Runtime Authority 分离）：用户选择的 Agent 是能力要求约束，
-  // 非执行目标。Retry 与原 Invocation 一致，从 invocation 的 Turn 读取 requestedAgentId 构建。
-  let capabilityRequirements:
-    | Array<{ capability_type: "agent"; capability_id: string; mode: "required" }>
+  // 4. Retry 从原 Turn 事实重建相同 preferred directive，不读取 Thread 或后续 Turn。
+  let capabilityDirectives:
+    | Array<{ capability_type: "agent"; capability_id: string; mode: "preferred" }>
     | undefined;
   if (invocation.turnId) {
     const turn = await getTurnById(params.tenantId, invocation.turnId);
-    if (turn?.requestedAgentId && turn.agentSelectionMode === "required") {
-      capabilityRequirements = [
+    if (turn?.preferredAgentId && turn.agentUseMode === "preferred") {
+      capabilityDirectives = [
         {
           capability_type: "agent",
-          capability_id: turn.requestedAgentId,
-          mode: "required",
+          capability_id: turn.preferredAgentId,
+          mode: "preferred",
         },
       ];
     }
@@ -217,7 +216,7 @@ export async function dispatchQueuedInvocationAttempt(
     tenantId: params.tenantId,
     invocation,
     binding,
-    capabilityRequirements,
+    capabilityDirectives,
     runtimeRevisionId: binding.runtimeRevisionId,
     gatewayEndpoints,
     governanceConfig,

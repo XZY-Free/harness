@@ -109,7 +109,7 @@ describe("checkAgentCallRuntimeBoundaryGate", () => {
     ),
     doc(
       "lib/runtime/adapters/hosted-adapter.ts",
-      'if (result.outcome === "pending") return { agentCallHandoff: result };',
+      "const preferredCandidate = params.capabilityDirectives;",
     ),
   ];
 
@@ -141,14 +141,14 @@ describe("checkAgentCallRuntimeBoundaryGate", () => {
     );
   });
 
-  it("Hosted adapter 缺 pending durable handoff 时失败", () => {
+  it("Hosted adapter 从 preferred directive 自动调用 Agent 时失败", () => {
     const documents = valid();
     documents[2] = doc(
       "lib/runtime/adapters/hosted-adapter.ts",
-      'if (result.outcome === "terminal") return result;',
+      "const selected = capabilityDirectives?.find(Boolean); await agentCallExecutor(selected);",
     );
     expect(checkAgentCallRuntimeBoundaryGate(documents).failures).toContain(
-      "Hosted Harness 未保留 pending AgentCall durable handoff",
+      "Hosted Harness 把 preferred directive 当成 AgentCall 执行要求",
     );
   });
 });
@@ -1041,7 +1041,7 @@ describe("checkAgentExecutionAuthorityGate", () => {
         "lib/persistence/schema/runtimes.ts",
         "protocolType: mysqlEnum('harness_runtime_protocol');",
       ),
-      doc("lib/runtime/runtime-client.ts", "capability_type: 'agent'; mode: 'required';"),
+      doc("lib/runtime/runtime-client.ts", "capability_type: 'agent'; mode: 'preferred';"),
       doc("lib/agents/calls/domain/agent-call.ts", "parentInvocationId: string;"),
       doc("lib/persistence/schema/agent-calls.ts", "parentInvocationId: varchar(...);"),
       doc("lib/agents/calls/transport/a2a/a2a-mapper.ts", "A2A completed -> AgentCall.completed;"),
@@ -1080,6 +1080,23 @@ describe("checkAgentExecutionAuthorityGate", () => {
     );
     const result = checkAgentExecutionAuthorityGate(docs);
     expect(result.failures.some((f) => f.includes("Runtime Start Request"))).toBe(true);
+  });
+
+  it("旧 Agent 选择与 required capability 标识符重新出现 → 失败", () => {
+    const docs = [
+      ...compliantDocs(),
+      doc(
+        "lib/runtime/legacy-start.ts",
+        "const capability_requirements = [{ capability_type: 'agent', mode: 'required' }];",
+      ),
+      doc(
+        "lib/conversations/legacy-turn.ts",
+        "const requestedAgentId = turn.requestedAgentId; const agentSelectionMode = 'required';",
+      ),
+      doc("app/api/v1/legacy/route.ts", "const wireKey = 'agent_selection';"),
+    ];
+    const result = checkAgentExecutionAuthorityGate(docs);
+    expect(result.failures.some((f) => f.includes("旧 Agent 选择协议"))).toBe(true);
   });
 
   it("Runtime adapter start 参数出现 agentRevisionId → 失败", () => {

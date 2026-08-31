@@ -187,8 +187,11 @@ export function checkAgentCallRuntimeBoundaryGate(
   if (!start.includes("createA2AAgentTransport") || !start.includes("getById")) {
     failures.push("startAgentCall 未经唯一 AgentTransport 出站并回读 durable AgentCall");
   }
-  if (!hosted.includes('outcome === "pending"') || !hosted.includes("agentCallHandoff")) {
-    failures.push("Hosted Harness 未保留 pending AgentCall durable handoff");
+  if (
+    /capabilityDirectives\??\.find[\s\S]{0,1200}\bagentCallExecutor\s*\(/.test(hosted) ||
+    /preferredAgent[\s\S]{0,1200}\bagentCallExecutor\s*\(/.test(hosted)
+  ) {
+    failures.push("Hosted Harness 把 preferred directive 当成 AgentCall 执行要求");
   }
 
   for (const document of documents) {
@@ -890,7 +893,7 @@ const RUNTIME_AGENT_AUTHORITY =
 /**
  * Runtime Start Request（lib/runtime/runtime-client.ts）禁止出现
  * agent execution target / agent_instruction_ref / Agent model-permission-interface
- * 下发字段。允许 capability_requirements[type=agent]。
+ * 下发字段。允许 capability_directives[type=agent,mode=preferred]。
  */
 const START_REQUEST_PATH = "lib/runtime/runtime-client.ts";
 const START_REQUEST_AGENT_TARGET =
@@ -898,6 +901,10 @@ const START_REQUEST_AGENT_TARGET =
 
 /** Runtime start DTO/调用方不得携带 AgentRevision 占位或选择字段。 */
 const RUNTIME_START_AGENT_REVISION = /\bagentRevisionId\??\s*:/;
+
+/** 协议收口后，Turn 与 Runtime 通道只允许 AgentUseDirective(preferred)。 */
+const LEGACY_AGENT_SELECTION_PROTOCOL =
+  /\bcapability_requirements\b|\bcapabilityRequirements\b|\brequested_agent_id\b|\brequestedAgentId\b|\bagentSelectionMode\b|["']agent_selection["']/;
 
 /** 全仓标识符级禁词（生产 scope，剥离注释）。 */
 const AGENT_EXECUTION_FORBIDDEN_IDENTIFIERS: ReadonlyArray<{ pattern: RegExp; title: string }> = [
@@ -956,6 +963,9 @@ export function checkAgentExecutionAuthorityGate(
       RUNTIME_START_AGENT_REVISION.test(source)
     ) {
       failures.push(`Runtime start 通道出现 agentRevisionId：${path}`);
+    }
+    if (LEGACY_AGENT_SELECTION_PROTOCOL.test(source)) {
+      failures.push(`旧 Agent 选择协议重新出现：${path}`);
     }
     // 全仓被禁执行标识符。
     for (const rule of AGENT_EXECUTION_FORBIDDEN_IDENTIFIERS) {

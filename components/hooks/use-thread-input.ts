@@ -173,7 +173,7 @@ export function useThreadInput({
           },
           body: JSON.stringify({
             input: { type: "message", text },
-            ...(agentId ? { agent_selection: { mode: "required", agent_id: agentId } } : {}),
+            ...(agentId ? { agent_use: { mode: "preferred", agent_id: agentId } } : {}),
           }),
         });
         if (!resp.ok) {

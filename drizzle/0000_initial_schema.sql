@@ -514,11 +514,12 @@ CREATE TABLE `Turn` (
 	`startedAt` datetime(3),
 	`waitingAt` datetime(3),
 	`finishedAt` datetime(3),
-	`requestedAgentId` varchar(36),
-	`agentSelectionMode` varchar(32),
+	`preferredAgentId` varchar(36),
+	`agentUseMode` varchar(32),
 	`versionNo` bigint NOT NULL DEFAULT 1,
 	CONSTRAINT `Turn_id` PRIMARY KEY(`id`),
-	CONSTRAINT `Turn_thread_sequence_uq` UNIQUE(`threadId`,`turnSequence`)
+	CONSTRAINT `Turn_thread_sequence_uq` UNIQUE(`threadId`,`turnSequence`),
+	CONSTRAINT `Turn_agentUse_pair_check` CHECK(((`Turn`.`preferredAgentId` IS NULL AND `Turn`.`agentUseMode` IS NULL) OR (`Turn`.`preferredAgentId` IS NOT NULL AND `Turn`.`agentUseMode` = 'preferred')))
 );
 --> statement-breakpoint
 CREATE TABLE `DeletionRequest` (

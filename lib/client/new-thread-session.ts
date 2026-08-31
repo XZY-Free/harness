@@ -113,9 +113,9 @@ export function createNewThreadSession(config: NewThreadSessionConfig = {}): New
         body: JSON.stringify({
           input: { type: "message", text: pending.submission.text },
           ...(pending.submission.modelRef ? { selected_model: pending.submission.modelRef } : {}),
-          // 09 §9/§10：员工选择只影响本条 Turn（agent_selection.mode=required）。
+          // 员工选择只形成当前 Turn 的 preferred AgentUseDirective。
           ...(pending.submission.agentId
-            ? { agent_selection: { mode: "required", agent_id: pending.submission.agentId } }
+            ? { agent_use: { mode: "preferred", agent_id: pending.submission.agentId } }
             : {}),
         }),
       });

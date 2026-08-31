@@ -43,7 +43,7 @@ export function createInProcessHostedRuntimeClient(params: {
   modelFn: ModelFn;
   /** 平台租户 id（Harness Loop 调 AgentCall 时作用域）。 */
   tenantId?: string;
-  /** Harness Loop → AgentCall 桥接器（有 required Agent 时调用）。 */
+  /** Harness Loop → AgentCall action 桥接器。 */
   agentCallExecutor?: AgentCallExecutor;
   ingressEventBatch: (params: {
     invocationId: string;
@@ -104,8 +104,7 @@ export function createInProcessHostedRuntimeClient(params: {
           tenantId: params.tenantId,
           threadId: turnContext?.thread_id ?? null,
           turnId: turnContext?.turn_id ?? null,
-          // Agent 与 Runtime Authority：本轮 capability requirements（required Agent）传给 Harness Loop。
-          capabilityRequirements: invocation.request.requestBody.capability_requirements,
+          capabilityDirectives: invocation.request.requestBody.capability_directives,
           agentCallExecutor: params.agentCallExecutor,
           inputItems: invocation.request.requestBody.input_items,
           contextHandle: invocation.request.requestBody.context_handle,

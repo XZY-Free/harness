@@ -46,8 +46,8 @@ export interface ClientNewThreadSubmission {
   readonly text: string;
   readonly modelRef: string | null;
   /**
-   * 员工显式选择的 Agent id（09 §9：用户选择只影响下一 Invocation，不写 Thread 主 Agent）。
-   * null/undefined = 不带 agent_selection，由基础 Harness Route 正常发送。
+   * 员工显式选择的 Agent id；只形成下一新 Turn 的 preferred directive，不写 Thread Agent。
+   * null/undefined = 不带 agent_use，本 Turn 不继承上一 Turn。
    */
   readonly agentId?: string | null;
 }
@@ -273,7 +273,8 @@ export interface ClientTurnControls {
 export interface ClientTurn {
   readonly controls: ClientTurnControls;
   readonly id: string;
-  readonly requested_agent_id: string | null;
+  readonly preferred_agent_id: string | null;
+  readonly agent_use_mode: "preferred" | null;
   readonly turn_sequence: number;
   readonly trigger_type: string;
   readonly trigger_ref: string | null;

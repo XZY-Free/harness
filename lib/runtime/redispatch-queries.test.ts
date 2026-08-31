@@ -41,6 +41,7 @@ import {
   generateTestBuilderKey,
 } from "@/lib/artifacts/test-support/build-dsse-artifact-attestation-envelope";
 import { createThread } from "@/lib/conversations/thread-queries";
+import { acceptUserMessageTurn } from "@/lib/conversations/turn-queries";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -336,6 +337,7 @@ async function seedInvocation(params: {
   routeId: string;
   threadId?: string;
   turnId?: string;
+  triggerItemId?: string;
   jobId?: string;
   invocationKind?: "initial" | "job";
   initialExecutionState?:
@@ -354,7 +356,9 @@ async function seedInvocation(params: {
   // 满足 issueContextHandle 的绑定完整性要求（threadId + triggerItemId 均非空）。
   // Job 模式（threadId=null）：triggerItemId 保持 null（Job 上下文句柄属 S09-W03 范围）。
   let triggerItemId: string | null = null;
-  if (params.threadId) {
+  if (params.triggerItemId) {
+    triggerItemId = params.triggerItemId;
+  } else if (params.threadId) {
     const itemId = randomUUID();
     await db.insert(threadItemTable).values({
       id: itemId,
@@ -679,6 +683,37 @@ describe("S09-C06 redispatchInvocation 成功流程", () => {
     expect(result.sessionBindingCreated).toBe(true);
     expect(result.invocation?.executionState).toBe("running");
     expect(result.invocationStartedEvent).not.toBeNull();
+  });
+
+  it("重调度从原 Turn 恢复同一 preferred capability directive", async () => {
+    const accepted = await acceptUserMessageTurn({
+      tenantId,
+      threadId,
+      ownerUserId: ownerId,
+      content: { text: "重试仍优先使用原 Agent" },
+      agentUse: { mode: "preferred", agentId },
+      actorId: ownerId,
+    });
+    const seeded = await seedInvocation({
+      tenantId,
+      ownerId,
+      agentRevision,
+      runtimeRevisionId,
+      routeId,
+      threadId,
+      turnId: accepted.turn.id,
+      triggerItemId: accepted.item.id,
+      initialExecutionState: "waiting_user",
+      withSessionBinding: true,
+      withPriorAttempt: true,
+    });
+    const client = buildSuccessRuntimeClient(seeded.invocationId, 2);
+
+    await redispatchInvocation(buildRedispatchParams(seeded, client));
+
+    expect(client.calls.startInvocation[0]?.requestBody.capability_directives).toEqual([
+      { capability_type: "agent", capability_id: agentId, mode: "preferred" },
+    ]);
   });
 
   it("已 running 的 Invocation：不调状态机，仅更新 runtimeExecutionRef", async () => {

@@ -100,15 +100,11 @@ export interface StartInvocationRequestBody {
     job_id: string;
     trigger_item_id?: string | null;
   } | null;
-  /**
-   * 本轮 Harness 执行约束（capability requirements），不是执行目标（Agent 与 Runtime Authority 分离）。
-   * 用户选择 Agent = 本轮要求 Harness 使用该 Agent 能力；顶层执行主体恒为 Harness。
-   * Agent 与 Runtime Authority 仅支持 capability_type=agent + mode=required。
-   */
-  capability_requirements?: Array<{
+  /** 本 Turn 的能力使用提示；preferred 只影响 Harness 决策，不承诺调用。 */
+  capability_directives?: Array<{
     capability_type: "agent";
     capability_id: string;
-    mode: "required";
+    mode: "preferred";
   }>;
   input_items: unknown[];
   context_handle: string;

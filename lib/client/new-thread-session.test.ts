@@ -70,7 +70,7 @@ describe("new thread client session", () => {
     );
   });
 
-  it("sends agent_selection when the employee explicitly selected an Agent (09 §9)", async () => {
+  it("sends preferred agent_use when the employee explicitly selected an Agent", async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(
@@ -93,13 +93,13 @@ describe("new thread client session", () => {
       expect.objectContaining({
         body: JSON.stringify({
           input: { type: "message", text: "我今年还有多少年假？" },
-          agent_selection: { mode: "required", agent_id: "agent-1" },
+          agent_use: { mode: "preferred", agent_id: "agent-1" },
         }),
       }),
     );
   });
 
-  it("omits agent_selection when no Agent was selected (基础 Harness 正常发送)", async () => {
+  it("omits agent_use when no Agent was selected", async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(
@@ -136,7 +136,7 @@ describe("new thread client session", () => {
           JSON.stringify({
             error: {
               code: "BUSINESS_CONSTRAINT_VIOLATION",
-              message: "agent_selection.required 无 eligible route（agentId=agent-1）",
+              message: "Agent action 无 eligible route（agentId=agent-1）",
             },
           }),
           { status: 422 },
@@ -149,7 +149,7 @@ describe("new thread client session", () => {
 
     await expect(
       session.submit({ text: "选了不存在的 Agent", modelRef: null, agentId: "agent-1" }),
-    ).rejects.toThrow("agent_selection.required 无 eligible route（agentId=agent-1）");
+    ).rejects.toThrow("Agent action 无 eligible route（agentId=agent-1）");
   });
 
   it("retries a failed first Turn without creating another Thread", async () => {

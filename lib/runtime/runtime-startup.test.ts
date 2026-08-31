@@ -274,7 +274,7 @@ interface FullDispatchContext {
   triggerItemId: string | null;
 }
 
-async function seedFullDispatchContext(): Promise<FullDispatchContext> {
+async function seedFullDispatchContext(preferredAgentId?: string): Promise<FullDispatchContext> {
   const { tenantId, ownerId } = await seedTenantAndOwner();
 
   const { revision: runtimeRevision } = await seedPublishedRuntimeRevision(
@@ -314,6 +314,7 @@ async function seedFullDispatchContext(): Promise<FullDispatchContext> {
     threadId: thread.id,
     ownerUserId: ownerId,
     content: { text: "请帮我分析财务数据" },
+    agentUse: preferredAgentId ? { mode: "preferred", agentId: preferredAgentId } : null,
     actorId: ownerId,
   });
 
@@ -691,6 +692,33 @@ describe("S05-C02 dispatchInvocationForTurn Runtime 集成", () => {
     expect(handleBinding.threadId).toBe(ctx.threadId);
   });
 
+  it("preferred Agent 只作为 capability_directives 下发，不进入顶层 Binding", async () => {
+    const { turn } = await acceptUserMessageTurn({
+      tenantId: ctx.tenantId,
+      threadId: ctx.threadId,
+      ownerUserId: ctx.ownerId,
+      content: { text: "优先使用指定 Agent" },
+      agentUse: { mode: "preferred", agentId: "agent-preferred-1" },
+      actorId: ctx.ownerId,
+    });
+    const mockClient = createMockRuntimeClient({
+      startInvocation: async (req) => buildAcceptedResponse(req.requestBody.invocation_id),
+    });
+
+    const result = await dispatchInvocationForTurn({
+      tenantId: ctx.tenantId,
+      turnId: turn.id,
+      runtimeClient: mockClient,
+      runtimeEndpointResolver: async () => buildRuntimeEndpointResolution(ctx.runtimeRevision.id),
+    });
+
+    expect(mockClient.calls.startInvocation[0]?.requestBody.capability_directives).toEqual([
+      { capability_type: "agent", capability_id: "agent-preferred-1", mode: "preferred" },
+    ]);
+    expect(result.binding).not.toHaveProperty("agentRevisionId");
+    expect(result.binding).not.toHaveProperty("preferredAgentId");
+  });
+
   it("dispatch Runtime 网络不可达 → Turn 保持 queued，skipped=true", async () => {
     const mockClient = createMockRuntimeClient({
       startInvocation: async () => {
@@ -1031,6 +1059,132 @@ describe("S05-C02 POST /runtime/v1/invocations", () => {
     expect(respBody.runtime_session_ref).toMatch(/^rss_/);
     expect(respBody.runtime_execution_ref).toMatch(/^rex_/);
     expect(respBody.capabilities.protocol_versions).toEqual(["2"]);
+  });
+
+  it("preferred capability_directives 的 capability_id 为空 → 400", async () => {
+    const token = issueWorkloadToken({
+      type: "runtime",
+      tenantId: "test-tenant",
+      invocationId: "inv-empty-preferred-agent",
+      runtimeRevisionId: "test-rr",
+      audience: "runtime",
+      expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+    });
+    const response = await invocationsPOST(
+      new Request("https://platform.internal/runtime/v1/invocations", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          "idempotency-key": "empty-preferred-agent",
+        },
+        body: JSON.stringify({
+          protocol_version: RUNTIME_PROTOCOL_VERSION,
+          invocation_id: "inv-empty-preferred-agent",
+          turn_context: null,
+          job_context: null,
+          capability_directives: [
+            { capability_type: "agent", capability_id: "   ", mode: "preferred" },
+          ],
+          input_items: [{ type: "user_message", content: { text: "test" } }],
+          context_handle: "ctx_test",
+          gateway_endpoints: {
+            events: "https://gw/events",
+            cancel: "https://gw/cancel",
+            resume: "https://gw/resume",
+            steer: "https://gw/steer",
+            tools: "https://gw/tools",
+            tool_calls: "https://gw/tool-calls",
+            user_action_requests: "https://gw/user-action-requests",
+          },
+          governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
+          gateway_access: {
+            access_token: "gw-token",
+            expires_at: new Date(Date.now() + 60000).toISOString(),
+          },
+          execution_limits: {
+            max_invocation_seconds: 600,
+            max_event_bytes: 1_048_576,
+          },
+          workspace: null,
+          trace_context: { trace_id: "trace-empty-preferred", span_id: "span-1" },
+        }),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe("REQUEST_SCHEMA_INVALID");
+  });
+
+  it("capability_directives 超过一个或携带额外字段 → 400", async () => {
+    const token = issueWorkloadToken({
+      type: "runtime",
+      tenantId: "test-tenant",
+      invocationId: "inv-invalid-directives",
+      runtimeRevisionId: "test-rr",
+      audience: "runtime",
+      expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.runtime,
+    });
+    const baseBody = {
+      protocol_version: RUNTIME_PROTOCOL_VERSION,
+      invocation_id: "inv-invalid-directives",
+      turn_context: null,
+      job_context: null,
+      input_items: [{ type: "user_message", content: { text: "test" } }],
+      context_handle: "ctx_test",
+      gateway_endpoints: {
+        events: "https://gw/events",
+        cancel: "https://gw/cancel",
+        resume: "https://gw/resume",
+        steer: "https://gw/steer",
+        tools: "https://gw/tools",
+        tool_calls: "https://gw/tool-calls",
+        user_action_requests: "https://gw/user-action-requests",
+      },
+      governance_config: { revision_id: "gov-rev-1", config_digest: "sha256:test", config: {} },
+      gateway_access: {
+        access_token: "gw-token",
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
+      execution_limits: { max_invocation_seconds: 600, max_event_bytes: 1_048_576 },
+      workspace: null,
+      trace_context: { trace_id: "trace-invalid-directives", span_id: "span-1" },
+    };
+    for (const [idempotencyKey, capabilityDirectives] of [
+      [
+        "multiple-directives",
+        [
+          { capability_type: "agent", capability_id: "agent-1", mode: "preferred" },
+          { capability_type: "agent", capability_id: "agent-2", mode: "preferred" },
+        ],
+      ],
+      [
+        "extra-directive-key",
+        [
+          {
+            capability_type: "agent",
+            capability_id: "agent-1",
+            mode: "preferred",
+            required: true,
+          },
+        ],
+      ],
+    ] as const) {
+      const response = await invocationsPOST(
+        new Request("https://platform.internal/runtime/v1/invocations", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+            "idempotency-key": idempotencyKey,
+          },
+          body: JSON.stringify({
+            ...baseBody,
+            capability_directives: capabilityDirectives,
+          }),
+        }),
+      );
+      expect(response.status).toBe(400);
+    }
   });
 
   it("Runtime route 把当前输入、handle、workspace、limits、trace 传入实际 HostedHarnessLoop", async () => {

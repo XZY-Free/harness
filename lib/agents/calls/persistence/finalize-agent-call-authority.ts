@@ -409,8 +409,8 @@ export async function lockAndValidateAgentCallAuthority(
     if (
       !turn ||
       turn.threadId !== invocation.threadId ||
-      turn.requestedAgentId !== input.agentId ||
-      turn.agentSelectionMode !== "required" ||
+      turn.preferredAgentId !== input.agentId ||
+      turn.agentUseMode !== "preferred" ||
       turn.latestInvocationId !== invocation.id
     ) {
       stale("employee-selected Turn 授权来源已漂移");

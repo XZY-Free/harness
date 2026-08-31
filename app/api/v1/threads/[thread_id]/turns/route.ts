@@ -70,13 +70,15 @@ interface CreateTurnBody {
   input: TurnInput;
   selected_model?: string;
   workspace_attachment_ids?: string[];
-  /** Per-Invocation Agent Selection：当前只支持 mode=required。 */
-  agent_selection?: { mode: "required"; agent_id: string };
+  /** 本 Turn 显式 Agent 使用偏好；null/省略均表示本 Turn 无 directive。 */
+  agent_use?: { mode: "preferred"; agent_id: string } | null;
 }
 
 function validateBody(body: unknown): body is CreateTurnBody {
   if (!body || typeof body !== "object") return false;
   const b = body as Record<string, unknown>;
+  const allowedKeys = new Set(["input", "selected_model", "workspace_attachment_ids", "agent_use"]);
+  if (Object.keys(b).some((key) => !allowedKeys.has(key))) return false;
   if (!b.input || typeof b.input !== "object") return false;
   const input = b.input as Record<string, unknown>;
   if (typeof input.type !== "string" || input.type.length === 0) return false;
@@ -88,13 +90,13 @@ function validateBody(body: unknown): body is CreateTurnBody {
       if (typeof id !== "string") return false;
     }
   }
-  // agent_selection：省略 = 无 selection（基础 Harness Route，05 §11）；
-  // 提供时 mode 必须为 "required" 且 agent_id 非空（当前冻结，05 §1）。
-  if (b.agent_selection !== undefined && b.agent_selection !== null) {
-    if (!b.agent_selection || typeof b.agent_selection !== "object") return false;
-    const selection = b.agent_selection as Record<string, unknown>;
-    if (selection.mode !== "required") return false;
-    if (typeof selection.agent_id !== "string" || selection.agent_id.trim().length === 0) {
+  if (b.agent_use !== undefined && b.agent_use !== null) {
+    if (typeof b.agent_use !== "object" || Array.isArray(b.agent_use)) return false;
+    const directive = b.agent_use as Record<string, unknown>;
+    const directiveKeys = new Set(["mode", "agent_id"]);
+    if (Object.keys(directive).some((key) => !directiveKeys.has(key))) return false;
+    if (directive.mode !== "preferred") return false;
+    if (typeof directive.agent_id !== "string" || directive.agent_id.trim().length === 0) {
       return false;
     }
   }
@@ -136,11 +138,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     );
   }
 
-  // Catalog 是发现入口，不是安全边界。任何 Agent 选择都必须在写入幂等记录和 Turn 前
+  // Catalog 是发现入口，不是安全边界。任何 Agent directive 都必须在写入幂等记录和 Turn 前
   // 按当前 RoleActionBinding 重新检查 exact agent.invoke；统一 403，不查询 Agent 存在性。
-  const selectedAgentId = body.agent_selection?.agent_id.trim() ?? null;
-  if (selectedAgentId) {
-    const authorization = await requireAgentInvokeScope(principal, selectedAgentId, requestId);
+  const preferredAgentId = body.agent_use?.agent_id.trim() ?? null;
+  if (preferredAgentId) {
+    const authorization = await requireAgentInvokeScope(principal, preferredAgentId, requestId);
     if (!authorization.ok) return authorization.response;
   }
 
@@ -197,9 +199,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         client_message_id: idempotencyKey,
       },
       actorId: principal.userIdentityId,
-      agentSelection: body.agent_selection
-        ? { mode: "required", agentId: selectedAgentId as string }
-        : null,
+      agentUse: body.agent_use ? { mode: "preferred", agentId: preferredAgentId as string } : null,
       idempotencyKey,
       correlationId: requestId,
     });
@@ -240,7 +240,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     });
     if (!dispatch.dispatched) {
       // 顶层无有效 Runtime Route → Turn 保持 accepted（Agent 与 Runtime Authority 分离）。
-      // 用户选择 Agent 是能力要求约束，不作为顶层 Route 判断；顶层无 Route 时
+      // 用户选择 Agent 是本 Turn 偏好，不作为顶层 Route 判断；顶层无 Route 时
       // 由正式控制面初始化供应 / dispatch retry 处理，POST Turn 不在此做同步失败。
       logger.warn("[runtime] 顶层 Harness Route 未就绪，Turn 保持 accepted", {
         threadId,
@@ -299,7 +299,8 @@ function projectTurn(
     id: turn.id,
     turn_sequence: turn.turnSequence,
     trigger_type: turn.triggerType,
-    requested_agent_id: turn.requestedAgentId,
+    preferred_agent_id: turn.preferredAgentId,
+    agent_use_mode: turn.agentUseMode,
     trigger_ref: turn.triggerRef,
     trigger_item_id: turn.triggerItemId,
     turn_state: turn.turnState,

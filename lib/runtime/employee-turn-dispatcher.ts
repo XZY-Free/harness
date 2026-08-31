@@ -94,9 +94,9 @@ export async function dispatchEmployeeTurn(params: {
   }
 
   // 顶层 Employee Turn 永远解析基础 Harness Route（冻结架构）。
-  // 用户选择 Agent 是"本轮使用该 Agent 能力"的约束，不改变顶层执行目标：
+  // 用户选择 Agent 只形成本 Turn 的能力使用偏好，不改变顶层执行目标：
   // 顶层 Invocation 始终由 Harness Runtime 执行，Agent 由 Harness Loop 通过
-  // AgentCall 调用（本模块不读取 turn.requestedAgentId 作为 Route 约束）。
+  // AgentCall 调用（本模块不读取 Turn directive 作为顶层 Route 约束）。
   // ─── 热路径：查询正式 RouteResolver（恒为 runtime target）───
   const routeOutcome = await resolveRoute({
     tenantId: params.tenantId,
@@ -173,8 +173,7 @@ export async function dispatchEmployeeTurn(params: {
         createInProcessHostedRuntimeClient({
           modelFn: params.modelFn ?? configuredModelFn(),
           tenantId: params.tenantId,
-          // Harness Loop → AgentCall 桥接器（required Agent capability）。
-          // 有 required Agent 时由 HostedHarnessLoop 调用；无 required Agent 恒不调用。
+          // Harness Loop → AgentCall action 桥接器；preferred directive 本身不触发调用。
           agentCallExecutor: (exec) =>
             invokeRequiredAgent({
               tenantId: params.tenantId,

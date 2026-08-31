@@ -54,7 +54,7 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
     "invocation_id",
     "turn_context",
     "job_context",
-    "capability_requirements",
+    "capability_directives",
     "input_items",
     "context_handle",
     "gateway_endpoints",
@@ -69,18 +69,23 @@ function validateBody(body: unknown): body is StartInvocationRequestBody {
   // §23/§49：harness-runtime-protocol@1，无 @1 fallback。
   if (b.protocol_version !== "2") return false;
   if (typeof b.invocation_id !== "string" || b.invocation_id.length === 0) return false;
-  // Agent 与 Runtime Authority 分离：本轮 Harness 能力要求（可选），非执行目标。仅支持 capability_type=agent + mode=required。
+  // 本 Turn 能力使用提示（可选），非执行目标；preferred 不承诺实际调用。
   if (
-    b.capability_requirements !== undefined &&
-    (!Array.isArray(b.capability_requirements) ||
-      b.capability_requirements.some(
-        (c) =>
-          !c ||
-          typeof c !== "object" ||
-          (c as Record<string, unknown>).capability_type !== "agent" ||
-          typeof (c as Record<string, unknown>).capability_id !== "string" ||
-          (c as Record<string, unknown>).mode !== "required",
-      ))
+    b.capability_directives !== undefined &&
+    (!Array.isArray(b.capability_directives) ||
+      b.capability_directives.length > 1 ||
+      b.capability_directives.some((c) => {
+        if (!c || typeof c !== "object" || Array.isArray(c)) return true;
+        const directive = c as Record<string, unknown>;
+        const directiveKeys = new Set(["capability_type", "capability_id", "mode"]);
+        return (
+          Object.keys(directive).some((key) => !directiveKeys.has(key)) ||
+          directive.capability_type !== "agent" ||
+          typeof directive.capability_id !== "string" ||
+          directive.capability_id.trim().length === 0 ||
+          directive.mode !== "preferred"
+        );
+      }))
   ) {
     return false;
   }
@@ -181,6 +186,7 @@ export async function POST(request: Request): Promise<Response> {
       invocationId: body.invocation_id,
       threadId: turnContext.thread_id,
       turnId: turnContext.turn_id,
+      capabilityDirectives: body.capability_directives,
       inputItems: body.input_items,
       contextHandle: body.context_handle,
       gatewayEndpoints: body.gateway_endpoints,

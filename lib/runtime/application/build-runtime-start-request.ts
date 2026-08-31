@@ -6,10 +6,10 @@
  *
  * 职责：
  * - 从 exact Invocation + immutable ExecutionBinding + RuntimeRevision 构建
- *   完整 StartInvocationRequestBody：capability_requirements / input_items / context_handle /
+ *   完整 StartInvocationRequestBody：capability_directives / input_items / context_handle /
  *   invocation_context / workspace / gateway / governance / trace / execution_limits。
  * - 顶层 Invocation 恒属于 Harness（Agent 与 Runtime Authority 分离）：不携带 Agent 执行目标，
- *   只携带 capability_requirements 表达"本轮要求使用某 Agent 能力"（由 Harness Loop 调用）。
+ *   只携带 capability_directives 表达本 Turn 的 Agent 使用偏好（由 Harness 决策是否调用）。
  * - Base Harness 路径不执行 Agent Contract Context Enrichment（该职责属 AgentCall，后续批次）。
  * - Attempt 维度差异只体现在 attempt 字段（attempt_no/attempt_id/retry_reason/checkpoint_ref/
  *   producer_sequence_start），由入参 attempt 提供。
@@ -36,15 +36,11 @@ export interface BuildRuntimeStartRequestInput {
   tenantId: string;
   invocation: Invocation;
   binding: ExecutionBinding;
-  /**
-   * 本轮 Harness 执行约束（capability requirements，非执行目标）。
-   * 由调用方从 Turn 的 requestedAgentId / selectionMode 构建；Agent 与 Runtime Authority 仅支持
-   * capability_type=agent + mode=required。省略/空数组 = 本轮无强制能力要求。
-   */
-  capabilityRequirements?: Array<{
+  /** 本 Turn 的能力使用提示；省略/空数组表示没有提示。 */
+  capabilityDirectives?: Array<{
     capability_type: "agent";
     capability_id: string;
-    mode: "required";
+    mode: "preferred";
   }>;
   /** Binding 冻结的 RuntimeRevision（读取 capabilities/execution_limits）。 */
   runtimeRevisionId: string;
@@ -154,8 +150,8 @@ export async function buildRuntimeStartRequestForInvocation(
           trigger_item_id: invocation.triggerItemId ?? null,
         }
       : null,
-    ...(input.capabilityRequirements && input.capabilityRequirements.length > 0
-      ? { capability_requirements: input.capabilityRequirements }
+    ...(input.capabilityDirectives && input.capabilityDirectives.length > 0
+      ? { capability_directives: input.capabilityDirectives }
       : {}),
     input_items: inputItems,
     context_handle: contextHandle,

@@ -536,16 +536,14 @@ async function dispatchToRuntime(params: {
   const { runtimeEndpoint, auth, gatewayEndpoints, governanceConfig, gatewayAccess } =
     await params.runtimeEndpointResolver(params.binding);
 
-  // 冻结架构：用户选择的 Agent 是能力要求约束（非执行目标）。
-  // 从 Turn 的 requestedAgentId/agentSelectionMode 构建 capability_requirements，
-  // 由 Harness Loop 读取并调 AgentCall。
-  const capabilityRequirements =
-    params.turn.requestedAgentId && params.turn.agentSelectionMode === "required"
+  // 用户选择只形成 Turn-scoped preferred directive，不改变顶层 Runtime 执行目标。
+  const capabilityDirectives =
+    params.turn.preferredAgentId && params.turn.agentUseMode === "preferred"
       ? [
           {
             capability_type: "agent" as const,
-            capability_id: params.turn.requestedAgentId,
-            mode: "required" as const,
+            capability_id: params.turn.preferredAgentId,
+            mode: "preferred" as const,
           },
         ]
       : undefined;
@@ -555,7 +553,7 @@ async function dispatchToRuntime(params: {
     tenantId: params.tenantId,
     invocation: params.invocation,
     binding: params.binding,
-    capabilityRequirements,
+    capabilityDirectives,
     runtimeRevisionId: params.runtimeRevisionId,
     gatewayEndpoints,
     governanceConfig,

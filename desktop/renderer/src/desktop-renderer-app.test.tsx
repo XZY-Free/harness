@@ -116,7 +116,7 @@ describe("DesktopRendererApp", () => {
         body: JSON.stringify({
           input: { type: "message", text: "请帮我分析销售数据" },
           selected_model: "glm-5.2",
-          agent_selection: { mode: "required", agent_id: "agent-1" },
+          agent_use: { mode: "preferred", agent_id: "agent-1" },
         }),
       }),
     );

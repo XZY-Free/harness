@@ -2115,8 +2115,8 @@ describe("S05-C04 基础 Harness Route redispatch 不依赖 Agent（§8.3）", (
     // 必须捕获真实 startInvocation request。
     expect(mockClient.calls.startInvocation).toHaveLength(1);
     const startReq = mockClient.calls.startInvocation[0];
-    // 基础 Harness Route（无 Agent）：不携带 capability_requirements（专题01 冻结架构）。
-    expect(startReq?.requestBody.capability_requirements).toBeUndefined();
+    // 基础 Harness Route（无 Agent）：不携带 capability_directives。
+    expect(startReq?.requestBody.capability_directives).toBeUndefined();
 
     // input_items 中不存在 type="agent_instruction_ref"。
     const inputItems = startReq?.requestBody.input_items ?? [];

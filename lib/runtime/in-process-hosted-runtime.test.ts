@@ -30,11 +30,11 @@ describe("InProcessHostedRuntimeClient", () => {
         invocation_id: "invocation-1",
         turn_context: { thread_id: "thread-1", turn_id: "turn-1" },
         job_context: null,
-        capability_requirements: [
+        capability_directives: [
           {
             capability_type: "agent",
             capability_id: "agent-revision-1",
-            mode: "required",
+            mode: "preferred",
           },
         ],
         input_items: [{ type: "user_message", content: { text: "你好" } }],

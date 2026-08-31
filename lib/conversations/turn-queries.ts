@@ -104,11 +104,8 @@ export async function acceptUserMessageTurn(params: {
   ownerUserId: string;
   content: UserMessageContent;
   triggerRef?: string;
-  /**
-   * Per-Invocation Agent Selection（05 §1）：mode=required + stable Agent.id。
-   * 省略 = 无 selection → 基础 Harness Route（05 §11）。
-   */
-  agentSelection?: { mode: "required"; agentId: string } | null;
+  /** 本 Turn 的显式 AgentUseDirective；省略/null = 本 Turn 无偏好，不继承历史。 */
+  agentUse?: { mode: "preferred"; agentId: string } | null;
   actorId: string;
   idempotencyKey?: string;
   correlationId?: string;
@@ -174,8 +171,8 @@ export async function acceptUserMessageTurn(params: {
       triggerRef: params.triggerRef ?? null,
       triggerItemId: itemId,
       turnState: "accepted",
-      requestedAgentId: params.agentSelection?.agentId ?? null,
-      agentSelectionMode: params.agentSelection?.mode ?? null,
+      preferredAgentId: params.agentUse?.agentId ?? null,
+      agentUseMode: params.agentUse?.mode ?? null,
       acceptedAt: now,
       versionNo: 1,
     });
@@ -197,11 +194,11 @@ export async function acceptUserMessageTurn(params: {
         turn_sequence: turnSequence,
         trigger_type: "user_message",
         trigger_item_id: itemId,
-        ...(params.agentSelection
+        ...(params.agentUse
           ? {
-              agent_selection: {
-                mode: params.agentSelection.mode,
-                agent_id: params.agentSelection.agentId,
+              agent_use: {
+                mode: params.agentUse.mode,
+                agent_id: params.agentUse.agentId,
               },
             }
           : {}),

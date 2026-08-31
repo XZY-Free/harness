@@ -202,7 +202,7 @@ function checkAgentCallFinalization(): void {
 
 function checkAgentCallRuntimeBoundary(): void {
   const result = checkAgentCallRuntimeBoundaryGate(productionDocuments());
-  if (result.passed) pass("AgentCall durable handoff 与 Runtime 边界闭合");
+  if (result.passed) pass("AgentCall 单次派发与 Runtime 边界闭合");
   else fail(`AgentCall Runtime 边界违规：\n  ${result.failures.join("\n  ")}`);
 }
 

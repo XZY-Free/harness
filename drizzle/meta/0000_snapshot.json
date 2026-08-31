@@ -4199,15 +4199,15 @@
           "notNull": false,
           "autoincrement": false
         },
-        "requestedAgentId": {
-          "name": "requestedAgentId",
+        "preferredAgentId": {
+          "name": "preferredAgentId",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "agentSelectionMode": {
-          "name": "agentSelectionMode",
+        "agentUseMode": {
+          "name": "agentUseMode",
           "type": "varchar(32)",
           "primaryKey": false,
           "notNull": false,
@@ -4265,7 +4265,12 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraint": {}
+      "checkConstraint": {
+        "Turn_agentUse_pair_check": {
+          "name": "Turn_agentUse_pair_check",
+          "value": "((`Turn`.`preferredAgentId` IS NULL AND `Turn`.`agentUseMode` IS NULL) OR (`Turn`.`preferredAgentId` IS NOT NULL AND `Turn`.`agentUseMode` = 'preferred'))"
+        }
+      }
     },
     "DeletionRequest": {
       "name": "DeletionRequest",

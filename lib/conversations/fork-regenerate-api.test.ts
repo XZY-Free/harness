@@ -79,7 +79,11 @@ async function createThread(idempotencyKey: string): Promise<string> {
  * 避免 dispatch 异步 launch 的 Hosted 执行与本测试后续的 SELECT ... FOR UPDATE 死锁
  * （§27 只要求"调度测试"证明生产链，命令面测试无需真正执行）。
  */
-async function createTurn(threadId: string, idempotencyKey: string): Promise<string> {
+async function createTurn(
+  threadId: string,
+  idempotencyKey: string,
+  preferredAgentId?: string,
+): Promise<string> {
   const [thread] = await db.select().from(threadTable).where(eq(threadTable.id, threadId)).limit(1);
   if (!thread) throw new Error(`Thread 不存在: ${threadId}`);
 
@@ -88,6 +92,7 @@ async function createTurn(threadId: string, idempotencyKey: string): Promise<str
     threadId,
     ownerUserId: thread.ownerUserId,
     content: { text: "测试消息" },
+    agentUse: preferredAgentId ? { mode: "preferred", agentId: preferredAgentId } : undefined,
     actorId: thread.ownerUserId,
     idempotencyKey,
   });
@@ -300,7 +305,7 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
   it("成功 Regenerate completed Turn → 202 + regenerating 状态 + InvocationCommand", async () => {
     const { tenantId, agent } = await seedContext();
     const threadId = await createThread("regen-thread-001");
-    const turnId = await createTurn(threadId, "regen-turn-001");
+    const turnId = await createTurn(threadId, "regen-turn-001", agent.id);
     // 将 Turn 转换到 completed 状态
     await transitionTurn(tenantId, turnId, "running");
     await transitionTurn(tenantId, turnId, "completed");
@@ -334,6 +339,8 @@ describe("POST /api/v1/turns/{turn_id}/regenerate", () => {
     const turnRow = await getTurnRow(turnId);
     expect(turnRow?.turnState).toBe("regenerating");
     expect(turnRow?.regenerationNo).toBe(1);
+    expect(turnRow?.preferredAgentId).toBe(agent.id);
+    expect(turnRow?.agentUseMode).toBe("preferred");
 
     // 验证 DB：InvocationCommand 已创建
     const commands = await getTurnCommands(turnId);

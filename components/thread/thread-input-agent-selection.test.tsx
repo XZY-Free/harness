@@ -37,7 +37,7 @@ async function send() {
   );
 }
 describe("已有会话单轮助手选择", () => {
-  it("选择后两轮都发送 required，成功后保留选择，不写会话设置", async () => {
+  it("选择后两轮都发送 preferred directive，成功后保留选择，不写会话设置", async () => {
     render(<ThreadInput {...props} />);
     await chooseAgent();
     await send();
@@ -50,14 +50,14 @@ describe("已有会话单轮助手选择", () => {
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
     expect(JSON.parse(post[1]!.body as string)).toEqual({
       input: { type: "message", text: "年假规则" },
-      agent_selection: { mode: "required", agent_id: "hr-agent" },
+      agent_use: { mode: "preferred", agent_id: "hr-agent" },
     });
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
     fetchMock.mockClear();
     await send();
     const second = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
-    expect(JSON.parse(second[1]!.body as string).agent_selection).toEqual({
-      mode: "required",
+    expect(JSON.parse(second[1]!.body as string).agent_use).toEqual({
+      mode: "preferred",
       agent_id: "hr-agent",
     });
   });
@@ -65,14 +65,15 @@ describe("已有会话单轮助手选择", () => {
     const latestTurn = {
       id: "turn-1",
       turn_state: "completed",
-      requested_agent_id: "hr-agent",
+      preferred_agent_id: "hr-agent",
+      agent_use_mode: "preferred",
     } as ClientTurn;
     render(<ThreadInput {...props} latestTurn={latestTurn} />);
     fireEvent.click(screen.getByRole("button", { name: "人力助手" }));
     fireEvent.click(await screen.findByRole("button", { name: "不指定助手" }));
     await send();
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
-    expect(JSON.parse(post[1]!.body as string)).not.toHaveProperty("agent_selection");
+    expect(JSON.parse(post[1]!.body as string)).not.toHaveProperty("agent_use");
   });
   it("发送失败保留选择和草稿，可显式取消选择", async () => {
     rejectSend = true;

@@ -50,7 +50,7 @@ export interface InvokeRequiredAgentParams {
   parentInvocationId: string;
   threadId: string;
   turnId: string;
-  /** capability_requirements 中的 capability_id（= Agent.id）。 */
+  /** Harness 已决定执行的 agent.call 目标（= stable Agent.id）。 */
   agentId: string;
   /** 用户输入文本（A2A start message）。 */
   input: string;

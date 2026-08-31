@@ -55,7 +55,7 @@ describe("useThreadInput 既有 Thread 正式路径", () => {
     });
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({
       input: { type: "message", text: "第二轮" },
-      ...(agentId ? { agent_selection: { mode: "required", agent_id: agentId } } : {}),
+      ...(agentId ? { agent_use: { mode: "preferred", agent_id: agentId } } : {}),
     });
   });
 
@@ -72,7 +72,7 @@ describe("useThreadInput 既有 Thread 正式路径", () => {
       await result.current.send("补充", "another-agent");
     });
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/v1/threads/thread-1/pending-inputs");
-    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).not.toHaveProperty("agent_selection");
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).not.toHaveProperty("agent_use");
   });
 
   it("同一事件循环重复发送只能发出一次请求", async () => {

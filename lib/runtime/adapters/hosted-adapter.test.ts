@@ -488,164 +488,40 @@ describe("S05-C05 HostedAdapter 命令处理", () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// Batch7：required Agent capability 分支
+// Batch 1：preferred directive 不等于调用命令
 // ═══════════════════════════════════════════════════════════
 
-describe("S05-C05 HostedAdapter required Agent capability（Batch7）", () => {
-  const REQUIRED_CAPS = [
-    { capability_type: "agent" as const, capability_id: "agent-1", mode: "required" as const },
-  ];
-
-  function startWithExecutor(
-    sink: EventBatchSink,
-    executor: NonNullable<StartInvocationParams["agentCallExecutor"]>,
-    modelFn?: NonNullable<CreateHostedAdapterParams["modelFn"]>,
-  ) {
+describe("S05-C05 HostedAdapter AgentUseDirective", () => {
+  it("preferred Agent 不会自动调用 executor，基础模型仍可完成", async () => {
+    const { sink, events } = createMockSink();
+    let executorCalls = 0;
     const adapter = createHostedAdapter({
       platformEndpoint: "https://platform.internal",
       platformAuthToken: "test-token",
       eventBatchSink: sink,
-      ...(modelFn ? { modelFn } : {}),
+      modelFn: async () => "基础模型已回答",
       modelRef: "test-model",
     });
-    return {
-      adapter,
-      start: () =>
-        adapter.startInvocation({
-          invocationId: `inv-required-${randomUUID()}`,
-          threadId: "thread-required",
-          turnId: "turn-required",
-          capabilityRequirements: REQUIRED_CAPS,
-          agentCallExecutor: executor,
-          inputItems: mockInputItems("调用 Agent"),
-          gatewayEndpoints: mockGatewayEndpoints(),
-          authToken: mockAuthToken(),
-        }),
-    };
-  }
 
-  it("completed：required Agent 结果注入 modelFn → response.completed 发送", async () => {
-    const { sink, events } = createMockSink();
-    let receivedAgentResult: unknown;
-    let modelCalled = false;
-    const { adapter, start } = startWithExecutor(
-      sink,
-      async () => ({
-        outcome: "terminal" as const,
-        state: "completed" as const,
-        callId: "call-1",
-        resultText: "Agent 完成结果",
-        resultJson: { ok: true },
-      }),
-      (userMessage, ctx) => {
-        modelCalled = true;
-        receivedAgentResult = ctx.agentResult;
-        return `整合回复：${userMessage}`;
+    await adapter.startInvocation({
+      invocationId: `inv-preferred-${randomUUID()}`,
+      threadId: "thread-preferred",
+      turnId: "turn-preferred",
+      capabilityDirectives: [
+        { capability_type: "agent", capability_id: "agent-1", mode: "preferred" },
+      ],
+      agentCallExecutor: async () => {
+        executorCalls += 1;
+        throw new Error("preferred 不应直接触发 AgentCall");
       },
-    );
+      inputItems: mockInputItems("无需 Agent 的问题"),
+      gatewayEndpoints: mockGatewayEndpoints(),
+      authToken: mockAuthToken(),
+    });
 
-    await start();
     const result = await adapter.getLastLoopPromise?.();
     expect(result?.completed).toBe(true);
-    expect(modelCalled).toBe(true);
-    // required Agent completed 结果作为受信任 capability result 注入模型上下文。
-    expect(receivedAgentResult).toMatchObject({
-      callId: "call-1",
-      resultText: "Agent 完成结果",
-      resultJson: { ok: true },
-    });
-    expect(events.some((e) => e.type === "response.completed")).toBe(true);
-  });
-
-  it("failed：required Agent 失败 → execution.failed（fail closed，不调用 modelFn）", async () => {
-    const { sink, events } = createMockSink();
-    let modelCalled = false;
-    const { adapter, start } = startWithExecutor(
-      sink,
-      async () => ({
-        outcome: "terminal" as const,
-        state: "failed" as const,
-        callId: "call-fail",
-        errorCode: "AGENT_TRANSPORT_XXX",
-        errorSummary: "required Agent 调用失败",
-      }),
-      () => {
-        modelCalled = true;
-        return "";
-      },
-    );
-
-    await start();
-    const result = await adapter.getLastLoopPromise?.();
-    expect(result?.completed).toBe(false);
-    // required 无法满足 → fail closed，绝不 model-only fallback。
-    expect(modelCalled).toBe(false);
-    expect(result?.failureReason).toContain("required Agent 调用失败");
-    const failedEvent = events.find((e) => e.type === "execution.failed");
-    expect(failedEvent).toBeDefined();
-    expect(failedEvent?.payload.error_code).toBe("AGENT_TRANSPORT_XXX");
-  });
-
-  it("waiting_user：required Agent 等待用户 → user_action.requested（含 agent_call_id，不调用 modelFn）", async () => {
-    const { sink, events } = createMockSink();
-    let modelCalled = false;
-    const { adapter, start } = startWithExecutor(
-      sink,
-      async () => ({
-        outcome: "waiting_user" as const,
-        state: "waiting_user" as const,
-        callId: "call-wait",
-        taskId: "task-1",
-        contextId: "ctx-1",
-      }),
-      () => {
-        modelCalled = true;
-        return "";
-      },
-    );
-
-    await start();
-    const result = await adapter.getLastLoopPromise?.();
-    expect(result?.completed).toBe(false);
-    expect(modelCalled).toBe(false);
-    const userActionEvent = events.find((e) => e.type === "user_action.requested");
-    expect(userActionEvent).toBeDefined();
-    // resume 复用 SAME AgentCall（agent_call_id 关联）。
-    expect(userActionEvent?.payload.agent_call_id).toBe("call-wait");
-    expect(userActionEvent?.payload.request_type).toBe("input");
-    expect(result?.agentCallHandoff).toMatchObject({
-      outcome: "waiting_user",
-      callId: "call-wait",
-    });
-  });
-
-  it("pending：返回 durable child handoff，不调用 modelFn、不发 completion/failure", async () => {
-    const { sink, events } = createMockSink();
-    let modelCalled = false;
-    const { adapter, start } = startWithExecutor(
-      sink,
-      async () => ({
-        outcome: "pending" as const,
-        state: "running" as const,
-        callId: "call-running",
-      }),
-      () => {
-        modelCalled = true;
-        return "不得调用";
-      },
-    );
-
-    await start();
-    const result = await adapter.getLastLoopPromise?.();
-    expect(result?.completed).toBe(false);
-    expect(result?.failureReason).toBeUndefined();
-    expect(result?.agentCallHandoff).toEqual({
-      outcome: "pending",
-      state: "running",
-      callId: "call-running",
-    });
-    expect(modelCalled).toBe(false);
-    expect(events.some((event) => event.type === "response.completed")).toBe(false);
-    expect(events.some((event) => event.type === "execution.failed")).toBe(false);
+    expect(executorCalls).toBe(0);
+    expect(events.some((event) => event.type === "response.completed")).toBe(true);
   });
 });

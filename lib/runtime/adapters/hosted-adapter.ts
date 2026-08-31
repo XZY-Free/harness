@@ -171,13 +171,13 @@ export type TransientEventBatchSink = (params: {
 // ─── Harness Loop → AgentCall 桥接（Agent 与 Runtime Authority ）──────────
 
 /**
- * required Agent 调用结果（归一化，由 Harness Loop 消费）。
+ * AgentCall action 调用结果（归一化，由 Harness Loop 消费）。
  *
  * - terminal/completed：Agent 结果作为受信任 capability result，交给 Harness 决定最终回答。
  * - pending：AgentCall 仍 queued/running，返回 durable handoff，不调用模型 fallback。
  * - waiting_user：AgentCall 等待用户补充（A2A input-required），Harness Loop 转 parent
  *   waiting_user，resume 复用 SAME AgentCall/task/context。
- * - terminal/failed|cancelled|lost：required capability 无法满足，Harness fail closed。
+ * - terminal/failed|cancelled|lost：已提交的 agent.call 无法完成，Harness fail closed。
  */
 export type HarnessRequiredAgentResult = AgentCallDisposition;
 
@@ -202,15 +202,15 @@ export interface StartInvocationParams {
   threadId?: string | null;
   /** 会话模式 Turn id（Job 模式为 null）。 */
   turnId?: string | null;
-  /** 本轮 Harness 执行约束（capability requirements），非执行目标（Agent 与 Runtime Authority 分离）。 */
-  capabilityRequirements?: Array<{
+  /** 本 Turn 的能力使用提示；preferred 只供 Harness 决策。 */
+  capabilityDirectives?: Array<{
     capability_type: "agent";
     capability_id: string;
-    mode: "required";
+    mode: "preferred";
   }>;
   /**
-   * Harness Loop → AgentCall 桥接器（可注入；in-process 平台侧构造真实编排）。
-   * 有 required Agent 时由 Harness Loop 调用；无 required Agent 时恒不调用。
+   * Harness Loop → AgentCall 桥接器（由结构化 agent.call action 使用）。
+   * 当前协议只传递 directive，不因 preferred 自动调用。
    */
   agentCallExecutor?: AgentCallExecutor;
   /** 输入 Item 列表（来自 startInvocation 请求体 input_items）。 */
@@ -331,13 +331,13 @@ export interface HostedHarnessLoopParams {
   tenantId: string;
   threadId: string | null;
   turnId: string | null;
-  /** 本轮 Harness 执行约束（capability requirements），非执行目标。 */
-  capabilityRequirements?: Array<{
+  /** 本 Turn 的能力使用提示；preferred 只供 Harness 决策。 */
+  capabilityDirectives?: Array<{
     capability_type: "agent";
     capability_id: string;
-    mode: "required";
+    mode: "preferred";
   }>;
-  /** Harness Loop → AgentCall 桥接器（有 required Agent 时调用）。 */
+  /** Harness Loop → AgentCall action 桥接器。 */
   agentCallExecutor?: AgentCallExecutor;
   inputItems: unknown[];
   contextHandle?: string;
@@ -367,7 +367,7 @@ export interface HostedHarnessLoopResult {
   responseText: string;
   /** 真实失败时填写；pending/waiting_user 不伪装成失败。 */
   failureReason?: string;
-  /** required Agent 尚未终结时的正式 child handoff。 */
+  /** agent.call 尚未终结时的正式 child handoff。 */
   agentCallHandoff?: Extract<HarnessRequiredAgentResult, { outcome: "pending" | "waiting_user" }>;
   /** 已发送的候选事件列表。 */
   sentEvents: RuntimeCandidateEvent[];
@@ -381,9 +381,7 @@ export interface HostedModelContext {
   executionLimits?: StartInvocationRequestBody["execution_limits"];
   traceContext?: StartInvocationRequestBody["trace_context"];
   /**
-   * required Agent 的 completed 结果（受信任 capability result）。
-   * 无 required Agent 或 required Agent 未完成时为 undefined。
-   * 由 Harness Loop 在调用 modelFn 前注入，modelFn 据此生成最终整合回答。
+   * 已完成 agent.call 的受信任 observation；无此 action 时为 undefined。
    */
   agentResult?: {
     callId: string;
@@ -456,83 +454,12 @@ export class HostedHarnessLoop {
       if (!this.params.modelFn) {
         throw new Error("Hosted Runtime 未配置模型执行器");
       }
-      // ─── Agent 与 Runtime Authority：required Agent capability ─────────────
-      // Harness Loop 读取 capability_requirements；有 required Agent → 必须先调用该
-      // Agent（AgentCall → A2A），completed 后把 Agent 结果作为受信任 capability result
-      // 交给 modelFn 做最终整合。无 required Agent → 原有 model 路径。
-      const requiredAgent = this.params.capabilityRequirements?.find(
-        (r) => r.capability_type === "agent" && r.mode === "required",
-      );
-      let agentResult: HarnessRequiredAgentResult | null = null;
-      if (requiredAgent && this.params.agentCallExecutor) {
-        agentResult = await this.params.agentCallExecutor({
-          tenantId: this.params.tenantId,
-          parentInvocationId: this.params.invocationId,
-          threadId: this.params.threadId ?? "",
-          turnId: this.params.turnId ?? "",
-          agentId: requiredAgent.capability_id,
-          input: userMessage,
-        });
-        if (agentResult.outcome === "terminal" && agentResult.state !== "completed") {
-          // required capability 无法满足 → fail closed，绝不 model-only fallback。
-          await this.sendEvent(ingressClient, "execution.failed", {
-            error_code: agentResult.errorCode ?? "REQUIRED_AGENT_FAILED",
-            error_summary:
-              agentResult.errorSummary ?? "required Agent 调用失败，Harness 不降级为纯模型回答",
-          });
-          return {
-            completed: false,
-            responseText: "",
-            failureReason: agentResult.errorSummary,
-            sentEvents: this.sentEvents,
-          };
-        }
-        if (agentResult.outcome === "waiting_user") {
-          // AgentCall waiting_user → parent Harness Invocation waiting_user + 正式 UserAction。
-          await this.sendEvent(ingressClient, "user_action.requested", {
-            request_type: "input",
-            purpose: "agent_input_required",
-            input_schema: {
-              type: "object",
-              properties: { text: { type: "string", title: "补充信息" } },
-              required: ["text"],
-            },
-            agent_call_id: agentResult.callId,
-          });
-          return {
-            completed: false,
-            responseText: "",
-            agentCallHandoff: agentResult,
-            sentEvents: this.sentEvents,
-          };
-        }
-        if (agentResult.outcome === "pending") {
-          // durable child 仍运行：明确 handoff，禁止 model-only fallback 或伪造失败。
-          return {
-            completed: false,
-            responseText: "",
-            agentCallHandoff: agentResult,
-            sentEvents: this.sentEvents,
-          };
-        }
-        // terminal/completed：Agent 结果作为 capability result 交给 Harness 整合最终回答。
-      }
       const responseText = await this.params.modelFn(userMessage, {
         modelRef: this.params.modelRef ?? "unknown",
         contextHandle: this.params.contextHandle,
         workspace: this.params.workspace,
         executionLimits: this.params.executionLimits,
         traceContext: this.params.traceContext,
-        // required Agent completed 结果注入模型上下文（受信任 capability result）。
-        ...(agentResult && agentResult.outcome === "terminal" && agentResult.state === "completed"
-          ? {
-              agentResult: {
-                callId: agentResult.callId,
-                resultText: agentResult.resultText,
-                resultJson: agentResult.resultJson,
-              },
-            }
-          : {}),
         emitTextDelta: this.params.transientEventBatchSink
           ? async (delta) => {
               if (!delta) return;
@@ -779,7 +706,7 @@ export function createHostedAdapter(params: CreateHostedAdapterParams): RuntimeA
           tenantId: startParams.tenantId ?? "",
           threadId: startParams.threadId,
           turnId: startParams.turnId,
-          capabilityRequirements: startParams.capabilityRequirements,
+          capabilityDirectives: startParams.capabilityDirectives,
           agentCallExecutor: startParams.agentCallExecutor,
           inputItems: startParams.inputItems,
           contextHandle: startParams.contextHandle,

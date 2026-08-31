@@ -84,7 +84,7 @@ export function ThreadInput({
     ? (currentAgentId ?? null)
     : selection.threadId === threadId && selection.agentId !== undefined
       ? selection.agentId
-      : (latestTurn?.requested_agent_id ?? null);
+      : (latestTurn?.preferred_agent_id ?? null);
   const changeAgent = (agentId: string | null) => {
     if (onAgentChange) onAgentChange(agentId);
     else setSelection({ threadId, agentId });
