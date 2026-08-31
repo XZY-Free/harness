@@ -1,6 +1,7 @@
 import { EventSequenceGapError } from "@/lib/conversations/errors";
 import { db } from "@/lib/db/client";
 import { agentCallEventIngressTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
+import { agentTable } from "@/lib/persistence/schema/agents";
 import { invocationTable } from "@/lib/persistence/schema/executions";
 import {
   getIngressByInvocation,
@@ -47,6 +48,11 @@ export async function coordinateAgentInputRequired(
   if (!parent?.threadId || !parent.turnId) {
     throw new Error(`AgentCall ${callId} 的 Parent 缺少 Thread/Turn`);
   }
+  const [agent] = await db
+    .select({ displayName: agentTable.displayName })
+    .from(agentTable)
+    .where(and(eq(agentTable.id, call.agentId), eq(agentTable.tenantId, tenantId)))
+    .limit(1);
   const [inputEvent] = await db
     .select()
     .from(agentCallEventIngressTable)
@@ -78,6 +84,7 @@ export async function coordinateAgentInputRequired(
     prompt,
     input_schema: inputSchema,
     agent_call_id: call.id,
+    agent_display_name: agent?.displayName ?? null,
     agent_call_event_id: inputEvent.id,
     action_id: call.sourceRef,
     task_id: call.externalTaskRef,

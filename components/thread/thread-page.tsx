@@ -77,7 +77,8 @@ export function ThreadPage({
     resnapshot,
   } = useThread(threadId);
 
-  const { thread, activeGoal, latestTurn, loading, error, refresh } = useThreadDetail(threadId);
+  const { thread, activeGoal, latestTurn, turns, loading, error, refresh } =
+    useThreadDetail(threadId);
 
   // W04：Thread 默认设置 PATCH（Model / Environment）
   const { patchSettings, busy: settingsBusy } = useThreadSettings({ threadId });
@@ -280,6 +281,7 @@ export function ThreadPage({
             reconnectMax={reconnectMax}
             threadId={threadId}
             activeTurn={latestTurn}
+            turns={turns}
           />
           <TurnFailureNotice
             turnState={latestTurn?.turn_state}
@@ -319,6 +321,7 @@ export function ThreadPage({
                   showMessageLocator
                   locateItem={locateItem}
                   activeTurn={latestTurn}
+                  turns={turns}
                 />
                 <TurnFailureNotice
                   turnState={latestTurn?.turn_state}

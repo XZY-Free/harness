@@ -58,9 +58,16 @@ afterEach(() => {
 
 describe("UserActionItem input submit 主流程", () => {
   it("展示请求的问题，不把内部 purpose 当正文", () => {
-    render(<UserActionItem threadId="thread-1" item={makeInputItem()} />);
+    render(
+      <UserActionItem
+        threadId="thread-1"
+        item={makeInputItem({ agent_display_name: "人力助手" })}
+      />,
+    );
+    expect(screen.getByText("人力助手需要补充信息")).toBeTruthy();
     expect(screen.getByText("请提供请假事由")).toBeTruthy();
     expect(screen.queryByText("a2a_input_required")).toBeNull();
+    expect(screen.getByRole("button", { name: "继续同一任务" })).toBeTruthy();
   });
 
   it.each([undefined, null, "", "  ", 0, {}])(
@@ -83,7 +90,7 @@ describe("UserActionItem input submit 主流程", () => {
       />,
     );
     expect(screen.getAllByText("已提交").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "提交" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "继续同一任务" })).toBeNull();
   });
 
   it("提交使用 content.request_id（request-1）而非 item.id，body 为精确脱敏对象", async () => {
@@ -96,7 +103,7 @@ describe("UserActionItem input submit 主流程", () => {
     expect(input).toBeTruthy();
     fireEvent.change(input!, { target: { value: "年休假，明天一天" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续同一任务" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -116,7 +123,7 @@ describe("UserActionItem input submit 主流程", () => {
 
     render(<UserActionItem threadId="thread-1" item={makeInputItem()} />);
 
-    const submit = screen.getByRole("button", { name: "提交" }) as HTMLButtonElement;
+    const submit = screen.getByRole("button", { name: "继续同一任务" }) as HTMLButtonElement;
     // RED：当前实现不按 minLength:1 校验，按钮可点击且会发请求。
     expect(submit.disabled).toBe(true);
     fireEvent.click(submit);
@@ -131,7 +138,7 @@ describe("UserActionItem input submit 主流程", () => {
 
     // 不暴露裸技术键 `text`，回落到中文默认 label「补充信息」。
     expect(screen.queryByText(/^text\*?$/)).toBeNull();
-    expect(screen.getByText(/补充信息\*?/)).toBeTruthy();
+    expect(screen.getByText(/^补充信息\*?$/)).toBeTruthy();
   });
 
   it("content.request_id 缺失：fail-closed，所有按钮不可用、零网络，显示可恢复中文提示（绝不 fallback 到 item.id）", async () => {
@@ -142,7 +149,7 @@ describe("UserActionItem input submit 主流程", () => {
 
     expect(screen.getByText(/操作信息不完整/)).toBeTruthy();
 
-    const submit = screen.getByRole("button", { name: "提交" }) as HTMLButtonElement;
+    const submit = screen.getByRole("button", { name: "继续同一任务" }) as HTMLButtonElement;
     const cancel = screen.getByRole("button", { name: "取消" }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     expect(cancel.disabled).toBe(true);
@@ -158,7 +165,7 @@ describe("UserActionItem input submit 主流程", () => {
 
     render(<UserActionItem threadId="thread-1" item={makeInputItem({ request_id: "   " })} />);
 
-    const submit = screen.getByRole("button", { name: "提交" }) as HTMLButtonElement;
+    const submit = screen.getByRole("button", { name: "继续同一任务" }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     fireEvent.click(submit);
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -202,7 +209,7 @@ describe("UserActionItem input schema omitted/required 语义与 fail-closed", (
       target: { value: "年休假，明天一天" },
     });
 
-    const submit = screen.getByRole("button", { name: "提交" }) as HTMLButtonElement;
+    const submit = screen.getByRole("button", { name: "继续同一任务" }) as HTMLButtonElement;
     expect(submit.disabled).toBe(false);
     fireEvent.click(submit);
 
@@ -228,7 +235,7 @@ describe("UserActionItem input schema omitted/required 语义与 fail-closed", (
       target: { value: "  备注内容  " },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续同一任务" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
@@ -250,7 +257,7 @@ describe("UserActionItem input schema omitted/required 语义与 fail-closed", (
     });
 
     // boolean 未显式选择：必填不满足。
-    const submit = screen.getByRole("button", { name: "提交" }) as HTMLButtonElement;
+    const submit = screen.getByRole("button", { name: "继续同一任务" }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     fireEvent.click(submit);
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -287,7 +294,7 @@ describe("UserActionItem input schema omitted/required 语义与 fail-closed", (
       render(<UserActionItem threadId="thread-1" item={makeInputItem({ input_schema })} />);
 
       expect(screen.getByText(/输入定义不可用/)).toBeTruthy();
-      const submit = screen.getByRole("button", { name: "提交" }) as HTMLButtonElement;
+      const submit = screen.getByRole("button", { name: "继续同一任务" }) as HTMLButtonElement;
       const cancel = screen.getByRole("button", { name: "取消" }) as HTMLButtonElement;
       expect(submit.disabled).toBe(true);
       expect(cancel.disabled).toBe(false); // 取消只受 request_id 约束
@@ -315,7 +322,7 @@ describe("UserActionItem input schema omitted/required 语义与 fail-closed", (
       />,
     );
 
-    const submit = screen.getByRole("button", { name: "提交" }) as HTMLButtonElement;
+    const submit = screen.getByRole("button", { name: "继续同一任务" }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     fireEvent.click(submit);
     await new Promise((resolve) => setTimeout(resolve, 20));

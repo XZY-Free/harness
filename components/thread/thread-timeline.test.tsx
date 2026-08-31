@@ -1,4 +1,4 @@
-import type { ClientItem } from "@/lib/client/types";
+import type { ClientItem, ClientTurn } from "@/lib/client/types";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThreadTimeline } from "./thread-timeline";
@@ -144,5 +144,72 @@ describe("ThreadTimeline 底部锚定", () => {
     timelineScrollHeight = 1300;
     triggerResize();
     expect(timeline.scrollTop).toBe(1300);
+  });
+});
+
+describe("ThreadTimeline Agent 使用事实", () => {
+  const userItem: ClientItem = {
+    id: "user-1",
+    turn_id: "turn-1",
+    item_sequence: 1,
+    item_type: "user_message",
+    item_state: "completed",
+    content: { text: "查询我的年假余额" },
+    created_at: "2026-08-31T01:00:00.000Z",
+  };
+
+  it("偏好标签与真实 AgentCall 时间线分开显示", () => {
+    const turn = {
+      id: "turn-1",
+      agent_use: { mode: "preferred", agent_id: "hr-agent", display_name: "人力助手" },
+      actual_agent_calls: {
+        count: 1,
+        active_call_id: null,
+        last_state: "completed",
+        selected_agent_called: true,
+        selected_but_unused: false,
+        calls: [
+          {
+            call_id: "call-1",
+            parent_invocation_id: "inv-1",
+            agent_id: "hr-agent",
+            display_name: "人力助手",
+            action_id: "action-1",
+            state: "completed",
+            created_at: "2026-08-31T01:00:01.000Z",
+            started_at: "2026-08-31T01:00:01.000Z",
+            waiting_at: null,
+            finished_at: "2026-08-31T01:00:02.000Z",
+            duration_ms: 1000,
+            error_code: null,
+          },
+        ],
+      },
+    } as unknown as ClientTurn;
+
+    render(<ThreadTimeline items={[userItem]} turns={[turn]} streamStatus="open" />);
+
+    expect(screen.getByText("优先助手：人力助手")).toBeTruthy();
+    expect(screen.getByText("已收到人力助手结果")).toBeTruthy();
+  });
+
+  it("selected but unused 只显示偏好，不伪造已咨询", () => {
+    const turn = {
+      id: "turn-1",
+      agent_use: { mode: "preferred", agent_id: "hr-agent", display_name: "人力助手" },
+      actual_agent_calls: {
+        count: 0,
+        active_call_id: null,
+        last_state: null,
+        selected_agent_called: false,
+        selected_but_unused: true,
+        calls: [],
+      },
+    } as unknown as ClientTurn;
+
+    render(<ThreadTimeline items={[userItem]} turns={[turn]} streamStatus="open" />);
+
+    expect(screen.getByText("优先助手：人力助手")).toBeTruthy();
+    expect(screen.queryByText(/正在咨询|已收到.*结果/)).toBeNull();
   });
 });

@@ -12,9 +12,7 @@
  * 测试只断言「出现非空 assistant 回复」，不校验文本内容（避免脆弱断言）。
  */
 import { type Server, createServer } from "node:http";
-
-/** e2e 回复前缀，便于在服务端日志中辨认确定性回复。 */
-export const E2E_REPLY_PREFIX = "[e2e-model]";
+import { buildE2eModelReply } from "./e2e-model-response";
 
 export interface E2eModelServer {
   readonly baseUrl: string;
@@ -44,13 +42,6 @@ function lastUserText(messages: readonly ChatMessage[]): string {
     }
   }
   return "";
-}
-
-/** 由用户输入推导确定性回复。 */
-function buildReply(userText: string): string {
-  const trimmed = userText.trim();
-  if (trimmed.length === 0) return `${E2E_REPLY_PREFIX} 收到空消息。`;
-  return `${E2E_REPLY_PREFIX} 已收到你的消息：「${trimmed}」。这是 e2e 确定性回复。`;
 }
 
 /** 切分为若干 delta，模拟真实流式输出。 */
@@ -108,7 +99,7 @@ export function startE2eModelServer(port = 0): Promise<E2eModelServer> {
     void readBody(req).then((body) => {
       const messages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : [];
       const model = typeof body.model === "string" ? body.model : "e2e-deterministic";
-      const reply = buildReply(lastUserText(messages));
+      const reply = buildE2eModelReply(lastUserText(messages));
       const id = `chatcmpl-e2e-${Buffer.from(reply).length}`;
       const created = 1_700_000_000;
       console.log(`[e2e-model] 请求 model=${model} → 回复 ${reply.length} 字符`);

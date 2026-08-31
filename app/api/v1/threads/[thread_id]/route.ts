@@ -1,3 +1,8 @@
+import {
+  type TurnAgentActivityProjection,
+  emptyTurnAgentActivity,
+  loadTurnAgentActivity,
+} from "@/lib/agents/calls/application/agent-call-projection";
 import { getActiveGoalByThread } from "@/lib/conversations/goal-queries";
 /**
  * GET /api/v1/threads/{thread_id} — 查询 Thread 详情（§3.1）。
@@ -74,7 +79,11 @@ function projectGoal(goal: Goal): Record<string, unknown> {
  * 投影 Turn 为响应体（snake_case，仅最新 Turn 的摘要字段）。
  * controls由服务端按精确 Binding 派生；终态 Turn 恒 false。
  */
-function projectTurnSummary(turn: Turn, controls: TurnControls): Record<string, unknown> {
+function projectTurnSummary(
+  turn: Turn,
+  controls: TurnControls,
+  agentActivity: TurnAgentActivityProjection,
+): Record<string, unknown> {
   return {
     controls: {
       cancel_supported: controls.cancel_supported,
@@ -84,8 +93,8 @@ function projectTurnSummary(turn: Turn, controls: TurnControls): Record<string, 
     id: turn.id,
     turn_sequence: turn.turnSequence,
     trigger_type: turn.triggerType,
-    preferred_agent_id: turn.preferredAgentId,
-    agent_use_mode: turn.agentUseMode,
+    agent_use: agentActivity.agent_use,
+    actual_agent_calls: agentActivity.actual_agent_calls,
     turn_state: turn.turnState,
     active_invocation_id: turn.activeInvocationId,
     latest_invocation_id: turn.latestInvocationId,
@@ -137,11 +146,18 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const controlsByTurn = latestTurn
     ? await resolveTurnControls(principal.tenantId, [latestTurn])
     : null;
+  const agentActivityByTurn = latestTurn
+    ? await loadTurnAgentActivity(principal.tenantId, [latestTurn])
+    : null;
   const responseBody = {
     thread: projectThread(thread),
     active_goal: activeGoal ? projectGoal(activeGoal) : null,
     latest_turn: latestTurn
-      ? projectTurnSummary(latestTurn, controlsByTurn?.get(latestTurn.id) ?? TERMINAL_TURN_CONTROLS)
+      ? projectTurnSummary(
+          latestTurn,
+          controlsByTurn?.get(latestTurn.id) ?? TERMINAL_TURN_CONTROLS,
+          agentActivityByTurn?.get(latestTurn.id) ?? emptyTurnAgentActivity(),
+        )
       : null,
   };
 

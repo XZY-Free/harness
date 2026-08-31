@@ -65,6 +65,8 @@ interface UserActionContent {
   summary?: string;
   /** 面向用户的问题；purpose 是内部分类，不作为展示正文。 */
   prompt?: string;
+  /** Agent input-required 的安全目录名称。 */
+  agent_display_name?: string | null;
   resolution?: UserActionResolution;
   /** confirmation 类型：等待确认的目标文件。 */
   target_path?: string;
@@ -258,7 +260,14 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
   const clearError = userActionHook.clearError;
 
   const requestTypeLabel = getRequestTypeLabel(content.request_type);
-  const displayTitle = content.title ?? requestTypeLabel;
+  const isAgentInputRequired =
+    content.request_type === "input" && content.purpose === "a2a_input_required";
+  const agentDisplayName =
+    typeof content.agent_display_name === "string" && content.agent_display_name.trim().length > 0
+      ? content.agent_display_name.trim()
+      : "助手";
+  const displayTitle =
+    content.title ?? (isAgentInputRequired ? `${agentDisplayName}需要补充信息` : requestTypeLabel);
   const displayReason =
     [content.prompt, content.summary, content.reason].find(
       (value) => typeof value === "string" && value.trim().length > 0,
@@ -519,7 +528,7 @@ export function UserActionItem({ threadId, item }: UserActionItemProps) {
                 disabled={busy || !requestId || !inputFormValid}
                 className="flex-1 rounded-md bg-primary px-3 py-1.5 text-primary-foreground text-xs transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {busy ? "处理中…" : "提交"}
+                {busy ? "处理中…" : isAgentInputRequired ? "继续同一任务" : "提交"}
               </button>
               <button
                 type="button"

@@ -78,17 +78,37 @@ test.describe("§20.5 Desktop 正式执行链", () => {
     const agentsBody = (await agentsResponse.json()) as { items: readonly unknown[] };
     expect(agentsBody.items).toEqual([]);
 
-    // Agent selector 空态：触发按钮可点（aria-label 稳定为"助手"），打开 popover
+    // Agent selector 空态：触发按钮可点（aria-label 稳定为"优先助手"），打开 popover
     // 后必须显示权威要求的空态文案「还没有智能体」（§24.1/§25：不阻止输入，不伪造 Agent）。
-    const agentTrigger = window.getByRole("button", { name: "助手" });
+    const agentTrigger = window.getByRole("button", { name: "优先助手" });
     await expect(agentTrigger).toBeVisible({ timeout: 30_000 });
     await agentTrigger.click();
+    await expect(window.getByText("当前问题需要时优先咨询；简单问题可能直接回答。")).toBeVisible();
     await expect(window.getByText("还没有智能体")).toBeVisible({ timeout: 15_000 });
 
     // popover 打开与关闭后，消息输入框都保持 enabled（空态不阻止输入）。
     await expect(input).toBeEnabled();
     await window.keyboard.press("Escape");
     await expect(input).toBeEnabled();
+
+    // 连续调整真实 BrowserWindow 尺寸，确认 Desktop 共用的输入区没有遮挡或横向溢出。
+    for (const size of [
+      { width: 1280, height: 900 },
+      { width: 960, height: 760 },
+      { width: 720, height: 700 },
+    ]) {
+      await desktop.app.evaluate(({ BrowserWindow }, nextSize) => {
+        const mainWindow = BrowserWindow.getAllWindows()[0];
+        if (!mainWindow) throw new Error("Desktop 主窗口不存在");
+        mainWindow.setSize(nextSize.width, nextSize.height);
+      }, size);
+      await expect(agentTrigger).toBeVisible();
+      await expect(input).toBeVisible();
+      await expect(input).toBeEnabled();
+      expect(
+        await window.evaluate(() => document.documentElement.scrollWidth <= globalThis.innerWidth),
+      ).toBe(true);
+    }
 
     // ─── 2. 发送消息（创建 Thread + 首个 Turn）───────────────
     await input.fill("Desktop 端发送的第一条消息。");

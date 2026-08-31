@@ -109,6 +109,8 @@ export async function dispatchEmployeeTurn(params: {
   tenantId: string;
   threadId: string;
   turnId: string;
+  /** 入口请求关联 id；进入 Runtime trace_context，贯穿本次 Harness 执行。 */
+  correlationId?: string;
   modelRef?: string;
   decisionPort?: HarnessDecisionPort;
   finalResponsePort?: HarnessFinalResponsePort;
@@ -244,6 +246,7 @@ export async function dispatchEmployeeTurn(params: {
   const result = await dispatchInvocationForTurn({
     tenantId: params.tenantId,
     turnId: params.turnId,
+    correlationId: params.correlationId,
     selectedModelRef: params.modelRef,
     executionSubject: params.executionSubject,
     runtimeClient: transport,

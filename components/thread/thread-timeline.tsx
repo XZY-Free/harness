@@ -25,6 +25,7 @@ import type { ClientItem, ClientStreamStatus, ClientTurn } from "@/lib/client/ty
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Wifi } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { AgentCallTimelineItem } from "./items/agent-call-timeline-item";
 import { ArtifactItem } from "./items/artifact-item";
 import { AssistantMessageItem } from "./items/assistant-message-item";
 import { ChildThreadItem } from "./items/child-thread-item";
@@ -55,6 +56,8 @@ interface ThreadTimelineProps {
   readonly locateItem?: { readonly itemId: string; readonly requestId: number } | null;
   /** 最新 Turn 投影（真实运行状态反馈：非终态时时间线底部渲染运行指示）。 */
   readonly activeTurn?: ClientTurn | null;
+  /** Turn 列表：为每条用户消息关联显式偏好与真实 AgentCall。 */
+  readonly turns?: readonly ClientTurn[];
 }
 
 /**
@@ -94,12 +97,19 @@ function hasTextContent(item: ClientItem): boolean {
 }
 
 /** 单个 Item 渲染分发；外层包裹 data-item-id 供定位轴测量。 */
-function renderItem(item: ClientItem, threadId: string): React.ReactNode {
+function renderItem(item: ClientItem, threadId: string, turn?: ClientTurn): React.ReactNode {
   const inner = (() => {
     switch (item.item_type) {
       case "user_message":
       case "user_guidance":
-        return <UserMessageItem item={item} />;
+        return (
+          <>
+            <UserMessageItem item={item} agentUse={turn?.agent_use} />
+            {turn?.actual_agent_calls.calls.map((call) => (
+              <AgentCallTimelineItem key={call.call_id} call={call} />
+            ))}
+          </>
+        );
       case "assistant_message":
         return <AssistantMessageItem item={item} />;
       case "tool_call":
@@ -128,9 +138,13 @@ function renderItem(item: ClientItem, threadId: string): React.ReactNode {
 }
 
 /** 段渲染：过程段包 ProcessFold，普通段直出。 */
-function renderSegment(segment: TimelineSegment, threadId: string): React.ReactNode {
+function renderSegment(
+  segment: TimelineSegment,
+  threadId: string,
+  turnsById: ReadonlyMap<string, ClientTurn>,
+): React.ReactNode {
   if (segment.kind === "item") {
-    return renderItem(segment.item, threadId);
+    return renderItem(segment.item, threadId, turnsById.get(segment.item.turn_id));
   }
   const running = segment.items.some((i) => i.item_state === "pending");
   const first = segment.items[0];
@@ -141,7 +155,7 @@ function renderSegment(segment: TimelineSegment, threadId: string): React.ReactN
       startedAt={first?.created_at}
       endedAt={running ? undefined : last?.created_at}
     >
-      {segment.items.map((i) => renderItem(i, threadId))}
+      {segment.items.map((i) => renderItem(i, threadId, turnsById.get(i.turn_id)))}
     </ProcessFold>
   );
 }
@@ -160,6 +174,7 @@ export function ThreadTimeline({
   showMessageLocator = false,
   locateItem = null,
   activeTurn = null,
+  turns = [],
 }: ThreadTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -175,6 +190,7 @@ export function ThreadTimeline({
     );
   }, [items, showSuperseded]);
   const segments = useMemo(() => buildSegments(visibleItems), [visibleItems]);
+  const turnsById = useMemo(() => new Map(turns.map((turn) => [turn.id, turn])), [turns]);
 
   const shouldVirtualize = segments.length > VIRTUALIZATION_THRESHOLD;
   const virtualizer = useVirtualizer({
@@ -346,7 +362,7 @@ export function ThreadTimeline({
                   }}
                   className="pb-2"
                 >
-                  {renderSegment(segment, threadId)}
+                  {renderSegment(segment, threadId, turnsById)}
                 </div>
               );
             })}
@@ -354,7 +370,7 @@ export function ThreadTimeline({
         ) : (
           segments.map((segment) => (
             <div key={segmentKey(segment)} className="flex flex-col">
-              {renderSegment(segment, threadId)}
+              {renderSegment(segment, threadId, turnsById)}
             </div>
           ))
         )}

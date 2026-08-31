@@ -269,12 +269,45 @@ export interface ClientTurnControls {
   readonly steer_supported: boolean;
 }
 
+/** 用户在本 Turn 显式声明的 Agent 偏好；不代表实际发生过调用。 */
+export interface ClientAgentUse {
+  readonly mode: "preferred";
+  readonly agent_id: string;
+  readonly display_name: string | null;
+}
+
+/** 真实 AgentCall 的员工端安全摘要；不包含请求上下文、结果正文或凭证。 */
+export interface ClientAgentCallSummary {
+  readonly call_id: string;
+  readonly parent_invocation_id: string;
+  readonly agent_id: string;
+  readonly display_name: string | null;
+  readonly action_id: string | null;
+  readonly state: string;
+  readonly created_at: string;
+  readonly started_at: string | null;
+  readonly waiting_at: string | null;
+  readonly finished_at: string | null;
+  readonly duration_ms: number | null;
+  readonly error_code: string | null;
+}
+
+/** 本 Turn 实际发生的 AgentCall 集合，与 agent_use 偏好分开投影。 */
+export interface ClientActualAgentCalls {
+  readonly count: number;
+  readonly active_call_id: string | null;
+  readonly last_state: string | null;
+  readonly selected_agent_called: boolean;
+  readonly selected_but_unused: boolean;
+  readonly calls: readonly ClientAgentCallSummary[];
+}
+
 /** GET /api/v1/threads/{thread_id}/turns 返回的 Turn 投影。 */
 export interface ClientTurn {
   readonly controls: ClientTurnControls;
   readonly id: string;
-  readonly preferred_agent_id: string | null;
-  readonly agent_use_mode: "preferred" | null;
+  readonly agent_use: ClientAgentUse | null;
+  readonly actual_agent_calls: ClientActualAgentCalls;
   readonly turn_sequence: number;
   readonly trigger_type: string;
   readonly trigger_ref: string | null;

@@ -21,6 +21,8 @@ import { buildApiRequest } from "@/lib/db/test/api-fixtures";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import { revokeActionBinding } from "@/lib/identity/role-action-queries";
+import { loadHarnessExecutionTraceForAgentCall } from "@/lib/observability/harness-execution-trace";
+import { agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import { turnTable } from "@/lib/persistence/schema/conversation";
 import { idempotencyRecord } from "@/lib/persistence/schema/idempotency";
 import { seedDispatchableTurn } from "@/lib/test-support/seed-dispatchable-turn";
@@ -176,9 +178,32 @@ describe("Turn-scoped AgentUseDirective", () => {
       params,
     );
     expect(detail.status).toBe(200);
-    expect((await detail.json()).latest_turn).toMatchObject({
-      preferred_agent_id: ctx.agentId,
-      agent_use_mode: "preferred",
+    if (!turn?.latestInvocationId) throw new Error("测试要求已创建 Invocation");
+    await db.insert(agentCallTable).values({
+      id: "11111111-1111-4111-8111-111111111111",
+      tenantId: ctx.tenantId,
+      parentInvocationId: turn.latestInvocationId,
+      agentId: ctx.agentId,
+      agentRevisionId: ctx.agentRevision.id,
+      sourceType: "harness_planned",
+      sourceRef: "action-consult-agent-a",
+      state: "completed",
+      creationRequestDigest: `sha256:${"a".repeat(64)}`,
+      resultText: "已返回真实业务结果",
+      resultDigest: `sha256:${"b".repeat(64)}`,
+      startedAt: new Date("2026-08-31T01:00:00.000Z"),
+      finishedAt: new Date("2026-08-31T01:00:02.000Z"),
+      versionNo: 1,
+    });
+
+    const detailBody = await detail.json();
+    expect(detailBody.latest_turn).toMatchObject({
+      agent_use: {
+        mode: "preferred",
+        agent_id: ctx.agentId,
+        display_name: "Agent sel-agent-a",
+      },
+      actual_agent_calls: { count: 0, calls: [] },
     });
     const turns = await getTurnsGET(
       buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}/turns` }),
@@ -186,9 +211,61 @@ describe("Turn-scoped AgentUseDirective", () => {
     );
     expect(turns.status).toBe(200);
     expect((await turns.json()).turns.at(-1)).toMatchObject({
-      preferred_agent_id: ctx.agentId,
-      agent_use_mode: "preferred",
+      agent_use: {
+        mode: "preferred",
+        agent_id: ctx.agentId,
+        display_name: "Agent sel-agent-a",
+      },
+      actual_agent_calls: {
+        count: 1,
+        active_call_id: null,
+        last_state: "completed",
+        selected_agent_called: true,
+        selected_but_unused: false,
+        calls: [
+          {
+            call_id: "11111111-1111-4111-8111-111111111111",
+            agent_id: ctx.agentId,
+            display_name: "Agent sel-agent-a",
+            action_id: "action-consult-agent-a",
+            state: "completed",
+            duration_ms: 2000,
+          },
+        ],
+      },
     });
+    expect(
+      (
+        await getThreadGET(
+          buildApiRequest({ audience: "employee", method: "GET", path: `/threads/${threadId}` }),
+          params,
+        ).then((response) => response.json())
+      ).latest_turn.actual_agent_calls.count,
+    ).toBe(1);
+
+    const trace = await loadHarnessExecutionTraceForAgentCall(
+      ctx.tenantId,
+      "11111111-1111-4111-8111-111111111111",
+    );
+    expect(trace).toMatchObject({
+      trace_id: expect.any(String),
+      turn: {
+        turn_id: turn.id,
+        agent_use: { mode: "preferred", agent_id: ctx.agentId, source: "user_selected" },
+      },
+      parent_invocation: { invocation_id: turn.latestInvocationId },
+      agent_calls: [
+        {
+          call_id: "11111111-1111-4111-8111-111111111111",
+          parent_invocation_id: turn.latestInvocationId,
+          action_id: "action-consult-agent-a",
+          state: "completed",
+        },
+      ],
+    });
+    expect(JSON.stringify(trace)).not.toMatch(
+      /已返回真实业务结果|credential|hidden_prompt|chain_of_thought/i,
+    );
 
     // 调度走 Agent Route：Binding 存在（专题01 冻结架构：ExecutionBinding 不再携带 Agent 证据字段）。
     expect(turn?.latestInvocationId).toBeTruthy();

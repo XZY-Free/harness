@@ -109,17 +109,29 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
   const agentsBody = (await agentsResponse.json()) as { items: readonly unknown[] };
   expect(agentsBody.items).toEqual([]);
 
-  // Agent selector 空态：触发按钮可点（aria-label 稳定为"助手"），打开 popover
+  // Agent selector 空态：触发按钮可点（文案明确是偏好而非接管），打开 popover
   // 后必须显示权威要求的空态文案「还没有智能体」（§24.1/§25：不阻止输入，不伪造 Agent）。
-  const agentTrigger = page.getByRole("button", { name: "助手" });
+  const agentTrigger = page.getByRole("button", { name: "优先助手" });
   await expect(agentTrigger).toBeVisible({ timeout: 30_000 });
   await agentTrigger.click();
+  await expect(page.getByText("当前问题需要时优先咨询；简单问题可能直接回答。")).toBeVisible();
   await expect(page.getByText("还没有智能体")).toBeVisible({ timeout: 15_000 });
 
   // popover 打开与关闭后，消息输入框都保持 enabled（空态不阻止输入）。
   await expect(input).toBeEnabled();
   await page.keyboard.press("Escape");
   await expect(input).toBeEnabled();
+
+  // 连续 resize：选择器与输入框始终可见可操作，页面不产生横向溢出。
+  for (const width of [1280, 960, 720, 390]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(agentTrigger).toBeVisible();
+    await expect(input).toBeEnabled();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `${width}px 不应出现页面级横向溢出`,
+    ).toBe(true);
+  }
 
   // ─── 2. 发送首条消息（同时创建 Thread + 首个 Turn）──────
   await input.fill("请用一句话介绍 SnowHarness。");
@@ -274,16 +286,29 @@ test("Web 正式执行链：创建 Thread → Turn → Invocation → ExecutionB
     expect(event.turn_id).toBe(turnId);
   }
 
-  const assistantItemEvent = invocationEvents.find(
-    (event) =>
-      event.event_type === "item.created" &&
-      event.payload_json?.item_type === "assistant_message" &&
-      event.payload_json?.source === "response.completed",
-  );
-  expect(
-    assistantItemEvent,
-    "必须存在 assistant_message 落地（response.completed）运行时事件",
-  ).toBeTruthy();
+  // 浏览器可先收到 transient delta 并渲染正文，response.completed 的持久映射稍后收敛；
+  // 因此与 Invocation 终态一样轮询正式事件，不能用单次快照制造竞态。
+  let assistantItemEvent: ThreadEventItem | undefined;
+  await expect
+    .poll(
+      async () => {
+        const pollResponse = await request.get(`${ADMIN_BASE}/threads/${threadId}/events`);
+        if (pollResponse.status() !== 200) return false;
+        const pollBody = (await pollResponse.json()) as ThreadEventsResponse;
+        assistantItemEvent = pollBody.items.find(
+          (event) =>
+            event.invocation_id === invocationId &&
+            event.turn_id === turnId &&
+            event.event_type === "item.created" &&
+            event.payload_json?.item_type === "assistant_message" &&
+            event.payload_json?.source === "response.completed",
+        );
+        return assistantItemEvent !== undefined;
+      },
+      { timeout: 30_000, intervals: [250, 500, 1000, 2000] },
+    )
+    .toBe(true);
+  expect(assistantItemEvent, "必须存在 assistant_message 落地事件").toBeTruthy();
   expect(assistantItemEvent?.item_id).toMatch(UUID_PATTERN);
 
   // 冻结架构（专题01）：invocation.completed 由 execution.completed 独立 Authority 异步写入

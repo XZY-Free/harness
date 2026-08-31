@@ -1,4 +1,9 @@
 import {
+  type TurnAgentActivityProjection,
+  emptyTurnAgentActivity,
+  loadTurnAgentActivity,
+} from "@/lib/agents/calls/application/agent-call-projection";
+import {
   type Principal,
   conversationErrorToResponse,
   employeeAuthErrorResponse,
@@ -204,32 +209,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       correlationId: requestId,
     });
 
-    // 8. 构造响应（turn + input_item + event_cursor）
-    const lastEvent = result.events[result.events.length - 1];
-    const responseBody = {
-      turn: {
-        id: result.turn.id,
-        thread_id: result.turn.threadId,
-        turn_sequence: result.turn.turnSequence,
-        trigger_type: result.turn.triggerType,
-        turn_state: result.turn.turnState,
-      },
-      input_item: {
-        id: result.item.id,
-        item_type: result.item.itemType,
-        item_sequence: result.item.itemSequence,
-        item_state: result.item.itemState,
-      },
-      event_cursor: {
-        sequence: lastEvent?.eventSequence ?? result.thread.lastEventSequence,
-        event_id: lastEvent?.id ?? null,
-      },
-    };
-
     const dispatch = await dispatchEmployeeTurn({
       tenantId: principal.tenantId,
       threadId,
       turnId: result.turn.id,
+      correlationId: requestId,
       modelRef: body.selected_model,
       // ExecutionSubject：服务端从认证 Principal 生成，禁止 caller 自报。
       executionSubject: {
@@ -248,6 +232,33 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         reason: dispatch.reason ?? "no_effective_route",
       });
     }
+
+    // 8. 构造响应（Turn directive 与真实 AgentCall 分开投影）。调度是异步的，
+    // 因此这里只返回响应生成时已经持久化的真实调用，不预判后续 Harness 行动。
+    const agentActivityByTurn = await loadTurnAgentActivity(principal.tenantId, [result.turn]);
+    const agentActivity = agentActivityByTurn.get(result.turn.id) ?? emptyTurnAgentActivity();
+    const lastEvent = result.events[result.events.length - 1];
+    const responseBody = {
+      turn: {
+        id: result.turn.id,
+        thread_id: result.turn.threadId,
+        turn_sequence: result.turn.turnSequence,
+        trigger_type: result.turn.triggerType,
+        turn_state: result.turn.turnState,
+        agent_use: agentActivity.agent_use,
+        actual_agent_calls: agentActivity.actual_agent_calls,
+      },
+      input_item: {
+        id: result.item.id,
+        item_type: result.item.itemType,
+        item_sequence: result.item.itemSequence,
+        item_state: result.item.itemState,
+      },
+      event_cursor: {
+        sequence: lastEvent?.eventSequence ?? result.thread.lastEventSequence,
+        event_id: lastEvent?.id ?? null,
+      },
+    };
 
     await completeRecord({
       recordId,
@@ -289,6 +300,7 @@ function projectTurn(
     resume_supported: false,
     steer_supported: false,
   },
+  agentActivity: TurnAgentActivityProjection = emptyTurnAgentActivity(),
 ): Record<string, unknown> {
   return {
     controls: {
@@ -299,8 +311,8 @@ function projectTurn(
     id: turn.id,
     turn_sequence: turn.turnSequence,
     trigger_type: turn.triggerType,
-    preferred_agent_id: turn.preferredAgentId,
-    agent_use_mode: turn.agentUseMode,
+    agent_use: agentActivity.agent_use,
+    actual_agent_calls: agentActivity.actual_agent_calls,
     trigger_ref: turn.triggerRef,
     trigger_item_id: turn.triggerItemId,
     turn_state: turn.turnState,
@@ -365,8 +377,11 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   // 5. 解析 Turn controls（服务端 Binding 派生，05 §9）并返回列表（按 turn_sequence 升序）
   const visibleTurns = turns.slice(0, limit);
   const controlsByTurn = await resolveTurnControls(principal.tenantId, visibleTurns);
+  const agentActivityByTurn = await loadTurnAgentActivity(principal.tenantId, visibleTurns);
   const responseBody = {
-    turns: visibleTurns.map((turn) => projectTurn(turn, controlsByTurn.get(turn.id))),
+    turns: visibleTurns.map((turn) =>
+      projectTurn(turn, controlsByTurn.get(turn.id), agentActivityByTurn.get(turn.id)),
+    ),
   };
 
   return apiSuccess(responseBody, {

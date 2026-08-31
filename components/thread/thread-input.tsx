@@ -74,7 +74,8 @@ export function ThreadInput({
   currentModelRef,
   defaultModelRef,
 }: ThreadInputProps) {
-  // 保留用户选择；重新进入会话时使用上一轮明确选择，不建立 Thread 默认绑定。
+  // 选择器只做客户端预填；每次发送仍把当前选择显式写入新 Turn，
+  // null 表示本 Turn 不带 directive，不建立 Thread 默认绑定。
   // undefined 表示尚未手动选择，null 表示用户明确选择“不指定助手”。
   const [selection, setSelection] = useState<{ threadId: string | null; agentId?: string | null }>({
     threadId,
@@ -84,7 +85,7 @@ export function ThreadInput({
     ? (currentAgentId ?? null)
     : selection.threadId === threadId && selection.agentId !== undefined
       ? selection.agentId
-      : (latestTurn?.preferred_agent_id ?? null);
+      : (latestTurn?.agent_use?.agent_id ?? null);
   const changeAgent = (agentId: string | null) => {
     if (onAgentChange) onAgentChange(agentId);
     else setSelection({ threadId, agentId });

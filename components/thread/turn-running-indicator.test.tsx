@@ -17,8 +17,15 @@ function makeTurn(state: string, overrides: Partial<ClientTurn> = {}): ClientTur
   return {
     controls: { cancel_supported: false, resume_supported: false, steer_supported: false },
     id: "turn-1",
-    preferred_agent_id: null,
-    agent_use_mode: null,
+    agent_use: null,
+    actual_agent_calls: {
+      count: 0,
+      active_call_id: null,
+      last_state: null,
+      selected_agent_called: false,
+      selected_but_unused: false,
+      calls: [],
+    },
     turn_sequence: 1,
     trigger_type: "user_message",
     trigger_ref: null,

@@ -24,7 +24,7 @@ afterEach(() => {
 });
 const props = { threadId: "thread-1", latestTurn: null, availableAgents: agents };
 async function chooseAgent() {
-  fireEvent.click(screen.getByRole("button", { name: "助手" }));
+  fireEvent.click(screen.getByRole("button", { name: "优先助手" }));
   fireEvent.click(await screen.findByRole("button", { name: "人力助手" }));
 }
 async function send() {
@@ -65,8 +65,7 @@ describe("已有会话单轮助手选择", () => {
     const latestTurn = {
       id: "turn-1",
       turn_state: "completed",
-      preferred_agent_id: "hr-agent",
-      agent_use_mode: "preferred",
+      agent_use: { mode: "preferred", agent_id: "hr-agent", display_name: "人力助手" },
     } as ClientTurn;
     render(<ThreadInput {...props} latestTurn={latestTurn} />);
     fireEvent.click(screen.getByRole("button", { name: "人力助手" }));
@@ -86,15 +85,15 @@ describe("已有会话单轮助手选择", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "人力助手" }));
     fireEvent.click(await screen.findByRole("button", { name: "不指定助手" }));
-    expect(screen.getByRole("button", { name: "助手" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "优先助手" })).toBeTruthy();
   });
   it("切换会话不会继承未发送的助手选择", async () => {
     const { rerender } = render(<ThreadInput {...props} />);
     await chooseAgent();
     rerender(<ThreadInput {...props} threadId="thread-2" />);
-    expect(screen.getByRole("button", { name: "助手" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "优先助手" })).toBeTruthy();
     rerender(<ThreadInput {...props} />);
-    expect(screen.getByRole("button", { name: "助手" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "优先助手" })).toBeTruthy();
   });
   it.each(["running", "waiting_user"] as const)(
     "%s 时不可重选当前任务的助手且无 Stop",
@@ -113,7 +112,7 @@ describe("已有会话单轮助手选择", () => {
           />,
         );
       });
-      expect((screen.getByRole("button", { name: "助手" }) as HTMLButtonElement).disabled).toBe(
+      expect((screen.getByRole("button", { name: "优先助手" }) as HTMLButtonElement).disabled).toBe(
         true,
       );
       expect(screen.queryByRole("button", { name: "停止任务" })).toBeNull();
