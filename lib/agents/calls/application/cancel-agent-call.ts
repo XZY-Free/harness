@@ -18,8 +18,10 @@ import { agentCallStore } from "@/lib/agents/calls/application/agent-call-events
 import { synthesizeAgentCallTerminalEvent } from "@/lib/agents/calls/application/agent-call-events-common";
 import type { AgentCall } from "@/lib/agents/calls/domain/agent-call";
 import { assertAgentCallTransition } from "@/lib/agents/calls/domain/agent-call";
+import { AgentCallStateConcurrencyError } from "@/lib/agents/calls/persistence/mysql-agent-call-store";
 import {
   createAgentCallTransport,
+  loadAgentCallContract,
   resolveAgentCallOutboundAuth,
 } from "@/lib/agents/calls/transport/agent-call-transport-factory";
 import { AgentTransportError } from "@/lib/agents/calls/transport/agent-transport";
@@ -28,6 +30,11 @@ import { AgentTransportError } from "@/lib/agents/calls/transport/agent-transpor
 export interface CancelAgentCallCommand {
   tenantId: string;
   callId: string;
+}
+
+export interface CancelAgentCallResult {
+  call: AgentCall;
+  remoteCancellation: "cancelled" | "unsupported" | "failed" | "already_terminal";
 }
 
 /** cancel 失败类别（路由据此映射稳定错误响应）。 */
@@ -54,7 +61,9 @@ const CANCELLABLE_STATES = new Set(["running", "waiting_user"]);
  * 幂等：
  * - call 已 cancelled / 其它终态 → 返回既有 call（不重复 outbound）。
  */
-export async function cancelAgentCall(command: CancelAgentCallCommand): Promise<AgentCall> {
+export async function cancelAgentCall(
+  command: CancelAgentCallCommand,
+): Promise<CancelAgentCallResult> {
   const { tenantId, callId } = command;
 
   // 1. tenant-scoped 加载 existing call + exact binding。
@@ -64,7 +73,7 @@ export async function cancelAgentCall(command: CancelAgentCallCommand): Promise<
   if (!binding) throw new AgentCallCancelError("AgentCallBinding 不存在", "binding_not_found");
 
   // 2. 状态校验：只允许 running / waiting_user 取消；已终态幂等返回。
-  if (isTerminal(call.state)) return call;
+  if (isTerminal(call.state)) return { call, remoteCancellation: "already_terminal" };
   if (!CANCELLABLE_STATES.has(call.state)) {
     throw new AgentCallCancelError(
       `AgentCall 当前状态 ${call.state} 不可取消（期望 running/waiting_user）`,
@@ -72,30 +81,36 @@ export async function cancelAgentCall(command: CancelAgentCallCommand): Promise<
     );
   }
 
-  // 3. cancel 需要 A2A taskId（externalTaskRef）。
+  // 3. exact frozen Contract cancel=false：不发伪取消，保留 active child 真值。
+  const { capabilities } = await loadAgentCallContract(tenantId, callId, {
+    agentContractSnapshotId: binding.agentContractSnapshotId,
+    agentContractDigest: binding.agentContractDigest,
+    agentCapabilityDigest: binding.agentCapabilityDigest,
+    agentContextDigest: binding.agentContextDigest,
+  });
+  if (!capabilities.cancel) {
+    return { call, remoteCancellation: "unsupported" };
+  }
+
+  // 4. cancel 需要 A2A taskId（externalTaskRef）。
   const taskId = call.externalTaskRef;
   if (!taskId) {
     throw new AgentCallCancelError("AgentCall 缺少 externalTaskRef，无法取消", "context_missing");
   }
 
-  // 4. 只按 binding 冻结解析出站凭证。
+  // 5. 只按 binding 冻结解析出站凭证。
   const auth = await resolveAgentCallOutboundAuth(tenantId, binding);
 
-  // 5. 构造 transport（cancel 不涉及 context/capabilities；事件走 AgentCallEventIngress）。
+  // 6. 构造 transport，能力完全来自冻结 Contract。
   const transport = createAgentCallTransport({
     callId,
     tenantId,
-    capabilities: {
-      cancel: true,
-      resume: false,
-      streamingTransport: false,
-      inputRequired: false,
-    },
+    capabilities,
     eventSink: async () => {},
     streamTimeoutMs: 60_000,
   });
 
-  // 6. cancelCall（A2A tasks/cancel）；失败归一化为子域 call.failed，parent 不变。
+  // 7. cancelCall（A2A tasks/cancel）；失败归一化为子域 call.failed，parent 不变。
   try {
     await transport.cancelCall({
       callId,
@@ -114,20 +129,39 @@ export async function cancelAgentCall(command: CancelAgentCallCommand): Promise<
     throw new AgentCallCancelError(summary, "transport");
   }
 
-  // 7. 状态转移 → cancelled（domain 校验）。
-  assertAgentCallTransition(callId, call.state, "cancelled");
-  await agentCallStore.updateState({
-    callId,
-    tenantId,
-    from: call.state,
-    to: "cancelled",
-    now: new Date(),
-    lifecycle: { finishedAt: new Date() },
-  });
+  // 8. 远端 cancel ack 可能已由原 stream 先写 cancelled；先回读吸收并发终态。
+  const afterTransport = await agentCallStore.getById({ callId, tenantId });
+  if (!afterTransport) throw new AgentCallCancelError("AgentCall 读取失败", "call_not_found");
+  if (afterTransport.state === "cancelled") {
+    return { call: afterTransport, remoteCancellation: "cancelled" };
+  }
+  if (isTerminal(afterTransport.state)) {
+    return { call: afterTransport, remoteCancellation: "already_terminal" };
+  }
+
+  // 9. 无回传事件的协议 ack：由 cancel 应用 Authority 转为 cancelled。
+  assertAgentCallTransition(callId, afterTransport.state, "cancelled");
+  try {
+    await agentCallStore.updateState({
+      callId,
+      tenantId,
+      from: afterTransport.state,
+      to: "cancelled",
+      now: new Date(),
+      lifecycle: { finishedAt: new Date() },
+    });
+  } catch (error) {
+    if (!(error instanceof AgentCallStateConcurrencyError)) throw error;
+    const raced = await agentCallStore.getById({ callId, tenantId });
+    if (raced?.state === "cancelled") {
+      return { call: raced, remoteCancellation: "cancelled" };
+    }
+    throw error;
+  }
 
   const updated = await agentCallStore.getById({ callId, tenantId });
   if (!updated) throw new AgentCallCancelError("AgentCall 读取失败", "call_not_found");
-  return updated;
+  return { call: updated, remoteCancellation: "cancelled" };
 }
 
 function isTerminal(state: string): boolean {

@@ -270,6 +270,12 @@ describe("resolveGenericUserAction input submit（authority payload）", () => {
       .where(eq(invocationTable.id, seeded.invocationId))
       .limit(1);
     expect(invRow?.executionState).toBe("running");
+    const [turnRow] = await db
+      .select()
+      .from(turnTable)
+      .where(eq(turnTable.id, seeded.turnId))
+      .limit(1);
+    expect(turnRow?.turnState).toBe("running");
 
     // 冻结断言：queued resume 命令必须携带精确 resume_payload 对象（非仅 has_response）
     // + 内部来源标记（post-authority Resume 凭证）。

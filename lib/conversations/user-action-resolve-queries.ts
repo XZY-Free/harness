@@ -51,6 +51,7 @@ import {
   invocationCommandTable,
   threadItemTable,
   threadTable,
+  turnTable,
 } from "@/lib/persistence/schema/conversation";
 import { type Invocation, invocationTable } from "@/lib/persistence/schema/executions";
 import {
@@ -61,7 +62,7 @@ import {
 } from "@/lib/persistence/schema/user-action-request";
 import { updateInvocationState } from "@/lib/runtime/invocation-queries";
 import Ajv, { type ValidateFunction } from "ajv";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 /**
  * input+submit：按 UAR.inputSchemaJson 真实 JSON Schema 校验响应（required/type/
@@ -395,6 +396,24 @@ export async function resolveGenericUserAction(
       "running",
     );
 
+    const turnUpdate = await tx
+      .update(turnTable)
+      .set({
+        turnState: "running",
+        activeInvocationId: invocation.id,
+        versionNo: sql`${turnTable.versionNo} + 1`,
+      })
+      .where(
+        and(
+          eq(turnTable.id, request.turnId),
+          eq(turnTable.threadId, request.threadId),
+          eq(turnTable.turnState, "waiting_user"),
+        ),
+      );
+    if (turnUpdate[0].affectedRows !== 1) {
+      throw new UserActionStateError(`Turn ${request.turnId} 不是可恢复的 waiting_user 状态`);
+    }
+
     // 7. UPDATE Thread: lastActivityAt + versionNo 递增
     await tx
       .update(threadTable)
@@ -440,6 +459,7 @@ export async function resolveGenericUserAction(
       resumed_by: params.resolvedBy,
       ...(grantId ? { grant_id: grantId } : {}),
       ...(params.responseRedactedJson ? { has_response: true } : {}),
+      ...agentCallResumeRefs(request.promptJson),
       // input+submit：精确脱敏响应对象 + 内部来源标记（post-authority Resume 凭证，
       // 其他类型不发明 resume_payload）。
       ...(request.requestType === "input" && params.resolution === "submit"
@@ -509,4 +529,16 @@ export async function resolveGenericUserAction(
   });
 
   return result;
+}
+
+function agentCallResumeRefs(promptJson: unknown): Record<string, string> {
+  if (!promptJson || typeof promptJson !== "object" || Array.isArray(promptJson)) return {};
+  const prompt = promptJson as Record<string, unknown>;
+  const fields = ["agent_call_id", "agent_call_event_id", "action_id", "task_id", "context_id"];
+  const refs: Record<string, string> = {};
+  for (const field of fields) {
+    const value = prompt[field];
+    if (typeof value === "string" && value) refs[field] = value;
+  }
+  return refs.agent_call_id ? refs : {};
 }

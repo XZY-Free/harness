@@ -67,9 +67,17 @@ export async function POST(request: Request): Promise<Response> {
 
   // 3. cancel（只改 AgentCall 子域终态，parent 由 Harness cancel authority 收口）。
   try {
-    const updated = await cancelAgentCall({ tenantId: claims.tenantId, callId });
+    const result = await cancelAgentCall({ tenantId: claims.tenantId, callId });
     return apiSuccess(
-      { call_id: callId, state: updated.state },
+      {
+        call_id: callId,
+        state: result.call.state,
+        remote_cancellation: result.remoteCancellation,
+        remote_may_continue:
+          result.remoteCancellation === "unsupported" ||
+          result.remoteCancellation === "failed" ||
+          result.call.state === "lost",
+      },
       { headers: { [REQUEST_ID_HEADER]: requestId } },
     );
   } catch (err) {

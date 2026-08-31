@@ -144,6 +144,21 @@ export function createMysqlAgentCallStore(
       return row ? toAgentCall(row) : null;
     },
 
+    getByLogicalCallKey: async ({ parentInvocationId, tenantId, logicalCallKey }) => {
+      const [row] = await db
+        .select()
+        .from(agentCallTable)
+        .where(
+          and(
+            eq(agentCallTable.parentInvocationId, parentInvocationId),
+            eq(agentCallTable.tenantId, tenantId),
+            eq(agentCallTable.logicalCallKey, logicalCallKey),
+          ),
+        )
+        .limit(1);
+      return row ? toAgentCall(row) : null;
+    },
+
     getBinding: async ({ callId, tenantId }) => {
       const [row] = await db
         .select()
@@ -521,7 +536,6 @@ function toAttempt(row: typeof agentCallAttemptTable.$inferSelect): AgentCallAtt
     tenantId: row.tenantId,
     attemptNo: row.attemptNo,
     attemptState: row.attemptState,
-    externalTaskRef: row.externalTaskRef,
     dispatchAttemptCount: row.dispatchAttemptCount,
     retryReasonCode: row.retryReasonCode,
     requestDigest: row.requestDigest,

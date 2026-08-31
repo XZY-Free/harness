@@ -215,7 +215,7 @@ export type AgentCallAttemptState = (typeof AGENT_CALL_ATTEMPT_STATES)[number];
  * 关键约束：
  * - UNIQUE(callId, attemptNo) 保证 Attempt 编号唯一。
  * - dispatchAttemptCount 记录该 Attempt 对远端累计 outbound 次数（防重复 outbound）。
- * - externalTaskRef 为 A2A taskId。
+ * - A2A taskId 由 AgentCall.externalTaskRef 唯一持有，Attempt 不复制 Authority。
  */
 export const agentCallAttemptTable = mysqlTable(
   "AgentCallAttempt",
@@ -231,7 +231,6 @@ export const agentCallAttemptTable = mysqlTable(
     /** 1 表示第一次尝试。 */
     attemptNo: int("attemptNo").notNull(),
     attemptState: mysqlEnum("attemptState", AGENT_CALL_ATTEMPT_STATES).notNull().default("queued"),
-    externalTaskRef: varchar("externalTaskRef", { length: 256 }),
     /** 该 Attempt 累计 outbound 次数。 */
     dispatchAttemptCount: int("dispatchAttemptCount").notNull().default(0),
     retryReasonCode: varchar("retryReasonCode", { length: 64 }),

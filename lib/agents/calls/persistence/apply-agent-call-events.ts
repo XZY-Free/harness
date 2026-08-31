@@ -354,24 +354,30 @@ export async function applyAgentCallEvents(
           versionNo: lock.versionNo + 1,
         })
         .where(eq(agentCallTable.id, input.callId));
-      await updateAttempt(
-        tx,
-        input.callId,
-        input.tenantId,
-        "completed",
-        externalTaskRef,
-        null,
-        null,
-      );
+      await updateAttempt(tx, input.callId, input.tenantId, "completed", null, null);
       await markMapped(tx, input.callId, input.tenantId, p.e.producer_event_id);
       continue;
     }
 
     if (p.type === "call.input_required") {
+      if (p.taskId && externalTaskRef === null) {
+        if (!p.contextId) {
+          throw new Error("call.input_required 缺少 contextId，无法建立 AgentCall 会话");
+        }
+        externalTaskRef = p.taskId;
+        externalContextRef = p.contextId;
+        await ensureSession(tx, lock, input.tenantId, lock.parentThreadId, p.contextId);
+      }
       state = "waiting_user";
       await tx
         .update(agentCallTable)
-        .set({ state, waitingAt: new Date(), versionNo: lock.versionNo + 1 })
+        .set({
+          state,
+          externalTaskRef,
+          externalContextRef,
+          waitingAt: new Date(),
+          versionNo: lock.versionNo + 1,
+        })
         .where(eq(agentCallTable.id, input.callId));
       await markMapped(tx, input.callId, input.tenantId, p.e.producer_event_id);
       continue;
@@ -398,15 +404,7 @@ export async function applyAgentCallEvents(
         versionNo: lock.versionNo + 1,
       })
       .where(eq(agentCallTable.id, input.callId));
-    await updateAttempt(
-      tx,
-      input.callId,
-      input.tenantId,
-      terminalState,
-      externalTaskRef,
-      errorCode,
-      errorSummary,
-    );
+    await updateAttempt(tx, input.callId, input.tenantId, terminalState, errorCode, errorSummary);
     await markMapped(tx, input.callId, input.tenantId, p.e.producer_event_id);
   }
 
@@ -418,7 +416,6 @@ async function updateAttempt(
   callId: string,
   tenantId: string,
   attemptState: string,
-  externalTaskRef: string | null,
   errorCode: string | null,
   errorSummary: string | null,
 ): Promise<void> {
@@ -432,8 +429,6 @@ async function updateAttempt(
     .limit(1);
   if (!attempt) return;
   const updates: Record<string, unknown> = { attemptState, updatedAt: new Date() };
-  if (externalTaskRef !== undefined && externalTaskRef !== null)
-    updates.externalTaskRef = externalTaskRef;
   if (
     attemptState === "completed" ||
     attemptState === "failed" ||

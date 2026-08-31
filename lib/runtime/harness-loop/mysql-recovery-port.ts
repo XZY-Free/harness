@@ -12,10 +12,13 @@ export function createMySqlHarnessLoopRecoveryPort(tenantId: string): HarnessLoo
   return {
     async load(invocationId): Promise<HarnessLoopRecoverySnapshot> {
       const invocation = await getInvocationById(tenantId, invocationId);
-      if (!invocation || invocation.executionState !== "running") {
+      if (
+        !invocation ||
+        (invocation.executionState !== "running" && invocation.executionState !== "waiting_user")
+      ) {
         throw new HarnessLoopError(
           "HARNESS_LOOP_STATE_RECOVERY_FAILED",
-          `无法从 running Invocation 恢复 Harness Loop：${invocationId}`,
+          `无法从 active Invocation 恢复 Harness Loop：${invocationId}`,
         );
       }
       const ingress = await getIngressByInvocation(tenantId, invocationId, { limit: 500 });
@@ -76,7 +79,7 @@ export function createMySqlHarnessLoopRecoveryPort(tenantId: string): HarnessLoo
       }
       const actionHistory = [...historyByActionId.values()].sort((a, b) => a.stepNo - b.stepNo);
       return {
-        invocationState: "running",
+        invocationState: invocation.executionState,
         nextProducerSequence: Math.max(0, ...ingress.map((row) => row.producerSequence)) + 1,
         actionHistory,
         observations: actionHistory.flatMap((entry) =>

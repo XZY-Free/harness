@@ -1,3 +1,4 @@
+import { resumeAgentCallFromUserAction } from "@/lib/agents/calls/application/resume-agent-call-from-user-action";
 import {
   type Principal,
   conversationErrorToResponse,
@@ -65,6 +66,7 @@ import type { UserActionResolution } from "@/lib/persistence/schema/user-action-
 import { dispatchResumeCommandToRuntime } from "@/lib/runtime/command-dispatch-gateway";
 import { InvocationAlreadyTerminalError } from "@/lib/runtime/errors";
 import { markInvocationLost } from "@/lib/runtime/recovery-queries";
+import { executionSubjectFromUserIdentity } from "@/lib/runtime/transport/execution-subject";
 import { and, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -322,6 +324,19 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       });
     }
 
+    const agentResume =
+      body.resolution === "submit"
+        ? await resumeAgentCallFromUserAction({
+            tenantId: principal.tenantId,
+            request: result.request,
+            responseRedactedJson: body.response_redacted,
+            executionSubject: executionSubjectFromUserIdentity(
+              principal.tenantId,
+              principal.userIdentityId,
+            ),
+          })
+        : { resumed: false as const };
+
     const responseBody = {
       thread_id: result.thread.id,
       request_id: result.request.id,
@@ -334,6 +349,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       resume_command_id: result.resumeCommand.id,
       // 唯一 Authority 是真实 Gateway/Command 结果（resume_dispatch）。
       resume_dispatch: resumeDispatch,
+      ...(agentResume.resumed
+        ? { agent_call_resume: { call_id: agentResume.callId, state: agentResume.state } }
+        : {}),
       ...(result.grantId ? { grant_id: result.grantId } : {}),
       event_ids: result.events.map((e) => e.id),
     };

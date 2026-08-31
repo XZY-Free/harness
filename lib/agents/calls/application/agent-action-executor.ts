@@ -14,7 +14,9 @@ import {
   RequiredContextUnavailableError,
 } from "@/lib/context/enrichment/build-invocation-context-bundle";
 import { OutboundCredentialError } from "@/lib/identity/resolve-outbound-credential";
+import { logger } from "@/lib/logger";
 import type { RouteResolver } from "@/lib/routes/application/resolve-route";
+import { coordinateAgentInputRequired } from "@/lib/runtime/harness-loop/coordinate-agent-input-required";
 import type { HarnessActionExecutors } from "@/lib/runtime/harness-loop/loop";
 import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 
@@ -50,24 +52,39 @@ export function createAgentActionExecutor(
     }
 
     try {
-      const resolved = await resolveAgentActionBinding({
-        tenantId: params.tenantId,
-        agentId: action.payload.agentId,
-        resolveRoute: params.resolveRoute,
-        routeScopeKey: params.routeScopeKey ?? "default",
-        businessKey: { threadId: context.threadId },
-      });
       const logicalCallKey = `${context.invocationId}:${action.actionId}:${action.payload.agentId}`;
-      const { call } = await createAgentCall({
+      const existing = await mysqlAgentCallStore.getByLogicalCallKey({
         tenantId: params.tenantId,
         parentInvocationId: context.invocationId,
-        agentId: action.payload.agentId,
-        agentRevisionId: resolved.agentRevisionId,
-        sourceType: "harness_planned",
-        sourceRef: action.actionId,
         logicalCallKey,
-        bindingCandidate: resolved.bindingCandidate,
       });
+      let call = existing;
+      if (!call) {
+        const resolved = await resolveAgentActionBinding({
+          tenantId: params.tenantId,
+          agentId: action.payload.agentId,
+          resolveRoute: params.resolveRoute,
+          routeScopeKey: params.routeScopeKey ?? "default",
+          businessKey: { threadId: context.threadId },
+        });
+        const created = await createAgentCall({
+          tenantId: params.tenantId,
+          parentInvocationId: context.invocationId,
+          agentId: action.payload.agentId,
+          agentRevisionId: resolved.agentRevisionId,
+          sourceType: "harness_planned",
+          sourceRef: action.actionId,
+          logicalCallKey,
+          bindingCandidate: resolved.bindingCandidate,
+        });
+        call = created.call;
+      } else if (
+        call.agentId !== action.payload.agentId ||
+        call.sourceType !== "harness_planned" ||
+        call.sourceRef !== action.actionId
+      ) {
+        throw new AgentCallIdempotencyConflictError(context.invocationId, logicalCallKey);
+      }
       const current = await startAgentCall({
         tenantId: params.tenantId,
         callId: call.id,
@@ -82,6 +99,16 @@ export function createAgentActionExecutor(
       });
       const disposition = toAgentCallDisposition(current);
       if (disposition.outcome === "pending" || disposition.outcome === "waiting_user") {
+        if (disposition.outcome === "waiting_user") {
+          try {
+            await coordinateAgentInputRequired(params.tenantId, disposition.callId);
+          } catch (error) {
+            logger.warn("Harness recovery 尚未完成 Agent input-required Parent 协调", {
+              callId: disposition.callId,
+              error: error instanceof Error ? error.message : "unknown",
+            });
+          }
+        }
         return {
           authorityRef: `agent-call:${disposition.callId}`,
           pending: {

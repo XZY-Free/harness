@@ -1,3 +1,4 @@
+import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
 import { describe, expect, it, vi } from "vitest";
 import {
   type HarnessActionExecutors,
@@ -587,5 +588,255 @@ describe("HarnessLoop", () => {
     expect(knowledge).not.toHaveBeenCalled();
     expect(views[0].observations).toEqual([recoveredObservation]);
     expect(views[0].actionHistory).toHaveLength(1);
+  });
+
+  it.each(["proposed", "started"] as const)(
+    "从 %s action 恢复时继续同一行动，不生成新的决策或重复 proposed",
+    async (recoveredState) => {
+      const writer = eventWriter();
+      const recoveredAction = {
+        actionId: "action-1",
+        stepNo: 1,
+        actionType: "agent.call" as const,
+        purposeCode: "ask_specialist",
+        shortPurpose: "咨询专家",
+        payload: { agentId: "agent-1", task: "核对年假制度" },
+      };
+      const actionDigest = computeCanonicalDigest({
+        actionType: recoveredAction.actionType,
+        payload: recoveredAction.payload,
+      });
+      const executeAgent = vi.fn(async () => ({
+        observation: {
+          observationType: "agent" as const,
+          summary: "专家确认年假为 10 天",
+          sourceRefs: ["agent_call:call-1"],
+          data: { callId: "call-1", state: "completed" },
+        },
+        authorityRef: "agent_call:call-1",
+      }));
+      const decideNextAction = vi.fn(
+        decisionPort([
+          {
+            actionId: "action-2",
+            stepNo: 2,
+            actionType: "respond",
+            purposeCode: "answer_ready",
+            shortPurpose: "回答",
+            payload: { evidenceRefs: ["agent_call:call-1"] },
+          },
+        ]).decideNextAction,
+      );
+      const loop = new HarnessLoop(
+        baseParams({
+          recoveryPort: {
+            async load() {
+              return {
+                invocationState: "running" as const,
+                nextProducerSequence: recoveredState === "proposed" ? 2 : 3,
+                observations: [],
+                actionHistory: [
+                  {
+                    ...recoveredAction,
+                    action: recoveredAction,
+                    actionDigest,
+                    targetRef: "agent-1",
+                    state: recoveredState,
+                  },
+                ],
+              };
+            },
+          },
+          capabilityDirectives: [
+            { capability_type: "agent", capability_id: "agent-1", mode: "preferred" },
+          ],
+          decisionPort: { decideNextAction },
+          eventWriter: writer,
+          executors: { "agent.call": executeAgent },
+        }),
+      );
+
+      const result = await loop.run();
+
+      expect(result.completed).toBe(true);
+      expect(executeAgent).toHaveBeenCalledOnce();
+      expect(executeAgent).toHaveBeenCalledWith(
+        recoveredAction,
+        expect.objectContaining({ actionDigest }),
+      );
+      expect(decideNextAction).toHaveBeenCalledOnce();
+      expect(
+        writer.events.filter((event) => event.type === "harness.action.proposed"),
+      ).toHaveLength(1);
+      expect(
+        writer.events.filter(
+          (event) =>
+            event.type === "harness.action.started" && event.payload.action_id === "action-1",
+        ),
+      ).toHaveLength(recoveredState === "proposed" ? 1 : 0);
+      expect(
+        writer.events.some(
+          (event) =>
+            event.type === "harness.action.completed" && event.payload.action_id === "action-1",
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("从 started action 恢复到 pending 时保持同一行动，不调用决策与最终回答", async () => {
+    const recoveredAction = {
+      actionId: "action-1",
+      stepNo: 1,
+      actionType: "agent.call" as const,
+      purposeCode: "ask_specialist",
+      shortPurpose: "咨询专家",
+      payload: { agentId: "agent-1", task: "核对年假制度" },
+    };
+    const executeAgent = vi.fn(async () => ({
+      pending: { kind: "agent_call" as const, callId: "call-1", state: "running" as const },
+    }));
+    const decideNextAction = vi.fn();
+    const generateFinalResponse = vi.fn();
+    const loop = new HarnessLoop(
+      baseParams({
+        recoveryPort: {
+          async load() {
+            return {
+              invocationState: "running" as const,
+              nextProducerSequence: 3,
+              observations: [],
+              actionHistory: [
+                {
+                  ...recoveredAction,
+                  action: recoveredAction,
+                  actionDigest: computeCanonicalDigest({
+                    actionType: recoveredAction.actionType,
+                    payload: recoveredAction.payload,
+                  }),
+                  targetRef: "agent-1",
+                  state: "started" as const,
+                },
+              ],
+            };
+          },
+        },
+        capabilityDirectives: [
+          { capability_type: "agent", capability_id: "agent-1", mode: "preferred" },
+        ],
+        decisionPort: { decideNextAction },
+        finalResponsePort: { generateFinalResponse },
+        executors: { "agent.call": executeAgent },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result).toMatchObject({ completed: false, pending: true });
+    expect(executeAgent).toHaveBeenCalledOnce();
+    expect(decideNextAction).not.toHaveBeenCalled();
+    expect(generateFinalResponse).not.toHaveBeenCalled();
+  });
+
+  it("从 completed 但 observation 尚未落库的行动恢复时，从同一 Authority 补齐 observation", async () => {
+    const writer = eventWriter();
+    const recoveredAction = {
+      actionId: "action-1",
+      stepNo: 1,
+      actionType: "agent.call" as const,
+      purposeCode: "ask_specialist",
+      shortPurpose: "咨询专家",
+      payload: { agentId: "agent-1", task: "核对年假制度" },
+    };
+    const executeAgent = vi.fn(async () => ({
+      observation: {
+        observationType: "agent" as const,
+        summary: "已完成",
+        sourceRefs: ["agent-call:call-1"],
+        data: { callId: "call-1" },
+      },
+      authorityRef: "agent-call:call-1",
+    }));
+    const loop = new HarnessLoop(
+      baseParams({
+        recoveryPort: {
+          async load() {
+            return {
+              invocationState: "running" as const,
+              nextProducerSequence: 4,
+              observations: [],
+              actionHistory: [
+                {
+                  ...recoveredAction,
+                  action: recoveredAction,
+                  actionDigest: computeCanonicalDigest({
+                    actionType: recoveredAction.actionType,
+                    payload: recoveredAction.payload,
+                  }),
+                  targetRef: "agent-1",
+                  state: "completed" as const,
+                },
+              ],
+            };
+          },
+        },
+        capabilityDirectives: [
+          { capability_type: "agent", capability_id: "agent-1", mode: "preferred" },
+        ],
+        decisionPort: decisionPort([
+          {
+            actionId: "action-2",
+            stepNo: 2,
+            actionType: "respond",
+            purposeCode: "answer_ready",
+            shortPurpose: "回答",
+            payload: { evidenceRefs: ["agent-call:call-1"] },
+          },
+        ]),
+        eventWriter: writer,
+        executors: { "agent.call": executeAgent },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result.completed).toBe(true);
+    expect(executeAgent).toHaveBeenCalledOnce();
+    expect(result.observations).toHaveLength(1);
+    expect(
+      writer.events.filter(
+        (event) =>
+          event.type === "harness.action.completed" && event.payload.action_id === "action-1",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("恢复到 waiting_user 时保持暂停，不执行行动、决策或最终回答", async () => {
+    const executeAgent = vi.fn();
+    const decideNextAction = vi.fn();
+    const generateFinalResponse = vi.fn();
+    const loop = new HarnessLoop(
+      baseParams({
+        recoveryPort: {
+          async load() {
+            return {
+              invocationState: "waiting_user" as const,
+              nextProducerSequence: 8,
+              observations: [],
+              actionHistory: [],
+            };
+          },
+        },
+        decisionPort: { decideNextAction },
+        finalResponsePort: { generateFinalResponse },
+        executors: { "agent.call": executeAgent },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result).toMatchObject({ completed: false, waitingForUser: true });
+    expect(executeAgent).not.toHaveBeenCalled();
+    expect(decideNextAction).not.toHaveBeenCalled();
+    expect(generateFinalResponse).not.toHaveBeenCalled();
   });
 });

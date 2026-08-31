@@ -75,6 +75,11 @@ export interface AgentCallStore {
   /** 原子状态转移（CAS on versionNo）。非法转移由 domain 层校验后调用。 */
   updateState(input: UpdateAgentCallStateInput): Promise<AgentCall>;
   getById(params: { callId: string; tenantId: string }): Promise<AgentCall | null>;
+  getByLogicalCallKey(params: {
+    parentInvocationId: string;
+    tenantId: string;
+    logicalCallKey: string;
+  }): Promise<AgentCall | null>;
   getBinding(params: {
     callId: string;
     tenantId: string;

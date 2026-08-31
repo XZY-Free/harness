@@ -246,6 +246,7 @@ export function checkAgentCallFinalizationGate(
     source("lib/agents/calls/application/resolve-agent-call-binding.ts"),
   );
   const schema = stripComments(source("lib/persistence/schema/agent-calls.ts"));
+  const attemptDomain = stripComments(source("lib/agents/calls/domain/agent-call-attempt.ts"));
 
   if (!createApplication.includes("finalizeAgentCall")) {
     failures.push("AgentCall creation 未委托 finalizeAgentCall");
@@ -268,6 +269,12 @@ export function checkAgentCallFinalizationGate(
   }
   if (!schema.includes("creationRequestDigest") || !schema.includes("projectionVersionNo")) {
     failures.push("AgentCall Schema 缺 creationRequestDigest/projectionVersionNo");
+  }
+  const attemptSchema = schema
+    .split("export const agentCallAttemptTable", 2)[1]
+    ?.split("export type AgentCallAttempt", 1)[0];
+  if (attemptSchema?.includes("externalTaskRef") || attemptDomain.includes("externalTaskRef")) {
+    failures.push("AgentCallAttempt 仍复制 AgentCall.externalTaskRef Authority");
   }
 
   for (const document of documents) {

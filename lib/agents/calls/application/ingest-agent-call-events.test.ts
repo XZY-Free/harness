@@ -1,7 +1,8 @@
 /**
  * ingestAgentCallEvents 应用服务集成测试 — 真实 MySQL。
  *
- * 覆盖 AgentCallEventIngress 原子应用子生命周期，绝不触碰 parent 生命周期。
+ * 覆盖 AgentCallEventIngress 原子应用子生命周期，以及 input-required 的显式
+ * post-commit Parent 协调；A2A mapper 本身不触碰 Parent 生命周期。
  *
  * 应用 API：
  *   ingestAgentCallEvents({ tenantId, callId, events })
@@ -11,8 +12,9 @@
  *
  * 不变量：
  * - A2A taskId → AgentCall.externalTaskRef；A2A contextId → AgentSessionBinding.externalContextRef。
- * - completed/failed/lost/waiting_user/cancelled 绝不复用 parent 生命周期：
- *   不写 parent Invocation / RuntimeSessionBinding / RuntimeEventIngress / Turn / ThreadItems。
+ * - completed/failed/lost/cancelled 绝不复用 Parent 生命周期。
+ * - input-required 先成为 child fact，再由应用协调器经 RuntimeEventIngress 原子生成 UAR
+ *   与 Parent/Turn waiting_user；不是 A2A mapper 越权写 Parent。
  * - Thread 关联只来自可信 parent Invocation.threadId；parent 无 thread（Job）则不建会话。
  * - canonical hash 含事件 TYPE（非仅 payload）与 data。
  */
@@ -49,14 +51,18 @@ afterEach(async () => {
 });
 
 /** Invocation.threadId 为逻辑非 FK 列（无 references），可安全写入任意 UUID。 */
-async function seedRunningCall(threadId?: string) {
+async function seedRunningCall(threadId?: string, preserveExistingThread = false) {
   const scenario = await seedAgentCallExecutionScenario();
   scenarios.push(scenario);
   const tenantId = scenario.tenantId;
   const parentId = scenario.parentInvocationId;
   await db
     .update(invocationTable)
-    .set({ threadId: threadId ?? null, executionState: "running", runtimeExecutionRef: null })
+    .set({
+      ...(!preserveExistingThread ? { threadId: threadId ?? null } : {}),
+      executionState: "running",
+      runtimeExecutionRef: null,
+    })
     .where(eq(invocationTable.id, parentId));
   const call = await mysqlAgentCallStore.getById({ callId: scenario.callId, tenantId });
   if (!call) throw new Error("测试 AgentCall 缺失");
@@ -142,7 +148,7 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
     expect(await db.select().from(runtimeEventIngressTable)).toHaveLength(0);
   });
 
-  it("input_required/failed/cancelled/lost 各自仅子状态，input prompt/schema 保留，parent 不变", async () => {
+  it("input_required 经应用协调器推进 parent waiting；failed/cancelled/lost 仍仅更新子状态", async () => {
     for (const [type, state, terminal] of [
       ["call.input_required", "waiting_user", false],
       ["call.failed", "failed", true],
@@ -150,10 +156,25 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
       ["call.lost", "lost", true],
     ] as const) {
       // 每次迭代用唯一 threadId，避免 (threadId, invocationSequence) 唯一索引在循环内撞键。
-      const { tenantId, parentId, call } = await seedRunningCall(`thread-${type}`);
+      const { tenantId, parentId, call } = await seedRunningCall(
+        `thread-${type}`,
+        type === "call.input_required",
+      );
       const payload =
         type === "call.input_required"
-          ? { task_id: "t", context_id: "c", prompt: "need more", schema: { kind: "form" } }
+          ? {
+              task_id: "t",
+              context_id: "c",
+              request_type: "input",
+              purpose: "a2a_input_required",
+              prompt: "need more",
+              input_schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["text"],
+                properties: { text: { type: "string", minLength: 1 } },
+              },
+            }
           : { task_id: "t", context_id: "c" };
       await ingestAgentCallEvents({
         tenantId,
@@ -172,12 +193,17 @@ describe("ingestAgentCallEvents 原子应用与生命周期边界", () => {
         .from(agentCallEventIngressTable)
         .where(eq(agentCallEventIngressTable.producerEventId, `evt-${type}`));
       if (type === "call.input_required")
-        expect(ing?.payloadJson).toMatchObject({ prompt: "need more", schema: { kind: "form" } });
+        expect(ing?.payloadJson).toMatchObject({
+          prompt: "need more",
+          input_schema: { type: "object" },
+        });
       const [parentRow] = await db
         .select()
         .from(invocationTable)
         .where(eq(invocationTable.id, parentId));
-      expect(parentRow?.executionState).toBe("running");
+      expect(parentRow?.executionState).toBe(
+        type === "call.input_required" ? "waiting_user" : "running",
+      );
       expect(parentRow?.finishedAt).toBeNull();
     }
   });

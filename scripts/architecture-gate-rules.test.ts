@@ -258,6 +258,26 @@ describe("checkAgentCallFinalizationGate", () => {
     expect(failures).toContain("createIdempotent");
     expect(failures).toContain("假事实 fallback");
   });
+
+  it("AgentCallAttempt 重新复制 externalTaskRef Authority 时失败", () => {
+    const docs = valid().map((item) =>
+      item.path === "lib/persistence/schema/agent-calls.ts"
+        ? doc(
+            item.path,
+            "creationRequestDigest; projectionVersionNo; export const agentCallAttemptTable = { externalTaskRef: true }; export type AgentCallAttempt = {};",
+          )
+        : item,
+    );
+    docs.push(
+      doc(
+        "lib/agents/calls/domain/agent-call-attempt.ts",
+        "export interface AgentCallAttempt { externalTaskRef: string | null }",
+      ),
+    );
+    expect(checkAgentCallFinalizationGate(docs).failures).toContain(
+      "AgentCallAttempt 仍复制 AgentCall.externalTaskRef Authority",
+    );
+  });
 });
 
 describe("checkAgentInvokeAuthorizationGate", () => {

@@ -1,3 +1,4 @@
+import { cancelActiveAgentCalls } from "@/lib/agents/calls/application/cancel-active-agent-calls";
 /**
  * POST /api/v1/turns/{turn_id}/interrupt — Interrupt Turn（§3.8）。
  *
@@ -202,6 +203,13 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       });
     });
 
+    const agentCallCancellations = currentInvocationId
+      ? await cancelActiveAgentCalls({
+          tenantId: principal.tenantId,
+          parentInvocationId: currentInvocationId,
+        })
+      : [];
+
     const responseBody = {
       turn_id: result.turnId,
       turn_state: result.turnState,
@@ -211,6 +219,15 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         command_state: result.command.commandState,
       },
       already_completed_effects_preserved: result.alreadyCompletedEffectsPreserved,
+      active_agent_calls: agentCallCancellations.map((entry) => ({
+        call_id: entry.call.id,
+        state: entry.call.state,
+        remote_cancellation: entry.remoteCancellation,
+        remote_may_continue:
+          entry.remoteCancellation === "unsupported" ||
+          entry.remoteCancellation === "failed" ||
+          entry.call.state === "lost",
+      })),
       event_id: result.eventId,
     };
 

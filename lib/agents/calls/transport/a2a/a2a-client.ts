@@ -584,6 +584,10 @@ export function createA2AAgentTransport(params: CreateA2AAgentTransportParams): 
         }
       };
 
+      // Durable handoff：startCall 返回前必须把首个已确认 task/context 事件落库。
+      // 长运行流可能在首个 working 后长期无新帧，不能把关联只留在进程内队列。
+      await flushBatches();
+
       // 后台消费剩余流 → Mapper → eventSink；只经归一化 ingress。
       // reader/network error → stream_read_failed；malformed JSON/protocol →
       // protocol_parse_failed；remote explicit terminal（failed/rejected/canceled）

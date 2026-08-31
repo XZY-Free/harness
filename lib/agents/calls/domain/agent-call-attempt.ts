@@ -33,8 +33,6 @@ export interface AgentCallAttempt {
   /** 1 表示第一次尝试。 */
   attemptNo: number;
   attemptState: AgentCallAttemptState;
-  /** 外部 Task 引用（A2A taskId）。 */
-  externalTaskRef: string | null;
   /** 该 Attempt 累计 outbound 次数（防重复 outbound）。 */
   dispatchAttemptCount: number;
   retryReasonCode: string | null;

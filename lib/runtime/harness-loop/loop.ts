@@ -177,14 +177,39 @@ export class HarnessLoop {
       const recovered = this.params.recoveryPort
         ? await this.params.recoveryPort.load(this.params.invocationId)
         : EMPTY_RECOVERY;
-      if (recovered.invocationState !== "running") {
-        throw new HarnessLoopError(
-          "HARNESS_LOOP_STATE_RECOVERY_FAILED",
-          `Invocation 不是 running：${recovered.invocationState}`,
-        );
-      }
       this.observations = [...recovered.observations];
       this.actionHistory = [...recovered.actionHistory];
+      if (recovered.invocationState === "waiting_user") {
+        return {
+          completed: false,
+          waitingForUser: true,
+          responseText: "",
+          observations: [...this.observations],
+          actionHistory: [...this.actionHistory],
+        };
+      }
+
+      const unfinished = this.actionHistory.filter(
+        (entry) =>
+          entry.state === "proposed" ||
+          entry.state === "started" ||
+          (entry.state === "completed" &&
+            entry.actionType !== "respond" &&
+            entry.observation === undefined),
+      );
+      if (unfinished.length > 1) {
+        throw new HarnessLoopError(
+          "HARNESS_LOOP_STATE_RECOVERY_FAILED",
+          "Harness Loop 存在多个未完成行动",
+        );
+      }
+      if (unfinished[0]) {
+        const recoveredResult = await this.executeAction(
+          unfinished[0],
+          unfinished[0].state === "proposed",
+        );
+        if (recoveredResult) return recoveredResult;
+      }
 
       while (true) {
         const nextStepNo = this.nextStepNo();
@@ -228,62 +253,8 @@ export class HarnessLoop {
         this.actionHistory.push(historyEntry);
         await this.writeActionEvent("harness.action.proposed", historyEntry);
 
-        if (action.actionType === "respond") {
-          return await this.respond(action, historyEntry);
-        }
-
-        const executor = this.executorFor(action);
-        if (!executor) {
-          throw new HarnessLoopError(
-            action.actionType === "agent.call"
-              ? "AGENT_CALL_EXECUTOR_UNAVAILABLE"
-              : "HARNESS_ACTION_EXECUTOR_UNAVAILABLE",
-            `${action.actionType} 执行器未注册`,
-          );
-        }
-
-        historyEntry.state = "started";
-        await this.writeActionEvent("harness.action.started", historyEntry);
-        const execution = await executor(action as never, {
-          invocationId: this.params.invocationId,
-          tenantId: this.params.tenantId,
-          threadId: this.params.threadId,
-          turnId: this.params.turnId,
-          actionDigest,
-        });
-        if (execution.pending) {
-          return {
-            completed: false,
-            pending: true,
-            responseText: "",
-            observations: [...this.observations],
-            actionHistory: [...this.actionHistory],
-          };
-        }
-        if (execution.waitingForUser) {
-          await this.params.eventWriter.write("user_action.requested", {
-            request_type: execution.waitingForUser.requestType,
-            purpose: execution.waitingForUser.purpose,
-            prompt: execution.waitingForUser.prompt,
-            input_schema: execution.waitingForUser.inputSchema,
-            action_id: action.actionId,
-          });
-        }
-        historyEntry.state = "completed";
-        historyEntry.authorityRef = execution.authorityRef;
-        historyEntry.observation = execution.observation;
-        this.observations.push(execution.observation);
-        await this.writeActionEvent("harness.action.completed", historyEntry);
-
-        if (execution.waitingForUser) {
-          return {
-            completed: false,
-            waitingForUser: true,
-            responseText: "",
-            observations: [...this.observations],
-            actionHistory: [...this.actionHistory],
-          };
-        }
+        const actionResult = await this.executeAction(historyEntry, true);
+        if (actionResult) return actionResult;
       }
     } catch (error) {
       const current = this.actionHistory.at(-1);
@@ -320,12 +291,82 @@ export class HarnessLoop {
     }
   }
 
+  private async executeAction(
+    historyEntry: HarnessActionHistoryEntry,
+    writeStarted: boolean,
+  ): Promise<HarnessLoopResult | null> {
+    const action = historyEntry.action;
+    if (action.actionType === "respond") {
+      return await this.respond(action, historyEntry, writeStarted);
+    }
+
+    const executor = this.executorFor(action);
+    if (!executor) {
+      throw new HarnessLoopError(
+        action.actionType === "agent.call"
+          ? "AGENT_CALL_EXECUTOR_UNAVAILABLE"
+          : "HARNESS_ACTION_EXECUTOR_UNAVAILABLE",
+        `${action.actionType} 执行器未注册`,
+      );
+    }
+
+    if (writeStarted) {
+      historyEntry.state = "started";
+      await this.writeActionEvent("harness.action.started", historyEntry);
+    }
+    const execution = await executor(action as never, {
+      invocationId: this.params.invocationId,
+      tenantId: this.params.tenantId,
+      threadId: this.params.threadId,
+      turnId: this.params.turnId,
+      actionDigest: historyEntry.actionDigest,
+    });
+    if (execution.pending) {
+      return {
+        completed: false,
+        pending: true,
+        ...(execution.pending.state === "waiting_user" ? { waitingForUser: true } : {}),
+        responseText: "",
+        observations: [...this.observations],
+        actionHistory: [...this.actionHistory],
+      };
+    }
+    if (execution.waitingForUser) {
+      await this.params.eventWriter.write("user_action.requested", {
+        request_type: execution.waitingForUser.requestType,
+        purpose: execution.waitingForUser.purpose,
+        prompt: execution.waitingForUser.prompt,
+        input_schema: execution.waitingForUser.inputSchema,
+        action_id: action.actionId,
+      });
+    }
+    historyEntry.state = "completed";
+    historyEntry.authorityRef = execution.authorityRef;
+    historyEntry.observation = execution.observation;
+    this.observations.push(execution.observation);
+    await this.writeActionEvent("harness.action.completed", historyEntry);
+
+    if (execution.waitingForUser) {
+      return {
+        completed: false,
+        waitingForUser: true,
+        responseText: "",
+        observations: [...this.observations],
+        actionHistory: [...this.actionHistory],
+      };
+    }
+    return null;
+  }
+
   private async respond(
     action: Extract<HarnessNextAction, { actionType: "respond" }>,
     historyEntry: HarnessActionHistoryEntry,
+    writeStarted = true,
   ): Promise<HarnessLoopResult> {
-    historyEntry.state = "started";
-    await this.writeActionEvent("harness.action.started", historyEntry);
+    if (writeStarted) {
+      historyEntry.state = "started";
+      await this.writeActionEvent("harness.action.started", historyEntry);
+    }
     const responseText = await this.params.finalResponsePort.generateFinalResponse(
       this.buildView(),
       this.params.emitTextDelta,

@@ -182,7 +182,6 @@ describe("startAgentCall 执行域启动", () => {
     const attempt = await loadAttempt(scenario.callId, scenario.tenantId);
     expect(attempt?.dispatchAttemptCount).toBe(1);
     expect(attempt?.attemptState).toBe("completed");
-    expect(attempt?.externalTaskRef).toBe(terminal.externalTaskRef);
 
     // 父 Invocation 完全不变（含 refs）。
     const [parentAfter] = await db

@@ -93,6 +93,10 @@ async function seedWaitingInputOnThread(params: {
     createdAt: new Date(),
     updatedAt: new Date(),
   });
+  await db
+    .update(turnTable)
+    .set({ turnState: "waiting_user", activeInvocationId: invocationId })
+    .where(eq(turnTable.id, params.turnId));
   const requestId = randomUUID();
   await db.insert(userActionRequestTable).values({
     id: requestId,

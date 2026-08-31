@@ -36,6 +36,7 @@ import {
   createUserActionRequest,
   isUserActionRequestType,
 } from "@/lib/permission/user-action-queries";
+import { agentCallEventIngressTable, agentCallTable } from "@/lib/persistence/schema/agent-calls";
 import {
   type ThreadEventActorType,
   type ThreadItem,
@@ -824,6 +825,54 @@ async function mapUserActionRequested(
   }
 
   const payload = ctx.event.payload;
+
+  if (payload.agent_call_id !== undefined) {
+    if (
+      typeof payload.agent_call_id !== "string" ||
+      typeof payload.agent_call_event_id !== "string"
+    ) {
+      throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
+    }
+    const [call] = await tx
+      .select({
+        id: agentCallTable.id,
+        sourceRef: agentCallTable.sourceRef,
+        externalTaskRef: agentCallTable.externalTaskRef,
+        externalContextRef: agentCallTable.externalContextRef,
+      })
+      .from(agentCallTable)
+      .where(
+        and(
+          eq(agentCallTable.id, payload.agent_call_id),
+          eq(agentCallTable.tenantId, ctx.tenantId),
+          eq(agentCallTable.parentInvocationId, ctx.invocation.id),
+          eq(agentCallTable.state, "waiting_user"),
+        ),
+      )
+      .limit(1);
+    const [callEvent] = await tx
+      .select({ id: agentCallEventIngressTable.id })
+      .from(agentCallEventIngressTable)
+      .where(
+        and(
+          eq(agentCallEventIngressTable.id, payload.agent_call_event_id),
+          eq(agentCallEventIngressTable.callId, payload.agent_call_id),
+          eq(agentCallEventIngressTable.tenantId, ctx.tenantId),
+          eq(agentCallEventIngressTable.candidateType, "call.input_required"),
+          eq(agentCallEventIngressTable.ingressState, "mapped"),
+        ),
+      )
+      .limit(1);
+    if (
+      !call ||
+      !callEvent ||
+      call.sourceRef !== payload.action_id ||
+      call.externalTaskRef !== payload.task_id ||
+      call.externalContextRef !== payload.context_id
+    ) {
+      throw new IngressCandidateTypeUnsupportedError(ctx.invocation.id, ctx.event.type);
+    }
+  }
 
   // §21：External Runtime 不得伪造 tool_permission_confirmation（仅 Tool Gateway 可创建）。
   if (payload.purpose === TOOL_PERMISSION_CONFIRMATION_PURPOSE) {

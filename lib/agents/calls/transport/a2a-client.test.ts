@@ -1039,7 +1039,7 @@ describe("createA2AAgentTransport — 背景流终态与 Recovery（06 §5–§9
     expect(failures).toEqual(["protocol_parse_failed"]);
   });
 
-  it("event sink DB error：ingress_failed → lost，停止消费", async () => {
+  it("首个 durable handoff 写库失败：startCall fail closed + ingress_failed，停止消费", async () => {
     const fixture = createFixture([sseResponse([statusUpdate("working")])]);
     const failures: string[] = [];
     let sinkCalls = 0;
@@ -1052,8 +1052,9 @@ describe("createA2AAgentTransport — 背景流终态与 Recovery（06 §5–§9
         failures.push(report.failureKind);
       },
     });
-    await transport.startCall(startRequest());
-    await waitUntil(() => failures.length > 0);
+    await expect(transport.startCall(startRequest())).rejects.toMatchObject({
+      kind: "stream_interrupted",
+    });
     expect(failures).toEqual(["ingress_failed"]);
     const settled = sinkCalls;
     await new Promise((r) => setTimeout(r, 50));
