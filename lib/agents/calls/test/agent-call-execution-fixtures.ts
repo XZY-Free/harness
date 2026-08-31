@@ -20,7 +20,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
-import { resolveRequiredAgentBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
+import { resolveAgentActionBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import {
   type AgentCallBindingConfigInput,
   computeAgentCallBindingHash,
@@ -183,6 +183,7 @@ export interface ExecutionScenario {
   provider: A2ATestProvider;
   threadId: string;
   turnId: string;
+  actionId: string;
   logicalCallKey: string;
   resolution: Extract<RouteResolution, { target: { kind: "agent" } }>;
   /** 在给定租户播种一个"新的最新 published 修订 + 新 CredentialRef"，返回其证据 id/env/token。 */
@@ -351,7 +352,7 @@ export async function seedAgentCallExecutionScenario(options?: {
     actor: buildActor(tenantId, "agent-call-exec-fixture"),
   });
   const resolveRoute = createResolveRoute({ store: mysqlRouteEligibilityResolutionStore });
-  const resolved = await resolveRequiredAgentBinding({
+  const resolved = await resolveAgentActionBinding({
     tenantId,
     agentId: agent.id,
     resolveRoute,
@@ -364,7 +365,8 @@ export async function seedAgentCallExecutionScenario(options?: {
   const resolution = resolved.resolution as Extract<RouteResolution, { target: { kind: "agent" } }>;
   const finalizedBinding = resolved.bindingCandidate;
   const finalizedBindingHash = computeAgentCallBindingHash(finalizedBinding);
-  const logicalCallKey = options?.logicalCallKey ?? `required-agent:${randomUUID()}:${agent.id}`;
+  const actionId = options?.sourceRef ?? randomUUID();
+  const logicalCallKey = options?.logicalCallKey ?? `${parentInvocationId}:${actionId}:${agent.id}`;
 
   const createAgentCall = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => now });
   const { call } = await createAgentCall({
@@ -372,8 +374,8 @@ export async function seedAgentCallExecutionScenario(options?: {
     parentInvocationId,
     agentId: agent.id,
     agentRevisionId: revision.id,
-    sourceType: "user_selected",
-    sourceRef: options?.sourceRef ?? turnId,
+    sourceType: "harness_planned",
+    sourceRef: actionId,
     logicalCallKey,
     bindingCandidate: finalizedBinding,
     now,
@@ -441,6 +443,7 @@ export async function seedAgentCallExecutionScenario(options?: {
     provider,
     threadId,
     turnId,
+    actionId,
     logicalCallKey,
     resolution,
     async createNewLatestEvidence() {

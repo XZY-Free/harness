@@ -24,9 +24,9 @@ export interface CreateAgentCallCommand {
   agentId: string;
   agentRevisionId: string;
   sourceType: AgentCallSourceType;
-  /** user_selected → Turn.id。 */
+  /** 来源 Harness actionId。 */
   sourceRef: string | null;
-  /** 业务幂等键（如 required-agent:<turnId>:<agentId>）。 */
+  /** 业务幂等键（parentInvocationId:actionId:agentId）。 */
   logicalCallKey: string | null;
   /** 待最终事务验证的候选证据。 */
   bindingCandidate: AgentCallBindingCandidate;

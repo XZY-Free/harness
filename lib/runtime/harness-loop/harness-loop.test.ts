@@ -310,6 +310,125 @@ describe("HarnessLoop", () => {
     expect(writer.events.some((event) => event.type === "harness.action.started")).toBe(false);
   });
 
+  it("已提交的 agent.call 缺少执行器时父执行正式失败且不生成最终正文", async () => {
+    const writer = eventWriter();
+    const generateFinalResponse = vi.fn(finalPort().generateFinalResponse);
+    const loop = new HarnessLoop(
+      baseParams({
+        capabilityDirectives: [
+          { capability_type: "agent", capability_id: "agent-allowed", mode: "preferred" },
+        ],
+        eventWriter: writer,
+        decisionPort: decisionPort([
+          {
+            actionId: "action-agent-missing",
+            stepNo: 1,
+            actionType: "agent.call",
+            purposeCode: "query_balance",
+            shortPurpose: "查询余额",
+            payload: { agentId: "agent-allowed", task: "查询员工年假余额" },
+          },
+        ]),
+        finalResponsePort: { generateFinalResponse },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result).toMatchObject({
+      completed: false,
+      errorCode: "AGENT_CALL_EXECUTOR_UNAVAILABLE",
+    });
+    expect(writer.events.map((event) => event.type)).toEqual([
+      "harness.action.proposed",
+      "harness.action.failed",
+      "execution.failed",
+    ]);
+    expect(generateFinalResponse).not.toHaveBeenCalled();
+  });
+
+  it("AgentCall 仍在运行时保留 action.started，不写 completed 或最终正文", async () => {
+    const writer = eventWriter();
+    const generateFinalResponse = vi.fn(finalPort().generateFinalResponse);
+    const loop = new HarnessLoop(
+      baseParams({
+        capabilityDirectives: [
+          { capability_type: "agent", capability_id: "agent-allowed", mode: "preferred" },
+        ],
+        eventWriter: writer,
+        decisionPort: decisionPort([
+          {
+            actionId: "action-agent-pending",
+            stepNo: 1,
+            actionType: "agent.call",
+            purposeCode: "query_balance",
+            shortPurpose: "查询余额",
+            payload: { agentId: "agent-allowed", task: "查询员工年假余额" },
+          },
+        ]),
+        executors: {
+          "agent.call": async () => ({
+            authorityRef: "agent-call:call-1",
+            pending: { kind: "agent_call", callId: "call-1", state: "running" },
+          }),
+        },
+        finalResponsePort: { generateFinalResponse },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result).toMatchObject({ completed: false, pending: true });
+    expect(result.actionHistory.at(-1)?.state).toBe("started");
+    expect(writer.events.map((event) => event.type)).toEqual([
+      "harness.action.proposed",
+      "harness.action.started",
+    ]);
+    expect(generateFinalResponse).not.toHaveBeenCalled();
+  });
+
+  it("Agent 执行错误码原样传播，不回退为普通最终回答", async () => {
+    const writer = eventWriter();
+    const generateFinalResponse = vi.fn(finalPort().generateFinalResponse);
+    const loop = new HarnessLoop(
+      baseParams({
+        capabilityDirectives: [
+          { capability_type: "agent", capability_id: "agent-allowed", mode: "preferred" },
+        ],
+        eventWriter: writer,
+        decisionPort: decisionPort([
+          {
+            actionId: "action-agent-failed",
+            stepNo: 1,
+            actionType: "agent.call",
+            purposeCode: "query_balance",
+            shortPurpose: "查询余额",
+            payload: { agentId: "agent-allowed", task: "查询员工年假余额" },
+          },
+        ]),
+        executors: {
+          "agent.call": async () => {
+            throw Object.assign(new Error("无可用 Agent Route"), {
+              code: "AGENT_ROUTE_UNAVAILABLE",
+            });
+          },
+        },
+        finalResponsePort: { generateFinalResponse },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result).toMatchObject({ completed: false, errorCode: "AGENT_ROUTE_UNAVAILABLE" });
+    expect(writer.events.map((event) => event.type)).toEqual([
+      "harness.action.proposed",
+      "harness.action.started",
+      "harness.action.failed",
+      "execution.failed",
+    ]);
+    expect(generateFinalResponse).not.toHaveBeenCalled();
+  });
+
   it("超过连续相同行动预算时失败且不执行第三次", async () => {
     const knowledge = vi.fn(async () => ({
       observation: {

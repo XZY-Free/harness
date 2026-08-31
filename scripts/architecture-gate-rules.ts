@@ -25,6 +25,9 @@ const RETIRED_MODULE_SPECIFIER =
 const MODULE_DEPENDENCY =
   /(?:from\s*|require\(\s*|import\(\s*|export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s+from\s*)["']([^"']+)["']/g;
 
+const RETIRED_AGENT_EXECUTION_PATTERN =
+  /\b(?:resolveRequiredAgentBinding|RequiredAgentUnavailableError|invokeRequiredAgent)\b|harness-required-agent|required-agent/;
+
 export interface SourceDocument {
   path: string;
   source: string;
@@ -61,6 +64,26 @@ export function collectRetiredModuleDependencyViolations(
     MODULE_DEPENDENCY.lastIndex = 0;
     for (const match of document.source.matchAll(MODULE_DEPENDENCY)) {
       if (RETIRED_MODULE_SPECIFIER.test(match[1] ?? "")) violations.add(document.path);
+    }
+  }
+  return [...violations];
+}
+
+/** 返回重新引入旧 Required-Agent 执行桥、符号或幂等前缀的源码。 */
+export function collectRetiredAgentExecutionViolations(
+  documents: readonly SourceDocument[],
+): string[] {
+  const violations = new Set<string>();
+  for (const document of documents) {
+    if (!/^(app|components|desktop|hooks|lib|scripts)\//.test(document.path)) continue;
+    if (
+      document.path === "scripts/architecture-gate-rules.ts" ||
+      document.path === "scripts/architecture-gate-rules.test.ts"
+    ) {
+      continue;
+    }
+    if (RETIRED_AGENT_EXECUTION_PATTERN.test(stripComments(document.source))) {
+      violations.add(document.path);
     }
   }
   return [...violations];
@@ -170,7 +193,7 @@ export function checkAgentCallRuntimeBoundaryGate(
   const failures: string[] = [];
   const source = (path: string) =>
     stripComments(documents.find((document) => document.path === path)?.source ?? "");
-  const harness = source("lib/agents/calls/application/harness-required-agent.ts");
+  const harness = source("lib/agents/calls/application/agent-action-executor.ts");
   const start = source("lib/agents/calls/application/start-agent-call.ts");
   const hosted = source("lib/runtime/adapters/hosted-adapter.ts");
 

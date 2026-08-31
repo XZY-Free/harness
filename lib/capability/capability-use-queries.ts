@@ -57,6 +57,7 @@ const VALID_CAPABILITY_USE_SOURCE_TYPES = new Set<string>([
   "user_selected",
   "policy",
   "gateway",
+  "harness_planned",
 ]);
 
 function assertValidCapabilityType(value: string): asserts value is CapabilityUseType {

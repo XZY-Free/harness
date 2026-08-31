@@ -359,6 +359,8 @@ export interface HostedHarnessLoopParams {
 export interface HostedHarnessLoopResult {
   /** 是否成功完成（execution.completed 已发送或被平台视为终态）。 */
   completed: boolean;
+  /** 已提交 action 的子调用仍在 durable 执行。 */
+  pending?: boolean;
   /** Agent 回复文本（response.completed payload.text）。 */
   responseText: string;
   /** 真实失败时填写；pending/waiting_user 不伪装成失败。 */
@@ -497,6 +499,7 @@ export class HostedHarnessLoop {
     const result = await loop.run();
     return {
       completed: result.completed,
+      pending: result.pending,
       waitingForUser: result.waitingForUser,
       responseText: result.responseText,
       errorCode: result.errorCode,

@@ -24,9 +24,6 @@ const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const AGENT_IDENTITY_MODES = ["none", "bearer"] as const;
 export type AgentIdentityMode = (typeof AGENT_IDENTITY_MODES)[number];
 
-/** AgentCall 业务幂等来源模式。 */
-export const AGENT_CALL_IDEMPOTENCY_PREFIXES = ["required-agent"] as const;
-
 /**
  * AgentCallBinding 冻结配置（创建时一次性冻结）。
  */

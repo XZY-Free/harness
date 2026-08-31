@@ -49,16 +49,28 @@ export interface HarnessLoopEventWriter {
   write(type: string, payload: Record<string, unknown>): Promise<void>;
 }
 
-export interface HarnessActionExecutionResult {
-  observation: HarnessObservation;
-  authorityRef?: string;
-  waitingForUser?: {
-    requestType: "input";
-    purpose: string;
-    prompt: string;
-    inputSchema: Record<string, unknown>;
-  };
-}
+export type HarnessActionExecutionResult =
+  | {
+      observation: HarnessObservation;
+      authorityRef?: string;
+      waitingForUser?: {
+        requestType: "input";
+        purpose: string;
+        prompt: string;
+        inputSchema: Record<string, unknown>;
+      };
+      pending?: never;
+    }
+  | {
+      pending: {
+        kind: "agent_call" | "tool_call";
+        callId: string;
+        state: "queued" | "running" | "waiting_user";
+      };
+      observation?: never;
+      authorityRef?: string;
+      waitingForUser?: never;
+    };
 
 export interface HarnessActionExecutionContext {
   invocationId: string;
@@ -119,6 +131,7 @@ export interface HarnessLoopParams {
 
 export interface HarnessLoopResult {
   completed: boolean;
+  pending?: boolean;
   waitingForUser?: boolean;
   responseText: string;
   errorCode?: string;
@@ -238,6 +251,15 @@ export class HarnessLoop {
           turnId: this.params.turnId,
           actionDigest,
         });
+        if (execution.pending) {
+          return {
+            completed: false,
+            pending: true,
+            responseText: "",
+            observations: [...this.observations],
+            actionHistory: [...this.actionHistory],
+          };
+        }
         if (execution.waitingForUser) {
           await this.params.eventWriter.write("user_action.requested", {
             request_type: execution.waitingForUser.requestType,
@@ -265,6 +287,7 @@ export class HarnessLoop {
       }
     } catch (error) {
       const current = this.actionHistory.at(-1);
+      const explicitErrorCode = errorCode(error);
       const loopError =
         error instanceof HarnessLoopError
           ? error
@@ -274,7 +297,7 @@ export class HarnessLoop {
                 : current?.actionType === "tool.call"
                   ? "TOOL_ACTION_FAILED"
                   : current?.actionType === "agent.call"
-                    ? "AGENT_CALL_FAILED"
+                    ? (explicitErrorCode ?? "AGENT_CALL_FAILED")
                     : current?.actionType === "respond"
                       ? "MODEL_EXECUTION_FAILED"
                       : "HARNESS_ACTION_EXECUTION_FAILED",
@@ -543,4 +566,9 @@ function actionTargetRef(action: HarnessNextAction): string | null {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function errorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  return typeof error.code === "string" && error.code ? error.code : null;
 }

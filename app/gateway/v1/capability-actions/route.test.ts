@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { seedAgentCallExecutionScenario } from "@/lib/agents/calls/test/agent-call-execution-fixtures";
 import { db } from "@/lib/db/client";
 import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import {
@@ -12,6 +13,12 @@ import {
   ensureDefaultTenant,
 } from "@/lib/identity/tenant-bootstrap";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
+import {
+  agentCallAttemptTable,
+  agentCallBindingTable,
+  agentCallTable,
+} from "@/lib/persistence/schema/agent-calls";
+import { capabilityUseTable } from "@/lib/persistence/schema/capability-use";
 import { threadEventTable, threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { invocationTable, runtimeEventIngressTable } from "@/lib/persistence/schema/executions";
 import {
@@ -19,14 +26,23 @@ import {
   governanceConfigSetTable,
 } from "@/lib/persistence/schema/governance-config";
 import { and, asc, eq, like } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { POST } from "./route";
 
 const TENANT = DEFAULT_TENANT_ID;
+const agentScenarios: Awaited<ReturnType<typeof seedAgentCallExecutionScenario>>[] = [];
 
 beforeEach(async () => {
   await resetDatabase(db);
   await ensureDefaultTenant();
+  agentScenarios.length = 0;
+});
+
+afterEach(async () => {
+  for (const scenario of agentScenarios) {
+    delete process.env[scenario.credentialEnvVar];
+    await scenario.provider.close();
+  }
 });
 
 async function seedRunningTurn(
@@ -114,21 +130,26 @@ async function seedRunningTurn(
   return { threadId, turnId, invocationId };
 }
 
-function token(invocationId: string): string {
+function token(invocationId: string, tenantId = TENANT): string {
   return issueWorkloadToken({
     type: "gateway",
-    tenantId: TENANT,
+    tenantId,
     invocationId,
     audience: "gateway",
     expiresAt: Date.now() + WORKLOAD_TOKEN_DEFAULT_TTL_MS.gateway,
   });
 }
 
-function request(invocationId: string, action: unknown, producerSequenceStart = 1): Request {
+function request(
+  invocationId: string,
+  action: unknown,
+  producerSequenceStart = 1,
+  tenantId = TENANT,
+): Request {
   return new Request("http://localhost/gateway/v1/capability-actions", {
     method: "POST",
     headers: {
-      authorization: `Bearer ${token(invocationId)}`,
+      authorization: `Bearer ${token(invocationId, tenantId)}`,
       "content-type": "application/json",
       "idempotency-key": `${invocationId}:${(action as { actionId?: string })?.actionId ?? ""}`,
     },
@@ -256,7 +277,7 @@ describe("POST /gateway/v1/capability-actions", () => {
     expect(ingress).toHaveLength(0);
   });
 
-  it("agent.call 已通过 Directive 校验但执行器缺失时提交失败且不伪装成功", async () => {
+  it("agent.call 通过统一执行器解析 Route，Route 不存在时稳定失败且不伪装成功", async () => {
     const seeded = await seedRunningTurn("agent-allowed");
     const response = await POST(
       request(seeded.invocationId, {
@@ -271,7 +292,7 @@ describe("POST /gateway/v1/capability-actions", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
-      error: { code: "AGENT_CALL_EXECUTOR_UNAVAILABLE" },
+      error: { code: "AGENT_ROUTE_UNAVAILABLE" },
     });
     const events = await db
       .select({ type: runtimeEventIngressTable.candidateType })
@@ -280,7 +301,77 @@ describe("POST /gateway/v1/capability-actions", () => {
       .orderBy(asc(runtimeEventIngressTable.producerSequence));
     expect(events.map((event) => event.type)).toEqual([
       "harness.action.proposed",
+      "harness.action.started",
       "harness.action.failed",
+    ]);
+  });
+
+  it("External Runtime 经 Gateway 复用统一 AgentActionExecutor 并返回 durable pending", async () => {
+    const scenario = await seedAgentCallExecutionScenario({ providerScenario: "long_running" });
+    agentScenarios.push(scenario);
+    await db.delete(agentCallAttemptTable).where(eq(agentCallAttemptTable.callId, scenario.callId));
+    await db.delete(agentCallBindingTable).where(eq(agentCallBindingTable.callId, scenario.callId));
+    await db.delete(agentCallTable).where(eq(agentCallTable.id, scenario.callId));
+    await db
+      .delete(capabilityUseTable)
+      .where(eq(capabilityUseTable.invocationId, scenario.parentInvocationId));
+    scenario.provider.reset();
+    scenario.provider.setScenario("long_running");
+    await createExecutionBinding({
+      invocationId: scenario.parentInvocationId,
+      tenantId: scenario.tenantId,
+      runtimeRevisionId: "external-runtime-revision-test",
+      deploymentRouteId: "external-runtime-route-test",
+      modelProvider: "test",
+      modelId: "test-model",
+      governanceConfigRevisionId: scenario.binding.governanceConfigRevisionId,
+      governanceConfigDigest: scenario.binding.governanceConfigDigest,
+      controlPlaneEvidence: TEST_EXECUTION_BINDING_EVIDENCE,
+      projectionVersionNo: 1,
+    });
+    const action = {
+      actionId: "agent-external-pending",
+      stepNo: 1,
+      actionType: "agent.call",
+      purposeCode: "query_balance",
+      shortPurpose: "查询余额",
+      payload: {
+        agentId: scenario.agentId,
+        task: "只查询当前员工的年假余额",
+        contextRefs: ["context:employee-subject"],
+      },
+    };
+
+    const response = await POST(request(scenario.parentInvocationId, action, 1, scenario.tenantId));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      action_id: action.actionId,
+      state: "started",
+      disposition: "pending",
+      pending: { kind: "agent_call", state: "running" },
+    });
+    expect(scenario.provider.captured).toHaveLength(1);
+    expect(scenario.provider.captured[0]?.text).toBe(action.payload.task);
+    const [call] = await db
+      .select()
+      .from(agentCallTable)
+      .where(eq(agentCallTable.parentInvocationId, scenario.parentInvocationId))
+      .limit(1);
+    expect(call).toMatchObject({
+      sourceType: "harness_planned",
+      sourceRef: action.actionId,
+      logicalCallKey: `${scenario.parentInvocationId}:${action.actionId}:${scenario.agentId}`,
+    });
+    const events = await db
+      .select({ type: runtimeEventIngressTable.candidateType })
+      .from(runtimeEventIngressTable)
+      .where(eq(runtimeEventIngressTable.invocationId, scenario.parentInvocationId))
+      .orderBy(asc(runtimeEventIngressTable.producerSequence));
+    expect(events.map((event) => event.type)).toEqual([
+      "harness.action.proposed",
+      "harness.action.started",
     ]);
   });
 });

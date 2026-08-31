@@ -28,14 +28,15 @@ describe("createAgentCall 应用服务", () => {
   it("只提交 candidate，由 Store 最终事务冻结并原子写 CapabilityUse", async () => {
     const scenario = await seedAgentCallExecutionScenario();
     scenarios.push(scenario);
-    const logicalCallKey = `application:${randomUUID()}`;
+    const actionId = randomUUID();
+    const logicalCallKey = `${scenario.parentInvocationId}:${actionId}:${scenario.agentId}`;
     const result = await createAgentCall({
       tenantId: scenario.tenantId,
       parentInvocationId: scenario.parentInvocationId,
       agentId: scenario.agentId,
       agentRevisionId: scenario.agentRevisionId,
-      sourceType: "user_selected",
-      sourceRef: scenario.turnId,
+      sourceType: "harness_planned",
+      sourceRef: actionId,
       logicalCallKey,
       bindingCandidate: scenario.binding,
       now: NOW,
@@ -66,8 +67,8 @@ describe("createAgentCall 应用服务", () => {
       parentInvocationId: scenario.parentInvocationId,
       agentId: scenario.agentId,
       agentRevisionId: scenario.agentRevisionId,
-      sourceType: "user_selected" as const,
-      sourceRef: scenario.turnId,
+      sourceType: "harness_planned" as const,
+      sourceRef: scenario.actionId,
       logicalCallKey: scenario.logicalCallKey,
       bindingCandidate: scenario.binding,
       now: NOW,

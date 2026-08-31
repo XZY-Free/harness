@@ -1,5 +1,6 @@
 import { getTurnById } from "@/lib/conversations/turn-queries";
 import { computeCanonicalDigest } from "@/lib/crypto/rfc-8785-canonicalize";
+import { API_ERROR_CODES, type ApiErrorCode } from "@/lib/error-codes";
 import { getExecutionBindingByInvocation } from "@/lib/executions/persistence/execution-binding-queries";
 import {
   type GatewayPrincipal,
@@ -9,6 +10,9 @@ import {
 } from "@/lib/gateway/route-helpers";
 import { loadFrozenGovernanceConfig } from "@/lib/governance/governance-repository";
 import { apiError, apiSuccess, getRequestId } from "@/lib/http";
+import type { RouteResolver } from "@/lib/routes/application/resolve-route";
+import { createConfiguredRouteResolver } from "@/lib/routes/infrastructure/configured-route-resolver";
+import { mysqlRouteEligibilityResolutionStore } from "@/lib/routes/persistence/mysql-route-eligibility-resolution-store";
 import { type RuntimeCandidateEvent, ingressEventBatch } from "@/lib/runtime/event-ingress-queries";
 import { HARNESS_NEXT_ACTION_SCHEMA } from "@/lib/runtime/harness-loop/action-schema";
 import {
@@ -20,10 +24,25 @@ import { createMySqlHarnessLoopRecoveryPort } from "@/lib/runtime/harness-loop/m
 import { createPlatformHarnessActionExecutors } from "@/lib/runtime/harness-loop/platform-action-executors";
 import type { HarnessNextAction } from "@/lib/runtime/harness-loop/types";
 import { getInvocationById } from "@/lib/runtime/invocation-queries";
+import { executionSubjectFromServiceIdentity } from "@/lib/runtime/transport/execution-subject";
 
 export const dynamic = "force-dynamic";
 
 const BODY_KEYS = new Set(["invocation_id", "producer_sequence_start", "action"]);
+const configuredResolver = createConfiguredRouteResolver({
+  projectionStore: mysqlRouteEligibilityResolutionStore,
+});
+const resolveRoute: RouteResolver = async (input) =>
+  (
+    await configuredResolver({
+      tenantId: input.tenantId,
+      target: input.target,
+      routeScopeKey: input.routeScopeKey,
+      businessKey: input.businessKey,
+      attributes: input.attributes,
+      threadDefaultModelRef: input.threadDefaultModelRef,
+    })
+  ).outcome;
 
 function parseBody(raw: unknown): {
   invocationId: string;
@@ -205,7 +224,11 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  const executors = createPlatformHarnessActionExecutors(principal.tenantId);
+  const executors = createPlatformHarnessActionExecutors({
+    tenantId: principal.tenantId,
+    executionSubject: executionSubjectFromServiceIdentity(principal.tenantId, "gateway"),
+    resolveRoute,
+  });
   const executor = executors[body.action.actionType] as
     | ((
         action: never,
@@ -260,12 +283,15 @@ export async function POST(request: Request): Promise<Response> {
       actionDigest: digest,
     });
   } catch (error) {
-    const errorCode =
+    const reportedCode = getErrorCode(error);
+    const errorCode: ApiErrorCode =
       body.action.actionType === "knowledge.search"
         ? "KNOWLEDGE_ACTION_FAILED"
         : body.action.actionType === "tool.call"
           ? "TOOL_ACTION_FAILED"
-          : "HARNESS_ACTION_EXECUTOR_UNAVAILABLE";
+          : reportedCode && reportedCode in API_ERROR_CODES
+            ? (reportedCode as ApiErrorCode)
+            : "AGENT_CALL_FAILED";
     const failedSequence = startedSequence + (existing?.state === "started" ? 0 : 1);
     await ingressEventBatch({
       tenantId: principal.tenantId,
@@ -280,6 +306,16 @@ export async function POST(request: Request): Promise<Response> {
     });
     return apiError(errorCode, error instanceof Error ? error.message : String(error), {
       requestId,
+    });
+  }
+  if (execution.pending) {
+    return apiSuccess({
+      action_id: body.action.actionId,
+      state: "started",
+      disposition: "pending",
+      pending: execution.pending,
+      authority_ref: execution.authorityRef ?? null,
+      next_producer_sequence: startedSequence + (existing?.state === "started" ? 0 : 1),
     });
   }
   const completedSequence = startedSequence + (existing?.state === "started" ? 0 : 1);
@@ -303,6 +339,11 @@ export async function POST(request: Request): Promise<Response> {
     waiting_for_user: execution.waitingForUser ?? null,
     next_producer_sequence: completedSequence + 1,
   });
+}
+
+function getErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  return typeof error.code === "string" && error.code ? error.code : null;
 }
 
 function actionEvent(

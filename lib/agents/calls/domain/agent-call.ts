@@ -43,13 +43,8 @@ export const AGENT_CALL_TERMINAL_STATES: readonly AgentCallState[] = [
   "lost",
 ];
 
-/** AgentCall 来源类型；当前正式入口只创建 user_selected。 */
-export const AGENT_CALL_SOURCE_TYPES = [
-  "user_selected",
-  "dynamic_discovery",
-  "policy",
-  "gateway",
-] as const;
+/** AgentCall 只由 Harness 已提交的 agent.call action 创建。 */
+export const AGENT_CALL_SOURCE_TYPES = ["harness_planned"] as const;
 export type AgentCallSourceType = (typeof AGENT_CALL_SOURCE_TYPES)[number];
 
 /**
@@ -129,7 +124,7 @@ export interface AgentCall {
   agentRevisionId: string;
   /** 调用来源类型。 */
   sourceType: AgentCallSourceType;
-  /** 来源引用（user_selected → Turn.id）。 */
+  /** 来源 Harness actionId。 */
   sourceRef: string | null;
   /** 当前状态。 */
   state: AgentCallState;

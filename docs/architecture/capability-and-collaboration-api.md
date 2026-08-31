@@ -227,7 +227,26 @@ curl -X POST 'https://snow.example.com/gateway/v1/capability-actions' \
 }
 ```
 
-平台先把 `harness.action.proposed`、`harness.action.started` 写入现有 Runtime Event Ingress，再调用平台内执行器；成功后写 `harness.action.completed`，失败写 `harness.action.failed`。相同 `actionId` 与相同 digest 重试返回既有结果，不重复执行已完成行动。External Runtime 不直连数据库、Credential 或 Agent endpoint。`respond` 由 Runtime 自己提交并调用 Final Response Port，不经本接口。
+`agent.call` 的 `payload.task` 是本次 Harness 规划出的子任务，不固定复制原始用户消息；`payload.agentId` 必须等于本 Turn 的 preferred Agent。平台以 `parentInvocationId + actionId + agentId` 创建唯一 `harness_planned` AgentCall。AgentCall 尚未结束时返回 durable pending，不写 `harness.action.completed`：
+
+```json
+{
+  "action_id": "action-agent-01",
+  "state": "started",
+  "disposition": "pending",
+  "pending": {
+    "kind": "agent_call",
+    "callId": "call_01J...",
+    "state": "running"
+  },
+  "authority_ref": "agent-call:call_01J...",
+  "next_producer_sequence": 3
+}
+```
+
+AgentCall 完成后只返回 `observationType=agent` 的 Observation，再由 Harness 决定下一步或提交 `respond`。目标不是本 Turn preferred Agent 时返回 `AGENT_ACTION_NOT_ALLOWED`，平台执行器未注册时返回 `AGENT_CALL_EXECUTOR_UNAVAILABLE`。Route、Binding、Credential、Context、A2A transport 与幂等冲突分别返回登记过的 `AGENT_ROUTE_UNAVAILABLE`、`AGENT_CALL_BINDING_INVALID`、`AGENT_CALL_CREDENTIAL_UNAVAILABLE`、`AGENT_CONTEXT_REQUIREMENT_UNSATISFIED`、`AGENT_CALL_TRANSPORT_FAILED`、`AGENT_CALL_IDEMPOTENCY_CONFLICT`；其他已进入 AgentCall 的执行失败统一返回 `AGENT_CALL_FAILED`，不得改成普通回答。
+
+平台先把 `harness.action.proposed`、`harness.action.started` 写入现有 Runtime Event Ingress，再调用统一平台执行器；成功后写 `harness.action.completed`，失败写 `harness.action.failed`。相同 `actionId` 与相同 digest 重试返回既有结果，不重复执行已完成行动。Hosted 与 External Runtime 共用同一 `AgentActionExecutor`；External Runtime 不创建 AgentCall，也不直连数据库、Credential、Agent Route 或 A2A endpoint。`respond` 由 Runtime 自己提交并调用 Final Response Port，不经本接口。
 
 ## 4. Child Thread Command API
 

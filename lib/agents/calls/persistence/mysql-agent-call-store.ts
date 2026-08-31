@@ -416,7 +416,7 @@ async function doCreate(
     revisionId: input.agentRevisionId,
     sourceType: input.sourceType,
     sourceRef: input.sourceRef,
-    selectionReasonCode: input.sourceType === "user_selected" ? "explicit_select" : null,
+    selectionReasonCode: "preferred_agent_relevant",
   });
 
   const [row] = await tx

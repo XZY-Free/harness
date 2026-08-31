@@ -56,13 +56,8 @@ export const AGENT_CALL_STATES = [
 ] as const;
 export type AgentCallState = (typeof AGENT_CALL_STATES)[number];
 
-/** AgentCall 来源类型（Agent 与 Runtime Authority：user_selected=用户明确选择；gateway=Harness Runtime 经 Gateway 调用）。 */
-export const AGENT_CALL_SOURCE_TYPES = [
-  "user_selected",
-  "dynamic_discovery",
-  "policy",
-  "gateway",
-] as const;
+/** AgentCall 来源类型：只接受 Harness 已提交的 agent.call action。 */
+export const AGENT_CALL_SOURCE_TYPES = ["harness_planned"] as const;
 export type AgentCallSourceType = (typeof AGENT_CALL_SOURCE_TYPES)[number];
 
 // ─── AgentCall ─────────────────────────────────────────────
@@ -96,7 +91,7 @@ export const agentCallTable = mysqlTable(
     agentRevisionId: varchar("agentRevisionId", { length: 36 }).notNull(),
     /** 调用来源类型。 */
     sourceType: varchar("sourceType", { length: 32 }).notNull(),
-    /** 来源引用（user_selected → Turn.id）。 */
+    /** 来源 Harness actionId。 */
     sourceRef: varchar("sourceRef", { length: 256 }),
     /** 独立状态机。 */
     state: mysqlEnum("state", AGENT_CALL_STATES).notNull().default("queued"),

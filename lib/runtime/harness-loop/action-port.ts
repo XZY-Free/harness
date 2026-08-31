@@ -12,6 +12,16 @@ export interface HarnessActionPort {
   >;
 }
 
+export class HarnessActionPortError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HarnessActionPortError";
+  }
+}
+
 /** External Harness Runtime 只通过 Invocation-bound Gateway 调用平台 action。 */
 export function createHttpHarnessActionPort(params: {
   endpoint: string;
@@ -38,14 +48,26 @@ export function createHttpHarnessActionPort(params: {
         observation?: HarnessActionExecutionResult["observation"];
         authority_ref?: string;
         waiting_for_user?: HarnessActionExecutionResult["waitingForUser"];
+        pending?: Extract<HarnessActionExecutionResult, { pending: unknown }>["pending"];
       };
       if (!response.ok) {
-        throw new Error(
-          body.error?.code ?? body.error?.message ?? `Capability Action HTTP ${response.status}`,
+        throw new HarnessActionPortError(
+          body.error?.code ?? "HARNESS_ACTION_EXECUTION_FAILED",
+          body.error?.message ?? `Capability Action HTTP ${response.status}`,
         );
       }
-      if (!body.observation || typeof body.next_producer_sequence !== "number") {
-        throw new Error("Capability Action 响应缺少 observation/next_producer_sequence");
+      if (typeof body.next_producer_sequence !== "number") {
+        throw new Error("Capability Action 响应缺少 next_producer_sequence");
+      }
+      if (body.pending) {
+        return {
+          pending: body.pending,
+          authorityRef: body.authority_ref,
+          nextProducerSequence: body.next_producer_sequence,
+        };
+      }
+      if (!body.observation) {
+        throw new Error("Capability Action 响应缺少 observation");
       }
       return {
         observation: body.observation,

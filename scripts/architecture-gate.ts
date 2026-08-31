@@ -14,6 +14,7 @@ import {
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
+  collectRetiredAgentExecutionViolations,
   collectRetiredModuleDependencyViolations,
 } from "./architecture-gate-rules";
 
@@ -224,6 +225,10 @@ function checkSourceHistoryAndRetiredDependencies(): void {
   const dependencyViolations = collectRetiredModuleDependencyViolations(documents);
   if (dependencyViolations.length === 0) pass("生产与测试支撑未依赖已删除入口");
   else fail(`仍依赖已删除入口：\n  ${dependencyViolations.join("\n  ")}`);
+
+  const agentExecutionViolations = collectRetiredAgentExecutionViolations(documents);
+  if (agentExecutionViolations.length === 0) pass("旧 Required-Agent 执行路径归零");
+  else fail(`旧 Required-Agent 执行路径回流：\n  ${agentExecutionViolations.join("\n  ")}`);
 }
 
 function main(): void {

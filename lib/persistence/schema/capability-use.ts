@@ -52,6 +52,7 @@ export type CapabilityUseType = (typeof CAPABILITY_USE_TYPES)[number];
  * - dynamic_discovery：搜索发现后选用（默认）。
  * - user_selected：用户显式选择。
  * - policy：策略强制注入。
+ * - harness_planned：Harness 已提交 action 后实际使用。
  */
 export const CAPABILITY_USE_SOURCE_TYPES = [
   "default",
@@ -59,6 +60,7 @@ export const CAPABILITY_USE_SOURCE_TYPES = [
   "user_selected",
   "policy",
   "gateway",
+  "harness_planned",
 ] as const;
 export type CapabilityUseSourceType = (typeof CAPABILITY_USE_SOURCE_TYPES)[number];
 
@@ -86,7 +88,7 @@ export const capabilityUseTable = mysqlTable(
     contentHash: varchar("contentHash", { length: 128 }),
     /** 实际 Schema hash（sha256: 前缀，Tool Schema）；可空。 */
     schemaHash: varchar("schemaHash", { length: 128 }),
-    /** 来源类型（default/dynamic_discovery/user_selected/policy）。 */
+    /** 来源类型（default/dynamic_discovery/user_selected/policy/harness_planned）。 */
     sourceType: varchar("sourceType", { length: 32 }).notNull().default("dynamic_discovery"),
     /** 来源引用（如搜索 query / 用户选择路径）；可空。 */
     sourceRef: varchar("sourceRef", { length: 256 }),

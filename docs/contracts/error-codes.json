@@ -1,5 +1,5 @@
 {
-  "contract_version": "11.2.0",
+  "contract_version": "11.3.0",
   "errors": {
     "ACCESS_DENIED": {
       "http": 403,
@@ -16,6 +16,34 @@
     "AGENT_CALL_EXECUTOR_UNAVAILABLE": {
       "http": 503,
       "retryable": false
+    },
+    "AGENT_CALL_BINDING_INVALID": {
+      "http": 409,
+      "retryable": false
+    },
+    "AGENT_CALL_CREDENTIAL_UNAVAILABLE": {
+      "http": 503,
+      "retryable": false
+    },
+    "AGENT_CALL_FAILED": {
+      "http": 503,
+      "retryable": false
+    },
+    "AGENT_CALL_IDEMPOTENCY_CONFLICT": {
+      "http": 409,
+      "retryable": false
+    },
+    "AGENT_CALL_TRANSPORT_FAILED": {
+      "http": 503,
+      "retryable": true
+    },
+    "AGENT_CONTEXT_REQUIREMENT_UNSATISFIED": {
+      "http": 422,
+      "retryable": false
+    },
+    "AGENT_ROUTE_UNAVAILABLE": {
+      "http": 503,
+      "retryable": true
     },
     "ACTIVE_LEGAL_HOLD": {
       "http": 409,

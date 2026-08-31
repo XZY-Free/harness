@@ -15,7 +15,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { POST as createRevisionPOST } from "@/app/admin/api/v1/agents/[agent_id]/revisions/route";
 import { createPublishAgentRevision } from "@/lib/agents/application/publish-agent-revision";
 import { createWithdrawAgentRevision } from "@/lib/agents/application/withdraw-agent-revision";
-import { resolveRequiredAgentBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
+import { resolveAgentActionBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { createAgent, getAgentById } from "@/lib/agents/persistence/agent-queries";
 import {
   createDraftRevision,
@@ -2049,7 +2049,7 @@ describe("场景21（J-3）：Agent Lifecycle E2E — 真实 Outbox Worker 链",
       agentRevisionId: agentRevision.id,
     });
     expect(outcome.resolution.projectionVersionNo).toBeGreaterThan(0);
-    const resolvedAgent = await resolveRequiredAgentBinding({
+    const resolvedAgent = await resolveAgentActionBinding({
       tenantId,
       agentId: agent.id,
       resolveRoute,

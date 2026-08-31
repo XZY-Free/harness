@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createCreateAgentCall } from "@/lib/agents/calls/application/create-agent-call";
-import { resolveRequiredAgentBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
+import { resolveAgentActionBinding } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import { computeAgentCallBindingHash } from "@/lib/agents/calls/domain/agent-call-binding";
 import {
   AgentCallStateConcurrencyError,
@@ -62,17 +62,19 @@ function commandFor(
   scenario: Scenario,
   overrides: Partial<Parameters<ReturnType<typeof createCreateAgentCall>>[0]> = {},
 ) {
+  const actionId = overrides.logicalCallKey ?? scenario.actionId;
+  const { logicalCallKey: _logicalCallKey, sourceRef: _sourceRef, ...rest } = overrides;
   return {
     tenantId: scenario.tenantId,
     parentInvocationId: scenario.parentInvocationId,
     agentId: scenario.agentId,
     agentRevisionId: scenario.agentRevisionId,
-    sourceType: "user_selected" as const,
-    sourceRef: scenario.turnId,
-    logicalCallKey: scenario.logicalCallKey,
+    sourceType: "harness_planned" as const,
+    sourceRef: actionId,
+    logicalCallKey: `${scenario.parentInvocationId}:${actionId}:${scenario.agentId}`,
     bindingCandidate: scenario.binding,
     now: NOW,
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -126,33 +128,6 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
     ).toHaveLength(1);
   });
 
-  it("同 key 但来源语义不同返回 AGENT_CALL_IDEMPOTENCY_CONFLICT", async () => {
-    const scenario = await seed();
-    const resolved = await resolveRequiredAgentBinding({
-      tenantId: scenario.tenantId,
-      agentId: scenario.agentId,
-      resolveRoute: createResolveRoute({ store: mysqlRouteEligibilityResolutionStore }),
-      routeScopeKey: "default",
-      businessKey: { jobId: scenario.parentInvocationId },
-    });
-    const binding = resolved.bindingCandidate;
-    await expect(
-      mysqlAgentCallStore.finalizeAgentCall({
-        id: randomUUID(),
-        tenantId: scenario.tenantId,
-        parentInvocationId: scenario.parentInvocationId,
-        agentId: scenario.agentId,
-        agentRevisionId: scenario.agentRevisionId,
-        sourceType: "gateway",
-        sourceRef: scenario.parentInvocationId,
-        logicalCallKey: scenario.logicalCallKey,
-        bindingCandidate: binding,
-        bindingHash: computeAgentCallBindingHash(binding),
-        createdAt: NOW,
-      }),
-    ).rejects.toMatchObject({ code: "AGENT_CALL_IDEMPOTENCY_CONFLICT" });
-  });
-
   it("同 key 切到另一个有效 AgentRevision 也必须幂等冲突", async () => {
     const scenario = await seed();
     const latest = await scenario.createNewLatestEvidence();
@@ -173,7 +148,7 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
       trafficWeight: 10_000,
       actor: buildActor(scenario.tenantId, "idempotency-revision-switch"),
     });
-    const resolved = await resolveRequiredAgentBinding({
+    const resolved = await resolveAgentActionBinding({
       tenantId: scenario.tenantId,
       agentId: scenario.agentId,
       resolveRoute: createResolveRoute({ store: mysqlRouteEligibilityResolutionStore }),
@@ -188,8 +163,8 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
         parentInvocationId: scenario.parentInvocationId,
         agentId: scenario.agentId,
         agentRevisionId: resolved.agentRevisionId,
-        sourceType: "user_selected",
-        sourceRef: scenario.turnId,
+        sourceType: "harness_planned",
+        sourceRef: scenario.actionId,
         logicalCallKey: scenario.logicalCallKey,
         bindingCandidate: binding,
         bindingHash: computeAgentCallBindingHash(binding),
@@ -208,9 +183,9 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
         parentInvocationId: scenario.parentInvocationId,
         agentId: scenario.agentId,
         agentRevisionId: scenario.agentRevisionId,
-        sourceType: "user_selected",
-        sourceRef: scenario.turnId,
-        logicalCallKey: `identity-mismatch:${randomUUID()}`,
+        sourceType: "harness_planned",
+        sourceRef: scenario.actionId,
+        logicalCallKey: scenario.logicalCallKey,
         bindingCandidate: binding,
         bindingHash: computeAgentCallBindingHash(binding),
         createdAt: NOW,
@@ -254,11 +229,12 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
 
   it("同请求并发最终化只创建一个 Call", async () => {
     const scenario = await seed();
-    const logicalCallKey = `concurrent:${randomUUID()}`;
+    const actionId = `concurrent:${randomUUID()}`;
+    const logicalCallKey = `${scenario.parentInvocationId}:${actionId}:${scenario.agentId}`;
     const create = createCreateAgentCall({ store: mysqlAgentCallStore, now: () => NOW });
     const [left, right] = await Promise.all([
-      create(commandFor(scenario, { logicalCallKey })),
-      create(commandFor(scenario, { logicalCallKey })),
+      create(commandFor(scenario, { logicalCallKey: actionId })),
+      create(commandFor(scenario, { logicalCallKey: actionId })),
     ]);
     expect([left.status, right.status].sort()).toEqual(["created", "replayed"]);
     expect(left.call.id).toBe(right.call.id);
@@ -349,9 +325,9 @@ describe("mysqlAgentCallStore.finalizeAgentCall", () => {
         parentInvocationId: scenario.parentInvocationId,
         agentId: scenario.agentId,
         agentRevisionId: scenario.agentRevisionId,
-        sourceType: "user_selected",
-        sourceRef: scenario.turnId,
-        logicalCallKey: `forged-resolution:${randomUUID()}`,
+        sourceType: "harness_planned",
+        sourceRef: scenario.actionId,
+        logicalCallKey: scenario.logicalCallKey,
         bindingCandidate: binding,
         bindingHash: computeAgentCallBindingHash(binding),
         createdAt: NOW,

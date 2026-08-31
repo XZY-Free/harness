@@ -395,15 +395,20 @@ export async function lockAndValidateAgentCallAuthority(
     stale("GovernanceConfigRevision 已漂移");
   }
 
-  // 13. employee-selected provenance；gateway 则必须回指 parent Invocation。
+  // 13. Harness action provenance：actionId + preferred AgentUseDirective + parent Invocation。
   let resolutionBusinessKey: { threadId?: string; jobId?: string };
-  if (input.sourceType === "user_selected") {
-    const sourceRef = input.sourceRef;
-    if (!sourceRef || invocation.turnId !== sourceRef) stale("Turn provenance 与 parent 不一致");
+  if (input.sourceType === "harness_planned") {
+    const actionId = input.sourceRef;
+    if (!actionId || !invocation.turnId || !invocation.threadId) {
+      stale("Harness action provenance 缺少 action/Turn/Thread 引用");
+    }
+    if (input.logicalCallKey !== `${input.parentInvocationId}:${actionId}:${input.agentId}`) {
+      stale("AgentCall logicalCallKey 与 parent/action/agent 不一致");
+    }
     const [turn] = await tx
       .select()
       .from(turnTable)
-      .where(eq(turnTable.id, sourceRef))
+      .where(eq(turnTable.id, invocation.turnId))
       .limit(1)
       .for("update");
     if (
@@ -413,13 +418,9 @@ export async function lockAndValidateAgentCallAuthority(
       turn.agentUseMode !== "preferred" ||
       turn.latestInvocationId !== invocation.id
     ) {
-      stale("employee-selected Turn 授权来源已漂移");
+      stale("Harness action 的 preferred Agent 授权来源已漂移");
     }
     resolutionBusinessKey = { threadId: turn.threadId };
-  } else if (input.sourceType === "gateway" && input.sourceRef !== input.parentInvocationId) {
-    stale("gateway provenance 必须回指 parent Invocation");
-  } else if (input.sourceType === "gateway") {
-    resolutionBusinessKey = { jobId: input.parentInvocationId };
   } else {
     stale(`AgentCall sourceType 尚无正式 provenance: ${input.sourceType}`);
   }

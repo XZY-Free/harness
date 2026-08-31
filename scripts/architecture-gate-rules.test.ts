@@ -12,6 +12,7 @@ import {
   collectExecutionBoundaryViolations,
   collectHarnessAgentBoundaryViolations,
   collectImplementationHistoryViolations,
+  collectRetiredAgentExecutionViolations,
   collectRetiredModuleDependencyViolations,
 } from "./architecture-gate-rules";
 
@@ -95,12 +96,24 @@ describe("source history and retired dependency gates", () => {
       "lib/agents/test-support/provider.ts",
     ]);
   });
+
+  it("旧 Required-Agent 执行桥、符号与幂等前缀重新出现时失败", () => {
+    const documents = [
+      doc("lib/runtime/old-bridge.ts", "invokeRequiredAgent();"),
+      doc("lib/agents/calls/old.ts", 'const prefix = "required-agent";'),
+      doc("scripts/architecture-gate-rules.test.ts", "invokeRequiredAgent();"),
+    ];
+    expect(collectRetiredAgentExecutionViolations(documents)).toEqual([
+      "lib/runtime/old-bridge.ts",
+      "lib/agents/calls/old.ts",
+    ]);
+  });
 });
 
 describe("checkAgentCallRuntimeBoundaryGate", () => {
   const valid = (): SourceDocument[] => [
     doc(
-      "lib/agents/calls/application/harness-required-agent.ts",
+      "lib/agents/calls/application/agent-action-executor.ts",
       "const current = await startAgentCall(command); return toAgentCallDisposition(current);",
     ),
     doc(
@@ -120,7 +133,7 @@ describe("checkAgentCallRuntimeBoundaryGate", () => {
   it("Harness bridge 出现同步轮询、等待常量或 timeout 参数时失败", () => {
     const documents = valid();
     documents[0] = doc(
-      "lib/agents/calls/application/harness-required-agent.ts",
+      "lib/agents/calls/application/agent-action-executor.ts",
       "const MAX_WAIT_MS = 30_000; while (true) { await setTimeout(POLL_INTERVAL_MS); } const pollTimeoutMs = 1;",
     );
     expect(checkAgentCallRuntimeBoundaryGate(documents).failures).toContain(

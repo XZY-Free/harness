@@ -1,15 +1,15 @@
 /**
- * resolveRequiredAgentBinding — 消费者迁移 RED 测试（专题01 工程包01）。
+ * resolveAgentActionBinding — Agent action 路由绑定测试。
  *
  * 冻结模型：RouteResolution 仅以 resolution.target.kind 判别。Agent target 含
  * agentRevisionId；Runtime target 不含任何 Agent 事实。不存在 resolution.targetKind /
  * resolution.agentRevisionId 平铺字段。
  *
  * 目标不变量：
- * 1. resolveRoute 返回 resolved Agent resolution 时，resolveRequiredAgentBinding 必须从
+ * 1. resolveRoute 返回 resolved Agent resolution 时，resolveAgentActionBinding 必须从
  *    resolution.target.agentRevisionId 传入 buildAgentCallBindingConfig 并返回同一 revision。
  * 2. 返回 Runtime resolution 时，必须在读取 ContractSnapshot / governance / build binding
- *    之前 fail-closed，报 RequiredAgentUnavailableError。
+ *    之前 fail-closed，报 AgentActionUnavailableError。
  * 3. 保持 resolveRoute 调用 target={kind:"agent", agentId}，不允许宽松 Runtime fallback。
  *
  * 隔离：mock mysqlAgentContractStore / resolveBindingGovernance / buildAgentCallBindingConfig
@@ -17,8 +17,8 @@
  * 不用 as/any/@ts-ignore 伪造旧平铺字段。
  */
 import {
-  RequiredAgentUnavailableError,
-  resolveRequiredAgentBinding,
+  AgentActionUnavailableError,
+  resolveAgentActionBinding,
 } from "@/lib/agents/calls/application/resolve-agent-call-binding";
 import {
   D,
@@ -49,7 +49,7 @@ vi.mock("@/lib/agents/calls/application/build-agent-call-binding-config", () => 
 }));
 vi.mock("@/lib/db/client", () => ({ db: {} }));
 
-describe("resolveRequiredAgentBinding（消费者迁移 · 判别 target 冻结）", () => {
+describe("resolveAgentActionBinding（判别 target 冻结）", () => {
   const tenantId = "tenant-1";
   const agentId = "agent-1";
 
@@ -103,7 +103,7 @@ describe("resolveRequiredAgentBinding（消费者迁移 · 判别 target 冻结�
     const agentResolution = validAgentRouteResolution(); // target.kind=agent, agentRevisionId=agent-rev-1
     const { resolveRoute, calls } = mockResolveRoute(agentResolution);
 
-    const result = await resolveRequiredAgentBinding({
+    const result = await resolveAgentActionBinding({
       tenantId,
       agentId,
       resolveRoute,
@@ -128,7 +128,7 @@ describe("resolveRequiredAgentBinding（消费者迁移 · 判别 target 冻结�
 
   it("invariant3：resolveRoute 始终以 target={kind:'agent', agentId} 调用（无宽松 Runtime fallback）", async () => {
     const { resolveRoute, calls } = mockResolveRoute(validAgentRouteResolution());
-    await resolveRequiredAgentBinding({
+    await resolveAgentActionBinding({
       tenantId,
       agentId,
       resolveRoute,
@@ -139,17 +139,17 @@ describe("resolveRequiredAgentBinding（消费者迁移 · 判别 target 冻结�
     expect(calls[0]?.target).toEqual({ kind: "agent", agentId });
   });
 
-  it("invariant2：Runtime resolution → fail-closed RequiredAgentUnavailableError，且不读 ContractSnapshot/governance/build", async () => {
+  it("invariant2：Runtime resolution → fail-closed AgentActionUnavailableError，且不读 ContractSnapshot/governance/build", async () => {
     const { resolveRoute } = mockResolveRoute(runtimeRouteResolution());
 
     await expect(
-      resolveRequiredAgentBinding({
+      resolveAgentActionBinding({
         tenantId,
         agentId,
         resolveRoute,
         businessKey: { threadId: "thread-1" },
       }),
-    ).rejects.toThrow(RequiredAgentUnavailableError);
+    ).rejects.toThrow(AgentActionUnavailableError);
 
     // 读取 ContractSnapshot / governance / build binding 一律不得发生。
     expect(mocks.transaction).not.toHaveBeenCalled();

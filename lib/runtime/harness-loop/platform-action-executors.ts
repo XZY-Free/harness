@@ -1,12 +1,20 @@
+import { createAgentActionExecutor } from "@/lib/agents/calls/application/agent-action-executor";
 import { searchKnowledgeEvidence } from "@/lib/context/knowledge-queries";
+import type { RouteResolver } from "@/lib/routes/application/resolve-route";
+import type { ExecutionSubject } from "@/lib/runtime/transport/execution-subject";
 import type { HarnessActionExecutors } from "./loop";
 
 /** 平台内置 Action Executor；Hosted 进程内与 Gateway HTTP 共用。 */
-export function createPlatformHarnessActionExecutors(tenantId: string): HarnessActionExecutors {
+export function createPlatformHarnessActionExecutors(params: {
+  tenantId: string;
+  executionSubject: ExecutionSubject | null;
+  resolveRoute: RouteResolver;
+}): HarnessActionExecutors {
   return {
+    "agent.call": createAgentActionExecutor(params),
     "knowledge.search": async (action) => {
       const result = await searchKnowledgeEvidence({
-        tenantId,
+        tenantId: params.tenantId,
         query: action.payload.query,
         limit: action.payload.maxResults,
       });
