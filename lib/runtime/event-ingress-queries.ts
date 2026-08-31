@@ -597,7 +597,7 @@ async function mapHarnessActionEvent(
     actorType: ctx.actorType,
     payload: parsed.data,
     correlationId: ctx.correlationId ?? undefined,
-    idempotencyKey: `${ctx.event.type}:${parsed.data.action_id}`,
+    idempotencyKey: `${ctx.invocation.id}:${ctx.event.type}:${parsed.data.action_id}`,
   });
   return {
     threadEventId: event.id,

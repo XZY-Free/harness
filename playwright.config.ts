@@ -34,6 +34,7 @@ export const E2E_ORIGIN = `http://localhost:${E2E_PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
+  testMatch: "**/*.spec.ts",
   // DB 共享单容器 → 串行执行避免 TRUNCATE 竞态（e2e 不 TRUNCATE，但保持简单）
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

@@ -933,6 +933,57 @@ describe("RuntimeEventIngress 幂等去重", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("同一 Thread 的两个 Invocation 可各自使用相同 Harness actionId", async () => {
+    const first = await seedRunningInvocation(ctx);
+    const actionPayload = {
+      action_id: "e2e-respond-1",
+      step_no: 1,
+      action_type: "respond",
+      action_digest: `sha256:${"0".repeat(64)}`,
+      purpose_code: "answer_user",
+      short_purpose: "生成最终回答",
+      target_ref: null,
+      state: "proposed",
+      action_payload: {},
+    };
+
+    const firstResult = await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId: first.invocationId,
+      producerSequenceStart: 1,
+      events: [
+        makeEvent("first-action-proposed", 1, "harness.action.proposed", actionPayload),
+        makeEvent("first-execution-completed", 2, "execution.completed", {
+          finish_reason: "done",
+        }),
+      ],
+    });
+
+    const { turn } = await acceptUserMessageTurn({
+      tenantId: ctx.tenantId,
+      threadId: ctx.threadId,
+      ownerUserId: ctx.ownerId,
+      content: { text: "请再回答一次" },
+      actorId: ctx.ownerId,
+    });
+    const second = await seedRunningInvocation({
+      ...ctx,
+      turnId: turn.id,
+      triggerItemId: turn.triggerItemId ?? null,
+    });
+    const secondResult = await ingressEventBatch({
+      tenantId: ctx.tenantId,
+      invocationId: second.invocationId,
+      producerSequenceStart: 1,
+      events: [makeEvent("second-action-proposed", 1, "harness.action.proposed", actionPayload)],
+    });
+
+    expect(second.invocationId).not.toBe(first.invocationId);
+    expect(secondResult.mappedEvents[0]?.threadEventId).not.toBe(
+      firstResult.mappedEvents[0]?.threadEventId,
+    );
+  });
+
   it("相同 producerSequence 重放：返回原映射", async () => {
     const { invocationId } = await seedRunningInvocation(ctx);
 

@@ -92,7 +92,9 @@ test.describe("§20.6 跨端一致性", () => {
 
     // ─── 3. Desktop 发送第二个 Turn ───────────────────────
     const desktopMessage = "跨端用例：这条来自 Desktop。";
-    const desktopInput = desktopWindow.getByLabel("消息输入框");
+    // 等第一轮 latestTurn 投影收敛到终态；非精确查询会误命中
+    // 运行态的“队列消息输入框”，使第二条被正式写为 PendingInput。
+    const desktopInput = desktopWindow.getByLabel("消息输入框", { exact: true });
     await expect(desktopInput).toBeEnabled({ timeout: 60_000 });
     await desktopInput.fill(desktopMessage);
     await desktopInput.press("Enter");

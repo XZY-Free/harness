@@ -472,9 +472,9 @@ describe("AgentRegistrationWorkspace（导入合同后连续交接）", () => {
     });
 
     // 创建草稿版本（合同已交接为 snap-0001，草稿本身不是可发布状态）。
-    const createButton = screen.getByRole("button", {
+    const createButton = (await screen.findByRole("button", {
       name: "创建草稿版本",
-    }) as HTMLButtonElement;
+    })) as HTMLButtonElement;
     await waitFor(() => expect(createButton.disabled).toBe(false));
     fireEvent.click(createButton);
     await waitFor(() => expect(screen.getByText(/已创建草稿版本/)).toBeTruthy());

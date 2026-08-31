@@ -65,8 +65,10 @@ import {
   createUserActionRequest,
   getUserActionRequestByPermissionDecisionId,
 } from "@/lib/permission/user-action-queries";
+import { turnTable } from "@/lib/persistence/schema/conversation";
 import type { PermissionDecision } from "@/lib/persistence/schema/permission";
 import { getInvocationById, updateInvocationState } from "@/lib/runtime/invocation-queries";
+import { and, eq, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -518,7 +520,7 @@ interface TurnPauseContext {
  * 返回新 UAR id。
  *
  * Tx-aware（§22 / §55.7）：与 PermissionDecision / ToolCall 状态迁移同事务；UAR 创建或
- * Invocation → waiting_user 任一步失败，整个 pause 决策全部 rollback。
+ * Invocation / Turn → waiting_user 任一步失败，整个 pause 决策全部 rollback。
  */
 async function createTurnPauseUserActionTx(tx: GatewayTx, ctx: TurnPauseContext): Promise<string> {
   const invocation = ctx.invocation;
@@ -547,6 +549,29 @@ async function createTurnPauseUserActionTx(tx: GatewayTx, ctx: TurnPauseContext)
 
   // Invocation → waiting_user（§18.3；与 UAR 同事务）。
   await updateInvocationState(tx, ctx.tenantId, ctx.invocationId, "waiting_user");
+
+  // Turn 与 Invocation 是同一等待事实的两份正式投影，必须在本事务一起推进。
+  // 后续 resolve 会以 Turn.waiting_user 作为恢复前置条件；缺行、错状态或错 active
+  // Invocation 都表示执行上下文已漂移，整笔 pause 必须 fail-closed 回滚。
+  const turnUpdate = await tx
+    .update(turnTable)
+    .set({
+      turnState: "waiting_user",
+      waitingAt: new Date(),
+      activeInvocationId: ctx.invocationId,
+      versionNo: sql`${turnTable.versionNo} + 1`,
+    })
+    .where(
+      and(
+        eq(turnTable.id, invocation.turnId),
+        eq(turnTable.threadId, invocation.threadId),
+        eq(turnTable.turnState, "running"),
+        eq(turnTable.activeInvocationId, ctx.invocationId),
+      ),
+    );
+  if (turnUpdate[0].affectedRows !== 1) {
+    throw new Error("GATEWAY_TURN_STATE_INVALID");
+  }
 
   return result.request.id;
 }

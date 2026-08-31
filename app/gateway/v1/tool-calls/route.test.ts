@@ -18,7 +18,7 @@ import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { DEFAULT_TENANT_ID, ensureDefaultTenant } from "@/lib/identity/tenant-bootstrap";
 import { WORKLOAD_TOKEN_DEFAULT_TTL_MS, issueWorkloadToken } from "@/lib/identity/workload-token";
 import { type PolicyRuleInput, createPolicyRevision } from "@/lib/permission/policy-queries";
-import { threadTable } from "@/lib/persistence/schema/conversation";
+import { threadTable, turnTable } from "@/lib/persistence/schema/conversation";
 import { executionBindingTable, invocationTable } from "@/lib/persistence/schema/executions";
 import { permissionDecisionTable } from "@/lib/persistence/schema/permission";
 import {
@@ -215,7 +215,7 @@ async function seedThread(id: string): Promise<void> {
     defaultModelRef: null,
     defaultEnvironmentDefinitionId: null,
     lastActivityAt: new Date(),
-    lastTurnSequence: 0,
+    lastTurnSequence: 1,
     lastItemSequence: 0,
     lastEventSequence: 0,
     pendingQueueVersionNo: 1,
@@ -223,6 +223,25 @@ async function seedThread(id: string): Promise<void> {
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
+  });
+}
+
+/** 与 Invocation 一致的真实 running Turn；Gateway pause 必须原子推进两者。 */
+async function seedRunningTurn(
+  threadId: string,
+  turnId: string,
+  invocationId: string,
+): Promise<void> {
+  await db.insert(turnTable).values({
+    id: turnId,
+    threadId,
+    turnSequence: 1,
+    triggerType: "user_message",
+    turnState: "running",
+    activeInvocationId: invocationId,
+    latestInvocationId: invocationId,
+    regenerationNo: 0,
+    versionNo: 1,
   });
 }
 
@@ -324,6 +343,8 @@ describe("POST /gateway/v1/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", 
     const { policyRevisionId, policyRulesDigest } = await seedPolicy("pause", []);
     const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
+    await seedThread("t-1");
+    await seedRunningTurn("t-1", "turn-1", invocationId);
 
     const res = await POST(
       gatewayRequest(
@@ -351,6 +372,9 @@ describe("POST /gateway/v1/tool-calls（02-6 P6 §14/§15/§16/§18/§55.5）", 
       db.select().from(invocationTable).where(eq(invocationTable.id, invocationId)),
     );
     expect(inv.executionState).toBe("waiting_user");
+    const turn = await singleRow(db.select().from(turnTable).where(eq(turnTable.id, "turn-1")));
+    expect(turn.turnState).toBe("waiting_user");
+    expect(turn.activeInvocationId).toBe(invocationId);
   });
 
   it("block：ToolCall→cancelled + 403 POLICY_BLOCKED + 不创建 UAR（§18.2）", async () => {
@@ -540,6 +564,7 @@ describe("POST /gateway/v1/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§
     const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
     await seedThread("t-1");
+    await seedRunningTurn("t-1", "turn-1", invocationId);
     const res = await POST(
       gatewayRequest(
         gatewayToken(invocationId),
@@ -574,6 +599,7 @@ describe("POST /gateway/v1/tool-calls Pause/Resume（02-6 P7 §20/§45/§55.6/§
     const invocationId = await seedInvocation({ threadId: "t-1", turnId: "turn-1" });
     await seedBinding(invocationId, { policyRevisionId, policyRulesDigest });
     await seedThread("t-1");
+    await seedRunningTurn("t-1", "turn-1", invocationId);
     const body = toolCallBody({
       invocation_id: invocationId,
       tool_id: toolId,

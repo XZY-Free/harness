@@ -139,6 +139,13 @@ describe("tenant-bootstrap（02-6 P1 §8）", () => {
       commandDenyList: [],
       formatOnWrite: false,
       verifyBeforeDelivery: true,
+      harnessLoopLimits: {
+        maxLoopSteps: 12,
+        maxAgentCalls: 3,
+        maxToolCalls: 8,
+        maxKnowledgeSearches: 6,
+        maxConsecutiveSameAction: 2,
+      },
     });
     expect(a).toBe(b);
     expect(a).toMatch(/^sha256:[0-9a-f]{64}$/);

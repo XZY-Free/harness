@@ -101,6 +101,13 @@ async function main(): Promise<void> {
   const container = await new MySqlContainer("mysql:8.0")
     .withDatabase("snow_fresh")
     .withRootPassword("test")
+    .withCommand([
+      "--skip-sync-binlog",
+      "--innodb-flush-log-at-trx-commit=0",
+      "--innodb-doublewrite=0",
+      "--disable-log-bin",
+      "--innodb-file-per-table=0",
+    ])
     .start();
 
   try {

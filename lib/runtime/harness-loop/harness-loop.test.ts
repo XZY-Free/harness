@@ -160,6 +160,95 @@ describe("HarnessLoop", () => {
     ]);
   });
 
+  it("Knowledge 证据后调用 preferred Agent，再携带两类证据生成最终回答", async () => {
+    const decisionViews: Array<any> = [];
+    const finalViews: Array<any> = [];
+    const knowledge = vi.fn(async () => ({
+      observation: {
+        observationType: "knowledge" as const,
+        summary: "年假制度为每年 10 天",
+        sourceRefs: ["knowledge_document:doc-1:rev-2"],
+        data: { status: "ok" },
+      },
+      authorityRef: "knowledge-result:action-knowledge",
+    }));
+    const agent = vi.fn(async () => ({
+      observation: {
+        observationType: "agent" as const,
+        summary: "人事 Agent 确认当前余额为 6 天",
+        sourceRefs: ["agent_call:call-1"],
+        data: { callId: "call-1", state: "completed" },
+      },
+      authorityRef: "agent_call:call-1",
+    }));
+    const loop = new HarnessLoop(
+      baseParams({
+        capabilityDirectives: [
+          { capability_type: "agent", capability_id: "agent-hr", mode: "preferred" },
+        ],
+        decisionPort: decisionPort(
+          [
+            {
+              actionId: "action-knowledge",
+              stepNo: 1,
+              actionType: "knowledge.search",
+              purposeCode: "load_policy",
+              shortPurpose: "读取年假制度",
+              payload: { query: "年假制度", maxResults: 5 },
+            },
+            {
+              actionId: "action-agent",
+              stepNo: 2,
+              actionType: "agent.call",
+              purposeCode: "query_balance",
+              shortPurpose: "查询当前余额",
+              payload: { agentId: "agent-hr", task: "查询当前年假余额" },
+            },
+            {
+              actionId: "action-respond",
+              stepNo: 3,
+              actionType: "respond",
+              purposeCode: "answer_ready",
+              shortPurpose: "制度和余额证据齐备",
+              payload: {
+                evidenceRefs: ["knowledge_document:doc-1:rev-2", "agent_call:call-1"],
+              },
+            },
+          ],
+          decisionViews,
+        ),
+        executors: { "knowledge.search": knowledge, "agent.call": agent },
+        finalResponsePort: {
+          async generateFinalResponse(
+            view: Parameters<HarnessFinalResponsePort["generateFinalResponse"]>[0],
+          ) {
+            finalViews.push(view);
+            return "每年 10 天，当前余额 6 天";
+          },
+        },
+      }),
+    );
+
+    const result = await loop.run();
+
+    expect(result).toMatchObject({ completed: true, responseText: "每年 10 天，当前余额 6 天" });
+    expect(knowledge).toHaveBeenCalledOnce();
+    expect(agent).toHaveBeenCalledOnce();
+    expect(decisionViews[1].observations).toEqual([
+      expect.objectContaining({ observationType: "knowledge" }),
+    ]);
+    expect(decisionViews[2].observations).toEqual([
+      expect.objectContaining({ observationType: "knowledge" }),
+      expect.objectContaining({ observationType: "agent" }),
+    ]);
+    expect(finalViews[0].observations).toEqual(decisionViews[2].observations);
+    expect(result.actionHistory.map((action) => action.state)).toEqual([
+      "completed",
+      "completed",
+      "completed",
+    ]);
+  });
+
   it("committed action 缺少执行器时写 action.failed 并正式失败，不生成正文", async () => {
     const writer = eventWriter();
     const generateFinalResponse = vi.fn(finalPort().generateFinalResponse);

@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { db } from "@/lib/db/client";
 import { seedDefaultGrants, seedDefaultIdentity } from "@/lib/db/seed";
+import { resetDatabase } from "@/lib/db/test/mysql-harness";
 import { agentTable } from "@/lib/persistence/schema/agents";
 import { roleActionBinding } from "@/lib/persistence/schema/authorization";
 import { tenant, userIdentity } from "@/lib/persistence/schema/identity";
 import { sql } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 const manifest = JSON.parse(
   readFileSync(
@@ -14,6 +15,10 @@ const manifest = JSON.parse(
     "utf8",
   ),
 ) as { tableCount: number; tables: string[] };
+
+beforeEach(async () => {
+  await resetDatabase(db);
+});
 
 describe("Fresh MySQL Schema", () => {
   it("empty MySQL migrate 后的物理表与最终 manifest 完全一致", async () => {
